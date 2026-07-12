@@ -113,11 +113,9 @@ let remove_meta_cleanup : Shutdown_types.cleanup_intent =
   }
 ;;
 
-(* Seed the keeper TOML the way a real workspace persists it. A keeper resolves
-   its sandbox_profile from [config/keepers/<name>.toml]; keepalive/shutdown
-   paths fail closed without one (keeper_meta_contract, "missing profile source
-   fails loudly"). Tests that only build runtime meta must seed this so they
-   exercise the lifecycle path instead of the missing-profile rejection. *)
+(* Keepalive resolves its sandbox profile from the persisted keeper TOML. Seed
+   the fixture explicitly so this test exercises the lifecycle path rather than
+   the intentional missing-profile rejection. *)
 let seed_keeper_sandbox_profile ~base_dir name =
   let keepers_dir =
     List.fold_left Filename.concat base_dir [ ".masc"; "config"; "keepers" ]
@@ -147,7 +145,6 @@ let configure_keeper_chat_persistence ~base_path =
     Alcotest.failf
       "keeper chat persistence fixture failed: %s"
       (String.concat "; " (List.map describe errors))
-
 let resolve_done_for_test reg value =
   ignore (R.resolve_done reg ~source:"test_fixture" value);
   match
@@ -653,7 +650,9 @@ let test_direct_start_keepalive_resolves_done_on_stop () =
         }
       in
       seed_keeper_sandbox_profile ~base_dir keeper_name;
-      Masc.Keeper_keepalive.start_keepalive ctx meta;
+      ignore
+        (Masc.Keeper_keepalive.start_keepalive ctx meta
+          : Masc.Keeper_keepalive.start_keepalive_outcome);
       Eio.Time.sleep ctx.clock 0.05;
       (match
          Masc.Keeper_keepalive.stop_keepalive_and_await
@@ -1947,7 +1946,10 @@ let test_start_keepalive_preserves_unresolved_failing_entry () =
           net = None;
         }
       in
-      Masc.Keeper_keepalive.start_keepalive ctx meta;
+      seed_keeper_sandbox_profile ~base_dir keeper_name;
+      ignore
+        (Masc.Keeper_keepalive.start_keepalive ctx meta
+          : Masc.Keeper_keepalive.start_keepalive_outcome);
       match R.get ~base_path:config.base_path keeper_name with
       | None -> fail "expected live-failing-entry registry entry"
       | Some entry ->
@@ -1990,7 +1992,10 @@ let test_start_keepalive_reclaims_finished_failing_entry () =
           net = None;
         }
       in
-      Masc.Keeper_keepalive.start_keepalive ctx meta;
+      seed_keeper_sandbox_profile ~base_dir keeper_name;
+      ignore
+        (Masc.Keeper_keepalive.start_keepalive ctx meta
+          : Masc.Keeper_keepalive.start_keepalive_outcome);
       match R.get ~base_path:config.base_path keeper_name with
       | None -> fail "expected stale-failing-entry registry entry"
       | Some entry ->

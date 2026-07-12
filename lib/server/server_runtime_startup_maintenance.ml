@@ -68,6 +68,26 @@ let startup_migrate_retired_keeper_meta_keys (state : Mcp_server.server_state) =
        "startup retired keeper meta key migration failed: %s (next boot retries; stale keys keep warning on read)"
        (Printexc.to_string exn))
 
+let startup_recover_keeper_lifecycle_transactions
+      (state : Mcp_server.server_state)
+  =
+  let summary =
+    Keeper_dead_revival_transaction.recover_pending
+      (Mcp_server.workspace_config state)
+  in
+  Log.Keeper.info
+    "startup keeper lifecycle recovery recovered=%d cleared=%d unresolved=%d"
+    summary.recovered
+    summary.cleared
+    (List.length summary.unresolved);
+  List.iter
+    (fun (path, detail) ->
+       Log.Keeper.error
+         "startup keeper lifecycle recovery unresolved journal=%s detail=%s"
+         path
+         detail)
+    summary.unresolved
+
 let startup_migrate_keeper_histories (state : Mcp_server.server_state) =
   (try
      let traces_dir =

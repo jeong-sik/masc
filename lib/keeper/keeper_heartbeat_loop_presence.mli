@@ -8,6 +8,7 @@ val effective_keepalive_meta :
 (** Pick the freshest keeper meta available for keepalive publication. *)
 
 val repair_identity_drift_for_keepalive :
+  ?lifecycle_token:Keeper_lifecycle_reservation.token ->
   ctx:'a Keeper_types_profile.context ->
   Keeper_meta_contract.keeper_meta ->
   Keeper_meta_contract.keeper_meta option

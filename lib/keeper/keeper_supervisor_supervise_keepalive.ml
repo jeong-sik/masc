@@ -79,6 +79,11 @@ let supervise_keepalive
          "supervisor launch skipped %s because shutdown operation %s owns admission"
          meta.name
          (Keeper_shutdown_types.Operation_id.to_string operation_id)
+     | Error (Keeper_registry.Registration_lifecycle_reserved owner) ->
+       Log.Keeper.info
+         "supervisor launch skipped %s because lifecycle transaction owns admission: %s"
+         meta.name
+         (Keeper_lifecycle_reservation.snapshot_to_string owner)
      | Error (Keeper_registry.Registration_invalid validation_error) ->
        Log.Keeper.error
          "supervisor registry validation rejected %s: %s"

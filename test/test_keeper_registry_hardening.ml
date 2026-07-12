@@ -73,7 +73,9 @@ let test_unregister_exact_preserves_replacement_lane () =
   (match KR.unregister_exact old_entry with
    | KR.Exact_entry_replaced -> ()
    | KR.Exact_unregistered -> fail "stale entry removed its replacement lane"
-   | KR.Exact_entry_missing -> fail "replacement lane unexpectedly missing");
+   | KR.Exact_entry_missing -> fail "replacement lane unexpectedly missing"
+   | KR.Exact_unregister_lifecycle_reserved _ ->
+     fail "test did not acquire a lifecycle reservation");
   (match KR.get ~base_path "alice" with
    | Some current ->
      check bool "replacement remains registered" true (current == replacement)
@@ -82,6 +84,8 @@ let test_unregister_exact_preserves_replacement_lane () =
   | KR.Exact_unregistered -> ()
   | KR.Exact_entry_missing -> fail "replacement disappeared before exact removal"
   | KR.Exact_entry_replaced -> fail "replacement identity changed unexpectedly"
+  | KR.Exact_unregister_lifecycle_reserved _ ->
+    fail "test did not acquire a lifecycle reservation"
 ;;
 
 let test_unregister_exact_accepts_same_lane_record_update () =
@@ -97,6 +101,8 @@ let test_unregister_exact_accepts_same_lane_record_update () =
   | KR.Exact_unregistered -> ()
   | KR.Exact_entry_missing -> fail "same lane disappeared before removal"
   | KR.Exact_entry_replaced -> fail "same lane record update was treated as ABA"
+  | KR.Exact_unregister_lifecycle_reserved _ ->
+    fail "test did not acquire a lifecycle reservation"
 ;;
 
 let test_update_entry_exact_preserves_replacement_lane () =

@@ -1255,7 +1255,7 @@ let test_spawn_admission_denial_does_not_register_or_fork () =
   check bool "fd pressure active" true (FD.active ());
   let fork_before = fork_total () in
   let keepalive_denials_before = denial_count "keepalive" in
-  KA.start_keepalive ctx meta;
+  ignore (KA.start_keepalive ctx meta : KA.start_keepalive_outcome);
   check bool "keepalive denial does not register keeper" false
     (Reg.is_registered ~base_path:config.base_path name);
   check (float 0.001) "keepalive denial metric increments"

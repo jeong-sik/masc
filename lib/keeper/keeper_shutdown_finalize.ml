@@ -460,7 +460,12 @@ let unregister_exact operation = function
      | Keeper_registry.Exact_unregistered
      | Keeper_registry.Exact_entry_missing -> Ok true
      | Keeper_registry.Exact_entry_replaced ->
-       Error "Keeper registry lane was replaced during finalization")
+       Error "Keeper registry lane was replaced during finalization"
+     | Keeper_registry.Exact_unregister_lifecycle_reserved owner ->
+       Error
+         (Printf.sprintf
+            "Keeper lifecycle transaction owns registry finalization: %s"
+            (Keeper_lifecycle_reservation.snapshot_to_string owner)))
 ;;
 
 let release_finalized_admission ~(config : Workspace.config) operation =

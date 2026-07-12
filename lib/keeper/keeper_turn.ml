@@ -27,6 +27,16 @@ type tool_result = Keeper_types_profile.tool_result
 let handle_keeper_up = Keeper_turn_up.handle_keeper_up
 let handle_keeper_down = Keeper_turn_lifecycle.handle_keeper_down
 
+let restart_keepalive_after_message_turn ctx meta =
+  match start_keepalive ctx meta with
+  | Keepalive_started _ | Keepalive_already_registered _ -> ()
+  | outcome ->
+    Log.Keeper.error
+      "keeper message turn did not restore keepalive name=%s outcome=%s"
+      meta.name
+      (start_keepalive_outcome_to_string outcome)
+;;
+
 let turn_cost_for_result (result : Keeper_agent_run.run_result) : float =
   (* cost_usd is accounted independently of token-count trust (token⊥cost). The
      provider's authoritative cost field is used directly; missing/non-positive
@@ -1132,7 +1142,7 @@ let run_keeper_msg_turn_admitted
                  ()
                with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_keeper_exn
                  ~label:"trajectory finalize (agent_run error)" exn);
-              start_keepalive ctx meta;
+              restart_keepalive_after_message_turn ctx meta;
               Progress.stop_tracking turn_task_id;
               tool_result_error user_message
 	            | Ok (result, final_max_runtime_context) ->
@@ -1264,7 +1274,7 @@ let run_keeper_msg_turn_admitted
                 ~turn_generation:lifecycle.turn_generation
                 ~compaction:lifecycle.compaction
                 ~handoff_json:lifecycle.handoff_json;
-              start_keepalive ctx updated_meta;
+              restart_keepalive_after_message_turn ctx updated_meta;
               Progress.Tracker.complete turn_tracker
                 ~message:(Printf.sprintf "Turn completed: %d tool calls" (Keeper_agent_result.tool_call_count result)) ();
               let reply_json =

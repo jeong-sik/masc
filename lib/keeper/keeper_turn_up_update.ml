@@ -136,6 +136,22 @@ let update_keeper ?(preserve_prompt_defaults = false)
   let resume_paused_keeper =
     old.paused && not (paused_state_requires_approval old)
   in
+  let dead_revival_requested =
+    resume_paused_keeper
+    &&
+    match old.latched_reason with
+    | Some Keeper_latched_reason.Dead_tombstone -> true
+    | Some
+        ( Keeper_latched_reason.Operator_paused _
+        | Keeper_latched_reason.Stale_storm
+        | Keeper_latched_reason.No_progress_loop _
+        | Keeper_latched_reason.Completion_contract_violation _
+        | Keeper_latched_reason.Idle_detected _
+        | Keeper_latched_reason.Runtime_exhausted _
+        | Keeper_latched_reason.Turn_budget_exhausted _
+        | Keeper_latched_reason.Provider_timeout_loop _ )
+    | None -> false
+  in
   if resume_paused_keeper then (
     let blocker_class, blocker_detail =
       match old.runtime.last_blocker with
@@ -338,6 +354,39 @@ let update_keeper ?(preserve_prompt_defaults = false)
               err;
             tool_result_error err
           | Ok () ->
+            let enqueue_goal_assignment_wakes (meta : keeper_meta) =
+              let (_ : string list) =
+                Keeper_goal_assignment_wake.enqueue_goal_assigned_wakes
+                  ~config:ctx.config
+                  ~keeper_name:meta.name
+                  ~assigned_by:"keeper_up"
+                  ~old_ids:old.active_goal_ids
+                  ~new_ids:meta.active_goal_ids
+                  ()
+              in
+              ()
+            in
+            if dead_revival_requested
+            then
+              (match
+                 Keeper_dead_revival_transaction.revive
+                   ctx
+                   ~original:old
+                   ~candidate:updated
+               with
+               | Error error ->
+                 Otel_metric_store.inc_counter
+                   Keeper_metrics.(to_string TurnUpUpdateFailures)
+                   ~labels:[ "keeper", updated.name; "site", "dead_revival_transaction" ]
+                   ();
+                 tool_result_error
+                   (Keeper_dead_revival_transaction.error_to_string error)
+               | Ok success ->
+                 enqueue_goal_assignment_wakes success.meta;
+                 tool_result_ok
+                   (Yojson.Safe.to_string
+                      (Keeper_meta_json.meta_to_json success.meta)))
+            else
             (* CAS-merge instead of a force write: a dashboard/turn-up edit
                builds [updated] from a meta snapshot ([old]), so a concurrent
                keeper turn that bumped cumulative usage counters between the
@@ -362,15 +411,36 @@ let update_keeper ?(preserve_prompt_defaults = false)
                   wake the keeper once at the assignment edge. Enqueue is
                   durable, so the keepalive restart below delivers it on the
                   new fiber's first cycle. Removals never wake. *)
-               let (_ : string list) =
-                 Keeper_goal_assignment_wake.enqueue_goal_assigned_wakes
-                   ~config:ctx.config
-                   ~keeper_name:updated.name
-                   ~assigned_by:"keeper_up"
-                   ~old_ids:old.active_goal_ids
-                   ~new_ids:updated.active_goal_ids
-                   ()
+               enqueue_goal_assignment_wakes updated;
+               let stop_outcome =
+                 stop_keepalive_and_await
+                   ~base_path:ctx.config.base_path
+                   updated.name
                in
-               stop_keepalive ~base_path:ctx.config.base_path updated.name;
-               start_keepalive ctx updated;
-               tool_result_ok (Yojson.Safe.to_string (Keeper_meta_json.meta_to_json updated)))))
+               let launch_outcome = start_keepalive ctx updated in
+               (match launch_outcome with
+                | Keepalive_started _ ->
+                  tool_result_ok
+                    (Yojson.Safe.to_string (Keeper_meta_json.meta_to_json updated))
+                | Keepalive_already_registered entry ->
+                  let stop_detail =
+                    match stop_outcome with
+                    | Keeper_not_registered -> "keeper was not registered before restart"
+                    | Keeper_joined _ -> "previous keeper lane joined"
+                  in
+                  tool_result_error
+                    (Printf.sprintf
+                       "keeper update launch conflicted after %s: %s"
+                       stop_detail
+                       (start_keepalive_outcome_to_string
+                          (Keepalive_already_registered entry)))
+                | ( Keepalive_identity_unrepairable
+                  | Keepalive_spawn_slot_denied _
+                  | Keepalive_registration_rejected _
+                  | Keepalive_fiber_start_rejected _
+                  | Keepalive_lane_ownership_lost
+                  | Keepalive_fork_rejected _ ) as rejected ->
+                  tool_result_error
+                    (Printf.sprintf
+                       "keeper metadata was updated but lane restart failed: %s"
+                       (start_keepalive_outcome_to_string rejected))))))

@@ -561,6 +561,8 @@ let execute_keeper_tool_call_with_outcome
         match health with
         | Keeper_registry.Healthy -> "healthy"
         | Keeper_registry.Meta_validation_failed _ -> "meta_validation_failed"
+        | Keeper_registry.Lifecycle_transaction_reserved _ ->
+          "lifecycle_transaction_reserved"
         | Keeper_registry.Required_field_missing _ -> "required_field_missing"
         | Keeper_registry.Base_path_mismatch _ -> "base_path_mismatch"
         | Keeper_registry.Name_mismatch _ -> "name_mismatch"

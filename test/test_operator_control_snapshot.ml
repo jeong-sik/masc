@@ -422,6 +422,27 @@ let test_keeper_up_clears_dead_tombstone_resume_state () =
     (Option.is_some persisted_seed.auto_resume_after_sec);
   Alcotest.(check bool) "seed has runtime blocker" true
     (Option.is_some persisted_seed.runtime.last_blocker);
+  let dead_entry =
+    Keeper_registry.register_offline ~base_path:base_dir keeper_name persisted_seed
+  in
+  Keeper_registry.mark_dead ~base_path:base_dir keeper_name
+    ~at:(Time_compat.now ());
+  (match
+     Keeper_lane.reject_before_start
+       dead_entry.lane
+       ~reason:(Failure "seed dead tombstone")
+   with
+   | Ok () -> ()
+   | Error error ->
+     Alcotest.fail
+       ("failed to settle seeded Dead lane: "
+        ^ Keeper_lane.start_error_to_string error));
+  ignore
+    (Keeper_registry.resolve_done
+       dead_entry
+       ~source:"operator_control_snapshot_seed"
+       (`Crashed "seed dead tombstone")
+      : Keeper_registry.done_resolve_result);
   let ok, dispatch_message =
     dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
       ~args:
@@ -439,6 +460,26 @@ let test_keeper_up_clears_dead_tombstone_resume_state () =
     Alcotest.failf "masc_keeper_up rejected the tombstoned resume: %s"
       dispatch_message;
   Alcotest.(check bool) "keeper_up resumes tombstoned keeper" true ok;
+  let running_entry =
+    match Keeper_registry.get ~base_path:base_dir keeper_name with
+    | Some entry -> entry
+    | None -> Alcotest.fail "revival committed without a registry lane"
+  in
+  Alcotest.(check bool) "revival launches a running lane" true
+    (running_entry.phase = Keeper_state_machine.Running);
+  Alcotest.(check bool) "revival replaces the exact Dead lane" true
+    (not
+       (Keeper_lane.Id.equal
+          (Keeper_lane.id running_entry.lane)
+          (Keeper_lane.id dead_entry.lane)));
+  Alcotest.(check bool) "revival mints a new generation" true
+    (running_entry.meta.runtime.generation > persisted_seed.runtime.generation);
+  let journal_path =
+    List.fold_left Filename.concat base_dir
+      [ ".masc"; "keeper-lifecycle-transactions"; keeper_name ^ ".json" ]
+  in
+  Alcotest.(check bool) "committed revival clears durable journal" false
+    (Fs_compat.file_exists journal_path);
   ignore
     (Keeper_keepalive.stop_keepalive_and_await
        ~base_path:base_dir keeper_name);
@@ -450,6 +491,332 @@ let test_keeper_up_clears_dead_tombstone_resume_state () =
     (Option.is_none resumed.auto_resume_after_sec);
   Alcotest.(check bool) "operator resume clears runtime blocker" true
     (Option.is_none resumed.runtime.last_blocker)
+
+let test_lifecycle_reservation_is_per_keeper_and_owner_typed () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let module Reservation = Keeper_lifecycle_reservation in
+      let start = Atomic.make false in
+      let attempted = Atomic.make 0 in
+      let worker () =
+        while not (Atomic.get start) do
+          Domain.cpu_relax ()
+        done;
+        let result =
+          Reservation.acquire
+            ~base_path:base_dir
+            ~keeper_name:"concurrent"
+            ~expected_generation:11
+            ~purpose:Reservation.Dead_revival
+        in
+        Atomic.incr attempted;
+        (match result with
+         | Ok token ->
+           while Atomic.get attempted < 2 do
+             Domain.cpu_relax ()
+           done;
+           ignore (Reservation.release token : Reservation.release_outcome)
+         | Error _ -> ());
+        result
+      in
+      let left = Domain.spawn worker in
+      let right = Domain.spawn worker in
+      Atomic.set start true;
+      let concurrent_results = [ Domain.join left; Domain.join right ] in
+      let owners, conflicts =
+        List.fold_left
+          (fun (owners, conflicts) -> function
+             | Ok _ -> owners + 1, conflicts
+             | Error (Reservation.Already_reserved _) -> owners, conflicts + 1)
+          (0, 0)
+          concurrent_results
+      in
+      Alcotest.(check int) "concurrent requests have one owner" 1 owners;
+      Alcotest.(check int) "concurrent follower gets typed conflict" 1 conflicts;
+      let first =
+        match
+          Reservation.acquire
+            ~base_path:base_dir
+            ~keeper_name:"alpha"
+            ~expected_generation:7
+            ~purpose:Reservation.Dead_revival
+        with
+        | Ok token -> token
+        | Error _ -> Alcotest.fail "first reservation acquisition failed"
+      in
+      Fun.protect
+        ~finally:(fun () -> ignore (Reservation.release first : Reservation.release_outcome))
+        (fun () ->
+          (match
+             Reservation.acquire
+               ~base_path:base_dir
+               ~keeper_name:"alpha"
+               ~expected_generation:7
+               ~purpose:Reservation.Dead_revival
+           with
+           | Error (Reservation.Already_reserved owner) ->
+             Alcotest.(check int) "conflict reports expected generation" 7
+               owner.expected_generation
+           | Ok token ->
+             ignore (Reservation.release token : Reservation.release_outcome);
+             Alcotest.fail "same keeper acquired two lifecycle owners");
+          (match
+             Reservation.authorize
+               ~base_path:base_dir
+               ~keeper_name:"alpha"
+               ()
+           with
+           | Error owner ->
+             Alcotest.(check int) "unowned mutation sees reservation" 7
+               owner.expected_generation
+           | Ok () -> Alcotest.fail "unowned mutation crossed reservation");
+          (match
+             Reservation.authorize
+               ~token:first
+               ~base_path:base_dir
+               ~keeper_name:"alpha"
+               ()
+           with
+           | Ok () -> ()
+           | Error _ -> Alcotest.fail "opaque owner token was rejected");
+          let other =
+            match
+              Reservation.acquire
+                ~base_path:base_dir
+                ~keeper_name:"beta"
+                ~expected_generation:3
+                ~purpose:Reservation.Dead_revival
+            with
+            | Ok token -> token
+            | Error _ -> Alcotest.fail "reservation leaked across keeper lanes"
+          in
+          Alcotest.(check bool) "different keeper has independent owner" true
+            (not (String.equal (Reservation.owner_id first) (Reservation.owner_id other)));
+          ignore (Reservation.release other : Reservation.release_outcome)))
+
+let test_lifecycle_owner_gates_meta_and_registry_mutations () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_registry.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator"));
+      let meta =
+        match
+          Masc_test_deps.meta_of_json_fixture
+            (`Assoc
+              [ "name", `String "reserved-dead"
+              ; "agent_name", `String (Keeper_identity.keeper_agent_name "reserved-dead")
+              ; "trace_id", `String "trace-reserved-dead"
+              ; "goal", `String "Verify lifecycle ownership"
+              ; "runtime_id", `String "runtime.primary"
+              ])
+        with
+        | Ok meta -> meta
+        | Error detail -> Alcotest.fail detail
+      in
+      (match Keeper_meta_store.write_meta config meta with
+       | Ok () -> ()
+       | Error detail -> Alcotest.fail detail);
+      let persisted =
+        match Keeper_meta_store.read_meta config meta.name with
+        | Ok (Some persisted) -> persisted
+        | Ok None -> Alcotest.fail "seeded metadata disappeared"
+        | Error detail -> Alcotest.fail detail
+      in
+      let token =
+        match
+          Keeper_lifecycle_reservation.acquire
+            ~base_path:base_dir
+            ~keeper_name:persisted.name
+            ~expected_generation:persisted.runtime.generation
+            ~purpose:Keeper_lifecycle_reservation.Dead_revival
+        with
+        | Ok token -> token
+        | Error _ -> Alcotest.fail "lifecycle reservation acquisition failed"
+      in
+      Fun.protect
+        ~finally:(fun () ->
+          ignore
+            (Keeper_lifecycle_reservation.release token
+              : Keeper_lifecycle_reservation.release_outcome))
+        (fun () ->
+          (match Keeper_meta_store.write_meta config persisted with
+           | Error _ -> ()
+           | Ok () -> Alcotest.fail "unowned durable write crossed reservation");
+          (match
+             Keeper_registry.register_offline_if_admitted
+               ~base_path:base_dir
+               persisted.name
+               persisted
+           with
+           | Error (Keeper_registry.Registration_lifecycle_reserved owner) ->
+             Alcotest.(check int) "registration conflict generation"
+               persisted.runtime.generation owner.expected_generation
+           | Error
+               ( Keeper_registry.Registration_shutdown_reserved _
+               | Keeper_registry.Registration_invalid _
+               | Keeper_registry.Registration_event_queue_unavailable _ ) ->
+             Alcotest.fail "registration failed for a non-lifecycle reason"
+           | Ok _ -> Alcotest.fail "unowned registration crossed reservation");
+          let entry =
+            match
+              Keeper_registry.register_offline_if_admitted_for_lifecycle
+                token
+                ~base_path:base_dir
+                persisted.name
+                persisted
+            with
+            | Ok entry -> entry
+            | Error _ -> Alcotest.fail "owner registration was rejected"
+          in
+          (match Keeper_registry.update_entry_exact entry Fun.id with
+           | Keeper_registry.Exact_update_invalid
+               (Keeper_registry.Lifecycle_transaction_reserved _) -> ()
+           | Keeper_registry.Exact_updated
+           | Keeper_registry.Exact_update_missing
+           | Keeper_registry.Exact_update_replaced
+           | Keeper_registry.Exact_update_invalid
+               ( Keeper_registry.Healthy
+               | Keeper_registry.Meta_validation_failed _
+               | Keeper_registry.Required_field_missing _
+               | Keeper_registry.Base_path_mismatch _
+               | Keeper_registry.Name_mismatch _ ) ->
+             Alcotest.fail "unowned exact registry update crossed reservation");
+          (match
+             Keeper_registry.update_entry_exact_for_lifecycle token entry Fun.id
+           with
+           | Keeper_registry.Exact_updated -> ()
+           | Keeper_registry.Exact_update_missing
+           | Keeper_registry.Exact_update_replaced
+           | Keeper_registry.Exact_update_invalid _ ->
+             Alcotest.fail "owner exact registry update was rejected");
+          (match Keeper_registry.unregister_exact_for_lifecycle token entry with
+           | Keeper_registry.Exact_unregistered -> ()
+           | Keeper_registry.Exact_entry_missing
+           | Keeper_registry.Exact_entry_replaced
+           | Keeper_registry.Exact_unregister_lifecycle_reserved _ ->
+             Alcotest.fail "owner exact unregister was rejected")))
+
+let test_dead_revival_launch_failure_rolls_back_both_authorities () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let keeper_name = "dead-revival-rollback" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_keepalive.stop_keepalive ~base_path:base_dir keeper_name;
+      Keeper_registry.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator"));
+      let original_seed =
+        match
+          Masc_test_deps.meta_of_json_fixture
+            (`Assoc
+              [ "name", `String keeper_name
+              ; "agent_name", `String (Keeper_identity.keeper_agent_name keeper_name)
+              ; "trace_id", `String "trace-dead-revival-rollback"
+              ; "goal", `String "Rollback a rejected revival"
+              ; "runtime_id", `String "runtime.primary"
+              ])
+        with
+        | Error detail -> Alcotest.fail detail
+        | Ok meta ->
+          { meta with
+            paused = true
+          ; latched_reason = Some Keeper_latched_reason.Dead_tombstone
+          }
+      in
+      (match Keeper_meta_store.write_meta config original_seed with
+       | Ok () -> ()
+       | Error detail -> Alcotest.fail detail);
+      let original =
+        match Keeper_meta_store.read_meta config keeper_name with
+        | Ok (Some meta) -> meta
+        | Ok None -> Alcotest.fail "rollback seed metadata disappeared"
+        | Error detail -> Alcotest.fail detail
+      in
+      let dead_entry =
+        Keeper_registry.register_offline ~base_path:base_dir keeper_name original
+      in
+      Keeper_registry.mark_dead ~base_path:base_dir keeper_name
+        ~at:(Time_compat.now ());
+      (match
+         Keeper_lane.reject_before_start
+           dead_entry.lane
+           ~reason:(Failure "seed dead revival rollback")
+       with
+       | Ok () -> ()
+       | Error error -> Alcotest.fail (Keeper_lane.start_error_to_string error));
+      ignore
+        (Keeper_registry.resolve_done
+           dead_entry
+           ~source:"dead_revival_rollback_seed"
+           (`Crashed "seed")
+          : Keeper_registry.done_resolve_result);
+      let candidate =
+        { original with
+          agent_name = "intentionally-invalid-transaction-identity"
+        ; paused = false
+        ; latched_reason = None
+        }
+      in
+      let ctx : _ Keeper_tool_surface.context =
+        { config
+        ; agent_name = "operator"
+        ; sw
+        ; clock = Eio.Stdenv.clock env
+        ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
+        ; net = None
+        }
+      in
+      (match Keeper_dead_revival_transaction.revive ctx ~original ~candidate with
+       | Error
+           (Keeper_dead_revival_transaction.Launch_failed
+              Keeper_keepalive.Keepalive_identity_unrepairable) -> ()
+       | Error error ->
+         Alcotest.fail
+           ("unexpected revival failure: "
+            ^ Keeper_dead_revival_transaction.error_to_string error)
+       | Ok _ -> Alcotest.fail "invalid transactional identity unexpectedly launched");
+      let rolled_back =
+        match Keeper_meta_store.read_meta config keeper_name with
+        | Ok (Some meta) -> meta
+        | Ok None -> Alcotest.fail "rollback removed durable metadata"
+        | Error detail -> Alcotest.fail detail
+      in
+      Alcotest.(check bool) "rollback restores paused Dead metadata" true
+        rolled_back.paused;
+      Alcotest.(check bool) "rollback restores Dead tombstone" true
+        (rolled_back.latched_reason = Some Keeper_latched_reason.Dead_tombstone);
+      Alcotest.(check int) "rollback restores original generation"
+        original.runtime.generation rolled_back.runtime.generation;
+      let restored_entry =
+        match Keeper_registry.get ~base_path:base_dir keeper_name with
+        | Some entry -> entry
+        | None -> Alcotest.fail "rollback did not restore Dead registry entry"
+      in
+      Alcotest.(check bool) "rollback restores exact Dead lane" true
+        (Keeper_lane.Id.equal
+           (Keeper_lane.id restored_entry.lane)
+           (Keeper_lane.id dead_entry.lane));
+      Alcotest.(check bool) "rollback registry phase is Dead" true
+        (restored_entry.phase = Keeper_state_machine.Dead);
+      let journal_path =
+        List.fold_left Filename.concat base_dir
+          [ ".masc"; "keeper-lifecycle-transactions"; keeper_name ^ ".json" ]
+      in
+      Alcotest.(check bool) "successful rollback clears journal" false
+        (Fs_compat.file_exists journal_path))
 
 let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
   Eio_main.run @@ fun env ->
@@ -1319,6 +1686,18 @@ let () =
     [
       ( "keeper_up resume"
       , [
+          Alcotest.test_case
+            "lifecycle reservations are per keeper and owner typed"
+            `Quick
+            test_lifecycle_reservation_is_per_keeper_and_owner_typed;
+          Alcotest.test_case
+            "lifecycle owner gates durable and registry mutations"
+            `Quick
+            test_lifecycle_owner_gates_meta_and_registry_mutations;
+          Alcotest.test_case
+            "rejected revival rolls back durable and registry authorities"
+            `Quick
+            test_dead_revival_launch_failure_rolls_back_both_authorities;
           Alcotest.test_case
             "operator resume clears persisted dead-tombstone state"
             `Quick

@@ -124,45 +124,73 @@ let launch_supervised_fiber_body
            lane was never forked (mirrors [prepare_fiber_launch]'s rejection
            path). *)
         let detail = Keeper_lane.start_error_to_string error in
-        Keeper_registry.set_failure_reason
-          ~base_path
-          meta.name
-          (Some (Keeper_registry.Exception detail));
-        (match
-           Keeper_registry.dispatch_event
-             ~base_path
-             meta.name
-             (Keeper_state_machine.Fiber_terminated
-                { outcome = detail; provider_id = None; http_status = None })
-         with
-         | Ok _ -> ()
-         | Error transition_error ->
-           Otel_metric_store.inc_counter
-             Keeper_metrics.(to_string DispatchEventFailures)
-             ~labels:[ "keeper", meta.name; "event", "fiber_terminated" ]
-             ();
-           Log.Keeper.warn
-             "supervisor: fork-rejection Fiber_terminated dispatch failed: %s"
-             (Keeper_state_machine.transition_error_to_string transition_error));
-        Keeper_registry.record_crash
-          ~base_path
-          meta.name
-          (Time_compat.now ())
-          detail;
-        Keeper_registry_error_recording.record ~base_path meta.name detail;
-        if
+        let owns_terminal_signal =
           Keeper_registry.resolve_done
             reg
             ~source:"supervisor_lane_start_rejected"
             (`Crashed detail)
           |> done_signal_of_registry_result
           |> should_publish_lifecycle_for_done_signal
-        then
-          publish_phase_lifecycle
-            ~phase:Keeper_state_machine.Crashed
-            meta.name
-            detail
-            ();
+        in
+        if owns_terminal_signal
+        then (
+          let _failure_reason_recorded =
+            Keeper_registry.set_failure_reason_exact
+              reg
+              (Some (Keeper_registry.Exception detail))
+            |> Keeper_registry.exact_update_succeeded
+                 reg
+                 ~site:"supervisor_lane_start_rejected.failure_reason"
+          in
+          let terminalized =
+            match
+              Keeper_registry.dispatch_event_exact
+                reg
+                (Keeper_state_machine.Fiber_terminated
+                   { outcome = detail; provider_id = None; http_status = None })
+            with
+            | Ok _ -> true
+            | Error transition_error ->
+              Otel_metric_store.inc_counter
+                Keeper_metrics.(to_string DispatchEventFailures)
+                ~labels:[ "keeper", meta.name; "event", "fiber_terminated" ]
+                ();
+              Log.Keeper.warn
+                "supervisor: exact-lane fork-rejection terminalization failed: %s"
+                (Keeper_state_machine.transition_error_to_string transition_error);
+              false
+          in
+          let _crash_recorded =
+            Keeper_registry.record_crash_exact
+              reg
+              (Time_compat.now ())
+              detail
+            |> Keeper_registry.exact_update_succeeded
+                 reg
+                 ~site:"supervisor_lane_start_rejected.crash_log"
+          in
+          Keeper_registry_error_recording.record_exact reg detail;
+          if terminalized
+          then
+            publish_phase_lifecycle
+              ~phase:Keeper_state_machine.Crashed
+              meta.name
+              detail
+              ()
+          else
+            match Keeper_registry.unregister_exact reg with
+            | Keeper_registry.Exact_unregistered ->
+              Log.Keeper.error
+                "supervisor: removed non-terminalizable fork-rejected lane +                 name=%s"
+                meta.name
+            | Keeper_registry.Exact_entry_missing ->
+              Log.Keeper.warn
+                "supervisor: fork-rejected lane was already unregistered name=%s"
+                meta.name
+            | Keeper_registry.Exact_entry_replaced ->
+              Log.Keeper.warn
+                "supervisor: fork-rejected lane retained newer same-name owner +                 name=%s"
+                meta.name);
         Error
           (Keeper_state_machine.Precondition_violation
              { event = "supervisor_lane_fork"; reason = detail })

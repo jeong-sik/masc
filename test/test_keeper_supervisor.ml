@@ -277,7 +277,9 @@ let test_supervisor_policy_runtime_exhausted_retryable_reasons () =
 
 let test_supervisor_policy_runtime_exhausted_terminal_reasons () =
   let terminal_reasons =
-    [ Keeper_meta_contract.Other_detail "opaque free-text" ]
+    [ Keeper_meta_contract.Session_conflict
+    ; Keeper_meta_contract.Other_detail "opaque free-text"
+    ]
   in
   List.iter
     (fun reason ->

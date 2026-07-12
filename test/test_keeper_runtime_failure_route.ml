@@ -196,7 +196,13 @@ let test_masc_internal_judgment_classes () =
        { pacing = KFR.Capacity_backpressure; retry_after = None })
     (internal_err
        (Keeper_internal_error.Runtime_exhausted
-          { runtime_id = "r"; reason = Keeper_internal_error.Capacity_exhausted }))
+          { runtime_id = "r"; reason = Keeper_internal_error.Capacity_exhausted }));
+  check_masc_route
+    "session conflict rotates without retry pacing"
+    (KFR.Rotate_now { rotate = KFR.Runtime_exhausted })
+    (internal_err
+       (Keeper_internal_error.Runtime_exhausted
+          { runtime_id = "r"; reason = Keeper_internal_error.Session_conflict }))
 
 let test_non_provider_families_judge () =
   let raw_internal = Agent_sdk.Error.Internal "boom" in

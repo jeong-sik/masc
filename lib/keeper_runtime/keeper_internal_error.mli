@@ -56,6 +56,7 @@ type runtime_exhaustion_reason =
   | All_providers_failed
   | Candidates_filtered_after_cycles
   | Max_turns_exceeded
+  | Session_conflict
   | Structural_attempt_timeout of { detail : string }
   | Capacity_exhausted
   | Other_detail of string

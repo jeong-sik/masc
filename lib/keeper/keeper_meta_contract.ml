@@ -127,6 +127,7 @@ type runtime_exhaustion_reason = Keeper_internal_error.runtime_exhaustion_reason
   | All_providers_failed
   | Candidates_filtered_after_cycles
   | Max_turns_exceeded
+  | Session_conflict
   | Structural_attempt_timeout of { detail : string }
   | Capacity_exhausted
   | Other_detail of string
@@ -261,6 +262,8 @@ let runtime_exhaustion_summary = function
     "Runtime exhausted after provider candidates were filtered; inspect candidate filter reasons."
   | Max_turns_exceeded ->
     "Runtime exhausted after a provider hit its per-call turn budget."
+  | Session_conflict ->
+    "Runtime exhausted because another process owns the provider session lease."
   | Structural_attempt_timeout _ ->
     "Runtime exhausted after the per-OAS-call ceiling (max_execution_time_s) fired."
   | Capacity_exhausted ->

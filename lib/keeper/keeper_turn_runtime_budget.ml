@@ -52,6 +52,7 @@ let runtime_reason_is_structural_attempt_timeout
   | Keeper_turn_driver.All_providers_failed
   | Keeper_turn_driver.Candidates_filtered_after_cycles
   | Keeper_turn_driver.Max_turns_exceeded
+  | Keeper_turn_driver.Session_conflict
   | Keeper_turn_driver.Capacity_exhausted
   | Keeper_turn_driver.Other_detail _ -> false
 

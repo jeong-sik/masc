@@ -103,6 +103,7 @@ let runtime_exhaustion_reason_code
   | Keeper_internal_error.Candidates_filtered_after_cycles ->
     "runtime_exhausted_candidates_filtered"
   | Keeper_internal_error.Max_turns_exceeded -> "runtime_exhausted_max_turns"
+  | Keeper_internal_error.Session_conflict -> "runtime_exhausted_session_conflict"
   | Keeper_internal_error.Structural_attempt_timeout _ ->
     "runtime_exhausted_structural_attempt_timeout"
   | Keeper_internal_error.Capacity_exhausted -> "runtime_exhausted_capacity_exhausted"
@@ -124,6 +125,8 @@ let registry_reason_of_internal_reason
     Keeper_meta_contract.Candidates_filtered_after_cycles
   | Keeper_internal_error.Max_turns_exceeded ->
     Keeper_meta_contract.Max_turns_exceeded
+  | Keeper_internal_error.Session_conflict ->
+    Keeper_meta_contract.Session_conflict
   | Keeper_internal_error.Structural_attempt_timeout { detail } ->
     Keeper_meta_contract.Structural_attempt_timeout { detail }
   | Keeper_internal_error.Capacity_exhausted ->

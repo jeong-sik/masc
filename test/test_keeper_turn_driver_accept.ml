@@ -2474,32 +2474,32 @@ let test_capacity_failure_exhaustion_classifies_as_capacity_exhausted () =
     Alcotest.failf "expected typed keeper error, got %s"
       (Agent_sdk.Error.to_string mapped)
 
-let test_session_conflict_exhaustion_preserves_terminal_detail () =
-  let session_conflict =
+let test_session_conflict_exhaustion_preserves_typed_terminal_reason () =
+  let conflict_err =
     Llm_provider.Http_client.ProviderTerminal
       { kind = Llm_provider.Http_client.Session_conflict
-      ; message = "session is owned by another process"
+      ; message = "provider prose is not a MASC policy input"
       }
   in
   let mapped =
     Masc.Keeper_turn_driver.For_testing.sdk_error_of_exhausted
       ~runtime_id:"runtime.session-conflict"
-      (Some session_conflict)
+      (Some conflict_err)
   in
   match Keeper_internal_error.classify_masc_internal_error mapped with
   | Some (Keeper_internal_error.Runtime_exhausted { reason; _ }) ->
     Alcotest.(check bool)
-      "session conflict stays terminal"
+      "reason is Session_conflict"
+      true
+      (reason = Keeper_internal_error.Session_conflict);
+    Alcotest.(check bool)
+      "session conflict is not automatically retryable"
       false
       (Keeper_internal_error.runtime_exhaustion_reason_retryable reason);
     Alcotest.(check bool)
       "session conflict is not auto-recoverable"
       false
-      (Masc.Keeper_error_classify.is_auto_recoverable_turn_error mapped);
-    Alcotest.(check bool)
-      "provider terminal detail is preserved"
-      true
-      (reason = Keeper_internal_error.Other_detail "session is owned by another process")
+      (Masc.Keeper_error_classify.is_auto_recoverable_turn_error mapped)
   | Some other ->
     Alcotest.failf "expected Runtime_exhausted, got %s"
       (Keeper_internal_error.kind_of_masc_internal_error other)
@@ -2693,9 +2693,9 @@ let () =
             `Quick
             test_capacity_failure_exhaustion_classifies_as_capacity_exhausted;
           Alcotest.test_case
-            "session conflict exhaustion stays terminal"
+            "session conflict preserves typed terminal exhaustion"
             `Quick
-            test_session_conflict_exhaustion_preserves_terminal_detail;
+            test_session_conflict_exhaustion_preserves_typed_terminal_reason;
           Alcotest.test_case
             "runtime exhaustion labels cap free-text detail"
             `Quick

@@ -1,7 +1,7 @@
 (** Keeper_guards — composable pre_tool_use hooks for keeper agents.
 
     Decomposes the previously monolithic [pre_tool_use] guard chain
-    (streak / deny / cost / destructive / governance) into standalone
+    (deny / cost / destructive / governance) into standalone
     OAS [Hooks.hooks] records that stack via
     [Agent_sdk.Hooks.compose]. Most guards fill only the
     [pre_tool_use] slot; lifecycle-sensitive guards may also observe
@@ -12,7 +12,7 @@
     - Public SDK boundary (C0): OAS is consumed as-is. No OAS-side
       edits. All keeper-specific state lives in MASC closures.
     - MASC/OAS boundary (C1): OAS primitives do not learn about
-      keepers. [meta_ref], deny lists, streak thresholds, and cost
+      keepers. [meta_ref], deny lists, and cost
       limits stay on the MASC side.
     - Observability (C2): every override / approval decision emits a
       [masc:keeper_gate] Event_bus Custom event in addition to the
@@ -227,10 +227,6 @@ let planner_alternative_for_gate ~stage ~tool_name =
   | "readonly_observation_duplicate" ->
     Printf.sprintf
       "planner_alternative=\"stop retrying %s with identical input; use the prior observation, choose a different tool/input, mutate state, or report no-work/blocker directly\""
-      tool_name
-  | "streak_gate" ->
-    Printf.sprintf
-      "planner_alternative=\"stop retrying %s; choose a different tool, batch remaining work, or report no-work/blocker directly\""
       tool_name
   | "keeper_deny" ->
     "planner_alternative=\"choose an allowed replacement tool, change plan, or request operator approval\""
@@ -451,15 +447,6 @@ let compose_all (hs : Agent_sdk.Hooks.hooks list)
     Agent_sdk.Hooks.empty
     hs
 
-(* -------------------------------------------------------------- *)
-(* Streak state (shared across invocations for one keeper)         *)
-(* -------------------------------------------------------------- *)
-
-(** Mutable streak state captured by [streak_guard]. *)
-type streak_state = { mutable entry : string * int }
-
-let make_streak_state () : streak_state = { entry = ("", 0) }
-
 (** Guarded read-only observation state inside one Agent.run turn.
     [previous_success] is confirmed only from a successful PostToolUse event;
     [pending] catches same-batch duplicate reads before the first result lands.
@@ -642,62 +629,6 @@ let custom_guard
               ~tool_name ~reason_code:"pre_tool_use_guard"
               ~reason_text:reason)
        | None -> Agent_sdk.Hooks.Continue)
-    | _ -> Agent_sdk.Hooks.Continue)
-
-(** Same-name streak gate: block when the same tool name is called
-    [threshold+] times consecutively, regardless of args. OAS idle
-    detection requires exact name+args match, so this catches the
-    "same operation, different targets" pattern (e.g. reading 20
-    board posts one by one). *)
-let streak_guard
-    ~(meta_ref : Keeper_meta_contract.keeper_meta ref)
-    ~on_gate_decision
-    ~(state : streak_state)
-    ~(threshold : int)
-  : Agent_sdk.Hooks.hooks =
-  hooks_of_pre_tool_use (fun event ->
-    match event with
-    | Agent_sdk.Hooks.PreToolUse
-        { tool_name; input; accumulated_cost_usd; turn; _ } ->
-      let t0 = Time_compat.now () in
-      let keeper_name = (!meta_ref).name in
-      let prev_name, prev_count = state.entry in
-      let new_count =
-        if prev_name = tool_name then prev_count + 1 else 1
-      in
-      state.entry <- (tool_name, new_count);
-      if new_count >= threshold then begin
-        let reason_text =
-          Printf.sprintf
-            "%s called %d times consecutively. Use a DIFFERENT tool or finish with a direct no-work/blocker response"
-            tool_name new_count
-        in
-        let latency_ms = (Time_compat.now () -. t0) *. 1000.0 in
-        Otel_metric_store.inc_counter
-          Keeper_metrics.(to_string GuardsFailures)
-          ~labels:[("keeper", keeper_name); ("site", "streak_gate")]
-          ();
-        log_gate_rejection
-          ~keeper_name ~stage:"streak_gate" ~tool_name
-          ~reason_code:"streak_gate"
-          "keeper:%s streak_gate: %s called %d times consecutively, blocking"
-          keeper_name tool_name new_count;
-        broadcast_tool_skipped
-          ~keeper_name ~tool_name ~reason_code:"streak_gate";
-        let source_path = keeper_guards_source_path in
-        let source_line = __LINE__ in
-        report_gate_decision on_gate_decision
-          ~source_path:(Some source_path) ~source_line:(Some source_line)
-          ~stage:"streak_gate" ~decision:Gate_override
-          ~reason_code:"streak_gate" ~reason_text
-          ~tool_name ~keeper_name ~input ~turn ~accumulated_cost_usd
-          ~stage_latency_ms:latency_ms;
-        Agent_sdk.Hooks.Override
-          (render_inline_skip_reason_with_source
-             ~source_path ~source_line
-             ~tool_name ~reason_code:"streak_gate" ~reason_text)
-      end
-      else Agent_sdk.Hooks.Continue
     | _ -> Agent_sdk.Hooks.Continue)
 
 (** Consecutive duplicate read-only snapshot gate.
@@ -977,15 +908,14 @@ let governance_approval_guard
 
     Order matters: the first guard to return a non-[Continue]
     decision wins (short-circuit via [Hooks.compose]). Preserves the
-    ordering of the previous monolithic implementation:
-      timing -> custom -> read-only observation duplicate -> streak -> deny
+    ordering of the previous monolithic implementation after retiring the
+    argument-blind same-name streak heuristic:
+      timing -> custom -> read-only observation duplicate -> deny
       -> cost telemetry passthrough -> destructive -> governance_approval *)
 let build_chain
     ~(meta_ref : Keeper_meta_contract.keeper_meta ref)
     ~(tool_start_time : float ref)
-    ~(streak_state : streak_state)
     ~(readonly_observation_state : readonly_observation_state)
-    ~(streak_threshold : int)
     ~(denied : string list)
     ~(max_cost_usd : float option)
     ~(destructive_ops_policy : Destructive_ops_policy.t)
@@ -998,7 +928,6 @@ let build_chain
     custom_guard ~meta_ref ~on_gate_decision ~guard:pre_tool_use_guard;
     readonly_observation_duplicate_guard
       ~meta_ref ~on_gate_decision ~state:readonly_observation_state;
-    streak_guard ~meta_ref ~on_gate_decision ~state:streak_state ~threshold:streak_threshold;
     deny_guard ~meta_ref ~on_gate_decision ~denied;
     cost_guard ~meta_ref ~on_gate_decision ~max_cost_usd;
     destructive_guard ~meta_ref ~on_gate_decision ~policy:destructive_ops_policy;

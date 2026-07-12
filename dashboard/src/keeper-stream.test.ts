@@ -968,8 +968,8 @@ describe('applyKeeperStreamEvent tool calls', () => {
 
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'RUN_ERROR',
-      value: { message: 'request exceeded timeout_sec=300.000 before completion' },
-    })).toBe('request exceeded timeout_sec=300.000 before completion')
+      value: { message: 'request was cancelled by operator' },
+    })).toBe('request was cancelled by operator')
 
     const reply = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
     expect(reply?.text).toBe('')

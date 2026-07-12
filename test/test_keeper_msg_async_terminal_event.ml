@@ -4,7 +4,7 @@
     terminal signal it emits on its own side channel while it runs (e.g.
     [process_single_turn]'s [worker_events] stream in
     server_routes_http_keeper_stream.ml). Before this fix, a turn cut off by
-    [Eio.Time.with_timeout_exn] or an external [Eio.Cancel.Cancelled] left
+    an external [Eio.Cancel.Cancelled] left
     [f] mid-flight with no chance to push its own terminal event, so a
     consumer blocked on [Eio.Stream.take worker_events] hung forever even
     though [Keeper_msg_async]'s own polling table correctly recorded the
@@ -12,7 +12,7 @@
 
     These tests exercise [Keeper_msg_async.submit] directly (not the SSE
     route) and assert on the new [on_worker_aborted] callback: it must fire
-    exactly once, with a [Timeout]/[Cancelled] reason, precisely when [f] is
+    exactly once, with a typed cancellation reason, precisely when [f] is
     cut off before reaching its own completion — and never on a normal
     [f] return. *)
 
@@ -25,6 +25,7 @@ module Keeper_types_profile = Masc.Keeper_types_profile
    same accepted-submit and persisted-terminal path. *)
 let () = Mirage_crypto_rng_unix.use_default ()
 let caller = "terminal-event-test-caller"
+exception Synthetic_background_switch_closed
 
 let accepted_request_id = function
   | Ok request_id -> request_id
@@ -68,79 +69,23 @@ let wait_until ~clock ~max_iterations ~interval_sec predicate =
   loop max_iterations
 ;;
 
-let test_timeout_invokes_on_worker_aborted_exactly_once () =
-  with_temp_base (fun base_path ->
-    Eio_main.run (fun env ->
-      Eio.Switch.run (fun sw ->
-        let clock = Eio.Stdenv.clock env in
-        let aborted = ref [] in
-        let request_id =
-          Keeper_msg_async.submit
-            ~clock
-            ~timeout_sec:0.01
-            ~on_worker_aborted:(fun reason ->
-              aborted := reason :: !aborted;
-              Ok ())
-            ~background_sw:sw
-            ~base_path
-            ~caller
-            ~keeper_name:"terminal-event-timeout"
-            ~f:(fun _request_sw ->
-              (* Sleeps far past the 0.01s timeout budget so
-                 [Eio.Time.with_timeout_exn] cancels this fiber before it
-                 ever returns — [f] never reaches its own completion. *)
-              Eio.Time.sleep clock 5.0;
-              Keeper_types_profile.tool_result_ok "unreachable")
-            ()
-          |> accepted_request_id
-        in
-        let fired =
-          wait_until ~clock ~max_iterations:300 ~interval_sec:0.01 (fun () ->
-            not (List.is_empty !aborted))
-        in
-        check bool "on_worker_aborted fired within budget (masc#23924 regression guard)" true fired;
-        (* Grace period: give a buggy double-fire a chance to show up before
-           we assert exactly-once. *)
-        Eio.Time.sleep clock 0.05;
-        (match !aborted with
-         | [ Keeper_msg_async.Timeout { timeout_sec } ] ->
-           check bool "timeout_sec matches the submitted timeout_sec" true
-             (Float.equal timeout_sec 0.01)
-         | [] -> fail "on_worker_aborted was never invoked"
-         | reasons ->
-           fail
-             (Printf.sprintf "on_worker_aborted fired %d times, expected 1"
-                (List.length reasons)));
-        (* The pre-existing polling table must still record the timeout
-           terminally — this fix must not regress that contract. *)
-        match Keeper_msg_async.poll ~base_path ~caller request_id with
-        | Keeper_msg_async.Found { status = Keeper_msg_async.Done { ok = false; _ }; _ } -> ()
-        | Keeper_msg_async.Found { status; _ } ->
-          fail
-            (Printf.sprintf "expected a failed Done status, got %s"
-               (Keeper_msg_async.status_to_string status))
-        | Keeper_msg_async.Absent -> fail "request record unexpectedly absent"
-        | Keeper_msg_async.Unreadable reason ->
-          fail (Printf.sprintf "request record unreadable: %s" reason)
-        | Keeper_msg_async.Rejected _ -> fail "request access unexpectedly rejected")))
-;;
-
 let test_operator_cancel_running_worker_invokes_on_worker_aborted () =
   with_temp_base (fun base_path ->
     Eio_main.run (fun env ->
       Eio.Switch.run (fun sw ->
         let clock = Eio.Stdenv.clock env in
         let aborted = ref [] in
+        let settled = ref [] in
         let f_was_called = ref false in
         let worker_started, worker_started_resolver = Eio.Promise.create () in
         let never, _never_resolver = Eio.Promise.create () in
         let request_id =
           Keeper_msg_async.submit
-            ~clock
-            ~timeout_sec:5.0
             ~on_worker_aborted:(fun reason ->
               aborted := reason :: !aborted;
               Ok ())
+            ~on_worker_settled:(fun settlement ->
+              settled := settlement :: !settled)
             ~background_sw:sw
             ~base_path
             ~caller
@@ -156,12 +101,17 @@ let test_operator_cancel_running_worker_invokes_on_worker_aborted () =
         Eio.Promise.await worker_started;
         let cancelled = Keeper_msg_async.cancel ~base_path ~caller request_id in
         check bool "cancel accepted the running request" true
-          (cancelled = Keeper_msg_async.Cancelled_request);
+          (cancelled = Keeper_msg_async.Cancellation_requested);
         let fired =
           wait_until ~clock ~max_iterations:300 ~interval_sec:0.01 (fun () ->
             not (List.is_empty !aborted))
         in
         check bool "on_worker_aborted fired for an operator cancel" true fired;
+        let settlement_fired =
+          wait_until ~clock ~max_iterations:300 ~interval_sec:0.01 (fun () ->
+            not (List.is_empty !settled))
+        in
+        check bool "durable settlement callback fired" true settlement_fired;
         Eio.Time.sleep clock 0.05;
         (match !aborted with
          | [ Keeper_msg_async.Worker_cancelled { cancelled_by; _ } ] ->
@@ -171,7 +121,18 @@ let test_operator_cancel_running_worker_invokes_on_worker_aborted () =
          | reasons ->
            fail
              (Printf.sprintf "on_worker_aborted fired %d times, expected 1"
-                (List.length reasons)));
+             (List.length reasons)));
+        (match !settled with
+         | [ { Keeper_msg_async.status = Keeper_msg_async.Cancelled _
+             ; durability = Keeper_msg_async.Durable
+             } ] ->
+           ()
+         | [ settlement ] ->
+           failf
+             "unexpected settlement status=%s"
+             (Keeper_msg_async.status_to_string settlement.status)
+         | settlements ->
+           failf "settlement callback count=%d, expected 1" (List.length settlements));
         check bool "f was running before cancellation" true !f_was_called)))
 ;;
 
@@ -184,8 +145,6 @@ let test_abort_callback_failure_does_not_fail_server_switch () =
         let never, _never_resolver = Eio.Promise.create () in
         let request_id =
           Keeper_msg_async.submit
-            ~clock
-            ~timeout_sec:5.0
             ~on_worker_aborted:(fun _reason ->
               failwith "synthetic abort notification failure")
             ~background_sw:sw
@@ -204,7 +163,7 @@ let test_abort_callback_failure_does_not_fail_server_switch () =
           "operator cancellation remains accepted"
           true
           (Keeper_msg_async.cancel ~base_path ~caller request_id
-           = Keeper_msg_async.Cancelled_request);
+           = Keeper_msg_async.Cancellation_requested);
         let reached_persistence_failure =
           wait_until ~clock ~max_iterations:300 ~interval_sec:0.01 (fun () ->
             match Keeper_msg_async.poll ~base_path ~caller request_id with
@@ -234,8 +193,6 @@ let test_normal_completion_never_invokes_on_worker_aborted () =
         let aborted = ref [] in
         let request_id =
           Keeper_msg_async.submit
-            ~clock
-            ~timeout_sec:5.0
             ~on_worker_aborted:(fun reason ->
               aborted := reason :: !aborted;
               Ok ())
@@ -262,12 +219,11 @@ let test_normal_completion_never_invokes_on_worker_aborted () =
 
 let test_acceptance_failure_prevents_worker_start () =
   with_temp_base (fun base_path ->
-    Eio_main.run (fun env ->
+    Eio_main.run (fun _env ->
       Eio.Switch.run (fun sw ->
         let worker_called = ref false in
         match
           Keeper_msg_async.submit
-            ~clock:(Eio.Stdenv.clock env)
             ~on_accepted:(fun _request_id -> Error "chat user append failed")
             ~background_sw:sw
             ~base_path
@@ -300,13 +256,65 @@ let test_acceptance_failure_prevents_worker_start () =
         | Ok _ -> fail "acceptance failure returned a successful request id")))
 ;;
 
+let test_closed_background_switch_rejects_worker_acceptance () =
+  with_temp_base (fun base_path ->
+    Eio_main.run (fun _env ->
+      let submit_result = ref None in
+      let aborted = ref [] in
+      let settled = ref [] in
+      (try
+         Eio.Switch.run (fun sw ->
+           Eio.Switch.fail sw Synthetic_background_switch_closed;
+           submit_result :=
+             Some
+               (Eio.Cancel.protect (fun () ->
+                  Keeper_msg_async.submit
+                    ~on_worker_aborted:(fun reason ->
+                      aborted := reason :: !aborted;
+                      Ok ())
+                    ~on_worker_settled:(fun settlement ->
+                      settled := settlement :: !settled)
+                    ~background_sw:sw
+                    ~base_path
+                    ~caller
+                    ~keeper_name:"terminal-event-closed-background-switch"
+                    ~f:(fun _request_sw ->
+                      fail "worker ran on a closed background switch")
+                    ())))
+       with
+       | Synthetic_background_switch_closed -> ()
+       | Eio.Cancel.Cancelled Synthetic_background_switch_closed -> ());
+      match !submit_result with
+      | Some
+          (Error
+             (Keeper_msg_async.Background_fork_failed
+                { request_id; reason = _ })) ->
+        check int "never-started worker emits no abort callback" 0 (List.length !aborted);
+        check int "never-started worker emits no settlement callback" 0
+          (List.length !settled);
+        (match Keeper_msg_async.poll ~base_path ~caller request_id with
+         | Keeper_msg_async.Found { status = Keeper_msg_async.Lost _; _ } -> ()
+         | Keeper_msg_async.Found { status; _ } ->
+           failf
+             "expected lost request after rejected background start, got %s"
+             (Keeper_msg_async.status_to_string status)
+         | Keeper_msg_async.Absent -> fail "rejected background start lost its record"
+         | Keeper_msg_async.Unreadable reason -> fail reason
+         | Keeper_msg_async.Rejected _ -> fail "request ownership rejected")
+      | Some (Error error) ->
+        fail
+          (Keeper_msg_async.submit_error_to_json error
+           |> Yojson.Safe.to_string)
+      | Some (Ok request_id) ->
+        failf "closed background switch accepted request_id=%s" request_id
+      | None -> fail "submit did not return before the background switch closed"))
+;;
+
 let () =
   run
     "keeper_msg_async_terminal_event"
     [ ( "on_worker_aborted"
-      , [ test_case "timeout invokes on_worker_aborted exactly once" `Quick
-            test_timeout_invokes_on_worker_aborted_exactly_once
-        ; test_case "operator cancel running worker invokes on_worker_aborted" `Quick
+      , [ test_case "operator cancel running worker invokes on_worker_aborted" `Quick
             test_operator_cancel_running_worker_invokes_on_worker_aborted
         ; test_case "abort callback failure stays inside the request lane" `Quick
             test_abort_callback_failure_does_not_fail_server_switch
@@ -316,6 +324,10 @@ let () =
             "acceptance failure prevents worker start"
             `Quick
             test_acceptance_failure_prevents_worker_start
+        ; test_case
+            "closed background switch rejects worker acceptance"
+            `Quick
+            test_closed_background_switch_rejects_worker_acceptance
         ] )
     ]
 ;;

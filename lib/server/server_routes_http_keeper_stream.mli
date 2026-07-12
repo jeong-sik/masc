@@ -74,7 +74,6 @@ type keeper_chat_stream_request = {
   name : string;
   message : string;
   user_blocks : user_input_block list;
-  timeout_sec : float option;
   turn_instructions : string option;
   surface_context : Yojson.Safe.t option;
   channel : string;
@@ -86,9 +85,7 @@ type keeper_chat_stream_request = {
 (** Parsed payload of a keeper chat-stream HTTP request.
     [message] is the text fallback used by the existing direct keeper
     path; [user_blocks] preserves semantic text/media input for the
-    block-aware runtime path. [timeout_sec] is an optional caller-owned
-    positive finite deadline; it is never synthesized or clamped by this
-    boundary. [turn_instructions] and [surface_context]
+    block-aware runtime path. [turn_instructions] and [surface_context]
     are optional copilot context fields; when
     [turn_instructions] is absent but [surface_context]
     is present, the surface context is formatted and
@@ -104,9 +101,9 @@ val parse_keeper_chat_stream_request :
 (** Parses the HTTP body string into a
     {!keeper_chat_stream_request}.  Returns
     [Error reason] on JSON shape mismatches, missing
-    [name] / content, malformed [user_blocks], an invalid explicit timeout,
-    partial connector context, or presence of legacy keeper model args removed by the
-    runtime rewrite. *)
+    [name] / content, malformed [user_blocks], partial connector context, or a
+    removed Keeper argument (including the retired request-level
+    [timeout_sec]). *)
 
 (** {1 Error envelope} *)
 
@@ -163,7 +160,6 @@ val handle_keeper_chat_stream :
 
 type queued_turn_failure_kind =
   | Turn_failed
-  | Turn_timed_out
   | Turn_cancelled
   | No_visible_reply
   | Continuation_checkpoint_without_reply
@@ -231,6 +227,26 @@ val process_single_turn :
 
 (** {1 Testing helpers} *)
 
+type canonical_reply_payload_error =
+  | Malformed_reply_json of { parser_detail : string }
+  | Reply_payload_not_object
+  | Missing_payload_field of string
+  | Duplicate_payload_field of string
+  | Invalid_payload_field_type of string
+  | Unknown_turn_outcome
+  | Invalid_turn_ref
+
+type canonical_reply_payload =
+  { payload_json : Yojson.Safe.t
+  ; turn_outcome : Keeper_turn_outcome.t
+  ; turn_ref : Ids.Turn_ref.t
+  ; visible_reply : string
+  ; poll_body : string
+  }
+
+val canonical_reply_payload_error_to_string :
+  canonical_reply_payload_error -> string
+
 type keeper_stream_bridge_state = Keeper_chat_oas_stream_bridge.state
 (** Per-stream OAS event bridge state. Abstract outside tests so callers cannot
     construct synthetic stream correlation state. *)
@@ -266,26 +282,19 @@ module For_testing : sig
     | `Queued of Yojson.Safe.t * string
     | `Queue_error of string
     ]
-  val extract_visible_reply : string -> Yojson.Safe.t option * string
+  val canonical_reply_payload_of_body :
+    redact_text:(string -> string) ->
+    string ->
+    (canonical_reply_payload, canonical_reply_payload_error) result
   val direct_reply_terminal_error :
     ?has_visible_blocks:bool -> Yojson.Safe.t option -> string -> string option
   val queued_delivery_outcome_of_turn_ref :
     Ids.Turn_ref.t option -> queued_turn_outcome
-  val visible_reply_with_stream_fallback :
-    streamed_text:string -> string -> string
-  val redacted_visible_reply_with_stream_fallback :
-    redact:(string -> string) -> streamed_text:string -> string -> string
-  val reply_payload_with_streamed_visible_reply :
-    Yojson.Safe.t option ->
-    visible_reply:string ->
-    streamed_text_present:bool ->
-    Yojson.Safe.t option
   val format_surface_context : Yojson.Safe.t -> string
   val surface_context_to_instructions : Yojson.Safe.t -> string option
   val empty_stream_bridge_state : keeper_stream_bridge_state
   val translate_oas_stream_event :
     redact_text:(string -> string) ->
-    on_text_delta:(string -> string) ->
     base_dir:string ->
     keeper_stream_bridge_state ->
     Agent_sdk.Types.sse_event ->

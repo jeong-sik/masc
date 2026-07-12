@@ -170,8 +170,8 @@ let test_keeper_msg_async_roundtrip () =
      | Done { ok = true; body } -> String.length body > 0
      | _ -> false);
   Alcotest.(check int)
-    "one pending entry"
-    1
+    "terminal entry leaves active memory index"
+    0
     (match
        Keeper_msg_async.list_for_keeper
          ~base_path ~caller ~keeper_name:"alpha" ()
@@ -203,20 +203,22 @@ let test_keeper_msg_async_list_isolates_base_paths () =
   let clock = Eio.Stdenv.clock env in
   let base_a = temp_dir "keeper-msg-list-base-a-" in
   let base_b = temp_dir "keeper-msg-list-base-b-" in
-  let submit base_path keeper_name =
+  let release_a, resolve_release_a = Eio.Promise.create () in
+  let release_b, resolve_release_b = Eio.Promise.create () in
+  let submit base_path keeper_name release =
     Keeper_msg_async.submit
       ~background_sw:sw
       ~base_path
       ~caller
       ~keeper_name
-      ~f:(fun _request_sw -> tr_ok "{}")
+      ~f:(fun _request_sw ->
+        Eio.Promise.await release;
+        tr_ok "{}")
       ()
     |> accepted_request_id
   in
-  let request_a = submit base_a "alpha" in
-  let request_b = submit base_b "beta" in
-  ignore (wait_for_done_with_clock clock ~base_path:base_a request_a : Keeper_msg_async.entry);
-  ignore (wait_for_done_with_clock clock ~base_path:base_b request_b : Keeper_msg_async.entry);
+  let request_a = submit base_a "alpha" release_a in
+  let request_b = submit base_b "beta" release_b in
   let request_ids base_path =
     match Keeper_msg_async.list_for_keeper ~base_path ~caller () with
     | Ok entries -> List.map (fun (entry : Keeper_msg_async.entry) -> entry.request_id) entries
@@ -226,7 +228,11 @@ let test_keeper_msg_async_list_isolates_base_paths () =
         (Keeper_msg_async.access_rejection_to_json rejection |> Yojson.Safe.to_string)
   in
   Alcotest.(check (list string)) "base A sees only its owner lane" [ request_a ] (request_ids base_a);
-  Alcotest.(check (list string)) "base B sees only its owner lane" [ request_b ] (request_ids base_b)
+  Alcotest.(check (list string)) "base B sees only its owner lane" [ request_b ] (request_ids base_b);
+  Eio.Promise.resolve resolve_release_a ();
+  Eio.Promise.resolve resolve_release_b ();
+  ignore (wait_for_done_with_clock clock ~base_path:base_a request_a : Keeper_msg_async.entry);
+  ignore (wait_for_done_with_clock clock ~base_path:base_b request_b : Keeper_msg_async.entry)
 ;;
 
 let test_keeper_msg_async_recovers_done_from_disk () =
@@ -366,47 +372,6 @@ let test_keeper_msg_async_does_not_accept_failed_initial_persistence () =
          Alcotest.failf "request %s was ACKed without initial persistence" request_id)
 ;;
 
-let test_keeper_msg_async_rejects_invalid_timeout_before_acceptance () =
-  with_eio_env
-  @@ fun _env ->
-  Eio.Switch.run
-  @@ fun background_sw ->
-  let base_path = temp_dir "keeper-msg-invalid-timeout-" in
-  let worker_ran = Atomic.make false in
-  List.iter
-    (fun timeout_sec ->
-       match
-         Keeper_msg_async.submit
-           ~background_sw
-           ~base_path
-           ~caller
-           ~timeout_sec
-           ~keeper_name:"invalid-timeout"
-           ~f:(fun _request_sw ->
-             Atomic.set worker_ran true;
-             tr_ok "{}")
-           ()
-       with
-       | Error (Keeper_msg_async.Invalid_timeout _) -> ()
-       | Error error ->
-           Alcotest.failf
-             "expected invalid timeout rejection, got %s"
-             (Keeper_msg_async.submit_error_to_json error |> Yojson.Safe.to_string)
-       | Ok request_id ->
-           Alcotest.failf
-             "invalid timeout was accepted as request %s"
-             request_id)
-    [ 0.0; -1.0; Float.nan; Float.infinity; Float.neg_infinity ];
-  Alcotest.(check bool) "invalid timeout never starts a worker" false (Atomic.get worker_ran);
-  match Keeper_msg_async.list_for_keeper ~base_path ~caller () with
-  | Ok [] -> ()
-  | Ok _ -> Alcotest.fail "invalid timeout created an in-memory request"
-  | Error rejection ->
-      Alcotest.failf
-        "valid owner lane rejected after invalid timeout: %s"
-        (Keeper_msg_async.access_rejection_to_json rejection |> Yojson.Safe.to_string)
-;;
-
 let test_keeper_msg_async_marks_recovered_inflight_lost () =
   with_eio_env
   @@ fun _env ->
@@ -483,7 +448,7 @@ let test_keeper_msg_async_recovery_sweep_marks_only_disk_only_inflight_lost () =
   Alcotest.(check int)
     "live in-memory worker is not recovered as lost"
     0
-    (Keeper_msg_async.For_testing.recover_lost_disk_records ~base_path);
+    (Keeper_msg_async.For_testing.recover_lost_disk_records ~base_path).lost;
   (match Keeper_msg_async.For_testing.load_record ~base_path ~request_id with
    | Keeper_msg_async.Found { Keeper_msg_async.status = Running; _ } -> ()
    | Keeper_msg_async.Found entry ->
@@ -494,14 +459,29 @@ let test_keeper_msg_async_recovery_sweep_marks_only_disk_only_inflight_lost () =
    | Keeper_msg_async.Unreadable _
    | Keeper_msg_async.Rejected _ ->
      Alcotest.fail "expected persisted running request");
+  (match Keeper_msg_async.For_testing.active_record_path ~base_path ~request_id with
+   | Some path ->
+     Alcotest.(check bool) "running request is stored in active partition" true
+       (Sys.file_exists path)
+   | None -> Alcotest.fail "expected safe active record path");
   Keeper_msg_async.For_testing.forget ~base_path ~caller ~request_id;
   Alcotest.(check int)
     "disk-only in-flight request is recovered as lost"
     1
-    (Keeper_msg_async.For_testing.recover_lost_disk_records ~base_path);
+    (Keeper_msg_async.For_testing.recover_lost_disk_records ~base_path).lost;
   match Keeper_msg_async.For_testing.load_record ~base_path ~request_id with
   | Keeper_msg_async.Found { Keeper_msg_async.status = Lost { reason }; _ } ->
-    Alcotest.(check bool) "lost reason retained" true (String.length reason > 0)
+    Alcotest.(check bool) "lost reason retained" true (String.length reason > 0);
+    (match
+       Keeper_msg_async.For_testing.active_record_path ~base_path ~request_id,
+       Keeper_msg_async.For_testing.terminal_record_path ~base_path ~request_id
+     with
+     | Some active_path, Some terminal_path ->
+       Alcotest.(check bool) "recovery removes active namespace entry" false
+         (Sys.file_exists active_path);
+       Alcotest.(check bool) "recovery commits terminal namespace entry" true
+         (Sys.file_exists terminal_path)
+     | _ -> Alcotest.fail "expected safe partitioned record paths")
   | Keeper_msg_async.Found entry ->
     Alcotest.failf
       "expected recovered lost request, got %s"
@@ -572,7 +552,7 @@ let test_keeper_msg_async_operator_cancel_is_terminal_cancelled () =
     "cancel returns true"
     true
     (Keeper_msg_async.cancel ~base_path ~caller request_id
-     = Keeper_msg_async.Cancelled_request);
+     = Keeper_msg_async.Cancellation_requested);
   (match wait_for_cancelled ~base_path request_id with
    | { Keeper_msg_async.status = Cancelled { reason; cancelled_by }; completed_at = Some _; _ } ->
      Alcotest.(check string) "cancelled_by operator" "operator" cancelled_by;
@@ -604,122 +584,7 @@ let test_keeper_msg_async_operator_cancel_is_terminal_cancelled () =
      | _ -> true)
 ;;
 
-let test_keeper_msg_async_timeout_is_terminal_error () =
-  with_eio_env
-  @@ fun env ->
-  Eio.Switch.run
-  @@ fun sw ->
-  let clock = Eio.Stdenv.clock env in
-  let base_path = temp_dir "keeper-msg-async-timeout-" in
-  Alcotest.(check int)
-    "no active switches before timeout request"
-    0
-    (Keeper_msg_async.For_testing.active_switch_count ());
-  let release_late, notify_release_late = Eio.Promise.create () in
-  let request_id =
-    Keeper_msg_async.submit
-      ~clock
-      ~timeout_sec:0.02
-      ~background_sw:sw
-      ~base_path
-      ~caller
-      ~keeper_name:"timeout"
-      ~f:(fun _request_sw ->
-        Eio.Promise.await release_late;
-        tr_ok (Yojson.Safe.to_string (`Assoc [ "kind", `String "late" ])))
-      ()
-    |> accepted_request_id
-  in
-  let entry = wait_for_done_with_clock clock ~base_path request_id in
-  let timeout_body =
-    match entry.Keeper_msg_async.status with
-    | Done { ok = false; body } ->
-      Alcotest.(check bool)
-        "timeout completion timestamp"
-        true
-        (Option.is_some entry.completed_at);
-      body
-    | Done { ok = true; body } ->
-      Alcotest.failf "expected timeout error, got ok body=%s" body
-    | status ->
-      Alcotest.failf
-        "expected timeout error, got %s"
-        (Keeper_msg_async.status_to_string status)
-  in
-  (match Yojson.Safe.from_string timeout_body with
-   | `Assoc fields ->
-     Alcotest.(check (option string))
-       "timeout error code"
-       (Some "keeper_msg_timeout")
-       (Option.bind
-          (List.assoc_opt "error" fields)
-          (function
-          | `String value -> Some value
-          | _ -> None))
-   | _ -> Alcotest.fail "expected timeout body JSON object");
-  Alcotest.(check bool)
-    "cancel after terminal timeout returns false"
-    false
-    (match Keeper_msg_async.cancel ~base_path ~caller request_id with
-     | Keeper_msg_async.Cancel_already_terminal _ -> false
-     | _ -> true);
-  wait_for_active_switch_count clock 0;
-  Eio.Promise.resolve notify_release_late ();
-  Eio.Time.sleep clock 0.05;
-  match Keeper_msg_async.poll ~base_path ~caller request_id with
-  | Keeper_msg_async.Found { Keeper_msg_async.status = Done { ok = false; body }; _ } ->
-    Alcotest.(check string) "late worker result cannot overwrite timeout" timeout_body body
-  | Keeper_msg_async.Found entry ->
-    Alcotest.failf
-      "expected timeout to remain terminal, got %s"
-      (Keeper_msg_async.status_to_string entry.Keeper_msg_async.status)
-  | Keeper_msg_async.Absent
-  | Keeper_msg_async.Unreadable _
-  | Keeper_msg_async.Rejected _ ->
-    Alcotest.fail "expected timeout request to remain pollable"
-;;
-
-let test_keeper_msg_async_timeout_is_explicit_only () =
-  Alcotest.(check (option (float 0.0001)))
-    "default async worker has no outer timeout"
-    None
-    (Keeper_msg_async.For_testing.effective_timeout_sec ());
-  Alcotest.(check (option (float 0.0001)))
-    "explicit async worker timeout is preserved"
-    (Some 42.0)
-    (Keeper_msg_async.For_testing.effective_timeout_sec ~timeout_sec:42.0 ())
-;;
-
-let test_keeper_msg_async_explicit_timeout_requires_clock () =
-  with_eio_env
-  @@ fun _env ->
-  Eio.Switch.run
-  @@ fun background_sw ->
-  let base_path = temp_dir "keeper-msg-async-clock-required-" in
-  match
-    Keeper_msg_async.submit
-      ~timeout_sec:1.0
-      ~background_sw
-      ~base_path
-      ~caller
-      ~keeper_name:"clock-required"
-      ~f:(fun _request_sw -> tr_ok "{}")
-      ()
-  with
-  | Error (Keeper_msg_async.Invalid_timeout { reason }) ->
-    Alcotest.(check string)
-      "typed clock requirement"
-      "keeper_msg explicit timeout_sec requires an Eio clock"
-      reason
-  | Error error ->
-    Alcotest.failf
-      "expected explicit-timeout clock rejection, got %s"
-      (Keeper_msg_async.submit_error_to_json error |> Yojson.Safe.to_string)
-  | Ok request_id ->
-    Alcotest.failf "explicit timeout without clock was accepted as %s" request_id
-;;
-
-let test_keeper_msg_async_gc_removes_stale_terminal_disk_record () =
+let test_keeper_msg_async_terminal_record_is_durable_without_age_eviction () =
   with_eio_env
   @@ fun env ->
   Eio.Switch.run
@@ -738,46 +603,40 @@ let test_keeper_msg_async_gc_removes_stale_terminal_disk_record () =
       ()
     |> accepted_request_id
   in
-  let entry = wait_for_done_with_clock clock ~base_path request_id in
-  ignore
-    (wait_for_persisted_done_with_clock clock ~base_path request_id
-      : Keeper_msg_async.entry);
+  ignore (wait_for_done_with_clock clock ~base_path request_id : Keeper_msg_async.entry);
+  let persisted =
+    wait_for_persisted_done_with_clock clock ~base_path request_id
+  in
   let path =
-    match Keeper_msg_async.For_testing.record_path ~base_path ~request_id with
+    match Keeper_msg_async.For_testing.terminal_record_path ~base_path ~request_id with
     | Some path -> path
     | None -> Alcotest.fail "expected safe record path"
   in
-  let stale_ts = entry.Keeper_msg_async.submitted_at -. 7200.0 in
-  Fs_compat.save_file
-    path
-    (Yojson.Safe.to_string
-       (`Assoc
-           [ "schema_version", `Int Keeper_msg_async.For_testing.record_schema_version
-           ; "request_id", `String request_id
-           ; "keeper_name", `String entry.keeper_name
-           ; "base_path", `String entry.base_path
-           ; "submitted_by", `String caller
-           ; "status", `String "done"
-           ; "submitted_at", `Float stale_ts
-           ; "completed_at", `Float stale_ts
-           ; "ok", `Bool true
-           ; "body", `String "{}"
-           ]));
-  Keeper_msg_async.For_testing.forget ~base_path ~caller ~request_id;
-  let removed = Keeper_msg_async.For_testing.gc_stale_disk ~base_path in
-  Alcotest.(check int) "removed stale disk record" 1 removed;
-  Alcotest.(check bool) "record file removed" false (Sys.file_exists path);
+  Alcotest.(check bool) "terminal record remains durable" true (Sys.file_exists path);
+  (match Keeper_msg_async.For_testing.active_record_path ~base_path ~request_id with
+   | Some active_path ->
+     Alcotest.(check bool) "terminal commit leaves no active record" false
+       (Sys.file_exists active_path)
+   | None -> Alcotest.fail "expected safe active record path");
+  Alcotest.(check int)
+    "terminal record is absent from active memory index"
+    0
+    (match Keeper_msg_async.list_for_keeper ~base_path ~caller () with
+     | Ok entries -> List.length entries
+     | Error _ -> Alcotest.fail "owner lane list was rejected");
   match Keeper_msg_async.poll ~base_path ~caller request_id with
-  | Keeper_msg_async.Absent -> ()
-  | Keeper_msg_async.Unreadable reason ->
-    Alcotest.failf "expected stale disk record to be gone, got unreadable: %s" reason
   | Keeper_msg_async.Found entry ->
-    Alcotest.failf
-      "expected stale disk record to be gone, got %s"
-      (Keeper_msg_async.status_to_string entry.Keeper_msg_async.status)
+    Alcotest.(check string)
+      "exact poll reloads durable terminal result"
+      (Keeper_msg_async.status_to_string persisted.status)
+      (Keeper_msg_async.status_to_string entry.status)
+  | Keeper_msg_async.Absent ->
+    Alcotest.fail "durable terminal result disappeared"
+  | Keeper_msg_async.Unreadable reason ->
+    Alcotest.failf "durable terminal result became unreadable: %s" reason
   | Keeper_msg_async.Rejected rejection ->
     Alcotest.failf
-      "expected stale disk record to be gone, got rejected: %s"
+      "durable terminal result was rejected: %s"
       (Keeper_msg_async.access_rejection_to_json rejection |> Yojson.Safe.to_string)
 ;;
 
@@ -793,12 +652,14 @@ let test_keeper_msg_async_rejects_oversized_request_id () =
          "128-char request id accepted"
          true
          (Option.is_some
-            (Keeper_msg_async.For_testing.record_path ~base_path ~request_id:max_id));
+            (Keeper_msg_async.For_testing.active_record_path
+               ~base_path
+               ~request_id:max_id));
        check
          (option string)
          "129-char request id rejected"
          None
-         (Keeper_msg_async.For_testing.record_path ~base_path ~request_id:too_long))
+         (Keeper_msg_async.For_testing.active_record_path ~base_path ~request_id:too_long))
 ;;
 
 let rec mkdir_p path =
@@ -810,7 +671,7 @@ let rec mkdir_p path =
 ;;
 
 let write_disk_record ~base_path ~request_id content =
-  match Keeper_msg_async.For_testing.record_path ~base_path ~request_id with
+  match Keeper_msg_async.For_testing.legacy_record_path ~base_path ~request_id with
   | None -> Alcotest.fail "expected safe record path"
   | Some path ->
     mkdir_p (Filename.dirname path);
@@ -1069,10 +930,6 @@ let () =
             `Quick
             test_keeper_msg_async_does_not_accept_failed_initial_persistence
         ; test_case
-            "invalid timeout is rejected before acceptance"
-            `Quick
-            test_keeper_msg_async_rejects_invalid_timeout_before_acceptance
-        ; test_case
             "recover in-flight request as lost"
             `Quick
             test_keeper_msg_async_marks_recovered_inflight_lost
@@ -1089,21 +946,9 @@ let () =
             `Quick
             test_keeper_msg_async_operator_cancel_is_terminal_cancelled
         ; test_case
-            "timeout is terminal error"
+            "terminal record stays durable without age eviction"
             `Quick
-            test_keeper_msg_async_timeout_is_terminal_error
-        ; test_case
-            "async worker timeout is explicit only"
-            `Quick
-            test_keeper_msg_async_timeout_is_explicit_only
-        ; test_case
-            "explicit async timeout requires a clock"
-            `Quick
-            test_keeper_msg_async_explicit_timeout_requires_clock
-        ; test_case
-            "gc removes stale terminal disk record"
-            `Quick
-            test_keeper_msg_async_gc_removes_stale_terminal_disk_record
+            test_keeper_msg_async_terminal_record_is_durable_without_age_eviction
         ; test_case
             "oversized request id rejected"
             `Quick

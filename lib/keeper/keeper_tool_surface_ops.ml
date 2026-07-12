@@ -92,8 +92,6 @@ let rec cached_text_by_key cache_ref ~key ~ttl_s compute =
       end
 
 let submit_keeper_msg_with_captured_event_bus
-      ?timeout_sec
-      ~clock
       ~background_sw
       ~base_path
       ~caller
@@ -102,8 +100,6 @@ let submit_keeper_msg_with_captured_event_bus
       () =
   let event_bus = Keeper_event_bus.get () in
   Keeper_msg_async.submit
-    ?timeout_sec
-    ~clock
     ~background_sw
     ~base_path
     ~caller
@@ -654,7 +650,6 @@ let keeper_msg_body
     let* name = resolve_keeper_name_config ~config args in
     let resolved_args = with_keeper_name args name in
     let* () = Turn.preflight_keeper_msg keeper_ctx resolved_args in
-    let* timeout_sec = Turn.keeper_msg_timeout_override resolved_args in
     let* background_sw =
       Keeper_msg_async.server_background_switch ()
       |> Result.map_error (fun error ->
@@ -662,8 +657,6 @@ let keeper_msg_body
     in
     let* request_id =
       submit_keeper_msg_with_captured_event_bus
-        ?timeout_sec
-        ~clock
         ~background_sw
         ~base_path:config.base_path
         ~caller:agent_name
@@ -713,7 +706,6 @@ let handle_keeper_msg ?continuation_channel ~submitted_by ctx args : tool_result
     let* name = resolve_keeper_name ctx args in
     let resolved_args = with_keeper_name args name in
     let* () = Turn.preflight_keeper_msg ctx resolved_args in
-    let* timeout_sec = Turn.keeper_msg_timeout_override resolved_args in
     let* background_sw =
       Keeper_msg_async.server_background_switch ()
       |> Result.map_error (fun error ->
@@ -721,8 +713,6 @@ let handle_keeper_msg ?continuation_channel ~submitted_by ctx args : tool_result
     in
     let* request_id =
       submit_keeper_msg_with_captured_event_bus
-        ?timeout_sec
-        ~clock:ctx.clock
         ~background_sw
         ~base_path:ctx.config.base_path
         ~caller:submitted_by
@@ -809,13 +799,17 @@ let keeper_msg_cancel_body ~(config : Workspace.config) ~caller args : tool_resu
     in
     let json = Keeper_msg_async.cancel_result_to_json ~request_id result in
     match result with
-    | Keeper_msg_async.Cancelled_request -> tool_result_ok (Yojson.Safe.to_string json)
+    | Keeper_msg_async.Cancellation_requested
+    | Keeper_msg_async.Cancelled_request
+    | Keeper_msg_async.Cancel_in_progress ->
+      tool_result_ok (Yojson.Safe.to_string json)
     | Keeper_msg_async.Cancel_not_found
     | Keeper_msg_async.Cancel_unreadable _
     | Keeper_msg_async.Cancel_rejected _
     | Keeper_msg_async.Cancel_already_terminal _
     | Keeper_msg_async.Cancel_persistence_failed _
-    | Keeper_msg_async.Cancel_worker_signal_failed _ ->
+    | Keeper_msg_async.Cancel_worker_signal_failed _
+    | Keeper_msg_async.Cancel_state_invariant_failed _ ->
       tool_result_error (Yojson.Safe.to_string json))
 
 let handle_keeper_msg_cancel ctx args : tool_result =

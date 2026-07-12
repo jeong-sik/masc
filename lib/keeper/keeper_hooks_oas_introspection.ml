@@ -63,7 +63,6 @@ let hook_introspection_json ~denied_tools ?(max_cost_usd : float option)
             "cost_event";
             "metrics";
             "usage_trust";
-            "tool_streak_reset";
           ]
         "after_turn";
       slot
@@ -74,7 +73,6 @@ let hook_introspection_json ~denied_tools ?(max_cost_usd : float option)
             "timing";
             "custom_guard";
             "readonly_observation_duplicate";
-            "streak_gate";
             "keeper_deny_list";
             (if destructive_enabled then "destructive_pattern" else "destructive_pattern_off");
             "governance_approval";

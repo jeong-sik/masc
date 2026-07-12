@@ -92,26 +92,35 @@ let removed_keeper_sandbox_input_key_names =
     "network_mode";
   ]
 
-let removed_keeper_msg_input_key_names =
-  [
-    "goal";
-    "short_goal";
-    "mid_goal";
-    "long_goal";
-    "instructions";
-    "require_existing";
-    "new_goal";
-    "new_short_goal";
-    "new_mid_goal";
-    "new_long_goal";
-    "new_instructions";
+type removed_keeper_msg_input_owner =
+  | Request_lifecycle
+  | Keeper_definition
+  | Tool_selection
 
-    (* Tool-task coupling purged (#19806): keeper turns no longer accept
-       per-message tool forcing hints; reject them so older harnesses fail
-       loud rather than have the keys silently ignored. *)
-    "required_tools";
-    "required_tool_names";
+type removed_keeper_msg_input =
+  { name : string
+  ; owner : removed_keeper_msg_input_owner
+  }
+
+let removed_keeper_msg_inputs =
+  [ { name = "timeout_sec"; owner = Request_lifecycle }
+  ; { name = "goal"; owner = Keeper_definition }
+  ; { name = "short_goal"; owner = Keeper_definition }
+  ; { name = "mid_goal"; owner = Keeper_definition }
+  ; { name = "long_goal"; owner = Keeper_definition }
+  ; { name = "instructions"; owner = Keeper_definition }
+  ; { name = "require_existing"; owner = Keeper_definition }
+  ; { name = "new_goal"; owner = Keeper_definition }
+  ; { name = "new_short_goal"; owner = Keeper_definition }
+  ; { name = "new_mid_goal"; owner = Keeper_definition }
+  ; { name = "new_long_goal"; owner = Keeper_definition }
+  ; { name = "new_instructions"; owner = Keeper_definition }
+  ; { name = "required_tools"; owner = Tool_selection }
+  ; { name = "required_tool_names"; owner = Tool_selection }
   ]
+
+let removed_keeper_msg_input_key_names =
+  List.map (fun input -> input.name) removed_keeper_msg_inputs
 
 let present_json_keys (keys : string list) (json : Yojson.Safe.t) : string list =
   match json with
@@ -148,15 +157,35 @@ let reject_removed_keeper_input_keys ?(allow_sandbox_fields = false) ~tool_name
              (String.concat ", " sandbox_fields))
 
 let reject_removed_keeper_msg_input_keys ~tool_name (args : Yojson.Safe.t) =
-  let present = present_json_keys removed_keeper_msg_input_key_names args in
+  let present =
+    match args with
+    | `Assoc fields ->
+      List.filter
+        (fun input -> List.mem_assoc input.name fields)
+        removed_keeper_msg_inputs
+    | _ -> []
+  in
+  let remediation input =
+    match input.owner with
+    | Request_lifecycle ->
+      "request-level whole-turn deadline is retired; use explicit operator \
+       cancellation, provider progress deadlines, or tool-local deadlines"
+    | Keeper_definition ->
+      "use masc_keeper_up for keeper creation or persisted updates"
+    | Tool_selection ->
+      "Keeper runtime selects tools from its declared capability surface"
+  in
+  let describe input =
+    Printf.sprintf "%s (%s)" input.name (remediation input)
+  in
   match present with
   | [] -> Ok ()
-  | fields ->
+  | inputs ->
       Error
         (Printf.sprintf
-           "removed keeper message args for %s: %s. Use masc_keeper_up for keeper creation or persisted updates."
+           "removed keeper message args for %s: %s."
            tool_name
-           (String.concat ", " fields))
+           (String.concat "; " (List.map describe inputs)))
 
 (* ── UTF-8 string processing ────────────────────────────────── *)
 

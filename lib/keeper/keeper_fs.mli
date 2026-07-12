@@ -28,6 +28,59 @@ val save_atomic : string -> string -> (unit, string) result
     Returns [Error msg] on I/O failure. Cancellation still re-raises. *)
 val save_json_atomic : string -> Yojson.Safe.t -> (unit, string) result
 
+type durable_write_stage =
+  | Temp_file_create
+  | Payload_write
+  | Payload_fsync
+  | Temp_file_close
+  | Atomic_rename
+  | Parent_directory_fsync_after_rename
+
+type durable_write_error =
+  { renamed : bool
+  ; stage : durable_write_stage
+  ; reason : string
+  }
+
+(** Strict durable atomic JSON write. Unlike the compatibility
+    [save_json_atomic] boundary, parent-directory fsync failure is returned as
+    an error and never downgraded to success. *)
+val save_json_durable_atomic :
+  string -> Yojson.Safe.t -> (unit, durable_write_error) result
+
+val durable_write_error_to_string : durable_write_error -> string
+
+type durable_move_stage =
+  | Rename
+  | Destination_directory_fsync
+  | Source_directory_fsync
+
+type durable_move_error =
+  { renamed : bool
+  ; failures : (durable_move_stage * string) list
+  }
+
+(** [move_file_durable ~src ~dst] atomically renames [src] to [dst] on the
+    same filesystem, then fsyncs every affected parent directory. [renamed]
+    records whether the namespace move committed before a durability failure,
+    so callers can recover without guessing from an error string. *)
+val move_file_durable : src:string -> dst:string -> (unit, durable_move_error) result
+
+val durable_move_error_to_string : durable_move_error -> string
+
+type durable_remove_stage =
+  | Unlink
+  | Parent_directory_fsync
+
+type durable_remove_error =
+  { removed : bool
+  ; failure : durable_remove_stage * string
+  }
+
+(** Idempotently unlink [path] and fsync its parent directory. *)
+val remove_file_durable : string -> (unit, durable_remove_error) result
+val durable_remove_error_to_string : durable_remove_error -> string
+
 (** {1 Standard Keeper Paths} *)
 
 (** [.masc/keepers/] directory. *)

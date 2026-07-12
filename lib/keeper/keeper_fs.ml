@@ -116,6 +116,225 @@ let save_atomic (path : string) (content : string) : (unit, string) result =
 let save_json_atomic (path : string) (json : Yojson.Safe.t) : (unit, string) result =
   save_atomic path (Yojson.Safe.pretty_to_string json)
 
+type durable_write_stage =
+  | Temp_file_create
+  | Payload_write
+  | Payload_fsync
+  | Temp_file_close
+  | Atomic_rename
+  | Parent_directory_fsync_after_rename
+
+type durable_write_error =
+  { renamed : bool
+  ; stage : durable_write_stage
+  ; reason : string
+  }
+
+let durable_write_stage_to_string = function
+  | Temp_file_create -> "temp_file_create"
+  | Payload_write -> "payload_write"
+  | Payload_fsync -> "payload_fsync"
+  | Temp_file_close -> "temp_file_close"
+  | Atomic_rename -> "atomic_rename"
+  | Parent_directory_fsync_after_rename ->
+    "parent_directory_fsync_after_rename"
+;;
+
+let durable_write_error_to_string error =
+  Printf.sprintf
+    "stage=%s renamed=%b reason=%s"
+    (durable_write_stage_to_string error.stage)
+    error.renamed
+    error.reason
+;;
+
+exception Durable_write_failed of durable_write_error
+
+let fsync_directory path =
+  let fd = Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 in
+  Fun.protect
+    ~finally:(fun () -> Unix.close fd)
+    (fun () -> Unix.fsync fd)
+;;
+
+let save_json_durable_atomic path json =
+  let dir = Filename.dirname path in
+  let content = Yojson.Safe.pretty_to_string json in
+  try
+    ignore (ensure_dir dir : string);
+    Eio_guard.run_in_systhread (fun () ->
+      let temp_path = ref None in
+      let channel = ref None in
+      let renamed = ref false in
+      Fun.protect
+        ~finally:(fun () ->
+          Option.iter close_out_noerr !channel;
+          match !temp_path with
+          | Some temp when not !renamed && Sys.file_exists temp ->
+            (try Sys.remove temp with
+             | exn ->
+               Log.Keeper.error
+                 "filesystem_runtime: strict atomic temp cleanup failed path=%s error=%s"
+                 temp
+                 (Printexc.to_string exn))
+          | Some _ | None -> ())
+        (fun () ->
+           let temp, oc =
+             try Filename.open_temp_file ~temp_dir:dir ".keeper_atomic_" ".tmp" with
+             | exn ->
+               raise
+                 (Durable_write_failed
+                    { renamed = false
+                    ; stage = Temp_file_create
+                    ; reason = Printexc.to_string exn
+                    })
+           in
+           temp_path := Some temp;
+           channel := Some oc;
+           (try output_string oc content; flush oc with
+            | exn ->
+              raise
+                (Durable_write_failed
+                   { renamed = false
+                   ; stage = Payload_write
+                   ; reason = Printexc.to_string exn
+                   }));
+           (try Unix.fsync (Unix.descr_of_out_channel oc) with
+            | exn ->
+              raise
+                (Durable_write_failed
+                   { renamed = false
+                   ; stage = Payload_fsync
+                   ; reason = Printexc.to_string exn
+                   }));
+           (try close_out oc; channel := None with
+            | exn ->
+              raise
+                (Durable_write_failed
+                   { renamed = false
+                   ; stage = Temp_file_close
+                   ; reason = Printexc.to_string exn
+                   }));
+           (try Unix.rename temp path; renamed := true with
+            | exn ->
+              raise
+                (Durable_write_failed
+                   { renamed = false
+                   ; stage = Atomic_rename
+                   ; reason = Printexc.to_string exn
+                   }));
+           (try fsync_directory dir with
+            | exn ->
+              raise
+                (Durable_write_failed
+                   { renamed = true
+                   ; stage = Parent_directory_fsync_after_rename
+                   ; reason = Printexc.to_string exn
+                   }));
+           Ok ()))
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | Durable_write_failed error -> Error error
+  | exn ->
+    Error
+      { renamed = false
+      ; stage = Temp_file_create
+      ; reason = Printexc.to_string exn
+      }
+;;
+
+type durable_move_stage =
+  | Rename
+  | Destination_directory_fsync
+  | Source_directory_fsync
+
+type durable_move_error =
+  { renamed : bool
+  ; failures : (durable_move_stage * string) list
+  }
+
+let durable_move_stage_to_string = function
+  | Rename -> "rename"
+  | Destination_directory_fsync -> "destination_directory_fsync"
+  | Source_directory_fsync -> "source_directory_fsync"
+;;
+
+let durable_move_error_to_string error =
+  error.failures
+  |> List.map (fun (stage, reason) ->
+    Printf.sprintf "%s: %s" (durable_move_stage_to_string stage) reason)
+  |> String.concat "; "
+;;
+
+let move_file_durable ~src ~dst =
+  let src_dir = Filename.dirname src in
+  let dst_dir = Filename.dirname dst in
+  try
+    ignore (ensure_dir dst_dir : string);
+    Eio_guard.run_in_systhread (fun () ->
+      match Unix.rename src dst with
+      | exception exn ->
+        Error { renamed = false; failures = [ Rename, Printexc.to_string exn ] }
+      | () ->
+        let failures =
+          match fsync_directory dst_dir with
+          | () -> []
+          | exception exn ->
+            [ Destination_directory_fsync, Printexc.to_string exn ]
+        in
+        let failures =
+          if String.equal src_dir dst_dir
+          then failures
+          else
+            match fsync_directory src_dir with
+            | () -> failures
+            | exception exn ->
+              failures @ [ Source_directory_fsync, Printexc.to_string exn ]
+        in
+        if List.is_empty failures
+        then Ok ()
+        else Error { renamed = true; failures })
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error { renamed = false; failures = [ Rename, Printexc.to_string exn ] }
+;;
+
+type durable_remove_stage =
+  | Unlink
+  | Parent_directory_fsync
+
+type durable_remove_error =
+  { removed : bool
+  ; failure : durable_remove_stage * string
+  }
+
+let durable_remove_stage_to_string = function
+  | Unlink -> "unlink"
+  | Parent_directory_fsync -> "parent_directory_fsync"
+;;
+
+let durable_remove_error_to_string error =
+  let stage, reason = error.failure in
+  Printf.sprintf "%s: %s" (durable_remove_stage_to_string stage) reason
+;;
+
+let remove_file_durable path =
+  let parent = Filename.dirname path in
+  Eio_guard.run_in_systhread (fun () ->
+    match Unix.unlink path with
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok ()
+    | exception exn ->
+      Error { removed = false; failure = Unlink, Printexc.to_string exn }
+    | () ->
+      (match fsync_directory parent with
+       | () -> Ok ()
+       | exception exn ->
+         Error
+           { removed = true
+           ; failure = Parent_directory_fsync, Printexc.to_string exn
+           }))
+;;
+
 (* ================================================================ *)
 (* Standard Keeper Paths                                            *)
 (* ================================================================ *)

@@ -2,16 +2,21 @@
 
     Background fibers run [keeper_msg] turns. MCP tool returns
     immediately with a [request_id]; clients poll via
-    [masc_keeper_msg_result] for completion. Completed entries auto-expire
-    from memory after [max_age_sec] (1h), while accepted request records are
-    persisted under the active [.masc] root for recovery diagnostics. Terminal
-    disk records follow the same age-based cleanup policy. *)
+    [masc_keeper_msg_result] for completion. Process memory owns only active
+    [Queued]/[Running]/[Cancelling] workers. Terminal state is removed from memory after its
+    durable record moves into the terminal partition and remains queryable by
+    exact request id; no hidden age-based cleanup can erase an unobserved
+    result, and startup recovery does not scan historical terminal records. *)
 
 (** {1 Types} *)
 
 type request_status =
   | Queued
   | Running
+  | Cancelling of
+      { reason : string
+      ; cancelled_by : string
+      }
   | Lost of { reason : string }
   | Cancelled of
       { reason : string
@@ -49,8 +54,8 @@ type access_rejection =
 (** Outcome of looking up a request record.
 
     - [Found entry] — the request is known (in memory or recovered from disk).
-    - [Absent] — no record exists: the id was never accepted, or its terminal
-      record already aged out. Pollers can stop polling or resubmit.
+    - [Absent] — no record exists: the id was never accepted, or an explicit
+      operator retention action removed it. Pollers can stop polling or resubmit.
     - [Unreadable reason] — a record file exists but cannot be decoded
       (corrupt JSON, missing required fields, or unknown status). The request
       WAS accepted, but its result cannot be recovered. *)
@@ -60,9 +65,16 @@ type load_result =
   | Unreadable of string
   | Rejected of access_rejection
 
+type recovery_report =
+  { lost : int
+  ; migrated : int
+  ; cleaned : int
+  ; unreadable : int
+  ; failed : int
+  }
+
 type submit_error =
   | Submit_rejected of access_rejection
-  | Invalid_timeout of { reason : string }
   | Initial_persistence_failed of { reason : string }
   | Acceptance_persistence_failed of
       { request_id : string
@@ -75,13 +87,16 @@ type submit_error =
       }
 
 type cancel_result =
+  | Cancellation_requested
   | Cancelled_request
   | Cancel_not_found
   | Cancel_unreadable of string
   | Cancel_rejected of access_rejection
+  | Cancel_in_progress
   | Cancel_already_terminal of request_status
   | Cancel_persistence_failed of { reason : string }
   | Cancel_worker_signal_failed of { reason : string }
+  | Cancel_state_invariant_failed of { reason : string }
 
 (** Reason [f] was cut off before it could reach its own completion. [f] is
     the sole owner of any terminal signal it emits on its own side channels
@@ -97,11 +112,19 @@ val worker_cancel_source_to_string : worker_cancel_source -> string
 (** Stable wire label for cancellation provenance. *)
 
 type worker_abort_reason =
-  | Timeout of { timeout_sec : float }
   | Worker_cancelled of
       { cancelled_by : worker_cancel_source
       ; reason : string
       }
+
+type settlement_durability =
+  | Durable
+  | Volatile_persistence_failure
+
+type worker_settlement =
+  { status : request_status
+  ; durability : settlement_durability
+  }
 
 (** {1 Submit and poll} *)
 
@@ -110,18 +133,15 @@ val server_background_switch : unit -> (Eio.Switch.t, submit_error) result
     turn-local switch. Failure is typed and suitable for the same error envelope
     as [submit]. *)
 
-(** [submit ?clock ?timeout_sec ?on_accepted ?on_worker_aborted ~background_sw ~f
+(** [submit ?on_accepted ?on_worker_aborted ~background_sw ~f
     ~keeper_name ~base_path ~caller] forks a background daemon fiber on the
     explicitly supplied server-lifetime [background_sw].  The per-request
     worker switch passed to [f] is distinct: cancellation fails that switch,
     never the server root.  Returns the fresh [request_id] synchronously only
     after the owner-bearing v2 request record is durably accepted. The async
-    transport has no implicit outer deadline: Keeper/OAS turn policy owns
-    execution deadlines and finalization. When [timeout_sec] is explicitly
-    supplied together with [clock], the caller-owned deadline is enforced and
-    recorded as a terminal timeout. A timeout must be finite and positive, and
-    an explicit timeout without [clock] is rejected before persistence.
-    Cancellation of the
+    transport has no outer wall-clock deadline: provider progress, tool-local
+    deadlines, typed runtime completion, and explicit operator cancellation own
+    their respective boundaries. Cancellation of the
     per-request worker switch interrupts the worker and records a terminal
     [Cancelled] state before stopping, so
     pollers do not observe an indefinite [Running] request. [Lost] is
@@ -133,21 +153,24 @@ val server_background_switch : unit -> (Eio.Switch.t, submit_error) result
     failure returns [Acceptance_persistence_failed] and no worker is forked.
 
     [on_worker_aborted], when supplied, is invoked exactly once whenever [f]
-    is cut off by a timeout or cancellation before it completes on its own —
-    never when [f] returns or raises normally, since [f] is expected to have
-    already signaled its own completion on those paths. It runs from a fiber
+    is cut off by cancellation before it completes on its own —
+    never when [f] returns or raises normally. It runs from a fiber
     that is not itself under cancellation at the moment of the call (wrapped
     internally in {!Eio.Cancel.protect}), so it may safely perform blocking
-    Eio operations such as pushing to a caller-owned stream. Callback
+    Eio operations such as committing a caller-owned transcript. Callback
     errors and exceptions are converted to [Persistence_failed]; the requested
-    timeout/cancel status cannot become terminal polling truth until this
+    cancellation status cannot become terminal polling truth until this
     delivery callback succeeds. Callback failures never escape to the server
-    root switch. *)
+    root switch.
+
+    [on_worker_settled] is invoked only after the terminal request status has
+    committed. It is the single projection boundary for SSE or other live
+    terminal notifications. Projection exceptions are observed and isolated
+    from the already-committed request truth. *)
 val submit
-  :  ?clock:_ Eio.Time.clock
-  -> ?timeout_sec:float
-  -> ?on_accepted:(string -> (unit, string) result)
+  :  ?on_accepted:(string -> (unit, string) result)
   -> ?on_worker_aborted:(worker_abort_reason -> (unit, string) result)
+  -> ?on_worker_settled:(worker_settlement -> unit)
   -> background_sw:Eio.Switch.t
   -> base_path:string
   -> caller:string
@@ -166,20 +189,26 @@ val poll : base_path:string -> caller:string -> string -> load_result
 
 (** Mark persisted non-terminal request records that have no live in-memory
     worker as [Lost], returning the number of records transitioned. This is
-    intended for server startup/recovery sweeps: current-process workers remain
-    protected by the in-memory pending table, while disk-only [Queued]/[Running]
+    intended for server startup/recovery sweeps. Only the active partition and
+    the finite legacy flat-layout residue are scanned; the terminal partition
+    is excluded. Current-process workers remain protected by the in-memory
+    active table, while disk-only
+    [Queued]/[Running]/[Cancelling]
     records from a previous process stop looking indefinitely active. *)
-val recover_lost_disk_records : base_path:string -> int
+val recover_lost_disk_records : base_path:string -> recovery_report
 
 (** [cancel ~base_path ~caller request_id] validates exact request ownership,
-    atomically installs the terminal cancelled state, and only then fails the
-    per-request worker switch. *)
+    durably commits a non-terminal [Cancelling] intent, publishes it, and only
+    then fails the per-request worker switch. The worker's abort callback owns
+    the actual [Cancelled] or [Persistence_failed] settlement. A disk-only
+    recovered request has no live callback and is settled directly. *)
 val cancel : base_path:string -> caller:string -> string -> cancel_result
 
-(** [list_for_keeper ~base_path ~caller ?keeper_name ()] returns only entries
-    owned by the exact canonical BasePath/caller lane, optionally filtered by
-    target keeper, sorted most-recent-first. Cross-workspace and cross-caller
-    entries are omitted. *)
+(** [list_for_keeper ~base_path ~caller ?keeper_name ()] returns active
+    [Queued]/[Running]/[Cancelling] entries owned by the exact canonical
+    BasePath/caller lane, optionally filtered by target keeper, sorted most-recent-first.
+    Terminal results are queried by exact request id from durable storage.
+    Cross-workspace and cross-caller entries are omitted. *)
 val list_for_keeper
   :  base_path:string
   -> caller:string
@@ -204,10 +233,10 @@ module For_testing : sig
   val is_safe_request_id : string -> bool
   val forget : base_path:string -> caller:string -> request_id:string -> unit
   val clear : unit -> unit
-  val record_path : base_path:string -> request_id:string -> string option
+  val active_record_path : base_path:string -> request_id:string -> string option
+  val terminal_record_path : base_path:string -> request_id:string -> string option
+  val legacy_record_path : base_path:string -> request_id:string -> string option
   val load_record : base_path:string -> request_id:string -> load_result
-  val gc_stale_disk : base_path:string -> int
-  val recover_lost_disk_records : base_path:string -> int
+  val recover_lost_disk_records : base_path:string -> recovery_report
   val active_switch_count : unit -> int
-  val effective_timeout_sec : ?timeout_sec:float -> unit -> float option
 end

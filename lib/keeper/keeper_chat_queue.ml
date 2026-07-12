@@ -28,7 +28,7 @@ type completion = {
 
 type failure_kind =
   | Turn_failed
-  | Timed_out
+  | Legacy_request_timeout
   | No_visible_reply
   | Transcript_persist_failed
   | Connector_unavailable
@@ -470,7 +470,7 @@ let canonical_queued_message message =
 
 let failure_kind_to_string = function
   | Turn_failed -> "turn_failed"
-  | Timed_out -> "timed_out"
+  | Legacy_request_timeout -> "legacy_request_timeout"
   | No_visible_reply -> "no_visible_reply"
   | Transcript_persist_failed -> "transcript_persist_failed"
   | Connector_unavailable -> "connector_unavailable"
@@ -481,7 +481,7 @@ let failure_kind_to_string = function
 
 let failure_kind_of_string = function
   | "turn_failed" -> Ok Turn_failed
-  | "timed_out" -> Ok Timed_out
+  | "timed_out" | "legacy_request_timeout" -> Ok Legacy_request_timeout
   | "no_visible_reply" -> Ok No_visible_reply
   | "transcript_persist_failed" -> Ok Transcript_persist_failed
   | "connector_unavailable" -> Ok Connector_unavailable
@@ -1408,4 +1408,5 @@ module For_testing = struct
     with_registry_rw (fun () -> Hashtbl.clear registry)
 
   let fail_next_persist () = Atomic.set fail_next_persist_for_testing true
+  let failure_kind_of_string = failure_kind_of_string
 end

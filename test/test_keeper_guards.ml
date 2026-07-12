@@ -150,21 +150,21 @@ let retired_code_exempt_keepers_env_key = "MASC_CODE_EXEMPT_KEEPERS"
 let test_render_inline_skip_reason () =
   let s = KG.render_inline_skip_reason
     ~tool_name:"tool_read_file"
-    ~reason_code:"streak_gate"
-    ~reason_text:"called 5 times"
+    ~reason_code:"readonly_observation_duplicate"
+    ~reason_text:"identical read-only observation"
   in
   check bool "contains tool=tool_read_file" true
     (contains_substring s "tool=tool_read_file");
-  check bool "contains code=streak_gate" true
-    (contains_substring s "code=streak_gate");
+  check bool "contains typed reason code" true
+    (contains_substring s "code=readonly_observation_duplicate");
   check bool "contains source=keeper_hook" true
     (contains_substring s "source=keeper_hook");
   let with_source = KG.render_inline_skip_reason_with_source
     ~source_path:"lib/keeper/keeper_guards.ml"
     ~source_line:123
     ~tool_name:"tool_read_file"
-    ~reason_code:"streak_gate"
-    ~reason_text:"called 5 times"
+    ~reason_code:"readonly_observation_duplicate"
+    ~reason_text:"identical read-only observation"
   in
   check bool "contains source_path" true
     (contains_substring with_source "source_path=lib/keeper/keeper_guards.ml");
@@ -247,14 +247,14 @@ let test_gate_rejection_log_severity_keys_by_rejection () =
         (KG.gate_rejection_log_severity_to_string different_reason))
 
 let test_gate_rejection_planner_alternative () =
-  let streak =
+  let duplicate_observation =
     KG.For_testing.planner_alternative_for_gate
-      ~stage:"streak_gate" ~tool_name:"tool_read_file"
+      ~stage:"readonly_observation_duplicate" ~tool_name:"tool_read_file"
   in
   check bool "includes structured field" true
-    (contains_substring streak "planner_alternative=");
+    (contains_substring duplicate_observation "planner_alternative=");
   check bool "names retry alternative" true
-    (contains_substring streak "report no-work/blocker directly");
+    (contains_substring duplicate_observation "report no-work/blocker directly");
   let destructive =
     KG.For_testing.planner_alternative_for_gate
       ~stage:"destructive_guard" ~tool_name:"shell_exec"
@@ -409,74 +409,6 @@ let test_destructive_guard_notifies_block_observer () =
     check string "tool_name" "shell_exec" event.KG.tool_name
   | events ->
     failf "expected one destructive observer event, got %d" (List.length events)
-
-let test_streak_guard_under_threshold () =
-  let meta_ref = make_meta_ref "test_keeper" in
-  let state = KG.make_streak_state () in
-  let hook =
-    KG.streak_guard ~meta_ref ~on_gate_decision:no_gate_observer
-      ~state ~threshold:5
-  in
-  (* 4 consecutive calls — should all Continue *)
-  for _ = 1 to 4 do
-    let d = invoke hook (pre_tool_use_event ~tool_name:"repeat_me" ()) in
-    check string "under threshold -> Continue" "Continue" (decision_kind d)
-  done
-
-let test_streak_guard_at_threshold () =
-  let meta_ref = make_meta_ref "test_keeper" in
-  let state = KG.make_streak_state () in
-  let observed = ref [] in
-  let on_gate_decision event = observed := event :: !observed in
-  let hook =
-    KG.streak_guard ~meta_ref ~on_gate_decision
-      ~state ~threshold:5
-  in
-  (* 4 calls Continue, 5th blocks *)
-  for _ = 1 to 4 do
-    let _ = invoke hook (pre_tool_use_event ~tool_name:"repeat_me" ()) in
-    ()
-  done;
-  let d = invoke hook (pre_tool_use_event ~tool_name:"repeat_me" ()) in
-  check string "5th consecutive -> Override" "Override" (decision_kind d);
-  let text = override_text d in
-  check bool "override mentions streak_gate" true
-    (contains_substring text "code=streak_gate");
-  check_single_observed_decision
-    ~label:"streak telemetry stays override"
-    ~expected:"override"
-    observed
-
-let test_streak_guard_resets_on_different_tool () =
-  let meta_ref = make_meta_ref "test_keeper" in
-  let state = KG.make_streak_state () in
-  let hook =
-    KG.streak_guard ~meta_ref ~on_gate_decision:no_gate_observer
-      ~state ~threshold:3
-  in
-  (* 2 calls of tool_a, then tool_b resets counter *)
-  let _ = invoke hook (pre_tool_use_event ~tool_name:"tool_a" ()) in
-  let _ = invoke hook (pre_tool_use_event ~tool_name:"tool_a" ()) in
-  let d_b = invoke hook (pre_tool_use_event ~tool_name:"tool_b" ()) in
-  check string "different tool -> Continue" "Continue" (decision_kind d_b);
-  (* tool_a counter was reset, so another 2 calls won't trigger *)
-  let _ = invoke hook (pre_tool_use_event ~tool_name:"tool_a" ()) in
-  let d_back = invoke hook (pre_tool_use_event ~tool_name:"tool_a" ()) in
-  check string "reset streak -> Continue" "Continue" (decision_kind d_back)
-
-let test_streak_state_manual_reset () =
-  let meta_ref = make_meta_ref "test_keeper" in
-  let state = KG.make_streak_state () in
-  let hook =
-    KG.streak_guard ~meta_ref ~on_gate_decision:no_gate_observer
-      ~state ~threshold:3
-  in
-  let _ = invoke hook (pre_tool_use_event ~tool_name:"t" ()) in
-  let _ = invoke hook (pre_tool_use_event ~tool_name:"t" ()) in
-  (* Emulate after_turn reset: streak_state.entry <- ("", 0) *)
-  state.entry <- ("", 0);
-  let d = invoke hook (pre_tool_use_event ~tool_name:"t" ()) in
-  check string "after reset -> Continue" "Continue" (decision_kind d)
 
 let readonly_observation_hook ?(on_gate_decision = no_gate_observer) () =
   let meta_ref = make_meta_ref "test_keeper" in
@@ -1013,29 +945,6 @@ let test_compose_all_short_circuits_at_first_override () =
   check bool "short-circuit preserves first reason" true
     (contains_substring text "code=keeper_deny")
 
-let test_compose_all_preserves_order () =
-  let meta_ref = make_meta_ref "test_keeper" in
-  let streak_state = KG.make_streak_state () in
-  (* streak_guard fires first; after 3 calls it blocks before reaching cost_guard *)
-  let hooks = KG.compose_all [
-    KG.streak_guard ~meta_ref ~on_gate_decision:no_gate_observer
-      ~state:streak_state ~threshold:3;
-    KG.cost_guard ~meta_ref ~on_gate_decision:no_gate_observer
-      ~max_cost_usd:(Some 0.10);
-  ] in
-  let _ = invoke hooks (pre_tool_use_event ~tool_name:"x"
-                          ~accumulated_cost_usd:0.05 ()) in
-  let _ = invoke hooks (pre_tool_use_event ~tool_name:"x"
-                          ~accumulated_cost_usd:0.05 ()) in
-  let d = invoke hooks
-    (pre_tool_use_event ~tool_name:"x" ~accumulated_cost_usd:0.05 ())
-  in
-  (* streak triggered, cost would not have *)
-  check string "streak blocks before cost" "Override" (decision_kind d);
-  let text = override_text d in
-  check bool "reason is streak, not cost" true
-    (contains_substring text "code=streak_gate")
-
 (* ----------------------------------------------------------------- *)
 (* hooks_of_pre_tool_use                                              *)
 (* ----------------------------------------------------------------- *)
@@ -1082,12 +991,6 @@ let () = run "Keeper_guards" [
   "destructive_guard", [
     test_case "notifies observer on block" `Quick
       test_destructive_guard_notifies_block_observer;
-  ];
-  "streak_guard", [
-    test_case "under threshold -> continue" `Quick test_streak_guard_under_threshold;
-    test_case "at threshold -> override" `Quick test_streak_guard_at_threshold;
-    test_case "resets on different tool" `Quick test_streak_guard_resets_on_different_tool;
-    test_case "manual state reset" `Quick test_streak_state_manual_reset;
   ];
   "readonly_observation_duplicate_guard", [
     test_case "blocks same read-only input" `Quick
@@ -1139,7 +1042,6 @@ let () = run "Keeper_guards" [
     test_case "all Continue" `Quick test_compose_all_continue_all;
     test_case "short-circuits at first Override" `Quick
       test_compose_all_short_circuits_at_first_override;
-    test_case "preserves declared order" `Quick test_compose_all_preserves_order;
   ];
   "slot_helpers", [
     test_case "hooks_of_pre_tool_use only fills pre_tool_use" `Quick

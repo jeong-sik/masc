@@ -24,7 +24,6 @@ let payload ?(name = keeper_name) ?(content = "are you there?") ()
   { name
   ; message = content
   ; user_blocks = []
-  ; timeout_sec = None
   ; turn_instructions = None
   ; surface_context = None
   ; channel = ""

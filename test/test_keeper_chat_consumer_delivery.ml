@@ -618,6 +618,18 @@ let test_typed_admission_race_nacks_then_retries () =
       check_terminal_snapshot ~label:"typed deferral retry" ~keeper_name
         ~receipt_id:accepted.receipt_id)
 
+let test_legacy_request_timeout_decoder_is_read_only_and_canonical () =
+  Printf.printf "Test: retired request timeout decodes to a historical label\n%!";
+  match Keeper_chat_queue.For_testing.failure_kind_of_string "timed_out" with
+  | Ok Keeper_chat_queue.Legacy_request_timeout ->
+    check "legacy timeout re-encodes under an explicitly historical label"
+      (String.equal
+         (Keeper_chat_queue.failure_kind_to_string
+            Keeper_chat_queue.Legacy_request_timeout)
+         "legacy_request_timeout")
+  | Ok _ -> check "legacy timeout does not become a live failure kind" false
+  | Error detail -> check_failure "legacy timeout remains readable" detail
+
 let () =
   test_delivery_finalizes_terminal_receipt ();
   test_explicit_failure_finalizes_failed_receipt ();
@@ -628,6 +640,7 @@ let () =
   test_invalid_delivery_diagnostic_does_not_block_lane ();
   test_shutdown_fence_keeps_receipt_pending_until_rollback ();
   test_typed_admission_race_nacks_then_retries ();
+  test_legacy_request_timeout_decoder_is_read_only_and_canonical ();
   if !failures > 0
   then (
     Printf.printf "FAILED: %d check(s)\n%!" !failures;

@@ -214,7 +214,6 @@ let payload_of_queued_message ~keeper_name
   let projection = queued_chat_projection queued_message in
   { Server_routes_http_keeper_stream.name = keeper_name
   ; message = queued_message.content
-  ; timeout_sec = None
   ; turn_instructions = None
   ; surface_context = None
   ; channel = projection.payload_channel
@@ -319,14 +318,23 @@ let start_keeper_loops
   (* Request status is recovered only after transcript journals converge: a
      poller must never observe a final Lost status while its durable terminal
      row is still absent. *)
-  let recovered_keeper_msg_requests =
+  let keeper_msg_recovery =
     Keeper_msg_async.recover_lost_disk_records ~base_path
   in
-  if recovered_keeper_msg_requests > 0
+  if
+    keeper_msg_recovery.lost > 0
+    || keeper_msg_recovery.migrated > 0
+    || keeper_msg_recovery.cleaned > 0
+    || keeper_msg_recovery.unreadable > 0
+    || keeper_msg_recovery.failed > 0
   then
     Log.Keeper.warn
-      "keeper_msg_async: recovered %d disk-only non-terminal request record(s) as lost"
-      recovered_keeper_msg_requests;
+      "keeper_msg_async: recovery lost=%d migrated=%d cleaned=%d unreadable=%d failed=%d"
+      keeper_msg_recovery.lost
+      keeper_msg_recovery.migrated
+      keeper_msg_recovery.cleaned
+      keeper_msg_recovery.unreadable
+      keeper_msg_recovery.failed;
   (* Shared Agent_sdk Event_bus used as the runtime transport between subsystems.
      Configuration is sourced from [Masc_event_bus_policy.oas_runtime] so the
      buffer-size/policy choice is auditable in source rather than implicit in
@@ -1355,7 +1363,6 @@ let start_keeper_loops
                  let kind =
                    match kind with
                    | Turn_failed -> Keeper_chat_queue.Turn_failed
-                   | Turn_timed_out -> Keeper_chat_queue.Timed_out
                    | Turn_cancelled -> Keeper_chat_queue.Cancelled
                    | No_visible_reply
                    | Continuation_checkpoint_without_reply ->

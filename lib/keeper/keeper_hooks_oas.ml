@@ -236,14 +236,9 @@ let make_hooks
       (!meta_ref).name
       ~event_kind
   in
-  (* Streak gate state: tracks consecutive calls to the same tool
-     name (regardless of args). Lives across invocations via the
-     [make_hooks] closure — one state per keeper. *)
-  let streak_state = Keeper_guards.make_streak_state () in
   let readonly_observation_state =
     Keeper_guards.make_readonly_observation_state ()
   in
-  let streak_threshold = 5 in
   ignore trajectory_acc;
   let record_gate_decision = Keeper_guards.ignore_gate_decision in
   (* Build the pre_tool_use guard chain via Hooks.compose. Each guard
@@ -255,9 +250,7 @@ let make_hooks
     Keeper_guards.build_chain
       ~meta_ref
       ~tool_start_time
-      ~streak_state
       ~readonly_observation_state
-      ~streak_threshold
       ~denied:keeper_denied_tools
       ~max_cost_usd
       ~destructive_ops_policy
@@ -498,10 +491,6 @@ let make_hooks
              Log.Keeper.warn ~keeper_name:meta.name
                "turn=%d sse_turn_complete broadcast failed: %s"
                turn (Printexc.to_string exn));
-        (* Reset same-name streak at turn boundary so it doesn't
-           carry across turns (e.g., 4 calls in turn N + 1 in turn N+1
-           should not hit threshold 5). *)
-        streak_state.Keeper_guards.entry <- ("", 0);
         Keeper_guards.reset_readonly_observation_state
           readonly_observation_state;
         tool_call_count_ref := 0;

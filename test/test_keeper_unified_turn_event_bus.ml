@@ -268,7 +268,6 @@ let test_keeper_msg_async_submit_uses_captured_event_bus () =
     (fun () ->
        let request_id =
          Ops.For_testing.submit_keeper_msg_with_captured_event_bus
-           ~clock:env#clock
            ~background_sw:sw
            ~base_path
            ~caller:keeper_msg_caller

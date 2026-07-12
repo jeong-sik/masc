@@ -338,7 +338,6 @@
   test_keeper_retrieval_quality
   test_observability_redact
   test_keeper_tool_call_sse_io_preview
-  test_keeper_stream_text_accum
   test_keeper_tool_descriptor_registry_integrity
   test_voice_command_descriptor_parity
   test_disk_hygiene_script
@@ -709,7 +708,6 @@
   test_keeper_retrieval_quality
   test_observability_redact
   test_keeper_tool_call_sse_io_preview
-  test_keeper_stream_text_accum
   test_keeper_tool_descriptor_registry_integrity
   test_voice_command_descriptor_parity
   test_disk_hygiene_script

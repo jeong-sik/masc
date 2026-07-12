@@ -26,6 +26,7 @@ type t =
   | FailureDrivenPause
   | IdleSeconds
   | ContractViolations
+  | StreamProjectionEventCutoff
   | MetricEmitDropped
   | ContextMaxObserved
   | TurnStarts
@@ -286,6 +287,8 @@ let to_string = function
   | FailureDrivenPause -> "masc_keeper_failure_driven_pause_total"
   | IdleSeconds -> "masc_keeper_idle_seconds"
   | ContractViolations -> "masc_keeper_contract_violations_total"
+  | StreamProjectionEventCutoff ->
+    "masc_keeper_stream_projection_event_cutoff_total"
   | MetricEmitDropped -> "masc_keeper_metric_emit_dropped_total"
   | ContextMaxObserved -> "masc_keeper_context_max_observed_total"
   | TurnStarts -> "masc_keeper_turn_starts_total"

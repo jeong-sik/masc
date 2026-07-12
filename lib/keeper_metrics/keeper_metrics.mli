@@ -17,6 +17,7 @@ type t =
   | FailureDrivenPause
   | IdleSeconds
   | ContractViolations
+  | StreamProjectionEventCutoff
   | MetricEmitDropped
   | ContextMaxObserved
   | TurnStarts

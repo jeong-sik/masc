@@ -509,8 +509,7 @@ send_keeper_message() {
   raw_args="$(jq -cn \
     --arg name "$KEEPER_NAME" \
     --arg message "$message" \
-    --argjson timeout "$TURN_TIMEOUT_SEC" \
-    '{name:$name,message:$message,timeout_sec:$timeout}')"
+    '{name:$name,message:$message}')"
 
   if ! call_mcp_tool "$request_id" "masc_keeper_msg" "$raw_args" "$((TURN_TIMEOUT_SEC + 30))"; then
     return 1

@@ -35,7 +35,6 @@ type keeper_chat_stream_request = {
   name : string;
   message : string;
   user_blocks : user_input_block list;
-  timeout_sec : float option;
   turn_instructions : string option;
   surface_context : Yojson.Safe.t option;
   channel : string;
@@ -128,10 +127,6 @@ let args_of_request payload : Yojson.Safe.t =
     [ ("name", `String payload.name);
       ("message", `String message);
       ("direct_reply", `Bool true) ]
-    @
-    (match payload.timeout_sec with
-     | Some timeout_sec -> [ ("timeout_sec", `Float timeout_sec) ]
-     | None -> [])
     @
     (match turn_instructions_for_request payload with
      | Some instructions when String.trim instructions <> "" ->
@@ -411,13 +406,17 @@ let handle_keeper_chat_request_cancel ~caller state request reqd =
       let status =
         match result with
         | Keeper_msg_async.Cancelled_request -> `OK
+        | Keeper_msg_async.Cancellation_requested
+        | Keeper_msg_async.Cancel_in_progress ->
+            `Accepted
         | Keeper_msg_async.Cancel_not_found -> `Not_found
         | Keeper_msg_async.Cancel_rejected rejection ->
             http_status_of_access_rejection rejection
         | Keeper_msg_async.Cancel_already_terminal _ -> `Conflict
         | Keeper_msg_async.Cancel_unreadable _
         | Keeper_msg_async.Cancel_persistence_failed _
-        | Keeper_msg_async.Cancel_worker_signal_failed _ ->
+        | Keeper_msg_async.Cancel_worker_signal_failed _
+        | Keeper_msg_async.Cancel_state_invariant_failed _ ->
             `Internal_server_error
       in
       respond_json_value_with_cors ~status request reqd
@@ -639,17 +638,6 @@ let parse_keeper_chat_stream_request body_str =
         channel <> "" || channel_user_id <> ""
         || channel_user_name <> "" || channel_workspace_id <> ""
       in
-      let timeout_sec =
-        match Json_util.assoc_member_opt "timeout_sec" json with
-        | None | Some `Null -> Ok None
-        | Some (`Int value) when value > 0 ->
-          Ok (Some (float_of_int value))
-        | Some (`Float value) when Float.is_finite value && value > 0.0 ->
-          Ok (Some value)
-        | Some (`Int _) | Some (`Float _) ->
-          Error "timeout_sec must be a positive finite number"
-        | Some _ -> Error "timeout_sec must be a positive finite number"
-      in
       let attachments = Keeper_multimodal_input.parse_attachments json in
       let user_blocks_result = Keeper_multimodal_input.parse_user_blocks json in
       let message_of_blocks user_blocks =
@@ -671,10 +659,16 @@ let parse_keeper_chat_stream_request body_str =
         with
         | Error err -> Error err
         | Ok () -> (
-          match user_blocks_result, timeout_sec with
-          | Error err, _ -> Error err
-          | Ok _, Error err -> Error err
-          | Ok user_blocks, Ok timeout_sec ->
+          match
+            Keeper_config.reject_removed_keeper_msg_input_keys
+              ~tool_name:"masc_keeper_msg"
+              json
+          with
+          | Error err -> Error err
+          | Ok () -> (
+            match user_blocks_result with
+            | Error err -> Error err
+            | Ok user_blocks ->
               let message = message_of_blocks user_blocks in
               if message = "" then
                 Error "message is required"
@@ -684,7 +678,6 @@ let parse_keeper_chat_stream_request body_str =
                   name;
                   message;
                   user_blocks;
-                  timeout_sec;
                   turn_instructions;
                   surface_context;
                   channel;
@@ -693,7 +686,7 @@ let parse_keeper_chat_stream_request body_str =
                   channel_workspace_id;
                   attachments;
                 }
-          )
+          ))
   with Yojson.Json_error e ->
     Error ("invalid json: " ^ e)
 
@@ -1002,31 +995,96 @@ let send_keeper_error ?on_closed writer mutex closed ~thread_id ~run_id err =
            ~custom_value:(Some (`Assoc [ ("message", `String err) ]))
            Run_error))
 
-(** Extract visible reply from the keeper pipeline result body.
-    Parses JSON if possible and strips internal markers. *)
-let extract_visible_reply body =
-  let payload_json_opt =
-    try Some (Yojson.Safe.from_string body)
-    with Yojson.Json_error _ -> None
+type canonical_reply_payload_error =
+  | Malformed_reply_json of { parser_detail : string }
+  | Reply_payload_not_object
+  | Missing_payload_field of string
+  | Duplicate_payload_field of string
+  | Invalid_payload_field_type of string
+  | Unknown_turn_outcome
+  | Invalid_turn_ref
+
+type canonical_reply_payload =
+  { payload_json : Yojson.Safe.t
+  ; turn_outcome : Keeper_turn_outcome.t
+  ; turn_ref : Ids.Turn_ref.t
+  ; visible_reply : string
+  ; poll_body : string
+  }
+
+exception Canonical_reply_payload_rejected of canonical_reply_payload_error
+
+let canonical_reply_payload_error_to_string = function
+  | Malformed_reply_json _ -> "keeper reply payload is not valid JSON"
+  | Reply_payload_not_object -> "keeper reply payload must be a JSON object"
+  | Missing_payload_field field ->
+    Printf.sprintf "keeper reply payload is missing required field %s" field
+  | Duplicate_payload_field field ->
+    Printf.sprintf "keeper reply payload contains duplicate field %s" field
+  | Invalid_payload_field_type field ->
+    Printf.sprintf "keeper reply payload field %s must be a string" field
+  | Unknown_turn_outcome ->
+    "keeper reply payload contains an unknown turn_outcome"
+  | Invalid_turn_ref -> "keeper reply payload contains an invalid turn_ref"
+;;
+
+let required_unique_string_field field fields =
+  match
+    List.filter_map
+      (fun (key, value) -> if String.equal key field then Some value else None)
+      fields
+  with
+  | [] -> Error (Missing_payload_field field)
+  | [ `String value ] -> Ok value
+  | [ _ ] -> Error (Invalid_payload_field_type field)
+  | _ -> Error (Duplicate_payload_field field)
+;;
+
+let assoc_replace key value fields =
+  (key, value)
+  :: List.filter (fun (field_key, _) -> not (String.equal field_key key)) fields
+;;
+
+let canonical_reply_payload_of_body ~redact_text body =
+  let ( let* ) = Result.bind in
+  let* fields =
+    match Yojson.Safe.from_string body with
+    | `Assoc fields -> Ok fields
+    | _ -> Error Reply_payload_not_object
+    | exception Yojson.Json_error parser_detail ->
+      Error (Malformed_reply_json { parser_detail })
+  in
+  let* reply_raw = required_unique_string_field "reply" fields in
+  let* outcome_label =
+    required_unique_string_field Keeper_turn_outcome.wire_key fields
+  in
+  let* turn_outcome =
+    match Keeper_turn_outcome.of_label outcome_label with
+    | Some outcome -> Ok outcome
+    | None -> Error Unknown_turn_outcome
+  in
+  let* turn_ref_raw =
+    required_unique_string_field Keeper_turn_outcome.turn_ref_wire_key fields
+  in
+  let* turn_ref =
+    match Ids.Turn_ref.of_string turn_ref_raw with
+    | Some turn_ref -> Ok turn_ref
+    | None -> Error Invalid_turn_ref
   in
   let visible_reply =
-    match payload_json_opt with
-    | Some payload_json ->
-        let reply_raw =
-          Json_util.get_string payload_json "reply"
-          |> Option.value ~default:""
-        in
-        let visible = strip_keeper_visible_reply reply_raw in
-        if visible = "" then
-          match payload_json with
-          | `String s -> strip_keeper_visible_reply s
-          | _ -> ""
-        else visible
-    | None ->
-        let visible = strip_keeper_visible_reply body in
-        visible
+    strip_keeper_visible_reply reply_raw |> redact_text |> String.trim
   in
-  (payload_json_opt, visible_reply)
+  let payload_json =
+    `Assoc (assoc_replace "reply" (`String visible_reply) fields)
+  in
+  Ok
+    { payload_json
+    ; turn_outcome
+    ; turn_ref
+    ; visible_reply
+    ; poll_body = Yojson.Safe.to_string payload_json
+    }
+;;
 
 let persisted_error_reply err =
   let detail =
@@ -1049,54 +1107,10 @@ let direct_reply_terminal_error ?(has_visible_blocks = false) payload_json_opt v
   | Keeper_turn_outcome.Visible_reply, None, false -> Some empty_direct_reply_error
   | Keeper_turn_outcome.Visible_reply, Some _, _ -> None
 
-let visible_reply_with_stream_fallback ~streamed_text visible_reply =
-  match String.trim visible_reply with
-  | "" -> String.trim streamed_text
-  | visible_reply -> visible_reply
-
-let redacted_visible_reply_with_stream_fallback ~redact ~streamed_text visible_reply =
-  visible_reply_with_stream_fallback ~streamed_text visible_reply |> redact
-
-let assoc_replace key value fields =
-  (key, value)
-  :: List.filter (fun (field_key, _) -> not (String.equal field_key key)) fields
-
-let reply_payload_with_streamed_visible_reply payload_json_opt ~visible_reply
-    ~streamed_text_present =
-  match String_util.trim_to_option visible_reply with
-  | None -> payload_json_opt
-  | Some visible_reply -> (
-      match Keeper_turn_outcome.of_reply_payload payload_json_opt with
-      | Keeper_turn_outcome.Continuation_checkpoint -> payload_json_opt
-      | Keeper_turn_outcome.No_visible_reply when not streamed_text_present ->
-          payload_json_opt
-      | Keeper_turn_outcome.No_visible_reply
-      | Keeper_turn_outcome.Visible_reply -> (
-          match payload_json_opt with
-          | Some (`Assoc fields) ->
-              let fields =
-                assoc_replace "reply" (`String visible_reply) fields
-              in
-              let fields =
-                assoc_replace Keeper_turn_outcome.wire_key
-                  (`String
-                    (Keeper_turn_outcome.to_label
-                       Keeper_turn_outcome.Visible_reply))
-                  fields
-              in
-              Some (`Assoc fields)
-          | Some _ | None -> payload_json_opt))
-
-let body_with_rewritten_payload ~fallback payload_json_opt =
-  match payload_json_opt with
-  | Some (`Assoc _ as payload_json) -> Yojson.Safe.to_string payload_json
-  | Some _ | None -> fallback
-
 type keeper_stream_terminal_status =
   | Stream_done
   | Stream_error
   | Stream_cancelled
-  | Stream_timeout
   | Stream_rejected
 
 type keeper_request_terminal_status =
@@ -1108,7 +1122,6 @@ let keeper_stream_terminal_status_to_string = function
   | Stream_done -> "done"
   | Stream_error -> "error"
   | Stream_cancelled -> "cancelled"
-  | Stream_timeout -> "timeout"
   | Stream_rejected -> "rejected"
 ;;
 
@@ -1120,7 +1133,7 @@ let keeper_request_terminal_status_to_string = function
 
 let keeper_request_terminal_status_ok = function
   | Request_deferred | Request_queued | Request_stream Stream_done -> true
-  | Request_stream (Stream_error | Stream_cancelled | Stream_timeout | Stream_rejected) ->
+  | Request_stream (Stream_error | Stream_cancelled | Stream_rejected) ->
     false
 ;;
 
@@ -1128,7 +1141,7 @@ let keeper_request_terminal_status_is_routine = function
   | Request_deferred
   | Request_queued
   | Request_stream (Stream_done | Stream_cancelled) -> true
-  | Request_stream (Stream_error | Stream_timeout | Stream_rejected) -> false
+  | Request_stream (Stream_error | Stream_rejected) -> false
 ;;
 
 let keeper_request_terminal_payload ?request_id ~keeper_name ~status
@@ -1162,9 +1175,17 @@ type keeper_stream_worker_event =
       ; queued_outcome : queued_turn_outcome option
       }
 
+and keeper_stream_completion =
+  | Completion_dashboard_queued of dashboard_deferred_chat
+  | Completion_queued_turn_deferred of Keeper_turn_admission.rejection
+  | Completion_terminal of
+      { status : keeper_stream_terminal_status
+      ; body : string
+      ; queued_outcome : queued_turn_outcome option
+      }
+
 and queued_turn_failure_kind =
   | Turn_failed
-  | Turn_timed_out
   | Turn_cancelled
   | No_visible_reply
   | Continuation_checkpoint_without_reply
@@ -1205,7 +1226,6 @@ let admission_rejection_to_json
 
 let queued_turn_failure_kind_to_string = function
   | Turn_failed -> "turn_failed"
-  | Turn_timed_out -> "turn_timed_out"
   | Turn_cancelled -> "turn_cancelled"
   | No_visible_reply -> "no_visible_reply"
   | Continuation_checkpoint_without_reply ->
@@ -1273,15 +1293,15 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
     ]
   in
   let args = args_of_request payload in
-  (* Stream model text deltas live with per-delta redaction — the same
-     treatment ThinkingDelta and Tool_call_args already get in
-     [consume_worker_events]. The once-only invariant (live emit + terminal
-     re-send suppression + raw fallback) is owned by
-     [Keeper_stream_text_accum]; see its interface for the #20825/#20854/
-     #20869 history this guards against. *)
-  let text_accum = Keeper_stream_text_accum.create () in
+  (* Stream model text deltas live with per-delta redaction. The typed OAS
+     bridge owns per-provider-message state so only the final provider
+     message controls terminal resend suppression; canonical terminal content
+     always comes from the assembled OAS response carried by [body]. *)
   let worker_events = Eio.Stream.create worker_events_buffer_size in
+  let worker_completion, worker_completion_resolver = Eio.Promise.create () in
+  let client_disconnect, client_disconnect_resolver = Eio.Promise.create () in
   let terminal_delivery_mu = Eio.Mutex.create () in
+  let staged_completion = ref None in
   let terminal_pushed = Atomic.make false in
   let client_disconnected = Atomic.make false in
   let stream_projection_done, stream_projection_done_resolver =
@@ -1291,33 +1311,152 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
     (* fire-and-forget: completion is idempotent and may race disconnect cleanup. *)
     ignore (Eio.Promise.try_resolve stream_projection_done_resolver () : bool)
   in
+  let publish_completion completion =
+    Eio.Mutex.use_rw ~protect:true terminal_delivery_mu (fun () ->
+      if not (Atomic.get terminal_pushed)
+      then (
+        Atomic.set terminal_pushed true;
+        ignore
+          (Eio.Promise.try_resolve worker_completion_resolver completion : bool)))
+  in
+  let stage_completion completion =
+    Eio.Mutex.use_rw ~protect:true terminal_delivery_mu (fun () ->
+      if not (Atomic.get terminal_pushed) then staged_completion := Some completion)
+  in
+  let queued_failure kind detail =
+    if queued_turn then Some (Failed { kind; detail }) else None
+  in
+  let publish_committed_completion
+      (settlement : Keeper_msg_async.worker_settlement) =
+    let status = settlement.status in
+    let completion =
+      match settlement.durability, status with
+      | Keeper_msg_async.Volatile_persistence_failure, _ ->
+        let body =
+          Printf.sprintf
+            "keeper request terminal state is not durable (status=%s)"
+            (Keeper_msg_async.status_to_string status)
+        in
+        Some
+          (Completion_terminal
+             { status = Stream_error
+             ; body
+             ; queued_outcome = queued_failure Transcript_persist_failed body
+             })
+      | Keeper_msg_async.Durable, Keeper_msg_async.Done { ok; body } ->
+        (match !staged_completion with
+         | Some completion -> Some completion
+         | None ->
+           let stream_status = if ok then Stream_done else Stream_error in
+           Some
+             (Completion_terminal
+                { status = stream_status
+                ; body
+                ; queued_outcome =
+                    (if ok then None else queued_failure Turn_failed body)
+                }))
+      | Keeper_msg_async.Durable, Keeper_msg_async.Cancelled { reason; cancelled_by } ->
+        (match !staged_completion with
+         | Some
+             (Completion_terminal
+                { status = (Stream_cancelled | Stream_error); _ } as completion) ->
+           Some (Completion_terminal completion)
+         | Some _ | None ->
+           let body = Printf.sprintf "%s (cancelled_by=%s)" reason cancelled_by in
+           Some
+             (Completion_terminal
+                { status = Stream_cancelled
+                ; body
+                ; queued_outcome = queued_failure Turn_cancelled body
+                }))
+      | ( Keeper_msg_async.Durable
+        , Keeper_msg_async.Persistence_failed { attempted_status; reason } ) ->
+        let body =
+          Printf.sprintf
+            "keeper request terminal persistence failed (attempted_status=%s): %s"
+            attempted_status
+            reason
+        in
+        Some
+          (Completion_terminal
+             { status = Stream_error
+             ; body
+             ; queued_outcome = queued_failure Transcript_persist_failed body
+             })
+      | Keeper_msg_async.Durable, Keeper_msg_async.Lost { reason } ->
+        Some
+          (Completion_terminal
+             { status = Stream_rejected
+             ; body = reason
+             ; queued_outcome = queued_failure Turn_failed reason
+             })
+      | Keeper_msg_async.Durable, Keeper_msg_async.Queued
+      | Keeper_msg_async.Durable, Keeper_msg_async.Running
+      | Keeper_msg_async.Durable, Keeper_msg_async.Cancelling _ ->
+        None
+    in
+    match completion with
+    | Some completion -> publish_completion completion
+    | None ->
+      Log.Keeper.error
+        "keeper_stream: worker settlement callback received non-terminal status keeper=%s status=%s"
+        payload.name
+        (Keeper_msg_async.status_to_string status)
+  in
+  let await_projection_cutoff () =
+    Eio.Fiber.first
+      ~combine:(fun left right ->
+        match left, right with
+        | `Terminal, _ | _, `Terminal -> `Terminal
+        | `Client_disconnected, `Client_disconnected -> `Client_disconnected)
+      (fun () ->
+         ignore (Eio.Promise.await worker_completion : keeper_stream_completion);
+         `Terminal)
+      (fun () ->
+         Eio.Promise.await client_disconnect;
+         `Client_disconnected)
+  in
+  let observe_stream_event_cutoff reason =
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string StreamProjectionEventCutoff)
+      ~labels:[ "reason", reason ]
+      ()
+  in
   let push_worker_event event =
     match event with
-    | Stream_dashboard_queued _
-    | Stream_queued_turn_deferred _
-    | Stream_terminal _ ->
-        Eio.Mutex.use_rw ~protect:true terminal_delivery_mu (fun () ->
-          if not (Atomic.get terminal_pushed) then begin
-            Eio.Stream.add worker_events event;
-            Atomic.set terminal_pushed true
-          end)
+    | Stream_dashboard_queued queued ->
+        stage_completion (Completion_dashboard_queued queued)
+    | Stream_queued_turn_deferred rejection ->
+        stage_completion (Completion_queued_turn_deferred rejection)
+    | Stream_terminal terminal ->
+        stage_completion (Completion_terminal terminal)
     | Stream_client_disconnected ->
-        (try Eio.Stream.add worker_events event
-         with
-         | Eio.Cancel.Cancelled _ as e -> raise e
-         | exn ->
-             Log.Keeper.warn
-               "keeper_stream: client-disconnect push failed: %s"
-               (Printexc.to_string exn))
-    | Stream_event _ ->
-        if not !closed then
-          try Eio.Stream.add worker_events event
+        Atomic.set client_disconnected true;
+        ignore (Eio.Promise.try_resolve client_disconnect_resolver () : bool)
+    | Stream_event stream_event ->
+        if !closed
+        then observe_stream_event_cutoff "writer_closed"
+        else if Atomic.get terminal_pushed
+        then observe_stream_event_cutoff "terminal"
+        else if Atomic.get client_disconnected
+        then observe_stream_event_cutoff "client_disconnected"
+        else (
+          match
+            Eio.Fiber.first
+              ~combine:(fun left right ->
+                match left, right with
+                | `Added, _ | _, `Added -> `Added
+                | `Terminal, _ | _, `Terminal -> `Terminal
+                | `Client_disconnected, `Client_disconnected -> `Client_disconnected)
+              (fun () ->
+                 Eio.Stream.add worker_events stream_event;
+                 `Added)
+              await_projection_cutoff
           with
-          | Eio.Cancel.Cancelled _ as e -> raise e
-          | exn ->
-              Log.Keeper.warn
-                "keeper_stream: worker event push failed: %s"
-                (Printexc.to_string exn)
+          | `Added -> ()
+          | `Terminal -> observe_stream_event_cutoff "terminal"
+          | `Client_disconnected ->
+            observe_stream_event_cutoff "client_disconnected")
   in
   (* RFC-0232 P5: the typed surface is the write-side truth; the label
      [chat_source] is its derivation, used for broadcast metadata. *)
@@ -1576,20 +1715,12 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
     | None -> Error "direct Keeper delivery journal is unavailable"
     | Some journal -> drive journal
   in
-  let worker_text_accum = Keeper_stream_text_accum.create () in
   (* RFC-0301 item 6: collect generated media from the same stream so the assistant
      turn can persist it as reload-visible chat blocks. The bridge surfaces this
      media live over SSE; the persist site records it durably (see the persist arm
      below). Content-addressed, so the two persists reuse one file. *)
   let worker_media_accum = Keeper_stream_media_accum.create () in
   let on_event evt =
-    (match evt with
-     | Agent_sdk.Types.ContentBlockDelta
-         { delta = Agent_sdk.Types.TextDelta text; _ } ->
-         ignore
-           (Keeper_stream_text_accum.on_delta worker_text_accum ~redact:redact_text text
-            : string)
-     | _ -> ());
     Keeper_stream_media_accum.on_event worker_media_accum evt;
     push_worker_event (Stream_event evt)
   in
@@ -1668,23 +1799,16 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
      | Error _ -> ());
     persisted
   in
-  let timeout_sec = payload.timeout_sec in
   (* masc#23924: [f] below pushes its own [Stream_terminal] once it reaches a
-     completion arm, but a timeout/cancellation cuts [f] off before any of
+     completion arm, but cancellation cuts [f] off before any of
      those arms run — nothing would ever push to [worker_events], and
      [consume_worker_events]'s [Eio.Stream.take] would block forever.
      [on_worker_aborted] fires from Keeper_msg_async.submit's own catch
      sites (never inside the cancelled [f]) so this turn still gets exactly
      one terminal event via the same serialized [push_worker_event]. *)
   let on_worker_aborted (reason : Keeper_msg_async.worker_abort_reason) =
-    let status, body, failure_kind =
+    let cancellation_status, cancellation_body, failure_kind =
       match reason with
-      | Keeper_msg_async.Timeout { timeout_sec } ->
-          ( Stream_timeout
-          , Printf.sprintf
-              "keeper_msg request exceeded timeout_sec=%.3f before completion"
-              timeout_sec
-          , Turn_timed_out )
       | Keeper_msg_async.Worker_cancelled { cancelled_by; reason } ->
           let cancelled_by =
             Keeper_msg_async.worker_cancel_source_to_string cancelled_by
@@ -1693,12 +1817,21 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
           , Printf.sprintf "%s (cancelled_by=%s)" reason cancelled_by
           , Turn_cancelled )
     in
-    let persisted = persist_failure_reply body in
+    let persisted = persist_failure_reply cancellation_body in
+    let status, body =
+      match persisted with
+      | Ok () -> cancellation_status, cancellation_body
+      | Error persist_error ->
+          ( Stream_error
+          , Printf.sprintf
+              "keeper cancellation transcript persistence failed: %s"
+              persist_error )
+    in
     let queued_outcome =
       if not queued_turn then None
       else
         match persisted with
-        | Ok () -> Some (Failed { kind = failure_kind; detail = body })
+        | Ok () -> Some (Failed { kind = failure_kind; detail = cancellation_body })
         | Error persist_error ->
             Some
               (Failed
@@ -1721,16 +1854,35 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
         else None
       in
       Keeper_msg_async.submit
-        ?timeout_sec
         ?on_accepted
-        ~clock
         ~background_sw
         ~on_worker_aborted
+        ~on_worker_settled:publish_committed_completion
         ~base_path
         ~caller:submitted_by
         ~keeper_name:payload.name
         ~f:(fun request_sw ->
         let start_time = Time_compat.now () in
+        let finish_projection_failure kind detail =
+          let persisted = persist_failure_reply detail in
+          let queued_outcome =
+            if not queued_turn
+            then None
+            else
+              match persisted with
+              | Ok () -> Some (Failed { kind; detail })
+              | Error persist_error ->
+                Some
+                  (Failed
+                     { kind = Transcript_persist_failed
+                     ; detail = persist_error
+                     })
+          in
+          push_worker_event
+            (Stream_terminal
+               { status = Stream_error; body = detail; queued_outcome });
+          Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time detail
+        in
         let on_admitted =
           if queued_turn then Some on_queue_turn_admitted else None
         in
@@ -1829,35 +1981,30 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                     });
                Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time detail)
         | Ok (`Ran (true, body)) ->
-            let payload_json_opt, visible_reply = extract_visible_reply body in
-            let streamed_text =
-              Keeper_stream_text_accum.streamed_text worker_text_accum
-            in
-            let streamed_text_present =
-              Option.is_some (String_util.trim_to_option streamed_text)
-            in
-            let visible_reply =
-              redacted_visible_reply_with_stream_fallback
-                ~redact:redact_text
-                ~streamed_text
-                visible_reply
-            in
-            let payload_json_opt =
-              reply_payload_with_streamed_visible_reply payload_json_opt
-                ~visible_reply ~streamed_text_present
-            in
-            let body =
-              body_with_rewritten_payload ~fallback:body payload_json_opt
-            in
-            (* RFC-0233 §7: the keeper minted this turn's join key into the
-               reply payload (keeper_turn.ml). Decode it via the shared
-               reply-payload parser — never repair. A direct turn may retain
-               an uncorrelated row for diagnostics; a queued turn fails closed
-               below because Delivered requires the exact join key. *)
-            let turn_ref =
-              Keeper_turn_outcome.turn_ref_of_reply_payload payload_json_opt
-            in
-            let visible_reply = String.trim visible_reply in
+          (match canonical_reply_payload_of_body ~redact_text body with
+           | Error error ->
+             let detail = canonical_reply_payload_error_to_string error in
+             let internal_detail =
+               match error with
+               | Malformed_reply_json { parser_detail } ->
+                 redact_text parser_detail
+               | Reply_payload_not_object
+               | Missing_payload_field _
+               | Duplicate_payload_field _
+               | Invalid_payload_field_type _
+               | Unknown_turn_outcome
+               | Invalid_turn_ref -> detail
+             in
+             Log.Keeper.error
+               "keeper_stream: canonical terminal projection rejected keeper=%s error=%s"
+               payload.name
+               internal_detail;
+             finish_projection_failure Stream_projection_failed detail
+           | Ok canonical_reply ->
+            let payload_json_opt = Some canonical_reply.payload_json in
+            let body = canonical_reply.poll_body in
+            let turn_ref = Some canonical_reply.turn_ref in
+            let visible_reply = canonical_reply.visible_reply in
             (* RFC-0301 item 6: attach any generated media (accumulated from
                this turn's stream) as reload-visible chat blocks so a dashboard
                reload shows media-only replies too, not just text-bearing
@@ -1961,9 +2108,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                               })
                        else None
                  in
-                 let turn_outcome =
-                   Keeper_turn_outcome.of_reply_payload payload_json_opt
-                 in
+                 let turn_outcome = canonical_reply.turn_outcome in
                  let queued_outcome =
                    match turn_outcome, String_util.trim_to_option visible_reply with
                    | Keeper_turn_outcome.Continuation_checkpoint, _ when queued_turn ->
@@ -2058,7 +2203,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                            ; body
                            ; queued_outcome
                            });
-                      Tool_result.ok ~tool_name:"masc_keeper_msg" ~start_time body))
+                      Tool_result.ok ~tool_name:"masc_keeper_msg" ~start_time body)))
         | Ok (`Ran (false, err)) ->
             let persisted = persist_failure_reply err in
             let queued_outcome =
@@ -2116,8 +2261,8 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                      ; detail = persist_error
                      })
         in
-        push_worker_event
-          (Stream_terminal
+        publish_completion
+          (Completion_terminal
              { status = Stream_rejected
              ; body
              ; queued_outcome
@@ -2129,8 +2274,12 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
    | Some (disconnect_sw, disconnects), Some request_id ->
        Eio.Fiber.fork ~sw:disconnect_sw (fun () ->
          match
-           Eio.Fiber.first
-             (fun () ->
+         Eio.Fiber.first
+           ~combine:(fun left right ->
+             match left, right with
+             | `Projection_done, _ | _, `Projection_done -> `Projection_done
+             | `Client_disconnected, `Client_disconnected -> `Client_disconnected)
+           (fun () ->
                Eio.Stream.take disconnects;
                `Client_disconnected)
              (fun () ->
@@ -2205,20 +2354,46 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
       Keeper_chat_events.publish events
         (Custom { name = "KEEPER_REQUEST_TERMINAL"; value = payload_json })
   in
+  let next_worker_projection () =
+    if Atomic.get client_disconnected
+    then `Client_disconnected
+    else (
+      match Eio.Stream.take_nonblocking worker_events with
+      | Some event -> `Stream_event event
+      | None ->
+        Eio.Fiber.first
+          ~combine:(fun left right ->
+            match left, right with
+            | `Stream_event _, _ -> left
+            | _, `Stream_event _ -> right
+            | `Completion _, _ -> left
+            | _, `Completion _ -> right
+            | `Client_disconnected, `Client_disconnected -> `Client_disconnected)
+          (fun () -> `Stream_event (Eio.Stream.take worker_events))
+          (fun () ->
+             Eio.Fiber.first
+               ~combine:(fun left right ->
+                 match left, right with
+                 | `Completion _, _ -> left
+                 | _, `Completion _ -> right
+                 | `Client_disconnected, `Client_disconnected ->
+                   `Client_disconnected)
+               (fun () -> `Completion (Eio.Promise.await worker_completion))
+               (fun () ->
+                  Eio.Promise.await client_disconnect;
+                  `Client_disconnected)))
+  in
   let rec consume_worker_events bridge_state =
-    if Atomic.get client_disconnected then None
-    else match Eio.Stream.take worker_events with
-    | Stream_client_disconnected -> None
-    | Stream_event evt ->
+    match next_worker_projection () with
+    | `Client_disconnected -> None
+    | `Stream_event evt ->
         let translated =
           translate_oas_stream_event ~redact_text
-            ~on_text_delta:
-              (Keeper_stream_text_accum.on_delta text_accum ~redact:redact_text)
             ~base_dir:base_path bridge_state evt
         in
         List.iter (Keeper_chat_events.publish events) translated.chat_events;
         consume_worker_events translated.bridge_state
-    | Stream_queued_turn_deferred rejection ->
+    | `Completion (Completion_queued_turn_deferred rejection) ->
         let message =
           match rejection.Keeper_turn_admission.shutdown_operation_id with
           | Some operation_id ->
@@ -2241,7 +2416,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
         Keeper_chat_events.publish events Text_message_end;
         Keeper_chat_events.publish events (Run_finished { run_id });
         Some (Deferred { rejection })
-    | Stream_dashboard_queued queued ->
+    | `Completion (Completion_dashboard_queued queued) ->
         let message =
           dashboard_deferred_ack_text ~keeper_name:payload.name queued
         in
@@ -2255,42 +2430,38 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
         Keeper_chat_events.publish events Text_message_end;
         Keeper_chat_events.publish events (Run_finished { run_id });
         None
-    | Stream_terminal
+    | `Completion
+        (Completion_terminal
         { status = Stream_cancelled
         ; body = message
         ; queued_outcome
-        } ->
+        }) ->
         let message = redact_text message in
         publish_terminal ~status:(Request_stream Stream_cancelled) ~message ();
         Keeper_chat_events.publish events Text_message_end;
         Keeper_chat_events.publish events (Run_finished { run_id });
         queued_outcome
-    | Stream_terminal
-        { status = ((Stream_error | Stream_timeout | Stream_rejected) as status)
+    | `Completion
+        (Completion_terminal
+        { status = ((Stream_error | Stream_rejected) as status)
         ; body = err
         ; queued_outcome
-        } ->
+        }) ->
         let err = redact_text err in
         publish_terminal ~status:(Request_stream status) ~message:err ();
         Keeper_chat_events.publish events Text_message_end;
         Keeper_chat_events.publish events (Event_error { message = err });
         queued_outcome
-    | Stream_terminal { status = Stream_done; body; queued_outcome } -> (
+    | `Completion (Completion_terminal { status = Stream_done; body; queued_outcome }) -> (
         try
-          let payload_json_opt, visible_reply = extract_visible_reply body in
-          let visible_reply =
-            match String.trim visible_reply with
-            | "" ->
-                let streamed =
-                  Keeper_stream_text_accum.streamed_text text_accum |> String.trim
-                in
-                if streamed = "" then visible_reply else streamed
-            | _ -> visible_reply
+          let canonical_reply =
+            match canonical_reply_payload_of_body ~redact_text body with
+            | Ok canonical_reply -> canonical_reply
+            | Error error -> raise (Canonical_reply_payload_rejected error)
           in
-          let visible_reply = redact_text visible_reply in
-          let turn_outcome =
-            Keeper_turn_outcome.of_reply_payload payload_json_opt
-          in
+          let payload_json_opt = Some canonical_reply.payload_json in
+          let visible_reply = canonical_reply.visible_reply in
+          let turn_outcome = canonical_reply.turn_outcome in
           let suppress_terminal_reply =
             match turn_outcome with
             | Keeper_turn_outcome.Continuation_checkpoint
@@ -2300,7 +2471,9 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
           in
           if
             (not suppress_terminal_reply)
-            && not (Keeper_stream_text_accum.suppress_terminal_resend text_accum)
+            && not
+                 (Keeper_chat_oas_stream_bridge.terminal_message_had_text
+                    bridge_state)
           then
             split_keeper_reply_chunks visible_reply
             |> List.iter (fun chunk ->
@@ -2333,6 +2506,14 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
           queued_outcome
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
+        | Canonical_reply_payload_rejected error ->
+            let message = canonical_reply_payload_error_to_string error in
+            publish_terminal ~status:(Request_stream Stream_error) ~message ();
+            Keeper_chat_events.publish events Text_message_end;
+            Keeper_chat_events.publish events (Event_error { message });
+            if queued_turn
+            then Some (Failed { kind = Stream_projection_failed; detail = message })
+            else None
         | exn ->
             let message = redact_text (Printexc.to_string exn) in
             publish_terminal ~status:(Request_stream Stream_error) ~message ();
@@ -2461,9 +2642,8 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
                     Text_message_start)
             then loop ()
         | Text_delta text ->
-            (* [text] is already redacted at ingest — streaming tokens via
-               [Keeper_stream_text_accum.on_delta ~redact:redact_text] and
-               terminal-reply chunks split from a whole-redacted
+            (* [text] is already redacted by the typed OAS stream bridge, or
+               is a terminal-reply chunk split from a whole-redacted
                [visible_reply].  Re-redacting here doubled the per-token
                regex cost with no effect (redact is idempotent on already-
                redacted text).  Do not re-redact. *)
@@ -2753,15 +2933,10 @@ module For_testing = struct
     | `Queued queued -> `Queued queued.pending_count
     | `Queue_error message -> `Queue_error message
 
-  let extract_visible_reply = extract_visible_reply
+  let canonical_reply_payload_of_body = canonical_reply_payload_of_body
   let direct_reply_terminal_error = direct_reply_terminal_error
   let queued_delivery_outcome_of_turn_ref =
     queued_delivery_outcome_of_turn_ref
-  let visible_reply_with_stream_fallback = visible_reply_with_stream_fallback
-  let redacted_visible_reply_with_stream_fallback =
-    redacted_visible_reply_with_stream_fallback
-  let reply_payload_with_streamed_visible_reply =
-    reply_payload_with_streamed_visible_reply
   let format_surface_context = format_surface_context
   let surface_context_to_instructions = surface_context_to_instructions
   let empty_stream_bridge_state = empty_keeper_stream_bridge_state

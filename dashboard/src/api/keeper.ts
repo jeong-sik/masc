@@ -131,10 +131,12 @@ export interface KeeperToolReply {
 export type QueuedKeeperMessageStatus =
   | 'queued'
   | 'running'
+  | 'cancelling'
   | 'done'
   | 'error'
   | 'lost'
   | 'cancelled'
+  | 'persistence_failed'
 
 export interface QueuedKeeperMessageSubmission {
   requestId: string
@@ -156,7 +158,7 @@ export interface QueuedKeeperMessageResult {
 
 export interface QueuedKeeperMessageCancelResult {
   requestId: string
-  status: QueuedKeeperMessageStatus
+  status: 'cancelling' | 'cancelled'
   message?: string
 }
 
@@ -165,6 +167,7 @@ const TERMINAL_QUEUED_KEEPER_MESSAGE_STATUSES = new Set<QueuedKeeperMessageStatu
   'error',
   'lost',
   'cancelled',
+  'persistence_failed',
 ])
 
 function normalizeQueuedKeeperMessageStatus(value: unknown): QueuedKeeperMessageStatus {
@@ -173,6 +176,8 @@ function normalizeQueuedKeeperMessageStatus(value: unknown): QueuedKeeperMessage
       return 'queued'
     case 'running':
       return 'running'
+    case 'cancelling':
+      return 'cancelling'
     case 'done':
       return 'done'
     case 'error':
@@ -181,8 +186,10 @@ function normalizeQueuedKeeperMessageStatus(value: unknown): QueuedKeeperMessage
       return 'lost'
     case 'cancelled':
       return 'cancelled'
+    case 'persistence_failed':
+      return 'persistence_failed'
     default:
-      return 'error'
+      throw new Error(`unsupported keeper message status: ${JSON.stringify(value)}`)
   }
 }
 
@@ -229,9 +236,13 @@ function parseQueuedKeeperMessageCancelResult(data: unknown): QueuedKeeperMessag
   if (!requestId) {
     throw new Error('keeper message cancel response missing request_id')
   }
+  const status = normalizeQueuedKeeperMessageStatus(record?.status)
+  if (status !== 'cancelling' && status !== 'cancelled') {
+    throw new Error(`keeper message cancel response has non-cancellation status: ${status}`)
+  }
   return {
     requestId,
-    status: normalizeQueuedKeeperMessageStatus(record?.status),
+    status,
     message: asString(record?.message),
   }
 }
@@ -713,7 +724,7 @@ export interface KeeperChatReceipt {
 
 const KEEPER_CHAT_RECEIPT_FAILURE_KINDS = new Set<KeeperChatReceiptFailureKind>([
   'turn_failed',
-  'timed_out',
+  'legacy_request_timeout',
   'no_visible_reply',
   'transcript_persist_failed',
   'connector_unavailable',

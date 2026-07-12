@@ -55,10 +55,10 @@ let payload () : Journal.accepted_payload =
 
 let terminal () : Journal.terminal_result =
   { ok = false
-  ; poll_body = "keeper_msg request exceeded timeout_sec"
+  ; poll_body = "keeper_msg request was cancelled by operator"
   ; delivery =
       Journal.Transport_failure
-        { content = "Keeper request failed: request exceeded timeout" }
+        { content = "Keeper request failed: request was cancelled by operator" }
   }
 ;;
 
@@ -361,7 +361,7 @@ let test_chat_append_once_converges_across_processes () =
     await_child second;
     let matching_rows =
       Keeper_chat_store.load ~base_dir:base_path ~keeper_name:"sangsu"
-      |> List.filter (fun row ->
+      |> List.filter (fun (row : Keeper_chat_store.chat_message) ->
            Keeper_chat_store.Role.equal row.role Keeper_chat_store.Role.User
            && String.equal row.content "cross-process request")
     in

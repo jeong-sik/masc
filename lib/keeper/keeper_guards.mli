@@ -1,7 +1,7 @@
 (** Keeper_guards — composable pre_tool_use hooks for keeper agents.
 
     Decomposes the previously monolithic [pre_tool_use] guard chain
-    (streak / deny / cost / destructive / governance) into standalone
+    (deny / cost / destructive / governance) into standalone
     OAS [Hooks.hooks] records that stack via [Agent_sdk.Hooks.compose].
     Each guard fills only the [pre_tool_use] slot; composition
     short-circuits on the first non-[Continue] decision.
@@ -139,12 +139,6 @@ val hooks_of_pre_tool_use : Agent_sdk.Hooks.hook -> Agent_sdk.Hooks.hooks
     slot short-circuits on the first non-[Continue] decision. *)
 val compose_all : Agent_sdk.Hooks.hooks list -> Agent_sdk.Hooks.hooks
 
-(** Mutable streak state captured by [streak_guard]: pair of
-    [(tool_name, count)]. *)
-type streak_state = { mutable entry : string * int }
-
-val make_streak_state : unit -> streak_state
-
 (** Mutex-protected per-hook state for consecutive duplicate read-only
     observations. Pending reads are represented as a duplicate-free set of
     in-flight tool/input keys scoped to the current OAS tool batch, so the
@@ -166,17 +160,6 @@ val custom_guard :
   meta_ref:Keeper_meta_contract.keeper_meta ref ->
   on_gate_decision:(gate_decision_event -> unit) ->
   guard:(tool_name:string -> input:Yojson.Safe.t -> string option) ->
-  Agent_sdk.Hooks.hooks
-
-(** Same-name streak gate: block when [tool_name] is called
-    [threshold+] times consecutively. Catches the
-    "same operation, different targets" pattern that OAS's exact
-    name+args idle detection misses. *)
-val streak_guard :
-  meta_ref:Keeper_meta_contract.keeper_meta ref ->
-  on_gate_decision:(gate_decision_event -> unit) ->
-  state:streak_state ->
-  threshold:int ->
   Agent_sdk.Hooks.hooks
 
 (** Block a consecutive duplicate read-only snapshot observation with the same
@@ -223,14 +206,12 @@ val governance_approval_guard :
   Agent_sdk.Hooks.hooks
 
 (** Build the full keeper pre_tool_use chain in canonical order:
-    timing -> custom -> read-only observation duplicate -> streak -> deny ->
+    timing -> custom -> read-only observation duplicate -> deny ->
     cost -> destructive -> governance_approval. *)
 val build_chain :
   meta_ref:Keeper_meta_contract.keeper_meta ref ->
   tool_start_time:float ref ->
-  streak_state:streak_state ->
   readonly_observation_state:readonly_observation_state ->
-  streak_threshold:int ->
   denied:string list ->
   max_cost_usd:float option ->
   destructive_ops_policy:Destructive_ops_policy.t ->

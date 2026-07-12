@@ -373,10 +373,6 @@ let keeper_schemas : tool_schema list = [
           ("type", `String "string");
           ("description", `String "User message");
         ]);
-        ("timeout_sec", `Assoc [
-          ("type", `String "number");
-          ("description", `String "Optional override: overall timeout (sec) for this async keeper message request and its runtime turn. Defaults to the runtime-resolved keeper turn timeout.");
-        ]);
         ("direct_reply", `Assoc [
           ("type", `String "boolean");
           ("description", `String "Optional: run the turn synchronously and return the reply directly instead of queueing");

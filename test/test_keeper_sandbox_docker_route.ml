@@ -1452,6 +1452,42 @@ let test_execute_missing_image_falls_back_to_local_playground () =
   Alcotest.(check bool) "docker run skipped" false
     (contains_substring log "\nrun ")
 
+(* Reserved env keys are rejected uniformly: the Docker->Host fallback
+   (image absent + in-playground) enforces the same reserved-key policy as
+   the Docker argv boundary, so identical input does not silently succeed
+   just because the image is unavailable. *)
+let test_execute_reserved_env_rejected_on_local_fallback () =
+  with_fake_docker fake_docker_missing_image_script @@ fun () ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  let log_path = Filename.concat config.Workspace.base_path "docker.log" in
+  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "missing:test" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "false" @@ fun () ->
+  let raw =
+    Keeper_tool_command_runtime.handle_tool_execute
+      ~turn_sandbox_factory:None
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:
+        (tool_execute_typed_exec_args
+           ~cwd:playground
+           ~env:[ "HOME", "/evil" ]
+           "echo")
+      ()
+  in
+  Alcotest.(check bool) "reserved-key rejection is not a success" false
+    (parse_bool_field raw "ok" = Some true);
+  Alcotest.(check (option string)) "did not fall back to a running host command"
+    None
+    (parse_string_field raw "sandbox_fallback");
+  Alcotest.(check bool) "typed reserved-key error surfaced" true
+    (response_mentions raw "error" "the sandbox exec boundary owns it")
+
 let test_execute_outside_playground_rejects_before_image_preflight () =
   with_fake_docker fake_docker_missing_image_script @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
@@ -2556,6 +2592,10 @@ let () =
             test_docker_shell_ir_parse_failure_blocks_before_run;
           Alcotest.test_case "tool_execute missing image falls back locally" `Quick
             test_execute_missing_image_falls_back_to_local_playground;
+          Alcotest.test_case
+            "tool_execute reserved env rejected on local fallback"
+            `Quick
+            test_execute_reserved_env_rejected_on_local_fallback;
           Alcotest.test_case
             "tool_execute outside playground rejects before image preflight"
             `Quick

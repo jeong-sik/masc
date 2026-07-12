@@ -145,8 +145,9 @@ let journal_of_json = function
 
 let save_journal config journal =
   let dir = journal_dir config in
-  ignore (Keeper_fs.ensure_dir dir : string);
-  Keeper_fs.save_json_atomic (journal_path config journal.keeper_name) (journal_to_json journal)
+  let ensured_dir = Keeper_fs.ensure_dir dir in
+  let path = Filename.concat ensured_dir (journal.keeper_name ^ ".json") in
+  Keeper_fs.save_json_atomic path (journal_to_json journal)
 ;;
 
 let delete_journal config keeper_name =
@@ -262,8 +263,10 @@ let clear_candidate_registry token config journal =
   | None -> []
   | Some entry when same_identity entry.meta journal.candidate ->
     Keeper_keepalive.request_entry_stop entry;
-    ignore (Keeper_lane.await_exit entry.lane : Keeper_lane.exit);
-    ignore (Eio.Promise.await entry.done_p : Keeper_registry.done_resolution);
+    (* Cancellation-safe rollback joins both terminal signals before exact
+       unregister, so the replacement cannot inherit a live predecessor. *)
+    let _lane_exit = Keeper_lane.await_exit entry.lane in
+    let _done_resolution = Eio.Promise.await entry.done_p in
     (match Keeper_registry.unregister_exact_for_lifecycle token entry with
      | Keeper_registry.Exact_unregistered | Keeper_registry.Exact_entry_missing -> []
      | Keeper_registry.Exact_entry_replaced -> [ Rollback_registry_occupied entry ]

@@ -334,14 +334,31 @@ let wake_keeper_on_fusion_completion
     ignore (Fusion_wake_route.take ~run_id);
     Log.Keeper.info "fusion completion wake: keeper=%s run_id=%s ok=%b" keeper run_id ok;
     (* Best-effort wake hint: the payload is already durable, so a withheld or
-       failed hint only defers pickup to the keeper's next turn. The Running-gate
-       outcome is intentionally discarded (typed [_] so a signature change surfaces
-       here), and a hint exception is logged — not swallowed — then dropped. *)
+       failed hint only defers pickup to the keeper's next turn. The typed outcome
+       remains observable; an exception is logged and does not roll back the
+       durable completion. *)
     (try
-       let (_ : Keeper_registry.wakeup_running_outcome) =
-         Keeper_registry.wakeup_running ~base_path:base_dir keeper
-       in
-       ()
+       match
+         Keeper_registry.wakeup_running
+           ~intent:Keeper_registry.Reactive_signal
+           ~base_path:base_dir
+           keeper
+       with
+       | Keeper_registry.Signaled -> ()
+       | Keeper_registry.Deferred_unregistered ->
+         Log.Keeper.info ~keeper_name:keeper
+           "fusion completion wake deferred: keeper is no longer registered run_id=%s"
+           run_id
+       | Keeper_registry.Deferred_not_running phase ->
+         Log.Keeper.info ~keeper_name:keeper
+           "fusion completion wake deferred: phase=%s run_id=%s"
+           (Keeper_state_machine.phase_to_string phase)
+           run_id
+       | Keeper_registry.Deferred_lifecycle denial ->
+         Log.Keeper.info ~keeper_name:keeper
+           "fusion completion wake deferred by lifecycle: reason=%s run_id=%s"
+           (Keeper_lifecycle_admission.autonomous_denial_to_wire denial)
+           run_id
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn ->

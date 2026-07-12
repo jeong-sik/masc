@@ -160,7 +160,7 @@ let test_delivery_finalizes_terminal_receipt () =
     | None -> ()
     | Some accepted ->
       let captured = ref None in
-      let handle_turn ~sw:_ ~keeper_name:dispatched_keeper ~queued_message =
+      let handle_turn ~sw:_ ~keeper_name:dispatched_keeper ~delivery_key:_ ~queued_message =
         captured := Some (dispatched_keeper, queued_message);
         Keeper_chat_consumer.Delivered
           { outcome_ref = "trace-delivered#1" }
@@ -206,7 +206,7 @@ let test_explicit_failure_finalizes_failed_receipt () =
     with
     | None -> ()
     | Some accepted ->
-      let handle_turn ~sw:_ ~keeper_name:_ ~queued_message:_ =
+      let handle_turn ~sw:_ ~keeper_name:_ ~delivery_key:_ ~queued_message:_ =
         Keeper_chat_consumer.Failed
           { kind = Keeper_chat_queue.Delivery_failed
           ; detail = "connector rejected outbound delivery"
@@ -247,7 +247,7 @@ let test_structured_cancellation_nacks_and_preserves_receipt () =
     | Some accepted ->
       let started, resolve_started = Eio.Promise.create () in
       let never, _resolve_never = Eio.Promise.create () in
-      let handle_turn ~sw:_ ~keeper_name:_ ~queued_message:_ =
+      let handle_turn ~sw:_ ~keeper_name:_ ~delivery_key:_ ~queued_message:_ =
         Eio.Promise.resolve resolve_started ();
         Eio.Promise.await never
       in
@@ -308,7 +308,7 @@ let test_dispatch_is_concurrent_per_keeper () =
       let first_started, resolve_first_started = Eio.Promise.create () in
       let release_first, resolve_release_first = Eio.Promise.create () in
       let second_started, resolve_second_started = Eio.Promise.create () in
-      let handle_turn ~sw:_ ~keeper_name:dispatched_keeper ~queued_message:_ =
+      let handle_turn ~sw:_ ~keeper_name:dispatched_keeper ~delivery_key:_ ~queued_message:_ =
         incr calls;
         match !first_keeper with
         | None ->
@@ -379,7 +379,7 @@ let test_finalization_persistence_retry_does_not_redeliver () =
     | None -> ()
     | Some accepted ->
       let calls = ref 0 in
-      let handle_turn ~sw:_ ~keeper_name:_ ~queued_message:_ =
+      let handle_turn ~sw:_ ~keeper_name:_ ~delivery_key:_ ~queued_message:_ =
         incr calls;
         Keeper_chat_queue.For_testing.fail_next_persist ();
         Keeper_chat_consumer.Delivered
@@ -415,7 +415,7 @@ let test_invalid_delivered_turn_ref_fails_closed () =
     with
     | None -> ()
     | Some accepted ->
-      let handle_turn ~sw:_ ~keeper_name:_ ~queued_message:_ =
+      let handle_turn ~sw:_ ~keeper_name:_ ~delivery_key:_ ~queued_message:_ =
         Keeper_chat_consumer.Delivered { outcome_ref = "trace#0042" }
       in
       with_consumer_switch (fun sw ->
@@ -450,7 +450,7 @@ let test_invalid_delivery_diagnostic_does_not_block_lane () =
       let calls = ref 0 in
       let first_started, resolve_first_started = Eio.Promise.create () in
       let release_first, resolve_release_first = Eio.Promise.create () in
-      let handle_turn ~sw:_ ~keeper_name:_
+      let handle_turn ~sw:_ ~keeper_name:_ ~delivery_key:_
           ~(queued_message : Keeper_chat_queue.queued_message) =
         incr calls;
         if String.equal queued_message.content "invalid diagnostic"
@@ -518,7 +518,7 @@ let test_shutdown_fence_keeps_receipt_pending_until_rollback () =
            ~operation_id
           : Keeper_turn_admission.begin_shutdown_result);
       let calls = ref 0 in
-      let handle_turn ~sw:_ ~keeper_name:_ ~queued_message:_ =
+      let handle_turn ~sw:_ ~keeper_name:_ ~delivery_key:_ ~queued_message:_ =
         incr calls;
         Keeper_chat_consumer.Delivered
           { outcome_ref = "trace-shutdown-rollback#1" }
@@ -572,7 +572,7 @@ let test_typed_admission_race_nacks_then_retries () =
       let first_deferred, resolve_first_deferred = Eio.Promise.create () in
       let second_started, resolve_second_started = Eio.Promise.create () in
       let release_second, resolve_release_second = Eio.Promise.create () in
-      let handle_turn ~sw:_ ~keeper_name:_ ~queued_message:_ =
+      let handle_turn ~sw:_ ~keeper_name:_ ~delivery_key:_ ~queued_message:_ =
         incr calls;
         if !calls = 1
         then (

@@ -64,6 +64,10 @@ type submit_error =
   | Submit_rejected of access_rejection
   | Invalid_timeout of { reason : string }
   | Initial_persistence_failed of { reason : string }
+  | Acceptance_persistence_failed of
+      { request_id : string
+      ; reason : string
+      }
   | Background_switch_unavailable of { reason : string }
   | Background_fork_failed of
       { request_id : string
@@ -106,7 +110,7 @@ val server_background_switch : unit -> (Eio.Switch.t, submit_error) result
     turn-local switch. Failure is typed and suitable for the same error envelope
     as [submit]. *)
 
-(** [submit ?clock ?timeout_sec ?on_worker_aborted ~background_sw ~f
+(** [submit ?clock ?timeout_sec ?on_accepted ?on_worker_aborted ~background_sw ~f
     ~keeper_name ~base_path ~caller] forks a background daemon fiber on the
     explicitly supplied server-lifetime [background_sw].  The per-request
     worker switch passed to [f] is distinct: cancellation fails that switch,
@@ -124,6 +128,10 @@ val server_background_switch : unit -> (Eio.Switch.t, submit_error) result
     reserved for persisted non-terminal requests recovered without a live
     worker.
 
+    [on_accepted] runs after the request record is durable and before a worker
+    can start. It owns any producer-specific durable acceptance side effect;
+    failure returns [Acceptance_persistence_failed] and no worker is forked.
+
     [on_worker_aborted], when supplied, is invoked exactly once whenever [f]
     is cut off by a timeout or cancellation before it completes on its own —
     never when [f] returns or raises normally, since [f] is expected to have
@@ -131,13 +139,15 @@ val server_background_switch : unit -> (Eio.Switch.t, submit_error) result
     that is not itself under cancellation at the moment of the call (wrapped
     internally in {!Eio.Cancel.protect}), so it may safely perform blocking
     Eio operations such as pushing to a caller-owned stream. Callback
-    exceptions are logged and counted as lifecycle callback failures, but are
-    not propagated to the server root switch. The durable request status remains
-    the authoritative terminal result available to pollers. *)
+    errors and exceptions are converted to [Persistence_failed]; the requested
+    timeout/cancel status cannot become terminal polling truth until this
+    delivery callback succeeds. Callback failures never escape to the server
+    root switch. *)
 val submit
   :  ?clock:_ Eio.Time.clock
   -> ?timeout_sec:float
-  -> ?on_worker_aborted:(worker_abort_reason -> unit)
+  -> ?on_accepted:(string -> (unit, string) result)
+  -> ?on_worker_aborted:(worker_abort_reason -> (unit, string) result)
   -> background_sw:Eio.Switch.t
   -> base_path:string
   -> caller:string

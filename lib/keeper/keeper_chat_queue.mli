@@ -30,13 +30,7 @@ type queued_message = {
   source : message_source;
 }
 
-module Receipt_id : sig
-  type t
-
-  val of_string : string -> (t, string) result
-  val to_string : t -> string
-  val equal : t -> t -> bool
-end
+module Receipt_id = Keeper_chat_delivery_identity.Receipt_id
 
 type completion = {
   completed_at : float;
@@ -52,6 +46,7 @@ type failure_kind =
   | Delivery_failed
   | Cancelled
   | Internal_error
+  | Recovery_interrupted
 
 val failure_kind_to_string : failure_kind -> string
 

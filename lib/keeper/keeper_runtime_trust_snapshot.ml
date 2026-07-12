@@ -556,6 +556,12 @@ let approval_state_json ~pending_approval_count ~pending_approvals ~latest_tool_
   in
   let latest_event_kind =
     Option.bind latest_approval_audit (json_string_opt_member "event")
+    |> Option.map Keeper_approval_queue.approval_audit_event_kind_of_wire
+  in
+  let latest_event_wire =
+    Option.map
+      Keeper_approval_queue.approval_audit_event_kind_to_canonical_wire
+      latest_event_kind
   in
   let resolution_mode =
     Option.bind latest_tool_call (json_string_opt_member "approval_mode")
@@ -565,15 +571,22 @@ let approval_state_json ~pending_approval_count ~pending_approvals ~latest_tool_
     if pending_approval_count > 0 then "pending"
     else
       match latest_event_kind with
-      | Some "auto_approved_always" -> "always_flag"
-      | Some "auto_approved_rule_match" -> "always_rule"
-      | Some event
-        when String.equal event Keeper_approval_queue.approval_audit_hard_forbidden_event ->
-        "hard_forbidden"
-      | Some "resolved" -> "resolved"
-      | Some "expired" | Some "approval_timeout" -> "expired"
-      | Some "cancelled" -> "cancelled"
-      | Some _ -> "observed"
+      | Some Keeper_approval_queue.Audit_auto_always -> "always_flag"
+      | Some Keeper_approval_queue.Audit_auto_rule -> "always_rule"
+      | Some
+          (Keeper_approval_queue.Audit_resolved
+          | Keeper_approval_queue.Audit_legacy_terminal_rejection) ->
+        "resolved"
+      | Some
+          (Keeper_approval_queue.Audit_expired
+          | Keeper_approval_queue.Audit_timeout) ->
+        "expired"
+      | Some Keeper_approval_queue.Audit_cancelled -> "cancelled"
+      | Some
+          (Keeper_approval_queue.Audit_pending
+          | Keeper_approval_queue.Audit_rule_created
+          | Keeper_approval_queue.Audit_other _) ->
+        "observed"
       | None -> "idle"
   in
   `Assoc
@@ -581,7 +594,7 @@ let approval_state_json ~pending_approval_count ~pending_approvals ~latest_tool_
       ("state", `String state);
       ("pending_count", `Int pending_approval_count);
       ("resolution_mode", Json_util.string_opt_to_json resolution_mode);
-      ("latest_event_kind", Json_util.string_opt_to_json latest_event_kind);
+      ("latest_event_kind", Json_util.string_opt_to_json latest_event_wire);
       ( "latest_event_at",
         match Option.bind latest_approval_audit (json_float_opt_member "ts") with
         | Some ts -> `String (Masc_domain.iso8601_of_unix_seconds ts)

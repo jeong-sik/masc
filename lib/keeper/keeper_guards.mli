@@ -218,6 +218,9 @@ val destructive_guard :
 (** Governance gate. Escalates via [ApprovalRequired] when the
     assessed risk meets or exceeds the keeper-confirm threshold. *)
 val governance_approval_guard :
+  ?active_tool_names:string list ->
+  ?risk_context:Governance_pipeline.keeper_risk_context ->
+  ?meta_provider:(unit -> Keeper_meta_contract.keeper_meta option) ->
   meta_ref:Keeper_meta_contract.keeper_meta ref ->
   on_gate_decision:(gate_decision_event -> unit) ->
   Agent_sdk.Hooks.hooks
@@ -234,6 +237,8 @@ val build_chain :
   denied:string list ->
   max_cost_usd:float option ->
   destructive_ops_policy:Destructive_ops_policy.t ->
+  risk_context:Governance_pipeline.keeper_risk_context ->
+  ?meta_provider:(unit -> Keeper_meta_contract.keeper_meta option) ->
   on_gate_decision:(gate_decision_event -> unit) ->
   pre_tool_use_guard:
     (tool_name:string -> input:Yojson.Safe.t -> string option) ->

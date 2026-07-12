@@ -14,17 +14,30 @@
 > requires follow-up issue [#23906](https://github.com/jeong-sik/masc/issues/23906)
 > and security review.
 
+> **Operator-continuation correction (2026-07-12).** The terminal Critical
+> rejection described below is historical. `governance_approval_guard` now
+> returns `ApprovalRequired` for the Keeper High/Critical floor and the approval
+> callback registers the ordinary nonblocking HITL continuation. Automatic
+> flags, remembered rules, and approval mode cannot cross that floor; an exact
+> one-shot operator resolution can resume the Keeper in a later cycle.
+
 ---
 
-## 1. Problem — a granted capability that is unconditionally blocked
+## 1. Historical problem — a granted capability was unconditionally blocked
 
-A keeper is granted the `tool_execute` tool in its `tool_access`. The governance gate then blocks every use of it, unconditionally, in a way HITL cannot resolve. The structure is:
+A keeper was granted the `tool_execute` tool in its `tool_access`, while the
+governance gate blocked every use in a way HITL could not resolve. Before the
+2026-07-12 operator-continuation correction, the structure was:
 
 1. `tool_execute` is force-marked destructive in the catalog (`static_destructive_tool_names` includes `"tool_execute"`, `tool_catalog.ml:183-184`, applied via `force_true_if_member` `:416`), so `classify_with_metadata "tool_execute"` returns `Some Critical`. Independently, `risk_of_keeper Execute -> Critical` (`governance_pipeline_risk.ml:141`) is unconditional. Either source alone makes the risk Critical, ignoring the command payload.
-2. `keeper_guards.governance_approval_guard` (`keeper_guards.ml:944-963`) computes `hard_forbidden = auto_approval_hard_forbidden ~risk = (risk = Critical || runtime_auto_approval_blocked)` (`governance_pipeline.ml:104-105`). For Critical this is true, and the guard returns `Agent_sdk.Hooks.Block` with reason "hard_forbidden: unconditional block regardless of HITL mode" (`:958`) — before the tool handler runs.
-3. There is no active exemption path. A prior attempt read keeper names from `MASC_CODE_EXEMPT_KEEPERS` and bypassed the generic `needs_approval` branch, but it was removed because the decision was not scoped to a typed code-tool category and was not audited. Critical Execute remains blocked before any future exemption point.
+2. `keeper_guards.governance_approval_guard` computed a terminal policy predicate for Critical/runtime blockers and returned `Agent_sdk.Hooks.Block` before the tool handler or HITL continuation could run. That branch is retired; the current guard returns `ApprovalRequired` and the callback owns the operator continuation.
+3. There is no active exemption path. A prior attempt read keeper names from `MASC_CODE_EXEMPT_KEEPERS` and bypassed the generic `needs_approval` branch, but it was removed because the decision was not scoped to a typed code-tool category and was not audited. Critical Execute now reaches the ordinary operator continuation, but no exemption can bypass that decision.
 
-Net: no keeper can run any shell command — `git status` and `rm -rf /` alike — and no HITL approval can change that. A capability that is always blocked is not a capability. This is the "weird structure" the incident (RFC-0328) exposed; `mad-improver` correctly observed "Execute is blocked" and then confabulated a repo-mapping cause because the true structure is invisible to the keeper.
+The historical result was that no keeper could run any shell command — `git
+status` and `rm -rf /` alike — and no HITL approval could change that. The
+terminal part of that structure is now removed. Payload-aware risk remains a
+separate Gap A: read-only and destructive commands can still share the same
+approval band, but an operator decision is no longer made impossible.
 
 The already-built typed classifier that *can* tell `git status` from `rm -rf /` — `Masc_exec.Shell_ir_risk` (closed sum `R0_Read | R1_Reversible_mutation | R2_Irreversible | Destructive_protected`, `shell_ir_risk.mli:10-14`) plus the handler-level `Approval_policy`/`catastrophic_floor` (RFC-0254, Active) — lives *inside* the handler and is categorically unreachable for the governance decision (`rg 'Shell_ir|Approval_policy|R0_Read' lib/governance_pipeline*.ml` = 0 hits). The cruder gate runs first and shadows the typed one.
 
@@ -54,7 +67,7 @@ This is the correction that an adversarial pass forced, and it is the load-beari
 - `Docker` (`:1158`), `Awk` with `system()` (`:1165`)
 - unknown/interpreter heads not otherwise typed (perl, ruby, php, osascript, deno, bun, Rscript, `tar --to-command`)
 
-Mapping `R0_Read → Low` flatly would let `awk 'BEGIN{system("...")}'`, `perl -e`, an unknown binary, `$VAR`-bearing argv, or a compound `git status; rm -rf /` slip below the `hard_forbidden` Critical line. That is fail-open. The claim in an earlier draft that "these already fail closed to Critical inside classify" is false and is corrected here.
+Mapping `R0_Read → Low` flatly would let `awk 'BEGIN{system("...")}'`, `perl -e`, an unknown binary, `$VAR`-bearing argv, or a compound `git status; rm -rf /` slip below the Critical operator floor. That is fail-open. The claim in an earlier draft that "these already fail closed to Critical inside classify" is false and is corrected here.
 
 De-escalate below Critical **only when both** conditions hold:
 
@@ -98,8 +111,11 @@ It removes two classifiers (the catalog destructive override and `risk_of_keeper
 
 **Current production-safe state (verified 2026-07-10).**
 `governance_approval_guard` has no keeper-name exemption. Critical decisions
-take the `hard_forbidden` Block branch, and every remaining decision at or above
-the keeper confirmation threshold returns `ApprovalRequired`.
+and every remaining decision at or above the keeper confirmation threshold
+return `ApprovalRequired`. The approval callback then enforces the operator-only
+floor: Critical calls cannot use automatic flags, remembered rules, or approval
+mode, but an explicit operator resolution can resume the nonblocking Keeper
+continuation.
 
 **Removed unsafe attempt.** PR #23761 added `MASC_CODE_EXEMPT_KEEPERS` as a
 space-split set of raw keeper-name strings. The generic approval branch checked
@@ -149,7 +165,7 @@ Override clause: this is a security-loosening change, not production-blocking; i
 
 Exercise `Governance_pipeline_risk.assess_risk ~tool_name:"tool_execute"` (the wiring), not only `Shell_ir_risk.classify` (the substrate):
 
-- Below Critical (must NOT hard_forbidden): `git status`, `git log --oneline -5`, `git diff`, `ls`, `cat FILE`, `rg PATTERN`, `gh pr view 123`, `gh pr diff 123` → Low.
+- Below Critical (must not enter the High/Critical operator floor): `git status`, `git log --oneline -5`, `git diff`, `ls`, `cat FILE`, `rg PATTERN`, `gh pr view 123`, `gh pr diff 123` → Low.
 - Fail-closed to Critical (the actual risk surface — these are the tests the earlier draft omitted): `awk 'BEGIN{system("id")}'`, `perl -e '...'`, `ruby -e '...'`, `tar --to-command ...`, `docker run ...`, an unknown binary, `gh <unknown-subcommand>`, `$VAR`-bearing argv, and the compound `git status; rm -rf /` → each ≥ Critical.
 - Known-destructive to Critical: `rm -rf /`, `git push --force`, `mkfs...`, `sed -i ...`, any `$( )` substitution, `curl ... | sh` → Critical.
 - R1 floor: `git commit`, `curl https://...`, `ssh host` → High (reaches the approval floor), asserted to NOT auto-run at production `keeper_confirm_threshold`.
@@ -157,7 +173,7 @@ Exercise `Governance_pipeline_risk.assess_risk ~tool_name:"tool_execute"` (the w
 ### 6.2 Exemption (Gap B)
 
 - The retired `MASC_CODE_EXEMPT_KEEPERS` value has no effect: a High-risk non-code tool still returns `ApprovalRequired`.
-- Critical Execute remains Block even when the retired environment variable names the current keeper.
+- Critical Execute remains `ApprovalRequired` even when the retired environment variable names the current keeper; it is never terminally rejected by this policy.
 - Any future typed exemption must prove that only its explicit typed code-tool category can continue and that exactly one exemption audit event is emitted.
 
 ### 6.3 Flag audit (Gap A gating)
@@ -174,11 +190,11 @@ A test/assertion that with `MASC_SHELL_IR_APPROVAL_GATE_ENABLED` off (if reachab
 | RFC-0160 shell-ir-first-class | Implemented | Established Shell-IR as the single decision substrate in the exec runtime; Gap A completes that for the governance layer. |
 | RFC-0208 shell-ir-compositional-risk-ast | Draft | Owns the compositional risk AST with `R0_Read`; Gap A consumes it. |
 | RFC-0091 execute-typed-argv | Implemented | Provides the typed argv → `Shell_ir` lowering Gap A reuses; each argv token is literal by construction, which is why a typed classifier (not substring) is the correct basis and why non-literal argv must fail closed. |
-| RFC-0254 shell-ir-approval-autonomous-policy | Active | The landed handler-level typed gate that already allows `git status` but runs downstream of and is shadowed by the governance Block. Gap A lifts its typed verdict up into the PreToolUse risk assessment. |
+| RFC-0254 shell-ir-approval-autonomous-policy | Active | The landed handler-level typed gate already distinguishes `git status`, but it still runs downstream of the coarser governance approval classification. Gap A lifts its typed verdict into the PreToolUse risk assessment. |
 | RFC-0255 shell-ir-path-typed-scope-and-floor-narrow | Draft | Documents the per-binary string-exemption ladder as the N-of-M fail-open pattern to avoid (§2.2). |
 | RFC-0131 shell command gate facade | referenced | The handler-side gate facade, structurally separate from `governance_approval_guard`; confirms the two-gate split Gap A unifies. |
-| RFC-0321 hard-forbidden-typed-error | Draft/impl | Made `hard_forbidden` a typed `Block`; its open-question #3 (dual risk evaluation) is exactly the governance-vs-ShellIR shadowing Gap A fixes. |
-| RFC-0304 hitl-critical-bounded-escalation | Draft | Its Defer/escalation applies to the ApprovalRequired path, which Critical Execute never reaches (it Blocks first). After Gap A, R1/High Execute reaches that path. |
+| RFC-0321 retired terminal-policy error | Historical | Its terminal `Block` is retired. Its open-question #3 (dual risk evaluation) still describes the governance-vs-ShellIR shadowing Gap A fixes. |
+| RFC-0304 hitl-critical-bounded-escalation | Draft | Its Defer/escalation now applies to High/Critical Keeper requests through the `ApprovalRequired` continuation path. |
 | RFC-0309 typed-gh-capability-gating | Draft | The `gh` capability axis Gap A §3.1 consumes for unrecognized subcommands (`Gh_capability_policy.disposition_of`). |
 | RFC-0312 keeper-repo-mapping-advisory-scope | Accepted | Confirms repo mappings are advisory and non-gating; Gap A/B must not re-introduce a hidden cap 0312 removed. |
 | RFC-0126 silent-fallback-discipline | Implemented | The fail-closed discipline Gap A honors (Unknown → Critical, never a permissive default). |

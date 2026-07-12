@@ -214,6 +214,9 @@ let make_hooks
     ?(max_cost_usd : float option)
     ?(destructive_ops_policy : Destructive_ops_policy.t =
         Destructive_ops_policy.default)
+    ?active_tool_names
+    ?risk_context
+    ?meta_provider
     ?(pre_tool_use_guard :
         tool_name:string -> input:Yojson.Safe.t -> string option =
         fun ~tool_name:_ ~input:_ -> None)
@@ -243,6 +246,10 @@ let make_hooks
   let readonly_observation_state =
     Keeper_guards.make_readonly_observation_state ()
   in
+  if Option.is_some active_tool_names && Option.is_some risk_context
+  then
+    invalid_arg
+      "Keeper_hooks_oas.make_hooks: provide active_tool_names or risk_context, not both";
   let streak_threshold = 5 in
   ignore trajectory_acc;
   let record_gate_decision = Keeper_guards.ignore_gate_decision in
@@ -252,6 +259,20 @@ let make_hooks
      attempted action into tool-call and trajectory lanes so blocked
      pre-tool attempts are not invisible to tool-stats. *)
   let guard_chain =
+    let risk_context =
+      match risk_context with
+      | Some context -> context
+      | None ->
+        let active_tool_names =
+          match active_tool_names with
+          | Some names -> names
+          | None ->
+            Tool_shard.get_agent_shards (!meta_ref).name
+            |> Tool_shard.tools_of_shards
+            |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
+        in
+        Governance_pipeline.keeper_risk_context ~active_tool_names
+    in
     Keeper_guards.build_chain
       ~meta_ref
       ~tool_start_time
@@ -261,6 +282,8 @@ let make_hooks
       ~denied:keeper_denied_tools
       ~max_cost_usd
       ~destructive_ops_policy
+      ~risk_context
+      ?meta_provider
       ~on_gate_decision:record_gate_decision
       ~pre_tool_use_guard
   in

@@ -382,7 +382,7 @@ let test_cost_guard_disabled () =
   in
   check string "no budget -> Continue" "Continue" (decision_kind d)
 
-let test_destructive_guard_notifies_block_observer () =
+let test_destructive_guard_requires_operator_approval () =
   let meta_ref = make_meta_ref "test_keeper" in
   let observed = ref [] in
   let on_gate_decision event = observed := event :: !observed in
@@ -399,13 +399,14 @@ let test_destructive_guard_notifies_block_observer () =
          ~input:(`Assoc [ ("command", `String "rm -rf /") ])
          ())
   in
-  check string "destructive command -> Block" "Block" (decision_kind d);
+  check string "destructive command -> ApprovalRequired"
+    "ApprovalRequired" (decision_kind d);
   match !observed with
   | [ event ] ->
     check string "stage" "destructive_guard" event.KG.stage;
-    check string "decision" "block"
+    check string "decision" "approval_required"
       (KG.gate_decision_to_string event.KG.decision);
-    check string "reason_code" "destructive_guard" event.KG.reason_code;
+    check string "reason_code" "destructive_approval_required" event.KG.reason_code;
     check string "tool_name" "shell_exec" event.KG.tool_name
   | events ->
     failf "expected one destructive observer event, got %d" (List.length events)
@@ -874,25 +875,23 @@ let test_governance_approval_critical_code_blocks_with_legacy_exemption () =
            ~input:(`Assoc [ ("cmd", `String "git status") ])
            ())
     in
-    check string "legacy exemption cannot bypass critical code block"
-      "Block" (decision_kind d);
-    check bool "override carries hard-forbidden reason" true
-      (contains_substring (override_text d) "code=hard_forbidden");
+    check string "legacy exemption cannot bypass critical approval"
+      "ApprovalRequired" (decision_kind d);
     match !observed with
     | [ event ] ->
       check string "stage" "governance_approval" event.KG.stage;
-      check string "decision" "block"
+      check string "decision" "approval_required"
         (KG.gate_decision_to_string event.KG.decision);
-      check string "reason_code" "hard_forbidden" event.KG.reason_code;
+      check string "reason_code" "governance_approval" event.KG.reason_code;
       check string "tool_name" "tool_execute" event.KG.tool_name;
       check (option string) "source_path"
         (Some "lib/keeper/keeper_guards.ml")
         event.KG.source_path
     | events ->
-      failf "expected one hard-forbidden observer event, got %d"
+      failf "expected one operator-approval observer event, got %d"
         (List.length events))))
 
-let test_governance_approval_hard_forbidden_blocks_without_hitl () =
+let test_governance_approval_critical_requires_operator_without_hitl () =
   with_env "MASC_GOVERNANCE_LEVEL" "development" (fun () ->
   with_env "MASC_DISABLE_HITL" "true" (fun () ->
     let meta_ref = make_meta_ref "test_keeper" in
@@ -905,29 +904,115 @@ let test_governance_approval_hard_forbidden_blocks_without_hitl () =
            ~input:(`Assoc [ ("target", `String "workspace") ])
            ())
     in
-    check string "critical hard-forbidden tool -> Block"
-      "Block" (decision_kind d);
-    check bool "block carries hard-forbidden reason" true
-      (contains_substring (override_text d) "code=hard_forbidden");
+    check string "Critical tool -> ApprovalRequired"
+      "ApprovalRequired" (decision_kind d);
     match !observed with
     | [ event ] ->
       check string "stage" "governance_approval" event.KG.stage;
-      check string "decision" "block"
+      check string "decision" "approval_required"
         (KG.gate_decision_to_string event.KG.decision);
-      check string "reason_code" "hard_forbidden" event.KG.reason_code;
+      check string "reason_code" "governance_approval" event.KG.reason_code;
       check string "tool_name" "masc_force_reset" event.KG.tool_name;
       check (option string) "source_path"
         (Some "lib/keeper/keeper_guards.ml")
         event.KG.source_path
     | events ->
-      failf "expected one hard-forbidden observer event, got %d"
+      failf "expected one operator-approval observer event, got %d"
         (List.length events)))
+
+let test_keeper_chain_high_requires_operator_without_hitl () =
+  with_env "MASC_GOVERNANCE_LEVEL" "development" (fun () ->
+  with_env "MASC_DISABLE_HITL" "true" (fun () ->
+    let keeper_name = "test_keeper" in
+    let meta_ref = make_meta_ref keeper_name in
+    let observed = ref [] in
+    let tool_name = "keeper_surface_post" in
+    let input = `Assoc [ "content", `String "follow up" ] in
+    Masc.Tool_shard.set_agent_shards
+      keeper_name
+      Masc.Tool_shard.default_shard_names;
+    Fun.protect
+      ~finally:(fun () -> Masc.Tool_shard.remove_agent_shards keeper_name)
+      (fun () ->
+         let active_tool_names =
+           Masc.Tool_shard.tools_of_shards
+             Masc.Tool_shard.default_shard_names
+           |> List.map
+                (fun (schema : Masc_domain.tool_schema) -> schema.name)
+         in
+         let risk_context =
+           Masc.Governance_pipeline.keeper_risk_context
+             ~active_tool_names
+         in
+         let assessment =
+           Masc.Governance_pipeline.assess_keeper_risk
+             ~context:risk_context
+             ~tool_name
+             ~input
+         in
+         check string "fixture base risk" "medium"
+           (Masc.Governance_pipeline.risk_level_to_string assessment.base_risk);
+         check string "active shards escalate fixture to High" "high"
+           (Masc.Governance_pipeline.risk_level_to_string
+              assessment.effective_risk);
+         let hook =
+           KG.build_chain
+             ~meta_ref
+             ~tool_start_time:(ref 0.0)
+             ~streak_state:(KG.make_streak_state ())
+             ~readonly_observation_state:(KG.make_readonly_observation_state ())
+             ~streak_threshold:8
+             ~denied:[]
+             ~max_cost_usd:None
+             ~destructive_ops_policy:Masc.Destructive_ops_policy.default
+             ~risk_context
+             ~on_gate_decision:(fun event -> observed := event :: !observed)
+             ~pre_tool_use_guard:(fun ~tool_name:_ ~input:_ -> None)
+         in
+         let decision = invoke hook (pre_tool_use_event ~tool_name ~input ()) in
+         check string
+           "effective-High tool reaches operator approval through the full chain"
+           "ApprovalRequired"
+           (decision_kind decision);
+         match !observed with
+         | [ event ] ->
+           check string "stage" "governance_approval" event.KG.stage;
+           check string "decision" "approval_required"
+             (KG.gate_decision_to_string event.KG.decision)
+         | events ->
+           failf "expected one operator-approval observer event, got %d"
+             (List.length events))))
 
 let meta_with_blocker klass meta =
   let open Masc.Keeper_meta_contract in
   let blocker = blocker_info_of_class ~detail:"test blocker" klass in
   { meta with runtime = { meta.runtime with last_blocker = Some blocker } }
 ;;
+
+let test_governance_metadata_unavailable_requires_operator () =
+  with_env "MASC_GOVERNANCE_LEVEL" "development" (fun () ->
+  with_env "MASC_DISABLE_HITL" "true" (fun () ->
+    let meta_ref = make_meta_ref "test_keeper" in
+    let observed = ref [] in
+    let hook =
+      KG.governance_approval_guard
+        ~active_tool_names:[ "keeper_time_now" ]
+        ~meta_provider:(fun () -> None)
+        ~meta_ref
+        ~on_gate_decision:(fun event -> observed := event :: !observed)
+    in
+    let decision =
+      invoke hook (pre_tool_use_event ~tool_name:"keeper_time_now" ())
+    in
+    check string "missing live metadata fails closed"
+      "ApprovalRequired" (decision_kind decision);
+    match !observed with
+    | [ event ] ->
+      check string "typed reason" "governance_metadata_unavailable"
+        event.KG.reason_code
+    | events ->
+      failf "expected one metadata-unavailable event, got %d"
+        (List.length events)))
 
 let test_governance_approval_serious_blocker_overrides () =
   with_env "MASC_GOVERNANCE_LEVEL" "development" (fun () ->
@@ -943,10 +1028,8 @@ let test_governance_approval_serious_blocker_overrides () =
            ~input:(`Assoc [ ("title", `String "follow up") ])
            ())
     in
-    check string "serious last_blocker -> Block"
-      "Block" (decision_kind d);
-    check bool "block carries hard-forbidden reason" true
-      (contains_substring (override_text d) "code=hard_forbidden")))
+    check string "serious last_blocker -> ApprovalRequired"
+      "ApprovalRequired" (decision_kind d)))
 
 let test_governance_approval_transient_blocker_allows () =
   with_env "MASC_GOVERNANCE_LEVEL" "development" (fun () ->
@@ -1080,8 +1163,8 @@ let () = run "Keeper_guards" [
     test_case "no budget -> continue" `Quick test_cost_guard_disabled;
   ];
   "destructive_guard", [
-    test_case "notifies observer on block" `Quick
-      test_destructive_guard_notifies_block_observer;
+    test_case "requires operator approval" `Quick
+      test_destructive_guard_requires_operator_approval;
   ];
   "streak_guard", [
     test_case "under threshold -> continue" `Quick test_streak_guard_under_threshold;
@@ -1122,10 +1205,14 @@ let () = run "Keeper_guards" [
   "governance_approval_guard", [
     test_case "legacy exemption cannot bypass high-risk approval" `Quick
       test_governance_approval_legacy_exemption_cannot_bypass_high;
-    test_case "critical code blocks with legacy exemption" `Quick
+    test_case "critical code requires approval with legacy exemption" `Quick
       test_governance_approval_critical_code_blocks_with_legacy_exemption;
-    test_case "hard-forbidden blocks without HITL" `Quick
-      test_governance_approval_hard_forbidden_blocks_without_hitl;
+    test_case "Critical requires operator without HITL" `Quick
+      test_governance_approval_critical_requires_operator_without_hitl;
+    test_case "High requires operator through chain without HITL" `Quick
+      test_keeper_chain_high_requires_operator_without_hitl;
+    test_case "metadata unavailable requires operator" `Quick
+      test_governance_metadata_unavailable_requires_operator;
     test_case "serious last_blocker overrides without HITL" `Quick
       test_governance_approval_serious_blocker_overrides;
     test_case "transient last_blocker allows without HITL" `Quick

@@ -202,7 +202,7 @@ val blocker_class_auto_approval_blocked : blocker_class -> bool
 (** [blocker_class_auto_approval_blocked b] is [true] iff this blocker
     class should prevent auto-approval of the keeper's next tool call
     (including [always_approve] and remembered allow-rules).  Only
-    safety/uncertainty classes are hard-forbidden; transient liveness
+    safety/uncertainty classes require an operator decision; transient liveness
     signals such as [Capacity_backpressure], [Turn_timeout], and SDK
     budget/idle/input conditions are intentionally excluded so
     automated recovery flows are not stalled.  Exhaustive — adding a

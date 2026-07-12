@@ -31,6 +31,32 @@ let assess_trifecta = Governance_pipeline_risk.assess_trifecta
 let combinatorial_risk_escalation = Governance_pipeline_risk.combinatorial_risk_escalation
 let assess_risk = Governance_pipeline_risk.assess_risk
 
+type keeper_risk_assessment =
+  { base_risk : risk_level
+  ; effective_risk : risk_level
+  ; trifecta_active : bool
+  }
+
+type keeper_risk_context = { trifecta_active : bool }
+
+let keeper_risk_context ~active_tool_names =
+  let trifecta_count, _, _, _ = assess_trifecta ~active_tool_names in
+  { trifecta_active = trifecta_count >= 3 }
+;;
+
+let assess_keeper_risk ~context ~tool_name ~input =
+  let trifecta_active = context.trifecta_active in
+  let base_risk = assess_risk ~tool_name ~input in
+  let effective_risk =
+    combinatorial_risk_escalation
+      ~trifecta_active
+      ~tool_name
+      ~input
+      ~base_risk
+  in
+  { base_risk; effective_risk; trifecta_active }
+;;
+
 (* ── Trace ID generation ────────────────────────────────────── *)
 
 let trace_id prefix =
@@ -88,21 +114,17 @@ let runtime_auto_approval_blocked = function
       Keeper_meta_contract.blocker_class_auto_approval_blocked blocker.klass
 ;;
 
-(** PR-E (Plan v3 Leak 1): split the legacy [auto_approval_forbidden]
-    into a "hard" component that always wins and a "soft" pattern
-    component that a narrowly-scoped routine allowlist match is
-    permitted to override.
-
-    - Hard forbidden = the request is at Critical risk OR structured
-      [runtime.last_blocker] is set.  Routine matchers must not
-      bypass these — this is where real safety walls live.  The
-      blocker [detail] is free-form UI/debug context, not a policy
-      classifier.
-    - Soft forbidden = the tool name or op string trips
-      [destructive_tool_or_op] (a substring filter on "shell"/"git"
-      plus a small list of bash/git ops). *)
-let auto_approval_hard_forbidden ~risk meta =
+(** Critical risk and structured runtime blockers establish an operator-only
+    confirmation floor. They prohibit automatic approval, but they do not make
+    an operator decision impossible: the request follows the ordinary HITL
+    continuation path and can resume the Keeper lane after resolution. The
+    blocker [detail] remains display context, never a policy classifier. *)
+let manual_approval_required ~risk meta =
   risk = Critical || runtime_auto_approval_blocked meta
+;;
+
+let keeper_manual_approval_required ~risk meta =
+  risk = High || manual_approval_required ~risk meta
 ;;
 
 (** Minimum risk level that triggers audit logging. *)
@@ -117,11 +139,10 @@ let decide ?meta ~governance_level ~tool_name ~input () =
   let risk = assess_risk ~tool_name ~input in
   let trace_id = generate_trace_id () in
   let action =
-    if auto_approval_hard_forbidden ~risk meta then
+    if manual_approval_required ~risk meta then
       `Require_confirm
         (Printf.sprintf
-           "Governance (%s): %s risk tool %S requires confirmation: auto-approval is \
-            hard-forbidden"
+           "Governance (%s): %s risk tool %S requires operator confirmation"
            governance_level
            (risk_level_to_string risk)
            tool_name)
@@ -309,21 +330,6 @@ let approval_band_of_risk = function
   | Critical -> Operator_approval.Band_critical
 ;;
 
-(* Human-readable reason attached to a hard-forbidden rejection.
-   Reports every wall that fired — Critical risk, an active runtime
-   blocker, or both — so operators see the complete disposition in the
-   audit trail rather than only the highest-precedence one. *)
-let forbidden_reject_reason ~risk ~runtime_blocked =
-  match risk = Critical, runtime_blocked with
-  | true, true ->
-    "critical risk tool and runtime contract both block auto-approval"
-  | true, false -> "critical risk tool cannot be auto-approved"
-  | false, true -> "runtime contract blocks auto-approval"
-  | false, false ->
-    invalid_arg
-      "forbidden_reject_reason: expected Critical risk or runtime auto-approval blocker"
-;;
-
 type hitl_approval_grant =
   { approval_id : string
   ; approved_action : Keeper_event_queue.hitl_approved_action
@@ -352,63 +358,14 @@ let consume_hitl_approval_grant grant ~keeper_name ~tool_name ~input =
   && Atomic.compare_and_set grant.consumed false true
 ;;
 
-(* Reject a hard-forbidden request outright, auditing the decision as a
-   terminal event. Called before any HITL queue path so the request can
-   never be approved by an operator or a remembered rule. *)
-let reject_hard_forbidden ~config ~keeper_name ~tool_name ~input ~risk ~meta () =
-  let risk_level = queue_risk_level risk in
-  let base_path = (config : Workspace.config).base_path in
-  let runtime_blocked = runtime_auto_approval_blocked meta in
-  let reason = forbidden_reject_reason ~risk ~runtime_blocked in
-  let turn_id =
-    Option.map
-      (fun (m : Keeper_meta_contract.keeper_meta) -> m.runtime.usage.total_turns + 1)
-      meta
-  in
-  let task_id = Option.bind meta Keeper_runtime_contract.current_task_id_opt in
-  let goal_id = Option.bind meta Keeper_runtime_contract.primary_goal_id_opt in
-  let goal_ids =
-    match meta with
-    | Some (m : Keeper_meta_contract.keeper_meta) -> m.active_goal_ids
-    | None -> []
-  in
-  let runtime_contract =
-    Option.map (Keeper_runtime_contract.runtime_contract_json ~config) meta
-  in
-  let sandbox_target =
-    Option.map
-      (fun keeper_meta -> Keeper_runtime_contract.backend_of_meta keeper_meta)
-      meta
-  in
-  let selected_model = selected_model_of_meta meta in
-  let decision = Agent_sdk.Hooks.Reject reason in
-  Keeper_approval_queue.audit_approval_event
-    ~base_path
-    ~event_type:Keeper_approval_queue.approval_audit_hard_forbidden_event
-    ~id:(Keeper_approval_queue.generate_id ())
-    ~keeper_name
-    ~tool_name
-    ~risk_level
-    ?turn_id
-    ?task_id
-    ?goal_id
-    ~goal_ids
-    ?sandbox_target
-    ?runtime_contract
-    ?selected_model
-    ~disposition:"Blocked"
-    ~disposition_reason:"hard_forbidden"
-    ~auto_approved:false
-    ~decision:(Keeper_approval_queue.Approval_resolved decision)
-    ();
-  decision
-;;
-
 let to_oas_approval_callback
       ~config
       ~governance_level
       ~keeper_name
       ?meta
+      ?meta_provider
+      ?active_tool_names
+      ?risk_context
       ?clock
       ?continuation_channel
       ?(lane_policy = Keeper_approval_queue.Blocking)
@@ -416,37 +373,52 @@ let to_oas_approval_callback
       ()
   : Agent_sdk.Hooks.approval_callback
   =
+  if Option.is_some meta && Option.is_some meta_provider
+  then invalid_arg "to_oas_approval_callback: provide meta or meta_provider, not both";
+  if Option.is_some active_tool_names && Option.is_some risk_context
+  then
+    invalid_arg
+      "to_oas_approval_callback: provide active_tool_names or risk_context, not both";
+  let risk_context =
+    match risk_context with
+    | Some context -> context
+    | None ->
+      let active_tool_names =
+        match active_tool_names with
+        | Some names -> names
+        | None ->
+          Tool_shard.get_agent_shards keeper_name
+          |> Tool_shard.tools_of_shards
+          |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
+      in
+      keeper_risk_context ~active_tool_names
+  in
   fun ~tool_name ~input ->
-    let active_tool_names =
-      Tool_shard.get_agent_shards keeper_name
-      |> Tool_shard.tools_of_shards
-      |> List.map (fun (s : Masc_domain.tool_schema) -> s.name)
+    let meta, metadata_unavailable =
+      match meta_provider with
+      | Some current ->
+        (match current () with
+         | Some meta -> Some meta, false
+         | None -> None, true)
+      | None -> meta, false
     in
-    let trifecta_count, _, _, _ = assess_trifecta ~active_tool_names in
-    let trifecta_active = trifecta_count >= 3 in
-    let base_risk = assess_risk ~tool_name ~input in
-    let risk =
-      combinatorial_risk_escalation ~trifecta_active ~tool_name ~input ~base_risk
+    let risk_assessment =
+      assess_keeper_risk ~context:risk_context ~tool_name ~input
     in
+    let base_risk = risk_assessment.base_risk in
+    let risk = risk_assessment.effective_risk in
+    let trifecta_active = risk_assessment.trifecta_active in
     let needs_approval =
       match keeper_confirm_threshold governance_level with
       | Some threshold -> risk_level_to_int risk >= risk_level_to_int threshold
       | None -> false
     in
-    let hard_forbidden = auto_approval_hard_forbidden ~risk meta in
+    let operator_floor =
+      metadata_unavailable || keeper_manual_approval_required ~risk meta
+    in
     let soft_forbidden = auto_approval_soft_forbidden ~tool_name ~input in
-    if hard_forbidden
-    then (
-      Log.Governance.debug
-        "[%s] hard_forbidden tool=%s base=%s effective=%s: rejecting outright"
-        keeper_name
-        tool_name
-        (risk_level_to_string base_risk)
-        (risk_level_to_string risk);
-      reject_hard_forbidden ~config ~keeper_name ~tool_name ~input ~risk ~meta ())
-    else (
-      let auto_approval_forbidden = soft_forbidden in
-      let requires_operator_approval = needs_approval || auto_approval_forbidden in
+    let auto_approval_forbidden = operator_floor || soft_forbidden in
+    let requires_operator_approval = needs_approval || auto_approval_forbidden in
       let base_path = (config : Workspace.config).base_path in
       if trifecta_active
       then
@@ -573,16 +545,22 @@ let to_oas_approval_callback
           Agent_sdk.Hooks.Approve
         | None ->
           match
-            Keeper_approval_queue.find_matching_rule
-              ~base_path
-              ~keeper_name
-              ~tool_name
-              ~input
-              ~risk_level
-              ?sandbox_profile
-              ?backend
-              ?runtime_contract
-              ()
+            (* A remembered rule is an exact operator decision, not a blanket
+               automatic mode.  Soft signals may reuse it; the High/Critical
+               operator floor may not. *)
+            if operator_floor
+            then None
+            else
+              Keeper_approval_queue.find_matching_rule
+                ~base_path
+                ~keeper_name
+                ~tool_name
+                ~input
+                ~risk_level
+                ?sandbox_profile
+                ?backend
+                ?runtime_contract
+                ()
           with
           | Some matched ->
             Keeper_approval_queue.audit_approval_event
@@ -668,7 +646,30 @@ let to_oas_approval_callback
                   ?continuation_channel
                   ()
             in
-            (match Operator_approval.decide_approval_mode ~mode ~band with
+            (match
+               if metadata_unavailable
+               then
+                 Operator_approval.Queue_for_operator
+                   { mode
+                   ; band
+                   ; reason = Operator_approval.Metadata_unavailable
+                   }
+               else if operator_floor
+               then
+                 Operator_approval.Queue_for_operator
+                   { mode
+                   ; band
+                   ; reason = Operator_approval.Separation_of_duties_floor
+                   }
+               else if soft_forbidden
+               then
+                 Operator_approval.Queue_for_operator
+                   { mode
+                   ; band
+                   ; reason = Operator_approval.Automatic_approval_prohibited
+                   }
+               else Operator_approval.decide_approval_mode ~mode ~band
+             with
              | Operator_approval.Auto_approved { mode; band } ->
                Keeper_approval_queue.audit_approval_event
                  ~base_path
@@ -694,5 +695,5 @@ let to_oas_approval_callback
                  ();
                Agent_sdk.Hooks.Approve
              | Operator_approval.Queue_for_operator { reason; mode = _; band = _ } ->
-               submit_for_operator reason)))
+               submit_for_operator reason))
 ;;

@@ -256,9 +256,27 @@ val approval_audit_pending_event : string
 val approval_audit_resolved_event : string
 (** Event tag persisted when an approval is resolved. *)
 
-val approval_audit_hard_forbidden_event : string
-(** Event tag persisted when governance rejects a hard-forbidden approval
-    (Critical risk or an active runtime blocker) without queuing it. *)
+type approval_audit_event_kind =
+  | Audit_pending
+  | Audit_resolved
+  | Audit_expired
+  | Audit_timeout
+  | Audit_cancelled
+  | Audit_auto_rule
+  | Audit_auto_always
+  | Audit_rule_created
+  | Audit_legacy_terminal_rejection
+  | Audit_other of string
+
+val approval_audit_event_kind_of_wire : string -> approval_audit_event_kind
+(** Decode the exact persisted wire variant. The legacy terminal-rejection
+    variant is read-only migration support and is never emitted by current
+    code. *)
+
+val approval_audit_event_kind_to_canonical_wire :
+  approval_audit_event_kind -> string
+(** Canonical dashboard projection. Legacy terminal rejections project as
+    [resolved], so the retired label is never displayed. *)
 
 val generate_id : unit -> string
 (** Generate a unique approval/audit id. *)

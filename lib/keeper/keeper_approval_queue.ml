@@ -81,10 +81,46 @@ let read_recent_audit_raw store limit =
 
 let approval_audit_pending_event = "pending"
 let approval_audit_resolved_event = "resolved"
-let approval_audit_hard_forbidden_event = "hard_forbidden"
 let approval_audit_summary_event = "summary_updated"
 let approval_sse_pending_event = "approval:pending"
 let approval_sse_resolved_event = "approval:resolved"
+
+type approval_audit_event_kind =
+  | Audit_pending
+  | Audit_resolved
+  | Audit_expired
+  | Audit_timeout
+  | Audit_cancelled
+  | Audit_auto_rule
+  | Audit_auto_always
+  | Audit_rule_created
+  | Audit_legacy_terminal_rejection
+  | Audit_other of string
+
+let approval_audit_event_kind_of_wire = function
+  | "pending" -> Audit_pending
+  | "resolved" -> Audit_resolved
+  | "expired" -> Audit_expired
+  | "approval_timeout" -> Audit_timeout
+  | "cancelled" -> Audit_cancelled
+  | "auto_approved_rule_match" -> Audit_auto_rule
+  | "auto_approved_always" -> Audit_auto_always
+  | "rule_created" -> Audit_rule_created
+  | "hard_forbidden" -> Audit_legacy_terminal_rejection
+  | other -> Audit_other other
+;;
+
+let approval_audit_event_kind_to_canonical_wire = function
+  | Audit_pending -> "pending"
+  | Audit_resolved | Audit_legacy_terminal_rejection -> "resolved"
+  | Audit_expired -> "expired"
+  | Audit_timeout -> "approval_timeout"
+  | Audit_cancelled -> "cancelled"
+  | Audit_auto_rule -> "auto_approved_rule_match"
+  | Audit_auto_always -> "auto_approved_always"
+  | Audit_rule_created -> "rule_created"
+  | Audit_other other -> other
+;;
 let approval_sse_summary_event = "approval:summary_updated"
 
 let non_empty_reason reason =
@@ -350,16 +386,44 @@ let resolved_approval_decision_kind json =
 let resolved_history_event json =
   match Safe_ops.json_string_opt "event" json with
   | Some event ->
-    String.equal event approval_audit_resolved_event
-    || String.equal event approval_audit_hard_forbidden_event
+    (match approval_audit_event_kind_of_wire event with
+     | Audit_resolved | Audit_legacy_terminal_rejection -> true
+     | Audit_pending
+     | Audit_expired
+     | Audit_timeout
+     | Audit_cancelled
+     | Audit_auto_rule
+     | Audit_auto_always
+     | Audit_rule_created
+     | Audit_other _ -> false)
   | None -> false
 ;;
 
 let resolved_approval_json_of_audit_event json =
   let resolved_at = Safe_ops.json_float_opt "ts" json in
+  let event_kind =
+    Safe_ops.json_string_opt "event" json
+    |> Option.map approval_audit_event_kind_of_wire
+  in
+  let disposition_reason =
+    match event_kind with
+    | Some Audit_legacy_terminal_rejection -> `String "retired_terminal_policy"
+    | Some
+        (Audit_pending
+        | Audit_resolved
+        | Audit_expired
+        | Audit_timeout
+        | Audit_cancelled
+        | Audit_auto_rule
+        | Audit_auto_always
+        | Audit_rule_created
+        | Audit_other _)
+    | None ->
+      json_member_or_null "disposition_reason" json
+  in
   `Assoc
     [ "id", `String (Safe_ops.json_string ~default:"" "id" json)
-    ; "event", `String (Safe_ops.json_string ~default:"" "event" json)
+    ; "event", `String approval_audit_resolved_event
     ; "keeper_name", `String (Safe_ops.json_string ~default:"" "keeper" json)
     ; "tool_name", `String (Safe_ops.json_string ~default:"" "tool" json)
     ; "risk_level", `String (Safe_ops.json_string ~default:"" "risk" json)
@@ -377,7 +441,7 @@ let resolved_approval_json_of_audit_event json =
     ; "goal_ids", json_member_or_null "goal_ids" json
     ; "sandbox_target", json_member_or_null "sandbox_target" json
     ; "disposition", json_member_or_null "disposition" json
-    ; "disposition_reason", json_member_or_null "disposition_reason" json
+    ; "disposition_reason", disposition_reason
     ; "actor", json_member_or_null "actor" json
     ; "approval_mode", json_member_or_null "approval_mode" json
     ; "authorizing_band", json_member_or_null "authorizing_band" json

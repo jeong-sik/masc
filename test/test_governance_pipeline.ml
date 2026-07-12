@@ -553,14 +553,14 @@ let test_risk_payload_beats_low_override () =
 (* ── Governance Level Decision Tests ────────────────────────── *)
 
 let test_development_confirms_critical () =
-  (* Hard-forbidden gate is unconditional: even development must confirm
+  (* The operator-only floor is unconditional: even development must confirm
      Critical-risk tools rather than allowing silent auto-approval. *)
   let d = Gp.decide ~governance_level:"development"
     ~tool_name:"masc_delete_workspace" ~input:`Null () in
   (match d.action with
    | `Require_confirm reason ->
      Alcotest.(check bool) "reason non-empty" true (String.length reason > 0)
-   | `Allow -> Alcotest.fail "development should confirm hard-forbidden critical"
+   | `Allow -> Alcotest.fail "development should confirm critical"
    | `Deny _ -> Alcotest.fail "development should confirm critical, not deny");
   Alcotest.(check string) "risk" "critical" (Gp.risk_level_to_string d.risk)
 
@@ -690,7 +690,7 @@ let setup () =
 
 let test_hook_development_blocks_critical () =
   (* The front-door pre_hook uses decide without keeper meta, but the
-     unconditional hard-forbidden gate still blocks Critical risk. *)
+     unconditional operator-confirmation floor still gates Critical risk. *)
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   setup ();
@@ -707,9 +707,9 @@ let test_hook_development_blocks_critical () =
      let status = Yojson.Safe.Util.((Tool_result.data r) |> member "status" |> to_string) in
      Alcotest.(check string) "awaiting_approval" "awaiting_approval" status
    | Tool_dispatch.Pass ->
-     Alcotest.fail "development should block hard-forbidden critical"
+     Alcotest.fail "development should gate critical"
    | Tool_dispatch.Proceed _ ->
-     Alcotest.fail "development should block hard-forbidden critical, not proceed");
+     Alcotest.fail "development should gate critical, not proceed");
   cleanup_tmpdir tmpdir
 
 let test_hook_production_blocks_critical () =
@@ -888,10 +888,10 @@ let test_hitl_disabled_allows_noncritical_below_threshold () =
     | `Allow -> ()
     | `Require_confirm _ ->
       Alcotest.fail "HITL disabled should keep noncritical below-threshold calls allowed"
-    | `Deny _ -> Alcotest.fail "high risk should not be denied by hard-forbidden gate")
+    | `Deny _ -> Alcotest.fail "high risk should not be denied by operator floor")
 
 (* ── HITL governance blocker tests ──────────────────────────── *)
-(* Adversarial review blockers for hard-forbidden front-door / keeper
+(* Adversarial review blockers for the operator-only front-door / keeper
    governance scope. *)
 
 let make_test_meta ?(last_blocker = None) () =
@@ -1013,7 +1013,7 @@ let test_decide_runtime_blocker_requires_confirm () =
   in
   match d.action with
   | `Require_confirm reason ->
-    Alcotest.(check bool) "reason mentions hard-forbidden" true
+    Alcotest.(check bool) "reason is explicit" true
       (String.length reason > 0)
   | `Allow ->
     Alcotest.fail "runtime blocker should require confirmation for non-Critical tool"
@@ -1035,10 +1035,10 @@ let test_decide_front_door_none_allows_noncritical () =
   | `Deny _ ->
     Alcotest.fail "front-door (meta=None) should allow non-Critical, non-destructive tool"
 
-let test_oas_callback_critical_rejects_hard_forbidden () =
+let test_oas_callback_critical_queues_operator_continuation () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let keeper_name = "hard-forbidden-critical-reject-test" in
+  let keeper_name = "critical-operator-continuation-test" in
   let initial_pending = AQ.pending_count () in
   let tmpdir = make_tmpdir () in
   Fun.protect
@@ -1050,18 +1050,22 @@ let test_oas_callback_critical_rejects_hard_forbidden () =
            ~config
            ~governance_level:"production"
            ~keeper_name
+           ~lane_policy:AQ.Nonblocking
            ()
        in
        Alcotest.(check bool)
-         "Critical request is hard-forbidden"
+         "nonblocking Critical request returns a pending decision"
          true
          (match callback ~tool_name:"masc_delete_workspace" ~input:`Null with
           | Agent_sdk.Hooks.Reject _ -> true
           | Agent_sdk.Hooks.Approve | Agent_sdk.Hooks.Edit _ -> false);
        Alcotest.(check int)
-         "hard-forbidden request never enters operator approval queue"
-         0
+         "Critical request enters the operator approval queue"
+         1
          (AQ.pending_count_for_keeper ~keeper_name);
+       (match pending_id_for_keeper ~keeper_name with
+        | Some id -> resolve_pending_or_fail ~id ~decision:(Agent_sdk.Hooks.Reject "test cleanup")
+        | None -> Alcotest.fail "expected queued Critical approval");
        Alcotest.(check int)
          "pending count restored"
          initial_pending
@@ -1352,8 +1356,8 @@ let () =
         `Quick test_decide_runtime_blocker_requires_confirm;
       Alcotest.test_case "decide: front-door None allows non-Critical" `Quick
         test_decide_front_door_none_allows_noncritical;
-      Alcotest.test_case "OAS callback: Critical rejects hard-forbidden" `Quick
-        test_oas_callback_critical_rejects_hard_forbidden;
+      Alcotest.test_case "OAS callback: Critical queues operator continuation" `Quick
+        test_oas_callback_critical_queues_operator_continuation;
     ];
     "trace_id", [
       Alcotest.test_case "has gov_ prefix" `Quick test_decision_has_trace_id;

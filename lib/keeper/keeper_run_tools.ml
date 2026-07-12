@@ -75,6 +75,8 @@ type agent_setup = Keeper_run_tools_hooks.agent_setup =
   ; hooks : Agent_sdk.Hooks.hooks
   ; reducer : Agent_sdk.Context_reducer.t
   ; acc : hook_accumulator
+  ; current_meta : unit -> Keeper_meta_contract.keeper_meta option
+  ; risk_context : Governance_pipeline.keeper_risk_context
   ; all_tool_names : string list
   ; tool_context_estimate : Keeper_run_prompt.tool_schema_context_estimate
   ; receipt_turn_count_ref : int option ref

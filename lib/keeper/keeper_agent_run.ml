@@ -822,7 +822,8 @@ let run_turn
                          ~config
                          ~governance_level:(Env_config_core.governance_level ())
                          ~keeper_name:meta.name
-                         ~meta
+                         ~meta_provider:s.Keeper_run_tools.current_meta
+                         ~risk_context:s.Keeper_run_tools.risk_context
                          ?clock:(Eio_context.get_clock_opt ())
                          ?continuation_channel
                          ~lane_policy:Keeper_approval_queue.Nonblocking

@@ -158,6 +158,9 @@ val make_hooks :
   generation:int ->
   ?max_cost_usd:float ->
   ?destructive_ops_policy:Destructive_ops_policy.t ->
+  ?active_tool_names:string list ->
+  ?risk_context:Governance_pipeline.keeper_risk_context ->
+  ?meta_provider:(unit -> Keeper_meta_contract.keeper_meta option) ->
   ?pre_tool_use_guard:(tool_name:string ->
                        input:Yojson.Safe.t -> string option) ->
   ?on_tool_executed:(tool_name:string ->

@@ -303,8 +303,8 @@ let blocker_class_continue_gate = function
     this blocker should prevent auto-approval (including [always_approve]
     and remembered allow-rules) for the keeper's next tool call.
 
-    Only blockers that signal genuine safety/uncertainty conditions are
-    hard-forbidden.  Transient liveness signals — capacity backpressure,
+    Only blockers that signal genuine safety/uncertainty conditions establish
+    an operator-only approval floor. Transient liveness signals — capacity backpressure,
     queue timeouts, turn timeouts, SDK budget/idle/input conditions — do
     NOT block auto-approval, so automated recovery flows are not stalled
     by a momentary runtime hiccup.

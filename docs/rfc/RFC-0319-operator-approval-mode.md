@@ -1,6 +1,6 @@
 # RFC-0319 — Operator Approval Mode (AUTO 승인 모드) with separation-of-duties invariant
 
-- Status: Draft
+- Status: Implemented
 - Area: keeper HITL queue decision path: `lib/keeper/keeper_guards.ml` (`governance_approval_guard`), `lib/governance_pipeline.ml` (`to_oas_approval_callback`), `lib/keeper/keeper_approval_queue*.ml` (`submit_and_await`, `resolve_with_policy`, rule matching, audit), `lib/server/server_dashboard_http.ml` + `server_routes_http_routes_dashboard.ml` (dashboard resolve/mode API), and `dashboard/src/components/approvals/approvals-surface.ts` / `dashboard/src/components/governance-actions.ts`.
 - Builds on / touches: RFC-0304 (HITL summary), the keeper-v2 approvals surface (#23603), the existing `Agent_sdk.Hooks.ApprovalRequired` callback path, `Keeper_approval_queue.submit_and_await`, `Keeper_approval_queue.resolve_with_policy`, and the per-request "항상 승인" rule (`respondToKeeperApproval(id, 'approve', rememberRule=true)`).
 - Evidence base: keeper-v2 design mockup (`~/Downloads/Keeper Agent v2 (standalone) (3).html`) renders an **AUTO 승인 모드** panel with the note "비가역·파괴적(bad)은 항상 수동 결재 — 직무분리 원칙". Audit 2026-07-08: no runtime operator-toggleable keeper approval mode exists. `rg "approval_mode|approval-mode" lib/server/ dashboard/src` returns **zero** dashboard/governance mode endpoints; current auto paths are fixed keeper metadata/rule paths in `Governance_pipeline.to_oas_approval_callback` (`always_approve`, `find_matching_rule`) plus the legacy SDK-local `operator_approval.ml` policy, not a global operator mode.
@@ -9,9 +9,9 @@
 
 The v2 design promises an operator control the runtime does not have: a **mode** that lets the operator run the HITL queue in *auto* (low-risk keeper actions clear without a human) or *manual* (every gated action waits), with a hard invariant that destructive/irreversible actions are **never** auto-approved.
 
-Today:
+At the 2026-07-08 design audit (before implementation):
 
-- `governance_approval_guard` only decides when a keeper tool call needs approval; the real approve/queue/reject decision is in `Governance_pipeline.to_oas_approval_callback`, which may reject hard-forbidden requests, auto-approve `always_approve`, auto-approve a remembered rule match, or call `Keeper_approval_queue.submit_and_await`.
+- `governance_approval_guard` now decides when a keeper tool call needs approval; the real approve/queue decision is in `Governance_pipeline.to_oas_approval_callback`. Critical risk or a structured runtime blocker establishes an operator-only floor: it bypasses automatic flags/rules/mode and enters the ordinary HITL continuation path instead of becoming a terminal policy rejection.
 - The dashboard can approve, approve+always (a per-request rule persisted through `resolve_with_policy`), or reject via `respondToKeeperApproval` -> `/api/v1/dashboard/governance/approvals/resolve`. There is **no mode**: the operator cannot say "auto-clear low-risk for the next hour" and they cannot see or change a global posture.
 - Building the design's toggle as UI-only would be a **dead/dangerous stub**: a switch that reads as "auto-approving keeper actions" while gating nothing. A governance control that does not actually gate is worse than absent — it manufactures false assurance. This violates the workspace no-stub / no-silent-failure bar and is safety-relevant.
 
@@ -58,13 +58,13 @@ type approval_risk_projection =
 
 ### 4. Decision integration
 
-At the keeper approval callback decision point (`Governance_pipeline.to_oas_approval_callback`), consult the mode after hard-forbidden rejection and before `always_approve` / remembered-rule / `submit_and_await`:
+At the keeper approval callback decision point (`Governance_pipeline.to_oas_approval_callback`), apply the operator-only floor before `always_approve`, remembered rules, and approval mode:
 
 ```
 decide(request):
   risk = approval_risk_projection(request)
-  if hard_forbidden(request):                (* critical/runtime blocker today *)
-      -> Reject + audit hard_forbidden        (* existing terminal wall *)
+  if manual_approval_required(request):       (* critical/runtime blocker *)
+      -> Manual HITL continuation             (* never an automatic decision *)
   if soft_forbidden(request):                (* destructive tool/op signal today *)
       -> Manual (submit_and_await)            (* mode must not bypass it *)
   if risk ∈ {Classified Critical, Classified High, Unclassified _}:
@@ -77,7 +77,7 @@ decide(request):
 ```
 
 - The `{Critical, High} | Unclassified -> Manual` line is evaluated **before** the mode branch, so no mode can reach a destructive action. Exhaustive `match` over the projection and mode; a new band or mode fails to compile until handled.
-- Existing always/rule auto-approval remains orthogonal but must share the same floor: hard-forbidden still rejects before any auto path, mode never overrides `soft_forbidden`, and `High | Critical | Unclassified` never auto-approves by mode.
+- Existing always/rule auto-approval remains orthogonal but shares the same floor: operator-only requests skip every auto path, mode never overrides `soft_forbidden`, and `High | Critical | Unclassified` never auto-approves by mode. An explicit one-shot operator grant is consumed before the floor is re-evaluated so a resolved continuation can actually run.
 - `Keeper_approval_queue.audit_approval_event` records mode auto-clears with a distinct `event_type` such as `auto_approved_mode_low_risk`, `auto_approved=true`, `created_by=auto_mode`, and the authorizing mode/risk fields.
 
 ### 5. Operator API
@@ -100,7 +100,7 @@ decide(request):
 ## Verification
 
 - **Mode round-trip**: GET/POST reflect the set mode; an out-of-variant POST is rejected.
-- **Queue integration**: `governance_approval_guard` still raises `ApprovalRequired`; `to_oas_approval_callback` chooses exactly one of hard reject, mode auto-approve, always/rule auto-approve, or `Keeper_approval_queue.submit_and_await`.
+- **Queue integration**: `governance_approval_guard` raises `ApprovalRequired`; `to_oas_approval_callback` chooses exactly one of operator continuation, mode auto-approve, always/rule auto-approve, or ordinary threshold approval.
 - **Invariant (must-fail model)**: in `Auto_low_risk`, a `critical` and a `high` request are queued/rejected according to the existing hard floor, never auto. TLA+ `NextBuggy = Next \/ AutoApprovesDestructive` must violate `NoDestructiveAutoApproval`; clean `Next` must satisfy it (per the workspace TLA+ bug-model pattern).
 - **Classifier/downcast bug cases**: a destructive request that a buggy classifier/downcast reports as low but still carries the existing destructive tool/op signal is manual-only; a missing risk field and an unknown future wire value become `Unclassified`; assert no `Auto_approved` record is emitted for any of these cases.
 - **Fail-closed**: an unclassified/missing band is queued, not auto-approved, in every mode.

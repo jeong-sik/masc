@@ -883,30 +883,15 @@ let destructive_guard
              Printf.sprintf "pattern='%s' (%s)" pattern desc
            in
            let latency_ms = (Time_compat.now () -. t0) *. 1000.0 in
-           Otel_metric_store.inc_counter
-             Keeper_metrics.(to_string GuardsFailures)
-             ~labels:[("keeper", keeper_name); ("site", "destructive_guard")]
-             ();
-           log_gate_rejection
-             ~keeper_name ~stage:"destructive_guard" ~tool_name
-             ~reason_code:"destructive_guard" ~reason_key:pattern
-             "keeper:%s destructive pattern in %s: '%s' (%s)"
-             keeper_name tool_name pattern desc;
-           broadcast_tool_skipped
-             ~keeper_name ~tool_name ~reason_code:"destructive_guard";
            let source_path = keeper_guards_source_path in
            let source_line = __LINE__ in
            report_gate_decision on_gate_decision
              ~source_path:(Some source_path) ~source_line:(Some source_line)
-             ~stage:"destructive_guard" ~decision:Gate_block
-             ~reason_code:"destructive_guard" ~reason_text
+             ~stage:"destructive_guard" ~decision:Gate_approval_required
+             ~reason_code:"destructive_approval_required" ~reason_text
              ~tool_name ~keeper_name ~input ~turn ~accumulated_cost_usd
              ~stage_latency_ms:latency_ms;
-           Agent_sdk.Hooks.Block
-             (render_inline_skip_reason_with_source
-                ~source_path ~source_line
-                ~tool_name ~reason_code:"destructive_guard"
-                ~reason_text))
+           Agent_sdk.Hooks.ApprovalRequired)
     | _ -> Agent_sdk.Hooks.Continue)
 
 (** Governance approval gate. Escalates via [ApprovalRequired] when
@@ -914,9 +899,30 @@ let destructive_guard
     confirm threshold. Relies on an approval callback wired into the
     agent Builder to resolve the decision. *)
 let governance_approval_guard
+    ?active_tool_names
+    ?risk_context
+    ?meta_provider
     ~(meta_ref : Keeper_meta_contract.keeper_meta ref)
     ~on_gate_decision
   : Agent_sdk.Hooks.hooks =
+  if Option.is_some active_tool_names && Option.is_some risk_context
+  then
+    invalid_arg
+      "governance_approval_guard: provide active_tool_names or risk_context, not both";
+  let risk_context =
+    match risk_context with
+    | Some context -> context
+    | None ->
+      let active_tool_names =
+        match active_tool_names with
+        | Some names -> names
+        | None ->
+          Tool_shard.get_agent_shards (!meta_ref).name
+          |> Tool_shard.tools_of_shards
+          |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
+      in
+      Governance_pipeline.keeper_risk_context ~active_tool_names
+  in
   hooks_of_pre_tool_use (fun event ->
     match event with
     | Agent_sdk.Hooks.PreToolUse
@@ -924,7 +930,20 @@ let governance_approval_guard
       let t0 = Time_compat.now () in
       let keeper_name = (!meta_ref).name in
       let governance_level = Env_config_core.governance_level () in
-      let risk = Governance_pipeline.assess_risk ~tool_name ~input in
+      let risk =
+        (Governance_pipeline.assess_keeper_risk
+           ~context:risk_context
+           ~tool_name
+           ~input).effective_risk
+      in
+      let meta, metadata_unavailable =
+        match meta_provider with
+        | None -> Some !meta_ref, false
+        | Some current ->
+          (match current () with
+           | Some meta -> Some meta, false
+           | None -> None, true)
+      in
       let needs_approval =
         match Governance_pipeline.keeper_confirm_threshold governance_level with
         | Some threshold ->
@@ -932,36 +951,27 @@ let governance_approval_guard
           >= Governance_pipeline.risk_level_to_int threshold
         | None -> false
       in
-      (* task-1627: unconditional hard_forbidden gate — blocks before HITL *)
-      let hard_forbidden =
-        Governance_pipeline.auto_approval_hard_forbidden ~risk (Some !meta_ref)
+      let manual_approval_required =
+        Governance_pipeline.keeper_manual_approval_required
+          ~risk
+          meta
       in
-      if hard_forbidden then begin
-        let latency_ms = (Time_compat.now () -. t0) *. 1000.0 in
-        let source_path = keeper_guards_source_path in
-        let source_line = __LINE__ in
-        report_gate_decision on_gate_decision
-          ~source_path:(Some source_path) ~source_line:(Some source_line)
-          ~stage:"governance_approval" ~decision:Gate_block
-          ~reason_code:"hard_forbidden"
-          ~reason_text:"hard_forbidden: unconditional block regardless of HITL mode"
-          ~tool_name ~keeper_name ~input ~turn ~accumulated_cost_usd
-          ~stage_latency_ms:latency_ms;
-        Agent_sdk.Hooks.Block
-          (render_inline_skip_reason_with_source
-             ~source_path ~source_line
-             ~tool_name ~reason_code:"hard_forbidden"
-             ~reason_text:"hard_forbidden: unconditional block regardless of HITL mode")
-      end
-      else if needs_approval then begin
+      if metadata_unavailable || manual_approval_required || needs_approval
+      then begin
         let latency_ms = (Time_compat.now () -. t0) *. 1000.0 in
         let source_path = keeper_guards_source_path in
         let source_line = __LINE__ in
         report_gate_decision on_gate_decision
           ~source_path:(Some source_path) ~source_line:(Some source_line)
           ~stage:"governance_approval" ~decision:Gate_approval_required
-          ~reason_code:"governance_approval"
-          ~reason_text:"risk threshold reached; operator approval required"
+          ~reason_code:
+            (if metadata_unavailable
+             then "governance_metadata_unavailable"
+             else "governance_approval")
+          ~reason_text:
+            (if metadata_unavailable
+             then "live Keeper metadata is unavailable; operator decision required"
+             else "risk policy requires an explicit operator decision")
           ~tool_name ~keeper_name ~input ~turn ~accumulated_cost_usd
           ~stage_latency_ms:latency_ms;
         Agent_sdk.Hooks.ApprovalRequired
@@ -989,6 +999,8 @@ let build_chain
     ~(denied : string list)
     ~(max_cost_usd : float option)
     ~(destructive_ops_policy : Destructive_ops_policy.t)
+    ~risk_context
+    ?meta_provider
     ~on_gate_decision
     ~(pre_tool_use_guard :
         tool_name:string -> input:Yojson.Safe.t -> string option)
@@ -1002,5 +1014,9 @@ let build_chain
     deny_guard ~meta_ref ~on_gate_decision ~denied;
     cost_guard ~meta_ref ~on_gate_decision ~max_cost_usd;
     destructive_guard ~meta_ref ~on_gate_decision ~policy:destructive_ops_policy;
-    governance_approval_guard ~meta_ref ~on_gate_decision;
+    governance_approval_guard
+      ~risk_context
+      ?meta_provider
+      ~meta_ref
+      ~on_gate_decision;
   ]

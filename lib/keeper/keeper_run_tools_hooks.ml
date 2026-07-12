@@ -16,6 +16,8 @@ type agent_setup =
   ; hooks : Agent_sdk.Hooks.hooks
   ; reducer : Agent_sdk.Context_reducer.t
   ; acc : hook_accumulator
+  ; current_meta : unit -> Keeper_meta_contract.keeper_meta option
+  ; risk_context : Governance_pipeline.keeper_risk_context
   ; all_tool_names : string list
   ; tool_context_estimate : Keeper_run_prompt.tool_schema_context_estimate
   ; receipt_turn_count_ref : int option ref
@@ -176,13 +178,50 @@ let assemble_hooks
      ; runtime_config_path
      };
   Keeper_run_tools_hook_accumulator.record_requested_tool_names
-      acc
+    acc
       initial_schema_filter;
     let meta_ref = ref acc.meta in
+    let meta_available = ref true in
+    let mark_meta_unavailable reason =
+      if !meta_available
+      then
+        Log.Keeper.error
+          "keeper tool policy metadata unavailable keeper=%s reason=%s; requiring operator approval"
+          meta.name reason;
+      meta_available := false
+    in
+    let refresh_meta_from_registry () =
+      match
+        Keeper_registry.get_with_health
+          ~base_path:config.base_path
+          meta.name
+      with
+      | Some (entry, Keeper_registry.Healthy) ->
+        if not !meta_available
+        then
+          Log.Keeper.info
+            "keeper tool policy metadata recovered keeper=%s"
+            meta.name;
+        acc.meta <- entry.meta;
+        meta_ref := entry.meta;
+        meta_available := true;
+        ()
+      | Some (_, health) ->
+        mark_meta_unavailable
+          (Keeper_registry.registry_entry_validation_error_to_string health)
+      | None -> mark_meta_unavailable "registry_entry_missing"
+    in
+    let current_meta () =
+      if !meta_available then Some !meta_ref else None
+    in
     let public_alias_pre_tool_use_guard ~tool_name ~input:_ =
       Keeper_tool_resolution.public_alias_guidance_for_internal_call
         ~allowed_tool_names:acc.requested_tool_names
         tool_name
+    in
+    let risk_context =
+      Governance_pipeline.keeper_risk_context
+        ~active_tool_names:all_tool_names
     in
     let base_hooks =
       Keeper_hooks_oas.make_hooks
@@ -190,6 +229,8 @@ let assemble_hooks
         ~meta_ref
         ~turn_ctx_cell
         ~generation
+        ~risk_context
+        ~meta_provider:current_meta
         ?max_cost_usd
         ?trajectory_acc
         ~on_tool_executed:
@@ -217,11 +258,7 @@ let assemble_hooks
             then "ok"
             else "ok_no_progress"
           in
-          (match Keeper_registry.get ~base_path:config.base_path meta.name with
-           | Some entry ->
-             acc.meta <- entry.meta;
-             meta_ref := entry.meta
-           | None -> ());
+          refresh_meta_from_registry ();
           let task_id = Keeper_run_tools_task_scope.task_id_scope_of_tool_call ~tool_name ~input ~output_text ~meta:acc.meta in
           acc.tool_calls
           <- { tool_name
@@ -309,6 +346,20 @@ let assemble_hooks
              ()))
         ~pre_tool_use_guard:public_alias_pre_tool_use_guard
         ()
+    in
+    let refresh_meta_hook : Agent_sdk.Hooks.hooks =
+      { Agent_sdk.Hooks.empty with
+        pre_tool_use =
+          Some
+            (fun event ->
+               (match event with
+                | Agent_sdk.Hooks.PreToolUse _ -> refresh_meta_from_registry ()
+                | _ -> ());
+               Agent_sdk.Hooks.Continue)
+      }
+    in
+    let base_hooks =
+      Agent_sdk.Hooks.compose ~outer:refresh_meta_hook ~inner:base_hooks
     in
     let before_turn_hook : Agent_sdk.Hooks.hooks =
       { Agent_sdk.Hooks.empty with
@@ -828,6 +879,8 @@ let assemble_hooks
       ; hooks
       ; reducer
       ; acc
+      ; current_meta
+      ; risk_context
       ; all_tool_names
       ; tool_context_estimate
       ; receipt_turn_count_ref

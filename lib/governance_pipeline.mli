@@ -30,7 +30,7 @@ val confirm_threshold : string -> risk_level option
 (** Minimum risk level that requires confirmation for the given governance level.
     Returns [None] for "development" (no threshold-triggered confirmation
     needed) or when HITL thresholds are disabled. This threshold does not
-    include the hard-forbidden auto-approval override applied by {!decide}. *)
+    include the operator-only confirmation floor applied by {!decide}. *)
 
 val keeper_confirm_threshold : string -> risk_level option
 (** Keeper-specific confirmation threshold.
@@ -51,9 +51,39 @@ val assess_risk : tool_name:string -> input:Yojson.Safe.t -> risk_level
     - Medium: state-changing reads
     - Low: readonly/status/query surfaces *)
 
-val auto_approval_hard_forbidden :
+type keeper_risk_assessment =
+  { base_risk : risk_level
+  ; effective_risk : risk_level
+  ; trifecta_active : bool
+  }
+
+type keeper_risk_context
+
+val keeper_risk_context :
+  active_tool_names:string list -> keeper_risk_context
+(** Derive the immutable combinatorial context for one installed agent tool
+    surface. Compute once when assembling the run, not per tool call. *)
+
+val assess_keeper_risk :
+  context:keeper_risk_context ->
+  tool_name:string ->
+  input:Yojson.Safe.t ->
+  keeper_risk_assessment
+(** Keeper risk projection shared by the pre-tool guard and approval callback.
+    [context] belongs to the immutable tool surface installed for the current
+    run, avoiding shard lookup and capability rescans on the per-tool hot path. *)
+
+val manual_approval_required :
   risk:risk_level -> Keeper_meta_contract.keeper_meta option -> bool
-(** True when auto-approval must be blocked regardless of HITL threshold. *)
+(** True when a Critical call or structured runtime blocker requires a real
+    operator decision. Automatic flags, remembered rules, and approval mode
+    cannot bypass this floor; an explicit one-shot operator grant can. *)
+
+val keeper_manual_approval_required :
+  risk:risk_level -> Keeper_meta_contract.keeper_meta option -> bool
+(** Keeper-only operator floor. In addition to {!manual_approval_required},
+    High-risk calls require a real operator decision. This keeps the generic
+    front-door governance thresholds distinct from the Keeper contract. *)
 
 val decide :
   ?meta:Keeper_meta_contract.keeper_meta ->
@@ -64,7 +94,7 @@ val decide :
   governance_decision
 (** Evaluate a tool call against governance policy and return a decision.
     - development: allow Low/Medium/High while HITL is enabled, audit High+Critical,
-      but always confirm hard-forbidden calls
+      but always confirm calls subject to the operator-only floor
     - production: confirm Critical, audit Medium+
     - enterprise: confirm High+Critical, audit all
     - paranoid: confirm Medium+High+Critical, audit all
@@ -72,14 +102,15 @@ val decide :
     [meta] is optional because front-door governance is server-scoped:
     it classifies the tool call itself and does not need keeper runtime
     state. The [runtime_auto_approval_blocked] component of
-    [auto_approval_hard_forbidden] is keeper-scoped (it inspects
+    [manual_approval_required] is keeper-scoped (it inspects
     [meta.runtime.last_blocker]), so passing [None] from the front door
     is intentional and correct.
 
-    Hard-forbidden calls (Critical risk or keeper runtime blocker) always
-    require confirmation, even if they would otherwise fall below the
-    governance threshold, and even when HITL thresholds are disabled, so
-    disabling HITL cannot silently auto-approve destructive operations. *)
+    Critical calls and calls with a keeper runtime blocker always require
+    operator confirmation, even if they would otherwise fall below the
+    governance threshold and even when ordinary HITL thresholds are disabled.
+    They are queued through the standard continuation path rather than being
+    terminally rejected. *)
 
 val make_pre_hook :
   ?meta:Keeper_meta_contract.keeper_meta ->
@@ -152,6 +183,9 @@ val to_oas_approval_callback :
   governance_level:string ->
   keeper_name:string ->
   ?meta:Keeper_meta_contract.keeper_meta ->
+  ?meta_provider:(unit -> Keeper_meta_contract.keeper_meta option) ->
+  ?active_tool_names:string list ->
+  ?risk_context:keeper_risk_context ->
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   ?continuation_channel:Keeper_continuation_channel.t ->
   ?lane_policy:Keeper_approval_queue.lane_policy ->
@@ -160,8 +194,11 @@ val to_oas_approval_callback :
   Agent_sdk.Hooks.approval_callback
 (** Build an OAS approval callback with HITL approval handling.
 
-    Pre-computes trifecta status from the keeper's active shard tool set.
-    When trifecta is active, state-modifying tools get risk escalation.
+    [risk_context] should be the immutable projection shared by the current
+    agent run. Compatibility callers may instead provide [active_tool_names],
+    or omit both to derive the context from keeper shard state once when the
+    callback is built. When trifecta is active, state-modifying tools get risk
+    escalation.
 
     With [lane_policy = Blocking] (the compatibility default), a tool that
     exceeds the governance threshold suspends via
@@ -176,9 +213,16 @@ val to_oas_approval_callback :
     It is scoped by the caller to the independent cycle opened by that wake;
     there is no persisted blanket rule or time-based grant.
 
+    [meta_provider] is the live per-turn metadata source used by production
+    Keeper runs. It is sampled for every approval decision so a runtime blocker
+    established between tool calls cannot be bypassed by captured turn-start
+    metadata. Supplying both [meta] and [meta_provider] is invalid. [meta] is
+    retained for immutable callers and focused tests.
+
     Tools below the threshold are auto-approved unless auto-approval is
-    explicitly forbidden. Critical risk and runtime safety blockers still enter
-    the operator approval queue even when HITL thresholds are otherwise
-    disabled. Soft destructive tool-name/op heuristics are HITL-dependent.
+    explicitly forbidden. High/Critical Keeper risk and runtime safety blockers
+    still enter the operator approval queue even when HITL thresholds are
+    otherwise disabled. Soft destructive tool-name/op heuristics are
+    HITL-dependent.
 
     @since 2.262.0 (#5902, #5907) *)

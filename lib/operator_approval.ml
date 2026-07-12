@@ -42,6 +42,8 @@ type risk_band =
 
 type approval_mode_queue_reason =
   | Separation_of_duties_floor
+  | Metadata_unavailable
+  | Automatic_approval_prohibited
   | Manual_mode
   | Not_auto_eligible
 
@@ -110,6 +112,8 @@ let auto_eligible_bands_json () =
 
 let approval_mode_queue_reason_to_string = function
   | Separation_of_duties_floor -> "separation_of_duties_floor"
+  | Metadata_unavailable -> "metadata_unavailable"
+  | Automatic_approval_prohibited -> "automatic_approval_prohibited"
   | Manual_mode -> "manual_mode"
   | Not_auto_eligible -> "not_auto_eligible"
 

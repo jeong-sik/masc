@@ -82,18 +82,23 @@ let severity_of_decision = function
 
 let severity_of_tool_call success = if success then "ok" else "bad"
 
-let severity_of_approval_event event decision =
-  match event with
-  | "pending" -> "warn"
-  | "expired" | "approval_timeout" | "cancelled" -> "bad"
-  | event when String.equal event Keeper_approval_queue.approval_audit_hard_forbidden_event ->
+let severity_of_approval_event event_kind decision =
+  match event_kind with
+  | Keeper_approval_queue.Audit_pending -> "warn"
+  | Keeper_approval_queue.Audit_expired
+  | Keeper_approval_queue.Audit_timeout
+  | Keeper_approval_queue.Audit_cancelled
+  | Keeper_approval_queue.Audit_legacy_terminal_rejection ->
     "bad"
-  | "resolved" -> (
+  | Keeper_approval_queue.Audit_resolved -> (
       match decision with
       | Some raw when String_util.contains_substring_ci raw "reject" -> "bad"
       | _ -> "ok")
-  | "auto_approved_rule_match" | "auto_approved_always" | "rule_created" -> "ok"
-  | _ -> "warn"
+  | Keeper_approval_queue.Audit_auto_rule
+  | Keeper_approval_queue.Audit_auto_always
+  | Keeper_approval_queue.Audit_rule_created ->
+    "ok"
+  | Keeper_approval_queue.Audit_other _ -> "warn"
 
 let severity_of_transition_type event_type =
   if String_util.contains_substring_ci event_type "failed"
@@ -168,6 +173,9 @@ let live_pending_approval_timeline_event json =
 let approval_event_timeline_event json =
   match json_float_opt_member "ts" json, json_string_opt_member "event" json with
   | Some ts_unix, Some event ->
+      let event_kind =
+        Keeper_approval_queue.approval_audit_event_kind_of_wire event
+      in
       let tool_name =
         json_string_opt_member "tool" json |> Option.value ~default:"tool"
       in
@@ -180,14 +188,15 @@ let approval_event_timeline_event json =
       in
       let decision = json_string_opt_member "decision" json in
       let kind, title, summary, next_human_action =
-        match event with
-        | "pending" ->
+        match event_kind with
+        | Keeper_approval_queue.Audit_pending ->
             ( "approval_requested",
               Printf.sprintf "Approval · %s" tool_name,
               approval_summary
                 "approval requested and waiting for operator decision",
               Some "resolve_approval" )
-        | "resolved" ->
+        | Keeper_approval_queue.Audit_resolved
+        | Keeper_approval_queue.Audit_legacy_terminal_rejection ->
             let decision_label =
               Option.value ~default:"resolved" decision
             in
@@ -195,7 +204,7 @@ let approval_event_timeline_event json =
               Printf.sprintf "Approval · %s" tool_name,
               approval_summary (Printf.sprintf "approval %s" decision_label),
               None )
-        | "expired" ->
+        | Keeper_approval_queue.Audit_expired ->
             let blocker_note = "" in
             let next_action = "retry_or_rerun" in
             let decision_label =
@@ -207,7 +216,8 @@ let approval_event_timeline_event json =
               Printf.sprintf "Approval · %s" tool_name,
               approval_summary (decision_label ^ blocker_note),
               Some next_action )
-        | "approval_timeout" | "cancelled" ->
+        | Keeper_approval_queue.Audit_timeout
+        | Keeper_approval_queue.Audit_cancelled ->
             let summary =
               match decision with
               | Some value -> value
@@ -217,7 +227,7 @@ let approval_event_timeline_event json =
               Printf.sprintf "Approval · %s" tool_name,
               approval_summary summary,
               Some "retry_or_rerun" )
-        | "auto_approved_rule_match" ->
+        | Keeper_approval_queue.Audit_auto_rule ->
             let matched_by =
               json |> json_member "rule_match"
               |> json_string_opt_member "matched_by"
@@ -227,17 +237,17 @@ let approval_event_timeline_event json =
               Printf.sprintf "Approval Rule · %s" tool_name,
               approval_summary (Printf.sprintf "auto-approved by %s" matched_by),
               None )
-        | "auto_approved_always" ->
+        | Keeper_approval_queue.Audit_auto_always ->
             ( "approval_always_flag",
               Printf.sprintf "Approval Always · %s" tool_name,
               approval_summary "auto-approved by keeper always_approve flag",
               None )
-        | "rule_created" ->
+        | Keeper_approval_queue.Audit_rule_created ->
             ( "approval_rule_created",
               Printf.sprintf "Approval Rule · %s" tool_name,
               approval_summary "persistent approval rule recorded",
               None )
-        | other ->
+        | Keeper_approval_queue.Audit_other other ->
             ( "approval_event",
               Printf.sprintf "Approval · %s" tool_name,
               approval_summary other,
@@ -250,7 +260,7 @@ let approval_event_timeline_event json =
            ~goal_ids:(goal_ids_of_json json)
            ?next_human_action
            ~ts_unix ~kind ~title ~summary
-           ~severity:(severity_of_approval_event event decision) ())
+           ~severity:(severity_of_approval_event event_kind decision) ())
   | _ -> None
 
 let decision_timeline_event json =

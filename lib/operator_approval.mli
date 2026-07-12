@@ -49,6 +49,8 @@ type risk_band =
 
 type approval_mode_queue_reason =
   | Separation_of_duties_floor
+  | Metadata_unavailable
+  | Automatic_approval_prohibited
   | Manual_mode
   | Not_auto_eligible
 

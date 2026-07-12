@@ -9,7 +9,9 @@ open Alcotest
 module KR = Masc.Keeper_registry
 module KET = Masc.Keeper_tool_dispatch_runtime
 module KLH = Masc.Keeper_lifecycle_hooks
+module Keeper_lifecycle_admission = Masc.Keeper_lifecycle_admission
 module KSM = Keeper_state_machine
+module Lane = Masc.Keeper_lane
 
 let base_path = "/tmp/test_keeper_registry_hardening"
 
@@ -65,6 +67,119 @@ let test_update_entry_rejects_corrupted_result () =
   | Some e -> check string "original base_path preserved" original_base_path e.base_path
 ;;
 
+let test_unregister_exact_preserves_replacement_lane () =
+  KR.clear ();
+  let old_entry = register "alice" in
+  let replacement = register "alice" in
+  (match KR.unregister_exact old_entry with
+   | KR.Exact_entry_replaced -> ()
+   | KR.Exact_unregistered -> fail "stale entry removed its replacement lane"
+   | KR.Exact_entry_missing -> fail "replacement lane unexpectedly missing"
+   | KR.Exact_unregister_lifecycle_reserved _ ->
+     fail "test did not acquire a lifecycle reservation");
+  (match KR.get ~base_path "alice" with
+   | Some current ->
+     check bool "replacement remains registered" true (current == replacement)
+   | None -> fail "replacement lane was removed");
+  match KR.unregister_exact replacement with
+  | KR.Exact_unregistered -> ()
+  | KR.Exact_entry_missing -> fail "replacement disappeared before exact removal"
+  | KR.Exact_entry_replaced -> fail "replacement identity changed unexpectedly"
+  | KR.Exact_unregister_lifecycle_reserved _ ->
+    fail "test did not acquire a lifecycle reservation"
+;;
+
+let test_unregister_exact_accepts_same_lane_record_update () =
+  KR.clear ();
+  let observed = register "alice" in
+  (match
+     KR.update_entry ~base_path "alice" (fun entry ->
+       { entry with last_error = Some "immutable record replacement" })
+   with
+   | Ok () -> ()
+   | Error error -> fail (KR.registry_entry_validation_error_to_string error));
+  match KR.unregister_exact observed with
+  | KR.Exact_unregistered -> ()
+  | KR.Exact_entry_missing -> fail "same lane disappeared before removal"
+  | KR.Exact_entry_replaced -> fail "same lane record update was treated as ABA"
+  | KR.Exact_unregister_lifecycle_reserved _ ->
+    fail "test did not acquire a lifecycle reservation"
+;;
+
+let test_update_entry_exact_preserves_replacement_lane () =
+  KR.clear ();
+  let old_entry = register "alice" in
+  let replacement = register "alice" in
+  (match
+     KR.update_entry_exact old_entry (fun entry ->
+       { entry with last_error = Some "stale lane mutation" })
+   with
+   | KR.Exact_update_replaced -> ()
+   | KR.Exact_updated -> fail "stale exact update mutated the replacement lane"
+   | KR.Exact_update_missing -> fail "replacement lane unexpectedly missing"
+   | KR.Exact_update_invalid error ->
+     fail (KR.registry_entry_validation_error_to_string error));
+  match KR.get ~base_path "alice" with
+  | Some current ->
+    check bool "replacement identity preserved" true (current == replacement);
+    check (option string) "replacement error field preserved" None current.last_error
+  | None -> fail "replacement lane disappeared"
+;;
+
+let test_dispatch_event_exact_preserves_replacement_lane () =
+  KR.clear ();
+  let old_meta = make_meta "alice" in
+  let old_entry = KR.register_offline ~base_path old_meta.name old_meta in
+  let replacement = KR.register_offline ~base_path old_meta.name old_meta in
+  (match KR.dispatch_event_exact old_entry KSM.Fiber_started with
+   | Error _ -> ()
+   | Ok _ -> fail "stale exact dispatch mutated the replacement lane");
+  match KR.get ~base_path "alice" with
+  | Some current ->
+    check bool "replacement identity preserved" true (current == replacement);
+    check
+      string
+      "replacement remains offline"
+      "offline"
+      (KSM.phase_to_string current.phase)
+  | None -> fail "replacement lane disappeared"
+;;
+
+let test_lane_fork_rejects_cancelling_switch () =
+  Eio_main.run @@ fun _env ->
+  let lane = Lane.create () in
+  let run_called = Atomic.make false in
+  let cleanup_calls = Atomic.make 0 in
+  let fork_result = Atomic.make None in
+  (try
+     Eio.Switch.run @@ fun sw ->
+     Eio.Switch.fail sw (Failure "synthetic parent cancellation");
+     Atomic.set
+       fork_result
+       (Some
+          (Lane.fork
+             ~sw
+             lane
+             ~run:(fun _ -> Atomic.set run_called true)
+             ~cleanup:(fun _ ->
+               Atomic.incr cleanup_calls;
+               Ok ())))
+   with
+   | Failure _ -> ()
+   | exn -> raise exn);
+  (match Atomic.get fork_result with
+   | Some (Error (Lane.Fork_failed _)) -> ()
+   | Some (Error error) -> fail (Lane.start_error_to_string error)
+   | Some (Ok ()) -> fail "fork reported success on an already-cancelling switch"
+   | None -> fail "fork result was not captured");
+  check bool "lane body was not run" false (Atomic.get run_called);
+  check int "cleanup ran exactly once" 1 (Atomic.get cleanup_calls);
+  match Lane.peek_exit lane with
+  | Some { outcome = Lane.Cancelled_by_parent _; _ } -> ()
+  | Some _ -> fail "lane exit did not preserve parent cancellation"
+  | None -> fail "lane exit promise remained unresolved"
+;;
+
 let test_dispatch_write_failure_skips_phase_side_effects () =
   KR.clear ();
   KLH.reset_for_testing ();
@@ -111,25 +226,54 @@ let test_get_filters_corrupted_entry () =
 
 let test_wakeup_running_reports_typed_outcome () =
   KR.clear ();
-  (match KR.wakeup_running ~base_path "missing" with
+  (match
+     KR.wakeup_running ~intent:KR.Hitl_resolution ~base_path "missing"
+   with
    | KR.Deferred_unregistered -> ()
-   | KR.Signaled | KR.Deferred_not_running _ ->
+   | KR.Signaled | KR.Deferred_not_running _ | KR.Deferred_lifecycle _ ->
      fail "missing keeper did not return Deferred_unregistered");
   let running = register "running" in
   Atomic.set running.fiber_wakeup false;
-  (match KR.wakeup_running ~base_path "running" with
+  (match
+     KR.wakeup_running ~intent:KR.Hitl_resolution ~base_path "running"
+   with
    | KR.Signaled -> check bool "running keeper is signaled" true (Atomic.get running.fiber_wakeup)
-   | KR.Deferred_unregistered | KR.Deferred_not_running _ ->
+   | KR.Deferred_unregistered | KR.Deferred_not_running _
+   | KR.Deferred_lifecycle _ ->
      fail "running keeper was not signaled");
   let offline_meta = make_meta "offline" in
   let offline = KR.register_offline ~base_path offline_meta.name offline_meta in
   Atomic.set offline.fiber_wakeup false;
-  (match KR.wakeup_running ~base_path "offline" with
+  (match
+     KR.wakeup_running ~intent:KR.Hitl_resolution ~base_path "offline"
+   with
    | KR.Deferred_not_running phase ->
      check string "deferred phase is explicit" "offline" (KSM.phase_to_string phase);
      check bool "offline keeper is not signaled" false (Atomic.get offline.fiber_wakeup)
-   | KR.Signaled | KR.Deferred_unregistered ->
+   | KR.Signaled | KR.Deferred_unregistered | KR.Deferred_lifecycle _ ->
      fail "offline keeper did not return Deferred_not_running")
+;;
+
+let test_wakeup_denies_dead_tombstone_without_signaling () =
+  KR.clear ();
+  let meta =
+    { (make_meta "dead-wakeup") with
+      paused = true
+    ; latched_reason = Some Keeper_latched_reason.Dead_tombstone
+    }
+  in
+  let entry = KR.register ~base_path meta.name meta in
+  Atomic.set entry.fiber_wakeup false;
+  (match KR.wakeup ~intent:KR.Scheduled_signal ~base_path meta.name with
+   | KR.Deferred_lifecycle
+       Keeper_lifecycle_admission.Autonomous_dead_tombstone -> ()
+   | KR.Signaled
+   | KR.Deferred_unregistered
+   | KR.Deferred_not_running _
+   | KR.Deferred_lifecycle (Keeper_lifecycle_admission.Autonomous_paused _) ->
+     fail "dead tombstone wake was not lifecycle-deferred");
+  check bool "dead tombstone wake flag remains false" false
+    (Atomic.get entry.fiber_wakeup)
 ;;
 
 let temp_dir prefix =
@@ -218,12 +362,36 @@ let () =
             "rejects corrupted closure result and preserves original"
             `Quick
             test_update_entry_rejects_corrupted_result
+        ; test_case
+            "exact update preserves replacement lane"
+            `Quick
+            test_update_entry_exact_preserves_replacement_lane
+        ] )
+    ; ( "unregister_exact"
+      , [ test_case
+            "stale entry preserves replacement lane"
+            `Quick
+            test_unregister_exact_preserves_replacement_lane
+        ; test_case
+            "same lane immutable update remains removable"
+            `Quick
+            test_unregister_exact_accepts_same_lane_record_update
         ] )
     ; ( "dispatch_event"
       , [ test_case
             "skips phase side effects when validated write fails"
             `Quick
             test_dispatch_write_failure_skips_phase_side_effects
+        ; test_case
+            "exact dispatch preserves replacement lane"
+            `Quick
+            test_dispatch_event_exact_preserves_replacement_lane
+        ] )
+    ; ( "keeper_lane"
+      , [ test_case
+            "rejects fork on an already-cancelling switch"
+            `Quick
+            test_lane_fork_rejects_cancelling_switch
         ] )
     ; ( "get_with_health"
       , [ test_case "get filters corrupted entry" `Quick test_get_filters_corrupted_entry ] )
@@ -232,6 +400,10 @@ let () =
             "reports signaled and deferred outcomes"
             `Quick
             test_wakeup_running_reports_typed_outcome
+        ; test_case
+            "dead tombstone never receives runnable signal"
+            `Quick
+            test_wakeup_denies_dead_tombstone_without_signaling
         ] )
     ; ( "tool_dispatch_fallback"
       , [ test_case "uses original meta on corrupted registry entry" `Quick

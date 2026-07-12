@@ -21,7 +21,13 @@ let tool_result_msg ~tool_use_id ~content : Types.message =
     content =
       [
         Types.ToolResult
-          { tool_use_id; content; is_error = false; json = None; content_blocks = None };
+          {
+            tool_use_id;
+            content;
+            outcome = Types.Tool_succeeded;
+            json = None;
+            content_blocks = None;
+          };
       ];
     name = None;
     tool_call_id = Some tool_use_id;

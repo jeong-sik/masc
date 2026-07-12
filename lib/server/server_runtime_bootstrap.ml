@@ -740,10 +740,36 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
     loop ());
   (* 1. HTTP socket first — Railway healthcheck can reach /health immediately *)
   let config = Server_bootstrap_http.make_http_config ~host ~port in
+  (* The listener identity comes only from the effective CLI/bootstrap config
+     above.  A public identity is additional trust only when the operator
+     explicitly configured MASC_HTTP_BASE_URL; deriving it again from env
+     MASC_HOST/MASC_HTTP_PORT would diverge from CLI overrides and could admit
+     a host/port on which this process is not listening. *)
+  let explicit_base_url = Env_config_core.masc_http_base_url_opt () in
+  let request_trust_policy =
+    match
+      Server_request_authority.make_trust_policy
+        ~bind_host:config.host
+        ~bind_port:config.port
+        ~explicit_base_url
+    with
+    | Ok policy -> policy
+    | Error error ->
+      raise
+        (Env_config_core.Config_error
+           (Server_request_authority.trust_policy_error_to_string error))
+  in
+  let background_request_authority =
+    Server_request_authority.projection_context request_trust_policy
+  in
   let routes = make_routes ~port:config.port ~host:config.host ~sw ~clock in
-  let request_handler = make_request_handler routes in
+  let request_handler = make_request_handler ~trust_policy:request_trust_policy routes in
   let h2_request_handler =
-    make_h2_request_handler ~sw ~clock ~server_start_time
+    make_h2_request_handler
+      ~trust_policy:request_trust_policy
+      ~sw
+      ~clock
+      ~server_start_time
   in
   let h2_error_handler = make_h2_error_handler () in
   let http_mode =
@@ -849,6 +875,11 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       let t1 = Eio.Time.now clock in
       Log.Server.info "State created (runtime state) in %.1fs" (t1 -. t0);
       bootstrap_server_state_blocking state;
+      (* Recover per-keeper lifecycle transactions before any other keeper
+         metadata writer or autoboot reader is published. A changed keeper
+         generation is never overwritten; its journal remains visible as an
+         unresolved recovery record. *)
+      startup_recover_keeper_lifecycle_transactions state;
       (* The retired-key migration performs a raw atomic rewrite without version CAS.
          Run it before [server_state := Some state] publishes mutation routes,
          and before connectors, maintenance, or keeper loops can write meta.
@@ -1367,7 +1398,10 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
         (* Full-health scans are heavier than the probe path. Start them after
            shell prewarm has either succeeded or exhausted its own budget so
            cold-start diagnostics do not contend with the shell's first render. *)
-        Server_routes_http_runtime.start_full_health_snapshot_refresh_loop ~sw ~clock);
+        Server_routes_http_runtime.start_full_health_snapshot_refresh_loop
+          ~sw
+          ~clock
+          ~request_authority:background_request_authority);
       start_lazy_startup state;
       (* RFC-0206: runtime catalog startup validation removed; Runtime.init_default
          already fail-fasts on an invalid runtime config at boot. *)

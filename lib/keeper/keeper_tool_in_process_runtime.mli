@@ -215,6 +215,7 @@ val handle_masc_schedule
 val handle_masc_fusion
   :  config:Workspace.config
   -> meta:keeper_meta
+  -> ?continuation_channel:Keeper_continuation_channel.t
   -> args:Yojson.Safe.t
   -> unit
   -> string

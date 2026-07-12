@@ -7,6 +7,12 @@ val startup_prune_jsonl : Mcp_server.server_state -> unit
     only keep producing the existing unknown-key warning. *)
 val startup_migrate_retired_keeper_meta_keys : Mcp_server.server_state -> unit
 
+(** Resolve crash-left keeper lifecycle journals before keeper metadata
+    migrations, credential projection, autoboot, or request mutation paths. *)
+val startup_recover_keeper_lifecycle_transactions :
+  Mcp_server.server_state ->
+  unit
+
 val startup_migrate_keeper_histories :
   Mcp_server.server_state -> unit
 (** Runs the typed history migration. Failures escape to the lazy-task runner,

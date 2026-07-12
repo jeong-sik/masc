@@ -92,17 +92,20 @@ let test_masc_board_post_resolves () =
       fail (Printf.sprintf "masc_board_post should resolve, got Unknown (tried: %s)"
               (TR.string_of_tried tried))
 
-let test_system_internal_hidden_tool_resolves () =
+let test_hidden_descriptor_precedes_system_internal_fallback () =
   (* masc_gc is a system-internal tool (tool_misc dispatch, hidden from keeper
-     surfaces). Before the System_internal source it resolved to Unknown, so the
-     prompt-token integrity scanner stripped it from continuity prose and emitted
-     ~33 false "stripped masc token masc_gc" WARNs/day for keeper taskmaster. It
-     is a real tool and must now resolve via System_internal. *)
+     surfaces). It also has a dispatch-only descriptor, which is earlier in the
+     resolution chain. Keep the current provenance explicit while asserting that
+     the System_internal fallback still independently recognizes the real tool. *)
   match TR.resolve "masc_gc" with
-  | TR.Resolved { via = TR.System_internal; canonical } ->
-      check string "canonical preserved" "masc_gc" canonical
+  | TR.Resolved { via = TR.Descriptor_registry; canonical } ->
+      check string "canonical preserved" "masc_gc" canonical;
+      check bool
+        "system-internal fallback also admits masc_gc"
+        true
+        (List.mem TR.System_internal (TR.all_admitting_sources "masc_gc"))
   | TR.Resolved { via; _ } | TR.Alias_to { via; _ } ->
-      fail (Printf.sprintf "masc_gc resolved via %s; expected System_internal"
+      fail (Printf.sprintf "masc_gc resolved via %s; expected Descriptor_registry"
               (TR.string_of_tried_source via))
   | TR.Unknown { tried; _ } ->
       fail (Printf.sprintf
@@ -335,7 +338,7 @@ let () =
         test_case "tool_execute resolves" `Quick test_tool_execute_resolves;
         test_case "masc_keeper_* cluster resolves via descriptor registry (boot guard)" `Quick test_descriptor_registry_admits_masc_keeper_cluster;
         test_case "masc_board_post resolves" `Quick test_masc_board_post_resolves;
-        test_case "system-internal hidden tool (masc_gc) resolves via System_internal" `Quick test_system_internal_hidden_tool_resolves;
+        test_case "masc_gc descriptor precedes the system-internal fallback" `Quick test_hidden_descriptor_precedes_system_internal_fallback;
       ]
     ; "policy_validation", [
         test_case "known tools resolve" `Quick test_policy_validation_known_tools_resolve;

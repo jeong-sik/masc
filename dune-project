@@ -57,10 +57,10 @@
   (eio-ssl (>= 0.3.0))
   ;; Pinned to OAS v0.209.1 (tag v0.209.1, #2510). The patch repairs the
   ;; oas#2499 library build while preserving the catalog-driven capability,
-  ;; typed empty-completion, and Hooks.Block 0.209 public boundary.
-  ;; Exact pin sha lives
-  ;; in scripts/oas-agent-sdk-pin.sh (SSOT); see check-oas-pin.sh.
-  (agent_sdk (>= 0.211.0))
+  ;; The exact release pin carries the typed tool-failure recovery boundary;
+  ;; its SHA and rationale live in scripts/oas-agent-sdk-pin.sh (SSOT).
+  ;; See check-oas-pin.sh.
+  (agent_sdk (>= 0.211.8))
   (uri (>= 4.4))
   (tls (>= 2.0))
   (tls-eio (>= 2.0))

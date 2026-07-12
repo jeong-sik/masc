@@ -64,6 +64,15 @@ let run_result ?content ?stop_reason ?checkpoint () : Runtime_agent.run_result =
     stop_reason = Runtime_agent.Completed;
   }
 
+let input_required_request () : Agent_sdk.Error.input_required =
+  { request_id = "input-request-1"
+  ; participant_name = Some "operator"
+  ; question = "Which repository should I inspect?"
+  ; schema = Some (`Assoc [ "type", `String "string" ])
+  ; timeout_s = None
+  ; created_at = 1_000.0
+  }
+
 let accept_no_progress_retry_kind_string err =
   let kind =
     match Masc.Keeper_turn_driver.classify_masc_internal_error err with
@@ -193,6 +202,45 @@ let test_accept_keeps_result () =
   | Error err ->
     Alcotest.failf "accepted response should pass through: %s"
       (Agent_sdk.Error.to_string err)
+
+let test_typed_recovery_control_stops_bypass_response_accept () =
+  let accept_calls = ref 0 in
+  let reject (_ : Agent_sdk.Types.api_response) =
+    incr accept_calls;
+    false
+  in
+  let request = input_required_request () in
+  let input_required =
+    { (run_result ()) with
+      stop_reason = Runtime_agent.InputRequired { turns_used = 2; request }
+    }
+  in
+  let deferred =
+    { (run_result ()) with
+      stop_reason =
+        Runtime_agent.ToolFailureRecoveryDeferred
+          { turns_used = 2; reason = "wait"; tool_names = [ "Execute" ] }
+    }
+  in
+  List.iter
+    (fun (label, result) ->
+       match
+         Masc.Keeper_turn_driver.For_testing.apply_accept
+           ~runtime_id:"runtime.reasoning-model"
+           ~accept:reject
+           result
+       with
+       | Ok _ -> ()
+       | Error error ->
+         Alcotest.failf
+           "%s control stop rotated through response acceptance: %s"
+           label
+           (Agent_sdk.Error.to_string error))
+    [ "input_required", input_required; "defer", deferred ];
+  Alcotest.(check int)
+    "typed control stops never invoke the deliverable accept predicate"
+    0
+    !accept_calls
 
 let test_replay_projection_failure_preserves_provider_success () =
   let open Agent_sdk.Types in
@@ -490,6 +538,36 @@ let test_finalization_does_not_surface_hidden_reasoning () =
     "typed rejection diagnostic does not expose ReasoningDetails content"
     false
     (contains ~needle:"provider-private reasoning" reason)
+
+let test_recovery_defer_does_not_synthesize_tool_narration () =
+  let deferred =
+    { (run_result ()) with
+      stop_reason =
+        Runtime_agent.ToolFailureRecoveryDeferred
+          { turns_used = 2
+          ; reason = "wait for repository state"
+          ; tool_names = [ "Execute" ]
+          }
+    }
+  in
+  match
+    Masc.Keeper_agent_run.For_testing.normalize_response_text_for_finalization
+      ~runtime_id:"runtime.reasoning-model"
+      ~initial_messages:[]
+      ~run_result:deferred
+      ~text:""
+      ~tool_names:[ "Execute" ]
+      ()
+  with
+  | Ok text ->
+    Alcotest.(check string)
+      "control checkpoint has no synthetic assistant narration"
+      ""
+      text
+  | Error error ->
+    Alcotest.failf
+      "typed recovery checkpoint should finalize without a chat reply: %s"
+      (Agent_sdk.Error.to_string error)
 
 let test_runtime_error_mapping_preserves_no_progress_accept_rejection () =
   let result =
@@ -1749,7 +1827,7 @@ let test_accept_contract_delegates_to_oas_response_shape () =
         {
           tool_use_id = "tool-1";
           content = "ok";
-          is_error = false;
+          outcome = Agent_sdk.Types.Tool_succeeded;
           json = None;
           content_blocks = None;
         };
@@ -2070,7 +2148,7 @@ let test_reject_reason_describes_mixed_non_progress_response () =
                {
                  tool_use_id = "tool-1";
                  content = "ok";
-                 is_error = false;
+                 outcome = Agent_sdk.Types.Tool_succeeded;
                  json = None;
                  content_blocks = None;
                };
@@ -2396,6 +2474,39 @@ let test_capacity_failure_exhaustion_classifies_as_capacity_exhausted () =
     Alcotest.failf "expected typed keeper error, got %s"
       (Agent_sdk.Error.to_string mapped)
 
+let test_session_conflict_exhaustion_preserves_terminal_detail () =
+  let session_conflict =
+    Llm_provider.Http_client.ProviderTerminal
+      { kind = Llm_provider.Http_client.Session_conflict
+      ; message = "session is owned by another process"
+      }
+  in
+  let mapped =
+    Masc.Keeper_turn_driver.For_testing.sdk_error_of_exhausted
+      ~runtime_id:"runtime.session-conflict"
+      (Some session_conflict)
+  in
+  match Keeper_internal_error.classify_masc_internal_error mapped with
+  | Some (Keeper_internal_error.Runtime_exhausted { reason; _ }) ->
+    Alcotest.(check bool)
+      "session conflict stays terminal"
+      false
+      (Keeper_internal_error.runtime_exhaustion_reason_retryable reason);
+    Alcotest.(check bool)
+      "session conflict is not auto-recoverable"
+      false
+      (Masc.Keeper_error_classify.is_auto_recoverable_turn_error mapped);
+    Alcotest.(check bool)
+      "provider terminal detail is preserved"
+      true
+      (reason = Keeper_internal_error.Other_detail "session is owned by another process")
+  | Some other ->
+    Alcotest.failf "expected Runtime_exhausted, got %s"
+      (Keeper_internal_error.kind_of_masc_internal_error other)
+  | None ->
+    Alcotest.failf "expected typed keeper error, got %s"
+      (Agent_sdk.Error.to_string mapped)
+
 let test_runtime_exhaustion_label_caps_free_text_detail () =
   let detail = String.make 260 'x' ^ "\nwith newline\tand spacing" in
   let label =
@@ -2409,6 +2520,19 @@ let test_runtime_exhaustion_label_caps_free_text_detail () =
   Alcotest.(check bool) "label has no newline" false (contains ~needle:"\n" label);
   Alcotest.(check bool) "label is marked truncated" true (contains ~needle:"..." label)
 
+let test_keeper_tool_slot_callbacks_are_always_wired () =
+  let config = Masc.Workspace.default_config (Filename.get_temp_dir_name ()) in
+  let _, yield_on_tool, on_yield, on_resume, _ =
+    Masc.Keeper_agent_run_turn_helpers.turn_progress_callbacks
+      ~config
+      ~keeper_name:"slot-lease-test"
+      ~downstream:None
+      ~turn_id:1
+  in
+  Alcotest.(check bool) "tool execution always yields the provider lease" true yield_on_tool;
+  Alcotest.(check bool) "yield callback is wired" true (Option.is_some on_yield);
+  Alcotest.(check bool) "resume callback is wired" true (Option.is_some on_resume)
+
 let () =
   Alcotest.run "keeper_turn_driver_accept"
     [
@@ -2416,6 +2540,10 @@ let () =
       , [
           Alcotest.test_case "accepted response passes through" `Quick
             test_accept_keeps_result;
+          Alcotest.test_case
+            "typed recovery control stops bypass response acceptance"
+            `Quick
+            test_typed_recovery_control_stops_bypass_response_accept;
           Alcotest.test_case
             "replay projection failure preserves provider success"
             `Quick
@@ -2436,6 +2564,10 @@ let () =
             "finalization does not surface hidden reasoning"
             `Quick
             test_finalization_does_not_surface_hidden_reasoning;
+          Alcotest.test_case
+            "recovery defer does not synthesize tool narration"
+            `Quick
+            test_recovery_defer_does_not_synthesize_tool_narration;
           Alcotest.test_case
             "runtime mapping preserves no-progress accept rejection"
             `Quick
@@ -2561,8 +2693,16 @@ let () =
             `Quick
             test_capacity_failure_exhaustion_classifies_as_capacity_exhausted;
           Alcotest.test_case
+            "session conflict exhaustion stays terminal"
+            `Quick
+            test_session_conflict_exhaustion_preserves_terminal_detail;
+          Alcotest.test_case
             "runtime exhaustion labels cap free-text detail"
             `Quick
             test_runtime_exhaustion_label_caps_free_text_detail;
+          Alcotest.test_case
+            "keeper tool slot callbacks are always wired"
+            `Quick
+            test_keeper_tool_slot_callbacks_are_always_wired;
         ] );
     ]

@@ -251,6 +251,22 @@ let test_scheduled_event_queue_trigger_runs_warm_keeper () =
   check bool "reason includes scheduled automation due" true
     (has_run_reason WO.Scheduled_automation_due d)
 
+let test_failure_judgment_control_respects_paused_keeper () =
+  let meta = { (warm_meta ()) with paused = true } in
+  let d =
+    WO.keeper_cycle_decision
+      ~provider_cooldown_remaining_sec:no_provider_cooldown
+      ~reactive_wake:true
+      ~event_queue_triggers:[ WO.Failure_judgment_stimulus ]
+      ~meta
+      no_signal_obs
+  in
+  check bool "paused keeper does not run judgment action" false d.should_run;
+  check bool "operator pause remains authoritative" true
+    (match d.verdict with
+     | WO.Skip { reasons = WO.Keeper_paused, _ } -> true
+     | WO.Skip _ | WO.Run _ -> false)
+
 (* RFC-0303 Phase 2 stimulus-gate: a warm keeper whose [min_interval] HAS
    elapsed but that has NO opportunity (no signal, no claimed task, no backlog)
    now stays silent. Before Phase 2, [min_interval_elapsed] drove a blind
@@ -360,6 +376,10 @@ let () =
             "scheduled event queue trigger runs warm keeper"
             `Quick
             test_scheduled_event_queue_trigger_runs_warm_keeper
+        ; test_case
+            "failure judgment control respects paused keeper"
+            `Quick
+            test_failure_judgment_control_respects_paused_keeper
         ; test_case
             "elapsed min_interval + no opportunity stays silent (RFC-0303 P2)"
             `Quick

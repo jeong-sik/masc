@@ -91,6 +91,100 @@ describe('applyKeeperStreamEvent', () => {
     expect(entry?.streamContract?.deliveryReceipt).toBe('client_observed_sse_event')
   })
 
+  it('retains the durable receipt when a busy chat message enters the server queue', () => {
+    assistantEntry()
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_CHAT_QUEUED',
+      value: {
+        keeper_name: 'sangsu',
+        status: 'queued',
+        receipt_id: 'chatq_00000000-0000-4000-8000-000000000007',
+        queue_revision: 12,
+        pending_count: 3,
+        inflight_count: 1,
+        shutdown_operation_id: ' shutdown-op-7 ',
+      },
+    })).toBeNull()
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.delivery).toBe('queued')
+    expect(entry?.streamState).toBeNull()
+    expect(entry?.details).toMatchObject({
+      queueReceiptId: 'chatq_00000000-0000-4000-8000-000000000007',
+      queueShutdownOperationId: 'shutdown-op-7',
+      queueRevision: 12,
+      queuePendingCount: 3,
+      queueInflightCount: 1,
+    })
+    expect(entry?.streamContract).toMatchObject({
+      source: 'queue_event',
+      eventName: 'KEEPER_CHAT_QUEUED',
+      deliveryReceipt: 'client_observed_sse_event',
+    })
+  })
+
+  it('rejects a busy queue acceptance event without a durable receipt', () => {
+    assistantEntry()
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_CHAT_QUEUED',
+      value: {
+        status: 'queued',
+        pending_count: 1,
+        inflight_count: 0,
+        shutdown_operation_id: null,
+      },
+    })).toBe('Keeper queue acceptance is missing its durable receipt metadata.')
+  })
+
+  it('rejects malformed or partial durable queue acceptance metadata', () => {
+    assistantEntry()
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_CHAT_QUEUED',
+      value: {
+        receipt_id: 'not-a-chat-receipt',
+        queue_revision: 1,
+        pending_count: 1,
+        inflight_count: 0,
+        shutdown_operation_id: null,
+      },
+    })).toBe('Keeper queue acceptance is missing its durable receipt metadata.')
+
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_CHAT_QUEUED',
+      value: {
+        receipt_id: 'chatq_00000000-0000-4000-8000-000000000007',
+        pending_count: 1,
+        inflight_count: 0,
+        shutdown_operation_id: null,
+      },
+    })).toBe('Keeper queue acceptance is missing its durable receipt metadata.')
+  })
+
+  it('rejects missing, blank, or wrongly typed shutdown operation metadata', () => {
+    assistantEntry()
+    const baseValue = {
+      receipt_id: 'chatq_00000000-0000-4000-8000-000000000007',
+      queue_revision: 1,
+      pending_count: 1,
+      inflight_count: 0,
+    }
+
+    for (const shutdownOperationId of [undefined, '   ', 7]) {
+      const value = shutdownOperationId === undefined
+        ? baseValue
+        : { ...baseValue, shutdown_operation_id: shutdownOperationId }
+      expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+        type: 'CUSTOM',
+        name: 'KEEPER_CHAT_QUEUED',
+        value,
+      })).toBe('Keeper queue acceptance has invalid shutdown operation metadata.')
+    }
+  })
+
   it('surfaces failed request terminal events before stream error close', () => {
     assistantEntry()
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
@@ -789,6 +883,100 @@ describe('applyKeeperStreamEvent tool calls', () => {
         ts: expect.any(String),
       },
       { kind: 'think', text: 'think B', ts: expect.any(String) },
+    ])
+  })
+
+  it('promotes text followed by a tool call and keeps only terminal text as Chat', () => {
+    assistantEntry()
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_CONTENT_BLOCK_START',
+      value: { index: 2, content_type: 'text' },
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_START' })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TEXT_MESSAGE_CONTENT',
+      delta: '  PR 목록을 확인하겠다.\n',
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_END' })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TOOL_CALL_START',
+      toolCallId: 'tc-progress',
+      toolCallName: 'Execute',
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TOOL_CALL_ARGS',
+      toolCallId: 'tc-progress',
+      delta: '{"argv":["pr","list"]}',
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TOOL_CALL_END',
+      toolCallId: 'tc-progress',
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TEXT_MESSAGE_CONTENT',
+      delta: '최종 결과다.',
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'RUN_FINISHED' })
+
+    const reply = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
+    expect(reply?.text).toBe('최종 결과다.')
+    expect(reply?.rawText).toBe('최종 결과다.')
+    expect(reply?.traceSteps).toEqual([
+      {
+        kind: 'progress',
+        text: '  PR 목록을 확인하겠다.\n',
+        ts: expect.any(String),
+        oasBlockIndex: 2,
+      },
+      {
+        kind: 'tool',
+        name: 'Execute',
+        toolCallId: 'tc-progress',
+        status: 'ok',
+        args: '{"argv":["pr","list"]}',
+        ts: expect.any(String),
+      },
+    ])
+  })
+
+  it('keeps repeated intermediate rounds as progress when the run times out', () => {
+    assistantEntry()
+    for (const [index, text] of [
+      [2, 'PR 목록을 확인하겠다.'],
+      [4, 'cwd를 설정해서 다시 보겠다.'],
+    ] as const) {
+      applyKeeperStreamEvent('sangsu', 'reply-1', {
+        type: 'CUSTOM',
+        name: 'KEEPER_CONTENT_BLOCK_START',
+        value: { index, content_type: 'text' },
+      })
+      applyKeeperStreamEvent('sangsu', 'reply-1', {
+        type: 'TEXT_MESSAGE_CONTENT',
+        delta: text,
+      })
+      applyKeeperStreamEvent('sangsu', 'reply-1', {
+        type: 'TOOL_CALL_START',
+        toolCallId: `tc-progress-${index}`,
+        toolCallName: 'Execute',
+      })
+      applyKeeperStreamEvent('sangsu', 'reply-1', {
+        type: 'TOOL_CALL_END',
+        toolCallId: `tc-progress-${index}`,
+      })
+    }
+
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'RUN_ERROR',
+      value: { message: 'request exceeded timeout_sec=300.000 before completion' },
+    })).toBe('request exceeded timeout_sec=300.000 before completion')
+
+    const reply = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
+    expect(reply?.text).toBe('')
+    expect(reply?.rawText).toBe('')
+    expect(reply?.traceSteps?.filter(step => step.kind === 'progress')).toEqual([
+      expect.objectContaining({ kind: 'progress', text: 'PR 목록을 확인하겠다.', oasBlockIndex: 2 }),
+      expect.objectContaining({ kind: 'progress', text: 'cwd를 설정해서 다시 보겠다.', oasBlockIndex: 4 }),
     ])
   })
 

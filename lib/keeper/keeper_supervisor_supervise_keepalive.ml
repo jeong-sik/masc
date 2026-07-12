@@ -47,10 +47,40 @@ let supervise_keepalive
       (ctx : _ context)
       (meta : keeper_meta)
   =
-  if Keeper_registry.is_registered ~base_path:ctx.config.base_path meta.name
-  then ()
-  else
-    match Keeper_registry.spawn_slots_decision () with
+  let lifecycle_state =
+    Keeper_lifecycle_admission.state
+      ~paused:meta.paused
+      ~latched_reason:meta.latched_reason
+  in
+  match Keeper_lifecycle_admission.admit_autonomous lifecycle_state with
+  | Keeper_lifecycle_admission.Autonomous_denied denial ->
+    let reason = Keeper_lifecycle_admission.autonomous_denial_to_wire denial in
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string LifecycleDispatchRejections)
+      ~labels:
+        [ "keeper", meta.name
+        ; "event", "supervisor_keepalive_start"
+        ; "reason", reason
+        ]
+      ();
+    publish_lifecycle
+      ~event:
+        (Keeper_lifecycle_events.Custom_event
+           { verb = Keeper_lifecycle_events.Admission_denied
+           ; phase = Some Keeper_state_machine.Offline
+           })
+      meta.name
+      reason
+      ();
+    Log.Keeper.info
+      "%s: supervisor keepalive start denied by lifecycle admission: %s"
+      meta.name
+      reason
+  | Keeper_lifecycle_admission.Autonomous_admitted ->
+    if Keeper_registry.is_registered ~base_path:ctx.config.base_path meta.name
+    then ()
+    else
+      match Keeper_registry.spawn_slots_decision () with
     | Error reason ->
       Keeper_registry.record_spawn_slot_denied
         ~keeper_name:meta.name
@@ -65,12 +95,36 @@ let supervise_keepalive
         meta.name
         (Keeper_registry.spawn_slot_denial_reason_to_detail reason)
         ()
-    | Ok () -> (
+    | Ok () ->
     Startup_helpers.log_persona_drift_if_missing ~base_path:ctx.config.base_path meta;
     (* Register in Keeper_registry — single source of truth. *)
-    let reg =
-      Keeper_registry.register_offline ~base_path:ctx.config.base_path meta.name meta
-    in
+    (match
+       Keeper_registry.register_offline_if_admitted
+         ~base_path:ctx.config.base_path
+         meta.name
+         meta
+     with
+     | Error (Keeper_registry.Registration_shutdown_reserved operation_id) ->
+       Log.Keeper.info
+         "supervisor launch skipped %s because shutdown operation %s owns admission"
+         meta.name
+         (Keeper_shutdown_types.Operation_id.to_string operation_id)
+     | Error (Keeper_registry.Registration_lifecycle_reserved owner) ->
+       Log.Keeper.info
+         "supervisor launch skipped %s because lifecycle transaction owns admission: %s"
+         meta.name
+         (Keeper_lifecycle_reservation.snapshot_to_string owner)
+     | Error (Keeper_registry.Registration_invalid validation_error) ->
+       Log.Keeper.error
+         "supervisor registry validation rejected %s: %s"
+         meta.name
+         (Keeper_registry.registry_entry_validation_error_to_string validation_error)
+     | Error (Keeper_registry.Registration_event_queue_unavailable { keeper_name; detail }) ->
+       Log.Keeper.error
+         "supervisor registry event queue unavailable keeper=%s: %s"
+         keeper_name
+         detail
+     | Ok reg ->
     (* Workspace initialization *)
     (try
        if not (Workspace_utils.is_initialized ctx.config)

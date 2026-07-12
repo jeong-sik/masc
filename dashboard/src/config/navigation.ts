@@ -2,6 +2,7 @@ import type { RouteState, TabId } from '../types'
 
 type SurfaceId = TabId
 export const SETTINGS_ROUTE_SECTION_IDS = [
+  'account',
   'runtime',
   'routing',
   'runtimes',

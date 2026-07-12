@@ -5,7 +5,23 @@ open Masc_domain
 (** Network mode strings exposed only by explicit sandbox-management tools.
     Keeper creation/update no longer accepts sandbox posture knobs. *)
 let network_mode_enum_strings =
-  [ "none"; "inherit" ]
+  Keeper_types_profile_sandbox.valid_network_mode_strings
+;;
+
+module Sandbox_contract = Keeper_sandbox_control_contract
+
+let sandbox_stop_scope_enum_strings = Sandbox_contract.stop_scope_strings
+
+let bounded_number_schema (bounds : Sandbox_contract.bounded_float) description =
+  `Assoc
+    [ "type", `String "number"
+    ; "minimum", `Float bounds.minimum
+    ; "maximum", `Float bounds.maximum
+    ; "default", `Float bounds.default
+    ; "description", `String description
+    ]
+;;
+
 (** Issue #8486: hand-mirrored from
     [Keeper_status_detail.valid_tail_order_strings].  Same cycle
     constraint — Keeper_schema is upstream of Keeper_status_detail.
@@ -30,6 +46,66 @@ let tool_access_schema description =
   ]
 
 let keeper_schemas : tool_schema list = [
+  {
+    name = "masc_keeper_sandbox_start";
+    description = "Start the managed sandbox container for a keeper.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Keeper handle whose managed sandbox should be started.");
+        ]);
+        ("network_mode", `Assoc [
+          ("type", `String "string");
+          ("enum", `List (List.map (fun value -> `String value) network_mode_enum_strings));
+          ("description", `String "Optional sandbox network mode. Defaults to the keeper's configured network mode.");
+        ]);
+        ( "ttl_sec",
+          bounded_number_schema
+            Sandbox_contract.managed_ttl_sec
+            "Managed sandbox lifetime in seconds." );
+        ( "timeout_sec",
+          bounded_number_schema
+            Sandbox_contract.operation_timeout_sec
+            "Sandbox start timeout in seconds." );
+      ]);
+      ("required", `List [`String "name"]);
+      ("additionalProperties", `Bool false);
+    ];
+  };
+  {
+    name = "masc_keeper_sandbox_stop";
+    description = "Stop the managed sandbox container(s) for a keeper or fleet.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional keeper handle. When omitted, stop matching containers across the active fleet.");
+        ]);
+        ("container_kind", `Assoc [
+          ("type", `String "string");
+          ("enum", `List (List.map (fun value -> `String value) sandbox_stop_scope_enum_strings));
+          ( "default",
+            `String
+              (Sandbox_contract.stop_scope_to_string
+                 Sandbox_contract.default_stop_scope) );
+          ("description", `String "Container scope to stop: managed, turn, or all (default: managed).");
+        ]);
+        ( "timeout_sec",
+          bounded_number_schema
+            Sandbox_contract.operation_timeout_sec
+            "Sandbox stop timeout in seconds." );
+        ("prune_stale", `Assoc [
+          ("type", `String "boolean");
+          ("default", `Bool false);
+          ("description", `String "Also remove stale managed sandbox containers after the targeted stop.");
+        ]);
+      ]);
+      ("additionalProperties", `Bool false);
+    ];
+  };
   {
     name = "masc_persona_list";
     description = "List available persona profiles that can be used to create keepers via masc_keeper_create_from_persona.";
@@ -405,7 +481,7 @@ let keeper_schemas : tool_schema list = [
 
   {
     name = "masc_keeper_down";
-    description = "Stop a keeper. Optionally remove underlying files.";
+    description = "Submit a durable, non-blocking Keeper shutdown. Returns an operation_id immediately after admission is fenced and the ownership snapshot is persisted. Repeating the call returns the existing operation state.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

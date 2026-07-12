@@ -15,6 +15,7 @@ open Alcotest
 
 module TO = Masc.Keeper_turn_outcome
 module Ops = Masc.Keeper_tool_surface_ops
+module Stream = Server_routes_http_keeper_stream
 
 let outcome : TO.t testable =
   testable
@@ -38,6 +39,15 @@ let test_unknown_label_is_none () =
     [ ""; "completed"; "checkpoint"; "Visible_reply"; "VISIBLE_REPLY" ]
 
 let test_of_stop_reason () =
+  let request : Agent_sdk.Error.input_required =
+    { request_id = "outcome-input-1"
+    ; participant_name = None
+    ; question = "Which repository?"
+    ; schema = None
+    ; timeout_s = None
+    ; created_at = 1_000.0
+    }
+  in
   check outcome "completed -> visible" TO.Visible_reply
     (TO.of_stop_reason Runtime_agent.Completed);
   check outcome "budget exhausted -> checkpoint" TO.Continuation_checkpoint
@@ -52,7 +62,14 @@ let test_of_stop_reason () =
        (Runtime_agent.Yielded_to_chat_waiting { turns_used = 2 }));
   check outcome "durable stimulus yield -> checkpoint" TO.Continuation_checkpoint
     (TO.of_stop_reason
-       (Runtime_agent.Yielded_to_durable_stimulus { turns_used = 2 }))
+       (Runtime_agent.Yielded_to_durable_stimulus { turns_used = 2 }));
+  check outcome "typed recovery defer -> checkpoint" TO.Continuation_checkpoint
+    (TO.of_stop_reason
+       (Runtime_agent.ToolFailureRecoveryDeferred
+          { turns_used = 2; reason = "wait"; tool_names = [ "Execute" ] }));
+  check outcome "typed input required -> visible" TO.Visible_reply
+    (TO.of_stop_reason
+       (Runtime_agent.InputRequired { turns_used = 2; request }))
 
 let test_of_result_surface () =
   check outcome "completed with text -> visible" TO.Visible_reply
@@ -113,7 +130,9 @@ let test_autonomous_yield_boundary_contract () =
   | Runtime_agent.Completed
   | Runtime_agent.TurnBudgetExhausted _
   | Runtime_agent.MutationBoundaryReached _
-  | Runtime_agent.Yielded_to_chat_waiting _ ->
+  | Runtime_agent.Yielded_to_chat_waiting _
+  | Runtime_agent.InputRequired _
+  | Runtime_agent.ToolFailureRecoveryDeferred _ ->
     fail "durable request mapped to the wrong stop reason"
 
 let payload fields = Some (`Assoc fields)
@@ -199,6 +218,43 @@ let test_turn_ref_payload_decode () =
   check (option turn_ref_t) "non-string field -> None" None
     (TO.turn_ref_of_reply_payload (payload [ (TO.turn_ref_wire_key, `Int 5) ]))
 
+let test_queued_delivery_requires_exact_turn_ref () =
+  let check_failed label payload_json =
+    match
+      payload_json
+      |> TO.turn_ref_of_reply_payload
+      |> Stream.For_testing.queued_delivery_outcome_of_turn_ref
+    with
+    | Stream.Failed { kind = Stream.Missing_turn_ref; detail } ->
+        check bool (label ^ " has diagnostic detail") true
+          (String.trim detail <> "")
+    | Stream.Failed _ | Stream.Delivered _ | Stream.Deferred _ ->
+        fail (label ^ " must fail with Missing_turn_ref")
+  in
+  check_failed "missing turn_ref"
+    (payload [ ("reply", `String "hi") ]);
+  check_failed "malformed turn_ref"
+    (payload
+       [ ("reply", `String "hi")
+       ; (TO.turn_ref_wire_key, `String "not-a-turn-ref")
+       ]);
+  let valid =
+    payload
+      [ ("reply", `String "hi")
+      ; (TO.turn_ref_wire_key, `String "trace-queued#42")
+      ]
+  in
+  match
+    valid
+    |> TO.turn_ref_of_reply_payload
+    |> Stream.For_testing.queued_delivery_outcome_of_turn_ref
+  with
+  | Stream.Delivered { outcome_ref } ->
+      check string "valid turn_ref is preserved exactly"
+        "trace-queued#42" outcome_ref
+  | Stream.Failed _ | Stream.Deferred _ ->
+    fail "valid turn_ref must produce Delivered"
+
 let body fields = Yojson.Safe.to_string (`Assoc fields)
 
 let test_direct_reply_visible_text () =
@@ -252,6 +308,8 @@ let () =
           test_case "prefix is dead" `Quick test_prefix_is_dead;
           test_case "turn_ref decode (parse, don't repair)" `Quick
             test_turn_ref_payload_decode;
+          test_case "queued delivery requires exact turn_ref" `Quick
+            test_queued_delivery_requires_exact_turn_ref;
         ] );
       ( "direct_reply",
         [

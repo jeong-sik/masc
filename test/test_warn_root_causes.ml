@@ -88,7 +88,7 @@ let filter_core_by_tool_access (meta : Keeper_meta_contract.keeper_meta) =
 let write_tools = [ "Edit" ]
 
 let shell_bridge_tools = [ "Execute" ]
-let read_alias_tools = [ "Grep"; "Search"; "Read" ]
+let read_model_tools = [ "Grep"; "Read" ]
 
 let write_enabled_tool_access =
   [ "tool_edit_file"; "tool_execute" ]
@@ -107,12 +107,12 @@ let test_core_tools_visible_with_empty_tool_access () =
   List.iter (fun t ->
     if not (List.mem t unfiltered_core) then
       fail (Printf.sprintf "precondition: %s missing from effective_core_tools" t)
-  ) (write_tools @ read_alias_tools);
+  ) (write_tools @ read_model_tools);
   let filtered = filter_core_by_tool_access meta in
   List.iter (fun t ->
     if not (List.mem t filtered) then
       fail (Printf.sprintf "%s must stay visible without explicit tool_access" t)
-  ) (write_tools @ read_alias_tools);
+  ) (write_tools @ read_model_tools);
   (* Core always-tools must survive *)
   List.iter (fun t ->
     if not (List.mem t filtered) then
@@ -130,7 +130,7 @@ let test_core_tools_visible_with_read_only_tool_access () =
   List.iter (fun t ->
     if not (List.mem t filtered) then
       fail (Printf.sprintf "%s should stay visible for read-only tool_access" t)
-  ) (write_tools @ read_alias_tools)
+  ) (write_tools @ read_model_tools)
 
 let test_core_tools_include_write_for_write_enabled_tool_access () =
   ignore (init_registry ());
@@ -192,7 +192,19 @@ let test_web_alias_bundle_visible_without_injected_masc_schema () =
           check bool "WebSearch remains bundle-visible" true
             (List.mem "WebSearch" names);
           check bool "WebFetch remains bundle-visible" true
-            (List.mem "WebFetch" names)))
+            (List.mem "WebFetch" names);
+          check bool "Grep preferred projection is bundle-visible" true
+            (List.mem "Grep" names);
+          check bool "Search compatibility alias is not model-visible" false
+            (List.mem "Search" names);
+          check bool "search_files compatibility alias is not model-visible" false
+            (List.mem "search_files" names);
+          check bool "Grep internal route is not model-visible" false
+            (List.mem "tool_search_files" names);
+          check int
+            "bundle model names are unique"
+            (List.length names)
+            (List.length (List.sort_uniq String.compare names))))
 
 let test_fusion_default_descriptor_is_bundle_visible () =
   ignore (init_registry ());

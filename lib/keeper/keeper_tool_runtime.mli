@@ -21,11 +21,12 @@ type context =
   ; proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option
   ; net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option
   ; mcp_session_id : string option
+  ; continuation_channel : Keeper_continuation_channel.t option
+    (** RFC-0320: originating connector conversation of the current turn;
+        lets async tools (masc_fusion) route completion wakes back. *)
   }
 
 val descriptor_for_internal : string -> Keeper_tool_descriptor.t option
 
 val handle :
   context -> descriptor:Keeper_tool_descriptor.t -> args:Yojson.Safe.t -> string option
-
-val handle_internal : context -> name:string -> args:Yojson.Safe.t -> string option

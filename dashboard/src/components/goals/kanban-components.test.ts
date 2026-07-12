@@ -192,4 +192,10 @@ describe('TaskBacklog', () => {
     const matches = screen.getAllByText(/검증 대기/)
     expect(matches.length).toBeGreaterThanOrEqual(2)
   })
+
+  it('opts discrete task issue links into the runtime mobile target contract', () => {
+    render(h(TaskBacklog, {}))
+    const link = screen.getAllByRole('link', { name: /관련 이슈 검색/ })[0]
+    expect(link).toHaveClass('v2-mobile-operator-target')
+  })
 })

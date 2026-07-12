@@ -22,6 +22,11 @@ type context =
   ; proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option
   ; net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option
   ; mcp_session_id : string option
+  ; continuation_channel : Keeper_continuation_channel.t option
+    (* RFC-0320: the connector conversation the current turn started from,
+       so async tools (masc_fusion) can route their completion wake back to
+       the originating channel. [None] on non-connector turns and on callers
+       without turn context (OAS handler defaults, tests). *)
   }
 
 let descriptor_for_internal internal_name =
@@ -77,6 +82,9 @@ let handle_filesystem ctx descriptor args =
   | Tool_masc_surface_audit
   | Tool_masc_fusion_dispatch
   | Tool_masc_fusion_status
+  | Tool_masc_library_dispatch
+  | Tool_masc_recurring_dispatch
+  | Tool_masc_local_runtime_dispatch
   | Tool_analyze_image -> None
 ;;
 
@@ -134,6 +142,9 @@ let handle_shell_ir ctx descriptor args =
   | Tool_masc_surface_audit
   | Tool_masc_fusion_dispatch
   | Tool_masc_fusion_status
+  | Tool_masc_library_dispatch
+  | Tool_masc_recurring_dispatch
+  | Tool_masc_local_runtime_dispatch
   | Tool_analyze_image -> None
 ;;
 
@@ -307,6 +318,7 @@ let handle_in_process ctx descriptor args =
       (Keeper_tool_in_process_runtime.handle_masc_fusion
          ~config:ctx.config
          ~meta:ctx.meta
+         ?continuation_channel:ctx.continuation_channel
          ~args
          ())
   | Tool_masc_fusion_status ->
@@ -316,6 +328,14 @@ let handle_in_process ctx descriptor args =
          ~meta:ctx.meta
          ~args
          ())
+  | Tool_masc_library_dispatch
+  | Tool_masc_recurring_dispatch
+  | Tool_masc_local_runtime_dispatch ->
+    Keeper_tool_registered_runtime.handle_registered_tool
+      ~config:ctx.config
+      ~keeper_name:ctx.meta.name
+      ~name
+      ~args
   | Tool_analyze_image ->
     (* read-only vision sub-call; needs [net] (like masc_fusion), threaded from
        the turn-scoped dispatch context. *)
@@ -339,10 +359,4 @@ let handle ctx ~descriptor ~args =
   | Filesystem -> handle_filesystem ctx descriptor args
   | Shell_ir -> handle_shell_ir ctx descriptor args
   | In_process -> handle_in_process ctx descriptor args
-;;
-
-let handle_internal ctx ~name ~args =
-  match descriptor_for_internal name with
-  | None -> None
-  | Some descriptor -> handle ctx ~descriptor ~args
 ;;

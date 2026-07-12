@@ -29,7 +29,9 @@ type retry_loop_input =
 let autonomous_yield_request ~base_path ~keeper_name ~channel =
   if
     Keeper_turn_admission.chat_waiting ~base_path ~keeper_name
-    || Keeper_chat_queue.length ~keeper_name > 0
+    || (match Keeper_chat_queue.pending_count ~keeper_name with
+        | Ok count -> count > 0
+        | Error _ -> true)
   then
     let boundary =
       match channel with
@@ -61,10 +63,10 @@ type ctx =
       base_system_prompt:string -> messages:Agent_sdk.Types.message list ->
       Keeper_agent_run.turn_prompt
   ; channel : Keeper_world_observation.keeper_cycle_channel
-  ; hitl_delivery_channel : Keeper_continuation_channel.t option
-      (* RFC-0320 W3c: the originating channel to deterministically deliver this
-         turn's reply to when the turn was opened by a Hitl_resolved wake; [None]
-         on every other lane (fail-closed: no delivery). *)
+  ; continuation_delivery_channel : Keeper_continuation_channel.t option
+      (* Exact originating channel for a continuation-bearing wake. Non-board
+         intake admits one stimulus per turn, so this never chooses between
+         unrelated conversations. [None] fails closed to no external delivery. *)
   ; hitl_approval_grant : Governance_pipeline.hitl_approval_grant option
       (* Exact operator authorization scoped to this cycle and shared across
          all runtime retry attempts so a retry cannot recreate the grant. *)
@@ -110,7 +112,7 @@ let run (ctx : ctx)
       ; keeper_turn_id
       ; turn_id
       ; channel
-      ; hitl_delivery_channel
+      ; continuation_delivery_channel
       ; hitl_approval_grant
       ; shared_context
       ; base_dir
@@ -188,7 +190,8 @@ let run (ctx : ctx)
                Keeper_agent_run.run_turn
                  ~config
                  ~meta:run_meta
-                 ?hitl_delivery_channel
+                 ~profile_defaults
+                 ?continuation_delivery_channel
                  ?hitl_approval_grant
                  ~turn_ctx_cell
                  ~base_dir

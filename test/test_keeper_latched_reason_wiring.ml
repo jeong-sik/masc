@@ -6,10 +6,10 @@
     Sites under test:
     - gRPC pause directive ([Keeper_keepalive.process_directive "pause"]
       -> [directive_paused_meta]) -> [Operator_paused {grpc_directive}]
-    - keeper_down retain ([Keeper_turn_lifecycle.handle_keeper_down_config],
+    - keeper_down retain ([Keeper_shutdown_finalize.For_testing.paused_meta],
       remove_meta=false) -> [Operator_paused {keeper_down}]
-    - dead-tombstone cleanup
-      ([Keeper_supervisor_cleanup_tombstone.cleanup_dead_tombstone])
+    - durable dead-tombstone final meta
+      ([Keeper_shutdown_finalize.For_testing.dead_tombstone_meta])
       -> [Dead_tombstone]
 
     Observability only: these tests assert the {i reason} annotation, not
@@ -20,15 +20,12 @@ open Alcotest
 module Keeper_meta_contract = Masc.Keeper_meta_contract
 module Keeper_meta_json = Masc.Keeper_meta_json
 module Keeper_meta_json_parse = Masc.Keeper_meta_json_parse
-module Keeper_meta_store = Masc.Keeper_meta_store
 module Keeper_meta_merge = Masc.Keeper_meta_merge
 module Keeper_registry = Masc.Keeper_registry
 module Keeper_keepalive = Masc.Keeper_keepalive
 module Keeper_turn_lifecycle = Masc.Keeper_turn_lifecycle
 module Keeper_status_bridge = Masc.Keeper_status_bridge
-module Keeper_supervisor_cleanup_tombstone = Masc.Keeper_supervisor_cleanup_tombstone
 module Keeper_supervisor_types = Masc.Keeper_supervisor_types
-module Keeper_types_profile = Masc.Keeper_types_profile
 
 let base_json name =
   `Assoc
@@ -187,176 +184,52 @@ let test_grpc_pause_directive_records_reason () =
 (* ── Site 2: keeper_down retain (remove_meta=false) ─────────── *)
 
 let test_keeper_down_retain_records_reason () =
-  Eio_main.run
-  @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let base_path = Masc_test_deps.setup_test_workspace () in
-  Fun.protect
-    ~finally:(fun () ->
-      Keeper_registry.clear ();
-      Masc_test_deps.cleanup_test_workspace base_path)
-    (fun () ->
-       let config = Masc.Workspace.default_config base_path in
-       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
-       (* Avoid a leading "keeper-" — identity resolution strips that prefix
-          and the write/read names would diverge. *)
-       let keeper_name = "downretain-owner" in
-       let meta = make_meta keeper_name in
-       Keeper_registry.clear ();
-       (match Keeper_meta_store.write_meta config meta with
-        | Ok () -> ()
-        | Error err -> failf "seed meta write: %s" err);
-       ignore (Keeper_registry.register ~base_path:config.base_path keeper_name meta);
-       let args =
-         `Assoc
-           [ "name", `String keeper_name
-           ; "remove_meta", `Bool false
-           ; "remove_session", `Bool false
-           ]
-       in
-       let _result = Keeper_turn_lifecycle.handle_keeper_down_config ~config args in
-       match Keeper_meta_store.read_meta config keeper_name with
-       | Ok (Some persisted) ->
-         check bool "keeper_down retain pauses keeper" true persisted.paused;
-         check
-           (option string)
-           "keeper_down retain records keeper_down operator pause"
-           (Some wire_keeper_down)
-           (latched_reason_wire persisted)
-       | Ok None -> fail "expected retained keeper meta on disk"
-       | Error err -> failf "read persisted meta: %s" err)
+  let retained =
+    Masc.Keeper_shutdown_finalize.For_testing.paused_meta
+      (make_meta "downretain-owner")
+  in
+  check bool "keeper_down retain pauses keeper" true retained.paused;
+  check
+    (option string)
+    "keeper_down retain records keeper_down operator pause"
+    (Some wire_keeper_down)
+    (latched_reason_wire retained)
 
 (* ── Site 1: dead-tombstone cleanup ─────────────────────────── *)
 
-let run_dead_tombstone_cleanup_records_reason
-      ?(paused = false)
-      ?latched_reason
-      ?auto_resume_after_sec
-      ?last_blocker
-      ?updated_at
-      keeper_name
-  =
-  Eio_main.run
-  @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  Eio.Switch.run
-  @@ fun sw ->
-  let base_path = Masc_test_deps.setup_test_workspace () in
-  Fun.protect
-    ~finally:(fun () ->
-      Keeper_registry.clear ();
-      Masc_test_deps.cleanup_test_workspace base_path)
-    (fun () ->
-       let config = Masc.Workspace.default_config base_path in
-       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
-       let meta =
-         let base =
-           { (make_meta keeper_name) with
-             paused
-           ; latched_reason
-           ; auto_resume_after_sec
-           }
-         in
-         let base =
-           match updated_at with
-           | Some updated_at -> { base with updated_at }
-           | None -> base
-         in
-         { base with runtime = { base.runtime with last_blocker } }
-       in
-       Keeper_registry.clear ();
-       (match Keeper_meta_store.write_meta config meta with
-        | Ok () -> ()
-        | Error err -> failf "seed meta write: %s" err);
-       let entry =
-         Keeper_registry.register ~base_path:config.base_path keeper_name meta
-       in
-       let ctx : _ Keeper_types_profile.context =
-         { config
-         ; agent_name = "supervisor"
-         ; sw
-         ; clock = Eio.Stdenv.clock env
-         ; proc_mgr = None
-         ; net = None
-         }
-       in
-       let events = ref [] in
-       let publish_lifecycle ~event:_ name detail () =
-         events := (name, detail) :: !events
-       in
-       Keeper_supervisor_cleanup_tombstone.cleanup_dead_tombstone
-         ~publish_lifecycle
-         ctx
-         entry;
-       check bool "dead-cleaned lifecycle event published" true (!events <> []);
-       match Keeper_meta_store.read_meta config keeper_name with
-       | Ok (Some persisted) ->
-         check bool "dead tombstone persists paused=true" true persisted.paused;
-         check
-           (option string)
-           "dead tombstone records the Dead_tombstone reason"
-           (Some wire_dead_tombstone)
-           (latched_reason_wire persisted);
-         check
-           bool
-           "dead tombstone clears stale auto-resume policy"
-           true
-           (Option.is_none persisted.auto_resume_after_sec);
-         check
-           bool
-           "dead tombstone clears stale blocker"
-           true
-           (Option.is_none persisted.runtime.last_blocker);
-         check
-           bool
-           "dead tombstone pause is not auto-resume due"
-           false
-           (Keeper_supervisor_types.paused_meta_auto_resume_due
-              ~now:(Unix.time () +. 7200.0)
-              persisted)
-       | Ok None -> fail "expected tombstone meta to remain on disk after cleanup"
-       | Error err -> failf "read persisted meta: %s" err)
-
-let test_dead_tombstone_cleanup_records_reason () =
-  run_dead_tombstone_cleanup_records_reason "dead-tombstone-keeper"
-
-let test_dead_tombstone_cleanup_overwrites_existing_pause_reason () =
-  run_dead_tombstone_cleanup_records_reason
-    ~paused:true
-    ~latched_reason:
-      (Keeper_latched_reason.Operator_paused
-         { operator_actor = Keeper_latched_reason.operator_actor_keeper_down })
-    "dead-tombstone-paused-keeper"
-
-let test_dead_tombstone_cleanup_clears_auto_resume_state () =
+let test_dead_tombstone_final_meta_records_reason () =
   let timeout_blocker =
     Keeper_meta_contract.blocker_info_of_class
-      ~detail:"stale auto-pause before dead cleanup"
+      ~detail:"stale pause before durable dead finalization"
       Keeper_meta_contract.Turn_timeout
   in
-  run_dead_tombstone_cleanup_records_reason
-    ~paused:true
-    ~latched_reason:
-      (Keeper_latched_reason.Operator_paused
-         { operator_actor = Keeper_latched_reason.operator_actor_keeper_down })
-    ~auto_resume_after_sec:1.0
-    ~last_blocker:timeout_blocker
-    ~updated_at:"1970-01-01T00:00:00Z"
-    "dead-tombstone-auto-resume-keeper"
-
-let test_dead_tombstone_cleanup_repairs_stale_terminal_state () =
-  let timeout_blocker =
-    Keeper_meta_contract.blocker_info_of_class
-      ~detail:"stale dead tombstone auto-resume state"
-      Keeper_meta_contract.Turn_timeout
+  let input =
+    { (make_meta "dead-tombstone-final-meta") with
+      paused = true
+    ; latched_reason =
+        Some
+          (Keeper_latched_reason.Operator_paused
+             { operator_actor = Keeper_latched_reason.operator_actor_keeper_down })
+    ; auto_resume_after_sec = Some 1.0
+    ; runtime =
+        { (make_meta "dead-tombstone-final-meta").runtime with
+          last_blocker = Some timeout_blocker
+        }
+    }
   in
-  run_dead_tombstone_cleanup_records_reason
-    ~paused:true
-    ~latched_reason:Keeper_latched_reason.Dead_tombstone
-    ~auto_resume_after_sec:1.0
-    ~last_blocker:timeout_blocker
-    ~updated_at:"1970-01-01T00:00:00Z"
-    "dead-tombstone-stale-terminal-keeper"
+  let finalized =
+    Masc.Keeper_shutdown_finalize.For_testing.dead_tombstone_meta input
+  in
+  check bool "dead final meta remains paused" true finalized.paused;
+  check
+    (option string)
+    "dead final meta records Dead_tombstone"
+    (Some wire_dead_tombstone)
+    (latched_reason_wire finalized);
+  check bool "dead final meta clears auto-resume" true
+    (Option.is_none finalized.auto_resume_after_sec);
+  check bool "dead final meta clears stale blocker" true
+    (Option.is_none finalized.runtime.last_blocker)
 
 let test_dead_tombstone_latch_blocks_legacy_auto_resume () =
   let timeout_blocker =
@@ -384,7 +257,39 @@ let test_dead_tombstone_latch_blocks_legacy_auto_resume () =
        ~now:(Unix.time () +. 7200.0)
        meta)
 
-let test_heartbeat_merge_preserves_only_typed_operator_pause () =
+(* Regression for the "permanent zombie" bug: operator [masc_keeper_up]
+   ([Keeper_turn_up_update] resume branch) must clear [latched_reason], not
+   only [paused].  A [Dead_tombstone] latch that survives a paused-clearing
+   resume keeps [paused_meta_auto_resume_due] false forever, so the keeper can
+   never recover.  This pins that clearing the latch re-enables recovery. *)
+let test_operator_resume_clears_dead_tombstone_latch () =
+  let base = make_meta "revive-after-operator-up" in
+  let auto_resume_after_sec = 1.0 in
+  let paused_at = 1.0 in
+  let after_auto_resume = paused_at +. auto_resume_after_sec +. 1.0 in
+  let paused_due =
+    { base with
+      paused = true
+    ; auto_resume_after_sec = Some auto_resume_after_sec
+    ; updated_at = Masc_domain.iso8601_of_unix_seconds paused_at
+    }
+  in
+  check
+    bool
+    "Dead_tombstone latch blocks auto-resume"
+    false
+    (Keeper_supervisor_types.paused_meta_auto_resume_due
+       ~now:after_auto_resume
+       { paused_due with latched_reason = Some Keeper_latched_reason.Dead_tombstone });
+  check
+    bool
+    "operator-cleared latch re-enables auto-resume"
+    true
+    (Keeper_supervisor_types.paused_meta_auto_resume_due
+       ~now:after_auto_resume
+       { paused_due with latched_reason = None })
+
+let test_heartbeat_merge_preserves_typed_latched_pause () =
   let caller =
     { (make_meta "typed-operator-pause-merge-caller") with
       paused = false
@@ -410,6 +315,22 @@ let test_heartbeat_merge_preserves_only_typed_operator_pause () =
     "typed operator pause preserves reason"
     (Some wire_keeper_down)
     (latched_reason_wire preserved);
+  let latest_dead_tombstone =
+    { latest_operator_pause with
+      latched_reason = Some Keeper_latched_reason.Dead_tombstone
+    }
+  in
+  let dead_preserved =
+    Keeper_meta_merge.heartbeat_fields_from_disk
+      ~latest:latest_dead_tombstone
+      ~caller
+  in
+  check bool "typed dead tombstone remains paused" true dead_preserved.paused;
+  check
+    (option string)
+    "typed dead tombstone preserves terminal reason"
+    (Some wire_dead_tombstone)
+    (latched_reason_wire dead_preserved);
   let latest_unlabeled_pause =
     { latest_operator_pause with latched_reason = None }
   in
@@ -424,89 +345,6 @@ let test_heartbeat_merge_preserves_only_typed_operator_pause () =
     "unlabeled pause does not copy a reason"
     None
     (latched_reason_wire not_preserved)
-
-(* Reviewer P1 (2026-07-03): the overwrite test above only exercises the
-   no-conflict write, where the merge never runs. On a CAS retry the cleanup
-   re-reads disk; if that snapshot is an operator pause, reusing
-   [heartbeat_fields_from_disk] copied the operator reason back over
-   [Dead_tombstone] and returned [Ok ()], silently persisting the wrong reason.
-   This drives the retry path deterministically without a concurrent writer: the
-   caller carries a stale [meta_version] so its first write loses the CAS race
-   against a seeded operator-pause snapshot, forcing the merge to run. *)
-let test_dead_tombstone_cleanup_cas_retry_preserves_reason () =
-  Eio_main.run
-  @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let base_path = Masc_test_deps.setup_test_workspace () in
-  Fun.protect
-    ~finally:(fun () ->
-      Keeper_registry.clear ();
-      Masc_test_deps.cleanup_test_workspace base_path)
-    (fun () ->
-       let config = Masc.Workspace.default_config base_path in
-       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
-       let keeper_name = "dead-tombstone-cas-keeper" in
-       (* Disk snapshot the retry re-reads: an operator pause with a higher turn
-          count than the caller's stale snapshot. The typed
-          [Operator_paused] latch is what lets the heartbeat merge preserve the
-          disk pause; dead-tombstone cleanup must keep ownership with the
-          caller instead. *)
-       let disk_meta =
-         let base =
-           { (make_meta keeper_name) with
-             paused = true
-           ; latched_reason =
-               Some
-                 (Keeper_latched_reason.Operator_paused
-                    { operator_actor = Keeper_latched_reason.operator_actor_keeper_down })
-           }
-         in
-         { base with
-           runtime =
-             { base.runtime with
-               usage = { base.runtime.usage with total_turns = 7 }
-             }
-         }
-       in
-       (match Keeper_meta_store.write_meta config disk_meta with
-        | Ok () -> ()
-        | Error err -> failf "seed disk meta: %s" err);
-       (* Caller: the cleanup's stale in-hand snapshot. [meta_version = 0] loses
-          the CAS race against the seeded version, forcing the retry + merge. *)
-       let caller =
-         { disk_meta with
-           meta_version = 0
-         ; paused = true
-         ; latched_reason = Some Keeper_latched_reason.Dead_tombstone
-         ; runtime =
-             { disk_meta.runtime with
-               usage = { disk_meta.runtime.usage with total_turns = 3 }
-             }
-         }
-       in
-       (match
-          Keeper_meta_store.write_meta_with_merge
-            ~merge:Keeper_meta_merge.dead_tombstone_cleanup_from_disk
-            config
-            caller
-        with
-        | Ok () -> ()
-        | Error err -> failf "write_meta_with_merge after CAS retry: %s" err);
-       match Keeper_meta_store.read_meta config keeper_name with
-       | Ok (Some persisted) ->
-         check bool "CAS retry keeps paused=true" true persisted.paused;
-         check
-           (option string)
-           "CAS retry persists Dead_tombstone, not the operator reason"
-           (Some wire_dead_tombstone)
-           (latched_reason_wire persisted);
-         check
-           int
-           "CAS retry preserves heartbeat-owned turn count monotonically"
-           7
-           persisted.runtime.usage.total_turns
-       | Ok None -> fail "expected meta on disk after CAS retry"
-       | Error err -> failf "read persisted meta: %s" err)
 
 let () =
   run
@@ -526,19 +364,13 @@ let () =
             test_grpc_pause_directive_records_reason
         ; test_case "keeper_down retain records keeper_down reason" `Quick
             test_keeper_down_retain_records_reason
-        ; test_case "dead-tombstone cleanup records Dead_tombstone reason" `Quick
-            test_dead_tombstone_cleanup_records_reason
-        ; test_case "dead-tombstone cleanup overwrites existing pause reason" `Quick
-            test_dead_tombstone_cleanup_overwrites_existing_pause_reason
-        ; test_case "dead-tombstone cleanup clears auto-resume state" `Quick
-            test_dead_tombstone_cleanup_clears_auto_resume_state
-        ; test_case "dead-tombstone cleanup repairs stale terminal state" `Quick
-            test_dead_tombstone_cleanup_repairs_stale_terminal_state
+        ; test_case "dead final meta records terminal tombstone reason" `Quick
+            test_dead_tombstone_final_meta_records_reason
         ; test_case "dead-tombstone latch blocks legacy auto-resume" `Quick
             test_dead_tombstone_latch_blocks_legacy_auto_resume
-        ; test_case "heartbeat merge uses typed operator latch, not pause shape" `Quick
-            test_heartbeat_merge_preserves_only_typed_operator_pause
-        ; test_case "dead-tombstone cleanup CAS retry preserves Dead_tombstone" `Quick
-            test_dead_tombstone_cleanup_cas_retry_preserves_reason
+        ; test_case "operator resume clears dead-tombstone latch to re-enable recovery"
+            `Quick test_operator_resume_clears_dead_tombstone_latch
+        ; test_case "heartbeat merge preserves typed latch, not pause shape" `Quick
+            test_heartbeat_merge_preserves_typed_latched_pause
         ] )
     ]

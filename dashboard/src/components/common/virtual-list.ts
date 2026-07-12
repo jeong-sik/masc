@@ -23,6 +23,8 @@ interface VirtualListProps<T> {
   getKey: (item: T) => string
   className?: string
   onEndReached?: () => void
+  tabIndex?: number
+  ariaLabel?: string
 }
 
 interface VisibleRange {
@@ -67,6 +69,8 @@ export function VirtualList<T>({
   getKey,
   className = '',
   onEndReached,
+  tabIndex,
+  ariaLabel,
 }: VirtualListProps<T>) {
   // Hooks must be called unconditionally (Rules of Hooks)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -242,7 +246,7 @@ export function VirtualList<T>({
   if (!virtualize) {
     const fallbackRowHeight = itemHeight ?? estimatedItemHeight
     return html`
-      <div class=${className}>
+      <div class=${className} tabindex=${tabIndex} aria-label=${ariaLabel}>
         ${items.map((item, i) => html`
           <div
             key=${getKey(item)}
@@ -266,7 +270,7 @@ export function VirtualList<T>({
     const visible = items.slice(range.start, range.end)
 
     return html`
-      <div ref=${containerRef} class=${className}>
+      <div ref=${containerRef} class=${className} tabindex=${tabIndex} aria-label=${ariaLabel}>
         <div class="virtual-list-spacer" style=${{ height: `${totalHeight}px`, position: 'relative' }}>
           <div
             class="virtual-list-viewport"
@@ -296,7 +300,7 @@ export function VirtualList<T>({
   const visible = items.slice(range.start, range.end)
 
   return html`
-    <div ref=${containerRef} class=${className}>
+    <div ref=${containerRef} class=${className} tabindex=${tabIndex} aria-label=${ariaLabel}>
       <div class="virtual-list-spacer" style=${{ height: `${totalHeight}px`, position: 'relative' }}>
         <div
           class="virtual-list-viewport"

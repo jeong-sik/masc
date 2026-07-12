@@ -192,6 +192,19 @@ val current_env_base_path_opt : unit -> string option
     anchor stays the SSOT. *)
 val absolute_path : string -> string
 
+type canonical_base_path_error =
+  | Empty_after_normalization
+  | Could_not_derive_absolute of { input : string }
+
+val canonical_base_path_error_to_string : canonical_base_path_error -> string
+
+val canonical_base_path : string -> (string, canonical_base_path_error) result
+(** Canonical identity for a MASC workspace base path. Applies
+    {!Env_config_core.normalize_masc_base_path_input}, anchors relative inputs
+    at {!current_working_dir}, then normalizes once more. Thus [base_path] and
+    [base_path/.masc] resolve to the same absolute identity. Invalid input is a
+    typed error; callers must not fall back to the raw string. *)
+
 val current_env_config_dir_opt : unit -> string option
 val current_env_personas_dir_opt : unit -> string option
 

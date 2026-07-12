@@ -13,10 +13,12 @@ type phase_gate_outcome =
         caller may proceed to runtime routing. The carried [phase_opt]
         is the same value the gate observed in the registry, so the
         caller's runtime routing dispatches on the gate's view. *)
-  | Phase_gate_terminal_ok of Keeper_meta_contract.keeper_meta
-    (** Cooperative early-exit: supervisor stop, or non-executable
-        phase. [run_keeper_cycle] returns [Ok meta] with [meta]
-        unchanged. *)
+  | Phase_gate_cancelled of Keeper_meta_contract.keeper_meta
+    (** Cooperative early-exit after a supervisor stop. The caller must retain
+        this cancellation as a typed outcome; it is not completed work. *)
+  | Phase_gate_skipped of Keeper_meta_contract.keeper_meta
+    (** Cooperative early-exit in a non-executable registry phase. The caller
+        must retain this skip as a typed outcome; it is not completed work. *)
   | Phase_gate_terminal_error of Agent_sdk.Error.sdk_error
     (** Hard early-exit: registry phase missing. [run_keeper_cycle]
         returns [Error err]. *)
@@ -48,7 +50,7 @@ val decide_and_record
 
     @param config Workspace configuration passed through to observability.
     @param meta Current keeper metadata. Returned unchanged on
-      [Phase_gate_terminal_ok] outcomes.
+      [Phase_gate_cancelled] and [Phase_gate_skipped] outcomes.
     @param generation Current generation counter.
     @param keeper_turn_id Turn identifier assigned at function entry.
     @param append_phase_gate_decision Callback closing over the

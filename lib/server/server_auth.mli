@@ -155,55 +155,42 @@ val sanitized_dashboard_actor_for_request :
 
 (** {1 Origin / CORS} *)
 
-val default_port_of_scheme : string option -> int option
-(** Default port for [http]/[https]/[ws]/[wss], or [None]. *)
-
-val normalize_loopback_host : string -> string
-(** Map [127.0.0.1]/[::1]/[localhost] to a single canonical form so
-    origin comparisons are scheme/host-equivalent. *)
-
-val host_port_scheme_of_origin :
-  string -> (string * int option * string option) option
-(** Parse an [Origin] header value into [(host, port, scheme)]. *)
-
-type request_host_rejection =
-  | Missing_request_host
-  | Malformed_request_host
-  | Non_loopback_request_host of string
-
-type admitted_request_host =
-  { host : string
-  ; port : int option
-  }
-
-val admit_loopback_request_host :
-  Httpun.Request.t -> (admitted_request_host, request_host_rejection) result
-(** Parse the request [Host] authority and admit exact loopback hosts only.
-    Missing, malformed, and non-loopback authorities remain distinct typed
-    rejections. Credential-bearing endpoints must run this gate before I/O. *)
-
-val host_port_of_request : Httpun.Request.t -> (string * int option) option
-(** Host/port from the request's [Host] header. *)
-
 val allow_anonymous_mutations : unit -> bool
 (** Re-reads [MASC_ALLOW_ANONYMOUS_MUTATIONS] on each call.
     When [true] non-loopback mutations skip auth (test fixtures only). *)
 
-val default_loopback_dev_mutation_origins : string list
-(** Built-in allowlist of dev-loopback origins (e.g. Vite). *)
+type browser_origin_admission =
+  | Same_origin
+  | Allowed_dev_origin
+  | Rejected
 
-val configured_loopback_dev_mutation_origins : unit -> string list
-(** Configured allowlist (env / TOML), unioned with the default. *)
+type request_origin_admission =
+  | Missing_origin
+  | Single_origin of
+      { origin : string
+      ; admission : browser_origin_admission
+      }
+  | Multiple_origins
+  | Malformed_origin
 
-val normalized_origin_key :
-  string -> (string * int option * string option) option
-(** Stable key for origin allowlist comparisons. *)
+val classify_request_origin :
+  request_authority:Server_request_authority.authority ->
+  Httpun.Request.t ->
+  request_origin_admission
+(** Classify the full case-insensitive [Origin] field set.  Exactly one field
+    is parsed as one complete HTTP(S) serialized origin; repeated fields and
+    partially consumed values are distinct fail-closed outcomes. *)
 
-val is_allowlisted_loopback_dev_origin : string -> bool
-(** [true] when [origin] matches the loopback dev allowlist. *)
+val browser_origin_matches_request_authority :
+  request_authority:Server_request_authority.authority -> string -> bool
+(** Compare an HTTP(S) browser origin with the admitted request authority.
+    The explicit loopback development allowlist is accepted only when its
+    normalized host is also the admitted loopback host. *)
 
 val ensure_same_origin_browser_request :
-  Httpun.Request.t -> (unit, Masc_domain.masc_error) result
+  request_authority:Server_request_authority.authority ->
+  Httpun.Request.t ->
+  (unit, Masc_domain.masc_error) result
 (** Reject mutations from off-origin browsers; allows the loopback dev
     allowlist. *)
 
@@ -230,13 +217,18 @@ val server_state : Mcp_server.server_state option ref
     state is threaded through. *)
 
 val get_origin : Httpun.Request.t -> Httpun.Headers.value
-(** Resolve the request's [Origin] header value (empty string when
-    missing). *)
+(** Return the one syntactically valid serialized [Origin], or ["*"] when the
+    field is absent.  Raises [Invalid_origin_header] for repeated or malformed
+    fields; live request entry points reject those cases before routing. *)
+
+exception Invalid_origin_header
 
 val public_read_cors_origin_opt :
-  Httpun.Request.t -> Httpun.Headers.value option
-(** Origin to echo back on public-read CORS responses; [None] when the
-    request is not eligible for public-read. *)
+  request_authority:Server_request_authority.authority ->
+  Httpun.Request.t ->
+  Httpun.Headers.value option
+(** Origin to echo back on public-read CORS responses after comparison with the
+    admitted authority; [None] when the request is not eligible. *)
 
 val cors_allow_headers_value : string
 (** Static [Access-Control-Allow-Headers] value used for protected
@@ -329,8 +321,19 @@ val authorize_read_request :
 
 val authorize_tool_request :
   base_path:string ->
-  tool_name:string -> Httpun.Request.t -> (unit, Masc_domain.masc_error) result
+  tool_name:string ->
+  request_authority:Server_request_authority.authority ->
+  Httpun.Request.t -> (unit, Masc_domain.masc_error) result
 (** Check that the request is allowed to call [tool_name]. *)
+
+val authorize_tool_request_with_actor :
+  base_path:string ->
+  tool_name:string ->
+  request_authority:Server_request_authority.authority ->
+  Httpun.Request.t -> (string, Masc_domain.masc_error) result
+(** Check [tool_name] authority and return the exact principal used for that
+    decision. Auth-disabled same-origin dashboard calls use the explicit
+    ["dashboard"] principal. *)
 
 val authorize_token_bound_permission_request :
   base_path:string ->
@@ -388,6 +391,14 @@ val with_tool_auth :
    Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
   Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Tool-call auth combinator. *)
+
+val with_tool_actor_auth :
+  tool_name:string ->
+  (Mcp_server.server_state ->
+   string -> Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
+  Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** Tool-call auth combinator that threads the exact authorized caller into the
+    handler instead of asking the handler to resolve identity again. *)
 
 val with_token_permission_auth :
   permission:Masc_domain.permission ->

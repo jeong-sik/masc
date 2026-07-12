@@ -22,6 +22,7 @@ let make_keeper_tool_handler
       ?search_fn
       ?on_tool_called
       ?clock
+      ?continuation_channel
       ?(pre_validate_input = fun input -> Ok input)
       ?(translate_input = fun j -> j)
       ?(validate_translated_input = true)
@@ -155,6 +156,7 @@ let make_keeper_tool_handler
               ?clock
               ?proc_mgr
               ?net
+              ?continuation_channel
               ~failure_counts
               ~key
               ~input

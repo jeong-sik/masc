@@ -12,6 +12,7 @@ import { KeeperSpawnPanel } from './keeper-spawn/keeper-spawn-panel'
 import { FsmHub } from './fsm-hub'
 import { FleetFsmMatrix } from './fleet-fsm-matrix'
 import { CompositeFsmFlowchart } from './composite-fsm-flowchart'
+import { showSpawnPanel } from './keeper-spawn/keeper-spawn-state'
 
 type AgentsView = 'all' | 'agents' | 'keepers' | 'fsm'
 
@@ -39,11 +40,11 @@ export function AgentsUnified() {
   }
 
   return html`
-    <div class="v2-monitoring-surface flex flex-col gap-4">
+    <div class="v2-monitoring-surface flex h-full min-h-0 flex-col">
       ${currentView === 'fsm'
         ? html`<${FleetAndFsmHubPanel} />`
         : html`
-            ${currentView !== 'agents' ? html`<${KeeperSpawnPanel} />` : null}
+            ${currentView !== 'agents' && showSpawnPanel.value ? html`<${KeeperSpawnPanel} />` : null}
             <${AgentRoster}
               keeperFilter=${currentView === 'keepers' ? 'keeper-only'
                 : currentView === 'agents' ? 'agent-only'
@@ -64,6 +65,7 @@ function FleetAndFsmHubPanel() {
   const [pinned, setPinned] = useState<string | null>(null)
   return html`
     <div class="v2-monitoring-panel flex flex-col gap-4">
+      <h1 class="sr-only">Keeper Fleet FSM</h1>
       <${FleetFsmMatrix} onSelectKeeper=${(name: string) => setPinned(name)} />
       <${CompositeFsmFlowchart} />
       <${FsmHub} selectedName=${pinned} />

@@ -71,112 +71,53 @@ let authority_host host =
 let authority_of_host_port host port =
   Printf.sprintf "%s:%d" (authority_host host) port
 
-let advertised_host_port_authority request =
-  let default_host = configured_http_host () in
-  let default_port = configured_http_port () in
-  let fallback () =
-    let host = Transport_read_model.normalize_advertised_host default_host in
-    (host, default_port, authority_of_host_port host default_port)
+let advertised_host_port_authority ~request_authority =
+  let request_host = Server_request_authority.host request_authority in
+  let port_opt = Server_request_authority.port request_authority in
+  let port = Server_request_authority.port_or_default request_authority in
+  let host = Transport_read_model.normalize_advertised_host request_host in
+  let authority =
+    match port_opt with
+    | Some _ -> authority_of_host_port host port
+    | None -> authority_host host
   in
-  match Httpun.Headers.get request.Httpun.Request.headers "host" with
-  | None -> fallback ()
-  | Some raw -> (
-      let trimmed = String.trim raw in
-      if trimmed = "" || host_header_has_forbidden_authority_chars trimmed
-      then fallback ()
-      else
-        try
-          let uri = Uri.of_string ("http://" ^ trimmed) in
-          let parsed_host = Uri.host uri |> Option.value ~default:default_host in
-          let port_opt = Uri.port uri in
-          let port = Option.value ~default:default_port port_opt in
-          let host = Transport_read_model.normalize_advertised_host parsed_host in
-          let authority =
-            match port_opt with
-            | Some _ -> authority_of_host_port host port
-            | None ->
-              if String.equal host parsed_host
-              then authority_host host
-              else authority_of_host_port host port
-          in
-          (host, port, authority)
-        with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | _ -> fallback ())
+  host, port, authority
 
-let advertised_host_port request =
-  let host, port, _authority = advertised_host_port_authority request in
+let advertised_host_port ~request_authority =
+  let host, port, _authority =
+    advertised_host_port_authority ~request_authority
+  in
   (host, port)
 
-let normalize_forwarded_proto raw =
-  let value =
-    raw
-    |> String.trim
-    |> String.lowercase_ascii
-    |> fun value ->
-    let len = String.length value in
-    if len >= 2 && value.[0] = '"' && value.[len - 1] = '"'
-    then String.sub value 1 (len - 2)
-    else value
+let advertised_base_url ~request_authority _request =
+  let _host, _port, authority =
+    advertised_host_port_authority ~request_authority
   in
-  match value with
-  | "http" | "https" -> Some value
-  | _ -> None
+  Printf.sprintf
+    "%s://%s"
+    (Server_request_authority.scheme request_authority
+     |> Server_request_authority.scheme_to_string)
+    authority
 
-let first_forwarded_proto raw =
-  raw
-  |> String.split_on_char ','
-  |> List.find_map (fun element ->
-       element
-       |> String.split_on_char ';'
-       |> List.find_map (fun part ->
-            match String.split_on_char '=' (String.trim part) with
-            | [ key; value ] when String.equal (String.lowercase_ascii (String.trim key)) "proto" ->
-              normalize_forwarded_proto value
-            | _ -> None))
-
-let advertised_scheme request =
-  let headers = request.Httpun.Request.headers in
-  match Httpun.Headers.get headers "x-forwarded-proto" with
-  | Some raw -> (
-      match
-        raw
-        |> String.split_on_char ','
-        |> List.find_map normalize_forwarded_proto
-      with
-      | Some scheme -> scheme
-      | None -> (
-          match Httpun.Headers.get headers "forwarded" with
-          | Some raw -> Option.value ~default:"http" (first_forwarded_proto raw)
-          | None -> "http"))
-  | None -> (
-      match Httpun.Headers.get headers "forwarded" with
-      | Some raw -> Option.value ~default:"http" (first_forwarded_proto raw)
-      | None -> "http")
-
-let advertised_base_url request =
-  let _host, _port, authority = advertised_host_port_authority request in
-  Printf.sprintf "%s://%s" (advertised_scheme request) authority
-
-let websocket_discovery_json request =
-  let (host, _port) = advertised_host_port request in
+let websocket_discovery_json ~request_authority request =
+  let host, _port = advertised_host_port ~request_authority in
   let ctx =
     Transport_read_model.make_http_context ~include_configured:true
-      ~host ~base_url:(advertised_base_url request) ()
+      ~host ~base_url:(advertised_base_url ~request_authority request) ()
   in
   Transport_read_model.websocket_discovery_json ctx
 
-let transport_json request =
-  let (host, _port) = advertised_host_port request in
+let transport_json ~request_authority request =
+  let host, _port = advertised_host_port ~request_authority in
   let ctx =
     Transport_read_model.make_http_context ~include_configured:true
-      ~host ~base_url:(advertised_base_url request) ()
+      ~host ~base_url:(advertised_base_url ~request_authority request) ()
   in
   Transport_read_model.transport_status_json ctx
 
-let agent_card_json request =
-  let (host, port) = advertised_host_port request in
-  let base_url = advertised_base_url request in
+let agent_card_json ~request_authority request =
+  let host, port = advertised_host_port ~request_authority in
+  let base_url = advertised_base_url ~request_authority request in
   let build = Build_identity.current () in
   `Assoc
     [
@@ -324,7 +265,7 @@ let schedule_runner_status_json () =
 ;;
 
 let make_health_probe_fields ?(listener = "http/1.1") ?full_health_url
-    ?(health_detail = "probe") request =
+    ?(health_detail = "probe") ~request_authority request =
   let uptime_secs = health_uptime_secs () in
   let build = Build_identity.current () in
   let path_diagnostics = health_path_diagnostics () in
@@ -343,7 +284,7 @@ let make_health_probe_fields ?(listener = "http/1.1") ?full_health_url
   @ full_health_url_fields
   @ [
       ("protocol", protocol_json ~listener);
-      ("transport", transport_json request);
+      ("transport", transport_json ~request_authority request);
       ("http_listener", Transport_metrics.http_listener_json ());
       ("paths", Server_base_path_diagnostics.to_yojson path_diagnostics);
       ( "internal_mcp_auth"
@@ -360,10 +301,10 @@ let make_health_probe_fields ?(listener = "http/1.1") ?full_health_url
       ("gc", quick_gc_json ());
     ]
 
-let make_health_probe_json ?(listener = "http/1.1") request =
+let make_health_probe_json ?(listener = "http/1.1") ~request_authority request =
   Tool_args.ok_assoc
     (make_health_probe_fields ~listener ~health_detail:"probe"
-       ~full_health_url:"/health?full=1" request)
+       ~full_health_url:"/health?full=1" ~request_authority request)
 
 (* Keeper fleet scan / paused-keeper diagnostics / phase counts / fleet safety
    extracted to [Server_routes_http_runtime_fleet_scan] (godfile decomp). *)
@@ -508,33 +449,19 @@ let full_health_operator_summary ~keeper_fleet_safety
   let reasons = List.rev !reasons in
   (!status, reasons <> [], reasons)
 
-let make_health_json ?(listener = "http/1.1") ?section_timings_ref request =
+let make_health_json ?(listener = "http/1.1") ?section_timings_ref
+    ~request_authority request =
   let uptime_secs = health_uptime_secs () in
   let build = Build_identity.current () in
-  let keeper_config_parse_errors =
-    try Keeper_types_profile.keeper_toml_config_errors () with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn ->
-        [
-          {
-            Keeper_types_profile.keeper_name = "unknown";
-            path = "";
-            error = Printexc.to_string exn;
-            reason = "health_probe_failed";
-          };
-        ]
+  let keeper_config_errors, keeper_config_probe_error =
+    match Keeper_types_profile.keeper_toml_config_errors_result () with
+    | Ok errors -> errors, None
+    | Error error -> [], Some error
   in
   let keeper_config_unknown_keys =
-    try Keeper_types_profile.keeper_toml_unknown_keys () with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn ->
-        [
-          {
-            Keeper_types_profile.keeper_name = "unknown";
-            path = "";
-            unknown_keys = [ "health_probe_failed: " ^ Printexc.to_string exn ];
-          };
-        ]
+    match keeper_config_probe_error with
+    | Some _ -> []
+    | None -> Keeper_types_profile.keeper_toml_unknown_keys ()
   in
   let keeper_config_unknown_key_count =
     List.fold_left
@@ -543,12 +470,15 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref request =
       0
       keeper_config_unknown_keys
   in
-  let keeper_config_parse_error_count = List.length keeper_config_parse_errors in
+  let keeper_config_error_count = List.length keeper_config_errors in
   let keeper_config_schema_blocking =
-    keeper_config_parse_error_count > 0 || keeper_config_unknown_key_count > 0
+    keeper_config_error_count > 0
+    || Option.is_some keeper_config_probe_error
+    || keeper_config_unknown_key_count > 0
   in
   let keeper_config_schema_terminal_reason =
-    if keeper_config_parse_error_count > 0 then "config_parse_failed"
+    if keeper_config_error_count > 0 then "config_invalid"
+    else if Option.is_some keeper_config_probe_error then "config_probe_failed"
     else if keeper_config_unknown_key_count > 0 then "config_unknown_keys"
     else "none"
   in
@@ -674,7 +604,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref request =
     ("build", Build_identity.to_yojson build);
     ("health_detail", `String "full");
     ("protocol", protocol_json ~listener);
-    ("transport", transport_json request);
+    ("transport", transport_json ~request_authority request);
     ("http_listener", Transport_metrics.http_listener_json ());
     ("paths", Server_base_path_diagnostics.to_yojson path_diagnostics);
     ( "internal_mcp_auth"
@@ -718,12 +648,16 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref request =
        but ops still need a quick count without external telemetry. List names
        so an operator can correlate with the structured blocker cause. *)
     (key_paused_keepers, paused_keepers_json);
-    ("keeper_config_parse_error_count",
-     `Int keeper_config_parse_error_count);
-    ( "keeper_config_parse_errors",
+    ("keeper_config_error_count",
+     `Int keeper_config_error_count);
+    ( "keeper_config_errors",
       `List
         (List.map Keeper_types_profile.keeper_toml_config_error_to_json
-           keeper_config_parse_errors) );
+           keeper_config_errors) );
+    ( "keeper_config_probe_error",
+      Json_util.option_to_yojson
+        Keeper_types_profile.keeper_config_probe_error_to_json
+        keeper_config_probe_error );
     ( "keeper_config_unknown_key_count",
       `Int keeper_config_unknown_key_count );
     ( "keeper_config_unknown_keys",
@@ -815,8 +749,9 @@ let full_health_cached_field_names =
     "keeper_board_event_collection";
     "keeper_event_queue";
     "paused_keepers";
-    "keeper_config_parse_error_count";
-    "keeper_config_parse_errors";
+    "keeper_config_error_count";
+    "keeper_config_errors";
+    "keeper_config_probe_error";
     "keeper_config_unknown_key_count";
     "keeper_config_unknown_keys";
     "keeper_config_schema_status";
@@ -905,8 +840,9 @@ let full_health_placeholder_fields ?error ?(component_timed_out = false)
           ("names", `List []);
           ("component_timed_out", `Bool component_timed_out);
         ] );
-    ("keeper_config_parse_error_count", `Int 0);
-    ("keeper_config_parse_errors", `List []);
+    ("keeper_config_error_count", `Int 0);
+    ("keeper_config_errors", `List []);
+    ("keeper_config_probe_error", `Null);
     ("keeper_config_unknown_key_count", `Int 0);
     ("keeper_config_unknown_keys", `List []);
     ("keeper_config_schema_status", `String status);
@@ -943,12 +879,14 @@ let cached_full_health_fields = function
 let duration_ms ~started_at ~finished_at =
   max 0 (int_of_float ((finished_at -. started_at) *. 1000.))
 
-let compute_full_health_snapshot ?(listener = "http/1.1") request =
+let compute_full_health_snapshot ?(listener = "http/1.1") ~request_authority
+    request =
   let started_at = Unix.gettimeofday () in
   let section_timings_ref = ref [] in
   try
     let fields =
-      cached_full_health_fields (make_health_json ~listener ~section_timings_ref request)
+      cached_full_health_fields
+        (make_health_json ~listener ~section_timings_ref ~request_authority request)
     in
     let finished_at = Unix.gettimeofday () in
     {
@@ -1072,15 +1010,17 @@ let mark_full_health_snapshot_error exn =
           ~labels:[ "reason", "consecutive_failures" ]
           ())
 
-let compute_full_health_snapshot_for_refresh ?(listener = "http/1.1") request =
+let compute_full_health_snapshot_for_refresh ?(listener = "http/1.1")
+    ~request_authority request =
   with_full_health_snapshot_lock (fun () ->
       full_health_refresh_in_flight := true;
       full_health_refresh_started_at := Some (Unix.gettimeofday ());
       full_health_refresh_requested := false);
-  compute_full_health_snapshot ~listener request
+  compute_full_health_snapshot ~listener ~request_authority request
 
-let refresh_full_health_snapshot_sync ?(listener = "http/1.1") request =
-  compute_full_health_snapshot_for_refresh ~listener request
+let refresh_full_health_snapshot_sync ?(listener = "http/1.1")
+    ~request_authority request =
+  compute_full_health_snapshot_for_refresh ~listener ~request_authority request
   |> store_full_health_snapshot
 
 let snapshot_is_stale ~now snapshot =
@@ -1208,7 +1148,8 @@ let full_health_snapshot_state () =
         !full_health_refresh_started_at,
         !full_health_refresh_requested ))
 
-let make_cached_full_health_json ?(listener = "http/1.1") request =
+let make_cached_full_health_json ?(listener = "http/1.1") ~request_authority
+    request =
   let now = Unix.gettimeofday () in
   let snapshot, _refresh_in_flight, _refresh_started_at, _refresh_requested =
     full_health_snapshot_state ()
@@ -1228,7 +1169,8 @@ let make_cached_full_health_json ?(listener = "http/1.1") request =
     | None -> full_health_placeholder_fields ()
   in
   Tool_args.ok_assoc
-    (make_health_probe_fields ~listener ~health_detail:"full" request
+    (make_health_probe_fields ~listener ~health_detail:"full" ~request_authority
+       request
      @ fields
      @ [
          ( "full_health_snapshot",
@@ -1236,7 +1178,7 @@ let make_cached_full_health_json ?(listener = "http/1.1") request =
              ~refresh_started_at ~refresh_requested snapshot );
        ])
 
-let start_full_health_snapshot_refresh_loop ~sw ~clock =
+let start_full_health_snapshot_refresh_loop ~sw ~clock ~request_authority =
   let request = Httpun.Request.create `GET "/health?full=1" in
   Proactive_refresh.start
     ~sw
@@ -1264,7 +1206,7 @@ let start_full_health_snapshot_refresh_loop ~sw ~clock =
        the main domain so concurrent HTTP requests are not stalled. *)
     ~compute:(fun () ->
       Domain_pool_ref.submit_io_or_inline (fun () ->
-        compute_full_health_snapshot_for_refresh request))
+        compute_full_health_snapshot_for_refresh ~request_authority request))
     ~on_result:store_full_health_snapshot
 
 module For_testing = struct
@@ -1276,8 +1218,9 @@ module For_testing = struct
         full_health_refresh_requested := false;
         full_health_consecutive_failures := 0)
 
-  let refresh_full_health_snapshot_now ?(listener = "http/1.1") request =
-    refresh_full_health_snapshot_sync ~listener request
+  let refresh_full_health_snapshot_now ?(listener = "http/1.1")
+      ~request_authority request =
+    refresh_full_health_snapshot_sync ~listener ~request_authority request
 
   let mark_full_health_snapshot_error = mark_full_health_snapshot_error
 
@@ -1290,13 +1233,18 @@ end
 let full_health_requested request =
   Server_utils.bool_query_param request "full" ~default:false
 
-let make_health_response_json ?(listener = "http/1.1") request =
-  if full_health_requested request then make_cached_full_health_json ~listener request
-  else make_health_probe_json ~listener request
+let make_health_response_json ?(listener = "http/1.1") ~request_authority
+    request =
+  if full_health_requested request
+  then make_cached_full_health_json ~listener ~request_authority request
+  else make_health_probe_json ~listener ~request_authority request
 
 (** Health check handler *)
 let health_handler request reqd =
-  Http.Response.json_value (make_health_response_json request) reqd
+  let request_authority = Server_request_authority.current_exn () in
+  Http.Response.json_value
+    (make_health_response_json ~request_authority request)
+    reqd
 
 (** Liveness probe: responds 200 as soon as the HTTP accept loop is running.
     Does not depend on server_state initialization.
@@ -1399,9 +1347,14 @@ let board_post_detail_json ~include_moderation ~blind_votes ~config ~voter
 
 (** CORS preflight handler *)
 let options_handler request reqd =
-  let origin = get_origin request in
-  let headers = Httpun.Headers.of_list (
-    ("content-length", "0") :: cors_preflight_headers origin
-  ) in
+  let request_authority = Server_request_authority.current_exn () in
+  let cors =
+    match public_read_cors_origin_opt ~request_authority request with
+    | Some origin -> cors_preflight_headers origin
+    | None -> [ "vary", "Origin" ]
+  in
+  let headers =
+    Httpun.Headers.of_list (("content-length", "0") :: cors)
+  in
   let response = Httpun.Response.create ~headers `No_content in
   Httpun.Reqd.respond_with_string reqd response ""

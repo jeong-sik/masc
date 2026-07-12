@@ -5,6 +5,32 @@
 
 open Masc.Http_server_eio
 
+let request_trust_policy =
+  match
+    Server_request_authority.make_trust_policy
+      ~bind_host:"127.0.0.1"
+      ~bind_port:8935
+      ~explicit_base_url:None
+  with
+  | Ok policy -> policy
+  | Error error ->
+    Alcotest.fail (Server_request_authority.trust_policy_error_to_string error)
+;;
+
+let request_authority_exn request =
+  match
+    Server_request_authority.classify_http1_request
+      ~trust_policy:request_trust_policy
+      request
+  with
+  | Server_request_authority.Single authority -> authority
+  | ( Server_request_authority.Missing
+    | Server_request_authority.Multiple
+    | Server_request_authority.Malformed
+    | Server_request_authority.Untrusted ) ->
+    Alcotest.fail "expected one valid request authority"
+;;
+
 (* ===== Unit Tests for Router ===== *)
 
 let test_router_empty () =
@@ -129,7 +155,6 @@ let test_frontend_transport_routes_present () =
   let routes =
     Server_routes_http_routes_frontend.add_routes
       ~port:8935
-      ~host:"127.0.0.1"
       (Router.create ())
   in
   let has_route meth path =
@@ -255,6 +280,7 @@ let test_frontend_canonical_loopback_location_localhost () =
   let location =
     Server_routes_http_routes_frontend.canonical_loopback_location
       ~default_port:8935
+      ~request_authority:(request_authority_exn request)
       request
   in
   Alcotest.(check (option string))
@@ -269,6 +295,7 @@ let test_frontend_canonical_loopback_location_ipv6 () =
   let location =
     Server_routes_http_routes_frontend.canonical_loopback_location
       ~default_port:8935
+      ~request_authority:(request_authority_exn request)
       request
   in
   Alcotest.(check (option string))
@@ -283,6 +310,7 @@ let test_frontend_canonical_loopback_location_canonical_host () =
   let location =
     Server_routes_http_routes_frontend.canonical_loopback_location
       ~default_port:8935
+      ~request_authority:(request_authority_exn request)
       request
   in
   Alcotest.(check (option string))
@@ -297,38 +325,12 @@ let test_frontend_canonical_root_dashboard_location_localhost () =
   let location =
     Server_routes_http_routes_frontend.canonical_root_dashboard_location
       ~default_port:8935
-      request
+      ~request_authority:(request_authority_exn request)
   in
   Alcotest.(check (option string))
     "localhost root redirects directly to dashboard"
     (Some "http://127.0.0.1:8935/dashboard")
     location
-;;
-
-let test_parse_host_port_rejects_scheme_in_host_header () =
-  let parsed =
-    Server_routes_http_common.parse_host_port
-      (Some "http://localhost:8935")
-      "127.0.0.1"
-      8935
-  in
-  Alcotest.(check (pair string int))
-    "scheme-bearing host header falls back"
-    ("127.0.0.1", 8935)
-    parsed
-;;
-
-let test_parse_host_port_rejects_userinfo_in_host_header () =
-  let parsed =
-    Server_routes_http_common.parse_host_port
-      (Some "user@localhost:8935")
-      "127.0.0.1"
-      8935
-  in
-  Alcotest.(check (pair string int))
-    "userinfo-bearing host header falls back"
-    ("127.0.0.1", 8935)
-    parsed
 ;;
 
 (* ===== Unit Tests for Config ===== *)
@@ -558,12 +560,6 @@ let router_tests =
   ; ( "frontend canonical root goes direct to dashboard"
     , `Quick
     , test_frontend_canonical_root_dashboard_location_localhost )
-  ; ( "parse_host_port rejects scheme host header"
-    , `Quick
-    , test_parse_host_port_rejects_scheme_in_host_header )
-  ; ( "parse_host_port rejects userinfo host header"
-    , `Quick
-    , test_parse_host_port_rejects_userinfo_in_host_header )
   ]
 ;;
 

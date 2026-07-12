@@ -94,19 +94,21 @@ let rec cached_text_by_key cache_ref ~key ~ttl_s compute =
 let submit_keeper_msg_with_captured_event_bus
       ?timeout_sec
       ~clock
-      ~sw
+      ~background_sw
       ~base_path
+      ~caller
       ~keeper_name
-      ~(f : ?event_bus:Agent_sdk.Event_bus.t -> unit -> tool_result)
+      ~(f : ?event_bus:Agent_sdk.Event_bus.t -> Eio.Switch.t -> tool_result)
       () =
   let event_bus = Keeper_event_bus.get () in
   Keeper_msg_async.submit
     ?timeout_sec
     ~clock
-    ~sw
+    ~background_sw
     ~base_path
+    ~caller
     ~keeper_name
-    ~f:(fun () -> f ?event_bus ())
+    ~f:(fun request_sw -> f ?event_bus request_sw)
     ()
 
 module For_testing = struct
@@ -652,19 +654,29 @@ let keeper_msg_body
     let* name = resolve_keeper_name_config ~config args in
     let resolved_args = with_keeper_name args name in
     let* () = Turn.preflight_keeper_msg keeper_ctx resolved_args in
-    let timeout_sec =
-      Turn.keeper_msg_timeout_override resolved_args
-      |> Result.value ~default:None
+    let* timeout_sec = Turn.keeper_msg_timeout_override resolved_args in
+    let* background_sw =
+      Keeper_msg_async.server_background_switch ()
+      |> Result.map_error (fun error ->
+        Yojson.Safe.to_string (Keeper_msg_async.submit_error_to_json error))
     in
-    let request_id =
+    let* request_id =
       submit_keeper_msg_with_captured_event_bus
         ?timeout_sec
         ~clock
-        ~sw
+        ~background_sw
         ~base_path:config.base_path
+        ~caller:agent_name
         ~keeper_name:name
-        ~f:(fun ?event_bus () ->
-          let result = Turn.handle_keeper_msg ?event_bus ?continuation_channel keeper_ctx resolved_args in
+        ~f:(fun ?event_bus request_sw ->
+          let worker_ctx = { keeper_ctx with sw = request_sw } in
+          let result =
+            Turn.handle_keeper_msg
+              ?event_bus
+              ?continuation_channel
+              worker_ctx
+              resolved_args
+          in
           if tool_result_success result
           then begin
             append_direct_chat_pair_if_reply
@@ -677,6 +689,8 @@ let keeper_msg_body
           end;
           result)
         ()
+      |> Result.map_error (fun error ->
+        Yojson.Safe.to_string (Keeper_msg_async.submit_error_to_json error))
     in
     let json =
       `Assoc
@@ -694,25 +708,33 @@ let keeper_msg_body
   | Error err -> tool_result_error err
 ;;
 
-let handle_keeper_msg ?continuation_channel ctx args : tool_result =
+let handle_keeper_msg ?continuation_channel ~submitted_by ctx args : tool_result =
   match
     let* name = resolve_keeper_name ctx args in
     let resolved_args = with_keeper_name args name in
     let* () = Turn.preflight_keeper_msg ctx resolved_args in
-    let timeout_sec =
-      Turn.keeper_msg_timeout_override resolved_args
-      |> Result.value ~default:None
+    let* timeout_sec = Turn.keeper_msg_timeout_override resolved_args in
+    let* background_sw =
+      Keeper_msg_async.server_background_switch ()
+      |> Result.map_error (fun error ->
+        Yojson.Safe.to_string (Keeper_msg_async.submit_error_to_json error))
     in
-    let request_id =
+    let* request_id =
       submit_keeper_msg_with_captured_event_bus
         ?timeout_sec
         ~clock:ctx.clock
-        ~sw:ctx.sw
+        ~background_sw
         ~base_path:ctx.config.base_path
+        ~caller:submitted_by
         ~keeper_name:name
-        ~f:(fun ?event_bus () ->
+        ~f:(fun ?event_bus request_sw ->
+          let worker_ctx = { ctx with sw = request_sw } in
           let result =
-            Turn.handle_keeper_msg ?event_bus ?continuation_channel ctx resolved_args
+            Turn.handle_keeper_msg
+              ?event_bus
+              ?continuation_channel
+              worker_ctx
+              resolved_args
           in
           if tool_result_success result
           then begin
@@ -726,6 +748,8 @@ let handle_keeper_msg ?continuation_channel ctx args : tool_result =
           end;
           result)
         ()
+      |> Result.map_error (fun error ->
+        Yojson.Safe.to_string (Keeper_msg_async.submit_error_to_json error))
     in
     let json =
       `Assoc
@@ -743,12 +767,12 @@ let handle_keeper_msg ?continuation_channel ctx args : tool_result =
   | Error err -> tool_result_error err
 ;;
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
-let keeper_msg_result_body ~(config : Workspace.config) args : tool_result =
+let keeper_msg_result_body ~(config : Workspace.config) ~caller args : tool_result =
   let request_id = get_string args "request_id" "" in
   if String.equal request_id "" then
     tool_result_error {|{"error":"request_id is required"}|}
   else
-    match Keeper_msg_async.poll ~base_path:config.base_path request_id with
+    match Keeper_msg_async.poll ~base_path:config.base_path ~caller request_id with
     | Keeper_msg_async.Absent ->
       tool_result_error
         (Printf.sprintf {|{"error":"request_id not found","request_id":"%s"}|} request_id)
@@ -765,55 +789,80 @@ let keeper_msg_result_body ~(config : Workspace.config) args : tool_result =
                        reason) )
               ; ("request_id", `String request_id)
               ]))
+    | Keeper_msg_async.Rejected rejection ->
+      tool_result_error
+        (Yojson.Safe.to_string (Keeper_msg_async.access_rejection_to_json rejection))
     | Keeper_msg_async.Found entry ->
       tool_result_ok (Yojson.Safe.to_string (Keeper_msg_async.entry_to_json entry))
 
 let handle_keeper_msg_result ctx args : tool_result =
-  keeper_msg_result_body ~config:ctx.config args
+  keeper_msg_result_body ~config:ctx.config ~caller:ctx.agent_name args
 
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
-let keeper_msg_cancel_body ~(config : Workspace.config) args : tool_result =
+let keeper_msg_cancel_body ~(config : Workspace.config) ~caller args : tool_result =
   let request_id = get_string args "request_id" "" in
   if String.equal request_id "" then
     tool_result_error {|{"error":"request_id is required"}|}
-  else
-    if Keeper_msg_async.cancel ~base_path:config.base_path request_id then
-      let json =
-        `Assoc
-          [ "request_id", `String request_id
-          ; "status", `String "cancelled"
-          ; "message", `String "Keeper turn cancelled successfully."
-          ]
-      in
-      tool_result_ok (Yojson.Safe.to_string json)
-    else
-      tool_result_error
-        (Printf.sprintf
-           {|{"error":"request_id not found or already finished","request_id":"%s"}|}
-           request_id)
+  else (
+    let result =
+      Keeper_msg_async.cancel ~base_path:config.base_path ~caller request_id
+    in
+    let json = Keeper_msg_async.cancel_result_to_json ~request_id result in
+    match result with
+    | Keeper_msg_async.Cancelled_request -> tool_result_ok (Yojson.Safe.to_string json)
+    | Keeper_msg_async.Cancel_not_found
+    | Keeper_msg_async.Cancel_unreadable _
+    | Keeper_msg_async.Cancel_rejected _
+    | Keeper_msg_async.Cancel_already_terminal _
+    | Keeper_msg_async.Cancel_persistence_failed _
+    | Keeper_msg_async.Cancel_worker_signal_failed _ ->
+      tool_result_error (Yojson.Safe.to_string json))
 
 let handle_keeper_msg_cancel ctx args : tool_result =
-  keeper_msg_cancel_body ~config:ctx.config args
+  keeper_msg_cancel_body ~config:ctx.config ~caller:ctx.agent_name args
 
-let keeper_msg_queue_body ~(config : Workspace.config) args : tool_result =
+let keeper_msg_queue_body ~(config : Workspace.config) ~caller args : tool_result =
   let keeper_name = get_string_opt args "keeper_name" in
-  let entries = Keeper_msg_async.list_for_keeper ?keeper_name () in
-  let json_list = List.map Keeper_msg_async.entry_to_json entries in
-  tool_result_ok (Yojson.Safe.to_string (`List json_list))
+  match
+    Keeper_msg_async.list_for_keeper
+      ~base_path:config.base_path
+      ~caller
+      ?keeper_name
+      ()
+  with
+  | Ok entries ->
+    let json_list = List.map Keeper_msg_async.entry_to_json entries in
+    tool_result_ok (Yojson.Safe.to_string (`List json_list))
+  | Error rejection ->
+    tool_result_error
+      (Yojson.Safe.to_string (Keeper_msg_async.access_rejection_to_json rejection))
 
 let handle_keeper_msg_queue ctx args : tool_result =
-  keeper_msg_queue_body ~config:ctx.config args
+  keeper_msg_queue_body ~config:ctx.config ~caller:ctx.agent_name args
+
+let complete_keeper_msg_stream_result ~name result =
+  if not (tool_result_success result) then result
+  else begin
+    let body = tool_result_body result in
+    invalidate_keeper_list_cache ();
+    invalidate_status_cache name;
+    let json = json_of_body body in
+    tool_result_ok
+      (Yojson.Safe.pretty_to_string
+         (annotate_keeper_json ~runtime_class:"keeper" json))
+  end
 
 let handle_keeper_msg_stream
       ?on_text_delta
       ?on_event
       ?continuation_channel
+      ?on_admission_rejected
+      ?on_admitted
       ctx
       args
   : tool_result
   =
-  match
-    let* name = resolve_keeper_name ctx args in
+  let run name =
     let resolved_args = with_keeper_name args name in
     (* Stream turns are synchronous today, but still pin the bus visible at the
        public surface boundary so later refactors cannot reintroduce a nested
@@ -825,24 +874,65 @@ let handle_keeper_msg_stream
         ?on_event
         ?event_bus
         ?continuation_channel
+        ?on_admission_rejected
+        ?on_admitted
         ctx
         resolved_args
     in
-    if not (tool_result_success result) then
-      Ok result
-    else begin
-      let body = tool_result_body result in
-      invalidate_keeper_list_cache ();
-      invalidate_status_cache name;
-      let json = json_of_body body in
-      Ok
-        (tool_result_ok
-           (Yojson.Safe.pretty_to_string
-              (annotate_keeper_json ~runtime_class:"keeper" json)))
-    end
-  with
-  | Ok result -> result
-  | Error err -> tool_result_error err
+    complete_keeper_msg_stream_result ~name result
+  in
+  match resolve_keeper_name ctx args with
+  | Ok name -> run name
+  | Error err ->
+      let raw_name = String.trim (get_string args "name" "") in
+      if not (Keeper_config.validate_name raw_name)
+      then tool_result_error err
+      else
+        (* Preserve typed admission truth after lifecycle teardown removes the
+           metadata row: a shutdown-fenced queued receipt must return to
+           Pending, not become a terminal lookup failure. An open lane still
+           runs the admitted body and surfaces its authoritative metadata
+           error. *)
+        run raw_name
+
+let handle_keeper_msg_stream_if_free
+      ?on_text_delta
+      ?on_event
+      ?continuation_channel
+      ctx
+      args
+  =
+  match resolve_keeper_name ctx args with
+  | Error err ->
+    let raw_name = String.trim (get_string args "name" "") in
+    if not (Keeper_config.validate_name raw_name)
+    then `Ran (tool_result_error err)
+    else
+      (* A connector message already accepted for a live/raw Keeper identity
+         must remain queueable even if metadata resolution is temporarily
+         unavailable. Run the resolution error itself through the same
+         post-lock admission boundary: a held slot, parked waiter, active
+         receipt, or queue read error returns Busy; only an atomically free
+         lane returns the original metadata error. *)
+      Keeper_turn_admission.run_chat_if_free
+          ~base_path:ctx.config.base_path
+          ~keeper_name:raw_name
+          (fun () -> tool_result_error err)
+  | Ok name ->
+    let resolved_args = with_keeper_name args name in
+    let event_bus = Keeper_event_bus.get () in
+    (match
+       Turn.handle_keeper_msg_if_free
+         ?on_text_delta
+         ?on_event
+         ?event_bus
+         ?continuation_channel
+         ctx
+         resolved_args
+     with
+     | `Busy rejection -> `Busy rejection
+     | `Ran result ->
+       `Ran (complete_keeper_msg_stream_result ~name result))
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
 let resolve_keeper_meta_config ~(config : Workspace.config) args =
   let name = String.trim (get_string args "name" "") in

@@ -10,31 +10,18 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 
-let managed_kind = "managed"
-let turn_kind = "turn"
-let all_kind = "all"
+module Contract = Keeper_sandbox_control_contract
 
-type stop_scope =
+type stop_scope = Contract.stop_scope =
   | Stop_managed
   | Stop_turn
   | Stop_all
 
-let stop_scope_to_string = function
-  | Stop_managed -> managed_kind
-  | Stop_turn -> turn_kind
-  | Stop_all -> all_kind
-
-let parse_stop_scope raw =
-  match String.lowercase_ascii (String.trim raw) with
-  | "" -> Ok Stop_managed
-  | kind when String.equal kind managed_kind -> Ok Stop_managed
-  | kind when String.equal kind turn_kind -> Ok Stop_turn
-  | kind when String.equal kind all_kind -> Ok Stop_all
-  | other ->
-      Error
-        (Printf.sprintf
-           "invalid container_kind %S; expected managed, turn, or all"
-           other)
+let stop_scope_to_string = Contract.stop_scope_to_string
+let parse_stop_scope = Contract.parse_stop_scope
+let managed_kind = stop_scope_to_string Stop_managed
+let turn_kind = stop_scope_to_string Stop_turn
+let all_kind = stop_scope_to_string Stop_all
 
 let now_ms () =
   int_of_float (Unix.gettimeofday () *. 1000.0)

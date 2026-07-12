@@ -407,15 +407,22 @@ let override_field_source_json ~default_source_kind ~default_manifest_path detai
 ;;
 
 let source_provenance_json config (meta : keeper_meta) =
-  let snapshot = keeper_default_source_snapshot meta.name in
+  let snapshot =
+    keeper_default_source_snapshot ~base_path:config.Workspace.base_path meta.name
+  in
   let override_details = live_override_details meta snapshot.defaults in
   let override_fields = List.map (fun detail -> detail.field) override_details in
-  let resolution = Config_dir_resolver.resolve () in
+  let resolution =
+    Config_dir_resolver.resolve_for_base_path ~base_path:config.Workspace.base_path
+  in
   let live_meta_path = keeper_meta_path config meta.name in
   let default_manifest_path = snapshot.defaults.manifest_path in
   let default_source_kind = snapshot.source_kind in
   let default_config_error =
-    Keeper_types_profile.keeper_toml_config_error_for_name meta.name
+    Option.map
+      (Keeper_types_profile.keeper_toml_config_error_of_load_error
+         ~keeper_name:meta.name)
+      snapshot.config_error
   in
   `Assoc
     ([ "live_meta_path", `String live_meta_path

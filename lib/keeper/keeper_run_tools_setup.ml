@@ -37,6 +37,7 @@ let prepare_agent_setup
       ~(tool_overlay : Agent_sdk.Tool_op.t ref option)
       ?runtime_manifest_context
       ?runtime_manifest_append
+      ?continuation_channel
       ()
   : (Keeper_run_tools_hooks.agent_setup, Agent_sdk.Error.sdk_error) result
   =
@@ -126,6 +127,7 @@ let prepare_agent_setup
       ~search_fn:(fun ~query ~max_results -> !local_search_fn_ref ~query ~max_results)
       ~on_tool_called:(fun name ->
         Keeper_discovered_tools.mark_used acc.discovered ~turn:acc.current_turn ~name)
+      ?continuation_channel
       ()
   in
   let tools = keeper_tools in
@@ -321,8 +323,10 @@ let prepare_agent_setup
      keeper tool_access has explicitly excluded — the descriptor would dispatch to
      a registered-but-disallowed tool. See PR #14574 review. *)
   let descriptor_public_names =
-    Keeper_tool_descriptor_resolution.public_names_for_allowed_internal_names
-      policy_allowed_tool_names
+    Keeper_tool_descriptor.public_descriptors
+    |> List.filter (fun (descriptor : Keeper_tool_descriptor.t) ->
+      List.mem descriptor.internal_name policy_allowed_tool_names)
+    |> List.concat_map Keeper_tool_descriptor.keeper_model_names
   in
   (* Now strip the descriptor internal names from the LLM-visible surface,
      after [descriptor_public_names] has been computed. *)
@@ -364,7 +368,8 @@ let prepare_agent_setup
     ()
   in
   let allowed_public_name_for_internal internal_name =
-    Keeper_tool_descriptor_resolution.public_names_for_internal internal_name
+    Keeper_tool_descriptor.public_descriptors_for_internal internal_name
+    |> List.concat_map Keeper_tool_descriptor.keeper_model_names
     |> List.find_opt (fun public_name ->
       Keeper_tool_policy.StringSet.mem public_name universe_set
       && Keeper_tool_policy.StringSet.mem public_name policy_allowed_tool_set)

@@ -52,6 +52,8 @@ type error =
 val pp_error : Format.formatter -> error -> unit
 
 val send_message :
+  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  ?timeout_sec:float ->
   token:string ->
   channel_id:string ->
   content:string ->
@@ -69,6 +71,8 @@ val send_message :
     @raise nothing — failures are surfaced as typed {!error}. *)
 
 val edit_message :
+  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  ?timeout_sec:float ->
   token:string ->
   channel_id:string ->
   message_id:string ->
@@ -85,6 +89,8 @@ val edit_message :
     @raise nothing — failures are surfaced as typed {!error}. *)
 
 val trigger_typing :
+  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  ?timeout_sec:float ->
   token:string ->
   channel_id:string ->
   unit ->
@@ -133,6 +139,8 @@ val image_embed : url:string -> caption:string option -> embed
 (** Build an image embed with optional caption as the description. *)
 
 val send_embed_message :
+  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  ?timeout_sec:float ->
   token:string ->
   channel_id:string ->
   content:string ->
@@ -143,6 +151,8 @@ val send_embed_message :
     Returns the created message id on [Ok]. *)
 
 val edit_embed_message :
+  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  ?timeout_sec:float ->
   token:string ->
   channel_id:string ->
   message_id:string ->

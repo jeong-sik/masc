@@ -65,8 +65,7 @@ let dedupe_tool_search_schemas schemas =
 ;;
 
 let default_tool_search_schemas () =
-  Tool_shard.all_keeper_tool_schemas @ [ keeper_tool_search_schema ]
-  |> dedupe_tool_search_schemas
+  all_keeper_model_tool_schemas () |> dedupe_tool_search_schemas
 ;;
 
 let score_tool_schema terms (schema : Masc_domain.tool_schema) =
@@ -431,6 +430,9 @@ let tool_tutor_for_validation ~tool_name ~input =
      | Keeper_tool_descriptor.Tool_masc_surface_audit
      | Keeper_tool_descriptor.Tool_masc_fusion_dispatch
      | Keeper_tool_descriptor.Tool_masc_fusion_status
+     | Keeper_tool_descriptor.Tool_masc_library_dispatch
+     | Keeper_tool_descriptor.Tool_masc_recurring_dispatch
+     | Keeper_tool_descriptor.Tool_masc_local_runtime_dispatch
      | Keeper_tool_descriptor.Tool_analyze_image -> None)
 ;;
 
@@ -453,8 +455,80 @@ let add_tool_tutor_to_payload raw_payload tutor =
   Yojson.Safe.to_string (append_assoc_fields json [ "tool_tutor", tutor ])
 ;;
 
-(* Workspace tools dispatch through [Keeper_tool_runtime.handle_internal].
+(* Descriptor and registered-only routes are distinct dispatch sources.
    Outcome is inferred from raw JSON via [classify_tool_result_payload]. *)
+
+type descriptor_dispatch =
+  | Descriptor_route of Keeper_tool_descriptor.t * string option
+  | Validation_rejected of string
+  | Undescribed_route
+
+type descriptor_dispatch_resolution =
+  | Return_output of string
+  | Return_descriptor_invariant of Keeper_tool_descriptor.t
+  | Try_registered_only_route
+
+let resolve_descriptor_dispatch = function
+  | Descriptor_route (_, Some raw_output) | Validation_rejected raw_output ->
+    Return_output raw_output
+  | Descriptor_route (descriptor, None) -> Return_descriptor_invariant descriptor
+  | Undescribed_route -> Try_registered_only_route
+;;
+
+let descriptor_route_invariant_payload ~tool_name descriptor =
+  let descriptor_id = descriptor.Keeper_tool_descriptor.id in
+  let executor =
+    Keeper_tool_descriptor.executor_to_string descriptor.executor
+  in
+  let runtime_handler =
+    Keeper_tool_descriptor.runtime_handler_to_string descriptor.runtime_handler
+  in
+  `Assoc
+    [ "ok", `Bool false
+    ; "error", `String "keeper_tool_descriptor_route_invariant"
+    ; "failure_class", `String "runtime_failure"
+    ; "tool", `String tool_name
+    ; "descriptor_id", `String descriptor_id
+    ; "executor", `String executor
+    ; "runtime_handler", `String runtime_handler
+    ]
+;;
+
+let descriptor_route_invariant_error ~keeper_name ~tool_name descriptor =
+  let payload = descriptor_route_invariant_payload ~tool_name descriptor in
+  let descriptor_id = descriptor.Keeper_tool_descriptor.id in
+  let executor =
+    Keeper_tool_descriptor.executor_to_string descriptor.executor
+  in
+  let runtime_handler =
+    Keeper_tool_descriptor.runtime_handler_to_string descriptor.runtime_handler
+  in
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string AgentToolDispatchRuntimeFailures)
+    ~labels:
+      [ "keeper", keeper_name
+      ; "tool", tool_name
+      ; "reason", "descriptor_route_unhandled"
+      ; "descriptor_id", descriptor_id
+      ; "executor", executor
+      ; "runtime_handler", runtime_handler
+      ]
+    ();
+  Log.Keeper.emit
+    Log.Error
+    ~keeper_name
+    ~category:Log.Tool
+    ~details:
+      (`Assoc
+         [ "error_kind", `String "keeper_tool_descriptor_route_invariant"
+         ; "tool", `String tool_name
+         ; "descriptor_id", `String descriptor_id
+         ; "executor", `String executor
+         ; "runtime_handler", `String runtime_handler
+         ])
+    "keeper descriptor route resolved but its typed runtime handler returned no result";
+  Yojson.Safe.to_string payload
+;;
 
 (* ── Tool execution dispatch ──────────────────────────────────── *)
 
@@ -472,6 +546,7 @@ let execute_keeper_tool_call_with_outcome
       ?proc_mgr
       ?net
       ?mcp_session_id
+      ?continuation_channel
       ~(name : string)
       ~(input : Yojson.Safe.t)
       ()
@@ -486,6 +561,8 @@ let execute_keeper_tool_call_with_outcome
         match health with
         | Keeper_registry.Healthy -> "healthy"
         | Keeper_registry.Meta_validation_failed _ -> "meta_validation_failed"
+        | Keeper_registry.Lifecycle_transaction_reserved _ ->
+          "lifecycle_transaction_reserved"
         | Keeper_registry.Required_field_missing _ -> "required_field_missing"
         | Keeper_registry.Base_path_mismatch _ -> "base_path_mismatch"
         | Keeper_registry.Name_mismatch _ -> "name_mismatch"
@@ -616,19 +693,22 @@ let execute_keeper_tool_call_with_outcome
            ; proc_mgr
            ; net
            ; mcp_session_id
+           ; continuation_channel
            }
        in
-       let descriptor_output =
+       let descriptor_dispatch =
          match
            Keeper_tool_descriptor_resolution.validated_descriptor_and_input_for_tool_call
              ~tool_name:name
              ~input:args
          with
          | Some (Ok (descriptor, translated_args)) ->
-           Keeper_tool_runtime.handle
-             keeper_tool_runtime_context
-             ~descriptor
-             ~args:translated_args
+           Descriptor_route
+             ( descriptor
+             , Keeper_tool_runtime.handle
+                 keeper_tool_runtime_context
+                 ~descriptor
+                 ~args:translated_args )
          | Some (Error validation_result) ->
            let raw_payload = Yojson.Safe.to_string (Tool_result.data validation_result) in
            let raw_payload =
@@ -636,15 +716,21 @@ let execute_keeper_tool_call_with_outcome
              | Some tutor -> add_tool_tutor_to_payload raw_payload tutor
              | None -> raw_payload
            in
-           Some raw_payload
-         | None -> Keeper_tool_runtime.handle_internal keeper_tool_runtime_context ~name ~args
+           Validation_rejected raw_payload
+         | None -> Undescribed_route
        in
-       match descriptor_output with
-       | Some raw_output -> make_executed_tool_result raw_output
-       | None ->
-         (* Descriptor-backed dispatch did not recognize this name. Check
-            registered backend tools before returning a suggestion-enriched
-            unknown-tool error. *)
+       match resolve_descriptor_dispatch descriptor_dispatch with
+       | Return_output raw_output -> make_executed_tool_result raw_output
+       | Return_descriptor_invariant descriptor ->
+         make_executed_tool_result
+           (descriptor_route_invariant_error
+              ~keeper_name:meta.name
+              ~tool_name:name
+              descriptor)
+       | Try_registered_only_route ->
+         (* Registered-only tools are a separate dispatch source. A descriptor
+            route that resolves but returns [None] is handled above as a typed
+            invariant failure and can never fall through to this backend. *)
          let unknown_name = name in
          (match
             Keeper_tool_registered_runtime.handle_registered_tool
@@ -760,8 +846,21 @@ let execute_keeper_tool_call
 ;;
 
 module For_testing = struct
+  type descriptor_route_kind =
+    | Output
+    | Invariant
+    | Registered_only
+
   let set_on_keeper_tool_call = set_on_keeper_tool_call
   let record_keeper_tool_call = record_keeper_tool_call
   let set_tool_search_fn = set_tool_search_fn
   let search_tools = search_tools
+  let descriptor_route_invariant_payload = descriptor_route_invariant_payload
+
+  let descriptor_route_kind ~descriptor ~output =
+    match resolve_descriptor_dispatch (Descriptor_route (descriptor, output)) with
+    | Return_output _ -> Output
+    | Return_descriptor_invariant _ -> Invariant
+    | Try_registered_only_route -> Registered_only
+  ;;
 end

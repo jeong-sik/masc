@@ -88,6 +88,9 @@ type runtime_outcome =
 
 let runtime_outcome_to_string = function
   | Runtime_passed_to_next_model -> "passed_to_next_model"
+  (* Runtime-attempt completion is intentionally distinct from the final turn
+     disposition: a completed provider attempt can still fail the Keeper
+     completion contract. This field therefore keeps its own typed wire. *)
   | Runtime_completed -> "completed"
   | Runtime_failed -> "failed"
   | Runtime_not_observed -> "not_observed"
@@ -335,6 +338,26 @@ let stop_reason_to_string = function
     Printf.sprintf "yielded_to_chat_waiting:%d" turns_used
   | Runtime_agent.Yielded_to_durable_stimulus { turns_used } ->
     Printf.sprintf "yielded_to_durable_stimulus:%d" turns_used
+  | Runtime_agent.InputRequired _ ->
+    Keeper_turn_disposition.to_wire Keeper_turn_disposition.Input_required
+  | Runtime_agent.ToolFailureRecoveryDeferred _ ->
+    "tool_failure_recovery_deferred"
+;;
+
+(* This projects the runtime-stop axis into the receipt's terminal_reason_code
+   vocabulary. It does not classify the independent completion-contract axis;
+   [operator_disposition] remains the final typed receipt verdict. *)
+let receipt_terminal_reason_code_of_stop_reason = function
+  | Runtime_agent.InputRequired _ ->
+    Keeper_turn_disposition.to_wire Keeper_turn_disposition.Input_required
+  | Runtime_agent.Completed
+  | Runtime_agent.ToolFailureRecoveryDeferred _ ->
+    Keeper_turn_disposition.to_wire Keeper_turn_disposition.Success
+  | ( Runtime_agent.TurnBudgetExhausted _
+    | Runtime_agent.MutationBoundaryReached _
+    | Runtime_agent.Yielded_to_chat_waiting _
+    | Runtime_agent.Yielded_to_durable_stimulus _ ) as stop_reason ->
+    stop_reason_to_string stop_reason
 ;;
 
 let enrich_contract_violation_reason (receipt : t) : string =

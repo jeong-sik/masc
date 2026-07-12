@@ -249,6 +249,10 @@ let outcome_of_stop (sr : Runtime_agent.stop_reason) : Trajectory.trajectory_out
   | Runtime_agent.Yielded_to_durable_stimulus { turns_used } ->
     Trajectory.Gated
       (Printf.sprintf "yielded_to_durable_stimulus:turns=%d" turns_used)
+  | ( Runtime_agent.InputRequired _
+    | Runtime_agent.ToolFailureRecoveryDeferred _ ) as stop_reason ->
+    Trajectory.Gated
+      (Masc.Keeper_execution_receipt.stop_reason_to_string stop_reason)
 ;;
 
 let build_eval_run (scenario : EH.scenario) ~run_index

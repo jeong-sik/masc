@@ -338,11 +338,10 @@ type attempt_inference_policy =
   }
 
 let attempt_inference_policy
-    ?max_tokens_for_runtime
     ~runtime_id
     ~fallback_temperature
     ~fallback_enable_thinking
-    ~fallback_max_tokens
+    ~turn_max_tokens
     ()
   =
   let runtime_seed = Runtime_inference.for_runtime ~name:runtime_id in
@@ -356,15 +355,12 @@ let attempt_inference_policy
     | Some _ as enabled -> enabled
     | None -> fallback_enable_thinking
   in
-  let attempt_max_tokens =
-    match max_tokens_for_runtime with
-    | Some resolver -> resolver ~runtime_id
-    | None -> fallback_max_tokens
-  in
+  (* Temperature/thinking are runtime capabilities. Output-token intent is a
+     turn input, so candidate selection must not reinterpret or reload it. *)
   { attempt_temperature
   ; attempt_enable_thinking
   ; attempt_preserve_thinking = runtime_seed.preserve_thinking
-  ; attempt_max_tokens
+  ; attempt_max_tokens = turn_max_tokens
   }
 
 let run_named
@@ -387,7 +383,6 @@ let run_named
        means [None] — no request [max_tokens] field, not a synthesized
        fallback. *)
     ?max_tokens
-    ?max_tokens_for_runtime
     ?(accept = fun (_ : Agent_sdk_response.api_response) -> true)
     ?guardrails
     ?hooks
@@ -402,6 +397,7 @@ let run_named
     ?checkpoint_sidecar
     ?(cache_system_prompt = false)
     ?(yield_on_tool = false)
+    ?tool_failure_judge
     ?compact_ratio
     ?context_window_tokens
     ?(oas_auto_context_overflow_retry = true)
@@ -676,11 +672,10 @@ let run_named
       let error_runtime_id = attempt_runtime_id in
       let inference_policy =
         attempt_inference_policy
-          ?max_tokens_for_runtime
           ~runtime_id:attempt_runtime_id
           ~fallback_temperature:temperature
           ~fallback_enable_thinking:enable_thinking
-          ~fallback_max_tokens:max_tokens
+          ~turn_max_tokens:max_tokens
           ()
       in
       let final_runtime_context_window =
@@ -751,6 +746,7 @@ let run_named
             ; checkpoint_sidecar
             ; cache_system_prompt
             ; yield_on_tool
+            ; tool_failure_judge
             ; compact_ratio
             ; context_window_tokens
             ; oas_auto_context_overflow_retry

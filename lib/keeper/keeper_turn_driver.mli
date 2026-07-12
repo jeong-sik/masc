@@ -117,7 +117,6 @@ val run_named :
   ?body_timeout_s:float ->
   ?temperature:float ->
   ?max_tokens:int ->
-  ?max_tokens_for_runtime:(runtime_id:string -> int option) ->
   ?accept:(Agent_sdk_response.api_response -> bool) ->
   ?guardrails:Agent_sdk.Guardrails.t ->
   ?hooks:Agent_sdk.Hooks.hooks ->
@@ -132,6 +131,7 @@ val run_named :
   ?checkpoint_sidecar:Yojson.Safe.t ->
   ?cache_system_prompt:bool ->
   ?yield_on_tool:bool ->
+  ?tool_failure_judge:Agent_sdk.Tool_failure_recovery.judge ->
   ?compact_ratio:float ->
   ?context_window_tokens:int ->
   ?oas_auto_context_overflow_retry:bool ->
@@ -160,7 +160,8 @@ val run_named :
 (** Run a single [Agent.run] call with MASC-driven runtime model fallback.
     MASC drives the runtime FSM directly: resolves runtime providers,
     resolves each candidate's model temperature before trying it with OAS, and
-    uses [Runtime_fsm.decide] on failure.
+    uses [Runtime_fsm.decide] on failure. The optional [max_tokens] value is a
+    turn-start snapshot shared unchanged by every candidate.
     The runtime loop runs inside a capacity-managed queue permit. *)
 
 type attempt_inference_policy =
@@ -258,11 +259,10 @@ module For_testing : sig
     (context_window_rebudget, Agent_sdk.Error.sdk_error) result
 
   val attempt_inference_policy :
-    ?max_tokens_for_runtime:(runtime_id:string -> int option) ->
     runtime_id:string ->
     fallback_temperature:float ->
     fallback_enable_thinking:bool option ->
-    fallback_max_tokens:int option ->
+    turn_max_tokens:int option ->
     unit ->
     attempt_inference_policy
 

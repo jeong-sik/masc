@@ -61,6 +61,7 @@ let clear_collection_failure ~base_path ~keeper_name =
 ;;
 
 let live_failure_keeper_names ~base_path =
+  let base_path = Keeper_registry_types.canonical_base_path_exn base_path in
   Stdlib.Mutex.protect collection_failures_mu (fun () ->
     Hashtbl.fold
       (fun key _failure acc ->

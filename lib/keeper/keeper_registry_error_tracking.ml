@@ -4,6 +4,13 @@ open Keeper_registry_types
 
 let max_crash_log_entries = 5
 
+let record_crash_entry entry ts msg =
+  { entry with
+    crash_log =
+      List.filteri (fun i _ -> i < max_crash_log_entries) ((ts, msg) :: entry.crash_log)
+  }
+;;
+
 let mark_dead ~base_path name ~at ~decr_running_count_clamped ~update_entry =
   (* Same metric is also incremented by transition dispatch via
      [phase_to_string tr.new_phase], which emits lowercase wire format
@@ -77,11 +84,7 @@ let set_last_correlation_id ~base_path name cid ~update_entry =
 
 let record_crash ~base_path name ts msg ~update_entry =
   Log.Keeper.error "registry: recording crash name=%s msg=%s" name msg;
-  update_entry ~base_path name (fun e ->
-    { e with
-      crash_log =
-        List.filteri (fun i _ -> i < max_crash_log_entries) ((ts, msg) :: e.crash_log)
-    })
+  update_entry ~base_path name (fun entry -> record_crash_entry entry ts msg)
 ;;
 
 let restore_supervisor_state

@@ -1,8 +1,8 @@
 (** Tool bundle assembly for keeper OAS execution.
 
-    [make_tool_bundle] builds the full [tool_bundle] (internal tools +
-    alias-registered public names) and [make_tools] is the convenience
-    wrapper returning only [.tools].
+    [make_tool_bundle] builds the full [tool_bundle] from each descriptor's
+    single explicit Keeper-model projection, and [make_tools] is the
+    convenience wrapper returning only [.tools].
 
     Extracted from [Keeper_tools_oas_handler] to keep that module
     focused on per-tool handler construction. *)
@@ -12,7 +12,8 @@ open Keeper_tools_oas
 let task_state_hint ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_meta) : string =
   let meta = Keeper_current_task_reconcile.sync_current_task_id_from_backlog ~config meta in
   match meta.current_task_id with
-  | None -> "No task currently assigned. Use keeper_task_claim or masc_tasks to find one."
+  | None ->
+    "No task currently assigned. Use keeper_task_claim or keeper_tasks_list to find one."
   | Some tid ->
     let task_id = Keeper_id.Task_id.to_string tid in
     (match Workspace_backlog.read_backlog_r config with
@@ -33,6 +34,7 @@ let make_tool_bundle
       ?search_fn
       ?on_tool_called
       ?clock
+      ?continuation_channel
       ()
   : tool_bundle
   =
@@ -51,88 +53,27 @@ let make_tool_bundle
      (AllowList filter in before_turn_hook) controls LLM visibility;
      execute_keeper_tool_call uses can_execute for the execution gate. *)
   let universe_names = Keeper_tool_dispatch_runtime.keeper_universe_tool_names meta in
-  let tool_defs = Keeper_tool_dispatch_runtime.keeper_universe_model_tools meta in
-  (* RFC-0064 Phase 2 (Copilot review #14662 threads 5/6): aliased internal
-     names backing public aliases must NOT appear on
-     the LLM-visible surface alongside their public alias.  Mirrors the
-     pattern already established in [keeper_run_tools.ml] PRs #14574/#14596. *)
+  (* Every model-visible tool is materialized from one explicit descriptor
+     projection. Shard/injected schemas remain descriptor inputs but cannot
+     create a fallback model tool when descriptor coverage is absent. *)
   let model_visible_descriptors = Keeper_tool_descriptor.model_visible_descriptors () in
-  let aliased_internal_names =
-    model_visible_descriptors
-    |> List.map Keeper_tool_descriptor.internal_names
-    |> List.concat
-  in
   let failure_counts = create_failure_counts () in
-  (* Pass A: internal tools that have no public alias.  Aliased internals
-     are registered only via Pass B under their public name so the LLM
-     surface holds at most one entry per logical tool. *)
-  let internal_tools =
-    List.filter_map
-      (fun (td : Masc_domain.tool_schema) ->
-         if
-           List.mem td.name universe_names
-           && not (List.mem td.name aliased_internal_names)
-         then (
-           let h =
-             Keeper_tools_oas_handler.make_keeper_tool_handler
-               ~name:td.name
-               ~input_schema:td.input_schema
-               ~config
-                 ~meta
-                 ~ctx_snapshot
-                 ?turn_sandbox_factory
-                 ~exec_cache
-               ?search_fn
-               ?on_tool_called
-               ?clock
-               ~failure_counts
-               ()
-           in
-           let description =
-             if String.equal td.name "masc_transition"
-             then td.description ^ "\n\n" ^ task_state_hint ~config ~meta
-             else td.description
-           in
-           Some
-             (Tool_bridge.oas_tool_of_masc
-                ~name:td.name
-                ~description
-                ~input_schema:td.input_schema
-                (fun input -> h input)))
-         else None)
-      tool_defs
-  in
-  (* Pass B: register LLM-native capability names (Execute/Read/etc)
-     via descriptor projection. The handler dispatches with
+  (* The handler dispatches with
      [~name:descriptor.internal_name] so all telemetry SSOT remains internal;
-     only the Tool.schema.name (LLM-visible) is the public name.
+     exactly one projected Tool.schema.name is model-visible.
      [descriptor.translate] reshapes the LLM's payload before dispatch;
      [descriptor.input_schema] provides the LLM-facing schema. *)
-  let alias_tools =
+  let descriptor_tools =
     List.concat_map
       (fun (descriptor : Keeper_tool_descriptor.t) ->
          let internal = descriptor.internal_name in
-         if not (List.mem internal universe_names)
-         then []
-         else (
-           (* Descriptor-backed aliases own their public schema.  Some aliases
-              (notably WebSearch/WebFetch) can be present in the descriptor
-              universe before the injected masc_* schema snapshot is populated. *)
-           let handler_input_schema =
-             match
-               List.find_opt
-                 (fun (td : Masc_domain.tool_schema) -> String.equal td.name internal)
-                 tool_defs
-             with
-             | Some internal_def -> internal_def.input_schema
-             | None -> descriptor.input_schema
-           in
-           Keeper_tool_descriptor.public_names_of_descriptor descriptor
-           |> List.map (fun public_name ->
+         Keeper_tool_descriptor.keeper_model_names descriptor
+         |> List.filter (fun model_name -> List.mem model_name universe_names)
+         |> List.map (fun model_name ->
              let h =
                Keeper_tools_oas_handler.make_keeper_tool_handler
                  ~name:internal
-                 ~input_schema:handler_input_schema
+                 ~input_schema:descriptor.input_schema
                  ~config
                    ~meta
                    ~ctx_snapshot
@@ -141,10 +82,11 @@ let make_tool_bundle
                  ?search_fn
                  ?on_tool_called
                  ?clock
+                 ?continuation_channel
                  ~pre_validate_input:(fun input ->
                    match
                      Keeper_tool_descriptor_resolution.validate_public_input_for_tool_call
-                       ~tool_name:public_name
+                       ~tool_name:model_name
                        ~input
                    with
                  | Some result -> result
@@ -154,20 +96,25 @@ let make_tool_bundle
                  ~failure_counts
                  ()
              in
-             (* Public aliases (e.g. WebSearch) are not present in
-                [Tool_catalog] metadata, so derive the descriptor from the
-                internal name and pass it explicitly. *)
+             (* The projected model name may differ from the internal route,
+                so derive OAS metadata from the internal handler identity. *)
              let oas_descriptor = Tool_bridge.oas_descriptor_of_masc_tool internal in
+             let description =
+               match descriptor.model_description_projection with
+               | Keeper_tool_descriptor.Static_description -> descriptor.description
+               | Keeper_tool_descriptor.Current_task_state ->
+                 descriptor.description ^ "\n\n" ^ task_state_hint ~config ~meta
+             in
              Tool_bridge.oas_tool_of_masc
                ?descriptor:oas_descriptor
-               ~name:public_name
-               ~description:descriptor.description
+               ~name:model_name
+               ~description
                ~input_schema:descriptor.input_schema
-               (fun input -> h input))))
+               (fun input -> h input)))
       model_visible_descriptors
   in
   let bundle =
-      { tools = internal_tools @ alias_tools
+      { tools = descriptor_tools
       ; cleanup =
           (fun () ->
             Option.iter Keeper_sandbox_factory.cleanup turn_sandbox_factory)

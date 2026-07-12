@@ -17,6 +17,7 @@ describe('Breadcrumb', () => {
     const nav = container.querySelector('nav')
     expect(nav?.getAttribute('aria-label')).toBe('Breadcrumb')
     expect(container.querySelectorAll('ol > li').length).toBe(2)
+    expect(container.querySelector('a')?.classList.contains('v2-mobile-operator-target')).toBe(true)
     expect(container.textContent).toContain('Command')
     expect(container.textContent).toContain('Operations')
   })

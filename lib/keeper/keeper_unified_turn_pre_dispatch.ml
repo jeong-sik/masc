@@ -9,6 +9,23 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_context_runtime
 
+let profile_load_error ~keeper_name error =
+  Agent_sdk.Error.Config
+    (Agent_sdk.Error.InvalidConfig
+       { field = "keeper.profile"
+       ; detail =
+           Printf.sprintf
+             "keeper %s profile is invalid: %s"
+             keeper_name
+             (Keeper_types_profile.keeper_toml_load_error_to_string error)
+       })
+
+let load_profile_defaults ~base_path ~keeper_name =
+  Keeper_types_profile.load_keeper_profile_defaults_result_for_base_path
+    ~base_path
+    keeper_name
+  |> Result.map_error (profile_load_error ~keeper_name)
+
 (* masc#24067 / oas#2517: the keeper lane must not synthesize a request
    [max_tokens] value. The only override source is the explicit per-keeper
    env/profile knob; absent that, [None] — no [max_tokens] field goes on the

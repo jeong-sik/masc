@@ -437,8 +437,19 @@ type turn_measurement = {
 
 type done_resolution = [ `Stopped | `Crashed of string ]
 
+type lifecycle_transaction_purpose = Dead_revival
+
+type lifecycle_reservation_snapshot =
+  { owner_id : string
+  ; expected_generation : int
+  ; purpose : lifecycle_transaction_purpose
+  }
+
 type registry_entry = {
   base_path : string;
+      (** Canonical workspace identity from
+          {!Config_dir_resolver.canonical_base_path}; byte-equal to the
+          BasePath segment embedded by {!registry_key}. *)
   name : string;
   meta : keeper_meta;
   phase : Keeper_state_machine.phase;
@@ -456,6 +467,9 @@ type registry_entry = {
           and the [TurnDequeue] action. *)
   started_at : float;
   grpc_close : (unit -> unit) option Atomic.t;
+  lane : Keeper_lane.t;
+      (** Structured-concurrency scope owned by this exact registry entry.
+          Its exit promise is the authoritative lane join signal. *)
   done_p : done_resolution Eio.Promise.t;
   done_r : done_resolution Eio.Promise.u;
       (** Completion resolver owned by {!resolve_done}. Runtime callers must
@@ -587,6 +601,7 @@ type done_resolve_result =
     type returned by [validate_registry_entry] and the CAS write helpers. *)
 type registry_entry_health =
   | Healthy
+  | Lifecycle_transaction_reserved of lifecycle_reservation_snapshot
   | Meta_validation_failed of { reason : string }
   | Required_field_missing of { field : string }
   | Base_path_mismatch of { expected : string; actual : string }
@@ -605,9 +620,17 @@ type registry_entry_validation_error = registry_entry_health
 val resolve_done :
   registry_entry -> source:string -> done_resolution -> done_resolve_result
 
-(** Internal: keeper registry key composition (base_path ^ \\x1f ^ name).
-    Exposed via mli so keeper_registry.ml's state functions can use it
-    after the intra-library split; not intended for external callers. *)
+val lane_has_exited : registry_entry -> bool
+
+(** Internal: canonicalize a caller-provided BasePath through the shared
+    {!Config_dir_resolver.canonical_base_path} identity. Invalid paths raise
+    [Invalid_argument]; registry APIs require a valid workspace identity. *)
+val canonical_base_path_exn : string -> string
+
+(** Internal: keeper registry key composition
+    (canonical_base_path ^ \\x1f ^ name). Exposed via mli so
+    keeper_registry.ml's state functions can use it after the intra-library
+    split; not intended for external callers. *)
 val registry_key : base_path:string -> string -> string
 
 (** Internal: inverse of [registry_key]. Returns the [base_path] and

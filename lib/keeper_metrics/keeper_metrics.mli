@@ -13,6 +13,7 @@ type t =
   | PacingShadowEvents
   | PacingShadowNextDueSec
   | FailureRoute
+  | FailureJudgmentOutcome
   | FailureDrivenPause
   | IdleSeconds
   | ContractViolations
@@ -94,6 +95,7 @@ type t =
   | ToolExecuteFailures
   | RolloverFailures
   | LifecycleDispatchRejections
+  | LifecycleTransactions
   | RecordingErrorDedup
   | PausedStatePersistErrors
   | UnexpectedToolPartialTolerance
@@ -109,7 +111,6 @@ type t =
   | DecisionAuditFlushFailures
   | OasCancel
   | ClaimAutoProvision
-  | TomlInvalid
   | PersonaDriftMissing
   | WorkspaceInitFailures
   | PresenceSyncFailures

@@ -319,6 +319,7 @@ type semantic =
   | `Ctrl_h_sm
   | `Ctrl_h
   | `Ctrl_h_lg
+  | `Mobile_touch_target_min
   | `_density_scope
   | `Elev_0_bg
   | `Elev_0_border
@@ -843,6 +844,7 @@ let name_of = function
   | `Ctrl_h_sm -> "ctrl-h-sm"
   | `Ctrl_h -> "ctrl-h"
   | `Ctrl_h_lg -> "ctrl-h-lg"
+  | `Mobile_touch_target_min -> "mobile-touch-target-min"
   | `_density_scope -> "_density-scope"
   | `Elev_0_bg -> "elev-0-bg"
   | `Elev_0_border -> "elev-0-border"

@@ -50,7 +50,12 @@ let fusion_completed_stimulus ?(run_id = "fus-ledger-1") () :
   ; arrived_at = 1234.5
   ; payload =
       Keeper_event_queue.Fusion_completed
-        { run_id; ok = true; resolved_answer = "use approach B"; board_post_id = "post-fus" }
+        { run_id
+        ; ok = true
+        ; resolved_answer = "use approach B"
+        ; board_post_id = "post-fus"
+        ; channel = Keeper_continuation_channel.unrouted "test fixture"
+        }
   }
 ;;
 
@@ -69,6 +74,55 @@ let schedule_due_stimulus ?(schedule_id = "sched-ledger-1") () :
         ; message = "Scheduled lane wake"
         }
   }
+;;
+
+let failure_judgment_stimulus () : Keeper_event_queue.stimulus =
+  let judgment : Keeper_event_queue.failure_judgment =
+    { fj_runtime_id = "failed-runtime"
+    ; fj_judgment = Keeper_runtime_failure_route.Config_mismatch
+    ; fj_provenance = Keeper_runtime_failure_route.Oas_config_error
+    ; fj_detail = "configuration unavailable"
+    }
+  in
+  { post_id = Keeper_event_queue.failure_judgment_post_id judgment
+  ; urgency = Keeper_event_queue.Immediate
+  ; arrived_at = 1234.5
+  ; payload = Keeper_event_queue.Failure_judgment judgment
+  }
+;;
+
+let require_ok label = function
+  | Ok value -> value
+  | Error message -> failf "%s: %s" label message
+;;
+
+let transition_receipt ~settlement stimulus =
+  let pending = Keeper_event_queue.enqueue Keeper_event_queue.empty stimulus in
+  let state = Keeper_event_queue_state.with_pending pending Keeper_event_queue_state.empty in
+  let state, lease =
+    Keeper_event_queue_state.claim_when
+      ~claimed_at:1235.0
+      ~ready:(fun _ -> true)
+      state
+    |> require_ok "claim transition receipt stimulus"
+  in
+  let lease =
+    match lease with
+    | Some lease -> lease
+    | None -> fail "transition receipt stimulus was not claimed"
+  in
+  let _state, result =
+    Keeper_event_queue_state.settle
+      ~settled_at:1236.0
+      ~lease
+      ~settlement
+      state
+    |> require_ok "settle transition receipt stimulus"
+  in
+  match result with
+  | Keeper_event_queue_state.Settled receipt -> receipt
+  | Keeper_event_queue_state.Already_settled _ ->
+    fail "first transition receipt settlement was already settled"
 ;;
 
 let check_member_string label expected key json =
@@ -225,6 +279,60 @@ let test_event_queue_reaction_evidence_matches_exact_stimulus_id () =
   check int "missing exact rows" 0 missing.matched_record_count
 ;;
 
+let test_failure_judgment_operator_attention_is_typed_and_visible () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "judgment-attention-keeper" in
+  let stimulus = failure_judgment_stimulus () in
+  let receipt =
+    transition_receipt
+      ~settlement:
+        (Keeper_event_queue_state.Escalate
+           { reason =
+               Keeper_event_queue_state.Failure_judgment_operator_required
+                 { judge_runtime_id = "opaque-judge-runtime"
+                 ; rationale = "Operator-owned configuration must change."
+                 }
+           ; successor = None
+           })
+      stimulus
+  in
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path
+    ~keeper_name
+    stimulus;
+  Keeper_reaction_ledger.record_event_queue_transition_reaction_result
+    ~base_path
+    ~keeper_name
+    ~reaction_kind:Keeper_reaction_ledger.Event_queue_escalated
+    ~receipt
+    stimulus
+  |> require_ok "record operator-required judgment transition";
+  let summary =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  check_member_string "operator-required judgment degrades" "degraded" "status" summary;
+  check bool "operator-required judgment requires action" true
+    (summary |> member "operator_action_required" |> to_bool);
+  check int "terminal judgment attention counted" 1
+    (summary |> member "event_queue_operator_attention_count" |> to_int);
+  check int "typed transition receipt parsed" 0
+    (summary |> member "event_queue_transition_parse_error_count" |> to_int);
+  let fleet =
+    Keeper_reaction_ledger.fleet_summary_json
+      ~base_path
+      ~keeper_names:[ keeper_name ]
+      ~limit_per_keeper:10
+  in
+  check bool "fleet judgment attention requires action" true
+    (fleet |> member "operator_action_required" |> to_bool);
+  check int "fleet judgment attention counted" 1
+    (fleet |> member "event_queue_operator_attention_count" |> to_int);
+  check_list_has_string
+    "fleet explains judgment attention"
+    "event_queue_operator_attention"
+    (fleet |> member "status_reasons")
+;;
+
 let test_cursor_ack_is_replayable_state_entry () =
   with_temp_base @@ fun base_path ->
   let keeper_name = "cursor-keeper" in
@@ -267,6 +375,7 @@ let test_execution_receipt_links_to_reaction_ledger () =
     ~current_task_id:(Some "task-275")
     ~goal_ids:[ "goal-world-reactivity-p0-20260517" ]
     ~outcome:"receipt_failed"
+    ~reaction_kind:Keeper_reaction_ledger.Terminal_reason
     ~terminal_reason_code:"completion_contract_violation"
     ~receipt_json
     ();
@@ -294,7 +403,7 @@ let test_summary_observes_passive_only_without_attention () =
   with_temp_base @@ fun base_path ->
   let config = Workspace.default_config base_path in
   let keeper_name = "contract-attention-keeper" in
-  let record ?(terminal_reason_code = "completed") ?current_task_id
+  let record ?(terminal_reason_code = "success") ?current_task_id
         ~trace_id ~completion_contract_result () =
     let receipt_json =
       `Assoc
@@ -315,6 +424,7 @@ let test_summary_observes_passive_only_without_attention () =
       ~current_task_id
       ~goal_ids:[]
       ~outcome:"receipt_done"
+      ~reaction_kind:Keeper_reaction_ledger.Execution_receipt
       ~terminal_reason_code
       ~receipt_json
       ()
@@ -391,7 +501,7 @@ let test_summary_degrades_unknown_completion_contract_result () =
         [ "schema", `String "keeper.execution_receipt.v1"
         ; "trace_id", `String trace_id
         ; "outcome", `String "receipt_done"
-        ; "terminal_reason_code", `String "completed"
+        ; "terminal_reason_code", `String "success"
         ; "operator_disposition", `String "continue"
         ; "operator_disposition_reason", `String "none"
         ; "completion_contract_result", `String completion_contract_result
@@ -405,7 +515,8 @@ let test_summary_degrades_unknown_completion_contract_result () =
       ~current_task_id:None
       ~goal_ids:[]
       ~outcome:"receipt_done"
-      ~terminal_reason_code:"completed"
+      ~reaction_kind:Keeper_reaction_ledger.Execution_receipt
+      ~terminal_reason_code:"success"
       ~receipt_json
       ()
   in
@@ -517,7 +628,7 @@ let test_summary_observes_passive_only_without_work_scope_attention () =
       [ "schema", `String "keeper.execution_receipt.v1"
       ; "trace_id", `String "trace-passive-no-work"
       ; "outcome", `String "receipt_done"
-      ; "terminal_reason_code", `String "completed"
+      ; "terminal_reason_code", `String "success"
       ; "operator_disposition", `String "pass"
       ; "operator_disposition_reason", `String "healthy"
       ; "completion_contract_result", `String "passive_only"
@@ -531,7 +642,8 @@ let test_summary_observes_passive_only_without_work_scope_attention () =
     ~current_task_id:None
     ~goal_ids:[]
     ~outcome:"receipt_done"
-    ~terminal_reason_code:"completed"
+    ~reaction_kind:Keeper_reaction_ledger.Execution_receipt
+    ~terminal_reason_code:"success"
     ~receipt_json
     ();
   let summary =
@@ -756,7 +868,7 @@ let test_no_progress_recovery_unrelated_reaction_does_not_clear_pending () =
       [ "schema", `String "keeper.execution_receipt.v1"
       ; "trace_id", `String "trace-later-reaction"
       ; "outcome", `String "receipt_done"
-      ; "terminal_reason_code", `String "completed"
+      ; "terminal_reason_code", `String "success"
       ; "operator_disposition", `String "pass"
       ; "operator_disposition_reason", `String "healthy"
       ; "completion_contract_result", `String "satisfied_execution"
@@ -770,7 +882,8 @@ let test_no_progress_recovery_unrelated_reaction_does_not_clear_pending () =
     ~current_task_id:None
     ~goal_ids:[]
     ~outcome:"receipt_done"
-    ~terminal_reason_code:"completed"
+    ~reaction_kind:Keeper_reaction_ledger.Execution_receipt
+    ~terminal_reason_code:"success"
     ~receipt_json
     ();
   let unrelated_reaction_summary =
@@ -845,7 +958,7 @@ let test_summary_links_passive_only_observation_to_pending_recovery () =
       [ "schema", `String "keeper.execution_receipt.v1"
       ; "trace_id", `String "trace-passive"
       ; "outcome", `String "receipt_done"
-      ; "terminal_reason_code", `String "completed"
+      ; "terminal_reason_code", `String "success"
       ; "operator_disposition", `String "pause_human"
       ; "operator_disposition_reason", `String "completion_contract_unsatisfied"
       ; "completion_contract_result", `String "passive_only"
@@ -859,7 +972,8 @@ let test_summary_links_passive_only_observation_to_pending_recovery () =
     ~current_task_id:(Some "task-passive")
     ~goal_ids:[]
     ~outcome:"receipt_done"
-    ~terminal_reason_code:"completed"
+    ~reaction_kind:Keeper_reaction_ledger.Terminal_reason
+    ~terminal_reason_code:"success"
     ~receipt_json
     ();
   Keeper_reaction_ledger.record_event_queue_stimulus
@@ -1292,6 +1406,9 @@ let test_stimulus_kind_string_roundtrip () =
     ; Keeper_reaction_ledger.Connector_attention
     ; Keeper_reaction_ledger.Hitl_resolved
     ; Keeper_reaction_ledger.Goal_verification_failed
+    ; Keeper_reaction_ledger.Failure_judgment
+    ; Keeper_reaction_ledger.Goal_assigned
+    ; Keeper_reaction_ledger.Goal_stagnation
     ];
   check bool "unknown stimulus kind string is None" true
     (Option.is_none (Keeper_reaction_ledger.stimulus_kind_of_string "totally_unknown"))
@@ -1313,6 +1430,8 @@ let test_reaction_kind_string_roundtrip () =
       check bool "reaction_kind round-trips through string" true (roundtrips k))
     [ Keeper_reaction_ledger.Turn_started
     ; Keeper_reaction_ledger.Event_queue_ack
+    ; Keeper_reaction_ledger.Event_queue_requeued
+    ; Keeper_reaction_ledger.Event_queue_escalated
     ; Keeper_reaction_ledger.Execution_receipt
     ; Keeper_reaction_ledger.Terminal_reason
     ; Keeper_reaction_ledger.Cursor_ack
@@ -1336,6 +1455,10 @@ let () =
             "event queue reaction evidence matches exact stimulus id"
             `Quick
             test_event_queue_reaction_evidence_matches_exact_stimulus_id
+        ; test_case
+            "failure judgment operator attention is typed and visible"
+            `Quick
+            test_failure_judgment_operator_attention_is_typed_and_visible
         ; test_case
             "cursor ack is replayable state entry"
             `Quick

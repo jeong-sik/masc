@@ -152,6 +152,8 @@ let register_default_cleanup_hook () =
   if Atomic.compare_and_set registered false true then
     Keeper_lifecycle_hooks.register default_hook
 
+let default_cleanup_hook_registered () = Atomic.get registered
+
 let reset_for_testing () =
   with_lock (fun () -> Hashtbl.clear registry);
   Atomic.set registered false

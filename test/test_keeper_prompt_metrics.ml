@@ -388,7 +388,7 @@ let test_ctx_composition_splits_history_and_residual () =
               {
                 tool_use_id = "call-1";
                 content = "Fetched board post body";
-                is_error = false;
+                outcome = Agent_sdk.Types.Tool_succeeded;
                 json = None;
                 content_blocks = None;
               };

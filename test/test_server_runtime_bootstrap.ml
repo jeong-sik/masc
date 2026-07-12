@@ -2,6 +2,44 @@ module Types = Masc_domain
 
 open Masc
 
+module Runtime_under_test = Server_routes_http_runtime
+
+let test_request_authority () =
+  match Server_request_authority.of_host_port ~host:"localhost" ~port:8935 with
+  | Ok authority -> authority
+  | Error `Malformed -> Alcotest.fail "test authority must be valid"
+;;
+
+module Server_routes_http_runtime = struct
+  include Runtime_under_test
+
+  let make_health_json ?listener ?section_timings_ref request =
+    Runtime_under_test.make_health_json
+      ?listener
+      ?section_timings_ref
+      ~request_authority:(test_request_authority ())
+      request
+  ;;
+
+  let make_health_response_json ?listener request =
+    Runtime_under_test.make_health_response_json
+      ?listener
+      ~request_authority:(test_request_authority ())
+      request
+  ;;
+
+  module For_testing = struct
+    include Runtime_under_test.For_testing
+
+    let refresh_full_health_snapshot_now ?listener request =
+      Runtime_under_test.For_testing.refresh_full_health_snapshot_now
+        ?listener
+        ~request_authority:(test_request_authority ())
+        request
+    ;;
+  end
+end
+
 let () = Mirage_crypto_rng_unix.use_default ()
 
 let with_env name value f =
@@ -2300,6 +2338,64 @@ let test_health_json_preserves_active_task_owner_meta_read_error () =
           false
           (fleet_safety |> member "operator_action_required" |> to_bool)))
 
+let test_health_json_effective_capacity_includes_recovering_lanes () =
+  let previous_state = !Server_auth.server_state in
+  Fun.protect
+    ~finally:(fun () -> Server_auth.server_state := previous_state)
+    (fun () ->
+      Server_auth.server_state := None;
+      let running_names = [ "running-a"; "running-b"; "running-c" ] in
+      let recovering_names =
+        [ "recovering-a"; "recovering-b"; "recovering-c"; "recovering-d" ]
+      in
+      let target_names = running_names @ recovering_names in
+      let phase_counts :
+          Server_routes_http_runtime_fleet_scan.keeper_phase_counts =
+        { running = 3; failing = 4; recovering = 4; executable = 7 }
+      in
+      let phase_snapshot :
+          Server_routes_http_runtime_fleet_scan.keeper_phase_snapshot =
+        { counts = phase_counts
+        ; running_names
+        ; recovering_names
+        ; executable_names = target_names
+        ; phase_values = []
+        ; phase_details = []
+        }
+      in
+      let fleet_safety =
+        Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json
+          ~bootable_names:target_names
+          ~autoboot_scan:
+            { autoboot_names = target_names; read_errors = [] }
+          ~phase_snapshot
+          ~phase_counts
+          ~paused_keepers_json:(`Assoc [ ("count", `Int 0) ])
+          ()
+      in
+      let open Yojson.Safe.Util in
+      Alcotest.(check int)
+        "healthy running count remains actual running lanes"
+        3
+        (fleet_safety |> member "healthy_running_keeper_fiber_count" |> to_int);
+      Alcotest.(check int)
+        "effective capacity includes actively recovering lanes"
+        7
+        (fleet_safety |> member "effective_reaction_capacity_count" |> to_int);
+      Alcotest.(check int)
+        "effective capacity has no target shortfall"
+        0
+        (fleet_safety |> member "reaction_capacity_shortfall_count" |> to_int);
+      Alcotest.(check bool)
+        "capacity verdict uses the advertised effective count"
+        false
+        (fleet_safety |> member "reaction_capacity_below_target" |> to_bool);
+      Alcotest.(check string)
+        "active recovery does not request a stop/pause intervention"
+        "ok"
+        (fleet_safety |> member "status" |> to_string))
+;;
+
 let test_health_json_degrades_when_reaction_capacity_below_target () =
   with_temp_dir "health-reaction-capacity-below-target" (fun dir ->
     let config_root = make_config_root dir in
@@ -3183,6 +3279,21 @@ let test_health_json_reaction_ledger_unavailable_shape () =
           |> member "durable_event_queue_stale_by_keeper"
           |> to_list
           |> List.length))
+
+let test_health_json_turn_admission_unavailable_shape () =
+  let previous_state = !Server_auth.server_state in
+  Fun.protect
+    ~finally:(fun () -> Server_auth.server_state := previous_state)
+    (fun () ->
+       Server_auth.server_state := None;
+       let request = Httpun.Request.create `GET "/health" in
+       let json = Server_routes_http_runtime.make_health_json request in
+       let open Yojson.Safe.Util in
+       let admission = json |> member "keeper_turn_admission" in
+       Alcotest.(check string) "unavailable turn admission status" "unavailable"
+         (admission |> member "status" |> to_string);
+       Alcotest.(check int) "unavailable shutdown keeper count" 0
+         (admission |> member "shutdown_keeper_count" |> to_int))
 
 let test_health_json_surfaces_log_ring_summary () =
   Log.set_level Log.Info;
@@ -4683,6 +4794,10 @@ let () =
             `Quick
             test_health_json_preserves_active_task_owner_meta_read_error;
           Alcotest.test_case
+            "health json effective capacity includes recovering lanes"
+            `Quick
+            test_health_json_effective_capacity_includes_recovering_lanes;
+          Alcotest.test_case
             "health json degrades when reaction capacity is below target"
             `Quick test_health_json_degrades_when_reaction_capacity_below_target;
           Alcotest.test_case
@@ -4731,6 +4846,9 @@ let () =
           Alcotest.test_case
             "health json reaction ledger unavailable shape"
             `Quick test_health_json_reaction_ledger_unavailable_shape;
+          Alcotest.test_case
+            "health json turn admission unavailable shape"
+            `Quick test_health_json_turn_admission_unavailable_shape;
           Alcotest.test_case "health json surfaces log ring summary" `Quick
             test_health_json_surfaces_log_ring_summary;
           Alcotest.test_case

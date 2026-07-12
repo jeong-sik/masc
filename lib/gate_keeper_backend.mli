@@ -23,10 +23,20 @@ type connector_kind =
     keeps the async [masc_keeper_msg] poll path. See
     RFC-connector-deferred-reply-via-chat-queue §3.2–3.3 and RFC-0317. *)
 
+type submission_owner =
+  | Authenticated_caller of string
+  | Channel_actor
+(** Owner of an async request produced by this dispatch. [Channel_actor] uses
+    the external actor's deterministic gate identity. [Authenticated_caller]
+    keeps poll/cancel authority with the already-authenticated HTTP principal. *)
+
 val route_busy_connector :
   connector_kind ->
   channel_id:string ->
   user_id:string ->
+  user_name:string ->
+  team_id:string option ->
+  thread_ts:string option ->
   [ `Enqueue_chat_queue of Keeper_chat_queue.message_source | `Async_poll ]
 (** Pure routing decision for a connector message that arrives while the keeper
     has an in-flight turn. Exhaustive over {!connector_kind}: [Discord] and
@@ -37,6 +47,7 @@ val route_busy_connector :
 
 val dispatch :
   connector_kind:connector_kind ->
+  submission_owner:submission_owner ->
   sw:Eio.Switch.t ->
   clock:_ Eio.Time.clock ->
   proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t option ->
@@ -55,16 +66,26 @@ val dispatch :
     When the target keeper already has an admitted turn in flight, the busy
     message is routed per {!route_busy_connector}: a [Discord]/[Slack]
     [connector_kind] enqueues onto [Keeper_chat_queue] for deferred delivery via
-    the serial consumer's outbound adapter (RFC-connector-deferred-reply-via-chat-queue); [Generic] (the default)
+    the serial consumer's outbound adapter
+    (RFC-connector-deferred-reply-via-chat-queue). The enqueue is acknowledged
+    only after its durable snapshot commits; the reply's [message_request]
+    carries the queue receipt id and revision. When admission is fenced by a
+    typed Keeper shutdown operation, the same envelope carries
+    [shutdown_operation_id] and the ACK says the receipt waits for the next
+    active lane rather than promising completion of a current turn.
+    Persistence failure returns an explicit [Keeper_error_result], never a
+    queued ACK. [Generic]
     returns an accepted async request envelope ([Keeper_msg_async]) instead of
-    blocking the connector request behind that turn.  The [channel] and
+    blocking the connector request behind that turn. The [channel] and
     [channel_user_id] are used to construct the agent name
-    ([gate:<channel>:<workspace_id>:<user_id>]).  The other connector fields are
+    ([gate:<channel>:<workspace_id>:<user_id>]) for conversation identity;
+    [submission_owner] independently binds poll/cancel authority. The other connector fields are
     injected into the keeper-visible message body so external user identity
     survives memory and handoff boundaries. *)
 
 val dispatch_with_text_snapshot :
   connector_kind:connector_kind ->
+  submission_owner:submission_owner ->
   on_text_snapshot:(string -> unit) ->
   sw:Eio.Switch.t ->
   clock:_ Eio.Time.clock ->

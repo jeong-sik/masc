@@ -2,13 +2,69 @@
 
     Extracted from keeper_registry.ml (lines 1854-1900) as part of the
     godfile decomp campaign. Each [registry_entry] carries its own
-    [event_queue : Keeper_event_queue.t Atomic.t] — these wrappers do
-    CAS on that per-entry atomic after locating the entry via the
-    central registry's public [get]. No coupling to the central
-    Atomic state primitive. CAS-successful mutations are mirrored to
-    [Keeper_event_queue_persistence] for restart replay. *)
+    [event_queue : Keeper_event_queue.t Atomic.t].  The durable v2 envelope is
+    the mutation authority; these wrappers publish its pending projection to
+    that per-entry Atomic only after commit.  No coupling to the central
+    registry Atomic state primitive. *)
 
-open Keeper_registry_types
+type lease = Keeper_event_queue_persistence.lease
+
+type requeue_reason = Keeper_event_queue_persistence.requeue_reason =
+  | Cycle_busy
+  | Turn_not_scheduled
+  | Retry_after_pacing
+  | Rotate_now
+  | Cancelled
+  | Cycle_crashed
+  | Registration_recovery
+
+type escalation_reason = Keeper_event_queue_persistence.escalation_reason =
+  | Failure_judgment_requested
+  | Failure_judgment_boundary_failed of { detail : string }
+  | Failure_judgment_operator_required of
+      { judge_runtime_id : string
+      ; rationale : string
+      }
+
+type settlement = Keeper_event_queue_persistence.settlement =
+  | Ack
+  | Requeue of requeue_reason
+  | Escalate of
+      { reason : escalation_reason
+      ; successor : Keeper_event_queue.stimulus option
+      }
+
+type transition_receipt = Keeper_event_queue_persistence.transition_receipt
+type outbox_entry = Keeper_event_queue_persistence.outbox_entry
+
+type settle_result = Keeper_event_queue_persistence.settle_result =
+  | Settled of transition_receipt
+  | Already_settled of transition_receipt
+
+let lease_stimuli = Keeper_event_queue_persistence.lease_stimuli
+let lease_kind = Keeper_event_queue_persistence.lease_kind
+
+let active_lease_result ~base_path name =
+  match Keeper_registry.get ~base_path name with
+  | None -> Error (Printf.sprintf "keeper not registered: %s" name)
+  | Some _ ->
+    Keeper_event_queue_persistence.active_lease_result
+      ~base_path
+      ~keeper_name:name
+;;
+
+let transition_outbox_result ~base_path name =
+  Keeper_event_queue_persistence.transition_outbox_result
+    ~base_path
+    ~keeper_name:name
+;;
+
+let mark_transition_projected_result ~base_path name ~transition_id =
+  Keeper_event_queue_persistence.mark_transition_projected_result
+    ~base_path
+    ~keeper_name:name
+    ~transition_id
+;;
 
 let rec queue_contains queue stimulus =
   match Keeper_event_queue.dequeue queue with
@@ -44,68 +100,41 @@ let enqueue_external_decision queue stimulus =
          stimulus.post_id)
 ;;
 
-let requeue_missing_front queue stimuli =
-  let missing =
-    List.filter (fun stimulus -> not (queue_contains queue stimulus)) stimuli
-  in
-  Keeper_event_queue.prepend_list missing queue
-;;
-
-let persist_live_queue ~base_path (entry : Keeper_registry.registry_entry) name =
-  Keeper_event_queue_persistence.persist_snapshot
-    ~base_path
-    ~keeper_name:name
-    (fun () -> Atomic.get entry.event_queue)
-;;
-
-let enqueue_live_if_missing (entry : Keeper_registry.registry_entry) stimulus =
-  let rec loop () =
-    let cur = Atomic.get entry.event_queue in
-    let next = enqueue_if_missing cur stimulus in
-    if next = cur
-    then ()
-    else if Atomic.compare_and_set entry.event_queue cur next
-    then ()
-    else loop ()
-  in
-  loop ()
+let publish_pending ~base_path name pending =
+  match Keeper_registry.get ~base_path name with
+  | None -> ()
+  | Some entry -> Atomic.set entry.event_queue pending
 ;;
 
 let enqueue ~base_path name stimulus =
-  match Keeper_registry.get ~base_path name with
-  | None ->
+  if Option.is_none (Keeper_registry.get ~base_path name)
+  then
     Log.Keeper.warn
       "registry: enqueue_event name=%s base_path=%s: keeper not registered; persisting stimulus for replay"
       name
       base_path;
-    Keeper_event_queue_persistence.update
+  let committed_pending = ref None in
+  match
+    Keeper_event_queue_persistence.update_checked_result
       ~base_path
       ~keeper_name:name
-      (fun cur -> enqueue_if_missing cur stimulus);
-    (match Keeper_registry.get ~base_path name with
-     | None -> ()
-     | Some entry ->
-       let rec loop () =
-         let cur = Atomic.get entry.event_queue in
-         let next = enqueue_if_missing cur stimulus in
-         if next = cur
-         then ()
-         else if Atomic.compare_and_set entry.event_queue cur next
-         then persist_live_queue ~base_path entry name
-         else loop ()
-       in
-       loop ())
-  | Some entry ->
-    let rec loop () =
-      let cur = Atomic.get entry.event_queue in
-      let next = enqueue_if_missing cur stimulus in
-      if next = cur
-      then ()
-      else if Atomic.compare_and_set entry.event_queue cur next
-      then persist_live_queue ~base_path entry name
-      else loop ()
-    in
-    loop ()
+      ~after_commit:(fun () ->
+        match !committed_pending with
+        | None -> ()
+        | Some pending -> publish_pending ~base_path name pending)
+      (fun current ->
+         let pending = enqueue_if_missing current stimulus in
+         committed_pending := Some pending;
+         Ok pending)
+  with
+  | Ok () -> ()
+  | Error message ->
+    Log.Keeper.error
+      "registry: durable enqueue failed name=%s base_path=%s post_id=%s: %s"
+      name
+      base_path
+      stimulus.Keeper_event_queue.post_id
+      message
 ;;
 
 let enqueue_durable_result ~base_path name stimulus =
@@ -113,16 +142,20 @@ let enqueue_durable_result ~base_path name stimulus =
      delivery result. This path is intentionally separate from [enqueue]: most
      stimuli already have an upstream replay source, while HITL resolution is
      the sole carrier of an operator decision and must fail closed. *)
-  let after_commit =
-    match Keeper_registry.get ~base_path name with
-    | None -> fun () -> ()
-    | Some entry -> fun () -> enqueue_live_if_missing entry stimulus
-  in
+  let committed_pending = ref None in
   Keeper_event_queue_persistence.update_checked_result
     ~base_path
     ~keeper_name:name
-    ~after_commit
-    (fun queue -> enqueue_external_decision queue stimulus)
+    ~after_commit:(fun () ->
+      match !committed_pending with
+      | None -> ()
+      | Some pending -> publish_pending ~base_path name pending)
+    (fun queue ->
+       match enqueue_external_decision queue stimulus with
+       | Error _ as error -> error
+       | Ok pending ->
+         committed_pending := Some pending;
+         Ok pending)
 ;;
 
 let enqueue_hitl_resolution_durable_result
@@ -145,63 +178,14 @@ let enqueue_hitl_resolution_durable_result
   enqueue_durable_result ~base_path keeper_name stimulus
 ;;
 
-let requeue_front ~base_path name stimuli =
-  match stimuli with
-  | [] -> ()
-  | _ ->
-    (match Keeper_registry.get ~base_path name with
-     | None ->
-       Keeper_event_queue_persistence.update
-         ~base_path
-         ~keeper_name:name
-         (fun cur -> requeue_missing_front cur stimuli);
-       Keeper_event_queue_persistence.ack_inflight ~base_path ~keeper_name:name stimuli
-     | Some entry ->
-       let rec loop () =
-         let cur = Atomic.get entry.event_queue in
-         let next = requeue_missing_front cur stimuli in
-         if next = cur
-         then Keeper_event_queue_persistence.ack_inflight ~base_path ~keeper_name:name stimuli
-         else if Atomic.compare_and_set entry.event_queue cur next
-         then (
-           persist_live_queue ~base_path entry name;
-           Keeper_event_queue_persistence.ack_inflight ~base_path ~keeper_name:name stimuli)
-         else loop ()
-       in
-       loop ())
-;;
-
-let ack_consumed_result ~base_path name stimuli =
-  Keeper_event_queue_persistence.ack_consumed ~base_path ~keeper_name:name stimuli
-;;
-
-let ack_consumed ~base_path name stimuli =
-  match ack_consumed_result ~base_path name stimuli with
-  | Ok () -> ()
-  | Error msg ->
-    Log.Keeper.warn "registry: ack_consumed failed name=%s: %s" name msg
-;;
-
 let drop_by_post_id ~base_path name ~post_id =
-  let remove_live (entry : Keeper_registry.registry_entry) =
-    let rec loop () =
-      let cur = Atomic.get entry.event_queue in
-      let removed, next = Keeper_event_queue.remove_by_post_id post_id cur in
-      if removed = []
-      then removed
-      else if Atomic.compare_and_set entry.event_queue cur next
-      then (
-        persist_live_queue ~base_path entry name;
-        removed)
-      else loop ()
-    in
-    loop ()
-  in
   match
     Keeper_event_queue_persistence.drop_by_post_id
       ~base_path
       ~keeper_name:name
       ~post_id
+      ~after_commit:(publish_pending ~base_path name)
+      ()
   with
   | Error msg ->
     Log.Keeper.warn
@@ -210,13 +194,7 @@ let drop_by_post_id ~base_path name ~post_id =
       post_id
       msg;
     Error msg
-  | Ok persisted_removed ->
-    let live_removed =
-      match Keeper_registry.get ~base_path name with
-      | None -> []
-      | Some entry -> remove_live entry
-    in
-    Ok (Keeper_event_queue.uniq_stimuli (live_removed @ persisted_removed))
+  | Ok persisted_removed -> Ok persisted_removed
 ;;
 
 let snapshot ~base_path name =
@@ -225,44 +203,38 @@ let snapshot ~base_path name =
   | Some entry -> Atomic.get entry.event_queue
 ;;
 
-let dequeue_when ~base_path name ~ready =
+let claim_when_result ~base_path name ~claimed_at ~ready =
   match Keeper_registry.get ~base_path name with
-  | None -> None
-  | Some entry ->
-    let rec loop () =
-      let cur = Atomic.get entry.event_queue in
-      match Keeper_event_queue.dequeue cur with
-      | None -> None
-      | Some (stim, _) when not (ready stim) -> None
-      | Some (stim, rest) ->
-        Keeper_event_queue_persistence.record_inflight
-          ~base_path
-          ~keeper_name:name
-          [ stim ];
-        if Atomic.compare_and_set entry.event_queue cur rest
-        then (
-          persist_live_queue ~base_path entry name;
-          Some stim)
-        else loop ()
-    in
-    loop ()
+  | None -> Error (Printf.sprintf "keeper not registered: %s" name)
+  | Some _ ->
+    Keeper_event_queue_persistence.claim_when_result
+      ~base_path
+      ~keeper_name:name
+      ~claimed_at
+      ~ready
+      ~after_commit:(publish_pending ~base_path name)
+      ()
 ;;
 
-let dequeue ~base_path name = dequeue_when ~base_path name ~ready:(fun _ -> true)
-
-let drain_board ~base_path name =
+let claim_board_result ~base_path name ~claimed_at =
   match Keeper_registry.get ~base_path name with
-  | None -> []
-  | Some entry ->
-    let rec loop () =
-      let cur = Atomic.get entry.event_queue in
-      let board, rest = Keeper_event_queue.drain_board_all cur in
-      Keeper_event_queue_persistence.record_inflight ~base_path ~keeper_name:name board;
-      if Atomic.compare_and_set entry.event_queue cur rest
-      then (
-        persist_live_queue ~base_path entry name;
-        board)
-      else loop ()
-    in
-    loop ()
+  | None -> Error (Printf.sprintf "keeper not registered: %s" name)
+  | Some _ ->
+    Keeper_event_queue_persistence.claim_board_result
+      ~base_path
+      ~keeper_name:name
+      ~claimed_at
+      ~after_commit:(publish_pending ~base_path name)
+      ()
+;;
+
+let settle_result ~base_path name ~settled_at ~lease ~settlement =
+  Keeper_event_queue_persistence.settle_result
+    ~base_path
+    ~keeper_name:name
+    ~settled_at
+    ~lease
+    ~settlement
+    ~after_commit:(publish_pending ~base_path name)
+    ()
 ;;

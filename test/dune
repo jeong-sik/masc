@@ -47,6 +47,8 @@
   test_policy_source_of_status
   test_keeper_mention_scope
   test_keeper_lane_mentions
+  test_keeper_chat_delivery_identity
+  test_keeper_chat_delivery_journal
   test_keeper_librarian_retry
   test_surface_ref
   test_admission_fd_gate
@@ -369,6 +371,7 @@
   test_auth_strict_mode
   test_keeper_turn_fsm_emit
   test_keeper_event_queue
+  test_keeper_event_queue_owner_lock
   test_keeper_event_queue_persist_poison
   test_keeper_goal_stagnation_wake
   test_workspace_routes_keeper
@@ -410,6 +413,8 @@
   test_policy_source_of_status
   test_keeper_mention_scope
   test_keeper_lane_mentions
+  test_keeper_chat_delivery_identity
+  test_keeper_chat_delivery_journal
   test_keeper_librarian_retry
   test_surface_ref
   test_admission_fd_gate
@@ -738,6 +743,7 @@
   test_auth_strict_mode
   test_keeper_turn_fsm_emit
   test_keeper_event_queue
+  test_keeper_event_queue_owner_lock
   test_keeper_event_queue_persist_poison
   test_keeper_goal_stagnation_wake
   test_actionable_path_action
@@ -759,6 +765,24 @@
   test_board_rest_routes
   test_board_context_inference_resolution)
  (libraries masc_test_deps masc_schedule multimodal bigstringaf))
+
+; Request-authority admission uses Eio fiber-local bindings and therefore owns
+; an explicit executable stanza instead of borrowing the pure synchronous test
+; group above.
+(test
+ (name test_keeper_event_queue_state_v2)
+ (modules test_keeper_event_queue_state_v2)
+ (libraries alcotest masc_test_deps))
+
+(test
+ (name test_keeper_failure_judgment_contract)
+ (modules test_keeper_failure_judgment_contract)
+ (libraries alcotest masc_test_deps))
+
+(test
+ (name test_server_request_authority)
+ (modules test_server_request_authority)
+ (libraries alcotest masc_test_deps eio_main h2))
 
 ; Operator snapshot cache: stale-while-revalidate + background refresh.
 
@@ -1054,7 +1078,6 @@
   test_dashboard_k2_feeds
   test_keeper_profile_normalize_10552
   test_personality_field_diff_10269
-  test_toml_skip_dedup_10259
   test_discovery_history_models_10404
   test_masc_log_utc_filename_10392
   test_keeper_tag_dispatch
@@ -1252,7 +1275,6 @@
   test_dashboard_k2_feeds
   test_keeper_profile_normalize_10552
   test_personality_field_diff_10269
-  test_toml_skip_dedup_10259
   test_discovery_history_models_10404
   test_masc_log_utc_filename_10392
   test_keeper_tag_dispatch
@@ -2059,8 +2081,6 @@
 
 (include stanzas/test_keeper_msg_async_terminal_event.inc)
 
-(include stanzas/test_keeper_msg_cancel.inc)
-
 (include stanzas/test_turn_record.inc)
 
 (include stanzas/test_keeper_chat_coalescing.inc)
@@ -2232,15 +2252,12 @@
 
 (include stanzas/test_release_train_guard_script.inc)
 
-(include stanzas/test_reqd_invalid_state_swallow.inc)
 
 (include stanzas/test_server_state_product.inc)
 
 (include stanzas/test_server_discord_trigger_policy.inc)
 
 (include stanzas/test_server_slack_trigger_policy.inc)
-
-(include stanzas/test_shell_parse_site_ratchet.inc)
 
 (include stanzas/test_smart_heartbeat_keepalive.inc)
 

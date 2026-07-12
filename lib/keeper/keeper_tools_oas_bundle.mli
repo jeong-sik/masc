@@ -11,6 +11,7 @@ val make_tool_bundle
   -> ?search_fn:(query:string -> max_results:int -> Yojson.Safe.t)
   -> ?on_tool_called:(string -> unit)
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> ?continuation_channel:Keeper_continuation_channel.t
   -> unit
   -> Keeper_tools_oas.tool_bundle
 

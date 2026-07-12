@@ -122,9 +122,10 @@ let active_goal_scope_audit_to_json audit =
         else `Null );
     ]
 
-let profile_candidates persona_name =
-  let resolution = Config_dir_resolver.resolve () in
-  (resolution.personas.path :: Config_dir_resolver.personas_dirs ())
+let profile_candidates ~base_path persona_name =
+  let resolution = Config_dir_resolver.resolve_for_base_path ~base_path in
+  (resolution.personas.path
+   :: Config_dir_resolver.personas_dirs_for_base_path ~base_path)
   |> dedupe_sorted_strings
   |> List.map (fun root ->
          Filename.concat (Filename.concat root persona_name) "profile.json")
@@ -138,25 +139,33 @@ let item ~(config : Workspace.config) requested_name =
     | Error msg -> (requested_name, None, Some msg)
   in
   let keeper_toml_candidate =
-    Filename.concat (Config_dir_resolver.keepers_dir ()) (resolved_name ^ ".toml")
+    Filename.concat
+      (Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path)
+      (resolved_name ^ ".toml")
   in
   let keeper_toml_path =
-    match keeper_toml_path_opt resolved_name with
+    match keeper_toml_path_opt_for_base_path ~base_path:config.base_path resolved_name with
     | Some path -> Some path
     | None -> Some keeper_toml_candidate
   in
   let keeper_toml_exists = Fs_compat.file_exists keeper_toml_candidate in
-  let defaults_result = load_keeper_profile_defaults_result resolved_name in
-  let default_source = keeper_default_source_snapshot resolved_name in
+  let defaults_result =
+    load_keeper_profile_defaults_result_for_base_path
+      ~base_path:config.base_path
+      resolved_name
+  in
+  let default_source =
+    keeper_default_source_snapshot ~base_path:config.base_path resolved_name
+  in
   let defaults =
     match defaults_result with
     | Ok defaults -> defaults
     | Error _ -> default_source.defaults
   in
-  let toml_error =
-    match defaults_result with
-    | Ok _ -> None
-    | Error msg -> Some msg
+  let config_error =
+    Option.map
+      (keeper_toml_config_error_of_load_error ~keeper_name:resolved_name)
+      default_source.config_error
   in
   let explicit_persona_name =
     match defaults.persona_name with
@@ -167,10 +176,13 @@ let item ~(config : Workspace.config) requested_name =
   let inferred_persona_name =
     resolved_persona_name ~keeper_name:resolved_name defaults |> String.trim
   in
+  let inferred_persona_candidates =
+    if String.equal inferred_persona_name ""
+    then []
+    else profile_candidates ~base_path:config.base_path inferred_persona_name
+  in
   let inferred_persona_profile_path =
-    match inferred_persona_name with
-    | "" -> None
-    | name -> persona_profile_path_opt name
+    List.find_opt Fs_compat.file_exists inferred_persona_candidates
   in
   let persona_name =
     match explicit_persona_name with
@@ -185,19 +197,16 @@ let item ~(config : Workspace.config) requested_name =
   in
   let persona_candidates =
     match persona_name with
-    | Some name -> profile_candidates name
+    | Some name -> profile_candidates ~base_path:config.base_path name
     | None -> []
   in
   let persona_profile_path =
-    match persona_name with
-    | Some name -> (
-        match persona_profile_path_opt name with
-        | Some path -> Some path
-        | None -> (
-            match persona_candidates with
-            | candidate :: _ -> Some candidate
-            | [] -> None))
-    | None -> None
+    match List.find_opt Fs_compat.file_exists persona_candidates with
+    | Some path -> Some path
+    | None -> (
+        match persona_candidates with
+        | path :: _ -> Some path
+        | [] -> None)
   in
   let persona_profile_exists =
     match persona_profile_path with
@@ -243,7 +252,7 @@ let item ~(config : Workspace.config) requested_name =
     let add cond issue acc = if cond then issue :: acc else acc in
     []
     |> add (not keeper_toml_exists) "missing_keeper_toml"
-    |> add (Option.is_some toml_error) "toml_parse_error"
+    |> add (Option.is_some config_error) "config_invalid"
     |> add
          (persona_expected && not persona_profile_exists)
          "missing_persona_profile"
@@ -291,7 +300,8 @@ let item ~(config : Workspace.config) requested_name =
         existing_path_json ~candidates:[ keeper_toml_candidate ] keeper_toml_path );
       ("default_source_kind", Json_util.string_opt_to_json default_source_kind);
       ("default_manifest_path", Json_util.string_opt_to_json defaults.manifest_path);
-      ("toml_error", Json_util.string_opt_to_json toml_error);
+      ( "config_error",
+        Json_util.option_to_yojson keeper_toml_config_error_to_json config_error );
       ("persona_name", Json_util.string_opt_to_json persona_name);
       ("explicit_persona_name", Json_util.string_opt_to_json explicit_persona_name);
       ("persona_profile", existing_path_json ~candidates:persona_candidates persona_profile_path);
@@ -360,7 +370,7 @@ let summary items =
       ("ok", `Int ok_count);
       ("with_issues", `Int (List.length items - ok_count));
       ("missing_keeper_toml", `Int (count_issue "missing_keeper_toml"));
-      ("toml_parse_error", `Int (count_issue "toml_parse_error"));
+      ("config_invalid", `Int (count_issue "config_invalid"));
       ("missing_persona_profile", `Int (count_issue "missing_persona_profile"));
       ("missing_runtime_meta", `Int (count_issue "missing_runtime_meta"));
       ("runtime_meta_error", `Int (count_issue "runtime_meta_error"));
@@ -395,7 +405,9 @@ let handle ~(config : Workspace.config) args : tool_result =
             | _ -> true)
           audited_items
     in
-    let resolution = Config_dir_resolver.resolve () in
+    let resolution =
+      Config_dir_resolver.resolve_for_base_path ~base_path:config.base_path
+    in
     let roots =
       `Assoc
         [
@@ -406,7 +418,8 @@ let handle ~(config : Workspace.config) args : tool_result =
             `List
               (List.map
                  (fun path -> `String path)
-                 (Config_dir_resolver.personas_dirs ())) );
+                 (Config_dir_resolver.personas_dirs_for_base_path
+                    ~base_path:config.base_path)) );
         ]
     in
     let base_fields =

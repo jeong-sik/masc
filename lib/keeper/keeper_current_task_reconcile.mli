@@ -5,12 +5,34 @@ type owned_active_task = {
   task : Masc_domain.task;
 }
 
+type owned_active_tasks_snapshot =
+  { tasks : owned_active_task list
+  ; backlog_tasks : Masc_domain.task list
+  ; backlog_version : int
+  }
+
 (** Return every Claimed/InProgress backlog task owned by [meta]'s agent
     binding. *)
 val owned_active_tasks_for_meta :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   (owned_active_task list, string) result
+
+(** Shutdown transaction variant: agent-name resolution and backlog reads are
+    both strict. No fallback name is guessed when ownership identity cannot be
+    resolved. *)
+val owned_active_tasks_for_meta_strict :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  (owned_active_task list, string) result
+
+(** Strict ownership, task records, and the backlog CAS version captured by the
+    same read. The complete task snapshot lets lifecycle transactions reconcile
+    their own durable receipts without racing a second backlog read. *)
+val owned_active_tasks_snapshot_for_meta_strict :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  (owned_active_tasks_snapshot, string) result
 
 (** Find the deterministic active task a keeper should treat as current.
 

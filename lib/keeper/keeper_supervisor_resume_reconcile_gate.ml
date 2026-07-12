@@ -98,8 +98,23 @@ let resume_keeper_after_reconcile_gate
   | Some entry when Option.is_none (Eio.Promise.peek entry.done_p) ->
     (* tla-lint: allow-mutation: fiber signal — wake the keeper after operator resume *)
     Atomic.set entry.fiber_wakeup true
-  | Some _ ->
-    Keeper_registry.unregister ~base_path:ctx.config.base_path resumed_meta.name;
-    supervise_keepalive ~proactive_warmup_sec:0 ctx resumed_meta
+  | Some entry when not (Keeper_registry.lane_has_exited entry) ->
+    Log.Keeper.warn
+      "%s: resume deferred because the prior lane has a terminal result but has not joined"
+      resumed_meta.name
+  | Some entry ->
+    (match Keeper_registry.unregister_exact entry with
+     | Keeper_registry.Exact_unregistered
+     | Keeper_registry.Exact_entry_missing ->
+       supervise_keepalive ~proactive_warmup_sec:0 ctx resumed_meta
+     | Keeper_registry.Exact_entry_replaced ->
+       Log.Keeper.warn
+         "%s: resume retained a newer same-name lane"
+         resumed_meta.name
+     | Keeper_registry.Exact_unregister_lifecycle_reserved owner ->
+       Log.Keeper.info
+         "%s: resume deferred to lifecycle transaction owner: %s"
+         resumed_meta.name
+         (Keeper_lifecycle_reservation.snapshot_to_string owner))
   | None -> supervise_keepalive ~proactive_warmup_sec:0 ctx resumed_meta
 ;;

@@ -59,14 +59,6 @@ let record_event_queue_stimulus_turn_started ~ctx ~keeper_name stimulus =
     stimulus
 ;;
 
-let record_event_queue_stimulus_ack ~ctx ~keeper_name stimulus =
-  record_event_queue_stimulus_reaction
-    ~ctx
-    ~keeper_name
-    ~reaction_kind:Keeper_reaction_ledger.Event_queue_ack
-    stimulus
-;;
-
 let record_recovery_stimulus_turn_started ~ctx ~keeper_name stimulus =
   record_event_queue_stimulus_turn_started ~ctx ~keeper_name stimulus
 ;;
@@ -75,8 +67,14 @@ type heartbeat_event_intake = {
   pending_board_events : Keeper_world_observation.pending_board_event list;
   consumed_stimulus_count : int;
   consumed_stimuli : Keeper_event_queue.stimulus list;
+  claimed_lease : Keeper_registry_event_queue.lease option;
+  event_queue_claim_error : string option;
   event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
 }
+
+type single_claim_admission =
+  | Admit_ready_single
+  | Defer_failure_judgment
 
 let recorded_attention_item_by_event_id ~base_path ~keeper_name ~event_id =
   Keeper_external_attention.load_events ~base_path ~keeper_name
@@ -107,11 +105,12 @@ let event_queue_trigger_of_stimulus (stim : Keeper_event_queue.stimulus) =
        skip is already gone (the approval left the queue); this changes only
        how the resumed turn is described, not whether it runs. *)
     Some Keeper_world_observation.Hitl_resolved_stimulus
+  | Keeper_event_queue.Failure_judgment _ ->
+    Some Keeper_world_observation.Failure_judgment_stimulus
   | Keeper_event_queue.Board_signal _
   | Keeper_event_queue.Fusion_completed _
   | Keeper_event_queue.Bg_completed _
   | Keeper_event_queue.Goal_verification_failed _
-  | Keeper_event_queue.Failure_judgment _
   | Keeper_event_queue.Goal_assigned _
   | Keeper_event_queue.Goal_stagnation _ ->
     (* No dedicated turn_reason: like the other async-completion wakes, the
@@ -220,9 +219,11 @@ let consume_single_heartbeat_stimulus
        verdict. Promote it to a pending observation so the judgment turn does
        not wake empty — returning [] would silently drop the escalation. *)
     Log.Keeper.info
-      "turn entry: failure judgment delivered runtime=%s class=%s (keeper=%s)"
+      "turn entry: failure judgment delivered runtime=%s class=%s provenance=%s \
+       (keeper=%s)"
       fj.fj_runtime_id
       (Keeper_runtime_failure_route.judgment_class_label fj.fj_judgment)
+      (Keeper_runtime_failure_route.judgment_provenance_label fj.fj_provenance)
       meta_after_triage.name;
     pending_board_event_of_stimulus ~meta_after_triage stim |> Option.to_list
   | Keeper_event_queue.Bootstrap ->
@@ -340,29 +341,84 @@ let stimulus_ready_for_intake (stimulus : Keeper_event_queue.stimulus) =
     true
 ;;
 
-let heartbeat_event_intake ~ctx ~meta_after_triage ~pending_board_events =
+let heartbeat_event_intake
+      ~single_claim_admission
+      ~ctx
+      ~meta_after_triage
+      ~pending_board_events
+  =
   (* RFC-0020 §3 Rule 4 — drain at most one Event Layer stimulus per
      turn, where the board unit is the turn digest: every queued board
      signal is consumed as one batch ({!Keeper_event_queue.drain_board_all},
      RFC-0334 W2 — arrival-window batching is retired), and the non-board
      fallback below stays a single stimulus. *)
-  let board_batch =
-    Keeper_registry_event_queue.drain_board
-      ~base_path:ctx.config.base_path
-      meta_after_triage.name
+  let base_path = ctx.config.base_path in
+  let keeper_name = meta_after_triage.name in
+  let claim_new () =
+    match
+      Keeper_registry_event_queue.claim_board_result
+        ~base_path
+        keeper_name
+        ~claimed_at:(Time_compat.now ())
+    with
+    | Error _ as error -> error
+    | Ok (Some _ as lease) -> Ok lease
+    | Ok None ->
+      Keeper_registry_event_queue.claim_when_result
+        ~base_path
+        keeper_name
+        ~claimed_at:(Time_compat.now ())
+        ~ready:(fun stimulus ->
+          stimulus_ready_for_intake stimulus
+          &&
+          match single_claim_admission, stimulus.Keeper_event_queue.payload with
+          | Admit_ready_single, _ -> true
+          | Defer_failure_judgment, Keeper_event_queue.Failure_judgment _ -> false
+          | ( Defer_failure_judgment
+            , ( Keeper_event_queue.Board_signal _
+              | Keeper_event_queue.Fusion_completed _
+              | Keeper_event_queue.Bg_completed _
+              | Keeper_event_queue.Schedule_due _
+              | Keeper_event_queue.Bootstrap
+              | Keeper_event_queue.No_progress_recovery
+              | Keeper_event_queue.Connector_attention _
+              | Keeper_event_queue.Hitl_resolved _
+              | Keeper_event_queue.Goal_verification_failed _
+              | Keeper_event_queue.Goal_assigned _
+              | Keeper_event_queue.Goal_stagnation _ ) ) ->
+            true)
   in
-  let queued_observations, consumed_stimuli =
-    match board_batch with
-    | [] ->
-      (match
-         Keeper_registry_event_queue.dequeue_when
-           ~base_path:ctx.config.base_path
-           meta_after_triage.name
-           ~ready:stimulus_ready_for_intake
-       with
-       | None -> [], []
-       | Some stim -> consume_single_heartbeat_stimulus ~ctx ~meta_after_triage stim, [ stim ])
-    | batch -> consume_board_stimulus_batch ~meta_after_triage batch, batch
+  let claimed_lease =
+    match Keeper_registry_event_queue.active_lease_result ~base_path keeper_name with
+    | Error _ as error -> error
+    | Ok (Some _ as lease) -> Ok lease
+    | Ok None -> claim_new ()
+  in
+  let queued_observations, consumed_stimuli, claimed_lease, event_queue_claim_error =
+    match claimed_lease with
+    | Error message ->
+      Log.Keeper.error
+        "turn entry: event queue claim failed keeper=%s: %s"
+        keeper_name
+        message;
+      [], [], None, Some message
+    | Ok None -> [], [], None, None
+    | Ok (Some lease) ->
+      let stimuli = Keeper_registry_event_queue.lease_stimuli lease in
+      let observations =
+        match Keeper_registry_event_queue.lease_kind lease, stimuli with
+        | Keeper_event_queue_persistence.Board_batch, batch ->
+          consume_board_stimulus_batch ~meta_after_triage batch
+        | ( Keeper_event_queue_persistence.Single
+          | Keeper_event_queue_persistence.Legacy_inflight ), [ stimulus ] ->
+          consume_single_heartbeat_stimulus ~ctx ~meta_after_triage stimulus
+        | ( Keeper_event_queue_persistence.Single
+          | Keeper_event_queue_persistence.Legacy_inflight ), stimuli ->
+          List.concat_map
+            (consume_single_heartbeat_stimulus ~ctx ~meta_after_triage)
+            stimuli
+      in
+      observations, stimuli, Some lease, None
   in
   let consumed_stimulus_count = List.length consumed_stimuli in
   let event_queue_triggers = List.filter_map event_queue_trigger_of_stimulus consumed_stimuli in
@@ -386,5 +442,11 @@ let heartbeat_event_intake ~ctx ~meta_after_triage ~pending_board_events =
       pending_board_events
       (List.rev queued_observations)
   in
-  { pending_board_events; consumed_stimulus_count; consumed_stimuli; event_queue_triggers }
+  { pending_board_events
+  ; consumed_stimulus_count
+  ; consumed_stimuli
+  ; claimed_lease
+  ; event_queue_claim_error
+  ; event_queue_triggers
+  }
 ;;

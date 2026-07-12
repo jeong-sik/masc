@@ -30,6 +30,25 @@ type judgment_class =
   | Provider_integration
   | Internal_opaque
 
+type judgment_provenance =
+  | Oas_api_error
+  | Oas_provider_error
+  | Oas_agent_idle_detected of { consecutive_idle_turns : int }
+  | Oas_agent_error
+  | Oas_mcp_error
+  | Oas_config_error
+  | Oas_serialization_error
+  | Oas_io_error
+  | Oas_orchestration_error
+  | Oas_internal_error
+  | Masc_internal_error
+  | Completion_contract
+  | Legacy_unattributed
+
+type error_boundary =
+  | Masc_execution
+  | Oas_execution
+
 type route =
   | Retry_after_pacing of
       { pacing : pacing_class
@@ -38,6 +57,7 @@ type route =
   | Rotate_now of { rotate : rotate_class }
   | Escalate_judgment of
       { judgment : judgment_class
+      ; provenance : judgment_provenance
       ; detail : string
       }
 
@@ -58,8 +78,9 @@ let rotate rotate_class = Rotate_now { rotate = rotate_class }
 let judgment_detail err =
   Keeper_internal_error.cap_blocker_detail (Agent_sdk.Error.to_string err)
 
-let judge ~err judgment_class =
-  Escalate_judgment { judgment = judgment_class; detail = judgment_detail err }
+let judge ~err ~provenance judgment_class =
+  Escalate_judgment
+    { judgment = judgment_class; provenance; detail = judgment_detail err }
 
 let retry_after_of_capacity_hint = function
   | Keeper_internal_error.Explicit sec -> Some sec
@@ -67,6 +88,7 @@ let retry_after_of_capacity_hint = function
   | Keeper_internal_error.No_retry_hint -> None
 
 let route_of_masc_internal ~err (internal : Keeper_internal_error.masc_internal_error) =
+  let judge = judge ~err ~provenance:Masc_internal_error in
   match internal with
   | Keeper_internal_error.Resumable_cli_session _ -> rotate Resumable_cli_session
   | Keeper_internal_error.Admission_queue_timeout _ -> pacing Admission_backpressure
@@ -94,14 +116,15 @@ let route_of_masc_internal ~err (internal : Keeper_internal_error.masc_internal_
      | Some `Empty_no_progress -> rotate No_progress_empty
      | Some `Read_only_no_progress -> rotate No_progress_read_only
      | Some `Thinking_only_no_progress -> rotate No_progress_thinking_only
-     | None -> judge ~err Contract_violation)
-  | Keeper_internal_error.Internal_contract_rejected _ -> judge ~err Contract_violation
-  | Keeper_internal_error.Ambiguous_post_commit _ -> judge ~err Mutating_ambiguity
+     | None -> judge Contract_violation)
+  | Keeper_internal_error.Internal_contract_rejected _ -> judge Contract_violation
+  | Keeper_internal_error.Ambiguous_post_commit _ -> judge Mutating_ambiguity
   | Keeper_internal_error.Internal_unhandled_exception _
   | Keeper_internal_error.Internal_bridge_exception _ ->
-    judge ~err Internal_opaque
+    judge Internal_opaque
 
 let route_of_api_error ~err (api : Llm_provider.Retry.api_error) =
+  let judge = judge ~err ~provenance:Oas_api_error in
   match api with
   | Llm_provider.Retry.RateLimited { retry_after; _ } ->
     if Llm_provider.Retry.is_hard_quota api
@@ -114,15 +137,18 @@ let route_of_api_error ~err (api : Llm_provider.Retry.api_error) =
     then pacing Capacity_backpressure
     else if status >= 500
     then pacing Server_error
-    else judge ~err Provider_integration
-  | Llm_provider.Retry.AuthError _ -> rotate Auth_failed
+    else judge Provider_integration
+  | Llm_provider.Retry.AuthError _
+  | Llm_provider.Retry.AuthorizationError _ ->
+    rotate Auth_failed
   | Llm_provider.Retry.NotFound _ -> rotate Model_unavailable
   | Llm_provider.Retry.NetworkError _ -> pacing Network_transient
   | Llm_provider.Retry.Timeout _ -> pacing Provider_timeout
-  | Llm_provider.Retry.InvalidRequest _ -> judge ~err Deterministic_request
-  | Llm_provider.Retry.ContextOverflow _ -> judge ~err Context_overflow
+  | Llm_provider.Retry.InvalidRequest _ -> judge Deterministic_request
+  | Llm_provider.Retry.ContextOverflow _ -> judge Context_overflow
 
 let route_of_provider_error ~err (p : Llm_provider.Error.provider_error) =
+  let judge = judge ~err ~provenance:Oas_provider_error in
   match p with
   | Llm_provider.Error.RateLimit { retry_after; _ } -> pacing ?retry_after Rate_limited
   | Llm_provider.Error.HardQuota { retry_after; _ } -> pacing ?retry_after Hard_quota
@@ -134,40 +160,88 @@ let route_of_provider_error ~err (p : Llm_provider.Error.provider_error) =
     then pacing Capacity_backpressure
     else if transient || code >= 500
     then pacing Server_error
-    else judge ~err Provider_integration
+    else judge Provider_integration
   | Llm_provider.Error.NetworkError _ -> pacing Network_transient
   | Llm_provider.Error.Timeout _ -> pacing Provider_timeout
-  | Llm_provider.Error.AuthError _ -> rotate Auth_failed
+  | Llm_provider.Error.AuthError _
+  | Llm_provider.Error.AuthorizationError _ ->
+    rotate Auth_failed
   | Llm_provider.Error.NotFound _ -> rotate Model_unavailable
-  | Llm_provider.Error.MissingApiKey _ -> judge ~err Config_mismatch
-  | Llm_provider.Error.InvalidConfig _ -> judge ~err Config_mismatch
-  | Llm_provider.Error.InvalidRequest _ -> judge ~err Deterministic_request
+  | Llm_provider.Error.MissingApiKey _ -> judge Config_mismatch
+  | Llm_provider.Error.InvalidConfig _ -> judge Config_mismatch
+  | Llm_provider.Error.InvalidRequest _ -> judge Deterministic_request
   | Llm_provider.Error.ParseError _
   | Llm_provider.Error.UnknownVariant _
   | Llm_provider.Error.ProviderTerminal _ ->
-    judge ~err Provider_integration
+    judge Provider_integration
 
-let route_of_error (err : Agent_sdk.Error.sdk_error) : route =
-  match Keeper_internal_error.classify_masc_internal_error err with
-  | Some internal -> route_of_masc_internal ~err internal
-  | None ->
-    (match err with
-     | Agent_sdk.Error.Api api -> route_of_api_error ~err api
-     | Agent_sdk.Error.Provider p -> route_of_provider_error ~err p
-     | Agent_sdk.Error.Mcp _ -> judge ~err Protocol_error
-     | Agent_sdk.Error.Config _ -> judge ~err Config_mismatch
-     | Agent_sdk.Error.Agent (Agent_sdk.Error.IdleDetected _) ->
-       (* RFC-0313 W3: an idle loop (repeated no-usable-progress turns) was
-          a manual-resume pause class on the legacy ladder; under existence
-          invariance it escalates as a behavioral contract judgment, not as
-          an opaque internal error. *)
-       judge ~err Contract_violation
-     | Agent_sdk.Error.Agent _
-     | Agent_sdk.Error.Serialization _
-     | Agent_sdk.Error.Io _
-     | Agent_sdk.Error.Orchestration _
-     | Agent_sdk.Error.Internal _ ->
-       judge ~err Internal_opaque)
+let provenance_for_boundary boundary oas_provenance =
+  match boundary with
+  | Oas_execution -> oas_provenance
+  | Masc_execution -> Masc_internal_error
+;;
+
+let route_of_error_family ~boundary (err : Agent_sdk.Error.sdk_error) : route =
+  match err with
+  | Agent_sdk.Error.Api api -> route_of_api_error ~err api
+  | Agent_sdk.Error.Provider p -> route_of_provider_error ~err p
+  | Agent_sdk.Error.Mcp _ ->
+    judge
+      ~err
+      ~provenance:(provenance_for_boundary boundary Oas_mcp_error)
+      Protocol_error
+  | Agent_sdk.Error.Config _ ->
+    judge
+      ~err
+      ~provenance:(provenance_for_boundary boundary Oas_config_error)
+      Config_mismatch
+  | Agent_sdk.Error.Agent
+      (Agent_sdk.Error.IdleDetected { consecutive_idle_turns }) ->
+    (* RFC-0313 W3: an idle loop (repeated no-usable-progress turns) was
+       a manual-resume pause class on the legacy ladder; under existence
+       invariance it escalates as a behavioral contract judgment, not as
+       an opaque internal error. *)
+    judge
+      ~err
+      ~provenance:
+        (provenance_for_boundary
+           boundary
+           (Oas_agent_idle_detected { consecutive_idle_turns }))
+      Contract_violation
+  | Agent_sdk.Error.Agent _ ->
+    judge
+      ~err
+      ~provenance:(provenance_for_boundary boundary Oas_agent_error)
+      Internal_opaque
+  | Agent_sdk.Error.Serialization _ ->
+    judge
+      ~err
+      ~provenance:(provenance_for_boundary boundary Oas_serialization_error)
+      Internal_opaque
+  | Agent_sdk.Error.Io _ ->
+    judge
+      ~err
+      ~provenance:(provenance_for_boundary boundary Oas_io_error)
+      Internal_opaque
+  | Agent_sdk.Error.Orchestration _ ->
+    judge
+      ~err
+      ~provenance:(provenance_for_boundary boundary Oas_orchestration_error)
+      Internal_opaque
+  | Agent_sdk.Error.Internal _ ->
+    judge
+      ~err
+      ~provenance:(provenance_for_boundary boundary Oas_internal_error)
+      Internal_opaque
+;;
+
+let route_of_error ~boundary (err : Agent_sdk.Error.sdk_error) : route =
+  match boundary with
+  | Oas_execution -> route_of_error_family ~boundary err
+  | Masc_execution ->
+    (match Keeper_internal_error.classify_masc_internal_error err with
+     | Some internal -> route_of_masc_internal ~err internal
+     | None -> route_of_error_family ~boundary err)
 
 let retry_after_of_route = function
   | Retry_after_pacing { retry_after; _ } -> retry_after
@@ -208,6 +282,142 @@ let judgment_class_label = function
   | Config_mismatch -> "config_mismatch"
   | Provider_integration -> "provider_integration"
   | Internal_opaque -> "internal_opaque"
+
+let judgment_provenance_label = function
+  | Oas_api_error -> "oas_api_error"
+  | Oas_provider_error -> "oas_provider_error"
+  | Oas_agent_idle_detected _ -> "oas_agent_idle_detected"
+  | Oas_agent_error -> "oas_agent_error"
+  | Oas_mcp_error -> "oas_mcp_error"
+  | Oas_config_error -> "oas_config_error"
+  | Oas_serialization_error -> "oas_serialization_error"
+  | Oas_io_error -> "oas_io_error"
+  | Oas_orchestration_error -> "oas_orchestration_error"
+  | Oas_internal_error -> "oas_internal_error"
+  | Masc_internal_error -> "masc_internal_error"
+  | Completion_contract -> "completion_contract"
+  | Legacy_unattributed -> "legacy_unattributed"
+
+type judgment_provenance_boundary =
+  | Boundary_oas_api
+  | Boundary_oas_provider
+  | Boundary_oas_agent_idle
+  | Boundary_oas_agent
+  | Boundary_oas_mcp
+  | Boundary_oas_config
+  | Boundary_oas_serialization
+  | Boundary_oas_io
+  | Boundary_oas_orchestration
+  | Boundary_oas_internal
+  | Boundary_masc_internal
+  | Boundary_completion_contract
+  | Boundary_legacy_unattributed
+
+let judgment_provenance_boundary = function
+  | Oas_api_error -> Boundary_oas_api
+  | Oas_provider_error -> Boundary_oas_provider
+  | Oas_agent_idle_detected _ -> Boundary_oas_agent_idle
+  | Oas_agent_error -> Boundary_oas_agent
+  | Oas_mcp_error -> Boundary_oas_mcp
+  | Oas_config_error -> Boundary_oas_config
+  | Oas_serialization_error -> Boundary_oas_serialization
+  | Oas_io_error -> Boundary_oas_io
+  | Oas_orchestration_error -> Boundary_oas_orchestration
+  | Oas_internal_error -> Boundary_oas_internal
+  | Masc_internal_error -> Boundary_masc_internal
+  | Completion_contract -> Boundary_completion_contract
+  | Legacy_unattributed -> Boundary_legacy_unattributed
+;;
+
+let judgment_provenance_same_boundary left right =
+  judgment_provenance_boundary left = judgment_provenance_boundary right
+;;
+
+let judgment_provenance_to_yojson provenance =
+  let kind = "kind", `String (judgment_provenance_label provenance) in
+  match provenance with
+  | Oas_agent_idle_detected { consecutive_idle_turns } ->
+    `Assoc [ kind; "consecutive_idle_turns", `Int consecutive_idle_turns ]
+  | Oas_api_error
+  | Oas_provider_error
+  | Oas_agent_error
+  | Oas_mcp_error
+  | Oas_config_error
+  | Oas_serialization_error
+  | Oas_io_error
+  | Oas_orchestration_error
+  | Oas_internal_error
+  | Masc_internal_error
+  | Completion_contract
+  | Legacy_unattributed ->
+    `Assoc [ kind ]
+
+let require_exact_provenance_fields expected fields =
+  let actual = List.map fst fields |> List.sort String.compare in
+  let expected = List.sort String.compare expected in
+  if actual = expected
+  then Ok ()
+  else
+    Error
+      (Printf.sprintf
+         "failure judgment provenance fields must be exactly [%s], got [%s]"
+         (String.concat "," expected)
+         (String.concat "," actual))
+;;
+
+let provenance_without_payload fields provenance =
+  match require_exact_provenance_fields [ "kind" ] fields with
+  | Ok () -> Ok provenance
+  | Error _ as error -> error
+;;
+
+let judgment_provenance_of_yojson = function
+  | `Assoc fields ->
+    (match List.assoc_opt "kind" fields with
+     | Some (`String "oas_api_error") ->
+       provenance_without_payload fields Oas_api_error
+     | Some (`String "oas_provider_error") ->
+       provenance_without_payload fields Oas_provider_error
+     | Some (`String "oas_agent_idle_detected") ->
+       (match
+          require_exact_provenance_fields
+            [ "kind"; "consecutive_idle_turns" ]
+            fields
+        with
+        | Error _ as error -> error
+        | Ok () ->
+          (match List.assoc_opt "consecutive_idle_turns" fields with
+           | Some (`Int value) when value > 0 ->
+             Ok (Oas_agent_idle_detected { consecutive_idle_turns = value })
+           | Some (`Int _) ->
+             Error "failure judgment idle provenance count must be positive"
+           | Some _ | None ->
+             Error "failure judgment idle provenance requires an integer count"))
+     | Some (`String "oas_agent_error") ->
+       provenance_without_payload fields Oas_agent_error
+     | Some (`String "oas_mcp_error") ->
+       provenance_without_payload fields Oas_mcp_error
+     | Some (`String "oas_config_error") ->
+       provenance_without_payload fields Oas_config_error
+     | Some (`String "oas_serialization_error") ->
+       provenance_without_payload fields Oas_serialization_error
+     | Some (`String "oas_io_error") ->
+       provenance_without_payload fields Oas_io_error
+     | Some (`String "oas_orchestration_error") ->
+       provenance_without_payload fields Oas_orchestration_error
+     | Some (`String "oas_internal_error") ->
+       provenance_without_payload fields Oas_internal_error
+     | Some (`String "masc_internal_error") ->
+       provenance_without_payload fields Masc_internal_error
+     | Some (`String "completion_contract") ->
+       provenance_without_payload fields Completion_contract
+     | Some (`String "legacy_unattributed") ->
+       provenance_without_payload fields Legacy_unattributed
+     | Some (`String kind) ->
+       Error (Printf.sprintf "unknown failure judgment provenance: %s" kind)
+     | Some _ | None ->
+       Error "failure judgment provenance.kind must be a string")
+  | _ -> Error "failure judgment provenance must be an object"
 
 let route_class_label = function
   | Retry_after_pacing { pacing; _ } -> pacing_class_label pacing

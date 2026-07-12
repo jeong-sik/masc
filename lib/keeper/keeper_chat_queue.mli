@@ -1,37 +1,26 @@
-(** Keeper_chat_queue — thread-safe per-keeper message queue.
+(** Durable per-Keeper chat receipt queue.
 
-    Each keeper owns an in-memory FIFO queue for chat messages that
-    arrive while the keeper is already processing a previous message.
-    When a stream finishes, the queue is drained automatically.
+    Every accepted message receives a stable receipt before the first durable
+    write.  The receipt then follows exactly one closed lifecycle:
+    [Pending -> Inflight -> Delivered | Failed].  A process restart moves an
+    unfinalized [Inflight] receipt back to [Pending] without changing its id.
 
-    Once [configure_persistence] is called from server bootstrap, queue
-    mutations are mirrored to a per-keeper durable snapshot and replayed on
-    restart. Snapshot rewrite failure aborts the mutation before it is
-    acknowledged, keeping in-memory state and durable replay aligned.
-
-    Delivery is at-least-once, not at-most-once: {!lease_batch} moves a
-    same-source run out of the live queue into a durably-persisted inflight
-    slot instead of deleting it outright. The caller must call {!ack} once a
-    reply (or failure marker) has actually been persisted for the batch, or
-    {!nack} to return the batch to the head of the queue for retry. A lease
-    that is never acked or nacked (process crash, unhandled cancellation)
-    survives in the durable snapshot and is requeued the next time
-    {!configure_persistence} runs — see its doc comment.
-
-    Queue drain is handled by [Keeper_chat_consumer], started from
-    server bootstrap.  The [source] field preserves connector context
-    so queued dashboard, Discord, and Slack messages can be projected
-    into the same keeper-chat execution path without losing reply
-    routing metadata.
+    Queue delivery is at-least-once.  Same-source receipts may share one turn,
+    but their identities are never merged: a lease and its terminal transition
+    always carry every constituent receipt.
 
     @since 2.145.0 *)
-
-(** {1 Types} *)
 
 type message_source =
   | Dashboard
   | Discord of { channel_id : string; user_id : string }
-  | Slack of { channel : string; user_id : string }
+  | Slack of {
+      channel_id : string;
+      user_id : string;
+      user_name : string;
+      team_id : string option;
+      thread_ts : string option;
+    }
 
 type queued_message = {
   content : string;
@@ -41,152 +30,188 @@ type queued_message = {
   source : message_source;
 }
 
-(** A same-source run leased out of the live queue by {!lease_batch}.
-    [lease_id] identifies this specific lease for {!ack}/{!nack}; it is
-    unrelated to the per-message [receipt_id] {!enqueue} returns. *)
-type lease = {
-  lease_id : string;
-  messages : queued_message list;
+module Receipt_id = Keeper_chat_delivery_identity.Receipt_id
+
+type completion = {
+  completed_at : float;
+  outcome_ref : string option;
 }
 
-exception Persistence_failed of string
-(** Raised when an enqueue mutation cannot be acknowledged as durable. *)
+type failure_kind =
+  | Turn_failed
+  | Timed_out
+  | No_visible_reply
+  | Transcript_persist_failed
+  | Connector_unavailable
+  | Delivery_failed
+  | Cancelled
+  | Internal_error
+  | Recovery_interrupted
 
-(** [continuation_channel_of_message_source source] converts queued chat
-    provenance into the RFC-0320 continuation-channel type. Dashboard queue
-    sources may supply [dashboard_thread_id] from the local AG-UI thread; when
-    omitted the dashboard surface is preserved as a single route. *)
+val failure_kind_to_string : failure_kind -> string
+
+type failure = {
+  completed_at : float;
+  kind : failure_kind;
+  detail : string;
+  outcome_ref : string option;
+}
+
+type receipt_state =
+  | Pending
+  | Inflight of { lease_id : string; started_at : float }
+  | Delivered of completion
+  | Failed of failure
+
+type leased_message = {
+  receipt_id : Receipt_id.t;
+  message : queued_message;
+}
+
+type lease = {
+  lease_id : string;
+  items : leased_message list;
+}
+
+type finalization =
+  | Mark_delivered of completion
+  | Mark_failed of failure
+
+type snapshot_load_error_kind =
+  | Invalid_path
+  | Read_failed
+  | Parse_failed
+  | Migration_failed
+  | Recovery_failed
+
+type snapshot_load_error = {
+  kind : snapshot_load_error_kind;
+  path : string option;
+  message : string;
+}
+
+type mutation_error =
+  | Persistence_not_configured
+  | Snapshot_unavailable of snapshot_load_error
+  | Invalid_input of string
+  | Revision_exhausted
+  | Persist_failed of string
+
+val snapshot_load_error_kind_to_string : snapshot_load_error_kind -> string
+val mutation_error_to_string : mutation_error -> string
+
+type active_receipt = {
+  receipt_id : Receipt_id.t;
+  message : queued_message;
+  state : receipt_state;
+}
+
+type receipt_view = {
+  receipt_id : Receipt_id.t;
+  state : receipt_state;
+}
+
+type receipt_lookup = {
+  revision : int64;
+  receipt : receipt_view option;
+}
+
+type diagnostic_snapshot = {
+  revision : int64;
+  pending : active_receipt list;
+  inflight : active_receipt list;
+  terminal : receipt_view list;
+  load_errors : snapshot_load_error list;
+}
+
+type enqueue_receipt = {
+  receipt_id : Receipt_id.t;
+  revision : int64;
+  pending_count : int;
+  inflight_count : int;
+}
+
+type configure_report = {
+  restored_keeper_count : int;
+  migrated_keeper_count : int;
+  recovered_receipt_count : int;
+  load_errors : (string option * snapshot_load_error) list;
+}
+
+type transition_observer = keeper_name:string -> revision:int64 -> unit
+
+(** Install the single post-commit invalidation observer.  It is invoked after
+    every successful queue mutation and always outside queue mutexes.  Observer
+    failures are logged and never roll back or disguise a committed mutation. *)
+val set_transition_observer : transition_observer option -> unit
+
 val continuation_channel_of_message_source :
   ?dashboard_thread_id:string -> message_source -> Keeper_continuation_channel.t
 
-(** {1 Queue operations} *)
+(** Enable persistence and restore every per-Keeper snapshot.  Version-1 files
+    are decoded only by the explicit one-time migration, atomically rewritten
+    as strict version 2, and never treated as a version-2 fallback.  A malformed
+    snapshot is retained, registered as unavailable, and reported here; it is
+    never replaced by an empty queue. Reconfiguration clears the prior
+    in-memory registry before loading the new BasePath ownership boundary. *)
+val configure_persistence : base_path:string -> configure_report
 
-(** [configure_persistence base_path] enables durable per-keeper queue
-    snapshots under the runtime keeper directory and loads any non-empty
-    snapshots into memory for queue-consumer replay.
-
-    A snapshot recorded while a lease was outstanding (the process crashed or
-    was killed between {!lease_batch} and the matching {!ack}/{!nack}) has its
-    leased messages requeued ahead of the still-queued messages, and the
-    stale lease is dropped: nothing survives as "leased" across a restart,
-    so a booted process always starts with every keeper's inflight slot free.
-    This is the at-least-once guarantee — a message answered but not yet
-    acked when the process died is redelivered and may be answered twice. *)
-val configure_persistence : base_path:string -> unit
-
-(** [persistence_configured ()] reports whether durable snapshots are enabled
-    in this process. *)
 val persistence_configured : unit -> bool
 
-(** [enqueue keeper_name msg] adds [msg] to the tail of [keeper_name]'s
-    queue.  Creates the queue lazily if it does not yet exist. Returns a
-    freshly minted [receipt_id] correlation token for this specific message
-    (not persisted, not required to be unique across process restarts) so a
-    caller such as the dashboard busy-ack can echo it back to the sender.
-    Raises [Persistence_failed] instead of returning a receipt when the
-    snapshot cannot be confirmed durable. *)
-val enqueue : keeper_name:string -> queued_message -> string
+(** Enqueue only after the receipt-bearing version-2 snapshot commits. *)
+val enqueue :
+  keeper_name:string -> queued_message -> (enqueue_receipt, mutation_error) result
 
-(** [dequeue keeper_name] removes and returns the head message, or
-    [None] if the queue is empty or does not exist. Unlike {!lease_batch}
-    this is an immediate, unleased pop — it does not participate in the
-    ack/nack lifecycle. *)
-val dequeue : keeper_name:string -> queued_message option
-
-(** [same_source a b] is true when two messages share a reply route:
-    the dashboard surface, the same Discord channel+user, or the same
-    Slack channel+user. Coalescing across different routes would lose
-    reply routing. *)
 val same_source : message_source -> message_source -> bool
 
-(** [lease_batch keeper_name] leases the head run of messages sharing the
-    same source ([same_source]) out of the live queue, preserving FIFO
-    order, and durably records the lease so a crash before {!ack}/{!nack}
-    redelivers it (see {!configure_persistence}). Stops at the first message
-    with a different source so each coalesced turn answers one reply route.
-
-    - [Leased lease] — the run was leased; the caller must eventually call
-      {!ack} or {!nack} with [lease.lease_id].
-    - [Empty] — the queue is empty or absent.
-    - [Already_leased lease_id] — a previous lease for this keeper is
-      still outstanding (the caller has not yet acked/nacked it); the queue
-      is unchanged. At most one lease is outstanding per keeper at a time.
-    - [Persist_failed msg] — the snapshot rewrite failed; the queue is
-      unchanged (rolled back before this is returned). *)
 val lease_batch :
   keeper_name:string ->
   [ `Leased of lease
   | `Empty
   | `Already_leased of string
-  | `Persist_failed of string
+  | `Error of mutation_error
   ]
 
-(** [ack keeper_name lease_id] permanently removes a leased batch after its
-    reply (or failure marker) has been durably persisted by the caller.
-    [`Unknown_lease] when [lease_id] does not match the keeper's current
-    outstanding lease (already acked/nacked, or never leased). *)
-val ack :
+(** Atomically finalize every receipt in the matching lease.  Terminal records
+    retain correlation metadata but discard message bodies and attachments. *)
+val finalize :
   keeper_name:string ->
   lease_id:string ->
-  [ `Acked | `Unknown_lease | `Persist_failed of string ]
+  outcome:finalization ->
+  [ `Finalized of Receipt_id.t list
+  | `Unknown_lease
+  | `Error of mutation_error
+  ]
 
-(** [nack keeper_name lease_id] returns a leased batch to the head of the
-    queue, ahead of any messages that arrived while the lease was
-    outstanding, so it is retried on the next {!lease_batch}. [`Unknown_lease]
-    when [lease_id] does not match the keeper's current outstanding lease. *)
+(** Return every receipt in the matching lease to [Pending], preserving ids and
+    FIFO order. *)
 val nack :
   keeper_name:string ->
   lease_id:string ->
-  [ `Requeued | `Unknown_lease | `Persist_failed of string ]
+  [ `Requeued of Receipt_id.t list
+  | `Unknown_lease
+  | `Error of mutation_error
+  ]
 
-(** [merge_batch batch] coalesces a same-source batch into one message:
-    contents joined in arrival order with a blank line, semantic user blocks
-    and attachments concatenated, the first message's timestamp (queueing
-    latency stays measurable), the shared source. [None] on [[]]; a singleton
-    is returned unchanged. *)
-val merge_batch : queued_message list -> queued_message option
+(** Coalesce a leased same-source run into one turn payload without erasing the
+    receipt list carried by the lease. *)
+val merge_batch : leased_message list -> queued_message option
 
-(** [remove_matching keeper_name msg] removes exactly one message structurally
-    equal to [msg] from the head run of [keeper_name]'s still-queued messages
-    — the leading same-source messages {!lease_batch} would coalesce into one
-    turn. A message already moved into the inflight lease by {!lease_batch}
-    is out of scope: it is being answered, not merely queued, so it is not a
-    candidate for removal here. Duplicates in the head run leave all but the
-    first match in place, and a match past the head-run boundary is not
-    removed. Returns [`Not_found] when the queue is empty or absent, or when
-    no head-run message matches. On a match the durable snapshot is rewritten
-    before the removal is reported [`Removed]; a snapshot rewrite failure
-    aborts the removal (queue unchanged) and returns [`Persist_failed msg],
-    mirroring the persist-abort contract of {!lease_batch}. Serialized on the
-    same per-keeper mutex as {!lease_batch}, so a still-queued message is
-    answered by at most one of them. *)
-val remove_matching :
+val pending_count : keeper_name:string -> (int, mutation_error) result
+val inflight_count : keeper_name:string -> (int, mutation_error) result
+val has_active_receipts : keeper_name:string -> (bool, mutation_error) result
+val snapshot : keeper_name:string -> diagnostic_snapshot
+
+val lookup_receipt :
   keeper_name:string ->
-  queued_message ->
-  [ `Removed | `Not_found | `Persist_failed of string ]
+  receipt_id:Receipt_id.t ->
+  (receipt_lookup, mutation_error) result
+(** Atomically return the receipt observation with the queue revision that
+    produced it. *)
 
-(** [length keeper_name] returns the number of still-queued messages — it
-    excludes a message currently held by an outstanding lease, which is
-    being answered rather than waiting. *)
-val length : keeper_name:string -> int
-
-(** [snapshot keeper_name] returns the still-queued messages in FIFO order
-    without mutating the queue (excludes an outstanding lease's messages, see
-    {!length}). Intended for diagnostic projections that need source
-    metadata; consumers must still use {!lease_batch} for delivery. *)
-val snapshot : keeper_name:string -> queued_message list
-
-(** [clear keeper_name] empties the still-queued messages. Does not affect an
-    outstanding lease — {!ack} or {!nack} it explicitly. *)
-val clear : keeper_name:string -> unit
-
-(** [all_keeper_names ()] returns a snapshot list of all keeper names
-    that currently have a queue in the registry. *)
 val all_keeper_names : unit -> string list
 
 module For_testing : sig
   val reset : unit -> unit
   val fail_next_persist : unit -> unit
-  val force_next_sync_debt : unit -> unit
-  val fail_next_durability_confirmation : unit -> unit
 end

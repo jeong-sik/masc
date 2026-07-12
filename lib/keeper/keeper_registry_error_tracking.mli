@@ -6,6 +6,8 @@
 
 open Keeper_registry_types
 
+val record_crash_entry : registry_entry -> float -> string -> registry_entry
+
 val mark_dead :
   base_path:string ->
   string ->

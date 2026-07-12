@@ -192,6 +192,7 @@ type blocker_class =
   | Sdk_tripwire_violation
   | Sdk_exit_condition_met
   | Sdk_input_required
+  | Sdk_tool_failure_recovery_failed
 
 let blocker_class_to_string = function
   | Runtime_exhausted _ -> "runtime_exhausted"
@@ -217,6 +218,7 @@ let blocker_class_to_string = function
   | Sdk_tripwire_violation -> "sdk_tripwire_violation"
   | Sdk_exit_condition_met -> "sdk_exit_condition_met"
   | Sdk_input_required -> "sdk_input_required"
+  | Sdk_tool_failure_recovery_failed -> "sdk_tool_failure_recovery_failed"
 ;;
 
 let blocker_class_of_serialized_string = function
@@ -243,6 +245,7 @@ let blocker_class_of_serialized_string = function
   | "sdk_tripwire_violation" -> Some Sdk_tripwire_violation
   | "sdk_exit_condition_met" -> Some Sdk_exit_condition_met
   | "sdk_input_required" -> Some Sdk_input_required
+  | "sdk_tool_failure_recovery_failed" -> Some Sdk_tool_failure_recovery_failed
   | _ -> None
 ;;
 
@@ -289,7 +292,8 @@ let blocker_class_continue_gate = function
   | Sdk_guardrail_violation
   | Sdk_tripwire_violation
   | Sdk_exit_condition_met
-  | Sdk_input_required -> false
+  | Sdk_input_required
+  | Sdk_tool_failure_recovery_failed -> false
 ;;
 
 (** [blocker_class_auto_approval_blocked b] is [true] iff the presence of
@@ -317,7 +321,8 @@ let blocker_class_auto_approval_blocked = function
   | Oas_agent_execution_timeout
   | Sdk_guardrail_violation
   | Sdk_tripwire_violation
-  | Sdk_exit_condition_met -> true
+  | Sdk_exit_condition_met
+  | Sdk_tool_failure_recovery_failed -> true
   | Capacity_backpressure
   | Admission_queue_wait_timeout
   | Turn_timeout_after_queue_wait
@@ -637,9 +642,9 @@ type keeper_meta =
     (** Typed companion to [paused]: {i why} this keeper is latched.
         Producers set it alongside [paused = true] (bool-only pause sites
         record their [Keeper_latched_reason.t]); consumers surface it via
-        the status bridge. Display/observability only — the control
-        decision is still carried by [paused]. [None] means paused was
-        set by a site that has not yet been wired to a reason. *)
+        the status bridge. [paused] remains the pause authority, while
+        [Dead_tombstone] refines it into a terminal lifecycle state. [None]
+        while paused is a fail-closed unclassified pause. *)
   ; auto_resume_after_sec : float option
     (** Self-healing circuit breaker: when [Some sec] the supervisor will
         auto-resume this keeper after [sec] seconds following the last
@@ -674,15 +679,6 @@ let apply_profile_default_opt opt current =
   match opt with
   | Some _ -> opt
   | None -> current
-;;
-
-let invalid_profile_defaults_error ~keeper_name detail =
-  if String_util.contains_substring detail "runtime_id" then
-    Printf.sprintf
-      "invalid profile.runtime_id for keeper %s: unknown runtime_id: %s"
-      keeper_name detail
-  else
-    Printf.sprintf "invalid keeper profile for keeper %s: %s" keeper_name detail
 ;;
 
 let missing_required_sandbox_profile_error ~keeper_name
@@ -782,10 +778,18 @@ let effective_meta_of_profile_defaults
         }
 ;;
 
-let effective_meta_result (meta : keeper_meta) : (keeper_meta, string) result =
-  match Keeper_types_profile.load_keeper_profile_defaults_result meta.name with
-  | Error detail ->
-      Error (invalid_profile_defaults_error ~keeper_name:meta.name detail)
+let effective_meta_result ~base_path (meta : keeper_meta) : (keeper_meta, string) result =
+  match
+    Keeper_types_profile.load_keeper_profile_defaults_result_for_base_path
+      ~base_path
+      meta.name
+  with
+  | Error error ->
+      Error
+        (Printf.sprintf
+           "invalid keeper profile for keeper %s: %s"
+           meta.name
+           (Keeper_types_profile.keeper_toml_load_error_to_string error))
   | Ok defaults -> effective_meta_of_profile_defaults defaults meta
 ;;
 

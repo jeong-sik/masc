@@ -67,38 +67,46 @@ val configured_http_host : unit -> string
     var, supporting tests that override mid-process. *)
 
 val advertised_host_port :
-  Httpun.Request.t -> string * int
-(** [advertised_host_port request] returns the
+  request_authority:Server_request_authority.authority -> string * int
+(** [advertised_host_port ~request_authority] returns the
     [(canonical_host, port)] pair the server should advertise
-    in JSON projections.  Reads the [Host:] header (if present)
-    via {!parse_host_port}, then routes the host through
-    {!Transport_read_model.normalize_advertised_host} (loopback
-    aliases collapse to the configured default).  Falls back to
-    [(configured_http_host (), configured_http_port ())] when
-    the header is absent. *)
+    in JSON projections.  The authority was validated at request entry;
+    this function never reads wire headers. *)
 
-val advertised_base_url : Httpun.Request.t -> string
-(** [advertised_base_url request] returns the browser-visible HTTP(S) base URL.
-    It derives the authority from [Host:] and the scheme from
-    [X-Forwarded-Proto] / [Forwarded: proto=...] when present, falling back to
-    local [http]. *)
+val advertised_base_url :
+  request_authority:Server_request_authority.authority ->
+  Httpun.Request.t ->
+  string
+(** [advertised_base_url ~request_authority request] returns the
+    browser-visible HTTP(S) base URL.  Both scheme and authority come from the
+    typed trusted request-entry value; untrusted forwarded headers are not
+    scheme inputs. *)
 
 (** {1 Discovery / status JSON} *)
 
-val websocket_discovery_json : Httpun.Request.t -> Yojson.Safe.t
-(** [websocket_discovery_json request] returns the WebSocket
+val websocket_discovery_json :
+  request_authority:Server_request_authority.authority ->
+  Httpun.Request.t ->
+  Yojson.Safe.t
+(** [websocket_discovery_json ~request_authority request] returns the WebSocket
     discovery payload using {!advertised_host_port}.  Always
     sets [include_configured = true] so dashboards see the
-    enabled / runtime-listening pair.  Used by [GET /ws.json]
+    enabled / runtime-listening pair.  Used by [GET /ws]
     on both HTTP/1.1 and HTTP/2 listeners. *)
 
-val transport_json : Httpun.Request.t -> Yojson.Safe.t
-(** [transport_json request] returns the full transport status
+val transport_json :
+  request_authority:Server_request_authority.authority ->
+  Httpun.Request.t ->
+  Yojson.Safe.t
+(** [transport_json ~request_authority request] returns the full transport status
     JSON (HTTP + WS + protocol set).  Sub-projection used by
     {!make_health_json}'s [transport] field. *)
 
-val agent_card_json : Httpun.Request.t -> Yojson.Safe.t
-(** [agent_card_json request] returns the public well-known MASC server
+val agent_card_json :
+  request_authority:Server_request_authority.authority ->
+  Httpun.Request.t ->
+  Yojson.Safe.t
+(** [agent_card_json ~request_authority request] returns the public well-known MASC server
     card served from [/.well-known/agent.json].  This route is public
     discovery metadata; mutable operations still require normal tool auth. *)
 
@@ -115,8 +123,12 @@ val health_path_diagnostics :
     default base path computed from env. *)
 
 val make_health_json :
-  ?listener:string -> ?section_timings_ref:(string * int) list ref -> Httpun.Request.t -> Yojson.Safe.t
-(** [make_health_json ?listener request] builds the full health diagnostics
+  ?listener:string ->
+  ?section_timings_ref:(string * int) list ref ->
+  request_authority:Server_request_authority.authority ->
+  Httpun.Request.t ->
+  Yojson.Safe.t
+(** [make_health_json ?listener ~request_authority request] builds the full health diagnostics
     JSON body.  [listener] defaults to ["http/1.1"] and is overridden to
     ["h2"] by the H2 gateway.  This is the force-compute diagnostic builder
     used by tests and snapshot refreshes.  The public [/health] route uses
@@ -133,7 +145,7 @@ val make_health_json :
     [operator_action_reasons] /
     [keeper_fibers] / [keeper_fd_pressure] / [fd_accountant] /
     [keeper_fleet_safety] / [keeper_reaction_ledger] / [paused_keepers] /
-    [keeper_config_parse_error_count] / [keeper_config_parse_errors] /
+    [keeper_config_error_count] / [keeper_config_errors] /
     [keeper_config_unknown_key_count] / [keeper_config_unknown_keys] /
     [keeper_config_schema_status] / [keeper_config_schema_blocking] /
     [keeper_config_schema_terminal_reason] /
@@ -182,10 +194,12 @@ val make_health_json :
     [running_keeper_fiber_count] / [healthy_running_keeper_fiber_count] from
     [failing_keeper_fiber_count] and [executable_keeper_fiber_count] because
     the FSM intentionally allows [Failing] keepers to finish or attempt turns.
-    It reports [blocked] when autoboot-enabled keepers exist but no executable
+    [effective_reaction_capacity_count] is the sum of healthy [Running] lanes
+    and unpaused, executable [Failing] lanes whose restart budget remains. It
+    reports [blocked] when autoboot-enabled keepers exist but no executable
     fiber remains, and [degraded] when executable fibers remain but healthy
-    running capacity is zero, below the safety margin, or below
-    [target_reaction_capacity_count].
+    running capacity is zero or below the safety margin, or effective reaction
+    capacity is below [target_reaction_capacity_count].
     [paused_autoboot_enabled_keeper_count] keeps operator-paused autoboot
     keepers visible without counting them as reaction-capacity targets.
 
@@ -205,16 +219,22 @@ val make_health_json :
     must touch this. *)
 
 val make_health_probe_json :
-  ?listener:string -> Httpun.Request.t -> Yojson.Safe.t
-(** [make_health_probe_json ?listener request] builds the cheap default
+  ?listener:string ->
+  request_authority:Server_request_authority.authority ->
+  Httpun.Request.t ->
+  Yojson.Safe.t
+(** [make_health_probe_json ?listener ~request_authority request] builds the cheap default
     [/health] probe body.  It keeps liveness/readiness-facing fields such as
     [startup], [paths], [transport], [logs], and quick GC counters, but skips
     durable keeper scans, reaction-ledger JSONL reads, config TOML scans, and
     contract-verdict ledger inspection. *)
 
 val make_health_response_json :
-  ?listener:string -> Httpun.Request.t -> Yojson.Safe.t
-(** [make_health_response_json ?listener request] is the public [/health]
+  ?listener:string ->
+  request_authority:Server_request_authority.authority ->
+  Httpun.Request.t ->
+  Yojson.Safe.t
+(** [make_health_response_json ?listener ~request_authority request] is the public [/health]
     renderer.  It returns {!make_health_probe_json} by default.  When the
     request query contains [full=1] / [full=true], it returns the latest cached
     full-health snapshot plus cheap request-local fields and marks the snapshot
@@ -225,17 +245,23 @@ val make_health_response_json :
 val start_full_health_snapshot_refresh_loop :
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  request_authority:Server_request_authority.request_context ->
   unit
 (** Starts the Eio background refresh loop for cached [/health?full=1]
     diagnostics.  The loop keeps heavy durable scans out of the HTTP request
-    path and stores stale/error metadata when refreshes fail or time out. *)
+    path and stores stale/error metadata when refreshes fail or time out.  Its
+    projection context comes from the bootstrap trust policy, never a second
+    read of listener environment. *)
 
 module For_testing : sig
   val reset_full_health_snapshot : unit -> unit
   (** Clears the cached full-health snapshot and in-flight refresh marker. *)
 
   val refresh_full_health_snapshot_now :
-    ?listener:string -> Httpun.Request.t -> unit
+    ?listener:string ->
+    request_authority:Server_request_authority.authority ->
+    Httpun.Request.t ->
+    unit
   (** Synchronously recomputes and stores the cached full-health snapshot. *)
 
   val mark_full_health_snapshot_error : exn -> unit
@@ -339,6 +365,6 @@ val board_post_detail_json :
 
 val options_handler : Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** [options_handler request reqd] handles [OPTIONS *] and
-    [OPTIONS <path>] CORS preflights.  Always responds
-    [204 No Content] with {!cors_preflight_headers} for the
-    request origin and [content-length: 0]. *)
+    [OPTIONS <path>] CORS preflights.  It responds [204 No Content], reflecting
+    only origins admitted against the typed request authority, and always sets
+    [content-length: 0]. *)

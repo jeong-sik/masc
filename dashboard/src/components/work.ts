@@ -17,6 +17,7 @@ import { PlanningPanel } from './planning-panel'
 import { VerificationRequestsPanel } from './verification-requests-panel'
 import { ErrorBoundary } from './common/error-boundary'
 import { LoadingState } from './common/feedback-state'
+import { VirtualList } from './common/virtual-list'
 import { KeeperBadge } from './keeper-badge'
 import { openTaskDetail } from './goals/task-detail-state'
 import { GoalCreateForm } from './goals/goal-create-form'
@@ -1460,7 +1461,6 @@ function WorkSurfaceV2() {
         goalTitle: t.goal_id ? goalTitleById.get(t.goal_id) : undefined,
       }))
   }, [claimedTasks, goalTitleById])
-
   const toggleGoal = (id: string) => {
     setOpenSet(prev => {
       const next = new Set(prev)
@@ -1688,8 +1688,14 @@ function WorkSurfaceV2() {
                 <span class="n">${backlogTasks.length}</span>
                 <span class="wk-backlog-sub mono">keeper_task_claim — 미배정 task</span>
               </div>
-              <div class="wk-backlog-list">
-                ${backlogTasks.map(t => html`
+              <${VirtualList}
+                items=${backlogTasks}
+                estimatedItemHeight=${48}
+                className="wk-backlog-list"
+                tabIndex=${0}
+                ariaLabel="클레임 가능 백로그 목록"
+                getKey=${(t: Task & { goalTitle?: string }) => t.id}
+                renderItem=${(t: Task & { goalTitle?: string }) => html`
                   <div key=${t.id} class="wk-bl-row">
                     <span class="wk-task-id mono">${t.id}</span>
                     <span class="wk-bl-title">
@@ -1700,8 +1706,8 @@ function WorkSurfaceV2() {
                     <span class="wk-bl-prio mono">P${t.priority ?? 0}</span>
                     <button type="button" class="wk-task-claim" onClick=${() => claimTask(t.id)}>＋ claim</button>
                   </div>
-                `)}
-              </div>
+                `}
+              />
             </section>
           ` : null}
 

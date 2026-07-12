@@ -20,6 +20,18 @@ let bool_field name json =
   | _ -> failf "field %s is not a bool" name
 ;;
 
+let request_trust_policy =
+  match
+    Server_request_authority.make_trust_policy
+      ~bind_host:"127.0.0.1"
+      ~bind_port:8935
+      ~explicit_base_url:None
+  with
+  | Ok policy -> policy
+  | Error error ->
+    fail (Server_request_authority.trust_policy_error_to_string error)
+;;
+
 let test_status_contract () =
   let json = Server_hibernation.status_json () in
   check string "schema" "masc.server_hibernation.v1" (string_field "schema" json);
@@ -36,8 +48,24 @@ let test_status_contract () =
 ;;
 
 let test_health_exposes_status () =
-  let request = Httpun.Request.create `GET "/health" in
-  let json = Server_routes_http_runtime.make_health_json request in
+  let headers = Httpun.Headers.of_list [ "host", "localhost:8935" ] in
+  let request = Httpun.Request.create ~headers `GET "/health" in
+  let request_authority =
+    match
+      Server_request_authority.classify_http1_request
+        ~trust_policy:request_trust_policy
+        request
+    with
+    | Server_request_authority.Single authority -> authority
+    | ( Server_request_authority.Missing
+      | Server_request_authority.Multiple
+      | Server_request_authority.Malformed
+      | Server_request_authority.Untrusted ) ->
+      fail "expected valid authority"
+  in
+  let json =
+    Server_routes_http_runtime.make_health_json ~request_authority request
+  in
   let hibernation = member "server_hibernation" json in
   check string "health status" "not_implemented" (string_field "status" hibernation);
   check string "health mode" "long_running" (string_field "mode" hibernation)

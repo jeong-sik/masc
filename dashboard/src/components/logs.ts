@@ -728,7 +728,7 @@ function renderLogKindGrid(
       ${note(extra, true)}
       <${RouteLink}
         tab="approvals"
-        class="lg-jump"
+        class="lg-jump inline-flex items-center"
         data-testid="logs-approval-jump"
         aria-label="HILT 승인 큐 열기"
       >HILT 승인 큐 열기 →<//>
@@ -1232,7 +1232,7 @@ export function LogViewer() {
                   onInput=${(v: string) => { logLimit.value = parseInt(v, 10) }}
                 />
 
-                <label class="logs-hide-fsm-label flex items-center gap-1.5 cursor-pointer text-2xs text-[var(--color-fg-muted)]">
+                <label class="logs-hide-fsm-label v2-mobile-operator-target flex items-center gap-1.5 cursor-pointer text-2xs text-[var(--color-fg-muted)]">
                   <${Checkbox}
                     name="log-hide-fsm"
                     ariaLabel="Hide FSM transitions"
@@ -1243,7 +1243,7 @@ export function LogViewer() {
                 </label>
               </div>
             </details>
-            <label class="logs-auto-label flex items-center gap-1.5 cursor-pointer">
+            <label class="logs-auto-label v2-mobile-operator-target flex items-center gap-1.5 cursor-pointer">
               <${Checkbox}
                 name="log-auto-refresh"
                 ariaLabel="자동 새로고침"
@@ -1276,7 +1276,15 @@ export function LogViewer() {
         ` : null}
 
         <div class="v2-logs-support">
-          ${renderLogSummary(summary)}
+          <details class="v2-logs-diagnostics" data-testid="logs-signal-summary">
+            <summary>
+              <span>Signal summary</span>
+              <span class="mono">error ${summary.errors} · warn ${summary.warnings}</span>
+            </summary>
+            <div class="v2-logs-diagnostics-body">
+              ${renderLogSummary(summary)}
+            </div>
+          </details>
           ${providerDiagnostics
             ? html`
               <details class="v2-logs-diagnostics" data-testid="logs-provider-diagnostics">

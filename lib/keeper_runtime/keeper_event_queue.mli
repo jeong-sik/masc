@@ -9,10 +9,10 @@
     This module is data only. The enqueue side is wired:
     [keeper_keepalive_signal.ml] calls [Keeper_registry_event_queue.enqueue]
     before the wakeup flag flips (RFC-0020 Rule 1). On the dequeue side,
-    [keeper_heartbeat_loop.ml] drains every queued board signal at turn
-    start via [Keeper_registry_event_queue.drain_board] (a CAS loop
-    over [drain_board_all], RFC-0334 W2) and falls back to a single non-board
-    [dequeue_event] when that batch is empty — either path pins the
+    [keeper_heartbeat_loop.ml] leases every queued board signal at turn
+    start via [Keeper_registry_event_queue.claim_board_result] (a CAS loop
+    over [drain_board_all], RFC-0334 W2) and falls back to one typed non-board
+    lease when that batch is empty — either path pins the
     [Conservation] invariant. [run_smart_heartbeat_gate] then snapshots
     the queue and forces [Emit] when it is non-empty (pinning
     [QueueNeverStarvedBySkip] — the queue is read before any [Skip]
@@ -112,6 +112,7 @@ and fusion_completion = {
   ok : bool;
   resolved_answer : string;
   board_post_id : string;
+  channel : Keeper_continuation_channel.t;
 }
 (** RFC-0266 payload for [Fusion_completed]: [ok] distinguishes a synthesized
     judge result from denied/sink_failed/aborted; [resolved_answer] carries the
@@ -201,9 +202,14 @@ and goal_verification_failure = {
 and failure_judgment = {
   fj_runtime_id : string;
   fj_judgment : Keeper_runtime_failure_route.judgment_class;
+  fj_provenance : Keeper_runtime_failure_route.judgment_provenance;
   fj_detail : string;
 }
-(** Payload for [Failure_judgment]. *)
+(** Payload for [Failure_judgment]. [fj_runtime_id] is the opaque failed
+    binding identity, [fj_judgment] is the routing class, and
+    [fj_provenance] retains the typed execution boundary (including the OAS
+    idle-loop count). [fj_detail] is display/prompt evidence and is never used
+    for routing. *)
 
 and goal_assignment = {
   ga_goal_id : string;

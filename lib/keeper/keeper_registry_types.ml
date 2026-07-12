@@ -89,6 +89,14 @@ type turn_measurement =
 
 type done_resolution = [ `Stopped | `Crashed of string ]
 
+type lifecycle_transaction_purpose = Dead_revival
+
+type lifecycle_reservation_snapshot =
+  { owner_id : string
+  ; expected_generation : int
+  ; purpose : lifecycle_transaction_purpose
+  }
+
 type registry_entry =
   { base_path : string
   ; name : string
@@ -102,6 +110,7 @@ type registry_entry =
   ; event_queue : Keeper_event_queue.t Atomic.t
   ; started_at : float
   ; grpc_close : (unit -> unit) option Atomic.t
+  ; lane : Keeper_lane.t
   ; done_p : done_resolution Eio.Promise.t
   ; done_r : done_resolution Eio.Promise.u
   ; restart_count : int
@@ -163,6 +172,7 @@ type done_resolve_result =
 
 type registry_entry_health =
   | Healthy
+  | Lifecycle_transaction_reserved of lifecycle_reservation_snapshot
   | Meta_validation_failed of { reason : string }
   | Required_field_missing of { field : string }
   | Base_path_mismatch of { expected : string; actual : string }
@@ -187,9 +197,22 @@ let resolve_done entry ~source (value : done_resolution) =
        Done_already_resolved { source; previous })
 ;;
 
+let lane_has_exited entry = Option.is_some (Keeper_lane.peek_exit entry.lane)
+
+let canonical_base_path_exn raw =
+  match Config_dir_resolver.canonical_base_path raw with
+  | Ok canonical -> canonical
+  | Error error ->
+    invalid_arg
+      (Printf.sprintf
+         "invalid keeper registry base path: %s"
+         (Config_dir_resolver.canonical_base_path_error_to_string error))
+;;
+
 let registry_key ~base_path name =
   if String.contains name '\x1f'
   then invalid_arg (Printf.sprintf "keeper name contains unit separator: %s" name);
+  let base_path = canonical_base_path_exn base_path in
   base_path ^ "\x1f" ^ name
 ;;
 

@@ -7,6 +7,7 @@ const {
   authHeaders,
   clearStoredToken,
   currentDashboardActor,
+  currentStoredTokenRevision,
   getStoredToken,
   getStoredTokenMeta,
   isRemoteAccess,
@@ -19,6 +20,7 @@ const {
   authHeaders: vi.fn().mockReturnValue({}),
   clearStoredToken: vi.fn(),
   currentDashboardActor: vi.fn().mockReturnValue('dashboard'),
+  currentStoredTokenRevision: vi.fn().mockReturnValue(0),
   // Default to a non-empty stored token so ensureDevToken() short-circuits
   // without consuming a fetchWithTimeout mock. Individual tests that want
   // to exercise the dev-token bootstrap can override this.
@@ -39,6 +41,7 @@ vi.mock('./core', () => ({
   authHeaders,
   clearStoredToken,
   currentDashboardActor,
+  currentStoredTokenRevision,
   getStoredToken,
   getStoredTokenMeta,
   isRemoteAccess,
@@ -60,6 +63,7 @@ beforeEach(() => {
   // test (e.g. authHeaders). The dev-token bootstrap must stay inert unless
   // a test explicitly exercises it.
   currentDashboardActor.mockReturnValue('dashboard')
+  currentStoredTokenRevision.mockReturnValue(0)
   getStoredToken.mockReturnValue('test-stored-token')
   getStoredTokenMeta.mockReturnValue({
     source: 'manual',
@@ -88,10 +92,24 @@ function setupMcpSessionMocks(sessionId: string) {
     )
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
+
 /** Find a fetchWithTimeout call by matching the JSON body's "method" field. */
 function findCallByMethod(method: string) {
+  return callsByMethod(method)[0]
+}
+
+function callsByMethod(method: string) {
   const calls = fetchWithTimeout.mock.calls as Array<[string, RequestInit, number]>
-  return calls.find(([, init]) => {
+  return calls.filter(([, init]) => {
     const body = init.body
     if (typeof body !== 'string') return false
     try { return JSON.parse(body).method === method }
@@ -100,6 +118,174 @@ function findCallByMethod(method: string) {
 }
 
 describe('mcpHeaders auth integration', () => {
+  it('reinitializes instead of reusing a session after the stored token changes', async () => {
+    setupMcpSessionMocks('sess-before-token-clear')
+
+    const { callMcpTool } = await import('./mcp')
+    await callMcpTool('masc_status', {})
+
+    currentStoredTokenRevision.mockReturnValue(1)
+    setupMcpSessionMocks('sess-after-token-clear')
+    await callMcpTool('masc_status', {})
+
+    const initializeCalls = callsByMethod('initialize')
+    const toolCalls = callsByMethod('tools/call')
+    expect(initializeCalls).toHaveLength(2)
+    expect(toolCalls).toHaveLength(2)
+    expect((initializeCalls[1]![1].headers as Record<string, string>)['Mcp-Session-Id'])
+      .toBeUndefined()
+    expect((toolCalls[0]![1].headers as Record<string, string>)['Mcp-Session-Id'])
+      .toBe('sess-before-token-clear')
+    expect((toolCalls[1]![1].headers as Record<string, string>)['Mcp-Session-Id'])
+      .toBe('sess-after-token-clear')
+  }, 60_000)
+
+  it('rejects an initialization response created under an older token revision', async () => {
+    fetchWithTimeout.mockImplementationOnce(async () => {
+      currentStoredTokenRevision.mockReturnValue(1)
+      return new Response('{}', {
+        status: 200,
+        headers: { 'Mcp-Session-Id': 'sess-stale-auth' },
+      })
+    })
+
+    const { callMcpTool } = await import('./mcp')
+    await expect(callMcpTool('masc_status', {}))
+      .rejects.toThrow('MCP authentication changed during request')
+
+    expect(callsByMethod('notifications/initialized')).toHaveLength(0)
+    expect(callsByMethod('tools/call')).toHaveLength(0)
+  }, 60_000)
+
+  it('does not let a delayed old-token tool response replace the current session', async () => {
+    let tokenRevision = 0
+    currentStoredTokenRevision.mockImplementation(() => tokenRevision)
+    setupMcpSessionMocks('sess-token-a')
+
+    const { callMcpTool } = await import('./mcp')
+    await callMcpTool('masc_status', {})
+
+    const delayedOldResponse = deferred<Response>()
+    fetchWithTimeout.mockImplementationOnce(() => delayedOldResponse.promise)
+    const oldCall = callMcpTool('masc_status', {})
+    await vi.waitFor(() => {
+      expect(callsByMethod('tools/call')).toHaveLength(2)
+    })
+
+    tokenRevision = 1
+    setupMcpSessionMocks('sess-token-b')
+    await callMcpTool('masc_status', {})
+
+    delayedOldResponse.resolve(new Response(
+      'data: {"result":{"content":[{"type":"text","text":"stale"}]}}\n',
+      { status: 200, headers: { 'Mcp-Session-Id': 'sess-token-a' } },
+    ))
+    await expect(oldCall).rejects.toThrow('MCP authentication changed during request')
+
+    fetchWithTimeout.mockResolvedValueOnce(
+      new Response('data: {"result":{"content":[{"type":"text","text":"fresh"}]}}\n', { status: 200 }),
+    )
+    await callMcpTool('masc_status', {})
+
+    expect(callsByMethod('initialize')).toHaveLength(2)
+    const latestToolCall = callsByMethod('tools/call').at(-1)
+    expect((latestToolCall?.[1].headers as Record<string, string>)['Mcp-Session-Id'])
+      .toBe('sess-token-b')
+  }, 60_000)
+
+  it('does not replay a delayed unknown-session response after the token changes', async () => {
+    let tokenRevision = 0
+    currentStoredTokenRevision.mockImplementation(() => tokenRevision)
+    setupMcpSessionMocks('sess-token-a')
+
+    const { callMcpTool } = await import('./mcp')
+    await callMcpTool('masc_status', {})
+
+    const finishOldErrorBody = deferred<void>()
+    apiRequestErrorFromResponse.mockImplementationOnce(async (_method, _path, res) => {
+      await finishOldErrorBody.promise
+      return new Error(`POST /mcp: ${res.status} stale transport session`)
+    })
+    fetchWithTimeout.mockResolvedValueOnce(new Response('{}', {
+      status: 404,
+      statusText: 'Not Found',
+      headers: { 'Mcp-Session-Id': 'sess-uninitialized-replacement' },
+    }))
+    const oldCall = callMcpTool('masc_status', {})
+    await vi.waitFor(() => {
+      expect(callsByMethod('tools/call')).toHaveLength(2)
+    })
+
+    tokenRevision = 1
+    setupMcpSessionMocks('sess-token-b')
+    await callMcpTool('masc_status', {})
+
+    finishOldErrorBody.resolve(undefined)
+    await expect(oldCall).rejects.toThrow('MCP authentication changed during request')
+
+    expect(callsByMethod('initialize')).toHaveLength(2)
+    expect(callsByMethod('tools/call')).toHaveLength(3)
+
+    fetchWithTimeout.mockResolvedValueOnce(
+      new Response('data: {"result":{"content":[{"type":"text","text":"still-b"}]}}\n', { status: 200 }),
+    )
+    await callMcpTool('masc_status', {})
+
+    expect(callsByMethod('initialize')).toHaveLength(2)
+    expect(callsByMethod('tools/call')).toHaveLength(4)
+    const latestToolCall = callsByMethod('tools/call').at(-1)
+    expect((latestToolCall?.[1].headers as Record<string, string>)['Mcp-Session-Id'])
+      .toBe('sess-token-b')
+  }, 60_000)
+
+  it('keeps a newer initializer authoritative when an older initializer finishes last', async () => {
+    let tokenRevision = 0
+    currentStoredTokenRevision.mockImplementation(() => tokenRevision)
+    const initializeA = deferred<Response>()
+    const initializeB = deferred<Response>()
+    fetchWithTimeout.mockImplementationOnce(() => initializeA.promise)
+
+    const { callMcpTool } = await import('./mcp')
+    const callA = callMcpTool('masc_status', {})
+    await vi.waitFor(() => {
+      expect(callsByMethod('initialize')).toHaveLength(1)
+    })
+
+    tokenRevision = 1
+    fetchWithTimeout
+      .mockImplementationOnce(() => initializeB.promise)
+      .mockResolvedValueOnce(new Response('', { status: 202 }))
+      .mockResolvedValueOnce(
+        new Response('data: {"result":{"content":[{"type":"text","text":"b"}]}}\n', { status: 200 }),
+      )
+    const callB = callMcpTool('masc_status', {})
+    await vi.waitFor(() => {
+      expect(callsByMethod('initialize')).toHaveLength(2)
+    })
+
+    initializeB.resolve(new Response('{}', {
+      status: 200,
+      headers: { 'Mcp-Session-Id': 'sess-init-b' },
+    }))
+    await expect(callB).resolves.toBe('b')
+
+    initializeA.resolve(new Response('{}', {
+      status: 200,
+      headers: { 'Mcp-Session-Id': 'sess-init-a' },
+    }))
+    await expect(callA).rejects.toThrow('MCP authentication changed during request')
+
+    fetchWithTimeout.mockResolvedValueOnce(
+      new Response('data: {"result":{"content":[{"type":"text","text":"still-b"}]}}\n', { status: 200 }),
+    )
+    await callMcpTool('masc_status', {})
+
+    expect(callsByMethod('initialize')).toHaveLength(2)
+    const latestToolCall = callsByMethod('tools/call').at(-1)
+    expect((latestToolCall?.[1].headers as Record<string, string>)['Mcp-Session-Id'])
+      .toBe('sess-init-b')
+  }, 60_000)
+
   it('includes Authorization header from authHeaders in MCP initialize request', async () => {
     authHeaders.mockReturnValue({
       'Authorization': 'Bearer test-token-123',
@@ -363,6 +549,44 @@ describe('callMcpTool', () => {
     )
   })
 
+  it('attributes a delayed failure to the binding that sent the request', async () => {
+    let tokenRevision = 0
+    currentStoredTokenRevision.mockImplementation(() => tokenRevision)
+    const delayedOldFailure = deferred<Response>()
+    fetchWithTimeout
+      .mockResolvedValueOnce(
+        new Response('{}', {
+          status: 200,
+          headers: { 'Mcp-Session-Id': 'sess-telemetry-a' },
+        }),
+      )
+      .mockResolvedValueOnce(new Response('', { status: 202 }))
+      .mockImplementationOnce(() => delayedOldFailure.promise)
+
+    const { callMcpTool } = await import('./mcp')
+    const oldCall = callMcpTool('masc_keeper_msg', { name: 'sangsu', message: 'old' })
+    const oldFailure = expect(oldCall).rejects.toThrow('POST /mcp: timeout after 30000ms')
+    await vi.waitFor(() => {
+      expect(callsByMethod('tools/call')).toHaveLength(1)
+    })
+
+    tokenRevision = 1
+    setupMcpSessionMocks('sess-telemetry-b')
+    await callMcpTool('masc_status', {})
+
+    delayedOldFailure.reject(new Error('POST /mcp: timeout after 30000ms'))
+    await oldFailure
+
+    expect(reportToolHostFailure).toHaveBeenCalledTimes(1)
+    expect(reportToolHostFailure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tool_name: 'masc_keeper_msg',
+        phase: 'tools/call',
+        session_id: 'sess-telemetry-a',
+      }),
+    )
+  }, 60_000)
+
   it('does not retry implicit actor mismatches', async () => {
     fetchWithTimeout
       .mockResolvedValueOnce(
@@ -424,7 +648,7 @@ describe('callMcpTool', () => {
             jsonrpc: '2.0',
             error: {
               code: -32600,
-              message: 'Unknown Mcp-Session-Id. Re-initialize to obtain a fresh session.',
+              message: 'transport session is no longer available',
             },
             id: null,
           }),
@@ -507,6 +731,29 @@ describe('callMcpTool', () => {
       'POST /mcp initialize: 500',
     )
     expect(fetchWithTimeout).toHaveBeenCalledTimes(1)
+  })
+
+  it('fails closed when the initialized notification returns non-2xx', async () => {
+    fetchWithTimeout
+      .mockResolvedValueOnce(
+        new Response('{}', {
+          status: 200,
+          headers: { 'Mcp-Session-Id': 'sess-notification-failed' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response('Internal Server Error', {
+          status: 500,
+          statusText: 'Internal Server Error',
+        }),
+      )
+
+    const { callMcpTool } = await import('./mcp')
+
+    await expect(callMcpTool('masc_status', {})).rejects.toThrow(
+      'POST /mcp notifications/initialized: 500',
+    )
+    expect(callsByMethod('tools/call')).toHaveLength(0)
   })
 
   it('blocks subsequent calls after initialize returns 403', async () => {

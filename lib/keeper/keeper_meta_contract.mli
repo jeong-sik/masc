@@ -169,6 +169,7 @@ type blocker_class =
   | Sdk_tripwire_violation
   | Sdk_exit_condition_met
   | Sdk_input_required
+  | Sdk_tool_failure_recovery_failed
 
 val blocker_class_to_string : blocker_class -> string
 (** Canonical lowercase labels.  Pinned literals — operator
@@ -388,7 +389,8 @@ type keeper_meta = {
     status-facing reads. Persisted runtime JSON intentionally omits
     TOML-owned fields such as [sandbox_profile], [network_mode], and
     [tool_access]. *)
-val effective_meta_result : keeper_meta -> (keeper_meta, string) result
+val effective_meta_result :
+  base_path:string -> keeper_meta -> (keeper_meta, string) result
 
 (** Pure variant for callers that already loaded profile defaults. *)
 val effective_meta_of_profile_defaults :

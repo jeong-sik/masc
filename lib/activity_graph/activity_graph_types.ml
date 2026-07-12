@@ -60,6 +60,25 @@ let span_status_of_string_opt = function
   | "ended" -> Some Span_ended
   | _ -> None
 
+type tool_execution_event_kind =
+  | External_tool_called
+  | Keeper_in_turn_tool_executed
+
+let tool_execution_event_kind_to_string = function
+  | External_tool_called -> "tool.called"
+  | Keeper_in_turn_tool_executed -> "keeper.tool_exec"
+;;
+
+let tool_execution_event_kind_of_string = function
+  | "tool.called" -> Some External_tool_called
+  | "keeper.tool_exec" -> Some Keeper_in_turn_tool_executed
+  | _ -> None
+;;
+
+let all_tool_execution_event_kinds =
+  [ External_tool_called; Keeper_in_turn_tool_executed ]
+;;
+
 type entity_ref = {
   kind : string;
   id : string;

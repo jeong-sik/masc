@@ -187,11 +187,6 @@ let all_flags : flag list = [
     description = "Route Execute tool calls through the capability-based Shell IR approval policy gate";
     default = true; category = "runtime";
     lifecycle = Active; since = "2.234.0" };
-  { env_name = "MASC_SLOT_YIELD_ENABLED";
-    description = "Release LLM slot during tool execution so other agents can use it";
-    default = true; category = "runtime";
-    lifecycle = Active; since = "2.208.0" };
-
   (* ── Contract verification ───────────────────────────────── *)
   { env_name = "MASC_VERIFICATION_FSM_ENABLED";
     description = "Task verification FSM: AwaitingVerification state and cross-agent approval";

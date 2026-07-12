@@ -654,4 +654,14 @@ describe('logs vendored stylesheet', () => {
     expect(panelRule).toMatch(/overflow:\s*visible\s*;/)
     expect(panelRule).not.toMatch(/overflow:\s*hidden\s*;/)
   })
+
+  it('anchors the advanced menu to the viewport-side edge on narrow screens', () => {
+    const css = readFileSync(resolve(__dirname, '../styles/v2-logs.css'), 'utf8')
+    expect(css).toMatch(/\.v2-logs-advanced-menu \.v2-logs-advanced\s*\{[^}]*position:\s*fixed;[^}]*right:\s*12px;[^}]*left:\s*12px;[^}]*width:\s*auto;/)
+  })
+
+  it('does not lay out advanced controls while the disclosure is closed', () => {
+    const css = readFileSync(resolve(__dirname, '../styles/v2-logs.css'), 'utf8')
+    expect(css).toMatch(/\.v2-logs-advanced-menu:not\(\[open\]\) \.v2-logs-advanced\s*\{\s*display:\s*none;/)
+  })
 })

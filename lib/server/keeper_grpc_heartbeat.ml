@@ -117,6 +117,30 @@ let run_grpc_heartbeat_fiber
     None
   | Some env ->
     let close_ref = Atomic.make false in
+    let active_stream_close = Atomic.make None in
+    let close_active_stream () =
+      match Atomic.exchange active_stream_close None with
+      | None -> Ok ()
+      | Some close_stream ->
+        Eio.Cancel.protect (fun () ->
+          try
+            close_stream ();
+            Ok ()
+          with
+          | exn -> Error exn)
+    in
+    let report_close_error = function
+      | Ok () -> ()
+      | Error exn ->
+        Otel_metric_store.inc_counter
+          Keeper_metrics.(to_string HeartbeatFailures)
+          ~labels:[ "keeper", agent_name; "site", "grpc_stream_close" ]
+          ();
+        Log.Keeper.warn
+          "gRPC heartbeat stream close failed for %s: %s"
+          agent_name
+          (Printexc.to_string exn)
+    in
     Eio.Fiber.fork ~sw (fun () ->
       let rec connect_loop attempts =
         if Atomic.get stop || Atomic.get close_ref
@@ -135,34 +159,51 @@ let run_grpc_heartbeat_fiber
           let send, recv, close_stream =
             Masc_grpc_client.heartbeat_stream grpc_client ~sw ~env
           in
-          (try
-             run_grpc_heartbeat_stream
-               ~stop
-               ~close_ref
-               ~clock
-               ~interval_sec
-               ~config
-               ~agent_name
-               ~session_id
-               send
-               recv
-           with
-           | Eio.Cancel.Cancelled _ as e ->
-             close_stream ();
-             raise e
-           | End_of_file ->
-             log_grpc_heartbeat_stream_failure ~agent_name ~attempts `Closed;
-             close_stream ()
-           | exn ->
-             log_grpc_heartbeat_stream_failure ~agent_name ~attempts (`Error exn);
-             close_stream ());
+          let installed_close = Some close_stream in
+          Atomic.set active_stream_close installed_close;
+          let stream_outcome =
+            try
+              run_grpc_heartbeat_stream
+                ~stop
+                ~close_ref
+                ~clock
+                ~interval_sec
+                ~config
+                ~agent_name
+                ~session_id
+                send
+                recv;
+              `Completed
+            with
+            | Eio.Cancel.Cancelled _ as exn -> `Cancelled exn
+            | End_of_file ->
+              log_grpc_heartbeat_stream_failure ~agent_name ~attempts `Closed;
+              `Reconnect
+            | exn ->
+              log_grpc_heartbeat_stream_failure ~agent_name ~attempts (`Error exn);
+              `Reconnect
+          in
+          if Atomic.compare_and_set active_stream_close installed_close None
+          then
+            report_close_error
+              (Eio.Cancel.protect (fun () ->
+                 try
+                   close_stream ();
+                   Ok ()
+                 with
+                 | exn -> Error exn));
+          (match stream_outcome with
+           | `Cancelled exn -> raise exn
+           | `Completed | `Reconnect -> ());
           if not (Atomic.get stop || Atomic.get close_ref)
           then (
             Eio.Time.sleep clock reconnect_backoff_sec;
             connect_loop (attempts + 1)))
       in
       connect_loop 0);
-    Some (fun () -> Atomic.set close_ref true)
+    Some (fun () ->
+      Atomic.set close_ref true;
+      report_close_error (close_active_stream ()))
 ;;
 
 let start_keeper_grpc_heartbeat
@@ -181,9 +222,8 @@ let start_keeper_grpc_heartbeat
         m.name
         (Int64.of_float (Time_compat.now () *. 1000.0))
     in
-    let sw = Option.value (Keeper_supervisor.get_global_switch ()) ~default:ctx.sw in
     run_grpc_heartbeat_fiber
-      ~sw
+      ~sw:ctx.sw
       ~stop
       ~grpc_client:client
       ~config:ctx.config

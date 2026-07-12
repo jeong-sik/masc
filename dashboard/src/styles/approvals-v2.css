@@ -205,7 +205,21 @@ button.wka-switch:focus-visible { outline: 2px solid var(--volt-strong); outline
 .ap-recent-sub { color: var(--text-dim); font-size: var(--fs-10); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ap-side-empty { color: var(--text-dim); font-size: var(--fs-12); padding: 8px 0; }
 
+@media (max-width: 980px) {
+  .ap-surface { flex-direction: column; }
+  .ap-surface > .ov-scroll { box-sizing: border-box; width: 100%; }
+  .ap-surface > .ap-aside { position: static; box-sizing: border-box; width: 100%; align-self: stretch; }
+  .ap-workspace, .ap-queue, .ap-card { min-width: 0; }
+}
+
 @media (max-width: 720px) {
+  .ap-surface button,
+  .ap-surface summary,
+  .ap-surface input,
+  .ap-surface select {
+    min-width: var(--mobile-touch-target-min);
+    min-height: var(--mobile-touch-target-min);
+  }
   .ap-hist-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .ap-history-item { flex-wrap: wrap; }
   .ap-history-at { flex-basis: 100%; }

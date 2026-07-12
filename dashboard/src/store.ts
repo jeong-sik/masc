@@ -692,7 +692,7 @@ export const staleKeepers: ReadonlySignal<Set<string>> = computed(() => {
 // TTL values from config/constants.ts
 
 let inflightDashboardRefresh: Promise<void> | null = null
-let inflightShellRefresh: Promise<void> | null = null
+let inflightShellRefresh: Promise<boolean> | null = null
 let inflightShellRefreshLight = false
 let lastShellRefreshAt = 0
 
@@ -991,23 +991,32 @@ export function hydrateShellSnapshot(
   lastShellRefreshAt = Date.now()
 }
 
-export async function refreshShell(opts?: RefreshOptions): Promise<void> {
+export async function refreshShell(opts?: RefreshOptions): Promise<boolean> {
   const wantsLight = opts?.light === true
   if (inflightShellRefresh) {
-    if (wantsLight || !inflightShellRefreshLight) return inflightShellRefresh
+    // A forced refresh must observe state established by the caller before
+    // this invocation (notably Settings clearing the browser token). Joining
+    // an older request could otherwise hydrate auth from the pre-clear token
+    // and falsely report that the cleared state was rechecked.
+    if (!opts?.force && (wantsLight || !inflightShellRefreshLight)) return inflightShellRefresh
     await inflightShellRefresh
+    // Another waiter may have started the required follow-up refresh while
+    // this caller resumed. Join it instead of launching duplicate requests.
+    if (inflightShellRefresh) return inflightShellRefresh
   }
-  if (!opts?.force && Date.now() - lastShellRefreshAt < SHELL_TTL_MS) return
+  if (!opts?.force && Date.now() - lastShellRefreshAt < SHELL_TTL_MS) return true
   inflightShellRefreshLight = wantsLight
   inflightShellRefresh = (async () => {
     try {
       const data = await fetchDashboardShell({ light: wantsLight })
       hydrateShellSnapshot(data, { light: wantsLight })
+      return true
     } catch (err) {
       setCanonicalDashboardActor(null)
       shellAuthSummary.value = null
       console.warn('[Dashboard] shell fetch error:', err)
       showToast('서버 연결 실패 — 데이터를 불러올 수 없습니다', 'error', 6000)
+      return false
     } finally {
       inflightShellRefresh = null
       inflightShellRefreshLight = false

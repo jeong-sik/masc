@@ -189,6 +189,7 @@ let required_commands =
 type cleanup_result =
   { scanned : int
   ; removed : int
+  ; already_absent : int
   ; errors : string list
   }
 

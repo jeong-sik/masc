@@ -434,6 +434,17 @@ function normalizeTraceStep(raw: unknown): ChatTraceStep | null {
       ? withoutUndefined({ kind: 'reason', text, detail: asString(raw.detail) ?? undefined, ts: asString(raw.ts) })
       : null
   }
+  if (kind === 'progress') {
+    const text = asString(raw.text)
+    return text !== undefined
+      ? withoutUndefined({
+          kind: 'progress',
+          text,
+          ts: asString(raw.ts),
+          oasBlockIndex: asNumber(raw.oasBlockIndex) ?? asNumber(raw.oas_block_index) ?? undefined,
+        })
+      : null
+  }
   if (kind === 'tool') {
     const name = asString(raw.name)
     if (name === undefined) return null
@@ -868,10 +879,11 @@ function normalizeHistoryEntry(
   const turnRef = asString(raw.turn_ref) ?? null
   // keeper_chat_store mints kind=transport_failure (row content is the
   // "Keeper request failed: ..." text) so a reload can tell a failed request
-  // apart from a real reply. Map it to the existing error delivery state so
-  // the bubble renders the error label/styling instead of a saved reply.
+  // apart from a real reply. Preserve that writer-declared provenance as its
+  // own delivery variant: generic client/tool errors have different watermark
+  // semantics and must not inherit the durable-row reassurance.
   const delivery: KeeperConversationDelivery =
-    asString(raw.kind) === 'transport_failure' ? 'error' : 'history'
+    asString(raw.kind) === 'transport_failure' ? 'transport_failure' : 'history'
   const serverBlocks = normalizeBlocks(raw.blocks, role)
   const blocks = serverBlocks
     ?? ((role === 'assistant' || role === 'system') && text
@@ -895,6 +907,7 @@ function normalizeHistoryEntry(
     timestamp,
     turnRef,
     delivery,
+    error: delivery === 'transport_failure' ? rawText : null,
     streamState: null,
     streamContract,
     details: null,
@@ -1015,6 +1028,34 @@ export function appendAssistantDelta(name: string, entryId: string, delta: strin
       deliveryReceipt: 'client_observed_sse_event',
     }),
   }))
+}
+
+/** Move assistant text that is structurally followed by a tool call out of
+ *  the final reply and into the turn timeline. The following TOOL_CALL_START
+ *  is the protocol proof that this text belonged to an intermediate assistant
+ *  round; no text-content or similarity classification participates. */
+export function promoteAssistantTextToProgress(
+  name: string,
+  entryId: string,
+  meta: { oasBlockIndex?: number } = {},
+): void {
+  updateThreadEntry(name, entryId, entry => {
+    const text = entry.rawText ?? entry.text
+    if (!text.trim()) return entry
+    const progress = withoutUndefined({
+      kind: 'progress' as const,
+      text,
+      ts: new Date().toISOString(),
+      oasBlockIndex: meta.oasBlockIndex,
+    })
+    return {
+      ...entry,
+      text: '',
+      rawText: '',
+      blocks: [],
+      traceSteps: [...(entry.traceSteps ?? []), progress],
+    }
+  })
 }
 
 function writeAssistantThinkingText(
@@ -1366,7 +1407,13 @@ function replaceThread(name: string, entries: KeeperConversationEntry[]): void {
       // must survive history merges until they finalize. Otherwise a queued
       // assistant with empty text can be mistaken for an older empty-text
       // history row and dropped, making the queued reply look like an error.
-      const shouldKeepLocalEntry = isInFlightDelivery(entry.delivery) || !coveredByHistory
+      // A terminal durable-receipt observation is also operator evidence, not
+      // a duplicate assistant reply: keep it alongside the canonical history
+      // row so its Pending/Inflight/Delivered/Failed lifecycle remains visible.
+      const isReceiptObservation = Boolean(entry.details?.queueReceiptId)
+      const shouldKeepLocalEntry = isInFlightDelivery(entry.delivery)
+        || isReceiptObservation
+        || !coveredByHistory
       return entry.delivery !== 'history' && !isCoveredToolRow && shouldKeepLocalEntry
     },
   )

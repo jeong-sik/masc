@@ -2,10 +2,19 @@ open Alcotest
 open Masc
 
 let tr_ok body = Tool_result.ok ~tool_name:"keeper-test" ~start_time:0.0 body
+let caller = "keeper-msg-test-caller"
 
-let wait_for_done_with_clock clock request_id =
+let accepted_request_id = function
+  | Ok request_id -> request_id
+  | Error error ->
+    Alcotest.failf
+      "keeper_msg submission rejected: %s"
+      (Keeper_msg_async.submit_error_to_json error |> Yojson.Safe.to_string)
+;;
+
+let wait_for_done_with_clock clock ~base_path request_id =
   let rec loop remaining =
-    match Keeper_msg_async.poll request_id with
+    match Keeper_msg_async.poll ~base_path ~caller request_id with
     | Keeper_msg_async.Found ({ status = Done _; _ } as entry) -> entry
     | _ when remaining <= 0 ->
       failwith (Printf.sprintf "request %s did not complete" request_id)
@@ -43,9 +52,9 @@ let wait_for_active_switch_count clock expected =
   loop 100
 ;;
 
-let wait_for_running request_id =
+let wait_for_running ~base_path request_id =
   let rec loop remaining =
-    match Keeper_msg_async.poll request_id with
+    match Keeper_msg_async.poll ~base_path ~caller request_id with
     | Keeper_msg_async.Found ({ status = Running; _ } as entry) -> entry
     | _ when remaining <= 0 ->
       failwith (Printf.sprintf "request %s did not start" request_id)
@@ -56,9 +65,9 @@ let wait_for_running request_id =
   loop 200
 ;;
 
-let wait_for_lost request_id =
+let wait_for_lost ~base_path request_id =
   let rec loop remaining =
-    match Keeper_msg_async.poll request_id with
+    match Keeper_msg_async.poll ~base_path ~caller request_id with
     | Keeper_msg_async.Found ({ status = Lost _; _ } as entry) -> entry
     | _ when remaining <= 0 ->
       failwith (Printf.sprintf "request %s did not become lost" request_id)
@@ -69,9 +78,9 @@ let wait_for_lost request_id =
   loop 200
 ;;
 
-let wait_for_cancelled request_id =
+let wait_for_cancelled ~base_path request_id =
   let rec loop remaining =
-    match Keeper_msg_async.poll request_id with
+    match Keeper_msg_async.poll ~base_path ~caller request_id with
     | Keeper_msg_async.Found ({ status = Cancelled _; _ } as entry) -> entry
     | _ when remaining <= 0 ->
       failwith (Printf.sprintf "request %s did not become cancelled" request_id)
@@ -99,23 +108,6 @@ let contains_substring ~needle value =
     in
     loop 0)
 ;;
-
-let read_file path =
-  let ic = open_in path in
-  Fun.protect
-    ~finally:(fun () -> close_in_noerr ic)
-    (fun () ->
-       let len = in_channel_length ic in
-       really_input_string ic len)
-;;
-
-let source_root () =
-  match Sys.getenv_opt "DUNE_SOURCEROOT" with
-  | Some root -> root
-  | None -> Sys.getcwd ()
-;;
-
-let source_file path = Filename.concat (source_root ()) path
 
 let temp_dir prefix =
   let path = Filename.temp_file prefix "" in
@@ -155,15 +147,22 @@ let test_keeper_msg_async_roundtrip () =
   let base_path = temp_dir "keeper-msg-async-roundtrip-" in
   let request_id =
     Keeper_msg_async.submit
-      ~sw
+      ~background_sw:sw
       ~base_path
+      ~caller
       ~keeper_name:"alpha"
-      ~f:(fun () ->
+      ~f:(fun _request_sw ->
         Eio.Fiber.yield ();
         tr_ok (Yojson.Safe.to_string (`Assoc [ "kind", `String "done" ])))
       ()
+    |> accepted_request_id
   in
-  let entry = wait_for_done_with_clock clock request_id in
+  let entry = wait_for_done_with_clock clock ~base_path request_id in
+  Alcotest.(check string) "submitted_by persisted in memory" caller entry.submitted_by;
+  Alcotest.(check string)
+    "base_path stored as canonical identity"
+    (Fs_compat.realpath base_path)
+    entry.base_path;
   Alcotest.(check bool)
     "request completed"
     true
@@ -173,7 +172,61 @@ let test_keeper_msg_async_roundtrip () =
   Alcotest.(check int)
     "one pending entry"
     1
-    (List.length (Keeper_msg_async.list_for_keeper ~keeper_name:"alpha" ()))
+    (match
+       Keeper_msg_async.list_for_keeper
+         ~base_path ~caller ~keeper_name:"alpha" ()
+     with
+     | Ok entries -> List.length entries
+     | Error rejection ->
+       Alcotest.failf
+         "queue access rejected: %s"
+         (Keeper_msg_async.access_rejection_to_json rejection
+          |> Yojson.Safe.to_string))
+  ;
+  (match Keeper_msg_async.poll ~base_path ~caller:"different-caller" request_id with
+   | Keeper_msg_async.Rejected Keeper_msg_async.Caller_mismatch -> ()
+   | _ -> Alcotest.fail "cross-caller poll must be rejected");
+  (match
+     Keeper_msg_async.list_for_keeper
+       ~base_path ~caller:"different-caller" ~keeper_name:"alpha" ()
+   with
+   | Ok [] -> ()
+   | Ok _ -> Alcotest.fail "cross-caller queue entries must be omitted"
+   | Error _ -> Alcotest.fail "valid different caller identity should produce an empty queue")
+;;
+
+let test_keeper_msg_async_list_isolates_base_paths () =
+  with_eio_env
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let clock = Eio.Stdenv.clock env in
+  let base_a = temp_dir "keeper-msg-list-base-a-" in
+  let base_b = temp_dir "keeper-msg-list-base-b-" in
+  let submit base_path keeper_name =
+    Keeper_msg_async.submit
+      ~background_sw:sw
+      ~base_path
+      ~caller
+      ~keeper_name
+      ~f:(fun _request_sw -> tr_ok "{}")
+      ()
+    |> accepted_request_id
+  in
+  let request_a = submit base_a "alpha" in
+  let request_b = submit base_b "beta" in
+  ignore (wait_for_done_with_clock clock ~base_path:base_a request_a : Keeper_msg_async.entry);
+  ignore (wait_for_done_with_clock clock ~base_path:base_b request_b : Keeper_msg_async.entry);
+  let request_ids base_path =
+    match Keeper_msg_async.list_for_keeper ~base_path ~caller () with
+    | Ok entries -> List.map (fun (entry : Keeper_msg_async.entry) -> entry.request_id) entries
+    | Error rejection ->
+      Alcotest.failf
+        "queue access rejected: %s"
+        (Keeper_msg_async.access_rejection_to_json rejection |> Yojson.Safe.to_string)
+  in
+  Alcotest.(check (list string)) "base A sees only its owner lane" [ request_a ] (request_ids base_a);
+  Alcotest.(check (list string)) "base B sees only its owner lane" [ request_b ] (request_ids base_b)
 ;;
 
 let test_keeper_msg_async_recovers_done_from_disk () =
@@ -185,15 +238,17 @@ let test_keeper_msg_async_recovers_done_from_disk () =
   let base_path = temp_dir "keeper-msg-async-done-" in
   let request_id =
     Keeper_msg_async.submit
-      ~sw
+      ~background_sw:sw
       ~base_path
+      ~caller
       ~keeper_name:"beta"
-      ~f:(fun () ->
+      ~f:(fun _request_sw ->
         Eio.Fiber.yield ();
         tr_ok (Yojson.Safe.to_string (`Assoc [ "kind", `String "done" ])))
       ()
+    |> accepted_request_id
   in
-  let entry = wait_for_done_with_clock clock request_id in
+  let entry = wait_for_done_with_clock clock ~base_path request_id in
   Alcotest.(check bool)
     "request completed before recovery"
     true
@@ -203,16 +258,153 @@ let test_keeper_msg_async_recovers_done_from_disk () =
   ignore
     (wait_for_persisted_done_with_clock clock ~base_path request_id
       : Keeper_msg_async.entry);
-  Keeper_msg_async.For_testing.forget request_id;
-  match Keeper_msg_async.poll ~base_path request_id with
+  Keeper_msg_async.For_testing.forget ~base_path ~caller ~request_id;
+  match Keeper_msg_async.poll ~base_path ~caller request_id with
   | Keeper_msg_async.Found { Keeper_msg_async.status = Done { ok = true; body }; _ } ->
     Alcotest.(check bool) "body persisted" true (String.length body > 0)
   | Keeper_msg_async.Found entry ->
     Alcotest.failf
       "expected recovered done, got %s"
       (Keeper_msg_async.status_to_string entry.Keeper_msg_async.status)
-  | Keeper_msg_async.Absent | Keeper_msg_async.Unreadable _ ->
+  | Keeper_msg_async.Absent
+  | Keeper_msg_async.Unreadable _
+  | Keeper_msg_async.Rejected _ ->
     Alcotest.fail "expected persisted request"
+;;
+
+let test_keeper_msg_async_survives_submitter_turn_switch () =
+  with_eio_env
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun root_sw ->
+  let clock = Eio.Stdenv.clock env in
+  let base_path = temp_dir "keeper-msg-root-lifetime-" in
+  let worker_started, resolve_worker_started = Eio.Promise.create () in
+  let release_worker, resolve_release_worker = Eio.Promise.create () in
+  let request_switch_is_turn_switch = Atomic.make true in
+  let request_id =
+    Eio.Switch.run
+    @@ fun turn_sw ->
+    let request_id =
+      Keeper_msg_async.submit
+        ~background_sw:root_sw
+        ~base_path
+        ~caller
+        ~keeper_name:"root-lifetime"
+        ~f:(fun request_sw ->
+          Atomic.set request_switch_is_turn_switch (request_sw == turn_sw);
+          Eio.Promise.resolve resolve_worker_started ();
+          Eio.Promise.await release_worker;
+          tr_ok "{}")
+        ()
+      |> accepted_request_id
+    in
+    Eio.Promise.await worker_started;
+    request_id
+  in
+  Alcotest.(check bool)
+    "request uses a per-entry switch, not the submitter turn switch"
+    false
+    (Atomic.get request_switch_is_turn_switch);
+  Eio.Promise.resolve resolve_release_worker ();
+  ignore (wait_for_done_with_clock clock ~base_path request_id : Keeper_msg_async.entry)
+;;
+
+let test_keeper_msg_async_resolves_server_root_switch () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun root_sw ->
+  Eio_context.with_test_env
+    ~net:(Eio.Stdenv.net env)
+    ~clock:(Eio.Stdenv.clock env)
+    ~mono_clock:(Eio.Stdenv.mono_clock env)
+    ~sw:root_sw
+  @@ fun () ->
+  Eio.Switch.run
+  @@ fun turn_sw ->
+  Eio_context.with_turn_switch turn_sw
+  @@ fun () ->
+  match Keeper_msg_async.server_background_switch () with
+  | Error error ->
+      Alcotest.failf
+        "server background switch rejected: %s"
+        (Keeper_msg_async.submit_error_to_json error |> Yojson.Safe.to_string)
+  | Ok resolved ->
+      Alcotest.(check bool) "server root is selected" true (resolved == root_sw);
+      Alcotest.(check bool) "turn-local switch is not selected" false (resolved == turn_sw)
+;;
+
+let test_keeper_msg_async_does_not_accept_failed_initial_persistence () =
+  with_eio_env
+  @@ fun _env ->
+  Eio.Switch.run
+  @@ fun background_sw ->
+  let base_path = Filename.temp_file "keeper-msg-non-directory-base-" "" in
+  Fun.protect
+    ~finally:(fun () -> Sys.remove base_path)
+    (fun () ->
+       let worker_ran = Atomic.make false in
+       match
+         Keeper_msg_async.submit
+           ~background_sw
+           ~base_path
+           ~caller
+           ~keeper_name:"initial-persist-failure"
+           ~f:(fun _request_sw ->
+             Atomic.set worker_ran true;
+             tr_ok "{}")
+           ()
+       with
+       | Error (Keeper_msg_async.Initial_persistence_failed _) ->
+         Alcotest.(check bool) "worker was not started" false (Atomic.get worker_ran)
+       | Error error ->
+         Alcotest.failf
+           "expected initial persistence failure, got %s"
+           (Keeper_msg_async.submit_error_to_json error |> Yojson.Safe.to_string)
+       | Ok request_id ->
+         Alcotest.failf "request %s was ACKed without initial persistence" request_id)
+;;
+
+let test_keeper_msg_async_rejects_invalid_timeout_before_acceptance () =
+  with_eio_env
+  @@ fun _env ->
+  Eio.Switch.run
+  @@ fun background_sw ->
+  let base_path = temp_dir "keeper-msg-invalid-timeout-" in
+  let worker_ran = Atomic.make false in
+  List.iter
+    (fun timeout_sec ->
+       match
+         Keeper_msg_async.submit
+           ~background_sw
+           ~base_path
+           ~caller
+           ~timeout_sec
+           ~keeper_name:"invalid-timeout"
+           ~f:(fun _request_sw ->
+             Atomic.set worker_ran true;
+             tr_ok "{}")
+           ()
+       with
+       | Error (Keeper_msg_async.Invalid_timeout _) -> ()
+       | Error error ->
+           Alcotest.failf
+             "expected invalid timeout rejection, got %s"
+             (Keeper_msg_async.submit_error_to_json error |> Yojson.Safe.to_string)
+       | Ok request_id ->
+           Alcotest.failf
+             "invalid timeout was accepted as request %s"
+             request_id)
+    [ 0.0; -1.0; Float.nan; Float.infinity; Float.neg_infinity ];
+  Alcotest.(check bool) "invalid timeout never starts a worker" false (Atomic.get worker_ran);
+  match Keeper_msg_async.list_for_keeper ~base_path ~caller () with
+  | Ok [] -> ()
+  | Ok _ -> Alcotest.fail "invalid timeout created an in-memory request"
+  | Error rejection ->
+      Alcotest.failf
+        "valid owner lane rejected after invalid timeout: %s"
+        (Keeper_msg_async.access_rejection_to_json rejection |> Yojson.Safe.to_string)
 ;;
 
 let test_keeper_msg_async_marks_recovered_inflight_lost () =
@@ -224,33 +416,47 @@ let test_keeper_msg_async_marks_recovered_inflight_lost () =
   let promise, _resolver = Eio.Promise.create () in
   let request_id =
     Keeper_msg_async.submit
-      ~sw
+      ~background_sw:sw
       ~base_path
+      ~caller
       ~keeper_name:"gamma"
-      ~f:(fun () ->
+      ~f:(fun _request_sw ->
         Eio.Promise.await promise;
         tr_ok "{}")
       ()
+    |> accepted_request_id
   in
-  ignore (wait_for_running request_id : Keeper_msg_async.entry);
-  Keeper_msg_async.For_testing.forget request_id;
-  match Keeper_msg_async.poll ~base_path request_id with
+  ignore (wait_for_running ~base_path request_id : Keeper_msg_async.entry);
+  (match
+     Keeper_msg_async.cancel ~base_path ~caller:"different-caller" request_id
+   with
+   | Keeper_msg_async.Cancel_rejected Keeper_msg_async.Caller_mismatch -> ()
+   | _ -> Alcotest.fail "cross-caller cancellation must be rejected before switch failure");
+  (match Keeper_msg_async.poll ~base_path ~caller request_id with
+   | Keeper_msg_async.Found { status = Running; _ } -> ()
+   | _ -> Alcotest.fail "rejected cross-caller cancellation must leave worker running");
+  Keeper_msg_async.For_testing.forget ~base_path ~caller ~request_id;
+  match Keeper_msg_async.poll ~base_path ~caller request_id with
   | Keeper_msg_async.Found { Keeper_msg_async.status = Lost { reason }; _ } ->
     Alcotest.(check bool) "lost reason retained" true (String.length reason > 0);
-    Keeper_msg_async.For_testing.forget request_id;
-    (match Keeper_msg_async.poll ~base_path request_id with
+    Keeper_msg_async.For_testing.forget ~base_path ~caller ~request_id;
+    (match Keeper_msg_async.poll ~base_path ~caller request_id with
      | Keeper_msg_async.Found { Keeper_msg_async.status = Lost _; _ } -> ()
      | Keeper_msg_async.Found entry ->
        Alcotest.failf
          "expected persisted lost, got %s"
          (Keeper_msg_async.status_to_string entry.Keeper_msg_async.status)
-     | Keeper_msg_async.Absent | Keeper_msg_async.Unreadable _ ->
+     | Keeper_msg_async.Absent
+     | Keeper_msg_async.Unreadable _
+     | Keeper_msg_async.Rejected _ ->
        Alcotest.fail "expected persisted lost request")
   | Keeper_msg_async.Found entry ->
     Alcotest.failf
       "expected recovered lost, got %s"
       (Keeper_msg_async.status_to_string entry.Keeper_msg_async.status)
-  | Keeper_msg_async.Absent | Keeper_msg_async.Unreadable _ ->
+  | Keeper_msg_async.Absent
+  | Keeper_msg_async.Unreadable _
+  | Keeper_msg_async.Rejected _ ->
     Alcotest.fail "expected persisted request"
 ;;
 
@@ -263,15 +469,17 @@ let test_keeper_msg_async_recovery_sweep_marks_only_disk_only_inflight_lost () =
   let promise, _resolver = Eio.Promise.create () in
   let request_id =
     Keeper_msg_async.submit
-      ~sw
+      ~background_sw:sw
       ~base_path
+      ~caller
       ~keeper_name:"sweep"
-      ~f:(fun () ->
+      ~f:(fun _request_sw ->
         Eio.Promise.await promise;
         tr_ok "{}")
       ()
+    |> accepted_request_id
   in
-  ignore (wait_for_running request_id : Keeper_msg_async.entry);
+  ignore (wait_for_running ~base_path request_id : Keeper_msg_async.entry);
   Alcotest.(check int)
     "live in-memory worker is not recovered as lost"
     0
@@ -282,9 +490,11 @@ let test_keeper_msg_async_recovery_sweep_marks_only_disk_only_inflight_lost () =
      Alcotest.failf
        "expected live request to remain running, got %s"
        (Keeper_msg_async.status_to_string entry.Keeper_msg_async.status)
-   | Keeper_msg_async.Absent | Keeper_msg_async.Unreadable _ ->
+   | Keeper_msg_async.Absent
+   | Keeper_msg_async.Unreadable _
+   | Keeper_msg_async.Rejected _ ->
      Alcotest.fail "expected persisted running request");
-  Keeper_msg_async.For_testing.forget request_id;
+  Keeper_msg_async.For_testing.forget ~base_path ~caller ~request_id;
   Alcotest.(check int)
     "disk-only in-flight request is recovered as lost"
     1
@@ -296,31 +506,36 @@ let test_keeper_msg_async_recovery_sweep_marks_only_disk_only_inflight_lost () =
     Alcotest.failf
       "expected recovered lost request, got %s"
       (Keeper_msg_async.status_to_string entry.Keeper_msg_async.status)
-  | Keeper_msg_async.Absent | Keeper_msg_async.Unreadable _ ->
+  | Keeper_msg_async.Absent
+  | Keeper_msg_async.Unreadable _
+  | Keeper_msg_async.Rejected _ ->
     Alcotest.fail "expected persisted lost request"
 ;;
 
 let test_keeper_msg_async_marks_cancelled_worker_cancelled () =
   with_eio_env
   @@ fun _env ->
+  let base_path = temp_dir "keeper-msg-async-cancel-" in
   let request_id =
     Eio.Switch.run
     @@ fun sw ->
     let never, _resolver = Eio.Promise.create () in
     let request_id =
       Keeper_msg_async.submit
-        ~sw
-        ~base_path:(temp_dir "keeper-msg-async-cancel-")
+        ~background_sw:sw
+        ~base_path
+        ~caller
         ~keeper_name:"cancelled"
-        ~f:(fun () ->
+        ~f:(fun _request_sw ->
           Eio.Promise.await never;
           tr_ok "{}")
         ()
+      |> accepted_request_id
     in
-    ignore (wait_for_running request_id : Keeper_msg_async.entry);
+    ignore (wait_for_running ~base_path request_id : Keeper_msg_async.entry);
     request_id
   in
-  match wait_for_cancelled request_id with
+  match wait_for_cancelled ~base_path request_id with
   | { Keeper_msg_async.status = Cancelled { reason; cancelled_by }; completed_at = Some _; _ } ->
     Alcotest.(check string) "cancelled_by runtime" "runtime" cancelled_by;
     Alcotest.(check bool) "cancelled reason mentions cancellation" true
@@ -342,20 +557,23 @@ let test_keeper_msg_async_operator_cancel_is_terminal_cancelled () =
   let never, _resolver = Eio.Promise.create () in
   let request_id =
     Keeper_msg_async.submit
-      ~sw
+      ~background_sw:sw
       ~base_path
+      ~caller
       ~keeper_name:"operator-cancelled"
-      ~f:(fun () ->
+      ~f:(fun _request_sw ->
         Eio.Promise.await never;
         tr_ok "{}")
       ()
+    |> accepted_request_id
   in
-  ignore (wait_for_running request_id : Keeper_msg_async.entry);
+  ignore (wait_for_running ~base_path request_id : Keeper_msg_async.entry);
   Alcotest.(check bool)
     "cancel returns true"
     true
-    (Keeper_msg_async.cancel ~base_path request_id);
-  (match wait_for_cancelled request_id with
+    (Keeper_msg_async.cancel ~base_path ~caller request_id
+     = Keeper_msg_async.Cancelled_request);
+  (match wait_for_cancelled ~base_path request_id with
    | { Keeper_msg_async.status = Cancelled { reason; cancelled_by }; completed_at = Some _; _ } ->
      Alcotest.(check string) "cancelled_by operator" "operator" cancelled_by;
      Alcotest.(check bool) "reason mentions operator" true
@@ -366,20 +584,24 @@ let test_keeper_msg_async_operator_cancel_is_terminal_cancelled () =
      Alcotest.failf
        "expected operator cancel to be cancelled, got %s"
        (Keeper_msg_async.status_to_string entry.Keeper_msg_async.status));
-  Keeper_msg_async.For_testing.forget request_id;
-  (match Keeper_msg_async.poll ~base_path request_id with
+  Keeper_msg_async.For_testing.forget ~base_path ~caller ~request_id;
+  (match Keeper_msg_async.poll ~base_path ~caller request_id with
    | Keeper_msg_async.Found { Keeper_msg_async.status = Cancelled { cancelled_by; _ }; _ } ->
      Alcotest.(check string) "persisted cancelled_by operator" "operator" cancelled_by
    | Keeper_msg_async.Found entry ->
      Alcotest.failf
        "expected persisted cancelled, got %s"
        (Keeper_msg_async.status_to_string entry.Keeper_msg_async.status)
-   | Keeper_msg_async.Absent | Keeper_msg_async.Unreadable _ ->
+   | Keeper_msg_async.Absent
+   | Keeper_msg_async.Unreadable _
+   | Keeper_msg_async.Rejected _ ->
      Alcotest.fail "expected persisted cancelled request");
   Alcotest.(check bool)
     "second cancel returns false"
     false
-    (Keeper_msg_async.cancel ~base_path request_id)
+    (match Keeper_msg_async.cancel ~base_path ~caller request_id with
+     | Keeper_msg_async.Cancel_already_terminal _ -> false
+     | _ -> true)
 ;;
 
 let test_keeper_msg_async_timeout_is_terminal_error () =
@@ -398,15 +620,17 @@ let test_keeper_msg_async_timeout_is_terminal_error () =
     Keeper_msg_async.submit
       ~clock
       ~timeout_sec:0.02
-      ~sw
+      ~background_sw:sw
       ~base_path
+      ~caller
       ~keeper_name:"timeout"
-      ~f:(fun () ->
+      ~f:(fun _request_sw ->
         Eio.Promise.await release_late;
         tr_ok (Yojson.Safe.to_string (`Assoc [ "kind", `String "late" ])))
       ()
+    |> accepted_request_id
   in
-  let entry = wait_for_done_with_clock clock request_id in
+  let entry = wait_for_done_with_clock clock ~base_path request_id in
   let timeout_body =
     match entry.Keeper_msg_async.status with
     | Done { ok = false; body } ->
@@ -436,31 +660,63 @@ let test_keeper_msg_async_timeout_is_terminal_error () =
   Alcotest.(check bool)
     "cancel after terminal timeout returns false"
     false
-    (Keeper_msg_async.cancel ~base_path request_id);
+    (match Keeper_msg_async.cancel ~base_path ~caller request_id with
+     | Keeper_msg_async.Cancel_already_terminal _ -> false
+     | _ -> true);
   wait_for_active_switch_count clock 0;
   Eio.Promise.resolve notify_release_late ();
   Eio.Time.sleep clock 0.05;
-  match Keeper_msg_async.poll request_id with
+  match Keeper_msg_async.poll ~base_path ~caller request_id with
   | Keeper_msg_async.Found { Keeper_msg_async.status = Done { ok = false; body }; _ } ->
     Alcotest.(check string) "late worker result cannot overwrite timeout" timeout_body body
   | Keeper_msg_async.Found entry ->
     Alcotest.failf
       "expected timeout to remain terminal, got %s"
       (Keeper_msg_async.status_to_string entry.Keeper_msg_async.status)
-  | Keeper_msg_async.Absent | Keeper_msg_async.Unreadable _ ->
+  | Keeper_msg_async.Absent
+  | Keeper_msg_async.Unreadable _
+  | Keeper_msg_async.Rejected _ ->
     Alcotest.fail "expected timeout request to remain pollable"
 ;;
 
-let test_keeper_msg_async_default_timeout_uses_turn_timeout () =
-  let expected = Keeper_runtime_resolved.turn_timeout_sec () in
-  Alcotest.(check (float 0.0001))
-    "default async worker timeout"
-    expected
+let test_keeper_msg_async_timeout_is_explicit_only () =
+  Alcotest.(check (option (float 0.0001)))
+    "default async worker has no outer timeout"
+    None
     (Keeper_msg_async.For_testing.effective_timeout_sec ());
-  Alcotest.(check (float 0.0001))
-    "explicit async worker timeout wins"
-    42.0
+  Alcotest.(check (option (float 0.0001)))
+    "explicit async worker timeout is preserved"
+    (Some 42.0)
     (Keeper_msg_async.For_testing.effective_timeout_sec ~timeout_sec:42.0 ())
+;;
+
+let test_keeper_msg_async_explicit_timeout_requires_clock () =
+  with_eio_env
+  @@ fun _env ->
+  Eio.Switch.run
+  @@ fun background_sw ->
+  let base_path = temp_dir "keeper-msg-async-clock-required-" in
+  match
+    Keeper_msg_async.submit
+      ~timeout_sec:1.0
+      ~background_sw
+      ~base_path
+      ~caller
+      ~keeper_name:"clock-required"
+      ~f:(fun _request_sw -> tr_ok "{}")
+      ()
+  with
+  | Error (Keeper_msg_async.Invalid_timeout { reason }) ->
+    Alcotest.(check string)
+      "typed clock requirement"
+      "keeper_msg explicit timeout_sec requires an Eio clock"
+      reason
+  | Error error ->
+    Alcotest.failf
+      "expected explicit-timeout clock rejection, got %s"
+      (Keeper_msg_async.submit_error_to_json error |> Yojson.Safe.to_string)
+  | Ok request_id ->
+    Alcotest.failf "explicit timeout without clock was accepted as %s" request_id
 ;;
 
 let test_keeper_msg_async_gc_removes_stale_terminal_disk_record () =
@@ -472,15 +728,17 @@ let test_keeper_msg_async_gc_removes_stale_terminal_disk_record () =
   let base_path = temp_dir "keeper-msg-async-gc-" in
   let request_id =
     Keeper_msg_async.submit
-      ~sw
+      ~background_sw:sw
       ~base_path
+      ~caller
       ~keeper_name:"delta"
-      ~f:(fun () ->
+      ~f:(fun _request_sw ->
         Eio.Fiber.yield ();
         tr_ok "{}")
       ()
+    |> accepted_request_id
   in
-  let entry = wait_for_done_with_clock clock request_id in
+  let entry = wait_for_done_with_clock clock ~base_path request_id in
   ignore
     (wait_for_persisted_done_with_clock clock ~base_path request_id
       : Keeper_msg_async.entry);
@@ -494,20 +752,22 @@ let test_keeper_msg_async_gc_removes_stale_terminal_disk_record () =
     path
     (Yojson.Safe.to_string
        (`Assoc
-           [ "request_id", `String request_id
+           [ "schema_version", `Int Keeper_msg_async.For_testing.record_schema_version
+           ; "request_id", `String request_id
            ; "keeper_name", `String entry.keeper_name
-           ; "base_path", `String base_path
+           ; "base_path", `String entry.base_path
+           ; "submitted_by", `String caller
            ; "status", `String "done"
            ; "submitted_at", `Float stale_ts
            ; "completed_at", `Float stale_ts
            ; "ok", `Bool true
            ; "body", `String "{}"
            ]));
-  Keeper_msg_async.For_testing.forget request_id;
+  Keeper_msg_async.For_testing.forget ~base_path ~caller ~request_id;
   let removed = Keeper_msg_async.For_testing.gc_stale_disk ~base_path in
   Alcotest.(check int) "removed stale disk record" 1 removed;
   Alcotest.(check bool) "record file removed" false (Sys.file_exists path);
-  match Keeper_msg_async.poll ~base_path request_id with
+  match Keeper_msg_async.poll ~base_path ~caller request_id with
   | Keeper_msg_async.Absent -> ()
   | Keeper_msg_async.Unreadable reason ->
     Alcotest.failf "expected stale disk record to be gone, got unreadable: %s" reason
@@ -515,6 +775,10 @@ let test_keeper_msg_async_gc_removes_stale_terminal_disk_record () =
     Alcotest.failf
       "expected stale disk record to be gone, got %s"
       (Keeper_msg_async.status_to_string entry.Keeper_msg_async.status)
+  | Keeper_msg_async.Rejected rejection ->
+    Alcotest.failf
+      "expected stale disk record to be gone, got rejected: %s"
+      (Keeper_msg_async.access_rejection_to_json rejection |> Yojson.Safe.to_string)
 ;;
 
 let test_keeper_msg_async_rejects_oversized_request_id () =
@@ -568,7 +832,8 @@ let test_keeper_msg_async_load_record_absent_id () =
        | Keeper_msg_async.Absent -> ()
        | Keeper_msg_async.Found _ -> Alcotest.fail "expected absent, got found"
        | Keeper_msg_async.Unreadable reason ->
-         Alcotest.failf "expected absent, got unreadable: %s" reason)
+         Alcotest.failf "expected absent, got unreadable: %s" reason
+       | Keeper_msg_async.Rejected _ -> Alcotest.fail "expected absent, got rejected")
 ;;
 
 let test_keeper_msg_async_load_record_corrupt_json_is_unreadable () =
@@ -587,12 +852,14 @@ let test_keeper_msg_async_load_record_corrupt_json_is_unreadable () =
             true
             (String.length reason > 0)
         | Keeper_msg_async.Found _ -> Alcotest.fail "expected unreadable, got found"
-        | Keeper_msg_async.Absent -> Alcotest.fail "expected unreadable, got absent");
+        | Keeper_msg_async.Absent -> Alcotest.fail "expected unreadable, got absent"
+        | Keeper_msg_async.Rejected _ -> Alcotest.fail "expected unreadable, got rejected");
        (* poll must surface the same distinction to callers. *)
-       match Keeper_msg_async.poll ~base_path request_id with
+       match Keeper_msg_async.poll ~base_path ~caller request_id with
        | Keeper_msg_async.Unreadable _ -> ()
        | Keeper_msg_async.Found _ -> Alcotest.fail "expected poll unreadable, got found"
-       | Keeper_msg_async.Absent -> Alcotest.fail "expected poll unreadable, got absent")
+       | Keeper_msg_async.Absent -> Alcotest.fail "expected poll unreadable, got absent"
+       | Keeper_msg_async.Rejected _ -> Alcotest.fail "expected poll unreadable, got rejected")
 ;;
 
 let test_keeper_msg_async_load_record_missing_status_is_unreadable () =
@@ -608,8 +875,11 @@ let test_keeper_msg_async_load_record_missing_status_is_unreadable () =
          ~request_id
          (Yojson.Safe.to_string
             (`Assoc
-                [ "request_id", `String request_id
+                [ "schema_version", `Int Keeper_msg_async.For_testing.record_schema_version
+                ; "request_id", `String request_id
                 ; "keeper_name", `String "alpha"
+                ; "base_path", `String (Fs_compat.realpath base_path)
+                ; "submitted_by", `String caller
                 ; "submitted_at", `Float 1.0
                 ]));
        match Keeper_msg_async.For_testing.load_record ~base_path ~request_id with
@@ -617,9 +887,10 @@ let test_keeper_msg_async_load_record_missing_status_is_unreadable () =
          Alcotest.(check bool)
            "reason mentions missing fields"
            true
-           (contains_substring ~needle:"missing required fields" reason)
+           (contains_substring ~needle:"missing required string field \"status\"" reason)
        | Keeper_msg_async.Found _ -> Alcotest.fail "expected unreadable, got found"
-       | Keeper_msg_async.Absent -> Alcotest.fail "expected unreadable, got absent")
+       | Keeper_msg_async.Absent -> Alcotest.fail "expected unreadable, got absent"
+       | Keeper_msg_async.Rejected _ -> Alcotest.fail "expected unreadable, got rejected")
 ;;
 
 let test_keeper_msg_async_load_record_unknown_status_is_unreadable () =
@@ -635,8 +906,11 @@ let test_keeper_msg_async_load_record_unknown_status_is_unreadable () =
          ~request_id
          (Yojson.Safe.to_string
             (`Assoc
-                [ "request_id", `String request_id
+                [ "schema_version", `Int Keeper_msg_async.For_testing.record_schema_version
+                ; "request_id", `String request_id
                 ; "keeper_name", `String "alpha"
+                ; "base_path", `String (Fs_compat.realpath base_path)
+                ; "submitted_by", `String caller
                 ; "status", `String "sideways"
                 ; "submitted_at", `Float 1.0
                 ]));
@@ -647,7 +921,71 @@ let test_keeper_msg_async_load_record_unknown_status_is_unreadable () =
            true
            (contains_substring ~needle:"unknown status" reason)
        | Keeper_msg_async.Found _ -> Alcotest.fail "expected unreadable, got found"
-       | Keeper_msg_async.Absent -> Alcotest.fail "expected unreadable, got absent")
+       | Keeper_msg_async.Absent -> Alcotest.fail "expected unreadable, got absent"
+       | Keeper_msg_async.Rejected _ -> Alcotest.fail "expected unreadable, got rejected")
+;;
+
+let test_keeper_msg_async_rejects_ownerless_v1_record () =
+  with_eio_env
+  @@ fun _env ->
+  let base_path = temp_dir "keeper-msg-load-v1-" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+       let request_id = "kmsg_ownerless_v1_0_0" in
+       write_disk_record
+         ~base_path
+         ~request_id
+         (Yojson.Safe.to_string
+            (`Assoc
+                [ "schema_version", `Int 1
+                ; "request_id", `String request_id
+                ; "keeper_name", `String "alpha"
+                ; "base_path", `String (Fs_compat.realpath base_path)
+                ; "status", `String "queued"
+                ; "submitted_at", `Float 1.0
+                ]));
+       match Keeper_msg_async.For_testing.load_record ~base_path ~request_id with
+       | Keeper_msg_async.Unreadable reason ->
+         Alcotest.(check bool)
+           "v1 hard cut is explicit"
+           true
+           (contains_substring ~needle:"unsupported keeper_msg request schema_version=1" reason)
+       | Keeper_msg_async.Found _ -> Alcotest.fail "ownerless v1 record must not load"
+       | Keeper_msg_async.Absent -> Alcotest.fail "ownerless v1 record unexpectedly absent"
+       | Keeper_msg_async.Rejected _ -> Alcotest.fail "ownerless v1 is a schema error")
+;;
+
+let test_keeper_msg_async_rejects_filename_request_id_mismatch () =
+  with_eio_env
+  @@ fun _env ->
+  let base_path = temp_dir "keeper-msg-load-id-mismatch-" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+       let request_id = "kmsg_filename_id_0_0" in
+       write_disk_record
+         ~base_path
+         ~request_id
+         (Yojson.Safe.to_string
+            (`Assoc
+                [ "schema_version", `Int Keeper_msg_async.For_testing.record_schema_version
+                ; "request_id", `String "kmsg_different_id_0_0"
+                ; "keeper_name", `String "alpha"
+                ; "base_path", `String (Fs_compat.realpath base_path)
+                ; "submitted_by", `String caller
+                ; "status", `String "queued"
+                ; "submitted_at", `Float 1.0
+                ]));
+       match Keeper_msg_async.For_testing.load_record ~base_path ~request_id with
+       | Keeper_msg_async.Unreadable reason ->
+         Alcotest.(check bool)
+           "filename/request id consistency is enforced"
+           true
+           (contains_substring ~needle:"does not match filename request_id" reason)
+       | Keeper_msg_async.Found _ -> Alcotest.fail "mismatched request id must not load"
+       | Keeper_msg_async.Absent -> Alcotest.fail "mismatched record unexpectedly absent"
+       | Keeper_msg_async.Rejected _ -> Alcotest.fail "mismatched id is a record error")
 ;;
 
 let test_yield_meter_noops_without_runnable_fiber () =
@@ -705,33 +1043,35 @@ let test_voice_output_turn_serializes_speakers () =
     (Atomic.get second_entered)
 ;;
 
-let test_keeper_msg_async_persists_outside_global_mutex () =
-  let source = read_file (source_file "lib/keeper/keeper_msg_async.ml") in
-  Alcotest.(check bool)
-    "set_status computes optional persist entry"
-    true
-    (contains_substring ~needle:"let to_persist =" source);
-  Alcotest.(check bool)
-    "persist happens after lock returns"
-    true
-    (contains_substring ~needle:"Option.iter persist_entry to_persist" source);
-  Alcotest.(check bool)
-    "status update does not persist while holding lock"
-    false
-    (contains_substring
-       ~needle:"Hashtbl.replace pending request_id updated;\n      persist_entry updated"
-       source)
-;;
-
 let () =
   run
     "keeper_mutex_coverage"
     [ ( "keeper_msg_async"
       , [ test_case "submit/poll roundtrip" `Quick test_keeper_msg_async_roundtrip
         ; test_case
+            "list isolates canonical BasePath owner lanes"
+            `Quick
+            test_keeper_msg_async_list_isolates_base_paths
+        ; test_case
             "recover completed request from disk"
             `Quick
             test_keeper_msg_async_recovers_done_from_disk
+        ; test_case
+            "request survives submitter turn switch"
+            `Quick
+            test_keeper_msg_async_survives_submitter_turn_switch
+        ; test_case
+            "server root switch ignores turn-local binding"
+            `Quick
+            test_keeper_msg_async_resolves_server_root_switch
+        ; test_case
+            "initial persistence failure is not accepted"
+            `Quick
+            test_keeper_msg_async_does_not_accept_failed_initial_persistence
+        ; test_case
+            "invalid timeout is rejected before acceptance"
+            `Quick
+            test_keeper_msg_async_rejects_invalid_timeout_before_acceptance
         ; test_case
             "recover in-flight request as lost"
             `Quick
@@ -753,9 +1093,13 @@ let () =
             `Quick
             test_keeper_msg_async_timeout_is_terminal_error
         ; test_case
-            "default timeout follows keeper turn timeout"
+            "async worker timeout is explicit only"
             `Quick
-            test_keeper_msg_async_default_timeout_uses_turn_timeout
+            test_keeper_msg_async_timeout_is_explicit_only
+        ; test_case
+            "explicit async timeout requires a clock"
+            `Quick
+            test_keeper_msg_async_explicit_timeout_requires_clock
         ; test_case
             "gc removes stale terminal disk record"
             `Quick
@@ -781,9 +1125,13 @@ let () =
             `Quick
             test_keeper_msg_async_load_record_unknown_status_is_unreadable
         ; test_case
-            "persistence outside global mutex"
+            "ownerless v1 record is rejected"
             `Quick
-            test_keeper_msg_async_persists_outside_global_mutex
+            test_keeper_msg_async_rejects_ownerless_v1_record
+        ; test_case
+            "filename request id mismatch is rejected"
+            `Quick
+            test_keeper_msg_async_rejects_filename_request_id_mismatch
         ] )
     ; ( "eio_guard"
       , [ test_case

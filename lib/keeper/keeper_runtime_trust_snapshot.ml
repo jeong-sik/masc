@@ -89,8 +89,8 @@ let terminal_reason_from_receipt receipt =
   in
   match terminal_reason_code with
   | Some code when receipt_requires_tool_attention
-                   && (String.equal code "completed"
-                       || String.equal code "success") ->
+                   && Keeper_turn_disposition.is_success
+                        (Keeper_turn_disposition.of_wire code) ->
       Some
         (Keeper_turn_terminal.of_disposition
            ~source:"execution_receipt"
@@ -172,7 +172,8 @@ let disposition_of_typed_runtime_blocker_class blocker_class =
   | Keeper_meta_contract.Sdk_idle_detected
   | Keeper_meta_contract.Sdk_guardrail_violation
   | Keeper_meta_contract.Sdk_tripwire_violation
-  | Keeper_meta_contract.Sdk_exit_condition_met ->
+  | Keeper_meta_contract.Sdk_exit_condition_met
+  | Keeper_meta_contract.Sdk_tool_failure_recovery_failed ->
       Keeper_turn_disposition.Unknown { raw_error = "" }
 
 let legacy_provider_runtime_blocker_disposition raw_blocker_class =

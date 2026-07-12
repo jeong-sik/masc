@@ -161,12 +161,31 @@ let keeper_toml_path_opt name =
 let keeper_toml_path_opt_for_base_path ~base_path name =
   Config_dir_resolver.keeper_toml_path_opt_for_base_path ~base_path name
 
-let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
-  Keeper_types_profile_persona_defaults.load ~name
+let persona_load_error_to_profile_error
+    ?keeper_path
+    (error : Keeper_types_profile_persona_defaults.load_error) =
+  let kind =
+    match error.kind with
+    | Keeper_types_profile_persona_defaults.Persona_read_error -> Read_error
+    | Keeper_types_profile_persona_defaults.Persona_parse_error -> Parse_error
+  in
+  let keeper_path =
+    match keeper_path with
+    | Some keeper_path -> keeper_path
+    | None -> error.path
+  in
+  { keeper_path
+  ; failing_path = error.path
+  ; kind
+  ; detail = error.detail
+  }
 
-let load_keeper_profile_defaults_from_persona_dirs ~persona_dirs name
-    : keeper_profile_defaults =
+let load_keeper_profile_defaults_from_persona_dirs
+    ?keeper_path
+    ~persona_dirs
+    name =
   Keeper_types_profile_persona_defaults.load_from_dirs ~persona_dirs ~name
+  |> Result.map_error (persona_load_error_to_profile_error ?keeper_path)
 
 let safe_persona_dirs ?base_path () =
   try
@@ -196,7 +215,7 @@ let load_keeper_profile_defaults_result_uncached_with_paths
     ~keeper_toml_path_opt
     ~persona_dirs
     name :
-    (keeper_profile_defaults, string) result =
+    (keeper_profile_defaults, keeper_toml_load_error) result =
   (* Priority: TOML config/keepers/<name>.toml > persona profile.json.
      If TOML sets [persona_name], load that persona first and treat TOML as a
      thin overlay instead of duplicating the full keeper profile. *)
@@ -207,67 +226,56 @@ let load_keeper_profile_defaults_result_uncached_with_paths
        | Ok (_name, defaults) -> (
            match defaults.persona_name with
            | Some persona_name ->
-               let persona_defaults =
-                 load_keeper_profile_defaults_from_persona_dirs
-                   ~persona_dirs
-                   persona_name
-               in
-               Ok
-                 (merge_keeper_profile_defaults ~agent_name:name
-                    ~base:persona_defaults ~overlay:defaults)
+               (match
+                  load_keeper_profile_defaults_from_persona_dirs
+                    ~keeper_path:toml_path
+                    ~persona_dirs
+                    persona_name
+                with
+                | Error _ as error -> error
+                | Ok persona_defaults ->
+                  Ok
+                    (merge_keeper_profile_defaults ~agent_name:name
+                       ~base:persona_defaults ~overlay:defaults))
            | None -> Ok defaults)
        | Error e -> Error e)
     | None ->
-      Ok (load_keeper_profile_defaults_from_persona_dirs ~persona_dirs name)
+      load_keeper_profile_defaults_from_persona_dirs ~persona_dirs name
   in
   result
 
 let load_keeper_profile_defaults_result_uncached name :
-    (keeper_profile_defaults, string) result =
+    (keeper_profile_defaults, keeper_toml_load_error) result =
   load_keeper_profile_defaults_result_uncached_with_paths
     ~keeper_toml_path_opt:(keeper_toml_path_opt name)
     ~persona_dirs:(safe_persona_dirs ())
     name
 
 let load_keeper_profile_defaults_result_for_base_path ~base_path name :
-    (keeper_profile_defaults, string) result =
+    (keeper_profile_defaults, keeper_toml_load_error) result =
   load_keeper_profile_defaults_result_uncached_with_paths
     ~keeper_toml_path_opt:(keeper_toml_path_opt_for_base_path ~base_path name)
     ~persona_dirs:(safe_persona_dirs ~base_path ())
     name
 
-(* Classify a [load_keeper_toml] failure message into a low-cardinality
-   label suitable for Otel_metric_store. The raw error string embeds user input
-   (invalid enum values etc.) and would blow up metric cardinality. *)
-let classify_toml_failure_reason (err : string) : string =
-  let err_lc = String.lowercase_ascii err in
-  let contains needle =
-    let nl = String.length needle in
-    let hl = String.length err_lc in
-    if nl = 0 then true
-    else if nl > hl then false
-    else
-      let rec loop i =
-        if i + nl > hl then false
-        else if String.sub err_lc i nl = needle then true
-        else loop (i + 1)
-      in
-      loop 0
-  in
-  if contains "invalid network_mode" then "invalid_network_mode"
-  else if contains "invalid sandbox_profile" then "invalid_sandbox_profile"
-    else if contains "invalid" then "invalid_enum"
-  else if contains "unknown" || contains "unexpected field" then "unknown_field"
-  else if contains "parse" || contains "syntax" || contains "expected" then
-    "parse_error"
-  else "other"
-
 type keeper_toml_config_error = {
   keeper_name : string;
-  path : string;
-  error : string;
-  reason : string;
+  keeper_path : string;
+  failing_path : string;
+  kind : keeper_toml_error_kind;
+  detail : string;
 }
+
+type keeper_config_probe_error_kind =
+  | Directory_resolution_error
+  | Not_a_directory
+  | Directory_read_error
+
+type keeper_config_probe_error =
+  { directory_path : string option
+  ; kind : keeper_config_probe_error_kind
+  ; detail : string
+  }
 
 type keeper_toml_unknown_keys = {
   keeper_name : string;
@@ -276,20 +284,49 @@ type keeper_toml_unknown_keys = {
 }
 
 let keeper_toml_config_error_to_json
-    ({ keeper_name; path; error; reason } : keeper_toml_config_error)
+    ({ keeper_name; keeper_path; failing_path; kind; detail } :
+      keeper_toml_config_error)
     : Yojson.Safe.t =
   `Assoc
     [
       ("keeper", `String keeper_name);
-      ("path", `String path);
-      ("reason", `String reason);
-      ("error", `String error);
-      ("terminal_reason", `String "config_parse_failed");
+      ("keeper_path", `String keeper_path);
+      ("failing_path", `String failing_path);
+      ("kind", `String (keeper_toml_error_kind_to_string kind));
+      ("detail", `String detail);
+      ("terminal_reason", `String "config_invalid");
       ("severity", `String "error");
       ("blocking", `Bool true);
       ("operator_action_required", `Bool true);
       ("next_action", `String "fix_keeper_toml_config");
     ]
+
+let keeper_config_probe_error_kind_to_string = function
+  | Directory_resolution_error -> "directory_resolution_error"
+  | Not_a_directory -> "not_a_directory"
+  | Directory_read_error -> "directory_read_error"
+
+let keeper_config_probe_error_to_json
+    ({ directory_path; kind; detail } : keeper_config_probe_error)
+    : Yojson.Safe.t =
+  `Assoc
+    [ ("directory_path", Json_util.string_opt_to_json directory_path)
+    ; ("kind", `String (keeper_config_probe_error_kind_to_string kind))
+    ; ("detail", `String detail)
+    ; ("blocking", `Bool true)
+    ; ("operator_action_required", `Bool true)
+    ; ("next_action", `String "repair_keeper_config_directory")
+    ]
+
+let keeper_toml_config_error_of_load_error
+    ~keeper_name
+    (error : keeper_toml_load_error) =
+  { keeper_name
+  ; keeper_path = error.keeper_path
+  ; failing_path = error.failing_path
+  ; kind = error.kind
+  ; detail = error.detail
+  }
 
 let keeper_toml_unknown_keys_to_json
     ({ keeper_name; path; unknown_keys } : keeper_toml_unknown_keys)
@@ -328,42 +365,44 @@ let keeper_toml_unknown_keys_of_path path =
                 }))
 
 let keeper_toml_config_error_of_path path =
-  let error =
-    match Safe_ops.read_file_safe path with
-    | Error e -> Some (Printf.sprintf "cannot read %s: %s" path e)
-    | Ok content -> (
-        match Keeper_toml_loader.parse_toml content with
-        | Error e -> Some (Printf.sprintf "%s: %s" path e)
-        | Ok doc -> (
-            match profile_defaults_of_toml doc with
-            | Error e -> Some (Printf.sprintf "%s: %s" path e)
-            | Ok _ -> (
-                match Keeper_toml_loader.toml_string_opt doc "keeper.name" with
-                | Some name when name <> "" && not (validate_name name) ->
-                    Some (Printf.sprintf "%s: invalid keeper name '%s'" path name)
-                | _ -> None)))
-  in
-  match error with
-  | None -> None
-  | Some error ->
-      Some
-        {
-          keeper_name = keeper_name_of_toml_path path;
-          path;
-          error;
-          reason = classify_toml_failure_reason error;
-        }
+  match inspect_keeper_toml path with
+  | Ok _ -> None
+  | Error error ->
+    Some
+      (keeper_toml_config_error_of_load_error
+         ~keeper_name:(keeper_name_of_toml_path path)
+         error)
 
-let keeper_toml_config_errors_in_dir dir =
-  if not (Fs_compat.file_exists dir && Sys.is_directory dir) then []
-  else
-    dir
-    |> Sys.readdir
-    |> Array.to_list
-    |> List.filter (fun f -> Filename.check_suffix f ".toml")
-    |> List.sort String.compare
-    |> List.filter_map (fun f ->
-         keeper_toml_config_error_of_path (Filename.concat dir f))
+let keeper_toml_config_errors_in_dir_result dir =
+  try
+    if not (Fs_compat.file_exists dir)
+    then Ok []
+    else if not (Sys.is_directory dir)
+    then
+      Error
+        { directory_path = Some dir
+        ; kind = Not_a_directory
+        ; detail = "keeper config path exists but is not a directory"
+        }
+    else
+      match Safe_ops.list_dir_safe dir with
+      | Error detail ->
+        Error { directory_path = Some dir; kind = Directory_read_error; detail }
+      | Ok files ->
+        Ok
+          (files
+           |> List.filter (fun f -> Filename.check_suffix f ".toml")
+           |> List.sort String.compare
+           |> List.filter_map (fun f ->
+                keeper_toml_config_error_of_path (Filename.concat dir f)))
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Error
+      { directory_path = Some dir
+      ; kind = Directory_read_error
+      ; detail = Printexc.to_string exn
+      }
 
 let keeper_toml_unknown_keys_in_dir dir =
   if not (Fs_compat.file_exists dir && Sys.is_directory dir) then []
@@ -376,19 +415,18 @@ let keeper_toml_unknown_keys_in_dir dir =
     |> List.filter_map (fun f ->
          keeper_toml_unknown_keys_of_path (Filename.concat dir f))
 
-let keeper_toml_config_errors () =
-  keeper_toml_config_errors_in_dir (Config_dir_resolver.keepers_dir ())
+let keeper_toml_config_errors_result () =
+  try keeper_toml_config_errors_in_dir_result (Config_dir_resolver.keepers_dir ()) with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Error
+      { directory_path = None
+      ; kind = Directory_resolution_error
+      ; detail = Printexc.to_string exn
+      }
 
 let keeper_toml_unknown_keys () =
   keeper_toml_unknown_keys_in_dir (Config_dir_resolver.keepers_dir ())
-
-let keeper_toml_config_errors_json () =
-  `List (List.map keeper_toml_config_error_to_json (keeper_toml_config_errors ()))
-
-let keeper_toml_config_error_for_name name =
-  match keeper_toml_path_opt name with
-  | None -> None
-  | Some path -> keeper_toml_config_error_of_path path
 
 (* Profile defaults cache — strict results are cached by source file
    fingerprint, not by keeper name alone. TOML/persona edits happen outside the
@@ -400,7 +438,7 @@ type profile_defaults_cache_entry =
   { primary_toml_path : string option
   ; dependency_paths : string list
   ; dependency_fingerprint : string
-  ; result : (keeper_profile_defaults, string) result
+  ; result : (keeper_profile_defaults, keeper_toml_load_error) result
   }
 
 let profile_defaults_cache : (profile_defaults_cache_key, profile_defaults_cache_entry) Hashtbl.t =
@@ -462,7 +500,7 @@ let persona_profile_candidate_paths name =
        Filename.concat (Filename.concat root name) "profile.json")
 
 let profile_dependency_paths ~name ~primary_toml_path
-    (result : (keeper_profile_defaults, string) result) =
+    (result : (keeper_profile_defaults, keeper_toml_load_error) result) =
   let paths =
     match primary_toml_path, result with
     | Some toml_path, Ok defaults ->
@@ -473,13 +511,13 @@ let profile_dependency_paths ~name ~primary_toml_path
         | _ -> []
       in
       toml_path :: persona_paths
-    | Some toml_path, Error _ -> [ toml_path ]
+    | Some _, Error error -> keeper_toml_load_error_paths error
     | None, _ -> persona_profile_candidate_paths name
   in
   dedupe_keep_order paths
 
 let load_keeper_profile_defaults_result name :
-    (keeper_profile_defaults, string) result =
+    (keeper_profile_defaults, keeper_toml_load_error) result =
   let primary_toml_path = keeper_toml_path_opt name in
   let key = profile_defaults_cache_key name in
   let cached =
@@ -517,43 +555,22 @@ let invalidate_keeper_profile_defaults_cache name =
   Hashtbl.remove profile_defaults_cache key;
   Stdlib.Mutex.unlock profile_defaults_mu
 
-let load_keeper_profile_defaults name : keeper_profile_defaults =
-  match load_keeper_profile_defaults_result name with
-  | Ok defaults -> defaults
-  | Error e ->
-    (match keeper_toml_path_opt name with
-     | Some _ ->
-       Log.Keeper.warn "toml config for %s failed (%s), falling back to persona" name e;
-       Otel_metric_store.inc_counter Keeper_metrics.(to_string TomlInvalid)
-         ~labels:[ ("keeper", name); ("reason", classify_toml_failure_reason e) ]
-         ()
-     | None -> ());
-    load_keeper_profile_defaults_from_persona name
-
-let load_keeper_profile_defaults_for_base_path ~base_path name
-    : keeper_profile_defaults =
-  match load_keeper_profile_defaults_result_for_base_path ~base_path name with
-  | Ok defaults -> defaults
-  | Error e ->
-    (match keeper_toml_path_opt_for_base_path ~base_path name with
-     | Some _ ->
-       Log.Keeper.warn "toml config for %s failed (%s), falling back to persona" name e;
-       Otel_metric_store.inc_counter Keeper_metrics.(to_string TomlInvalid)
-         ~labels:[ ("keeper", name); ("reason", classify_toml_failure_reason e) ]
-         ()
-     | None -> ());
-    load_keeper_profile_defaults_from_persona_dirs
-      ~persona_dirs:(safe_persona_dirs ~base_path ())
-      name
-
 let keeper_profile_defaults_materializable_for_name ?base_path name =
   try
-    let defaults =
+    let defaults_result =
       match base_path with
-      | Some base_path -> load_keeper_profile_defaults_for_base_path ~base_path name
-      | None -> load_keeper_profile_defaults name
+      | Some base_path ->
+        load_keeper_profile_defaults_result_for_base_path ~base_path name
+      | None -> load_keeper_profile_defaults_result name
     in
-    keeper_profile_defaults_materializable defaults
+    (match defaults_result with
+     | Ok defaults -> keeper_profile_defaults_materializable defaults
+     | Error error ->
+       Log.Keeper.warn
+         "profile materializable check for %s blocked by invalid config: %s"
+         name
+         (keeper_toml_load_error_to_string error);
+       false)
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
@@ -571,42 +588,49 @@ let keeper_profile_defaults_materializable_for_name ?base_path name =
         | None -> ""
       in
       Log.Keeper.warn
-        "profile materializable check for %s failed%s: %s; keeping configured keeper visible"
+        "profile materializable check for %s failed%s: %s"
         name
         base_path_detail
         (Printexc.to_string exn);
-      true
+      false
 
 type keeper_default_source_snapshot = {
   source_kind : string option;
   defaults : keeper_profile_defaults;
+  config_error : keeper_toml_load_error option;
 }
 
-let keeper_default_source_snapshot name : keeper_default_source_snapshot =
-  match keeper_toml_path_opt name with
+let keeper_default_source_snapshot ~base_path name : keeper_default_source_snapshot =
+  match keeper_toml_path_opt_for_base_path ~base_path name with
   | Some toml_path -> (
       match load_keeper_toml toml_path with
       | Ok (_name, defaults) ->
-          { source_kind = Some "toml"; defaults }
+          { source_kind = Some "toml"; defaults; config_error = None }
       | Error e ->
-          Otel_metric_store.inc_counter
-            Keeper_metrics.(to_string ProfileLoadFailures)
-            ~labels:[("site", Keeper_profile_load_failure_site.(to_label Toml_fallback))]
-            ();
           Log.Keeper.warn
-            "toml config for %s failed (%s), falling back to persona"
-            name e;
-          let defaults = load_keeper_profile_defaults_from_persona name in
-          let source_kind =
-            if Option.is_some defaults.manifest_path then Some "persona" else None
-          in
-          { source_kind; defaults })
+            "toml config for %s failed (%s); no declarative defaults projected"
+            name
+            (keeper_toml_load_error_to_string e);
+          { source_kind = None
+          ; defaults = empty_keeper_profile_defaults
+          ; config_error = Some e
+          })
   | None ->
-      let defaults = load_keeper_profile_defaults_from_persona name in
-      let source_kind =
-        if Option.is_some defaults.manifest_path then Some "persona" else None
-      in
-      { source_kind; defaults }
+      (match
+         load_keeper_profile_defaults_from_persona_dirs
+           ~persona_dirs:(safe_persona_dirs ~base_path ())
+           name
+       with
+       | Error config_error ->
+         { source_kind = None
+         ; defaults = empty_keeper_profile_defaults
+         ; config_error = Some config_error
+         }
+       | Ok defaults ->
+         let source_kind =
+           if Option.is_some defaults.manifest_path then Some "persona" else None
+         in
+         { source_kind; defaults; config_error = None })
 
 let persona_description_max_chars =
   Keeper_types_profile_persona.persona_description_max_chars

@@ -22,16 +22,21 @@
   keeper_recording_error_state
   keeper_internal_error
   keeper_runtime_failure_route
+  keeper_failure_judgment_contract
   keeper_latched_reason
   keeper_event_queue
+  keeper_event_queue_state
+  keeper_event_queue_owner_lock
   keeper_event_queue_persistence
   keeper_continuation_channel)
+ (private_modules keeper_event_queue_owner_lock)
  (libraries
   agent_sdk
   agent_sdk.llm_provider
   eio
   masc_eio_context
   masc.config
+  masc.keeper_registry
   masc.keeper_toml
   masc.config_dir_resolver
   masc.fs_compat

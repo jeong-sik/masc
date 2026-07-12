@@ -52,7 +52,7 @@ let test_joins_recall_to_receipts () =
       (Filename.concat
          masc_root
          "keepers/alpha/execution-receipts/2026-06/27.jsonl")
-      [ {|{"schema":"keeper.execution_receipt.v1","keeper_name":"alpha","trace_id":"trace-1","outcome":"receipt_done","terminal_reason_code":"completed","current_task_id":"T-1","ended_at":"2026-06-27T00:00:00Z"}|}
+      [ {|{"schema":"keeper.execution_receipt.v1","keeper_name":"alpha","trace_id":"trace-1","outcome":"receipt_done","terminal_reason_code":"success","current_task_id":"T-1","ended_at":"2026-06-27T00:00:00Z"}|}
       ];
     let report = Eval.evaluate ~masc_root in
     Alcotest.(check int) "read errors" 0 report.read_error_count;
@@ -132,7 +132,7 @@ let test_selects_newest_receipt_by_timestamp () =
          masc_root
          "keepers/alpha/execution-receipts/2026-06/27.jsonl")
       [ {|{"schema":"keeper.execution_receipt.v1","keeper_name":"alpha","trace_id":"trace-1","outcome":"receipt_failed","terminal_reason_code":"error","ended_at":"2026-06-27T00:00:02Z"}|}
-      ; {|{"schema":"keeper.execution_receipt.v1","keeper_name":"alpha","trace_id":"trace-1","outcome":"receipt_done","terminal_reason_code":"completed","ended_at":"2026-06-27T00:00:03Z"}|}
+      ; {|{"schema":"keeper.execution_receipt.v1","keeper_name":"alpha","trace_id":"trace-1","outcome":"receipt_done","terminal_reason_code":"success","ended_at":"2026-06-27T00:00:03Z"}|}
       ];
     let report = Eval.evaluate ~masc_root in
     Alcotest.(check int) "ok newest outcome" 1 report.outcome_ok;
@@ -168,7 +168,7 @@ let test_writes_fact_key_summary_index () =
       (Filename.concat
          masc_root
          "keepers/alpha/execution-receipts/2026-06/27.jsonl")
-      [ {|{"schema":"keeper.execution_receipt.v1","keeper_name":"alpha","trace_id":"trace-ok","outcome":"receipt_done","terminal_reason_code":"completed","ended_at":"2026-06-27T00:00:00Z"}|}
+      [ {|{"schema":"keeper.execution_receipt.v1","keeper_name":"alpha","trace_id":"trace-ok","outcome":"receipt_done","terminal_reason_code":"success","ended_at":"2026-06-27T00:00:00Z"}|}
       ; {|{"schema":"keeper.execution_receipt.v1","keeper_name":"beta","trace_id":"trace-err","outcome":"receipt_failed","terminal_reason_code":"error","ended_at":"2026-06-27T00:00:01Z"}|}
       ];
     let report = Eval.evaluate ~masc_root in

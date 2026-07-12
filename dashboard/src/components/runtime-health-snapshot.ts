@@ -459,21 +459,21 @@ export function RuntimeHealthSnapshot() {
         <${RouteLink}
           tab="monitoring"
           params=${{ section: 'runtime', view: 'providers' }}
-          class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)]"
+          class="inline-flex items-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)]"
         >
           provider details
         <//>
         <${RouteLink}
           tab="monitoring"
           params=${{ section: 'runtime', view: 'config' }}
-          class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)]"
+          class="inline-flex items-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)]"
         >
           runtime.toml
         <//>
         <${RouteLink}
           tab="monitoring"
           params=${{ section: 'transport-health' }}
-          class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)]"
+          class="inline-flex items-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)]"
         >
           transport health
         <//>

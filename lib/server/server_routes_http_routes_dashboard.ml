@@ -504,8 +504,8 @@ let add_routes ~sw ~clock router =
          with_public_read (fun state req reqd ->
            let base_path = (Mcp_server.workspace_config state).base_path in
            let raw_result =
-             Server_routes_http_dashboard_dev_token.ensure_dashboard_dev_token_for_request
-               ~request:req
+             Server_routes_http_dashboard_dev_token.ensure_dashboard_dev_token_for_authority
+               ~request_authority:(Server_request_authority.current_exn ())
                ~base_path
            in
            begin
@@ -515,11 +515,7 @@ let add_routes ~sw ~clock router =
                  (`Assoc [ ("token", `String raw) ]) reqd
              | Error err ->
                let status =
-                 match err with
-                 | Server_routes_http_dashboard_dev_token.Request_host_rejected _ ->
-                   `Forbidden
-                 | Server_routes_http_dashboard_dev_token.Token_operation_failed _ ->
-                   `Internal_server_error
+                 Server_routes_http_dashboard_dev_token.request_error_status err
                in
                let error_code =
                  Server_routes_http_dashboard_dev_token.request_error_code err
@@ -1666,11 +1662,18 @@ let add_routes ~sw ~clock router =
          request reqd)
 
   |> Http.Router.post "/api/v1/keepers/chat/stream" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_keeper_msg" (fun state _req reqd ->
+       with_tool_actor_auth ~tool_name:"masc_keeper_msg" (fun state submitted_by _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            match parse_keeper_chat_stream_request body_str with
            | Ok payload ->
-               handle_keeper_chat_stream ~sw ~clock state request reqd payload
+               handle_keeper_chat_stream
+                 ~sw
+                 ~clock
+                 ~submitted_by
+                 state
+                 request
+                 reqd
+                 payload
            | Error message ->
                respond_json_value_with_cors ~status:`Bad_request request reqd
                  (keeper_chat_stream_error_json message)
@@ -1678,15 +1681,15 @@ let add_routes ~sw ~clock router =
        ) request reqd)
 
   |> Http.Router.prefix_get "/api/v1/keepers/chat/requests/" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_keeper_msg_result"
-         (fun state _req reqd ->
-           handle_keeper_chat_request_result state request reqd)
+       with_tool_actor_auth ~tool_name:"masc_keeper_msg_result"
+         (fun state caller _req reqd ->
+           handle_keeper_chat_request_result ~caller state request reqd)
          request reqd)
 
   |> Http.Router.prefix_post "/api/v1/keepers/chat/requests/" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_keeper_msg_cancel"
-         (fun state _req reqd ->
-           handle_keeper_chat_request_cancel state request reqd)
+       with_tool_actor_auth ~tool_name:"masc_keeper_msg_cancel"
+         (fun state caller _req reqd ->
+           handle_keeper_chat_request_cancel ~caller state request reqd)
          request reqd)
 
   (* Keeper GET sub-routes: /config, /chat/history, /trajectory *)

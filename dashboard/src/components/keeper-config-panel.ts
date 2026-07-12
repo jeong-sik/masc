@@ -53,6 +53,15 @@ import {
   registerKeeperConfigUpdateHandler,
 } from './keeper-config-state'
 
+async function refreshKeeperSurfacesAfterConfigSave(): Promise<void> {
+  try {
+    await refreshKeeperRuntimeStatus({ force: true })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : '런타임 상태 새로고침 실패'
+    showToast(message, 'warning')
+  }
+}
+
 export {
   applyKeeperConfigUpdate,
   configState,
@@ -1804,10 +1813,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     try {
       const updated = await patchKeeperConfig(keeperName, payload)
       applyKeeperConfigUpdate(keeperName, updated)
-      void refreshKeeperRuntimeStatus().catch(err => {
-        const message = err instanceof Error ? err.message : '런타임 상태 새로고침 실패'
-        showToast(message, 'warning')
-      })
+      void refreshKeeperSurfacesAfterConfigSave()
       showToast('런타임 설정 저장 완료', 'success')
     } catch (err) {
       const msg = err instanceof Error ? err.message : '저장 실패'
@@ -1862,6 +1868,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         deny,
       })
       applyKeeperConfigUpdate(keeperName, updated)
+      void refreshKeeperSurfacesAfterConfigSave()
       toolAccessDraftText.value = null
       denylistDraftText.value = null
       showToast('도구 정책 저장 완료', 'success')
@@ -1898,6 +1905,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     try {
       const updated = await patchKeeperConfig(keeperName, payload)
       applyKeeperConfigUpdate(keeperName, updated)
+      void refreshKeeperSurfacesAfterConfigSave()
       editMode.value = false
       editDraft.value = null
       lastSavedAt.value = new Date().toISOString()

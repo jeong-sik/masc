@@ -39,6 +39,7 @@ export function lifecycleEventTone(event: string): EventTone {
   if (e === 'started' || e === 'reconciled' || e === 'auto_resumed') return 'ok'
   if (e === 'restarted') return 'warn'
   if (e === 'dead_cleaned') return 'bad'
+  if (e === 'purged') return 'info'
   if (e === 'paused_pruned' || e === 'self_preservation') return 'warn'
   return 'info'
 }
@@ -62,6 +63,7 @@ export function lifecycleEventLabel(event: string): string {
     case 'dead_cleaned':      return '종료 정리됨'
     case 'self_preservation': return '자기보존'
     case 'paused_pruned':     return '일시정지 정리됨'
+    case 'purged':            return '완전 삭제됨'
     case 'auto_resumed':      return '자동 재개됨'
     default:                  return event.replace(/_/g, ' ')
   }

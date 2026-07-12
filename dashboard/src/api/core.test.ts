@@ -5,6 +5,7 @@ import {
   clearStoredToken,
   confirmOperatorAction,
   currentDashboardActor,
+  currentStoredTokenRevision,
   dashboardBearerToken,
   defaultBoardVoter,
   extractApiError,
@@ -66,6 +67,7 @@ describe('stored token metadata', () => {
   it('notifies token listeners only when the semantic token state changes', () => {
     const listener = vi.fn()
     const unsubscribe = subscribeStoredTokenChanges(listener)
+    const revisionBeforeChanges = currentStoredTokenRevision()
 
     setStoredToken('manual-token', { source: 'manual', actor: 'dashboard-user' })
     setStoredToken(' manual-token ', { source: 'manual', actor: 'dashboard-user' })
@@ -75,6 +77,7 @@ describe('stored token metadata', () => {
     unsubscribe()
 
     expect(listener).toHaveBeenCalledTimes(3)
+    expect(currentStoredTokenRevision()).toBe(revisionBeforeChanges + 3)
     expect(listener).toHaveBeenNthCalledWith(1, {
       token: 'manual-token',
       meta: { source: 'manual', actor: 'dashboard-user', scope: null },

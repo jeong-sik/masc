@@ -655,7 +655,13 @@ let handle_ambient ~base_dir
            }
          in
          Keeper_registry_event_queue.enqueue ~base_path:base_dir keeper_name stimulus;
-         Keeper_registry.wakeup ~base_path:base_dir keeper_name
+         let (_ : Keeper_registry.wakeup_outcome) =
+           Keeper_registry.wakeup
+             ~intent:Keeper_registry.Reactive_signal
+             ~base_path:base_dir
+             keeper_name
+         in
+         ()
        | Some _ | None -> ());
       Discord_observability.record_ambient
         Discord_observability.Ambient_recorded
@@ -690,6 +696,7 @@ let start ~sw ~env ~clock ~state =
          outbound-less async poll store ([Keeper_msg_async]). *)
       Gate_keeper_backend.dispatch_with_text_snapshot
         ~connector_kind:Gate_keeper_backend.Discord
+        ~submission_owner:Gate_keeper_backend.Channel_actor
         ~sw ~clock
         ~proc_mgr:state.Mcp_server.proc_mgr
         ~net:state.Mcp_server.net

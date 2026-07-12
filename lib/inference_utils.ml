@@ -126,7 +126,13 @@ let rec sanitize_content_blocks_utf8
                   input = sanitized_input;
                 }
         | Agent_sdk.Types.ToolResult
-            { tool_use_id; content; is_error; json; content_blocks } ->
+            {
+              tool_use_id;
+              content;
+              outcome;
+              json;
+              content_blocks;
+            } ->
             let sanitized_tool_use_id = sanitize_text_utf8 tool_use_id in
             let sanitized_content = sanitize_text_utf8 content in
             let sanitized_json, json_changed =
@@ -144,7 +150,7 @@ let rec sanitize_content_blocks_utf8
               Agent_sdk.Types.ToolResult {
                 tool_use_id = sanitized_tool_use_id;
                 content = sanitized_content;
-                is_error;
+                outcome;
                 json = sanitized_json;
                 content_blocks;
               }

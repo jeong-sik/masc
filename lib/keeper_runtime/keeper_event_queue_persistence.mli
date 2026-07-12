@@ -1,13 +1,76 @@
-(** Durable snapshot store for per-keeper Event Layer queues.
+(** Durable per-Keeper Event Layer state.
 
-    This module lives in [masc.keeper_runtime] so queue persistence stays with
-    the queue DTO/codec and does not grow the main keeper surface. *)
+    [event-queue.json] uses one v2 envelope containing pending stimuli, active
+    typed leases, the monotonic lease sequence and the transition outbox.
+    [event-queue-inflight.json] is accepted only as a one-time v1 migration
+    input; it is never a second runtime authority. *)
+
+type lease_kind = Keeper_event_queue_state.lease_kind =
+  | Single
+  | Board_batch
+  | Legacy_inflight
+
+type requeue_reason = Keeper_event_queue_state.requeue_reason =
+  | Cycle_busy
+  | Turn_not_scheduled
+  | Retry_after_pacing
+  | Rotate_now
+  | Cancelled
+  | Cycle_crashed
+  | Registration_recovery
+
+type escalation_reason = Keeper_event_queue_state.escalation_reason =
+  | Failure_judgment_requested
+  | Failure_judgment_boundary_failed of { detail : string }
+  | Failure_judgment_operator_required of
+      { judge_runtime_id : string
+      ; rationale : string
+      }
+
+type settlement = Keeper_event_queue_state.settlement =
+  | Ack
+  | Requeue of requeue_reason
+  | Escalate of
+      { reason : escalation_reason
+      ; successor : Keeper_event_queue.stimulus option
+      }
+
+type lease = Keeper_event_queue_state.lease
+type transition_receipt = Keeper_event_queue_state.transition_receipt
+type outbox_entry = Keeper_event_queue_state.outbox_entry
+
+type settle_result = Keeper_event_queue_state.settle_result =
+  | Settled of transition_receipt
+  | Already_settled of transition_receipt
+
+val lease_stimuli : lease -> Keeper_event_queue.stimulus list
+val lease_kind : lease -> lease_kind
+
+val active_lease_result :
+  base_path:string -> keeper_name:string -> (lease option, string) result
+
+val transition_outbox_result :
+  base_path:string -> keeper_name:string -> (outbox_entry list, string) result
+(** Read the single pending projection entry for this Keeper lane.  The state
+    machine blocks new claims until this list is drained. *)
 
 val load : base_path:string -> keeper_name:string -> Keeper_event_queue.t
-(** Restore a keeper queue snapshot, returning [Keeper_event_queue.empty] when
-    no snapshot exists or the snapshot cannot be parsed. [load] is synchronized
-    with pending/inflight writes so callers cannot observe a split snapshot
-    transition. *)
+(** Compatibility replay projection: pending followed by active lease stimuli.
+    New live registry code should use {!load_pending} after explicitly
+    recovering abandoned leases at registration. Raises [Failure] when the
+    durable state is unavailable; it never substitutes an empty queue. *)
+
+val load_result :
+  base_path:string -> keeper_name:string -> (Keeper_event_queue.t, string) result
+(** Result-returning replay projection for callers that can propagate a durable
+    read failure. *)
+
+val load_pending : base_path:string -> keeper_name:string -> Keeper_event_queue.t
+(** Compatibility pending projection. Raises [Failure] on a durable read
+    failure; use {!load_pending_result} in production control flow. *)
+
+val load_pending_result :
+  base_path:string -> keeper_name:string -> (Keeper_event_queue.t, string) result
 
 type snapshot_pair =
   { pending : Keeper_event_queue.t
@@ -37,101 +100,104 @@ type snapshot_discovery =
   }
 
 val snapshot_read_error_kind_to_string : snapshot_read_error_kind -> string
-
 val discover_keeper_names_with_snapshots : base_path:string -> snapshot_discovery
-(** Discover keeper names that have durable pending or in-flight queue snapshot
-    files under the runtime keeper directory. Missing keeper roots are an empty
-    discovery; unreadable roots or invalid snapshot-bearing keeper directories
-    are surfaced in [read_error] so health callers do not silently report a false
-    empty backlog. *)
-
 val load_snapshot_pair : base_path:string -> keeper_name:string -> snapshot_pair
-(** Restore the pending and in-flight snapshots as separate typed queues under
-    the same lock used by {!load}. Use this for operator health surfaces that
-    must distinguish queued work from leased work without parsing file paths
-    independently. *)
-
 val load_snapshot_pair_with_errors :
   base_path:string -> keeper_name:string -> snapshot_pair_with_errors
-(** Like {!load_snapshot_pair}, but preserves read/parse/path failures for
-    operator health surfaces. Queue replay semantics remain conservative:
-    failed snapshots contribute [Keeper_event_queue.empty], while
-    [read_errors] records the exact reason so full health cannot silently
-    report a false empty backlog. *)
+
+val load_state_result :
+  base_path:string -> keeper_name:string -> (Keeper_event_queue_state.t, string) result
+(** Strict state read used by tests and operator projection.  A malformed v2
+    envelope or v2-plus-legacy residue is an [Error], never an empty queue. *)
+
+val claim_when_result :
+  ?after_commit:(Keeper_event_queue.t -> unit) ->
+  base_path:string ->
+  keeper_name:string ->
+  claimed_at:float ->
+  ready:(Keeper_event_queue.stimulus -> bool) ->
+  unit ->
+  (lease option, string) result
+
+val claim_board_result :
+  ?after_commit:(Keeper_event_queue.t -> unit) ->
+  base_path:string ->
+  keeper_name:string ->
+  claimed_at:float ->
+  unit ->
+  (lease option, string) result
+
+val settle_result :
+  ?after_commit:(Keeper_event_queue.t -> unit) ->
+  base_path:string ->
+  keeper_name:string ->
+  settled_at:float ->
+  lease:lease ->
+  settlement:settlement ->
+  unit ->
+  (settle_result, string) result
+
+val prepare_registration_result :
+  ?after_commit:(Keeper_event_queue.t -> unit) ->
+  base_path:string ->
+  keeper_name:string ->
+  settled_at:float ->
+  unit ->
+  (Keeper_event_queue.t, string) result
+(** Registration boundary for a newly-owned lane. Requeues an abandoned lease,
+    records its stable [Registration_recovery] transition, and returns the
+    resulting pending projection from the same durable transaction. A malformed
+    state is an [Error]; registration must not substitute an empty queue. *)
+
+val mark_transition_projected_result :
+  base_path:string ->
+  keeper_name:string ->
+  transition_id:string ->
+  (unit, string) result
 
 val persist :
   base_path:string -> keeper_name:string -> Keeper_event_queue.t -> unit
-(** Atomically write the latest queue snapshot. Runtime fibers use a yielding
-    Eio mutex; non-Eio setup/test callers use a Stdlib fallback mutex.
-    Persistence failures are logged and do not roll back the already-applied
-    in-memory registry CAS update. *)
 
 val update :
   base_path:string -> keeper_name:string -> (Keeper_event_queue.t -> Keeper_event_queue.t) -> unit
-(** Load, transform, and atomically write the queue snapshot while holding the
-    persistence write lock. Use this for pre-registry mutation paths that do not
-    have a live registry CAS cell yet. *)
 
 val update_result :
-  ?after_commit:(unit -> unit)
-  -> base_path:string
-  -> keeper_name:string
-  -> (Keeper_event_queue.t -> Keeper_event_queue.t)
-  -> (unit, string) result
-(** Result-returning form of {!update}. Critical delivery paths use this so a
-    failed durable write cannot be reported as a committed wake.
-    [after_commit] runs under the same write lock only after the snapshot is
-    durable, allowing a live queue publication without a generation gap. *)
+  ?after_commit:(unit -> unit) ->
+  base_path:string ->
+  keeper_name:string ->
+  (Keeper_event_queue.t -> Keeper_event_queue.t) ->
+  (unit, string) result
 
 val update_checked_result :
-  ?after_commit:(unit -> unit)
-  -> base_path:string
-  -> keeper_name:string
-  -> (Keeper_event_queue.t -> (Keeper_event_queue.t, string) result)
-  -> (unit, string) result
-(** Checked transform form of {!update_result}. A transform error leaves the
-    existing durable snapshot and live queue unchanged. *)
+  ?after_commit:(unit -> unit) ->
+  base_path:string ->
+  keeper_name:string ->
+  (Keeper_event_queue.t -> (Keeper_event_queue.t, string) result) ->
+  (unit, string) result
 
 val persist_snapshot :
   base_path:string -> keeper_name:string -> (unit -> Keeper_event_queue.t) -> unit
-(** Evaluate [snapshot] while holding the persistence write lock, then atomically
-    write it. Use this after live registry CAS mutations so an older writer
-    cannot overwrite a newer live queue snapshot after waiting on the file lock. *)
 
 val record_inflight :
   base_path:string -> keeper_name:string -> Keeper_event_queue.stimulus list -> unit
-(** Mark drained stimuli as in-flight before they are removed from the pending
-    snapshot. [load] merges these rows back in front of pending rows, giving a
-    restart at-least-once replay boundary until {!ack_inflight} acknowledges
-    them. *)
+(** Legacy source/test adapter.  Writes a typed [Legacy_inflight] lease into the
+    v2 envelope; it never creates [event-queue-inflight.json]. *)
 
 val ack_inflight :
   base_path:string -> keeper_name:string -> Keeper_event_queue.stimulus list -> unit
-(** Remove acknowledged stimuli from the in-flight lease after the heartbeat
-    stimuli have been requeued into the pending snapshot. Genuine turn-complete
-    acknowledgement uses {!ack_consumed} instead. *)
 
 val ack_consumed :
-  base_path:string
-  -> keeper_name:string
-  -> Keeper_event_queue.stimulus list
-  -> (unit, string) result
-(** Remove consumed stimuli from pending and in-flight snapshots under one
-    persistence lock. Returns [Error _] when durable acknowledgement fails so
-    the caller can avoid treating the stimuli as acknowledged. *)
+  base_path:string ->
+  keeper_name:string ->
+  Keeper_event_queue.stimulus list ->
+  (unit, string) result
 
 val drop_by_post_id :
-  base_path:string
-  -> keeper_name:string
-  -> post_id:string
-  -> (Keeper_event_queue.stimulus list, string) result
-(** Remove matching stimuli from pending and in-flight snapshots under one
-    persistence lock, returning the exact removed stimuli for ledger
-    acknowledgement. *)
+  ?after_commit:(Keeper_event_queue.t -> unit) ->
+  base_path:string ->
+  keeper_name:string ->
+  post_id:string ->
+  unit ->
+  (Keeper_event_queue.stimulus list, string) result
 
 val fleet_summary_json : now:float -> base_path:string -> Yojson.Safe.t
-(** Diagnostic fleet summary of durable pending and in-flight queue snapshots.
-    This is read-only and does not mutate or de-duplicate files. Parse/read
-    failures are surfaced in the JSON instead of being collapsed to an empty
-    queue, so health probes cannot report a false green while durable queue
-    state is unreadable. *)

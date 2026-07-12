@@ -397,15 +397,6 @@ module Keeper_mid_turn_progress = struct
     if v > 0.0 then Some v else None
 end
 
-(** {1 Slot Scheduling} *)
-
-module Slot = struct
-  (** Release LLM slot during tool execution so other agents can use it.
-      Default: false. Set MASC_SLOT_YIELD_ENABLED=true to enable. *)
-  let yield_enabled () =
-    Feature_flag_registry.get_bool "MASC_SLOT_YIELD_ENABLED"
-end
-
 (** {1 Board Configuration} *)
 
 module Board = struct

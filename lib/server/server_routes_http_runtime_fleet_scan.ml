@@ -21,15 +21,7 @@ let empty_paused_keeper_scan =
 
 let sorted_unique_strings values = List.sort_uniq String.compare values
 
-let effective_autoboot_enabled config name (meta : Keeper_meta_contract.keeper_meta) =
-  match
-    (Keeper_types_profile.load_keeper_profile_defaults_for_base_path
-       ~base_path:config.Workspace.base_path
-       name)
-      .autoboot_enabled
-  with
-  | Some value -> value
-  | None -> meta.autoboot_enabled
+let effective_autoboot_enabled = Keeper_meta_store.effective_autoboot_enabled
 
 let blocker_class_string (info : Keeper_meta_contract.blocker_info option) =
   Option.map (fun (info : Keeper_meta_contract.blocker_info) ->
@@ -43,13 +35,17 @@ let pause_elapsed_sec now (meta : Keeper_meta_contract.keeper_meta) =
   | Some updated_ts when updated_ts > 0.0 -> Some (max 0.0 (now -. updated_ts))
   | Some _ | None -> None
 
-let pause_kind (meta : Keeper_meta_contract.keeper_meta) =
-  if Keeper_supervisor_types.paused_meta_requires_reconcile_recovery meta then
-    "reconcile_gated"
-  else
-    match Keeper_supervisor_types.paused_meta_effective_auto_resume_after_sec meta with
-    | Some _ -> "auto_recoverable"
-    | None -> "operator_paused"
+type pause_kind = Keeper_activation_readiness.pause_kind =
+  | Active
+  | Reconcile_gated
+  | Auto_recoverable
+  | Operator_paused
+  | Latched_paused
+  | Unclassified_paused
+  | Dead_tombstone
+
+let pause_kind = Keeper_activation_readiness.pause_kind
+let pause_kind_to_wire = Keeper_activation_readiness.pause_kind_to_wire
 
 let pause_auto_resume_source (meta : Keeper_meta_contract.keeper_meta) =
   match meta.auto_resume_after_sec with
@@ -75,7 +71,7 @@ let paused_keeper_detail_json ~now ~name ~(autoboot_enabled : bool)
   `Assoc [
     ("name", `String name);
     ("autoboot_enabled", `Bool autoboot_enabled);
-    ("pause_kind", `String (pause_kind meta));
+    ("pause_kind", `String (pause_kind_to_wire (pause_kind meta)));
     ("auto_resume_after_sec", Json_util.float_opt_to_json effective_auto_resume_after_sec);
     ( "persisted_auto_resume_after_sec"
     , Json_util.float_opt_to_json meta.auto_resume_after_sec );
@@ -728,8 +724,7 @@ let blocked_keeper_action = function
   | Not_bootable -> Add_keeper_toml_or_disable_stale_autoboot_meta
   | Boot_failure Keeper_runtime.Missing_meta -> Run_keeper_up_or_recreate_meta
   | Boot_failure Keeper_runtime.Meta_read_error -> Repair_keeper_meta_file
-  | Boot_failure Keeper_runtime.Config_parse_failed
-  | Boot_failure Keeper_runtime.Invalid_profile ->
+  | Boot_failure Keeper_runtime.Config_invalid ->
       Repair_keeper_toml_config
   | Boot_failure Keeper_runtime.Sandbox_profile_required ->
       Add_sandbox_profile_to_keeper_toml
@@ -988,6 +983,7 @@ let blocked_keeper_detail_json
         [
           ("last_bootstrap_reason", `Null);
           ("last_bootstrap_error", `Null);
+          ("last_bootstrap_config_error", `Null);
           ("last_bootstrap_recorded_at", `Null);
         ]
     | Some failure ->
@@ -997,6 +993,14 @@ let blocked_keeper_detail_json
               (Keeper_runtime.boot_meta_failure_cause_label
                  failure.Keeper_runtime.cause) );
           ("last_bootstrap_error", `String failure.Keeper_runtime.error);
+          ( "last_bootstrap_config_error"
+          , Json_util.option_to_yojson
+              (fun error ->
+                 Keeper_types_profile.keeper_toml_config_error_of_load_error
+                   ~keeper_name:name
+                   error
+                 |> Keeper_types_profile.keeper_toml_config_error_to_json)
+              failure.Keeper_runtime.config_error );
           ("last_bootstrap_recorded_at", `String failure.Keeper_runtime.recorded_at);
         ]
   in
@@ -1388,8 +1392,17 @@ let keeper_fleet_safety_health_json
   let low_running_fiber_margin =
     target_count > 1 && phase_counts.running < minimum_running_fibers
   in
+  (* Recovering lanes are deliberately capacity-bearing for the fleet verdict:
+     [Failing] remains executable in the FSM, and restart budget marks the lane
+     eligible for heartbeat-driven recovery. Keep that policy in one value so
+     the advertised effective count and its derived shortfall cannot diverge.
+     Actual healthy execution remains available separately as
+     [healthy_running_keeper_fiber_count]. *)
+  let effective_reaction_capacity_count =
+    phase_counts.running + phase_counts.recovering
+  in
   let reaction_capacity_shortfall_count =
-    max 0 (target_count - phase_counts.running - phase_counts.recovering)
+    max 0 (target_count - effective_reaction_capacity_count)
   in
   let reaction_capacity_below_target =
     target_count > 0 && reaction_capacity_shortfall_count > 0
@@ -1534,7 +1547,7 @@ let keeper_fleet_safety_health_json
     ; "executable_keeper_fiber_count", `Int phase_counts.executable
     ; ( "executable_keeper_names"
       , `List (List.map (fun name -> `String name) executable_names) )
-    ; "effective_reaction_capacity_count", `Int phase_counts.running
+    ; "effective_reaction_capacity_count", `Int effective_reaction_capacity_count
     ; "executable_reaction_capacity_count", `Int phase_counts.executable
     ; "target_reaction_capacity_count", `Int target_count
     ; "minimum_running_fibers", `Int minimum_running_fibers

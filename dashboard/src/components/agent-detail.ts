@@ -214,20 +214,22 @@ export function AgentDetailOverlay() {
       const targetLabel = keeper ? `${displayName} 키퍼` : displayName
       const confirmed = await requestConfirm({
         title: '에이전트 완전 삭제',
-        message: `${targetLabel}를 완전 삭제합니다.\n런타임 상태, 인증, metrics가 제거되고 keeper면 config/keepers TOML도 함께 삭제됩니다.`,
+        message: keeper
+          ? `${targetLabel}의 안전한 삭제 작업을 접수합니다.\n현재 작업이 정리된 뒤 세션, 인증, metrics와 Keeper 설정이 삭제됩니다.`
+          : `${targetLabel}를 완전 삭제합니다.\n런타임 상태, 인증, metrics가 제거됩니다.`,
         tone: 'danger',
-        confirmText: '완전 삭제',
+        confirmText: keeper ? '삭제 작업 접수' : '완전 삭제',
       })
       if (!confirmed) return
       purgePending.value = true
       try {
-        const result = await purgeAgent(agentName)
+        const result = await purgeAgent(keeper?.name ?? agentName)
         closeAgentDetail()
         invalidateDashboardCache()
         await refreshDashboard({ force: true })
         showToast(
           result.target_kind === 'keeper'
-            ? `${displayName} 완전 삭제됨`
+            ? `${displayName} 삭제 작업 접수됨 (${result.operation_id})`
             : `${agentName} 삭제됨`,
           'success',
         )

@@ -87,3 +87,18 @@ let next_due_remaining ~keeper_name =
   match state with
   | None -> None
   | Some state -> next_due_remaining_of_state ~now state
+
+let remaining_for_runtime ~keeper_name ~runtime_id =
+  let now = Time_compat.now () in
+  let revisit =
+    Eio.Mutex.use_rw ~protect:true mu (fun () ->
+      Option.bind
+        (Hashtbl.find_opt table keeper_name)
+        (Keeper_pacing.revisit_of ~runtime_id))
+  in
+  match revisit with
+  | None -> None
+  | Some revisit ->
+    let remaining = revisit.Keeper_pacing.eligible_at -. now in
+    if remaining > 0.0 then Some remaining else None
+;;

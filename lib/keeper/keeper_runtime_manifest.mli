@@ -165,6 +165,9 @@ val make_for_context :
 val to_json : t -> Yojson.Safe.t
 val public_to_json : t -> Yojson.Safe.t
 val public_projection_of_decision : Yojson.Safe.t -> Yojson.Safe.t
+(** Decode and validate the common persisted envelope before classifying its
+    event as active, retired, or genuinely unsupported. *)
+val decode_persisted_row : Yojson.Safe.t -> (decoded_row, string) result
 val of_json : Yojson.Safe.t -> (t, string) result
 
 val execution_receipt_path_for_today :

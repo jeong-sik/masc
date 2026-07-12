@@ -103,41 +103,26 @@ let state_net_opt = function
   | None -> Eio_context.get_net_opt ()
 
 
-let host_header_has_forbidden_authority_chars value =
-  let has_forbidden_char =
-    String.exists
-      (function
-        | '/' | '@' | '?' | '#' | '%' | ' ' | '\t' -> true
-        | _ -> false)
-      value
-  in
-  has_forbidden_char || String_util.contains_substring value "://"
+(** Requests that enter the MCP transport surface.  [/]'s GET representation
+    is the dashboard, while its POST representation is the legacy MCP endpoint;
+    keep that method distinction explicit instead of using a path prefix. *)
+let is_mcp_transport_request (request : Httpun.Request.t) =
+  match request.meth, Http.Request.path request with
+  | `POST, "/" -> true
+  | _, ("/mcp" | "/mcp/managed" | "/mcp/operator" | "/sse") -> true
+  | _ -> false
+;;
 
-let parse_host_port host_header default_host default_port =
-  match host_header with
-  | None -> (default_host, default_port)
-  | Some host_value -> (
-      let trimmed = String.trim host_value in
-      if trimmed = "" || host_header_has_forbidden_authority_chars trimmed then
-        (default_host, default_port)
-      else
-        try
-          let uri = Uri.of_string ("http://" ^ trimmed) in
-          let host = Uri.host uri |> Option.value ~default:default_host in
-          let port = Uri.port uri |> Option.value ~default:default_port in
-          (host, port)
-        with Eio.Cancel.Cancelled _ as e -> raise e | _ -> (default_host, default_port))
-
-(** Allowed origins for DNS rebinding protection.
-    SSOT: [Masc_network_defaults.allowed_origins]. *)
-let allowed_origins = Masc_network_defaults.allowed_origins
-
-(** Validate Origin header for DNS rebinding protection *)
-let validate_origin (request : Httpun.Request.t) =
-  match Httpun.Headers.get request.headers "origin" with
-  | None -> true
-  | Some origin ->
-      List.exists (fun prefix -> String.starts_with ~prefix origin) allowed_origins
+(** Validate an HTTP(S) Origin against the authority admitted at request entry.
+    Native clients without an Origin remain valid. *)
+let validate_origin ~request_authority (request : Httpun.Request.t) =
+  match classify_request_origin ~request_authority request with
+  | Missing_origin -> true
+  | Single_origin { admission = (Same_origin | Allowed_dev_origin); _ } -> true
+  | Single_origin { admission = Rejected; _ }
+  | Multiple_origins
+  | Malformed_origin ->
+    false
 
 (** Check if client accepts SSE *)
 let accepts_sse (request : Httpun.Request.t) =

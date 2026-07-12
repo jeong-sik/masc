@@ -74,6 +74,7 @@ describe('SetupGuideCard', () => {
     expect(links.length).toBeGreaterThan(0)
     links.forEach(link => {
       expect(link.getAttribute('rel')).toBe('noopener noreferrer')
+      expect(link.classList.contains('v2-mobile-operator-target')).toBe(true)
     })
   })
 

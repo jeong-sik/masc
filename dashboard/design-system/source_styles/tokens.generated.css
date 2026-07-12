@@ -323,6 +323,7 @@
   --ctrl-h-sm: calc(var(--density) * 20px);
   --ctrl-h: calc(var(--density) * 24px);
   --ctrl-h-lg: calc(var(--density) * 28px);
+  --mobile-touch-target-min: calc(var(--grid-unit) * 5);  /* minimum hit target for mobile operator controls */
   --_density-scope: 1;  /* scope marker */
   --elev-0-bg: var(--bg-0);  /* page / inset */
   --elev-0-border: transparent;

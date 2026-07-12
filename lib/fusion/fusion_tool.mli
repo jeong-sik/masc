@@ -14,6 +14,9 @@
     @param now_unix 현재 유닉스초 (키퍼 clock에서; run 시작 시각 기록).
     @param run_id correlation id (호출자가 생성 — fusion_tool은 무작위성 비포함).
     @param policy runtime.toml [fusion]에서 로드한 정책.
+    @param continuation_channel 호출 턴이 시작된 connector 대화(RFC-0320).
+           [Allow] 시 {!Fusion_wake_route}에 등록되어 [Fusion_completed] wake가
+           원 채널로 회신을 라우팅할 수 있게 한다. 생략/Unrouted면 미등록.
     @param args 도구 입력 JSON (prompt 필수; preset/web_tools 선택). *)
 val handle
   :  sw:Eio.Switch.t
@@ -23,7 +26,9 @@ val handle
   -> now_unix:float
   -> run_id:string
   -> policy:Fusion_policy.t
+  -> ?continuation_channel:Keeper_continuation_channel.t
   -> args:Yojson.Safe.t
+  -> unit
   -> string
 
 module For_test : sig
@@ -56,6 +61,8 @@ module For_test : sig
     -> now_unix:float
     -> run_id:string
     -> policy:Fusion_policy.t
+    -> ?continuation_channel:Keeper_continuation_channel.t
     -> args:Yojson.Safe.t
+    -> unit
     -> string
 end

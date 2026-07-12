@@ -123,6 +123,10 @@ type stream_lifecycle_event =
   | Run_finished
   | Run_error
 
+type append_once_result =
+  | Appended of { row_id : string }
+  | Already_present of { row_id : string }
+
 let stream_lifecycle_event_to_label = function
   | Run_started -> "RUN_STARTED"
   | Text_message_start -> "TEXT_MESSAGE_START"
@@ -507,10 +511,10 @@ let legacy_message_id ~ts ~content =
   Printf.sprintf "legacy-%s-%s" ts_part
     (String.sub (Digest.to_hex (Digest.string content)) 0 12)
 
-let encode_line ~(role : Role.t) ~content ~ts ?attachments ?tool_call_id
+let encode_line ~(role : Role.t) ~content ~ts ?message_id ?attachments ?tool_call_id
     ?tool_call_name ?surface ?conversation_id ?external_message_id ?speaker
     ?audio ?blocks ?(mentions = []) ?(kind = Row_kind.Utterance) ?turn_ref
-    ?stream_lifecycle ()
+    ?stream_lifecycle ?delivery_key ?transcript_slot ()
     : string =
   (* RFC-0232 P5: the label is a derivation of the typed surface — the
      single site that turns a [Surface_ref.t] into the legacy [source]
@@ -521,8 +525,13 @@ let encode_line ~(role : Role.t) ~content ~ts ?attachments ?tool_call_id
     | None -> []
     | Some s -> [ ("surface", Surface_ref.to_json s) ]
   in
+  let message_id =
+    match message_id with
+    | Some value -> value
+    | None -> mint_message_id ~ts
+  in
   let base_fields = [
-    ("id", `String (mint_message_id ~ts));
+    ("id", `String message_id);
     ("role", `String (Role.to_label role));
     ("content", `String content);
     ("ts", `Float ts);
@@ -590,8 +599,148 @@ let encode_line ~(role : Role.t) ~content ~ts ?attachments ?tool_call_id
     @ blocks_fields blocks
     @ opt_string_field "turn_ref" (Option.map Ids.Turn_ref.to_string turn_ref)
     @ stream_lifecycle_fields stream_lifecycle
+    @ (match delivery_key with
+       | None -> []
+       | Some value ->
+         [ ( "delivery_key"
+           , Keeper_chat_delivery_identity.delivery_key_to_yojson value ) ])
+    @ (match transcript_slot with
+       | None -> []
+       | Some value ->
+         [ ( "transcript_slot"
+           , Keeper_chat_delivery_identity.transcript_slot_to_yojson value ) ])
   in
   Yojson.Safe.to_string (`Assoc all_fields)
+
+type writer_lock =
+  { mutex : Stdlib.Mutex.t
+  ; mutable users : int
+  }
+
+let writer_locks : (string, writer_lock) Hashtbl.t = Hashtbl.create 16
+let writer_locks_mutex = Stdlib.Mutex.create ()
+
+let acquire_writer_lock path =
+  Stdlib.Mutex.protect writer_locks_mutex (fun () ->
+    match Hashtbl.find_opt writer_locks path with
+    | Some lock ->
+      lock.users <- lock.users + 1;
+      lock
+    | None ->
+      let lock = { mutex = Stdlib.Mutex.create (); users = 1 } in
+      Hashtbl.add writer_locks path lock;
+      lock)
+;;
+
+let release_writer_lock path lock =
+  Stdlib.Mutex.protect writer_locks_mutex (fun () ->
+    lock.users <- lock.users - 1;
+    if lock.users = 0
+    then
+      match Hashtbl.find_opt writer_locks path with
+      | Some current when current == lock -> Hashtbl.remove writer_locks path
+      | Some _ | None -> ())
+;;
+
+let with_writer_lock path f =
+  let lock = acquire_writer_lock path in
+  Fun.protect
+    ~finally:(fun () -> release_writer_lock path lock)
+    (fun () -> Stdlib.Mutex.protect lock.mutex f)
+;;
+
+let provenance_of_line ~line_number line =
+  let fail detail =
+    Error
+      (Printf.sprintf
+         "keeper chat provenance decode failed at line %d: %s"
+         line_number
+         detail)
+  in
+  try
+    match Yojson.Safe.from_string line with
+    | `Assoc fields ->
+      (match
+         List.assoc_opt "delivery_key" fields,
+         List.assoc_opt "transcript_slot" fields
+       with
+       | None, None -> Ok None
+       | Some _, None | None, Some _ ->
+         fail "delivery_key and transcript_slot must appear together"
+       | Some delivery_key_json, Some transcript_slot_json ->
+         (match
+            Keeper_chat_delivery_identity.delivery_key_of_yojson
+              delivery_key_json,
+            Keeper_chat_delivery_identity.transcript_slot_of_yojson
+              transcript_slot_json,
+            List.assoc_opt "id" fields
+          with
+          | Ok delivery_key, Ok transcript_slot, Some (`String row_id)
+            when not (String.equal (String.trim row_id) "") ->
+            Ok (Some (delivery_key, transcript_slot, row_id))
+          | Error detail, _, _ | _, Error detail, _ -> fail detail
+          | _, _, _ -> fail "provenance row requires a nonblank id"))
+    | _ -> fail "row must be a JSON object"
+  with
+  | Yojson.Json_error detail -> fail detail
+;;
+
+let find_provenance_unlocked path ~delivery_key ~transcript_slot =
+  if not (Fs_compat.file_exists path)
+  then Ok None
+  else
+    try
+      let lines =
+        Fs_compat.load_file path
+        |> String.split_on_char '\n'
+        |> List.mapi (fun index line -> index + 1, line)
+      in
+      List.fold_left
+           (fun result (line_number, line) ->
+              let ( let* ) = Result.bind in
+              let* found = result in
+              if String.equal line ""
+              then Ok found
+              else
+                let* provenance = provenance_of_line ~line_number line in
+                match provenance, found with
+                | None, _ -> Ok found
+                | Some (candidate_key, candidate_slot, row_id), None
+                  when
+                    Keeper_chat_delivery_identity.delivery_key_equal
+                      delivery_key
+                      candidate_key
+                    && Keeper_chat_delivery_identity.transcript_slot_equal
+                         transcript_slot
+                         candidate_slot ->
+                  Ok (Some row_id)
+                | Some (candidate_key, candidate_slot, _), Some _
+                  when
+                    Keeper_chat_delivery_identity.delivery_key_equal
+                      delivery_key
+                      candidate_key
+                    && Keeper_chat_delivery_identity.transcript_slot_equal
+                         transcript_slot
+                         candidate_slot ->
+                  Error "duplicate Keeper chat delivery provenance rows"
+                | Some _, _ -> Ok found)
+           (Ok None)
+           lines
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> Error (Printexc.to_string exn)
+;;
+
+let append_line_once path ~delivery_key ~transcript_slot ~row_id line =
+  with_writer_lock path (fun () ->
+    match find_provenance_unlocked path ~delivery_key ~transcript_slot with
+    | Error _ as error -> error
+    | Ok (Some existing_row_id) ->
+      Ok (Already_present { row_id = existing_row_id })
+    | Ok None ->
+      Fs_compat.append_file path (line ^ "\n");
+      Ok (Appended { row_id }))
+;;
 
 (* Tool calls with empty accumulated arguments are normalised to "{}" so
    every persisted line keeps a non-empty [content] (the read-side
@@ -610,7 +759,7 @@ let user_line_mentions ~extra_mentions content =
   Keeper_lane_mentions.mention_ids_of_content content @ extra_mentions
   |> List.sort_uniq Keeper_identity.Keeper_id.compare
 
-let append_turn ~base_dir ~keeper_name ~(user_content : string)
+let append_turn_result ~base_dir ~keeper_name ~(user_content : string)
     ~(user_attachments : attachment list) ?(tool_calls = []) ?surface
     ?conversation_id ?external_message_id ?speaker ?(extra_mentions = [])
     ?(assistant_kind = Row_kind.Utterance)
@@ -665,7 +814,8 @@ let append_turn ~base_dir ~keeper_name ~(user_content : string)
     let payload =
       String.concat "\n" ((user_line :: tool_lines) @ [ asst_line ]) ^ "\n"
     in
-    Fs_compat.append_file path payload
+    Fs_compat.append_file path payload;
+    Ok ()
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
@@ -673,8 +823,22 @@ let append_turn ~base_dir ~keeper_name ~(user_content : string)
       Keeper_metrics.(to_string ChatStoreFailures)
       ~labels:[("operation", Keeper_chat_store_operation.(to_label Append))]
       ();
+    let message = Printexc.to_string exn in
     Log.Keeper.warn "keeper_chat_store: append failed for %s: %s"
-      (sanitize_name keeper_name) (Printexc.to_string exn)
+      (sanitize_name keeper_name) message;
+    Error message
+
+let append_turn ~base_dir ~keeper_name ~(user_content : string)
+    ~(user_attachments : attachment list) ?(tool_calls = []) ?surface
+    ?conversation_id ?external_message_id ?speaker ?(extra_mentions = [])
+    ?(assistant_kind = Row_kind.Utterance) ?blocks ?turn_ref ?stream_lifecycle
+    ~(assistant_content : string) () =
+  ignore
+    (append_turn_result ~base_dir ~keeper_name ~user_content ~user_attachments
+       ~tool_calls ?surface ?conversation_id ?external_message_id ?speaker
+       ~extra_mentions ~assistant_kind ?blocks ?turn_ref ?stream_lifecycle
+       ~assistant_content ()
+      : (unit, string) result)
 
 (* RFC-0223 P4: keeper-initiated message on one lane. A single
    assistant line — there is no user turn to pair it with.
@@ -710,6 +874,62 @@ let append_assistant_message_result ~base_dir ~keeper_name ~(content : string)
     Log.Keeper.warn "keeper_chat_store: assistant append failed for %s: %s"
       (sanitize_name keeper_name) (Printexc.to_string exn);
     Error (Printexc.to_string exn)
+
+let append_assistant_message_once
+      ~base_dir
+      ~keeper_name
+      ~delivery_key
+      ~(content : string)
+      ?surface
+      ?conversation_id
+      ?(assistant_kind = Row_kind.Utterance)
+      ?blocks
+      ?turn_ref
+      ?stream_lifecycle
+      ()
+  =
+  try
+    ensure_dir_once ~base_dir;
+    let redaction = redaction_for ~base_dir ~keeper_name in
+    let content = Keeper_secret_redaction.redact_text redaction content in
+    let blocks = redact_blocks redaction blocks in
+    let path = chat_path ~base_dir ~keeper_name in
+    let ts = Time_compat.now () in
+    let row_id = mint_message_id ~ts in
+    let transcript_slot =
+      Keeper_chat_delivery_identity.Terminal_assistant
+    in
+    let line =
+      encode_line
+        ~role:Role.Assistant
+        ~content
+        ~ts
+        ~message_id:row_id
+        ?surface
+        ?conversation_id
+        ~kind:assistant_kind
+        ?blocks
+        ?turn_ref
+        ?stream_lifecycle
+        ~delivery_key
+        ~transcript_slot
+        ()
+    in
+    append_line_once path ~delivery_key ~transcript_slot ~row_id line
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string ChatStoreFailures)
+      ~labels:[ "operation", Keeper_chat_store_operation.(to_label Append) ]
+      ();
+    let detail = Printexc.to_string exn in
+    Log.Keeper.warn
+      "keeper_chat_store: assistant append-once failed for %s: %s"
+      (sanitize_name keeper_name)
+      detail;
+    Error detail
+;;
 
 (* Unit wrapper: existing callers keep the prior swallow-and-count behavior (the
    failure is already counted + logged inside the [_result] variant). New callers
@@ -751,6 +971,61 @@ let append_user_message ~base_dir ~keeper_name ~(content : string)
       ();
     Log.Keeper.warn "keeper_chat_store: user append failed for %s: %s"
       (sanitize_name keeper_name) (Printexc.to_string exn)
+
+let append_user_message_once
+      ~base_dir
+      ~keeper_name
+      ~delivery_key
+      ~(content : string)
+      ?(attachments = [])
+      ?surface
+      ?conversation_id
+      ?external_message_id
+      ?speaker
+      ?(extra_mentions = [])
+      ()
+  =
+  try
+    ensure_dir_once ~base_dir;
+    let redaction = redaction_for ~base_dir ~keeper_name in
+    let content = Keeper_secret_redaction.redact_text redaction content in
+    let attachments = List.map (redact_attachment redaction) attachments in
+    let persisted_attachments = List.map persisted_attachment attachments in
+    let path = chat_path ~base_dir ~keeper_name in
+    let ts = Time_compat.now () in
+    let row_id = mint_message_id ~ts in
+    let transcript_slot = Keeper_chat_delivery_identity.Accepted_user in
+    let line =
+      encode_line
+        ~role:Role.User
+        ~content
+        ~ts
+        ~message_id:row_id
+        ~attachments:persisted_attachments
+        ?surface
+        ?conversation_id
+        ?external_message_id
+        ?speaker
+        ~mentions:(user_line_mentions ~extra_mentions content)
+        ~delivery_key
+        ~transcript_slot
+        ()
+    in
+    append_line_once path ~delivery_key ~transcript_slot ~row_id line
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string ChatStoreFailures)
+      ~labels:[ "operation", Keeper_chat_store_operation.(to_label Append) ]
+      ();
+    let detail = Printexc.to_string exn in
+    Log.Keeper.warn
+      "keeper_chat_store: user append-once failed for %s: %s"
+      (sanitize_name keeper_name)
+      detail;
+    Error detail
+;;
 
 let parse_line ~file_path (line : string) : chat_message option =
   try

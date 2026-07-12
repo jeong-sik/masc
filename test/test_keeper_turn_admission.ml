@@ -21,7 +21,12 @@ let check name cond =
 
 let base_path = "/tmp/masc_test_turn_admission"
 let keeper_name = "admission-keeper"
-let reset () = Keeper_turn_admission.For_testing.reset ()
+let reset () =
+  Keeper_turn_admission.For_testing.reset ();
+  Keeper_chat_queue.For_testing.reset ();
+  ignore
+    (Keeper_chat_queue.configure_persistence ~base_path
+      : Keeper_chat_queue.configure_report)
 
 let test_free_slot_admits () =
   reset ();
@@ -71,6 +76,62 @@ let test_chat_if_free_never_parks () =
     Eio.Promise.resolve set_release ())
 ;;
 
+let test_chat_if_free_rechecks_durable_queue_after_stale_peek () =
+  reset ();
+  Printf.printf
+    "Test 1c: run_chat_if_free rechecks durable receipts after a stale outer peek\n%!";
+  check
+    "outer precheck initially observes no active receipt"
+    (Keeper_chat_queue.has_active_receipts ~keeper_name = Ok false);
+  let message : Keeper_chat_queue.queued_message =
+    { content = "queued first"
+    ; user_blocks = []
+    ; attachments = []
+    ; timestamp = Time_compat.now ()
+    ; source = Keeper_chat_queue.Dashboard
+    }
+  in
+  let receipt = Keeper_chat_queue.enqueue ~keeper_name message in
+  check "receipt commits after the stale outer peek" (Result.is_ok receipt);
+  let direct_ran = ref false in
+  (match
+     Keeper_turn_admission.run_chat_if_free ~base_path ~keeper_name (fun () ->
+       direct_ran := true)
+   with
+   | `Busy { Keeper_turn_admission.waiting = 0; in_flight = None } ->
+     check "pending receipt blocks direct admission" true
+   | `Busy _ | `Ran () -> check "pending receipt blocks direct admission" false);
+  check "pending receipt is not overtaken" (not !direct_ran);
+  let lease =
+    match Keeper_chat_queue.lease_batch ~keeper_name with
+    | `Leased lease -> lease
+    | `Empty | `Already_leased _ | `Error _ ->
+      failwith "expected the committed receipt to lease"
+  in
+  (match
+     Keeper_turn_admission.run_chat_if_free ~base_path ~keeper_name (fun () ->
+       direct_ran := true)
+   with
+   | `Busy _ -> check "inflight receipt blocks direct admission" true
+   | `Ran () -> check "inflight receipt blocks direct admission" false);
+  check "inflight receipt is not overtaken" (not !direct_ran);
+  (match
+     Keeper_chat_queue.finalize ~keeper_name ~lease_id:lease.lease_id
+       ~outcome:
+         (Keeper_chat_queue.Mark_delivered
+            { completed_at = Time_compat.now (); outcome_ref = Some "turn#1" })
+   with
+   | `Finalized _ -> ()
+   | `Unknown_lease | `Error _ -> failwith "expected the lease to finalize");
+  (match
+     Keeper_turn_admission.run_chat_if_free ~base_path ~keeper_name (fun () ->
+       direct_ran := true)
+   with
+   | `Ran () -> check "terminal receipt no longer blocks direct admission" true
+   | `Busy _ -> check "terminal receipt no longer blocks direct admission" false);
+  check "direct turn runs only after receipt terminalizes" !direct_ran
+;;
+
 let test_autonomous_skips_in_flight_chat () =
   reset ();
   Printf.printf "Test 2: autonomous lane skips while a chat turn is in flight\n%!";
@@ -87,7 +148,9 @@ let test_autonomous_skips_in_flight_chat () =
       | `Rejected _ -> check "chat turn admitted on a free slot" false);
     Eio.Promise.await started;
     (match Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () -> ()) with
-     | `Busy (Some { Keeper_turn_admission.lane = Chat; _ }) ->
+     | `Busy
+         (Keeper_turn_admission.Turn_busy
+            (Some { Keeper_turn_admission.lane = Chat; _ })) ->
        check "run_if_free reports Busy with the in-flight chat lane" true
      | `Busy _ -> check "run_if_free reports Busy with the in-flight chat lane" false
      | `Ran () -> check "run_if_free must not admit during an in-flight turn" false);
@@ -197,7 +260,11 @@ let test_waiting_cap_rejects () =
          (waiting = Keeper_turn_admission.max_waiting_chat_requests)
      | None -> check "slot exists after queueing" false);
     (match Keeper_turn_admission.run_serialized ~base_path ~keeper_name (fun () -> ()) with
-     | `Rejected { Keeper_turn_admission.waiting; in_flight } ->
+     | `Rejected
+         { Keeper_turn_admission.waiting
+         ; in_flight
+         ; shutdown_operation_id = None
+         } ->
        check "request beyond the cap is rejected" true;
        check
          "rejection reports a full queue"
@@ -206,6 +273,8 @@ let test_waiting_cap_rejects () =
         | Some { Keeper_turn_admission.lane = Chat; _ } ->
           check "rejection reports the in-flight lane" true
         | Some _ | None -> check "rejection reports the in-flight lane" false)
+     | `Rejected { shutdown_operation_id = Some _; _ } ->
+       check "queue-cap rejection is not a shutdown" false
      | `Ran () -> check "request beyond the cap is rejected" false);
     let snapshot = Keeper_turn_admission.snapshot_for ~base_path ~keeper_name in
     check
@@ -395,7 +464,6 @@ let test_idle_loop_yields_to_parked_chat () =
 
 let test_autonomous_yields_to_queued_connector_message () =
   reset ();
-  Keeper_chat_queue.clear ~keeper_name;
   Printf.printf
     "Test 10: autonomous lane yields while a connector/dashboard message is queued\n%!";
   (* Sanity: an empty queue lets the autonomous lane run. *)
@@ -406,16 +474,29 @@ let test_autonomous_yields_to_queued_connector_message () =
      without parking on the admission slot, so [chat_waiting] stays false. The
      autonomous lane must still yield, or a long/back-to-back autonomous turn
      busy-ACKs the connector forever (the starvation this pins). *)
-  ignore
-    (Keeper_chat_queue.enqueue ~keeper_name
+  (match
+     Keeper_chat_queue.enqueue ~keeper_name
        { Keeper_chat_queue.content = "deferred slack mention"
        ; user_blocks = []
        ; attachments = []
        ; timestamp = 1.0
-       ; source = Keeper_chat_queue.Slack { channel = "C-test"; user_id = "U-test" }
+       ; source =
+           Keeper_chat_queue.Slack
+             { channel_id = "C-test"
+             ; user_id = "U-test"
+             ; user_name = "slack-user"
+             ; team_id = Some "T-test"
+             ; thread_ts = Some "171.001"
+             }
        }
-      : string);
-  check "queue depth is 1 after enqueue" (Keeper_chat_queue.length ~keeper_name = 1);
+   with
+   | Ok _ -> ()
+   | Error error ->
+     check
+       ("enqueue succeeds: " ^ Keeper_chat_queue.mutation_error_to_string error)
+       false);
+  let queued = Keeper_chat_queue.snapshot ~keeper_name in
+  check "queue depth is 1 after enqueue" (List.length queued.pending = 1);
   check
     "a queued connector message is not a parked chat"
     (not (Keeper_turn_admission.chat_waiting ~base_path ~keeper_name));
@@ -424,24 +505,153 @@ let test_autonomous_yields_to_queued_connector_message () =
      check "run_if_free yields (Busy) while a connector message is queued" true
    | `Ran () ->
      check "run_if_free must not admit while a connector message is queued" false);
-  (* Draining the queue (what the consumer does in the yielded window) lets the
-     autonomous lane run again. [length] excludes a leased-but-unacked batch
-     just like it excluded a dequeued one, so leasing alone (no ack needed)
-     is enough to reproduce that window here. *)
-  (match Keeper_chat_queue.lease_batch ~keeper_name with
-   | `Leased _ -> ()
-   | `Empty | `Already_leased _ | `Persist_failed _ ->
-     check "lease_batch drains the queued connector message" false);
-  check "queue empty after drain" (Keeper_chat_queue.length ~keeper_name = 0);
+  (* Leasing changes the receipt to Inflight but does not make it disappear.
+     The autonomous lane keeps yielding until the terminal decision commits. *)
+  let lease =
+    match Keeper_chat_queue.lease_batch ~keeper_name with
+    | `Leased lease -> Some lease
+    | `Empty | `Already_leased _ | `Error _ ->
+      check "lease_batch leases the queued connector message" false;
+      None
+  in
+  let inflight = Keeper_chat_queue.snapshot ~keeper_name in
+  check "leased receipt remains visible" (List.length inflight.inflight = 1);
+  (match Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () -> ()) with
+   | `Busy _ -> check "run_if_free yields while the receipt is inflight" true
+   | `Ran () -> check "run_if_free must not overtake an inflight receipt" false);
+  (match lease with
+   | None -> ()
+   | Some lease ->
+     (match
+        Keeper_chat_queue.finalize ~keeper_name ~lease_id:lease.lease_id
+          ~outcome:
+            (Keeper_chat_queue.Mark_delivered
+               { completed_at = 2.0; outcome_ref = None })
+      with
+      | `Finalized _ -> ()
+      | `Unknown_lease | `Error _ ->
+        check "finalize commits the terminal receipt" false));
+  let settled = Keeper_chat_queue.snapshot ~keeper_name in
+  check
+    "queue has no active receipts after finalization"
+    (settled.pending = [] && settled.inflight = []);
   match Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () -> "ok") with
   | `Ran "ok" -> check "run_if_free admits again once the queue is drained" true
   | `Ran _ | `Busy _ -> check "run_if_free admits again once the queue is drained" false
+;;
+
+let test_shutdown_reservation_fences_and_rolls_back () =
+  reset ();
+  Printf.printf "Test 11: shutdown reservation fences every turn lane\n%!";
+  let operation_id = Keeper_shutdown_types.Operation_id.generate () in
+  (match
+     Keeper_turn_admission.begin_shutdown
+       ~base_path
+       ~keeper_name
+       ~operation_id
+   with
+   | Keeper_turn_admission.Shutdown_reserved reservation ->
+     check
+       "reservation records the requested operation"
+       (Keeper_shutdown_types.Operation_id.equal reservation.operation_id operation_id);
+     check "idle reservation has no in-flight turn" (Option.is_none reservation.in_flight)
+   | Keeper_turn_admission.Shutdown_already_reserved _ ->
+     check "fresh slot is not already reserved" false);
+  (match Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () -> ()) with
+   | `Busy (Keeper_turn_admission.Shutdown_requested reserved) ->
+     check
+       "autonomous lane sees typed shutdown fence"
+       (Keeper_shutdown_types.Operation_id.equal reserved operation_id)
+   | `Busy (Keeper_turn_admission.Turn_busy _) | `Ran () ->
+     check "autonomous lane cannot cross shutdown fence" false);
+  (match Keeper_turn_admission.run_serialized ~base_path ~keeper_name (fun () -> ()) with
+   | `Rejected { shutdown_operation_id = Some reserved; _ } ->
+     check
+       "chat lane sees typed shutdown fence"
+       (Keeper_shutdown_types.Operation_id.equal reserved operation_id)
+   | `Rejected { shutdown_operation_id = None; _ } | `Ran () ->
+     check "chat lane cannot cross shutdown fence" false);
+  (match
+     Keeper_turn_admission.run_chat_if_free ~base_path ~keeper_name (fun () -> ())
+   with
+   | `Busy { shutdown_operation_id = Some reserved; _ } ->
+     check
+       "if-free chat preserves the typed shutdown owner"
+       (Keeper_shutdown_types.Operation_id.equal reserved operation_id)
+   | `Busy { shutdown_operation_id = None; _ } | `Ran () ->
+     check "if-free chat cannot lose the shutdown owner" false);
+  (match
+     Keeper_turn_admission.rollback_shutdown
+       ~base_path
+       ~keeper_name
+       ~operation_id
+   with
+   | Keeper_turn_admission.Shutdown_rolled_back -> ()
+   | Keeper_turn_admission.Shutdown_not_reserved
+   | Keeper_turn_admission.Shutdown_reserved_by_other _ ->
+     check "own reservation rolls back" false);
+  match Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () -> "open") with
+  | `Ran "open" -> check "rollback re-opens admission" true
+  | `Ran _ | `Busy _ -> check "rollback re-opens admission" false
+;;
+
+let test_shutdown_reservation_restores_durable_owner () =
+  reset ();
+  Printf.printf "Test 12: durable shutdown owner restores before registration\n%!";
+  let operation_id = Keeper_shutdown_types.Operation_id.generate () in
+  let other_operation_id = Keeper_shutdown_types.Operation_id.generate () in
+  (match
+     Keeper_turn_admission.restore_shutdown
+       ~base_path
+       ~keeper_name
+       ~operation_id
+   with
+   | Keeper_turn_admission.Shutdown_restored -> ()
+   | Keeper_turn_admission.Shutdown_already_restored
+   | Keeper_turn_admission.Shutdown_restore_conflict _ ->
+     check "fresh durable owner restores" false);
+  (match
+     Keeper_turn_admission.restore_shutdown
+       ~base_path
+       ~keeper_name
+       ~operation_id
+   with
+   | Keeper_turn_admission.Shutdown_already_restored -> ()
+   | Keeper_turn_admission.Shutdown_restored
+   | Keeper_turn_admission.Shutdown_restore_conflict _ ->
+     check "same durable owner restores idempotently" false);
+  (match
+     Keeper_turn_admission.restore_shutdown
+       ~base_path
+       ~keeper_name
+       ~operation_id:other_operation_id
+   with
+   | Keeper_turn_admission.Shutdown_restore_conflict existing ->
+     check
+       "different durable owner cannot replace restored fence"
+       (Keeper_shutdown_types.Operation_id.equal existing operation_id)
+   | Keeper_turn_admission.Shutdown_restored
+   | Keeper_turn_admission.Shutdown_already_restored ->
+     check "different durable owner is rejected" false);
+  match
+    Keeper_turn_admission.commit_registration_if_open
+      ~base_path
+      ~keeper_name
+      (fun () -> ())
+  with
+  | Keeper_turn_admission.Registration_shutdown_reserved existing ->
+    check
+      "registration sees restored durable owner"
+      (Keeper_shutdown_types.Operation_id.equal existing operation_id)
+  | Keeper_turn_admission.Registration_committed () ->
+    check "registration cannot cross restored fence" false
 ;;
 
 let () =
   Eio_main.run @@ fun _env ->
   test_free_slot_admits ();
   test_chat_if_free_never_parks ();
+  test_chat_if_free_rechecks_durable_queue_after_stale_peek ();
   test_autonomous_skips_in_flight_chat ();
   test_chat_turns_serialize ();
   test_distinct_keepers_do_not_block_each_other ();
@@ -451,6 +661,8 @@ let () =
   test_autonomous_yields_to_parked_chat ();
   test_idle_loop_yields_to_parked_chat ();
   test_autonomous_yields_to_queued_connector_message ();
+  test_shutdown_reservation_fences_and_rolls_back ();
+  test_shutdown_reservation_restores_durable_owner ();
   if !failures > 0
   then (
     Printf.printf "FAILED: %d check(s)\n%!" !failures;

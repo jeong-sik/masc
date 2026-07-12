@@ -92,12 +92,15 @@ let dashboard_retention_json =
           ] );
       ( "activity_event_kinds",
         `List
-          [
-            `String "tool.called";
-            `String "keeper.contract_verdict";
-            `String "keeper.friction";
-            `String "keeper.turn_completed";
-          ] );
+          (List.map
+             (fun kind ->
+               `String
+                 (Activity_graph.tool_execution_event_kind_to_string kind))
+             Activity_graph.all_tool_execution_event_kinds
+           @ [ `String "keeper.contract_verdict"
+             ; `String "keeper.friction"
+             ; `String "keeper.turn_completed"
+             ]) );
     ]
 
 let event_to_json (e : timeline_event) : Yojson.Safe.t =
@@ -290,7 +293,11 @@ let take_last n xs =
       in
       skip (len - n) xs
 
-(* Collect tool call events from Activity Graph *)
+(* Collect tool call events from Activity Graph. Two producers feed this
+   source: the external MCP dispatch path ([tool.called]) and the keeper
+   in-turn execution hook ([keeper.tool_exec], #23540 — without it a keeper
+   working through its own turn reported tool_calls = 0). Both share the
+   tool_name/success/duration_ms payload contract projected below. *)
 let tool_call_events (config : Workspace.config) ~agent_name ~limit :
     timeline_event list =
   (* `list_events` limits globally before we filter by actor, so fetch a
@@ -302,7 +309,13 @@ let tool_call_events (config : Workspace.config) ~agent_name ~limit :
   in
   let all_events =
     Activity_graph.list_events config
-      ~kinds:["tool.called"] ~after_seq:0 ~limit:scan_limit ()
+      ~kinds:
+        (List.map
+           Activity_graph.tool_execution_event_kind_to_string
+           Activity_graph.all_tool_execution_event_kinds)
+      ~after_seq:0
+      ~limit:scan_limit
+      ()
   in
   all_events
   |> List.filter (activity_event_matches_agent ~agent_name)
@@ -318,6 +331,12 @@ let tool_call_events (config : Workspace.config) ~agent_name ~limit :
          Safe_ops.json_int ~default:0 "duration_ms" e.payload
        in
        let error_str = Safe_ops.json_string_opt "error" e.payload in
+       let source_str = Safe_ops.json_string_opt "source" e.payload in
+       let keeper_turn_id = Safe_ops.json_int_opt "keeper_turn_id" e.payload in
+       let oas_turn = Safe_ops.json_int_opt "oas_turn" e.payload in
+       let task_id = Safe_ops.json_string_opt "task_id" e.payload in
+       let provider = Safe_ops.json_string_opt "provider" e.payload in
+       let typed_outcome = Yojson.Safe.Util.member "typed_outcome" e.payload in
        Some
          {
            ts;
@@ -330,6 +349,12 @@ let tool_call_events (config : Workspace.config) ~agent_name ~limit :
                  ("success", `Bool success);
                  ("duration_ms", `Int duration_ms);
                  ("error", Json_util.string_opt_to_json error_str);
+                 ("source", Json_util.string_opt_to_json source_str);
+                 ("keeper_turn_id", Json_util.int_opt_to_json keeper_turn_id);
+                 ("oas_turn", Json_util.int_opt_to_json oas_turn);
+                 ("task_id", Json_util.string_opt_to_json task_id);
+                 ("provider", Json_util.string_opt_to_json provider);
+                 ("typed_outcome", typed_outcome);
                ];
          })
   |> take_last limit

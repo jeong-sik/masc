@@ -60,6 +60,10 @@ type heartbeat_event_intake = {
   event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
 }
 
+type single_claim_admission =
+  | Admit_ready_single
+  | Defer_failure_judgment
+
 (** Closed pre-intake admission result. Blocking approval and explicit Keeper
     pause are classified before durable dequeue, just like fd/disk pressure, so
     a blocked cycle does not repeatedly lease and requeue the same stimulus. *)
@@ -76,6 +80,7 @@ val classify_turn_intake_admission :
   turn_intake_admission
 
 val heartbeat_event_intake :
+  ?single_claim_admission:single_claim_admission ->
   ctx:'a context ->
   meta_after_triage:keeper_meta ->
   pending_board_events:Keeper_world_observation.pending_board_event list ->

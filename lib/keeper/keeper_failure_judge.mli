@@ -24,6 +24,13 @@ type run_result =
 
 type error_disposition = Escalate_judge_failure
 
+type claim_eligibility =
+  | Claim_eligible
+  | Claim_deferred_by_runtime_pacing of
+      { runtime_id : string
+      ; remaining_seconds : float
+      }
+
 val error_detail : run_error -> string
 val error_disposition : run_error -> error_disposition
 val error_disposition_label : error_disposition -> string
@@ -35,6 +42,12 @@ val resolve_runtime_id : unit -> (string, run_error) result
 (** Resolve the same configured structured-judge lane used by {!run}. This
     lets the Keeper scheduler consult only that lane's pacing state; a
     configuration error is left runnable so {!run} can settle it explicitly. *)
+
+val claim_eligibility : keeper_name:string -> claim_eligibility
+(** Decide whether a durable failure-judgment stimulus may be claimed now.
+    When pacing enforcement is active, only the exact configured judge runtime
+    can defer the claim. Configuration errors remain eligible so one judge
+    execution can settle them as explicit terminal evidence. *)
 
 val build_prompt :
   keeper_name:string ->

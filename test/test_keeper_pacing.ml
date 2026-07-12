@@ -135,6 +135,38 @@ let test_shadow_exact_runtime_ignores_other_failure () =
       (remaining > 0.0)
   | None -> Alcotest.fail "judge runtime failure did not retain pacing"
 
+let test_failure_judgment_claim_uses_exact_judge_pacing () =
+  Eio_main.run
+  @@ fun _env ->
+  let keeper_name = "test-failure-judgment-claim-pacing" in
+  let judge_runtime_id =
+    match Keeper_failure_judge.resolve_runtime_id () with
+    | Ok runtime_id -> runtime_id
+    | Error error ->
+      Alcotest.failf
+        "structured judge runtime fixture: %s"
+        (Keeper_failure_judge.error_detail error)
+  in
+  Keeper_pacing_shadow.observe_failure
+    ~keeper_name
+    ~runtime_id:"unrelated-failed-runtime"
+    ~retry_after:(Some 30.0);
+  (match Keeper_failure_judge.claim_eligibility ~keeper_name with
+   | Keeper_failure_judge.Claim_eligible -> ()
+   | Keeper_failure_judge.Claim_deferred_by_runtime_pacing _ ->
+     Alcotest.fail "unrelated runtime pacing deferred the judgment claim");
+  Keeper_pacing_shadow.observe_failure
+    ~keeper_name
+    ~runtime_id:judge_runtime_id
+    ~retry_after:(Some 30.0);
+  match Keeper_failure_judge.claim_eligibility ~keeper_name with
+  | Keeper_failure_judge.Claim_deferred_by_runtime_pacing
+      { runtime_id; remaining_seconds } ->
+    Alcotest.(check string) "exact judge runtime" judge_runtime_id runtime_id;
+    Alcotest.(check bool) "positive remaining pacing" true (remaining_seconds > 0.0)
+  | Keeper_failure_judge.Claim_eligible ->
+    Alcotest.fail "paced judge runtime remained claim-eligible"
+
 let () =
   Alcotest.run
     "keeper_pacing"
@@ -161,5 +193,9 @@ let () =
             "exact runtime ignores other failure"
             `Quick
             test_shadow_exact_runtime_ignores_other_failure
+        ; Alcotest.test_case
+            "failure judgment claim pacing"
+            `Quick
+            test_failure_judgment_claim_uses_exact_judge_pacing
         ] )
     ]

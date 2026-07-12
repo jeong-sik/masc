@@ -51,6 +51,10 @@ type heartbeat_event_intake = {
   event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
 }
 
+type single_claim_admission =
+  | Admit_ready_single
+  | Defer_failure_judgment
+
 (** [consume_single_heartbeat_stimulus ~ctx ~meta_after_triage stim]
     increments Otel_metric_store, logs the consumption, and returns a list of
     pending board events derived from [stim] (empty for non-board
@@ -69,14 +73,19 @@ val consume_board_stimulus_batch
   -> Keeper_event_queue.stimulus list
   -> Keeper_world_observation.pending_board_event list
 
-(** [heartbeat_event_intake ~ctx ~meta_after_triage ~pending_board_events]
+(** [heartbeat_event_intake ?single_claim_admission ~ctx ~meta_after_triage
+     ~pending_board_events]
     drains the Event-Layer queue (per RFC-0020 §3 Rule 4) and merges
     newly-consumed board events with the [pending_board_events] already
     accumulated by the caller, deduplicating by [post_id]. A
     [Hitl_resolved] head remains queued until its exact approval id has left
-    the pending map, so domain callbacks complete before continuation intake. *)
+    the pending map, so domain callbacks complete before continuation intake.
+    [single_claim_admission] is a closed coordinator-owned decision for the
+    non-board single-stimulus fallback. [Defer_failure_judgment] leaves only a
+    failure-judgment stimulus pending; it cannot suppress unrelated kinds. *)
 val heartbeat_event_intake
-  :  ctx:'a context
+  :  ?single_claim_admission:single_claim_admission
+  -> ctx:'a context
   -> meta_after_triage:keeper_meta
   -> pending_board_events:Keeper_world_observation.pending_board_event list
   -> heartbeat_event_intake

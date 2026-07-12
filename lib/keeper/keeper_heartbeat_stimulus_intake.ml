@@ -72,6 +72,10 @@ type heartbeat_event_intake = {
   event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
 }
 
+type single_claim_admission =
+  | Admit_ready_single
+  | Defer_failure_judgment
+
 let recorded_attention_item_by_event_id ~base_path ~keeper_name ~event_id =
   Keeper_external_attention.load_events ~base_path ~keeper_name
   |> List.find_map (function
@@ -337,7 +341,12 @@ let stimulus_ready_for_intake (stimulus : Keeper_event_queue.stimulus) =
     true
 ;;
 
-let heartbeat_event_intake ~ctx ~meta_after_triage ~pending_board_events =
+let heartbeat_event_intake
+      ?(single_claim_admission = Admit_ready_single)
+      ~ctx
+      ~meta_after_triage
+      ~pending_board_events
+  =
   (* RFC-0020 §3 Rule 4 — drain at most one Event Layer stimulus per
      turn, where the board unit is the turn digest: every queued board
      signal is consumed as one batch ({!Keeper_event_queue.drain_board_all},
@@ -359,7 +368,25 @@ let heartbeat_event_intake ~ctx ~meta_after_triage ~pending_board_events =
         ~base_path
         keeper_name
         ~claimed_at:(Time_compat.now ())
-        ~ready:stimulus_ready_for_intake
+        ~ready:(fun stimulus ->
+          stimulus_ready_for_intake stimulus
+          &&
+          match single_claim_admission, stimulus.Keeper_event_queue.payload with
+          | Admit_ready_single, _ -> true
+          | Defer_failure_judgment, Keeper_event_queue.Failure_judgment _ -> false
+          | ( Defer_failure_judgment
+            , ( Keeper_event_queue.Board_signal _
+              | Keeper_event_queue.Fusion_completed _
+              | Keeper_event_queue.Bg_completed _
+              | Keeper_event_queue.Schedule_due _
+              | Keeper_event_queue.Bootstrap
+              | Keeper_event_queue.No_progress_recovery
+              | Keeper_event_queue.Connector_attention _
+              | Keeper_event_queue.Hitl_resolved _
+              | Keeper_event_queue.Goal_verification_failed _
+              | Keeper_event_queue.Goal_assigned _
+              | Keeper_event_queue.Goal_stagnation _ ) ) ->
+            true)
   in
   let claimed_lease =
     match Keeper_registry_event_queue.active_lease_result ~base_path keeper_name with

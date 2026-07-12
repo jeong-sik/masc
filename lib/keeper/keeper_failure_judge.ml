@@ -17,6 +17,13 @@ type run_result =
 
 type error_disposition = Escalate_judge_failure
 
+type claim_eligibility =
+  | Claim_eligible
+  | Claim_deferred_by_runtime_pacing of
+      { runtime_id : string
+      ; remaining_seconds : float
+      }
+
 let prompt_name = Keeper_prompt_names.failure_judgment
 let schema_name = "keeper_failure_judgment"
 
@@ -82,6 +89,19 @@ let resolve_runtime_id () =
   match Runtime.runtime_id_for_structured_judge () with
   | runtime_id -> Ok runtime_id
   | exception Failure detail -> Error (Runtime_configuration_error detail)
+;;
+
+let claim_eligibility ~keeper_name =
+  if not (Keeper_pacing_shadow.pacing_enforced ())
+  then Claim_eligible
+  else
+    match resolve_runtime_id () with
+    | Error _ -> Claim_eligible
+    | Ok runtime_id ->
+      (match Keeper_pacing_shadow.remaining_for_runtime ~keeper_name ~runtime_id with
+       | None -> Claim_eligible
+       | Some remaining_seconds ->
+         Claim_deferred_by_runtime_pacing { runtime_id; remaining_seconds })
 ;;
 
 let parse_response ~runtime_id response =

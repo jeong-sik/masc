@@ -63,6 +63,10 @@ type heartbeat_event_intake = Stimulus_intake.heartbeat_event_intake = {
   event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
 }
 
+type single_claim_admission = Stimulus_intake.single_claim_admission =
+  | Admit_ready_single
+  | Defer_failure_judgment
+
 type turn_intake_admission =
   | Intake_admitted
   | Intake_pressure_blocked of Keeper_pressure_admission.block
@@ -521,8 +525,21 @@ let run_keepalive_unified_turn
                 (float_of_int
                    (Keeper_config.keeper_goal_stagnation_threshold_sec ()))
               ()));
+      let single_claim_admission =
+        match
+          Keeper_failure_judge.claim_eligibility
+            ~keeper_name:meta_after_triage.name
+        with
+        | Keeper_failure_judge.Claim_eligible -> Admit_ready_single
+        | Keeper_failure_judge.Claim_deferred_by_runtime_pacing _ ->
+          Defer_failure_judgment
+      in
       let event_intake =
-        heartbeat_event_intake ~ctx ~meta_after_triage ~pending_board_events
+        heartbeat_event_intake
+          ~single_claim_admission
+          ~ctx
+          ~meta_after_triage
+          ~pending_board_events
       in
       consumed_stimuli := event_intake.consumed_stimuli;
       claimed_lease := event_intake.claimed_lease;
@@ -566,18 +583,10 @@ let run_keepalive_unified_turn
           ~pacing_block_of_name:(fun keeper_name ->
             if judgment_control_turn
             then
-              if Keeper_pacing_shadow.pacing_enforced ()
-              then
-                (match Keeper_failure_judge.resolve_runtime_id () with
-                 | Ok runtime_id ->
-                   Keeper_pacing_shadow.remaining_for_runtime
-                     ~keeper_name
-                     ~runtime_id
-                 | Error _ ->
-                   (* Let the judge boundary run once so the configuration
-                      failure becomes a durable terminal settlement. *)
-                   None)
-              else None
+              (* Exact judge-runtime pacing is checked by stimulus intake
+                 before durable claim. Rechecking after claim would recreate
+                 the claim/requeue heartbeat loop. *)
+              None
             else
               match Keeper_pacing_shadow.next_due_remaining ~keeper_name with
               | None -> None

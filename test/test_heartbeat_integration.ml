@@ -2383,7 +2383,7 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
       in
       write_file agent_path "{}";
       let agent_metrics_dir =
-        Metrics_store_eio.agent_metrics_dir config meta.agent_name
+        Masc.Metrics_store_eio.agent_metrics_dir config meta.agent_name
       in
       write_file (Filename.concat agent_metrics_dir "fixture.jsonl") "{}\n";
       let unrelated_path =

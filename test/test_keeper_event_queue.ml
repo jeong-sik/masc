@@ -1173,24 +1173,74 @@ let () =
       ignore (Masc.Keeper_registry.register ~base_path keeper_name meta);
       let restored = Masc.Keeper_registry_event_queue.snapshot ~base_path keeper_name in
       assert (length restored = 2);
-      let first =
-        match Masc.Keeper_registry_event_queue.dequeue ~base_path keeper_name with
-        | Some stim -> stim
-        | None ->
-          Alcotest.fail "late registry registration should replay first pre-registered stimulus"
+      let claim_and_ack expected_post_id =
+        let claimed_at = Time_compat.now () in
+        let lease =
+          match
+            Masc.Keeper_registry_event_queue.claim_when_result
+              ~base_path
+              keeper_name
+              ~claimed_at
+              ~ready:(fun _ -> true)
+          with
+          | Ok (Some lease) -> lease
+          | Ok None ->
+            Alcotest.failf
+              "late registry registration did not replay %s"
+              expected_post_id
+          | Error error ->
+            Alcotest.failf
+              "late registry registration failed to claim %s: %s"
+              expected_post_id
+              error
+        in
+        let stimulus =
+          match Masc.Keeper_registry_event_queue.lease_stimuli lease with
+          | [ stimulus ] -> stimulus
+          | [] | _ :: _ :: _ ->
+            Alcotest.failf
+              "late registry registration claim for %s changed cardinality"
+              expected_post_id
+        in
+        Alcotest.(check string)
+          "late registry registration replay order"
+          expected_post_id
+          stimulus.post_id;
+        let receipt =
+          match
+            Masc.Keeper_registry_event_queue.settle_result
+              ~base_path
+              keeper_name
+              ~settled_at:(Time_compat.now ())
+              ~lease
+              ~settlement:Masc.Keeper_registry_event_queue.Ack
+          with
+          | Ok (Masc.Keeper_registry_event_queue.Settled receipt) -> receipt
+          | Ok (Masc.Keeper_registry_event_queue.Already_settled _) ->
+            Alcotest.failf
+              "late registry registration repeated settlement for %s"
+              expected_post_id
+          | Error error ->
+            Alcotest.failf
+              "late registry registration failed to settle %s: %s"
+              expected_post_id
+              error
+        in
+        match
+          Masc.Keeper_registry_event_queue.mark_transition_projected_result
+            ~base_path
+            keeper_name
+            ~transition_id:receipt.transition_id
+        with
+        | Ok () -> ()
+        | Error error ->
+          Alcotest.failf
+            "late registry registration failed to project %s settlement: %s"
+            expected_post_id
+            error
       in
-      assert (String.equal first.post_id "p1");
-      let second =
-        match Masc.Keeper_registry_event_queue.dequeue ~base_path keeper_name with
-        | Some stim -> stim
-        | None ->
-          Alcotest.fail "late registry registration should replay second pre-registered stimulus"
-      in
-      assert (String.equal second.post_id "bootstrap");
-      Masc.Keeper_registry_event_queue.ack_consumed
-        ~base_path
-        keeper_name
-        [ first; second ];
+      claim_and_ack "p1";
+      claim_and_ack "bootstrap";
       assert (is_empty (Keeper_event_queue_persistence.load ~base_path ~keeper_name)));
 
   (* A pending durable stimulus is the structural cooperative-yield signal for

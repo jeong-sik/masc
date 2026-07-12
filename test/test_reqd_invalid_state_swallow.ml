@@ -312,7 +312,7 @@ let () =
     keeper_stream_src
     "~client_disconnects:(Some (stream_sw, client_disconnects))";
   let keeper_cancel_count =
-    count_occurrences keeper_stream_src "Keeper_msg_async.cancel"
+    count_occurrences keeper_stream_src "Keeper_msg_async.cancel\n"
   in
   if keeper_cancel_count > 1 then
     failwith

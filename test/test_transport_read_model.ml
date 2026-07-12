@@ -240,24 +240,44 @@ let test_websocket_discovery_retains_same_origin_wss_diagnostic () =
       check string "primary ws_url uses same-origin wss" "wss://example.com/root/ws"
         Yojson.Safe.Util.(json |> member "ws_url" |> to_string)))
 
-let test_advertised_base_url_uses_forwarded_proto_without_internal_port () =
+let test_advertised_base_url_uses_typed_trusted_scheme () =
   let headers =
     Httpun.Headers.of_list
-      [ "host", "masc.example.com"; "x-forwarded-proto", "https" ]
+      [ "host", "masc.example.com"; "x-forwarded-proto", "http" ]
   in
   let request = Httpun.Request.create ~headers `GET "/ws" in
   let request_authority =
-    match Server_request_authority.classify_http1_request request with
+    let trust_policy =
+      match
+        Server_request_authority.make_trust_policy
+          ~bind_host:"0.0.0.0"
+          ~bind_port:8935
+          ~explicit_base_url:(Some "https://masc.example.com")
+      with
+      | Ok policy -> policy
+      | Error error ->
+        fail (Server_request_authority.trust_policy_error_to_string error)
+    in
+    match
+      Server_request_authority.classify_http1_request ~trust_policy request
+    with
     | Server_request_authority.Single authority -> authority
     | ( Server_request_authority.Missing
       | Server_request_authority.Multiple
-      | Server_request_authority.Malformed ) ->
+      | Server_request_authority.Malformed
+      | Server_request_authority.Untrusted ) ->
       fail "expected valid authority"
   in
-  check string "forwarded https base" "https://masc.example.com"
+  check string "trusted HTTPS base" "https://masc.example.com"
     (Server_routes_http_runtime.advertised_base_url
        ~request_authority
-       request)
+       request);
+  with_env "MASC_HTTP_PORT" (Some "9000") (fun () ->
+      let host, port =
+        Server_routes_http_runtime.advertised_host_port ~request_authority
+      in
+      check string "typed authority host" "masc.example.com" host;
+      check int "typed HTTPS default port" 443 port)
 
 let test_context_from_env_uses_default_loopback_base_url () =
   with_env "MASC_HTTP_BASE_URL" None (fun () ->
@@ -267,6 +287,27 @@ let test_context_from_env_uses_default_loopback_base_url () =
               check string "normalized host" "127.0.0.1" ctx.host;
               check string "default base_url" "http://127.0.0.1:8935"
                 ctx.base_url)))
+
+let test_explicit_base_url_opt_never_derives_from_bind_env () =
+  with_env "MASC_HTTP_BASE_URL" None (fun () ->
+      with_env "MASC_HOST" (Some "0.0.0.0") (fun () ->
+          with_env "MASC_HTTP_PORT" (Some "9000") (fun () ->
+              check
+                (option string)
+                "listener env is not an explicit public identity"
+                None
+                (Env_config_core.masc_http_base_url_opt ()))))
+
+let test_explicit_base_url_opt_normalizes_only_explicit_value () =
+  with_env
+    "MASC_HTTP_BASE_URL"
+    (Some "  https://example.com/root///  ")
+    (fun () ->
+       check
+         (option string)
+         "explicit public identity is normalized"
+         (Some "https://example.com/root")
+         (Env_config_core.masc_http_base_url_opt ()))
 
 let test_context_from_env_trims_explicit_base_url () =
   with_env "MASC_HTTP_BASE_URL" (Some "https://example.com/root/") (fun () ->
@@ -314,13 +355,17 @@ let () =
              test_websocket_discovery_waits_for_same_origin_dispatcher;
            test_case "websocket HTTPS diagnostic URL" `Quick
              test_websocket_discovery_retains_same_origin_wss_diagnostic;
-           test_case "forwarded base URL" `Quick
-             test_advertised_base_url_uses_forwarded_proto_without_internal_port;
+           test_case "typed trusted base URL" `Quick
+             test_advertised_base_url_uses_typed_trusted_scheme;
          ] );
       ( "env",
         [
           test_case "default loopback base url" `Quick
             test_context_from_env_uses_default_loopback_base_url;
+          test_case "explicit base URL does not derive bind env" `Quick
+            test_explicit_base_url_opt_never_derives_from_bind_env;
+          test_case "explicit base URL normalizes explicit value" `Quick
+            test_explicit_base_url_opt_normalizes_only_explicit_value;
           test_case "trim explicit base url" `Quick
             test_context_from_env_trims_explicit_base_url;
           test_case "normalize loopback alias base url" `Quick

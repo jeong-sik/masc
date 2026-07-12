@@ -30,7 +30,7 @@ let make_error_handler () =
 
   h2_error_handler
 
-let make_request_handler ~sw ~clock ~server_start_time:_ =
+let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
   let mcp_eio_profile_of_transport_profile = function
     | Server_mcp_transport_http.Full -> Mcp_eio.Full
     | Server_mcp_transport_http.Managed_agent -> Mcp_eio.Managed_agent
@@ -1005,11 +1005,25 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           ~status:`Internal_server_error
           ~extra_headers:cors
     in
-    match Server_request_authority.classify_h2_request h2_req with
+    match
+      Server_request_authority.classify_h2_request ~trust_policy h2_req
+    with
     | Server_request_authority.H2_authority
         (Server_request_authority.Single request_authority) ->
-      Server_request_authority.with_current request_authority (fun () ->
-        handle_admitted_request request_authority)
+      (match classify_request_origin ~request_authority httpun_request with
+       | Multiple_origins ->
+         h2_request_authority_bad_request
+           ~error_code:"request_origin_multiple"
+           ~message:"request contains more than one Origin field"
+           h2_reqd
+       | Malformed_origin ->
+         h2_request_authority_bad_request
+           ~error_code:"request_origin_malformed"
+           ~message:"request Origin is not one complete HTTP(S) serialized origin"
+           h2_reqd
+       | Missing_origin | Single_origin _ ->
+         Server_request_authority.with_current request_authority (fun () ->
+           handle_admitted_request request_authority))
     | Server_request_authority.H2_authority Server_request_authority.Missing ->
       h2_request_authority_bad_request
         ~error_code:"request_authority_missing"
@@ -1024,6 +1038,11 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
       h2_request_authority_bad_request
         ~error_code:"request_authority_malformed"
         ~message:"request authority is malformed"
+        h2_reqd
+    | Server_request_authority.H2_authority Server_request_authority.Untrusted ->
+      h2_request_authority_bad_request
+        ~error_code:"request_authority_untrusted"
+        ~message:"request authority is not a configured server identity"
         h2_reqd
     | Server_request_authority.Unsupported_asterisk_form_options ->
       h2_request_authority_bad_request

@@ -116,10 +116,13 @@ let is_mcp_transport_request (request : Httpun.Request.t) =
 (** Validate an HTTP(S) Origin against the authority admitted at request entry.
     Native clients without an Origin remain valid. *)
 let validate_origin ~request_authority (request : Httpun.Request.t) =
-  match Httpun.Headers.get request.headers "origin" with
-  | None -> true
-  | Some origin ->
-    browser_origin_matches_request_authority ~request_authority origin
+  match classify_request_origin ~request_authority request with
+  | Missing_origin -> true
+  | Single_origin { admission = (Same_origin | Allowed_dev_origin); _ } -> true
+  | Single_origin { admission = Rejected; _ }
+  | Multiple_origins
+  | Malformed_origin ->
+    false
 
 (** Check if client accepts SSE *)
 let accepts_sse (request : Httpun.Request.t) =

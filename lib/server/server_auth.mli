@@ -159,6 +159,28 @@ val allow_anonymous_mutations : unit -> bool
 (** Re-reads [MASC_ALLOW_ANONYMOUS_MUTATIONS] on each call.
     When [true] non-loopback mutations skip auth (test fixtures only). *)
 
+type browser_origin_admission =
+  | Same_origin
+  | Allowed_dev_origin
+  | Rejected
+
+type request_origin_admission =
+  | Missing_origin
+  | Single_origin of
+      { origin : string
+      ; admission : browser_origin_admission
+      }
+  | Multiple_origins
+  | Malformed_origin
+
+val classify_request_origin :
+  request_authority:Server_request_authority.authority ->
+  Httpun.Request.t ->
+  request_origin_admission
+(** Classify the full case-insensitive [Origin] field set.  Exactly one field
+    is parsed as one complete HTTP(S) serialized origin; repeated fields and
+    partially consumed values are distinct fail-closed outcomes. *)
+
 val browser_origin_matches_request_authority :
   request_authority:Server_request_authority.authority -> string -> bool
 (** Compare an HTTP(S) browser origin with the admitted request authority.
@@ -195,8 +217,11 @@ val server_state : Mcp_server.server_state option ref
     state is threaded through. *)
 
 val get_origin : Httpun.Request.t -> Httpun.Headers.value
-(** Resolve the request's [Origin] header value (empty string when
-    missing). *)
+(** Return the one syntactically valid serialized [Origin], or ["*"] when the
+    field is absent.  Raises [Invalid_origin_header] for repeated or malformed
+    fields; live request entry points reject those cases before routing. *)
+
+exception Invalid_origin_header
 
 val public_read_cors_origin_opt :
   request_authority:Server_request_authority.authority ->

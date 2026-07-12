@@ -330,11 +330,14 @@ Sse.subscribe_external ~id:"ws-123"
 
 라우팅, 인증, credential I/O보다 먼저 `Server_request_authority`가 요청의
 authority를 한 번만 분류한다. HTTP/1.1은 case-insensitive `Host` 필드 전체를
-읽어 `Missing | Single authority | Multiple | Malformed`로 닫고, `Single`만
-request fiber에 바인딩한다. HTTP/2는 `:authority`만 authority 원천으로 쓰며
-`Host`가 함께 있으면 정규화한 host와 scheme 기본 port가 같은지 교차 검증한다.
+읽어 `Missing | Single authority | Multiple | Malformed | Untrusted`로 닫고,
+configured bind identity 또는 명시된 `MASC_HTTP_BASE_URL` identity와 일치하는
+`Single`만 request fiber에 바인딩한다. 바인딩 값은 `(scheme, authority,
+trust_class)`를 함께 보존한다. HTTP/2는 `:authority`만 authority 원천으로 쓰며
+`Host`가 함께 있으면 정규화한 host와 typed `:scheme` 기본 port가 같은지 교차
+검증한다.
 반복 `:authority`, 반복 `Host`, userinfo, 불완전 IPv6/port, 두 authority의
-불일치는 모두 route projection 전에 400이다. H2의 authority 없는
+불일치와 미신뢰 Host는 모두 route projection 전에 400이다. H2의 authority 없는
 `OPTIONS *`는 일반 missing authority와 합치지 않고 지원하지 않는 request
 target으로 명시적으로 거부한다.
 
@@ -465,11 +468,13 @@ Access-Control-Allow-Credentials: true
 
 HTTP/1.1과 HTTP/2 모두 MCP 경로(`/mcp`, `/mcp/managed`,
 `/mcp/operator`, `/sse`, `POST /`)에서 같은 typed request authority를 기준으로
-Origin을 비교한다. HTTP(S)가 아닌 scheme, userinfo, host/port 불일치는
-`403 Forbidden`이며, `http://localhost.attacker` 같은 prefix 혼동은 허용하지
-않는다. Origin이 없는 native client는 허용한다. 로컬 Vite cross-port는
-명시된 loopback dev-origin 목록에 속하고 request authority도 같은 정규화된
-loopback host일 때만 허용한다.
+Origin을 비교한다. `Origin`은 `get_multi`로 정확히 한 필드만 허용하고, path,
+query, fragment, trailing bytes 없이 HTTP(S) serialized-origin 문법 전체를
+소비한다. scheme/host/effective-port가 모두 같아야 `Same_origin`이며,
+HTTP(S)가 아닌 scheme, userinfo, 부분 파싱 값은 거부한다. Origin이 없는 native
+client는 허용한다. 로컬 Vite cross-port는 명시된 loopback dev-origin 목록의
+정확한 typed 값일 때만 별도 `Allowed_dev_origin`으로 허용하며 loopback alias를
+`Same_origin`으로 합치지 않는다.
 
 ---
 

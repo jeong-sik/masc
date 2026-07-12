@@ -66,6 +66,15 @@ type stop_reason =
   | MutationBoundaryReached of { turns_used : int; tool_name : string option }
   | Yielded_to_chat_waiting of { turns_used : int }
   | Yielded_to_durable_stimulus of { turns_used : int }
+  | InputRequired of {
+      turns_used : int;
+      request : Agent_sdk.Error.input_required;
+    }
+  | ToolFailureRecoveryDeferred of {
+      turns_used : int;
+      reason : string;
+      tool_names : string list;
+    }
 
 type config =
   Runtime_agent_context.config = {
@@ -102,6 +111,7 @@ type config =
   checkpoint_sidecar : Yojson.Safe.t option;
   cache_system_prompt : bool;
   yield_on_tool : bool;
+  tool_failure_judge : Agent_sdk.Tool_failure_recovery.judge option;
   compact_ratio : float option;
   context_window_tokens : int option;
   oas_auto_context_overflow_retry : bool;
@@ -149,6 +159,11 @@ let worker_lifecycle_classification_of_result = function
   | Ok _ -> { event = "completed"; status = "completed"; error = None }
   | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.MaxTurnsExceeded _)) ->
     { event = "completed"; status = "continuation_checkpoint"; error = None }
+  | Error
+      (Agent_sdk.Error.Agent (Agent_sdk.Error.ToolFailureRecoveryDeferred _)) ->
+    { event = "completed"; status = "tool_failure_recovery_deferred"; error = None }
+  | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.InputRequired _)) ->
+    { event = "completed"; status = "input_required"; error = None }
   | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionTimeout _)) ->
     { event = "failed"; status = "agent_execution_timeout"; error = None }
   | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionIdleTimeout _)) ->
@@ -1002,6 +1017,10 @@ let dashboard_status_of_stop_reason = function
       Dashboard_oas_bridge.Cancelled { reason = "yielded_to_chat_waiting" }
   | Yielded_to_durable_stimulus _ ->
       Dashboard_oas_bridge.Cancelled { reason = "yielded_to_durable_stimulus" }
+  | InputRequired _ ->
+      Dashboard_oas_bridge.Cancelled { reason = "input_required" }
+  | ToolFailureRecoveryDeferred _ ->
+      Dashboard_oas_bridge.Cancelled { reason = "tool_failure_recovery_deferred" }
 
 let record_dashboard_oas_response ~config ~total_duration_ms ?serialization_ms
     ~status (response : Agent_sdk.Types.api_response) =
@@ -1083,6 +1102,7 @@ let resume_from_checkpoint
         (Agent_sdk.Agent.resume ~net ~checkpoint:prepared_resume.patched_checkpoint
            ~tools:config.tools ?context:config.context
            ~options ~config:prepared_resume.agent_config
+           ?tool_failure_judge:config.tool_failure_judge
            ~auto_context_overflow_retry:config.oas_auto_context_overflow_retry
            ()))
 
@@ -1102,8 +1122,9 @@ let content_block_detail (block : Agent_sdk.Types.content_block) =
           Printf.sprintf "[tool use block: %s]" call.Agent_sdk.Canonical_tool.name
       | None -> (
           match block with
-          | Agent_sdk.Types.ToolResult { is_error; _ } ->
-              if is_error then "[tool result block: error]"
+          | Agent_sdk.Types.ToolResult { outcome; _ } ->
+              if Agent_sdk.Types.tool_result_outcome_is_error outcome
+              then "[tool result block: error]"
               else "[tool result block]"
           | Agent_sdk.Types.Image { media_type; data; _ } ->
               Printf.sprintf "[image:%s data_chars=%d]" media_type (String.length data)
@@ -1311,6 +1332,38 @@ let run_blocks
           runtime_observation = Some runtime_observation;
           stop_reason = TurnBudgetExhausted { turns_used = r.turns; limit = r.limit };
         }
+    | Error
+        (Agent_sdk.Error.Agent (Agent_sdk.Error.InputRequired request)) ->
+      close_after_success ();
+      let stop_reason = InputRequired { turns_used = turns; request } in
+      let partial_response =
+        partial_response_of_stop ~session_id ~text:request.question
+      in
+      record_dashboard_oas_response
+        ~config
+        ~total_duration_ms:run_total_duration_ms
+        ~status:(dashboard_status_of_stop_reason stop_reason)
+        partial_response;
+      Log.Misc.info
+        "oas_worker %s: typed input required request_id=%s turns=%d"
+        config.name
+        request.request_id
+        turns;
+      let runtime_observation =
+        runtime_observation_for_completed_config
+          ~total_duration_ms:run_total_duration_ms
+          config
+      in
+      Ok
+        { response = partial_response
+        ; checkpoint
+        ; session_id
+        ; turns
+        ; trace_ref
+        ; run_validation
+        ; runtime_observation = Some runtime_observation
+        ; stop_reason
+        }
     | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.ExitConditionMet r)) -> (
       match config.exit_condition_result with
       | Some render ->
@@ -1348,6 +1401,41 @@ let run_blocks
       | None ->
         close_agent_for_cleanup ~propagate_cancel:false ~config agent;
         Error (Agent_sdk.Error.Agent (Agent_sdk.Error.ExitConditionMet r)))
+    | Error
+        (Agent_sdk.Error.Agent
+           (Agent_sdk.Error.ToolFailureRecoveryDeferred
+              { reason; tool_names })) ->
+      close_after_success ();
+      let stop_reason =
+        ToolFailureRecoveryDeferred { turns_used = turns; reason; tool_names }
+      in
+      let partial_response = partial_response_of_stop ~session_id ~text:"" in
+      record_dashboard_oas_response
+        ~config
+        ~total_duration_ms:run_total_duration_ms
+        ~status:(dashboard_status_of_stop_reason stop_reason)
+        partial_response;
+      Log.Misc.info
+        "oas_worker %s: typed tool-failure recovery deferred tools=%s \
+         reason_digest=%s"
+        config.name
+        (String.concat "," tool_names)
+        (Auth.sha256_hash reason);
+      let runtime_observation =
+        runtime_observation_for_completed_config
+          ~total_duration_ms:run_total_duration_ms
+          config
+      in
+      Ok
+        { response = partial_response
+        ; checkpoint
+        ; session_id
+        ; turns
+        ; trace_ref
+        ; run_validation
+        ; runtime_observation = Some runtime_observation
+        ; stop_reason
+        }
     | Error
         (Agent_sdk.Error.Agent
            (Agent_sdk.Error.AgentExecutionTimeout r as agent_err)) ->

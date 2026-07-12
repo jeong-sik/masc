@@ -58,7 +58,9 @@ let budget_exhausted_no_progress_threshold_override
     | Runtime_agent.Completed
     | Runtime_agent.MutationBoundaryReached _
     | Runtime_agent.Yielded_to_chat_waiting _
-    | Runtime_agent.Yielded_to_durable_stimulus _ -> false
+    | Runtime_agent.Yielded_to_durable_stimulus _
+    | Runtime_agent.InputRequired _
+    | Runtime_agent.ToolFailureRecoveryDeferred _ -> false
   in
   if
     budget_exhausted
@@ -187,7 +189,20 @@ let claim_bound_work (calls : (string * Keeper_tool_outcome.t option) list) =
 type terminal_outcome =
   | Terminal_done
   | Terminal_checkpoint
+  | Terminal_input_required
   | Terminal_failed_completion_contract of { reason_code : string }
+
+type failure_judgment_delivery =
+  | Queue_successor
+  | Handled_in_turn
+
+type handle_result =
+  | Completed of Keeper_meta_contract.keeper_meta
+  | Failed_completion_contract of
+      { meta : Keeper_meta_contract.keeper_meta
+      ; failure_judgment : Keeper_event_queue.failure_judgment
+      ; judgment_delivery : failure_judgment_delivery
+      }
 
 let completion_contract_attention_reason_code result =
   match result with
@@ -221,7 +236,9 @@ let completion_contract_terminal_failure_reason_code result =
      | Runtime_agent.Completed
      | Runtime_agent.MutationBoundaryReached _
      | Runtime_agent.Yielded_to_chat_waiting _
-     | Runtime_agent.Yielded_to_durable_stimulus _ -> None)
+     | Runtime_agent.Yielded_to_durable_stimulus _
+     | Runtime_agent.InputRequired _
+     | Runtime_agent.ToolFailureRecoveryDeferred _ -> None)
   | Some _ -> None
   | None ->
     Some
@@ -235,30 +252,35 @@ let terminal_outcome_of_result result =
   | None ->
     (match result.Keeper_agent_run.stop_reason with
      | Runtime_agent.Completed -> Terminal_done
+     | Runtime_agent.InputRequired _ -> Terminal_input_required
      | Runtime_agent.TurnBudgetExhausted _
      | Runtime_agent.MutationBoundaryReached _
      | Runtime_agent.Yielded_to_chat_waiting _
-     | Runtime_agent.Yielded_to_durable_stimulus _ ->
+     | Runtime_agent.Yielded_to_durable_stimulus _
+     | Runtime_agent.ToolFailureRecoveryDeferred _ ->
        Terminal_checkpoint)
 ;;
 
 let terminal_outcome_is_completed_turn = function
-  | Terminal_done | Terminal_checkpoint -> true
+  | Terminal_done | Terminal_checkpoint | Terminal_input_required -> true
   | Terminal_failed_completion_contract _ -> false
 ;;
 
 let terminal_outcome_to_activity_kind = function
   | Terminal_failed_completion_contract _ -> "keeper.turn_failed"
   | Terminal_done | Terminal_checkpoint -> "keeper.turn_completed"
+  | Terminal_input_required -> "keeper.turn_input_required"
 
 let terminal_outcome_to_label = function
   | Terminal_done -> "done"
   | Terminal_checkpoint -> "checkpoint"
+  | Terminal_input_required -> "input_required"
   | Terminal_failed_completion_contract _ -> "failed"
 
 let terminal_outcome_to_log_label = function
   | Terminal_done -> "OK"
   | Terminal_checkpoint -> "checkpoint"
+  | Terminal_input_required -> "input_required"
   | Terminal_failed_completion_contract _ -> "failed"
 
 let append_metrics_snapshot
@@ -451,11 +473,16 @@ let emit_usage_metrics_and_log
       Printf.sprintf "yielded_to_chat_waiting(%d)" turns_used
     | Runtime_agent.Yielded_to_durable_stimulus { turns_used } ->
       Printf.sprintf "yielded_to_durable_stimulus(%d)" turns_used
+    | Runtime_agent.InputRequired { turns_used; _ } ->
+      Printf.sprintf "input_required(%d)" turns_used
+    | Runtime_agent.ToolFailureRecoveryDeferred { turns_used; _ } ->
+      Printf.sprintf "tool_failure_recovery_deferred(%d)" turns_used
   in
   let outcome_label =
     match terminal_outcome with
     | Terminal_failed_completion_contract _ -> "failure"
     | Terminal_done -> "success"
+    | Terminal_input_required -> "input_required"
     | Terminal_checkpoint ->
       (match result.stop_reason with
        | Runtime_agent.TurnBudgetExhausted _ -> "budget_exhausted"
@@ -463,6 +490,9 @@ let emit_usage_metrics_and_log
        | Runtime_agent.Yielded_to_chat_waiting _ -> "yielded_to_chat_waiting"
        | Runtime_agent.Yielded_to_durable_stimulus _ ->
          "yielded_to_durable_stimulus"
+       | Runtime_agent.InputRequired _ -> "input_required"
+       | Runtime_agent.ToolFailureRecoveryDeferred _ ->
+         "tool_failure_recovery_deferred"
        | Runtime_agent.Completed -> "success")
   in
   Otel_metric_store.inc_counter
@@ -544,7 +574,7 @@ let emit_usage_metrics_and_log
       turn_mode_label
       outcome_str
       reason_code
-  | Terminal_done | Terminal_checkpoint ->
+  | Terminal_done | Terminal_checkpoint | Terminal_input_required ->
     Log.Keeper.info
       "%s: keeper cycle %s runtime_lane=%s tokens=%d latency=%dms mode=%s stop=%s"
       updated_meta.name
@@ -559,20 +589,27 @@ let emit_usage_metrics_and_log
 type decision_outcome =
   | Decision_success
   | Decision_checkpoint
+  | Decision_input_required
   | Decision_failure
 
 let decision_outcome_of_terminal_outcome = function
   | Terminal_done -> Decision_success
   | Terminal_checkpoint -> Decision_checkpoint
+  | Terminal_input_required -> Decision_input_required
   | Terminal_failed_completion_contract _ -> Decision_failure
 
 let decision_outcome_to_label = function
   | Decision_success -> "success"
   | Decision_checkpoint -> "checkpoint"
+  | Decision_input_required -> "input_required"
   | Decision_failure -> "failure"
 
 let terminal_reason_of_outcome result = function
   | Terminal_done -> Keeper_turn_terminal.success ()
+  | Terminal_input_required ->
+    Keeper_turn_terminal.of_disposition
+      ~source:"runtime_stop_reason"
+      Keeper_turn_disposition.Input_required
   | Terminal_checkpoint ->
     (match result.Keeper_agent_run.stop_reason with
      | Runtime_agent.TurnBudgetExhausted { turns_used; limit } ->
@@ -583,6 +620,11 @@ let terminal_reason_of_outcome result = function
      | Runtime_agent.MutationBoundaryReached _
      | Runtime_agent.Yielded_to_chat_waiting _
      | Runtime_agent.Yielded_to_durable_stimulus _
+     | Runtime_agent.InputRequired _ ->
+       Keeper_turn_terminal.of_disposition
+         ~source:"runtime_stop_reason"
+         Keeper_turn_disposition.Input_required
+     | Runtime_agent.ToolFailureRecoveryDeferred _
      | Runtime_agent.Completed ->
        Keeper_turn_terminal.success ())
   | Terminal_failed_completion_contract _ ->
@@ -678,6 +720,21 @@ let reset_turn_failures_for_stop_reason ~config ~updated_meta result =
        checkpoint saved — will resume next cycle"
       turns_used;
     reset_failure_state ()
+  | Runtime_agent.ToolFailureRecoveryDeferred
+      { turns_used; reason; tool_names } ->
+    Log.Keeper.info ~keeper_name:updated_meta.name
+      "typed tool-failure recovery deferred after %d turn(s), checkpoint saved \
+       tools=%s reason_digest=%s"
+      turns_used
+      (String.concat "," tool_names)
+      Digestif.SHA256.(digest_string reason |> to_hex);
+    reset_failure_state ()
+  | Runtime_agent.InputRequired { turns_used; request } ->
+    Log.Keeper.info ~keeper_name:updated_meta.name
+      "typed input required after %d turn(s), checkpoint saved request_id=%s"
+      turns_used
+      request.Agent_sdk.Error.request_id;
+    reset_failure_state ()
   | Runtime_agent.Completed -> reset_failure_state ()
 ;;
 
@@ -706,6 +763,7 @@ module For_testing = struct
   type nonrec terminal_outcome = terminal_outcome =
     | Terminal_done
     | Terminal_checkpoint
+    | Terminal_input_required
     | Terminal_failed_completion_contract of { reason_code : string }
 
   let terminal_outcome_of_result = terminal_outcome_of_result
@@ -735,6 +793,7 @@ let completion_contract_attention_detail ~reason_code =
 let record_completion_contract_attention_failure
       ~(config : Workspace.config)
       ~(updated_meta : Keeper_meta_contract.keeper_meta)
+      ~runtime_id
       ~reason_code
   =
   let base_path = config.Workspace.base_path in
@@ -752,33 +811,24 @@ let record_completion_contract_attention_failure
     ~agent_name:updated_meta.name
     ~reason:(Keeper_types_profile.short_preview detail);
   let count = Keeper_registry.get_turn_failures ~base_path updated_meta.name in
+  let fj : Keeper_event_queue.failure_judgment =
+    { fj_runtime_id = runtime_id
+    ; fj_judgment = Keeper_runtime_failure_route.Contract_violation
+    ; fj_detail = detail
+    }
+  in
   if Keeper_pacing_shadow.pacing_enforced ()
   then (
-    (* RFC-0313 W3: contract attention after a runtime success is a judgment
-       stimulus, not a pause. The keeper keeps running; its own next turn
-       receives the typed [Failure_judgment] as input (identity-deduped in
-       the queue, no dedicated turn_reason, scheduling cadence unchanged). *)
-    let fj : Keeper_event_queue.failure_judgment =
-      { fj_runtime_id = Keeper_meta_contract.runtime_id_of_meta updated_meta
-      ; fj_judgment = Keeper_runtime_failure_route.Contract_violation
-      ; fj_detail = detail
-      }
-    in
-    Keeper_registry_event_queue.enqueue
-      ~base_path
-      updated_meta.name
-      { post_id = Keeper_event_queue.failure_judgment_post_id fj
-      ; urgency = Keeper_event_queue.Normal
-      ; arrived_at = Time_compat.now ()
-      ; payload = Keeper_event_queue.Failure_judgment fj
-      };
+    (* Return the typed successor to the owning heartbeat lease transaction.
+       Enqueueing here would commit the successor separately from acknowledging
+       the stimulus that caused this turn. *)
     Log.Keeper.warn
       "%s: completion contract attention (streak=%d, reason=%s) escalated as \
-       judgment stimulus; keeper keeps running (RFC-0313 W3)"
+       an atomic judgment successor (RFC-0313 W3)"
       updated_meta.name
       count
       reason_code;
-    updated_meta)
+    updated_meta, fj, Queue_successor)
   else (
     let pause_threshold = Runtime.pause_threshold () in
     let turn_fail_streak_threshold =
@@ -819,7 +869,7 @@ let record_completion_contract_attention_failure
           count
           turn_fail_streak_threshold
           reason_code;
-        paused_meta
+        paused_meta, fj, Handled_in_turn
       | Error sync_err ->
         Log.Keeper.error
           "%s: completion contract attention auto-pause sync failed: %s \
@@ -833,8 +883,8 @@ let record_completion_contract_attention_failure
             ; "site", "completion_contract_attention_auto_pause"
             ]
           ();
-        pause_meta)
-    else updated_meta)
+        pause_meta, fj, Handled_in_turn)
+    else updated_meta, fj, Handled_in_turn)
 ;;
 
 let emit_terminal_fsm
@@ -842,6 +892,7 @@ let emit_terminal_fsm
       ~meta
       ~keeper_turn_id
       ~updated_meta
+      ~runtime_id
       ~terminal_outcome
       result
   =
@@ -852,10 +903,11 @@ let emit_terminal_fsm
     Keeper_turn_fsm.Completing;
   match terminal_outcome with
   | Terminal_failed_completion_contract { reason_code } ->
-    let updated_meta =
+    let updated_meta, failure_judgment, judgment_delivery =
       record_completion_contract_attention_failure
         ~config
         ~updated_meta
+        ~runtime_id
         ~reason_code
     in
     Keeper_turn_fsm.emit_transition
@@ -864,15 +916,16 @@ let emit_terminal_fsm
       ~prev:Keeper_turn_fsm.Completing
       (Keeper_turn_fsm.Failed
          (Keeper_turn_fsm.Failure_completion_contract_violation { reason_code }));
-    updated_meta
-  | Terminal_done | Terminal_checkpoint ->
+    Failed_completion_contract
+      { meta = updated_meta; failure_judgment; judgment_delivery }
+  | Terminal_done | Terminal_checkpoint | Terminal_input_required ->
     reset_turn_failures_for_stop_reason ~config ~updated_meta result;
     Keeper_turn_fsm.emit_transition
       ~keeper_name:meta.name
       ~turn_id:keeper_turn_id
       ~prev:Keeper_turn_fsm.Completing
       Keeper_turn_fsm.Done;
-    updated_meta
+    Completed updated_meta
 ;;
 
 let handle
@@ -1015,6 +1068,7 @@ let handle
     ~meta
     ~keeper_turn_id
     ~updated_meta
+    ~runtime_id:final_execution.runtime_id
     ~terminal_outcome
     result
 ;;

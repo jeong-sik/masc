@@ -338,13 +338,20 @@ let stop_reason_to_string = function
     Printf.sprintf "yielded_to_chat_waiting:%d" turns_used
   | Runtime_agent.Yielded_to_durable_stimulus { turns_used } ->
     Printf.sprintf "yielded_to_durable_stimulus:%d" turns_used
+  | Runtime_agent.InputRequired _ ->
+    Keeper_turn_disposition.to_wire Keeper_turn_disposition.Input_required
+  | Runtime_agent.ToolFailureRecoveryDeferred _ ->
+    "tool_failure_recovery_deferred"
 ;;
 
 (* This projects the runtime-stop axis into the receipt's terminal_reason_code
    vocabulary. It does not classify the independent completion-contract axis;
    [operator_disposition] remains the final typed receipt verdict. *)
 let receipt_terminal_reason_code_of_stop_reason = function
-  | Runtime_agent.Completed ->
+  | Runtime_agent.InputRequired _ ->
+    Keeper_turn_disposition.to_wire Keeper_turn_disposition.Input_required
+  | Runtime_agent.Completed
+  | Runtime_agent.ToolFailureRecoveryDeferred _ ->
     Keeper_turn_disposition.to_wire Keeper_turn_disposition.Success
   | ( Runtime_agent.TurnBudgetExhausted _
     | Runtime_agent.MutationBoundaryReached _

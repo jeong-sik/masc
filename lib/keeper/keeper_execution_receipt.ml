@@ -106,6 +106,7 @@ type operator_disposition_reason =
   | Reason_internal_error
   | Reason_tool_route_recoverable_failure
   | Reason_completion_contract_unsatisfied
+  | Reason_input_required
   | Reason_passive_no_action
       (* RFC-0303 Phase 0: a passive-only turn is activity (thinking / deciding
          to defer / choosing to wait), not an operator-pageable failure. It maps
@@ -131,6 +132,7 @@ let operator_disposition_reason_to_string = function
   | Reason_internal_error -> "internal_error"
   | Reason_tool_route_recoverable_failure -> "tool_route_recoverable_failure"
   | Reason_completion_contract_unsatisfied -> "completion_contract_unsatisfied"
+  | Reason_input_required -> "input_required"
   | Reason_passive_no_action -> "passive_no_action"
   | Reason_turn_budget_exhausted -> "turn_budget_exhausted"
   | Reason_turn_livelock_blocked -> "turn_livelock_blocked"
@@ -224,6 +226,21 @@ let operator_disposition (receipt : t)
      sub-predicates stay here (they read the receipt record, not the wire
      string) and remain OR'd with the variant test at the same branch. *)
   let terminal_reason = Keeper_terminal_reason.of_wire receipt.terminal_reason_code in
+  let input_required =
+    let open Keeper_turn_disposition in
+    match Keeper_turn_disposition.of_wire receipt.terminal_reason_code with
+    | Input_required -> true
+    | Success
+    | External_cancel
+    | Turn_wall_clock_timeout
+    | Runtime_attempts_exhausted
+    | Completion_contract_unsatisfied
+    | Completion_contract_no_progress
+    | Post_commit_ambiguous
+    | Turn_budget_exhausted _
+    | Provider_error _
+    | Unknown _ -> false
+  in
   let error_kind =
     Option.map
       (fun kind -> String.lowercase_ascii (error_kind_to_string kind))
@@ -254,6 +271,7 @@ let operator_disposition (receipt : t)
      typed migration drops them.  Runtime exhaustion still reaches this
      branch via [terminal_reason="runtime_exhausted"]. *)
   match terminal_reason with
+  | _ when input_required -> Disp_pass, Reason_input_required
   | Keeper_terminal_reason.Runtime_exhausted _ ->
     Disp_alert_exhausted, Reason_runtime_exhausted
   | _ when preflight_config_failure ->

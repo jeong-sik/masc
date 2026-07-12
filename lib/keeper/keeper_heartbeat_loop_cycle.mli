@@ -1,5 +1,22 @@
 (** Keeper cycle execution with error-class handling. *)
 
+type cycle_outcome =
+  | Completed of Keeper_meta_contract.keeper_meta
+  | Failed of
+      { meta : Keeper_meta_contract.keeper_meta
+      ; failure : Keeper_unified_turn.turn_failure
+      }
+  | Busy of
+      { meta : Keeper_meta_contract.keeper_meta
+      ; block : Keeper_turn_admission.autonomous_block
+      }
+
+val meta : cycle_outcome -> Keeper_meta_contract.keeper_meta
+(** Metadata projection for callers that must continue the heartbeat state
+    machine independently of whether the turn completed, failed, or was not
+    admitted.  Queue ownership must inspect the full {!cycle_outcome}; this
+    projection alone is never completion evidence. *)
+
 val run_keeper_cycle
   :  ?event_bus:Agent_sdk.Event_bus.t
   -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
@@ -11,4 +28,4 @@ val run_keeper_cycle
   -> shared_context:Agent_sdk.Context.t
   -> wake:Keeper_registry.wake_reason
   -> unit
-  -> Keeper_meta_contract.keeper_meta
+  -> cycle_outcome

@@ -163,10 +163,12 @@ val run :
   base_path:string ->
   make_routes:(port:int -> host:string -> sw:Eio.Switch.t ->
                clock:float Eio.Time.clock_ty Eio.Resource.t -> 'a) ->
-  make_request_handler:('a ->
+  make_request_handler:(trust_policy:Server_request_authority.trust_policy ->
+                        'a ->
                         Eio.Net.Sockaddr.stream ->
                         Httpun.Reqd.t Gluten.Reqd.t -> unit) ->
-  make_h2_request_handler:(sw:Eio.Switch.t ->
+  make_h2_request_handler:(trust_policy:Server_request_authority.trust_policy ->
+                           sw:Eio.Switch.t ->
                            clock:float Eio.Time.clock_ty Eio.Resource.t ->
                            server_start_time:float ->
                            Eio.Net.Sockaddr.stream ->

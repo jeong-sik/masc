@@ -59,14 +59,6 @@ let record_event_queue_stimulus_turn_started ~ctx ~keeper_name stimulus =
     stimulus
 ;;
 
-let record_event_queue_stimulus_ack ~ctx ~keeper_name stimulus =
-  record_event_queue_stimulus_reaction
-    ~ctx
-    ~keeper_name
-    ~reaction_kind:Keeper_reaction_ledger.Event_queue_ack
-    stimulus
-;;
-
 let record_recovery_stimulus_turn_started ~ctx ~keeper_name stimulus =
   record_event_queue_stimulus_turn_started ~ctx ~keeper_name stimulus
 ;;
@@ -75,6 +67,8 @@ type heartbeat_event_intake = {
   pending_board_events : Keeper_world_observation.pending_board_event list;
   consumed_stimulus_count : int;
   consumed_stimuli : Keeper_event_queue.stimulus list;
+  claimed_lease : Keeper_registry_event_queue.lease option;
+  event_queue_claim_error : string option;
   event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
 }
 
@@ -346,23 +340,55 @@ let heartbeat_event_intake ~ctx ~meta_after_triage ~pending_board_events =
      signal is consumed as one batch ({!Keeper_event_queue.drain_board_all},
      RFC-0334 W2 — arrival-window batching is retired), and the non-board
      fallback below stays a single stimulus. *)
-  let board_batch =
-    Keeper_registry_event_queue.drain_board
-      ~base_path:ctx.config.base_path
-      meta_after_triage.name
+  let base_path = ctx.config.base_path in
+  let keeper_name = meta_after_triage.name in
+  let claim_new () =
+    match
+      Keeper_registry_event_queue.claim_board_result
+        ~base_path
+        keeper_name
+        ~claimed_at:(Time_compat.now ())
+    with
+    | Error _ as error -> error
+    | Ok (Some _ as lease) -> Ok lease
+    | Ok None ->
+      Keeper_registry_event_queue.claim_when_result
+        ~base_path
+        keeper_name
+        ~claimed_at:(Time_compat.now ())
+        ~ready:stimulus_ready_for_intake
   in
-  let queued_observations, consumed_stimuli =
-    match board_batch with
-    | [] ->
-      (match
-         Keeper_registry_event_queue.dequeue_when
-           ~base_path:ctx.config.base_path
-           meta_after_triage.name
-           ~ready:stimulus_ready_for_intake
-       with
-       | None -> [], []
-       | Some stim -> consume_single_heartbeat_stimulus ~ctx ~meta_after_triage stim, [ stim ])
-    | batch -> consume_board_stimulus_batch ~meta_after_triage batch, batch
+  let claimed_lease =
+    match Keeper_registry_event_queue.active_lease_result ~base_path keeper_name with
+    | Error _ as error -> error
+    | Ok (Some _ as lease) -> Ok lease
+    | Ok None -> claim_new ()
+  in
+  let queued_observations, consumed_stimuli, claimed_lease, event_queue_claim_error =
+    match claimed_lease with
+    | Error message ->
+      Log.Keeper.error
+        "turn entry: event queue claim failed keeper=%s: %s"
+        keeper_name
+        message;
+      [], [], None, Some message
+    | Ok None -> [], [], None, None
+    | Ok (Some lease) ->
+      let stimuli = Keeper_registry_event_queue.lease_stimuli lease in
+      let observations =
+        match Keeper_registry_event_queue.lease_kind lease, stimuli with
+        | Keeper_event_queue_persistence.Board_batch, batch ->
+          consume_board_stimulus_batch ~meta_after_triage batch
+        | ( Keeper_event_queue_persistence.Single
+          | Keeper_event_queue_persistence.Legacy_inflight ), [ stimulus ] ->
+          consume_single_heartbeat_stimulus ~ctx ~meta_after_triage stimulus
+        | ( Keeper_event_queue_persistence.Single
+          | Keeper_event_queue_persistence.Legacy_inflight ), stimuli ->
+          List.concat_map
+            (consume_single_heartbeat_stimulus ~ctx ~meta_after_triage)
+            stimuli
+      in
+      observations, stimuli, Some lease, None
   in
   let consumed_stimulus_count = List.length consumed_stimuli in
   let event_queue_triggers = List.filter_map event_queue_trigger_of_stimulus consumed_stimuli in
@@ -386,5 +412,11 @@ let heartbeat_event_intake ~ctx ~meta_after_triage ~pending_board_events =
       pending_board_events
       (List.rev queued_observations)
   in
-  { pending_board_events; consumed_stimulus_count; consumed_stimuli; event_queue_triggers }
+  { pending_board_events
+  ; consumed_stimulus_count
+  ; consumed_stimuli
+  ; claimed_lease
+  ; event_queue_claim_error
+  ; event_queue_triggers
+  }
 ;;

@@ -8,8 +8,8 @@
 
     Coverage:
     - all [api_error] variants (RateLimited / Overloaded / ServerError /
-      AuthError / PaymentRequired / InvalidRequest / NotFound / ContextOverflow /
-      NetworkError / Timeout)
+      AuthError / AuthorizationError / PaymentRequired / InvalidRequest /
+      NotFound / ContextOverflow / NetworkError / Timeout)
     - agent_error variants reached via [SdkE.Agent _] routing
     - all top-level non-Agent / non-Api wrappers (Mcp / Config /
       Serialization / Io / Orchestration / Internal) *)
@@ -38,6 +38,9 @@ let api_cases : (string * SdkE.api_error * string) list =
     , Retry.ServerError { status = 502; message = "" }
     , "api_error_server:502" )
   ; "AuthError", Retry.AuthError { message = "" }, "api_error_auth"
+  ; ( "AuthorizationError"
+    , Retry.AuthorizationError { message = "permission refused" }
+    , "api_error_authorization" )
   ; ( "PaymentRequired"
     , Retry.PaymentRequired { message = "billing required" }
     , "api_error_payment_required" )
@@ -88,6 +91,14 @@ let sdk_cases : (string * SdkE.sdk_error * string) list =
   ; ( "Api/Timeout"
     , SdkE.Api (Retry.Timeout { message = "60s"; phase = None })
     , "api_error_timeout" )
+  ; ( "Api/AuthorizationError"
+    , SdkE.Api (Retry.AuthorizationError { message = "permission refused" })
+    , "api_error_authorization" )
+  ; ( "Provider/AuthorizationError"
+    , SdkE.Provider
+        (Llm_provider.Error.AuthorizationError
+           { provider = "provider"; detail = "permission refused" })
+    , "provider_error_authorization" )
   ; "Mcp", SdkE.Mcp (SdkE.InitializeFailed { detail = "boot" }), "mcp_error"
   ; "Config", SdkE.Config (SdkE.MissingEnvVar { var_name = "X" }), "config_error"
   ; ( "Serialization"
@@ -115,6 +126,17 @@ let test_sdk_typed_wire () =
        let actual = typed_wire (AE.terminal_reason_code_of_sdk_error_typed err) in
        Alcotest.(check string) ("sdk/" ^ label) expected actual)
     sdk_cases
+;;
+
+let test_idle_detected_receipt_is_failure () =
+  let outcome =
+    AE.receipt_outcome_kind_of_sdk_error
+      (SdkE.Agent (SdkE.IdleDetected { consecutive_idle_turns = 3 }))
+  in
+  Alcotest.(check string)
+    "IdleDetected is not cancellation"
+    "error"
+    (Masc.Keeper_execution_receipt.outcome_kind_to_string outcome)
 ;;
 
 let check_parse_split label err ~provider ~model_ ~server =
@@ -1189,6 +1211,10 @@ let () =
             "all sdk_error cases produce expected wire"
             `Quick
             test_sdk_typed_wire
+        ; Alcotest.test_case
+            "IdleDetected receipt remains a failure"
+            `Quick
+            test_idle_detected_receipt_is_failure
         ] )
     ; ( "server parse rejection split"
       , [ Alcotest.test_case

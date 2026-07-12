@@ -842,6 +842,15 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
               Keeper_metrics.(to_string RestartOutcomes)
               ~labels:[ "keeper", old_entry.name; "outcome", "shutdown_reserved" ]
               ()
+          | Error (Keeper_registry.Restart_event_queue_unavailable { keeper_name; detail }) ->
+            Log.Keeper.error
+              "%s: restart refused because durable event queue is unavailable: %s"
+              keeper_name
+              detail;
+            Otel_metric_store.inc_counter
+              Keeper_metrics.(to_string RestartOutcomes)
+              ~labels:[ "keeper", keeper_name; "outcome", "event_queue_unavailable" ]
+              ()
           | Ok reg ->
             Keeper_registry.restore_supervisor_state
               ~base_path

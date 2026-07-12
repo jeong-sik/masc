@@ -295,8 +295,8 @@ let rec masc_http_base_url () =
   | Error msg -> raise (Config_error msg)
 
 and masc_http_base_url_result () =
-  match raw_value_opt http_base_url_env_key |> trim_opt with
-  | Some base -> Ok (strip_trailing_slashes base)
+  match masc_http_base_url_opt () with
+  | Some base -> Ok base
   | None ->
       let host =
         match masc_host_opt () with
@@ -308,6 +308,11 @@ and masc_http_base_url_result () =
       Result.map
         (fun host -> Printf.sprintf "http://%s:%s" host (masc_http_port ()))
         host
+
+and masc_http_base_url_opt () =
+  raw_value_opt http_base_url_env_key
+  |> trim_opt
+  |> Option.map strip_trailing_slashes
 
 (** {1 Additional Helpers} *)
 

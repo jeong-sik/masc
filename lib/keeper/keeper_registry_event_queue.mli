@@ -1,11 +1,70 @@
 (** Per-keeper event-queue access.
 
     SSOT for enqueueing / draining the per-keeper stimulus queue.
-    Internal CAS retry on the entry-owned
-    [event_queue : Keeper_event_queue.t Atomic.t] field; no central
-    registry Atomic touched. Successful mutations are mirrored to the
-    MASC-owned durable queue snapshot so a keeper restart can replay
-    pending stimuli. *)
+    The MASC-owned v2 envelope is authoritative.  Mutations commit that one
+    durable state first, then publish its pending projection into the
+    entry-owned [event_queue : Keeper_event_queue.t Atomic.t].  No central
+    registry Atomic is touched. *)
+
+type lease = Keeper_event_queue_persistence.lease
+
+type requeue_reason = Keeper_event_queue_persistence.requeue_reason =
+  | Cycle_busy
+  | Turn_not_scheduled
+  | Retry_after_pacing
+  | Rotate_now
+  | Cancelled
+  | Cycle_crashed
+  | Registration_recovery
+
+type escalation_reason = Keeper_event_queue_persistence.escalation_reason =
+  | Failure_judgment_requested
+  | Failure_judgment_failed
+
+type settlement = Keeper_event_queue_persistence.settlement =
+  | Ack
+  | Requeue of requeue_reason
+  | Escalate of
+      { reason : escalation_reason
+      ; successor : Keeper_event_queue.stimulus option
+      }
+
+type transition_receipt = Keeper_event_queue_persistence.transition_receipt
+type outbox_entry = Keeper_event_queue_persistence.outbox_entry
+
+type settle_result = Keeper_event_queue_persistence.settle_result =
+  | Settled of transition_receipt
+  | Already_settled of transition_receipt
+
+val lease_stimuli : lease -> Keeper_event_queue.stimulus list
+val lease_kind : lease -> Keeper_event_queue_persistence.lease_kind
+
+val active_lease_result :
+  base_path:string -> string -> (lease option, string) result
+
+val transition_outbox_result :
+  base_path:string -> string -> (outbox_entry list, string) result
+
+val mark_transition_projected_result :
+  base_path:string -> string -> transition_id:string -> (unit, string) result
+
+val claim_when_result :
+  base_path:string ->
+  string ->
+  claimed_at:float ->
+  ready:(Keeper_event_queue.stimulus -> bool) ->
+  (lease option, string) result
+
+val claim_board_result :
+  base_path:string -> string -> claimed_at:float -> (lease option, string) result
+
+val settle_result :
+  base_path:string ->
+  string ->
+  settled_at:float ->
+  lease:lease ->
+  settlement:settlement ->
+  (settle_result, string) result
 
 (** Enqueue a stimulus on the keeper's event queue. When the keeper is not
     registered yet, persist the stimulus to the durable snapshot so later

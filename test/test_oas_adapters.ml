@@ -24,7 +24,7 @@ let make_test_messages () : Agent_sdk.Types.message list =
         [ Agent_sdk.Types.ToolResult
             { tool_use_id = "call-1"
             ; content = "result: 4"
-            ; is_error = false
+            ; outcome = Agent_sdk.Types.Tool_succeeded
             ; json = None
             ; content_blocks = None
             }
@@ -73,7 +73,7 @@ let test_roundtrip_tool_msg () =
         [ Agent_sdk.Types.ToolResult
             { tool_use_id = "tc-1"
             ; content = "tool output here"
-            ; is_error = false
+            ; outcome = Agent_sdk.Types.Tool_succeeded
             ; json = None
             ; content_blocks = None
             }
@@ -210,7 +210,7 @@ let test_agent_sdk_response_visible_text_excludes_non_answer_blocks () =
         ; Agent_sdk.Types.ToolResult
             { tool_use_id = "tool-1"
             ; content = "tool payload"
-            ; is_error = false
+            ; outcome = Agent_sdk.Types.Tool_succeeded
             ; json = None
             ; content_blocks = Some [ Agent_sdk.Types.Text "structured tool payload" ]
             }
@@ -236,7 +236,7 @@ let test_agent_sdk_response_structured_json_uses_oas_visible_projection () =
         [ Agent_sdk.Types.ToolResult
             { tool_use_id = "tool-1"
             ; content = {|{"text":"tool payload must not be parsed"}|}
-            ; is_error = false
+            ; outcome = Agent_sdk.Types.Tool_succeeded
             ; json = None
             ; content_blocks = None
             }

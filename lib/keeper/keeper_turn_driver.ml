@@ -397,6 +397,7 @@ let run_named
     ?checkpoint_sidecar
     ?(cache_system_prompt = false)
     ?(yield_on_tool = false)
+    ?tool_failure_judge
     ?compact_ratio
     ?context_window_tokens
     ?(oas_auto_context_overflow_retry = true)
@@ -745,6 +746,7 @@ let run_named
             ; checkpoint_sidecar
             ; cache_system_prompt
             ; yield_on_tool
+            ; tool_failure_judge
             ; compact_ratio
             ; context_window_tokens
             ; oas_auto_context_overflow_retry

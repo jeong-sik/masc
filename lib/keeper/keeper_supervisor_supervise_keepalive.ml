@@ -84,6 +84,11 @@ let supervise_keepalive
          "supervisor registry validation rejected %s: %s"
          meta.name
          (Keeper_registry.registry_entry_validation_error_to_string validation_error)
+     | Error (Keeper_registry.Registration_event_queue_unavailable { keeper_name; detail }) ->
+       Log.Keeper.error
+         "supervisor registry event queue unavailable keeper=%s: %s"
+         keeper_name
+         detail
      | Ok reg ->
     (* Workspace initialization *)
     (try

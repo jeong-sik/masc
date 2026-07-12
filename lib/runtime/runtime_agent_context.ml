@@ -27,6 +27,24 @@ type stop_reason =
     (* The current autonomous cycle completed at least one OAS provider turn,
        then released its lane because another durable stimulus was queued
        behind the stimulus already leased by this cycle. *)
+  | InputRequired of
+      { turns_used : int
+      ; request : Agent_sdk.Error.input_required
+      }
+    (* OAS ended the current run with a typed elicitation request. The host
+       must surface [request.question] and persist the checkpoint before
+       returning control; this is neither a provider failure nor a completed
+       model deliverable. *)
+  | ToolFailureRecoveryDeferred of
+      { turns_used : int
+      ; reason : string
+      ; tool_names : string list
+      }
+    (* The OAS typed recovery judge ended this Agent.run without another main
+       provider call. [reason] is observation-only model output; scheduling
+       decisions must branch only on this constructor. The host owns the next
+       activity boundary, so this is a checkpoint yield, never a provider
+       failure or Keeper pause. *)
 
 type config =
   { name : string
@@ -81,6 +99,7 @@ type config =
   ; checkpoint_sidecar : Yojson.Safe.t option
   ; cache_system_prompt : bool
   ; yield_on_tool : bool
+  ; tool_failure_judge : Agent_sdk.Tool_failure_recovery.judge option
   ; compact_ratio : float option
   ; context_window_tokens : int option
   ; oas_auto_context_overflow_retry : bool
@@ -183,6 +202,7 @@ let default_config
   ; checkpoint_sidecar = None
   ; cache_system_prompt = false
   ; yield_on_tool = false
+  ; tool_failure_judge = None
   ; compact_ratio = None
   ; context_window_tokens = None
   ; oas_auto_context_overflow_retry = true
@@ -314,6 +334,11 @@ let builder_without_approval
     if config.yield_on_tool
     then Agent_sdk.Builder.with_yield_on_tool true builder
     else builder
+  in
+  let builder =
+    match config.tool_failure_judge with
+    | Some judge -> Agent_sdk.Builder.with_tool_failure_judge judge builder
+    | None -> builder
   in
   let builder =
     if config.allowed_paths <> []

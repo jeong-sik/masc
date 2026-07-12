@@ -95,7 +95,7 @@ type 'a lock_outcome =
    poisons the gate when the callback raises. The gate carries no mutable
    resource state of its own, and the shared Stdlib mutex is released by the
    [Fun.protect] finalizer before any callback exception is propagated. *)
-let with_eio_lock owner f =
+let with_eio_lock ~check_after owner f =
   let outcome =
     match
       Eio.Mutex.use_ro owner.eio_gate (fun () ->
@@ -112,7 +112,7 @@ let with_eio_lock owner f =
      transaction. Re-check the parent context after both owner locks have been
      released on every outcome so an ordinary exception cannot mask pending
      cancellation. *)
-  Eio.Fiber.check ();
+  if check_after then Eio.Fiber.check ();
   match outcome with
   | Returned value -> value
   | Raised (exn, backtrace) -> Printexc.raise_with_backtrace exn backtrace
@@ -120,6 +120,12 @@ let with_eio_lock owner f =
 
 let with_lock owner f =
   match execution_context () with
-  | Eio_fiber -> with_eio_lock owner f
+  | Eio_fiber -> with_eio_lock ~check_after:true owner f
+  | Non_eio -> Stdlib.Mutex.protect owner.cross_context_mutex f
+;;
+
+let with_durable_lock owner f =
+  match execution_context () with
+  | Eio_fiber -> with_eio_lock ~check_after:false owner f
   | Non_eio -> Stdlib.Mutex.protect owner.cross_context_mutex f
 ;;

@@ -49,6 +49,15 @@ type cleanup_remove_outcome =
   | Cleanup_removed
   | Cleanup_remove_already_absent
 
+type cleanup_container_presence =
+  | Cleanup_container_present
+  | Cleanup_container_absent
+
+type docker_container_state =
+  | Docker_container_running
+  | Docker_container_stopped
+  | Docker_container_absent
+
 (* #10488: previously used [String.trim] which strips ALL trailing
    whitespace including [\t]. Docker inspect templates emit tab-
    separated fields and a trailing-empty-field shows up as [...\t].
@@ -208,6 +217,146 @@ let should_remove_container ~now ~max_age_sec (inspected : inspected_container) 
   stopped || owner_dead || expired
 ;;
 
+let probe_cleanup_container_presence ~container_id ~timeout_sec =
+  (* Docker CLI stderr is human-readable and not a stable control protocol.
+     Re-read the machine-oriented ID inventory after a failed inspect/remove;
+     exact ID absence proves the cleanup race without matching error prose. *)
+  let argv =
+    docker_command_argv ()
+    @ [ "ps"; "-aq"; "--no-trunc"; "--filter"; "id=" ^ container_id ]
+  in
+  let st, out =
+    run_docker_argv_with_status
+      ~summary:"keeper sandbox docker container presence probe"
+      ~timeout_sec
+      argv
+  in
+  if st <> Unix.WEXITED 0
+  then
+    Error
+      (Printf.sprintf
+         "docker container presence probe failed for %s: %s"
+         container_id
+         (Exec_policy.truncate_for_log out))
+  else if List.exists (String.equal container_id) (nonempty_lines out)
+  then Ok Cleanup_container_present
+  else Ok Cleanup_container_absent
+;;
+
+let parse_json_container_name line =
+  match Yojson.Safe.from_string line with
+  | `String name -> Ok name
+  | payload ->
+    Error
+      (Printf.sprintf
+         "unexpected docker container-name inventory payload: %s"
+         (Yojson.Safe.to_string payload))
+  | exception Yojson.Json_error detail ->
+    Error
+      (Printf.sprintf
+         "invalid docker container-name inventory payload: %s"
+         detail)
+;;
+
+let probe_container_name_presence ~container_name ~timeout_sec =
+  let argv =
+    docker_command_argv ()
+    @ [ "ps"
+      ; "-a"
+      ; "--no-trunc"
+      ; "--filter"
+      ; "name=" ^ container_name
+      ; "--format"
+      ; "{{json .Names}}"
+      ]
+  in
+  let st, out =
+    run_docker_argv_with_status
+      ~summary:"keeper sandbox docker container-name presence probe"
+      ~timeout_sec
+      argv
+  in
+  if st <> Unix.WEXITED 0
+  then
+    Error
+      (Printf.sprintf
+         "docker container-name presence probe failed for %s: %s"
+         container_name
+         (Exec_policy.truncate_for_log out))
+  else
+    let rec parse_names = function
+      | [] -> Ok false
+      | line :: rest ->
+        (match parse_json_container_name line with
+         | Ok name when String.equal name container_name -> Ok true
+         | Ok _ -> parse_names rest
+         | Error _ as error -> error)
+    in
+    parse_names (nonempty_lines out)
+;;
+
+let probe_container_state ~container_name ~timeout_sec =
+  let argv =
+    docker_command_argv ()
+    @ [ "inspect"; "--format"; "{{json .State.Running}}"; container_name ]
+  in
+  let st, out =
+    run_docker_argv_with_status
+      ~summary:"keeper sandbox docker container state probe"
+      ~timeout_sec
+      argv
+  in
+  if st = Unix.WEXITED 0
+  then (
+    match nonempty_lines out with
+    | [ line ] ->
+      (match Yojson.Safe.from_string line with
+       | `Bool true -> Ok Docker_container_running
+       | `Bool false -> Ok Docker_container_stopped
+       | payload ->
+         Error
+           (Printf.sprintf
+              "unexpected docker container state payload for %s: %s"
+              container_name
+              (Yojson.Safe.to_string payload))
+       | exception Yojson.Json_error detail ->
+         Error
+           (Printf.sprintf
+              "invalid docker container state payload for %s: %s"
+              container_name
+              detail))
+    | lines ->
+      Error
+        (Printf.sprintf
+           "docker container state probe for %s returned %d payloads"
+           container_name
+           (List.length lines)))
+  else
+    let inspect_failure =
+      Printf.sprintf
+        "docker inspect state probe failed for %s: %s"
+        container_name
+        (Exec_policy.truncate_for_log out)
+    in
+    match probe_container_name_presence ~container_name ~timeout_sec with
+    | Ok false -> Ok Docker_container_absent
+    | Ok true -> Error inspect_failure
+    | Error inventory_failure ->
+      Error (inspect_failure ^ "; " ^ inventory_failure)
+;;
+
+let cleanup_failure_or_absent
+      ~container_id
+      ~timeout_sec
+      ~failure
+      ~already_absent
+  =
+  match probe_cleanup_container_presence ~container_id ~timeout_sec with
+  | Ok Cleanup_container_absent -> Ok already_absent
+  | Ok Cleanup_container_present -> Error failure
+  | Error probe_error -> Error (failure ^ "; " ^ probe_error)
+;;
+
 let inspect_cleanup_container ~container_id ~timeout_sec =
   let format =
     "{{ index .Config.Labels \""
@@ -226,17 +375,16 @@ let inspect_cleanup_container ~container_id ~timeout_sec =
       argv
   in
   if st <> Unix.WEXITED 0
-  then (
-    match Keeper_sandbox_runtime_classify.classify_container_reference_failure out with
-    | Keeper_sandbox_runtime_classify.Container_absent ->
-      Ok Cleanup_inspect_already_absent
-    | Keeper_sandbox_runtime_classify.Container_not_running
-    | Keeper_sandbox_runtime_classify.Container_reference_error ->
-      Error
+  then
+    cleanup_failure_or_absent
+      ~container_id
+      ~timeout_sec
+      ~failure:
         (Printf.sprintf
            "docker inspect failed for cleanup container %s: %s"
            container_id
-           (Exec_policy.truncate_for_log out)))
+           (Exec_policy.truncate_for_log out))
+      ~already_absent:Cleanup_inspect_already_absent
   else (
     match nonempty_lines out with
     | line :: _ ->
@@ -263,17 +411,16 @@ let remove_cleanup_container ~container_id ~timeout_sec =
   in
   if st = Unix.WEXITED 0
   then Ok Cleanup_removed
-  else (
-    match Keeper_sandbox_runtime_classify.classify_container_reference_failure out with
-    | Keeper_sandbox_runtime_classify.Container_absent ->
-      Ok Cleanup_remove_already_absent
-    | Keeper_sandbox_runtime_classify.Container_not_running
-    | Keeper_sandbox_runtime_classify.Container_reference_error ->
-      Error
+  else
+    cleanup_failure_or_absent
+      ~container_id
+      ~timeout_sec
+      ~failure:
         (Printf.sprintf
            "docker rm -fv failed for cleanup container %s: %s"
            container_id
-           (Exec_policy.truncate_for_log out)))
+           (Exec_policy.truncate_for_log out))
+      ~already_absent:Cleanup_remove_already_absent
 ;;
 
 let cleanup_stale_containers
@@ -288,6 +435,7 @@ let cleanup_stale_containers
       docker_command_argv ()
       @ [ "ps"
         ; "-aq"
+        ; "--no-trunc"
         ; "--filter"
         ; "label=" ^ sandbox_component_label_key ^ "=" ^ sandbox_component_label_value
         ; "--filter"
@@ -364,7 +512,7 @@ let list_container_ids ?keeper_name ?container_kind ~base_path ~timeout_sec () =
   try
     let argv =
       docker_command_argv ()
-      @ [ "ps"; "-aq" ]
+      @ [ "ps"; "-aq"; "--no-trunc" ]
       @ docker_filter_args ?keeper_name ?container_kind ~base_path ()
     in
     let st, out =

@@ -62,6 +62,11 @@ type stop_result =
   ; errors : string list
   }
 
+type docker_container_state =
+  | Docker_container_running
+  | Docker_container_stopped
+  | Docker_container_absent
+
 (** Resolve the Docker CLI from the current [PATH]. This keeps Docker
     calls deterministic after the Eio process manager has been
     initialized and tests inject a fake [docker] binary. *)
@@ -301,6 +306,14 @@ val stop_containers
   -> timeout_sec:float
   -> unit
   -> stop_result
+
+(** Query a named container through Docker's machine-oriented state and name
+    inventory projections. Human-readable stderr is retained only as
+    diagnostics and never determines the returned state. *)
+val probe_container_state
+  :  container_name:string
+  -> timeout_sec:float
+  -> (docker_container_state, string) result
 
 (** Best-effort cleanup for stale MASC keeper sandbox containers under the
     same base path. Only containers with the keeper sandbox labels are

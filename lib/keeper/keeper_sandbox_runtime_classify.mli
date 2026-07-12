@@ -16,14 +16,6 @@ type docker_failure_class =
   | Docker_hardening_error
   | Image_required_command_missing
 
-(** Typed interpretation of a failed Docker command that references a
-    container. Docker's human-readable output is parsed only in this boundary
-    module; lifecycle callers branch on this closed variant. *)
-type container_reference_failure =
-  | Container_absent
-  | Container_not_running
-  | Container_reference_error
-
 val docker_failure_class_to_string : docker_failure_class -> string
 val process_status_is_timeout : Unix.process_status -> bool
 val lower_contains : string -> string -> bool
@@ -43,5 +35,3 @@ val classify_image_inspect_failure :
 
 val classify_image_inventory_failure :
   status:Unix.process_status -> output:string -> docker_failure_class
-
-val classify_container_reference_failure : string -> container_reference_failure

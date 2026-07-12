@@ -9,7 +9,7 @@
 open Keeper_shutdown_types
 
 let cleanup_intent : Keeper_shutdown_types.cleanup_intent =
-  { meta_disposition = Retain_dead_tombstone
+  { reason = Dead_tombstone_cleanup
   ; remove_session = false
   }
 ;;
@@ -31,7 +31,9 @@ let cleanup_dead_tombstone
     (entry : Keeper_registry.registry_entry)
   =
   let request : Keeper_shutdown_prepare_join.request =
-    { actor = ctx.agent_name; cleanup_intent }
+    { actor = ctx.agent_name
+    ; cleanup_intent
+    }
   in
   match Keeper_shutdown_runtime.submit ~config:ctx.config ~entry ~request with
   | Ok operation ->
@@ -70,17 +72,23 @@ let completion_meta_for_coverage config operation =
     None
 ;;
 
-let completion_sinks_ready () =
+let lifecycle_event_bus_ready () =
   match Masc_event_bus.get () with
   | None -> Error "MASC lifecycle event bus is not installed"
-  | Some _ when not (Keeper_subprocess_registry.default_cleanup_hook_registered ()) ->
-    Error "default Keeper subprocess cleanup hook is not registered"
   | Some _ -> Ok ()
+;;
+
+let dead_tombstone_sinks_ready () =
+  match lifecycle_event_bus_ready () with
+  | Error _ as error -> error
+  | Ok () when not (Keeper_subprocess_registry.default_cleanup_hook_registered ()) ->
+    Error "default Keeper subprocess cleanup hook is not registered"
+  | Ok () -> Ok ()
 ;;
 
 let handle_completion config operation = function
   | Keeper_shutdown_types.Dead_tombstone_reaped ->
-    (match completion_sinks_ready () with
+    (match dead_tombstone_sinks_ready () with
      | Error _ as error -> error
      | Ok () ->
        let operation_id =
@@ -102,6 +110,46 @@ let handle_completion config operation = function
        Log.Keeper.info
          "%s: dead tombstone finalization delivered operation=%s"
          operation.keeper_name
-         operation_id;
+       operation_id;
        Ok ())
+  | Keeper_shutdown_types.Paused_meta_pruned ->
+    (match lifecycle_event_bus_ready (), operation.cleanup_intent.reason with
+     | Error _ as error, _ -> error
+     | Ok (), Stale_paused_prune context ->
+       let operation_id =
+         Keeper_shutdown_types.Operation_id.to_string operation.operation_id
+       in
+       let latched_reason_detail =
+         match context.latched_reason with
+         | Some reason ->
+           Printf.sprintf
+             " latched_reason=%s"
+             (Keeper_latched_reason.to_wire reason)
+         | None -> ""
+       in
+       Keeper_supervisor_publish_lifecycle.publish_lifecycle
+         ~event:
+           (Keeper_lifecycle_events.Custom_event
+              { verb = Keeper_lifecycle_events.Paused_pruned; phase = None })
+         operation.keeper_name
+         (Printf.sprintf
+            "meta_version=%d last_updated=%s%s shutdown_operation=%s"
+            context.meta_version
+            context.last_updated
+            latched_reason_detail
+            operation_id)
+         ();
+       Log.Keeper.info
+         "%s: stale paused meta prune delivered operation=%s"
+         operation.keeper_name
+         operation_id;
+       Ok ()
+     | Ok (),
+       ( Operator_stop_retain_meta
+       | Operator_stop_remove_meta
+       | Dead_tombstone_cleanup
+       | Dashboard_keeper_purge _ ) ->
+       Error "paused-meta completion does not belong to a stale-prune operation")
+  | Keeper_shutdown_types.Dashboard_keeper_purged ->
+    Error "dashboard Keeper purge completion requires the server artifact boundary"
 ;;

@@ -33,7 +33,41 @@ type meta_disposition =
   | Retain_dead_tombstone
   | Remove_meta
 
-type completion_action = Dead_tombstone_reaped
+type stale_paused_context =
+  { meta_version : int
+  ; last_updated : string
+  ; latched_reason : Keeper_latched_reason.t option
+  }
+
+type dashboard_purge_context =
+  { requested_name : string
+  ; agent_name : string
+  ; meta_version : int
+  }
+
+type cleanup_reason =
+  | Operator_stop_retain_meta
+  | Operator_stop_remove_meta
+  | Dead_tombstone_cleanup
+  | Stale_paused_prune of stale_paused_context
+  | Dashboard_keeper_purge of dashboard_purge_context
+
+type completion_action =
+  | Dead_tombstone_reaped
+  | Paused_meta_pruned
+  | Dashboard_keeper_purged
+
+type dashboard_purge_artifact =
+  | Keeper_metrics_artifact
+  | Keeper_memory_bank_artifact
+  | Keeper_generation_index_artifact
+  | Keeper_policy_log_artifact
+  | Keeper_decision_log_artifact
+  | Keeper_feedback_log_artifact
+  | Keeper_dataset_export_artifact
+  | Keeper_runtime_directory_artifact
+  | Keeper_configuration_artifact
+  | Agent_artifact_bundle of string list
 
 type completion_receipt =
   | Completion_not_requested
@@ -41,9 +75,13 @@ type completion_receipt =
   | Completion_delivered of completion_action
 
 type cleanup_intent =
-  { meta_disposition : meta_disposition
+  { reason : cleanup_reason
   ; remove_session : bool
   }
+
+type lane_ownership =
+  | Registered_lane of Keeper_lane.Id.t
+  | Dormant_meta
 
 type admission_lane =
   | Autonomous
@@ -107,6 +145,7 @@ type finalization_evidence =
   ; meta_removed : bool
   ; session_removed : bool
   ; registry_unregistered : bool
+  ; accumulator_dropped : bool
   ; completion : completion_receipt
   }
 
@@ -124,7 +163,7 @@ type t =
   ; revision : int
   ; operation_id : Operation_id.t
   ; keeper_name : string
-  ; lane_id : Keeper_lane.Id.t
+  ; lane_ownership : lane_ownership
   ; trace_id : Keeper_id.Trace_id.t
   ; generation : int
   ; actor : string
@@ -151,9 +190,10 @@ type invariant_error =
       { expected_session_removed : bool
       ; actual_session_removed : bool
       }
-  | Finalized_completion_mismatch of meta_disposition * completion_receipt
+  | Required_accumulator_not_dropped
+  | Finalized_completion_mismatch of cleanup_reason * completion_receipt
 
-let schema_version = 3
+let schema_version = 5
 
 let meta_disposition_to_string = function
   | Retain_operator_pause -> "retain_operator_pause"
@@ -168,13 +208,54 @@ let meta_disposition_of_string = function
   | value -> Error (Printf.sprintf "unknown Keeper shutdown meta disposition: %S" value)
 ;;
 
+let cleanup_reason_label = function
+  | Operator_stop_retain_meta -> "operator_stop_retain_meta"
+  | Operator_stop_remove_meta -> "operator_stop_remove_meta"
+  | Dead_tombstone_cleanup -> "dead_tombstone_cleanup"
+  | Stale_paused_prune _ -> "stale_paused_prune"
+  | Dashboard_keeper_purge _ -> "dashboard_keeper_purge"
+;;
+
+let meta_disposition_of_cleanup_reason = function
+  | Operator_stop_retain_meta -> Retain_operator_pause
+  | Dead_tombstone_cleanup -> Retain_dead_tombstone
+  | Operator_stop_remove_meta
+  | Stale_paused_prune _
+  | Dashboard_keeper_purge _ -> Remove_meta
+;;
+
 let completion_action_to_string = function
   | Dead_tombstone_reaped -> "dead_tombstone_reaped"
+  | Paused_meta_pruned -> "paused_meta_pruned"
+  | Dashboard_keeper_purged -> "dashboard_keeper_purged"
 ;;
 
 let completion_action_of_string = function
   | "dead_tombstone_reaped" -> Ok Dead_tombstone_reaped
+  | "paused_meta_pruned" -> Ok Paused_meta_pruned
+  | "dashboard_keeper_purged" -> Ok Dashboard_keeper_purged
   | value -> Error (Printf.sprintf "unknown Keeper shutdown completion action: %S" value)
+;;
+
+let completion_action_equal left right =
+  match left, right with
+  | Dead_tombstone_reaped, Dead_tombstone_reaped
+  | Paused_meta_pruned, Paused_meta_pruned
+  | Dashboard_keeper_purged, Dashboard_keeper_purged -> true
+  | Dead_tombstone_reaped, Paused_meta_pruned
+  | Dead_tombstone_reaped, Dashboard_keeper_purged
+  | Paused_meta_pruned, Dead_tombstone_reaped
+  | Paused_meta_pruned, Dashboard_keeper_purged
+  | Dashboard_keeper_purged, Dead_tombstone_reaped
+  | Dashboard_keeper_purged, Paused_meta_pruned -> false
+;;
+
+let completion_action_of_cleanup_reason = function
+  | Dead_tombstone_cleanup -> Some Dead_tombstone_reaped
+  | Stale_paused_prune _ -> Some Paused_meta_pruned
+  | Dashboard_keeper_purge _ -> Some Dashboard_keeper_purged
+  | Operator_stop_retain_meta
+  | Operator_stop_remove_meta -> None
 ;;
 
 let completion_receipt_kind = function
@@ -202,10 +283,12 @@ let invariant_error_to_string = function
       "shutdown finalized session evidence mismatch: expected removed=%b, actual=%b"
       expected_session_removed
       actual_session_removed
-  | Finalized_completion_mismatch (meta_disposition, completion) ->
+  | Required_accumulator_not_dropped ->
+    "shutdown finalized cleanup without dropping its required tool accumulator"
+  | Finalized_completion_mismatch (cleanup_reason, completion) ->
     Printf.sprintf
-      "shutdown finalized completion mismatch: meta_disposition=%s, completion=%s"
-      (meta_disposition_to_string meta_disposition)
+      "shutdown finalized completion mismatch: cleanup_reason=%s, completion=%s"
+      (cleanup_reason_label cleanup_reason)
       (completion_receipt_kind completion)
 ;;
 
@@ -221,7 +304,7 @@ let validate operation =
     match operation.phase with
     | Finalized evidence ->
       let expected_meta_removed =
-        match operation.cleanup_intent.meta_disposition with
+        match meta_disposition_of_cleanup_reason operation.cleanup_intent.reason with
         | Remove_meta -> true
         | Retain_operator_pause
         | Retain_dead_tombstone -> false
@@ -245,13 +328,31 @@ let validate operation =
              ; actual_session_removed = evidence.session_removed
              })
       else
-        (match operation.cleanup_intent.meta_disposition, evidence.completion with
-         | Retain_dead_tombstone,
-           (Completion_pending Dead_tombstone_reaped
-           | Completion_delivered Dead_tombstone_reaped)
-         | (Retain_operator_pause | Remove_meta), Completion_not_requested -> Ok ()
-         | meta_disposition, completion ->
-           Error (Finalized_completion_mismatch (meta_disposition, completion)))
+        let accumulator_drop_required =
+          match operation.lane_ownership, operation.cleanup_intent.reason with
+          | Dormant_meta, _
+          | Registered_lane _, (Stale_paused_prune _ | Dashboard_keeper_purge _) ->
+            true
+          | Registered_lane _,
+            ( Operator_stop_retain_meta
+            | Operator_stop_remove_meta
+            | Dead_tombstone_cleanup ) -> false
+        in
+        if accumulator_drop_required && not evidence.accumulator_dropped
+        then Error Required_accumulator_not_dropped
+        else
+        (match
+           completion_action_of_cleanup_reason operation.cleanup_intent.reason,
+           evidence.completion
+         with
+         | None, Completion_not_requested -> Ok ()
+         | Some expected, Completion_pending actual
+         | Some expected, Completion_delivered actual
+           when completion_action_equal expected actual -> Ok ()
+         | (None | Some _), completion ->
+           Error
+             (Finalized_completion_mismatch
+                (operation.cleanup_intent.reason, completion)))
     | Prepared
     | Joined_idle
     | Finalizing_tasks _
@@ -292,26 +393,98 @@ let turn_disposition_equal left right =
   | Inflight_effect_unknown _, No_inflight_turn -> false
 ;;
 
-let meta_disposition_equal left right =
+let stale_paused_context_equal
+    (left : stale_paused_context)
+    (right : stale_paused_context)
+  =
+  Int.equal left.meta_version right.meta_version
+  && String.equal left.last_updated right.last_updated
+  && option_equal Keeper_latched_reason.equal left.latched_reason right.latched_reason
+;;
+
+let dashboard_purge_context_equal
+    (left : dashboard_purge_context)
+    (right : dashboard_purge_context)
+  =
+  String.equal left.requested_name right.requested_name
+  && String.equal left.agent_name right.agent_name
+  && Int.equal left.meta_version right.meta_version
+;;
+
+let cleanup_reason_equal left right =
   match left, right with
-  | Retain_operator_pause, Retain_operator_pause
-  | Retain_dead_tombstone, Retain_dead_tombstone
-  | Remove_meta, Remove_meta -> true
-  | Retain_operator_pause, (Retain_dead_tombstone | Remove_meta)
-  | Retain_dead_tombstone, (Retain_operator_pause | Remove_meta)
-  | Remove_meta, (Retain_operator_pause | Retain_dead_tombstone) -> false
+  | Operator_stop_retain_meta, Operator_stop_retain_meta
+  | Operator_stop_remove_meta, Operator_stop_remove_meta
+  | Dead_tombstone_cleanup, Dead_tombstone_cleanup -> true
+  | Stale_paused_prune left, Stale_paused_prune right ->
+    stale_paused_context_equal left right
+  | Dashboard_keeper_purge left, Dashboard_keeper_purge right ->
+    dashboard_purge_context_equal left right
+  | Operator_stop_retain_meta,
+    ( Operator_stop_remove_meta
+    | Dead_tombstone_cleanup
+    | Stale_paused_prune _
+    | Dashboard_keeper_purge _ )
+  | Operator_stop_remove_meta,
+    ( Operator_stop_retain_meta
+    | Dead_tombstone_cleanup
+    | Stale_paused_prune _
+    | Dashboard_keeper_purge _ )
+  | Dead_tombstone_cleanup,
+    ( Operator_stop_retain_meta
+    | Operator_stop_remove_meta
+    | Stale_paused_prune _
+    | Dashboard_keeper_purge _ )
+  | Stale_paused_prune _,
+    ( Operator_stop_retain_meta
+    | Operator_stop_remove_meta
+    | Dead_tombstone_cleanup
+    | Dashboard_keeper_purge _ )
+  | Dashboard_keeper_purge _,
+    ( Operator_stop_retain_meta
+    | Operator_stop_remove_meta
+    | Dead_tombstone_cleanup
+    | Stale_paused_prune _ ) ->
+    false
+;;
+
+let dashboard_purge_artifact_plan ~keeper_name context =
+  let agent_aliases =
+    [ context.requested_name; keeper_name; context.agent_name ]
+    |> List.filter_map String_util.trim_to_option
+    |> List.sort_uniq String.compare
+  in
+  [ Keeper_metrics_artifact
+  ; Keeper_memory_bank_artifact
+  ; Keeper_generation_index_artifact
+  ; Keeper_policy_log_artifact
+  ; Keeper_decision_log_artifact
+  ; Keeper_feedback_log_artifact
+  ; Keeper_dataset_export_artifact
+  ; Keeper_runtime_directory_artifact
+  ; Keeper_configuration_artifact
+  ; Agent_artifact_bundle agent_aliases
+  ]
 ;;
 
 let cleanup_intent_equal left right =
-  meta_disposition_equal left.meta_disposition right.meta_disposition
+  cleanup_reason_equal left.reason right.reason
   && Bool.equal left.remove_session right.remove_session
+;;
+
+let lane_ownership_equal left right =
+  match left, right with
+  | Registered_lane left, Registered_lane right -> Keeper_lane.Id.equal left right
+  | Dormant_meta, Dormant_meta -> true
+  | Registered_lane _, Dormant_meta
+  | Dormant_meta, Registered_lane _ -> false
 ;;
 
 let immutable_fields_equal left right =
   Int.equal left.schema_version right.schema_version
   && Operation_id.equal left.operation_id right.operation_id
   && String.equal left.keeper_name right.keeper_name
-  && Keeper_lane.Id.equal left.lane_id right.lane_id
+  && lane_ownership_equal left.lane_ownership right.lane_ownership
   && Keeper_id.Trace_id.equal left.trace_id right.trace_id
   && Int.equal left.generation right.generation
   && String.equal left.actor right.actor

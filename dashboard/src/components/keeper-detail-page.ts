@@ -316,16 +316,19 @@ const KeeperDetailContent = memo(function KeeperDetailContent({
     void (async () => {
       const confirmed = await requestConfirm({
         title: '키퍼 완전 삭제',
-        message: `${keeper.name}를 완전 삭제합니다.\n런타임 상태, 세션 trace, 인증, metrics와 config/keepers/${keeper.name}.toml까지 함께 제거됩니다.`,
+        message: `${keeper.name}의 안전한 삭제 작업을 접수합니다.\n현재 작업이 정리된 뒤 세션 trace, 인증, metrics와 Keeper 설정이 삭제됩니다.`,
         tone: 'danger',
-        confirmText: '완전 삭제',
+        confirmText: '삭제 작업 접수',
       })
       if (!confirmed) return
       setPurgePending(true)
       try {
-        await purgeAgent(keeper.name)
+        const result = await purgeAgent(keeper.name)
+        if (result.target_kind !== 'keeper') {
+          throw new Error('Keeper 삭제 요청이 agent 즉시 삭제로 처리되었습니다')
+        }
         closeKeeperDetail()
-        showToast(`${keeper.name} 완전 삭제됨`, 'success')
+        showToast(`${keeper.name} 삭제 작업 접수됨 (${result.operation_id})`, 'success')
         await refreshAfterRuntimeAction()
       } catch (err) {
         showToast(err instanceof Error ? err.message : '키퍼 삭제 실패', 'error')

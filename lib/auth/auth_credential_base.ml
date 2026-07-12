@@ -497,6 +497,7 @@ let persist_raw_token config ~agent_name raw_token =
 (** Delete agent credential *)
 let delete_credential config agent_name =
   let file = credential_file config agent_name in
+  let raw_token = raw_token_file config agent_name in
   let redirect_target = load_redirect_target config file in
   let credential_target =
     match load_credential config agent_name with
@@ -504,6 +505,7 @@ let delete_credential config agent_name =
     | _ -> None
   in
   remove_file_if_exists file;
+  remove_file_if_exists raw_token;
   Option.iter remove_file_if_exists redirect_target;
   Option.iter remove_file_if_exists credential_target;
   !credential_cache_invalidator_ref config

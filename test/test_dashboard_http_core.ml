@@ -1734,6 +1734,7 @@ let test_lifecycle_event_display_values () =
       ("resumed", true, "running", "idle", false);
       ("paused", true, "paused", "paused", true);
       ("paused_pruned", false, "stopped", "offline", true);
+      ("purged", false, "stopped", "offline", false);
       ("admission_denied", false, "offline", "offline", false);
       ("dead_cleaned", false, "dead", "offline", false);
       ("stopped", false, "stopped", "offline", true);

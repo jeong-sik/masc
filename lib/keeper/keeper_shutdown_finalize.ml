@@ -323,22 +323,70 @@ let dead_tombstone_meta (meta : Keeper_meta_contract.keeper_meta) =
   }
 ;;
 
-let final_meta_update cleanup_intent =
-  match cleanup_intent.meta_disposition with
-  | Retain_operator_pause
-  | Remove_meta -> paused_meta
-  | Retain_dead_tombstone -> dead_tombstone_meta
+let stale_paused_state_matches context (meta : Keeper_meta_contract.keeper_meta) =
+  meta.paused
+  && String.equal meta.updated_at context.last_updated
+  && Option.equal
+       Keeper_latched_reason.equal
+       meta.latched_reason
+       context.latched_reason
+;;
+
+let read_operation_meta ~config operation =
+  match operation.cleanup_intent.reason with
+  | Stale_paused_prune context ->
+    (match
+       Keeper_meta_store.read_meta_if_exact_identity
+         config
+         ~name:operation.keeper_name
+         ~trace_id:operation.trace_id
+         ~generation:operation.generation
+         ~meta_version:context.meta_version
+     with
+     | Error error ->
+       Error (Keeper_meta_store.exact_identity_error_to_string error)
+     | Ok meta when stale_paused_state_matches context meta -> Ok meta
+     | Ok _ ->
+       Error
+         "stale paused Keeper metadata state changed while lifecycle cleanup owned admission")
+  | Dashboard_keeper_purge context ->
+    (match
+       Keeper_meta_store.read_meta_if_exact_identity
+         config
+         ~name:operation.keeper_name
+         ~trace_id:operation.trace_id
+         ~generation:operation.generation
+         ~meta_version:context.meta_version
+     with
+     | Ok meta -> Ok meta
+     | Error error ->
+       Error (Keeper_meta_store.exact_identity_error_to_string error))
+  | Operator_stop_retain_meta
+  | Operator_stop_remove_meta
+  | Dead_tombstone_cleanup ->
+    (match Keeper_meta_store.read_meta_resolved config operation.keeper_name with
+     | Error detail -> Error detail
+     | Ok None -> Error "Keeper metadata is absent"
+     | Ok (Some (_, meta)) ->
+       if
+         Keeper_id.Trace_id.equal meta.runtime.trace_id operation.trace_id
+         && Int.equal meta.runtime.generation operation.generation
+       then Ok meta
+       else Error "Keeper metadata identity changed before finalization")
 ;;
 
 let update_registry_meta_exact operation entry retained =
-  match entry with
-  | None -> Ok ()
-  | Some registry_entry
+  match operation.lane_ownership, entry with
+  | Dormant_meta, None
+  | Registered_lane _, None -> Ok ()
+  | Dormant_meta, Some _ ->
+    Error "dormant Keeper operation found a registered lane before meta update"
+  | Registered_lane lane_id, Some registry_entry
     when not
            (Keeper_lane.Id.equal
               (Keeper_lane.id registry_entry.Keeper_registry.lane)
-              operation.lane_id) -> Error "Keeper registry lane changed before meta update"
-  | Some registry_entry ->
+              lane_id) -> Error "Keeper registry lane changed before meta update"
+  | Registered_lane _, Some registry_entry ->
     (match
        Keeper_registry.update_entry_exact registry_entry (fun current ->
          { current with meta = retained })
@@ -353,23 +401,75 @@ let update_registry_meta_exact operation entry retained =
          (Keeper_registry.registry_entry_validation_error_to_string validation_error))
 ;;
 
-let prepare_cleanup ~config ~entry operation settled_task_ids =
+let validate_registry_owner_exact ~config operation =
   match
-    Keeper_meta_store.update_meta_if_identity
-      config
-      ~name:operation.keeper_name
-      ~trace_id:operation.trace_id
-      ~generation:operation.generation
-      (final_meta_update operation.cleanup_intent)
+    operation.lane_ownership,
+    Keeper_registry.get ~base_path:config.Workspace.base_path operation.keeper_name
   with
-  | Error error ->
-    block
-      ~config
-      operation
-      Meta_update
-      (Keeper_meta_store.identity_update_error_to_string error)
-  | Ok retained ->
-    (match update_registry_meta_exact operation entry retained with
+  | Dormant_meta, None
+  | Registered_lane _, None -> Ok ()
+  | Dormant_meta, Some _ ->
+    Error "dormant Keeper operation found a registered lane before cleanup"
+  | Registered_lane lane_id, Some registry_entry ->
+    if
+      not
+        (Keeper_lane.Id.equal
+           (Keeper_lane.id registry_entry.Keeper_registry.lane)
+           lane_id)
+    then Error "Keeper registry lane changed before cleanup"
+    else
+      (match operation.cleanup_intent.reason, registry_entry.phase with
+       | Stale_paused_prune _, Keeper_state_machine.Paused -> Ok ()
+       | Stale_paused_prune _, phase ->
+         Error
+           (Printf.sprintf
+              "stale paused Keeper lane changed phase before cleanup: expected paused, actual %s"
+              (Keeper_state_machine.phase_to_string phase))
+       | ( Operator_stop_retain_meta
+         | Operator_stop_remove_meta
+         | Dead_tombstone_cleanup
+         | Dashboard_keeper_purge _ )
+         , _ -> Ok ())
+;;
+
+let prepare_cleanup ~config ~entry operation settled_task_ids =
+  let meta_prepare_result =
+    match operation.cleanup_intent.reason with
+    | Stale_paused_prune _
+    | Dashboard_keeper_purge _ ->
+      (match read_operation_meta ~config operation with
+       | Error _ as error -> error
+       | Ok _ -> validate_registry_owner_exact ~config operation)
+    | Operator_stop_retain_meta
+    | Operator_stop_remove_meta ->
+      (match
+         Keeper_meta_store.update_meta_if_identity
+           config
+           ~name:operation.keeper_name
+           ~trace_id:operation.trace_id
+           ~generation:operation.generation
+           paused_meta
+       with
+       | Error error ->
+         Error (Keeper_meta_store.identity_update_error_to_string error)
+       | Ok retained -> update_registry_meta_exact operation entry retained)
+    | Dead_tombstone_cleanup ->
+      (match
+         Keeper_meta_store.update_meta_if_identity
+           config
+           ~name:operation.keeper_name
+           ~trace_id:operation.trace_id
+           ~generation:operation.generation
+           dead_tombstone_meta
+       with
+       | Error error ->
+         Error (Keeper_meta_store.identity_update_error_to_string error)
+       | Ok retained -> update_registry_meta_exact operation entry retained)
+  in
+  match meta_prepare_result with
+  | Error detail -> block ~config operation Meta_update detail
+  | Ok () ->
+    (match validate_registry_owner_exact ~config operation with
      | Error detail -> block ~config operation Meta_update detail
      | Ok () ->
          (match
@@ -392,40 +492,77 @@ let prepare_cleanup ~config ~entry operation settled_task_ids =
              | Error _ as error -> error)))
 ;;
 
-let rec remove_tree path =
-  if not (Fs_compat.file_exists path)
-  then Ok ()
-  else
-    try
-      match (Unix.lstat path).Unix.st_kind with
-      | Unix.S_DIR ->
-        let entries = Sys.readdir path |> Array.to_list in
-        let rec remove_entries = function
-          | [] ->
-            Unix.rmdir path;
-            Ok ()
-          | entry :: rest ->
-            (match remove_tree (Filename.concat path entry) with
-             | Error _ as error -> error
-             | Ok () -> remove_entries rest)
-        in
-        remove_entries entries
-      | Unix.S_REG
-      | Unix.S_LNK
-      | Unix.S_CHR
-      | Unix.S_BLK
-      | Unix.S_FIFO
-      | Unix.S_SOCK ->
-        Unix.unlink path;
-        Ok ()
-    with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn -> Error (Printexc.to_string exn)
+let rec remove_tree_blocking path =
+  try
+    match (Unix.lstat path).Unix.st_kind with
+    | Unix.S_DIR ->
+      let entries = Sys.readdir path |> Array.to_list |> List.sort String.compare in
+      let rec remove_entries = function
+        | [] ->
+          Unix.rmdir path;
+          Ok ()
+        | entry :: rest ->
+          (match remove_tree_blocking (Filename.concat path entry) with
+           | Error _ as error -> error
+           | Ok () -> remove_entries rest)
+      in
+      remove_entries entries
+    | Unix.S_REG
+    | Unix.S_LNK
+    | Unix.S_CHR
+    | Unix.S_BLK
+    | Unix.S_FIFO
+    | Unix.S_SOCK ->
+      Unix.unlink path;
+      Ok ()
+  with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok ()
+  | exn -> Error (Printexc.to_string exn)
+;;
+
+let remove_tree path =
+  try Eio_guard.run_in_systhread (fun () -> remove_tree_blocking path) with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (Printexc.to_string exn)
 ;;
 
 let remove_meta_file ~config operation =
-  match operation.cleanup_intent.meta_disposition with
-  | Remove_meta ->
+  match operation.cleanup_intent.reason with
+  | Stale_paused_prune context ->
+    (match
+       Keeper_meta_store.remove_meta_if_exact_identity
+         config
+         ~name:operation.keeper_name
+         ~trace_id:operation.trace_id
+         ~generation:operation.generation
+         ~meta_version:context.meta_version
+     with
+     | Ok () -> Ok ()
+     | Error Keeper_meta_store.Exact_identity_missing ->
+       Log.Keeper.warn
+         "%s: exact stale-paused metadata already absent during cleanup replay"
+         operation.keeper_name;
+       Ok ()
+     | Error error ->
+       Error (Keeper_meta_store.exact_identity_error_to_string error))
+  | Dashboard_keeper_purge context ->
+    (match
+       Keeper_meta_store.remove_meta_if_exact_identity
+         config
+         ~name:operation.keeper_name
+         ~trace_id:operation.trace_id
+         ~generation:operation.generation
+         ~meta_version:context.meta_version
+     with
+     | Ok () -> Ok ()
+     | Error Keeper_meta_store.Exact_identity_missing ->
+       Log.Keeper.warn
+         "%s: exact dashboard-purge metadata already absent during cleanup replay"
+         operation.keeper_name;
+       Ok ()
+     | Error error ->
+       Error (Keeper_meta_store.exact_identity_error_to_string error))
+  | Operator_stop_remove_meta ->
     (match
        Keeper_meta_store.remove_meta_if_identity
          config
@@ -433,11 +570,16 @@ let remove_meta_file ~config operation =
          ~trace_id:operation.trace_id
          ~generation:operation.generation
      with
-     | Ok () | Error Keeper_meta_store.Remove_identity_missing -> Ok ()
+     | Ok () -> Ok ()
+     | Error Keeper_meta_store.Remove_identity_missing ->
+       Log.Keeper.warn
+         "%s: shutdown metadata already absent during cleanup replay"
+         operation.keeper_name;
+       Ok ()
      | Error error ->
        Error (Keeper_meta_store.identity_remove_error_to_string error))
-  | Retain_operator_pause
-  | Retain_dead_tombstone -> Ok ()
+  | Operator_stop_retain_meta
+  | Dead_tombstone_cleanup -> Ok ()
 ;;
 
 let remove_session_dir ~config operation =
@@ -450,12 +592,19 @@ let remove_session_dir ~config operation =
   else Ok ()
 ;;
 
-let unregister_exact operation = function
-  | None -> Ok false
-  | Some entry
-    when not (Keeper_lane.Id.equal (Keeper_lane.id entry.Keeper_registry.lane) operation.lane_id) ->
-    Error "Keeper registry lane changed before finalization"
-  | Some entry ->
+let unregister_exact operation entry =
+  match operation.lane_ownership, entry with
+  | (Dormant_meta | Registered_lane _), None -> Ok false
+  | Dormant_meta, Some _ ->
+    Error "dormant Keeper operation found a registered lane before finalization"
+  | Registered_lane expected_lane_id, Some entry ->
+    if
+      not
+        (Keeper_lane.Id.equal
+           (Keeper_lane.id entry.Keeper_registry.lane)
+           expected_lane_id)
+    then Error "Keeper registry lane changed before finalization"
+    else
     (match Keeper_registry.unregister_exact entry with
      | Keeper_registry.Exact_unregistered
      | Keeper_registry.Exact_entry_missing -> Ok true
@@ -521,34 +670,44 @@ let deliver_finalized_completion ~config operation =
 ;;
 
 let complete_cleanup ~config ~entry operation cleanup =
-  match unregister_exact operation entry with
-  | Error detail -> block ~config operation Registry_unregister detail
-  | Ok registry_unregistered ->
-    (match remove_session_dir ~config operation with
-     | Error detail -> block ~config operation Session_remove detail
-     | Ok () ->
-       (match remove_meta_file ~config operation with
-        | Error detail -> block ~config operation Meta_remove detail
+  match remove_meta_file ~config operation with
+  | Error detail -> block ~config operation Meta_remove detail
+  | Ok () ->
+    (match unregister_exact operation entry with
+     | Error detail -> block ~config operation Registry_unregister detail
+     | Ok registry_unregistered ->
+       (match remove_session_dir ~config operation with
+        | Error detail -> block ~config operation Session_remove detail
         | Ok () ->
-          if registry_unregistered
-          then Keeper_tool_emission_hook.drop_keeper_accumulator operation.keeper_name;
           let meta_removed =
-            match operation.cleanup_intent.meta_disposition with
+            match
+              meta_disposition_of_cleanup_reason operation.cleanup_intent.reason
+            with
             | Remove_meta -> true
             | Retain_operator_pause
             | Retain_dead_tombstone -> false
           in
+          let accumulator_dropped =
+            meta_removed
+            || registry_unregistered
+            ||
+            match operation.lane_ownership with
+            | Dormant_meta -> true
+            | Registered_lane _ -> false
+          in
+          if accumulator_dropped
+          then Keeper_tool_emission_hook.drop_keeper_accumulator operation.keeper_name;
           let completion =
-            match operation.cleanup_intent.meta_disposition with
-            | Retain_dead_tombstone -> Completion_pending Dead_tombstone_reaped
-            | Retain_operator_pause
-            | Remove_meta -> Completion_not_requested
+            match completion_action_of_cleanup_reason operation.cleanup_intent.reason with
+            | None -> Completion_not_requested
+            | Some action -> Completion_pending action
           in
           let evidence =
             { cleanup
             ; meta_removed
             ; session_removed = operation.cleanup_intent.remove_session
             ; registry_unregistered
+            ; accumulator_dropped
             ; completion
             }
           in
@@ -567,10 +726,9 @@ let complete_cleanup ~config ~entry operation cleanup =
 let run ~config ~entry operation =
   match operation.phase with
   | Joined_idle ->
-    (match Keeper_meta_store.read_meta_resolved config operation.keeper_name with
+    (match read_operation_meta ~config operation with
      | Error detail -> block ~config operation Meta_update detail
-     | Ok None -> block ~config operation Meta_update "Keeper metadata is absent"
-     | Ok (Some (_, meta)) ->
+     | Ok meta ->
        (match settle_tasks ~config ~meta operation [] with
         | Error _ as error -> error
         | Ok (settled_operation, settled_task_ids) ->
@@ -581,10 +739,9 @@ let run ~config ~entry operation =
               | Cleanup_ready cleanup -> complete_cleanup ~config ~entry ready cleanup
               | _ -> Error Unsupported_phase))))
   | Finalizing_tasks settled_task_ids ->
-    (match Keeper_meta_store.read_meta_resolved config operation.keeper_name with
+    (match read_operation_meta ~config operation with
      | Error detail -> block ~config operation Meta_update detail
-     | Ok None -> block ~config operation Meta_update "Keeper metadata is absent"
-     | Ok (Some (_, meta)) ->
+     | Ok meta ->
        (match settle_tasks ~config ~meta operation settled_task_ids with
         | Error _ as error -> error
         | Ok (settled_operation, settled_task_ids) ->

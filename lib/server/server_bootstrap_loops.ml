@@ -353,7 +353,7 @@ let start_keeper_loops
      receipt is replayed. *)
   Keeper_subprocess_registry.register_default_cleanup_hook ();
   Keeper_shutdown_finalize.register_completion_handler
-    Keeper_supervisor_cleanup_tombstone.handle_completion;
+    Server_dashboard_http_delete_actions.handle_keeper_lifecycle_completion;
   let wait_for_lazy_startup () =
     (* Combines #10843 (per-task elapsed diagnostic, merged via #10854) with
        a per-task boot guard.  The diagnostic surface stays as #10854

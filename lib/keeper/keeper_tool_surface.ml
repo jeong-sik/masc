@@ -724,13 +724,64 @@ let dispatch_stream_if_free
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
 
-let fail_closed_metadata_flag = function
-  | Some enabled -> enabled
-  | None -> false
+type keeper_surface_metadata_axis =
+  | Read_only_axis
+  | Idempotent_axis
+  | Destructive_axis
+
+type keeper_surface_registration_error =
+  | Missing_policy_metadata of
+      { tool_name : string
+      ; missing_axes : keeper_surface_metadata_axis list
+      }
+
+exception Keeper_surface_registration_error of keeper_surface_registration_error
+
+let keeper_surface_metadata_axis_to_string = function
+  | Read_only_axis -> "readonly"
+  | Idempotent_axis -> "idempotent"
+  | Destructive_axis -> "destructive"
+;;
+
+let keeper_surface_registration_error_to_string = function
+  | Missing_policy_metadata { tool_name; missing_axes } ->
+    Printf.sprintf
+      "keeper surface schema %s is missing required policy metadata: %s"
+      tool_name
+      (missing_axes
+       |> List.map keeper_surface_metadata_axis_to_string
+       |> String.concat ", ")
+;;
+
+let () =
+  Printexc.register_printer (function
+    | Keeper_surface_registration_error error ->
+      Some (keeper_surface_registration_error_to_string error)
+    | _ -> None)
+;;
+
+let required_policy_metadata ~tool_name (metadata : Tool_catalog.metadata) =
+  match metadata.readonly, metadata.idempotent, metadata.destructive with
+  | Some readonly, Some idempotent, Some destructive ->
+    Ok (readonly, idempotent, destructive)
+  | readonly, idempotent, destructive ->
+    let missing_axes =
+      [ Option.fold ~none:(Some Read_only_axis) ~some:(fun _ -> None) readonly
+      ; Option.fold ~none:(Some Idempotent_axis) ~some:(fun _ -> None) idempotent
+      ; Option.fold ~none:(Some Destructive_axis) ~some:(fun _ -> None) destructive
+      ]
+      |> List.filter_map Fun.id
+    in
+    Error (Missing_policy_metadata { tool_name; missing_axes })
 ;;
 
 let register_keeper_surface_schema (s : Masc_domain.tool_schema) =
   let metadata = Tool_catalog.metadata s.name in
+  let readonly, idempotent, destructive =
+    match required_policy_metadata ~tool_name:s.name metadata with
+    | Ok flags -> flags
+    | Error error -> raise (Keeper_surface_registration_error error)
+  in
   Tool_spec.register
     (Tool_spec.create
        ~name:s.name
@@ -738,9 +789,9 @@ let register_keeper_surface_schema (s : Masc_domain.tool_schema) =
        ~module_tag:Tool_dispatch.Mod_external
        ~input_schema:s.input_schema
        ~handler_binding:Tag_dispatch
-       ~is_read_only:(fail_closed_metadata_flag metadata.readonly)
-       ~is_idempotent:(fail_closed_metadata_flag metadata.idempotent)
-       ~is_destructive:(fail_closed_metadata_flag metadata.destructive)
+       ~is_read_only:readonly
+       ~is_idempotent:idempotent
+       ~is_destructive:destructive
        ?effect_domain:metadata.effect_domain
        ?requires_actor_binding:metadata.requires_actor_binding
        ~required_permission:metadata.required_permission

@@ -1343,8 +1343,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
     | Keeper_chat_store.Already_present { row_id } -> row_id
   in
   let set_direct_delivery_journal journal =
-    direct_delivery_journal := Some journal;
-    journal
+    direct_delivery_journal := Some journal
   in
   let on_direct_request_accepted request_id =
     let ( let* ) = Result.bind in
@@ -1374,7 +1373,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
         ~now:(Time_compat.now ())
       |> Result.map_error journal_error
     in
-    ignore (set_direct_delivery_journal prepared : Keeper_chat_delivery_journal.t);
+    set_direct_delivery_journal prepared;
     let* user_row =
       Keeper_chat_store.append_user_message_once
         ~base_dir:base_path
@@ -1395,7 +1394,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
         ~now:(Time_compat.now ())
       |> Result.map_error journal_error
     in
-    ignore (set_direct_delivery_journal accepted : Keeper_chat_delivery_journal.t);
+    set_direct_delivery_journal accepted;
     let* running =
       Keeper_chat_delivery_journal.mark_running
         ~base_path
@@ -1404,7 +1403,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
         ~now:(Time_compat.now ())
       |> Result.map_error journal_error
     in
-    ignore (set_direct_delivery_journal running : Keeper_chat_delivery_journal.t);
+    set_direct_delivery_journal running;
     Ok ()
   in
   let on_queue_turn_admitted () =
@@ -1448,7 +1447,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
         ~now:(Time_compat.now ())
       |> Result.map_error journal_error
     in
-    ignore (set_direct_delivery_journal prepared : Keeper_chat_delivery_journal.t);
+    set_direct_delivery_journal prepared;
     let* user_row_id =
       match user_row_origin with
       | Keeper_chat_delivery_journal.Already_persisted_upstream -> Ok None
@@ -1475,7 +1474,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
         ~now:(Time_compat.now ())
       |> Result.map_error journal_error
     in
-    ignore (set_direct_delivery_journal accepted : Keeper_chat_delivery_journal.t);
+    set_direct_delivery_journal accepted;
     let* running =
       Keeper_chat_delivery_journal.mark_running
         ~base_path
@@ -1484,7 +1483,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
         ~now:(Time_compat.now ())
       |> Result.map_error journal_error
     in
-    ignore (set_direct_delivery_journal running : Keeper_chat_delivery_journal.t);
+    set_direct_delivery_journal running;
     Ok ()
   in
   let commit_direct_terminal terminal =
@@ -1501,8 +1500,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
             ~now:(Time_compat.now ())
           |> Result.map_error journal_error
         in
-        ignore
-          (set_direct_delivery_journal pending : Keeper_chat_delivery_journal.t);
+        set_direct_delivery_journal pending;
         drive pending
       | Keeper_chat_delivery_journal.Terminal_pending
           { terminal = persisted_terminal; user_row_id } ->
@@ -1553,8 +1551,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
             ~now:(Time_compat.now ())
           |> Result.map_error journal_error
         in
-        ignore
-          (set_direct_delivery_journal committed : Keeper_chat_delivery_journal.t);
+        set_direct_delivery_journal committed;
         drive committed
       | Keeper_chat_delivery_journal.Transcript_committed _ ->
         let* final =
@@ -1565,8 +1562,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
             ~now:(Time_compat.now ())
           |> Result.map_error journal_error
         in
-        ignore
-          (set_direct_delivery_journal final : Keeper_chat_delivery_journal.t);
+        set_direct_delivery_journal final;
         Ok ()
       | Keeper_chat_delivery_journal.Final _ -> Ok ()
       | Keeper_chat_delivery_journal.Prepared

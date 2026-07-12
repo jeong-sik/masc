@@ -965,6 +965,7 @@ let test_keeper_shutdown_prepare_joins_idle_lane () =
   let base_dir = temp_dir "shutdown-prepare-join" in
   Fun.protect
     ~finally:(fun () ->
+      Masc.Keeper_chat_queue.For_testing.reset ();
       Masc.Keeper_turn_admission.For_testing.reset ();
       R.clear ();
       cleanup_dir base_dir)
@@ -1153,6 +1154,7 @@ let test_keeper_shutdown_finalizes_idle_operation () =
   Fun.protect
     ~finally:(fun () ->
       Shutdown_finalize.For_testing.reset_remove_pending_confirms_by_target ();
+      Masc.Keeper_chat_queue.For_testing.reset ();
       Masc.Keeper_turn_admission.For_testing.reset ();
       R.clear ();
       cleanup_dir base_dir)

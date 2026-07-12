@@ -930,7 +930,7 @@ let handle_schema _state request reqd =
             request
             reqd
             ~status:`Service_unavailable
-            (`Assoc [ "ok", `Bool false; "error", `String "no schema available" ]])))
+            (`Assoc [ "ok", `Bool false; "error", `String "no schema available" ])))
 ;;
 
 let handle_start state request reqd =

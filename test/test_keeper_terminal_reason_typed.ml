@@ -689,6 +689,20 @@ let () =
     (got = want);
   check
     "opaque internal lookalike still emits operator broadcast"
+    (R.needs_operator_broadcast (fst got));
+  let noncanonical_case =
+    { receipt with terminal_reason_code = String.uppercase_ascii code }
+  in
+  let got = R.operator_disposition noncanonical_case in
+  let want = R.Disp_pause_human, R.Reason_internal_error in
+  check
+    (Printf.sprintf
+       "noncanonical capacity casing stays opaque want=%s got=%s"
+       (disp_pair_to_string want)
+       (disp_pair_to_string got))
+    (got = want);
+  check
+    "noncanonical capacity casing still emits operator broadcast"
     (R.needs_operator_broadcast (fst got))
 ;;
 

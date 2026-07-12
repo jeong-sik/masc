@@ -70,7 +70,9 @@ let contains_config_or_auth lowered =
    order of the pre-typing [operator_disposition] string predicates, with the
    exact canonical [Capacity_backpressure] policy bucket inserted before the
    opaque internal-error fall-through;
-   [of_wire] returns the FIRST matching bucket. The original
+   [of_wire] returns the FIRST matching bucket. Capacity backpressure is an
+   exact producer-owned wire kind; casing variants remain opaque rather than
+   inheriting its non-pageable policy. The original
    (case-preserving) [wire] is carried in payload-bearing variants so
    [to_wire] reproduces it byte-for-byte; classification is done on a
    lowercased copy to match [operator_disposition], which lowercased
@@ -79,7 +81,7 @@ let of_wire wire =
   let lowered = String.lowercase_ascii wire in
   if String.equal lowered "runtime_exhausted"
   then Runtime_exhausted wire
-  else if String.equal lowered Keeper_internal_error.capacity_backpressure_kind
+  else if String.equal wire Keeper_internal_error.capacity_backpressure_kind
   then Capacity_backpressure wire
   else if contains_config_or_auth lowered
   then Config_or_auth wire

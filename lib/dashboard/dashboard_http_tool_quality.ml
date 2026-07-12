@@ -229,6 +229,39 @@ let dashboard_surface = "/api/v1/dashboard/tool-quality"
 
 let failure_concentration_top_n = 2
 
+let failure_concentration_of_keeper_counts keeper_counts =
+  let failures =
+    List.filter_map
+      (fun (name, calls, successes) ->
+         let failures = calls - successes in
+         if failures > 0 then Some (name, failures) else None)
+      keeper_counts
+  in
+  let total_failures =
+    List.fold_left (fun total (_, failures) -> total + failures) 0 failures
+  in
+  if total_failures = 0 then 0.0, []
+  else
+    let compare_failures (name_a, failures_a) (name_b, failures_b) =
+      match Int.compare failures_b failures_a with
+      | 0 -> String.compare name_a name_b
+      | comparison -> comparison
+    in
+    let sorted_failures = List.sort compare_failures failures in
+    let rec take n selected = function
+      | _ when n = 0 -> List.rev selected
+      | [] -> List.rev selected
+      | (name, failures) :: rest -> take (n - 1) ((name, failures) :: selected) rest
+    in
+    let top_failures = take failure_concentration_top_n [] sorted_failures in
+    let top_failure_count =
+      List.fold_left (fun total (_, failures) -> total + failures) 0 top_failures
+    in
+    let percentage =
+      Float.of_int top_failure_count /. Float.of_int total_failures *. 100.0
+    in
+    Float.round (percentage *. 10.0) /. 10.0, List.map fst top_failures
+
 let source_metadata_fields () =
   Dashboard_tool_source_freshness.keeper_tool_call_io_fields
     ~dashboard_surface ()
@@ -462,41 +495,11 @@ let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
     render_rate_table ~field:"name" keeper_stats
   in
   let failure_concentration =
-    let total_failures = total_n - success_n in
-    if total_failures = 0 then
-      (`Float 0.0, `List [])
-    else
-      let keepers =
-        Hashtbl.fold (fun name (c, s) acc ->
-          let calls = !c in
-          let failures = calls - !s in
-          if failures > 0 then (name, failures) :: acc else acc
-        ) keeper_stats []
-        |> List.sort (fun (_, a) (_, b) -> Int.compare b a)
-      in
-      let top_failures =
-        let rec sum n acc = function
-          | [] -> acc
-          | (_, f) :: rest when n > 0 -> sum (n - 1) (acc + f) rest
-          | _ -> acc
-        in
-        sum failure_concentration_top_n 0 keepers
-      in
-      let pct =
-        let percentage =
-          Float.of_int top_failures /. Float.of_int total_failures *. 100.0
-        in
-        Float.round (percentage *. 10.0) /. 10.0
-      in
-      let top2_names =
-        let rec take n acc = function
-          | [] -> List.rev acc
-          | (name, _) :: rest when n > 0 -> take (n - 1) (name :: acc) rest
-          | _ -> List.rev acc
-        in
-        take failure_concentration_top_n [] keepers
-      in
-      (`Float pct, `List (List.map (fun n -> `String n) top2_names))
+    Hashtbl.fold
+      (fun name (calls, successes) acc -> (name, !calls, !successes) :: acc)
+      keeper_stats
+      []
+    |> failure_concentration_of_keeper_counts
   in
   let by_runtime = render_rate_table ~field:"name" runtime_stats in
   let by_model = render_rate_table ~field:"name" model_stats in
@@ -553,8 +556,8 @@ let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
     ("failure", `Int (total_n - success_n));
     ("success_rate", `Float (Float.round (rate *. 100.0) /. 100.0));
     ("failure_concentration", `Assoc [
-      ("top2_pct", fst failure_concentration);
-      ("top2_keepers", snd failure_concentration);
+      ("top2_pct", `Float (fst failure_concentration));
+      ("top2_keepers", `List (List.map (fun name -> `String name) (snd failure_concentration)));
     ]);
     ("by_tool", `List by_tool);
     ("by_keeper", `List by_keeper);

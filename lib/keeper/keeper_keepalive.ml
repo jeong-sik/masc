@@ -944,7 +944,7 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
         let live_meta_installed =
           Keeper_registry.update_entry_exact reg (fun current ->
             { current with meta = live_meta })
-          |> log_exact_update_outcome reg ~site:"start_keepalive.live_meta"
+          |> Keeper_registry.exact_update_succeeded reg ~site:"start_keepalive.live_meta"
         in
         if not live_meta_installed
         then (

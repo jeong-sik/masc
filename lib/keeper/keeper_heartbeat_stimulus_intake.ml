@@ -101,11 +101,12 @@ let event_queue_trigger_of_stimulus (stim : Keeper_event_queue.stimulus) =
        skip is already gone (the approval left the queue); this changes only
        how the resumed turn is described, not whether it runs. *)
     Some Keeper_world_observation.Hitl_resolved_stimulus
+  | Keeper_event_queue.Failure_judgment _ ->
+    Some Keeper_world_observation.Failure_judgment_stimulus
   | Keeper_event_queue.Board_signal _
   | Keeper_event_queue.Fusion_completed _
   | Keeper_event_queue.Bg_completed _
   | Keeper_event_queue.Goal_verification_failed _
-  | Keeper_event_queue.Failure_judgment _
   | Keeper_event_queue.Goal_assigned _
   | Keeper_event_queue.Goal_stagnation _ ->
     (* No dedicated turn_reason: like the other async-completion wakes, the
@@ -214,9 +215,11 @@ let consume_single_heartbeat_stimulus
        verdict. Promote it to a pending observation so the judgment turn does
        not wake empty — returning [] would silently drop the escalation. *)
     Log.Keeper.info
-      "turn entry: failure judgment delivered runtime=%s class=%s (keeper=%s)"
+      "turn entry: failure judgment delivered runtime=%s class=%s provenance=%s \
+       (keeper=%s)"
       fj.fj_runtime_id
       (Keeper_runtime_failure_route.judgment_class_label fj.fj_judgment)
+      (Keeper_runtime_failure_route.judgment_provenance_label fj.fj_provenance)
       meta_after_triage.name;
     pending_board_event_of_stimulus ~meta_after_triage stim |> Option.to_list
   | Keeper_event_queue.Bootstrap ->

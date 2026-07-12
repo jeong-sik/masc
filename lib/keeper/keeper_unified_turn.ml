@@ -31,6 +31,11 @@ type turn_failure =
   ; source_lease_disposition : source_lease_disposition
   }
 
+type turn_success =
+  | Turn_completed of keeper_meta
+  | Turn_cancelled of keeper_meta
+  | Turn_skipped of keeper_meta
+
 let run_keeper_cycle
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
@@ -1062,6 +1067,7 @@ dominant source of the observed CAS race exhaustion after
                      let route =
                        Keeper_runtime_failure_route.Escalate_judgment
                          { judgment = judgment.fj_judgment
+                         ; provenance = judgment.fj_provenance
                          ; detail = judgment.fj_detail
                          }
                      in
@@ -1121,10 +1127,15 @@ dominant source of the observed CAS race exhaustion after
       }
   in
   match phase_gate_outcome with
-  | Keeper_unified_turn_phase_gate.Phase_gate_terminal_ok meta -> Ok meta
+  | Keeper_unified_turn_phase_gate.Phase_gate_cancelled meta ->
+    Ok (Turn_cancelled meta)
+  | Keeper_unified_turn_phase_gate.Phase_gate_skipped meta ->
+    Ok (Turn_skipped meta)
   | Keeper_unified_turn_phase_gate.Phase_gate_terminal_error err ->
     Error (failure_of_error err)
   | Keeper_unified_turn_phase_gate.Phase_gate_proceed phase_opt ->
     let result, _turn_state = main_path turn_state phase_opt in
-    Result.map_error failure_of_error result
+    result
+    |> Result.map (fun meta -> Turn_completed meta)
+    |> Result.map_error failure_of_error
 ;;

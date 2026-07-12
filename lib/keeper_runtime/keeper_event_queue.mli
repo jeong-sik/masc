@@ -201,9 +201,14 @@ and goal_verification_failure = {
 and failure_judgment = {
   fj_runtime_id : string;
   fj_judgment : Keeper_runtime_failure_route.judgment_class;
+  fj_provenance : Keeper_runtime_failure_route.judgment_provenance;
   fj_detail : string;
 }
-(** Payload for [Failure_judgment]. *)
+(** Payload for [Failure_judgment]. [fj_runtime_id] is the opaque failed
+    binding identity, [fj_judgment] is the routing class, and
+    [fj_provenance] retains the typed execution boundary (including the OAS
+    idle-loop count). [fj_detail] is display/prompt evidence and is never used
+    for routing. *)
 
 and goal_assignment = {
   ga_goal_id : string;

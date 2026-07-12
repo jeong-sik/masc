@@ -157,7 +157,12 @@ let test_masc_internal_judgment_classes () =
        (internal_err
           (Keeper_internal_error.Internal_contract_rejected { reason = "empty" }))
    with
-   | KFR.Escalate_judgment { judgment = KFR.Contract_violation; _ } -> ()
+   | KFR.Escalate_judgment
+       { judgment = KFR.Contract_violation
+       ; provenance = KFR.Masc_internal_error
+       ; _
+       } ->
+     ()
    | other ->
      Alcotest.failf "contract rejection should judge, got %s"
        (KFR.route_kind_label other));
@@ -189,7 +194,12 @@ let test_non_provider_families_judge () =
        (Agent_sdk.Error.Agent
           (Agent_sdk.Error.IdleDetected { consecutive_idle_turns = 3 }))
    with
-   | KFR.Escalate_judgment { judgment = KFR.Contract_violation; _ } -> ()
+   | KFR.Escalate_judgment
+       { judgment = KFR.Contract_violation
+       ; provenance = KFR.Oas_agent_idle_detected { consecutive_idle_turns = 3 }
+       ; _
+       } ->
+     ()
    | other ->
      Alcotest.failf "idle loop should judge contract, got %s"
        (KFR.route_kind_label other));
@@ -223,10 +233,76 @@ let test_judgment_label_roundtrip () =
     None
     (KFR.judgment_class_of_label "totally_new_class")
 
+let test_judgment_provenance_codec () =
+  let values =
+    [ KFR.Oas_api_error
+    ; KFR.Oas_provider_error
+    ; KFR.Oas_agent_idle_detected { consecutive_idle_turns = 3 }
+    ; KFR.Oas_agent_error
+    ; KFR.Oas_mcp_error
+    ; KFR.Oas_config_error
+    ; KFR.Oas_serialization_error
+    ; KFR.Oas_io_error
+    ; KFR.Oas_orchestration_error
+    ; KFR.Oas_internal_error
+    ; KFR.Masc_internal_error
+    ; KFR.Completion_contract
+    ; KFR.Legacy_unattributed
+    ]
+  in
+  List.iter
+    (fun provenance ->
+       match
+         KFR.judgment_provenance_to_yojson provenance
+         |> KFR.judgment_provenance_of_yojson
+       with
+       | Ok parsed ->
+         Alcotest.(check bool)
+           (KFR.judgment_provenance_label provenance ^ " roundtrip")
+           true
+           (parsed = provenance)
+       | Error detail -> Alcotest.fail detail)
+    values;
+  (match
+     KFR.judgment_provenance_of_yojson
+       (`Assoc
+         [ "kind", `String "oas_agent_idle_detected"
+         ; "consecutive_idle_turns", `Int 0
+         ])
+   with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "zero idle count decoded");
+  (match
+     KFR.judgment_provenance_of_yojson
+       (`Assoc
+         [ "kind", `String "oas_mcp_error"
+         ; "unexpected", `String "ignored"
+         ])
+   with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "extra provenance field was silently ignored");
+  (match
+     KFR.judgment_provenance_of_yojson
+       (`Assoc
+         [ "kind", `String "oas_agent_idle_detected"
+         ; "consecutive_idle_turns", `Int 3
+         ; "unexpected", `Bool true
+         ])
+   with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "extra idle provenance field was silently ignored");
+  match
+    KFR.judgment_provenance_of_yojson
+      (`Assoc [ "kind", `String "future_unregistered_boundary" ])
+  with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "unknown provenance decoded"
+
 let test_queue_stimulus_roundtrip () =
   let fj : Keeper_event_queue.failure_judgment =
     { fj_runtime_id = "glm-coding.glm-5-turbo"
     ; fj_judgment = KFR.Protocol_error
+    ; fj_provenance = KFR.Oas_mcp_error
     ; fj_detail = "mcp handshake failed"
     }
   in
@@ -238,8 +314,8 @@ let test_queue_stimulus_roundtrip () =
     }
   in
   Alcotest.(check string)
-    "post_id stable per (runtime, class)"
-    "failure-judgment:glm-coding.glm-5-turbo:protocol_error"
+    "post_id stable per (runtime, class, provenance)"
+    "failure-judgment:glm-coding.glm-5-turbo:protocol_error:oas_mcp_error"
     stimulus.post_id;
   match
     Keeper_event_queue.stimulus_of_yojson
@@ -249,13 +325,41 @@ let test_queue_stimulus_roundtrip () =
     Alcotest.(check bool)
       "roundtrip preserves identity"
       true
-      (Keeper_event_queue.stimulus_identity_equal stimulus parsed)
+      (Keeper_event_queue.stimulus_identity_equal stimulus parsed);
+    let legacy_json =
+      match Keeper_event_queue.stimulus_to_yojson stimulus with
+      | `Assoc stimulus_fields ->
+        let payload =
+          match List.assoc_opt "payload" stimulus_fields with
+          | Some (`Assoc payload_fields) ->
+            `Assoc
+              (List.filter
+                 (fun (name, _) -> not (String.equal name "provenance"))
+                 payload_fields)
+          | _ -> Alcotest.fail "fixture payload is not an object"
+        in
+        `Assoc
+          (("payload", payload)
+           :: List.remove_assoc "payload" stimulus_fields)
+      | _ -> Alcotest.fail "fixture stimulus is not an object"
+    in
+    (match Keeper_event_queue.stimulus_of_yojson legacy_json with
+     | Ok
+         { payload =
+             Keeper_event_queue.Failure_judgment
+               { fj_provenance = KFR.Legacy_unattributed; _ }
+         ; _
+         } ->
+       ()
+     | Ok _ -> Alcotest.fail "legacy stimulus invented a provenance"
+     | Error detail -> Alcotest.failf "legacy stimulus did not decode: %s" detail)
   | Error msg -> Alcotest.failf "roundtrip failed: %s" msg
 
 let failure_judgment_stimulus ~detail : Keeper_event_queue.stimulus =
   let fj : Keeper_event_queue.failure_judgment =
     { fj_runtime_id = "glm-coding.glm-5-turbo"
     ; fj_judgment = KFR.Deterministic_request
+    ; fj_provenance = KFR.Oas_api_error
     ; fj_detail = detail
     }
   in
@@ -268,7 +372,7 @@ let failure_judgment_stimulus ~detail : Keeper_event_queue.stimulus =
 (* RFC-0313 W2 loop-safety: the same deterministic failure class repeats
    with volatile provider text (token counts, addresses) in [fj_detail];
    the queue must stay bounded to one pending judgment per
-   (runtime, class), or repeated failures self-stimulate judgment turns.
+   (runtime, class, provenance kind), or repeated failures self-stimulate judgment turns.
    Pins the identity semantics that
    [Keeper_registry_event_queue.enqueue_if_missing] relies on. *)
 let test_queue_bounded_across_detail_variants () =
@@ -289,6 +393,7 @@ let test_queue_bounded_across_detail_variants () =
     let fj : Keeper_event_queue.failure_judgment =
       { fj_runtime_id = "glm-coding.glm-5-turbo"
       ; fj_judgment = KFR.Protocol_error
+      ; fj_provenance = KFR.Oas_mcp_error
       ; fj_detail = "mcp handshake failed"
       }
     in
@@ -300,7 +405,27 @@ let test_queue_bounded_across_detail_variants () =
   Alcotest.(check bool)
     "a different judgment class is a distinct durable event"
     false
-    (Keeper_event_queue.stimulus_identity_equal first other_class)
+    (Keeper_event_queue.stimulus_identity_equal first other_class);
+  let idle_stimulus count =
+    let fj : Keeper_event_queue.failure_judgment =
+      { fj_runtime_id = "glm-coding.glm-5-turbo"
+      ; fj_judgment = KFR.Contract_violation
+      ; fj_provenance =
+          KFR.Oas_agent_idle_detected { consecutive_idle_turns = count }
+      ; fj_detail = "idle loop"
+      }
+    in
+    { first with
+      post_id = Keeper_event_queue.failure_judgment_post_id fj
+    ; payload = Keeper_event_queue.Failure_judgment fj
+    }
+  in
+  Alcotest.(check bool)
+    "idle observation count is evidence, not event identity"
+    true
+    (Keeper_event_queue.stimulus_identity_equal
+       (idle_stimulus 3)
+       (idle_stimulus 4))
 
 let () =
   Alcotest.run
@@ -323,7 +448,12 @@ let () =
     ; ( "families"
       , [ Alcotest.test_case "non-provider judge" `Quick test_non_provider_families_judge ] )
     ; ( "labels"
-      , [ Alcotest.test_case "judgment roundtrip" `Quick test_judgment_label_roundtrip ] )
+      , [ Alcotest.test_case "judgment roundtrip" `Quick test_judgment_label_roundtrip
+        ; Alcotest.test_case
+            "provenance codec"
+            `Quick
+            test_judgment_provenance_codec
+        ] )
     ; ( "queue"
       , [ Alcotest.test_case "stimulus roundtrip" `Quick test_queue_stimulus_roundtrip
         ; Alcotest.test_case

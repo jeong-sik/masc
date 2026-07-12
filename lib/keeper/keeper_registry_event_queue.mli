@@ -19,7 +19,11 @@ type requeue_reason = Keeper_event_queue_persistence.requeue_reason =
 
 type escalation_reason = Keeper_event_queue_persistence.escalation_reason =
   | Failure_judgment_requested
-  | Failure_judgment_failed
+  | Failure_judgment_boundary_failed of { detail : string }
+  | Failure_judgment_operator_required of
+      { judge_runtime_id : string
+      ; rationale : string
+      }
 
 type settlement = Keeper_event_queue_persistence.settlement =
   | Ack

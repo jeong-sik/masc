@@ -104,6 +104,37 @@ let test_shadow_next_due_uses_observed_failures_only () =
       (remaining > 0.0)
   | None -> Alcotest.fail "observed pending failure should pace next turn"
 
+let test_shadow_exact_runtime_ignores_other_failure () =
+  Eio_main.run
+  @@ fun _env ->
+  let keeper_name = "test-keeper-pacing-shadow-exact-runtime" in
+  Keeper_pacing_shadow.observe_failure
+    ~keeper_name
+    ~runtime_id:"failed-keeper-runtime"
+    ~retry_after:(Some 30.0);
+  Alcotest.(check bool)
+    "unobserved judge runtime is immediately eligible"
+    true
+    (Option.is_none
+       (Keeper_pacing_shadow.remaining_for_runtime
+          ~keeper_name
+          ~runtime_id:"structured-judge"));
+  Keeper_pacing_shadow.observe_failure
+    ~keeper_name
+    ~runtime_id:"structured-judge"
+    ~retry_after:(Some 30.0);
+  match
+    Keeper_pacing_shadow.remaining_for_runtime
+      ~keeper_name
+      ~runtime_id:"structured-judge"
+  with
+  | Some remaining ->
+    Alcotest.(check bool)
+      "judge failure paces the exact judge runtime"
+      true
+      (remaining > 0.0)
+  | None -> Alcotest.fail "judge runtime failure did not retain pacing"
+
 let () =
   Alcotest.run
     "keeper_pacing"
@@ -126,5 +157,9 @@ let () =
             "next due uses observed failures only"
             `Quick
             test_shadow_next_due_uses_observed_failures_only
+        ; Alcotest.test_case
+            "exact runtime ignores other failure"
+            `Quick
+            test_shadow_exact_runtime_ignores_other_failure
         ] )
     ]

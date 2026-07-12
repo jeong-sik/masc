@@ -2,6 +2,8 @@
 
 type cycle_outcome =
   | Completed of Keeper_meta_contract.keeper_meta
+  | Cancelled of Keeper_meta_contract.keeper_meta
+  | Skipped of Keeper_meta_contract.keeper_meta
   | Failed of
       { meta : Keeper_meta_contract.keeper_meta
       ; failure : Keeper_unified_turn.turn_failure
@@ -9,6 +11,19 @@ type cycle_outcome =
   | Busy of
       { meta : Keeper_meta_contract.keeper_meta
       ; block : Keeper_turn_admission.autonomous_block
+      }
+  | Judgment_settled of
+      { meta : Keeper_meta_contract.keeper_meta
+      ; outcome : failure_judgment_terminal
+      }
+
+and failure_judgment_terminal =
+  | Judgment_requeue_after_pacing
+  | Judgment_requeue_after_rotation
+  | Judgment_boundary_failed of { detail : string }
+  | Judgment_operator_required of
+      { judge_runtime_id : string
+      ; rationale : string
       }
 
 val meta : cycle_outcome -> Keeper_meta_contract.keeper_meta
@@ -27,5 +42,6 @@ val run_keeper_cycle
   -> turn_decision:Keeper_world_observation.keeper_cycle_decision
   -> shared_context:Agent_sdk.Context.t
   -> wake:Keeper_registry.wake_reason
+  -> ?failure_judgment:Keeper_event_queue.failure_judgment
   -> unit
   -> cycle_outcome

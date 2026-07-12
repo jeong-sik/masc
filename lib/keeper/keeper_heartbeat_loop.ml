@@ -250,33 +250,48 @@ let record_crashed_cycle_failure ~base_path ~keeper_name exn =
     (if String.equal backtrace "" then "" else "\n" ^ backtrace)
 ;;
 
-let lease_contains_failure_judgment lease =
-  Keeper_registry_event_queue.lease_stimuli lease
-  |> List.exists (fun (stimulus : Keeper_event_queue.stimulus) ->
-    match stimulus.payload with
-    | Keeper_event_queue.Failure_judgment _ -> true
-    | Keeper_event_queue.Board_signal _
-    | Keeper_event_queue.Fusion_completed _
-    | Keeper_event_queue.Bg_completed _
-    | Keeper_event_queue.Schedule_due _
-    | Keeper_event_queue.Bootstrap
-    | Keeper_event_queue.No_progress_recovery
-    | Keeper_event_queue.Connector_attention _
-    | Keeper_event_queue.Hitl_resolved _
-    | Keeper_event_queue.Goal_verification_failed _
-    | Keeper_event_queue.Goal_assigned _
-    | Keeper_event_queue.Goal_stagnation _ ->
-      false)
+let failure_judgment_of_stimuli = function
+  | [ { Keeper_event_queue.payload =
+          Keeper_event_queue.Failure_judgment judgment
+      ; _
+      } ] ->
+    Ok (Some judgment)
+  | stimuli ->
+    if
+      List.exists
+        (fun (stimulus : Keeper_event_queue.stimulus) ->
+           match stimulus.payload with
+           | Keeper_event_queue.Failure_judgment _ -> true
+           | Keeper_event_queue.Board_signal _
+           | Keeper_event_queue.Fusion_completed _
+           | Keeper_event_queue.Bg_completed _
+           | Keeper_event_queue.Schedule_due _
+           | Keeper_event_queue.Bootstrap
+           | Keeper_event_queue.No_progress_recovery
+           | Keeper_event_queue.Connector_attention _
+           | Keeper_event_queue.Hitl_resolved _
+           | Keeper_event_queue.Goal_verification_failed _
+           | Keeper_event_queue.Goal_assigned _
+           | Keeper_event_queue.Goal_stagnation _ ->
+             false)
+        stimuli
+    then Error "failure judgment must be the sole stimulus in its event queue lease"
+    else Ok None
 ;;
 
 let failure_judgment_successor
       ~arrived_at
       (failure : Keeper_unified_turn.turn_failure)
       judgment
+      provenance
       detail
   =
   let payload : Keeper_event_queue.failure_judgment =
-    { fj_runtime_id = failure.runtime_id; fj_judgment = judgment; fj_detail = detail }
+    { fj_runtime_id = failure.runtime_id
+    ; fj_judgment = judgment
+    ; fj_provenance = provenance
+    ; fj_detail = detail
+    }
   in
   { Keeper_event_queue.post_id = Keeper_event_queue.failure_judgment_post_id payload
   ; urgency = Keeper_event_queue.Normal
@@ -285,43 +300,64 @@ let failure_judgment_successor
   }
 ;;
 
-let settlement_of_failure ~settled_at ~lease failure =
-  if lease_contains_failure_judgment lease
-  then
-    Keeper_registry_event_queue.Escalate
-      { reason = Keeper_registry_event_queue.Failure_judgment_failed
-      ; successor = None
-      }
-  else
-    match failure.Keeper_unified_turn.source_lease_disposition with
-    | Keeper_unified_turn.Acknowledge_after_in_turn_handling ->
-      Keeper_registry_event_queue.Ack
-    | Keeper_unified_turn.Follow_failure_route ->
-      (match failure.Keeper_unified_turn.route with
-       | Keeper_runtime_failure_route.Retry_after_pacing _ ->
-         Keeper_registry_event_queue.Requeue
-           Keeper_registry_event_queue.Retry_after_pacing
-       | Keeper_runtime_failure_route.Rotate_now _ ->
-         Keeper_registry_event_queue.Requeue Keeper_registry_event_queue.Rotate_now
-       | Keeper_runtime_failure_route.Escalate_judgment { judgment; detail } ->
-         Keeper_registry_event_queue.Escalate
-           { reason = Keeper_registry_event_queue.Failure_judgment_requested
-           ; successor =
-               Some
-                 (failure_judgment_successor
-                    ~arrived_at:settled_at
-                    failure
-                    judgment
-                    detail)
-           })
+let settlement_of_failure ~settled_at failure =
+  match failure.Keeper_unified_turn.source_lease_disposition with
+  | Keeper_unified_turn.Acknowledge_after_in_turn_handling ->
+    Keeper_registry_event_queue.Ack
+  | Keeper_unified_turn.Follow_failure_route ->
+    (match failure.Keeper_unified_turn.route with
+     | Keeper_runtime_failure_route.Retry_after_pacing _ ->
+       Keeper_registry_event_queue.Requeue
+         Keeper_registry_event_queue.Retry_after_pacing
+     | Keeper_runtime_failure_route.Rotate_now _ ->
+       Keeper_registry_event_queue.Requeue Keeper_registry_event_queue.Rotate_now
+     | Keeper_runtime_failure_route.Escalate_judgment
+         { judgment; provenance; detail } ->
+       Keeper_registry_event_queue.Escalate
+         { reason = Keeper_registry_event_queue.Failure_judgment_requested
+         ; successor =
+             Some
+               (failure_judgment_successor
+                  ~arrived_at:settled_at
+                  failure
+                  judgment
+                  provenance
+                  detail)
+         })
 ;;
 
-let settlement_of_cycle_outcome ~settled_at ~stop_requested ~lease = function
+let settlement_of_cycle_outcome ~settled_at ~stop_requested ~lease:_ = function
   | Some (Cycle.Completed _) -> Keeper_registry_event_queue.Ack
+  | Some (Cycle.Cancelled _) ->
+    Keeper_registry_event_queue.Requeue Keeper_registry_event_queue.Cancelled
+  | Some (Cycle.Skipped _) ->
+    Keeper_registry_event_queue.Requeue
+      Keeper_registry_event_queue.Turn_not_scheduled
   | Some (Cycle.Busy _) ->
     Keeper_registry_event_queue.Requeue Keeper_registry_event_queue.Cycle_busy
   | Some (Cycle.Failed { failure; _ }) ->
-    settlement_of_failure ~settled_at ~lease failure
+    settlement_of_failure ~settled_at failure
+  | Some (Cycle.Judgment_settled { outcome; _ }) ->
+    (match outcome with
+     | Cycle.Judgment_requeue_after_pacing ->
+       Keeper_registry_event_queue.Requeue
+         Keeper_registry_event_queue.Retry_after_pacing
+     | Cycle.Judgment_requeue_after_rotation ->
+       Keeper_registry_event_queue.Requeue Keeper_registry_event_queue.Rotate_now
+     | Cycle.Judgment_boundary_failed { detail } ->
+       Keeper_registry_event_queue.Escalate
+         { reason =
+             Keeper_registry_event_queue.Failure_judgment_boundary_failed
+               { detail }
+         ; successor = None
+         }
+     | Cycle.Judgment_operator_required { judge_runtime_id; rationale } ->
+       Keeper_registry_event_queue.Escalate
+         { reason =
+             Keeper_registry_event_queue.Failure_judgment_operator_required
+               { judge_runtime_id; rationale }
+         ; successor = None
+         })
   | None ->
     if stop_requested
     then Keeper_registry_event_queue.Requeue Keeper_registry_event_queue.Cancelled
@@ -426,7 +462,13 @@ let run_keepalive_unified_turn
         (* The failed turn already recorded its failure counter.  The queue
            error remains explicit in the log and active durable lease. *)
         ()
-      | Some (Cycle.Completed _ | Cycle.Busy _) | None ->
+      | Some
+          ( Cycle.Completed _
+          | Cycle.Cancelled _
+          | Cycle.Skipped _
+          | Cycle.Busy _
+          | Cycle.Judgment_settled _ )
+      | None ->
         record_crashed_cycle_failure
           ~base_path:ctx.config.base_path
           ~keeper_name:meta_after_triage.name
@@ -486,6 +528,12 @@ let run_keepalive_unified_turn
       in
       consumed_stimuli := event_intake.consumed_stimuli;
       claimed_lease := event_intake.claimed_lease;
+      let failure_judgment =
+        match failure_judgment_of_stimuli event_intake.consumed_stimuli with
+        | Ok judgment -> judgment
+        | Error message -> raise (Event_queue_settlement_failed message)
+      in
+      let judgment_control_turn = Option.is_some failure_judgment in
       (match event_intake.event_queue_claim_error with
        | None -> ()
        | Some message -> record_settlement_failure message);
@@ -501,7 +549,14 @@ let run_keepalive_unified_turn
           ~reactive_wake
           ~event_queue_triggers:event_intake.event_queue_triggers
           ~keeper_resilience_of_name:(fun keeper_name ->
-            if Health.is_healthy ~agent_name:keeper_name then None
+            (* A durable judgment is the typed recovery path for the failure
+               that made this Keeper unhealthy. Reapplying that derived health
+               gate here would make recovery unreachable. Explicit lifecycle
+               gates in [keeper_cycle_decision] remain authoritative. *)
+            if judgment_control_turn
+            then None
+            else if Health.is_healthy ~agent_name:keeper_name
+            then None
             else Some "unhealthy")
             (* RFC-0313 W3: with [pacing.mode = enforce] the scheduler
                consumes failure revisit pacing — the next turn waits until
@@ -511,12 +566,27 @@ let run_keepalive_unified_turn
                per-tick hot path only pays the [Runtime.pacing] toml read
                while a revisit is actually pending. *)
           ~pacing_block_of_name:(fun keeper_name ->
-            match Keeper_pacing_shadow.next_due_remaining ~keeper_name with
-            | None -> None
-            | Some _ as remaining
-              when Keeper_pacing_shadow.pacing_enforced () ->
-              remaining
-            | Some _ -> None)
+            if judgment_control_turn
+            then
+              if Keeper_pacing_shadow.pacing_enforced ()
+              then
+                (match Keeper_failure_judge.resolve_runtime_id () with
+                 | Ok runtime_id ->
+                   Keeper_pacing_shadow.remaining_for_runtime
+                     ~keeper_name
+                     ~runtime_id
+                 | Error _ ->
+                   (* Let the judge boundary run once so the configuration
+                      failure becomes a durable terminal settlement. *)
+                   None)
+              else None
+            else
+              match Keeper_pacing_shadow.next_due_remaining ~keeper_name with
+              | None -> None
+              | Some _ as remaining
+                when Keeper_pacing_shadow.pacing_enforced () ->
+                remaining
+              | Some _ -> None)
           ~stop
           ~meta:meta_after_triage
           obs
@@ -725,6 +795,7 @@ let run_keepalive_unified_turn
               ~turn_decision
               ~shared_context
               ~wake
+              ?failure_judgment
               ()
           in
           cycle_outcome_ref := Some cycle_outcome;
@@ -739,12 +810,14 @@ let run_keepalive_unified_turn
          (match !cycle_outcome_ref with
           | Some (Cycle.Failed { failure; _ }) ->
             (match failure.Keeper_unified_turn.route with
-             | Keeper_runtime_failure_route.Escalate_judgment { judgment; detail } ->
+             | Keeper_runtime_failure_route.Escalate_judgment
+                 { judgment; provenance; detail } ->
                let successor =
                  failure_judgment_successor
                    ~arrived_at:(Time_compat.now ())
                    failure
                    judgment
+                   provenance
                    detail
                in
                (match
@@ -763,7 +836,16 @@ let run_keepalive_unified_turn
              | Keeper_runtime_failure_route.Retry_after_pacing _
              | Keeper_runtime_failure_route.Rotate_now _ ->
                ())
-          | Some (Cycle.Completed _ | Cycle.Busy _) | None -> ())
+          | Some (Cycle.Judgment_settled _) ->
+            record_settlement_failure
+              "failure judgment completed without an owning event queue lease"
+          | Some
+              ( Cycle.Completed _
+              | Cycle.Cancelled _
+              | Cycle.Skipped _
+              | Cycle.Busy _ )
+          | None ->
+            ())
        | Some lease ->
          let settled_at = Time_compat.now () in
          let settlement =

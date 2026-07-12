@@ -136,13 +136,22 @@ val record_crashed_cycle_failure :
 
 val settlement_of_failure :
   settled_at:float ->
-  lease:Keeper_registry_event_queue.lease ->
   Keeper_unified_turn.turn_failure ->
   Keeper_registry_event_queue.settlement
-(** Pure queue disposition for a failed cycle.  Retry/rotation requeue;
-    deterministic failure creates one judgment successor; failure of an
-    already-leased judgment emits an operator-visible escalation with no
-    recursive successor. *)
+(** Pure queue disposition for a failed cycle. Retry/rotation requeue and a
+    deterministic failure creates one judgment successor. This mapping is
+    identical when the source lease carried an earlier judgment: the failed
+    action's new typed route remains authoritative rather than being collapsed
+    into a generic judgment failure. *)
+
+val settlement_of_cycle_outcome :
+  settled_at:float ->
+  stop_requested:bool ->
+  lease:Keeper_registry_event_queue.lease ->
+  Keeper_heartbeat_loop_cycle.cycle_outcome option ->
+  Keeper_registry_event_queue.settlement
+(** Pure lease settlement boundary. Completed work acknowledges; typed
+    cancellation and non-executable-phase skips requeue. *)
 
 val project_transition_outbox :
   base_path:string -> keeper_name:string -> (unit, string) result

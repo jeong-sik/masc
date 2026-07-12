@@ -1338,11 +1338,21 @@ export async function sendKeeperThreadMessage(
       return
     }
 
-    const finalDelivery =
-      finalEntry?.delivery === 'queued'
-        ? 'queued' as KeeperConversationDelivery
-        : 'delivered' as KeeperConversationDelivery
-    if (!finalText && finalDelivery !== 'queued' && !toolCallEnded) {
+    const preserveQueueDurabilityFailure =
+      finalEntry?.delivery === 'error'
+      && finalEntry.details?.queueState === 'durability_uncertain'
+      && finalEntry.details.queueDurability === 'uncertain'
+    const finalDelivery: KeeperConversationDelivery = (() => {
+      if (finalEntry?.delivery === 'queued') return 'queued'
+      if (preserveQueueDurabilityFailure) return 'error'
+      return 'delivered'
+    })()
+    if (
+      !finalText
+      && finalDelivery !== 'queued'
+      && !preserveQueueDurabilityFailure
+      && !toolCallEnded
+    ) {
       finalizeAssistantEntry(keeperName, assistantId, {
         text: EMPTY_VISIBLE_REPLY_TEXT,
         rawText: finalEntry?.rawText || EMPTY_VISIBLE_REPLY_TEXT,
@@ -1372,10 +1382,12 @@ export async function sendKeeperThreadMessage(
       delivery: finalDelivery,
       streamState: null,
       timestamp: new Date().toISOString(),
-      error: null,
-      streamContract: keeperClientObservedSseStreamContract('sse_event', 'backend_terminal_event', {
-        eventName: 'RUN_FINISHED',
-      }),
+      error: preserveQueueDurabilityFailure ? finalEntry.error : null,
+      streamContract: preserveQueueDurabilityFailure
+        ? finalEntry.streamContract
+        : keeperClientObservedSseStreamContract('sse_event', 'backend_terminal_event', {
+            eventName: 'RUN_FINISHED',
+          }),
     })
     if (toolCallEnded) void hydrateKeeperToolOutputs(keeperName)
     if (requestId) {

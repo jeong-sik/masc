@@ -1496,6 +1496,44 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     )
   })
 
+  it('does not let RUN_FINISHED overwrite an uncertain queue receipt', async () => {
+    streamKeeperMessage.mockImplementation(emitting([
+      { type: 'RUN_STARTED' },
+      {
+        type: 'CUSTOM',
+        name: 'KEEPER_CHAT_QUEUED',
+        value: {
+          keeper_name: 'echo',
+          status: 'queued_durability_uncertain',
+          receipt_id: 'chatq_00000000-0000-4000-8000-000000000003',
+          queue_revision: 6,
+          pending_count: 1,
+          inflight_count: 0,
+          queue_durability: 'uncertain',
+          shutdown_operation_id: null,
+        },
+      },
+      { type: 'RUN_FINISHED' },
+    ], true))
+
+    await sendKeeperThreadMessage('echo', '진행 상황?')
+
+    const reply = (keeperThreads.value.echo ?? []).find(entry => entry.role === 'assistant')
+    expect(reply?.delivery).toBe('error')
+    expect(reply?.details).toMatchObject({
+      queueReceiptId: 'chatq_00000000-0000-4000-8000-000000000003',
+      queueRevision: 6,
+      queueState: 'durability_uncertain',
+      queueDurability: 'uncertain',
+    })
+    expect(reply?.error).toContain('crash 내구성')
+    expect(reply?.streamContract).toMatchObject({
+      source: 'queue_event',
+      status: 'queue_request_event',
+      eventName: 'KEEPER_CHAT_QUEUED',
+    })
+  })
+
   it('does not let the short ACK RUN_FINISHED overwrite a durable failed receipt', async () => {
     fetchKeeperChatReceipt.mockResolvedValue({
       keeperName: 'echo',

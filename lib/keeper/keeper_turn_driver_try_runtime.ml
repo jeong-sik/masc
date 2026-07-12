@@ -178,6 +178,14 @@ let runtime_exhaustion_reason_of_http_error
     Keeper_internal_error.Other_detail reason
   | Some (Llm_provider.Http_client.ProviderTerminal { kind = Llm_provider.Http_client.Max_turns _; _ }) ->
     Keeper_internal_error.Max_turns_exceeded
+  | Some
+      (Llm_provider.Http_client.ProviderTerminal
+         { kind = Llm_provider.Http_client.Session_conflict; message }) ->
+    (* The provider terminal kind is matched directly, so this never reparses
+       provider prose. [runtime_exhaustion_reason] has no session-conflict
+       constructor yet; retain the provider's structured message as terminal
+       detail rather than pretending that it is retryable transport failure. *)
+    Keeper_internal_error.Other_detail message
   | Some (Llm_provider.Http_client.ProviderTerminal { kind = Llm_provider.Http_client.Other _; message }) ->
     Keeper_internal_error.Other_detail message
   | Some

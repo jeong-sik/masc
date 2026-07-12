@@ -303,7 +303,25 @@ let wakeup_keeper ?base_path ?stimulus name =
               value)
          stimulus;
        if entry.phase = Keeper_state_machine.Running
-       then Keeper_registry.wakeup ~base_path:entry.base_path name
+       then (
+         match
+           Keeper_registry.wakeup
+             ~intent:Keeper_registry.Reactive_signal
+             ~base_path:entry.base_path
+             name
+         with
+         | Keeper_registry.Signaled -> ()
+         | Keeper_registry.Deferred_unregistered ->
+           Log.Keeper.info ~keeper_name:name
+             "wakeup_keeper: wake deferred after registry removal"
+         | Keeper_registry.Deferred_not_running phase ->
+           Log.Keeper.info ~keeper_name:name
+             "wakeup_keeper: wake deferred after phase change phase=%s"
+             (Keeper_state_machine.phase_to_string phase)
+         | Keeper_registry.Deferred_lifecycle denial ->
+           Log.Keeper.info ~keeper_name:name
+             "wakeup_keeper: wake deferred by lifecycle reason=%s"
+             (Keeper_lifecycle_admission.autonomous_denial_to_wire denial))
        else
          Log.Keeper.info ~keeper_name:name
            "wakeup_keeper: stimulus queued; wake hint withheld phase=%s stimulus=%s"
@@ -320,12 +338,12 @@ let wakeup_keeper ?base_path ?stimulus name =
     [None] preserves the legacy global wakeup behavior. *)
 let wakeup_all_keepers ?base_path () =
   match base_path with
-  | None -> Keeper_registry.wakeup_all ()
+  | None -> Keeper_registry.wakeup_all ~intent:Keeper_registry.Broadcast_signal ()
   | Some expected ->
-      Keeper_registry.all ~base_path:expected ()
-      |> List.iter (fun (entry : Keeper_registry.registry_entry) ->
-           if entry.phase = Keeper_state_machine.Running then
-             Keeper_registry.wakeup ~base_path:entry.base_path entry.name)
+    Keeper_registry.wakeup_all
+      ~intent:Keeper_registry.Broadcast_signal
+      ~base_path:expected
+      ()
 
 (* ── Board-reactive policy constants ── *)
 
@@ -602,7 +620,24 @@ let board_signal_wake_paused_keeper
       ~base_path:config.base_path
       resumed_meta.name
       stimulus;
-    Keeper_registry.wakeup ~base_path:config.base_path resumed_meta.name;
+    (match
+       Keeper_registry.wakeup
+         ~intent:Keeper_registry.Supervisor_resume
+         ~base_path:config.base_path
+         resumed_meta.name
+     with
+     | Keeper_registry.Signaled -> ()
+     | Keeper_registry.Deferred_unregistered ->
+       Log.Keeper.info ~keeper_name:resumed_meta.name
+         "board signal resume committed but wake deferred: keeper unregistered"
+     | Keeper_registry.Deferred_not_running phase ->
+       Log.Keeper.info ~keeper_name:resumed_meta.name
+         "board signal resume committed but wake deferred: phase=%s"
+         (Keeper_state_machine.phase_to_string phase)
+     | Keeper_registry.Deferred_lifecycle denial ->
+       Log.Keeper.info ~keeper_name:resumed_meta.name
+         "board signal resume committed but wake deferred by lifecycle: reason=%s"
+         (Keeper_lifecycle_admission.autonomous_denial_to_wire denial));
     Ok ()
   | Error err ->
     Otel_metric_store.inc_counter

@@ -102,6 +102,13 @@ let optional_bool fields name =
   | Some _ -> Error (Printf.sprintf "%s must be a boolean" name)
 ;;
 
+let optional_bool_with_default fields name ~default =
+  match List.assoc_opt name fields with
+  | None -> Ok default
+  | Some (`Bool value) -> Ok value
+  | Some _ -> Error (Printf.sprintf "%s must be a boolean" name)
+;;
+
 let positive_number_with_default fields name ~default =
   let parsed =
     match List.assoc_opt name fields with
@@ -187,8 +194,8 @@ let parse_sandbox_status_request args =
   | Ok fields ->
     (match
        optional_nonempty_string fields "name",
-       optional_bool fields "verbose",
-       optional_bool fields "include_preflight",
+       optional_bool_with_default fields "verbose" ~default:false,
+       optional_bool_with_default fields "include_preflight" ~default:true,
        positive_number_with_default
          fields
          "timeout_sec"
@@ -204,8 +211,8 @@ let parse_sandbox_status_request args =
        , Ok timeout_sec ) ->
        Ok
          { keeper_name
-         ; verbose = Option.value ~default:false verbose
-         ; include_preflight = Option.value ~default:true include_preflight
+         ; verbose
+         ; include_preflight
          ; timeout_sec
          })
 ;;

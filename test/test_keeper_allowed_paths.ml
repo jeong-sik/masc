@@ -59,7 +59,7 @@ let test_validate_rejects_star_wildcard () =
   match
     KTU.validate_sandbox_settings
       ~sandbox_profile:Masc.Keeper_types_profile.Local
-      ~network_mode:Masc.Keeper_types_profile.Host
+      ~network_mode:Masc.Keeper_types_profile.Network_host
       ~allowed_paths:[ "*" ]
   with
   | Ok () -> fail "expected wildcard rejection"
@@ -72,7 +72,7 @@ let test_validate_rejects_globs_and_traversal () =
   match
     KTU.validate_sandbox_settings
       ~sandbox_profile:Masc.Keeper_types_profile.Local
-      ~network_mode:Masc.Keeper_types_profile.Host
+      ~network_mode:Masc.Keeper_types_profile.Network_host
       ~allowed_paths:[ "workspace/../outside"; "logs/*.txt" ]
   with
   | Ok () -> fail "expected path-shape rejection"
@@ -86,7 +86,7 @@ let test_validate_accepts_plain_paths () =
   match
     KTU.validate_sandbox_settings
       ~sandbox_profile:Masc.Keeper_types_profile.Local
-      ~network_mode:Masc.Keeper_types_profile.Host
+      ~network_mode:Masc.Keeper_types_profile.Network_host
       ~allowed_paths:[ "workspace/outside"; ".masc/playground/keeper/" ]
   with
   | Ok () -> ()

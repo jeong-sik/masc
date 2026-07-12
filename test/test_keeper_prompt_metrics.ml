@@ -389,6 +389,8 @@ let test_ctx_composition_splits_history_and_residual () =
                 tool_use_id = "call-1";
                 content = "Fetched board post body";
                 is_error = false;
+                failure_kind = None;
+                error_class = None;
                 json = None;
                 content_blocks = None;
               };

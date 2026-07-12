@@ -510,6 +510,8 @@ let test_librarian_prompt_omits_private_blocks () =
             { tool_use_id = "call_1"
             ; content = "secret tool payload"
             ; is_error = false
+            ; failure_kind = None
+            ; error_class = None
             ; json = None
             ; content_blocks = None
             }
@@ -1509,6 +1511,8 @@ let test_librarian_runtime_appends_episode_bundle () =
                   { tool_use_id = "call_runtime"
                   ; content = "secret tool payload"
                   ; is_error = false
+                  ; failure_kind = None
+                  ; error_class = None
                   ; json = None
                   ; content_blocks = None
                   }

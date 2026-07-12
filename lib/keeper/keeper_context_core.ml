@@ -212,7 +212,7 @@ let sanitize_checkpoint_message
                         add_checkpoint_sanitize_stats
                           (add_checkpoint_sanitize_stats stats text_stats)
                           block_stats ))
-         | Agent_sdk.Types.ToolResult _ ->
+         | Agent_sdk.Types.ToolResult { failure_kind; error_class; _ } ->
              let result =
                match Canonical_tool.tool_result_of_block block with
                | Some result -> result
@@ -264,6 +264,8 @@ let sanitize_checkpoint_message
                    { tool_use_id;
                      content = stub_content;
                      is_error;
+                     failure_kind;
+                     error_class;
                      json = None;
                      content_blocks = None }
                in
@@ -298,6 +300,8 @@ let sanitize_checkpoint_message
                    { tool_use_id
                    ; content = capped
                    ; is_error
+                   ; failure_kind
+                   ; error_class
                    ; json = None
                    ; content_blocks = None
                    }
@@ -418,7 +422,7 @@ let cap_checkpoint_message_to_remaining_content
            match block with
            | Agent_sdk.Types.Text text ->
                cap_content (fun text -> Agent_sdk.Types.Text text) text
-           | Agent_sdk.Types.ToolResult _ ->
+           | Agent_sdk.Types.ToolResult { failure_kind; error_class; _ } ->
                let result =
                  match Canonical_tool.tool_result_of_block block with
                  | Some result -> result
@@ -432,6 +436,8 @@ let cap_checkpoint_message_to_remaining_content
                      { tool_use_id = result.Canonical_tool.call_id
                      ; content
                      ; is_error = result.Canonical_tool.is_error
+                     ; failure_kind
+                     ; error_class
                      ; json = None
                      ; content_blocks = result.Canonical_tool.content_blocks
                      })

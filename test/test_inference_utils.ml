@@ -44,6 +44,37 @@ let test_total_tokens_parity_and_excludes_cache () =
     (Agent_sdk.Types.total_tokens sample)
     (Inference_utils.total_tokens sample)
 
+let test_utf8_sanitization_preserves_tool_failure_provenance () =
+  let open Agent_sdk.Types in
+  let message : message =
+    {
+      role = Tool;
+      content =
+        [
+          ToolResult
+            {
+              tool_use_id = "tool-\255";
+              content = "failure-\255";
+              is_error = true;
+              failure_kind = Some Validation_error;
+              error_class = Some Deterministic;
+              json = None;
+              content_blocks = None;
+            };
+        ];
+      name = None;
+      tool_call_id = None;
+      metadata = [];
+    }
+  in
+  match (Inference_utils.sanitize_message_utf8 message).content with
+  | [ ToolResult { failure_kind; error_class; _ } ] ->
+      check bool "failure kind preserved" true
+        (failure_kind = Some Validation_error);
+      check bool "error class preserved" true
+        (error_class = Some Deterministic)
+  | _ -> fail "expected one ToolResult"
+
 let () =
   Alcotest.run "Inference_utils"
     [
@@ -64,5 +95,10 @@ let () =
             test_zero_usage_tracks_oas_canonical;
           test_case "total_tokens parity, excludes cache tokens" `Quick
             test_total_tokens_parity_and_excludes_cache;
+        ] );
+      ( "tool result sanitation",
+        [
+          test_case "typed failure provenance survives UTF-8 sanitation" `Quick
+            test_utf8_sanitization_preserves_tool_failure_provenance;
         ] );
     ]

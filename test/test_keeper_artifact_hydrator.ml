@@ -44,7 +44,15 @@ let store_a_blob store payload =
 
 let tool_result_block ~tool_use_id ~content : T.content_block =
   T.ToolResult
-    { tool_use_id; content; is_error = false; json = None; content_blocks = None }
+    {
+      tool_use_id;
+      content;
+      is_error = false;
+      failure_kind = None;
+      error_class = None;
+      json = None;
+      content_blocks = None;
+    }
 
 let make_tool_message ~tool_use_id ~content : T.message =
   {
@@ -78,6 +86,44 @@ let test_hydrates_recent_marker () =
       Alcotest.(check int) "single message back" 1 (List.length result);
       Alcotest.(check string) "hydrated" payload
         (extract_tool_content (List.hd result)))
+
+let test_hydration_preserves_tool_failure_provenance () =
+  with_temp_dir (fun dir ->
+      let store = B.create ~base_path:dir in
+      let payload = String.make 5000 'x' in
+      let _sha, marker = store_a_blob store payload in
+      let msg : T.message =
+        {
+          T.role = T.Tool;
+          content =
+            [
+              T.ToolResult
+                {
+                  tool_use_id = "failed-tool";
+                  content = marker;
+                  is_error = true;
+                  failure_kind = Some T.Validation_error;
+                  error_class = Some T.Deterministic;
+                  json = None;
+                  content_blocks = None;
+                };
+            ];
+          name = None;
+          tool_call_id = Some "failed-tool";
+          metadata = [];
+        }
+      in
+      let result =
+        invoke_reducer (H.hydrate_recent ~store ~keep_recent:1) [ msg ]
+      in
+      match (List.hd result).content with
+      | [ T.ToolResult { content; failure_kind; error_class; _ } ] ->
+          Alcotest.(check string) "hydrated payload" payload content;
+          Alcotest.(check bool) "failure kind preserved" true
+            (failure_kind = Some T.Validation_error);
+          Alcotest.(check bool) "error class preserved" true
+            (error_class = Some T.Deterministic)
+      | _ -> Alcotest.fail "expected one ToolResult block")
 
 let test_keep_recent_zero_no_hydration () =
   with_temp_dir (fun dir ->
@@ -191,6 +237,8 @@ let () =
         [
           Alcotest.test_case "single recent marker hydrated" `Quick
             test_hydrates_recent_marker;
+          Alcotest.test_case "typed failure provenance preserved" `Quick
+            test_hydration_preserves_tool_failure_provenance;
           Alcotest.test_case "keep_recent=0 = no hydration" `Quick
             test_keep_recent_zero_no_hydration;
           Alcotest.test_case "only last K hydrated" `Quick

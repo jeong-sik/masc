@@ -281,6 +281,8 @@ let assistant_same_message_tool_pair id name content : Agent_sdk.Types.message =
           { tool_use_id = id
           ; content
           ; is_error = false
+          ; failure_kind = None
+          ; error_class = None
           ; json = None
           ; content_blocks = None
           }
@@ -298,6 +300,8 @@ let tool_result_message ?(role = Agent_sdk.Types.User) id content
           { tool_use_id = id
           ; content
           ; is_error = false
+          ; failure_kind = None
+          ; error_class = None
           ; json = None
           ; content_blocks = None
           }
@@ -314,6 +318,8 @@ let user_tool_result id content : Agent_sdk.Types.message =
           { tool_use_id = id
           ; content
           ; is_error = false
+          ; failure_kind = None
+          ; error_class = None
           ; json = None
           ; content_blocks = None
           }
@@ -331,6 +337,8 @@ let user_text_and_tool_result text id content : Agent_sdk.Types.message =
           { tool_use_id = id
           ; content
           ; is_error = false
+          ; failure_kind = None
+          ; error_class = None
           ; json = None
           ; content_blocks = None
           }
@@ -669,6 +677,44 @@ let test_checkpoint_sanitize_preserves_pair_repair_stats () =
     false
     (text_contains "unpaired tool use elided" texts)
 
+let test_checkpoint_sanitize_preserves_tool_failure_provenance () =
+  let message : Agent_sdk.Types.message =
+    {
+      role = Agent_sdk.Types.Tool;
+      content =
+        [
+          Agent_sdk.Types.ToolResult
+            {
+              tool_use_id = "failed-tool";
+              content =
+                String.make
+                  (KC.default_max_checkpoint_tool_result_chars + 1)
+                  'x';
+              is_error = true;
+              failure_kind = Some Agent_sdk.Types.Validation_error;
+              error_class = Some Agent_sdk.Types.Deterministic;
+              json = None;
+              content_blocks = None;
+            };
+        ];
+      name = None;
+      tool_call_id = Some "failed-tool";
+      metadata = [];
+    }
+  in
+  match fst (KC.sanitize_checkpoint_message message) with
+  | Some
+      {
+        content =
+          [ Agent_sdk.Types.ToolResult { failure_kind; error_class; _ } ];
+        _;
+      } ->
+      Alcotest.(check bool) "failure kind preserved" true
+        (failure_kind = Some Agent_sdk.Types.Validation_error);
+      Alcotest.(check bool) "error class preserved" true
+        (error_class = Some Agent_sdk.Types.Deterministic)
+  | _ -> Alcotest.fail "expected one sanitized ToolResult"
+
 let test_checkpoint_save_repair_drops_unpaired_tool_blocks () =
   let raw_messages =
     [ user_text "q"
@@ -902,6 +948,8 @@ let () =
         test_pair_repair_metadata_samples_bounded;
       Alcotest.test_case "checkpoint sanitize preserves pair repair stats" `Quick
         test_checkpoint_sanitize_preserves_pair_repair_stats;
+      Alcotest.test_case "checkpoint sanitize preserves typed failure provenance" `Quick
+        test_checkpoint_sanitize_preserves_tool_failure_provenance;
       Alcotest.test_case "checkpoint save repair drops unpaired tool blocks" `Quick
         test_checkpoint_save_repair_drops_unpaired_tool_blocks;
       Alcotest.test_case

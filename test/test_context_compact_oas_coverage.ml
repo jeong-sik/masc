@@ -24,6 +24,8 @@ let tool_msg ?(id = "tool-1") text : Agent_sdk.Types.message =
           { tool_use_id = id
           ; content = text
           ; is_error = false
+          ; failure_kind = None
+          ; error_class = None
           ; json = None
           ; content_blocks = None
           }

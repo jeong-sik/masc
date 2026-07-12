@@ -96,15 +96,14 @@ let has_git_marker path =
     containing [.git]. These may differ. The fallback is safe for
     sandbox environments where worktrees are not used.
 
-    Performance note: [has_git_marker] and the [find_git_root] fallback
-    both walk parent directories. This is O(2n) in worst case where
-    n is directory depth. A future optimization could cache the
-    [find_git_root] result to avoid the duplicate walk. *)
+    We intentionally skip the [has_git_marker] fast-path check here
+    to eliminate the double parent-walk (previously O(2n), now O(n)).
+    [find_git_root] already handles the no-marker case by returning
+    [None], so [has_git_marker] is redundant in this path. *)
 let git_root ~base_path =
-  if not (has_git_marker base_path) then None
-  else match run_argv_line ["git"; "-C"; base_path; "rev-parse"; "--show-toplevel"] with
-    | Some root -> Some root
-    | None -> find_git_root base_path
+  match run_argv_line ["git"; "-C"; base_path; "rev-parse"; "--show-toplevel"] with
+  | Some root -> Some root
+  | None -> find_git_root base_path
 
 (** Check if directory is a git repository *)
 let is_git_repo ~base_path =

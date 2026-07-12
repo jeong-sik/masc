@@ -313,53 +313,36 @@ let transcript_context_of_queued_message message =
 
 let queued_user_message_input
     (item : Keeper_chat_queue.leased_message) :
-    Keeper_chat_store.user_message_input option =
+    Keeper_chat_store.user_message_input =
   let message = item.message in
-  match message.transcript_ownership with
-  | Keeper_chat_queue.Upstream_recorded -> None
-  | Keeper_chat_queue.Queue_owned ->
-    let context = transcript_context_of_queued_message message in
-    Some
-      { content = message.content
-      ; attachments = message.attachments
-      ; timestamp = message.timestamp
-      ; queue_receipt_id =
-          Some (Keeper_chat_queue.Receipt_id.to_string item.receipt_id)
-      ; surface = Some context.surface
-      ; conversation_id = context.conversation_id
-      ; external_message_id = context.external_message_id
-      ; speaker = Some context.speaker
-      ; extra_mentions = context.extra_mentions
-      }
+  let context = transcript_context_of_queued_message message in
+  { content = message.content
+  ; attachments = message.attachments
+  ; timestamp = message.timestamp
+  ; queue_receipt_id =
+      Some (Keeper_chat_queue.Receipt_id.to_string item.receipt_id)
+  ; surface = Some context.surface
+  ; conversation_id = context.conversation_id
+  ; external_message_id = context.external_message_id
+  ; speaker = Some context.speaker
+  ; extra_mentions = context.extra_mentions
+  }
 
 type queued_transcript_batch =
   { user_messages : Keeper_chat_store.user_message_input list
   ; assistant_context : Keeper_chat_queue.transcript_context option
-  ; connector_user_line_recorded_upstream : bool
   }
 
 let queued_transcript_batch leased_items =
-  let user_messages =
-    List.filter_map queued_user_message_input leased_items
-  in
+  let user_messages = List.map queued_user_message_input leased_items in
   let assistant_context =
     match leased_items with
     | [] -> None
     | first :: _ ->
       Some (transcript_context_of_queued_message first.message)
   in
-  let connector_user_line_recorded_upstream =
-    user_messages = []
-    && List.exists
-         (fun (item : Keeper_chat_queue.leased_message) ->
-            match item.message.transcript_ownership with
-            | Keeper_chat_queue.Upstream_recorded -> true
-            | Keeper_chat_queue.Queue_owned -> false)
-         leased_items
-  in
   { user_messages
   ; assistant_context
-  ; connector_user_line_recorded_upstream
   }
 
 let queue_failure_kind_of_turn = function
@@ -390,7 +373,7 @@ let keeper_chat_consumer_outcome ~turn_outcome ~delivery_outcome =
     Keeper_chat_consumer.Failed
       { kind
       ; detail
-      ; outcome_ref = Some (Ids.Turn_ref.to_string outcome_ref)
+      ; outcome_ref = Some outcome_ref
       }
   | Some
       (Server_routes_http_keeper_stream.Failed
@@ -476,9 +459,7 @@ module For_testing = struct
 
   let queued_transcript_batch leased_items =
     let batch = queued_transcript_batch leased_items in
-    ( batch.user_messages
-    , batch.assistant_context
-    , batch.connector_user_line_recorded_upstream )
+    batch.user_messages, batch.assistant_context
 end
 
 let fork_logged_fiber = Server_bootstrap_loops_fiber.fork_logged_fiber
@@ -682,9 +663,6 @@ let start_keeper_chat_queue
              it has acquired the free turn slot; a Busy branch commits the
              queue receipt instead. The consumer therefore persists the user
              line together with its terminal assistant/failure row. *)
-          let connector_user_line_recorded_upstream =
-            transcript_batch.connector_user_line_recorded_upstream
-          in
           (* Derive the typed reply-continuation channel from the queued
              message source so [process_single_turn] can route the
              assistant reply to the originating connector (Discord/Slack)
@@ -697,8 +675,7 @@ let start_keeper_chat_queue
           in
           let turn_outcome =
             match
-              process_single_turn ~connector_user_line_recorded_upstream
-                ~queued_turn:true ~queued_user_messages
+              process_single_turn ~queued_turn:true ~queued_user_messages
                 ~queued_assistant_context ~state ~clock ~auth_token:None
                 ~thread_id ~continuation_channel ~closed
                 ~client_disconnects:None ~payload ~run_id ~message_id

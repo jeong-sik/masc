@@ -62,10 +62,8 @@ module For_testing : sig
     Keeper_chat_queue.leased_message list ->
     Keeper_chat_store.user_message_input list
     * Keeper_chat_queue.transcript_context option
-    * bool
   (** Exact queue-consumer transcript projection: one user input per
-      queue-owned receipt, the typed assistant context, and whether every user
-      line was explicitly recorded upstream. *)
+      receipt and the typed assistant context. *)
 
   val keeper_chat_consumer_outcome :
     turn_outcome:Server_routes_http_keeper_stream.queued_turn_outcome option ->

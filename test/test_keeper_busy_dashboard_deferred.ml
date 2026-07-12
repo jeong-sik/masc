@@ -159,7 +159,6 @@ let test_existing_backlog_defers_new_dashboard_message () =
        ; timestamp = Eio.Time.now clock
        ; source = Dashboard
        ; transcript_context = None
-       ; transcript_ownership = Keeper_chat_queue.Queue_owned
        }
    with
    | Ok receipt ->

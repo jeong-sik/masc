@@ -20,7 +20,7 @@ type turn_outcome =
   | Failed of
       { kind : Keeper_chat_queue.failure_kind
       ; detail : string
-      ; outcome_ref : string option
+      ; outcome_ref : Ids.Turn_ref.t option
       }
   | Deferred of { rejection : Keeper_turn_admission.rejection }
 

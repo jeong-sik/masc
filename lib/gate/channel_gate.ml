@@ -272,10 +272,12 @@ let admission_source_for_message (msg : inbound_message) =
   External_channel
     { channel = msg.channel; workspace_id = msg.channel_workspace_id }
 
+let resolve_admission_source ~message = function
+  | Some source -> source
+  | None -> admission_source_for_message message
+
 let validate ?admission_source (msg : inbound_message) =
-  let source =
-    Option.value admission_source ~default:(admission_source_for_message msg)
-  in
+  let source = resolve_admission_source ~message:msg admission_source in
   Gate_protocol.validate
     ~max_content_length:(max_content_length ())
     ~dedup_check:(dedup_check ~source)
@@ -284,12 +286,10 @@ let validate ?admission_source (msg : inbound_message) =
 (* ── Dispatch ────────────────────────────────────────────────── *)
 
 (* TEL-OK: every terminal branch records its typed outcome through
-   [Channel_gate_metrics]; this function owns no second metric family. *)
+  [Channel_gate_metrics]; this function owns no second metric family. *)
 let handle_inbound_with ?admission_source ~dispatch (msg : inbound_message) =
   let channel = msg.channel in
-  let source =
-    Option.value admission_source ~default:(admission_source_for_message msg)
-  in
+  let source = resolve_admission_source ~message:msg admission_source in
   let identity = admission_identity ~source msg.idempotency_key in
   match validate ~admission_source:source msg with
   | Error e ->

@@ -149,7 +149,6 @@ let test_busy_discord_enqueues () =
                      Keeper_chat_queue.Discord { channel_id; user_id }
                  ; content
                  ; transcript_context
-                 ; transcript_ownership
                  ; _
                  }
              ; _
@@ -162,8 +161,6 @@ let test_busy_discord_enqueues () =
              check "queued source carries the user_id" (user_id = "user-42");
              check "queued content is the user's message"
                (content = "are you there?");
-             check "Discord queue receipt owns its future transcript row"
-               (transcript_ownership = Keeper_chat_queue.Queue_owned);
              check "Discord transcript provenance is exact"
                (match transcript_context with
                 | Some context ->
@@ -427,7 +424,6 @@ let test_pending_receipt_prevents_direct_overtake () =
                      }
                  ; extra_mentions = []
                  }
-           ; transcript_ownership = Keeper_chat_queue.Queue_owned
            });
       Eio.Switch.run @@ fun sw ->
       let reply =
@@ -494,7 +490,6 @@ let test_busy_slack_preserves_thread_context () =
                   Keeper_chat_queue.Slack
                     { channel_id; user_id; user_name; team_id; thread_ts }
               ; transcript_context
-              ; transcript_ownership
               ; _
               }
           ; _
@@ -504,8 +499,6 @@ let test_busy_slack_preserves_thread_context () =
         check "Slack team retained" (team_id = Some "T-777");
         check "top-level message roots deferred reply thread"
           (thread_ts = Some "171.001");
-        check "Slack queue receipt owns its future transcript row"
-          (transcript_ownership = Keeper_chat_queue.Queue_owned);
         check "Slack transcript provenance is exact"
           (match transcript_context with
            | Some context ->

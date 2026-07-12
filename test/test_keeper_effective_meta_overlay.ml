@@ -647,7 +647,6 @@ let test_status_surfaces_chat_queue_runtime () =
              timestamp = 1.0;
              source = Masc.Keeper_chat_queue.Dashboard;
              transcript_context = None;
-             transcript_ownership = Masc.Keeper_chat_queue.Queue_owned;
            }
        with
        | Ok _receipt -> ()

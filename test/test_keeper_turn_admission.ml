@@ -94,7 +94,6 @@ let test_chat_if_free_rechecks_durable_queue_after_stale_peek () =
     ; timestamp = Time_compat.now ()
     ; source = Keeper_chat_queue.Dashboard
     ; transcript_context = None
-    ; transcript_ownership = Keeper_chat_queue.Queue_owned
     }
   in
   let receipt = Keeper_chat_queue.enqueue ~keeper_name message in
@@ -511,7 +510,6 @@ let test_autonomous_yields_to_queued_connector_message () =
                  }
              ; extra_mentions = []
              }
-       ; transcript_ownership = Keeper_chat_queue.Queue_owned
        }
    with
    | Ok _ -> ()

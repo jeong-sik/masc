@@ -183,7 +183,6 @@ type queued_turn_outcome =
 val queued_turn_failure_kind_to_string : queued_turn_failure_kind -> string
 
 val process_single_turn :
-  connector_user_line_recorded_upstream:bool ->
   queued_turn:bool ->
   queued_user_messages:Keeper_chat_store.user_message_input list ->
   queued_assistant_context:Keeper_chat_queue.transcript_context option ->
@@ -211,10 +210,8 @@ val process_single_turn :
     cancel the accepted request. [auth_token] is [None] for queue-consumer
     turns where no HTTP request is available.
 
-    [connector_user_line_recorded_upstream] is [true] only for an explicitly
-    reconciled queue receipt whose persisted ownership is
-    [Upstream_recorded]. Normal busy Discord/Slack receipts are [Queue_owned]:
-    [queued_user_messages] then carries one typed user row per leased receipt,
+    Normal busy Discord/Slack receipts are queue-owned:
+    [queued_user_messages] carries one typed user row per leased receipt,
     and the turn atomically appends those rows with its one terminal row.
     Direct/free connector admission persists its inbound row inside the
     acquired turn slot before model execution.

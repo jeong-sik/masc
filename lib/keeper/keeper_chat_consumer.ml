@@ -11,7 +11,7 @@ type turn_outcome =
   | Failed of
       { kind : Keeper_chat_queue.failure_kind
       ; detail : string
-      ; outcome_ref : string option
+      ; outcome_ref : Ids.Turn_ref.t option
       }
   | Deferred of { rejection : Keeper_turn_admission.rejection }
 
@@ -189,22 +189,6 @@ let retry_pending_finalization state ~keeper_name =
     | `Settled | `Pending -> ());
     true
 
-let canonical_turn_ref_string value =
-  if not (String.is_valid_utf_8 value) then None
-  else
-    match Ids.Turn_ref.of_string value with
-    | Some turn_ref
-      when String.equal (Ids.Turn_ref.to_string turn_ref) value ->
-      Some value
-    | Some _ | None -> None
-
-let canonical_optional_outcome_ref = function
-  | None -> None, false
-  | Some value ->
-    (match canonical_turn_ref_string value with
-     | Some value -> Some value, false
-     | None -> None, true)
-
 let canonical_failure_detail detail =
   let detail = Safe_ops.sanitize_text_utf8 detail |> String.trim in
   if String.equal detail ""
@@ -216,15 +200,7 @@ let finalization_of_delivered ~clock ~outcome_ref =
     { completed_at = Eio.Time.now clock; outcome_ref }
 
 let finalization_of_failed ~clock ~kind ~detail ~outcome_ref =
-  let outcome_ref, invalid_outcome_ref =
-    canonical_optional_outcome_ref outcome_ref
-  in
   let detail = canonical_failure_detail detail in
-  let detail =
-    if invalid_outcome_ref
-    then detail ^ "; invalid turn_ref omitted from terminal correlation"
-    else detail
-  in
   Keeper_chat_queue.Mark_failed
     { completed_at = Eio.Time.now clock; kind; detail; outcome_ref }
 

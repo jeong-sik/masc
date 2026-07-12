@@ -251,7 +251,6 @@ let test_discord_queue_projection_matches_gateway_context () =
               }
           ; extra_mentions = []
           };
-      transcript_ownership = Chat_queue.Queue_owned;
     }
   in
   let projection = Boot.queued_chat_projection queued in
@@ -294,7 +293,6 @@ let test_slack_queue_projection_matches_gateway_context () =
               }
           ; extra_mentions = []
           }
-    ; transcript_ownership = Chat_queue.Queue_owned
     }
   in
   let projection = Boot.queued_chat_projection queued in

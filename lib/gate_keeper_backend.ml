@@ -724,7 +724,6 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~submission_owne
            ; timestamp = Eio.Time.now clock
            ; source
            ; transcript_context = Some transcript_context
-           ; transcript_ownership = Keeper_chat_queue.Queue_owned
            }
        with
        | Ok receipt when receipt.reused ->

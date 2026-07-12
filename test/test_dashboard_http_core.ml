@@ -177,7 +177,8 @@ let test_keeper_chat_receipt_route_and_json () =
             { completed_at = 42.0
             ; kind = Keeper_chat_queue.Delivery_failed
             ; detail = "Slack rejected sk-proj-abcdefghijklmnopqrstuvwxyz"
-            ; outcome_ref = Some "chat-row-7"
+            ; outcome_ref =
+                Some (Ids.Turn_ref.make ~trace_id:"chat-row" ~absolute_turn:7)
             }
       }
   in

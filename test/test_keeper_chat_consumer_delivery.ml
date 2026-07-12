@@ -49,7 +49,6 @@ let discord_msg ?guild_id ?parent_channel_id ?thread_id ?conversation_id
             }
         ; extra_mentions = []
         }
-  ; transcript_ownership = Keeper_chat_queue.Queue_owned
   }
 
 let slack_msg ~content ~channel_id ~user_id ~user_name ~team_id ~thread_ts
@@ -73,7 +72,6 @@ let slack_msg ~content ~channel_id ~user_id ~user_name ~team_id ~thread_ts
             }
         ; extra_mentions = []
         }
-  ; transcript_ownership = Keeper_chat_queue.Queue_owned
   }
 
 let rec rm_rf path =
@@ -188,7 +186,7 @@ let check_terminal_snapshot ~label ~keeper_name ~receipt_id =
 
 let persist_real_queue_transcript ~base ~keeper_name ~assistant_content
     leased_items =
-  let user_messages, assistant_context, upstream_recorded =
+  let user_messages, assistant_context =
     Server_bootstrap_loops.For_testing.queued_transcript_batch leased_items
   in
   match assistant_context with
@@ -201,18 +199,11 @@ let persist_real_queue_transcript ~base ~keeper_name ~assistant_content
   | Some context ->
     let config = Workspace.default_config base in
     let persisted =
-      if user_messages <> [] then
-        Keeper_chat_store.append_user_messages_and_assistant_result
-          ~config ~base_dir:base ~keeper_name ~user_messages
-          ~surface:context.surface
-          ?conversation_id:context.conversation_id
-          ~assistant_content ()
-      else if upstream_recorded then
-        Keeper_chat_store.append_assistant_message_result
-          ~config ~base_dir:base ~keeper_name ~content:assistant_content
-          ~surface:context.surface
-          ?conversation_id:context.conversation_id ()
-      else Error "queue transcript batch had no owned or upstream user rows"
+      Keeper_chat_store.append_user_messages_and_assistant_result
+        ~config ~base_dir:base ~keeper_name ~user_messages
+        ~surface:context.surface
+        ?conversation_id:context.conversation_id
+        ~assistant_content ()
     in
     (match persisted with
      | Ok () ->
@@ -262,7 +253,8 @@ let test_delivery_finalizes_terminal_receipt () =
           (match receipt.state with
            | Keeper_chat_queue.Delivered completion ->
              check "delivery stores the typed outcome reference"
-               (completion.outcome_ref = Some "trace-delivered#1")
+               (Ids.Turn_ref.equal completion.outcome_ref
+                  (turn_ref "trace-delivered" 1))
            | Pending | Inflight _ | Failed _ ->
              check "delivery state is Delivered" false));
       (match !captured with
@@ -444,7 +436,7 @@ let test_explicit_failure_finalizes_failed_receipt () =
         Keeper_chat_consumer.Failed
           { kind = Keeper_chat_queue.Delivery_failed
           ; detail = "connector rejected outbound delivery"
-          ; outcome_ref = Some "trace-delivery-failed#1"
+          ; outcome_ref = Some (turn_ref "trace-delivery-failed" 1)
           }
       in
       with_consumer_switch (fun sw ->
@@ -463,7 +455,8 @@ let test_explicit_failure_finalizes_failed_receipt () =
                (String.equal failure.detail
                   "connector rejected outbound delivery");
              check "failure outcome reference is preserved"
-               (failure.outcome_ref = Some "trace-delivery-failed#1")
+               (Option.equal Ids.Turn_ref.equal failure.outcome_ref
+                  (Some (turn_ref "trace-delivery-failed" 1)))
            | Pending | Inflight _ | Delivered _ ->
              check "explicit failure state is Failed" false));
       check_terminal_snapshot ~label:"explicit failure" ~keeper_name
@@ -631,7 +624,8 @@ let test_finalization_persistence_retry_does_not_redeliver () =
           (match receipt.state with
            | Keeper_chat_queue.Delivered completion ->
              check "retried finalization preserves the outcome reference"
-               (completion.outcome_ref = Some "trace-finalized-after-retry#3")
+               (Ids.Turn_ref.equal completion.outcome_ref
+                  (turn_ref "trace-finalized-after-retry" 3))
            | Pending | Inflight _ | Failed _ ->
              check "retried finalization reaches Delivered" false));
       check "finalization retry does not re-run handle_turn" (!calls = 1);
@@ -778,7 +772,7 @@ let test_invalid_delivery_diagnostic_does_not_block_lane () =
           Keeper_chat_consumer.Failed
             { kind = Keeper_chat_queue.Delivery_failed
             ; detail = "HTTP response body: \255"
-            ; outcome_ref = Some " delivery:\255 "
+            ; outcome_ref = Some (turn_ref "delivery" 1)
             })
         else
           Keeper_chat_consumer.Delivered
@@ -805,8 +799,9 @@ let test_invalid_delivery_diagnostic_does_not_block_lane () =
                (String.is_valid_utf_8 failure.detail);
              check "original failure kind is preserved"
                (failure.kind = Keeper_chat_queue.Delivery_failed);
-             check "invalid failure turn_ref is omitted, never repaired"
-               (failure.outcome_ref = None)
+            check "typed failure turn_ref is preserved"
+              (Option.equal Ids.Turn_ref.equal failure.outcome_ref
+                 (Some (turn_ref "delivery" 1)))
            | Some { state = Pending | Inflight _ | Delivered _; _ } | None ->
              check "malformed diagnostic reaches terminal Failed" false);
           check "next queued turn dispatches after repaired terminal outcome"

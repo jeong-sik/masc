@@ -318,7 +318,6 @@ let chat_queue_load_error_kind_to_string = function
   | Keeper_chat_queue.Invalid_path -> "invalid_path"
   | Keeper_chat_queue.Read_failed -> "read_failed"
   | Keeper_chat_queue.Parse_failed -> "parse_failed"
-  | Keeper_chat_queue.Migration_failed -> "migration_failed"
   | Keeper_chat_queue.Recovery_failed -> "recovery_failed"
 ;;
 
@@ -452,7 +451,9 @@ let recent_failed_chat_receipt_json
         ; "failure_kind", `String (Keeper_chat_queue.failure_kind_to_string failure.kind)
         ; "completed_at", `Float failure.completed_at
         ; "completed_at_iso", unix_iso_json (Some failure.completed_at)
-        ; "outcome_ref", Json_util.string_opt_to_json failure.outcome_ref
+        ; ( "outcome_ref"
+          , Option.fold ~none:`Null ~some:Ids.Turn_ref.to_yojson
+              failure.outcome_ref )
         ])
   | Keeper_chat_queue.Pending | Keeper_chat_queue.Inflight _
   | Keeper_chat_queue.Delivered _ -> None

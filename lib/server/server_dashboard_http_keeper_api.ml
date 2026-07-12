@@ -1125,7 +1125,7 @@ let keeper_chat_receipt_state_json = function
     `Assoc
       [ "kind", `String "delivered"
       ; "completed_at", `Float completion.completed_at
-      ; "outcome_ref", json_string_opt completion.outcome_ref
+      ; "outcome_ref", Ids.Turn_ref.to_yojson completion.outcome_ref
       ]
   | Keeper_chat_queue.Failed failure ->
     `Assoc
@@ -1135,7 +1135,9 @@ let keeper_chat_receipt_state_json = function
       ; ( "detail"
         , `String (Observability_redact.redact_text failure.detail) )
       ; "completed_at", `Float failure.completed_at
-      ; "outcome_ref", json_string_opt failure.outcome_ref
+      ; ( "outcome_ref"
+        , Option.fold ~none:`Null ~some:Ids.Turn_ref.to_yojson
+            failure.outcome_ref )
       ]
 ;;
 

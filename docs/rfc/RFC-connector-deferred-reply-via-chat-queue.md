@@ -73,10 +73,8 @@ Snapshots contain pending prompts and attachments, so the atomic replacement
 file is created with owner-only mode `0600`. A queue configured for one cluster
 never scans, leases, or rewrites another cluster's Keeper directory.
 `Workspace.keepers_runtime_dir` is the explicit ownership decision: a
-non-default cluster never inspects the default cluster as a migration fallback.
-If an operator intentionally migrates a queue, the exact snapshot directories
-must be copied into the selected canonical namespace while the server is
-stopped; startup does not infer ownership from partial directory contents.
+non-default cluster never inspects the default cluster. Startup accepts only
+the canonical v3 schema in that namespace and never migrates another shape.
 
 Schema `keeper_chat_queue.v3` contains:
 
@@ -84,8 +82,7 @@ Schema `keeper_chat_queue.v3` contains:
 - every receipt ID;
 - `Pending` and `Inflight` message payloads;
 - typed transcript provenance (`surface`, conversation/external message IDs,
-  speaker, structured mentions) plus an explicit `queue_owned` or
-  `upstream_recorded` ownership decision;
+  speaker, structured mentions); all queued rows are queue-owned;
 - lease ID and start time for `Inflight`; and
 - terminal completion/failure metadata. Delivered receipts discard message
   bodies and attachments. Every failed receipt conservatively retains the
@@ -103,18 +100,11 @@ write rolls the in-memory mutation and revision back. Corrupt or unreadable
 snapshots remain untouched, make that Keeper queue unavailable, and surface an
 explicit load error. They are never interpreted as an empty queue.
 
-### 3.2 Version-1 migration
+### 3.2 Schema boundary
 
-Production snapshots existed as `keeper_chat_queue.v1` before this contract.
-Startup therefore performs one explicit migration transaction:
-
-1. strictly decode the v1 shape;
-2. mint one receipt for each legacy inflight/pending payload;
-3. replay legacy inflight payloads ahead of pending payloads; and
-4. atomically replace the file with strict v3.
-
-After that transaction there is no v1 runtime fallback or dual-write path. A
-malformed v1/v2 file is a load error, not a compatibility success.
+Any schema other than `keeper_chat_queue.v3` is a typed load error. The server
+keeps the original bytes untouched and makes that Keeper queue unavailable;
+there is no runtime migration, fallback parser, or dual-write path.
 
 ### 3.3 Restart recovery
 
@@ -185,19 +175,13 @@ their delivery boundary.
 
 ### 4.3 Recording ownership
 
-The admission result and persisted queue ownership fix transcript ownership
-without string classification:
+The admission result fixes transcript ownership without string classification:
 
 ```ocaml
-match admission, transcript_ownership with
-| Free_turn, _ -> gate records the user row inside the acquired turn slot
-| Busy_queued, Queue_owned -> queue consumer atomically records each receipt's user row and one terminal row
-| Busy_queued, Upstream_recorded -> queue consumer records only the terminal row
+match admission with
+| Free_turn -> gate records the user row inside the acquired turn slot
+| Busy_queued -> queue consumer atomically records each receipt's user row and one terminal row
 ```
-
-Legacy active connector receipts without an ownership decision fail migration
-closed. Operators must reconcile them explicitly; startup never guesses from a
-pre-existing transcript row.
 
 This preserves the single connector-inbound recorder defined by RFC-0226.
 
@@ -299,7 +283,7 @@ Focused regression coverage must prove:
 - coalescing preserves all receipt identities;
 - nack and restart preserve receipt IDs;
 - enqueue, lease, finalize, and nack persistence failures roll back;
-- v1 migration happens once and malformed snapshots fail closed;
+- non-v3 and malformed snapshots fail closed without rewriting bytes;
 - BasePath/cluster reconfiguration does not leak the registry;
 - every atomic snapshot replacement has exact owner-only `0600` permissions;
 - structural Eio switch cancellation nacks the unchanged lease, while an

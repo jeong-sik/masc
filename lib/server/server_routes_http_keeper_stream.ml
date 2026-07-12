@@ -286,7 +286,6 @@ let enqueue_dashboard_payload
       ; timestamp = Eio.Time.now clock
       ; source = Keeper_chat_queue.Dashboard
       ; transcript_context = None
-      ; transcript_ownership = Keeper_chat_queue.Queue_owned
       }
   with
   | Error error -> Error (Keeper_chat_queue.mutation_error_to_string error)
@@ -1230,8 +1229,7 @@ let queued_turn_failure_kind_to_string = function
   | Stream_projection_failed -> "stream_projection_failed"
 
 let queued_delivery_outcome_of_turn_ref = function
-  | Some turn_ref ->
-      Delivered { outcome_ref = turn_ref }
+  | Some turn_ref -> Delivered { outcome_ref = turn_ref }
   | None ->
       Failed
         { kind = Missing_turn_ref
@@ -1250,14 +1248,9 @@ type translated_keeper_stream_event =
 let empty_keeper_stream_bridge_state = Keeper_chat_oas_stream_bridge.empty_state
 let translate_oas_stream_event = Keeper_chat_oas_stream_bridge.translate
 
-(* [connector_user_line_recorded_upstream] and [queued_turn] are required
-   labelled arguments, not optional with the "default" their .mli doc
-   comments describe: the function ends in labelled args with no positional
-   terminator, so a leading optional could not be erased (warning 16). Every
-   caller states explicitly whether the gate inbound boundary already owns
-   the user line, and whether this turn was dispatched from the queue
-   consumer. *)
-let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
+(* [queued_turn] is required: every caller states explicitly whether this
+   turn was dispatched from the durable queue consumer. *)
+let process_single_turn ~queued_turn
     ~queued_user_messages ~queued_assistant_context ~state ~clock ~auth_token
     ~thread_id ~continuation_channel ~closed
     ~client_disconnects
@@ -1371,20 +1364,15 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
     push_worker_event (Stream_event evt)
   in
   let persist_user_message_only () =
-    (* The normal queue-owned path persists its per-receipt user rows through
-       [queued_user_messages] in the atomic terminal append below. This guard is
-       only for an explicitly reconciled [Upstream_recorded] legacy receipt:
-       re-recording that already durable user line would double-write it. *)
-    if not connector_user_line_recorded_upstream then
-      Keeper_chat_store.append_user_message
-        ~config:workspace_config
-        ~base_dir:base_path
-        ~keeper_name:payload.name
-        ~content:payload.message
-        ~attachments:payload.attachments
-        ~surface:chat_surface
-        ~speaker:chat_speaker
-        ()
+    Keeper_chat_store.append_user_message
+      ~config:workspace_config
+      ~base_dir:base_path
+      ~keeper_name:payload.name
+      ~content:payload.message
+      ~attachments:payload.attachments
+      ~surface:chat_surface
+      ~speaker:chat_speaker
+      ()
   in
   let persist_failure_reply err =
     (* The failure marker is typed, not an utterance: it renders for the
@@ -1401,8 +1389,6 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
        failure under this feature's "queued, will answer" contract).
        - Queue-owned receipts: atomically append every constituent user row and
          one [Transport_failure] terminal row.
-       - Explicit [Upstream_recorded] reconciliation: append only the terminal
-         failure marker because the user line already exists.
        - Direct Dashboard turns: append the ordinary paired user/failure rows. *)
     let persisted =
       if queued_user_messages <> [] then
@@ -1415,17 +1401,6 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
          ?conversation_id:chat_conversation_id
          ~assistant_kind:Keeper_chat_store.Row_kind.Transport_failure
          ~assistant_content:(persisted_error_reply err)
-         ~stream_lifecycle:errored_stream_lifecycle
-         ()
-      else if connector_user_line_recorded_upstream then
-       Keeper_chat_store.append_assistant_message_result
-         ~config:workspace_config
-         ~base_dir:base_path
-         ~keeper_name:payload.name
-         ~content:(persisted_error_reply err)
-         ~kind:Keeper_chat_store.Row_kind.Transport_failure
-         ~surface:chat_surface
-         ?conversation_id:chat_conversation_id
          ~stream_lifecycle:errored_stream_lifecycle
          ()
       else
@@ -1454,9 +1429,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
   in
   let timeout_sec = payload.timeout_sec in
   let dashboard_direct_stream =
-    (not queued_turn)
-    && (not connector_user_line_recorded_upstream)
-    && not (has_external_speaker payload)
+    (not queued_turn) && not (has_external_speaker payload)
   in
   (* masc#23924: [f] below pushes its own [Stream_terminal] once it reaches a
      completion arm, but a timeout/cancellation cuts [f] off before any of
@@ -1665,18 +1638,6 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                        ~surface:chat_surface
                        ?conversation_id:chat_conversation_id
                        ~assistant_content
-                       ?blocks
-                       ?turn_ref
-                       ~stream_lifecycle:completed_stream_lifecycle
-                       ()
-                   else if connector_user_line_recorded_upstream then
-                     Keeper_chat_store.append_assistant_message_result
-                       ~config:workspace_config
-                       ~base_dir:base_path
-                       ~keeper_name:payload.name
-                       ~content:assistant_content
-                       ~surface:chat_surface
-                       ?conversation_id:chat_conversation_id
                        ?blocks
                        ?turn_ref
                        ~stream_lifecycle:completed_stream_lifecycle
@@ -2413,8 +2374,7 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
              (* Dashboard stream route: no gate inbound boundary recorded this
                 user line, so the turn owns recording both sides (RFC-connector-deferred-reply-via-chat-queue §3.4). *)
               ignore
-                (process_single_turn ~connector_user_line_recorded_upstream:false
-                   ~queued_turn:false
+                (process_single_turn ~queued_turn:false
                    ~queued_user_messages:[] ~queued_assistant_context:None
                    ~state ~clock
                   ~auth_token:(auth_token_from_request request)

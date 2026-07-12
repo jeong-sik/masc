@@ -270,7 +270,6 @@ let test_chat_queue_pending_rows_are_visible () =
               }
           ; extra_mentions = []
           }
-    ; transcript_ownership = Keeper_chat_queue.Queue_owned
     }
   in
   let receipt =
@@ -453,7 +452,6 @@ let test_chat_queue_inflight_priority_matches_structured_projection () =
     ; timestamp
     ; source = Keeper_chat_queue.Dashboard
     ; transcript_context = None
-    ; transcript_ownership = Keeper_chat_queue.Queue_owned
     }
   in
   let first =
@@ -525,7 +523,6 @@ let test_recent_failed_chat_projection_is_bounded_and_newest_first () =
       ; timestamp = Float.of_int ordinal
       ; source = Keeper_chat_queue.Dashboard
       ; transcript_context = None
-      ; transcript_ownership = Keeper_chat_queue.Queue_owned
       }
     in
     let receipt =
@@ -912,7 +909,6 @@ let test_queue_only_keeper_is_not_hidden_by_meta_inventory () =
     ; timestamp = 155.0
     ; source = Keeper_chat_queue.Dashboard
     ; transcript_context = None
-    ; transcript_ownership = Keeper_chat_queue.Queue_owned
     }
   in
   (match Keeper_chat_queue.enqueue ~keeper_name message with

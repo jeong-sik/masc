@@ -32,14 +32,6 @@ type transcript_context =
   ; extra_mentions : Keeper_identity.Keeper_id.t list
   }
 
-type transcript_ownership =
-  | Queue_owned
-  | Upstream_recorded
-(** Durable user-row ownership. [Queue_owned] means the consumer atomically
-    appends this receipt's user row with the turn terminal row.
-    [Upstream_recorded] is only for explicitly reconciled legacy input whose
-    user row is already durable. *)
-
 type queued_message = {
   content : string;
   user_blocks : Keeper_multimodal_input.user_input_block list;
@@ -47,7 +39,6 @@ type queued_message = {
   timestamp : float;
   source : message_source;
   transcript_context : transcript_context option;
-  transcript_ownership : transcript_ownership;
 }
 
 module Receipt_id : sig
@@ -59,15 +50,6 @@ module Receipt_id : sig
 end
 
 type completion = {
-  completed_at : float;
-  outcome_ref : string option;
-}
-
-(** Write-side delivered evidence.  Unlike legacy persisted [completion]
-    reads, a new successful finalization cannot omit the turn join key or pass
-    an arbitrary string.  The queue also round-trips the typed value through
-    the canonical [Ids.Turn_ref] codec before persistence. *)
-type delivered_completion = {
   completed_at : float;
   outcome_ref : Ids.Turn_ref.t;
 }
@@ -89,7 +71,7 @@ type failure = {
   completed_at : float;
   kind : failure_kind;
   detail : string;
-  outcome_ref : string option;
+  outcome_ref : Ids.Turn_ref.t option;
 }
 
 type receipt_state =
@@ -109,14 +91,13 @@ type lease = {
 }
 
 type finalization =
-  | Mark_delivered of delivered_completion
+  | Mark_delivered of completion
   | Mark_failed of failure
 
 type snapshot_load_error_kind =
   | Invalid_path
   | Read_failed
   | Parse_failed
-  | Migration_failed
   | Recovery_failed
 
 type snapshot_load_error = {
@@ -169,7 +150,6 @@ type enqueue_receipt = {
 
 type configure_report = {
   restored_keeper_count : int;
-  migrated_keeper_count : int;
   recovered_receipt_count : int;
   load_errors : (string option * snapshot_load_error) list;
 }
@@ -185,14 +165,11 @@ val continuation_channel_of_message_source :
   ?dashboard_thread_id:string -> message_source -> Keeper_continuation_channel.t
 
 (** Enable persistence in the canonical cluster-aware Keeper runtime directory
-    resolved from [config], and restore every per-Keeper snapshot. Safe
-    version-1/version-2 files are decoded only by explicit parsers and
-    atomically rewritten as strict version 3. Active legacy connector messages
-    without a transcript-ownership decision fail migration closed. A malformed
-    snapshot is retained, registered as unavailable, and reported here; it is
-    never replaced by an empty queue. Reconfiguration clears the prior
-    in-memory registry before loading the new workspace/cluster ownership
-    boundary, and never scans a different cluster as a migration fallback. *)
+    resolved from [config], and restore strict version-3 per-Keeper snapshots.
+    Any other schema or malformed snapshot is retained, registered as
+    unavailable, and reported here; it is never migrated or replaced by an
+    empty queue. Reconfiguration clears the prior in-memory registry before
+    loading the new workspace/cluster ownership boundary. *)
 val configure_persistence : config:Workspace.config -> configure_report
 
 val persistence_configured : unit -> bool
@@ -268,7 +245,7 @@ val all_keeper_names : unit -> string list
 
 val configuration_errors : unit -> snapshot_load_error list
 (** Queue-registry errors that are not owned by one valid Keeper entry, such
-    as a failed storage-root migration decision or an invalid snapshot-bearing
+    as a failed storage-root decision or an invalid snapshot-bearing
     directory name. Per-Keeper snapshot errors remain on {!snapshot}. *)
 
 module For_testing : sig

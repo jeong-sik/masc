@@ -60,6 +60,7 @@ module For_testing : sig
   type terminal_outcome =
     | Terminal_done
     | Terminal_checkpoint
+    | Terminal_input_required
     | Terminal_failed_completion_contract of { reason_code : string }
 
   val terminal_outcome_of_result : Keeper_agent_run.run_result -> terminal_outcome

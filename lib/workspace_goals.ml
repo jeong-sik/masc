@@ -157,7 +157,13 @@ let enqueue_goal_verification_failed_wake
             stimulus;
           match Keeper_registry.get ~base_path:ctx.config.base_path keeper_name with
           | Some entry when entry.phase = Keeper_state_machine.Running ->
-            Keeper_registry.wakeup ~base_path:ctx.config.base_path keeper_name
+            let (_ : Keeper_registry.wakeup_outcome) =
+              Keeper_registry.wakeup
+                ~intent:Keeper_registry.Goal_signal
+                ~base_path:ctx.config.base_path
+                keeper_name
+            in
+            ()
           | Some entry ->
             Log.Keeper.info
               "goal verification wake queued without fiber wake keeper=%s phase=%s goal_id=%s"

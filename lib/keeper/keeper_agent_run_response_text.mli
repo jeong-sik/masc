@@ -9,8 +9,23 @@ type finalized = {
     mutation-boundary stop). Used by finalize to tag budget-limited turns. *)
 val stop_reason_is_turn_budget_exhausted : Runtime_agent.stop_reason -> bool
 
+(** [true] only for typed control checkpoints that must not manufacture a
+    chat reply. The checkpoint remains observable through its stop/event
+    surfaces. *)
+val stop_reason_suppresses_visible_response : Runtime_agent.stop_reason -> bool
+
 val completion_contract_suppresses_visible_response :
   history_assistant_source:string ->
+  Keeper_execution_receipt.completion_contract_result ->
+  bool
+
+(** [InputRequired] carries a question that must remain visible even when the
+    otherwise-passive completion contract came from an internal/autonomous
+    history source. Other stop reasons use
+    {!completion_contract_suppresses_visible_response}. *)
+val completion_contract_suppresses_visible_response_for_stop_reason :
+  history_assistant_source:string ->
+  stop_reason:Runtime_agent.stop_reason ->
   Keeper_execution_receipt.completion_contract_result ->
   bool
 

@@ -35,7 +35,9 @@ let of_stop_reason = function
   | Runtime_agent.TurnBudgetExhausted _ -> Continuation_checkpoint
   | Runtime_agent.MutationBoundaryReached _ -> Continuation_checkpoint
   | Runtime_agent.Yielded_to_chat_waiting _
-  | Runtime_agent.Yielded_to_durable_stimulus _ -> Continuation_checkpoint
+  | Runtime_agent.Yielded_to_durable_stimulus _
+  | Runtime_agent.ToolFailureRecoveryDeferred _ -> Continuation_checkpoint
+  | Runtime_agent.InputRequired _ -> Visible_reply
 
 let of_result_surface ~response_text = function
   | Runtime_agent.Completed ->
@@ -43,7 +45,9 @@ let of_result_surface ~response_text = function
   | Runtime_agent.TurnBudgetExhausted _ -> Continuation_checkpoint
   | Runtime_agent.MutationBoundaryReached _ -> Continuation_checkpoint
   | Runtime_agent.Yielded_to_chat_waiting _
-  | Runtime_agent.Yielded_to_durable_stimulus _ -> Continuation_checkpoint
+  | Runtime_agent.Yielded_to_durable_stimulus _
+  | Runtime_agent.ToolFailureRecoveryDeferred _ -> Continuation_checkpoint
+  | Runtime_agent.InputRequired _ -> Visible_reply
 
 let of_reply_payload payload =
   match payload with

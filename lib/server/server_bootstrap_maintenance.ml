@@ -581,12 +581,13 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
           with
           | None -> ()
           | Some result ->
-            if result.removed > 0 || result.errors <> []
+            if result.removed > 0 || result.already_absent > 0 || result.errors <> []
             then (
               Log.Server.info
-                "Sandbox cleanup: scanned=%d removed=%d errors=%d"
+                "Sandbox cleanup: scanned=%d removed=%d already_absent=%d errors=%d"
                 result.scanned
                 result.removed
+                result.already_absent
                 (List.length result.errors);
               List.iter
                 (fun err -> Log.Server.warn "Sandbox cleanup error: %s" err)

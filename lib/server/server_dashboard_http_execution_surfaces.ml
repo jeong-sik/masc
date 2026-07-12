@@ -496,6 +496,8 @@ let display_of_custom_event (verb : Keeper_lifecycle_events.t) : lifecycle_displ
   | Paused_pruned ->
     (* prune == removed from supervision *)
     { ld_keepalive_running = false; ld_phase = "stopped"; ld_pipeline_stage = "offline"; ld_paused = true }
+  | Purged ->
+    { ld_keepalive_running = false; ld_phase = "stopped"; ld_pipeline_stage = "offline"; ld_paused = false }
   | Admission_denied ->
     (* admission guard refused to launch a fiber *)
     { ld_keepalive_running = false; ld_phase = "offline"; ld_pipeline_stage = "offline"; ld_paused = false }

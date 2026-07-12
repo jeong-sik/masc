@@ -25,6 +25,15 @@ type stop_reason =
     }
   | Yielded_to_chat_waiting of { turns_used : int }
   | Yielded_to_durable_stimulus of { turns_used : int }
+  | InputRequired of {
+      turns_used : int;
+      request : Agent_sdk.Error.input_required;
+    }
+  | ToolFailureRecoveryDeferred of {
+      turns_used : int;
+      reason : string;
+      tool_names : string list;
+    }
 
 (** {1 Per-worker config} *)
 
@@ -78,6 +87,7 @@ type config = {
   checkpoint_sidecar : Yojson.Safe.t option;
   cache_system_prompt : bool;
   yield_on_tool : bool;
+  tool_failure_judge : Agent_sdk.Tool_failure_recovery.judge option;
   compact_ratio : float option;
   context_window_tokens : int option;
       (** Input/context window basis forwarded to OAS
@@ -120,7 +130,7 @@ type config = {
   tool_selector : Agent_sdk.Tool_selector.strategy option;
   checkpoint_sink : Agent_sdk.Agent.checkpoint_sink option;
 }
-(** Per-worker configuration.  59 fields — concrete record because
+(** Per-worker configuration.  60 fields — concrete record because
     callers ({!Runtime_agent}, keeper workers) construct + tweak
     fields field-by-field at the dispatch site. *)
 

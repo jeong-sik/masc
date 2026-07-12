@@ -43,8 +43,15 @@ let append_chat_failure ~base_dir ~keeper ~run_id ~failure_code content =
      (generic append 실패는 warn 후 계속 진행해 도달한다), registry는 위에서 이미 갱신됐으므로
      어느 경우든 가시성은 보존된다. *)
   Fusion_sink.broadcast_run_status ~registry:(Fusion_run_registry.global ()) ~run_id;
-  Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~ok:false
-    ~resolved_answer:content ~board_post_id:""
+  (* The failure conclusion is already durable on the chat lane above, and the
+     wake ERROR-logs its own durable-commit failure, so a degraded completion
+     wake here is degraded reply-channel routing — not a change to the
+     failure-notification contract. Match explicitly rather than swallow. *)
+  match
+    Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~ok:false
+      ~resolved_answer:content ~board_post_id:""
+  with
+  | Ok () | Error _ -> ()
 
 type orchestrator_runner =
   sw:Eio.Switch.t
@@ -57,7 +64,7 @@ type orchestrator_runner =
   -> Fusion_orchestrator.outcome
 
 let handle_with_runner ~run_orchestrator ~sw ~net ~base_dir ~keeper ~now_unix ~run_id
-      ~policy ~args : string =
+      ~policy ?continuation_channel ~args () : string =
   let prompt = Tool_args.get_string args "prompt" "" in
   let preset = Tool_args.get_string args "preset" policy.Fusion_policy.default_preset in
   let web_tools = Tool_args.get_bool args "web_tools" false in
@@ -104,6 +111,13 @@ let handle_with_runner ~run_orchestrator ~sw ~net ~base_dir ~keeper ~now_unix ~r
          뿐, 키퍼를 깨우지 않는다(wake는 별개). *)
       Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id ~keeper
         ~preset ~started_at:now_unix;
+      (* Reply route: captured next to [register_running] so route lifetime
+         tracks the run. [register] drops [Unrouted] itself; the completion
+         wake ([Fusion_sink.wake_keeper_on_fusion_completion], success AND
+         failure paths) consumes it exactly once. *)
+      Option.iter
+        (fun channel -> Fusion_wake_route.register ~run_id channel)
+        continuation_channel;
       (* RFC-0266 §7 Phase 4: push the new [Running] card to the dashboard panel
          (no polling). wake-free, broadcast-failure-safe; see
          Fusion_sink.broadcast_run_status. *)
@@ -139,6 +153,9 @@ let handle_with_runner ~run_orchestrator ~sw ~net ~base_dir ~keeper ~now_unix ~r
           Fusion_run_registry.mark_completed (Fusion_run_registry.global ()) ~run_id
             ~failure:"cancelled: structural cancellation (shutdown or sibling switch failure)"
             ~failure_code:"cancelled" ~ok:false ();
+          (* No completion wake fires on this path, so drop the reply route
+             here or it leaks for the process lifetime. *)
+          Fusion_wake_route.discard ~run_id;
           raise exn
         | exception exn ->
           append_chat_failure ~base_dir ~keeper ~run_id ~failure_code:"aborted"
@@ -158,9 +175,10 @@ let handle_with_runner ~run_orchestrator ~sw ~net ~base_dir ~keeper ~now_unix ~r
                your chat lane. No need to poll masc_fusion_status." )
         ]
 
-let handle ~sw ~net ~base_dir ~keeper ~now_unix ~run_id ~policy ~args : string =
+let handle ~sw ~net ~base_dir ~keeper ~now_unix ~run_id ~policy ?continuation_channel
+      ~args () : string =
   handle_with_runner ~run_orchestrator:Fusion_orchestrator.run ~sw ~net ~base_dir
-    ~keeper ~now_unix ~run_id ~policy ~args
+    ~keeper ~now_unix ~run_id ~policy ?continuation_channel ~args ()
 
 module For_test = struct
   type nonrec orchestrator_runner = orchestrator_runner

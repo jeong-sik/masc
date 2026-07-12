@@ -27,6 +27,16 @@ type tool_result = Keeper_types_profile.tool_result
 let handle_keeper_up = Keeper_turn_up.handle_keeper_up
 let handle_keeper_down = Keeper_turn_lifecycle.handle_keeper_down
 
+let restart_keepalive_after_message_turn ctx meta =
+  match start_keepalive ctx meta with
+  | Keepalive_started _ | Keepalive_already_registered _ -> ()
+  | outcome ->
+    Log.Keeper.error
+      "keeper message turn did not restore keepalive name=%s outcome=%s"
+      meta.name
+      (start_keepalive_outcome_to_string outcome)
+;;
+
 let turn_cost_for_result (result : Keeper_agent_run.run_result) : float =
   (* cost_usd is accounted independently of token-count trust (token⊥cost). The
      provider's authoritative cost field is used directly; missing/non-positive
@@ -110,7 +120,8 @@ let has_no_progress_loop_blocker (meta : keeper_meta) =
           | Sdk_guardrail_violation
           | Sdk_tripwire_violation
           | Sdk_exit_condition_met
-          | Sdk_input_required )
+          | Sdk_input_required
+          | Sdk_tool_failure_recovery_failed )
       ; _
       } ->
     false
@@ -1131,7 +1142,7 @@ let run_keeper_msg_turn_admitted
                  ()
                with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_keeper_exn
                  ~label:"trajectory finalize (agent_run error)" exn);
-              start_keepalive ctx meta;
+              restart_keepalive_after_message_turn ctx meta;
               Progress.stop_tracking turn_task_id;
               tool_result_error user_message
 	            | Ok (result, final_max_runtime_context) ->
@@ -1263,7 +1274,7 @@ let run_keeper_msg_turn_admitted
                 ~turn_generation:lifecycle.turn_generation
                 ~compaction:lifecycle.compaction
                 ~handoff_json:lifecycle.handoff_json;
-              start_keepalive ctx updated_meta;
+              restart_keepalive_after_message_turn ctx updated_meta;
               Progress.Tracker.complete turn_tracker
                 ~message:(Printf.sprintf "Turn completed: %d tool calls" (Keeper_agent_result.tool_call_count result)) ();
               let reply_json =
@@ -1327,6 +1338,7 @@ let handle_keeper_msg
       ?event_bus
       ?continuation_channel
       ?on_admission_rejected
+      ?on_admitted
       ctx
       args
   : tool_result
@@ -1353,13 +1365,28 @@ let handle_keeper_msg
         ~base_path:ctx.config.base_path
         ~keeper_name:name
         (fun () ->
-          run_keeper_msg_turn_admitted
-            ?on_text_delta
-            ?on_event
-            ?event_bus
-            ?continuation_channel
-            ctx
-            args)
+          match on_admitted with
+          | Some notify ->
+            (match notify () with
+             | Ok () ->
+               run_keeper_msg_turn_admitted
+                 ?on_text_delta
+                 ?on_event
+                 ?event_bus
+                 ?continuation_channel
+                 ctx
+                 args
+             | Error detail ->
+               tool_result_error
+                 ("keeper turn admission persistence failed: " ^ detail))
+          | None ->
+            run_keeper_msg_turn_admitted
+              ?on_text_delta
+              ?on_event
+              ?event_bus
+              ?continuation_channel
+              ctx
+              args)
     with
     | `Ran result -> result
     | `Rejected

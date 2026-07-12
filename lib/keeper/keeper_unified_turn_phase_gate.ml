@@ -12,7 +12,8 @@ open Keeper_context_runtime
 
 type phase_gate_outcome =
   | Phase_gate_proceed of Keeper_state_machine.phase option
-  | Phase_gate_terminal_ok of keeper_meta
+  | Phase_gate_cancelled of keeper_meta
+  | Phase_gate_skipped of keeper_meta
   | Phase_gate_terminal_error of Agent_sdk.Error.sdk_error
 
 let decide_and_record
@@ -69,7 +70,7 @@ let decide_and_record
       ~turn_id:keeper_turn_id
       ~prev:Keeper_turn_fsm.Phase_gating
       (Keeper_turn_fsm.Cancelled Keeper_turn_fsm.Cancelled_supervisor_stop);
-    Phase_gate_terminal_ok meta, turn_state)
+    Phase_gate_cancelled meta, turn_state)
   else (
     match
       Keeper_registry.get_phase ~base_path:registry_base_path meta.name
@@ -108,7 +109,7 @@ let decide_and_record
         ~turn_id:keeper_turn_id
         ~prev:Keeper_turn_fsm.Phase_gating
         Keeper_turn_fsm.Done;
-      Phase_gate_terminal_ok meta, turn_state
+      Phase_gate_skipped meta, turn_state
     | None ->
       let turn_plan =
         Keeper_unified_turn_phase_plan.decide_turn_plan_at_phase_gate

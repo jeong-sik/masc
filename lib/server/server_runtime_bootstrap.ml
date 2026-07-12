@@ -875,6 +875,11 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       let t1 = Eio.Time.now clock in
       Log.Server.info "State created (runtime state) in %.1fs" (t1 -. t0);
       bootstrap_server_state_blocking state;
+      (* Recover per-keeper lifecycle transactions before any other keeper
+         metadata writer or autoboot reader is published. A changed keeper
+         generation is never overwritten; its journal remains visible as an
+         unresolved recovery record. *)
+      startup_recover_keeper_lifecycle_transactions state;
       (* The retired-key migration performs a raw atomic rewrite without version CAS.
          Run it before [server_state := Some state] publishes mutation routes,
          and before connectors, maintenance, or keeper loops can write meta.

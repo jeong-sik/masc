@@ -349,6 +349,29 @@ let record_crash_exact entry ts msg =
     Error_tracking.record_crash_entry current ts msg)
 ;;
 
+let exact_update_succeeded entry ~site = function
+  | Exact_updated -> true
+  | Exact_update_missing ->
+    Log.Keeper.warn
+      "%s: exact registry update skipped because lane is no longer registered site=%s"
+      entry.name
+      site;
+    false
+  | Exact_update_replaced ->
+    Log.Keeper.warn
+      "%s: exact registry update retained newer same-name lane site=%s"
+      entry.name
+      site;
+    false
+  | Exact_update_invalid validation_error ->
+    Log.Keeper.warn
+      "%s: exact registry update validation failed site=%s error=%s"
+      entry.name
+      site
+      (registry_entry_validation_error_to_string validation_error);
+    false
+;;
+
 let set_grpc_close ~base_path name close_fn =
   match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
   | Some entry -> Atomic.set entry.grpc_close close_fn
@@ -412,37 +435,92 @@ let record_spawn_slot_denied ~keeper_name ~surface reason =
   Spawn_slots.record_denied ~keeper_name ~surface reason
 ;;
 
-let wakeup ~base_path name =
-  (* RFC-0303 Phase 3: the no-progress wake-tombstone gate is removed (the
-     detector that fed it is retired), so a wake always signals the fiber. *)
-  match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
-  (* tla-lint: allow-mutation: fiber signal — public wakeup API for a single keeper *)
-  | Some entry -> Atomic.set entry.fiber_wakeup true
-  | None -> ()
+type wakeup_intent =
+  | Reactive_signal
+  | Scheduled_signal
+  | Goal_signal
+  | Supervisor_resume
+  | Hitl_resolution
+  | Broadcast_signal
+
+let wakeup_intent_to_wire = function
+  | Reactive_signal -> "reactive_signal"
+  | Scheduled_signal -> "scheduled_signal"
+  | Goal_signal -> "goal_signal"
+  | Supervisor_resume -> "supervisor_resume"
+  | Hitl_resolution -> "hitl_resolution"
+  | Broadcast_signal -> "broadcast_signal"
 ;;
 
-type wakeup_running_outcome =
+type wakeup_outcome =
   | Signaled
   | Deferred_unregistered
   | Deferred_not_running of Keeper_state_machine.phase
+  | Deferred_lifecycle of Keeper_lifecycle_admission.autonomous_denial
 
-let wakeup_running ~base_path name =
-  match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
-  | None -> Deferred_unregistered
-  | Some entry when entry.phase = Keeper_state_machine.Running ->
-    Atomic.set entry.fiber_wakeup true;
-    Signaled
-  | Some entry -> Deferred_not_running entry.phase
+let record_lifecycle_wakeup_denial ~intent (entry : registry_entry) denial =
+  let reason = Keeper_lifecycle_admission.autonomous_denial_to_wire denial in
+  let intent = wakeup_intent_to_wire intent in
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string LifecycleDispatchRejections)
+    ~labels:
+      [ "keeper", entry.name
+      ; "event", "registry_wakeup"
+      ; "reason", reason
+      ; "intent", intent
+      ]
+    ();
+  Log.Keeper.info
+    "%s: registry wake deferred by lifecycle admission intent=%s reason=%s"
+    entry.name
+    intent
+    reason
 ;;
 
-let wakeup_all ?base_path () =
+let wakeup_entry ~intent ~require_running (entry : registry_entry) =
+  let lifecycle_state =
+    Keeper_lifecycle_admission.state
+      ~paused:entry.meta.paused
+      ~latched_reason:entry.meta.latched_reason
+  in
+  match Keeper_lifecycle_admission.admit_autonomous lifecycle_state with
+  | Keeper_lifecycle_admission.Autonomous_denied denial ->
+    record_lifecycle_wakeup_denial ~intent entry denial;
+    Deferred_lifecycle denial
+  | Keeper_lifecycle_admission.Autonomous_admitted ->
+    if require_running && entry.phase <> Keeper_state_machine.Running
+    then Deferred_not_running entry.phase
+    else (
+      (* tla-lint: allow-mutation: lifecycle-admitted fiber hint signal *)
+      Atomic.set entry.fiber_wakeup true;
+      Signaled)
+;;
+
+let wakeup ~intent ~base_path name =
+  match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
+  | None -> Deferred_unregistered
+  | Some entry -> wakeup_entry ~intent ~require_running:true entry
+;;
+
+let wakeup_running ~intent ~base_path name =
+  match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
+  | None -> Deferred_unregistered
+  | Some entry -> wakeup_entry ~intent ~require_running:true entry
+;;
+
+let wakeup_all ~intent ?base_path () =
   let base_path = Option.map canonical_base_path_exn base_path in
   StringMap.iter
     (fun _k entry ->
        match base_path with
        | Some expected when not (String.equal expected entry.base_path) -> ()
-       (* tla-lint: allow-mutation: fiber signal — bulk wakeup for Running keepers under base_path filter *)
-       | _ -> if entry.phase = Running then Atomic.set entry.fiber_wakeup true)
+       | _ ->
+         if entry.phase = Running
+         then
+           let (_ : wakeup_outcome) =
+             wakeup_entry ~intent ~require_running:true entry
+           in
+           ())
     (Atomic.get registry)
 ;;
 
@@ -706,6 +784,7 @@ let compaction_stage_after_event entry event =
     state is consistent. *)
 let rec dispatch_event_with_audit_internal
           ~base_path
+          ?lifecycle_token
           ?expected_lane
           ?(origin = Generic_dispatch)
           ?snapshot
@@ -810,7 +889,8 @@ let rec dispatch_event_with_audit_internal
        in
        let new_seq = entry.transition_seq + 1 in
        (match
-          install_entry_if_current
+          install_entry_if_current_internal
+            ?lifecycle_token
             ~observed:entry
             { entry with
               phase = tr.new_phase
@@ -831,6 +911,7 @@ let rec dispatch_event_with_audit_internal
         | Entry_install_conflict ->
           dispatch_event_with_audit_internal
             ~base_path
+            ?lifecycle_token
             ?expected_lane
             ~origin
             ?snapshot
@@ -937,6 +1018,7 @@ let rec dispatch_event_with_audit_internal
                match
                  dispatch_event_with_audit_internal
                    ~base_path
+                   ?lifecycle_token
                    ?expected_lane
                    name
                    followup_event
@@ -1005,7 +1087,8 @@ let rec dispatch_event_with_audit_internal
        (* No phase change — still update conditions *)
        let new_seq = entry.transition_seq + 1 in
        (match
-          install_entry_if_current
+          install_entry_if_current_internal
+            ?lifecycle_token
             ~observed:entry
             { entry with
               conditions = tr.updated_conditions
@@ -1024,6 +1107,7 @@ let rec dispatch_event_with_audit_internal
         | Entry_install_conflict ->
           dispatch_event_with_audit_internal
             ~base_path
+            ?lifecycle_token
             ?expected_lane
             ~origin
             ?snapshot
@@ -1089,6 +1173,21 @@ let dispatch_event_exact
   =
   dispatch_event_with_audit_internal
     ~base_path:entry.base_path
+    ~expected_lane:(Keeper_lane.id entry.lane)
+    ~origin
+    entry.name
+    event
+;;
+
+let dispatch_event_exact_for_lifecycle
+      token
+      (entry : registry_entry)
+      ?(origin = Generic_dispatch)
+      event
+  =
+  dispatch_event_with_audit_internal
+    ~base_path:entry.base_path
+    ~lifecycle_token:token
     ~expected_lane:(Keeper_lane.id entry.lane)
     ~origin
     entry.name
@@ -1191,6 +1290,13 @@ let prepare_fiber_launch ~base_path name =
           name
           base_path));
   dispatch_event ~base_path name Keeper_state_machine.Fiber_started
+;;
+
+let prepare_fiber_launch_for_lifecycle token (entry : registry_entry) =
+  Atomic.set entry.fiber_stop false;
+  Atomic.set entry.fiber_wakeup false;
+  Atomic.set entry.waiting_for_inference false;
+  dispatch_event_exact_for_lifecycle token entry Keeper_state_machine.Fiber_started
 ;;
 
 let get_phase ~base_path name =

@@ -1,8 +1,10 @@
-(** Non-blocking lifecycle orchestration for durable Keeper shutdown. *)
+(** Non-blocking orchestration for durable Keeper lifecycle cleanup. *)
 
 type submit_error =
   | Prepare_error of Keeper_shutdown_prepare_join.error
   | Existing_operation_load_error of Keeper_shutdown_store.error
+  | Existing_operation_lane_mismatch of Keeper_shutdown_types.t
+  | Existing_operation_intent_mismatch of Keeper_shutdown_types.t
   | Worker_start_error of worker_start_error
 
 and worker_start_error =
@@ -10,7 +12,21 @@ and worker_start_error =
   | Worker_supervisor_stopping of exn
   | Worker_fork_failed of exn
 
+type restored_inventory =
+  { operations : Keeper_shutdown_types.t list
+  ; blocked_keeper_names : string list
+  ; corrupt_records : Keeper_shutdown_store.corrupt_record list
+  }
+
 val submit_error_to_string : submit_error -> string
+
+(** Restore admission from owner-addressable durable inventory. Corrupt
+    payloads fence their path owner and remain explicit in [corrupt_records];
+    valid operations for unrelated Keepers remain recoverable. *)
+val restore_inventory_admission :
+  config:Workspace.config ->
+  Keeper_shutdown_store.inventory_entry list ->
+  (restored_inventory, string) result
 
 (** Fence admission and persist the operation synchronously, then fork lane
     join/finalization on the process-lifetime Keeper supervisor switch. The
@@ -18,6 +34,15 @@ val submit_error_to_string : submit_error -> string
 val submit :
   config:Workspace.config ->
   entry:Keeper_registry.registry_entry ->
+  request:Keeper_shutdown_prepare_join.request ->
+  (Keeper_shutdown_types.t, submit_error) result
+
+(** Fence same-name registration and submit a meta-only operation for a Keeper
+    with no registered lane. The durable record is committed before the
+    process-owned finalizer fiber starts. *)
+val submit_dormant :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
   request:Keeper_shutdown_prepare_join.request ->
   (Keeper_shutdown_types.t, submit_error) result
 

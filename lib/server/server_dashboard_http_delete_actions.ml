@@ -3,35 +3,25 @@
     Extracted from server_routes_http_routes_dashboard.ml.
     Contains POST handler logic for /api/v1/dashboard/board/delete,
     /api/v1/dashboard/tasks/delete, /api/v1/dashboard/goals/delete,
-    /api/v1/dashboard/goals/sweep, /api/v1/dashboard/agents/purge. *)
+    /api/v1/dashboard/goals/sweep, /api/v1/dashboard/agents/purge.
+    Keeper purge is durable and asynchronous; plain-agent purge remains an
+    exact synchronous cleanup. *)
 
 module Http = Http_server_eio
 
 open Server_auth
 
-type keeper_purge_target =
-  { keeper_name : string
-  ; agent_name : string
-  ; trace_id : string option
-  ; toml_path : string option
-  }
-
 type agent_purge_cleanup_result =
   { agent_name : string
-  ; pending_confirms_removed : int
   ; heartbeats_stopped : int
-  ; workspace_unbind_result : string
+  ; workspace_unbound : bool
   }
 
-type agent_purge_cleanup_target =
-  { agent_name : string
-  ; aliases : string list
-  }
+type path_removal = Path_absent | Path_removed
 
-type keeper_purge_cleanup_result =
-  { keeper_pending_confirms_removed : int
-  ; agent_cleanup_results : agent_purge_cleanup_result list
-  }
+type plain_agent_resolve_error =
+  | Invalid_plain_agent_name of string
+  | Plain_agent_artifact_read_failed of string
 
 let invalid_request field =
   Printf.sprintf "invalid request: requires {\"%s\":\"...\"}" field
@@ -56,66 +46,110 @@ let respond_error ?(status = `Bad_request) ~request reqd message =
     reqd
 ;;
 
-let sum_pending_confirm_removals config ~target_type target_ids =
-  target_ids
-  |> List.fold_left
-       (fun acc target_id ->
-         match acc with
-         | Error _ -> acc
-         | Ok total -> (
-           match
-             Operator_pending_confirm.remove_pending_confirms_by_target
-               config
-               ~target_type
-               ~target_id:(Some target_id)
-           with
-           | Ok removed -> Ok (total + removed)
-           | Error msg ->
-             Error
-               (Printf.sprintf
-                  "pending-confirm cleanup failed for %s %s: %s"
-                  target_type
-                  target_id
-                  msg)))
-       (Ok 0)
+let path_error operation path exn =
+  Printf.sprintf "%s failed for %s: %s" operation path (Printexc.to_string exn)
 ;;
 
-let rec rm_rf path =
-  if Fs_compat.file_exists path
-  then if Sys.is_directory path
-  then (
-    Sys.readdir path
-    |> Array.iter (fun entry -> rm_rf (Filename.concat path entry));
-    (try Fs_compat.rmdir path with
-     | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | exn ->
-       Log.Misc.warn "[agent_purge] failed to remove directory %s: %s"
-         path (Printexc.to_string exn)))
-  else Safe_ops.remove_file_logged ~context:"agent_purge" path
+let lstat_path_blocking path =
+  try Ok (Some (Unix.lstat path)) with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+  | exn -> Error (path_error "lstat" path exn)
 ;;
 
-let remove_path_if_exists ~context path =
-  if Fs_compat.file_exists path
-  then if Sys.is_directory path
-  then rm_rf path
-  else Safe_ops.remove_file_logged ~context path
+let lstat_path path =
+  try Eio_guard.run_in_systhread (fun () -> lstat_path_blocking path) with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (path_error "systhread lstat" path exn)
 ;;
 
-let credential_aliases agent_name =
-  let trimmed = String.trim agent_name in
+let unlink_path_blocking path =
+  try
+    Unix.unlink path;
+    Ok Path_removed
+  with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok Path_absent
+  | exn -> Error (path_error "unlink" path exn)
+;;
+
+let rmdir_path_blocking path =
+  try
+    Unix.rmdir path;
+    Ok Path_removed
+  with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok Path_absent
+  | exn -> Error (path_error "rmdir" path exn)
+;;
+
+let rec remove_path_strict_blocking path =
+  match lstat_path_blocking path with
+  | Error _ as error -> error
+  | Ok None -> Ok Path_absent
+  | Ok (Some stat) ->
+    (match stat.Unix.st_kind with
+     | Unix.S_DIR ->
+       let entries =
+         try Ok (Sys.readdir path |> Array.to_list |> List.sort String.compare) with
+         | exn -> Error (path_error "readdir" path exn)
+       in
+       (match entries with
+        | Error _ as error -> error
+        | Ok entries ->
+          let rec remove_entries = function
+            | [] -> rmdir_path_blocking path
+            | entry :: rest ->
+              (match remove_path_strict_blocking (Filename.concat path entry) with
+               | Error _ as error -> error
+               | Ok (Path_absent | Path_removed) -> remove_entries rest)
+          in
+          remove_entries entries)
+     | Unix.S_REG
+     | Unix.S_LNK
+     | Unix.S_CHR
+     | Unix.S_BLK
+     | Unix.S_FIFO
+     | Unix.S_SOCK -> unlink_path_blocking path)
+;;
+
+let remove_path_strict path =
+  try Eio_guard.run_in_systhread (fun () -> remove_path_strict_blocking path) with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (path_error "systhread recursive removal" path exn)
+;;
+
+let rec remove_paths_strict = function
+  | [] -> Ok ()
+  | path :: rest ->
+    (match remove_path_strict path with
+     | Error _ as error -> error
+     | Ok outcome ->
+       Log.Misc.debug
+         "[dashboard_purge] artifact path=%s outcome=%s"
+         path
+         (match outcome with Path_absent -> "absent" | Path_removed -> "removed");
+       remove_paths_strict rest)
+;;
+
+let validate_agent_alias alias =
+  match Workspace.validate_agent_name alias with
+  | Ok _ -> Ok alias
+  | Error detail ->
+    Error (Printf.sprintf "invalid exact agent purge owner %S: %s" alias detail)
+;;
+
+let exact_agent_aliases agent_names =
   let aliases =
-    [
-      Some trimmed;
-      (if Nickname.is_generated_nickname trimmed
-       then Nickname.extract_agent_type trimmed
-       else None);
-    ]
+    agent_names
+    |> List.filter_map String_util.trim_to_option
+    |> List.sort_uniq String.compare
   in
-  aliases
-  |> List.filter_map (function
-       | Some value when value <> "" -> Some value
-       | _ -> None)
-  |> Json_util.dedupe_keep_order
+  let rec validate acc = function
+    | [] -> Ok (List.rev acc)
+    | alias :: rest ->
+      (match validate_agent_alias alias with
+       | Error _ as error -> error
+       | Ok alias -> validate (alias :: acc) rest)
+  in
+  validate [] aliases
 ;;
 
 let agent_file_path config agent_name =
@@ -123,232 +157,387 @@ let agent_file_path config agent_name =
     (Workspace.safe_filename agent_name ^ ".json")
 ;;
 
-let resolve_keeper_purge_target config requested_name =
+let plain_agent_candidate_names requested_name =
   let trimmed = String.trim requested_name in
-  let candidates =
-    [
-      Some trimmed;
-      Keeper_identity.canonical_keeper_name_from_agent_name trimmed;
-      Keeper_identity.canonical_keeper_name trimmed;
-    ]
-    |> List.filter_map (function
-         | Some value when value <> "" -> Some value
-         | _ -> None)
-    |> Json_util.dedupe_keep_order
-  in
-  let rec loop = function
-    | [] -> None
-    | candidate :: rest -> (
-      let candidate_meta_path = Keeper_types_profile.keeper_meta_path config candidate in
-      let candidate_toml_path = Config_dir_resolver.keeper_toml_path_opt candidate in
-      match Keeper_meta_store.read_meta_resolved config candidate with
-      | Ok (Some (resolved_name, meta)) ->
-        Some
-          {
-            keeper_name = resolved_name;
-            agent_name = meta.agent_name;
-            trace_id =
-              Some (Keeper_id.Trace_id.to_string meta.runtime.trace_id);
-            toml_path = Config_dir_resolver.keeper_toml_path_opt resolved_name;
-          }
-      | Ok None ->
-        if Fs_compat.file_exists candidate_meta_path
-           || Option.is_some candidate_toml_path
-        then
-          Some
-            {
-              keeper_name = candidate;
-              agent_name = Keeper_identity.keeper_agent_name candidate;
-              trace_id = None;
-              toml_path = candidate_toml_path;
-            }
-        else loop rest
-      | Error err ->
-        if Fs_compat.file_exists candidate_meta_path
-           || Option.is_some candidate_toml_path
-        then (
-          Log.Keeper.warn
-            "agent purge: continuing despite keeper meta read failure for %s: %s"
-            candidate err;
-          Some
-            {
-              keeper_name = candidate;
-              agent_name = Keeper_identity.keeper_agent_name candidate;
-              trace_id = None;
-              toml_path = candidate_toml_path;
-            })
-        else loop rest)
-  in
-  loop candidates
-;;
-
-let plain_agent_candidate_names config requested_name =
-  let trimmed = String.trim requested_name in
-  let resolved = Workspace.resolve_agent_name config trimmed in
-  [ trimmed; resolved ]
+  [ trimmed ]
   |> List.filter (fun value -> value <> "")
-  |> Json_util.dedupe_keep_order
 ;;
 
 let plain_agent_artifacts_exist config agent_name =
-  let agent_exists = Fs_compat.file_exists (agent_file_path config agent_name) in
-  let metrics_exists =
-    Fs_compat.file_exists (Metrics_store_eio.agent_metrics_dir config agent_name)
+  let rec any_path_exists = function
+    | [] -> Ok false
+    | path :: rest ->
+      (match lstat_path path with
+       | Error _ as error -> error
+       | Ok (Some _) -> Ok true
+       | Ok None -> any_path_exists rest)
   in
-  let credential_exists =
-    credential_aliases agent_name
-    |> List.exists (fun alias ->
-         Fs_compat.file_exists
-           (Auth.credential_file config.base_path alias))
-  in
-  agent_exists || metrics_exists || credential_exists
+  any_path_exists
+    [ agent_file_path config agent_name
+    ; Metrics_store_eio.agent_metrics_dir config agent_name
+    ; Auth.credential_file config.base_path agent_name
+    ]
 ;;
 
 let resolve_plain_agent_target config requested_name =
-  plain_agent_candidate_names config requested_name
-  |> List.find_opt (plain_agent_artifacts_exist config)
+  match exact_agent_aliases (plain_agent_candidate_names requested_name) with
+  | Error detail -> Error (Invalid_plain_agent_name detail)
+  | Ok [] -> Ok None
+  | Ok (agent_name :: _) ->
+    (match plain_agent_artifacts_exist config agent_name with
+     | Error detail -> Error (Plain_agent_artifact_read_failed detail)
+     | Ok true -> Ok (Some agent_name)
+     | Ok false -> Ok None)
+;;
+
+let plain_agent_resolve_error_to_string = function
+  | Invalid_plain_agent_name detail -> detail
+  | Plain_agent_artifact_read_failed detail -> detail
+;;
+
+let plain_agent_resolve_status = function
+  | Invalid_plain_agent_name _ -> `Bad_request
+  | Plain_agent_artifact_read_failed _ -> `Internal_server_error
 ;;
 
 let agent_purge_cleanup_result_to_json
     { agent_name
-    ; pending_confirms_removed
     ; heartbeats_stopped
-    ; workspace_unbind_result
+    ; workspace_unbound
     } =
   `Assoc
     [ ("agent_name", `String agent_name)
-    ; ("pending_confirms_removed", `Int pending_confirms_removed)
     ; ("heartbeats_stopped", `Int heartbeats_stopped)
-    ; ("workspace_unbind_result", `String workspace_unbind_result)
+    ; ("workspace_unbound", `Bool workspace_unbound)
     ]
 ;;
 
-let resolve_agent_purge_targets config agent_names =
-  let aliases_by_agent = Hashtbl.create (List.length agent_names) in
-  let order = ref [] in
-  let add_alias ~agent_name alias =
-    let aliases =
-      match Hashtbl.find_opt aliases_by_agent agent_name with
-      | Some existing -> existing
-      | None ->
-        order := agent_name :: !order;
-        []
-    in
-    Hashtbl.replace aliases_by_agent agent_name
-      (aliases @ [ alias; agent_name ] |> Json_util.dedupe_keep_order)
+type credential_plan =
+  { aliases : string list
+  ; credential_paths : string list
+  }
+;;
+
+let credential_plan config aliases =
+  let owner_matches (credential : Masc_domain.agent_credential) =
+    List.exists (String.equal credential.agent_name) aliases
   in
-  agent_names
-  |> List.iter (fun requested_name ->
-       let alias = String.trim requested_name in
-       if alias <> ""
-       then (
-         let agent_name = Workspace.resolve_agent_name config alias |> String.trim in
-         if agent_name <> "" then add_alias ~agent_name alias));
-  !order
-  |> List.rev
-  |> List.map (fun agent_name ->
-       let aliases =
-         Hashtbl.find_opt aliases_by_agent agent_name
-         |> Option.value ~default:[ agent_name ]
-         |> List.rev
-         |> Json_util.dedupe_keep_order
-         |> List.rev
-       in
-       { agent_name; aliases })
+  let rec collect credential_paths = function
+    | [] ->
+      Ok
+        { aliases
+        ; credential_paths = List.sort_uniq String.compare credential_paths
+        }
+    | alias :: rest ->
+      let alias_path = Auth.credential_file config.Workspace.base_path alias in
+      (match lstat_path alias_path with
+       | Error _ as error -> error
+       | Ok None -> collect credential_paths rest
+       | Ok (Some _) ->
+         let loaded =
+           try Ok (Auth.load_credential config.base_path alias) with
+           | Eio.Cancel.Cancelled _ as exn -> raise exn
+           | exn -> Error (path_error "credential read" alias_path exn)
+         in
+         (match loaded with
+          | Error _ as error -> error
+          | Ok None ->
+            Error
+              (Printf.sprintf
+                 "credential artifact is present but unreadable: owner=%s path=%s"
+                 alias
+                 alias_path)
+          | Ok (Some credential) when owner_matches credential ->
+            let credential_paths =
+              match credential.id with
+              | None -> alias_path :: credential_paths
+              | Some credential_id ->
+                Auth.credential_file
+                  config.base_path
+                  (Masc_domain.Credential_id.to_string credential_id)
+                :: alias_path
+                :: credential_paths
+            in
+            collect credential_paths rest
+          | Ok (Some credential) ->
+            Error
+              (Printf.sprintf
+                 "credential artifact owner mismatch: requested=%s persisted=%s path=%s"
+                 alias
+                 credential.agent_name
+                 alias_path)))
+  in
+  collect [] aliases
+;;
+
+let delete_credentials config ({ aliases; credential_paths } : credential_plan) =
+  let rec delete_aliases = function
+    | [] -> remove_paths_strict credential_paths
+    | alias :: rest ->
+      (try
+         Auth.delete_credential config.Workspace.base_path alias;
+         delete_aliases rest
+       with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn ->
+         Error
+           (Printf.sprintf
+              "credential deletion failed for exact owner %s: %s"
+              alias
+              (Printexc.to_string exn)))
+  in
+  delete_aliases aliases
+;;
+
+let unbind_exact_workspace_agents config aliases =
+  try
+    let state = Workspace.read_state config in
+    let unbound =
+      List.filter
+        (fun alias -> List.exists (String.equal alias) state.active_agents)
+        aliases
+    in
+    if unbound <> []
+    then
+      ignore
+        (Workspace.update_state config (fun current ->
+           { current with
+             active_agents =
+               List.filter
+                 (fun active -> not (List.exists (String.equal active) aliases))
+                 current.active_agents
+           }));
+    Ok unbound
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Error
+      (Printf.sprintf
+         "exact workspace agent unbind failed for [%s]: %s"
+         (String.concat "," aliases)
+         (Printexc.to_string exn))
 ;;
 
 let purge_agent_filesystem_artifacts config agent_names =
-  agent_names
-  |> resolve_agent_purge_targets config
-  |> List.fold_left
-       (fun acc { agent_name; aliases } ->
-         match acc with
-         | Error _ -> acc
-         | Ok results -> (
-           match sum_pending_confirm_removals config ~target_type:"agent" aliases with
-           | Error msg -> Error msg
-           | Ok pending_confirms_removed ->
-             let heartbeats_stopped = Heartbeat.stop_by_agent ~agent_name in
-             let workspace_unbind_result =
-               Workspace.end_session ~stop_heartbeats:false config ~agent_name
-             in
-             let aliases_label = String.concat "," aliases in
-             Log.Misc.info
-               "[agent_purge] cleanup agent=%s aliases=%s pending_confirms_removed=%d heartbeats_stopped=%d workspace_unbind=%S"
-               agent_name aliases_label pending_confirms_removed heartbeats_stopped
-               workspace_unbind_result;
-             aliases
-             |> List.iter (fun alias ->
-                  remove_path_if_exists ~context:"agent_purge"
-                    (agent_file_path config alias);
-                  remove_path_if_exists ~context:"agent_purge"
-                    (Metrics_store_eio.agent_metrics_dir config alias);
-                  Tool_shard.remove_agent_shards alias;
-                  credential_aliases alias
-                  |> List.iter (Auth.delete_credential config.base_path));
-             Ok
-               ({ agent_name
-                ; pending_confirms_removed
-                ; heartbeats_stopped
-                ; workspace_unbind_result
-                }
-                :: results)))
-       (Ok [])
-  |> Result.map List.rev
+  match exact_agent_aliases agent_names with
+  | Error _ as error -> error
+  | Ok aliases ->
+    (match credential_plan config aliases with
+     | Error _ as error -> error
+     | Ok credential_plan ->
+       (match unbind_exact_workspace_agents config aliases with
+        | Error _ as error -> error
+        | Ok unbound ->
+          let cleanup_results =
+            List.map
+              (fun agent_name ->
+                 let heartbeats_stopped = Heartbeat.stop_by_agent ~agent_name in
+                 Tool_shard.remove_agent_shards agent_name;
+                 { agent_name
+                 ; heartbeats_stopped
+                 ; workspace_unbound =
+                     List.exists (String.equal agent_name) unbound
+                 })
+              aliases
+          in
+          let filesystem_paths =
+            aliases
+            |> List.concat_map (fun alias ->
+                 [ agent_file_path config alias
+                 ; Metrics_store_eio.agent_metrics_dir config alias
+                 ])
+            |> List.sort_uniq String.compare
+          in
+          (match remove_paths_strict filesystem_paths with
+           | Error _ as error -> error
+           | Ok () ->
+             (match delete_credentials config credential_plan with
+              | Error _ as error -> error
+              | Ok () ->
+                List.iter
+                  (fun result ->
+                     Log.Misc.info
+                       "[agent_purge] exact owner=%s heartbeats_stopped=%d workspace_unbound=%b"
+                       result.agent_name
+                       result.heartbeats_stopped
+                       result.workspace_unbound)
+                  cleanup_results;
+                Ok cleanup_results))))
 ;;
 
-let purge_keeper_artifacts config requested_name
-    ({ keeper_name; agent_name; trace_id; toml_path } : keeper_purge_target) =
-  let keeper_dir = Keeper_fs.keeper_dir config in
-  let keeper_runtime_dir = Filename.concat keeper_dir keeper_name in
-  let cleanup_names =
-    [ requested_name; keeper_name; agent_name ]
-    |> List.filter_map String_util.trim_to_option
-    |> Json_util.dedupe_keep_order
-  in
-  cleanup_names
-  |> List.iter (fun name ->
-       Keeper_keepalive.stop_keepalive ~base_path:config.base_path name);
-  match
-    Operator_pending_confirm.remove_pending_confirms_by_target
-      config
-      ~target_type:"keeper"
-      ~target_id:(Some keeper_name)
-  with
-  | Error msg ->
-    Error
-      (Printf.sprintf
-         "pending-confirm cleanup failed for keeper %s: %s"
-         keeper_name
-         msg)
-  | Ok keeper_pending_confirms_removed ->
-  Log.Misc.info
-    "[keeper_purge] cleanup keeper=%s pending_confirms_removed=%d"
-    keeper_name keeper_pending_confirms_removed;
-  Keeper_registry.unregister ~base_path:config.base_path keeper_name;
-  (match purge_agent_filesystem_artifacts config [ agent_name; keeper_name ] with
-   | Error _ as err -> err
-   | Ok agent_cleanup_results ->
-  List.iter
-    (remove_path_if_exists ~context:"keeper_purge")
-    [
-      Keeper_types_profile.keeper_meta_path config keeper_name;
-      Keeper_types_support.keeper_metrics_path config keeper_name;
-      Keeper_types_support.keeper_memory_bank_path config keeper_name;
-      Keeper_types_support.keeper_generation_index_path config keeper_name;
-      Keeper_types_support.keeper_policy_log_path config keeper_name;
-      Keeper_types_support.keeper_decision_log_path config keeper_name;
-      Keeper_types_support.keeper_feedback_log_path config keeper_name;
-      Keeper_types_support.keeper_dataset_export_path config keeper_name;
-    ];
-  remove_path_if_exists ~context:"keeper_purge" keeper_runtime_dir;
-  Option.iter
-    (fun keeper_trace_id ->
-       remove_path_if_exists ~context:"keeper_purge"
-         (Keeper_types_support.keeper_session_dir config keeper_trace_id))
-    trace_id;
-  Option.iter (remove_path_if_exists ~context:"keeper_purge") toml_path;
-  Ok { keeper_pending_confirms_removed; agent_cleanup_results })
+let keeper_artifact_path config keeper_name artifact =
+  let open Keeper_shutdown_types in
+  match artifact with
+  | Keeper_metrics_artifact ->
+    Some (Keeper_types_support.keeper_metrics_path config keeper_name)
+  | Keeper_memory_bank_artifact ->
+    Some (Keeper_types_support.keeper_memory_bank_path config keeper_name)
+  | Keeper_generation_index_artifact ->
+    Some (Keeper_types_support.keeper_generation_index_path config keeper_name)
+  | Keeper_policy_log_artifact ->
+    Some (Keeper_types_support.keeper_policy_log_path config keeper_name)
+  | Keeper_decision_log_artifact ->
+    Some (Keeper_types_support.keeper_decision_log_path config keeper_name)
+  | Keeper_feedback_log_artifact ->
+    Some (Keeper_types_support.keeper_feedback_log_path config keeper_name)
+  | Keeper_dataset_export_artifact ->
+    Some (Keeper_types_support.keeper_dataset_export_path config keeper_name)
+  | Keeper_runtime_directory_artifact ->
+    Some (Filename.concat (Keeper_fs.keeper_dir config) keeper_name)
+  | Keeper_configuration_artifact ->
+    Some
+      (Filename.concat
+         (Config_dir_resolver.keepers_dir_for_base_path
+            ~base_path:config.Workspace.base_path)
+         (keeper_name ^ ".toml"))
+  | Agent_artifact_bundle _ -> None
+;;
+
+let purge_dashboard_keeper_artifacts config operation =
+  let open Keeper_shutdown_types in
+  match operation.Keeper_shutdown_types.cleanup_intent.reason with
+  | Dashboard_keeper_purge context ->
+    let artifacts =
+      Keeper_shutdown_types.dashboard_purge_artifact_plan
+        ~keeper_name:operation.keeper_name
+        context
+    in
+    let rec remove = function
+      | [] -> Ok ()
+      | Agent_artifact_bundle aliases :: rest ->
+        (match purge_agent_filesystem_artifacts config aliases with
+         | Error _ as error -> error
+         | Ok _ -> remove rest)
+      | artifact :: rest ->
+        (match keeper_artifact_path config operation.keeper_name artifact with
+         | None ->
+           Error "dashboard Keeper purge artifact plan lost its typed projection"
+         | Some path ->
+           (match remove_path_strict path with
+            | Error _ as error -> error
+            | Ok outcome ->
+              (match artifact with
+               | Keeper_runtime_directory_artifact ->
+                 Keeper_fs.invalidate_dir path
+               | Keeper_metrics_artifact
+               | Keeper_memory_bank_artifact
+               | Keeper_generation_index_artifact
+               | Keeper_policy_log_artifact
+               | Keeper_decision_log_artifact
+               | Keeper_feedback_log_artifact
+               | Keeper_dataset_export_artifact
+               | Keeper_configuration_artifact
+               | Agent_artifact_bundle _ -> ());
+              Log.Keeper.debug
+                "dashboard Keeper purge artifact: keeper=%s path=%s outcome=%s"
+                operation.keeper_name
+                path
+                (match outcome with
+                 | Path_absent -> "absent"
+                 | Path_removed -> "removed");
+              remove rest))
+    in
+    remove artifacts
+  | Operator_stop_retain_meta
+  | Operator_stop_remove_meta
+  | Dead_tombstone_cleanup
+  | Stale_paused_prune _ ->
+    Error "dashboard Keeper purge artifacts require a dashboard purge operation"
+;;
+
+let handle_dashboard_keeper_purge_completion config operation =
+  match Masc_event_bus.get () with
+  | None -> Error "MASC lifecycle event bus is not installed"
+  | Some _ ->
+    (match operation.Keeper_shutdown_types.cleanup_intent.reason with
+     | Keeper_shutdown_types.Dashboard_keeper_purge context ->
+       (match purge_dashboard_keeper_artifacts config operation with
+        | Error _ as error -> error
+        | Ok () ->
+          let operation_id =
+            Keeper_shutdown_types.Operation_id.to_string operation.operation_id
+          in
+          Keeper_supervisor_publish_lifecycle.publish_lifecycle
+            ~event:
+              (Keeper_lifecycle_events.Custom_event
+                 { verb = Keeper_lifecycle_events.Purged; phase = None })
+            operation.keeper_name
+            (Printf.sprintf
+               "requested_name=%s agent_name=%s shutdown_operation=%s"
+               context.requested_name
+               context.agent_name
+               operation_id)
+            ();
+          Log.Keeper.info
+            "dashboard Keeper purge completion delivered: keeper=%s operation=%s"
+            operation.keeper_name
+            operation_id;
+          Ok ())
+     | Operator_stop_retain_meta
+     | Operator_stop_remove_meta
+     | Dead_tombstone_cleanup
+     | Stale_paused_prune _ ->
+       Error "dashboard purge completion does not belong to a dashboard purge operation")
+;;
+
+let handle_keeper_lifecycle_completion config operation = function
+  | Keeper_shutdown_types.Dashboard_keeper_purged ->
+    handle_dashboard_keeper_purge_completion config operation
+  | Dead_tombstone_reaped
+  | Paused_meta_pruned as action ->
+    Keeper_supervisor_cleanup_tombstone.handle_completion config operation action
+;;
+
+let keeper_purge_resolve_status = function
+  | Keeper_dashboard_purge.Empty_requested_name -> `Bad_request
+  | Invalid_requested_name _ -> `Bad_request
+  | Keeper_metadata_unreadable _ -> `Internal_server_error
+  | Keeper_metadata_required _
+  | Keeper_metadata_name_mismatch _
+  | Keeper_agent_name_invalid _ -> `Conflict
+  | Keeper_operation_unreadable _ -> `Internal_server_error
+;;
+
+let keeper_purge_submit_status = function
+  | Keeper_shutdown_runtime.Worker_start_error _ -> `Service_unavailable
+  | Existing_operation_load_error _ -> `Internal_server_error
+  | Prepare_error _
+  | Existing_operation_lane_mismatch _
+  | Existing_operation_intent_mismatch _ -> `Conflict
+;;
+
+module For_testing = struct
+  let purge_dashboard_keeper_artifacts = purge_dashboard_keeper_artifacts
+end
+
+let respond_keeper_purge_operation_accepted ~request reqd operation =
+  match operation.Keeper_shutdown_types.cleanup_intent.reason with
+  | Keeper_shutdown_types.Dashboard_keeper_purge context ->
+    Http.Response.json_value
+      ~status:`Accepted
+      ~compress:true
+      ~request
+      (`Assoc
+         [ ("ok", `Bool true)
+         ; ("accepted", `Bool true)
+         ; ("target_kind", `String "keeper")
+         ; ("agent_name", `String context.agent_name)
+         ; ("keeper_name", `String operation.keeper_name)
+         ; ( "operation_id"
+           , `String
+               (Keeper_shutdown_types.Operation_id.to_string
+                  operation.operation_id) )
+         ])
+      reqd
+  | Operator_stop_retain_meta
+  | Operator_stop_remove_meta
+  | Dead_tombstone_cleanup
+  | Stale_paused_prune _ ->
+    respond_error
+      ~status:`Internal_server_error
+      ~request
+      reqd
+      "dashboard purge acceptance received a non-dashboard lifecycle operation"
 ;;
 
 let add_delete_action_routes router =
@@ -483,7 +672,7 @@ let add_delete_action_routes router =
 
   |> Http.Router.post "/api/v1/dashboard/agents/purge" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun state _agent_name req reqd ->
+         (fun state actor req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let json = Yojson.Safe.from_string body_str in
@@ -492,62 +681,84 @@ let add_delete_action_routes router =
                respond_error ~request:req reqd (invalid_request "agent_name")
              | Some requested_name ->
                let config = (Mcp_server.workspace_config state) in
-               (match resolve_keeper_purge_target config requested_name with
-                | Some keeper_target ->
-                  let toml_deleted = Option.is_some keeper_target.toml_path in
-                  (match purge_keeper_artifacts config requested_name keeper_target with
-                   | Error msg ->
+               (match
+                  Keeper_dashboard_purge.existing_operation
+                    config
+                    requested_name
+                with
+                | Error error ->
+                  respond_error
+                    ~status:(keeper_purge_resolve_status error)
+                    ~request:req
+                    reqd
+                    (Keeper_dashboard_purge.resolve_error_to_string error)
+                | Ok (Some operation) ->
+                  respond_keeper_purge_operation_accepted
+                    ~request:req
+                    reqd
+                    operation
+                | Ok None ->
+                  (match Keeper_dashboard_purge.resolve config requested_name with
+                  | Error error ->
+                    respond_error
+                      ~status:(keeper_purge_resolve_status error)
+                      ~request:req
+                      reqd
+                      (Keeper_dashboard_purge.resolve_error_to_string error)
+                  | Ok (Some keeper_target) ->
+                  (match
+                     Keeper_dashboard_purge.submit
+                       ~config
+                       ~actor
+                       keeper_target
+                   with
+                   | Error error ->
                      respond_error
-                       ~status:`Internal_server_error
+                       ~status:(keeper_purge_submit_status error)
                        ~request:req
                        reqd
-                       msg
-                   | Ok purge_result ->
-                  Http.Response.json_value ~compress:true ~request:req
-                    (`Assoc
-                       [
-                         ("ok", `Bool true);
-                         ("target_kind", `String "keeper");
-                         ("agent_name", `String keeper_target.agent_name);
-                         ("keeper_name", `String keeper_target.keeper_name);
-                         ("removed_keeper_toml", `Bool toml_deleted);
-                         ( "keeper_pending_confirms_removed",
-                           `Int purge_result.keeper_pending_confirms_removed );
-                         ( "cleanup_results",
-                           `List
-                             (List.map agent_purge_cleanup_result_to_json
-                                purge_result.agent_cleanup_results) );
-                       ])
-                    reqd)
-                | None -> (
-                  match resolve_plain_agent_target config requested_name with
-                  | Some agent_name ->
-                    (match
-                       purge_agent_filesystem_artifacts config
-                         [ requested_name; agent_name ]
-                     with
-                     | Error msg ->
-                       respond_error
-                         ~status:`Internal_server_error
-                         ~request:req
-                         reqd
-                         msg
-                     | Ok cleanup_results ->
-                    Http.Response.json_value ~compress:true ~request:req
-                      (`Assoc
-                         [
-                           ("ok", `Bool true);
-                           ("target_kind", `String "agent");
-                           ("agent_name", `String agent_name);
-                           ( "cleanup_results",
-                             `List
-                               (List.map agent_purge_cleanup_result_to_json
-                                  cleanup_results) );
-                         ])
-                      reqd)
-                  | None ->
-                    respond_error ~status:`Not_found ~request:req reqd
-                      "agent or keeper not found"))
+                       (Keeper_shutdown_runtime.submit_error_to_string error)
+                   | Ok operation ->
+                     respond_keeper_purge_operation_accepted
+                       ~request:req
+                       reqd
+                       operation)
+                  | Ok None ->
+                    (match resolve_plain_agent_target config requested_name with
+                    | Error error ->
+                      respond_error
+                        ~status:(plain_agent_resolve_status error)
+                        ~request:req
+                        reqd
+                        (plain_agent_resolve_error_to_string error)
+                    | Ok (Some agent_name) ->
+                      (match
+                         purge_agent_filesystem_artifacts config
+                           [ agent_name ]
+                       with
+                       | Error msg ->
+                         respond_error
+                           ~status:`Internal_server_error
+                           ~request:req
+                           reqd
+                           msg
+                       | Ok cleanup_results ->
+                      Http.Response.json_value ~compress:true ~request:req
+                        (`Assoc
+                           [
+                             ("ok", `Bool true);
+                             ("accepted", `Bool false);
+                             ("target_kind", `String "agent");
+                             ("agent_name", `String agent_name);
+                             ( "cleanup_results",
+                               `List
+                                 (List.map agent_purge_cleanup_result_to_json
+                                    cleanup_results) );
+                           ])
+                        reqd)
+                    | Ok None ->
+                      respond_error ~status:`Not_found ~request:req reqd
+                        "agent or keeper not found")))
            with Yojson.Json_error _ ->
              respond_error ~request:req reqd (invalid_request "agent_name")
          )

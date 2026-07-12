@@ -127,6 +127,7 @@ let classify_provider_error = function
   | Llm_provider.Error.HardQuota _
   | Llm_provider.Error.CapacityExhausted _
   | Llm_provider.Error.AuthError _
+  | Llm_provider.Error.AuthorizationError _
   | Llm_provider.Error.ServerError _
   | Llm_provider.Error.NetworkError _
   | Llm_provider.Error.InvalidRequest _
@@ -145,8 +146,8 @@ let classify_sdk_error (err : Agent_sdk.Error.sdk_error) : t =
      | Agent_sdk.Error.Provider provider_error ->
        classify_provider_error provider_error
      | Agent_sdk.Error.Api (NetworkError _ | Overloaded _ | ServerError _
-       | RateLimited _ | AuthError _ | PaymentRequired _ | InvalidRequest _ | NotFound _
-       | ContextOverflow _)
+       | RateLimited _ | AuthError _ | AuthorizationError _ | PaymentRequired _
+       | InvalidRequest _ | NotFound _ | ContextOverflow _)
      | Agent_sdk.Error.Agent _
      | Agent_sdk.Error.Mcp _
      | Agent_sdk.Error.Config _

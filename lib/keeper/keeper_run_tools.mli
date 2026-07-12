@@ -112,5 +112,6 @@ val prepare_agent_setup
   -> tool_overlay:Agent_sdk.Tool_op.t ref option
   -> ?runtime_manifest_context:Keeper_runtime_manifest.turn_context
   -> ?runtime_manifest_append:(Keeper_runtime_manifest.t -> unit)
+  -> ?continuation_channel:Keeper_continuation_channel.t
   -> unit
   -> (agent_setup, Agent_sdk.Error.sdk_error) result

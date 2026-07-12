@@ -437,6 +437,14 @@ type turn_measurement = {
 
 type done_resolution = [ `Stopped | `Crashed of string ]
 
+type lifecycle_transaction_purpose = Dead_revival
+
+type lifecycle_reservation_snapshot =
+  { owner_id : string
+  ; expected_generation : int
+  ; purpose : lifecycle_transaction_purpose
+  }
+
 type registry_entry = {
   base_path : string;
       (** Canonical workspace identity from
@@ -593,6 +601,7 @@ type done_resolve_result =
     type returned by [validate_registry_entry] and the CAS write helpers. *)
 type registry_entry_health =
   | Healthy
+  | Lifecycle_transaction_reserved of lifecycle_reservation_snapshot
   | Meta_validation_failed of { reason : string }
   | Required_field_missing of { field : string }
   | Base_path_mismatch of { expected : string; actual : string }

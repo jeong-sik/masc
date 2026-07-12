@@ -44,9 +44,8 @@ let publish_lifecycle = Keeper_supervisor_publish_lifecycle.publish_lifecycle
 let publish_phase_lifecycle = Keeper_supervisor_publish_lifecycle.publish_phase_lifecycle
 (* ── Supervised fiber launch ─────────────────────────────── *)
 
-let global_switch : Eio.Switch.t option Atomic.t = Atomic.make None
-let set_global_switch sw = Atomic.set global_switch (Some sw)
-let get_global_switch () = Atomic.get global_switch
+let set_global_switch = Keeper_process_switch.set
+let get_global_switch = Keeper_process_switch.get
 
 let set_restart_launch_noop_for_test = Keeper_supervisor_restart_noop.set
 let restart_launch_noop_enabled_for_test = Keeper_supervisor_restart_noop.enabled
@@ -107,12 +106,9 @@ let launch_supervised_fiber_body
           "keeper supervise domain pool ignored: keepalive body requires the owning \
            Eio domain (first_keeper=%s)"
           meta.name;
-      (* determinism-contract: allow — ctx.sw fallback is the same deterministic
-         default used before the ref -> Atomic conversion. *)
-      let sw = Option.value (Atomic.get global_switch) ~default:ctx.sw in
       match
         Keeper_lane.fork
-          ~sw
+          ~sw:ctx.sw
           reg.lane
           ~run:body
           ~cleanup:(fun _ -> Ok ())
@@ -128,23 +124,78 @@ let launch_supervised_fiber_body
            lane was never forked (mirrors [prepare_fiber_launch]'s rejection
            path). *)
         let detail = Keeper_lane.start_error_to_string error in
-        Keeper_registry.set_failure_reason
-          ~base_path
-          meta.name
-          (Some (Keeper_registry.Exception detail));
-        if
+        let owns_terminal_signal =
           Keeper_registry.resolve_done
             reg
             ~source:"supervisor_lane_start_rejected"
             (`Crashed detail)
           |> done_signal_of_registry_result
           |> should_publish_lifecycle_for_done_signal
-        then
-          publish_phase_lifecycle
-            ~phase:Keeper_state_machine.Crashed
-            meta.name
-            detail
-            ();
+        in
+        if owns_terminal_signal
+        then (
+          let _failure_reason_recorded =
+            Keeper_registry.set_failure_reason_exact
+              reg
+              (Some (Keeper_registry.Exception detail))
+            |> Keeper_registry.exact_update_succeeded
+                 reg
+                 ~site:"supervisor_lane_start_rejected.failure_reason"
+          in
+          let terminalized =
+            match
+              Keeper_registry.dispatch_event_exact
+                reg
+                (Keeper_state_machine.Fiber_terminated
+                   { outcome = detail; provider_id = None; http_status = None })
+            with
+            | Ok _ -> true
+            | Error transition_error ->
+              Otel_metric_store.inc_counter
+                Keeper_metrics.(to_string DispatchEventFailures)
+                ~labels:[ "keeper", meta.name; "event", "fiber_terminated" ]
+                ();
+              Log.Keeper.warn
+                "supervisor: exact-lane fork-rejection terminalization failed: %s"
+                (Keeper_state_machine.transition_error_to_string transition_error);
+              false
+          in
+          let _crash_recorded =
+            Keeper_registry.record_crash_exact
+              reg
+              (Time_compat.now ())
+              detail
+            |> Keeper_registry.exact_update_succeeded
+                 reg
+                 ~site:"supervisor_lane_start_rejected.crash_log"
+          in
+          Keeper_registry_error_recording.record_exact reg detail;
+          if terminalized
+          then
+            publish_phase_lifecycle
+              ~phase:Keeper_state_machine.Crashed
+              meta.name
+              detail
+              ()
+          else
+            match Keeper_registry.unregister_exact reg with
+            | Keeper_registry.Exact_unregistered ->
+              Log.Keeper.error
+                "supervisor: removed non-terminalizable fork-rejected lane name=%s"
+                meta.name
+            | Keeper_registry.Exact_entry_missing ->
+              Log.Keeper.warn
+                "supervisor: fork-rejected lane was already unregistered name=%s"
+                meta.name
+            | Keeper_registry.Exact_entry_replaced ->
+              Log.Keeper.warn
+                "supervisor: fork-rejected lane retained newer same-name owner name=%s"
+                meta.name
+            | Keeper_registry.Exact_unregister_lifecycle_reserved owner ->
+              Log.Keeper.info
+                "supervisor: fork-rejected lane cleanup deferred to lifecycle transaction owner name=%s %s"
+                meta.name
+                (Keeper_lifecycle_reservation.snapshot_to_string owner));
         Error
           (Keeper_state_machine.Precondition_violation
              { event = "supervisor_lane_fork"; reason = detail })
@@ -748,14 +799,10 @@ let reconcile_keepalive_keepers ~load_or_materialize_keeper_meta (ctx : _ contex
     ctx
 ;;
 
-(* Dead-tombstone cleanup extracted to
-   [Keeper_supervisor_cleanup_tombstone] (godfile decomp). publish_lifecycle is
-   injected explicitly to avoid sibling -> parent cycle. *)
+(* Dead-tombstone cleanup submits a durable exact-lane finalization operation;
+   completion events/hooks are delivered from its durable receipt. *)
 let cleanup_dead_tombstone (ctx : _ context) (entry : Keeper_registry.registry_entry) =
-  Keeper_supervisor_cleanup_tombstone.cleanup_dead_tombstone
-    ~publish_lifecycle
-    ctx
-    entry
+  Keeper_supervisor_cleanup_tombstone.cleanup_dead_tombstone ctx entry
 ;;
 
 (** Cohort key from structured failure_reason ADT.

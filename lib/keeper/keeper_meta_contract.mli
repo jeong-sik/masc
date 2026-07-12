@@ -169,6 +169,7 @@ type blocker_class =
   | Sdk_tripwire_violation
   | Sdk_exit_condition_met
   | Sdk_input_required
+  | Sdk_tool_failure_recovery_failed
 
 val blocker_class_to_string : blocker_class -> string
 (** Canonical lowercase labels.  Pinned literals — operator

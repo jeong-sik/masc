@@ -194,12 +194,6 @@ module Keeper_mid_turn_progress : sig
       thinking turn. RFC-0012 recommends [300.0] when enabling. *)
 end
 
-(** {1 Slot scheduling} *)
-
-module Slot : sig
-  val yield_enabled : unit -> bool
-end
-
 (** {1 Board persistence} *)
 
 module Board : sig

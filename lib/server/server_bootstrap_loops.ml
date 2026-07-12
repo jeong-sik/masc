@@ -230,8 +230,9 @@ let connector_user_line_recorded_upstream_of_source
   (* RFC-connector-deferred-reply-via-chat-queue §3.4: connector sources (Discord/Slack) had their user
      line recorded at the gate inbound boundary before the message was
      enqueued, so the turn records the assistant reply only and does not
-     re-write the user line. Dashboard-source queue messages have no
-     upstream recorder, so the turn records both sides. *)
+     re-write the user line. Dashboard ownership is resolved later from exact
+     direct-request handoff journals, allowing legacy receipts to append their
+     missing user row without duplicating current receipts. *)
   match source with
   | Keeper_chat_queue.Discord _ | Keeper_chat_queue.Slack _ -> true
   | Keeper_chat_queue.Dashboard -> false
@@ -295,6 +296,29 @@ let start_keeper_loops
   Atomic.set Workspace_hooks.stop_keeper_fn Keeper_keepalive.stop_keepalive;
   Atomic.set Workspace_hooks.runtime_agents_fn keeper_registry_runtime_agents;
   let base_path = (Mcp_server.workspace_config state).base_path in
+  let delivery_recovery =
+    Keeper_chat_delivery_journal.recover_all
+      ~base_path
+      ~now:(Time_compat.now ())
+  in
+  List.iter
+    (fun (failure : Keeper_chat_delivery_journal.recovery_failure) ->
+       Log.Keeper.error
+         "keeper_chat_delivery_journal: recovery failed keeper=%s delivery_ref=%s error=%s"
+         failure.keeper_name
+         failure.delivery_ref
+         (Keeper_chat_delivery_journal.error_to_string failure.error))
+    delivery_recovery.failures;
+  if delivery_recovery.recovered > 0 || delivery_recovery.failures <> []
+  then
+    Log.Keeper.warn
+      "keeper_chat_delivery_journal: recovery completed recovered=%d already_final=%d failures=%d"
+      delivery_recovery.recovered
+      delivery_recovery.already_final
+      (List.length delivery_recovery.failures);
+  (* Request status is recovered only after transcript journals converge: a
+     poller must never observe a final Lost status while its durable terminal
+     row is still absent. *)
   let recovered_keeper_msg_requests =
     Keeper_msg_async.recover_lost_disk_records ~base_path
   in
@@ -324,79 +348,12 @@ let start_keeper_loops
   in
   let shutdown_inventory_p, shutdown_inventory_r = Eio.Promise.create () in
   let config = Mcp_server.workspace_config state in
-  fork_subsystem "keeper_shutdown_recovery" (fun () ->
-    let operation_requires_fence operation =
-      match operation.Keeper_shutdown_types.phase with
-      | Keeper_shutdown_types.Finalized _ -> false
-      | Keeper_shutdown_types.Prepared
-      | Keeper_shutdown_types.Joined_idle
-      | Keeper_shutdown_types.Finalizing_tasks _
-      | Keeper_shutdown_types.Cleanup_ready _
-      | Keeper_shutdown_types.Reconciliation_required _
-      | Keeper_shutdown_types.Blocked _ -> true
-    in
-    let inventory =
-      match Keeper_shutdown_store.list_all ~config with
-      | Error error -> Error (Keeper_shutdown_store.error_to_string error)
-      | Ok operations ->
-        List.fold_left
-          (fun restored operation ->
-             match restored with
-             | Error _ as error -> error
-             | Ok () when not (operation_requires_fence operation) -> Ok ()
-             | Ok () ->
-               (match
-                  Keeper_turn_admission.restore_shutdown
-                    ~base_path:config.base_path
-                    ~keeper_name:operation.keeper_name
-                    ~operation_id:operation.operation_id
-                with
-                | Keeper_turn_admission.Shutdown_restored
-                | Keeper_turn_admission.Shutdown_already_restored -> Ok ()
-                | Keeper_turn_admission.Shutdown_restore_conflict existing ->
-                  Error
-                    (Printf.sprintf
-                       "shutdown admission restore conflict: keeper=%s durable=%s existing=%s"
-                       operation.keeper_name
-                       (Keeper_shutdown_types.Operation_id.to_string
-                          operation.operation_id)
-                       (Keeper_shutdown_types.Operation_id.to_string existing))))
-          (Ok ())
-          operations
-        |> Result.map (fun () -> operations)
-    in
-    Eio.Promise.resolve shutdown_inventory_r inventory;
-    match inventory with
-    | Error detail ->
-      Log.Keeper.error "shutdown recovery inventory failed: %s" detail;
-      failwith detail
-    | Ok operations ->
-      Eio.Switch.run (fun recovery_sw ->
-        List.iter
-          (fun operation ->
-             Eio.Fiber.fork ~sw:recovery_sw (fun () ->
-               try
-                 match Keeper_shutdown_runtime.recover_operation ~config operation with
-                 | Ok recovered ->
-                   Log.Keeper.info
-                     "recovered shutdown operation keeper=%s operation=%s"
-                     recovered.Keeper_shutdown_types.keeper_name
-                     (Keeper_shutdown_types.Operation_id.to_string recovered.operation_id)
-                 | Error detail ->
-                   Log.Keeper.error
-                     "shutdown recovery failed keeper=%s operation=%s error=%s"
-                     operation.Keeper_shutdown_types.keeper_name
-                     (Keeper_shutdown_types.Operation_id.to_string operation.operation_id)
-                     detail
-               with
-               | Eio.Cancel.Cancelled _ as exn -> raise exn
-               | exn ->
-                 Log.Keeper.error
-                   "shutdown recovery crashed keeper=%s operation=%s error=%s"
-                   operation.Keeper_shutdown_types.keeper_name
-                   (Keeper_shutdown_types.Operation_id.to_string operation.operation_id)
-                   (Printexc.to_string exn)))
-          operations));
+  (* Completion recovery can publish [Dead_cleaned] and invoke
+     [Tombstone_reaped]. Install the production hook before any durable
+     receipt is replayed. *)
+  Keeper_subprocess_registry.register_default_cleanup_hook ();
+  Keeper_shutdown_finalize.register_completion_handler
+    Server_dashboard_http_delete_actions.handle_keeper_lifecycle_completion;
   let wait_for_lazy_startup () =
     (* Combines #10843 (per-task elapsed diagnostic, merged via #10854) with
        a per-task boot guard.  The diagnostic surface stays as #10854
@@ -545,6 +502,58 @@ let start_keeper_loops
   in
   Eio.Switch.on_release sw (fun () ->
     Agent_sdk_metrics_bridge.unsubscribe masc_event_bus keeper_lifecycle_sub);
+  (* Replay durable completion receipts only after the MASC event bus has its
+     SSE/metrics subscribers and lifecycle hooks are installed. Otherwise a
+     boot-time [Dead_cleaned] publish can return successfully while every
+     process-local sink is still absent. *)
+  fork_subsystem "keeper_shutdown_recovery" (fun () ->
+    let inventory =
+      match Keeper_shutdown_store.scan_inventory ~config with
+      | Error error -> Error (Keeper_shutdown_store.error_to_string error)
+      | Ok entries ->
+        Keeper_shutdown_runtime.restore_inventory_admission ~config entries
+    in
+    Eio.Promise.resolve shutdown_inventory_r inventory;
+    match inventory with
+    | Error detail ->
+      Log.Keeper.error "shutdown recovery inventory failed: %s" detail;
+      failwith detail
+    | Ok restored ->
+      List.iter
+        (fun corrupt ->
+           Log.Keeper.error
+             "corrupt shutdown operation retained under an exact Keeper admission fence: keeper=%s operation=%s path=%s error=%s"
+             corrupt.Keeper_shutdown_store.keeper_name
+             (Keeper_shutdown_types.Operation_id.to_string corrupt.operation_id)
+             corrupt.path
+             (Keeper_shutdown_store.error_to_string corrupt.error))
+        restored.corrupt_records;
+      Eio.Switch.run (fun recovery_sw ->
+        List.iter
+          (fun operation ->
+             Eio.Fiber.fork ~sw:recovery_sw (fun () ->
+               try
+                 match Keeper_shutdown_runtime.recover_operation ~config operation with
+                 | Ok recovered ->
+                   Log.Keeper.info
+                     "recovered shutdown operation keeper=%s operation=%s"
+                     recovered.Keeper_shutdown_types.keeper_name
+                     (Keeper_shutdown_types.Operation_id.to_string recovered.operation_id)
+                 | Error detail ->
+                   Log.Keeper.error
+                     "shutdown recovery failed keeper=%s operation=%s error=%s"
+                     operation.Keeper_shutdown_types.keeper_name
+                     (Keeper_shutdown_types.Operation_id.to_string operation.operation_id)
+                     detail
+               with
+               | Eio.Cancel.Cancelled _ as exn -> raise exn
+               | exn ->
+                 Log.Keeper.error
+                   "shutdown recovery crashed keeper=%s operation=%s error=%s"
+                   operation.Keeper_shutdown_types.keeper_name
+                   (Keeper_shutdown_types.Operation_id.to_string operation.operation_id)
+                   (Printexc.to_string exn)))
+          restored.operations));
   (* Spawn the OAS bus depth sampler so warnings surface on stdout
      even when no external telemetry backend is attached.
 
@@ -744,10 +753,6 @@ let start_keeper_loops
      Log.Server.error
        "subsystem orchestrator failed to start: %s"
        (Printexc.to_string exn));
-  (* RFC-0036 Phase A.3: register default keeper-lifecycle cleanup hooks
-     once during bootstrap. The call is Atomic-guarded and idempotent so
-     re-bootstrapping (e.g. tests) is safe. *)
-  Keeper_subprocess_registry.register_default_cleanup_hook ();
   (* Build read-only tool surface shared by both judges. *)
   let judge_tool_names =
     [ "masc_status"
@@ -916,19 +921,7 @@ let start_keeper_loops
       let shutdown_blocked_names_result =
         match shutdown_inventory with
         | Error detail -> Error detail
-        | Ok operations ->
-          Ok
-            (operations
-             |> List.filter_map (fun operation ->
-               match operation.Keeper_shutdown_types.phase with
-               | Keeper_shutdown_types.Finalized _ -> None
-               | Keeper_shutdown_types.Prepared
-               | Keeper_shutdown_types.Joined_idle
-               | Keeper_shutdown_types.Finalizing_tasks _
-               | Keeper_shutdown_types.Cleanup_ready _
-               | Keeper_shutdown_types.Reconciliation_required _
-               | Keeper_shutdown_types.Blocked _ -> Some operation.keeper_name)
-             |> List.sort_uniq String.compare)
+        | Ok restored -> Ok restored.Keeper_shutdown_runtime.blocked_keeper_names
       in
       let all_names = Keeper_meta_store.keeper_names config in
       let all_count = List.length all_names in
@@ -1016,7 +1009,21 @@ let start_keeper_loops
                 ; net = state.net
                 }
               in
-              Keeper_keepalive.start_keepalive ~proactive_warmup_sec:warmup ctx m;
+              let launch_outcome =
+                Keeper_keepalive.start_keepalive
+                  ~proactive_warmup_sec:warmup
+                  ctx
+                  m
+              in
+              (match launch_outcome with
+               | Keeper_keepalive.Keepalive_started _
+               | Keeper_keepalive.Keepalive_already_registered _ -> ()
+               | outcome ->
+                 Log.Keeper.warn
+                   "%s: start_keepalive rejected %s: %s"
+                   log_prefix
+                   m.name
+                   (Keeper_keepalive.start_keepalive_outcome_to_string outcome));
               (* start_keepalive registers the keeper synchronously via
                  register_offline and then forks the keepalive fiber.  The
                  fiber flips the registry to running asynchronously on the
@@ -1145,7 +1152,7 @@ let start_keeper_loops
            queue_report.load_errors;
          Keeper_chat_consumer.start ~sw ~clock
            ~base_path
-           ~handle_turn:(fun ~sw ~keeper_name ~queued_message ->
+           ~handle_turn:(fun ~sw ~keeper_name ~delivery_key ~queued_message ->
              let open Server_routes_http_keeper_stream in
              let now = Time_compat.now () in
              let run_id =
@@ -1306,6 +1313,7 @@ let start_keeper_loops
                match
                  process_single_turn ~connector_user_line_recorded_upstream
                    ~queued_turn:true
+                   ~delivery_key:(Some delivery_key)
                    ~state ~clock ~auth_token:None
                    ~thread_id ~continuation_channel ~closed
                    ~client_disconnects:None

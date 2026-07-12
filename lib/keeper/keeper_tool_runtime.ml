@@ -22,6 +22,11 @@ type context =
   ; proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option
   ; net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option
   ; mcp_session_id : string option
+  ; continuation_channel : Keeper_continuation_channel.t option
+    (* RFC-0320: the connector conversation the current turn started from,
+       so async tools (masc_fusion) can route their completion wake back to
+       the originating channel. [None] on non-connector turns and on callers
+       without turn context (OAS handler defaults, tests). *)
   }
 
 let descriptor_for_internal internal_name =
@@ -304,6 +309,7 @@ let handle_in_process ctx descriptor args =
       (Keeper_tool_in_process_runtime.handle_masc_fusion
          ~config:ctx.config
          ~meta:ctx.meta
+         ?continuation_channel:ctx.continuation_channel
          ~args
          ())
   | Tool_masc_fusion_status ->

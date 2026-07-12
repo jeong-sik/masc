@@ -35,13 +35,17 @@ let pause_elapsed_sec now (meta : Keeper_meta_contract.keeper_meta) =
   | Some updated_ts when updated_ts > 0.0 -> Some (max 0.0 (now -. updated_ts))
   | Some _ | None -> None
 
-let pause_kind (meta : Keeper_meta_contract.keeper_meta) =
-  if Keeper_supervisor_types.paused_meta_requires_reconcile_recovery meta then
-    "reconcile_gated"
-  else
-    match Keeper_supervisor_types.paused_meta_effective_auto_resume_after_sec meta with
-    | Some _ -> "auto_recoverable"
-    | None -> "operator_paused"
+type pause_kind = Keeper_activation_readiness.pause_kind =
+  | Active
+  | Reconcile_gated
+  | Auto_recoverable
+  | Operator_paused
+  | Latched_paused
+  | Unclassified_paused
+  | Dead_tombstone
+
+let pause_kind = Keeper_activation_readiness.pause_kind
+let pause_kind_to_wire = Keeper_activation_readiness.pause_kind_to_wire
 
 let pause_auto_resume_source (meta : Keeper_meta_contract.keeper_meta) =
   match meta.auto_resume_after_sec with
@@ -67,7 +71,7 @@ let paused_keeper_detail_json ~now ~name ~(autoboot_enabled : bool)
   `Assoc [
     ("name", `String name);
     ("autoboot_enabled", `Bool autoboot_enabled);
-    ("pause_kind", `String (pause_kind meta));
+    ("pause_kind", `String (pause_kind_to_wire (pause_kind meta)));
     ("auto_resume_after_sec", Json_util.float_opt_to_json effective_auto_resume_after_sec);
     ( "persisted_auto_resume_after_sec"
     , Json_util.float_opt_to_json meta.auto_resume_after_sec );
@@ -1388,8 +1392,17 @@ let keeper_fleet_safety_health_json
   let low_running_fiber_margin =
     target_count > 1 && phase_counts.running < minimum_running_fibers
   in
+  (* Recovering lanes are deliberately capacity-bearing for the fleet verdict:
+     [Failing] remains executable in the FSM, and restart budget marks the lane
+     eligible for heartbeat-driven recovery. Keep that policy in one value so
+     the advertised effective count and its derived shortfall cannot diverge.
+     Actual healthy execution remains available separately as
+     [healthy_running_keeper_fiber_count]. *)
+  let effective_reaction_capacity_count =
+    phase_counts.running + phase_counts.recovering
+  in
   let reaction_capacity_shortfall_count =
-    max 0 (target_count - phase_counts.running - phase_counts.recovering)
+    max 0 (target_count - effective_reaction_capacity_count)
   in
   let reaction_capacity_below_target =
     target_count > 0 && reaction_capacity_shortfall_count > 0
@@ -1534,7 +1547,7 @@ let keeper_fleet_safety_health_json
     ; "executable_keeper_fiber_count", `Int phase_counts.executable
     ; ( "executable_keeper_names"
       , `List (List.map (fun name -> `String name) executable_names) )
-    ; "effective_reaction_capacity_count", `Int phase_counts.running
+    ; "effective_reaction_capacity_count", `Int effective_reaction_capacity_count
     ; "executable_reaction_capacity_count", `Int phase_counts.executable
     ; "target_reaction_capacity_count", `Int target_count
     ; "minimum_running_fibers", `Int minimum_running_fibers

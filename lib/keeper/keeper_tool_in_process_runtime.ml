@@ -469,7 +469,8 @@ let handle_masc_schedule ~(config : Workspace.config) ~(meta : keeper_meta) ~nam
    the server net capability (not turn-scoped) from the same context.  When
    either is unavailable we return an explicit error JSON rather than
    silently dropping the request (CLAUDE.md Silent-Failure avoidance). *)
-let handle_masc_fusion ~(config : Workspace.config) ~(meta : keeper_meta) ~args () =
+let handle_masc_fusion ~(config : Workspace.config) ~(meta : keeper_meta)
+      ?continuation_channel ~args () =
   match Eio_context.get_root_switch_opt (), Eio_context.get_net_opt () with
   | Some sw, Some net ->
     (match Fusion_config_loader.load ~base_path:config.Workspace.base_path with
@@ -486,7 +487,9 @@ let handle_masc_fusion ~(config : Workspace.config) ~(meta : keeper_meta) ~args 
          ~now_unix
          ~run_id
          ~policy
-         ~args)
+         ?continuation_channel
+         ~args
+         ())
   | _ ->
     Yojson.Safe.to_string
       (`Assoc

@@ -38,6 +38,7 @@ val register_offline : base_path:string -> string -> keeper_meta -> registry_ent
 
 type registration_error =
   | Registration_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+  | Registration_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
   | Registration_invalid of registry_entry_validation_error
   | Registration_event_queue_unavailable of
       { keeper_name : string
@@ -53,6 +54,13 @@ val register_offline_if_admitted :
   keeper_meta ->
   (registry_entry, registration_error) result
 
+val register_offline_if_admitted_for_lifecycle :
+  Keeper_lifecycle_reservation.token ->
+  base_path:string ->
+  string ->
+  keeper_meta ->
+  (registry_entry, registration_error) result
+
 (** R-A-6.a — error variant for [register_restarting].
     [Budget_already_exhausted] is returned (not raised — the API is
     Result-based) when the caller attempts to revive a keeper whose
@@ -61,6 +69,7 @@ val register_offline_if_admitted :
 type register_restarting_error =
   | Budget_already_exhausted of { name : string }
   | Restart_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+  | Restart_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
   | Restart_event_queue_unavailable of
       { keeper_name : string
       ; detail : string
@@ -85,6 +94,11 @@ val prepare_fiber_launch :
   base_path:string -> string ->
   (Keeper_state_machine.transition_result, Keeper_state_machine.transition_error) result
 
+val prepare_fiber_launch_for_lifecycle :
+  Keeper_lifecycle_reservation.token ->
+  registry_entry ->
+  (Keeper_state_machine.transition_result, Keeper_state_machine.transition_error) result
+
 (** Unregister a keeper (removes from registry). *)
 val unregister : base_path:string -> string -> unit
 
@@ -92,12 +106,32 @@ type unregister_exact_result =
   | Exact_unregistered
   | Exact_entry_missing
   | Exact_entry_replaced
+  | Exact_unregister_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
 
 (** Remove [entry] only if its typed lane identity still owns the
     [(base_path, name)] key. Immutable registry field updates may replace the
     record value while preserving the same lane; a newer same-name lane has a
     different identity and is retained. *)
 val unregister_exact : registry_entry -> unregister_exact_result
+
+val unregister_exact_for_lifecycle :
+  Keeper_lifecycle_reservation.token ->
+  registry_entry ->
+  unregister_exact_result
+
+type restore_entry_result =
+  | Entry_restored
+  | Entry_restore_occupied of registry_entry
+  | Entry_restore_invalid of registry_entry_validation_error
+  | Entry_restore_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
+
+(** Restore a transaction's original registry snapshot only when the key is
+    still absent and [token] owns the reservation. A newer lane is returned
+    untouched as [Entry_restore_occupied]. *)
+val restore_entry_if_absent_for_lifecycle :
+  Keeper_lifecycle_reservation.token ->
+  registry_entry ->
+  restore_entry_result
 
 (** Look up a keeper by name. *)
 val get : base_path:string -> string -> registry_entry option
@@ -153,6 +187,12 @@ type exact_update_result =
     registry key. CAS conflicts within that lane retry against the latest
     immutable entry; a same-name replacement is never mutated. *)
 val update_entry_exact :
+  registry_entry ->
+  (registry_entry -> registry_entry) ->
+  exact_update_result
+
+val update_entry_exact_for_lifecycle :
+  Keeper_lifecycle_reservation.token ->
   registry_entry ->
   (registry_entry -> registry_entry) ->
   exact_update_result
@@ -371,6 +411,12 @@ val set_last_error_exact : registry_entry -> string -> exact_update_result
 val record_crash_exact :
   registry_entry -> float -> string -> exact_update_result
 
+(** Observe an exact-lane update without discarding why it did not commit.
+    Returns [true] only for [Exact_updated]; all other outcomes are logged with
+    [site], and a newer same-name lane is never mutated. *)
+val exact_update_succeeded :
+  registry_entry -> site:string -> exact_update_result -> bool
+
 (** Set or clear the gRPC close callback. *)
 val set_grpc_close : base_path:string -> string -> (unit -> unit) option -> unit
 
@@ -442,24 +488,36 @@ module For_testing : sig
     bool
 end
 
-(** Set fiber_wakeup for a specific keeper. RFC-0303 Phase 3: the no-progress
-    wake-tombstone gate is removed (retired detector), so a wake always signals
-    the fiber. *)
-val wakeup : base_path:string -> string -> unit
+type wakeup_intent =
+  | Reactive_signal
+  | Scheduled_signal
+  | Goal_signal
+  | Supervisor_resume
+  | Hitl_resolution
+  | Broadcast_signal
 
-type wakeup_running_outcome =
+type wakeup_outcome =
   | Signaled
   | Deferred_unregistered
   | Deferred_not_running of Keeper_state_machine.phase
+  | Deferred_lifecycle of Keeper_lifecycle_admission.autonomous_denial
 
-val wakeup_running : base_path:string -> string -> wakeup_running_outcome
+(** Signal a registered keeper without requiring a Running phase. Lifecycle
+    admission is still mandatory: paused and dead-tombstone lanes are never
+    made runnable by a hint signal. The typed intent is observability data,
+    not a policy bypass. *)
+val wakeup :
+  intent:wakeup_intent -> base_path:string -> string -> wakeup_outcome
+
+val wakeup_running :
+  intent:wakeup_intent -> base_path:string -> string -> wakeup_outcome
 (** Signal a registered Keeper only while its fiber phase is [Running]. The
     typed deferred outcomes let durable event producers distinguish an absent
     or inactive live hint without treating the already-committed payload as a
     delivery failure. *)
 
 (** Set fiber_wakeup for all running keepers. *)
-val wakeup_all : ?base_path:string -> unit -> unit
+val wakeup_all : intent:wakeup_intent -> ?base_path:string -> unit -> unit
 
 (** Fiber-level health based on Promise resolution state.
     Returns Fiber_unknown if the keeper is not registered. *)
@@ -548,6 +606,13 @@ val dispatch_event :
     is recomputed after same-lane CAS conflicts and is rejected before mutating
     a same-name replacement lane. *)
 val dispatch_event_exact :
+  registry_entry ->
+  ?origin:lifecycle_event_origin ->
+  Keeper_state_machine.event ->
+  (Keeper_state_machine.transition_result, Keeper_state_machine.transition_error) result
+
+val dispatch_event_exact_for_lifecycle :
+  Keeper_lifecycle_reservation.token ->
   registry_entry ->
   ?origin:lifecycle_event_origin ->
   Keeper_state_machine.event ->

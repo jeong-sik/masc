@@ -45,6 +45,10 @@ describe('lifecycleEventTone', () => {
     expect(lifecycleEventTone('dead_cleaned')).toBe('bad')
   })
 
+  it('purged returns info', () => {
+    expect(lifecycleEventTone('purged')).toBe('info')
+  })
+
   it('unknown events return info', () => {
     expect(lifecycleEventTone('unknown_event')).toBe('info')
     expect(lifecycleEventTone('')).toBe('info')
@@ -71,6 +75,10 @@ describe('lifecycleEventLabel', () => {
 
   it('maps auto_resumed to Korean label', () => {
     expect(lifecycleEventLabel('auto_resumed')).toBe('자동 재개됨')
+  })
+
+  it('maps purged to Korean label', () => {
+    expect(lifecycleEventLabel('purged')).toBe('완전 삭제됨')
   })
 
   it('falls back to underscore-replaced string for unknown events', () => {

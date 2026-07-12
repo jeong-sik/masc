@@ -22,6 +22,7 @@ type t =
   | PacingShadowEvents
   | PacingShadowNextDueSec
   | FailureRoute
+  | FailureJudgmentOutcome
   | FailureDrivenPause
   | IdleSeconds
   | ContractViolations
@@ -103,6 +104,7 @@ type t =
   | ToolExecuteFailures
   | RolloverFailures
   | LifecycleDispatchRejections
+  | LifecycleTransactions
   | RecordingErrorDedup
   | PausedStatePersistErrors
   | UnexpectedToolPartialTolerance
@@ -280,6 +282,7 @@ let to_string = function
   | PacingShadowEvents -> "masc_keeper_pacing_shadow_events_total"
   | PacingShadowNextDueSec -> "masc_keeper_pacing_shadow_next_due_sec"
   | FailureRoute -> "masc_keeper_failure_route_total"
+  | FailureJudgmentOutcome -> "masc_keeper_failure_judgment_outcome_total"
   | FailureDrivenPause -> "masc_keeper_failure_driven_pause_total"
   | IdleSeconds -> "masc_keeper_idle_seconds"
   | ContractViolations -> "masc_keeper_contract_violations_total"
@@ -367,6 +370,7 @@ let to_string = function
   | ToolExecuteFailures -> "masc_keeper_tool_execute_runtime_failures_total"
   | RolloverFailures -> "masc_keeper_rollover_failures_total"
   | LifecycleDispatchRejections -> "masc_keeper_lifecycle_dispatch_rejections_total"
+  | LifecycleTransactions -> "masc_keeper_lifecycle_transactions_total"
   | RecordingErrorDedup -> "masc_keeper_recording_error_dedup_total"
   | PausedStatePersistErrors -> "masc_keeper_paused_state_persist_errors_total"
   | UnexpectedToolPartialTolerance ->

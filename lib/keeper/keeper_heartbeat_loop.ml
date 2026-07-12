@@ -63,18 +63,31 @@ type heartbeat_event_intake = Stimulus_intake.heartbeat_event_intake = {
   event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
 }
 
+type single_claim_admission = Stimulus_intake.single_claim_admission =
+  | Admit_ready_single
+  | Defer_failure_judgment
+
 type turn_intake_admission =
   | Intake_admitted
+  | Intake_lifecycle_blocked of Keeper_lifecycle_admission.autonomous_denial
   | Intake_pressure_blocked of Keeper_pressure_admission.block
   | Intake_blocking_approval_pending
 
-let classify_turn_intake_admission ~pressure ~blocking_approval_pending =
-  match pressure with
-  | Keeper_pressure_admission.Blocked block -> Intake_pressure_blocked block
-  | Keeper_pressure_admission.Admitted ->
-    if blocking_approval_pending
-    then Intake_blocking_approval_pending
-    else Intake_admitted
+let classify_turn_intake_admission
+      ~lifecycle
+      ~pressure
+      ~blocking_approval_pending
+  =
+  match lifecycle with
+  | Keeper_lifecycle_admission.Autonomous_denied denial ->
+    Intake_lifecycle_blocked denial
+  | Keeper_lifecycle_admission.Autonomous_admitted ->
+    (match pressure with
+     | Keeper_pressure_admission.Blocked block -> Intake_pressure_blocked block
+     | Keeper_pressure_admission.Admitted ->
+       if blocking_approval_pending
+       then Intake_blocking_approval_pending
+       else Intake_admitted)
 ;;
 
 let consume_single_heartbeat_stimulus = Stimulus_intake.consume_single_heartbeat_stimulus
@@ -250,33 +263,48 @@ let record_crashed_cycle_failure ~base_path ~keeper_name exn =
     (if String.equal backtrace "" then "" else "\n" ^ backtrace)
 ;;
 
-let lease_contains_failure_judgment lease =
-  Keeper_registry_event_queue.lease_stimuli lease
-  |> List.exists (fun (stimulus : Keeper_event_queue.stimulus) ->
-    match stimulus.payload with
-    | Keeper_event_queue.Failure_judgment _ -> true
-    | Keeper_event_queue.Board_signal _
-    | Keeper_event_queue.Fusion_completed _
-    | Keeper_event_queue.Bg_completed _
-    | Keeper_event_queue.Schedule_due _
-    | Keeper_event_queue.Bootstrap
-    | Keeper_event_queue.No_progress_recovery
-    | Keeper_event_queue.Connector_attention _
-    | Keeper_event_queue.Hitl_resolved _
-    | Keeper_event_queue.Goal_verification_failed _
-    | Keeper_event_queue.Goal_assigned _
-    | Keeper_event_queue.Goal_stagnation _ ->
-      false)
+let failure_judgment_of_stimuli = function
+  | [ { Keeper_event_queue.payload =
+          Keeper_event_queue.Failure_judgment judgment
+      ; _
+      } ] ->
+    Ok (Some judgment)
+  | stimuli ->
+    if
+      List.exists
+        (fun (stimulus : Keeper_event_queue.stimulus) ->
+           match stimulus.payload with
+           | Keeper_event_queue.Failure_judgment _ -> true
+           | Keeper_event_queue.Board_signal _
+           | Keeper_event_queue.Fusion_completed _
+           | Keeper_event_queue.Bg_completed _
+           | Keeper_event_queue.Schedule_due _
+           | Keeper_event_queue.Bootstrap
+           | Keeper_event_queue.No_progress_recovery
+           | Keeper_event_queue.Connector_attention _
+           | Keeper_event_queue.Hitl_resolved _
+           | Keeper_event_queue.Goal_verification_failed _
+           | Keeper_event_queue.Goal_assigned _
+           | Keeper_event_queue.Goal_stagnation _ ->
+             false)
+        stimuli
+    then Error "failure judgment must be the sole stimulus in its event queue lease"
+    else Ok None
 ;;
 
 let failure_judgment_successor
       ~arrived_at
       (failure : Keeper_unified_turn.turn_failure)
       judgment
+      provenance
       detail
   =
   let payload : Keeper_event_queue.failure_judgment =
-    { fj_runtime_id = failure.runtime_id; fj_judgment = judgment; fj_detail = detail }
+    { fj_runtime_id = failure.runtime_id
+    ; fj_judgment = judgment
+    ; fj_provenance = provenance
+    ; fj_detail = detail
+    }
   in
   { Keeper_event_queue.post_id = Keeper_event_queue.failure_judgment_post_id payload
   ; urgency = Keeper_event_queue.Normal
@@ -285,43 +313,59 @@ let failure_judgment_successor
   }
 ;;
 
-let settlement_of_failure ~settled_at ~lease failure =
-  if lease_contains_failure_judgment lease
-  then
-    Keeper_registry_event_queue.Escalate
-      { reason = Keeper_registry_event_queue.Failure_judgment_failed
-      ; successor = None
-      }
-  else
-    match failure.Keeper_unified_turn.source_lease_disposition with
-    | Keeper_unified_turn.Acknowledge_after_in_turn_handling ->
-      Keeper_registry_event_queue.Ack
-    | Keeper_unified_turn.Follow_failure_route ->
-      (match failure.Keeper_unified_turn.route with
-       | Keeper_runtime_failure_route.Retry_after_pacing _ ->
-         Keeper_registry_event_queue.Requeue
-           Keeper_registry_event_queue.Retry_after_pacing
-       | Keeper_runtime_failure_route.Rotate_now _ ->
-         Keeper_registry_event_queue.Requeue Keeper_registry_event_queue.Rotate_now
-       | Keeper_runtime_failure_route.Escalate_judgment { judgment; detail } ->
-         Keeper_registry_event_queue.Escalate
-           { reason = Keeper_registry_event_queue.Failure_judgment_requested
-           ; successor =
-               Some
-                 (failure_judgment_successor
-                    ~arrived_at:settled_at
-                    failure
-                    judgment
-                    detail)
-           })
+let settlement_of_failure ~settled_at failure =
+  match failure.Keeper_unified_turn.source_lease_disposition with
+  | Keeper_unified_turn.Acknowledge_after_in_turn_handling ->
+    Keeper_registry_event_queue.Ack
+  | Keeper_unified_turn.Follow_failure_route ->
+    (match failure.Keeper_unified_turn.route with
+     | Keeper_runtime_failure_route.Retry_after_pacing _ ->
+       Keeper_registry_event_queue.Requeue
+         Keeper_registry_event_queue.Retry_after_pacing
+     | Keeper_runtime_failure_route.Rotate_now _ ->
+       Keeper_registry_event_queue.Requeue Keeper_registry_event_queue.Rotate_now
+     | Keeper_runtime_failure_route.Escalate_judgment
+         { judgment; provenance; detail } ->
+       Keeper_registry_event_queue.Escalate
+         { reason = Keeper_registry_event_queue.Failure_judgment_requested
+         ; successor =
+             Some
+               (failure_judgment_successor
+                  ~arrived_at:settled_at
+                  failure
+                  judgment
+                  provenance
+                  detail)
+         })
 ;;
 
-let settlement_of_cycle_outcome ~settled_at ~stop_requested ~lease = function
+let settlement_of_cycle_outcome ~settled_at ~stop_requested ~lease:_ = function
   | Some (Cycle.Completed _) -> Keeper_registry_event_queue.Ack
+  | Some (Cycle.Cancelled _) ->
+    Keeper_registry_event_queue.Requeue Keeper_registry_event_queue.Cancelled
+  | Some (Cycle.Skipped _) ->
+    Keeper_registry_event_queue.Requeue
+      Keeper_registry_event_queue.Turn_not_scheduled
   | Some (Cycle.Busy _) ->
     Keeper_registry_event_queue.Requeue Keeper_registry_event_queue.Cycle_busy
   | Some (Cycle.Failed { failure; _ }) ->
-    settlement_of_failure ~settled_at ~lease failure
+    settlement_of_failure ~settled_at failure
+  | Some (Cycle.Judgment_settled { outcome; _ }) ->
+    (match outcome with
+     | Cycle.Judgment_boundary_failed { detail } ->
+       Keeper_registry_event_queue.Escalate
+         { reason =
+             Keeper_registry_event_queue.Failure_judgment_boundary_failed
+               { detail }
+         ; successor = None
+         }
+     | Cycle.Judgment_operator_required { judge_runtime_id; rationale } ->
+       Keeper_registry_event_queue.Escalate
+         { reason =
+             Keeper_registry_event_queue.Failure_judgment_operator_required
+               { judge_runtime_id; rationale }
+         ; successor = None
+         })
   | None ->
     if stop_requested
     then Keeper_registry_event_queue.Requeue Keeper_registry_event_queue.Cancelled
@@ -426,7 +470,13 @@ let run_keepalive_unified_turn
         (* The failed turn already recorded its failure counter.  The queue
            error remains explicit in the log and active durable lease. *)
         ()
-      | Some (Cycle.Completed _ | Cycle.Busy _) | None ->
+      | Some
+          ( Cycle.Completed _
+          | Cycle.Cancelled _
+          | Cycle.Skipped _
+          | Cycle.Busy _
+          | Cycle.Judgment_settled _ )
+      | None ->
         record_crashed_cycle_failure
           ~base_path:ctx.config.base_path
           ~keeper_name:meta_after_triage.name
@@ -481,11 +531,30 @@ let run_keepalive_unified_turn
                 (float_of_int
                    (Keeper_config.keeper_goal_stagnation_threshold_sec ()))
               ()));
+      let single_claim_admission =
+        match
+          Keeper_failure_judge.claim_eligibility
+            ~keeper_name:meta_after_triage.name
+        with
+        | Keeper_failure_judge.Claim_eligible -> Admit_ready_single
+        | Keeper_failure_judge.Claim_deferred_by_runtime_pacing _ ->
+          Defer_failure_judgment
+      in
       let event_intake =
-        heartbeat_event_intake ~ctx ~meta_after_triage ~pending_board_events
+        heartbeat_event_intake
+          ~single_claim_admission
+          ~ctx
+          ~meta_after_triage
+          ~pending_board_events
       in
       consumed_stimuli := event_intake.consumed_stimuli;
       claimed_lease := event_intake.claimed_lease;
+      let failure_judgment =
+        match failure_judgment_of_stimuli event_intake.consumed_stimuli with
+        | Ok judgment -> judgment
+        | Error message -> raise (Event_queue_settlement_failed message)
+      in
+      let judgment_control_turn = Option.is_some failure_judgment in
       (match event_intake.event_queue_claim_error with
        | None -> ()
        | Some message -> record_settlement_failure message);
@@ -501,7 +570,14 @@ let run_keepalive_unified_turn
           ~reactive_wake
           ~event_queue_triggers:event_intake.event_queue_triggers
           ~keeper_resilience_of_name:(fun keeper_name ->
-            if Health.is_healthy ~agent_name:keeper_name then None
+            (* A durable judgment is the typed recovery path for the failure
+               that made this Keeper unhealthy. Reapplying that derived health
+               gate here would make recovery unreachable. Explicit lifecycle
+               gates in [keeper_cycle_decision] remain authoritative. *)
+            if judgment_control_turn
+            then None
+            else if Health.is_healthy ~agent_name:keeper_name
+            then None
             else Some "unhealthy")
             (* RFC-0313 W3: with [pacing.mode = enforce] the scheduler
                consumes failure revisit pacing — the next turn waits until
@@ -511,12 +587,19 @@ let run_keepalive_unified_turn
                per-tick hot path only pays the [Runtime.pacing] toml read
                while a revisit is actually pending. *)
           ~pacing_block_of_name:(fun keeper_name ->
-            match Keeper_pacing_shadow.next_due_remaining ~keeper_name with
-            | None -> None
-            | Some _ as remaining
-              when Keeper_pacing_shadow.pacing_enforced () ->
-              remaining
-            | Some _ -> None)
+            if judgment_control_turn
+            then
+              (* Exact judge-runtime pacing is checked by stimulus intake
+                 before durable claim. Rechecking after claim would recreate
+                 the claim/requeue heartbeat loop. *)
+              None
+            else
+              match Keeper_pacing_shadow.next_due_remaining ~keeper_name with
+              | None -> None
+              | Some _ as remaining
+                when Keeper_pacing_shadow.pacing_enforced () ->
+                remaining
+              | Some _ -> None)
           ~stop
           ~meta:meta_after_triage
           obs
@@ -696,6 +779,20 @@ let run_keepalive_unified_turn
                 | _ -> None)
               !consumed_stimuli
           in
+          (* Non-board intake consumes exactly one stimulus per turn. Project
+             its exact reply route without choosing between wake families or
+             coalescing unrelated connector conversations. Board batches carry
+             no continuation channel and therefore leave this [None]. *)
+          let continuation_delivery_channel =
+            match !consumed_stimuli with
+            | [ { Keeper_event_queue.payload = Hitl_resolved resolution; _ } ]
+              when Keeper_continuation_channel.is_routable resolution.channel ->
+              Some resolution.channel
+            | [ { Keeper_event_queue.payload = Fusion_completed completion; _ } ]
+              when Keeper_continuation_channel.is_routable completion.channel ->
+              Some completion.channel
+            | [] | [ _ ] | _ :: _ :: _ -> None
+          in
           (* #16 (38-bug campaign PR-5): [reactive_wake] tells us this cycle
              was triggered by an external signal rather than the proactive
              cadence tick, but by itself does not say *which* stimulus (or
@@ -718,6 +815,7 @@ let run_keepalive_unified_turn
             run_keeper_cycle
               ?event_bus
               ?hitl_resolution
+              ?continuation_delivery_channel
               ~ctx
               ~meta_after_triage
               ~stop
@@ -725,6 +823,7 @@ let run_keepalive_unified_turn
               ~turn_decision
               ~shared_context
               ~wake
+              ?failure_judgment
               ()
           in
           cycle_outcome_ref := Some cycle_outcome;
@@ -739,12 +838,14 @@ let run_keepalive_unified_turn
          (match !cycle_outcome_ref with
           | Some (Cycle.Failed { failure; _ }) ->
             (match failure.Keeper_unified_turn.route with
-             | Keeper_runtime_failure_route.Escalate_judgment { judgment; detail } ->
+             | Keeper_runtime_failure_route.Escalate_judgment
+                 { judgment; provenance; detail } ->
                let successor =
                  failure_judgment_successor
                    ~arrived_at:(Time_compat.now ())
                    failure
                    judgment
+                   provenance
                    detail
                in
                (match
@@ -763,7 +864,16 @@ let run_keepalive_unified_turn
              | Keeper_runtime_failure_route.Retry_after_pacing _
              | Keeper_runtime_failure_route.Rotate_now _ ->
                ())
-          | Some (Cycle.Completed _ | Cycle.Busy _) | None -> ())
+          | Some (Cycle.Judgment_settled _) ->
+            record_settlement_failure
+              "failure judgment completed without an owning event queue lease"
+          | Some
+              ( Cycle.Completed _
+              | Cycle.Cancelled _
+              | Cycle.Skipped _
+              | Cycle.Busy _ )
+          | None ->
+            ())
        | Some lease ->
          let settled_at = Time_compat.now () in
          let settlement =
@@ -1225,8 +1335,8 @@ let run_heartbeat_loop
           proactive_warmup_sec <= 0
           || now_ts -. keepalive_started_ts >= float_of_int proactive_warmup_sec
         in
-        (* Turn-intake preconditions (fd/disk pressure and a typed Blocking HITL
-           lane) are evaluated ONCE here, BEFORE board collection and durable
+        (* Turn-intake preconditions (typed lifecycle, fd/disk pressure, and a
+           typed Blocking HITL lane) are evaluated ONCE here, BEFORE board collection and durable
            stimulus intake. A blocked keeper therefore neither advances the
            board cursor nor leases and requeues the same event every heartbeat.
            Nonblocking approvals never enter this gate.
@@ -1245,15 +1355,40 @@ let run_heartbeat_loop
           Keeper_approval_queue.has_blocking_pending_for_keeper
             ~keeper_name:meta_current.name
         in
+        let lifecycle_state =
+          Keeper_lifecycle_admission.state
+            ~paused:meta_current.paused
+            ~latched_reason:meta_current.latched_reason
+        in
         let intake_admission =
           classify_turn_intake_admission
+            ~lifecycle:
+              (Keeper_lifecycle_admission.admit_autonomous lifecycle_state)
             ~pressure:turn_admission
             ~blocking_approval_pending:approval_pending
         in
         let admitted_turn =
           match intake_admission with
           | Intake_admitted -> true
-          | Intake_pressure_blocked _ | Intake_blocking_approval_pending -> false
+          | Intake_lifecycle_blocked _
+          | Intake_pressure_blocked _
+          | Intake_blocking_approval_pending -> false
+        in
+        let lifecycle_blocked =
+          match intake_admission with
+          | Intake_lifecycle_blocked _ -> true
+          | Intake_admitted
+          | Intake_pressure_blocked _
+          | Intake_blocking_approval_pending -> false
+        in
+        let terminal_lifecycle_blocked =
+          match intake_admission with
+          | Intake_lifecycle_blocked
+              Keeper_lifecycle_admission.Autonomous_dead_tombstone -> true
+          | Intake_lifecycle_blocked (Keeper_lifecycle_admission.Autonomous_paused _) -> false
+          | Intake_admitted
+          | Intake_pressure_blocked _
+          | Intake_blocking_approval_pending -> false
         in
         let keeper_health_blocker =
           if Health.is_healthy ~agent_name:meta_current.name then None else Some "unhealthy"
@@ -1267,6 +1402,35 @@ let run_heartbeat_loop
         let provider_cooldown_pending = Option.is_some provider_cooldown_remaining_sec in
         (match intake_admission with
          | Intake_admitted -> ()
+         | Intake_lifecycle_blocked denial ->
+           let reason =
+             Keeper_lifecycle_admission.autonomous_denial_to_wire denial
+           in
+           Otel_metric_store.inc_counter
+             Keeper_metrics.(to_string LifecycleDispatchRejections)
+             ~labels:
+               [ "keeper", meta_current.name
+               ; "event", "heartbeat_pre_intake"
+               ; "reason", reason
+               ]
+             ();
+           Keeper_registry.record_skip_reasons
+             ~base_path:ctx.config.base_path
+             meta_current.name
+             ~reasons:[ "lifecycle_" ^ reason ];
+           Log.Keeper.info
+             "%s: heartbeat intake denied by lifecycle admission: %s"
+             meta_current.name
+             reason;
+           if terminal_lifecycle_blocked
+           then
+             (* A dead tombstone owns no runnable lane. Ordinary pause keeps
+                its lane parked so an explicit resume remains local. *)
+             Atomic.set stop true
+           else
+             Keeper_registry.touch_last_turn_ts
+               ~base_path:ctx.config.base_path
+               meta_current.name
          | Intake_pressure_blocked block ->
            Keeper_registry.record_skip_reasons
              ~base_path:ctx.config.base_path
@@ -1356,51 +1520,61 @@ let run_heartbeat_loop
             r)
         in
         let meta_after_proactive = turn_outcome.meta in
-        (* Turn failure threshold: registry tracks count (via unified_turn,
-                 and via [record_crashed_cycle_failure] for swallowed cycle
-                 exceptions), keepalive raises to terminate the fiber for
-                 supervisor restart. *)
-        let turn_fail_count =
-          Keeper_registry.get_turn_failures ~base_path:ctx.config.base_path m.name
-        in
-        (* RFC-0002: dispatch turn status event *)
-        Keeper_keepalive_signal.dispatch_keepalive_event
-          ~ctx
-          ~keeper_name:m.name
-          (turn_status_event
-             ~turn_fail_count
-             ~max_allowed:(Keeper_heartbeat_snapshot.max_consecutive_turn_failures ()));
-        if turn_fail_count >= Keeper_heartbeat_snapshot.max_consecutive_turn_failures ()
+        if not lifecycle_blocked
         then (
-          Keeper_registry.set_failure_reason
-            ~base_path:ctx.config.base_path
-            m.name
-            (Some (Keeper_registry.Turn_consecutive_failures turn_fail_count));
-          raise Keeper_registry.Keeper_fiber_crash);
-        (* Phase 1: work-as-heartbeat — renew point (b).
-                 After turn, call Workspace.heartbeat to prove workspace I/O health.
-                 On success: refresh freshness lease + reset consecutive_failures.
-                 On failure: leave timestamp unchanged → presence sync resumes next cycle.
-                 T6 audit: a crashed cycle proves nothing about health — do not
-                 refresh the lease or reset consecutive_failures for it. *)
-        if turn_outcome.cycle_crashed
-        then
-          Log.Keeper.info
-            "%s: skipping work-as-heartbeat refresh after crashed keepalive cycle"
-            m.name
-        else
-          refresh_work_as_heartbeat
+          (* Turn failure threshold: registry tracks count (via unified_turn,
+             and via [record_crashed_cycle_failure] for swallowed cycle
+             exceptions), keepalive raises to terminate the fiber for
+             supervisor restart. A lifecycle-blocked cycle did not run a turn
+             and must not emit a false [Turn_succeeded]. *)
+          let turn_fail_count =
+            Keeper_registry.get_turn_failures
+              ~base_path:ctx.config.base_path
+              m.name
+          in
+          (* RFC-0002: dispatch turn status event *)
+          Keeper_keepalive_signal.dispatch_keepalive_event
             ~ctx
-            ~meta_after_proactive
-            ~proactive_warmup_elapsed
-            ~work_as_hb
-            ~last_successful_heartbeat_ts
-            ~consecutive_failures;
+            ~keeper_name:m.name
+            (turn_status_event
+               ~turn_fail_count
+               ~max_allowed:
+                 (Keeper_heartbeat_snapshot.max_consecutive_turn_failures ()));
+          if
+            turn_fail_count
+            >= Keeper_heartbeat_snapshot.max_consecutive_turn_failures ()
+          then (
+            Keeper_registry.set_failure_reason
+              ~base_path:ctx.config.base_path
+              m.name
+              (Some (Keeper_registry.Turn_consecutive_failures turn_fail_count));
+            raise Keeper_registry.Keeper_fiber_crash);
+          (* Phase 1: work-as-heartbeat — renew point (b).
+             After turn, call Workspace.heartbeat to prove workspace I/O health.
+             On success: refresh freshness lease + reset consecutive_failures.
+             On failure: leave timestamp unchanged → presence sync resumes next cycle.
+             T6 audit: a crashed cycle proves nothing about health — do not
+             refresh the lease or reset consecutive_failures for it. *)
+          if turn_outcome.cycle_crashed
+          then
+            Log.Keeper.info
+              "%s: skipping work-as-heartbeat refresh after crashed keepalive cycle"
+              m.name
+          else
+            refresh_work_as_heartbeat
+              ~ctx
+              ~meta_after_proactive
+              ~proactive_warmup_elapsed
+              ~work_as_hb
+              ~last_successful_heartbeat_ts
+              ~consecutive_failures);
         let t_turn_end = Time_compat.now () in
         let t_recurring_start = t_turn_end in
         (* Recurring task dispatch (#3190) *)
-        let _recurring_dispatched =
-          dispatch_recurring_keepalive ~ctx ~meta_after_proactive ~now_ts
+        let _recurring_dispatch_count =
+          if lifecycle_blocked
+          then 0
+          else dispatch_recurring_keepalive ~ctx ~meta_after_proactive ~now_ts
         in
         let t_recurring_end = Time_compat.now () in
         let base =

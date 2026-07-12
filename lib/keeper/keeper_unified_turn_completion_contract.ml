@@ -63,7 +63,8 @@ let blocker_is_completion_contract = function
   | Keeper_meta_contract.Sdk_guardrail_violation
   | Keeper_meta_contract.Sdk_tripwire_violation
   | Keeper_meta_contract.Sdk_exit_condition_met
-  | Keeper_meta_contract.Sdk_input_required ->
+  | Keeper_meta_contract.Sdk_input_required
+  | Keeper_meta_contract.Sdk_tool_failure_recovery_failed ->
     false
 ;;
 

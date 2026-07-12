@@ -61,6 +61,10 @@ type submit_error =
   | Submit_rejected of access_rejection
   | Invalid_timeout of { reason : string }
   | Initial_persistence_failed of { reason : string }
+  | Acceptance_persistence_failed of
+      { request_id : string
+      ; reason : string
+      }
   | Background_switch_unavailable of { reason : string }
   | Background_fork_failed of
       { request_id : string
@@ -262,6 +266,12 @@ let submit_error_to_json = function
   | Initial_persistence_failed { reason } ->
     `Assoc
       [ "error", `String "request_persistence_failed"
+      ; "message", `String reason
+      ]
+  | Acceptance_persistence_failed { request_id; reason } ->
+    `Assoc
+      [ "error", `String "acceptance_persistence_failed"
+      ; "request_id", `String request_id
       ; "message", `String reason
       ]
   | Background_switch_unavailable { reason } ->
@@ -551,7 +561,7 @@ let load_record_canonical ~base_path ~request_id : load_result =
       in
       match decoded with
       | Ok entry -> Found entry
-      | Error reason ->
+       | Error reason ->
         Log.Keeper.warn
           "keeper_msg_async: load failed request_id=%s path=%s error=%s"
           request_id
@@ -860,7 +870,8 @@ let timeout_done_status ~request_id ~keeper_name ~timeout_sec =
     }
 ;;
 
-let submit ?clock ?timeout_sec ?on_worker_aborted ~background_sw ~base_path ~caller
+let submit ?clock ?timeout_sec ?on_accepted ?on_worker_aborted ~background_sw
+    ~base_path ~caller
     ~(f : Eio.Switch.t -> tool_result) ~keeper_name () : (string, submit_error) result =
   match resolve_access_identity ~base_path ~caller with
   | Error rejection -> Error (Submit_rejected rejection)
@@ -895,7 +906,55 @@ let submit ?clock ?timeout_sec ?on_worker_aborted ~background_sw ~base_path ~cal
         | Some _ | None -> ());
        Error (Initial_persistence_failed { reason })
      | Ok () ->
-       (match
+       let acceptance_result =
+         match on_accepted with
+         | None -> Ok ()
+         | Some callback ->
+           Eio.Cancel.protect (fun () ->
+             match callback request_id with
+             | Ok () -> Ok ()
+             | Error _ as error -> error
+             | exception exn -> Error (Printexc.to_string exn))
+       in
+       (match acceptance_result with
+        | Error reason ->
+          set_status_protected
+            key
+            (Persistence_failed
+               { attempted_status = "accepted"; reason });
+          Error (Acceptance_persistence_failed { request_id; reason })
+        | Ok () ->
+          let notify_aborted reason =
+            match on_worker_aborted with
+            | None -> Ok ()
+            | Some callback ->
+              Eio.Cancel.protect (fun () ->
+                match callback reason with
+                | Ok () -> Ok ()
+                | Error detail -> Error detail
+                | exception exn ->
+                  Otel_metric_store.inc_counter
+                    Keeper_metrics.(to_string LifecycleCallbackFailures)
+                    ~labels:[ "callback", "keeper_msg_async_on_worker_aborted" ]
+                    ();
+                  Log.Keeper.error
+                    "keeper_msg_async: on_worker_aborted callback failed request_id=%s error=%s"
+                    request_id
+                    (Printexc.to_string exn);
+                  Error (Printexc.to_string exn))
+          in
+          let persist_abort_status ~attempted_status reason =
+            match notify_aborted reason with
+            | Ok () -> set_status_protected key attempted_status
+            | Error callback_error ->
+              set_status_protected
+                key
+                (Persistence_failed
+                   { attempted_status = status_to_string attempted_status
+                   ; reason = callback_error
+                   })
+          in
+          (match
           Eio.Fiber.fork_daemon ~sw:background_sw (fun () ->
     set_status_protected ~preserve_terminal:true key Running;
     (* [f] owns any terminal signal it emits on its own side channels while
@@ -906,23 +965,6 @@ let submit ?clock ?timeout_sec ?on_worker_aborted ~background_sw ~base_path ~cal
        set_status_protected above: at these catch sites the ambient switch
        may still be tearing down, so an unprotected call could itself be
        cancelled before the callback runs. *)
-    let notify_aborted reason =
-      match on_worker_aborted with
-      | None -> ()
-      | Some cb ->
-        Eio.Cancel.protect (fun () ->
-          match cb reason with
-          | () -> ()
-          | exception exn ->
-            Otel_metric_store.inc_counter
-              Keeper_metrics.(to_string LifecycleCallbackFailures)
-              ~labels:[ "callback", "keeper_msg_async_on_worker_aborted" ]
-              ();
-            Log.Keeper.error
-              "keeper_msg_async: on_worker_aborted callback failed request_id=%s error=%s"
-              request_id
-              (Printexc.to_string exn))
-    in
     let run_worker_with_timeout request_sw =
       match worker_timeout with
       | Some (worker_timeout_sec, clock) ->
@@ -931,8 +973,9 @@ let submit ?clock ?timeout_sec ?on_worker_aborted ~background_sw ~base_path ~cal
            let status =
              timeout_done_status ~request_id ~keeper_name ~timeout_sec:worker_timeout_sec
            in
-           set_status_protected ~preserve_terminal:true key status;
-           notify_aborted (Timeout { timeout_sec = worker_timeout_sec });
+           persist_abort_status
+             ~attempted_status:status
+             (Timeout { timeout_sec = worker_timeout_sec });
            raise (Worker_timeout worker_timeout_sec))
       | None -> f request_sw
     in
@@ -965,7 +1008,8 @@ let submit ?clock ?timeout_sec ?on_worker_aborted ~background_sw ~base_path ~cal
         Fun.protect
           ~finally:(fun () -> clear_active_switch key)
           (fun () ->
-            notify_aborted
+            persist_abort_status
+              ~attempted_status:(operator_cancelled_status ())
               (Worker_cancelled
                  { cancelled_by = Operator_request
                  ; reason = "keeper_msg request was cancelled by operator"
@@ -975,11 +1019,11 @@ let submit ?clock ?timeout_sec ?on_worker_aborted ~background_sw ~base_path ~cal
         Fun.protect
           ~finally:(fun () -> clear_active_switch key)
           (fun () ->
-            notify_aborted
+            persist_abort_status
+              ~attempted_status:(runtime_cancelled_status ())
               (Worker_cancelled { cancelled_by = Runtime_cancellation; reason }));
         runtime_cancelled_status ()
       | Eio.Cancel.Cancelled _ as e ->
-        set_status_protected ~preserve_terminal:true key (runtime_cancelled_status ());
         (* [notify_aborted] observes callback exceptions without letting one
            request fail the server root switch. The switch-table release must
            still be exception-safe because cancellation cleanup below can be
@@ -989,7 +1033,8 @@ let submit ?clock ?timeout_sec ?on_worker_aborted ~background_sw ~base_path ~cal
         Fun.protect
           ~finally:(fun () -> clear_active_switch key)
           (fun () ->
-            notify_aborted
+            persist_abort_status
+              ~attempted_status:(runtime_cancelled_status ())
               (Worker_cancelled
                  { cancelled_by = Runtime_cancellation
                  ; reason =
@@ -1013,8 +1058,11 @@ let submit ?clock ?timeout_sec ?on_worker_aborted ~background_sw ~base_path ~cal
               "keeper_msg request was persisted but its background worker could not start: %s"
               (Printexc.to_string exn)
           in
-          set_status_protected ~preserve_terminal:true key (Lost { reason });
-          Error (Background_fork_failed { request_id; reason })))
+          persist_abort_status
+            ~attempted_status:(Lost { reason })
+            (Worker_cancelled
+               { cancelled_by = Runtime_cancellation; reason });
+          Error (Background_fork_failed { request_id; reason }))))
 ;;
 
 (** Exact owner check for both the process-global table and persisted rows. *)
@@ -1062,7 +1110,9 @@ let list_for_keeper ~base_path ~caller ?keeper_name () :
     Eio.Mutex.use_ro mu (fun () ->
       Request_table.fold
         (fun _id entry acc ->
-           if Option.is_some (owner_rejection ~caller entry)
+           if
+             (not (String.equal entry.base_path base_path))
+             || Option.is_some (owner_rejection ~caller entry)
            then acc
            else
              match keeper_name with

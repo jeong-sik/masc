@@ -7,7 +7,17 @@ type request =
 
 type error =
   | Registry_lane_replaced
+  | Dormant_registry_lane_present
   | Existing_operation of Operation_id.t
+  | Meta_snapshot_missing
+  | Meta_snapshot_identity_changed
+  | Meta_snapshot_version_changed of
+      { expected : int
+      ; actual : int
+      }
+  | Meta_snapshot_read_failed of string
+  | Stale_prune_meta_changed
+  | Stale_prune_lane_not_paused of Keeper_state_machine.phase
   | Task_discovery_failed of string
   | Prepare_persist_failed of Keeper_shutdown_store.error
   | Cancellation_failed of Keeper_shutdown_types.t
@@ -16,10 +26,28 @@ type error =
 
 let error_to_string = function
   | Registry_lane_replaced -> "Keeper registry lane changed before shutdown prepare"
+  | Dormant_registry_lane_present ->
+    "dormant Keeper gained a registered lane before shutdown prepare"
   | Existing_operation operation_id ->
     Printf.sprintf
       "Keeper shutdown already reserved by operation %s"
       (Operation_id.to_string operation_id)
+  | Meta_snapshot_missing -> "Keeper shutdown metadata is absent"
+  | Meta_snapshot_identity_changed ->
+    "Keeper shutdown metadata identity changed before durable prepare"
+  | Meta_snapshot_version_changed { expected; actual } ->
+    Printf.sprintf
+      "Keeper shutdown metadata version changed before durable prepare: expected %d, actual %d"
+      expected
+      actual
+  | Meta_snapshot_read_failed detail ->
+    Printf.sprintf "Keeper shutdown metadata read failed: %s" detail
+  | Stale_prune_meta_changed ->
+    "stale paused Keeper metadata changed before durable prune prepare"
+  | Stale_prune_lane_not_paused phase ->
+    Printf.sprintf
+      "stale paused Keeper lane changed phase before durable prune prepare: expected paused, actual %s"
+      (Keeper_state_machine.phase_to_string phase)
   | Task_discovery_failed detail ->
     Printf.sprintf "Keeper shutdown task discovery failed: %s" detail
   | Prepare_persist_failed error -> Keeper_shutdown_store.error_to_string error
@@ -77,11 +105,11 @@ let active_turn_of_snapshots reservation current =
       }
 ;;
 
-let rollback_reservation ~config ~entry operation_id =
+let rollback_reservation ~config ~keeper_name operation_id =
   match
     Keeper_turn_admission.rollback_shutdown
       ~base_path:config.Workspace.base_path
-      ~keeper_name:entry.Keeper_registry.name
+      ~keeper_name
       ~operation_id
   with
   | Keeper_turn_admission.Shutdown_rolled_back
@@ -89,9 +117,62 @@ let rollback_reservation ~config ~entry operation_id =
   | Keeper_turn_admission.Shutdown_reserved_by_other existing ->
     Log.Keeper.error
       "%s: shutdown rollback for %s found reservation %s"
-      entry.name
+      keeper_name
       (Operation_id.to_string operation_id)
       (Operation_id.to_string existing)
+;;
+
+let validate_cleanup_reason reason (meta : Keeper_meta_contract.keeper_meta) =
+  match reason with
+  | Operator_stop_retain_meta
+  | Operator_stop_remove_meta
+  | Dead_tombstone_cleanup -> Ok ()
+  | Stale_paused_prune context ->
+    if not (Int.equal meta.meta_version context.meta_version)
+    then
+      Error
+        (Meta_snapshot_version_changed
+           { expected = context.meta_version; actual = meta.meta_version })
+    else if
+      meta.paused
+      && String.equal meta.updated_at context.last_updated
+      && Option.equal
+           Keeper_latched_reason.equal
+           meta.latched_reason
+           context.latched_reason
+    then Ok ()
+    else Error Stale_prune_meta_changed
+  | Dashboard_keeper_purge context ->
+    if Int.equal meta.meta_version context.meta_version
+    then Ok ()
+    else
+      Error
+        (Meta_snapshot_version_changed
+           { expected = context.meta_version; actual = meta.meta_version })
+;;
+
+let read_guarded_meta
+    ~config
+    ~(observed : Keeper_meta_contract.keeper_meta)
+    ~cleanup_reason
+  =
+  match Keeper_meta_store.read_meta config observed.name with
+  | Error detail -> Error (Meta_snapshot_read_failed detail)
+  | Ok None -> Error Meta_snapshot_missing
+  | Ok (Some latest)
+    when not
+           (Keeper_id.Trace_id.equal
+              latest.runtime.trace_id
+              observed.runtime.trace_id)
+         || not
+              (Int.equal
+                 latest.runtime.generation
+                 observed.runtime.generation) ->
+    Error Meta_snapshot_identity_changed
+  | Ok (Some latest) ->
+    (match validate_cleanup_reason cleanup_reason latest with
+     | Error _ as error -> error
+     | Ok () -> Ok latest)
 ;;
 
 let persist_blocked ~config operation stage detail =
@@ -147,18 +228,39 @@ let prepare ~config ~(entry : Keeper_registry.registry_entry) ~request =
     Fun.protect
       ~finally:(fun () ->
         if not (Atomic.get durable_prepare_committed)
-        then rollback_reservation ~config ~entry operation_id)
+        then rollback_reservation ~config ~keeper_name:entry.name operation_id)
       (fun () ->
     (match current_entry ~config entry with
      | Error error -> Error error
      | Ok current ->
+       let stale_prune_phase_error =
+         match request.cleanup_intent.reason, current.phase with
+         | Stale_paused_prune _, Keeper_state_machine.Paused -> None
+         | Stale_paused_prune _, phase -> Some (Stale_prune_lane_not_paused phase)
+         | ( Operator_stop_retain_meta
+           | Operator_stop_remove_meta
+           | Dead_tombstone_cleanup
+           | Dashboard_keeper_purge _ )
+           , _ -> None
+       in
+       (match stale_prune_phase_error with
+        | Some error -> Error error
+        | None ->
        (match
-          Keeper_current_task_reconcile.owned_active_tasks_snapshot_for_meta_strict
+          read_guarded_meta
             ~config
-            ~meta:current.meta
+            ~observed:current.meta
+            ~cleanup_reason:request.cleanup_intent.reason
         with
-        | Error detail -> Error (Task_discovery_failed detail)
-        | Ok owned_snapshot ->
+        | Error _ as error -> error
+        | Ok durable_meta ->
+          (match
+             Keeper_current_task_reconcile.owned_active_tasks_snapshot_for_meta_strict
+               ~config
+               ~meta:durable_meta
+           with
+           | Error detail -> Error (Task_discovery_failed detail)
+           | Ok owned_snapshot ->
           let owned_tasks = owned_snapshot.tasks in
           let now = Masc_domain.now_iso () in
           let turn_disposition = active_turn_of_snapshots reservation current in
@@ -167,9 +269,9 @@ let prepare ~config ~(entry : Keeper_registry.registry_entry) ~request =
             ; revision = 0
             ; operation_id
             ; keeper_name = current.name
-            ; lane_id = Keeper_lane.id current.lane
-            ; trace_id = current.meta.runtime.trace_id
-            ; generation = current.meta.runtime.generation
+            ; lane_ownership = Registered_lane (Keeper_lane.id current.lane)
+            ; trace_id = durable_meta.runtime.trace_id
+            ; generation = durable_meta.runtime.generation
             ; actor = request.actor
             ; cleanup_intent = request.cleanup_intent
             ; turn_disposition
@@ -195,7 +297,83 @@ let prepare ~config ~(entry : Keeper_registry.registry_entry) ~request =
           (match persist_result with
            | Error store_error ->
              Error (Prepare_persist_failed store_error)
-           | Ok () -> Ok operation))))
+           | Ok () -> Ok operation))))))
+;;
+
+let prepare_dormant
+    ~config
+    ~(meta : Keeper_meta_contract.keeper_meta)
+    ~request
+  =
+  let operation_id = Operation_id.generate () in
+  match
+    Keeper_turn_admission.begin_shutdown
+      ~base_path:config.Workspace.base_path
+      ~keeper_name:meta.name
+      ~operation_id
+  with
+  | Keeper_turn_admission.Shutdown_already_reserved reservation ->
+    Error (Existing_operation reservation.operation_id)
+  | Keeper_turn_admission.Shutdown_reserved _ ->
+    let durable_prepare_committed = Atomic.make false in
+    Fun.protect
+      ~finally:(fun () ->
+        if not (Atomic.get durable_prepare_committed)
+        then rollback_reservation ~config ~keeper_name:meta.name operation_id)
+      (fun () ->
+         match Keeper_registry.get ~base_path:config.base_path meta.name with
+         | Some _ -> Error Dormant_registry_lane_present
+         | None ->
+           (match
+              read_guarded_meta
+                ~config
+                ~observed:meta
+                ~cleanup_reason:request.cleanup_intent.reason
+            with
+            | Error _ as error -> error
+            | Ok durable_meta ->
+              (match
+                 Keeper_current_task_reconcile.owned_active_tasks_snapshot_for_meta_strict
+                   ~config
+                   ~meta:durable_meta
+               with
+               | Error detail -> Error (Task_discovery_failed detail)
+               | Ok owned_snapshot ->
+                 let now = Masc_domain.now_iso () in
+                 let operation =
+                   { schema_version
+                   ; revision = 0
+                   ; operation_id
+                   ; keeper_name = durable_meta.name
+                   ; lane_ownership = Dormant_meta
+                   ; trace_id = durable_meta.runtime.trace_id
+                   ; generation = durable_meta.runtime.generation
+                   ; actor = request.actor
+                   ; cleanup_intent = request.cleanup_intent
+                   ; turn_disposition = No_inflight_turn
+                   ; expected_backlog_version = owned_snapshot.backlog_version
+                   ; owned_task_ids =
+                       List.map
+                         (fun task -> task.Keeper_current_task_reconcile.task_id)
+                         owned_snapshot.tasks
+                   ; join_evidence = None
+                   ; phase = Joined_idle
+                   ; created_at = now
+                   ; updated_at = now
+                   }
+                 in
+                 let persist_result =
+                   Eio.Cancel.protect (fun () ->
+                     match Keeper_shutdown_store.persist_new ~config operation with
+                     | Ok () as committed ->
+                       Atomic.set durable_prepare_committed true;
+                       committed
+                     | Error _ as error -> error)
+                 in
+                 (match persist_result with
+                  | Error store_error ->
+                    Error (Prepare_persist_failed store_error)
+                  | Ok () -> Ok operation))))
 ;;
 
 let join_prepared ~config ~(entry : Keeper_registry.registry_entry) ~operation =
@@ -203,9 +381,10 @@ let join_prepared ~config ~(entry : Keeper_registry.registry_entry) ~operation =
   | Error error -> Error error
   | Ok current
     when not
-           (Keeper_lane.Id.equal
-              (Keeper_lane.id current.lane)
-              operation.lane_id) -> Error Registry_lane_replaced
+           (match operation.lane_ownership with
+            | Registered_lane lane_id ->
+              Keeper_lane.Id.equal (Keeper_lane.id current.lane) lane_id
+            | Dormant_meta -> false) -> Error Registry_lane_replaced
   | Ok current ->
     Keeper_keepalive.request_entry_stop current;
     let turn_cancel = Keeper_registry.interrupt_current_turn_exact current in

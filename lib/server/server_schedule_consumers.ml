@@ -334,7 +334,31 @@ let dispatch_keeper_wake config ~now (request : Schedule_domain.schedule_request
     ~base_path:config.Workspace_utils.base_path
     keeper_name
     stimulus;
-  Keeper_registry.wakeup ~base_path:config.Workspace_utils.base_path keeper_name;
+  let wakeup_outcome =
+    Keeper_registry.wakeup
+      ~intent:Keeper_registry.Scheduled_signal
+      ~base_path:config.Workspace_utils.base_path
+      keeper_name
+  in
+  (match wakeup_outcome with
+   | Keeper_registry.Signaled -> ()
+   | Keeper_registry.Deferred_unregistered ->
+     Log.Keeper.info
+       "schedule stimulus queued for unregistered keeper schedule_id=%s keeper=%s"
+       request.schedule_id
+       keeper_name
+   | Keeper_registry.Deferred_not_running phase ->
+     Log.Keeper.info
+       "schedule stimulus queued without runnable fiber schedule_id=%s keeper=%s phase=%s"
+       request.schedule_id
+       keeper_name
+       (Keeper_state_machine.phase_to_string phase)
+   | Keeper_registry.Deferred_lifecycle denial ->
+     Log.Keeper.info
+       "schedule stimulus queued but lifecycle admission deferred wake schedule_id=%s keeper=%s reason=%s"
+       request.schedule_id
+       keeper_name
+       (Keeper_lifecycle_admission.autonomous_denial_to_wire denial));
   let reaction_ledger_status =
     record_keeper_wake_stimulus
       ~base_path:config.Workspace_utils.base_path

@@ -60,6 +60,7 @@ let non_overflow_classes_are_not_matched () =
     Keeper_meta_contract.Sdk_guardrail_violation;
     Keeper_meta_contract.Sdk_tripwire_violation;
     Keeper_meta_contract.Sdk_exit_condition_met;
+    Keeper_meta_contract.Sdk_tool_failure_recovery_failed;
   ] in
   List.iter
     (fun klass ->

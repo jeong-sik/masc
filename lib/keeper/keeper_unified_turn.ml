@@ -31,6 +31,11 @@ type turn_failure =
   ; source_lease_disposition : source_lease_disposition
   }
 
+type turn_success =
+  | Turn_completed of keeper_meta
+  | Turn_cancelled of keeper_meta
+  | Turn_skipped of keeper_meta
+
 let run_keeper_cycle
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
@@ -42,8 +47,9 @@ let run_keeper_cycle
       ?shared_context
       ?event_bus
       ?hitl_resolution
+      ?continuation_delivery_channel
       ()
-  : (keeper_meta, turn_failure) result
+  : (turn_success, turn_failure) result
   =
   (* Spec navigation: see specs/keeper-state-machine/KeeperTaskAcquisition.tla
      (Cycle 8/Tier B2, PR #11412).  Action mapping:
@@ -60,11 +66,6 @@ let run_keeper_cycle
      phases like Overflowed. *)
   let registry_base_path = config.base_path in
   let exact_failure_execution = ref None in
-  let hitl_delivery_channel =
-    Option.map
-      (fun (resolution : Keeper_event_queue.hitl_resolution) -> resolution.channel)
-      hitl_resolution
-  in
   let hitl_approval_grant =
     Option.bind
       hitl_resolution
@@ -520,7 +521,7 @@ let run_keeper_cycle
                            ; base_dir
                            ; build_turn_prompt
                            ; channel
-                           ; hitl_delivery_channel
+                           ; continuation_delivery_channel
                            ; hitl_approval_grant
                            ; cleanup
                            ; committed_mutating_tools_snapshot
@@ -976,7 +977,11 @@ dominant source of the observed CAS race exhaustion after
                      the heartbeat settles the current lease and, for
                      [Escalate_judgment], enqueues its typed successor in the
                      same durable event-queue transaction. *)
-                  let failure_route = Keeper_runtime_failure_route.route_of_error err in
+                  let failure_route =
+                    Keeper_runtime_failure_route.route_of_error
+                      ~boundary:Keeper_runtime_failure_route.Oas_execution
+                      err
+                  in
                   exact_failure_execution :=
                     Some
                       ( final_execution.runtime_id
@@ -1062,6 +1067,7 @@ dominant source of the observed CAS race exhaustion after
                      let route =
                        Keeper_runtime_failure_route.Escalate_judgment
                          { judgment = judgment.fj_judgment
+                         ; provenance = judgment.fj_provenance
                          ; detail = judgment.fj_detail
                          }
                      in
@@ -1116,15 +1122,23 @@ dominant source of the observed CAS race exhaustion after
     | None ->
       { error
       ; runtime_id = Keeper_meta_contract.runtime_id_of_meta meta
-      ; route = Keeper_runtime_failure_route.route_of_error error
+      ; route =
+          Keeper_runtime_failure_route.route_of_error
+            ~boundary:Keeper_runtime_failure_route.Masc_execution
+            error
       ; source_lease_disposition = Follow_failure_route
       }
   in
   match phase_gate_outcome with
-  | Keeper_unified_turn_phase_gate.Phase_gate_terminal_ok meta -> Ok meta
+  | Keeper_unified_turn_phase_gate.Phase_gate_cancelled meta ->
+    Ok (Turn_cancelled meta)
+  | Keeper_unified_turn_phase_gate.Phase_gate_skipped meta ->
+    Ok (Turn_skipped meta)
   | Keeper_unified_turn_phase_gate.Phase_gate_terminal_error err ->
     Error (failure_of_error err)
   | Keeper_unified_turn_phase_gate.Phase_gate_proceed phase_opt ->
     let result, _turn_state = main_path turn_state phase_opt in
-    Result.map_error failure_of_error result
+    result
+    |> Result.map (fun meta -> Turn_completed meta)
+    |> Result.map_error failure_of_error
 ;;

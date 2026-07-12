@@ -575,14 +575,16 @@ let start_keeper_grpc_heartbeat
 
 (* ── Lifecycle bootstrap / publish helpers ── *)
 
-let bootstrap_live_keeper_meta ~(ctx : _ context) (m : keeper_meta) : keeper_meta =
+let bootstrap_live_keeper_meta ?lifecycle_token ~(ctx : _ context) (m : keeper_meta)
+  : keeper_meta
+  =
   try
     if not (Workspace_utils.is_initialized ctx.config)
     then (
       let (_init_msg : string) = Workspace.init ctx.config ~agent_name:None in
       ());
     let m =
-      match repair_identity_drift_for_keepalive ~ctx m with
+      match repair_identity_drift_for_keepalive ?lifecycle_token ~ctx m with
       | Some repaired -> repaired
       | None -> m
     in
@@ -606,21 +608,30 @@ let bootstrap_live_keeper_meta ~(ctx : _ context) (m : keeper_meta) : keeper_met
           }
       }
     in
-    (match
-       write_meta_with_merge
-         ~merge:Keeper_meta_merge.monotonic_usage_counters ctx.config synced
-     with
-     | Ok () -> ()
-     | Error e ->
-       Otel_metric_store.inc_counter
-         Keeper_metrics.(to_string WriteMetaFailures)
-         ~labels:[ "keeper", synced.name; "phase", "bootstrap" ]
-         ();
-       Log.Keeper.emit
-         Log.Warn
-         ~category:Log.Heartbeat
-         ~details:(`Assoc [ "keeper", `String synced.name; "error", `String e ])
-         (Printf.sprintf "write_meta failed (bootstrap): %s" e));
+    (match lifecycle_token with
+     | Some _ ->
+       (* The revival coordinator already committed the durable candidate.
+          Keep this fresh presence timestamp in the new registry lane; the
+          heartbeat persists it after the transaction releases ownership. *)
+       ()
+     | None ->
+       (match
+          write_meta_with_merge
+            ~merge:Keeper_meta_merge.monotonic_usage_counters
+            ctx.config
+            synced
+        with
+        | Ok () -> ()
+        | Error e ->
+          Otel_metric_store.inc_counter
+            Keeper_metrics.(to_string WriteMetaFailures)
+            ~labels:[ "keeper", synced.name; "phase", "bootstrap" ]
+            ();
+          Log.Keeper.emit
+            Log.Warn
+            ~category:Log.Heartbeat
+            ~details:(`Assoc [ "keeper", `String synced.name; "error", `String e ])
+            (Printf.sprintf "write_meta failed (bootstrap): %s" e)));
     synced
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -673,8 +684,16 @@ let publish_keeper_started ~(live_meta : keeper_meta) : unit =
 (** Launch gate: dispatch [Fiber_started] before forking the keepalive
     fiber. Returns [Error _] when the registry FSM rejects the launch —
     the caller must not fork and must not announce [Started]/[Running]. *)
-let dispatch_fiber_started ~base_path keeper_name =
-  match Keeper_registry.prepare_fiber_launch ~base_path keeper_name with
+let dispatch_fiber_started ?lifecycle_token ?entry ~base_path keeper_name =
+  let transition =
+    match lifecycle_token, entry with
+    | Some token, Some entry ->
+      Keeper_registry.prepare_fiber_launch_for_lifecycle token entry
+    | None, None -> Keeper_registry.prepare_fiber_launch ~base_path keeper_name
+    | Some _, None | None, Some _ ->
+      invalid_arg "dispatch_fiber_started lifecycle token and entry must be paired"
+  in
+  match transition with
   | Ok _ -> Ok ()
   | Error err ->
     Otel_metric_store.inc_counter
@@ -707,32 +726,6 @@ let resolve_registry_done
   match Keeper_registry.resolve_done entry ~source value with
   | Keeper_registry.Done_resolved _ -> true
   | Keeper_registry.Done_already_resolved _ -> false
-;;
-
-let log_exact_update_outcome
-      (entry : Keeper_registry.registry_entry)
-      ~site
-  = function
-  | Keeper_registry.Exact_updated -> true
-  | Keeper_registry.Exact_update_missing ->
-    Log.Keeper.warn
-      "%s: exact registry update skipped because lane is no longer registered site=%s"
-      entry.name
-      site;
-    false
-  | Keeper_registry.Exact_update_replaced ->
-    Log.Keeper.warn
-      "%s: exact registry update retained newer same-name lane site=%s"
-      entry.name
-      site;
-    false
-  | Keeper_registry.Exact_update_invalid validation_error ->
-    Log.Keeper.warn
-      "%s: exact registry update validation failed site=%s error=%s"
-      entry.name
-      site
-      (Keeper_registry.registry_entry_validation_error_to_string validation_error);
-    false
 ;;
 
 let dispatch_event_exact_unit
@@ -790,7 +783,9 @@ let record_keeper_crashed
     let outcome = reason in
     ignore
       (Keeper_registry.set_failure_reason_exact entry (Some failure_reason)
-       |> log_exact_update_outcome entry ~site:"record_keeper_crashed.failure_reason");
+       |> Keeper_registry.exact_update_succeeded
+            entry
+            ~site:"record_keeper_crashed.failure_reason");
     ignore
       (dispatch_event_exact_unit
          entry
@@ -798,7 +793,9 @@ let record_keeper_crashed
             { outcome; provider_id = None; http_status = None }));
     ignore
       (Keeper_registry.record_crash_exact entry (Time_compat.now ()) reason
-       |> log_exact_update_outcome entry ~site:"record_keeper_crashed.crash_log");
+       |> Keeper_registry.exact_update_succeeded
+            entry
+            ~site:"record_keeper_crashed.crash_log");
     Keeper_registry_error_recording.record_exact entry reason;
     publish_keeper_phase_lifecycle
       ~phase:Keeper_state_machine.Crashed
@@ -809,9 +806,113 @@ let record_keeper_crashed
 
 (* ── Keeper lifecycle start/stop ── *)
 
-let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_meta) : unit
+type start_keepalive_outcome =
+  | Keepalive_started of Keeper_registry.registry_entry
+  | Keepalive_already_registered of Keeper_registry.registry_entry
+  | Keepalive_lifecycle_denied of Keeper_lifecycle_admission.autonomous_denial
+  | Keepalive_identity_unrepairable
+  | Keepalive_spawn_slot_denied of Keeper_registry.spawn_slot_denial_reason
+  | Keepalive_registration_rejected of Keeper_registry.registration_error
+  | Keepalive_fiber_start_rejected of Keeper_state_machine.transition_error
+  | Keepalive_lane_ownership_lost
+  | Keepalive_fork_rejected of Keeper_lane.start_error
+
+let start_keepalive_outcome_to_string = function
+  | Keepalive_started entry ->
+    Printf.sprintf "started lane=%s" (Keeper_lane.Id.to_string (Keeper_lane.id entry.lane))
+  | Keepalive_already_registered entry ->
+    Printf.sprintf
+      "already registered phase=%s lane=%s"
+      (Keeper_state_machine.phase_to_string entry.phase)
+      (Keeper_lane.Id.to_string (Keeper_lane.id entry.lane))
+  | Keepalive_lifecycle_denied denial ->
+    Keeper_lifecycle_admission.autonomous_denial_to_wire denial
+  | Keepalive_identity_unrepairable -> "keeper identity drift could not be repaired"
+  | Keepalive_spawn_slot_denied reason ->
+    Keeper_registry.spawn_slot_denial_reason_to_detail reason
+  | Keepalive_registration_rejected
+      (Keeper_registry.Registration_shutdown_reserved operation_id) ->
+    Printf.sprintf
+      "shutdown operation %s owns keeper admission"
+      (Keeper_shutdown_types.Operation_id.to_string operation_id)
+  | Keepalive_registration_rejected
+      (Keeper_registry.Registration_lifecycle_reserved owner) ->
+    Printf.sprintf
+      "keeper lifecycle reservation conflict: %s"
+      (Keeper_lifecycle_reservation.snapshot_to_string owner)
+  | Keepalive_registration_rejected
+      (Keeper_registry.Registration_invalid validation_error) ->
+    Keeper_registry.registry_entry_validation_error_to_string validation_error
+  | Keepalive_registration_rejected
+      (Keeper_registry.Registration_event_queue_unavailable { keeper_name; detail }) ->
+    Printf.sprintf "event queue unavailable for %s: %s" keeper_name detail
+  | Keepalive_fiber_start_rejected error ->
+    Printf.sprintf
+      "Fiber_started rejected: %s"
+      (Keeper_state_machine.transition_error_to_string error)
+  | Keepalive_lane_ownership_lost -> "lane ownership lost before fiber fork"
+  | Keepalive_fork_rejected error -> Keeper_lane.start_error_to_string error
+
+let record_lifecycle_start_denial
+      (meta : keeper_meta)
+      (denial : Keeper_lifecycle_admission.autonomous_denial)
   =
-  match repair_identity_drift_for_keepalive ~ctx m with
+  let reason = Keeper_lifecycle_admission.autonomous_denial_to_wire denial in
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string LifecycleDispatchRejections)
+    ~labels:
+      [ "keeper", meta.name
+      ; "event", "autonomous_keepalive_start"
+      ; "reason", reason
+      ]
+    ();
+  publish_keeper_lifecycle
+    ~event:
+      (Keeper_lifecycle_events.Custom_event
+         { verb = Keeper_lifecycle_events.Admission_denied
+         ; phase = Some Keeper_state_machine.Offline
+         })
+    ~keeper_name:meta.name
+    ~detail:reason
+    ();
+  Log.Keeper.emit
+    Log.Info
+    ~category:Log.Heartbeat
+    ~details:
+      (`Assoc
+        [ "keeper", `String meta.name
+        ; "reason", `String reason
+        ; "lifecycle_state"
+        , `String
+            (Keeper_lifecycle_admission.state_to_wire
+               (Keeper_lifecycle_admission.state
+                  ~paused:meta.paused
+                  ~latched_reason:meta.latched_reason))
+        ])
+    (Printf.sprintf
+       "start_keepalive denied for %s by lifecycle admission: %s"
+       meta.name
+       reason)
+;;
+
+let start_keepalive
+      ?(proactive_warmup_sec = 0)
+      ?lifecycle_token
+      (ctx : _ context)
+  (m : keeper_meta)
+  : start_keepalive_outcome
+  =
+  let lifecycle_state =
+    Keeper_lifecycle_admission.state
+      ~paused:m.paused
+      ~latched_reason:m.latched_reason
+  in
+  match Keeper_lifecycle_admission.admit_autonomous lifecycle_state with
+  | Keeper_lifecycle_admission.Autonomous_denied denial ->
+    record_lifecycle_start_denial m denial;
+    Keepalive_lifecycle_denied denial
+  | Keeper_lifecycle_admission.Autonomous_admitted ->
+  match repair_identity_drift_for_keepalive ?lifecycle_token ~ctx m with
   | None ->
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string HeartbeatFailures)
@@ -821,7 +922,8 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
       Log.Error
       ~category:Log.Heartbeat
       ~details:(`Assoc [ "keeper", `String m.name; "reason", `String "identity_drift_unrepairable" ])
-      (Printf.sprintf "start_keepalive skipped %s: identity drift could not be repaired" m.name)
+      (Printf.sprintf "start_keepalive skipped %s: identity drift could not be repaired" m.name);
+    Keepalive_identity_unrepairable
   | Some m ->
     let existing_entry =
       Keeper_registry.get ~base_path:ctx.config.base_path m.name
@@ -860,22 +962,32 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
             "start_keepalive: reclaiming stale registered entry %s phase=%s"
             m.name
             (Keeper_state_machine.phase_to_string entry.phase));
-       (match Keeper_registry.unregister_exact entry with
+       (match
+          match lifecycle_token with
+          | None -> Keeper_registry.unregister_exact entry
+          | Some token -> Keeper_registry.unregister_exact_for_lifecycle token entry
+        with
         | Keeper_registry.Exact_unregistered
         | Keeper_registry.Exact_entry_missing -> ()
         | Keeper_registry.Exact_entry_replaced ->
           Log.Keeper.info
             "start_keepalive: stale entry for %s was already replaced; keeping the newer lane"
-            m.name)
+            m.name
+        | Keeper_registry.Exact_unregister_lifecycle_reserved owner ->
+          Log.Keeper.warn
+            "start_keepalive: stale entry reclaim rejected by lifecycle reservation for %s: %s"
+            m.name
+            (Keeper_lifecycle_reservation.snapshot_to_string owner))
      | _ -> ());
-    if Keeper_registry.is_registered ~base_path:ctx.config.base_path m.name
-    then
+    match Keeper_registry.get ~base_path:ctx.config.base_path m.name with
+    | Some registered ->
       Log.Keeper.emit
         Log.Info
         ~category:Log.Heartbeat
         ~details:(`Assoc [ "keeper", `String m.name ])
-        (Printf.sprintf "start_keepalive: skipped %s (already registered)" m.name)
-    else
+        (Printf.sprintf "start_keepalive: skipped %s (already registered)" m.name);
+      Keepalive_already_registered registered
+    | None ->
       match Keeper_registry.spawn_slots_decision () with
       | Error reason ->
         Keeper_registry.record_spawn_slot_denied ~keeper_name:m.name ~surface:"keepalive" reason;
@@ -887,30 +999,53 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
                })
           ~keeper_name:m.name
           ~detail:(Keeper_registry.spawn_slot_denial_reason_to_detail reason)
-          ()
+          ();
+        Keepalive_spawn_slot_denied reason
       | Ok () ->
       (* Register in Keeper_registry first — single source of truth. *)
       (match
-         Keeper_registry.register_offline_if_admitted
-           ~base_path:ctx.config.base_path
-           m.name
-           m
+         match lifecycle_token with
+         | None ->
+           Keeper_registry.register_offline_if_admitted
+             ~base_path:ctx.config.base_path
+             m.name
+             m
+         | Some token ->
+           Keeper_registry.register_offline_if_admitted_for_lifecycle
+             token
+             ~base_path:ctx.config.base_path
+             m.name
+             m
        with
        | Error (Keeper_registry.Registration_shutdown_reserved operation_id) ->
          Log.Keeper.info
            "start_keepalive: skipped %s because shutdown operation %s owns admission"
            m.name
-           (Keeper_shutdown_types.Operation_id.to_string operation_id)
+           (Keeper_shutdown_types.Operation_id.to_string operation_id);
+         Keepalive_registration_rejected
+           (Keeper_registry.Registration_shutdown_reserved operation_id)
+       | Error (Keeper_registry.Registration_lifecycle_reserved owner) ->
+         Log.Keeper.warn
+           "start_keepalive: lifecycle reservation rejected %s: %s"
+           m.name
+           (Keeper_lifecycle_reservation.snapshot_to_string owner);
+         Keepalive_registration_rejected
+           (Keeper_registry.Registration_lifecycle_reserved owner)
        | Error (Keeper_registry.Registration_invalid validation_error) ->
          Log.Keeper.error
            "start_keepalive: registry validation rejected %s: %s"
            m.name
-           (Keeper_registry.registry_entry_validation_error_to_string validation_error)
+           (Keeper_registry.registry_entry_validation_error_to_string validation_error);
+         Keepalive_registration_rejected
+           (Keeper_registry.Registration_invalid validation_error)
        | Error (Keeper_registry.Registration_event_queue_unavailable { keeper_name; detail }) ->
          Log.Keeper.error
            "start_keepalive: registry event queue unavailable keeper=%s: %s"
            keeper_name
-           detail
+           detail;
+         Keepalive_registration_rejected
+           (Keeper_registry.Registration_event_queue_unavailable
+              { keeper_name; detail })
        | Ok reg ->
       (* Restore persisted tool usage stats from previous session *)
       Keeper_registry_tool_usage_persistence.restore ~base_path:ctx.config.base_path m.name;
@@ -920,7 +1055,17 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
          heartbeat before the gate left a live gRPC resource behind a
          rejected launch — the same half-commit class this change removes
          from the fiber-fork path. *)
-      match dispatch_fiber_started ~base_path:ctx.config.base_path m.name with
+      match
+        match lifecycle_token with
+        | None ->
+          dispatch_fiber_started ~base_path:ctx.config.base_path m.name
+        | Some token ->
+          dispatch_fiber_started
+            ~lifecycle_token:token
+            ~entry:reg
+            ~base_path:ctx.config.base_path
+            m.name
+      with
       | Error err ->
         (* Fail closed: the registry FSM refused [Fiber_started], so no
            keepalive fiber may fork and [Started]/[Running] must not be
@@ -958,15 +1103,21 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
            Log.Keeper.error
              "%s: rejected launch could not close lane join contract: %s"
              m.name
-             (Keeper_lane.start_error_to_string lane_error))
+             (Keeper_lane.start_error_to_string lane_error));
+        Keepalive_fiber_start_rejected err
       | Ok () ->
         let stop = reg.fiber_stop in
         let wakeup = reg.fiber_wakeup in
-        let live_meta = bootstrap_live_keeper_meta ~ctx m in
+        let live_meta = bootstrap_live_keeper_meta ?lifecycle_token ~ctx m in
         let live_meta_installed =
-          Keeper_registry.update_entry_exact reg (fun current ->
-            { current with meta = live_meta })
-          |> log_exact_update_outcome reg ~site:"start_keepalive.live_meta"
+          (match lifecycle_token with
+           | None ->
+             Keeper_registry.update_entry_exact reg (fun current ->
+               { current with meta = live_meta })
+           | Some token ->
+             Keeper_registry.update_entry_exact_for_lifecycle token reg (fun current ->
+               { current with meta = live_meta }))
+          |> Keeper_registry.exact_update_succeeded reg ~site:"start_keepalive.live_meta"
         in
         if not live_meta_installed
         then (
@@ -976,7 +1127,7 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
             ~base_path:ctx.config.base_path
             ~keeper_name:live_meta.name
             ~failure_reason;
-          match
+          (match
             Keeper_lane.reject_before_start
               reg.lane
               ~reason:(Failure "lane ownership lost before fork")
@@ -986,7 +1137,8 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
             Log.Keeper.warn
               "%s: failed to close rejected stale lane: %s"
               live_meta.name
-              (Keeper_lane.start_error_to_string error))
+              (Keeper_lane.start_error_to_string error));
+          Keepalive_lane_ownership_lost)
         else (
         (* Telemetry feedback refresh loop removed in #6814:
          behavioral_stats no longer consumed by build_prompt. *)
@@ -1136,14 +1288,15 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
         run_heartbeat_loop ~proactive_warmup_sec ctx live_meta stop ~wakeup)
              ~cleanup:cleanup_tracking
          with
-         | Ok () -> ()
+         | Ok () -> Keepalive_started reg
          | Error error ->
            let detail = Keeper_lane.start_error_to_string error in
            record_keeper_crashed
              reg
              ~base_path:ctx.config.base_path
              ~keeper_name:live_meta.name
-             ~failure_reason:(Keeper_registry.Exception detail)))
+             ~failure_reason:(Keeper_registry.Exception detail);
+           Keepalive_fork_rejected error))
         )
 ;;
 

@@ -127,7 +127,8 @@ let blocker_class_indicates_overflow (klass : blocker_class) : bool =
   | Sdk_guardrail_violation
   | Sdk_tripwire_violation
   | Sdk_exit_condition_met
-  | Sdk_input_required -> false
+  | Sdk_input_required
+  | Sdk_tool_failure_recovery_failed -> false
 
 type rollover_gate_decision =
   | Skip of string

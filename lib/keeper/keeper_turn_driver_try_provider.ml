@@ -51,6 +51,7 @@ type try_provider_ctx =
   ; checkpoint_sidecar : Yojson.Safe.t option
   ; cache_system_prompt : bool
   ; yield_on_tool : bool
+  ; tool_failure_judge : Agent_sdk.Tool_failure_recovery.judge option
   ; compact_ratio : float option
   ; context_window_tokens : int option
   ; oas_auto_context_overflow_retry : bool
@@ -361,16 +362,29 @@ let apply_accept
       ~accept
       (run_result : Runtime_agent.run_result)
   =
-  if accept run_result.response then Ok run_result
-  else
-    let last_tool_context =
-      accept_rejection_context_of_run_result ~initial_messages run_result
-    in
-    Error
-      (accept_rejected_error
-         ~last_tool_context
-         ~runtime_id
-         ~response:run_result.response)
+  match run_result.stop_reason with
+  | Runtime_agent.InputRequired _
+  | Runtime_agent.ToolFailureRecoveryDeferred _ ->
+    (* These are typed host-control terminals, not model deliverables. Running
+       the normal response accept predicate over their question/blank carrier
+       would turn them into [Accept_rejected] and incorrectly rotate providers,
+       discarding the checkpoint that carries the recovery receipt. *)
+    Ok run_result
+  | Runtime_agent.Completed
+  | Runtime_agent.TurnBudgetExhausted _
+  | Runtime_agent.MutationBoundaryReached _
+  | Runtime_agent.Yielded_to_chat_waiting _
+  | Runtime_agent.Yielded_to_durable_stimulus _ ->
+    if accept run_result.response then Ok run_result
+    else
+      let last_tool_context =
+        accept_rejection_context_of_run_result ~initial_messages run_result
+      in
+      Error
+        (accept_rejected_error
+           ~last_tool_context
+           ~runtime_id
+           ~response:run_result.response)
 
 (** Run a single provider attempt within the runtime.
 
@@ -491,6 +505,7 @@ let run_try_provider
           ; raw_trace = ctx.raw_trace
           ; trace_link = ctx.trace_link
           ; yield_on_tool = ctx.yield_on_tool
+          ; tool_failure_judge = ctx.tool_failure_judge
           ; runtime_mcp_policy
           }
   in

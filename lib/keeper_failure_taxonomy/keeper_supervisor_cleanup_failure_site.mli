@@ -1,14 +1,12 @@
 (** Keeper_supervisor_cleanup_failure_site — closed sum for [site] label on
-    [metric_keeper_supervisor_cleanup_failures] (7 sites in
-    keeper_supervisor.ml). *)
+    [metric_keeper_supervisor_cleanup_failures]. *)
 
 type t =
   | Fiber_start_rejected
   | Reconcile_gate_rejected
-  | Dead_tombstone_meta_write
-  | Dead_tombstone_meta_missing
-  | Dead_tombstone_meta_error
+  | Dead_tombstone_submission
   | Force_watchdog_crash
-  | Paused_meta_prune
+  | Paused_meta_read
+  | Paused_meta_prune_submission
 
 val to_label : t -> string

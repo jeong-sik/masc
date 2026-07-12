@@ -695,6 +695,11 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
       Log.Keeper.warn
         "%s: stale supervisor entry was not unregistered because a newer lane owns the name"
         entry.name
+    | Keeper_registry.Exact_unregister_lifecycle_reserved owner ->
+      Log.Keeper.info
+        "%s: stale registry unregister deferred to lifecycle transaction owner: %s"
+        entry.name
+        (Keeper_lifecycle_reservation.snapshot_to_string owner)
   in
   List.iter
     (fun (entry : Keeper_registry.registry_entry) ->
@@ -772,16 +777,11 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
          msg
          entry.restart_count))
     final_acc.to_mark_dead;
-  (* RFC-0036 Phase A.2: fire Tombstone_reaped after cleanup completes.
-     Hook is exception-safe; supervisor never observes failure. *)
+  (* Submit exact-lane durable finalization. [Dead_cleaned] and
+     [Tombstone_reaped] are emitted only by the completion receipt handler. *)
   List.iter
     (fun (entry : Keeper_registry.registry_entry) ->
-       cleanup_dead_tombstone ctx entry;
-       Keeper_lifecycle_hooks.run
-         ~base_dir:(Workspace.masc_root_dir ctx.config)
-         ~meta:entry.meta
-         ~keeper_id:entry.name
-         Keeper_lifecycle_hooks.Tombstone_reaped)
+       cleanup_dead_tombstone ctx entry)
     final_acc.to_cleanup_dead;
   let active_count =
     Keeper_registry.all ~base_path () |> active_supervision_keeper_count
@@ -794,19 +794,76 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
   List.iter
     (fun ((old_entry : Keeper_registry.registry_entry), crash_msg) ->
        let attempt = old_entry.restart_count + 1 in
-       Otel_metric_store.inc_counter
-         Keeper_metrics.(to_string RestartAttempts)
-         ~labels:[ "keeper", old_entry.name ]
-         ();
        match read_effective_meta ctx.config old_entry.name with
        | Ok (Some meta) ->
-         (* RFC-0002: dispatch restart attempt event *)
-         Keeper_registry.dispatch_event_unit
-           ~base_path
-           old_entry.name
-           (Keeper_state_machine.Supervisor_restart_attempt { attempt });
-         let old_crash_log = old_entry.crash_log in
-         (* R-A-6.a guard: register_restarting refuses revival when the
+         let lifecycle_state =
+           Keeper_lifecycle_admission.state
+             ~paused:meta.paused
+             ~latched_reason:meta.latched_reason
+         in
+         (match Keeper_lifecycle_admission.admit_autonomous lifecycle_state with
+          | Keeper_lifecycle_admission.Autonomous_denied denial ->
+            let reason =
+              Keeper_lifecycle_admission.autonomous_denial_to_wire denial
+            in
+            (* The persisted meta won the admission decision, so make the
+               registry observe that same authoritative snapshot before
+               publishing the denial.  In particular, a stale [Running]
+               registry entry paired with a persisted dead tombstone must
+               become [Dead], not remain an apparently live lane that can be
+               selected by phase-only consumers. *)
+            Keeper_registry.update_meta
+              ~base_path
+              old_entry.name
+              meta;
+            (match denial with
+             | Keeper_lifecycle_admission.Autonomous_dead_tombstone ->
+               Keeper_registry.mark_dead ~base_path old_entry.name ~at:now
+             | Keeper_lifecycle_admission.Autonomous_paused _ -> ());
+            let denial_phase =
+              match Keeper_registry.get ~base_path old_entry.name with
+              | Some entry -> Some entry.phase
+              | None -> None
+            in
+            Otel_metric_store.inc_counter
+              Keeper_metrics.(to_string LifecycleDispatchRejections)
+              ~labels:
+                [ "keeper", old_entry.name
+                ; "event", "supervisor_restart"
+                ; "reason", reason
+                ]
+              ();
+            Otel_metric_store.inc_counter
+              Keeper_metrics.(to_string RestartOutcomes)
+              ~labels:[ "keeper", old_entry.name; "outcome", "lifecycle_denied" ]
+              ();
+            publish_lifecycle
+              ~event:
+                (Keeper_lifecycle_events.Custom_event
+                   { verb = Keeper_lifecycle_events.Admission_denied
+                   ; phase = denial_phase
+                   })
+              old_entry.name
+              reason
+              ();
+            Log.Keeper.info
+              "%s: supervisor restart denied by lifecycle admission: %s"
+              old_entry.name
+              reason
+          | Keeper_lifecycle_admission.Autonomous_admitted ->
+            Otel_metric_store.inc_counter
+              Keeper_metrics.(to_string RestartAttempts)
+              ~labels:[ "keeper", old_entry.name ]
+              ();
+            (* RFC-0002: dispatch restart attempt event only after lifecycle
+               admission. A paused/terminal lane must not consume restart
+               budget or enter the restarting FSM. *)
+            Keeper_registry.dispatch_event_unit
+              ~base_path
+              old_entry.name
+              (Keeper_state_machine.Supervisor_restart_attempt { attempt });
+            let old_crash_log = old_entry.crash_log in
+            (* R-A-6.a guard: register_restarting refuses revival when the
             prior entry's restart_budget was already exhausted (TLA+ §S3
             BudgetNeverRevives).  In normal sweeps this never fires —
             the [restart_count >= max_restarts] gate at line ~1468 routes
@@ -842,6 +899,11 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
               Keeper_metrics.(to_string RestartOutcomes)
               ~labels:[ "keeper", old_entry.name; "outcome", "shutdown_reserved" ]
               ()
+          | Error (Keeper_registry.Restart_lifecycle_reserved owner) ->
+            Log.Keeper.info
+              "%s: supervisor restart deferred to lifecycle transaction owner: %s"
+              old_entry.name
+              (Keeper_lifecycle_reservation.snapshot_to_string owner)
           | Error (Keeper_registry.Restart_event_queue_unavailable { keeper_name; detail }) ->
             Log.Keeper.error
               "%s: restart refused because durable event queue is unavailable: %s"
@@ -900,7 +962,7 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
               Otel_metric_store.inc_counter
                 Keeper_metrics.(to_string NearExhaustionTotal)
                 ~labels:[ "keeper", old_entry.name ]
-                ()))
+                ())))
        | _ ->
          Otel_metric_store.inc_counter
            Keeper_metrics.(to_string RestartOutcomes)
@@ -925,8 +987,16 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
                     ~keeper_name:meta.name)
        -> restore_reconcile_continue_gate ctx meta
      | Ok (Some _)
-     | Ok None
-     | Error _ -> ());
+     | Ok None -> ()
+     | Error detail ->
+       Otel_metric_store.inc_counter
+         Keeper_metrics.(to_string ReconcileFailures)
+         ~labels:[ "keeper", name; "phase", "paused_reconcile_meta_read" ]
+         ();
+       Log.Keeper.error
+         "%s: paused reconcile metadata read failed: %s"
+         name
+         detail);
     Eio_guard.yield_step sweep_names_ym);
   (* Phase 3: prune stale paused keeper meta files from disk. Keep
      reconcile-recovery pauses until the operator explicitly resolves them. *)
@@ -944,66 +1014,13 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
                   (Keeper_approval_queue.has_blocking_pending_for_keeper
                      ~keeper_name:meta.name)
         ->
-        let path = Keeper_types_profile.keeper_meta_path ctx.config name in
-        (try
-           Sys.remove path;
-           (* Record why the pruned meta was latched before the on-disk record
-              is gone. [meta] was read above (pre-[Sys.remove]), so the reason
-              survives in the event even though the file no longer does. *)
-           let latched_reason_detail =
-             match meta.latched_reason with
-             | Some reason ->
-               Printf.sprintf
-                 " latched_reason=%s"
-                 (Keeper_latched_reason.to_wire reason)
-             | None -> ""
-           in
-           publish_lifecycle
-             ~event:
-               (Keeper_lifecycle_events.Custom_event
-                  { verb = Keeper_lifecycle_events.Paused_pruned; phase = None })
-             name
-             (Printf.sprintf
-                "last_updated=%s%s"
-                meta.updated_at
-                latched_reason_detail)
-             ();
-           (* The durable record is gone; a surviving registry entry would be
-              a ghost — still a board-wake candidate (Paused is accepted by
-              [board_signal_entry_is_wakeup_candidate]), and any later
-              [write_meta] through it resurrects the pruned file at
-              meta_version=1. [keeper_down]'s remove_meta branch pairs
-              [Sys.remove] with [unregister]; mirror that here (RFC-0334 W3
-              census #23837, freshness caveat 1). *)
-           Keeper_registry.unregister ~base_path name;
-           (* K4c — keeper fully forgotten: reclaim its accumulator slot,
-              matching the unregister sites above. *)
-           Keeper_tool_emission_hook.drop_keeper_accumulator name;
-           Log.Keeper.info "%s: stale paused meta pruned" name
-         with
-         | Eio.Cancel.Cancelled _ ->
-           (* supervisor finally cleanup cancelled: cleanup arms must not
-              re-raise cancellation, because [Fun.protect] wraps exceptions
-              raised from cleanup as [Fun.Finally_raised] and can re-arm the
-              2026-05-05 cycle9 incident. *)
-           Log.Keeper.debug
-             "%s: supervisor finally cleanup cancelled during paused meta prune"
-             name
-         | exn ->
-           Log.Keeper.warn
-             "%s: paused meta prune failed: %s"
-             name
-             (Printexc.to_string exn);
-              Otel_metric_store.inc_counter
-                Keeper_metrics.(to_string SupervisorCleanupFailures)
-                ~labels:
-               [ "keeper", name
-               ; ("site", Keeper_supervisor_cleanup_failure_site.(to_label Paused_meta_prune))
-               ]
-             ())
+        Keeper_supervisor_cleanup_paused.submit ctx meta
       | Ok (Some _)
-      | Ok None
-      | Error _ -> ());
+      | Ok None -> ()
+      | Error detail ->
+        Keeper_supervisor_cleanup_paused.report_meta_read_failure
+          ~keeper_name:name
+          detail);
     Eio_guard.yield_step sweep_names_ym);
   (* Phase 3.5: self-healing circuit breaker — auto-resume keepers that were
      auto-paused and whose explicit pause timer has elapsed.  Clearing
@@ -1047,6 +1064,10 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
                 resumed_meta
             with
             | Ok () ->
+              Keeper_registry.update_meta
+                ~base_path:ctx.config.base_path
+                name
+                resumed_meta;
               Keeper_turn_livelock.reset_keeper_livelock
                 ~base_path:ctx.config.base_path
                 ~keeper:name;
@@ -1056,7 +1077,13 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
                    ~base_path:ctx.config.base_path
                    name
                    Keeper_state_machine.Operator_resume;
-                 Keeper_registry.wakeup ~base_path:ctx.config.base_path name
+                 let (_ : Keeper_registry.wakeup_outcome) =
+                   Keeper_registry.wakeup
+                     ~intent:Keeper_registry.Supervisor_resume
+                     ~base_path:ctx.config.base_path
+                     name
+                 in
+                 ()
                | None -> ());
               publish_lifecycle
                 ~event:
@@ -1088,8 +1115,16 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
          | None, Some _
          | None, None -> ())
       | Ok (Some _)
-      | Ok None
-      | Error _ -> ());
+      | Ok None -> ()
+      | Error detail ->
+        Otel_metric_store.inc_counter
+          Keeper_metrics.(to_string ReconcileFailures)
+          ~labels:[ "keeper", name; "phase", "auto_resume_meta_read" ]
+          ();
+        Log.Keeper.error
+          "%s: auto-resume metadata read failed: %s"
+          name
+          detail);
     Eio_guard.yield_step sweep_names_ym);
   (* Phase 4: reconcile LAST — only orphaned durable keepers *)
   reconcile_keepalive_keepers ~load_or_materialize_keeper_meta ctx

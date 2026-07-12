@@ -485,7 +485,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           p.name (Keeper_id.Trace_id.to_string meta.runtime.trace_id);
         Progress.Tracker.step tracker ~message:"Starting keepalive loop" ();
         Log.Keeper.info "create_keeper: starting keepalive for name=%s" p.name;
-        start_keepalive ctx meta;
+        let launch_outcome = start_keepalive ctx meta in
         (* Apply per-persona shard configuration if present *)
         (match p.profile_defaults.shards with
          | Some (_ :: _ as shard_names) ->
@@ -493,6 +493,8 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                p.name (List.length shard_names);
              Tool_shard.set_agent_shards p.name shard_names
          | Some [] | None -> ());
+        (match launch_outcome with
+         | Keepalive_started _ ->
         Progress.Tracker.complete tracker ~message:"Keeper created" ();
         Log.Keeper.info "create_keeper: completed for name=%s trace_id=%s" p.name (Keeper_id.Trace_id.to_string meta.runtime.trace_id);
         let json = `Assoc [
@@ -519,4 +521,17 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           ("handoff_threshold", `Float meta.handoff_threshold);
           ("oas_env", `Assoc (List.map (fun (k, v) -> (k, `String v)) meta.oas_env));
         ] in
-        tool_result_ok (Yojson.Safe.to_string json))
+        tool_result_ok (Yojson.Safe.to_string json)
+         | ( Keepalive_already_registered _
+           | Keepalive_lifecycle_denied _
+           | Keepalive_identity_unrepairable
+           | Keepalive_spawn_slot_denied _
+           | Keepalive_registration_rejected _
+           | Keepalive_fiber_start_rejected _
+           | Keepalive_lane_ownership_lost
+           | Keepalive_fork_rejected _ ) as rejected ->
+           Progress.stop_tracking task_id;
+           tool_result_error
+             (Printf.sprintf
+                "keeper metadata was created but lane launch failed: %s"
+                (start_keepalive_outcome_to_string rejected))))

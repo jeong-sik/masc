@@ -206,11 +206,6 @@ let format_docker_exec_error ~head_program ~st ~out =
   | Unix.WSTOPPED n -> Printf.sprintf "docker_%s_stopped: signal=%d" head_program n
 ;;
 
-let container_missing_error out =
-  String_util.contains_substring_ci out "no such container"
-  || String_util.contains_substring_ci out "is not running"
-;;
-
 let image_preflight_start_error (failure : Keeper_sandbox_runtime.classified_error) =
   Keeper_sandbox_runtime.docker_image_preflight_failure_message
     ~prefix:"docker_container_start_failed"
@@ -700,21 +695,41 @@ let inspect_container_exists ~timeout_sec container_name =
 ;;
 
 let inspect_container_running ~timeout_sec container_name =
-  let inspect_argv =
-    Keeper_sandbox_runtime.docker_command_argv ()
-    @ [ "inspect"; "--format"; "{{.State.Running}}"; container_name ]
-  in
-  let inspect_st, inspect_out =
-    run_argv_with_status_retry_eintr ~timeout_sec inspect_argv
-  in
-  match inspect_st, String.trim inspect_out with
-  | Unix.WEXITED 0, "true" -> Ok ()
-  | Unix.WEXITED 0, state ->
-    Error
-      (Printf.sprintf
-         "docker_container_not_running: %s"
-         (if state = "" then "<empty>" else state))
-  | _ -> Error inspect_out
+  match Keeper_sandbox_runtime.probe_container_state ~container_name ~timeout_sec with
+  | Ok Keeper_sandbox_runtime.Docker_container_running -> Ok ()
+  | Ok Keeper_sandbox_runtime.Docker_container_stopped ->
+    Error (Printf.sprintf "docker container %s is stopped" container_name)
+  | Ok Keeper_sandbox_runtime.Docker_container_absent ->
+    Error (Printf.sprintf "docker container %s is absent" container_name)
+  | Error _ as error -> error
+;;
+
+type failed_exec_recovery =
+  | Preserve_failed_exec
+  | Restart_failed_exec
+  | Failed_exec_state_probe_error of string
+
+let failed_exec_recovery (t : t) =
+  match get_state t with
+  | Not_started -> Restart_failed_exec
+  | Running { container_name } ->
+    (match
+       Keeper_sandbox_runtime.probe_container_state
+         ~container_name
+         ~timeout_sec:(container_inspect_timeout_sec ())
+     with
+     | Ok Keeper_sandbox_runtime.Docker_container_running -> Preserve_failed_exec
+     | Ok Keeper_sandbox_runtime.Docker_container_stopped
+     | Ok Keeper_sandbox_runtime.Docker_container_absent -> Restart_failed_exec
+     | Error detail -> Failed_exec_state_probe_error detail)
+;;
+
+let failed_exec_state_probe_error ~status ~output detail =
+  Printf.sprintf
+    "docker_container_state_probe_failed_after_exec: status=%s output=%s probe_error=%s"
+    (Keeper_sandbox_exec_failure.status_label status)
+    (Keeper_sandbox_runtime.docker_failure_output_for_log output)
+    detail
 ;;
 
 let start_container (t : t) ~timeout_sec =
@@ -981,21 +996,29 @@ let run_exec_with_status_split
       ~command_argv
   with
   | Error _ as err -> err
-  | Ok ((Unix.WEXITED 126 | Unix.WEXITED 127), stdout, stderr)
-    when container_missing_error (output_for_status ~stdout ~stderr) ->
-    set_state t Not_started;
-    (match
-       run_exec_with_status_split_once
-         ?stdin_content
-         ?on_stdout_chunk
-         ?on_stderr_chunk
-         t
-         ~timeout_sec
-         ~cwd
-         ~command_argv
-     with
-     | Ok _ as ok -> ok
-     | Error _ as err -> err)
+  | Ok (((Unix.WEXITED 126 | Unix.WEXITED 127) as status), stdout, stderr) as failed ->
+    (match failed_exec_recovery t with
+     | Preserve_failed_exec -> failed
+     | Restart_failed_exec ->
+       set_state t Not_started;
+       (match
+          run_exec_with_status_split_once
+            ?stdin_content
+            ?on_stdout_chunk
+            ?on_stderr_chunk
+            t
+            ~timeout_sec
+            ~cwd
+            ~command_argv
+        with
+        | Ok _ as ok -> ok
+        | Error _ as err -> err)
+     | Failed_exec_state_probe_error detail ->
+       Error
+         (failed_exec_state_probe_error
+            ~status
+            ~output:(output_for_status ~stdout ~stderr)
+            detail))
   | Ok other -> Ok other
 ;;
 
@@ -1106,20 +1129,28 @@ let run_exec_pipeline_with_status ?on_stdout_chunk ?on_stderr_chunk ~timeout_sec
       ~stages
   with
   | Error _ as err -> err
-  | Ok ((Unix.WEXITED 126 | Unix.WEXITED 127), stdout, stderr)
-    when container_missing_error (output_for_status ~stdout ~stderr) ->
-    set_state t Not_started;
-    (match
-       run_exec_pipeline_with_status_once
-         t
-         ~timeout_sec
-         ?on_stdout_chunk
-         ?on_stderr_chunk
-         ~cwd
-         ~stages
-     with
-     | Ok _ as ok -> ok
-     | Error _ as err -> err)
+  | Ok (((Unix.WEXITED 126 | Unix.WEXITED 127) as status), stdout, stderr) as failed ->
+    (match failed_exec_recovery t with
+     | Preserve_failed_exec -> failed
+     | Restart_failed_exec ->
+       set_state t Not_started;
+       (match
+          run_exec_pipeline_with_status_once
+            t
+            ~timeout_sec
+            ?on_stdout_chunk
+            ?on_stderr_chunk
+            ~cwd
+            ~stages
+        with
+        | Ok _ as ok -> ok
+        | Error _ as err -> err)
+     | Failed_exec_state_probe_error detail ->
+       Error
+         (failed_exec_state_probe_error
+            ~status
+            ~output:(output_for_status ~stdout ~stderr)
+            detail))
   | Ok other -> Ok other
 ;;
 
@@ -1189,10 +1220,11 @@ let run_bash_with_status ~timeout_sec (t : t) ~(cwd : string) ~(cmd : string) ()
         ~stdin_content:cmd
         argv
     in
-    if container_missing_error out
-    then (
-      match st with
-      | Unix.WEXITED (126 | 127) ->
+    (match st with
+     | (Unix.WEXITED (126 | 127) as status) ->
+       (match failed_exec_recovery t with
+        | Preserve_failed_exec -> Ok (st, out)
+        | Restart_failed_exec ->
         set_state t Not_started;
         (match ensure_started t ~timeout_sec with
          | Error _ as err -> err
@@ -1202,8 +1234,9 @@ let run_bash_with_status ~timeout_sec (t : t) ~(cwd : string) ~(cmd : string) ()
              (run_argv_with_stdin_and_status_retry_eintr
                 ~stdin_content:cmd
                 argv))
-      | _ -> Ok (st, out))
-    else Ok (st, out)
+        | Failed_exec_state_probe_error detail ->
+          Error (failed_exec_state_probe_error ~status ~output:out detail))
+     | _ -> Ok (st, out))
 ;;
 
 let write_file_common

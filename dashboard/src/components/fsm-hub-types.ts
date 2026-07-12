@@ -398,7 +398,7 @@ export function operatorDispositionLabel(value: string | null | undefined): stri
 }
 
 /** Korean labels for `execution.operator_disposition_reason`. Backend
- *  emits 15 closed-sum values via
+ *  emits closed-sum values via
  *  `Keeper_execution_receipt.operator_disposition_reason_to_string`. Paired with
  *  {!operatorDispositionLabel} at every emit site — same atomic
  *  coverage as the attention_reason / next_human_action pair fixed
@@ -414,6 +414,8 @@ const OPERATOR_DISPOSITION_REASON_LABELS: Record<string, string> = {
   internal_error: '내부 오류',
   tool_route_recoverable_failure: '도구 라우팅 복구 가능 실패',
   completion_contract_unsatisfied: '완료 계약 미충족',
+  input_required: '사용자 입력 대기',
+  passive_no_action: '수동 대기',
   turn_budget_exhausted: '턴 예산 소진',
   turn_livelock_blocked: '턴 livelock 차단',
   cancelled: '취소됨',

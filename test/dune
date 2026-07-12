@@ -43,6 +43,8 @@
   test_policy_source_of_status
   test_keeper_mention_scope
   test_keeper_lane_mentions
+  test_keeper_chat_delivery_identity
+  test_keeper_chat_delivery_journal
   test_keeper_librarian_retry
   test_surface_ref
   test_admission_fd_gate
@@ -407,6 +409,8 @@
   test_policy_source_of_status
   test_keeper_mention_scope
   test_keeper_lane_mentions
+  test_keeper_chat_delivery_identity
+  test_keeper_chat_delivery_journal
   test_keeper_librarian_retry
   test_surface_ref
   test_admission_fd_gate
@@ -764,6 +768,11 @@
 (test
  (name test_keeper_event_queue_state_v2)
  (modules test_keeper_event_queue_state_v2)
+ (libraries alcotest masc_test_deps))
+
+(test
+ (name test_keeper_failure_judgment_contract)
+ (modules test_keeper_failure_judgment_contract)
  (libraries alcotest masc_test_deps))
 
 (test
@@ -2235,15 +2244,12 @@
 
 (include stanzas/test_release_train_guard_script.inc)
 
-(include stanzas/test_reqd_invalid_state_swallow.inc)
 
 (include stanzas/test_server_state_product.inc)
 
 (include stanzas/test_server_discord_trigger_policy.inc)
 
 (include stanzas/test_server_slack_trigger_policy.inc)
-
-(include stanzas/test_shell_parse_site_ratchet.inc)
 
 (include stanzas/test_smart_heartbeat_keepalive.inc)
 

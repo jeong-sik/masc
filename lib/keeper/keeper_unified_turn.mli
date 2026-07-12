@@ -214,6 +214,15 @@ type turn_failure =
     The heartbeat queue settles from this value; it must not reconstruct a
     possibly rotated runtime from Keeper meta. *)
 
+type turn_success =
+  | Turn_completed of Keeper_meta_contract.keeper_meta
+  | Turn_cancelled of Keeper_meta_contract.keeper_meta
+  | Turn_skipped of Keeper_meta_contract.keeper_meta
+(** Typed non-error result of the unified turn boundary. Only
+    [Turn_completed] proves that the action path ran successfully.
+    Supervisor cancellation and a non-executable phase remain distinct so a
+    durable source lease cannot be acknowledged as completed work. *)
+
 val run_keeper_cycle
   :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
@@ -225,8 +234,9 @@ val run_keeper_cycle
   -> ?shared_context:Agent_sdk.Context.t
   -> ?event_bus:Agent_sdk.Event_bus.t
   -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
+  -> ?continuation_delivery_channel:Keeper_continuation_channel.t
   -> unit
-  -> (Keeper_meta_contract.keeper_meta, turn_failure) result
+  -> (turn_success, turn_failure) result
 
 (** Run a unified keeper turn.
 

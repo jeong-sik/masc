@@ -48,7 +48,9 @@ type pacing_class =
 
 (** Why a different runtime is tried in the same turn. *)
 type rotate_class =
-  | Auth_failed  (** this runtime's credential is invalid; others differ *)
+  | Auth_failed
+      (** this runtime's credential is invalid or lacks authorization;
+          other runtimes may use a different credential scope *)
   | Model_unavailable  (** model/endpoint not found on this runtime *)
   | Resumable_cli_session  (** CLI session can resume on a recovery lane *)
   | Candidates_filtered  (** candidate set emptied after cycles *)
@@ -79,6 +81,33 @@ type judgment_class =
           family errors; judgment is the fail-open route that keeps the
           keeper alive *)
 
+(** Typed origin of a judgment request. The route class says what kind of
+    decision is needed; this provenance says which execution boundary produced
+    it. [Oas_agent_idle_detected] retains the behavioral counter that was
+    previously collapsed into [Contract_violation]. [Legacy_unattributed] is a
+    decode-only state for persisted pre-provenance stimuli and is never emitted
+    by current producers. *)
+type judgment_provenance =
+  | Oas_api_error
+  | Oas_provider_error
+  | Oas_agent_idle_detected of { consecutive_idle_turns : int }
+  | Oas_agent_error
+  | Oas_mcp_error
+  | Oas_config_error
+  | Oas_serialization_error
+  | Oas_io_error
+  | Oas_orchestration_error
+  | Oas_internal_error
+  | Masc_internal_error
+  | Completion_contract
+  | Legacy_unattributed
+
+type error_boundary =
+  | Masc_execution
+  | Oas_execution
+(** Actual producer boundary supplied by the caller. Ambiguous SDK constructors
+    such as [Config] and [Internal] do not carry their own origin. *)
+
 type route =
   | Retry_after_pacing of
       { pacing : pacing_class
@@ -90,17 +119,17 @@ type route =
   | Rotate_now of { rotate : rotate_class }
   | Escalate_judgment of
       { judgment : judgment_class
+      ; provenance : judgment_provenance
       ; detail : string
         (** display-only failure summary for the judgment prompt, bounded
             by [Keeper_internal_error.cap_blocker_detail]. Never matched. *)
       }
 
-val route_of_error : Agent_sdk.Error.sdk_error -> route
-(** Total over every [sdk_error] class: MASC-internal classified errors
-    route by their [Keeper_internal_error.masc_internal_error] variant;
-    raw API/Provider errors route by their typed payloads; the non-provider
-    families ([Agent]/[Mcp]/[Config]/[Serialization]/[Io]/[Orchestration]/
-    [Internal]) escalate for judgment. No arm returns "no route". *)
+val route_of_error : boundary:error_boundary -> Agent_sdk.Error.sdk_error -> route
+(** Total over every [sdk_error] class. The caller supplies the actual execution
+    boundary so constructors shared by MASC and OAS are never used as provenance
+    inference. MASC-internal typed envelopes are decoded only at
+    [Masc_execution]. No arm returns "no route". *)
 
 val retry_after_of_route : route -> float option
 (** [Some hint] only for [Retry_after_pacing] carrying a provider hint.
@@ -113,6 +142,23 @@ val route_kind_label : route -> string
 val pacing_class_label : pacing_class -> string
 val rotate_class_label : rotate_class -> string
 val judgment_class_label : judgment_class -> string
+
+val judgment_provenance_label : judgment_provenance -> string
+(** Stable wire/telemetry label. The idle counter remains a typed field and is
+    not embedded in this label. *)
+
+val judgment_provenance_same_boundary :
+  judgment_provenance -> judgment_provenance -> bool
+(** Typed durable-identity comparison. Two idle-detected values share the same
+    producer boundary even when their observation counts differ; no routing
+    decision is derived from wire labels. *)
+
+val judgment_provenance_to_yojson : judgment_provenance -> Yojson.Safe.t
+
+val judgment_provenance_of_yojson :
+  Yojson.Safe.t -> (judgment_provenance, string) result
+(** Total codec for durable queue stimuli. Unknown kinds and invalid idle
+    counters are explicit [Error] values. *)
 
 val route_class_label : route -> string
 (** The route's class label ([pacing_class_label] / [rotate_class_label] /

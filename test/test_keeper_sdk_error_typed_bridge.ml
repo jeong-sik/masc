@@ -8,8 +8,8 @@
 
     Coverage:
     - all [api_error] variants (RateLimited / Overloaded / ServerError /
-      AuthError / PaymentRequired / InvalidRequest / NotFound / ContextOverflow /
-      NetworkError / Timeout)
+      AuthError / AuthorizationError / PaymentRequired / InvalidRequest /
+      NotFound / ContextOverflow / NetworkError / Timeout)
     - agent_error variants reached via [SdkE.Agent _] routing
     - all top-level non-Agent / non-Api wrappers (Mcp / Config /
       Serialization / Io / Orchestration / Internal) *)
@@ -38,6 +38,9 @@ let api_cases : (string * SdkE.api_error * string) list =
     , Retry.ServerError { status = 502; message = "" }
     , "api_error_server:502" )
   ; "AuthError", Retry.AuthError { message = "" }, "api_error_auth"
+  ; ( "AuthorizationError"
+    , Retry.AuthorizationError { message = "permission refused" }
+    , "api_error_authorization" )
   ; ( "PaymentRequired"
     , Retry.PaymentRequired { message = "billing required" }
     , "api_error_payment_required" )
@@ -88,6 +91,14 @@ let sdk_cases : (string * SdkE.sdk_error * string) list =
   ; ( "Api/Timeout"
     , SdkE.Api (Retry.Timeout { message = "60s"; phase = None })
     , "api_error_timeout" )
+  ; ( "Api/AuthorizationError"
+    , SdkE.Api (Retry.AuthorizationError { message = "permission refused" })
+    , "api_error_authorization" )
+  ; ( "Provider/AuthorizationError"
+    , SdkE.Provider
+        (Llm_provider.Error.AuthorizationError
+           { provider = "provider"; detail = "permission refused" })
+    , "provider_error_authorization" )
   ; "Mcp", SdkE.Mcp (SdkE.InitializeFailed { detail = "boot" }), "mcp_error"
   ; "Config", SdkE.Config (SdkE.MissingEnvVar { var_name = "X" }), "config_error"
   ; ( "Serialization"

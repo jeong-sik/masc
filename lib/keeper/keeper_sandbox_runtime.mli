@@ -32,6 +32,7 @@ type docker_preflight =
 type cleanup_result =
   { scanned : int
   ; removed : int
+  ; already_absent : int
   ; errors : string list
   }
 
@@ -60,6 +61,11 @@ type stop_result =
   ; removed : int
   ; errors : string list
   }
+
+type docker_container_state =
+  | Docker_container_running
+  | Docker_container_stopped
+  | Docker_container_absent
 
 (** Resolve the Docker CLI from the current [PATH]. This keeps Docker
     calls deterministic after the Eio process manager has been
@@ -301,9 +307,18 @@ val stop_containers
   -> unit
   -> stop_result
 
+(** Query a named container through Docker's machine-oriented state and name
+    inventory projections. Human-readable stderr is retained only as
+    diagnostics and never determines the returned state. *)
+val probe_container_state
+  :  container_name:string
+  -> timeout_sec:float
+  -> (docker_container_state, string) result
+
 (** Best-effort cleanup for stale MASC keeper sandbox containers under the
     same base path. Only containers with the keeper sandbox labels are
-    considered. *)
+    considered. [already_absent] counts containers that disappeared after the
+    labeled Docker snapshot and before inspect/removal completed. *)
 val cleanup_stale_containers
   :  ?now:float
   -> ?max_age_sec:float

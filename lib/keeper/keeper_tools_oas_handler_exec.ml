@@ -103,6 +103,7 @@ let execute_with_observers
       ?proc_mgr
       ?net
       ?mcp_session_id
+      ?continuation_channel
       ~(failure_counts : failure_counts)
       ~(key : string)
       ~(input : Yojson.Safe.t)
@@ -125,6 +126,7 @@ let execute_with_observers
           ?proc_mgr
           ?net
           ?mcp_session_id
+          ?continuation_channel
           ~name
           ~input
           ())

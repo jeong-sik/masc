@@ -577,6 +577,14 @@ let run_cmd host port cli_base_path =
   acquire_pid_lock port;
   acquire_base_path_lock normalized_base_path;
   Log.init_from_env ();
+  let shutdown_cfg =
+    match Masc.Shutdown.config_from_env_result () with
+    | Ok config -> config
+    | Error error ->
+        Log.Server.error "[FATAL] Invalid shutdown configuration: %s"
+          (Masc.Shutdown.config_error_to_string error);
+        exit 1
+  in
   (* Decouple console mirror writes from the Eio domain before any keeper
      boots: with fd 2 on a pty, a full pty buffer (scrollback/copy-mode)
      blocks write(2) outside the scheduler and halts the whole fleet
@@ -657,24 +665,17 @@ let run_cmd host port cli_base_path =
             Eio.Time.sleep clock 0.05;
             await_shutdown_signal ()
         | Some signal ->
-            let shutdown_cfg = Masc.Shutdown.config_from_env () in
             let force_timeout = shutdown_cfg.force_timeout_s in
             let t_shutdown_start = Unix.gettimeofday () in
             let signal_name = shutdown_signal_name signal in
-            (match
-               Masc.Shutdown.start_process_deadline_watchdog
-                 ~timeout_s:force_timeout
-             with
-             | Ok watchdog ->
-                 Atomic.set shutdown_watchdog (Some watchdog);
-                 Log.Server.info
-                   "[MASC] Received %s, shutting down gracefully (timeout=%.0fs, hard_exit=%d)..."
-                   signal_name force_timeout Masc.Shutdown.process_deadline_exit_code
-             | Error error ->
-                 Log.Server.error
-                   "[MASC] Invalid graceful shutdown deadline: %s"
-                   (Masc.Shutdown.deadline_error_to_string error);
-                 exit 1);
+            let watchdog =
+              Masc.Shutdown.start_process_deadline_watchdog_or_exit
+                ~timeout_s:force_timeout
+            in
+            Atomic.set shutdown_watchdog (Some watchdog);
+            Log.Server.info
+              "[MASC] Received %s, shutting down gracefully (timeout=%.0fs, hard_exit=%d)..."
+              signal_name force_timeout Masc.Shutdown.process_deadline_exit_code;
             (* Phase 1: Notify SSE clients *)
             let t_phase = Unix.gettimeofday () in
             let shutdown_data =

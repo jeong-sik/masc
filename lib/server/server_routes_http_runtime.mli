@@ -194,10 +194,12 @@ val make_health_json :
     [running_keeper_fiber_count] / [healthy_running_keeper_fiber_count] from
     [failing_keeper_fiber_count] and [executable_keeper_fiber_count] because
     the FSM intentionally allows [Failing] keepers to finish or attempt turns.
-    It reports [blocked] when autoboot-enabled keepers exist but no executable
+    [effective_reaction_capacity_count] is the sum of healthy [Running] lanes
+    and unpaused, executable [Failing] lanes whose restart budget remains. It
+    reports [blocked] when autoboot-enabled keepers exist but no executable
     fiber remains, and [degraded] when executable fibers remain but healthy
-    running capacity is zero, below the safety margin, or below
-    [target_reaction_capacity_count].
+    running capacity is zero or below the safety margin, or effective reaction
+    capacity is below [target_reaction_capacity_count].
     [paused_autoboot_enabled_keeper_count] keeps operator-paused autoboot
     keepers visible without counting them as reaction-capacity targets.
 

@@ -131,6 +131,7 @@ val run_named :
   ?checkpoint_sidecar:Yojson.Safe.t ->
   ?cache_system_prompt:bool ->
   ?yield_on_tool:bool ->
+  ?tool_failure_judge:Agent_sdk.Tool_failure_recovery.judge ->
   ?compact_ratio:float ->
   ?context_window_tokens:int ->
   ?oas_auto_context_overflow_retry:bool ->

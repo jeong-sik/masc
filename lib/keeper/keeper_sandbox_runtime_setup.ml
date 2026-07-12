@@ -163,6 +163,7 @@ let required_commands = Env_config_sandbox.Preflight.required_commands ()
 type cleanup_result =
   { scanned : int
   ; removed : int
+  ; already_absent : int
   ; errors : string list
   }
 

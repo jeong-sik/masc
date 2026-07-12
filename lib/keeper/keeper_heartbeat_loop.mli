@@ -9,12 +9,18 @@ val effective_keepalive_meta :
   keeper_meta
 
 val repair_identity_drift_for_keepalive :
-  ctx:'a context -> keeper_meta -> keeper_meta option
+  ?lifecycle_token:Keeper_lifecycle_reservation.token ->
+  ctx:'a context ->
+  keeper_meta ->
+  keeper_meta option
 
 val keeper_agent_status : keeper_meta -> Masc_domain.agent_status
 
 val repair_identity_drift_for_keepalive :
-  ctx:'a context -> keeper_meta -> keeper_meta option
+  ?lifecycle_token:Keeper_lifecycle_reservation.token ->
+  ctx:'a context ->
+  keeper_meta ->
+  keeper_meta option
 
 val sync_keeper_presence :
   ctx:'a context ->
@@ -60,20 +66,27 @@ type heartbeat_event_intake = {
   event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
 }
 
-(** Closed pre-intake admission result. A blocking approval is classified
-    before durable dequeue, just like fd/disk pressure, so a blocked cycle does
-    not repeatedly lease and requeue the same stimulus. *)
+type single_claim_admission =
+  | Admit_ready_single
+  | Defer_failure_judgment
+
+(** Closed pre-intake admission result. Lifecycle, blocking approval, and
+    fd/disk pressure are classified before durable dequeue, so a blocked cycle
+    does not repeatedly lease and requeue the same stimulus. *)
 type turn_intake_admission =
   | Intake_admitted
+  | Intake_lifecycle_blocked of Keeper_lifecycle_admission.autonomous_denial
   | Intake_pressure_blocked of Keeper_pressure_admission.block
   | Intake_blocking_approval_pending
 
 val classify_turn_intake_admission :
+  lifecycle:Keeper_lifecycle_admission.autonomous_admission ->
   pressure:Keeper_pressure_admission.decision ->
   blocking_approval_pending:bool ->
   turn_intake_admission
 
 val heartbeat_event_intake :
+  single_claim_admission:single_claim_admission ->
   ctx:'a context ->
   meta_after_triage:keeper_meta ->
   pending_board_events:Keeper_world_observation.pending_board_event list ->
@@ -136,13 +149,22 @@ val record_crashed_cycle_failure :
 
 val settlement_of_failure :
   settled_at:float ->
-  lease:Keeper_registry_event_queue.lease ->
   Keeper_unified_turn.turn_failure ->
   Keeper_registry_event_queue.settlement
-(** Pure queue disposition for a failed cycle.  Retry/rotation requeue;
-    deterministic failure creates one judgment successor; failure of an
-    already-leased judgment emits an operator-visible escalation with no
-    recursive successor. *)
+(** Pure queue disposition for a failed cycle. Retry/rotation requeue and a
+    deterministic failure creates one judgment successor. This mapping is
+    identical when the source lease carried an earlier judgment: the failed
+    action's new typed route remains authoritative rather than being collapsed
+    into a generic judgment failure. *)
+
+val settlement_of_cycle_outcome :
+  settled_at:float ->
+  stop_requested:bool ->
+  lease:Keeper_registry_event_queue.lease ->
+  Keeper_heartbeat_loop_cycle.cycle_outcome option ->
+  Keeper_registry_event_queue.settlement
+(** Pure lease settlement boundary. Completed work acknowledges; typed
+    cancellation and non-executable-phase skips requeue. *)
 
 val project_transition_outbox :
   base_path:string -> keeper_name:string -> (unit, string) result
@@ -157,7 +179,7 @@ val turn_status_event :
   turn_fail_count:int -> max_allowed:int -> Keeper_state_machine.event
 
 (** Runs one keepalive turn (event intake, scheduling, optional cycle dispatch).
-    The caller classifies fd/disk pressure and typed Blocking HITL ownership
+    The caller classifies lifecycle state, fd/disk pressure, and typed Blocking HITL ownership
     with {!classify_turn_intake_admission} BEFORE this is invoked, so this
     function must not re-add inline admission gates: doing so would reinstate
     the consume-before-gate churn that hoisting the decision removed. *)

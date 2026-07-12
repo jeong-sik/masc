@@ -45,7 +45,12 @@ let normalize_response_text_for_finalization
       ~tool_names
       ()
   =
-  match Keeper_tool_response.normalize_response_text ~text ~tool_names () with
+  if
+    Keeper_agent_run_response_text.stop_reason_suppresses_visible_response
+      run_result.stop_reason
+  then Ok ""
+  else
+    match Keeper_tool_response.normalize_response_text ~text ~tool_names () with
   | Ok response_text -> Ok response_text
   | Error _ ->
     (* Finalization intentionally exposes the higher-level accept-rejected
@@ -249,7 +254,7 @@ let run_turn
       ?event_bus
       ?trace_link
       ?continuation_channel
-      ?hitl_delivery_channel
+      ?continuation_delivery_channel
       ?hitl_approval_grant
       ?autonomous_yield_requested
       ()
@@ -495,6 +500,7 @@ let run_turn
     Keeper_run_tools.prepare_agent_setup
       ~config
       ~meta
+      ?continuation_channel
       ~turn_ctx_cell
       ~ctx_work
       ~session
@@ -641,6 +647,11 @@ let run_turn
         ~keeper_name:meta.name
         ~downstream:on_event
         ~turn_id:manifest_keeper_turn_id
+    in
+    let tool_failure_judge =
+      Keeper_tool_failure_recovery_judge.create
+        ~base_path:config.base_path
+        ~keeper_name:meta.name
     in
     let priority =
       Option.value priority ~default:Llm_provider.Request_priority.Proactive
@@ -803,6 +814,7 @@ let run_turn
                     ~allowed_paths:oas_allowed_paths
                     ~cache_system_prompt:true
                     ~yield_on_tool
+                    ~tool_failure_judge
                     ~context_injector
                     ~context:shared_context
                     ~approval:
@@ -933,7 +945,7 @@ let run_turn
                           ~pre_dispatch_compaction_before_tokens:ctx.pre_dispatch_compaction_before_tokens
                           ~pre_dispatch_compaction_after_tokens:ctx.pre_dispatch_compaction_after_tokens
                           ~raw_response_text:response_text
-                          ?hitl_delivery_channel
+                          ?continuation_delivery_channel
                           ~capture_replay_response:
                             (fun ~response_text ->
                               (* Phase O observability: capture the exact

@@ -261,10 +261,16 @@ type operator_disposition_reason =
       [Disp_fail_open_next_runtime]; suppresses the operator page that the
       pre-fix [Reason_provider_runtime_error] / [Disp_pause_human]
       fall-through emitted. *)
+  | Reason_capacity_backpressure
+  (** Typed provider-capacity pacing before a retry/rotation has completed.
+      Paired with [Disp_fail_open_next_runtime]: the keeper keeps moving and
+      no operator broadcast is emitted, while the receipt does not falsely
+      claim [Reason_runtime_fallback]. *)
   | Reason_provider_runtime_error
   | Reason_internal_error
   | Reason_tool_route_recoverable_failure
   | Reason_completion_contract_unsatisfied
+  | Reason_input_required
   | Reason_passive_no_action
   (** RFC-0303 Phase 0: a passive-only turn ([Contract_passive_only]) paired with
       [Disp_pass]. The turn produced activity (thinking / defer / choosing to

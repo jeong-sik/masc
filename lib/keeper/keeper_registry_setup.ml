@@ -17,6 +17,7 @@ module Error_tracking = Keeper_registry_error_tracking
 
 let registry_entry_validation_error_label = function
   | Healthy -> "healthy"
+  | Lifecycle_transaction_reserved _ -> "lifecycle_transaction_reserved"
   | Meta_validation_failed _ -> "meta_validation_failed"
   | Required_field_missing _ -> "required_field_missing"
   | Base_path_mismatch _ -> "base_path_mismatch"
@@ -25,6 +26,11 @@ let registry_entry_validation_error_label = function
 
 let registry_entry_validation_error_to_string = function
   | Healthy -> "registry entry is healthy"
+  | Lifecycle_transaction_reserved owner ->
+    Printf.sprintf
+      "registry mutation reserved by lifecycle transaction owner=%s expected_generation=%d"
+      owner.owner_id
+      owner.expected_generation
   | Meta_validation_failed { reason } ->
       Printf.sprintf "registry entry meta validation failed: %s" reason
   | Required_field_missing { field } ->
@@ -129,7 +135,8 @@ let record_invalid_registry_entry ~operation ~name reason =
 let canonicalize_registry_meta ~operation ~base_path name (meta : keeper_meta) =
   match validate_registry_meta ~base_path name meta with
   | Ok () -> meta
-  | Error ((Name_mismatch _ | Meta_validation_failed _) as reason) ->
+  | Error
+      ((Name_mismatch _ | Meta_validation_failed _) as reason) ->
       let expected_name = String.trim name in
       let expected_agent_name = Keeper_identity.keeper_agent_name expected_name in
       let repaired =
@@ -164,20 +171,32 @@ let decr_running_count_clamped () =
 
 (** Lock-free CAS loop for registry writes. Atomic.t used instead of Eio.Mutex for non-Eio context compatibility (#7011 pattern). *)
 
-let put_entry ~base_path name entry =
-  match validate_registry_entry ~base_path name entry with
-  | Error err ->
-    record_invalid_registry_entry ~operation:"put" ~name err;
-    Error err
-  | Ok () ->
-    let key = registry_key ~base_path name in
-    let rec loop () =
-      let current = Atomic.get registry in
-      let updated = StringMap.add key entry current in
-      if Atomic.compare_and_set registry current updated then Ok () else loop ()
-    in
-    loop ()
+let put_entry_internal ?lifecycle_token ~base_path name entry =
+  Keeper_lifecycle_reservation.with_key_lock ~base_path ~keeper_name:name (fun () ->
+    match
+      Keeper_lifecycle_reservation.authorize
+        ?token:lifecycle_token
+        ~base_path
+        ~keeper_name:name
+        ()
+    with
+    | Error owner -> Error (Lifecycle_transaction_reserved owner)
+    | Ok () ->
+      (match validate_registry_entry ~base_path name entry with
+       | Error err ->
+         record_invalid_registry_entry ~operation:"put" ~name err;
+         Error err
+       | Ok () ->
+         let key = registry_key ~base_path name in
+         let rec loop () =
+           let current = Atomic.get registry in
+           let updated = StringMap.add key entry current in
+           if Atomic.compare_and_set registry current updated then Ok () else loop ()
+         in
+         loop ()))
 ;;
+
+let put_entry ~base_path name entry = put_entry_internal ~base_path name entry
 
 (** Test-only bypass: install an entry without validation so tests can seed
     corrupted registry state for [get] / [get_with_health] hardening checks. *)
@@ -195,7 +214,17 @@ let unsafe_put_entry ~base_path name entry =
     result of [f entry] before installing; on validation error returns the
     health reason, emits [RegistryInvalidEntry] with [operation="update"], and
     leaves the original entry untouched.  Only CAS conflicts retry. *)
-let update_entry ~base_path name f =
+let update_entry_internal ?lifecycle_token ~base_path name f =
+  Keeper_lifecycle_reservation.with_key_lock ~base_path ~keeper_name:name (fun () ->
+  match
+    Keeper_lifecycle_reservation.authorize
+      ?token:lifecycle_token
+      ~base_path
+      ~keeper_name:name
+      ()
+  with
+  | Error owner -> Error (Lifecycle_transaction_reserved owner)
+  | Ok () ->
   let key = registry_key ~base_path name in
   let rec loop () =
     let current = Atomic.get registry in
@@ -242,8 +271,10 @@ let update_entry ~base_path name f =
            Ok ())
          else loop ())
   in
-  loop ()
+  loop ())
 ;;
+
+let update_entry ~base_path name f = update_entry_internal ~base_path name f
 
 type exact_update_result =
   | Exact_updated
@@ -251,9 +282,19 @@ type exact_update_result =
   | Exact_update_replaced
   | Exact_update_invalid of registry_entry_validation_error
 
-let update_entry_exact (expected : registry_entry) f =
+let update_entry_exact_internal ?lifecycle_token (expected : registry_entry) f =
   let base_path = expected.base_path in
   let name = expected.name in
+  Keeper_lifecycle_reservation.with_key_lock ~base_path ~keeper_name:name (fun () ->
+  match
+    Keeper_lifecycle_reservation.authorize
+      ?token:lifecycle_token
+      ~base_path
+      ~keeper_name:name
+      ()
+  with
+  | Error owner -> Exact_update_invalid (Lifecycle_transaction_reserved owner)
+  | Ok () ->
   let key = registry_key ~base_path name in
   let expected_lane = Keeper_lane.id expected.lane in
   let rec loop () =
@@ -277,7 +318,13 @@ let update_entry_exact (expected : registry_entry) f =
            Exact_updated)
          else loop ())
   in
-  loop ()
+  loop ())
+;;
+
+let update_entry_exact expected f = update_entry_exact_internal expected f
+
+let update_entry_exact_for_lifecycle token expected f =
+  update_entry_exact_internal ~lifecycle_token:token expected f
 ;;
 
 type install_entry_result =
@@ -287,12 +334,23 @@ type install_entry_result =
   | Entry_install_replaced
   | Entry_install_invalid of registry_entry_validation_error
 
-let install_entry_if_current
+let install_entry_if_current_internal
+      ?lifecycle_token
       ~(observed : registry_entry)
       (replacement : registry_entry)
   =
   let base_path = observed.base_path in
   let name = observed.name in
+  Keeper_lifecycle_reservation.with_key_lock ~base_path ~keeper_name:name (fun () ->
+  match
+    Keeper_lifecycle_reservation.authorize
+      ?token:lifecycle_token
+      ~base_path
+      ~keeper_name:name
+      ()
+  with
+  | Error owner -> Entry_install_invalid (Lifecycle_transaction_reserved owner)
+  | Ok () ->
   match validate_registry_entry ~base_path name replacement with
   | Error err ->
     record_invalid_registry_entry ~operation:"install_if_current" ~name err;
@@ -313,7 +371,11 @@ let install_entry_if_current
        let updated = StringMap.add key replacement current in
        if Atomic.compare_and_set registry current updated
        then Entry_installed
-       else Entry_install_conflict)
+       else Entry_install_conflict))
+;;
+
+let install_entry_if_current ~observed replacement =
+  install_entry_if_current_internal ~observed replacement
 ;;
 
 let update_entry_unit ~base_path name f =
@@ -322,6 +384,17 @@ let update_entry_unit ~base_path name f =
 ;;
 
 let update_entry_if_registered ~base_path name f =
+  Keeper_lifecycle_reservation.with_key_lock ~base_path ~keeper_name:name (fun () ->
+  match
+    Keeper_lifecycle_reservation.authorize ~base_path ~keeper_name:name ()
+  with
+  | Error owner ->
+    Log.Keeper.info
+      "registry: conditional update deferred to lifecycle transaction name=%s %s"
+      name
+      (Keeper_lifecycle_reservation.snapshot_to_string owner);
+    false
+  | Ok () ->
   let key = registry_key ~base_path name in
   let rec loop () =
     let current = Atomic.get registry in
@@ -344,7 +417,7 @@ let update_entry_if_registered ~base_path name f =
             true)
           else loop ()
   in
-  loop ()
+  loop ())
 ;;
 
 let update_entry_if_registered_unit ~base_path name f =
@@ -354,6 +427,7 @@ let update_entry_if_registered_unit ~base_path name f =
 
 type registration_error =
   | Registration_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+  | Registration_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
   | Registration_invalid of registry_entry_validation_error
   | Registration_event_queue_unavailable of
       { keeper_name : string
@@ -361,6 +435,7 @@ type registration_error =
       }
 
 let register_with_state_result
+      ?lifecycle_token
       ~respect_shutdown_fence
       ~base_path
       name
@@ -370,6 +445,15 @@ let register_with_state_result
   =
   let base_path = canonical_base_path_exn base_path in
   let meta = canonicalize_registry_meta ~operation:"register" ~base_path name meta in
+  match
+    Keeper_lifecycle_reservation.authorize
+      ?token:lifecycle_token
+      ~base_path
+      ~keeper_name:name
+      ()
+  with
+  | Error owner -> Error (Registration_lifecycle_reserved owner)
+  | Ok () ->
   Log.Keeper.info
     "registry: registering keeper name=%s base_path=%s phase=%s"
     name
@@ -434,7 +518,7 @@ let register_with_state_result
        Log.Keeper.warn "registry: overwriting running keeper during register name=%s" name;
        decr_running_count_clamped ()
      | Some _ | None -> ());
-    put_entry ~base_path name entry
+    put_entry_internal ?lifecycle_token ~base_path name entry
   in
   let commit_result =
     if respect_shutdown_fence
@@ -447,12 +531,17 @@ let register_with_state_result
       with
       | Keeper_turn_admission.Registration_shutdown_reserved operation_id ->
         Error (Registration_shutdown_reserved operation_id)
+      | Keeper_turn_admission.Registration_committed
+          (Error (Lifecycle_transaction_reserved owner)) ->
+        Error (Registration_lifecycle_reserved owner)
       | Keeper_turn_admission.Registration_committed (Error validation_error) ->
         Error (Registration_invalid validation_error)
       | Keeper_turn_admission.Registration_committed (Ok ()) -> Ok ()
     else
       match commit () with
       | Ok () -> Ok ()
+      | Error (Lifecycle_transaction_reserved owner) ->
+        Error (Registration_lifecycle_reserved owner)
       | Error validation_error -> Error (Registration_invalid validation_error)
   in
   match commit_result with
@@ -487,6 +576,11 @@ let register_with_state ~base_path name meta ~phase ~conditions =
          detail)
   | Error (Registration_shutdown_reserved _) ->
     invalid_arg "unchecked registry registration observed a shutdown fence"
+  | Error (Registration_lifecycle_reserved owner) ->
+    invalid_arg
+      (Printf.sprintf
+         "unchecked registry registration observed lifecycle reservation: %s"
+         (Keeper_lifecycle_reservation.snapshot_to_string owner))
 ;;
 
 let register ~base_path name meta =
@@ -528,10 +622,29 @@ let register_offline_if_admitted ~base_path name meta =
     ~conditions
 ;;
 
+let register_offline_if_admitted_for_lifecycle token ~base_path name meta =
+  let conditions =
+    { Keeper_state_machine.default_conditions with
+      launch_pending = true
+    ; restart_budget_remaining = true
+    }
+  in
+  let phase = Keeper_state_machine.derive_phase conditions in
+  register_with_state_result
+    ~lifecycle_token:token
+    ~respect_shutdown_fence:true
+    ~base_path
+    name
+    meta
+    ~phase
+    ~conditions
+;;
+
 (** R-A-6.a — refuse to revive a keeper whose restart_budget was previously exhausted.  Pairs with TLA+ §S3 BudgetNeverRevives:  []( ~restart_budget_remaining => []( ~restart_budget_remaining ))  Witho... *)
 type register_restarting_error =
   | Budget_already_exhausted of { name : string }
   | Restart_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+  | Restart_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
   | Restart_event_queue_unavailable of
       { keeper_name : string
       ; detail : string
@@ -545,6 +658,11 @@ let register_restarting ~base_path name meta
     canonicalize_registry_meta ~operation:"register_restarting" ~base_path name meta
   in
   let key = registry_key ~base_path name in
+  match
+    Keeper_lifecycle_reservation.authorize ~base_path ~keeper_name:name ()
+  with
+  | Error owner -> Error (Restart_lifecycle_reserved owner)
+  | Ok () ->
   let conditions =
     { Keeper_state_machine.default_conditions with
       restart_budget_remaining = true
@@ -616,11 +734,19 @@ let register_restarting ~base_path name meta
       then Ok new_entry
       else loop ()
   in
+  let guarded_loop () =
+    Keeper_lifecycle_reservation.with_key_lock ~base_path ~keeper_name:name (fun () ->
+      match
+        Keeper_lifecycle_reservation.authorize ~base_path ~keeper_name:name ()
+      with
+      | Error owner -> Error (Restart_lifecycle_reserved owner)
+      | Ok () -> loop ())
+  in
   match
     Keeper_turn_admission.commit_registration_if_open
       ~base_path
       ~keeper_name:name
-      loop
+      guarded_loop
   with
   | Keeper_turn_admission.Registration_shutdown_reserved operation_id ->
     Error (Restart_shutdown_reserved operation_id)
@@ -638,13 +764,25 @@ type unregister_exact_result =
   | Exact_unregistered
   | Exact_entry_missing
   | Exact_entry_replaced
+  | Exact_unregister_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
 
 type remove_entry_result =
   | Entry_removed of registry_entry
   | Entry_missing
   | Entry_replaced
+  | Entry_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
 
-let remove_entry ?expected ~base_path name =
+let remove_entry ?lifecycle_token ?expected ~base_path name =
+  Keeper_lifecycle_reservation.with_key_lock ~base_path ~keeper_name:name (fun () ->
+  match
+    Keeper_lifecycle_reservation.authorize
+      ?token:lifecycle_token
+      ~base_path
+      ~keeper_name:name
+      ()
+  with
+  | Error owner -> Entry_lifecycle_reserved owner
+  | Ok () ->
   let key = registry_key ~base_path name in
   let rec loop () =
     let current = Atomic.get registry in
@@ -664,7 +802,7 @@ let remove_entry ?expected ~base_path name =
          then Entry_removed entry
          else loop ())
   in
-  loop ()
+  loop ())
 ;;
 
 let finish_unregistration entry =
@@ -697,11 +835,18 @@ let unregister ~base_path name =
       "registry: unconditional unregister reported a replaced entry name=%s base_path=%s"
       name
       base_path
+  | Entry_lifecycle_reserved owner ->
+    Log.Keeper.warn
+      "registry: unregister rejected by lifecycle reservation name=%s base_path=%s %s"
+      name
+      base_path
+      (Keeper_lifecycle_reservation.snapshot_to_string owner)
 ;;
 
-let unregister_exact entry =
+let unregister_exact_internal ?lifecycle_token entry =
   match
     remove_entry
+      ?lifecycle_token
       ~expected:entry
       ~base_path:entry.base_path
       entry.name
@@ -711,6 +856,50 @@ let unregister_exact entry =
     Exact_unregistered
   | Entry_missing -> Exact_entry_missing
   | Entry_replaced -> Exact_entry_replaced
+  | Entry_lifecycle_reserved owner -> Exact_unregister_lifecycle_reserved owner
+;;
+
+let unregister_exact entry = unregister_exact_internal entry
+
+let unregister_exact_for_lifecycle token entry =
+  unregister_exact_internal ~lifecycle_token:token entry
+;;
+
+type restore_entry_result =
+  | Entry_restored
+  | Entry_restore_occupied of registry_entry
+  | Entry_restore_invalid of registry_entry_validation_error
+  | Entry_restore_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
+
+let restore_entry_if_absent_for_lifecycle token (entry : registry_entry) =
+  Keeper_lifecycle_reservation.with_key_lock
+    ~base_path:entry.base_path
+    ~keeper_name:entry.name
+    (fun () ->
+  match
+    Keeper_lifecycle_reservation.authorize
+      ~token
+      ~base_path:entry.base_path
+      ~keeper_name:entry.name
+      ()
+  with
+  | Error owner -> Entry_restore_lifecycle_reserved owner
+  | Ok () ->
+    (match validate_registry_entry ~base_path:entry.base_path entry.name entry with
+     | Error error -> Entry_restore_invalid error
+     | Ok () ->
+       let key = registry_key ~base_path:entry.base_path entry.name in
+       let rec loop () =
+         let current = Atomic.get registry in
+         match StringMap.find_opt key current with
+         | Some occupied -> Entry_restore_occupied occupied
+         | None ->
+           let updated = StringMap.add key entry current in
+           if Atomic.compare_and_set registry current updated
+           then Entry_restored
+           else loop ()
+       in
+       loop ()))
 ;;
 
 let health_of_entry ~base_path name entry =

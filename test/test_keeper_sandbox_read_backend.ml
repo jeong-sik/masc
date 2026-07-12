@@ -503,12 +503,17 @@ case \"$1\" in\n\
     printf 'runtime-container\\n'\n\
     exit 0\n\
     ;;\n\
+  ps)\n\
+    # The failed state inspect is followed by an exact-name inventory probe.\n\
+    # Empty successful output proves that the cached container disappeared.\n\
+    exit 0\n\
+    ;;\n\
   inspect)\n\
     count=$(read_count \"$inspect_count_file\")\n\
     count=$((count + 1))\n\
     write_count \"$inspect_count_file\" \"$count\"\n\
     if [ \"$count\" = \"2\" ]; then\n\
-      printf 'No such container: runtime-container\\n' >&2\n\
+      printf 'synthetic opaque state inspection failure\\n' >&2\n\
       exit 1\n\
     fi\n\
     printf 'runtime-container-id\\n'\n\
@@ -520,7 +525,7 @@ case \"$1\" in\n\
     write_count \"$exec_count_file\" \"$exec_count\"\n\
     inspect_count=$(read_count \"$inspect_count_file\")\n\
     if [ \"$exec_count\" = \"2\" ] && [ \"$inspect_count\" -lt 2 ]; then\n\
-      printf 'No such container: runtime-container\\n' >&2\n\
+      printf 'synthetic opaque exec failure\\n' >&2\n\
       exit 127\n\
     fi\n\
     printf 'exec ok\\n'\n\
@@ -599,7 +604,7 @@ case \"$1\" in\n\
     write_count \"$exec_count_file\" \"$exec_count\"\n\
     run_count=$(read_count \"$run_count_file\")\n\
     if [ \"$exec_count\" = \"2\" ] && [ \"$run_count\" -lt 2 ]; then\n\
-      printf 'container is not running\\n' >&2\n\
+      printf 'synthetic opaque stopped-container exec failure\\n' >&2\n\
       exit 126\n\
     fi\n\
     printf 'exec ok\\n'\n\
@@ -905,6 +910,65 @@ fi\n\
 case \"$1\" in\n\
   ps)\n\
     printf 'docker daemon unavailable\\n' >&2\n\
+    exit 1\n\
+    ;;\n\
+esac\n\
+printf 'unexpected docker invocation\\n' >&2\n\
+exit 2\n"
+
+let fake_docker_cleanup_disappeared_script =
+  "#!/bin/sh\n\
+log_file=${MASC_KEEPER_TEST_DOCKER_LOG:-}\n\
+if [ -n \"$log_file\" ]; then\n\
+  printf '%s\\n' \"$*\" >> \"$log_file\"\n\
+fi\n\
+case \"$1\" in\n\
+  ps)\n\
+    for arg in \"$@\"; do\n\
+      case \"$arg\" in\n\
+        id=*) exit 0 ;;\n\
+      esac\n\
+    done\n\
+    printf 'inspect-gone\\nrm-gone\\n'\n\
+    exit 0\n\
+    ;;\n\
+  inspect)\n\
+    last=''\n\
+    for arg in \"$@\"; do last=\"$arg\"; done\n\
+    case \"$last\" in\n\
+      inspect-gone)\n\
+        printf 'synthetic inspect failure\\n' >&2\n\
+        exit 1\n\
+        ;;\n\
+      rm-gone)\n\
+        printf '\\t100.000\\tfalse\\t600\\n'\n\
+        exit 0\n\
+        ;;\n\
+    esac\n\
+    printf 'unexpected inspect target: %s\\n' \"$last\" >&2\n\
+    exit 2\n\
+    ;;\n\
+  rm)\n\
+    if [ \"$2\" = \"-f\" ] && [ \"$3\" = \"-v\" ] && [ \"$4\" = \"rm-gone\" ]; then\n\
+      printf 'synthetic remove failure\\n' >&2\n\
+      exit 1\n\
+    fi\n\
+    printf 'unexpected rm target\\n' >&2\n\
+    exit 2\n\
+    ;;\n\
+esac\n\
+printf 'unexpected docker invocation\\n' >&2\n\
+exit 2\n"
+
+let fake_docker_cleanup_present_failure_script =
+  "#!/bin/sh\n\
+case \"$1\" in\n\
+  ps)\n\
+    printf 'present-container\\n'\n\
+    exit 0\n\
+    ;;\n\
+  inspect)\n\
+    printf 'synthetic inspect failure while container remains present\\n' >&2\n\
     exit 1\n\
     ;;\n\
 esac\n\
@@ -1218,12 +1282,95 @@ let test_cleanup_stale_containers_removes_only_stale_masc_scope () =
   in
   Alcotest.(check int) "scanned labeled containers" 2 result.scanned;
   Alcotest.(check int) "removed stale container" 1 result.removed;
+  Alcotest.(check int) "no concurrent disappearance" 0 result.already_absent;
   Alcotest.(check (list string)) "no cleanup errors" [] result.errors;
   let log = read_file log_path in
   Alcotest.(check bool) "removes old container" true
     (contains_substring log "rm -f -v old-container");
   Alcotest.(check bool) "keeps fresh container" false
     (contains_substring log "rm -f -v fresh-container")
+
+let test_cleanup_stale_containers_accepts_concurrent_disappearance () =
+  with_fake_docker fake_docker_cleanup_disappeared_script @@ fun () ->
+  let base = temp_dir () in
+  let log_path = Filename.concat base "docker.log" in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
+  let result =
+    Keeper_sandbox_runtime.cleanup_stale_containers
+      ~now:1000.0
+      ~max_age_sec:60.0
+      ~base_path:base
+      ~timeout_sec:5.0 ()
+  in
+  Alcotest.(check int) "scanned snapshot containers" 2 result.scanned;
+  Alcotest.(check int) "no container removed by this sweep" 0 result.removed;
+  Alcotest.(check int) "both disappearance races observed" 2 result.already_absent;
+  Alcotest.(check (list string)) "disappearance is not an error" [] result.errors;
+  let log = read_file log_path in
+  Alcotest.(check bool)
+    "inspect-absent container is not removed again"
+    false
+    (contains_substring log "rm -f -v inspect-gone");
+  Alcotest.(check bool)
+    "remove race reaches docker rm"
+    true
+    (contains_substring log "rm -f -v rm-gone")
+
+let test_cleanup_stale_containers_preserves_present_failure () =
+  with_fake_docker fake_docker_cleanup_present_failure_script @@ fun () ->
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  let result =
+    Keeper_sandbox_runtime.cleanup_stale_containers
+      ~now:1000.0
+      ~max_age_sec:60.0
+      ~base_path:base
+      ~timeout_sec:5.0 ()
+  in
+  Alcotest.(check int) "scanned present container" 1 result.scanned;
+  Alcotest.(check int) "present container is not removed" 0 result.removed;
+  Alcotest.(check int) "present container is not called absent" 0 result.already_absent;
+  match result.errors with
+  | [ error ] ->
+    Alcotest.(check bool)
+      "original inspect failure remains explicit"
+      true
+      (contains_substring error "synthetic inspect failure")
+  | errors -> Alcotest.failf "expected one explicit cleanup error, got %d" (List.length errors)
+
+let test_maybe_cleanup_disappearance_does_not_activate_backoff () =
+  with_fake_docker fake_docker_cleanup_disappeared_script @@ fun () ->
+  let base = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_sandbox_runtime.reset_last_cleanup_for_tests ();
+      cleanup_dir base)
+  @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "true" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC" "10" @@ fun () ->
+  Keeper_sandbox_runtime.reset_last_cleanup_for_tests ();
+  let first =
+    Keeper_sandbox_runtime.maybe_cleanup_stale_containers
+      ~now:1000.0
+      ~base_path:base
+      ~timeout_sec:5.0 ()
+  in
+  (match first with
+   | Some result ->
+     Alcotest.(check int) "first sweep records both races" 2 result.already_absent;
+     Alcotest.(check (list string)) "first sweep has no errors" [] result.errors
+   | None -> Alcotest.fail "expected first cleanup sweep to run");
+  let second =
+    Keeper_sandbox_runtime.maybe_cleanup_stale_containers
+      ~now:1011.0
+      ~base_path:base
+      ~timeout_sec:5.0 ()
+  in
+  Alcotest.(check bool)
+    "normal interval remains eligible after disappearance"
+    true
+    (Option.is_some second)
 
 let test_maybe_cleanup_stale_containers_runs_once_per_interval () =
   with_fake_docker fake_docker_cleanup_script @@ fun () ->
@@ -1260,13 +1407,20 @@ let test_maybe_cleanup_stale_containers_runs_once_per_interval () =
       !results
   in
   Alcotest.(check int) "only one cleanup sweep enters per interval" 1 ran;
-  let ps_count =
+  let cleanup_snapshot_count =
     read_file log_path
     |> String.split_on_char '\n'
-    |> List.filter (String.starts_with ~prefix:"ps -aq ")
+    |> List.filter (fun line ->
+      String.starts_with ~prefix:"ps -aq " line
+      && contains_substring
+           line
+           "label=masc.mcp.component=keeper-sandbox")
     |> List.length
   in
-  Alcotest.(check int) "only one docker ps cleanup spawn" 1 ps_count
+  Alcotest.(check int)
+    "only one labeled cleanup snapshot"
+    1
+    cleanup_snapshot_count
 
 let test_maybe_cleanup_stale_containers_backs_off_after_failure () =
   with_fake_docker fake_docker_cleanup_fail_script @@ fun () ->
@@ -1743,7 +1897,7 @@ let test_streaming_exec_validates_cached_container_before_retry () =
   Alcotest.(check bool)
     "stale container error is not streamed"
     false
-    (contains_substring streamed_stderr "No such container")
+    (contains_substring streamed_stderr "synthetic opaque state inspection failure")
 
 let test_streaming_exec_preserves_split_stderr () =
   with_fake_docker fake_docker_turn_runtime_script @@ fun () ->
@@ -1923,7 +2077,7 @@ let test_streaming_exec_restarts_stopped_container_before_exec () =
   Alcotest.(check bool)
     "stopped container error is not streamed"
     false
-    (contains_substring streamed_stderr "container is not running")
+    (contains_substring streamed_stderr "synthetic opaque stopped-container exec failure")
 
 let test_streaming_exec_buffers_eintr_retry_output () =
   with_fake_docker fake_docker_eintr_streaming_retry_script @@ fun () ->
@@ -2487,6 +2641,12 @@ let run_tests ~clock () =
             test_sandbox_container_label_args_include_owner_scope;
           Alcotest.test_case "cleanup removes stale scoped containers" `Quick
             test_cleanup_stale_containers_removes_only_stale_masc_scope;
+          Alcotest.test_case "cleanup accepts concurrent disappearance" `Quick
+            test_cleanup_stale_containers_accepts_concurrent_disappearance;
+          Alcotest.test_case "cleanup preserves failure for present container" `Quick
+            test_cleanup_stale_containers_preserves_present_failure;
+          Alcotest.test_case "cleanup disappearance does not back off" `Quick
+            test_maybe_cleanup_disappearance_does_not_activate_backoff;
           Alcotest.test_case "cleanup CAS runs once per interval" `Quick
             test_maybe_cleanup_stale_containers_runs_once_per_interval;
           Alcotest.test_case "cleanup failure activates backoff" `Quick

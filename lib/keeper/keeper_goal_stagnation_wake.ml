@@ -77,7 +77,13 @@ let enqueue_goal_stagnation_wakes
                 Keeper_registry.get ~base_path:config.base_path keeper_name
               with
               | Some entry when entry.phase = Keeper_state_machine.Running ->
-                Keeper_registry.wakeup ~base_path:config.base_path keeper_name
+                let (_ : Keeper_registry.wakeup_outcome) =
+                  Keeper_registry.wakeup
+                    ~intent:Keeper_registry.Goal_signal
+                    ~base_path:config.base_path
+                    keeper_name
+                in
+                ()
               | Some entry ->
                 Log.Keeper.info
                   "goal stagnation wake queued without fiber wake keeper=%s \

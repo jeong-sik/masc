@@ -81,6 +81,10 @@ type stream_lifecycle_event =
   | Run_finished
   | Run_error
 
+type append_once_result =
+  | Appended of { row_id : string }
+  | Already_present of { row_id : string }
+
 (** Authority class of the human (or agent) whose message opened a
     turn. Derived structurally from the arrival route, never from
     message content: the authenticated dashboard route is [Owner];
@@ -264,6 +268,24 @@ val append_assistant_message_result :
   unit ->
   (unit, string) result
 
+(** Idempotent terminal assistant append. The per-Keeper lookup and append are
+    serialized, so callback re-entry and restart recovery converge on one row
+    for the exact typed delivery slot. A malformed persisted provenance row is
+    an explicit [Error], never treated as absence. *)
+val append_assistant_message_once :
+  base_dir:string ->
+  keeper_name:string ->
+  delivery_key:Keeper_chat_delivery_identity.delivery_key ->
+  content:string ->
+  ?surface:Surface_ref.t ->
+  ?conversation_id:string ->
+  ?assistant_kind:Row_kind.t ->
+  ?blocks:chat_block list ->
+  ?turn_ref:Ids.Turn_ref.t ->
+  ?stream_lifecycle:stream_lifecycle_event list ->
+  unit ->
+  (append_once_result, string) result
+
 (** [append_assistant_message ~base_dir ~keeper_name ~content ?source
     ?conversation_id ()]
     appends one keeper-initiated assistant line with no paired user
@@ -300,6 +322,21 @@ val append_user_message :
   ?extra_mentions:Keeper_identity.Keeper_id.t list ->
   unit ->
   unit
+
+(** Idempotent accepted-user append for a direct/queued delivery identity. *)
+val append_user_message_once :
+  base_dir:string ->
+  keeper_name:string ->
+  delivery_key:Keeper_chat_delivery_identity.delivery_key ->
+  content:string ->
+  ?attachments:attachment list ->
+  ?surface:Surface_ref.t ->
+  ?conversation_id:string ->
+  ?external_message_id:string ->
+  ?speaker:speaker ->
+  ?extra_mentions:Keeper_identity.Keeper_id.t list ->
+  unit ->
+  (append_once_result, string) result
 
 (** [load ~base_dir ~keeper_name] returns the most recent messages in
     chronological order: the last 100 user/assistant messages plus the

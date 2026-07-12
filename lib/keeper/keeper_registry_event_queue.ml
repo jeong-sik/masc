@@ -20,7 +20,11 @@ type requeue_reason = Keeper_event_queue_persistence.requeue_reason =
 
 type escalation_reason = Keeper_event_queue_persistence.escalation_reason =
   | Failure_judgment_requested
-  | Failure_judgment_failed
+  | Failure_judgment_boundary_failed of { detail : string }
+  | Failure_judgment_operator_required of
+      { judge_runtime_id : string
+      ; rationale : string
+      }
 
 type settlement = Keeper_event_queue_persistence.settlement =
   | Ack
@@ -94,13 +98,6 @@ let enqueue_external_decision queue stimulus =
       (Printf.sprintf
          "conflicting durable stimulus already exists for post_id=%s"
          stimulus.post_id)
-;;
-
-let requeue_missing_front queue stimuli =
-  let missing =
-    List.filter (fun stimulus -> not (queue_contains queue stimulus)) stimuli
-  in
-  Keeper_event_queue.prepend_list missing queue
 ;;
 
 let publish_pending ~base_path name pending =
@@ -181,44 +178,6 @@ let enqueue_hitl_resolution_durable_result
   enqueue_durable_result ~base_path keeper_name stimulus
 ;;
 
-let requeue_front ~base_path name stimuli =
-  match stimuli with
-  | [] -> ()
-  | _ ->
-    let committed_pending = ref None in
-    (match
-       Keeper_event_queue_persistence.update_checked_result
-         ~base_path
-         ~keeper_name:name
-         ~after_commit:(fun () ->
-           match !committed_pending with
-           | None -> ()
-           | Some pending -> publish_pending ~base_path name pending)
-         (fun current ->
-            let pending = requeue_missing_front current stimuli in
-            committed_pending := Some pending;
-            Ok pending)
-     with
-     | Error message ->
-       Log.Keeper.error "registry: durable requeue failed name=%s: %s" name message
-     | Ok () ->
-       Keeper_event_queue_persistence.ack_inflight
-         ~base_path
-         ~keeper_name:name
-         stimuli)
-;;
-
-let ack_consumed_result ~base_path name stimuli =
-  Keeper_event_queue_persistence.ack_consumed ~base_path ~keeper_name:name stimuli
-;;
-
-let ack_consumed ~base_path name stimuli =
-  match ack_consumed_result ~base_path name stimuli with
-  | Ok () -> ()
-  | Error msg ->
-    Log.Keeper.warn "registry: ack_consumed failed name=%s: %s" name msg
-;;
-
 let drop_by_post_id ~base_path name ~post_id =
   match
     Keeper_event_queue_persistence.drop_by_post_id
@@ -242,54 +201,6 @@ let snapshot ~base_path name =
   match Keeper_registry.get ~base_path name with
   | None -> Keeper_event_queue_persistence.load ~base_path ~keeper_name:name
   | Some entry -> Atomic.get entry.event_queue
-;;
-
-let dequeue_when ~base_path name ~ready =
-  match Keeper_registry.get ~base_path name with
-  | None -> None
-  | Some _ ->
-    (match
-       Keeper_event_queue_persistence.claim_when_result
-         ~base_path
-         ~keeper_name:name
-         ~claimed_at:(Time_compat.now ())
-         ~ready
-         ~after_commit:(publish_pending ~base_path name)
-         ()
-     with
-     | Error message ->
-       Log.Keeper.error "registry: durable claim failed name=%s: %s" name message;
-       None
-     | Ok None -> None
-     | Ok (Some lease) ->
-       (match lease_stimuli lease with
-        | [ stimulus ] -> Some stimulus
-        | [] | _ :: _ :: _ ->
-          Log.Keeper.error
-            "registry: single claim returned invalid cardinality name=%s"
-            name;
-          None))
-;;
-
-let dequeue ~base_path name = dequeue_when ~base_path name ~ready:(fun _ -> true)
-
-let drain_board ~base_path name =
-  match Keeper_registry.get ~base_path name with
-  | None -> []
-  | Some _ ->
-    (match
-       Keeper_event_queue_persistence.claim_board_result
-         ~base_path
-         ~keeper_name:name
-         ~claimed_at:(Time_compat.now ())
-         ~after_commit:(publish_pending ~base_path name)
-         ()
-     with
-     | Error message ->
-       Log.Keeper.error "registry: durable board claim failed name=%s: %s" name message;
-       []
-     | Ok None -> []
-     | Ok (Some lease) -> lease_stimuli lease)
 ;;
 
 let claim_when_result ~base_path name ~claimed_at ~ready =

@@ -211,6 +211,7 @@ let declared_type_to_string : declared_type -> string = function
   | `Integer -> "integer"
   | `Number -> "number"
   | `Boolean -> "boolean"
+;;
 
 let field_types_to_json (fields : (string * declared_type) list) : Yojson.Safe.t =
   `List
@@ -218,6 +219,7 @@ let field_types_to_json (fields : (string * declared_type) list) : Yojson.Safe.t
        (fun (name, typ) ->
          `Assoc [ "name", `String name; "type", `String (declared_type_to_string typ) ])
        fields)
+;;
 
 let coerce_value (typ : declared_type) (raw : string) : (toml_value, string) result =
   if String.length raw > max_value_bytes

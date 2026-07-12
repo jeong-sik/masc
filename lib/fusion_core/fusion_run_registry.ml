@@ -226,7 +226,7 @@ let compact_replay_log path runs =
     |> String.concat ""
   in
   try
-    let report = Fs_compat.save_file_atomic_eio path content in
+    let report = Fs_compat.save_file_atomic_blocking path content in
     Fs_compat.Durable_mutation.fold_report report
       ~not_committed:(fun report ->
         Log.Misc.warn

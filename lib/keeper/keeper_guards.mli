@@ -223,6 +223,7 @@ val governance_approval_guard :
   ?meta_provider:(unit -> Keeper_meta_contract.keeper_meta option) ->
   meta_ref:Keeper_meta_contract.keeper_meta ref ->
   on_gate_decision:(gate_decision_event -> unit) ->
+  unit ->
   Agent_sdk.Hooks.hooks
 
 (** Build the full keeper pre_tool_use chain in canonical order:
@@ -242,6 +243,7 @@ val build_chain :
   on_gate_decision:(gate_decision_event -> unit) ->
   pre_tool_use_guard:
     (tool_name:string -> input:Yojson.Safe.t -> string option) ->
+  unit ->
   Agent_sdk.Hooks.hooks
 
 module For_testing : sig

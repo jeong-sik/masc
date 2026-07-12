@@ -904,6 +904,7 @@ let governance_approval_guard
     ?meta_provider
     ~(meta_ref : Keeper_meta_contract.keeper_meta ref)
     ~on_gate_decision
+    ()
   : Agent_sdk.Hooks.hooks =
   if Option.is_some active_tool_names && Option.is_some risk_context
   then
@@ -1004,6 +1005,7 @@ let build_chain
     ~on_gate_decision
     ~(pre_tool_use_guard :
         tool_name:string -> input:Yojson.Safe.t -> string option)
+    ()
   : Agent_sdk.Hooks.hooks =
   compose_all [
     timing_guard ~tool_start_time;
@@ -1018,5 +1020,6 @@ let build_chain
       ~risk_context
       ?meta_provider
       ~meta_ref
-      ~on_gate_decision;
+      ~on_gate_decision
+      ();
   ]

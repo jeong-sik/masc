@@ -286,6 +286,7 @@ let make_hooks
       ?meta_provider
       ~on_gate_decision:record_gate_decision
       ~pre_tool_use_guard
+      ()
   in
   let non_gate_hooks =
     { Agent_sdk.Hooks.empty with

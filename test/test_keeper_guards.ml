@@ -835,7 +835,7 @@ let test_governance_approval_legacy_exemption_cannot_bypass_high () =
     let meta_ref = make_meta_ref "test_keeper" in
     let observed = ref [] in
     let on_gate_decision event = observed := event :: !observed in
-    let hook = KG.governance_approval_guard ~meta_ref ~on_gate_decision in
+    let hook = KG.governance_approval_guard ~meta_ref ~on_gate_decision () in
     let d =
       invoke hook
         (pre_tool_use_event ~tool_name:"masc_create_task"
@@ -868,7 +868,7 @@ let test_governance_approval_critical_code_blocks_with_legacy_exemption () =
     let meta_ref = make_meta_ref "test_keeper" in
     let observed = ref [] in
     let on_gate_decision event = observed := event :: !observed in
-    let hook = KG.governance_approval_guard ~meta_ref ~on_gate_decision in
+    let hook = KG.governance_approval_guard ~meta_ref ~on_gate_decision () in
     let d =
       invoke hook
         (pre_tool_use_event ~tool_name:"tool_execute"
@@ -897,7 +897,7 @@ let test_governance_approval_critical_requires_operator_without_hitl () =
     let meta_ref = make_meta_ref "test_keeper" in
     let observed = ref [] in
     let on_gate_decision event = observed := event :: !observed in
-    let hook = KG.governance_approval_guard ~meta_ref ~on_gate_decision in
+    let hook = KG.governance_approval_guard ~meta_ref ~on_gate_decision () in
     let d =
       invoke hook
         (pre_tool_use_event ~tool_name:"masc_force_reset"
@@ -968,6 +968,7 @@ let test_keeper_chain_high_requires_operator_without_hitl () =
              ~risk_context
              ~on_gate_decision:(fun event -> observed := event :: !observed)
              ~pre_tool_use_guard:(fun ~tool_name:_ ~input:_ -> None)
+             ()
          in
          let decision = invoke hook (pre_tool_use_event ~tool_name ~input ()) in
          check string
@@ -1000,6 +1001,7 @@ let test_governance_metadata_unavailable_requires_operator () =
         ~meta_provider:(fun () -> None)
         ~meta_ref
         ~on_gate_decision:(fun event -> observed := event :: !observed)
+        ()
     in
     let decision =
       invoke hook (pre_tool_use_event ~tool_name:"keeper_time_now" ())
@@ -1021,7 +1023,7 @@ let test_governance_approval_serious_blocker_overrides () =
     meta_ref := meta_with_blocker Masc.Keeper_meta_contract.Completion_contract_violation !meta_ref;
     let observed = ref [] in
     let on_gate_decision event = observed := event :: !observed in
-    let hook = KG.governance_approval_guard ~meta_ref ~on_gate_decision in
+    let hook = KG.governance_approval_guard ~meta_ref ~on_gate_decision () in
     let d =
       invoke hook
         (pre_tool_use_event ~tool_name:"masc_create_task"
@@ -1038,7 +1040,7 @@ let test_governance_approval_transient_blocker_allows () =
     meta_ref := meta_with_blocker Masc.Keeper_meta_contract.Turn_timeout !meta_ref;
     let observed = ref [] in
     let on_gate_decision event = observed := event :: !observed in
-    let hook = KG.governance_approval_guard ~meta_ref ~on_gate_decision in
+    let hook = KG.governance_approval_guard ~meta_ref ~on_gate_decision () in
     let d =
       invoke hook
         (pre_tool_use_event ~tool_name:"masc_create_task"

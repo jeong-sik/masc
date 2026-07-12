@@ -54,9 +54,7 @@ let classify_raw_failure raw =
        that must declare (Execute outcome/blocked/validation JSON since the
        sangsu incident fix) are testable and regressions are visible instead
        of silently reclassified. *)
-    (* DET-OK: not a guessed parse default — the undeclared case is carried
-       as [failure_class_declared = false] alongside this conservative
-       resolution. *)
+    (* DET-OK: typed via [failure_class_declared], not a guessed default. *)
     Option.value declared_failure_class ~default:Tool_result.Runtime_failure
   in
   let deterministic_classification =

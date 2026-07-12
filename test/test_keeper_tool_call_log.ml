@@ -891,6 +891,31 @@ let test_dashboard_aggregate_groups_runtime_fields () =
     Alcotest.(check int) "auto tool_choice calls" 2
       (Safe_ops.json_int ~default:0 "calls" auto_bucket))
 
+let test_dashboard_failure_concentration () =
+  with_tmp_log (fun () ->
+    let rec log_failures keeper_name remaining =
+      if remaining > 0 then begin
+        Keeper_tool_call_log.log_call
+          ~keeper_name ~tool_name:"masc_status"
+          ~input:(`Assoc []) ~output_text:"error: {\"ok\":false,\"error\":\"boom\"}"
+          ~success:false ~duration_ms:1.0 ();
+        log_failures keeper_name (remaining - 1)
+      end
+    in
+    log_failures "alpha" 6;
+    log_failures "beta" 3;
+    log_failures "gamma" 1;
+    let concentration =
+      Dashboard_http_tool_quality.aggregate ~n:10 ()
+      |> Yojson.Safe.Util.member "failure_concentration"
+    in
+    Alcotest.(check (option float)) "top two failure percentage"
+      (Some 90.0)
+      (Safe_ops.json_float_opt "top2_pct" concentration);
+    Alcotest.(check (list string)) "top two keepers"
+      [ "alpha"; "beta" ]
+      (Safe_ops.json_string_list "top2_keepers" concentration))
+
 let test_dashboard_aggregate_missing_runtime_profile_is_unknown () =
   with_tmp_log (fun () ->
     Keeper_tool_call_log.log_call
@@ -1307,6 +1332,8 @@ let () =
             test_non_object_input_still_logs_action_radius
         ; eio_test "dashboard aggregate groups runtime fields"
             test_dashboard_aggregate_groups_runtime_fields
+        ; eio_test "dashboard failure concentration"
+            test_dashboard_failure_concentration
         ; eio_test "dashboard aggregate marks missing runtime profile unknown"
             test_dashboard_aggregate_missing_runtime_profile_is_unknown
         ; eio_test "dashboard hourly trend buckets numeric ts"

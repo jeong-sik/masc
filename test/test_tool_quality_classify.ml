@@ -7,17 +7,6 @@ open Alcotest
 
 let classify = Dashboard_http_tool_quality.classify_failure_output
 
-let failure_concentration =
-  Dashboard_http_tool_quality.failure_concentration_of_keeper_counts
-
-let test_failure_concentration_top_two () =
-  let percentage, keepers =
-    failure_concentration
-      [ "alpha", 10, 4; "beta", 8, 5; "gamma", 3, 2 ]
-  in
-  check (float 0.01) "top two failure percentage" 90.0 percentage;
-  check (list string) "top two keepers" [ "alpha"; "beta" ] keepers
-
 let test_bare_json_error () =
   let output = {|{"ok":false,"error":"Invalid task state"}|} in
   check string "bare JSON extracts error key"
@@ -104,7 +93,6 @@ let () =
   run "tool_quality_classify"
     [
       ("classify_failure_output", [
-           test_case "failure concentration top two" `Quick test_failure_concentration_top_two;
            test_case "bare JSON error" `Quick test_bare_json_error;
            test_case "error: prefix stripped" `Quick test_error_prefix_stripped;
            test_case "tool_error: prefix stripped" `Quick test_tool_error_prefix_stripped;

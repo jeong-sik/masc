@@ -58,6 +58,23 @@ let test_git_root_is_directory () =
   | Some root -> check bool "root is directory" true (Sys.is_directory root)
   | None -> fail "expected git root"
 
+let test_git_root_falls_back_to_parent_marker () =
+  let root = Filename.temp_dir "workspace-git-fallback" "" in
+  let child = Filename.concat root "nested" in
+  let marker = Filename.concat root ".git" in
+  Fun.protect
+    ~finally:(fun () ->
+      if Sys.file_exists marker then Unix.unlink marker;
+      if Sys.file_exists child then Unix.rmdir child;
+      if Sys.file_exists root then Unix.rmdir root)
+    (fun () ->
+      Unix.mkdir child 0o700;
+      let missing_git_dir = Filename.concat root "missing-git-dir" in
+      Fs_compat.save_file marker ("gitdir: " ^ missing_git_dir ^ "\n");
+      check (option string) "failed rev-parse falls back to marker root"
+        (Some root)
+        (Workspace_git.git_root ~base_path:child))
+
 (* ============================================================
    is_git_repo Tests
    ============================================================ *)
@@ -192,6 +209,8 @@ let () =
       test_case "tmp" `Quick test_git_root_tmp;
       test_case "current nonempty" `Quick test_git_root_current_nonempty;
       test_case "is directory" `Quick test_git_root_is_directory;
+      test_case "rev-parse failure uses parent marker" `Quick
+        test_git_root_falls_back_to_parent_marker;
     ];
     "is_git_repo", [
       test_case "current" `Quick test_is_git_repo_current;

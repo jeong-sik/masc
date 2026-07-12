@@ -239,6 +239,7 @@ let test_nondefault_cluster_keeps_queue_and_transcript_together () =
           with_busy_slot ~base ~sw (fun () ->
             Gate_keeper_backend.dispatch
               ~connector_kind:Gate_keeper_backend.Discord
+              ~submission_owner:Gate_keeper_backend.Channel_actor
               ~sw ~clock ~proc_mgr:None ~net:None ~config
               ~channel:"discord" ~channel_user_id:"cluster-user"
               ~channel_user_name:"Cluster User"

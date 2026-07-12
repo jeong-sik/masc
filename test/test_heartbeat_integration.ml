@@ -47,17 +47,8 @@ let temp_dir prefix =
   Unix.mkdir dir 0o755;
   dir
 
-let rec mkdir_p path =
-  if Sys.file_exists path
-  then ()
-  else (
-    let parent = Filename.dirname path in
-    if not (String.equal parent path) then mkdir_p parent;
-    Unix.mkdir path 0o755)
-;;
-
 let write_file path content =
-  mkdir_p (Filename.dirname path);
+  Fs_compat.mkdir_p (Filename.dirname path);
   let oc = open_out_bin path in
   Fun.protect
     ~finally:(fun () -> close_out_noerr oc)

@@ -240,7 +240,7 @@ let test_failed_cycle_route_mapping () =
          })
   in
   (match
-     Keeper_heartbeat_loop.settlement_of_failure
+     Masc.Keeper_heartbeat_loop.settlement_of_failure
        ~settled_at:2.0
        ~lease:ordinary_lease
        retry_failure
@@ -257,7 +257,7 @@ let test_failed_cycle_route_mapping () =
          })
   in
   (match
-     Keeper_heartbeat_loop.settlement_of_failure
+     Masc.Keeper_heartbeat_loop.settlement_of_failure
        ~settled_at:3.0
        ~lease:ordinary_lease
        judgment_failure
@@ -285,7 +285,7 @@ let test_failed_cycle_route_mapping () =
          4.0)
   in
   (match
-     Keeper_heartbeat_loop.settlement_of_failure
+     Masc.Keeper_heartbeat_loop.settlement_of_failure
        ~settled_at:5.0
        ~lease:leased_judgment
        judgment_failure
@@ -304,7 +304,7 @@ let test_failed_cycle_route_mapping () =
     }
   in
   (match
-     Keeper_heartbeat_loop.settlement_of_failure
+     Masc.Keeper_heartbeat_loop.settlement_of_failure
        ~settled_at:6.0
        ~lease:ordinary_lease
        handled_failure
@@ -423,7 +423,7 @@ let test_transition_outbox_projects_with_stable_identity () =
       | Persistence.Already_settled _ ->
         Alcotest.fail "first projection settlement was already settled"
     in
-    Keeper_heartbeat_loop.project_transition_outbox ~base_path ~keeper_name
+    Masc.Keeper_heartbeat_loop.project_transition_outbox ~base_path ~keeper_name
     |> require_ok "project transition outbox";
     let state =
       Persistence.load_state_result ~base_path ~keeper_name
@@ -448,7 +448,7 @@ let test_transition_outbox_projects_with_stable_identity () =
       "stable event id deduplicates crash replay"
       1
       (summary |> member "event_queue_ack_count" |> to_int);
-    Keeper_heartbeat_loop.project_transition_outbox ~base_path ~keeper_name
+    Masc.Keeper_heartbeat_loop.project_transition_outbox ~base_path ~keeper_name
     |> require_ok "empty outbox projection is idempotent")
 ;;
 

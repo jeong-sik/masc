@@ -287,6 +287,90 @@ let test_chat_append_once_converges () =
     check int "one user and one terminal row" 2 (List.length history))
 ;;
 
+let test_chat_append_once_converges_across_processes () =
+  with_temp_dir (fun base_path ->
+    let delivery_key = direct_key () in
+    let seed =
+      Keeper_chat_store.append_assistant_message_result
+        ~base_dir:base_path
+        ~keeper_name:"sangsu"
+        ~content:"seed"
+        ()
+    in
+    (match seed with
+     | Ok () -> ()
+     | Error detail -> fail detail);
+    let ready_read, ready_write = Unix.pipe () in
+    let append_child () =
+      Unix.close ready_write;
+      let byte = Bytes.create 1 in
+      let rec await_start () =
+        match Unix.read ready_read byte 0 1 with
+        | 1 -> ()
+        | 0 -> exit 2
+        | _ -> await_start ()
+        | exception Unix.Unix_error (Unix.EINTR, _, _) -> await_start ()
+      in
+      await_start ();
+      let result =
+        Keeper_chat_store.append_user_message_once
+          ~base_dir:base_path
+          ~keeper_name:"sangsu"
+          ~delivery_key
+          ~content:"cross-process request"
+          ~surface:
+            (Surface_ref.Dashboard { session_id = Some "dashboard-session" })
+          ~speaker:(payload ()).speaker
+          ()
+      in
+      Unix.close ready_read;
+      exit (if Result.is_ok result then 0 else 3)
+    in
+    let spawn () =
+      match Unix.fork () with
+      | 0 -> append_child ()
+      | pid -> pid
+    in
+    let first = spawn () in
+    let second = spawn () in
+    Unix.close ready_read;
+    let rec release_children offset =
+      if offset = 2
+      then ()
+      else
+        match Unix.write_substring ready_write "xy" offset (2 - offset) with
+        | 0 -> fail "cross-process start barrier made no write progress"
+        | written -> release_children (offset + written)
+        | exception Unix.Unix_error (Unix.EINTR, _, _) ->
+          release_children offset
+    in
+    release_children 0;
+    Unix.close ready_write;
+    let await_child pid =
+      match Unix.waitpid [] pid with
+      | _, Unix.WEXITED 0 -> ()
+      | _, status ->
+        failf
+          "cross-process append child failed: %s"
+          (match status with
+           | Unix.WEXITED code -> Printf.sprintf "exit %d" code
+           | Unix.WSIGNALED signal -> Printf.sprintf "signal %d" signal
+           | Unix.WSTOPPED signal -> Printf.sprintf "stopped %d" signal)
+    in
+    await_child first;
+    await_child second;
+    let matching_rows =
+      Keeper_chat_store.load ~base_dir:base_path ~keeper_name:"sangsu"
+      |> List.filter (fun row ->
+           Keeper_chat_store.Role.equal row.role Keeper_chat_store.Role.User
+           && String.equal row.content "cross-process request")
+    in
+    check int
+      "cross-process retries persist one provenance row"
+      1
+      (List.length matching_rows))
+;;
+
 let test_restart_recovery_converges_without_duplicate_rows () =
   with_temp_dir (fun base_path ->
     let key = direct_key () in
@@ -590,6 +674,10 @@ let () =
             "chat append-once converges"
             `Quick
             test_chat_append_once_converges
+        ; test_case
+            "chat append-once converges across processes"
+            `Quick
+            test_chat_append_once_converges_across_processes
         ; test_case
             "restart recovery converges"
             `Quick

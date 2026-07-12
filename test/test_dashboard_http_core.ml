@@ -1410,7 +1410,7 @@ let test_dashboard_shell_separates_configured_and_persisted_keeper_counts () =
     (fun () ->
       let expected_configured_names = [ "alpha"; "base"; "beta" ] in
       let configured_names =
-        Keeper_meta_store.configured_keeper_names config
+        Masc.Keeper_meta_store.configured_keeper_names config
         |> List.sort String.compare
       in
       Alcotest.(check (list string))
@@ -1438,7 +1438,7 @@ let test_dashboard_shell_separates_configured_and_persisted_keeper_counts () =
         "[keeper]\nautoboot_enabled = true\n";
       Config_dir_resolver.reset ();
       let configured_names_after_autoboot_change =
-        Keeper_meta_store.configured_keeper_names config
+        Masc.Keeper_meta_store.configured_keeper_names config
         |> List.sort String.compare
       in
       Alcotest.(check (list string))

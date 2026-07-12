@@ -120,6 +120,13 @@ val cluster_name : unit -> string
 
 val http_base_url_env_key : string
 val mcp_url_env_key : string
+val masc_http_base_url_opt : unit -> string option
+(** Return only an explicitly configured [MASC_HTTP_BASE_URL], normalized by
+    trimming surrounding whitespace and trailing slashes.  Unlike
+    {!masc_http_base_url_result}, this never derives an identity from
+    [MASC_HOST]/[MASC_HTTP_PORT]; listener admission must use the actual bind
+    configuration instead of re-reading potentially stale environment input. *)
+
 val masc_http_base_url : unit -> string
 val masc_http_base_url_result : unit -> (string, string) result
 

@@ -159,6 +159,28 @@ val allow_anonymous_mutations : unit -> bool
 (** Re-reads [MASC_ALLOW_ANONYMOUS_MUTATIONS] on each call.
     When [true] non-loopback mutations skip auth (test fixtures only). *)
 
+type browser_origin_admission =
+  | Same_origin
+  | Allowed_dev_origin
+  | Rejected
+
+type request_origin_admission =
+  | Missing_origin
+  | Single_origin of
+      { origin : string
+      ; admission : browser_origin_admission
+      }
+  | Multiple_origins
+  | Malformed_origin
+
+val classify_request_origin :
+  request_authority:Server_request_authority.authority ->
+  Httpun.Request.t ->
+  request_origin_admission
+(** Classify the full case-insensitive [Origin] field set.  Exactly one field
+    is parsed as one complete HTTP(S) serialized origin; repeated fields and
+    partially consumed values are distinct fail-closed outcomes. *)
+
 val browser_origin_matches_request_authority :
   request_authority:Server_request_authority.authority -> string -> bool
 (** Compare an HTTP(S) browser origin with the admitted request authority.
@@ -195,8 +217,11 @@ val server_state : Mcp_server.server_state option ref
     state is threaded through. *)
 
 val get_origin : Httpun.Request.t -> Httpun.Headers.value
-(** Resolve the request's [Origin] header value (empty string when
-    missing). *)
+(** Return the one syntactically valid serialized [Origin], or ["*"] when the
+    field is absent.  Raises [Invalid_origin_header] for repeated or malformed
+    fields; live request entry points reject those cases before routing. *)
+
+exception Invalid_origin_header
 
 val public_read_cors_origin_opt :
   request_authority:Server_request_authority.authority ->
@@ -301,6 +326,15 @@ val authorize_tool_request :
   Httpun.Request.t -> (unit, Masc_domain.masc_error) result
 (** Check that the request is allowed to call [tool_name]. *)
 
+val authorize_tool_request_with_actor :
+  base_path:string ->
+  tool_name:string ->
+  request_authority:Server_request_authority.authority ->
+  Httpun.Request.t -> (string, Masc_domain.masc_error) result
+(** Check [tool_name] authority and return the exact principal used for that
+    decision. Auth-disabled same-origin dashboard calls use the explicit
+    ["dashboard"] principal. *)
+
 val authorize_token_bound_permission_request :
   base_path:string ->
   permission:Masc_domain.permission ->
@@ -357,6 +391,14 @@ val with_tool_auth :
    Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
   Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Tool-call auth combinator. *)
+
+val with_tool_actor_auth :
+  tool_name:string ->
+  (Mcp_server.server_state ->
+   string -> Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
+  Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** Tool-call auth combinator that threads the exact authorized caller into the
+    handler instead of asking the handler to resolve identity again. *)
 
 val with_token_permission_auth :
   permission:Masc_domain.permission ->

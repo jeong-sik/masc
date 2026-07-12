@@ -128,6 +128,17 @@ let test_sdk_typed_wire () =
     sdk_cases
 ;;
 
+let test_idle_detected_receipt_is_failure () =
+  let outcome =
+    AE.receipt_outcome_kind_of_sdk_error
+      (SdkE.Agent (SdkE.IdleDetected { consecutive_idle_turns = 3 }))
+  in
+  Alcotest.(check string)
+    "IdleDetected is not cancellation"
+    "error"
+    (Masc.Keeper_execution_receipt.outcome_kind_to_string outcome)
+;;
+
 let check_parse_split label err ~provider ~model_ ~server =
   Alcotest.(check bool)
     (label ^ "/provider")
@@ -1200,6 +1211,10 @@ let () =
             "all sdk_error cases produce expected wire"
             `Quick
             test_sdk_typed_wire
+        ; Alcotest.test_case
+            "IdleDetected receipt remains a failure"
+            `Quick
+            test_idle_detected_receipt_is_failure
         ] )
     ; ( "server parse rejection split"
       , [ Alcotest.test_case

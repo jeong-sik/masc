@@ -58,6 +58,49 @@ export interface KeeperRuntimeTraceProviderAttemptsSummary {
   attempts: KeeperRuntimeTraceProviderAttempt[]
 }
 
+export interface KeeperRuntimeManifestEventCount {
+  event: string
+  count: number
+}
+
+export const KEEPER_RUNTIME_MANIFEST_SCAN_DIAGNOSTICS_SCHEMA =
+  'keeper.runtime_manifest_scan_diagnostics.v1' as const
+
+const KEEPER_RUNTIME_MANIFEST_SCAN_DIAGNOSTIC_KINDS = [
+  'retired_event',
+  'unsupported_event',
+  'invalid_manifest_row',
+  'invalid_json_row',
+] as const
+
+export type KeeperRuntimeManifestScanDiagnosticKind =
+  typeof KEEPER_RUNTIME_MANIFEST_SCAN_DIAGNOSTIC_KINDS[number]
+
+export interface KeeperRuntimeManifestScanDiagnostic {
+  kind: KeeperRuntimeManifestScanDiagnosticKind
+  event: string | null
+  detail: string | null
+}
+
+export type KeeperRuntimeManifestScanDiagnostics =
+  | {
+      state: 'available'
+      schema: typeof KEEPER_RUNTIME_MANIFEST_SCAN_DIAGNOSTICS_SCHEMA
+      retired_event_count: number
+      retired_event_counts: KeeperRuntimeManifestEventCount[]
+      unsupported_event_count: number
+      unsupported_event_counts: KeeperRuntimeManifestEventCount[]
+      unsupported_event_unattributed_count: number
+      invalid_manifest_row_count: number
+      invalid_json_row_count: number
+      samples: KeeperRuntimeManifestScanDiagnostic[]
+    }
+  | {
+      state: 'unavailable'
+      schema: string | null
+      error: string
+    }
+
 export interface KeeperRuntimeLensTurnClock {
   trace_id: string
   keeper_turn_id: number | null
@@ -263,6 +306,7 @@ export interface KeeperRuntimeTraceResponse {
   manifest_total_rows: number
   manifest_returned_rows: number
   receipt_returned_rows: number
+  manifest_scan_diagnostics: KeeperRuntimeManifestScanDiagnostics
   turn_identity: KeeperRuntimeTraceTurnIdentity
   provider_attempts: KeeperRuntimeTraceProviderAttemptsSummary
   event_bus: KeeperRuntimeTraceEventBusSummary
@@ -310,6 +354,103 @@ function stringListField(raw: Record<string, unknown>, key: string): string[] {
   const value = raw[key]
   if (!Array.isArray(value)) return []
   return value.filter((item): item is string => typeof item === 'string')
+}
+
+function nonNegativeInteger(raw: unknown): number | null {
+  return typeof raw === 'number' && Number.isInteger(raw) && raw >= 0 ? raw : null
+}
+
+function parseManifestEventCount(raw: unknown): KeeperRuntimeManifestEventCount | null {
+  if (!isRecord(raw) || typeof raw.event !== 'string' || raw.event === '') return null
+  const count = nonNegativeInteger(raw.count)
+  return count === null ? null : { event: raw.event, count }
+}
+
+function isManifestScanDiagnosticKind(
+  raw: unknown,
+): raw is KeeperRuntimeManifestScanDiagnosticKind {
+  return typeof raw === 'string'
+    && KEEPER_RUNTIME_MANIFEST_SCAN_DIAGNOSTIC_KINDS.some(kind => kind === raw)
+}
+
+function nullableWireString(raw: unknown): string | null | undefined {
+  if (raw === undefined || raw === null) return null
+  return typeof raw === 'string' ? raw : undefined
+}
+
+function allParsed<T>(values: (T | null)[]): values is T[] {
+  return values.every(value => value !== null)
+}
+
+function parseManifestScanDiagnostic(
+  raw: unknown,
+): KeeperRuntimeManifestScanDiagnostic | null {
+  if (!isRecord(raw) || !isManifestScanDiagnosticKind(raw.kind)) return null
+  const event = nullableWireString(raw.event)
+  const detail = nullableWireString(raw.detail)
+  if (event === undefined || detail === undefined) return null
+  return { kind: raw.kind, event, detail }
+}
+
+function parseManifestScanDiagnostics(raw: unknown): KeeperRuntimeManifestScanDiagnostics {
+  if (!isRecord(raw)) {
+    return {
+      state: 'unavailable',
+      schema: null,
+      error: 'runtime did not report manifest scan diagnostics',
+    }
+  }
+  const schema = typeof raw.schema === 'string' ? raw.schema : null
+  if (schema !== KEEPER_RUNTIME_MANIFEST_SCAN_DIAGNOSTICS_SCHEMA) {
+    return {
+      state: 'unavailable',
+      schema,
+      error: schema === null
+        ? 'manifest scan diagnostics schema is missing'
+        : `unsupported manifest scan diagnostics schema: ${schema}`,
+    }
+  }
+  if (
+    !Array.isArray(raw.retired_event_counts)
+    || !Array.isArray(raw.unsupported_event_counts)
+    || !Array.isArray(raw.samples)
+  ) {
+    return { state: 'unavailable', schema, error: 'malformed manifest scan diagnostics payload' }
+  }
+  const retiredEventCounts = raw.retired_event_counts.map(parseManifestEventCount)
+  const unsupportedEventCounts = raw.unsupported_event_counts.map(parseManifestEventCount)
+  const samples = raw.samples.map(parseManifestScanDiagnostic)
+  const retiredEventCount = nonNegativeInteger(raw.retired_event_count)
+  const unsupportedEventCount = nonNegativeInteger(raw.unsupported_event_count)
+  const unsupportedEventUnattributedCount = nonNegativeInteger(
+    raw.unsupported_event_unattributed_count,
+  )
+  const invalidManifestRowCount = nonNegativeInteger(raw.invalid_manifest_row_count)
+  const invalidJsonRowCount = nonNegativeInteger(raw.invalid_json_row_count)
+  if (
+    retiredEventCount === null
+    || unsupportedEventCount === null
+    || unsupportedEventUnattributedCount === null
+    || invalidManifestRowCount === null
+    || invalidJsonRowCount === null
+    || !allParsed(retiredEventCounts)
+    || !allParsed(unsupportedEventCounts)
+    || !allParsed(samples)
+  ) {
+    return { state: 'unavailable', schema, error: 'malformed manifest scan diagnostics payload' }
+  }
+  return {
+    state: 'available',
+    schema,
+    retired_event_count: retiredEventCount,
+    retired_event_counts: retiredEventCounts,
+    unsupported_event_count: unsupportedEventCount,
+    unsupported_event_counts: unsupportedEventCounts,
+    unsupported_event_unattributed_count: unsupportedEventUnattributedCount,
+    invalid_manifest_row_count: invalidManifestRowCount,
+    invalid_json_row_count: invalidJsonRowCount,
+    samples,
+  }
 }
 
 function recordListField(raw: Record<string, unknown>, key: string): Record<string, unknown>[] {
@@ -683,6 +824,7 @@ export function parseKeeperRuntimeTrace(raw: unknown): KeeperRuntimeTraceRespons
     manifest_total_rows: numberField(raw, 'manifest_total_rows'),
     manifest_returned_rows: numberField(raw, 'manifest_returned_rows'),
     receipt_returned_rows: numberField(raw, 'receipt_returned_rows'),
+    manifest_scan_diagnostics: parseManifestScanDiagnostics(raw.manifest_scan_diagnostics),
     turn_identity: parseRuntimeTraceTurnIdentity(raw.turn_identity),
     provider_attempts: parseRuntimeTraceProviderAttempts(raw.provider_attempts),
     event_bus: parseRuntimeTraceEventBus(raw.event_bus),

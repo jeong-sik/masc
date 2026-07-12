@@ -418,55 +418,22 @@ let sanitized_dashboard_actor_for_request ~base_path request =
       if String.equal sanitized "" then None else Some sanitized
   | None -> None
 
-(** Extract host and explicit port only.
-    Host header carries no scheme, so inferring a default port from scheme
-    (80 for http, 443 for https) causes mismatches when the browser Origin
-    uses https (port 443) but we parse Host with a synthetic "http://" prefix
-    (port 80).  Comparing explicit ports avoids this class of bug. *)
-
-type browser_scheme =
-  | Http
-  | Https
-
-let browser_scheme_of_uri uri =
-  match Uri.scheme uri |> Option.map String.lowercase_ascii with
-  | Some "http" -> Some Http
-  | Some "https" -> Some Https
-  | Some _ | None -> None
-;;
-
-let default_port_of_scheme = function Http -> Some 80 | Https -> Some 443
-
-let normalize_loopback_host host =
-  match String.lowercase_ascii (String.trim host) with
-  | "127.0.0.1" -> "localhost"
-  | "::1" | "0:0:0:0:0:0:0:1" -> "localhost"
-  | other -> other
-
-
 let split_csv_nonempty raw =
   raw |> String.split_on_char ',' |> List.filter_map String_util.trim_nonempty
 
-(** Returns [(host, explicit_port, scheme)] for an HTTP(S) origin or
-    referrer.  Userinfo is never part of a browser origin and accepting it
-    would make the displayed authority differ from the authenticated one. *)
-let host_port_scheme_of_origin origin =
-  try
-    let uri = Uri.of_string origin in
-    match browser_scheme_of_uri uri, Uri.userinfo uri, Uri.host uri with
-    | Some scheme, None, Some host ->
-      String_util.trim_nonempty host
-      |> Option.map (fun host ->
-        String.lowercase_ascii host, Uri.port uri, scheme)
-    | Some _, Some _, _ | Some _, None, None | None, _, _ -> None
-  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-    Log.Auth.debug "host_port_scheme_of_origin: parse failed for %S: %s"
-      origin (Printexc.to_string exn);
-    None
+type browser_origin_admission =
+  | Same_origin
+  | Allowed_dev_origin
+  | Rejected
 
-let host_port_of_authority authority =
-  ( Server_request_authority.host authority
-  , Server_request_authority.port authority )
+type request_origin_admission =
+  | Missing_origin
+  | Single_origin of
+      { origin : string
+      ; admission : browser_origin_admission
+      }
+  | Multiple_origins
+  | Malformed_origin
 
 (* Re-reads the env var on each call so MASC_ALLOW_ANONYMOUS_MUTATIONS
    can be toggled without restarting the server process. *)
@@ -483,76 +450,129 @@ let configured_loopback_dev_mutation_origins () =
   | Some raw -> split_csv_nonempty raw
   | None -> default_loopback_dev_mutation_origins
 
-let normalized_origin_key origin =
-  match host_port_scheme_of_origin origin with
-  | Some (host, port, scheme) ->
-      let default = default_port_of_scheme scheme in
-      Some
-        ( normalize_loopback_host host,
-          (match port with Some _ -> port | None -> default),
-          scheme )
-  | None -> None
-
-let is_allowlisted_loopback_dev_origin origin =
-  match normalized_origin_key origin with
-  | Some ((host, _, _) as candidate) when is_loopback_host host ->
-      configured_loopback_dev_mutation_origins ()
-      |> List.filter_map normalized_origin_key
-      |> List.exists (fun allowed -> allowed = candidate)
-  | _ -> false
-
-let origin_matches_request_authority ~request_authority origin =
-  match host_port_scheme_of_origin origin with
-  | Some (origin_host, origin_port, scheme) ->
-    let request_host, request_port =
-      host_port_of_authority request_authority
-    in
-    if
-      String.equal
-        (normalize_loopback_host origin_host)
-        (normalize_loopback_host request_host)
-    then
-      let default = default_port_of_scheme scheme in
-      let normalize_port = function
-        | Some _ as explicit -> explicit
-        | None -> default
-      in
-      normalize_port origin_port = normalize_port request_port
-    else false
-  | None -> false
+let parse_configured_dev_origins () =
+  let rec parse_all parsed = function
+    | [] -> Ok (List.rev parsed)
+    | raw :: rest ->
+      (match Server_request_authority.parse_serialized_origin raw with
+       | Ok origin -> parse_all (origin :: parsed) rest
+       | Error `Malformed -> Error raw)
+  in
+  parse_all [] (configured_loopback_dev_mutation_origins ())
 ;;
 
 let allowlisted_dev_origin_matches_request ~request_authority origin =
-  match host_port_scheme_of_origin origin with
-  | Some (origin_host, _, _) ->
-    let request_host = Server_request_authority.host request_authority in
-    String.equal
-      (normalize_loopback_host origin_host)
-      (normalize_loopback_host request_host)
-    && is_loopback_host (normalize_loopback_host origin_host)
-    && is_allowlisted_loopback_dev_origin origin
-  | None -> false
+  let request_host = Server_request_authority.host request_authority in
+  let origin_host = Server_request_authority.serialized_origin_host origin in
+  if not (is_loopback_host request_host && is_loopback_host origin_host)
+  then false
+  else
+    match parse_configured_dev_origins () with
+    | Ok configured ->
+      List.exists
+        (Server_request_authority.serialized_origin_equal origin)
+        configured
+    | Error malformed ->
+      Log.Auth.warn
+        "rejecting dev Origin because MASC_HTTP_DEV_MUTATION_ORIGINS contains a malformed serialized origin: %S"
+        malformed;
+      false
+;;
+
+let admission_of_serialized_origin ~request_authority origin =
+  if
+    Server_request_authority.serialized_origin_matches_authority
+      origin
+      request_authority
+  then Same_origin
+  else if allowlisted_dev_origin_matches_request ~request_authority origin
+  then Allowed_dev_origin
+  else Rejected
+;;
+
+let classify_request_origin ~request_authority request =
+  match Httpun.Headers.get_multi request.Httpun.Request.headers "origin" with
+  | [] -> Missing_origin
+  | [ raw ] ->
+    (match Server_request_authority.parse_serialized_origin raw with
+     | Error `Malformed -> Malformed_origin
+     | Ok parsed ->
+       Single_origin
+         { origin = raw
+         ; admission =
+             admission_of_serialized_origin ~request_authority parsed
+         })
+  | _ -> Multiple_origins
 ;;
 
 let browser_origin_matches_request_authority ~request_authority origin =
-  origin_matches_request_authority ~request_authority origin
-  || allowlisted_dev_origin_matches_request ~request_authority origin
+  match Server_request_authority.parse_serialized_origin origin with
+  | Error `Malformed -> false
+  | Ok parsed ->
+    (match admission_of_serialized_origin ~request_authority parsed with
+     | Same_origin | Allowed_dev_origin -> true
+     | Rejected -> false)
 ;;
 
-(* Browsers omit Origin for same-origin requests per the Fetch spec, but
-   always include Referer.  The admitted request authority is already parsed
-   at the request entry; this path never re-reads Host. *)
+let ascii_is_whitespace = function
+  | ' ' | '\t' | '\r' | '\n' -> true
+  | _ -> false
+;;
+
+let serialized_origin_of_referer referer =
+  if
+    String.equal referer ""
+    || not (String.equal referer (String.trim referer))
+    || String.exists ascii_is_whitespace referer
+  then None
+  else
+    let uri = Uri.of_string referer in
+    match
+      Uri.scheme uri |> Option.map String.lowercase_ascii,
+      Uri.userinfo uri,
+      Uri.host uri,
+      Uri.fragment uri
+    with
+    | Some ("http" | "https" as scheme), None, Some host, None ->
+      let rendered_host =
+        match Ipaddr.V6.of_string host with
+        | Ok _ -> "[" ^ host ^ "]"
+        | Error _ -> host
+      in
+      let rendered_port =
+        Option.fold ~none:"" ~some:(Printf.sprintf ":%d") (Uri.port uri)
+      in
+      (match
+         Server_request_authority.parse_serialized_origin
+           (Printf.sprintf "%s://%s%s" scheme rendered_host rendered_port)
+       with
+       | Ok origin -> Some origin
+       | Error `Malformed -> None)
+    | Some _, _, _, _ | None, _, _, _ -> None
+;;
+
+let referer_matches_request_authority ~request_authority referer =
+  match serialized_origin_of_referer referer with
+  | Some origin ->
+    Server_request_authority.serialized_origin_matches_authority
+      origin
+      request_authority
+  | None -> false
+;;
+
+(* Browsers omit Origin for some same-origin requests. Referer is parsed by a
+   separate URL parser because it legitimately carries a path/query; it never
+   goes through the serialized-Origin grammar. The admitted request authority
+   is already parsed at request entry, so this path never re-reads Host. *)
 let ensure_same_origin_browser_request ~request_authority request :
     (unit, Masc_domain.masc_error) result =
-  match Httpun.Headers.get request.Httpun.Request.headers "origin" with
-  | None ->
-    (* Same-origin browser requests don't send Origin.  Check Referer
-       as a fallback — browsers always include it even for same-origin. *)
-    (match Httpun.Headers.get request.Httpun.Request.headers "referer" with
-     | Some referer
-       when origin_matches_request_authority ~request_authority referer ->
+  match classify_request_origin ~request_authority request with
+  | Missing_origin ->
+    (match Httpun.Headers.get_multi request.Httpun.Request.headers "referer" with
+     | [ referer ]
+       when referer_matches_request_authority ~request_authority referer ->
        Ok ()
-     | _ ->
+     | [] | [ _ ] | _ :: _ :: _ ->
        if allow_anonymous_mutations () then Ok ()
        else
          Error (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
@@ -560,18 +580,29 @@ let ensure_same_origin_browser_request ~request_authority request :
            ; message = "Authentication required: provide a bearer token or Origin header. \
                         Set MASC_ALLOW_ANONYMOUS_MUTATIONS=true for local development."
            })))
-  | Some origin ->
-    if browser_origin_matches_request_authority ~request_authority origin
-    then Ok ()
-    else (
-      Log.Auth.debug
-        "same-origin check failed: origin=%S authority=%S"
-        origin
-        (Server_request_authority.rendered request_authority);
-      Error
-        (Masc_domain.Auth
-           (Masc_domain.Auth_error.Forbidden
-              { agent = "browser"; action = "cross-origin HTTP mutation" })))
+  | Single_origin
+      { admission = (Same_origin | Allowed_dev_origin); _ } ->
+    Ok ()
+  | Single_origin { origin; admission = Rejected } ->
+    Log.Auth.debug
+      "same-origin check failed: origin=%S scheme=%s authority=%S trust=%s"
+      origin
+      (Server_request_authority.scheme request_authority
+       |> Server_request_authority.scheme_to_string)
+      (Server_request_authority.rendered request_authority)
+      (match Server_request_authority.trust_class request_authority with
+       | Server_request_authority.Configured_bind -> "configured_bind"
+       | Server_request_authority.Explicit_trusted_host ->
+         "explicit_trusted_host");
+    Error
+      (Masc_domain.Auth
+         (Masc_domain.Auth_error.Forbidden
+            { agent = "browser"; action = "cross-origin HTTP mutation" }))
+  | Multiple_origins | Malformed_origin ->
+    Error
+      (Masc_domain.Auth
+         (Masc_domain.Auth_error.Forbidden
+            { agent = "browser"; action = "malformed Origin header" }))
 
 (* Mirrors [Masc_error.code] (the typed SSOT in lib/types/masc_error.ml).
    Previously the catch-all [_ -> `Internal_server_error] silently demoted
@@ -607,17 +638,27 @@ let http_status_of_auth_error = function
 let server_state : Mcp_server.server_state option ref = ref None
 
 (** CORS origin *)
+exception Invalid_origin_header
+
 let get_origin (request : Httpun.Request.t) =
-  Httpun.Headers.get request.headers "origin"
-  |> Option.value ~default:"*"
+  match Httpun.Headers.get_multi request.headers "origin" with
+  | [] -> "*"
+  | [ origin ] ->
+    (match Server_request_authority.parse_serialized_origin origin with
+     | Ok _ -> origin
+     | Error `Malformed -> raise Invalid_origin_header)
+  | _ -> raise Invalid_origin_header
 
 let public_read_cors_origin_opt ~request_authority (request : Httpun.Request.t) =
-  match Httpun.Headers.get request.Httpun.Request.headers "origin" with
-  | None -> None
-  | Some origin ->
-    if browser_origin_matches_request_authority ~request_authority origin
-    then Some origin
-    else None
+  match classify_request_origin ~request_authority request with
+  | Single_origin
+      { origin; admission = (Same_origin | Allowed_dev_origin) } ->
+    Some origin
+  | Missing_origin
+  | Single_origin { admission = Rejected; _ }
+  | Multiple_origins
+  | Malformed_origin ->
+    None
 
 (** CORS headers *)
 let cors_allow_headers_value =
@@ -653,13 +694,14 @@ let respond_json_value_with_cors ?(status = `OK) request reqd value =
     ~extra_headers:(cors_headers origin) value reqd
 
 let public_read_cors_headers request =
-  match Httpun.Headers.get request.Httpun.Request.headers "origin" with
-  | None -> [ ("vary", "Origin") ]
-  | Some _ ->
+  match Httpun.Headers.get_multi request.Httpun.Request.headers "origin" with
+  | [] -> [ ("vary", "Origin") ]
+  | [ _ ] ->
     let request_authority = Server_request_authority.current_exn () in
     (match public_read_cors_origin_opt ~request_authority request with
      | Some origin -> cors_headers origin
      | None -> [ ("vary", "Origin") ])
+  | _ -> raise Invalid_origin_header
 
 let respond_public_read_json ?(status = `OK) request reqd body =
   Http_server_eio.Response.json ~status
@@ -843,8 +885,8 @@ let authorize_permission_request ~base_path ~permission request :
 let authorize_read_request ~base_path request : (unit, Masc_domain.masc_error) result =
   authorize_permission_request ~base_path ~permission:Masc_domain.CanReadState request
 
-let authorize_tool_request ~base_path ~tool_name ~request_authority request :
-    (unit, Masc_domain.masc_error) result =
+let authorize_tool_request_with_actor ~base_path ~tool_name ~request_authority request :
+    (string, Masc_domain.masc_error) result =
   let auth_cfg = Auth.load_auth_config base_path in
   let token = auth_token_from_request request in
   let* () =
@@ -875,8 +917,18 @@ let authorize_tool_request ~base_path ~tool_name ~request_authority request :
                 "Agent name required (X-Gate-Agent / X-MASC-Agent or \
                  token-bound credential)"
             }))
-  else
-    Auth.authorize_tool_v2 base_path ~agent_name ~token ~tool_name
+  else (
+    let* () = Auth.authorize_tool_v2 base_path ~agent_name ~token ~tool_name in
+    Ok agent_name)
+
+let authorize_tool_request ~base_path ~tool_name ~request_authority request :
+    (unit, Masc_domain.masc_error) result =
+  authorize_tool_request_with_actor
+    ~base_path
+    ~tool_name
+    ~request_authority
+    request
+  |> Result.map (fun _agent_name -> ())
 
 let authorize_token_bound_permission_request ~base_path ~permission request :
     (string, Masc_domain.masc_error) result =
@@ -1009,6 +1061,25 @@ and with_tool_auth ~tool_name handler request reqd =
           | Ok () -> handler state request reqd
           | Error () -> ())
       | Error err -> respond_auth_error request reqd err)
+
+and with_tool_actor_auth ~tool_name handler request reqd =
+  match !server_state with
+  | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
+  | Some state ->
+    let base_path = (Mcp_server.workspace_config state).base_path in
+    let request_authority = Server_request_authority.current_exn () in
+    (match
+       authorize_tool_request_with_actor
+         ~base_path
+         ~tool_name
+         ~request_authority
+         request
+     with
+     | Ok agent_name ->
+       (match check_agent_rate_limit request reqd with
+        | Ok () -> handler state agent_name request reqd
+        | Error () -> ())
+     | Error err -> respond_auth_error request reqd err)
 
 and with_token_permission_auth ~permission handler request reqd =
   match !server_state with

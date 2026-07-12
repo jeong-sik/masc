@@ -39,6 +39,10 @@ val register_offline : base_path:string -> string -> keeper_meta -> registry_ent
 type registration_error =
   | Registration_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
   | Registration_invalid of registry_entry_validation_error
+  | Registration_event_queue_unavailable of
+      { keeper_name : string
+      ; detail : string
+      }
 
 (** Production registration gate: the final registry CAS is serialized with
     Keeper shutdown reservation. Event-queue loading remains outside the
@@ -57,6 +61,10 @@ val register_offline_if_admitted :
 type register_restarting_error =
   | Budget_already_exhausted of { name : string }
   | Restart_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+  | Restart_event_queue_unavailable of
+      { keeper_name : string
+      ; detail : string
+      }
 
 (** Register a keeper that is about to relaunch after a crash.
     The entry starts in [Restarting] and must receive [Fiber_started] when the

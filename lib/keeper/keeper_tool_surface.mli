@@ -18,6 +18,16 @@ val dispatch :
   ?continuation_channel:Keeper_continuation_channel.t ->
   _ context -> name:string -> args:Yojson.Safe.t -> tool_result option
 
+(** Internal async-message entry point for adapters whose authenticated
+    submission principal differs from the target turn's [ctx.agent_name].
+    [submitted_by] is trusted boundary context, never model input. *)
+val dispatch_keeper_msg
+  :  submitted_by:string
+  -> ?continuation_channel:Keeper_continuation_channel.t
+  -> _ context
+  -> args:Yojson.Safe.t
+  -> tool_result
+
 module For_testing : sig
   val reset_keeper_list_cache : unit -> unit
   val invalidate_keeper_list_cache : unit -> unit

@@ -31,6 +31,10 @@ type connector_kind =
           a busy message keeps the async [masc_keeper_msg] poll path; see
           RFC-connector-deferred-reply-via-chat-queue §3.3 option (a). *)
 
+type submission_owner =
+  | Authenticated_caller of string
+  | Channel_actor
+
 (* [route_busy_connector] decides where a connector message goes when the keeper
    is already in flight. Pure and exhaustive over [connector_kind] so a new
    connector forces a routing decision at compile time (no catch-all). [Discord]
@@ -482,8 +486,8 @@ let persist_connector_assistant_reply ~base_dir ~keeper_name ~source ?surface
    below either pass it ([dispatch_with_text_snapshot]) or omit it so it defaults
    to [None] ([dispatch]). Without the unit the optional leaks into [dispatch]'s
    inferred type and breaks the .mli signature. Do not drop the [()]. *)
-let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~sw ~clock
-    ~proc_mgr ~net ~config
+let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~submission_owner
+    ~sw ~clock ~proc_mgr ~net ~config
     ~channel ~channel_user_id ~channel_user_name ~channel_workspace_id
     ~keeper_name ~idempotency_key ~metadata ~content () =
   let keeper_name = String.trim keeper_name in
@@ -496,6 +500,11 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~sw ~clock
   let redact_json = Keeper_secret_redaction.redact_json redaction in
   let agent_name =
     agent_name_for_channel_actor ~channel ~channel_workspace_id ~channel_user_id
+  in
+  let submitted_by =
+    match submission_owner with
+    | Authenticated_caller caller -> caller
+    | Channel_actor -> agent_name
   in
   (* Use filesystem-safe sanitizer: this key is later used as a directory
      component in session_dir. An unsanitized channel_workspace_id with '..' or '/'
@@ -641,8 +650,11 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~sw ~clock
     | `Async_poll ->
       `Async_ack
         ( admission_rejection.in_flight
-        , Keeper_tool_surface.dispatch keeper_ctx
-            ~name:"masc_keeper_msg" ~args )
+        , Some
+            (Keeper_tool_surface.dispatch_keeper_msg
+               ~submitted_by
+               keeper_ctx
+               ~args) )
   in
   let dispatch_result =
     (* The admission boundary, not a route-level peek, owns the FIFO decision.
@@ -782,16 +794,19 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~sw ~clock
    the connector-neutral [dispatch_fn] shape. Requiring the connector to name
    its kind also makes a missing wiring a compile error rather than a silent
    [Generic] default. *)
-let dispatch ~connector_kind ~sw ~clock ~proc_mgr ~net ~config ~channel
+let dispatch ~connector_kind ~submission_owner ~sw ~clock ~proc_mgr ~net ~config
+    ~channel
     ~channel_user_id ~channel_user_name ~channel_workspace_id ~keeper_name
     ~idempotency_key ~metadata ~content =
-  dispatch_core ~connector_kind ~sw ~clock ~proc_mgr ~net ~config ~channel
+  dispatch_core ~connector_kind ~submission_owner ~sw ~clock ~proc_mgr ~net ~config
+    ~channel
     ~channel_user_id ~channel_user_name ~channel_workspace_id ~keeper_name
     ~idempotency_key ~metadata ~content ()
 
-let dispatch_with_text_snapshot ~connector_kind ~on_text_snapshot ~sw ~clock
+let dispatch_with_text_snapshot ~connector_kind ~submission_owner
+    ~on_text_snapshot ~sw ~clock ~proc_mgr ~net ~config ~channel ~channel_user_id
+    ~channel_user_name ~channel_workspace_id ~keeper_name ~idempotency_key
+    ~metadata ~content =
+  dispatch_core ~connector_kind ~submission_owner ~on_text_snapshot ~sw ~clock
     ~proc_mgr ~net ~config ~channel ~channel_user_id ~channel_user_name
-    ~channel_workspace_id ~keeper_name ~idempotency_key ~metadata ~content =
-  dispatch_core ~connector_kind ~on_text_snapshot ~sw ~clock ~proc_mgr ~net
-    ~config ~channel ~channel_user_id ~channel_user_name ~channel_workspace_id
-    ~keeper_name ~idempotency_key ~metadata ~content ()
+    ~channel_workspace_id ~keeper_name ~idempotency_key ~metadata ~content ()

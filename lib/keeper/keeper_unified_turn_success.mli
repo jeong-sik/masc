@@ -80,6 +80,24 @@ module For_testing : sig
     -> unit
 end
 
+type failure_judgment_delivery =
+  | Queue_successor
+  | Handled_in_turn
+(** Whether the heartbeat must atomically append the judgment as the source
+    lease successor, or the configured in-turn failure policy already handled
+    the terminal failure.  This does not change the failure into success. *)
+
+type handle_result =
+  | Completed of Keeper_meta_contract.keeper_meta
+  | Failed_completion_contract of
+      { meta : Keeper_meta_contract.keeper_meta
+      ; failure_judgment : Keeper_event_queue.failure_judgment
+      ; judgment_delivery : failure_judgment_delivery
+      }
+(** Final typed turn disposition from the authoritative receipt/operator
+    verdict.  Runtime completion with a failed completion contract is never
+    represented as [Completed]. *)
+
 val handle
   :  config:Workspace.config
   -> base_dir:string
@@ -96,4 +114,4 @@ val handle
   -> current_turn_blocker_info:Keeper_meta_contract.blocker_info option
   -> keeper_turn_id:int
   -> Keeper_agent_run.run_result
-  -> Keeper_meta_contract.keeper_meta
+  -> handle_result

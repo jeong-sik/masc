@@ -99,6 +99,7 @@ let test_busy_discord_enqueues () =
           with_busy_slot ~base ~sw (fun () ->
             Gate_keeper_backend.dispatch
               ~connector_kind:Gate_keeper_backend.Discord
+              ~submission_owner:Gate_keeper_backend.Channel_actor
               ~sw ~clock ~proc_mgr:None ~net:None ~config
               ~channel:"discord" ~channel_user_id:"user-42"
               ~channel_user_name:"Tester" ~channel_workspace_id:"chan-777"
@@ -205,6 +206,7 @@ let test_unpublished_busy_slot_queues_without_resolved_meta () =
               (Keeper_turn_admission.in_flight ~base_path:base ~keeper_name = None);
             Gate_keeper_backend.dispatch
               ~connector_kind:Gate_keeper_backend.Discord
+              ~submission_owner:Gate_keeper_backend.Channel_actor
               ~sw ~clock ~proc_mgr:None ~net:None ~config
               ~channel:"discord" ~channel_user_id:"user-unpublished"
               ~channel_user_name:"Tester" ~channel_workspace_id:"chan-unpublished"
@@ -250,6 +252,7 @@ let test_busy_discord_persist_failure_is_explicit () =
             Keeper_chat_queue.For_testing.fail_next_persist ();
             Gate_keeper_backend.dispatch
               ~connector_kind:Gate_keeper_backend.Discord
+              ~submission_owner:Gate_keeper_backend.Channel_actor
               ~sw ~clock ~proc_mgr:None ~net:None ~config
               ~channel:"discord" ~channel_user_id:"user-42"
               ~channel_user_name:"Tester" ~channel_workspace_id:"chan-777"
@@ -301,6 +304,7 @@ let test_pending_receipt_prevents_direct_overtake () =
       let reply =
         Gate_keeper_backend.dispatch
           ~connector_kind:Gate_keeper_backend.Discord
+          ~submission_owner:Gate_keeper_backend.Channel_actor
           ~sw ~clock ~proc_mgr:None ~net:None ~config
           ~channel:"discord" ~channel_user_id:"user-42"
           ~channel_user_name:"Tester" ~channel_workspace_id:"chan-777"
@@ -340,6 +344,7 @@ let test_busy_slack_preserves_thread_context () =
         with_busy_slot ~base ~sw (fun () ->
           Gate_keeper_backend.dispatch
             ~connector_kind:Gate_keeper_backend.Slack
+            ~submission_owner:Gate_keeper_backend.Channel_actor
             ~sw ~clock ~proc_mgr:None ~net:None ~config
             ~channel:"slack" ~channel_user_id:"U-42"
             ~channel_user_name:"Slack User" ~channel_workspace_id:"C-777"
@@ -410,7 +415,9 @@ let test_shutdown_fenced_connector_ack
         Eio.Switch.on_release sw Keeper_chat_queue.For_testing.reset;
         let reply =
           Gate_keeper_backend.dispatch
-            ~connector_kind ~sw ~clock ~proc_mgr:None ~net:None ~config
+            ~connector_kind
+            ~submission_owner:Gate_keeper_backend.Channel_actor
+            ~sw ~clock ~proc_mgr:None ~net:None ~config
             ~channel ~channel_user_id ~channel_user_name ~channel_workspace_id
             ~keeper_name
             ~idempotency_key:("shutdown-fenced-" ^ String.lowercase_ascii label)

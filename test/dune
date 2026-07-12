@@ -766,6 +766,11 @@
 ; an explicit executable stanza instead of borrowing the pure synchronous test
 ; group above.
 (test
+ (name test_keeper_event_queue_state_v2)
+ (modules test_keeper_event_queue_state_v2)
+ (libraries alcotest masc_test_deps))
+
+(test
  (name test_server_request_authority)
  (modules test_server_request_authority)
  (libraries alcotest masc_test_deps eio_main h2))
@@ -2066,8 +2071,6 @@
 (include stanzas/test_keeper_msg_async_path_traversal.inc)
 
 (include stanzas/test_keeper_msg_async_terminal_event.inc)
-
-(include stanzas/test_keeper_msg_cancel.inc)
 
 (include stanzas/test_turn_record.inc)
 

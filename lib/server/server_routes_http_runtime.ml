@@ -72,22 +72,14 @@ let authority_of_host_port host port =
   Printf.sprintf "%s:%d" (authority_host host) port
 
 let advertised_host_port_authority ~request_authority =
-  let default_port = configured_http_port () in
   let request_host = Server_request_authority.host request_authority in
   let port_opt = Server_request_authority.port request_authority in
-  let port =
-    match port_opt with
-    | Some explicit_port -> explicit_port
-    | None -> default_port
-  in
+  let port = Server_request_authority.port_or_default request_authority in
   let host = Transport_read_model.normalize_advertised_host request_host in
   let authority =
     match port_opt with
     | Some _ -> authority_of_host_port host port
-    | None ->
-      if String.equal host request_host
-      then authority_host host
-      else authority_of_host_port host port
+    | None -> authority_host host
   in
   host, port, authority
 
@@ -97,57 +89,15 @@ let advertised_host_port ~request_authority =
   in
   (host, port)
 
-let normalize_forwarded_proto raw =
-  let value =
-    raw
-    |> String.trim
-    |> String.lowercase_ascii
-    |> fun value ->
-    let len = String.length value in
-    if len >= 2 && value.[0] = '"' && value.[len - 1] = '"'
-    then String.sub value 1 (len - 2)
-    else value
-  in
-  match value with
-  | "http" | "https" -> Some value
-  | _ -> None
-
-let first_forwarded_proto raw =
-  raw
-  |> String.split_on_char ','
-  |> List.find_map (fun element ->
-       element
-       |> String.split_on_char ';'
-       |> List.find_map (fun part ->
-            match String.split_on_char '=' (String.trim part) with
-            | [ key; value ] when String.equal (String.lowercase_ascii (String.trim key)) "proto" ->
-              normalize_forwarded_proto value
-            | _ -> None))
-
-let advertised_scheme request =
-  let headers = request.Httpun.Request.headers in
-  match Httpun.Headers.get headers "x-forwarded-proto" with
-  | Some raw -> (
-      match
-        raw
-        |> String.split_on_char ','
-        |> List.find_map normalize_forwarded_proto
-      with
-      | Some scheme -> scheme
-      | None -> (
-          match Httpun.Headers.get headers "forwarded" with
-          | Some raw -> Option.value ~default:"http" (first_forwarded_proto raw)
-          | None -> "http"))
-  | None -> (
-      match Httpun.Headers.get headers "forwarded" with
-      | Some raw -> Option.value ~default:"http" (first_forwarded_proto raw)
-      | None -> "http")
-
-let advertised_base_url ~request_authority request =
+let advertised_base_url ~request_authority _request =
   let _host, _port, authority =
     advertised_host_port_authority ~request_authority
   in
-  Printf.sprintf "%s://%s" (advertised_scheme request) authority
+  Printf.sprintf
+    "%s://%s"
+    (Server_request_authority.scheme request_authority
+     |> Server_request_authority.scheme_to_string)
+    authority
 
 let websocket_discovery_json ~request_authority request =
   let host, _port = advertised_host_port ~request_authority in
@@ -1228,18 +1178,8 @@ let make_cached_full_health_json ?(listener = "http/1.1") ~request_authority
              ~refresh_started_at ~refresh_requested snapshot );
        ])
 
-let start_full_health_snapshot_refresh_loop ~sw ~clock =
+let start_full_health_snapshot_refresh_loop ~sw ~clock ~request_authority =
   let request = Httpun.Request.create `GET "/health?full=1" in
-  let request_authority =
-    match
-      Server_request_authority.of_host_port
-        ~host:(configured_http_host ())
-        ~port:(configured_http_port ())
-    with
-    | Ok authority -> authority
-    | Error `Malformed ->
-      invalid_arg "configured HTTP host/port is not a valid authority"
-  in
   Proactive_refresh.start
     ~sw
     ~clock

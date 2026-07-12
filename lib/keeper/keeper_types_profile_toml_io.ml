@@ -25,7 +25,7 @@ let keeper_toml_load_error_to_string error =
   then Printf.sprintf "%s: %s" error.failing_path error.detail
   else
     Printf.sprintf
-      "%s: keeper.base %s failed: %s"
+      "%s: profile dependency %s failed: %s"
       error.keeper_path
       error.failing_path
       error.detail

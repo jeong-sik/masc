@@ -38,22 +38,10 @@ let resolve_error_to_string = function
 ;;
 
 let canonical_base_path raw =
-  let normalized = Env_config_core.normalize_masc_base_path_input raw in
-  if String.equal normalized ""
-  then Error (Invalid_base_path "path is empty after normalization")
-  else
-    let absolute =
-      if Filename.is_relative normalized
-      then Filename.concat (Config_dir_resolver.current_working_dir ()) normalized
-      else normalized
-    in
-    let canonical = Env_config_core.normalize_masc_base_path_input absolute in
-    if String.equal canonical "" || Filename.is_relative canonical
-    then
-      Error
-        (Invalid_base_path
-           (Printf.sprintf "could not derive an absolute path from %S" raw))
-    else Ok canonical
+  Config_dir_resolver.canonical_base_path raw
+  |> Result.map_error (fun error ->
+    Invalid_base_path
+      (Config_dir_resolver.canonical_base_path_error_to_string error))
 ;;
 
 let resolve ~base_path ~keeper_name =
@@ -107,7 +95,7 @@ type 'a lock_outcome =
    poisons the gate when the callback raises. The gate carries no mutable
    resource state of its own, and the shared Stdlib mutex is released by the
    [Fun.protect] finalizer before any callback exception is propagated. *)
-let with_eio_lock owner f =
+let with_eio_lock ~check_after owner f =
   let outcome =
     match
       Eio.Mutex.use_ro owner.eio_gate (fun () ->
@@ -124,7 +112,7 @@ let with_eio_lock owner f =
      transaction. Re-check the parent context after both owner locks have been
      released on every outcome so an ordinary exception cannot mask pending
      cancellation. *)
-  Eio.Fiber.check ();
+  if check_after then Eio.Fiber.check ();
   match outcome with
   | Returned value -> value
   | Raised (exn, backtrace) -> Printexc.raise_with_backtrace exn backtrace
@@ -132,6 +120,12 @@ let with_eio_lock owner f =
 
 let with_lock owner f =
   match execution_context () with
-  | Eio_fiber -> with_eio_lock owner f
+  | Eio_fiber -> with_eio_lock ~check_after:true owner f
+  | Non_eio -> Stdlib.Mutex.protect owner.cross_context_mutex f
+;;
+
+let with_durable_lock owner f =
+  match execution_context () with
+  | Eio_fiber -> with_eio_lock ~check_after:false owner f
   | Non_eio -> Stdlib.Mutex.protect owner.cross_context_mutex f
 ;;

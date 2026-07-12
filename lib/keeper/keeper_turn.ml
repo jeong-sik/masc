@@ -409,12 +409,15 @@ let resolve_turn_runtime_id (meta : keeper_meta) =
     Ok runtime_id
 
 let keeper_msg_timeout_override args =
-  match get_float_opt args "timeout_sec" with
-  | None -> Ok None
-  | Some timeout_sec
+  match Json_util.assoc_member_opt "timeout_sec" args with
+  | None | Some `Null -> Ok None
+  | Some (`Int value) when value > 0 -> Ok (Some (float_of_int value))
+  | Some (`Float timeout_sec)
     when Float.is_finite timeout_sec && timeout_sec > 0.0 ->
       Ok (Some timeout_sec)
-  | Some _ -> Error "timeout_sec must be a positive finite number"
+  | Some (`Int _) | Some (`Float _) ->
+    Error "timeout_sec must be a positive finite number"
+  | Some _ -> Error "timeout_sec must be a JSON number"
 
 let user_oas_blocks_of_args args =
   match Keeper_multimodal_input.parse_user_blocks args with

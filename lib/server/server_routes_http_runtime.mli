@@ -78,10 +78,9 @@ val advertised_base_url :
   Httpun.Request.t ->
   string
 (** [advertised_base_url ~request_authority request] returns the
-    browser-visible HTTP(S) base URL.  It derives the authority from the typed
-    request-entry value and the scheme from
-    [X-Forwarded-Proto] / [Forwarded: proto=...] when present, falling back to
-    local [http]. *)
+    browser-visible HTTP(S) base URL.  Both scheme and authority come from the
+    typed trusted request-entry value; untrusted forwarded headers are not
+    scheme inputs. *)
 
 (** {1 Discovery / status JSON} *)
 
@@ -244,10 +243,13 @@ val make_health_response_json :
 val start_full_health_snapshot_refresh_loop :
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  request_authority:Server_request_authority.request_context ->
   unit
 (** Starts the Eio background refresh loop for cached [/health?full=1]
     diagnostics.  The loop keeps heavy durable scans out of the HTTP request
-    path and stores stale/error metadata when refreshes fail or time out. *)
+    path and stores stale/error metadata when refreshes fail or time out.  Its
+    projection context comes from the bootstrap trust policy, never a second
+    read of listener environment. *)
 
 module For_testing : sig
   val reset_full_health_snapshot : unit -> unit

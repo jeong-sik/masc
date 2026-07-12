@@ -146,8 +146,8 @@ let handle_pause_status ~tool_name ~start_time ctx _args : Tool_result.result =
   text_ok ~tool_name ~start_time (Yojson.Safe.to_string payload)
 ;;
 
-(* schemas removed in RFC-0057 PR-1 — masc_pause / masc_resume are emitted
-   via Tool_descriptors_gen (Tool_schemas_misc.schemas chain). *)
+(* Schemas are generated from the RFC-0057 specs and projected through
+   [Tool_schemas_misc.control_schemas]. *)
 
 (* Dispatch function *)
 let dispatch ctx ~name ~args : Tool_result.result option =
@@ -166,23 +166,18 @@ let dispatch ctx ~name ~args : Tool_result.result option =
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
 
-(* RFC-0057 PR-1: control tool schemas now come from
-   Tool_descriptors_gen via Tool_schemas_misc.schemas. Filter to the
-   two control tools so they register with Mod_control. *)
+(* Control schemas have a dedicated typed projection because they must remain
+   registered with [Mod_control] while staying outside Config's public/front-door
+   inventory. *)
 let () =
-  let is_control = function
-    | "masc_pause" | "masc_resume" -> true
-    | _ -> false
-  in
   List.iter
     (fun (s : Masc_domain.tool_schema) ->
-      if is_control s.name then
-        Tool_spec.register
-          (Tool_spec.create
-             ~name:s.name
-             ~description:s.description
-             ~module_tag:Tool_dispatch.Mod_control
-             ~input_schema:s.input_schema
-             ~handler_binding:Tag_dispatch
-             ()))
-    Tool_schemas_misc.schemas
+      Tool_spec.register
+        (Tool_spec.create
+           ~name:s.name
+           ~description:s.description
+           ~module_tag:Tool_dispatch.Mod_control
+           ~input_schema:s.input_schema
+           ~handler_binding:Tag_dispatch
+           ()))
+    Tool_schemas_misc.control_schemas

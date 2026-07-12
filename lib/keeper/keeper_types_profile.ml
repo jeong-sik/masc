@@ -161,9 +161,31 @@ let keeper_toml_path_opt name =
 let keeper_toml_path_opt_for_base_path ~base_path name =
   Config_dir_resolver.keeper_toml_path_opt_for_base_path ~base_path name
 
-let load_keeper_profile_defaults_from_persona_dirs ~persona_dirs name
-    : keeper_profile_defaults =
+let persona_load_error_to_profile_error
+    ?keeper_path
+    (error : Keeper_types_profile_persona_defaults.load_error) =
+  let kind =
+    match error.kind with
+    | Keeper_types_profile_persona_defaults.Persona_read_error -> Read_error
+    | Keeper_types_profile_persona_defaults.Persona_parse_error -> Parse_error
+  in
+  let keeper_path =
+    match keeper_path with
+    | Some keeper_path -> keeper_path
+    | None -> error.path
+  in
+  { keeper_path
+  ; failing_path = error.path
+  ; kind
+  ; detail = error.detail
+  }
+
+let load_keeper_profile_defaults_from_persona_dirs
+    ?keeper_path
+    ~persona_dirs
+    name =
   Keeper_types_profile_persona_defaults.load_from_dirs ~persona_dirs ~name
+  |> Result.map_error (persona_load_error_to_profile_error ?keeper_path)
 
 let safe_persona_dirs ?base_path () =
   try
@@ -204,18 +226,21 @@ let load_keeper_profile_defaults_result_uncached_with_paths
        | Ok (_name, defaults) -> (
            match defaults.persona_name with
            | Some persona_name ->
-               let persona_defaults =
-                 load_keeper_profile_defaults_from_persona_dirs
-                   ~persona_dirs
-                   persona_name
-               in
-               Ok
-                 (merge_keeper_profile_defaults ~agent_name:name
-                    ~base:persona_defaults ~overlay:defaults)
+               (match
+                  load_keeper_profile_defaults_from_persona_dirs
+                    ~keeper_path:toml_path
+                    ~persona_dirs
+                    persona_name
+                with
+                | Error _ as error -> error
+                | Ok persona_defaults ->
+                  Ok
+                    (merge_keeper_profile_defaults ~agent_name:name
+                       ~base:persona_defaults ~overlay:defaults))
            | None -> Ok defaults)
        | Error e -> Error e)
     | None ->
-      Ok (load_keeper_profile_defaults_from_persona_dirs ~persona_dirs name)
+      load_keeper_profile_defaults_from_persona_dirs ~persona_dirs name
   in
   result
 
@@ -591,15 +616,21 @@ let keeper_default_source_snapshot ~base_path name : keeper_default_source_snaps
           ; config_error = Some e
           })
   | None ->
-      let defaults =
-        load_keeper_profile_defaults_from_persona_dirs
-          ~persona_dirs:(safe_persona_dirs ~base_path ())
-          name
-      in
-      let source_kind =
-        if Option.is_some defaults.manifest_path then Some "persona" else None
-      in
-      { source_kind; defaults; config_error = None }
+      (match
+         load_keeper_profile_defaults_from_persona_dirs
+           ~persona_dirs:(safe_persona_dirs ~base_path ())
+           name
+       with
+       | Error config_error ->
+         { source_kind = None
+         ; defaults = empty_keeper_profile_defaults
+         ; config_error = Some config_error
+         }
+       | Ok defaults ->
+         let source_kind =
+           if Option.is_some defaults.manifest_path then Some "persona" else None
+         in
+         { source_kind; defaults; config_error = None })
 
 let persona_description_max_chars =
   Keeper_types_profile_persona.persona_description_max_chars

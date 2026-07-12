@@ -25,12 +25,16 @@ type stimulus_kind =
 type reaction_kind =
   | Turn_started
   | Event_queue_ack
+  | Event_queue_requeued
+  | Event_queue_escalated
   | Execution_receipt
   | Terminal_reason
   | Cursor_ack
   | Operator_escalation
   | Supervisor_recovery_requested
   | Unknown_reaction of string
+
+module Event_id_set = Set.Make (String)
 
 let schema = "keeper.reaction_ledger.v1"
 
@@ -72,6 +76,8 @@ let stimulus_kind_of_string = function
 let reaction_kind_to_string = function
   | Turn_started -> "turn_started"
   | Event_queue_ack -> "event_queue_ack"
+  | Event_queue_requeued -> "event_queue_requeued"
+  | Event_queue_escalated -> "event_queue_escalated"
   | Execution_receipt -> "execution_receipt"
   | Terminal_reason -> "terminal_reason"
   | Cursor_ack -> "cursor_ack"
@@ -87,6 +93,8 @@ let reaction_kind_to_string = function
 let reaction_kind_of_string = function
   | "turn_started" -> Turn_started
   | "event_queue_ack" -> Event_queue_ack
+  | "event_queue_requeued" -> Event_queue_requeued
+  | "event_queue_escalated" -> Event_queue_escalated
   | "execution_receipt" -> Execution_receipt
   | "terminal_reason" -> Terminal_reason
   | "cursor_ack" -> Cursor_ack
@@ -314,6 +322,62 @@ let record_event_queue_reaction ~base_path ~keeper_name ~reaction_kind stimulus 
     (event_queue_reaction_json ~keeper_name ~reaction_kind stimulus)
 ;;
 
+let event_queue_transition_reaction_json
+      ~keeper_name
+      ~reaction_kind
+      (receipt : Keeper_event_queue_state.transition_receipt)
+      stimulus
+  =
+  let stimulus_id = stimulus_id_of_event_queue stimulus in
+  `Assoc
+    (base_fields
+       ~record_kind:"reaction"
+       ~event_id:(digest_id "krl" (receipt.event_id ^ "|" ^ stimulus_id))
+       ~keeper_name
+       ~recorded_at:receipt.settled_at
+     @ [ "stimulus_id", `String stimulus_id
+       ; ( "reaction"
+         , `Assoc
+             [ "kind", `String (reaction_kind_to_string reaction_kind)
+             ; "source", `String "keeper_event_queue_transition_outbox"
+             ; "post_id", `String stimulus.post_id
+             ; ( "stimulus_kind"
+               , `String
+                   (stimulus_kind_to_string (stimulus_kind_of_event_queue stimulus)) )
+             ; "transition_id", `String receipt.transition_id
+             ; ( "transition_receipt"
+               , Keeper_event_queue_state.transition_receipt_to_yojson receipt )
+             ] )
+       ])
+;;
+
+let record_event_queue_transition_reaction_result
+      ~base_path
+      ~keeper_name
+      ~reaction_kind
+      ~receipt
+      stimulus
+  =
+  try
+    Dated_jsonl.append
+      (store_for_base_path ~base_path ~keeper_name)
+      (event_queue_transition_reaction_json
+         ~keeper_name
+         ~reaction_kind
+         receipt
+         stimulus);
+    Ok ()
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Error
+      (Printf.sprintf
+         "event queue transition ledger append failed keeper=%s transition=%s: %s"
+         keeper_name
+         receipt.Keeper_event_queue_state.transition_id
+         (Printexc.to_string exn))
+;;
+
 let cursor_json { cursor_ts; post_id } =
   `Assoc
     [ "scope", `String "board"
@@ -515,6 +579,8 @@ let event_queue_reaction_evidence ~base_path ~keeper_name ~stimulus_id =
             event_queue_ack_seen := true;
             event_queue_ack_recorded_at
               := max_recorded_at !event_queue_ack_recorded_at recorded_at
+          | Some Event_queue_requeued
+          | Some Event_queue_escalated -> ()
           | Some Execution_receipt
           | Some Terminal_reason
           | Some Cursor_ack
@@ -780,12 +846,28 @@ let board_stimulus_token row =
   | _ -> None
 ;;
 
+let dedupe_rows_by_event_id rows =
+  let rec loop seen kept = function
+    | [] -> List.rev kept
+    | row :: rest ->
+      (match string_field "event_id" row with
+       | Some event_id when Event_id_set.mem event_id seen -> loop seen kept rest
+       | Some event_id ->
+         loop (Event_id_set.add event_id seen) (row :: kept) rest
+       | None -> loop seen (row :: kept) rest)
+  in
+  loop Event_id_set.empty [] rows
+;;
+
 let summarize_rows ~keeper_name ~limit rows =
+  let rows = dedupe_rows_by_event_id rows in
   let row_count = List.length rows in
   let stimulus_count = ref 0 in
   let reaction_count = ref 0 in
   let turn_started_count = ref 0 in
   let event_queue_ack_count = ref 0 in
+  let event_queue_requeue_count = ref 0 in
+  let event_queue_escalation_count = ref 0 in
   let cursor_ack_count = ref 0 in
   let execution_receipt_count = ref 0 in
   let terminal_reason_count = ref 0 in
@@ -877,6 +959,8 @@ let summarize_rows ~keeper_name ~limit rows =
       (match reaction_kind_of_string raw with
        | Turn_started -> incr turn_started_count
        | Event_queue_ack -> incr event_queue_ack_count
+       | Event_queue_requeued -> incr event_queue_requeue_count
+       | Event_queue_escalated -> incr event_queue_escalation_count
        | Cursor_ack -> incr cursor_ack_count
        | Execution_receipt -> incr execution_receipt_count
        | Terminal_reason -> incr terminal_reason_count
@@ -1058,6 +1142,8 @@ let summarize_rows ~keeper_name ~limit rows =
     ; "reaction_count", `Int !reaction_count
     ; "turn_started_count", `Int !turn_started_count
     ; "event_queue_ack_count", `Int !event_queue_ack_count
+    ; "event_queue_requeue_count", `Int !event_queue_requeue_count
+    ; "event_queue_escalation_count", `Int !event_queue_escalation_count
     ; "cursor_ack_count", `Int !cursor_ack_count
     ; "execution_receipt_count", `Int !execution_receipt_count
     ; "terminal_reason_count", `Int !terminal_reason_count
@@ -1430,6 +1516,9 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
     ; "reaction_count", `Int (total_int "reaction_count")
     ; "turn_started_count", `Int (total_int "turn_started_count")
     ; "event_queue_ack_count", `Int (total_int "event_queue_ack_count")
+    ; "event_queue_requeue_count", `Int (total_int "event_queue_requeue_count")
+    ; ( "event_queue_escalation_count"
+      , `Int (total_int "event_queue_escalation_count") )
     ; "cursor_ack_count", `Int (total_int "cursor_ack_count")
     ; "execution_receipt_count", `Int (total_int "execution_receipt_count")
     ; "terminal_reason_count", `Int (total_int "terminal_reason_count")

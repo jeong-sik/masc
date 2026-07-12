@@ -886,6 +886,100 @@ describe('applyKeeperStreamEvent tool calls', () => {
     ])
   })
 
+  it('promotes text followed by a tool call and keeps only terminal text as Chat', () => {
+    assistantEntry()
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_CONTENT_BLOCK_START',
+      value: { index: 2, content_type: 'text' },
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_START' })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TEXT_MESSAGE_CONTENT',
+      delta: '  PR 목록을 확인하겠다.\n',
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_END' })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TOOL_CALL_START',
+      toolCallId: 'tc-progress',
+      toolCallName: 'Execute',
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TOOL_CALL_ARGS',
+      toolCallId: 'tc-progress',
+      delta: '{"argv":["pr","list"]}',
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TOOL_CALL_END',
+      toolCallId: 'tc-progress',
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TEXT_MESSAGE_CONTENT',
+      delta: '최종 결과다.',
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'RUN_FINISHED' })
+
+    const reply = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
+    expect(reply?.text).toBe('최종 결과다.')
+    expect(reply?.rawText).toBe('최종 결과다.')
+    expect(reply?.traceSteps).toEqual([
+      {
+        kind: 'progress',
+        text: '  PR 목록을 확인하겠다.\n',
+        ts: expect.any(String),
+        oasBlockIndex: 2,
+      },
+      {
+        kind: 'tool',
+        name: 'Execute',
+        toolCallId: 'tc-progress',
+        status: 'ok',
+        args: '{"argv":["pr","list"]}',
+        ts: expect.any(String),
+      },
+    ])
+  })
+
+  it('keeps repeated intermediate rounds as progress when the run times out', () => {
+    assistantEntry()
+    for (const [index, text] of [
+      [2, 'PR 목록을 확인하겠다.'],
+      [4, 'cwd를 설정해서 다시 보겠다.'],
+    ] as const) {
+      applyKeeperStreamEvent('sangsu', 'reply-1', {
+        type: 'CUSTOM',
+        name: 'KEEPER_CONTENT_BLOCK_START',
+        value: { index, content_type: 'text' },
+      })
+      applyKeeperStreamEvent('sangsu', 'reply-1', {
+        type: 'TEXT_MESSAGE_CONTENT',
+        delta: text,
+      })
+      applyKeeperStreamEvent('sangsu', 'reply-1', {
+        type: 'TOOL_CALL_START',
+        toolCallId: `tc-progress-${index}`,
+        toolCallName: 'Execute',
+      })
+      applyKeeperStreamEvent('sangsu', 'reply-1', {
+        type: 'TOOL_CALL_END',
+        toolCallId: `tc-progress-${index}`,
+      })
+    }
+
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'RUN_ERROR',
+      value: { message: 'request exceeded timeout_sec=300.000 before completion' },
+    })).toBe('request exceeded timeout_sec=300.000 before completion')
+
+    const reply = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
+    expect(reply?.text).toBe('')
+    expect(reply?.rawText).toBe('')
+    expect(reply?.traceSteps?.filter(step => step.kind === 'progress')).toEqual([
+      expect.objectContaining({ kind: 'progress', text: 'PR 목록을 확인하겠다.', oasBlockIndex: 2 }),
+      expect.objectContaining({ kind: 'progress', text: 'cwd를 설정해서 다시 보겠다.', oasBlockIndex: 4 }),
+    ])
+  })
+
   it('preserves OAS content block index on tool trace steps', () => {
     assistantEntry()
     applyKeeperStreamEvent('sangsu', 'reply-1', {

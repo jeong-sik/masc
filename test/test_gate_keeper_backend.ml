@@ -233,6 +233,34 @@ let test_parse_keeper_chat_stream_request_accepts_connector_context () =
       check string "workspace id" "workspace-9" payload.channel_workspace_id
   | Error err -> fail ("expected connector context to parse: " ^ err)
 
+let test_parse_keeper_chat_stream_request_preserves_explicit_timeout () =
+  let body = {|{"name":"luna","message":"hello","timeout_sec":1200.5}|} in
+  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
+  | Ok payload ->
+    check (option (float 0.0001))
+      "explicit timeout"
+      (Some 1200.5)
+      payload.timeout_sec
+  | Error err -> fail ("expected explicit timeout to parse: " ^ err)
+;;
+
+let test_parse_keeper_chat_stream_request_rejects_invalid_timeout () =
+  let body = {|{"name":"luna","message":"hello","timeout_sec":0}|} in
+  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
+  | Ok _ -> fail "expected non-positive timeout to be rejected"
+  | Error err ->
+    check string
+      "validation message"
+      "timeout_sec must be a positive finite number"
+      err
+;;
+
+let test_keeper_msg_timeout_override_rejects_non_number () =
+  match KT.keeper_msg_timeout_override (`Assoc [ "timeout_sec", `String "120" ]) with
+  | Ok _ -> fail "expected a string timeout to be rejected"
+  | Error err -> check string "validation message" "timeout_sec must be a JSON number" err
+;;
+
 let test_parse_keeper_chat_stream_request_rejects_partial_connector_context () =
   let body =
     {|{"name":"luna","message":"hello","channel":"discord"}|}
@@ -2794,6 +2822,12 @@ let () =
             test_contextualize_message_includes_channel_metadata;
           test_case "stream request accepts connector context" `Quick
             test_parse_keeper_chat_stream_request_accepts_connector_context;
+          test_case "stream request preserves explicit timeout" `Quick
+            test_parse_keeper_chat_stream_request_preserves_explicit_timeout;
+          test_case "stream request rejects invalid explicit timeout" `Quick
+            test_parse_keeper_chat_stream_request_rejects_invalid_timeout;
+          test_case "keeper message rejects non-number timeout" `Quick
+            test_keeper_msg_timeout_override_rejects_non_number;
           test_case "stream request rejects partial connector context" `Quick
             test_parse_keeper_chat_stream_request_rejects_partial_connector_context;
           test_case "stream request accepts copilot context" `Quick

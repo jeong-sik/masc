@@ -40,22 +40,14 @@ val record_event_queue_stimulus_turn_started
   -> Keeper_event_queue.stimulus
   -> unit
 
-(** [record_event_queue_stimulus_ack ~ctx ~keeper_name stim] writes a durable
-    [Event_queue_ack] reaction only after the caller has confirmed
-    [ack_consumed] persisted. Logs and swallows errors except
-    [Eio.Cancel.Cancelled]. *)
-val record_event_queue_stimulus_ack
-  :  ctx:_ context
-  -> keeper_name:string
-  -> Keeper_event_queue.stimulus
-  -> unit
-
 (** Result of one heartbeat intake — accumulated pending board events
     after dedup and the number of stimuli consumed from the queue. *)
 type heartbeat_event_intake = {
   pending_board_events : Keeper_world_observation.pending_board_event list;
   consumed_stimulus_count : int;
   consumed_stimuli : Keeper_event_queue.stimulus list;
+  claimed_lease : Keeper_registry_event_queue.lease option;
+  event_queue_claim_error : string option;
   event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
 }
 

@@ -27,7 +27,7 @@ module Subprocess_registry = Masc.Keeper_subprocess_registry
 module Tombstone_cleanup = Masc.Keeper_supervisor_cleanup_tombstone
 module Process_switch = Masc.Keeper_process_switch
 module Tool_accumulator = Masc.Keeper_tool_emission_hook
-module Latched_reason = Masc.Keeper_latched_reason
+module Latched_reason = Keeper_latched_reason
 
 let supervisor_agent_name = Sup.supervisor_agent_name
 

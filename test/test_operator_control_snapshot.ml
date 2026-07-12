@@ -360,16 +360,10 @@ let test_keeper_up_clears_dead_tombstone_resume_state () =
     let keepers_dir =
       List.fold_left Filename.concat base_dir [ ".masc"; "config"; "keepers" ]
     in
-    let rec mkdir_p dir =
-      if not (Sys.file_exists dir) then begin
-        mkdir_p (Filename.dirname dir);
-        (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
-      end
-    in
-    mkdir_p keepers_dir;
-    let oc = open_out (Filename.concat keepers_dir (keeper_name ^ ".toml")) in
-    output_string oc "[keeper]\nsandbox_profile = \"local\"\n";
-    close_out oc
+    Fs_compat.mkdir_p keepers_dir;
+    Fs_compat.save_file
+      (Filename.concat keepers_dir (keeper_name ^ ".toml"))
+      "[keeper]\nsandbox_profile = \"local\"\n"
   in
   let keeper_ctx : _ Keeper_tool_surface.context =
     {

@@ -222,11 +222,11 @@ let lease_for stimulus =
   require_some "fixture lease" lease
 ;;
 
-let turn_failure route : Keeper_unified_turn.turn_failure =
+let turn_failure route : Masc.Keeper_unified_turn.turn_failure =
   { error = Agent_sdk.Error.Internal "deterministic fixture"
   ; runtime_id = "exact-final-runtime"
   ; route
-  ; source_lease_disposition = Keeper_unified_turn.Follow_failure_route
+  ; source_lease_disposition = Masc.Keeper_unified_turn.Follow_failure_route
   }
 ;;
 
@@ -300,7 +300,7 @@ let test_failed_cycle_route_mapping () =
   let handled_failure =
     { judgment_failure with
       source_lease_disposition =
-        Keeper_unified_turn.Acknowledge_after_in_turn_handling
+        Masc.Keeper_unified_turn.Acknowledge_after_in_turn_handling
     }
   in
   (match

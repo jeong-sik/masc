@@ -117,9 +117,19 @@ val write_meta :
   Keeper_meta_contract.keeper_meta ->
   (unit, string) result
 
+(** Lifecycle-owner variant of [write_meta]. The opaque reservation token is
+    checked against the same BasePath/name key before entering the per-path
+    CAS critical section. *)
+val write_meta_for_lifecycle :
+  Keeper_lifecycle_reservation.token ->
+  Workspace.config ->
+  Keeper_meta_contract.keeper_meta ->
+  (unit, string) result
+
 type identity_update_error =
   | Identity_missing
   | Identity_changed
+  | Identity_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
   | Identity_read_failed of string
   | Identity_write_failed of string
 
@@ -139,6 +149,7 @@ val update_meta_if_identity :
 type identity_remove_error =
   | Remove_identity_missing
   | Remove_identity_changed
+  | Remove_identity_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
   | Remove_identity_read_failed of string
   | Remove_identity_unlink_failed of string
 
@@ -185,6 +196,17 @@ val migrate_retired_keeper_meta_keys : Workspace.config -> unit
 val write_meta_with_merge :
   ?max_retries:int ->
   merge:(latest:Keeper_meta_contract.keeper_meta -> caller:Keeper_meta_contract.keeper_meta -> Keeper_meta_contract.keeper_meta) ->
+  Workspace.config ->
+  Keeper_meta_contract.keeper_meta ->
+  (unit, string) result
+
+val write_meta_with_merge_for_lifecycle :
+  Keeper_lifecycle_reservation.token ->
+  ?max_retries:int ->
+  merge:
+    (latest:Keeper_meta_contract.keeper_meta ->
+     caller:Keeper_meta_contract.keeper_meta ->
+     Keeper_meta_contract.keeper_meta) ->
   Workspace.config ->
   Keeper_meta_contract.keeper_meta ->
   (unit, string) result

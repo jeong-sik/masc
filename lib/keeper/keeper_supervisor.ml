@@ -695,6 +695,11 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
       Log.Keeper.warn
         "%s: stale supervisor entry was not unregistered because a newer lane owns the name"
         entry.name
+    | Keeper_registry.Exact_unregister_lifecycle_reserved owner ->
+      Log.Keeper.info
+        "%s: stale registry unregister deferred to lifecycle transaction owner: %s"
+        entry.name
+        (Keeper_lifecycle_reservation.snapshot_to_string owner)
   in
   List.iter
     (fun (entry : Keeper_registry.registry_entry) ->
@@ -837,6 +842,11 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
               Keeper_metrics.(to_string RestartOutcomes)
               ~labels:[ "keeper", old_entry.name; "outcome", "shutdown_reserved" ]
               ()
+          | Error (Keeper_registry.Restart_lifecycle_reserved owner) ->
+            Log.Keeper.info
+              "%s: supervisor restart deferred to lifecycle transaction owner: %s"
+              old_entry.name
+              (Keeper_lifecycle_reservation.snapshot_to_string owner)
           | Error (Keeper_registry.Restart_event_queue_unavailable { keeper_name; detail }) ->
             Log.Keeper.error
               "%s: restart refused because durable event queue is unavailable: %s"

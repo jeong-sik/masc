@@ -38,6 +38,7 @@ val register_offline : base_path:string -> string -> keeper_meta -> registry_ent
 
 type registration_error =
   | Registration_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+  | Registration_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
   | Registration_invalid of registry_entry_validation_error
   | Registration_event_queue_unavailable of
       { keeper_name : string
@@ -53,6 +54,13 @@ val register_offline_if_admitted :
   keeper_meta ->
   (registry_entry, registration_error) result
 
+val register_offline_if_admitted_for_lifecycle :
+  Keeper_lifecycle_reservation.token ->
+  base_path:string ->
+  string ->
+  keeper_meta ->
+  (registry_entry, registration_error) result
+
 (** R-A-6.a — error variant for [register_restarting].
     [Budget_already_exhausted] is returned (not raised — the API is
     Result-based) when the caller attempts to revive a keeper whose
@@ -61,6 +69,7 @@ val register_offline_if_admitted :
 type register_restarting_error =
   | Budget_already_exhausted of { name : string }
   | Restart_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+  | Restart_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
   | Restart_event_queue_unavailable of
       { keeper_name : string
       ; detail : string
@@ -85,6 +94,11 @@ val prepare_fiber_launch :
   base_path:string -> string ->
   (Keeper_state_machine.transition_result, Keeper_state_machine.transition_error) result
 
+val prepare_fiber_launch_for_lifecycle :
+  Keeper_lifecycle_reservation.token ->
+  registry_entry ->
+  (Keeper_state_machine.transition_result, Keeper_state_machine.transition_error) result
+
 (** Unregister a keeper (removes from registry). *)
 val unregister : base_path:string -> string -> unit
 
@@ -92,12 +106,32 @@ type unregister_exact_result =
   | Exact_unregistered
   | Exact_entry_missing
   | Exact_entry_replaced
+  | Exact_unregister_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
 
 (** Remove [entry] only if its typed lane identity still owns the
     [(base_path, name)] key. Immutable registry field updates may replace the
     record value while preserving the same lane; a newer same-name lane has a
     different identity and is retained. *)
 val unregister_exact : registry_entry -> unregister_exact_result
+
+val unregister_exact_for_lifecycle :
+  Keeper_lifecycle_reservation.token ->
+  registry_entry ->
+  unregister_exact_result
+
+type restore_entry_result =
+  | Entry_restored
+  | Entry_restore_occupied of registry_entry
+  | Entry_restore_invalid of registry_entry_validation_error
+  | Entry_restore_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
+
+(** Restore a transaction's original registry snapshot only when the key is
+    still absent and [token] owns the reservation. A newer lane is returned
+    untouched as [Entry_restore_occupied]. *)
+val restore_entry_if_absent_for_lifecycle :
+  Keeper_lifecycle_reservation.token ->
+  registry_entry ->
+  restore_entry_result
 
 (** Look up a keeper by name. *)
 val get : base_path:string -> string -> registry_entry option
@@ -153,6 +187,12 @@ type exact_update_result =
     registry key. CAS conflicts within that lane retry against the latest
     immutable entry; a same-name replacement is never mutated. *)
 val update_entry_exact :
+  registry_entry ->
+  (registry_entry -> registry_entry) ->
+  exact_update_result
+
+val update_entry_exact_for_lifecycle :
+  Keeper_lifecycle_reservation.token ->
   registry_entry ->
   (registry_entry -> registry_entry) ->
   exact_update_result
@@ -554,6 +594,13 @@ val dispatch_event :
     is recomputed after same-lane CAS conflicts and is rejected before mutating
     a same-name replacement lane. *)
 val dispatch_event_exact :
+  registry_entry ->
+  ?origin:lifecycle_event_origin ->
+  Keeper_state_machine.event ->
+  (Keeper_state_machine.transition_result, Keeper_state_machine.transition_error) result
+
+val dispatch_event_exact_for_lifecycle :
+  Keeper_lifecycle_reservation.token ->
   registry_entry ->
   ?origin:lifecycle_event_origin ->
   Keeper_state_machine.event ->

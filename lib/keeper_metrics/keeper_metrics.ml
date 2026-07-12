@@ -104,6 +104,7 @@ type t =
   | ToolExecuteFailures
   | RolloverFailures
   | LifecycleDispatchRejections
+  | LifecycleTransactions
   | RecordingErrorDedup
   | PausedStatePersistErrors
   | UnexpectedToolPartialTolerance
@@ -369,6 +370,7 @@ let to_string = function
   | ToolExecuteFailures -> "masc_keeper_tool_execute_runtime_failures_total"
   | RolloverFailures -> "masc_keeper_rollover_failures_total"
   | LifecycleDispatchRejections -> "masc_keeper_lifecycle_dispatch_rejections_total"
+  | LifecycleTransactions -> "masc_keeper_lifecycle_transactions_total"
   | RecordingErrorDedup -> "masc_keeper_recording_error_dedup_total"
   | PausedStatePersistErrors -> "masc_keeper_paused_state_persist_errors_total"
   | UnexpectedToolPartialTolerance ->

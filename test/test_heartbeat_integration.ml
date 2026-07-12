@@ -637,7 +637,9 @@ let test_direct_start_keepalive_resolves_done_on_stop () =
           net = None;
         }
       in
-      Masc.Keeper_keepalive.start_keepalive ctx meta;
+      ignore
+        (Masc.Keeper_keepalive.start_keepalive ctx meta
+          : Masc.Keeper_keepalive.start_keepalive_outcome);
       Eio.Time.sleep ctx.clock 0.05;
       (match
          Masc.Keeper_keepalive.stop_keepalive_and_await
@@ -1931,7 +1933,9 @@ let test_start_keepalive_preserves_unresolved_failing_entry () =
           net = None;
         }
       in
-      Masc.Keeper_keepalive.start_keepalive ctx meta;
+      ignore
+        (Masc.Keeper_keepalive.start_keepalive ctx meta
+          : Masc.Keeper_keepalive.start_keepalive_outcome);
       match R.get ~base_path:config.base_path keeper_name with
       | None -> fail "expected live-failing-entry registry entry"
       | Some entry ->
@@ -1974,7 +1978,9 @@ let test_start_keepalive_reclaims_finished_failing_entry () =
           net = None;
         }
       in
-      Masc.Keeper_keepalive.start_keepalive ctx meta;
+      ignore
+        (Masc.Keeper_keepalive.start_keepalive ctx meta
+          : Masc.Keeper_keepalive.start_keepalive_outcome);
       match R.get ~base_path:config.base_path keeper_name with
       | None -> fail "expected stale-failing-entry registry entry"
       | Some entry ->

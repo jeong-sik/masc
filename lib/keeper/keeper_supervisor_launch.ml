@@ -190,7 +190,12 @@ let launch_supervised_fiber_body
             | Keeper_registry.Exact_entry_replaced ->
               Log.Keeper.warn
                 "supervisor: fork-rejected lane retained newer same-name owner name=%s"
-                meta.name);
+                meta.name
+            | Keeper_registry.Exact_unregister_lifecycle_reserved owner ->
+              Log.Keeper.info
+                "supervisor: fork-rejected lane cleanup deferred to lifecycle transaction owner name=%s %s"
+                meta.name
+                (Keeper_lifecycle_reservation.snapshot_to_string owner));
         Error
           (Keeper_state_machine.Precondition_violation
              { event = "supervisor_lane_fork"; reason = detail })

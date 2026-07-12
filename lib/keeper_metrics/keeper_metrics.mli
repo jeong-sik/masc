@@ -95,6 +95,7 @@ type t =
   | ToolExecuteFailures
   | RolloverFailures
   | LifecycleDispatchRejections
+  | LifecycleTransactions
   | RecordingErrorDedup
   | PausedStatePersistErrors
   | UnexpectedToolPartialTolerance

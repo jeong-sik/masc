@@ -1132,7 +1132,7 @@ let run_keeper_msg_turn_admitted
                  ()
                with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_keeper_exn
                  ~label:"trajectory finalize (agent_run error)" exn);
-              start_keepalive ctx meta;
+              ignore (start_keepalive ctx meta : start_keepalive_outcome);
               Progress.stop_tracking turn_task_id;
               tool_result_error user_message
 	            | Ok (result, final_max_runtime_context) ->
@@ -1264,7 +1264,7 @@ let run_keeper_msg_turn_admitted
                 ~turn_generation:lifecycle.turn_generation
                 ~compaction:lifecycle.compaction
                 ~handoff_json:lifecycle.handoff_json;
-              start_keepalive ctx updated_meta;
+              ignore (start_keepalive ctx updated_meta : start_keepalive_outcome);
               Progress.Tracker.complete turn_tracker
                 ~message:(Printf.sprintf "Turn completed: %d tool calls" (Keeper_agent_result.tool_call_count result)) ();
               let reply_json =

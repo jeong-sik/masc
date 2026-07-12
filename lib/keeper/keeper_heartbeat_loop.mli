@@ -9,12 +9,18 @@ val effective_keepalive_meta :
   keeper_meta
 
 val repair_identity_drift_for_keepalive :
-  ctx:'a context -> keeper_meta -> keeper_meta option
+  ?lifecycle_token:Keeper_lifecycle_reservation.token ->
+  ctx:'a context ->
+  keeper_meta ->
+  keeper_meta option
 
 val keeper_agent_status : keeper_meta -> Masc_domain.agent_status
 
 val repair_identity_drift_for_keepalive :
-  ctx:'a context -> keeper_meta -> keeper_meta option
+  ?lifecycle_token:Keeper_lifecycle_reservation.token ->
+  ctx:'a context ->
+  keeper_meta ->
+  keeper_meta option
 
 val sync_keeper_presence :
   ctx:'a context ->

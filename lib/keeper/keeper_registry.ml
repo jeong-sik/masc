@@ -729,6 +729,7 @@ let compaction_stage_after_event entry event =
     state is consistent. *)
 let rec dispatch_event_with_audit_internal
           ~base_path
+          ?lifecycle_token
           ?expected_lane
           ?(origin = Generic_dispatch)
           ?snapshot
@@ -833,7 +834,8 @@ let rec dispatch_event_with_audit_internal
        in
        let new_seq = entry.transition_seq + 1 in
        (match
-          install_entry_if_current
+          install_entry_if_current_internal
+            ?lifecycle_token
             ~observed:entry
             { entry with
               phase = tr.new_phase
@@ -854,6 +856,7 @@ let rec dispatch_event_with_audit_internal
         | Entry_install_conflict ->
           dispatch_event_with_audit_internal
             ~base_path
+            ?lifecycle_token
             ?expected_lane
             ~origin
             ?snapshot
@@ -960,6 +963,7 @@ let rec dispatch_event_with_audit_internal
                match
                  dispatch_event_with_audit_internal
                    ~base_path
+                   ?lifecycle_token
                    ?expected_lane
                    name
                    followup_event
@@ -1028,7 +1032,8 @@ let rec dispatch_event_with_audit_internal
        (* No phase change — still update conditions *)
        let new_seq = entry.transition_seq + 1 in
        (match
-          install_entry_if_current
+          install_entry_if_current_internal
+            ?lifecycle_token
             ~observed:entry
             { entry with
               conditions = tr.updated_conditions
@@ -1047,6 +1052,7 @@ let rec dispatch_event_with_audit_internal
         | Entry_install_conflict ->
           dispatch_event_with_audit_internal
             ~base_path
+            ?lifecycle_token
             ?expected_lane
             ~origin
             ?snapshot
@@ -1112,6 +1118,21 @@ let dispatch_event_exact
   =
   dispatch_event_with_audit_internal
     ~base_path:entry.base_path
+    ~expected_lane:(Keeper_lane.id entry.lane)
+    ~origin
+    entry.name
+    event
+;;
+
+let dispatch_event_exact_for_lifecycle
+      token
+      (entry : registry_entry)
+      ?(origin = Generic_dispatch)
+      event
+  =
+  dispatch_event_with_audit_internal
+    ~base_path:entry.base_path
+    ~lifecycle_token:token
     ~expected_lane:(Keeper_lane.id entry.lane)
     ~origin
     entry.name
@@ -1214,6 +1235,13 @@ let prepare_fiber_launch ~base_path name =
           name
           base_path));
   dispatch_event ~base_path name Keeper_state_machine.Fiber_started
+;;
+
+let prepare_fiber_launch_for_lifecycle token (entry : registry_entry) =
+  Atomic.set entry.fiber_stop false;
+  Atomic.set entry.fiber_wakeup false;
+  Atomic.set entry.waiting_for_inference false;
+  dispatch_event_exact_for_lifecycle token entry Keeper_state_machine.Fiber_started
 ;;
 
 let get_phase ~base_path name =

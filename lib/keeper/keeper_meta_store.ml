@@ -303,13 +303,23 @@ let read_meta_if_changed config name ~(last_mtime : float) : (Keeper_meta_contra
   read_candidate requested_name
 ;;
 
-let persist_meta config path persisted =
+type runtime_sync =
+  | Sync_runtime
+  | Defer_runtime_sync
+
+let persist_meta_internal ~runtime_sync config path persisted =
   let json = meta_to_json persisted in
   match Keeper_fs.save_json_atomic path json with
   | Ok () ->
-    Atomic.get runtime_meta_write_sync_hook_atomic config persisted;
+    (match runtime_sync with
+     | Sync_runtime -> Atomic.get runtime_meta_write_sync_hook_atomic config persisted
+     | Defer_runtime_sync -> ());
     Ok ()
   | Error msg -> Error (Printf.sprintf "failed to write meta %s: %s" path msg)
+;;
+
+let persist_meta config path persisted =
+  persist_meta_internal ~runtime_sync:Sync_runtime config path persisted
 ;;
 
 type write_meta_error =
@@ -318,6 +328,7 @@ type write_meta_error =
       ; expected : int
       ; actual : int
       }
+  | Lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
   | Read_failed of string
   | Persist_failed of string
 
@@ -328,6 +339,10 @@ let write_meta_error_to_string = function
       keeper_name
       expected
       actual
+  | Lifecycle_reserved owner ->
+    Printf.sprintf
+      "keeper lifecycle transaction reserved metadata mutation: %s"
+      (Keeper_lifecycle_reservation.snapshot_to_string owner)
   | Read_failed detail | Persist_failed detail -> detail
 ;;
 
@@ -335,34 +350,63 @@ let write_meta_error_to_string = function
    counters are a monotone invariant (RFC-0225 §3.2, RFC-0237); a caller that
    lost the race must resolve the conflict through [write_meta_with_merge],
    never overwrite the disk snapshot. *)
-let write_meta_typed config (m : Keeper_meta_contract.keeper_meta) =
+let write_meta_typed ?lifecycle_token config (m : Keeper_meta_contract.keeper_meta) =
   let path = keeper_meta_path config m.name in
-  File_lock_eio.with_mutex path (fun () ->
-  match read_meta_file_path path with
-  | Ok (Some existing) ->
-    if existing.meta_version <> m.meta_version
-    then
-      Error
-        (Version_conflict
-           { keeper_name = m.name
-           ; expected = m.meta_version
-           ; actual = existing.meta_version
-           })
-    else (
-      let persisted = { m with meta_version = m.meta_version + 1 } in
-      persist_meta config path persisted |> Result.map_error (fun error -> Persist_failed error))
-  | Ok None ->
-    (* No existing file: initial write. *)
-    let persisted = { m with meta_version = 1 } in
-    persist_meta config path persisted |> Result.map_error (fun error -> Persist_failed error)
-  | Error msg ->
-    Error
-      (Read_failed
-         (Printf.sprintf "failed to read existing meta for CAS %s: %s" path msg)))
+  Keeper_lifecycle_reservation.with_key_lock
+    ~base_path:config.Workspace.base_path
+    ~keeper_name:m.name
+    (fun () ->
+       match
+         Keeper_lifecycle_reservation.authorize
+           ?token:lifecycle_token
+           ~base_path:config.Workspace.base_path
+           ~keeper_name:m.name
+           ()
+       with
+       | Error owner -> Error (Lifecycle_reserved owner)
+       | Ok () ->
+         File_lock_eio.with_mutex path (fun () ->
+           let persist persisted =
+             let runtime_sync =
+               match lifecycle_token with
+               | None -> Sync_runtime
+               | Some _ -> Defer_runtime_sync
+             in
+             persist_meta_internal
+               ~runtime_sync
+               config
+               path
+               persisted
+             |> Result.map_error (fun error -> Persist_failed error)
+           in
+           match read_meta_file_path path with
+           | Ok (Some existing) ->
+             if existing.meta_version <> m.meta_version
+             then
+               Error
+                 (Version_conflict
+                    { keeper_name = m.name
+                    ; expected = m.meta_version
+                    ; actual = existing.meta_version
+                    })
+             else persist { m with meta_version = m.meta_version + 1 }
+           | Ok None -> persist { m with meta_version = 1 }
+           | Error msg ->
+             Error
+               (Read_failed
+                  (Printf.sprintf
+                     "failed to read existing meta for CAS %s: %s"
+                     path
+                     msg))))
 ;;
 
 let write_meta config m =
   write_meta_typed config m |> Result.map_error write_meta_error_to_string
+;;
+
+let write_meta_for_lifecycle token config m =
+  write_meta_typed ~lifecycle_token:token config m
+  |> Result.map_error write_meta_error_to_string
 ;;
 
 let is_version_conflict_error msg =
@@ -445,7 +489,8 @@ let migrate_retired_keeper_meta_keys config =
 (* #9769 root fix: CAS retry with explicit field ownership. The
    turn-failure/cycle path uses [Keeper_meta_merge.heartbeat_fields_from_disk]
    now only carries the disk meta_version forward. *)
-let write_meta_with_merge
+let write_meta_with_merge_internal
+      ?lifecycle_token
       ?(max_retries = 3)
       ~(merge : latest:Keeper_meta_contract.keeper_meta -> caller:Keeper_meta_contract.keeper_meta -> Keeper_meta_contract.keeper_meta)
       config
@@ -454,10 +499,10 @@ let write_meta_with_merge
   =
   let path = keeper_meta_path config m.name in
   let rec attempt n (caller : Keeper_meta_contract.keeper_meta) =
-    match write_meta_typed config caller with
+    match write_meta_typed ?lifecycle_token config caller with
     | Ok () -> Ok ()
     | Error error when n >= max_retries -> Error (write_meta_error_to_string error)
-    | Error ((Read_failed _ | Persist_failed _) as error) ->
+    | Error ((Lifecycle_reserved _ | Read_failed _ | Persist_failed _) as error) ->
       Error (write_meta_error_to_string error)
     | Error (Version_conflict _) ->
       (match read_meta_file_path path with
@@ -483,15 +528,33 @@ let write_meta_with_merge
   attempt 0 m
 ;;
 
+let write_meta_with_merge ?max_retries ~merge config m =
+  write_meta_with_merge_internal ?max_retries ~merge config m
+;;
+
+let write_meta_with_merge_for_lifecycle token ?max_retries ~merge config m =
+  write_meta_with_merge_internal
+    ~lifecycle_token:token
+    ?max_retries
+    ~merge
+    config
+    m
+;;
+
 type identity_update_error =
   | Identity_missing
   | Identity_changed
+  | Identity_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
   | Identity_read_failed of string
   | Identity_write_failed of string
 
 let identity_update_error_to_string = function
   | Identity_missing -> "Keeper metadata is absent"
   | Identity_changed -> "Keeper metadata identity changed"
+  | Identity_lifecycle_reserved owner ->
+    Printf.sprintf
+      "Keeper metadata lifecycle reservation conflict: %s"
+      (Keeper_lifecycle_reservation.snapshot_to_string owner)
   | Identity_read_failed detail -> detail
   | Identity_write_failed detail -> detail
 ;;
@@ -504,51 +567,80 @@ let update_meta_if_identity
       update
   =
   let path = keeper_meta_path config name in
-  File_lock_eio.with_mutex path (fun () ->
-    match read_meta_file_path path with
-    | Error detail -> Error (Identity_read_failed detail)
-    | Ok None -> Error Identity_missing
-    | Ok (Some latest) ->
-      if
-        not (Keeper_id.Trace_id.equal latest.runtime.trace_id trace_id)
-        || not (Int.equal latest.runtime.generation generation)
-      then Error Identity_changed
-      else
-        let caller = update latest in
-        let persisted = { caller with meta_version = latest.meta_version + 1 } in
-        (match persist_meta config path persisted with
-         | Ok () -> Ok persisted
-         | Error detail -> Error (Identity_write_failed detail)))
+  Keeper_lifecycle_reservation.with_key_lock
+    ~base_path:config.Workspace.base_path
+    ~keeper_name:name
+    (fun () ->
+       match
+         Keeper_lifecycle_reservation.authorize
+           ~base_path:config.Workspace.base_path
+           ~keeper_name:name
+           ()
+       with
+       | Error owner -> Error (Identity_lifecycle_reserved owner)
+       | Ok () ->
+         File_lock_eio.with_mutex path (fun () ->
+           match read_meta_file_path path with
+           | Error detail -> Error (Identity_read_failed detail)
+           | Ok None -> Error Identity_missing
+           | Ok (Some latest) ->
+             if
+               not (Keeper_id.Trace_id.equal latest.runtime.trace_id trace_id)
+               || not (Int.equal latest.runtime.generation generation)
+             then Error Identity_changed
+             else
+               let caller = update latest in
+               let persisted = { caller with meta_version = latest.meta_version + 1 } in
+               (match persist_meta config path persisted with
+                | Ok () -> Ok persisted
+                | Error detail -> Error (Identity_write_failed detail))))
 ;;
 
 type identity_remove_error =
   | Remove_identity_missing
   | Remove_identity_changed
+  | Remove_identity_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
   | Remove_identity_read_failed of string
   | Remove_identity_unlink_failed of string
 
 let identity_remove_error_to_string = function
   | Remove_identity_missing -> "Keeper metadata is absent"
   | Remove_identity_changed -> "Keeper metadata identity changed"
+  | Remove_identity_lifecycle_reserved owner ->
+    Printf.sprintf
+      "Keeper metadata lifecycle reservation conflict: %s"
+      (Keeper_lifecycle_reservation.snapshot_to_string owner)
   | Remove_identity_read_failed detail | Remove_identity_unlink_failed detail -> detail
 ;;
 
 let remove_meta_if_identity config ~name ~trace_id ~generation =
   let path = keeper_meta_path config name in
-  File_lock_eio.with_mutex path (fun () ->
-    match read_meta_file_path path with
-    | Error detail -> Error (Remove_identity_read_failed detail)
-    | Ok None -> Error Remove_identity_missing
-    | Ok (Some latest) ->
-      if
-        not (Keeper_id.Trace_id.equal latest.runtime.trace_id trace_id)
-        || not (Int.equal latest.runtime.generation generation)
-      then Error Remove_identity_changed
-      else
-        try
-          Unix.unlink path;
-          Ok ()
-        with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Remove_identity_unlink_failed (Printexc.to_string exn)))
+  Keeper_lifecycle_reservation.with_key_lock
+    ~base_path:config.Workspace.base_path
+    ~keeper_name:name
+    (fun () ->
+       match
+         Keeper_lifecycle_reservation.authorize
+           ~base_path:config.Workspace.base_path
+           ~keeper_name:name
+           ()
+       with
+       | Error owner -> Error (Remove_identity_lifecycle_reserved owner)
+       | Ok () ->
+         File_lock_eio.with_mutex path (fun () ->
+           match read_meta_file_path path with
+           | Error detail -> Error (Remove_identity_read_failed detail)
+           | Ok None -> Error Remove_identity_missing
+           | Ok (Some latest) ->
+             if
+               not (Keeper_id.Trace_id.equal latest.runtime.trace_id trace_id)
+               || not (Int.equal latest.runtime.generation generation)
+             then Error Remove_identity_changed
+             else
+               try
+                 Unix.unlink path;
+                 Ok ()
+               with
+               | Eio.Cancel.Cancelled _ as exn -> raise exn
+               | exn -> Error (Remove_identity_unlink_failed (Printexc.to_string exn))))
 ;;

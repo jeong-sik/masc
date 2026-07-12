@@ -115,8 +115,27 @@ val run_heartbeat_loop :
     Returns 0.0 for empty arrays. Used by per-stage profiling. *)
 val percentile : float array -> float -> float
 
+type start_keepalive_outcome =
+  | Keepalive_started of Keeper_registry.registry_entry
+  | Keepalive_already_registered of Keeper_registry.registry_entry
+  | Keepalive_identity_unrepairable
+  | Keepalive_spawn_slot_denied of Keeper_registry.spawn_slot_denial_reason
+  | Keepalive_registration_rejected of Keeper_registry.registration_error
+  | Keepalive_fiber_start_rejected of Keeper_state_machine.transition_error
+  | Keepalive_lane_ownership_lost
+  | Keepalive_fork_rejected of Keeper_lane.start_error
+
+val start_keepalive_outcome_to_string : start_keepalive_outcome -> string
+
+(** Launch one keeper lane and return the exact typed admission/launch
+    outcome. Rejections remain logged and observable, but are never collapsed
+    into [unit]; lifecycle transactions use the result to commit or roll back. *)
 val start_keepalive :
-  ?proactive_warmup_sec:int -> 'a context -> keeper_meta -> unit
+  ?proactive_warmup_sec:int ->
+  ?lifecycle_token:Keeper_lifecycle_reservation.token ->
+  'a context ->
+  keeper_meta ->
+  start_keepalive_outcome
 
 type joined_stop =
   { lane_exit : Keeper_lane.exit

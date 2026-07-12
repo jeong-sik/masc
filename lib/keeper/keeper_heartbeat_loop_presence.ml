@@ -39,12 +39,23 @@ let effective_keepalive_meta
     selected
 ;;
 
-let repair_identity_drift_for_keepalive ~(ctx : _ context) (meta : keeper_meta)
+let repair_identity_drift_for_keepalive ?lifecycle_token ~(ctx : _ context) (meta : keeper_meta)
   : keeper_meta option
   =
   let expected_agent_name = Keeper_identity.keeper_agent_name meta.name in
   if String.equal expected_agent_name meta.agent_name
   then Some meta
+  else if Option.is_some lifecycle_token
+  then (
+    (* A lifecycle transaction has one durable commit point. Identity repair
+       would mint another generation and write after that commit, so reject
+       the launch and let the transaction restore its original snapshot. *)
+    Log.Keeper.error
+      "keepalive identity drift cannot be repaired inside lifecycle transaction keeper=%s actual=%s expected=%s"
+      meta.name
+      meta.agent_name
+      expected_agent_name;
+    None)
   else (
     let previous_trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
     let new_trace_id_raw = Keeper_identity.generate_trace_id () in
@@ -80,8 +91,18 @@ let repair_identity_drift_for_keepalive ~(ctx : _ context) (meta : keeper_meta)
         }
       in
       (match
-         write_meta_with_merge
-           ~merge:Keeper_meta_merge.monotonic_usage_counters ctx.config repaired
+         match lifecycle_token with
+         | None ->
+           write_meta_with_merge
+             ~merge:Keeper_meta_merge.monotonic_usage_counters
+             ctx.config
+             repaired
+         | Some token ->
+           write_meta_with_merge_for_lifecycle
+             token
+             ~merge:Keeper_meta_merge.monotonic_usage_counters
+             ctx.config
+             repaired
        with
        | Ok () ->
          Log.Keeper.warn

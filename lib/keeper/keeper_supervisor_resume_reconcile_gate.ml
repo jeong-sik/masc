@@ -110,6 +110,11 @@ let resume_keeper_after_reconcile_gate
      | Keeper_registry.Exact_entry_replaced ->
        Log.Keeper.warn
          "%s: resume retained a newer same-name lane"
-         resumed_meta.name)
+         resumed_meta.name
+     | Keeper_registry.Exact_unregister_lifecycle_reserved owner ->
+       Log.Keeper.info
+         "%s: resume deferred to lifecycle transaction owner: %s"
+         resumed_meta.name
+         (Keeper_lifecycle_reservation.snapshot_to_string owner))
   | None -> supervise_keepalive ~proactive_warmup_sec:0 ctx resumed_meta
 ;;

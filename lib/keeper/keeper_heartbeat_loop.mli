@@ -80,7 +80,7 @@ val classify_turn_intake_admission :
   turn_intake_admission
 
 val heartbeat_event_intake :
-  ?single_claim_admission:single_claim_admission ->
+  single_claim_admission:single_claim_admission ->
   ctx:'a context ->
   meta_after_triage:keeper_meta ->
   pending_board_events:Keeper_world_observation.pending_board_event list ->

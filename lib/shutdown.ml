@@ -60,7 +60,7 @@ let config_error_to_string = function
       Printf.sprintf "%s must be greater than zero (received %g)"
         (config_field_env_name field) value
 
-let config_from_env () =
+let config_from_env_result () =
   let get_duration field ~default ~positive =
     match Sys.getenv_opt (config_field_env_name field) with
     | None -> Ok default
@@ -93,6 +93,12 @@ let config_from_env () =
       ~positive:true
   in
   Ok { notify_delay_s; drain_timeout_s; cleanup_timeout_s; force_timeout_s }
+
+let config_from_env () =
+  match config_from_env_result () with
+  | Ok config -> config
+  | Error error -> invalid_arg (config_error_to_string error)
+;;
 
 (** {1 Process deadline supervision} *)
 
@@ -147,9 +153,13 @@ let start_process_deadline_watchdog ~timeout_s =
        try
          Ok
            ((Atomic.get deadline_thread_create) (fun () ->
-                Thread.delay timeout_s;
-                if Atomic.compare_and_set state Armed Fired then
-                  Unix._exit process_deadline_exit_code))
+                try
+                  Thread.delay timeout_s;
+                  if Atomic.compare_and_set state Armed Fired then
+                    Unix._exit process_deadline_exit_code
+                with _ ->
+                  if Atomic.compare_and_set state Armed Fired then
+                    Unix._exit process_deadline_start_failure_exit_code))
        with exn -> Error (Watchdog_thread_start_failed (Printexc.to_string exn))
      with
      | Ok thread -> Ok { state; thread }
@@ -211,10 +221,7 @@ let create ?config () =
   let config =
     match config with
     | Some config -> config
-    | None ->
-        (match config_from_env () with
-         | Ok config -> config
-         | Error error -> invalid_arg (config_error_to_string error))
+    | None -> config_from_env ()
   in
   {
     phase = Running;

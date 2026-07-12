@@ -37,10 +37,15 @@ type config_error =
   | Non_positive_config_duration of { field : config_field; value : float }
 
 val config_error_to_string : config_error -> string
-val config_from_env : unit -> (config, config_error) result
+val config_from_env_result : unit -> (config, config_error) result
 (** Read and validate the shutdown duration environment variables. A present
     malformed, non-finite, or out-of-range value is an explicit error; it is
     never replaced with a default. *)
+
+val config_from_env : unit -> config
+(** Source-compatible configuration front door. Invalid present values raise
+    [Invalid_argument] with {!config_error_to_string}; callers that need typed
+    startup handling should use {!config_from_env_result}. *)
 
 (** {1 Process deadline supervision} *)
 

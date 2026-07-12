@@ -169,12 +169,27 @@ let () = test "shutdown config rejects malformed present values" (fun () ->
       Unix.putenv "MASC_SHUTDOWN_DRAIN_TIMEOUT" "5";
       Unix.putenv "MASC_SHUTDOWN_CLEANUP_TIMEOUT" "3";
       Unix.putenv "MASC_SHUTDOWN_FORCE_TIMEOUT" "60s";
-      (match Shutdown.config_from_env () with
+      (match Shutdown.config_from_env_result () with
        | Error
            (Shutdown.Invalid_config_number
              { field = Shutdown.Force_timeout; raw_value = "60s" }) ->
            Unix._exit 0
        | _ -> Unix._exit 26)
+  | child_pid ->
+      let waited_pid, status = waitpid_no_intr child_pid in
+      assert (waited_pid = child_pid);
+      assert (status = Unix.WEXITED 0))
+
+let () = test "shutdown config legacy front door stays source-compatible" (fun () ->
+  match Unix.fork () with
+  | 0 ->
+      Unix.putenv "MASC_SHUTDOWN_NOTIFY_DELAY" "0.2";
+      Unix.putenv "MASC_SHUTDOWN_DRAIN_TIMEOUT" "5";
+      Unix.putenv "MASC_SHUTDOWN_CLEANUP_TIMEOUT" "3";
+      Unix.putenv "MASC_SHUTDOWN_FORCE_TIMEOUT" "11";
+      let config : Shutdown.config = Shutdown.config_from_env () in
+      if Float.equal config.force_timeout_s 11.0 then Unix._exit 0
+      else Unix._exit 27
   | child_pid ->
       let waited_pid, status = waitpid_no_intr child_pid in
       assert (waited_pid = child_pid);

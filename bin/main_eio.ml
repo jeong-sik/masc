@@ -558,7 +558,7 @@ let run_cmd host port cli_base_path =
   acquire_base_path_lock normalized_base_path;
   Log.init_from_env ();
   let shutdown_cfg =
-    match Masc.Shutdown.config_from_env () with
+    match Masc.Shutdown.config_from_env_result () with
     | Ok config -> config
     | Error error ->
         Log.Server.error "[FATAL] Invalid shutdown configuration: %s"

@@ -245,8 +245,8 @@ let test_failed_cycle_route_mapping () =
        ~lease:ordinary_lease
        retry_failure
    with
-   | Keeper_registry_event_queue.Requeue
-       Keeper_registry_event_queue.Retry_after_pacing ->
+   | Masc.Keeper_registry_event_queue.Requeue
+       Masc.Keeper_registry_event_queue.Retry_after_pacing ->
      ()
    | _ -> Alcotest.fail "retry route did not requeue the lease");
   let judgment_failure =
@@ -262,8 +262,8 @@ let test_failed_cycle_route_mapping () =
        ~lease:ordinary_lease
        judgment_failure
    with
-   | Keeper_registry_event_queue.Escalate
-       { reason = Keeper_registry_event_queue.Failure_judgment_requested
+   | Masc.Keeper_registry_event_queue.Escalate
+       { reason = Masc.Keeper_registry_event_queue.Failure_judgment_requested
        ; successor = Some { Queue.payload = Queue.Failure_judgment successor; _ }
        } ->
      Alcotest.(check string)
@@ -290,8 +290,8 @@ let test_failed_cycle_route_mapping () =
        ~lease:leased_judgment
        judgment_failure
    with
-   | Keeper_registry_event_queue.Escalate
-       { reason = Keeper_registry_event_queue.Failure_judgment_failed
+   | Masc.Keeper_registry_event_queue.Escalate
+       { reason = Masc.Keeper_registry_event_queue.Failure_judgment_failed
        ; successor = None
        } ->
      ()
@@ -309,7 +309,7 @@ let test_failed_cycle_route_mapping () =
        ~lease:ordinary_lease
        handled_failure
    with
-   | Keeper_registry_event_queue.Ack -> ()
+   | Masc.Keeper_registry_event_queue.Ack -> ()
    | _ -> Alcotest.fail "in-turn handled terminal failure was retried")
 ;;
 
@@ -433,15 +433,18 @@ let test_transition_outbox_projects_with_stable_identity () =
       "projection retires outbox"
       0
       (List.length (State.transition_outbox state));
-    Keeper_reaction_ledger.record_event_queue_transition_reaction_result
+    Masc.Keeper_reaction_ledger.record_event_queue_transition_reaction_result
       ~base_path
       ~keeper_name
-      ~reaction_kind:Keeper_reaction_ledger.Event_queue_ack
+      ~reaction_kind:Masc.Keeper_reaction_ledger.Event_queue_ack
       ~receipt
       source
     |> require_ok "replay stable transition reaction";
     let summary =
-      Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:20
+      Masc.Keeper_reaction_ledger.summary_for_keeper
+        ~base_path
+        ~keeper_name
+        ~limit:20
     in
     let open Yojson.Safe.Util in
     Alcotest.(check int)

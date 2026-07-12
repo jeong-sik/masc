@@ -123,24 +123,24 @@ exception Worker_preempted of string
 let max_age_sec = Masc_time_constants.hour
 let record_schema_version = 2
 
-let effective_timeout_sec ?timeout_sec () =
-  match timeout_sec with
-  | Some timeout_sec -> timeout_sec
-  | None -> Keeper_runtime_resolved.turn_timeout_sec ()
-;;
+let effective_timeout_sec ?timeout_sec () = timeout_sec
 
-let resolve_timeout_sec ?timeout_sec () =
-  let value = effective_timeout_sec ?timeout_sec () in
-  if Float.is_finite value && value > 0.0
-  then Ok value
-  else
+let resolve_worker_timeout ?clock ?timeout_sec () =
+  match effective_timeout_sec ?timeout_sec (), clock with
+  | None, _ -> Ok None
+  | Some value, _ when not (Float.is_finite value) || value <= 0.0 ->
     Error
       (Invalid_timeout
          { reason =
              Printf.sprintf
-               "keeper_msg timeout_sec must be finite and greater than zero (resolved=%g)"
+               "keeper_msg explicit timeout_sec must be finite and greater than zero (resolved=%g)"
                value
          })
+  | Some _, None ->
+    Error
+      (Invalid_timeout
+         { reason = "keeper_msg explicit timeout_sec requires an Eio clock" })
+  | Some value, Some clock -> Ok (Some (value, clock))
 ;;
 
 let server_background_switch () =
@@ -865,7 +865,7 @@ let submit ?clock ?timeout_sec ?on_worker_aborted ~background_sw ~base_path ~cal
   match resolve_access_identity ~base_path ~caller with
   | Error rejection -> Error (Submit_rejected rejection)
   | Ok (base_path, submitted_by) ->
-    let* worker_timeout_sec = resolve_timeout_sec ?timeout_sec () in
+    let* worker_timeout = resolve_worker_timeout ?clock ?timeout_sec () in
     gc_stale ();
     gc_stale_disk_canonical_observed ~base_path;
     let request_id = generate_request_id () in
@@ -921,8 +921,8 @@ let submit ?clock ?timeout_sec ?on_worker_aborted ~background_sw ~base_path ~cal
             raise exn)
     in
     let run_worker_with_timeout request_sw =
-      match clock with
-      | Some clock ->
+      match worker_timeout with
+      | Some (worker_timeout_sec, clock) ->
         (try Eio.Time.with_timeout_exn clock worker_timeout_sec (fun () -> f request_sw) with
          | Eio.Time.Timeout ->
            let status =

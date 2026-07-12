@@ -4,18 +4,6 @@ open Server_auth
 module Http = Http_server_eio
 module Mcp_eio = Mcp_server_eio
 
-(* Keeper-chat stream tunables (CLAUDE.md Magic Number 규칙: 의미를 드러내는 리터럴은
-   named constant로). Bounds are keeper-message-specific and distinct from the
-   env_config turn/orchestrator clamps. *)
-
-(* Clamp bounds for the client-supplied per-message timeout (seconds). *)
-let keeper_msg_timeout_sec_min = 5
-let keeper_msg_timeout_sec_max = 300
-
-let clamp_keeper_msg_timeout_sec v =
-  max keeper_msg_timeout_sec_min (min keeper_msg_timeout_sec_max v)
-;;
-
 (* Progressive-render hard-wrap width (characters) for streamed keeper replies —
    a UI readability chunk width, NOT an SSE/transport line-length limit. *)
 let keeper_reply_chunk_hard_wrap_chars = 180
@@ -47,7 +35,7 @@ type keeper_chat_stream_request = {
   name : string;
   message : string;
   user_blocks : user_input_block list;
-  timeout_sec : int option;
+  timeout_sec : float option;
   turn_instructions : string option;
   surface_context : Yojson.Safe.t option;
   channel : string;
@@ -142,7 +130,7 @@ let args_of_request payload : Yojson.Safe.t =
       ("direct_reply", `Bool true) ]
     @
     (match payload.timeout_sec with
-     | Some timeout_sec -> [ ("timeout_sec", `Int timeout_sec) ]
+     | Some timeout_sec -> [ ("timeout_sec", `Float timeout_sec) ]
      | None -> [])
     @
     (match turn_instructions_for_request payload with
@@ -655,14 +643,12 @@ let parse_keeper_chat_stream_request body_str =
         match Json_util.assoc_member_opt "timeout_sec" json with
         | None | Some `Null -> Ok None
         | Some (`Int value) when value > 0 ->
-            Ok (Some (clamp_keeper_msg_timeout_sec value))
-        | Some (`Float value) when value > 0.0 ->
-            (* int_of_float is unspecified (not exception-raising) for
-               out-of-range floats (e.g. 1e300, infinity); clamp_keeper_msg_timeout_sec
-               below bounds whatever int comes out into [5, 300] regardless. *)
-            Ok (Some (clamp_keeper_msg_timeout_sec (int_of_float (Float.ceil value))))
-        | Some (`Int _) | Some (`Float _) -> Ok None
-        | Some _ -> Error "timeout_sec must be a positive number"
+          Ok (Some (float_of_int value))
+        | Some (`Float value) when Float.is_finite value && value > 0.0 ->
+          Ok (Some value)
+        | Some (`Int _) | Some (`Float _) ->
+          Error "timeout_sec must be a positive finite number"
+        | Some _ -> Error "timeout_sec must be a positive finite number"
       in
       let attachments = Keeper_multimodal_input.parse_attachments json in
       let user_blocks_result = Keeper_multimodal_input.parse_user_blocks json in
@@ -1424,7 +1410,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
      | Error _ -> ());
     persisted
   in
-  let timeout_sec = Option.map float_of_int payload.timeout_sec in
+  let timeout_sec = payload.timeout_sec in
   let dashboard_direct_stream =
     (not queued_turn)
     && (not connector_user_line_recorded_upstream)

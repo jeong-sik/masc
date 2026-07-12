@@ -645,16 +645,44 @@ let test_keeper_msg_async_timeout_is_terminal_error () =
     Alcotest.fail "expected timeout request to remain pollable"
 ;;
 
-let test_keeper_msg_async_default_timeout_uses_turn_timeout () =
-  let expected = Keeper_runtime_resolved.turn_timeout_sec () in
-  Alcotest.(check (float 0.0001))
-    "default async worker timeout"
-    expected
+let test_keeper_msg_async_timeout_is_explicit_only () =
+  Alcotest.(check (option (float 0.0001)))
+    "default async worker has no outer timeout"
+    None
     (Keeper_msg_async.For_testing.effective_timeout_sec ());
-  Alcotest.(check (float 0.0001))
-    "explicit async worker timeout wins"
-    42.0
+  Alcotest.(check (option (float 0.0001)))
+    "explicit async worker timeout is preserved"
+    (Some 42.0)
     (Keeper_msg_async.For_testing.effective_timeout_sec ~timeout_sec:42.0 ())
+;;
+
+let test_keeper_msg_async_explicit_timeout_requires_clock () =
+  with_eio_env
+  @@ fun _env ->
+  Eio.Switch.run
+  @@ fun background_sw ->
+  let base_path = temp_dir "keeper-msg-async-clock-required-" in
+  match
+    Keeper_msg_async.submit
+      ~timeout_sec:1.0
+      ~background_sw
+      ~base_path
+      ~caller
+      ~keeper_name:"clock-required"
+      ~f:(fun _request_sw -> tr_ok "{}")
+      ()
+  with
+  | Error (Keeper_msg_async.Invalid_timeout { reason }) ->
+    Alcotest.(check string)
+      "typed clock requirement"
+      "keeper_msg explicit timeout_sec requires an Eio clock"
+      reason
+  | Error error ->
+    Alcotest.failf
+      "expected explicit-timeout clock rejection, got %s"
+      (Keeper_msg_async.submit_error_to_json error |> Yojson.Safe.to_string)
+  | Ok request_id ->
+    Alcotest.failf "explicit timeout without clock was accepted as %s" request_id
 ;;
 
 let test_keeper_msg_async_gc_removes_stale_terminal_disk_record () =
@@ -1027,9 +1055,13 @@ let () =
             `Quick
             test_keeper_msg_async_timeout_is_terminal_error
         ; test_case
-            "default timeout follows keeper turn timeout"
+            "async worker timeout is explicit only"
             `Quick
-            test_keeper_msg_async_default_timeout_uses_turn_timeout
+            test_keeper_msg_async_timeout_is_explicit_only
+        ; test_case
+            "explicit async timeout requires a clock"
+            `Quick
+            test_keeper_msg_async_explicit_timeout_requires_clock
         ; test_case
             "gc removes stale terminal disk record"
             `Quick

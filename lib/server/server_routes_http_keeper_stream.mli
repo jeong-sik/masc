@@ -74,7 +74,7 @@ type keeper_chat_stream_request = {
   name : string;
   message : string;
   user_blocks : user_input_block list;
-  timeout_sec : int option;
+  timeout_sec : float option;
   turn_instructions : string option;
   surface_context : Yojson.Safe.t option;
   channel : string;
@@ -86,8 +86,9 @@ type keeper_chat_stream_request = {
 (** Parsed payload of a keeper chat-stream HTTP request.
     [message] is the text fallback used by the existing direct keeper
     path; [user_blocks] preserves semantic text/media input for the
-    block-aware runtime path.  [timeout_sec] is clamped to [\[5, 300\]] when
-    present.  [turn_instructions] and [surface_context]
+    block-aware runtime path. [timeout_sec] is an optional caller-owned
+    positive finite deadline; it is never synthesized or clamped by this
+    boundary. [turn_instructions] and [surface_context]
     are optional copilot context fields; when
     [turn_instructions] is absent but [surface_context]
     is present, the surface context is formatted and
@@ -103,8 +104,8 @@ val parse_keeper_chat_stream_request :
 (** Parses the HTTP body string into a
     {!keeper_chat_stream_request}.  Returns
     [Error reason] on JSON shape mismatches, missing
-    [name] / content, malformed [user_blocks], partial connector context, or
-    presence of legacy keeper model args removed by the
+    [name] / content, malformed [user_blocks], an invalid explicit timeout,
+    partial connector context, or presence of legacy keeper model args removed by the
     runtime rewrite. *)
 
 (** {1 Error envelope} *)

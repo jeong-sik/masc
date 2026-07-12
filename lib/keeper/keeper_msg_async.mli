@@ -111,12 +111,13 @@ val server_background_switch : unit -> (Eio.Switch.t, submit_error) result
     explicitly supplied server-lifetime [background_sw].  The per-request
     worker switch passed to [f] is distinct: cancellation fails that switch,
     never the server root.  Returns the fresh [request_id] synchronously only
-    after the owner-bearing v2 request record is durably accepted.  When
-    [clock] is provided,
-    the worker records a terminal timeout error if [f] does not return before
-    the deadline: [timeout_sec] when explicitly supplied, otherwise the
-    runtime-resolved keeper turn timeout. A timeout must resolve to a finite
-    positive value before the request is persisted. Cancellation of the
+    after the owner-bearing v2 request record is durably accepted. The async
+    transport has no implicit outer deadline: Keeper/OAS turn policy owns
+    execution deadlines and finalization. When [timeout_sec] is explicitly
+    supplied together with [clock], the caller-owned deadline is enforced and
+    recorded as a terminal timeout. A timeout must be finite and positive, and
+    an explicit timeout without [clock] is rejected before persistence.
+    Cancellation of the
     per-request worker switch interrupts the worker and records a terminal
     [Cancelled] state before stopping, so
     pollers do not observe an indefinite [Running] request. [Lost] is
@@ -196,5 +197,5 @@ module For_testing : sig
   val gc_stale_disk : base_path:string -> int
   val recover_lost_disk_records : base_path:string -> int
   val active_switch_count : unit -> int
-  val effective_timeout_sec : ?timeout_sec:float -> unit -> float
+  val effective_timeout_sec : ?timeout_sec:float -> unit -> float option
 end

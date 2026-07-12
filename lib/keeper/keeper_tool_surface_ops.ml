@@ -654,10 +654,7 @@ let keeper_msg_body
     let* name = resolve_keeper_name_config ~config args in
     let resolved_args = with_keeper_name args name in
     let* () = Turn.preflight_keeper_msg keeper_ctx resolved_args in
-    let timeout_sec =
-      Turn.keeper_msg_timeout_override resolved_args
-      |> Result.value ~default:None
-    in
+    let* timeout_sec = Turn.keeper_msg_timeout_override resolved_args in
     let* background_sw =
       Keeper_msg_async.server_background_switch ()
       |> Result.map_error (fun error ->
@@ -716,10 +713,7 @@ let handle_keeper_msg ?continuation_channel ~submitted_by ctx args : tool_result
     let* name = resolve_keeper_name ctx args in
     let resolved_args = with_keeper_name args name in
     let* () = Turn.preflight_keeper_msg ctx resolved_args in
-    let timeout_sec =
-      Turn.keeper_msg_timeout_override resolved_args
-      |> Result.value ~default:None
-    in
+    let* timeout_sec = Turn.keeper_msg_timeout_override resolved_args in
     let* background_sw =
       Keeper_msg_async.server_background_switch ()
       |> Result.map_error (fun error ->

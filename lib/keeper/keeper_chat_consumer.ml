@@ -240,8 +240,9 @@ let log_deferred_turn ~keeper_name
          in_flight=%b; returning the leased receipt to Pending"
         keeper_name waiting (Option.is_some in_flight)
 
-let run_leased_turn state ~sw ~clock ~handle_turn ~keeper_name ~lease_id ~queued =
-  match handle_turn ~sw ~keeper_name ~queued_message:queued with
+let run_leased_turn state ~sw ~clock ~handle_turn ~keeper_name ~lease_id
+    ~delivery_key ~queued =
+  match handle_turn ~sw ~keeper_name ~delivery_key ~queued_message:queued with
   | Deferred { rejection } ->
       log_deferred_turn ~keeper_name rejection;
       nack_or_warn state ~keeper_name ~lease_id
@@ -267,11 +268,11 @@ let run_leased_turn state ~sw ~clock ~handle_turn ~keeper_name ~lease_id ~queued
            })
 
 let dispatch_queued_turn state ~sw ~clock ~handle_turn ~keeper_name ~lease_id
-    ~queued =
+    ~delivery_key ~queued =
   Eio.Fiber.fork ~sw (fun () ->
       try
         run_leased_turn state ~sw ~clock ~handle_turn ~keeper_name ~lease_id
-          ~queued;
+          ~delivery_key ~queued;
         clear_dispatching state keeper_name
       with
       | Eio.Cancel.Cancelled _ as e ->
@@ -366,6 +367,16 @@ let start ~sw ~clock ~base_path ~handle_turn =
                           nack_or_warn dispatch_state ~keeper_name ~lease_id;
                           clear_dispatching dispatch_state keeper_name
                       | Some queued ->
+                          let delivery_key =
+                            List.map
+                              (fun (item : Keeper_chat_queue.leased_message) ->
+                                 item.receipt_id)
+                              items
+                            |> Keeper_chat_delivery_identity.Receipt_ids.of_list
+                            |> Result.map (fun receipt_ids ->
+                              Keeper_chat_delivery_identity.Queue_receipts
+                                receipt_ids)
+                          in
                           let admission =
                             Keeper_turn_admission.snapshot_for ~base_path
                               ~keeper_name
@@ -378,25 +389,38 @@ let start ~sw ~clock ~base_path ~handle_turn =
                                nack_or_warn dispatch_state ~keeper_name ~lease_id;
                                clear_dispatching dispatch_state keeper_name
                            | None, None ->
-                               (try
-                                  dispatch_queued_turn dispatch_state ~sw ~clock
-                                    ~handle_turn ~keeper_name ~lease_id ~queued
-                                with
-                                | Eio.Cancel.Cancelled _ as e ->
-                                    Eio.Cancel.protect (fun () ->
-                                        nack_or_warn dispatch_state ~keeper_name
-                                          ~lease_id);
-                                    clear_dispatching dispatch_state keeper_name;
-                                    raise e
-                                | exn ->
-                                    nack_or_warn dispatch_state ~keeper_name
-                                      ~lease_id;
-                                    clear_dispatching dispatch_state keeper_name;
-                                    Log.Keeper.warn
-                                      "keeper_chat_consumer: dispatch fork failed for \
-                                       keeper=%s: %s"
-                                      keeper_name
-                                      (Printexc.to_string exn)))))
+                               (match delivery_key with
+                                | Error detail ->
+                                  finalize_or_warn dispatch_state ~keeper_name
+                                    ~lease_id
+                                    (Keeper_chat_queue.Mark_failed
+                                       { completed_at = Eio.Time.now clock
+                                       ; kind = Keeper_chat_queue.Internal_error
+                                       ; detail
+                                       ; outcome_ref = None
+                                       });
+                                  clear_dispatching dispatch_state keeper_name
+                                | Ok delivery_key ->
+                                  (try
+                                     dispatch_queued_turn dispatch_state ~sw ~clock
+                                       ~handle_turn ~keeper_name ~lease_id
+                                       ~delivery_key ~queued
+                                   with
+                                   | Eio.Cancel.Cancelled _ as e ->
+                                       Eio.Cancel.protect (fun () ->
+                                           nack_or_warn dispatch_state ~keeper_name
+                                             ~lease_id);
+                                       clear_dispatching dispatch_state keeper_name;
+                                       raise e
+                                   | exn ->
+                                       nack_or_warn dispatch_state ~keeper_name
+                                         ~lease_id;
+                                       clear_dispatching dispatch_state keeper_name;
+                                       Log.Keeper.warn
+                                         "keeper_chat_consumer: dispatch fork failed for \
+                                          keeper=%s: %s"
+                                         keeper_name
+                                         (Printexc.to_string exn))))))
                else
                  Log.Keeper.warn
                    "keeper_chat_consumer: duplicate dispatch suppressed for \

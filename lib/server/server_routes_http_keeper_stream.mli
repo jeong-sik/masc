@@ -184,6 +184,7 @@ val queued_turn_failure_kind_to_string : queued_turn_failure_kind -> string
 val process_single_turn :
   connector_user_line_recorded_upstream:bool ->
   queued_turn:bool ->
+  delivery_key:Keeper_chat_delivery_identity.delivery_key option ->
   state:Mcp_server.server_state ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   auth_token:string option ->

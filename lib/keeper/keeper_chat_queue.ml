@@ -35,6 +35,7 @@ type failure_kind =
   | Delivery_failed
   | Cancelled
   | Internal_error
+  | Recovery_interrupted
 
 type failure = {
   completed_at : float;
@@ -476,6 +477,7 @@ let failure_kind_to_string = function
   | Delivery_failed -> "delivery_failed"
   | Cancelled -> "cancelled"
   | Internal_error -> "internal_error"
+  | Recovery_interrupted -> "recovery_interrupted"
 
 let failure_kind_of_string = function
   | "turn_failed" -> Ok Turn_failed
@@ -486,6 +488,7 @@ let failure_kind_of_string = function
   | "delivery_failed" -> Ok Delivery_failed
   | "cancelled" -> Ok Cancelled
   | "internal_error" -> Ok Internal_error
+  | "recovery_interrupted" -> Ok Recovery_interrupted
   | value -> Error (Printf.sprintf "unknown chat queue failure kind: %s" value)
 
 let completion_fields (completion : completion) =
@@ -746,7 +749,76 @@ type loaded_snapshot = {
 
 let load_error kind ?path message = { kind; path; message }
 
-let recover_inflight path ~revision receipts =
+let recovered_queue_terminal ~base_path ~keeper_name receipts =
+  let inflight_ids =
+    List.filter_map
+      (fun receipt ->
+         match receipt.state with
+         | Stored_inflight _ -> Some receipt.receipt_id
+         | Stored_pending _ | Stored_delivered _ | Stored_failed _ -> None)
+      receipts
+  in
+  match Keeper_chat_delivery_identity.Receipt_ids.of_list inflight_ids with
+  | Error _ -> Ok None
+  | Ok receipt_ids ->
+    let delivery_key =
+      Keeper_chat_delivery_identity.Queue_receipts receipt_ids
+    in
+    (match
+       Keeper_chat_delivery_journal.load
+         ~base_path
+         ~keeper_name
+         delivery_key
+     with
+     | Error (Keeper_chat_delivery_journal.Not_found _) -> Ok None
+     | Error error ->
+       Error
+         (Keeper_chat_delivery_journal.error_to_string error)
+     | Ok
+         { Keeper_chat_delivery_journal.phase =
+             Keeper_chat_delivery_journal.Final { terminal; _ }
+          ; updated_at
+          ; _
+          } ->
+       if terminal.ok
+       then
+         (match terminal.delivery with
+          | Keeper_chat_delivery_journal.Assistant_reply
+              { turn_ref = Some turn_ref; _ } ->
+            Ok
+              (Some
+                 (Stored_delivered
+                    { completed_at = updated_at
+                    ; outcome_ref = Some (Ids.Turn_ref.to_string turn_ref)
+                    }))
+          | Keeper_chat_delivery_journal.Assistant_reply { turn_ref = None; _ }
+          | Keeper_chat_delivery_journal.No_assistant_reply _
+          | Keeper_chat_delivery_journal.Transport_failure _ ->
+            Ok
+              (Some
+                 (Stored_failed
+                    { completed_at = updated_at
+                    ; kind = Internal_error
+                    ; detail =
+                        "recovered queue delivery lacks a canonical successful turn_ref"
+                    ; outcome_ref = None
+                    })))
+       else
+         Ok
+           (Some
+              (Stored_failed
+                 { completed_at = updated_at
+                 ; kind = Recovery_interrupted
+                 ; detail = terminal.poll_body
+                 ; outcome_ref = None
+                 }))
+     | Ok journal ->
+       Error
+         (Printf.sprintf
+            "queue delivery journal remained non-final after startup recovery: %s"
+            (Keeper_chat_delivery_journal.phase_to_string journal.phase)))
+
+let recover_inflight ~base_path ~keeper_name path ~revision receipts =
   let recovered_count =
     List.fold_left
       (fun count receipt ->
@@ -758,14 +830,23 @@ let recover_inflight path ~revision receipts =
   if recovered_count = 0
   then Ok { revision; receipts; migrated = false; recovered_count = 0 }
   else
+    let recovered_terminal =
+      recovered_queue_terminal ~base_path ~keeper_name receipts
+    in
     let receipts =
-      List.map
-        (fun receipt ->
-           match receipt.state with
-           | Stored_inflight { message; _ } ->
-             { receipt with state = Stored_pending message }
-           | Stored_pending _ | Stored_delivered _ | Stored_failed _ -> receipt)
-        receipts
+      Result.map
+        (fun recovered_terminal ->
+           List.map
+             (fun receipt ->
+                match receipt.state, recovered_terminal with
+                | Stored_inflight _, Some terminal_state ->
+                  { receipt with state = terminal_state }
+                | Stored_inflight { message; _ }, None ->
+                  { receipt with state = Stored_pending message }
+                | (Stored_pending _ | Stored_delivered _ | Stored_failed _), _ ->
+                  receipt)
+             receipts)
+        recovered_terminal
     in
     if Int64.compare revision max_revision >= 0
     then
@@ -774,12 +855,18 @@ let recover_inflight path ~revision receipts =
            "cannot persist restart recovery: chat queue revision domain is exhausted")
     else
       let revision = Int64.succ revision in
-      match persist_snapshot_to_path path ~revision receipts with
-      | Ok () -> Ok { revision; receipts; migrated = false; recovered_count }
+      match receipts with
       | Error error ->
         Error
           (load_error Recovery_failed ~path
-             ("failed to persist restart recovery: " ^ error))
+             ("failed to reconcile delivery journal: " ^ error))
+      | Ok receipts ->
+        (match persist_snapshot_to_path path ~revision receipts with
+         | Ok () -> Ok { revision; receipts; migrated = false; recovered_count }
+         | Error error ->
+           Error
+             (load_error Recovery_failed ~path
+                ("failed to persist restart recovery: " ^ error)))
 
 let load_snapshot ~base_path ~keeper_name =
   match snapshot_path ~base_path ~keeper_name with
@@ -797,7 +884,13 @@ let load_snapshot ~base_path ~keeper_name =
            (match parse_v2 json with
             | Error message -> Error (load_error Parse_failed ~path message)
             | Ok (revision, receipts) ->
-              Result.map Option.some (recover_inflight path ~revision receipts))
+              Result.map Option.some
+                (recover_inflight
+                   ~base_path
+                   ~keeper_name
+                   path
+                   ~revision
+                   receipts))
          | Ok schema when String.equal schema schema_v1 ->
            (match migrate_v1_to_v2 path json with
             | Ok (revision, receipts) ->

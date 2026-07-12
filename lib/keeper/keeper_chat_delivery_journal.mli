@@ -9,6 +9,7 @@ module Identity = Keeper_chat_delivery_identity
 type user_row_origin =
   | Needs_append
   | Already_persisted of { row_id : string }
+  | Already_persisted_upstream
 
 type accepted_payload =
   { keeper_name : string
@@ -31,7 +32,9 @@ type terminal_delivery =
   | Transport_failure of { content : string }
   | No_assistant_reply of { reason : no_assistant_reply_reason }
 
-and no_assistant_reply_reason = Continuation_checkpoint
+and no_assistant_reply_reason =
+  | Continuation_checkpoint
+  | Queued_for_later of { receipt_id : Identity.Receipt_id.t }
 
 type terminal_result =
   { ok : bool
@@ -41,11 +44,11 @@ type terminal_result =
 
 type phase =
   | Prepared
-  | Accepted of { user_row_id : string }
-  | Running of { user_row_id : string }
+  | Accepted of { user_row_id : string option }
+  | Running of { user_row_id : string option }
   | Terminal_pending of
       { terminal : terminal_result
-      ; user_row_id : string
+      ; user_row_id : string option
       }
   | Transcript_committed of
       { terminal : terminal_result
@@ -82,6 +85,7 @@ type error =
       ; actual : string
       }
   | Transcript_error of string
+  | Invalid_terminal of string
 
 val error_to_string : error -> string
 val phase_to_string : phase -> string
@@ -97,7 +101,7 @@ val mark_accepted :
   base_path:string ->
   expected_revision:int ->
   identity:t ->
-  user_row_id:string ->
+  user_row_id:string option ->
   now:float ->
   (t, error) result
 
@@ -141,6 +145,15 @@ val list_for_keeper :
   base_path:string ->
   keeper_name:string ->
   (t list, error) result
+
+(** Resolve Dashboard queue user-row ownership from exact typed direct-request
+    handoff journals. All receipts must agree; a mixed legacy/current batch is
+    an explicit error instead of a duplicate or missing transcript row. *)
+val dashboard_queue_user_row_origin :
+  base_path:string ->
+  keeper_name:string ->
+  Identity.Receipt_ids.t ->
+  (user_row_origin, error) result
 
 (** Complete every durable non-final delivery without re-running inference.
     Recovery is lane-local: one malformed Keeper journal is reported without

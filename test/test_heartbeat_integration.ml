@@ -90,13 +90,6 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
-let rec wait_until ~clock ~timeout_s predicate =
-  if predicate () then true
-  else if timeout_s <= 0.0 then false
-  else (
-    Eio.Time.sleep clock 0.05;
-    wait_until ~clock ~timeout_s:(timeout_s -. 0.05) predicate)
-
 let make_meta name =
   let json = `Assoc [
     ("name", `String name);
@@ -662,23 +655,21 @@ let test_direct_start_keepalive_resolves_done_on_stop () =
       seed_keeper_sandbox_profile ~base_dir keeper_name;
       Masc.Keeper_keepalive.start_keepalive ctx meta;
       Eio.Time.sleep ctx.clock 0.05;
-      Masc.Keeper_keepalive.stop_keepalive
-        ~base_path:config.base_path
-        keeper_name;
-      let stopped_resolved =
-        wait_until ~clock:ctx.clock ~timeout_s:1.0 (fun () ->
-          match R.get ~base_path:config.base_path keeper_name with
-          | Some entry ->
-            entry.phase = KSM.Stopped
-            && Option.is_some (Eio.Promise.peek entry.done_p)
-            && R.lane_has_exited entry
-          | None -> false)
-      in
+      (match
+         Masc.Keeper_keepalive.stop_keepalive_and_await
+           ~base_path:config.base_path
+           keeper_name
+       with
+       | Masc.Keeper_keepalive.Keeper_not_registered ->
+         fail "direct-lifecycle keeper disappeared before joined stop"
+       | Masc.Keeper_keepalive.Keeper_joined { terminal = `Stopped; _ } -> ()
+       | Masc.Keeper_keepalive.Keeper_joined { terminal = `Crashed reason; _ } ->
+         fail ("joined stop resolved as crashed: " ^ reason));
       match R.get ~base_path:config.base_path keeper_name with
       | None -> fail "expected direct-lifecycle registry entry"
       | Some entry ->
         check string "state stopped" "stopped" (KSM.phase_to_string entry.phase);
-        check bool "terminal and lane join resolve eventually" true stopped_resolved;
+        check bool "joined stop observes lane exit" true (R.lane_has_exited entry);
         (match Eio.Promise.peek entry.done_p with
          | Some `Stopped -> ()
          | Some (`Crashed reason) ->

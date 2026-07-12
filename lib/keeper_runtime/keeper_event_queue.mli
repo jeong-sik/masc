@@ -9,10 +9,10 @@
     This module is data only. The enqueue side is wired:
     [keeper_keepalive_signal.ml] calls [Keeper_registry_event_queue.enqueue]
     before the wakeup flag flips (RFC-0020 Rule 1). On the dequeue side,
-    [keeper_heartbeat_loop.ml] drains every queued board signal at turn
-    start via [Keeper_registry_event_queue.drain_board] (a CAS loop
-    over [drain_board_all], RFC-0334 W2) and falls back to a single non-board
-    [dequeue_event] when that batch is empty — either path pins the
+    [keeper_heartbeat_loop.ml] leases every queued board signal at turn
+    start via [Keeper_registry_event_queue.claim_board_result] (a CAS loop
+    over [drain_board_all], RFC-0334 W2) and falls back to one typed non-board
+    lease when that batch is empty — either path pins the
     [Conservation] invariant. [run_smart_heartbeat_gate] then snapshots
     the queue and forces [Emit] when it is non-empty (pinning
     [QueueNeverStarvedBySkip] — the queue is read before any [Skip]

@@ -143,10 +143,3 @@ val drop_by_post_id :
     snapshots, returning the exact stimuli that were dropped. Returns [Error _]
     when durable removal fails so callers do not clear recovery state while a
     replayable stimulus remains on disk. *)
-
-(** Drain every queued board-signal stimulus for the keeper (RFC-0334 W2:
-    turn-keyed digest — one turn consumes everything queued since the
-    keeper's last turn, however it arrived). *)
-val drain_board :
-  base_path:string -> string
-  -> Keeper_event_queue.stimulus list

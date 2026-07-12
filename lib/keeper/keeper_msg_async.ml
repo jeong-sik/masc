@@ -1110,7 +1110,9 @@ let list_for_keeper ~base_path ~caller ?keeper_name () :
     Eio.Mutex.use_ro mu (fun () ->
       Request_table.fold
         (fun _id entry acc ->
-           if Option.is_some (owner_rejection ~caller entry)
+           if
+             (not (String.equal entry.base_path base_path))
+             || Option.is_some (owner_rejection ~caller entry)
            then acc
            else
              match keeper_name with

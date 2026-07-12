@@ -277,25 +277,6 @@ let dequeue_when ~base_path name ~ready =
 
 let dequeue ~base_path name = dequeue_when ~base_path name ~ready:(fun _ -> true)
 
-let drain_board ~base_path name =
-  match Keeper_registry.get ~base_path name with
-  | None -> []
-  | Some _ ->
-    (match
-       Keeper_event_queue_persistence.claim_board_result
-         ~base_path
-         ~keeper_name:name
-         ~claimed_at:(Time_compat.now ())
-         ~after_commit:(publish_pending ~base_path name)
-         ()
-     with
-     | Error message ->
-       Log.Keeper.error "registry: durable board claim failed name=%s: %s" name message;
-       []
-     | Ok None -> []
-     | Ok (Some lease) -> lease_stimuli lease)
-;;
-
 let claim_when_result ~base_path name ~claimed_at ~ready =
   match Keeper_registry.get ~base_path name with
   | None -> Error (Printf.sprintf "keeper not registered: %s" name)

@@ -779,11 +779,12 @@ let test_keeper_wake_consumer_rejects_invalid_keeper_name () =
           (Schedule_supported_kinds.keeper_wake_target_name_error
              ~field:"masc.keeper_wake payload body.keeper_name"))
        execution.error);
-  check int "invalid keeper wake does not enqueue" 0
-    (Keeper_event_queue.length
-       (Keeper_registry_event_queue.snapshot
-          ~base_path:config.Workspace_utils.base_path
-          "../bad"))
+  let queue_discovery =
+    Keeper_event_queue_persistence.discover_keeper_names_with_snapshots
+      ~base_path:config.Workspace_utils.base_path
+  in
+  check bool "invalid keeper wake creates no durable queue owner" false
+    (List.mem "../bad" queue_discovery.keeper_names)
 ;;
 
 let test_dashboard_schedule_resolve_uses_authenticated_operator () =

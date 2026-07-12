@@ -1056,7 +1056,7 @@ let () =
            keeper_name
          |> queue_post_ids));
 
-  (* --- registry drain_board: turn digest consumes every queued board
+  (* --- registry typed board lease: turn digest consumes every queued board
      signal in one call, however spread their arrival times (RFC-0334 W2
      pin: 5 signals spread over >2 s while the keeper was busy → one
      drain, mention-urgency first; the non-board stimulus stays queued
@@ -1088,19 +1088,67 @@ let () =
           ; payload = Bootstrap
           }
         ];
-      let digest = Masc.Keeper_registry_event_queue.drain_board ~base_path keeper_name in
+      let board_lease =
+        match
+          Masc.Keeper_registry_event_queue.claim_board_result
+            ~base_path
+            keeper_name
+            ~claimed_at:digest_now
+        with
+        | Ok (Some lease) -> lease
+        | Ok None -> Alcotest.fail "expected a board digest lease"
+        | Error error -> Alcotest.fail ("board digest claim failed: " ^ error)
+      in
+      let digest = Masc.Keeper_registry_event_queue.lease_stimuli board_lease in
       assert (List.length digest = 5);
       (match digest with
        | first :: _ -> assert (String.equal first.post_id "dg3")
        | [] -> Alcotest.fail "turn digest should not be empty");
-      (* Second drain finds no board signals; the bootstrap stimulus is
-         still queued for the non-board single-dequeue lane. *)
-      assert (
-        List.length (Masc.Keeper_registry_event_queue.drain_board ~base_path keeper_name)
-        = 0);
-      (match Masc.Keeper_registry_event_queue.dequeue ~base_path keeper_name with
-       | Some stim -> assert (String.equal stim.post_id "dg-bootstrap")
-       | None -> Alcotest.fail "bootstrap stimulus should remain after board drain"));
+      let board_receipt =
+        match
+          Masc.Keeper_registry_event_queue.settle_result
+            ~base_path
+            keeper_name
+            ~settled_at:digest_now
+            ~lease:board_lease
+            ~settlement:Masc.Keeper_registry_event_queue.Ack
+        with
+        | Ok (Masc.Keeper_registry_event_queue.Settled receipt)
+        | Ok (Masc.Keeper_registry_event_queue.Already_settled receipt) -> receipt
+        | Error error -> Alcotest.fail ("board digest settlement failed: " ^ error)
+      in
+      (match
+         Masc.Keeper_registry_event_queue.mark_transition_projected_result
+           ~base_path
+           keeper_name
+           ~transition_id:board_receipt.transition_id
+       with
+       | Ok () -> ()
+       | Error error -> Alcotest.fail ("board digest projection failed: " ^ error));
+      (match
+         Masc.Keeper_registry_event_queue.claim_board_result
+           ~base_path
+           keeper_name
+           ~claimed_at:digest_now
+       with
+       | Ok None -> ()
+       | Ok (Some _) -> Alcotest.fail "non-board stimulus entered board digest"
+       | Error error -> Alcotest.fail ("empty board digest claim failed: " ^ error));
+      let bootstrap_lease =
+        match
+          Masc.Keeper_registry_event_queue.claim_when_result
+            ~base_path
+            keeper_name
+            ~claimed_at:digest_now
+            ~ready:(fun _ -> true)
+        with
+        | Ok (Some lease) -> lease
+        | Ok None -> Alcotest.fail "bootstrap stimulus did not remain after board digest"
+        | Error error -> Alcotest.fail ("bootstrap claim failed: " ^ error)
+      in
+      match Masc.Keeper_registry_event_queue.lease_stimuli bootstrap_lease with
+      | [ stimulus ] -> assert (String.equal stimulus.post_id "dg-bootstrap")
+      | [] | _ :: _ :: _ -> Alcotest.fail "bootstrap lease cardinality drifted");
 
   (* --- registry unavailable window: enqueue persists before register --- *)
   let base_path = temp_dir "keeper-event-queue-unregistered" in

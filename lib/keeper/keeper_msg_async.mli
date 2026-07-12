@@ -177,8 +177,9 @@ val recover_lost_disk_records : base_path:string -> int
 val cancel : base_path:string -> caller:string -> string -> cancel_result
 
 (** [list_for_keeper ~base_path ~caller ?keeper_name ()] returns only entries
-    owned by the exact caller lane, optionally filtered by target keeper, sorted
-    most-recent-first. Cross-lane entries are omitted. *)
+    owned by the exact canonical BasePath/caller lane, optionally filtered by
+    target keeper, sorted most-recent-first. Cross-workspace and cross-caller
+    entries are omitted. *)
 val list_for_keeper
   :  base_path:string
   -> caller:string

@@ -133,9 +133,28 @@ let parse_declared_type json : declared_type option =
   | _ -> None
 ;;
 
+(** Static schema for in-process connectors that have no Python sidecar.
+
+    When the dashboard saves config for an in-process connector (e.g. Slack
+    Socket Mode, RFC-0317), [fetch_schema] fails because there is no sidecar
+    directory with a [schema_dump] entry point. This provides a static schema
+    so the config form renders and Save succeeds, writing to
+    [.gate/runtime/<id>/config.toml]. *)
+let in_process_connector_schema id : (string * declared_type) list =
+  match id with
+  | "slack" ->
+    [ ("SLACK_APP_TOKEN", `String)
+    ; ("SLACK_BOT_TOKEN", `String)
+    ; ("MASC_SLACK_TRIGGER_POLICY", `String)
+    ]
+  | _ -> []
+
 let schema_field_types ?base_path id : (string * declared_type) list =
-  match fetch_schema ?base_path id with
-  | Error _ -> []
+  match in_process_connector_schema id with
+  | _ :: _ as non_empty -> non_empty
+  | [] -> (
+    match fetch_schema ?base_path id with
+    | Error _ -> []
   | Ok json_str ->
     (match Yojson.Safe.from_string json_str with
      | j ->

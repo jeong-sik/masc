@@ -724,6 +724,11 @@ let dispatch_stream_if_free
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
 
+let fail_closed_metadata_flag = function
+  | Some enabled -> enabled
+  | None -> false
+;;
+
 let register_keeper_surface_schema (s : Masc_domain.tool_schema) =
   let metadata = Tool_catalog.metadata s.name in
   Tool_spec.register
@@ -733,9 +738,9 @@ let register_keeper_surface_schema (s : Masc_domain.tool_schema) =
        ~module_tag:Tool_dispatch.Mod_external
        ~input_schema:s.input_schema
        ~handler_binding:Tag_dispatch
-       ~is_read_only:(Option.value metadata.readonly ~default:false)
-       ~is_idempotent:(Option.value metadata.idempotent ~default:false)
-       ~is_destructive:(Option.value metadata.destructive ~default:false)
+       ~is_read_only:(fail_closed_metadata_flag metadata.readonly)
+       ~is_idempotent:(fail_closed_metadata_flag metadata.idempotent)
+       ~is_destructive:(fail_closed_metadata_flag metadata.destructive)
        ?effect_domain:metadata.effect_domain
        ?requires_actor_binding:metadata.requires_actor_binding
        ~required_permission:metadata.required_permission

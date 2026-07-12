@@ -108,7 +108,6 @@ let optional_bool_with_default fields name ~default =
   | Some (`Bool value) -> Ok value
   | Some _ -> Error (Printf.sprintf "%s must be a boolean" name)
 ;;
-
 let positive_number_with_default fields name ~default =
   let parsed =
     match List.assoc_opt name fields with

@@ -260,8 +260,8 @@ let test_recovery_decision_projection_omits_model_payload () =
   in
   check (option string) "typed action retained" (Some "defer")
     (string_of_field (payload_member "action" json));
-  check bool "decision digest retained" true
-    (Option.is_some (string_of_field (payload_member "decision_digest" json)));
+  check bool "legacy decision digest omitted" true
+    (payload_member "decision_digest" json = None);
   check bool "model reason omitted" true (payload_member "reason" json = None)
 
 let test_recovery_judge_failure_projection_omits_detail () =

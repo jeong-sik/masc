@@ -66,18 +66,14 @@ let tool_failure_episode_observation
 
 let sha256_hex value = Digestif.SHA256.(digest_string value |> to_hex)
 
-let recovery_decision_action = function
-  | Agent_sdk.Tool_failure_recovery.Retry_modified _ -> "retry_modified"
-  | Agent_sdk.Tool_failure_recovery.Replan _ -> "replan"
-  | Agent_sdk.Tool_failure_recovery.Ask_user _ -> "ask_user"
-  | Agent_sdk.Tool_failure_recovery.Defer _ -> "defer"
-;;
-
 let recovery_decision_observation_fields decision =
-  let json = Agent_sdk.Tool_failure_recovery.decision_to_yojson decision in
-  [ "action", `String (recovery_decision_action decision)
-  ; "decision_digest", `String (sha256_hex (Yojson.Safe.to_string json))
-  ]
+  match
+    Agent_sdk.Tool_failure_recovery.decision_observation_to_yojson decision
+  with
+  | `Assoc fields -> fields
+  | _ ->
+    invalid_arg
+      "keeper_event_bridge: OAS recovery decision observation must be an object"
 ;;
 
 let emit_native_event_log (evt : Agent_sdk.Event_bus.event) (json : Yojson.Safe.t) =

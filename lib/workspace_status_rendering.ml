@@ -44,6 +44,7 @@ let task_status_badge = function
   | Masc_domain.Claimed _ -> ("🟡", "claimed")
   | Masc_domain.InProgress _ -> ("🟢", "in_progress")
   | Masc_domain.AwaitingVerification _ -> ("🔍", "awaiting_verification")
+  | Masc_domain.OperatorBlocked _ -> ("🚧", "operator_blocked")
   | Masc_domain.Done _ -> ("✅", "done")
   | Masc_domain.Cancelled _ -> ("🚫", "cancelled")
 
@@ -51,6 +52,7 @@ let task_assignee = function
   | Masc_domain.Claimed { assignee; _ }
   | Masc_domain.InProgress { assignee; _ }
   | Masc_domain.AwaitingVerification { assignee; _ }
+  | Masc_domain.OperatorBlocked { assignee; _ }
   | Masc_domain.Done { assignee; _ } -> assignee
   | Masc_domain.Cancelled { cancelled_by; _ } -> cancelled_by
   | Masc_domain.Todo -> "unclaimed"
@@ -58,7 +60,8 @@ let task_assignee = function
 let active_task_assignee = function
   | Masc_domain.Claimed { assignee; _ }
   | Masc_domain.InProgress { assignee; _ }
-  | Masc_domain.AwaitingVerification { assignee; _ } ->
+  | Masc_domain.AwaitingVerification { assignee; _ }
+  | Masc_domain.OperatorBlocked { assignee; _ } ->
       Some assignee
   | Masc_domain.Todo | Masc_domain.Done _ | Masc_domain.Cancelled _ -> None
 

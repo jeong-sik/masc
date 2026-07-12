@@ -55,7 +55,8 @@ let classify_completion_path
   | Masc_domain.Approve_verification -> "via_verification"
   | Masc_domain.Claim | Masc_domain.Start | Masc_domain.Done_action
   | Masc_domain.Cancel | Masc_domain.Release
-  | Masc_domain.Submit_for_verification | Masc_domain.Reject_verification ->
+  | Masc_domain.Submit_for_verification | Masc_domain.Reject_verification
+  | Masc_domain.Block_for_operator | Masc_domain.Unblock ->
     if force then "forced_done"
     else (match drift with
           | Some Workspace_task_lifecycle.Claimed_to_done_skip -> "claimed_to_done_skip"
@@ -85,6 +86,7 @@ let working_agents config =
       (fun (t : task) ->
          match t.task_status with
          | Claimed { assignee; _ } | InProgress { assignee; _ } -> Some assignee
+         | OperatorBlocked { assignee; _ } -> Some assignee
          | Todo | Done _ | Cancelled _ | AwaitingVerification _ -> None)
       backlog.tasks
     |> List.sort_uniq String.compare

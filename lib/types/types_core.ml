@@ -233,6 +233,8 @@ type task_action =
   | Submit_for_verification
   | Approve_verification
   | Reject_verification
+  | Block_for_operator
+  | Unblock
 [@@deriving show]
 
 (** RFC-0262: who authorizes a transition that would otherwise require the
@@ -269,6 +271,8 @@ let task_action_of_string s =
   | "submit_for_verification" -> Ok Submit_for_verification
   | "approve" -> Ok Approve_verification
   | "reject" -> Ok Reject_verification
+  | "block_for_operator" -> Ok Block_for_operator
+  | "unblock" -> Ok Unblock
   | other -> Error (Printf.sprintf "Unknown task action: %s" other)
 
 let task_action_to_string = function
@@ -280,11 +284,14 @@ let task_action_to_string = function
   | Submit_for_verification -> "submit_for_verification"
   | Approve_verification -> "approve"
   | Reject_verification -> "reject"
+  | Block_for_operator -> "block_for_operator"
+  | Unblock -> "unblock"
 
 (** All valid task actions, derived from the ADT (single source of truth). *)
 let all_task_actions =
   [ Claim; Start; Done_action; Cancel; Release;
-    Submit_for_verification; Approve_verification; Reject_verification ]
+    Submit_for_verification; Approve_verification; Reject_verification;
+    Block_for_operator; Unblock ]
 let valid_task_action_strings = List.map task_action_to_string all_task_actions
 
 (* RFC-0220: the verification sub-state (previously a separate request_status
@@ -313,6 +320,7 @@ type task_status =
     }
   | Done of { assignee: string; completed_at: string; notes: string option }
   | Cancelled of { cancelled_by: string; cancelled_at: string; reason: string option }
+  | OperatorBlocked of { assignee: string; blocked_at: string; reason: string option }
 [@@deriving show]
 
 (** RFC-0220 §3.5: the [task_status] of an [AwaitingVerification] obligation
@@ -344,6 +352,7 @@ let string_of_task_status = task_status_to_string
 let task_status_icon = function
   | Todo -> "📋"
   | Claimed _ | InProgress _ -> "🔄"
+  | OperatorBlocked _ -> "🚧"
   | AwaitingVerification _ -> "🔍"
   | Done _ -> "✅"
   | Cancelled _ -> "🚫"
@@ -370,14 +379,14 @@ let task_assignee_of_status = function
     Exhaustive match — adding a constructor forces an update here. *)
 let task_status_is_terminal = function
   | Done _ | Cancelled _ -> true
-  | Todo | Claimed _ | InProgress _ | AwaitingVerification _ -> false
+  | Todo | Claimed _ | InProgress _ | AwaitingVerification _ | OperatorBlocked _ -> false
 
 (** Completed state: [Done]. Distinct from [task_status_is_terminal] which
     also includes [Cancelled]. Use this when only successful completion
     matters (e.g. convergence ratios, reputation counting). *)
 let task_status_is_done = function
   | Done _ -> true
-  | Todo | Claimed _ | InProgress _ | AwaitingVerification _ | Cancelled _ -> false
+  | Todo | Claimed _ | InProgress _ | AwaitingVerification _ | Cancelled _ | OperatorBlocked _ -> false
 
 (** Issue #8354 + 2026-05-27 follow-up: schema enums for [task_status]
     used to be hand-rolled in [tool_shard.ml] and [mcp_server.ml],

@@ -20,6 +20,7 @@ let task_status_label (status : Masc_domain.task_status) : string =
   | Claimed _ -> "claimed"
   | InProgress _ -> "in_progress"
   | AwaitingVerification _ -> "awaiting_verification"
+  | OperatorBlocked _ -> "operator_blocked"
   | Done _ -> "done"
   | Cancelled _ -> "cancelled"
 ;;
@@ -60,7 +61,7 @@ let active_task_assignees_by_task_id backlog =
        match task.task_status with
        | Claimed { assignee; _ } | InProgress { assignee; _ } ->
          Hashtbl.replace table task.id assignee
-       | Todo | AwaitingVerification _ | Done _ | Cancelled _ -> ())
+       | Todo | AwaitingVerification _ | OperatorBlocked _ | Done _ | Cancelled _ -> ())
     backlog.tasks;
   table
 ;;

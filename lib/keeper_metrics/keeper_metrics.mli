@@ -13,6 +13,7 @@ type t =
   | PacingShadowEvents
   | PacingShadowNextDueSec
   | FailureRoute
+  | FailureJudgmentOutcome
   | FailureDrivenPause
   | IdleSeconds
   | ContractViolations

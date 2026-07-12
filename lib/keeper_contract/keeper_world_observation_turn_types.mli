@@ -17,6 +17,8 @@ type event_queue_trigger =
           waited on; when the original turn already ended, the wake has no live
           tool call to resume and must steer the keeper back to the originating
           conversation. *)
+  | Failure_judgment_stimulus
+      (** Durable recovery control for a deterministic failed turn. *)
 
 type turn_reason =
   | Mention_pending
@@ -26,6 +28,7 @@ type turn_reason =
   | No_progress_recovery_stimulus_pending
   | Connector_attention_pending
   | Hitl_resolved_pending
+  | Failure_judgment_pending
   | Scheduled_autonomous_turn
   | Scheduled_automation_due
   | Idle_cooldown_elapsed of

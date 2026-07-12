@@ -136,6 +136,7 @@ let test_requeue_and_escalation_are_total () =
   let judgment : Queue.failure_judgment =
     { fj_runtime_id = "runtime-a"
     ; fj_judgment = Keeper_runtime_failure_route.Contract_violation
+    ; fj_provenance = Keeper_runtime_failure_route.Oas_agent_error
     ; fj_detail = "deterministic failure"
     }
   in
@@ -178,12 +179,16 @@ let test_requeue_and_escalation_are_total () =
       ~lease:judgment_lease
       ~settlement:
         (State.Escalate
-           { reason = State.Failure_judgment_failed; successor = None })
+           { reason =
+               State.Failure_judgment_boundary_failed
+                 { detail = "structured judge response violated its contract" }
+           ; successor = None
+           })
       state
-    |> require_ok "judgment failure escalation"
+    |> require_ok "judgment boundary failure escalation"
   in
   Alcotest.(check int)
-    "failed judgment does not enqueue itself"
+    "judgment boundary failure does not enqueue itself"
     0
     (Queue.length (State.pending state));
   Alcotest.(check int)
@@ -191,7 +196,7 @@ let test_requeue_and_escalation_are_total () =
     1
     (List.length (State.transition_outbox state));
   let open Yojson.Safe.Util in
-  let failed_judgment_settlement =
+  let boundary_failure_settlement =
     State.to_yojson state
     |> member "transition_outbox"
     |> to_list
@@ -201,19 +206,132 @@ let test_requeue_and_escalation_are_total () =
     |> member "settlement"
   in
   Alcotest.(check string)
-    "failed judgment receipt is an escalation"
+    "judgment boundary failure receipt is an escalation"
     "escalate"
-    (failed_judgment_settlement |> member "kind" |> to_string);
+    (boundary_failure_settlement |> member "kind" |> to_string);
   Alcotest.(check string)
-    "failed judgment receipt preserves the typed reason"
-    "failure_judgment_failed"
-    (failed_judgment_settlement |> member "reason" |> to_string);
+    "judgment boundary failure receipt preserves the typed reason"
+    "failure_judgment_boundary_failed"
+    (boundary_failure_settlement |> member "reason" |> to_string);
   Alcotest.(check bool)
-    "failed judgment receipt explicitly stores no successor"
+    "judgment boundary failure receipt explicitly stores no successor"
     true
-    (failed_judgment_settlement
+    (boundary_failure_settlement
      |> member "successor"
      |> Yojson.Safe.equal `Null)
+;;
+
+let test_judgment_terminal_evidence_is_durable () =
+  Alcotest.(check bool)
+    "judgment request is a normal transition"
+    false
+    (State.escalation_reason_requires_operator_attention
+       State.Failure_judgment_requested);
+  List.iter
+    (fun reason ->
+      Alcotest.(check bool)
+        "terminal judgment escalation requires attention"
+        true
+        (State.escalation_reason_requires_operator_attention reason))
+    [ State.Failure_judgment_boundary_failed { detail = "schema drift" }
+    ; State.Failure_judgment_operator_required
+        { judge_runtime_id = "structured-judge"
+        ; rationale = "Operator-owned configuration must change."
+        }
+    ];
+  let judgment : Queue.failure_judgment =
+    { fj_runtime_id = "failed-runtime"
+    ; fj_judgment = Keeper_runtime_failure_route.Config_mismatch
+    ; fj_provenance = Keeper_runtime_failure_route.Oas_config_error
+    ; fj_detail = "configuration unavailable"
+    }
+  in
+  let source =
+    stimulus
+      ~payload:(Queue.Failure_judgment judgment)
+      (Queue.failure_judgment_post_id judgment)
+      1.0
+  in
+  let state = State.with_pending (queue [ source ]) State.empty in
+  let state, lease = claim_head state in
+  let lease = require_some "operator judgment lease" lease in
+  let state, _ =
+    State.settle
+      ~settled_at:2.0
+      ~lease
+      ~settlement:
+        (State.Escalate
+           { reason =
+               State.Failure_judgment_operator_required
+                 { judge_runtime_id = "structured-judge"
+                 ; rationale = "Operator-owned configuration must change."
+                 }
+           ; successor = None
+           })
+      state
+    |> require_ok "operator judgment settlement"
+  in
+  let restored =
+    State.to_yojson state
+    |> State.of_yojson
+    |> require_ok "operator judgment evidence roundtrip"
+  in
+  (match State.transition_outbox restored with
+   | [ { receipt =
+           { settlement =
+               State.Escalate
+                 { reason =
+                     State.Failure_judgment_operator_required
+                       { judge_runtime_id; rationale }
+                 ; successor = None
+                 }
+           ; _
+           }
+       ; _
+       } ] ->
+     Alcotest.(check string)
+       "opaque judge runtime preserved"
+       "structured-judge"
+       judge_runtime_id;
+     Alcotest.(check string)
+       "operator rationale preserved"
+       "Operator-owned configuration must change."
+       rationale
+   | _ -> Alcotest.fail "operator judgment evidence changed during roundtrip");
+  let open Yojson.Safe.Util in
+  let settlement_json =
+    State.to_yojson state
+    |> member "transition_outbox"
+    |> to_list
+    |> List.hd
+    |> member "receipt"
+    |> member "settlement"
+  in
+  Alcotest.(check string)
+    "operator reason wire label"
+    "failure_judgment_operator_required"
+    (settlement_json |> member "reason" |> to_string);
+  Alcotest.(check string)
+    "operator rationale wire evidence"
+    "Operator-owned configuration must change."
+    (settlement_json |> member "reason_detail" |> member "rationale" |> to_string);
+  let invalid_state = State.with_pending (queue [ source ]) State.empty in
+  let invalid_state, invalid_lease = claim_head invalid_state in
+  let invalid_lease = require_some "invalid evidence lease" invalid_lease in
+  match
+    State.settle
+      ~settled_at:3.0
+      ~lease:invalid_lease
+      ~settlement:
+        (State.Escalate
+           { reason =
+               State.Failure_judgment_boundary_failed { detail = "" }
+           ; successor = None
+           })
+      invalid_state
+  with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "empty boundary failure evidence committed"
 ;;
 
 let lease_for stimulus =
@@ -231,7 +349,6 @@ let turn_failure route : Masc.Keeper_unified_turn.turn_failure =
 ;;
 
 let test_failed_cycle_route_mapping () =
-  let ordinary_lease = lease_for (stimulus "ordinary" 1.0) in
   let retry_failure =
     turn_failure
       (Keeper_runtime_failure_route.Retry_after_pacing
@@ -242,7 +359,6 @@ let test_failed_cycle_route_mapping () =
   (match
      Masc.Keeper_heartbeat_loop.settlement_of_failure
        ~settled_at:2.0
-       ~lease:ordinary_lease
        retry_failure
    with
    | Masc.Keeper_registry_event_queue.Requeue
@@ -253,13 +369,13 @@ let test_failed_cycle_route_mapping () =
     turn_failure
       (Keeper_runtime_failure_route.Escalate_judgment
          { judgment = Keeper_runtime_failure_route.Contract_violation
+         ; provenance = Keeper_runtime_failure_route.Oas_agent_error
          ; detail = "fixture contract failure"
          })
   in
   (match
      Masc.Keeper_heartbeat_loop.settlement_of_failure
        ~settled_at:3.0
-       ~lease:ordinary_lease
        judgment_failure
    with
    | Masc.Keeper_registry_event_queue.Escalate
@@ -271,32 +387,6 @@ let test_failed_cycle_route_mapping () =
        "exact-final-runtime"
        successor.fj_runtime_id
    | _ -> Alcotest.fail "deterministic failure did not create one judgment successor");
-  let judgment : Queue.failure_judgment =
-    { fj_runtime_id = "source-runtime"
-    ; fj_judgment = Keeper_runtime_failure_route.Contract_violation
-    ; fj_detail = "source failure"
-    }
-  in
-  let leased_judgment =
-    lease_for
-      (stimulus
-         ~payload:(Queue.Failure_judgment judgment)
-         (Queue.failure_judgment_post_id judgment)
-         4.0)
-  in
-  (match
-     Masc.Keeper_heartbeat_loop.settlement_of_failure
-       ~settled_at:5.0
-       ~lease:leased_judgment
-       judgment_failure
-   with
-   | Masc.Keeper_registry_event_queue.Escalate
-       { reason = Masc.Keeper_registry_event_queue.Failure_judgment_failed
-       ; successor = None
-       } ->
-     ()
-   | _ -> Alcotest.fail "failed judgment recursively re-enqueued itself")
-  ;
   let handled_failure =
     { judgment_failure with
       source_lease_disposition =
@@ -306,11 +396,46 @@ let test_failed_cycle_route_mapping () =
   (match
      Masc.Keeper_heartbeat_loop.settlement_of_failure
        ~settled_at:6.0
-       ~lease:ordinary_lease
        handled_failure
    with
    | Masc.Keeper_registry_event_queue.Ack -> ()
    | _ -> Alcotest.fail "in-turn handled terminal failure was retried")
+;;
+
+let cycle_meta () =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+        [ "name", `String "queue-outcome"
+        ; "agent_name", `String "agent-queue-outcome"
+        ; "trace_id", `String "trace-queue-outcome"
+        ; "goal", `String "verify typed event queue outcomes"
+        ])
+  with
+  | Ok meta -> meta
+  | Error message -> Alcotest.failf "cycle meta fixture: %s" message
+;;
+
+let test_cancelled_and_skipped_cycles_requeue () =
+  let lease = lease_for (stimulus "phase-gated" 1.0) in
+  let meta = cycle_meta () in
+  let settlement outcome =
+    Masc.Keeper_heartbeat_loop.settlement_of_cycle_outcome
+      ~settled_at:2.0
+      ~stop_requested:false
+      ~lease
+      (Some outcome)
+  in
+  (match settlement (Masc.Keeper_heartbeat_loop_cycle.Cancelled meta) with
+   | Masc.Keeper_registry_event_queue.Requeue
+       Masc.Keeper_registry_event_queue.Cancelled ->
+     ()
+   | _ -> Alcotest.fail "supervisor cancellation acknowledged leased work");
+  match settlement (Masc.Keeper_heartbeat_loop_cycle.Skipped meta) with
+  | Masc.Keeper_registry_event_queue.Requeue
+      Masc.Keeper_registry_event_queue.Turn_not_scheduled ->
+    ()
+  | _ -> Alcotest.fail "non-executable phase acknowledged leased work"
 ;;
 
 let rec remove_tree path =
@@ -574,7 +699,15 @@ let () =
     [ ( "state"
       , [ Alcotest.test_case "claim codec ack idempotency" `Quick test_claim_codec_ack_idempotency
         ; Alcotest.test_case "requeue and escalation" `Quick test_requeue_and_escalation_are_total
+        ; Alcotest.test_case
+            "judgment terminal evidence"
+            `Quick
+            test_judgment_terminal_evidence_is_durable
         ; Alcotest.test_case "failed cycle route mapping" `Quick test_failed_cycle_route_mapping
+        ; Alcotest.test_case
+            "cancelled and skipped cycles requeue"
+            `Quick
+            test_cancelled_and_skipped_cycles_requeue
         ] )
     ; ( "persistence"
       , [ Alcotest.test_case "legacy pair migration" `Quick test_legacy_pair_migrates_once

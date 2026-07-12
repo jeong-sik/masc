@@ -262,6 +262,17 @@ let verification_verdict_output_schema =
   object_schema ~required:(List.map fst fields) fields
 ;;
 
+let failure_judgment_output_schema =
+  let fields =
+    [ ( "decision"
+      , enum_schema Keeper_failure_judgment_contract.decision_tokens )
+    ; "guidance", nullable_string_schema
+    ; "rationale", string_schema
+    ]
+  in
+  object_schema ~required:(List.map fst fields) fields
+;;
+
 let anti_rationalization_verdict_output_schema =
   let fields =
     [ "verdict", enum_schema Task.Anti_rationalization.valid_verdict_strings

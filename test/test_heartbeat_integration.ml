@@ -2212,22 +2212,39 @@ let test_pacing_block_delays_requested_turn () =
   in
   check bool "default pacing closure never blocks" true admitted.should_run_turn
 
-let test_blocking_approval_is_classified_before_intake () =
+let test_blocking_gates_are_classified_before_intake () =
   (match
      KHL.classify_turn_intake_admission
        ~pressure:Keeper_pressure_admission.Admitted
        ~blocking_approval_pending:true
+       ~keeper_paused:false
    with
    | KHL.Intake_blocking_approval_pending -> ()
-   | KHL.Intake_admitted | KHL.Intake_pressure_blocked _ ->
+   | KHL.Intake_admitted
+   | KHL.Intake_pressure_blocked _
+   | KHL.Intake_keeper_paused ->
      fail "blocking approval must stop intake before durable dequeue");
+  (match
+     KHL.classify_turn_intake_admission
+       ~pressure:Keeper_pressure_admission.Admitted
+       ~blocking_approval_pending:false
+       ~keeper_paused:true
+   with
+   | KHL.Intake_keeper_paused -> ()
+   | KHL.Intake_admitted
+   | KHL.Intake_blocking_approval_pending
+   | KHL.Intake_pressure_blocked _ ->
+     fail "explicit Keeper pause must stop intake before durable dequeue");
   match
     KHL.classify_turn_intake_admission
       ~pressure:Keeper_pressure_admission.Admitted
       ~blocking_approval_pending:false
+      ~keeper_paused:false
   with
   | KHL.Intake_admitted -> ()
-  | KHL.Intake_blocking_approval_pending | KHL.Intake_pressure_blocked _ ->
+  | KHL.Intake_blocking_approval_pending
+  | KHL.Intake_pressure_blocked _
+  | KHL.Intake_keeper_paused ->
     fail "no blocking approval should leave intake admitted"
 
 let test_crashed_cycle_records_health_failure () =
@@ -2341,8 +2358,8 @@ let () =
         test_keeper_health_backpressure_uses_keeper_name;
       test_case "pacing block delays requested turn (RFC-0313 W3)" `Quick
         test_pacing_block_delays_requested_turn;
-      test_case "blocking approval is classified before intake" `Quick
-        test_blocking_approval_is_classified_before_intake;
+      test_case "blocking gates are classified before intake" `Quick
+        test_blocking_gates_are_classified_before_intake;
       test_case "crashed cycles feed agent health breaker" `Quick
         test_crashed_cycle_records_health_failure;
     ];

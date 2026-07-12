@@ -22,6 +22,7 @@ type t =
   | PacingShadowEvents
   | PacingShadowNextDueSec
   | FailureRoute
+  | FailureJudgmentOutcome
   | FailureDrivenPause
   | IdleSeconds
   | ContractViolations
@@ -280,6 +281,7 @@ let to_string = function
   | PacingShadowEvents -> "masc_keeper_pacing_shadow_events_total"
   | PacingShadowNextDueSec -> "masc_keeper_pacing_shadow_next_due_sec"
   | FailureRoute -> "masc_keeper_failure_route_total"
+  | FailureJudgmentOutcome -> "masc_keeper_failure_judgment_outcome_total"
   | FailureDrivenPause -> "masc_keeper_failure_driven_pause_total"
   | IdleSeconds -> "masc_keeper_idle_seconds"
   | ContractViolations -> "masc_keeper_contract_violations_total"

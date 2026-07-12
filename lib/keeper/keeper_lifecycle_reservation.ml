@@ -110,7 +110,9 @@ let authorize ?token ~base_path ~keeper_name () =
   | None -> Ok ()
   | Some current ->
     (match token with
-     | Some token when String.equal token.key key && token_owns_current token current -> Ok ()
+     | Some (token : token)
+       when String.equal token.key key && token_owns_current token current ->
+       Ok ()
      | Some _ | None -> Error current)
 ;;
 

@@ -82,10 +82,30 @@ let has_git_marker path =
   in
   try walk path with Sys_error _ -> false
 
-(** Get git root directory *)
+(** Get git root directory.
+    First checks [base_path] itself, then searches one level of child
+    directories for a .git marker.  This handles the sandbox case where
+    [base_path] is the sandbox root but the actual git checkout lives
+    under a child directory (e.g. [repos/<name>]). *)
 let git_root ~base_path =
-  if not (has_git_marker base_path) then None
-  else git_first_line ~repo_path:base_path [ "rev-parse"; "--show-toplevel" ]
+  if has_git_marker base_path then
+    git_first_line ~repo_path:base_path [ "rev-parse"; "--show-toplevel" ]
+  else
+    (* Fallback: search one level of children for a .git marker *)
+    (try
+       let entries = Sys.readdir base_path |> Array.to_list in
+       let rec find_git = function
+         | [] -> None
+         | entry :: rest ->
+           let child = Filename.concat base_path entry in
+           (try
+              if Sys.is_directory child && has_git_marker child then
+                git_first_line ~repo_path:child [ "rev-parse"; "--show-toplevel" ]
+              else find_git rest
+            with Sys_error _ -> find_git rest)
+       in
+       find_git entries
+     with Sys_error _ -> None)
 
 (** Check if directory is a git repository *)
 let is_git_repo ~base_path =

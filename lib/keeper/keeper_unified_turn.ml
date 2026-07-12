@@ -48,7 +48,7 @@ let run_keeper_cycle
       ?event_bus
       ?hitl_resolution
       ()
-  : (keeper_meta, turn_failure) result
+  : (turn_success, turn_failure) result
   =
   (* Spec navigation: see specs/keeper-state-machine/KeeperTaskAcquisition.tla
      (Cycle 8/Tier B2, PR #11412).  Action mapping:

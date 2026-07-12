@@ -896,12 +896,6 @@ let handle_schema _state request reqd =
   | Error msg -> bad_request request reqd msg
   | Ok id ->
     (match fetch_schema ~base_path:(request_base_path _state) id with
-     | Error msg ->
-       respond_json
-         request
-         reqd
-         ~status:`Service_unavailable
-         (`Assoc [ "ok", `Bool false; "error", `String msg ])
      | Ok json_str ->
        (match Yojson.Safe.from_string json_str with
         | parsed ->
@@ -920,7 +914,23 @@ let handle_schema _state request reqd =
             (`Assoc
                 [ "ok", `Bool false
                 ; "error", `String "schema_dump returned invalid JSON"
-                ])))
+                ]))
+     | Error _ ->
+       (* No sidecar directory — fall back to static schema for
+          in-process connectors (e.g. Slack Socket Mode, RFC-0317). *)
+       (match schema_field_types ~base_path:(request_base_path _state) id with
+        | _ :: _ as fields ->
+          respond_json
+            request
+            reqd
+            ~status:`OK
+            (`Assoc [ "ok", `Bool true; "id", `String id; "schema", field_types_to_json fields ])
+        | [] ->
+          respond_json
+            request
+            reqd
+            ~status:`Service_unavailable
+            (`Assoc [ "ok", `Bool false; "error", `String "no schema available" ]])))
 ;;
 
 let handle_start state request reqd =

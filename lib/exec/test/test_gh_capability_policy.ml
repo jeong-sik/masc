@@ -132,6 +132,9 @@ let test_current_dispositions () =
 let graphql_words body =
   [ "gh"; "api"; "graphql"; "-f"; "query=" ^ body ]
 
+let top_level_graphql_words body =
+  [ "gh"; "graphql"; "-f"; "query=" ^ body ]
+
 let lit s = Shell_ir.Lit (s, Shell_ir.default_meta)
 let var s = Shell_ir.Var (s, Shell_ir.default_meta)
 let concat parts = Shell_ir.Concat parts
@@ -311,6 +314,31 @@ let test_graphql_opaque_query_simple () =
   | None -> Alcotest.fail "expected gh disposition"
 ;;
 
+let test_top_level_graphql_keeps_graphql_safety_boundary () =
+  let durable_mutation =
+    "mutation { createRepository(input:{name:\"x\"}){ repository { id } } }"
+  in
+  let words = top_level_graphql_words durable_mutation in
+  let verb = Gh_verb.classify words in
+  (match verb.Gh_verb.family with
+   | Gh_verb.Graphql -> ()
+   | _ -> Alcotest.fail "top-level graphql must retain the Graphql family");
+  (match Pol.disposition_of_words words verb with
+   | Pol.Requires_approval -> ()
+   | disposition ->
+     Alcotest.failf "top-level durable graphql mutation must ask, got %s"
+       (dstr disposition));
+  let opaque_query =
+    gh_simple [ lit "graphql"; lit "-f"; var "QUERY" ]
+  in
+  match Pol.disposition_of_simple opaque_query with
+  | Some Pol.Requires_approval -> ()
+  | Some disposition ->
+    Alcotest.failf "opaque top-level graphql query must ask, got %s"
+      (dstr disposition)
+  | None -> Alcotest.fail "expected top-level graphql disposition"
+;;
+
 let test_pr_merge_admin_denies_simple () =
   let cases =
     [ "trailing admin", [ lit "pr"; lit "merge"; lit "123"; lit "--admin" ]
@@ -353,6 +381,8 @@ let () =
             test_graphql_durable_remote_words;
           Alcotest.test_case "graphql opaque query (simple)" `Quick
             test_graphql_opaque_query_simple;
+          Alcotest.test_case "top-level graphql keeps safety boundary" `Quick
+            test_top_level_graphql_keeps_graphql_safety_boundary;
           Alcotest.test_case "pr merge admin deny (simple)" `Quick
             test_pr_merge_admin_denies_simple;
         ] );

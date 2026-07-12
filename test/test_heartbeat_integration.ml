@@ -31,6 +31,9 @@ module Shutdown_prepare_join = Masc.Keeper_shutdown_prepare_join
 module Shutdown_finalize = Masc.Keeper_shutdown_finalize
 module Shutdown_runtime = Masc.Keeper_shutdown_runtime
 module Keeper_meta_store = Masc.Keeper_meta_store
+module Lifecycle_hooks = Masc.Keeper_lifecycle_hooks
+module Subprocess_registry = Masc.Keeper_subprocess_registry
+module Tombstone_cleanup = Masc.Keeper_supervisor_cleanup_tombstone
 
 let bp = "/tmp/test-heartbeat-integ"
 
@@ -104,6 +107,18 @@ let make_meta name =
   match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta -> meta
   | Error err -> Alcotest.fail ("make_meta failed: " ^ err)
+
+let retain_operator_cleanup : Shutdown_types.cleanup_intent =
+  { meta_disposition = Shutdown_types.Retain_operator_pause
+  ; remove_session = false
+  }
+;;
+
+let remove_meta_cleanup : Shutdown_types.cleanup_intent =
+  { meta_disposition = Shutdown_types.Remove_meta
+  ; remove_session = false
+  }
+;;
 
 let resolve_done_for_test reg value =
   ignore (R.resolve_done reg ~source:"test_fixture" value);
@@ -791,7 +806,7 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
         ; trace_id = meta.runtime.trace_id
         ; generation = meta.runtime.generation
         ; actor = "tester"
-        ; cleanup_intent = { remove_meta = false; remove_session = false }
+        ; cleanup_intent = retain_operator_cleanup
         ; turn_disposition = Shutdown_types.No_inflight_turn
         ; expected_backlog_version = backlog_version
         ; owned_task_ids = []
@@ -808,8 +823,30 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
        | Error (Shutdown_store.Already_exists _) -> ()
        | Error error -> fail (Shutdown_store.error_to_string error)
        | Ok () -> fail "duplicate shutdown operation overwrote its record");
+      let invalid_completion_operation =
+        { operation with
+          operation_id = Shutdown_types.Operation_id.generate ()
+        ; phase =
+            Shutdown_types.Finalized
+              { cleanup =
+                  { settled_task_ids = []; pending_confirms_removed = 0 }
+              ; meta_removed = false
+              ; session_removed = false
+              ; registry_unregistered = false
+              ; completion =
+                  Shutdown_types.Completion_pending
+                    Shutdown_types.Dead_tombstone_reaped
+              }
+        }
+      in
+      (match Shutdown_store.persist_new ~config invalid_completion_operation with
+       | Error
+           (Shutdown_store.Invalid_operation
+             (Shutdown_types.Finalized_completion_mismatch _)) -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error)
+       | Ok () -> fail "store accepted completion outside dead-tombstone intent");
       let loaded =
-        match Shutdown_store.load ~config operation_id with
+        match Shutdown_store.load ~config ~keeper_name:meta.name operation_id with
         | Ok loaded -> loaded
         | Error error -> fail (Shutdown_store.error_to_string error)
       in
@@ -848,6 +885,21 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
        | Error (Shutdown_store.Identity_mismatch _) -> ()
        | Error error -> fail (Shutdown_store.error_to_string error)
        | Ok () -> fail "shutdown store accepted a different lane identity");
+      let mutated_cleanup =
+        { joined with
+          revision = joined.revision + 1
+        ; cleanup_intent = remove_meta_cleanup
+        }
+      in
+      (match
+         Shutdown_store.replace
+           ~config
+           ~expected_revision:joined.revision
+           mutated_cleanup
+       with
+       | Error (Shutdown_store.Identity_mismatch _) -> ()
+      | Error error -> fail (Shutdown_store.error_to_string error)
+      | Ok () -> fail "shutdown store accepted a changed cleanup intent");
       let worker_failure = Failure "worker exploded after durable join" in
       let failure_timestamp = "2026-07-11T11:00:01Z" in
       let failure_clock_sampled = Atomic.make false in
@@ -858,12 +910,17 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
       let exception Cancel_worker in
       Eio.Switch.run @@ fun test_sw ->
       Eio.Fiber.fork ~sw:test_sw (fun () ->
-        Shutdown_store.For_testing.with_operation_write_lock
-          ~config
-          operation_id
-          (fun () ->
-             Eio.Promise.resolve holder_locked_r ();
-             Eio.Promise.await release_holder_p);
+        (match
+           Shutdown_store.For_testing.with_operation_write_lock
+             ~config
+             ~keeper_name:meta.name
+             operation_id
+             (fun () ->
+                Eio.Promise.resolve holder_locked_r ();
+                Eio.Promise.await release_holder_p)
+         with
+         | Ok () -> ()
+         | Error error -> fail (Shutdown_store.error_to_string error));
         Eio.Promise.resolve holder_done_r ());
       Eio.Promise.await holder_locked_p;
       (try
@@ -889,7 +946,7 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
        | Cancel_worker -> ());
       Eio.Promise.await holder_done_p;
       let blocked =
-        match Shutdown_store.load ~config operation_id with
+        match Shutdown_store.load ~config ~keeper_name:meta.name operation_id with
         | Ok blocked -> blocked
         | Error error -> fail (Shutdown_store.error_to_string error)
       in
@@ -925,7 +982,7 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
         operation
         (Failure "later worker failure");
       let preserved =
-        match Shutdown_store.load ~config operation_id with
+        match Shutdown_store.load ~config ~keeper_name:meta.name operation_id with
         | Ok preserved -> preserved
         | Error error -> fail (Shutdown_store.error_to_string error)
       in
@@ -957,6 +1014,171 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
       | Error (Shutdown_store.Decode_error _) -> ()
       | Error error -> fail (Shutdown_store.error_to_string error)
       | Ok _ -> fail "unsupported shutdown schema was accepted")
+
+let test_keeper_shutdown_store_isolates_corrupt_owner () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir "shutdown-store-corrupt-owner" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_turn_admission.For_testing.reset ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      let (_init_message : string) =
+        Masc.Workspace.init config ~agent_name:(Some "tester")
+      in
+      let backlog_version =
+        match Workspace_backlog.read_backlog_r config with
+        | Ok backlog -> backlog.version
+        | Error detail -> fail detail
+      in
+      let dotted_owner_operation_id = Shutdown_types.Operation_id.generate () in
+      (match
+         Shutdown_store.path
+           ~config
+           ~keeper_name:"dotted.owner"
+           dotted_owner_operation_id
+       with
+       | Ok path ->
+         check string
+           "portable dotted Keeper name has an exact owner codec"
+           "_dotted.owner"
+           (Filename.basename (Filename.dirname path))
+       | Error error -> fail (Shutdown_store.error_to_string error));
+      let operation name phase =
+        let meta = make_meta name in
+        let now = Masc_domain.now_iso () in
+        let operation : Shutdown_types.t =
+          { schema_version = Shutdown_types.schema_version
+          ; revision = 0
+          ; operation_id = Shutdown_types.Operation_id.generate ()
+          ; keeper_name = meta.name
+          ; lane_id = Lane.id (Lane.create ())
+          ; trace_id = meta.runtime.trace_id
+          ; generation = meta.runtime.generation
+          ; actor = "tester"
+          ; cleanup_intent = retain_operator_cleanup
+          ; turn_disposition = Shutdown_types.No_inflight_turn
+          ; expected_backlog_version = backlog_version
+          ; owned_task_ids = []
+          ; join_evidence = None
+          ; phase
+          ; created_at = now
+          ; updated_at = now
+          }
+        in
+        (match Shutdown_store.persist_new ~config operation with
+         | Ok () -> operation
+         | Error error -> fail (Shutdown_store.error_to_string error))
+      in
+      let corrupt_operation = operation "corrupt-owner" Shutdown_types.Prepared in
+      let recoverable_operation =
+        operation
+          "recoverable-owner"
+          (Shutdown_types.Blocked
+             { stage = Shutdown_types.Record_update
+             ; detail = "operator repair required"
+             })
+      in
+      let corrupt_path =
+        match
+          Shutdown_store.path
+            ~config
+            ~keeper_name:corrupt_operation.keeper_name
+            corrupt_operation.operation_id
+        with
+        | Ok path -> path
+        | Error error -> fail (Shutdown_store.error_to_string error)
+      in
+      (match Fs_compat.save_file_atomic corrupt_path "{not-json" with
+       | Ok () -> ()
+       | Error detail -> fail detail);
+      let inventory =
+        match Shutdown_store.scan_inventory ~config with
+        | Ok inventory -> inventory
+        | Error error -> fail (Shutdown_store.error_to_string error)
+      in
+      let operations, corrupt_records =
+        List.fold_left
+          (fun (operations, corrupt_records) -> function
+             | Shutdown_store.Operation operation -> operation :: operations, corrupt_records
+             | Shutdown_store.Corrupt_record corrupt ->
+               operations, corrupt :: corrupt_records)
+          ([], [])
+          inventory
+      in
+      (match operations with
+       | [ operation ] ->
+         check string
+           "unrelated valid operation remains recoverable"
+           recoverable_operation.keeper_name
+           operation.keeper_name
+       | _ -> fail "corrupt inventory hid or duplicated the valid operation");
+      (match corrupt_records with
+       | [ corrupt ] ->
+         check string
+           "corrupt payload retains path owner"
+           corrupt_operation.keeper_name
+           corrupt.keeper_name;
+         check bool
+           "corrupt payload retains path operation id"
+           true
+           (Shutdown_types.Operation_id.equal
+              corrupt_operation.operation_id
+              corrupt.operation_id)
+       | _ -> fail "corrupt operation was not isolated as one typed record");
+      (match
+         Shutdown_store.list_for_keeper
+           ~config
+           ~keeper_name:corrupt_operation.keeper_name
+       with
+       | Error (Shutdown_store.Decode_error _) -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error)
+       | Ok _ -> fail "corrupt owner inventory was reported as healthy");
+      (match
+         Shutdown_store.list_for_keeper
+           ~config
+           ~keeper_name:recoverable_operation.keeper_name
+       with
+       | Ok [ _ ] -> ()
+       | Ok _ -> fail "recoverable owner inventory changed cardinality"
+       | Error error -> fail (Shutdown_store.error_to_string error));
+      let restored =
+        match Shutdown_runtime.restore_inventory_admission ~config inventory with
+        | Ok restored -> restored
+        | Error detail -> fail detail
+      in
+      check (list string)
+        "corrupt and valid non-terminal owners are fenced independently"
+        [ corrupt_operation.keeper_name; recoverable_operation.keeper_name ]
+        restored.blocked_keeper_names;
+      check int "one corrupt record remains explicit" 1
+        (List.length restored.corrupt_records);
+      check int "one valid operation remains recoverable" 1
+        (List.length restored.operations);
+      (match
+         Masc.Keeper_turn_admission.run_if_free
+           ~base_path:config.base_path
+           ~keeper_name:corrupt_operation.keeper_name
+           (fun () -> ())
+       with
+       | `Busy (Masc.Keeper_turn_admission.Shutdown_requested operation_id) ->
+         check bool
+           "corrupt owner fence retains durable operation id"
+           true
+           (Shutdown_types.Operation_id.equal
+              corrupt_operation.operation_id
+              operation_id)
+       | `Busy (Masc.Keeper_turn_admission.Turn_busy _)
+       | `Ran () -> fail "corrupt owner admission was reopened");
+      match Shutdown_runtime.recover_operation ~config recoverable_operation with
+      | Ok recovered ->
+        check bool
+          "unrelated blocked operation remains explicitly recoverable"
+          true
+          (recovered.phase = recoverable_operation.phase)
+      | Error detail -> fail detail)
 
 let test_keeper_shutdown_prepare_joins_idle_lane () =
   Eio_main.run @@ fun env ->
@@ -1003,7 +1225,7 @@ let test_keeper_shutdown_prepare_joins_idle_lane () =
             ~entry
             ~request:
               { actor = "operator"
-              ; cleanup_intent = { remove_meta = false; remove_session = false }
+              ; cleanup_intent = retain_operator_cleanup
               }
         with
         | Ok operation -> operation
@@ -1058,7 +1280,7 @@ let test_keeper_shutdown_prepare_joins_not_started_lane () =
             ~entry
             ~request:
               { actor = "operator"
-              ; cleanup_intent = { remove_meta = false; remove_session = false }
+              ; cleanup_intent = retain_operator_cleanup
               }
         with
         | Ok operation -> operation
@@ -1099,8 +1321,11 @@ let test_keeper_shutdown_prepare_failure_rolls_back_fence () =
       let entry = R.register ~base_path:config.base_path name (make_meta name) in
       let probe_operation_id = Shutdown_types.Operation_id.generate () in
       let records_dir =
-        Filename.dirname (Shutdown_store.path ~config probe_operation_id)
+        match Shutdown_store.path ~config ~keeper_name:name probe_operation_id with
+        | Ok path -> Filename.dirname path
+        | Error error -> fail (Shutdown_store.error_to_string error)
       in
+      Fs_compat.mkdir_p (Filename.dirname records_dir);
       let blocker = open_out records_dir in
       close_out blocker;
       (match
@@ -1109,7 +1334,7 @@ let test_keeper_shutdown_prepare_failure_rolls_back_fence () =
            ~entry
            ~request:
              { actor = "operator"
-             ; cleanup_intent = { remove_meta = false; remove_session = false }
+             ; cleanup_intent = retain_operator_cleanup
              }
        with
        | Error (Shutdown_prepare_join.Prepare_persist_failed _) -> ()
@@ -1160,7 +1385,7 @@ let test_keeper_shutdown_finalizes_idle_operation () =
         ; trace_id = meta.runtime.trace_id
         ; generation = meta.runtime.generation
         ; actor = "operator"
-        ; cleanup_intent = { remove_meta = false; remove_session = false }
+        ; cleanup_intent = retain_operator_cleanup
         ; turn_disposition = Shutdown_types.No_inflight_turn
         ; expected_backlog_version = backlog_version
         ; owned_task_ids = []
@@ -1208,14 +1433,15 @@ let test_keeper_shutdown_finalizes_idle_operation () =
       (match Shutdown_finalize.run ~config ~entry:None finalized with
        | Ok _ -> ()
        | Error error -> fail (Shutdown_finalize.error_to_string error));
-      (match
-         Masc.Keeper_turn_admission.run_if_free
-           ~base_path:config.base_path
-           ~keeper_name:meta.name
-           (fun () -> ())
-       with
-       | `Ran () -> ()
-       | `Busy _ -> fail "finalized shutdown replay left admission fenced");
+      check
+        bool
+        "finalized shutdown replay releases admission fence"
+        true
+        (Option.is_none
+           (Masc.Keeper_turn_admission.snapshot_for
+              ~base_path:config.base_path
+              ~keeper_name:meta.name)
+             .snapshot_shutdown_operation_id);
       match Keeper_meta_store.read_meta config meta.name with
       | Ok (Some retained) ->
         check bool "retained Keeper is paused" true retained.paused;
@@ -1223,6 +1449,258 @@ let test_keeper_shutdown_finalizes_idle_operation () =
           (Option.is_none retained.current_task_id)
       | Ok None -> fail "retained Keeper metadata disappeared"
       | Error detail -> fail detail)
+
+let test_keeper_shutdown_delivers_dead_tombstone_completion_after_receipt () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir "shutdown-dead-tombstone-completion" in
+  let completion_bus =
+    Agent_sdk.Event_bus.create
+      ~policy:Agent_sdk.Event_bus.Drop_oldest
+      ()
+  in
+  let completion_subscription =
+    Agent_sdk.Event_bus.subscribe
+      ~purpose:"dead-tombstone-completion-test"
+      completion_bus
+  in
+  Masc_event_bus.set completion_bus;
+  Fun.protect
+    ~finally:(fun () ->
+      Agent_sdk.Event_bus.unsubscribe completion_bus completion_subscription;
+      Shutdown_finalize.For_testing.reset_remove_pending_confirms_by_target ();
+      Shutdown_finalize.For_testing.reset_completion_handler ();
+      Lifecycle_hooks.reset_for_testing ();
+      Subprocess_registry.reset_for_testing ();
+      Masc.Keeper_turn_admission.For_testing.reset ();
+      R.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      let (_init_message : string) =
+        Masc.Workspace.init config ~agent_name:(Some "supervisor")
+      in
+      let backlog_version =
+        match Workspace_backlog.read_backlog_r config with
+        | Ok backlog -> backlog.version
+        | Error detail -> fail detail
+      in
+      let meta = make_meta "shutdown-dead-tombstone-keeper" in
+      (match Keeper_meta_store.write_meta config meta with
+       | Ok () -> ()
+       | Error detail -> fail detail);
+      let entry = R.register ~base_path:config.base_path meta.name meta in
+      let hook_deliveries = ref 0 in
+      Subprocess_registry.register_default_cleanup_hook ();
+      Lifecycle_hooks.register (fun ~keeper_id event ->
+        match event with
+        | Lifecycle_hooks.Tombstone_reaped ->
+          check string "completion hook Keeper" meta.name keeper_id;
+          incr hook_deliveries
+        | Lifecycle_hooks.Phase_transition _ -> ());
+      Shutdown_finalize.register_remove_pending_confirms_by_target
+        (fun _config ~target_type:_ ~target_id:_ -> Ok 0);
+      Shutdown_finalize.register_completion_handler
+        (fun _config _operation _action -> Error "synthetic completion outage");
+      let operation_id = Shutdown_types.Operation_id.generate () in
+      let operation : Shutdown_types.t =
+        { schema_version = Shutdown_types.schema_version
+        ; revision = 0
+        ; operation_id
+        ; keeper_name = meta.name
+        ; lane_id = Lane.id entry.lane
+        ; trace_id = meta.runtime.trace_id
+        ; generation = meta.runtime.generation
+        ; actor = "supervisor"
+        ; cleanup_intent =
+            { meta_disposition = Shutdown_types.Retain_dead_tombstone
+            ; remove_session = false
+            }
+        ; turn_disposition = Shutdown_types.No_inflight_turn
+        ; expected_backlog_version = backlog_version
+        ; owned_task_ids = []
+        ; join_evidence = None
+        ; phase = Shutdown_types.Joined_idle
+        ; created_at = Masc_domain.now_iso ()
+        ; updated_at = Masc_domain.now_iso ()
+        }
+      in
+      (match
+         Masc.Keeper_turn_admission.begin_shutdown
+           ~base_path:config.base_path
+           ~keeper_name:meta.name
+           ~operation_id
+       with
+       | Masc.Keeper_turn_admission.Shutdown_reserved _ -> ()
+       | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
+         fail "fresh dead-tombstone fixture was already reserved");
+      (match Shutdown_store.persist_new ~config operation with
+       | Ok () -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error));
+      (match Shutdown_finalize.run ~config ~entry:(Some entry) operation with
+       | Error (Shutdown_finalize.Completion_failed (_, detail)) ->
+         check string
+           "completion outage remains explicit"
+           "synthetic completion outage"
+           detail
+       | Error error -> fail (Shutdown_finalize.error_to_string error)
+       | Ok _ -> fail "completion outage was reported as delivered");
+      let pending =
+        match
+          Shutdown_store.load
+            ~config
+            ~keeper_name:meta.name
+            operation_id
+        with
+        | Ok operation -> operation
+        | Error error -> fail (Shutdown_store.error_to_string error)
+      in
+      (match pending.phase with
+       | Shutdown_types.Finalized
+           { completion =
+               Shutdown_types.Completion_pending
+                 Shutdown_types.Dead_tombstone_reaped
+           ; registry_unregistered
+           ; _
+           } -> check bool "exact dead lane unregistered" true registry_unregistered
+       | Shutdown_types.Prepared
+       | Shutdown_types.Joined_idle
+       | Shutdown_types.Finalizing_tasks _
+       | Shutdown_types.Cleanup_ready _
+       | Shutdown_types.Reconciliation_required _
+       | Shutdown_types.Blocked _
+       | Shutdown_types.Finalized _ ->
+         fail "completion outage did not retain a pending durable receipt");
+      check int "pending receipt did not fire hook" 0 !hook_deliveries;
+      (match
+         Masc.Keeper_turn_admission.run_if_free
+           ~base_path:config.base_path
+           ~keeper_name:meta.name
+           (fun () -> ())
+       with
+       | `Busy (Masc.Keeper_turn_admission.Shutdown_requested reserved) ->
+         check bool "pending receipt retains exact admission owner" true
+           (Shutdown_types.Operation_id.equal operation_id reserved)
+       | `Busy (Masc.Keeper_turn_admission.Turn_busy _)
+       | `Ran () -> fail "pending completion reopened admission");
+      Masc.Keeper_turn_admission.For_testing.reset ();
+      let boot_inventory =
+        match Shutdown_store.scan_inventory ~config with
+        | Ok inventory -> inventory
+        | Error error -> fail (Shutdown_store.error_to_string error)
+      in
+      let restored =
+        match
+          Shutdown_runtime.restore_inventory_admission ~config boot_inventory
+        with
+        | Ok restored -> restored
+        | Error detail -> fail detail
+      in
+      check
+        (list string)
+        "boot restores pending completion owner fence"
+        [ meta.name ]
+        restored.blocked_keeper_names;
+      (match
+         Masc.Keeper_turn_admission.run_if_free
+           ~base_path:config.base_path
+           ~keeper_name:meta.name
+           (fun () -> ())
+       with
+       | `Busy (Masc.Keeper_turn_admission.Shutdown_requested reserved) ->
+         check bool "boot-restored fence keeps exact completion owner" true
+           (Shutdown_types.Operation_id.equal operation_id reserved)
+       | `Busy (Masc.Keeper_turn_admission.Turn_busy _)
+       | `Ran () -> fail "boot recovery reopened pending completion admission");
+      Shutdown_finalize.register_completion_handler
+        Tombstone_cleanup.handle_completion;
+      let finalized =
+        match Shutdown_finalize.run ~config ~entry:None pending with
+        | Ok finalized -> finalized
+        | Error error -> fail (Shutdown_finalize.error_to_string error)
+      in
+      (match finalized.phase with
+       | Shutdown_types.Finalized
+           { completion =
+               Shutdown_types.Completion_delivered
+                 Shutdown_types.Dead_tombstone_reaped
+           ; registry_unregistered
+           ; meta_removed
+           ; _
+           } ->
+         check bool "delivered receipt preserves unregister evidence" true
+           registry_unregistered;
+         check bool "dead tombstone meta retained" false meta_removed
+       | Shutdown_types.Prepared
+       | Shutdown_types.Joined_idle
+       | Shutdown_types.Finalizing_tasks _
+       | Shutdown_types.Cleanup_ready _
+       | Shutdown_types.Reconciliation_required _
+       | Shutdown_types.Blocked _
+       | Shutdown_types.Finalized _ ->
+          fail "dead tombstone completion receipt was not delivered");
+      check int "Tombstone_reaped delivered once" 1 !hook_deliveries;
+      (match Agent_sdk.Event_bus.drain completion_subscription with
+       | [ event ] ->
+         (match event.Agent_sdk.Event_bus.payload with
+          | Agent_sdk.Event_bus.Custom
+              ("masc.keeper.lifecycle", `Assoc fields) ->
+            (match List.assoc_opt "event" fields, List.assoc_opt "detail" fields with
+             | Some (`String event_name), Some (`String detail) ->
+               check string "durable completion lifecycle event" "dead_cleaned" event_name;
+               check string
+                 "durable completion event identity"
+                 ("shutdown_operation="
+                  ^ Shutdown_types.Operation_id.to_string operation_id)
+                 detail
+             | _ -> fail "dead completion event payload lost typed fields")
+          | Agent_sdk.Event_bus.Custom (topic, _) ->
+            fail ("unexpected completion event topic: " ^ topic)
+          | _ -> fail "dead completion did not publish a custom lifecycle event")
+       | events ->
+         fail
+           (Printf.sprintf
+              "expected one durable completion event, got %d"
+              (List.length events)));
+      let reloaded =
+        match
+          Shutdown_store.load
+            ~config
+            ~keeper_name:meta.name
+            operation_id
+        with
+        | Ok operation -> operation
+        | Error error -> fail (Shutdown_store.error_to_string error)
+      in
+      check bool "delivered completion receipt survives store round-trip" true
+        (reloaded.phase = finalized.phase);
+      check bool "dead Keeper removed from registry" false
+        (R.is_registered ~base_path:config.base_path meta.name);
+      (match Keeper_meta_store.read_meta config meta.name with
+       | Ok (Some retained) ->
+         check bool "retained dead meta paused" true retained.paused;
+         (match retained.latched_reason with
+          | Some Keeper_latched_reason.Dead_tombstone -> ()
+          | Some _ | None -> fail "retained meta lost Dead_tombstone reason")
+       | Ok None -> fail "dead tombstone meta was removed"
+       | Error detail -> fail detail);
+      (match Shutdown_finalize.run ~config ~entry:None finalized with
+       | Ok _ -> ()
+       | Error error -> fail (Shutdown_finalize.error_to_string error));
+      check int "delivered receipt prevents duplicate hook" 1 !hook_deliveries;
+      check int
+        "delivered receipt prevents duplicate lifecycle event"
+        0
+        (List.length (Agent_sdk.Event_bus.drain completion_subscription));
+      check
+        bool
+        "delivered dead completion releases admission fence"
+        true
+        (Option.is_none
+           (Masc.Keeper_turn_admission.snapshot_for
+              ~base_path:config.base_path
+              ~keeper_name:meta.name)
+             .snapshot_shutdown_operation_id))
 
 let test_keeper_shutdown_cleanup_replays_after_meta_removal () =
   Eio_main.run @@ fun env ->
@@ -1260,7 +1738,7 @@ let test_keeper_shutdown_cleanup_replays_after_meta_removal () =
         ; trace_id = meta.runtime.trace_id
         ; generation = meta.runtime.generation
         ; actor = "operator"
-        ; cleanup_intent = { remove_meta = true; remove_session = false }
+        ; cleanup_intent = remove_meta_cleanup
         ; turn_disposition = Shutdown_types.No_inflight_turn
         ; expected_backlog_version = backlog_version
         ; owned_task_ids = []
@@ -1349,7 +1827,7 @@ let test_keeper_shutdown_recovers_committed_task_receipt () =
         ; trace_id = meta.runtime.trace_id
         ; generation = meta.runtime.generation
         ; actor = "operator"
-        ; cleanup_intent = { remove_meta = false; remove_session = false }
+        ; cleanup_intent = retain_operator_cleanup
         ; turn_disposition = Shutdown_types.No_inflight_turn
         ; expected_backlog_version = backlog_version
         ; owned_task_ids = [ task_id ]
@@ -1819,6 +2297,8 @@ let () =
         test_lane_records_shutdown_request_on_cancel;
       test_case "shutdown store round-trip and identity guard" `Quick
         test_keeper_shutdown_store_round_trip_and_identity_guard;
+      test_case "shutdown store isolates corrupt owner" `Quick
+        test_keeper_shutdown_store_isolates_corrupt_owner;
       test_case "shutdown prepare joins idle lane" `Quick
         test_keeper_shutdown_prepare_joins_idle_lane;
       test_case "shutdown prepare joins not-started lane" `Quick
@@ -1827,6 +2307,8 @@ let () =
         test_keeper_shutdown_prepare_failure_rolls_back_fence;
       test_case "shutdown finalizes idle operation" `Quick
         test_keeper_shutdown_finalizes_idle_operation;
+      test_case "shutdown delivers dead tombstone completion after receipt" `Quick
+        test_keeper_shutdown_delivers_dead_tombstone_completion_after_receipt;
       test_case "shutdown cleanup replays after meta removal" `Quick
         test_keeper_shutdown_cleanup_replays_after_meta_removal;
       test_case "shutdown recovers committed task receipt" `Quick

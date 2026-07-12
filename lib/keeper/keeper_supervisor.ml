@@ -772,16 +772,11 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
          msg
          entry.restart_count))
     final_acc.to_mark_dead;
-  (* RFC-0036 Phase A.2: fire Tombstone_reaped after cleanup completes.
-     Hook is exception-safe; supervisor never observes failure. *)
+  (* Submit exact-lane durable finalization. [Dead_cleaned] and
+     [Tombstone_reaped] are emitted only by the completion receipt handler. *)
   List.iter
     (fun (entry : Keeper_registry.registry_entry) ->
-       cleanup_dead_tombstone ctx entry;
-       Keeper_lifecycle_hooks.run
-         ~base_dir:(Workspace.masc_root_dir ctx.config)
-         ~meta:entry.meta
-         ~keeper_id:entry.name
-         Keeper_lifecycle_hooks.Tombstone_reaped)
+       cleanup_dead_tombstone ctx entry)
     final_acc.to_cleanup_dead;
   let active_count =
     Keeper_registry.all ~base_path () |> active_supervision_keeper_count

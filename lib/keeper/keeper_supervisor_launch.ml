@@ -181,7 +181,7 @@ let launch_supervised_fiber_body
             match Keeper_registry.unregister_exact reg with
             | Keeper_registry.Exact_unregistered ->
               Log.Keeper.error
-                "supervisor: removed non-terminalizable fork-rejected lane +                 name=%s"
+                "supervisor: removed non-terminalizable fork-rejected lane name=%s"
                 meta.name
             | Keeper_registry.Exact_entry_missing ->
               Log.Keeper.warn
@@ -189,7 +189,7 @@ let launch_supervised_fiber_body
                 meta.name
             | Keeper_registry.Exact_entry_replaced ->
               Log.Keeper.warn
-                "supervisor: fork-rejected lane retained newer same-name owner +                 name=%s"
+                "supervisor: fork-rejected lane retained newer same-name owner name=%s"
                 meta.name);
         Error
           (Keeper_state_machine.Precondition_violation

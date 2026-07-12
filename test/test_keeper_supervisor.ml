@@ -2739,6 +2739,98 @@ let test_launch_fork_rejection_does_not_announce_running () =
          | Some KSM.Crashed -> true
          | Some _ | None -> false))
 
+let test_fork_rejection_preserves_replacement_lane () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Reg.clear ();
+      Masc.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      ignore (Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name));
+      let name = "fork-reject-replacement" in
+      let meta = make_meta name in
+      let rejected = Reg.register ~base_path:config.base_path name meta in
+      (match
+         Lane.reject_before_start rejected.lane ~reason:(Failure "pre-claimed for test")
+       with
+       | Ok () -> ()
+       | Error error -> fail (Lane.start_error_to_string error));
+      let replacement = Reg.register ~base_path:config.base_path name meta in
+      let ctx : _ Keeper_types_profile.context =
+        { config
+        ; agent_name = supervisor_agent_name
+        ; sw
+        ; clock = Eio.Stdenv.clock env
+        ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
+        ; net = Some (Eio.Stdenv.net env)
+        }
+      in
+      (match
+         Masc.Keeper_supervisor_launch.launch_supervised_fiber_body
+           ~proactive_warmup_sec:0 ctx meta rejected
+       with
+       | Ok () -> fail "expected rejected lane to propagate as Error"
+       | Error _ -> ());
+      check bool
+        "newer same-name lane remains the registry owner"
+        true
+        (match Reg.get ~base_path:config.base_path name with
+         | Some current -> Lane.Id.equal (Lane.id current.lane) (Lane.id replacement.lane)
+         | None -> false);
+      check bool
+        "rejected predecessor cannot terminalize replacement"
+        true
+        (match Reg.get_phase ~base_path:config.base_path name with
+         | Some KSM.Running -> true
+         | Some _ | None -> false))
+
+let test_fork_rejection_unregisters_non_terminalizable_owner () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Reg.clear ();
+      Masc.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      ignore (Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name));
+      let name = "fork-reject-terminal-owner" in
+      let meta = make_meta name in
+      let rejected = Reg.register ~base_path:config.base_path name meta in
+      Reg.mark_dead ~base_path:config.base_path name ~at:(Unix.gettimeofday ());
+      (match
+         Lane.reject_before_start rejected.lane ~reason:(Failure "pre-claimed for test")
+       with
+       | Ok () -> ()
+       | Error error -> fail (Lane.start_error_to_string error));
+      let ctx : _ Keeper_types_profile.context =
+        { config
+        ; agent_name = supervisor_agent_name
+        ; sw
+        ; clock = Eio.Stdenv.clock env
+        ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
+        ; net = Some (Eio.Stdenv.net env)
+        }
+      in
+      (match
+         Masc.Keeper_supervisor_launch.launch_supervised_fiber_body
+           ~proactive_warmup_sec:0 ctx meta rejected
+       with
+       | Ok () -> fail "expected rejected terminal lane to propagate as Error"
+       | Error _ -> ());
+      check bool
+        "non-terminalizable exact owner is unregistered"
+        true
+        (Option.is_none (Reg.get ~base_path:config.base_path name)))
+
 let test_sweep_waits_for_lane_join_before_unregister () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -4073,6 +4165,10 @@ let () =
         test_launch_rejected_terminal_state_does_not_announce_running;
       test_case "lane fork reject does not announce Running" `Quick
         test_launch_fork_rejection_does_not_announce_running;
+      test_case "fork reject preserves newer same-name lane" `Quick
+        test_fork_rejection_preserves_replacement_lane;
+      test_case "fork reject unregisters non-terminalizable exact owner" `Quick
+        test_fork_rejection_unregisters_non_terminalizable_owner;
       test_case "sweep joins lane before unregister" `Quick
         test_sweep_waits_for_lane_join_before_unregister;
       test_case "start_keepalive launch gate precedes side effects (source guard)" `Quick

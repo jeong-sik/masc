@@ -2388,6 +2388,48 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     expect(bundle?.querySelector('[data-chat-trace-step="chat"]')?.textContent).toContain('곧 답합니다')
   })
 
+  it('renders intermediate assistant text as compact progress without fabricating Chat', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'assistant-progress',
+            text: '',
+            role: 'assistant',
+            source: 'direct_assistant',
+            delivery: 'error',
+            traceSteps: [
+              {
+                kind: 'progress',
+                text: 'PR 목록을 확인하고 리뷰 상태를 보겠다.',
+                oasBlockIndex: 2,
+              },
+              {
+                kind: 'tool',
+                name: 'Execute',
+                toolCallId: 'tc-progress',
+                status: 'err',
+              },
+            ],
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+      />`,
+      container,
+    )
+
+    const trace = container.querySelector('[data-chat-work-trace]')
+    expect(trace?.textContent).toContain('Progress 1')
+    expect(trace?.textContent).not.toContain('Chat 1')
+    expect(container.textContent).not.toContain('(empty reply)')
+    expect(trace?.querySelector('[data-chat-trace-step="chat"]')).toBeNull()
+    const progress = trace?.querySelector('[data-chat-trace-step="progress"]') as HTMLElement
+    expect(progress.getAttribute('data-chat-trace-provenance')).toBe('intermediate_text')
+    expect(progress.getAttribute('data-chat-trace-oas-block-index')).toBe('2')
+    expect(progress.textContent).toContain('PR 목록을 확인하고 리뷰 상태를 보겠다.')
+  })
+
   it('badges turn timeline rows with field-level provenance', () => {
     render(
       html`<${ChatTranscript}

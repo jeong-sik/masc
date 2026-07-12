@@ -906,6 +906,7 @@ export type ChatMermaidBlock = { t: 'mermaid'; source: string; caption?: string 
 // timestamps and still render in stored order.
 export type ChatTraceThinkStep = { kind: 'think'; text: string; ts?: string; oasBlockIndex?: number }
 export type ChatTraceReasonStep = { kind: 'reason'; text: string; detail?: string; ts?: string }
+export type ChatTraceProgressStep = { kind: 'progress'; text: string; ts?: string; oasBlockIndex?: number }
 export type ChatTraceToolStep = {
   kind: 'tool'
   name: string
@@ -917,7 +918,7 @@ export type ChatTraceToolStep = {
   ts?: string
   oasBlockIndex?: number
 }
-export type ChatTraceStep = ChatTraceThinkStep | ChatTraceReasonStep | ChatTraceToolStep
+export type ChatTraceStep = ChatTraceThinkStep | ChatTraceReasonStep | ChatTraceProgressStep | ChatTraceToolStep
 export type ChatTraceBlock = { t: 'trace'; trace: ChatTraceStep[] }
 
 export type ChatLinkBlock = { t: 'link'; url: string; title: string; desc?: string; meta?: string; fav?: string; kind?: string }

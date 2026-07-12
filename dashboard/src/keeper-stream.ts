@@ -8,6 +8,7 @@ import type { KeeperChatStreamEvent } from './api'
 import type { KeeperConversationDetails } from './types'
 import {
   appendAssistantDelta,
+  promoteAssistantTextToProgress,
   appendAssistantToolTraceArgsDelta,
   setAssistantToolTraceArgsSnapshot,
   appendAssistantToolTraceStep,
@@ -41,6 +42,7 @@ export const TERMINAL_REQUEST_STATUSES = new Set(['done', 'error', 'lost', 'canc
 export const KEEPER_THINKING_DELTA_FLUSH_INTERVAL_MS = 100
 
 const pendingOasToolBlockIndexes = new Map<string, number>()
+const pendingOasTextBlockIndexes = new Map<string, number>()
 type ScheduledFlushHandle = ReturnType<typeof setTimeout>
 interface PendingThinkingState {
   chunks: string[]
@@ -180,6 +182,7 @@ export function _resetKeeperStreamBuffersForTests(): void {
   }
   pendingThinkingDeltas.clear()
   pendingOasToolBlockIndexes.clear()
+  pendingOasTextBlockIndexes.clear()
 }
 
 export interface KeeperThreadAbortResult {
@@ -278,6 +281,26 @@ function clearPendingOasToolBlockIndexesForEntry(keeperName: string, assistantEn
   }
 }
 
+function rememberOasTextBlockIndex(
+  keeperName: string,
+  assistantEntryId: string,
+  index: number | undefined,
+): void {
+  if (index === undefined) return
+  pendingOasTextBlockIndexes.set(streamEntryKey(keeperName, assistantEntryId), index)
+}
+
+function takeOasTextBlockIndex(keeperName: string, assistantEntryId: string): number | undefined {
+  const key = streamEntryKey(keeperName, assistantEntryId)
+  const index = pendingOasTextBlockIndexes.get(key)
+  pendingOasTextBlockIndexes.delete(key)
+  return index
+}
+
+function clearPendingOasTextBlockIndex(keeperName: string, assistantEntryId: string): void {
+  pendingOasTextBlockIndexes.delete(streamEntryKey(keeperName, assistantEntryId))
+}
+
 function normalizeStreamUsage(raw: unknown): NonNullable<KeeperConversationDetails['usage']> | null {
   if (!isRecord(raw)) return null
   const usage: NonNullable<KeeperConversationDetails['usage']> = {
@@ -333,6 +356,7 @@ export function abortKeeperThreadMessage(name: string): KeeperThreadAbortResult 
       timestamp: new Date().toISOString(),
     })
     clearPendingOasToolBlockIndexesForEntry(keeperName, entryId)
+    clearPendingOasTextBlockIndex(keeperName, entryId)
   }
   clearActiveStream(keeperName)
   setRecordValue(keeperSending, keeperName, false)
@@ -415,6 +439,9 @@ export function applyKeeperStreamEvent(
         )
         return null
       }
+      promoteAssistantTextToProgress(keeperName, assistantEntryId, {
+        oasBlockIndex: takeOasTextBlockIndex(keeperName, assistantEntryId),
+      })
       appendAssistantToolTraceStep(keeperName, assistantEntryId, {
         toolCallId,
         name: toolName,
@@ -543,8 +570,12 @@ export function applyKeeperStreamEvent(
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
         const value = isRecord(event.value) ? event.value : null
         const oasBlockIndex = asNumber(value?.index) ?? asNumber(value?.block_index)
+        const contentType = asString(value?.content_type)
         const toolCallId = asString(value?.tool_call_id)
         const toolName = asString(value?.tool_call_name)
+        if (contentType === 'text') {
+          rememberOasTextBlockIndex(keeperName, assistantEntryId, oasBlockIndex)
+        }
         if (toolCallId && toolName) {
           rememberOasToolBlockIndex(keeperName, assistantEntryId, toolCallId, oasBlockIndex)
         }
@@ -840,10 +871,12 @@ export function applyKeeperStreamEvent(
     case 'RUN_FINISHED':
       flushPendingThinkingDeltas(keeperName, assistantEntryId)
       clearPendingOasToolBlockIndexesForEntry(keeperName, assistantEntryId)
+      clearPendingOasTextBlockIndex(keeperName, assistantEntryId)
       return null
     case 'RUN_ERROR':
       flushPendingThinkingDeltas(keeperName, assistantEntryId)
       clearPendingOasToolBlockIndexesForEntry(keeperName, assistantEntryId)
+      clearPendingOasTextBlockIndex(keeperName, assistantEntryId)
       return typeof event.value === 'string'
         ? event.value
         : (isRecord(event.value) ? asString(event.value.message) : null) ?? 'Keeper stream failed'

@@ -434,6 +434,17 @@ function normalizeTraceStep(raw: unknown): ChatTraceStep | null {
       ? withoutUndefined({ kind: 'reason', text, detail: asString(raw.detail) ?? undefined, ts: asString(raw.ts) })
       : null
   }
+  if (kind === 'progress') {
+    const text = asString(raw.text)
+    return text !== undefined
+      ? withoutUndefined({
+          kind: 'progress',
+          text,
+          ts: asString(raw.ts),
+          oasBlockIndex: asNumber(raw.oasBlockIndex) ?? asNumber(raw.oas_block_index) ?? undefined,
+        })
+      : null
+  }
   if (kind === 'tool') {
     const name = asString(raw.name)
     if (name === undefined) return null
@@ -1017,6 +1028,34 @@ export function appendAssistantDelta(name: string, entryId: string, delta: strin
       deliveryReceipt: 'client_observed_sse_event',
     }),
   }))
+}
+
+/** Move assistant text that is structurally followed by a tool call out of
+ *  the final reply and into the turn timeline. The following TOOL_CALL_START
+ *  is the protocol proof that this text belonged to an intermediate assistant
+ *  round; no text-content or similarity classification participates. */
+export function promoteAssistantTextToProgress(
+  name: string,
+  entryId: string,
+  meta: { oasBlockIndex?: number } = {},
+): void {
+  updateThreadEntry(name, entryId, entry => {
+    const text = entry.text.trim()
+    if (!text) return entry
+    const progress = withoutUndefined({
+      kind: 'progress' as const,
+      text,
+      ts: new Date().toISOString(),
+      oasBlockIndex: meta.oasBlockIndex,
+    })
+    return {
+      ...entry,
+      text: '',
+      rawText: '',
+      blocks: [],
+      traceSteps: [...(entry.traceSteps ?? []), progress],
+    }
+  })
 }
 
 function writeAssistantThinkingText(

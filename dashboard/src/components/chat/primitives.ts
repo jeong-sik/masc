@@ -108,6 +108,15 @@ function traceSourceBadge(step: ChatTraceStep): TraceSourceBadgeInfo {
       tone: 'stream',
     }
   }
+  if (step.kind === 'progress') {
+    return {
+      label: 'intermediate_text',
+      title: step.oasBlockIndex === undefined
+        ? 'source: TEXT_MESSAGE_CONTENT followed by TOOL_CALL_START'
+        : `source: TEXT_MESSAGE_CONTENT block ${step.oasBlockIndex}, followed by TOOL_CALL_START`,
+      tone: 'stream',
+    }
+  }
   const callId = step.toolCallId?.trim()
   if (callId) {
     return {
@@ -1645,6 +1654,41 @@ function ChatTraceStep({
     `
   }
 
+  if (step.kind === 'progress') {
+    return html`
+      <div
+        class="chat-block-tstep progress ${open ? 'exp' : ''}"
+        data-chat-trace-step="progress"
+        data-chat-turn-order-index=${orderIndex ?? undefined}
+        data-chat-turn-order-kind="trace"
+        data-chat-trace-provenance=${sourceBadge.label}
+        data-chat-trace-oas-block-index=${step.oasBlockIndex ?? undefined}
+        data-chat-trace-ts=${step.ts ?? undefined}
+      >
+        <span class="chat-block-tnode"></span>
+        <div class="min-w-0 flex-1">
+          <button
+            type="button"
+            class="chat-block-tstep-row click w-full text-left"
+            aria-expanded=${open}
+            onClick=${() => setOpen((o) => !o)}
+          >
+            <span class="chat-block-tstep-kind">Progress</span>
+            <${TraceSourceBadge} info=${sourceBadge} />
+            <span class="chat-block-tstep-text min-w-0 flex-1 truncate">${step.text}</span>
+            <span class="chat-block-tstep-chev">${open ? '▼' : '▶'}</span>
+          </button>
+          ${open
+            ? html`<${AsyncMarkdownDiv}
+                text=${step.text}
+                className="chat-block-reason-detail markdown-body whitespace-pre-wrap break-words"
+              />`
+            : null}
+        </div>
+      </div>
+    `
+  }
+
   const statusUi = traceToolStatusUi(step.status)
 
   return html`
@@ -2403,6 +2447,7 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
     entry.delivery === 'transport_failure' && !!entry.error?.trim()
   const richTextRole = entry.role === 'assistant' || entry.role === 'system'
   const hasRealText = !liveLabel && !!entry.text && entry.text.trim().length > 0
+  const traceOwnsIntermediateText = !hasRealText && (entry.traceSteps?.length ?? 0) > 0
   const hasCardBlock = (entry.blocks ?? []).some((b) => CARD_BLOCK_TYPES.has(b.t))
   const shouldParseRichBlocks =
     !isFailureMessage
@@ -2650,6 +2695,8 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
                 />`
               : hasEffectiveBlocks
               ? html`<${ChatBlocks} blocks=${effectiveBlocks} fallbackText=${entry.text} />`
+              : traceOwnsIntermediateText
+              ? null
               : html`
                   <div
                     class=${`markdown-body whitespace-pre-wrap break-words text-base leading-airy text-[var(--color-fg-primary)] ${isCollapsible && messageCollapsed ? 'max-h-96 overflow-hidden' : ''}`}
@@ -3226,7 +3273,10 @@ function ToolTraceCard({
     )
   const canMarkMissingForEntry = (entry: KeeperConversationEntry): boolean =>
     turnComplete && coverageStateForEntry(entry) === 'covered'
-  const ordered = assistant
+  const hasChatResponse = assistant !== null
+    && assistant.delivery !== 'no_reply'
+    && assistant.text.trim().length > 0
+  const ordered = hasChatResponse && assistant
     ? [...interleaveTraceAndTools(traceSteps, steps), { kind: 'chat' as const, entry: assistant }]
     : interleaveTraceAndTools(traceSteps, steps)
   const orderSignature = ordered.map((item) => {
@@ -3237,6 +3287,7 @@ function ToolTraceCard({
   }).join('|')
   const orderedToolSteps = ordered.filter(isToolOrderItem)
   const thinkN = traceSteps.filter((step) => step.kind === 'think' || step.kind === 'reason').length
+  const progressN = traceSteps.filter((step) => step.kind === 'progress').length
   const failN = orderedToolSteps.filter(
     (s) =>
       (s.output !== null && (s.output.success === false || s.output.semantic_success === false))
@@ -3261,7 +3312,7 @@ function ToolTraceCard({
     0,
   )
   const durLabel = totalMs > 0 ? formatMsCompact(totalMs) : null
-  const chatN = assistant ? 1 : 0
+  const chatN = hasChatResponse ? 1 : 0
   const stepN = ordered.length
 
   return html`
@@ -3299,6 +3350,7 @@ function ToolTraceCard({
         <span class="chat-block-trace-count">${stepN}단계</span>
         <span class="chat-block-trace-meta">
           ${thinkN > 0 ? html`<span>Think ${thinkN}</span>` : null}
+          ${progressN > 0 ? html`<span>Progress ${progressN}</span>` : null}
           ${orderedToolSteps.length > 0 ? html`<span>도구 ${orderedToolSteps.length}</span>` : null}
           ${chatN > 0 ? html`<span>Chat ${chatN}</span>` : null}
           ${failN > 0 ? html`<span class="text-[var(--color-status-err)]">실패 ${failN}</span>` : null}
@@ -3615,6 +3667,7 @@ function traceStepsSignature(entry: KeeperConversationEntry): string {
   return steps.map((step) => {
     if (step.kind === 'think') return `think:${step.text.length}:${step.ts ?? ''}`
     if (step.kind === 'reason') return `reason:${step.text.length}:${step.detail?.length ?? 0}:${step.ts ?? ''}`
+    if (step.kind === 'progress') return `progress:${step.text.length}:${step.ts ?? ''}`
     return `tool:${step.name}:${step.status ?? ''}:${step.dur ?? ''}:${step.result?.length ?? 0}`
   }).join(',')
 }

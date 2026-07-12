@@ -433,6 +433,22 @@ let test_placeholder_notes_reject () =
            check string "rule_id" Gate.rule_id_evidence_incomplete rule_id)
       [ ""; "done"; "ok"; "n/a"; "pending"; "draft" ])
 
+let test_commit_ref_in_non_git_base_path_rejects () =
+  with_base_path (fun base_path ->
+    let handoff = handoff_with_refs ["commit:abc123def"] in
+    let task =
+      make_task ~handoff_context:(Some handoff) ()
+    in
+    match
+      Gate.decide ~base_path ~task_id:task.id
+        ~task_opt:(Some task) ~notes:""
+        ~handoff_context:handoff ()
+    with
+    | Gate.Pass ->
+      fail "commit ref in non-git base_path should Reject"
+    | Gate.Reject { rule_id; _ } ->
+      check string "rule_id" Gate.rule_id_evidence_incomplete rule_id)
+
 let test_rule_id_constant_stable () =
   check string "evidence_incomplete rule_id" "cdal_evidence_incomplete"
     Gate.rule_id_evidence_incomplete
@@ -466,9 +482,9 @@ let () =
         ; test_case "contract without trusted ref → Reject" `Quick
             test_contract_without_trusted_ref_rejects
         ; test_case "placeholder notes → Reject" `Quick
-            test_placeholder_notes_reject
-        ] )
-    ; ( "stable constants"
+          test_placeholder_notes_reject
+        ; test_case "commit ref in non-git base_path → Reject" `Quick
+          test_commit_ref_in_non_git_base_path_rejects
       , [ test_case "rule_id constant" `Quick test_rule_id_constant_stable ] )
     ]
 ;;

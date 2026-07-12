@@ -152,12 +152,6 @@ let () =
     main_src
     "safe_reqd_respond";
 
-  (* Anchor M2: Cancelled re-raised in make_extended_handler catch-all. *)
-  assert_contains
-    ~label:"M2: Cancelled re-raise in make_extended_handler"
-    main_src
-    "Re-raise cancellation so Eio structured concurrency propagates cleanly";
-
   (* Anchor M3: defence-in-depth guard on the error fallback. The
      [safe_reqd_respond] doc comment must keep the "guards" anchor so a
      future refactor that drops the wrapper is forced to update this

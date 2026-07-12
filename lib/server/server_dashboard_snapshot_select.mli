@@ -50,6 +50,8 @@ val select_shell_json :
 val select_tools_json :
   ?actor:string ->
   ?timing:Server_timing.t ->
+  ?include_sensitive:bool ->
+  ?fresh_keeper_waiting_inventory:bool ->
   Workspace.config ->
   Yojson.Safe.t
 (** RFC-0138 Phase 3 Step 2 — /api/v1/dashboard/tools read path
@@ -58,7 +60,16 @@ val select_tools_json :
     stores the canonical full registry view, not per-agent filtered
     catalogues).  Falls back to
     [Server_dashboard_http_runtime_info.dashboard_tools_http_json]
-    otherwise.
+    otherwise. [?include_sensitive] is an explicit authenticated-operator
+    decision and defaults to the redacted projection. On a snapshot hit, opting
+    in replaces the redacted waiting inventory with a fresh sensitive projection
+    without recomputing the rest of the tools payload. A snapshot whose
+    visibility does not match the request is also replaced at this boundary, so
+    a public caller cannot inherit an operator projection. When
+    [?fresh_keeper_waiting_inventory] is true, only that queue/waiting field is
+    recomputed and replaced after the snapshot read; this preserves the
+    wait-free tools base while allowing revision-bearing queue invalidations to
+    converge immediately instead of rereading an older two-second snapshot.
 
     Per RFC-0138 §3.3 Step 2 the per-actor variant continues through
     [Dashboard_cache] until the snapshot type grows an [Actor_filter]

@@ -182,6 +182,16 @@ val fold_appended_lines
   -> f:('acc -> string -> 'acc)
   -> 'acc * int
 
+val update_private_file_durable_locked :
+  string -> (string -> string option * 'a) -> 'a
+(** [update_private_file_durable_locked path decide] serializes in-process
+    callers with the shared per-path append mutex, takes a cross-process file
+    lock, reads the exact existing bytes, and calls [decide]. [Some suffix]
+    appends the complete suffix and fsyncs it before returning; [None] performs
+    no write. The file is created with mode [0600] and any cached JSONL writer
+    for the path is invalidated while the lock is held. This is the durable
+    read-check-append boundary used by receipt-linked chat persistence. *)
+
 (** Append JSON value as line to JSONL file.
 
     Backed by a process-local per-path fd cache (RFC-0162 §3.4).

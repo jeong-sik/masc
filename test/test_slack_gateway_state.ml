@@ -5,6 +5,8 @@
    against fixture JSON. *)
 
 open Alcotest
+
+module State = Channel_gate_slack_state
 module S = Slack_gateway_state
 
 (* ---------------------------------------------------------------- *)
@@ -339,6 +341,13 @@ let test_decode_event_unknown_is_ignored_event () =
   | Ok _ -> fail "unknown event must be Ignored_event, not silent"
   | Error e -> failf "unknown event became Error (should be Ignored): %s" e
 
+let test_auth_team_id_emits_exact_provenance_metadata () =
+  check (list (pair string string)) "team id propagated"
+    [ "slack.team_id", "T-777" ]
+    (State.team_provenance_metadata (Some "T-777"));
+  check (list (pair string string)) "missing team remains absent" []
+    (State.team_provenance_metadata None)
+
 (* ---------------------------------------------------------------- *)
 
 let () =
@@ -393,5 +402,9 @@ let () =
             test_decode_event_reaction_missing_item_rejected
         ; test_case "decode unknown -> Ignored_event" `Quick
             test_decode_event_unknown_is_ignored_event
+        ]
+    ; "provenance"
+      , [ test_case "auth team id reaches ingress metadata" `Quick
+            test_auth_team_id_emits_exact_provenance_metadata
         ]
     ]

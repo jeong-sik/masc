@@ -19,6 +19,7 @@ import {
   fetchDashboardBriefing,
   fetchDashboardTools,
   parseDashboardKeeperChatQueue,
+  parseDashboardKeeperWaitingInventory,
   parseDashboardKeeperWaitingSource,
   parseDashboardKeeperWaitingState,
   fetchKeeperToolCalls,
@@ -910,14 +911,14 @@ function validKeeperChatQueueProjection(): Record<string, unknown> {
         attachment_count: 0,
         submitted_at: 1_783_814_400,
         submitted_at_iso: '2026-07-12T00:00:00Z',
-        state: 'pending',
-        lease_id: null,
-        started_at: null,
-        started_at_iso: null,
+        state: 'inflight',
+        lease_id: 'lease-1',
+        started_at: 1_783_814_402,
+        started_at_iso: '2026-07-12T00:00:02Z',
       },
       {
         receipt_id: 'chatq_00000000-0000-4000-8000-000000000002',
-        queue_index: 0,
+        queue_index: 1,
         message_source: {
           kind: 'slack',
           channel_id: 'C1',
@@ -931,10 +932,10 @@ function validKeeperChatQueueProjection(): Record<string, unknown> {
         attachment_count: 0,
         submitted_at: 1_783_814_401,
         submitted_at_iso: '2026-07-12T00:00:01Z',
-        state: 'inflight',
-        lease_id: 'lease-2',
-        started_at: 1_783_814_402,
-        started_at_iso: '2026-07-12T00:00:02Z',
+        state: 'pending',
+        lease_id: null,
+        started_at: null,
+        started_at_iso: null,
       },
     ],
     read_errors: [],
@@ -953,6 +954,65 @@ function validKeeperChatQueueProjection(): Record<string, unknown> {
         outcome_ref: null,
       },
     ],
+  }
+}
+
+function validEmptyKeeperChatQueueProjection(): Record<string, unknown> {
+  return {
+    schema: 'keeper_chat_queue.dashboard.v1',
+    revision: 0,
+    pending_count: 0,
+    inflight_count: 0,
+    active_receipts: [],
+    read_errors: [],
+    next_action: null,
+    recent_failed_receipt_count: 0,
+    recent_failed_receipt_limit: 8,
+    recent_failed_receipts_truncated: false,
+    recent_failed_receipts: [],
+  }
+}
+
+function validKeeperWaitingInventory(
+  keeperOverrides: Record<string, unknown> = {},
+  inventoryOverrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    schema: 'masc.dashboard.keeper_waiting_inventory.v2',
+    source: 'server_keeper_waiting_inventory',
+    visibility: 'operator',
+    generated_at: '2026-07-12T00:00:00Z',
+    supported_states: ['idle', 'busy', 'waiting', 'deferred'],
+    keeper_count_known: true,
+    keeper_count: 1,
+    waiting_keeper_count: 0,
+    row_count: 0,
+    row_count_truncated: false,
+    external_attention_row_limit: 64,
+    external_attention_truncated_keeper_count: 0,
+    global_row_count: 0,
+    global_pending_confirm_count_known: true,
+    global_pending_confirm_count: 0,
+    source_counts: {},
+    keepers: [{
+      keeper_name: 'sangsu',
+      metadata_status: 'registered',
+      state: 'idle',
+      waiting_on: [],
+      waiting_count: 0,
+      waiting_count_truncated: false,
+      truncated_sources: {},
+      sources: {},
+      since: null,
+      since_iso: null,
+      due_at: null,
+      due_at_iso: null,
+      next_action: null,
+      chat_queue: validEmptyKeeperChatQueueProjection(),
+      ...keeperOverrides,
+    }],
+    global_waiting_on: [],
+    ...inventoryOverrides,
   }
 }
 
@@ -978,7 +1038,7 @@ describe('fetchDashboardTools', () => {
     const queue = parseDashboardKeeperChatQueue(validKeeperChatQueueProjection())
 
     expect(queue.revision).toBe(4)
-    expect(queue.active_receipts.map(receipt => receipt.state)).toEqual(['pending', 'inflight'])
+    expect(queue.active_receipts.map(receipt => receipt.state)).toEqual(['inflight', 'pending'])
     expect(queue.recent_failed_receipts).toHaveLength(1)
     expect(queue.recent_failed_receipts_truncated).toBe(true)
     expect(queue.active_receipts[0]).not.toHaveProperty('dashboard_message')
@@ -1009,6 +1069,100 @@ describe('fetchDashboardTools', () => {
     })).toThrow('Invalid dashboard tools projection')
   })
 
+  it('parses redacted queue sources without inventing connector coordinates and rejects leaks', () => {
+    const raw = validKeeperChatQueueProjection()
+    const active = raw.active_receipts as Record<string, unknown>[]
+    const redacted = {
+      ...raw,
+      active_receipts: [
+        active[0],
+        {
+          ...active[1],
+          message_source: { kind: 'slack' },
+        },
+      ],
+      read_errors: [{ kind: 'read_failed' }],
+    }
+
+    const parsed = parseDashboardKeeperChatQueue(redacted, 'queue', 'redacted')
+    const slack = parsed.active_receipts[1]?.message_source
+    expect(slack).toEqual({
+      kind: 'slack',
+      channel_id: null,
+      user_id: null,
+      team_id: null,
+      thread_ts: null,
+    })
+    expect(parsed.read_errors[0]).toEqual({ kind: 'read_failed', path: null, message: null })
+
+    expect(() => parseDashboardKeeperChatQueue({
+      ...redacted,
+      active_receipts: active,
+    }, 'queue', 'redacted')).toThrow('redacted Slack source')
+  })
+
+  it('strictly validates queue-only metadata, row fields, and inventory counts', () => {
+    expect(() => parseDashboardKeeperWaitingInventory(
+      validKeeperWaitingInventory({ metadata_status: 'orphaned' }),
+    )).toThrow('keepers[0].metadata_status')
+
+    const malformedRow = {
+      keeper_name: 'sangsu',
+      source: 'read_error',
+      waiting_on: 'chat_queue_snapshot',
+      wake_producer: { invalid: true },
+      since: null,
+      since_iso: null,
+      due_at: null,
+      due_at_iso: null,
+      next_action: 'repair_keeper_chat_queue_snapshot',
+      detail: { kind: 'read_failed' },
+    }
+    expect(() => parseDashboardKeeperWaitingInventory(validKeeperWaitingInventory({
+      state: 'waiting',
+      waiting_on: [malformedRow],
+      waiting_count: 1,
+      sources: { read_error: 1 },
+      next_action: 'repair_keeper_chat_queue_snapshot',
+    }, {
+      waiting_keeper_count: 1,
+      row_count: 1,
+      source_counts: { read_error: 1 },
+    }))).toThrow('keepers[0].waiting_on[0].wake_producer')
+
+    expect(() => parseDashboardKeeperWaitingInventory(
+      validKeeperWaitingInventory({}, { keeper_count: 2 }),
+    )).toThrow('keeper_count')
+  })
+
+  it('requests the live queue projection when queue revision convergence is required', async () => {
+    const rawResponse = {
+      tool_inventory: { tools: [] },
+      tool_usage: {
+        total_calls: 0,
+        distinct_tools_called: 0,
+        top_20: [],
+        never_called_count: 0,
+        dispatch_v2_enabled: false,
+        registered_count: 0,
+      },
+      keeper_waiting_inventory: validKeeperWaitingInventory(),
+    }
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(rawResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await fetchDashboardTools({ freshKeeperChatQueue: true })
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      '/api/v1/dashboard/tools?fresh_keeper_chat_queue=1',
+    )
+  })
+
   it('rejects an unknown Keeper state and missing chat queue from the tools endpoint', async () => {
     const responseFor = (keeper: Record<string, unknown>) => ({
       tool_inventory: { tools: [] },
@@ -1020,16 +1174,7 @@ describe('fetchDashboardTools', () => {
         dispatch_v2_enabled: false,
         registered_count: 0,
       },
-      keeper_waiting_inventory: {
-        keepers: [{
-          keeper_name: 'sangsu',
-          state: 'idle',
-          waiting_on: [],
-          waiting_count: 0,
-          chat_queue: validKeeperChatQueueProjection(),
-          ...keeper,
-        }],
-      },
+      keeper_waiting_inventory: validKeeperWaitingInventory(keeper),
     })
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify(responseFor({ state: 'running' })), {
@@ -1042,7 +1187,7 @@ describe('fetchDashboardTools', () => {
       }))
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(fetchDashboardTools()).rejects.toThrow('Unknown keeper waiting inventory state')
+    await expect(fetchDashboardTools()).rejects.toThrow('keepers[0].state')
     await expect(fetchDashboardTools()).rejects.toThrow('keepers[0].chat_queue')
   })
 

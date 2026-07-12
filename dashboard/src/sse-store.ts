@@ -102,10 +102,17 @@ export function registerKeeperTurnRefresh(fn: (keeperName: string) => void): voi
 // deliberately an invalidation signal, so the tools resource registers its
 // authoritative re-read here instead of this transport layer importing a UI
 // store or reconstructing Pending/Inflight state from event deltas.
-let _refreshKeeperChatQueueFn: (() => void) | null = null
-const pendingKeeperChatQueueRefreshNames = new Set<string>()
-export function registerKeeperChatQueueRefresh(fn: () => void): void {
+let _refreshKeeperChatQueueFn: ((expectedRevisions: ReadonlyMap<string, number>) => void) | null = null
+const pendingKeeperChatQueueRefreshRevisions = new Map<string, number>()
+export function registerKeeperChatQueueRefresh(
+  fn: (expectedRevisions: ReadonlyMap<string, number>) => void,
+): void {
   _refreshKeeperChatQueueFn = fn
+  if (pendingKeeperChatQueueRefreshRevisions.size > 0) {
+    const expectedRevisions = new Map(pendingKeeperChatQueueRefreshRevisions)
+    pendingKeeperChatQueueRefreshRevisions.clear()
+    fn(expectedRevisions)
+  }
 }
 
 const _refreshActivityFns = new Set<() => void>()
@@ -661,13 +668,20 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
 
   if (event.type === 'keeper_chat_queue_changed') {
     const keeperName = event.keeper_name?.trim() ?? ''
-    if (keeperName) pendingKeeperChatQueueRefreshNames.add(keeperName)
+    const revision = event.revision
+    if (keeperName && typeof revision === 'number') {
+      const previous = pendingKeeperChatQueueRefreshRevisions.get(keeperName) ?? -1
+      pendingKeeperChatQueueRefreshRevisions.set(keeperName, Math.max(previous, revision))
+    }
     scheduleRefresh(
       'keeper_chat_queue',
       () => {
-        const keeperNames = Array.from(pendingKeeperChatQueueRefreshNames)
-        pendingKeeperChatQueueRefreshNames.clear()
-        _refreshKeeperChatQueueFn?.()
+        const keeperNames = Array.from(pendingKeeperChatQueueRefreshRevisions.keys())
+        if (_refreshKeeperChatQueueFn) {
+          const expectedRevisions = new Map(pendingKeeperChatQueueRefreshRevisions)
+          pendingKeeperChatQueueRefreshRevisions.clear()
+          _refreshKeeperChatQueueFn(expectedRevisions)
+        }
         void import('./keeper-runtime')
           .then(mod => Promise.all(
             keeperNames.map(name => mod.reconcileKeeperChatReceipts(name)),

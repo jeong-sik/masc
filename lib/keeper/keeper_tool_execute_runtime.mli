@@ -49,6 +49,7 @@ module For_testing : sig
     Yojson.Safe.t
   val submit_shell_ir_approval_pending :
     base_path:string ->
+    ?workspace_config:Workspace.config ->
     keeper_name:string ->
     ?task_id:string ->
     ?goal_ids:string list ->

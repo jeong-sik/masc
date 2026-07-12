@@ -666,6 +666,57 @@ let reset_fd_cache_for_testing () = Fd_cache.reset_for_testing ()
 
 let with_cached_writer_for_testing path f = Fd_cache.with_writer path f
 
+let rec read_fd_chunks fd buffer =
+  let chunk = Bytes.create 65536 in
+  match Unix.read fd chunk 0 (Bytes.length chunk) with
+  | 0 -> Buffer.contents buffer
+  | count ->
+    Buffer.add_subbytes buffer chunk 0 count;
+    read_fd_chunks fd buffer
+  | exception Unix.Unix_error (Unix.EINTR, _, _) -> read_fd_chunks fd buffer
+
+let rec write_fd_all fd bytes offset remaining =
+  if remaining > 0 then
+    match Unix.write fd bytes offset remaining with
+    | 0 -> raise (Sys_error "durable append made no write progress")
+    | written -> write_fd_all fd bytes (offset + written) (remaining - written)
+    | exception Unix.Unix_error (Unix.EINTR, _, _) ->
+      write_fd_all fd bytes offset remaining
+
+let update_private_file_durable_locked path decide =
+  test_exec_home_guard ~op:"update_private_file_durable_locked" path;
+  let dir = Filename.dirname path in
+  mkdir_p_memoized dir;
+  let path_mu = get_append_path_mutex path in
+  Stdlib.Mutex.protect path_mu (fun () ->
+    Fd_cache.invalidate path;
+    let fd =
+      Unix.openfile path
+        [ Unix.O_RDWR; Unix.O_CREAT; Unix.O_APPEND; Unix.O_CLOEXEC ]
+        0o600
+    in
+    Fun.protect
+      ~finally:(fun () -> Unix.close fd)
+      (fun () ->
+         Unix.fchmod fd 0o600;
+         (* See Unix.lseek: only the file-position side effect is required. *)
+         ignore (Unix.lseek fd 0 Unix.SEEK_SET : int);
+         Unix.lockf fd Unix.F_LOCK 0;
+         (* See Unix.lseek: only the file-position side effect is required. *)
+         ignore (Unix.lseek fd 0 Unix.SEEK_SET : int);
+         let existing = read_fd_chunks fd (Buffer.create 4096) in
+         let suffix, result = decide existing in
+         (match suffix with
+          | None -> ()
+          | Some suffix ->
+            (* See Unix.lseek: only the file-position side effect is required. *)
+            ignore (Unix.lseek fd 0 Unix.SEEK_END : int);
+            let bytes = Bytes.of_string suffix in
+            write_fd_all fd bytes 0 (Bytes.length bytes);
+            Unix.fsync fd);
+         result))
+;;
+
 let append_jsonl (path : string) (json : Yojson.Safe.t) : unit =
   test_exec_home_guard ~op:"append_jsonl" path;
   let dir = Stdlib.Filename.dirname path in

@@ -57,6 +57,7 @@ let restore_reconcile_continue_gate
       ~input
       ~risk_level:Keeper_approval_queue.Critical
       ~base_path:ctx.config.base_path
+      ~workspace_config:ctx.config
       ~lane_policy:Keeper_approval_queue.Blocking
       ~on_resolution:(fun decision ->
         match decision with

@@ -40,10 +40,22 @@ type validation_error = Gate_protocol.validation_error =
   | Empty_idempotency_key
   | Duplicate_message of string
 
+type accepted_failure = Gate_protocol.accepted_failure =
+  { detail : string
+  ; message_id : string
+  ; receipt_id : string option
+  }
+
+type accepted_replay = Gate_protocol.accepted_replay =
+  { message_id : string
+  ; receipt_id : string option
+  }
+
 type gate_error = Gate_protocol.gate_error =
   | Validation of validation_error
   | Keeper_error of string
-  | Accepted_keeper_error of string
+  | Accepted_keeper_error of accepted_failure
+  | Accepted_replay of accepted_replay
   | Dispatch_unavailable
   | Internal of string
 
@@ -173,11 +185,70 @@ let inbound_of_json = Gate_protocol.inbound_of_json
 let outbound_to_json = Gate_protocol.outbound_to_json
 let error_json = Gate_protocol.error_json
 
+let gate_error_json error =
+  let optional_string key = function
+    | None -> []
+    | Some value -> [ key, `String value ]
+  in
+  let fields =
+    match error with
+    | Validation validation ->
+      let message_id =
+        match validation with
+        | Duplicate_message value -> Some value
+        | Empty_content | Content_too_long _ | Empty_keeper_name
+        | Empty_channel_user_id | Empty_idempotency_key -> None
+      in
+      [ "error_kind", `String "validation"
+      ; "error", `String (validation_error_to_string validation)
+      ; "accepted", `Bool false
+      ; "retryable", `Bool false
+      ]
+      @ optional_string "message_id" message_id
+    | Keeper_error _ ->
+      [ "error_kind", `String "keeper_error"
+      ; "error", `String "Keeper processing failed before durable acceptance."
+      ; "accepted", `Bool false
+      ; "retryable", `Bool true
+      ]
+    | Accepted_keeper_error failure ->
+      [ "error_kind", `String "accepted_keeper_error"
+      ; ( "error"
+        , `String
+            "The message was durably accepted, but the Keeper turn did not complete. Check the receipt in the Dashboard; do not replay the same message." )
+      ; "accepted", `Bool true
+      ; "retryable", `Bool false
+      ; "message_id", `String failure.message_id
+      ]
+      @ optional_string "receipt_id" failure.receipt_id
+    | Accepted_replay replay ->
+      [ "error_kind", `String "accepted_replay"
+      ; "error", `String "This message was already durably accepted."
+      ; "accepted", `Bool true
+      ; "retryable", `Bool false
+      ; "message_id", `String replay.message_id
+      ]
+      @ optional_string "receipt_id" replay.receipt_id
+    | Dispatch_unavailable ->
+      [ "error_kind", `String "dispatch_unavailable"
+      ; "error", `String "Keeper dispatch is unavailable."
+      ; "accepted", `Bool false
+      ; "retryable", `Bool true
+      ]
+    | Internal _ ->
+      [ "error_kind", `String "internal"
+      ; "error", `String "Internal gate error."
+      ; "accepted", `Bool false
+      ; "retryable", `Bool true
+      ]
+  in
+  `Assoc (("ok", `Bool false) :: fields)
+
 let inbound_error_notice = function
   | Dispatch_unavailable -> Offline_notice
   | Keeper_error _ -> Retry_notice
   | Accepted_keeper_error _ -> Accepted_failure_notice
-  | Validation _ | Internal _ -> No_notice
+  | Accepted_replay _ | Validation _ | Internal _ -> No_notice
 
 (* ── Validation (uses local dedup) ───────────────────────────── *)
 
@@ -211,18 +282,32 @@ let handle_inbound_with ~dispatch (msg : inbound_message) =
   | Ok () ->
       let keeper = String.trim msg.keeper_name in
       let result =
-        dispatch
-          ~channel
-          ~channel_user_id:msg.channel_user_id
-          ~channel_user_name:msg.channel_user_name
-          ~channel_workspace_id:msg.channel_workspace_id
-          ~keeper_name:keeper
-          ~idempotency_key:msg.idempotency_key
-          ~metadata:msg.metadata
-          ~content:(String.trim msg.content)
+        try
+          Ok
+            (dispatch
+               ~channel
+               ~channel_user_id:msg.channel_user_id
+               ~channel_user_name:msg.channel_user_name
+               ~channel_workspace_id:msg.channel_workspace_id
+               ~keeper_name:keeper
+               ~idempotency_key:msg.idempotency_key
+               ~metadata:msg.metadata
+               ~content:(String.trim msg.content))
+        with
+        | Eio.Cancel.Cancelled _ as exception_ -> raise exception_
+        | exception_ -> Error exception_
       in
       (match result with
-       | Gate_protocol.Reply { content = reply; structured; stats; message_request } ->
+       | Error exception_ ->
+           dedup_release msg.idempotency_key;
+           Channel_gate_metrics.record_internal_error_exn
+             ~channel
+             ~workspace_id:msg.channel_workspace_id
+             ~keeper
+             ~duration_ms:0 exception_;
+           Error (Internal "")
+       | Ok (Gate_protocol.Reply
+           { content = reply; structured; stats; message_request }) ->
            let duration_ms = match stats with
              | Some s -> s.duration_ms
              | None -> 0
@@ -240,7 +325,7 @@ let handle_inbound_with ~dispatch (msg : inbound_message) =
              ; turn_stats = stats
              ; message_request
              }
-       | Gate_protocol.Keeper_error_result err ->
+       | Ok (Gate_protocol.Keeper_error_result err) ->
            (* Validation reserves the external idempotency key before dispatch.
               A keeper-side failure did not accept the message, so release the
               reservation: a connector replay of the same event may retry
@@ -253,7 +338,7 @@ let handle_inbound_with ~dispatch (msg : inbound_message) =
              ~duration_ms:0
              (Channel_gate_metrics.Keeper_error err);
            Error (Keeper_error err)
-       | Gate_protocol.Accepted_keeper_error_result err ->
+       | Ok (Gate_protocol.Accepted_keeper_error_result failure) ->
            (* The durable inbound transcript committed before the turn failed.
               Keep the idempotency reservation so a connector retry cannot
               append the same external message twice. *)
@@ -262,9 +347,18 @@ let handle_inbound_with ~dispatch (msg : inbound_message) =
              ~workspace_id:msg.channel_workspace_id
              ~keeper
              ~duration_ms:0
-             (Channel_gate_metrics.Keeper_error err);
-           Error (Accepted_keeper_error err)
-       | Gate_protocol.Unavailable_result ->
+             (Channel_gate_metrics.Accepted_keeper_error
+                "accepted Keeper turn failed");
+           Error (Accepted_keeper_error failure)
+       | Ok (Gate_protocol.Duplicate_accepted_result replay) ->
+           Channel_gate_metrics.record_attempt
+             ~channel
+             ~workspace_id:msg.channel_workspace_id
+             ~keeper
+             ~duration_ms:0
+             Channel_gate_metrics.Duplicate;
+           Error (Accepted_replay replay)
+       | Ok Gate_protocol.Unavailable_result ->
            dedup_release msg.idempotency_key;
            Channel_gate_metrics.record_attempt
              ~channel

@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { useState } from 'preact/hooks'
 import type {
+  DashboardKeeperChatQueue,
   DashboardKeeperWaitingInventory,
   DashboardKeeperWaitingKeeper,
   DashboardKeeperWaitingRow,
@@ -157,6 +158,39 @@ function WaitingRowShutdownDetail({ row }: { row: DashboardKeeperWaitingRow }) {
   `
 }
 
+function WaitingRowReadErrorDetail({ row }: { row: DashboardKeeperWaitingRow }) {
+  if (row.source !== 'read_error') return null
+  const detail = asDetailRecord(row.detail)
+  if (!detail) {
+    return html`<div class="text-2xs text-[var(--color-fg-muted)]">diagnostic details redacted</div>`
+  }
+  const fields = [
+    ['kind', detail.kind],
+    ['path', detail.path],
+    ['message', detail.message],
+    ['error', detail.error],
+    ['primary error', detail.primary_err],
+    ['recovery error', detail.recovery_err],
+  ].flatMap(([label, value]) => (
+    typeof value === 'string' && value.trim() !== ''
+      ? [{ label: label as string, value: value.trim() }]
+      : []
+  ))
+  if (fields.length === 0) {
+    return html`<div class="text-2xs text-[var(--color-fg-muted)]">diagnostic details redacted</div>`
+  }
+  return html`
+    <div class="grid gap-1 rounded-[var(--r-0)] border border-[var(--danger-20)] bg-[var(--danger-10)] px-2 py-1.5 text-2xs text-[var(--color-status-err)]" data-waiting-read-error-detail>
+      ${fields.map(field => html`
+        <div key=${field.label} class="flex min-w-0 flex-wrap gap-1">
+          <strong>${field.label}</strong>
+          <code class="min-w-0 break-all">${field.value}</code>
+        </div>
+      `)}
+    </div>
+  `
+}
+
 function WaitingRow({ row }: { row: DashboardKeeperWaitingRow }) {
   const wakeProducer = evidenceLabel(row.wake_producer, 'wake producer missing')
   const nextAction = evidenceLabel(row.next_action, 'next action missing')
@@ -174,6 +208,77 @@ function WaitingRow({ row }: { row: DashboardKeeperWaitingRow }) {
       </div>
       <${WaitingRowReceiptDetail} row=${row} />
       <${WaitingRowShutdownDetail} row=${row} />
+      <${WaitingRowReadErrorDetail} row=${row} />
+    </div>
+  `
+}
+
+function KeeperQueueRevision({ keeper }: { keeper: DashboardKeeperWaitingKeeper }) {
+  const qualifiedRevision = `${keeper.keeper_name}@${keeper.chat_queue.revision}`
+  return html`
+    <span class="inline-flex min-w-0 items-center gap-1">
+      <span>revision</span>
+      <code class="min-w-0 break-all">${qualifiedRevision}</code>
+      <${CopyIdButton}
+        value=${qualifiedRevision}
+        label="Keeper queue revision"
+        ariaLabel=${`Keeper queue revision ${qualifiedRevision} 복사`}
+        size=${11}
+      />
+    </span>
+  `
+}
+
+function queueHasOperatorEvidence(
+  queue: DashboardKeeperChatQueue,
+): boolean {
+  return queue.active_receipts.length > 0
+    || queue.recent_failed_receipt_count > 0
+    || queue.read_errors.length > 0
+}
+
+function KeeperQueueSummary({ keeper }: { keeper: DashboardKeeperWaitingKeeper }) {
+  const queue = keeper.chat_queue
+  if (keeper.metadata_status !== 'queue_only' && !queueHasOperatorEvidence(queue)) return null
+  return html`
+    <div
+      class="mt-2 grid gap-1.5 rounded-[var(--r-0)] border border-[var(--color-border-subtle)] bg-[var(--color-bg-page)] px-2 py-1.5 text-2xs text-[var(--color-fg-muted)]"
+      data-keeper-chat-queue-summary=${keeper.keeper_name}
+    >
+      <div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+        <${KeeperQueueRevision} keeper=${keeper} />
+        <span>pending <strong>${queue.pending_count}</strong></span>
+        <span>inflight <strong>${queue.inflight_count}</strong></span>
+        <span>recent failures <strong>${queue.recent_failed_receipt_count}</strong></span>
+        ${queue.next_action ? html`<span>next <code>${enumLabel(queue.next_action)}</code></span>` : null}
+      </div>
+      ${queue.recent_failed_receipts.map(receipt => html`
+        <div
+          key=${receipt.receipt_id}
+          class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[var(--color-status-err)]"
+          data-keeper-chat-queue-terminal-failure=${receipt.receipt_id}
+        >
+          <strong>${enumLabel(receipt.failure_kind)}</strong>
+          <span class="inline-flex min-w-0 items-center gap-1">
+            <code class="min-w-0 break-all">${receipt.receipt_id}</code>
+            <${CopyIdButton}
+              value=${receipt.receipt_id}
+              label="queue receipt ID"
+              ariaLabel=${`큐 receipt ${receipt.receipt_id} 복사`}
+              size=${11}
+            />
+          </span>
+          <span>${timeLabel(receipt.completed_at_iso)}</span>
+        </div>
+      `)}
+      ${queue.recent_failed_receipts_truncated
+        ? html`<div class="text-[var(--color-status-warn)]">older terminal failures omitted by server limit ${queue.recent_failed_receipt_limit}</div>`
+        : null}
+      ${queue.read_errors.map((error, index) => html`
+        <div key=${`${error.kind}:${index}`} class="text-[var(--color-status-err)]">
+          <strong>${enumLabel(error.kind)}</strong>${error.path ? ` · ${error.path}` : ''}${error.message ? ` · ${error.message}` : ' · details redacted'}
+        </div>
+      `)}
     </div>
   `
 }
@@ -191,10 +296,14 @@ function KeeperRow({ keeper }: { keeper: DashboardKeeperWaitingKeeper }) {
         <div class="flex min-w-0 items-center gap-2">
           <span class="min-w-0 truncate font-mono text-sm text-[var(--color-fg-primary)]">${keeper.keeper_name}</span>
           <${StatusChip} tone=${stateTone(keeper.state)} uppercase=${false}>${enumLabel(keeper.state)}<//>
+          ${keeper.metadata_status === 'queue_only'
+            ? html`<${StatusChip} tone="warn" uppercase=${false}>queue only · metadata missing<//>`
+            : null}
         </div>
         <span class="text-2xs text-[var(--color-fg-muted)]">${keeper.waiting_count.toLocaleString()} rows</span>
       </div>
       <${SourceCounts} counts=${keeper.sources} />
+      <${KeeperQueueSummary} keeper=${keeper} />
       ${keeper.waiting_count_truncated
         ? html`
             <div class="mt-2 text-2xs text-[var(--color-status-warn)]">
@@ -218,7 +327,10 @@ function KeeperRow({ keeper }: { keeper: DashboardKeeperWaitingKeeper }) {
 }
 
 function keeperVisible(keeper: DashboardKeeperWaitingKeeper): boolean {
-  return keeper.waiting_count > 0 || keeper.state !== 'idle'
+  return keeper.waiting_count > 0
+    || keeper.state !== 'idle'
+    || keeper.metadata_status === 'queue_only'
+    || queueHasOperatorEvidence(keeper.chat_queue)
 }
 
 export function KeeperWaitingInventoryPanel({
@@ -226,13 +338,15 @@ export function KeeperWaitingInventoryPanel({
 }: {
   inventory: DashboardKeeperWaitingInventory | null | undefined
 }) {
+  const [globalExpanded, setGlobalExpanded] = useState(false)
   if (!inventory) {
     return html`<div class="text-xs text-[var(--color-fg-muted)]">waiting inventory unavailable</div>`
   }
   const activeKeepers = (inventory.keepers ?? [])
     .filter(keeperVisible)
     .slice(0, 8)
-  const globalRows = (inventory.global_waiting_on ?? []).slice(0, 4)
+  const allGlobalRows = inventory.global_waiting_on
+  const globalRows = globalExpanded ? allGlobalRows : allGlobalRows.slice(0, 4)
   const keeperCount =
     inventory.keeper_count_known === false ? 'unknown' : inventory.keeper_count
   const pendingConfirmCount =
@@ -261,6 +375,11 @@ export function KeeperWaitingInventoryPanel({
             <div class="border-t border-[var(--color-border-subtle)] pt-3">
               <div class="mb-1 text-xs font-medium text-[var(--color-fg-secondary)]">Global waiting</div>
               ${globalRows.map((row, index) => html`<${WaitingRow} key=${`${row.source}:${row.waiting_on}:${index}`} row=${row} />`)}
+              ${allGlobalRows.length > globalRows.length
+                ? html`<button type="button" class="pt-1 text-2xs font-medium text-[var(--color-accent-fg)]" onClick=${() => setGlobalExpanded(true)} data-expand-global-waiting-rows>+${allGlobalRows.length - globalRows.length} more · 전체 보기</button>`
+                : globalExpanded && allGlobalRows.length > 4
+                  ? html`<button type="button" class="pt-1 text-2xs font-medium text-[var(--color-accent-fg)]" onClick=${() => setGlobalExpanded(false)} data-collapse-global-waiting-rows>접기</button>`
+                  : null}
             </div>
           `
         : null}
@@ -299,6 +418,9 @@ function LaneEvidenceCard({ keeper }: { keeper: DashboardKeeperWaitingKeeper }) 
           <div class="flex min-w-0 flex-wrap items-center gap-2">
             <span class="min-w-0 truncate font-mono text-sm font-semibold text-[var(--color-fg-primary)]">${keeper.keeper_name}</span>
             <${StatusChip} tone=${stateTone(keeper.state)} uppercase=${false}>${enumLabel(keeper.state)}<//>
+            ${keeper.metadata_status === 'queue_only'
+              ? html`<${StatusChip} tone="warn" uppercase=${false}>queue only · metadata missing<//>`
+              : null}
           </div>
           <div class="mt-1 text-2xs text-[var(--color-fg-muted)]" title=${laneSummary(keeper)}>
             <span class="font-mono">since ${timeLabel(keeper.since_iso)}</span>
@@ -316,6 +438,7 @@ function LaneEvidenceCard({ keeper }: { keeper: DashboardKeeperWaitingKeeper }) 
       <div class="mt-2">
         <${SourceCounts} counts=${keeper.sources} />
       </div>
+      <${KeeperQueueSummary} keeper=${keeper} />
       ${keeper.waiting_count_truncated
         ? html`
             <div class="mt-2 text-2xs text-[var(--color-status-warn)]">
@@ -345,11 +468,13 @@ export function KeeperLaneInventoryPanel({
 }: {
   inventory: DashboardKeeperWaitingInventory | null | undefined
 }) {
+  const [globalExpanded, setGlobalExpanded] = useState(false)
   if (!inventory) {
     return html`<div class="text-xs text-[var(--color-fg-muted)]">keeper lane evidence unavailable</div>`
   }
   const lanes = inventory.keepers ?? []
-  const globalRows = (inventory.global_waiting_on ?? []).slice(0, 6)
+  const allGlobalRows = inventory.global_waiting_on
+  const globalRows = globalExpanded ? allGlobalRows : allGlobalRows.slice(0, 6)
   const keeperCount =
     inventory.keeper_count_known === false ? 'unknown' : inventory.keeper_count
   const pendingConfirmCount =
@@ -381,6 +506,11 @@ export function KeeperLaneInventoryPanel({
             <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
               <div class="mb-1 text-xs font-medium text-[var(--color-fg-secondary)]">Global lane evidence</div>
               ${globalRows.map((row, index) => html`<${WaitingRow} key=${`${row.source}:${row.waiting_on}:${index}`} row=${row} />`)}
+              ${allGlobalRows.length > globalRows.length
+                ? html`<button type="button" class="pt-1 text-2xs font-medium text-[var(--color-accent-fg)]" onClick=${() => setGlobalExpanded(true)} data-expand-global-lane-rows>+${allGlobalRows.length - globalRows.length} more · 전체 보기</button>`
+                : globalExpanded && allGlobalRows.length > 6
+                  ? html`<button type="button" class="pt-1 text-2xs font-medium text-[var(--color-accent-fg)]" onClick=${() => setGlobalExpanded(false)} data-collapse-global-lane-rows>접기</button>`
+                  : null}
             </div>
           `
         : null}

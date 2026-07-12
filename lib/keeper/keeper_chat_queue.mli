@@ -152,6 +152,7 @@ type enqueue_receipt = {
   revision : int64;
   pending_count : int;
   inflight_count : int;
+  reused : bool;
 }
 
 type configure_report = {
@@ -185,14 +186,21 @@ val configure_persistence : config:Workspace.config -> configure_report
 val persistence_configured : unit -> bool
 
 val persistence_matches_config : config:Workspace.config -> bool
-(** [persistence_matches_config ~config] is [true] when persistence has not yet
-    been configured or when [config] resolves to the exact configured Keeper
-    storage root. A process-lifetime consumer must reject live workspace/root
-    switches when this returns [false]. *)
+(** [persistence_matches_config ~config] is [true] only when persistence is
+    configured for the exact Keeper storage root resolved by [config]. An
+    unconfigured queue is not a match: ingress must not accept work before the
+    durable owner boundary has been installed. A process-lifetime consumer
+    must reject live workspace/root switches when this returns [false]. *)
 
-(** Enqueue only after the receipt-bearing version-3 snapshot commits. *)
+(** Enqueue only after the receipt-bearing version-3 snapshot commits.
+    [idempotency_key], when present, is canonicalized into a private durable
+    fingerprint scoped to the Keeper and typed message source. Replays return
+    the original receipt with [reused=true] without changing the revision. *)
 val enqueue :
-  keeper_name:string -> queued_message -> (enqueue_receipt, mutation_error) result
+  ?idempotency_key:string ->
+  keeper_name:string ->
+  queued_message ->
+  (enqueue_receipt, mutation_error) result
 
 val same_source : message_source -> message_source -> bool
 
@@ -204,11 +212,11 @@ val lease_batch :
   | `Error of mutation_error
   ]
 
-(** Atomically finalize every receipt in the matching lease.  Terminal records
-    retain correlation metadata and normally discard message bodies and
-    attachments. [Transcript_persist_failed] retains the queued message in the
-    owner-only snapshot so a failed transcript write cannot erase its only
-    durable copy; diagnostic projections do not expose that body. *)
+(** Atomically finalize every receipt in the matching lease. Delivered records
+    discard message bodies and attachments. Failed records conservatively
+    retain the queued message in the owner-only snapshot so an exception or
+    unproven transcript write cannot erase its only durable copy; diagnostic
+    projections do not expose that body. *)
 val finalize :
   keeper_name:string ->
   lease_id:string ->

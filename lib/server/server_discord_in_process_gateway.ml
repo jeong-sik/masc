@@ -231,6 +231,17 @@ let finish_discord_stream_reply state ~final_content =
                  log_stream_error "overflow send" state error;
                  Stream_overflow_send_failed error)
 
+let replace_discord_stream_with_terminal state ~content =
+  match finish_discord_stream_reply state ~final_content:content with
+  | Stream_completed -> Ok ()
+  | Stream_not_started ->
+    Result.map
+      (fun (_ : string) -> ())
+      (State.send_message ~channel_id:state.channel_id ~content
+         ~reply_to_message_id:state.reply_to_message_id ())
+  | Stream_final_edit_failed error | Stream_overflow_send_failed error ->
+    Error error
+
 let metadata_opt key = function
   | None -> []
   | Some value ->
@@ -343,6 +354,10 @@ let resolve_binding_for_message ~channel_id ~message_reference_channel_id =
                     },
                     [ ("discord.binding_reference_channel_id", reference_channel_id) ] ))
 
+let discord_thread_provenance_metadata ~channel_id
+    (resolution : State.keeper_binding_resolution) =
+  State.thread_provenance_metadata ~channel_id resolution
+
 let handle_message_create ~dispatch
       ~clock
       ~(channel_id : string) ~(message_id : string)
@@ -373,6 +388,7 @@ let handle_message_create ~dispatch
       ]
       @ resolution_metadata
       @ metadata_opt "discord.guild_id" guild_id
+      @ discord_thread_provenance_metadata ~channel_id resolution
       @ metadata_bool "discord.mentions_bot" mentions_bot
       @ metadata_bool "discord.explicit_mentions_bot" explicit_mentions_bot
       (* Connector-neutral key consumed by the gate recorder: the
@@ -486,17 +502,16 @@ let handle_message_create ~dispatch
           Discord_observability.record_inbound_dispatch
             Discord_observability.Gate_error;
           (match
-             State.send_message ~channel_id ~content:notice
-               ~reply_to_message_id:message_id ()
+             replace_discord_stream_with_terminal stream_reply ~content:notice
            with
-           | Ok _ ->
+           | Ok () ->
              Discord_observability.record_reply
                Discord_observability.Reply_send_ok
            | Error e ->
              Discord_observability.record_reply
                Discord_observability.Reply_send_failed;
              Log.Server.error
-               "discord send accepted-failure notice failed (channel=%s keeper=%s): %s"
+               "discord replace stream with accepted-failure notice failed (channel=%s keeper=%s): %s"
                channel_id keeper_name
                (Format.asprintf "%a" State.pp_send_error e));
           Log.Server.warn
@@ -594,6 +609,7 @@ let on_event ~dispatch ~clock ~base_dir (ev : Gw.gateway_event) =
        trigger to drain pending messages. That feature is dropped in
        the in-process gateway; re-add as a follow-up if needed. *)
     ()
+
   | Gw.Thread_tracked { thread_id; parent_channel_id } ->
     State.register_thread ~thread_id ~parent_channel_id;
     Log.Server.info

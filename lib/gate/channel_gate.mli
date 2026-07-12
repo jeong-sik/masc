@@ -52,6 +52,17 @@ type validation_error = Gate_protocol.validation_error =
   | Empty_idempotency_key
   | Duplicate_message of string
 
+type accepted_failure = Gate_protocol.accepted_failure =
+  { detail : string
+  ; message_id : string
+  ; receipt_id : string option
+  }
+
+type accepted_replay = Gate_protocol.accepted_replay =
+  { message_id : string
+  ; receipt_id : string option
+  }
+
 val validate : inbound_message -> (unit, validation_error) result
 (** Validation plus idempotency gate.  Returns [Ok ()] when the message can proceed.
     Duplicate detection consumes the idempotency key on first success. *)
@@ -84,7 +95,8 @@ val make_dedup_cleanup_consumer : unit -> (module Pulse.Consumer)
 type gate_error = Gate_protocol.gate_error =
   | Validation of validation_error
   | Keeper_error of string
-  | Accepted_keeper_error of string
+  | Accepted_keeper_error of accepted_failure
+  | Accepted_replay of accepted_replay
   | Dispatch_unavailable
   | Internal of string
 
@@ -160,6 +172,11 @@ val outbound_to_json : outbound_message -> Yojson.Safe.t
 
 val error_json : string -> Yojson.Safe.t
 (** [{ok: false, error: "<msg>"}] *)
+
+val gate_error_json : gate_error -> Yojson.Safe.t
+(** Typed public failure envelope. It always states whether the inbound was
+    durably accepted and whether replay is safe. Operator-only failure detail is
+    never copied into this projection. *)
 
 (** {1 Configuration} *)
 

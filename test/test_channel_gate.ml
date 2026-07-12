@@ -158,8 +158,17 @@ let mock_dispatch_error ~channel:_ ~channel_user_id:_ ~channel_user_name:_
 
 let mock_dispatch_accepted_error ~channel:_ ~channel_user_id:_
     ~channel_user_name:_ ~channel_workspace_id:_ ~keeper_name:_
-    ~idempotency_key:_ ~metadata:_ ~content:_ =
-  Gate_protocol.Accepted_keeper_error_result "mock accepted keeper error"
+    ~idempotency_key ~metadata:_ ~content:_ =
+  Gate_protocol.Accepted_keeper_error_result
+    { detail = "mock accepted keeper error"
+    ; message_id = idempotency_key
+    ; receipt_id = Some "chatq_00000000-0000-4000-8000-000000000777"
+    }
+
+let mock_dispatch_raises ~channel:_ ~channel_user_id:_ ~channel_user_name:_
+    ~channel_workspace_id:_ ~keeper_name:_ ~idempotency_key:_ ~metadata:_
+    ~content:_ =
+  failwith "unexpected dispatch exception"
 
 let mock_dispatch_unavailable ~channel:_ ~channel_user_id:_ ~channel_user_name:_
     ~channel_workspace_id:_ ~keeper_name:_ ~idempotency_key:_ ~metadata:_ ~content:_ =
@@ -253,6 +262,18 @@ let test_accepted_keeper_error_retains_idempotency_key () =
   | Error error -> fail (Channel_gate.gate_error_to_string error)
   | Ok _ -> fail "accepted inbound message must retain its idempotency key"
 
+let test_dispatch_exception_releases_preaccept_reservation () =
+  reset_dedup ();
+  let msg = make_message ~idempotency_key:(unique_key "dispatch-raise") () in
+  (match Channel_gate.handle_inbound ~dispatch:mock_dispatch_raises msg with
+   | Error (Channel_gate.Internal _) -> ()
+   | Error _ | Ok _ -> fail "expected typed internal dispatch failure");
+  match Channel_gate.handle_inbound ~dispatch:mock_dispatch_ok msg with
+  | Ok _ -> ()
+  | Error (Channel_gate.Validation (Channel_gate.Duplicate_message _)) ->
+    fail "preaccept exception must release the reservation"
+  | Error error -> fail (Channel_gate.gate_error_to_string error)
+
 let test_inbound_error_notice_policy () =
   check bool "keeper error requires retry notice" true
     (match
@@ -264,7 +285,11 @@ let test_inbound_error_notice_policy () =
   check bool "accepted keeper error requires a non-retry notice" true
     (match
        Channel_gate.inbound_error_notice
-         (Channel_gate.Accepted_keeper_error "private")
+         (Channel_gate.Accepted_keeper_error
+            { detail = "private"
+            ; message_id = "message-1"
+            ; receipt_id = None
+            })
      with
      | Channel_gate.Accepted_failure_notice -> true
      | Channel_gate.Offline_notice | Channel_gate.Retry_notice
@@ -284,6 +309,36 @@ let test_inbound_error_notice_policy () =
      | Channel_gate.No_notice -> true
      | Channel_gate.Offline_notice | Channel_gate.Retry_notice
      | Channel_gate.Accepted_failure_notice -> false)
+
+let test_accepted_replay_has_no_connector_notice () =
+  match
+    Channel_gate.inbound_error_notice
+      (Channel_gate.Accepted_replay
+         { message_id = "message-1"; receipt_id = None })
+  with
+  | Channel_gate.No_notice -> ()
+  | Channel_gate.Offline_notice | Channel_gate.Retry_notice
+  | Channel_gate.Accepted_failure_notice ->
+    fail "accepted replay must not produce another connector message"
+
+let test_gate_error_json_distinguishes_accepted_failure () =
+  let json =
+    Channel_gate.gate_error_json
+      (Channel_gate.Accepted_keeper_error
+         { detail = "/private/storage/path"
+         ; message_id = "message-accepted-1"
+         ; receipt_id = Some "chatq_00000000-0000-4000-8000-000000000778"
+         })
+  in
+  let open Yojson.Safe.Util in
+  check bool "accepted is explicit" true (json |> member "accepted" |> to_bool);
+  check bool "accepted failure is not retryable" false
+    (json |> member "retryable" |> to_bool);
+  check string "message identity is present" "message-accepted-1"
+    (json |> member "message_id" |> to_string);
+  check bool "private operator detail is absent" false
+    (Astring.String.is_infix ~affix:"/private/storage/path"
+       (Yojson.Safe.to_string json))
 
 let test_handle_inbound_unavailable () =
   reset_dedup ();
@@ -476,8 +531,14 @@ let () =
             test_handle_inbound_keeper_error_releases_idempotency_key;
           test_case "accepted keeper error retains idempotency key" `Quick
             test_accepted_keeper_error_retains_idempotency_key;
+          test_case "dispatch exception releases preaccept reservation" `Quick
+            test_dispatch_exception_releases_preaccept_reservation;
           test_case "maps gate errors to connector notices" `Quick
             test_inbound_error_notice_policy;
+          test_case "accepted replay has no connector notice" `Quick
+            test_accepted_replay_has_no_connector_notice;
+          test_case "typed accepted failure envelope" `Quick
+            test_gate_error_json_distinguishes_accepted_failure;
           test_case "returns unavailable" `Quick
             test_handle_inbound_unavailable;
           test_case "validation blocks dispatch" `Quick

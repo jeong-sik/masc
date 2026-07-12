@@ -33,6 +33,23 @@ let test_lookup_unbound_channel_returns_none () =
   check (option string) "no binding => None" None
     (State.keeper_for_channel ~channel_id:"channel-id-with-no-binding")
 
+let test_thread_resolution_emits_exact_provenance_metadata () =
+  let resolution : State.keeper_binding_resolution =
+    { keeper_name = "keeper-a"
+    ; incoming_channel_id = "thread-1"
+    ; bound_channel_id = "parent-1"
+    ; via_parent = true
+    }
+  in
+  let metadata =
+    State.thread_provenance_metadata ~channel_id:"thread-1"
+      resolution
+  in
+  check (option string) "parent channel propagated" (Some "parent-1")
+    (List.assoc_opt "discord.parent_channel_id" metadata);
+  check (option string) "thread id propagated" (Some "thread-1")
+    (List.assoc_opt "discord.thread_id" metadata)
+
 (* ---------------------------------------------------------------- *)
 (* send_error / pp_send_error                                       *)
 (* ---------------------------------------------------------------- *)
@@ -116,6 +133,8 @@ let () =
             test_lookup_whitespace_channel_id
         ; test_case "unbound channel => None" `Quick
             test_lookup_unbound_channel_returns_none
+        ; test_case "thread resolution emits exact provenance" `Quick
+            test_thread_resolution_emits_exact_provenance_metadata
         ] )
     ; ( "send_error"
       , [ test_case "pp Missing_token mentions env var" `Quick

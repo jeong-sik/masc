@@ -1,8 +1,10 @@
 (** Keeper_chat_store — JSONL-based persistence for keeper direct
     messages.
 
-    Each keeper owns an append-only file at
-    [<base_dir>/.masc/keeper_chat/<sanitized-name>.jsonl]. Lines are
+    Each keeper owns an append-only file under the canonical cluster root:
+    [<Workspace.masc_root_dir config>/keeper_chat/<sanitized-name>.jsonl].
+    The default cluster keeps the historical [<base_dir>/.masc/keeper_chat]
+    location; named clusters remain isolated under their own runtime roots. Lines are
     JSON objects of the form
     {v {"role":"user","content":"hello","ts":1774000000.0} v}
 
@@ -129,12 +131,17 @@ type user_message_input =
   { content : string
   ; attachments : attachment list
   ; timestamp : float
+  ; queue_receipt_id : string option
   ; surface : Surface_ref.t option
   ; conversation_id : string option
   ; external_message_id : string option
   ; speaker : speaker option
   ; extra_mentions : Keeper_identity.Keeper_id.t list
   }
+
+type append_once_result =
+  | Appended
+  | Already_present
 
 type chat_message = {
   id : string;
@@ -160,6 +167,10 @@ type chat_message = {
           to decode (reported as a persistence read drop, row kept). *)
   conversation_id : string option;
   external_message_id : string option;
+  queue_receipt_ids : string list;
+      (** Durable queue receipt identities joined to this row. Queue-owned user
+          rows carry one id; their assistant/failure terminal row carries the
+          complete coalesced batch. Empty on direct and legacy rows. *)
   speaker : speaker option;
       (** Present on user lines written since RFC-0223 P1; [None] on
           older lines, tool/assistant lines, and lines whose persisted
@@ -336,6 +347,24 @@ val append_user_message_result :
   ?extra_mentions:Keeper_identity.Keeper_id.t list ->
   unit ->
   (unit, string) result
+
+val append_user_message_once_result :
+  ?config:Workspace.config ->
+  base_dir:string ->
+  keeper_name:string ->
+  content:string ->
+  ?attachments:attachment list ->
+  surface:Surface_ref.t ->
+  ?conversation_id:string ->
+  external_message_id:string ->
+  ?speaker:speaker ->
+  ?extra_mentions:Keeper_identity.Keeper_id.t list ->
+  unit ->
+  (append_once_result, string) result
+(** Durably append one inbound user row unless the same typed surface and
+    external message id are already present. The read-check-append is protected
+    by both the process-local path mutex and a cross-process file lock; success
+    is returned only after fsync. *)
 
 (** [append_user_message ~base_dir ~keeper_name ~content ?attachments
     ?surface ?conversation_id ?external_message_id ?speaker ()] appends one

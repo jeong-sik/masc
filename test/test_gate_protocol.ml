@@ -262,7 +262,8 @@ let test_gate_error_strings () =
     (Gate_protocol.gate_error_to_string (Gate_protocol.Keeper_error "boom"));
   check string "accepted keeper error" "accepted keeper error: boom"
     (Gate_protocol.gate_error_to_string
-       (Gate_protocol.Accepted_keeper_error "boom"));
+       (Gate_protocol.Accepted_keeper_error
+          { detail = "boom"; message_id = "message-1"; receipt_id = None }));
   check string "unavailable" "keeper dispatch unavailable"
     (Gate_protocol.gate_error_to_string Gate_protocol.Dispatch_unavailable);
   check string "internal" "internal error"

@@ -507,6 +507,7 @@ let shell_ir_approval_input
 
 let submit_shell_ir_approval_pending
       ~base_path
+      ?workspace_config
       ~keeper_name
       ?task_id
       ?(goal_ids = [])
@@ -555,6 +556,7 @@ let submit_shell_ir_approval_pending
       ~input
       ~risk_level:Keeper_approval_queue.High
       ~base_path
+      ?workspace_config
       ?task_id
       ~goal_ids
       ~sandbox_target
@@ -1160,6 +1162,7 @@ let handle_tool_execute_typed
                let approval_id =
                  submit_shell_ir_approval_pending
                    ~base_path:root
+                   ~workspace_config:config
                    ~keeper_name:meta.name
                    ?task_id
                    ~goal_ids:meta.active_goal_ids

@@ -13,6 +13,7 @@ import { registerKeeperChatQueueRefresh } from '../../sse-store'
 // keeps showing the last inventory instead of flashing a loading gap every
 // cycle. A plain createAsyncResource would blank the data on each load.
 const toolsResource = createManagedAsyncResource<DashboardToolsResponse>()
+const expectedKeeperChatQueueRevisions = new Map<string, number>()
 
 export const toolsData = computed(() => toolsResource.state.value.data)
 export const toolsError = computed<string | null>(() => toolsResource.state.value.error)
@@ -41,8 +42,50 @@ export const SURFACE_LABELS: Record<SurfaceFilter, string> = {
   internal: '내부',
 }
 
-export async function loadTools() {
-  await toolsResource.load(signal => fetchDashboardTools({ signal }))
+function noteExpectedKeeperChatQueueRevisions(
+  expectedRevisions: ReadonlyMap<string, number>,
+): void {
+  for (const [keeperName, revision] of expectedRevisions) {
+    const previous = expectedKeeperChatQueueRevisions.get(keeperName) ?? -1
+    expectedKeeperChatQueueRevisions.set(keeperName, Math.max(previous, revision))
+  }
+}
+
+function assertExpectedKeeperChatQueueRevisions(
+  data: DashboardToolsResponse,
+  expectedRevisions: ReadonlyMap<string, number>,
+): void {
+  for (const [keeperName, expectedRevision] of expectedRevisions) {
+    const keeper = data.keeper_waiting_inventory?.keepers
+      .find(candidate => candidate.keeper_name === keeperName)
+    const observedRevision = keeper?.chat_queue.revision
+    if (typeof observedRevision !== 'number' || observedRevision < expectedRevision) {
+      throw new Error(
+        `Keeper chat queue projection is stale for ${keeperName}: expected revision ${expectedRevision}, observed ${observedRevision ?? 'missing'}`,
+      )
+    }
+  }
+}
+
+export async function loadTools(): Promise<void> {
+  const expectedAtRequest = new Map(expectedKeeperChatQueueRevisions)
+  const result = await toolsResource.load(async signal => {
+    const data = await fetchDashboardTools({
+      signal,
+      freshKeeperChatQueue: expectedAtRequest.size > 0,
+    })
+    assertExpectedKeeperChatQueueRevisions(data, expectedAtRequest)
+    return data
+  })
+  if (!result) return
+  for (const [keeperName, expectedRevision] of expectedKeeperChatQueueRevisions) {
+    const observedRevision = result.keeper_waiting_inventory?.keepers
+      .find(candidate => candidate.keeper_name === keeperName)
+      ?.chat_queue.revision
+    if (typeof observedRevision === 'number' && observedRevision >= expectedRevision) {
+      expectedKeeperChatQueueRevisions.delete(keeperName)
+    }
+  }
 }
 
 export const KEEPER_WAITING_INVENTORY_REFRESH_MS = 15_000
@@ -74,7 +117,8 @@ export function subscribeToolsAutoRefresh(): () => void {
   }
 }
 
-registerKeeperChatQueueRefresh(() => {
+registerKeeperChatQueueRefresh((expectedRevisions) => {
+  noteExpectedKeeperChatQueueRevisions(expectedRevisions)
   void loadTools()
 })
 

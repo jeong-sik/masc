@@ -538,11 +538,42 @@ function queueSnapshotAgeLabel(generatedAt: string | null | undefined): string {
     : `snapshot clock ahead ${Math.abs(deltaSeconds)}s`
 }
 
-function queueSourceLabel(source: DashboardKeeperChatQueue['active_receipts'][number]['message_source']): string {
+function QueueSourceCoordinate({ label, value }: { label: string; value: string }) {
+  return html`
+    <span class="inline-flex min-w-0 items-center gap-1">
+      <span>${label}</span>
+      <code class="min-w-0 break-all">${value}</code>
+      <${CopyIdButton} value=${value} label=${label} size=${11} />
+    </span>
+  `
+}
+
+function QueueSourceDetails({
+  source,
+}: {
+  source: DashboardKeeperChatQueue['active_receipts'][number]['message_source']
+}) {
   switch (source.kind) {
-    case 'dashboard': return 'dashboard'
-    case 'discord': return `discord #${source.channel_id}`
-    case 'slack': return `slack #${source.channel_id}`
+    case 'dashboard':
+      return html`<span>dashboard</span>`
+    case 'discord':
+      return source.channel_id
+        ? html`<${QueueSourceCoordinate} label="discord channel" value=${source.channel_id} />`
+        : html`<span>discord · route redacted</span>`
+    case 'slack':
+      return html`
+        <span class="inline-flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+          ${source.channel_id
+            ? html`<${QueueSourceCoordinate} label="slack channel" value=${source.channel_id} />`
+            : html`<span>slack · route redacted</span>`}
+          ${source.team_id
+            ? html`<${QueueSourceCoordinate} label="slack team" value=${source.team_id} />`
+            : null}
+          ${source.thread_ts
+            ? html`<${QueueSourceCoordinate} label="slack thread" value=${source.thread_ts} />`
+            : null}
+        </span>
+      `
   }
 }
 
@@ -561,13 +592,16 @@ function QueueReceiptIdentifier({ receiptId }: { receiptId: string }) {
 }
 
 function ServerQueueProjection({
+  keeperName,
   queue,
   generatedAt,
 }: {
+  keeperName: string
   queue: DashboardKeeperChatQueue
   generatedAt?: string | null
 }) {
   const visibleFailedCount = queue.recent_failed_receipts.length
+  const qualifiedRevision = `${keeperName}@${queue.revision}`
   return html`
     <div
       class="mt-2 grid max-h-72 gap-2 overflow-y-auto border-t border-[var(--color-border-subtle)] pt-2"
@@ -577,7 +611,16 @@ function ServerQueueProjection({
       data-server-chat-queue-age=${queueSnapshotAgeLabel(generatedAt)}
     >
       <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-2xs text-[var(--color-fg-muted)]">
-        <span>revision <code>${queue.revision}</code></span>
+        <span class="inline-flex min-w-0 items-center gap-1">
+          <span>revision</span>
+          <code class="min-w-0 break-all">${qualifiedRevision}</code>
+          <${CopyIdButton}
+            value=${qualifiedRevision}
+            label="Keeper queue revision"
+            ariaLabel=${`Keeper queue revision ${qualifiedRevision} 복사`}
+            size=${11}
+          />
+        </span>
         <span>
           generated
           ${generatedAt
@@ -603,7 +646,7 @@ function ServerQueueProjection({
                   <div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                     <strong>${receipt.state === 'pending' ? '서버 대기' : 'Keeper 처리 중'}</strong>
                     <${QueueReceiptIdentifier} receiptId=${receipt.receipt_id} />
-                    <span>${queueSourceLabel(receipt.message_source)}</span>
+                    <${QueueSourceDetails} source=${receipt.message_source} />
                     <span>submitted ${formatDateTimeKo(receipt.submitted_at_iso)}</span>
                   </div>
                   ${receipt.lease_id
@@ -662,7 +705,7 @@ function ServerQueueProjection({
           class="rounded-[var(--r-0)] border border-[var(--danger-20)] bg-[var(--danger-10)] px-2 py-1.5 text-2xs text-[var(--color-status-err)]"
           data-server-chat-queue-read-error=${error.kind}
         >
-          <strong>${error.kind}</strong>${error.path ? ` · ${error.path}` : ''} · ${error.message}
+          <strong>${error.kind}</strong>${error.path ? ` · ${error.path}` : ''}${error.message ? ` · ${error.message}` : ' · details redacted'}
         </div>
       `)}
     </div>
@@ -670,6 +713,7 @@ function ServerQueueProjection({
 }
 
 function ServerQueueStatus({
+  keeperName,
   busy,
   queue,
   projectionError,
@@ -677,6 +721,7 @@ function ServerQueueStatus({
   projectionPresent,
   generatedAt,
 }: {
+  keeperName: string
   busy: boolean
   queue: DashboardKeeperChatQueue | null
   projectionError?: string | null
@@ -733,7 +778,9 @@ function ServerQueueStatus({
         이 값은 브라우저 초안이 아니라 서버의 durable receipt 투영입니다.
         ${projectionError ? html` 최근 갱신 오류: <code>${projectionError}</code>. 표시 수치는 이전 snapshot일 수 있습니다.` : null}
       </div>
-      ${queue ? html`<${ServerQueueProjection} queue=${queue} generatedAt=${generatedAt} />` : null}
+      ${queue
+        ? html`<${ServerQueueProjection} keeperName=${keeperName} queue=${queue} generatedAt=${generatedAt} />`
+        : null}
     </div>
   `
 }
@@ -1062,6 +1109,7 @@ export function KeeperConversationPanel({
 
   const serverQueueStatus = html`
     <${ServerQueueStatus}
+      keeperName=${keeperName}
       busy=${serverBusy}
       queue=${serverQueue}
       projectionError=${toolsProjectionError}

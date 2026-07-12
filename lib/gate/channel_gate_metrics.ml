@@ -6,6 +6,7 @@ type outcome =
   | Duplicate
   | Validation_error of string
   | Keeper_error of string
+  | Accepted_keeper_error of string
   | Dispatch_unavailable
   | Internal_error of string
 
@@ -210,6 +211,7 @@ let outcome_name = function
   | Duplicate -> "duplicate"
   | Validation_error _ -> "validation_error"
   | Keeper_error _ -> "keeper_error"
+  | Accepted_keeper_error _ -> "accepted_keeper_error"
   | Dispatch_unavailable -> "dispatch_unavailable"
   | Internal_error _ -> "internal_error"
 
@@ -256,6 +258,7 @@ let get_or_create_binding acc workspace_id =
 let outcome_error_details = function
   | Validation_error message -> (Ek_validation, message)
   | Keeper_error message -> (Ek_keeper, message)
+  | Accepted_keeper_error message -> (Ek_keeper, message)
   | Dispatch_unavailable ->
       (Ek_dispatch_unavailable, "keeper dispatch unavailable")
   | Internal_error message -> (Ek_internal, message)
@@ -350,6 +353,13 @@ let record_attempt ~channel ~workspace_id ~keeper ~duration_ms outcome =
            | Some binding ->
                update_binding_error_fields binding ~now
                  ~kind:(Ek_keeper) ~message
+           | None -> ())
+      | Accepted_keeper_error message ->
+          acc.keeper_error_count <- acc.keeper_error_count + 1;
+          update_error_fields acc ~now ~kind:Ek_keeper ~message;
+          (match binding with
+           | Some binding ->
+               update_binding_error_fields binding ~now ~kind:Ek_keeper ~message
            | None -> ())
       | Dispatch_unavailable ->
           acc.dispatch_unavailable_count <- acc.dispatch_unavailable_count + 1;

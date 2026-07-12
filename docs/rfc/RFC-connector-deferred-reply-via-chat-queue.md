@@ -87,11 +87,11 @@ Schema `keeper_chat_queue.v3` contains:
   speaker, structured mentions) plus an explicit `queue_owned` or
   `upstream_recorded` ownership decision;
 - lease ID and start time for `Inflight`; and
-- terminal completion/failure metadata. Ordinary terminal receipts discard
-  message bodies and attachments; `Transcript_persist_failed` retains the
-  queued message/provenance in owner-only storage so a failed transcript write
-  cannot erase the only durable copy. The Dashboard projection never emits
-  that retained body.
+- terminal completion/failure metadata. Delivered receipts discard message
+  bodies and attachments. Every failed receipt conservatively retains the
+  queued message/provenance in owner-only storage because an unexpected
+  exception cannot prove that a transcript copy committed. The Dashboard
+  projection never emits that retained body.
 
 The revision domain is capped at JavaScript's exact JSON integer boundary
 (`2^53 - 1`) because the same value crosses the Dashboard JSON/SSE boundary.
@@ -111,7 +111,7 @@ Startup therefore performs one explicit migration transaction:
 1. strictly decode the v1 shape;
 2. mint one receipt for each legacy inflight/pending payload;
 3. replay legacy inflight payloads ahead of pending payloads; and
-4. atomically replace the file with strict v2.
+4. atomically replace the file with strict v3.
 
 After that transaction there is no v1 runtime fallback or dual-write path. A
 malformed v1/v2 file is a load error, not a compatibility success.
@@ -131,8 +131,10 @@ new workspace. Receipts from one BasePath must never appear in another.
 
 The public queue API is intentionally narrow:
 
-- `enqueue` returns the durable receipt, revision, pending count, and inflight
-  count only after commit;
+- `enqueue` returns the durable receipt, revision, pending count, inflight
+  count, and replay marker only after commit. Connector calls include an
+  idempotency key that is persisted as a private SHA-256 fingerprint; a replay
+  returns the original receipt without incrementing the revision;
 - `lease_batch` changes a same-source pending run to `Inflight` atomically;
 - `finalize` commits `Delivered` or `Failed` for the exact lease;
 - `nack` returns the exact lease to `Pending`; and

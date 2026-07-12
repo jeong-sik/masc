@@ -555,6 +555,8 @@ describe('setupSSEReaction reconnect hydration', () => {
     await flushAsyncWork()
 
     expect(refreshQueue).toHaveBeenCalledTimes(1)
+    const expectedRevisions = refreshQueue.mock.calls[0]?.[0] as ReadonlyMap<string, number>
+    expect(Array.from(expectedRevisions.entries())).toEqual([['echo', 5]])
     expect(reconcileKeeperChatReceipts).toHaveBeenCalledTimes(1)
     expect(reconcileKeeperChatReceipts).toHaveBeenCalledWith('echo')
   })

@@ -554,6 +554,21 @@ let resolve_keeper_for_channel ~channel_id =
                         via_parent = true;
                       } )) )
 
+let thread_provenance_metadata ~channel_id
+    (resolution : keeper_binding_resolution) =
+  let parent_channel_id =
+    match parent_channel_of_thread ~channel_id with
+    | Some parent_channel_id -> Some parent_channel_id
+    | None when resolution.via_parent -> Some resolution.bound_channel_id
+    | None -> None
+  in
+  match parent_channel_id with
+  | None -> []
+  | Some parent_channel_id ->
+    [ ("discord.parent_channel_id", parent_channel_id)
+    ; ("discord.thread_id", channel_id)
+    ]
+
 let keeper_for_channel ~channel_id =
   match resolve_keeper_for_channel ~channel_id with
   | None -> None

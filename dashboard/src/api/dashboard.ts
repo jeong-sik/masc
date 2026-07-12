@@ -202,6 +202,7 @@ export {
 
 export {
   parseDashboardKeeperChatQueue,
+  parseDashboardKeeperWaitingInventory,
   parseDashboardKeeperWaitingSource,
   parseDashboardKeeperWaitingState,
 } from './dashboard-tools-prompts'
@@ -227,6 +228,9 @@ export type {
   DashboardScheduledAutomation,
   DashboardKeeperWaitingSource,
   DashboardKeeperWaitingState,
+  DashboardKeeperWaitingMetadataStatus,
+  DashboardKeeperWaitingVisibility,
+  DashboardKeeperWaitingWakeProducer,
   DashboardKeeperChatQueueSource,
   DashboardKeeperChatQueueActiveReceipt,
   DashboardKeeperChatQueueLoadErrorKind,
@@ -242,6 +246,7 @@ export type {
   DashboardKeeperBackgroundKeeper,
   DashboardKeeperBackground,
   DashboardToolsResponse,
+  FetchDashboardToolsOptions,
 } from './dashboard-tools-prompts'
 
 export type {

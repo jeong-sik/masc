@@ -578,39 +578,85 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~submission_owne
     }
   in
   let inbound_transcript_committed = ref false in
+  let inbound_transcript_already_present = ref false in
+  let accepted_failure_marker_written = ref false in
   let persist_inbound_transcript () =
-    match
-      Keeper_chat_store.append_user_message_result
-        ~config
-        ~base_dir:config.Workspace.base_path
-        ~keeper_name
-        ~content:(String.trim content)
-        ~surface
-        ?conversation_id
-        ?external_message_id
-        ~speaker
-        ~extra_mentions
-        ()
-    with
-    | Ok () ->
-      inbound_transcript_committed := true;
-      Keeper_chat_broadcast.chat_appended ~keeper_name ~source:lane ();
-      Ok ()
-    | Error error ->
-      Log.Server.error
-        "channel gate inbound transcript append failed (keeper=%s, lane=%s): %s"
-        keeper_name lane error;
+    match external_message_id with
+    | None ->
       Error
-        (redact_text
-           (Printf.sprintf
-              "The %s message was not accepted because its inbound transcript could not be persisted. Retry after storage health is restored."
-              lane))
+        "validated connector message has no durable external_message_id"
+    | Some external_message_id ->
+      (match
+         Keeper_chat_store.append_user_message_once_result
+           ~config
+           ~base_dir:config.Workspace.base_path
+           ~keeper_name
+           ~content:(String.trim content)
+           ~surface
+           ?conversation_id
+           ~external_message_id
+           ~speaker
+           ~extra_mentions
+           ()
+       with
+       | Ok Keeper_chat_store.Appended ->
+         inbound_transcript_committed := true;
+         Keeper_chat_broadcast.chat_appended ~keeper_name ~source:lane ();
+         Ok ()
+       | Ok Keeper_chat_store.Already_present ->
+         inbound_transcript_committed := true;
+         inbound_transcript_already_present := true;
+         Error "connector message was already durably accepted"
+       | Error error ->
+         Log.Server.error
+           "channel gate inbound transcript append failed (keeper=%s, lane=%s): %s"
+           keeper_name lane error;
+         Error
+           (redact_text
+              (Printf.sprintf
+                 "The %s message was not accepted because its inbound transcript could not be persisted. Retry after storage health is restored."
+                 lane)))
   in
   let keeper_error_result message =
     if !inbound_transcript_committed
-    then Gate_protocol.Accepted_keeper_error_result message
+    then begin
+      if
+        (not !inbound_transcript_already_present)
+        && not !accepted_failure_marker_written
+      then begin
+        accepted_failure_marker_written := true;
+        let public_marker =
+          "This accepted connector turn failed before a durable reply completed. Check the Dashboard receipt before retrying."
+        in
+        (match
+           Keeper_chat_store.append_assistant_message_result ~config
+             ~base_dir:config.Workspace.base_path ~keeper_name
+             ~content:public_marker
+             ~kind:Keeper_chat_store.Row_kind.Transport_failure ~surface
+             ?conversation_id
+             ~stream_lifecycle:
+               [ Keeper_chat_store.Run_started
+               ; Keeper_chat_store.Run_error
+               ]
+             ()
+         with
+         | Ok () ->
+           Keeper_chat_broadcast.chat_appended ~keeper_name ~source:lane
+             ~content:public_marker ()
+         | Error persist_error ->
+           Log.Server.error
+             "channel gate accepted-failure marker append failed (keeper=%s lane=%s): %s"
+             keeper_name lane persist_error)
+      end;
+      Gate_protocol.Accepted_keeper_error_result
+        { detail = message
+        ; message_id = idempotency_key
+        ; receipt_id = None
+        }
+    end
     else Gate_protocol.Keeper_error_result message
   in
+  try
   let args =
     `Assoc [
       ("name", `String keeper_name);
@@ -671,7 +717,7 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~submission_owne
          admission reports Busy. This includes a receipt committed or leased
          after any outer observation but before the turn slot was acquired. *)
       (match
-         Keeper_chat_queue.enqueue ~keeper_name
+         Keeper_chat_queue.enqueue ~idempotency_key ~keeper_name
            { Keeper_chat_queue.content = String.trim content
            ; user_blocks = []
            ; attachments = []
@@ -681,6 +727,8 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~submission_owne
            ; transcript_ownership = Keeper_chat_queue.Queue_owned
            }
        with
+       | Ok receipt when receipt.reused ->
+         `Already_accepted receipt
        | Ok receipt -> `Queued_to_chat_lane (admission_rejection, receipt)
        | Error error ->
          Log.Server.error
@@ -711,7 +759,11 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~submission_owne
     | `Busy admission_rejection ->
       defer_to_existing_work admission_rejection
   in
-  match dispatch_result with
+  if !inbound_transcript_already_present
+  then
+    Gate_protocol.Duplicate_accepted_result
+      { message_id = idempotency_key; receipt_id = None }
+  else match dispatch_result with
   | `Inbound_transcript_error message ->
     keeper_error_result message
   | `Async_ack (in_flight, Some result) when Tool_result.is_success result ->
@@ -796,6 +848,13 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~submission_owne
         ; stats
         ; message_request = Some message_request
         }
+  | `Already_accepted receipt ->
+      Gate_protocol.Duplicate_accepted_result
+        { message_id = idempotency_key
+        ; receipt_id =
+            Some
+              (Keeper_chat_queue.Receipt_id.to_string receipt.receipt_id)
+        }
   | `Chat_queue_error error ->
       keeper_error_result
         (redact_text
@@ -842,8 +901,21 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~submission_owne
       if !inbound_transcript_committed
       then
         Gate_protocol.Accepted_keeper_error_result
-          "The inbound message was recorded, but no Keeper turn result was produced. Check the Keeper dashboard before sending another message."
+          { detail =
+              "The inbound message was recorded, but no Keeper turn result was produced. Check the Keeper dashboard before sending another message."
+          ; message_id = idempotency_key
+          ; receipt_id = None
+          }
       else Gate_protocol.Unavailable_result
+  with
+  | Eio.Cancel.Cancelled _ as exception_ -> raise exception_
+  | exception_ ->
+    Log.Server.error
+      "channel gate dispatch crashed after acceptance boundary (keeper=%s lane=%s accepted=%b): %s"
+      keeper_name lane !inbound_transcript_committed
+      (Printexc.to_string exception_);
+    keeper_error_result
+      "The Keeper dispatch failed unexpectedly. Check the Keeper dashboard before taking further action."
 
 (* [connector_kind] is a required labelled argument (not optional): these
    wrappers are partially applied to produce a [Channel_gate.dispatch_fn] /

@@ -519,6 +519,7 @@ let create_entry
          Keeper_continuation_channel.unrouted "no originating connector")
       ~lane_policy
       ~audit_base_path
+      ~audit_cluster_name
       ~resolver
       ~on_resolution
       ()
@@ -557,6 +558,7 @@ let create_entry
   ; lane_policy
   ; continuation_channel
   ; audit_base_path
+  ; audit_cluster_name
   ; resolver
   ; on_resolution
   ; context_summary = None
@@ -1140,6 +1142,7 @@ let submit_and_await
       ~input
       ~risk_level
       ~base_path
+      ?workspace_config
       ?turn_id
       ?task_id
       ?goal_id
@@ -1159,6 +1162,12 @@ let submit_and_await
   : Agent_sdk.Hooks.approval_decision
   =
   let id = generate_id () in
+  let audit_cluster_name =
+    match workspace_config with
+    | Some config -> config.Workspace.backend_config.cluster_name
+    | None ->
+      (Workspace_utils.default_config base_path).Workspace.backend_config.cluster_name
+  in
   let promise, resolver = Eio.Promise.create () in
   let entry =
     create_entry
@@ -1181,6 +1190,7 @@ let submit_and_await
       ?continuation_channel
       ~lane_policy:Blocking
       ~audit_base_path:base_path
+      ~audit_cluster_name
       ~resolver:(Some resolver)
       ~on_resolution:None
       ()
@@ -1299,6 +1309,7 @@ let submit_pending
       ~input
       ~risk_level
       ~base_path
+      ?workspace_config
       ?turn_id
       ?task_id
       ?goal_id
@@ -1317,6 +1328,12 @@ let submit_pending
   : string
   =
   let action_key = action_key_of_input ~tool_name ~input in
+  let audit_cluster_name =
+    match workspace_config with
+    | Some config -> config.Workspace.backend_config.cluster_name
+    | None ->
+      (Workspace_utils.default_config base_path).Workspace.backend_config.cluster_name
+  in
   let input_hash = normalized_input_hash input in
   let sandbox_target =
     match nonempty_string_opt sandbox_target with
@@ -1361,6 +1378,7 @@ let submit_pending
           ?continuation_channel
           ~lane_policy
           ~audit_base_path:base_path
+          ~audit_cluster_name
           ~resolver:None
           ~on_resolution:(Some on_resolution)
           ()

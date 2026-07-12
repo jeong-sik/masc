@@ -173,6 +173,7 @@ type enqueue_receipt = {
   revision : int64;
   pending_count : int;
   inflight_count : int;
+  reused : bool;
 }
 
 type configure_report = {
@@ -199,6 +200,7 @@ type stored_state =
 
 type stored_receipt = {
   receipt_id : Receipt_id.t;
+  dedupe_fingerprint : string option;
   state : stored_state;
 }
 
@@ -465,17 +467,17 @@ let validate_transcript_context_for_source
     message.transcript_ownership
   with
   | Dashboard, None, Queue_owned -> Ok ()
-  | Dashboard, Some context, (Queue_owned | Upstream_recorded) ->
+  | Dashboard, Some context, Queue_owned ->
     (match context.surface, context.speaker.speaker_authority with
      | Surface_ref.Dashboard _, Keeper_chat_store.Owner -> Ok ()
      | _ ->
        Error
          "dashboard chat queue transcript context must use Dashboard surface and Owner speaker")
-  | Dashboard, None, Upstream_recorded ->
+  | Dashboard, (None | Some _), Upstream_recorded ->
     Error "dashboard chat queue receipts cannot be upstream-recorded"
-  | (Discord _ | Slack _), None, Queue_owned ->
-    Error "queue-owned connector receipt requires transcript_context"
-  | (Discord _ | Slack _), None, Upstream_recorded -> Ok ()
+  | (Discord _ | Slack _), None, (Queue_owned | Upstream_recorded) ->
+    Error
+      "connector receipt requires exact transcript_context for either ownership decision"
   | Discord { channel_id; user_id }, Some context,
     (Queue_owned | Upstream_recorded) ->
     (match context.surface with
@@ -650,13 +652,18 @@ let required_transcript_ownership json _source _context =
   Result.bind (required_string json "transcript_ownership")
     transcript_ownership_of_string
 
-let legacy_transcript_ownership _json source transcript_context =
-  match source, transcript_context with
-  | Dashboard, _ -> Ok Queue_owned
-  | (Discord _ | Slack _), Some _ -> Ok Queue_owned
-  | (Discord _ | Slack _), None ->
-    Error
-      "legacy active connector receipt has ambiguous transcript ownership; explicitly reconcile it as queue_owned or upstream_recorded before queue consumption"
+let legacy_transcript_ownership json source _transcript_context =
+  match source with
+  | Dashboard ->
+    (match Json_util.assoc_member_opt "transcript_ownership" json with
+     | None -> Ok Queue_owned
+     | Some _ -> required_transcript_ownership json source None)
+  | Discord _ | Slack _ ->
+    (match Json_util.assoc_member_opt "transcript_ownership" json with
+     | None ->
+       Error
+         "legacy active connector receipt requires an explicit transcript_ownership and exact transcript_context before queue consumption"
+     | Some _ -> required_transcript_ownership json source None)
 
 let queued_message_of_yojson json =
   queued_message_of_yojson_with_source_and_ownership source_of_yojson
@@ -764,6 +771,9 @@ let state_to_yojson = function
 let stored_receipt_to_yojson receipt =
   let fields =
     [ "receipt_id", `String (Receipt_id.to_string receipt.receipt_id)
+    ; ( "dedupe_fingerprint"
+      , Option.fold ~none:`Null ~some:(fun value -> `String value)
+          receipt.dedupe_fingerprint )
     ; "state", state_to_yojson receipt.state
     ]
   in
@@ -820,28 +830,43 @@ let parse_receipt_id json =
   | Error _ as error -> error
   | Ok value -> Receipt_id.of_string value
 
+let optional_dedupe_fingerprint json =
+  match optional_string json "dedupe_fingerprint" with
+  | Error _ as error -> error
+  | Ok None -> Ok None
+  | Ok (Some value) ->
+    let value = String.trim value in
+    if String.length value = 64
+       && String.for_all
+            (function
+              | '0' .. '9' | 'a' .. 'f' -> true
+              | _ -> false)
+            value
+    then Ok (Some value)
+    else
+      Error
+        "chat queue dedupe_fingerprint must be a lowercase SHA-256 hex value"
+
 let reject_terminal_message json =
   match Json_util.assoc_member_opt "message" json with
   | None -> Ok ()
   | Some _ -> Error "terminal chat queue receipts must not retain message bodies"
 
-let retained_failed_message ~message_parser ~kind json =
-  match Json_util.assoc_member_opt "message" json, kind with
-  | None, _ -> Ok None
-  | Some message_json, Transcript_persist_failed ->
-    Result.map Option.some (message_parser message_json)
-  | Some _,
-    ( Turn_failed | Timed_out | No_visible_reply | Connector_unavailable
-    | Delivery_failed | Cancelled | Internal_error ) ->
-    Error
-      "only transcript_persist_failed terminal receipts may retain their queued message"
+let retained_failed_message ~message_parser json =
+  match Json_util.assoc_member_opt "message" json with
+  | None -> Ok None
+  | Some message_json -> Result.map Option.some (message_parser message_json)
 
 let stored_receipt_of_yojson ~message_parser json =
   match json with
   | `Assoc _ ->
-    (match parse_receipt_id json, required_member json "state" with
-     | Error error, _ | _, Error error -> Error error
-     | Ok receipt_id, Ok state_json ->
+    (match
+       parse_receipt_id json,
+       optional_dedupe_fingerprint json,
+       required_member json "state"
+     with
+     | Error error, _, _ | _, Error error, _ | _, _, Error error -> Error error
+     | Ok receipt_id, Ok dedupe_fingerprint, Ok state_json ->
        (match required_string state_json "kind" with
         | Error _ as error -> error
         | Ok "pending" ->
@@ -849,7 +874,8 @@ let stored_receipt_of_yojson ~message_parser json =
            | Error _ as error -> error
            | Ok message_json ->
              Result.map
-               (fun message -> { receipt_id; state = Stored_pending message })
+               (fun message ->
+                  { receipt_id; dedupe_fingerprint; state = Stored_pending message })
                (message_parser message_json))
         | Ok "inflight" ->
           (match
@@ -862,6 +888,7 @@ let stored_receipt_of_yojson ~message_parser json =
              Result.map
                (fun message ->
                   { receipt_id
+                  ; dedupe_fingerprint
                   ; state = Stored_inflight { lease_id; started_at; message }
                   })
                (message_parser message_json)
@@ -875,7 +902,11 @@ let stored_receipt_of_yojson ~message_parser json =
              reject_terminal_message json
            with
            | Ok completed_at, Ok outcome_ref, Ok () ->
-             Ok { receipt_id; state = Stored_delivered { completed_at; outcome_ref } }
+             Ok
+               { receipt_id
+               ; dedupe_fingerprint
+               ; state = Stored_delivered { completed_at; outcome_ref }
+               }
            | Error error, _, _ | _, Error error, _ | _, _, Error error -> Error error)
         | Ok "failed" ->
           (match
@@ -890,6 +921,7 @@ let stored_receipt_of_yojson ~message_parser json =
                Result.map
                  (fun retained_message ->
                     { receipt_id
+                    ; dedupe_fingerprint
                     ; state =
                         Stored_failed
                           { failure =
@@ -897,7 +929,7 @@ let stored_receipt_of_yojson ~message_parser json =
                           ; retained_message
                           }
                     })
-                 (retained_failed_message ~message_parser ~kind json))
+                 (retained_failed_message ~message_parser json))
            | Ok _, Ok _, Ok _, Ok _ ->
              Error "failed chat queue receipt detail must be non-empty"
            | Error error, _, _, _
@@ -911,6 +943,7 @@ let parse_receipt_list ~message_parser json =
   match json with
   | `List values ->
     let seen = Hashtbl.create (List.length values) in
+    let seen_dedupe = Hashtbl.create (List.length values) in
     let rec loop seen acc = function
       | [] -> Ok (List.rev acc)
       | value :: rest ->
@@ -920,9 +953,19 @@ let parse_receipt_list ~message_parser json =
            let id = Receipt_id.to_string receipt.receipt_id in
            if Hashtbl.mem seen id
            then Error (Printf.sprintf "duplicate chat queue receipt_id: %s" id)
-           else (
-             Hashtbl.add seen id ();
-             loop seen (receipt :: acc) rest))
+           else
+             (match receipt.dedupe_fingerprint with
+              | Some fingerprint when Hashtbl.mem seen_dedupe fingerprint ->
+                Error
+                  (Printf.sprintf
+                     "duplicate chat queue dedupe_fingerprint: %s"
+                     fingerprint)
+              | fingerprint ->
+                Hashtbl.add seen id ();
+                Option.iter
+                  (fun value -> Hashtbl.add seen_dedupe value ())
+                  fingerprint;
+                loop seen (receipt :: acc) rest))
     in
     loop seen [] values
   | _ -> Error "chat queue receipts must be an array"
@@ -995,7 +1038,10 @@ let migrate_v1_to_v3 path json =
     let receipts =
       List.map
         (fun message ->
-           { receipt_id = Receipt_id.generate (); state = Stored_pending message })
+           { receipt_id = Receipt_id.generate ()
+           ; dedupe_fingerprint = None
+           ; state = Stored_pending message
+           })
         messages
     in
     let revision = 1L in
@@ -1086,7 +1132,12 @@ let message_json_has_ambiguous_legacy_connector (json : Yojson.Safe.t) =
       | None | Some `Null -> true
       | Some _ -> false
     in
-    context_absent
+    let ownership_absent =
+      match List.assoc_opt "transcript_ownership" fields with
+      | None | Some `Null -> true
+      | Some _ -> false
+    in
+    (context_absent || ownership_absent)
     && (match List.assoc_opt "source" fields with
         | Some source -> source_json_is_connector source
         | None -> false)
@@ -1156,7 +1207,7 @@ let load_snapshot ~keepers_dir ~keeper_name =
            then
              Error
                (load_error Migration_failed ~path
-                  "legacy v2 contains active connector receipts without a transcript ownership decision; reconcile each as queue_owned or upstream_recorded before startup")
+                  "legacy v2 contains active connector receipts without both an exact transcript_context and explicit transcript_ownership; reconcile each before startup")
            else
              (match
                 parse_snapshot
@@ -1173,7 +1224,7 @@ let load_snapshot ~keepers_dir ~keeper_name =
            then
              Error
                (load_error Migration_failed ~path
-                  "legacy v1 contains active connector messages without a transcript ownership decision; reconcile them before startup")
+                  "legacy v1 contains active connector messages without both an exact transcript_context and explicit transcript_ownership; reconcile them before startup")
            else
            (match migrate_v1_to_v3 path json with
             | Ok (revision, receipts) ->
@@ -1220,17 +1271,14 @@ let persistence_configured () = Option.is_some (Atomic.get persistence_keepers_d
 
 let persistence_matches_config ~config =
   match Atomic.get persistence_keepers_dir with
-  | None -> true
+  | None -> false
   | Some configured_dir ->
     String.equal configured_dir (Workspace.keepers_runtime_dir config)
 
 let first_snapshot_error entry =
   match entry.load_errors with
   | error :: _ -> Some error
-  | [] ->
-    (match Atomic.get global_load_errors with
-     | error :: _ -> Some error
-     | [] -> None)
+  | [] -> None
 
 let mutation_entry ~keeper_name ~create =
   match Atomic.get persistence_keepers_dir with
@@ -1290,11 +1338,57 @@ let commit (entry : queue_entry) ~path receipts =
       entry.revision <- before_revision;
       raise exception_
 
-let enqueue ~keeper_name message =
+let dedupe_source_scope = function
+  | Dashboard -> `Assoc [ "kind", `String "dashboard" ]
+  | Discord { channel_id; user_id } ->
+    `Assoc
+      [ "kind", `String "discord"
+      ; "channel_id", `String channel_id
+      ; "user_id", `String user_id
+      ]
+  | Slack { channel_id; user_id; team_id; thread_ts; _ } ->
+    `Assoc
+      [ "kind", `String "slack"
+      ; "channel_id", `String channel_id
+      ; "user_id", `String user_id
+      ; ( "team_id"
+        , Option.fold ~none:`Null ~some:(fun value -> `String value) team_id )
+      ; ( "thread_ts"
+        , Option.fold ~none:`Null ~some:(fun value -> `String value) thread_ts )
+      ]
+
+let dedupe_fingerprint ~keeper_name ~source idempotency_key =
+  let idempotency_key = String.trim idempotency_key in
+  if idempotency_key = ""
+  then Error "idempotency_key must be non-empty when present"
+  else if not (String.is_valid_utf_8 idempotency_key)
+  then Error "idempotency_key contains malformed UTF-8"
+  else
+    let canonical =
+      `Assoc
+        [ "keeper_name", `String keeper_name
+        ; "source", dedupe_source_scope source
+        ; "idempotency_key", `String idempotency_key
+        ]
+      |> Yojson.Safe.to_string
+    in
+    Ok (Digestif.SHA256.(digest_string canonical |> to_hex))
+
+let enqueue ?idempotency_key ~keeper_name message =
   let receipt_id = Receipt_id.generate () in
   match canonical_queued_message message with
   | Error message -> Error (Invalid_input message)
   | Ok message ->
+  let dedupe_fingerprint =
+    match idempotency_key with
+    | None -> Ok None
+    | Some key ->
+      Result.map Option.some
+        (dedupe_fingerprint ~keeper_name ~source:message.source key)
+  in
+  (match dedupe_fingerprint with
+  | Error message -> Error (Invalid_input message)
+  | Ok dedupe_fingerprint ->
   match mutation_entry ~keeper_name ~create:true with
   | Error _ as error -> error
   | Ok (_, _, None) ->
@@ -1302,23 +1396,45 @@ let enqueue ~keeper_name message =
   | Ok (_, path, Some entry) ->
     let result =
       with_entry_lock entry (fun () ->
-          let receipt = { receipt_id; state = Stored_pending message } in
-          let receipts = entry.receipts @ [ receipt ] in
-          match commit entry ~path receipts with
-          | Error _ as error -> error
-          | Ok revision ->
+          let existing =
+            Option.bind dedupe_fingerprint (fun fingerprint ->
+                List.find_opt
+                  (fun receipt ->
+                     Option.equal String.equal receipt.dedupe_fingerprint
+                       (Some fingerprint))
+                  entry.receipts)
+          in
+          match existing with
+          | Some existing ->
             Ok
-              { receipt_id
-              ; revision
-              ; pending_count = List.length (pending_receipts receipts)
-              ; inflight_count = List.length (inflight_receipts receipts)
-              })
+              { receipt_id = existing.receipt_id
+              ; revision = entry.revision
+              ; pending_count = List.length (pending_receipts entry.receipts)
+              ; inflight_count = List.length (inflight_receipts entry.receipts)
+              ; reused = true
+              }
+          | None ->
+            let receipt =
+              { receipt_id; dedupe_fingerprint; state = Stored_pending message }
+            in
+            let receipts = entry.receipts @ [ receipt ] in
+            (match commit entry ~path receipts with
+             | Error _ as error -> error
+             | Ok revision ->
+               Ok
+                 { receipt_id
+                 ; revision
+                 ; pending_count = List.length (pending_receipts receipts)
+                 ; inflight_count = List.length (inflight_receipts receipts)
+                 ; reused = false
+                 }))
     in
     (match result with
-     | Ok receipt ->
+     | Ok receipt when not receipt.reused ->
        notify_transition ~keeper_name ~revision:receipt.revision;
        Ok receipt
-     | Error _ as error -> error)
+     | Ok receipt -> Ok receipt
+     | Error _ as error -> error))
 
 let lease_id () =
   "lease_"
@@ -1460,15 +1576,11 @@ let finalize ~keeper_name ~lease_id ~outcome =
                    | Stored_inflight current when String.equal current.lease_id lease_id ->
                      let state =
                        match terminal_state with
-                       | Stored_failed
-                           ({ failure =
-                                { kind = Transcript_persist_failed; _ }
-                            ; _
-                            } as failed) ->
+                       | Stored_failed failed ->
                          Stored_failed
                            { failed with retained_message = Some current.message }
                        | Stored_pending _ | Stored_inflight _
-                       | Stored_delivered _ | Stored_failed _ -> terminal_state
+                       | Stored_delivered _ -> terminal_state
                      in
                      { receipt with state }
                    | Stored_pending _ | Stored_inflight _

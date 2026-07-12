@@ -2006,7 +2006,15 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
         ; body = err
         ; queued_outcome
         } ->
-        let err = redact_text err in
+        let err =
+          match queued_outcome with
+          | Some (Failed { kind = Transcript_persist_failed; _ }) ->
+            "The queued response could not be durably recorded. Check the Keeper queue receipt in the Dashboard; internal storage detail is available to operators only."
+          | Some (Failed { kind = Stream_projection_failed; _ }) ->
+            "The queued response reached an internal projection failure. Check the Keeper queue receipt in the Dashboard."
+          | Some (Failed _ | Delivered _ | Deferred _) | None ->
+            redact_text err
+        in
         publish_terminal ~status:(Request_stream status) ~message:err ();
         Keeper_chat_events.publish events Text_message_end;
         Keeper_chat_events.publish events (Event_error { message = err });

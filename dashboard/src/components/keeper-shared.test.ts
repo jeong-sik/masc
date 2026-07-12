@@ -1072,7 +1072,7 @@ describe('KeeperConversationPanel', () => {
                 {
                   receipt_id: 'chatq_00000000-0000-4000-8000-000000000022',
                   queue_index: 0,
-                  message_source: { kind: 'slack', channel_id: 'C1', user_id: 'U1', team_id: null, thread_ts: null },
+                  message_source: { kind: 'slack', channel_id: 'C1', user_id: 'U1', team_id: 'T1', thread_ts: '123.456' },
                   content_length: 18,
                   user_block_count: 1,
                   attachment_count: 0,
@@ -1120,7 +1120,12 @@ describe('KeeperConversationPanel', () => {
     await waitFor(() => {
       expect(container.querySelectorAll('[data-server-chat-queue-active-receipt]')).toHaveLength(2)
       expect(container.querySelector('[data-server-chat-queue-active-receipt="chatq_00000000-0000-4000-8000-000000000021"]')?.textContent).toContain('dashboard')
-      expect(container.querySelector('[data-server-chat-queue-active-receipt="chatq_00000000-0000-4000-8000-000000000022"]')?.textContent).toContain('slack #C1')
+      const slackReceipt = container.querySelector('[data-server-chat-queue-active-receipt="chatq_00000000-0000-4000-8000-000000000022"]')
+      expect(slackReceipt?.textContent).toContain('slack channelC1')
+      expect(slackReceipt?.textContent).toContain('slack teamT1')
+      expect(slackReceipt?.textContent).toContain('slack thread123.456')
+      expect(slackReceipt?.querySelector('[aria-label="slack team 복사"]')).not.toBeNull()
+      expect(slackReceipt?.querySelector('[aria-label="slack thread 복사"]')).not.toBeNull()
       expect(container.querySelectorAll('[data-server-chat-queue-failed-receipt]')).toHaveLength(2)
       const failedSummary = container.querySelector('[data-server-chat-queue-recent-failed]')
       expect(failedSummary?.getAttribute('data-server-chat-queue-recent-failed-count')).toBe('3')
@@ -1131,6 +1136,8 @@ describe('KeeperConversationPanel', () => {
       expect(container.querySelector('[data-server-chat-queue-age-label]')?.textContent).toBe('snapshot age 90s')
       expect(container.querySelector('[data-server-chat-queue-projection-detail]')?.getAttribute('data-server-chat-queue-generated-at')).toBe('2026-07-12T00:00:00Z')
       expect(container.querySelector('[aria-label="큐 receipt chatq_00000000-0000-4000-8000-000000000021 복사"]')).not.toBeNull()
+      expect(container.textContent).toContain('sangsu@42')
+      expect(container.querySelector('[aria-label="Keeper queue revision sangsu@42 복사"]')).not.toBeNull()
     })
   })
 

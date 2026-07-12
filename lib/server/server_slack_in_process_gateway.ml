@@ -135,6 +135,8 @@ let metadata_opt key = function
 
 let metadata_bool key value = [ (key, string_of_bool value) ]
 
+let slack_team_provenance_metadata = State.team_provenance_metadata
+
 (* Slack threads share the parent channel id, so the conversation id is keyed
    on the channel alone (unlike Discord's guild:channel). Consumed by the gate
    recorder to thread the persisted user line. *)
@@ -261,12 +263,23 @@ let finish_slack_stream_reply ~clock state ~final_content =
            log_stream_error "overflow send" state error;
            Stream_overflow_send_failed error)
 
+let replace_slack_stream_with_terminal ~clock state ~content =
+  match finish_slack_stream_reply ~clock state ~final_content:content with
+  | Stream_completed -> Ok ()
+  | Stream_not_started ->
+    Result.map
+      (fun (_ : string) -> ())
+      (State.send_message ~clock ~channel_id:state.channel_id ~content
+         ~reply_to_message_id:state.reply_to_thread_ts ())
+  | Stream_final_edit_failed error | Stream_overflow_send_failed error ->
+    Error error
+
 (* ---------------------------------------------------------------- *)
 (* Inbound delivery                                                 *)
 (* ---------------------------------------------------------------- *)
 
-let handle_inbound ~dispatch ~clock ~channel_id ~thread_ts ~user_id ~user_name
-    ~text ~ts ~mentions_bot ~is_app_mention =
+let handle_inbound ~dispatch ~clock ~team_id ~channel_id ~thread_ts ~user_id
+    ~user_name ~text ~ts ~mentions_bot ~is_app_mention =
   match State.resolve_keeper_for_channel ~channel_id with
   | None ->
     (* No binding for this channel — drop quietly. The bot may sit in channels
@@ -288,6 +301,7 @@ let handle_inbound ~dispatch ~clock ~channel_id ~thread_ts ~user_id ~user_name
       ; ("slack.bound_channel_id", resolution.State.bound_channel_id)
       ; ("slack.binding_via_parent", string_of_bool resolution.State.via_parent)
       ]
+      @ slack_team_provenance_metadata team_id
       @ metadata_opt "slack.thread_ts" thread_ts
       @ metadata_bool "slack.mentions_bot" mentions_bot
       @ metadata_bool "slack.is_app_mention" is_app_mention
@@ -375,16 +389,15 @@ let handle_inbound ~dispatch ~clock ~channel_id ~thread_ts ~user_id ~user_name
          Slack_observability.record_inbound_dispatch
            Slack_observability.Gate_error;
          (match
-            State.send_message ~clock ~channel_id ~content:notice
-              ~reply_to_message_id:reply_to_thread_ts ()
+            replace_slack_stream_with_terminal ~clock stream_reply ~content:notice
           with
-          | Ok _ ->
+          | Ok () ->
             Slack_observability.record_reply Slack_observability.Reply_send_ok
           | Error e ->
             Slack_observability.record_reply
               Slack_observability.Reply_send_failed;
             Log.Server.error
-              "slack send accepted-failure notice failed (channel=%s keeper=%s): %s"
+              "slack replace stream with accepted-failure notice failed (channel=%s keeper=%s): %s"
               channel_id keeper_name
               (Format.asprintf "%a" State.pp_send_error e));
          Log.Server.warn
@@ -436,7 +449,7 @@ let handle_inbound ~dispatch ~clock ~channel_id ~thread_ts ~user_id ~user_name
            Slack_observability.record_reply
              Slack_observability.Reply_send_failed)
 
-let on_event ~dispatch ~clock (ev : Gw.slack_event) =
+let on_event ~dispatch ~clock ~team_id (ev : Gw.slack_event) =
   match ev with
   | Gw.Message_create
       { channel_id; thread_ts; user_id; user_name; text; ts; mentions_bot
@@ -451,12 +464,12 @@ let on_event ~dispatch ~clock (ev : Gw.slack_event) =
     | None ->
       Slack_observability.record_gateway_event
         ~route:Slack_observability.Triggered Slack_observability.Message_create;
-      handle_inbound ~dispatch ~clock ~channel_id ~thread_ts ~user_id ~user_name
-        ~text ~ts ~mentions_bot ~is_app_mention:false)
+      handle_inbound ~dispatch ~clock ~team_id ~channel_id ~thread_ts ~user_id
+        ~user_name ~text ~ts ~mentions_bot ~is_app_mention:false)
   | Gw.App_mention { channel_id; thread_ts; user_id; text; ts } ->
     Slack_observability.record_gateway_event ~route:Slack_observability.Triggered
       Slack_observability.App_mention;
-    handle_inbound ~dispatch ~clock ~channel_id ~thread_ts ~user_id
+    handle_inbound ~dispatch ~clock ~team_id ~channel_id ~thread_ts ~user_id
       ~user_name:None ~text ~ts ~mentions_bot:true ~is_app_mention:true
   | Gw.Reaction_added _ ->
     (* Ambient this pass: reactions are not turn-starters (RFC-0317). *)
@@ -495,26 +508,26 @@ let start ~sw ~env ~state =
           without it, [app_mention] events still trigger (a mention by
           construction); only plain-message mention detection on the [message]
           event degrades. *)
-       let bot_user_id =
+       let bot_user_id, team_id =
          match Env_config_slack.bot_token_opt () with
          | None ->
            Log.Server.warn
              "RFC-0317: SLACK_BOT_TOKEN unset; Slack plain-message mention \
               detection disabled (app_mention still triggers)";
-           None
+           None, None
          | Some bot_token -> (
            match Slack_rest_client.auth_test ~clock ~token:bot_token () with
-           | Ok { user_id; team_id = _ } ->
+           | Ok { user_id; team_id } ->
              State.record_ready ~bot_user_id:user_id;
              Log.Server.info "RFC-0317: Slack auth.test ok (bot_user_id=%s)"
                user_id;
-             Some user_id
+             Some user_id, team_id
            | Error e ->
              Log.Server.warn
                "RFC-0317: Slack auth.test failed (%s); proceeding without \
                 bot_user_id"
                (Format.asprintf "%a" Slack_rest_client.pp_error e);
-             None)
+             None, None)
        in
        State.set_trigger_policy policy;
        let dispatch =
@@ -538,7 +551,7 @@ let start ~sw ~env ~state =
          try
            Slack_socket_client.run ~sw ~env ~bot_user_id ~app_token
              ~trigger_policy:policy
-             ~on_event:(fun ev -> on_event ~dispatch ~clock ev)
+             ~on_event:(fun ev -> on_event ~dispatch ~clock ~team_id ev)
              ()
          with
          | Eio.Cancel.Cancelled _ as e -> raise e

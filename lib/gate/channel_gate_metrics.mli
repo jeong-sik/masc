@@ -12,6 +12,7 @@ type outcome =
   | Duplicate
   | Validation_error of string
   | Keeper_error of string
+  | Accepted_keeper_error of string
   | Dispatch_unavailable
   | Internal_error of string
 

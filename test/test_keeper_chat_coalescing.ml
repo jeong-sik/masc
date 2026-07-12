@@ -526,6 +526,83 @@ let test_v2_active_connector_requires_ownership_reconciliation () =
      | `Error (Snapshot_unavailable { kind = Migration_failed; _ }) -> true
      | `Leased _ | `Already_leased _ | `Empty | `Error _ -> false)
 
+let test_v2_explicit_connector_reconciliation_migrates () =
+  Printf.printf
+    "Test: explicit v2 connector ownership and context migrate to v3\n%!";
+  with_base "keeper-chat-v2-explicit-reconciliation" @@ fun base_path ->
+  let keeper_name = "v2-explicit-reconciliation" in
+  let path = snapshot_path ~base_path ~keeper_name in
+  let surface =
+    Surface_ref.Slack
+      { team_id = Some "T-legacy"
+      ; channel_id = "C-legacy"
+      ; thread_ts = Some "171.001"
+      }
+  in
+  let message_json =
+    `Assoc
+      [ "content", `String "already recorded upstream"
+      ; "user_blocks", `List []
+      ; "attachments", `List []
+      ; "timestamp", `Float 1.0
+      ; ( "source"
+        , `Assoc
+            [ "kind", `String "slack"
+            ; "channel_id", `String "C-legacy"
+            ; "user_id", `String "U-legacy"
+            ; "user_name", `String "Legacy user"
+            ; "team_id", `String "T-legacy"
+            ; "thread_ts", `String "171.001"
+            ] )
+      ; ( "transcript_context"
+        , `Assoc
+            [ "surface", Surface_ref.to_json surface
+            ; "conversation_id", `String "slack:channel:C-legacy"
+            ; "external_message_id", `String "171.001"
+            ; ( "speaker"
+              , `Assoc
+                  [ "speaker_id", `String "U-legacy"
+                  ; "speaker_name", `String "Legacy user"
+                  ; "speaker_authority", `String "external"
+                  ] )
+            ; "extra_mentions", `List []
+            ] )
+      ; "transcript_ownership", `String "upstream_recorded"
+      ]
+  in
+  let legacy =
+    `Assoc
+      [ "schema", `String "keeper_chat_queue.v2"
+      ; "revision", `Int 9
+      ; ( "receipts"
+        , `List
+            [ `Assoc
+                [ ( "receipt_id"
+                  , `String
+                      "chatq_00000000-0000-4000-8000-000000000209" )
+                ; "state", `Assoc [ "kind", `String "pending" ]
+                ; "message", message_json
+                ]
+            ] )
+      ]
+    |> Yojson.Safe.pretty_to_string
+  in
+  save_raw path legacy;
+  let report = configure_raw base_path in
+  check "explicit v2 reconciliation has no load error"
+    (report.load_errors = [] && report.migrated_keeper_count = 1);
+  check "explicit v2 receipt remains pending with upstream ownership"
+    (match (Keeper_chat_queue.snapshot ~keeper_name).pending with
+     | [ { message; _ } ] ->
+       message.transcript_ownership = Keeper_chat_queue.Upstream_recorded
+       && message.transcript_context <> None
+     | _ -> false);
+  (match Safe_ops.read_json_file_safe path with
+   | Ok json ->
+     check "explicit reconciliation writes strict v3"
+       (Json_util.get_string json "schema" = Some "keeper_chat_queue.v3")
+   | Error _ -> check "explicit reconciliation writes strict v3" false)
+
 let test_corrupt_snapshot_is_quarantined () =
   Printf.printf "Test: corrupt snapshot is explicit and never overwritten as empty\n%!";
   with_base "keeper-chat-corrupt" @@ fun base_path ->
@@ -557,6 +634,137 @@ let test_corrupt_snapshot_is_quarantined () =
    | Ok _ | Error _ ->
      check "receipt lookup does not collapse unreadable into absent" false);
   check "corrupt bytes remain untouched" (String.equal (read_raw path) corrupt)
+
+let test_invalid_sibling_snapshot_does_not_poison_healthy_lane () =
+  Printf.printf
+    "Test: invalid sibling snapshot remains global diagnostics only\n%!";
+  with_base "keeper-chat-invalid-sibling" @@ fun base_path ->
+  let invalid_name = "invalid keeper name" in
+  let invalid_path = snapshot_path ~base_path ~keeper_name:invalid_name in
+  save_raw invalid_path "{}";
+  let report = configure_raw base_path in
+  check "invalid sibling is reported globally"
+    (match report.load_errors with
+     | [ Some name, { Keeper_chat_queue.kind = Invalid_path; _ } ] ->
+       String.equal name invalid_name
+     | _ -> false);
+  check "healthy Keeper still accepts a durable receipt"
+    (match
+       Keeper_chat_queue.enqueue ~keeper_name:"healthy-keeper"
+         (message "healthy lane")
+     with
+     | Ok _ -> true
+     | Error _ -> false);
+  check "healthy receipt remains visible despite sibling diagnostics"
+    (List.length
+       (Keeper_chat_queue.snapshot ~keeper_name:"healthy-keeper").pending
+     = 1)
+
+let test_connector_idempotency_survives_restart_and_terminal_state () =
+  Printf.printf
+    "Test: connector idempotency reuses one durable receipt across restart\n%!";
+  with_base "keeper-chat-durable-idempotency" @@ fun base_path ->
+  let keeper_name = "durable-idempotency" in
+  let key = "discord-msg-private-777" in
+  let queued =
+    message
+      ~source:(Keeper_chat_queue.Discord
+                 { channel_id = "C-777"; user_id = "U-777" })
+      "only once"
+  in
+  ignore (configure base_path : Keeper_chat_queue.configure_report);
+  let first =
+    match Keeper_chat_queue.enqueue ~idempotency_key:key ~keeper_name queued with
+    | Ok receipt -> receipt
+    | Error error ->
+      failwith (Keeper_chat_queue.mutation_error_to_string error)
+  in
+  check "first durable acceptance is not a replay" (not first.reused);
+  let lease = lease_exn ~keeper_name in
+  (match
+     Keeper_chat_queue.finalize ~keeper_name ~lease_id:lease.lease_id
+       ~outcome:
+         (Mark_failed
+            { completed_at = 8.0
+            ; kind = Internal_error
+            ; detail = "turn failed after acceptance"
+            ; outcome_ref = None
+            })
+   with
+   | `Finalized [ receipt_id ] ->
+     check "original receipt reaches terminal state"
+       (Keeper_chat_queue.Receipt_id.equal first.receipt_id receipt_id)
+   | `Finalized _ | `Unknown_lease | `Error _ ->
+     check "original receipt reaches terminal state" false);
+  let path = snapshot_path ~base_path ~keeper_name in
+  check "non-transcript terminal failure retains the sole prompt copy"
+    (Astring.String.is_infix ~affix:"only once" (read_raw path));
+  check "private idempotency key is never stored verbatim"
+    (not (Astring.String.is_infix ~affix:key (read_raw path)));
+  Keeper_chat_queue.For_testing.reset ();
+  let report = configure_raw base_path in
+  check "fingerprinted receipt reloads cleanly" (report.load_errors = []);
+  let replay =
+    match Keeper_chat_queue.enqueue ~idempotency_key:key ~keeper_name queued with
+    | Ok receipt -> receipt
+    | Error error ->
+      failwith (Keeper_chat_queue.mutation_error_to_string error)
+  in
+  check "restart replay returns the original receipt"
+    (replay.reused
+     && Keeper_chat_queue.Receipt_id.equal replay.receipt_id first.receipt_id);
+  check "replay does not mutate revision"
+    (Int64.equal replay.revision
+       (Keeper_chat_queue.snapshot ~keeper_name).revision);
+  check "terminal replay does not enqueue another prompt"
+    (replay.pending_count = 0 && replay.inflight_count = 0)
+
+let test_impossible_transcript_ownership_combinations_fail_closed () =
+  Printf.printf "Test: impossible transcript ownership combinations fail closed\n%!";
+  with_base "keeper-chat-ownership-invariants" @@ fun base_path ->
+  ignore (configure base_path : Keeper_chat_queue.configure_report);
+  let dashboard_context : Keeper_chat_queue.transcript_context =
+    { surface = Surface_ref.Dashboard { session_id = Some "session-1" }
+    ; conversation_id = Some "dashboard:session-1"
+    ; external_message_id = Some "dashboard-message-1"
+    ; speaker =
+        { Keeper_chat_store.speaker_id = Some "owner"
+        ; speaker_name = Some "Owner"
+        ; speaker_authority = Keeper_chat_store.Owner
+        }
+    ; extra_mentions = []
+    }
+  in
+  let invalid_dashboard =
+    { (message "dashboard upstream") with
+      transcript_context = Some dashboard_context
+    ; transcript_ownership = Keeper_chat_queue.Upstream_recorded
+    }
+  in
+  check "Dashboard can never claim upstream transcript ownership"
+    (match
+       Keeper_chat_queue.enqueue ~keeper_name:"ownership-dashboard"
+         invalid_dashboard
+     with
+     | Error (Keeper_chat_queue.Invalid_input _) -> true
+     | Ok _ | Error _ -> false);
+  let invalid_connector =
+    { (message
+         ~source:
+           (Keeper_chat_queue.Discord
+              { channel_id = "C-1"; user_id = "U-1" })
+         "connector without context") with
+      transcript_context = None
+    ; transcript_ownership = Keeper_chat_queue.Upstream_recorded
+    }
+  in
+  check "connector upstream ownership requires exact context"
+    (match
+       Keeper_chat_queue.enqueue ~keeper_name:"ownership-connector"
+         invalid_connector
+     with
+     | Error (Keeper_chat_queue.Invalid_input _) -> true
+     | Ok _ | Error _ -> false)
 
 let test_invalid_v2_is_not_a_compatibility_fallback () =
   Printf.printf "Test: malformed v2 is a parse error, never an empty fallback\n%!";
@@ -1157,7 +1365,11 @@ let () =
   test_v1_atomic_migration ();
   test_v1_active_connector_requires_ownership_reconciliation ();
   test_v2_active_connector_requires_ownership_reconciliation ();
+  test_v2_explicit_connector_reconciliation_migrates ();
   test_corrupt_snapshot_is_quarantined ();
+  test_invalid_sibling_snapshot_does_not_poison_healthy_lane ();
+  test_connector_idempotency_survives_restart_and_terminal_state ();
+  test_impossible_transcript_ownership_combinations_fail_closed ();
   test_invalid_v2_is_not_a_compatibility_fallback ();
   test_invalid_v2_attachment_is_not_silently_dropped ();
   test_revision_domain_does_not_wrap ();

@@ -61,6 +61,7 @@ type pending_approval =
   ; lane_policy : lane_policy
   ; continuation_channel : Keeper_continuation_channel.t
   ; audit_base_path : string
+  ; audit_cluster_name : string
   ; resolver : Agent_sdk.Hooks.approval_decision Eio.Promise.u option
   ; on_resolution : (Agent_sdk.Hooks.approval_decision -> unit) option
   ; context_summary : hitl_context_summary option

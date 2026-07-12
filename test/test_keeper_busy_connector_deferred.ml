@@ -129,6 +129,7 @@ let test_busy_discord_enqueues () =
              check "busy connector ACK carries durable receipt" false
          | Gate_protocol.Keeper_error_result _
          | Gate_protocol.Accepted_keeper_error_result _
+         | Gate_protocol.Duplicate_accepted_result _
          | Gate_protocol.Unavailable_result ->
              check "busy Discord dispatch returns a Reply (not error/unavailable)"
                false);
@@ -251,6 +252,7 @@ let test_nondefault_cluster_keeps_queue_and_transcript_together () =
          | Gate_protocol.Reply { message_request = None; _ }
          | Gate_protocol.Keeper_error_result _
          | Gate_protocol.Accepted_keeper_error_result _
+         | Gate_protocol.Duplicate_accepted_result _
          | Gate_protocol.Unavailable_result ->
            check "non-default connector input receives a durable queue receipt"
              false);
@@ -317,6 +319,7 @@ let test_unpublished_busy_slot_queues_without_resolved_meta () =
          | Gate_protocol.Reply { message_request = None; _ }
          | Gate_protocol.Keeper_error_result _
          | Gate_protocol.Accepted_keeper_error_result _
+         | Gate_protocol.Duplicate_accepted_result _
          | Gate_protocol.Unavailable_result ->
            check "unpublished busy slot returns a queued ACK" false);
         let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
@@ -363,6 +366,7 @@ let test_busy_discord_persist_failure_is_explicit () =
                (String.length message > 0)
          | Gate_protocol.Reply _
          | Gate_protocol.Accepted_keeper_error_result _
+         | Gate_protocol.Duplicate_accepted_result _
          | Gate_protocol.Unavailable_result ->
              check "persistence failure never claims queued" false);
         let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
@@ -563,6 +567,7 @@ let test_connector_transcript_failure_rejects_before_queue
              (String.trim message <> "")
          | Gate_protocol.Reply _
          | Gate_protocol.Accepted_keeper_error_result _
+         | Gate_protocol.Duplicate_accepted_result _
          | Gate_protocol.Unavailable_result ->
            check (label ^ " never receives a queue ACK") false);
         let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
@@ -654,6 +659,7 @@ let test_shutdown_fenced_connector_ack
          | Gate_protocol.Reply { message_request = None; _ }
          | Gate_protocol.Keeper_error_result _
          | Gate_protocol.Accepted_keeper_error_result _
+         | Gate_protocol.Duplicate_accepted_result _
          | Gate_protocol.Unavailable_result ->
            check (label ^ " shutdown-fenced input returns a queued ACK") false);
         (match (Keeper_chat_queue.snapshot ~keeper_name).pending with

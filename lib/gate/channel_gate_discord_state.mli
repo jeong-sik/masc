@@ -81,6 +81,11 @@ val resolve_keeper_for_channel :
     exact binding exists and [channel_id] is a Discord thread known
     in the names side-store, its parent channel binding is used. *)
 
+val thread_provenance_metadata :
+  channel_id:string -> keeper_binding_resolution -> (string * string) list
+(** Emit the live thread/parent identifiers proven by the binding resolution.
+    A top-level channel has no thread provenance. *)
+
 val bound_channels : keeper_name:string -> string list
 (** Channel snowflakes bound to [keeper_name], freshly read from the
     binding store on each call. Empty on blank name or unreadable

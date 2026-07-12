@@ -141,11 +141,15 @@ val dashboard_perf_http_json : Workspace.config -> Yojson.Safe.t
 val dashboard_tools_http_json :
   ?actor:string ->
   ?timing:Server_timing.t ->
+  ?include_sensitive:bool ->
   Workspace.config ->
   Yojson.Safe.t
 (** Renders the dashboard tools projection.  [?actor]
     selects the per-agent tool catalogue when present;
-    otherwise the full registry surface is returned.  When [?timing] is
+    otherwise the full registry surface is returned. [?include_sensitive]
+    defaults to [false], so snapshot/public callers receive connector and
+    filesystem diagnostics only in redacted form. Authenticated operator
+    routes must opt in explicitly after permission verification. When [?timing] is
     provided, internal phases (config_resolution, runtime_resolution,
     tools_compute) are accumulated into the [Server_timing.t] for surfacing
     via the [Server-Timing] response header. *)

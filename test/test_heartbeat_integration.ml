@@ -2305,12 +2305,13 @@ let test_blocking_gates_are_classified_before_intake () =
    | KHL.Intake_lifecycle_blocked _
    | KHL.Intake_pressure_blocked _ ->
      fail "blocking approval must stop intake before durable dequeue");
+  let paused_lifecycle =
+    Keeper_lifecycle_admission.state ~paused:true ~latched_reason:None
+    |> Keeper_lifecycle_admission.admit_autonomous
+  in
   (match
      KHL.classify_turn_intake_admission
-       ~lifecycle:
-         (Keeper_lifecycle_admission.Autonomous_denied
-            (Keeper_lifecycle_admission.Autonomous_paused
-               Keeper_lifecycle_admission.Unclassified))
+       ~lifecycle:paused_lifecycle
        ~pressure:Keeper_pressure_admission.Admitted
        ~blocking_approval_pending:false
    with

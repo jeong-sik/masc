@@ -33,6 +33,7 @@ module Shutdown_runtime = Masc.Keeper_shutdown_runtime
 module Keeper_meta_contract = Masc.Keeper_meta_contract
 module Keeper_meta_store = Masc.Keeper_meta_store
 module Keeper_types_support = Masc.Keeper_types_support
+module Keeper_fs = Masc.Keeper_fs
 module Lifecycle_hooks = Masc.Keeper_lifecycle_hooks
 module Subprocess_registry = Masc.Keeper_subprocess_registry
 module Tombstone_cleanup = Masc.Keeper_supervisor_cleanup_tombstone

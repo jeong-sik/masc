@@ -218,14 +218,16 @@ let render_rate_table ~field table =
       ("calls", `Int calls);
       ("successes", `Int successes);
       ("failures", `Int failures);
-      ("success_pct", `Float (Float.round pct /. 10.0) /. 10.0);
-      ("failure_pct", `Float (Float.round failure_pct /. 10.0) /. 10.0);
+      ("success_pct", `Float (Float.round (pct *. 10.0) /. 10.0));
+      ("failure_pct", `Float (Float.round (failure_pct *. 10.0) /. 10.0));
     ]) :: acc
   ) table []
   |> List.sort (fun ((ca, _), _) ((cb, _), _) -> Int.compare cb ca)
   |> List.map snd
 
 let dashboard_surface = "/api/v1/dashboard/tool-quality"
+
+let failure_concentration_top_n = 2
 
 let source_metadata_fields () =
   Dashboard_tool_source_freshness.keeper_tool_call_io_fields
@@ -472,18 +474,19 @@ let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
         ) keeper_stats []
         |> List.sort (fun (_, a) (_, b) -> Int.compare b a)
       in
-      let top2 =
+      let top_failures =
         let rec sum n acc = function
           | [] -> acc
           | (_, f) :: rest when n > 0 -> sum (n - 1) (acc + f) rest
           | _ -> acc
         in
-        sum 2 0 keepers
+        sum failure_concentration_top_n 0 keepers
       in
       let pct =
-        Float.round
-          (Float.of_int top2 /. Float.of_int total_failures *. 1000.0)
-        /. 10.0
+        let percentage =
+          Float.of_int top_failures /. Float.of_int total_failures *. 100.0
+        in
+        Float.round (percentage *. 10.0) /. 10.0
       in
       let top2_names =
         let rec take n acc = function
@@ -491,7 +494,7 @@ let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
           | (name, _) :: rest when n > 0 -> take (n - 1) (name :: acc) rest
           | _ -> List.rev acc
         in
-        take 2 [] keepers
+        take failure_concentration_top_n [] keepers
       in
       (`Float pct, `List (List.map (fun n -> `String n) top2_names))
   in

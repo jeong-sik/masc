@@ -2491,6 +2491,19 @@ let test_runtime_exhaustion_label_caps_free_text_detail () =
   Alcotest.(check bool) "label has no newline" false (contains ~needle:"\n" label);
   Alcotest.(check bool) "label is marked truncated" true (contains ~needle:"..." label)
 
+let test_keeper_tool_slot_callbacks_are_always_wired () =
+  let config = Masc.Workspace.default_config (Filename.get_temp_dir_name ()) in
+  let _, yield_on_tool, on_yield, on_resume, _ =
+    Masc.Keeper_agent_run_turn_helpers.turn_progress_callbacks
+      ~config
+      ~keeper_name:"slot-lease-test"
+      ~downstream:None
+      ~turn_id:1
+  in
+  Alcotest.(check bool) "tool execution always yields the provider lease" true yield_on_tool;
+  Alcotest.(check bool) "yield callback is wired" true (Option.is_some on_yield);
+  Alcotest.(check bool) "resume callback is wired" true (Option.is_some on_resume)
+
 let () =
   Alcotest.run "keeper_turn_driver_accept"
     [
@@ -2654,5 +2667,9 @@ let () =
             "runtime exhaustion labels cap free-text detail"
             `Quick
             test_runtime_exhaustion_label_caps_free_text_detail;
+          Alcotest.test_case
+            "keeper tool slot callbacks are always wired"
+            `Quick
+            test_keeper_tool_slot_callbacks_are_always_wired;
         ] );
     ]

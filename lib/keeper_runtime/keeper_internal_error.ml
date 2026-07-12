@@ -111,6 +111,7 @@ type runtime_exhaustion_reason =
   | All_providers_failed
   | Candidates_filtered_after_cycles
   | Max_turns_exceeded
+  | Session_conflict
   | Structural_attempt_timeout of { detail : string }
   | Capacity_exhausted
   | Other_detail of string
@@ -121,7 +122,7 @@ let runtime_exhaustion_reason_retryable = function
   | Connection_refused | Dns_failure | No_providers_available | All_providers_failed ->
     true
   | Structural_attempt_timeout _ -> true
-  | Other_detail _ -> false
+  | Session_conflict | Other_detail _ -> false
 
 let runtime_exhaustion_label_payload_max_bytes = 200
 
@@ -146,6 +147,7 @@ let runtime_exhaustion_reason_to_label = function
   | All_providers_failed -> "all_providers_failed"
   | Candidates_filtered_after_cycles -> "candidates_filtered_after_cycles"
   | Max_turns_exceeded -> "max_turns_exceeded"
+  | Session_conflict -> "session_conflict"
   | Structural_attempt_timeout { detail } ->
     Printf.sprintf "structural_attempt_timeout(%s)"
       (runtime_exhaustion_label_payload detail)
@@ -160,6 +162,7 @@ let runtime_exhaustion_reason_to_json = function
   | All_providers_failed -> `String "all_providers_failed"
   | Candidates_filtered_after_cycles -> `String "candidates_filtered_after_cycles"
   | Max_turns_exceeded -> `String "max_turns_exceeded"
+  | Session_conflict -> `String "session_conflict"
   | Structural_attempt_timeout { detail } ->
     `Assoc [ "tag", `String "structural_attempt_timeout"; "detail", `String detail ]
   | Capacity_exhausted -> `String "capacity_exhausted"
@@ -172,6 +175,7 @@ let runtime_exhaustion_reason_of_json = function
   | `String "all_providers_failed" -> Some All_providers_failed
   | `String "candidates_filtered_after_cycles" -> Some Candidates_filtered_after_cycles
   | `String "max_turns_exceeded" -> Some Max_turns_exceeded
+  | `String "session_conflict" -> Some Session_conflict
   | `String "capacity_exhausted" -> Some Capacity_exhausted
   | `Assoc fields ->
     (match List.assoc_opt "tag" fields with

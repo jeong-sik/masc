@@ -39,6 +39,7 @@ let non_overflow_classes_are_not_matched () =
     Keeper_meta_contract.Runtime_exhausted Keeper_meta_contract.No_providers_available;
     Keeper_meta_contract.Runtime_exhausted Keeper_meta_contract.All_providers_failed;
     Keeper_meta_contract.Runtime_exhausted Keeper_meta_contract.Max_turns_exceeded;
+    Keeper_meta_contract.Runtime_exhausted Keeper_meta_contract.Session_conflict;
     Keeper_meta_contract.Capacity_backpressure;
     Keeper_meta_contract.Ambiguous_post_commit_timeout;
     Keeper_meta_contract.Ambiguous_post_commit_failure;

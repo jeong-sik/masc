@@ -23,6 +23,7 @@ let blocker_reason_of_turn_driver_reason
   | Keeper_turn_driver.Candidates_filtered_after_cycles ->
     Candidates_filtered_after_cycles
   | Keeper_turn_driver.Max_turns_exceeded -> Max_turns_exceeded
+  | Keeper_turn_driver.Session_conflict -> Session_conflict
   | Keeper_turn_driver.Structural_attempt_timeout { detail } ->
     Structural_attempt_timeout { detail }
   | Keeper_turn_driver.Capacity_exhausted -> Capacity_exhausted

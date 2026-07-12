@@ -24,6 +24,7 @@ let all_variants : blocker_class list =
   ; Runtime_exhausted All_providers_failed
   ; Runtime_exhausted Candidates_filtered_after_cycles
   ; Runtime_exhausted Max_turns_exceeded
+  ; Runtime_exhausted Session_conflict
   ; Runtime_exhausted (Structural_attempt_timeout { detail = "30" })
   ; Runtime_exhausted Capacity_exhausted
   ; Capacity_backpressure
@@ -106,7 +107,7 @@ let test_unknown_string () =
 (** Pin the variant count so additions are visible in diffs.  When adding a
     new [blocker_class] variant, bump this number and add the variant to
     [all_variants]. *)
-let expected_variant_count = 32
+let expected_variant_count = 33
 
 let test_variant_count () =
   let count = List.length all_variants in

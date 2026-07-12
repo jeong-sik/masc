@@ -109,6 +109,7 @@ let route_of_masc_internal ~err (internal : Keeper_internal_error.masc_internal_
      | Keeper_internal_error.No_providers_available
      | Keeper_internal_error.All_providers_failed
      | Keeper_internal_error.Max_turns_exceeded
+     | Keeper_internal_error.Session_conflict
      | Keeper_internal_error.Other_detail _ ->
        rotate Runtime_exhausted)
   | Keeper_internal_error.Accept_rejected _ ->

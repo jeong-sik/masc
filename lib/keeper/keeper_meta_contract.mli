@@ -133,6 +133,9 @@ type runtime_exhaustion_reason = Keeper_internal_error.runtime_exhaustion_reason
   | All_providers_failed
   | Candidates_filtered_after_cycles
   | Max_turns_exceeded
+  | Session_conflict
+      (** The provider session lease is owned by another process. This remains
+          terminal for automatic retry and is never inferred from message text. *)
   | Structural_attempt_timeout of { detail : string }
       (** Agent SDK [with_optional_timeout] wrapper fired its per-OAS-call
           ceiling ([max_execution_time_s]). Distinct from transport-level
@@ -183,9 +186,9 @@ val runtime_exhaustion_summary :
 val runtime_exhaustion_reason_retryable : runtime_exhaustion_reason -> bool
 (** Total typed retryability per reason variant. Transient/connectivity
     reasons and bounded-cycle/turn/capacity exhaustion are retryable;
-    [Other_detail] (unknown free-text) is not. Replaces a string-prefix
-    reparse with a [_ -> false] catch-all that mis-biased transient faults
-    to terminal. *)
+    [Session_conflict] and [Other_detail] (unknown free-text) are not. Replaces
+    a string-prefix reparse with a [_ -> false] catch-all that mis-biased
+    transient faults to terminal. *)
 
 val blocker_class_continue_gate : blocker_class -> bool
 (** [blocker_class_continue_gate b] is [true] iff the supervisor

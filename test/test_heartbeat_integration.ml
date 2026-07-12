@@ -2557,14 +2557,15 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
         "delivered dashboard purge receipt prevents duplicate event"
         0
         (List.length (Agent_sdk.Event_bus.drain completion_subscription));
-      match
-        Masc.Keeper_turn_admission.run_if_free
+      let admission =
+        Masc.Keeper_turn_admission.snapshot_for
           ~base_path:config.base_path
           ~keeper_name:meta.name
-          (fun () -> ())
-      with
-      | `Ran () -> ()
-      | `Busy _ -> fail "delivered dashboard purge left admission fenced")
+      in
+      check bool
+        "delivered dashboard purge released admission fence"
+        true
+        (Option.is_none admission.snapshot_shutdown_operation_id))
 ;;
 
 let test_keeper_shutdown_cleanup_replays_after_meta_removal () =

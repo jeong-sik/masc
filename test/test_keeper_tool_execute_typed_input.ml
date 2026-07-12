@@ -12,7 +12,7 @@ let typed_ok input =
   | Error _ -> false
 ;;
 
-let mk_exec executable argv =
+let mk_exec ?(timeout_sec = None) executable argv =
   Execute_input.Exec
     { executable
     ; argv
@@ -21,6 +21,7 @@ let mk_exec executable argv =
     ; stdin = Execute_input.Inherit
     ; stdout = Execute_input.Inherit
     ; stderr = Execute_input.Inherit
+    ; timeout_sec
     }
 ;;
 
@@ -155,7 +156,8 @@ let test_case case () =
 
 let test_pipeline_empty () =
   let input =
-    Execute_input.Pipeline { stages = []; cwd = None; env = [] }
+    Execute_input.Pipeline
+      { stages = []; cwd = None; env = []; timeout_sec = None }
   in
   Alcotest.(check bool)
     "pipeline with empty stages is rejected"
@@ -169,6 +171,7 @@ let test_pipeline_single_stage_rejected () =
       { stages = [ { executable = "rg"; argv = [ "pattern" ] } ]
       ; cwd = None
       ; env = []
+      ; timeout_sec = None
       }
   in
   Alcotest.(check bool)
@@ -186,6 +189,7 @@ let test_pipeline_stage_executable_check () =
           ]
       ; cwd = None
       ; env = []
+      ; timeout_sec = None
       }
   in
   Alcotest.(check bool)
@@ -375,7 +379,7 @@ let test_of_json_pipeline () =
           ])
   in
   match input with
-  | Execute_input.Pipeline { stages; cwd; env } ->
+  | Execute_input.Pipeline { stages; cwd; env; _ } ->
     Alcotest.(check int) "stage count" 2 (List.length stages);
     Alcotest.(check (option string)) "cwd" (Some "/tmp") cwd;
     Alcotest.(check (list (pair string string))) "env" [] env;
@@ -439,7 +443,7 @@ let test_of_json_keeps_empty_pipeline_stage_for_validation () =
           ])
   in
   match input with
-  | Execute_input.Pipeline { stages; cwd; env } ->
+  | Execute_input.Pipeline { stages; cwd; env; _ } ->
     Alcotest.(check (option string)) "cwd" (Some "/tmp") cwd;
     Alcotest.(check (list (pair string string))) "env" [] env;
     (match stages with
@@ -586,6 +590,7 @@ let test_pipeline_lowers_to_shell_ir_pipeline () =
           ]
       ; cwd = Some "/tmp"
       ; env = [ "LC_ALL", "C" ]
+      ; timeout_sec = None
       }
   in
   match to_shell_ir_exn input with
@@ -621,6 +626,7 @@ let test_exec_lowering_preserves_duplicate_executable_argv () =
       ; stdin = Execute_input.Inherit
       ; stdout = Execute_input.Inherit
       ; stderr = Execute_input.Inherit
+      ; timeout_sec = None
       }
   in
   match Execute_input.to_shell_ir input with
@@ -648,6 +654,7 @@ let test_exec_lowering_preserves_single_argv_equal_to_executable () =
       ; stdin = Execute_input.Inherit
       ; stdout = Execute_input.Inherit
       ; stderr = Execute_input.Inherit
+      ; timeout_sec = None
       }
   in
   match Execute_input.to_shell_ir input with
@@ -674,6 +681,7 @@ let test_pipeline_lowering_preserves_single_stage_argv_equal_to_executable () =
           ]
       ; cwd = None
       ; env = []
+      ; timeout_sec = None
       }
   in
   match Execute_input.to_shell_ir input with
@@ -706,6 +714,7 @@ let test_pipeline_lowering_preserves_duplicate_stage_argv () =
           ]
       ; cwd = None
       ; env = []
+      ; timeout_sec = None
       }
   in
   match Execute_input.to_shell_ir input with
@@ -752,6 +761,7 @@ let test_pipeline_lowers_with_injected_docker_sandbox () =
           ]
       ; cwd = Some "/tmp"
       ; env = []
+      ; timeout_sec = None
       }
   in
   match
@@ -783,6 +793,7 @@ let test_pipe_character_in_exec_argv_is_literal () =
       ; stdin = Execute_input.Inherit
       ; stdout = Execute_input.Inherit
       ; stderr = Execute_input.Inherit
+      ; timeout_sec = None
       }
   in
   match to_shell_ir_exn input with
@@ -806,6 +817,7 @@ let test_standalone_pipe_operator_in_exec_argv_rejected () =
         ; stdin = Execute_input.Inherit
         ; stdout = Execute_input.Inherit
         ; stderr = Execute_input.Inherit
+        ; timeout_sec = None
         }
     in
     match Execute_input.validate input with
@@ -860,6 +872,7 @@ let test_gh_multiline_body_lowers_to_literal_argv () =
       ; stdin = Execute_input.Inherit
       ; stdout = Execute_input.Inherit
       ; stderr = Execute_input.Inherit
+      ; timeout_sec = None
       }
   in
   match to_shell_ir_exn input with
@@ -889,6 +902,7 @@ let test_cwd_not_absolute () =
       ; stdin = Execute_input.Inherit
       ; stdout = Execute_input.Inherit
       ; stderr = Execute_input.Inherit
+      ; timeout_sec = None
       }
   in
   Alcotest.(check bool)
@@ -907,6 +921,7 @@ let test_env_key_invalid () =
       ; stdin = Execute_input.Inherit
       ; stdout = Execute_input.Inherit
       ; stderr = Execute_input.Inherit
+      ; timeout_sec = None
       }
   in
   Alcotest.(check bool)
@@ -948,6 +963,7 @@ let test_shell_redirection_token_rejected () =
           ; stdin = Execute_input.Inherit
           ; stdout = Execute_input.Inherit
           ; stderr = Execute_input.Inherit
+          ; timeout_sec = None
           }
       in
       expect_redirection_rejected ~token input)
@@ -982,6 +998,7 @@ let test_legitimate_metachar_still_allowed () =
           ; stdin = Execute_input.Inherit
           ; stdout = Execute_input.Inherit
           ; stderr = Execute_input.Inherit
+          ; timeout_sec = None
           }
       in
       match Execute_input.validate  input with
@@ -1038,6 +1055,7 @@ let test_redirection_rejected_emits_typed_alternative () =
       ; stdin = Execute_input.Inherit
       ; stdout = Execute_input.Inherit
       ; stderr = Execute_input.Inherit
+      ; timeout_sec = None
       }
   in
   match Execute_input.validate  input with
@@ -1099,10 +1117,11 @@ let mk_exec_with_redirects
       ?(stdin = Execute_input.Inherit)
       ?(stdout = Execute_input.Inherit)
       ?(stderr = Execute_input.Inherit)
+      ?(timeout_sec = None)
       ()
   =
   Execute_input.Exec
-    { executable; argv; cwd; env; stdin; stdout; stderr }
+    { executable; argv; cwd; env; stdin; stdout; stderr; timeout_sec }
 ;;
 
 let count_redirects ir =
@@ -1246,6 +1265,121 @@ let test_of_json_rejects_redirect_with_both_discard_and_file () =
   match Execute_input.of_json json with
   | Ok _ -> Alcotest.fail "of_json must reject conflicting discard+file"
   | Error _ -> ()
+;;
+
+(* [timeout_sec] used to be accepted into the allowed-field list and then
+   silently dropped: [of_json] never read it, and [Exec]/[Pipeline] had no
+   field to store it in, so a caller-supplied timeout never reached
+   [Exec_dispatch] and the "increase timeout_sec" recovery hint in
+   [Exec_core] pointed at a no-op.  These tests cover the fix: JSON shape
+   parsing (int/float/absent) here, and positivity/finiteness in
+   [validate]. *)
+
+let test_of_json_accepts_timeout_sec_as_float () =
+  let input =
+    parse_json_exn
+      (`Assoc
+          [ "executable", `String "sleep"
+          ; "argv", `List [ `String "5" ]
+          ; "timeout_sec", `Float 30.5
+          ])
+  in
+  match input with
+  | Execute_input.Exec { timeout_sec; _ } ->
+    Alcotest.(check (option (float 0.001))) "timeout_sec" (Some 30.5) timeout_sec
+  | Execute_input.Pipeline _ -> Alcotest.fail "expected Exec"
+;;
+
+let test_of_json_accepts_timeout_sec_as_int () =
+  let input =
+    parse_json_exn
+      (`Assoc
+          [ "executable", `String "sleep"
+          ; "argv", `List [ `String "5" ]
+          ; "timeout_sec", `Int 45
+          ])
+  in
+  match input with
+  | Execute_input.Exec { timeout_sec; _ } ->
+    Alcotest.(check (option (float 0.001))) "timeout_sec" (Some 45.0) timeout_sec
+  | Execute_input.Pipeline _ -> Alcotest.fail "expected Exec"
+;;
+
+let test_of_json_timeout_sec_absent_is_none () =
+  let input = mk_exec "ls" [] in
+  match input with
+  | Execute_input.Exec { timeout_sec; _ } ->
+    Alcotest.(check bool) "timeout_sec absent stays None" true (Option.is_none timeout_sec)
+  | Execute_input.Pipeline _ -> Alcotest.fail "expected Exec"
+;;
+
+let test_of_json_rejects_non_numeric_timeout_sec () =
+  let msg =
+    parse_json_error
+      (`Assoc
+          [ "executable", `String "sleep"
+          ; "argv", `List [ `String "5" ]
+          ; "timeout_sec", `String "30"
+          ])
+  in
+  Alcotest.(check bool)
+    "error names the rejected field"
+    true
+    (String_util.contains_substring_ci msg "timeout_sec")
+;;
+
+let test_of_json_pipeline_accepts_timeout_sec () =
+  let input =
+    parse_json_exn
+      (`Assoc
+          [ ( "pipeline"
+            , `List
+                [ `Assoc
+                    [ "executable", `String "printf"
+                    ; "argv", `List [ `String "hello" ]
+                    ]
+                ; `Assoc [ "executable", `String "wc"; "argv", `List [ `String "-c" ] ]
+                ] )
+          ; "timeout_sec", `Float 12.0
+          ])
+  in
+  match input with
+  | Execute_input.Pipeline { timeout_sec; _ } ->
+    Alcotest.(check (option (float 0.001))) "pipeline timeout_sec" (Some 12.0) timeout_sec
+  | Execute_input.Exec _ -> Alcotest.fail "expected Pipeline"
+;;
+
+let test_timeout_sec_zero_rejected () =
+  let input = mk_exec ~timeout_sec:(Some 0.0) "ls" [] in
+  match Execute_input.validate input with
+  | Error (Execute_input.Timeout_sec_not_positive v) ->
+    Alcotest.(check (float 0.001)) "rejected value echoed" 0.0 v
+  | Error other ->
+    Alcotest.failf
+      "expected Timeout_sec_not_positive, got %a"
+      Execute_input.pp_validation_error
+      other
+  | Ok () -> Alcotest.fail "timeout_sec=0 should be rejected"
+;;
+
+let test_timeout_sec_negative_rejected () =
+  let input = mk_exec ~timeout_sec:(Some (-5.0)) "ls" [] in
+  Alcotest.(check bool) "negative timeout_sec rejected" false (typed_ok input)
+;;
+
+let test_timeout_sec_nan_rejected () =
+  let input = mk_exec ~timeout_sec:(Some Float.nan) "ls" [] in
+  Alcotest.(check bool) "NaN timeout_sec rejected" false (typed_ok input)
+;;
+
+let test_timeout_sec_infinite_rejected () =
+  let input = mk_exec ~timeout_sec:(Some Float.infinity) "ls" [] in
+  Alcotest.(check bool) "infinite timeout_sec rejected" false (typed_ok input)
+;;
+
+let test_timeout_sec_positive_finite_accepted () =
+  let input = mk_exec ~timeout_sec:(Some 120.0) "ls" [] in
+  Alcotest.(check bool) "positive finite timeout_sec accepted" true (typed_ok input)
 ;;
 
 let suite =
@@ -1410,6 +1544,43 @@ let suite =
           "rfc_0198_phaseb_of_json_rejects_discard_and_file"
           `Quick
           test_of_json_rejects_redirect_with_both_discard_and_file
+      ; Alcotest.test_case
+          "timeout_sec_of_json_accepts_float"
+          `Quick
+          test_of_json_accepts_timeout_sec_as_float
+      ; Alcotest.test_case
+          "timeout_sec_of_json_accepts_int"
+          `Quick
+          test_of_json_accepts_timeout_sec_as_int
+      ; Alcotest.test_case
+          "timeout_sec_of_json_absent_is_none"
+          `Quick
+          test_of_json_timeout_sec_absent_is_none
+      ; Alcotest.test_case
+          "timeout_sec_of_json_rejects_non_numeric"
+          `Quick
+          test_of_json_rejects_non_numeric_timeout_sec
+      ; Alcotest.test_case
+          "timeout_sec_of_json_pipeline_accepts"
+          `Quick
+          test_of_json_pipeline_accepts_timeout_sec
+      ; Alcotest.test_case
+          "timeout_sec_zero_rejected"
+          `Quick
+          test_timeout_sec_zero_rejected
+      ; Alcotest.test_case
+          "timeout_sec_negative_rejected"
+          `Quick
+          test_timeout_sec_negative_rejected
+      ; Alcotest.test_case "timeout_sec_nan_rejected" `Quick test_timeout_sec_nan_rejected
+      ; Alcotest.test_case
+          "timeout_sec_infinite_rejected"
+          `Quick
+          test_timeout_sec_infinite_rejected
+      ; Alcotest.test_case
+          "timeout_sec_positive_finite_accepted"
+          `Quick
+          test_timeout_sec_positive_finite_accepted
       ])
 ;;
 

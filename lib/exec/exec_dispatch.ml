@@ -200,7 +200,7 @@ let process_spec_of_simple (s : Shell_ir.simple) =
   in
   (argv, env, cwd)
 
-let dispatch_simple ?base_host_env ?stdin_content ?on_output_chunk (s : Shell_ir.simple) =
+let dispatch_simple ?base_host_env ?stdin_content ?timeout_sec ?on_output_chunk (s : Shell_ir.simple) =
   let on_output_chunk, emitted = tracked_output_callback on_output_chunk in
   let argv, env, cwd = process_spec_of_simple s in
   let result =
@@ -223,6 +223,7 @@ let dispatch_simple ?base_host_env ?stdin_content ?on_output_chunk (s : Shell_ir
                  ~actor:`Tool_local_runtime
                  ~raw_source
                  ~summary:"exec dispatch simple"
+                 ?timeout_sec
                  ?env:host_env
                  ?cwd
                  argv
@@ -231,6 +232,7 @@ let dispatch_simple ?base_host_env ?stdin_content ?on_output_chunk (s : Shell_ir
                  ~actor:`Tool_local_runtime
                  ~raw_source
                  ~summary:"exec dispatch simple streaming"
+                 ?timeout_sec
                  ?env:host_env
                  ?cwd
                  ~on_stdout_chunk:(fun chunk -> on_chunk (`Stdout chunk))
@@ -243,6 +245,7 @@ let dispatch_simple ?base_host_env ?stdin_content ?on_output_chunk (s : Shell_ir
                  ~actor:`Tool_local_runtime
                  ~raw_source
                  ~summary:"exec dispatch simple stdin"
+                 ?timeout_sec
                  ?env:host_env
                  ?cwd
                  ~stdin_content
@@ -252,6 +255,7 @@ let dispatch_simple ?base_host_env ?stdin_content ?on_output_chunk (s : Shell_ir
                  ~actor:`Tool_local_runtime
                  ~raw_source
                  ~summary:"exec dispatch simple stdin streaming"
+                 ?timeout_sec
                  ?env:host_env
                  ?cwd
                  ~on_stdout_chunk:(fun chunk -> on_chunk (`Stdout chunk))
@@ -269,6 +273,12 @@ let dispatch_simple ?base_host_env ?stdin_content ?on_output_chunk (s : Shell_ir
          | status, stdout, stderr ->
              apply_redirect_plan redirect_plan { status; stdout; stderr })
       | Docker { runner; _ } ->
+        (* [Sandbox_target.runner] has no timeout parameter, so [timeout_sec]
+           does not reach Docker-dispatched commands.  Threading it through
+           would require changing the [runner]/[pipeline_runner] closure
+           type in [Sandbox_target] (a public type every keeper-side Docker
+           runner construction site implements); left as a follow-up rather
+           than forced here. *)
         let on_stdout_chunk, on_stderr_chunk =
           match child_on_output_chunk with
           | None -> None, None
@@ -339,7 +349,7 @@ let docker_pipeline_specs stages =
 (* TEL-OK: this lower-level Shell IR dispatcher is wrapped by Execute/keeper
    telemetry at the action boundary; it preserves output delivery but does not
    record action-level telemetry directly. *)
-let rec dispatch_pipeline ?base_host_env ?stdin_content ?on_output_chunk stages =
+let rec dispatch_pipeline ?base_host_env ?stdin_content ?timeout_sec ?on_output_chunk stages =
   let on_output_chunk, emitted = tracked_output_callback on_output_chunk in
   let decomposed_stage_callback ~is_final (simple : Shell_ir.simple) on_output_chunk =
     match on_output_chunk with
@@ -373,12 +383,14 @@ let rec dispatch_pipeline ?base_host_env ?stdin_content ?on_output_chunk stages 
                      ~actor:`Tool_local_runtime
                      ~raw_source
                      ~summary:"exec dispatch pipeline"
+                     ?timeout_sec
                      specs
                | Some on_chunk ->
                    Exec_gate.run_argv_pipeline_with_status_split
                      ~actor:`Tool_local_runtime
                      ~raw_source
                      ~summary:"exec dispatch pipeline streaming"
+                     ?timeout_sec
                      ~on_stdout_chunk:(fun chunk -> on_chunk (`Stdout chunk))
                      ~on_stderr_chunk:(fun chunk -> on_chunk (`Stderr chunk))
                      specs
@@ -387,6 +399,9 @@ let rec dispatch_pipeline ?base_host_env ?stdin_content ?on_output_chunk stages 
          | None -> (
              match docker_pipeline_specs stages with
              | Some (runner, specs) ->
+                 (* [Sandbox_target.pipeline_runner] has no timeout parameter
+                    either — same gap as the [Docker] branch in
+                    [dispatch_simple] above. *)
                  let on_stdout_chunk, on_stderr_chunk =
                    match on_output_chunk with
                    | None -> None, None
@@ -409,6 +424,7 @@ let rec dispatch_pipeline ?base_host_env ?stdin_content ?on_output_chunk stages 
                        let stage_result =
                          dispatch_simple
                            ?base_host_env
+                           ?timeout_sec
                            ?on_output_chunk:stage_on_output_chunk
                            ~stdin_content:prev_stdout
                            s
@@ -478,6 +494,7 @@ let rec dispatch_pipeline ?base_host_env ?stdin_content ?on_output_chunk stages 
                         let first_result =
                           dispatch_simple
                             ?base_host_env
+                            ?timeout_sec
                             ?on_output_chunk:first_on_output_chunk
                             s
                         in
@@ -525,12 +542,12 @@ let rec dispatch_pipeline ?base_host_env ?stdin_content ?on_output_chunk stages 
   in
   emit_unseen_captured_output on_output_chunk emitted result
 
-and dispatch ?base_host_env ?on_output_chunk (ir : Shell_ir.t) =
+and dispatch ?base_host_env ?timeout_sec ?on_output_chunk (ir : Shell_ir.t) =
   match ir with
-  | Shell_ir.Simple s -> dispatch_simple ?base_host_env ?on_output_chunk s
-  | Pipeline stages -> dispatch_pipeline ?base_host_env ?on_output_chunk stages
+  | Shell_ir.Simple s -> dispatch_simple ?base_host_env ?timeout_sec ?on_output_chunk s
+  | Pipeline stages -> dispatch_pipeline ?base_host_env ?timeout_sec ?on_output_chunk stages
 
-let dispatch_decided ?base_host_env ?on_output_chunk (envelope : Shell_ir_risk.decided Shell_ir_risk.decided_ir) :
+let dispatch_decided ?base_host_env ?timeout_sec ?on_output_chunk (envelope : Shell_ir_risk.decided Shell_ir_risk.decided_ir) :
     dispatch_result =
   (match envelope.Shell_ir_risk.risk with
    | Shell_ir_risk.Destructive_protected ->
@@ -543,4 +560,4 @@ let dispatch_decided ?base_host_env ?on_output_chunk (envelope : Shell_ir_risk.d
    | Shell_ir_risk.R1_Reversible_mutation
    | Shell_ir_risk.R2_Irreversible ->
        ());
-  dispatch ?base_host_env ?on_output_chunk envelope.Shell_ir_risk.ir
+  dispatch ?base_host_env ?timeout_sec ?on_output_chunk envelope.Shell_ir_risk.ir

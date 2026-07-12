@@ -1283,5 +1283,73 @@ let () =
   | Error (Keeper_tool_execute_shell_ir.Policy_denied _) -> ()
   | Error _ -> assert false
 
+(* --- dispatch_simple / dispatch_pipeline thread ?timeout_sec into
+   Exec_gate/Process_eio (this PR) ---
+
+   Before this PR, [Exec_dispatch] had no [?timeout_sec] parameter at all —
+   every caller silently got [Exec_gate]'s 60s default no matter what the
+   typed Execute JSON boundary parsed.  These tests prove the parameter is
+   live end to end: a "sleep 30" is spawned with a much shorter
+   [timeout_sec] and must be killed (exit 124) well before either the sleep
+   duration or the previous 60s default would elapse.  [reap_proc_with_clock]
+   allows up to a 2s SIGTERM grace period per process before escalating to
+   SIGKILL, and the pipeline test reaps two processes sequentially, so the
+   8s elapsed bound below is generous relative to [timeout_sec] itself. *)
+
+let () =
+  with_eio @@ fun () ->
+  let open Masc_exec.Shell_ir in
+  let bin = Masc_exec.Exec_program.of_string "sh" |> Result.get_ok in
+  let ir =
+    { bin
+    ; args = [ Lit ("-c", default_meta); Lit ("sleep 30", default_meta) ]
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Masc_exec.Sandbox_target.host ()
+    }
+  in
+  let t0 = Unix.gettimeofday () in
+  let result = Masc_exec.Exec_dispatch.dispatch_simple ~timeout_sec:0.5 ir in
+  let elapsed = Unix.gettimeofday () -. t0 in
+  assert (result.status = Unix.WEXITED 124);
+  assert (elapsed < 8.0)
+
+let () =
+  with_eio @@ fun () ->
+  let open Masc_exec.Shell_ir in
+  let host_sandbox = Masc_exec.Sandbox_target.host () in
+  let sh_bin = Masc_exec.Exec_program.of_string "sh" |> Result.get_ok in
+  let cat_bin = Masc_exec.Exec_program.of_string "cat" |> Result.get_ok in
+  let slow_stage =
+    Simple
+      { bin = sh_bin
+      ; args = [ Lit ("-c", default_meta); Lit ("sleep 30", default_meta) ]
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = host_sandbox
+      }
+  in
+  let cat_stage =
+    Simple
+      { bin = cat_bin
+      ; args = []
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = host_sandbox
+      }
+  in
+  let t0 = Unix.gettimeofday () in
+  let result =
+    Masc_exec.Exec_dispatch.dispatch_pipeline
+      ~timeout_sec:0.5
+      [ slow_stage; cat_stage ]
+  in
+  let elapsed = Unix.gettimeofday () -. t0 in
+  assert (result.status = Unix.WEXITED 124);
+  assert (elapsed < 8.0)
+
 let () =
   Printf.printf "p7_exec_dispatch: all tests passed.\n"

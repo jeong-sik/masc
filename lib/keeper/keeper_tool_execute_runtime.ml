@@ -608,6 +608,7 @@ let has_typed_execute_input_key = Keeper_tool_execute_input.has_typed_execute_in
 let assoc_upsert = Keeper_tool_execute_input.assoc_upsert
 let typed_input_command_text = Keeper_tool_execute_input.typed_input_command_text
 let typed_input_has_env = Keeper_tool_execute_input.typed_input_has_env
+let typed_input_timeout_sec = Keeper_tool_execute_input.typed_input_timeout_sec
 let typed_validation_error_text = Keeper_tool_execute_input.typed_validation_error_text
 
 let typed_validation_deterministic_retry_fields
@@ -677,6 +678,20 @@ let typed_validation_recovery_fields
              ; "stderr", `Assoc [ "discard", `Bool true ]
              ; "cwd", `String "repos/<repo>"
              ])
+  | Keeper_tool_execute_typed_input.Timeout_sec_not_positive _ ->
+    diagnosis ~rule_id:"execute_timeout_sec_not_positive"
+    @ recovery_plan
+        ~input_shape:"timeout_sec"
+        ~instruction:
+          "Retry Execute with timeout_sec set to a finite number greater \
+           than 0 (seconds), or omit the field to use the existing default \
+           timeout."
+        ~example:
+          (`Assoc
+             [ "executable", `String "<same as previous call>"
+             ; "argv", `List []
+             ; "timeout_sec", `Float 120.0
+             ])
   | Keeper_tool_execute_typed_input.Empty_executable _
   | Keeper_tool_execute_typed_input.Executable_repeated_in_argv0 _
   | Keeper_tool_execute_typed_input.Argv_contains_shell_metachar _
@@ -697,7 +712,7 @@ let docker_local_fallback_target =
 
 let input_with_cwd cwd = function
   | Keeper_tool_execute_typed_input.Exec
-      { executable; argv; cwd = _; env; stdin; stdout; stderr } ->
+      { executable; argv; cwd = _; env; stdin; stdout; stderr; timeout_sec } ->
     Keeper_tool_execute_typed_input.Exec
       { executable
       ; argv
@@ -706,9 +721,11 @@ let input_with_cwd cwd = function
       ; stdin
       ; stdout
       ; stderr
+      ; timeout_sec
       }
-  | Keeper_tool_execute_typed_input.Pipeline { stages; cwd = _; env } ->
-    Keeper_tool_execute_typed_input.Pipeline { stages; cwd = Some cwd; env }
+  | Keeper_tool_execute_typed_input.Pipeline { stages; cwd = _; env; timeout_sec } ->
+    Keeper_tool_execute_typed_input.Pipeline
+      { stages; cwd = Some cwd; env; timeout_sec }
 
 let typed_input_shell_ir_unvalidated input =
   match Keeper_tool_execute_typed_input.to_shell_ir_unvalidated input with
@@ -1077,6 +1094,7 @@ let handle_tool_execute_typed
           Retired_env_warnings.report_shell_ir_path_jail_if_set
             ~source:"execute"
             ();
+          let dispatch_timeout_sec = typed_input_timeout_sec input in
           let dispatch_result =
             if Env_config_runtime.Shell_ir_approval_gate.enabled ()
             then (
@@ -1104,6 +1122,7 @@ let handle_tool_execute_typed
                 ~workdir:cwd
                 ~sandbox:dispatch_sandbox
                 ?base_host_env
+                ?timeout_sec:dispatch_timeout_sec
                 ~on_output_chunk
                 envelope)
             else
@@ -1113,6 +1132,7 @@ let handle_tool_execute_typed
                 ~workdir:cwd
                 ~sandbox:dispatch_sandbox
                 ?base_host_env
+                ?timeout_sec:dispatch_timeout_sec
                 ~on_output_chunk
                 envelope
           in

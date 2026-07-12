@@ -11,6 +11,7 @@ val resolve_arg : Shell_ir.arg -> string
 val dispatch_simple :
   ?base_host_env:string array ->
   ?stdin_content:string ->
+  ?timeout_sec:float ->
   ?on_output_chunk:([ `Stdout of string | `Stderr of string ] -> unit) ->
   Shell_ir.simple ->
   dispatch_result
@@ -20,29 +21,37 @@ val dispatch_simple :
     [?on_output_chunk] is invoked for every chunk read from
     stdout/stderr while the process is running on the host sandbox path,
     including host commands that receive typed stdin. Docker runner targets
-    receive the same callback contract. *)
+    receive the same callback contract.  [?timeout_sec], when supplied, is
+    forwarded to [Exec_gate] on the [Host] sandbox path only; absent, the
+    call keeps [Exec_gate]'s existing default timeout.  The [Docker] path
+    ignores it — [Sandbox_target.runner] has no timeout parameter yet. *)
 
 val dispatch :
   ?base_host_env:string array ->
+  ?timeout_sec:float ->
   ?on_output_chunk:([ `Stdout of string | `Stderr of string ] -> unit) ->
   Shell_ir.t ->
   dispatch_result
 (** General dispatch over any [Shell_ir.t] variant.  [Simple] routes
     to [dispatch_simple]; [Pipeline] routes to internal pipeline
     logic.  Prefer [dispatch_decided] for production keeper paths.
-    Exposed for tests and legacy call sites. *)
+    Exposed for tests and legacy call sites.  [?timeout_sec] is forwarded
+    unchanged; see [dispatch_simple] for the Host/Docker caveat. *)
 
 val dispatch_decided :
   ?base_host_env:string array ->
+  ?timeout_sec:float ->
   ?on_output_chunk:([ `Stdout of string | `Stderr of string ] -> unit) ->
   Shell_ir_risk.decided Shell_ir_risk.decided_ir ->
   dispatch_result
 (** RFC-0160 S3: dispatch a risk-classified IR.  The phantom type
-    ensures the IR has passed through [Shell_ir_risk.classify]. *)
+    ensures the IR has passed through [Shell_ir_risk.classify].
+    [?timeout_sec] is forwarded unchanged to [dispatch]. *)
 
 val dispatch_pipeline :
   ?base_host_env:string array ->
   ?stdin_content:string ->
+  ?timeout_sec:float ->
   ?on_output_chunk:([ `Stdout of string | `Stderr of string ] -> unit) ->
   Shell_ir.t list ->
   dispatch_result
@@ -54,4 +63,8 @@ val dispatch_pipeline :
     same callback contract. Decomposed fallback pipeline paths stream each
     stage's stderr and the final stage's stdout through the same callback
     contract while preserving intermediate stdout as stdin for the next
-    stage. *)
+    stage.  [?timeout_sec] applies uniformly to every stage on the host
+    native-pipeline and decomposed-fallback paths (one deadline per spawn,
+    mirroring [Exec_gate.run_argv_pipeline_with_status_split]); the Docker
+    [pipeline_runner] path ignores it — [Sandbox_target.pipeline_runner] has
+    no timeout parameter yet. *)

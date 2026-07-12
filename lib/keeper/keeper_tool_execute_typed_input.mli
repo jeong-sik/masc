@@ -59,21 +59,32 @@ type execute_input =
       stdin : redirect_target;
       stdout : redirect_target;
       stderr : redirect_target;
+      timeout_sec : float option;
     }
       (** [stdin], [stdout], [stderr] default to {!Inherit} when absent
           from JSON.  RFC-0198 Phase B introduced them so the LLM can
           express "discard stderr" or "write stdout to an absolute path"
           via typed schema, instead of attempting shell redirection
           syntax inside an execve-style argv (which silently leaks as
-          a runtime [find: 2>/dev/null: unknown primary] failure). *)
+          a runtime [find: 2>/dev/null: unknown primary] failure).
+          [timeout_sec] is [None] when absent from JSON, in which case the
+          dispatch chain keeps using its existing default timeout.  When
+          present, it is threaded as an optional per-spawn override through
+          {!Keeper_tool_execute_shell_ir.dispatch_classified} down to the
+          Process_eio runner; {!validate} (not this parse step) rejects
+          non-positive or non-finite values. *)
   | Pipeline of {
       stages : exec_stage list;
       cwd : string option;
       env : (string * string) list;
+      timeout_sec : float option;
     }
       (** Per-stage redirects are intentionally not exposed here — pipe
           construction owns the inter-stage fd plumbing.  Out-of-stage
-          redirects on the pipeline's endpoints are a deferred extension. *)
+          redirects on the pipeline's endpoints are a deferred extension.
+          [timeout_sec] applies uniformly to every stage, mirroring how
+          {!Masc_exec.Exec_gate.run_argv_pipeline_with_status_split} applies
+          one deadline per spawned stage. *)
 
 type validation_error =
   | Empty_executable of { argv : string list }
@@ -121,12 +132,20 @@ type validation_error =
   | Pipeline_empty
   | Pipeline_too_short
   | Env_key_invalid of string
+  | Timeout_sec_not_positive of float
+      (** [timeout_sec] must be a finite number strictly greater than 0.
+          Rejected at {!validate} rather than {!of_json}, mirroring how
+          {!Cwd_not_absolute} validates a JSON-shape-correct value. *)
 
 val of_json : Yojson.Safe.t -> (execute_input, string) result
 (** Parse the typed Execute JSON boundary.  Accepts either
     [{executable, argv?, cwd?, env?, timeout_sec?}] for [Exec] or
-    [{pipeline = [{executable, argv?}, ...], cwd?, env?}] for [Pipeline].
-    [timeout_sec] is accepted at this layer and consumed by the caller.
+    [{pipeline = [{executable, argv?}, ...], cwd?, env?, timeout_sec?}] for
+    [Pipeline].  [timeout_sec] must be a JSON number (int or float) when
+    present; the value is stored on {!execute_input} and threaded through
+    dispatch as an optional per-spawn timeout override.  This function only
+    checks the JSON shape (number vs. not) — {!validate} rejects
+    non-positive or non-finite [timeout_sec] values.
     [executable] and [pipeline] together, raw command-string fields, [{stages =
     ...}], and other unsupported fields are intentionally rejected here.  No
     compatibility normalization is applied at parse time: missing [find .]
@@ -138,7 +157,9 @@ val validate : execute_input -> (unit, validation_error) result
     success, or the first {!validation_error} encountered.  Validation
     mirrors lowering's bounded argv0 autocorrection: a leading executable
     duplicate with at least one following argument is tolerated, while the
-    caller-authored input is not mutated.  No side effects, no exceptions. *)
+    caller-authored input is not mutated.  Also rejects a present
+    [timeout_sec] that is non-positive, infinite, or NaN.  No side effects,
+    no exceptions. *)
 
 val to_shell_ir_unvalidated :
   ?sandbox:Masc_exec.Sandbox_target.t ->

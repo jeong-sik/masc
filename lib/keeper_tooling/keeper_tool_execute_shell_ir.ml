@@ -217,6 +217,7 @@ let dispatch_classified
       ~workdir
       ~sandbox
       ?base_host_env
+      ?timeout_sec
       ?on_output_chunk
       envelope
   =
@@ -278,6 +279,7 @@ let dispatch_classified
                 Ok
                   (Masc_exec.Exec_dispatch.dispatch_decided
                      ?base_host_env
+                     ?timeout_sec
                      ?on_output_chunk
                      envelope))))
 ;;
@@ -291,6 +293,7 @@ let dispatch
       ~workdir
       ~sandbox
       ?base_host_env
+      ?timeout_sec
       ?on_output_chunk
       ir
   =
@@ -302,6 +305,7 @@ let dispatch
     ~workdir
     ~sandbox
     ?base_host_env
+    ?timeout_sec
     ?on_output_chunk
     (classify ir)
 ;;
@@ -323,6 +327,7 @@ let dispatch_classified_with_approval
       ~workdir
       ~sandbox
       ?base_host_env
+      ?timeout_sec
       ?on_output_chunk
       ~agent_id
       ~approval_config
@@ -352,6 +357,7 @@ let dispatch_classified_with_approval
          ~workdir
          ~sandbox
          ?base_host_env
+         ?timeout_sec
          ?on_output_chunk
          envelope
      | Ask { bin = request_bin; _ } ->

@@ -77,6 +77,7 @@ val dispatch_classified :
   workdir:string ->
   sandbox:Masc_exec.Sandbox_target.t ->
   ?base_host_env:string array ->
+  ?timeout_sec:float ->
   ?on_output_chunk:([ `Stdout of string | `Stderr of string ] -> unit) ->
   Masc_exec.Shell_ir_risk.decided Masc_exec.Shell_ir_risk.decided_ir ->
   (Masc_exec.Exec_dispatch.dispatch_result, dispatch_error) result
@@ -86,7 +87,12 @@ val dispatch_classified :
     callers pass [false].  Catastrophic operations are policy-denied, and
     typed gh capability asks and privileged programs are [Approval_required];
     both also apply to the approval-gate kill-switch path. [?on_output_chunk] is
-    forwarded to the host dispatch path for live output streaming. *)
+    forwarded to the host dispatch path for live output streaming.
+    [?timeout_sec], when supplied, is forwarded to
+    {!Masc_exec.Exec_dispatch.dispatch_decided}; absent, the dispatch chain
+    keeps its existing default timeout.  It only reaches the Host sandbox
+    spawn path — {!Masc_exec.Sandbox_target.runner} (the Docker path) has no
+    timeout parameter yet, so Docker-dispatched commands ignore it. *)
 
 val dispatch_classified_with_approval :
   ?allow_pipes:bool ->
@@ -96,6 +102,7 @@ val dispatch_classified_with_approval :
   workdir:string ->
   sandbox:Masc_exec.Sandbox_target.t ->
   ?base_host_env:string array ->
+  ?timeout_sec:float ->
   ?on_output_chunk:([ `Stdout of string | `Stderr of string ] -> unit) ->
   agent_id:Masc_exec.Agent_id.t ->
   approval_config:Masc_exec.Approval_config.t ->
@@ -111,7 +118,9 @@ val dispatch_classified_with_approval :
     [Allow] and [Suggest_confirm] proceed to {!dispatch_classified}, which
     still applies the privileged fail-closed floor before process dispatch.
     A nested pipeline whose last stage is itself a pipeline yields
-    [Too_complex], matching {!dispatch_classified}. *)
+    [Too_complex], matching {!dispatch_classified}.  [?timeout_sec] is
+    forwarded unchanged to {!dispatch_classified} on the [Allow]/
+    [Suggest_confirm] path; see its docstring for the Docker-path caveat. *)
 
 val dispatch :
   ?allow_pipes:bool ->
@@ -121,8 +130,10 @@ val dispatch :
   workdir:string ->
   sandbox:Masc_exec.Sandbox_target.t ->
   ?base_host_env:string array ->
+  ?timeout_sec:float ->
   ?on_output_chunk:([ `Stdout of string | `Stderr of string ] -> unit) ->
   Masc_exec.Shell_ir.t ->
   (Masc_exec.Exec_dispatch.dispatch_result, dispatch_error) result
 (** Run the canonical keeper Shell IR pipeline:
-    classify -> typed gate -> path validation -> dispatch_decided. *)
+    classify -> typed gate -> path validation -> dispatch_decided.
+    [?timeout_sec] is forwarded unchanged to {!dispatch_classified}. *)

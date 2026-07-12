@@ -17,11 +17,13 @@ type execute_input =
       stdin : redirect_target;
       stdout : redirect_target;
       stderr : redirect_target;
+      timeout_sec : float option;
     }
   | Pipeline of {
       stages : exec_stage list;
       cwd : string option;
       env : (string * string) list;
+      timeout_sec : float option;
     }
 
 type validation_error =
@@ -53,6 +55,7 @@ type validation_error =
   | Pipeline_empty
   | Pipeline_too_short
   | Env_key_invalid of string
+  | Timeout_sec_not_positive of float
 
 let json_type_name (json : Yojson.Safe.t) =
   match json with
@@ -194,6 +197,23 @@ let optional_redirect_target ~path fields key =
       (json_type_name value)
 ;;
 
+(* [timeout_sec] shape check only: accepts a JSON int or float and stores it
+   unvalidated.  Positivity/finiteness is [validate]'s job (check_timeout_sec
+   below), mirroring how [cwd]'s absolute-path check lives in [validate]
+   rather than here. *)
+let optional_timeout_sec ~path fields key =
+  match member fields key with
+  | None | Some `Null -> Ok None
+  | Some (`Float value) -> Ok (Some value)
+  | Some (`Int value) -> Ok (Some (float_of_int value))
+  | Some value ->
+    result_errorf
+      "%s.%s must be number, got %s"
+      path
+      key
+      (json_type_name value)
+;;
+
 let parse_stage ~path_prefix ~index (value : Yojson.Safe.t) =
   let ( let* ) = Result.bind in
   let path = Printf.sprintf "%s[%d]" path_prefix index in
@@ -254,6 +274,7 @@ let of_json (json : Yojson.Safe.t) =
   in
   let* cwd = optional_string ~path:"$" fields "cwd" in
   let* env = optional_env ~path:"$" fields in
+  let* timeout_sec = optional_timeout_sec ~path:"$" fields "timeout_sec" in
   match executable_present, pipeline_value with
   | true, Some _ ->
     Error
@@ -268,7 +289,7 @@ let of_json (json : Yojson.Safe.t) =
     let* stdin = optional_redirect_target ~path:"$" fields "stdin" in
     let* stdout = optional_redirect_target ~path:"$" fields "stdout" in
     let* stderr = optional_redirect_target ~path:"$" fields "stderr" in
-    Ok (Exec { executable; argv; cwd; env; stdin; stdout; stderr })
+    Ok (Exec { executable; argv; cwd; env; stdin; stdout; stderr; timeout_sec })
   | false, Some (path, value) ->
     (* RFC-0198 Phase B 한계: typed redirect triple(stdin/stdout/stderr)은 [Exec]
        variant에만 존재하고 [Pipeline]에는 없다. 그런데 이 세 키는
@@ -294,7 +315,7 @@ let of_json (json : Yojson.Safe.t) =
          {executable, argv} form with the typed redirect fields."
     else
       let* stages = parse_pipeline ~path value in
-      Ok (Pipeline { stages; cwd; env })
+      Ok (Pipeline { stages; cwd; env; timeout_sec })
   | false, None -> Error "$.executable or $.pipeline is required"
 ;;
 
@@ -410,6 +431,12 @@ let check_env env =
   loop env
 ;;
 
+let check_timeout_sec = function
+  | None -> Ok ()
+  | Some v when Float.is_finite v && v > 0.0 -> Ok ()
+  | Some v -> Error (Timeout_sec_not_positive v)
+;;
+
 let check_exec ~executable ~argv ~cwd ~env =
   let ( let* ) = Result.bind in
   let trimmed = String.trim executable in
@@ -437,16 +464,18 @@ let check_redirects ~stdin ~stdout ~stderr =
 ;;
 
 let validate = function
-  | Exec { executable; argv; cwd; env; stdin; stdout; stderr } ->
+  | Exec { executable; argv; cwd; env; stdin; stdout; stderr; timeout_sec } ->
     let ( let* ) = Result.bind in
     let* () = check_exec ~executable ~argv ~cwd ~env in
-    check_redirects ~stdin ~stdout ~stderr
+    let* () = check_redirects ~stdin ~stdout ~stderr in
+    check_timeout_sec timeout_sec
   | Pipeline { stages = []; _ } -> Error Pipeline_empty
   | Pipeline { stages = [ _ ]; _ } -> Error Pipeline_too_short
-  | Pipeline { stages; cwd; env } ->
+  | Pipeline { stages; cwd; env; timeout_sec } ->
     let ( let* ) = Result.bind in
     let* () = check_cwd cwd in
     let* () = check_env env in
+    let* () = check_timeout_sec timeout_sec in
     let rec each = function
       | [] -> Ok ()
       | { executable; argv } :: rest ->
@@ -517,11 +546,11 @@ let redirects_of ~cwd ~stdin ~stdout ~stderr =
 let to_shell_ir_unvalidated ?(sandbox = Masc_exec.Sandbox_target.host ()) input =
   let ( let* ) = Result.bind in
   match input with
-  | Exec { executable; argv; cwd; env; stdin; stdout; stderr } ->
+  | Exec { executable; argv; cwd; env; stdin; stdout; stderr; timeout_sec = _ } ->
     let stage = { executable; argv } in
     let redirects = redirects_of ~cwd ~stdin ~stdout ~stderr in
     shell_simple ~sandbox ?cwd ~env ~redirects stage
-  | Pipeline { stages; cwd; env } ->
+  | Pipeline { stages; cwd; env; timeout_sec = _ } ->
     let* simples =
       let rec loop acc = function
         | [] -> Ok (List.rev acc)
@@ -619,6 +648,11 @@ let pp_validation_error ppf = function
     Format.pp_print_string ppf "pipeline requires at least two stages"
   | Env_key_invalid k ->
     Format.fprintf ppf "env key %S is not [A-Za-z0-9_]+" k
+  | Timeout_sec_not_positive v ->
+    Format.fprintf
+      ppf
+      "timeout_sec %.3f must be a finite number greater than 0"
+      v
 ;;
 
 let validation_error_alternatives : validation_error -> string list = function

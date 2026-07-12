@@ -58,6 +58,12 @@ let typed_input_has_env = function
     env <> []
 ;;
 
+let typed_input_timeout_sec = function
+  | Keeper_tool_execute_typed_input.Exec { timeout_sec; _ }
+  | Keeper_tool_execute_typed_input.Pipeline { timeout_sec; _ } ->
+    timeout_sec
+;;
+
 let typed_validation_error_text error =
   Format.asprintf "%a" Keeper_tool_execute_typed_input.pp_validation_error error
 ;;

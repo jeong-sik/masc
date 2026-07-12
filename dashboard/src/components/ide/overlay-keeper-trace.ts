@@ -35,10 +35,11 @@ import { routeLinkLabels } from './ide-context-route-helpers'
  * keeps the bucket-by-line shape; consumers (editor gutter, sidebar
  * keeper rail) decide where to mount the chips.
  *
- * Conflict avoidance (RFC §10): the `keeper-trace` IDE_LAYERS entry
- * declares `conflictsWith: ['runtime']` so activating either layer drops
- * the other automatically — see `layered-overlay.ts`. PR-β does not
- * orchestrate with runtime-overlay directly; the layer registry handles it.
+ * Conflict avoidance (RFC §10): the `keeper-trace` IDE_LAYERS entry used to
+ * declare `conflictsWith: ['runtime']` so activating either layer dropped
+ * the other automatically (see `layered-overlay.ts`). The 'runtime' layer
+ * was removed (masc#24069 #49 — decorative chip, no backing overlay), so
+ * this entry no longer needs a conflict declaration.
  */
 
 export const TRACE_CHIP_CAP = 3
@@ -350,7 +351,7 @@ function selectTraceEvent(event: KeeperTraceEvent): void {
     source_id: context.sourceId ?? `trace:${event.id}`,
     keeper_id: context.keeperId,
     route_links: routeLinksForContext(context),
-  })
+  }, 'operator')
 }
 
 function traceRouteLinks(events: ReadonlyArray<KeeperTraceEvent>): ReadonlyArray<IdeContextRouteLink> {

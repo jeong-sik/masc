@@ -109,6 +109,16 @@ function normalizeTraceStep(raw: unknown): ChatTraceStep | null {
     if (ts !== undefined) step.ts = ts
     return step
   }
+  if (kind === 'progress') {
+    const text = stringValue(raw.text)
+    if (text === undefined) return null
+    const step: ChatTraceStep = { kind, text }
+    const ts = stringValue(raw.ts)
+    const oasBlockIndex = numberValue(raw.oasBlockIndex)
+    if (ts !== undefined) step.ts = ts
+    if (oasBlockIndex !== undefined) step.oasBlockIndex = oasBlockIndex
+    return step
+  }
   if (kind === 'tool') {
     const name = stringValue(raw.name)
     if (name === undefined) return null

@@ -5,6 +5,13 @@ open Server_dashboard_http
 open Server_h2_gateway_helpers
 open Server_routes_http
 
+let h2_request_authority_bad_request ~error_code ~message h2_reqd =
+  h2_respond_json_value
+    h2_reqd
+    (`Assoc [ "error_code", `String error_code; "error", `String message ])
+    ~status:`Bad_request
+;;
+
 let make_error_handler () =
   (* HTTP/2 error handler *)
   let h2_error_handler _client_addr ?request:_ error respond =
@@ -23,7 +30,7 @@ let make_error_handler () =
 
   h2_error_handler
 
-let make_request_handler ~sw ~clock ~server_start_time:_ =
+let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
   let mcp_eio_profile_of_transport_profile = function
     | Server_mcp_transport_http.Full -> Mcp_eio.Full
     | Server_mcp_transport_http.Managed_agent -> Mcp_eio.Managed_agent
@@ -62,11 +69,17 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
       | `CONNECT -> `CONNECT | `TRACE -> `TRACE | `Other s -> `Other s
     in
     let httpun_request = Httpun.Request.create ~headers:httpun_headers httpun_meth h2_req.target in
+    let handle_admitted_request request_authority =
     let path = Http.Request.path httpun_request in
-    let origin = match H2.Headers.get h2_headers "origin" with
-      | Some o -> o | None -> "*"
+    let origin = get_origin httpun_request in
+    let reflected_cors_origin =
+      public_read_cors_origin_opt ~request_authority httpun_request
     in
-    let cors = cors_headers origin in
+    let cors =
+      match reflected_cors_origin with
+      | Some origin -> cors_headers origin
+      | None -> [ "vary", "Origin" ]
+    in
     (* [with_server_state] (#9793): HTTP-layer wrapper around
        [get_server_state_result]. Returns a controlled 500 JSON error when
        server state is not initialized, instead of crashing the request
@@ -140,6 +153,15 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
              | Error () -> ())
         | Error err -> h2_respond_auth_error h2_reqd err)
     in
+    let h2_respond_board_reaction_result h2_reqd = function
+      | Ok json -> h2_respond_json_value h2_reqd json ~extra_headers:cors
+      | Error error ->
+        h2_respond_json_value
+          h2_reqd
+          (Server_board_reaction_http.error_json error)
+          ~status:(Server_board_reaction_http.error_status error :> H2.Status.t)
+          ~extra_headers:cors
+    in
     let session_id_opt = get_session_id_any httpun_request in
     let h2_respond_dashboard_index () =
       let index_path = dashboard_index_path () in
@@ -165,7 +187,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
     let _h2_authorize_tool state ~tool_name =
       authorize_tool_request
         ~base_path:(Mcp_server.workspace_config state).base_path
-        ~tool_name httpun_request
+        ~tool_name ~request_authority httpun_request
     in
 
     let dispatch_h2_route () =
@@ -175,7 +197,10 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
          ───────────────────────────────────────────────────────────────────── *)
       | `GET, "/health" ->
           let json =
-            Server_routes_http_runtime.make_health_response_json ~listener:"h2" httpun_request
+            Server_routes_http_runtime.make_health_response_json
+              ~listener:"h2"
+              ~request_authority
+              httpun_request
           in
           h2_respond_json_value h2_reqd json ~extra_headers:cors
 
@@ -210,12 +235,16 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
 
       | `GET, ("/.well-known/agent.json" | "/.well-known/agent-card.json") ->
           h2_respond_json_value h2_reqd
-            (Server_routes_http_runtime.agent_card_json httpun_request)
+            (Server_routes_http_runtime.agent_card_json
+               ~request_authority
+               httpun_request)
             ~extra_headers:cors
 
       | `GET, "/ws" ->
           let json =
-            Server_routes_http_runtime.websocket_discovery_json httpun_request
+            Server_routes_http_runtime.websocket_discovery_json
+              ~request_authority
+              httpun_request
           in
           h2_respond_json_value h2_reqd json ~extra_headers:cors
 
@@ -295,7 +324,12 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
          CORS Preflight
          ───────────────────────────────────────────────────────────────────── *)
       | `OPTIONS, _ ->
-          h2_respond_empty h2_reqd ~extra_headers:(cors_preflight_headers origin)
+          let headers =
+            match reflected_cors_origin with
+            | Some reflected -> cors_preflight_headers reflected
+            | None -> [ "vary", "Origin" ]
+          in
+          h2_respond_empty h2_reqd ~extra_headers:headers
 
       (* ─────────────────────────────────────────────────────────────────────
          MCP Endpoints
@@ -854,11 +888,11 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
       | `GET, "/api/v1/openapi.json" ->
-          let host_header = get_header_any_case httpun_request.headers "host" in
-          let (resolved_host, resolved_port) = match host_header with
-            | Some header -> parse_host_port (Some header)
-                (Env_config_core.masc_host ()) (Env_config_core.masc_http_port_int ())
-            | None -> ("", 0)
+          let resolved_host = Server_request_authority.host request_authority in
+          let resolved_port =
+            Option.value
+              ~default:(Env_config_core.masc_http_port_int ())
+              (Server_request_authority.port request_authority)
           in
           let json =
             Transport.Rest.generate_openapi_document
@@ -874,6 +908,50 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
 
       | `POST, p when String.starts_with ~prefix:"/api/v1/command-plane" p ->
           h2_respond_removed_surface h2_reqd ~surface:"command_plane" ~extra_headers:cors
+
+      | `GET, "/api/v1/board/reactions/catalog" ->
+          with_h2_public_read h2_reqd (fun _state ->
+            h2_respond_json_value
+              h2_reqd
+              (Server_board_reaction_http.catalog_json ())
+              ~extra_headers:cors)
+
+      | `GET, "/api/v1/board/reactions" ->
+          with_h2_token_permission_auth
+            h2_reqd
+            ~permission:Masc_domain.CanReadState
+            (fun _state actor ->
+               let actor = Server_utils.board_actor_author_for_write actor in
+               let result =
+                 Result.bind
+                   (Server_board_reaction_http.target_of_strings
+                      ~target_type:
+                        (Server_utils.query_param httpun_request "target_type")
+                      ~target_id:
+                        (Server_utils.query_param httpun_request "target_id"))
+                   (Server_board_reaction_http.list_json ~actor)
+               in
+               h2_respond_board_reaction_result h2_reqd result)
+
+      | `POST, "/api/v1/board/reactions" ->
+          with_h2_token_permission_auth
+            h2_reqd
+            ~permission:Masc_domain.CanVote
+            (fun _state actor ->
+               let actor = Server_utils.board_actor_author_for_write actor in
+               h2_read_body h2_reqd (fun body ->
+                 let parsed =
+                   match Yojson.Safe.from_string body with
+                   | json -> Server_board_reaction_http.toggle_request_of_json json
+                   | exception Yojson.Json_error message ->
+                     Error (Server_board_reaction_http.malformed_json message)
+                 in
+                 let result =
+                   Result.bind
+                     parsed
+                     (Server_board_reaction_http.toggle_json ~actor)
+                 in
+                 h2_respond_board_reaction_result h2_reqd result))
 
       (* ═══════════════════════════════════════════════════════════════════════
          Delegated route groups
@@ -895,12 +973,82 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           h2_respond_text h2_reqd (Printf.sprintf "404 Not Found: %s" path) ~status:`Not_found ~extra_headers:cors
 
     in
-    try
-      dispatch_h2_route ()
-    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-      let msg = Printexc.to_string exn in
-      Log.Http.error "Handler error: %s" msg;
-      h2_respond_text h2_reqd ("500 Internal Server Error: " ^ msg) ~status:`Internal_server_error ~extra_headers:cors
+    if
+      is_mcp_transport_request httpun_request
+      && not (validate_origin ~request_authority httpun_request)
+    then
+      h2_respond_json_value
+        h2_reqd
+        (`Assoc
+           [ "jsonrpc", `String "2.0"
+           ; ( "error"
+             , `Assoc
+                 [ ( "code"
+                   , `Int
+                       (Mcp_error_code.to_wire_code
+                          Mcp_error_code.Invalid_request) )
+                 ; "message", `String "Invalid origin"
+                 ] )
+           ; "id", `Null
+           ])
+        ~status:`Forbidden
+        ~extra_headers:cors
+    else
+      try dispatch_h2_route () with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+        let msg = Printexc.to_string exn in
+        Log.Http.error "Handler error: %s" msg;
+        h2_respond_text
+          h2_reqd
+          ("500 Internal Server Error: " ^ msg)
+          ~status:`Internal_server_error
+          ~extra_headers:cors
+    in
+    match
+      Server_request_authority.classify_h2_request ~trust_policy h2_req
+    with
+    | Server_request_authority.H2_authority
+        (Server_request_authority.Single request_authority) ->
+      (match classify_request_origin ~request_authority httpun_request with
+       | Multiple_origins ->
+         h2_request_authority_bad_request
+           ~error_code:"request_origin_multiple"
+           ~message:"request contains more than one Origin field"
+           h2_reqd
+       | Malformed_origin ->
+         h2_request_authority_bad_request
+           ~error_code:"request_origin_malformed"
+           ~message:"request Origin is not one complete HTTP(S) serialized origin"
+           h2_reqd
+       | Missing_origin | Single_origin _ ->
+         Server_request_authority.with_current request_authority (fun () ->
+           handle_admitted_request request_authority))
+    | Server_request_authority.H2_authority Server_request_authority.Missing ->
+      h2_request_authority_bad_request
+        ~error_code:"request_authority_missing"
+        ~message:"request is missing :authority"
+        h2_reqd
+    | Server_request_authority.H2_authority Server_request_authority.Multiple ->
+      h2_request_authority_bad_request
+        ~error_code:"request_authority_multiple"
+        ~message:"request contains multiple authority fields"
+        h2_reqd
+    | Server_request_authority.H2_authority Server_request_authority.Malformed ->
+      h2_request_authority_bad_request
+        ~error_code:"request_authority_malformed"
+        ~message:"request authority is malformed"
+        h2_reqd
+    | Server_request_authority.H2_authority Server_request_authority.Untrusted ->
+      h2_request_authority_bad_request
+        ~error_code:"request_authority_untrusted"
+        ~message:"request authority is not a configured server identity"
+        h2_reqd
+    | Server_request_authority.Unsupported_asterisk_form_options ->
+      h2_request_authority_bad_request
+        ~error_code:"request_target_asterisk_unsupported"
+        ~message:"MASC does not support authority-free OPTIONS *"
+        h2_reqd
   in
   (* H2 error handler *)
   let _h2_error_handler _client_addr ?request:_ error respond =

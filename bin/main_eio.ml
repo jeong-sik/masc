@@ -176,30 +176,35 @@ let try_rate_limit_block ~path ~client_addr ~request reqd =
                 true
               end
 
-(** Path predicate: requests that go through the MCP transport surface
-    (HTTP-based sessions, SSE, JSON-RPC messages) and therefore must pass
-    origin and protocol-version checks. *)
-let is_mcp_like_path path =
-  String.equal path "/mcp"
-  || String.equal path "/mcp/managed"
-  || String.equal path "/mcp/operator"
-  || String.equal path "/sse"
-
 (** Returns true if the request failed origin or protocol-version
     validation and the corresponding error response was sent on [reqd].
     Caller should short-circuit further handling in that case. *)
-let try_mcp_validation_block ~is_mcp_like ~request ~protocol_version ~origin reqd =
-  if is_mcp_like && not (validate_origin request) then begin
+let try_mcp_validation_block
+    ~request_authority
+    ~request
+    ~protocol_version
+    ~origin
+    reqd
+  =
+  let is_mcp_transport = is_mcp_transport_request request in
+  if
+    is_mcp_transport
+    && not (validate_origin ~request_authority request)
+  then begin
     let body = json_rpc_error Masc.Mcp_error_code.Invalid_request "Invalid origin" in
-    let headers = Httpun.Headers.of_list (
-      ("content-length", string_of_int (String.length body))
-      :: json_headers "-" protocol_version origin
-    ) in
+    let headers =
+      Httpun.Headers.of_list
+        ([ ("content-length", string_of_int (String.length body))
+         ; ("content-type", "application/json")
+         ; ("vary", "Origin")
+         ]
+         @ mcp_headers "-" protocol_version)
+    in
     let response = Httpun.Response.create ~headers `Forbidden in
     safe_reqd_respond reqd response body;
     true
   end
-  else if is_mcp_like && request.Httpun.Request.meth <> `OPTIONS &&
+  else if is_mcp_transport && request.Httpun.Request.meth <> `OPTIONS &&
           not (is_valid_protocol_version protocol_version) then begin
     let body = json_rpc_error Masc.Mcp_error_code.Invalid_request "Unsupported protocol version" in
     let headers = Httpun.Headers.of_list (
@@ -304,96 +309,9 @@ let dispatch_route ~router ~request ~path ~upgrade reqd =
           ]
       in
       Http.Response.json (Yojson.Safe.to_string json) reqd
-  | `POST, "/api/v1/board/reactions" ->
-      Http.Request.read_body_async reqd (fun body ->
-        try
-          let args = Yojson.Safe.from_string body in
-          let target_type_raw =
-            Option.value ~default:""
-              (Safe_ops.json_string_opt "target_type" args)
-          in
-          let target_id =
-            Option.value ~default:"" (Safe_ops.json_string_opt "target_id" args)
-          in
-          let user_id =
-            Option.value ~default:"" (Safe_ops.json_string_opt "user_id" args)
-          in
-          let emoji =
-            Option.value ~default:"" (Safe_ops.json_string_opt "emoji" args)
-          in
-          match Board.reaction_target_type_of_string_opt target_type_raw with
-          | None ->
-              Http.Response.json ~status:`Bad_request
-                {|{"error":"target_type must be post or comment"}|} reqd
-          | Some target_type ->
-              (match
-                 Board_dispatch.toggle_reaction ~target_type ~target_id
-                   ~user_id ~emoji
-               with
-               | Ok result ->
-                   Http.Response.json
-                     (Yojson.Safe.to_string
-                        (Board.reaction_toggle_result_to_yojson result))
-                     reqd
-               | Error e ->
-                   Http.Response.json ~status:`Bad_request
-                     (Yojson.Safe.to_string
-                        (`Assoc
-                           [
-                             ("error", `String (Tool_board.board_error_to_string e));
-                           ]))
-                     reqd)
-        with
-        | Yojson.Json_error msg ->
-            Http.Response.json ~status:`Bad_request
-              (Yojson.Safe.to_string
-                 (`Assoc [ ("error", `String ("invalid JSON: " ^ msg)) ]))
-              reqd)
-  | `GET, "/api/v1/board/reactions" ->
-      let target_type_raw =
-        Option.value ~default:"" (query_param request "target_type")
-      in
-      let target_id =
-        Option.value ~default:"" (query_param request "target_id")
-      in
-      let user_id = query_param request "user_id" in
-      (match Board.reaction_target_type_of_string_opt target_type_raw with
-       | None ->
-           Http.Response.json ~status:`Bad_request
-             {|{"error":"target_type must be post or comment"}|} reqd
-       | Some target_type ->
-           (match
-              Board_dispatch.list_reactions ~target_type ~target_id ?user_id ()
-            with
-            | Ok summary ->
-                let json =
-                  `Assoc
-                    [
-                      ( "reactions",
-                        `List (List.map Board.reaction_summary_to_yojson summary) );
-                    ]
-                in
-                Http.Response.json (Yojson.Safe.to_string json) reqd
-            | Error e ->
-                Http.Response.json ~status:`Bad_request
-                  (Yojson.Safe.to_string
-                     (`Assoc
-                        [
-                          ("error", `String (Tool_board.board_error_to_string e));
-                        ]))
-                  reqd))
-  | `GET, p when String.length p > 14 && String.sub p 0 14 = "/api/v1/board/" ->
-      let post_id = String.sub p 14 (String.length p - 14) in
-      let format = Option.value ~default:"nested" (query_param request "format") in
-      let voter = board_voter_query request in
-      let config =
-        Option.map (fun state -> (Mcp_server.workspace_config state)) !server_state
-      in
-      let (status, body) =
-        board_post_detail_json ~include_moderation:false ~blind_votes:false
-          ~config ~voter ~response_format:format ~post_id
-      in
-      Http.Response.json ~status body reqd
+  (* Board reads/reactions are owned by the typed route table: exact routes
+     ([/api/v1/board/reactions], [/catalog]) win over the board prefix route,
+     and the prefix route resolves the bearer-bound reaction actor itself. *)
   | _ -> Http.Router.dispatch router ~upgrade request reqd
 
 let log_late_response_failure ~context msg =
@@ -412,8 +330,15 @@ let try_internal_error_response reqd msg =
           Log.Http.warn "main_eio internal_error response failed: %s"
             (Printexc.to_string exn))
 
+let respond_request_authority_bad_request ~error_code ~message reqd =
+  Http.Response.json_value
+    ~status:`Bad_request
+    (`Assoc [ "error_code", `String error_code; "error", `String message ])
+    reqd
+;;
+
 (** Extended router to handle OPTIONS *)
-let make_extended_handler routes =
+let make_extended_handler ~trust_policy routes =
   fun client_addr gluten_reqd ->
     let reqd = gluten_reqd.Gluten.Reqd.reqd in
     (* Gluten upgrade capability — only available here at the connection
@@ -422,32 +347,81 @@ let make_extended_handler routes =
        RFC-0281. *)
     let upgrade = gluten_reqd.Gluten.Reqd.upgrade in
     let request = Httpun.Reqd.request reqd in
-    (* Rate limiting: enforce before any auth or routing. *)
-    let path = Http.Request.path request in
-    if try_rate_limit_block ~path ~client_addr ~request reqd then ()
-    else
-    try
-      let is_mcp_like = is_mcp_like_path path in
-      let session_id_for_version = get_session_id_any request in
-      let protocol_version =
-        get_protocol_version_for_session ?session_id:session_id_for_version request
-      in
-      let origin = get_origin request in
-      if try_mcp_validation_block ~is_mcp_like ~request ~protocol_version ~origin reqd then ()
-      else dispatch_route ~router:routes ~request ~path ~upgrade reqd
+    match
+      Server_request_authority.classify_http1_request ~trust_policy request
     with
-    (* Re-raise cancellation so Eio structured concurrency propagates cleanly.
-       Previously the catch-all swallowed Cancelled and tried to write a 500
-       response; that masks shutdown signals and interferes with per-connection
-       switch cleanup. *)
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn -> (
-      let msg = Printexc.to_string exn in
-      match Http.Late_response.classify_write_failure exn with
-      | Some failure_msg ->
-          log_late_response_failure ~context:"main_eio request handler"
-            failure_msg
-      | None -> try_internal_error_response reqd msg)
+    | Server_request_authority.Missing ->
+      respond_request_authority_bad_request
+        ~error_code:"request_authority_missing"
+        ~message:"request is missing its Host authority"
+        reqd
+    | Server_request_authority.Multiple ->
+      respond_request_authority_bad_request
+        ~error_code:"request_authority_multiple"
+        ~message:"request contains more than one Host field"
+        reqd
+    | Server_request_authority.Malformed ->
+      respond_request_authority_bad_request
+        ~error_code:"request_authority_malformed"
+        ~message:"request Host authority is malformed"
+        reqd
+    | Server_request_authority.Untrusted ->
+      respond_request_authority_bad_request
+        ~error_code:"request_authority_untrusted"
+        ~message:"request Host is not a configured server identity"
+        reqd
+    | Server_request_authority.Single request_authority ->
+      (match classify_request_origin ~request_authority request with
+       | Multiple_origins ->
+         respond_request_authority_bad_request
+           ~error_code:"request_origin_multiple"
+           ~message:"request contains more than one Origin field"
+           reqd
+       | Malformed_origin ->
+         respond_request_authority_bad_request
+           ~error_code:"request_origin_malformed"
+           ~message:"request Origin is not one complete HTTP(S) serialized origin"
+           reqd
+       | Missing_origin | Single_origin _ ->
+         Server_request_authority.with_current request_authority (fun () ->
+        (* Authority admission precedes rate limiting, auth, and routing so no
+           credential I/O or URL projection can observe an untrusted Host or
+           an ambiguous/malformed Origin field set. *)
+        let path = Http.Request.path request in
+        if try_rate_limit_block ~path ~client_addr ~request reqd
+        then ()
+        else
+          try
+            let session_id_for_version = get_session_id_any request in
+            let protocol_version =
+              get_protocol_version_for_session
+                ?session_id:session_id_for_version
+                request
+            in
+            let origin = get_origin request in
+            if
+              try_mcp_validation_block
+                ~request_authority
+                ~request
+                ~protocol_version
+                ~origin
+                reqd
+            then ()
+            else dispatch_route ~router:routes ~request ~path ~upgrade reqd
+          with
+          (* Re-raise cancellation so Eio structured concurrency propagates
+             cleanly.  Previously the catch-all swallowed Cancelled and tried
+             to write a 500 response; that masks shutdown signals and
+             interferes with per-connection switch cleanup. *)
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn ->
+            let msg = Printexc.to_string exn in
+            (match Http.Late_response.classify_write_failure exn with
+             | Some failure_msg ->
+               log_late_response_failure
+                 ~context:"main_eio request handler"
+                 failure_msg
+             | None -> try_internal_error_response reqd msg)))
 
 (** Main server loop *)
 let run_server ~sw ~env ~host ~port ~base_path =
@@ -553,6 +527,14 @@ let login_no_expiry =
     [Switch.run] wait forever. *)
 exception Graceful_shutdown
 
+type shutdown_signal =
+  | Sigterm
+  | Sigint
+
+let shutdown_signal_name = function
+  | Sigterm -> "SIGTERM"
+  | Sigint -> "SIGINT"
+
 let acquire_pid_lock port =
   match Server_startup_takeover.acquire_pid_lock port with
   | Server_startup_takeover.Acquired -> ()
@@ -595,6 +577,14 @@ let run_cmd host port cli_base_path =
   acquire_pid_lock port;
   acquire_base_path_lock normalized_base_path;
   Log.init_from_env ();
+  let shutdown_cfg =
+    match Masc.Shutdown.config_from_env_result () with
+    | Ok config -> config
+    | Error error ->
+        Log.Server.error "[FATAL] Invalid shutdown configuration: %s"
+          (Masc.Shutdown.config_error_to_string error);
+        exit 1
+  in
   (* Decouple console mirror writes from the Eio domain before any keeper
      boots: with fd 2 on a pty, a full pty buffer (scrollback/copy-mode)
      blocks write(2) outside the scheduler and halts the whole fleet
@@ -655,13 +645,14 @@ let run_cmd host port cli_base_path =
      then enqueue the signal name for the Eio watcher fiber to consume.
      [Atomic.set]/[Atomic.get] are lock-free and signal-safe. *)
   let pending_shutdown_signal = Atomic.make None in
-  let request_shutdown signal_name =
+  let shutdown_watchdog : Masc.Shutdown.watchdog option Atomic.t = Atomic.make None in
+  let request_shutdown signal =
     Masc.Shutdown.mark_shutting_down ();
     if Option.is_none (Atomic.get pending_shutdown_signal) then
-      Atomic.set pending_shutdown_signal (Some signal_name)
+      Atomic.set pending_shutdown_signal (Some signal)
   in
-  Sys.set_signal Sys.sigterm (Sys.Signal_handle (fun _ -> request_shutdown "SIGTERM"));
-  Sys.set_signal Sys.sigint (Sys.Signal_handle (fun _ -> request_shutdown "SIGINT"));
+  Sys.set_signal Sys.sigterm (Sys.Signal_handle (fun _ -> request_shutdown Sigterm));
+  Sys.set_signal Sys.sigint (Sys.Signal_handle (fun _ -> request_shutdown Sigint));
 
   let max_bind_retries = 5 in
   let rec try_start attempt =
@@ -673,20 +664,18 @@ let run_cmd host port cli_base_path =
         | None ->
             Eio.Time.sleep clock 0.05;
             await_shutdown_signal ()
-        | Some signal_name ->
-            let shutdown_cfg = Masc.Shutdown.config_from_env () in
+        | Some signal ->
             let force_timeout = shutdown_cfg.force_timeout_s in
             let t_shutdown_start = Unix.gettimeofday () in
+            let signal_name = shutdown_signal_name signal in
+            let watchdog =
+              Masc.Shutdown.start_process_deadline_watchdog_or_exit
+                ~timeout_s:force_timeout
+            in
+            Atomic.set shutdown_watchdog (Some watchdog);
             Log.Server.info
-              "[MASC] Received %s, shutting down gracefully (timeout=%.0fs)..."
-              signal_name force_timeout;
-            Eio.Fiber.fork_daemon ~sw (fun () ->
-                Eio.Time.sleep clock force_timeout;
-                let elapsed = Unix.gettimeofday () -. t_shutdown_start in
-                Log.Server.error
-                  "[MASC] Graceful shutdown timed out after %.1fs (limit=%.0fs), forcing exit."
-                  elapsed force_timeout;
-                exit 1);
+              "[MASC] Received %s, shutting down gracefully (timeout=%.0fs, hard_exit=%d)..."
+              signal_name force_timeout Masc.Shutdown.process_deadline_exit_code;
             (* Phase 1: Notify SSE clients *)
             let t_phase = Unix.gettimeofday () in
             let shutdown_data =
@@ -810,6 +799,13 @@ let run_cmd host port cli_base_path =
         exit 1)
   in
   try_start 0;
+  (match Atomic.get shutdown_watchdog with
+   | None -> ()
+   | Some watchdog ->
+       (match Masc.Shutdown.disarm_deadline_watchdog watchdog with
+        | Masc.Shutdown.Disarmed | Masc.Shutdown.Already_disarmed -> ()
+        | Masc.Shutdown.Already_fired ->
+            Masc.Shutdown.await_deadline_watchdog watchdog));
   Log.Server.info "MASC MCP: Shutdown complete."
 
 let run_cmd_exit host port base_path =

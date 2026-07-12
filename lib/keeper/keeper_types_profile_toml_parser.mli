@@ -179,9 +179,14 @@ val string_of_toml_value_for_env :
   Keeper_toml_loader.toml_value -> string option
 val oas_env_key_prefix : string
 val keeper_unified_max_tokens_oas_env_key : string
+val keeper_unified_max_tokens_toml_key : string
 val oas_env_key_is_allowed : string -> bool
 val extract_oas_env_from_doc :
   Keeper_toml_loader.toml_doc -> (string * string) list
+val validate_unified_max_tokens_toml_value :
+  Keeper_toml_loader.toml_doc -> (unit, string) result
+val parse_unified_max_tokens_override_of_oas_env :
+  (string * string) list -> (int option, string) result
 val unified_max_tokens_override_of_oas_env :
   ?keeper_name:string -> (string * string) list -> int option
 val profile_defaults_of_toml :
@@ -198,6 +203,7 @@ val current_unknown_keeper_toml_warning_keys : unit -> string list
 val take_warning_keys : int -> 'a list -> 'a list
 val normalize_unknown_keeper_toml_keys : String.t list -> String.t list
 val warn_unknown_keeper_toml_keys_once : path:string -> String.t list -> bool
+val warn_unknown_keeper_toml_key_names : path:string -> String.t list -> unit
 val warn_unknown_keeper_toml_keys :
   path:string -> Keeper_toml_loader.toml_doc -> unit
 val merge_string_list : base:'a list -> 'a list -> 'a list

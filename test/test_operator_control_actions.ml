@@ -33,7 +33,8 @@ let test_task_inject_executes_immediately () =
             [
               ("actor", `String "operator");
               ("action_type", `String "task_inject");
-              ("target_type", `String "root");
+              ( "target_type"
+              , `String Operator_action_constants.workspace_target_type );
               ( "payload",
                 `Assoc
                   [
@@ -63,7 +64,7 @@ let test_task_inject_executes_immediately () =
       let tasks = Workspace.get_tasks_raw config in
       Alcotest.(check int) "task injected" 1 (List.length tasks))
 
-let test_digest_defaults_to_root_target () =
+let test_digest_defaults_to_workspace_target () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->
@@ -79,7 +80,9 @@ let test_digest_defaults_to_root_target () =
         | Ok json -> json
         | Error err -> Alcotest.fail err
       in
-      Alcotest.(check string) "default target_type" "root"
+      Alcotest.(check string)
+        "default target_type"
+        Operator_action_constants.workspace_target_type
         Yojson.Safe.Util.(digest_json |> member "target_type" |> to_string))
 
 let test_operator_action_rejects_legacy_action_aliases () =
@@ -138,3 +141,29 @@ let test_operator_action_rejects_legacy_action_aliases () =
    a retired dashboard surface; the producers (split_review_items,
    *_review_item) were also removed. Review decisions still reach the UI
    via [recent_reviews]. *)
+
+let () =
+  Alcotest.run
+    "operator_control_actions"
+    [ ( "actions"
+      , [ Alcotest.test_case
+            "task inject executes immediately"
+            `Quick
+            test_task_inject_executes_immediately
+        ; Alcotest.test_case
+            "digest defaults to workspace target"
+            `Quick
+            test_digest_defaults_to_workspace_target
+        ; Alcotest.test_case
+            "legacy action aliases are rejected"
+            `Quick
+            test_operator_action_rejects_legacy_action_aliases
+        ] )
+    ; ( "confirmation"
+      , [ Alcotest.test_case
+            "expired token is rejected"
+            `Quick
+            Test_operator_control_confirm.test_confirm_rejects_expired_token
+        ] )
+    ]
+;;

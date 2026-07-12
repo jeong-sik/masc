@@ -17,7 +17,7 @@ type runtime_execution = {
   max_context_resolution : Keeper_context_runtime.max_context_resolution;
   max_context : int;
   temperature : float;
-  max_tokens : int;
+  max_tokens : int option;
 }
 
 let next_fail_open_runtime_for_turn =
@@ -75,7 +75,6 @@ let degraded_retry_bypasses_slot_phase_guard
       | Keeper_turn_driver.Admission_queue_timeout _
       | Keeper_turn_driver.Admission_queue_rejected _
       | Keeper_turn_driver.Turn_timeout _
-      | Keeper_turn_driver.Max_tokens_ceiling_violation _
       | Keeper_turn_driver.Ambiguous_post_commit _
       (* RFC-0159 Phase A: Internal_* variants are not OAS-budget timeouts. *)
       | Keeper_turn_driver.Internal_unhandled_exception _

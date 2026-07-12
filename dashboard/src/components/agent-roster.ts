@@ -1,7 +1,8 @@
 // MASC Dashboard — Runtime Roster
 // Workspace agents, keeper runtime fibers, configured keepers, and task owners
-// are separate surfaces. This roster may display them together, but labels
-// must not imply they are the same namespace.
+// are separate surfaces internally. Fleet joins them only through typed
+// keeper_id / keeper_name / agent_name relation fields; display-name parsing
+// is not an identity contract. The roster therefore needs no disclaimer copy.
 
 import { html } from 'htm/preact'
 import { useMemo, useState } from 'preact/hooks'
@@ -20,15 +21,10 @@ import { EmptyState } from './common/feedback-state'
 import { ringFocusClasses } from './common/ring'
 import { RouteLink } from './common/route-link'
 import { TimeAgo } from './common/time-ago'
-import {
-  keeperIdentityKeys,
-  keeperPrincipalKey,
-  keeperPrimaryName,
-} from './common/keeper-identity'
 import { AgentAvatar } from './overview/agent-avatar'
 import { AgentPresence } from './common/agent-presence'
 import { AgentCapability } from './common/agent-capability'
-import { openAgentDetail } from './agent-detail-state'
+import { openAgentProfile } from './agent-detail-state'
 import { openKeeperDetail } from './keeper-detail'
 import { formatDuration } from '../lib/format-time'
 import { trimText } from '../lib/truncate'
@@ -75,6 +71,8 @@ import { FL_TONE_LABEL, type FleetTone } from '../lib/fleet-tone'
 import type { KeeperCompositeSnapshot } from '../api/schemas/keeper-composite'
 import { compositeSnapshotForKeeper } from '../lib/keeper-composite-lookup'
 import { buildCompositeByKeeperKey, fleetCompositeSnapshot } from '../composite-signals'
+import { showSpawnPanel } from './keeper-spawn/keeper-spawn-state'
+import { operatorSnapshot } from '../operator-store'
 
 type RosterStateNote = { label: string; text: string; kind?: string }
 type RosterPresenceDisplay = { status: string | null; detail: string | null }
@@ -363,6 +361,17 @@ const FLEET_CTX_HOT_PCT = 85
 
 type FleetVital = { k: string; v: string }
 
+type FleetRuntimeEvidence =
+  | { source: 'assigned'; value: string }
+  | { source: 'unknown'; value: null }
+
+export function fleetRuntimeEvidence(keeper: Keeper | null): FleetRuntimeEvidence {
+  const runtime = keeperDisplayRuntime(keeper)
+  return runtime
+    ? { source: 'assigned', value: runtime.value }
+    : { source: 'unknown', value: null }
+}
+
 // Build the aside `런타임` vitals grid from shared keeper runtime display only.
 // Fields with no live source (e.g. tps) are omitted rather than fabricated —
 // the audit (P1-6) flags `tps` as having no roster-model source.
@@ -373,8 +382,11 @@ function fleetRuntimeVitals(
   if (!keeper) return []
   const vitals: FleetVital[] = []
 
-  const runtime = keeperDisplayRuntime(keeper)
-  if (runtime) vitals.push({ k: 'runtime', v: runtime.value })
+  const runtime = fleetRuntimeEvidence(keeper)
+  vitals.push({
+    k: runtime.source === 'assigned' ? 'runtime · 할당' : 'runtime · 미확인',
+    v: runtime.value ?? '미확인',
+  })
 
   if (typeof keeper.keeper_age_s === 'number' && Number.isFinite(keeper.keeper_age_s)) {
     vitals.push({ k: 'uptime', v: formatDuration(keeper.keeper_age_s) })
@@ -422,15 +434,52 @@ function fleetAttentionItems(
     .map(action => ({ sev: fleetAttentionSev(action.severity), text: action.reason }))
 }
 
-function registerKeeperLookup<T extends Pick<Keeper, 'keeper_id' | 'name' | 'agent_name'>>(
-  lookup: Map<string, T>,
-  source: T,
-) {
-  const candidates = keeperIdentityKeys(source.keeper_id ?? null, source.name, source.agent_name)
-  for (const candidate of candidates) {
-    const key = candidate?.trim()
-    if (!key || lookup.has(key)) continue
-    lookup.set(key, source)
+function relationValue(value: string | null | undefined): string | null {
+  const trimmed = value?.trim()
+  return trimmed ? trimmed : null
+}
+
+function relationKey(
+  kind: 'keeper-id' | 'keeper-name' | 'agent-name',
+  value: string | null | undefined,
+): string | null {
+  const relation = relationValue(value)
+  return relation ? `${kind}:${relation}` : null
+}
+
+/** Fleet identity joins use backend-projected relation fields only.
+ *
+ * The key namespace is part of the relation: equal text in a keeper id, keeper
+ * name, and agent name does not make those identifiers interchangeable. In
+ * particular, this code never parses `keeper-*-agent` or generated nicknames. */
+function keeperRelationKeys(source: Keeper): string[] {
+  const keys = [
+    relationKey('keeper-id', source.keeper_id),
+    relationKey('keeper-name', source.name),
+    relationKey('agent-name', source.agent_name),
+    relationKey('agent-name', source.agent?.name),
+  ]
+  return Array.from(new Set(keys.filter((key): key is string => key != null)))
+}
+
+function agentRelationKeys(agent: Pick<Agent, 'name' | 'keeper_id' | 'keeper_name'>): string[] {
+  const keys = [
+    relationKey('keeper-id', agent.keeper_id),
+    relationKey('keeper-name', agent.keeper_name),
+    relationKey('agent-name', agent.name),
+  ]
+  return Array.from(new Set(keys.filter((key): key is string => key != null)))
+}
+
+function fleetKeeperKey(source: Pick<Keeper, 'keeper_id' | 'name'>): string {
+  const keeperId = relationValue(source.keeper_id)
+  if (keeperId) return `keeper-id:${keeperId}`
+  return `keeper-name:${source.name.trim()}`
+}
+
+function registerKeeperLookup(lookup: Map<string, Keeper>, source: Keeper) {
+  for (const key of keeperRelationKeys(source)) {
+    if (!lookup.has(key)) lookup.set(key, source)
   }
 }
 
@@ -440,27 +489,31 @@ function buildKeeperRuntimeLookup(keeperList: Keeper[]): Map<string, Keeper> {
   return lookup
 }
 
-function findKeeperRuntime(agentName: string, keeperList: Keeper[]): Keeper | null {
-  const target = agentName.trim()
-  if (!target) return null
-  const lookup = buildKeeperRuntimeLookup(keeperList)
-  return lookup.get(target) ?? lookup.get(target.toLowerCase()) ?? null
-}
-
 function findKeeperRuntimeForAgent(
   agent: Pick<Agent, 'name' | 'keeper_id' | 'keeper_name'>,
   lookup: Map<string, Keeper>,
 ): Keeper | null {
-  const candidates = keeperIdentityKeys(
-    agent.keeper_id ?? null,
-    agent.keeper_name ?? null,
-    agent.name,
-  )
-  for (const candidate of candidates) {
-    const keeper = lookup.get(candidate)
+  for (const key of agentRelationKeys(agent)) {
+    const keeper = lookup.get(key)
     if (keeper) return keeper
   }
   return null
+}
+
+function fleetRosterKey(
+  agent: Pick<Agent, 'name' | 'keeper_id' | 'keeper_name'>,
+  lookup: Map<string, Keeper>,
+): string {
+  const keeper = findKeeperRuntimeForAgent(agent, lookup)
+  return keeper
+    ? fleetKeeperKey(keeper)
+    : `agent-name:${agent.name.trim()}`
+}
+
+function fleetKeeperIdEvidence(keeper: Keeper | null): string | null {
+  const keeperId = relationValue(keeper?.keeper_id)
+  const keeperName = relationValue(keeper?.name)
+  return keeperId && keeperId !== keeperName ? keeperId : null
 }
 
 type KeeperFilterMode = 'all' | 'agent-only' | 'keeper-only'
@@ -484,21 +537,14 @@ function keeperHasLiveAgentPresence(
   keeper: Keeper,
   liveAgentKeys: ReadonlySet<string>,
 ): boolean {
-  const candidates = keeperIdentityKeys(keeper.keeper_id ?? null, keeper.name, keeper.agent_name)
-  return candidates.some(candidate => liveAgentKeys.has(candidate))
+  return keeperRelationKeys(keeper).some(key => liveAgentKeys.has(key))
 }
 
 function liveAgentIdentityKeys(agentList: readonly Agent[]): Set<string> {
   const keys = new Set<string>()
   for (const agent of agentList) {
     if (!agentCanBackKeeperRuntime(agent)) continue
-    for (const candidate of keeperIdentityKeys(
-      agent.keeper_id ?? null,
-      agent.keeper_name ?? null,
-      agent.name,
-    )) {
-      keys.add(candidate)
-    }
+    for (const key of agentRelationKeys(agent)) keys.add(key)
   }
   return keys
 }
@@ -559,13 +605,8 @@ function scopeAgentsByKeeperFilter(
     matchesKeeperFilter(agent, keeperLookup, keeperFilter))
 }
 
-function keeperRuntimeName(source: Pick<Keeper, 'name' | 'agent_name'>): string {
-  const runtimeName = source.agent_name?.trim()
-  return runtimeName && runtimeName.length > 0 ? runtimeName : source.name
-}
-
 function keeperRuntimeAgentProjection(source: Keeper): RosterAgent | null {
-  const displayName = keeperPrimaryName(source.name, source.agent_name) ?? keeperRuntimeName(source)
+  const displayName = relationValue(source.name)
   if (!displayName) return null
 
   const linkedAgent = source.agent
@@ -629,13 +670,9 @@ function buildAgentRoster(
 
   for (const agent of agentList) {
     const keeper = findKeeperRuntimeForAgent(agent, keeperLookup)
-    const key =
-      keeperPrincipalKey(
-        keeper?.keeper_id ?? agent.keeper_id ?? null,
-        keeper?.name ?? agent.keeper_name ?? null,
-        keeper?.agent_name ?? agent.name,
-      )
-      ?? agent.name
+    const key = keeper
+      ? fleetKeeperKey(keeper)
+      : `agent-name:${agent.name.trim()}`
     const normalizedAgent: RosterAgent =
       keeper != null
         ? {
@@ -651,7 +688,7 @@ function buildAgentRoster(
   for (const source of keeperList) {
     const keeperRuntimeAgent = keeperRuntimeAgentProjection(source)
     if (!keeperRuntimeAgent) continue
-    const key = keeperPrincipalKey(source.keeper_id ?? null, source.name, source.agent_name) ?? keeperRuntimeAgent.name
+    const key = fleetKeeperKey(source)
     roster.set(key, mergeRosterAgent(roster.get(key), keeperRuntimeAgent))
   }
 
@@ -844,6 +881,8 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
   const expectedScopedCount = expectedCountForKeeperFilter(keeperFilter, runtimeCounts)
   const namespaceStatus = namespaceTruth.value?.root.status ?? serverStatus.value
   const namespaceName = namespaceStatus?.project ?? 'default'
+  const admission = operatorSnapshot.value?.admission_queue ?? null
+  const admissionError = operatorSnapshot.value?.admission_queue_error ?? null
 
   const scopedAgents = useMemo(
     () => scopeAgentsByKeeperFilter(rosterAgents, runtimeKeeperList, keeperFilter, keeperRuntimeLookup),
@@ -852,18 +891,18 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
   const bandByAgent = useMemo(
     () => new Map(
       scopedAgents.map(agent => {
-        const keeperRuntime =
-          keeperRuntimeLookup.get(agent.name)
-            ?? findKeeperRuntimeForAgent(agent, keeperRuntimeLookup)
-            ?? findKeeperRuntime(agent.name, runtimeKeeperList)
+        const keeperRuntime = findKeeperRuntimeForAgent(agent, keeperRuntimeLookup)
         // RFC-0135 PR-12: thread composite snapshot through band
         // derivation so stale-blocker demotion in the typed SSOT
         // applies to the badge color too.
         const composite = compositeSnapshotForKeeper(keeperRuntime, compositeByKeeperKey)
-        return [agent.name, runtimeBandMetaForAgent(agent, keeperRuntime, composite)] as const
+        return [
+          fleetRosterKey(agent, keeperRuntimeLookup),
+          runtimeBandMetaForAgent(agent, keeperRuntime, composite),
+        ] as const
       }),
     ),
-    [scopedAgents, keeperRuntimeLookup, runtimeKeeperList, compositeByKeeperKey],
+    [scopedAgents, keeperRuntimeLookup, compositeByKeeperKey],
   )
   const filtered = useMemo(() => scopedAgents.slice()
     .sort((a: Agent, b: Agent) => {
@@ -879,12 +918,16 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
         paused: 3,
         offline: 4,
       }
-      const aOrder = order[bandByAgent.get(a.name)?.key ?? 'attention']
-      const bOrder = order[bandByAgent.get(b.name)?.key ?? 'attention']
+      const aOrder = order[
+        bandByAgent.get(fleetRosterKey(a, keeperRuntimeLookup))?.key ?? 'attention'
+      ]
+      const bOrder = order[
+        bandByAgent.get(fleetRosterKey(b, keeperRuntimeLookup))?.key ?? 'attention'
+      ]
       if (aOrder !== bOrder) return aOrder - bOrder
       return a.name.localeCompare(b.name)
     }),
-    [scopedAgents, bandByAgent],
+    [scopedAgents, bandByAgent, keeperRuntimeLookup],
   )
 
   const counts = countAgentsByStatus(scopedAgents, runtimeKeeperList, compositeByKeeperKey)
@@ -895,10 +938,6 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     loadedCount: scopedAgents.length,
     expectedCount: expectedScopedCount,
   })
-  const resultCountLabel =
-    expectedScopedCount > scopedAgents.length
-      ? `항목 ${filtered.length}개 표시 · 예상 ${expectedScopedCount}개`
-      : `항목 ${filtered.length}개 표시 중`
   const liveKeepers = runtimeCounts.live.keepers
   const livePausedKeepers = runtimeCounts.live.pausedKeepers
   const liveOfflineKeepers = runtimeCounts.live.offlineKeepers
@@ -949,11 +988,9 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
         : `${scopeLabel}.${configuredIdleHint ? ` ${configuredIdleHint}.` : ''} 상태 정보가 올라오면 목록이 채워집니다.`
 
   const rosterRows = useMemo(() => filtered.map((agent: Agent) => {
-    const keeperRuntime =
-      keeperRuntimeLookup.get(agent.name)
-      ?? findKeeperRuntimeForAgent(agent, keeperRuntimeLookup)
-      ?? findKeeperRuntime(agent.name, runtimeKeeperList)
-    const band = bandByAgent.get(agent.name) ?? runtimeBandMeta('attention')
+    const keeperRuntime = findKeeperRuntimeForAgent(agent, keeperRuntimeLookup)
+    const rowKey = fleetRosterKey(agent, keeperRuntimeLookup)
+    const band = bandByAgent.get(rowKey) ?? runtimeBandMeta('attention')
     const compositeForMonitoring: KeeperCompositeSnapshot | null =
       compositeSnapshotForKeeper(keeperRuntime, compositeByKeeperKey)
     const keeperMonitoring = keeperRuntime ? summarizeKeeperMonitoring(keeperRuntime, compositeForMonitoring) : null
@@ -992,12 +1029,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
       keeperRuntime?.latest_tool_call_count
       ?? null
     const toolAuditAt = keeperRuntime?.tool_audit_at ?? null
-    const displayName =
-      keeperPrimaryName(
-        keeperRuntime?.name ?? null,
-        keeperRuntime?.agent_name ?? agent.name,
-      )
-      ?? agent.name
+    const displayName = relationValue(keeperRuntime?.name) ?? agent.name
     const fsmPhaseKey =
       keeperMonitoring?.phase.key && keeperMonitoring.phase.key !== 'unknown'
         ? keeperMonitoring.phase.key
@@ -1011,11 +1043,11 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
         openKeeperDetail(keeperRuntime)
         return
       }
-      openAgentDetail(agent.name)
+      openAgentProfile(agent.name)
     }
 
     return {
-      key: agent.name,
+      key: rowKey,
       agent,
       keeperRuntime,
       band,
@@ -1071,10 +1103,10 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
   const selectedVitals = selectedRow
     ? fleetRuntimeVitals(selectedRow.keeperRuntime, selectedRow.contextMeta?.detail ?? null)
     : []
-  const selectedKeeperId = selectedRow?.keeperRuntime?.keeper_id?.trim() || null
   const selectedKoreanName = selectedRow?.keeperRuntime?.koreanName?.trim()
     || selectedRow?.agent.koreanName?.trim()
     || null
+  const selectedKeeperId = fleetKeeperIdEvidence(selectedRow?.keeperRuntime ?? null)
 
   // Render one fleet roster row (.fl-row), layered with the live classes /
   // test-ids the tests + CSS rely on (v2-monitoring-roster-row, data-tone,
@@ -1112,11 +1144,8 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     const latestTool = row.recentTools[0] ?? (row.toolCallCount != null && row.toolCallCount > 0 ? `${row.toolCallCount} calls` : '—')
     const ctxPct = row.contextMeta?.pct ?? null
     const ctxHot = ctxPct != null && ctxPct >= FLEET_CTX_HOT_PCT
-    // namespace line: keeper id is the closest stable namespace handle the
-    // roster row model carries; agents without a keeper runtime show none.
-    const namespaceLine = row.keeperRuntime?.keeper_id?.trim()
-      || row.keeperRuntime?.agent_name?.trim()
-      || null
+    const runtime = fleetRuntimeEvidence(row.keeperRuntime)
+    const keeperId = fleetKeeperIdEvidence(row.keeperRuntime)
 
     const handleRowKey = (e: KeyboardEvent) => {
       if (e.key === 'Enter' || e.key === ' ') {
@@ -1131,8 +1160,11 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
         tabIndex=${0}
         key=${row.key}
         data-testid="keeper-operations-row"
+        data-roster-key=${row.key}
         data-tone=${tone}
-        aria-label=${`${row.displayName} 선택`}
+        aria-label=${row.isKeeper
+          ? `${row.displayName} keeper 선택`
+          : `${row.displayName} agent 선택`}
         aria-pressed=${selected}
         onClick=${() => setSelectedKey(row.key)}
         onKeyDown=${handleRowKey}
@@ -1159,7 +1191,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             </div>
             ${row.keeperRuntime?.sandbox_profile === 'local'
               ? html`<div class="fl-ns"><span class="fl-sandbox" title="git worktree 격리 · localhost-trust (OS sandbox 없음)">⬡</span> worktree 격리</div>`
-              : namespaceLine ? html`<div class="fl-ns">${namespaceLine}</div>` : null}
+              : keeperId ? html`<div class="fl-ns">keeper-id · ${keeperId}</div>` : null}
           </div>
         </div>
 
@@ -1185,6 +1217,20 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
         </div>
 
         <div
+          class="fl-runtime ${runtime.source === 'unknown' ? 'unknown' : ''}"
+          data-runtime-source=${runtime.source}
+          title=${runtime.source === 'assigned'
+            ? `할당 runtime · ${runtime.value}`
+            : 'runtime source · 미확인'}
+          aria-label=${runtime.source === 'assigned'
+            ? `할당 런타임 ${runtime.value}`
+            : '런타임 출처 미확인'}
+        >
+          <span class="fl-runtime-source">${runtime.source === 'assigned' ? '할당' : '미확인'}</span>
+          ${runtime.value ? html`<span class="fl-runtime-value">${runtime.value}</span>` : null}
+        </div>
+
+        <div
           class="fl-tool ${row.recentTools.length || (row.toolCallCount ?? 0) > 0 ? '' : 'none'}"
           title=${latestTool}
           aria-label=${`최근 도구 ${latestTool}`}
@@ -1206,46 +1252,71 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
   return html`
     <div class="v2-monitoring-surface fl-shell agent-page">
-      <section class="monitor-surface-card monitor-surface-card-strong v2-monitoring-card p-5" aria-label="runtime surface directory">
-        <div class="flex flex-col gap-5">
-          <div class="flex min-w-0 flex-col gap-2.5">
-            <div class="fl-health">
-              <span class="fl-hpill ok">실행 rows <b>${healthRun}</b></span>
-                ${healthTransient > 0 ? html`<span class="fl-hpill busy">전이 rows <b>${healthTransient}</b></span>` : null}
-              <span class="fl-hpill warn">일시정지 rows <b>${healthPaused}</b></span>
-              <span class="fl-hpill">오프라인 rows <b>${healthOffline}</b></span>
-              ${healthAttention > 0 ? html`<span class="fl-hpill bad">주의 <b>${healthAttention}</b></span>` : null}
-            </div>
-            <div class="flex flex-wrap items-center gap-2 text-2xs text-[var(--color-fg-muted)]">
-              <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5">workspace agents ≠ keeper fibers</span>
-              <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5">configured keeper ≠ running fiber</span>
-              <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5">task owner ≠ live agent</span>
-            </div>
-            <span class="inline-flex w-fit items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-accent-soft)] px-2.5 py-1 text-2xs font-medium text-[var(--color-fg-secondary)]">${resultCountLabel}</span>
-          </div>
-
-          ${showExecutionFallbackState
-            ? html`
-                <div class="rounded-[var(--r-1)] border ${executionError.value ? 'border-[var(--warn-border)] bg-[var(--warn-10)]' : 'border-[var(--accent-20)] bg-[var(--accent-10)]'} px-4 py-3 shadow-[var(--shadow-panel)]">
-                  <div class="flex flex-col gap-2">
-                    <div class="flex flex-wrap items-center gap-2">
-                      <strong class="text-xs font-semibold text-[var(--color-fg-primary)]">${fallbackStateTitle}</strong>
-                    </div>
-                    <p class="m-0 text-xs leading-paragraph text-[var(--color-fg-primary)]">${fallbackStateMessage}</p>
-                    <div class="flex flex-wrap items-center gap-2 text-2xs text-[var(--color-fg-muted)]">
-                      <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5">프로젝트 ${namespaceName}</span>
-                      ${configuredIdleHint ? html`<span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5">${configuredIdleHint}</span>` : null}
-                    </div>
-                  </div>
-                </div>
-              `
-            : null}
-
+      <header class="fl-top" aria-label="Keeper Fleet summary">
+        <div class="fl-brand">
+          <span class="ov-eyebrow">Observatory</span>
+          <h1 class="fl-title">Keeper Fleet</h1>
         </div>
-      </section>
+        <div class="fl-health">
+          <span class="fl-hpill ok">런타임 가능 <b>${healthRun}</b></span>
+          ${healthTransient > 0 ? html`<span class="fl-hpill busy">전이 <b>${healthTransient}</b></span>` : null}
+          <span class="fl-hpill warn">일시정지 <b>${healthPaused}</b></span>
+          <span class="fl-hpill">오프라인 <b>${healthOffline}</b></span>
+          ${healthAttention > 0 ? html`<span class="fl-hpill bad">주의 <b>${healthAttention}</b></span>` : null}
+        </div>
+        <span class="fl-spacer"></span>
+        <button
+          type="button"
+          class="fl-create"
+          data-testid="keeper-spawn-panel"
+          onClick=${() => { showSpawnPanel.value = true }}
+        >＋ 새 Keeper</button>
+        <div class="fl-meta"><span class="live">● live</span><span>${namespaceName}</span></div>
+        <span class="sr-only">실행 rows ${healthRun} · 전이 rows ${healthTransient} · 일시정지 rows ${healthPaused} · 오프라인 rows ${healthOffline}</span>
+      </header>
 
-      <div class="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_372px]">
-        <section class="fl-main monitor-surface-card monitor-surface-card-medium v2-monitoring-panel overflow-hidden" aria-label="Keeper operations list">
+      ${showExecutionFallbackState
+        ? html`
+            <div class="fl-fallback ${executionError.value ? 'error' : ''}">
+              <strong>${fallbackStateTitle}</strong>
+              <span>${fallbackStateMessage}</span>
+              ${configuredIdleHint ? html`<span class="mono">${configuredIdleHint}</span>` : null}
+            </div>
+          `
+        : null}
+
+      ${admission ? html`
+        <section class="fl-capacity" aria-label="Runtime admission capacity" data-testid="fleet-admission-capacity">
+          <div class="fl-capacity-lead">
+            <span class="ov-eyebrow">Admission</span>
+            <strong>관측값</strong>
+          </div>
+          <div class="fl-capacity-cell">
+            <span>활성 / 상한</span>
+            <strong>${admission.active} / ${admission.max_concurrent}</strong>
+          </div>
+          <div class="fl-capacity-cell ${admission.queue_depth > 0 ? 'warn' : ''}">
+            <span>대기열</span>
+            <strong>${admission.queue_depth}</strong>
+          </div>
+          <div class="fl-capacity-cell">
+            <span>가용 슬롯</span>
+            <strong>${admission.available}</strong>
+          </div>
+          <div class="fl-capacity-cell owner">
+            <span>제어 주체</span>
+            <strong>${admission.throttle_owner}</strong>
+          </div>
+        </section>
+      ` : admissionError ? html`
+        <div class="fl-fallback error" role="status" data-testid="fleet-admission-error">
+          <strong>Admission 관측 불가</strong>
+          <span>${admissionError}</span>
+        </div>
+      ` : null}
+
+      <div class="fl-body">
+        <section class="fl-main v2-monitoring-panel" aria-label="Keeper operations list">
           <!--
             keeper-v2 Fleet skin (fleet.css .fl-*): roster header + tone-rail
             rows + attention/steady group dividers. The shell's SurfaceLead
@@ -1262,6 +1333,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             <span>Keeper</span>
             <span>운영판정 · 차단 · 단계</span>
             <span>컨텍스트</span>
+            <span>런타임 · 출처</span>
             <span>최근 도구</span>
             <span class="r">액션</span>
           </div>
@@ -1287,7 +1359,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
           </div>
         </section>
 
-        <aside class="fl-aside monitor-surface-card monitor-surface-card-medium v2-monitoring-panel" aria-label="Selected keeper detail">
+        <aside class="fl-aside v2-monitoring-panel" aria-label="Selected keeper detail">
           ${selectedRow ? html`
             <div class="fl-as-head">
               <span class="fl-as-ey">${selectedRow.isKeeper ? 'selected keeper runtime' : 'selected workspace agent'}</span>
@@ -1314,7 +1386,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                   <div class="fl-as-kr">
                     ${selectedKoreanName ?? ''}
                     ${selectedKoreanName && selectedKeeperId ? ' · ' : ''}
-                    ${selectedKeeperId ? html`<span class="font-mono">${selectedKeeperId}</span>` : null}
+                    ${selectedKeeperId ? html`<span class="font-mono">keeper-id · ${selectedKeeperId}</span>` : null}
                   </div>
                 ` : null}
                 <div class="mt-1.5 flex flex-wrap items-center gap-2 text-2xs text-[var(--color-fg-secondary)]">
@@ -1338,6 +1410,10 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                 type="button"
                 class="fl-open-chat v2-monitoring-action"
                 aria-label=${selectedRow.detailLabel}
+                data-detail-kind=${selectedRow.isKeeper ? 'keeper' : 'agent-profile'}
+                data-detail-target=${selectedRow.isKeeper
+                  ? selectedRow.keeperRuntime?.name ?? selectedRow.displayName
+                  : selectedRow.agent.name}
                 onClick=${selectedRow.openDetail}
               >
                 <span>상세 열기</span><span class="arr">▸</span>

@@ -690,6 +690,7 @@ let start ~sw ~env ~clock ~state =
          outbound-less async poll store ([Keeper_msg_async]). *)
       Gate_keeper_backend.dispatch_with_text_snapshot
         ~connector_kind:Gate_keeper_backend.Discord
+        ~submission_owner:Gate_keeper_backend.Channel_actor
         ~sw ~clock
         ~proc_mgr:state.Mcp_server.proc_mgr
         ~net:state.Mcp_server.net

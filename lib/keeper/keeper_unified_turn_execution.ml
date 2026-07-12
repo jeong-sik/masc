@@ -29,7 +29,9 @@ type retry_loop_input =
 let autonomous_yield_request ~base_path ~keeper_name ~channel =
   if
     Keeper_turn_admission.chat_waiting ~base_path ~keeper_name
-    || Keeper_chat_queue.length ~keeper_name > 0
+    || (match Keeper_chat_queue.pending_count ~keeper_name with
+        | Ok count -> count > 0
+        | Error _ -> true)
   then
     let boundary =
       match channel with
@@ -188,6 +190,7 @@ let run (ctx : ctx)
                Keeper_agent_run.run_turn
                  ~config
                  ~meta:run_meta
+                 ~profile_defaults
                  ?hitl_delivery_channel
                  ?hitl_approval_grant
                  ~turn_ctx_cell
@@ -217,7 +220,7 @@ let run (ctx : ctx)
                  ~runtime_rotation_attempts:
                    (List.rev turn_state.runtime_rotation_attempts)
                  ~temperature:execution.temperature
-                 ~max_tokens:execution.max_tokens
+                 ?max_tokens:execution.max_tokens
                  ~oas_timeout_s
                  ~oas_timeout_is_explicit:false
                  ~trajectory_acc

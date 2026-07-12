@@ -282,7 +282,6 @@ val list_recent_resolved_json :
 module For_testing : sig
   val reset_audit_store : unit -> unit
   val first_cmd_token : string -> string option
-  val clear_approval_resolution_wake_hook : unit -> unit
 end
 
 (** {1 Submit & await} *)
@@ -355,29 +354,12 @@ val submit_pending :
 
 (** {1 Resolve (operator action)} *)
 
-(** Install the hook that durably delivers a resolved or expired approval to
-    its keeper lane. Injected (rather than a direct
-    [Keeper_keepalive_signal] call) to break a dependency cycle: this module
-    sits below [Keeper_keepalive_signal], which depends on
-    [Keeper_world_observation], which depends back here for
-    [has_blocking_pending_for_keeper]. Before [Server_bootstrap] installs the
-    hook, nonblocking resolution fails explicitly and remains pending. A
-    successful hook returns the wake signal closure; the queue invokes it only
-    after the resolution callback has completed and the pending id is gone. *)
-val set_approval_resolution_wake_hook :
-  (base_path:string ->
-   keeper_name:string ->
-   approval_id:string ->
-   decision:Keeper_event_queue.hitl_resolution_decision ->
-   channel:Keeper_continuation_channel.t ->
-   (unit -> unit, string) result) ->
-  unit
-
 (** Resolve a pending approval and optionally remember the decision
     as a rule. Returns [Not_found] when [id] is absent or
     [Already_resolved] on a concurrent-resolve race. [Delivery_failed]
-    preserves the pending entry and reports that no resolution was
-    acknowledged. *)
+    preserves the pending entry when the typed durable [Hitl_resolved] commit
+    fails. Live-fiber signaling is a post-commit hint and cannot roll back an
+    acknowledged durable decision. *)
 val resolve_with_policy :
   base_path:string ->
   id:string ->

@@ -9,8 +9,8 @@
 
    2. The NEW [Keeper_execution_receipt.operator_disposition] (which now
       parses [terminal_reason_code] once via [Keeper_terminal_reason.of_wire]
-      and exhaustive-matches) returns the SAME (disposition, reason) pair as
-      the frozen independent oracle over the cartesian product of
+      and exhaustive-matches) returns the same pair as the independent oracle,
+      including focused policy updates, over the cartesian product of
       (producer-string corpus) x (the small finite field matrix the
       classifier branches on). The oracle is intentionally NOT refactored to
       share code with production, so a priority-order regression in production
@@ -72,6 +72,7 @@ let read_meta_exn config keeper_name =
 let roundtrip_corpus =
   [ (* exact-match buckets *)
     "runtime_exhausted"
+  ; Keeper_internal_error.capacity_backpressure_kind
   ; "internal_error"
   ; "pre_dispatch_success"
   ; "provider_error"
@@ -254,6 +255,9 @@ let frozen_operator_disposition (receipt : R.t)
   in
   if String.equal terminal_reason "runtime_exhausted"
   then R.Disp_alert_exhausted, R.Reason_runtime_exhausted
+  else if
+    String.equal terminal_reason Keeper_internal_error.capacity_backpressure_kind
+  then R.Disp_fail_open_next_runtime, R.Reason_capacity_backpressure
   else if preflight_config_failure
   then R.Disp_pause_human, R.Reason_preflight_config_error
   else if
@@ -392,6 +396,38 @@ let base_receipt : R.t =
   }
 ;;
 
+let () =
+  let completed_stop = Runtime_agent.Completed in
+  let receipt =
+    { base_receipt with
+      outcome = `Ok
+    ; terminal_reason_code =
+        R.receipt_terminal_reason_code_of_stop_reason completed_stop
+    ; completion_contract_result = R.Contract_satisfied_execution
+    ; runtime_outcome = R.Runtime_completed
+    ; stop_reason = Some completed_stop
+    }
+  in
+  let json = R.to_json receipt in
+  check
+    "one receipt uses canonical terminal success"
+    (Json_util.get_string json "terminal_reason_code" = Some "success");
+  check
+    "the same receipt preserves runtime stop completed"
+    (Json_util.get_string json "stop_reason" = Some "completed");
+  let violated =
+    { receipt with completion_contract_result = R.Contract_violated }
+  in
+  let disposition = fst (R.operator_disposition violated) in
+  check
+    "runtime completion plus violated contract is not final success"
+    (disposition = R.Disp_pause_human);
+  check
+    "violated completed turn records a terminal reaction"
+    (R.reaction_kind_of_operator_disposition disposition
+     = Masc.Keeper_reaction_ledger.Terminal_reason)
+;;
+
 (* Field matrix axes. Kept small but covering the dimensions the
    classifier branches on. *)
 let codes = roundtrip_corpus
@@ -453,6 +489,26 @@ let operator_disposition_kinds =
 
 let () =
   List.iter
+    (fun (disposition, expected) ->
+      let actual = R.reaction_kind_of_operator_disposition disposition in
+      check
+        (Printf.sprintf
+           "typed reaction kind for %s"
+           (R.operator_disposition_kind_to_string disposition))
+        (actual = expected))
+    [ R.Disp_pass, Masc.Keeper_reaction_ledger.Execution_receipt
+    ; R.Disp_skipped, Masc.Keeper_reaction_ledger.Execution_receipt
+    ; R.Disp_pause_human, Masc.Keeper_reaction_ledger.Terminal_reason
+    ; R.Disp_alert_exhausted, Masc.Keeper_reaction_ledger.Terminal_reason
+    ; R.Disp_fail_open_next_runtime, Masc.Keeper_reaction_ledger.Terminal_reason
+    ; R.Disp_pass_next_model, Masc.Keeper_reaction_ledger.Terminal_reason
+    ; R.Disp_user_cancelled, Masc.Keeper_reaction_ledger.Terminal_reason
+    ; R.Disp_unknown, Masc.Keeper_reaction_ledger.Terminal_reason
+    ]
+;;
+
+let () =
+  List.iter
     (fun disposition ->
        let label = R.operator_disposition_kind_to_string disposition in
        let parsed =
@@ -497,8 +553,7 @@ let intentional_passive_only_policy_change (receipt : R.t) got =
            && receipt.actionable_signal = Some C.No_actionable_signal
            && receipt.outcome = `Ok
            && receipt.runtime_outcome = R.Runtime_completed
-           && (let c = String.lowercase_ascii receipt.terminal_reason_code in
-               c = "completed" || c = "success") ->
+           && String.equal receipt.terminal_reason_code "success" ->
       true
     | _ -> false
 ;;
@@ -577,6 +632,78 @@ let () =
     "test_keeper_terminal_reason_typed: matrix cases=%d mismatches=%d\n"
     !count
     !mismatches
+;;
+
+let () =
+  let internal_error =
+    Keeper_internal_error.Capacity_backpressure
+      { runtime_id = "runtime-capacity"
+      ; source = Keeper_internal_error.Provider_capacity
+      ; detail = "provider health cooldown active before dispatch"
+      ; retry_after = Keeper_internal_error.No_retry_hint
+      ; cooldown_cause = None
+      }
+  in
+  let code =
+    internal_error
+    |> Keeper_internal_error.sdk_error_of_masc_internal_error
+    |> Masc.Keeper_agent_error.terminal_reason_code_of_sdk_error
+  in
+  check
+    "capacity producer uses canonical terminal kind"
+    (String.equal code Keeper_internal_error.capacity_backpressure_kind);
+  check
+    "capacity terminal kind decodes to closed variant"
+    (match Tr.of_wire code with
+     | Tr.Capacity_backpressure wire -> String.equal wire code
+     | _ -> false);
+  let receipt =
+    { base_receipt with
+      terminal_reason_code = code
+    ; error_kind = Some (R.error_kind_of_string "internal")
+    ; outcome = `Error
+    ; runtime_outcome = R.Runtime_not_observed
+    }
+  in
+  let got = R.operator_disposition receipt in
+  let want = R.Disp_fail_open_next_runtime, R.Reason_capacity_backpressure in
+  check
+    (Printf.sprintf
+       "capacity disposition want=%s got=%s"
+       (disp_pair_to_string want)
+       (disp_pair_to_string got))
+    (got = want);
+  check
+    "capacity pacing does not emit operator broadcast"
+    (not (R.needs_operator_broadcast (fst got)));
+  let opaque_internal =
+    { receipt with terminal_reason_code = code ^ "_unexpected" }
+  in
+  let got = R.operator_disposition opaque_internal in
+  let want = R.Disp_pause_human, R.Reason_internal_error in
+  check
+    (Printf.sprintf
+       "capacity lookalike remains opaque internal want=%s got=%s"
+       (disp_pair_to_string want)
+       (disp_pair_to_string got))
+    (got = want);
+  check
+    "opaque internal lookalike still emits operator broadcast"
+    (R.needs_operator_broadcast (fst got));
+  let noncanonical_case =
+    { receipt with terminal_reason_code = String.uppercase_ascii code }
+  in
+  let got = R.operator_disposition noncanonical_case in
+  let want = R.Disp_pause_human, R.Reason_internal_error in
+  check
+    (Printf.sprintf
+       "noncanonical capacity casing stays opaque want=%s got=%s"
+       (disp_pair_to_string want)
+       (disp_pair_to_string got))
+    (got = want);
+  check
+    "noncanonical capacity casing still emits operator broadcast"
+    (R.needs_operator_broadcast (fst got))
 ;;
 
 let () =
@@ -687,7 +814,7 @@ let () =
 let () =
   let receipt =
     { base_receipt with
-      terminal_reason_code = "completed"
+      terminal_reason_code = "success"
     ; outcome = `Ok
     ; runtime_outcome = R.Runtime_completed
     ; completion_contract_result = R.Contract_passive_only
@@ -727,7 +854,7 @@ let () =
 let () =
   let coordination_passive ?(actionable_signal = Some C.No_actionable_signal) () =
     { base_receipt with
-      terminal_reason_code = "completed"
+      terminal_reason_code = "success"
     ; outcome = `Ok
     ; runtime_outcome = R.Runtime_completed
     ; completion_contract_result = R.Contract_passive_only

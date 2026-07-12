@@ -163,9 +163,9 @@ let normalize_loopback_base_url base_url =
         |> Uri.to_string |> trim_trailing_slashes
   | None -> trimmed
 
-(** Default port for the dashboard's Vite dev server.  Used by
-    [Server_auth.default_loopback_dev_mutation_origins] to whitelist
-    the frontend dev origin on each loopback variant. *)
+(** Default port for the dashboard's Vite dev server.  The request-authority
+    boundary uses the corresponding origins below for explicit local
+    cross-port development. *)
 let vite_dev_default_port = 5173
 
 (** Loopback dev-server origins for the Vite frontend on
@@ -191,15 +191,3 @@ let otel_default_port = 4318
 (** Default URL for OpenTelemetry OTLP HTTP endpoint. *)
 let otel_default_url =
   Printf.sprintf "http://localhost:%d" otel_default_port
-
-(** Allowed origins for DNS rebinding / CORS protection.
-    Update here; [server_routes_http_common.ml] reads this list. *)
-let allowed_origins = [
-  "http://localhost";
-  "https://localhost";
-  "http://127.0.0.1";
-  "https://127.0.0.1";
-  (* Cloudflare tunnel *)
-  "https://masc.crying.pictures";
-  "https://masc-dev.crying.pictures";
-]

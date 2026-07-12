@@ -28,14 +28,6 @@ let resolved_tool_lane_label ~effective_tools ~runtime_mcp_policy =
   | false, false, Some _ -> "runtime_mcp_connect_only"
   | false, false, None -> "none"
 
-let fail_open_health_filtered_candidates
-    ~(tool_filtered_candidates : 'a list)
-    ~(health_filtered_candidates : 'a list)
-  : 'a list * bool =
-  match health_filtered_candidates with
-  | [] when tool_filtered_candidates <> [] -> tool_filtered_candidates, true
-  | _ -> health_filtered_candidates, false
-
 (* RFC-0206: provider_rejections_for_no_tool_error deleted — multi-candidate
    tool-filter rejection lists have no meaning under single-runtime dispatch. *)
 

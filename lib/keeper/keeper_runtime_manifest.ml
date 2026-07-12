@@ -570,7 +570,23 @@ let links_of_json = function
         (Printf.sprintf "field \"links\" must be an object (received %s)"
            (Json_util.kind_name other))
 
-let of_json = function
+type parsed_row = {
+  ts : string;
+  keeper_name : string;
+  agent_name : string option;
+  trace_id : string;
+  generation : int option;
+  keeper_turn_id : int option;
+  oas_turn_count : int option;
+  logical_seq : int option;
+  event_wire : string;
+  runtime_id : string option;
+  status : string;
+  decision : Yojson.Safe.t;
+  links : links;
+}
+
+let parse_row = function
   | `Assoc fields -> (
       let ( >>= ) result f =
         match result with Ok value -> f value | Error _ as err -> err
@@ -591,23 +607,14 @@ let of_json = function
             optional_int "keeper_turn_id" fields >>= fun keeper_turn_id ->
             optional_int "oas_turn_count" fields >>= fun oas_turn_count ->
             optional_int "logical_seq" fields >>= fun logical_seq ->
-            required_string "event" fields >>= fun event_string ->
-            (match event_kind_of_string event_string with
-            | None -> Error (Printf.sprintf "unknown event: %S" event_string)
-            | Some event -> Ok event)
-            >>= fun event ->
-            (match optional_string "runtime_id" fields with
-             | Ok (Some runtime_id) -> Ok (Some runtime_id)
-             | Ok None -> optional_string "runtime_id" fields
-             | Error _ as error -> error)
-            >>= fun runtime_id ->
+            required_string "event" fields >>= fun event_wire ->
+            optional_string "runtime_id" fields >>= fun runtime_id ->
             required_string "status" fields >>= fun status ->
             field "decision" fields >>= fun decision ->
             field "links" fields >>= fun links_json ->
             links_of_json links_json >>= fun links ->
             Ok
               {
-                schema_version;
                 ts;
                 keeper_name;
                 agent_name;
@@ -616,7 +623,7 @@ let of_json = function
                 keeper_turn_id;
                 oas_turn_count;
                 logical_seq;
-                event;
+                event_wire;
                 runtime_id;
                 status;
                 decision;
@@ -626,6 +633,50 @@ let of_json = function
       Error
         (Printf.sprintf "manifest row must be a JSON object (received %s)"
            (Json_util.kind_name other))
+
+let row_identity (row : parsed_row) : row_identity =
+  {
+    keeper_name = row.keeper_name;
+    trace_id = row.trace_id;
+    keeper_turn_id = row.keeper_turn_id;
+  }
+
+let active_row (row : parsed_row) event : t =
+  {
+    schema_version;
+    ts = row.ts;
+    keeper_name = row.keeper_name;
+    agent_name = row.agent_name;
+    trace_id = row.trace_id;
+    generation = row.generation;
+    keeper_turn_id = row.keeper_turn_id;
+    oas_turn_count = row.oas_turn_count;
+    logical_seq = row.logical_seq;
+    event;
+    runtime_id = row.runtime_id;
+    status = row.status;
+    decision = row.decision;
+    links = row.links;
+  }
+
+let decode_persisted_row json =
+  match parse_row json with
+  | Error _ as error -> error
+  | Ok row -> (
+      match classify_event_wire row.event_wire with
+      | Active_event event -> Ok (Active_row (active_row row event))
+      | Retired_event event -> Ok (Retired_row (row_identity row, event))
+      | Unsupported_event event -> Ok (Unsupported_row (row_identity row, event)))
+
+let of_json json =
+  match decode_persisted_row json with
+  | Ok (Active_row row) -> Ok row
+  | Ok (Retired_row (_, event)) ->
+      Error
+        (Printf.sprintf "unknown event: %S" (retired_event_kind_to_string event))
+  | Ok (Unsupported_row (_, event)) ->
+      Error (Printf.sprintf "unknown event: %S" event)
+  | Error _ as error -> error
 
 let dated_jsonl_today_path base_dir =
   let open Unix in

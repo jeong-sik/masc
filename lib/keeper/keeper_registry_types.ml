@@ -102,6 +102,7 @@ type registry_entry =
   ; event_queue : Keeper_event_queue.t Atomic.t
   ; started_at : float
   ; grpc_close : (unit -> unit) option Atomic.t
+  ; lane : Keeper_lane.t
   ; done_p : done_resolution Eio.Promise.t
   ; done_r : done_resolution Eio.Promise.u
   ; restart_count : int
@@ -187,9 +188,22 @@ let resolve_done entry ~source (value : done_resolution) =
        Done_already_resolved { source; previous })
 ;;
 
+let lane_has_exited entry = Option.is_some (Keeper_lane.peek_exit entry.lane)
+
+let canonical_base_path_exn raw =
+  match Config_dir_resolver.canonical_base_path raw with
+  | Ok canonical -> canonical
+  | Error error ->
+    invalid_arg
+      (Printf.sprintf
+         "invalid keeper registry base path: %s"
+         (Config_dir_resolver.canonical_base_path_error_to_string error))
+;;
+
 let registry_key ~base_path name =
   if String.contains name '\x1f'
   then invalid_arg (Printf.sprintf "keeper name contains unit separator: %s" name);
+  let base_path = canonical_base_path_exn base_path in
   base_path ^ "\x1f" ^ name
 ;;
 

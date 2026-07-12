@@ -27,7 +27,7 @@ export function PostShareActions({ post, compact = false }: { post: BoardPost; c
   const permalink = boardPostPermalink(post.id)
   const trackback = boardPostTrackbackMarkdown(post)
   const xShareUrl = boardPostXShareUrl(post)
-  const buttonClass = `v2-workspace-action !px-1.5 ${compact ? '!py-0.5' : '!py-1'}`
+  const buttonClass = `v2-workspace-action bd-share-action !px-1.5 ${compact ? '!py-0.5' : '!py-1'}`
 
   const copyLink = async (event: Event) => {
     event.stopPropagation()
@@ -102,7 +102,7 @@ export function PostShareActions({ post, compact = false }: { post: BoardPost; c
         href=${xShareUrl}
         target="_blank"
         rel="noopener noreferrer"
-        class=${`${buttonClass} inline-flex items-center justify-center rounded-md border border-solid border-border bg-transparent text-text-primary hover:bg-surface-subtle`}
+        class=${`${buttonClass} bd-share-x inline-flex items-center justify-center rounded-md border border-solid border-border bg-transparent text-text-primary hover:bg-surface-subtle`}
         aria-label=${`X에 공유: ${post.id}`}
         title="X 공유"
         data-testid=${`bd-share-x-${post.id}`}

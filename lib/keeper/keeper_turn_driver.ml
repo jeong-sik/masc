@@ -70,6 +70,40 @@ let media_degrade_manifest_decision ~(runtime_id : string)
         ("media_dropped_counts", `String summary);
       ])
 
+type provider_run_result =
+  (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
+
+type provider_attempt_outcomes =
+  { provider_result : provider_run_result
+  ; turn_result : provider_run_result
+  }
+
+let project_provider_attempt_result ~replay_prefix_projection provider_result =
+  let turn_result =
+    match provider_result with
+    | Error _ as error -> error
+    | Ok run_result ->
+      (match run_result.Runtime_agent.checkpoint with
+       | None -> Ok run_result
+       | Some checkpoint ->
+         (match
+            Keeper_replay_prefix.restore_checkpoint
+              replay_prefix_projection
+              checkpoint
+          with
+          | Ok checkpoint ->
+            Ok
+              { run_result with
+                Runtime_agent.checkpoint = Some checkpoint
+              }
+          | Error error ->
+            Error
+              (Agent_sdk.Error.Internal
+                 (Keeper_replay_prefix.restore_error_to_string error))))
+  in
+  { provider_result; turn_result }
+;;
+
 type context_window_rebudget =
   { requested_context_window : int option
   ; final_runtime_context_window : int
@@ -300,15 +334,14 @@ type attempt_inference_policy =
   { attempt_temperature : float
   ; attempt_enable_thinking : bool option
   ; attempt_preserve_thinking : bool option
-  ; attempt_max_tokens : int
+  ; attempt_max_tokens : int option
   }
 
 let attempt_inference_policy
-    ?max_tokens_for_runtime
     ~runtime_id
     ~fallback_temperature
     ~fallback_enable_thinking
-    ~fallback_max_tokens
+    ~turn_max_tokens
     ()
   =
   let runtime_seed = Runtime_inference.for_runtime ~name:runtime_id in
@@ -322,15 +355,12 @@ let attempt_inference_policy
     | Some _ as enabled -> enabled
     | None -> fallback_enable_thinking
   in
-  let attempt_max_tokens =
-    match max_tokens_for_runtime with
-    | Some resolver -> resolver ~runtime_id
-    | None -> fallback_max_tokens
-  in
+  (* Temperature/thinking are runtime capabilities. Output-token intent is a
+     turn input, so candidate selection must not reinterpret or reload it. *)
   { attempt_temperature
   ; attempt_enable_thinking
   ; attempt_preserve_thinking = runtime_seed.preserve_thinking
-  ; attempt_max_tokens
+  ; attempt_max_tokens = turn_max_tokens
   }
 
 let run_named
@@ -349,8 +379,10 @@ let run_named
     ?stream_idle_timeout_s
     ?body_timeout_s
     ?(temperature = Runtime_provider_defaults.agent_default_temperature)
-    ?(max_tokens = Runtime_provider_defaults.agent_default_max_tokens)
-    ?max_tokens_for_runtime
+    (* masc#24067 / oas#2517: no flat-int default. Omitting [?max_tokens]
+       means [None] — no request [max_tokens] field, not a synthesized
+       fallback. *)
+    ?max_tokens
     ?(accept = fun (_ : Agent_sdk_response.api_response) -> true)
     ?guardrails
     ?hooks
@@ -464,6 +496,11 @@ let run_named
     | None -> []
     | Some (checkpoint : Agent_sdk.Checkpoint.t) -> checkpoint.messages
   in
+  (* [initial_messages] is the caller's canonical pre-turn history and is the
+     exact prefix checked later by replay persistence.  A resumed checkpoint is
+     only the OAS dispatch carrier; media degradation may project its messages
+     without changing this canonical history. *)
+  let canonical_replay_prefix = initial_messages in
   let first_candidate_id, remaining_candidate_ids =
     match lane_candidate_ids with
     | first :: rest -> first, rest
@@ -539,7 +576,7 @@ let run_named
      row + injected model-input notice — RFC-0126/0145). The stripped checkpoint
      is the dispatch view only; the persisted checkpoint is unchanged, so a
      later vision-capable runtime still sees the original media. *)
-  let goal_blocks, initial_messages, oas_checkpoint =
+  let goal_blocks, initial_messages, oas_checkpoint, replay_prefix_projection =
     match reroute_decision with
     | Runtime_agent.No_capable_runtime _ ->
       let caps = Runtime_agent.input_capabilities_of_runtime first_runtime in
@@ -569,7 +606,7 @@ let run_named
        | None ->
          (* Nothing strippable (e.g. only ToolResult-nested media): keep the
             inputs unchanged so the loud capability floor still applies. *)
-         goal_blocks, initial_messages, oas_checkpoint
+         goal_blocks, initial_messages, oas_checkpoint, Keeper_replay_prefix.unchanged
        | Some note ->
          Log.Keeper.warn
            "%s: RFC-0265 media degrade on %s — dropped %s, continuing text-only"
@@ -583,9 +620,19 @@ let run_named
          let goal_with_note =
            stripped_goal @ [ Agent_sdk.Types.text_block note ]
          in
-         Some goal_with_note, stripped_initial, stripped_checkpoint)
+         let dispatch_prefix =
+           match stripped_checkpoint with
+           | Some (checkpoint : Agent_sdk.Checkpoint.t) -> checkpoint.messages
+           | None -> stripped_initial
+         in
+         ( Some goal_with_note
+         , stripped_initial
+         , stripped_checkpoint
+         , Keeper_replay_prefix.media_degraded
+             ~canonical_prefix:canonical_replay_prefix
+             ~dispatch_prefix ))
     | Runtime_agent.No_reroute_needed | Runtime_agent.Reroute _ ->
-      goal_blocks, initial_messages, oas_checkpoint
+      goal_blocks, initial_messages, oas_checkpoint, Keeper_replay_prefix.unchanged
   in
   let transport_resolved =
     match transport with
@@ -624,11 +671,10 @@ let run_named
       let error_runtime_id = attempt_runtime_id in
       let inference_policy =
         attempt_inference_policy
-          ?max_tokens_for_runtime
           ~runtime_id:attempt_runtime_id
           ~fallback_temperature:temperature
           ~fallback_enable_thinking:enable_thinking
-          ~fallback_max_tokens:max_tokens
+          ~turn_max_tokens:max_tokens
           ()
       in
       let final_runtime_context_window =
@@ -728,9 +774,14 @@ let run_named
             }
           in
           let provider_attempt_started_at = Mtime_clock.now () in
-          let result, checkpoint_after, _success_sample =
+          let provider_result, checkpoint_after, _success_sample =
             Keeper_turn_driver_try_provider.run_try_provider
               try_provider_ctx ?resume_checkpoint ?per_provider_timeout_s candidate
+          in
+          let outcomes =
+            project_provider_attempt_result
+              ~replay_prefix_projection
+              provider_result
           in
           let latency_ms =
             let ns =
@@ -739,7 +790,11 @@ let run_named
             in
             Int64.to_float ns /. 1_000_000.
           in
-          (match result with
+          (* Binding health describes the provider attempt, not MASC-local
+             checkpoint projection.  A fail-closed replay-prefix error must
+             fail the turn without falsely degrading a provider that returned
+             successfully. *)
+          (match outcomes.provider_result with
            | Ok _ ->
              record_candidate_health_success
                ~keeper_name
@@ -751,11 +806,16 @@ let run_named
                 record_candidate_health_rejected ~keeper_name candidate ~reason
               | Some _ | None ->
                 record_candidate_health_error ~keeper_name candidate err));
-          result, checkpoint_after))
+          outcomes.turn_result, checkpoint_after))
     attempt_runtimes
 
 
 module For_testing = struct
+  type nonrec provider_attempt_outcomes = provider_attempt_outcomes
+
+  let project_provider_attempt_result = project_provider_attempt_result
+  let provider_result outcomes = outcomes.provider_result
+  let turn_result outcomes = outcomes.turn_result
   let checkpoint_after_attempt = checkpoint_after_attempt
   let success_selected_model_raw = success_selected_model_raw
   let record_candidate_health_error = record_candidate_health_error

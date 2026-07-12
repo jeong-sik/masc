@@ -307,10 +307,12 @@ let () =
     ~label:"KS3a: worker owns connector user-line recording decision"
     keeper_stream_src
     "process_single_turn ~connector_user_line_recorded_upstream:false";
-  assert_contains
-    ~label:"KS3b: worker uses server switch"
-    keeper_stream_src
-    "~state ~clock ~sw";
+  (* KS3b removed: it string-matched the literal "~state ~clock ~sw", an
+     obsolete worker signature. The worker now takes "~state ~clock ~auth_token
+     ..." (keeper_stream.ml:1244) and threads the switch via
+     ~client_disconnects:(Some (stream_sw, _)) — still asserted by KS4 below.
+     The switch/structured-concurrency invariant holds; the anchor was a
+     brittle source string-match that false-positived on the signature change. *)
   assert_contains
     ~label:"KS4: disconnect watcher uses stream switch"
     keeper_stream_src

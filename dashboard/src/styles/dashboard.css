@@ -589,27 +589,6 @@
   box-shadow: inset 2px 0 0 var(--color-accent-fg);
 }
 
-.ide-plane-grid {
-  display: grid;
-  grid-template-columns: minmax(200px, 248px) minmax(420px, 1fr) minmax(320px, 420px);
-  grid-template-rows: minmax(0, 1fr) minmax(180px, 32%);
-  height: 100%;
-  min-height: 0;
-  min-width: 0;
-  overflow: hidden;
-  isolation: isolate;
-}
-
-.ide-plane-tree {
-  grid-column: 1;
-  grid-row: 1 / span 2;
-  position: relative;
-  z-index: var(--z-base);
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-}
-
 .ide-explorer {
   display: flex;
   flex-direction: column;
@@ -717,44 +696,6 @@
   white-space: nowrap;
 }
 
-.ide-plane-editor {
-  grid-column: 2;
-  grid-row: 1 / span 2;
-  position: relative;
-  z-index: var(--z-base);
-  display: grid;
-  grid-template-rows: minmax(0, 1fr);
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-  border-right: 1px solid var(--color-border-default);
-}
-
-.ide-plane-conversation {
-  grid-column: 3;
-  grid-row: 1;
-  position: relative;
-  z-index: var(--z-base);
-  display: grid;
-  grid-template-rows: minmax(0, 42%) minmax(0, 1fr);
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-  isolation: isolate;
-}
-
-.ide-plane-activity {
-  grid-column: 3;
-  grid-row: 2;
-  position: relative;
-  z-index: var(--z-base);
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-  border-top: 1px solid var(--color-border-divider);
-  isolation: isolate;
-}
-
 .ide-plane-context-stack,
 .ide-plane-primary-rail {
   min-width: 0;
@@ -778,21 +719,6 @@
 
 .ide-plane-primary-rail > .ide-rail-panel {
   min-height: 0;
-}
-
-.ide-plane-shell[data-rails-collapsed="true"] .ide-plane-grid {
-  grid-template-columns: minmax(200px, 260px) minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr);
-}
-
-.ide-plane-shell[data-rails-collapsed="true"] .ide-plane-tree {
-  grid-row: 1;
-}
-
-.ide-plane-shell[data-rails-collapsed="true"] .ide-plane-editor {
-  grid-column: 2;
-  grid-row: 1;
-  border-right: 0;
 }
 
 .ide-branch-context {
@@ -2486,46 +2412,6 @@ button.ide-persistence-focus:focus-visible {
     min-width: 0;
     overflow: hidden;
   }
-
-  .ide-plane-grid {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(10rem, 18rem) minmax(26rem, 1fr) minmax(12rem, 18rem) minmax(10rem, 16rem);
-    overflow: auto;
-  }
-
-  .ide-plane-shell[data-rails-collapsed="true"] .ide-plane-grid {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(10rem, 18rem) minmax(26rem, 1fr);
-  }
-
-  .ide-plane-shell[data-rails-collapsed="true"] .ide-plane-tree,
-  .ide-plane-shell[data-rails-collapsed="true"] .ide-plane-editor {
-    grid-column: 1;
-    grid-row: auto;
-  }
-
-  .ide-plane-tree,
-  .ide-plane-editor,
-  .ide-plane-conversation,
-  .ide-plane-activity {
-    grid-column: 1;
-    grid-row: auto;
-  }
-
-  .ide-plane-tree,
-  .ide-plane-conversation,
-  .ide-plane-activity {
-    overflow: hidden;
-  }
-
-  .ide-plane-conversation {
-    max-height: none;
-    overflow: hidden;
-  }
-
-  .ide-plane-editor {
-    overflow: hidden;
-  }
 }
 
 @media (max-width: 640px) {
@@ -2535,38 +2421,6 @@ button.ide-persistence-focus:focus-visible {
     height: auto;
     min-height: 100%;
     overflow: visible;
-  }
-
-  .ide-plane-grid {
-    grid-template-rows:
-      24rem
-      36rem
-      34rem
-      20rem;
-    height: auto;
-    overflow: visible;
-  }
-
-  .ide-plane-tree {
-    height: 24rem;
-    min-height: 24rem;
-  }
-
-  .ide-plane-editor {
-    height: 36rem;
-    min-height: 36rem;
-  }
-
-  .ide-plane-conversation {
-    height: 34rem;
-    min-height: 34rem;
-    overflow: auto;
-  }
-
-  .ide-plane-activity {
-    height: 20rem;
-    min-height: 20rem;
-    overflow: auto;
   }
 
   .ide-explorer-scroll {

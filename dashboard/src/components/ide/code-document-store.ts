@@ -18,13 +18,18 @@ export interface CodeDocumentSnapshot extends CodeDocumentSource {
   readonly lines: ReadonlyArray<CodeDocumentLine>
 }
 
+export type CodeDocumentRegionsState = 'idle' | 'loading' | 'ready' | 'error'
+
 export interface CodeDocumentStore {
   readonly load: (source: unknown) => boolean
+  readonly invalidate: () => void
   readonly document: () => CodeDocumentSnapshot
   readonly lines: () => ReadonlyArray<CodeDocumentLine>
   readonly line: (lineNumber: number) => CodeDocumentLine | null
   readonly regions: () => ReadonlyArray<IdeCodeRegion>
   readonly regionsLoading: () => boolean
+  readonly regionsState: () => CodeDocumentRegionsState
+  readonly subscribeRegions: (listener: () => void) => () => void
   readonly loadRegions: (
     filePath: string,
     opts?: { keeper?: string; repoId?: string | null; signal?: AbortSignal },
@@ -47,26 +52,51 @@ export function createCodeDocumentStore(
   const initial = normalizeSource(initialSource, maxLines) ?? EMPTY_DOCUMENT
   const snapshot = signal<CodeDocumentSnapshot>(initial)
   const regionsSignal = signal<ReadonlyArray<IdeCodeRegion>>([])
-  const regionsLoadingSignal = signal<boolean>(false)
+  const regionsStateSignal = signal<CodeDocumentRegionsState>('idle')
+  let regionRequestId = 0
 
   const load = (source: unknown): boolean => {
     const next = normalizeSource(source, maxLines)
     if (!next) return false
+    if (next.file_path !== snapshot.peek().file_path) {
+      regionRequestId += 1
+      regionsSignal.value = []
+      regionsStateSignal.value = 'idle'
+    }
     snapshot.value = next
     return true
+  }
+
+  const invalidate = (): void => {
+    regionRequestId += 1
+    snapshot.value = EMPTY_DOCUMENT
+    regionsSignal.value = []
+    regionsStateSignal.value = 'idle'
   }
 
   const loadRegions = async (
     filePath: string,
     opts?: { keeper?: string; repoId?: string | null; signal?: AbortSignal },
   ): Promise<void> => {
-    regionsLoadingSignal.value = true
+    const requestId = regionRequestId + 1
+    regionRequestId = requestId
+    regionsStateSignal.value = 'loading'
     try {
       const fetched = await fetchIdeRegions(filePath, opts ?? {})
-      if (opts?.signal?.aborted) return
+      if (opts?.signal?.aborted || requestId !== regionRequestId) return
       regionsSignal.value = fetched
+      regionsStateSignal.value = 'ready'
+    } catch (error) {
+      if (!opts?.signal?.aborted && requestId === regionRequestId) {
+        regionsStateSignal.value = 'error'
+      }
+      throw error
     } finally {
-      regionsLoadingSignal.value = false
+      // A stale request must never clear the visible loading state of the
+      // newer file/request that superseded it.
+      if (requestId === regionRequestId && opts?.signal?.aborted) {
+        regionsStateSignal.value = 'idle'
+      }
     }
   }
 
@@ -83,11 +113,32 @@ export function createCodeDocumentStore(
 
   return {
     load,
+    invalidate,
     document: () => snapshot.value,
     lines: () => snapshot.value.lines,
     line: lineNumber => snapshot.value.lines[lineNumber - 1] ?? null,
     regions: () => regionsSignal.value,
-    regionsLoading: () => regionsLoadingSignal.value,
+    regionsLoading: () => regionsStateSignal.value === 'loading',
+    regionsState: () => regionsStateSignal.value,
+    subscribeRegions: (listener: () => void) => {
+      // Preact Signals notify immediately on subscribe. Wait until both
+      // region-related signals have delivered that initial value, then expose
+      // later loading/data changes as one document-metadata subscription.
+      let initialNotifications = 2
+      const notify = (): void => {
+        if (initialNotifications > 0) {
+          initialNotifications -= 1
+          return
+        }
+        listener()
+      }
+      const unsubscribeRegions = regionsSignal.subscribe(notify)
+      const unsubscribeState = regionsStateSignal.subscribe(notify)
+      return () => {
+        unsubscribeRegions()
+        unsubscribeState()
+      }
+    },
     loadRegions,
     subscribe,
   }
@@ -135,4 +186,3 @@ function normalizeMaxLines(value: number | undefined): number {
   if (isPositiveSafeInteger(value)) return value
   return 5_000
 }
-

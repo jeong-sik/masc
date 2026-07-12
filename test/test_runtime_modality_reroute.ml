@@ -355,6 +355,87 @@ let test_degrade_manifest_public_projection () =
      | Some (`String value) -> Some value
      | _ -> None)
 
+let test_media_degrade_restores_canonical_replay_prefix () =
+  let canonical_history =
+    [ message_with_blocks
+        [ Agent_sdk.Types.Text "pre-turn"
+        ; Agent_sdk.Types.image_block ~media_type:"image/png" ~data:"image" ()
+        ]
+    ]
+  in
+  let dispatch_history, _dropped =
+    Runtime_agent.strip_unsupported_modality_messages
+      (caps ())
+      canonical_history
+  in
+  let assistant =
+    { Agent_sdk.Types.role = Agent_sdk.Types.Assistant
+    ; content = [ Agent_sdk.Types.Text "completed" ]
+    ; name = None
+    ; tool_call_id = None
+    ; metadata = []
+    }
+  in
+  match
+    Masc.Keeper_replay_prefix.restore_messages
+      (Masc.Keeper_replay_prefix.media_degraded
+         ~canonical_prefix:canonical_history
+         ~dispatch_prefix:dispatch_history)
+      (dispatch_history @ [ assistant ])
+  with
+  | Error error -> fail (Masc.Keeper_replay_prefix.restore_error_to_string error)
+  | Ok restored ->
+    check int "canonical history plus current suffix" 2 (List.length restored);
+    check bool "original media history is restored" true (List.hd restored = List.hd canonical_history);
+    check bool "current assistant suffix is preserved" true (List.nth restored 1 = assistant)
+
+let test_media_degrade_rejects_checkpoint_prefix_drift () =
+  let canonical_history = [ message_with_blocks [ Agent_sdk.Types.Text "canonical" ] ] in
+  let dispatch_history = [ message_with_blocks [ Agent_sdk.Types.Text "dispatch" ] ] in
+  let unrelated_checkpoint =
+    [ message_with_blocks [ Agent_sdk.Types.Text "unrelated" ] ]
+  in
+  match
+    Masc.Keeper_replay_prefix.restore_messages
+      (Masc.Keeper_replay_prefix.media_degraded
+         ~canonical_prefix:canonical_history
+         ~dispatch_prefix:dispatch_history)
+      unrelated_checkpoint
+  with
+  | Error _ -> ()
+  | Ok _ -> fail "expected dispatch-prefix drift to fail closed"
+
+let test_media_degrade_preserves_already_canonical_checkpoint () =
+  let canonical_history =
+    [ message_with_blocks
+        [ Agent_sdk.Types.Text "canonical"
+        ; Agent_sdk.Types.image_block ~media_type:"image/png" ~data:"image" ()
+        ]
+    ]
+  in
+  let dispatch_history, _dropped =
+    Runtime_agent.strip_unsupported_modality_messages
+      (caps ())
+      canonical_history
+  in
+  let checkpoint_messages =
+    canonical_history @ [ message_with_blocks [ Agent_sdk.Types.Text "suffix" ] ]
+  in
+  match
+    Masc.Keeper_replay_prefix.restore_messages
+      (Masc.Keeper_replay_prefix.media_degraded
+         ~canonical_prefix:canonical_history
+         ~dispatch_prefix:dispatch_history)
+      checkpoint_messages
+  with
+  | Error error -> fail (Masc.Keeper_replay_prefix.restore_error_to_string error)
+  | Ok restored ->
+    check
+      bool
+      "already canonical checkpoint is unchanged"
+      true
+      (restored = checkpoint_messages)
+
 let test_driver_degrade_branch_emits_manifest () =
   let source = read_file "lib/keeper/keeper_turn_driver.ml" in
   check bool "degrade branch emits manifest" true
@@ -468,6 +549,12 @@ let () =
             test_degrade_note_none_when_empty
         ; test_case "degrade manifest public projection" `Quick
             test_degrade_manifest_public_projection
+        ; test_case "degrade restores canonical replay prefix" `Quick
+            test_media_degrade_restores_canonical_replay_prefix
+        ; test_case "degrade rejects checkpoint prefix drift" `Quick
+            test_media_degrade_rejects_checkpoint_prefix_drift
+        ; test_case "degrade preserves an already canonical checkpoint" `Quick
+            test_media_degrade_preserves_already_canonical_checkpoint
         ; test_case "driver degrade branch emits manifest" `Quick
             test_driver_degrade_branch_emits_manifest
         ; test_case "reroute context window rebudgets to final runtime" `Quick

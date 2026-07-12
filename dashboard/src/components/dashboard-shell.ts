@@ -704,7 +704,7 @@ function healthChipClass(tone: DashboardHealthChipTone): string {
   }
 }
 
-export function DashboardHealthStrip() {
+export function DashboardHealthStrip({ hidden = false }: { hidden?: boolean }) {
   useEffect(() => {
     let disposed = false
     let inFlight = false
@@ -783,6 +783,8 @@ export function DashboardHealthStrip() {
   return html`
     <div
       class="v2-health-strip flex shrink-0 flex-wrap items-center gap-2 border-b border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] px-3 py-1.5 text-xs"
+      style=${hidden ? { display: 'none' } : undefined}
+      aria-hidden=${hidden ? 'true' : undefined}
       role="status"
       aria-label="Dashboard runtime health"
       data-testid="dashboard-health-strip"
@@ -949,7 +951,7 @@ export function BuildIdentityBadge() {
                         href=${url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        class="text-right font-bold text-[color:var(--color-fg-secondary)] underline decoration-dotted underline-offset-2 decoration-[color:var(--color-fg-disabled)] hover:decoration-[color:var(--color-accent-fg)] hover:text-[color:var(--color-accent-fg)]"
+                        class="v2-mobile-operator-target inline-flex items-center text-right font-bold text-[color:var(--color-fg-secondary)] underline decoration-dotted underline-offset-2 decoration-[color:var(--color-fg-disabled)] hover:decoration-[color:var(--color-accent-fg)] hover:text-[color:var(--color-accent-fg)]"
                         data-build-commit-link
                         title="View this commit on GitHub"
                       >${text} ↗</a>`
@@ -1585,7 +1587,7 @@ function SurfaceLead() {
           href=${soloUrl}
           target="_blank"
           rel="noopener noreferrer"
-          class=${`v2-shell-action inline-flex size-7 items-center justify-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-secondary)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'page' })}`}
+          class=${`v2-shell-action v2-mobile-operator-target inline-flex size-7 items-center justify-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-secondary)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'page' })}`}
           title="Open this surface in a solo view"
           aria-label="Open this surface in a solo view"
           data-testid="dashboard-widget-solo-link"

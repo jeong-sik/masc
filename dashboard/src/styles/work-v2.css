@@ -415,6 +415,10 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
+  max-block-size: min(24dvh, 14rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .wk-bl-row {
@@ -1873,4 +1877,19 @@
   font-size: var(--text-xs);
   color: var(--color-fg-muted);
   margin-top: 0.25rem;
+}
+
+@media (max-width: 700px) {
+  .wk-viewseg button,
+  .wk-newgoal,
+  .wk-task-claim,
+  .wk-task-kp {
+    min-height: var(--mobile-touch-target-min);
+  }
+
+  .wk-metric {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
 }

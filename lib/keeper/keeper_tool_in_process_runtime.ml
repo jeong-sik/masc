@@ -241,7 +241,7 @@ let handle_surface_post ~config ~(meta : keeper_meta) ~args =
         | Some token ->
             match
               Keeper_chat_slack.send_message_with_blocks ~token
-                ~channel:channel_id ~content:safe_content ~blocks:slack_blocks
+                ~channel:channel_id ~content:safe_content ~blocks:slack_blocks ()
             with
             | Error err ->
                 Keeper_surface_post.error_json
@@ -279,28 +279,88 @@ let handle_board ~(meta : keeper_meta) ~name ~args =
   Keeper_tool_board_runtime.handle_keeper_board_tool ~meta ~name ~args
 ;;
 
+type board_projection_error =
+  | Unknown_board_route
+  | Keeper_wrapper_required of
+      { board_name : Tool_name.Board_name.t
+      ; keeper_tool : Keeper_tool_name.t
+      }
+  | External_only_board_route of Tool_name.Board_name.t
+
+let board_projection_error_kind = function
+  | Unknown_board_route -> "unknown_board_route"
+  | Keeper_wrapper_required _ -> "keeper_wrapper_required"
+  | External_only_board_route _ -> "external_only_board_route"
+;;
+
+let board_projection_error_class = function
+  | Unknown_board_route -> Tool_result.Runtime_failure
+  | Keeper_wrapper_required _ | External_only_board_route _ ->
+    Tool_result.Policy_rejection
+;;
+
+let board_projection_error_fields error =
+  let route_fields =
+    match error with
+    | Unknown_board_route -> []
+    | Keeper_wrapper_required { board_name; keeper_tool } ->
+      [ "board_operation", `String (Tool_name.Board_name.operation_name board_name)
+      ; "required_tool", `String (Keeper_tool_name.to_string keeper_tool)
+      ]
+    | External_only_board_route board_name ->
+      [ "board_operation", `String (Tool_name.Board_name.operation_name board_name) ]
+  in
+  ("error_kind", `String (board_projection_error_kind error)) :: route_fields
+;;
+
+let reject_board_projection ~(meta : keeper_meta) ~name error =
+  let class_ = board_projection_error_class error in
+  let fields =
+    ("ok", `Bool false)
+    :: ("error", `String (board_projection_error_kind error))
+    :: ("tool", `String name)
+    :: ( "failure_class"
+       , `String (Tool_result.tool_failure_class_to_string class_) )
+    :: board_projection_error_fields error
+  in
+  let data = `Assoc fields in
+  Log.Keeper.emit
+    (Tool_result.log_level_of_failure_class class_)
+    ~keeper_name:meta.name
+    ~category:Log.Tool
+    ~details:data
+    "board projection rejected";
+  Tool_result.make_err
+    ~tool_name:name
+    ~class_
+    ~start_time:(Time_compat.now ())
+    ~data
+    (Yojson.Safe.to_string data)
+  |> Keeper_tool_shared_runtime.tool_result_or_error
+;;
+
 let handle_masc_board ~(meta : keeper_meta) ~name ~args =
-  let args =
-    match Tool_name.Board_name.of_string name with
-    | None -> args
-    | Some board_name ->
+  match Tool_name.Board_name.of_string name with
+  | None -> reject_board_projection ~meta ~name Unknown_board_route
+  | Some board_name ->
+    (match Keeper_tool_name.board_projection_of_masc_board_name board_name with
+     | Keeper_tool_name.Keeper_wrapper keeper_tool ->
+       reject_board_projection
+         ~meta
+         ~name
+         (Keeper_wrapper_required { board_name; keeper_tool })
+     | Keeper_tool_name.External_only ->
+       reject_board_projection ~meta ~name (External_only_board_route board_name)
+     | Keeper_tool_name.Direct_masc ->
+      let args =
       List.fold_left
         (fun args field ->
            Keeper_tool_shared_runtime.assoc_override_string field meta.name args)
         args
         (Board_tool_registry.identity_fields_for_board_name board_name)
-  in
-  let result =
-    Board_tool_dispatch.handle_tool name args
-  in
-  if Tool_result.is_success result
-  then Tool_result.message result
-  else
-    Yojson.Safe.to_string
-      (`Assoc
-         [ "error", `String (Tool_result.message result)
-         ; "tool", `String name
-         ])
+      in
+      Board_tool_dispatch.handle_tool name args
+      |> Keeper_tool_shared_runtime.tool_result_or_error)
 ;;
 
 (* RFC-0182 §3.1 — shared helper. Converts the [Tool_result.result option]
@@ -337,7 +397,7 @@ let handle_masc_task ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~a
   let ctx : Task.Tool.context =
     { config; agent_name = meta.name; sw = None }
   in
-  Task.Tool.dispatch ctx ~name ~args |> dispatch_option_to_string ~name
+  Task.Tool.dispatch_for_keeper ctx ~name ~args |> dispatch_option_to_string ~name
 ;;
 
 let handle_masc_plan ~(config : Workspace.config) ~name ~args =

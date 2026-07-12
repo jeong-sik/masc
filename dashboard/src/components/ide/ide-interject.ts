@@ -31,6 +31,8 @@ async function dispatchInterject(request: InterjectDispatchRequest): Promise<voi
 
 interface IdeInterjectProps {
   readonly keeperName?: string | null
+  /** A terminal-first IDE keeps chat as a floating entry point until opened. */
+  readonly compact?: boolean
 }
 
 function resolveActiveKeeper(keeperName?: string | null): string {
@@ -38,7 +40,11 @@ function resolveActiveKeeper(keeperName?: string | null): string {
   return routeKeeper || activeKeeperName.value
 }
 
-export const IdeInterject: FunctionComponent<IdeInterjectProps> = ({ keeperName = null }) => {
+export const IdeInterject: FunctionComponent<IdeInterjectProps> = ({
+  keeperName = null,
+  compact = false,
+}) => {
+  const [expanded, setExpanded] = useState(false)
   const [interjectStore] = useState(() =>
     createInterjectStore({
       initialActiveKeeper: resolveActiveKeeper(keeperName),
@@ -89,9 +95,21 @@ export const IdeInterject: FunctionComponent<IdeInterjectProps> = ({ keeperName 
     : null
   const contextLinks = interjectContextRouteLinks(keeperId, cursor)
 
+  if (compact && !expanded) {
+    return html`
+      <button
+        type="button"
+        class="ide-interject-fab"
+        data-testid="ide-interject-fab"
+        aria-label="Open keeper chat"
+        onClick=${() => setExpanded(true)}
+      >✦ Chat</button>
+    `
+  }
+
   return html`
     <div
-      class="ide-interject-bar v2-ide-panel"
+      class=${`ide-interject-bar v2-ide-panel ${compact ? 'ide-interject-expanded' : ''}`}
       role="region"
       aria-label="INTERJECT (interject store active keeper wiring)"
       style=${{

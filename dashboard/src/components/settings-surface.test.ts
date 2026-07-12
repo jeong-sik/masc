@@ -26,11 +26,13 @@ import { SETTINGS_ROUTE_SECTION_IDS } from '../config/navigation'
 import { route } from '../router'
 import { connected } from '../sse'
 import { tweaksDensity } from './tweaks-panel'
+import { notificationDeliveryError, notifyRules } from '../notifications'
 
 const MOCK_RUNTIME_PATH = 'fixture/config/runtime.toml'
-import { dashboardLoading, shellConfigResolution, shellRuntimeResolution } from '../store'
+import { dashboardLoading, shellAuthSummary, shellConfigResolution, shellRuntimeResolution } from '../store'
 import { namespaceTruthInitializing } from '../namespace-truth-store'
 import { resetDevTokenBootstrap } from '../api/dev-token'
+import { setStoredToken } from '../api/core'
 
 const apiMock = vi.hoisted(() => ({
   fetchDashboardConfig: vi.fn(),
@@ -165,7 +167,6 @@ function makeRuntimeDefaults(
       { id: 'rt-c', provider: 'P', model: 'm3', max_context: 128000, is_default: false },
     ],
     model_routing: {
-      keeper_assignments: [{ keeper: 'analyst', runtime_id: 'rt-b' }],
       librarian_runtime_id: null,
       structured_judge_runtime_id: null,
       hitl_summary_runtime_id: null,
@@ -319,9 +320,6 @@ function makeDashboardConfig(overrides: Partial<DashboardConfigResponse> = {}): 
         makeConfigEntry({ env: 'MASC_DASHBOARD_RUNTIME_WARNING_CTX_RATIO', description: 'Runtime warning', value: '0.95', default: '0.95', source: 'default', source_detail: 'compiled default value' }),
         makeConfigEntry({ env: 'MASC_DASHBOARD_SIGNAL_STALE_SEC', description: 'Signal stale', value: '1200.0', default: '1200.0', source: 'default', source_detail: 'compiled default value' }),
       ],
-      alerting: [
-        makeConfigEntry({ env: 'MASC_ALERT_DEDUP_WINDOW_SEC', description: 'Alert dedup', value: '60.0', default: '60.0', source: 'default', source_detail: 'compiled default value' }),
-      ],
     },
     ...overrides,
   }
@@ -443,8 +441,16 @@ describe('SettingsSurface', () => {
       keepers: { path: '/workspace/.masc/keepers', exists: true, source: 'derived' },
       personas: { path: '/workspace/.masc/personas', exists: true, source: 'derived' },
     }
+    shellAuthSummary.value = null
     localStorage.clear()
     tweaksDensity.value = 'spacious'
+    notifyRules.value = {
+      keeper_guardrail: true,
+      keeper_handoff: true,
+      'approval:pending': true,
+      'oas:agent_failed': true,
+    }
+    notificationDeliveryError.value = null
     window.location.hash = '#settings'
     route.value = { tab: 'settings', params: {}, postId: null }
   })
@@ -455,6 +461,7 @@ describe('SettingsSurface', () => {
     navigate.mockClear()
     shellConfigResolution.value = null
     shellRuntimeResolution.value = null
+    shellAuthSummary.value = null
     resetDevTokenBootstrap()
     sessionStorage.clear()
     localStorage.clear()
@@ -474,7 +481,7 @@ describe('SettingsSurface', () => {
     expect(container.querySelector('[data-testid="settings-nav-mcp"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="settings-nav-notify"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="settings-nav-logs"]')).not.toBeNull()
-    expect(container.querySelector('[data-testid="settings-nav-account"]')).toBeNull()
+    expect(container.querySelector('[data-testid="settings-nav-account"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="settings-nav-policy"]')).toBeNull()
     expect(container.querySelector('[data-testid="settings-nav-gate"]')).toBeNull()
   })
@@ -490,7 +497,7 @@ describe('SettingsSurface', () => {
     render(html`<${SettingsSurface} />`, container)
 
     const title = () => container.querySelector('[data-testid="settings-section-title"]') as HTMLElement
-    expect(title().textContent).toBe('런타임')
+    expect(title().textContent).toBe('계정')
 
     const pathsNav = container.querySelector('[data-testid="settings-nav-paths"]') as HTMLElement
     await fireEvent.click(pathsNav)
@@ -503,7 +510,7 @@ describe('SettingsSurface', () => {
     await fireEvent.click(runtimeNav)
 
     expect(title().textContent).toBe('런타임')
-    expect(navigate).toHaveBeenLastCalledWith('settings', {})
+    expect(navigate).toHaveBeenLastCalledWith('settings', { section: 'runtime' })
   })
 
   it('selects a valid section from the dashboard route', () => {
@@ -625,20 +632,20 @@ describe('SettingsSurface', () => {
     }
   })
 
-  it('falls invalid settings sections back to runtime without a fake subsection', () => {
-    expect(normalizeSettingsSection('not-real')).toBe('runtime')
+  it('falls invalid settings sections back to the live account subsection', () => {
+    expect(normalizeSettingsSection('not-real')).toBe('account')
     route.value = { tab: 'settings', params: { section: 'not-real' }, postId: null }
 
     render(html`<${SettingsSurface} />`, container)
 
-    expect(container.querySelector('[data-testid="settings-section-title"]')?.textContent).toBe('런타임')
-    expect(container.querySelector('[data-testid="settings-nav-runtime"]')?.getAttribute('data-active')).toBe('true')
+    expect(container.querySelector('[data-testid="settings-section-title"]')?.textContent).toBe('계정')
+    expect(container.querySelector('[data-testid="settings-nav-account"]')?.getAttribute('data-active')).toBe('true')
   })
 
   it('syncs when the dashboard route section changes while mounted', async () => {
     render(html`<${SettingsSurface} />`, container)
 
-    expect(container.querySelector('[data-testid="settings-section-title"]')?.textContent).toBe('런타임')
+    expect(container.querySelector('[data-testid="settings-section-title"]')?.textContent).toBe('계정')
 
     route.value = { tab: 'settings', params: { section: 'logs' }, postId: null }
 
@@ -647,20 +654,45 @@ describe('SettingsSurface', () => {
     })
   })
 
-  it('does not render removed fake-only settings sections', async () => {
+  it('renders the live auth-backed account section without fake policy controls', async () => {
     render(html`<${SettingsSurface} />`, container)
 
-    expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('runtime.toml + provider catalog')
-    expect(container.querySelector('.set-card-b')?.getAttribute('data-settings-mode')).toBe('live')
+    expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('live auth + browser token')
+    expect(container.querySelector('.set-card-b')?.getAttribute('data-settings-mode')).toBe('mixed')
     expect(container.querySelector('.set-card-b')?.getAttribute('data-preview-locked')).toBe('false')
     expect(container.textContent).not.toContain('Save changes')
     expect(container.textContent).not.toContain('Reissue')
     expect(container.textContent).not.toContain('Log out')
-    expect(container.querySelector('[data-testid="settings-nav-account"]')).toBeNull()
+    expect(container.querySelector('[data-testid="settings-nav-account"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="settings-account-live"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="settings-nav-policy"]')).toBeNull()
     expect(container.querySelector('[data-testid="settings-nav-sandbox"]')).toBeNull()
     expect(container.querySelector('[data-testid="settings-nav-gate"]')).toBeNull()
     expect(container.querySelector('[data-testid="settings-nav-ide"]')).toBeNull()
+  })
+
+  it('renders token presence and source without re-projecting the bearer secret into the DOM', () => {
+    const secret = 'masc-secret-that-must-not-enter-dom'
+    setStoredToken(secret, { source: 'manual', scope: 'admin' })
+    shellAuthSummary.value = {
+      enabled: true,
+      require_token: true,
+      token_present: true,
+      token_valid: true,
+      token_agent: 'dashboard',
+      effective_agent: 'dashboard',
+      effective_role: 'admin',
+      can_keeper_msg: true,
+    }
+
+    render(html`<${SettingsSurface} />`, container)
+
+    const presence = container.querySelector('[data-testid="settings-account-token-presence"]')
+    expect(presence?.textContent).toContain('브라우저에 저장됨')
+    expect(presence?.textContent).toContain('source:manual')
+    expect(presence?.textContent).toContain('scope:admin')
+    expect(container.querySelector('input[aria-label="Dashboard API token"]')).toBeNull()
+    expect(container.innerHTML).not.toContain(secret)
   })
 
   it('MCP server page shows resolved endpoint, inventory, and runs a real status check', async () => {
@@ -774,7 +806,7 @@ describe('SettingsSurface', () => {
     expect(container.textContent).not.toContain('미수집')
   })
 
-  it('notify page shows live thresholds without fake local routing controls', async () => {
+  it('notify page shows live thresholds plus a browser-local notification delivery writer', async () => {
     render(html`<${SettingsSurface} />`, container)
 
     await fireEvent.click(container.querySelector('[data-testid="settings-nav-notify"]') as HTMLElement)
@@ -783,19 +815,55 @@ describe('SettingsSurface', () => {
       expect(container.textContent).toContain('MASC_DASHBOARD_CTX_PREPARING')
       expect(container.textContent).toContain('70%')
       expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('live thresholds read-only')
-      expect(container.querySelector('[data-testid="notify-routing-readonly"]')?.textContent).toContain('no writer')
       expect(container.querySelector('[data-control-id="settings-notify-thresholds"]')?.getAttribute('data-control-kind'))
         .toBe('live-read')
       expect(container.querySelector('[data-control-id="settings-notify-routing"]')?.getAttribute('data-control-kind'))
-        .toBe('unsupported')
+        .toBe('browser-local')
     })
 
-    expect(container.querySelector('[data-testid="notify-local-summary"]')).toBeNull()
-    expect(container.querySelector('[data-testid="set-slider"]')).toBeNull()
-    expect(container.querySelector('[data-testid="set-stepper"]')).toBeNull()
-    expect(container.querySelector('[data-testid="set-toggle"]')).toBeNull()
-    expect(container.querySelector('[data-testid="set-seg"]')).toBeNull()
-    expect(sessionStorage.getItem('masc.settings.local.notifyChannel')).toBeNull()
+    // jsdom/happy-dom has no Notification API, so the permission state is
+    // honestly 'unsupported' here — the granted/denied/request-button paths
+    // are covered with a mocked Notification in notifications.test.ts.
+    expect(container.querySelector('[data-testid="notify-permission-value"]')?.textContent).toBe('unsupported')
+    expect(container.querySelector('[data-testid="notify-permission-request"]')).toBeNull()
+
+    for (const kind of ['keeper_guardrail', 'keeper_handoff', 'approval:pending', 'oas:agent_failed']) {
+      const toggle = container.querySelector(`[data-testid="notify-rule-toggle-${kind}"]`)
+      expect(toggle).not.toBeNull()
+      expect(toggle?.closest('label')?.classList.contains('v2-mobile-operator-target')).toBe(true)
+    }
+  })
+
+  it('notify page per-event toggle writes to the browser-local rule store', async () => {
+    render(html`<${SettingsSurface} />`, container)
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-notify"]') as HTMLElement)
+
+    const toggle = await waitFor(() => {
+      const el = container.querySelector('[data-testid="notify-rule-toggle-keeper_guardrail"]') as HTMLInputElement
+      expect(el).not.toBeNull()
+      return el
+    })
+    expect(toggle.checked).toBe(true)
+
+    await fireEvent.click(toggle)
+
+    await waitFor(() => {
+      const stored = JSON.parse(localStorage.getItem('dashboard:notify:rules-v1') ?? '{}')
+      expect(stored.keeper_guardrail).toBe(false)
+    })
+  })
+
+  it('notify page exposes the latest browser delivery failure', async () => {
+    notificationDeliveryError.value = 'notification constructor failed'
+    render(html`<${SettingsSurface} />`, container)
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-notify"]') as HTMLElement)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="notify-delivery-error"]')?.textContent)
+        .toContain('notification constructor failed')
+    })
   })
 
   it('notify page surfaces config projection failures instead of rendering missing thresholds', async () => {
@@ -1211,11 +1279,10 @@ describe('SettingsSurface', () => {
     expect(container.querySelectorAll('[data-testid="runtime-catalog-card"]').length).toBe(0)
   })
 
-  it('routing section shows resolved model routing controls and keeper assignments', async () => {
+  it('routing section shows resolved model routing controls', async () => {
     stubRuntimeDefaults(
       makeRuntimeDefaults({
         model_routing: {
-          keeper_assignments: [{ keeper: 'analyst', runtime_id: 'rt-b' }],
           librarian_runtime_id: 'rt-b',
           structured_judge_runtime_id: 'rt-c',
           hitl_summary_runtime_id: 'rt-a',
@@ -1224,13 +1291,7 @@ describe('SettingsSurface', () => {
         },
       }),
     )
-    stubRuntimeResolved(
-      makeRuntimeResolved({
-        assignments: [
-          { keeper: 'analyst', assignment_source: 'explicit', resolved: { kind: 'single_runtime', id: 'rt-b' } },
-        ],
-      }),
-    )
+    stubRuntimeResolved(makeRuntimeResolved())
     render(html`<${SettingsSurface} />`, container)
 
     await fireEvent.click(container.querySelector('[data-testid="settings-nav-routing"]') as HTMLElement)
@@ -1251,10 +1312,6 @@ describe('SettingsSurface', () => {
         .toBe('rt-a')
       expect(container.querySelector('[data-testid="runtime-routing-cross-verifier"]')).not.toBeNull()
       expect(container.querySelector('[data-testid="runtime-media-failover-editor"]')).not.toBeNull()
-      const assignments = Array.from(
-        container.querySelectorAll('[data-testid="routing-assignment"]'),
-      ).map(n => n.textContent)
-      expect(assignments).toEqual(['rt-b'])
     })
   })
 
@@ -1264,7 +1321,6 @@ describe('SettingsSurface', () => {
       .mockResolvedValueOnce(makeRuntimeDefaults())
       .mockResolvedValueOnce(makeRuntimeDefaults({
         model_routing: {
-          keeper_assignments: [{ keeper: 'analyst', runtime_id: 'rt-b' }],
           librarian_runtime_id: 'rt-b',
           structured_judge_runtime_id: null,
           hitl_summary_runtime_id: null,
@@ -1300,7 +1356,6 @@ describe('SettingsSurface', () => {
       .mockResolvedValueOnce(makeRuntimeDefaults())
       .mockResolvedValueOnce(makeRuntimeDefaults({
         model_routing: {
-          keeper_assignments: [{ keeper: 'analyst', runtime_id: 'rt-b' }],
           librarian_runtime_id: null,
           structured_judge_runtime_id: null,
           hitl_summary_runtime_id: 'rt-c',
@@ -1385,7 +1440,6 @@ describe('SettingsSurface', () => {
     apiMock.fetchRuntimeDefaults
       .mockResolvedValueOnce(makeRuntimeDefaults({
         model_routing: {
-          keeper_assignments: [{ keeper: 'analyst', runtime_id: 'rt-b' }],
           librarian_runtime_id: null,
           structured_judge_runtime_id: null,
           hitl_summary_runtime_id: null,
@@ -1395,7 +1449,6 @@ describe('SettingsSurface', () => {
       }))
       .mockResolvedValueOnce(makeRuntimeDefaults({
         model_routing: {
-          keeper_assignments: [{ keeper: 'analyst', runtime_id: 'rt-b' }],
           librarian_runtime_id: null,
           structured_judge_runtime_id: null,
           hitl_summary_runtime_id: null,
@@ -1428,42 +1481,13 @@ describe('SettingsSurface', () => {
     apiMock.fetchRuntimeResolved.mockRejectedValue(new Error('resolved runtime unavailable'))
     render(html`<${SettingsSurface} />`, container)
 
-    await fireEvent.click(container.querySelector('[data-testid="settings-nav-routing"]') as HTMLElement)
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-runtime"]') as HTMLElement)
 
     await waitFor(() => {
-      expect(container.querySelector('[data-testid="routing-assignments-error"]')).not.toBeNull()
+      expect(container.querySelector('[data-testid="runtime-resolved-error"]')).not.toBeNull()
     })
-    expect(container.querySelector('[data-testid="routing-assignments-empty"]')).toBeNull()
-    expect(container.querySelectorAll('[data-testid="routing-assignment"]').length).toBe(0)
-    await fireEvent.click(container.querySelector('[data-testid="settings-nav-runtime"]') as HTMLElement)
-    expect(container.querySelector('[data-testid="runtime-resolved-error"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="runtime-default-model"]')?.textContent).toBe('—')
     expect(container.querySelector('[data-testid="runtime-default-context"]')?.textContent).toBe('ctx 미수집')
-  })
-
-  it('routing section shows a keeper riding [runtime].default with no explicit assignment (bug #14)', async () => {
-    stubRuntimeResolved(
-      makeRuntimeResolved({
-        assignments: [
-          { keeper: 'analyst', assignment_source: 'explicit', resolved: { kind: 'single_runtime', id: 'rt-b' } },
-          { keeper: 'unassigned-keeper', assignment_source: 'default', resolved: { kind: 'single_runtime', id: 'rt-a' } },
-        ],
-      }),
-    )
-    render(html`<${SettingsSurface} />`, container)
-
-    await fireEvent.click(container.querySelector('[data-testid="settings-nav-routing"]') as HTMLElement)
-
-    await waitFor(() => {
-      const sources = Array.from(
-        container.querySelectorAll('[data-testid="routing-assignment-source"]'),
-      ).map(n => n.textContent)
-      expect(sources).toEqual(['explicit', 'default'])
-      const targets = Array.from(
-        container.querySelectorAll('[data-testid="routing-assignment"]'),
-      ).map(n => n.textContent)
-      expect(targets).toEqual(['rt-b', 'rt-a'])
-    })
   })
 
   it('renders prompt settings from the live prompt registry instead of prototype placeholders', async () => {
@@ -1639,7 +1663,7 @@ describe('settings read-surface helpers', () => {
 
     const notifyKinds = settingsControlInventory('notify').map(item => [item.id, item.kind])
     expect(notifyKinds).toContainEqual(['settings-notify-thresholds', 'live-read'])
-    expect(notifyKinds).toContainEqual(['settings-notify-routing', 'unsupported'])
+    expect(notifyKinds).toContainEqual(['settings-notify-routing', 'browser-local'])
   })
 
   it('settingsControlInventory records runtime routing writers as live-backed actions', () => {

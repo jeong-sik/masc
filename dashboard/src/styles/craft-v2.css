@@ -92,7 +92,7 @@
    `.kw-rail` (context cards only). Verified on the running dashboard. */
 .v2-app[data-density="spacious"] .kw-rail-scroll   { padding: 20px; gap: 24px; }
 .v2-app[data-density="spacious"] .kw-rail .kw-sec  { padding: 14px 16px; }
-.v2-app[data-density="spacious"] .kw-roster-head   { padding: 16px 14px; }
+.v2-app[data-density="spacious"] .kw-roster-head   { padding: 0; }
 .v2-app[data-density="spacious"] .kw-roster-list   { padding: 10px 8px; }
 .v2-app[data-density="spacious"] .kw-roster-filters { padding: 12px 14px; }
 

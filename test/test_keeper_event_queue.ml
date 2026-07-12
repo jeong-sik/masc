@@ -972,6 +972,90 @@ let () =
       Masc.Keeper_registry_event_queue.ack_consumed ~base_path keeper_name [ replayed ];
       assert (is_empty (Keeper_event_queue_persistence.load ~base_path ~keeper_name)));
 
+  (* --- registry identity barrier: [base] and [base/.masc] must address one
+     live atomic and the same durable owner. Two registrations followed by one
+     enqueue through each alias used to leave two live entries whose snapshots
+     overwrote each other on the shared canonical file. --- *)
+  let base_path = temp_dir "keeper-event-queue-registry-base-alias" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_registry.clear ();
+      rm_rf base_path)
+    (fun () ->
+      let keeper_name = "keeper-event-queue-registry-base-alias-test" in
+      let base_path_masc = Filename.concat base_path Common.masc_dirname in
+      let meta = meta_for_keeper keeper_name "trace-event-queue-base-alias-test" in
+      let queue_post_ids queue =
+        Keeper_event_queue.to_list queue
+        |> List.map (fun (stimulus : Keeper_event_queue.stimulus) -> stimulus.post_id)
+      in
+      Masc.Keeper_registry.clear ();
+      ignore (Masc.Keeper_registry.register ~base_path keeper_name meta);
+      ignore
+        (Masc.Keeper_registry.register
+           ~base_path:base_path_masc
+           keeper_name
+           meta);
+      let base_entry =
+        match Masc.Keeper_registry.get ~base_path keeper_name with
+        | Some entry -> entry
+        | None -> Alcotest.fail "base-path registry entry missing"
+      in
+      let masc_entry =
+        match Masc.Keeper_registry.get ~base_path:base_path_masc keeper_name with
+        | Some entry -> entry
+        | None -> Alcotest.fail "base-path/.masc registry entry missing"
+      in
+      Alcotest.(check bool)
+        "BasePath aliases resolve one live registry entry"
+        true
+        (base_entry == masc_entry);
+      Alcotest.(check string)
+        "registry stores canonical BasePath"
+        base_path
+        base_entry.base_path;
+      Alcotest.(check int)
+        "registry contains one canonical owner"
+        1
+        (List.length (Masc.Keeper_registry.all ()));
+      Alcotest.(check int)
+        "BasePath/.masc filter sees canonical owner"
+        1
+        (List.length (Masc.Keeper_registry.all ~base_path:base_path_masc ()));
+
+      Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name board_stim;
+      Masc.Keeper_registry_event_queue.enqueue
+        ~base_path:base_path_masc
+        keeper_name
+        bootstrap_stim;
+      let expected_post_ids = [ "p1"; "bootstrap" ] in
+      Alcotest.(check (list string))
+        "both aliases publish to one live atomic"
+        expected_post_ids
+        (Masc.Keeper_registry_event_queue.snapshot ~base_path keeper_name
+         |> queue_post_ids);
+      Alcotest.(check (list string))
+        "both alias stimuli share one durable snapshot"
+        expected_post_ids
+        (Keeper_event_queue_persistence.load
+           ~base_path:base_path_masc
+           ~keeper_name
+         |> queue_post_ids);
+
+      Masc.Keeper_registry.clear ();
+      ignore
+        (Masc.Keeper_registry.register
+           ~base_path:base_path_masc
+           keeper_name
+           meta);
+      Alcotest.(check (list string))
+        "restart through alias restores both stimuli"
+        expected_post_ids
+        (Masc.Keeper_registry_event_queue.snapshot
+           ~base_path
+           keeper_name
+         |> queue_post_ids));
+
   (* --- registry drain_board: turn digest consumes every queued board
      signal in one call, however spread their arrival times (RFC-0334 W2
      pin: 5 signals spread over >2 s while the keeper was busy → one
@@ -1065,45 +1149,49 @@ let () =
      an already-running autonomous OAS loop. The classifier reads the same
      registry queue this test dequeues below; no age, count, or payload text
      heuristic participates. *)
-  let base_path = temp_dir "keeper-event-queue-autonomous-yield" in
-  Fun.protect
-    ~finally:(fun () ->
-      Masc.Keeper_registry.clear ();
-      Masc.Keeper_chat_queue.clear ~keeper_name:"keeper-event-queue-yield-test";
-      rm_rf base_path)
-    (fun () ->
-      let keeper_name = "keeper-event-queue-yield-test" in
-      let meta = meta_for_keeper keeper_name "trace-event-queue-yield-test" in
-      Masc.Keeper_registry.clear ();
-      Masc.Keeper_chat_queue.clear ~keeper_name;
-      ignore (Masc.Keeper_registry.register ~base_path keeper_name meta);
-      (match
-         Masc.Keeper_unified_turn_execution.autonomous_yield_request
-           ~base_path
-           ~keeper_name
-           ~channel:Masc.Keeper_world_observation.Scheduled_autonomous
-       with
-       | None -> ()
-       | Some _ ->
-         Alcotest.fail "empty work queues must not request an autonomous yield");
-      Masc.Keeper_registry_event_queue.enqueue
-        ~base_path
-        keeper_name
-        bootstrap_stim;
-      match
-        Masc.Keeper_unified_turn_execution.autonomous_yield_request
+  Eio_main.run (fun _env ->
+    let base_path = temp_dir "keeper-event-queue-autonomous-yield" in
+    Fun.protect
+      ~finally:(fun () ->
+        Masc.Keeper_registry.clear ();
+        Masc.Keeper_chat_queue.For_testing.reset ();
+        rm_rf base_path)
+      (fun () ->
+        let keeper_name = "keeper-event-queue-yield-test" in
+        let meta = meta_for_keeper keeper_name "trace-event-queue-yield-test" in
+        Masc.Keeper_registry.clear ();
+        Masc.Keeper_chat_queue.For_testing.reset ();
+        ignore
+          (Masc.Keeper_chat_queue.configure_persistence ~base_path
+            : Masc.Keeper_chat_queue.configure_report);
+        ignore (Masc.Keeper_registry.register ~base_path keeper_name meta);
+        (match
+           Masc.Keeper_unified_turn_execution.autonomous_yield_request
+             ~base_path
+             ~keeper_name
+             ~channel:Masc.Keeper_world_observation.Scheduled_autonomous
+         with
+         | None -> ()
+         | Some _ ->
+           Alcotest.fail "empty work queues must not request an autonomous yield");
+        Masc.Keeper_registry_event_queue.enqueue
           ~base_path
-          ~keeper_name
-          ~channel:Masc.Keeper_world_observation.Reactive
-      with
-      | Some
-          { Masc.Keeper_agent_run.reason =
-              Masc.Keeper_agent_run.Durable_stimulus_waiting
-          ; boundary = Masc.Keeper_agent_run.Yield_after_current_turn
-          } ->
-        ()
-      | None | Some _ ->
-        Alcotest.fail "pending durable stimulus must request a typed yield");
+          keeper_name
+          bootstrap_stim;
+        match
+          Masc.Keeper_unified_turn_execution.autonomous_yield_request
+            ~base_path
+            ~keeper_name
+            ~channel:Masc.Keeper_world_observation.Reactive
+        with
+        | Some
+            { Masc.Keeper_agent_run.reason =
+                Masc.Keeper_agent_run.Durable_stimulus_waiting
+            ; boundary = Masc.Keeper_agent_run.Yield_after_current_turn
+            } ->
+          ()
+        | None | Some _ ->
+          Alcotest.fail "pending durable stimulus must request a typed yield"));
 
   (* --- critical delivery: durable enqueue succeeds before registration and
      is replayed when that keeper lane appears. --- *)

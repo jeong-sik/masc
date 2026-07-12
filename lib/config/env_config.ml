@@ -45,16 +45,6 @@ let print_summary () =
     Env_config_keeper.KeeperBootstrap.enabled
     Env_config_keeper.KeeperBootstrap.stale_turn_seconds
     Env_config_keeper.KeeperBootstrap.max_scan;
-  Log.Env.info "KeeperAlert: enabled=%b min_score=%.2f retries=%d board=%b slack=%b github=%b"
-    Env_config_keeper.KeeperAlert.enabled
-    Env_config_keeper.KeeperAlert.min_score
-    Env_config_keeper.KeeperAlert.max_retries
-    Env_config_keeper.KeeperAlert.board_enabled
-    Env_config_keeper.KeeperAlert.slack_enabled
-    Env_config_keeper.KeeperAlert.github_enabled;
-  Log.Env.info "KeeperAlert(SlackDM): enabled=%b user_id_set=%b"
-    Env_config_keeper.KeeperAlert.slack_dm_enabled
-    (String.trim Env_config_keeper.KeeperAlert.slack_dm_user_id <> "");
   Log.Env.info "KeeperKeepalive: interval=%ds max_hb_failures=%d sleep_chunk=%.1fs jitter=%.2f"
     Env_config_keeper.KeeperKeepalive.interval_sec
     Env_config_keeper.KeeperKeepalive.max_consecutive_failures

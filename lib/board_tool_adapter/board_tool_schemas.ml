@@ -5,7 +5,7 @@
 open Masc_board_handlers
 
 let tool_post_create : Masc_domain.tool_schema =
-  { name = "masc_board_post"
+  { name = Tool_name.Board_name.(to_string Board_post)
   ; description =
       "Create a post on the MASC internal board. Pass either `body` or `content` (both \
        accepted — `body` wins if both present). `author` is auto-filled from the \
@@ -161,7 +161,7 @@ let tool_post_create : Masc_domain.tool_schema =
 ;;
 
 let tool_post_edit : Masc_domain.tool_schema =
-  { name = "masc_board_post_update"
+  { name = Tool_name.Board_name.(to_string Board_post_update)
   ; description =
       "Edit an existing board post you authored, by exact post_id. Only the post's \
        author can edit it; an edit by anyone else is rejected. Pass the full new \
@@ -227,7 +227,7 @@ let tool_post_edit : Masc_domain.tool_schema =
 ;;
 
 let tool_post_list : Masc_domain.tool_schema =
-  { name = "masc_board_list"
+  { name = Tool_name.Board_name.(to_string Board_list)
   ; description =
       "List MASC internal board posts and return post_id values for follow-up \
        masc_board_post_get, masc_board_comment, or masc_board_vote calls. Use this when \
@@ -352,7 +352,7 @@ let tool_post_list : Masc_domain.tool_schema =
 ;;
 
 let tool_post_get : Masc_domain.tool_schema =
-  { name = "masc_board_post_get"
+  { name = Tool_name.Board_name.(to_string Board_post_get)
   ; description =
       "Read one existing board post by exact post_id. Comments are paginated by \
        default; use comment_offset and comment_limit to continue through long \
@@ -405,7 +405,7 @@ let tool_post_get : Masc_domain.tool_schema =
 ;;
 
 let tool_comment_add : Masc_domain.tool_schema =
-  { name = "masc_board_comment"
+  { name = Tool_name.Board_name.(to_string Board_comment)
   ; description =
       "Add a comment to one existing board post by exact post_id. Use after the \
        post_id is visible from board context, masc_board_list, masc_board_search, or \
@@ -500,7 +500,7 @@ let tool_comment_add : Masc_domain.tool_schema =
 ;;
 
 let tool_vote : Masc_domain.tool_schema =
-  { name = "masc_board_vote"
+  { name = Tool_name.Board_name.(to_string Board_vote)
   ; description =
       "Vote on one existing board post by exact post_id to signal agreement or quality. \
        Use after the post_id is visible from board context, masc_board_list, \
@@ -534,7 +534,7 @@ let tool_vote : Masc_domain.tool_schema =
 ;;
 
 let tool_stats : Masc_domain.tool_schema =
-  { name = "masc_board_stats"
+  { name = Tool_name.Board_name.(to_string Board_stats)
   ; description =
       "Get board activity statistics: total posts, comments, votes, active hearths. Use \
        to understand overall board health and engagement levels."
@@ -543,7 +543,7 @@ let tool_stats : Masc_domain.tool_schema =
 ;;
 
 let tool_search : Masc_domain.tool_schema =
-  { name = "masc_board_search"
+  { name = Tool_name.Board_name.(to_string Board_search)
   ; description =
       "Search board posts by keyword across titles and content and return post_id values \
        for follow-up masc_board_post_get, masc_board_comment, or masc_board_vote calls. Use \
@@ -581,7 +581,7 @@ let tool_search : Masc_domain.tool_schema =
 ;;
 
 let tool_comment_vote : Masc_domain.tool_schema =
-  { name = "masc_board_comment_vote"
+  { name = Tool_name.Board_name.(to_string Board_comment_vote)
   ; description =
       "Vote on a comment (up or down) to signal agreement or quality. Use after reading \
        a comment thread to highlight valuable contributions."
@@ -608,7 +608,7 @@ let tool_comment_vote : Masc_domain.tool_schema =
 ;;
 
 let tool_reaction : Masc_domain.tool_schema =
-  { name = "masc_board_reaction"
+  { name = Tool_name.Board_name.(to_string Board_reaction)
   ; description = "Toggle a standard emoji reaction on a board post or comment."
   ; input_schema =
       `Assoc
@@ -656,7 +656,7 @@ let tool_reaction : Masc_domain.tool_schema =
 ;;
 
 let tool_profile : Masc_domain.tool_schema =
-  { name = "masc_board_profile"
+  { name = Tool_name.Board_name.(to_string Board_profile)
   ; description =
       "Get an agent's board profile: post count, comment count, vote activity, and \
        engagement stats. Use to understand an agent's contribution patterns."
@@ -675,7 +675,7 @@ let tool_profile : Masc_domain.tool_schema =
 ;;
 
 let tool_hearth_list : Masc_domain.tool_schema =
-  { name = "masc_board_hearths"
+  { name = Tool_name.Board_name.(to_string Board_hearths)
   ; description = "List active hearths (topic categories) with post counts"
   ; input_schema = `Assoc [ "type", `String "object"; "properties", `Assoc [] ]
   }
@@ -683,7 +683,7 @@ let tool_hearth_list : Masc_domain.tool_schema =
 
 
 let tool_sub_board_create : Masc_domain.tool_schema =
-  { name = "masc_board_sub_board_create"
+  { name = Tool_name.Board_name.(to_string Board_sub_board_create)
   ; description =
       "Create a named SubBoard (subreddit-style space) within the MASC board. \
        Requires a unique slug, name, and description. Owner is auto-filled from \
@@ -733,7 +733,7 @@ let tool_sub_board_create : Masc_domain.tool_schema =
 ;;
 
 let tool_sub_board_list : Masc_domain.tool_schema =
-  { name = "masc_board_sub_board_list"
+  { name = Tool_name.Board_name.(to_string Board_sub_board_list)
   ; description =
       "List all SubBoards with their slug, name, owner, member count, access policy, \
        and derived post count. Use to discover available board spaces before posting."
@@ -742,7 +742,7 @@ let tool_sub_board_list : Masc_domain.tool_schema =
 ;;
 
 let tool_sub_board_get : Masc_domain.tool_schema =
-  { name = "masc_board_sub_board_get"
+  { name = Tool_name.Board_name.(to_string Board_sub_board_get)
   ; description =
       "Get a single SubBoard by slug or ID. Returns full metadata including owner, \
        members, access policy, and post count."
@@ -766,7 +766,7 @@ let tool_sub_board_get : Masc_domain.tool_schema =
 ;;
 
 let tool_sub_board_update : Masc_domain.tool_schema =
-  { name = "masc_board_sub_board_update"
+  { name = Tool_name.Board_name.(to_string Board_sub_board_update)
   ; description =
       "Update an existing SubBoard by slug or ID. Only provided fields are changed; \
        slug and owner remain immutable."
@@ -820,7 +820,7 @@ let tool_sub_board_update : Masc_domain.tool_schema =
 ;;
 
 let tool_sub_board_delete : Masc_domain.tool_schema =
-  { name = "masc_board_sub_board_delete"
+  { name = Tool_name.Board_name.(to_string Board_sub_board_delete)
   ; description =
       "Delete a SubBoard by slug or ID. Existing posts inside the SubBoard keep \
        their content but lose their hearth binding (orphan policy)."

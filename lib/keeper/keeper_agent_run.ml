@@ -203,14 +203,17 @@ end
     @param temperature Subsystem temperature fallback; a selected runtime model
            declaration takes precedence. When omitted,
            [Keeper_config.keeper_unified_temperature] is the fallback.
-    @param max_tokens Maximum output tokens override; when omitted, resolved
-           from [Runtime_inference] with a 8192 fallback
+    @param max_tokens Explicit caller output-token override. When omitted, the
+           turn-start profile snapshot may provide the validated keeper OAS
+           override; absent both, no [max_tokens] field is sent. The keeper lane
+           never synthesizes a model-derived value (masc#24067 / oas#2517)
     @param is_retry When [true], replays the current user message into the
            working context without persisting it again, so transient retry
            attempts do not duplicate the user entry in session history *)
 let run_turn
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
+      ~(profile_defaults : Keeper_types_profile.keeper_profile_defaults)
       ~(turn_ctx_cell : Keeper_tool_call_log.turn_ctx_cell)
       ~(base_dir : string)
       ~(max_context : int)
@@ -350,6 +353,7 @@ let run_turn
     Keeper_run_context.prepare_run_context
       ~config
       ~meta
+      ~profile_defaults
       ~base_dir
       ~max_context
       ~runtime_id
@@ -359,30 +363,13 @@ let run_turn
       ~generation
       ()
   in
-  let requested_max_tokens = max_tokens in
   let meta = ctx.meta in
   let temperature = ctx.temperature in
-  let max_output_ceiling =
-    None
-  in
-  let max_tokens, pre_dispatch_max_tokens_error =
-    match
-      Runtime_inference.validate_max_tokens_within_ceiling
-        ~runtime_id
-        ~provider_ceiling:max_output_ceiling
-        ctx.max_tokens
-    with
-    | Ok max_tokens -> max_tokens, None
-    | Error internal_error ->
-      let detail =
-        Option.value
-          ~default:(Keeper_internal_error.kind_of_masc_internal_error internal_error)
-          (Keeper_internal_error.summary_of_masc_internal_error internal_error)
-      in
-      Log.Keeper.error "%s: %s" meta.name detail;
-      ( ctx.max_tokens,
-        Some (Keeper_internal_error.sdk_error_of_masc_internal_error internal_error) )
-  in
+  (* The single turn-start snapshot. This exact binding feeds every runtime
+     candidate, OAS provider/lifecycle config, and the Turn_record sampling
+     payload below. OAS owns model-ceiling validation and envelope-specific
+     clamp/fallback policy. *)
+  let max_tokens = ctx.max_tokens in
   let context_injector = ctx.context_injector in
   let shared_context = ctx.shared_context in
   let session = ctx.session in
@@ -700,24 +687,13 @@ let run_turn
          ~max_context
          ~pre_dispatch_compacted;
        (* Section 3: Dispatch — call Keeper_turn_driver.run_named / Agent.run. *)
-       let pre_dispatch_error =
-         match pre_dispatch_checkpoint_error with
-         | Some err -> Some err
-         | None -> pre_dispatch_max_tokens_error
-       in
+       let pre_dispatch_error = pre_dispatch_checkpoint_error in
        let turn_result =
          match pre_dispatch_error with
          | Some err -> Error err
          | None ->
               let keeper_oas_guardrails =
                 keeper_oas_visibility_neutral_guardrails ?guardrails ()
-              in
-              let max_tokens_for_runtime ~runtime_id =
-                Keeper_run_context.resolve_max_tokens_for_runtime
-                  ~keeper_name:meta.name
-                  ~runtime_id
-                  ?max_tokens:requested_max_tokens
-                  ()
               in
               (* Autonomous cooperative yield: OAS checks [exit_condition]
                  before the first provider dispatch as well as between turns.
@@ -816,8 +792,7 @@ let run_turn
                     ?stream_idle_timeout_s
                     ~body_timeout_s:timeout_s
                     ~temperature
-                    ~max_tokens
-                    ~max_tokens_for_runtime
+                    ?max_tokens
                     ~accept:
                       Keeper_tool_response.response_has_text_or_tool_progress
                     ~guardrails:keeper_oas_guardrails
@@ -1102,10 +1077,7 @@ let run_turn
           ~sampling:
             { temperature = Some temperature
             ; top_p = Runtime.top_p_of_runtime_id runtime_id_string
-            ; max_tokens =
-                (match pre_dispatch_max_tokens_error with
-                 | None -> Some max_tokens
-                 | Some _ -> None)
+            ; max_tokens
             ; thinking_budget = tctx.thinking_budget
             ; enable_thinking = tctx.thinking_enabled
             }

@@ -7,12 +7,6 @@ module Lib = Masc
 open Alcotest
 open Printf
 
-let () =
-  Lib.Keeper_approval_queue.set_approval_resolution_wake_hook
-    (fun
-      ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_ ~channel:_ ->
-      Ok (fun () -> ()))
-
 let test_dir () =
   let tmp = Filename.temp_file "masc_dashboard_governance" "" in
   Sys.remove tmp;

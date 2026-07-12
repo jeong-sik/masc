@@ -1,9 +1,21 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { activeIdeFile, focusIdeContextAnchor, ideContextFocus } from './ide-state'
+import {
+  activeIdeFile,
+  activeIdeFocus,
+  focusIdeContextAnchor,
+  focusIdeFile,
+  ideContextFocus,
+  synchronizeIdeWorkspaceIdentity,
+} from './ide-state'
 
 describe('ide-state', () => {
   beforeEach(() => {
-    activeIdeFile.value = 'package.json'
+    synchronizeIdeWorkspaceIdentity({ kind: 'project' })
+    focusIdeFile({
+      path: 'package.json',
+      origin: 'operator',
+      availability: 'available',
+    })
     ideContextFocus.value = null
   })
 
@@ -14,13 +26,19 @@ describe('ide-state', () => {
       surface: 'Log',
       label: 'runtime event',
       source_id: 'evt-1',
-    })
+    }, 'operator')
 
     expect(activeIdeFile.value).toBe('src/runtime/router.ts')
     expect(ideContextFocus.value).toMatchObject({
       file_path: 'src/runtime/router.ts',
       line: 12,
       source_id: 'evt-1',
+    })
+    expect(activeIdeFocus.value).toEqual({
+      path: 'src/runtime/router.ts',
+      origin: 'operator',
+      workspace_identity: { kind: 'project' },
+      availability: 'pending',
     })
   })
 
@@ -38,7 +56,7 @@ describe('ide-state', () => {
       surface: 'Log',
       label: 'runtime event',
       source_id: 'evt-1',
-    })
+    }, 'route')
 
     expect(activeIdeFile.value).toBe('package.json')
     expect(ideContextFocus.value).toBeNull()
@@ -51,7 +69,7 @@ describe('ide-state', () => {
       surface: 'Log',
       label: 'runtime event',
       source_id: 'evt-1',
-    })
+    }, 'operator')
 
     expect(activeIdeFile.value).toBe('src/runtime/router.ts')
     expect(ideContextFocus.value?.line).toBeUndefined()

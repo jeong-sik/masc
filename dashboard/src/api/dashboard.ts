@@ -8,7 +8,6 @@ import { type LogEntry, type LogsResponse } from './schemas/logs'
 import {
   type RuntimeDefaultsResponse,
   type RuntimeEntry,
-  type KeeperAssignment,
   type ModelRouting,
 } from './schemas/runtime-defaults'
 import {
@@ -64,7 +63,7 @@ export { decodeDashboardFeedMetadata } from './dashboard-shared'
 // --- System logs ---
 
 export type { LogEntry, LogsResponse }
-export type { RuntimeDefaultsResponse, RuntimeEntry, KeeperAssignment, ModelRouting }
+export type { RuntimeDefaultsResponse, RuntimeEntry, ModelRouting }
 export type {
   RuntimeResolvedResponse,
   RuntimeResolution,
@@ -201,6 +200,10 @@ export {
   fetchCostLatency,
 } from './dashboard-keeper-cost'
 
+export {
+  parseDashboardKeeperWaitingSource,
+} from './dashboard-tools-prompts'
+
 export { fetchDashboardMissionBriefing, fetchDashboardPlanning } from './dashboard-mission'
 
 
@@ -220,6 +223,8 @@ export type {
   DashboardScheduledAutomationPayloadSupport,
   DashboardScheduledAutomationLiveSupportedNonTerminalEvidence,
   DashboardScheduledAutomation,
+  DashboardKeeperWaitingSource,
+  DashboardKeeperWaitingState,
   DashboardKeeperWaitingRow,
   DashboardKeeperWaitingKeeper,
   DashboardKeeperWaitingInventory,

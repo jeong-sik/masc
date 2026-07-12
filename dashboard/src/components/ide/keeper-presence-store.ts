@@ -31,7 +31,7 @@ export function disconnectedSnapshot(reason: string): KeeperPresenceSnapshot {
 export const globalPresenceSnapshot = signal<KeeperPresenceSnapshot>(LOADING_SNAPSHOT)
 
 export function updateKeeperPresenceFromSSE(snapshot: unknown): boolean {
-  const normalized = normalizeSnapshot(snapshot)
+  const normalized = normalizeKeeperPresenceSnapshot(snapshot)
   if (normalized === null) return false
   globalPresenceSnapshot.value = normalized
   return true
@@ -86,7 +86,7 @@ export function createKeeperPresenceStore(
       snapshotSignal.value = withSortedEntries(snapshot)
       return true
     }
-    const normalized = normalizeSnapshot(snapshot)
+    const normalized = normalizeKeeperPresenceSnapshot(snapshot)
     if (normalized === null) return false
     snapshotSignal.value = normalized
     return true
@@ -131,7 +131,13 @@ function withSortedEntries(snap: KeeperPresenceSnapshot): KeeperPresenceSnapshot
   return { ...snap, entries: sorted }
 }
 
-function normalizeSnapshot(value: unknown): KeeperPresenceSnapshot | null {
+/**
+ * Parse the server-owned IDE presence payload.  Keeping this normalizer next
+ * to the store makes REST bootstrap and the SSE stream use the same contract
+ * instead of separately guessing which dashboard summary fields imply a
+ * keeper is present.
+ */
+export function normalizeKeeperPresenceSnapshot(value: unknown): KeeperPresenceSnapshot | null {
   if (!isRecord(value)) return null
   if (!hasNonEmptyStringField(value, 'runtime_id')) return null
   if (!Array.isArray(value.entries)) return null

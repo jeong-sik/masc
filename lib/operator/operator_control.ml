@@ -85,7 +85,7 @@ let workspace_action_result request result =
 let execute_workspace_action (ctx : 'a context) (request : action_request) =
   match request.action_type with
   | "broadcast" ->
-      let* () = validate_target_type "workspace" request in
+      let* () = validate_target_type Operator_action_constants.Workspace request in
       let* message =
         match get_string_opt request.payload "message" with
         | Some value -> Ok value
@@ -94,7 +94,7 @@ let execute_workspace_action (ctx : 'a context) (request : action_request) =
       let result = Workspace.broadcast ctx.config ~from_agent:request.actor ~content:message in
       workspace_action_result request (`String result)
   | "namespace_pause" ->
-      let* () = validate_target_type "workspace" request in
+      let* () = validate_target_type Operator_action_constants.Workspace request in
       let reason =
         get_string request.payload "reason" "Paused by operator control plane"
       in
@@ -102,7 +102,7 @@ let execute_workspace_action (ctx : 'a context) (request : action_request) =
       workspace_action_result request
         (`Assoc [ ("paused", `Bool true); ("reason", `String reason) ])
   | "namespace_resume" ->
-      let* () = validate_target_type "workspace" request in
+      let* () = validate_target_type Operator_action_constants.Workspace request in
       let status =
         match Workspace.resume ctx.config ~by:request.actor with
         | `Resumed -> "resumed"
@@ -114,7 +114,7 @@ let execute_workspace_action (ctx : 'a context) (request : action_request) =
         (`Assoc [("status", `String "removed");
                  ("reason", `String "Social runtime removed. Keepers discover board events via proactive turns.")])
   | "task_inject" ->
-      let* () = validate_target_type "workspace" request in
+      let* () = validate_target_type Operator_action_constants.Workspace request in
       let* title =
         match get_string_opt request.payload "title" with
         | Some value -> Ok value
@@ -174,7 +174,7 @@ let goal_decision_payload decision payload =
 let execute_goal_action (ctx : 'a context) (request : action_request) =
   match request.action_type with
   | action when String.equal action Operator_action_constants.goal_completion_decision ->
-    let* () = validate_target_type Operator_action_constants.goal_target_type request in
+    let* () = validate_target_type Operator_action_constants.Goal request in
     let* goal_id = require_target_id request in
     let* decision = parse_goal_completion_decision request.payload in
     let action = goal_completion_transition_action decision in
@@ -206,7 +206,7 @@ let execute_goal_action (ctx : 'a context) (request : action_request) =
 let execute_keeper_action (ctx : 'a context) (request : action_request) =
   match request.action_type with
   | "keeper_probe" ->
-      let* () = validate_target_type "keeper" request in
+      let* () = validate_target_type Operator_action_constants.Keeper request in
       let* name = require_target_id request in
       let status_args =
         `Assoc
@@ -236,7 +236,7 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
                 ] );
           ])
   | "keeper_recover" ->
-      let* () = validate_target_type "keeper" request in
+      let* () = validate_target_type Operator_action_constants.Keeper request in
       let* name = require_target_id request in
       let* (resolved_name, _meta) =
         resolve_keeper_meta_for_name ctx ~name
@@ -287,7 +287,7 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
                   ] );
             ])
   | "keeper_message" ->
-      let* () = validate_target_type "keeper" request in
+      let* () = validate_target_type Operator_action_constants.Keeper request in
       let* name = require_target_id request in
       let* message =
         match get_string_opt request.payload "message" with

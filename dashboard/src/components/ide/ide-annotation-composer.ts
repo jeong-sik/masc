@@ -28,14 +28,14 @@ const ANNOTATION_KINDS: readonly AnnotationKind[] = [
   'Bookmark',
 ]
 
-interface ComposerDraft {
+export interface IdeAnnotationComposerDraft {
   readonly kind: AnnotationKind
   readonly lineStart: string
   readonly lineEnd: string
   readonly content: string
 }
 
-function draftFromSelection(filePath: string): ComposerDraft {
+function draftFromSelection(filePath: string): IdeAnnotationComposerDraft {
   const selection = ideEditorSelection.value
   const matches = selection !== null && selection.filePath === filePath
   const lineStart = matches ? selection.lineStart : 1
@@ -60,7 +60,7 @@ function parseLine(raw: string): number | null {
   return value
 }
 
-function draftProblem(draft: ComposerDraft): string | null {
+function draftProblem(draft: IdeAnnotationComposerDraft): string | null {
   const lineStart = parseLine(draft.lineStart)
   const lineEnd = parseLine(draft.lineEnd)
   if (lineStart === null) return 'line_start는 1 이상의 정수여야 합니다'
@@ -75,6 +75,10 @@ export function IdeAnnotationComposer({
   activeRepositoryId,
   subscribeActiveRepositoryId,
   refresh,
+  draft: controlledDraft,
+  onDraftChange,
+  submitting: controlledSubmitting,
+  onSubmittingChange,
 }: {
   documentStore: {
     document: () => { readonly file_path: string | null }
@@ -83,13 +87,21 @@ export function IdeAnnotationComposer({
   activeRepositoryId: () => string | null
   subscribeActiveRepositoryId: (listener: () => void) => () => void
   refresh: () => void
+  draft?: IdeAnnotationComposerDraft | null
+  onDraftChange?: (draft: IdeAnnotationComposerDraft | null) => void
+  submitting?: boolean
+  onSubmittingChange?: (submitting: boolean) => void
 }): VNode | null {
   useStoreSubscription(documentStore.subscribe)
   useStoreSubscription(subscribeActiveRepositoryId)
   useSignalValue(ideEditorSelection)
 
-  const [draft, setDraft] = useState<ComposerDraft | null>(null)
-  const [submitting, setSubmitting] = useState(false)
+  const [localDraft, setLocalDraft] = useState<IdeAnnotationComposerDraft | null>(null)
+  const [localSubmitting, setLocalSubmitting] = useState(false)
+  const draft = onDraftChange ? controlledDraft ?? null : localDraft
+  const setDraft = onDraftChange ?? setLocalDraft
+  const submitting = onSubmittingChange ? controlledSubmitting ?? false : localSubmitting
+  const setSubmitting = onSubmittingChange ?? setLocalSubmitting
 
   const filePath = documentStore.document().file_path
   if (filePath === null) return null
@@ -115,8 +127,9 @@ export function IdeAnnotationComposer({
   }
 
   const problem = draftProblem(draft)
-  const update = (patch: Partial<ComposerDraft>) =>
-    setDraft(current => (current === null ? current : { ...current, ...patch }))
+  const update = (patch: Partial<IdeAnnotationComposerDraft>) => {
+    if (draft !== null) setDraft({ ...draft, ...patch })
+  }
 
   const submit = async () => {
     if (problem !== null || repoId === null || submitting) return

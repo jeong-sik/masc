@@ -13,6 +13,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
   let strs key = Keeper_toml_loader.toml_string_list doc (k key) in
   let has key = List.mem_assoc (k key) doc in
   let has_raw key = List.mem_assoc key doc in
+  let oas_env = extract_oas_env_from_doc doc in
   let tool_access_defaults_result =
     let key = k "tool_access" in
     if has_raw key then
@@ -128,6 +129,17 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
     Result.bind result (fun () -> runtime_assignment_result)
   in
   let result =
+    Result.bind result (fun () -> validate_unified_max_tokens_toml_value doc)
+  in
+  let result =
+    Result.bind result (fun () ->
+      Result.map
+        (fun _ -> ())
+        (parse_unified_max_tokens_override_of_oas_env oas_env))
+  in
+  (* [tool_access_defaults_result] must remain the final bind: its successful
+     payload is consumed by the record-building [Result.map] below. *)
+  let result =
     Result.bind result (fun () -> tool_access_defaults_result)
   in
   Result.map
@@ -168,7 +180,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         per_provider_timeout_state;
         per_provider_timeout;
         always_approve = bool_ "always_approve";
-        oas_env = extract_oas_env_from_doc doc;
+        oas_env;
         unknown_toml_keys = [];
       })
     result
@@ -298,11 +310,10 @@ let warn_unknown_keeper_toml_keys_once ~path unknown =
   in
   loop ()
 
-let warn_unknown_keeper_toml_keys ~path (doc : Keeper_toml_loader.toml_doc) =
-  match detect_unknown_keeper_toml_keys doc with
+let warn_unknown_keeper_toml_key_names ~path unknown =
+  match normalize_unknown_keeper_toml_keys unknown with
   | [] -> ()
   | unknown ->
-    let unknown = normalize_unknown_keeper_toml_keys unknown in
     if warn_unknown_keeper_toml_keys_once ~path unknown then begin
       Otel_metric_store.inc_counter
         Otel_metric_store.metric_config_unknown_keys_ignored
@@ -314,6 +325,11 @@ let warn_unknown_keeper_toml_keys ~path (doc : Keeper_toml_loader.toml_doc) =
         path
         (String.concat ", " unknown)
     end
+
+let warn_unknown_keeper_toml_keys ~path (doc : Keeper_toml_loader.toml_doc) =
+  warn_unknown_keeper_toml_key_names
+    ~path
+    (detect_unknown_keeper_toml_keys doc)
 
 let merge_string_list ~base overlay =
   match overlay with [] -> base | xs -> xs

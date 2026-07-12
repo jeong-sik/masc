@@ -81,24 +81,6 @@ let key_to_env =
     "memory.placeholders",              "MASC_KEEPER_MEMORY_PLACEHOLDERS";
     "memory.consensus_pattern",         "MASC_KEEPER_MEMORY_CONSENSUS_PATTERN";
     "memory.llm_summary",               "MASC_KEEPER_MEMORY_LLM_SUMMARY";
-    (* [alert] *)
-    "alert.enabled",                    "MASC_KEEPER_ALERT_ENABLED";
-    "alert.min_score",                  "MASC_KEEPER_ALERT_MIN_SCORE";
-    "alert.max_body_chars",             "MASC_KEEPER_ALERT_MAX_BODY_CHARS";
-    "alert.max_retries",                "MASC_KEEPER_ALERT_MAX_RETRIES";
-    "alert.retry_base_delay_ms",        "MASC_KEEPER_ALERT_RETRY_BASE_DELAY_MS";
-    "alert.board_enabled",              "MASC_KEEPER_ALERT_BOARD_ENABLED";
-    "alert.board_author",               "MASC_KEEPER_ALERT_BOARD_AUTHOR";
-    "alert.board_hearth",               "MASC_KEEPER_ALERT_BOARD_HEARTH";
-    "alert.board_visibility",           "MASC_KEEPER_ALERT_BOARD_VISIBILITY";
-    "alert.slack_enabled",              "MASC_KEEPER_ALERT_SLACK_ENABLED";
-    "alert.slack_webhook_url",          "MASC_KEEPER_ALERT_SLACK_WEBHOOK_URL";
-    "alert.slack_dm_enabled",           "MASC_KEEPER_ALERT_SLACK_DM_ENABLED";
-    "alert.slack_dm_user_id",           "MASC_KEEPER_ALERT_SLACK_DM_USER_ID";
-    "alert.github_enabled",             "MASC_KEEPER_ALERT_GITHUB_ENABLED";
-    "alert.github_repo",                "MASC_KEEPER_ALERT_GITHUB_REPO";
-    "alert.github_label",               "MASC_KEEPER_ALERT_GITHUB_LABEL";
-    "alert.github_min_score",           "MASC_KEEPER_ALERT_GITHUB_MIN_SCORE";
     (* [web_search] *)
     "web_search.searxng_url",           "MASC_SEARXNG_URL";
     "web_search.provider",              "MASC_WEB_SEARCH_PROVIDER";

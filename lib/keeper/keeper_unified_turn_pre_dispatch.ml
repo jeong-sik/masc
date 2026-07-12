@@ -9,18 +9,36 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_context_runtime
 
-let resolve_unified_max_tokens_fallback
+let profile_load_error ~keeper_name error =
+  Agent_sdk.Error.Config
+    (Agent_sdk.Error.InvalidConfig
+       { field = "keeper.profile"
+       ; detail =
+           Printf.sprintf
+             "keeper %s profile is invalid: %s"
+             keeper_name
+             (Keeper_types_profile.keeper_toml_load_error_to_string error)
+       })
+
+let load_profile_defaults ~base_path ~keeper_name =
+  Keeper_types_profile.load_keeper_profile_defaults_result_for_base_path
+    ~base_path
+    keeper_name
+  |> Result.map_error (profile_load_error ~keeper_name)
+
+(* masc#24067 / oas#2517: the keeper lane must not synthesize a request
+   [max_tokens] value. The only override source is the explicit per-keeper
+   env/profile knob; absent that, [None] — no [max_tokens] field goes on the
+   request. *)
+let resolve_unified_max_tokens_override
       ~(meta_name : string)
       ~(profile_defaults : Keeper_types_profile.keeper_profile_defaults)
       ()
+  : int option
   =
-  match
-    Keeper_types_profile.unified_max_tokens_override_of_oas_env
-      ~keeper_name:meta_name
-      profile_defaults.oas_env
-  with
-  | Some value -> value
-  | None -> Keeper_config.keeper_unified_max_tokens ()
+  Keeper_types_profile.unified_max_tokens_override_of_oas_env
+    ~keeper_name:meta_name
+    profile_defaults.oas_env
 
 let build_runtime_execution
       ~(meta : keeper_meta)
@@ -76,36 +94,15 @@ let build_runtime_execution
            ~fallback:Keeper_config.keeper_unified_temperature
        in
        let raw_max_tokens =
-         Runtime_inference.resolve_max_tokens
-           ~runtime_id
-           ~fallback:
-             (resolve_unified_max_tokens_fallback
-                ~meta_name:meta.name
-                ~profile_defaults)
+         resolve_unified_max_tokens_override
+           ~meta_name:meta.name
+           ~profile_defaults
+           ()
        in
-       let max_output_ceiling =
-         None
-       in
-       (match
-         Runtime_inference.validate_max_tokens_within_ceiling
-           ~runtime_id
-            ~provider_ceiling:max_output_ceiling
-            raw_max_tokens
-        with
-        | Error err ->
-          let detail =
-            Option.value
-              ~default:(Keeper_internal_error.kind_of_masc_internal_error err)
-              (Keeper_internal_error.summary_of_masc_internal_error err)
-          in
-          log_pre_dispatch_error ~site:"validate_max_tokens_within_ceiling" detail;
-          Error
-            (Keeper_internal_error.sdk_error_of_masc_internal_error err)
-        | Ok max_tokens ->
-          Ok
-            { Keeper_turn_runtime_budget.runtime_id
-            ; max_context_resolution
-            ; max_context
-            ; temperature
-            ; max_tokens
-            }))
+       Ok
+         { Keeper_turn_runtime_budget.runtime_id
+         ; max_context_resolution
+         ; max_context
+         ; temperature
+         ; max_tokens = raw_max_tokens
+         })

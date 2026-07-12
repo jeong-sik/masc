@@ -68,6 +68,25 @@ type available_action = {
   confirm_required : bool;
 }
 
+type target =
+  { target_type : Operator_action_constants.target_type
+  ; target_id : string option
+  }
+
+let target_gate_callback
+    : (Workspace.config -> target -> (unit, string) result) Atomic.t
+  =
+  Atomic.make (fun _config _target -> Ok ())
+;;
+
+let register_target_gate gate = Atomic.set target_gate_callback gate
+
+let target_of_entry (entry : pending_confirm) =
+  match Operator_action_constants.target_type_of_string entry.target_type with
+  | Some target_type -> Ok { target_type; target_id = entry.target_id }
+  | None -> Error (Printf.sprintf "invalid pending-confirm target type: %S" entry.target_type)
+;;
+
 let make_available_action ~action_type ~tool_name ~target_type ~description =
   { action_type; tool_name; target_type; description;
     confirm_required = Operator_approval.confirm_required action_type }
@@ -174,12 +193,16 @@ let write_pending_confirms config (entries : pending_confirm list) =
   Workspace_utils.write_json_result config (pending_confirms_path config)
     (pending_confirms_to_yojson entries)
 
+let with_store_lock config f =
+  File_lock_eio.with_mutex (pending_confirms_path config) f
+;;
+
 let pending_confirm_expired (entry : pending_confirm) =
   match entry.expires_at with
   | Some exp -> Masc_domain.now_iso () > exp
   | None -> false
 
-let read_pending_confirms_result config =
+let read_pending_confirms_result_unlocked config =
   match raw_pending_confirms_result config with
   | Error _ as error -> error
   | Ok entries ->
@@ -194,6 +217,10 @@ let read_pending_confirms_result config =
            msg)
   else Ok active
 
+let read_pending_confirms_result config =
+  with_store_lock config (fun () -> read_pending_confirms_result_unlocked config)
+;;
+
 let read_pending_confirms config : pending_confirm list =
   match read_pending_confirms_result config with
   | Ok entries -> entries
@@ -202,39 +229,59 @@ let read_pending_confirms config : pending_confirm list =
     []
 
 let upsert_pending_confirm config entry =
-  match read_pending_confirms_result config with
-  | Error _ as error -> error
-  | Ok entries ->
-    let remaining =
-      entries
-      |> List.filter (fun existing -> not (String.equal existing.token entry.token))
-    in
-    write_pending_confirms config (entry :: remaining)
+  with_store_lock config (fun () ->
+    match target_of_entry entry with
+    | Error _ as error -> error
+    | Ok target ->
+      (match Atomic.get target_gate_callback config target with
+       | Error _ as error -> error
+       | Ok () ->
+         (match read_pending_confirms_result_unlocked config with
+          | Error _ as error -> error
+          | Ok entries ->
+            let remaining =
+              entries
+              |> List.filter (fun existing -> not (String.equal existing.token entry.token))
+            in
+            write_pending_confirms config (entry :: remaining))))
 
 let remove_pending_confirm config token =
-  match read_pending_confirms_result config with
-  | Error _ as error -> error
-  | Ok entries ->
-    let remaining =
-      entries
-      |> List.filter (fun existing -> not (String.equal existing.token token))
-    in
-    write_pending_confirms config remaining
+  with_store_lock config (fun () ->
+    match read_pending_confirms_result_unlocked config with
+    | Error _ as error -> error
+    | Ok entries ->
+      let remaining =
+        entries
+        |> List.filter (fun existing -> not (String.equal existing.token token))
+      in
+      write_pending_confirms config remaining)
+
+let remove_pending_confirms_by_typed_target config target =
+  with_store_lock config (fun () ->
+    match raw_pending_confirms_result config with
+    | Error _ as error -> error
+    | Ok all ->
+      let target_type =
+        Operator_action_constants.target_type_to_string target.target_type
+      in
+      let remaining =
+        List.filter
+          (fun (entry : pending_confirm) ->
+             not
+               (String.equal entry.target_type target_type
+                && entry.target_id = target.target_id))
+          all
+      in
+      let removed = List.length all - List.length remaining in
+      if removed > 0
+      then write_pending_confirms config remaining |> Result.map (fun () -> removed)
+      else Ok 0)
 
 let remove_pending_confirms_by_target config ~target_type ~target_id =
-  let all = raw_pending_confirms config in
-  let remaining =
-    List.filter
-      (fun (entry : pending_confirm) ->
-        not
-          (String.equal entry.target_type target_type
-          && entry.target_id = target_id))
-      all
-  in
-  let removed = List.length all - List.length remaining in
-  if removed > 0 then
-    write_pending_confirms config remaining |> Result.map (fun () -> removed)
-  else Ok 0
+  match Operator_action_constants.target_type_of_string target_type with
+  | None -> Error (Printf.sprintf "invalid pending-confirm target type: %S" target_type)
+  | Some target_type ->
+    remove_pending_confirms_by_typed_target config { target_type; target_id }
 
 let normalize_pending_confirm_actor_filter = function
   | Some raw ->
@@ -275,19 +322,19 @@ let pending_confirms_json ?actor config =
 let available_actions : available_action list =
   [
     make_available_action ~action_type:"broadcast" ~tool_name:"masc_broadcast"
-      ~target_type:"workspace"
+      ~target_type:Operator_action_constants.workspace_target_type
       ~description:"Namespace-wide operator broadcast.";
     make_available_action ~action_type:"namespace_pause" ~tool_name:"masc_pause"
-      ~target_type:"workspace"
+      ~target_type:Operator_action_constants.workspace_target_type
       ~description:"Pause namespace automation and spawning.";
     make_available_action ~action_type:"namespace_resume" ~tool_name:"masc_resume"
-      ~target_type:"workspace"
+      ~target_type:Operator_action_constants.workspace_target_type
       ~description:"Resume a paused namespace.";
     make_available_action ~action_type:"social_sweep" ~tool_name:"social_sweep"
-      ~target_type:"workspace"
+      ~target_type:Operator_action_constants.workspace_target_type
       ~description:"Run one immediate social sweep across keepers.";
     make_available_action ~action_type:"task_inject" ~tool_name:"masc_add_task"
-      ~target_type:"workspace"
+      ~target_type:Operator_action_constants.workspace_target_type
       ~description:"Inject a backlog task into the namespace.";
     make_available_action
       ~action_type:Operator_action_constants.goal_completion_decision
@@ -295,14 +342,15 @@ let available_actions : available_action list =
       ~target_type:Operator_action_constants.goal_target_type
       ~description:"Approve or reject a goal completion approval gate.";
     make_available_action ~action_type:"keeper_message" ~tool_name:"masc_keeper_msg"
-      ~target_type:"keeper"
+      ~target_type:Operator_action_constants.keeper_target_type
       ~description:"Send a direct operator message to a keeper.";
     make_available_action ~action_type:"keeper_probe" ~tool_name:"masc_keeper_status"
-      ~target_type:"keeper"
+      ~target_type:Operator_action_constants.keeper_target_type
       ~description:"Immediate keeper diagnostic snapshot.";
     make_available_action
       ~action_type:Operator_action_constants.keeper_recover
-      ~tool_name:"masc_keeper_recover" ~target_type:"keeper"
+      ~tool_name:"masc_keeper_recover"
+      ~target_type:Operator_action_constants.keeper_target_type
       ~description:"Safe down/up recovery for stale/degraded keeper.";
   ]
 

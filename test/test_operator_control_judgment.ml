@@ -22,7 +22,8 @@ let test_digest_workspace_prefers_fresh_operator_judgment () =
             [
               ("action_kind", `String "pause_workspace");
               ("resolved_tool", `String "masc_operator_confirm");
-              ("target_type", `String "root");
+              ( "target_type"
+              , `String Operator_action_constants.workspace_target_type );
               ("target_id", `Null);
               ("reason", `String "operator judge requires manual gate");
               ("payload_preview", `Assoc [ ("reason", `String "manual review") ]);
@@ -168,13 +169,9 @@ let test_operator_judgment_rejects_retired_target_type_aliases () =
     "namespace no longer parses"
     true
     (Option.is_none (Operator_judgment.target_type_of_string "namespace"));
-  Alcotest.(check bool)
-    "namespace no longer parses"
-    true
-    (Option.is_none (Operator_judgment.target_type_of_string "namespace"));
   Alcotest.(check (result string string))
     "digest rejects namespace"
-    (Error "target_type must be root")
+    (Error Operator_action_constants.workspace_target_type_error)
     (Operator_digest_types.normalize_digest_target_type (Some "namespace"));
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -199,7 +196,7 @@ let test_operator_judgment_rejects_retired_target_type_aliases () =
       | Error err ->
           Alcotest.(check string)
             "write rejects namespace"
-            "target_type must be root" err)
+            Operator_action_constants.workspace_target_type_error err)
 
 let test_confirm_consumes_pending_token_before_delegated_action_fails () =
   Eio_main.run @@ fun env ->
@@ -222,7 +219,8 @@ let test_confirm_consumes_pending_token_before_delegated_action_fails () =
             ("trace_id", `String "trace-retry");
             ("actor", `String "operator");
             ("action_type", `String "missing_action_type");
-            ("target_type", `String "root");
+            ( "target_type"
+            , `String Operator_action_constants.workspace_target_type );
             ("target_id", `Null);
             ("payload", `Assoc []);
             ("delegated_tool", `String "missing_operator_tool");

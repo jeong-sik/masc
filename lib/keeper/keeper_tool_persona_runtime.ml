@@ -306,7 +306,9 @@ let resolved_keeper_args_from_persona args :
              "persona not found or missing profile.json: %s"
              persona_name)
     | Some persona ->
-        let defaults = load_keeper_profile_defaults persona_name in
+      (match load_keeper_profile_defaults_result persona_name with
+       | Error error -> Error (keeper_toml_load_error_to_string error)
+       | Ok defaults ->
         let defaults_source =
           Option.value defaults.manifest_path ~default:persona.profile_path
         in
@@ -404,4 +406,4 @@ let resolved_keeper_args_from_persona args :
                           masc_keeper_create_from_persona"
                          defaults_source
                          (String.concat ", " fields))
-                  | [] -> Ok (persona, resolved))))
+                  | [] -> Ok (persona, resolved)))))

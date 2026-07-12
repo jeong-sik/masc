@@ -93,7 +93,7 @@ let configured_keeper_names config =
   Keeper_types_profile.discover_keepers_toml
     (Config_dir_resolver.keepers_dir_for_base_path
        ~base_path:config.Workspace.base_path)
-  |> List.map fst
+  |> List.map Keeper_types_profile.keeper_toml_discovery_name
   |> dedupe_keep_order
 ;;
 
@@ -116,24 +116,28 @@ let keeper_names config =
 
 let declarative_autoboot_enabled_by_default config name =
   match
-    (load_keeper_profile_defaults_for_base_path
-       ~base_path:config.Workspace.base_path
-       name)
-      .autoboot_enabled
+    load_keeper_profile_defaults_result_for_base_path
+      ~base_path:config.Workspace.base_path
+      name
   with
-  | Some false -> false
-  | Some true | None -> true
+  | Error _ -> false
+  | Ok defaults ->
+    (match defaults.autoboot_enabled with
+     | Some false -> false
+     | Some true | None -> true)
 ;;
 
 let effective_autoboot_enabled config name meta =
   match
-    (load_keeper_profile_defaults_for_base_path
-       ~base_path:config.Workspace.base_path
-       name)
-      .autoboot_enabled
+    load_keeper_profile_defaults_result_for_base_path
+      ~base_path:config.Workspace.base_path
+      name
   with
-  | Some value -> value
-  | None -> meta.autoboot_enabled
+  | Error _ -> false
+  | Ok defaults ->
+    (match defaults.autoboot_enabled with
+     | Some value -> value
+     | None -> meta.autoboot_enabled)
 ;;
 
 let keepalive_keeper_names config =
@@ -247,7 +251,11 @@ let read_effective_meta_resolved config name
   | Error _ as err -> err
   | Ok None -> Ok None
   | Ok (Some (resolved_name, meta)) -> (
-      match Keeper_meta_contract.effective_meta_result meta with
+      match
+        Keeper_meta_contract.effective_meta_result
+          ~base_path:config.Workspace.base_path
+          meta
+      with
       | Ok meta -> Ok (Some (resolved_name, meta))
       | Error msg -> Error msg)
 ;;
@@ -304,31 +312,57 @@ let persist_meta config path persisted =
   | Error msg -> Error (Printf.sprintf "failed to write meta %s: %s" path msg)
 ;;
 
+type write_meta_error =
+  | Version_conflict of
+      { keeper_name : string
+      ; expected : int
+      ; actual : int
+      }
+  | Read_failed of string
+  | Persist_failed of string
+
+let write_meta_error_to_string = function
+  | Version_conflict { keeper_name; expected; actual } ->
+    Printf.sprintf
+      "meta version conflict for %s: expected %d, disk has %d"
+      keeper_name
+      expected
+      actual
+  | Read_failed detail | Persist_failed detail -> detail
+;;
+
 (* Version CAS only — there is no force/bypass path. Cumulative usage
    counters are a monotone invariant (RFC-0225 §3.2, RFC-0237); a caller that
    lost the race must resolve the conflict through [write_meta_with_merge],
    never overwrite the disk snapshot. *)
-let write_meta config (m : Keeper_meta_contract.keeper_meta) : (unit, string) result =
+let write_meta_typed config (m : Keeper_meta_contract.keeper_meta) =
   let path = keeper_meta_path config m.name in
+  File_lock_eio.with_mutex path (fun () ->
   match read_meta_file_path path with
   | Ok (Some existing) ->
     if existing.meta_version <> m.meta_version
     then
       Error
-        (Printf.sprintf
-           "meta version conflict for %s: expected %d, disk has %d"
-           m.name
-           m.meta_version
-           existing.meta_version)
+        (Version_conflict
+           { keeper_name = m.name
+           ; expected = m.meta_version
+           ; actual = existing.meta_version
+           })
     else (
       let persisted = { m with meta_version = m.meta_version + 1 } in
-      persist_meta config path persisted)
+      persist_meta config path persisted |> Result.map_error (fun error -> Persist_failed error))
   | Ok None ->
     (* No existing file: initial write. *)
     let persisted = { m with meta_version = 1 } in
-    persist_meta config path persisted
+    persist_meta config path persisted |> Result.map_error (fun error -> Persist_failed error)
   | Error msg ->
-    Error (Printf.sprintf "failed to read existing meta for CAS %s: %s" path msg)
+    Error
+      (Read_failed
+         (Printf.sprintf "failed to read existing meta for CAS %s: %s" path msg)))
+;;
+
+let write_meta config m =
+  write_meta_typed config m |> Result.map_error write_meta_error_to_string
 ;;
 
 let is_version_conflict_error msg =
@@ -420,11 +454,12 @@ let write_meta_with_merge
   =
   let path = keeper_meta_path config m.name in
   let rec attempt n (caller : Keeper_meta_contract.keeper_meta) =
-    match write_meta config caller with
+    match write_meta_typed config caller with
     | Ok () -> Ok ()
-    | Error msg when n >= max_retries -> Error msg
-    | Error msg when not (is_version_conflict_error msg) -> Error msg
-    | Error _ ->
+    | Error error when n >= max_retries -> Error (write_meta_error_to_string error)
+    | Error ((Read_failed _ | Persist_failed _) as error) ->
+      Error (write_meta_error_to_string error)
+    | Error (Version_conflict _) ->
       (match read_meta_file_path path with
        | Ok (Some latest) ->
          Otel_metric_store.inc_counter
@@ -446,4 +481,74 @@ let write_meta_with_merge
          Error (Printf.sprintf "write_meta retry: failed to re-read for CAS: %s" read_msg))
   in
   attempt 0 m
+;;
+
+type identity_update_error =
+  | Identity_missing
+  | Identity_changed
+  | Identity_read_failed of string
+  | Identity_write_failed of string
+
+let identity_update_error_to_string = function
+  | Identity_missing -> "Keeper metadata is absent"
+  | Identity_changed -> "Keeper metadata identity changed"
+  | Identity_read_failed detail -> detail
+  | Identity_write_failed detail -> detail
+;;
+
+let update_meta_if_identity
+      config
+      ~name
+      ~trace_id
+      ~generation
+      update
+  =
+  let path = keeper_meta_path config name in
+  File_lock_eio.with_mutex path (fun () ->
+    match read_meta_file_path path with
+    | Error detail -> Error (Identity_read_failed detail)
+    | Ok None -> Error Identity_missing
+    | Ok (Some latest) ->
+      if
+        not (Keeper_id.Trace_id.equal latest.runtime.trace_id trace_id)
+        || not (Int.equal latest.runtime.generation generation)
+      then Error Identity_changed
+      else
+        let caller = update latest in
+        let persisted = { caller with meta_version = latest.meta_version + 1 } in
+        (match persist_meta config path persisted with
+         | Ok () -> Ok persisted
+         | Error detail -> Error (Identity_write_failed detail)))
+;;
+
+type identity_remove_error =
+  | Remove_identity_missing
+  | Remove_identity_changed
+  | Remove_identity_read_failed of string
+  | Remove_identity_unlink_failed of string
+
+let identity_remove_error_to_string = function
+  | Remove_identity_missing -> "Keeper metadata is absent"
+  | Remove_identity_changed -> "Keeper metadata identity changed"
+  | Remove_identity_read_failed detail | Remove_identity_unlink_failed detail -> detail
+;;
+
+let remove_meta_if_identity config ~name ~trace_id ~generation =
+  let path = keeper_meta_path config name in
+  File_lock_eio.with_mutex path (fun () ->
+    match read_meta_file_path path with
+    | Error detail -> Error (Remove_identity_read_failed detail)
+    | Ok None -> Error Remove_identity_missing
+    | Ok (Some latest) ->
+      if
+        not (Keeper_id.Trace_id.equal latest.runtime.trace_id trace_id)
+        || not (Int.equal latest.runtime.generation generation)
+      then Error Remove_identity_changed
+      else
+        try
+          Unix.unlink path;
+          Ok ()
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Remove_identity_unlink_failed (Printexc.to_string exn)))
 ;;

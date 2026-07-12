@@ -4,10 +4,6 @@ let agent_default_temperature =
   Llm_provider.Constants.Inference_profile.agent_default.temperature
 ;;
 
-let agent_default_max_tokens =
-  Llm_provider.Constants.Inference_profile.agent_default.max_tokens
-;;
-
 let worker_default_temperature =
   Llm_provider.Constants.Inference_profile.worker_default.temperature
 ;;

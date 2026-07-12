@@ -683,6 +683,8 @@
   border: 1px solid var(--border-main);
   border-radius: var(--radius-md);
   padding: 14px 16px;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
 }
 
 .cn-audit-h {
@@ -710,6 +712,7 @@
 
 .cn-audit table {
   width: 100%;
+  min-width: 500px;
   border-collapse: collapse;
   font-size: 11.5px;
 }
@@ -1096,6 +1099,20 @@
 /* ── Responsive ─────────────────────────────────────────────────────────── */
 
 @media (max-width: 900px) {
+  .v2-connectors-surface button,
+  .v2-connectors-surface summary,
+  .v2-connectors-surface input,
+  .v2-connectors-surface select {
+    min-width: var(--mobile-touch-target-min);
+    min-height: var(--mobile-touch-target-min);
+  }
+
+  .v2-connectors-surface .cn-runtime-paths > span {
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+
   /* Keep the last connector cards scrollable above the mobile bottom bar
    * (~56px) plus the floating status/focus chrome row (~48px) with a small
    * breathing gap. 118px matches the prototype mobile scroll-padding heuristic. */

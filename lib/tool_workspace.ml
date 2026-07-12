@@ -315,7 +315,7 @@ let planning_context_state
        { planning_missing_task = None; deliverable_conflict_task })
 ;;
 
-let status_summary_string (ctx : context) =
+let status_summary_string ~task_list_projection (ctx : context) =
   Workspace.ensure_initialized ctx.config;
   let state = Workspace.read_state ctx.config in
   let backlog = safe_read_backlog ctx in
@@ -578,6 +578,7 @@ let status_summary_string (ctx : context) =
     else items
   in
   Workspace_status_rendering.status_summary_string
+    ~task_list_projection
     ~ctx
     ~bound:session_bound
     ~actual_name
@@ -601,8 +602,13 @@ let status_summary_string (ctx : context) =
     ~backlog
 ;;
 
-let handle_status ~tool_name ~start_time ctx _args =
-  let cache_key = Printf.sprintf "%s::%s" ctx.config.base_path ctx.agent_name in
+let handle_status ~task_list_projection ~tool_name ~start_time ctx _args =
+  let task_list_name =
+    Tool_capability_projection.task_list_name task_list_projection
+  in
+  let cache_key =
+    Printf.sprintf "%s::%s::%s" ctx.config.base_path ctx.agent_name task_list_name
+  in
   Tool_result.ok
     ~tool_name
     ~start_time
@@ -610,7 +616,7 @@ let handle_status ~tool_name ~start_time ctx _args =
        status_cache
        ~key:cache_key
        ~ttl_s:(status_cache_ttl_s ())
-       (fun () -> status_summary_string ctx))
+       (fun () -> status_summary_string ~task_list_projection ctx))
 ;;
 
 let handle_reset ~tool_name ~start_time ctx args =
@@ -708,8 +714,7 @@ let handle_check ~tool_name ~start_time ctx args =
 ;;
 
 let dispatch_bindings : (string * dispatch_handler) list =
-  [ "masc_status", handle_status
-  ; "masc_heartbeat", handle_heartbeat
+  [ "masc_heartbeat", handle_heartbeat
   ; "masc_goal_list", Workspace_goals.handle_goal_list
   ; "masc_goal_upsert", Workspace_goals.handle_goal_upsert
   ; "masc_goal_hygiene_review", Workspace_goals.handle_goal_hygiene_review
@@ -720,13 +725,39 @@ let dispatch_bindings : (string * dispatch_handler) list =
   ]
 ;;
 
-let dispatchable_names = List.map fst dispatch_bindings
+let dispatchable_names = "masc_status" :: List.map fst dispatch_bindings
 
-let dispatch ctx ~name ~args : Tool_result.result option =
+let dispatch_with_task_list_projection task_list_projection ctx ~name ~args =
   let start_time = Time_compat.now () in
-  match List.assoc_opt name dispatch_bindings with
-  | Some handle -> Some (handle ~tool_name:name ~start_time ctx args)
-  | None -> None
+  if String.equal name "masc_status"
+  then
+    Some
+      (handle_status
+         ~task_list_projection
+         ~tool_name:name
+         ~start_time
+         ctx
+         args)
+  else
+    match List.assoc_opt name dispatch_bindings with
+    | Some handle -> Some (handle ~tool_name:name ~start_time ctx args)
+    | None -> None
+;;
+
+let dispatch ctx ~name ~args =
+  dispatch_with_task_list_projection
+    Tool_capability_projection.External_masc_tasks
+    ctx
+    ~name
+    ~args
+;;
+
+let dispatch_for_keeper ctx ~name ~args =
+  dispatch_with_task_list_projection
+    Tool_capability_projection.Keeper_tasks_list
+    ctx
+    ~name
+    ~args
 ;;
 
 let schemas = Tool_schemas_workspace.schemas

@@ -4,7 +4,7 @@
     Pins three properties:
 
     1. {b Negative input → default} (the contract this PR adds).
-       An operator who writes [MASC_KEEPER_ALERT_MAX_RETRIES=-5]
+       An operator who writes [MASC_KEEPER_MEMORY_MAX_NOTES=-5]
        gets the default, not the literal [-5].
     2. {b Non-negative parses pass through unchanged} (no
        behavior change vs {!get_int} / {!get_float} on the

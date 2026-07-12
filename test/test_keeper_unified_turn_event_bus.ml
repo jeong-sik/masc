@@ -235,9 +235,11 @@ let temp_dir prefix =
   path
 ;;
 
+let keeper_msg_caller = "event-bus-test-caller"
+
 let wait_for_done ~clock ~base_path request_id =
   let rec loop remaining =
-    match Kmsg.poll ~base_path request_id with
+    match Kmsg.poll ~base_path ~caller:keeper_msg_caller request_id with
     | Kmsg.Found { Kmsg.status = Kmsg.Done { ok = true; _ }; _ } ->
       ()
     | Kmsg.Found { Kmsg.status = Kmsg.Done { ok = false; body }; _ } ->
@@ -267,14 +269,21 @@ let test_keeper_msg_async_submit_uses_captured_event_bus () =
        let request_id =
          Ops.For_testing.submit_keeper_msg_with_captured_event_bus
            ~clock:env#clock
-           ~sw
+           ~background_sw:sw
            ~base_path
+           ~caller:keeper_msg_caller
            ~keeper_name:"event-bus-test"
-           ~f:(fun ?event_bus () ->
+           ~f:(fun ?event_bus _request_sw ->
              Keeper_event_bus.set later_bus;
              observed_bus := event_bus;
              Tool_result.ok ~tool_name:"keeper-event-bus-test" ~start_time:0.0 "{}")
            ()
+         |> function
+         | Ok request_id -> request_id
+         | Error error ->
+           Alcotest.failf
+             "keeper_msg submission rejected: %s"
+             (Kmsg.submit_error_to_json error |> Yojson.Safe.to_string)
        in
        wait_for_done ~clock:env#clock ~base_path request_id;
        check

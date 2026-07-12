@@ -1321,6 +1321,39 @@ function runtimeTraceMemoryEvidence(trace: KeeperRuntimeTraceResponse): string {
   ].join(' · ')
 }
 
+function runtimeManifestDiagnosticsValue(trace: KeeperRuntimeTraceResponse): string {
+  const diagnostics = trace.manifest_scan_diagnostics
+  if (diagnostics.state === 'unavailable') return 'unavailable'
+  const invalid = diagnostics.invalid_manifest_row_count + diagnostics.invalid_json_row_count
+  if (
+    diagnostics.retired_event_count === 0
+    && diagnostics.unsupported_event_count === 0
+    && invalid === 0
+  ) return 'clean'
+  return [
+    `retired ${diagnostics.retired_event_count}`,
+    `unsupported ${diagnostics.unsupported_event_count}`,
+    `invalid ${invalid}`,
+  ].join(' · ')
+}
+
+function runtimeManifestDiagnosticsTitle(trace: KeeperRuntimeTraceResponse): string {
+  const diagnostics = trace.manifest_scan_diagnostics
+  if (diagnostics.state === 'unavailable') {
+    return [diagnostics.error, diagnostics.schema].filter(Boolean).join('\n')
+  }
+  const eventCounts = [
+    ...diagnostics.retired_event_counts.map(item => `retired:${item.event}=${item.count}`),
+    ...diagnostics.unsupported_event_counts.map(item => `unsupported:${item.event}=${item.count}`),
+  ]
+  const sampleDetails = diagnostics.samples.map(sample =>
+    [sample.kind, sample.event, sample.detail].filter(Boolean).join(':'))
+  const overflow = diagnostics.unsupported_event_unattributed_count === 0
+    ? []
+    : [`unsupported rows outside identity detail bound=${diagnostics.unsupported_event_unattributed_count}`]
+  return [...eventCounts, ...overflow, ...sampleDetails].join('\n') || 'no manifest scan diagnostics'
+}
+
 function artifactEvidenceLabel(artifacts: readonly { present: boolean }[]): string {
   if (artifacts.length === 0) return '0/0'
   const present = artifacts.filter(item => item.present).length
@@ -1627,6 +1660,11 @@ export function RuntimeLensSection({
           title=${trace.manifest_path}
         />
         <${SignalRow} label="manifest rows" value=${formatRatioPair({ numerator: trace.manifest_returned_rows, denominator: trace.manifest_total_rows })} />
+        <${SignalRow}
+          label="manifest diagnostics"
+          value=${runtimeManifestDiagnosticsValue(trace)}
+          title=${runtimeManifestDiagnosticsTitle(trace)}
+        />
         <${SignalRow} label="receipt rows" value=${trace.receipt_returned_rows} />
         <${SignalRow} label="manifest raw rows" value=${trace.manifest_rows.length} />
         <${SignalRow} label="receipt raw rows" value=${trace.receipts.length} />

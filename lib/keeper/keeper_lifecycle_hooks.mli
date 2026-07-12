@@ -7,9 +7,9 @@
     - [Keeper_registry.dispatch_event_with_audit] fires [Phase_transition]
       after the state machine accepts a phase change and the registry write
       commits.
-    - [Keeper_supervisor.sweep_and_recover] fires [Tombstone_reaped] after
-      a dead-keeper unregister succeeds (see [Keeper_lifecycle_hooks.run]
-      invocation in keeper_supervisor.ml).
+    - [Keeper_supervisor_cleanup_tombstone.handle_completion] fires
+      [Tombstone_reaped] after the durable shutdown finalization receipt
+      records exact-lane unregister.
 
     Phase B/C uses the same registration API to attach the
     [Docker_runtime] bridge.
@@ -37,9 +37,9 @@ type event =
           phase changes after the registry write commits. Hooks observe an
           applied transition; they cannot veto. *)
   | Tombstone_reaped
-      (** Fired by [Keeper_supervisor.cleanup_dead_tombstone] after the
-          registry unregister completes. The keeper is fully gone from
-          in-process state at this point. *)
+      (** Fired by the durable dead-tombstone completion handler after exact
+          registry unregister and finalization persistence. The keeper is
+          fully gone from in-process state at this point. *)
 
 (** Hook callback. *)
 type hook = keeper_id:string -> event -> unit

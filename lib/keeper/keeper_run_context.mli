@@ -8,7 +8,7 @@ open Keeper_types_profile
 type run_context =
   { meta : keeper_meta
   ; temperature : float
-  ; max_tokens : int
+  ; max_tokens : int option
   ; context_injector : Agent_sdk.Hooks.context_injector
   ; shared_context : Agent_sdk.Context.t
   ; session_dir : string
@@ -36,22 +36,21 @@ val build_base_system_prompt :
 (** Build the keeper base system prompt from the same persisted meta/profile
     inputs used by {!prepare_run_context}. *)
 
-val resolve_max_tokens_for_runtime :
+val resolve_turn_max_tokens :
      keeper_name:string
-  -> runtime_id:string
+  -> profile_defaults:Keeper_types_profile.keeper_profile_defaults
   -> ?max_tokens:int
   -> unit
-  -> int
-(** Resolve the keeper turn max-token budget for a concrete runtime id.
-
-    [max_tokens] is an explicit caller override and is capped through
-    {!Runtime_inference.cap_max_tokens_to_runtime_ceiling}. When absent, the
-    keeper profile/env fallback is passed through
-    {!Runtime_inference.resolve_max_tokens} for the supplied runtime. *)
+  -> int option
+(** Resolve output-token intent exactly once at turn start. An explicit caller
+    value wins; otherwise the validated keeper profile override is used.
+    Absent both, return [None]. Runtime candidates must receive this result
+    unchanged. *)
 
 val prepare_run_context :
      config:Workspace.config
   -> meta:keeper_meta
+  -> profile_defaults:Keeper_types_profile.keeper_profile_defaults
   -> base_dir:string
   -> max_context:int
   -> runtime_id:string
@@ -62,4 +61,7 @@ val prepare_run_context :
   -> unit
   -> run_context
 (** Resolve [temperature] as the caller fallback; a temperature declared by the
-    selected runtime model always wins. *)
+    selected runtime model always wins. [profile_defaults] is the immutable
+    pre-dispatch snapshot. [max_tokens] is resolved once from the explicit
+    caller value or that snapshot and remains unchanged for every runtime
+    candidate in this turn. *)

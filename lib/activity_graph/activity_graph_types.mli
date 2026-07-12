@@ -41,6 +41,17 @@ val span_status_to_string : span_status -> string
     explicitly (drop / fallback / route). See #8605. *)
 val span_status_of_string_opt : string -> span_status option
 
+(** Closed activity kinds whose payload describes one executed tool. Producers,
+    reducers, and timeline readers share this type rather than maintaining
+    independent string lists. *)
+type tool_execution_event_kind =
+  | External_tool_called
+  | Keeper_in_turn_tool_executed
+
+val tool_execution_event_kind_to_string : tool_execution_event_kind -> string
+val tool_execution_event_kind_of_string : string -> tool_execution_event_kind option
+val all_tool_execution_event_kinds : tool_execution_event_kind list
+
 (** {1 Graph entities} *)
 
 type entity_ref = {

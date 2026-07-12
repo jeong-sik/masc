@@ -1,5 +1,15 @@
-import { signal, effect } from '@preact/signals'
-import { activeIdeFile } from './ide-state'
+import { signal, effect, untracked } from '@preact/signals'
+import {
+  activeIdeFile,
+  activeIdeFocus,
+  activeIdeWorkspaceIdentity,
+  clearIdeContextFocus,
+  clearIdeFileFocus,
+  focusIdeFile,
+  ideWorkspaceIdentityForSelection,
+  sameIdeWorkspaceIdentity,
+  synchronizeIdeWorkspaceIdentity,
+} from './ide-state'
 import { activeKeeperName } from '../../keeper-state'
 import { route } from '../../router'
 import { selectedTask } from '../goals/task-detail-selection'
@@ -34,6 +44,7 @@ import {
 } from './file-tree-store'
 import {
   fetchIdeAnnotations,
+  ideScopeFromKeeperLane,
   type IdeAnnotation,
 } from '../../api/ide'
 import { registerIdeWorkspaceRefresh } from '../../sse-store'
@@ -101,9 +112,26 @@ export interface WorkspaceFetchIssueContext {
 
 type WorkspaceFetchIssueScope = Pick<WorkspaceFetchIssueContext, 'filePath' | 'keeper' | 'repoId'>
 
-function firstFilePath(nodes: ReadonlyArray<{ readonly path: string; readonly hasChildren: boolean }>): string | null {
-  const firstFile = nodes.find(node => !node.hasChildren)
-  return firstFile?.path ?? null
+export function firstObservedChangedFilePath(
+  nodes: ReadonlyArray<{
+    readonly path: string
+    readonly hasChildren: boolean
+    readonly diff: string | null
+  }>,
+): string | null {
+  return nodes.find(node =>
+    !node.hasChildren
+    && node.path.trim().length > 0
+    && node.diff !== null
+    && node.diff.trim().length > 0,
+  )?.path ?? null
+}
+
+export function workspaceTreeHasFile(
+  nodes: ReadonlyArray<{ readonly path: string; readonly hasChildren: boolean }>,
+  filePath: string,
+): boolean {
+  return nodes.some(node => !node.hasChildren && node.path === filePath)
 }
 
 export function workspaceTreeIdentity(
@@ -307,6 +335,10 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
 
   /** Track repo IDs that returned unreachable workspace sources, to avoid re-selecting them. */
   const unreachableRepoIds = new Set<string>()
+  // Repository discovery can overlap the initial list fetch. Only the newest
+  // list request may publish repository identity or its failure projection;
+  // otherwise a late startup response can rewind a completed scan.
+  let repositoryRefreshGeneration = 0
 
   let abortController = new AbortController()
   // Identity of the workspace source the file tree was last seeded for.
@@ -318,20 +350,25 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
 
   const applyRepositories = (repositories: ReadonlyArray<Repository>): void => {
     const current = activeRepositoryIdSignal.value
-    activeRepositoryIdSignal.value = selectPreferredIdeRepositoryId(repositories, current, unreachableRepoIds)
     repositoriesSignal.value = repositories
+    activeRepositoryIdSignal.value = selectPreferredIdeRepositoryId(repositories, current, unreachableRepoIds)
   }
 
   const refreshRepositories = async (): Promise<ReadonlyArray<Repository>> => {
+    const generation = ++repositoryRefreshGeneration
     try {
       const repositories = await fetchRepositoriesList()
-      clearIssue('repositories')
-      applyRepositories(repositories)
+      if (generation === repositoryRefreshGeneration) {
+        clearIssue('repositories')
+        applyRepositories(repositories)
+      }
       return repositories
     } catch (error) {
-      recordIssue('repositories', error, {
-        fallbackMessage: 'repository list fetch failed',
-      })
+      if (generation === repositoryRefreshGeneration) {
+        recordIssue('repositories', error, {
+          fallbackMessage: 'repository list fetch failed',
+        })
+      }
       throw error
     }
   }
@@ -343,11 +380,13 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
   }
 
   refreshRepositories()
+    // The current-generation failure is already projected into workspaceIssues.
+    // Contain the background startup rejection without overwriting a newer scan.
     .catch(error => {
-      recordIssue('repositories', error, {
-        fallbackMessage: 'repository list fetch failed',
-      })
-      repositoriesSignal.value = []
+      console.warn(
+        '[IDE] initial repository refresh failed',
+        error instanceof Error ? error.message : error,
+      )
     })
 
   // Fetch the workspace snapshot for the current file/keeper/repo/task.
@@ -359,27 +398,90 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
   // refresh to stale data. The fetches are idempotent (server is SSOT), so a
   // coalesced live+nav refresh is safe.
   const runWorkspaceFetches = (): void => {
-    const filePath = activeIdeFile.value
+    const focus = activeIdeFocus.value
     const keeper = activeKeeperName.value
     const repoId = activeRepositoryIdSignal.value
     const task = selectedTask.value
+    const workspaceIdentity = ideWorkspaceIdentityForSelection(repoId, keeper)
+    const workspaceIdentityChanged = !sameIdeWorkspaceIdentity(
+      activeIdeWorkspaceIdentity.peek(),
+      workspaceIdentity,
+    )
 
-    // Cancel in-flight requests for previous file
+    // Cancel every request owned by the previous focus/workspace before any
+    // state transition can synchronously re-run this effect.
     abortController.abort()
     abortController = new AbortController()
     const { signal } = abortController
+
+    const invalidateWorkspaceDocument = (): void => {
+      documentStore.invalidate()
+      ownershipStore.reset(null)
+      diffRowsSignal.value = []
+      annotationsSignal.value = []
+    }
+
+    const focusWorkspaceChanged = focus !== null
+      && !sameIdeWorkspaceIdentity(focus.workspace_identity, workspaceIdentity)
+    if (workspaceIdentityChanged || focusWorkspaceChanged) {
+      invalidateWorkspaceDocument()
+      // Context-anchor labels, keeper attribution, and route links describe
+      // the workspace in which the anchor was selected. They cannot be safely
+      // rebound by path alone when a repository/project/keeper identity
+      // changes, even if the target workspace contains the same path.
+      clearIdeContextFocus()
+    }
+    if (workspaceIdentityChanged) {
+      fileTreeStore.seed([])
+      synchronizeIdeWorkspaceIdentity(workspaceIdentity)
+    }
+
+    if (focusWorkspaceChanged) {
+      if (focus.origin === 'observed_change') {
+        clearIdeFileFocus()
+      } else {
+        focusIdeFile({
+          path: focus.path,
+          origin: focus.origin,
+          workspace_identity: workspaceIdentity,
+          availability: 'pending',
+        })
+      }
+      return
+    }
+
+    const requestedFilePath = focus?.path ?? null
+    const filePath = focus?.availability === 'available' ? focus.path : null
+    const loadedFilePath = untracked(() => documentStore.document().file_path)
+    if (loadedFilePath !== null && loadedFilePath !== filePath) {
+      invalidateWorkspaceDocument()
+    }
 
     ownershipStore.reset(filePath)
 
     const keeperParam = keeper || undefined
     const opts = { keeper: keeperParam, repoId, signal, includeDiff: true }
+    // IDE observation routes require one explicit scope. Repository scope is
+    // authoritative when configured; otherwise a selected keeper can read its
+    // own orphan observation lane without fabricating a repository identity.
+    const ideOpts = repoId
+      ? { keeper: keeperParam, repoId, signal }
+      : {
+          keeper: keeperParam,
+          repoId,
+          scope: ideScopeFromKeeperLane(keeperParam),
+          signal,
+        }
     workspaceIssuesSignal.value = retainCurrentWorkspaceFetchIssues(currentWorkspaceIssues(), {
-      filePath,
+      filePath: requestedFilePath,
       keeper: keeperParam ?? null,
       repoId,
     })
 
-    // Load file tree (independent of active file — needed to suggest first file)
+    // Load the file tree independently of the active file. When no explicit
+    // operator/route focus exists, the server-ordered changed-file observation
+    // is the only automatic focus contract. Do not infer focus from dot-path
+    // visibility, keeper ownership, or an arbitrary tree leaf.
     fetchWorkspaceTree(2, opts).then(({ nodes, source, basePath }) => {
       if (signal.aborted) return
       clearIssue('tree', { keeper: keeperParam ?? null, repoId })
@@ -408,13 +510,118 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
         }
       }
 
-      const hasCurrentFile =
-        filePath !== null && nodes.some(node => node.path === filePath && !node.hasChildren)
-      const nextFile = hasCurrentFile ? null : firstFilePath(nodes)
-      if (nextFile && nextFile !== activeIdeFile.value) {
-        activeIdeFile.value = nextFile
+      const currentFocus = activeIdeFocus.peek()
+      if (currentFocus?.availability === 'pending') {
+        if (!sameIdeWorkspaceIdentity(currentFocus.workspace_identity, workspaceIdentity)) return
+        if (workspaceTreeHasFile(nodes, currentFocus.path)) {
+          focusIdeFile({
+            ...currentFocus,
+            availability: 'available',
+          })
+          return
+        }
+        const pendingFocus = currentFocus
+        fetchWorkspaceFile(pendingFocus.path, opts).then(response => {
+          if (signal.aborted || activeIdeFocus.peek() !== pendingFocus) return
+          if (response?.ok === true && typeof response.content === 'string') {
+            const loaded = documentStore.load({
+              file_path: pendingFocus.path,
+              language: response.language ?? DEFAULT_LANGUAGE_ID,
+              content: response.content,
+            })
+            if (!loaded) {
+              documentStore.invalidate()
+              focusIdeFile({
+                ...pendingFocus,
+                availability: 'unavailable',
+              })
+              recordIssue('file', new Error('explicit IDE focus response was malformed'), {
+                filePath: pendingFocus.path,
+                keeper: keeperParam ?? null,
+                repoId,
+                fallbackMessage: 'explicit IDE focus validation failed',
+              })
+              return
+            }
+            clearIssue('file', {
+              filePath: pendingFocus.path,
+              keeper: keeperParam ?? null,
+              repoId,
+            })
+            focusIdeFile({
+              ...pendingFocus,
+              availability: 'available',
+            })
+            return
+          }
+          documentStore.invalidate()
+          if (response?.ok === false) {
+            focusIdeFile({
+              ...pendingFocus,
+              availability: 'not_found',
+            })
+            recordIssue(
+              'file',
+              new Error(`explicit IDE focus not found in selected workspace: ${pendingFocus.path}`),
+              {
+                filePath: pendingFocus.path,
+                keeper: keeperParam ?? null,
+                repoId,
+              },
+            )
+            return
+          }
+          focusIdeFile({
+            ...pendingFocus,
+            availability: 'unavailable',
+          })
+          recordIssue('file', new Error('explicit IDE focus response was unavailable'), {
+            filePath: pendingFocus.path,
+            keeper: keeperParam ?? null,
+            repoId,
+            fallbackMessage: 'explicit IDE focus validation failed',
+          })
+        }).catch(error => {
+          if (signal.aborted || activeIdeFocus.peek() !== pendingFocus) return
+          documentStore.invalidate()
+          focusIdeFile({
+            ...pendingFocus,
+            availability: 'unavailable',
+          })
+          recordIssue('file', error, {
+            filePath: pendingFocus.path,
+            keeper: keeperParam ?? null,
+            repoId,
+            fallbackMessage: 'explicit IDE focus validation failed',
+          })
+        })
+        return
+      }
+
+      if (currentFocus === null) {
+        const nextFile = firstObservedChangedFilePath(nodes)
+        if (nextFile) {
+          focusIdeFile({
+            path: nextFile,
+            origin: 'observed_change',
+            workspace_identity: workspaceIdentity,
+            availability: 'available',
+          })
+        }
       }
     }).catch(error => {
+      if (signal.aborted) return
+      const pendingFocus = activeIdeFocus.peek()
+      if (
+        pendingFocus?.availability === 'pending'
+        && sameIdeWorkspaceIdentity(pendingFocus.workspace_identity, workspaceIdentity)
+      ) {
+        documentStore.invalidate()
+        focusIdeFile({
+          ...pendingFocus,
+          availability: 'unavailable',
+        })
+      }
       recordIssue('tree', error, {
         keeper: keeperParam ?? null,
         repoId,
@@ -426,7 +633,9 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
     if (filePath === null) {
       diffRowsSignal.value = []
       annotationsSignal.value = []
-      workspaceIssuesSignal.value = currentWorkspaceIssues().filter(issue => issue.file_path === null)
+      if (requestedFilePath === null) {
+        workspaceIssuesSignal.value = currentWorkspaceIssues().filter(issue => issue.file_path === null)
+      }
       return
     }
 
@@ -440,6 +649,14 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
           content: response.content,
         })
         if (!loaded) {
+          documentStore.invalidate()
+          const currentFocus = activeIdeFocus.peek()
+          if (currentFocus?.path === filePath && currentFocus.availability === 'available') {
+            focusIdeFile({
+              ...currentFocus,
+              availability: 'unavailable',
+            })
+          }
           recordIssue('file', new Error('workspace file response was malformed'), {
             filePath,
             keeper: keeperParam ?? null,
@@ -449,8 +666,56 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
           return
         }
         clearIssue('file', { filePath, keeper: keeperParam ?? null, repoId })
+
+        // The document load invalidates metadata for a different file. Start
+        // the region read only after that load has committed; doing both in
+        // parallel let a slower file response mark a valid region response as
+        // stale before it could populate the ownership projection.
+        documentStore.loadRegions(filePath, ideOpts).then(() => {
+          if (signal.aborted || documentStore.document().file_path !== filePath) return
+          for (const region of documentStore.regions()) {
+            ownershipStore.ingest({
+              file_path: region.file_path,
+              line_start: region.line_start,
+              line_end: region.line_end,
+              keeper_id: region.keeper_id,
+              timestamp_ms: region.timestamp_ms,
+              // Regions prove that a keeper operated on this code range, but the
+              // wire contract deliberately does not infer a more specific edit
+              // operation such as create/refactor/revert.
+              kind: 'observed',
+            })
+          }
+          clearIssue('regions', { filePath, keeper: keeperParam ?? null, repoId })
+        }).catch(error => {
+          if (signal.aborted) return
+          recordIssue('regions', error, {
+            filePath,
+            keeper: keeperParam ?? null,
+            repoId,
+            fallbackMessage: 'IDE regions fetch failed',
+          })
+        })
       } else {
-        recordIssue('file', new Error('workspace file response was not available'), {
+        documentStore.invalidate()
+        const currentFocus = activeIdeFocus.peek()
+        if (currentFocus?.path === filePath) {
+          if (response?.ok === false && currentFocus.origin !== 'observed_change') {
+            focusIdeFile({
+              ...currentFocus,
+              availability: 'not_found',
+            })
+          } else {
+            focusIdeFile({
+              ...currentFocus,
+              availability: 'unavailable',
+            })
+          }
+        }
+        const responseError = response?.ok === false
+          ? new Error('workspace file response reported that the file was not found')
+          : new Error('workspace file response was unavailable or malformed')
+        recordIssue('file', responseError, {
           filePath,
           keeper: keeperParam ?? null,
           repoId,
@@ -458,24 +723,20 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
         })
       }
     }).catch(error => {
+      if (signal.aborted) return
+      documentStore.invalidate()
+      const currentFocus = activeIdeFocus.peek()
+      if (currentFocus?.path === filePath && currentFocus.availability === 'available') {
+        focusIdeFile({
+          ...currentFocus,
+          availability: 'unavailable',
+        })
+      }
       recordIssue('file', error, {
         filePath,
         keeper: keeperParam ?? null,
         repoId,
         fallbackMessage: 'workspace file fetch failed',
-      })
-    })
-
-    // Load regions
-    documentStore.loadRegions(filePath, opts).then(() => {
-      if (signal.aborted) return
-      clearIssue('regions', { filePath, keeper: keeperParam ?? null, repoId })
-    }).catch(error => {
-      recordIssue('regions', error, {
-        filePath,
-        keeper: keeperParam ?? null,
-        repoId,
-        fallbackMessage: 'IDE regions fetch failed',
       })
     })
 
@@ -501,6 +762,7 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
           })
         }
       }).catch(error => {
+        if (signal.aborted) return
         recordIssue('blame', error, {
           filePath,
           keeper: keeperParam ?? null,
@@ -516,6 +778,7 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
         clearIssue('diff', { filePath, keeper: keeperParam ?? null, repoId })
         diffRowsSignal.value = rows
       }).catch(error => {
+        if (signal.aborted) return
         recordIssue('diff', error, {
           filePath,
           keeper: keeperParam ?? null,
@@ -528,11 +791,12 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
     }
 
     // Load annotations
-    fetchIdeAnnotations({ file_path: filePath, goal_id: task?.goal_id ?? undefined, task_id: task?.id ?? undefined }, opts).then(annotations => {
+    fetchIdeAnnotations({ file_path: filePath, goal_id: task?.goal_id ?? undefined, task_id: task?.id ?? undefined }, ideOpts).then(annotations => {
       if (signal.aborted) return
       clearIssue('annotations', { filePath, keeper: keeperParam ?? null, repoId })
       annotationsSignal.value = annotations
     }).catch(error => {
+      if (signal.aborted) return
       recordIssue('annotations', error, {
         filePath,
         keeper: keeperParam ?? null,
@@ -593,6 +857,9 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
       runWorkspaceFetches()
     },
     dispose: () => {
+      // Invalidate a non-abortable repository list request before tearing down
+      // subscriptions so a late completion cannot publish into a disposed store.
+      repositoryRefreshGeneration += 1
       abortController.abort()
       unregisterLiveRefresh()
       disposeEffect()

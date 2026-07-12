@@ -566,6 +566,10 @@ export const semantic: ReadonlyArray<TokenBase> = (() => {
   out.push(t("ctrl-h",    "calc(var(--density) * 24px)", "role", "dimension"));
   out.push(t("ctrl-h-lg", "calc(var(--density) * 28px)", "role", "dimension"));
 
+  // Mobile operator controls keep a density-invariant physical hit area.
+  out.push(t("mobile-touch-target-min", "calc(var(--grid-unit) * 5)", "role", "dimension",
+    "minimum hit target for mobile operator controls"));
+
   // Density-scope marker — closes the auto-var block in tokens.css so the
   // body[data-density="..."] override below scopes cleanly. Kept for parity.
   out.push(t("_density-scope", "1", "role", "number", "scope marker"));

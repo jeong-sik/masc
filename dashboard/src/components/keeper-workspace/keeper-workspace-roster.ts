@@ -41,7 +41,7 @@ type RosterFilter = 'all' | 'run' | 'att'
 type RosterSort = 'status' | 'recent' | 'name' | 'att'
 type KeeperWorkspaceRouteSurface = 'monitoring' | 'keepers'
 type RosterMenuState = { keeper: Keeper; x: number; y: number } | null
-type RosterHeaderBucket = KeeperBucket | 'attention'
+type RosterHeaderBucket = KeeperBucket
 type RosterFleetSummary = {
   total: number
   running: number
@@ -75,19 +75,18 @@ export const rosterFilterPref = persistentSignal<RosterFilter>({
   defaultValue: 'all',
   deserialize: memberOr(ROSTER_FILTER_VALUES, 'all'),
 })
-// Default '최근순' (most-recent-first): returning to #keepers should surface the
-// keeper that just did something, not an alphabetically-first name. 상태순 remains
-// available in the sort menu for operators who want running-first grouping.
+// The standalone's default is lifecycle grouping: running, waiting, then
+// stopped. Recency remains available as an explicit operator preference.
 export const rosterSortPref = persistentSignal<RosterSort>({
   key: 'dashboard:kw-roster:sort-v1',
-  defaultValue: 'recent',
-  deserialize: memberOr(ROSTER_SORT_VALUES, 'recent'),
+  defaultValue: 'status',
+  deserialize: memberOr(ROSTER_SORT_VALUES, 'status'),
 })
 
 const GROUP_ORDER: { bucket: KeeperBucket; label: string }[] = [
   { bucket: 'running', label: '실행 중' },
-  { bucket: 'paused', label: '대기 · 일시정지' },
-  { bucket: 'offline', label: '중지 · 종료됨' },
+  { bucket: 'paused', label: '대기' },
+  { bucket: 'offline', label: '중지' },
 ]
 
 /** Flattened roster item used by the virtualized render path. */
@@ -233,6 +232,9 @@ function RosterRow({
   const activity = keeperActivityDisplay(keeper, undefined, { includeCreated: false })
   const activityText = rosterActivityText(activity)
   const phaseLabel = keeperPhaseLabel(keeper)
+  const configErrorTitle = keeper.config_error
+    ? `${keeper.config_error.reported_kind ?? keeper.config_error.kind} · ${keeper.config_error.failing_path} · ${keeper.config_error.detail}`
+    : null
   const beat = phasePulse(keeper.lifecycle_phase)
   const select = () => onSelect(keeper.name)
   return html`
@@ -261,8 +263,10 @@ function RosterRow({
       </div>
       <div class="kw-kp-right">
         ${activityText ? html`<span class="kw-kp-time" title=${rosterActivityTitle(activity)}>${activityText}</span>` : null}
-        ${att > 0
-          ? html`<span class="kw-kp-att kp-att" title=${`주의 신호 ${att}건 · 메시지 수가 아니라 blocked/attention 상태입니다`}>주의 ${att}</span>`
+        ${keeper.config_error
+          ? html`<span class="kw-kp-att kp-att" aria-label="설정 차단 · TOML 수정" title=${configErrorTitle}>설정 차단 · TOML 수정</span>`
+          : att > 0
+          ? html`<span class="kw-kp-att kp-att" aria-label=${`주의 신호 ${att}건`} title=${`주의 신호 ${att}건 · 메시지 수가 아니라 blocked/attention 상태입니다`}>▲ ${att}</span>`
           : null}
       </div>
       <button
@@ -311,6 +315,7 @@ function MiniRosterRow({
 }
 
 function lifecycleActions(keeper: Keeper): KeeperActionKey[] {
+  if (keeper.config_error?.blocking === true) return []
   const visibility = keeperActionVisibility(keeper)
   const actions: KeeperActionKey[] = []
   if (visibility.canBoot) actions.push('boot')
@@ -344,7 +349,6 @@ function rosterActivityTitle(activity: KeeperActivityDisplay): string | undefine
 }
 
 function groupBucketClass(bucket: RosterHeaderBucket): string {
-  if (bucket === 'attention') return 'att'
   if (bucket === 'running') return 'run'
   if (bucket === 'paused') return 'pause'
   return 'off'
@@ -550,23 +554,14 @@ export function KeeperWorkspaceRoster({
     { id: 'att', label: '주의', tone: 'att', title: '주의 신호가 있는 키퍼 — 실행 중 키퍼도 포함되는 교차 집계' },
   ]
 
-  // Flatten to [{ type: 'header'|'row', ... }] for windowing. 'status' keeps the
-  // bucket grouping with headers; 'name'/'att' produce a flat sorted list with no
-  // headers, mirroring the v2 roster sort modes (rails.jsx Roster).
+  // Flatten to [{ type: 'header'|'row', ... }] for windowing. Attention is a
+  // cross-cutting row badge/filter, never a lifecycle bucket; status view keeps
+  // every keeper exactly once under running, paused, or offline.
   const items: RosterItem[] = []
   if (sort === 'status') {
-    const attentionRows = visible.filter(needsAttention).sort((a, b) =>
-      attentionScore(b) - attentionScore(a)
-      || keeperContextRatio(b) - keeperContextRatio(a)
-      || a.name.localeCompare(b.name),
-    )
-    if (attentionRows.length > 0) {
-      items.push({ type: 'header', bucket: 'attention', label: '주의 필요', count: attentionRows.length })
-      for (const keeper of attentionRows) items.push({ type: 'row', keeper })
-    }
     for (const group of GROUP_ORDER) {
       const rows = visible
-        .filter(k => !needsAttention(k) && keeperBucket(k) === group.bucket)
+        .filter(k => keeperBucket(k) === group.bucket)
         .sort(compareFleetRows)
       if (rows.length === 0) continue
       items.push({ type: 'header', bucket: group.bucket, label: group.label, count: rows.length })

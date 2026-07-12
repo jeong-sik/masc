@@ -103,10 +103,9 @@ val action_request_of_args :
 val normalize_request_target_type :
   action_request -> (action_request, string) result
 (** [normalize_request_target_type r] returns [r] with [target_type]
-    validated against the allowed set ([root] / [keeper] / [goal] / [""]).
+    validated against the allowed set ([workspace] / [keeper] / [goal] / [""]).
     Empty [target_type] is replaced by the action-type default.
-    Returns [Error "target_type must be root, keeper, or goal"] on invalid
-    inputs. *)
+    Invalid inputs return the canonical operator-target validation error. *)
 
 val delegated_tool_for : string -> string
 (** [delegated_tool_for action_type] returns the tool name for an
@@ -134,9 +133,10 @@ val preview_of_action : action_request -> Yojson.Safe.t
     ]} *)
 
 val validate_target_type :
-  string -> action_request -> (unit, string) result
+  Operator_action_constants.target_type -> action_request -> (unit, string) result
 (** [validate_target_type expected r] returns [Ok ()] iff
-    [r.target_type = expected]; otherwise
+    [r.target_type] decodes to [expected] through the operator target-type
+    SSOT; otherwise
     [Error "invalid target_type for <action_type> (expected
     <expected>)"]. *)
 

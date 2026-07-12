@@ -22,7 +22,7 @@ let config_for_label
     ~(model_label : string)
     ~(system_prompt : string)
     ~(tools : Agent_sdk.Tool.t list)
-    ~(max_tokens : int)
+    ~(max_tokens : int option)
     ~(temperature : float)
     ?(max_idle_turns = 3)
     ?stream_idle_timeout_s
@@ -76,7 +76,7 @@ let run_model_by_label
     ?(max_idle_turns = 3)
     ?stream_idle_timeout_s
     ?(temperature = Runtime_provider_defaults.agent_default_temperature)
-    ?(max_tokens = Runtime_provider_defaults.agent_default_max_tokens)
+    ?max_tokens
     ?wait_timeout_sec
     ?(accept = fun (_ : Agent_sdk_response.api_response) -> true)
     ?guardrails
@@ -173,6 +173,7 @@ let run_model_by_label
 
 let run_named_with_masc_tools
     ~runtime_id
+    ?(keeper_name = "")
     ~goal
     ~base_path
     ?priority
@@ -181,7 +182,7 @@ let run_named_with_masc_tools
     ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result)
     ?stream_idle_timeout_s
     ?(temperature = Runtime_provider_defaults.agent_default_temperature)
-    ?(max_tokens = Runtime_provider_defaults.agent_default_max_tokens)
+    ?max_tokens
     ?(accept = fun (_ : Agent_sdk_response.api_response) -> true)
     ?guardrails
     ?hooks
@@ -206,10 +207,10 @@ let run_named_with_masc_tools
       ~input_schema:td.input_schema
       (fun input -> dispatch ~name:td.name ~args:input)
   ) masc_tools in
-  Keeper_turn_driver.run_named ~runtime_id ~goal ~base_path ?priority ~system_prompt ~tools:oas_tools
+  Keeper_turn_driver.run_named ~runtime_id ~keeper_name ~goal ~base_path ?priority ~system_prompt ~tools:oas_tools
     ?max_turns
     ~max_idle_turns
-    ~temperature ~max_tokens
+    ~temperature ?max_tokens
     ?stream_idle_timeout_s ?guardrails ?hooks
     ~accept
     ?compact_ratio
@@ -226,7 +227,7 @@ let run_model_with_masc_tools
     ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result)
     ?stream_idle_timeout_s
     ?(temperature = Runtime_provider_defaults.agent_default_temperature)
-    ?(max_tokens = Runtime_provider_defaults.agent_default_max_tokens)
+    ?max_tokens
     ?wait_timeout_sec
     ?guardrails
     ?hooks

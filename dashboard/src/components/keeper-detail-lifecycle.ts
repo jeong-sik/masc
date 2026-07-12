@@ -92,7 +92,7 @@ export function KeeperClearContextDialog({
           />
         </label>
 
-        <label class="flex items-start gap-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-3 text-xs text-[var(--color-fg-primary)]">
+        <label class="v2-mobile-operator-target flex items-start gap-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-3 text-xs text-[var(--color-fg-primary)]">
           <${Checkbox}
             class="mt-0.5"
             checked=${preserveSystemPrompt}

@@ -161,7 +161,6 @@ let runtime_exhausted_failure_reason_of_raw_error ~detail raw_error =
       | Keeper_internal_error.Admission_queue_rejected _
       | Keeper_internal_error.Turn_timeout _
       | Keeper_internal_error.Provider_timeout _
-      | Keeper_internal_error.Max_tokens_ceiling_violation _
       | Keeper_internal_error.Ambiguous_post_commit _
       (* RFC-0159 Phase A: typed [Internal_*] variants are not
          runtime-exhaustion reasons; they map to opaque

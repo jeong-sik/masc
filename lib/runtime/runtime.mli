@@ -315,9 +315,9 @@ val max_context_of_runtime_id : string -> int option
 val max_output_tokens_of_runtime_id : string -> int option
 (** Declared max output tokens (OAS capability catalog) for the model bound to
     runtime [id], or [None] when the id is not configured or the catalog leaves
-    it unset.  Consumed by {!Runtime_inference.resolve_max_tokens} to size a
-    reasoning turn from the model's own output ceiling rather than the flat
-    fallback. *)
+    it unset. This is an observable capability ceiling only; OAS owns request
+    validation and clamp policy, and MASC never turns it into a request
+    default. *)
 
 val thinking_support_of_runtime_id : string -> bool option
 (** [thinking-support] capability of the model bound to runtime [id], or [None]

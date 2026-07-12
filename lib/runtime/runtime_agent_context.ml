@@ -56,7 +56,13 @@ type config =
         streams are not killed by total duration; streaming liveness is
         owned by [stream_idle_timeout_s] plus attempt observation. Non-HTTP
         transports ignore it. *)
-  ; max_tokens : int
+  ; max_tokens : int option
+    (** Request-time output token budget. [None] means no [max_tokens] field
+        goes on the request at all — the keeper lane's default (masc#24067 /
+        oas#2517): the OAS capability catalog ceiling is a validation bound,
+        never a synthesized request value. [Some n] is an explicit
+        operator/profile override or a non-keeper caller's deliberate
+        request budget. *)
   ; temperature : float
   ; hooks : Agent_sdk.Hooks.hooks option
   ; context_reducer : Agent_sdk.Context_reducer.t option
@@ -158,7 +164,7 @@ let default_config
   ; stream_idle_timeout_s = None
   ; max_execution_time_s = None
   ; body_timeout_s = None
-  ; max_tokens = Runtime_provider_defaults.agent_default_max_tokens
+  ; max_tokens = None
   ; temperature = Runtime_provider_defaults.agent_default_temperature
   ; hooks = None
   ; context_reducer = None
@@ -227,7 +233,6 @@ let builder_without_approval
     Agent_sdk.Builder.create ~net ~model:config.model_id
     |> Agent_sdk.Builder.with_name config.name
     |> Agent_sdk.Builder.with_system_prompt config.system_prompt
-    |> Agent_sdk.Builder.with_max_tokens config.max_tokens
     |> Agent_sdk.Builder.with_max_turns config.max_turns
     |> Agent_sdk.Builder.with_max_idle_turns config.max_idle_turns
     |> Agent_sdk.Builder.with_temperature config.temperature
@@ -236,6 +241,14 @@ let builder_without_approval
     |> Agent_sdk.Builder.with_guardrails guardrails
     |> Agent_sdk.Builder.with_missing_approval_callback_policy
          Agent_sdk.Hooks.Reject_without_callback
+  in
+  let builder =
+    (* masc#24067 / oas#2517: [None] means the request carries no
+       [max_tokens] field at all — [Builder.with_max_tokens] is simply not
+       called, rather than filling in a synthesized default. *)
+    match config.max_tokens with
+    | Some max_tokens -> Agent_sdk.Builder.with_max_tokens max_tokens builder
+    | None -> builder
   in
   let builder =
     match config.stream_idle_timeout_s with
@@ -458,7 +471,7 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
       name = config.name
     ; model = config.model_id
     ; system_prompt = Some config.system_prompt
-    ; max_tokens = Some config.max_tokens
+    ; max_tokens = config.max_tokens
     ; max_turns = max_turns_for_resume
     ; temperature = Some config.temperature
     ; top_p = config.top_p

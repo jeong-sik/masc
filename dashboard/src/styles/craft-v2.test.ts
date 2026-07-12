@@ -88,7 +88,7 @@ describe('craft-v2.css density chat console (retargeted to live classes)', () =>
     expect(declarationsForSelector(css, '.v2-app[data-density="spacious"] .kw-rail .kw-sec').padding)
       .toBe('14px 16px')
     expect(declarationsForSelector(css, '.v2-app[data-density="spacious"] .kw-roster-head').padding)
-      .toBe('16px 14px')
+      .toBe('0')
     expect(declarationsForSelector(css, '.v2-app[data-density="spacious"] .kw-roster-filters').padding)
       .toBe('12px 14px')
     expect(declarationsForSelector(css, '.v2-app[data-density="compact"] .kw-rail-scroll').padding)

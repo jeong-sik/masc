@@ -2,9 +2,23 @@
 
 open Masc_domain
 
-let schemas : Masc_domain.tool_schema list =
+type operation =
+  | Verify
+  | Ollama_probe
+
+type definition =
+  { operation : operation
+  ; schema : Masc_domain.tool_schema
+  }
+
+let operation_id = function
+  | Verify -> "verify"
+  | Ollama_probe -> "ollama_probe"
+;;
+
+let definitions : definition list =
   [
-    {
+    { operation = Verify; schema = {
       name = "masc_runtime_verify";
       description =
         "Strictly verify the active provider/runtime contract used for swarm and benchmark runs. Returns reachability, chat-completions contract status, model match, slots, ctx, configured capacity, active slots, and blocker codes such as provider_unreachable, provider_model_mismatch, slot_count_insufficient, ctx_mismatch, or chat_contract_incompatible.";
@@ -21,8 +35,8 @@ let schemas : Masc_domain.tool_schema list =
                   ("expected_ctx", `Assoc [ ("type", `String "integer") ]);
                 ] );
           ];
-    };
-    {
+    } };
+    { operation = Ollama_probe; schema = {
       name = "masc_runtime_ollama_probe";
       description =
         "Probe native Ollama timing behavior with repeated /api/generate calls. Returns loaded models from /api/ps, per-run load/prompt-eval/generation timings, tok/sec estimates, and a timing-based repeated-prefix reuse inference. This does not expose direct KV occupancy or hit-rate.";
@@ -69,5 +83,7 @@ let schemas : Masc_domain.tool_schema list =
                   ("run_generate", `Assoc [ ("type", `String "boolean") ]);
                 ] );
           ];
-    };
+    } };
   ]
+
+let schemas = List.map (fun definition -> definition.schema) definitions

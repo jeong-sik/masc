@@ -124,6 +124,31 @@ let degraded_keeper_dashboard_row
       ; ("last_model_used_label", `String (Keeper_status_runtime.active_model_label_of_meta m))
      ])
 
+let invalid_profile_dashboard_row ~keeper_name error =
+  let config_error =
+    Keeper_types_profile.keeper_toml_config_error_of_load_error
+      ~keeper_name
+      error
+    |> Keeper_types_profile.keeper_toml_config_error_to_json
+  in
+  `Assoc
+    [ ("name", `String keeper_name)
+    ; ("agent_name", `String (Keeper_identity.keeper_agent_name keeper_name))
+    ; ("phase", `String "Offline")
+    ; ("lifecycle_phase", `String "Offline")
+    ; ("pipeline_stage", `String "offline")
+    ; ("pipeline_stage_detail", `String "keeper_profile_load_failed")
+    ; ("status", `String "blocked")
+    ; ("degraded", `Bool true)
+    ; ("degraded_reason", `String "config_invalid")
+    ; ("needs_attention", `Bool true)
+    ; ("attention_reason", `String "config_invalid")
+    ; ("next_human_action", `String "fix_keeper_toml_config")
+    ; ("config_error", config_error)
+    ; ("paused", `Bool false)
+    ; ("keepalive_running", `Bool false)
+    ]
+
 type keeper_activity_source =
   | Keeper_meta
   | Tool_call of Yojson.Safe.t
@@ -330,7 +355,10 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
     bool_default_true_of_env "MASC_KEEPER_HISTORY_FRAGMENT_FILTER"
   in
   let series_points = 120 in
-  let names = keeper_names config in
+  let names =
+    keeper_names config @ Keeper_meta_store.configured_keeper_names config
+    |> List.sort_uniq String.compare
+  in
   let now_ts = Time_compat.now () in
   let max_restarts =
     Runtime_params.get Governance_registry.keeper_supervisor_max_restarts
@@ -365,6 +393,13 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
     (List.mapi (fun idx name -> fun () ->
       let row =
       try
+      match
+        Keeper_types_profile.load_keeper_profile_defaults_result_for_base_path
+          ~base_path:config.base_path
+          name
+      with
+      | Error error -> Some (invalid_profile_dashboard_row ~keeper_name:name error)
+      | Ok _ ->
       match Keeper_meta_store.read_meta config name with
       | Error _ | Ok None -> None
       | Ok (Some (m : Keeper_meta_contract.keeper_meta)) ->

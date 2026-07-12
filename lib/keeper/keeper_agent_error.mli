@@ -63,9 +63,10 @@ val api_error_terminal_reason_code_typed
   :  Agent_sdk.Error.api_error
   -> Keeper_turn_terminal_code.t
 
-(** Receipt outcome for terminal SDK errors.  Provider timeouts map to
-    [`Cancelled] to match [KeeperTurnFSM.tla] [ProviderTimeout], while
-    all other SDK errors remain ordinary failed receipts. *)
+(** Receipt outcome for terminal SDK errors.  Provider/time-budget stop
+    semantics retain their existing [`Cancelled] mapping.  Behavioral
+    [IdleDetected] is an ordinary failed receipt: it is not evidence of a
+    user or supervisor cancellation. *)
 val receipt_outcome_kind_of_sdk_error
   :  Agent_sdk.Error.sdk_error
   -> Keeper_execution_receipt.outcome_kind

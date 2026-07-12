@@ -501,6 +501,84 @@ let test_tool_not_allowed_reason_label_is_bounded () =
       check bool "reason label is bounded vocabulary"
         true (List.mem reason valid))
 
+let test_raw_board_wrapper_routes_are_not_keeper_candidates () =
+  with_exec_fixture
+    "keeper_tool_dispatch_runtime_raw_board_wrapper"
+    (fun ~config ~meta ~ctx_work ->
+      List.iter
+        (fun board_name ->
+          match Keeper_tool_name.board_projection_of_masc_board_name board_name with
+          | Keeper_tool_name.Keeper_wrapper _ ->
+            let name = Tool_name.Board_name.to_string board_name in
+            let result =
+              KET.execute_keeper_tool_call_with_outcome
+                ~config
+                ~meta
+                ~ctx_work
+                ~exec_cache:None
+                ~name
+                ~input:(`Assoc [])
+                ()
+            in
+            check string (name ^ " outcome") "failure" (outcome_label result.outcome);
+            let json = Yojson.Safe.from_string result.raw_output in
+            check string
+              (name ^ " candidate rejection")
+              "not_in_candidate_set"
+              Yojson.Safe.Util.(member "reason" json |> to_string)
+          | Keeper_tool_name.Direct_masc | Keeper_tool_name.External_only -> ())
+        Tool_name.Board_name.all)
+;;
+
+let test_raw_board_runtime_is_fail_closed () =
+  let meta = make_meta ~name:"keeper-board-runtime-guard" () in
+  let check_rejection board_name expected_kind expected_class =
+    let name = Tool_name.Board_name.to_string board_name in
+    let raw =
+      Masc.Keeper_tool_in_process_runtime.handle_masc_board
+        ~meta
+        ~name
+        ~args:(`Assoc [])
+    in
+    let json = Yojson.Safe.from_string raw in
+    check string
+      (name ^ " rejection kind")
+      expected_kind
+      Yojson.Safe.Util.(member "error_kind" json |> to_string);
+    check string
+      (name ^ " failure class")
+      expected_class
+      Yojson.Safe.Util.(member "failure_class" json |> to_string);
+    check string
+      (name ^ " payload classification")
+      "structured_error"
+      (payload_kind (KET.classify_tool_result_payload raw))
+  in
+  check_rejection
+    Tool_name.Board_name.Board_post
+    "keeper_wrapper_required"
+    "policy_rejection";
+  check_rejection
+    Tool_name.Board_name.Board_cleanup
+    "external_only_board_route"
+    "policy_rejection";
+  let raw =
+    Masc.Keeper_tool_in_process_runtime.handle_masc_board
+      ~meta
+      ~name:"masc_board_not_registered"
+      ~args:(`Assoc [])
+  in
+  let json = Yojson.Safe.from_string raw in
+  check string
+    "unknown Board route is explicit"
+    "unknown_board_route"
+    Yojson.Safe.Util.(member "error_kind" json |> to_string);
+  check string
+    "unknown Board route is a runtime invariant failure"
+    "runtime_failure"
+    Yojson.Safe.Util.(member "failure_class" json |> to_string)
+;;
+
 let test_keeper_tools_list_json_uses_typed_groups () =
   let meta =
     make_meta
@@ -511,6 +589,8 @@ let test_keeper_tools_list_json_uses_typed_groups () =
              "keeper_board_fake";
              "keeper_voice_speak";
              "keeper_task_claim";
+             "masc_transition";
+             "masc_plan_get";
              "keeper_surface_read";
              "tool_search_files";
              "tool_read_file";
@@ -531,16 +611,22 @@ let test_keeper_tools_list_json_uses_typed_groups () =
     (member "voice" "keeper_voice_speak");
   check bool "task tool grouped as workspace" true
     (member "workspace" "keeper_task_claim");
+  check bool "MASC task tool grouped as workspace" true
+    (member "workspace" "masc_transition");
+  check bool "MASC plan tool grouped as workspace" true
+    (member "workspace" "masc_plan_get");
   check bool "surface read grouped as surface" true
     (member "surface" "keeper_surface_read");
   check bool "surface read not hidden under meta" false
     (member "meta" "keeper_surface_read");
   check bool "tools_list remains a meta introspection tool" true
     (member "meta" "keeper_tools_list");
-  check bool "Grep tool grouped" true
+  check bool "Grep tool grouped under its sole model name" true
+    (member "search_files" "Grep");
+  check bool "Grep internal route omitted from model list" false
     (member "search_files" "tool_search_files");
-  check bool "fs tool grouped" true
-    (member "fs" "tool_read_file");
+  check bool "fs tool grouped under its sole model name" true
+    (member "fs" "Read");
   check bool "memory tool grouped" true
     (member "memory" "keeper_memory_search");
   let descriptor_surface =
@@ -584,10 +670,12 @@ let test_keeper_tools_list_json_uses_typed_groups () =
     (string_member "public_name" execute);
   check string "Execute executor" "shell_ir"
     (string_member "executor" execute);
-  check bool "Execute active internal name listed" true
+  check bool "Execute internal route is not a model name" false
     (list_member_contains "active_names" "tool_execute" execute);
   check bool "Execute active public name listed" true
     (list_member_contains "active_names" "Execute" execute);
+  check string "Execute model projection" "preferred_public_name"
+    (string_member "keeper_model_projection" execute);
   let policy = Yojson.Safe.Util.member "policy" execute in
   check string "Execute effect domain" "playground_write"
     (string_member "effect_domain" policy);
@@ -641,8 +729,12 @@ let test_keeper_tools_list_json_uses_typed_groups () =
     (string_member "effect_domain" grep_policy);
   check bool "Grep policy group omitted" true
     (Yojson.Safe.Util.member "policy_group" grep_policy = `Null);
-  check bool "Grep active internal name listed" true
+  check bool "Grep internal route is not a model name" false
     (list_member_contains "active_names" "tool_search_files" grep);
+  check bool "Grep preferred model name listed" true
+    (list_member_contains "active_names" "Grep" grep);
+  check bool "Grep compatibility alias is not a model name" false
+    (list_member_contains "active_names" "Search" grep);
   let malformed_execute =
     { (descriptor_for_internal "tool_execute") with
       KTD.input_schema =
@@ -1462,6 +1554,42 @@ let make_dummy_oas_tool name =
     (fun _ -> Tool_result.make_ok ~tool_name:name ~start_time:0.0 ~data:(`String "") ())
 ;;
 
+let test_descriptor_route_miss_payload_is_typed_runtime_failure () =
+  let descriptor =
+    match KTD.descriptors_for_internal "tool_execute" with
+    | [ descriptor ] -> descriptor
+    | [] -> fail "missing tool_execute descriptor"
+    | _ :: _ :: _ -> fail "duplicate tool_execute descriptors"
+  in
+  let payload =
+    KET.For_testing.descriptor_route_invariant_payload
+      ~tool_name:"Execute"
+      descriptor
+  in
+  (match
+     KET.For_testing.descriptor_route_kind ~descriptor ~output:None
+   with
+   | KET.For_testing.Invariant -> ()
+   | KET.For_testing.Output | KET.For_testing.Registered_only ->
+     fail "resolved descriptor without output must not reach registered fallback");
+  check bool "descriptor route miss is not ok" false
+    Yojson.Safe.Util.(member "ok" payload |> to_bool);
+  check string
+    "descriptor route miss has typed error"
+    "keeper_tool_descriptor_route_invariant"
+    Yojson.Safe.Util.(member "error" payload |> to_string);
+  check string
+    "descriptor route miss is a runtime failure"
+    "runtime_failure"
+    Yojson.Safe.Util.(member "failure_class" payload |> to_string);
+  check string "descriptor identity is retained" "agent.execute"
+    Yojson.Safe.Util.(member "descriptor_id" payload |> to_string);
+  check string "executor identity is retained" "shell_ir"
+    Yojson.Safe.Util.(member "executor" payload |> to_string);
+  check string "runtime handler identity is retained" "tool_execute"
+    Yojson.Safe.Util.(member "runtime_handler" payload |> to_string)
+;;
+
 let string_of_concurrency_class = function
   | Agent_sdk.Tool.Parallel_read -> "parallel_read"
   | Agent_sdk.Tool.Sequential_workspace -> "sequential_workspace"
@@ -1722,10 +1850,16 @@ let () =
         test_tool_not_allowed_denied_by_policy_counter;
       test_case "reason label is bounded vocabulary" `Quick
         test_tool_not_allowed_reason_label_is_bounded;
+      test_case "raw Board wrapper routes are not Keeper candidates" `Quick
+        test_raw_board_wrapper_routes_are_not_keeper_candidates;
+      test_case "raw Board runtime routes fail closed" `Quick
+        test_raw_board_runtime_is_fail_closed;
     ]);
     ("keeper_tools_list_json", [
       test_case "uses typed groups" `Quick
         test_keeper_tools_list_json_uses_typed_groups;
+      test_case "descriptor route miss is typed runtime failure" `Quick
+        test_descriptor_route_miss_payload_is_typed_runtime_failure;
     ]);
     ("oas_descriptor", [
       test_case "masc_web_search is Exclusive_external" `Quick

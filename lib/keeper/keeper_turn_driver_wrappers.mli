@@ -41,6 +41,7 @@ val run_model_by_label :
 
 val run_named_with_masc_tools :
   runtime_id:string ->
+  ?keeper_name:string ->
   goal:string ->
   base_path:string ->
   ?priority:Llm_provider.Request_priority.t ->
@@ -71,7 +72,9 @@ val run_named_with_masc_tools :
   unit ->
   (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
 (** [run_named] variant that bridges MASC tool schemas into OAS tools
-    via {!Tool_bridge.oas_tool_of_masc}. *)
+    via {!Tool_bridge.oas_tool_of_masc}. [keeper_name] preserves per-Keeper
+    lane ownership in runtime manifests and metrics; the default retains
+    compatibility for non-Keeper callers. *)
 
 val run_model_with_masc_tools :
   model_label:string ->

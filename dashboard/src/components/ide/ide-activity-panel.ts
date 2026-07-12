@@ -69,11 +69,13 @@ interface ApiActivityResponse {
   readonly latest_seq?: number
 }
 
-interface ActivityFetchResult {
+interface GraphFetchResult {
   readonly events: ReadonlyArray<RunActivityEvent>
   readonly workspaceId: string
   readonly ok: boolean
 }
+
+type ActivityFetchResult = GraphFetchResult
 
 type ActivityRefreshTone = 'loading' | 'live' | 'stale' | 'offline'
 
@@ -85,6 +87,7 @@ interface ActivityRefreshState {
 }
 
 const EMPTY_ACTIVITY: ReadonlyArray<RunActivityEvent> = []
+const EMPTY_KEEPERS: ReadonlyArray<string> = []
 const EMPTY_ANNOTATIONS: ReadonlyArray<IdeAnnotation> = []
 const EMPTY_DIFF_ROWS: ReadonlyArray<UnifiedDiffRow> = []
 const EMPTY_DIAGNOSTICS: ReadonlyArray<LspDiagnosticAnchor> = []
@@ -163,6 +166,7 @@ export interface IdeActivityPanelProps {
   readonly annotations?: ReadonlyArray<IdeAnnotation>
   readonly diffRows?: ReadonlyArray<UnifiedDiffRow>
   readonly pollMs?: number
+  readonly compact?: boolean
   readonly children?: unknown
 }
 
@@ -209,7 +213,7 @@ async function fetchActivityEvents(
   const graph = await fetchActivityGraphEvents()
   const bridge = await fetchIdeBridgeRunActivityEvents(graph.workspaceId, repoId, keeperLane)
   return {
-    ...graph,
+    workspaceId: graph.workspaceId,
     // A bridge fetch failure must degrade the refresh tone instead of
     // rendering an empty-but-"live" feed: an operator cannot distinguish
     // "no keeper activity" from "the activity source is broken" otherwise.
@@ -218,7 +222,7 @@ async function fetchActivityEvents(
   }
 }
 
-async function fetchActivityGraphEvents(): Promise<ActivityFetchResult> {
+async function fetchActivityGraphEvents(): Promise<GraphFetchResult> {
   try {
     const data = await get<ApiActivityResponse>('/api/v1/activity/events?limit=50')
     const rawEvents = data.events
@@ -257,6 +261,9 @@ async function fetchIdeBridgeRunActivityEvents(
   if (lane) {
     sources.push(fetchIdeEvents({ limit: 50, scope: { kind: 'keeper_lane', keeperId: lane } }))
   }
+  // Neither scope is set: there is nothing to query, not a request that
+  // happened to find zero events. The caller derives the visible no-scope
+  // state from the current props, before any asynchronous response arrives.
   if (sources.length === 0) return { events: EMPTY_ACTIVITY, ok: true }
   const settled = await Promise.allSettled(sources)
   const events: RunActivityEvent[] = []
@@ -461,6 +468,14 @@ function normalizedPollMs(value: number | undefined): number | null {
   return Math.floor(value)
 }
 
+function activityScopeKey(repoId?: string | null, keeperLane?: string | null): string {
+  return JSON.stringify([repoId?.trim() || null, keeperLane?.trim() || null])
+}
+
+function hasActivityBridgeScope(repoId?: string | null, keeperLane?: string | null): boolean {
+  return Boolean(repoId?.trim()) || Boolean(keeperLane?.trim())
+}
+
 export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
   const {
     activeFile: rawActiveFile = '',
@@ -469,6 +484,7 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
     annotations = EMPTY_ANNOTATIONS,
     diffRows = EMPTY_DIFF_ROWS,
     pollMs = 0,
+    compact = false,
   } = props
   const activeFile = rawActiveFile ?? ''
   const store = useMemo(() => {
@@ -477,8 +493,19 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
     return store
   }, [])
   const [refreshState, setRefreshState] = useState<ActivityRefreshState>(INITIAL_REFRESH_STATE)
+  const requestedScopeKey = activityScopeKey(repoId, keeperLane)
+  const bridgeScoped = hasActivityBridgeScope(repoId, keeperLane)
+  const [loadedScopeKey, setLoadedScopeKey] = useState<string | null>(null)
+  const loadedScopeKeyRef = useRef<string | null>(null)
+  const [compactInsightsOpen, setCompactInsightsOpen] = useState(false)
   const emittedTraceIds = useRef<ReadonlySet<string>>(new Set())
   const refreshMs = normalizedPollMs(pollMs)
+
+  useEffect(() => {
+    if (loadedScopeKeyRef.current !== requestedScopeKey) {
+      setRefreshState(INITIAL_REFRESH_STATE)
+    }
+  }, [requestedScopeKey])
 
   useEffect(() => {
     let cancelled = false
@@ -495,6 +522,8 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
       if (ok) {
         store.reset(workspaceId)
         store.seed(events)
+        loadedScopeKeyRef.current = requestedScopeKey
+        setLoadedScopeKey(requestedScopeKey)
         setRefreshState({
           tone: 'live',
           lastOkMs: Date.now(),
@@ -502,9 +531,10 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
           failedCount: 0,
         })
       } else {
+        const sameScopeSnapshot = loadedScopeKeyRef.current === requestedScopeKey
         setRefreshState(prev => ({
-          tone: prev.lastOkMs === null ? 'offline' : 'stale',
-          lastOkMs: prev.lastOkMs,
+          tone: sameScopeSnapshot && prev.lastOkMs !== null ? 'stale' : 'offline',
+          lastOkMs: sameScopeSnapshot ? prev.lastOkMs : null,
           lastAttemptMs: attemptMs,
           failedCount: prev.failedCount + 1,
         }))
@@ -516,7 +546,7 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
       cancelled = true
       if (timer !== null) clearTimeout(timer)
     }
-  }, [store, refreshMs, repoId, keeperLane])
+  }, [store, refreshMs, repoId, keeperLane, requestedScopeKey])
 
   useStoreSubscription(store.subscribe)
   useSignalValue(globalPresenceSnapshot)
@@ -524,8 +554,9 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
   useSignalValue(ideConversationThreadSnapshot)
   useSignalValue(lspDiagnosticSnapshot)
 
-  const events = store.events()
-  const keepers = store.knownKeepers()
+  const snapshotMatchesScope = loadedScopeKey === requestedScopeKey
+  const events = snapshotMatchesScope ? store.events() : EMPTY_ACTIVITY
+  const keepers = snapshotMatchesScope ? store.knownKeepers() : EMPTY_KEEPERS
   const presence = globalPresenceSnapshot.value
   const overlay = cursorOverlaySignal.value
   const threadSnapshot = ideConversationThreadSnapshot.value
@@ -542,42 +573,80 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
 
   return html`
     <div
-      class="ide-rail-panel ide-activity-panel"
+      class=${`ide-rail-panel ide-activity-panel ${compact ? 'is-compact' : ''}`}
       role="region"
       aria-label="EVENT TIMELINE"
     >
-      <div
-        class="ide-rail-head"
-      >
-        <span>EVENT TIMELINE</span>
-        <span class="ide-activity-head-meta">
-          <span>${events.length} events · ${keepers.length} keepers</span>
-          <span
-            class="ide-activity-refresh-status"
-            data-state=${refreshState.tone}
-            role="status"
-            aria-label=${`Activity refresh ${activityRefreshLabel(refreshState, refreshMs)}`}
-            title=${activityRefreshTitle(refreshState, refreshMs)}
-          >
-            ${activityRefreshLabel(refreshState, refreshMs)}
+      ${compact ? null : html`
+        <div
+          class="ide-rail-head"
+        >
+          <span>EVENT TIMELINE</span>
+          <span class="ide-activity-head-meta">
+            <span>${events.length} events · ${keepers.length} keepers</span>
+            <span
+              class="ide-activity-refresh-status"
+              data-state=${refreshState.tone}
+              role="status"
+              aria-label=${`Activity refresh ${activityRefreshLabel(refreshState, refreshMs)}`}
+              title=${activityRefreshTitle(refreshState, refreshMs)}
+            >
+              ${activityRefreshLabel(refreshState, refreshMs)}
+            </span>
           </span>
-        </span>
-      </div>
-      <${RunProgressStrip} summary=${progress} />
-      <${IdeContextLens}
-        filePath=${activeFile}
-        annotations=${annotations}
-        diffRows=${diffRows}
-        events=${events}
-        threads=${threads}
-        diagnostics=${diagnostics}
-        overlay=${overlay}
-      />
+        </div>
+        <${RunProgressStrip} summary=${progress} />
+        <${IdeContextLens}
+          filePath=${activeFile}
+          annotations=${annotations}
+          diffRows=${diffRows}
+          events=${events}
+          threads=${threads}
+          diagnostics=${diagnostics}
+          overlay=${overlay}
+        />
+      `}
+      ${compact ? html`
+        <div
+          class="ide-activity-compact-status"
+          data-state=${refreshState.tone}
+          role="status"
+          aria-label=${`Activity refresh ${activityRefreshLabel(refreshState, refreshMs)}`}
+          title=${activityRefreshTitle(refreshState, refreshMs)}
+        >
+          <span>${events.length} events · ${keepers.length} keepers</span>
+          <span>${activityRefreshLabel(refreshState, refreshMs)}</span>
+        </div>
+        <div class="ide-activity-compact-insights">
+          <button
+            type="button"
+            aria-expanded=${compactInsightsOpen ? 'true' : 'false'}
+            onClick=${() => setCompactInsightsOpen(current => !current)}
+          >
+            Observation context
+            <span>${progress.linkedEvents}/${progress.totalEvents} linked</span>
+          </button>
+          ${compactInsightsOpen ? html`
+            <${RunProgressStrip} summary=${progress} />
+            <${IdeContextLens}
+              filePath=${activeFile}
+              annotations=${annotations}
+              diffRows=${diffRows}
+              events=${events}
+              threads=${threads}
+              diagnostics=${diagnostics}
+              overlay=${overlay}
+            />
+          ` : null}
+        </div>
+      ` : null}
       <ol
         class="ide-rail-list ide-activity-list"
       >
         ${events.length === 0
-          ? html`<li class="ide-rail-empty">no recent activity</li>`
+          ? bridgeScoped
+            ? html`<li class="ide-rail-empty">no recent activity</li>`
+            : html`<li class="ide-rail-empty" data-testid="ide-activity-no-scope">관측 스코프(저장소/keeper)가 선택되지 않았습니다</li>`
           : events.map(item => html`<${ActivityRow} item=${item} presence=${presence} overlay=${overlay} />`)}
       </ol>
     </div>
@@ -1020,7 +1089,7 @@ const ActivityRow = memo(function ActivityRow({
               source_id: item.id,
               keeper_id: item.keeper_id,
               route_links: routeLinks,
-            })}
+            }, 'operator')}
           >
             ↗ ${shortContextPath(eventFocusFile, eventFocusLine)}
           </button>

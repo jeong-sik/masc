@@ -9,7 +9,7 @@ import { SectionCard } from './common/card'
 import { FilterChips } from './common/filter-chips'
 import { EmptyState } from './common/feedback-state'
 import { StatusChip, type StatusChipTone } from './common/status-chip'
-import { KpiStripIsland, type KpiStripIslandData } from './kpi-strip-island'
+import { KpiStripView, type KpiStripViewData } from './kpi-strip-view'
 import { asBoolean, asRecordArray, asString, isRecord } from './common/normalize'
 
 type SurfaceFilter = 'all' | 'main' | 'lab' | 'diagnostic' | 'gaps'
@@ -216,7 +216,7 @@ function SurfaceReadinessBody({ data }: { data: SurfaceReadinessData }) {
               generated ${data.generated_at ? formatTimeAgoEn(data.generated_at) : 'unknown'}
             </div>
           </div>
-          <${KpiStripIsland}
+          <${KpiStripView}
             ariaLabel="Surface readiness summary"
             cols=${3}
             cells=${[
@@ -226,7 +226,7 @@ function SurfaceReadinessBody({ data }: { data: SurfaceReadinessData }) {
               { variant: 'stacked', label: 'gaps', value: summary.gaps },
               { variant: 'stacked', label: 'refs', value: data.verification_ref_bar || 'n/a' },
               { variant: 'stacked', label: 'filter', value: activeFilter.value },
-            ] satisfies KpiStripIslandData['cells']}
+            ] satisfies KpiStripViewData['cells']}
           />
         </div>
       </div>

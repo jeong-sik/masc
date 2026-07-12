@@ -208,6 +208,30 @@ describe('SSEMessageSchema', () => {
     })
     expect(r.success).toBe(false)
   })
+
+  it('accepts a typed Keeper chat-queue projection invalidation', () => {
+    const r = SSEMessageSchema.safeParse({
+      type: 'keeper_chat_queue_changed',
+      keeper_name: 'keeper-1',
+      revision: 7,
+      ts_unix: 1_712_000_000,
+    })
+    expect(r.success).toBe(true)
+  })
+
+  it.each([
+    { type: 'keeper_chat_queue_changed', revision: 7 },
+    { type: 'keeper_chat_queue_changed', keeper_name: 'keeper-1' },
+    { type: 'keeper_chat_queue_changed', keeper_name: 'keeper-1', revision: -1 },
+    { type: 'keeper_chat_queue_changed', keeper_name: 'keeper-1', revision: 1.5 },
+    {
+      type: 'keeper_chat_queue_changed',
+      keeper_name: 'keeper-1',
+      revision: Number.MAX_SAFE_INTEGER + 1,
+    },
+  ])('rejects an incomplete Keeper chat-queue invalidation: %o', value => {
+    expect(SSEMessageSchema.safeParse(value).success).toBe(false)
+  })
 })
 
 describe('parseSSEMessage', () => {

@@ -552,7 +552,9 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
       Keeper_registry.record_crash ~base_path entry.name ts msg;
       Keeper_registry_error_recording.record ~base_path entry.name msg;
       match Keeper_registry.get ~base_path entry.name with
-      | Some updated -> queue_crashed_entry acc updated msg
+      | Some updated when Keeper_registry.lane_has_exited updated ->
+        queue_crashed_entry acc updated msg
+      | Some _ -> acc
       | None -> acc
   in
   (* 2-level supervision slice: process the flat registry through stable
@@ -568,7 +570,9 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
          { acc with to_cleanup_dead = entry :: acc.to_cleanup_dead }
        | _ -> acc)
     | Keeper_state_machine.Stopped ->
-      { acc with to_unregister = entry :: acc.to_unregister }
+      if Keeper_registry.lane_has_exited entry
+      then { acc with to_unregister = entry :: acc.to_unregister }
+      else acc
     | Keeper_state_machine.Running
     | Keeper_state_machine.Paused
     | Keeper_state_machine.Crashed
@@ -652,8 +656,14 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
               ~stale_seconds
               ~last_turn_ts:entry.meta.runtime.usage.last_turn_ts;
             acc)
-       | Some `Stopped -> { acc with to_unregister = entry :: acc.to_unregister }
-       | Some (`Crashed msg) -> queue_crashed_entry acc entry msg)
+       | Some `Stopped ->
+         if Keeper_registry.lane_has_exited entry
+         then { acc with to_unregister = entry :: acc.to_unregister }
+         else acc
+       | Some (`Crashed msg) ->
+         if Keeper_registry.lane_has_exited entry
+         then queue_crashed_entry acc entry msg
+         else acc)
   in
   let entry_cohorts = supervision_cohorts entries in
   let sweep_ym = Eio_guard.create_yield_meter () in
@@ -671,21 +681,63 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
       empty_sweep_acc
       entry_cohorts
   in
+  let unregister_exact_and_drop (entry : Keeper_registry.registry_entry) =
+    match Keeper_registry.unregister_exact entry with
+    | Keeper_registry.Exact_unregistered ->
+      Keeper_tool_emission_hook.drop_keeper_accumulator entry.name;
+      ()
+    | Keeper_registry.Exact_entry_missing -> ()
+    | Keeper_registry.Exact_entry_replaced ->
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string SupervisorCleanupFailures)
+        ~labels:[ "keeper", entry.name; "site", "stale_entry_replaced" ]
+        ();
+      Log.Keeper.warn
+        "%s: stale supervisor entry was not unregistered because a newer lane owns the name"
+        entry.name
+  in
   List.iter
     (fun (entry : Keeper_registry.registry_entry) ->
-       Keeper_registry.unregister ~base_path entry.name;
-       (* K4c — restart-budget exhaustion: keeper is permanently
-       removed (no respawn), so reclaim its accumulator slot. *)
-       Keeper_tool_emission_hook.drop_keeper_accumulator entry.name)
+       (* K4c — reclaim only when this exact lane was removed. A stale
+          sweep must not drop the accumulator of a newer same-name lane. *)
+       unregister_exact_and_drop entry)
     final_acc.to_unregister;
   List.iter
     (fun ((entry : Keeper_registry.registry_entry), msg) ->
        (* RFC-0002: dispatch budget exhaustion before marking dead *)
-       Keeper_registry.dispatch_event_unit
-         ~base_path
-         entry.name
-         Keeper_state_machine.Restart_budget_exhausted;
-       Keeper_registry.mark_dead ~base_path entry.name ~at:now;
+       (match
+          Keeper_registry.dispatch_event_exact
+            entry
+            Keeper_state_machine.Restart_budget_exhausted
+        with
+        | Ok _ -> ()
+        | Error error ->
+          Log.Keeper.warn
+            "%s: exact restart-budget dispatch rejected: %s"
+            entry.name
+            (Keeper_state_machine.transition_error_to_string error));
+       let exact_dead =
+         match Keeper_registry.mark_dead_exact entry ~at:now with
+         | Keeper_registry.Exact_updated -> true
+         | Keeper_registry.Exact_update_missing ->
+           Log.Keeper.info
+             "%s: dead transition skipped because the observed lane was already removed"
+             entry.name;
+           false
+         | Keeper_registry.Exact_update_replaced ->
+           Log.Keeper.warn
+             "%s: dead transition retained a newer same-name lane"
+             entry.name;
+           false
+         | Keeper_registry.Exact_update_invalid validation_error ->
+           Log.Keeper.warn
+             "%s: dead transition validation failed: %s"
+             entry.name
+             (Keeper_registry.registry_entry_validation_error_to_string validation_error);
+           false
+       in
+       if exact_dead
+       then (
        (* Dead keepers cannot make progress on owned tasks.  Release from the
           backlog's typed ownership state, not from a possibly stale meta
           pointer, so an exhausted keeper cannot strand an InProgress task and
@@ -718,18 +770,13 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
           operator action required"
          entry.name
          msg
-         entry.restart_count)
+         entry.restart_count))
     final_acc.to_mark_dead;
-  (* RFC-0036 Phase A.2: fire Tombstone_reaped after cleanup completes.
-     Hook is exception-safe; supervisor never observes failure. *)
+  (* Submit exact-lane durable finalization. [Dead_cleaned] and
+     [Tombstone_reaped] are emitted only by the completion receipt handler. *)
   List.iter
     (fun (entry : Keeper_registry.registry_entry) ->
-       cleanup_dead_tombstone ctx entry;
-       Keeper_lifecycle_hooks.run
-         ~base_dir:(Workspace.masc_root_dir ctx.config)
-         ~meta:entry.meta
-         ~keeper_id:entry.name
-         Keeper_lifecycle_hooks.Tombstone_reaped)
+       cleanup_dead_tombstone ctx entry)
     final_acc.to_cleanup_dead;
   let active_count =
     Keeper_registry.all ~base_path () |> active_supervision_keeper_count
@@ -781,6 +828,24 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
                append happened after the mark_dead post-processing above, so it
                had no effect in the current sweep. We keep the metric/log and
                intentionally do not accumulate, preserving the prior behavior. *)
+          | Error (Keeper_registry.Restart_shutdown_reserved operation_id) ->
+            Log.Keeper.info
+              "%s: restart skipped because shutdown operation %s owns admission"
+              old_entry.name
+              (Keeper_shutdown_types.Operation_id.to_string operation_id);
+            Otel_metric_store.inc_counter
+              Keeper_metrics.(to_string RestartOutcomes)
+              ~labels:[ "keeper", old_entry.name; "outcome", "shutdown_reserved" ]
+              ()
+          | Error (Keeper_registry.Restart_event_queue_unavailable { keeper_name; detail }) ->
+            Log.Keeper.error
+              "%s: restart refused because durable event queue is unavailable: %s"
+              keeper_name
+              detail;
+            Otel_metric_store.inc_counter
+              Keeper_metrics.(to_string RestartOutcomes)
+              ~labels:[ "keeper", keeper_name; "outcome", "event_queue_unavailable" ]
+              ()
           | Ok reg ->
             Keeper_registry.restore_supervisor_state
               ~base_path
@@ -835,11 +900,11 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
          Otel_metric_store.inc_counter
            Keeper_metrics.(to_string RestartOutcomes)
            ~labels:[ "keeper", old_entry.name; "outcome", "meta_unavailable" ]
-           ();
+         ();
          Log.Keeper.error "%s: cannot read meta for restart, removing" old_entry.name;
-         Keeper_registry.unregister ~base_path old_entry.name;
-         (* K4c — restart-meta read failure: keeper abandoned, drop. *)
-         Keeper_tool_emission_hook.drop_keeper_accumulator old_entry.name)
+         (* K4c — restart-meta read failure: abandon only the exact crashed
+            lane observed by this sweep. *)
+         unregister_exact_and_drop old_entry)
     restart_list;
   (* Phase 2: restore paused reconcile gates whose approval queue was lost
      on restart. The queue itself is in-memory, but paused keeper meta is

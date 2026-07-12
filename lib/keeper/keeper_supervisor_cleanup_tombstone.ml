@@ -1,154 +1,107 @@
-(** Dead-tombstone cleanup for the keeper supervisor, extracted from
-    [keeper_supervisor.ml]. The cleanup CASes [paused = true] (merging
-    heartbeat-owned fields), unregisters the keeper, drops its tool
-    emission accumulator, and emits the [Dead_cleaned] lifecycle event.
+(** Dead-tombstone cleanup admission and completion delivery.
 
-    [publish_lifecycle] is injected explicitly so the sibling does not
-    reach back into the supervisor godfile (mirrors the pattern already
-    used by [Keeper_supervisor_self_preservation.apply]). *)
+    The supervisor only submits an exact-lane durable shutdown operation.
+    Meta mutation, lane join, registry removal, and accumulator removal are
+    owned by [Keeper_shutdown_finalize]. [Dead_cleaned] and
+    [Tombstone_reaped] are delivered from the durable completion receipt after
+    finalization, never from the sweep that observed the old entry. *)
 
-open Keeper_types
-open Keeper_meta_contract
-open Keeper_meta_store
-open Keeper_types_profile
-open Keeper_execution
+open Keeper_shutdown_types
+
+let cleanup_intent : Keeper_shutdown_types.cleanup_intent =
+  { meta_disposition = Retain_dead_tombstone
+  ; remove_session = false
+  }
+;;
+
+let record_submission_failure keeper_name =
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string SupervisorCleanupFailures)
+    ~labels:
+      [ "keeper", keeper_name
+      ; ( "site"
+        , Keeper_supervisor_cleanup_failure_site.(
+            to_label Dead_tombstone_submission) )
+      ]
+    ()
+;;
 
 let cleanup_dead_tombstone
-      ~publish_lifecycle
-      (ctx : _ context)
-      (entry : Keeper_registry.registry_entry)
+    (ctx : _ Keeper_types_profile.context)
+    (entry : Keeper_registry.registry_entry)
   =
-  match read_meta ctx.config entry.name with
-  | Ok (Some meta) ->
-    let dead_tombstone_terminal_persisted =
-      meta.paused
-      &&
-      match meta.latched_reason with
-      | Some Keeper_latched_reason.Dead_tombstone ->
-        Option.is_none meta.auto_resume_after_sec
-        && Option.is_none meta.runtime.last_blocker
-      | Some _
-      | None -> false
-    in
-    let persisted_paused =
-      if dead_tombstone_terminal_persisted
-      then true
-      else (
-        (* #9733: dead tombstone cleanup writes [paused = true] —
-             cycle-owned field — while heartbeat fibers can still
-             update the same record's heartbeat-owned fields.  Use
-             the same merged-CAS retry as the resume + overflow-pause
-             paths so a parallel heartbeat write doesn't make this
-             write fail and leave the keeper unpaused on disk while
-             the supervisor proceeds to unregister it.
+  let request : Keeper_shutdown_prepare_join.request =
+    { actor = ctx.agent_name; cleanup_intent }
+  in
+  match Keeper_shutdown_runtime.submit ~config:ctx.config ~entry ~request with
+  | Ok operation ->
+    Log.Keeper.info
+      "%s: dead tombstone finalization accepted operation=%s"
+      entry.name
+      (Keeper_shutdown_types.Operation_id.to_string operation.operation_id)
+  | Error error ->
+    record_submission_failure entry.name;
+    Log.Keeper.error
+      "%s: dead tombstone finalization submission failed: %s"
+      entry.name
+      (Keeper_shutdown_runtime.submit_error_to_string error)
+;;
 
-             The cleanup owns [paused]/[latched_reason] here, so use
-             [dead_tombstone_cleanup_from_disk] rather than the
-             heartbeat merge: on a CAS retry that re-reads an operator
-             pause, the heartbeat merge would copy the operator reason
-             back over [Dead_tombstone] and still return [Ok ()]. *)
-        match
-          write_meta_with_merge
-            ~merge:Keeper_meta_merge.dead_tombstone_cleanup_from_disk
-            ctx.config
-            { meta with
-              paused = true
-            ; (* Record {i why} this meta is paused on disk: a dead-keeper
-                 tombstone, distinct from an operator pause or runtime latch.
-                 Observability only — the unregister/pause behavior below is
-                 unchanged. *)
-              latched_reason = Some Keeper_latched_reason.Dead_tombstone
-            ; auto_resume_after_sec = None
-            ; updated_at = now_iso ()
-            ; runtime = { meta.runtime with last_blocker = None }
-            }
-        with
-        | Ok () -> true
-        | Error err when is_version_conflict_error err ->
-          Otel_metric_store.inc_counter
-            Keeper_metrics.(to_string WriteMetaFailures)
-            ~labels:[ "keeper", entry.name; "phase", "dead_cleanup_cas_race" ]
-            ();
-          Log.Keeper.warn
-            "%s: dead tombstone cleanup paused/reason write lost CAS race after retries: %s"
-            entry.name
-            err;
-          false
-        | Error err ->
-          Otel_metric_store.inc_counter
-            Keeper_metrics.(to_string WriteMetaFailures)
-            ~labels:[ "keeper", entry.name; "phase", "dead_cleanup" ]
-            ();
-          Log.Keeper.warn
-            "%s: dead tombstone cleanup paused/reason write failed: %s"
-            entry.name
-            err;
-          false)
-    in
-    Keeper_registry.unregister ~base_path:ctx.config.base_path entry.name;
-    Keeper_tool_emission_hook.drop_keeper_accumulator entry.name;
-    if persisted_paused
-    then (
-      publish_lifecycle
-        ~event:
-          (Keeper_lifecycle_events.Custom_event
-             { verb = Keeper_lifecycle_events.Dead_cleaned; phase = None })
-        entry.name
-        "paused meta persisted"
-        ();
-      Log.Keeper.info "%s: dead tombstone cleaned up" entry.name)
-    else (
-      publish_lifecycle
-        ~event:
-          (Keeper_lifecycle_events.Custom_event
-             { verb = Keeper_lifecycle_events.Dead_cleaned; phase = None })
-        entry.name
-        "meta write failed, unregistered anyway"
-        ();
-      Log.Keeper.warn
-        "%s: dead tombstone unregistered despite meta write failure"
-        entry.name;
-      Otel_metric_store.inc_counter
-        Keeper_metrics.(to_string SupervisorCleanupFailures)
-        ~labels:
-          [ "keeper", entry.name
-          ; ("site", Keeper_supervisor_cleanup_failure_site.(to_label Dead_tombstone_meta_write))
-          ]
-        ())
+let completion_meta_for_coverage config operation =
+  match Keeper_meta_store.read_meta config operation.Keeper_shutdown_types.keeper_name with
+  | Ok (Some meta)
+    when Keeper_id.Trace_id.equal meta.runtime.trace_id operation.trace_id
+         && Int.equal meta.runtime.generation operation.generation -> Some meta
+  | Ok (Some _) ->
+    Log.Keeper.warn
+      "%s: dead tombstone completion coverage meta identity changed"
+      operation.keeper_name;
+    None
   | Ok None ->
-    Keeper_registry.unregister ~base_path:ctx.config.base_path entry.name;
-    Keeper_tool_emission_hook.drop_keeper_accumulator entry.name;
-    publish_lifecycle
-      ~event:
-        (Keeper_lifecycle_events.Custom_event
-           { verb = Keeper_lifecycle_events.Dead_cleaned; phase = None })
-      entry.name
-      "meta missing"
-      ();
-    Log.Keeper.warn "%s: dead tombstone unregistered (meta missing)" entry.name;
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string SupervisorCleanupFailures)
-      ~labels:
-        [ "keeper", entry.name
-        ; ("site", Keeper_supervisor_cleanup_failure_site.(to_label Dead_tombstone_meta_missing))
-        ]
-      ()
-  | Error err ->
-    Keeper_registry.unregister ~base_path:ctx.config.base_path entry.name;
-    Keeper_tool_emission_hook.drop_keeper_accumulator entry.name;
-    publish_lifecycle
-      ~event:
-        (Keeper_lifecycle_events.Custom_event
-           { verb = Keeper_lifecycle_events.Dead_cleaned; phase = None })
-      entry.name
-      (Printf.sprintf "meta read error: %s" err)
-      ();
-    Log.Keeper.warn "%s: dead tombstone unregistered (meta error: %s)" entry.name err;
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string SupervisorCleanupFailures)
-      ~labels:
-        [ "keeper", entry.name
-        ; ("site", Keeper_supervisor_cleanup_failure_site.(to_label Dead_tombstone_meta_error))
-        ]
-      ()
+    Log.Keeper.warn
+      "%s: dead tombstone completion coverage meta is absent"
+      operation.keeper_name;
+    None
+  | Error detail ->
+    Log.Keeper.warn
+      "%s: dead tombstone completion coverage meta read failed: %s"
+      operation.keeper_name
+      detail;
+    None
+;;
+
+let completion_sinks_ready () =
+  match Masc_event_bus.get () with
+  | None -> Error "MASC lifecycle event bus is not installed"
+  | Some _ when not (Keeper_subprocess_registry.default_cleanup_hook_registered ()) ->
+    Error "default Keeper subprocess cleanup hook is not registered"
+  | Some _ -> Ok ()
+;;
+
+let handle_completion config operation = function
+  | Keeper_shutdown_types.Dead_tombstone_reaped ->
+    (match completion_sinks_ready () with
+     | Error _ as error -> error
+     | Ok () ->
+       let operation_id =
+         Keeper_shutdown_types.Operation_id.to_string operation.operation_id
+       in
+       Keeper_supervisor_publish_lifecycle.publish_lifecycle
+         ~event:
+           (Keeper_lifecycle_events.Custom_event
+              { verb = Keeper_lifecycle_events.Dead_cleaned; phase = None })
+         operation.keeper_name
+         ("shutdown_operation=" ^ operation_id)
+         ();
+       let meta = completion_meta_for_coverage config operation in
+       Keeper_lifecycle_hooks.run
+         ~base_dir:(Workspace.masc_root_dir config)
+         ?meta
+         ~keeper_id:operation.keeper_name
+         Keeper_lifecycle_hooks.Tombstone_reaped;
+       Log.Keeper.info
+         "%s: dead tombstone finalization delivered operation=%s"
+         operation.keeper_name
+         operation_id;
+       Ok ())
 ;;

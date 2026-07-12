@@ -301,8 +301,8 @@ let receipt_outcome_kind_of_sdk_error err =
   | Provider_wall_clock_timeout
   | Oas_agent_execution_timeout
   | Oas_turn_budget_exhausted
-  | Oas_idle_budget_exhausted
   | Oas_exit_condition_reached -> `Cancelled
+  | Oas_idle_budget_exhausted -> `Error
   | Oas_input_required -> `Cancelled
   | Oas_token_budget_exhausted
   | Oas_cost_budget_exhausted

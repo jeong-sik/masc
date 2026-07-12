@@ -49,6 +49,8 @@ val keeper_names : Workspace.config -> string list
 (** Default autoboot policy when a keeper has TOML config but no
     persisted JSON yet. *)
 val declarative_autoboot_enabled_by_default : Workspace.config -> string -> bool
+val effective_autoboot_enabled :
+  Workspace.config -> string -> Keeper_meta_contract.keeper_meta -> bool
 
 (** Names of keepers eligible for the keepalive fiber set —
     autoboot enabled, not paused. Logs and excludes on read failure
@@ -114,6 +116,42 @@ val write_meta :
   Workspace.config ->
   Keeper_meta_contract.keeper_meta ->
   (unit, string) result
+
+type identity_update_error =
+  | Identity_missing
+  | Identity_changed
+  | Identity_read_failed of string
+  | Identity_write_failed of string
+
+val identity_update_error_to_string : identity_update_error -> string
+
+(** Re-read and CAS-update [name] only while its trace/generation identity
+    matches the shutdown snapshot. Every CAS retry rechecks identity before
+    applying [update], so a replacement generation is never overwritten. *)
+val update_meta_if_identity :
+  Workspace.config ->
+  name:string ->
+  trace_id:Keeper_id.Trace_id.t ->
+  generation:int ->
+  (Keeper_meta_contract.keeper_meta -> Keeper_meta_contract.keeper_meta) ->
+  (Keeper_meta_contract.keeper_meta, identity_update_error) result
+
+type identity_remove_error =
+  | Remove_identity_missing
+  | Remove_identity_changed
+  | Remove_identity_read_failed of string
+  | Remove_identity_unlink_failed of string
+
+val identity_remove_error_to_string : identity_remove_error -> string
+
+(** Remove [name]'s meta only while the same trace/generation still occupies
+    the path. This shares the per-path lock used by [write_meta]. *)
+val remove_meta_if_identity :
+  Workspace.config ->
+  name:string ->
+  trace_id:Keeper_id.Trace_id.t ->
+  generation:int ->
+  (unit, identity_remove_error) result
 
 (** [true] iff [msg] matches [version_conflict_re]. *)
 val is_version_conflict_error : string -> bool

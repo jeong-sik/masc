@@ -148,7 +148,7 @@ describe('ChatTranscript', () => {
     expect(bubble?.textContent).toContain('✓')
   })
 
-  it('preserves structured failure messages as preformatted text', () => {
+  it('renders failure rows as a typed card with collapsed diagnostic detail', async () => {
     const text = 'Keeper request failed: Internal error: [masc_oas_error] {"kind":"accept_rejected","scope":"ollama_cloud.deepseek-v4-flash","reason_kind":"no_usable_progress","last_tool_effect":"mutating"}'
     render(
       html`<${ChatTranscript}
@@ -158,9 +158,9 @@ describe('ChatTranscript', () => {
             role: 'assistant',
             source: 'direct_assistant',
             label: 'sangsu',
-            text,
-            rawText: text,
-            delivery: 'error',
+            text: '응답을 만들지 못했습니다',
+            rawText: '응답을 만들지 못했습니다',
+            delivery: 'transport_failure',
             error: text,
           }),
         ]}
@@ -170,15 +170,52 @@ describe('ChatTranscript', () => {
       container,
     )
 
-    const pre = container.querySelector('[data-chat-structured-error]')
+    // Typed failure card: discriminated by the row's delivery/kind signal,
+    // never by matching the content string.
+    const card = container.querySelector('[data-chat-failure-card]')
+    expect(card).not.toBeNull()
+    // The raw internal error no longer replaces the reply: the card leads
+    // with the reassurance that the pending message survives the failure.
+    expect(card?.querySelector('[data-chat-failure-reassurance]')?.textContent)
+      .toContain('정상 응답하기 전까지')
+    // Diagnostic detail is collapsed by default…
+    expect(container.querySelector('[data-chat-failure-detail]')).toBeNull()
+    expect(card?.textContent).not.toContain('no_usable_progress')
+    // …and expands to the preformatted token view on demand.
+    const toggle = card?.querySelector('[data-chat-failure-detail-toggle]') as HTMLButtonElement
+    toggle.click()
+    await flushUi()
+    const pre = container.querySelector('[data-chat-failure-detail]')
     expect(pre?.tagName).toBe('PRE')
     expect(pre?.classList.contains('chat-error-text')).toBe(true)
-    expect(pre?.classList.contains('break-words')).toBe(false)
     expect(pre?.textContent).toContain('ollama_cloud.deepseek-v4-flash')
     expect(Array.from(pre?.querySelectorAll('.chat-error-token') ?? []).some(node =>
       node.textContent?.includes('ollama_cloud.deepseek-v4-flash'),
     )).toBe(true)
     expect(container.querySelector('[data-chat-blocks]')).toBeNull()
+  })
+
+  it('keeps generic client errors distinct from durable transport failures', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'client-error-user',
+            text: '내 질문은 계속 보여야 해',
+            delivery: 'error',
+            error: 'queue poll lost its delivery receipt',
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const bubble = container.querySelector('[data-chat-entry-id="client-error-user"]')
+    expect(bubble?.textContent).toContain('내 질문은 계속 보여야 해')
+    expect(bubble?.textContent).toContain('queue poll lost its delivery receipt')
+    expect(bubble?.querySelector('[data-chat-failure-card]')).toBeNull()
   })
 
   it('exposes entry provenance as rendered attributes and surface links', () => {
@@ -330,7 +367,7 @@ describe('ChatTranscript', () => {
     )
   })
 
-  it('renders REST replay failure and no-turn-ref gaps as visible stream contract badges', () => {
+  it('renders REST replay failure and no-turn-ref gaps as visible stream contract badges', async () => {
     const entries = chatHistoryEntriesFromRest('sangsu', [
       {
         id: 'smoke-legacy-user',
@@ -395,7 +432,7 @@ describe('ChatTranscript', () => {
 
     const failure = container.querySelector('[data-chat-entry-id="smoke-error-assistant"]') as HTMLElement
     expect(failure).not.toBeNull()
-    expect(failure.getAttribute('data-chat-delivery-state')).toBe('error')
+    expect(failure.getAttribute('data-chat-delivery-state')).toBe('transport_failure')
     expect(failure.getAttribute('data-chat-turn-ref')).toBe('trace-chat-contract-smoke#8')
     expect(failure.getAttribute('data-chat-stream-contract-source')).toBe('backend_stream_lifecycle')
     expect(failure.getAttribute('data-chat-stream-contract-status')).toBe('backend_lifecycle_replay')
@@ -404,7 +441,16 @@ describe('ChatTranscript', () => {
     expect(failure.getAttribute('data-chat-stream-contract-delivery-receipt')).toBe('server_lifecycle_replay_only')
     expect(failure.getAttribute('data-chat-stream-contract-badge-state')).toBe('server-replay')
     expect(failure.querySelector('[data-chat-stream-contract-badge]')?.textContent).toContain('서버 replay')
-    expect(failure.textContent).toContain('Timeout after 630.0s')
+    // transport_failure renders the typed card, so the raw diagnostic is
+    // collapsed by default (the legacy banner is suppressed for card rows)
+    // and surfaces only on expand.
+    const errCard = failure.querySelector('[data-chat-failure-card]')
+    expect(errCard).not.toBeNull()
+    expect(failure.textContent).not.toContain('Timeout after 630.0s')
+    const errToggle = errCard?.querySelector('[data-chat-failure-detail-toggle]') as HTMLButtonElement
+    errToggle.click()
+    await flushUi()
+    expect(failure.querySelector('[data-chat-failure-detail]')?.textContent).toContain('Timeout after 630.0s')
     expect(
       [...container.querySelectorAll('[data-chat-stream-contract-delivery-receipt]')]
         .map(node => node.getAttribute('data-chat-stream-contract-delivery-receipt')),
@@ -782,6 +828,44 @@ describe('ChatTranscript', () => {
 
     const cursor = container.querySelector('.animate-pulse')
     expect(cursor).toBeNull()
+  })
+
+  it('shows the shutdown fence that caused a durable queued receipt', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'queued-after-shutdown',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'sangsu',
+            text: '메시지가 다음 active lane에 접수되었습니다.',
+            delivery: 'queued',
+            details: {
+              queueReceiptId: 'chatq_00000000-0000-4000-8000-000000000007',
+              queueShutdownOperationId: 'shutdown-op-7',
+              queueState: 'pending',
+            },
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const bubble = container.querySelector('[data-chat-entry-id="queued-after-shutdown"]')
+    expect(bubble?.getAttribute('data-chat-queue-shutdown-operation-id')).toBe('shutdown-op-7')
+    const badge = container.querySelector('[data-chat-queue-state-badge="pending"]')
+    expect(badge?.textContent).toContain('종료 후 처리')
+    expect(badge?.getAttribute('data-chat-queue-shutdown-operation-id')).toBe('shutdown-op-7')
+
+    const detailButton = [...container.querySelectorAll('button')]
+      .find(button => button.textContent?.trim() === '상세 보기')
+    expect(detailButton).toBeDefined()
+    fireEvent.click(detailButton!)
+    expect(container.textContent).toContain('종료 작업 ID')
+    expect(container.textContent).toContain('shutdown-op-7')
   })
 
   it('uses a parent-bounded flexible transcript in primary mode', () => {
@@ -2304,6 +2388,48 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     expect(bundle?.querySelector('[data-chat-trace-step="chat"]')?.textContent).toContain('곧 답합니다')
   })
 
+  it('renders intermediate assistant text as compact progress without fabricating Chat', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'assistant-progress',
+            text: '',
+            role: 'assistant',
+            source: 'direct_assistant',
+            delivery: 'error',
+            traceSteps: [
+              {
+                kind: 'progress',
+                text: 'PR 목록을 확인하고 리뷰 상태를 보겠다.',
+                oasBlockIndex: 2,
+              },
+              {
+                kind: 'tool',
+                name: 'Execute',
+                toolCallId: 'tc-progress',
+                status: 'err',
+              },
+            ],
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+      />`,
+      container,
+    )
+
+    const trace = container.querySelector('[data-chat-work-trace]')
+    expect(trace?.textContent).toContain('Progress 1')
+    expect(trace?.textContent).not.toContain('Chat 1')
+    expect(container.textContent).not.toContain('(empty reply)')
+    expect(trace?.querySelector('[data-chat-trace-step="chat"]')).toBeNull()
+    const progress = trace?.querySelector('[data-chat-trace-step="progress"]') as HTMLElement
+    expect(progress.getAttribute('data-chat-trace-provenance')).toBe('intermediate_text')
+    expect(progress.getAttribute('data-chat-trace-oas-block-index')).toBe('2')
+    expect(progress.textContent).toContain('PR 목록을 확인하고 리뷰 상태를 보겠다.')
+  })
+
   it('badges turn timeline rows with field-level provenance', () => {
     render(
       html`<${ChatTranscript}
@@ -3439,6 +3565,42 @@ describe('ChatComposer v2 prototype surface', () => {
     expect(cls).not.toMatch(/\bpx-/)
     expect(cls).not.toMatch(/\bpy-/)
     expect(cls).not.toMatch(/\bbg-\[/)
+  })
+
+  it('uses the single-row prototype composer and can omit the redundant workspace footer', () => {
+    render(
+      html`<${ChatComposer}
+        draft=""
+        placeholder="메시지 입력..."
+        disabled=${false}
+        streaming=${false}
+        layout="primary"
+        footerMode="activity"
+        onDraftChange=${() => {}}
+        onSend=${() => {}}
+      />`,
+      container,
+    )
+    expect((container.querySelector('.composer-textarea') as HTMLTextAreaElement).rows).toBe(1)
+    expect(container.querySelector('.composer-foot')).toBeNull()
+  })
+
+  it('restores the compact footer when queue evidence exists in activity mode', () => {
+    render(
+      html`<${ChatComposer}
+        draft=""
+        placeholder="메시지 입력..."
+        disabled=${false}
+        streaming=${false}
+        queueCount=${2}
+        layout="primary"
+        footerMode="activity"
+        onDraftChange=${() => {}}
+        onSend=${() => {}}
+      />`,
+      container,
+    )
+    expect(container.querySelector('[data-chat-queue-count]')?.textContent).toContain('대기 2')
   })
 
   it('keeps send and attach controls operational', () => {

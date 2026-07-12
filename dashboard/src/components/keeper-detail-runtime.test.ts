@@ -66,7 +66,7 @@ function runtimeProviderFixture(runtimeId: string): DashboardRuntimeProviderSnap
     effective_capabilities: {
       source: 'oas-provider-config-model',
       accepted_reasoning_efforts: null,
-      thinking_control_format: 'responses.reasoning',
+      thinking_control_format: 'reasoning-effort',
       supports_multimodal_inputs: true,
       supports_image_input: true,
       supports_audio_input: true,
@@ -106,7 +106,7 @@ function runtimeProviderFixture(runtimeId: string): DashboardRuntimeProviderSnap
         match_prefixes: ['model-'],
         capabilities: {
           source: 'runtime.toml',
-          thinking_control_format: 'responses.reasoning',
+          thinking_control_format: 'reasoning-effort',
           supports_multimodal_inputs: true,
           supports_image_input: true,
           supports_audio_input: true,
@@ -503,6 +503,18 @@ describe('RuntimeLensSection', () => {
       manifest_total_rows: 6,
       manifest_returned_rows: 6,
       receipt_returned_rows: 1,
+      manifest_scan_diagnostics: {
+        state: 'available',
+        schema: 'keeper.runtime_manifest_scan_diagnostics.v1',
+        retired_event_count: 0,
+        retired_event_counts: [],
+        unsupported_event_count: 0,
+        unsupported_event_counts: [],
+        unsupported_event_unattributed_count: 0,
+        invalid_manifest_row_count: 0,
+        invalid_json_row_count: 0,
+        samples: [],
+      },
       turn_identity: {
         requested_keeper_turn_id: 7,
         manifest_keeper_turn_ids: [7],
@@ -808,6 +820,8 @@ describe('RuntimeLensSection', () => {
     expect(screen.getByText('trace-lens')).toBeInTheDocument()
     expect(screen.getByText('manifest rows')).toBeInTheDocument()
     expect(screen.getByText('6/6')).toBeInTheDocument()
+    expect(screen.getByText('manifest diagnostics')).toBeInTheDocument()
+    expect(screen.getByText('clean')).toBeInTheDocument()
     expect(screen.getByText('receipt rows')).toBeInTheDocument()
     expect(screen.getByText('manifest file')).toBeInTheDocument()
     expect(screen.getByText('manifest raw rows')).toBeInTheDocument()
@@ -835,6 +849,50 @@ describe('RuntimeLensSection', () => {
     expect(screen.getByText('inj 1/1 · flush success 1 · error 0 · ep/proc ep 2 · proc 1')).toBeInTheDocument()
     expect(screen.getByText('Provider')).toBeInTheDocument()
     expect(screen.getByText('Tool Runtime')).toBeInTheDocument()
+  })
+
+  it('surfaces retired, unsupported, and invalid manifest rows', () => {
+    const trace = runtimeTraceFixture()
+    trace.manifest_scan_diagnostics = {
+      state: 'available',
+      schema: 'keeper.runtime_manifest_scan_diagnostics.v1',
+      retired_event_count: 2,
+      retired_event_counts: [
+        { event: 'state_snapshot_sidecar_saved', count: 1 },
+        { event: 'working_state_sidecar_saved', count: 1 },
+      ],
+      unsupported_event_count: 3,
+      unsupported_event_counts: [{ event: 'future_manifest_event', count: 1 }],
+      unsupported_event_unattributed_count: 2,
+      invalid_manifest_row_count: 1,
+      invalid_json_row_count: 0,
+      samples: [
+        { kind: 'unsupported_event', event: 'future_manifest_event', detail: null },
+      ],
+    }
+
+    render(h(RuntimeLensSection, { trace }))
+
+    expect(screen.getByText('retired 2 · unsupported 3 · invalid 1')).toBeInTheDocument()
+    expect(screen.getByText('manifest diagnostics').nextElementSibling).toHaveAttribute(
+      'title',
+      expect.stringContaining('unsupported rows outside identity detail bound=2'),
+    )
+  })
+
+  it('does not render an omitted diagnostics contract as clean', () => {
+    const trace = runtimeTraceFixture()
+    trace.manifest_scan_diagnostics = {
+      state: 'unavailable',
+      schema: null,
+      error: 'runtime did not report manifest scan diagnostics',
+    }
+
+    render(h(RuntimeLensSection, { trace }))
+
+    expect(screen.getByText('manifest diagnostics').nextElementSibling).toHaveTextContent(
+      'unavailable',
+    )
   })
 
   it('renders catalog-backed runtime spec for the observed live runtime id', async () => {

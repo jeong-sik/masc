@@ -108,6 +108,15 @@ function traceSourceBadge(step: ChatTraceStep): TraceSourceBadgeInfo {
       tone: 'stream',
     }
   }
+  if (step.kind === 'progress') {
+    return {
+      label: 'intermediate_text',
+      title: step.oasBlockIndex === undefined
+        ? 'source: TEXT_MESSAGE_CONTENT followed by TOOL_CALL_START'
+        : `source: TEXT_MESSAGE_CONTENT block ${step.oasBlockIndex}, followed by TOOL_CALL_START`,
+      tone: 'stream',
+    }
+  }
   const callId = step.toolCallId?.trim()
   if (callId) {
     return {
@@ -411,6 +420,8 @@ function deliveryLabel(entry: KeeperConversationEntry): string {
       return 'no reply'
     case 'error':
       return 'error'
+    case 'transport_failure':
+      return 'transport failure'
     case 'interrupted':
       return 'interrupted'
     case 'history':
@@ -442,6 +453,39 @@ function bubbleTone(entry: KeeperConversationEntry): string {
 function showDeliveryBadge(entry: KeeperConversationEntry, variant: ChatTranscriptVariant): boolean {
   if (variant !== 'messenger') return true
   return entry.delivery !== 'history' && entry.delivery !== 'delivered'
+}
+
+function QueueReceiptBadge({ entry }: { entry: KeeperConversationEntry }) {
+  const receiptId = entry.details?.queueReceiptId?.trim()
+  const shutdownOperationId = entry.details?.queueShutdownOperationId?.trim()
+  const queueState = entry.details?.queueState
+  if (!receiptId || !queueState) return null
+  const label = (() => {
+    switch (queueState) {
+      case 'pending': return '서버 대기'
+      case 'inflight': return 'Keeper 처리 중'
+      case 'delivered': return '처리 완료'
+      case 'failed': return '처리 실패'
+      default: return '상태 확인 필요'
+    }
+  })()
+  const shutdownLabel = shutdownOperationId ? ' · 종료 후 처리' : ''
+  const title = [
+    `receipt ${receiptId}`,
+    label,
+    shutdownOperationId ? `shutdown operation ${shutdownOperationId}` : null,
+  ].filter((value): value is string => value !== null).join(' · ')
+  return html`
+    <span
+      class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-2xs font-semibold text-[var(--color-fg-secondary)]"
+      title=${title}
+      data-chat-queue-state-badge=${queueState}
+      data-chat-queue-receipt=${receiptId}
+      data-chat-queue-shutdown-operation-id=${shutdownOperationId ?? undefined}
+    >
+      ${label}${shutdownLabel}
+    </span>
+  `
 }
 
 function avatarLabel(entry: KeeperConversationEntry): string {
@@ -578,6 +622,13 @@ function overviewRows(details: KeeperConversationDetails): Array<{ label: string
     typeof details.usage?.totalTokens === 'number' ? { label: '토큰', value: `${details.usage.totalTokens}` } : null,
     formatCurrency(details.costUsd) ? { label: '비용', value: formatCurrency(details.costUsd)! } : null,
     details.traceId ? { label: '트레이스', value: details.traceId } : null,
+    details.queueReceiptId ? { label: '큐 receipt', value: details.queueReceiptId } : null,
+    details.queueShutdownOperationId ? { label: '종료 작업 ID', value: details.queueShutdownOperationId } : null,
+    details.queueState ? { label: '큐 상태', value: details.queueState } : null,
+    details.queueFailureKind ? { label: '큐 실패', value: details.queueFailureKind } : null,
+    typeof details.queueRevision === 'number' ? { label: '큐 revision', value: `${details.queueRevision}` } : null,
+    typeof details.queuePendingCount === 'number' ? { label: '접수 시 pending', value: `${details.queuePendingCount}` } : null,
+    typeof details.queueInflightCount === 'number' ? { label: '접수 시 inflight', value: `${details.queueInflightCount}` } : null,
     typeof details.generation === 'number' ? { label: '세대', value: `${details.generation}` } : null,
   ].filter((row): row is { label: string; value: string } => Boolean(row))
 }
@@ -1603,6 +1654,41 @@ function ChatTraceStep({
     `
   }
 
+  if (step.kind === 'progress') {
+    return html`
+      <div
+        class="chat-block-tstep progress ${open ? 'exp' : ''}"
+        data-chat-trace-step="progress"
+        data-chat-turn-order-index=${orderIndex ?? undefined}
+        data-chat-turn-order-kind="trace"
+        data-chat-trace-provenance=${sourceBadge.label}
+        data-chat-trace-oas-block-index=${step.oasBlockIndex ?? undefined}
+        data-chat-trace-ts=${step.ts ?? undefined}
+      >
+        <span class="chat-block-tnode"></span>
+        <div class="min-w-0 flex-1">
+          <button
+            type="button"
+            class="chat-block-tstep-row click w-full text-left"
+            aria-expanded=${open}
+            onClick=${() => setOpen((o) => !o)}
+          >
+            <span class="chat-block-tstep-kind">Progress</span>
+            <${TraceSourceBadge} info=${sourceBadge} />
+            <span class="chat-block-tstep-text min-w-0 flex-1 truncate">${step.text}</span>
+            <span class="chat-block-tstep-chev">${open ? '▼' : '▶'}</span>
+          </button>
+          ${open
+            ? html`<${AsyncMarkdownDiv}
+                text=${step.text}
+                className="chat-block-reason-detail markdown-body whitespace-pre-wrap break-words"
+              />`
+            : null}
+        </div>
+      </div>
+    `
+  }
+
   const statusUi = traceToolStatusUi(step.status)
 
   return html`
@@ -2056,6 +2142,63 @@ function renderStructuredFailureText(text: string): Array<string | VNode> {
   })
 }
 
+/** Typed failure card for kind=transport_failure rows.
+ *
+ * The discriminator is the writer-declared row kind (normalized to the closed
+ * delivery='transport_failure' variant), never a string match on the content.
+ * The raw error text is diagnostic payload, shown collapsed. The reassurance line states
+ * what the backend guarantees: a Transport_failure row is watermark-neutral
+ * (keeper_chat_store), so the user message it failed to answer stays pending
+ * for the keeper's next turn. */
+function ChatFailureCard({ diagnostic }: { diagnostic: string }) {
+  const [detailOpen, setDetailOpen] = useState(false)
+  return html`
+    <div
+      class="flex flex-col gap-2 rounded-[var(--r-1)] border border-[var(--color-status-error)]/40 bg-[var(--color-bg-surface)] p-3"
+      data-chat-structured-error
+      data-chat-failure-card
+    >
+      <div class="flex flex-wrap items-center gap-2">
+        <span
+          class="inline-flex items-center rounded-[var(--r-0)] bg-[var(--color-status-error)]/15 px-2 py-0.5 text-2xs font-bold uppercase tracking-[var(--track-caps)] text-[var(--color-status-error)]"
+        >
+          응답 실패
+        </span>
+        <span class="text-sm font-semibold text-[var(--color-fg-primary)]">
+          이 턴은 응답을 만들지 못했습니다
+        </span>
+      </div>
+      <p class="m-0 text-sm leading-airy text-[var(--color-fg-secondary)]" data-chat-failure-reassurance>
+        보낸 메시지는 사라지지 않았습니다. 이 실패 기록은 처리 완료로 간주되지 않으며, keeper가 이후 정상 응답하기 전까지 다시 처리 대상에 남습니다.
+      </p>
+      <div class="flex items-center gap-2">
+        <button
+          type="button"
+          class="self-start rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-1 text-xs font-medium text-[var(--color-fg-secondary)] transition-colors hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] ${CHAT_FOCUS_RING}"
+          aria-expanded=${detailOpen}
+          data-chat-failure-detail-toggle
+          onClick=${() => { setDetailOpen(open => !open) }}
+        >
+          ${detailOpen ? '상세 접기' : '오류 상세 보기'}
+        </button>
+        <button
+          type="button"
+          class="self-start rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-1 text-xs font-medium text-[var(--color-fg-secondary)] transition-colors hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] ${CHAT_FOCUS_RING}"
+          data-chat-failure-copy
+          onClick=${() => { void copyWithToast(diagnostic, '오류 내용을 복사했습니다') }}
+        >
+          오류 복사
+        </button>
+      </div>
+      ${detailOpen
+        ? html`
+            <pre class="chat-error-text" data-chat-failure-detail>${renderStructuredFailureText(diagnostic)}</pre>
+          `
+        : null}
+    </div>
+  `
+}
+
 function AttachmentCard({ attachment }: { attachment: KeeperConversationAttachment }) {
   const [open, setOpen] = useState(false)
   const canDownload = isSafeAttachmentHref(attachment)
@@ -2295,10 +2438,16 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
   const liveLabel = liveMessageLabel(entry)
   const messageText = liveLabel ? '' : entry.text || '(empty reply)'
   const messageLength = messageText.length
+  // keeper-state.ts maps the writer-declared kind=transport_failure to its own
+  // closed delivery variant; only that durable row renders the typed
+  // failure card, because its reassurance ("보낸 메시지는 사라지지 않았습니다")
+  // holds only when the keeper never answered. interrupted/timeout keep any
+  // partial text and render as prose plus the diagnostic banner below.
   const isFailureMessage =
-    isFailedDelivery(entry.delivery) && !!entry.error?.trim()
+    entry.delivery === 'transport_failure' && !!entry.error?.trim()
   const richTextRole = entry.role === 'assistant' || entry.role === 'system'
   const hasRealText = !liveLabel && !!entry.text && entry.text.trim().length > 0
+  const traceOwnsIntermediateText = !hasRealText && (entry.traceSteps?.length ?? 0) > 0
   const hasCardBlock = (entry.blocks ?? []).some((b) => CARD_BLOCK_TYPES.has(b.t))
   const shouldParseRichBlocks =
     !isFailureMessage
@@ -2394,6 +2543,12 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
       data-chat-speaker-name=${entry.speakerName ?? undefined}
       data-chat-speaker-authority=${entry.speakerAuthority ?? undefined}
       data-chat-turn-ref=${entry.turnRef ?? undefined}
+      data-chat-queue-receipt-id=${entry.details?.queueReceiptId ?? undefined}
+      data-chat-queue-shutdown-operation-id=${entry.details?.queueShutdownOperationId ?? undefined}
+      data-chat-queue-state=${entry.details?.queueState ?? undefined}
+      data-chat-queue-revision=${entry.details?.queueRevision ?? undefined}
+      data-chat-queue-pending-count=${entry.details?.queuePendingCount ?? undefined}
+      data-chat-queue-inflight-count=${entry.details?.queueInflightCount ?? undefined}
       data-chat-attachment-count=${attachments.length}
       data-chat-server-attach-block-count=${attachBlocks.length}
       data-chat-multimodal-sources=${multimodalSources.length > 0 ? multimodalSources.join(',') : undefined}
@@ -2431,6 +2586,7 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
                           </span>
                         `
                       : null}
+                    <${QueueReceiptBadge} entry=${entry} />
                     <${StreamContractBadge} badge=${streamContractBadge} compact=${true} />
                     <${ChatMetaChip} info=${surfaceInfo} compact=${true} />
                     <${ChatMetaChip} info=${speakerInfo} compact=${true} />
@@ -2454,6 +2610,7 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
                           </span>
                         `
                       : null}
+                    <${QueueReceiptBadge} entry=${entry} />
                     ${timestamp
                       ? html`
                           <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] px-2.5 py-1 text-2xs font-medium tabular-nums text-[var(--color-fg-secondary)]">
@@ -2533,14 +2690,13 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
         ? html`<${LiveMessagePlaceholder} label=${liveLabel} />`
         : html`
             ${isFailureMessage
-              ? html`
-                  <pre
-                    class="chat-error-text"
-                    data-chat-structured-error
-                  >${renderStructuredFailureText(messageText)}</pre>
-                `
+              ? html`<${ChatFailureCard}
+                  diagnostic=${entry.error?.trim() ? entry.error : messageText}
+                />`
               : hasEffectiveBlocks
               ? html`<${ChatBlocks} blocks=${effectiveBlocks} fallbackText=${entry.text} />`
+              : traceOwnsIntermediateText
+              ? null
               : html`
                   <div
                     class=${`markdown-body whitespace-pre-wrap break-words text-base leading-airy text-[var(--color-fg-primary)] ${isCollapsible && messageCollapsed ? 'max-h-96 overflow-hidden' : ''}`}
@@ -2572,7 +2728,7 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
       ${entry.audio
         ? html`<${AudioPlayer} clip=${entry.audio} />`
         : null}
-      ${entry.error
+      ${entry.error && !isFailureMessage
         ? html`
             <div class="rounded-[var(--r-1)] border border-[var(--err-border)] bg-[var(--bad-soft)] px-3 py-2 text-sm font-medium leading-paragraph text-[var(--bad-light)]">
               ${entry.error}
@@ -3117,7 +3273,10 @@ function ToolTraceCard({
     )
   const canMarkMissingForEntry = (entry: KeeperConversationEntry): boolean =>
     turnComplete && coverageStateForEntry(entry) === 'covered'
-  const ordered = assistant
+  const hasChatResponse = assistant !== null
+    && assistant.delivery !== 'no_reply'
+    && assistant.text.trim().length > 0
+  const ordered = hasChatResponse && assistant
     ? [...interleaveTraceAndTools(traceSteps, steps), { kind: 'chat' as const, entry: assistant }]
     : interleaveTraceAndTools(traceSteps, steps)
   const orderSignature = ordered.map((item) => {
@@ -3128,6 +3287,7 @@ function ToolTraceCard({
   }).join('|')
   const orderedToolSteps = ordered.filter(isToolOrderItem)
   const thinkN = traceSteps.filter((step) => step.kind === 'think' || step.kind === 'reason').length
+  const progressN = traceSteps.filter((step) => step.kind === 'progress').length
   const failN = orderedToolSteps.filter(
     (s) =>
       (s.output !== null && (s.output.success === false || s.output.semantic_success === false))
@@ -3152,7 +3312,7 @@ function ToolTraceCard({
     0,
   )
   const durLabel = totalMs > 0 ? formatMsCompact(totalMs) : null
-  const chatN = assistant ? 1 : 0
+  const chatN = hasChatResponse ? 1 : 0
   const stepN = ordered.length
 
   return html`
@@ -3190,6 +3350,7 @@ function ToolTraceCard({
         <span class="chat-block-trace-count">${stepN}단계</span>
         <span class="chat-block-trace-meta">
           ${thinkN > 0 ? html`<span>Think ${thinkN}</span>` : null}
+          ${progressN > 0 ? html`<span>Progress ${progressN}</span>` : null}
           ${orderedToolSteps.length > 0 ? html`<span>도구 ${orderedToolSteps.length}</span>` : null}
           ${chatN > 0 ? html`<span>Chat ${chatN}</span>` : null}
           ${failN > 0 ? html`<span class="text-[var(--color-status-err)]">실패 ${failN}</span>` : null}
@@ -3506,6 +3667,7 @@ function traceStepsSignature(entry: KeeperConversationEntry): string {
   return steps.map((step) => {
     if (step.kind === 'think') return `think:${step.text.length}:${step.ts ?? ''}`
     if (step.kind === 'reason') return `reason:${step.text.length}:${step.detail?.length ?? 0}:${step.ts ?? ''}`
+    if (step.kind === 'progress') return `progress:${step.text.length}:${step.ts ?? ''}`
     return `tool:${step.name}:${step.status ?? ''}:${step.dur ?? ''}:${step.result?.length ?? 0}`
   }).join(',')
 }
@@ -3742,6 +3904,7 @@ export function ChatComposer({
   layout = 'default',
   draftPersistKey,
   keeperLabel,
+  footerMode = 'always',
 }: {
   draft?: string
   placeholder: string
@@ -3766,6 +3929,10 @@ export function ChatComposer({
    *  intentionally separate from [draftPersistKey], which may be an opaque
    *  storage key. */
   keeperLabel?: string
+  /** `activity` keeps queue/stall evidence but removes the idle instruction
+   * row, allowing the dense keeper-v2 workspace to match its single-row
+   * composer. Other chat layouts retain the footer by default. */
+  footerMode?: 'always' | 'activity'
   /** When set (and uncontrolled), the composer persists its unsent draft
    *  per key across remounts via keeper-chat-store, so switching keepers
    *  keeps each keeper's own half-typed message without leaking it to
@@ -4167,6 +4334,7 @@ export function ChatComposer({
                 <textarea
                   ref=${textareaRef}
                   class="composer-textarea"
+                  rows=${layout === 'primary' ? 1 : 2}
                   placeholder=${drag ? CHAT_COMPOSER_DROP_PLACEHOLDER : placeholder}
                   aria-label="메시지 입력"
                   value=${draft}
@@ -4236,17 +4404,21 @@ export function ChatComposer({
                 </div>
               `}
         </div>
-        <div class="composer-foot">
-          <span class="hint">
-            <kbd>⌘</kbd> <kbd>↵</kbd> 전송 · 끌어다 놓아 첨부
-            ${isStalled
-              ? html`<span class="ml-2 text-[var(--color-status-warn)]" data-chat-stall-hint>마지막 수신 ${sinceLastEvent}초 전 — 스트림 지연</span>`
-              : null}
-          </span>
-          ${queueCount > 0
-            ? html`<span class="queue-badge" data-chat-queue-count>대기 ${queueCount}</span>`
-            : null}
-        </div>
+        ${footerMode === 'always' || (footerMode === 'activity' && (isStalled || queueCount > 0))
+          ? html`
+              <div class="composer-foot">
+                <span class="hint">
+                  <kbd>⌘</kbd> <kbd>↵</kbd> 전송 · 끌어다 놓아 첨부
+                  ${isStalled
+                    ? html`<span class="ml-2 text-[var(--color-status-warn)]" data-chat-stall-hint>마지막 수신 ${sinceLastEvent}초 전 — 스트림 지연</span>`
+                    : null}
+                </span>
+                ${queueCount > 0
+                  ? html`<span class="queue-badge" data-chat-queue-count>대기 ${queueCount}</span>`
+                  : null}
+              </div>
+            `
+          : null}
       </div>
     </div>
   `

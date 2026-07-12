@@ -28,8 +28,9 @@
 
     [of_wire] is a {e priority-ranked partition}: it tests the buckets in
     the same order the old [operator_disposition] [if/else] chain tested
-    its string predicates and returns the first match. This is a faithful
-    re-encoding of the [if/else] order — pathological overlaps (a contract
+    its string predicates, plus the exact canonical
+    [Capacity_backpressure] policy bucket, and returns the first match.
+    Pathological overlaps (a contract
     id containing ["auth"], a budget string that also matches a later
     bucket) resolve identically to the pre-typing code. The order is
     load-bearing; see the [.ml] for the ranked list.
@@ -54,6 +55,11 @@ type t =
   (** Exact wire ["runtime_exhausted"] (modulo case). Payload is the
           original string, carried only so [to_wire] is a byte-identical
           inverse; the disposition classifier ignores it. *)
+  | Capacity_backpressure of string
+  (** Exact canonical wire kind
+          {!Keeper_internal_error.capacity_backpressure_kind}.  This is a
+          typed provider/infrastructure pacing condition, not an opaque
+          internal failure.  Payload preserves the original bytes. *)
   | Config_or_auth of string
   (** Wire string contains ["config"] or ["auth"] (case-insensitive).
           Ranked above the provider family so [api_error_auth],

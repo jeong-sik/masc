@@ -170,13 +170,21 @@ let summary_of_recommendations ~actor (items : recommended_action list) =
       ("authoritative", `Bool false);
     ]
 
-(** [is_root_target_type v] is true when [v] matches the canonical "workspace" target type. *)
-let is_root_target_type value = String.equal value "workspace"
+(** [is_workspace_target_type v] is true when [v] is the canonical
+    workspace target from the operator target codec. *)
+let is_workspace_target_type value =
+  match Operator_action_constants.target_type_of_string value with
+  | Some Operator_action_constants.Workspace -> true
+  | Some Operator_action_constants.Keeper
+  | Some Operator_action_constants.Goal
+  | None -> false
+;;
 
 let normalize_digest_target_type value =
   match value with
   | Some raw ->
       let normalized = String.trim raw |> String.lowercase_ascii in
-      if is_root_target_type normalized then Ok "workspace"
-      else Error "target_type must be root"
-  | None -> Ok "workspace"
+      if is_workspace_target_type normalized
+      then Ok Operator_action_constants.workspace_target_type
+      else Error Operator_action_constants.workspace_target_type_error
+  | None -> Ok Operator_action_constants.workspace_target_type

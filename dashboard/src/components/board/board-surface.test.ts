@@ -60,6 +60,11 @@ vi.mock('../../api/actions', () => ({
 
 vi.mock('../../api/board', () => ({
   requestBoardContextInference: vi.fn(),
+  fetchBoardReactionState: vi.fn().mockResolvedValue({
+    summaries: [],
+    supportedEmojis: ['👍', '❤️', '🎉', '🚀', '👀', '😕', '👏', '🔥'],
+  }),
+  toggleReaction: vi.fn(),
 }))
 
 vi.mock('../../operator-store', async (importOriginal) => {
@@ -113,6 +118,7 @@ function makePost(overrides: Partial<BoardPost> & { id: string; title: string; a
     visibility: 'internal',
     expires_at: null,
     hearth_count: 0,
+    supported_reaction_emojis: ['👍', '❤️', '🎉', '🚀', '👀', '😕', '👏', '🔥'],
     ...overrides,
   } as BoardPost
 }
@@ -277,6 +283,7 @@ describe('BoardSurface Component', () => {
     // and "전체 피드" heading are the only structure above the posts. board is
     // in SURFACE_OWN_LEAD_IDS so the generic SurfaceLead is also suppressed.
     expect(container.querySelector('header.v2-surface-header')).toBeNull()
+    expect(container.querySelector('h1')?.textContent).toBe('Board')
   })
 
   it('collapses the detail column by default (two-column rail + feed)', () => {
@@ -682,6 +689,23 @@ describe('BoardSurface Component', () => {
     expect(boardHearthFilter.value).toBe('ops')
   })
 
+  it('renders every hearth in an available-space scroll region while queues stay outside it', () => {
+    boardHearths.value = Array.from({ length: 9 }, (_, index) => ({
+      name: `hearth-${index + 1}`,
+      count: index,
+    }))
+
+    const { container } = render(h(BoardSurface, null))
+
+    const hearthScroll = container.querySelector('.bd-hearth-scroll')
+    const queueSection = container.querySelector('.bd-queue-section')
+    expect(hearthScroll?.querySelectorAll('[data-testid^="bd-sub-hearth-"]')).toHaveLength(9)
+    expect(hearthScroll?.querySelector('[data-testid="bd-sub-hearth-9"]')).not.toBeNull()
+    expect(container.querySelector('.bd-sub-more')).toBeNull()
+    expect(queueSection?.querySelector('[data-testid="bd-queue-mod"]')).not.toBeNull()
+    expect(queueSection?.querySelector('[data-testid="bd-queue-mentions"]')).not.toBeNull()
+  })
+
   it('counts desktop mention queue from messages instead of board posts', () => {
     boardPosts.value = [
       makePost({ id: 'post-ops', title: 'Ops note', body: 'ops', author: 'keeper', hearth: 'ops' }),
@@ -742,6 +766,9 @@ describe('BoardSurface Component', () => {
     expect(screen.getByTestId('bd-context-infer-post-share')).toHaveAttribute('aria-label', '맥락 추론 요청: post-share')
 
     const xShare = screen.getByTestId('bd-share-x-post-share') as HTMLAnchorElement
+    expect(xShare).toHaveClass('bd-share-x')
+    expect(xShare).toHaveClass('bd-share-action')
+    expect(screen.getByTestId('bd-share-link-post-share')).toHaveClass('bd-share-action')
     expect(xShare).toHaveAttribute('target', '_blank')
     expect(xShare).toHaveAttribute('rel', expect.stringContaining('noopener'))
     expect(xShare.href).toContain('https://twitter.com/intent/tweet?')

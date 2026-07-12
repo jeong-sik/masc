@@ -522,42 +522,55 @@ let merge_expectation base extras =
       Expect_success_or_guard (fragments @ extras)
 
 let case_for_name name =
-  if string_starts_with ~prefix:"masc_" name then
+  let runtime_name =
+    match Masc.Keeper_tool_descriptor_resolution.descriptor_for_tool_name name with
+    | Some (descriptor : Masc.Keeper_tool_descriptor.t) -> descriptor.internal_name
+    | None -> name
+  in
+  if string_starts_with ~prefix:"masc_" runtime_name then
     let generic_case_opt =
-      try Some (Generic.case_for_name name) with Failure _ -> None
+      try Some (Generic.case_for_name runtime_name) with Failure _ -> None
     in
     (match generic_case_opt with
      | Some generic_case ->
        {
          init_mode = generic_case.init_mode;
-         prepare = (fun fixture -> Generic.prepare_for_name fixture.generic name);
+         prepare = (fun fixture -> Generic.prepare_for_name fixture.generic runtime_name);
          arguments =
-           (fun fixture schema -> Generic.tool_arguments fixture.generic schema);
+           (fun fixture schema ->
+             Generic.tool_arguments
+               fixture.generic
+               { schema with name = runtime_name });
          expectation =
            merge_expectation generic_case.expectation
-             (extra_guard_fragments_for_name name);
+             (extra_guard_fragments_for_name runtime_name);
        }
      | None ->
        {
          init_mode = Init_only;
          prepare = (fun _fixture -> ());
          arguments =
-           (fun fixture schema -> Generic.tool_arguments fixture.generic schema);
+           (fun fixture schema ->
+             Generic.tool_arguments
+               fixture.generic
+               { schema with name = runtime_name });
          expectation =
            Expect_success_or_guard
-             (Generic.guard_fragments_for_name name
-              @ extra_guard_fragments_for_name name);
+             (Generic.guard_fragments_for_name runtime_name
+              @ extra_guard_fragments_for_name runtime_name);
        })
   else if
-    string_starts_with ~prefix:"keeper_" name
-    || string_starts_with ~prefix:"tool_" name
-    || String.equal name "analyze_image"
+    string_starts_with ~prefix:"keeper_" runtime_name
+    || string_starts_with ~prefix:"tool_" runtime_name
+    || String.equal runtime_name "analyze_image"
   then
     {
       init_mode = Init_joined;
-      prepare = (fun fixture -> prepare_keeper_name fixture name);
-      arguments = keeper_arguments;
-      expectation = keeper_expectation_for_name name;
+      prepare = (fun fixture -> prepare_keeper_name fixture runtime_name);
+      arguments =
+        (fun fixture schema ->
+          keeper_arguments fixture { schema with name = runtime_name });
+      expectation = keeper_expectation_for_name runtime_name;
     }
   else
     failwith ("missing keeper tool contract for " ^ name)

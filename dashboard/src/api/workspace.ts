@@ -1,4 +1,4 @@
-import { get, getWithResponse, type GetOptions } from './core'
+import { ApiRequestError, get, getWithResponse, type GetOptions } from './core'
 import type { FileTreeNode } from '../components/ide/file-tree-store'
 import { parseWorkspaceSource, type WorkspaceSource } from './workspace-source'
 
@@ -34,11 +34,15 @@ export interface UnifiedDiffRow {
 
 // --- Workspace File ---
 
-export interface WorkspaceFileResponse {
-  readonly ok: boolean
-  readonly content: string
-  readonly language?: string
-}
+export type WorkspaceFileResponse =
+  | {
+      readonly ok: true
+      readonly content: string
+      readonly language?: string
+    }
+  | {
+      readonly ok: false
+    }
 
 // --- API helpers ---
 
@@ -93,17 +97,29 @@ export function fetchWorkspaceChildren(
   )
 }
 
-export function fetchWorkspaceFile(
+export async function fetchWorkspaceFile(
   path: string,
   opts: WorkspaceApiOptions = {},
 ): Promise<WorkspaceFileResponse | null> {
   const params = new URLSearchParams()
   params.set('path', path)
   appendWorkspaceParams(params, opts)
-  return get<WorkspaceFileResponse | null>(
-    `/api/v1/workspace/file?${params.toString()}`,
-    opts,
-  )
+  try {
+    return await get<WorkspaceFileResponse | null>(
+      `/api/v1/workspace/file?${params.toString()}`,
+      opts,
+    )
+  } catch (error) {
+    // The workspace file route represents an absent file as HTTP 404 with an
+    // { ok: false } body. The generic GET boundary correctly rejects non-2xx
+    // responses, so recover only the typed status here. Authorization,
+    // validation, server, transport, and timeout failures remain errors and
+    // are projected as `unavailable` by the IDE focus state machine.
+    if (error instanceof ApiRequestError && error.status === 404) {
+      return { ok: false }
+    }
+    throw error
+  }
 }
 
 export function fetchGitBlame(

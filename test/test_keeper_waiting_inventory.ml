@@ -5,6 +5,7 @@ module Keeper_chat_store = Masc.Keeper_chat_store
 module Keeper_external_attention = Masc.Keeper_external_attention
 module Keeper_meta_store = Masc.Keeper_meta_store
 module Keeper_registry = Masc.Keeper_registry
+module Keeper_shutdown_types = Masc.Keeper_shutdown_types
 module Keeper_turn_admission = Masc.Keeper_turn_admission
 module Keeper_types_profile = Masc.Keeper_types_profile
 module Otel_metric_store = Masc.Otel_metric_store
@@ -48,9 +49,15 @@ let with_workspace f =
   let dir = temp_dir () in
   Eio.Switch.run
   @@ fun sw ->
-  Eio.Switch.on_release sw (fun () -> rm_rf dir);
+  Eio.Switch.on_release sw (fun () ->
+    Keeper_chat_queue.For_testing.reset ();
+    rm_rf dir);
   let config = Workspace_core.default_config dir in
   ignore (Workspace_core.init config ~agent_name:(Some "test"));
+  Keeper_chat_queue.For_testing.reset ();
+  let queue_report = Keeper_chat_queue.configure_persistence ~base_path:dir in
+  check int "chat queue persistence starts clean" 0
+    (List.length queue_report.load_errors);
   f config
 ;;
 
@@ -212,7 +219,7 @@ let test_event_queue_pending_and_inflight_are_visible () =
        Otel_metric_store.metric_keeper_waiting_age_seconds
        ~labels:[ "scope", "keeper"; "source", "event_queue_pending" ]
      > 0.0);
-  check string "schema" "masc.dashboard.keeper_waiting_inventory.v1"
+  check string "schema" "masc.dashboard.keeper_waiting_inventory.v2"
     (json_string_member "schema" json);
   check int "one keeper" 1 (json_int_member "keeper_count" json);
   check int "one waiting keeper" 1 (json_int_member "waiting_keeper_count" json);
@@ -238,7 +245,6 @@ let test_chat_queue_pending_rows_are_visible () =
   @@ fun config ->
   let keeper_name = "queued-chat-keeper" in
   ensure_keeper config keeper_name;
-  Keeper_chat_queue.For_testing.reset ();
   let message : Keeper_chat_queue.queued_message =
     { content = "queued while busy"
     ; user_blocks = []
@@ -247,7 +253,14 @@ let test_chat_queue_pending_rows_are_visible () =
     ; source = Keeper_chat_queue.Discord { channel_id = "chan-42"; user_id = "user-7" }
     }
   in
-  ignore (Keeper_chat_queue.enqueue ~keeper_name message : string);
+  let receipt =
+    match Keeper_chat_queue.enqueue ~keeper_name message with
+    | Ok receipt -> receipt
+    | Error error ->
+      fail
+        ("chat queue enqueue failed: "
+         ^ Keeper_chat_queue.mutation_error_to_string error)
+  in
   let json = Server_keeper_waiting_inventory.dashboard_json config in
   check_metric_float "chat queue metric"
     Otel_metric_store.metric_keeper_waiting_count
@@ -278,8 +291,41 @@ let test_chat_queue_pending_rows_are_visible () =
             row |> member "detail" |> member "message_source" |> member "channel_id"
             |> to_string);
         check int "chat queue content length" (String.length message.content)
-          U.(row |> member "detail" |> member "content_length" |> to_int)
+          U.(row |> member "detail" |> member "content_length" |> to_int);
+        check string "pending receipt is correlated"
+          (Keeper_chat_queue.Receipt_id.to_string receipt.receipt_id)
+          U.(row |> member "detail" |> member "receipt_id" |> to_string);
+        check string "pending lifecycle is explicit" "pending"
+          U.(row |> member "detail" |> member "lifecycle" |> member "state"
+             |> to_string)
       | rows -> failf "expected one chat queue row, got %d" (List.length rows)))
+  ;
+  let lease =
+    match Keeper_chat_queue.lease_batch ~keeper_name with
+    | `Leased lease -> lease
+    | `Empty | `Already_leased _ | `Error _ ->
+      fail "pending chat receipt should lease"
+  in
+  let inflight_json = Server_keeper_waiting_inventory.dashboard_json config in
+  match find_keeper inflight_json keeper_name with
+  | None -> fail "inflight keeper row missing"
+  | Some keeper ->
+    check int "pending source clears after lease" 0
+      U.(keeper |> member "sources" |> member "chat_queue_pending" |> to_int_option
+         |> Option.value ~default:0);
+    check int "inflight source is visible" 1
+      U.(keeper |> member "sources" |> member "chat_queue_inflight" |> to_int);
+    (match U.(keeper |> member "waiting_on" |> to_list) with
+     | [ row ] ->
+       check string "inflight row source" "chat_queue_inflight"
+         (json_string_member "source" row);
+       check string "inflight lifecycle is explicit" "inflight"
+         U.(row |> member "detail" |> member "lifecycle" |> member "state"
+            |> to_string);
+       check string "inflight lease is correlated" lease.lease_id
+         U.(row |> member "detail" |> member "lifecycle" |> member "lease_id"
+            |> to_string)
+     | rows -> failf "expected one inflight chat row, got %d" (List.length rows))
 ;;
 
 let test_turn_admission_waiting_row_is_visible () =
@@ -350,6 +396,89 @@ let test_turn_admission_waiting_row_is_visible () =
               U.(row |> member "detail" |> member "in_flight" |> member "lane" |> to_string)
           | rows -> failf "expected one turn admission row, got %d" (List.length rows)));
       Eio.Promise.resolve set_release_autonomous ())
+;;
+
+let test_turn_admission_shutdown_row_is_deferred () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "admission-shutdown-keeper" in
+  ensure_keeper config keeper_name;
+  Keeper_turn_admission.For_testing.reset ();
+  Fun.protect
+    ~finally:(fun () -> Keeper_turn_admission.For_testing.reset ())
+    (fun () ->
+      let base_path = config.Workspace_utils_backend_setup.base_path in
+      let operation_id = Keeper_shutdown_types.Operation_id.generate () in
+      (match
+         Keeper_turn_admission.begin_shutdown
+           ~base_path
+           ~keeper_name
+           ~operation_id
+       with
+       | Keeper_turn_admission.Shutdown_reserved reservation ->
+         check bool "shutdown reservation is idle" true
+           (Option.is_none reservation.in_flight)
+       | Keeper_turn_admission.Shutdown_already_reserved _ ->
+         fail "fresh keeper unexpectedly had a shutdown reservation");
+      let json = Server_keeper_waiting_inventory.dashboard_json config in
+      check_metric_float "turn admission shutdown metric"
+        Otel_metric_store.metric_keeper_waiting_count
+        ~labels:[ "scope", "keeper"; "source", "turn_admission_shutdown" ]
+        1.0;
+      check_metric_float "deferred keeper metric"
+        Otel_metric_store.metric_keeper_waiting_keeper_count
+        ~labels:[ "state", "deferred" ]
+        1.0;
+      check int "shutdown keeper is counted" 1
+        (json_int_member "waiting_keeper_count" json);
+      check int "shutdown contributes one row" 1 (json_int_member "row_count" json);
+      (match find_keeper json keeper_name with
+       | None -> fail "shutdown keeper row missing"
+       | Some keeper ->
+         check string "shutdown keeper is deferred" "deferred"
+           (json_string_member "state" keeper);
+         check int "shutdown source count" 1
+           U.(keeper |> member "sources" |> member "turn_admission_shutdown" |> to_int);
+         (match U.(keeper |> member "waiting_on" |> to_list) with
+          | [ row ] ->
+            check string "shutdown row source" "turn_admission_shutdown"
+              (json_string_member "source" row);
+            check string "shutdown row waiting_on" "shutdown"
+              (json_string_member "waiting_on" row);
+            check string "shutdown row wake producer" "keeper_turn_admission"
+              (json_string_member "wake_producer" row);
+            check string "shutdown row next action" "keeper_shutdown_finalize"
+              (json_string_member "next_action" row);
+            check string "shutdown operation is correlated"
+              (Keeper_shutdown_types.Operation_id.to_string operation_id)
+              U.(
+                row |> member "detail" |> member "shutdown_operation_id"
+                |> to_string);
+            check bool "admission fence is explicit" true
+              U.(row |> member "detail" |> member "admission_fenced" |> to_bool);
+            check int "shutdown has no waiting chat" 0
+              U.(row |> member "detail" |> member "chat_waiting_count" |> to_int);
+            check bool "shutdown has no in-flight turn" true
+              U.(row |> member "detail" |> member "in_flight" = `Null)
+          | rows -> failf "expected one shutdown row, got %d" (List.length rows)));
+      (match
+         Keeper_turn_admission.rollback_shutdown
+           ~base_path
+           ~keeper_name
+           ~operation_id
+       with
+       | Keeper_turn_admission.Shutdown_rolled_back -> ()
+       | Keeper_turn_admission.Shutdown_not_reserved
+       | Keeper_turn_admission.Shutdown_reserved_by_other _ ->
+         fail "owned shutdown reservation did not roll back");
+      let reopened = Server_keeper_waiting_inventory.dashboard_json config in
+      match find_keeper reopened keeper_name with
+      | None -> fail "reopened keeper row missing"
+      | Some keeper ->
+        check string "rollback returns keeper to idle" "idle"
+          (json_string_member "state" keeper);
+        check int "rollback removes shutdown row" 0
+          (json_int_member "waiting_count" keeper))
 ;;
 
 let test_keeper_owned_schedule_waiting_rows_are_lane_scoped () =
@@ -449,6 +578,39 @@ let save_text path text =
   match Fs_compat.save_file_atomic path text with
   | Ok () -> ()
   | Error err -> fail ("save_file_atomic failed: " ^ err)
+;;
+
+let test_corrupt_chat_queue_snapshot_is_read_error () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "corrupt-chat-queue-keeper" in
+  ensure_keeper config keeper_name;
+  let base_path = config.Workspace_utils_backend_setup.base_path in
+  let path =
+    Filename.concat
+      (Filename.concat
+         (Common.keepers_runtime_dir_of_base ~base_path)
+         keeper_name)
+      "chat-queue.json"
+  in
+  save_text path "{not-json";
+  let report = Keeper_chat_queue.configure_persistence ~base_path in
+  check int "corrupt chat queue is reported at configure" 1
+    (List.length report.load_errors);
+  let json = Server_keeper_waiting_inventory.dashboard_json config in
+  match find_keeper json keeper_name with
+  | None -> fail "corrupt chat queue keeper row missing"
+  | Some keeper ->
+    check int "corrupt queue projects one read error" 1
+      U.(keeper |> member "sources" |> member "read_error" |> to_int);
+    (match U.(keeper |> member "waiting_on" |> to_list) with
+     | [ row ] ->
+       check string "corrupt queue waiting_on" "chat_queue_snapshot"
+         (json_string_member "waiting_on" row);
+       check string "corrupt queue repair action"
+         "repair_keeper_chat_queue_snapshot"
+         (json_string_member "next_action" row)
+     | rows -> failf "expected one corrupt chat queue row, got %d" (List.length rows))
 ;;
 
 let pending_confirm_fixture ?(target_type = "goal") ?target_id ()
@@ -694,12 +856,16 @@ let () =
             test_chat_queue_pending_rows_are_visible
         ; test_case "turn admission waiting row is visible" `Quick
             test_turn_admission_waiting_row_is_visible
+        ; test_case "turn admission shutdown row is deferred" `Quick
+            test_turn_admission_shutdown_row_is_deferred
         ; test_case "keeper-owned schedule rows are lane scoped" `Quick
             test_keeper_owned_schedule_waiting_rows_are_lane_scoped
         ; test_case "live turn keeper is busy without waiting rows" `Quick
             test_live_turn_keeper_is_busy_without_waiting_rows
         ; test_case "corrupt schedule ledger is read_error" `Quick
             test_corrupt_schedule_ledger_is_read_error
+        ; test_case "corrupt chat queue is read_error" `Quick
+            test_corrupt_chat_queue_snapshot_is_read_error
         ; test_case "keeper name discovery failure is read_error" `Quick
             test_keeper_name_discovery_failure_is_read_error
         ; test_case "corrupt external attention is read_error" `Quick

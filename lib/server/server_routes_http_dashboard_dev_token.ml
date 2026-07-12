@@ -6,6 +6,28 @@
 
 let dashboard_dev_actor_name = "dashboard"
 
+type request_error =
+  | Non_loopback_request_host of string
+  | Token_operation_failed of string
+
+let request_error_status : request_error -> Httpun.Status.t = function
+  | Non_loopback_request_host _ -> `Forbidden
+  | Token_operation_failed _ -> `Internal_server_error
+;;
+
+let request_error_code = function
+  | Non_loopback_request_host _ -> "dashboard_dev_token_host_non_loopback"
+  | Token_operation_failed _ -> "dashboard_dev_token_operation_failed"
+;;
+
+let request_error_to_string = function
+  | Non_loopback_request_host host ->
+    Printf.sprintf
+      "dashboard dev-token request Host %S is not an exact loopback host"
+      host
+  | Token_operation_failed detail -> detail
+;;
+
 let dashboard_dev_token_path base_path =
   Filename.concat
     (Filename.concat (Common.masc_dir_from_base_path ~base_path) "auth")
@@ -14,6 +36,15 @@ let dashboard_dev_token_path base_path =
 type dashboard_dev_token_candidate =
   | Reusable of string
   | Rotate
+
+let default_dashboard_dev_token_load path = Fs_compat.load_file path
+let dashboard_dev_token_load = Atomic.make default_dashboard_dev_token_load
+
+let set_dashboard_dev_token_load_for_testing load =
+  Atomic.set dashboard_dev_token_load load
+
+let reset_dashboard_dev_token_load_for_testing () =
+  Atomic.set dashboard_dev_token_load default_dashboard_dev_token_load
 
 let classify_dashboard_dev_token_candidate ~base_path raw :
     (dashboard_dev_token_candidate, string) result =
@@ -38,17 +69,16 @@ let read_reusable_dashboard_dev_token ~base_path path :
   else
     try
       match classify_dashboard_dev_token_candidate ~base_path
-              (Fs_compat.load_file path) with
+              ((Atomic.get dashboard_dev_token_load) path) with
       | Ok (Reusable raw) -> Ok (Some raw)
       | Ok Rotate -> Ok None
       | Error msg -> Error msg
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
-        Log.Server.warn
-          "dashboard dev-token read skipped for %s: %s"
-          path (Printexc.to_string exn);
-        Ok None
+        Error
+          (Printf.sprintf "read dev-token %s: %s"
+             path (Printexc.to_string exn))
 
 let persist_dashboard_dev_token ~base_path raw : (unit, string) result =
   let token_path = dashboard_dev_token_path base_path in
@@ -78,3 +108,13 @@ let ensure_dashboard_dev_token base_path : (string, string) result =
   | Error msg -> Error msg
   | Ok (Some raw) -> Ok raw
   | Ok None -> mint_dashboard_dev_token base_path
+
+let ensure_dashboard_dev_token_for_authority ~request_authority ~base_path =
+  let host = Server_request_authority.host request_authority in
+  if not (Server_auth.is_loopback_host host)
+  then Error (Non_loopback_request_host host)
+  else
+    Result.map_error
+      (fun detail -> Token_operation_failed detail)
+      (ensure_dashboard_dev_token base_path)
+;;

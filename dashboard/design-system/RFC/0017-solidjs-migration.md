@@ -1,7 +1,16 @@
 # RFC 0017 — SolidJS Cockpit Migration
 
-> **Status**: KpiStrip migration **complete** (#12162 → #12268). Performance hypothesis **falsified** for our app shape — see [`0017-solidjs-migration-measurement.md`](./0017-solidjs-migration-measurement.md) (2026-04-30). Phase 2 (Lifeline) and Phase 3 (Ticker) **paused** pending a synchronous-mount spike.
-> **Date**: 2026-04-30
+> **Status**: **Reverted / superseded** (2026-07-11, PR #24015 for bug #66). The
+> KpiStrip island and the entire SolidJS toolchain (solid-js, vite-plugin-solid,
+> the separate vitest.solid.config, and the `.solid` mirror components) were
+> removed and the dashboard unified on Preact. The performance hypothesis this
+> RFC was built on was already **falsified** for our app shape (see the
+> measurement companion, 2026-04-30, and §7): the island carried dual-transform
+> build + test complexity without the projected benefit, so Phase 1 was reverted
+> rather than advanced to Phase 2 (Lifeline) / Phase 3 (Ticker). The sections
+> below are retained as the historical record of the projection and the
+> measurement that overturned it.
+> **Date**: 2026-04-30 (reverted 2026-07-11)
 > **Relation to RFC 0013**: Amends RFC 0013 (cockpit-migration). RFC 0013 specified Preact for Phase 1 (KpiStrip), 2 (Lifeline), 3 (Ticker). This RFC supersedes the framework choice based on (then-projected) performance evidence; the phasing and component scope from RFC 0013 are preserved. Section 1 below records the original projection; the measurement companion document records what we actually observed.
 
 ## 1. Motivation (original projection — see §7 for the post-implementation reality)

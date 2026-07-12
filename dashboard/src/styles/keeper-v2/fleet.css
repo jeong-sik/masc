@@ -21,7 +21,7 @@
      Last track = action cell (멈춤/깨움/종료): the 3 text buttons render ~156px,
      so the track must be wide enough or the button group overflows left into the
      context value (fl-ctx-val) on a selected/hovered row. */
-  --fl-cols: minmax(196px, 1.3fr) 184px 140px minmax(108px, 1fr) 160px;
+  --fl-cols: minmax(196px, 1.3fr) 184px 140px 120px minmax(108px, 1fr) 160px;
   --fl-gap: 14px;
 }
 
@@ -35,7 +35,7 @@
 .fl-brand { display: flex; flex-direction: column; justify-content: center; gap: 1px; flex: none; }
 .fl-brand .ov-eyebrow { margin-bottom: 0; }
 .fl-crumb { font-family: var(--font-mono); font-size: var(--fs-10); letter-spacing: 0.16em; text-transform: uppercase; color: var(--text-dim); white-space: nowrap; }
-.fl-title { font-family: var(--font-display); font-weight: 600; font-size: 18px; letter-spacing: -0.005em; color: var(--text-bright); white-space: nowrap; }
+.fl-title { margin: 0; font-family: var(--font-display); font-weight: 600; font-size: 18px; line-height: 1.2; letter-spacing: -0.005em; color: var(--text-bright); white-space: nowrap; }
 .fl-health { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .fl-hpill {
   display: inline-flex; align-items: center; gap: 7px;
@@ -146,6 +146,14 @@
 .fl-ctx-val.hot { color: var(--status-bad); }
 .fl-ctx-val.zero { color: var(--text-dim); }
 
+/* Runtime assignment evidence. The keeper snapshot currently exposes the
+   configured/selected runtime, not an in-flight runtime lease, so the source
+   label stays visible instead of implying this is a live provider reading. */
+.fl-runtime { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-family: var(--font-mono); }
+.fl-runtime-source { font-size: var(--fs-9); letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-dim); }
+.fl-runtime-value { font-size: var(--fs-11); color: var(--text-mid); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fl-runtime.unknown .fl-runtime-source { color: var(--status-warn); }
+
 /* last tool cell */
 .fl-tool { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-mid); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fl-tool.none { color: var(--text-dim); }
@@ -254,10 +262,14 @@
 .fl-attn-item[data-sev="bad"] { color: var(--text-bright); }
 
 /* ── responsive: progressively shed columns instead of letting strings collide ── */
-/* mid width — aside still present, but main is tight: drop 최근 도구 first */
-@media (max-width: 1320px) and (min-width: 1101px) {
-  .fl-shell { --fl-cols: minmax(168px, 1.3fr) 168px 132px 160px; }
-  .fl-rhead span:nth-child(4), .fl-row .fl-tool { display: none; }
+/* mid width — aside still present, but main is tight: drop 최근 도구 first,
+   keep 런타임 (5 tracks remain: Keeper / 운영판정 / 컨텍스트 / 런타임 / 액션). */
+/* The fixed 372px detail aside leaves the roster at roughly 986px in the
+   canonical 1440px operator viewport. Shed the recent-tool column there so
+   the action group remains fully visible instead of sliding under the aside. */
+@media (max-width: 1500px) and (min-width: 1101px) {
+  .fl-shell { --fl-cols: minmax(168px, 1.3fr) 168px 132px 110px 160px; }
+  .fl-rhead span:nth-child(5), .fl-row .fl-tool { display: none; }
 }
 
 @media (max-width: 1100px) {
@@ -265,8 +277,37 @@
   .fl-aside { display: none; }
 }
 
+@media (max-width: 900px) {
+  .fl-top { height: auto; flex-wrap: wrap; padding: 12px 16px; gap: 10px 14px; }
+  .fl-spacer { display: none; }
+  .fl-health { width: 100%; order: 3; }
+}
+
+/* 800px and 1024px operator windows: keep runtime provenance and actions,
+   shed context/tool telemetry, and use four tracks that fit without horizontal
+   overflow. The 720px layout below remains the single-column mobile mode. */
+@media (max-width: 1100px) and (min-width: 721px) {
+  .fl-shell {
+    --fl-cols: minmax(168px, 1.3fr) minmax(150px, 1fr) minmax(104px, 0.8fr) 160px;
+    --fl-gap: 10px;
+  }
+  .fl-rhead span:nth-child(3), .fl-rhead span:nth-child(5),
+  .fl-row .fl-ctx, .fl-row .fl-tool { display: none; }
+  .fl-rhead, .fl-row { padding-left: 16px; padding-right: 16px; }
+}
+
 /* narrow — collapse the row to identity · state · action; ctx/tool move out of the way */
 @media (max-width: 720px) {
+  .fleet-fsm-matrix button,
+  .fleet-fsm-matrix input,
+  .fleet-fsm-matrix select,
+  .fsm-hub-surface button,
+  .fsm-hub-surface input,
+  .fsm-hub-surface select {
+    min-width: var(--mobile-touch-target-min);
+    min-height: var(--mobile-touch-target-min);
+  }
+
   .fl-shell {
     --fl-cols: minmax(0, 1fr);
     --fl-gap: var(--space-2);
@@ -284,12 +325,10 @@
     border: 0;
   }
   .fl-row { align-items: start; }
-  .fl-row .fl-ctx, .fl-row .fl-tool { display: none; }
+  .fl-row .fl-ctx, .fl-row .fl-tool, .fl-row .fl-runtime { display: none; }
   .fl-row .fl-state, .fl-row .fl-actcell { margin-left: var(--fl-mobile-row-indent); }
   .fl-row .fl-actcell { justify-content: flex-start; flex-wrap: wrap; }
-  .fl-top { height: auto; flex-wrap: wrap; padding: 12px 16px; gap: 10px 14px; }
-  .fl-spacer { display: none; }
-  .fl-health { width: 100%; order: 3; }
   .fl-row, .fl-group { padding-left: 16px; padding-right: 16px; }
+  .fl-create { min-height: var(--mobile-touch-target-min); }
   .fl-foot { gap: 14px; overflow-x: auto; }
 }

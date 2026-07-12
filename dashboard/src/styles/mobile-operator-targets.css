@@ -1,0 +1,25 @@
+/* Runtime mobile control contract.
+ *
+ * App.ts owns the single mobile breakpoint and exposes it as data-mobile="1".
+ * Keep generic form/action controls on that typed scope so tablet-width mobile
+ * layouts cannot silently fall through phone-only surface media queries.
+ * Inline prose anchors and checkbox/radio inputs are intentional exceptions.
+ * Clickable label wrappers opt into the semantic class below so their hit area
+ * follows the same runtime scope instead of a separate media-query breakpoint.
+ */
+.v2-app[data-mobile="1"] button,
+.v2-app[data-mobile="1"] summary,
+.v2-app[data-mobile="1"] select,
+.v2-app[data-mobile="1"] textarea,
+.v2-app[data-mobile="1"] input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]),
+.v2-app[data-mobile="1"] [role="button"],
+.v2-app[data-mobile="1"] [role="tab"] {
+  min-width: var(--mobile-touch-target-min);
+  min-height: var(--mobile-touch-target-min);
+}
+
+.v2-app[data-mobile="1"] .v2-mobile-operator-target {
+  min-width: var(--mobile-touch-target-min);
+  min-height: var(--mobile-touch-target-min);
+  touch-action: manipulation;
+}

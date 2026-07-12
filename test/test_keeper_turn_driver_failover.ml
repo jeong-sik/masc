@@ -351,19 +351,16 @@ let test_resolve_assignment_to_single_runtime () =
 let test_attempt_inference_policy_uses_attempt_runtime () =
   with_model_catalog_content runtime_thinking_lane_model_catalog @@ fun () ->
   with_runtime_config runtime_toml_thinking_lane (fun () ->
-    let max_tokens_for_runtime ~runtime_id =
-      Masc.Keeper_run_context.resolve_max_tokens_for_runtime
-        ~keeper_name:"policy-test"
-        ~runtime_id
-        ()
-    in
+    (* Runtime candidates still resolve their own thinking and temperature
+       policy. The turn's max-token intent is an independent immutable input;
+       [None] remains [None] for every candidate and is never synthesized from
+       the model catalog. *)
     let lane_policy =
       Driver.For_testing.attempt_inference_policy
-        ~max_tokens_for_runtime
         ~runtime_id:"mixed"
         ~fallback_temperature:0.25
         ~fallback_enable_thinking:None
-        ~fallback_max_tokens:8192
+        ~turn_max_tokens:None
         ()
     in
     Alcotest.(check (option bool))
@@ -378,17 +375,16 @@ let test_attempt_inference_policy_uses_attempt_runtime () =
       "lane id has no preserve thinking policy"
       None
       lane_policy.Driver.attempt_preserve_thinking;
-    Alcotest.(check int)
-      "lane id keeps caller max_tokens fallback"
-      8192
+    Alcotest.(check (option int))
+      "lane id: no override configured -> None (masc#24067 / oas#2517)"
+      None
       lane_policy.Driver.attempt_max_tokens;
     let thinking_policy =
       Driver.For_testing.attempt_inference_policy
-        ~max_tokens_for_runtime
         ~runtime_id:"thinking.reasoning_big"
         ~fallback_temperature:0.25
         ~fallback_enable_thinking:(Some false)
-        ~fallback_max_tokens:8192
+        ~turn_max_tokens:None
         ()
     in
     Alcotest.(check (option bool))
@@ -403,17 +399,17 @@ let test_attempt_inference_policy_uses_attempt_runtime () =
       "thinking candidate preserves thinking when configured"
       (Some true)
       thinking_policy.Driver.attempt_preserve_thinking;
-    Alcotest.(check int)
-      "thinking candidate sizes from catalog ceiling"
-      32768
+    Alcotest.(check (option int))
+      "thinking candidate: no override configured -> None, not the catalog \
+       ceiling (masc#24067 / oas#2517)"
+      None
       thinking_policy.Driver.attempt_max_tokens;
     let non_thinking_policy =
       Driver.For_testing.attempt_inference_policy
-        ~max_tokens_for_runtime
         ~runtime_id:"plain.non_reasoning"
         ~fallback_temperature:0.25
         ~fallback_enable_thinking:(Some true)
-        ~fallback_max_tokens:8192
+        ~turn_max_tokens:None
         ()
     in
     Alcotest.(check (option bool))
@@ -428,10 +424,42 @@ let test_attempt_inference_policy_uses_attempt_runtime () =
       "non-thinking candidate disables preserve thinking"
       (Some false)
       non_thinking_policy.Driver.attempt_preserve_thinking;
-    Alcotest.(check int)
-      "non-thinking candidate keeps caller max_tokens fallback"
-      8192
+    Alcotest.(check (option int))
+      "non-thinking candidate: no override configured -> None (masc#24067 / \
+       oas#2517)"
+      None
       non_thinking_policy.Driver.attempt_max_tokens)
+
+let max_tokens_of_policy ~turn_max_tokens runtime_id =
+  let policy =
+    Driver.For_testing.attempt_inference_policy
+      ~runtime_id
+      ~fallback_temperature:0.25
+      ~fallback_enable_thinking:None
+      ~turn_max_tokens
+      ()
+  in
+  policy.Driver.attempt_max_tokens
+
+let test_turn_max_tokens_snapshot_is_stable_across_candidates () =
+  let profile_at_turn_start = Some 4096 in
+  let turn_max_tokens = profile_at_turn_start in
+  let profile_after_first_candidate = Some 8192 in
+  Alcotest.(check (option int))
+    "first candidate receives turn-start snapshot"
+    (Some 4096)
+    (max_tokens_of_policy ~turn_max_tokens "primary.test_model");
+  Alcotest.(check (option int))
+    "fallback candidate ignores profile revision during current turn"
+    (Some 4096)
+    (max_tokens_of_policy ~turn_max_tokens "fallback.test_model");
+  let next_turn_max_tokens = profile_after_first_candidate in
+  Alcotest.(check (option int))
+    "next turn receives revised profile snapshot"
+    (Some 8192)
+    (max_tokens_of_policy
+       ~turn_max_tokens:next_turn_max_tokens
+       "primary.test_model")
 
 let test_resolve_assignment_missing () =
   with_runtime_config runtime_toml_with_lane (fun () ->
@@ -934,6 +962,10 @@ let () =
             "attempt inference policy uses attempt runtime"
             `Quick
             test_attempt_inference_policy_uses_attempt_runtime;
+          Alcotest.test_case
+            "turn max_tokens snapshot survives failover and refreshes next turn"
+            `Quick
+            test_turn_max_tokens_snapshot_is_stable_across_candidates;
           Alcotest.test_case
             "attempt loop stops on nonretryable failure"
             `Quick

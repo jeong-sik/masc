@@ -84,24 +84,67 @@ let event_kind_of_string = function
   | "turn_finished" -> Some Turn_finished
   | _ -> None
 
+(** Event kinds that were valid in persisted schema-v1 manifests but whose
+    producers and product behavior have been retired. Keeping them outside
+    [event_kind] makes it impossible for current manifest producers to emit a
+    retired row while preserving a typed read boundary for durable history. *)
+type retired_event_kind =
+  | Memory_injected
+  | Memory_flushed
+  | Tool_lineage_recorded
+  | Tool_surface_selected
+  | Cascade_routed
+  | State_snapshot_sidecar_saved
+  | Working_state_sidecar_saved
+
+let all_retired_event_kinds =
+  [ Memory_injected
+  ; Memory_flushed
+  ; Tool_lineage_recorded
+  ; Tool_surface_selected
+  ; Cascade_routed
+  ; State_snapshot_sidecar_saved
+  ; Working_state_sidecar_saved
+  ]
+;;
+
+let retired_event_kind_to_string = function
+  | Memory_injected -> "memory_injected"
+  | Memory_flushed -> "memory_flushed"
+  | Tool_lineage_recorded -> "tool_lineage_recorded"
+  | Tool_surface_selected -> "tool_surface_selected"
+  | Cascade_routed -> "cascade_routed"
+  | State_snapshot_sidecar_saved -> "state_snapshot_sidecar_saved"
+  | Working_state_sidecar_saved -> "working_state_sidecar_saved"
+;;
+
+let retired_event_kind_of_string value =
+  List.find_opt
+    (fun event -> String.equal value (retired_event_kind_to_string event))
+    all_retired_event_kinds
+;;
+
+type event_wire_class =
+  | Active_event of event_kind
+  | Retired_event of retired_event_kind
+  | Unsupported_event of string
+
+let classify_event_wire value =
+  match event_kind_of_string value with
+  | Some event -> Active_event event
+  | None ->
+    (match retired_event_kind_of_string value with
+     | Some event -> Retired_event event
+     | None -> Unsupported_event value)
+;;
+
 type compaction_snapshot_event_class =
   | Compaction_snapshot_relevant
   | Compaction_snapshot_known_unrelated
   | Compaction_snapshot_unknown
 
 let known_unrelated_untyped_compaction_snapshot_events =
-  [ "memory_injected"
-  ; "memory_flushed"
-  ; "tool_lineage_recorded"
-  ; "tool_surface_selected"
-  ; "cascade_routed"
-  ]
-;;
-
-let is_known_unrelated_untyped_compaction_snapshot_event event =
-  List.exists
-    (String.equal event)
-    known_unrelated_untyped_compaction_snapshot_events
+  List.map retired_event_kind_to_string all_retired_event_kinds
 ;;
 
 let classify_compaction_snapshot_typed_event = function
@@ -124,12 +167,10 @@ let classify_compaction_snapshot_typed_event = function
       Compaction_snapshot_known_unrelated
 
 let classify_compaction_snapshot_event event =
-  if is_known_unrelated_untyped_compaction_snapshot_event event
-  then Compaction_snapshot_known_unrelated
-  else (
-    match event_kind_of_string event with
-    | Some typed_event -> classify_compaction_snapshot_typed_event typed_event
-    | None -> Compaction_snapshot_unknown)
+  match classify_event_wire event with
+  | Active_event typed_event -> classify_compaction_snapshot_typed_event typed_event
+  | Retired_event _ -> Compaction_snapshot_known_unrelated
+  | Unsupported_event _ -> Compaction_snapshot_unknown
 
 (* ── Record types ────────────────────────────────────────────────────── *)
 
@@ -155,6 +196,17 @@ type t = {
   decision : Yojson.Safe.t;
   links : links;
 }
+
+type row_identity = {
+  keeper_name : string;
+  trace_id : string;
+  keeper_turn_id : int option;
+}
+
+type decoded_row =
+  | Active_row of t
+  | Retired_row of row_identity * retired_event_kind
+  | Unsupported_row of row_identity * string
 
 type turn_context = {
   manifest_keeper_name : string;

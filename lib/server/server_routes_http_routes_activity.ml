@@ -17,6 +17,16 @@ let activity_result_json ~ok ~message =
   `Assoc [ ("ok", `Bool ok); ("message", `String message) ]
 ;;
 
+let respond_board_reaction_result request reqd = function
+  | Ok json -> respond_json_value_with_cors request reqd json
+  | Error error ->
+    respond_json_value_with_cors
+      ~status:(Server_board_reaction_http.error_status error :> Httpun.Status.t)
+      request
+      reqd
+      (Server_board_reaction_http.error_json error)
+;;
+
 let include_moderation_projection ~base_path request =
   match auth_token_from_request request with
   | None -> false
@@ -29,6 +39,16 @@ let include_moderation_projection ~base_path request =
       with
       | Ok _ -> true
       | Error _ -> false)
+
+let with_optional_board_reaction_actor ~base_path request reqd f =
+  match
+    authorize_optional_token_bound_permission_request
+      ~base_path
+      ~permission:Masc_domain.CanReadState
+      request
+  with
+  | Ok actor -> f (Option.map board_actor_author_for_write actor)
+  | Error err -> respond_auth_error request reqd err
 
 let activity_http_deps ~sw ~clock : Server_activity_http.deps =
   {
@@ -540,6 +560,11 @@ let add_routes ~sw ~clock router =
   |> Http.Router.get "/api/v1/board" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let config = Mcp_server.workspace_config state in
+         with_optional_board_reaction_actor
+           ~base_path:config.base_path
+           req
+           reqd
+           (fun reaction_actor ->
          let hearth = query_param req "hearth" in
          let sort_by = board_sort_order_of_request req in
          let exclude_system = bool_query_param req "exclude_system" ~default:false in
@@ -569,13 +594,14 @@ let add_routes ~sw ~clock router =
              | Some value -> value
              | None -> ""
            in
-           Printf.sprintf "board:list:%s:%s:%s:%b:%b:%s:%d:%d:%s:%b:%b"
+           Printf.sprintf "board:list:%s:%s:%s:%b:%b:%s:%d:%d:%s:%s:%b:%b"
              config.base_path
              (cache_part hearth)
              (board_sort_label sort_by)
              exclude_system exclude_automation
              (cache_part author_query)
-             limit offset (cache_part voter) blind_votes include_moderation
+             limit offset (cache_part voter) (cache_part reaction_actor)
+             blind_votes include_moderation
          in
          let json =
            Dashboard_cache.get_or_compute cache_key
@@ -600,7 +626,7 @@ let add_routes ~sw ~clock router =
                            (fun (p : Board.post) ->
                               (Board.Reaction_post, Board.Post_id.to_string p.id))
                            paged)
-                      ~voter
+                      ~voter:reaction_actor
                   in
                   let reactions_for = board_reactions_lookup reaction_rows in
                   let contributor_quality_for =
@@ -630,8 +656,54 @@ let add_routes ~sw ~clock router =
                     ("sort_by", `String (board_sort_label sort_by));
                   ]))
          in
-         Http.Response.json_value json reqd
+         Http.Response.json_value json reqd)
        ) request reqd)
+
+  |> Http.Router.get "/api/v1/board/reactions/catalog" (fun request reqd ->
+       with_public_read
+         (fun _state _request reqd ->
+            Http.Response.json_value
+              (Server_board_reaction_http.catalog_json ())
+              reqd)
+         request
+         reqd)
+
+  |> Http.Router.get "/api/v1/board/reactions" (fun request reqd ->
+       with_token_permission_auth
+         ~permission:Masc_domain.CanReadState
+         (fun _state actor req reqd ->
+            let actor = board_actor_author_for_write actor in
+            let result =
+              Result.bind
+                (Server_board_reaction_http.target_of_strings
+                   ~target_type:(query_param req "target_type")
+                   ~target_id:(query_param req "target_id"))
+                (Server_board_reaction_http.list_json ~actor)
+            in
+            respond_board_reaction_result request reqd result)
+         request
+         reqd)
+
+  |> Http.Router.post "/api/v1/board/reactions" (fun request reqd ->
+       with_token_permission_auth
+         ~permission:Masc_domain.CanVote
+         (fun _state actor _req reqd ->
+            let actor = board_actor_author_for_write actor in
+            Http.Request.read_body_async reqd (fun body ->
+              let parsed =
+                match Yojson.Safe.from_string body with
+                | json -> Server_board_reaction_http.toggle_request_of_json json
+                | exception Yojson.Json_error message ->
+                  Error (Server_board_reaction_http.malformed_json message)
+              in
+              let result =
+                Result.bind
+                  parsed
+                  (Server_board_reaction_http.toggle_json ~actor)
+              in
+              respond_board_reaction_result request reqd result))
+         request
+         reqd)
 
   |> Http.Router.get "/api/v1/board/hearths" (fun request reqd ->
        with_public_read (fun state _req reqd ->
@@ -821,24 +893,41 @@ let add_routes ~sw ~clock router =
           | Some "karma/ledger" ->
               respond_board_json reqd (board_karma_ledger_json req)
           | Some post_id ->
-              let format =
-                query_param req "format" |> Option.value ~default:"nested"
-              in
-              let voter = board_voter_query req in
-              let blind_votes =
-                bool_query_param req "blind_votes" ~default:false
-              in
-              let include_moderation =
-                include_moderation_projection
-                  ~base_path:(Mcp_server.workspace_config state).base_path
-                  req
-              in
-              let (status, body) =
-                board_post_detail_json ~include_moderation ~blind_votes ~voter
-                  ~config:(Some (Mcp_server.workspace_config state))
-                  ~response_format:format ~post_id
-              in
-              respond_json_with_cors ~status request reqd body)
+              let config = Mcp_server.workspace_config state in
+              with_optional_board_reaction_actor
+                ~base_path:config.base_path
+                req
+                reqd
+                (fun reaction_actor ->
+                   match
+                     Server_board_post_response_format.of_query
+                       (query_param req "format")
+                   with
+                   | Error error ->
+                     respond_json_value_with_cors
+                       ~status:`Bad_request
+                       request
+                       reqd
+                       (Server_board_post_response_format.error_json error)
+                   | Ok response_format ->
+                     let voter = board_voter_query req in
+                     let blind_votes =
+                       bool_query_param req "blind_votes" ~default:false
+                     in
+                     let include_moderation =
+                       include_moderation_projection ~base_path:config.base_path req
+                     in
+                     let status, body =
+                       board_post_detail_json
+                         ~include_moderation
+                         ~blind_votes
+                         ~voter
+                         ~reaction_actor
+                         ~config:(Some config)
+                         ~response_format
+                         ~post_id
+                     in
+                     respond_json_with_cors ~status request reqd body))
        ) request reqd)
 
   (* Board write APIs — used by dashboard + Bevy Viewer.

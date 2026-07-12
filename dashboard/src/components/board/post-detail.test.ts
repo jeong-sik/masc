@@ -39,7 +39,10 @@ vi.mock('../common/feedback-state', () => ({
 }))
 
 vi.mock('../../api/board', () => ({
-  fetchBoardReactions: vi.fn().mockResolvedValue([]),
+  fetchBoardReactionState: vi.fn().mockResolvedValue({
+    summaries: [],
+    supportedEmojis: ['👍', '❤️', '🎉', '🚀', '👀', '😕', '👏', '🔥'],
+  }),
   votePost: vi.fn().mockResolvedValue(undefined),
   voteComment: vi.fn().mockResolvedValue(undefined),
   requestBoardContextInference: vi.fn().mockResolvedValue({
@@ -667,6 +670,7 @@ describe('PostDetail', () => {
   it('renders permalink, trackback, context inference, and X share actions on the full post detail route', async () => {
     const post = {
       id: 'post-share',
+      meta: { source: 'board' },
       author: 'sleepers',
       author_identity: {
         kind: 'keeper',
@@ -693,6 +697,11 @@ describe('PostDetail', () => {
     expect(screen.getByTestId('bd-share-trackback-post-share')).toHaveAttribute('aria-label', '트랙백 링크 복사: post-share')
     expect(screen.getByTestId('bd-context-infer-post-share')).toHaveAttribute('aria-label', '맥락 추론 요청: post-share')
     expect(screen.getByTestId('bd-share-x-post-share')).toHaveAttribute('href', expect.stringContaining('https://twitter.com/intent/tweet?'))
+    expect(screen.getByTestId('bd-share-link-post-share')).toHaveClass('bd-share-action')
+    expect(screen.getByTestId('bd-share-trackback-post-share')).toHaveClass('bd-share-action')
+    expect(screen.getByTestId('bd-context-infer-post-share')).toHaveClass('bd-share-action')
+    expect(screen.getByTestId('bd-share-x-post-share')).toHaveClass('bd-share-action')
+    expect(screen.getByText('운영 메타')).toHaveClass('bd-meta-summary')
 
     fireEvent.click(screen.getByTestId('bd-context-infer-post-share'))
 

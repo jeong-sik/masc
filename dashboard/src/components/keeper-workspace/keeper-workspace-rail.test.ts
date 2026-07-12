@@ -243,6 +243,46 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.querySelector('.rtc-model')?.textContent).toContain('—')
   })
 
+  it('shows catalog loading without claiming the runtime is missing', async () => {
+    vi.mocked(fetchRuntimeProviders).mockReturnValueOnce(new Promise(() => {}))
+
+    const k = mkKeeper({ runtime_canonical: 'ollama_cloud.pending' })
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-effort-status="loading"]')).not.toBeNull()
+    })
+    expect(container.textContent).toContain('카탈로그 로딩 중')
+    expect(container.textContent).not.toContain('카탈로그 미등재')
+  })
+
+  it('shows catalog failure without claiming the runtime is missing', async () => {
+    vi.mocked(fetchRuntimeProviders).mockRejectedValueOnce(new Error('catalog unavailable'))
+
+    const k = mkKeeper({ runtime_canonical: 'ollama_cloud.failed' })
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-effort-status="error"]')).not.toBeNull()
+    })
+    const effort = container.querySelector('[data-effort-status="error"]')
+    expect(effort?.textContent).toContain('카탈로그 조회 실패')
+    expect(effort?.getAttribute('title')).toBe('catalog unavailable')
+    expect(container.textContent).not.toContain('카탈로그 미등재')
+  })
+
+  it('shows catalog missing only after a loaded catalog has no runtime entry', async () => {
+    vi.mocked(fetchRuntimeProviders).mockResolvedValueOnce({ providers: [] } as Awaited<ReturnType<typeof fetchRuntimeProviders>>)
+
+    const k = mkKeeper({ runtime_canonical: 'ollama_cloud.unregistered' })
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-effort-status="missing"]')).not.toBeNull()
+    })
+    expect(container.textContent).toContain('카탈로그 미등재')
+  })
+
   it('renders multimodal and effort adjustability from the runtime catalog capabilities', async () => {
     vi.mocked(fetchRuntimeProviders).mockResolvedValueOnce({
       providers: [
@@ -435,7 +475,7 @@ describe('KeeperWorkspaceRail', () => {
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
 
     await waitFor(() => {
-      expect(container.querySelector('[data-effort-mode="reasoning-effort"]')).not.toBeNull()
+      expect(container.querySelector('[data-effort-mode="chat-template-kwargs"]')).not.toBeNull()
     })
 
     const multimodalFlag = Array.from(container.querySelectorAll('.rtc-flag')).find(node =>
@@ -444,9 +484,15 @@ describe('KeeperWorkspaceRail', () => {
     expect(multimodalFlag).not.toBeUndefined()
     expect(multimodalFlag?.className).toContain('on')
 
-    const effort = container.querySelector('[data-effort-mode="reasoning-effort"]')
-    expect(effort?.textContent).toContain('reasoning-effort')
+    // The effort row sources effective_capabilities.thinking_control_format
+    // ('chat-template-kwargs'), NOT the top-level entry.thinking_control_format
+    // ('reasoning-effort', set above) — that top-level field mirrors
+    // runtime.toml's hand-maintained, wire-inert capabilities block.
+    const effort = container.querySelector('[data-effort-mode="chat-template-kwargs"]')
+    expect(effort?.textContent).toContain('chat-template-kwargs')
+    expect(effort?.textContent).not.toContain('reasoning-effort')
     expect(effort?.textContent).toContain('조정 가능')
+    expect(effort?.textContent).toContain('(low, medium, high)')
 
     // Raw catalog rows are collapsed by default — only the curated block shows.
     expect(container.textContent).not.toContain('params')
@@ -496,8 +542,8 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).toContain('preserve:always-preserved')
     expect(container.textContent).toContain('reasoning-stream:delta-reasoning-field:reasoning_content')
     expect(container.textContent).toContain('task:transcription · native-stream')
-    // the "no source" stub is replaced once the catalog reports capabilities
-    expect(container.textContent).not.toContain('조정 정보 미수신')
+    // the "no catalog entry" stub is replaced once the catalog reports capabilities
+    expect(container.textContent).not.toContain('카탈로그 미등재')
   })
 
   it('renders undeclared runtime capabilities as unknown, not disabled', async () => {
@@ -538,9 +584,96 @@ describe('KeeperWorkspaceRail', () => {
     expect(multimodalFlag?.className).toContain('na')
     expect(multimodalFlag?.className).not.toContain('off')
     // effort is likewise unknown, not the definitive "effort 제어 없음" claim that
-    // the default-filled thinking_control_format ('none') would otherwise imply.
-    expect(container.textContent).toContain('조정 정보 미수신')
+    // the top-level thinking_control_format ('none', still set above to prove
+    // it is ignored) would otherwise imply. The catalog entry exists, but its
+    // OAS-derived effective capabilities were not projected.
+    expect(container.textContent).toContain('유효 capability 미수신')
+    expect(container.querySelector('[data-effort-status="unknown"]')).not.toBeNull()
+    expect(container.textContent).not.toContain('카탈로그 미등재')
     expect(container.textContent).not.toContain('effort 제어 없음')
+  })
+
+  it('renders a missing effective thinking-control format as unknown', async () => {
+    vi.mocked(fetchRuntimeProviders).mockResolvedValueOnce({
+      providers: [
+        {
+          provider: 'ollama_cloud.unknown-wire',
+          runtime_id: 'ollama_cloud.unknown-wire',
+          model_api_name: 'unknown-wire',
+          tools_support: true,
+          thinking_support: true,
+          streaming: true,
+          effective_capabilities: {
+            supports_reasoning: true,
+            supports_reasoning_budget: false,
+            accepted_reasoning_efforts: null,
+            thinking_control_format: null,
+            ignored_sampling_parameters: [],
+            supported_models: ['unknown-wire'],
+          },
+          models: ['unknown-wire'],
+        },
+      ],
+    } as unknown as Awaited<ReturnType<typeof fetchRuntimeProviders>>)
+
+    const k = mkKeeper({ runtime_canonical: 'ollama_cloud.unknown-wire' })
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-effort-status="unknown"]')).not.toBeNull()
+    })
+    expect(container.textContent).toContain('thinking control 형식 미수신')
+    expect(container.textContent).not.toContain('effort 제어 없음')
+  })
+
+  it('renders the effort row from effective_capabilities even when capabilities_declared is false', async () => {
+    // capabilities_declared gates the runtime.toml-derived multimodal flag,
+    // NOT the effort row (fix design: "no capabilities_declared gating for
+    // effort"). The OAS catalog can know a model's reasoning wire even when
+    // MASC's runtime.toml never declared a [models.<id>.capabilities] block
+    // for it — the two sources are independent.
+    vi.mocked(fetchRuntimeProviders).mockResolvedValueOnce({
+      providers: [
+        {
+          provider: 'ollama_cloud.deepseek-v3-1',
+          runtime_id: 'ollama_cloud.deepseek-v3-1',
+          model_api_name: 'deepseek-v3-1',
+          tools_support: true,
+          thinking_support: true,
+          streaming: true,
+          capabilities_declared: false,
+          effective_capabilities: {
+            source: 'oas-provider-config-model',
+            supports_reasoning: true,
+            supports_reasoning_budget: false,
+            accepted_reasoning_efforts: null,
+            thinking_control_format: 'ollama-think',
+            ignored_sampling_parameters: [],
+            supported_models: ['deepseek-v3-1'],
+          },
+          models: ['deepseek-v3-1'],
+        },
+      ],
+    } as unknown as Awaited<ReturnType<typeof fetchRuntimeProviders>>)
+
+    const k = mkKeeper({ runtime_canonical: 'ollama_cloud.deepseek-v3-1' })
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-effort-mode="ollama-think"]')).not.toBeNull()
+    })
+
+    // multimodal is unknown (gated by capabilities_declared === false) ...
+    const multimodalFlag = Array.from(container.querySelectorAll('.rtc-flag')).find(node =>
+      node.textContent?.includes('multimodal'),
+    )
+    expect(multimodalFlag?.className).toContain('na')
+
+    // ... but effort is known and fixed (no reasoning-budget, no accepted list).
+    const effort = container.querySelector('[data-effort-mode="ollama-think"]')
+    expect(effort?.textContent).toContain('ollama-think')
+    expect(effort?.textContent).toContain('고정')
+    expect(container.textContent).not.toContain('카탈로그 미등재')
   })
 
   it('renders the context-window occupancy percent', () => {

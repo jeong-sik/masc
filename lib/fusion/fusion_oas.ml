@@ -206,7 +206,7 @@ let build_agent
          match max_tokens with
          | None -> Ok base_config
          | Some n when Fusion_policy.valid_max_output_tokens (Some n) ->
-           Ok { base_config with max_tokens = n }
+           Ok { base_config with max_tokens = Some n }
          | Some n -> Error (Fusion_types.Invalid_max_output_tokens n)
        in
        (match base_config with

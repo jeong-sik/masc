@@ -26,7 +26,19 @@ import {
   type RuntimeRoutingLane,
 } from '../api/dashboard.js'
 import { callMcpTool } from '../api/mcp'
-import { shellConfigResolution, shellRuntimeResolution } from '../store'
+import {
+  refreshShell,
+  shellAuthSummary,
+  shellConfigResolution,
+  shellRuntimeResolution,
+} from '../store'
+import {
+  clearStoredToken,
+  currentDashboardActor,
+  dashboardBearerToken,
+  getStoredTokenMeta,
+  isRemoteAccess,
+} from '../api/core'
 import type { DashboardConfigResolutionItem } from '../types'
 import { RuntimeTomlEditor } from './runtime-toml-editor'
 import { SettingsRepositoriesSection } from './settings-repositories'
@@ -34,8 +46,22 @@ import { FusionSettingsPanel } from './fusion-settings-panel'
 import { PromptRegistryPanel } from './tools/prompt-registry-panel'
 import { ThemeSwitch } from './theme-switch'
 import { StatusChip } from './common/status-chip'
+import { showToast } from './common/toast'
+import { Checkbox } from './common/checkbox'
+import { ActionButton } from './common/button'
 import { logDisplayKind } from './log-classification'
 import { tweaksDensity, type Density } from './tweaks-panel'
+import {
+  NOTIFY_EVENT_KINDS,
+  NOTIFY_EVENT_LABELS,
+  notificationDeliveryError,
+  notificationPermission,
+  notifyRules,
+  refreshNotificationPermission,
+  requestNotificationPermission,
+  setNotifyRuleEnabled,
+  type NotifyEventKind,
+} from '../notifications'
 import type { ComponentChildren } from 'preact'
 import { errorToString } from '../lib/format-string'
 import { refreshRuntimeConfigConsumers } from '../lib/runtime-config-refresh'
@@ -65,9 +91,10 @@ export type SettingsControlInventoryItem = {
   readonly action: string
 }
 const SETTINGS_ROUTE_SECTION_SET = new Set<string>(SETTINGS_ROUTE_SECTION_IDS)
-const DEFAULT_SETTINGS_SECTION: SectionId = 'runtime'
+const DEFAULT_SETTINGS_SECTION: SectionId = 'account'
 
 const SET_SECTIONS: [SectionId, string, string][] = [
+  ['account', 'Account', '계정'],
   ['runtime', 'Runtime', '런타임'],
   ['routing', 'Routing', '모델 라우팅'],
   ['runtimes', 'Runtimes', '런타임 관리'],
@@ -81,11 +108,12 @@ const SET_SECTIONS: [SectionId, string, string][] = [
   ['display', 'Display', '표시'],
 ]
 
-// keeper-v2 design settings.jsx SET_GROUPS의 부분 채택: account/lifecycle/
+// keeper-v2 design settings.jsx SET_GROUPS의 부분 채택: lifecycle/
 // sandbox/gate 섹션은 백엔드 계약 부재로 미구현이라 그룹에서 빠져 있고,
 // 디자인이 nav에서 뺀 mcp/display는 live-backed 동작 섹션이라 유지한다
 // (docs/design/keeper-v2-design-delta-audit-2026-07-03.md).
 const SET_GROUPS: [string, SectionId[]][] = [
+  ['계정', ['account']],
   ['Keeper 운영', ['runtime', 'routing', 'prompts', 'fusion']],
   ['인프라 · 실행', ['runtimes', 'paths']],
   ['연결 · 통합', ['mcp', 'repositories']],
@@ -103,6 +131,14 @@ const SETTINGS_LOG_POLL_MS = 3000
 const DISPLAY_DENSITY_OPTIONS: Density[] = ['compact', 'regular', 'spacious']
 
 const SETTINGS_CONTROL_INVENTORY: readonly SettingsControlInventoryItem[] = [
+  {
+    id: 'account-auth-summary',
+    section: 'account',
+    label: 'Dashboard auth session',
+    kind: 'live-read',
+    source: 'dashboard shell auth projection + browser token store',
+    action: 'clear local token and refresh shell auth truth',
+  },
   {
     id: 'runtime-default-runtime',
     section: 'runtime',
@@ -178,10 +214,10 @@ const SETTINGS_CONTROL_INVENTORY: readonly SettingsControlInventoryItem[] = [
   {
     id: 'settings-notify-routing',
     section: 'notify',
-    label: 'Notification routing',
-    kind: 'unsupported',
-    source: 'no dashboard writer exposed',
-    action: 'render read-only unsupported state',
+    label: 'Browser notification delivery',
+    kind: 'browser-local',
+    source: 'Notification permission + dashboard:notify:rules-v1 localStorage',
+    action: 'browser-local writer; delivers on typed SSE events the operator opts into',
   },
   {
     id: 'settings-prompts',
@@ -370,6 +406,78 @@ function SettingsControlLedger({ section }: { section: SectionId }) {
         `)}
       </div>
     </section>
+  `
+}
+
+function AccountSettingsSection() {
+  const [clearing, setClearing] = useState(false)
+  const summary = shellAuthSummary.value
+  const actor = summary?.effective_agent ?? summary?.token_agent ?? currentDashboardActor()
+  const role = summary?.effective_role ?? summary?.default_role ?? 'unknown'
+  const tokenPresent = dashboardBearerToken() !== null
+  const tokenMeta = getStoredTokenMeta()
+  const tokenState = summary?.token_valid === true
+    ? 'verified'
+    : summary?.token_present === true || tokenPresent
+      ? 'unverified'
+      : 'not configured'
+
+  async function clearAccountToken() {
+    if (clearing || !tokenPresent) return
+    setClearing(true)
+    try {
+      clearStoredToken()
+      const refreshed = await refreshShell({ force: true })
+      if (!refreshed) {
+        showToast('Token은 지웠지만 auth 상태를 다시 확인하지 못했습니다.', 'error')
+        return
+      }
+      showToast('Dashboard token을 지우고 auth 상태를 다시 확인했습니다.', 'success')
+    } catch (error) {
+      showToast(`Auth 갱신 실패: ${errorToString(error)}`, 'error')
+    } finally {
+      setClearing(false)
+    }
+  }
+
+  return html`
+    <div class="set-account" data-testid="settings-account-live">
+      <div class="set-hint">
+        현재 dashboard shell이 검증한 actor·role과 이 브라우저에 저장된 Bearer token 상태입니다.
+        토큰 생성·재발급 writer는 이 화면에 없으므로 지원한다고 가장하지 않습니다.
+      </div>
+      <${SetRow} label="운영자" hint="Effective dashboard actor">
+        <div class="set-truth-value">
+          <span class="mono">@${actor}</span>
+          <span class="set-truth-source">${isRemoteAccess() ? 'remote access' : 'local access'}</span>
+        </div>
+      <//>
+      <${SetRow} label="역할" hint="Server-resolved effective role">
+        <span class="set-role-chip mono">${role}</span>
+      <//>
+      <${SetRow} label="API token" hint="Browser token store · MCP/dashboard authentication">
+        <div class="set-account-token" data-testid="settings-account-token-presence">
+          <span class=${`set-account-token-presence ${tokenPresent ? 'stored' : 'absent'}`}>
+            ${tokenPresent ? '브라우저에 저장됨' : '저장된 token 없음'}
+          </span>
+          ${tokenMeta
+            ? html`<span class="set-truth-source mono">source:${tokenMeta.source}${tokenMeta.scope ? ` · scope:${tokenMeta.scope}` : ''}</span>`
+            : null}
+        </div>
+      <//>
+      <${SetRow} label="검증 상태" hint=${summary?.auth_error_code ?? 'shell auth projection'}>
+        <span class=${`set-account-state ${tokenState}`}>${tokenState}</span>
+      <//>
+      ${summary?.auth_error_detail
+        ? html`<div class="set-account-error" role="status">${summary.auth_error_detail}</div>`
+        : null}
+      <button
+        type="button"
+        class="set-account-clear"
+        disabled=${!tokenPresent || clearing}
+        onClick=${() => { void clearAccountToken() }}
+      >${clearing ? '정리 중…' : '저장된 token 지우기'}</button>
+    </div>
   `
 }
 
@@ -734,6 +842,70 @@ function ThresholdTruthRow({
   `
 }
 
+// notify-permission / notify-rule-toggle — browser-local writer for
+// masc issue #54's browser notification path. notificationPermission and
+// notifyRules are @preact/signals values owned by ../notifications; reading
+// `.value` here subscribes this render the same way `tweaksDensity.value`
+// does above for display/density.
+function NotifyPermissionRow() {
+  const permission = notificationPermission.value
+  const deliveryError = notificationDeliveryError.value
+  const handleEnable = () => { void requestNotificationPermission() }
+  useEffect(() => {
+    const refresh = () => { refreshNotificationPermission() }
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') refresh()
+    }
+    refresh()
+    window.addEventListener('focus', refresh)
+    document.addEventListener('visibilitychange', refreshWhenVisible)
+    return () => {
+      window.removeEventListener('focus', refresh)
+      document.removeEventListener('visibilitychange', refreshWhenVisible)
+    }
+  }, [])
+  return html`
+    <${SetRow} label="Browser notifications" hint="This browser's Notification permission — requested only when you click Enable">
+      <div class="set-truth-value" data-testid="notify-permission-state">
+        <span class="mono" data-testid="notify-permission-value">${permission}</span>
+        ${permission === 'default'
+          ? html`<${ActionButton} variant="primary" size="sm" testId="notify-permission-request" onClick=${handleEnable}>Enable notifications<//>`
+          : null}
+        ${permission === 'denied'
+          ? html`<span class="set-truth-source">Blocked — re-enable from this browser's site permissions for this page.</span>`
+          : null}
+        ${permission === 'unsupported'
+          ? html`<span class="set-truth-source">This browser has no Notification API.</span>`
+          : null}
+        ${permission === 'granted'
+          ? html`<span class="set-truth-source">Enabled</span>`
+          : null}
+        ${deliveryError
+          ? html`<span class="set-truth-source text-[var(--color-status-danger)]" data-testid="notify-delivery-error">${deliveryError}</span>`
+          : null}
+      </div>
+    <//>
+  `
+}
+
+function NotifyEventToggleRow({ kind }: { kind: NotifyEventKind }) {
+  const enabled = notifyRules.value[kind] ?? true
+  const label = NOTIFY_EVENT_LABELS[kind]
+  return html`
+    <${SetRow} label=${label} hint=${kind}>
+      <label class="set-truth-value v2-mobile-operator-target" data-testid=${`notify-rule-row-${kind}`}>
+        <${Checkbox}
+          checked=${enabled}
+          ariaLabel=${`Notify on ${label}`}
+          testId=${`notify-rule-toggle-${kind}`}
+          onChange=${(next: boolean) => setNotifyRuleEnabled(kind, next)}
+        />
+        <span class="set-truth-source">${enabled ? 'notify' : 'muted'}</span>
+      </label>
+    <//>
+  `
+}
+
 function PathTruthRow({
   label,
   item,
@@ -766,6 +938,7 @@ function settingsSectionState(
   section: SectionId,
   pathResolutionAvailability: PathResolutionAvailability = 'ready',
 ): { mode: SettingsSectionMode; label: string } {
+  if (section === 'account') return { mode: 'mixed', label: 'live auth + browser token' }
   if (section === 'runtime') return { mode: 'live', label: 'runtime.toml + provider catalog' }
   if (section === 'routing') return { mode: 'live', label: 'runtime.toml live-backed' }
   if (section === 'runtimes') return { mode: 'live', label: 'runtime.toml live-backed' }
@@ -1181,13 +1354,7 @@ export function SettingsSurface() {
   const runtimeCatalogEntries = runtimeProviders?.providers ?? []
   const runtimeConfigPath = runtimeResolved?.config_path ?? null
   const defaultRuntimeId = runtimeResolved?.default_runtime?.id ?? null
-  // bug #14: the full keeper fleet joined against [runtime.assignments],
-  // including keepers riding [runtime].default with no explicit entry
-  // (assignment_source: "explicit" | "default") — not an assignments-only
-  // listing.
-  const keeperAssignments = runtimeResolved?.assignments ?? []
   const runtimeCount = runtimeResolved?.runtimes.length ?? 0
-  const keeperAssignmentCount = keeperAssignments.length
   const librarianRuntime = runtimeDefaults?.model_routing.librarian_runtime_id ?? null
   const structuredJudgeRuntime = runtimeDefaults?.model_routing.structured_judge_runtime_id ?? null
   const hitlSummaryRuntime = runtimeDefaults?.model_routing.hitl_summary_runtime_id ?? null
@@ -1221,7 +1388,6 @@ export function SettingsSurface() {
   const ctxHandoffEntry = configEntry(dashboardConfig, 'MASC_DASHBOARD_CTX_HANDOFF_IMMINENT')
   const runtimeWarningEntry = configEntry(dashboardConfig, 'MASC_DASHBOARD_RUNTIME_WARNING_CTX_RATIO')
   const signalStaleEntry = configEntry(dashboardConfig, 'MASC_DASHBOARD_SIGNAL_STALE_SEC')
-  const alertDedupEntry = configEntry(dashboardConfig, 'MASC_ALERT_DEDUP_WINDOW_SEC')
 
   return html`
     <main class="v2-shell-surface settings-surf ss-surface bg-surface-page text-text-primary" data-screen-label="설정" data-testid="settings-surface">
@@ -1270,11 +1436,14 @@ export function SettingsSurface() {
           </header>
 
           <div
-            class=${`set-card-b mx-6 my-6 ${sec === 'runtime' || sec === 'routing' || sec === 'runtimes' || sec === 'paths' || sec === 'mcp' || sec === 'repositories' || sec === 'notify' || sec === 'prompts' || sec === 'fusion' ? 'set-card-b-wide' : 'ss-card'}`}
+            class=${`set-card-b mx-6 my-6 ${sec === 'account' || sec === 'runtime' || sec === 'routing' || sec === 'runtimes' || sec === 'paths' || sec === 'mcp' || sec === 'repositories' || sec === 'notify' || sec === 'prompts' || sec === 'fusion' ? 'set-card-b-wide' : 'ss-card'}`}
             data-preview-locked="false"
             data-settings-mode=${sectionState.mode}
           >
             <${SettingsControlLedger} section=${sec} />
+            ${sec === 'account' && html`
+              <${AccountSettingsSection} />
+            `}
             ${sec === 'mcp' && html`
               <div class="set-hint" style=${{ marginBottom: '12px' }}>
                 현재 대시보드가 사용하는 HTTP MCP 서버 상태와 public MCP 도구 노출 목록입니다. 도구 노출은 서버 capability registry가 SSOT입니다.
@@ -1351,10 +1520,6 @@ export function SettingsSurface() {
                     <div class="set-rt-launch-stat">
                       <span class="v mono">${runtimeCatalogEntries.length}</span>
                       <span class="k">catalog entries</span>
-                    </div>
-                    <div class="set-rt-launch-stat">
-                      <span class="v mono">${keeperAssignmentCount}</span>
-                      <span class="k">keeper assignments</span>
                     </div>
                   </div>
                   ${runtimeSelectOptions.length > 0
@@ -1495,29 +1660,6 @@ export function SettingsSurface() {
                         : null}
                   </div>
                 </div>
-
-                <div class="settings-runtime-section" data-runtime-section="assignments" data-testid="runtime-assignments-section">
-                  <div class="set-sub-h">Keeper assignments (${keeperAssignments.length})</div>
-                  ${runtimeResolvedStatus === 'loading'
-                    ? html`<div class="set-hint" data-testid="routing-assignments-loading">resolved assignments 불러오는 중...</div>`
-                    : runtimeResolvedStatus === 'error'
-                      ? html`<div class="set-hint" data-testid="routing-assignments-error">resolved assignments를 불러오지 못했습니다.</div>`
-                      : keeperAssignments.length === 0
-                        ? html`<div class="set-hint" data-testid="routing-assignments-empty">등록된 keeper assignment가 없습니다.</div>`
-                        : html`<div class="settings-runtime-routing" data-testid="routing-assignments-list">
-                      ${keeperAssignments.map(a => html`
-                        <div class="set-routing-row" key=${a.keeper}>
-                          <span class="mono">${a.keeper}</span>
-                          <span class="set-hint" data-testid="routing-assignment-source">${a.assignment_source}</span>
-                          <span class="set-routing-arrow">→</span>
-                          <span class="mono" data-testid="routing-assignment">${a.resolved.id ?? '—'}</span>
-                        </div>
-                      `)}
-                    </div>`}
-                  <div class="set-hint" style=${{ marginTop: '8px' }}>
-                    키퍼별 고정 배정(<span class="mono">[runtime.assignments]</span>) 편집은 런타임 관리에서.
-                  </div>
-                </div>
               </div>
             `}
 
@@ -1640,7 +1782,7 @@ export function SettingsSurface() {
 
             ${sec === 'notify' && html`
               <div class="set-hint" style=${{ marginBottom: '12px' }}>
-                알림 임계값은 현재 서버 config projection에서 읽습니다. 이 화면은 아직 알림 라우팅 writer를 노출하지 않으므로 브라우저-only 토글을 만들지 않습니다.
+                알림 임계값은 서버 config projection에서 읽는 실측값입니다. 브라우저 알림 전달 규칙(아래)은 이 브라우저에만 저장되며 서버 설정을 그림자화하지 않습니다.
               </div>
               ${dashboardConfigStatus === 'loading'
                 ? html`<div class="set-hint" data-testid="notify-config-loading">알림 임계값을 불러오는 중...</div>`
@@ -1669,15 +1811,11 @@ export function SettingsSurface() {
                         value=${formatThresholdPercent(configEntryDisplayValue(runtimeWarningEntry))}
                       />
                       <${ConfigTruthRow} label="Signal stale seconds" entry=${signalStaleEntry} />
-                      <${ConfigTruthRow} label="Alert dedup window" entry=${alertDedupEntry} />
-                      <${SetRow} label="Notification routing" hint="No dashboard writer is exposed for alert channels or event toggles yet">
-                        <div class="set-truth-value" data-testid="notify-routing-readonly">
-                          <span class="mono">read-only</span>
-                          <span class="set-truth-source">no writer</span>
-                        </div>
-                      <//>
                     </div>
                   `}
+              <div class="set-sub-h">Browser notification delivery</div>
+              <${NotifyPermissionRow} />
+              ${NOTIFY_EVENT_KINDS.map(kind => html`<${NotifyEventToggleRow} key=${kind} kind=${kind} />`)}
             `}
 
             ${sec === 'display' && html`

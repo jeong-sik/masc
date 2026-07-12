@@ -22,6 +22,7 @@ type t =
   | PacingShadowEvents
   | PacingShadowNextDueSec
   | FailureRoute
+  | FailureJudgmentOutcome
   | FailureDrivenPause
   | IdleSeconds
   | ContractViolations
@@ -70,6 +71,7 @@ type t =
   | WriteMetaFailures
   | MetaReadFailures
   | ApprovalQueueFailures
+  | ApprovalResolutionSignal
   | GuardsFailures
   | ProfileLoadFailures
   | CompactAuditFailures
@@ -117,7 +119,6 @@ type t =
   | DecisionAuditFlushFailures
   | OasCancel
   | ClaimAutoProvision
-  | TomlInvalid
   | PersonaDriftMissing
   | WorkspaceInitFailures
   | PresenceSyncFailures
@@ -259,6 +260,7 @@ type t =
       (* counter: RFC-0320 W3c continuation delivery outcome; label=outcome_tag
          (Delivered/Skipped_unrouted/Skipped_already_replied/Skipped_empty/Failed).
          G5 observability — a dropped/unrouted continuation must never be silent. *)
+[@@deriving enumerate]
 
 (** String conversion
 
@@ -279,6 +281,7 @@ let to_string = function
   | PacingShadowEvents -> "masc_keeper_pacing_shadow_events_total"
   | PacingShadowNextDueSec -> "masc_keeper_pacing_shadow_next_due_sec"
   | FailureRoute -> "masc_keeper_failure_route_total"
+  | FailureJudgmentOutcome -> "masc_keeper_failure_judgment_outcome_total"
   | FailureDrivenPause -> "masc_keeper_failure_driven_pause_total"
   | IdleSeconds -> "masc_keeper_idle_seconds"
   | ContractViolations -> "masc_keeper_contract_violations_total"
@@ -330,6 +333,7 @@ let to_string = function
   | WriteMetaFailures -> "masc_keeper_write_meta_failures_total"
   | MetaReadFailures -> "masc_keeper_meta_read_failures_total"
   | ApprovalQueueFailures -> "masc_keeper_approval_queue_failures_total"
+  | ApprovalResolutionSignal -> "masc_keeper_approval_resolution_signal_total"
   | GuardsFailures -> "masc_keeper_guards_failures_total"
   | ProfileLoadFailures -> "masc_keeper_profile_load_failures_total"
   | CompactAuditFailures -> "masc_keeper_compact_audit_failures_total"
@@ -381,7 +385,6 @@ let to_string = function
   | DecisionAuditFlushFailures -> "masc_keeper_decision_audit_flush_failures_total"
   | OasCancel -> "masc_keeper_oas_cancel_total"
   | ClaimAutoProvision -> "masc_keeper_claim_auto_provision_total"
-  | TomlInvalid -> "masc_keeper_toml_invalid_total"
   | PersonaDriftMissing -> "masc_keeper_persona_drift_missing_total"
   | WorkspaceInitFailures -> "masc_keeper_workspace_init_failures_total"
   | PresenceSyncFailures -> "masc_keeper_presence_sync_failures_total"
@@ -537,76 +540,6 @@ let to_string = function
   | WireCaptureWriteFailures -> "masc_keeper_wire_capture_write_failures_total"
   | WireCaptureRecordSkipped -> "masc_keeper_wire_capture_record_skipped_total"
   | ContinuationDeliveryOutcome -> "masc_keeper_continuation_delivery_outcome_total"
-;;
-
-(* Every constructor of [t], in declaration order.  Consumed by
-   [register_zero_fill] below.  The compiler cannot enforce membership
-   here (no enumerate ppx in this repo): when you add a constructor,
-   exhaustiveness already forces you to edit [to_string] in this file --
-   add the constructor to [all] in the same edit. *)
-let all : t list =
-  [ Turns; InputTokens; OutputTokens; CacheCreationTokens;
-    CacheReadTokens; UsageAnomalies; TotalCostUsd; TurnScheduled;
-    TurnCompleted; PacingShadowEvents; PacingShadowNextDueSec; FailureRoute; FailureDrivenPause; IdleSeconds; ContractViolations; MetricEmitDropped;
-    ContextMaxObserved; TurnStarts; TurnReattempts; TurnRegressions;
-    TurnLivelockBlocks; TurnLivelockBlocksRepeated; TurnLivelockBlocksThresholdPark; TurnLatencyBucket;
-    TurnLatencyByModelBucket; ProviderCooldownSkip; ProviderCooldownRemainingSec; ProviderBlockDurationSec;
-    TurnQueueDepth; SupervisorSweepStarts; SupervisorLastSweepUnixtime; DomainPoolFork;
-    TurnHolderBookkeepingFailures; Compactions; CompactionRatioChange; CompactionSavedTokens;
-    CompactionPairRepairDrops; EmergencyCompactRatioThreshold; OperatorCompact; OperatorClear;
-    CompactionNoop; ToolPairRepair; ToolEmissionRegistrySize; ToolEmissionPushes;
-    ToolUnderusedAllowedCount; ToolUnderusedAllowed; PathRejection; IdeOrphanWrites;
-    PathResolverIdentityMismatch; KeeperMetaOverlayDrift; HeartbeatSuccesses; HeartbeatFailures; CleanupTrackingFailures;
-    DispatchEventFailures; DirectiveFailures; ToolCallDuration; ToolCallDurationBucket; WriteMetaFailures;
-    MetaReadFailures; ApprovalQueueFailures; GuardsFailures; ProfileLoadFailures;
-    CompactAuditFailures; CompactAuditRetentionParse; CompactAuditDrainBatches; CompactAuditDrainBatchSizeBucket;
-    FsFailures; CrashPersistenceFailures; GenerationLineageFailures; KeepaliveSignalFailures;
-    BoardSignalWakeupCappedTotal; BoardSignalNoWakeTotal; BoardSignalAttentionCandidateTotal; MetaJsonFailures; ToolsOasFailures;
-    ToolsOasDeterministicFailures; TurnUpUpdateFailures; AgentToolDispatchRuntimeFailures; CircuitBreakerTrips;
-    PromptFailures; RunContextFailures; SearchFilesFailures; TagDispatchFailures;
-    TraceEmitFailures; TransitionAuditFailures; ExecutionReceiptFailures; OperatorBroadcastSuppressed;
-    LlmBridgeFailures; SessionCleanupFailures; ToolExecuteFailures; RolloverFailures;
-    LifecycleDispatchRejections; RecordingErrorDedup; PausedStatePersistErrors; UnexpectedToolPartialTolerance;
-    ToolCallTotal; ProfileConfigConflicts; OasTimeoutClassifications; NoToolProvider;
-    ProactiveOutcome; OllamaSaturationSkip; TaskLoadFailures; ToolSelectionFailures;
-    ReconcileFailures; DecisionAuditFlushFailures; OasCancel;
-    ClaimAutoProvision; TomlInvalid; PersonaDriftMissing; WorkspaceInitFailures;
-    PresenceSyncFailures; SelfPreservationUniversal; StaleStormPaused; ProviderTimeoutLoopPaused;
-    TurnFailureStreakPaused;
-    CycleExceptions; SnapshotReadFailures; SnapshotWriteFailures; PromptUnknownToolTokens;
-    PromptTokenStripped;
-    SseBroadcastFailures; WorkspaceHeartbeatFailures; TurnMetricsSnapshotFailures; OasExecutionErrors;
-    EpisodeCreateFailures; MemoryActivityEmitFailures; SupervisorSweepFailures; TomlReconcileSweepFailures;
-    TomlReconcileDedup; ReconcileDisabled; ToolUsageFlushFailures; TurnTimeoutCommitted;
-    TurnErrorAfterTools; RuntimeSyncFailures; LocalDiscoveryFailures; ThinkingPersistFailures;
-    CheckpointFailures; DecisionAuditRingOverflows; ReplySkillRouteStrips; ReplySkillRouteLinesRemoved;
-    MemoryLlmSummaryOutcomes; MemoryLlmSummaryChainExhausted; HitlSummaryOutcomes; UserVisibleReplySource;
-    OasEnvKeyRejections;
-    MemoryWriteFailures; MemoryLaneUnitFailures; MemoryConsolidations; MemoryLaneSubmitted; MemoryLaneRanInline; MemoryLaneDropped;
-    MemoryLanePending; MemoryLaneInFlight; MemoryLaneProviderSlotBusy; MemoryBankCompactionFailures; MemoryOsMaintenanceKeeperTimeout; WriteMetaCycleFailures; AlertPersistFailures;
-    MetricsSseFailures; ChatStoreFailures; ChatTransportFailures; PersonNoteStoreFailures; KeeperMaterializationFailures; ObservationQueryFailures; OasOnStop;
-    InvariantViolations; FsmEdgeTransitions; TurnFsmTransitions;
-    TurnPhaseDuration; LifecycleTransitions; LifecycleCallbackFailures; CompactionCallbackRecoveries;
-    EventBusDrain; SupervisorCleanupFailures; SpawnSlotDenied; RegistryUpdateDropped;
-    RegistryOrphanThresholdBreached; RegistryInvalidEntry; DeadTotal; AutoResumedTotal; AutoResumeBlockedTotal;
-    SkipIdleWakeResumed; EventQueueOverride; StimulusConsumed; UnsupportedStimulus;
-    NearExhaustionTotal; RestartAttempts; RestartOutcomes;
-    LastProductiveTs; ProviderTimeoutStrike; StaleTerminationTotal; StaleTerminationByClass;
-    ProviderTimeoutWatchdogTermination; StaleTerminationThresholdBreached; StaleTerminationBatch; StaleBroadcastEmitFailures;
-    OasRunTimeout; RuntimeSaturationSignal; RuntimeSelected; RuntimeRotation; ToolUseFailure; ToolNotAllowed;
-    TurnGateRejectedTerminal; ReceiptUnmappedDisposition; ExecuteNetworkUpgrade; ExecuteLocalExecution;
-    DockerRuntimeDiscarded; ProactiveSkip; NoProgressLoopDetected; NoProgressStreak; UsageTrust;
-    UsageAnomalyReason; ConfigEnvParseFailures; PostTurnWireinFailures; RecurringFailures;
-    TurnCleanupFailures; MemoryBankLoadHistorySwallowedExceptions; MemoryRecallReadErrors; MemoryOsRecallUnavailable; MemoryOsReobserveEchoSuppressed; RuntimeHttpProbeJsonParseFailures;
-    VisionAnalyze; VisionCandidateAttempts; VisionIngestEvictions; PromptSegmentBytes; PromptTemplateRenderOutcome; ToolCallParamCompleteness; KeeperTurnInstructionHash;
-    KeeperToolCallRetryLoop; AttemptWatchdogFired; ShellIrEffectTotal; ToolExecutePrActionTotal;
-    GhClassificationTotal; GatedGhLifecycleTotal; GatedGhBlockTimeSeconds;
-  KeeperRepoMappingDefaultScopeAllowed; KeeperRepoMappingDeniedUnregistered;
-  KeeperRepoMappingLoadError;
-  KeeperRepoMappingRepositoryIdentityMismatch; KeeperRepoMappingRepositoryStoreError;
-  RawTraceSinkDegraded; WireCaptureResponseSuppressed; WireCaptureWriteFailures;
-  WireCaptureRecordSkipped; ContinuationDeliveryOutcome
-  ]
 ;;
 
 let emit_runtime_selected ~keeper_name ~runtime_id ~fallback_reason =

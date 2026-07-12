@@ -15,29 +15,17 @@
 
 type activity_item = {
   id: string;
-  kind: string; [@default ""]
-  agent_name: string; [@default ""]
-  summary: string; [@default ""]
-  detail_json: Yojson.Safe.t; [@default `Null]
-  created_at: float; [@default 0.0]
-} [@@deriving yojson { strict = false }]
+  kind: string;
+  agent_name: string;
+  summary: string;
+  detail_json: Yojson.Safe.t;
+  created_at: float;
+} [@@deriving to_yojson]
 
-(** {1 JSON Serialization}
-
-    [activity_item_to_yojson] and [activity_item_of_yojson] are generated
-    by [ppx_deriving_yojson].  Legacy wrappers below keep the [option]
-    API for callers that haven't migrated to [result]. *)
+(** {1 JSON Serialization} *)
 
 let activity_item_to_json : activity_item -> Yojson.Safe.t =
   activity_item_to_yojson
-
-let activity_item_of_json (json : Yojson.Safe.t) : activity_item option =
-  match activity_item_of_yojson json with
-  | Ok item when item.id <> "" -> Some item
-  | Ok _ -> None
-  | Error msg ->
-    Log.Feed.warn "activity_item_of_json: %s" msg;
-    None
 
 (** {1 JSONL Helpers} *)
 

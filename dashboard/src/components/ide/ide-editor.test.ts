@@ -5,7 +5,7 @@ import { fireEvent, waitFor } from '@testing-library/preact'
 import { annotationRouteLinks, currentFileFindMatches, IdeEditor } from './ide-editor'
 import { createCodeDocumentStore } from './code-document-store'
 import { createKeeperLineOwnershipStore } from './keeper-line-ownership-store'
-import { activeIdeFile, focusIdeContextAnchor, ideContextFocus } from './ide-state'
+import { focusIdeContextAnchor, focusIdeFile, ideContextFocus } from './ide-state'
 import { ideConversationThreadSnapshot } from './ide-context-bridge'
 import { lspDiagnosticSnapshot } from './ide-lsp-client'
 import { cursorOverlaySignal } from './keeper-cursor-overlay'
@@ -17,7 +17,12 @@ describe('IdeEditor', () => {
 
   beforeEach(() => {
     container = document.createElement('div')
-    activeIdeFile.value = 'package.json'
+    focusIdeFile({
+      path: 'package.json',
+      origin: 'operator',
+      workspace_identity: { kind: 'project' },
+      availability: 'available',
+    })
     ideContextFocus.value = null
     setIdeReplayUntilMs(null)
     clearTraces()
@@ -72,6 +77,40 @@ describe('IdeEditor', () => {
       expect(container.textContent).toContain('3 lines')
       expect(container.querySelector('.cm-content')?.textContent).toContain('masc')
     })
+  })
+
+  it('shows observed keeper ownership in Source view, not only Blame view', async () => {
+    const documentStore = createCodeDocumentStore({
+      file_path: 'runtime.ts',
+      language: 'typescript',
+      content: 'const runtime = 1\n',
+    })
+    const ownershipStore = createKeeperLineOwnershipStore('runtime.ts')
+    ownershipStore.ingest({
+      file_path: 'runtime.ts',
+      line_start: 1,
+      line_end: 1,
+      keeper_id: 'sangsu',
+      timestamp_ms: 1,
+      kind: 'observed',
+    })
+
+    render(
+      h(IdeEditor, {
+        documentStore,
+        ownershipStore,
+        diffRows: () => [],
+      }),
+      container,
+    )
+
+    await waitFor(() => {
+      expect(container.querySelector('.cm-blame-gutter')).not.toBeNull()
+      expect(container.querySelector('[data-testid="ide-observation-summary"]')?.textContent)
+        .toContain('metadata pending')
+    })
+    expect(container.querySelector('.ide-codemirror-shell')?.getAttribute('data-view'))
+      .toBe('source-ownership')
   })
 
   it('finds current-file matches with case and whole-word options', () => {
@@ -663,7 +702,7 @@ describe('IdeEditor', () => {
           evidence: 'Fleet telemetry event log · query turn-9',
         },
       ],
-    })
+    }, 'operator')
 
     await waitFor(() => {
       expect(container.querySelector('[data-testid="ide-context-focus-status"]')?.textContent)

@@ -64,6 +64,12 @@
   background: var(--color-brass-soft);
 }
 
+.v2-ide-action:disabled,
+.v2-ide-toolbar .v2-ide-action:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 /* ── Rows (lists, tables) ─────────────────────────────────────────────────── */
 
 .v2-ide-row,

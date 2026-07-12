@@ -913,8 +913,13 @@ export function RuntimeEnvironmentEditor({
 
       <!-- models — runtime-editor.jsx:167-191. search + read-only chips. The
            model parse now reads [models.<id>.capabilities], so tool-choice /
-           json / structured / multimodal chips and the effort (thinking-control
-           -format) label render from the live config when the key is present. -->
+           json / structured / multimodal chips render from the live config
+           when the key is present. There is no effort/thinking-control-format
+           chip here: this list has no runtime binding, so there is no catalog
+           entry to resolve it against, and the raw thinking-control-format key
+           in runtime.toml is inert (OAS request-building never reads it — see
+           masc #21521 / oas models.toml). Showing it back to the operator here
+           invited editing a dead key as if it mattered. -->
       <div class=${section === 'models' ? '' : 'hidden'} data-testid="runtime-section-models">
         <input
           class="rt-search mono"
@@ -944,7 +949,6 @@ export function RuntimeEnvironmentEditor({
                 ${model.jsonSupport !== null ? capChip(model.jsonSupport, 'json') : null}
                 ${model.structuredOutput !== null ? capChip(model.structuredOutput, 'structured') : null}
                 ${model.multimodal !== null ? capChip(model.multimodal, 'multimodal') : null}
-                <span class="rt-cap tcf mono">effort: ${model.thinkingControlFormat ?? '없음'}</span>
               </div>
               <div class="rt-field" style=${{ marginTop: '9px' }}>
                 <span class="sub-k">max-ctx</span>
@@ -1025,7 +1029,7 @@ export function RuntimeEnvironmentEditor({
                   </select>
                 </div>
                 <div class="rt-check-row">
-                  <label class="rt-check">
+                  <label class="rt-check v2-mobile-operator-target">
                     <input
                       type="checkbox"
                       checked=${newModel.toolsSupport}
@@ -1033,7 +1037,7 @@ export function RuntimeEnvironmentEditor({
                       onChange=${(event: Event) => setNewModel({ ...newModel, toolsSupport: (event.currentTarget as HTMLInputElement).checked })}
                     /><span>tools</span>
                   </label>
-                  <label class="rt-check">
+                  <label class="rt-check v2-mobile-operator-target">
                     <input
                       type="checkbox"
                       checked=${newModel.thinkingSupport}
@@ -1041,7 +1045,7 @@ export function RuntimeEnvironmentEditor({
                       onChange=${(event: Event) => setNewModel({ ...newModel, thinkingSupport: (event.currentTarget as HTMLInputElement).checked })}
                     /><span>thinking</span>
                   </label>
-                  <label class="rt-check">
+                  <label class="rt-check v2-mobile-operator-target">
                     <input
                       type="checkbox"
                       checked=${newModel.streaming}
@@ -1050,7 +1054,7 @@ export function RuntimeEnvironmentEditor({
                     /><span>streaming</span>
                   </label>
                 </div>
-                <div class="rt-note">capability 세부 항목(tool-choice, thinking-control-format 등)은 runtime.toml 탭에서 편집하세요.</div>
+                <div class="rt-note">capability 세부 항목(tool-choice 등)은 runtime.toml 탭에서 편집하세요.</div>
                 ${modelFormError ? html`<div class="rt-warn" role="alert" data-testid="runtime-add-model-error">${modelFormError}</div>` : null}
                 <div class="rt-add-actions">
                   <button
@@ -1076,8 +1080,12 @@ export function RuntimeEnvironmentEditor({
       <!-- bindings — runtime-editor.jsx:193-214. radio sets the default runtime;
            max-conc / keep-alive / num-ctx edit the draft runtime.toml and are
            applied through the existing validated Save path. The sub-line shows
-           context, the model effort mode, and per-M price when the binding
-           declares price-input/price-output (runtime_toml.ml:600-601). -->
+           context and per-M price when the binding declares
+           price-input/price-output (runtime_toml.ml:600-601). The effort mode
+           is NOT shown here — it lives in the catalog-derived "effective" row
+           rendered by RuntimeBindingCatalogSpec just below, which is the value
+           OAS request-building actually uses (the raw runtime.toml
+           thinking-control-format key is inert; masc #21521). -->
       <div class=${section === 'bindings' ? '' : 'hidden'} data-testid="runtime-section-bindings">
         <div class="rt-binds">
           <div class="rt-note">
@@ -1138,9 +1146,7 @@ export function RuntimeEnvironmentEditor({
                     ${binding.id}${isDefault ? html`<span class="rt-default-tag">default</span>` : null}
                   </div>
                   <div class="rt-bind-sub mono">
-                    ${protoContext(model?.maxContext ?? null)}${model?.thinkingControlFormat
-                      ? html` · effort ${model.thinkingControlFormat}`
-                      : null}${binding.priceInput != null
+                    ${protoContext(model?.maxContext ?? null)}${binding.priceInput != null
                       ? html` · $${binding.priceInput}/$${binding.priceOutput ?? '—'} per M`
                       : null}
                   </div>

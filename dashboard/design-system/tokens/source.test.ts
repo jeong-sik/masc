@@ -58,4 +58,12 @@ describe('design-system token SSOT (source.ts) integrity', () => {
     const missing = source.bonsai.invariantRoleNames.filter((n) => !roleNames.has(n))
     expect(missing).toEqual([])
   })
+
+  it('defines the mobile operator hit target as a semantic spacing role', () => {
+    expect(SEMANTIC.find((token) => token.name === 'mobile-touch-target-min')).toMatchObject({
+      value: 'calc(var(--grid-unit) * 5)',
+      tier: 'role',
+      kind: 'dimension',
+    })
+  })
 })

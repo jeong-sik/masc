@@ -61,7 +61,6 @@ let is_transient_internal_runner_error (err : Agent_sdk.Error.sdk_error) : bool 
       | Keeper_turn_driver.Admission_queue_rejected _
       | Keeper_turn_driver.Provider_timeout _
       | Keeper_turn_driver.Turn_timeout _
-      | Keeper_turn_driver.Max_tokens_ceiling_violation _
       | Keeper_turn_driver.Ambiguous_post_commit _
       | Keeper_turn_driver.Internal_bridge_exception _
       | Keeper_turn_driver.Internal_contract_rejected _ )
@@ -283,7 +282,6 @@ let is_auto_recoverable_runtime_exhausted_error (err : Agent_sdk.Error.sdk_error
   | Some (Keeper_turn_driver.Admission_queue_timeout _)
   | Some (Keeper_turn_driver.Turn_timeout _)
   | Some (Keeper_turn_driver.Provider_timeout _)
-  | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
   | Some (Keeper_turn_driver.Ambiguous_post_commit _)
   (* RFC-0159 Phase A: opaque internal failures. *)
   | Some (Keeper_turn_driver.Internal_unhandled_exception _)
@@ -302,7 +300,6 @@ let is_resumable_cli_session_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Keeper_turn_driver.Admission_queue_rejected _)
   | Some (Keeper_turn_driver.Turn_timeout _)
   | Some (Keeper_turn_driver.Provider_timeout _)
-  | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
   | Some (Keeper_turn_driver.Ambiguous_post_commit _)
   (* RFC-0159 Phase A: opaque internal failures. *)
   | Some (Keeper_turn_driver.Internal_unhandled_exception _)
@@ -333,7 +330,6 @@ let is_accept_no_usable_progress_error (err : Agent_sdk.Error.sdk_error) : bool 
       | Keeper_turn_driver.Admission_queue_timeout _
       | Keeper_turn_driver.Turn_timeout _
       | Keeper_turn_driver.Provider_timeout _
-      | Keeper_turn_driver.Max_tokens_ceiling_violation _
       | Keeper_turn_driver.Ambiguous_post_commit _
       | Keeper_turn_driver.Internal_unhandled_exception _
       | Keeper_turn_driver.Internal_bridge_exception _
@@ -484,7 +480,6 @@ let degraded_retry_after_recoverable_error
     | Some
         (Keeper_turn_driver.Runtime_exhausted _)
     | Some (Keeper_turn_driver.Admission_queue_rejected _)
-    | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
     | Some (Keeper_turn_driver.Ambiguous_post_commit _)
     (* RFC-0159 Phase A: opaque internal failures have no
        local-recovery retry mapping. *)
@@ -530,7 +525,6 @@ let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
     | Some (Keeper_turn_driver.Accept_rejected _) ->
         accept_rejection_degraded_retry_reason err
     | Some (Keeper_turn_driver.Admission_queue_rejected _)
-    | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
     | Some (Keeper_turn_driver.Ambiguous_post_commit _)
     (* RFC-0159 Phase A: typed [Internal_*] variants are not runtime-rotation
        reasons; they expose previously-opaque raw exception payloads.  *)
@@ -763,7 +757,6 @@ let is_completion_contract_violation (err : Agent_sdk.Error.sdk_error) : bool =
       | Keeper_turn_driver.Admission_queue_rejected _
       | Keeper_turn_driver.Turn_timeout _
       | Keeper_turn_driver.Provider_timeout _
-      | Keeper_turn_driver.Max_tokens_ceiling_violation _
       | Keeper_turn_driver.Ambiguous_post_commit _
       | Keeper_turn_driver.Internal_unhandled_exception _
       | Keeper_turn_driver.Internal_bridge_exception _
@@ -930,7 +923,6 @@ let should_warn_keeper_cycle_failed (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Keeper_turn_driver.Admission_queue_rejected _)
   | Some (Keeper_turn_driver.Provider_timeout _)
   | Some (Keeper_turn_driver.Turn_timeout _)
-  | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
   | Some (Keeper_turn_driver.Ambiguous_post_commit _)
   (* RFC-0159 Phase A: opaque internal failures should not trigger the
      keeper-cycle-failed WARN by themselves; the surrounding handler
@@ -1008,7 +1000,6 @@ let is_runtime_exhausted_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Keeper_turn_driver.Admission_queue_rejected _)
   | Some (Keeper_turn_driver.Provider_timeout _)
   | Some (Keeper_turn_driver.Turn_timeout _)
-  | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
   | Some (Keeper_turn_driver.Ambiguous_post_commit _)
   (* RFC-0159 Phase A: opaque internal failures are not runtime exhaustion. *)
   | Some (Keeper_turn_driver.Internal_unhandled_exception _)

@@ -94,3 +94,8 @@ val dispatchable_names : string list
     text-cache to absorb repeated dashboard polls; cache
     invalidates on workspace state mutations. *)
 val dispatch : context -> name:string -> args:Yojson.Safe.t -> Tool_result.result option
+
+(** Keeper-model dispatch uses Keeper-facing semantic capability names in
+    rendered follow-up guidance. *)
+val dispatch_for_keeper :
+  context -> name:string -> args:Yojson.Safe.t -> Tool_result.result option

@@ -1394,7 +1394,8 @@
      is the whole point of a phone glance) — drop only the passive run-count */
   .v2-top { gap: 8px; padding: 0 12px; height: 46px; }
   .v2-statchip.live { display: none; }
-  .v2-statchip { padding: 5px 9px; font-size: 10.5px; gap: 5px; }
+  .v2-statchip { min-width: var(--mobile-touch-target-min); min-height: var(--mobile-touch-target-min); padding: 5px 9px; font-size: 10.5px; gap: 5px; }
+  .attn-row { min-width: var(--mobile-touch-target-min); min-height: var(--mobile-touch-target-min); }
   .v2-top .crumb { font-size: var(--fs-10); letter-spacing: 0.06em; max-width: 36vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .topbar-copilot kbd { display: none; }
   /* reading a 1:1 thread — the co-view trigger is redundant */
@@ -1511,7 +1512,7 @@
 .v2-statchip.attn.bad { color: var(--status-bad); border-color: color-mix(in oklab, var(--status-bad) 48%, transparent); background: color-mix(in oklab, var(--status-bad) 9%, transparent); }
 .v2-statchip.attn b { color: inherit; }
 .v2-statchip.attn:hover { border-color: currentColor; }
-.attn-menu { position: absolute; top: 34px; right: 0; z-index: 80; min-width: 220px; padding: 6px; background: var(--bg-panel); border: 1px solid var(--border-highlight); border-radius: var(--radius-md); box-shadow: var(--shadow-pop); animation: cmdk-pop 0.14s ease; }
+.attn-menu { position: absolute; top: calc(100% + var(--sp-1h)); right: 0; z-index: 80; min-width: 220px; padding: 6px; background: var(--bg-panel); border: 1px solid var(--border-highlight); border-radius: var(--radius-md); box-shadow: var(--shadow-pop); animation: cmdk-pop 0.14s ease; }
 .attn-menu-h { font-size: var(--fs-10); letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-dim); padding: 6px 8px 8px; }
 .attn-row { display: flex; align-items: center; gap: 9px; width: 100%; padding: 8px 9px; background: none; border: 0; border-radius: var(--radius-xs); color: var(--text-mid); font-family: var(--font-ui); font-size: 12.5px; text-align: left; cursor: pointer; transition: 0.12s; }
 .attn-row:hover { background: var(--bg-card); color: var(--text-bright); }

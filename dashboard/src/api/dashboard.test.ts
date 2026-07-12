@@ -18,6 +18,7 @@ import {
   fetchDashboardGoalsTree,
   fetchDashboardBriefing,
   fetchDashboardTools,
+  parseDashboardKeeperWaitingSource,
   fetchKeeperToolCalls,
   fetchKeeperToolStats,
   fetchKeeperCompactionSnapshots,
@@ -891,6 +892,13 @@ describe('fetchTlcResults', () => {
 })
 
 describe('fetchDashboardTools', () => {
+  it('parses the shutdown admission source without accepting source drift', () => {
+    expect(parseDashboardKeeperWaitingSource('turn_admission_shutdown')).toBe('turn_admission_shutdown')
+    expect(parseDashboardKeeperWaitingSource(' turn_admission_shutdown ')).toBeNull()
+    expect(parseDashboardKeeperWaitingSource('turn_admission_stopping')).toBeNull()
+    expect(parseDashboardKeeperWaitingSource(null)).toBeNull()
+  })
+
   it('fills missing category and tier with defaults', async () => {
     const rawResponse = {
       tool_inventory: {
@@ -2848,6 +2856,40 @@ describe('fetchRuntimeProviders', () => {
     expect(result.startup_degradation?.dropped_routes[0]?.route_name).toBe('runtime.librarian')
     expect(result.startup_degradation?.dropped_lane_candidates[0]?.lane_id).toBe('coding')
   })
+
+  it('preserves thinking-control wires without duplicating the server enum', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        providers: [
+          {
+            provider: 'ollama.deepseek',
+            runtime_id: 'ollama.deepseek',
+            models: ['deepseek'],
+            effective_capabilities: {
+              thinking_control_format: 'ollama-think',
+            },
+          },
+          {
+            provider: 'future.model',
+            runtime_id: 'future.model',
+            models: ['model'],
+            effective_capabilities: {
+              thinking_control_format: 'future-undocumented-wire',
+            },
+          },
+        ],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchRuntimeProviders()
+
+    expect(result.providers[0]?.effective_capabilities?.thinking_control_format).toBe('ollama-think')
+    expect(result.providers[1]?.effective_capabilities?.thinking_control_format).toBe('future-undocumented-wire')
+  })
 })
 
 describe('fetchRuntimeModelMetrics', () => {
@@ -3228,7 +3270,6 @@ describe('fetchRuntimeDefaults', () => {
         { id: 'openai.gpt-4o', provider: 'OpenAI', model: 'gpt-4o', max_context: 128000, is_default: true },
       ],
       model_routing: {
-        keeper_assignments: [{ keeper: 'analyst', runtime_id: 'openai.gpt-4o' }],
         librarian_runtime_id: null,
         structured_judge_runtime_id: null,
         cross_verifier_runtime_id: null,
@@ -3249,6 +3290,5 @@ describe('fetchRuntimeDefaults', () => {
     expect(result.default_runtime_id).toBe('openai.gpt-4o')
     expect(result.default_model).toBe('gpt-4o')
     expect(result.runtimes[0]?.is_default).toBe(true)
-    expect(result.model_routing.keeper_assignments[0]?.keeper).toBe('analyst')
   })
 })

@@ -6,7 +6,7 @@
 // session and shares the result, rather than each component issuing its own
 // request.
 
-import { createAsyncResource } from './async-state'
+import { createAsyncResource, type AsyncState } from './async-state'
 import {
   fetchRuntimeProviders,
   type DashboardRuntimeProviderSnapshot,
@@ -55,4 +55,34 @@ export function findRuntimeCatalogEntry(
       return ids.some(id => id?.trim() === needle)
     }) ?? null
   )
+}
+
+export type RuntimeCatalogEntryResolution =
+  | { readonly status: 'loading' }
+  | { readonly status: 'error'; readonly message: string }
+  | { readonly status: 'missing' }
+  | { readonly status: 'ready'; readonly entry: DashboardRuntimeProviderSnapshot }
+
+/**
+ * Resolve a runtime against the catalog without collapsing transport state into
+ * a false "missing" result. `idle` is presented as loading because every
+ * consumer calls `loadRuntimeCatalog` when it mounts.
+ */
+export function resolveRuntimeCatalogEntry(
+  state: AsyncState<DashboardRuntimeProviderSnapshot[]>,
+  runtimeId: string | null | undefined,
+): RuntimeCatalogEntryResolution {
+  switch (state.status) {
+    case 'idle':
+    case 'loading':
+      return { status: 'loading' }
+    case 'error':
+      return { status: 'error', message: state.message }
+    case 'loaded': {
+      const entry = findRuntimeCatalogEntry(state.data, runtimeId ?? '')
+      return entry === null
+        ? { status: 'missing' }
+        : { status: 'ready', entry }
+    }
+  }
 }

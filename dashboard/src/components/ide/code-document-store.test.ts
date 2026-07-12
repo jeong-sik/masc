@@ -4,6 +4,7 @@ vi.mock('../../api/ide', () => ({
   fetchIdeRegions: vi.fn().mockResolvedValue([]),
 }))
 import { fetchIdeRegions } from '../../api/ide'
+import type { IdeCodeRegion } from '../../api/ide'
 import { createCodeDocumentStore } from './code-document-store'
 
 const fetchIdeRegionsMock = vi.mocked(fetchIdeRegions)
@@ -82,5 +83,97 @@ describe('createCodeDocumentStore', () => {
       keeper: 'sangsu',
       repoId: 'masc',
     })
+  })
+
+  it('notifies metadata subscribers as region loading settles', async () => {
+    fetchIdeRegionsMock.mockResolvedValueOnce([])
+    const store = createCodeDocumentStore({
+      file_path: 'a.ts',
+      language: 'typescript',
+      content: 'export {}',
+    })
+    let calls = 0
+    const unsubscribe = store.subscribeRegions(() => {
+      calls += 1
+    })
+
+    await store.loadRegions('a.ts')
+
+    unsubscribe()
+    expect(calls).toBeGreaterThan(0)
+    expect(store.regionsLoading()).toBe(false)
+    expect(store.regionsState()).toBe('ready')
+  })
+
+  it('clears region metadata when a different file becomes active', async () => {
+    fetchIdeRegionsMock.mockResolvedValueOnce([{
+      file_path: 'a.ts',
+      line_start: 1,
+      line_end: 1,
+      keeper_id: 'sangsu',
+      source_type: 'tool_call',
+      source_tool_name: 'tool_edit_file',
+      source_turn: 1,
+      source_note: null,
+      timestamp_ms: 1,
+    }])
+    const store = createCodeDocumentStore({
+      file_path: 'a.ts',
+      language: 'typescript',
+      content: 'export {}',
+    })
+
+    await store.loadRegions('a.ts')
+    expect(store.regions()).toHaveLength(1)
+
+    store.load({ file_path: 'b.ts', language: 'typescript', content: 'export {}' })
+    expect(store.regions()).toEqual([])
+    expect(store.regionsState()).toBe('idle')
+  })
+
+  it('invalidates the document and prevents an older region request from repopulating it', async () => {
+    let resolveRegions: (regions: ReadonlyArray<IdeCodeRegion>) => void = () => {
+      throw new Error('region request resolver was not initialized')
+    }
+    fetchIdeRegionsMock.mockImplementationOnce(() => new Promise<ReadonlyArray<IdeCodeRegion>>(resolve => {
+      resolveRegions = resolve
+    }))
+    const store = createCodeDocumentStore({
+      file_path: 'repo-a.ml',
+      language: 'ocaml',
+      content: 'let workspace = "repo-a"\n',
+    })
+
+    const regions = store.loadRegions('repo-a.ml')
+    expect(store.regionsState()).toBe('loading')
+
+    store.invalidate()
+    expect(store.document()).toMatchObject({
+      file_path: null,
+      language: 'text',
+      content: '',
+      lines: [],
+    })
+    expect(store.regions()).toEqual([])
+    expect(store.regionsState()).toBe('idle')
+
+    resolveRegions([])
+    await regions
+    expect(store.regions()).toEqual([])
+    expect(store.regionsState()).toBe('idle')
+  })
+
+  it('exposes region fetch failure instead of presenting an empty result as ready', async () => {
+    fetchIdeRegionsMock.mockRejectedValueOnce(new Error('regions offline'))
+    const store = createCodeDocumentStore({
+      file_path: 'a.ts',
+      language: 'typescript',
+      content: 'export {}',
+    })
+
+    await expect(store.loadRegions('a.ts')).rejects.toThrow('regions offline')
+
+    expect(store.regionsState()).toBe('error')
+    expect(store.regionsLoading()).toBe(false)
   })
 })

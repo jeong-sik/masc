@@ -255,6 +255,7 @@ function renderCategorySection(
         }} />
         <div class="flex justify-center py-3">
           <${CursorPagination}
+            class="bd-category-pagination"
             cursor=${cursorLabel}
             cursorLabel="표시"
             hasPrevious=${limit > PAGE_SIZE}
@@ -306,6 +307,7 @@ function BoardSummary() {
   const metrics = boardLatencyMetrics.value
   return html`
     <div class="bd-summary v2-workspace-panel ss-card mx-6 flex flex-wrap items-center gap-2 mb-4 px-3 py-2.5 text-xs text-text-secondary" data-testid="bd-summary">
+      <h1 class="sr-only">Board</h1>
       <span class="font-semibold text-text-primary tabular-nums text-md">${visibleCount}</span>
       <span>개 표시 중</span>
       ${grouped.groups.map(g => {
@@ -323,7 +325,7 @@ function BoardSummary() {
       <${ActionButton}
         variant="ghost"
         size="sm"
-        class="v2-workspace-action ${lastBoardRefreshAt.value ? '' : 'ml-auto'} !px-2"
+        class="v2-workspace-action bd-summary-action ${lastBoardRefreshAt.value ? '' : 'ml-auto'} !px-2"
         onClick=${() => navigateBoard({ focus: 'curation' })}
         ariaLabel="보드 큐레이션 열기"
       >
@@ -335,7 +337,7 @@ function BoardSummary() {
       <${ActionButton}
         variant="ghost"
         size="sm"
-        class="v2-workspace-action !px-2"
+        class="v2-workspace-action bd-summary-action !px-2"
         onClick=${() => navigateBoard({ focus: 'karma' })}
         ariaLabel="보드 카르마 열기"
       >
@@ -445,7 +447,7 @@ function PostCard({ post }: { post: BoardPost }) {
       <div class="bd-post-h">
         <${BdAuthor} label=${authorSigilLabel} />
         <a
-          class="who"
+          class="who bd-author-action"
           href=${`#monitoring/agents/${encodeURIComponent(post.author_identity?.raw ?? post.author)}`}
           title=${authorTitle}
           onClick=${(e: Event) => {
@@ -466,12 +468,14 @@ function PostCard({ post }: { post: BoardPost }) {
         ` : null}
         ${boardHearthFilter.value === '' && post.hearth ? html`<span class="bd-badge">${post.hearth}</span>` : null}
         <span class="ts"><${TimeAgo} timestamp=${post.created_at} /></span>
-        <${Checkbox}
-          ariaLabel=${`게시글 선택: ${post.id}`}
-          class="!w-3.5 !h-3.5 ml-1"
-          checked=${selectedPostIds.value.has(post.id)}
-          onClick=${(e: Event) => togglePostSelection(post.id, e)}
-        />
+        <label class="bd-post-select-target v2-mobile-operator-target" onClick=${(e: Event) => e.stopPropagation()}>
+          <${Checkbox}
+            ariaLabel=${`게시글 선택: ${post.id}`}
+            class="!w-4 !h-4"
+            checked=${selectedPostIds.value.has(post.id)}
+            onClick=${(e: Event) => togglePostSelection(post.id, e)}
+          />
+        </label>
       </div>
       <div class="bd-post-title">${stripInlineMarkdown(post.title)}</div>
       <div class="bd-post-body">
@@ -484,6 +488,7 @@ function PostCard({ post }: { post: BoardPost }) {
             targetId=${post.id}
             compact
             initialSummaries=${post.reactions ?? []}
+            supportedEmojis=${post.supported_reaction_emojis}
           />
         </div>
         <span class="karma" aria-label=${voteScoreAria} title=${voteScoreLabel}>karma <b>${voteScoreLabel}</b></span>
@@ -555,42 +560,46 @@ function BdRail({ activeSub, onSub, onMentions }: {
 
   return html`
     <nav class="bd-rail" aria-label="서브보드">
-      <h4>서브보드</h4>
-      <button
-        type="button"
-        class=${`bd-sub ${activeSub === '' ? 'on' : ''}`}
-        onClick=${() => onSub('')}
-        data-testid="bd-sub-all"
-      >
-        <span class="glyph">${SUB_BOARD_GLYPHS.all}</span>
-        <span style=${{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>전체</span>
-        <span class="n">${allCount}</span>
-      </button>
-      ${hearths.map(hearth => html`
+      <div class="bd-hearth-scroll" tabindex="0" aria-label="서브보드 목록">
+        <h4>서브보드</h4>
         <button
-          key=${hearth.name}
           type="button"
-          class=${`bd-sub ${activeSub === hearth.name ? 'on' : ''}`}
-          onClick=${() => onSub(hearth.name)}
-          data-testid=${`bd-sub-${hearth.name}`}
+          class=${`bd-sub ${activeSub === '' ? 'on' : ''}`}
+          onClick=${() => onSub('')}
+          data-testid="bd-sub-all"
         >
-          <span class="glyph">${SUB_BOARD_GLYPHS[hearth.name] ?? SUB_BOARD_GLYPHS.default}</span>
-          <span style=${{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>${hearth.name}</span>
-          <span class="n">${hearth.count}</span>
+          <span class="glyph">${SUB_BOARD_GLYPHS.all}</span>
+          <span style=${{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>전체</span>
+          <span class="n">${allCount}</span>
         </button>
-      `)}
-      <div class="div"></div>
-      <h4>큐</h4>
-      <button type="button" class="bd-sub" onClick=${() => { boardFilterMode.value = 'mod'; onMentions() }} data-testid="bd-queue-mod">
-        <span class="glyph">⚑</span>
-        모더레이션
-        <span class="n">${modCount}</span>
-      </button>
-      <button type="button" class="bd-sub" onClick=${onMentions} data-testid="bd-queue-mentions">
-        <span class="glyph">＠</span>
-        멘션 인박스
-        <span class="n">${mentionCount}</span>
-      </button>
+        ${hearths.map(hearth => html`
+          <button
+            key=${hearth.name}
+            type="button"
+            class=${`bd-sub ${activeSub === hearth.name ? 'on' : ''}`}
+            onClick=${() => onSub(hearth.name)}
+            data-testid=${`bd-sub-${hearth.name}`}
+          >
+            <span class="glyph">${SUB_BOARD_GLYPHS[hearth.name] ?? SUB_BOARD_GLYPHS.default}</span>
+            <span style=${{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>${hearth.name}</span>
+            <span class="n">${hearth.count}</span>
+          </button>
+        `)}
+      </div>
+      <div class="bd-queue-section">
+        <div class="div"></div>
+        <h4>큐</h4>
+        <button type="button" class="bd-sub" onClick=${() => { boardFilterMode.value = 'mod'; onMentions() }} data-testid="bd-queue-mod">
+          <span class="glyph">⚑</span>
+          모더레이션
+          <span class="n">${modCount}</span>
+        </button>
+        <button type="button" class="bd-sub" onClick=${onMentions} data-testid="bd-queue-mentions">
+          <span class="glyph">＠</span>
+          멘션 인박스
+          <span class="n">${mentionCount}</span>
+        </button>
+      </div>
     </nav>
   `
 }
@@ -1505,6 +1514,7 @@ export function BoardSurface() {
       data-detail-width=${String(detailWidth)}
       data-detail-open=${String(detailOpen)}
     >
+      <h1 class="sr-only">Board</h1>
       <!-- Collapse is driven by the inline --bd-detail-width custom property
            (0 when no detail is open), which BOTH the legacy board-v2.css and the
            keeper-v2 surfaces.css .bd-body grids consume as their third track.

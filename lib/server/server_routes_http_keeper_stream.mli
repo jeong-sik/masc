@@ -74,7 +74,7 @@ type keeper_chat_stream_request = {
   name : string;
   message : string;
   user_blocks : user_input_block list;
-  timeout_sec : int option;
+  timeout_sec : float option;
   turn_instructions : string option;
   surface_context : Yojson.Safe.t option;
   channel : string;
@@ -86,8 +86,9 @@ type keeper_chat_stream_request = {
 (** Parsed payload of a keeper chat-stream HTTP request.
     [message] is the text fallback used by the existing direct keeper
     path; [user_blocks] preserves semantic text/media input for the
-    block-aware runtime path.  [timeout_sec] is clamped to [\[5, 300\]] when
-    present.  [turn_instructions] and [surface_context]
+    block-aware runtime path. [timeout_sec] is an optional caller-owned
+    positive finite deadline; it is never synthesized or clamped by this
+    boundary. [turn_instructions] and [surface_context]
     are optional copilot context fields; when
     [turn_instructions] is absent but [surface_context]
     is present, the surface context is formatted and
@@ -103,8 +104,8 @@ val parse_keeper_chat_stream_request :
 (** Parses the HTTP body string into a
     {!keeper_chat_stream_request}.  Returns
     [Error reason] on JSON shape mismatches, missing
-    [name] / content, malformed [user_blocks], partial connector context, or
-    presence of legacy keeper model args removed by the
+    [name] / content, malformed [user_blocks], an invalid explicit timeout,
+    partial connector context, or presence of legacy keeper model args removed by the
     runtime rewrite. *)
 
 (** {1 Error envelope} *)
@@ -116,12 +117,14 @@ val keeper_chat_stream_error_json : string -> Yojson.Safe.t
 (** {1 Queue request handlers} *)
 
 val handle_keeper_chat_request_result :
+  caller:string ->
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Drives [GET /api/v1/keepers/chat/requests/<request_id>].
     Reads the async keeper message request state directly from
     {!Keeper_msg_async} without requiring an MCP session. *)
 
 val handle_keeper_chat_request_cancel :
+  caller:string ->
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Drives [POST /api/v1/keepers/chat/requests/<request_id>/cancel].
     Cancels a live async keeper message request when it is still
@@ -141,6 +144,7 @@ val handle_keeper_turn_interrupt :
 val handle_keeper_chat_stream :
   sw:Eio.Switch.t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  submitted_by:string ->
   Mcp_server.server_state ->
   Httpun.Request.t ->
   Httpun.Reqd.t ->
@@ -157,12 +161,31 @@ val handle_keeper_chat_stream :
 
 (** {1 Turn execution (shared between HTTP handler and queue consumer)} *)
 
+type queued_turn_failure_kind =
+  | Turn_failed
+  | Turn_timed_out
+  | Turn_cancelled
+  | No_visible_reply
+  | Continuation_checkpoint_without_reply
+  | Missing_turn_ref
+  | Transcript_persist_failed
+  | Stream_projection_failed
+
+type queued_turn_outcome =
+  | Delivered of { outcome_ref : string }
+  | Failed of
+      { kind : queued_turn_failure_kind
+      ; detail : string
+      }
+  | Deferred of { rejection : Keeper_turn_admission.rejection }
+
+val queued_turn_failure_kind_to_string : queued_turn_failure_kind -> string
+
 val process_single_turn :
   connector_user_line_recorded_upstream:bool ->
   queued_turn:bool ->
   state:Mcp_server.server_state ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
-  sw:Eio.Switch.t ->
   auth_token:string option ->
   thread_id:string ->
   continuation_channel:Keeper_continuation_channel.t ->
@@ -172,11 +195,12 @@ val process_single_turn :
   run_id:string ->
   message_id:string ->
   agent_name:string ->
+  submitted_by:string ->
   events:Keeper_chat_events.keeper_chat_event Eio.Stream.t ->
-  unit
+  queued_turn_outcome option
 (** Execute a single keeper turn, publishing events to the provided
-    event stream. [sw] owns the async keeper_msg worker and must outlive
-    a single HTTP stream when resumable dashboard requests are used.
+    event stream. The async keeper_msg worker is always forked under the
+    server root switch and owns a separate per-request cancellation switch.
     [closed] is a mutable flag that suppresses worker event pushes when
     set to [true] (used by the SSE adapter when the HTTP stream is
     closed). [client_disconnects] carries the HTTP stream switch and
@@ -200,22 +224,9 @@ val process_single_turn :
     ([persist_user_message_only]), matching its existing "the keeper will
     answer on the next turn" semantics; a queued turn instead persists a
     typed failure row via [persist_failure_reply]. A queued message was
-    already dequeued off [Keeper_chat_queue] — there is no "next turn" for
+    already leased from [Keeper_chat_queue] — there is no "next turn" for
     it to ride along with, so silence here is terminal, not merely
     deferred. *)
-
-val persist_queued_turn_stalled :
-  base_path:string ->
-  connector_user_line_recorded_upstream:bool ->
-  payload:keeper_chat_stream_request ->
-  unit
-(** Durably records that a queued turn never reached a terminal outcome
-    within [Keeper_chat_consumer]'s dispatch watchdog deadline: a typed
-    failure row (mirroring [persist_failure_reply]'s dashboard/connector
-    split), a [ChatTransportFailures] counter increment, and a
-    [Keeper_chat_broadcast.chat_appended] broadcast. Called from
-    [Server_bootstrap_loops]'s [on_stalled] wiring — see
-    [Keeper_chat_consumer.start] for when this fires and why. *)
 
 (** {1 Testing helpers} *)
 
@@ -245,10 +256,20 @@ module For_testing : sig
     base_path:string ->
     clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
     keeper_chat_stream_request ->
-    [ `Not_busy | `Queued of int ]
+    [ `Not_busy | `Queued of int | `Queue_error of string ]
+  val defer_dashboard_payload_if_busy_evidence :
+    base_path:string ->
+    clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+    keeper_chat_stream_request ->
+    [ `Not_busy
+    | `Queued of Yojson.Safe.t * string
+    | `Queue_error of string
+    ]
   val extract_visible_reply : string -> Yojson.Safe.t option * string
   val direct_reply_terminal_error :
     ?has_visible_blocks:bool -> Yojson.Safe.t option -> string -> string option
+  val queued_delivery_outcome_of_turn_ref :
+    Ids.Turn_ref.t option -> queued_turn_outcome
   val visible_reply_with_stream_fallback :
     streamed_text:string -> string -> string
   val redacted_visible_reply_with_stream_fallback :

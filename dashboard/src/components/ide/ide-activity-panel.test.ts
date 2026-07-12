@@ -3,7 +3,7 @@ import { h } from 'preact'
 import { render as preactRender } from 'preact'
 import { fireEvent, waitFor } from '@testing-library/preact'
 import { deriveIdeRunProgressSummary, IdeActivityPanel } from './ide-activity-panel'
-import { activeIdeFile, ideContextFocus } from './ide-state'
+import { activeIdeFile, focusIdeFile, ideContextFocus } from './ide-state'
 import { lspDiagnosticSnapshot } from './ide-lsp-client'
 import { clearTraces, keeperTraceState } from './keeper-trace-store'
 import { goals, tasks } from '../../store'
@@ -36,7 +36,12 @@ afterEach(() => {
   vi.unstubAllGlobals()
   ideContextFocus.value = null
   lspDiagnosticSnapshot.value = new Map()
-  activeIdeFile.value = 'package.json'
+  focusIdeFile({
+    path: 'package.json',
+    origin: 'operator',
+    workspace_identity: { kind: 'project' },
+    availability: 'available',
+  })
   goals.value = []
   tasks.value = []
   window.location.hash = ''
@@ -56,6 +61,147 @@ describe('IdeActivityPanel', () => {
     expect(container.textContent).toContain('0/0 linked')
     expect(container.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow')).toBe('0')
     expect(container.textContent).toContain('no keeper activity')
+  })
+
+  it('shows a no-scope message instead of "no recent activity" when neither repoId nor keeperLane is set', async () => {
+    const container = document.createElement('div')
+    render(h(IdeActivityPanel, {}), container)
+
+    await waitFor(() => {
+      const notice = container.querySelector('[data-testid="ide-activity-no-scope"]')
+      expect(notice?.textContent).toBe('관측 스코프(저장소/keeper)가 선택되지 않았습니다')
+    })
+    expect(container.textContent).not.toContain('no recent activity')
+  })
+
+  it('shows "no recent activity" (not the no-scope message) when a scoped fetch genuinely finds nothing', async () => {
+    vi.stubGlobal('fetch', vi.fn(async input => {
+      const url = String(input)
+      if (url.includes('/api/v1/ide/events')) {
+        return new Response(JSON.stringify({ ok: true, data: { events: [] } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      return new Response(JSON.stringify({ events: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }))
+
+    const container = document.createElement('div')
+    render(h(IdeActivityPanel, { repoId: 'masc' }), container)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('no recent activity')
+    })
+    expect(container.querySelector('[data-testid="ide-activity-no-scope"]')).toBeNull()
+  })
+
+  it('hides the previous repository snapshot immediately when scope is cleared', async () => {
+    let activityCalls = 0
+    let resolveUnscopedGraph: ((response: Response) => void) | null = null
+    vi.stubGlobal('fetch', vi.fn(async input => {
+      const url = String(input)
+      if (url.includes('/api/v1/ide/events')) {
+        return new Response(JSON.stringify({
+          ok: true,
+          data: {
+            events: [{
+              type: 'turn',
+              keeper_id: 'repo-a-keeper',
+              turn_id: 'turn-repo-a',
+              phase: 'completed',
+              timestamp_ms: 100,
+            }],
+          },
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      activityCalls += 1
+      if (activityCalls === 1) {
+        return new Response(JSON.stringify({ events: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      return new Promise<Response>(resolve => {
+        resolveUnscopedGraph = resolve
+      })
+    }))
+
+    const container = document.createElement('div')
+    render(h(IdeActivityPanel, { repoId: 'repo-a' }), container)
+    await waitFor(() => expect(container.textContent).toContain('turn-repo-a'))
+
+    render(h(IdeActivityPanel, {}), container)
+    expect(container.textContent).not.toContain('turn-repo-a')
+    expect(container.querySelector('[data-testid="ide-activity-no-scope"]')).not.toBeNull()
+
+    await waitFor(() => expect(resolveUnscopedGraph).not.toBeNull())
+    resolveUnscopedGraph!(new Response(JSON.stringify({ events: [] }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    await waitFor(() => {
+      expect(container.querySelector('.ide-activity-refresh-status')?.textContent).toBe('loaded')
+    })
+  })
+
+  it('does not expose repository A events while repository B is loading', async () => {
+    let resolveRepoB: ((response: Response) => void) | null = null
+    vi.stubGlobal('fetch', vi.fn(async input => {
+      const url = String(input)
+      if (url.includes('/api/v1/activity/events')) {
+        return new Response(JSON.stringify({ events: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (url.includes('repo_id=repo-a')) {
+        return new Response(JSON.stringify({
+          ok: true,
+          data: {
+            events: [{
+              type: 'turn',
+              keeper_id: 'repo-a-keeper',
+              turn_id: 'turn-repo-a',
+              phase: 'completed',
+              timestamp_ms: 100,
+            }],
+          },
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      if (url.includes('repo_id=repo-b')) {
+        return new Promise<Response>(resolve => {
+          resolveRepoB = resolve
+        })
+      }
+      throw new Error(`unexpected fetch ${url}`)
+    }))
+
+    const container = document.createElement('div')
+    render(h(IdeActivityPanel, { repoId: 'repo-a' }), container)
+    await waitFor(() => expect(container.textContent).toContain('turn-repo-a'))
+
+    render(h(IdeActivityPanel, { repoId: 'repo-b' }), container)
+    expect(container.textContent).not.toContain('turn-repo-a')
+    await waitFor(() => expect(resolveRepoB).not.toBeNull())
+
+    resolveRepoB!(new Response(JSON.stringify({
+      ok: true,
+      data: {
+        events: [{
+          type: 'turn',
+          keeper_id: 'repo-b-keeper',
+          turn_id: 'turn-repo-b',
+          phase: 'completed',
+          timestamp_ms: 200,
+        }],
+      },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+
+    await waitFor(() => expect(container.textContent).toContain('turn-repo-b'))
+    expect(container.textContent).not.toContain('turn-repo-a')
   })
 
   it('treats a null active file as no active file', () => {
@@ -598,7 +744,10 @@ describe('IdeActivityPanel', () => {
     await waitFor(() => {
       expect(container.querySelector('.ide-activity-refresh-status')?.textContent).toBe('offline 1 failed')
     })
-    expect(container.textContent).toContain('no recent activity')
+    // No repoId/keeperLane was passed: the empty list explains the missing
+    // scope rather than claiming "no recent activity" (which would imply
+    // a real, merely-empty fetch happened).
+    expect(container.querySelector('[data-testid="ide-activity-no-scope"]')).not.toBeNull()
   })
 
   it('degrades the refresh tone when the keeper lane fetch fails', async () => {

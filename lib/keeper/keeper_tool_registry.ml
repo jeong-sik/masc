@@ -91,9 +91,8 @@ let base_core_tools =
 
 let core_discovery_tools =
   base_core_tools
-  (* RFC-0064/RFC-016x: public capability names replace internal names
-     in the LLM-facing discovery surface. *)
-  @ Keeper_tool_descriptor.public_names ()
+  @ (Keeper_tool_descriptor.public_descriptors
+     |> List.concat_map Keeper_tool_descriptor.keeper_model_names)
 ;;
 
 (* [effective_core_tools] is defined below (see "Universe-aware effective core
@@ -337,7 +336,7 @@ let effective_core_tools () =
         Set_util.StringSet.mem
           d.Keeper_tool_descriptor.internal_name
           universe_set)
-    |> List.concat_map Keeper_tool_descriptor.public_names_of_descriptor
+    |> List.concat_map Keeper_tool_descriptor.keeper_model_names
   in
   base_core_tools @ descriptor_publics
 ;;

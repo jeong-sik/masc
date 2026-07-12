@@ -31,6 +31,13 @@
   height: 100%;
 }
 
+/* `#main-content > div` owns generic card padding with ID specificity. Its
+ * padding defeats the `p-0` class emitted for the keeper workspace, leaving a
+ * 12px frame around a prototype that is intentionally edge-to-edge. */
+[data-keeper-detail-mode="true"] #main-content > div {
+  padding: 0;
+}
+
 /* Keeper detail is a focused single-keeper view. On mobile the prototype topbar
  * only keeps the breadcrumb + primary status chips; the re-mounted operational
  * cluster is too wide for the phone chrome and pushes the breadcrumb off-screen.
@@ -110,6 +117,7 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   .kw-rail-toggle.right { display: none; }
   /* Rail column is gone ≤1180px → its resize handle has nothing to drag. */
   .kw-pane-resizer.right { display: none; }
+  .kw-roster-filters.roster-filters { flex-wrap: wrap; row-gap: 6px; }
 }
 /* Below 860px the workspace becomes master-detail: the roster and chat/detail
  * panes share one grid column, and JS flips data-mobile-pane after selection.
@@ -185,9 +193,9 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 .kw-roster-head {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--color-border-divider);
+  gap: 0;
+  padding: 0;
+  border-bottom: 0;
 }
 .kw-roster-title {
   display: flex; align-items: center; gap: 8px;
@@ -217,15 +225,10 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   min-width: 0;
   align-items: center;
   gap: 6px;
+  width: 100%;
 }
-/* CJK chip labels have a wide min-content floor; at narrow roster widths the
-   sort <select> overflowed the aside instead of dropping to its own line.
-   The element carries both class vocabularies and keeper-v2/v2.css
-   (.roster-filters, deliberately loaded last) re-asserts flex-wrap: nowrap —
-   double up the classes (0,2,0) so the wrap fix actually wins the cascade. */
 .kw-roster-filters.roster-filters {
-  flex-wrap: wrap;
-  row-gap: 6px;
+  flex-wrap: nowrap;
 }
 .kw-rfilter {
   font-size: var(--fs-11); letter-spacing: 0.06em; text-transform: uppercase;
@@ -300,7 +303,6 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   border-radius: 50%;
   background: var(--color-fg-muted);
 }
-.kw-roster-group.att .rg-dot { background: var(--color-status-err); }
 .kw-roster-group.run .rg-dot { background: var(--color-status-ok); }
 .kw-roster-group.pause .rg-dot { background: var(--color-status-warn); }
 .kw-roster-group.off .rg-dot { background: var(--color-fg-muted); }
@@ -364,16 +366,16 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   pointer-events: auto;
 }
 .kw-kp-meta { min-width: 0; }
-.kw-kp-name { font-weight: var(--fw-bold); font-size: var(--fs-15); color: var(--color-fg-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.kw-kp-sub { display: flex; align-items: center; gap: 6px; font-size: var(--fs-12); color: var(--color-fg-secondary); margin-top: 3px; min-width: 0; }
+.kw-kp-name { font-weight: var(--fw-bold); font-size: var(--fs-15); line-height: 1.55; color: var(--color-fg-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kw-kp-sub { display: flex; align-items: center; gap: 6px; font-size: var(--fs-12); line-height: 1.55; color: var(--color-fg-secondary); margin-top: 2px; min-width: 0; }
 .kw-kp-state { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .kw-kp-handle { font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.kw-kp-right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: none; padding-top: 2px; padding-right: 34px; }
+.kw-kp-right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: none; padding-top: 2px; }
 .kw-kp-time {
   max-width: 96px;
   font-family: var(--font-mono);
-  font-size: var(--fs-11);
-  line-height: 1.25;
+  font-size: var(--fs-10);
+  line-height: 1.55;
   color: var(--color-fg-muted);
   text-align: right;
 }
@@ -471,8 +473,10 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   line-height: 1.4;
 }
 @media (max-width: 860px) {
-  .kw-kp-more { opacity: 1; }
-  .kw-kp-row .kw-kp-right { padding-right: 30px; }
+  /* The standalone touch roster is identity-first and opens commands from the
+   * selected keeper header. Hiding the duplicate row menu gives status/model
+   * text the full narrow-screen width without removing the command surface. */
+  .kw-kp-more { display: none; }
   .kw-kp-row:hover .kw-kp-right,
   .kw-kp-row:focus-within .kw-kp-right {
     opacity: 1;
@@ -564,6 +568,20 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 .kw-state-pill.bad { color: var(--color-status-err); border-color: rgb(var(--color-status-err-glow) / 0.50); background: rgb(var(--color-status-err-glow) / 0.12); }
 .kw-state-pill.busy { color: var(--color-status-info); border-color: rgb(var(--color-info-glow) / 0.45); background: rgb(var(--color-info-glow) / 0.10); }
 .kw-state-pill.off { color: var(--color-fg-muted); }
+
+.kw-pending-approval-link {
+  display: inline-flex;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.kw-pending-approval-link:focus-visible {
+  outline: 2px solid var(--color-accent-fg-dim);
+  outline-offset: 2px;
+  border-radius: 9999px;
+}
 
 .kw-chat-actions { display: flex; gap: 8px; align-items: center; flex: none; }
 /* Desktop header command row. These classes were referenced by
@@ -663,6 +681,10 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 .kw-chat-command-item:hover {
   color: var(--color-fg-primary);
   background: var(--color-bg-surface);
+}
+.kw-chat-command-item.active {
+  color: var(--color-accent-fg);
+  background: var(--color-accent-bg-subtle);
 }
 .kw-act {
   font-size: var(--fs-12); font-weight: var(--fw-med); letter-spacing: 0.02em;
@@ -817,14 +839,14 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   flex: none;
   border-top: 1px solid var(--color-border-default);
   background: linear-gradient(0deg, var(--color-bg-panel-alt), var(--color-bg-page));
-  padding: 12px 24px 16px;
+  padding: 16px 30px 22px;
 }
 .kw-composer-inner { width: 100%; max-width: var(--kw-thread-w, 980px); margin: 0 auto; padding: 0 4px; }
-/* Composer floor: the reused ChatComposer applies min-h-30 (120px) to an empty
- * textarea, permanently reserving space the transcript (its flex:1 sibling)
- * would otherwise take. Lower the floor to ~2 rows, scoped to the workspace;
- * control-textarea keeps resize:vertical so a long draft can be dragged taller. */
-.kw-composer-inner .control-textarea { min-height: 80px; }
+/* Prototype composer is one row at rest; long drafts still grow through the
+ * shared composer autosize path. Keep both selector vocabularies for callers
+ * that still render the older control-textarea hook. */
+.kw-composer-inner .control-textarea,
+.kw-composer-inner .composer-textarea { min-height: 40px; }
 
 .kw-chat-toolbar {
   flex: none; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;

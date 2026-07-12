@@ -180,6 +180,13 @@
 
 @media (max-width: 720px) {
   .sch-kv .k { width: 96px; }
+  .sch-surf button,
+  .sch-surf summary,
+  .sch-surf input,
+  .sch-surf select {
+    min-width: var(--mobile-touch-target-min);
+    min-height: var(--mobile-touch-target-min);
+  }
 }
 
 /* ── cadence tag (예약 종류) — ported from prototype styles/schedule.css ── */
@@ -301,3 +308,9 @@
 }
 .sch-diag > .sch-diag-summary:hover { color: var(--text-mid); }
 .sch-diag > .sch-diag-summary[aria-expanded="true"] { margin-bottom: 10px; color: var(--text-mid); }
+
+.sch-diag-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-bottom: 8px;
+}

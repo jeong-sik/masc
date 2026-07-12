@@ -196,6 +196,33 @@ val record_streaming_cancelled_observation
   -> unit
   -> unit
 
+type source_lease_disposition =
+  | Follow_failure_route
+  | Acknowledge_after_in_turn_handling
+(** A failed turn normally follows its typed retry/rotate/escalate route.
+    [Acknowledge_after_in_turn_handling] consumes only the source stimulus when
+    the configured in-turn policy already handled the terminal failure; the
+    cycle remains failed for receipts, counters, and heartbeat freshness. *)
+
+type turn_failure =
+  { error : Agent_sdk.Error.sdk_error
+  ; runtime_id : string
+  ; route : Keeper_runtime_failure_route.route
+  ; source_lease_disposition : source_lease_disposition
+  }
+(** Exact execution identity and typed disposition route for a failed turn.
+    The heartbeat queue settles from this value; it must not reconstruct a
+    possibly rotated runtime from Keeper meta. *)
+
+type turn_success =
+  | Turn_completed of Keeper_meta_contract.keeper_meta
+  | Turn_cancelled of Keeper_meta_contract.keeper_meta
+  | Turn_skipped of Keeper_meta_contract.keeper_meta
+(** Typed non-error result of the unified turn boundary. Only
+    [Turn_completed] proves that the action path ran successfully.
+    Supervisor cancellation and a non-executable phase remain distinct so a
+    durable source lease cannot be acknowledged as completed work. *)
+
 val run_keeper_cycle
   :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
@@ -208,7 +235,7 @@ val run_keeper_cycle
   -> ?event_bus:Agent_sdk.Event_bus.t
   -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
   -> unit
-  -> (Keeper_meta_contract.keeper_meta, Agent_sdk.Error.sdk_error) result
+  -> (turn_success, turn_failure) result
 
 (** Run a unified keeper turn.
 

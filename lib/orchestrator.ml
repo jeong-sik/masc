@@ -65,50 +65,41 @@ let should_orchestrate ~min_priority workspace_config =
   end  (* end of else begin for pause check *)
 
 (** The orchestrator prompt - MCP tools are now available via --allowedTools! *)
+let orchestrator_prompt_key = "system.orchestrator"
+let orchestrator_prompt_asset = "prompts/" ^ orchestrator_prompt_key ^ ".md"
+
+type embedded_prompt_error =
+  | Embedded_prompt_missing of string
+  | Embedded_prompt_empty of string
+
+let embedded_orchestrator_prompt () : (string, embedded_prompt_error) result =
+  match Embedded_config.read orchestrator_prompt_asset with
+  | None -> Error (Embedded_prompt_missing orchestrator_prompt_asset)
+  | Some markdown ->
+    let prompt = Prompt_registry.markdown_body markdown in
+    if String.trim prompt = "" then
+      Error (Embedded_prompt_empty orchestrator_prompt_asset)
+    else Ok prompt
+
+let embedded_prompt_error_message = function
+  | Embedded_prompt_missing asset ->
+    Printf.sprintf "orchestrator prompt asset %S is not embedded" asset
+  | Embedded_prompt_empty asset ->
+    Printf.sprintf "orchestrator prompt asset %S has an empty body" asset
+
 let make_orchestrator_prompt ~port:_ =
-  let p = Prompt_registry.get_prompt "system.orchestrator" in
-  if String.trim p <> "" then p
+  let prompt = Prompt_registry.get_prompt orchestrator_prompt_key in
+  if String.trim prompt <> "" then prompt
   else begin
     Log.Orchestrator.warn
-      "system.orchestrator prompt missing or empty, using embedded fallback";
-    {|You are the MASC Orchestrator Agent.
-
-You have access to MASC MCP tools via mcp__masc__* prefix.
-
-## Your Tasks:
-
-1. **Check status**: Call `mcp__masc__masc_status` to see the project state
-
-2. **Find unclaimed tasks**: Look for tasks with "📋" (unclaimed) status
-
-3. **Claim a task**: Call `mcp__masc__masc_transition` with:
-   - agent_name: "orchestrator"
-   - task_id: "task-XXX"
-   - action: "claim"
-
-4. **Work on the task**: Execute the task description
-
-5. **Complete the task**: Call `mcp__masc__masc_transition` with:
-   - agent_name: "orchestrator"
-   - task_id: "task-XXX"
-   - action: "submit_for_verification"
-   - notes: completion summary
-
-   A verifier (a different agent) then approves it to done. Strict-contract
-   tasks reject direct completion; only non-strict tasks may skip verification
-   with action: "done".
-
-6. **Broadcast progress**: Call `mcp__masc__masc_broadcast` to notify others
-
-## Available MCP Tools:
-- mcp__masc__masc_status - Get project status
-- mcp__masc__masc_tasks - List all tasks
-- mcp__masc__masc_transition - Claim/start/done/cancel/release a task
-- mcp__masc__keeper_task_claim - Auto-claim highest priority
-- mcp__masc__masc_broadcast - Send message to all
-- mcp__masc__masc_heartbeat - Update your heartbeat
-
-Start by calling mcp__masc__masc_status to see the current project state.|}
+      "%s prompt missing or empty, using embedded asset %s"
+      orchestrator_prompt_key orchestrator_prompt_asset;
+    match embedded_orchestrator_prompt () with
+    | Ok embedded -> embedded
+    | Error error ->
+      let message = embedded_prompt_error_message error in
+      Log.Orchestrator.error "%s" message;
+      invalid_arg message
   end
 
 (* ── Pulse helpers ─────────────────────────────────────────── *)

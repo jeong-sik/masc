@@ -9,6 +9,7 @@ const { invalidateDashboardCache, refreshDashboard } = vi.hoisted(() => ({
 const {
   cancelQueuedKeeperMessage,
   fetchKeeperChatHistory,
+  fetchKeeperChatReceipt,
   fetchQueuedKeeperMessageResult,
   isTerminalQueuedKeeperMessage,
   queuedKeeperMessageError,
@@ -17,6 +18,7 @@ const {
 } = vi.hoisted(() => ({
   cancelQueuedKeeperMessage: vi.fn(async () => undefined),
   fetchKeeperChatHistory: vi.fn(),
+  fetchKeeperChatReceipt: vi.fn(),
   fetchQueuedKeeperMessageResult: vi.fn(),
   isTerminalQueuedKeeperMessage: vi.fn((result: { status: string }) => (
     result.status === 'done'
@@ -40,6 +42,7 @@ vi.mock('./api/core', () => ({ runOperatorAction }))
 vi.mock('./api/keeper', () => ({
   cancelQueuedKeeperMessage,
   fetchKeeperChatHistory,
+  fetchKeeperChatReceipt,
   fetchQueuedKeeperMessageResult,
   isTerminalQueuedKeeperMessage,
   queuedKeeperMessageError,
@@ -76,6 +79,7 @@ import {
   loadFullKeeperHistory,
   noteKeeperChatAppended,
   probeKeeperRuntime,
+  reconcileKeeperChatReceipts,
   recoverKeeperRuntime,
   refreshActiveKeeperChatHistory,
   resumePendingKeeperChatRequests,
@@ -188,6 +192,376 @@ describe('noteKeeperChatAppended', () => {
     await vi.runAllTimersAsync()
 
     expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(2)
+  })
+})
+
+const RECEIPT_TURN_REF = 'trace-queue#42'
+
+describe('reconcileKeeperChatReceipts', () => {
+  beforeEach(() => {
+    keeperThreads.value = {
+      echo: [
+        {
+          id: 'queued-reply-1',
+          role: 'assistant',
+          source: 'direct_assistant',
+          label: 'echo',
+          text: 'echo is busy; your message is queued.',
+          timestamp: null,
+          delivery: 'queued',
+          streamState: null,
+          details: {
+            queueReceiptId: 'chatq_00000000-0000-4000-8000-000000000001',
+            queueRevision: 1,
+            queuePendingCount: 1,
+            queueInflightCount: 0,
+            queueState: 'pending',
+          },
+        },
+      ],
+    }
+    keeperActionErrors.value = {}
+    _resetChatHydrationForTests()
+    fetchKeeperChatHistory.mockReset()
+    fetchKeeperChatHistory.mockResolvedValue([])
+    fetchKeeperChatReceipt.mockReset()
+  })
+
+  it('moves a busy ACK to delivered only after the durable terminal receipt', async () => {
+    fetchKeeperChatReceipt.mockResolvedValue({
+      keeperName: 'echo',
+      receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
+      revision: 4,
+      state: { kind: 'delivered', completedAt: 42, outcomeRef: RECEIPT_TURN_REF },
+    })
+    fetchKeeperChatHistory.mockResolvedValue([
+      { role: 'assistant', content: 'delivered reply', ts: 1_780_000_000, turn_ref: RECEIPT_TURN_REF },
+    ])
+
+    await reconcileKeeperChatReceipts('echo')
+
+    const entry = keeperThreads.value.echo?.find(candidate => (
+      candidate.details?.queueReceiptId === 'chatq_00000000-0000-4000-8000-000000000001'
+    ))
+    expect(entry?.delivery).toBe('delivered')
+    expect(entry?.details?.queueState).toBe('delivered')
+    expect(entry?.streamContract).toMatchObject({
+      source: 'queue_poll',
+      status: 'queue_poll_result',
+      deliveryReceipt: 'server_durable_receipt',
+    })
+  })
+
+  it('fails closed instead of retrying forever when Delivered lacks outcome_ref', async () => {
+    fetchKeeperChatReceipt.mockResolvedValue({
+      keeperName: 'echo',
+      receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
+      revision: 4,
+      state: { kind: 'delivered', completedAt: 42, outcomeRef: null },
+    })
+
+    await reconcileKeeperChatReceipts('echo')
+
+    const entry = keeperThreads.value.echo?.find(candidate => (
+      candidate.details?.queueReceiptId === 'chatq_00000000-0000-4000-8000-000000000001'
+    ))
+    expect(entry?.delivery).toBe('error')
+    expect(entry?.details?.queueCorrelationError).toBe('missing_outcome_ref')
+    expect(entry?.error).toContain('outcome_ref')
+    expect(keeperActionErrors.value.echo).toContain('outcome_ref')
+    expect(fetchKeeperChatHistory).not.toHaveBeenCalled()
+
+    await reconcileKeeperChatReceipts('echo')
+    expect(fetchKeeperChatHistory).not.toHaveBeenCalled()
+  })
+
+  it('forces transcript convergence when only the terminal queue receipt is observed', async () => {
+    fetchKeeperChatReceipt.mockResolvedValue({
+      keeperName: 'echo',
+      receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
+      revision: 4,
+      state: { kind: 'delivered', completedAt: 42, outcomeRef: RECEIPT_TURN_REF },
+    })
+    fetchKeeperChatHistory.mockResolvedValue([
+      {
+        role: 'assistant',
+        content: 'reply recovered without append SSE',
+        ts: 1_780_000_001,
+        turn_ref: RECEIPT_TURN_REF,
+      },
+    ])
+
+    await reconcileKeeperChatReceipts('echo')
+
+    expect(fetchKeeperChatHistory).toHaveBeenCalledWith('echo')
+    expect(keeperThreads.value.echo?.some(entry => (
+      entry.text === 'reply recovered without append SSE'
+    ))).toBe(true)
+    expect(keeperThreads.value.echo?.some(entry => (
+      entry.details?.queueState === 'delivered'
+    ))).toBe(true)
+  })
+
+  it('retries terminal transcript convergence on the next poll after a failed fetch', async () => {
+    fetchKeeperChatReceipt.mockResolvedValue({
+      keeperName: 'echo',
+      receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
+      revision: 4,
+      state: { kind: 'delivered', completedAt: 42, outcomeRef: RECEIPT_TURN_REF },
+    })
+    fetchKeeperChatHistory
+      .mockRejectedValueOnce(new Error('temporary history timeout'))
+      .mockResolvedValueOnce([
+        {
+          role: 'assistant',
+          content: 'reply recovered on retry',
+          ts: 1_780_000_002,
+          turn_ref: RECEIPT_TURN_REF,
+        },
+      ])
+
+    await reconcileKeeperChatReceipts('echo')
+
+    const receiptEntry = keeperThreads.value.echo?.find(entry => (
+      entry.details?.queueReceiptId === 'chatq_00000000-0000-4000-8000-000000000001'
+    ))
+    expect(receiptEntry?.delivery).toBe('delivered')
+    expect(keeperActionErrors.value.echo).toContain('transcript convergence')
+
+    await reconcileKeeperChatReceipts('echo')
+
+    expect(fetchKeeperChatReceipt).toHaveBeenCalledTimes(1)
+    expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(2)
+    expect(keeperThreads.value.echo?.some(entry => (
+      entry.text === 'reply recovered on retry'
+    ))).toBe(true)
+    expect(keeperActionErrors.value.echo).toBeFalsy()
+  })
+
+  it('does not accept stale non-empty history for a newer terminal receipt', async () => {
+    fetchKeeperChatReceipt.mockResolvedValue({
+      keeperName: 'echo',
+      receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
+      revision: 4,
+      state: { kind: 'delivered', completedAt: 42, outcomeRef: RECEIPT_TURN_REF },
+    })
+    fetchKeeperChatHistory
+      .mockResolvedValueOnce([
+        { role: 'assistant', content: 'older reply', ts: 1_779_999_999, turn_ref: 'trace-old#41' },
+      ])
+      .mockResolvedValueOnce([
+        {
+          role: 'assistant',
+          content: 'exact terminal reply',
+          ts: 1_780_000_005,
+          turn_ref: RECEIPT_TURN_REF,
+        },
+      ])
+
+    await reconcileKeeperChatReceipts('echo')
+
+    expect(keeperActionErrors.value.echo).toContain(`did not find turn_ref ${RECEIPT_TURN_REF}`)
+
+    await reconcileKeeperChatReceipts('echo')
+
+    expect(fetchKeeperChatReceipt).toHaveBeenCalledTimes(1)
+    expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(2)
+    expect(keeperThreads.value.echo?.some(entry => (
+      entry.turnRef === RECEIPT_TURN_REF && entry.text === 'exact terminal reply'
+    ))).toBe(true)
+    expect(keeperActionErrors.value.echo).toBeFalsy()
+  })
+
+  it('shares one terminal transcript convergence fetch across overlapping polls', async () => {
+    fetchKeeperChatReceipt.mockResolvedValue({
+      keeperName: 'echo',
+      receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
+      revision: 4,
+      state: { kind: 'delivered', completedAt: 42, outcomeRef: RECEIPT_TURN_REF },
+    })
+    let resolveHistory!: (history: Array<{
+      role: string
+      content: string
+      ts: number
+      turn_ref: string
+    }>) => void
+    fetchKeeperChatHistory.mockReturnValue(new Promise(resolve => {
+      resolveHistory = resolve
+    }))
+
+    const firstPoll = reconcileKeeperChatReceipts('echo')
+    await vi.waitFor(() => expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(1))
+    const overlappingPoll = reconcileKeeperChatReceipts('echo')
+    await Promise.resolve()
+
+    expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(1)
+
+    resolveHistory([
+      {
+        role: 'assistant',
+        content: 'one bounded convergence result',
+        ts: 1_780_000_006,
+        turn_ref: RECEIPT_TURN_REF,
+      },
+    ])
+    await Promise.all([firstPoll, overlappingPoll])
+
+    expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(1)
+    expect(keeperActionErrors.value.echo).toBeFalsy()
+  })
+
+  it('surfaces a durable failed receipt on the queued chat row', async () => {
+    fetchKeeperChatReceipt.mockResolvedValue({
+      keeperName: 'echo',
+      receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
+      revision: 5,
+      state: {
+        kind: 'failed',
+        failureKind: 'delivery_failed',
+        detail: 'Slack API rejected the terminal message',
+        completedAt: 43,
+        outcomeRef: null,
+      },
+    })
+
+    await reconcileKeeperChatReceipts('echo')
+
+    const entry = keeperThreads.value.echo?.[0]
+    expect(entry?.delivery).toBe('error')
+    expect(entry?.details?.queueState).toBe('failed')
+    expect(entry?.details?.queueFailureKind).toBe('delivery_failed')
+    expect(entry?.error).toContain('Slack API rejected')
+  })
+
+  it('does not let an older concurrent lookup regress a terminal receipt', async () => {
+    let resolveOlder!: (value: {
+      keeperName: string
+      receiptId: string
+      revision: number
+      state: { kind: 'pending' }
+    }) => void
+    let resolveNewer!: (value: {
+      keeperName: string
+      receiptId: string
+      revision: number
+      state: { kind: 'delivered'; completedAt: number; outcomeRef: string }
+    }) => void
+    const older = new Promise<Parameters<typeof resolveOlder>[0]>(resolve => {
+      resolveOlder = resolve
+    })
+    const newer = new Promise<Parameters<typeof resolveNewer>[0]>(resolve => {
+      resolveNewer = resolve
+    })
+    fetchKeeperChatReceipt
+      .mockReturnValueOnce(older)
+      .mockReturnValueOnce(newer)
+
+    const olderReconciliation = reconcileKeeperChatReceipts('echo')
+    const newerReconciliation = reconcileKeeperChatReceipts('echo')
+    resolveNewer({
+      keeperName: 'echo',
+      receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
+      revision: 6,
+      state: { kind: 'delivered', completedAt: 44, outcomeRef: RECEIPT_TURN_REF },
+    })
+    await newerReconciliation
+    resolveOlder({
+      keeperName: 'echo',
+      receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
+      revision: 5,
+      state: { kind: 'pending' },
+    })
+    await olderReconciliation
+
+    const entry = keeperThreads.value.echo?.[0]
+    expect(entry?.delivery).toBe('delivered')
+    expect(entry?.details?.queueRevision).toBe(6)
+    expect(entry?.details?.queueState).toBe('delivered')
+  })
+
+  it('clears a receipt lookup error after authoritative recovery', async () => {
+    fetchKeeperChatReceipt.mockRejectedValueOnce(new Error('temporary disconnect'))
+    await reconcileKeeperChatReceipts('echo')
+    expect(keeperActionErrors.value.echo).toContain('큐 receipt 조회 실패')
+
+    fetchKeeperChatReceipt.mockResolvedValueOnce({
+      keeperName: 'echo',
+      receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
+      revision: 2,
+      state: { kind: 'pending' },
+    })
+    await reconcileKeeperChatReceipts('echo')
+
+    expect(keeperActionErrors.value.echo).toBeFalsy()
+  })
+
+  it('ignores an older rejected lookup after a newer terminal success', async () => {
+    fetchKeeperChatHistory.mockResolvedValue([
+      {
+        role: 'assistant',
+        content: 'authoritative terminal reply',
+        ts: 1_780_000_003,
+        turn_ref: RECEIPT_TURN_REF,
+      },
+    ])
+    let rejectOlder!: (reason: Error) => void
+    let resolveNewer!: (value: {
+      keeperName: string
+      receiptId: string
+      revision: number
+      state: { kind: 'delivered'; completedAt: number; outcomeRef: string }
+    }) => void
+    const older = new Promise<never>((_resolve, reject) => {
+      rejectOlder = reject
+    })
+    const newer = new Promise<Parameters<typeof resolveNewer>[0]>(resolve => {
+      resolveNewer = resolve
+    })
+    fetchKeeperChatReceipt
+      .mockReturnValueOnce(older)
+      .mockReturnValueOnce(newer)
+
+    const olderReconciliation = reconcileKeeperChatReceipts('echo')
+    const newerReconciliation = reconcileKeeperChatReceipts('echo')
+    resolveNewer({
+      keeperName: 'echo',
+      receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
+      revision: 7,
+      state: { kind: 'delivered', completedAt: 46, outcomeRef: RECEIPT_TURN_REF },
+    })
+    await newerReconciliation
+    rejectOlder(new Error('stale network failure'))
+    await olderReconciliation
+
+    const receiptEntry = keeperThreads.value.echo?.find(entry => (
+      entry.details?.queueReceiptId === 'chatq_00000000-0000-4000-8000-000000000001'
+    ))
+    expect(receiptEntry?.delivery).toBe('delivered')
+    expect(keeperActionErrors.value.echo).toBeFalsy()
+  })
+
+  it('reconciles visible receipts after reconnect history hydration', async () => {
+    _resetChatHydrationForTests()
+    fetchKeeperChatHistory.mockResolvedValue([
+      {
+        role: 'assistant',
+        content: 'reconnected terminal reply',
+        ts: 1_780_000_004,
+        turn_ref: RECEIPT_TURN_REF,
+      },
+    ])
+    fetchKeeperChatReceipt.mockResolvedValue({
+      keeperName: 'echo',
+      receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
+      revision: 3,
+      state: { kind: 'delivered', completedAt: 45, outcomeRef: RECEIPT_TURN_REF },
+    })
+
+    await hydrateKeeperChatHistory('echo', { force: true })
+
+    expect(keeperThreads.value.echo?.find(entry => (
+      entry.details?.queueReceiptId === 'chatq_00000000-0000-4000-8000-000000000001'
+    ))?.delivery).toBe('delivered')
   })
 })
 
@@ -954,7 +1328,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     await sendPromise
   })
 
-  it('persists the live assistant draft while the stream is in flight', async () => {
+  it('persists intermediate narration as progress while the stream is in flight', async () => {
     let resolveStream: (outcome: { terminal: boolean }) => void = () => {}
     streamKeeperMessage.mockImplementation(async (
       _name: string,
@@ -982,10 +1356,15 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     await Promise.resolve()
 
     const [pending] = pendingKeeperChatRequestsForKeeper('echo')
-    expect(pending?.assistantDraft?.text).toBe('부분 응답')
+    expect(pending?.assistantDraft?.text).toBe('')
+    expect(pending?.assistantDraft?.rawText).toBe('')
     expect(pending?.assistantDraft?.delivery).toBe('streaming')
     expect(pending?.assistantDraft?.streamState).toBe('streaming')
     expect(pending?.assistantDraft?.traceSteps).toEqual([
+      expect.objectContaining({
+        kind: 'progress',
+        text: '부분 응답',
+      }),
       expect.objectContaining({
         kind: 'tool',
         name: 'keeper_board_list',
@@ -1035,6 +1414,94 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     // whole dashboard after every chat send (user-visible "refresh").
     expect(refreshDashboard).not.toHaveBeenCalled()
     expect(invalidateDashboardCache).not.toHaveBeenCalled()
+  })
+
+  it('keeps a busy server-accepted message queued after RUN_FINISHED', async () => {
+    fetchKeeperChatReceipt.mockResolvedValue({
+      keeperName: 'echo',
+      receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
+      revision: 4,
+      state: { kind: 'pending' },
+    })
+    streamKeeperMessage.mockImplementation(emitting([
+      { type: 'RUN_STARTED' },
+      { type: 'TEXT_MESSAGE_START' },
+      { type: 'TEXT_MESSAGE_CONTENT', delta: 'echo is busy; your message is queued.' },
+      {
+        type: 'CUSTOM',
+        name: 'KEEPER_CHAT_QUEUED',
+        value: {
+          keeper_name: 'echo',
+          status: 'queued',
+          receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
+          queue_revision: 4,
+          pending_count: 1,
+          inflight_count: 0,
+          shutdown_operation_id: null,
+        },
+      },
+      { type: 'TEXT_MESSAGE_END' },
+      { type: 'RUN_FINISHED' },
+    ], true))
+
+    await sendKeeperThreadMessage('echo', '진행 상황?')
+
+    const reply = (keeperThreads.value.echo ?? []).find(entry => entry.role === 'assistant')
+    expect(reply?.delivery).toBe('queued')
+    expect(reply?.text).toContain('message is queued')
+    expect(reply?.details).toMatchObject({
+      queueReceiptId: 'chatq_00000000-0000-4000-8000-000000000001',
+      queueRevision: 4,
+      queuePendingCount: 1,
+      queueInflightCount: 0,
+    })
+    expect(fetchKeeperChatReceipt).toHaveBeenCalledWith(
+      'echo',
+      'chatq_00000000-0000-4000-8000-000000000001',
+    )
+  })
+
+  it('does not let the short ACK RUN_FINISHED overwrite a durable failed receipt', async () => {
+    fetchKeeperChatReceipt.mockResolvedValue({
+      keeperName: 'echo',
+      receiptId: 'chatq_00000000-0000-4000-8000-000000000002',
+      revision: 5,
+      state: {
+        kind: 'failed',
+        failureKind: 'turn_failed',
+        detail: 'provider rejected the queued turn',
+        completedAt: 47,
+        outcomeRef: null,
+      },
+    })
+    streamKeeperMessage.mockImplementation(emitting([
+      { type: 'RUN_STARTED' },
+      { type: 'TEXT_MESSAGE_START' },
+      { type: 'TEXT_MESSAGE_CONTENT', delta: 'echo accepted the durable message.' },
+      {
+        type: 'CUSTOM',
+        name: 'KEEPER_CHAT_QUEUED',
+        value: {
+          keeper_name: 'echo',
+          status: 'queued',
+          receipt_id: 'chatq_00000000-0000-4000-8000-000000000002',
+          queue_revision: 4,
+          pending_count: 1,
+          inflight_count: 0,
+          shutdown_operation_id: null,
+        },
+      },
+      { type: 'TEXT_MESSAGE_END' },
+      { type: 'RUN_FINISHED' },
+    ], true))
+
+    await sendKeeperThreadMessage('echo', '진행 상황?')
+    await vi.waitFor(() => {
+      const reply = (keeperThreads.value.echo ?? []).find(entry => entry.role === 'assistant')
+      expect(reply?.delivery).toBe('error')
+      expect(reply?.details?.queueState).toBe('failed')
+      expect(reply?.error).toContain('provider rejected')
+    })
   })
 
   it('throttles stream heartbeat signal updates during dense event bursts', async () => {
@@ -1740,7 +2207,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       const assistants = thread.filter(entry => entry.role === 'assistant')
       expect(assistants).toHaveLength(2)
       expect(assistants.some(entry => entry.delivery === 'queued')).toBe(true)
-      expect(assistants.some(entry => entry.delivery === 'error')).toBe(true)
+      expect(assistants.some(entry => entry.delivery === 'transport_failure')).toBe(true)
       expect(keeperActionErrors.value.echo).toBeNull()
 
       // Let the resume loop finish.

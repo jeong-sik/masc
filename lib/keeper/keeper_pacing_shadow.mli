@@ -48,3 +48,9 @@ val next_due_remaining : keeper_name:string -> float option
     eligible. [None] when no failure is pending or an observed revisit is
     already eligible. The query intentionally ignores unrelated runtime
     catalog entries with no pacing state. *)
+
+val remaining_for_runtime :
+  keeper_name:string -> runtime_id:string -> float option
+(** Remaining revisit delay for one exact runtime identity. Unlike
+    {!next_due_remaining}, unrelated failed runtimes in the same Keeper lane
+    cannot block this query. *)

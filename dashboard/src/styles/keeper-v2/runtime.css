@@ -67,7 +67,6 @@
 .rt-caps { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 11px; }
 .rt-cap { font-family: var(--font-mono); font-size: var(--fs-10); padding: 2px 8px; border-radius: var(--radius-pill); border: 1px solid var(--border-main); color: var(--text-dim); }
 .rt-cap.on { color: var(--status-ok); border-color: color-mix(in oklab, var(--status-ok) 32%, transparent); }
-.rt-cap.tcf { color: var(--info); border-color: color-mix(in oklab, var(--info) 28%, transparent); }
 
 /* models */
 .rt-search { width: 100%; box-sizing: border-box; background: var(--bg-sunken); border: 1px solid var(--border-main); border-radius: var(--radius-sm); padding: 9px 12px; color: var(--text-bright); font-size: var(--fs-12); margin-bottom: 12px; }

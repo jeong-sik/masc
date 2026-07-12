@@ -270,7 +270,7 @@ export function OasHealthChip() {
           href=${OAS_OPENTELEMETRY_UI_URL}
           target="_blank"
           rel="noopener noreferrer"
-          class="v2-shell-action text-3xs text-[var(--color-fg-muted)] hover:text-[var(--color-fg-primary)] underline"
+          class="v2-shell-action v2-mobile-operator-target inline-flex items-center text-3xs text-[var(--color-fg-muted)] hover:text-[var(--color-fg-primary)] underline"
         >
           OpenTelemetry에서 보기 →
         </a>

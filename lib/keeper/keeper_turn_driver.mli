@@ -117,7 +117,6 @@ val run_named :
   ?body_timeout_s:float ->
   ?temperature:float ->
   ?max_tokens:int ->
-  ?max_tokens_for_runtime:(runtime_id:string -> int) ->
   ?accept:(Agent_sdk_response.api_response -> bool) ->
   ?guardrails:Agent_sdk.Guardrails.t ->
   ?hooks:Agent_sdk.Hooks.hooks ->
@@ -160,17 +159,33 @@ val run_named :
 (** Run a single [Agent.run] call with MASC-driven runtime model fallback.
     MASC drives the runtime FSM directly: resolves runtime providers,
     resolves each candidate's model temperature before trying it with OAS, and
-    uses [Runtime_fsm.decide] on failure.
+    uses [Runtime_fsm.decide] on failure. The optional [max_tokens] value is a
+    turn-start snapshot shared unchanged by every candidate.
     The runtime loop runs inside a capacity-managed queue permit. *)
 
 type attempt_inference_policy =
   { attempt_temperature : float
   ; attempt_enable_thinking : bool option
   ; attempt_preserve_thinking : bool option
-  ; attempt_max_tokens : int
+  ; attempt_max_tokens : int option
   }
 
 module For_testing : sig
+  type provider_attempt_outcomes
+
+  val project_provider_attempt_result :
+    replay_prefix_projection:Keeper_replay_prefix.projection ->
+    (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result ->
+    provider_attempt_outcomes
+
+  val provider_result :
+    provider_attempt_outcomes ->
+    (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
+
+  val turn_result :
+    provider_attempt_outcomes ->
+    (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
+
   val checkpoint_after_attempt :
     ?agent_ref:Agent_sdk.Agent.t option ref ->
     Agent_sdk.Agent.t option ->
@@ -243,11 +258,10 @@ module For_testing : sig
     (context_window_rebudget, Agent_sdk.Error.sdk_error) result
 
   val attempt_inference_policy :
-    ?max_tokens_for_runtime:(runtime_id:string -> int) ->
     runtime_id:string ->
     fallback_temperature:float ->
     fallback_enable_thinking:bool option ->
-    fallback_max_tokens:int ->
+    turn_max_tokens:int option ->
     unit ->
     attempt_inference_policy
 

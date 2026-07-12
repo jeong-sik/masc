@@ -7,9 +7,9 @@ module M = Masc.Keeper_unified_metrics_support
 
 let is_noop = M.is_noop_cycle
 
-let test_is_noop_cycle_text_only () =
-  (* Text-only turn with no tools: noop *)
-  check bool "text + no tools = noop" true (is_noop ~has_text:true ~tools_used:[])
+let test_is_noop_cycle_text_only_is_visible_work () =
+  check bool "text + no tools = visible work" false
+    (is_noop ~has_text:true ~tools_used:[])
 
 let test_is_noop_cycle_passive_tool () =
   (* Turn with only passive status tools and no text: noop *)
@@ -30,7 +30,8 @@ let test_is_noop_cycle_empty () =
 let () =
   run "keeper_noop_backoff"
     [ ( "is_noop_cycle"
-      , [ test_case "text only" `Quick test_is_noop_cycle_text_only
+      , [ test_case "text only is visible work" `Quick
+            test_is_noop_cycle_text_only_is_visible_work
         ; test_case "passive tool, no text" `Quick test_is_noop_cycle_passive_tool
         ; test_case "text + passive tools" `Quick test_is_noop_cycle_not_noop_with_text
         ; test_case "substantive tool, no text" `Quick

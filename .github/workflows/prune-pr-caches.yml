@@ -1,0 +1,55 @@
+name: Prune PR caches
+
+# Actions caches are ref-scoped. Entries stored under refs/pull/N/merge become
+# unreachable the moment PR N closes, but they keep occupying the repository's
+# 10 GB cache quota until GitHub evicts them. Eviction is repo-wide and LRU, so
+# those dead bytes push out the refs/heads/main caches that every PR restores
+# from — and a missed main cache costs a ~40 min cold `dune build` in the
+# `Build and Test` job. Reclaiming the quota is therefore a CI *time* saving.
+
+on:
+  pull_request:
+    types: [closed]
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: prune-pr-caches-${{ github.event.pull_request.number || 'sweep' }}
+  cancel-in-progress: false
+
+jobs:
+  prune:
+    name: Prune unreachable caches
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Fork pull requests receive a read-only GITHUB_TOKEN, so cache deletion
+    # cannot succeed there. Skip rather than fail.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # Never execute the closing PR's copy of a script with an
+          # actions:write token. Cleanup code is owned by the default branch.
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Prune caches
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          # Empty on workflow_dispatch, which selects the full sweep.
+          CLOSED_PR: ${{ github.event.pull_request.number }}
+        run: bash scripts/ci/prune-pr-caches.sh
+
+      - name: Report remaining quota
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh api "repos/${GH_REPO}/actions/cache/usage" \
+            -q '"active caches: \(.active_caches_count), size: \(.active_caches_size_in_bytes / 1048576 | floor) MiB"'

@@ -342,7 +342,7 @@ export function FusionSettingsPanel() {
 
   return html`
     <div class="set-fusion-editor" data-testid="fusion-settings-editor">
-      <label class="set-line">
+      <label class="set-line v2-mobile-operator-target">
         <span>Fusion 심의 활성 (enabled)</span>
         <input type="checkbox" checked=${draft.enabled} onChange=${(e: Event) => patch({ enabled: checked(e) })} />
       </label>

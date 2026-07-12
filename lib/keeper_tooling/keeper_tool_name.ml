@@ -226,111 +226,48 @@ let public_mcp_non_descriptor_names =
      the surface entries without this allowlist edit while main was red. *)
   ; "masc_persona_create"
   ; "masc_persona_update"
-  ; "masc_runtime_verify"
-  ; "masc_runtime_ollama_probe"
   ]
 ;;
 
-let is_keeper_board_tool = function
-  | Board_comment
-  | Board_comment_vote
-  | Board_curation_read
-  | Board_curation_submit
-  | Board_post_get
-  | Board_list
-  | Board_post
-  | Board_search
-  | Board_stats
-  | Board_sub_board_create
-  | Board_sub_board_delete
-  | Board_sub_board_get
-  | Board_sub_board_list
-  | Board_sub_board_update
-  | Board_vote -> true
-  | Execute
-  | Broadcast
-  | Context_status
-  | Fs_edit
-  | Fs_write
-  | Fs_read
-  | Ide_annotate
-  | Handoff
-  | Library_read
-  | Library_search
-  | Memory_search
-  | Memory_write
-  | Keeper_msg
-  | Search_files
-  | Surface_read
-  | Surface_post
-  | Person_note_set
-  | Task_claim
-  | Task_create
-  | Task_done
-  | Tasks_audit
-  | Tasks_list
-  | Time_now
-  | Tool_search
-  | Tools_list
-  | Persona_create
-  | Persona_update
-  | Voice_agent
-  | Voice_listen
-  | Voice_session_end
-  | Voice_session_start
-  | Voice_sessions
-  | Voice_speak -> false
+type board_projection =
+  | Keeper_wrapper of t
+  | Direct_masc
+  | External_only
+
+let board_projection_of_masc_board_name = function
+  | Tool_name.Board_name.Board_comment -> Keeper_wrapper Board_comment
+  | Tool_name.Board_name.Board_comment_vote -> Keeper_wrapper Board_comment_vote
+  | Tool_name.Board_name.Board_curation_read -> Keeper_wrapper Board_curation_read
+  | Tool_name.Board_name.Board_curation_submit -> Keeper_wrapper Board_curation_submit
+  | Tool_name.Board_name.Board_post_get -> Keeper_wrapper Board_post_get
+  | Tool_name.Board_name.Board_list -> Keeper_wrapper Board_list
+  | Tool_name.Board_name.Board_post -> Keeper_wrapper Board_post
+  | Tool_name.Board_name.Board_search -> Keeper_wrapper Board_search
+  | Tool_name.Board_name.Board_stats -> Keeper_wrapper Board_stats
+  | Tool_name.Board_name.Board_sub_board_create -> Keeper_wrapper Board_sub_board_create
+  | Tool_name.Board_name.Board_sub_board_delete -> Keeper_wrapper Board_sub_board_delete
+  | Tool_name.Board_name.Board_sub_board_get -> Keeper_wrapper Board_sub_board_get
+  | Tool_name.Board_name.Board_sub_board_list -> Keeper_wrapper Board_sub_board_list
+  | Tool_name.Board_name.Board_sub_board_update -> Keeper_wrapper Board_sub_board_update
+  | Tool_name.Board_name.Board_vote -> Keeper_wrapper Board_vote
+  | Tool_name.Board_name.Board_hearths
+  | Tool_name.Board_name.Board_post_update
+  | Tool_name.Board_name.Board_profile
+  | Tool_name.Board_name.Board_reaction -> Direct_masc
+  | Tool_name.Board_name.Board_cleanup
+  | Tool_name.Board_name.Board_delete -> External_only
 ;;
 
-let masc_board_name_of_keeper_tool = function
-  | Board_comment -> Some Tool_name.Board_name.Board_comment
-  | Board_comment_vote -> Some Tool_name.Board_name.Board_comment_vote
-  | Board_curation_read -> Some Tool_name.Board_name.Board_curation_read
-  | Board_curation_submit -> Some Tool_name.Board_name.Board_curation_submit
-  | Board_post_get -> Some Tool_name.Board_name.Board_post_get
-  | Board_list -> Some Tool_name.Board_name.Board_list
-  | Board_post -> Some Tool_name.Board_name.Board_post
-  | Board_search -> Some Tool_name.Board_name.Board_search
-  | Board_stats -> Some Tool_name.Board_name.Board_stats
-  | Board_sub_board_create -> Some Tool_name.Board_name.Board_sub_board_create
-  | Board_sub_board_delete -> Some Tool_name.Board_name.Board_sub_board_delete
-  | Board_sub_board_get -> Some Tool_name.Board_name.Board_sub_board_get
-  | Board_sub_board_list -> Some Tool_name.Board_name.Board_sub_board_list
-  | Board_sub_board_update -> Some Tool_name.Board_name.Board_sub_board_update
-  | Board_vote -> Some Tool_name.Board_name.Board_vote
-  | Execute
-  | Broadcast
-  | Context_status
-  | Fs_edit
-  | Fs_write
-  | Fs_read
-  | Ide_annotate
-  | Handoff
-  | Library_read
-  | Library_search
-  | Memory_search
-  | Memory_write
-  | Keeper_msg
-  | Search_files
-  | Surface_read
-  | Surface_post
-  | Person_note_set
-  | Task_claim
-  | Task_create
-  | Task_done
-  | Tasks_audit
-  | Tasks_list
-  | Time_now
-  | Tool_search
-  | Tools_list
-  | Persona_create
-  | Persona_update
-  | Voice_agent
-  | Voice_listen
-  | Voice_session_end
-  | Voice_session_start
-  | Voice_sessions
-  | Voice_speak -> None
+let masc_board_name_of_keeper_tool keeper_tool =
+  Tool_name.Board_name.all
+  |> List.find_map (fun board_name ->
+    match board_projection_of_masc_board_name board_name with
+    | Keeper_wrapper projected when projected = keeper_tool -> Some board_name
+    | Keeper_wrapper _ | Direct_masc | External_only -> None)
+;;
+
+let is_keeper_board_tool tool =
+  Option.is_some (masc_board_name_of_keeper_tool tool)
 ;;
 
 let masc_board_name_of_keeper_name name =
@@ -351,29 +288,7 @@ let strip_mcp_masc_prefix name =
   else name
 ;;
 
-let is_board_write_name = function
-  | Tool_name.Board_name.Board_comment
-  | Tool_name.Board_name.Board_curation_submit
-  | Tool_name.Board_name.Board_post
-  | Tool_name.Board_name.Board_post_update
-  | Tool_name.Board_name.Board_vote -> true
-  | Tool_name.Board_name.Board_cleanup
-  | Tool_name.Board_name.Board_comment_vote
-  | Tool_name.Board_name.Board_curation_read
-  | Tool_name.Board_name.Board_delete
-  | Tool_name.Board_name.Board_post_get
-  | Tool_name.Board_name.Board_hearths
-  | Tool_name.Board_name.Board_list
-  | Tool_name.Board_name.Board_profile
-  | Tool_name.Board_name.Board_reaction
-  | Tool_name.Board_name.Board_search
-  | Tool_name.Board_name.Board_stats
-  | Tool_name.Board_name.Board_sub_board_create
-  | Tool_name.Board_name.Board_sub_board_delete
-  | Tool_name.Board_name.Board_sub_board_get
-  | Tool_name.Board_name.Board_sub_board_list
-  | Tool_name.Board_name.Board_sub_board_update -> false
-;;
+let is_board_write_name = Tool_name.Board_name.is_resource_write
 
 let is_board_write_surface_name name =
   let name = strip_mcp_masc_prefix name in

@@ -285,9 +285,10 @@ describe('RuntimeEnvironmentEditor capability projection', () => {
     expect(text).toContain('json')
     expect(text).toContain('structured')
     expect(text).toContain('multimodal')
-    expect(text).toContain('effort: reasoning-effort')
-    // the honest "no source" stub is gone now that a live source exists
-    expect(text).not.toContain('effort: 미수집')
+    // No effort/thinking-control-format chip: the models list has no runtime
+    // binding to resolve a catalog entry against, and the raw
+    // thinking-control-format key is inert (OAS never reads it — masc #21521).
+    expect(text).not.toContain('effort:')
 
     render(null, container)
   })
@@ -374,14 +375,16 @@ describe('RuntimeEnvironmentEditor capability projection', () => {
     render(null, container)
   })
 
-  it('shows per-M binding price and the model effort mode in the binding sub-line', () => {
+  it('shows per-M binding price in the binding sub-line, without the raw-TOML effort mode', () => {
     const container = document.createElement('div')
     mountSection(container, 'bindings')
 
     const text = container.querySelector('[data-testid="runtime-section-bindings"]')?.textContent ?? ''
     expect(text).toContain('$0.14/$0.28 per M')
-    expect(text).toContain('effort reasoning-effort')
-    expect(text).not.toContain('가격/effort 미수집')
+    // The raw-TOML thinking-control-format projection is gone from the
+    // sub-line (it was inert and duplicated the catalog "effective" row
+    // rendered by <RuntimeBindingCatalogSpec> just below).
+    expect(text).not.toContain('effort reasoning-effort')
 
     render(null, container)
   })
@@ -415,7 +418,7 @@ describe('RuntimeEnvironmentEditor capability projection', () => {
         supports_structured_output: true,
         supports_reasoning: true,
         accepted_reasoning_efforts: ['low', 'medium'],
-        thinking_control_format: 'responses.reasoning',
+        thinking_control_format: 'reasoning-effort',
         ignored_sampling_parameters: ['temperature'],
         supported_models: ['minimax-m3-api'],
       },
@@ -442,7 +445,7 @@ describe('RuntimeEnvironmentEditor capability projection', () => {
           thinking_support: true,
           streaming: true,
           capabilities: {
-            thinking_control_format: 'responses.reasoning',
+            thinking_control_format: 'reasoning-effort',
             supports_response_format_json: true,
             supports_structured_output: true,
           },

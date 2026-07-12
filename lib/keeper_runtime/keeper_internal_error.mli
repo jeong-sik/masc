@@ -1,6 +1,10 @@
 (** Structured keeper-internal error envelopes carried through
     [Agent_sdk.Error.Internal]. *)
 
+(** Canonical wire kind emitted for {!Capacity_backpressure}.  Receipt
+    terminal projection and decoding consume this same value. *)
+val capacity_backpressure_kind : string
+
 type provider_rejection = {
   provider_label : string;
   reason : string;
@@ -146,12 +150,6 @@ type masc_internal_error =
       remaining_turn_budget_sec : float option;
       min_required_sec : float;
       phase : string;
-    }
-  | Max_tokens_ceiling_violation of {
-      runtime_id : string;
-      requested_max_tokens : int;
-      provider_ceiling : int;
-      reason : string;
     }
   | Ambiguous_post_commit of {
       is_timeout : bool;

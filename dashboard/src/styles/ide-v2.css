@@ -12,6 +12,7 @@
 /* ── Surface shell ─────────────────────────────────────────────────────────── */
 
 .ide-v2-surface {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -20,6 +21,16 @@
   overflow: hidden;
   background: var(--bg-deep);
   color: var(--text-primary);
+}
+
+/* The keeper-v2 IDE is an immersive surface: the shell health strip and the
+   generic content inset duplicate IDE-local chrome and shrink all three panes. */
+.v2-app[data-surface="code"] > .v2-health-strip {
+  display: none;
+}
+
+.v2-app[data-surface="code"] .v2-surface-host > .h-full {
+  padding: 0 !important;
 }
 
 .ide-v2-surface > .ide-interject-bar {
@@ -44,6 +55,149 @@
   padding: 0 14px;
   border-bottom: 1px solid var(--border-main);
   background: linear-gradient(180deg, var(--bg-panel), var(--bg-deep));
+}
+
+.ide-v2-top > .ide-repo {
+  flex: 0 1 auto;
+  min-width: 12rem;
+  max-width: 34rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ide-v2-top > .ide-toolbar[data-compact="true"] {
+  flex: none;
+  width: auto;
+}
+
+.ide-v2-top > .ide-toolbar[data-compact="true"] .ide-toolbar-command-cluster,
+.ide-v2-top > .ide-toolbar[data-compact="true"] .ide-toolbar-layers,
+.ide-v2-top > .ide-toolbar[data-compact="true"] [data-view="unified"],
+.ide-v2-top > .ide-toolbar[data-compact="true"] [data-view="blame"],
+.ide-v2-top > .ide-toolbar[data-compact="true"] > .v2-ide-action {
+  display: none !important;
+}
+
+.ide-toolbar-advanced {
+  position: relative;
+  flex: none;
+}
+
+.ide-toolbar-advanced > summary {
+  display: inline-flex;
+  list-style: none;
+}
+
+.ide-toolbar-advanced > summary::-webkit-details-marker {
+  display: none;
+}
+
+.ide-toolbar-advanced-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: calc(var(--z-base) + 9);
+  display: grid;
+  width: min(42rem, 75vw);
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--border-main);
+  border-radius: var(--radius-md);
+  background: var(--bg-panel);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.42);
+}
+
+.ide-toolbar-advanced:not([open]) .ide-toolbar-advanced-popover {
+  display: none;
+}
+
+.ide-toolbar-advanced-views,
+.ide-toolbar-advanced-layers {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.ide-toolbar-advanced-layers > span {
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: var(--fs-9);
+  letter-spacing: 0.12em;
+}
+
+.ide-v2-operational-status {
+  position: relative;
+  flex: none;
+}
+
+.ide-v2-operational-status > summary {
+  cursor: pointer;
+  list-style: none;
+  white-space: nowrap;
+}
+
+.ide-v2-operational-status > summary::-webkit-details-marker {
+  display: none;
+}
+
+.ide-v2-operational-status-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: calc(var(--z-base) + 8);
+  display: flex;
+  width: min(32rem, 75vw);
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--border-main);
+  border-radius: var(--radius-md);
+  background: var(--bg-panel);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.42);
+}
+
+.ide-v2-presence-compact {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--text-dim);
+}
+
+.ide-v2-presence-compact .lbl {
+  font-family: var(--font-mono);
+  font-size: var(--fs-9);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.ide-v2-presence-compact ul {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  list-style: none;
+}
+
+.ide-v2-presence-compact li {
+  display: inline-flex;
+  flex: none;
+}
+
+.ide-v2-presence-state[data-state="live"],
+.ide-v2-connection-dot[data-state="ok"] {
+  color: var(--status-ok);
+}
+
+.ide-v2-presence-state:not([data-state="live"]),
+.ide-v2-connection-dot[data-state="warn"] {
+  color: var(--status-warn);
 }
 
 .ide-v2-top .ide-plane-statusbar,
@@ -175,6 +329,14 @@
   grid-template-rows: minmax(0, 1fr);
 }
 
+.ide-plane-shell[data-tree-collapsed="true"] .ide-v2-body.ide-plane-grid {
+  grid-template-columns: minmax(0, 1fr) minmax(270px, 320px);
+}
+
+.ide-plane-shell[data-tree-collapsed="true"][data-rails-collapsed="true"] .ide-v2-body.ide-plane-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .ide-plane-shell[data-rails-collapsed="true"] .ide-v2-body.ide-plane-grid {
   grid-template-columns: var(--ide-tree-width, 230px) minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
@@ -188,6 +350,16 @@
 .ide-v2-body.ide-plane-grid .ide-plane-editor {
   grid-column: 2;
   grid-row: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.ide-plane-shell[data-tree-collapsed="true"] .ide-v2-body.ide-plane-grid .ide-plane-editor {
+  grid-column: 1;
+}
+
+.ide-plane-shell[data-tree-collapsed="true"] .ide-v2-body.ide-plane-grid .ide-plane-conversation {
+  grid-column: 2;
 }
 
 .ide-v2-body.ide-plane-grid .ide-plane-conversation {
@@ -324,6 +496,11 @@
   overflow: hidden;
 }
 
+.ide-v2-responsive-annotation-composer {
+  display: none;
+  flex: none;
+}
+
 /* Breadcrumb */
 .ide-v2-crumb {
   flex: none;
@@ -378,10 +555,22 @@
   overflow: hidden;
 }
 
+/* The legacy IDE used this node as a two-row CSS grid (conversation over
+   activity).  The reference surface has one continuous activity rail, so make
+   the v2 modifier authoritative even when the legacy stylesheet is emitted
+   later by the CSS bundler. */
+.ide-v2-surface .ide-v2-rail.ide-plane-conversation {
+  display: flex;
+  flex-direction: column;
+  grid-template-rows: none;
+}
+
 .ide-v2-rail-tabs {
   flex: none;
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: flex-end;
   gap: 2px;
   padding: 10px 10px 0;
   border-bottom: 1px solid var(--border-soft);
@@ -401,7 +590,7 @@
   border-bottom: 2px solid transparent;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: normal;
+  white-space: nowrap;
 }
 
 .ide-v2-rail-tab.on {
@@ -422,10 +611,15 @@
   min-height: 0;
 }
 
+.ide-v2-surface .ide-v2-rail-scroll {
+  min-height: 0;
+}
+
 /* Map existing context-stack / conversation / activity panels into the rail. */
 .ide-v2-rail .ide-plane-context-stack,
 .ide-v2-rail .ide-plane-primary-rail,
 .ide-v2-rail .ide-plane-activity,
+.ide-v2-rail .ide-plane-annotations,
 .ide-v2-rail .ide-plane-cursors {
   border: 0;
   background: transparent;
@@ -447,6 +641,255 @@
   padding: 12px 12px;
   flex: 1;
   min-height: 0;
+}
+
+.ide-v2-rail .ide-activity-panel.is-compact {
+  min-height: 100%;
+}
+
+.ide-activity-compact-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: var(--fs-9);
+}
+
+.ide-activity-compact-status[data-state="offline"],
+.ide-activity-compact-status[data-state="stale"] {
+  color: var(--status-warn);
+}
+
+.ide-activity-compact-insights {
+  margin-bottom: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+}
+
+.ide-activity-compact-insights > button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: var(--fs-9);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.ide-activity-compact-insights > .ide-run-progress,
+.ide-activity-compact-insights > .ide-context-lens {
+  border-top: 1px solid var(--border-soft);
+}
+
+.ide-v2-rail .ide-activity-panel.is-compact .ide-activity-list {
+  gap: 9px;
+}
+
+.ide-v2-rail .ide-activity-panel.is-compact .ide-activity-row {
+  position: relative;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 9px;
+  min-height: 70px;
+  padding: 10px;
+}
+
+.ide-v2-rail .ide-activity-panel.is-compact .ide-activity-time {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  font-size: var(--fs-9);
+  color: var(--text-dim);
+}
+
+.ide-v2-rail .ide-activity-panel.is-compact .ide-activity-dot {
+  grid-column: 1;
+  align-self: start;
+  width: 24px;
+  height: 24px;
+  margin-top: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--ide-activity-dot) 18%, var(--bg-deep));
+  box-shadow: inset 0 0 0 6px var(--bg-deep);
+}
+
+.ide-v2-rail .ide-activity-panel.is-compact .ide-activity-row > div {
+  grid-column: 2;
+  padding-right: 34px;
+  overflow-wrap: anywhere;
+}
+
+.ide-v2-rail .ide-activity-panel.is-compact .ide-activity-row > div > span:first-child {
+  flex-wrap: wrap;
+}
+
+.ide-v2-work-context {
+  margin: 0 12px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+}
+
+.ide-v2-work-context > button {
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: var(--fs-9);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ide-v2-rail .ide-plane-annotations {
+  padding: 12px;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.ide-v2-rail .ide-activity-list {
+  display: grid;
+  gap: 8px;
+  padding: 0;
+}
+
+/* The reference rail presents recent activity as independently scannable
+   cards, not a single uninterrupted text log. */
+.ide-v2-rail .ide-activity-row {
+  grid-template-columns: 42px 7px minmax(0, 1fr);
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  box-shadow: 0 1px 0 rgb(0 0 0 / 0.22);
+}
+
+.ide-v2-rail .ide-activity-row:hover {
+  border-color: var(--border-main);
+  background: color-mix(in srgb, var(--bg-card) 86%, var(--volt-wash));
+}
+
+.ide-annotation-rail {
+  min-height: 100%;
+}
+
+.ide-annotation-rail-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ide-annotation-rail-card {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-left: 3px solid var(--volt);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  content-visibility: auto;
+  contain-intrinsic-size: auto 7.25rem;
+}
+
+.ide-annotation-rail-card-main {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  gap: 6px;
+  align-items: start;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ide-annotation-rail-card-main:hover .ide-annotation-rail-content,
+.ide-annotation-rail-card-main:focus-visible .ide-annotation-rail-content {
+  color: var(--volt-strong);
+}
+
+.ide-annotation-rail-card-main:focus-visible {
+  outline: 1px solid var(--volt);
+  outline-offset: 3px;
+  border-radius: var(--radius-sm);
+}
+
+.ide-annotation-rail-kind,
+.ide-annotation-rail-line,
+.ide-annotation-rail-context {
+  padding: 2px 5px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--fs-9);
+  line-height: 1.2;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.ide-annotation-rail-kind {
+  color: var(--volt-strong);
+  background: var(--volt-wash);
+}
+
+.ide-annotation-rail-kind.is-decision { color: var(--color-status-ok); }
+.ide-annotation-rail-kind.is-question { color: var(--color-status-warn); }
+.ide-annotation-rail-kind.is-bookmark { color: var(--text-dim); }
+
+.ide-annotation-rail-line,
+.ide-annotation-rail-context {
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.ide-annotation-rail-content {
+  min-width: 0;
+  color: var(--text-mid);
+  font-size: var(--fs-11);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.ide-annotation-rail-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: var(--fs-10);
+}
+
+.ide-annotation-rail-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ide-annotation-rail-context {
+  margin-left: auto;
+  flex: none;
 }
 
 .ide-v2-rail .ide-plane-cursors {
@@ -572,6 +1015,96 @@
   max-height: 200px;
 }
 
+/* The live drawer retains the existing stream contract, while this v2 shell
+   gives it the compact, always-present execution-output geometry of the
+   reference IDE. */
+.ide-v2-editor > .execute-output-drawer {
+  flex: none;
+  max-height: 200px;
+  min-height: 30px;
+  border-top: 1px solid var(--border-main);
+  background: var(--bg-well);
+}
+
+.ide-v2-editor > .execute-output-drawer .execute-output-drawer-header {
+  min-height: 30px;
+  padding: 5px 14px;
+  border-bottom-color: var(--border-soft);
+  background: var(--bg-sunken);
+}
+
+.ide-v2-editor > .execute-output-drawer [data-terminal] {
+  height: auto !important;
+  min-height: 48px;
+  max-height: 168px;
+  background: var(--bg-well) !important;
+}
+
+.ide-v2-editor > .execute-output-drawer.is-collapsed {
+  max-height: 30px;
+}
+
+.execute-output-drawer-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-mid);
+  font: inherit;
+  cursor: pointer;
+}
+
+.execute-output-drawer-chevron {
+  transition: transform 0.18s;
+}
+
+.execute-output-drawer.is-collapsed .execute-output-drawer-chevron {
+  transform: rotate(-90deg);
+}
+
+.ide-interject-fab {
+  position: absolute;
+  right: 18px;
+  bottom: 16px;
+  z-index: calc(var(--z-base) + 2);
+  min-width: 82px;
+  height: 38px;
+  padding: 0 16px;
+  border: 1px solid color-mix(in srgb, var(--volt) 58%, var(--border-main));
+  border-radius: 999px;
+  background: var(--volt);
+  box-shadow: 0 8px 26px color-mix(in srgb, var(--volt) 24%, transparent);
+  color: var(--bg-deep);
+  font-family: var(--font-ui);
+  font-size: var(--fs-11);
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.ide-interject-fab:hover,
+.ide-interject-fab:focus-visible {
+  background: var(--volt-strong);
+  transform: translateY(-1px);
+}
+
+.ide-interject-fab:focus-visible {
+  outline: 2px solid var(--text-bright);
+  outline-offset: 2px;
+}
+
+.ide-v2-surface > .ide-interject-expanded {
+  position: absolute;
+  right: 18px;
+  bottom: 16px;
+  z-index: calc(var(--z-base) + 3);
+  width: min(34rem, calc(100% - 36px));
+  border: 1px solid var(--border-main);
+  border-radius: var(--radius-md);
+  box-shadow: 0 16px 44px rgb(0 0 0 / 0.42);
+}
+
 .ide-v2-drawer.closed {
   max-height: 30px;
 }
@@ -642,37 +1175,115 @@
 
 /* ── Responsive ────────────────────────────────────────────────────────────── */
 
-@media (max-width: 1280px) {
-  .ide-v2-body,
-  .ide-v2-body.ide-plane-grid {
-    grid-template-columns: var(--ide-tree-width, 230px) minmax(0, 1fr);
+@media (max-width: 1180px) {
+  .ide-plane-shell[data-mobile-viewport="false"][data-rails-collapsed="false"] .ide-v2-body.ide-plane-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(270px, 320px) !important;
   }
 
-  .ide-v2-rail,
-  .ide-v2-body.ide-plane-grid .ide-plane-conversation {
+  .ide-plane-shell[data-mobile-viewport="false"][data-rails-collapsed="true"] .ide-v2-body.ide-plane-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .ide-plane-shell[data-mobile-viewport="false"] .ide-v2-tree,
+  .ide-plane-shell[data-mobile-viewport="false"] .ide-v2-body.ide-plane-grid .ide-plane-tree {
+    display: none;
+  }
+
+  .ide-plane-shell[data-mobile-viewport="false"] .ide-v2-body.ide-plane-grid .ide-plane-editor,
+  .ide-plane-shell[data-mobile-viewport="false"][data-tree-collapsed="true"] .ide-v2-body.ide-plane-grid .ide-plane-editor {
+    grid-column: 1;
+  }
+
+  .ide-plane-shell[data-mobile-viewport="false"] .ide-v2-body.ide-plane-grid .ide-plane-conversation,
+  .ide-plane-shell[data-mobile-viewport="false"][data-tree-collapsed="true"] .ide-v2-body.ide-plane-grid .ide-plane-conversation {
+    grid-column: 2;
+  }
+
+  .ide-plane-shell[data-mobile-viewport="false"] .ide-v2-tree-toggle {
     display: none;
   }
 }
 
-@media (max-width: 900px) {
-  .ide-v2-top {
-    height: auto;
-    min-height: 42px;
-    flex-wrap: wrap;
-    padding: 6px 10px;
-  }
+.ide-plane-shell[data-mobile-viewport="true"] .ide-v2-top {
+  height: auto;
+  min-height: 42px;
+  flex-wrap: wrap;
+  padding: 6px 10px;
+}
 
-  .ide-v2-top .ide-toolbar-command-cluster {
-    display: none;
-  }
+.ide-plane-shell[data-mobile-viewport="true"] .ide-v2-top .ide-toolbar-command-cluster {
+  display: none;
+}
 
-  .ide-v2-body,
-  .ide-v2-body.ide-plane-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
+.ide-plane-shell[data-mobile-viewport="true"] .ide-toolbar-advanced-popover {
+  position: fixed;
+  top: max(54px, env(safe-area-inset-top));
+  right: 12px;
+  left: 12px;
+  width: auto;
+  max-height: calc(100dvh - 130px);
+  overflow: auto;
+}
 
-  .ide-v2-tree,
-  .ide-v2-body.ide-plane-grid .ide-plane-tree {
-    display: none;
-  }
+.ide-plane-shell[data-mobile-viewport="true"] .ide-v2-body,
+.ide-plane-shell[data-mobile-viewport="true"] .ide-v2-body.ide-plane-grid {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+
+.ide-plane-shell[data-mobile-viewport="true"] .ide-v2-body.ide-plane-grid {
+  position: relative;
+}
+
+.ide-plane-shell[data-mobile-viewport="true"] .ide-v2-tree,
+.ide-plane-shell[data-mobile-viewport="true"] .ide-v2-body.ide-plane-grid .ide-plane-tree {
+  position: absolute;
+  inset: 0 auto 0 0;
+  z-index: var(--z-overlay);
+  display: flex;
+  width: min(86vw, 340px);
+  max-width: 100%;
+  border-right: 1px solid var(--color-border-strong);
+  box-shadow: var(--shadow-panel);
+}
+
+.ide-plane-shell[data-mobile-viewport="true"] .ide-v2-tree-resize {
+  display: none;
+}
+
+.ide-plane-shell[data-mobile-viewport="true"] .ide-v2-tree .ide-explorer-row {
+  min-height: var(--mobile-touch-target-min);
+}
+
+.ide-plane-shell[data-mobile-viewport="true"] .ide-v2-body.ide-plane-grid .ide-plane-editor {
+  grid-column: 1;
+}
+
+.ide-plane-shell[data-mobile-viewport="true"] .ide-v2-responsive-annotation-composer {
+  display: block;
+}
+
+.ide-plane-shell[data-mobile-viewport="true"] .ide-v2-rail-toggle {
+  display: none;
+}
+
+.ide-plane-shell[data-mobile-viewport="true"] .ide-v2-tree-toggle {
+  display: inline-flex;
+}
+
+.ide-plane-shell[data-mobile-viewport="true"] .v2-ide-action,
+.ide-plane-shell[data-mobile-viewport="true"] .ide-v2-action,
+.ide-plane-shell[data-mobile-viewport="true"] .execute-output-drawer-toggle,
+.ide-plane-shell[data-mobile-viewport="true"] .ide-interject-fab,
+.ide-plane-shell[data-mobile-viewport="true"] button.ide-remote,
+.ide-plane-shell[data-mobile-viewport="true"] a.ide-web,
+.ide-plane-shell[data-mobile-viewport="true"] summary.chip {
+  min-width: var(--mobile-touch-target-min);
+  min-height: var(--mobile-touch-target-min);
+}
+
+.ide-plane-shell[data-mobile-viewport="true"] button.ide-remote,
+.ide-plane-shell[data-mobile-viewport="true"] a.ide-web {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }

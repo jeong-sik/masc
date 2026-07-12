@@ -59,13 +59,19 @@ function SubBoardRow({ board, onEdit, onDelete, deleting }: SubBoardRowProps) {
             <span class="inline-flex size-7 items-center justify-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)]" aria-hidden="true">
               <${Hash} size=${15} />
             </span>
-            <div class="min-w-0 cursor-pointer" onClick=${() => {
+            <button
+              type="button"
+              class="v2-mobile-operator-target min-w-0 cursor-pointer border-0 bg-transparent p-0 text-left"
+              aria-label=${`서브보드 열기: ${board.name || board.slug}`}
+              data-testid=${`sub-board-open-${board.slug}`}
+              onClick=${() => {
               boardHearthFilter.value = board.slug
               navigateBoard()
-            }}>
+              }}
+            >
               <h3 class="truncate text-sm font-semibold text-[var(--color-fg-primary)] hover:underline">${board.name || board.slug}</h3>
               <div class="truncate font-mono text-2xs text-[var(--color-fg-muted)]">/${board.slug}</div>
-            </div>
+            </button>
           </div>
           ${board.description ? html`
             <p class="max-w-3xl text-xs leading-relaxed text-[var(--color-fg-secondary)]">${board.description}</p>

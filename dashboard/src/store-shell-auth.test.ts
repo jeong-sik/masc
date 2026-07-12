@@ -30,6 +30,39 @@ afterEach(async () => {
 })
 
 describe('refreshShell auth failure handling', () => {
+  it('starts a fresh forced request after an older shell refresh finishes', async () => {
+    let resolveFirst: ((value: Record<string, unknown>) => void) | undefined
+    apiMocks.fetchDashboardShell
+      .mockImplementationOnce(() => new Promise(resolve => { resolveFirst = resolve }))
+      .mockResolvedValueOnce({
+        generated_at: '2026-07-11T11:00:01Z',
+        status: { project: 'me' },
+        counts: { agents: 0, tasks: 0, keepers: 0, total_runtimes: 0 },
+        auth: { enabled: true, require_token: true, token_present: false, token_valid: false },
+      })
+
+    const store = await import('./store')
+    const older = store.refreshShell({ force: true })
+    await vi.waitFor(() => expect(apiMocks.fetchDashboardShell).toHaveBeenCalledTimes(1))
+
+    const afterStateChange = store.refreshShell({ force: true })
+    const concurrentAfterStateChange = store.refreshShell({ force: true })
+    expect(apiMocks.fetchDashboardShell).toHaveBeenCalledTimes(1)
+    resolveFirst?.({
+      generated_at: '2026-07-11T11:00:00Z',
+      status: { project: 'me' },
+      counts: { agents: 0, tasks: 0, keepers: 0, total_runtimes: 0 },
+      auth: { enabled: true, require_token: true, token_present: true, token_valid: true },
+    })
+
+    await expect(older).resolves.toBe(true)
+    await expect(afterStateChange).resolves.toBe(true)
+    await expect(concurrentAfterStateChange).resolves.toBe(true)
+    expect(apiMocks.fetchDashboardShell).toHaveBeenCalledTimes(2)
+    expect(store.shellAuthSummary.value?.token_present).toBe(false)
+    expect(store.shellAuthSummary.value?.token_valid).toBe(false)
+  })
+
   it('clears canonical actor and auth summary when shell refresh fails', async () => {
     apiMocks.fetchDashboardShell.mockRejectedValue(new Error('network down'))
 
@@ -53,8 +86,9 @@ describe('refreshShell auth failure handling', () => {
       keeper_msg_error: null,
     }
 
-    await store.refreshShell({ force: true })
+    const refreshed = await store.refreshShell({ force: true })
 
+    expect(refreshed).toBe(false)
     expect(sessionActor.currentCanonicalDashboardActor()).toBeNull()
     expect(store.shellAuthSummary.value).toBeNull()
     expect(toastMocks.showToast).toHaveBeenCalledWith(

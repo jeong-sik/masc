@@ -7,6 +7,18 @@ module Negotiation = Mcp_transport_protocol.Http_negotiation
 module Mcp_store = Masc.Session.McpSessionStore
 module Auth = Masc.Auth
 
+let request_trust_policy =
+  match
+    Server_request_authority.make_trust_policy
+      ~bind_host:"127.0.0.1"
+      ~bind_port:8935
+      ~explicit_base_url:None
+  with
+  | Ok policy -> policy
+  | Error error ->
+    fail (Server_request_authority.trust_policy_error_to_string error)
+;;
+
 let source_root () =
   match Sys.getenv_opt "DUNE_SOURCEROOT" with
   | Some root when Sys.file_exists (Filename.concat root "dune-project") -> root
@@ -453,9 +465,24 @@ let ws_upgrade_request headers =
   Httpun.Request.create ~headers:(Httpun.Headers.of_list headers) `GET "/ws"
 
 let ws_gate_on ~base_path headers =
+  let request = ws_upgrade_request headers in
+  let request_authority =
+    match
+      Server_request_authority.classify_http1_request
+        ~trust_policy:request_trust_policy
+        request
+    with
+    | Server_request_authority.Single authority -> authority
+    | ( Server_request_authority.Missing
+      | Server_request_authority.Multiple
+      | Server_request_authority.Malformed
+      | Server_request_authority.Untrusted ) ->
+      fail "expected valid authority"
+  in
   Server_routes_http_routes_frontend.websocket_upgrade_authorized
     ~base_path
-    (ws_upgrade_request headers)
+    ~request_authority
+    request
 
 let ws_gate headers = ws_gate_on ~base_path:(ws_absent_base_path ()) headers
 

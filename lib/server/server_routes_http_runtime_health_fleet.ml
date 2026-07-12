@@ -79,6 +79,7 @@ let keeper_turn_admission_health_json () =
       ; "chat_waiting_full_keeper_count", `Int 0
       ; "chat_rejected_total_count", `Int 0
       ; "in_flight_keeper_count", `Int 0
+      ; "shutdown_keeper_count", `Int 0
       ; "keepers", `List []
       ]
   | Some state ->
@@ -162,6 +163,8 @@ let keeper_event_queue_health_json () =
       ; "pending_count", `Int 0
       ; "inflight_count", `Int 0
       ; "total_count", `Int 0
+      ; "transition_outbox_count", `Int 0
+      ; "counts_complete", `Bool false
       ; "oldest_arrived_at_unix", `Null
       ; "oldest_age_seconds", `Null
       ; "pending_by_keeper", `List []

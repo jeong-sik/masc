@@ -179,9 +179,14 @@ val string_of_toml_value_for_env :
   Keeper_toml_loader.toml_value -> string option
 val oas_env_key_prefix : string
 val keeper_unified_max_tokens_oas_env_key : string
+val keeper_unified_max_tokens_toml_key : string
 val oas_env_key_is_allowed : string -> bool
 val extract_oas_env_from_doc :
   Keeper_toml_loader.toml_doc -> (string * string) list
+val validate_unified_max_tokens_toml_value :
+  Keeper_toml_loader.toml_doc -> (unit, string) result
+val parse_unified_max_tokens_override_of_oas_env :
+  (string * string) list -> (int option, string) result
 val unified_max_tokens_override_of_oas_env :
   ?keeper_name:string -> (string * string) list -> int option
 val profile_defaults_of_toml :
@@ -205,9 +210,37 @@ val merge_keeper_profile_defaults :
   agent_name:'a ->
   base:keeper_profile_defaults ->
   overlay:keeper_profile_defaults -> keeper_profile_defaults
+
+type keeper_toml_error_kind =
+  | Read_error
+  | Parse_error
+  | Profile_error
+  | Invalid_name
+
+type keeper_toml_load_error =
+  { keeper_path : string
+  ; failing_path : string
+  ; kind : keeper_toml_error_kind
+  ; detail : string
+  }
+
+val keeper_toml_error_kind_to_string : keeper_toml_error_kind -> string
+val keeper_toml_load_error_to_string : keeper_toml_load_error -> string
+val keeper_toml_load_error_paths : keeper_toml_load_error -> string list
+val inspect_keeper_toml :
+  string -> (string * keeper_profile_defaults, keeper_toml_load_error) result
 val load_keeper_toml :
-  string -> (string * keeper_profile_defaults, string) result
-val logged_toml_skip : (string * string, unit) Hashtbl.t
-val log_toml_skip_once : file:string -> error:string -> bool
-val reset_logged_toml_skip_for_test : unit -> unit
-val discover_keepers_toml : string -> (string * keeper_profile_defaults) list
+  string -> (string * keeper_profile_defaults, keeper_toml_load_error) result
+
+type keeper_toml_discovery =
+  | Loaded of
+      { keeper_name : string
+      ; defaults : keeper_profile_defaults
+      }
+  | Invalid of
+      { keeper_name : string
+      ; error : keeper_toml_load_error
+      }
+
+val keeper_toml_discovery_name : keeper_toml_discovery -> string
+val discover_keepers_toml : string -> keeper_toml_discovery list

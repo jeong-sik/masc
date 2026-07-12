@@ -89,7 +89,17 @@ let has_git_marker path =
 (** Get git root directory.
     Tries rev-parse first (most reliable when exec gate works),
     falls back to parent-walk .git marker when rev-parse fails
-    (e.g. sandbox exec gate blocks subprocess). *)
+    (e.g. sandbox exec gate blocks subprocess).
+
+    NOTE: In git worktree setups, [rev-parse --show-toplevel] returns
+    the working tree root while [find_git_root] returns the directory
+    containing [.git]. These may differ. The fallback is safe for
+    sandbox environments where worktrees are not used.
+
+    Performance note: [has_git_marker] and the [find_git_root] fallback
+    both walk parent directories. This is O(2n) in worst case where
+    n is directory depth. A future optimization could cache the
+    [find_git_root] result to avoid the duplicate walk. *)
 let git_root ~base_path =
   if not (has_git_marker base_path) then None
   else match run_argv_line ["git"; "-C"; base_path; "rev-parse"; "--show-toplevel"] with

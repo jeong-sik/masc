@@ -41,7 +41,8 @@ let text_of_content block =
       (Printf.sprintf
          "[tool result omitted: id=%s is_error=%b]"
          result.Canonical_tool.call_id
-         result.Canonical_tool.is_error)
+         (Agent_sdk.Types.tool_result_outcome_is_error
+            result.Canonical_tool.outcome))
   | None -> (
     match Canonical_tool.tool_call_of_block block with
     | Some call ->

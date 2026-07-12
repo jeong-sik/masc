@@ -25,6 +25,15 @@ module Receipt = Masc.Keeper_execution_receipt_types
 let failures = ref []
 let check name cond = if not cond then failures := name :: !failures
 
+let input_required_request () : Agent_sdk.Error.input_required =
+  { request_id = "receipt-input-1"
+  ; participant_name = None
+  ; question = "Which repository?"
+  ; schema = None
+  ; timeout_s = None
+  ; created_at = 1_000.0
+  }
+
 let () =
   let runtime_stop_wire = Receipt.stop_reason_to_string Runtime_agent.Completed in
   check
@@ -59,6 +68,22 @@ let () =
     (String.equal
        (Receipt.runtime_outcome_to_string Receipt.Runtime_completed)
        "completed");
+  let input_required_stop =
+    Runtime_agent.InputRequired
+      { turns_used = 2; request = input_required_request () }
+  in
+  let input_required_wire = Receipt.stop_reason_to_string input_required_stop in
+  check
+    "runtime input-required stop uses the typed disposition wire"
+    (String.equal input_required_wire "input_required");
+  let input_required_terminal =
+    Receipt.receipt_terminal_reason_code_of_stop_reason input_required_stop
+  in
+  check
+    "terminal receipt preserves input-required instead of success"
+    (match D.of_wire input_required_terminal with
+     | D.Input_required -> true
+     | _ -> false);
   let used = 1070 and limit = 1070 in
   let wire =
     Receipt.stop_reason_to_string

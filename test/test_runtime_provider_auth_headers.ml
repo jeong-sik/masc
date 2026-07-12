@@ -1150,6 +1150,20 @@ let test_runtime_agent_max_turns_is_continuation_checkpoint () =
   check string "status" "continuation_checkpoint" lifecycle.status;
   check (option string) "no error" None lifecycle.error
 
+let test_runtime_agent_recovery_defer_is_control_checkpoint () =
+  let lifecycle =
+    Runtime_agent.worker_lifecycle_classification_of_result
+      (Error
+         (Agent_sdk.Error.Agent
+            (Agent_sdk.Error.ToolFailureRecoveryDeferred
+               { reason = "wait for repository state"
+               ; tool_names = [ "Execute" ]
+               })))
+  in
+  check string "event" "completed" lifecycle.event;
+  check string "status" "tool_failure_recovery_deferred" lifecycle.status;
+  check (option string) "no provider error" None lifecycle.error
+
 let test_runtime_agent_context_uses_configured_turn_budget () =
   let config =
     Runtime_agent.default_config
@@ -1665,6 +1679,10 @@ let () =
             "max turns is continuation checkpoint"
             `Quick
             test_runtime_agent_max_turns_is_continuation_checkpoint
+        ; test_case
+            "typed recovery defer is a control checkpoint"
+            `Quick
+            test_runtime_agent_recovery_defer_is_control_checkpoint
         ; test_case
             "runtime agent context uses configured turn budget"
             `Quick

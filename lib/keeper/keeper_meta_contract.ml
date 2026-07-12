@@ -192,6 +192,7 @@ type blocker_class =
   | Sdk_tripwire_violation
   | Sdk_exit_condition_met
   | Sdk_input_required
+  | Sdk_tool_failure_recovery_failed
 
 let blocker_class_to_string = function
   | Runtime_exhausted _ -> "runtime_exhausted"
@@ -217,6 +218,7 @@ let blocker_class_to_string = function
   | Sdk_tripwire_violation -> "sdk_tripwire_violation"
   | Sdk_exit_condition_met -> "sdk_exit_condition_met"
   | Sdk_input_required -> "sdk_input_required"
+  | Sdk_tool_failure_recovery_failed -> "sdk_tool_failure_recovery_failed"
 ;;
 
 let blocker_class_of_serialized_string = function
@@ -243,6 +245,7 @@ let blocker_class_of_serialized_string = function
   | "sdk_tripwire_violation" -> Some Sdk_tripwire_violation
   | "sdk_exit_condition_met" -> Some Sdk_exit_condition_met
   | "sdk_input_required" -> Some Sdk_input_required
+  | "sdk_tool_failure_recovery_failed" -> Some Sdk_tool_failure_recovery_failed
   | _ -> None
 ;;
 
@@ -289,7 +292,8 @@ let blocker_class_continue_gate = function
   | Sdk_guardrail_violation
   | Sdk_tripwire_violation
   | Sdk_exit_condition_met
-  | Sdk_input_required -> false
+  | Sdk_input_required
+  | Sdk_tool_failure_recovery_failed -> false
 ;;
 
 (** [blocker_class_auto_approval_blocked b] is [true] iff the presence of
@@ -317,7 +321,8 @@ let blocker_class_auto_approval_blocked = function
   | Oas_agent_execution_timeout
   | Sdk_guardrail_violation
   | Sdk_tripwire_violation
-  | Sdk_exit_condition_met -> true
+  | Sdk_exit_condition_met
+  | Sdk_tool_failure_recovery_failed -> true
   | Capacity_backpressure
   | Admission_queue_wait_timeout
   | Turn_timeout_after_queue_wait

@@ -332,6 +332,131 @@ let test_anti_rationalization_verdict_schema_uses_task_ssot () =
     (allows_additional_properties schema)
 ;;
 
+let tool_failure_recovery_response text : Agent_sdk.Types.api_response =
+  { id = "recovery-judge-response"
+  ; model = "structured-judge"
+  ; stop_reason = Agent_sdk.Types.EndTurn
+  ; content = [ Agent_sdk.Types.Text text ]
+  ; usage = None
+  ; telemetry = None
+  }
+;;
+
+let test_tool_failure_recovery_judge_adapter_forwards_typed_request () =
+  Eio_main.run
+  @@ fun _env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let output_schema =
+    Keeper_structured_output_schema.librarian_episode_output_schema
+  in
+  let request : Agent_sdk.Tool_failure_recovery.model_request =
+    { system_prompt = "recovery system"
+    ; user_prompt = {|{"episodes":[]}|}
+    ; output_schema
+    }
+  in
+  let resolve_calls = ref 0 in
+  let captured = ref None in
+  let resolve_runtime () =
+    incr resolve_calls;
+    "structured-runtime"
+  in
+  let invoke
+        ~sw:_
+        ~runtime_id
+        ~base_path
+        ~keeper_name
+        ~system_prompt
+        ~user_prompt
+        ~provider_config_transform
+    =
+    let configured =
+      match provider_config_transform (schema_capable_oas_provider_config ()) with
+      | Ok configured -> configured
+      | Error error -> fail (Agent_sdk.Error.to_string error)
+    in
+    captured :=
+      Some
+        ( runtime_id
+        , base_path
+        , keeper_name
+        , system_prompt
+        , user_prompt
+        , configured );
+    Ok (tool_failure_recovery_response {|{"action":"defer","reason":"wait"}|})
+  in
+  let result =
+    Keeper_tool_failure_recovery_judge.For_testing.completion
+      ~resolve_runtime
+      ~invoke
+      ~base_path:"/workspace"
+      ~keeper_name:"sangsu"
+      ~sw
+      request
+  in
+  check int "runtime resolved exactly once" 1 !resolve_calls;
+  (match result with
+   | Ok text ->
+     check string "response text returned unchanged"
+       {|{"action":"defer","reason":"wait"}|}
+       text
+   | Error error -> fail (Agent_sdk.Error.to_string error));
+  match !captured with
+  | None -> fail "judge invocation was not captured"
+  | Some
+      ( runtime_id
+      , base_path
+      , keeper_name
+      , system_prompt
+      , user_prompt
+      , configured ) ->
+    check string "runtime catalog selection" "structured-runtime" runtime_id;
+    check string "base path" "/workspace" base_path;
+    check string "keeper identity" "sangsu" keeper_name;
+    check string "system prompt" request.system_prompt system_prompt;
+    check string "user prompt" request.user_prompt user_prompt;
+    check bool "OAS output schema attached" true
+      (has_json_schema_response_format output_schema configured)
+;;
+
+let test_tool_failure_recovery_judge_adapter_preserves_sdk_error () =
+  Eio_main.run
+  @@ fun _env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let request : Agent_sdk.Tool_failure_recovery.model_request =
+    { system_prompt = "system"
+    ; user_prompt = "user"
+    ; output_schema = `Assoc []
+    }
+  in
+  let invoke
+        ~sw:_
+        ~runtime_id:_
+        ~base_path:_
+        ~keeper_name:_
+        ~system_prompt:_
+        ~user_prompt:_
+        ~provider_config_transform:_
+    =
+    Error (Agent_sdk.Error.Internal "structured judge unavailable")
+  in
+  match
+    Keeper_tool_failure_recovery_judge.For_testing.completion
+      ~resolve_runtime:(fun () -> "structured-runtime")
+      ~invoke
+      ~base_path:"/workspace"
+      ~keeper_name:"sangsu"
+      ~sw
+      request
+  with
+  | Error (Agent_sdk.Error.Internal detail) ->
+    check string "typed SDK error detail" "structured judge unavailable" detail
+  | Error error -> failf "unexpected SDK error: %s" (Agent_sdk.Error.to_string error)
+  | Ok text -> failf "expected SDK error, got %s" text
+;;
+
 let test_failure_judgment_schema_uses_contract_ssot () =
   let schema = Keeper_structured_output_schema.failure_judgment_output_schema in
   check
@@ -364,6 +489,16 @@ let () =
             "schema-or-prompt helper keeps prompt tier when native rejected"
             `Quick
             test_apply_schema_or_prompt_tier_keeps_prompt_config_when_native_rejected
+        ] )
+    ; ( "tool failure recovery judge"
+      , [ test_case
+            "forwards typed request through runtime catalog"
+            `Quick
+            test_tool_failure_recovery_judge_adapter_forwards_typed_request
+        ; test_case
+            "preserves typed SDK error"
+            `Quick
+            test_tool_failure_recovery_judge_adapter_preserves_sdk_error
         ] )
     ; ( "dashboard schemas"
       , [ test_case

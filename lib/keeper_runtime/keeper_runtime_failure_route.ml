@@ -138,7 +138,9 @@ let route_of_api_error ~err (api : Llm_provider.Retry.api_error) =
     else if status >= 500
     then pacing Server_error
     else judge Provider_integration
-  | Llm_provider.Retry.AuthError _ -> rotate Auth_failed
+  | Llm_provider.Retry.AuthError _
+  | Llm_provider.Retry.AuthorizationError _ ->
+    rotate Auth_failed
   | Llm_provider.Retry.NotFound _ -> rotate Model_unavailable
   | Llm_provider.Retry.NetworkError _ -> pacing Network_transient
   | Llm_provider.Retry.Timeout _ -> pacing Provider_timeout
@@ -161,7 +163,9 @@ let route_of_provider_error ~err (p : Llm_provider.Error.provider_error) =
     else judge Provider_integration
   | Llm_provider.Error.NetworkError _ -> pacing Network_transient
   | Llm_provider.Error.Timeout _ -> pacing Provider_timeout
-  | Llm_provider.Error.AuthError _ -> rotate Auth_failed
+  | Llm_provider.Error.AuthError _
+  | Llm_provider.Error.AuthorizationError _ ->
+    rotate Auth_failed
   | Llm_provider.Error.NotFound _ -> rotate Model_unavailable
   | Llm_provider.Error.MissingApiKey _ -> judge Config_mismatch
   | Llm_provider.Error.InvalidConfig _ -> judge Config_mismatch

@@ -83,6 +83,17 @@ let test_api_auth_rotates_invalid_request_judges () =
     "auth error rotates (credentials differ per runtime)"
     (KFR.Rotate_now { rotate = KFR.Auth_failed })
     (Agent_sdk.Error.Api (Llm_provider.Retry.AuthError { message = "401" }));
+  check_route
+    "authorization error rotates (credential scopes differ per runtime)"
+    (KFR.Rotate_now { rotate = KFR.Auth_failed })
+    (Agent_sdk.Error.Api
+       (Llm_provider.Retry.AuthorizationError { message = "403" }));
+  check_route
+    "provider authorization error rotates"
+    (KFR.Rotate_now { rotate = KFR.Auth_failed })
+    (Agent_sdk.Error.Provider
+       (Llm_provider.Error.AuthorizationError
+          { provider = "provider"; detail = "403" }));
   match
     route_of_oas_error
       (Agent_sdk.Error.Api

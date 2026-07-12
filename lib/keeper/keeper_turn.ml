@@ -110,7 +110,8 @@ let has_no_progress_loop_blocker (meta : keeper_meta) =
           | Sdk_guardrail_violation
           | Sdk_tripwire_violation
           | Sdk_exit_condition_met
-          | Sdk_input_required )
+          | Sdk_input_required
+          | Sdk_tool_failure_recovery_failed )
       ; _
       } ->
     false
@@ -1327,6 +1328,7 @@ let handle_keeper_msg
       ?event_bus
       ?continuation_channel
       ?on_admission_rejected
+      ?on_admitted
       ctx
       args
   : tool_result
@@ -1353,13 +1355,28 @@ let handle_keeper_msg
         ~base_path:ctx.config.base_path
         ~keeper_name:name
         (fun () ->
-          run_keeper_msg_turn_admitted
-            ?on_text_delta
-            ?on_event
-            ?event_bus
-            ?continuation_channel
-            ctx
-            args)
+          match on_admitted with
+          | Some notify ->
+            (match notify () with
+             | Ok () ->
+               run_keeper_msg_turn_admitted
+                 ?on_text_delta
+                 ?on_event
+                 ?event_bus
+                 ?continuation_channel
+                 ctx
+                 args
+             | Error detail ->
+               tool_result_error
+                 ("keeper turn admission persistence failed: " ^ detail))
+          | None ->
+            run_keeper_msg_turn_admitted
+              ?on_text_delta
+              ?on_event
+              ?event_bus
+              ?continuation_channel
+              ctx
+              args)
     with
     | `Ran result -> result
     | `Rejected

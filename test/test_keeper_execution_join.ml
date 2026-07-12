@@ -161,6 +161,127 @@ let test_agent_failed_matches_typed_sse_event () =
   in
   check string "agent_failed bridge matches typed constructor" expected actual
 
+let test_authorization_errors_have_typed_projection () =
+  let check_projection label expected_domain error =
+    let projection = Error_json.agent_failed_error_projection error in
+    check string (label ^ " domain") expected_domain projection.error_domain;
+    check bool (label ^ " non-retryable") false projection.error_retryable;
+    check (option string)
+      (label ^ " variant")
+      (Some "authorization_error")
+      (string_of_field (member "variant" projection.error_detail))
+  in
+  check_projection
+    "API authorization"
+    "api"
+    (Agent_sdk.Error.Api
+       (Agent_sdk.Retry.AuthorizationError { message = "permission refused" }));
+  check_projection
+    "provider authorization"
+    "provider"
+    (Agent_sdk.Error.Provider
+       (Llm_provider.Error.AuthorizationError
+          { provider = "provider"; detail = "permission refused" }))
+
+let recovery_failed_attempt ~tool_use_id ~input ~error =
+  { Agent_sdk.Tool_failure_episode.tool_use_id = tool_use_id
+  ; tool_name = "Execute"
+  ; input
+  ; failure_kind = Agent_sdk.Types.Validation_error
+  ; error_class = Some Agent_sdk.Types.Deterministic
+  ; error
+  }
+
+let recovery_episode () : Agent_sdk.Tool_failure_episode.t =
+  { previous =
+      recovery_failed_attempt
+        ~tool_use_id:"tool-previous"
+        ~input:(`Assoc [ "cmd", `String "secret previous input" ])
+        ~error:"secret previous error"
+  ; current =
+      recovery_failed_attempt
+        ~tool_use_id:"tool-current"
+        ~input:(`Assoc [ "cmd", `String "secret current input" ])
+        ~error:"secret current error"
+  }
+
+let test_tool_failure_episode_projection_omits_inputs_and_error_text () =
+  let json =
+    Bridge.native_event_to_json
+      (mk_event
+         (Agent_sdk.Event_bus.ToolFailureEpisodeDetected
+            { agent_name = "oas-r1"; turn = 3; episodes = [ recovery_episode () ] }))
+    |> Option.get
+  in
+  let previous =
+    match payload_member "episodes" json with
+    | Some (`List [ `Assoc episode ]) ->
+      (match List.assoc_opt "previous" episode with
+       | Some (`Assoc fields) -> fields
+       | _ -> fail "missing previous failed-attempt projection")
+    | _ -> fail "missing tool-failure episode projection"
+  in
+  check bool "input omitted" true (List.assoc_opt "input" previous = None);
+  check bool "error prose omitted" true (List.assoc_opt "error" previous = None);
+  check (option string) "tool identity retained" (Some "Execute")
+    (string_of_field (List.assoc_opt "tool_name" previous))
+
+let recovery_defer_decision () =
+  Eio_main.run
+  @@ fun _env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let judge =
+    Agent_sdk.Tool_failure_recovery.create
+      ~complete:(fun ~sw:_ _request ->
+        Ok {|{"action":"defer","reason":"secret recovery reason"}|})
+  in
+  match
+    Agent_sdk.Tool_failure_recovery.decide
+      ~sw
+      ~agent_name:"oas-r1"
+      ~turn:3
+      ~episodes:[ recovery_episode () ]
+      judge
+  with
+  | Ok decision -> decision
+  | Error error ->
+    failf
+      "failed to construct validated recovery decision: %s"
+      (Agent_sdk.Tool_failure_recovery.judge_error_to_string error)
+
+let test_recovery_decision_projection_omits_model_payload () =
+  let json =
+    Bridge.native_event_to_json
+      (mk_event
+         (Agent_sdk.Event_bus.ToolFailureRecoveryDecided
+            { agent_name = "oas-r1"; turn = 3; decision = recovery_defer_decision () }))
+    |> Option.get
+  in
+  check (option string) "typed action retained" (Some "defer")
+    (string_of_field (payload_member "action" json));
+  check bool "legacy decision digest omitted" true
+    (payload_member "decision_digest" json = None);
+  check bool "model reason omitted" true (payload_member "reason" json = None)
+
+let test_recovery_judge_failure_projection_omits_detail () =
+  let json =
+    Bridge.native_event_to_json
+      (mk_event
+         (Agent_sdk.Event_bus.ToolFailureRecoveryJudgeFailed
+            { agent_name = "oas-r1"
+            ; turn = 3
+            ; kind = Agent_sdk.Tool_failure_recovery.Provider_call_failed
+            ; detail = "secret provider body"
+            }))
+    |> Option.get
+  in
+  check (option string) "typed failure kind retained" (Some "provider_call_failed")
+    (string_of_field (payload_member "kind" json));
+  check bool "detail digest retained" true
+    (Option.is_some (string_of_field (payload_member "detail_digest" json)));
+  check bool "raw detail omitted" true (payload_member "detail" json = None)
+
 let () =
   run "keeper_execution_join"
     [ ( "join_table"
@@ -180,5 +301,13 @@ let () =
             test_empty_tool_use_id_omitted_from_payload
         ; test_case "agent_failed matches typed constructor" `Quick
             test_agent_failed_matches_typed_sse_event
+        ; test_case "authorization errors have typed projection" `Quick
+            test_authorization_errors_have_typed_projection
+        ; test_case "tool failure episode omits input and error prose" `Quick
+            test_tool_failure_episode_projection_omits_inputs_and_error_text
+        ; test_case "recovery decision omits model payload" `Quick
+            test_recovery_decision_projection_omits_model_payload
+        ; test_case "recovery judge failure omits raw detail" `Quick
+            test_recovery_judge_failure_projection_omits_detail
         ] )
     ]

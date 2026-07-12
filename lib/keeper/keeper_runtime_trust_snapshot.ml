@@ -172,7 +172,8 @@ let disposition_of_typed_runtime_blocker_class blocker_class =
   | Keeper_meta_contract.Sdk_idle_detected
   | Keeper_meta_contract.Sdk_guardrail_violation
   | Keeper_meta_contract.Sdk_tripwire_violation
-  | Keeper_meta_contract.Sdk_exit_condition_met ->
+  | Keeper_meta_contract.Sdk_exit_condition_met
+  | Keeper_meta_contract.Sdk_tool_failure_recovery_failed ->
       Keeper_turn_disposition.Unknown { raw_error = "" }
 
 let legacy_provider_runtime_blocker_disposition raw_blocker_class =

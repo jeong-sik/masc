@@ -48,7 +48,9 @@ type pacing_class =
 
 (** Why a different runtime is tried in the same turn. *)
 type rotate_class =
-  | Auth_failed  (** this runtime's credential is invalid; others differ *)
+  | Auth_failed
+      (** this runtime's credential is invalid or lacks authorization;
+          other runtimes may use a different credential scope *)
   | Model_unavailable  (** model/endpoint not found on this runtime *)
   | Resumable_cli_session  (** CLI session can resume on a recovery lane *)
   | Candidates_filtered  (** candidate set emptied after cycles *)

@@ -729,6 +729,7 @@ let dispatch_stream
       ?on_event
       ?continuation_channel
       ?on_admission_rejected
+      ?on_admitted
       ctx
       ~name
       ~args
@@ -746,6 +747,7 @@ let dispatch_stream
               ?on_event
               ?continuation_channel
               ?on_admission_rejected
+              ?on_admitted
               ctx
               args))
   | _ -> None

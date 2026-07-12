@@ -222,7 +222,6 @@ let sanitize_checkpoint_message
              in
              let tool_use_id = result.Canonical_tool.call_id in
              let content = result.Canonical_tool.content in
-             let is_error = result.Canonical_tool.is_error in
              let tool_chars = String.length content in
              if kept_tool_results
                 >= default_max_checkpoint_tool_results_per_message
@@ -263,7 +262,7 @@ let sanitize_checkpoint_message
                  Agent_sdk.Types.ToolResult
                    { tool_use_id;
                      content = stub_content;
-                     is_error;
+                     outcome = result.Canonical_tool.outcome;
                      json = None;
                      content_blocks = None }
                in
@@ -297,7 +296,7 @@ let sanitize_checkpoint_message
                  Agent_sdk.Types.ToolResult
                    { tool_use_id
                    ; content = capped
-                   ; is_error
+                   ; outcome = result.Canonical_tool.outcome
                    ; json = None
                    ; content_blocks = None
                    }
@@ -431,7 +430,7 @@ let cap_checkpoint_message_to_remaining_content
                    Agent_sdk.Types.ToolResult
                      { tool_use_id = result.Canonical_tool.call_id
                      ; content
-                     ; is_error = result.Canonical_tool.is_error
+                     ; outcome = result.Canonical_tool.outcome
                      ; json = None
                      ; content_blocks = result.Canonical_tool.content_blocks
                      })

@@ -98,7 +98,7 @@ let acquire ~base_path ~keeper_name ~expected_generation ~purpose =
       Ok { key; base_path; keeper_name; snapshot })
 ;;
 
-let token_owns_current token current =
+let token_owns_current (token : token) current =
   String.equal token.snapshot.owner_id current.owner_id
   && Int.equal token.snapshot.expected_generation current.expected_generation
   && token.snapshot.purpose = current.purpose

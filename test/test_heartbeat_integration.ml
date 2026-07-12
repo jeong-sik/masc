@@ -2769,7 +2769,13 @@ let test_start_keepalive_denies_dead_tombstone_before_registration () =
         ; net = None
         }
       in
-      Masc.Keeper_keepalive.start_keepalive ctx meta;
+      (match Masc.Keeper_keepalive.start_keepalive ctx meta with
+       | Masc.Keeper_keepalive.Keepalive_lifecycle_denied
+           Keeper_lifecycle_admission.Autonomous_dead_tombstone -> ()
+       | outcome ->
+         failf
+           "dead tombstone returned unexpected launch outcome: %s"
+           (Masc.Keeper_keepalive.start_keepalive_outcome_to_string outcome));
       check bool "dead keeper never reaches registry registration" false
         (R.is_registered ~base_path:config.base_path keeper_name))
 let test_start_keepalive_preserves_unresolved_failing_entry () =

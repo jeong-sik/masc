@@ -614,14 +614,20 @@ let test_keeper_wake_dashboard_tracks_runtime_inflight_lease () =
         (pending_reaction_evidence |> member "turn_started_seen" |> to_bool);
       check int "one matched ledger row before turn" 1
         (pending_reaction_evidence |> member "matched_record_count" |> to_int);
-      let leased =
+      let lease, leased =
         match
-          Keeper_registry_event_queue.dequeue
+          Keeper_registry_event_queue.claim_when_result
             ~base_path:config.Workspace_utils.base_path
             keeper_name
+            ~claimed_at:(Time_compat.now ())
+            ~ready:(fun _ -> true)
         with
-        | Some stimulus -> stimulus
-        | None -> fail "registered keeper should lease the scheduled wake"
+        | Error error -> fail ("scheduled wake claim failed: " ^ error)
+        | Ok None -> fail "registered keeper should lease the scheduled wake"
+        | Ok (Some lease) ->
+          (match Keeper_registry_event_queue.lease_stimuli lease with
+           | [ stimulus ] -> lease, stimulus
+           | [] | _ :: _ :: _ -> fail "scheduled wake lease cardinality drifted")
       in
       check string "leased post id" "schedule-due:keeper-wake-sched-1" leased.post_id;
       (match leased.payload with
@@ -663,14 +669,27 @@ let test_keeper_wake_dashboard_tracks_runtime_inflight_lease () =
         (reaction_evidence |> member "turn_started_seen" |> to_bool);
       check int "two matched ledger rows after turn" 2
         (reaction_evidence |> member "matched_record_count" |> to_int);
+      let receipt =
+        match
+          Keeper_registry_event_queue.settle_result
+            ~base_path:config.Workspace_utils.base_path
+            keeper_name
+            ~settled_at:(Time_compat.now ())
+            ~lease
+            ~settlement:Keeper_registry_event_queue.Ack
+        with
+        | Error error -> fail ("scheduled wake settlement failed: " ^ error)
+        | Ok (Keeper_registry_event_queue.Settled receipt)
+        | Ok (Keeper_registry_event_queue.Already_settled receipt) -> receipt
+      in
       (match
-         Keeper_registry_event_queue.ack_consumed_result
+         Keeper_registry_event_queue.mark_transition_projected_result
            ~base_path:config.Workspace_utils.base_path
            keeper_name
-           [ leased ]
+           ~transition_id:receipt.transition_id
        with
        | Ok () -> ()
-       | Error msg -> fail ("scheduled wake ack failed: " ^ msg));
+       | Error error -> fail ("scheduled wake projection failed: " ^ error));
       Keeper_reaction_ledger.record_event_queue_reaction
         ~base_path:config.Workspace_utils.base_path
         ~keeper_name
@@ -779,11 +798,12 @@ let test_keeper_wake_consumer_rejects_invalid_keeper_name () =
           (Schedule_supported_kinds.keeper_wake_target_name_error
              ~field:"masc.keeper_wake payload body.keeper_name"))
        execution.error);
-  check int "invalid keeper wake does not enqueue" 0
-    (Keeper_event_queue.length
-       (Keeper_registry_event_queue.snapshot
-          ~base_path:config.Workspace_utils.base_path
-          "../bad"))
+  let queue_discovery =
+    Keeper_event_queue_persistence.discover_keeper_names_with_snapshots
+      ~base_path:config.Workspace_utils.base_path
+  in
+  check bool "invalid keeper wake creates no durable queue owner" false
+    (List.mem "../bad" queue_discovery.keeper_names)
 ;;
 
 let test_dashboard_schedule_resolve_uses_authenticated_operator () =

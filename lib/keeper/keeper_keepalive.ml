@@ -709,32 +709,6 @@ let resolve_registry_done
   | Keeper_registry.Done_already_resolved _ -> false
 ;;
 
-let log_exact_update_outcome
-      (entry : Keeper_registry.registry_entry)
-      ~site
-  = function
-  | Keeper_registry.Exact_updated -> true
-  | Keeper_registry.Exact_update_missing ->
-    Log.Keeper.warn
-      "%s: exact registry update skipped because lane is no longer registered site=%s"
-      entry.name
-      site;
-    false
-  | Keeper_registry.Exact_update_replaced ->
-    Log.Keeper.warn
-      "%s: exact registry update retained newer same-name lane site=%s"
-      entry.name
-      site;
-    false
-  | Keeper_registry.Exact_update_invalid validation_error ->
-    Log.Keeper.warn
-      "%s: exact registry update validation failed site=%s error=%s"
-      entry.name
-      site
-      (Keeper_registry.registry_entry_validation_error_to_string validation_error);
-    false
-;;
-
 let dispatch_event_exact_unit
       (entry : Keeper_registry.registry_entry)
       event
@@ -790,7 +764,9 @@ let record_keeper_crashed
     let outcome = reason in
     ignore
       (Keeper_registry.set_failure_reason_exact entry (Some failure_reason)
-       |> log_exact_update_outcome entry ~site:"record_keeper_crashed.failure_reason");
+       |> Keeper_registry.exact_update_succeeded
+            entry
+            ~site:"record_keeper_crashed.failure_reason");
     ignore
       (dispatch_event_exact_unit
          entry
@@ -798,7 +774,9 @@ let record_keeper_crashed
             { outcome; provider_id = None; http_status = None }));
     ignore
       (Keeper_registry.record_crash_exact entry (Time_compat.now ()) reason
-       |> log_exact_update_outcome entry ~site:"record_keeper_crashed.crash_log");
+       |> Keeper_registry.exact_update_succeeded
+            entry
+            ~site:"record_keeper_crashed.crash_log");
     Keeper_registry_error_recording.record_exact entry reason;
     publish_keeper_phase_lifecycle
       ~phase:Keeper_state_machine.Crashed
@@ -966,7 +944,7 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
         let live_meta_installed =
           Keeper_registry.update_entry_exact reg (fun current ->
             { current with meta = live_meta })
-          |> log_exact_update_outcome reg ~site:"start_keepalive.live_meta"
+          |> Keeper_registry.exact_update_succeeded reg ~site:"start_keepalive.live_meta"
         in
         if not live_meta_installed
         then (

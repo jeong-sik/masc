@@ -349,6 +349,29 @@ let record_crash_exact entry ts msg =
     Error_tracking.record_crash_entry current ts msg)
 ;;
 
+let exact_update_succeeded entry ~site = function
+  | Exact_updated -> true
+  | Exact_update_missing ->
+    Log.Keeper.warn
+      "%s: exact registry update skipped because lane is no longer registered site=%s"
+      entry.name
+      site;
+    false
+  | Exact_update_replaced ->
+    Log.Keeper.warn
+      "%s: exact registry update retained newer same-name lane site=%s"
+      entry.name
+      site;
+    false
+  | Exact_update_invalid validation_error ->
+    Log.Keeper.warn
+      "%s: exact registry update validation failed site=%s error=%s"
+      entry.name
+      site
+      (registry_entry_validation_error_to_string validation_error);
+    false
+;;
+
 let set_grpc_close ~base_path name close_fn =
   match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
   | Some entry -> Atomic.set entry.grpc_close close_fn

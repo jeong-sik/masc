@@ -371,6 +371,12 @@ val set_last_error_exact : registry_entry -> string -> exact_update_result
 val record_crash_exact :
   registry_entry -> float -> string -> exact_update_result
 
+(** Observe an exact-lane update without discarding why it did not commit.
+    Returns [true] only for [Exact_updated]; all other outcomes are logged with
+    [site], and a newer same-name lane is never mutated. *)
+val exact_update_succeeded :
+  registry_entry -> site:string -> exact_update_result -> bool
+
 (** Set or clear the gRPC close callback. *)
 val set_grpc_close : base_path:string -> string -> (unit -> unit) option -> unit
 

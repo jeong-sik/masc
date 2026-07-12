@@ -195,6 +195,40 @@ let test_keeper_msg_async_roundtrip () =
    | Error _ -> Alcotest.fail "valid different caller identity should produce an empty queue")
 ;;
 
+let test_keeper_msg_async_list_isolates_base_paths () =
+  with_eio_env
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let clock = Eio.Stdenv.clock env in
+  let base_a = temp_dir "keeper-msg-list-base-a-" in
+  let base_b = temp_dir "keeper-msg-list-base-b-" in
+  let submit base_path keeper_name =
+    Keeper_msg_async.submit
+      ~background_sw:sw
+      ~base_path
+      ~caller
+      ~keeper_name
+      ~f:(fun _request_sw -> tr_ok "{}")
+      ()
+    |> accepted_request_id
+  in
+  let request_a = submit base_a "alpha" in
+  let request_b = submit base_b "beta" in
+  ignore (wait_for_done_with_clock clock ~base_path:base_a request_a : Keeper_msg_async.entry);
+  ignore (wait_for_done_with_clock clock ~base_path:base_b request_b : Keeper_msg_async.entry);
+  let request_ids base_path =
+    match Keeper_msg_async.list_for_keeper ~base_path ~caller () with
+    | Ok entries -> List.map (fun (entry : Keeper_msg_async.entry) -> entry.request_id) entries
+    | Error rejection ->
+      Alcotest.failf
+        "queue access rejected: %s"
+        (Keeper_msg_async.access_rejection_to_json rejection |> Yojson.Safe.to_string)
+  in
+  Alcotest.(check (list string)) "base A sees only its owner lane" [ request_a ] (request_ids base_a);
+  Alcotest.(check (list string)) "base B sees only its owner lane" [ request_b ] (request_ids base_b)
+;;
+
 let test_keeper_msg_async_recovers_done_from_disk () =
   with_eio_env
   @@ fun env ->
@@ -1014,6 +1048,10 @@ let () =
     "keeper_mutex_coverage"
     [ ( "keeper_msg_async"
       , [ test_case "submit/poll roundtrip" `Quick test_keeper_msg_async_roundtrip
+        ; test_case
+            "list isolates canonical BasePath owner lanes"
+            `Quick
+            test_keeper_msg_async_list_isolates_base_paths
         ; test_case
             "recover completed request from disk"
             `Quick

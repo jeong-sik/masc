@@ -43,15 +43,8 @@ let keeper_names (config : Workspace.config) =
 let keeper_count (config : Workspace.config) : int =
   List.length (keeper_names config)
 
-let configured_runtime_keeper_names config =
-  Keeper_meta_store.configured_keeper_names config
-  |> List.filter (fun name ->
-       Keeper_types_profile.keeper_profile_defaults_materializable_for_name
-         ~base_path:config.Workspace.base_path
-         name)
-
 let configured_keeper_count (config : Workspace.config) : int =
-  List.length (configured_runtime_keeper_names config)
+  List.length (Keeper_meta_store.configured_keeper_names config)
 
 let non_empty_trimmed_string_opt value =
   let trimmed = String.trim value in

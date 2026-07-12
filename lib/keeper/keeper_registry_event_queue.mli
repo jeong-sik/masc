@@ -104,36 +104,6 @@ val enqueue_hitl_resolution_durable_result :
     read the durable snapshot so diagnostics still expose pending replay. *)
 val snapshot : base_path:string -> string -> Keeper_event_queue.t
 
-(** Remove and return the head stimulus, or [None] when the queue is
-    empty or the keeper is unregistered. *)
-val dequeue : base_path:string -> string -> Keeper_event_queue.stimulus option
-
-val dequeue_when :
-  base_path:string
-  -> string
-  -> ready:(Keeper_event_queue.stimulus -> bool)
-  -> Keeper_event_queue.stimulus option
-(** Remove and return the head stimulus only when [ready head] is [true]. A
-    rejected head remains in the live and durable queue without entering the
-    in-flight lease. This is the exact readiness gate for durable events whose
-    producer has not completed its domain callback yet. *)
-
-(** Put previously drained stimuli back at the front of the queue. This is a
-    crash-recovery primitive: if the keepalive cycle dies after dequeue/drain
-    but before the turn completes, the stimuli must remain replayable. *)
-val requeue_front : base_path:string -> string -> Keeper_event_queue.stimulus list -> unit
-
-val ack_consumed :
-  base_path:string -> string -> Keeper_event_queue.stimulus list -> unit
-(** Acknowledge consumed stimuli after a keepalive turn completes. Until this
-    runs, a restart reloads the leased stimuli for at-least-once replay. *)
-
-val ack_consumed_result :
-  base_path:string -> string -> Keeper_event_queue.stimulus list -> (unit, string) result
-(** Result-returning variant of {!ack_consumed}. Callers that publish follow-on
-    evidence must use this so they do not claim an acknowledgement after durable
-    queue persistence failed. *)
-
 val drop_by_post_id :
   base_path:string
   -> string
@@ -143,10 +113,3 @@ val drop_by_post_id :
     snapshots, returning the exact stimuli that were dropped. Returns [Error _]
     when durable removal fails so callers do not clear recovery state while a
     replayable stimulus remains on disk. *)
-
-(** Drain every queued board-signal stimulus for the keeper (RFC-0334 W2:
-    turn-keyed digest — one turn consumes everything queued since the
-    keeper's last turn, however it arrived). *)
-val drain_board :
-  base_path:string -> string
-  -> Keeper_event_queue.stimulus list

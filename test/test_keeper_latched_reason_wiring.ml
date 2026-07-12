@@ -264,11 +264,14 @@ let test_dead_tombstone_latch_blocks_legacy_auto_resume () =
    never recover.  This pins that clearing the latch re-enables recovery. *)
 let test_operator_resume_clears_dead_tombstone_latch () =
   let base = make_meta "revive-after-operator-up" in
+  let auto_resume_after_sec = 1.0 in
+  let paused_at = 1.0 in
+  let after_auto_resume = paused_at +. auto_resume_after_sec +. 1.0 in
   let paused_due =
     { base with
       paused = true
-    ; auto_resume_after_sec = Some 1.0
-    ; updated_at = "2000-01-01T00:00:00Z"
+    ; auto_resume_after_sec = Some auto_resume_after_sec
+    ; updated_at = Masc_domain.iso8601_of_unix_seconds paused_at
     }
   in
   check
@@ -276,14 +279,14 @@ let test_operator_resume_clears_dead_tombstone_latch () =
     "Dead_tombstone latch blocks auto-resume"
     false
     (Keeper_supervisor_types.paused_meta_auto_resume_due
-       ~now:(Unix.time () +. 7200.0)
+       ~now:after_auto_resume
        { paused_due with latched_reason = Some Keeper_latched_reason.Dead_tombstone });
   check
     bool
     "operator-cleared latch re-enables auto-resume"
     true
     (Keeper_supervisor_types.paused_meta_auto_resume_due
-       ~now:(Unix.time () +. 7200.0)
+       ~now:after_auto_resume
        { paused_due with latched_reason = None })
 
 let test_heartbeat_merge_preserves_only_typed_operator_pause () =

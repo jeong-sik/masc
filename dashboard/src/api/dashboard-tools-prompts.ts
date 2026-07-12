@@ -6,6 +6,7 @@ import { get, post, type AbortableRequestOptions } from './core'
 import { ensureDevToken } from './dev-token'
 import type { TelemetryFreshnessMetadata } from './dashboard-shared'
 import type { DashboardConfigResolution, DashboardRuntimeResolution } from '../types'
+import { isKeeperChatReceiptId } from '../lib/keeper-chat-receipt'
 
 // --- Tool metrics (P4 Phase 4.5) ---
 
@@ -324,6 +325,97 @@ export function parseDashboardKeeperWaitingSource(
 
 export type DashboardKeeperWaitingState = 'idle' | 'busy' | 'waiting' | 'deferred'
 
+export const DASHBOARD_KEEPER_WAITING_STATE_VALUES = [
+  'idle',
+  'busy',
+  'waiting',
+  'deferred',
+] as const satisfies ReadonlyArray<DashboardKeeperWaitingState>
+
+const DASHBOARD_KEEPER_WAITING_STATE_SET: ReadonlySet<string> =
+  new Set(DASHBOARD_KEEPER_WAITING_STATE_VALUES)
+
+/** Exact parser for the backend's closed per-Keeper state vocabulary. */
+export function parseDashboardKeeperWaitingState(
+  value: unknown,
+): DashboardKeeperWaitingState | null {
+  return typeof value === 'string' && DASHBOARD_KEEPER_WAITING_STATE_SET.has(value)
+    ? value as DashboardKeeperWaitingState
+    : null
+}
+
+export type DashboardKeeperChatQueueSource =
+  | { kind: 'dashboard' }
+  | { kind: 'discord'; channel_id: string; user_id: string }
+  | {
+      kind: 'slack'
+      channel_id: string
+      user_id: string
+      team_id: string | null
+      thread_ts: string | null
+    }
+
+export interface DashboardKeeperChatQueueActiveReceipt {
+  receipt_id: string
+  queue_index: number
+  message_source: DashboardKeeperChatQueueSource
+  content_length: number
+  user_block_count: number
+  attachment_count: number
+  submitted_at: number
+  submitted_at_iso: string
+  state: 'pending' | 'inflight'
+  lease_id: string | null
+  started_at: number | null
+  started_at_iso: string | null
+}
+
+export type DashboardKeeperChatQueueLoadErrorKind =
+  | 'invalid_path'
+  | 'read_failed'
+  | 'parse_failed'
+  | 'migration_failed'
+  | 'recovery_failed'
+
+export interface DashboardKeeperChatQueueLoadError {
+  kind: DashboardKeeperChatQueueLoadErrorKind
+  path: string | null
+  message: string
+}
+
+export type DashboardKeeperChatQueueFailureKind =
+  | 'turn_failed'
+  | 'timed_out'
+  | 'no_visible_reply'
+  | 'transcript_persist_failed'
+  | 'connector_unavailable'
+  | 'delivery_failed'
+  | 'cancelled'
+  | 'internal_error'
+
+export interface DashboardKeeperChatQueueFailedReceipt {
+  receipt_id: string
+  state: 'failed'
+  failure_kind: DashboardKeeperChatQueueFailureKind
+  completed_at: number
+  completed_at_iso: string
+  outcome_ref: string | null
+}
+
+export interface DashboardKeeperChatQueue {
+  schema: 'keeper_chat_queue.dashboard.v1'
+  revision: number
+  pending_count: number
+  inflight_count: number
+  active_receipts: DashboardKeeperChatQueueActiveReceipt[]
+  read_errors: DashboardKeeperChatQueueLoadError[]
+  next_action: string | null
+  recent_failed_receipt_count: number
+  recent_failed_receipt_limit: number
+  recent_failed_receipts_truncated: boolean
+  recent_failed_receipts: DashboardKeeperChatQueueFailedReceipt[]
+}
+
 export interface DashboardKeeperWaitingRow {
   keeper_name?: string | null
   source: DashboardKeeperWaitingSource
@@ -350,6 +442,7 @@ export interface DashboardKeeperWaitingKeeper {
   due_at?: number | null
   due_at_iso?: string | null
   next_action?: string | null
+  chat_queue: DashboardKeeperChatQueue
 }
 
 export interface DashboardKeeperWaitingInventory {
@@ -433,6 +526,306 @@ export interface DashboardToolsResponse {
   scheduled_automation?: DashboardScheduledAutomation
   keeper_waiting_inventory?: DashboardKeeperWaitingInventory
   keeper_background?: DashboardKeeperBackground
+}
+
+type DashboardJsonRecord = Record<string, unknown>
+
+function dashboardProjectionError(path: string, expected: string): never {
+  throw new Error(`Invalid dashboard tools projection at ${path}: expected ${expected}`)
+}
+
+function requireDashboardRecord(value: unknown, path: string): DashboardJsonRecord {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return dashboardProjectionError(path, 'object')
+  }
+  return value as DashboardJsonRecord
+}
+
+function requireDashboardArray(value: unknown, path: string): unknown[] {
+  if (!Array.isArray(value)) return dashboardProjectionError(path, 'array')
+  return value
+}
+
+function requireDashboardString(value: unknown, path: string): string {
+  if (typeof value !== 'string' || value.trim() === '') {
+    return dashboardProjectionError(path, 'non-empty string')
+  }
+  return value
+}
+
+function requireDashboardText(value: unknown, path: string): string {
+  if (typeof value !== 'string') return dashboardProjectionError(path, 'string')
+  return value
+}
+
+function requireDashboardNullableString(value: unknown, path: string): string | null {
+  if (value === null) return null
+  return requireDashboardString(value, path)
+}
+
+function requireDashboardNullableText(value: unknown, path: string): string | null {
+  if (value === null) return null
+  return requireDashboardText(value, path)
+}
+
+function requireDashboardFiniteNumber(value: unknown, path: string): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return dashboardProjectionError(path, 'finite number')
+  }
+  return value
+}
+
+function requireDashboardNonnegativeInteger(value: unknown, path: string): number {
+  if (
+    typeof value !== 'number'
+    || !Number.isSafeInteger(value)
+    || value < 0
+  ) {
+    return dashboardProjectionError(path, 'non-negative safe integer')
+  }
+  return value
+}
+
+function requireDashboardBoolean(value: unknown, path: string): boolean {
+  if (typeof value !== 'boolean') return dashboardProjectionError(path, 'boolean')
+  return value
+}
+
+function requireDashboardIsoTimestamp(value: unknown, path: string): string {
+  const timestamp = requireDashboardString(value, path)
+  if (!Number.isFinite(Date.parse(timestamp))) {
+    return dashboardProjectionError(path, 'ISO timestamp')
+  }
+  return timestamp
+}
+
+const DASHBOARD_KEEPER_CHAT_QUEUE_LOAD_ERROR_KIND_VALUES = [
+  'invalid_path',
+  'read_failed',
+  'parse_failed',
+  'migration_failed',
+  'recovery_failed',
+] as const satisfies ReadonlyArray<DashboardKeeperChatQueueLoadErrorKind>
+
+const DASHBOARD_KEEPER_CHAT_QUEUE_LOAD_ERROR_KIND_SET: ReadonlySet<string> =
+  new Set(DASHBOARD_KEEPER_CHAT_QUEUE_LOAD_ERROR_KIND_VALUES)
+
+const DASHBOARD_KEEPER_CHAT_QUEUE_FAILURE_KIND_VALUES = [
+  'turn_failed',
+  'timed_out',
+  'no_visible_reply',
+  'transcript_persist_failed',
+  'connector_unavailable',
+  'delivery_failed',
+  'cancelled',
+  'internal_error',
+] as const satisfies ReadonlyArray<DashboardKeeperChatQueueFailureKind>
+
+const DASHBOARD_KEEPER_CHAT_QUEUE_FAILURE_KIND_SET: ReadonlySet<string> =
+  new Set(DASHBOARD_KEEPER_CHAT_QUEUE_FAILURE_KIND_VALUES)
+
+function parseDashboardKeeperChatQueueSource(
+  value: unknown,
+  path: string,
+): DashboardKeeperChatQueueSource {
+  const source = requireDashboardRecord(value, path)
+  const kind = requireDashboardString(source.kind, `${path}.kind`)
+  switch (kind) {
+    case 'dashboard':
+      return { kind }
+    case 'discord':
+      return {
+        kind,
+        channel_id: requireDashboardString(source.channel_id, `${path}.channel_id`),
+        user_id: requireDashboardString(source.user_id, `${path}.user_id`),
+      }
+    case 'slack':
+      return {
+        kind,
+        channel_id: requireDashboardString(source.channel_id, `${path}.channel_id`),
+        user_id: requireDashboardString(source.user_id, `${path}.user_id`),
+        team_id: requireDashboardNullableText(source.team_id, `${path}.team_id`),
+        thread_ts: requireDashboardNullableText(source.thread_ts, `${path}.thread_ts`),
+      }
+    default:
+      return dashboardProjectionError(`${path}.kind`, 'dashboard | discord | slack')
+  }
+}
+
+function parseDashboardKeeperChatQueueActiveReceipt(
+  value: unknown,
+  path: string,
+): DashboardKeeperChatQueueActiveReceipt {
+  const receipt = requireDashboardRecord(value, path)
+  const receiptId = requireDashboardString(receipt.receipt_id, `${path}.receipt_id`)
+  if (!isKeeperChatReceiptId(receiptId)) {
+    return dashboardProjectionError(`${path}.receipt_id`, 'durable Keeper chat receipt id')
+  }
+  const state = receipt.state
+  if (state !== 'pending' && state !== 'inflight') {
+    return dashboardProjectionError(`${path}.state`, 'pending | inflight')
+  }
+  const source = parseDashboardKeeperChatQueueSource(
+    receipt.message_source,
+    `${path}.message_source`,
+  )
+  const leaseId = requireDashboardNullableString(receipt.lease_id, `${path}.lease_id`)
+  const startedAt = receipt.started_at === null
+    ? null
+    : requireDashboardFiniteNumber(receipt.started_at, `${path}.started_at`)
+  const startedAtIso = receipt.started_at_iso === null
+    ? null
+    : requireDashboardIsoTimestamp(receipt.started_at_iso, `${path}.started_at_iso`)
+  if (
+    (state === 'pending' && (leaseId !== null || startedAt !== null || startedAtIso !== null))
+    || (state === 'inflight' && (leaseId === null || startedAt === null || startedAtIso === null))
+  ) {
+    return dashboardProjectionError(
+      path,
+      state === 'pending'
+        ? 'pending receipt without lease timestamps'
+        : 'inflight receipt with lease timestamps',
+    )
+  }
+  return {
+    receipt_id: receiptId,
+    queue_index: requireDashboardNonnegativeInteger(receipt.queue_index, `${path}.queue_index`),
+    message_source: source,
+    content_length: requireDashboardNonnegativeInteger(receipt.content_length, `${path}.content_length`),
+    user_block_count: requireDashboardNonnegativeInteger(receipt.user_block_count, `${path}.user_block_count`),
+    attachment_count: requireDashboardNonnegativeInteger(receipt.attachment_count, `${path}.attachment_count`),
+    submitted_at: requireDashboardFiniteNumber(receipt.submitted_at, `${path}.submitted_at`),
+    submitted_at_iso: requireDashboardIsoTimestamp(receipt.submitted_at_iso, `${path}.submitted_at_iso`),
+    state,
+    lease_id: leaseId,
+    started_at: startedAt,
+    started_at_iso: startedAtIso,
+  }
+}
+
+function parseDashboardKeeperChatQueueLoadError(
+  value: unknown,
+  path: string,
+): DashboardKeeperChatQueueLoadError {
+  const error = requireDashboardRecord(value, path)
+  const kind = requireDashboardString(error.kind, `${path}.kind`)
+  if (!DASHBOARD_KEEPER_CHAT_QUEUE_LOAD_ERROR_KIND_SET.has(kind)) {
+    return dashboardProjectionError(`${path}.kind`, 'known queue load error kind')
+  }
+  return {
+    kind: kind as DashboardKeeperChatQueueLoadErrorKind,
+    path: requireDashboardNullableText(error.path, `${path}.path`),
+    message: requireDashboardString(error.message, `${path}.message`),
+  }
+}
+
+function parseDashboardKeeperChatQueueFailedReceipt(
+  value: unknown,
+  path: string,
+): DashboardKeeperChatQueueFailedReceipt {
+  const receipt = requireDashboardRecord(value, path)
+  const receiptId = requireDashboardString(receipt.receipt_id, `${path}.receipt_id`)
+  if (!isKeeperChatReceiptId(receiptId)) {
+    return dashboardProjectionError(`${path}.receipt_id`, 'durable Keeper chat receipt id')
+  }
+  if (receipt.state !== 'failed') {
+    return dashboardProjectionError(`${path}.state`, 'failed')
+  }
+  const failureKind = requireDashboardString(receipt.failure_kind, `${path}.failure_kind`)
+  if (!DASHBOARD_KEEPER_CHAT_QUEUE_FAILURE_KIND_SET.has(failureKind)) {
+    return dashboardProjectionError(`${path}.failure_kind`, 'known queue failure kind')
+  }
+  return {
+    receipt_id: receiptId,
+    state: 'failed',
+    failure_kind: failureKind as DashboardKeeperChatQueueFailureKind,
+    completed_at: requireDashboardFiniteNumber(receipt.completed_at, `${path}.completed_at`),
+    completed_at_iso: requireDashboardIsoTimestamp(receipt.completed_at_iso, `${path}.completed_at_iso`),
+    outcome_ref: requireDashboardNullableText(receipt.outcome_ref, `${path}.outcome_ref`),
+  }
+}
+
+/** Parse the entire typed queue projection. Its state-bearing fields are closed
+ * vocabularies: projection drift is an error, never an empty-queue fallback. */
+export function parseDashboardKeeperChatQueue(
+  value: unknown,
+  path = 'keeper_waiting_inventory.keepers[].chat_queue',
+): DashboardKeeperChatQueue {
+  const queue = requireDashboardRecord(value, path)
+  if (queue.schema !== 'keeper_chat_queue.dashboard.v1') {
+    return dashboardProjectionError(`${path}.schema`, 'keeper_chat_queue.dashboard.v1')
+  }
+  const pendingCount = requireDashboardNonnegativeInteger(
+    queue.pending_count,
+    `${path}.pending_count`,
+  )
+  const inflightCount = requireDashboardNonnegativeInteger(
+    queue.inflight_count,
+    `${path}.inflight_count`,
+  )
+  const activeReceipts = requireDashboardArray(queue.active_receipts, `${path}.active_receipts`)
+    .map((receipt, index) => parseDashboardKeeperChatQueueActiveReceipt(
+      receipt,
+      `${path}.active_receipts[${index}]`,
+    ))
+  const parsedPendingCount = activeReceipts.filter(receipt => receipt.state === 'pending').length
+  const parsedInflightCount = activeReceipts.length - parsedPendingCount
+  if (parsedPendingCount !== pendingCount || parsedInflightCount !== inflightCount) {
+    return dashboardProjectionError(
+      `${path}.active_receipts`,
+      `${pendingCount} pending and ${inflightCount} inflight receipts`,
+    )
+  }
+  const recentFailedReceiptCount = requireDashboardNonnegativeInteger(
+    queue.recent_failed_receipt_count,
+    `${path}.recent_failed_receipt_count`,
+  )
+  const recentFailedReceiptLimit = requireDashboardNonnegativeInteger(
+    queue.recent_failed_receipt_limit,
+    `${path}.recent_failed_receipt_limit`,
+  )
+  const recentFailedReceiptsTruncated = requireDashboardBoolean(
+    queue.recent_failed_receipts_truncated,
+    `${path}.recent_failed_receipts_truncated`,
+  )
+  const recentFailedReceipts = requireDashboardArray(
+    queue.recent_failed_receipts,
+    `${path}.recent_failed_receipts`,
+  ).map((receipt, index) => parseDashboardKeeperChatQueueFailedReceipt(
+    receipt,
+    `${path}.recent_failed_receipts[${index}]`,
+  ))
+  const expectedVisibleFailedCount = Math.min(
+    recentFailedReceiptCount,
+    recentFailedReceiptLimit,
+  )
+  if (
+    recentFailedReceipts.length !== expectedVisibleFailedCount
+    || recentFailedReceiptsTruncated !== (recentFailedReceiptCount > recentFailedReceiptLimit)
+  ) {
+    return dashboardProjectionError(
+      `${path}.recent_failed_receipts`,
+      `bounded list of ${expectedVisibleFailedCount} receipts with matching truncation flag`,
+    )
+  }
+  const nextAction = requireDashboardNullableString(queue.next_action, `${path}.next_action`)
+  return {
+    schema: 'keeper_chat_queue.dashboard.v1',
+    revision: requireDashboardNonnegativeInteger(queue.revision, `${path}.revision`),
+    pending_count: pendingCount,
+    inflight_count: inflightCount,
+    active_receipts: activeReceipts,
+    read_errors: requireDashboardArray(queue.read_errors, `${path}.read_errors`)
+      .map((error, index) => parseDashboardKeeperChatQueueLoadError(
+        error,
+        `${path}.read_errors[${index}]`,
+      )),
+    next_action: nextAction,
+    recent_failed_receipt_count: recentFailedReceiptCount,
+    recent_failed_receipt_limit: recentFailedReceiptLimit,
+    recent_failed_receipts_truncated: recentFailedReceiptsTruncated,
+    recent_failed_receipts: recentFailedReceipts,
+  }
 }
 
 // --- Runtime probe (KV-cache / model load probe) ---
@@ -582,24 +975,63 @@ export async function fetchDashboardTools(opts?: AbortableRequestOptions): Promi
     // filter simply degrades to zero counts. Mirrors category/tier above.
     surfaces: t.surfaces ?? [],
   }))
-  const normalizeWaitingRow = (row: DashboardKeeperWaitingRow): DashboardKeeperWaitingRow => {
+  const normalizeWaitingRow = (
+    value: unknown,
+    path: string,
+  ): DashboardKeeperWaitingRow => {
+    const row = requireDashboardRecord(value, path)
     const source = parseDashboardKeeperWaitingSource(row.source)
     if (!source) {
       throw new Error(`Unknown keeper waiting inventory source: ${JSON.stringify(row.source)}`)
     }
-    return { ...row, source }
+    return { ...row, source } as DashboardKeeperWaitingRow
+  }
+  const normalizeWaitingKeeper = (
+    value: unknown,
+    path: string,
+  ): DashboardKeeperWaitingKeeper => {
+    const keeper = requireDashboardRecord(value, path)
+    const keeperName = requireDashboardString(keeper.keeper_name, `${path}.keeper_name`)
+    const state = parseDashboardKeeperWaitingState(keeper.state)
+    if (!state) {
+      throw new Error(`Unknown keeper waiting inventory state: ${JSON.stringify(keeper.state)}`)
+    }
+    const waitingOn = requireDashboardArray(keeper.waiting_on, `${path}.waiting_on`)
+      .map((row, index) => normalizeWaitingRow(row, `${path}.waiting_on[${index}]`))
+    return {
+      ...keeper,
+      keeper_name: keeperName,
+      state,
+      waiting_on: waitingOn,
+      chat_queue: parseDashboardKeeperChatQueue(keeper.chat_queue, `${path}.chat_queue`),
+    } as DashboardKeeperWaitingKeeper
   }
   const normalizedWaitingInventory = raw.keeper_waiting_inventory
-    ? {
-        ...raw.keeper_waiting_inventory,
-        keepers: raw.keeper_waiting_inventory.keepers.map(keeper => ({
-          ...keeper,
-          waiting_on: keeper.waiting_on.map(normalizeWaitingRow),
-        })),
-        ...(raw.keeper_waiting_inventory.global_waiting_on
-          ? { global_waiting_on: raw.keeper_waiting_inventory.global_waiting_on.map(normalizeWaitingRow) }
-          : {}),
-      }
+    ? (() => {
+        const inventory = requireDashboardRecord(
+          raw.keeper_waiting_inventory,
+          'keeper_waiting_inventory',
+        )
+        const keepers = requireDashboardArray(inventory.keepers, 'keeper_waiting_inventory.keepers')
+          .map((keeper, index) => normalizeWaitingKeeper(
+            keeper,
+            `keeper_waiting_inventory.keepers[${index}]`,
+          ))
+        const globalWaitingOn = inventory.global_waiting_on === undefined
+          ? undefined
+          : requireDashboardArray(
+              inventory.global_waiting_on,
+              'keeper_waiting_inventory.global_waiting_on',
+            ).map((row, index) => normalizeWaitingRow(
+              row,
+              `keeper_waiting_inventory.global_waiting_on[${index}]`,
+            ))
+        return {
+          ...inventory,
+          keepers,
+          ...(globalWaitingOn ? { global_waiting_on: globalWaitingOn } : {}),
+        } as unknown as DashboardKeeperWaitingInventory
+      })()
     : undefined
   return {
     ...raw,

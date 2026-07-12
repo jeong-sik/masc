@@ -125,6 +125,17 @@ type speaker = {
   speaker_authority : speaker_authority;
 }
 
+type user_message_input =
+  { content : string
+  ; attachments : attachment list
+  ; timestamp : float
+  ; surface : Surface_ref.t option
+  ; conversation_id : string option
+  ; external_message_id : string option
+  ; speaker : speaker option
+  ; extra_mentions : Keeper_identity.Keeper_id.t list
+  }
+
 type chat_message = {
   id : string;
       (** R3: producer-assigned stable message id, minted once at append by
@@ -209,7 +220,27 @@ type chat_message = {
 (** [append_turn_result] is {!append_turn} with an explicit persistence
     result. Queue consumers use it so a durable delivery receipt cannot become
     [Delivered] after the transcript write actually failed. *)
+val append_user_messages_and_assistant_result :
+  ?config:Workspace.config ->
+  base_dir:string ->
+  keeper_name:string ->
+  user_messages:user_message_input list ->
+  ?tool_calls:tool_call list ->
+  ?surface:Surface_ref.t ->
+  ?conversation_id:string ->
+  ?assistant_kind:Row_kind.t ->
+  ?blocks:chat_block list ->
+  ?turn_ref:Ids.Turn_ref.t ->
+  ?stream_lifecycle:stream_lifecycle_event list ->
+  assistant_content:string ->
+  unit ->
+  (unit, string) result
+(** Atomically append every accepted queued user row, preserving each row's
+    timestamp/provenance, followed by the one terminal assistant/failure row.
+    Coalescing affects only the LLM input, never durable message identity. *)
+
 val append_turn_result :
+  ?config:Workspace.config ->
   base_dir:string ->
   keeper_name:string ->
   user_content:string ->
@@ -229,6 +260,7 @@ val append_turn_result :
   (unit, string) result
 
 val append_turn :
+  ?config:Workspace.config ->
   base_dir:string ->
   keeper_name:string ->
   user_content:string ->
@@ -249,12 +281,16 @@ val append_turn :
 
 (** [append_assistant_message_result] is {!append_assistant_message} that
     returns [Error msg] on a write failure instead of swallowing it (the failure
-    is still counted + warn-logged). For callers whose own contract requires
-    surfacing a chat-append failure — e.g. {!Fusion_sink.emit}. *)
+    is still counted + warn-logged). [kind] defaults to [Utterance]; queued-turn
+    failure persistence passes [Transport_failure] so the marker cannot advance
+    the answered watermark. For callers whose own contract requires surfacing a
+    chat-append failure — e.g. {!Fusion_sink.emit}. *)
 val append_assistant_message_result :
+  ?config:Workspace.config ->
   base_dir:string ->
   keeper_name:string ->
   content:string ->
+  ?kind:Row_kind.t ->
   ?surface:Surface_ref.t ->
   ?conversation_id:string ->
   ?audio:audio_clip ->
@@ -270,6 +306,7 @@ val append_assistant_message_result :
     turn (RFC-0223 P4 [keeper_surface_post]). Same failure policy as
     {!append_turn} (failure is counted + logged, not raised). *)
 val append_assistant_message :
+  ?config:Workspace.config ->
   base_dir:string ->
   keeper_name:string ->
   content:string ->
@@ -282,13 +319,33 @@ val append_assistant_message :
   unit ->
   unit
 
+(** [append_user_message_result] appends one inbound user line and returns a
+    typed persistence outcome. Gate connector admission uses this form so it
+    cannot acknowledge a durable queue receipt after the sole inbound
+    transcript recorder failed. *)
+val append_user_message_result :
+  ?config:Workspace.config ->
+  base_dir:string ->
+  keeper_name:string ->
+  content:string ->
+  ?attachments:attachment list ->
+  ?surface:Surface_ref.t ->
+  ?conversation_id:string ->
+  ?external_message_id:string ->
+  ?speaker:speaker ->
+  ?extra_mentions:Keeper_identity.Keeper_id.t list ->
+  unit ->
+  (unit, string) result
+
 (** [append_user_message ~base_dir ~keeper_name ~content ?attachments
     ?surface ?conversation_id ?external_message_id ?speaker ()] appends one
     inbound user line with no paired assistant turn (RFC-0226). Written at delivery time by the inbound
     recorder — the Discord gateway's ambient arm and the gate dispatch
     boundary — so the line lands whether or not a turn starts or
-    replies. Same failure policy as {!append_turn}. *)
+    replies. This compatibility wrapper logs/counts but swallows persistence
+    failure; fail-closed boundaries must use {!append_user_message_result}. *)
 val append_user_message :
+  ?config:Workspace.config ->
   base_dir:string ->
   keeper_name:string ->
   content:string ->
@@ -308,6 +365,13 @@ val append_user_message :
 val load :
   base_dir:string -> keeper_name:string -> chat_message list
 
+(** [load_configured ~config ~base_dir ~keeper_name] is the cluster-aware
+    form of {!load}. [config] is the storage authority; [base_dir] remains an
+    explicit compatibility argument and must not select a different root. *)
+val load_configured :
+  config:Workspace.config ->
+  base_dir:string -> keeper_name:string -> chat_message list
+
 type page = { messages : chat_message list; has_more : bool }
 
 (** [load_page ~base_dir ~keeper_name ?before ()] is the paged form of
@@ -320,6 +384,7 @@ type page = { messages : chat_message list; has_more : bool }
     Legacy rows without [ts] are unreachable through paging (the tail
     window still serves them). *)
 val load_page :
+  ?config:Workspace.config ->
   base_dir:string -> keeper_name:string -> ?before:float -> unit -> page
 
 (** {1 Serialisation} *)

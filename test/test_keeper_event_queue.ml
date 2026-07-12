@@ -1162,7 +1162,8 @@ let () =
         Masc.Keeper_registry.clear ();
         Masc.Keeper_chat_queue.For_testing.reset ();
         ignore
-          (Masc.Keeper_chat_queue.configure_persistence ~base_path
+          (Masc.Keeper_chat_queue.configure_persistence
+             ~config:(Masc.Workspace.default_config base_path)
             : Masc.Keeper_chat_queue.configure_report);
         ignore (Masc.Keeper_registry.register ~base_path keeper_name meta);
         (match

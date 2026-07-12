@@ -307,6 +307,10 @@ let adapter_loop_with_transport
           on_send_result
             (Error (Other "Slack terminal reply contained no text or blocks"));
         ()
+    | Run_cancelled { run_id = _; message } ->
+        on_send_result
+          (send_plain ~content:("Keeper request cancelled: " ^ message));
+        ()
     | Event_error { message } ->
         on_send_result (send_plain ~content:("Keeper error: " ^ message));
         ()

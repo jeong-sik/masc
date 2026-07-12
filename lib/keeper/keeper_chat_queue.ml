@@ -11,12 +11,26 @@ type message_source =
       thread_ts : string option;
     }
 
+type transcript_context =
+  { surface : Surface_ref.t
+  ; conversation_id : string option
+  ; external_message_id : string option
+  ; speaker : Keeper_chat_store.speaker
+  ; extra_mentions : Keeper_identity.Keeper_id.t list
+  }
+
+type transcript_ownership =
+  | Queue_owned
+  | Upstream_recorded
+
 type queued_message = {
   content : string;
   user_blocks : Keeper_multimodal_input.user_input_block list;
   attachments : Keeper_chat_store.attachment list;
   timestamp : float;
   source : message_source;
+  transcript_context : transcript_context option;
+  transcript_ownership : transcript_ownership;
 }
 
 module Receipt_id = struct
@@ -178,7 +192,10 @@ type stored_state =
       ; message : queued_message
       }
   | Stored_delivered of completion
-  | Stored_failed of failure
+  | Stored_failed of
+      { failure : failure
+      ; retained_message : queued_message option
+      }
 
 type stored_receipt = {
   receipt_id : Receipt_id.t;
@@ -194,12 +211,13 @@ type queue_entry = {
 
 let schema_v1 = "keeper_chat_queue.v1"
 let schema_v2 = "keeper_chat_queue.v2"
+let schema_v3 = "keeper_chat_queue.v3"
 (* Revisions cross the JSON/JavaScript dashboard boundary as numbers. Keep the
    persisted domain within IEEE-754's exact integer range instead of accepting
    all int64 values and silently losing identity in the browser. *)
 let max_revision = 9_007_199_254_740_991L
 let persistence_file = "chat-queue.json"
-let persistence_base_path : string option Atomic.t = Atomic.make None
+let persistence_keepers_dir : string option Atomic.t = Atomic.make None
 let global_load_errors : snapshot_load_error list Atomic.t = Atomic.make []
 let fail_next_persist_for_testing = Atomic.make false
 let transition_observer : transition_observer option Atomic.t = Atomic.make None
@@ -251,12 +269,12 @@ let valid_keeper_name name =
   && not (String.equal name "..")
   && String.for_all valid_char name
 
-let snapshot_path ~base_path ~keeper_name =
+let snapshot_path ~keepers_dir ~keeper_name =
   if valid_keeper_name keeper_name
   then
     Ok
       (Filename.concat
-         (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
+         (Filename.concat keepers_dir keeper_name)
          persistence_file)
   else Error (Printf.sprintf "invalid keeper name for chat queue snapshot: %s" keeper_name)
 
@@ -277,6 +295,57 @@ let source_to_yojson = function
       ; ("team_id", Option.fold ~none:`Null ~some:(fun value -> `String value) team_id)
       ; ("thread_ts", Option.fold ~none:`Null ~some:(fun value -> `String value) thread_ts)
       ]
+
+let speaker_authority_to_string = function
+  | Keeper_chat_store.Owner -> "owner"
+  | Keeper_chat_store.External -> "external"
+
+let speaker_authority_of_string = function
+  | "owner" -> Ok Keeper_chat_store.Owner
+  | "external" -> Ok Keeper_chat_store.External
+  | value ->
+    Error (Printf.sprintf "unknown chat queue speaker authority: %s" value)
+
+let speaker_to_yojson (speaker : Keeper_chat_store.speaker) =
+  `Assoc
+    [ ( "speaker_id"
+      , Option.fold ~none:`Null ~some:(fun value -> `String value)
+          speaker.speaker_id )
+    ; ( "speaker_name"
+      , Option.fold ~none:`Null ~some:(fun value -> `String value)
+          speaker.speaker_name )
+    ; ( "speaker_authority"
+      , `String (speaker_authority_to_string speaker.speaker_authority) )
+    ]
+
+let transcript_context_to_yojson
+    (context : transcript_context) =
+  `Assoc
+    [ "surface", Surface_ref.to_json context.surface
+    ; ( "conversation_id"
+      , Option.fold ~none:`Null ~some:(fun value -> `String value)
+          context.conversation_id )
+    ; ( "external_message_id"
+      , Option.fold ~none:`Null ~some:(fun value -> `String value)
+          context.external_message_id )
+    ; "speaker", speaker_to_yojson context.speaker
+    ; ( "extra_mentions"
+      , `List
+          (List.map
+             (fun mention ->
+                `String (Keeper_identity.Keeper_id.to_string mention))
+             context.extra_mentions) )
+    ]
+
+let transcript_ownership_to_string = function
+  | Queue_owned -> "queue_owned"
+  | Upstream_recorded -> "upstream_recorded"
+
+let transcript_ownership_of_string = function
+  | "queue_owned" -> Ok Queue_owned
+  | "upstream_recorded" -> Ok Upstream_recorded
+  | value ->
+    Error (Printf.sprintf "unknown transcript ownership: %s" value)
 
 let required_member json key =
   match Json_util.assoc_member_opt key json with
@@ -317,6 +386,116 @@ let optional_string json key =
     then Error (Printf.sprintf "chat queue JSON field %s must be non-empty when present" key)
     else Ok (Some value)
   | Some _ -> Error (Printf.sprintf "chat queue JSON field %s must be string or null" key)
+
+let speaker_of_yojson json =
+  match
+    optional_string json "speaker_id",
+    optional_string json "speaker_name",
+    required_string json "speaker_authority"
+  with
+  | Ok speaker_id, Ok speaker_name, Ok authority ->
+    Result.map
+      (fun speaker_authority ->
+         ({ speaker_id; speaker_name; speaker_authority }
+          : Keeper_chat_store.speaker))
+      (speaker_authority_of_string authority)
+  | Error error, _, _ | _, Error error, _ | _, _, Error error -> Error error
+
+let mentions_of_yojson = function
+  | `List values ->
+    let rec loop acc = function
+      | [] -> Ok (List.rev acc)
+      | `String value :: rest ->
+        (match Keeper_identity.Keeper_id.of_string value with
+         | Some mention -> loop (mention :: acc) rest
+         | None -> Error "chat queue transcript mention must be a Keeper id")
+      | _ :: _ -> Error "chat queue transcript mentions must be strings"
+    in
+    loop [] values
+  | _ -> Error "chat queue transcript mentions must be an array"
+
+let transcript_context_of_yojson json =
+  match
+    required_member json "surface",
+    optional_string json "conversation_id",
+    optional_string json "external_message_id",
+    required_member json "speaker",
+    required_member json "extra_mentions"
+  with
+  | Ok surface_json, Ok conversation_id, Ok external_message_id,
+    Ok speaker_json, Ok mentions_json ->
+    (match
+       Surface_ref.of_json surface_json,
+       speaker_of_yojson speaker_json,
+       mentions_of_yojson mentions_json
+     with
+     | Ok surface, Ok speaker, Ok extra_mentions ->
+       Ok
+         { surface
+         ; conversation_id
+         ; external_message_id
+         ; speaker
+         ; extra_mentions
+         }
+     | Error error, _, _ | _, Error error, _ | _, _, Error error ->
+       Error error)
+  | Error error, _, _, _, _
+  | _, Error error, _, _, _
+  | _, _, Error error, _, _
+  | _, _, _, Error error, _
+  | _, _, _, _, Error error -> Error error
+
+let optional_transcript_context json =
+  match Json_util.assoc_member_opt "transcript_context" json with
+  | None | Some `Null -> Ok None
+  | Some value -> Result.map Option.some (transcript_context_of_yojson value)
+
+let external_speaker_matches user_id
+    (speaker : Keeper_chat_store.speaker) =
+  match speaker.speaker_authority, speaker.speaker_id with
+  | Keeper_chat_store.External, Some speaker_id ->
+    String.equal speaker_id user_id
+  | Keeper_chat_store.Owner, _ | Keeper_chat_store.External, None -> false
+
+let validate_transcript_context_for_source
+    (message : queued_message) =
+  match
+    message.source,
+    message.transcript_context,
+    message.transcript_ownership
+  with
+  | Dashboard, None, Queue_owned -> Ok ()
+  | Dashboard, Some context, (Queue_owned | Upstream_recorded) ->
+    (match context.surface, context.speaker.speaker_authority with
+     | Surface_ref.Dashboard _, Keeper_chat_store.Owner -> Ok ()
+     | _ ->
+       Error
+         "dashboard chat queue transcript context must use Dashboard surface and Owner speaker")
+  | Dashboard, None, Upstream_recorded ->
+    Error "dashboard chat queue receipts cannot be upstream-recorded"
+  | (Discord _ | Slack _), None, Queue_owned ->
+    Error "queue-owned connector receipt requires transcript_context"
+  | (Discord _ | Slack _), None, Upstream_recorded -> Ok ()
+  | Discord { channel_id; user_id }, Some context,
+    (Queue_owned | Upstream_recorded) ->
+    (match context.surface with
+     | Surface_ref.Discord surface
+       when String.equal surface.channel_id channel_id
+            && external_speaker_matches user_id context.speaker -> Ok ()
+     | _ ->
+       Error
+         "Discord queue source and transcript surface/speaker must identify the same channel and external user")
+  | Slack { channel_id; user_id; team_id; thread_ts; _ }, Some context,
+    (Queue_owned | Upstream_recorded) ->
+    (match context.surface with
+     | Surface_ref.Slack surface
+       when String.equal surface.channel_id channel_id
+            && Option.equal String.equal surface.team_id team_id
+            && Option.equal String.equal surface.thread_ts thread_ts
+            && external_speaker_matches user_id context.speaker -> Ok ()
+     | _ ->
+       Error
+         "Slack queue source and transcript surface/speaker must identify the same channel, thread, team, and external user")
 
 let source_of_yojson json =
   match required_string json "kind" with
@@ -373,6 +552,11 @@ let queued_message_to_yojson (message : queued_message) =
     ; "attachments", Keeper_multimodal_input.attachments_to_yojson message.attachments
     ; "timestamp", `Float message.timestamp
     ; "source", source_to_yojson message.source
+    ; ( "transcript_context"
+      , Option.fold ~none:`Null ~some:transcript_context_to_yojson
+          message.transcript_context )
+    ; ( "transcript_ownership"
+      , `String (transcript_ownership_to_string message.transcript_ownership) )
     ]
 
 let attachment_of_yojson json =
@@ -418,7 +602,8 @@ let attachments_of_yojson = function
     loop [] values
   | _ -> Error "chat queue attachments must be an array"
 
-let queued_message_of_yojson_with_source source_parser json =
+let queued_message_of_yojson_with_source_and_ownership source_parser
+    ownership_parser json =
   match json with
   | `Assoc _ ->
     (match
@@ -426,27 +611,60 @@ let queued_message_of_yojson_with_source source_parser json =
        required_float json "timestamp",
        required_member json "user_blocks",
        required_member json "attachments",
-       required_member json "source"
+       required_member json "source",
+       optional_transcript_context json
      with
-     | Ok content, Ok timestamp, Ok _, Ok attachments_json, Ok source_json ->
+     | Ok content, Ok timestamp, Ok _, Ok attachments_json, Ok source_json,
+       Ok transcript_context ->
        (match
           Keeper_multimodal_input.parse_user_blocks json,
           attachments_of_yojson attachments_json,
           source_parser source_json
         with
         | Ok user_blocks, Ok attachments, Ok source ->
-          Ok { content; user_blocks; attachments; timestamp; source }
+          Result.bind (ownership_parser json source transcript_context)
+            (fun transcript_ownership ->
+               let message =
+                 { content
+                 ; user_blocks
+                 ; attachments
+                 ; timestamp
+                 ; source
+                 ; transcript_context
+                 ; transcript_ownership
+                 }
+               in
+               Result.map (fun () -> message)
+                 (validate_transcript_context_for_source message))
         | Error error, _, _ | _, Error error, _ | _, _, Error error ->
           Error error)
-     | Error error, _, _, _, _
-     | _, Error error, _, _, _
-     | _, _, Error error, _, _
-     | _, _, _, Error error, _
-     | _, _, _, _, Error error -> Error error)
+     | Error error, _, _, _, _, _
+     | _, Error error, _, _, _, _
+     | _, _, Error error, _, _, _
+     | _, _, _, Error error, _, _
+     | _, _, _, _, Error error, _
+     | _, _, _, _, _, Error error -> Error error)
   | _ -> Error "chat queue message must be a JSON object"
 
+let required_transcript_ownership json _source _context =
+  Result.bind (required_string json "transcript_ownership")
+    transcript_ownership_of_string
+
+let legacy_transcript_ownership _json source transcript_context =
+  match source, transcript_context with
+  | Dashboard, _ -> Ok Queue_owned
+  | (Discord _ | Slack _), Some _ -> Ok Queue_owned
+  | (Discord _ | Slack _), None ->
+    Error
+      "legacy active connector receipt has ambiguous transcript ownership; explicitly reconcile it as queue_owned or upstream_recorded before queue consumption"
+
 let queued_message_of_yojson json =
-  queued_message_of_yojson_with_source source_of_yojson json
+  queued_message_of_yojson_with_source_and_ownership source_of_yojson
+    required_transcript_ownership json
+
+let legacy_queued_message_of_yojson_with_source source_parser json =
+  queued_message_of_yojson_with_source_and_ownership source_parser
+    legacy_transcript_ownership json
 
 let source_of_v1_yojson json =
   match required_string json "kind" with
@@ -535,7 +753,7 @@ let state_to_yojson = function
       ]
   | Stored_delivered completion ->
     `Assoc (("kind", `String "delivered") :: completion_fields completion)
-  | Stored_failed failure ->
+  | Stored_failed { failure; _ } ->
     `Assoc
       (("kind", `String "failed")
        :: ("failure_kind", `String (failure_kind_to_string failure.kind))
@@ -551,15 +769,17 @@ let stored_receipt_to_yojson receipt =
   in
   let fields =
     match receipt.state with
-    | Stored_pending message | Stored_inflight { message; _ } ->
+    | Stored_pending message | Stored_inflight { message; _ }
+    | Stored_failed { retained_message = Some message; _ } ->
       fields @ [ "message", queued_message_to_yojson message ]
-    | Stored_delivered _ | Stored_failed _ -> fields
+    | Stored_delivered _
+    | Stored_failed { retained_message = None; _ } -> fields
   in
   `Assoc fields
 
 let snapshot_to_yojson ~revision receipts =
   `Assoc
-    [ "schema", `String schema_v2
+    [ "schema", `String schema_v3
     ; "revision", `Intlit (Int64.to_string revision)
     ; "receipts", `List (List.map stored_receipt_to_yojson receipts)
     ]
@@ -568,7 +788,7 @@ let save_json_atomic path json =
   Fs_compat.mkdir_p (Filename.dirname path);
   json
   |> Yojson.Safe.pretty_to_string
-  |> Fs_compat.save_file_atomic path
+  |> Fs_compat.save_file_atomic_private path
 
 let persist_snapshot_to_path path ~revision receipts =
   if Atomic.exchange fail_next_persist_for_testing false
@@ -605,7 +825,18 @@ let reject_terminal_message json =
   | None -> Ok ()
   | Some _ -> Error "terminal chat queue receipts must not retain message bodies"
 
-let stored_receipt_of_v2_yojson json =
+let retained_failed_message ~message_parser ~kind json =
+  match Json_util.assoc_member_opt "message" json, kind with
+  | None, _ -> Ok None
+  | Some message_json, Transcript_persist_failed ->
+    Result.map Option.some (message_parser message_json)
+  | Some _,
+    ( Turn_failed | Timed_out | No_visible_reply | Connector_unavailable
+    | Delivery_failed | Cancelled | Internal_error ) ->
+    Error
+      "only transcript_persist_failed terminal receipts may retain their queued message"
+
+let stored_receipt_of_yojson ~message_parser json =
   match json with
   | `Assoc _ ->
     (match parse_receipt_id json, required_member json "state" with
@@ -619,7 +850,7 @@ let stored_receipt_of_v2_yojson json =
            | Ok message_json ->
              Result.map
                (fun message -> { receipt_id; state = Stored_pending message })
-               (queued_message_of_yojson message_json))
+               (message_parser message_json))
         | Ok "inflight" ->
           (match
              required_string state_json "lease_id",
@@ -633,7 +864,7 @@ let stored_receipt_of_v2_yojson json =
                   { receipt_id
                   ; state = Stored_inflight { lease_id; started_at; message }
                   })
-               (queued_message_of_yojson message_json)
+               (message_parser message_json)
            | Ok _, Ok _, Ok _ ->
              Error "chat queue inflight lease_id must be non-empty"
            | Error error, _, _ | _, Error error, _ | _, _, Error error -> Error error)
@@ -651,35 +882,39 @@ let stored_receipt_of_v2_yojson json =
              required_float state_json "completed_at",
              required_string state_json "failure_kind",
              required_string state_json "detail",
-             optional_string state_json "outcome_ref",
-             reject_terminal_message json
+             optional_string state_json "outcome_ref"
            with
-           | Ok completed_at, Ok kind, Ok detail, Ok outcome_ref, Ok ()
+           | Ok completed_at, Ok kind_label, Ok detail, Ok outcome_ref
              when String.trim detail <> "" ->
-             Result.map
-               (fun kind ->
-                  { receipt_id
-                  ; state = Stored_failed { completed_at; kind; detail; outcome_ref }
-                  })
-               (failure_kind_of_string kind)
-           | Ok _, Ok _, Ok _, Ok _, Ok () ->
+             Result.bind (failure_kind_of_string kind_label) (fun kind ->
+               Result.map
+                 (fun retained_message ->
+                    { receipt_id
+                    ; state =
+                        Stored_failed
+                          { failure =
+                              { completed_at; kind; detail; outcome_ref }
+                          ; retained_message
+                          }
+                    })
+                 (retained_failed_message ~message_parser ~kind json))
+           | Ok _, Ok _, Ok _, Ok _ ->
              Error "failed chat queue receipt detail must be non-empty"
-           | Error error, _, _, _, _
-           | _, Error error, _, _, _
-           | _, _, Error error, _, _
-           | _, _, _, Error error, _
-           | _, _, _, _, Error error -> Error error)
+           | Error error, _, _, _
+           | _, Error error, _, _
+           | _, _, Error error, _
+           | _, _, _, Error error -> Error error)
         | Ok kind -> Error (Printf.sprintf "unknown chat queue receipt state: %s" kind)))
   | _ -> Error "chat queue receipt must be an object"
 
-let parse_receipt_list json =
+let parse_receipt_list ~message_parser json =
   match json with
   | `List values ->
     let seen = Hashtbl.create (List.length values) in
     let rec loop seen acc = function
       | [] -> Ok (List.rev acc)
       | value :: rest ->
-        (match stored_receipt_of_v2_yojson value with
+        (match stored_receipt_of_yojson ~message_parser value with
          | Error _ as error -> error
          | Ok receipt ->
            let id = Receipt_id.to_string receipt.receipt_id in
@@ -692,10 +927,10 @@ let parse_receipt_list json =
     loop seen [] values
   | _ -> Error "chat queue receipts must be an array"
 
-let parse_v2 json =
+let parse_snapshot ~message_parser json =
   match parse_revision json, required_member json "receipts" with
   | Ok revision, Ok receipts_json ->
-    (match parse_receipt_list receipts_json with
+    (match parse_receipt_list ~message_parser receipts_json with
      | Error _ as error -> error
      | Ok receipts ->
        let inflight =
@@ -719,7 +954,7 @@ let parse_v2 json =
           then Ok (revision, receipts)
           else
             Error
-              "chat queue v2 permits at most one same-source inflight lease per keeper"))
+              "chat queue snapshot permits at most one same-source inflight lease per keeper"))
   | Error error, _ | _, Error error -> Error error
 
 let parse_message_list json =
@@ -728,7 +963,9 @@ let parse_message_list json =
     let rec loop acc = function
       | [] -> Ok (List.rev acc)
       | value :: rest ->
-        (match queued_message_of_yojson_with_source source_of_v1_yojson value with
+        (match
+           legacy_queued_message_of_yojson_with_source source_of_v1_yojson value
+         with
          | Error _ as error -> error
          | Ok message -> loop (message :: acc) rest)
     in
@@ -751,7 +988,7 @@ let parse_v1_for_migration json =
     Result.map (fun pending -> inflight @ pending) (parse_message_list items_json)
   | Error error, _ | _, Error error -> Error error
 
-let migrate_v1_to_v2 path json =
+let migrate_v1_to_v3 path json =
   match parse_v1_for_migration json with
   | Error error -> Error (`Parse error)
   | Ok messages ->
@@ -810,25 +1047,135 @@ let recover_inflight path ~revision receipts =
           (load_error Recovery_failed ~path
              ("failed to persist restart recovery: " ^ error))
 
-let load_snapshot ~base_path ~keeper_name =
-  match snapshot_path ~base_path ~keeper_name with
+let migrate_snapshot_to_v3 path ~revision receipts =
+  let has_inflight =
+    List.exists
+      (fun receipt ->
+         match receipt.state with
+         | Stored_inflight _ -> true
+         | Stored_pending _ | Stored_delivered _ | Stored_failed _ -> false)
+      receipts
+  in
+  if has_inflight
+  then
+    Result.map
+      (fun loaded -> { loaded with migrated = true })
+      (recover_inflight path ~revision receipts)
+  else
+    match persist_snapshot_to_path path ~revision receipts with
+    | Ok () ->
+      Ok { revision; receipts; migrated = true; recovered_count = 0 }
+    | Error error ->
+      Error
+        (load_error Migration_failed ~path
+           ("failed to persist chat queue v3 migration: " ^ error))
+
+let source_json_is_connector (json : Yojson.Safe.t) =
+  match json with
+  | `Assoc fields ->
+    (match List.assoc_opt "kind" fields with
+     | Some (`String ("discord" | "slack")) -> true
+     | Some (`String _) | Some _ | None -> false)
+  | _ -> false
+
+let message_json_has_ambiguous_legacy_connector (json : Yojson.Safe.t) =
+  match json with
+  | `Assoc fields ->
+    let context_absent =
+      match List.assoc_opt "transcript_context" fields with
+      | None | Some `Null -> true
+      | Some _ -> false
+    in
+    context_absent
+    && (match List.assoc_opt "source" fields with
+        | Some source -> source_json_is_connector source
+        | None -> false)
+  | _ -> false
+
+let v2_has_ambiguous_active_connector (json : Yojson.Safe.t) =
+  match Json_util.assoc_member_opt "receipts" json with
+  | Some (`List receipts) ->
+    List.exists
+      (fun (receipt_json : Yojson.Safe.t) ->
+        match receipt_json with
+        | `Assoc fields ->
+          let active =
+            match List.assoc_opt "state" fields with
+            | Some (`Assoc state_fields) ->
+              (match List.assoc_opt "kind" state_fields with
+               | Some (`String ("pending" | "inflight")) -> true
+               | Some (`String _) | Some _ | None -> false)
+            | Some _ | None -> false
+          in
+          active
+          && (match List.assoc_opt "message" fields with
+              | Some message ->
+                message_json_has_ambiguous_legacy_connector message
+              | None -> false)
+        | _ -> false)
+      receipts
+  | Some _ | None -> false
+
+let v1_has_ambiguous_active_connector (json : Yojson.Safe.t) =
+  let messages_from = function
+    | Some (`List messages) -> messages
+    | Some _ | None -> []
+  in
+  let pending =
+    messages_from (Json_util.assoc_member_opt "items" json)
+  in
+  let inflight =
+    match Json_util.assoc_member_opt "inflight" json with
+    | Some (`Assoc fields) -> messages_from (List.assoc_opt "items" fields)
+    | Some _ | None -> []
+  in
+  List.exists message_json_has_ambiguous_legacy_connector (pending @ inflight)
+
+let load_snapshot ~keepers_dir ~keeper_name =
+  match snapshot_path ~keepers_dir ~keeper_name with
   | Error message -> Error (load_error Invalid_path message)
   | Ok path ->
     if not (Sys.file_exists path)
     then Ok None
     else
-      match Safe_ops.read_json_file_safe path with
+      match Safe_ops.read_file_safe path with
       | Error message -> Error (load_error Read_failed ~path message)
-      | Ok json ->
+      | Ok content ->
+        (match Safe_ops.parse_json_safe ~context:path content with
+         | Error message -> Error (load_error Parse_failed ~path message)
+         | Ok json ->
         (match required_string json "schema" with
          | Error message -> Error (load_error Parse_failed ~path message)
-         | Ok schema when String.equal schema schema_v2 ->
-           (match parse_v2 json with
+         | Ok schema when String.equal schema schema_v3 ->
+           (match parse_snapshot ~message_parser:queued_message_of_yojson json with
             | Error message -> Error (load_error Parse_failed ~path message)
             | Ok (revision, receipts) ->
               Result.map Option.some (recover_inflight path ~revision receipts))
+         | Ok schema when String.equal schema schema_v2 ->
+           if v2_has_ambiguous_active_connector json
+           then
+             Error
+               (load_error Migration_failed ~path
+                  "legacy v2 contains active connector receipts without a transcript ownership decision; reconcile each as queue_owned or upstream_recorded before startup")
+           else
+             (match
+                parse_snapshot
+                  ~message_parser:
+                    (legacy_queued_message_of_yojson_with_source source_of_yojson)
+                  json
+              with
+              | Error message -> Error (load_error Parse_failed ~path message)
+              | Ok (revision, receipts) ->
+                Result.map Option.some
+                  (migrate_snapshot_to_v3 path ~revision receipts))
          | Ok schema when String.equal schema schema_v1 ->
-           (match migrate_v1_to_v2 path json with
+           if v1_has_ambiguous_active_connector json
+           then
+             Error
+               (load_error Migration_failed ~path
+                  "legacy v1 contains active connector messages without a transcript ownership decision; reconcile them before startup")
+           else
+           (match migrate_v1_to_v3 path json with
             | Ok (revision, receipts) ->
               Ok (Some { revision; receipts; migrated = true; recovered_count = 0 })
             | Error (`Parse message) ->
@@ -840,7 +1187,7 @@ let load_snapshot ~base_path ~keeper_name =
          | Ok schema ->
            Error
              (load_error Parse_failed ~path
-                (Printf.sprintf "unsupported chat queue schema: %s" schema)))
+                (Printf.sprintf "unsupported chat queue schema: %s" schema))))
 
 let create_entry ?(revision = 0L) ?(receipts = []) ?(load_errors = []) () =
   { mutex = Eio.Mutex.create (); revision; receipts; load_errors }
@@ -869,7 +1216,13 @@ let with_entry_lock entry f =
   | Error (exception_, backtrace) ->
     Printexc.raise_with_backtrace exception_ backtrace
 
-let persistence_configured () = Option.is_some (Atomic.get persistence_base_path)
+let persistence_configured () = Option.is_some (Atomic.get persistence_keepers_dir)
+
+let persistence_matches_config ~config =
+  match Atomic.get persistence_keepers_dir with
+  | None -> true
+  | Some configured_dir ->
+    String.equal configured_dir (Workspace.keepers_runtime_dir config)
 
 let first_snapshot_error entry =
   match entry.load_errors with
@@ -880,10 +1233,10 @@ let first_snapshot_error entry =
      | [] -> None)
 
 let mutation_entry ~keeper_name ~create =
-  match Atomic.get persistence_base_path with
+  match Atomic.get persistence_keepers_dir with
   | None -> Error Persistence_not_configured
-  | Some base_path ->
-    (match snapshot_path ~base_path ~keeper_name with
+  | Some keepers_dir ->
+    (match snapshot_path ~keepers_dir ~keeper_name with
      | Error message ->
        Error (Snapshot_unavailable (load_error Invalid_path message))
      | Ok path ->
@@ -894,11 +1247,11 @@ let mutation_entry ~keeper_name ~create =
          | None, false -> None
        in
        match entry with
-       | None -> Ok (base_path, path, None)
+       | None -> Ok (keepers_dir, path, None)
        | Some entry ->
          (match first_snapshot_error entry with
           | Some error -> Error (Snapshot_unavailable error)
-          | None -> Ok (base_path, path, Some entry)))
+          | None -> Ok (keepers_dir, path, Some entry)))
 
 let pending_receipts receipts =
   List.filter_map
@@ -1070,7 +1423,11 @@ let canonical_terminal_state = function
     else if not (String.is_valid_utf_8 detail) then Error "terminal failure detail contains malformed UTF-8"
     else
       Result.map
-        (fun outcome_ref -> Stored_failed { failure with detail; outcome_ref })
+        (fun outcome_ref ->
+           Stored_failed
+             { failure = { failure with detail; outcome_ref }
+             ; retained_message = None
+             })
         (canonical_optional_ref failure.outcome_ref)
 
 let finalize ~keeper_name ~lease_id ~outcome =
@@ -1101,7 +1458,19 @@ let finalize ~keeper_name ~lease_id ~outcome =
                 (fun receipt ->
                    match receipt.state with
                    | Stored_inflight current when String.equal current.lease_id lease_id ->
-                     { receipt with state = terminal_state }
+                     let state =
+                       match terminal_state with
+                       | Stored_failed
+                           ({ failure =
+                                { kind = Transcript_persist_failed; _ }
+                            ; _
+                            } as failed) ->
+                         Stored_failed
+                           { failed with retained_message = Some current.message }
+                       | Stored_pending _ | Stored_inflight _
+                       | Stored_delivered _ | Stored_failed _ -> terminal_state
+                     in
+                     { receipt with state }
                    | Stored_pending _ | Stored_inflight _
                    | Stored_delivered _ | Stored_failed _ -> receipt)
                 entry.receipts
@@ -1179,6 +1548,8 @@ let merge_batch (items : leased_message list) =
             items
       ; timestamp = first.message.timestamp
       ; source = first.message.source
+      ; transcript_context = first.message.transcript_context
+      ; transcript_ownership = first.message.transcript_ownership
       }
 
 let pending_count ~keeper_name =
@@ -1213,7 +1584,7 @@ let receipt_state_of_stored = function
   | Stored_pending _ -> Pending
   | Stored_inflight { lease_id; started_at; _ } -> Inflight { lease_id; started_at }
   | Stored_delivered completion -> Delivered completion
-  | Stored_failed failure -> Failed failure
+  | Stored_failed { failure; _ } -> Failed failure
 
 let snapshot ~keeper_name =
   match find_entry keeper_name with
@@ -1222,7 +1593,7 @@ let snapshot ~keeper_name =
     ; pending = []
     ; inflight = []
     ; terminal = []
-    ; load_errors = Atomic.get global_load_errors
+    ; load_errors = []
     }
   | Some entry ->
     with_entry_lock entry (fun () ->
@@ -1255,7 +1626,7 @@ let snapshot ~keeper_name =
         ; pending = List.rev pending
         ; inflight = List.rev inflight
         ; terminal = List.rev terminal
-        ; load_errors = entry.load_errors @ Atomic.get global_load_errors
+        ; load_errors = entry.load_errors
         })
 
 let lookup_receipt ~keeper_name ~receipt_id =
@@ -1282,80 +1653,104 @@ let all_keeper_names () =
   with_registry_rw (fun () ->
       Hashtbl.fold (fun keeper_name _ names -> keeper_name :: names) registry [])
 
-let configure_persistence ~base_path =
-  Atomic.set persistence_base_path None;
+let configuration_errors () = Atomic.get global_load_errors
+
+let discover_keeper_entries keepers_dir =
+  if not (Sys.file_exists keepers_dir)
+  then Ok []
+  else
+    try Ok (Array.to_list (Sys.readdir keepers_dir)) with
+    | exception_ ->
+      Error
+        (load_error Read_failed ~path:keepers_dir
+           ("failed to discover keeper chat queue snapshots: "
+            ^ Printexc.to_string exception_))
+;;
+
+let configure_persistence ~config =
+  Atomic.set persistence_keepers_dir None;
   Atomic.set global_load_errors [];
-  (* BasePath is the queue ownership boundary. A reconfiguration must not make
-     an in-memory entry from the previous workspace appear in the new one. *)
+  (* The canonical cluster Keeper root is the queue ownership boundary. A
+     reconfiguration must not make an in-memory entry from the previous
+     workspace/cluster appear in the new one. *)
   with_registry_rw (fun () -> Hashtbl.clear registry);
   let restored_keeper_count = ref 0 in
   let migrated_keeper_count = ref 0 in
   let recovered_receipt_count = ref 0 in
   let load_errors = ref [] in
+  let global_errors = ref [] in
   let restored_mutations = ref [] in
-  let keepers_dir = Common.keepers_runtime_dir_of_base ~base_path in
-  let keeper_names =
-    if not (Sys.file_exists keepers_dir)
-    then []
-    else
-      try Array.to_list (Sys.readdir keepers_dir) with
-      | exception_ ->
-        let error =
-          load_error Read_failed ~path:keepers_dir
-            ("failed to discover keeper chat queue snapshots: "
-             ^ Printexc.to_string exception_)
-        in
-        load_errors := (None, error) :: !load_errors;
-        Atomic.set global_load_errors [ error ];
-        []
+  let keepers_dir = Workspace.keepers_runtime_dir config in
+  let fail_configuration error =
+    Atomic.set global_load_errors [ error ];
+    { restored_keeper_count = 0
+    ; migrated_keeper_count = 0
+    ; recovered_receipt_count = 0
+    ; load_errors = [ None, error ]
+    }
   in
-  List.iter
-    (fun keeper_name ->
-       let path = Filename.concat (Filename.concat keepers_dir keeper_name) persistence_file in
-       if Sys.file_exists path
-       then if not (valid_keeper_name keeper_name)
-         then
-           let error =
-             load_error Invalid_path ~path
-               (Printf.sprintf "invalid snapshot-bearing keeper name: %s" keeper_name)
-           in
-           load_errors := (Some keeper_name, error) :: !load_errors
-         else
-           match load_snapshot ~base_path ~keeper_name with
-           | Ok None -> ()
-           | Ok (Some loaded) ->
-             incr restored_keeper_count;
-             if loaded.migrated then incr migrated_keeper_count;
-             recovered_receipt_count :=
-               !recovered_receipt_count + loaded.recovered_count;
-             with_registry_rw (fun () ->
-                 Hashtbl.replace registry keeper_name
-                   (create_entry ~revision:loaded.revision
-                      ~receipts:loaded.receipts ()));
-             if loaded.migrated || loaded.recovered_count > 0
-             then
-               restored_mutations :=
-                 (keeper_name, loaded.revision) :: !restored_mutations
-           | Error error ->
+  match discover_keeper_entries keepers_dir with
+  | Error error -> fail_configuration error
+  | Ok keeper_names ->
+    (* [keepers_dir] is already the explicit workspace/cluster ownership
+       decision. Never inspect or infer from the default cluster's legacy root:
+       a non-default cluster starts from its own canonical namespace, and any
+       operator migration is an out-of-band exact copy into that namespace. *)
+    List.iter
+      (fun keeper_name ->
+         let path =
+           Filename.concat
+             (Filename.concat keepers_dir keeper_name)
+             persistence_file
+         in
+         if Sys.file_exists path
+         then if not (valid_keeper_name keeper_name)
+           then
+             let error =
+               load_error Invalid_path ~path
+                 (Printf.sprintf
+                    "invalid snapshot-bearing keeper name: %s"
+                    keeper_name)
+             in
              load_errors := (Some keeper_name, error) :: !load_errors;
-             with_registry_rw (fun () ->
-                 Hashtbl.replace registry keeper_name
-                   (create_entry ~load_errors:[ error ] ())))
-    keeper_names;
-  Atomic.set persistence_base_path (Some base_path);
-  List.rev !restored_mutations
-  |> List.iter (fun (keeper_name, revision) ->
-         notify_transition ~keeper_name ~revision);
-  { restored_keeper_count = !restored_keeper_count
-  ; migrated_keeper_count = !migrated_keeper_count
-  ; recovered_receipt_count = !recovered_receipt_count
-  ; load_errors = List.rev !load_errors
-  }
+             global_errors := error :: !global_errors
+           else
+             match load_snapshot ~keepers_dir ~keeper_name with
+             | Ok None -> ()
+             | Ok (Some loaded) ->
+               incr restored_keeper_count;
+               if loaded.migrated then incr migrated_keeper_count;
+               recovered_receipt_count :=
+                 !recovered_receipt_count + loaded.recovered_count;
+               with_registry_rw (fun () ->
+                   Hashtbl.replace registry keeper_name
+                     (create_entry ~revision:loaded.revision
+                        ~receipts:loaded.receipts ()));
+               if loaded.migrated || loaded.recovered_count > 0
+               then
+                 restored_mutations :=
+                   (keeper_name, loaded.revision) :: !restored_mutations
+             | Error error ->
+               load_errors := (Some keeper_name, error) :: !load_errors;
+               with_registry_rw (fun () ->
+                   Hashtbl.replace registry keeper_name
+                     (create_entry ~load_errors:[ error ] ())))
+      keeper_names;
+    Atomic.set global_load_errors (List.rev !global_errors);
+    Atomic.set persistence_keepers_dir (Some keepers_dir);
+    List.rev !restored_mutations
+    |> List.iter (fun (keeper_name, revision) ->
+           notify_transition ~keeper_name ~revision);
+    { restored_keeper_count = !restored_keeper_count
+    ; migrated_keeper_count = !migrated_keeper_count
+    ; recovered_receipt_count = !recovered_receipt_count
+    ; load_errors = List.rev !load_errors
+    }
 
 module For_testing = struct
   let reset () =
     Atomic.set fail_next_persist_for_testing false;
-    Atomic.set persistence_base_path None;
+    Atomic.set persistence_keepers_dir None;
     Atomic.set global_load_errors [];
     Atomic.set transition_observer None;
     with_registry_rw (fun () -> Hashtbl.clear registry)

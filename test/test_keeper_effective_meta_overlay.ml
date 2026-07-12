@@ -631,7 +631,7 @@ let test_status_surfaces_chat_queue_runtime () =
       Eio_guard.disable ())
     (fun () ->
       let report =
-        Masc.Keeper_chat_queue.configure_persistence ~base_path:config.base_path
+        Masc.Keeper_chat_queue.configure_persistence ~config
       in
       Alcotest.(check int)
         "queue persistence config has no load errors"
@@ -646,6 +646,8 @@ let test_status_surfaces_chat_queue_runtime () =
              attachments = [];
              timestamp = 1.0;
              source = Masc.Keeper_chat_queue.Dashboard;
+             transcript_context = None;
+             transcript_ownership = Masc.Keeper_chat_queue.Queue_owned;
            }
        with
        | Ok _receipt -> ()

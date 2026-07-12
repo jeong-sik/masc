@@ -124,6 +124,7 @@ import {
   resetToolCallOutputs,
 } from '../tool-call-output-store'
 import { shellAuthSummary } from '../store'
+import type { DashboardKeeperChatQueue } from '../api'
 import type { ChatBlock, KeeperConversationAttachment, KeeperConversationEntry, KeeperUserInputBlock } from '../types'
 import {
   KeeperConversationPanel,
@@ -131,6 +132,25 @@ import {
   KeeperRuntimeActions,
   filterConversationEntries,
 } from './keeper-shared'
+
+function chatQueueFixture(
+  overrides: Partial<DashboardKeeperChatQueue> = {},
+): DashboardKeeperChatQueue {
+  return {
+    schema: 'keeper_chat_queue.dashboard.v1',
+    revision: 1,
+    pending_count: 0,
+    inflight_count: 0,
+    active_receipts: [],
+    read_errors: [],
+    next_action: null,
+    recent_failed_receipt_count: 0,
+    recent_failed_receipt_limit: 8,
+    recent_failed_receipts_truncated: false,
+    recent_failed_receipts: [],
+    ...overrides,
+  }
+}
 
 describe('filterConversationEntries', () => {
   function entry(partial: Partial<KeeperConversationEntry>): KeeperConversationEntry {
@@ -222,6 +242,8 @@ describe('KeeperConversationPanel', () => {
     _resetChatStoreForTests()
     resetToolCallOutputs()
     vi.unstubAllGlobals()
+    vi.useRealTimers()
+    vi.restoreAllMocks()
   })
 
   it('renders a chat-first shell and removes the old KPI header cards', async () => {
@@ -895,6 +917,7 @@ describe('KeeperConversationPanel', () => {
   it('separates durable server pending/inflight counts from browser-local drafts', async () => {
     mockedToolsData.value = {
       keeper_waiting_inventory: {
+        generated_at: '2026-07-12T00:00:00Z',
         keepers: [
           {
             keeper_name: 'sangsu',
@@ -906,6 +929,56 @@ describe('KeeperConversationPanel', () => {
               chat_queue_inflight: 1,
             },
             next_action: 'keeper_chat_consumer_drain',
+            chat_queue: chatQueueFixture({
+              revision: 7,
+              pending_count: 2,
+              inflight_count: 1,
+              active_receipts: [
+                {
+                  receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
+                  queue_index: 0,
+                  message_source: { kind: 'dashboard' },
+                  content_length: 21,
+                  user_block_count: 0,
+                  attachment_count: 0,
+                  submitted_at: 1_783_814_400,
+                  submitted_at_iso: '2026-07-12T00:00:00Z',
+                  state: 'pending',
+                  lease_id: null,
+                  started_at: null,
+                  started_at_iso: null,
+                },
+                {
+                  receipt_id: 'chatq_00000000-0000-4000-8000-000000000002',
+                  queue_index: 1,
+                  message_source: { kind: 'dashboard' },
+                  content_length: 22,
+                  user_block_count: 0,
+                  attachment_count: 0,
+                  submitted_at: 1_783_814_401,
+                  submitted_at_iso: '2026-07-12T00:00:01Z',
+                  state: 'pending',
+                  lease_id: null,
+                  started_at: null,
+                  started_at_iso: null,
+                },
+                {
+                  receipt_id: 'chatq_00000000-0000-4000-8000-000000000003',
+                  queue_index: 0,
+                  message_source: { kind: 'dashboard' },
+                  content_length: 16,
+                  user_block_count: 0,
+                  attachment_count: 0,
+                  submitted_at: 1_783_814_402,
+                  submitted_at_iso: '2026-07-12T00:00:02Z',
+                  state: 'inflight',
+                  lease_id: 'lease-3',
+                  started_at: 1_783_814_403,
+                  started_at_iso: '2026-07-12T00:00:03Z',
+                },
+              ],
+              next_action: 'keeper_chat_turn_terminal_receipt',
+            }),
           },
         ],
       },
@@ -934,8 +1007,18 @@ describe('KeeperConversationPanel', () => {
             state: 'waiting',
             waiting_on: [],
             waiting_count: 1,
-            sources: { read_error: 1 },
-            next_action: 'repair_keeper_chat_queue_snapshot',
+            sources: { read_error: 9 },
+            next_action: 'unrelated_aggregate_action',
+            chat_queue: chatQueueFixture({
+              read_errors: [
+                {
+                  kind: 'parse_failed',
+                  path: '/tmp/keeper-chat.json',
+                  message: 'invalid queue snapshot',
+                },
+              ],
+              next_action: 'repair_keeper_chat_queue_snapshot',
+            }),
           },
         ],
       },
@@ -950,6 +1033,135 @@ describe('KeeperConversationPanel', () => {
       expect(status?.getAttribute('data-server-chat-queue-read-errors')).toBe('1')
       expect(status?.textContent).toContain('대기열 조회 실패 1')
       expect(status?.textContent).toContain('repair_keeper_chat_queue_snapshot')
+      expect(status?.textContent).not.toContain('unrelated_aggregate_action')
+      expect(status?.textContent).toContain('invalid queue snapshot')
+    })
+  })
+
+  it('reconstructs every active receipt and the explicitly bounded failed history after full reload', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-07-12T00:01:30Z'))
+    keeperThreads.value = {}
+    mockedToolsData.value = {
+      keeper_waiting_inventory: {
+        generated_at: '2026-07-12T00:00:00Z',
+        keepers: [
+          {
+            keeper_name: 'sangsu',
+            state: 'waiting',
+            waiting_on: [],
+            waiting_count: 2,
+            chat_queue: chatQueueFixture({
+              revision: 42,
+              pending_count: 1,
+              inflight_count: 1,
+              active_receipts: [
+                {
+                  receipt_id: 'chatq_00000000-0000-4000-8000-000000000021',
+                  queue_index: 0,
+                  message_source: { kind: 'dashboard' },
+                  content_length: 23,
+                  user_block_count: 0,
+                  attachment_count: 0,
+                  submitted_at: 1_783_814_400,
+                  submitted_at_iso: '2026-07-12T00:00:00Z',
+                  state: 'pending',
+                  lease_id: null,
+                  started_at: null,
+                  started_at_iso: null,
+                },
+                {
+                  receipt_id: 'chatq_00000000-0000-4000-8000-000000000022',
+                  queue_index: 0,
+                  message_source: { kind: 'slack', channel_id: 'C1', user_id: 'U1', team_id: null, thread_ts: null },
+                  content_length: 18,
+                  user_block_count: 1,
+                  attachment_count: 0,
+                  submitted_at: 1_783_814_410,
+                  submitted_at_iso: '2026-07-12T00:00:10Z',
+                  state: 'inflight',
+                  lease_id: 'lease-reload-22',
+                  started_at: 1_783_814_420,
+                  started_at_iso: '2026-07-12T00:00:20Z',
+                },
+              ],
+              next_action: 'keeper_chat_turn_terminal_receipt',
+              recent_failed_receipt_count: 3,
+              recent_failed_receipt_limit: 2,
+              recent_failed_receipts_truncated: true,
+              recent_failed_receipts: [
+                {
+                  receipt_id: 'chatq_00000000-0000-4000-8000-000000000023',
+                  state: 'failed',
+                  failure_kind: 'turn_failed',
+                  completed_at: 1_783_814_430,
+                  completed_at_iso: '2026-07-12T00:00:30Z',
+                  outcome_ref: 'turn-23',
+                },
+                {
+                  receipt_id: 'chatq_00000000-0000-4000-8000-000000000024',
+                  state: 'failed',
+                  failure_kind: 'timed_out',
+                  completed_at: 1_783_814_425,
+                  completed_at_iso: '2026-07-12T00:00:25Z',
+                  outcome_ref: null,
+                },
+              ],
+            }),
+          },
+        ],
+      },
+    }
+
+    render(
+      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="Say something" layout="primary" />`,
+      container,
+    )
+
+    await waitFor(() => {
+      expect(container.querySelectorAll('[data-server-chat-queue-active-receipt]')).toHaveLength(2)
+      expect(container.querySelector('[data-server-chat-queue-active-receipt="chatq_00000000-0000-4000-8000-000000000021"]')?.textContent).toContain('dashboard')
+      expect(container.querySelector('[data-server-chat-queue-active-receipt="chatq_00000000-0000-4000-8000-000000000022"]')?.textContent).toContain('slack #C1')
+      expect(container.querySelectorAll('[data-server-chat-queue-failed-receipt]')).toHaveLength(2)
+      const failedSummary = container.querySelector('[data-server-chat-queue-recent-failed]')
+      expect(failedSummary?.getAttribute('data-server-chat-queue-recent-failed-count')).toBe('3')
+      expect(failedSummary?.getAttribute('data-server-chat-queue-recent-failed-limit')).toBe('2')
+      expect(failedSummary?.getAttribute('data-server-chat-queue-recent-failed-truncated')).toBe('true')
+      expect(failedSummary?.textContent).toContain('최근 처리 실패 2/3 표시')
+      expect(failedSummary?.textContent).toContain('서버에서 이전 실패 receipt가 명시적으로 생략됨')
+      expect(container.querySelector('[data-server-chat-queue-age-label]')?.textContent).toBe('snapshot age 90s')
+      expect(container.querySelector('[data-server-chat-queue-projection-detail]')?.getAttribute('data-server-chat-queue-generated-at')).toBe('2026-07-12T00:00:00Z')
+      expect(container.querySelector('[aria-label="큐 receipt chatq_00000000-0000-4000-8000-000000000021 복사"]')).not.toBeNull()
+    })
+  })
+
+  it('keeps a zero queue visible with generated_at and age instead of treating it as timeless truth', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-07-12T00:05:00Z'))
+    mockedToolsData.value = {
+      keeper_waiting_inventory: {
+        generated_at: '2026-07-12T00:00:00Z',
+        keepers: [
+          {
+            keeper_name: 'sangsu',
+            state: 'idle',
+            waiting_on: [],
+            waiting_count: 0,
+            chat_queue: chatQueueFixture({ revision: 9 }),
+          },
+        ],
+      },
+    }
+
+    render(
+      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="Say something" layout="primary" />`,
+      container,
+    )
+
+    await waitFor(() => {
+      const status = container.querySelector('[data-server-chat-queue]')
+      expect(status).not.toBeNull()
+      expect(status?.textContent).toContain('active receipt 없음')
+      expect(status?.textContent).toContain('snapshot age 300s')
+      expect(status?.getAttribute('data-server-chat-queue-generated-at')).toBe('2026-07-12T00:00:00Z')
     })
   })
 
@@ -963,6 +1175,26 @@ describe('KeeperConversationPanel', () => {
             waiting_on: [],
             waiting_count: 1,
             sources: { chat_queue_pending: 1 },
+            chat_queue: chatQueueFixture({
+              pending_count: 1,
+              active_receipts: [
+                {
+                  receipt_id: 'chatq_00000000-0000-4000-8000-000000000010',
+                  queue_index: 0,
+                  message_source: { kind: 'dashboard' },
+                  content_length: 22,
+                  user_block_count: 0,
+                  attachment_count: 0,
+                  submitted_at: 1_783_814_400,
+                  submitted_at_iso: '2026-07-12T00:00:00Z',
+                  state: 'pending',
+                  lease_id: null,
+                  started_at: null,
+                  started_at_iso: null,
+                },
+              ],
+              next_action: 'keeper_chat_consumer_drain',
+            }),
           },
         ],
       },
@@ -1004,7 +1236,14 @@ describe('KeeperConversationPanel', () => {
     }
     mockedToolsData.value = {
       keeper_waiting_inventory: {
-        keepers: [{ keeper_name: 'sangsu', state: 'waiting', waiting_on: [], waiting_count: 0 }],
+        generated_at: '2026-07-12T00:00:00Z',
+        keepers: [{
+          keeper_name: 'sangsu',
+          state: 'waiting',
+          waiting_on: [],
+          waiting_count: 0,
+          chat_queue: chatQueueFixture(),
+        }],
       },
     }
 
@@ -1018,10 +1257,12 @@ describe('KeeperConversationPanel', () => {
       expect(container.querySelector('[data-chat-queue-state-badge="inflight"]')?.textContent).toContain('Keeper 처리 중')
       expect(container.querySelector('[data-chat-queue-state-badge="delivered"]')?.textContent).toContain('처리 완료')
       expect(container.querySelector('[data-chat-queue-state-badge="failed"]')?.textContent).toContain('처리 실패')
-      expect(container.querySelector('[data-chat-queue-state-badge="delivered"]')?.getAttribute('title')).toContain('chatq_')
+      expect(container.querySelector('[data-chat-queue-state-badge="delivered"] [data-chat-queue-receipt-visible]')?.textContent).toContain('chatq_')
+      expect(container.querySelector('[aria-label*="큐 receipt chatq_"]')).not.toBeNull()
       const shutdownBadge = container.querySelector('[data-chat-queue-state-badge][data-chat-queue-shutdown-operation-id="shutdown-op-7"]')
       expect(shutdownBadge?.textContent).toContain('종료 후 처리')
-      expect(shutdownBadge?.getAttribute('title')).toContain('shutdown operation shutdown-op-7')
+      expect(shutdownBadge?.querySelector('[data-chat-queue-shutdown-operation-visible]')?.textContent).toContain('shutdown-op-7')
+      expect(shutdownBadge?.querySelector('[aria-label="종료 작업 ID shutdown-op-7 복사"]')).not.toBeNull()
     })
   })
 

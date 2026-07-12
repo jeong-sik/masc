@@ -9,7 +9,7 @@ type outcome =
       ; judge : (Fusion_types.judge_synthesis, Fusion_types.judge_failure) result
       }
 
-let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
+let run ~sw ~net ~config ~base_dir ~policy ~topology ~request () : outcome =
   match Fusion_policy.decide ~policy request with
   | Fusion_types.Deny reason ->
     Fusion_metrics.record_invocation ~topology `Denied;
@@ -455,7 +455,7 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
           in
           List.iter (Fusion_metrics.record_judge_execution ~topology) judge_nodes;
           (match
-             Fusion_sink.emit ~base_dir ~keeper:req.Fusion_types.keeper
+             Fusion_sink.emit ~config ~base_dir ~keeper:req.Fusion_types.keeper
                ~run_id:req.Fusion_types.run_id ~question:req.Fusion_types.prompt
                ~panel ~judge ~judges:judge_nodes ~judge_usage
            with

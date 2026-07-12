@@ -7,6 +7,7 @@ import type {
 } from '../../api'
 import { formatDateTimeKo } from '../../lib/format-time'
 import { StatusChip, type StatusChipTone } from '../common/status-chip'
+import { CopyIdButton } from '../common/copy-id-button'
 
 // Exported for the keeper workspace lane strip (#23507): the lane
 // state/source palettes stay single-sourced here instead of growing a
@@ -112,7 +113,15 @@ function WaitingRowReceiptDetail({ row }: { row: DashboardKeeperWaitingRow }) {
       class="flex min-w-0 flex-wrap gap-x-3 gap-y-1 text-2xs text-[var(--color-fg-muted)]"
       data-keeper-chat-receipt=${receiptId}
     >
-      <span class="min-w-0 break-all font-mono">receipt ${receiptId}</span>
+      <span class="inline-flex min-w-0 items-center gap-1">
+        <span class="min-w-0 break-all font-mono">receipt ${receiptId}</span>
+        <${CopyIdButton}
+          value=${receiptId}
+          label="queue receipt ID"
+          ariaLabel=${`큐 receipt ${receiptId} 복사`}
+          size=${11}
+        />
+      </span>
       ${queueIndex === null ? null : html`<span class="font-mono">queue index ${queueIndex}</span>`}
       ${state ? html`<span class="font-mono">state ${enumLabel(state)}</span>` : null}
       ${leaseId ? html`<span class="min-w-0 break-all font-mono">lease ${leaseId}</span>` : null}
@@ -134,7 +143,15 @@ function WaitingRowShutdownDetail({ row }: { row: DashboardKeeperWaitingRow }) {
       class="flex min-w-0 flex-wrap gap-x-3 gap-y-1 text-2xs text-[var(--color-fg-muted)]"
       data-keeper-shutdown-operation-id=${operationId}
     >
-      <span class="min-w-0 break-all font-mono">shutdown operation ${operationId}</span>
+      <span class="inline-flex min-w-0 items-center gap-1">
+        <span class="min-w-0 break-all font-mono">shutdown operation ${operationId}</span>
+        <${CopyIdButton}
+          value=${operationId}
+          label="shutdown operation ID"
+          ariaLabel=${`종료 작업 ID ${operationId} 복사`}
+          size=${11}
+        />
+      </span>
       ${admissionFenced ? html`<span>admission fenced</span>` : null}
     </div>
   `

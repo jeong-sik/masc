@@ -72,7 +72,7 @@ module Http = Http_server_eio
 let http_status_of_gate_error : Channel_gate.gate_error -> Httpun.Status.t = function
   | Validation (Duplicate_message _) -> `Conflict
   | Validation _ -> `Bad_request
-  | Keeper_error _ -> `Bad_gateway
+  | Keeper_error _ | Accepted_keeper_error _ -> `Bad_gateway
   | Dispatch_unavailable -> `Service_unavailable
   | Internal _ -> `Internal_server_error
 

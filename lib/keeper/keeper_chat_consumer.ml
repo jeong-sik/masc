@@ -240,8 +240,11 @@ let log_deferred_turn ~keeper_name
          in_flight=%b; returning the leased receipt to Pending"
         keeper_name waiting (Option.is_some in_flight)
 
-let run_leased_turn state ~sw ~clock ~handle_turn ~keeper_name ~lease_id ~queued =
-  match handle_turn ~sw ~keeper_name ~queued_message:queued with
+let run_leased_turn state ~sw ~clock ~handle_turn ~keeper_name ~lease_id ~queued
+    ~leased_items =
+  match
+    handle_turn ~sw ~keeper_name ~queued_message:queued ~leased_items
+  with
   | Deferred { rejection } ->
       log_deferred_turn ~keeper_name rejection;
       nack_or_warn state ~keeper_name ~lease_id
@@ -267,11 +270,11 @@ let run_leased_turn state ~sw ~clock ~handle_turn ~keeper_name ~lease_id ~queued
            })
 
 let dispatch_queued_turn state ~sw ~clock ~handle_turn ~keeper_name ~lease_id
-    ~queued =
+    ~queued ~leased_items =
   Eio.Fiber.fork ~sw (fun () ->
       try
         run_leased_turn state ~sw ~clock ~handle_turn ~keeper_name ~lease_id
-          ~queued;
+          ~queued ~leased_items;
         clear_dispatching state keeper_name
       with
       | Eio.Cancel.Cancelled _ as e ->
@@ -381,6 +384,7 @@ let start ~sw ~clock ~base_path ~handle_turn =
                                (try
                                   dispatch_queued_turn dispatch_state ~sw ~clock
                                     ~handle_turn ~keeper_name ~lease_id ~queued
+                                    ~leased_items:items
                                 with
                                 | Eio.Cancel.Cancelled _ as e ->
                                     Eio.Cancel.protect (fun () ->

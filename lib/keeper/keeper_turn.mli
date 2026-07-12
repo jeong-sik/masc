@@ -153,6 +153,7 @@ val handle_keeper_msg_if_free :
   ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
   ?event_bus:Agent_sdk.Event_bus.t ->
   ?continuation_channel:Keeper_continuation_channel.t ->
+  ?before_run:(unit -> (unit, string) result) ->
   _ Keeper_types_profile.context ->
   Yojson.Safe.t ->
   [ `Ran of tool_result | `Busy of Keeper_turn_admission.rejection ]

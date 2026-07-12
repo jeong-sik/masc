@@ -56,7 +56,11 @@ let stopToolsRefresh: (() => void) | null = null
 export function subscribeToolsAutoRefresh(): () => void {
   toolsRefreshSubscriberCount += 1
   if (toolsRefreshSubscriberCount === 1) {
-    if (!toolsData.value && !toolsLoading.value) void loadTools()
+    // A cached snapshot is displayable while revalidation runs, but it is not
+    // evidence that a newly mounted operator surface has current queue truth.
+    // Always revalidate on the first subscriber mount; the managed resource
+    // retains the prior data so this does not introduce a loading flash.
+    if (!toolsLoading.value) void loadTools()
     stopToolsRefresh = setupVisibleAutoRefresh(() => {
       void loadTools()
     }, KEEPER_WAITING_INVENTORY_REFRESH_MS)

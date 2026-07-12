@@ -3,6 +3,7 @@ import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
   DashboardKeeperBackground,
+  DashboardKeeperChatQueue,
   DashboardKeeperWaitingInventory,
   DashboardScheduledAutomation,
 } from '../../api'
@@ -36,6 +37,16 @@ vi.mock('../../api/dashboard-governance', () => ({
 }))
 
 import { ScheduleSurface } from './schedule-surface'
+
+function emptyChatQueue(): DashboardKeeperChatQueue {
+  return {
+    schema: 'keeper_chat_queue.dashboard.v1', revision: 0,
+    pending_count: 0, inflight_count: 0, active_receipts: [], read_errors: [],
+    next_action: null, recent_failed_receipt_count: 0,
+    recent_failed_receipt_limit: 8, recent_failed_receipts_truncated: false,
+    recent_failed_receipts: [],
+  }
+}
 
 function sampleAutomation(): DashboardScheduledAutomation {
   return {
@@ -111,6 +122,7 @@ function sampleWaitingInventory(): DashboardKeeperWaitingInventory {
         keeper_name: 'sangsu',
         state: 'waiting',
         waiting_count: 1,
+        chat_queue: emptyChatQueue(),
         sources: { hitl_pending: 1 },
         waiting_on: [
           {

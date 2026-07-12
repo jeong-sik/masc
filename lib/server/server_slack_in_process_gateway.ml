@@ -315,11 +315,11 @@ let handle_inbound ~dispatch ~clock ~channel_id ~thread_ts ~user_id ~user_name
     let stream_reply = make_slack_stream_reply ~channel_id ~reply_to_thread_ts in
     let on_text_snapshot = publish_slack_stream_snapshot ~clock stream_reply in
     (match
-       Channel_gate.handle_inbound_streaming ~dispatch ~on_text_snapshot msg
+     Channel_gate.handle_inbound_streaming ~dispatch ~on_text_snapshot msg
      with
      | Error gate_err -> (
-       match gate_err with
-       | Channel_gate.Dispatch_unavailable ->
+       match Channel_gate.inbound_error_notice gate_err with
+       | Channel_gate.Offline_notice ->
          let notice = Printf.sprintf "⚠️ `%s` 오프라인" keeper_name in
          (match
             State.send_message ~clock ~channel_id ~content:notice
@@ -341,8 +341,57 @@ let handle_inbound ~dispatch ~clock ~channel_id ~thread_ts ~user_id ~user_name
            "slack inbound -> keeper unavailable, notice sent (channel=%s \
             keeper=%s)"
            channel_id keeper_name
-       | Channel_gate.Validation _ | Channel_gate.Keeper_error _
-       | Channel_gate.Internal _ ->
+       | Channel_gate.Retry_notice ->
+         let notice =
+           Printf.sprintf
+             "⚠️ `%s` 메시지를 처리하지 못했습니다. 잠시 후 다시 보내 주세요."
+             keeper_name
+         in
+         Slack_observability.record_inbound_dispatch
+           Slack_observability.Gate_error;
+         (match
+            State.send_message ~clock ~channel_id ~content:notice
+              ~reply_to_message_id:reply_to_thread_ts ()
+          with
+          | Ok _ ->
+            Slack_observability.record_reply Slack_observability.Reply_send_ok
+          | Error e ->
+            Slack_observability.record_reply
+              Slack_observability.Reply_send_failed;
+            Log.Server.error
+              "slack send retry notice failed (channel=%s keeper=%s): %s"
+              channel_id keeper_name
+              (Format.asprintf "%a" State.pp_send_error e));
+         Log.Server.warn
+           "slack inbound -> keeper failed, retry notice attempted (channel=%s keeper=%s): %s"
+           channel_id keeper_name
+           (Channel_gate.gate_error_to_string gate_err)
+       | Channel_gate.Accepted_failure_notice ->
+         let notice =
+           Printf.sprintf
+             "⚠️ `%s` 메시지는 기록됐지만 이번 턴이 실패했습니다. 같은 메시지를 다시 보내지 말고 대시보드 상태를 확인해 주세요."
+             keeper_name
+         in
+         Slack_observability.record_inbound_dispatch
+           Slack_observability.Gate_error;
+         (match
+            State.send_message ~clock ~channel_id ~content:notice
+              ~reply_to_message_id:reply_to_thread_ts ()
+          with
+          | Ok _ ->
+            Slack_observability.record_reply Slack_observability.Reply_send_ok
+          | Error e ->
+            Slack_observability.record_reply
+              Slack_observability.Reply_send_failed;
+            Log.Server.error
+              "slack send accepted-failure notice failed (channel=%s keeper=%s): %s"
+              channel_id keeper_name
+              (Format.asprintf "%a" State.pp_send_error e));
+         Log.Server.warn
+           "slack inbound -> accepted Keeper turn failed; dashboard notice attempted (channel=%s keeper=%s): %s"
+           channel_id keeper_name
+           (Channel_gate.gate_error_to_string gate_err)
+       | Channel_gate.No_notice ->
          Slack_observability.record_inbound_dispatch
            Slack_observability.Gate_error;
          Log.Server.warn

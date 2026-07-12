@@ -354,7 +354,7 @@ let payload_identity_match ~identity_of payload =
    The store's own parser owns chat read-drop accounting, so chat parse
    failures do not enter [read_errors]. Rows are de-duped by their stable
    [id] across page overlaps. *)
-let read_chat ~base_dir ~keeper_name ~since ~errs =
+let read_chat ~config ~base_dir ~keeper_name ~since ~errs =
   let seen : (string, unit) Hashtbl.t = Hashtbl.create 64 in
   let new_messages = ref 0 in
   let transport = ref 0 in
@@ -391,7 +391,7 @@ let read_chat ~base_dir ~keeper_name ~since ~errs =
     then mark_truncated ()
     else (
       let { Keeper_chat_store.messages; has_more } =
-        Keeper_chat_store.load_page ~base_dir ~keeper_name ?before ()
+        Keeper_chat_store.load_page ~config ~base_dir ~keeper_name ?before ()
       in
       List.iter process messages;
       let oldest =
@@ -418,15 +418,16 @@ let read_chat ~base_dir ~keeper_name ~since ~errs =
 
 (* ── Aggregation ─────────────────────────────────────────────────── *)
 
-let build ~base_path ~keeper_name ~since_unix ~now_unix =
+let build_configured ~config ~keeper_name ~since_unix ~now_unix =
+  let base_path = config.Workspace.base_path in
   let errs = ref [] in
   let scan_days = jsonl_retention_scan_days () in
   let retention_start = now_unix -. (float_of_int scan_days *. Masc_time_constants.day) in
   let identity_of candidate =
     Tool_agent_timeline.identity_matches ~agent_name:keeper_name candidate
   in
-  let masc_dir = Common.masc_dir_from_base_path ~base_path in
-  let keepers_dir = Common.keepers_runtime_dir_of_base ~base_path in
+  let masc_dir = Workspace.masc_root_dir config in
+  let keepers_dir = Workspace.keepers_runtime_dir config in
   let keeper_local store =
     Filename.concat
       (Filename.concat keepers_dir keeper_name)
@@ -434,7 +435,7 @@ let build ~base_path ~keeper_name ~since_unix ~now_unix =
   in
   (* chat *)
   let chat, chat_truncated =
-    read_chat ~base_dir:base_path ~keeper_name ~since:since_unix ~errs
+    read_chat ~config ~base_dir:base_path ~keeper_name ~since:since_unix ~errs
   in
   let chat_retention_truncated = since_unix < retention_start in
   (* turns.completed — keeper-local turn-records *)
@@ -655,6 +656,11 @@ let build ~base_path ~keeper_name ~since_unix ~now_unix =
   ; coverage
   ; read_errors = List.rev !errs
   }
+;;
+
+let build ~base_path ~keeper_name ~since_unix ~now_unix =
+  build_configured ~config:(Workspace.default_config base_path) ~keeper_name
+    ~since_unix ~now_unix
 ;;
 
 (* ── Wire encoding ───────────────────────────────────────────────── *)

@@ -21,11 +21,21 @@
 let sanitize_name name =
   Workspace_utils_backend_setup.sanitize_namespace_segment name
 
-let chat_dir base_dir =
-  Filename.concat (Common.masc_dir_from_base_path ~base_path:base_dir) "keeper_chat"
+let effective_base_dir ?config base_dir =
+  match config with
+  | Some config -> config.Workspace.base_path
+  | None -> base_dir
 
-let chat_path ~base_dir ~keeper_name =
-  Filename.concat (chat_dir base_dir) (sanitize_name keeper_name ^ ".jsonl")
+let chat_dir ?config base_dir =
+  let masc_root =
+    match config with
+    | Some config -> Workspace.masc_root_dir config
+    | None -> Common.masc_dir_from_base_path ~base_path:base_dir
+  in
+  Filename.concat masc_root "keeper_chat"
+
+let chat_path ?config ~base_dir ~keeper_name () =
+  Filename.concat (chat_dir ?config base_dir) (sanitize_name keeper_name ^ ".jsonl")
 
 let persistence_surface = "keeper_chat_store"
 
@@ -43,8 +53,8 @@ let report_persistence_read_drop ~reason ~path ~detail =
     ~path
     ~detail
 
-let ensure_dir_once ~base_dir =
-  ignore (Keeper_fs.ensure_dir (chat_dir base_dir))
+let ensure_dir_once ?config ~base_dir () =
+  ignore (Keeper_fs.ensure_dir (chat_dir ?config base_dir))
 
 type attachment = {
   id : string;
@@ -168,6 +178,17 @@ type speaker = {
   speaker_name : string option;
   speaker_authority : speaker_authority;
 }
+
+type user_message_input =
+  { content : string
+  ; attachments : attachment list
+  ; timestamp : float
+  ; surface : Surface_ref.t option
+  ; conversation_id : string option
+  ; external_message_id : string option
+  ; speaker : speaker option
+  ; extra_mentions : Keeper_identity.Keeper_id.t list
+  }
 
 type chat_message = {
   id : string;
@@ -610,41 +631,50 @@ let user_line_mentions ~extra_mentions content =
   Keeper_lane_mentions.mention_ids_of_content content @ extra_mentions
   |> List.sort_uniq Keeper_identity.Keeper_id.compare
 
-let append_turn_result ~base_dir ~keeper_name ~(user_content : string)
-    ~(user_attachments : attachment list) ?(tool_calls = []) ?surface
-    ?conversation_id ?external_message_id ?speaker ?(extra_mentions = [])
+let append_user_messages_and_assistant_result ?config ~base_dir ~keeper_name
+    ~(user_messages : user_message_input list) ?(tool_calls = []) ?surface
+    ?conversation_id
     ?(assistant_kind = Row_kind.Utterance)
     ?blocks
     ?turn_ref
     ?stream_lifecycle
     ~(assistant_content : string)
     () =
+  let base_dir = effective_base_dir ?config base_dir in
   try
-    ensure_dir_once ~base_dir;
+    if user_messages = []
+    then invalid_arg "queued transcript append requires at least one user message";
+    ensure_dir_once ?config ~base_dir ();
     let redaction = redaction_for ~base_dir ~keeper_name in
-    let user_content =
-      Keeper_secret_redaction.redact_text redaction user_content
-    in
-    let user_attachments =
-      List.map (redact_attachment redaction) user_attachments
-    in
-    let persisted_user_attachments =
-      List.map persisted_attachment user_attachments
-    in
     let tool_calls = List.map (redact_tool_call redaction) tool_calls in
     let assistant_content =
       Keeper_secret_redaction.redact_text redaction assistant_content
     in
     let blocks = redact_blocks redaction blocks in
-    let path = chat_path ~base_dir ~keeper_name in
+    let path = chat_path ?config ~base_dir ~keeper_name () in
     let ts = Time_compat.now () in
-    (* Speaker identity belongs to the user line only: tool and
-       assistant lines are the keeper's own output. *)
-    let user_line =
-      encode_line ~role:Role.User ~content:user_content ~ts
-        ~attachments:persisted_user_attachments ?surface ?conversation_id
-        ?external_message_id ?speaker ?turn_ref
-        ~mentions:(user_line_mentions ~extra_mentions user_content) ()
+    (* Each accepted queue receipt keeps its own user-row identity even when
+       the LLM input is coalesced into one turn. The whole batch plus terminal
+       assistant/failure row is one append operation. *)
+    let user_lines =
+      List.map
+        (fun (message : user_message_input) ->
+           let content = redact_string redaction message.content in
+           let attachments =
+             message.attachments
+             |> List.map (redact_attachment redaction)
+             |> List.map persisted_attachment
+           in
+           encode_line ~role:Role.User ~content ~ts:message.timestamp ~attachments
+             ?surface:message.surface
+             ?conversation_id:message.conversation_id
+             ?external_message_id:message.external_message_id
+             ?speaker:message.speaker ?turn_ref
+             ~mentions:
+               (user_line_mentions ~extra_mentions:message.extra_mentions
+                  content)
+             ())
+        user_messages
     in
     let tool_lines =
       List.mapi
@@ -663,7 +693,7 @@ let append_turn_result ~base_dir ~keeper_name ~(user_content : string)
         ?stream_lifecycle ()
     in
     let payload =
-      String.concat "\n" ((user_line :: tool_lines) @ [ asst_line ]) ^ "\n"
+      String.concat "\n" (user_lines @ tool_lines @ [ asst_line ]) ^ "\n"
     in
     Fs_compat.append_file path payload;
     Ok ()
@@ -679,13 +709,33 @@ let append_turn_result ~base_dir ~keeper_name ~(user_content : string)
       (sanitize_name keeper_name) message;
     Error message
 
-let append_turn ~base_dir ~keeper_name ~(user_content : string)
+let append_turn_result ?config ~base_dir ~keeper_name ~(user_content : string)
+    ~(user_attachments : attachment list) ?(tool_calls = []) ?surface
+    ?conversation_id ?external_message_id ?speaker ?(extra_mentions = [])
+    ?(assistant_kind = Row_kind.Utterance) ?blocks ?turn_ref ?stream_lifecycle
+    ~(assistant_content : string) () =
+  let user_message : user_message_input =
+    { content = user_content
+    ; attachments = user_attachments
+    ; timestamp = Time_compat.now ()
+    ; surface
+    ; conversation_id
+    ; external_message_id
+    ; speaker
+    ; extra_mentions
+    }
+  in
+  append_user_messages_and_assistant_result ?config ~base_dir ~keeper_name
+    ~user_messages:[ user_message ] ~tool_calls ?surface ?conversation_id
+    ~assistant_kind ?blocks ?turn_ref ?stream_lifecycle ~assistant_content ()
+
+let append_turn ?config ~base_dir ~keeper_name ~(user_content : string)
     ~(user_attachments : attachment list) ?(tool_calls = []) ?surface
     ?conversation_id ?external_message_id ?speaker ?(extra_mentions = [])
     ?(assistant_kind = Row_kind.Utterance) ?blocks ?turn_ref ?stream_lifecycle
     ~(assistant_content : string) () =
   ignore
-    (append_turn_result ~base_dir ~keeper_name ~user_content ~user_attachments
+    (append_turn_result ?config ~base_dir ~keeper_name ~user_content ~user_attachments
        ~tool_calls ?surface ?conversation_id ?external_message_id ?speaker
        ~extra_mentions ~assistant_kind ?blocks ?turn_ref ?stream_lifecycle
        ~assistant_content ()
@@ -698,20 +748,22 @@ let append_turn ~base_dir ~keeper_name ~(user_content : string)
    a caller bound by a no-silent-loss contract (e.g. {!Fusion_sink.emit}) can
    propagate it. The failure is still counted + warn-logged here so callers that
    use the unit wrapper below keep the existing swallow-and-count telemetry. *)
-let append_assistant_message_result ~base_dir ~keeper_name ~(content : string)
-    ?surface ?conversation_id ?audio ?blocks ?turn_ref ?stream_lifecycle () :
+let append_assistant_message_result ?config ~base_dir ~keeper_name ~(content : string)
+    ?(kind = Row_kind.Utterance) ?surface ?conversation_id ?audio ?blocks
+    ?turn_ref ?stream_lifecycle () :
     (unit, string) result =
+  let base_dir = effective_base_dir ?config base_dir in
   try
-    ensure_dir_once ~base_dir;
+    ensure_dir_once ?config ~base_dir ();
     let redaction = redaction_for ~base_dir ~keeper_name in
     let content = Keeper_secret_redaction.redact_text redaction content in
     let blocks = redact_blocks redaction blocks in
     let audio = Option.map (redact_audio redaction) audio in
-    let path = chat_path ~base_dir ~keeper_name in
+    let path = chat_path ?config ~base_dir ~keeper_name () in
     let ts = Time_compat.now () in
     let line =
       encode_line ~role:Role.Assistant ~content ~ts ?surface ?conversation_id
-        ?audio ?blocks ?turn_ref ?stream_lifecycle ()
+        ~kind ?audio ?blocks ?turn_ref ?stream_lifecycle ()
     in
     Fs_compat.append_file path (line ^ "\n");
     Ok ()
@@ -729,26 +781,27 @@ let append_assistant_message_result ~base_dir ~keeper_name ~(content : string)
 (* Unit wrapper: existing callers keep the prior swallow-and-count behavior (the
    failure is already counted + logged inside the [_result] variant). New callers
    that must surface the failure call [append_assistant_message_result] directly. *)
-let append_assistant_message ~base_dir ~keeper_name ~(content : string)
+let append_assistant_message ?config ~base_dir ~keeper_name ~(content : string)
     ?surface ?conversation_id ?audio ?blocks ?turn_ref ?stream_lifecycle () =
   ignore
-    (append_assistant_message_result ~base_dir ~keeper_name ~content ?surface
+    (append_assistant_message_result ?config ~base_dir ~keeper_name ~content ?surface
        ?conversation_id ?audio ?blocks ?turn_ref ?stream_lifecycle ()
       : (unit, string) result)
 
 (* RFC-0226: inbound user line recorded at delivery time, before (and
    independent of) any turn. A single user line — the assistant reply,
    if one ever comes, is appended separately by the reply path. *)
-let append_user_message ~base_dir ~keeper_name ~(content : string)
+let append_user_message_result ?config ~base_dir ~keeper_name ~(content : string)
     ?(attachments = []) ?surface ?conversation_id ?external_message_id ?speaker
-    ?(extra_mentions = []) () =
+    ?(extra_mentions = []) () : (unit, string) result =
+  let base_dir = effective_base_dir ?config base_dir in
   try
-    ensure_dir_once ~base_dir;
+    ensure_dir_once ?config ~base_dir ();
     let redaction = redaction_for ~base_dir ~keeper_name in
     let content = Keeper_secret_redaction.redact_text redaction content in
     let attachments = List.map (redact_attachment redaction) attachments in
     let persisted_attachments = List.map persisted_attachment attachments in
-    let path = chat_path ~base_dir ~keeper_name in
+    let path = chat_path ?config ~base_dir ~keeper_name () in
     let ts = Time_compat.now () in
     let line =
       encode_line ~role:Role.User ~content ~ts ?surface ?conversation_id
@@ -756,7 +809,8 @@ let append_user_message ~base_dir ~keeper_name ~(content : string)
         ?external_message_id ?speaker
         ~mentions:(user_line_mentions ~extra_mentions content) ()
     in
-    Fs_compat.append_file path (line ^ "\n")
+    Fs_compat.append_file path (line ^ "\n");
+    Ok ()
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
@@ -764,8 +818,18 @@ let append_user_message ~base_dir ~keeper_name ~(content : string)
       Keeper_metrics.(to_string ChatStoreFailures)
       ~labels:[("operation", Keeper_chat_store_operation.(to_label Append))]
       ();
+    let message = Printexc.to_string exn in
     Log.Keeper.warn "keeper_chat_store: user append failed for %s: %s"
-      (sanitize_name keeper_name) (Printexc.to_string exn)
+      (sanitize_name keeper_name) message;
+    Error message
+
+let append_user_message ?config ~base_dir ~keeper_name ~(content : string)
+    ?(attachments = []) ?surface ?conversation_id ?external_message_id ?speaker
+    ?(extra_mentions = []) () =
+  ignore
+    (append_user_message_result ?config ~base_dir ~keeper_name ~content ~attachments
+       ?surface ?conversation_id ?external_message_id ?speaker ~extra_mentions ()
+      : (unit, string) result)
 
 let parse_line ~file_path (line : string) : chat_message option =
   try
@@ -1102,8 +1166,9 @@ let find_cut ~path ~size ~before : int =
   done;
   !hi
 
-let load_page ~base_dir ~keeper_name ?before () : page =
-  let path = chat_path ~base_dir ~keeper_name in
+let load_page ?config ~base_dir ~keeper_name ?before () : page =
+  let base_dir = effective_base_dir ?config base_dir in
+  let path = chat_path ?config ~base_dir ~keeper_name () in
   if not (Sys.file_exists path) then { messages = []; has_more = false }
   else
   try
@@ -1170,8 +1235,14 @@ let load_page ~base_dir ~keeper_name ?before () : page =
         (sanitize_name keeper_name) (Printexc.to_string exn);
       { messages = []; has_more = false }
 
-let load ~base_dir ~keeper_name : chat_message list =
-  (load_page ~base_dir ~keeper_name ()).messages
+let load_internal ?config ~base_dir ~keeper_name () : chat_message list =
+  (load_page ?config ~base_dir ~keeper_name ()).messages
+
+let load ~base_dir ~keeper_name =
+  load_internal ~base_dir ~keeper_name ()
+
+let load_configured ~config ~base_dir ~keeper_name =
+  load_internal ~config ~base_dir ~keeper_name ()
 
 (* RFC-0235 P3: the history endpoint can tell the dashboard that a clip
    has been reaped by checking the same audio directory the synthesis side

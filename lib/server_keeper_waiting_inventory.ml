@@ -52,6 +52,11 @@ type waiting_row =
 
 let external_attention_dashboard_row_limit = 64
 
+(* Transport projection bound only: the durable queue retains every terminal
+   receipt, while the response also exposes total/limit/truncated so callers
+   never mistake this newest-first window for the complete history. *)
+let recent_failed_chat_receipt_limit = 8
+
 let source_to_string = function
   | Event_queue_pending -> "event_queue_pending"
   | Event_queue_inflight -> "event_queue_inflight"
@@ -245,25 +250,32 @@ let chat_queue_source_label = function
   | Keeper_chat_queue.Slack _ -> "slack"
 ;;
 
-let chat_queue_source_json = function
+let chat_queue_source_json ~include_sensitive = function
   | Keeper_chat_queue.Dashboard -> `Assoc [ "kind", `String "dashboard" ]
   | Keeper_chat_queue.Discord { channel_id; user_id } ->
     `Assoc
-      [ "kind", `String "discord"
-      ; "channel_id", `String channel_id
-      ; "user_id", `String user_id
-      ]
+      ([ "kind", `String "discord" ]
+       @ if include_sensitive
+         then
+           [ "channel_id", `String channel_id
+           ; "user_id", `String user_id
+           ]
+         else [])
   | Keeper_chat_queue.Slack { channel_id; user_id; team_id; thread_ts; _ } ->
     `Assoc
-      [ "kind", `String "slack"
-      ; "channel_id", `String channel_id
-      ; "user_id", `String user_id
-      ; "team_id", Json_util.string_opt_to_json team_id
-      ; "thread_ts", Json_util.string_opt_to_json thread_ts
-      ]
+      ([ "kind", `String "slack" ]
+       @ if include_sensitive
+         then
+           [ "channel_id", `String channel_id
+           ; "user_id", `String user_id
+           ; "team_id", Json_util.string_opt_to_json team_id
+           ; "thread_ts", Json_util.string_opt_to_json thread_ts
+           ]
+         else [])
 ;;
 
-let chat_queue_active_row ~source ~next_action ~lifecycle_fields keeper_name queue_index
+let chat_queue_active_row ~include_sensitive ~source ~next_action
+    ~lifecycle_fields keeper_name queue_index
     (receipt : Keeper_chat_queue.active_receipt) =
   let msg = receipt.message in
   let source_label = chat_queue_source_label msg.source in
@@ -280,7 +292,7 @@ let chat_queue_active_row ~source ~next_action ~lifecycle_fields keeper_name que
           ; ( "receipt_id"
             , `String
                 (Keeper_chat_queue.Receipt_id.to_string receipt.receipt_id) )
-          ; "message_source", chat_queue_source_json msg.source
+          ; "message_source", chat_queue_source_json ~include_sensitive msg.source
           ; "content_length", `Int (String.length msg.content)
           ; "user_block_count", `Int (List.length msg.user_blocks)
           ; "attachment_count", `Int (List.length msg.attachments)
@@ -302,37 +314,51 @@ let chat_queue_invariant_error_row keeper_name queue_index
       ])
 ;;
 
-let chat_queue_load_error_row keeper_name
-    (error : Keeper_chat_queue.snapshot_load_error) =
-  let kind =
-    match error.kind with
-    | Keeper_chat_queue.Invalid_path -> "invalid_path"
-    | Keeper_chat_queue.Read_failed -> "read_failed"
-    | Keeper_chat_queue.Parse_failed -> "parse_failed"
-    | Keeper_chat_queue.Migration_failed -> "migration_failed"
-    | Keeper_chat_queue.Recovery_failed -> "recovery_failed"
-  in
-  read_error_row ~keeper_name ~waiting_on:"chat_queue_snapshot"
-    ~next_action:"repair_keeper_chat_queue_snapshot"
-    (`Assoc
-      [ "kind", `String kind
-      ; "path", Json_util.string_opt_to_json error.path
-      ; "message", `String error.message
-      ])
+let chat_queue_load_error_kind_to_string = function
+  | Keeper_chat_queue.Invalid_path -> "invalid_path"
+  | Keeper_chat_queue.Read_failed -> "read_failed"
+  | Keeper_chat_queue.Parse_failed -> "parse_failed"
+  | Keeper_chat_queue.Migration_failed -> "migration_failed"
+  | Keeper_chat_queue.Recovery_failed -> "recovery_failed"
 ;;
 
-let chat_queue_rows keeper_name =
-  let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
+let chat_queue_load_error_json ~include_sensitive
+    (error : Keeper_chat_queue.snapshot_load_error) =
+  `Assoc
+    ([ "kind", `String (chat_queue_load_error_kind_to_string error.kind) ]
+     @ if include_sensitive
+       then
+         [ "path", Json_util.string_opt_to_json error.path
+         ; "message", `String error.message
+         ]
+       else [])
+;;
+
+let chat_queue_load_error_row ~include_sensitive keeper_name
+    (error : Keeper_chat_queue.snapshot_load_error) =
+  read_error_row ~keeper_name ~waiting_on:"chat_queue_snapshot"
+    ~next_action:"repair_keeper_chat_queue_snapshot"
+    (chat_queue_load_error_json ~include_sensitive error)
+;;
+
+let chat_queue_rows_of_snapshot ~include_sensitive keeper_name
+    (snapshot : Keeper_chat_queue.diagnostic_snapshot) =
+  (* The structured chat_queue projection prioritizes the in-flight turn over
+     later pending receipts. Keep the flat waiting rows in that same order and
+     use one queue-index domain so the keeper-level next_action cannot disagree
+     with chat_queue.next_action. *)
+  let inflight_count = List.length snapshot.inflight in
   let pending =
     snapshot.pending
     |> List.mapi (fun queue_index
                        (receipt : Keeper_chat_queue.active_receipt) ->
            match receipt.Keeper_chat_queue.state with
            | Keeper_chat_queue.Pending ->
-               chat_queue_active_row ~source:Chat_queue_pending
+               chat_queue_active_row ~include_sensitive
+                 ~source:Chat_queue_pending
                  ~next_action:"keeper_chat_consumer_drain"
                  ~lifecycle_fields:[ "state", `String "pending" ] keeper_name
-                 queue_index receipt
+                 (inflight_count + queue_index) receipt
            | Keeper_chat_queue.Inflight _ | Keeper_chat_queue.Delivered _
            | Keeper_chat_queue.Failed _ ->
                chat_queue_invariant_error_row keeper_name queue_index receipt
@@ -344,7 +370,8 @@ let chat_queue_rows keeper_name =
                        (receipt : Keeper_chat_queue.active_receipt) ->
            match receipt.Keeper_chat_queue.state with
            | Keeper_chat_queue.Inflight { lease_id; started_at } ->
-               chat_queue_active_row ~source:Chat_queue_inflight
+               chat_queue_active_row ~include_sensitive
+                 ~source:Chat_queue_inflight
                  ~next_action:"keeper_chat_turn_terminal_receipt"
                  ~lifecycle_fields:
                    [ "state", `String "inflight"
@@ -358,8 +385,163 @@ let chat_queue_rows keeper_name =
                chat_queue_invariant_error_row keeper_name queue_index receipt
                  "inflight")
   in
-  pending @ inflight
-  @ List.map (chat_queue_load_error_row keeper_name) snapshot.load_errors
+  inflight @ pending
+  @ List.map
+      (chat_queue_load_error_row ~include_sensitive keeper_name)
+      snapshot.load_errors
+;;
+
+type chat_queue_projection =
+  { snapshot : Keeper_chat_queue.diagnostic_snapshot
+  ; waiting_rows : waiting_row list
+  ; include_sensitive : bool
+  }
+
+let chat_queue_projection ~include_sensitive keeper_name =
+  let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
+  { snapshot
+  ; waiting_rows =
+      chat_queue_rows_of_snapshot ~include_sensitive keeper_name snapshot
+  ; include_sensitive
+  }
+;;
+
+let chat_queue_active_receipt_json ~include_sensitive queue_index
+    (receipt : Keeper_chat_queue.active_receipt) =
+  let message = receipt.message in
+  let state_fields =
+    match receipt.state with
+    | Keeper_chat_queue.Pending ->
+      [ "state", `String "pending"
+      ; "lease_id", `Null
+      ; "started_at", `Null
+      ; "started_at_iso", `Null
+      ]
+    | Keeper_chat_queue.Inflight { lease_id; started_at } ->
+      [ "state", `String "inflight"
+      ; "lease_id", `String lease_id
+      ; "started_at", `Float started_at
+      ; "started_at_iso", unix_iso_json (Some started_at)
+      ]
+    | Keeper_chat_queue.Delivered _ | Keeper_chat_queue.Failed _ ->
+      []
+  in
+  `Assoc
+    ([ ( "receipt_id"
+       , `String (Keeper_chat_queue.Receipt_id.to_string receipt.receipt_id) )
+     ; "queue_index", `Int queue_index
+     ; "message_source", chat_queue_source_json ~include_sensitive message.source
+     ; "content_length", `Int (String.length message.content)
+     ; "user_block_count", `Int (List.length message.user_blocks)
+     ; "attachment_count", `Int (List.length message.attachments)
+     ; "submitted_at", `Float message.timestamp
+     ; "submitted_at_iso", unix_iso_json (Some message.timestamp)
+     ]
+     @ state_fields)
+;;
+
+let recent_failed_chat_receipt_json
+    (receipt : Keeper_chat_queue.receipt_view) =
+  match receipt.state with
+  | Keeper_chat_queue.Failed failure ->
+    Some
+      (`Assoc
+        [ ( "receipt_id"
+          , `String (Keeper_chat_queue.Receipt_id.to_string receipt.receipt_id) )
+        ; "state", `String "failed"
+        ; "failure_kind", `String (Keeper_chat_queue.failure_kind_to_string failure.kind)
+        ; "completed_at", `Float failure.completed_at
+        ; "completed_at_iso", unix_iso_json (Some failure.completed_at)
+        ; "outcome_ref", Json_util.string_opt_to_json failure.outcome_ref
+        ])
+  | Keeper_chat_queue.Pending | Keeper_chat_queue.Inflight _
+  | Keeper_chat_queue.Delivered _ -> None
+;;
+
+let compare_recent_failed_receipts
+    (left : Keeper_chat_queue.receipt_view)
+    (right : Keeper_chat_queue.receipt_view) =
+  match left.state, right.state with
+  | Keeper_chat_queue.Failed left_failure, Keeper_chat_queue.Failed right_failure ->
+    let by_completion = Float.compare right_failure.completed_at left_failure.completed_at in
+    if by_completion <> 0
+    then by_completion
+    else
+      String.compare
+        (Keeper_chat_queue.Receipt_id.to_string left.receipt_id)
+        (Keeper_chat_queue.Receipt_id.to_string right.receipt_id)
+  | Keeper_chat_queue.Failed _, _ -> -1
+  | _, Keeper_chat_queue.Failed _ -> 1
+  | _, _ -> 0
+;;
+
+let insert_recent_failed receipt rows =
+  let rec insert = function
+    | [] -> [ receipt ]
+    | head :: tail as rows ->
+      if compare_recent_failed_receipts receipt head <= 0
+      then receipt :: rows
+      else head :: insert tail
+  in
+  let bounded, _ =
+    take_with_truncation recent_failed_chat_receipt_limit (insert rows)
+  in
+  bounded
+;;
+
+let bounded_recent_failed_receipts receipts =
+  List.fold_left
+    (fun (count, recent) (receipt : Keeper_chat_queue.receipt_view) ->
+       match receipt.state with
+       | Keeper_chat_queue.Failed _ ->
+         count + 1, insert_recent_failed receipt recent
+       | Keeper_chat_queue.Pending | Keeper_chat_queue.Inflight _
+       | Keeper_chat_queue.Delivered _ -> count, recent)
+    (0, [])
+    receipts
+;;
+
+let chat_queue_projection_json (projection : chat_queue_projection) =
+  let snapshot = projection.snapshot in
+  let include_sensitive = projection.include_sensitive in
+  let active = snapshot.inflight @ snapshot.pending in
+  let recent_failed_count, recent_failed =
+    bounded_recent_failed_receipts snapshot.terminal
+  in
+  let recent_failed_truncated =
+    recent_failed_count > recent_failed_chat_receipt_limit
+  in
+  let next_action =
+    if snapshot.load_errors <> []
+    then Some "repair_keeper_chat_queue_snapshot"
+    else if snapshot.inflight <> []
+    then Some "keeper_chat_turn_terminal_receipt"
+    else if snapshot.pending <> []
+    then Some "keeper_chat_consumer_drain"
+    else None
+  in
+  `Assoc
+    [ "schema", `String "keeper_chat_queue.dashboard.v1"
+    ; "revision", `Intlit (Int64.to_string snapshot.revision)
+    ; "pending_count", `Int (List.length snapshot.pending)
+    ; "inflight_count", `Int (List.length snapshot.inflight)
+    ; ( "active_receipts"
+      , `List
+          (List.mapi
+             (chat_queue_active_receipt_json ~include_sensitive)
+             active) )
+    ; ( "read_errors"
+      , `List
+          (List.map
+             (chat_queue_load_error_json ~include_sensitive)
+             snapshot.load_errors) )
+    ; "next_action", Json_util.string_opt_to_json next_action
+    ; "recent_failed_receipt_count", `Int recent_failed_count
+    ; "recent_failed_receipt_limit", `Int recent_failed_chat_receipt_limit
+    ; "recent_failed_receipts_truncated", `Bool recent_failed_truncated
+    ; ( "recent_failed_receipts"
+      , `List (List.filter_map recent_failed_chat_receipt_json recent_failed) )
+    ]
 ;;
 
 let turn_admission_rows ~base_path keeper_name =
@@ -770,7 +952,8 @@ let record_keeper_state_metrics per_keeper =
        let count =
          per_keeper
          |> List.fold_left
-              (fun total (_keeper_name, busy, rows, _external_attention_truncated) ->
+              (fun total
+                   (_keeper_name, busy, rows, _external_attention_truncated, _chat_queue) ->
                  if keeper_state ~busy rows = state then total + 1 else total)
               0
        in
@@ -785,7 +968,7 @@ let record_metrics ~now ~per_keeper ~global_rows =
   let all_keeper_rows =
     List.flatten
       (List.map
-         (fun (_keeper_name, _busy, rows, _external_attention_truncated) -> rows)
+         (fun (_keeper_name, _busy, rows, _external_attention_truncated, _chat_queue) -> rows)
          per_keeper)
   in
   record_scope_metrics ~now ~scope:"keeper" all_keeper_rows;
@@ -793,7 +976,8 @@ let record_metrics ~now ~per_keeper ~global_rows =
   record_keeper_state_metrics per_keeper
 ;;
 
-let keeper_json keeper_name ~busy ~external_attention_truncated rows =
+let keeper_json keeper_name ~busy ~queue_only ~external_attention_truncated
+    ~chat_queue rows =
   let state = keeper_state ~busy rows in
   let since =
     rows
@@ -807,6 +991,7 @@ let keeper_json keeper_name ~busy ~external_attention_truncated rows =
   in
   `Assoc
     [ "keeper_name", `String keeper_name
+    ; "metadata_status", `String (if queue_only then "queue_only" else "registered")
     ; "state", `String (keeper_state_to_string state)
     ; "waiting_on", `List (List.map waiting_row_json rows)
     ; "waiting_count", `Int (List.length rows)
@@ -825,18 +1010,21 @@ let keeper_json keeper_name ~busy ~external_attention_truncated rows =
       , match rows with
         | [] -> `Null
         | row :: _ -> `String row.next_action )
+    ; "chat_queue", chat_queue_projection_json chat_queue
     ]
 ;;
 
-let keeper_rows ~base_path ~pending_approvals ~fusion_runs ~pending_confirms keeper_names =
+let keeper_rows ~include_sensitive ~base_path ~pending_approvals ~fusion_runs
+    ~pending_confirms keeper_names =
   keeper_names
   |> List.map (fun keeper_name ->
     let external_attention_rows, external_attention_truncated =
       external_attention_rows ~base_path ~keeper_name
     in
+    let chat_queue = chat_queue_projection ~include_sensitive keeper_name in
     let rows =
       event_queue_rows ~base_path ~keeper_name
-      @ chat_queue_rows keeper_name
+      @ chat_queue.waiting_rows
       @ turn_admission_rows ~base_path keeper_name
       @ hitl_rows keeper_name pending_approvals
       @ external_attention_rows
@@ -844,7 +1032,7 @@ let keeper_rows ~base_path ~pending_approvals ~fusion_runs ~pending_confirms kee
       @ background_task_rows keeper_name
       @ pending_confirm_rows [ keeper_name ] pending_confirms
     in
-    keeper_name, rows, external_attention_truncated)
+    keeper_name, rows, external_attention_truncated, chat_queue)
 ;;
 
 let rows_for_keeper keeper_name rows =
@@ -863,10 +1051,14 @@ let global_rows_from rows =
     | Some _ -> false)
 ;;
 
-let dashboard_json config =
+let inventory_json ~include_sensitive config =
   let now = Time_compat.now () in
-  let keeper_names, keeper_name_read_error_rows =
+  let registered_keeper_names, keeper_name_read_error_rows =
     keeper_names_or_error_rows config
+  in
+  let keeper_names =
+    List.sort_uniq String.compare
+      (registered_keeper_names @ Keeper_chat_queue.all_keeper_names ())
   in
   let pending_approvals = Keeper_approval_queue.list_pending_entries () in
   let fusion_runs = Fusion_run_registry.list_runs (Fusion_run_registry.global ()) in
@@ -876,40 +1068,54 @@ let dashboard_json config =
   let schedule_rows = schedule_rows_or_error config ~keeper_names in
   let busy_names = busy_keeper_names ~base_path:config.Workspace.base_path in
   let per_keeper =
-    keeper_rows ~base_path:config.Workspace.base_path ~pending_approvals ~fusion_runs
-      ~pending_confirms keeper_names
-    |> List.map (fun (keeper_name, rows, external_attention_truncated) ->
+    keeper_rows ~include_sensitive ~base_path:config.Workspace.base_path
+      ~pending_approvals ~fusion_runs ~pending_confirms keeper_names
+    |> List.map (fun (keeper_name, rows, external_attention_truncated, chat_queue) ->
       let rows = rows @ rows_for_keeper keeper_name schedule_rows in
-      keeper_name, keeper_is_busy busy_names keeper_name, rows, external_attention_truncated)
+      ( keeper_name
+      , keeper_is_busy busy_names keeper_name
+      , rows
+      , external_attention_truncated
+      , chat_queue ))
   in
   let global_rows =
     global_rows_from schedule_rows
     @ global_pending_confirm_rows keeper_names pending_confirms
     @ keeper_name_read_error_rows
     @ pending_confirm_read_error_rows
+    @ List.map
+        (fun error ->
+           read_error_row ~waiting_on:"chat_queue_configuration"
+             ~next_action:"repair_keeper_chat_queue_configuration"
+             (chat_queue_load_error_json ~include_sensitive error))
+        (Keeper_chat_queue.configuration_errors ())
   in
   let keeper_json_rows =
     per_keeper
-    |> List.map (fun (keeper_name, busy, rows, external_attention_truncated) ->
-      keeper_json keeper_name ~busy ~external_attention_truncated rows)
+    |> List.map
+         (fun (keeper_name, busy, rows, external_attention_truncated, chat_queue) ->
+            keeper_json keeper_name ~busy
+              ~queue_only:
+                (not (List.mem keeper_name registered_keeper_names))
+              ~external_attention_truncated ~chat_queue rows)
   in
   let all_keeper_rows =
     List.flatten
       (List.map
-         (fun (_keeper_name, _busy, rows, _external_attention_truncated) -> rows)
+         (fun (_keeper_name, _busy, rows, _external_attention_truncated, _chat_queue) -> rows)
          per_keeper)
   in
   let external_attention_truncated_keeper_count =
     per_keeper
     |> List.fold_left
-         (fun count (_keeper_name, _busy, _rows, external_attention_truncated) ->
+         (fun count (_keeper_name, _busy, _rows, external_attention_truncated, _chat_queue) ->
             if external_attention_truncated then count + 1 else count)
          0
   in
   let waiting_keeper_count =
     per_keeper
     |> List.fold_left
-         (fun count (_keeper_name, busy, rows, _external_attention_truncated) ->
+         (fun count (_keeper_name, busy, rows, _external_attention_truncated, _chat_queue) ->
             match keeper_state ~busy rows with
             | Idle -> count
             | Busy | Waiting | Deferred -> count + 1)
@@ -919,6 +1125,7 @@ let dashboard_json config =
   `Assoc
     [ "schema", `String "masc.dashboard.keeper_waiting_inventory.v2"
     ; "source", `String "server_keeper_waiting_inventory"
+    ; "visibility", `String (if include_sensitive then "operator" else "redacted")
     ; "generated_at", `String (Masc_domain.now_iso ())
     ; "supported_states", `List (List.map (fun value -> `String value) [ "idle"; "busy"; "waiting"; "deferred" ])
     ; "keeper_count_known", `Bool (List.length keeper_name_read_error_rows = 0)
@@ -938,3 +1145,7 @@ let dashboard_json config =
     ; "global_waiting_on", `List (List.map waiting_row_json global_rows)
     ]
 ;;
+
+let dashboard_json config = inventory_json ~include_sensitive:true config
+
+let tool_json config = inventory_json ~include_sensitive:false config

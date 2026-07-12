@@ -18,6 +18,7 @@
 val handle
   :  sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> config:Workspace.config
   -> base_dir:string
   -> keeper:string
   -> now_unix:float
@@ -35,6 +36,7 @@ module For_test : sig
   type orchestrator_runner =
     sw:Eio.Switch.t
     -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+    -> config:Workspace.config
     -> base_dir:string
     -> policy:Fusion_policy.t
     -> topology:Fusion_types.fusion_topology
@@ -51,6 +53,7 @@ module For_test : sig
     :  run_orchestrator:orchestrator_runner
     -> sw:Eio.Switch.t
     -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+    -> config:Workspace.config
     -> base_dir:string
     -> keeper:string
     -> now_unix:float

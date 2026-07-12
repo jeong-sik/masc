@@ -118,11 +118,13 @@ let handle_start ~tool_name ~start_time (ctx : context) : Tool_result.result opt
           Error (Printf.sprintf "Directory not found: %s" expanded)
         else begin
           let cfg = Workspace.default_config expanded in
-          if Workspace.is_initialized cfg then begin
-            Mcp_server.set_workspace_config state cfg;
-            Ok cfg
-          end else begin
-            let _msg = Workspace.init cfg ~agent_name:None in
+          if not (Keeper_chat_queue.persistence_matches_config ~config:cfg)
+          then
+            Error
+              "The active server queue consumer is bound to another workspace storage root. Restart the MASC server with the requested workspace instead of switching this live process."
+          else begin
+            if not (Workspace.is_initialized cfg)
+            then ignore (Workspace.init cfg ~agent_name:None : string);
             Mcp_server.set_workspace_config state cfg;
             Ok cfg
           end

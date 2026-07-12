@@ -241,6 +241,10 @@ let save_file_atomic path content =
   Atomic_write.save_file_atomic ~save_file path content
 ;;
 
+let save_file_atomic_private path content =
+  Atomic_write.save_file_atomic ~mode:0o600 ~save_file path content
+;;
+
 let is_atomic_orphan_name = Atomic_write.is_atomic_orphan_name
 
 let cleanup_atomic_orphans ~base_path ?recovered_subdir () =

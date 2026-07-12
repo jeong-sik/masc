@@ -4,8 +4,9 @@ import { Markdown } from "./common/markdown"
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { keeperDirectChatAccess } from '../lib/keeper-chat-access'
 import { isInFlightDelivery } from '../lib/keeper-delivery'
-import { relativeTime, NO_TIME_INFO } from '../lib/format-time'
+import { formatDateTimeKo, relativeTime, NO_TIME_INFO } from '../lib/format-time'
 import { isAbortError } from '../lib/async-state'
+import type { DashboardKeeperChatQueue } from '../api'
 import type {
   ChatBlock,
   ChatAttachBlock,
@@ -82,6 +83,7 @@ import {
 } from './tools/tool-state'
 import { setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { chatShowInternal, chatShowMetadata } from '../lib/chat-view-prefs'
+import { CopyIdButton } from './common/copy-id-button'
 
 // Mirrors `LANE_REFRESH_MS` in keeper-workspace/keeper-lane-strip.ts. That
 // const is module-local there, so we keep the same 15 s cadence here rather
@@ -526,33 +528,166 @@ function BusyToolbar({
   `
 }
 
+function queueSnapshotAgeLabel(generatedAt: string | null | undefined): string {
+  if (!generatedAt) return 'snapshot age unknown (generated_at missing)'
+  const generatedAtMs = Date.parse(generatedAt)
+  if (!Number.isFinite(generatedAtMs)) return 'snapshot age unknown (generated_at invalid)'
+  const deltaSeconds = Math.trunc((Date.now() - generatedAtMs) / 1000)
+  return deltaSeconds >= 0
+    ? `snapshot age ${deltaSeconds}s`
+    : `snapshot clock ahead ${Math.abs(deltaSeconds)}s`
+}
+
+function queueSourceLabel(source: DashboardKeeperChatQueue['active_receipts'][number]['message_source']): string {
+  switch (source.kind) {
+    case 'dashboard': return 'dashboard'
+    case 'discord': return `discord #${source.channel_id}`
+    case 'slack': return `slack #${source.channel_id}`
+  }
+}
+
+function QueueReceiptIdentifier({ receiptId }: { receiptId: string }) {
+  return html`
+    <span class="inline-flex min-w-0 items-center gap-1">
+      <code class="min-w-0 break-all" data-server-chat-queue-receipt-id-visible>${receiptId}</code>
+      <${CopyIdButton}
+        value=${receiptId}
+        label="queue receipt ID"
+        ariaLabel=${`큐 receipt ${receiptId} 복사`}
+        size=${11}
+      />
+    </span>
+  `
+}
+
+function ServerQueueProjection({
+  queue,
+  generatedAt,
+}: {
+  queue: DashboardKeeperChatQueue
+  generatedAt?: string | null
+}) {
+  const visibleFailedCount = queue.recent_failed_receipts.length
+  return html`
+    <div
+      class="mt-2 grid max-h-72 gap-2 overflow-y-auto border-t border-[var(--color-border-subtle)] pt-2"
+      data-server-chat-queue-projection-detail
+      data-server-chat-queue-revision=${queue.revision}
+      data-server-chat-queue-generated-at=${generatedAt ?? undefined}
+      data-server-chat-queue-age=${queueSnapshotAgeLabel(generatedAt)}
+    >
+      <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-2xs text-[var(--color-fg-muted)]">
+        <span>revision <code>${queue.revision}</code></span>
+        <span>
+          generated
+          ${generatedAt
+            ? html`<time dateTime=${generatedAt}>${formatDateTimeKo(generatedAt)}</time>`
+            : html`<strong>missing</strong>`}
+        </span>
+        <span data-server-chat-queue-age-label>${queueSnapshotAgeLabel(generatedAt)}</span>
+        ${queue.next_action
+          ? html`<span>다음 서버 동작 <code>${queue.next_action}</code></span>`
+          : html`<span>다음 서버 동작 없음</span>`}
+      </div>
+
+      ${queue.active_receipts.length > 0
+        ? html`
+            <div class="grid gap-1.5" data-server-chat-queue-active-receipts>
+              ${queue.active_receipts.map(receipt => html`
+                <div
+                  key=${receipt.receipt_id}
+                  class="grid gap-1 rounded-[var(--r-0)] border border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)] px-2 py-1.5 text-2xs"
+                  data-server-chat-queue-active-receipt=${receipt.receipt_id}
+                  data-server-chat-queue-active-state=${receipt.state}
+                >
+                  <div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                    <strong>${receipt.state === 'pending' ? '서버 대기' : 'Keeper 처리 중'}</strong>
+                    <${QueueReceiptIdentifier} receiptId=${receipt.receipt_id} />
+                    <span>${queueSourceLabel(receipt.message_source)}</span>
+                    <span>submitted ${formatDateTimeKo(receipt.submitted_at_iso)}</span>
+                  </div>
+                  ${receipt.lease_id
+                    ? html`<div class="flex min-w-0 flex-wrap items-center gap-1 text-[var(--color-fg-muted)]">
+                        <span>lease</span>
+                        <code class="min-w-0 break-all">${receipt.lease_id}</code>
+                        <${CopyIdButton} value=${receipt.lease_id} label="queue lease ID" size=${11} />
+                        ${receipt.started_at_iso ? html`<span>started ${formatDateTimeKo(receipt.started_at_iso)}</span>` : null}
+                      </div>`
+                    : null}
+                </div>
+              `)}
+            </div>
+          `
+        : html`<div class="text-2xs text-[var(--color-fg-muted)]" data-server-chat-queue-empty>active receipt 없음</div>`}
+
+      <div
+        class="grid gap-1.5"
+        data-server-chat-queue-recent-failed
+        data-server-chat-queue-recent-failed-count=${queue.recent_failed_receipt_count}
+        data-server-chat-queue-recent-failed-limit=${queue.recent_failed_receipt_limit}
+        data-server-chat-queue-recent-failed-truncated=${queue.recent_failed_receipts_truncated}
+      >
+        <div class="text-2xs text-[var(--color-fg-muted)]">
+          최근 처리 실패 ${visibleFailedCount}/${queue.recent_failed_receipt_count} 표시
+          · 서버 표시 상한 ${queue.recent_failed_receipt_limit}
+          ${queue.recent_failed_receipts_truncated
+            ? html` · <strong class="text-[var(--color-status-warn)]">서버에서 이전 실패 receipt가 명시적으로 생략됨</strong>`
+            : ' · 생략 없음'}
+        </div>
+        ${queue.recent_failed_receipts.map(receipt => html`
+          <div
+            key=${receipt.receipt_id}
+            class="grid gap-1 rounded-[var(--r-0)] border border-[var(--danger-20)] bg-[var(--danger-10)] px-2 py-1.5 text-2xs"
+            data-server-chat-queue-failed-receipt=${receipt.receipt_id}
+          >
+            <div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+              <strong class="text-[var(--color-status-err)]">처리 실패 · ${receipt.failure_kind}</strong>
+              <${QueueReceiptIdentifier} receiptId=${receipt.receipt_id} />
+              <span>${formatDateTimeKo(receipt.completed_at_iso)}</span>
+            </div>
+            ${receipt.outcome_ref
+              ? html`<div class="flex min-w-0 flex-wrap items-center gap-1">
+                  <span>outcome</span>
+                  <code class="min-w-0 break-all">${receipt.outcome_ref}</code>
+                  <${CopyIdButton} value=${receipt.outcome_ref} label="queue outcome reference" size=${11} />
+                </div>`
+              : null}
+          </div>
+        `)}
+      </div>
+
+      ${queue.read_errors.map((error, index) => html`
+        <div
+          key=${`${error.kind}:${error.path ?? ''}:${index}`}
+          class="rounded-[var(--r-0)] border border-[var(--danger-20)] bg-[var(--danger-10)] px-2 py-1.5 text-2xs text-[var(--color-status-err)]"
+          data-server-chat-queue-read-error=${error.kind}
+        >
+          <strong>${error.kind}</strong>${error.path ? ` · ${error.path}` : ''} · ${error.message}
+        </div>
+      `)}
+    </div>
+  `
+}
+
 function ServerQueueStatus({
   busy,
-  pendingCount,
-  inflightCount,
-  readErrorCount,
+  queue,
   projectionError,
   projectionReady,
   projectionPresent,
-  nextAction,
+  generatedAt,
 }: {
   busy: boolean
-  pendingCount: number
-  inflightCount: number
-  readErrorCount: number
+  queue: DashboardKeeperChatQueue | null
   projectionError?: string | null
   projectionReady: boolean
   projectionPresent: boolean
-  nextAction?: string | null
+  generatedAt?: string | null
 }) {
+  const pendingCount = queue?.pending_count ?? 0
+  const inflightCount = queue?.inflight_count ?? 0
+  const readErrorCount = queue?.read_errors.length ?? 0
   const projectionUnavailable = Boolean(projectionError) || !projectionReady || !projectionPresent
-  if (
-    !projectionUnavailable
-    && !busy
-    && pendingCount === 0
-    && inflightCount === 0
-    && readErrorCount === 0
-  ) return null
   return html`
     <div
       class="mb-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-2.5 text-xs text-[var(--color-fg-secondary)] v2-monitoring-panel"
@@ -560,6 +695,7 @@ function ServerQueueStatus({
       data-server-chat-queue-pending=${pendingCount}
       data-server-chat-queue-inflight=${inflightCount}
       data-server-chat-queue-read-errors=${readErrorCount}
+      data-server-chat-queue-generated-at=${generatedAt ?? undefined}
       data-server-chat-queue-projection=${projectionError
         ? 'read-failed'
         : !projectionReady
@@ -589,12 +725,15 @@ function ServerQueueStatus({
         ${busy && inflightCount === 0
           ? html`<span class="rounded-[var(--r-0)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-2 py-0.5">다른 턴 실행 중</span>`
           : null}
+        ${!projectionUnavailable && !busy && pendingCount === 0 && inflightCount === 0
+          ? html`<span class="rounded-[var(--r-0)] border border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)] px-2 py-0.5">active receipt 없음</span>`
+          : null}
       </div>
       <div class="mt-1.5 text-2xs leading-relaxed text-[var(--color-fg-muted)]">
         이 값은 브라우저 초안이 아니라 서버의 durable receipt 투영입니다.
         ${projectionError ? html` 최근 갱신 오류: <code>${projectionError}</code>. 표시 수치는 이전 snapshot일 수 있습니다.` : null}
-        ${nextAction ? html` 다음 서버 동작: <code>${nextAction}</code>` : null}
       </div>
+      ${queue ? html`<${ServerQueueProjection} queue=${queue} generatedAt=${generatedAt} />` : null}
     </div>
   `
 }
@@ -687,14 +826,13 @@ export function KeeperConversationPanel({
   const sending = keeperSending.value[keeperName] ?? false
   const serverBusy = inventoryEntry?.state === 'busy'
   const isKeeperBusy = Boolean(serverBusy && !sending)
-  const serverPendingCount = Math.max(0, inventoryEntry?.sources?.chat_queue_pending ?? 0)
-  const serverInflightCount = Math.max(0, inventoryEntry?.sources?.chat_queue_inflight ?? 0)
-  const serverQueueReadErrorCount = Math.max(0, inventoryEntry?.sources?.read_error ?? 0)
+  const serverQueue = inventoryEntry?.chat_queue ?? null
   const toolsProjectionError = toolsError.value
   const toolsProjectionReady = toolsData.value !== null
   const toolsProjectionPresent = Boolean(
-    toolsData.value?.keeper_waiting_inventory && inventoryEntry,
+    toolsData.value?.keeper_waiting_inventory && inventoryEntry && serverQueue,
   )
+  const toolsProjectionGeneratedAt = toolsData.value?.keeper_waiting_inventory?.generated_at ?? null
   const visibleThread = useMemo(
     () =>
       sending && !thread.some(isActiveAssistantEntry)
@@ -925,13 +1063,11 @@ export function KeeperConversationPanel({
   const serverQueueStatus = html`
     <${ServerQueueStatus}
       busy=${serverBusy}
-      pendingCount=${serverPendingCount}
-      inflightCount=${serverInflightCount}
-      readErrorCount=${serverQueueReadErrorCount}
+      queue=${serverQueue}
       projectionError=${toolsProjectionError}
       projectionReady=${toolsProjectionReady}
       projectionPresent=${toolsProjectionPresent}
-      nextAction=${inventoryEntry?.next_action}
+      generatedAt=${toolsProjectionGeneratedAt}
     />
   `
 

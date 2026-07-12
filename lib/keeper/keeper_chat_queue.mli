@@ -22,12 +22,30 @@ type message_source =
       thread_ts : string option;
     }
 
+type transcript_context =
+  { surface : Surface_ref.t
+  ; conversation_id : string option
+  ; external_message_id : string option
+  ; speaker : Keeper_chat_store.speaker
+  ; extra_mentions : Keeper_identity.Keeper_id.t list
+  }
+
+type transcript_ownership =
+  | Queue_owned
+  | Upstream_recorded
+(** Durable user-row ownership. [Queue_owned] means the consumer atomically
+    appends this receipt's user row with the turn terminal row.
+    [Upstream_recorded] is only for explicitly reconciled legacy input whose
+    user row is already durable. *)
+
 type queued_message = {
   content : string;
   user_blocks : Keeper_multimodal_input.user_input_block list;
   attachments : Keeper_chat_store.attachment list;
   timestamp : float;
   source : message_source;
+  transcript_context : transcript_context option;
+  transcript_ownership : transcript_ownership;
 }
 
 module Receipt_id : sig
@@ -153,17 +171,26 @@ val set_transition_observer : transition_observer option -> unit
 val continuation_channel_of_message_source :
   ?dashboard_thread_id:string -> message_source -> Keeper_continuation_channel.t
 
-(** Enable persistence and restore every per-Keeper snapshot.  Version-1 files
-    are decoded only by the explicit one-time migration, atomically rewritten
-    as strict version 2, and never treated as a version-2 fallback.  A malformed
+(** Enable persistence in the canonical cluster-aware Keeper runtime directory
+    resolved from [config], and restore every per-Keeper snapshot. Safe
+    version-1/version-2 files are decoded only by explicit parsers and
+    atomically rewritten as strict version 3. Active legacy connector messages
+    without a transcript-ownership decision fail migration closed. A malformed
     snapshot is retained, registered as unavailable, and reported here; it is
     never replaced by an empty queue. Reconfiguration clears the prior
-    in-memory registry before loading the new BasePath ownership boundary. *)
-val configure_persistence : base_path:string -> configure_report
+    in-memory registry before loading the new workspace/cluster ownership
+    boundary, and never scans a different cluster as a migration fallback. *)
+val configure_persistence : config:Workspace.config -> configure_report
 
 val persistence_configured : unit -> bool
 
-(** Enqueue only after the receipt-bearing version-2 snapshot commits. *)
+val persistence_matches_config : config:Workspace.config -> bool
+(** [persistence_matches_config ~config] is [true] when persistence has not yet
+    been configured or when [config] resolves to the exact configured Keeper
+    storage root. A process-lifetime consumer must reject live workspace/root
+    switches when this returns [false]. *)
+
+(** Enqueue only after the receipt-bearing version-3 snapshot commits. *)
 val enqueue :
   keeper_name:string -> queued_message -> (enqueue_receipt, mutation_error) result
 
@@ -178,7 +205,10 @@ val lease_batch :
   ]
 
 (** Atomically finalize every receipt in the matching lease.  Terminal records
-    retain correlation metadata but discard message bodies and attachments. *)
+    retain correlation metadata and normally discard message bodies and
+    attachments. [Transcript_persist_failed] retains the queued message in the
+    owner-only snapshot so a failed transcript write cannot erase its only
+    durable copy; diagnostic projections do not expose that body. *)
 val finalize :
   keeper_name:string ->
   lease_id:string ->
@@ -215,6 +245,11 @@ val lookup_receipt :
     produced it. *)
 
 val all_keeper_names : unit -> string list
+
+val configuration_errors : unit -> snapshot_load_error list
+(** Queue-registry errors that are not owned by one valid Keeper entry, such
+    as a failed storage-root migration decision or an invalid snapshot-bearing
+    directory name. Per-Keeper snapshot errors remain on {!snapshot}. *)
 
 module For_testing : sig
   val reset : unit -> unit

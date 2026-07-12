@@ -1400,6 +1400,7 @@ let handle_keeper_msg_if_free
       ?on_event
       ?event_bus
       ?continuation_channel
+      ?before_run
       ctx
       args
   =
@@ -1423,10 +1424,23 @@ let handle_keeper_msg_if_free
       ~base_path:ctx.config.base_path
       ~keeper_name:name
       (fun () ->
-        run_keeper_msg_turn_admitted
-          ?on_text_delta
-          ?on_event
-          ?event_bus
-          ?continuation_channel
-          ctx
-          args)
+        match before_run with
+        | Some before_run ->
+          (match before_run () with
+           | Error message -> tool_result_error message
+           | Ok () ->
+             run_keeper_msg_turn_admitted
+               ?on_text_delta
+               ?on_event
+               ?event_bus
+               ?continuation_channel
+               ctx
+               args)
+        | None ->
+          run_keeper_msg_turn_admitted
+            ?on_text_delta
+            ?on_event
+            ?event_bus
+            ?continuation_channel
+            ctx
+            args)

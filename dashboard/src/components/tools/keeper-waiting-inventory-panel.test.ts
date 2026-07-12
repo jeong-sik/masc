@@ -3,8 +3,18 @@ import { render } from 'preact'
 import { fireEvent } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import type { DashboardKeeperWaitingInventory } from '../../api'
+import type { DashboardKeeperChatQueue, DashboardKeeperWaitingInventory } from '../../api'
 import { KeeperLaneInventoryPanel, KeeperWaitingInventoryPanel } from './keeper-waiting-inventory-panel'
+
+function emptyChatQueue(): DashboardKeeperChatQueue {
+  return {
+    schema: 'keeper_chat_queue.dashboard.v1', revision: 0,
+    pending_count: 0, inflight_count: 0, active_receipts: [], read_errors: [],
+    next_action: null, recent_failed_receipt_count: 0,
+    recent_failed_receipt_limit: 8, recent_failed_receipts_truncated: false,
+    recent_failed_receipts: [],
+  }
+}
 
 function inventoryFixture(): DashboardKeeperWaitingInventory {
   return {
@@ -32,6 +42,7 @@ function inventoryFixture(): DashboardKeeperWaitingInventory {
         keeper_name: 'sangsu',
         state: 'waiting',
         waiting_count: 3,
+        chat_queue: emptyChatQueue(),
         sources: {
           event_queue_pending: 1,
           event_queue_inflight: 1,
@@ -77,6 +88,7 @@ function inventoryFixture(): DashboardKeeperWaitingInventory {
         keeper_name: 'busy-one',
         state: 'busy',
         waiting_count: 1,
+        chat_queue: emptyChatQueue(),
         sources: {
           turn_admission_waiting: 1,
         },
@@ -95,12 +107,14 @@ function inventoryFixture(): DashboardKeeperWaitingInventory {
         keeper_name: 'idle-one',
         state: 'idle',
         waiting_count: 0,
+        chat_queue: emptyChatQueue(),
         waiting_on: [],
       },
       {
         keeper_name: 'stopping-one',
         state: 'deferred',
         waiting_count: 1,
+        chat_queue: emptyChatQueue(),
         sources: {
           turn_admission_shutdown: 1,
         },
@@ -160,6 +174,7 @@ describe('KeeperWaitingInventoryPanel', () => {
     expect(container.textContent).toContain('shutdown operation shutdown-op-7')
     expect(container.textContent).toContain('admission fenced')
     expect(container.querySelector('[data-keeper-shutdown-operation-id="shutdown-op-7"]')).not.toBeNull()
+    expect(container.querySelector('[aria-label="종료 작업 ID shutdown-op-7 복사"]')).not.toBeNull()
     const shutdownChip = [...container.querySelectorAll('[data-status-chip]')]
       .find(chip => chip.textContent?.trim() === 'turn admission shutdown')
     expect(shutdownChip?.getAttribute('data-status-chip-tone')).toBe('info')
@@ -168,6 +183,7 @@ describe('KeeperWaitingInventoryPanel', () => {
     expect(container.textContent).toContain('producer keeper no progress recovery')
     expect(container.textContent).toContain('no_progress_recovery')
     expect(container.textContent).toContain('chatq_00000000-0000-4000-8000-000000000001')
+    expect(container.querySelector('[aria-label="큐 receipt chatq_00000000-0000-4000-8000-000000000001 복사"]')).not.toBeNull()
     expect(container.textContent).toContain('lease_00000000-0000-4000-8000-000000000002')
     expect(container.textContent).toContain('state inflight')
     expect(container.textContent).toContain('Global waiting')
@@ -281,6 +297,7 @@ describe('KeeperLaneInventoryPanel', () => {
         keeper_name: 'partial-lane',
         state: 'waiting',
         waiting_count: 1,
+        chat_queue: emptyChatQueue(),
         waiting_on: [
           {
             keeper_name: 'partial-lane',

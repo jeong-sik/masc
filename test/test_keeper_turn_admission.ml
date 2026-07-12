@@ -25,7 +25,8 @@ let reset () =
   Keeper_turn_admission.For_testing.reset ();
   Keeper_chat_queue.For_testing.reset ();
   ignore
-    (Keeper_chat_queue.configure_persistence ~base_path
+    (Keeper_chat_queue.configure_persistence
+       ~config:(Workspace.default_config base_path)
       : Keeper_chat_queue.configure_report)
 
 let test_free_slot_admits () =
@@ -89,6 +90,8 @@ let test_chat_if_free_rechecks_durable_queue_after_stale_peek () =
     ; attachments = []
     ; timestamp = Time_compat.now ()
     ; source = Keeper_chat_queue.Dashboard
+    ; transcript_context = None
+    ; transcript_ownership = Keeper_chat_queue.Queue_owned
     }
   in
   let receipt = Keeper_chat_queue.enqueue ~keeper_name message in
@@ -488,6 +491,24 @@ let test_autonomous_yields_to_queued_connector_message () =
              ; team_id = Some "T-test"
              ; thread_ts = Some "171.001"
              }
+       ; transcript_context =
+           Some
+             { surface =
+                 Surface_ref.Slack
+                   { team_id = Some "T-test"
+                   ; channel_id = "C-test"
+                   ; thread_ts = Some "171.001"
+                   }
+             ; conversation_id = None
+             ; external_message_id = None
+             ; speaker =
+                 { Keeper_chat_store.speaker_id = Some "U-test"
+                 ; speaker_name = Some "slack-user"
+                 ; speaker_authority = Keeper_chat_store.External
+                 }
+             ; extra_mentions = []
+             }
+       ; transcript_ownership = Keeper_chat_queue.Queue_owned
        }
    with
    | Ok _ -> ()

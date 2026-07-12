@@ -84,8 +84,22 @@ val make_dedup_cleanup_consumer : unit -> (module Pulse.Consumer)
 type gate_error = Gate_protocol.gate_error =
   | Validation of validation_error
   | Keeper_error of string
+  | Accepted_keeper_error of string
   | Dispatch_unavailable
   | Internal of string
+
+type inbound_error_notice =
+  | Offline_notice
+  | Retry_notice
+  | Accepted_failure_notice
+  | No_notice
+
+val inbound_error_notice : gate_error -> inbound_error_notice
+(** Closed connector policy for user-visible gate failures. Keeper failures
+    require a generic retry notice; a failure after durable inbound acceptance
+    gets a non-retry accepted-failure notice; dispatch unavailability requires
+    an offline notice. Validation/internal failures remain log-only because
+    their safe message is owned by the ingress boundary. *)
 
 val gate_error_to_string : gate_error -> string
 

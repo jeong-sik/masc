@@ -285,6 +285,25 @@ let test_adapter_empty_terminal_is_error () =
       (contains message "no text or blocks")
   | _ -> fail "empty terminal must settle exactly once with an error"
 
+let test_adapter_typed_cancellation_sends_notice () =
+  let sends = ref [] in
+  let outcomes =
+    run_adapter
+      [ Masc.Keeper_chat_events.Run_cancelled
+          { run_id = "run-cancel"; message = "operator stopped the turn" }
+      ]
+      ~send_plain:(fun ~content ->
+        sends := content :: !sends;
+        Ok ())
+      ~send_blocks:(fun ~content:_ ~blocks:_ ->
+        fail "typed cancellation must use the plain terminal sender")
+  in
+  check (list string) "one explicit cancellation notice"
+    [ "Keeper request cancelled: operator stopped the turn" ]
+    (List.rev !sends);
+  check bool "cancellation notice delivery settles successfully" true
+    (outcomes = [ Ok () ])
+
 let test_message_body_preserves_reply_thread () =
   let body =
     Masc.Keeper_chat_slack.For_testing.build_message_body
@@ -352,6 +371,8 @@ let () =
             test_protocol_diagnostic_cannot_mask_final_failure
         ; test_case "empty terminal is explicit failure" `Quick
             test_adapter_empty_terminal_is_error
+        ; test_case "typed cancellation sends explicit notice" `Quick
+            test_adapter_typed_cancellation_sends_notice
         ] )
     ; ( "thread-routing"
       , [ test_case "deferred reply keeps thread_ts" `Quick

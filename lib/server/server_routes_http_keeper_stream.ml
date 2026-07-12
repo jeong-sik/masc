@@ -42,6 +42,7 @@ type keeper_chat_stream_request = {
   channel_user_id : string;
   channel_user_name : string;
   channel_workspace_id : string;
+  channel_metadata : (string * string) list;
   attachments : Keeper_chat_store.attachment list;
 }
 
@@ -87,7 +88,7 @@ let message_for_request payload =
       ~channel_user_id:payload.channel_user_id
       ~channel_user_name:payload.channel_user_name
       ~channel_workspace_id:payload.channel_workspace_id
-      ~metadata:[]
+      ~metadata:payload.channel_metadata
       ~content:payload.message
   else
     payload.message
@@ -151,6 +152,15 @@ let args_of_request payload : Yojson.Safe.t =
     (if payload.channel_user_name <> "" then
        [ ("channel_user_name", `String payload.channel_user_name) ]
      else [])
+    @ (if payload.channel_metadata = []
+       then []
+       else
+         [ ( "channel_metadata"
+           , `Assoc
+               (List.map
+                  (fun (key, value) -> key, `String value)
+                  payload.channel_metadata) )
+         ])
   in
   let fields = base_fields @ connector_fields in
   let fields =
@@ -194,9 +204,13 @@ let dashboard_busy_queue_state ~base_path ~keeper_name =
       || snapshot.pending <> []
       || snapshot.inflight <> []
   in
-  match in_flight, chat_waiting, queue_waiting, shutdown_operation_id with
-  | None, false, false, None -> None
-  | _ -> Some (in_flight, chat_waiting, shutdown_operation_id)
+  if
+    Option.is_none in_flight
+    && not chat_waiting
+    && not queue_waiting
+    && Option.is_none shutdown_operation_id
+  then None
+  else Some (in_flight, chat_waiting, shutdown_operation_id)
 
 let dashboard_deferred_ack_text ~keeper_name deferred =
   match deferred.shutdown_operation_id with
@@ -271,6 +285,8 @@ let enqueue_dashboard_payload
       ; attachments = payload.attachments
       ; timestamp = Eio.Time.now clock
       ; source = Keeper_chat_queue.Dashboard
+      ; transcript_context = None
+      ; transcript_ownership = Keeper_chat_queue.Queue_owned
       }
   with
   | Error error -> Error (Keeper_chat_queue.mutation_error_to_string error)
@@ -691,6 +707,7 @@ let parse_keeper_chat_stream_request body_str =
                   channel_user_id;
                   channel_user_name;
                   channel_workspace_id;
+                  channel_metadata = [];
                   attachments;
                 }
           )
@@ -1241,11 +1258,13 @@ let translate_oas_stream_event = Keeper_chat_oas_stream_bridge.translate
    the user line, and whether this turn was dispatched from the queue
    consumer. *)
 let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
-    ~state ~clock ~auth_token ~thread_id ~continuation_channel ~closed
+    ~queued_user_messages ~queued_assistant_context ~state ~clock ~auth_token
+    ~thread_id ~continuation_channel ~closed
     ~client_disconnects
     ~payload ~run_id ~message_id ~agent_name ~submitted_by
     ~(events : Keeper_chat_events.keeper_chat_event Eio.Stream.t) =
-  let base_path = (Mcp_server.workspace_config state).base_path in
+  let workspace_config = Mcp_server.workspace_config state in
+  let base_path = workspace_config.base_path in
   let redaction =
     Keeper_secret_redaction.snapshot ~base_path ~keeper_name:payload.name
   in
@@ -1318,7 +1337,15 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
   in
   (* RFC-0232 P5: the typed surface is the write-side truth; the label
      [chat_source] is its derivation, used for broadcast metadata. *)
-  let chat_surface = chat_surface_of_request payload in
+  let chat_surface =
+    match queued_assistant_context with
+    | Some context -> context.Keeper_chat_queue.surface
+    | None -> chat_surface_of_request payload
+  in
+  let chat_conversation_id =
+    Option.bind queued_assistant_context (fun context ->
+      context.Keeper_chat_queue.conversation_id)
+  in
   let chat_source = Surface_ref.lane_label chat_surface in
   (* RFC-0223 P1: authority derives from the arrival route. A non-empty
      [channel_user_id] means an arbitrary external person on that channel;
@@ -1344,12 +1371,13 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
     push_worker_event (Stream_event evt)
   in
   let persist_user_message_only () =
-    (* RFC-connector-deferred-reply-via-chat-queue §3.4: when the gate inbound boundary already recorded this
-       connector user line (Discord/Slack busy message enqueued onto the chat
-       queue), re-recording it here would double-write. The gate inbound line is
-       assistant-less, so the message is already "pending" — nothing to add. *)
+    (* The normal queue-owned path persists its per-receipt user rows through
+       [queued_user_messages] in the atomic terminal append below. This guard is
+       only for an explicitly reconciled [Upstream_recorded] legacy receipt:
+       re-recording that already durable user line would double-write it. *)
     if not connector_user_line_recorded_upstream then
       Keeper_chat_store.append_user_message
+        ~config:workspace_config
         ~base_dir:base_path
         ~keeper_name:payload.name
         ~content:payload.message
@@ -1371,30 +1399,44 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
        DURABLE on both paths — a post-ACK deferred turn that fails must not
        vanish on restart/replay (counter + live broadcast alone is silent
        failure under this feature's "queued, will answer" contract).
-       - Dashboard route ([recorded_upstream = false]): the turn owns the user
-         line, so record the paired [Transport_failure] row (user message stays
-         pending for the next turn; keeper never reads the error as its words).
-       - Connector route ([recorded_upstream = true]): the gate inbound boundary
-         already persisted the user line (assistant-less). The paired
-         [append_turn] would double-record that user line, so persist an
-         assistant-only durable failure marker instead — the failure survives a
-         restart and stays joined to the already-pending user line. *)
+       - Queue-owned receipts: atomically append every constituent user row and
+         one [Transport_failure] terminal row.
+       - Explicit [Upstream_recorded] reconciliation: append only the terminal
+         failure marker because the user line already exists.
+       - Direct Dashboard turns: append the ordinary paired user/failure rows. *)
     let persisted =
-      if connector_user_line_recorded_upstream then
+      if queued_user_messages <> [] then
+       Keeper_chat_store.append_user_messages_and_assistant_result
+         ~config:workspace_config
+         ~base_dir:base_path
+         ~keeper_name:payload.name
+         ~user_messages:queued_user_messages
+         ~surface:chat_surface
+         ?conversation_id:chat_conversation_id
+         ~assistant_kind:Keeper_chat_store.Row_kind.Transport_failure
+         ~assistant_content:(persisted_error_reply err)
+         ~stream_lifecycle:errored_stream_lifecycle
+         ()
+      else if connector_user_line_recorded_upstream then
        Keeper_chat_store.append_assistant_message_result
+         ~config:workspace_config
          ~base_dir:base_path
          ~keeper_name:payload.name
          ~content:(persisted_error_reply err)
+         ~kind:Keeper_chat_store.Row_kind.Transport_failure
          ~surface:chat_surface
+         ?conversation_id:chat_conversation_id
          ~stream_lifecycle:errored_stream_lifecycle
          ()
       else
        Keeper_chat_store.append_turn_result
+         ~config:workspace_config
          ~base_dir:base_path
          ~keeper_name:payload.name
          ~user_content:payload.message
          ~user_attachments:payload.attachments
          ~surface:chat_surface
+         ?conversation_id:chat_conversation_id
          ~speaker:chat_speaker
          ~assistant_kind:Keeper_chat_store.Row_kind.Transport_failure
          ~assistant_content:(persisted_error_reply err)
@@ -1614,23 +1656,40 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                  Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err
              | None ->
                  let persist_assistant_reply ~assistant_content =
-                   if connector_user_line_recorded_upstream then
+                   if queued_user_messages <> [] then
+                     Keeper_chat_store.append_user_messages_and_assistant_result
+                       ~config:workspace_config
+                       ~base_dir:base_path
+                       ~keeper_name:payload.name
+                       ~user_messages:queued_user_messages
+                       ~surface:chat_surface
+                       ?conversation_id:chat_conversation_id
+                       ~assistant_content
+                       ?blocks
+                       ?turn_ref
+                       ~stream_lifecycle:completed_stream_lifecycle
+                       ()
+                   else if connector_user_line_recorded_upstream then
                      Keeper_chat_store.append_assistant_message_result
+                       ~config:workspace_config
                        ~base_dir:base_path
                        ~keeper_name:payload.name
                        ~content:assistant_content
                        ~surface:chat_surface
+                       ?conversation_id:chat_conversation_id
                        ?blocks
                        ?turn_ref
                        ~stream_lifecycle:completed_stream_lifecycle
                        ()
                    else
                      Keeper_chat_store.append_turn_result
+                       ~config:workspace_config
                        ~base_dir:base_path
                        ~keeper_name:payload.name
                        ~user_content:payload.message
                        ~user_attachments:payload.attachments
                        ~surface:chat_surface
+                       ?conversation_id:chat_conversation_id
                        ~speaker:chat_speaker
                        ~assistant_content
                        ?blocks
@@ -1940,7 +1999,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
         let message = redact_text message in
         publish_terminal ~status:(Request_stream Stream_cancelled) ~message ();
         Keeper_chat_events.publish events Text_message_end;
-        Keeper_chat_events.publish events (Run_finished { run_id });
+        Keeper_chat_events.publish events (Run_cancelled { run_id; message });
         queued_outcome
     | Stream_terminal
         { status = ((Stream_error | Stream_timeout | Stream_rejected) as status)
@@ -2289,6 +2348,9 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
                the SSE stream already receives the underlying text/audio
                through other events. *)
             loop ()
+        | Run_cancelled { run_id; message } ->
+            current_run_id := Some run_id;
+            send_error message
         | Event_error { message } -> send_error message
         | Run_finished { run_id } ->
             current_run_id := Some run_id;
@@ -2342,10 +2404,11 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
            let run_now () =
              (* Dashboard stream route: no gate inbound boundary recorded this
                 user line, so the turn owns recording both sides (RFC-connector-deferred-reply-via-chat-queue §3.4). *)
-             ignore
-               (process_single_turn ~connector_user_line_recorded_upstream:false
-                  ~queued_turn:false
-                  ~state ~clock
+              ignore
+                (process_single_turn ~connector_user_line_recorded_upstream:false
+                   ~queued_turn:false
+                   ~queued_user_messages:[] ~queued_assistant_context:None
+                   ~state ~clock
                   ~auth_token:(auth_token_from_request request)
                   ~thread_id ~continuation_channel ~closed
                   ~client_disconnects:(Some (stream_sw, client_disconnects))

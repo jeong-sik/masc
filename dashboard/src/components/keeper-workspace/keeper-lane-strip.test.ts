@@ -2,9 +2,19 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import type { DashboardKeeperWaitingInventory } from '../../api'
+import type { DashboardKeeperChatQueue, DashboardKeeperWaitingInventory } from '../../api'
 import type { Keeper } from '../../types'
 import { KeeperLaneStrip } from './keeper-lane-strip'
+
+function emptyChatQueue(): DashboardKeeperChatQueue {
+  return {
+    schema: 'keeper_chat_queue.dashboard.v1', revision: 0,
+    pending_count: 0, inflight_count: 0, active_receipts: [], read_errors: [],
+    next_action: null, recent_failed_receipt_count: 0,
+    recent_failed_receipt_limit: 8, recent_failed_receipts_truncated: false,
+    recent_failed_receipts: [],
+  }
+}
 
 function keeperFixture(overrides: Partial<Keeper> = {}): Keeper {
   return {
@@ -30,6 +40,7 @@ function inventoryFixture(): DashboardKeeperWaitingInventory {
         state: 'deferred',
         waiting_count: 2,
         next_action: 'keeper_drain_chat_queue',
+        chat_queue: emptyChatQueue(),
         waiting_on: [
           {
             keeper_name: 'sangsu',
@@ -53,6 +64,7 @@ function inventoryFixture(): DashboardKeeperWaitingInventory {
         keeper_name: 'idle-one',
         state: 'idle',
         waiting_count: 0,
+        chat_queue: emptyChatQueue(),
         waiting_on: [],
       },
     ],

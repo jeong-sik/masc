@@ -203,6 +203,8 @@ type embed =
     (* (name, value, inline) tuples. Max 25. *)
   }
 
+let embed_count_limit = 10
+
 let embed_to_json (e : embed) : Yojson.Safe.t =
   let base =
     [ ("title", `String e.title)

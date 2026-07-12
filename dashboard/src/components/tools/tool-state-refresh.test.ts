@@ -41,4 +41,20 @@ describe('subscribeToolsAutoRefresh', () => {
     disposers = []
     expect(stopRefresh).toHaveBeenCalledTimes(1)
   })
+
+  it('revalidates a cached snapshot whenever the first subscriber mounts', async () => {
+    const first = subscribeToolsAutoRefresh()
+    disposers = [first]
+    await vi.waitFor(() => {
+      expect(fetchDashboardTools).toHaveBeenCalledTimes(1)
+    })
+    first()
+    disposers = []
+
+    const second = subscribeToolsAutoRefresh()
+    disposers = [second]
+    await vi.waitFor(() => {
+      expect(fetchDashboardTools).toHaveBeenCalledTimes(2)
+    })
+  })
 })

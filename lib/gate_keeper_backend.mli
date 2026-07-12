@@ -73,8 +73,10 @@ val dispatch :
     typed Keeper shutdown operation, the same envelope carries
     [shutdown_operation_id] and the ACK says the receipt waits for the next
     active lane rather than promising completion of a current turn.
-    Persistence failure returns an explicit [Keeper_error_result], never a
-    queued ACK. [Generic]
+    A failure before durable inbound acceptance returns [Keeper_error_result];
+    a turn failure after the user transcript committed returns
+    [Accepted_keeper_error_result] so connector idempotency remains reserved.
+    Neither path claims a queued ACK. [Generic]
     returns an accepted async request envelope ([Keeper_msg_async]) instead of
     blocking the connector request behind that turn. The [channel] and
     [channel_user_id] are used to construct the agent name
@@ -127,6 +129,7 @@ val contextualize_message :
     user message so keeper memory can retain actor/channel metadata. *)
 
 val persist_connector_assistant_reply :
+  config:Workspace.config ->
   base_dir:string ->
   keeper_name:string ->
   source:string ->
@@ -135,9 +138,11 @@ val persist_connector_assistant_reply :
   ?turn_ref:Ids.Turn_ref.t ->
   reply:string ->
   unit ->
-  unit
+  (unit, string) result
 (** Persist a completed connector direct reply on the same chat lane that
-    received the inbound user line. Empty replies are ignored.
+    received the inbound user line. Empty replies return [Ok ()]. Persistence
+    failures are returned to the connector boundary; a success broadcast is
+    emitted only after the durable append commits.
     [turn_ref] (RFC-0233 §7) is the join key the keeper minted into the
     reply payload, stamped on the assistant row. *)
 

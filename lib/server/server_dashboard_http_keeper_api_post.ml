@@ -125,7 +125,7 @@ let handle_keeper_catchup_judge_post state req reqd body_str =
         let config = Mcp_server.workspace_config state in
         let now_unix = Time_compat.now () in
         let digest =
-          Keeper_catchup_digest.build ~base_path:config.base_path
+          Keeper_catchup_digest.build_configured ~config
             ~keeper_name:name ~since_unix ~now_unix
         in
         let prompt = keeper_catchup_judge_prompt ~keeper_name:name ~digest in
@@ -148,6 +148,7 @@ let handle_keeper_catchup_judge_post state req reqd body_str =
                 Fusion_tool.handle
                   ~sw
                   ~net
+                  ~config
                   ~base_dir:config.base_path
                   ~keeper:name
                   ~now_unix

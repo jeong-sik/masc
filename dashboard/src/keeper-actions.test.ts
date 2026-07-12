@@ -1440,6 +1440,15 @@ describe('sendKeeperThreadMessage stream outcome', () => {
           shutdown_operation_id: null,
         },
       },
+      {
+        type: 'CUSTOM',
+        name: 'KEEPER_REQUEST_TERMINAL',
+        value: {
+          request_id: '',
+          status: 'done',
+          ok: true,
+        },
+      },
       { type: 'TEXT_MESSAGE_END' },
       { type: 'RUN_FINISHED' },
     ], true))

@@ -113,6 +113,7 @@ val validate :
 type gate_error =
   | Validation of validation_error
   | Keeper_error of string
+  | Accepted_keeper_error of string
   | Dispatch_unavailable
   | Internal of string
 
@@ -131,6 +132,7 @@ type dispatch_result =
       ; message_request : message_request option
       }
   | Keeper_error_result of string
+  | Accepted_keeper_error_result of string
   | Unavailable_result
 
 (** {1 JSON Codecs} *)

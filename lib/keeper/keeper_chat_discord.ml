@@ -346,8 +346,32 @@ let rich_embeds_of_text text =
   |> Keeper_chat_blocks.parse_text_to_blocks
   |> List.filter_map rich_embed_of_chat_block
 
+(* Side messages are joined before the terminal receipt settles. Bound their
+   count so adversarial/model-generated rich blocks cannot hold the Keeper lane
+   for an unbounded sequence of Discord REST calls. *)
+let max_rich_embeds_per_turn = Discord_rest_client.embed_count_limit
+
+let rich_embed_delivery_plan text =
+  let rec take remaining kept = function
+    | rest when remaining = 0 -> List.rev kept, List.length rest
+    | [] -> List.rev kept, 0
+    | embed :: rest -> take (remaining - 1) (embed :: kept) rest
+  in
+  take max_rich_embeds_per_turn [] (rich_embeds_of_text text)
+
 let send_text_rich_embeds ?clock ~token ~channel_id text =
-  rich_embeds_of_text text
+  let embeds, dropped = rich_embed_delivery_plan text in
+  if dropped > 0 then begin
+    Otel_metric_store.inc_counter
+      "masc_keeper_chat_discord_rich_embeds_dropped_total"
+      ~labels:[ "reason", "per_turn_cap" ]
+      ~delta:(Float.of_int dropped)
+      ();
+    Log.Keeper.warn
+      "keeper_chat_discord: omitted %d rich embed(s) above per-turn cap=%d"
+      dropped max_rich_embeds_per_turn
+  end;
+  embeds
   |> List.iter (fun embed ->
          match
            Discord_rest_client.send_embed_message ~token ~channel_id
@@ -373,12 +397,17 @@ let combine_delivery_results primary overflow =
   | Ok () -> overflow
 
 let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
-    ~edit_message ~send_message ?clock ?base_url
+    ~edit_message ~send_message ?send_rich_embeds ?clock ?base_url
     ?(on_send_result = fun _ -> ()) () =
   let base_url =
     match base_url with
     | Some b -> Some (Masc_network_defaults.normalize_loopback_base_url b)
     | None -> None
+  in
+  let send_rich_embeds =
+    match send_rich_embeds with
+    | Some send -> send
+    | None -> send_text_rich_embeds ?clock ~token ~channel_id
   in
   (* Streaming state:
      - msg_id: Some once the initial POST succeeds
@@ -489,9 +518,22 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
                  primary failure remains the terminal result. *)
               combine_delivery_results patch_result overflow_result
         in
+        (* Rich embeds are optional side messages and never replace the primary
+           delivery result. Join their projection before settling the callback
+           so the consumer cannot lease the next receipt while this adapter
+           fiber is still emitting side messages. *)
+        (try send_rich_embeds acc_text with
+         | Eio.Cancel.Cancelled _ as exn -> raise exn
+         | exn ->
+             Log.Keeper.warn
+               "keeper_chat_discord: rich embed projection crashed: %s"
+               (Printexc.to_string exn));
         on_send_result final_result;
-        send_text_rich_embeds ?clock ~token ~channel_id acc_text;
         (* Loop exits after one turn. *)
+        ()
+    | Run_cancelled { run_id = _; message } ->
+        on_send_result
+          (send_message ~content:("Keeper request cancelled: " ^ message));
         ()
     | Event_error { message } ->
         on_send_result (send_message ~content:("Keeper error: " ^ message));
@@ -602,5 +644,7 @@ module For_testing = struct
   let final_head_and_overflow = final_head_and_overflow
   let public_voice_audio_url = public_voice_audio_url
   let rich_embeds_of_text = rich_embeds_of_text
+  let max_rich_embeds_per_turn = max_rich_embeds_per_turn
+  let rich_embed_delivery_plan = rich_embed_delivery_plan
   let adapter_loop = adapter_loop_with_transport
 end

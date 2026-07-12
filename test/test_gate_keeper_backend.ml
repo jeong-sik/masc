@@ -144,6 +144,7 @@ let test_persist_connector_assistant_reply_records_lane_reply () =
   Fun.protect
     ~finally:(fun () -> try remove_tree base_dir with _ -> ())
     (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
       let keeper_name = "discord-reply-keeper" in
       let surface =
         Masc.Surface_ref.Discord
@@ -154,15 +155,19 @@ let test_persist_connector_assistant_reply_records_lane_reply () =
             thread_id = None;
           }
       in
-      K.append_user_message ~base_dir ~keeper_name
+      K.append_user_message ~config ~base_dir ~keeper_name
         ~content:"<@bot> factorio?"
         ~surface
         ~conversation_id:"discord:guild-1:channel:chan-9" ();
-      Gate_keeper_backend.persist_connector_assistant_reply ~base_dir
-        ~keeper_name ~source:"discord" ~surface
-        ~conversation_id:"discord:guild-1:channel:chan-9"
-        ~reply:"already answered" ();
-      match K.load ~base_dir ~keeper_name with
+      (match
+         Gate_keeper_backend.persist_connector_assistant_reply ~config ~base_dir
+           ~keeper_name ~source:"discord" ~surface
+           ~conversation_id:"discord:guild-1:channel:chan-9"
+           ~reply:"already answered" ()
+       with
+       | Ok () -> ()
+       | Error error -> fail ("assistant reply persistence failed: " ^ error));
+      match K.load_configured ~config ~base_dir ~keeper_name with
       | [ user; assistant ] ->
           check string "user line first" "user" (K.Role.to_label user.K.role);
           check string "assistant reply persisted" "assistant" (K.Role.to_label assistant.K.role);
@@ -184,11 +189,16 @@ let test_persist_connector_assistant_reply_ignores_empty_reply () =
   Fun.protect
     ~finally:(fun () -> try remove_tree base_dir with _ -> ())
     (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
       let keeper_name = "discord-empty-reply-keeper" in
-      Gate_keeper_backend.persist_connector_assistant_reply ~base_dir
-        ~keeper_name ~source:"discord" ~reply:"   " ();
+      (match
+         Gate_keeper_backend.persist_connector_assistant_reply ~config ~base_dir
+           ~keeper_name ~source:"discord" ~reply:"   " ()
+       with
+       | Ok () -> ()
+       | Error error -> fail ("empty assistant reply failed: " ^ error));
       check int "empty reply does not create chat file" 0
-        (List.length (K.load ~base_dir ~keeper_name)))
+        (List.length (K.load_configured ~config ~base_dir ~keeper_name)))
 
 let test_contextualize_message_includes_channel_metadata () =
   let rendered =
@@ -626,6 +636,7 @@ let test_keeper_stream_args_preserve_user_blocks () =
       channel_user_id = "";
       channel_user_name = "";
       channel_workspace_id = "";
+      channel_metadata = [];
       attachments =
         [
           {
@@ -2460,6 +2471,7 @@ let test_chat_surface_of_request_labels_copilot_gate () =
       channel_user_id = "";
       channel_user_name = "";
       channel_workspace_id = "session-7";
+      channel_metadata = [];
       attachments = [] }
   in
   let surface = Server_routes_http_keeper_stream.For_testing.chat_surface_of_request payload in
@@ -2484,6 +2496,7 @@ let test_chat_speaker_of_request_copilot_is_owner () =
       channel_user_id = "";
       channel_user_name = "";
       channel_workspace_id = "session-7";
+      channel_metadata = [];
       attachments = [] }
   in
   let speaker = Server_routes_http_keeper_stream.For_testing.chat_speaker_of_request payload in
@@ -2504,6 +2517,7 @@ let test_chat_speaker_of_request_connector_is_external () =
       channel_user_id = "user-42";
       channel_user_name = "Alice";
       channel_workspace_id = "workspace-9";
+      channel_metadata = [];
       attachments = [] }
   in
   let speaker = Server_routes_http_keeper_stream.For_testing.chat_speaker_of_request payload in

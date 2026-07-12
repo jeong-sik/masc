@@ -132,12 +132,15 @@ let validate ~max_content_length ~dedup_check (msg : inbound_message) =
 type gate_error =
   | Validation of validation_error
   | Keeper_error of string
+  | Accepted_keeper_error of string
   | Dispatch_unavailable
   | Internal of string
 
 let gate_error_to_string = function
   | Validation e -> validation_error_to_string e
   | Keeper_error msg -> Printf.sprintf "keeper error: %s" msg
+  | Accepted_keeper_error msg ->
+    Printf.sprintf "accepted keeper error: %s" msg
   | Dispatch_unavailable -> "keeper dispatch unavailable"
   | Internal _ -> "internal error"
 
@@ -151,6 +154,7 @@ type dispatch_result =
       ; message_request : message_request option
       }
   | Keeper_error_result of string
+  | Accepted_keeper_error_result of string
   | Unavailable_result
 
 (* ── JSON Codecs ─────────────────────────────────────────────── *)

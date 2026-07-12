@@ -81,6 +81,7 @@ type keeper_chat_stream_request = {
   channel_user_id : string;
   channel_user_name : string;
   channel_workspace_id : string;
+  channel_metadata : (string * string) list;
   attachments : Keeper_chat_store.attachment list;
 }
 (** Parsed payload of a keeper chat-stream HTTP request.
@@ -184,6 +185,8 @@ val queued_turn_failure_kind_to_string : queued_turn_failure_kind -> string
 val process_single_turn :
   connector_user_line_recorded_upstream:bool ->
   queued_turn:bool ->
+  queued_user_messages:Keeper_chat_store.user_message_input list ->
+  queued_assistant_context:Keeper_chat_queue.transcript_context option ->
   state:Mcp_server.server_state ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   auth_token:string option ->
@@ -208,16 +211,15 @@ val process_single_turn :
     cancel the accepted request. [auth_token] is [None] for queue-consumer
     turns where no HTTP request is available.
 
-    [connector_user_line_recorded_upstream] (default [false]) tells the turn
-    that the inbound user line was already persisted by the gate inbound
-    boundary ([Gate_keeper_backend.dispatch_core], RFC-0226 sole-recorder).
-    When [true] the turn records the assistant reply only and never re-writes
-    the user line — set by the queue consumer for connector ([Discord]/[Slack])
-    sources whose busy message was enqueued after the gate already recorded it
-    (RFC-connector-deferred-reply-via-chat-queue §3.4). [false] keeps the dashboard-route behaviour of recording
-    both sides.
+    [connector_user_line_recorded_upstream] is [true] only for an explicitly
+    reconciled queue receipt whose persisted ownership is
+    [Upstream_recorded]. Normal busy Discord/Slack receipts are [Queue_owned]:
+    [queued_user_messages] then carries one typed user row per leased receipt,
+    and the turn atomically appends those rows with its one terminal row.
+    Direct/free connector admission persists its inbound row inside the
+    acquired turn slot before model execution.
 
-    [queued_turn] (default [false], set [true] only by
+    [queued_turn] (set [true] only by
     [Server_bootstrap_loops]'s queue-consumer [handle_turn] wiring) changes
     ONLY the [No_visible_reply]/empty-[Visible_reply] outcome: the
     interactive HTTP stream keeps recording the user line only

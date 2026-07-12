@@ -22,12 +22,56 @@ let check_failure name detail =
 
 let keeper_name = "consumer-receipt-keeper"
 
-let discord_msg ~content ~channel_id ~user_id ~timestamp =
+let discord_msg ?guild_id ?parent_channel_id ?thread_id ?conversation_id
+    ?external_message_id ?speaker_name ~content ~channel_id ~user_id ~timestamp () =
   { Keeper_chat_queue.content
   ; user_blocks = []
   ; attachments = []
   ; timestamp
   ; source = Keeper_chat_queue.Discord { channel_id; user_id }
+  ; transcript_context =
+      Some
+        { surface =
+            Surface_ref.Discord
+              { guild_id
+              ; channel_id
+              ; parent_channel_id
+              ; thread_id
+              }
+        ; conversation_id
+        ; external_message_id
+        ; speaker =
+            { Keeper_chat_store.speaker_id = Some user_id
+            ; speaker_name
+            ; speaker_authority = Keeper_chat_store.External
+            }
+        ; extra_mentions = []
+        }
+  ; transcript_ownership = Keeper_chat_queue.Queue_owned
+  }
+
+let slack_msg ~content ~channel_id ~user_id ~user_name ~team_id ~thread_ts
+    ~conversation_id ~external_message_id ~timestamp =
+  { Keeper_chat_queue.content
+  ; user_blocks = []
+  ; attachments = []
+  ; timestamp
+  ; source =
+      Keeper_chat_queue.Slack
+        { channel_id; user_id; user_name; team_id; thread_ts }
+  ; transcript_context =
+      Some
+        { surface = Surface_ref.Slack { team_id; channel_id; thread_ts }
+        ; conversation_id = Some conversation_id
+        ; external_message_id = Some external_message_id
+        ; speaker =
+            { Keeper_chat_store.speaker_id = Some user_id
+            ; speaker_name = Some user_name
+            ; speaker_authority = Keeper_chat_store.External
+            }
+        ; extra_mentions = []
+        }
+  ; transcript_ownership = Keeper_chat_queue.Queue_owned
   }
 
 let rec rm_rf path =
@@ -58,7 +102,7 @@ let with_env body =
       Keeper_chat_queue.For_testing.reset ();
       Keeper_turn_admission.For_testing.reset ();
       let report : Keeper_chat_queue.configure_report =
-        Keeper_chat_queue.configure_persistence ~base_path:base
+        Keeper_chat_queue.configure_persistence ~config
       in
       check "persistence configured without load errors" (report.load_errors = []);
       Fun.protect
@@ -140,6 +184,45 @@ let check_terminal_snapshot ~label ~keeper_name ~receipt_id =
   check (label ^ " retains terminal receipt")
     (receipt_id_in_terminal receipt_id snapshot.terminal)
 
+let persist_real_queue_transcript ~base ~keeper_name ~assistant_content
+    leased_items =
+  let user_messages, assistant_context, upstream_recorded =
+    Server_bootstrap_loops.For_testing.queued_transcript_batch leased_items
+  in
+  match assistant_context with
+  | None ->
+    Keeper_chat_consumer.Failed
+      { kind = Keeper_chat_queue.Internal_error
+      ; detail = "consumer transcript batch had no assistant context"
+      ; outcome_ref = None
+      }
+  | Some context ->
+    let config = Workspace.default_config base in
+    let persisted =
+      if user_messages <> [] then
+        Keeper_chat_store.append_user_messages_and_assistant_result
+          ~config ~base_dir:base ~keeper_name ~user_messages
+          ~surface:context.surface
+          ?conversation_id:context.conversation_id
+          ~assistant_content ()
+      else if upstream_recorded then
+        Keeper_chat_store.append_assistant_message_result
+          ~config ~base_dir:base ~keeper_name ~content:assistant_content
+          ~surface:context.surface
+          ?conversation_id:context.conversation_id ()
+      else Error "queue transcript batch had no owned or upstream user rows"
+    in
+    (match persisted with
+     | Ok () ->
+       Keeper_chat_consumer.Delivered
+         { outcome_ref = "trace-consumer-transcript#1" }
+     | Error detail ->
+       Keeper_chat_consumer.Failed
+         { kind = Keeper_chat_queue.Transcript_persist_failed
+         ; detail
+         ; outcome_ref = None
+         })
+
 (* [Keeper_chat_consumer.start] owns a process-lifetime polling fiber.  Raising
    from the switch body gives each test a structured teardown and, when a turn
    is active, exercises the same cancellation path as server shutdown. *)
@@ -155,13 +238,14 @@ let test_delivery_finalizes_terminal_receipt () =
     match
       enqueue_checked ~label:"delivery enqueue" ~keeper_name
         (discord_msg ~content:"deliver me" ~channel_id:"channel-delivered"
-           ~user_id:"user-delivered" ~timestamp:1.0)
+           ~user_id:"user-delivered" ~timestamp:1.0 ())
     with
     | None -> ()
     | Some accepted ->
       let captured = ref None in
-      let handle_turn ~sw:_ ~keeper_name:dispatched_keeper ~queued_message =
-        captured := Some (dispatched_keeper, queued_message);
+      let handle_turn ~sw:_ ~keeper_name:dispatched_keeper ~queued_message
+          ~leased_items =
+        captured := Some (dispatched_keeper, queued_message, leased_items);
         Keeper_chat_consumer.Delivered
           { outcome_ref = "trace-delivered#1" }
       in
@@ -180,11 +264,17 @@ let test_delivery_finalizes_terminal_receipt () =
            | Pending | Inflight _ | Failed _ ->
              check "delivery state is Delivered" false));
       (match !captured with
-       | Some (dispatched_keeper, queued_message) ->
+       | Some (dispatched_keeper, queued_message, leased_items) ->
          check "delivery dispatches to the accepted keeper"
            (String.equal dispatched_keeper keeper_name);
          check "delivery preserves queued content"
            (String.equal queued_message.content "deliver me");
+         check "delivery callback receives the exact leased receipt"
+           (match leased_items with
+            | [ item ] ->
+              Keeper_chat_queue.Receipt_id.equal item.receipt_id
+                accepted.receipt_id
+            | [] | _ :: _ :: _ -> false);
          (match queued_message.source with
           | Keeper_chat_queue.Discord { channel_id; user_id } ->
             check "delivery preserves Discord channel"
@@ -196,17 +286,159 @@ let test_delivery_finalizes_terminal_receipt () =
       check_terminal_snapshot ~label:"delivery" ~keeper_name
         ~receipt_id:accepted.receipt_id)
 
+let test_discord_drain_persists_exact_transcript_provenance () =
+  Printf.printf
+    "Test: actual Discord queue drain persists exact transcript provenance\n%!";
+  with_env (fun ~base ~clock ->
+    let exact_keeper = keeper_name ^ "-discord-transcript" in
+    let surface =
+      Surface_ref.Discord
+        { guild_id = Some "guild-exact"
+        ; channel_id = "channel-exact"
+        ; parent_channel_id = Some "parent-exact"
+        ; thread_id = Some "thread-exact"
+        }
+    in
+    match
+      enqueue_checked ~label:"Discord transcript enqueue"
+        ~keeper_name:exact_keeper
+        (discord_msg ~guild_id:"guild-exact"
+           ~parent_channel_id:"parent-exact" ~thread_id:"thread-exact"
+           ~conversation_id:"discord:guild-exact:channel:channel-exact"
+           ~external_message_id:"discord-message-17"
+           ~speaker_name:"Exact Discord User"
+           ~content:"preserve Discord identity" ~channel_id:"channel-exact"
+           ~user_id:"discord-user-17" ~timestamp:17.25 ())
+    with
+    | None -> ()
+    | Some accepted ->
+      let handle_turn ~sw:_ ~keeper_name ~queued_message:_ ~leased_items =
+        persist_real_queue_transcript ~base ~keeper_name
+          ~assistant_content:"Discord answer" leased_items
+      in
+      with_consumer_switch (fun sw ->
+        Keeper_chat_consumer.start ~sw ~clock ~base_path:base ~handle_turn;
+        check "Discord drain reaches Delivered"
+          (Option.is_some
+             (await_receipt ~clock ~seconds:5.0 ~keeper_name:exact_keeper
+                ~receipt_id:accepted.receipt_id ~accept:is_delivered)));
+      let config = Workspace.default_config base in
+      (match
+         Keeper_chat_store.load_configured ~config ~base_dir:base
+           ~keeper_name:exact_keeper
+       with
+       | [ user; assistant ] ->
+         check "Discord drain writes user then assistant"
+           (user.role = Keeper_chat_store.Role.User
+            && assistant.role = Keeper_chat_store.Role.Assistant);
+         check "Discord user timestamp is the receipt timestamp"
+           (user.ts = Some 17.25);
+         check "Discord user keeps exact typed surface"
+           (Option.exists (Surface_ref.equal surface) user.surface);
+         check "Discord user keeps conversation and external message ids"
+           (user.conversation_id
+            = Some "discord:guild-exact:channel:channel-exact"
+            && user.external_message_id = Some "discord-message-17");
+         check "Discord user keeps speaker id and name"
+           (match user.speaker with
+            | Some speaker ->
+              speaker.speaker_id = Some "discord-user-17"
+              && speaker.speaker_name = Some "Exact Discord User"
+              && speaker.speaker_authority = Keeper_chat_store.External
+            | None -> false);
+         check "Discord assistant shares the exact conversation"
+           (assistant.conversation_id
+            = Some "discord:guild-exact:channel:channel-exact"
+            && Option.exists (Surface_ref.equal surface) assistant.surface)
+       | rows ->
+         check_failure "Discord transcript row count"
+           (Printf.sprintf "expected 2, got %d" (List.length rows))))
+
+let test_slack_coalesced_drain_persists_each_user_receipt_once () =
+  Printf.printf
+    "Test: actual coalesced Slack drain persists two user rows and one answer\n%!";
+  with_env (fun ~base ~clock ->
+    let exact_keeper = keeper_name ^ "-slack-transcript" in
+    let enqueue external_message_id content timestamp =
+      enqueue_checked ~label:("Slack enqueue " ^ external_message_id)
+        ~keeper_name:exact_keeper
+        (slack_msg ~content ~channel_id:"C-exact" ~user_id:"U-exact"
+           ~user_name:"Exact Slack User" ~team_id:(Some "T-exact")
+           ~thread_ts:(Some "171.002")
+           ~conversation_id:"slack:channel:C-exact"
+           ~external_message_id ~timestamp)
+    in
+    match
+      enqueue "slack-message-1" "first queued Slack prompt" 21.0,
+      enqueue "slack-message-2" "second queued Slack prompt" 22.0
+    with
+    | Some first, Some second ->
+      let handle_turn ~sw:_ ~keeper_name
+          ~(queued_message : Keeper_chat_queue.queued_message) ~leased_items =
+        check "coalesced LLM input contains both prompts in FIFO order"
+          (String.equal queued_message.content
+             "first queued Slack prompt\n\nsecond queued Slack prompt");
+        check "consumer callback receives both leased receipts"
+          (List.length leased_items = 2);
+        persist_real_queue_transcript ~base ~keeper_name
+          ~assistant_content:"one coalesced Slack answer" leased_items
+      in
+      with_consumer_switch (fun sw ->
+        Keeper_chat_consumer.start ~sw ~clock ~base_path:base ~handle_turn;
+        check "first Slack receipt reaches Delivered"
+          (Option.is_some
+             (await_receipt ~clock ~seconds:5.0 ~keeper_name:exact_keeper
+                ~receipt_id:first.receipt_id ~accept:is_delivered));
+        check "second Slack receipt reaches Delivered"
+          (Option.is_some
+             (await_receipt ~clock ~seconds:5.0 ~keeper_name:exact_keeper
+                ~receipt_id:second.receipt_id ~accept:is_delivered)));
+      let config = Workspace.default_config base in
+      (match
+         Keeper_chat_store.load_configured ~config ~base_dir:base
+           ~keeper_name:exact_keeper
+       with
+       | [ first_user; second_user; assistant ] ->
+         check "coalesced drain keeps two user rows and one assistant"
+           (first_user.role = Keeper_chat_store.Role.User
+            && second_user.role = Keeper_chat_store.Role.User
+            && assistant.role = Keeper_chat_store.Role.Assistant);
+         check "coalesced user contents remain distinct"
+           (first_user.content = "first queued Slack prompt"
+            && second_user.content = "second queued Slack prompt");
+         check "coalesced user timestamps remain stable and distinct"
+           (first_user.ts = Some 21.0 && second_user.ts = Some 22.0);
+         check "coalesced external message ids remain stable and distinct"
+           (first_user.external_message_id = Some "slack-message-1"
+            && second_user.external_message_id = Some "slack-message-2");
+         check "Slack speaker identity survives on both user rows"
+           (List.for_all
+              (fun (row : Keeper_chat_store.chat_message) ->
+                 match row.speaker with
+                 | Some speaker ->
+                   speaker.speaker_id = Some "U-exact"
+                   && speaker.speaker_name = Some "Exact Slack User"
+                   && speaker.speaker_authority = Keeper_chat_store.External
+                 | None -> false)
+              [ first_user; second_user ]);
+         check "coalesced assistant shares the Slack conversation"
+           (assistant.conversation_id = Some "slack:channel:C-exact")
+       | rows ->
+         check_failure "Slack transcript row count"
+           (Printf.sprintf "expected 3, got %d" (List.length rows)))
+    | None, _ | _, None -> ())
+
 let test_explicit_failure_finalizes_failed_receipt () =
   Printf.printf "Test: explicit turn failure finalizes a Failed receipt\n%!";
   with_env (fun ~base ~clock ->
     match
       enqueue_checked ~label:"failure enqueue" ~keeper_name
         (discord_msg ~content:"fail explicitly" ~channel_id:"channel-failed"
-           ~user_id:"user-failed" ~timestamp:2.0)
+           ~user_id:"user-failed" ~timestamp:2.0 ())
     with
     | None -> ()
     | Some accepted ->
-      let handle_turn ~sw:_ ~keeper_name:_ ~queued_message:_ =
+      let handle_turn ~sw:_ ~keeper_name:_ ~queued_message:_ ~leased_items:_ =
         Keeper_chat_consumer.Failed
           { kind = Keeper_chat_queue.Delivery_failed
           ; detail = "connector rejected outbound delivery"
@@ -241,13 +473,13 @@ let test_structured_cancellation_nacks_and_preserves_receipt () =
     match
       enqueue_checked ~label:"cancellation enqueue" ~keeper_name
         (discord_msg ~content:"cancel this turn" ~channel_id:"channel-cancel"
-           ~user_id:"user-cancel" ~timestamp:3.0)
+           ~user_id:"user-cancel" ~timestamp:3.0 ())
     with
     | None -> ()
     | Some accepted ->
       let started, resolve_started = Eio.Promise.create () in
       let never, _resolve_never = Eio.Promise.create () in
-      let handle_turn ~sw:_ ~keeper_name:_ ~queued_message:_ =
+      let handle_turn ~sw:_ ~keeper_name:_ ~queued_message:_ ~leased_items:_ =
         Eio.Promise.resolve resolve_started ();
         Eio.Promise.await never
       in
@@ -296,10 +528,10 @@ let test_dispatch_is_concurrent_per_keeper () =
     match
       ( enqueue_checked ~label:"keeper A enqueue" ~keeper_name:keeper_a
           (discord_msg ~content:"alpha waits" ~channel_id:"channel-a"
-             ~user_id:"user-a" ~timestamp:4.0)
+             ~user_id:"user-a" ~timestamp:4.0 ())
       , enqueue_checked ~label:"keeper B enqueue" ~keeper_name:keeper_b
           (discord_msg ~content:"beta proceeds" ~channel_id:"channel-b"
-             ~user_id:"user-b" ~timestamp:5.0) )
+             ~user_id:"user-b" ~timestamp:5.0 ()) )
     with
     | Some accepted_a, Some accepted_b ->
       let first_keeper = ref None in
@@ -308,7 +540,8 @@ let test_dispatch_is_concurrent_per_keeper () =
       let first_started, resolve_first_started = Eio.Promise.create () in
       let release_first, resolve_release_first = Eio.Promise.create () in
       let second_started, resolve_second_started = Eio.Promise.create () in
-      let handle_turn ~sw:_ ~keeper_name:dispatched_keeper ~queued_message:_ =
+      let handle_turn ~sw:_ ~keeper_name:dispatched_keeper ~queued_message:_
+          ~leased_items:_ =
         incr calls;
         match !first_keeper with
         | None ->
@@ -374,12 +607,12 @@ let test_finalization_persistence_retry_does_not_redeliver () =
       enqueue_checked ~label:"finalization retry enqueue" ~keeper_name
         (discord_msg ~content:"finalize after retry"
            ~channel_id:"channel-finalize-retry" ~user_id:"user-finalize-retry"
-           ~timestamp:6.0)
+           ~timestamp:6.0 ())
     with
     | None -> ()
     | Some accepted ->
       let calls = ref 0 in
-      let handle_turn ~sw:_ ~keeper_name:_ ~queued_message:_ =
+      let handle_turn ~sw:_ ~keeper_name:_ ~queued_message:_ ~leased_items:_ =
         incr calls;
         Keeper_chat_queue.For_testing.fail_next_persist ();
         Keeper_chat_consumer.Delivered
@@ -411,11 +644,11 @@ let test_invalid_delivered_turn_ref_fails_closed () =
       enqueue_checked ~label:"invalid turn_ref enqueue" ~keeper_name
         (discord_msg ~content:"invalid delivered ref"
            ~channel_id:"channel-invalid-ref" ~user_id:"user-invalid-ref"
-           ~timestamp:6.5)
+           ~timestamp:6.5 ())
     with
     | None -> ()
     | Some accepted ->
-      let handle_turn ~sw:_ ~keeper_name:_ ~queued_message:_ =
+      let handle_turn ~sw:_ ~keeper_name:_ ~queued_message:_ ~leased_items:_ =
         Keeper_chat_consumer.Delivered { outcome_ref = "trace#0042" }
       in
       with_consumer_switch (fun sw ->
@@ -443,7 +676,7 @@ let test_invalid_delivery_diagnostic_does_not_block_lane () =
     match
       enqueue_checked ~label:"invalid diagnostic enqueue" ~keeper_name
         (discord_msg ~content:"invalid diagnostic" ~channel_id:"channel-invalid"
-           ~user_id:"user-invalid" ~timestamp:7.0)
+           ~user_id:"user-invalid" ~timestamp:7.0 ())
     with
     | None -> ()
     | Some first ->
@@ -451,7 +684,7 @@ let test_invalid_delivery_diagnostic_does_not_block_lane () =
       let first_started, resolve_first_started = Eio.Promise.create () in
       let release_first, resolve_release_first = Eio.Promise.create () in
       let handle_turn ~sw:_ ~keeper_name:_
-          ~(queued_message : Keeper_chat_queue.queued_message) =
+          ~(queued_message : Keeper_chat_queue.queued_message) ~leased_items:_ =
         incr calls;
         if String.equal queued_message.content "invalid diagnostic"
         then (
@@ -471,7 +704,7 @@ let test_invalid_delivery_diagnostic_does_not_block_lane () =
         match
           enqueue_checked ~label:"next lane message enqueue" ~keeper_name
             (discord_msg ~content:"next lane message" ~channel_id:"channel-next"
-               ~user_id:"user-next" ~timestamp:8.0)
+               ~user_id:"user-next" ~timestamp:8.0 ())
         with
         | None -> Eio.Promise.resolve resolve_release_first ()
         | Some second ->
@@ -508,7 +741,7 @@ let test_shutdown_fence_keeps_receipt_pending_until_rollback () =
       enqueue_checked ~label:"shutdown fence enqueue" ~keeper_name
         (discord_msg ~content:"wait through shutdown"
            ~channel_id:"channel-shutdown" ~user_id:"user-shutdown"
-           ~timestamp:9.0)
+           ~timestamp:9.0 ())
     with
     | None -> ()
     | Some accepted ->
@@ -518,7 +751,7 @@ let test_shutdown_fence_keeps_receipt_pending_until_rollback () =
            ~operation_id
           : Keeper_turn_admission.begin_shutdown_result);
       let calls = ref 0 in
-      let handle_turn ~sw:_ ~keeper_name:_ ~queued_message:_ =
+      let handle_turn ~sw:_ ~keeper_name:_ ~queued_message:_ ~leased_items:_ =
         incr calls;
         Keeper_chat_consumer.Delivered
           { outcome_ref = "trace-shutdown-rollback#1" }
@@ -563,7 +796,7 @@ let test_typed_admission_race_nacks_then_retries () =
       enqueue_checked ~label:"typed deferral enqueue" ~keeper_name
         (discord_msg ~content:"retry typed deferral"
            ~channel_id:"channel-deferral" ~user_id:"user-deferral"
-           ~timestamp:10.0)
+           ~timestamp:10.0 ())
     with
     | None -> ()
     | Some accepted ->
@@ -572,7 +805,7 @@ let test_typed_admission_race_nacks_then_retries () =
       let first_deferred, resolve_first_deferred = Eio.Promise.create () in
       let second_started, resolve_second_started = Eio.Promise.create () in
       let release_second, resolve_release_second = Eio.Promise.create () in
-      let handle_turn ~sw:_ ~keeper_name:_ ~queued_message:_ =
+      let handle_turn ~sw:_ ~keeper_name:_ ~queued_message:_ ~leased_items:_ =
         incr calls;
         if !calls = 1
         then (
@@ -618,8 +851,57 @@ let test_typed_admission_race_nacks_then_retries () =
       check_terminal_snapshot ~label:"typed deferral retry" ~keeper_name
         ~receipt_id:accepted.receipt_id)
 
+let test_cancelled_turn_keeps_canonical_failure_kind_after_connector_result () =
+  let turn_outcome =
+    Some
+      (Server_routes_http_keeper_stream.Failed
+         { kind = Server_routes_http_keeper_stream.Turn_cancelled
+         ; detail = "operator cancelled the queued turn"
+         })
+  in
+  let check_cancelled label delivery_outcome =
+    match
+      Server_bootstrap_loops.For_testing.keeper_chat_consumer_outcome
+        ~turn_outcome ~delivery_outcome
+    with
+    | Keeper_chat_consumer.Failed
+        { kind = Keeper_chat_queue.Cancelled; detail; outcome_ref = None } ->
+      check (label ^ " keeps cancellation detail")
+        (String.length detail > 0)
+    | Keeper_chat_consumer.Failed _
+    | Keeper_chat_consumer.Delivered _
+    | Keeper_chat_consumer.Deferred _ ->
+      check (label ^ " keeps canonical Cancelled kind") false
+  in
+  check_cancelled "delivered cancellation notice" (Ok ());
+  check_cancelled "failed cancellation notice"
+    (Error (Keeper_chat_queue.Delivery_failed, "connector unavailable"))
+
+let test_non_cancelled_turn_still_reports_terminal_delivery_failure () =
+  let outcome =
+    Server_bootstrap_loops.For_testing.keeper_chat_consumer_outcome
+      ~turn_outcome:
+        (Some
+           (Server_routes_http_keeper_stream.Failed
+              { kind = Server_routes_http_keeper_stream.Turn_failed
+              ; detail = "provider failed"
+              }))
+      ~delivery_outcome:
+        (Error (Keeper_chat_queue.Delivery_failed, "terminal send failed"))
+  in
+  check "non-cancellation connector failure remains Delivery_failed"
+    (match outcome with
+     | Keeper_chat_consumer.Failed
+         { kind = Keeper_chat_queue.Delivery_failed; outcome_ref = None; _ } ->
+       true
+     | Keeper_chat_consumer.Failed _
+     | Keeper_chat_consumer.Delivered _
+     | Keeper_chat_consumer.Deferred _ -> false)
+
 let () =
   test_delivery_finalizes_terminal_receipt ();
+  test_discord_drain_persists_exact_transcript_provenance ();
+  test_slack_coalesced_drain_persists_each_user_receipt_once ();
   test_explicit_failure_finalizes_failed_receipt ();
   test_structured_cancellation_nacks_and_preserves_receipt ();
   test_dispatch_is_concurrent_per_keeper ();
@@ -628,6 +910,8 @@ let () =
   test_invalid_delivery_diagnostic_does_not_block_lane ();
   test_shutdown_fence_keeps_receipt_pending_until_rollback ();
   test_typed_admission_race_nacks_then_retries ();
+  test_cancelled_turn_keeps_canonical_failure_kind_after_connector_result ();
+  test_non_cancelled_turn_still_reports_terminal_delivery_failure ();
   if !failures > 0
   then (
     Printf.printf "FAILED: %d check(s)\n%!" !failures;

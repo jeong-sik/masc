@@ -43,8 +43,15 @@ type validation_error = Gate_protocol.validation_error =
 type gate_error = Gate_protocol.gate_error =
   | Validation of validation_error
   | Keeper_error of string
+  | Accepted_keeper_error of string
   | Dispatch_unavailable
   | Internal of string
+
+type inbound_error_notice =
+  | Offline_notice
+  | Retry_notice
+  | Accepted_failure_notice
+  | No_notice
 
 type dispatch_fn =
   channel:string ->
@@ -125,6 +132,9 @@ let dedup_cleanup ~now =
 let dedup_table_size () =
   with_dedup_lock (fun () -> Hashtbl.length dedup_table)
 
+let dedup_release key =
+  with_dedup_lock (fun () -> Hashtbl.remove dedup_table key)
+
 (* Register dedup_table_size callback to break cycle *)
 let () = Channel_gate_metrics.register_dedup_size_fn dedup_table_size
 
@@ -162,6 +172,12 @@ let gate_error_to_string = Gate_protocol.gate_error_to_string
 let inbound_of_json = Gate_protocol.inbound_of_json
 let outbound_to_json = Gate_protocol.outbound_to_json
 let error_json = Gate_protocol.error_json
+
+let inbound_error_notice = function
+  | Dispatch_unavailable -> Offline_notice
+  | Keeper_error _ -> Retry_notice
+  | Accepted_keeper_error _ -> Accepted_failure_notice
+  | Validation _ | Internal _ -> No_notice
 
 (* ── Validation (uses local dedup) ───────────────────────────── *)
 
@@ -225,6 +241,11 @@ let handle_inbound_with ~dispatch (msg : inbound_message) =
              ; message_request
              }
        | Gate_protocol.Keeper_error_result err ->
+           (* Validation reserves the external idempotency key before dispatch.
+              A keeper-side failure did not accept the message, so release the
+              reservation: a connector replay of the same event may retry
+              instead of being silently discarded as a duplicate. *)
+           dedup_release msg.idempotency_key;
            Channel_gate_metrics.record_attempt
              ~channel
              ~workspace_id:msg.channel_workspace_id
@@ -232,7 +253,19 @@ let handle_inbound_with ~dispatch (msg : inbound_message) =
              ~duration_ms:0
              (Channel_gate_metrics.Keeper_error err);
            Error (Keeper_error err)
+       | Gate_protocol.Accepted_keeper_error_result err ->
+           (* The durable inbound transcript committed before the turn failed.
+              Keep the idempotency reservation so a connector retry cannot
+              append the same external message twice. *)
+           Channel_gate_metrics.record_attempt
+             ~channel
+             ~workspace_id:msg.channel_workspace_id
+             ~keeper
+             ~duration_ms:0
+             (Channel_gate_metrics.Keeper_error err);
+           Error (Accepted_keeper_error err)
        | Gate_protocol.Unavailable_result ->
+           dedup_release msg.idempotency_key;
            Channel_gate_metrics.record_attempt
              ~channel
              ~workspace_id:msg.channel_workspace_id

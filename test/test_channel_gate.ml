@@ -156,6 +156,11 @@ let mock_dispatch_error ~channel:_ ~channel_user_id:_ ~channel_user_name:_
     ~channel_workspace_id:_ ~keeper_name:_ ~idempotency_key:_ ~metadata:_ ~content:_ =
   Gate_protocol.Keeper_error_result "mock keeper error"
 
+let mock_dispatch_accepted_error ~channel:_ ~channel_user_id:_
+    ~channel_user_name:_ ~channel_workspace_id:_ ~keeper_name:_
+    ~idempotency_key:_ ~metadata:_ ~content:_ =
+  Gate_protocol.Accepted_keeper_error_result "mock accepted keeper error"
+
 let mock_dispatch_unavailable ~channel:_ ~channel_user_id:_ ~channel_user_name:_
     ~channel_workspace_id:_ ~keeper_name:_ ~idempotency_key:_ ~metadata:_ ~content:_ =
   Gate_protocol.Unavailable_result
@@ -218,6 +223,67 @@ let test_handle_inbound_keeper_error () =
       check string "error message" "mock keeper error" err
   | Error _ -> fail "expected Keeper_error"
   | Ok _ -> fail "expected error"
+
+let test_handle_inbound_keeper_error_releases_idempotency_key () =
+  reset_dedup ();
+  let msg =
+    make_message ~idempotency_key:(unique_key "dispatch-err-retry") ()
+  in
+  (match Channel_gate.handle_inbound ~dispatch:mock_dispatch_error msg with
+   | Error (Channel_gate.Keeper_error _) -> ()
+   | Error _ | Ok _ -> fail "expected first keeper error");
+  match Channel_gate.handle_inbound ~dispatch:mock_dispatch_ok msg with
+  | Ok _ -> ()
+  | Error (Channel_gate.Validation (Channel_gate.Duplicate_message _)) ->
+    fail "keeper-side rejection must release the connector idempotency key"
+  | Error error -> fail (Channel_gate.gate_error_to_string error)
+
+let test_accepted_keeper_error_retains_idempotency_key () =
+  reset_dedup ();
+  let msg =
+    make_message ~idempotency_key:(unique_key "accepted-dispatch-err") ()
+  in
+  (match
+     Channel_gate.handle_inbound ~dispatch:mock_dispatch_accepted_error msg
+   with
+   | Error (Channel_gate.Accepted_keeper_error _) -> ()
+   | Error _ | Ok _ -> fail "expected accepted keeper error");
+  match Channel_gate.handle_inbound ~dispatch:mock_dispatch_ok msg with
+  | Error (Channel_gate.Validation (Channel_gate.Duplicate_message _)) -> ()
+  | Error error -> fail (Channel_gate.gate_error_to_string error)
+  | Ok _ -> fail "accepted inbound message must retain its idempotency key"
+
+let test_inbound_error_notice_policy () =
+  check bool "keeper error requires retry notice" true
+    (match
+       Channel_gate.inbound_error_notice (Channel_gate.Keeper_error "private")
+     with
+     | Channel_gate.Retry_notice -> true
+     | Channel_gate.Offline_notice | Channel_gate.Accepted_failure_notice
+     | Channel_gate.No_notice -> false);
+  check bool "accepted keeper error requires a non-retry notice" true
+    (match
+       Channel_gate.inbound_error_notice
+         (Channel_gate.Accepted_keeper_error "private")
+     with
+     | Channel_gate.Accepted_failure_notice -> true
+     | Channel_gate.Offline_notice | Channel_gate.Retry_notice
+     | Channel_gate.No_notice -> false);
+  check bool "offline requires offline notice" true
+    (match
+       Channel_gate.inbound_error_notice Channel_gate.Dispatch_unavailable
+     with
+     | Channel_gate.Offline_notice -> true
+     | Channel_gate.Retry_notice | Channel_gate.Accepted_failure_notice
+     | Channel_gate.No_notice -> false);
+  check bool "validation does not expose a connector notice" true
+    (match
+       Channel_gate.inbound_error_notice
+         (Channel_gate.Validation Channel_gate.Empty_content)
+     with
+     | Channel_gate.No_notice -> true
+     | Channel_gate.Offline_notice | Channel_gate.Retry_notice
+     | Channel_gate.Accepted_failure_notice -> false)
 
 let test_handle_inbound_unavailable () =
   reset_dedup ();
@@ -406,6 +472,12 @@ let () =
             test_handle_inbound_streaming_validation_blocks_callback;
           test_case "returns keeper error" `Quick
             test_handle_inbound_keeper_error;
+          test_case "keeper error releases idempotency key" `Quick
+            test_handle_inbound_keeper_error_releases_idempotency_key;
+          test_case "accepted keeper error retains idempotency key" `Quick
+            test_accepted_keeper_error_retains_idempotency_key;
+          test_case "maps gate errors to connector notices" `Quick
+            test_inbound_error_notice_policy;
           test_case "returns unavailable" `Quick
             test_handle_inbound_unavailable;
           test_case "validation blocks dispatch" `Quick

@@ -52,24 +52,46 @@ non-terminal exit: it nacks the lease back to `Pending` with the same receipt ID
 
 Messages from the same source may be coalesced into one Keeper turn, but the
 lease retains every constituent receipt and finalizes them atomically.
+Connector idempotency follows the same acceptance boundary: a failure before
+the queue/user transcript commits releases the external key for retry; a turn
+failure after durable inbound acceptance retains the key and emits a distinct
+"accepted but failed" notice so retry cannot duplicate the user row.
 
 ## 3. Durable queue contract
 
 ### 3.1 Snapshot schema
 
-The on-disk SSOT is the BasePath-owned file:
+The on-disk SSOT is the workspace/cluster-owned Keeper runtime file resolved by
+`Workspace.keepers_runtime_dir`:
 
 ```text
-<base>/.masc/keepers/<keeper>/chat-queue.json
+default cluster:     <base>/.masc/keepers/<keeper>/chat-queue.json
+non-default cluster: <base>/.masc/clusters/<cluster>/keepers/<keeper>/chat-queue.json
 ```
 
-Schema `keeper_chat_queue.v2` contains:
+Snapshots contain pending prompts and attachments, so the atomic replacement
+file is created with owner-only mode `0600`. A queue configured for one cluster
+never scans, leases, or rewrites another cluster's Keeper directory.
+`Workspace.keepers_runtime_dir` is the explicit ownership decision: a
+non-default cluster never inspects the default cluster as a migration fallback.
+If an operator intentionally migrates a queue, the exact snapshot directories
+must be copied into the selected canonical namespace while the server is
+stopped; startup does not infer ownership from partial directory contents.
+
+Schema `keeper_chat_queue.v3` contains:
 
 - a monotonic `revision`;
 - every receipt ID;
 - `Pending` and `Inflight` message payloads;
+- typed transcript provenance (`surface`, conversation/external message IDs,
+  speaker, structured mentions) plus an explicit `queue_owned` or
+  `upstream_recorded` ownership decision;
 - lease ID and start time for `Inflight`; and
-- terminal completion/failure metadata without message bodies or attachments.
+- terminal completion/failure metadata. Ordinary terminal receipts discard
+  message bodies and attachments; `Transcript_persist_failed` retains the
+  queued message/provenance in owner-only storage so a failed transcript write
+  cannot erase the only durable copy. The Dashboard projection never emits
+  that retained body.
 
 The revision domain is capped at JavaScript's exact JSON integer boundary
 (`2^53 - 1`) because the same value crosses the Dashboard JSON/SSE boundary.
@@ -139,8 +161,14 @@ For Discord and Slack, the consumer starts the outbound adapter before the turn
 and joins its terminal callback after the turn finishes. The callback reports
 exactly one result for the primary final reply or error reply.
 
-- preview edits and rich side messages do not settle the receipt;
+- preview edits and rich side messages do not decide the receipt, but the
+  adapter joins their transport work before firing its terminal callback;
+- Discord final-text rich projection preserves source order and uses the
+  transport's named embed-count limit per turn; omissions above that cap are
+  logged and counted;
 - an interim stream-protocol diagnostic cannot mask a later final-send failure;
+- a typed terminal cancellation emits an explicit connector notice and remains
+  `Cancelled` even if that notice itself cannot be delivered;
 - a missing connector credential becomes `Connector_unavailable`;
 - a terminal HTTP/API failure becomes `Delivery_failed`; and
 - empty terminal connector output is a failure, not implicit success.
@@ -155,13 +183,19 @@ their delivery boundary.
 
 ### 4.3 Recording ownership
 
-The source variant fixes transcript ownership without string classification:
+The admission result and persisted queue ownership fix transcript ownership
+without string classification:
 
 ```ocaml
-match source with
-| Dashboard -> turn records user and assistant rows
-| Discord _ | Slack _ -> gate records the user row; turn records assistant only
+match admission, transcript_ownership with
+| Free_turn, _ -> gate records the user row inside the acquired turn slot
+| Busy_queued, Queue_owned -> queue consumer atomically records each receipt's user row and one terminal row
+| Busy_queued, Upstream_recorded -> queue consumer records only the terminal row
 ```
+
+Legacy active connector receipts without an ownership decision fail migration
+closed. Operators must reconcile them explicitly; startup never guesses from a
+pre-existing transcript row.
 
 This preserves the single connector-inbound recorder defined by RFC-0226.
 
@@ -250,7 +284,10 @@ from deltas.
 The chat composer renders server pending/inflight/read-error counts independently
 from browser-local drafts and from the Keeper's active turn state. The waiting
 inventory renders each active receipt ID, lifecycle, lease ID, and inflight start
-time so a reloaded Dashboard still has a correlation path.
+time so a reloaded Dashboard still has a correlation path. Its chat-specific
+projection also exposes read errors and a stable newest-first window of failed
+receipts with explicit total, limit, and truncation fields; the UI never treats
+that response window as silent archival pruning.
 
 ## 7. Verification
 
@@ -261,8 +298,14 @@ Focused regression coverage must prove:
 - nack and restart preserve receipt IDs;
 - enqueue, lease, finalize, and nack persistence failures roll back;
 - v1 migration happens once and malformed snapshots fail closed;
-- BasePath reconfiguration does not leak the registry;
-- cancellation nacks, while unexpected exceptions become terminal failures;
+- BasePath/cluster reconfiguration does not leak the registry;
+- every atomic snapshot replacement has exact owner-only `0600` permissions;
+- structural Eio switch cancellation nacks the unchanged lease, while an
+  explicit operator/provider terminal cancellation remains a `Cancelled`
+  failure even when connector notice delivery fails;
+- an inbound connector transcript write failure rejects before queue ACK;
+- queued failure markers persist as `Transport_failure`, never as an utterance
+  that advances the answered watermark;
 - failed finalization persistence retries without redelivering the turn;
 - different Keeper queues dispatch concurrently;
 - a receipt committed after a stale outer peek still blocks direct admission,
@@ -284,5 +327,6 @@ targets plus the relevant Dashboard typecheck and Vitest suites.
 - This RFC does not redesign the general Keeper event queue.
 - Connector-specific rich formatting is a separate transport contract; this
   RFC only requires its terminal delivery result to settle truthfully.
-- Terminal receipt retention/archival policy may move to a separate append-only
-  ledger, but active receipts must never be pruned or hidden by that work.
+- Terminal receipt retention/archival policy is tracked separately in #24232
+  and may move to a crash-safe append-only ledger, but active receipts must
+  never be pruned or hidden by that work.

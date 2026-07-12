@@ -322,11 +322,13 @@ let execute_tool_eio
                                  agent_name)
                        then
                          Keeper_chat_timeline_source.lines_for_self
+                           ~config
                            ~base_dir:config.base_path
                            ~caller_keeper_name:agent_name
                            ~agent_name:requested_agent_name
                        else
                          Keeper_chat_timeline_source.lines_for
+                           ~config
                            ~base_dir:config.base_path
                            ~keeper_name:requested_agent_name)
                      { Tool_agent_timeline.config; agent_name }

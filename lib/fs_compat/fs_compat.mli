@@ -38,6 +38,11 @@ val save_file : string -> string -> unit
     Returns [Error msg] on I/O failure instead of raising. *)
 val save_file_atomic : string -> string -> (unit, string) Result.t
 
+(** Atomic owner-only write for sensitive snapshots.  The final file is
+    replaced with exact mode [0o600]; the generic {!save_file_atomic} contract
+    and permissions remain unchanged. *)
+val save_file_atomic_private : string -> string -> (unit, string) Result.t
+
 (** [true] iff [name] matches the [.atomic_*.tmp] pattern produced
     by [Filename.temp_file ~temp_dir:dir ".atomic_" ".tmp"] inside
     {!save_file_atomic}.  Exposed for tests and for a potential

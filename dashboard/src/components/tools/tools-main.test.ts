@@ -1,7 +1,7 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { DashboardKeeperWaitingInventory, DashboardScheduledAutomation } from '../../api'
+import type { DashboardKeeperChatQueue, DashboardKeeperWaitingInventory, DashboardScheduledAutomation } from '../../api'
 
 type MockToolsResponse = {
   generated_at?: string
@@ -61,6 +61,16 @@ vi.mock('../tool-executor/tool-executor', () => ({
 
 import { Tools } from './tools-main'
 
+function emptyChatQueue(): DashboardKeeperChatQueue {
+  return {
+    schema: 'keeper_chat_queue.dashboard.v1', revision: 0,
+    pending_count: 0, inflight_count: 0, active_receipts: [], read_errors: [],
+    next_action: null, recent_failed_receipt_count: 0,
+    recent_failed_receipt_limit: 8, recent_failed_receipts_truncated: false,
+    recent_failed_receipts: [],
+  }
+}
+
 function waitingInventoryFixture(): DashboardKeeperWaitingInventory {
   return {
     schema: 'masc.dashboard.keeper_waiting_inventory.v2',
@@ -75,6 +85,7 @@ function waitingInventoryFixture(): DashboardKeeperWaitingInventory {
         keeper_name: 'sangsu',
         state: 'waiting',
         waiting_count: 1,
+        chat_queue: emptyChatQueue(),
         waiting_on: [
           {
             keeper_name: 'sangsu',

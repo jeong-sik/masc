@@ -45,6 +45,21 @@ module For_testing : sig
 
   val queued_chat_projection :
     Keeper_chat_queue.queued_message -> queued_chat_projection
+
+  val queued_transcript_batch :
+    Keeper_chat_queue.leased_message list ->
+    Keeper_chat_store.user_message_input list
+    * Keeper_chat_queue.transcript_context option
+    * bool
+  (** Exact queue-consumer transcript projection: one user input per
+      queue-owned receipt, the typed assistant context, and whether every user
+      line was explicitly recorded upstream. *)
+
+  val keeper_chat_consumer_outcome :
+    turn_outcome:Server_routes_http_keeper_stream.queued_turn_outcome option ->
+    delivery_outcome:
+      (unit, Keeper_chat_queue.failure_kind * string) result ->
+    Keeper_chat_consumer.turn_outcome
 end
 
 val start_background_maintenance :

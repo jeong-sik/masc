@@ -48,6 +48,7 @@ val adapter_loop :
       Standalone links, images, code, and Mermaid blocks in the final text
       are also projected into Discord embeds using the shared server
       chat-block parser.
+    - [Run_cancelled]: sends a typed cancellation notice as a new message.
     - [Event_error]: sends error text as a new message.
     - [Link_block], [Image_block], [Audio_block]: send rich block embeds
       or messages.
@@ -60,7 +61,7 @@ val adapter_loop :
     Falls back to a single POST if no deltas arrive before [Run_finished].
 
     [on_send_result] is invoked exactly once when the turn terminates through
-    [Run_finished] or [Event_error]. The result reports whether the primary
+    [Run_finished], [Run_cancelled], or [Event_error]. The result reports whether the primary
     final text/error reply was actually delivered: the final PATCH plus every
     overflow POST must succeed. Streaming previews, tool embeds, and other rich
     side messages do not produce terminal callback invocations. The callback
@@ -89,6 +90,13 @@ module For_testing : sig
       cards use existing channel-native projection paths; code and Mermaid
       are rendered into embeds for richer Discord delivery. *)
 
+  val max_rich_embeds_per_turn : int
+
+  val rich_embed_delivery_plan :
+    string -> Discord_rest_client.embed list * int
+  (** Returns the bounded, order-preserving embed delivery list and the number
+      omitted by {!max_rich_embeds_per_turn}. *)
+
   val adapter_loop :
     token:string ->
     channel_id:string ->
@@ -96,6 +104,7 @@ module For_testing : sig
     post_message:(content:string -> (string, error) result) ->
     edit_message:(message_id:string -> content:string -> (unit, error) result) ->
     send_message:(content:string -> (unit, error) result) ->
+    ?send_rich_embeds:(string -> unit) ->
     ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
     ?base_url:string ->
     ?on_send_result:((unit, error) result -> unit) ->
@@ -103,6 +112,7 @@ module For_testing : sig
     unit
   (** Test seam for the text-delivery transport. Production uses
       {!Discord_rest_client}; tests can inject exact POST/PATCH outcomes while
-      exercising the real event-loop state machine. Rich side-message helpers
-      remain production-backed and should not be emitted by transport tests. *)
+      exercising the real event-loop state machine. [send_rich_embeds] replaces
+      the optional rich-side-message projection so tests can pin that terminal
+      settlement happens only after that projection is joined. *)
 end

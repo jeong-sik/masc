@@ -76,6 +76,7 @@ type failure_kind =
   | Transcript_persist_failed
   | Connector_unavailable
   | Delivery_failed
+  | Ambiguous_delivery
   | Cancelled
   | Internal_error
 
@@ -222,6 +223,8 @@ let persistence_file = "chat-queue.json"
 let persistence_keepers_dir : string option Atomic.t = Atomic.make None
 let global_load_errors : snapshot_load_error list Atomic.t = Atomic.make []
 let fail_next_persist_for_testing = Atomic.make false
+let before_persist_for_testing : (path:string -> unit) option Atomic.t =
+  Atomic.make None
 let transition_observer : transition_observer option Atomic.t = Atomic.make None
 
 let registry_mutex = Eio.Mutex.create ()
@@ -728,6 +731,7 @@ let failure_kind_to_string = function
   | Transcript_persist_failed -> "transcript_persist_failed"
   | Connector_unavailable -> "connector_unavailable"
   | Delivery_failed -> "delivery_failed"
+  | Ambiguous_delivery -> "ambiguous_delivery"
   | Cancelled -> "cancelled"
   | Internal_error -> "internal_error"
 
@@ -738,6 +742,7 @@ let failure_kind_of_string = function
   | "transcript_persist_failed" -> Ok Transcript_persist_failed
   | "connector_unavailable" -> Ok Connector_unavailable
   | "delivery_failed" -> Ok Delivery_failed
+  | "ambiguous_delivery" -> Ok Ambiguous_delivery
   | "cancelled" -> Ok Cancelled
   | "internal_error" -> Ok Internal_error
   | value -> Error (Printf.sprintf "unknown chat queue failure kind: %s" value)
@@ -801,12 +806,15 @@ let save_json_atomic path json =
   |> Fs_compat.save_file_atomic_private path
 
 let persist_snapshot_to_path path ~revision receipts =
-  if Atomic.exchange fail_next_persist_for_testing false
-  then Error "injected chat queue persist failure"
-  else
-    try save_json_atomic path (snapshot_to_yojson ~revision receipts) with
-    | Eio.Cancel.Cancelled _ as exception_ -> raise exception_
-    | exception_ -> Error (Printexc.to_string exception_)
+  try
+    Option.iter (fun before_persist -> before_persist ~path)
+      (Atomic.get before_persist_for_testing);
+    if Atomic.exchange fail_next_persist_for_testing false
+    then Error "injected chat queue persist failure"
+    else save_json_atomic path (snapshot_to_yojson ~revision receipts)
+  with
+  | Eio.Cancel.Cancelled _ as exception_ -> raise exception_
+  | exception_ -> Error (Printexc.to_string exception_)
 
 let revision_in_domain revision =
   Int64.compare revision 0L >= 0 && Int64.compare revision max_revision <= 0
@@ -1015,12 +1023,35 @@ let parse_message_list json =
     loop [] values
   | _ -> Error "legacy chat queue items must be an array"
 
+let recovery_completed_at () =
+  let now = Time_compat.now () in
+  if Float.is_finite now then now else 0.0
+
+let ambiguous_delivery_failure ~lease_id ~started_at =
+  let lease_detail =
+    match started_at with
+    | None -> Printf.sprintf "lease=%s" lease_id
+    | Some started_at ->
+      Printf.sprintf "lease=%s started_at=%.17g" lease_id started_at
+  in
+  { completed_at = recovery_completed_at ()
+  ; kind = Ambiguous_delivery
+  ; detail =
+      Printf.sprintf
+        "process restarted with an unfinalized inflight %s; transcript or connector effects may already be durable, so automatic replay is suppressed"
+        lease_detail
+  ; outcome_ref = None
+  }
+
 let parse_v1_inflight json =
   match Json_util.assoc_member_opt "inflight" json with
-  | None | Some `Null -> Ok []
+  | None | Some `Null -> Ok None
   | Some (`Assoc _ as inflight) ->
     (match required_string inflight "lease_id", required_member inflight "items" with
-     | Ok lease_id, Ok items_json when String.trim lease_id <> "" -> parse_message_list items_json
+     | Ok lease_id, Ok items_json when String.trim lease_id <> "" ->
+       Result.map
+         (fun messages -> Some (lease_id, messages))
+         (parse_message_list items_json)
      | Ok _, Ok _ -> Error "legacy inflight lease_id must be non-empty"
      | Error error, _ | _, Error error -> Error error)
   | Some _ -> Error "legacy chat queue inflight must be null or an object"
@@ -1028,25 +1059,39 @@ let parse_v1_inflight json =
 let parse_v1_for_migration json =
   match required_member json "items", parse_v1_inflight json with
   | Ok items_json, Ok inflight ->
-    Result.map (fun pending -> inflight @ pending) (parse_message_list items_json)
+    Result.map (fun pending -> inflight, pending) (parse_message_list items_json)
   | Error error, _ | _, Error error -> Error error
 
 let migrate_v1_to_v3 path json =
   match parse_v1_for_migration json with
   | Error error -> Error (`Parse error)
-  | Ok messages ->
+  | Ok (inflight, pending) ->
+    let receipt state =
+      { receipt_id = Receipt_id.generate (); dedupe_fingerprint = None; state }
+    in
+    let inflight_receipts, recovered_count =
+      match inflight with
+      | None -> [], 0
+      | Some (lease_id, messages) ->
+        ( List.map
+            (fun message ->
+               receipt
+                 (Stored_failed
+                    { failure =
+                        ambiguous_delivery_failure ~lease_id
+                          ~started_at:None
+                    ; retained_message = Some message
+                    }))
+            messages
+        , List.length messages )
+    in
     let receipts =
-      List.map
-        (fun message ->
-           { receipt_id = Receipt_id.generate ()
-           ; dedupe_fingerprint = None
-           ; state = Stored_pending message
-           })
-        messages
+      inflight_receipts
+      @ List.map (fun message -> receipt (Stored_pending message)) pending
     in
     let revision = 1L in
     (match persist_snapshot_to_path path ~revision receipts with
-     | Ok () -> Ok (revision, receipts)
+     | Ok () -> Ok (revision, receipts, recovered_count)
      | Error error -> Error (`Persist error))
 
 type loaded_snapshot = {
@@ -1074,8 +1119,16 @@ let recover_inflight path ~revision receipts =
       List.map
         (fun receipt ->
            match receipt.state with
-           | Stored_inflight { message; _ } ->
-             { receipt with state = Stored_pending message }
+           | Stored_inflight { lease_id; started_at; message } ->
+             { receipt with
+               state =
+                 Stored_failed
+                   { failure =
+                       ambiguous_delivery_failure ~lease_id
+                         ~started_at:(Some started_at)
+                   ; retained_message = Some message
+                   }
+             }
            | Stored_pending _ | Stored_delivered _ | Stored_failed _ -> receipt)
         receipts
     in
@@ -1227,8 +1280,8 @@ let load_snapshot ~keepers_dir ~keeper_name =
                   "legacy v1 contains active connector messages without both an exact transcript_context and explicit transcript_ownership; reconcile them before startup")
            else
            (match migrate_v1_to_v3 path json with
-            | Ok (revision, receipts) ->
-              Ok (Some { revision; receipts; migrated = true; recovered_count = 0 })
+            | Ok (revision, receipts, recovered_count) ->
+              Ok (Some { revision; receipts; migrated = true; recovered_count })
             | Error (`Parse message) ->
               Error (load_error Parse_failed ~path message)
             | Error (`Persist message) ->
@@ -1862,10 +1915,12 @@ let configure_persistence ~config =
 module For_testing = struct
   let reset () =
     Atomic.set fail_next_persist_for_testing false;
+    Atomic.set before_persist_for_testing None;
     Atomic.set persistence_keepers_dir None;
     Atomic.set global_load_errors [];
     Atomic.set transition_observer None;
     with_registry_rw (fun () -> Hashtbl.clear registry)
 
   let fail_next_persist () = Atomic.set fail_next_persist_for_testing true
+  let set_before_persist callback = Atomic.set before_persist_for_testing callback
 end

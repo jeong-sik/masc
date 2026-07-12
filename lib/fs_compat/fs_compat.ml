@@ -675,15 +675,135 @@ let rec read_fd_chunks fd buffer =
     read_fd_chunks fd buffer
   | exception Unix.Unix_error (Unix.EINTR, _, _) -> read_fd_chunks fd buffer
 
-let rec write_fd_all fd bytes offset remaining =
-  if remaining > 0 then
-    match Unix.write fd bytes offset remaining with
-    | 0 -> raise (Sys_error "durable append made no write progress")
-    | written -> write_fd_all fd bytes (offset + written) (remaining - written)
-    | exception Unix.Unix_error (Unix.EINTR, _, _) ->
-      write_fd_all fd bytes offset remaining
+type durable_append_operation =
+  | Write
+  | Append_fsync
+  | Rollback_truncate
+  | Rollback_fsync
 
-let update_private_file_durable_locked path decide =
+type durable_append_failure =
+  | Unix_error of
+      { operation : durable_append_operation
+      ; error : Unix.error
+      ; function_name : string
+      ; argument : string
+      }
+  | No_write_progress
+
+type durable_append_error =
+  { append_failure : durable_append_failure
+  ; rollback_failures : durable_append_failure list
+  }
+
+exception Durable_append_failed of durable_append_error
+
+let durable_append_operation_to_string = function
+  | Write -> "write"
+  | Append_fsync -> "append fsync"
+  | Rollback_truncate -> "rollback truncate"
+  | Rollback_fsync -> "rollback fsync"
+;;
+
+let durable_append_failure_to_string = function
+  | No_write_progress -> "write made no progress"
+  | Unix_error { operation; error; function_name; argument } ->
+    Printf.sprintf
+      "%s failed: %s (function=%S argument=%S)"
+      (durable_append_operation_to_string operation)
+      (Unix.error_message error)
+      function_name
+      argument
+;;
+
+let durable_append_error_to_string { append_failure; rollback_failures } =
+  let append = durable_append_failure_to_string append_failure in
+  match rollback_failures with
+  | [] -> Printf.sprintf "durable append failed and rollback succeeded: %s" append
+  | failures ->
+    Printf.sprintf
+      "durable append failed: %s; rollback failed: %s"
+      append
+      (failures
+       |> List.map durable_append_failure_to_string
+       |> String.concat "; ")
+;;
+
+let () =
+  Printexc.register_printer (function
+    | Durable_append_failed error ->
+      Some
+        (Printf.sprintf
+           "Fs_compat.Durable_append_failed(%s)"
+           (durable_append_error_to_string error))
+    | _ -> None)
+;;
+
+type durable_append_io_for_testing =
+  { write : Unix.file_descr -> bytes -> int -> int -> int
+  ; ftruncate : Unix.file_descr -> int -> unit
+  ; fsync : Unix.file_descr -> unit
+  }
+
+let unix_failure ~operation error function_name argument =
+  Unix_error { operation; error; function_name; argument }
+;;
+
+let rec write_fd_all ~write fd bytes offset remaining =
+  if remaining = 0
+  then Ok ()
+  else
+    match write fd bytes offset remaining with
+    | 0 -> Error No_write_progress
+    | written -> write_fd_all ~write fd bytes (offset + written) (remaining - written)
+    | exception Unix.Unix_error (Unix.EINTR, _, _) ->
+      write_fd_all ~write fd bytes offset remaining
+    | exception Unix.Unix_error (error, function_name, argument) ->
+      Error (unix_failure ~operation:Write error function_name argument)
+;;
+
+let rec run_unix_io ~operation f =
+  match f () with
+  | () -> Ok ()
+  | exception Unix.Unix_error (Unix.EINTR, _, _) -> run_unix_io ~operation f
+  | exception Unix.Unix_error (error, function_name, argument) ->
+    Error (unix_failure ~operation error function_name argument)
+;;
+
+let rollback_durable_append ~io ~fd ~original_length =
+  let truncate_result =
+    run_unix_io ~operation:Rollback_truncate (fun () ->
+      io.ftruncate fd original_length)
+  in
+  let fsync_result =
+    run_unix_io ~operation:Rollback_fsync (fun () -> io.fsync fd)
+  in
+  [ truncate_result; fsync_result ]
+  |> List.filter_map (function
+    | Ok () -> None
+    | Error failure -> Some failure)
+;;
+
+let append_fd_durable ~io ~fd ~original_length suffix =
+  let bytes = Bytes.of_string suffix in
+  let append_result =
+    match write_fd_all ~write:io.write fd bytes 0 (Bytes.length bytes) with
+    | Error _ as error -> error
+    | Ok () -> run_unix_io ~operation:Append_fsync (fun () -> io.fsync fd)
+  in
+  match append_result with
+  | Ok () -> Ok ()
+  | Error append_failure ->
+    let rollback_failures = rollback_durable_append ~io ~fd ~original_length in
+    Error { append_failure; rollback_failures }
+;;
+
+let append_fd_durable_for_testing = append_fd_durable
+
+let durable_append_unix_io =
+  { write = Unix.write; ftruncate = Unix.ftruncate; fsync = Unix.fsync }
+;;
+
+let update_private_file_durable_locked_result path decide =
   test_exec_home_guard ~op:"update_private_file_durable_locked" path;
   let dir = Filename.dirname path in
   mkdir_p_memoized dir;
@@ -706,15 +826,23 @@ let update_private_file_durable_locked path decide =
          ignore (Unix.lseek fd 0 Unix.SEEK_SET : int);
          let existing = read_fd_chunks fd (Buffer.create 4096) in
          let suffix, result = decide existing in
-         (match suffix with
-          | None -> ()
+         match suffix with
+          | None -> Ok result
           | Some suffix ->
             (* See Unix.lseek: only the file-position side effect is required. *)
-            ignore (Unix.lseek fd 0 Unix.SEEK_END : int);
-            let bytes = Bytes.of_string suffix in
-            write_fd_all fd bytes 0 (Bytes.length bytes);
-            Unix.fsync fd);
-         result))
+            let original_length = Unix.lseek fd 0 Unix.SEEK_END in
+            append_fd_durable
+              ~io:durable_append_unix_io
+              ~fd
+              ~original_length
+              suffix
+            |> Result.map (fun () -> result)))
+;;
+
+let update_private_file_durable_locked path decide =
+  match update_private_file_durable_locked_result path decide with
+  | Ok result -> result
+  | Error error -> raise (Durable_append_failed error)
 ;;
 
 let append_jsonl (path : string) (json : Yojson.Safe.t) : unit =

@@ -1975,6 +1975,8 @@
 
 (include stanzas/test_fs_compat_append_jsonl_atomicity.inc)
 
+(include stanzas/test_fs_compat_durable_append.inc)
+
 (include stanzas/test_fs_compat_home_guard.inc)
 
 (include stanzas/test_fs_compat_mkdir_memo.inc)

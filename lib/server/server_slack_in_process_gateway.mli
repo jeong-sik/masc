@@ -4,8 +4,9 @@
     Spawned once during server bootstrap. Forks a long-running fiber on the
     server-wide [Eio.Switch.t] that:
 
-    1. Resolves the bot identity via [auth.test] (non-fatal) and connects to
-       Slack Socket Mode ({!Slack_socket_client.run}).
+    1. Resolves the bot and workspace identity via [auth.test] and connects to
+       Slack Socket Mode ({!Slack_socket_client.run}). Missing workspace
+       provenance is a fail-closed startup error.
     2. For each triggered [Message_create] / [App_mention] event, looks up the
        channel→keeper binding
        ({!Channel_gate_slack_state.resolve_keeper_for_channel}), runs the keeper
@@ -56,11 +57,37 @@ val load_trigger_policy_from_toml :
 
 val trigger_policy_load_error_to_string : trigger_policy_load_error -> string
 
+type authenticated_workspace =
+  { bot_user_id : string
+  ; team_id : string
+  }
+(** Authenticated Slack identity required before Socket Mode starts. *)
+
+type auth_workspace_error =
+  | Bot_token_missing
+  | Auth_test_failed of Slack_rest_client.error
+  | Workspace_provenance_missing of { bot_user_id : string }
+(** Closed startup failures for the Slack authentication boundary. In
+    particular, a successful [auth.test] response without [team_id] cannot
+    start a gateway whose admission identity requires workspace provenance. *)
+
+val resolve_authenticated_workspace :
+  auth_test:
+    (token:string ->
+    (Slack_rest_client.auth_test_ok, Slack_rest_client.error) result) ->
+  bot_token:string option ->
+  (authenticated_workspace, auth_workspace_error) result
+(** Resolve and validate the bot plus workspace identity. Exposed with an
+    injected [auth_test] boundary for deterministic startup tests. *)
+
+val auth_workspace_error_to_string : auth_workspace_error -> string
+
 val start :
   sw:Eio.Switch.t ->
   env:Eio_unix.Stdenv.base ->
   state:Mcp_server.server_state ->
   unit
-(** Fork the gateway fiber. Returns immediately. Warnings and the eventual
-    gateway crash (if any) are emitted via [Log.Server]. Cancellation
-    propagates through [~sw]. *)
+(** Fork the gateway fiber after authenticated workspace provenance is
+    available. Missing bot credentials, [auth.test] failure, or absent
+    [team_id] records a startup error and does not start Socket Mode. Returns
+    immediately. Cancellation propagates through [~sw]. *)

@@ -319,8 +319,9 @@ let test_source_boundaries_preserve_fifo_runs () =
      | `Empty -> true
      | `Leased _ | `Already_leased _ | `Error _ -> false)
 
-let test_nack_and_restart_preserve_receipt () =
-  Printf.printf "Test: nack and restart replay preserve receipt identity\n%!";
+let test_nack_and_restart_terminalize_ambiguous_receipt () =
+  Printf.printf
+    "Test: nack retries explicitly but restart suppresses ambiguous replay\n%!";
   with_base "keeper-chat-replay-receipt" @@ fun base_path ->
   let keeper_name = "replay-receipt" in
   ignore (configure base_path : Keeper_chat_queue.configure_report);
@@ -342,8 +343,20 @@ let test_nack_and_restart_preserve_receipt () =
   let report = configure_raw base_path in
   check "restart recovery is reported" (report.recovered_receipt_count = 1);
   let replay = Keeper_chat_queue.snapshot ~keeper_name in
-  check "restart moves inflight back to pending" (replay.inflight = []);
-  check "restart preserves receipt id" (active_ids replay.pending = [ expected ])
+  check "restart does not replay inflight work"
+    (replay.pending = [] && replay.inflight = []);
+  check "restart preserves receipt id in terminal history"
+    (terminal_ids replay.terminal = [ expected ]);
+  check "restart records an explicit ambiguous-delivery terminal"
+    (match replay.terminal with
+     | [ { state = Failed failure; _ } ] ->
+       failure.kind = Ambiguous_delivery
+       && failure.outcome_ref = None
+       && String.trim failure.detail <> ""
+     | _ -> false);
+  let persisted = read_raw (snapshot_path ~base_path ~keeper_name) in
+  check "ambiguous terminal retains the prompt for operator reconciliation"
+    (Astring.String.is_infix ~affix:"retry me" persisted)
 
 let test_persist_failures_roll_back () =
   Printf.printf "Test: every lifecycle persistence failure rolls back\n%!";
@@ -414,21 +427,32 @@ let test_v1_atomic_migration () =
   save_raw path (Yojson.Safe.pretty_to_string v1);
   let report = configure_raw base_path in
   check "migration is reported once" (report.migrated_keeper_count = 1);
+  check "legacy inflight recovery is reported"
+    (report.recovered_receipt_count = 1);
   let migrated = Keeper_chat_queue.snapshot ~keeper_name in
-  check "legacy inflight is replayed ahead of pending"
+  check "legacy pending remains replayable"
     (List.map
        (fun (receipt : Keeper_chat_queue.active_receipt) ->
           receipt.message.content)
        migrated.pending
-     = [ "legacy inflight"; "legacy pending" ]);
-  let migrated_ids = active_ids migrated.pending in
-  check "migration mints durable ids" (List.for_all (( <> ) "") migrated_ids);
+     = [ "legacy pending" ]);
+  check "legacy inflight becomes an explicit ambiguous terminal"
+    (match migrated.terminal with
+     | [ { state = Failed failure; _ } ] ->
+       failure.kind = Ambiguous_delivery
+     | _ -> false);
+  let pending_ids = active_ids migrated.pending in
+  let terminal_receipt_ids = terminal_ids migrated.terminal in
+  check "migration mints durable ids"
+    (List.for_all (( <> ) "") (pending_ids @ terminal_receipt_ids));
   Keeper_chat_queue.For_testing.reset ();
   let second_report = configure_raw base_path in
   check "v3 is not migrated again" (second_report.migrated_keeper_count = 0);
   check
-    "migrated ids survive another restart"
-    (active_ids (Keeper_chat_queue.snapshot ~keeper_name).pending = migrated_ids);
+    "migrated active and terminal ids survive another restart"
+    (let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
+     active_ids snapshot.pending = pending_ids
+     && terminal_ids snapshot.terminal = terminal_receipt_ids);
   (match Safe_ops.read_json_file_safe path with
    | Ok json ->
      check
@@ -1360,7 +1384,7 @@ let () =
   test_durable_receipt_lifecycle ();
   test_coalesced_finalize_preserves_all_receipts ();
   test_source_boundaries_preserve_fifo_runs ();
-  test_nack_and_restart_preserve_receipt ();
+  test_nack_and_restart_terminalize_ambiguous_receipt ();
   test_persist_failures_roll_back ();
   test_v1_atomic_migration ();
   test_v1_active_connector_requires_ownership_reconciliation ();

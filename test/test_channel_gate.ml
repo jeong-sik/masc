@@ -54,6 +54,30 @@ let test_validate_rejects_duplicate_message () =
   | Ok () -> fail "expected duplicate validation failure"
   | Error _ -> fail "expected Duplicate_message"
 
+let test_validate_scopes_slack_admission_by_team_and_channel () =
+  reset_dedup ();
+  let key = unique_key "slack-source-scope" in
+  let message = make_message ~idempotency_key:key () in
+  let validate ~team_id ~channel_id =
+    Channel_gate.validate
+      ~admission_source:(Channel_gate.Slack { team_id; channel_id })
+      message
+  in
+  (match validate ~team_id:"T1" ~channel_id:"C1" with
+   | Ok () -> ()
+   | Error _ -> fail "first Slack source must be admitted");
+  (match validate ~team_id:"T2" ~channel_id:"C1" with
+   | Ok () -> ()
+   | Error _ -> fail "same raw key in another Slack team must be admitted");
+  (match validate ~team_id:"T1" ~channel_id:"C2" with
+   | Ok () -> ()
+   | Error _ -> fail "same raw key in another Slack channel must be admitted");
+  match validate ~team_id:"T1" ~channel_id:"C1" with
+  | Error (Channel_gate.Duplicate_message duplicate) ->
+    check string "raw duplicate identity" key duplicate
+  | Ok () -> fail "same Slack team/channel source must be deduplicated"
+  | Error _ -> fail "expected source-scoped Duplicate_message"
+
 let test_validate_allows_key_after_cleanup () =
   reset_dedup ();
   let key = unique_key "cleanup" in
@@ -428,6 +452,33 @@ let test_handle_inbound_passes_metadata_to_dispatch () =
       | None -> fail "dispatch should receive metadata")
   | Error e -> fail (Channel_gate.gate_error_to_string e)
 
+let test_admission_source_does_not_rewrite_dispatch_idempotency_key () =
+  reset_dedup ();
+  let raw_key = unique_key "slack-msg" in
+  let dispatched_key = ref None in
+  let dispatch ~channel:_ ~channel_user_id:_ ~channel_user_name:_
+      ~channel_workspace_id:_ ~keeper_name:_ ~idempotency_key ~metadata:_
+      ~content:_ =
+    dispatched_key := Some idempotency_key;
+    Gate_protocol.Reply
+      { content = "ok"
+      ; structured = None
+      ; stats = None
+      ; message_request = None
+      }
+  in
+  let message = make_message ~idempotency_key:raw_key () in
+  match
+    Channel_gate.handle_inbound
+      ~admission_source:
+        (Channel_gate.Slack { team_id = "T1"; channel_id = "C1" })
+      ~dispatch message
+  with
+  | Ok _ ->
+    check (option string) "durable dispatch receives the one raw key"
+      (Some raw_key) !dispatched_key
+  | Error error -> fail (Channel_gate.gate_error_to_string error)
+
 let test_handle_inbound_streaming_forwards_snapshot_callback () =
   reset_dedup ();
   let snapshots = ref [] in
@@ -498,6 +549,8 @@ let () =
             test_validate_rejects_empty_keeper_name;
           test_case "rejects duplicate message" `Quick
             test_validate_rejects_duplicate_message;
+          test_case "scopes Slack admission by team and channel" `Quick
+            test_validate_scopes_slack_admission_by_team_and_channel;
           test_case "allows key after cleanup" `Quick
             test_validate_allows_key_after_cleanup;
           test_case "dedup ttl covers discord resume replays" `Quick
@@ -521,6 +574,8 @@ let () =
             test_handle_inbound_passes_channel_context_to_dispatch;
           test_case "passes metadata to dispatch" `Quick
             test_handle_inbound_passes_metadata_to_dispatch;
+          test_case "admission scope preserves raw dispatch key" `Quick
+            test_admission_source_does_not_rewrite_dispatch_idempotency_key;
           test_case "streaming forwards snapshot callback" `Quick
             test_handle_inbound_streaming_forwards_snapshot_callback;
           test_case "streaming validation blocks callback" `Quick

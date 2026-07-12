@@ -2,8 +2,10 @@
 
     Every accepted message receives a stable receipt before the first durable
     write.  The receipt then follows exactly one closed lifecycle:
-    [Pending -> Inflight -> Delivered | Failed].  A process restart moves an
-    unfinalized [Inflight] receipt back to [Pending] without changing its id.
+    [Pending -> Inflight -> Delivered | Failed].  A process restart converts an
+    unfinalized [Inflight] receipt to a retained [Ambiguous_delivery] failure:
+    transcript or connector effects may already have committed, so startup must
+    not replay it without an external idempotency guarantee.
 
     Queue delivery is at-least-once.  Same-source receipts may share one turn,
     but their identities are never merged: a lease and its terminal transition
@@ -68,6 +70,7 @@ type failure_kind =
   | Transcript_persist_failed
   | Connector_unavailable
   | Delivery_failed
+  | Ambiguous_delivery
   | Cancelled
   | Internal_error
 
@@ -262,4 +265,5 @@ val configuration_errors : unit -> snapshot_load_error list
 module For_testing : sig
   val reset : unit -> unit
   val fail_next_persist : unit -> unit
+  val set_before_persist : (path:string -> unit) option -> unit
 end

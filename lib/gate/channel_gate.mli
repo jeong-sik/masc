@@ -52,6 +52,14 @@ type validation_error = Gate_protocol.validation_error =
   | Empty_idempotency_key
   | Duplicate_message of string
 
+type admission_source =
+  | External_channel of { channel : string; workspace_id : string }
+  | Slack of { team_id : string; channel_id : string }
+(** Typed source scope for the gate's short-lived admission reservation.
+    The raw [idempotency_key] remains the single external message identity sent
+    to the durable dispatch backend; this source is combined with it only in
+    the in-memory admission table. *)
+
 type accepted_failure = Gate_protocol.accepted_failure =
   { detail : string
   ; message_id : string
@@ -63,18 +71,23 @@ type accepted_replay = Gate_protocol.accepted_replay =
   ; receipt_id : string option
   }
 
-val validate : inbound_message -> (unit, validation_error) result
+val validate :
+  ?admission_source:admission_source ->
+  inbound_message ->
+  (unit, validation_error) result
 (** Validation plus idempotency gate.  Returns [Ok ()] when the message can proceed.
-    Duplicate detection consumes the idempotency key on first success. *)
+    Duplicate detection consumes the source-scoped idempotency identity on
+    first success. When [admission_source] is omitted, [channel] and
+    [channel_workspace_id] form the typed external-channel scope. *)
 
 val validation_error_to_string : validation_error -> string
 
 (** {1 Deduplication} *)
 
-val dedup_check : string -> bool
-(** [dedup_check key] returns [true] if [key] was already seen
-    within the TTL window ([MASC_CHANNEL_GATE_DEDUP_TTL_SEC], default
-    3600 s).  Thread-safe. *)
+val dedup_check : source:admission_source -> string -> bool
+(** [dedup_check ~source key] returns [true] if the source-scoped [key] was
+    already seen within the TTL window
+    ([MASC_CHANNEL_GATE_DEDUP_TTL_SEC], default 3600 s). Thread-safe. *)
 
 val dedup_cleanup : now:float -> unit
 (** Evict expired entries.  Called periodically by the Pulse consumer
@@ -145,6 +158,7 @@ type streaming_dispatch_fn =
     redacts provider deltas before invoking it. *)
 
 val handle_inbound :
+  ?admission_source:admission_source ->
   dispatch:dispatch_fn ->
   inbound_message ->
   (outbound_message, gate_error) result
@@ -153,11 +167,12 @@ val handle_inbound :
     (which is on the other side of the [dispatch] boundary). *)
 
 val handle_inbound_streaming :
+  ?admission_source:admission_source ->
   dispatch:streaming_dispatch_fn ->
   on_text_snapshot:(string -> unit) ->
   inbound_message ->
   (outbound_message, gate_error) result
-(** Streaming variant of {!handle_inbound}. Validation, deduplication,
+(** Streaming variant of {!handle_inbound}. Validation, source-scoped deduplication,
     metrics, and result mapping are identical; only the injected dispatch
     receives [on_text_snapshot]. Validation failures never invoke the
     streaming callback. *)

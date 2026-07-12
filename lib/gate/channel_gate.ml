@@ -40,6 +40,15 @@ type validation_error = Gate_protocol.validation_error =
   | Empty_idempotency_key
   | Duplicate_message of string
 
+type admission_source =
+  | External_channel of { channel : string; workspace_id : string }
+  | Slack of { team_id : string; channel_id : string }
+
+type admission_identity =
+  { source : admission_source
+  ; idempotency_key : string
+  }
+
 type accepted_failure = Gate_protocol.accepted_failure =
   { detail : string
   ; message_id : string
@@ -99,7 +108,7 @@ let dedup_ttl_sec () =
 
 (* ── Deduplication (TTL hashtable, Eio-guarded mutex) ───────── *)
 
-let dedup_table : (string, float) Hashtbl.t = Hashtbl.create 256
+let dedup_table : (admission_identity, float) Hashtbl.t = Hashtbl.create 256
 
 let dedup_mutex = Eio.Mutex.create ()
 
@@ -107,27 +116,34 @@ let dedup_max_entries = 10_000
 
 let with_dedup_lock f = Eio_guard.with_mutex dedup_mutex f
 
-let dedup_check key =
+let admission_identity ~source idempotency_key = { source; idempotency_key }
+
+let dedup_check ~source idempotency_key =
+  let identity = admission_identity ~source idempotency_key in
   with_dedup_lock (fun () ->
     let now = Unix.gettimeofday () in
     let result =
-      match Hashtbl.find_opt dedup_table key with
+      match Hashtbl.find_opt dedup_table identity with
       | Some ts when now -. ts < dedup_ttl_sec () -> true
       | Some _ ->
-          Hashtbl.remove dedup_table key;
+          Hashtbl.remove dedup_table identity;
           false
       | None -> false
     in
     if not result then begin
       if Hashtbl.length dedup_table >= dedup_max_entries then begin
-        let oldest_key = ref "" in
+        let oldest_identity = ref None in
         let oldest_ts = ref Float.max_float in
-        Hashtbl.iter (fun k ts ->
-          if ts < !oldest_ts then begin oldest_key := k; oldest_ts := ts end
-        ) dedup_table;
-        if !oldest_key <> "" then Hashtbl.remove dedup_table !oldest_key
+        Hashtbl.iter
+          (fun candidate ts ->
+            if ts < !oldest_ts then begin
+              oldest_identity := Some candidate;
+              oldest_ts := ts
+            end)
+          dedup_table;
+        Option.iter (Hashtbl.remove dedup_table) !oldest_identity
       end;
-      Hashtbl.replace dedup_table key now
+      Hashtbl.replace dedup_table identity now
     end;
     result)
 
@@ -144,8 +160,8 @@ let dedup_cleanup ~now =
 let dedup_table_size () =
   with_dedup_lock (fun () -> Hashtbl.length dedup_table)
 
-let dedup_release key =
-  with_dedup_lock (fun () -> Hashtbl.remove dedup_table key)
+let dedup_release identity =
+  with_dedup_lock (fun () -> Hashtbl.remove dedup_table identity)
 
 (* Register dedup_table_size callback to break cycle *)
 let () = Channel_gate_metrics.register_dedup_size_fn dedup_table_size
@@ -252,17 +268,28 @@ let inbound_error_notice = function
 
 (* ── Validation (uses local dedup) ───────────────────────────── *)
 
-let validate (msg : inbound_message) =
+let admission_source_for_message (msg : inbound_message) =
+  External_channel
+    { channel = msg.channel; workspace_id = msg.channel_workspace_id }
+
+let validate ?admission_source (msg : inbound_message) =
+  let source =
+    Option.value admission_source ~default:(admission_source_for_message msg)
+  in
   Gate_protocol.validate
     ~max_content_length:(max_content_length ())
-    ~dedup_check
+    ~dedup_check:(dedup_check ~source)
     msg
 
 (* ── Dispatch ────────────────────────────────────────────────── *)
 
-let handle_inbound_with ~dispatch (msg : inbound_message) =
+let handle_inbound_with ?admission_source ~dispatch (msg : inbound_message) =
   let channel = msg.channel in
-  match validate msg with
+  let source =
+    Option.value admission_source ~default:(admission_source_for_message msg)
+  in
+  let identity = admission_identity ~source msg.idempotency_key in
+  match validate ~admission_source:source msg with
   | Error e ->
       Channel_gate_metrics.record_attempt
         ~channel
@@ -299,7 +326,7 @@ let handle_inbound_with ~dispatch (msg : inbound_message) =
       in
       (match result with
        | Error exception_ ->
-           dedup_release msg.idempotency_key;
+           dedup_release identity;
            Channel_gate_metrics.record_internal_error_exn
              ~channel
              ~workspace_id:msg.channel_workspace_id
@@ -330,7 +357,7 @@ let handle_inbound_with ~dispatch (msg : inbound_message) =
               A keeper-side failure did not accept the message, so release the
               reservation: a connector replay of the same event may retry
               instead of being silently discarded as a duplicate. *)
-           dedup_release msg.idempotency_key;
+           dedup_release identity;
            Channel_gate_metrics.record_attempt
              ~channel
              ~workspace_id:msg.channel_workspace_id
@@ -359,7 +386,7 @@ let handle_inbound_with ~dispatch (msg : inbound_message) =
              Channel_gate_metrics.Duplicate;
            Error (Accepted_replay replay)
        | Ok Gate_protocol.Unavailable_result ->
-           dedup_release msg.idempotency_key;
+           dedup_release identity;
            Channel_gate_metrics.record_attempt
              ~channel
              ~workspace_id:msg.channel_workspace_id
@@ -368,8 +395,9 @@ let handle_inbound_with ~dispatch (msg : inbound_message) =
              Channel_gate_metrics.Dispatch_unavailable;
            Error Dispatch_unavailable)
 
-let handle_inbound ~dispatch msg =
-  handle_inbound_with ~dispatch msg
+let handle_inbound ?admission_source ~dispatch msg =
+  handle_inbound_with ?admission_source ~dispatch msg
 
-let handle_inbound_streaming ~dispatch ~on_text_snapshot msg =
-  handle_inbound_with ~dispatch:(dispatch ~on_text_snapshot) msg
+let handle_inbound_streaming ?admission_source ~dispatch ~on_text_snapshot msg =
+  handle_inbound_with ?admission_source
+    ~dispatch:(dispatch ~on_text_snapshot) msg

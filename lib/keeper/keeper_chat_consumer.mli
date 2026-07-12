@@ -26,23 +26,28 @@ type turn_outcome =
 (** [start ~sw ~clock ~base_path ~handle_turn] begins a background fiber that polls [Keeper_chat_queue]
     every [MASC_KEEPER_QUEUE_POLL_SEC] seconds (default 1.0).
 
-    Per keeper and per tick: when a turn is in flight
+    The fleet scanner only discovers Keeper names and assigns each one a
+    process-lifetime lane fiber. Per keeper and per lane tick: when a turn is in flight
     ([Keeper_turn_admission.in_flight]), queued messages are left to
     accumulate; once the slot is free, the head run of same-source messages
     is leased ([Keeper_chat_queue.lease_batch]) and merged into ONE
     coalesced message ([Keeper_chat_queue.merge_batch]).  The merged turn
-    then runs in a keeper-scoped child fiber, so a slow queued turn for one
-    keeper does not block polling or delivery for other keepers.  A
+    then runs in a keeper-scoped child fiber. Lease/finalization persistence
+    retries are also executed by that Keeper's lane, so slow finalization I/O
+    cannot block discovery or delivery for other keepers. A
     keeper-local dispatch gate preserves the single follow-up turn contract
     for messages sent during an existing queued turn.
 
-    Delivery is at-least-once. [handle_turn]'s typed terminal outcome is durably
+    [handle_turn]'s typed terminal outcome is durably
     finalized as [Delivered] or [Failed]. [Deferred] and structured cancellation
     nack the unchanged receipt back to [Pending]; [Deferred] is reserved for a
     typed admission rejection such as an active shutdown fence, so the same
     accepted receipt is retried after the lane reopens. An unexpected handler
     exception becomes a durable [Internal_error] failure instead of a
-    poison-message retry loop. There is deliberately no second wall-clock
+    poison-message retry loop. A process restart never blindly replays an
+    [Inflight] receipt: queue recovery terminalizes it as
+    [Ambiguous_delivery], because transcript or connector effects may already
+    have committed. There is deliberately no second wall-clock
     watchdog: the turn runtime owns timeout/cancellation and must return the
     typed outcome.
 

@@ -514,6 +514,12 @@ let start_keeper_chat_queue
            keeper_label
            error.Keeper_chat_queue.message)
       queue_report.load_errors;
+    if queue_report.recovered_receipt_count > 0
+    then
+      Log.Keeper.warn
+        "keeper_chat_queue: terminalized %d unfinalized inflight receipt(s) as \
+         ambiguous_delivery during startup; automatic replay is suppressed"
+        queue_report.recovered_receipt_count;
     if not (Keeper_chat_queue.persistence_matches_config ~config:workspace_config)
     then
       Error

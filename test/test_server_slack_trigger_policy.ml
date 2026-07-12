@@ -183,6 +183,55 @@ let test_invalid_runtime_toml_policy_is_error () =
     | Ok _ -> fail "invalid trigger-policy value must fail closed")
 ;;
 
+let test_missing_bot_token_is_typed_auth_error () =
+  let auth_test ~token:_ = fail "auth.test must not run without a bot token" in
+  match G.resolve_authenticated_workspace ~auth_test ~bot_token:None with
+  | Error G.Bot_token_missing -> ()
+  | Error _ -> fail "expected Bot_token_missing"
+  | Ok _ -> fail "missing bot token must fail closed"
+;;
+
+let test_auth_test_failure_is_typed_auth_error () =
+  let auth_test ~token:_ = Error (Slack_rest_client.Network "offline") in
+  match
+    G.resolve_authenticated_workspace ~auth_test ~bot_token:(Some "xoxb-test")
+  with
+  | Error (G.Auth_test_failed (Slack_rest_client.Network "offline")) -> ()
+  | Error _ -> fail "expected typed auth.test failure"
+  | Ok _ -> fail "auth.test failure must fail closed"
+;;
+
+let test_missing_team_id_is_typed_provenance_error () =
+  let assert_missing team_id =
+    let auth_test ~token:_ =
+      Ok { Slack_rest_client.user_id = "U1"; team_id }
+    in
+    match
+      G.resolve_authenticated_workspace ~auth_test ~bot_token:(Some "xoxb-test")
+    with
+    | Error (G.Workspace_provenance_missing { bot_user_id = "U1" }) -> ()
+    | Error _ -> fail "expected Workspace_provenance_missing"
+    | Ok _ -> fail "auth.test without a usable team_id must fail closed"
+  in
+  assert_missing None;
+  assert_missing (Some "   ")
+;;
+
+let test_authenticated_workspace_requires_team_id () =
+  let auth_test ~token:_ =
+    Ok { Slack_rest_client.user_id = "U1"; team_id = Some " T1 " }
+  in
+  match
+    G.resolve_authenticated_workspace ~auth_test ~bot_token:(Some "xoxb-test")
+  with
+  | Ok { G.bot_user_id; team_id } ->
+    check string "bot user id" "U1" bot_user_id;
+    check string "normalized team id" "T1" team_id
+  | Error error ->
+    failf "expected authenticated workspace: %s"
+      (G.auth_workspace_error_to_string error)
+;;
+
 let test_startup_error_is_operator_visible () =
   with_env "SLACK_APP_TOKEN" "xapp-test" (fun () ->
     with_temp_base (fun () ->
@@ -233,5 +282,15 @@ let () =
             test_invalid_runtime_toml_policy_is_error
         ; test_case "startup error => offline with error" `Quick
             test_startup_error_is_operator_visible
+        ] )
+    ; ( "workspace authentication"
+      , [ test_case "missing bot token => typed error" `Quick
+            test_missing_bot_token_is_typed_auth_error
+        ; test_case "auth.test failure => typed error" `Quick
+            test_auth_test_failure_is_typed_auth_error
+        ; test_case "missing team_id => provenance error" `Quick
+            test_missing_team_id_is_typed_provenance_error
+        ; test_case "team_id => authenticated workspace" `Quick
+            test_authenticated_workspace_requires_team_id
         ] )
     ]

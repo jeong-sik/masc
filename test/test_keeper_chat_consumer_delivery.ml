@@ -636,6 +636,89 @@ let test_finalization_persistence_retry_does_not_redeliver () =
       check_terminal_snapshot ~label:"retried finalization" ~keeper_name
         ~receipt_id:accepted.receipt_id)
 
+let test_blocked_finalization_retry_is_keeper_lane_local () =
+  Printf.printf
+    "Test: blocked finalization retry in Keeper A does not stop Keeper B\n%!";
+  with_env (fun ~base ~clock ->
+    let keeper_a = keeper_name ^ "-blocked-finalize-a" in
+    let keeper_b = keeper_name ^ "-blocked-finalize-b" in
+    match
+      enqueue_checked ~label:"blocked finalization enqueue A"
+        ~keeper_name:keeper_a
+        (discord_msg ~content:"A finalization blocks"
+           ~channel_id:"channel-finalize-a" ~user_id:"user-finalize-a"
+           ~timestamp:6.1 ())
+    with
+    | None -> ()
+    | Some accepted_a ->
+      let config = Workspace.default_config base in
+      let keeper_a_snapshot_path =
+        Filename.concat
+          (Filename.concat (Workspace.keepers_runtime_dir config) keeper_a)
+          "chat-queue.json"
+      in
+      let keeper_a_persists = ref 0 in
+      let retry_blocked, resolve_retry_blocked = Eio.Promise.create () in
+      let release_retry, resolve_release_retry = Eio.Promise.create () in
+      Keeper_chat_queue.For_testing.set_before_persist
+        (Some
+           (fun ~path ->
+              if String.equal path keeper_a_snapshot_path
+              then (
+                incr keeper_a_persists;
+                if !keeper_a_persists = 3
+                then (
+                  Eio.Promise.resolve resolve_retry_blocked ();
+                  Eio.Promise.await release_retry))));
+      let calls_a = ref 0 in
+      let calls_b = ref 0 in
+      let handle_turn ~sw:_ ~keeper_name:dispatched ~queued_message:_
+          ~leased_items:_ =
+        if String.equal dispatched keeper_a
+        then (
+          incr calls_a;
+          Keeper_chat_queue.For_testing.fail_next_persist ();
+          Keeper_chat_consumer.Delivered
+            { outcome_ref = "trace-blocked-finalize-a#1" })
+        else if String.equal dispatched keeper_b
+        then (
+          incr calls_b;
+          Keeper_chat_consumer.Delivered
+            { outcome_ref = "trace-blocked-finalize-b#1" })
+        else
+          Keeper_chat_consumer.Failed
+            { kind = Keeper_chat_queue.Internal_error
+            ; detail = "unexpected Keeper lane in regression test"
+            ; outcome_ref = None
+            }
+      in
+      with_consumer_switch (fun sw ->
+        Keeper_chat_consumer.start ~sw ~clock ~base_path:base ~handle_turn;
+        let blocked = await_promise ~clock ~seconds:5.0 retry_blocked in
+        check "Keeper A reaches its blocked finalization retry" blocked;
+        let accepted_b =
+          enqueue_checked ~label:"blocked finalization enqueue B"
+            ~keeper_name:keeper_b
+            (discord_msg ~content:"B must still run"
+               ~channel_id:"channel-finalize-b" ~user_id:"user-finalize-b"
+               ~timestamp:6.2 ())
+        in
+        (match accepted_b with
+         | None -> ()
+         | Some accepted_b ->
+           check "Keeper B delivers while Keeper A finalization I/O is blocked"
+             (Option.is_some
+                (await_receipt ~clock ~seconds:5.0 ~keeper_name:keeper_b
+                   ~receipt_id:accepted_b.receipt_id ~accept:is_delivered)));
+        Keeper_chat_queue.For_testing.set_before_persist None;
+        Eio.Promise.resolve resolve_release_retry ();
+        check "Keeper A finalization completes after its lane is released"
+          (Option.is_some
+             (await_receipt ~clock ~seconds:5.0 ~keeper_name:keeper_a
+                ~receipt_id:accepted_a.receipt_id ~accept:is_delivered)));
+      check "Keeper A turn is not redelivered" (!calls_a = 1);
+      check "Keeper B turn runs exactly once" (!calls_b = 1))
+
 let test_invalid_delivered_turn_ref_fails_closed () =
   Printf.printf
     "Test: Delivered with an invalid turn_ref becomes a terminal failure\n%!";
@@ -906,6 +989,7 @@ let () =
   test_structured_cancellation_nacks_and_preserves_receipt ();
   test_dispatch_is_concurrent_per_keeper ();
   test_finalization_persistence_retry_does_not_redeliver ();
+  test_blocked_finalization_retry_is_keeper_lane_local ();
   test_invalid_delivered_turn_ref_fails_closed ();
   test_invalid_delivery_diagnostic_does_not_block_lane ();
   test_shutdown_fence_keeps_receipt_pending_until_rollback ();

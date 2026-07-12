@@ -82,10 +82,55 @@ let has_git_marker path =
   in
   try walk path with Sys_error _ -> false
 
-(** Get git root directory *)
+(** Like {!has_git_marker} but also searches immediate child directories
+    (e.g. [repos/]) for a [".git"] marker.  Needed when [base_path] is a
+    sandbox root that contains git repos in sub-directories. *)
+let has_git_marker_deep path =
+  if has_git_marker path then true
+  else
+    let child_marker dir =
+      let candidate = Filename.concat dir ".git" in
+      Sys.file_exists candidate
+    in
+    let search_children () =
+      let entries =
+        try Sys.readdir path |> Array.to_list with Sys_error _ -> []
+      in
+      List.exists
+        (fun entry ->
+           let child = Filename.concat path entry in
+           Sys.is_directory child && child_marker child)
+        entries
+    in
+    search_children ()
+
+(** Get git root directory.
+    Falls back to scanning child directories when the base path itself
+    is not a git repo — handles sandbox environments where repos live
+    under a playground root. *)
 let git_root ~base_path =
-  if not (has_git_marker base_path) then None
-  else git_first_line ~repo_path:base_path [ "rev-parse"; "--show-toplevel" ]
+  if has_git_marker base_path then
+    git_first_line ~repo_path:base_path [ "rev-parse"; "--show-toplevel" ]
+  else if has_git_marker_deep base_path then
+    (* One of the immediate children has .git — try each and use the first
+       one that resolves via rev-parse. *)
+    let entries =
+      try Sys.readdir base_path |> Array.to_list with Sys_error _ -> []
+    in
+    let rec try_children = function
+      | [] -> None
+      | entry :: rest ->
+        let child = Filename.concat base_path entry in
+        if Sys.is_directory child && Sys.file_exists (Filename.concat child ".git")
+        then
+          match git_first_line ~repo_path:child [ "rev-parse"; "--show-toplevel" ] with
+          | Some _ as ok -> ok
+          | None -> try_children rest
+        else try_children rest
+    in
+    try_children entries
+  else
+    None
 
 (** Check if directory is a git repository *)
 let is_git_repo ~base_path =

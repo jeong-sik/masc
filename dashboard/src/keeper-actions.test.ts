@@ -1328,7 +1328,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     await sendPromise
   })
 
-  it('persists the live assistant draft while the stream is in flight', async () => {
+  it('persists intermediate narration as progress while the stream is in flight', async () => {
     let resolveStream: (outcome: { terminal: boolean }) => void = () => {}
     streamKeeperMessage.mockImplementation(async (
       _name: string,
@@ -1356,10 +1356,15 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     await Promise.resolve()
 
     const [pending] = pendingKeeperChatRequestsForKeeper('echo')
-    expect(pending?.assistantDraft?.text).toBe('부분 응답')
+    expect(pending?.assistantDraft?.text).toBe('')
+    expect(pending?.assistantDraft?.rawText).toBe('')
     expect(pending?.assistantDraft?.delivery).toBe('streaming')
     expect(pending?.assistantDraft?.streamState).toBe('streaming')
     expect(pending?.assistantDraft?.traceSteps).toEqual([
+      expect.objectContaining({
+        kind: 'progress',
+        text: '부분 응답',
+      }),
       expect.objectContaining({
         kind: 'tool',
         name: 'keeper_board_list',

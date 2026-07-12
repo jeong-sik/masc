@@ -80,13 +80,26 @@ let artifact_file_path ~base_path ref_path =
 
 let git_commit_exists ~base_path commit =
   match Workspace_git.git_root ~base_path with
-  | None -> false
   | Some root ->
+    (try Workspace_git.commit_exists ~root ~commit
+     with Eio.Cancel.Cancelled _ as e -> raise e | _ -> false)
+  | None ->
+    (* Sandbox base_path may not be a git root itself.
+       Search repos/ subdirectories for a repo containing the commit. *)
+    let repos_dir = Filename.concat base_path "repos" in
     (try
-       Workspace_git.commit_exists ~root ~commit
-     with
-     | Eio.Cancel.Cancelled _ as e -> raise e
-     | _ -> false)
+       directory_entries repos_dir
+       |> List.filter_map (fun name ->
+         let repo = Filename.concat repos_dir name in
+         match Workspace_git.git_root ~base_path:repo with
+         | Some root ->
+           (try
+              if Workspace_git.commit_exists ~root ~commit then Some true
+              else None
+            with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None)
+         | None -> None)
+       |> List.exists (fun x -> x)
+     with _ -> false)
 
 let trajectory_paths_for_trace ~base_path trace_id =
   if not (is_safe_ref_segment trace_id)

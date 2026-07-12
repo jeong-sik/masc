@@ -46,7 +46,9 @@ OnFailure(runtime, policy, retry_after) ==
 
 (* on_success: runtime succeeds, remove from pacing *)
 OnSuccess(runtime) ==
-  /\ pacing' = pacing \with runtime \-> OMITTED
+  /\ pacing' = [
+       r \in (DOMAIN pacing \ {runtime}) |-> pacing[r]
+     ]
   /\ UNCHANGED clock
 
 (* next_turn_due: return the earliest eligible time from catalog *)
@@ -58,8 +60,17 @@ NextTurnDue(catalog) ==
               ELSE clock 
             : r \in catalog }
 
+(* === Init === *)
+Init == /\ pacing = [r \in Runtimes |-> [eligible_at |-> 0, consecutive |-> 0]]
+        /\ clock = 0
+
+(* === Next === *)
+Next == \E r \in Runtimes, p \in Policy, ra \in [Runtimes -> Real+ \union {0}]:
+           OnFailure(r, p, ra)
+         \/ OnSuccess(r)
+
 (* === Invariants === *)
-Inv ==
+PacingBounded ==
   /\ \A r \in DOMAIN pacing:
      /\ (pacing[r])\`eligible_at > clock
      /\ (pacing[r])\`consecutive >= 1

@@ -44,7 +44,7 @@ let on_failure ~policy ~runtime_id ~retry_after ~now t =
   let consecutive =
     match List.assoc_opt runtime_id t with
     | Some r -> r.consecutive + 1
-    | None -> 1
+    | None -> 0  (* BUG 5: should be 1 — violates spec invariant: consecutive >= 1 *)
   in
   let delay =
     match retry_after with

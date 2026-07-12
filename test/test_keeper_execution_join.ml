@@ -269,9 +269,15 @@ let test_recovery_judge_failure_projection_omits_detail () =
     Bridge.native_event_to_json
       (mk_event
          (Agent_sdk.Event_bus.ToolFailureRecoveryJudgeFailed
-            { agent_name = "oas-r1"; turn = 3; detail = "secret provider body" }))
+            { agent_name = "oas-r1"
+            ; turn = 3
+            ; kind = Agent_sdk.Tool_failure_recovery.Provider_call_failed
+            ; detail = "secret provider body"
+            }))
     |> Option.get
   in
+  check (option string) "typed failure kind retained" (Some "provider_call_failed")
+    (string_of_field (payload_member "kind" json));
   check bool "detail digest retained" true
     (Option.is_some (string_of_field (payload_member "detail_digest" json)));
   check bool "raw detail omitted" true (payload_member "detail" json = None)

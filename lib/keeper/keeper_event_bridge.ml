@@ -360,11 +360,14 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
          ~turn
          ())
   | Agent_sdk.Event_bus.ToolFailureRecoveryJudgeFailed
-      { agent_name; turn; detail } ->
+      { agent_name; turn; kind; detail } ->
     let payload =
       `Assoc
         [ "agent_name", `String agent_name
         ; "turn", `Int turn
+        ; ( "kind"
+          , `String
+              (Agent_sdk.Tool_failure_recovery.judge_error_kind_to_string kind) )
         ; "detail_digest", `String (sha256_hex detail)
         ]
     in

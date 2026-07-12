@@ -39,7 +39,7 @@ let message_json (m : Store.chat_message) : Yojson.Safe.t =
   let kind_fields =
     match m.kind with
     | Store.Row_kind.Utterance -> []
-    | Store.Row_kind.Transport_failure ->
+    | Store.Row_kind.Transport_failure | Store.Row_kind.Agent_failure ->
         [ ("kind", `String (Store.Row_kind.to_label m.kind)) ]
   in
   `Assoc

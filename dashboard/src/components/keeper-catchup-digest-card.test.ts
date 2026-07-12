@@ -89,6 +89,33 @@ describe('KeeperCatchupDigestCard', () => {
     expect(screen.getByTestId('keeper-catchup-judge-run')).toHaveTextContent('판정 실행')
   })
 
+  it('counts agent_failures toward activity and renders a distinct chip from transport failures (masc#24314 / oas#2585)', () => {
+    const digest = makeDigest({
+      chat: {
+        new_messages: 2,
+        first_new_ts: 1_777_000_030,
+        transport_failures: 1,
+        agent_failures: 2,
+      },
+    })
+
+    // Base total (15) + 1 transport_failures + 2 agent_failures.
+    expect(keeperCatchupDigestActivityCount(digest)).toBe(18)
+
+    render(html`<${KeeperCatchupDigestCard} digest=${digest} />`)
+
+    expect(screen.getByText('전송 실패 1')).toBeInTheDocument()
+    expect(screen.getByText('에이전트 실패 2')).toBeInTheDocument()
+  })
+
+  it('treats an absent agent_failures field as 0 (dashboard-ahead-of-backend rollout)', () => {
+    const digest = makeDigest()
+
+    expect(keeperCatchupDigestActivityCount(digest)).toBe(15)
+    render(html`<${KeeperCatchupDigestCard} digest=${digest} />`)
+    expect(screen.queryByText(/에이전트 실패/)).not.toBeInTheDocument()
+  })
+
   it('starts a manual catch-up judgment and links to the Fusion run', async () => {
     const digest = makeDigest()
     runKeeperCatchupJudgmentMock.mockResolvedValue({

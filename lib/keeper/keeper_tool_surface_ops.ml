@@ -858,6 +858,7 @@ let handle_keeper_msg_stream
       ?continuation_channel
       ?on_admission_rejected
       ?on_admitted
+      ?on_run_failure_origin
       ctx
       args
   : tool_result
@@ -876,6 +877,7 @@ let handle_keeper_msg_stream
         ?continuation_channel
         ?on_admission_rejected
         ?on_admitted
+        ?on_run_failure_origin
         ctx
         resolved_args
     in

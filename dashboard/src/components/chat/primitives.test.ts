@@ -195,6 +195,34 @@ describe('ChatTranscript', () => {
     expect(container.querySelector('[data-chat-blocks]')).toBeNull()
   })
 
+  it('renders an agent_failure row with a distinct badge from transport_failure (masc#24314 / oas#2585)', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'err-agent-1',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'sangsu',
+            text: '응답을 만들지 못했습니다',
+            rawText: '응답을 만들지 못했습니다',
+            delivery: 'agent_failure',
+            error: 'Keeper request failed: ToolFailureRecoveryFailed',
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const card = container.querySelector('[data-chat-failure-card]')
+    expect(card).not.toBeNull()
+    expect(card?.getAttribute('data-chat-failure-kind')).toBe('agent_failure')
+    expect(card?.textContent).toContain('에이전트 실패')
+    expect(card?.textContent).not.toContain('전송 실패')
+  })
+
   it('keeps generic client errors distinct from durable transport failures', () => {
     render(
       html`<${ChatTranscript}

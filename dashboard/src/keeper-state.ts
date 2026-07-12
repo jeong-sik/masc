@@ -877,13 +877,18 @@ function normalizeHistoryEntry(
   const speakerAuthority = asString(raw.speaker_authority) ?? null
   // RFC-0233 §7: asString rejects malformed join keys instead of repairing them.
   const turnRef = asString(raw.turn_ref) ?? null
-  // keeper_chat_store mints kind=transport_failure (row content is the
-  // "Keeper request failed: ..." text) so a reload can tell a failed request
-  // apart from a real reply. Preserve that writer-declared provenance as its
-  // own delivery variant: generic client/tool errors have different watermark
-  // semantics and must not inherit the durable-row reassurance.
+  // keeper_chat_store mints kind=transport_failure / kind=agent_failure (row
+  // content is the "Keeper request failed: ..." text) so a reload can tell a
+  // failed request apart from a real reply, and (masc#24314 / oas#2585) tell
+  // a wire-level transport failure apart from a typed OAS agent failure.
+  // Preserve that writer-declared provenance as its own delivery variant:
+  // generic client/tool errors have different watermark semantics and must
+  // not inherit the durable-row reassurance.
+  const rawKind = asString(raw.kind)
   const delivery: KeeperConversationDelivery =
-    asString(raw.kind) === 'transport_failure' ? 'transport_failure' : 'history'
+    rawKind === 'transport_failure' ? 'transport_failure'
+    : rawKind === 'agent_failure' ? 'agent_failure'
+    : 'history'
   const serverBlocks = normalizeBlocks(raw.blocks, role)
   const blocks = serverBlocks
     ?? ((role === 'assistant' || role === 'system') && text
@@ -907,7 +912,7 @@ function normalizeHistoryEntry(
     timestamp,
     turnRef,
     delivery,
-    error: delivery === 'transport_failure' ? rawText : null,
+    error: delivery === 'transport_failure' || delivery === 'agent_failure' ? rawText : null,
     streamState: null,
     streamContract,
     details: null,
@@ -1476,7 +1481,8 @@ interface RestChatHistoryMessage {
     mime_type: string
     data: string
   }>
-  // Row kind; 'transport_failure' distinguishes a persisted failed request.
+  // Row kind; 'transport_failure' / 'agent_failure' distinguish a persisted
+  // failed request by cause (masc#24314 / oas#2585).
   kind?: string
   // RFC-0235 P3: backend-parsed rich chat blocks. When present the dashboard
   // prefers them over its local parser.

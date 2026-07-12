@@ -141,26 +141,36 @@ val handle_keeper_msg :
   ?continuation_channel:Keeper_continuation_channel.t ->
   ?on_admission_rejected:(Keeper_turn_admission.rejection -> unit) ->
   ?on_admitted:(unit -> (unit, string) result) ->
+  ?on_run_failure_origin:(Keeper_agent_error.failure_origin -> unit) ->
   _ Keeper_types_profile.context -> Yojson.Safe.t -> tool_result
 (** [event_bus] is captured at the handler boundary and reused by the admitted
     turn body. Callers that omit it keep the legacy process/domain fallback, but
     async wrappers should pass an explicit value captured before submitting the
     background turn. [on_admission_rejected] receives the typed admission
     result before the legacy tool error is rendered; queue consumers use it to
-    keep a leased receipt pending without matching diagnostic strings. *)
+    keep a leased receipt pending without matching diagnostic strings.
+    [on_run_failure_origin] fires exactly when [Keeper_agent_run.run_turn]
+    itself returned [Error]: it receives the typed classification of that
+    [Agent_sdk.Error.sdk_error] before it collapses into the tool-result
+    message string, so a caller that persists the failure (masc#24314 /
+    oas#2585) can pick the right chat Row_kind instead of assuming every
+    keeper_msg failure is a transport problem. It does not fire for
+    admission rejections or input-validation errors, which never reach
+    [run_turn]. *)
 
 val handle_keeper_msg_if_free :
   ?on_text_delta:(string -> unit) ->
   ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
   ?event_bus:Agent_sdk.Event_bus.t ->
   ?continuation_channel:Keeper_continuation_channel.t ->
+  ?on_run_failure_origin:(Keeper_agent_error.failure_origin -> unit) ->
   _ Keeper_types_profile.context ->
   Yojson.Safe.t ->
   [ `Ran of tool_result | `Busy of Keeper_turn_admission.rejection ]
 (** Non-blocking chat entrypoint for direct dashboard streaming. It runs the
     same admitted turn body as [handle_keeper_msg] only when the keeper slot is
     immediately available; otherwise it returns [`Busy] without parking behind
-    an in-flight turn. *)
+    an in-flight turn. See [handle_keeper_msg] for [on_run_failure_origin]. *)
 
 (** Stop a running keeper agent. *)
 val handle_keeper_down : _ Keeper_types_profile.context -> Yojson.Safe.t -> tool_result

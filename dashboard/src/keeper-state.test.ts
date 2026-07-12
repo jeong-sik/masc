@@ -610,6 +610,20 @@ describe('thread history merge & persistence', () => {
     expect(ok[0]?.delivery).toBe('history')
   })
 
+  it('marks an agent_failure row as error delivery, not a saved reply (masc#24314 / oas#2585)', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      { role: 'user', content: 'do it', ts: 1_780_000_000 },
+      {
+        role: 'assistant',
+        content: 'Keeper request failed: ToolFailureRecoveryFailed',
+        ts: 1_780_000_000,
+        kind: 'agent_failure',
+      },
+    ])
+    expect(entries[1]?.delivery).toBe('agent_failure')
+    expect(entries[1]?.error).toBe('Keeper request failed: ToolFailureRecoveryFailed')
+  })
+
   it('prefers server-provided rich blocks for assistant rows', () => {
     const entries = chatHistoryEntriesFromRest('echo', [
       { role: 'assistant', content: 'hello', ts: 1_780_000_000, blocks: [{ t: 'image', src: 'https://x.com/a.png' }] },

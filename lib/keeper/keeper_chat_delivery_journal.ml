@@ -24,6 +24,7 @@ type terminal_delivery =
       ; turn_ref : Ids.Turn_ref.t option
       }
   | Transport_failure of { content : string }
+  | Agent_failure of { content : string }
   | No_assistant_reply of { reason : no_assistant_reply_reason }
 
 and no_assistant_reply_reason =
@@ -119,9 +120,11 @@ let error_to_string = function
 let validate_terminal terminal =
   match terminal.ok, terminal.delivery with
   | true, (Assistant_reply _ | No_assistant_reply _) -> Ok ()
-  | false, Transport_failure _ -> Ok ()
+  | false, (Transport_failure _ | Agent_failure _) -> Ok ()
   | true, Transport_failure _ ->
     Error (Invalid_terminal "successful status cannot carry a transport failure")
+  | true, Agent_failure _ ->
+    Error (Invalid_terminal "successful status cannot carry an agent failure")
   | false, (Assistant_reply _ | No_assistant_reply _) ->
     Error (Invalid_terminal "failed status cannot carry a successful delivery")
 ;;
@@ -254,6 +257,9 @@ let terminal_delivery_to_yojson = function
   | Transport_failure { content } ->
     `Assoc
       [ "kind", `String "transport_failure"; "content", `String content ]
+  | Agent_failure { content } ->
+    `Assoc
+      [ "kind", `String "agent_failure"; "content", `String content ]
   | No_assistant_reply { reason = Continuation_checkpoint } ->
     `Assoc
       [ "kind", `String "no_assistant_reply"
@@ -553,6 +559,15 @@ let terminal_delivery_of_yojson = function
        in
        let* content = string "content" fields in
        Ok (Transport_failure { content })
+     | "agent_failure" ->
+       let* () =
+         validate_fields
+           ~context:"agent failure terminal delivery"
+           ~expected:[ "kind"; "content" ]
+           fields
+       in
+       let* content = string "content" fields in
+       Ok (Agent_failure { content })
      | "no_assistant_reply" ->
        let* reason = string "reason" fields in
        (match reason with
@@ -979,6 +994,24 @@ let append_terminal ~base_path journal ~user_row_id terminal =
       ~surface:journal.payload.surface
       ?conversation_id:journal.payload.conversation_id
       ~assistant_kind:Keeper_chat_store.Row_kind.Transport_failure
+      ~stream_lifecycle:
+        [ Keeper_chat_store.Run_started
+        ; Keeper_chat_store.Text_message_start
+        ; Keeper_chat_store.Text_message_end
+        ; Keeper_chat_store.Run_error
+        ]
+      ()
+    |> Result.map row_id_of_append_once
+    |> Result.map_error (fun detail -> Transcript_error detail)
+  | Agent_failure { content } ->
+    Keeper_chat_store.append_assistant_message_once
+      ~base_dir:base_path
+      ~keeper_name:journal.payload.keeper_name
+      ~delivery_key:journal.delivery_key
+      ~content
+      ~surface:journal.payload.surface
+      ?conversation_id:journal.payload.conversation_id
+      ~assistant_kind:Keeper_chat_store.Row_kind.Agent_failure
       ~stream_lifecycle:
         [ Keeper_chat_store.Run_started
         ; Keeper_chat_store.Text_message_start

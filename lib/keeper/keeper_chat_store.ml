@@ -90,30 +90,40 @@ end
 (* What an assistant line *is*, declared by the writer at append time.
    [Utterance] is something the keeper actually said; [Transport_failure]
    is the server persisting a failed request terminal ("Keeper request
-   failed: ...") so the operator still sees the failure after a reload.
-   Readers branch on the type: a transport failure is not a self reply —
-   it does not advance the lane watermark, so the user line it failed to
-   answer stays pending until the keeper's next real utterance — and it
-   is never quoted back as the keeper's own words. On disk the field is
-   ["kind"], absent for utterances so pre-existing rows read unchanged. *)
+   failed: ...") caused by a wire-level (Api/Provider) error reaching the
+   LLM backend; [Agent_failure] is the same terminal marker for every
+   other cause — a typed OAS Agent error (e.g. ToolFailureRecoveryFailed),
+   a turn that completed with no visible reply, or an admission/validation
+   rejection that never reached the runtime. Readers branch on the type
+   only to decide "is this a self reply" — both non-utterance kinds are
+   not: neither advances the lane watermark, so the user line either
+   failed to answer stays pending until the keeper's next real utterance,
+   and neither is ever quoted back as the keeper's own words. On disk the
+   field is ["kind"], absent for utterances so pre-existing rows read
+   unchanged. *)
 module Row_kind = struct
   type t =
     | Utterance
     | Transport_failure
+    | Agent_failure
 
   let to_label = function
     | Utterance -> "utterance"
     | Transport_failure -> "transport_failure"
+    | Agent_failure -> "agent_failure"
 
   let of_label = function
     | "utterance" -> Some Utterance
     | "transport_failure" -> Some Transport_failure
+    | "agent_failure" -> Some Agent_failure
     | _ -> None
 
   let equal a b =
     match a, b with
-    | Utterance, Utterance | Transport_failure, Transport_failure -> true
-    | (Utterance | Transport_failure), _ -> false
+    | Utterance, Utterance
+    | Transport_failure, Transport_failure
+    | Agent_failure, Agent_failure -> true
+    | (Utterance | Transport_failure | Agent_failure), _ -> false
 end
 
 type stream_lifecycle_event =
@@ -580,7 +590,7 @@ let encode_line ~(role : Role.t) ~content ~ts ?message_id ?attachments ?tool_cal
   let kind_field =
     match kind with
     | Row_kind.Utterance -> []
-    | Row_kind.Transport_failure ->
+    | Row_kind.Transport_failure | Row_kind.Agent_failure ->
         [ ("kind", `String (Row_kind.to_label kind)) ]
   in
   let all_fields =
@@ -815,7 +825,8 @@ let append_turn ~base_dir ~keeper_name ~(user_content : string)
    propagate it. The failure is still counted + warn-logged here so callers that
    use the unit wrapper below keep the existing swallow-and-count telemetry. *)
 let append_assistant_message_result ~base_dir ~keeper_name ~(content : string)
-    ?surface ?conversation_id ?audio ?blocks ?turn_ref ?stream_lifecycle () :
+    ?surface ?conversation_id ?audio ?blocks ?(assistant_kind = Row_kind.Utterance)
+    ?turn_ref ?stream_lifecycle () :
     (unit, string) result =
   try
     ensure_dir_once ~base_dir;
@@ -827,7 +838,7 @@ let append_assistant_message_result ~base_dir ~keeper_name ~(content : string)
     let ts = Time_compat.now () in
     let line =
       encode_line ~role:Role.Assistant ~content ~ts ?surface ?conversation_id
-        ?audio ?blocks ?turn_ref ?stream_lifecycle ()
+        ?audio ?blocks ~kind:assistant_kind ?turn_ref ?stream_lifecycle ()
     in
     append_chat_payload_durable path (line ^ "\n");
     Ok ()
@@ -1535,7 +1546,7 @@ let to_json_array ?base_dir ?trace_block_by_turn_ref
                  failure apart from keeper speech. *)
               @ (match m.kind with
                  | Row_kind.Utterance -> []
-                 | Row_kind.Transport_failure ->
+                 | Row_kind.Transport_failure | Row_kind.Agent_failure ->
                      [ ("kind", `String (Row_kind.to_label m.kind)) ])
               @ opt_string_field "tool_call_id" m.tool_call_id
               @ opt_string_field "tool_call_name" m.tool_call_name
@@ -1624,7 +1635,7 @@ let transcript_line_to_json (m : chat_message) : Yojson.Safe.t =
          back as the keeper's own words. *)
     @ (match m.kind with
        | Row_kind.Utterance -> []
-       | Row_kind.Transport_failure ->
+       | Row_kind.Transport_failure | Row_kind.Agent_failure ->
            [ ("kind", `String (Row_kind.to_label m.kind)) ]))
 
 let turn_transcript_to_json ~keeper ~turn_ref (t : turn_transcript) :

@@ -47,6 +47,7 @@ type chat =
   { new_messages : int
   ; first_new_ts : float option
   ; transport_failures : int
+  ; agent_failures : int
   }
 
 type turns =
@@ -130,7 +131,8 @@ val build :
     Sources (all filtered to activity strictly after [since_unix]):
     - [chat]: [Keeper_chat_store] paged backward from the tail; utterances
       count as [new_messages], [Row_kind.Transport_failure] rows as
-      [transport_failures].
+      [transport_failures], [Row_kind.Agent_failure] rows as
+      [agent_failures].
     - [turns.completed]: keeper-local [turn-records] day-files.
     - [turns.failed]: activity-events [keeper.turn_failed] for the keeper.
     - [turns.crashes]: [Keeper_crash_persistence] recent crash events.

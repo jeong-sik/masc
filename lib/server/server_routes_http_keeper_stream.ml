@@ -799,6 +799,12 @@ let execute_keeper_stream_tool_streaming
   =
   let start_time = Eio.Time.now clock in
   let admission_rejection = ref None in
+  (* masc#24314 / oas#2585: captures the typed OAS boundary classification
+     when [run_turn] itself failed, so the caller can persist the right
+     chat Row_kind instead of assuming every keeper_msg failure is a
+     transport problem. Stays [None] for admission/validation rejections,
+     which never reach [run_turn]. *)
+  let failure_origin = ref None in
   let success, body, failure_class =
     try
       let keeper_ctx : _ Keeper_tool_surface.context =
@@ -816,6 +822,7 @@ let execute_keeper_stream_tool_streaming
           ~on_admission_rejected:(fun rejection ->
             admission_rejection := Some rejection)
           ?on_admitted
+          ~on_run_failure_origin:(fun origin -> failure_origin := Some origin)
           keeper_ctx
           ~continuation_channel
           ~name:"masc_keeper_msg"
@@ -888,7 +895,7 @@ let execute_keeper_stream_tool_streaming
         | None -> ());
       Tool_registry.record_call_if_known ~source:Agent_internal
         ~tool_name:"masc_keeper_msg" ~success ~duration_ms ();
-      `Ran (success, body)
+      `Ran (success, body, !failure_origin)
 
 let execute_keeper_stream_tool_streaming_if_free
       ~sw
@@ -902,6 +909,9 @@ let execute_keeper_stream_tool_streaming_if_free
       ~on_text_delta
   =
   let start_time = Eio.Time.now clock in
+  (* masc#24314 / oas#2585: see [execute_keeper_stream_tool_streaming]'s
+     [failure_origin] for the contract. *)
+  let failure_origin = ref None in
   let outcome =
     try
       let keeper_ctx : _ Keeper_tool_surface.context =
@@ -919,6 +929,7 @@ let execute_keeper_stream_tool_streaming_if_free
           ~on_text_delta
           ?on_event
           ~continuation_channel
+          ~on_run_failure_origin:(fun origin -> failure_origin := Some origin)
           keeper_ctx
           arguments
       with
@@ -990,7 +1001,7 @@ let execute_keeper_stream_tool_streaming_if_free
         | None -> ());
       Tool_registry.record_call_if_known ~source:Agent_internal
         ~tool_name:"masc_keeper_msg" ~success ~duration_ms ();
-      `Ran (success, body)
+      `Ran (success, body, !failure_origin)
 
 (** Send a Run_error AG-UI event with the given message. *)
 let send_keeper_error ?on_closed writer mutex closed ~thread_id ~run_id err =
@@ -1531,6 +1542,17 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
               ~stream_lifecycle:errored_stream_lifecycle
               ()
             |> Result.map row_id_of_append_once
+          | Keeper_chat_delivery_journal.Agent_failure { content } ->
+            Keeper_chat_store.append_assistant_message_once
+              ~base_dir:base_path
+              ~keeper_name:payload.name
+              ~delivery_key
+              ~content
+              ~surface:chat_surface
+              ~assistant_kind:Keeper_chat_store.Row_kind.Agent_failure
+              ~stream_lifecycle:errored_stream_lifecycle
+              ()
+            |> Result.map row_id_of_append_once
           | Keeper_chat_delivery_journal.No_assistant_reply
               { reason =
                   ( Keeper_chat_delivery_journal.Continuation_checkpoint
@@ -1609,7 +1631,13 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
         ~speaker:chat_speaker
         ()
   in
-  let persist_failure_reply err =
+  (* masc#24314 / oas#2585: [row_kind] is required, not defaulted — every
+     call site must state whether this failure is [Transport_failure]
+     (wire-level Api/Provider error) or [Agent_failure] (everything else:
+     a typed OAS Agent error, a turn with no visible reply, or an
+     admission/validation rejection). See callers for the typed reasoning
+     behind each choice. *)
+  let persist_failure_reply ~(row_kind : Keeper_chat_store.Row_kind.t) err =
     (* The failure marker is typed, not an utterance: it renders for the
        operator but does not advance the lane watermark, so the user
        message it failed to answer stays pending for the keeper's next
@@ -1618,12 +1646,28 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
       Keeper_metrics.(to_string ChatTransportFailures)
       ~labels:[ ("keeper", payload.name); ("source", chat_source) ]
       ();
+    let delivery_journal_kind =
+      match row_kind with
+      | Keeper_chat_store.Row_kind.Transport_failure ->
+          Keeper_chat_delivery_journal.Transport_failure
+            { content = persisted_error_reply err }
+      | Keeper_chat_store.Row_kind.Agent_failure ->
+          Keeper_chat_delivery_journal.Agent_failure
+            { content = persisted_error_reply err }
+      | Keeper_chat_store.Row_kind.Utterance ->
+          (* Every call site in this module passes [Transport_failure] or
+             [Agent_failure]; [Utterance] here means a caller mis-threaded
+             the classification. Fail loudly rather than silently render
+             the failure marker as if the keeper had actually said it. *)
+          invalid_arg
+            "persist_failure_reply: row_kind must not be Row_kind.Utterance"
+    in
     (* RFC-connector-deferred-reply-via-chat-queue §3.4: the failure must be
        DURABLE on both paths — a post-ACK deferred turn that fails must not
        vanish on restart/replay (counter + live broadcast alone is silent
        failure under this feature's "queued, will answer" contract).
        - Dashboard route ([recorded_upstream = false]): the turn owns the user
-         line, so record the paired [Transport_failure] row (user message stays
+         line, so record the paired failure row (user message stays
          pending for the next turn; keeper never reads the error as its words).
        - Connector route ([recorded_upstream = true]): the gate inbound boundary
          already persisted the user line (assistant-less). The paired
@@ -1636,7 +1680,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
         commit_direct_terminal
           { ok = false
           ; poll_body = err
-          ; delivery = Keeper_chat_delivery_journal.Transport_failure { content = persisted_error_reply err }
+          ; delivery = delivery_journal_kind
           }
       else if connector_user_line_recorded_upstream then
        Keeper_chat_store.append_assistant_message_result
@@ -1644,6 +1688,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
          ~keeper_name:payload.name
          ~content:(persisted_error_reply err)
          ~surface:chat_surface
+         ~assistant_kind:row_kind
          ~stream_lifecycle:errored_stream_lifecycle
          ()
       else
@@ -1654,7 +1699,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
          ~user_attachments:payload.attachments
          ~surface:chat_surface
          ~speaker:chat_speaker
-         ~assistant_kind:Keeper_chat_store.Row_kind.Transport_failure
+         ~assistant_kind:row_kind
          ~assistant_content:(persisted_error_reply err)
          ~stream_lifecycle:errored_stream_lifecycle
          ()
@@ -1693,7 +1738,17 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
           , Printf.sprintf "%s (cancelled_by=%s)" reason cancelled_by
           , Turn_cancelled )
     in
-    let persisted = persist_failure_reply body in
+    (* Both [worker_abort_reason] variants are the async submission layer
+       cutting the turn off from the outside (wall-clock budget or an
+       operator/system cancellation) before any OAS Agent error boundary
+       is reached — a genuine transport-layer interruption, not an agent
+       execution outcome. *)
+    let row_kind =
+      match reason with
+      | Keeper_msg_async.Timeout _ | Keeper_msg_async.Worker_cancelled _ ->
+          Keeper_chat_store.Row_kind.Transport_failure
+    in
+    let persisted = persist_failure_reply ~row_kind body in
     let queued_outcome =
       if not queued_turn then None
       else
@@ -1773,12 +1828,17 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
               then Error (Printexc.to_string exn)
               else
                 (try
-                   Ok
-                     (`Ran
-	                        (execute_keeper_stream_tool ~sw:request_sw ~clock
-	                           ?auth_token
-	                           state ~agent_name ~arguments:args
-                            ~continuation_channel))
+                   (* [execute_keeper_stream_tool] is the non-streaming
+                      fallback used only after the streaming dispatch itself
+                      raised — it never reaches a typed OAS error boundary,
+                      so [failure_origin] is unavailable ([None]) here. *)
+                   let success, body =
+                     execute_keeper_stream_tool ~sw:request_sw ~clock
+                       ?auth_token
+                       state ~agent_name ~arguments:args
+                       ~continuation_channel
+                   in
+                   Ok (`Ran (success, body, None))
                  with
                  | Eio.Cancel.Cancelled _ as e -> raise e
                  | exn2 -> Error (Printexc.to_string exn2))
@@ -1828,7 +1888,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                     ; queued_outcome = None
                     });
                Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time detail)
-        | Ok (`Ran (true, body)) ->
+        | Ok (`Ran (true, body, _failure_origin)) ->
             let payload_json_opt, visible_reply = extract_visible_reply body in
             let streamed_text =
               Keeper_stream_text_accum.streamed_text worker_text_accum
@@ -1876,10 +1936,16 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                  visible_reply
              with
              | Some err ->
+                 (* The tool call itself succeeded ([`Ran (true, body)]) — the
+                    runtime completed the turn at the transport level. [err]
+                    here is [direct_reply_terminal_error]'s "no visible reply"
+                    diagnosis, an agent-behavior outcome, not a transport
+                    fault. *)
+                 let row_kind = Keeper_chat_store.Row_kind.Agent_failure in
                  let queued_outcome =
                    if not queued_turn then None
                    else
-                     match persist_failure_reply err with
+                     match persist_failure_reply ~row_kind err with
                      | Ok () -> Some (Failed { kind = Turn_failed; detail = err })
                      | Error persist_error ->
                          Some
@@ -1890,7 +1956,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                  in
                  if not queued_turn
                  then
-                   (match persist_failure_reply err with
+                   (match persist_failure_reply ~row_kind err with
                     | Ok () -> ()
                     | Error persist_error ->
                       Log.Keeper.error
@@ -1970,7 +2036,9 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                        let detail =
                          "queued turn ended with a continuation checkpoint and no delivered reply"
                        in
-                       (match persist_failure_reply detail with
+                       (* The turn ran and yielded at a checkpoint — an agent
+                          lifecycle outcome, not a transport fault. *)
+                       (match persist_failure_reply ~row_kind:Keeper_chat_store.Row_kind.Agent_failure detail with
                         | Ok () ->
                             Some
                               (Failed
@@ -2016,7 +2084,9 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                          let detail =
                            "no visible reply was produced for this queued message"
                          in
-                         (match persist_failure_reply detail with
+                         (* The turn ran and completed with no visible reply —
+                            an agent-behavior outcome, not a transport fault. *)
+                         (match persist_failure_reply ~row_kind:Keeper_chat_store.Row_kind.Agent_failure detail with
                           | Ok () -> Some (Failed { kind = No_visible_reply; detail })
                           | Error persist_error ->
                               Some
@@ -2059,8 +2129,25 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                            ; queued_outcome
                            });
                       Tool_result.ok ~tool_name:"masc_keeper_msg" ~start_time body))
-        | Ok (`Ran (false, err)) ->
-            let persisted = persist_failure_reply err in
+        | Ok (`Ran (false, err, failure_origin)) ->
+            (* [failure_origin] is [Some _] exactly when [Turn.handle_keeper_msg]
+               (or [_if_free]) reached [run_turn]'s typed [Error] arm — the OAS
+               Agent boundary. It is [None] for admission rejections and
+               input-validation errors, which never reach [run_turn] and have
+               no typed OAS classification available; the pre-existing
+               [Transport_failure] label is kept for those, since they are
+               scheduling/validation rejections, not agent execution
+               outcomes, and there is no typed signal to distinguish further
+               without expanding this PR's scope. *)
+            let row_kind =
+              match failure_origin with
+              | Some Keeper_agent_error.Transport_layer ->
+                  Keeper_chat_store.Row_kind.Transport_failure
+              | Some Keeper_agent_error.Agent_layer ->
+                  Keeper_chat_store.Row_kind.Agent_failure
+              | None -> Keeper_chat_store.Row_kind.Transport_failure
+            in
+            let persisted = persist_failure_reply ~row_kind err in
             let queued_outcome =
               if not queued_turn then None
               else
@@ -2078,7 +2165,14 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                  { status = Stream_error; body = err; queued_outcome });
             Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err
         | Error err ->
-            let persisted = persist_failure_reply err in
+            (* No [Tool_result] was ever produced on this path (a raw
+               exception from the dispatch try/with, or the async
+               submission layer's own admission failure) — no typed OAS
+               boundary was reached, so [Transport_failure] is kept. *)
+            let persisted =
+              persist_failure_reply
+                ~row_kind:Keeper_chat_store.Row_kind.Transport_failure err
+            in
             let queued_outcome =
               if not queued_turn then None
               else
@@ -2103,7 +2197,13 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
     match submit_result with
     | Ok request_id -> Some request_id
     | Error body ->
-        let persisted = persist_failure_reply body in
+        (* [Keeper_msg_async.submit] rejected admission before any turn ran
+           (e.g. background-switch setup failed) — no typed OAS boundary
+           was reached, so [Transport_failure] is kept. *)
+        let persisted =
+          persist_failure_reply
+            ~row_kind:Keeper_chat_store.Row_kind.Transport_failure body
+        in
         let queued_outcome =
           if not queued_turn then None
           else

@@ -422,6 +422,8 @@ function deliveryLabel(entry: KeeperConversationEntry): string {
       return 'error'
     case 'transport_failure':
       return 'transport failure'
+    case 'agent_failure':
+      return 'agent failure'
     case 'interrupted':
       return 'interrupted'
     case 'history':
@@ -2142,27 +2144,38 @@ function renderStructuredFailureText(text: string): Array<string | VNode> {
   })
 }
 
-/** Typed failure card for kind=transport_failure rows.
+/** Typed failure card for kind=transport_failure / kind=agent_failure rows
+ * (masc#24314 / oas#2585).
  *
  * The discriminator is the writer-declared row kind (normalized to the closed
- * delivery='transport_failure' variant), never a string match on the content.
- * The raw error text is diagnostic payload, shown collapsed. The reassurance line states
- * what the backend guarantees: a Transport_failure row is watermark-neutral
- * (keeper_chat_store), so the user message it failed to answer stays pending
- * for the keeper's next turn. */
-function ChatFailureCard({ diagnostic }: { diagnostic: string }) {
+ * delivery='transport_failure' | 'agent_failure' variant), never a string
+ * match on the content. The raw error text is diagnostic payload, shown
+ * collapsed. The reassurance line states what the backend guarantees: both
+ * row kinds are watermark-neutral (keeper_chat_store), so the user message
+ * it failed to answer stays pending for the keeper's next turn regardless of
+ * which kind caused it — only the badge distinguishes wire-level transport
+ * failures from the agent's own execution failures. */
+function ChatFailureCard({
+  diagnostic,
+  kind,
+}: {
+  diagnostic: string
+  kind: 'transport_failure' | 'agent_failure'
+}) {
   const [detailOpen, setDetailOpen] = useState(false)
+  const badgeLabel = kind === 'agent_failure' ? '에이전트 실패' : '전송 실패'
   return html`
     <div
       class="flex flex-col gap-2 rounded-[var(--r-1)] border border-[var(--color-status-error)]/40 bg-[var(--color-bg-surface)] p-3"
       data-chat-structured-error
       data-chat-failure-card
+      data-chat-failure-kind=${kind}
     >
       <div class="flex flex-wrap items-center gap-2">
         <span
           class="inline-flex items-center rounded-[var(--r-0)] bg-[var(--color-status-error)]/15 px-2 py-0.5 text-2xs font-bold uppercase tracking-[var(--track-caps)] text-[var(--color-status-error)]"
         >
-          응답 실패
+          ${badgeLabel}
         </span>
         <span class="text-sm font-semibold text-[var(--color-fg-primary)]">
           이 턴은 응답을 만들지 못했습니다
@@ -2438,13 +2451,15 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
   const liveLabel = liveMessageLabel(entry)
   const messageText = liveLabel ? '' : entry.text || '(empty reply)'
   const messageLength = messageText.length
-  // keeper-state.ts maps the writer-declared kind=transport_failure to its own
-  // closed delivery variant; only that durable row renders the typed
-  // failure card, because its reassurance ("보낸 메시지는 사라지지 않았습니다")
-  // holds only when the keeper never answered. interrupted/timeout keep any
-  // partial text and render as prose plus the diagnostic banner below.
+  // keeper-state.ts maps the writer-declared kind=transport_failure /
+  // kind=agent_failure (masc#24314 / oas#2585) to their own closed delivery
+  // variants; only those durable rows render the typed failure card,
+  // because its reassurance ("보낸 메시지는 사라지지 않았습니다") holds only
+  // when the keeper never answered. interrupted/timeout keep any partial
+  // text and render as prose plus the diagnostic banner below.
   const isFailureMessage =
-    entry.delivery === 'transport_failure' && !!entry.error?.trim()
+    (entry.delivery === 'transport_failure' || entry.delivery === 'agent_failure')
+    && !!entry.error?.trim()
   const richTextRole = entry.role === 'assistant' || entry.role === 'system'
   const hasRealText = !liveLabel && !!entry.text && entry.text.trim().length > 0
   const traceOwnsIntermediateText = !hasRealText && (entry.traceSteps?.length ?? 0) > 0
@@ -2692,6 +2707,7 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
             ${isFailureMessage
               ? html`<${ChatFailureCard}
                   diagnostic=${entry.error?.trim() ? entry.error : messageText}
+                  kind=${entry.delivery === 'agent_failure' ? 'agent_failure' : 'transport_failure'}
                 />`
               : hasEffectiveBlocks
               ? html`<${ChatBlocks} blocks=${effectiveBlocks} fallbackText=${entry.text} />`

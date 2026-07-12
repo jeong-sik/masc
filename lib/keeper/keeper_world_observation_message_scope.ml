@@ -113,7 +113,8 @@ let recent_direct_conversation_of_messages
           }
       | Keeper_chat_store.Role.Assistant ->
         (match m.kind with
-         | Keeper_chat_store.Row_kind.Transport_failure -> None
+         | Keeper_chat_store.Row_kind.Transport_failure
+         | Keeper_chat_store.Row_kind.Agent_failure -> None
          | Keeper_chat_store.Row_kind.Utterance ->
            (match m.audio with
             | Some _ -> None
@@ -195,10 +196,11 @@ let render_recent_direct_conversation_context
 
 (* User lines after the keeper's last assistant line, in lane order. The
    shared positional watermark for mentions and scope. Only an assistant
-   *utterance* is a self reply; a [Transport_failure] row is the server
-   persisting a failed request terminal — the keeper never answered, so
-   the user line stays pending until the keeper's next real utterance
-   (which, per positional semantics, clears every pending line). *)
+   *utterance* is a self reply; a [Transport_failure] or [Agent_failure]
+   row is the server persisting a failed request terminal — the keeper
+   never answered, so the user line stays pending until the keeper's
+   next real utterance (which, per positional semantics, clears every
+   pending line). *)
 let user_lines_after_last_self (messages : Keeper_chat_store.chat_message list)
   : Keeper_chat_store.chat_message list
   =
@@ -208,7 +210,8 @@ let user_lines_after_last_self (messages : Keeper_chat_store.chat_message list)
       | Keeper_chat_store.Role.Assistant -> (
         match m.kind with
         | Keeper_chat_store.Row_kind.Utterance -> []
-        | Keeper_chat_store.Row_kind.Transport_failure -> acc)
+        | Keeper_chat_store.Row_kind.Transport_failure
+        | Keeper_chat_store.Row_kind.Agent_failure -> acc)
       | Keeper_chat_store.Role.User -> m :: acc
       | Keeper_chat_store.Role.Tool -> acc)
     []

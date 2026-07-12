@@ -877,8 +877,9 @@ function OperatorLine({ line, seq }: { line: TurnTranscriptLine | null; seq: num
   `
 }
 
-// One keeper response line. A transport-failure row is labelled distinctly and
-// never presented as the keeper's own utterance.
+// One keeper response line. A transport-failure or agent-failure row
+// (masc#24314 / oas#2585) is labelled distinctly by its writer-declared
+// cause and never presented as the keeper's own utterance.
 function KeeperLine({
   keeperName,
   line,
@@ -888,14 +889,17 @@ function KeeperLine({
   line: TurnTranscriptLine | null
   seq: number
 }) {
-  const isFailure = line?.kind === 'transport_failure'
+  const failureLabel =
+    line?.kind === 'transport_failure' ? 'transport failure'
+    : line?.kind === 'agent_failure' ? 'agent failure'
+    : null
   return html`
     <div class="kti-msg">
       <div class="kti-msg-h">
         <span class="kti-msg-role assistant">assistant</span>
         <span class="who">${keeperName}</span>
-        ${isFailure
-          ? html`<span class="pill bad" data-testid="turn-transcript-assistant-failure">transport failure</span>`
+        ${failureLabel
+          ? html`<span class="pill bad" data-testid="turn-transcript-assistant-failure">${failureLabel}</span>`
           : null}
         <span class="seq">#${seq}</span>
       </div>

@@ -54,17 +54,23 @@ end
 (** What an assistant line {e is}, declared by the writer at append.
     [Utterance] is something the keeper actually said.
     [Transport_failure] is the server persisting a failed request
-    terminal (["Keeper request failed: ..."]) so the operator still sees
-    the failure after a reload — it is {e not} a self reply: it does not
-    advance the lane watermark, so the user line it failed to answer
-    stays pending until the keeper's next real utterance, and
-    observation never quotes it back as the keeper's own words.
+    terminal (["Keeper request failed: ..."]) caused by a wire-level
+    (Api/Provider) error reaching the LLM backend. [Agent_failure] is the
+    same terminal marker for every other cause: a typed OAS Agent error
+    (e.g. ToolFailureRecoveryFailed), a turn that completed with no
+    visible reply, or an admission/validation rejection that never
+    reached the runtime — none of these are transport problems. Neither
+    is a self reply: neither advances the lane watermark, so the user
+    line it failed to answer stays pending until the keeper's next real
+    utterance, and observation never quotes either back as the keeper's
+    own words.
     Persisted as ["kind"]; the field is absent for utterances, so rows
     written before it existed read unchanged. *)
 module Row_kind : sig
   type t =
     | Utterance
     | Transport_failure
+    | Agent_failure
 
   val to_label : t -> string
   val of_label : string -> t option
@@ -208,7 +214,8 @@ type chat_message = {
     coordinate and is written on all lines of the turn; [external_message_id]
     belongs to the inbound user line only. [assistant_kind] declares what
     the assistant line is (default [Utterance]); the failed-request
-    persistence path passes [Transport_failure]. Failures are logged but
+    persistence path passes [Transport_failure] or [Agent_failure]
+    depending on where the failure originated. Failures are logged but
     never raised except for {!Eio.Cancel.Cancelled}. *)
 (** [append_turn_result] is {!append_turn} with an explicit persistence
     result. Queue consumers use it so a durable delivery receipt cannot become
@@ -254,7 +261,12 @@ val append_turn :
 (** [append_assistant_message_result] is {!append_assistant_message} that
     returns [Error msg] on a write failure instead of swallowing it (the failure
     is still counted + warn-logged). For callers whose own contract requires
-    surfacing a chat-append failure — e.g. {!Fusion_sink.emit}. *)
+    surfacing a chat-append failure — e.g. {!Fusion_sink.emit}.
+    [assistant_kind] declares what the line is (default [Utterance]);
+    masc#24314 / oas#2585: the connector-route failure persistence path
+    passes [Transport_failure] or [Agent_failure] here — before this field
+    existed, that path had no way to mark a failure line as anything but
+    an ordinary utterance. *)
 val append_assistant_message_result :
   base_dir:string ->
   keeper_name:string ->
@@ -263,6 +275,7 @@ val append_assistant_message_result :
   ?conversation_id:string ->
   ?audio:audio_clip ->
   ?blocks:chat_block list ->
+  ?assistant_kind:Row_kind.t ->
   ?turn_ref:Ids.Turn_ref.t ->
   ?stream_lifecycle:stream_lifecycle_event list ->
   unit ->
@@ -378,7 +391,7 @@ val to_json_array :
 (** A keeper turn's transcript, derived by an exact join on the persisted
     [turn_ref]. [user] holds the operator request line(s) that opened the
     turn; [assistant] holds the keeper response line(s) (utterance and
-    typed transport-failure markers). Tool rows are excluded — their full
+    typed transport/agent-failure markers). Tool rows are excluded — their full
     I/O is surfaced by the tool-call store keyed on [execution_id]. Both
     lists are empty when no persisted row carries the requested
     [turn_ref] (old rows, redacted, or outside the retained window). *)

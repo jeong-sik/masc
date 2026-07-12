@@ -215,7 +215,9 @@ let crash_row ~ts = json_line (`Assoc [ "ts", `Float ts; "reason", `String "boom
 
 let write_rich_fixture base =
   (* chat: one legacy row before since (excluded), two utterances after,
-     one transport-failure after. *)
+     one transport-failure and one agent-failure after (masc#24314 /
+     oas#2585: the two Row_kind failure variants are counted separately,
+     not merged). *)
   let cf = chat_file base in
   append_line cf (chat_row ~role:"user" ~ts:(since_unix -. 10.) ());
   append_line cf (chat_row ~id:"m1" ~role:"user" ~ts:(since_unix +. 10.) ());
@@ -223,6 +225,9 @@ let write_rich_fixture base =
   append_line
     cf
     (chat_row ~id:"m3" ~role:"assistant" ~kind:"transport_failure" ~ts:(since_unix +. 12.) ());
+  append_line
+    cf
+    (chat_row ~id:"m4" ~role:"assistant" ~kind:"agent_failure" ~ts:(since_unix +. 13.) ());
   (* turn-records across two day-files straddling since; day-file B carries a
      deliberately corrupt line that must surface in read_errors. *)
   let td = turn_dir base in
@@ -315,7 +320,7 @@ let test_counts_and_boundary () =
   with_workspace (fun base ->
     write_rich_fixture base;
     let digest = D.build ~base_path:base ~keeper_name:keeper ~since_unix ~now_unix in
-    let { D.chat = { new_messages; first_new_ts; transport_failures }
+    let { D.chat = { new_messages; first_new_ts; transport_failures; agent_failures }
         ; turns = { completed; failed; crashes }
         ; tasks = { claimed; done_; released; cancelled; items = task_items }
         ; board = { posted; commented; voted }
@@ -340,6 +345,7 @@ let test_counts_and_boundary () =
     (* chat *)
     Alcotest.(check int) "new_messages (2 utterances after since)" 2 new_messages;
     Alcotest.(check int) "transport_failures" 1 transport_failures;
+    Alcotest.(check int) "agent_failures" 1 agent_failures;
     Alcotest.(check (option (float 0.0001)))
       "first_new_ts is the earliest new utterance"
       (Some (since_unix +. 10.))

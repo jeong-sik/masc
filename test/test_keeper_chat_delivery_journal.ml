@@ -232,6 +232,49 @@ let test_journal_rejects_unknown_and_duplicate_fields () =
    | _ -> fail "journal encoder did not produce an object")
 ;;
 
+(* masc#24314 / oas#2585: [Agent_failure] round-trips through the journal
+   wire format the same way [Transport_failure] already does — the two
+   are typed separately so a reload can tell a wire-level transport
+   failure apart from a typed OAS agent failure. *)
+let test_agent_failure_terminal_delivery_roundtrip () =
+  let journal : Journal.t =
+    { schema_version = 1
+    ; revision = 1
+    ; delivery_key = direct_key ()
+    ; payload = payload ()
+    ; phase =
+        Journal.Terminal_pending
+          { terminal =
+              { ok = false
+              ; poll_body = "keeper_msg turn failed"
+              ; delivery =
+                  Journal.Agent_failure
+                    { content = "Keeper request failed: ToolFailureRecoveryFailed" }
+              }
+          ; user_row_id = Some "msg-user"
+          }
+    ; created_at = 1.0
+    ; updated_at = 2.0
+    }
+  in
+  let json = Journal.For_testing.to_yojson journal in
+  match Journal.For_testing.of_yojson json with
+  | Error error -> fail (Journal.error_to_string error)
+  | Ok decoded ->
+    (match decoded.phase with
+     | Journal.Terminal_pending
+         { terminal = { delivery = Journal.Agent_failure { content }; ok; _ }; _ } ->
+       check bool "not ok" false ok;
+       check
+         string
+         "content preserved"
+         "Keeper request failed: ToolFailureRecoveryFailed"
+         content
+     | Journal.Terminal_pending { terminal = { delivery = Journal.Transport_failure _; _ }; _ } ->
+       fail "Agent_failure decoded as Transport_failure"
+     | _ -> fail "expected Terminal_pending phase")
+;;
+
 let row_id = function
   | Keeper_chat_store.Appended { row_id }
   | Keeper_chat_store.Already_present { row_id } -> row_id
@@ -670,6 +713,10 @@ let () =
             "schema drift fails closed"
             `Quick
             test_journal_rejects_unknown_and_duplicate_fields
+        ; test_case
+            "agent_failure terminal delivery roundtrips (masc#24314 / oas#2585)"
+            `Quick
+            test_agent_failure_terminal_delivery_roundtrip
         ; test_case
             "chat append-once converges"
             `Quick

@@ -16,6 +16,8 @@ export function keeperCatchupDigestActivityCount(digest: KeeperCatchupDigest): n
   return (
     chat.new_messages +
     chat.transport_failures +
+    // masc#24314 / oas#2585: optional during rollout; absent reads as 0.
+    (chat.agent_failures ?? 0) +
     turns.completed +
     turns.failed +
     turns.crashes +
@@ -105,6 +107,9 @@ function digestChips(digest: KeeperCatchupDigest): DigestChip[] {
   if (turns.failed > 0) chips.push({ key: 'turns-failed', text: `턴 실패 ${turns.failed}`, tone: 'warn' })
   if (turns.crashes > 0) chips.push({ key: 'turns-crashes', text: `크래시 ${turns.crashes}`, tone: 'warn' })
   if (chat.transport_failures > 0) chips.push({ key: 'transport', text: `전송 실패 ${chat.transport_failures}`, tone: 'warn' })
+  // masc#24314 / oas#2585: counted separately from transport_failures.
+  const agentFailures = chat.agent_failures ?? 0
+  if (agentFailures > 0) chips.push({ key: 'agent', text: `에이전트 실패 ${agentFailures}`, tone: 'warn' })
   return chips
 }
 

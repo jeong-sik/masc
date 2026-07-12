@@ -47,6 +47,7 @@ val dispatch_stream :
   ?continuation_channel:Keeper_continuation_channel.t ->
   ?on_admission_rejected:(Keeper_turn_admission.rejection -> unit) ->
   ?on_admitted:(unit -> (unit, string) result) ->
+  ?on_run_failure_origin:(Keeper_agent_error.failure_origin -> unit) ->
   _ context -> name:string -> args:Yojson.Safe.t -> tool_result option
 
 (** Non-blocking streaming dispatch for direct chat admission. The Keeper turn

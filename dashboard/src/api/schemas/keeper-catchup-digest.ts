@@ -31,6 +31,12 @@ const KeeperCatchupDigestChatSchema = object({
   // Null / absent when new_messages is 0 (no first row to anchor).
   first_new_ts: optional(nullable(number())),
   transport_failures: number(),
+  // masc#24314 / oas#2585: counted separately from transport_failures — a
+  // typed OAS Agent error, a turn with no visible reply, or an
+  // admission/validation rejection, none of which are transport problems.
+  // Optional so a dashboard deploy that lands ahead of the backend does not
+  // fail-closed on the whole digest; absent reads as 0 at the call site.
+  agent_failures: optional(number()),
 })
 
 const KeeperCatchupDigestTurnsSchema = object({

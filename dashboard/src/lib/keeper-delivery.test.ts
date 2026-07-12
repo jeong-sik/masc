@@ -22,14 +22,15 @@ const EXPECTED: Record<KeeperConversationDelivery, 'in-flight' | 'failed' | 'oth
   cancelled: 'other',
   error: 'failed',
   transport_failure: 'failed',
+  agent_failure: 'failed',
   interrupted: 'failed',
 }
 
 describe('keeper-delivery classifiers', () => {
   const all = Object.keys(EXPECTED) as KeeperConversationDelivery[]
 
-  it('covers all 11 delivery variants', () => {
-    expect(all).toHaveLength(11)
+  it('covers all 12 delivery variants', () => {
+    expect(all).toHaveLength(12)
   })
 
   it('classifies every variant into exactly one bucket', () => {
@@ -52,8 +53,9 @@ describe('keeper-delivery classifiers', () => {
     expect([...IN_FLIGHT_DELIVERY].sort()).toEqual(['queued', 'sending', 'streaming'])
   })
 
-  it('classifies durable transport failure separately from generic errors', () => {
+  it('classifies durable transport/agent failure separately from generic errors', () => {
     expect([...FAILED_DELIVERY].sort()).toEqual([
+      'agent_failure',
       'error',
       'interrupted',
       'timeout',

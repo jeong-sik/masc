@@ -85,6 +85,7 @@ type chat =
   { new_messages : int
   ; first_new_ts : float option
   ; transport_failures : int
+  ; agent_failures : int
   }
 
 type turns =
@@ -350,14 +351,18 @@ let payload_identity_match ~identity_of payload =
 
 (* Page [Keeper_chat_store] backward from the tail, counting rows strictly
    after [since]. Utterances (user/assistant) are [new_messages];
-   [Transport_failure] rows are counted separately; tool rows are ignored.
-   The store's own parser owns chat read-drop accounting, so chat parse
-   failures do not enter [read_errors]. Rows are de-duped by their stable
-   [id] across page overlaps. *)
+   [Transport_failure] and [Agent_failure] rows are counted separately
+   (masc#24314 / oas#2585: the two are not the same failure class — merging
+   them back into one counter would reintroduce the exact conflation this
+   Row_kind split exists to remove); tool rows are ignored. The store's own
+   parser owns chat read-drop accounting, so chat parse failures do not
+   enter [read_errors]. Rows are de-duped by their stable [id] across page
+   overlaps. *)
 let read_chat ~base_dir ~keeper_name ~since ~errs =
   let seen : (string, unit) Hashtbl.t = Hashtbl.create 64 in
   let new_messages = ref 0 in
   let transport = ref 0 in
+  let agent = ref 0 in
   let first_new = ref None in
   let truncated = ref false in
   let note_first ts =
@@ -370,6 +375,7 @@ let read_chat ~base_dir ~keeper_name ~since ~errs =
       Hashtbl.add seen id ();
       (match kind with
        | Keeper_chat_store.Row_kind.Transport_failure -> incr transport
+       | Keeper_chat_store.Row_kind.Agent_failure -> incr agent
        | Keeper_chat_store.Row_kind.Utterance ->
          (match role with
           | Keeper_chat_store.Role.User | Keeper_chat_store.Role.Assistant ->
@@ -412,6 +418,7 @@ let read_chat ~base_dir ~keeper_name ~since ~errs =
   ( { new_messages = !new_messages
     ; first_new_ts = !first_new
     ; transport_failures = !transport
+    ; agent_failures = !agent
     }
   , !truncated )
 ;;
@@ -729,6 +736,7 @@ let to_json (t : t) : Yojson.Safe.t =
           [ "new_messages", `Int t.chat.new_messages
           ; "first_new_ts", float_opt_to_json t.chat.first_new_ts
           ; "transport_failures", `Int t.chat.transport_failures
+          ; "agent_failures", `Int t.chat.agent_failures
           ] )
     ; ( "turns"
       , `Assoc

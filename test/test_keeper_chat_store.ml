@@ -324,6 +324,29 @@ let test_recent_direct_context_omits_transport_failure_as_self_reply () =
       Alcotest.(check bool) "failure text is not a self utterance" false
         (contains_substring rendered "Keeper request failed"))
 
+let test_recent_direct_context_omits_agent_failure_as_self_reply () =
+  let base_dir = temp_base_path "keeper-chat-recent-agent-failure" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-recent-agent-failure" in
+      K.append_turn ~base_dir ~keeper_name
+        ~user_content:"please answer this"
+        ~user_attachments:[]
+        ~surface:(Masc.Surface_ref.Dashboard { session_id = None })
+        ~assistant_kind:K.Row_kind.Agent_failure
+        ~assistant_content:"Keeper request failed: ToolFailureRecoveryFailed"
+        ();
+      let lines =
+        K.load ~base_dir ~keeper_name
+        |> MS.recent_direct_conversation_of_messages
+      in
+      Alcotest.(check (list string)) "failed request keeps user only"
+        [ "user" ] (recent_roles lines);
+      let rendered = MS.render_recent_direct_conversation_context lines in
+      Alcotest.(check bool) "failure text is not a self utterance" false
+        (contains_substring rendered "Keeper request failed"))
+
 let test_recent_direct_context_omits_voice_audio_self_echo () =
   let base_dir = temp_base_path "keeper-chat-recent-voice" in
   Fun.protect
@@ -863,6 +886,34 @@ let test_failure_turn_kind_roundtrip () =
           let raw = read_file (chat_path ~base_dir ~keeper_name) in
           Alcotest.(check bool) "failure row persists the kind field" true
             (contains_substring raw {|"kind":"transport_failure"|})
+      | messages ->
+          Alcotest.failf "expected 2 rows, got %d" (List.length messages))
+
+(* masc#24314 / oas#2585: the same round-trip for the typed agent-failure
+   marker, added so a typed OAS Agent error (e.g. ToolFailureRecoveryFailed)
+   is no longer indistinguishable from a wire-level transport failure. *)
+let test_agent_failure_turn_kind_roundtrip () =
+  let base_dir = temp_base_path "keeper-chat-store-kind-agent" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-kind-agent" in
+      K.append_turn ~base_dir ~keeper_name
+        ~user_content:"ping"
+        ~user_attachments:[]
+        ~surface:(Masc.Surface_ref.Dashboard { session_id = None })
+        ~assistant_kind:K.Row_kind.Agent_failure
+        ~assistant_content:"Keeper request failed: ToolFailureRecoveryFailed"
+        ();
+      match K.load ~base_dir ~keeper_name with
+      | [ user; asst ] ->
+          Alcotest.(check bool) "user row is an utterance" true
+            (K.Row_kind.equal user.kind K.Row_kind.Utterance);
+          Alcotest.(check bool) "assistant row is an agent failure" true
+            (K.Row_kind.equal asst.kind K.Row_kind.Agent_failure);
+          let raw = read_file (chat_path ~base_dir ~keeper_name) in
+          Alcotest.(check bool) "failure row persists the kind field" true
+            (contains_substring raw {|"kind":"agent_failure"|})
       | messages ->
           Alcotest.failf "expected 2 rows, got %d" (List.length messages))
 
@@ -1899,6 +1950,8 @@ let () =
         [
           Alcotest.test_case "failure turn kind roundtrip" `Quick
             test_failure_turn_kind_roundtrip;
+          Alcotest.test_case "agent failure turn kind roundtrip" `Quick
+            test_agent_failure_turn_kind_roundtrip;
           Alcotest.test_case "absent kind reads utterance" `Quick
             test_kind_absent_reads_utterance;
           Alcotest.test_case "unknown kind reported, reads utterance" `Quick
@@ -1931,6 +1984,8 @@ let () =
             test_recent_direct_context_renders_prior_reply_and_tool_evidence;
           Alcotest.test_case "recent context omits transport failure as reply" `Quick
             test_recent_direct_context_omits_transport_failure_as_self_reply;
+          Alcotest.test_case "recent context omits agent failure as reply" `Quick
+            test_recent_direct_context_omits_agent_failure_as_self_reply;
           Alcotest.test_case "recent context omits voice audio self echo" `Quick
             test_recent_direct_context_omits_voice_audio_self_echo;
           Alcotest.test_case "recent context is owner-direct only" `Quick

@@ -591,6 +591,7 @@ let run_keeper_msg_turn_admitted
       ?on_event
       ?event_bus
       ?continuation_channel
+      ?on_run_failure_origin
       ctx
       args
   : tool_result
@@ -1136,6 +1137,9 @@ let run_keeper_msg_turn_admitted
             | Error err ->
               let e_str = Agent_sdk.Error.to_string err in
               let user_message = Keeper_agent_error.user_message_of_sdk_error err in
+              Option.iter
+                (fun notify -> notify (Keeper_agent_error.failure_origin_of_sdk_error err))
+                on_run_failure_origin;
               (try
                  let _ = Trajectory.finalize trajectory_acc
                    (Trajectory.Failed e_str) in
@@ -1339,6 +1343,7 @@ let handle_keeper_msg
       ?continuation_channel
       ?on_admission_rejected
       ?on_admitted
+      ?on_run_failure_origin
       ctx
       args
   : tool_result
@@ -1357,6 +1362,7 @@ let handle_keeper_msg
       ?on_event
       ?event_bus
       ?continuation_channel
+      ?on_run_failure_origin
       ctx
       args
   else
@@ -1374,6 +1380,7 @@ let handle_keeper_msg
                  ?on_event
                  ?event_bus
                  ?continuation_channel
+                 ?on_run_failure_origin
                  ctx
                  args
              | Error detail ->
@@ -1385,6 +1392,7 @@ let handle_keeper_msg
               ?on_event
               ?event_bus
               ?continuation_channel
+              ?on_run_failure_origin
               ctx
               args)
     with
@@ -1427,6 +1435,7 @@ let handle_keeper_msg_if_free
       ?on_event
       ?event_bus
       ?continuation_channel
+      ?on_run_failure_origin
       ctx
       args
   =
@@ -1443,6 +1452,7 @@ let handle_keeper_msg_if_free
          ?on_event
          ?event_bus
          ?continuation_channel
+         ?on_run_failure_origin
          ctx
          args)
   else
@@ -1455,5 +1465,6 @@ let handle_keeper_msg_if_free
           ?on_event
           ?event_bus
           ?continuation_channel
+          ?on_run_failure_origin
           ctx
           args)

@@ -889,6 +889,44 @@ describe('KeeperTurnInspector v2 drawer', () => {
     expect(container.querySelector('[data-testid="turn-transcript-assistant-absent"]')).toBeTruthy()
   })
 
+  it('labels a transport_failure row distinctly from an agent_failure row (masc#24314 / oas#2585)', async () => {
+    fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
+    fetchKeeperTurnTranscriptMock.mockResolvedValue({
+      keeper: 'albini',
+      turn_ref: 'trace-active#42',
+      found: true,
+      source: 'keeper_chat_store',
+      user: [{ role: 'user', content: 'deploy the staging build', ts: 1_781_587_540 }],
+      assistant: [
+        {
+          role: 'assistant',
+          content: 'Keeper request failed: ToolFailureRecoveryFailed',
+          ts: 1_781_587_560,
+          kind: 'agent_failure',
+        },
+      ],
+    })
+
+    const { container } = render(html`<${KeeperTurnInspector} keeperName="albini" />`)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('T42')
+    })
+
+    fireEvent.click(container.querySelector('.kti-turn-summary')!)
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="turn-detail-drawer"]')).toBeTruthy()
+    })
+
+    fireEvent.click(container.querySelector('[data-testid="turn-tab-messages"]')!)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="turn-transcript-assistant-failure"]')?.textContent).toBe(
+        'agent failure',
+      )
+    })
+  })
+
   it('warns when the timing source fails while keeping turn records visible', async () => {
     fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
     fetchKeeperToolCallsMock.mockRejectedValue(new Error('tool log unavailable'))

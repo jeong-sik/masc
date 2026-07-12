@@ -16,6 +16,29 @@ let sdk_error_kind_for_receipt err =
   Keeper_execution_receipt.error_kind_of_string (sdk_error_kind err)
 ;;
 
+(* masc#24314 / oas#2585: which side of the OAS <-> keeper boundary
+   produced [err], for typed downstream failure display (e.g. keeper chat
+   Row_kind). [Transport_layer] is the wire-level Api/Provider failure
+   surface reaching the LLM backend; every other constructor is the
+   agent's own execution, config, or orchestration outcome — not evidence
+   of a transport-layer failure, even though today every [sdk_error] ends
+   up rendered through the same "Keeper request failed: ..." terminal
+   marker. *)
+type failure_origin =
+  | Transport_layer
+  | Agent_layer
+
+let failure_origin_of_sdk_error = function
+  | Agent_sdk.Error.Api _ | Agent_sdk.Error.Provider _ -> Transport_layer
+  | Agent_sdk.Error.Agent _
+  | Agent_sdk.Error.Mcp _
+  | Agent_sdk.Error.Config _
+  | Agent_sdk.Error.Serialization _
+  | Agent_sdk.Error.Io _
+  | Agent_sdk.Error.Orchestration _
+  | Agent_sdk.Error.Internal _ -> Agent_layer
+;;
+
 let network_error_kind_user_label = function
   | Llm_provider.Http_client.Connection_refused -> "connection refused"
   | Llm_provider.Http_client.Dns_failure -> "DNS lookup failed"

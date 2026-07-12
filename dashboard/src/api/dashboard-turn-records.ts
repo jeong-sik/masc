@@ -815,9 +815,10 @@ export type TurnTranscriptLine = {
   role: string
   content: string
   ts?: number
-  // Writer-declared row kind; present (e.g. 'transport_failure') only on
-  // non-utterance assistant rows so the inspector can mark a failed reply
-  // distinctly rather than quoting it as the keeper's own words.
+  // Writer-declared row kind; present (e.g. 'transport_failure' /
+  // 'agent_failure', masc#24314 / oas#2585) only on non-utterance
+  // assistant rows so the inspector can mark a failed reply distinctly
+  // rather than quoting it as the keeper's own words.
   kind?: string
 }
 

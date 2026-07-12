@@ -288,9 +288,11 @@ export const KeeperChatHistoryMessageSchema = object({
   // RFC-0235 P3: server-parsed rich chat blocks. Carried on history rows so
   // reloads preserve the structured render instead of re-parsing plain text.
   blocks: optional(array(KeeperChatBlockSchema)),
-  // Row kind (keeper_chat_store.ml :838-841). `transport_failure` is minted
-  // so a reload can tell a failed request apart from a real keeper reply;
-  // open string() per the same deploy-window rationale as `role`.
+  // Row kind (keeper_chat_store.ml Row_kind). `transport_failure` /
+  // `agent_failure` (masc#24314 / oas#2585) are minted so a reload can
+  // tell a failed request apart from a real keeper reply, and tell a
+  // wire-level failure apart from a typed OAS agent failure; open
+  // string() per the same deploy-window rationale as `role`.
   kind: optional(string()),
   // K1e read model: backend-owned provenance for what a history row can prove
   // about the stream/turn lifecycle. Kept optional for deploy windows and

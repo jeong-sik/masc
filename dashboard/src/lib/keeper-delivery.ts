@@ -22,6 +22,7 @@ export const IN_FLIGHT_DELIVERY = [
 export const FAILED_DELIVERY = [
   'error',
   'transport_failure',
+  'agent_failure',
   'timeout',
   'interrupted',
 ] as const satisfies ReadonlyArray<KeeperConversationDelivery>

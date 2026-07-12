@@ -743,9 +743,15 @@ export type KeeperConversationDelivery =
   | 'cancelled'
   | 'error'
   // Durable keeper_chat_store row written when a request failed before the
-  // keeper produced an utterance. Unlike generic client/tool errors, this
-  // writer-declared state is watermark-neutral.
+  // keeper produced an utterance, caused by a wire-level (Api/Provider)
+  // error reaching the LLM backend. Unlike generic client/tool errors,
+  // this writer-declared state is watermark-neutral.
   | 'transport_failure'
+  // masc#24314 / oas#2585: the same watermark-neutral failure marker for
+  // every other cause — a typed OAS Agent error (e.g.
+  // ToolFailureRecoveryFailed), a turn with no visible reply, or an
+  // admission/validation rejection. Not a transport problem.
+  | 'agent_failure'
   // Stream ended without a terminal RUN_FINISHED / RUN_ERROR event —
   // the transport was cut mid-response, so the text may be incomplete.
   | 'interrupted'

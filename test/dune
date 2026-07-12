@@ -779,6 +779,14 @@
  (modules test_keeper_failure_judgment_contract)
  (libraries alcotest masc_test_deps))
 
+; masc#24314 / oas#2585: pure classification unit tests for
+; Keeper_agent_error.failure_origin_of_sdk_error (the typed OAS Agent-vs-
+; transport seam the Row_kind fix threads through).
+(test
+ (name test_keeper_agent_error)
+ (modules test_keeper_agent_error)
+ (libraries alcotest masc_test_deps))
+
 (test
  (name test_server_request_authority)
  (modules test_server_request_authority)

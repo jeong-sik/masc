@@ -18,7 +18,7 @@ GET /api/v1/keepers/:name/digest?since_unix=<float>
   "keeper": "garnet",
   "since_unix": 1782976498.87,
   "generated_at_unix": 1783003000.1,
-  "chat": { "new_messages": 12, "first_new_ts": 1782976500.2, "transport_failures": 2 },
+  "chat": { "new_messages": 12, "first_new_ts": 1782976500.2, "transport_failures": 2, "agent_failures": 1 },
   "turns": { "completed": 34, "failed": 3, "crashes": 1 },
   "tasks": {
     "claimed": 2, "done": 1, "released": 1, "cancelled": 0,
@@ -50,7 +50,7 @@ GET /api/v1/keepers/:name/digest?since_unix=<float>
 
 | 카테고리 | 소스 | 필터 |
 |---|---|---|
-| chat | `Keeper_chat_store` (`.masc/keeper_chat/<name>.jsonl`, ts append-ordered) | `ts > since`; `Row_kind.Transport_failure`는 별도 카운트 |
+| chat | `Keeper_chat_store` (`.masc/keeper_chat/<name>.jsonl`, ts append-ordered) | `ts > since`; `Row_kind.Transport_failure`/`Row_kind.Agent_failure`는 각각 별도 카운트 (masc#24314 / oas#2585) |
 | turns.completed | keeper-local `turn-records/YYYY-MM/DD.jsonl` (day-partitioned) | day 파일 >= since 날짜만 open 후 `ts > since` |
 | turns.failed | activity-events `keeper.turn_failed` (actor/keeper_name match) | `ts_ms > since*1000` |
 | turns.crashes | keeper-local `crash-events/YYYY-MM/DD.jsonl` | `ts > since` |

@@ -30,6 +30,11 @@ type terminal_delivery =
       ; turn_ref : Ids.Turn_ref.t option
       }
   | Transport_failure of { content : string }
+      (** Wire-level (Api/Provider) error reaching the LLM backend. *)
+  | Agent_failure of { content : string }
+      (** masc#24314 / oas#2585: every other terminal failure — a typed OAS
+          Agent error, a turn with no visible reply, or an admission/
+          validation rejection — none of which are transport problems. *)
   | No_assistant_reply of { reason : no_assistant_reply_reason }
 
 and no_assistant_reply_reason =

@@ -8,6 +8,17 @@ val sdk_error_kind_for_receipt
   :  Agent_sdk.Error.sdk_error
   -> Keeper_execution_receipt.error_kind
 
+(** Which side of the OAS boundary [err] originates from, for typed
+    downstream classification (e.g. keeper chat Row_kind). [Transport_layer]
+    is the wire-level Api/Provider failure surface reaching the LLM
+    backend; every other constructor is the agent's own execution, config,
+    or orchestration outcome — not a transport-layer failure. *)
+type failure_origin =
+  | Transport_layer
+  | Agent_layer
+
+val failure_origin_of_sdk_error : Agent_sdk.Error.sdk_error -> failure_origin
+
 (** User-facing SDK error message for keeper chat/tool surfaces.
     Keeps low-level SDK prefixes out of persisted keeper replies while
     telemetry and terminal reason codes continue to use structured errors. *)

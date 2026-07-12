@@ -32,9 +32,12 @@ module Shutdown_finalize = Masc.Keeper_shutdown_finalize
 module Shutdown_runtime = Masc.Keeper_shutdown_runtime
 module Keeper_meta_contract = Masc.Keeper_meta_contract
 module Keeper_meta_store = Masc.Keeper_meta_store
+module Keeper_types_support = Masc.Keeper_types_support
 module Lifecycle_hooks = Masc.Keeper_lifecycle_hooks
 module Subprocess_registry = Masc.Keeper_subprocess_registry
 module Tombstone_cleanup = Masc.Keeper_supervisor_cleanup_tombstone
+module Dashboard_purge = Masc.Keeper_dashboard_purge
+module Dashboard_delete = Server_dashboard_http_delete_actions
 
 let bp = "/tmp/test-heartbeat-integ"
 
@@ -43,6 +46,14 @@ let temp_dir prefix =
   Unix.unlink dir;
   Unix.mkdir dir 0o755;
   dir
+
+let write_file path content =
+  Fs_compat.mkdir_p (Filename.dirname path);
+  let oc = open_out_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+;;
 
 (* The autonomous keeper_cycle_decision path resolves a runtime id
    (Keeper_meta_contract.runtime_id_of_meta -> Runtime.get_default_runtime_id),
@@ -159,6 +170,20 @@ let stale_paused_cleanup (meta : Keeper_meta_contract.keeper_meta)
   }
 ;;
 
+let dashboard_purge_cleanup requested_name
+    (meta : Keeper_meta_contract.keeper_meta)
+    : Shutdown_types.cleanup_intent
+  =
+  { reason =
+      Shutdown_types.Dashboard_keeper_purge
+        { requested_name
+        ; agent_name = meta.agent_name
+        ; meta_version = meta.meta_version
+        }
+  ; remove_session = true
+  }
+;;
+
 let replace_assoc_field key value fields =
   (key, value) :: List.remove_assoc key fields
 ;;
@@ -177,6 +202,8 @@ let shutdown_schema3_fixture (operation : Shutdown_types.t) =
     | Shutdown_types.Dead_tombstone_cleanup -> "retain_dead_tombstone"
     | Shutdown_types.Stale_paused_prune _ ->
       fail "schema 3 fixture cannot encode stale paused cleanup"
+    | Shutdown_types.Dashboard_keeper_purge _ ->
+      fail "schema 3 fixture cannot encode dashboard Keeper purge"
   in
   match Shutdown_store.to_json operation with
   | `Assoc fields ->
@@ -209,6 +236,13 @@ let shutdown_schema3_fixture (operation : Shutdown_types.t) =
               ; "remove_session", `Bool operation.cleanup_intent.remove_session
               ])
        |> replace_assoc_field "phase" phase)
+  | _ -> fail "shutdown JSON codec did not return an object"
+;;
+
+let shutdown_schema4_fixture (operation : Shutdown_types.t) =
+  match Shutdown_store.to_json operation with
+  | `Assoc fields ->
+    `Assoc (replace_assoc_field "schema_version" (`Int 4) fields)
   | _ -> fail "shutdown JSON codec did not return an object"
 ;;
 
@@ -979,6 +1013,39 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
        | Shutdown_types.Finalized _ ->
          fail "schema 3 unregister receipt did not restore accumulator evidence"
        | _ -> fail "schema 3 finalized phase changed during migration");
+      let migrated_schema4 =
+        match
+          operation
+          |> shutdown_schema4_fixture
+          |> Shutdown_store.of_json
+        with
+        | Ok operation -> operation
+        | Error error -> fail (Shutdown_store.error_to_string error)
+      in
+      check int
+        "schema 4 lifecycle record migrates to current schema"
+        Shutdown_types.schema_version
+        migrated_schema4.schema_version;
+      check bool
+        "schema 4 immutable intent survives migration"
+        true
+        (Shutdown_types.cleanup_intent_equal
+           operation.cleanup_intent
+           migrated_schema4.cleanup_intent);
+      let dashboard_v5_operation =
+        { operation with
+          operation_id = Shutdown_types.Operation_id.generate ()
+        ; cleanup_intent = dashboard_purge_cleanup meta.name meta
+        }
+      in
+      (match
+         dashboard_v5_operation
+         |> shutdown_schema4_fixture
+         |> Shutdown_store.of_json
+       with
+       | Error (Shutdown_store.Decode_error _) -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error)
+       | Ok _ -> fail "schema 4 accepted a schema 5 dashboard cleanup reason");
       let loaded =
         match Shutdown_store.load ~config ~keeper_name:meta.name operation_id with
         | Ok loaded -> loaded
@@ -1323,6 +1390,120 @@ let test_keeper_shutdown_store_isolates_corrupt_owner () =
           true
           (recovered.phase = recoverable_operation.phase)
       | Error detail -> fail detail)
+
+let test_dashboard_purge_resolution_is_fail_closed () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir "dashboard-purge-resolution" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_turn_admission.For_testing.reset ();
+      R.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      let (_init_message : string) =
+        Masc.Workspace.init config ~agent_name:(Some "operator")
+      in
+      (match Dashboard_purge.resolve config "plain-agent" with
+       | Ok None -> ()
+       | Ok (Some _) -> fail "plain agent was classified as a Keeper"
+       | Error error -> fail (Dashboard_purge.resolve_error_to_string error));
+      let persisted = make_meta "dashboard-purge-persisted" in
+      (match Keeper_meta_store.write_meta config persisted with
+       | Ok () -> ()
+       | Error detail -> fail detail);
+      let persisted =
+        match Keeper_meta_store.read_meta config persisted.name with
+        | Ok (Some meta) -> meta
+        | Ok None -> fail "persisted dashboard purge metadata disappeared"
+        | Error detail -> fail detail
+      in
+      let target =
+        match Dashboard_purge.resolve config persisted.name with
+        | Ok (Some target) -> target
+        | Ok None -> fail "persisted Keeper fell through to plain-agent purge"
+        | Error error -> fail (Dashboard_purge.resolve_error_to_string error)
+      in
+      check string "resolved exact Keeper name" persisted.name target.keeper_name;
+      check int
+        "resolved exact metadata version"
+        persisted.meta_version
+        target.meta.meta_version;
+      let backlog_version =
+        match Workspace_backlog.read_backlog_r config with
+        | Ok backlog -> backlog.version
+        | Error detail -> fail detail
+      in
+      let existing_operation : Shutdown_types.t =
+        { schema_version = Shutdown_types.schema_version
+        ; revision = 0
+        ; operation_id = Shutdown_types.Operation_id.generate ()
+        ; keeper_name = persisted.name
+        ; lane_ownership = Shutdown_types.Dormant_meta
+        ; trace_id = persisted.runtime.trace_id
+        ; generation = persisted.runtime.generation
+        ; actor = "supervisor"
+        ; cleanup_intent = retain_operator_cleanup
+        ; turn_disposition = Shutdown_types.No_inflight_turn
+        ; expected_backlog_version = backlog_version
+        ; owned_task_ids = []
+        ; join_evidence = None
+        ; phase = Shutdown_types.Joined_idle
+        ; created_at = Masc_domain.now_iso ()
+        ; updated_at = Masc_domain.now_iso ()
+        }
+      in
+      (match Shutdown_store.persist_new ~config existing_operation with
+       | Ok () -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error));
+      (match
+         Masc.Keeper_turn_admission.restore_shutdown
+           ~base_path:config.base_path
+           ~keeper_name:persisted.name
+           ~operation_id:existing_operation.operation_id
+       with
+       | Masc.Keeper_turn_admission.Shutdown_restored -> ()
+       | Shutdown_already_restored
+       | Shutdown_restore_conflict _ ->
+         fail "existing cleanup fixture could not restore admission");
+      (match Dashboard_purge.submit ~config ~actor:"operator" target with
+       | Error (Shutdown_runtime.Existing_operation_intent_mismatch operation) ->
+         check bool
+           "mismatched operation identity is surfaced"
+           true
+           (Shutdown_types.Operation_id.equal
+              existing_operation.operation_id
+              operation.operation_id)
+       | Error error -> fail (Shutdown_runtime.submit_error_to_string error)
+       | Ok _ -> fail "dashboard purge reused an unrelated cleanup operation");
+      let corrupt_name = "dashboard-purge-corrupt" in
+      write_file
+        (Keeper_types_profile.keeper_meta_path config corrupt_name)
+        "{not-json";
+      (match Dashboard_purge.resolve config corrupt_name with
+       | Error (Dashboard_purge.Keeper_metadata_unreadable _) -> ()
+       | Error error -> fail (Dashboard_purge.resolve_error_to_string error)
+       | Ok _ -> fail "corrupt Keeper metadata fell through to agent purge");
+      let configured_name = "dashboard-purge-configured" in
+      let configured_path =
+        Filename.concat
+          (Config_dir_resolver.keepers_dir_for_base_path
+             ~base_path:config.base_path)
+          (configured_name ^ ".toml")
+      in
+      write_file configured_path "[keeper]\nautoboot = false\n";
+      match Dashboard_purge.resolve config configured_name with
+      | Error
+          (Dashboard_purge.Keeper_metadata_required
+            { configuration_path; _ }) ->
+        check string
+          "configuration-only Keeper path stays explicit"
+          configured_path
+          configuration_path
+      | Error error -> fail (Dashboard_purge.resolve_error_to_string error)
+      | Ok _ -> fail "configuration-only Keeper fell through to agent purge")
+;;
 
 let test_stale_prune_dormant_prepare_rejects_version_change () =
   Eio_main.run @@ fun env ->
@@ -2123,6 +2304,266 @@ let test_keeper_shutdown_delivers_dead_tombstone_completion_after_receipt () =
               ~keeper_name:meta.name)
              .snapshot_shutdown_operation_id))
 
+let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir "dashboard-purge-finalization" in
+  let completion_bus =
+    Agent_sdk.Event_bus.create
+      ~policy:Agent_sdk.Event_bus.Drop_oldest
+      ()
+  in
+  let completion_subscription =
+    Agent_sdk.Event_bus.subscribe
+      ~purpose:"dashboard-purge-completion-test"
+      completion_bus
+  in
+  Masc_event_bus.set completion_bus;
+  Fun.protect
+    ~finally:(fun () ->
+      Agent_sdk.Event_bus.unsubscribe completion_bus completion_subscription;
+      Shutdown_finalize.For_testing.reset_remove_pending_confirms_by_target ();
+      Shutdown_finalize.For_testing.reset_completion_handler ();
+      Masc.Keeper_turn_admission.For_testing.reset ();
+      R.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      let (_init_message : string) =
+        Masc.Workspace.init config ~agent_name:(Some "operator")
+      in
+      let initial = make_meta "dashboard-purge-finalize" in
+      (match Keeper_meta_store.write_meta config initial with
+       | Ok () -> ()
+       | Error detail -> fail detail);
+      let meta =
+        match Keeper_meta_store.read_meta config initial.name with
+        | Ok (Some meta) -> meta
+        | Ok None -> fail "dashboard purge metadata disappeared"
+        | Error detail -> fail detail
+      in
+      let backlog_version =
+        match Workspace_backlog.read_backlog_r config with
+        | Ok backlog -> backlog.version
+        | Error detail -> fail detail
+      in
+      let sidecar_paths =
+        [ Keeper_types_support.keeper_metrics_path config meta.name
+        ; Keeper_types_support.keeper_memory_bank_path config meta.name
+        ; Keeper_types_support.keeper_generation_index_path config meta.name
+        ; Keeper_types_support.keeper_policy_log_path config meta.name
+        ; Keeper_types_support.keeper_decision_log_path config meta.name
+        ; Keeper_types_support.keeper_feedback_log_path config meta.name
+        ; Keeper_types_support.keeper_dataset_export_path config meta.name
+        ]
+      in
+      List.iter (fun path -> write_file path "fixture") sidecar_paths;
+      let runtime_dir = Filename.concat (Keeper_fs.keeper_dir config) meta.name in
+      write_file (Filename.concat runtime_dir "runtime.json") "{}";
+      let session_dir =
+        Keeper_types_support.keeper_session_dir
+          config
+          (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+      in
+      write_file (Filename.concat session_dir "history.jsonl") "{}\n";
+      let configuration_path =
+        Filename.concat
+          (Config_dir_resolver.keepers_dir_for_base_path
+             ~base_path:config.base_path)
+          (meta.name ^ ".toml")
+      in
+      write_file configuration_path "[keeper]\nautoboot = false\n";
+      let agent_path =
+        Filename.concat
+          (Workspace.agents_dir config)
+          (Workspace.safe_filename meta.agent_name ^ ".json")
+      in
+      write_file agent_path "{}";
+      let agent_metrics_dir =
+        Metrics_store_eio.agent_metrics_dir config meta.agent_name
+      in
+      write_file (Filename.concat agent_metrics_dir "fixture.jsonl") "{}\n";
+      let unrelated_path =
+        Filename.concat (Workspace.agents_dir config) "unrelated.json"
+      in
+      write_file unrelated_path "{}";
+      Masc.Auth.save_credential
+        config.base_path
+        { id = None
+        ; agent_id = None
+        ; agent_name = meta.agent_name
+        ; token = Masc.Auth.sha256_hash "dashboard-purge-token"
+        ; role = Masc_domain.Worker
+        ; created_at = Masc_domain.now_iso ()
+        ; expires_at = None
+        };
+      ignore
+        (Workspace.update_state config (fun state ->
+           { state with
+             active_agents = meta.agent_name :: state.active_agents
+           }));
+      ignore
+        (Heartbeat.start
+           ~agent_name:meta.agent_name
+           ~interval:30
+           ~message:"dashboard purge fixture");
+      let operation_id = Shutdown_types.Operation_id.generate () in
+      let operation : Shutdown_types.t =
+        { schema_version = Shutdown_types.schema_version
+        ; revision = 0
+        ; operation_id
+        ; keeper_name = meta.name
+        ; lane_ownership = Shutdown_types.Dormant_meta
+        ; trace_id = meta.runtime.trace_id
+        ; generation = meta.runtime.generation
+        ; actor = "operator"
+        ; cleanup_intent = dashboard_purge_cleanup meta.name meta
+        ; turn_disposition = Shutdown_types.No_inflight_turn
+        ; expected_backlog_version = backlog_version
+        ; owned_task_ids = []
+        ; join_evidence = None
+        ; phase =
+            Shutdown_types.Cleanup_ready
+              { settled_task_ids = []; pending_confirms_removed = 0 }
+        ; created_at = Masc_domain.now_iso ()
+        ; updated_at = Masc_domain.now_iso ()
+        }
+      in
+      (match Shutdown_store.persist_new ~config operation with
+       | Ok () -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error));
+      (match
+         Masc.Keeper_turn_admission.restore_shutdown
+           ~base_path:config.base_path
+           ~keeper_name:meta.name
+           ~operation_id
+       with
+       | Masc.Keeper_turn_admission.Shutdown_restored -> ()
+       | Shutdown_already_restored
+       | Shutdown_restore_conflict _ ->
+         fail "dashboard purge fixture could not restore admission");
+      Shutdown_finalize.register_remove_pending_confirms_by_target
+        (fun _config ~target_type:_ ~target_id:_ -> Ok 0);
+      Shutdown_finalize.register_completion_handler
+        (fun _config _operation _action -> Error "synthetic dashboard completion outage");
+      (match Shutdown_finalize.run ~config ~entry:None operation with
+       | Error (Shutdown_finalize.Completion_failed (_, detail)) ->
+         check string
+           "dashboard completion outage remains explicit"
+           "synthetic dashboard completion outage"
+           detail
+       | Error error -> fail (Shutdown_finalize.error_to_string error)
+       | Ok _ -> fail "dashboard completion outage was reported as delivered");
+      let pending =
+        match Shutdown_store.load ~config ~keeper_name:meta.name operation_id with
+        | Ok pending -> pending
+        | Error error -> fail (Shutdown_store.error_to_string error)
+      in
+      check bool
+        "pending dashboard completion already removed exact metadata"
+        false
+        (Sys.file_exists (Keeper_types_profile.keeper_meta_path config meta.name));
+      check bool
+        "pending dashboard completion already removed exact session"
+        false
+        (Sys.file_exists session_dir);
+      check bool
+        "pending dashboard completion retains server artifacts for retry"
+        true
+        (Sys.file_exists configuration_path);
+      (match Dashboard_purge.existing_operation config meta.name with
+       | Ok (Some existing) ->
+         check bool
+           "HTTP retry recovers the exact pending dashboard operation"
+           true
+           (Shutdown_types.Operation_id.equal
+              operation_id
+              existing.operation_id)
+       | Ok None -> fail "pending dashboard operation was not discoverable"
+       | Error error -> fail (Dashboard_purge.resolve_error_to_string error));
+      Shutdown_finalize.register_completion_handler
+        Dashboard_delete.handle_keeper_lifecycle_completion;
+      let finalized =
+        match Shutdown_finalize.run ~config ~entry:None pending with
+        | Ok finalized -> finalized
+        | Error error -> fail (Shutdown_finalize.error_to_string error)
+      in
+      (match finalized.phase with
+       | Shutdown_types.Finalized
+           { meta_removed = true
+           ; session_removed = true
+           ; completion =
+               Shutdown_types.Completion_delivered
+                 Shutdown_types.Dashboard_keeper_purged
+           ; _
+           } -> ()
+       | _ -> fail "dashboard purge did not persist its delivered receipt");
+      let removed_paths =
+        [ Keeper_types_profile.keeper_meta_path config meta.name
+        ; runtime_dir
+        ; session_dir
+        ; configuration_path
+        ; agent_path
+        ; agent_metrics_dir
+        ; Masc.Auth.credential_file config.base_path meta.agent_name
+        ]
+        @ sidecar_paths
+      in
+      List.iter
+        (fun path ->
+           check bool ("artifact removed: " ^ path) false (Sys.file_exists path))
+        removed_paths;
+      check bool "unrelated agent artifact preserved" true
+        (Sys.file_exists unrelated_path);
+      check bool
+        "exact workspace owner unbound"
+        false
+        (List.exists
+           (String.equal meta.agent_name)
+           (Workspace.read_state config).active_agents);
+      check int
+        "exact agent heartbeats stopped"
+        0
+        (List.length
+           (List.filter
+              (fun (heartbeat : Heartbeat.t) ->
+                 String.equal heartbeat.agent_name meta.agent_name)
+              (Heartbeat.list ())));
+      (match Agent_sdk.Event_bus.drain completion_subscription with
+       | [ event ] ->
+         (match event.Agent_sdk.Event_bus.payload with
+          | Agent_sdk.Event_bus.Custom
+              ("masc.keeper.lifecycle", `Assoc fields) ->
+            check string
+              "dashboard purge lifecycle event"
+              "purged"
+              (match List.assoc_opt "event" fields with
+               | Some (`String event_name) -> event_name
+               | _ -> fail "dashboard purge event omitted event name")
+          | _ -> fail "dashboard purge did not publish a lifecycle event")
+       | events ->
+         fail
+           (Printf.sprintf
+              "expected one dashboard purge lifecycle event, got %d"
+              (List.length events)));
+      (match Shutdown_finalize.run ~config ~entry:None finalized with
+       | Ok replayed -> check bool "finalized replay is stable" true
+                          (replayed.phase = finalized.phase)
+       | Error error -> fail (Shutdown_finalize.error_to_string error));
+      check int
+        "delivered dashboard purge receipt prevents duplicate event"
+        0
+        (List.length (Agent_sdk.Event_bus.drain completion_subscription));
+      match
+        Masc.Keeper_turn_admission.run_if_free
+          ~base_path:config.base_path
+          ~keeper_name:meta.name
+          (fun () -> ())
+      with
+      | `Ran () -> ()
+      | `Busy _ -> fail "delivered dashboard purge left admission fenced")
+;;
+
 let test_keeper_shutdown_cleanup_replays_after_meta_removal () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -2745,6 +3186,8 @@ let () =
         test_keeper_shutdown_store_round_trip_and_identity_guard;
       test_case "shutdown store isolates corrupt owner" `Quick
         test_keeper_shutdown_store_isolates_corrupt_owner;
+      test_case "dashboard purge resolution is fail closed" `Quick
+        test_dashboard_purge_resolution_is_fail_closed;
       test_case "stale dormant prepare rejects a newer meta version" `Quick
         test_stale_prune_dormant_prepare_rejects_version_change;
       test_case "stale registered prepare requires a paused lane" `Quick
@@ -2761,6 +3204,8 @@ let () =
         test_keeper_shutdown_finalizes_idle_operation;
       test_case "shutdown delivers dead tombstone completion after receipt" `Quick
         test_keeper_shutdown_delivers_dead_tombstone_completion_after_receipt;
+      test_case "dashboard purge finalizes artifacts and receipt" `Quick
+        test_dashboard_keeper_purge_finalizes_artifacts_and_receipt;
       test_case "shutdown cleanup replays after meta removal" `Quick
         test_keeper_shutdown_cleanup_replays_after_meta_removal;
       test_case "shutdown recovers committed task receipt" `Quick

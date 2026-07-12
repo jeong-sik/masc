@@ -2496,6 +2496,16 @@ let test_session_conflict_exhaustion_preserves_typed_terminal_reason () =
       "session conflict is not automatically retryable"
       false
       (Keeper_internal_error.runtime_exhaustion_reason_retryable reason);
+    Alcotest.(check string)
+      "session conflict has a stable observation label"
+      "session_conflict"
+      (Keeper_internal_error.runtime_exhaustion_reason_to_label reason);
+    let encoded = Keeper_internal_error.runtime_exhaustion_reason_to_json reason in
+    Alcotest.(check bool)
+      "session conflict survives persistence round-trip"
+      true
+      (Keeper_internal_error.runtime_exhaustion_reason_of_json encoded
+       = Some Keeper_internal_error.Session_conflict);
     Alcotest.(check bool)
       "session conflict is not auto-recoverable"
       false

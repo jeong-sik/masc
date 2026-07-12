@@ -203,24 +203,6 @@ let schema_field_types ?base_path id : (string * declared_type) list =
          ();
        []))
 
-(** Serialize a static field-type list into the same JSON shape the sidecar
-    [schema_dump] entry point produces, so the dashboard form can render
-    it without knowing whether the connector is in-process or sidecar. *)
-let declared_type_to_string : declared_type -> string = function
-  | `String -> "string"
-  | `Integer -> "integer"
-  | `Number -> "number"
-  | `Boolean -> "boolean"
-;;
-
-let field_types_to_json (fields : (string * declared_type) list) : Yojson.Safe.t =
-  `List
-    (List.map
-       (fun (name, typ) ->
-         `Assoc [ "name", `String name; "type", `String (declared_type_to_string typ) ])
-       fields)
-;;
-
 let coerce_value (typ : declared_type) (raw : string) : (toml_value, string) result =
   if String.length raw > max_value_bytes
   then Error (Printf.sprintf "value too long (>%d bytes)" max_value_bytes)

@@ -924,7 +924,23 @@ let handle_schema _state request reqd =
             request
             reqd
             ~status:`OK
-            (`Assoc [ "ok", `Bool true; "id", `String id; "schema", field_types_to_json fields ])
+            (`Assoc
+                [ "ok", `Bool true
+                ; "id", `String id
+                ; "schema"
+                , `List
+                    (List.map
+                       (fun (name, typ) ->
+                         let type_s =
+                           match typ with
+                           | `String -> "string"
+                           | `Integer -> "integer"
+                           | `Number -> "number"
+                           | `Boolean -> "boolean"
+                         in
+                         `Assoc [ "name", `String name; "type", `String type_s ])
+                       fields)
+                ])
         | [] ->
           respond_json
             request

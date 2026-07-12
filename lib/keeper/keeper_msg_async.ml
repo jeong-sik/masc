@@ -914,11 +914,14 @@ let submit ?clock ?timeout_sec ?on_worker_aborted ~background_sw ~base_path ~cal
           match cb reason with
           | () -> ()
           | exception exn ->
+            Otel_metric_store.inc_counter
+              Keeper_metrics.(to_string LifecycleCallbackFailures)
+              ~labels:[ "callback", "keeper_msg_async_on_worker_aborted" ]
+              ();
             Log.Keeper.error
               "keeper_msg_async: on_worker_aborted callback failed request_id=%s error=%s"
               request_id
-              (Printexc.to_string exn);
-            raise exn)
+              (Printexc.to_string exn))
     in
     let run_worker_with_timeout request_sw =
       match worker_timeout with
@@ -977,9 +980,10 @@ let submit ?clock ?timeout_sec ?on_worker_aborted ~background_sw ~base_path ~cal
         runtime_cancelled_status ()
       | Eio.Cancel.Cancelled _ as e ->
         set_status_protected ~preserve_terminal:true key (runtime_cancelled_status ());
-        (* [notify_aborted] re-raises callback exceptions now that delivery is
-           fail closed, so the switch-table release must be exception-safe or
-           every failed callback leaks a stale [active_switches] entry.
+        (* [notify_aborted] observes callback exceptions without letting one
+           request fail the server root switch. The switch-table release must
+           still be exception-safe because cancellation cleanup below can be
+           interrupted by unrelated bookkeeping failures.
            [clear_active_switch] is a mutex-guarded [Request_table.remove] and cannot
            itself raise, so the finally carries no [Finally_raised] risk. *)
         Fun.protect

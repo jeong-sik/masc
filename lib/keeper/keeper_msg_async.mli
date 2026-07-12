@@ -131,8 +131,9 @@ val server_background_switch : unit -> (Eio.Switch.t, submit_error) result
     that is not itself under cancellation at the moment of the call (wrapped
     internally in {!Eio.Cancel.protect}), so it may safely perform blocking
     Eio operations such as pushing to a caller-owned stream. Callback
-    exceptions are logged and re-raised; they are never treated as successful
-    notification. *)
+    exceptions are logged and counted as lifecycle callback failures, but are
+    not propagated to the server root switch. The durable request status remains
+    the authoritative terminal result available to pollers. *)
 val submit
   :  ?clock:_ Eio.Time.clock
   -> ?timeout_sec:float

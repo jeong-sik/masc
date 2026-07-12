@@ -171,6 +171,57 @@ let test_operator_cancel_running_worker_invokes_on_worker_aborted () =
         check bool "f was running before cancellation" true !f_was_called)))
 ;;
 
+let test_abort_callback_failure_does_not_fail_server_switch () =
+  with_temp_base (fun base_path ->
+    Eio_main.run (fun env ->
+      Eio.Switch.run (fun sw ->
+        let clock = Eio.Stdenv.clock env in
+        let worker_started, worker_started_resolver = Eio.Promise.create () in
+        let never, _never_resolver = Eio.Promise.create () in
+        let request_id =
+          Keeper_msg_async.submit
+            ~clock
+            ~timeout_sec:5.0
+            ~on_worker_aborted:(fun _reason ->
+              failwith "synthetic abort notification failure")
+            ~background_sw:sw
+            ~base_path
+            ~caller
+            ~keeper_name:"terminal-event-callback-failure"
+            ~f:(fun _request_sw ->
+              Eio.Promise.resolve worker_started_resolver ();
+              Eio.Promise.await never;
+              Keeper_types_profile.tool_result_ok "unreachable")
+            ()
+          |> accepted_request_id
+        in
+        Eio.Promise.await worker_started;
+        check bool
+          "operator cancellation remains accepted"
+          true
+          (Keeper_msg_async.cancel ~base_path ~caller request_id
+           = Keeper_msg_async.Cancelled_request);
+        let reached_cancelled =
+          wait_until ~clock ~max_iterations:300 ~interval_sec:0.01 (fun () ->
+            match Keeper_msg_async.poll ~base_path ~caller request_id with
+            | Keeper_msg_async.Found
+                { status = Keeper_msg_async.Cancelled _; _ } -> true
+            | _ -> false)
+        in
+        check bool
+          "callback failure preserves the durable cancelled result"
+          true
+          reached_cancelled;
+        let released =
+          wait_until ~clock ~max_iterations:300 ~interval_sec:0.01 (fun () ->
+            Keeper_msg_async.For_testing.active_switch_count () = 0)
+        in
+        check bool
+          "callback failure releases the request switch"
+          true
+          released)))
+;;
+
 let test_normal_completion_never_invokes_on_worker_aborted () =
   with_temp_base (fun base_path ->
     Eio_main.run (fun env ->
@@ -211,6 +262,8 @@ let () =
             test_timeout_invokes_on_worker_aborted_exactly_once
         ; test_case "operator cancel running worker invokes on_worker_aborted" `Quick
             test_operator_cancel_running_worker_invokes_on_worker_aborted
+        ; test_case "abort callback failure stays inside the request lane" `Quick
+            test_abort_callback_failure_does_not_fail_server_switch
         ; test_case "normal completion never invokes on_worker_aborted" `Quick
             test_normal_completion_never_invokes_on_worker_aborted
         ] )

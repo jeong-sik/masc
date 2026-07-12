@@ -32,6 +32,8 @@ type stimulus_kind =
 type reaction_kind =
   | Turn_started
   | Event_queue_ack
+  | Event_queue_requeued
+  | Event_queue_escalated
   | Execution_receipt
   | Terminal_reason
   | Cursor_ack
@@ -69,6 +71,17 @@ val record_event_queue_reaction :
   Keeper_event_queue.stimulus ->
   unit
 (** Append a [record_kind="reaction"] row tied to an event queue stimulus. *)
+
+val record_event_queue_transition_reaction_result :
+  base_path:string ->
+  keeper_name:string ->
+  reaction_kind:reaction_kind ->
+  receipt:Keeper_event_queue_state.transition_receipt ->
+  Keeper_event_queue.stimulus ->
+  (unit, string) result
+(** Append the outbox-owned terminal transition with a stable event id.  A
+    retry may append the same id after a crash, so readers treat [event_id] as
+    the idempotency identity.  Persistence failures remain explicit [Error]. *)
 
 type event_queue_reaction_evidence =
   { keeper_name : string

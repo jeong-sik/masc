@@ -13,6 +13,7 @@ open Keeper_memory
 open Keeper_execution
 open Keeper_keepalive_signal
 module Observations = Keeper_heartbeat_loop_observations
+module Cycle = Keeper_heartbeat_loop_cycle
 
 (* Presence/identity sync extracted to
    [Keeper_heartbeat_loop_presence] (godfile decomp). *)
@@ -53,14 +54,12 @@ let record_event_queue_stimulus_turn_started =
   Stimulus_intake.record_event_queue_stimulus_turn_started
 ;;
 
-let record_event_queue_stimulus_ack =
-  Stimulus_intake.record_event_queue_stimulus_ack
-;;
-
 type heartbeat_event_intake = Stimulus_intake.heartbeat_event_intake = {
   pending_board_events : Keeper_world_observation.pending_board_event list;
   consumed_stimulus_count : int;
   consumed_stimuli : Keeper_event_queue.stimulus list;
+  claimed_lease : Keeper_registry_event_queue.lease option;
+  event_queue_claim_error : string option;
   event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
 }
 
@@ -142,22 +141,25 @@ let provider_timeout_metric_outcome =
 ;;
 
 (** Run keeper cycle with holder diagnostics. *)
-let run_keeper_cycle = Keeper_heartbeat_loop_cycle.run_keeper_cycle
+let run_keeper_cycle = Cycle.run_keeper_cycle
 
 (* T6 audit: outcome of one keepalive cycle evaluation.
 
-   [cycle_crashed = true] means the catch-all in
+   [cycle_crashed = true] means either the catch-all in
    [run_keepalive_unified_turn] swallowed an exception to keep the
-   keeper fiber alive. The failure has already been recorded via
+   keeper fiber alive, or the durable event-queue claim/settlement did
+   not commit. The failure has already been recorded via
    [Keeper_registry.increment_turn_failures] (the same counter the
    unified-turn failure path in [Keeper_unified_turn_failure] uses),
    so the caller reads a non-zero [turn_fail_count] and dispatches
-   [Turn_failed] instead of [Turn_succeeded]. A crashed cycle must
-   also NOT refresh the work-as-heartbeat lease. *)
+   [Turn_failed] instead of [Turn_succeeded]. Such a cycle must also
+   NOT refresh the work-as-heartbeat lease. *)
 type keepalive_turn_outcome = {
   meta : keeper_meta;
   cycle_crashed : bool;
 }
+
+exception Event_queue_settlement_failed of string
 
 let connector_attention_event_ids_of_stimuli stimuli =
   List.filter_map
@@ -185,26 +187,6 @@ let record_schedule_due_turn_started_reactions ~ctx ~keeper_name stimuli =
        match stimulus.payload with
        | Keeper_event_queue.Schedule_due _ ->
          record_event_queue_stimulus_turn_started ~ctx ~keeper_name stimulus
-       | Keeper_event_queue.Board_signal _
-       | Keeper_event_queue.Fusion_completed _
-       | Keeper_event_queue.Bg_completed _
-       | Keeper_event_queue.Bootstrap
-       | Keeper_event_queue.No_progress_recovery
-       | Keeper_event_queue.Connector_attention _
-       | Keeper_event_queue.Hitl_resolved _
-       | Keeper_event_queue.Goal_verification_failed _
-       | Keeper_event_queue.Failure_judgment _
-       | Keeper_event_queue.Goal_assigned _
-       | Keeper_event_queue.Goal_stagnation _ -> ())
-    stimuli
-;;
-
-let record_schedule_due_event_queue_ack_reactions ~ctx ~keeper_name stimuli =
-  List.iter
-    (fun (stimulus : Keeper_event_queue.stimulus) ->
-       match stimulus.payload with
-       | Keeper_event_queue.Schedule_due _ ->
-         record_event_queue_stimulus_ack ~ctx ~keeper_name stimulus
        | Keeper_event_queue.Board_signal _
        | Keeper_event_queue.Fusion_completed _
        | Keeper_event_queue.Bg_completed _
@@ -268,6 +250,148 @@ let record_crashed_cycle_failure ~base_path ~keeper_name exn =
     (if String.equal backtrace "" then "" else "\n" ^ backtrace)
 ;;
 
+let lease_contains_failure_judgment lease =
+  Keeper_registry_event_queue.lease_stimuli lease
+  |> List.exists (fun (stimulus : Keeper_event_queue.stimulus) ->
+    match stimulus.payload with
+    | Keeper_event_queue.Failure_judgment _ -> true
+    | Keeper_event_queue.Board_signal _
+    | Keeper_event_queue.Fusion_completed _
+    | Keeper_event_queue.Bg_completed _
+    | Keeper_event_queue.Schedule_due _
+    | Keeper_event_queue.Bootstrap
+    | Keeper_event_queue.No_progress_recovery
+    | Keeper_event_queue.Connector_attention _
+    | Keeper_event_queue.Hitl_resolved _
+    | Keeper_event_queue.Goal_verification_failed _
+    | Keeper_event_queue.Goal_assigned _
+    | Keeper_event_queue.Goal_stagnation _ ->
+      false)
+;;
+
+let failure_judgment_successor
+      ~arrived_at
+      (failure : Keeper_unified_turn.turn_failure)
+      judgment
+      detail
+  =
+  let payload : Keeper_event_queue.failure_judgment =
+    { fj_runtime_id = failure.runtime_id; fj_judgment = judgment; fj_detail = detail }
+  in
+  { Keeper_event_queue.post_id = Keeper_event_queue.failure_judgment_post_id payload
+  ; urgency = Keeper_event_queue.Normal
+  ; arrived_at
+  ; payload = Keeper_event_queue.Failure_judgment payload
+  }
+;;
+
+let settlement_of_failure ~settled_at ~lease failure =
+  if lease_contains_failure_judgment lease
+  then
+    Keeper_registry_event_queue.Escalate
+      { reason = Keeper_registry_event_queue.Failure_judgment_failed
+      ; successor = None
+      }
+  else
+    match failure.Keeper_unified_turn.source_lease_disposition with
+    | Keeper_unified_turn.Acknowledge_after_in_turn_handling ->
+      Keeper_registry_event_queue.Ack
+    | Keeper_unified_turn.Follow_failure_route ->
+      (match failure.Keeper_unified_turn.route with
+       | Keeper_runtime_failure_route.Retry_after_pacing _ ->
+         Keeper_registry_event_queue.Requeue
+           Keeper_registry_event_queue.Retry_after_pacing
+       | Keeper_runtime_failure_route.Rotate_now _ ->
+         Keeper_registry_event_queue.Requeue Keeper_registry_event_queue.Rotate_now
+       | Keeper_runtime_failure_route.Escalate_judgment { judgment; detail } ->
+         Keeper_registry_event_queue.Escalate
+           { reason = Keeper_registry_event_queue.Failure_judgment_requested
+           ; successor =
+               Some
+                 (failure_judgment_successor
+                    ~arrived_at:settled_at
+                    failure
+                    judgment
+                    detail)
+           })
+;;
+
+let settlement_of_cycle_outcome ~settled_at ~stop_requested ~lease = function
+  | Some (Cycle.Completed _) -> Keeper_registry_event_queue.Ack
+  | Some (Cycle.Busy _) ->
+    Keeper_registry_event_queue.Requeue Keeper_registry_event_queue.Cycle_busy
+  | Some (Cycle.Failed { failure; _ }) ->
+    settlement_of_failure ~settled_at ~lease failure
+  | None ->
+    if stop_requested
+    then Keeper_registry_event_queue.Requeue Keeper_registry_event_queue.Cancelled
+    else
+      Keeper_registry_event_queue.Requeue
+        Keeper_registry_event_queue.Turn_not_scheduled
+;;
+
+let reaction_kind_of_settlement = function
+  | Keeper_registry_event_queue.Ack -> Keeper_reaction_ledger.Event_queue_ack
+  | Keeper_registry_event_queue.Requeue _ ->
+    Keeper_reaction_ledger.Event_queue_requeued
+  | Keeper_registry_event_queue.Escalate _ ->
+    Keeper_reaction_ledger.Event_queue_escalated
+;;
+
+let project_transition_outbox ~base_path ~keeper_name =
+  let rec project_stimuli ~reaction_kind ~receipt = function
+    | [] -> Ok ()
+    | stimulus :: rest ->
+      (match
+         Keeper_reaction_ledger.record_event_queue_transition_reaction_result
+           ~base_path
+           ~keeper_name
+           ~reaction_kind
+           ~receipt
+           stimulus
+       with
+       | Error _ as error -> error
+       | Ok () -> project_stimuli ~reaction_kind ~receipt rest)
+  in
+  match Keeper_registry_event_queue.transition_outbox_result ~base_path keeper_name with
+  | Error _ as error -> error
+  | Ok [] -> Ok ()
+  | Ok [ (entry : Keeper_registry_event_queue.outbox_entry) ] ->
+    let receipt = entry.receipt in
+    let reaction_kind = reaction_kind_of_settlement receipt.settlement in
+    (match project_stimuli ~reaction_kind ~receipt entry.stimuli with
+     | Error _ as error -> error
+     | Ok () ->
+       Keeper_registry_event_queue.mark_transition_projected_result
+         ~base_path
+         keeper_name
+         ~transition_id:receipt.transition_id)
+  | Ok (_ :: _ :: _) -> Error "event queue state has multiple unprojected transitions"
+;;
+
+let settle_claimed_lease
+      ~base_path
+      ~keeper_name
+      ~settled_at
+      ~lease
+      ~settlement
+  =
+  Eio.Cancel.protect (fun () ->
+    Keeper_registry_event_queue.settle_result
+      ~base_path
+      keeper_name
+      ~settled_at
+      ~lease
+      ~settlement)
+;;
+
+let settlement_is_ack = function
+  | Keeper_registry_event_queue.Ack -> true
+  | Keeper_registry_event_queue.Requeue _
+  | Keeper_registry_event_queue.Escalate _ ->
+    false
+;;
+
 (* Pure: post-turn status event derived from the registry turn-failure
    counter. Extracted from the loop body so the crashed-cycle ->
    [Turn_failed] mapping is unit-testable. *)
@@ -291,8 +415,54 @@ let run_keepalive_unified_turn
   then { meta = meta_after_triage; cycle_crashed = false }
   else (
     let consumed_stimuli = ref [] in
-    let consumed_stimuli_turn_completed = ref false in
+    let claimed_lease = ref None in
+    let cycle_outcome_ref = ref None in
+    let lease_settled = ref false in
+    let settlement_failed = ref false in
+    let record_settlement_failure message =
+      settlement_failed := true;
+      match !cycle_outcome_ref with
+      | Some (Cycle.Failed _) ->
+        (* The failed turn already recorded its failure counter.  The queue
+           error remains explicit in the log and active durable lease. *)
+        ()
+      | Some (Cycle.Completed _ | Cycle.Busy _) | None ->
+        record_crashed_cycle_failure
+          ~base_path:ctx.config.base_path
+          ~keeper_name:meta_after_triage.name
+          (Event_queue_settlement_failed message)
+    in
+    let requeue_unsettled reason =
+      match !claimed_lease with
+      | None -> ()
+      | Some _ when !lease_settled -> ()
+      | Some lease ->
+        (match
+           settle_claimed_lease
+             ~base_path:ctx.config.base_path
+             ~keeper_name:meta_after_triage.name
+             ~settled_at:(Time_compat.now ())
+             ~lease
+             ~settlement:(Keeper_registry_event_queue.Requeue reason)
+         with
+         | Ok
+             ( Keeper_registry_event_queue.Settled _
+             | Keeper_registry_event_queue.Already_settled _ ) ->
+           lease_settled := true
+         | Error message ->
+           Log.Keeper.error
+             "registry: failed to requeue unsettled lease keeper=%s: %s"
+             meta_after_triage.name
+             message)
+    in
     try
+      (match
+         project_transition_outbox
+           ~base_path:ctx.config.base_path
+           ~keeper_name:meta_after_triage.name
+       with
+       | Ok () -> ()
+       | Error message -> raise (Event_queue_settlement_failed message));
       (* RFC-0310 §3.3: before intake, surface any live goal that has gone
          stale as a Goal_stagnation stimulus so it flows through the normal
          event-queue intake below and drives this turn. The producer is
@@ -315,6 +485,10 @@ let run_keepalive_unified_turn
         heartbeat_event_intake ~ctx ~meta_after_triage ~pending_board_events
       in
       consumed_stimuli := event_intake.consumed_stimuli;
+      claimed_lease := event_intake.claimed_lease;
+      (match event_intake.event_queue_claim_error with
+       | None -> ()
+       | Some message -> record_settlement_failure message);
       let pending_board_events = event_intake.pending_board_events in
       let obs =
         Keeper_world_observation.observe
@@ -540,7 +714,7 @@ let run_keepalive_unified_turn
                    !consumed_stimuli)
             else Keeper_registry.Proactive_tick
           in
-          let meta_after_cycle =
+          let cycle_outcome =
             run_keeper_cycle
               ?event_bus
               ?hitl_resolution
@@ -553,58 +727,95 @@ let run_keepalive_unified_turn
               ~wake
               ()
           in
-          consumed_stimuli_turn_completed := true;
-          meta_after_cycle)
+          cycle_outcome_ref := Some cycle_outcome;
+          Cycle.meta cycle_outcome)
         else meta_after_triage
       in
-      (* The caller has already admitted intake before this dequeue. Downstream
-         scheduling can still decide not to run (for example provider cooldown
-         or keeper health), so acknowledge only after [run_keeper_cycle]
-         actually returns; otherwise put the lease back rather than dropping
-         the stimulus. *)
-      if !consumed_stimuli <> []
-      then
-        if !consumed_stimuli_turn_completed
-        then (
-          (match
-             Keeper_registry_event_queue.ack_consumed_result
-               ~base_path:ctx.config.base_path
-               meta_after_triage.name
-               !consumed_stimuli
-           with
-           | Ok () ->
-             record_schedule_due_event_queue_ack_reactions
-               ~ctx
-               ~keeper_name:meta_after_triage.name
-               !consumed_stimuli
-           | Error msg ->
-             Log.Keeper.warn
-               "registry: ack_consumed failed name=%s: %s"
-               meta_after_triage.name
-               msg);
-          (*
-             Connector post-turn handling preserves the existing behavior:
-             it is an external-attention lifecycle update, while
-             [event_queue_ack] evidence above is emitted only after durable
-             event-queue acknowledgement succeeds. *)
-          mark_connector_attention_ignored_after_turn
-            ~base_path:ctx.config.base_path
-            ~keeper_name:meta_after_triage.name
-            (connector_attention_event_ids_of_stimuli !consumed_stimuli))
-        else
-          Keeper_registry_event_queue.requeue_front
-            ~base_path:ctx.config.base_path
-            meta_after_triage.name
-            !consumed_stimuli;
-      { meta = meta_after_cycle; cycle_crashed = false }
+      (* Queue ownership follows the typed cycle outcome.  Pending removal,
+         lease removal, an optional judgment successor, and the transition
+         outbox receipt commit in one event-queue.json rename. *)
+      (match !claimed_lease with
+       | None ->
+         (match !cycle_outcome_ref with
+          | Some (Cycle.Failed { failure; _ }) ->
+            (match failure.Keeper_unified_turn.route with
+             | Keeper_runtime_failure_route.Escalate_judgment { judgment; detail } ->
+               let successor =
+                 failure_judgment_successor
+                   ~arrived_at:(Time_compat.now ())
+                   failure
+                   judgment
+                   detail
+               in
+               (match
+                  Keeper_registry_event_queue.enqueue_durable_result
+                    ~base_path:ctx.config.base_path
+                    meta_after_triage.name
+                    successor
+                with
+                | Ok () -> ()
+                | Error message ->
+                  Log.Keeper.error
+                    "registry: unleased failure judgment enqueue failed keeper=%s: %s"
+                    meta_after_triage.name
+                    message;
+                  record_settlement_failure message)
+             | Keeper_runtime_failure_route.Retry_after_pacing _
+             | Keeper_runtime_failure_route.Rotate_now _ ->
+               ())
+          | Some (Cycle.Completed _ | Cycle.Busy _) | None -> ())
+       | Some lease ->
+         let settled_at = Time_compat.now () in
+         let settlement =
+           settlement_of_cycle_outcome
+             ~settled_at
+             ~stop_requested:(Atomic.get stop)
+             ~lease
+             !cycle_outcome_ref
+         in
+         (match
+            settle_claimed_lease
+              ~base_path:ctx.config.base_path
+              ~keeper_name:meta_after_triage.name
+              ~settled_at
+              ~lease
+              ~settlement
+          with
+          | Error message ->
+            Log.Keeper.error
+              "registry: durable lease settlement failed keeper=%s: %s"
+              meta_after_triage.name
+              message;
+            record_settlement_failure message
+          | Ok
+              ( Keeper_registry_event_queue.Settled _
+              | Keeper_registry_event_queue.Already_settled _ ) ->
+            lease_settled := true;
+            (match
+               project_transition_outbox
+                 ~base_path:ctx.config.base_path
+                 ~keeper_name:meta_after_triage.name
+             with
+             | Error message -> raise (Event_queue_settlement_failed message)
+             | Ok () -> ());
+            if settlement_is_ack settlement
+            then
+              mark_connector_attention_ignored_after_turn
+                ~base_path:ctx.config.base_path
+                ~keeper_name:meta_after_triage.name
+                (connector_attention_event_ids_of_stimuli !consumed_stimuli)));
+      { meta = meta_after_cycle; cycle_crashed = !settlement_failed }
     with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | Keeper_registry.Keeper_fiber_crash as e -> raise e
+    | Eio.Cancel.Cancelled _ as e ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      requeue_unsettled Keeper_registry_event_queue.Cancelled;
+      Printexc.raise_with_backtrace e backtrace
+    | Keeper_registry.Keeper_fiber_crash as e ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      requeue_unsettled Keeper_registry_event_queue.Cycle_crashed;
+      Printexc.raise_with_backtrace e backtrace
     | exn ->
-      Keeper_registry_event_queue.requeue_front
-        ~base_path:ctx.config.base_path
-        meta_after_triage.name
-        !consumed_stimuli;
+      requeue_unsettled Keeper_registry_event_queue.Cycle_crashed;
       (* T6 audit: keep the fiber alive, but surface the crash as a
          turn failure so the caller does not dispatch
          [Turn_succeeded] for a cycle that never completed. *)

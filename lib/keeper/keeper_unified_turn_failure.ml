@@ -75,8 +75,8 @@ let record_failure_and_maybe_escalate
       (Some (Keeper_registry.Turn_consecutive_failures count));
   (* RFC-0313 W3: with [pacing.mode = enforce] a turn failure never writes
      [paused=true] — the failure was already recorded as pacing (revisit
-     widening) and, for judgment classes, as a [Failure_judgment] stimulus at
-     the routing site in [Keeper_unified_turn]. The three auto-pause flags
+     widening) and, for judgment classes, as a [Failure_judgment] successor in
+     the heartbeat lease settlement transaction. The three auto-pause flags
      below stay reachable only in shadow mode (kill-switch, removed in W4).
      [pacing_enforced] is injected by the caller (production wires
      [Keeper_pacing_shadow.pacing_enforced ()]) so the mode is an explicit

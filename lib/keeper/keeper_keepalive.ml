@@ -906,6 +906,11 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
            "start_keepalive: registry validation rejected %s: %s"
            m.name
            (Keeper_registry.registry_entry_validation_error_to_string validation_error)
+       | Error (Keeper_registry.Registration_event_queue_unavailable { keeper_name; detail }) ->
+         Log.Keeper.error
+           "start_keepalive: registry event queue unavailable keeper=%s: %s"
+           keeper_name
+           detail
        | Ok reg ->
       (* Restore persisted tool usage stats from previous session *)
       Keeper_registry_tool_usage_persistence.restore ~base_path:ctx.config.base_path m.name;

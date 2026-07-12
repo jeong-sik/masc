@@ -1319,6 +1319,8 @@ let test_reaction_kind_string_roundtrip () =
       check bool "reaction_kind round-trips through string" true (roundtrips k))
     [ Keeper_reaction_ledger.Turn_started
     ; Keeper_reaction_ledger.Event_queue_ack
+    ; Keeper_reaction_ledger.Event_queue_requeued
+    ; Keeper_reaction_ledger.Event_queue_escalated
     ; Keeper_reaction_ledger.Execution_receipt
     ; Keeper_reaction_ledger.Terminal_reason
     ; Keeper_reaction_ledger.Cursor_ack

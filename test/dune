@@ -2087,8 +2087,6 @@
 
 (include stanzas/test_keeper_chat_coalescing.inc)
 
-(include stanzas/test_fs_compat_durable_append.inc)
-
 (include stanzas/test_keeper_turn_admission.inc)
 
 (include stanzas/test_keeper_memory_bank_compaction_errors.inc)

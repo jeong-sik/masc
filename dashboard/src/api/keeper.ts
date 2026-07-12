@@ -692,6 +692,21 @@ export async function streamKeeperMessage(
 
 export type KeeperChatReceiptFailureKind = KeeperQueueReceiptFailureKind
 
+export type KeeperChatReceiptAvailability = 'available' | 'quarantined'
+
+export type KeeperChatReceiptLoadErrorKind =
+  | 'invalid_path'
+  | 'read_failed'
+  | 'parse_failed'
+  | 'migration_failed'
+  | 'recovery_failed'
+  | 'durability_uncertain'
+
+export interface KeeperChatReceiptLoadError {
+  kind: KeeperChatReceiptLoadErrorKind
+  message: string
+}
+
 export type KeeperChatReceiptState =
   | { kind: 'pending' }
   | { kind: 'inflight'; leaseId: string; startedAt: number }
@@ -708,6 +723,8 @@ export interface KeeperChatReceipt {
   keeperName: string
   receiptId: string
   revision: number
+  availability: KeeperChatReceiptAvailability
+  loadErrors: KeeperChatReceiptLoadError[]
   state: KeeperChatReceiptState
 }
 
@@ -720,6 +737,16 @@ const KEEPER_CHAT_RECEIPT_FAILURE_KINDS = new Set<KeeperChatReceiptFailureKind>(
   'delivery_failed',
   'cancelled',
   'internal_error',
+  'recovery_interrupted',
+])
+
+const KEEPER_CHAT_RECEIPT_LOAD_ERROR_KINDS = new Set<KeeperChatReceiptLoadErrorKind>([
+  'invalid_path',
+  'read_failed',
+  'parse_failed',
+  'migration_failed',
+  'recovery_failed',
+  'durability_uncertain',
 ])
 
 export function parseKeeperChatReceipt(value: unknown): KeeperChatReceipt {
@@ -729,6 +756,8 @@ export function parseKeeperChatReceipt(value: unknown): KeeperChatReceipt {
   const keeperName = asString(value.keeper_name, '').trim()
   const receiptId = asString(value.receipt_id, '').trim()
   const revision = asNumber(value.revision)
+  const availability = asString(value.availability, '').trim()
+  const rawLoadErrors = value.load_errors
   const rawState = isRecord(value.state) ? value.state : null
   const kind = asString(rawState?.kind, '').trim()
   if (
@@ -738,8 +767,27 @@ export function parseKeeperChatReceipt(value: unknown): KeeperChatReceipt {
     || typeof revision !== 'number'
     || !Number.isSafeInteger(revision)
     || revision < 0
+    || (availability !== 'available' && availability !== 'quarantined')
+    || !Array.isArray(rawLoadErrors)
   ) {
     throw new Error('Keeper chat receipt response is missing identity or state')
+  }
+  const loadErrors = rawLoadErrors.map((rawError): KeeperChatReceiptLoadError => {
+    if (!isRecord(rawError)) {
+      throw new Error('Keeper chat receipt load error must be an object')
+    }
+    const errorKind = asString(rawError.kind, '') as KeeperChatReceiptLoadErrorKind
+    const message = asString(rawError.message, '').trim()
+    if (!KEEPER_CHAT_RECEIPT_LOAD_ERROR_KINDS.has(errorKind) || !message) {
+      throw new Error('Keeper chat receipt has invalid load error metadata')
+    }
+    return { kind: errorKind, message }
+  })
+  if (
+    (availability === 'available' && loadErrors.length !== 0)
+    || (availability === 'quarantined' && loadErrors.length === 0)
+  ) {
+    throw new Error('Keeper chat receipt availability disagrees with load errors')
   }
   let state: KeeperChatReceiptState
   const nullableString = (fieldName: string, fieldValue: unknown): string | null => {
@@ -797,7 +845,7 @@ export function parseKeeperChatReceipt(value: unknown): KeeperChatReceipt {
     default:
       throw new Error(`Keeper chat receipt has unknown state: ${kind || '<empty>'}`)
   }
-  return { keeperName, receiptId, revision, state }
+  return { keeperName, receiptId, revision, availability, loadErrors, state }
 }
 
 export async function fetchKeeperChatReceipt(

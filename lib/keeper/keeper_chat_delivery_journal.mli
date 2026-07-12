@@ -86,6 +86,10 @@ type error =
       }
   | Transcript_error of string
   | Invalid_terminal of string
+  | Commit_durability_uncertain of
+      { committed : t
+      ; detail : string
+      }
 
 val error_to_string : error -> string
 val phase_to_string : phase -> string
@@ -180,4 +184,5 @@ module For_testing : sig
     keeper_name:string ->
     Identity.delivery_key ->
     (string, error) result
+  val fail_next_save_after_rename : unit -> unit
 end

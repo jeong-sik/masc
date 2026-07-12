@@ -104,6 +104,41 @@ let test_save_file_atomic_overwrites_existing () =
   check string "overwrite succeeded" "new" (Fs_compat.load_file target)
 ;;
 
+let test_save_file_atomic_detailed_types_temp_creation_failure () =
+  Fs_compat.clear_fs ();
+  with_tmp_dir
+  @@ fun base ->
+  let target = Filename.concat (Filename.concat base "missing") "out.json" in
+  match Fs_compat.save_file_atomic_detailed target "new" with
+  | Error { stage = Fs_compat.Not_renamed; _ } -> ()
+  | Error { stage = Fs_compat.Renamed_durability_uncertain; _ } ->
+    fail "temp-file creation failure was classified after rename"
+  | Ok () -> fail "atomic write unexpectedly created an absent parent"
+;;
+
+let test_probe_path_distinguishes_missing_from_stat_failure () =
+  Fs_compat.clear_fs ();
+  with_tmp_dir
+  @@ fun base ->
+  let missing = Filename.concat base "missing" in
+  (match Fs_compat.probe_path missing with
+   | Ok None -> ()
+   | Ok (Some _) -> fail "missing path was reported present"
+   | Error failure ->
+     fail
+       ("missing path produced an error: "
+        ^ Fs_compat.path_probe_failure_to_string failure));
+  let regular_parent = Filename.concat base "regular" in
+  Fs_compat.save_file regular_parent "not a directory";
+  match Fs_compat.probe_path (Filename.concat regular_parent "child") with
+  | Error { error = Unix.ENOTDIR; _ } -> ()
+  | Error failure ->
+    fail
+      ("unexpected path probe error: "
+       ^ Fs_compat.path_probe_failure_to_string failure)
+  | Ok _ -> fail "ENOTDIR was collapsed into path absence"
+;;
+
 let with_redirected_stderr (f : unit -> 'a) : 'a * string =
   let tmp = Filename.temp_file "masc_stderr_" ".log" in
   let saved = Unix.dup Unix.stderr in
@@ -323,6 +358,14 @@ let () =
             "overwrites existing target"
             `Quick
             test_save_file_atomic_overwrites_existing
+        ; test_case
+            "types temp-file creation before rename"
+            `Quick
+            test_save_file_atomic_detailed_types_temp_creation_failure
+        ; test_case
+            "probe distinguishes missing from stat failure"
+            `Quick
+            test_probe_path_distinguishes_missing_from_stat_failure
         ] )
     ; ( "load_jsonl_diagnostics"
       , [ test_case

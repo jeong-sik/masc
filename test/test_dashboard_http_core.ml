@@ -170,7 +170,7 @@ let test_keeper_chat_receipt_route_and_json () =
     (Server_dashboard_http_keeper_api.keeper_chat_receipt_route (path ^ "/extra"));
   let json =
     Server_dashboard_http_keeper_api.keeper_chat_receipt_json
-      ~keeper_name:"idealist" ~revision:7L
+      ~keeper_name:"idealist" ~revision:7L ~load_errors:[]
       { Keeper_chat_queue.receipt_id
       ; state =
           Keeper_chat_queue.Failed
@@ -191,10 +191,42 @@ let test_keeper_chat_receipt_route_and_json () =
      | _ -> "invalid");
   check string "receipt JSON failure kind" "delivery_failed"
     (json |> member "state" |> member "failure_kind" |> to_string);
+  check string "healthy receipt availability" "available"
+    (json |> member "availability" |> to_string);
   check bool "receipt JSON redacts failure detail" false
     (contains_substring
        (json |> member "state" |> member "detail" |> to_string)
-       "sk-proj-abcdefghijklmnopqrstuvwxyz")
+       "sk-proj-abcdefghijklmnopqrstuvwxyz");
+  let quarantined_json =
+    Server_dashboard_http_keeper_api.keeper_chat_receipt_json
+      ~keeper_name:"idealist"
+      ~revision:8L
+      ~load_errors:
+        [ { Keeper_chat_queue.kind = Keeper_chat_queue.Durability_uncertain
+          ; path = Some "/Users/operator/private/.masc/keepers/idealist/chat-queue.json"
+          ; message =
+              "save_file_atomic /Users/operator/private/.masc/keepers/idealist/chat-queue.json: EIO"
+          }
+        ]
+      { Keeper_chat_queue.receipt_id; state = Keeper_chat_queue.Pending }
+  in
+  let public_error =
+    quarantined_json
+    |> member "load_errors"
+    |> index 0
+    |> member "message"
+    |> to_string
+  in
+  check string "quarantined receipt availability" "quarantined"
+    (quarantined_json |> member "availability" |> to_string);
+  check string "quarantine error kind stays typed" "durability_uncertain"
+    (quarantined_json
+     |> member "load_errors"
+     |> index 0
+     |> member "kind"
+     |> to_string);
+  check bool "public quarantine error omits BasePath" false
+    (contains_substring public_error "/Users/operator/private")
 
 let with_test_env f =
   let dir = test_dir () in

@@ -24,9 +24,11 @@ let rec remove_tree path =
 
 let keeper_name = "chat-store-append-keeper"
 
-let chat_path base_dir =
+let persisted_path base_dir =
   Filename.concat
-    (Filename.concat (Filename.concat base_dir ".masc") "keeper_chat")
+    (Filename.concat
+       (Common.masc_dir_from_base_path ~base_path:base_dir)
+       "keeper_chat")
     (keeper_name ^ ".jsonl")
 
 let test_ok_on_writable_dir () =
@@ -43,7 +45,12 @@ let test_ok_on_writable_dir () =
       Alcotest.(check int)
         "chat transcript is private"
         0o600
-        ((Unix.stat (chat_path base_dir)).Unix.st_perm land 0o777))
+        ((Unix.stat (persisted_path base_dir)).Unix.st_perm land 0o777);
+      match S.load ~base_dir ~keeper_name with
+      | [ row ] ->
+        Alcotest.(check string) "durable row is readable" "hello" row.content
+      | rows ->
+        Alcotest.failf "expected one readable row, got %d" (List.length rows))
 
 (* base_dir nested under a regular file: directory creation / file open fails
    (ENOTDIR), so the write raises and must surface as [Error]. *)
@@ -73,7 +80,7 @@ let test_incomplete_tail_fails_closed_without_rewrite () =
           ~content:"initial" ()
       in
       Alcotest.(check bool) "initial append succeeds" true (Result.is_ok initial);
-      let path = chat_path base_dir in
+      let path = persisted_path base_dir in
       let corrupt = "{\"role\":\"assistant\"}" in
       let output = open_out_bin path in
       output_string output corrupt;

@@ -206,7 +206,7 @@ let busy_ack_reply_text ?in_flight (request : Gate_protocol.message_request) =
    outbound adapter. *)
 let busy_ack_reply_text_queued
     ~(admission_rejection : Keeper_turn_admission.rejection)
-    ~keeper_name ~receipt_id =
+    ~keeper_name ~receipt_id ~durability =
   let in_flight_text =
     match admission_rejection.in_flight with
     | None -> ""
@@ -215,15 +215,21 @@ let busy_ack_reply_text_queued
           " Current turn: %s."
           (Keeper_turn_admission.lane_to_string lane)
   in
-  match admission_rejection.shutdown_operation_id with
-  | Some operation_id ->
+  match durability, admission_rejection.shutdown_operation_id with
+  | Keeper_chat_queue.Durability_uncertain _, _ ->
+      Printf.sprintf
+        "%s accepted your message at receipt_id=%s, but could not prove the \n\
+         queue directory's crash durability. Do not resend it blindly. This \n\
+         Keeper's chat queue is quarantined until operator recovery.%s"
+        keeper_name receipt_id in_flight_text
+  | Keeper_chat_queue.Durable, Some operation_id ->
       Printf.sprintf
         "%s is stopping under shutdown operation %s; your message is durably \
          queued and will wait for the next active lane (receipt_id=%s).%s"
         keeper_name
         (Keeper_shutdown_types.Operation_id.to_string operation_id)
         receipt_id in_flight_text
-  | None ->
+  | Keeper_chat_queue.Durable, None ->
       Printf.sprintf
         "%s is busy; your message is queued and will be answered once the current \
          turn finishes (receipt_id=%s).%s"
@@ -242,6 +248,13 @@ let chat_queue_message_request ~channel ~channel_user_id ~keeper_name
         [ ( "shutdown_operation_id"
           , Keeper_shutdown_types.Operation_id.to_string operation_id ) ]
   in
+  let durability_metadata =
+    match receipt.durability with
+    | Keeper_chat_queue.Durable ->
+        [ "queue_durability", "durable" ]
+    | Keeper_chat_queue.Durability_uncertain _ ->
+        [ "queue_durability", "uncertain" ]
+  in
   { Gate_protocol.request_id = receipt_id
   ; destination_type = "keeper"
   ; destination_id = keeper_name
@@ -257,6 +270,7 @@ let chat_queue_message_request ~channel ~channel_user_id ~keeper_name
       ; "pending_count", string_of_int receipt.pending_count
       ; "inflight_count", string_of_int receipt.inflight_count
       ]
+      @ durability_metadata
       @ shutdown_metadata
       @ metadata
   }
@@ -755,7 +769,8 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~submission_owne
       let reply =
         redact_text
           (busy_ack_reply_text_queued ~admission_rejection ~keeper_name
-             ~receipt_id:message_request.request_id)
+             ~receipt_id:message_request.request_id
+             ~durability:receipt.durability)
       in
       let stats =
         Some { Gate_protocol.model_used = "runtime"; duration_ms; tokens_used = 0 }

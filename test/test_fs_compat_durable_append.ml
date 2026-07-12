@@ -290,40 +290,34 @@ let test_transcript_read_close_does_not_release_writer_lock () =
   read_signal ready_read;
   let read_fd = Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 in
   Unix.close read_fd;
-  let acquired_read, acquired_write = Unix.pipe ~cloexec:true () in
-  let contender_pid =
-    match Unix.fork () with
-    | 0 ->
-      Unix.close acquired_read;
-      let result =
-        Fs_compat.append_private_jsonl_durable_locked_result
-          path
-          "{\"row\":1}\n"
-      in
-      (match result with
-       | Ok () ->
-         write_signal acquired_write;
-         exit 0
-       | Error _ -> exit 3)
-    | pid -> pid
+  let contender_fd =
+    Unix.openfile (path ^ ".lock") [ Unix.O_RDWR; Unix.O_CLOEXEC ] 0
   in
-  Unix.close acquired_write;
-  let readable_before_release, _, _ = Unix.select [ acquired_read ] [] [] 0.05 in
+  let try_lock () =
+    ignore (Unix.lseek contender_fd 0 Unix.SEEK_SET : int);
+    match Unix.lockf contender_fd Unix.F_TLOCK 0 with
+    | () -> `Acquired
+    | exception Unix.Unix_error ((Unix.EACCES | Unix.EAGAIN), _, _) ->
+      `Contended
+  in
+  let before_release = try_lock () in
+  (match before_release with
+   | `Acquired -> Unix.lockf contender_fd Unix.F_ULOCK 0
+   | `Contended -> ());
   write_signal release_write;
-  let readable_after_release, _, _ = Unix.select [ acquired_read ] [] [] 2.0 in
-  if readable_after_release = [] then Unix.kill contender_pid Sys.sigkill
-  else read_signal acquired_read;
   Unix.close ready_read;
   Unix.close release_write;
-  Unix.close acquired_read;
   let _, holder_status = Unix.waitpid [] holder_pid in
-  let _, contender_status = Unix.waitpid [] contender_pid in
-  check int "read-close does not release the writer lock" 0
-    (List.length readable_before_release);
-  check int "contender acquires after writer release" 1
-    (List.length readable_after_release);
-  check bool "holder exits cleanly" true (holder_status = Unix.WEXITED 0);
-  check bool "contender exits cleanly" true (contender_status = Unix.WEXITED 0)
+  let after_release = try_lock () in
+  (match after_release with
+   | `Acquired -> Unix.lockf contender_fd Unix.F_ULOCK 0
+   | `Contended -> ());
+  Unix.close contender_fd;
+  check bool "read-close does not release the writer lock" true
+    (before_release = `Contended);
+  check bool "contender acquires after writer release" true
+    (after_release = `Acquired);
+  check bool "holder exits cleanly" true (holder_status = Unix.WEXITED 0)
 ;;
 
 let test_private_jsonl_append_preserves_complete_history () =

@@ -325,6 +325,10 @@ function normalizeStreamDeliveryReceipt(value: unknown): KeeperConversationStrea
   switch (asString(value)?.trim()) {
     case 'client_observed_sse_event':
       return 'client_observed_sse_event'
+    case 'server_durable_receipt':
+      return 'server_durable_receipt'
+    case 'server_receipt_durability_uncertain':
+      return 'server_receipt_durability_uncertain'
     case 'server_lifecycle_replay_only':
       return 'server_lifecycle_replay_only'
     case 'no_delivery_receipt':

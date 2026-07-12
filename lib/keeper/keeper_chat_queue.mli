@@ -83,6 +83,7 @@ type snapshot_load_error_kind =
   | Parse_failed
   | Migration_failed
   | Recovery_failed
+  | Durability_uncertain
 
 type snapshot_load_error = {
   kind : snapshot_load_error_kind;
@@ -96,6 +97,11 @@ type mutation_error =
   | Invalid_input of string
   | Revision_exhausted
   | Persist_failed of string
+  | Commit_durability_uncertain of
+      { revision : int64
+      ; receipt_ids : Receipt_id.t list
+      ; error : snapshot_load_error
+      }
 
 val snapshot_load_error_kind_to_string : snapshot_load_error_kind -> string
 val mutation_error_to_string : mutation_error -> string
@@ -114,6 +120,7 @@ type receipt_view = {
 type receipt_lookup = {
   revision : int64;
   receipt : receipt_view option;
+  load_errors : snapshot_load_error list;
 }
 
 type diagnostic_snapshot = {
@@ -129,7 +136,12 @@ type enqueue_receipt = {
   revision : int64;
   pending_count : int;
   inflight_count : int;
+  durability : commit_durability;
 }
+
+and commit_durability =
+  | Durable
+  | Durability_uncertain of snapshot_load_error
 
 type configure_report = {
   restored_keeper_count : int;
@@ -163,7 +175,11 @@ val persistence_matches_base_path : base_path:string -> bool
     This lets startup publish route readiness only after the queue owns the same
     BasePath as the server state. *)
 
-(** Enqueue only after the receipt-bearing version-2 snapshot commits. *)
+(** Enqueue only after the receipt-bearing version-2 snapshot reaches the
+    atomic rename commit point. [Durable] proves the parent directory was also
+    fsynced. [Durability_uncertain _] preserves the accepted receipt and
+    revision, quarantines only this Keeper's queue, and tells the caller not to
+    retry blindly. *)
 val enqueue :
   keeper_name:string -> queued_message -> (enqueue_receipt, mutation_error) result
 
@@ -212,11 +228,15 @@ val lookup_receipt :
   receipt_id:Receipt_id.t ->
   (receipt_lookup, mutation_error) result
 (** Atomically return the receipt observation with the queue revision that
-    produced it. *)
+    produced it. Keeper-local mutation quarantine does not hide a receipt that
+    is already known in memory; [load_errors] tells readers why further
+    mutations are unavailable. A missing receipt under non-empty [load_errors]
+    is not authoritative absence. *)
 
 val all_keeper_names : unit -> string list
 
 module For_testing : sig
   val reset : unit -> unit
   val fail_next_persist : unit -> unit
+  val fail_next_persist_after_rename : unit -> unit
 end

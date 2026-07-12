@@ -38,7 +38,9 @@ let direct_key () =
 
 let chat_path base_path keeper_name =
   Filename.concat
-    (Filename.concat (Filename.concat base_path ".masc") "keeper_chat")
+    (Filename.concat
+       (Common.masc_dir_from_base_path ~base_path)
+       "keeper_chat")
     (keeper_name ^ ".jsonl")
 ;;
 
@@ -182,6 +184,68 @@ let test_stale_revision_and_phase_fail_closed () =
     | Ok _ -> fail "terminal result skipped the Running phase")
 ;;
 
+let test_post_rename_uncertainty_preserves_visible_journal_and_quarantines_key () =
+  with_temp_dir (fun base_path ->
+    let key = direct_key () in
+    let prepared =
+      Journal.prepare
+        ~base_path
+        ~delivery_key:key
+        ~payload:(payload ())
+        ~now:1.0
+      |> expect_ok
+    in
+    Journal.For_testing.fail_next_save_after_rename ();
+    let committed =
+      match
+        Journal.mark_accepted
+          ~base_path
+          ~expected_revision:prepared.revision
+          ~identity:prepared
+          ~user_row_id:(Some "msg-user")
+          ~now:2.0
+      with
+      | Error (Journal.Commit_durability_uncertain { committed; _ }) ->
+        committed
+      | Error error -> fail (Journal.error_to_string error)
+      | Ok _ -> fail "post-rename uncertainty was reported as durable"
+    in
+    check int "uncertain journal keeps committed revision" 1 committed.revision;
+    (match committed.phase with
+     | Journal.Accepted { user_row_id = Some "msg-user" } -> ()
+     | phase ->
+       failf
+         "uncertain journal lost committed phase: %s"
+         (Journal.phase_to_string phase));
+    let visible =
+      Journal.load ~base_path ~keeper_name:"sangsu" key |> expect_ok
+    in
+    check int "renamed journal remains observable" 1 visible.revision;
+    (match
+       Journal.mark_accepted
+         ~base_path
+         ~expected_revision:prepared.revision
+         ~identity:prepared
+         ~user_row_id:(Some "msg-user")
+         ~now:3.0
+     with
+     | Error (Journal.Commit_durability_uncertain { committed; _ }) ->
+       check int "stale retry is stopped by typed quarantine" 1 committed.revision
+     | Error error -> fail (Journal.error_to_string error)
+     | Ok _ -> fail "quarantined journal accepted another transition");
+    let independent_payload =
+      { (payload ()) with keeper_name = "albini" }
+    in
+    ignore
+      (Journal.prepare
+         ~base_path
+         ~delivery_key:key
+         ~payload:independent_payload
+         ~now:4.0
+       |> expect_ok
+        : Journal.t))
+;;
+
 let test_corrupt_record_is_explicit () =
   with_temp_dir (fun base_path ->
     let key = direct_key () in
@@ -299,6 +363,88 @@ let test_chat_append_once_converges () =
       (row_id terminal_second);
     let history = Keeper_chat_store.load ~base_dir:base_path ~keeper_name:"sangsu" in
     check int "one user and one terminal row" 2 (List.length history))
+;;
+
+let test_chat_append_once_converges_across_processes () =
+  with_temp_dir (fun base_path ->
+    let delivery_key = direct_key () in
+    Keeper_chat_store.append_assistant_message_result
+      ~base_dir:base_path
+      ~keeper_name:"sangsu"
+      ~content:"seed"
+      ()
+    |> Result.get_ok;
+    let ready_read, ready_write = Unix.pipe () in
+    let append_child () =
+      Unix.close ready_write;
+      let byte = Bytes.create 1 in
+      let rec await_start () =
+        match Unix.read ready_read byte 0 1 with
+        | 1 -> ()
+        | 0 -> exit 2
+        | _ -> await_start ()
+        | exception Unix.Unix_error (Unix.EINTR, _, _) -> await_start ()
+      in
+      await_start ();
+      let result =
+        Keeper_chat_store.append_user_message_once
+          ~base_dir:base_path
+          ~keeper_name:"sangsu"
+          ~delivery_key
+          ~content:"cross-process request"
+          ~surface:
+            (Surface_ref.Dashboard { session_id = Some "dashboard-session" })
+          ~speaker:(payload ()).speaker
+          ()
+      in
+      Unix.close ready_read;
+      exit (if Result.is_ok result then 0 else 3)
+    in
+    let spawn () =
+      match Unix.fork () with
+      | 0 -> append_child ()
+      | pid -> pid
+    in
+    let first = spawn () in
+    let second = spawn () in
+    Unix.close ready_read;
+    let rec release_children offset =
+      if offset = 2
+      then ()
+      else
+        match Unix.write_substring ready_write "xy" offset (2 - offset) with
+        | 0 -> fail "cross-process start barrier made no write progress"
+        | written -> release_children (offset + written)
+        | exception Unix.Unix_error (Unix.EINTR, _, _) ->
+          release_children offset
+    in
+    release_children 0;
+    Unix.close ready_write;
+    let await_child pid =
+      match Unix.waitpid [] pid with
+      | _, Unix.WEXITED 0 -> ()
+      | _, status ->
+        failf
+          "cross-process append child failed: %s"
+          (match status with
+           | Unix.WEXITED code -> Printf.sprintf "exit %d" code
+           | Unix.WSIGNALED signal -> Printf.sprintf "signal %d" signal
+           | Unix.WSTOPPED signal -> Printf.sprintf "stopped %d" signal)
+    in
+    await_child first;
+    await_child second;
+    let matching_rows =
+      Keeper_chat_store.load ~base_dir:base_path ~keeper_name:"sangsu"
+      |> List.filter (fun (row : Keeper_chat_store.chat_message) ->
+           Keeper_chat_store.Role.equal
+             row.role
+             Keeper_chat_store.Role.User
+           && String.equal row.content "cross-process request")
+    in
+    check int
+      "cross-process retries persist one provenance row"
+      1
+      (List.length matching_rows))
 ;;
 
 let test_chat_append_once_rejects_incomplete_tail () =
@@ -625,6 +771,10 @@ let () =
             `Quick
             test_stale_revision_and_phase_fail_closed
         ; test_case
+            "post-rename uncertainty preserves and quarantines"
+            `Quick
+            test_post_rename_uncertainty_preserves_visible_journal_and_quarantines_key
+        ; test_case
             "corrupt records are explicit"
             `Quick
             test_corrupt_record_is_explicit
@@ -636,6 +786,10 @@ let () =
             "chat append-once converges"
             `Quick
             test_chat_append_once_converges
+        ; test_case
+            "chat append-once converges across processes"
+            `Quick
+            test_chat_append_once_converges_across_processes
         ; test_case
             "chat append-once rejects incomplete tail"
             `Quick

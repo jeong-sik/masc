@@ -160,7 +160,7 @@ let test_durable_receipt_lifecycle () =
      Keeper_chat_queue.lookup_receipt ~keeper_name
        ~receipt_id:enqueued.receipt_id
    with
-   | Ok { revision; receipt = Some { state = Delivered _; _ } } ->
+   | Ok { revision; receipt = Some { state = Delivered _; _ }; _ } ->
      check "receipt lookup returns terminal state" true;
      check "receipt lookup returns its atomic snapshot revision"
        (Int64.equal revision terminal.revision)
@@ -333,6 +333,53 @@ let test_persist_failures_roll_back () =
     "failed nack leaves original lease inflight"
     ((Keeper_chat_queue.snapshot ~keeper_name).inflight <> [])
 
+let test_post_rename_uncertainty_keeps_receipt_and_isolates_keeper () =
+  Printf.printf
+    "Test: post-rename durability uncertainty keeps the accepted receipt and isolates one Keeper\n%!";
+  with_base "keeper-chat-post-rename" @@ fun base_path ->
+  let keeper_name = "uncertain" in
+  let healthy_keeper = "healthy" in
+  ignore (configure base_path : Keeper_chat_queue.configure_report);
+  Keeper_chat_queue.For_testing.fail_next_persist_after_rename ();
+  let accepted =
+    match Keeper_chat_queue.enqueue ~keeper_name (message "accepted once") with
+    | Ok ({ durability = Durability_uncertain _; _ } as receipt) ->
+      check "uncertain enqueue returns its committed receipt" true;
+      receipt
+    | Ok _ | Error _ ->
+      check "uncertain enqueue returns its committed receipt" false;
+      failwith "missing uncertain receipt"
+  in
+  let accepted_id =
+    Keeper_chat_queue.Receipt_id.to_string accepted.receipt_id
+  in
+  let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
+  check "uncertain commit keeps the new revision" (snapshot.revision = accepted.revision);
+  check "uncertain commit keeps the receipt in memory"
+    (active_ids snapshot.pending = [ accepted_id ]);
+  check "uncertain commit quarantines only its Keeper" (snapshot.load_errors <> []);
+  (match
+     Keeper_chat_queue.lookup_receipt
+       ~keeper_name
+       ~receipt_id:accepted.receipt_id
+   with
+   | Ok { receipt = Some { state = Pending; _ }; load_errors = _ :: _; _ } ->
+     check "quarantine keeps the accepted receipt observable" true
+   | Ok _ | Error _ ->
+     check "quarantine keeps the accepted receipt observable" false);
+  let persisted = Fs_compat.load_file (snapshot_path ~base_path ~keeper_name) in
+  check "uncertain commit keeps the receipt in the renamed snapshot"
+    (String_util.contains_substring persisted accepted_id);
+  (match Keeper_chat_queue.enqueue ~keeper_name (message "must not retry") with
+   | Error (Snapshot_unavailable { kind = Durability_uncertain; _ }) ->
+     check "later mutation is rejected by the Keeper quarantine" true
+   | Ok _ | Error _ ->
+     check "later mutation is rejected by the Keeper quarantine" false);
+  (match Keeper_chat_queue.enqueue ~keeper_name:healthy_keeper (message "independent") with
+   | Ok { durability = Durable; _ } ->
+     check "another Keeper remains writable" true
+   | Ok _ | Error _ -> check "another Keeper remains writable" false)
+
 let v1_message_json ?(source = `Assoc [ "kind", `String "dashboard" ]) content =
   `Assoc
     [ "content", `String content
@@ -405,6 +452,43 @@ let test_v1_atomic_migration () =
        (Json_util.get_string json "schema" = Some "keeper_chat_queue.v2")
    | Error _ -> check "migrated snapshot is readable" false)
 
+let test_v1_post_rename_uncertainty_preserves_migrated_receipts () =
+  Printf.printf
+    "Test: uncertain v1 migration preserves visible receipts under quarantine\n%!";
+  with_base "keeper-chat-v1-uncertain" @@ fun base_path ->
+  let keeper_name = "v1-uncertain" in
+  let path = snapshot_path ~base_path ~keeper_name in
+  let v1 =
+    `Assoc
+      [ "schema", `String "keeper_chat_queue.v1"
+      ; "items", `List [ v1_message_json "legacy accepted" ]
+      ; "inflight", `Null
+      ]
+  in
+  save_raw path (Yojson.Safe.pretty_to_string v1);
+  Keeper_chat_queue.For_testing.fail_next_persist_after_rename ();
+  let report = Keeper_chat_queue.configure_persistence ~base_path in
+  check "uncertain migration is still counted" (report.migrated_keeper_count = 1);
+  check "uncertain migration reports its quarantine" (report.load_errors <> []);
+  let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
+  check "uncertain migration keeps its visible receipt" (List.length snapshot.pending = 1);
+  (match snapshot.pending with
+   | [ receipt ] ->
+     (match
+        Keeper_chat_queue.lookup_receipt
+          ~keeper_name
+          ~receipt_id:receipt.receipt_id
+      with
+      | Ok { receipt = Some { state = Pending; _ }; load_errors = _ :: _; _ } ->
+        check "migrated receipt remains queryable" true
+      | Ok _ | Error _ -> check "migrated receipt remains queryable" false)
+   | _ -> check "migrated receipt remains queryable" false);
+  (match Keeper_chat_queue.enqueue ~keeper_name (message "must wait for recovery") with
+   | Error (Snapshot_unavailable { kind = Durability_uncertain; _ }) ->
+     check "uncertain migrated queue rejects further mutation" true
+   | Ok _ | Error _ ->
+     check "uncertain migrated queue rejects further mutation" false)
+
 let test_corrupt_snapshot_is_quarantined () =
   Printf.printf "Test: corrupt snapshot is explicit and never overwritten as empty\n%!";
   with_base "keeper-chat-corrupt" @@ fun base_path ->
@@ -431,7 +515,7 @@ let test_corrupt_snapshot_is_quarantined () =
     | Error error -> failwith error
   in
   (match Keeper_chat_queue.lookup_receipt ~keeper_name ~receipt_id:unknown_id with
-   | Error (Snapshot_unavailable _) ->
+   | Ok { receipt = None; load_errors = _ :: _; _ } ->
      check "receipt lookup does not collapse unreadable into absent" true
    | Ok _ | Error _ ->
      check "receipt lookup does not collapse unreadable into absent" false);
@@ -751,7 +835,9 @@ let () =
   test_source_boundaries_preserve_fifo_runs ();
   test_nack_and_restart_preserve_receipt ();
   test_persist_failures_roll_back ();
+  test_post_rename_uncertainty_keeps_receipt_and_isolates_keeper ();
   test_v1_atomic_migration ();
+  test_v1_post_rename_uncertainty_preserves_migrated_receipts ();
   test_corrupt_snapshot_is_quarantined ();
   test_invalid_v2_is_not_a_compatibility_fallback ();
   test_invalid_v2_attachment_is_not_silently_dropped ();

@@ -773,6 +773,12 @@ export type KeeperQueueReceiptLifecycle =
   | 'inflight'
   | 'delivered'
   | 'failed'
+  | 'durability_uncertain'
+  | 'unavailable'
+
+export type KeeperQueueDurability =
+  | 'durable'
+  | 'uncertain'
 
 export type KeeperQueueReceiptFailureKind =
   | 'turn_failed'
@@ -783,6 +789,7 @@ export type KeeperQueueReceiptFailureKind =
   | 'delivery_failed'
   | 'cancelled'
   | 'internal_error'
+  | 'recovery_interrupted'
 
 export interface KeeperConversationDetails {
   traceId?: string | null
@@ -807,6 +814,7 @@ export interface KeeperConversationDetails {
   queuePendingCount?: number | null
   queueInflightCount?: number | null
   queueState?: KeeperQueueReceiptLifecycle | null
+  queueDurability?: KeeperQueueDurability | null
   queueFailureKind?: KeeperQueueReceiptFailureKind | null
   queueCorrelationError?: 'missing_outcome_ref' | null
   rawPayload?: unknown
@@ -988,6 +996,7 @@ export type KeeperConversationStreamContractStatus =
 export type KeeperConversationStreamDeliveryReceipt =
   | 'client_observed_sse_event'
   | 'server_durable_receipt'
+  | 'server_receipt_durability_uncertain'
   | 'server_lifecycle_replay_only'
   | 'no_delivery_receipt'
 

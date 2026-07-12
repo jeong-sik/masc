@@ -822,6 +822,39 @@ export async function reconcileKeeperChatReceipts(name: string): Promise<void> {
       if (typeof currentRevision === 'number' && receipt.revision < currentRevision) {
         return
       }
+      if (receipt.availability === 'quarantined') {
+        const errorKinds = receipt.loadErrors.map(error => error.kind)
+        const durabilityUncertain = errorKinds.includes('durability_uncertain')
+        const message = durabilityUncertain
+          ? '큐 receipt는 서버에 보이지만 crash 내구성을 확정하지 못했습니다. 재전송하지 말고 운영자 복구를 기다리세요.'
+          : `큐 receipt 저장소가 격리되었습니다 (${errorKinds.join(', ')}). 운영자 복구가 필요합니다.`
+        const receiptTargets = pendingTerminalTranscriptConvergence.get(keeperName)
+        receiptTargets?.delete(receiptId)
+        if (receiptTargets?.size === 0) {
+          pendingTerminalTranscriptConvergence.delete(keeperName)
+        }
+        setRecordValue(keeperActionErrors, keeperName, message)
+        finalizeAssistantEntry(keeperName, entry.id, {
+          delivery: 'error',
+          error: message,
+          streamState: null,
+          details: {
+            ...(entry.details ?? {}),
+            queueRevision: receipt.revision,
+            queueState: durabilityUncertain ? 'durability_uncertain' : 'unavailable',
+            queueDurability: durabilityUncertain ? 'uncertain' : null,
+            queueFailureKind:
+              receipt.state.kind === 'failed' ? receipt.state.failureKind : null,
+          },
+          streamContract: keeperStreamContract('queue_poll', 'queue_poll_result', {
+            deliveryReceipt: durabilityUncertain
+              ? 'server_receipt_durability_uncertain'
+              : 'no_delivery_receipt',
+            reason: `receipt ${receiptId} is quarantined (${errorKinds.join(',')})`,
+          }),
+        })
+        return
+      }
       if (
         typeof currentRevision === 'number'
         && receipt.revision === currentRevision

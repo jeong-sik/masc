@@ -466,6 +466,8 @@ function QueueReceiptBadge({ entry }: { entry: KeeperConversationEntry }) {
       case 'inflight': return 'Keeper 처리 중'
       case 'delivered': return '처리 완료'
       case 'failed': return '처리 실패'
+      case 'durability_uncertain': return '내구성 확인 필요'
+      case 'unavailable': return '큐 확인 불가'
       default: return '상태 확인 필요'
     }
   })()
@@ -518,7 +520,7 @@ function sourceBadgeInfo(entry: KeeperConversationEntry): { label: string; cls: 
 type StreamContractBadgeInfo = {
   label: string
   title: string
-  state: 'contract-gap' | 'no-turn-ref' | 'server-replay'
+  state: 'contract-gap' | 'durability-uncertain' | 'no-turn-ref' | 'server-replay'
 }
 
 function streamContractBadgeInfo(entry: KeeperConversationEntry): StreamContractBadgeInfo | null {
@@ -540,6 +542,8 @@ function streamContractBadgeInfo(entry: KeeperConversationEntry): StreamContract
     sourceContext || null,
   ].filter((value): value is string => Boolean(value)).join(' · ')
   switch (contract.deliveryReceipt) {
+    case 'server_receipt_durability_uncertain':
+      return { label: '내구성 확인 필요', title, state: 'durability-uncertain' }
     case 'server_lifecycle_replay_only':
       return { label: '서버 기록 복구', title, state: 'server-replay' }
     case 'no_delivery_receipt':
@@ -562,6 +566,8 @@ function streamContractBadgeClass(state: StreamContractBadgeInfo['state']): stri
       return 'border-[var(--warn-20)] bg-[var(--warn-10)] text-[var(--color-status-warn)]'
     case 'contract-gap':
       return 'border-[var(--warn-20)] bg-[var(--warn-10)] text-[var(--color-status-warn)]'
+    case 'durability-uncertain':
+      return 'border-[var(--danger-20)] bg-[var(--danger-10)] text-[var(--color-status-danger)]'
     case 'no-turn-ref':
       return 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-[var(--color-fg-secondary)]'
   }
@@ -625,6 +631,7 @@ function overviewRows(details: KeeperConversationDetails): Array<{ label: string
     details.queueReceiptId ? { label: '큐 receipt', value: details.queueReceiptId } : null,
     details.queueShutdownOperationId ? { label: '종료 작업 ID', value: details.queueShutdownOperationId } : null,
     details.queueState ? { label: '큐 상태', value: details.queueState } : null,
+    details.queueDurability ? { label: '큐 내구성', value: details.queueDurability } : null,
     details.queueFailureKind ? { label: '큐 실패', value: details.queueFailureKind } : null,
     typeof details.queueRevision === 'number' ? { label: '큐 revision', value: `${details.queueRevision}` } : null,
     typeof details.queuePendingCount === 'number' ? { label: '접수 시 pending', value: `${details.queuePendingCount}` } : null,

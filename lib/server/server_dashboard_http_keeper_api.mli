@@ -230,6 +230,7 @@ val keeper_chat_receipt_route : string -> (string * string) option
 val keeper_chat_receipt_json :
   keeper_name:string ->
   revision:int64 ->
+  load_errors:Keeper_chat_queue.snapshot_load_error list ->
   Keeper_chat_queue.receipt_view ->
   Yojson.Safe.t
 (** Read-only typed receipt projection returned by the route above. *)

@@ -103,6 +103,7 @@ describe('applyKeeperStreamEvent', () => {
         queue_revision: 12,
         pending_count: 3,
         inflight_count: 1,
+        queue_durability: 'durable',
         shutdown_operation_id: ' shutdown-op-7 ',
       },
     })).toBeNull()
@@ -116,12 +117,61 @@ describe('applyKeeperStreamEvent', () => {
       queueRevision: 12,
       queuePendingCount: 3,
       queueInflightCount: 1,
+      queueDurability: 'durable',
     })
     expect(entry?.streamContract).toMatchObject({
       source: 'queue_event',
       eventName: 'KEEPER_CHAT_QUEUED',
       deliveryReceipt: 'client_observed_sse_event',
     })
+  })
+
+  it('surfaces a committed receipt with uncertain crash durability without polling it as pending', () => {
+    assistantEntry()
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_CHAT_QUEUED',
+      value: {
+        keeper_name: 'sangsu',
+        status: 'queued_durability_uncertain',
+        receipt_id: 'chatq_00000000-0000-4000-8000-000000000008',
+        queue_revision: 13,
+        pending_count: 4,
+        inflight_count: 1,
+        queue_durability: 'uncertain',
+        shutdown_operation_id: null,
+      },
+    })).toBeNull()
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.delivery).toBe('error')
+    expect(entry?.details).toMatchObject({
+      queueReceiptId: 'chatq_00000000-0000-4000-8000-000000000008',
+      queueRevision: 13,
+      queueState: 'durability_uncertain',
+      queueDurability: 'uncertain',
+    })
+    expect(entry?.error).toContain('재전송하지 말고')
+    expect(entry?.streamContract?.reason).toBe(
+      'receipt chatq_00000000-0000-4000-8000-000000000008 durability uncertain',
+    )
+  })
+
+  it('rejects queue acceptance without an exact durability contract', () => {
+    assistantEntry()
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_CHAT_QUEUED',
+      value: {
+        keeper_name: 'sangsu',
+        status: 'queued',
+        receipt_id: 'chatq_00000000-0000-4000-8000-000000000009',
+        queue_revision: 14,
+        pending_count: 1,
+        inflight_count: 0,
+        shutdown_operation_id: null,
+      },
+    })).toBe('Keeper queue acceptance has invalid durability metadata.')
   })
 
   it('rejects a busy queue acceptance event without a durable receipt', () => {
@@ -167,10 +217,12 @@ describe('applyKeeperStreamEvent', () => {
   it('rejects missing, blank, or wrongly typed shutdown operation metadata', () => {
     assistantEntry()
     const baseValue = {
+      status: 'queued',
       receipt_id: 'chatq_00000000-0000-4000-8000-000000000007',
       queue_revision: 1,
       pending_count: 1,
       inflight_count: 0,
+      queue_durability: 'durable',
     }
 
     for (const shutdownOperationId of [undefined, '   ', 7]) {

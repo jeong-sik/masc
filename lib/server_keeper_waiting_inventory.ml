@@ -305,12 +305,7 @@ let chat_queue_invariant_error_row keeper_name queue_index
 let chat_queue_load_error_row keeper_name
     (error : Keeper_chat_queue.snapshot_load_error) =
   let kind =
-    match error.kind with
-    | Keeper_chat_queue.Invalid_path -> "invalid_path"
-    | Keeper_chat_queue.Read_failed -> "read_failed"
-    | Keeper_chat_queue.Parse_failed -> "parse_failed"
-    | Keeper_chat_queue.Migration_failed -> "migration_failed"
-    | Keeper_chat_queue.Recovery_failed -> "recovery_failed"
+    Keeper_chat_queue.snapshot_load_error_kind_to_string error.kind
   in
   read_error_row ~keeper_name ~waiting_on:"chat_queue_snapshot"
     ~next_action:"repair_keeper_chat_queue_snapshot"

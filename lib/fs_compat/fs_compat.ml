@@ -135,9 +135,16 @@ let load_file_unix (path : string) : string =
 
 let save_file_unix (path : string) (content : string) : unit =
   let oc = Stdlib.open_out path in
-  Stdlib.Fun.protect
-    ~finally:(fun () -> Stdlib.close_out_noerr oc)
-    (fun () -> Stdlib.output_string oc content)
+  match Stdlib.output_string oc content with
+  | () ->
+    (match Stdlib.close_out oc with
+     | () -> ()
+     | exception exn ->
+       Stdlib.close_out_noerr oc;
+       raise exn)
+  | exception exn ->
+    Stdlib.close_out_noerr oc;
+    raise exn
 ;;
 
 (* RFC-0108: per-path Stdlib.Mutex registry + fresh-fd open/close
@@ -288,6 +295,24 @@ let save_file (path : string) (content : string) : unit =
        Eio.Path.save ~create:(`Or_truncate 0o644) eio_path content)
 ;;
 
+type atomic_write_failure_stage = Atomic_write.failure_stage =
+  | Not_renamed
+  | Renamed_durability_uncertain
+
+type atomic_write_failure = Atomic_write.failure =
+  { stage : atomic_write_failure_stage
+  ; message : string
+  }
+
+let save_file_atomic_detailed path content =
+  test_exec_home_guard ~op:"save_file_atomic" path;
+  run_blocking_unix_io (fun () ->
+    Atomic_write.save_file_atomic_detailed
+      ~save_file:save_file_unix
+      path
+      content)
+;;
+
 let save_file_atomic path content =
   test_exec_home_guard ~op:"save_file_atomic" path;
   run_blocking_unix_io (fun () ->
@@ -325,6 +350,29 @@ let file_exists (path : string) : bool =
          true
        with
        | Eio.Io _ -> false)
+;;
+
+type path_probe_failure =
+  { error : Unix.error
+  ; function_name : string
+  ; argument : string
+  }
+
+let path_probe_failure_to_string failure =
+  Printf.sprintf
+    "%s(%s): %s"
+    failure.function_name
+    failure.argument
+    (Unix.error_message failure.error)
+;;
+
+let probe_path path =
+  run_blocking_unix_io (fun () ->
+    match Unix.stat path with
+    | stats -> Ok (Some stats)
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+    | exception Unix.Unix_error (error, function_name, argument) ->
+      Error { error; function_name; argument })
 ;;
 
 (** Load entire file contents as string, or [None] when the file is
@@ -925,7 +973,15 @@ let fsync_directory_result dir =
       run_unix_io ~operation:Parent_directory_fsync (fun () -> Unix.fsync fd)
     in
     let close_result =
-      run_unix_io ~operation:Parent_directory_close (fun () -> Unix.close fd)
+      match Unix.close fd with
+      | () -> Ok ()
+      | exception Unix.Unix_error (error, function_name, argument) ->
+        Error
+          (unix_failure
+             ~operation:Parent_directory_close
+             error
+             function_name
+             argument)
     in
     (match fsync_result, close_result with
      | Ok (), Ok () -> Ok ()
@@ -957,6 +1013,12 @@ let open_append_file path =
     , false )
 ;;
 
+let rec lock_whole_file fd =
+  match Unix.lockf fd Unix.F_LOCK 0 with
+  | () -> ()
+  | exception Unix.Unix_error (Unix.EINTR, _, _) -> lock_whole_file fd
+;;
+
 let with_private_append_fd_locked ~op path f =
   test_exec_home_guard ~op path;
   let dir = Filename.dirname path in
@@ -977,7 +1039,7 @@ let with_private_append_fd_locked ~op path f =
           (fun () ->
              Unix.fchmod lock_fd 0o600;
              ignore (Unix.lseek lock_fd 0 Unix.SEEK_SET : int);
-             Unix.lockf lock_fd Unix.F_LOCK 0;
+             lock_whole_file lock_fd;
              let fd, created = open_append_file path in
              Fun.protect
                ~finally:(fun () -> Unix.close fd)

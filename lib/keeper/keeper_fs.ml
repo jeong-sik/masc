@@ -9,62 +9,134 @@
     @since 2.162.0 — #3721 keeper stabilization *)
 
 (* ================================================================ *)
-(* Directory Cache (Eio.Mutex-protected)                            *)
+(* Directory Cache (path-local Eio synchronization)                 *)
 (* ================================================================ *)
 
-let dir_mu = Eio.Mutex.create ()
 let ensured_dirs : (string, unit) Hashtbl.t = Hashtbl.create 16
 
+type dir_lock =
+  { mutex : Eio.Mutex.t
+  ; mutable users : int
+  }
+
+let dir_state_mu = Stdlib.Mutex.create ()
+let dir_locks : (string, dir_lock) Hashtbl.t = Hashtbl.create 16
+let dir_cache_epoch = ref (ref ())
+
+let dir_cache_key path =
+  let path = Env_config_core.strip_path_trailing_slashes path in
+  if Filename.is_relative path
+  then Filename.concat (Sys.getcwd ()) path
+  else path
+
+let dir_is_cached path =
+  Stdlib.Mutex.protect dir_state_mu (fun () ->
+    Hashtbl.mem ensured_dirs path)
+
+let acquire_dir_lock path =
+  Stdlib.Mutex.protect dir_state_mu (fun () ->
+    match Hashtbl.find_opt dir_locks path with
+    | Some lock ->
+      lock.users <- lock.users + 1;
+      lock
+    | None ->
+      let lock = { mutex = Eio.Mutex.create (); users = 1 } in
+      Hashtbl.add dir_locks path lock;
+      lock)
+
+let release_dir_lock path lock =
+  Stdlib.Mutex.protect dir_state_mu (fun () ->
+    lock.users <- lock.users - 1;
+    if lock.users = 0
+    then
+      match Hashtbl.find_opt dir_locks path with
+      | Some current when current == lock -> Hashtbl.remove dir_locks path
+      | Some _ | None -> ())
+
+let capture_dir_cache_epoch () =
+  Stdlib.Mutex.protect dir_state_mu (fun () -> !dir_cache_epoch)
+
+let mark_dir_cached_if_current path expected_epoch =
+  Stdlib.Mutex.protect dir_state_mu (fun () ->
+    if !dir_cache_epoch == expected_epoch
+    then Hashtbl.replace ensured_dirs path ())
+
 let ensure_dir (path : string) : string =
-  (* Capture exceptions inside the mutex body so the lock exits normally,
-     then re-raise after release. Escaping an exception from
-     Eio.Mutex.use_rw poisons the mutex and breaks all subsequent
-     ensure_dir calls in the same process (Issue #8475: fleet-test
-     isolation runtime failures). *)
-  let deferred_exn = ref None in
-  Eio_guard.with_mutex dir_mu (fun () ->
-    if not (Hashtbl.mem ensured_dirs path) || not (Fs_compat.file_exists path) then begin
-      match
-        try
-          Fs_compat.mkdir_p_durable path;
-          Hashtbl.replace ensured_dirs path ();
-          Ok ()
-        with
-        | Eio.Cancel.Cancelled _ as exn ->
-            Otel_metric_store.inc_counter
-              Keeper_metrics.(to_string FsFailures)
-              ~labels:[("path", path); ("site", Keeper_fs_failure_site.(to_label Ensure_dir_cancelled))]
-              ();
-            Log.Keeper.warn "filesystem_runtime: ensure_dir cancelled path=%s" path;
-            Error (exn, Printexc.get_raw_backtrace ())
-        | exn ->
-            Keeper_fd_pressure.note_exception
-              ~site:"filesystem_runtime.ensure_dir"
-              exn;
-            Keeper_disk_pressure.note_exception
-              ~site:"filesystem_runtime.ensure_dir"
-              exn;
-            Otel_metric_store.inc_counter
-              Keeper_metrics.(to_string FsFailures)
-              ~labels:[("path", path); ("site", Keeper_fs_failure_site.(to_label Ensure_dir_failed))]
-              ();
-            Log.Keeper.warn "filesystem_runtime: ensure_dir failed path=%s: %s"
-              path (Printexc.to_string exn);
-            Error (exn, Printexc.get_raw_backtrace ())
-      with
-      | Ok () -> ()
-      | Error err -> deferred_exn := Some err
-    end);
-  match !deferred_exn with
-  | Some (exn, bt) -> Printexc.raise_with_backtrace exn bt
-  | None -> path
+  let key = dir_cache_key path in
+  if dir_is_cached key
+  then path
+  else
+    let lock = acquire_dir_lock key in
+    Fun.protect
+      ~finally:(fun () -> release_dir_lock key lock)
+      (fun () ->
+        let result =
+          Eio_guard.with_mutex lock.mutex (fun () ->
+            try
+              if not (dir_is_cached key)
+              then begin
+                let expected_epoch = capture_dir_cache_epoch () in
+                Fs_compat.mkdir_p_durable path;
+                mark_dir_cached_if_current key expected_epoch
+              end;
+              Ok ()
+            with
+            | exn -> Error (exn, Printexc.get_raw_backtrace ()))
+        in
+        match result with
+        | Ok () -> path
+        | Error ((Eio.Cancel.Cancelled _ as exn), bt) ->
+          Otel_metric_store.inc_counter
+            Keeper_metrics.(to_string FsFailures)
+            ~labels:
+              [ "path", path
+              ; ( "site"
+                , Keeper_fs_failure_site.(to_label Ensure_dir_cancelled) )
+              ]
+            ();
+          Log.Keeper.warn "filesystem_runtime: ensure_dir cancelled path=%s" path;
+          Printexc.raise_with_backtrace exn bt
+        | Error (exn, bt) ->
+          Keeper_fd_pressure.note_exception
+            ~site:"filesystem_runtime.ensure_dir"
+            exn;
+          Keeper_disk_pressure.note_exception
+            ~site:"filesystem_runtime.ensure_dir"
+            exn;
+          Otel_metric_store.inc_counter
+            Keeper_metrics.(to_string FsFailures)
+            ~labels:
+              [ "path", path
+              ; "site", Keeper_fs_failure_site.(to_label Ensure_dir_failed)
+              ]
+            ();
+          Log.Keeper.warn
+            "filesystem_runtime: ensure_dir failed path=%s: %s"
+            path
+            (Printexc.to_string exn);
+          Printexc.raise_with_backtrace exn bt)
 
 let invalidate_dir (path : string) : unit =
-  Eio_guard.with_mutex dir_mu (fun () ->
-    Hashtbl.remove ensured_dirs path)
+  let key = dir_cache_key path in
+  Stdlib.Mutex.protect dir_state_mu (fun () ->
+    dir_cache_epoch := ref ();
+    let rec is_same_or_descendant candidate =
+      if String.equal candidate key
+      then true
+      else
+        let parent = Filename.dirname candidate in
+        if String.equal parent candidate
+        then false
+        else is_same_or_descendant parent
+    in
+    Hashtbl.filter_map_inplace
+      (fun candidate () ->
+        if is_same_or_descendant candidate then None else Some ())
+      ensured_dirs)
 
 let clear_dir_cache () : unit =
-  Eio_guard.with_mutex dir_mu (fun () ->
+  Stdlib.Mutex.protect dir_state_mu (fun () ->
+    dir_cache_epoch := ref ();
     Hashtbl.clear ensured_dirs)
 
 (* ================================================================ *)

@@ -688,6 +688,12 @@ export function applyKeeperStreamEvent(
         const revision = asNumber(queued?.queue_revision)
         const pendingCount = asNumber(queued?.pending_count)
         const inflightCount = asNumber(queued?.inflight_count)
+        const queueStatus = asString(queued?.status, '').trim()
+        const queueDurability = (() => {
+          const raw = queued?.queue_durability
+          if (raw === 'durable' || raw === 'uncertain') return raw
+          return null
+        })()
         const shutdownOperationId = (() => {
           const raw = queued?.shutdown_operation_id
           if (raw === null) return null
@@ -709,12 +715,28 @@ export function applyKeeperStreamEvent(
         ) {
           return 'Keeper queue acceptance is missing its durable receipt metadata.'
         }
+        if (queueDurability === null) {
+          return 'Keeper queue acceptance has invalid durability metadata.'
+        }
+        if (
+          (queueDurability === 'durable' && queueStatus !== 'queued')
+          || (
+            queueDurability === 'uncertain'
+            && queueStatus !== 'queued_durability_uncertain'
+          )
+        ) {
+          return 'Keeper queue acceptance has inconsistent durability status.'
+        }
         if (shutdownOperationId === undefined) {
           return 'Keeper queue acceptance has invalid shutdown operation metadata.'
         }
+        const durabilityUncertain = queueDurability === 'uncertain'
         updateThreadEntry(keeperName, assistantEntryId, entry => ({
           ...entry,
-          delivery: 'queued',
+          delivery: durabilityUncertain ? 'error' : 'queued',
+          error: durabilityUncertain
+            ? '서버가 receipt를 수락했지만 crash 내구성을 확정하지 못했습니다. 재전송하지 말고 운영자 복구를 기다리세요.'
+            : entry.error,
           streamState: null,
           details: {
             ...(entry.details ?? {}),
@@ -723,11 +745,14 @@ export function applyKeeperStreamEvent(
             queueRevision: revision,
             queuePendingCount: pendingCount,
             queueInflightCount: inflightCount,
-            queueState: 'pending',
+            queueState: durabilityUncertain ? 'durability_uncertain' : 'pending',
+            queueDurability,
           },
           streamContract: keeperClientObservedSseStreamContract('queue_event', 'queue_request_event', {
             eventName: 'KEEPER_CHAT_QUEUED',
-            reason: `durable receipt ${receiptId}`,
+            reason: durabilityUncertain
+              ? `receipt ${receiptId} durability uncertain`
+              : `durable receipt ${receiptId}`,
           }),
         }))
         return null

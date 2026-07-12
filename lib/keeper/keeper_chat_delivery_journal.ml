@@ -80,6 +80,10 @@ type error =
       }
   | Transcript_error of string
   | Invalid_terminal of string
+  | Commit_durability_uncertain of
+      { committed : t
+      ; detail : string
+      }
 
 let schema_version = 1
 let ( let* ) = Result.bind
@@ -114,6 +118,11 @@ let error_to_string = function
   | Transcript_error detail ->
     "chat delivery transcript persistence failed: " ^ detail
   | Invalid_terminal detail -> "chat delivery terminal is invalid: " ^ detail
+  | Commit_durability_uncertain { committed; detail } ->
+    Printf.sprintf
+      "chat delivery journal revision %d is visible, but crash durability is uncertain: %s"
+      committed.revision
+      detail
 ;;
 
 let validate_terminal terminal =
@@ -127,12 +136,25 @@ let validate_terminal terminal =
 ;;
 
 type operation_lock =
-  { mutex : Stdlib.Mutex.t
+  { mutex : Eio.Mutex.t
   ; mutable users : int
   }
 
 let operation_locks : (string, operation_lock) Hashtbl.t = Hashtbl.create 16
 let operation_locks_mutex = Stdlib.Mutex.create ()
+let quarantined_records : (string, t * string) Hashtbl.t = Hashtbl.create 16
+let quarantined_records_mutex = Stdlib.Mutex.create ()
+let fail_next_save_after_rename_for_testing = Atomic.make false
+
+let quarantine_record record_path journal detail =
+  Stdlib.Mutex.protect quarantined_records_mutex (fun () ->
+    Hashtbl.replace quarantined_records record_path (journal, detail))
+
+let quarantine_error record_path =
+  Stdlib.Mutex.protect quarantined_records_mutex (fun () ->
+    Hashtbl.find_opt quarantined_records record_path)
+  |> Option.map (fun (committed, detail) ->
+    Commit_durability_uncertain { committed; detail })
 
 let acquire_operation_lock key =
   Stdlib.Mutex.protect operation_locks_mutex (fun () ->
@@ -141,7 +163,7 @@ let acquire_operation_lock key =
       lock.users <- lock.users + 1;
       lock
     | None ->
-      let lock = { mutex = Stdlib.Mutex.create (); users = 1 } in
+      let lock = { mutex = Eio.Mutex.create (); users = 1 } in
       Hashtbl.add operation_locks key lock;
       lock)
 ;;
@@ -160,7 +182,16 @@ let with_operation_lock key f =
   let lock = acquire_operation_lock key in
   Fun.protect
     ~finally:(fun () -> release_operation_lock key lock)
-    (fun () -> Stdlib.Mutex.protect lock.mutex f)
+    (fun () ->
+      match
+        Eio_guard.with_mutex lock.mutex (fun () ->
+          try Ok (f ()) with
+          | exception_ ->
+            Error (exception_, Printexc.get_raw_backtrace ()))
+      with
+      | Ok result -> result
+      | Error (exception_, backtrace) ->
+        Printexc.raise_with_backtrace exception_ backtrace)
 ;;
 
 let valid_keeper_name name =
@@ -707,10 +738,19 @@ let of_yojson = function
   | _ -> Error (Decode_error "journal record must be an object")
 ;;
 
+let probe_record_path record_path =
+  match Fs_compat.probe_path record_path with
+  | Ok result -> Ok result
+  | Error failure ->
+    Error
+      (Io_error (Fs_compat.path_probe_failure_to_string failure))
+;;
+
 let load_path_unlocked record_path =
-  if not (Fs_compat.file_exists record_path)
-  then Error (Not_found record_path)
-  else
+  let* stats = probe_record_path record_path in
+  match stats with
+  | None -> Error (Not_found record_path)
+  | Some _ ->
     try
       Fs_compat.load_file record_path |> Yojson.Safe.from_string |> of_yojson
     with
@@ -726,16 +766,49 @@ let same_identity left right =
 ;;
 
 let save record_path journal =
-  Keeper_fs.save_json_atomic record_path (to_yojson journal)
-  |> Result.map_error (fun detail -> Io_error detail)
+  try
+    ignore (Keeper_fs.ensure_dir (Filename.dirname record_path) : string);
+    let inject_after_rename =
+      Atomic.exchange fail_next_save_after_rename_for_testing false
+    in
+    let result =
+      to_yojson journal
+      |> Yojson.Safe.pretty_to_string
+      |> Fs_compat.save_file_atomic_detailed record_path
+    in
+    match result with
+    | Ok () when not inject_after_rename -> Ok ()
+    | Ok () ->
+      let detail =
+        "injected delivery-journal parent-directory durability failure after rename"
+      in
+      quarantine_record record_path journal detail;
+      Error (Commit_durability_uncertain { committed = journal; detail })
+    | Error { Fs_compat.stage = Fs_compat.Not_renamed; message } ->
+      Error (Io_error message)
+    | Error
+        { Fs_compat.stage = Fs_compat.Renamed_durability_uncertain
+        ; message
+        } ->
+      quarantine_record record_path journal message;
+      Error
+        (Commit_durability_uncertain
+           { committed = journal; detail = message })
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (Io_error (Printexc.to_string exn))
 ;;
 
 let prepare ~base_path ~delivery_key ~payload ~now =
   let* record_path = path ~base_path ~keeper_name:payload.keeper_name delivery_key in
   with_operation_lock record_path (fun () ->
-    if Fs_compat.file_exists record_path
-    then Error (Already_exists record_path)
-    else
+    match quarantine_error record_path with
+    | Some error -> Error error
+    | None ->
+    let* existing = probe_record_path record_path in
+    match existing with
+    | Some _ -> Error (Already_exists record_path)
+    | None ->
       let redaction =
         Keeper_secret_redaction.snapshot
           ~base_path
@@ -783,6 +856,11 @@ let replace
       identity.delivery_key
   in
   with_operation_lock record_path (fun () ->
+    let* () =
+      match quarantine_error record_path with
+      | None -> Ok ()
+      | Some error -> Error error
+    in
     let* existing = load_path_unlocked record_path in
     if not (same_identity existing identity)
     then Error Identity_mismatch
@@ -1091,9 +1169,16 @@ let list_for_keeper ~base_path ~keeper_name =
   then Error (Invalid_keeper_name keeper_name)
   else
     let directory = records_dir ~base_path ~keeper_name in
-    if not (Fs_compat.file_exists directory)
-    then Ok []
-    else
+    let* directory_stats = probe_record_path directory in
+    match directory_stats with
+    | None -> Ok []
+    | Some stats when stats.Unix.st_kind <> Unix.S_DIR ->
+      Error
+        (Io_error
+           (Printf.sprintf
+              "chat delivery journal path is not a directory: %s"
+              directory))
+    | Some _ ->
       try
         Sys.readdir directory
         |> Array.to_list
@@ -1161,9 +1246,27 @@ let dashboard_queue_user_row_origin ~base_path ~keeper_name receipt_ids =
 
 let recover_all ~base_path ~now =
   let keepers_dir = Common.keepers_runtime_dir_of_base ~base_path in
-  if not (Fs_compat.file_exists keepers_dir)
-  then { recovered = 0; already_final = 0; failures = [] }
-  else
+  let inventory_failure error =
+    { recovered = 0
+    ; already_final = 0
+    ; failures =
+        [ { keeper_name = "<inventory>"
+          ; delivery_ref = "inventory"
+          ; error
+          }
+        ]
+    }
+  in
+  match probe_record_path keepers_dir with
+  | Ok None -> { recovered = 0; already_final = 0; failures = [] }
+  | Error error -> inventory_failure error
+  | Ok (Some stats) when stats.Unix.st_kind <> Unix.S_DIR ->
+    inventory_failure
+      (Io_error
+         (Printf.sprintf
+            "Keeper runtime inventory path is not a directory: %s"
+            keepers_dir))
+  | Ok (Some _) ->
     try
       Sys.readdir keepers_dir
       |> Array.to_list
@@ -1206,19 +1309,13 @@ let recover_all ~base_path ~now =
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | exn ->
-      { recovered = 0
-      ; already_final = 0
-      ; failures =
-          [ { keeper_name = "<inventory>"
-            ; delivery_ref = "inventory"
-            ; error = Io_error (Printexc.to_string exn)
-            }
-          ]
-      }
+      inventory_failure (Io_error (Printexc.to_string exn))
 ;;
 
 module For_testing = struct
   let to_yojson = to_yojson
   let of_yojson = of_yojson
   let path = path
+  let fail_next_save_after_rename () =
+    Atomic.set fail_next_save_after_rename_for_testing true
 end

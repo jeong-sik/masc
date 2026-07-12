@@ -70,6 +70,7 @@ type snapshot_load_error_kind =
   | Parse_failed
   | Migration_failed
   | Recovery_failed
+  | Durability_uncertain
 
 type snapshot_load_error = {
   kind : snapshot_load_error_kind;
@@ -83,6 +84,11 @@ type mutation_error =
   | Invalid_input of string
   | Revision_exhausted
   | Persist_failed of string
+  | Commit_durability_uncertain of
+      { revision : int64
+      ; receipt_ids : Receipt_id.t list
+      ; error : snapshot_load_error
+      }
 
 let snapshot_load_error_kind_to_string = function
   | Invalid_path -> "invalid_path"
@@ -90,12 +96,21 @@ let snapshot_load_error_kind_to_string = function
   | Parse_failed -> "parse_failed"
   | Migration_failed -> "migration_failed"
   | Recovery_failed -> "recovery_failed"
+  | Durability_uncertain -> "durability_uncertain"
 
 let mutation_error_to_string = function
   | Persistence_not_configured -> "chat queue persistence is not configured"
   | Invalid_input message -> "chat queue input is invalid: " ^ message
   | Revision_exhausted -> "chat queue revision domain is exhausted"
   | Persist_failed message -> "chat queue persistence failed: " ^ message
+  | Commit_durability_uncertain { revision; receipt_ids; error } ->
+    Printf.sprintf
+      "chat queue mutation committed at revision %Ld for receipt(s) [%s], but durability is uncertain: %s"
+      revision
+      (receipt_ids
+       |> List.map Receipt_id.to_string
+       |> String.concat ",")
+      error.message
   | Snapshot_unavailable error ->
     Printf.sprintf
       "chat queue snapshot unavailable (%s): %s"
@@ -116,6 +131,7 @@ type receipt_view = {
 type receipt_lookup = {
   revision : int64;
   receipt : receipt_view option;
+  load_errors : snapshot_load_error list;
 }
 
 type diagnostic_snapshot = {
@@ -131,7 +147,12 @@ type enqueue_receipt = {
   revision : int64;
   pending_count : int;
   inflight_count : int;
+  durability : commit_durability;
 }
+
+and commit_durability =
+  | Durable
+  | Durability_uncertain of snapshot_load_error
 
 type configure_report = {
   restored_keeper_count : int;
@@ -174,6 +195,7 @@ let persistence_file = "chat-queue.json"
 let persistence_base_path : string option Atomic.t = Atomic.make None
 let global_load_errors : snapshot_load_error list Atomic.t = Atomic.make []
 let fail_next_persist_for_testing = Atomic.make false
+let fail_next_persist_after_rename_for_testing = Atomic.make false
 let transition_observer : transition_observer option Atomic.t = Atomic.make None
 
 let registry_mutex = Eio.Mutex.create ()
@@ -538,19 +560,41 @@ let snapshot_to_yojson ~revision receipts =
     ; "receipts", `List (List.map stored_receipt_to_yojson receipts)
     ]
 
-let save_json_atomic path json =
+let save_json_atomic_detailed path json =
   ignore (Keeper_fs.ensure_dir (Filename.dirname path) : string);
   json
   |> Yojson.Safe.pretty_to_string
-  |> Fs_compat.save_file_atomic path
+  |> Fs_compat.save_file_atomic_detailed path
 
 let persist_snapshot_to_path path ~revision receipts =
   if Atomic.exchange fail_next_persist_for_testing false
-  then Error "injected chat queue persist failure"
+  then
+    Error
+      { Fs_compat.stage = Fs_compat.Not_renamed
+      ; message = "injected chat queue persist failure before rename"
+      }
   else
-    try save_json_atomic path (snapshot_to_yojson ~revision receipts) with
+    let inject_after_rename =
+      Atomic.exchange fail_next_persist_after_rename_for_testing false
+    in
+    try
+      match
+        save_json_atomic_detailed path (snapshot_to_yojson ~revision receipts)
+      with
+      | Ok () when inject_after_rename ->
+        Error
+          { Fs_compat.stage = Fs_compat.Renamed_durability_uncertain
+          ; message =
+              "injected chat queue parent-directory durability failure after rename"
+          }
+      | result -> result
+    with
     | Eio.Cancel.Cancelled _ as exception_ -> raise exception_
-    | exception_ -> Error (Printexc.to_string exception_)
+    | exception_ ->
+      Error
+        { Fs_compat.stage = Fs_compat.Not_renamed
+        ; message = Printexc.to_string exception_
+        }
 
 let revision_in_domain revision =
   Int64.compare revision 0L >= 0 && Int64.compare revision max_revision <= 0
@@ -725,6 +769,20 @@ let parse_v1_for_migration json =
     Result.map (fun pending -> inflight @ pending) (parse_message_list items_json)
   | Error error, _ | _, Error error -> Error error
 
+let load_error kind ?path message = { kind; path; message }
+
+type path_probe =
+  | Path_missing
+  | Path_present of Unix.stats
+  | Path_probe_failed of string
+
+let probe_path path =
+  match Fs_compat.probe_path path with
+  | Ok None -> Path_missing
+  | Ok (Some stats) -> Path_present stats
+  | Error failure ->
+    Path_probe_failed (Fs_compat.path_probe_failure_to_string failure)
+
 let migrate_v1_to_v2 path json =
   match parse_v1_for_migration json with
   | Error error -> Error (`Parse error)
@@ -737,17 +795,28 @@ let migrate_v1_to_v2 path json =
     in
     let revision = 1L in
     (match persist_snapshot_to_path path ~revision receipts with
-     | Ok () -> Ok (revision, receipts)
-     | Error error -> Error (`Persist error))
+     | Ok () -> Ok (revision, receipts, [])
+     | Error { Fs_compat.stage = Fs_compat.Not_renamed; message } ->
+       Error (`Persist message)
+     | Error
+         { Fs_compat.stage = Fs_compat.Renamed_durability_uncertain
+         ; message
+         } ->
+       let error =
+         load_error Durability_uncertain ~path
+           ("the migrated v2 snapshot is visible, but parent-directory \n\
+             durability could not be proven; the migrated receipts remain \n\
+             observable and this Keeper queue is quarantined: " ^ message)
+       in
+       Ok (revision, receipts, [ error ]))
 
 type loaded_snapshot = {
   revision : int64;
   receipts : stored_receipt list;
   migrated : bool;
   recovered_count : int;
+  load_errors : snapshot_load_error list;
 }
-
-let load_error kind ?path message = { kind; path; message }
 
 let recovered_queue_terminal ~base_path ~keeper_name receipts =
   let inflight_ids =
@@ -815,7 +884,14 @@ let recover_inflight ~base_path ~keeper_name path ~revision receipts =
       0 receipts
   in
   if recovered_count = 0
-  then Ok { revision; receipts; migrated = false; recovered_count = 0 }
+  then
+    Ok
+      { revision
+      ; receipts
+      ; migrated = false
+      ; recovered_count = 0
+      ; load_errors = []
+      }
   else
     let recovered_terminal =
       recovered_queue_terminal ~base_path ~keeper_name receipts
@@ -849,19 +925,46 @@ let recover_inflight ~base_path ~keeper_name path ~revision receipts =
              ("failed to reconcile delivery journal: " ^ error))
       | Ok receipts ->
         (match persist_snapshot_to_path path ~revision receipts with
-         | Ok () -> Ok { revision; receipts; migrated = false; recovered_count }
-         | Error error ->
+         | Ok () ->
+           Ok
+             { revision
+             ; receipts
+             ; migrated = false
+             ; recovered_count
+             ; load_errors = []
+             }
+         | Error { Fs_compat.stage = Fs_compat.Not_renamed; message } ->
            Error
              (load_error Recovery_failed ~path
-                ("failed to persist restart recovery: " ^ error)))
+                ("failed to persist restart recovery: " ^ message))
+         | Error
+             { Fs_compat.stage = Fs_compat.Renamed_durability_uncertain
+             ; message
+             } ->
+           let error =
+             load_error Durability_uncertain ~path
+               ("the recovered queue revision is visible, but \n\
+                 parent-directory durability could not be proven; recovered \n\
+                 receipts remain observable and this Keeper queue is \n\
+                 quarantined: " ^ message)
+           in
+           Ok
+             { revision
+             ; receipts
+             ; migrated = false
+             ; recovered_count
+             ; load_errors = [ error ]
+             })
 
 let load_snapshot ~base_path ~keeper_name =
   match snapshot_path ~base_path ~keeper_name with
   | Error message -> Error (load_error Invalid_path message)
   | Ok path ->
-    if not (Sys.file_exists path)
-    then Ok None
-    else
+    (match probe_path path with
+     | Path_missing -> Ok None
+     | Path_probe_failed message ->
+       Error (load_error Read_failed ~path message)
+     | Path_present _ ->
       match Safe_ops.read_json_file_safe path with
       | Error message -> Error (load_error Read_failed ~path message)
       | Ok json ->
@@ -880,8 +983,15 @@ let load_snapshot ~base_path ~keeper_name =
                    receipts))
          | Ok schema when String.equal schema schema_v1 ->
            (match migrate_v1_to_v2 path json with
-            | Ok (revision, receipts) ->
-              Ok (Some { revision; receipts; migrated = true; recovered_count = 0 })
+            | Ok (revision, receipts, load_errors) ->
+              Ok
+                (Some
+                   { revision
+                   ; receipts
+                   ; migrated = true
+                   ; recovered_count = 0
+                   ; load_errors
+                   })
             | Error (`Parse message) ->
               Error (load_error Parse_failed ~path message)
             | Error (`Persist message) ->
@@ -891,7 +1001,7 @@ let load_snapshot ~base_path ~keeper_name =
          | Ok schema ->
            Error
              (load_error Parse_failed ~path
-                (Printf.sprintf "unsupported chat queue schema: %s" schema)))
+                (Printf.sprintf "unsupported chat queue schema: %s" schema))))
 
 let create_entry ?(revision = 0L) ?(receipts = []) ?(load_errors = []) () =
   { mutex = Eio.Mutex.create (); revision; receipts; load_errors }
@@ -929,12 +1039,13 @@ let persistence_matches_base_path ~base_path =
 ;;
 
 let first_snapshot_error entry =
-  match entry.load_errors with
-  | error :: _ -> Some error
-  | [] ->
-    (match Atomic.get global_load_errors with
-     | error :: _ -> Some error
-     | [] -> None)
+  with_entry_lock entry (fun () ->
+    match entry.load_errors with
+    | error :: _ -> Some error
+    | [] ->
+      (match Atomic.get global_load_errors with
+       | error :: _ -> Some error
+       | [] -> None))
 
 let mutation_entry ~keeper_name ~create =
   match Atomic.get persistence_base_path with
@@ -974,21 +1085,40 @@ let inflight_receipts receipts =
        | Stored_pending _ | Stored_delivered _ | Stored_failed _ -> None)
     receipts
 
+type commit_outcome =
+  { revision : int64
+  ; durability : commit_durability
+  }
+
 let commit (entry : queue_entry) ~path receipts =
   let before_receipts = entry.receipts in
   let before_revision = entry.revision in
-  if Int64.compare before_revision max_revision >= 0
-  then Error Revision_exhausted
-  else
+  match entry.load_errors, Atomic.get global_load_errors with
+  | error :: _, _ | [], error :: _ -> Error (Snapshot_unavailable error)
+  | [], [] when Int64.compare before_revision max_revision >= 0 ->
+    Error Revision_exhausted
+  | [], [] ->
     let revision = Int64.succ before_revision in
     entry.receipts <- receipts;
     entry.revision <- revision;
     match persist_snapshot_to_path path ~revision receipts with
-    | Ok () -> Ok revision
-    | Error message ->
+    | Ok () -> Ok { revision; durability = Durable }
+    | Error { Fs_compat.stage = Fs_compat.Not_renamed; message } ->
       entry.receipts <- before_receipts;
       entry.revision <- before_revision;
       Error (Persist_failed message)
+    | Error
+        { Fs_compat.stage = Fs_compat.Renamed_durability_uncertain
+        ; message
+        } ->
+      let error =
+        load_error Durability_uncertain ~path
+          ("the new queue revision is visible, but parent-directory durability \n\
+            could not be proven; this Keeper queue is quarantined and the \n\
+            committed receipt must not be retried blindly: " ^ message)
+      in
+      entry.load_errors <- error :: entry.load_errors;
+      Ok { revision; durability = Durability_uncertain error }
     | exception (Eio.Cancel.Cancelled _ as exception_) ->
       entry.receipts <- before_receipts;
       entry.revision <- before_revision;
@@ -1010,15 +1140,25 @@ let enqueue ~keeper_name message =
           let receipts = entry.receipts @ [ receipt ] in
           match commit entry ~path receipts with
           | Error _ as error -> error
-          | Ok revision ->
+          | Ok { revision; durability } ->
             Ok
               { receipt_id
               ; revision
               ; pending_count = List.length (pending_receipts receipts)
               ; inflight_count = List.length (inflight_receipts receipts)
+              ; durability
               })
     in
     (match result with
+     | Ok ({ durability = Durability_uncertain error; _ } as receipt) ->
+       Log.Keeper.error
+         "keeper_chat_queue: accepted receipt with uncertain crash durability keeper=%s receipt_id=%s revision=%Ld: %s"
+         keeper_name
+         (Receipt_id.to_string receipt.receipt_id)
+         receipt.revision
+         error.message;
+       notify_transition ~keeper_name ~revision:receipt.revision;
+       Ok receipt
      | Ok receipt ->
        notify_transition ~keeper_name ~revision:receipt.revision;
        Ok receipt
@@ -1091,12 +1231,25 @@ let lease_batch ~keeper_name =
               in
               match commit entry ~path receipts with
               | Error error -> `Error error
-              | Ok revision -> `Leased ({ lease_id; items }, revision))
+              | Ok { revision; durability = Durable } ->
+                `Leased ({ lease_id; items }, revision)
+              | Ok
+                  { revision
+                  ; durability = Durability_uncertain error
+                  } ->
+                `Committed_durability_uncertain
+                  ( List.map (fun (item : leased_message) -> item.receipt_id) items
+                  , revision
+                  , error ))
     in
     (match result with
      | `Leased (lease, revision) ->
        notify_transition ~keeper_name ~revision;
        `Leased lease
+     | `Committed_durability_uncertain (receipt_ids, revision, error) ->
+       notify_transition ~keeper_name ~revision;
+       `Error
+         (Commit_durability_uncertain { revision; receipt_ids; error })
      | `Empty -> `Empty
      | `Already_leased lease_id -> `Already_leased lease_id
      | `Error error -> `Error error)
@@ -1161,12 +1314,22 @@ let finalize ~keeper_name ~lease_id ~outcome =
             in
             match commit entry ~path receipts with
             | Error error -> `Error error
-            | Ok revision -> `Finalized (matched, revision))
+            | Ok { revision; durability = Durable } ->
+              `Finalized (matched, revision)
+            | Ok
+                { revision
+                ; durability = Durability_uncertain error
+                } ->
+              `Committed_durability_uncertain (matched, revision, error))
     in
     (match result with
      | `Finalized (receipts, revision) ->
        notify_transition ~keeper_name ~revision;
        `Finalized receipts
+     | `Committed_durability_uncertain (receipt_ids, revision, error) ->
+       notify_transition ~keeper_name ~revision;
+       `Error
+         (Commit_durability_uncertain { revision; receipt_ids; error })
      | `Unknown_lease -> `Unknown_lease
      | `Error error -> `Error error)
 
@@ -1202,12 +1365,22 @@ let nack ~keeper_name ~lease_id =
             in
             match commit entry ~path receipts with
             | Error error -> `Error error
-            | Ok revision -> `Requeued (matched, revision))
+            | Ok { revision; durability = Durable } ->
+              `Requeued (matched, revision)
+            | Ok
+                { revision
+                ; durability = Durability_uncertain error
+                } ->
+              `Committed_durability_uncertain (matched, revision, error))
     in
     (match result with
      | `Requeued (receipts, revision) ->
        notify_transition ~keeper_name ~revision;
        `Requeued receipts
+     | `Committed_durability_uncertain (receipt_ids, revision, error) ->
+       notify_transition ~keeper_name ~revision;
+       `Error
+         (Commit_durability_uncertain { revision; receipt_ids; error })
      | `Unknown_lease -> `Unknown_lease
      | `Error error -> `Error error)
 
@@ -1312,24 +1485,37 @@ let snapshot ~keeper_name =
         })
 
 let lookup_receipt ~keeper_name ~receipt_id =
-  match mutation_entry ~keeper_name ~create:false with
-  | Error _ as error -> error
-  | Ok (_, _, None) -> Ok { revision = 0L; receipt = None }
-  | Ok (_, _, Some entry) ->
-    with_entry_lock entry (fun () ->
-        let receipt =
-          List.find_map
-            (fun receipt ->
-               if Receipt_id.equal receipt.receipt_id receipt_id
-               then
-                 Some
-                   ({ receipt_id = receipt.receipt_id
-                    ; state = receipt_state_of_stored receipt.state
-                    } : receipt_view)
-               else None)
-            entry.receipts
-        in
-        Ok { revision = entry.revision; receipt })
+  match Atomic.get persistence_base_path with
+  | None -> Error Persistence_not_configured
+  | Some base_path ->
+    (match snapshot_path ~base_path ~keeper_name with
+     | Error message ->
+       Error (Snapshot_unavailable (load_error Invalid_path message))
+     | Ok _ ->
+       (match Atomic.get global_load_errors with
+        | error :: _ -> Error (Snapshot_unavailable error)
+        | [] ->
+          (match find_entry keeper_name with
+           | None -> Ok { revision = 0L; receipt = None; load_errors = [] }
+           | Some entry ->
+             with_entry_lock entry (fun () ->
+                 let receipt =
+                   List.find_map
+                     (fun receipt ->
+                        if Receipt_id.equal receipt.receipt_id receipt_id
+                        then
+                          Some
+                            ({ receipt_id = receipt.receipt_id
+                             ; state = receipt_state_of_stored receipt.state
+                             } : receipt_view)
+                        else None)
+                     entry.receipts
+                 in
+                 Ok
+                   { revision = entry.revision
+                   ; receipt
+                   ; load_errors = entry.load_errors
+                   }))))
 
 let all_keeper_names () =
   with_registry_rw (fun () ->
@@ -1348,11 +1534,27 @@ let configure_persistence ~base_path =
   let restored_mutations = ref [] in
   let keepers_dir = Common.keepers_runtime_dir_of_base ~base_path in
   let keeper_names =
-    if not (Sys.file_exists keepers_dir)
-    then []
-    else
-      try Array.to_list (Sys.readdir keepers_dir) with
-      | exception_ ->
+    match probe_path keepers_dir with
+    | Path_missing -> []
+    | Path_probe_failed message ->
+      let error =
+        load_error Read_failed ~path:keepers_dir
+          ("failed to inspect keeper chat queue registry: " ^ message)
+      in
+      load_errors := (None, error) :: !load_errors;
+      Atomic.set global_load_errors [ error ];
+      []
+    | Path_present stats when stats.Unix.st_kind <> Unix.S_DIR ->
+      let error =
+        load_error Read_failed ~path:keepers_dir
+          "keeper chat queue registry path is not a directory"
+      in
+      load_errors := (None, error) :: !load_errors;
+      Atomic.set global_load_errors [ error ];
+      []
+    | Path_present _ ->
+      (try Array.to_list (Sys.readdir keepers_dir) with
+       | exception_ ->
         let error =
           load_error Read_failed ~path:keepers_dir
             ("failed to discover keeper chat queue snapshots: "
@@ -1360,13 +1562,26 @@ let configure_persistence ~base_path =
         in
         load_errors := (None, error) :: !load_errors;
         Atomic.set global_load_errors [ error ];
-        []
+        [])
   in
   List.iter
     (fun keeper_name ->
        let path = Filename.concat (Filename.concat keepers_dir keeper_name) persistence_file in
-       if Sys.file_exists path
-       then if not (valid_keeper_name keeper_name)
+       match probe_path path with
+       | Path_missing -> ()
+       | Path_probe_failed message ->
+         let error =
+           load_error Read_failed ~path
+             ("failed to inspect keeper chat queue snapshot: " ^ message)
+         in
+         load_errors := (Some keeper_name, error) :: !load_errors;
+         if valid_keeper_name keeper_name
+         then
+           with_registry_rw (fun () ->
+               Hashtbl.replace registry keeper_name
+                 (create_entry ~load_errors:[ error ] ()))
+       | Path_present _ ->
+         if not (valid_keeper_name keeper_name)
          then
            let error =
              load_error Invalid_path ~path
@@ -1381,10 +1596,16 @@ let configure_persistence ~base_path =
              if loaded.migrated then incr migrated_keeper_count;
              recovered_receipt_count :=
                !recovered_receipt_count + loaded.recovered_count;
+             List.iter
+               (fun error ->
+                  load_errors := (Some keeper_name, error) :: !load_errors)
+               loaded.load_errors;
              with_registry_rw (fun () ->
                  Hashtbl.replace registry keeper_name
                    (create_entry ~revision:loaded.revision
-                      ~receipts:loaded.receipts ()));
+                      ~receipts:loaded.receipts
+                      ~load_errors:loaded.load_errors
+                      ()));
              if loaded.migrated || loaded.recovered_count > 0
              then
                restored_mutations :=
@@ -1408,10 +1629,14 @@ let configure_persistence ~base_path =
 module For_testing = struct
   let reset () =
     Atomic.set fail_next_persist_for_testing false;
+    Atomic.set fail_next_persist_after_rename_for_testing false;
     Atomic.set persistence_base_path None;
     Atomic.set global_load_errors [];
     Atomic.set transition_observer None;
     with_registry_rw (fun () -> Hashtbl.clear registry)
 
   let fail_next_persist () = Atomic.set fail_next_persist_for_testing true
+
+  let fail_next_persist_after_rename () =
+    Atomic.set fail_next_persist_after_rename_for_testing true
 end

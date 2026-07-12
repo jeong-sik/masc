@@ -16,12 +16,39 @@
     this module stays free of [Fs_compat]'s Eio bridge — same
     cycle-free placement pattern as [Mkdir_memo] and [Fd_cache]. *)
 
-(** [save_file_atomic ~save_file path content] writes [content] to
-    a temp file in [path]'s directory, fsyncs the tmp, renames it
-    over [path], and best-effort fsyncs the parent directory.
+(** Whether an atomic write failure happened before or after the rename commit
+    point. After-rename failure means the new file is visible in the current
+    process but crash durability could not be proven. *)
+type failure_stage =
+  | Not_renamed
+  | Renamed_durability_uncertain
 
-    Returns [Ok ()] on success or [Error msg] when the write or
-    rename fails (the tmp is cleaned up). Re-raises
+type failure =
+  { stage : failure_stage
+  ; message : string
+  }
+
+val failure_to_string : failure -> string
+
+(** [save_file_atomic_detailed ~save_file path content] writes [content] to
+    a temp file in [path]'s directory, fsyncs the tmp, renames it over [path],
+    and fsyncs the parent directory. No fsync failure is swallowed.
+
+    [Not_renamed] proves the old target remains authoritative.
+    [Renamed_durability_uncertain] means the new target is already visible and
+    callers must not roll in-memory state back to the old revision. *)
+val save_file_atomic_detailed
+  :  save_file:(string -> string -> unit)
+  -> string
+  -> string
+  -> (unit, failure) Result.t
+
+(** Compatibility wrapper around {!save_file_atomic_detailed}.
+
+    Returns [Error msg] for every durability failure, preserving the existing
+    explicit-failure API while erasing only the stage. Stateful callers that
+    might roll memory back must use {!save_file_atomic_detailed} to distinguish
+    the rename commit point. Re-raises
     [Eio.Cancel.Cancelled] after cleaning up the tmp — cancellation
     must not be swallowed (RFC-0143). *)
 val save_file_atomic

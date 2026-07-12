@@ -34,8 +34,27 @@ val load_file_opt : string -> string option
 (** Save string to file (overwrite). *)
 val save_file : string -> string -> unit
 
-(** Write content to path via temp file + rename.
-    Returns [Error msg] on I/O failure instead of raising. *)
+(** Whether a durable atomic write failed before or after its rename commit
+    point. *)
+type atomic_write_failure_stage =
+  | Not_renamed
+  | Renamed_durability_uncertain
+
+type atomic_write_failure =
+  { stage : atomic_write_failure_stage
+  ; message : string
+  }
+
+(** Typed durability result. A caller receiving
+    [Renamed_durability_uncertain] must keep the new in-memory revision because
+    the rename is already visible, while quarantining further mutations until
+    recovery establishes a single authority. *)
+val save_file_atomic_detailed :
+  string -> string -> (unit, atomic_write_failure) Result.t
+
+(** Compatibility atomic writer. Returns [Error msg] for every durability
+    failure but erases the commit stage. Stateful commit protocols must use
+    {!save_file_atomic_detailed} before deciding whether memory may roll back. *)
 val save_file_atomic : string -> string -> (unit, string) Result.t
 
 (** [true] iff [name] matches the [.atomic_*.tmp] pattern produced
@@ -71,6 +90,21 @@ val append_file : string -> string -> unit
 
 (** Check if file exists. *)
 val file_exists : string -> bool
+
+type path_probe_failure =
+  { error : Unix.error
+  ; function_name : string
+  ; argument : string
+  }
+
+(** [probe_path path] returns [Ok None] only for [ENOENT], [Ok (Some stats)]
+    for an observable path, and a typed [Error] for every other stat failure.
+    Blocking Unix stat runs on an Eio system thread when the runtime filesystem
+    is active, so callers can distinguish absence without blocking a Keeper
+    scheduler domain or parsing exception text. *)
+val probe_path : string -> (Unix.stats option, path_probe_failure) result
+
+val path_probe_failure_to_string : path_probe_failure -> string
 
 (** Return file size or None *)
 val file_size : string -> int option
@@ -209,11 +243,26 @@ exception Durable_append_failed of durable_append_error
 
 val durable_append_error_to_string : durable_append_error -> string
 
-(** Serialize in-process and cross-process writers, read the current bytes, and
-    append the suffix selected by [decide]. A successful append is fsynced.
-    Partial write/fsync failure rolls back to the original length and fsyncs the
-    rollback; both primary and rollback failures remain typed. Blocking Unix
-    I/O and per-path lock waits run on an Eio system thread when available. *)
+(** [update_private_file_durable_locked_result path decide] serializes
+    in-process callers with a refcounted per-path Eio mutex and the shared
+    append mutex, then locks the separate [path ^ ".lock"] inode across
+    processes. Keeping the lock off the payload inode prevents an unrelated
+    payload read/close from releasing this process's POSIX record lock.
+
+    The operation reads the exact existing bytes and calls [decide]. [Some
+    suffix] appends the complete suffix and fsyncs it before returning [Ok];
+    [None] performs no write. If writing or append fsync fails, the file is
+    truncated to its original length and that rollback is fsynced. [Error]
+    preserves the append failure and every rollback failure. Setup, read, and
+    [decide] exceptions still propagate.
+
+    The payload and lock files are mode [0600]. Every first-file transaction
+    fsyncs the parent directory before touching payload bytes; filesystems that
+    reject directory fsync fail explicitly. The shared path mutex serializes
+    this operation with cached JSONL writers without closing their
+    already-flushed descriptors. When the Eio filesystem is active, the
+    blocking transaction and [decide] run in a system thread; [decide]
+    therefore must not perform Eio effects. *)
 val update_private_file_durable_locked_result :
   string -> (string -> string option * 'a) -> ('a, durable_append_error) result
 
@@ -225,10 +274,14 @@ type private_jsonl_append_error =
   | Invalid_jsonl_suffix
   | Durable_jsonl_append_failed of durable_append_error
 
-(** Append complete JSONL rows after checking only the existing final byte.
-    The hot-path cost is proportional to the appended suffix, not history size.
-    Blocking Unix I/O and per-path lock waits run on an Eio system thread when
-    available. *)
+(** Append one or more complete JSONL rows without reading history. The
+    operation holds the same in-process mutexes and separate cross-process lock
+    inode as {!update_private_file_durable_locked_result}, verifies only that
+    an existing payload ends at a newline boundary, then appends and fsyncs
+    with rollback on failure. A first payload creation also fsyncs its parent
+    directory. Runtime cost is proportional to [suffix], not historical file
+    size. Blocking lock/write/fsync work runs in a system thread when Eio is
+    active. *)
 val append_private_jsonl_durable_locked_result :
   string -> string -> (unit, private_jsonl_append_error) result
 

@@ -64,6 +64,44 @@ let test_ensure_dir_invalidate () =
   check bool "recreated after invalidate" true (Sys.file_exists dir);
   cleanup_dir base
 
+let test_ensure_dir_invalidate_removes_descendant_cache () =
+  let base = temp_dir () in
+  let keeper_dir = Filename.concat base "keepers/sangsu" in
+  let deliveries_dir = Filename.concat keeper_dir ".chat-deliveries" in
+  ignore (KF.ensure_dir deliveries_dir);
+  cleanup_dir keeper_dir;
+  check bool "purged descendant is gone" false (Sys.file_exists deliveries_dir);
+  KF.invalidate_dir keeper_dir;
+  ignore (KF.ensure_dir deliveries_dir);
+  check bool "descendant is recreated after ancestor invalidation" true
+    (Sys.file_exists deliveries_dir);
+  cleanup_dir base
+
+let test_ensure_dir_cache_does_not_lexically_collapse_symlink_parent () =
+  let base = temp_dir () in
+  let real_sub = Filename.concat base "real/sub" in
+  let link = Filename.concat base "link" in
+  Fs_compat.mkdir_p real_sub;
+  Unix.symlink real_sub link;
+  Fun.protect
+    ~finally:(fun () ->
+      (try Unix.unlink link with
+       | Unix.Unix_error _ -> ());
+      cleanup_dir base)
+    (fun () ->
+      let through_symlink = Filename.concat link "../cache" in
+      let lexical_peer = Filename.concat base "cache" in
+      ignore (KF.ensure_dir through_symlink);
+      check bool
+        "symlink parent resolves to its target parent"
+        true
+        (Sys.file_exists (Filename.concat base "real/cache"));
+      ignore (KF.ensure_dir lexical_peer);
+      check bool
+        "lexically similar path retains separate cache authority"
+        true
+        (Sys.file_exists lexical_peer))
+
 let test_clear_dir_cache () =
   let base = temp_dir () in
   let dir = Filename.concat base "cleartest" in
@@ -153,8 +191,18 @@ let test_generate_trace_id_format () =
 (* Concurrent ensure_dir (Eio-based)                                *)
 (* ================================================================ *)
 
+let with_eio body =
+  Eio_main.run @@ fun environment ->
+  Eio_guard.enable ();
+  Fs_compat.set_fs (Eio.Stdenv.fs environment);
+  Fun.protect
+    ~finally:(fun () ->
+      Fs_compat.clear_fs ();
+      Eio_guard.disable ())
+    (fun () -> body environment)
+
 let test_concurrent_ensure_dir () =
-  Eio_main.run @@ fun _env ->
+  with_eio @@ fun _env ->
   let base = temp_dir () in
   KF.clear_dir_cache ();
   let dir = Filename.concat base "concurrent" in
@@ -169,7 +217,7 @@ let test_concurrent_ensure_dir () =
   cleanup_dir base
 
 let test_concurrent_save_atomic () =
-  Eio_main.run @@ fun _env ->
+  with_eio @@ fun _env ->
   let base = temp_dir () in
   let path = Filename.concat base "concurrent.txt" in
   let errors = Atomic.make 0 in
@@ -201,6 +249,10 @@ let () =
         [
           test_case "creates and caches" `Quick test_ensure_dir_creates_and_caches;
           test_case "invalidate" `Quick test_ensure_dir_invalidate;
+          test_case "invalidate descendants" `Quick
+            test_ensure_dir_invalidate_removes_descendant_cache;
+          test_case "symlink parent is not lexically aliased" `Quick
+            test_ensure_dir_cache_does_not_lexically_collapse_symlink_parent;
           test_case "clear cache" `Quick test_clear_dir_cache;
           test_case "failure does not poison mutex" `Quick
             test_ensure_dir_failure_does_not_poison_mutex;

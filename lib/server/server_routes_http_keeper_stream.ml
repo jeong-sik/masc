@@ -178,6 +178,7 @@ type dashboard_deferred_chat =
   ; receipt_id : string
   ; shutdown_operation_id : Keeper_shutdown_types.Operation_id.t option
   ; queue_revision : int64
+  ; queue_durability : Keeper_chat_queue.commit_durability
   }
 
 let dashboard_busy_queue_state ~base_path ~keeper_name =
@@ -189,18 +190,24 @@ let dashboard_busy_queue_state ~base_path ~keeper_name =
     if not (Keeper_chat_queue.persistence_configured ())
     then true
     else
-      let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
-      snapshot.load_errors <> []
-      || snapshot.pending <> []
-      || snapshot.inflight <> []
+      match Keeper_chat_queue.has_active_receipts ~keeper_name with
+      | Ok active -> active
+      | Error _ -> true
   in
   match in_flight, chat_waiting, queue_waiting, shutdown_operation_id with
   | None, false, false, None -> None
   | _ -> Some (in_flight, chat_waiting, shutdown_operation_id)
 
 let dashboard_deferred_ack_text ~keeper_name deferred =
-  match deferred.shutdown_operation_id with
-  | Some operation_id ->
+  match deferred.queue_durability, deferred.shutdown_operation_id with
+  | Keeper_chat_queue.Durability_uncertain _, _ ->
+    Printf.sprintf
+      "%s accepted your message at receipt_id=%s, but could not prove the \n\
+       queue directory's crash durability. Do not resend it blindly. This \n\
+       Keeper's chat queue is quarantined until operator recovery."
+      keeper_name
+      deferred.receipt_id
+  | Keeper_chat_queue.Durable, Some operation_id ->
     Printf.sprintf
       "%s is stopping under operation %s; your message was durably accepted \
        (receipt_id=%s, pending_count=%d, inflight_count=%d) for the next active \
@@ -211,7 +218,7 @@ let dashboard_deferred_ack_text ~keeper_name deferred =
       deferred.receipt_id
       deferred.pending_count
       deferred.inflight_count
-  | None ->
+  | Keeper_chat_queue.Durable, None ->
     Printf.sprintf
       "%s is busy; your message was durably accepted (receipt_id=%s, \
        pending_count=%d, inflight_count=%d). The Dashboard will track it through \
@@ -229,6 +236,7 @@ let dashboard_deferred_chat_to_json ~keeper_name
      ; receipt_id
      ; shutdown_operation_id
      ; queue_revision
+     ; queue_durability
      } : dashboard_deferred_chat) =
   let in_flight_fields =
     match in_flight with
@@ -240,9 +248,26 @@ let dashboard_deferred_chat_to_json ~keeper_name
           , `Float started_at )
         ]
   in
+  let durability_fields =
+    match queue_durability with
+    | Keeper_chat_queue.Durable ->
+      [ "queue_durability", `String "durable" ]
+    | Keeper_chat_queue.Durability_uncertain error ->
+      [ "queue_durability", `String "uncertain"
+      ; ( "queue_durability_error_kind"
+        , `String
+            (Keeper_chat_queue.snapshot_load_error_kind_to_string error.kind) )
+      ]
+  in
+  let status =
+    match queue_durability with
+    | Keeper_chat_queue.Durable -> "queued"
+    | Keeper_chat_queue.Durability_uncertain _ ->
+      "queued_durability_uncertain"
+  in
   `Assoc
     ([ ("keeper_name", `String keeper_name)
-     ; ("status", `String "queued")
+     ; ("status", `String status)
      ; ("queue", `String "keeper_chat_queue")
      ; ("pending_count", `Int pending_count)
      ; ("inflight_count", `Int inflight_count)
@@ -255,6 +280,7 @@ let dashboard_deferred_chat_to_json ~keeper_name
          | Some operation_id ->
            `String (Keeper_shutdown_types.Operation_id.to_string operation_id) )
      ]
+     @ durability_fields
      @ in_flight_fields)
 
 let enqueue_dashboard_payload
@@ -282,6 +308,7 @@ let enqueue_dashboard_payload
         ; inflight_count = receipt.inflight_count
         ; receipt_id = Keeper_chat_queue.Receipt_id.to_string receipt.receipt_id
         ; queue_revision = receipt.revision
+        ; queue_durability = receipt.durability
         ; shutdown_operation_id
         }
 
@@ -1347,9 +1374,12 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
      still an authenticated dashboard operator, so it keeps Owner authority
      while recording the Gate surface label. *)
   let chat_speaker : Keeper_chat_store.speaker = chat_speaker_of_request payload in
-  let dashboard_direct_stream =
+  let direct_delivery_journal_required =
     (not queued_turn)
     && (not connector_user_line_recorded_upstream)
+  in
+  let dashboard_direct_stream =
+    direct_delivery_journal_required
     && not (has_external_speaker payload)
   in
   let direct_delivery_journal = ref None in
@@ -1358,6 +1388,22 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
   in
   let set_direct_delivery_journal journal =
     direct_delivery_journal := Some journal
+  in
+  let adopt_direct_delivery_journal = function
+    | Ok journal ->
+      set_direct_delivery_journal journal;
+      Ok journal
+    | Error
+        (Keeper_chat_delivery_journal.Commit_durability_uncertain
+           { committed; _ } as error) ->
+      set_direct_delivery_journal committed;
+      Log.Keeper.error
+        "keeper_stream: delivery journal committed with uncertain crash durability keeper=%s revision=%d: %s"
+        payload.name
+        committed.revision
+        (journal_error error);
+      Error (journal_error error)
+    | Error error -> Error (journal_error error)
   in
   let on_direct_request_accepted request_id =
     let ( let* ) = Result.bind in
@@ -1385,9 +1431,8 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
         ~delivery_key
         ~payload:accepted_payload
         ~now:(Time_compat.now ())
-      |> Result.map_error journal_error
+      |> adopt_direct_delivery_journal
     in
-    set_direct_delivery_journal prepared;
     let* user_row_id =
       Keeper_chat_store.append_delivery_user_message_result
         ~base_dir:base_path
@@ -1406,18 +1451,16 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
         ~identity:prepared
         ~user_row_id:(Some user_row_id)
         ~now:(Time_compat.now ())
-      |> Result.map_error journal_error
+      |> adopt_direct_delivery_journal
     in
-    set_direct_delivery_journal accepted;
     let* running =
       Keeper_chat_delivery_journal.mark_running
         ~base_path
         ~expected_revision:accepted.revision
         ~identity:accepted
         ~now:(Time_compat.now ())
-      |> Result.map_error journal_error
+      |> adopt_direct_delivery_journal
     in
-    set_direct_delivery_journal running;
     Ok ()
   in
   let on_queue_turn_admitted () =
@@ -1459,9 +1502,8 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
         ~delivery_key
         ~payload:accepted_payload
         ~now:(Time_compat.now ())
-      |> Result.map_error journal_error
+      |> adopt_direct_delivery_journal
     in
-    set_direct_delivery_journal prepared;
     let* user_row_id =
       match user_row_origin with
       | Keeper_chat_delivery_journal.Already_persisted_upstream -> Ok None
@@ -1486,18 +1528,16 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
         ~identity:prepared
         ~user_row_id
         ~now:(Time_compat.now ())
-      |> Result.map_error journal_error
+      |> adopt_direct_delivery_journal
     in
-    set_direct_delivery_journal accepted;
     let* running =
       Keeper_chat_delivery_journal.mark_running
         ~base_path
         ~expected_revision:accepted.revision
         ~identity:accepted
         ~now:(Time_compat.now ())
-      |> Result.map_error journal_error
+      |> adopt_direct_delivery_journal
     in
-    set_direct_delivery_journal running;
     Ok ()
   in
   let commit_direct_terminal terminal =
@@ -1512,9 +1552,8 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
             ~identity:journal
             ~terminal
             ~now:(Time_compat.now ())
-          |> Result.map_error journal_error
+          |> adopt_direct_delivery_journal
         in
-        set_direct_delivery_journal pending;
         drive pending
       | Keeper_chat_delivery_journal.Terminal_pending
           { terminal = persisted_terminal; user_row_id } ->
@@ -1561,9 +1600,8 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
             ~identity:journal
             ~transcript_row_id
             ~now:(Time_compat.now ())
-          |> Result.map_error journal_error
+          |> adopt_direct_delivery_journal
         in
-        set_direct_delivery_journal committed;
         drive committed
       | Keeper_chat_delivery_journal.Transcript_committed _ ->
         let* final =
@@ -1572,9 +1610,8 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
             ~expected_revision:journal.revision
             ~identity:journal
             ~now:(Time_compat.now ())
-          |> Result.map_error journal_error
+          |> adopt_direct_delivery_journal
         in
-        set_direct_delivery_journal final;
         Ok ()
       | Keeper_chat_delivery_journal.Final _ -> Ok ()
       | Keeper_chat_delivery_journal.Prepared
@@ -1725,7 +1762,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
           (Keeper_msg_async.submit_error_to_json error |> Yojson.Safe.to_string)
     | Ok background_sw ->
       let on_accepted =
-        if dashboard_direct_stream
+        if direct_delivery_journal_required
         then Some on_direct_request_accepted
         else None
       in
@@ -1794,15 +1831,42 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
         in
         match dispatch_result with
         | Ok (`Deferred rejection) ->
-            push_worker_event (Stream_queued_turn_deferred rejection);
-            Tool_result.ok
-              ~tool_name:"masc_keeper_msg"
-              ~start_time
-              (Yojson.Safe.to_string
-                 (`Assoc
-                    [ ("status", `String "deferred")
-                    ; ("admission", admission_rejection_to_json rejection)
-                    ]))
+            if queued_turn
+            then begin
+              push_worker_event (Stream_queued_turn_deferred rejection);
+              Tool_result.ok
+                ~tool_name:"masc_keeper_msg"
+                ~start_time
+                (Yojson.Safe.to_string
+                   (`Assoc
+                      [ ("status", `String "deferred")
+                      ; ("admission", admission_rejection_to_json rejection)
+                      ]))
+            end
+            else
+              let err =
+                match rejection.shutdown_operation_id with
+                | Some operation_id ->
+                  Printf.sprintf
+                    "Keeper admission is fenced by shutdown operation %s; this direct request was not queued."
+                    (Keeper_shutdown_types.Operation_id.to_string operation_id)
+                | None ->
+                  Printf.sprintf
+                    "Keeper admission is busy with %d waiting chat requests; this direct request was not queued."
+                    rejection.waiting
+              in
+              let persisted = persist_failure_reply err in
+              let queued_outcome =
+                failure_outcome_after_persist
+                  ~queued_turn:false
+                  ~failure_kind:Turn_failed
+                  ~detail:err
+                  persisted
+              in
+              push_worker_event
+                (Stream_terminal
+                   { status = Stream_rejected; body = err; queued_outcome });
+              Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err
         | Ok (`Queued queued) ->
             let body =
               Yojson.Safe.to_string

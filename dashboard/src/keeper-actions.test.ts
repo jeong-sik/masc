@@ -252,6 +252,38 @@ describe('reconcileKeeperChatReceipts', () => {
     })
   })
 
+  it('stops polling and refuses to call a quarantined receipt durable', async () => {
+    fetchKeeperChatReceipt.mockResolvedValue({
+      keeperName: 'echo',
+      receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
+      revision: 2,
+      availability: 'quarantined',
+      loadErrors: [
+        {
+          kind: 'durability_uncertain',
+          message: 'Queue durability is uncertain; operator recovery is required.',
+        },
+      ],
+      state: { kind: 'inflight', leaseId: 'lease-1', startedAt: 42 },
+    })
+
+    await reconcileKeeperChatReceipts('echo')
+
+    const entry = keeperThreads.value.echo?.find(candidate => (
+      candidate.details?.queueReceiptId === 'chatq_00000000-0000-4000-8000-000000000001'
+    ))
+    expect(entry?.delivery).toBe('error')
+    expect(entry?.details?.queueState).toBe('durability_uncertain')
+    expect(entry?.details?.queueDurability).toBe('uncertain')
+    expect(entry?.streamContract?.deliveryReceipt).toBe(
+      'server_receipt_durability_uncertain',
+    )
+    expect(entry?.error).toContain('재전송하지 말고')
+
+    await reconcileKeeperChatReceipts('echo')
+    expect(fetchKeeperChatReceipt).toHaveBeenCalledTimes(1)
+  })
+
   it('fails closed instead of retrying forever when Delivered lacks outcome_ref', async () => {
     fetchKeeperChatReceipt.mockResolvedValue({
       keeperName: 'echo',
@@ -1421,6 +1453,8 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       keeperName: 'echo',
       receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
       revision: 4,
+      availability: 'available',
+      loadErrors: [],
       state: { kind: 'pending' },
     })
     streamKeeperMessage.mockImplementation(emitting([
@@ -1437,6 +1471,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
           queue_revision: 4,
           pending_count: 1,
           inflight_count: 0,
+          queue_durability: 'durable',
           shutdown_operation_id: null,
         },
       },
@@ -1466,6 +1501,8 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       keeperName: 'echo',
       receiptId: 'chatq_00000000-0000-4000-8000-000000000002',
       revision: 5,
+      availability: 'available',
+      loadErrors: [],
       state: {
         kind: 'failed',
         failureKind: 'turn_failed',
@@ -1488,6 +1525,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
           queue_revision: 4,
           pending_count: 1,
           inflight_count: 0,
+          queue_durability: 'durable',
           shutdown_operation_id: null,
         },
       },

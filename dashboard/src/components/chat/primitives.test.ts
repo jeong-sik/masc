@@ -408,6 +408,19 @@ describe('ChatTranscript', () => {
           reason: 'history row records durable server stream lifecycle replay',
         },
       },
+      {
+        id: 'smoke-durability-uncertain',
+        role: 'assistant',
+        content: 'queue receipt requires operator recovery',
+        ts: 1_780_000_002,
+        kind: 'transport_failure',
+        stream_contract: {
+          source: 'queue_poll',
+          status: 'queue_poll_result',
+          delivery_receipt: 'server_receipt_durability_uncertain',
+          reason: 'receipt is visible but parent directory fsync failed',
+        },
+      },
     ])
 
     render(
@@ -441,6 +454,18 @@ describe('ChatTranscript', () => {
     expect(failure.getAttribute('data-chat-stream-contract-delivery-receipt')).toBe('server_lifecycle_replay_only')
     expect(failure.getAttribute('data-chat-stream-contract-badge-state')).toBe('server-replay')
     expect(failure.querySelector('[data-chat-stream-contract-badge]')?.textContent).toContain('서버 기록 복구')
+    const uncertain = container.querySelector(
+      '[data-chat-entry-id="smoke-durability-uncertain"]',
+    ) as HTMLElement
+    expect(uncertain.getAttribute('data-chat-stream-contract-delivery-receipt')).toBe(
+      'server_receipt_durability_uncertain',
+    )
+    expect(uncertain.getAttribute('data-chat-stream-contract-badge-state')).toBe(
+      'durability-uncertain',
+    )
+    expect(uncertain.querySelector('[data-chat-stream-contract-badge]')?.textContent).toContain(
+      '내구성 확인 필요',
+    )
     // transport_failure renders the typed card, so the raw diagnostic is
     // collapsed by default (the legacy banner is suppressed for card rows)
     // and surfaces only on expand.

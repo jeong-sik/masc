@@ -20,31 +20,67 @@ let fsync_path path =
 let atomic_tmp_prefix = ".atomic_"
 let atomic_tmp_suffix = ".tmp"
 
-let save_file_atomic
+type failure_stage =
+  | Not_renamed
+  | Renamed_durability_uncertain
+
+type failure =
+  { stage : failure_stage
+  ; message : string
+  }
+
+let failure_to_string failure = failure.message
+
+let save_file_atomic_detailed
   ~(save_file : string -> string -> unit)
   (path : string)
   (content : string)
-  : (unit, string) Result.t
+  : (unit, failure) Result.t
   =
   let dir = Stdlib.Filename.dirname path in
-  let tmp =
-    Stdlib.Filename.temp_file ~temp_dir:dir atomic_tmp_prefix atomic_tmp_suffix
+  let tmp = ref None in
+  let renamed = ref false in
+  let cleanup_tmp () =
+    match !tmp with
+    | None -> ()
+    | Some tmp_path ->
+      (try Stdlib.Sys.remove tmp_path with
+       | Sys_error _ -> ())
   in
   try
-    save_file tmp content;
-    fsync_path tmp;
-    Stdlib.Sys.rename tmp path;
+    let tmp_path =
+      Stdlib.Filename.temp_file
+        ~temp_dir:dir
+        atomic_tmp_prefix
+        atomic_tmp_suffix
+    in
+    tmp := Some tmp_path;
+    save_file tmp_path content;
+    fsync_path tmp_path;
+    Stdlib.Sys.rename tmp_path path;
+    renamed := true;
     fsync_path dir;
     Ok ()
   with
   | Eio.Cancel.Cancelled _ as e ->
-    (try Stdlib.Sys.remove tmp with
-     | Sys_error _ -> ());
+    cleanup_tmp ();
     raise e
   | exn ->
-    (try Stdlib.Sys.remove tmp with
-     | Sys_error _ -> ());
-    Error (Printf.sprintf "save_file_atomic %s: %s" path (Printexc.to_string exn))
+    cleanup_tmp ();
+    Error
+      { stage =
+          (if !renamed then Renamed_durability_uncertain else Not_renamed)
+      ; message =
+          Printf.sprintf
+            "save_file_atomic %s: %s"
+            path
+            (Printexc.to_string exn)
+      }
+;;
+
+let save_file_atomic ~save_file path content =
+  save_file_atomic_detailed ~save_file path content
+  |> Result.map_error failure_to_string
 ;;
 
 let is_atomic_orphan_name name =

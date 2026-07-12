@@ -100,6 +100,8 @@ describe('Keeper chat durable receipt API', () => {
       keeper_name: 'echo',
       receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
       revision: 7,
+      availability: 'available',
+      load_errors: [],
       state: {
         kind: 'failed',
         failure_kind: 'delivery_failed',
@@ -111,6 +113,8 @@ describe('Keeper chat durable receipt API', () => {
       keeperName: 'echo',
       receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
       revision: 7,
+      availability: 'available',
+      loadErrors: [],
       state: {
         kind: 'failed',
         failureKind: 'delivery_failed',
@@ -121,12 +125,55 @@ describe('Keeper chat durable receipt API', () => {
     })
   })
 
+  it('preserves typed quarantine metadata and restart interruption', () => {
+    expect(parseKeeperChatReceipt({
+      schema: 'keeper_chat_queue.receipt.v1',
+      keeper_name: 'echo',
+      receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
+      revision: 8,
+      availability: 'quarantined',
+      load_errors: [
+        {
+          kind: 'durability_uncertain',
+          message: 'Queue durability is uncertain; operator recovery is required.',
+        },
+      ],
+      state: {
+        kind: 'failed',
+        failure_kind: 'recovery_interrupted',
+        detail: 'server restarted with an inflight receipt',
+        completed_at: 43,
+        outcome_ref: null,
+      },
+    })).toMatchObject({
+      availability: 'quarantined',
+      loadErrors: [{ kind: 'durability_uncertain' }],
+      state: { kind: 'failed', failureKind: 'recovery_interrupted' },
+    })
+  })
+
+  it('rejects availability that disagrees with load errors', () => {
+    expect(() => parseKeeperChatReceipt({
+      schema: 'keeper_chat_queue.receipt.v1',
+      keeper_name: 'echo',
+      receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
+      revision: 8,
+      availability: 'available',
+      load_errors: [
+        { kind: 'durability_uncertain', message: 'operator recovery required' },
+      ],
+      state: { kind: 'pending' },
+    })).toThrow('availability disagrees')
+  })
+
   it('rejects an unknown receipt lifecycle instead of guessing', () => {
     expect(() => parseKeeperChatReceipt({
       schema: 'keeper_chat_queue.receipt.v1',
       keeper_name: 'echo',
       receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
       revision: 1,
+      availability: 'available',
+      load_errors: [],
       state: { kind: 'lost_somewhere' },
     })).toThrow('unknown state')
   })
@@ -137,6 +184,8 @@ describe('Keeper chat durable receipt API', () => {
       keeper_name: 'echo',
       receipt_id: 'receipt-echo-1',
       revision: 1,
+      availability: 'available',
+      load_errors: [],
       state: { kind: 'pending' },
     })).toThrow('missing identity')
   })
@@ -147,6 +196,8 @@ describe('Keeper chat durable receipt API', () => {
       keeper_name: 'echo',
       receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
       revision: 2,
+      availability: 'available',
+      load_errors: [],
       state: { kind: 'delivered', completed_at: 42, outcome_ref: 7 },
     })).toThrow('outcome_ref must be a string or null')
   })
@@ -157,6 +208,8 @@ describe('Keeper chat durable receipt API', () => {
       keeper_name: 'echo',
       receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
       revision: 2,
+      availability: 'available',
+      load_errors: [],
       state: {
         kind: 'failed',
         failure_kind: 'delivery_failed',
@@ -174,6 +227,8 @@ describe('Keeper chat durable receipt API', () => {
         keeper_name: 'keeper sangsu',
         receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
         revision: 2,
+        availability: 'available',
+        load_errors: [],
         state: { kind: 'pending' },
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
     )

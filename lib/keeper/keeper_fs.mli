@@ -7,12 +7,15 @@
 
 (** {1 Directory Management} *)
 
-(** Ensure [path] exists, creating it recursively if needed.
-    Fiber-safe: protected by Eio.Mutex. Returns [path] for chaining. *)
+(** Ensure [path] exists, creating it recursively if needed. A successful path
+    is cached for the process lifetime: cache hits perform no stat or mkdir.
+    Cache misses synchronize only with the same path, so one Keeper's directory
+    fsync cannot serialize unrelated Keeper lanes. Returns [path] for chaining. *)
 val ensure_dir : string -> string
 
-(** Remove [path] from the directory cache.
-    Call after external deletion or move. *)
+(** Remove [path] and every cached descendant from the directory cache. Call
+    after external deletion or move so a later child write recreates its full
+    directory chain instead of trusting stale process-local ancestry. *)
 val invalidate_dir : string -> unit
 
 (** Clear the entire directory cache. Useful in tests. *)

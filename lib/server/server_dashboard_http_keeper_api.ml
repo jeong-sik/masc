@@ -1139,8 +1139,30 @@ let keeper_chat_receipt_state_json = function
       ]
 ;;
 
-let keeper_chat_receipt_json ~keeper_name ~revision
+let keeper_chat_receipt_json ~keeper_name ~revision ~load_errors
     (receipt : Keeper_chat_queue.receipt_view) =
+  let public_load_error_message = function
+    | Keeper_chat_queue.Invalid_path ->
+      "Keeper chat queue path is invalid."
+    | Keeper_chat_queue.Read_failed ->
+      "Keeper chat queue storage could not be read."
+    | Keeper_chat_queue.Parse_failed ->
+      "Keeper chat queue storage could not be decoded."
+    | Keeper_chat_queue.Migration_failed ->
+      "Keeper chat queue storage migration did not complete."
+    | Keeper_chat_queue.Recovery_failed ->
+      "Keeper chat queue recovery did not complete."
+    | Keeper_chat_queue.Durability_uncertain ->
+      "Keeper chat queue durability is uncertain; operator recovery is required."
+  in
+  let load_error_json (error : Keeper_chat_queue.snapshot_load_error) =
+    `Assoc
+      [ ( "kind"
+        , `String
+            (Keeper_chat_queue.snapshot_load_error_kind_to_string error.kind) )
+      ; "message", `String (public_load_error_message error.kind)
+      ]
+  in
   `Assoc
     [ "schema", `String "keeper_chat_queue.receipt.v1"
     ; "keeper_name", `String keeper_name
@@ -1149,6 +1171,9 @@ let keeper_chat_receipt_json ~keeper_name ~revision
           (Keeper_chat_queue.Receipt_id.to_string receipt.receipt_id) )
     ; "revision", `Intlit (Int64.to_string revision)
     ; "state", keeper_chat_receipt_state_json receipt.state
+    ; ( "availability"
+      , `String (if load_errors = [] then "available" else "quarantined") )
+    ; "load_errors", `List (List.map load_error_json load_errors)
     ]
 ;;
 
@@ -1195,15 +1220,29 @@ let handle_keeper_get_subroutes state req request reqd =
        | Ok receipt_id ->
          (match Keeper_chat_queue.lookup_receipt ~keeper_name:name ~receipt_id with
           | Error error ->
+            Log.Keeper.warn
+              "keeper chat receipt read unavailable keeper=%s receipt_id=%s: %s"
+              name
+              raw_receipt_id
+              (Keeper_chat_queue.mutation_error_to_string error);
             Server_auth.respond_json_value_with_cors ~status:`Service_unavailable
               request reqd
-              (error_json (Keeper_chat_queue.mutation_error_to_string error))
-          | Ok { receipt = None; _ } ->
+              (error_json "keeper chat receipt is temporarily unavailable")
+          | Ok { receipt = None; load_errors = _ :: _; _ } ->
+            Server_auth.respond_json_value_with_cors ~status:`Service_unavailable
+              request reqd
+              (error_json
+                 "keeper chat receipt absence is not authoritative while its Keeper queue is quarantined")
+          | Ok { receipt = None; load_errors = []; _ } ->
             Server_auth.respond_json_value_with_cors ~status:`Not_found request reqd
               (error_json "keeper chat receipt not found")
-          | Ok { revision; receipt = Some receipt } ->
+          | Ok { revision; receipt = Some receipt; load_errors } ->
             Server_auth.respond_json_value_with_cors ~status:`OK request reqd
-              (keeper_chat_receipt_json ~keeper_name:name ~revision receipt)))
+              (keeper_chat_receipt_json
+                 ~keeper_name:name
+                 ~revision
+                 ~load_errors
+                 receipt)))
   | None ->
   if ends_with "/digest" then (
     (* Keeper catch-up digest (since-last-seen). Inherits the enclosing

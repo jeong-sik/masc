@@ -554,6 +554,7 @@ let test_connector_transcript_failure_rejects_before_queue
         Eio.Switch.on_release sw Keeper_chat_queue.For_testing.reset;
         let reply =
           Gate_keeper_backend.dispatch ~connector_kind ~sw ~clock
+            ~submission_owner:Gate_keeper_backend.Channel_actor
             ~proc_mgr:None ~net:None ~config ~channel ~channel_user_id
             ~channel_user_name ~channel_workspace_id ~keeper_name
             ~idempotency_key:("transcript-fail-" ^ String.lowercase_ascii label)

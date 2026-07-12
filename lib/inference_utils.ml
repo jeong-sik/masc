@@ -129,9 +129,7 @@ let rec sanitize_content_blocks_utf8
             {
               tool_use_id;
               content;
-              is_error;
-              failure_kind;
-              error_class;
+              outcome;
               json;
               content_blocks;
             } ->
@@ -152,9 +150,7 @@ let rec sanitize_content_blocks_utf8
               Agent_sdk.Types.ToolResult {
                 tool_use_id = sanitized_tool_use_id;
                 content = sanitized_content;
-                is_error;
-                failure_kind;
-                error_class;
+                outcome;
                 json = sanitized_json;
                 content_blocks;
               }

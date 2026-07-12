@@ -55,9 +55,12 @@ let test_utf8_sanitization_preserves_tool_failure_provenance () =
             {
               tool_use_id = "tool-\255";
               content = "failure-\255";
-              is_error = true;
-              failure_kind = Some Validation_error;
-              error_class = Some Deterministic;
+              outcome =
+                Tool_failed
+                  {
+                    failure_kind = Validation_error;
+                    error_class = Some Deterministic;
+                  };
               json = None;
               content_blocks = None;
             };
@@ -68,11 +71,14 @@ let test_utf8_sanitization_preserves_tool_failure_provenance () =
     }
   in
   match (Inference_utils.sanitize_message_utf8 message).content with
-  | [ ToolResult { failure_kind; error_class; _ } ] ->
-      check bool "failure kind preserved" true
-        (failure_kind = Some Validation_error);
-      check bool "error class preserved" true
-        (error_class = Some Deterministic)
+  | [ ToolResult { outcome; _ } ] ->
+      check bool "failure provenance preserved" true
+        (outcome
+         = Tool_failed
+             {
+               failure_kind = Validation_error;
+               error_class = Some Deterministic;
+             })
   | _ -> fail "expected one ToolResult"
 
 let () =

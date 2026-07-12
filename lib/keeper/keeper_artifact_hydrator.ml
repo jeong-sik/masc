@@ -30,7 +30,7 @@ let try_hydrate ~store ~sha256 ~marker =
 let hydrate_block ~store ~remaining
     (block : Agent_sdk.Types.content_block) : Agent_sdk.Types.content_block =
   match block with
-  | Agent_sdk.Types.ToolResult { failure_kind; error_class; _ } ->
+  | Agent_sdk.Types.ToolResult _ ->
       let result =
         match Canonical_tool.tool_result_of_block block with
         | Some result -> result
@@ -50,9 +50,7 @@ let hydrate_block ~store ~remaining
                   Agent_sdk.Types.ToolResult
                     { tool_use_id = result.Canonical_tool.call_id
                     ; content = bytes
-                    ; is_error = result.Canonical_tool.is_error
-                    ; failure_kind
-                    ; error_class
+                    ; outcome = result.Canonical_tool.outcome
                     ; json = result.Canonical_tool.structured_content
                     ; content_blocks = result.Canonical_tool.content_blocks
                     }

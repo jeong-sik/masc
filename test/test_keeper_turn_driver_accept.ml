@@ -1827,9 +1827,7 @@ let test_accept_contract_delegates_to_oas_response_shape () =
         {
           tool_use_id = "tool-1";
           content = "ok";
-          is_error = false;
-          failure_kind = None;
-          error_class = None;
+          outcome = Agent_sdk.Types.Tool_succeeded;
           json = None;
           content_blocks = None;
         };
@@ -2150,9 +2148,7 @@ let test_reject_reason_describes_mixed_non_progress_response () =
                {
                  tool_use_id = "tool-1";
                  content = "ok";
-                 is_error = false;
-                 failure_kind = None;
-                 error_class = None;
+                 outcome = Agent_sdk.Types.Tool_succeeded;
                  json = None;
                  content_blocks = None;
                };

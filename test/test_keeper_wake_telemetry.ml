@@ -24,9 +24,7 @@ let tool_result_msg ~tool_use_id ~content : Types.message =
           {
             tool_use_id;
             content;
-            is_error = false;
-            failure_kind = None;
-            error_class = None;
+            outcome = Types.Tool_succeeded;
             json = None;
             content_blocks = None;
           };

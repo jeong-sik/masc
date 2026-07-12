@@ -60,7 +60,7 @@
   ;; The exact post-tag pin carries the typed tool-failure recovery boundary;
   ;; its SHA and rationale live in scripts/oas-agent-sdk-pin.sh (SSOT).
   ;; See check-oas-pin.sh.
-  (agent_sdk (>= 0.211.2))
+  (agent_sdk (>= 0.211.3))
   (uri (>= 4.4))
   (tls (>= 2.0))
   (tls-eio (>= 2.0))

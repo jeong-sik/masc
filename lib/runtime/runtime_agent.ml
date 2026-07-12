@@ -1122,8 +1122,9 @@ let content_block_detail (block : Agent_sdk.Types.content_block) =
           Printf.sprintf "[tool use block: %s]" call.Agent_sdk.Canonical_tool.name
       | None -> (
           match block with
-          | Agent_sdk.Types.ToolResult { is_error; _ } ->
-              if is_error then "[tool result block: error]"
+          | Agent_sdk.Types.ToolResult { outcome; _ } ->
+              if Agent_sdk.Types.tool_result_outcome_is_error outcome
+              then "[tool result block: error]"
               else "[tool result block]"
           | Agent_sdk.Types.Image { media_type; data; _ } ->
               Printf.sprintf "[image:%s data_chars=%d]" media_type (String.length data)

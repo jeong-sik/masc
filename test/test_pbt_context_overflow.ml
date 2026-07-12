@@ -280,9 +280,7 @@ let assistant_same_message_tool_pair id name content : Agent_sdk.Types.message =
       ; Agent_sdk.Types.ToolResult
           { tool_use_id = id
           ; content
-          ; is_error = false
-          ; failure_kind = None
-          ; error_class = None
+          ; outcome = Agent_sdk.Types.Tool_succeeded
           ; json = None
           ; content_blocks = None
           }
@@ -299,9 +297,7 @@ let tool_result_message ?(role = Agent_sdk.Types.User) id content
       [ Agent_sdk.Types.ToolResult
           { tool_use_id = id
           ; content
-          ; is_error = false
-          ; failure_kind = None
-          ; error_class = None
+          ; outcome = Agent_sdk.Types.Tool_succeeded
           ; json = None
           ; content_blocks = None
           }
@@ -317,9 +313,7 @@ let user_tool_result id content : Agent_sdk.Types.message =
       [ Agent_sdk.Types.ToolResult
           { tool_use_id = id
           ; content
-          ; is_error = false
-          ; failure_kind = None
-          ; error_class = None
+          ; outcome = Agent_sdk.Types.Tool_succeeded
           ; json = None
           ; content_blocks = None
           }
@@ -336,9 +330,7 @@ let user_text_and_tool_result text id content : Agent_sdk.Types.message =
       ; Agent_sdk.Types.ToolResult
           { tool_use_id = id
           ; content
-          ; is_error = false
-          ; failure_kind = None
-          ; error_class = None
+          ; outcome = Agent_sdk.Types.Tool_succeeded
           ; json = None
           ; content_blocks = None
           }
@@ -690,9 +682,12 @@ let test_checkpoint_sanitize_preserves_tool_failure_provenance () =
                 String.make
                   (KC.default_max_checkpoint_tool_result_chars + 1)
                   'x';
-              is_error = true;
-              failure_kind = Some Agent_sdk.Types.Validation_error;
-              error_class = Some Agent_sdk.Types.Deterministic;
+              outcome =
+                Agent_sdk.Types.Tool_failed
+                  {
+                    failure_kind = Agent_sdk.Types.Validation_error;
+                    error_class = Some Agent_sdk.Types.Deterministic;
+                  };
               json = None;
               content_blocks = None;
             };
@@ -706,13 +701,16 @@ let test_checkpoint_sanitize_preserves_tool_failure_provenance () =
   | Some
       {
         content =
-          [ Agent_sdk.Types.ToolResult { failure_kind; error_class; _ } ];
+          [ Agent_sdk.Types.ToolResult { outcome; _ } ];
         _;
       } ->
-      Alcotest.(check bool) "failure kind preserved" true
-        (failure_kind = Some Agent_sdk.Types.Validation_error);
-      Alcotest.(check bool) "error class preserved" true
-        (error_class = Some Agent_sdk.Types.Deterministic)
+      Alcotest.(check bool) "failure provenance preserved" true
+        (outcome
+         = Agent_sdk.Types.Tool_failed
+             {
+               failure_kind = Agent_sdk.Types.Validation_error;
+               error_class = Some Agent_sdk.Types.Deterministic;
+             })
   | _ -> Alcotest.fail "expected one sanitized ToolResult"
 
 let test_checkpoint_save_repair_drops_unpaired_tool_blocks () =

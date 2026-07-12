@@ -212,7 +212,7 @@ let sanitize_checkpoint_message
                         add_checkpoint_sanitize_stats
                           (add_checkpoint_sanitize_stats stats text_stats)
                           block_stats ))
-         | Agent_sdk.Types.ToolResult { failure_kind; error_class; _ } ->
+         | Agent_sdk.Types.ToolResult _ ->
              let result =
                match Canonical_tool.tool_result_of_block block with
                | Some result -> result
@@ -222,7 +222,6 @@ let sanitize_checkpoint_message
              in
              let tool_use_id = result.Canonical_tool.call_id in
              let content = result.Canonical_tool.content in
-             let is_error = result.Canonical_tool.is_error in
              let tool_chars = String.length content in
              if kept_tool_results
                 >= default_max_checkpoint_tool_results_per_message
@@ -263,9 +262,7 @@ let sanitize_checkpoint_message
                  Agent_sdk.Types.ToolResult
                    { tool_use_id;
                      content = stub_content;
-                     is_error;
-                     failure_kind;
-                     error_class;
+                     outcome = result.Canonical_tool.outcome;
                      json = None;
                      content_blocks = None }
                in
@@ -299,9 +296,7 @@ let sanitize_checkpoint_message
                  Agent_sdk.Types.ToolResult
                    { tool_use_id
                    ; content = capped
-                   ; is_error
-                   ; failure_kind
-                   ; error_class
+                   ; outcome = result.Canonical_tool.outcome
                    ; json = None
                    ; content_blocks = None
                    }
@@ -422,7 +417,7 @@ let cap_checkpoint_message_to_remaining_content
            match block with
            | Agent_sdk.Types.Text text ->
                cap_content (fun text -> Agent_sdk.Types.Text text) text
-           | Agent_sdk.Types.ToolResult { failure_kind; error_class; _ } ->
+           | Agent_sdk.Types.ToolResult _ ->
                let result =
                  match Canonical_tool.tool_result_of_block block with
                  | Some result -> result
@@ -435,9 +430,7 @@ let cap_checkpoint_message_to_remaining_content
                    Agent_sdk.Types.ToolResult
                      { tool_use_id = result.Canonical_tool.call_id
                      ; content
-                     ; is_error = result.Canonical_tool.is_error
-                     ; failure_kind
-                     ; error_class
+                     ; outcome = result.Canonical_tool.outcome
                      ; json = None
                      ; content_blocks = result.Canonical_tool.content_blocks
                      })

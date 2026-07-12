@@ -47,9 +47,7 @@ let tool_result_block ~tool_use_id ~content : T.content_block =
     {
       tool_use_id;
       content;
-      is_error = false;
-      failure_kind = None;
-      error_class = None;
+      outcome = T.Tool_succeeded;
       json = None;
       content_blocks = None;
     }
@@ -101,9 +99,12 @@ let test_hydration_preserves_tool_failure_provenance () =
                 {
                   tool_use_id = "failed-tool";
                   content = marker;
-                  is_error = true;
-                  failure_kind = Some T.Validation_error;
-                  error_class = Some T.Deterministic;
+                  outcome =
+                    T.Tool_failed
+                      {
+                        failure_kind = T.Validation_error;
+                        error_class = Some T.Deterministic;
+                      };
                   json = None;
                   content_blocks = None;
                 };
@@ -117,12 +118,15 @@ let test_hydration_preserves_tool_failure_provenance () =
         invoke_reducer (H.hydrate_recent ~store ~keep_recent:1) [ msg ]
       in
       match (List.hd result).content with
-      | [ T.ToolResult { content; failure_kind; error_class; _ } ] ->
+      | [ T.ToolResult { content; outcome; _ } ] ->
           Alcotest.(check string) "hydrated payload" payload content;
-          Alcotest.(check bool) "failure kind preserved" true
-            (failure_kind = Some T.Validation_error);
-          Alcotest.(check bool) "error class preserved" true
-            (error_class = Some T.Deterministic)
+          Alcotest.(check bool) "failure provenance preserved" true
+            (outcome
+             = T.Tool_failed
+                 {
+                   failure_kind = T.Validation_error;
+                   error_class = Some T.Deterministic;
+                 })
       | _ -> Alcotest.fail "expected one ToolResult block")
 
 let test_keep_recent_zero_no_hydration () =

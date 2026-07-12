@@ -125,9 +125,7 @@ let test_attention_prunes_current_turn_suffix () =
         [ ToolResult
             { tool_use_id = "tool-1"
             ; content = "status"
-            ; is_error = false
-            ; failure_kind = None
-            ; error_class = None
+            ; outcome = Tool_succeeded
             ; json = None
             ; content_blocks = None
             }
@@ -193,9 +191,7 @@ let test_success_preserves_typed_replay_suffix () =
         [ ToolResult
             { tool_use_id = "tool-1"
             ; content = "status"
-            ; is_error = false
-            ; failure_kind = None
-            ; error_class = None
+            ; outcome = Tool_succeeded
             ; json = None
             ; content_blocks = None
             }
@@ -291,9 +287,11 @@ let test_recovery_defer_preserves_typed_receipt_suffix () =
          [ ToolResult
              { tool_use_id = "tool-1"
              ; content = "working directory is required"
-             ; is_error = true
-             ; failure_kind = Some Validation_error
-             ; error_class = Some Deterministic
+             ; outcome =
+                 Tool_failed
+                   { failure_kind = Validation_error
+                   ; error_class = Some Deterministic
+                   }
              ; json = None
              ; content_blocks = None
              }
@@ -368,9 +366,11 @@ let test_recovery_ask_user_preserves_exact_typed_receipt_suffix () =
            [ ToolResult
                { tool_use_id = "tool-ask-1"
                ; content = "working directory is required"
-               ; is_error = true
-               ; failure_kind = Some Validation_error
-               ; error_class = Some Deterministic
+               ; outcome =
+                   Tool_failed
+                     { failure_kind = Validation_error
+                     ; error_class = Some Deterministic
+                     }
                ; json = None
                ; content_blocks = None
                }

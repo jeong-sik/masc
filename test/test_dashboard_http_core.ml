@@ -1408,13 +1408,22 @@ let test_dashboard_shell_separates_configured_and_persisted_keeper_counts () =
   Fun.protect
     ~finally:(fun () -> Config_dir_resolver.reset ())
     (fun () ->
+      let expected_configured_names = [ "alpha"; "base"; "beta" ] in
+      let configured_names =
+        Masc.Keeper_meta_store.configured_keeper_names config
+        |> List.sort String.compare
+      in
+      Alcotest.(check (list string))
+        "configured Keeper inventory includes every declarative TOML"
+        expected_configured_names
+        configured_names;
       let json =
         Server_dashboard_http_core.dashboard_shell_payload_json ~light:true config
       in
       let open Yojson.Safe.Util in
       Alcotest.(check int)
         "configured_keepers follows declarative runtime keeper TOML"
-        2
+        (List.length configured_names)
         (json |> member "configured_keepers" |> to_int);
       Alcotest.(check int)
         "persisted_keepers exposes durable meta count separately"
@@ -1428,12 +1437,20 @@ let test_dashboard_shell_separates_configured_and_persisted_keeper_counts () =
         (Filename.concat keepers_dir "base.toml")
         "[keeper]\nautoboot_enabled = true\n";
       Config_dir_resolver.reset ();
+      let configured_names_after_autoboot_change =
+        Masc.Keeper_meta_store.configured_keeper_names config
+        |> List.sort String.compare
+      in
+      Alcotest.(check (list string))
+        "autoboot policy does not change configured inventory"
+        expected_configured_names
+        configured_names_after_autoboot_change;
       let json =
         Server_dashboard_http_core.dashboard_shell_payload_json ~light:true config
       in
       Alcotest.(check int)
-        "configured_keepers includes explicit autoboot base keeper"
-        3
+        "configured_keepers remains the TOML inventory after autoboot change"
+        (List.length configured_names_after_autoboot_change)
         (json |> member "configured_keepers" |> to_int))
 
 let test_dashboard_shell_light_counts_agents_from_summary_fields () =

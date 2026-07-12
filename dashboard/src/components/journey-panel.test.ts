@@ -66,6 +66,18 @@ function runtimeTrace(): KeeperRuntimeTraceResponse {
     manifest_total_rows: 5,
     manifest_returned_rows: 5,
     receipt_returned_rows: 1,
+    manifest_scan_diagnostics: {
+      state: 'available',
+      schema: 'keeper.runtime_manifest_scan_diagnostics.v1',
+      retired_event_count: 0,
+      retired_event_counts: [],
+      unsupported_event_count: 0,
+      unsupported_event_counts: [],
+      unsupported_event_unattributed_count: 0,
+      invalid_manifest_row_count: 0,
+      invalid_json_row_count: 0,
+      samples: [],
+    },
     turn_identity: {
       requested_keeper_turn_id: 1,
       manifest_keeper_turn_ids: [1],

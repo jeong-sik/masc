@@ -5,6 +5,12 @@
 
 open Server_dashboard_http_keeper_api_types
 
+type manifest_scan_diagnostic =
+  | Retired_event_row of Keeper_runtime_manifest.retired_event_kind
+  | Unsupported_event_row of string
+  | Invalid_manifest_row of string
+  | Invalid_json_row of string
+
 type runtime_manifest_scan =
   { path : string
   ; limit : int
@@ -38,6 +44,13 @@ type runtime_manifest_scan =
   ; mutable scanned_lines : int
   ; scan_line_limit : int
   ; scan_scope : string
+  ; retired_event_counts : (Keeper_runtime_manifest.retired_event_kind, int) Hashtbl.t
+  ; unsupported_event_counts : (string, int) Hashtbl.t
+  ; mutable unsupported_event_count : int
+  ; mutable unsupported_event_unattributed_count : int
+  ; mutable invalid_manifest_row_count : int
+  ; mutable invalid_json_row_count : int
+  ; diagnostic_samples : manifest_scan_diagnostic Queue.t
   }
 
 let runtime_manifest_tail_scan_min_lines = 1000
@@ -85,6 +98,13 @@ let make_runtime_manifest_scan ~path ~limit ~scan_line_limit ~scan_scope =
   ; scanned_lines = 0
   ; scan_line_limit
   ; scan_scope
+  ; retired_event_counts = Hashtbl.create 7
+  ; unsupported_event_counts = Hashtbl.create 7
+  ; unsupported_event_count = 0
+  ; unsupported_event_unattributed_count = 0
+  ; invalid_manifest_row_count = 0
+  ; invalid_json_row_count = 0
+  ; diagnostic_samples = Queue.create ()
   }
 
 let push_bounded queue limit value =
@@ -96,6 +116,95 @@ let queue_to_list queue =
   let values = ref [] in
   Queue.iter (fun value -> values := value :: !values) queue;
   List.rev !values
+
+let increment_count table key =
+  let current =
+    match Hashtbl.find_opt table key with
+    | Some count -> count
+    | None -> 0
+  in
+  Hashtbl.replace table key (current + 1)
+;;
+
+let increment_bounded_count table ~capacity key =
+  match Hashtbl.find_opt table key with
+  | Some current ->
+    Hashtbl.replace table key (current + 1);
+    true
+  | None when Hashtbl.length table < capacity ->
+    Hashtbl.add table key 1;
+    true
+  | None -> false
+;;
+
+let record_manifest_scan_diagnostic scan diagnostic =
+  (match diagnostic with
+   | Retired_event_row event -> increment_count scan.retired_event_counts event
+   | Unsupported_event_row event ->
+     scan.unsupported_event_count <- scan.unsupported_event_count + 1;
+     if not (increment_bounded_count scan.unsupported_event_counts ~capacity:scan.limit event)
+     then
+       scan.unsupported_event_unattributed_count <-
+         scan.unsupported_event_unattributed_count + 1
+   | Invalid_manifest_row _ ->
+     scan.invalid_manifest_row_count <- scan.invalid_manifest_row_count + 1
+   | Invalid_json_row _ -> scan.invalid_json_row_count <- scan.invalid_json_row_count + 1);
+  push_bounded scan.diagnostic_samples scan.limit diagnostic
+;;
+
+let sorted_count_rows table key_to_string =
+  Hashtbl.fold
+    (fun key count rows -> (key_to_string key, count) :: rows)
+    table
+    []
+  |> List.sort (fun (left, _) (right, _) -> String.compare left right)
+  |> List.map (fun (event, count) ->
+    `Assoc [ "event", `String event; "count", `Int count ])
+;;
+
+let count_total table = Hashtbl.fold (fun _ count total -> total + count) table 0
+
+let manifest_scan_diagnostic_to_json = function
+  | Retired_event_row event ->
+    `Assoc
+      [ "kind", `String "retired_event"
+      ; "event", `String (Keeper_runtime_manifest.retired_event_kind_to_string event)
+      ]
+  | Unsupported_event_row event ->
+    `Assoc [ "kind", `String "unsupported_event"; "event", `String event ]
+  | Invalid_manifest_row detail ->
+    `Assoc [ "kind", `String "invalid_manifest_row"; "detail", `String detail ]
+  | Invalid_json_row detail ->
+    `Assoc [ "kind", `String "invalid_json_row"; "detail", `String detail ]
+;;
+
+let runtime_manifest_scan_diagnostics_schema =
+  "keeper.runtime_manifest_scan_diagnostics.v1"
+;;
+
+let runtime_manifest_scan_diagnostics_json scan =
+  `Assoc
+    [ "schema", `String runtime_manifest_scan_diagnostics_schema
+    ; "retired_event_count", `Int (count_total scan.retired_event_counts)
+    ; ( "retired_event_counts"
+      , `List
+          (sorted_count_rows
+             scan.retired_event_counts
+             Keeper_runtime_manifest.retired_event_kind_to_string) )
+    ; "unsupported_event_count", `Int scan.unsupported_event_count
+    ; ( "unsupported_event_counts"
+      , `List (sorted_count_rows scan.unsupported_event_counts Fun.id) )
+    ; ( "unsupported_event_unattributed_count"
+      , `Int scan.unsupported_event_unattributed_count )
+    ; "invalid_manifest_row_count", `Int scan.invalid_manifest_row_count
+    ; "invalid_json_row_count", `Int scan.invalid_json_row_count
+    ; ( "samples"
+      , `List
+          (List.map
+             manifest_scan_diagnostic_to_json
+             (queue_to_list scan.diagnostic_samples)) )
+    ]
+;;
 
 let increment_event_count scan event =
   let key = Keeper_runtime_manifest.event_kind_to_string event in
@@ -111,7 +220,7 @@ let max_int_opt current value =
   | None -> Some value
   | Some existing -> Some (max existing value)
 
-let update_runtime_manifest_scan scan row =
+let update_runtime_manifest_scan scan (row : Keeper_runtime_manifest.t) =
   scan.total_rows <- scan.total_rows + 1;
   push_bounded scan.returned_rows scan.limit row;
   increment_event_count scan row.Keeper_runtime_manifest.event;
@@ -219,6 +328,16 @@ let update_runtime_manifest_scan scan row =
      push_bounded scan.provider_attempt_rows scan.limit row
    | _ -> ())
 
+let manifest_identity_matches ?turn_id keeper_name trace_id
+    (identity : Keeper_runtime_manifest.row_identity) =
+  String.equal identity.keeper_name keeper_name
+  && String.equal identity.trace_id trace_id
+  &&
+  match turn_id with
+  | None -> true
+  | Some wanted -> identity.keeper_turn_id = Some wanted
+;;
+
 let read_runtime_manifest_scan ~config ~keeper_name ~trace_id ?turn_id ~limit () =
   let path =
     Keeper_runtime_manifest.path_for_trace config ~keeper_name ~trace_id
@@ -236,23 +355,21 @@ let read_runtime_manifest_scan ~config ~keeper_name ~trace_id ?turn_id ~limit ()
        (fun line ->
           scan.scanned_lines <- scan.scanned_lines + 1;
           try
-            match Yojson.Safe.from_string line |> Keeper_runtime_manifest.of_json with
-            | Ok row when manifest_row_matches ?turn_id keeper_name trace_id row ->
-                update_runtime_manifest_scan scan row
+            let json = Yojson.Safe.from_string line in
+            match Keeper_runtime_manifest.decode_persisted_row json with
+            | Ok (Keeper_runtime_manifest.Active_row row)
+              when manifest_row_matches ?turn_id keeper_name trace_id row ->
+              update_runtime_manifest_scan scan row
+            | Ok (Keeper_runtime_manifest.Retired_row (identity, retired))
+              when manifest_identity_matches ?turn_id keeper_name trace_id identity ->
+              record_manifest_scan_diagnostic scan (Retired_event_row retired)
+            | Ok (Keeper_runtime_manifest.Unsupported_row (identity, unsupported))
+              when manifest_identity_matches ?turn_id keeper_name trace_id identity ->
+              record_manifest_scan_diagnostic scan (Unsupported_event_row unsupported)
             | Ok _ -> ()
-            | Error msg ->
-                Log.warn
-                  ~ctx:"runtime_manifest_scan"
-                  "Runtime manifest row skipped (keeper=%s trace=%s): %s"
-                  keeper_name
-                  trace_id
-                  msg
+            | Error detail ->
+              record_manifest_scan_diagnostic scan (Invalid_manifest_row detail)
           with
           | Yojson.Json_error msg | Yojson.Safe.Util.Type_error (msg, _) ->
-              Log.warn
-                ~ctx:"runtime_manifest_scan"
-                "Runtime manifest row JSON parse failed (keeper=%s trace=%s): %s"
-                keeper_name
-                trace_id
-                msg);
+            record_manifest_scan_diagnostic scan (Invalid_json_row msg));
   scan

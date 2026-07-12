@@ -184,6 +184,23 @@ let test_resolve_base_branch_nonexistent_fallback () =
            ())
   | None -> fail "need git repo"
 
+(* --- has_git_marker_deep tests --- *)
+
+let test_has_git_marker_deep_git_repo () =
+  (* Current repo path has .git in an ancestor *)
+  let result = Workspace_git.has_git_marker_deep (current_repo_base_path ()) in
+  Alcotest.(check bool) "has_git_marker_deep true for git repo" true result
+
+let test_has_git_marker_deep_nonexistent () =
+  let result = Workspace_git.has_git_marker_deep "/nonexistent/path/xyz" in
+  Alcotest.(check bool) "has_git_marker_deep false for nonexistent" false result
+
+let test_has_git_marker_deep_child_repos () =
+  (* Sandbox root has .git in child repos/ directories *)
+  let sandbox_root = Filename.dirname (Filename.dirname (current_repo_base_path ())) in
+  let result = Workspace_git.has_git_marker_deep sandbox_root in
+  Alcotest.(check bool) "has_git_marker_deep true for sandbox with child repos" true result
+
 let () =
   run "Workspace Git Coverage" [
     "git_root", [
@@ -213,5 +230,10 @@ let () =
       test_case "main" `Quick test_resolve_base_branch_main;
       test_case "returns result" `Quick test_resolve_base_branch_returns_result;
       test_case "nonexistent fallback" `Quick test_resolve_base_branch_nonexistent_fallback;
+    ];
+    "has_git_marker_deep", [
+      test_case "git repo" `Quick test_has_git_marker_deep_git_repo;
+      test_case "nonexistent" `Quick test_has_git_marker_deep_nonexistent;
+      test_case "child repos" `Quick test_has_git_marker_deep_child_repos;
     ];
   ]

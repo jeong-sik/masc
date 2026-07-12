@@ -14,6 +14,12 @@
     git subprocesses on non-repo directories. *)
 val has_git_marker : string -> bool
 
+(** [has_git_marker_deep path] returns [true] if [path] (or any ancestor)
+    contains a [.git] entry, OR if any immediate child directory of [path]
+    contains a [.git] entry.  Used as a fallback when [base_path] is a sandbox
+    root that contains git repos in sub-directories. *)
+val has_git_marker_deep : string -> bool
+
 (** [git_root ~base_path] resolves the git toplevel containing
     [base_path] via [git rev-parse --show-toplevel].  Returns [None]
     when the path is outside any git repo or git fails. *)

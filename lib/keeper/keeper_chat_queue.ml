@@ -777,41 +777,23 @@ let recovered_queue_terminal ~base_path ~keeper_name receipts =
      | Ok
          { Keeper_chat_delivery_journal.phase =
              Keeper_chat_delivery_journal.Final { terminal; _ }
-          ; updated_at
-          ; _
-          } ->
-       if terminal.ok
-       then
-         (match terminal.delivery with
-          | Keeper_chat_delivery_journal.Assistant_reply
-              { turn_ref = Some turn_ref; _ } ->
-            Ok
-              (Some
-                 (Stored_delivered
-                    { completed_at = updated_at
-                    ; outcome_ref = Some (Ids.Turn_ref.to_string turn_ref)
-                    }))
-          | Keeper_chat_delivery_journal.Assistant_reply { turn_ref = None; _ }
-          | Keeper_chat_delivery_journal.No_assistant_reply _
-          | Keeper_chat_delivery_journal.Transport_failure _ ->
-            Ok
-              (Some
-                 (Stored_failed
-                    { completed_at = updated_at
-                    ; kind = Internal_error
-                    ; detail =
-                        "recovered queue delivery lacks a canonical successful turn_ref"
-                    ; outcome_ref = None
-                    })))
-       else
-         Ok
-           (Some
-              (Stored_failed
-                 { completed_at = updated_at
-                 ; kind = Recovery_interrupted
-                 ; detail = terminal.poll_body
-                 ; outcome_ref = None
-                 }))
+         ; updated_at
+         ; _
+         } ->
+       let detail =
+         if terminal.ok
+         then
+           "queue transcript committed before restart, but terminal connector delivery was not durably proven"
+         else terminal.poll_body
+       in
+       Ok
+         (Some
+            (Stored_failed
+               { completed_at = updated_at
+               ; kind = Recovery_interrupted
+               ; detail
+               ; outcome_ref = None
+               }))
      | Ok journal ->
        Error
          (Printf.sprintf

@@ -135,13 +135,6 @@ type disarm_result =
 let process_deadline_exit_code = 124
 let process_deadline_start_failure_exit_code = 125
 
-let default_deadline_thread_create f = Thread.create f ()
-let deadline_thread_create = Atomic.make default_deadline_thread_create
-
-let set_deadline_thread_create_for_testing f = Atomic.set deadline_thread_create f
-let reset_deadline_thread_create_for_testing () =
-  Atomic.set deadline_thread_create default_deadline_thread_create
-
 let start_process_deadline_watchdog ~timeout_s =
   if not (Float.is_finite timeout_s) then
     Error (Non_finite_deadline_timeout timeout_s)
@@ -152,27 +145,25 @@ let start_process_deadline_watchdog ~timeout_s =
     (match
        try
          Ok
-           ((Atomic.get deadline_thread_create) (fun () ->
+           (Thread.create
+              (fun () ->
                 try
                   Thread.delay timeout_s;
                   if Atomic.compare_and_set state Armed Fired then
                     Unix._exit process_deadline_exit_code
                 with _ ->
                   if Atomic.compare_and_set state Armed Fired then
-                    Unix._exit process_deadline_start_failure_exit_code))
+                    Unix._exit process_deadline_start_failure_exit_code)
+              ())
        with exn -> Error (Watchdog_thread_start_failed (Printexc.to_string exn))
      with
      | Ok thread -> Ok { state; thread }
      | Error _ as error -> error)
 
-let start_process_deadline_watchdog_or_exit ~timeout_s ~on_error =
+let start_process_deadline_watchdog_or_exit ~timeout_s =
   match start_process_deadline_watchdog ~timeout_s with
   | Ok watchdog -> watchdog
-  | Error error ->
-      Fun.protect
-        ~finally:(fun () -> Unix._exit process_deadline_start_failure_exit_code)
-        (fun () -> on_error error);
-      assert false
+  | Error _ -> Unix._exit process_deadline_start_failure_exit_code
 
 let rec disarm_deadline_watchdog watchdog =
   if Atomic.compare_and_set watchdog.state Armed Disarmed_state then

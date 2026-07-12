@@ -195,14 +195,12 @@ let () = test "shutdown config legacy front door stays source-compatible" (fun (
       assert (waited_pid = child_pid);
       assert (status = Unix.WEXITED 0))
 
-let () = test "watchdog thread-start failure terminates fail-closed" (fun () ->
+let () = test "watchdog start failure terminates fail-closed" (fun () ->
   match Unix.fork () with
   | 0 ->
-      Shutdown.set_deadline_thread_create_for_testing (fun _ ->
-        raise (Failure "thread budget exhausted"));
       ignore
         (Shutdown.start_process_deadline_watchdog_or_exit
-           ~timeout_s:1.0 ~on_error:(fun _ -> ()))
+           ~timeout_s:0.0)
   | child_pid ->
       let waited_pid, status = waitpid_no_intr child_pid in
       assert (waited_pid = child_pid);

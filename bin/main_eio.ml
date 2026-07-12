@@ -651,10 +651,6 @@ let run_cmd host port cli_base_path =
             let watchdog =
               Masc.Shutdown.start_process_deadline_watchdog_or_exit
                 ~timeout_s:force_timeout
-                ~on_error:(fun error ->
-                  Log.Server.error
-                    "[FATAL] Unable to arm graceful shutdown deadline: %s"
-                    (Masc.Shutdown.deadline_error_to_string error))
             in
             Atomic.set shutdown_watchdog (Some watchdog);
             Log.Server.info

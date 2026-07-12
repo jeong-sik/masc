@@ -86,18 +86,11 @@ val start_process_deadline_watchdog :
     disarm it only after the supervised switch has actually returned. *)
 
 val start_process_deadline_watchdog_or_exit :
-  timeout_s:float -> on_error:(deadline_error -> unit) -> watchdog
+  timeout_s:float -> watchdog
 (** Start the watchdog or terminate immediately via {!Unix._exit} with
-    {!process_deadline_start_failure_exit_code}. The error observer is
-    best-effort and cannot prevent the fail-closed terminal action. *)
-
-val set_deadline_thread_create_for_testing :
-  ((unit -> unit) -> Thread.t) -> unit
-(** Install the process-local deadline thread starter. Intended only for
-    focused tests of thread-start failure. *)
-
-val reset_deadline_thread_create_for_testing : unit -> unit
-(** Restore the default [Thread.create]-backed deadline starter. *)
+    {!process_deadline_start_failure_exit_code}. No callback runs before the
+    terminal action, so logging or another observer cannot block fail-closed
+    process termination. *)
 
 val disarm_deadline_watchdog : watchdog -> disarm_result
 (** Atomically disarm an armed watchdog. The result distinguishes a successful

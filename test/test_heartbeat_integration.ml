@@ -120,6 +120,26 @@ let remove_meta_cleanup : Shutdown_types.cleanup_intent =
   }
 ;;
 
+(* Seed the keeper TOML the way a real workspace persists it. A keeper resolves
+   its sandbox_profile from [config/keepers/<name>.toml]; keepalive/shutdown
+   paths fail closed without one (keeper_meta_contract, "missing profile source
+   fails loudly"). Tests that only build runtime meta must seed this so they
+   exercise the lifecycle path instead of the missing-profile rejection. *)
+let seed_keeper_sandbox_profile ~base_dir name =
+  let keepers_dir =
+    List.fold_left Filename.concat base_dir [ ".masc"; "config"; "keepers" ]
+  in
+  let rec mkdir_p dir =
+    if not (Sys.file_exists dir) then begin
+      mkdir_p (Filename.dirname dir);
+      (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+    end
+  in
+  mkdir_p keepers_dir;
+  let oc = open_out (Filename.concat keepers_dir (name ^ ".toml")) in
+  output_string oc "[keeper]\nsandbox_profile = \"local\"\n";
+  close_out oc
+
 let resolve_done_for_test reg value =
   ignore (R.resolve_done reg ~source:"test_fixture" value);
   match
@@ -624,6 +644,7 @@ let test_direct_start_keepalive_resolves_done_on_stop () =
           net = None;
         }
       in
+      seed_keeper_sandbox_profile ~base_dir keeper_name;
       Masc.Keeper_keepalive.start_keepalive ctx meta;
       Eio.Time.sleep ctx.clock 0.05;
       Masc.Keeper_keepalive.stop_keepalive

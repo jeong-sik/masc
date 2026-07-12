@@ -656,8 +656,9 @@ let find_provenance_in_text existing ~delivery_key ~transcript_slot =
       then Ok found
       else
         let line_end =
-          String.index_from_opt existing offset '\n'
-          |> Option.value ~default:length
+          match String.index_from_opt existing offset '\n' with
+          | Some line_end -> line_end
+          | None -> length
         in
         let line = String.sub existing offset (line_end - offset) in
         let next_offset = if line_end < length then line_end + 1 else length in

@@ -258,7 +258,7 @@ let mkdir_p_durable_unix path =
       ensure parent;
       (try Unix.mkdir path 0o755 with
        | Unix.Unix_error (Unix.EEXIST, _, _) ->
-         ignore (directory_exists_unix path : bool));
+         if not (directory_exists_unix path) then ensure path);
       fsync_directory_unix parent)
   in
   let existed = directory_exists_unix path in
@@ -1038,7 +1038,9 @@ let with_private_append_fd_locked ~op path f =
           ~finally:(fun () -> Unix.close lock_fd)
           (fun () ->
              Unix.fchmod lock_fd 0o600;
-             ignore (Unix.lseek lock_fd 0 Unix.SEEK_SET : int);
+             let (_lock_position : int) =
+               Unix.lseek lock_fd 0 Unix.SEEK_SET
+             in
              lock_whole_file lock_fd;
              let fd, created = open_append_file path in
              Fun.protect
@@ -1077,7 +1079,7 @@ let update_private_file_durable_locked_result path decide =
     ~op:"update_private_file_durable_locked"
     path
     (fun fd ->
-       ignore (Unix.lseek fd 0 Unix.SEEK_SET : int);
+       let (_read_position : int) = Unix.lseek fd 0 Unix.SEEK_SET in
        let existing = read_fd_contents fd in
        let suffix, result = decide existing in
        match suffix with
@@ -1127,7 +1129,9 @@ let append_private_jsonl_durable_locked_result path suffix =
              if original_length = 0
              then true
              else (
-               ignore (Unix.lseek fd (original_length - 1) Unix.SEEK_SET : int);
+               let (_tail_position : int) =
+                 Unix.lseek fd (original_length - 1) Unix.SEEK_SET
+               in
                let byte = Bytes.create 1 in
                let rec read_tail () =
                  match Unix.read fd byte 0 1 with
@@ -1141,7 +1145,9 @@ let append_private_jsonl_durable_locked_result path suffix =
            if not tail_is_complete
            then Error Incomplete_jsonl_tail
            else (
-             ignore (Unix.lseek fd 0 Unix.SEEK_END : int);
+             let (_append_position : int) =
+               Unix.lseek fd 0 Unix.SEEK_END
+             in
              append_fd_durable
                ~io:durable_append_unix_io
                ~fd

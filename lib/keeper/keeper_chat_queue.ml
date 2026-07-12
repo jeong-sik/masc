@@ -561,7 +561,9 @@ let snapshot_to_yojson ~revision receipts =
     ]
 
 let save_json_atomic_detailed path json =
-  ignore (Keeper_fs.ensure_dir (Filename.dirname path) : string);
+  let (_queue_dir : string) =
+    Keeper_fs.ensure_dir (Filename.dirname path)
+  in
   json
   |> Yojson.Safe.pretty_to_string
   |> Fs_compat.save_file_atomic_detailed path

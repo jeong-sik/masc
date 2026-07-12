@@ -767,7 +767,9 @@ let same_identity left right =
 
 let save record_path journal =
   try
-    ignore (Keeper_fs.ensure_dir (Filename.dirname record_path) : string);
+    let (_journal_dir : string) =
+      Keeper_fs.ensure_dir (Filename.dirname record_path)
+    in
     let inject_after_rename =
       Atomic.exchange fail_next_save_after_rename_for_testing false
     in

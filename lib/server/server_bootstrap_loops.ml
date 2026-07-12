@@ -321,7 +321,11 @@ let prepare_keeper_chat_persistence ~(workspace_config : Workspace.config) =
     let queue_report = Keeper_chat_queue.configure_persistence ~base_path in
     List.iter
       (fun (keeper_name, (error : Keeper_chat_queue.snapshot_load_error)) ->
-         let keeper_label = Option.value keeper_name ~default:"<registry>" in
+         let keeper_label =
+           match keeper_name with
+           | Some keeper_name -> keeper_name
+           | None -> "<registry>"
+         in
          Log.Keeper.error
            "keeper_chat_queue: snapshot unavailable keeper=%s: %s"
            keeper_label

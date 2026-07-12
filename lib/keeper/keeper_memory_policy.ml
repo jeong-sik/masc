@@ -72,6 +72,15 @@ let no_memory_bank_compaction =
   }
 ;;
 
+(** RFC-0327 §A1 — Outcome of a memory bank write operation.
+    [Persisted] means the row was written as-is.
+    [Merged_into target_id] means the row was similarity-matched (jaccard >= 0.85)
+    to an existing row and merged into it instead of creating a duplicate. *)
+type write_outcome =
+  | Persisted
+  | Merged_into of string
+;;
+
 let keeper_memory_schema_version = 2
 let short_term_horizon = "short_term"
 let mid_term_horizon = "mid_term"

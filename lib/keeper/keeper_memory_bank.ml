@@ -621,7 +621,19 @@ let compact_memory_bank_if_needed
             consolidated_parsed
         in
         let deduped = dedup_by_key memory_row_key by_recency in
-        let dedup_dropped = max 0 (before_notes - List.length deduped) in
+        (* RFC-0327 §A1: after exact-key dedup, also drop similarity
+           duplicates (jaccard >= 0.85).  This catches paraphrase rows
+           that share enough tokens with an earlier row. *)
+        let deduped, sim_dropped, _sim_merge_map =
+          similarity_dedup
+            ~threshold:0.85
+            ~key_of:memory_row_key
+            ~text_of:(fun row -> row.text)
+            deduped
+        in
+        let dedup_dropped =
+          max 0 (before_notes - List.length deduped - sim_dropped)
+        in
         if List.length deduped <= target_notes && dedup_dropped = 0 && invalid = 0
         then
           { no_memory_bank_compaction with

@@ -283,6 +283,8 @@ let validate ?admission_source (msg : inbound_message) =
 
 (* ── Dispatch ────────────────────────────────────────────────── *)
 
+(* TEL-OK: every terminal branch records its typed outcome through
+   [Channel_gate_metrics]; this function owns no second metric family. *)
 let handle_inbound_with ?admission_source ~dispatch (msg : inbound_message) =
   let channel = msg.channel in
   let source =
@@ -395,9 +397,11 @@ let handle_inbound_with ?admission_source ~dispatch (msg : inbound_message) =
              Channel_gate_metrics.Dispatch_unavailable;
            Error Dispatch_unavailable)
 
+(* TEL-OK: telemetry is owned by [handle_inbound_with]. *)
 let handle_inbound ?admission_source ~dispatch msg =
   handle_inbound_with ?admission_source ~dispatch msg
 
+(* TEL-OK: telemetry is owned by [handle_inbound_with]. *)
 let handle_inbound_streaming ?admission_source ~dispatch ~on_text_snapshot msg =
   handle_inbound_with ?admission_source
     ~dispatch:(dispatch ~on_text_snapshot) msg

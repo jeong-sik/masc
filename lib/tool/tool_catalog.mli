@@ -38,6 +38,25 @@ type metadata = {
   requires_actor_binding : bool option;
 }
 
+type execution_policy_axis =
+  | Read_only_axis
+  | Idempotent_axis
+  | Destructive_axis
+  | Mcp_context_required_axis
+
+type execution_policy = {
+  is_read_only : bool;
+  is_idempotent : bool;
+  is_destructive : bool;
+  mcp_context_required : bool;
+}
+
+type execution_policy_error =
+  | Missing_execution_policy of
+      { tool_name : string
+      ; missing_axes : execution_policy_axis list
+      }
+
 (** {1 Configuration} *)
 
 val default_metadata : metadata
@@ -70,6 +89,9 @@ val full_surface_override : unit -> bool
 (** {1 Metadata lookup} *)
 
 val metadata : string -> metadata
+val execution_policy_of_metadata :
+  tool_name:string -> metadata -> (execution_policy, execution_policy_error) result
+val execution_policy_error_to_string : execution_policy_error -> string
 val implementation_status : string -> implementation_status
 val effect_domain : string -> effect_domain option
 val requires_actor_binding : string -> bool

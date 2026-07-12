@@ -161,6 +161,40 @@ let test_workspace_schemas_have_tool_spec_metadata () =
     workspace_names
 ;;
 
+let test_default_metadata_has_no_implicit_execution_policy () =
+  match
+    Tool_catalog.execution_policy_of_metadata
+      ~tool_name:"__unregistered_tool"
+      Tool_catalog.default_metadata
+  with
+  | Ok _ -> Alcotest.fail "default metadata must not invent an execution policy"
+  | Error (Tool_catalog.Missing_execution_policy { tool_name; missing_axes }) ->
+    Alcotest.(check string) "diagnostic keeps tool name" "__unregistered_tool" tool_name;
+    Alcotest.(check int) "all execution axes are absent" 4 (List.length missing_axes)
+;;
+
+let test_keeper_schemas_have_explicit_execution_policy () =
+  let errors =
+    Keeper_schema.schemas
+    |> List.filter_map (fun (schema : Masc_domain.tool_schema) ->
+      match List.assoc_opt schema.name Tool_catalog.explicit_metadata with
+      | None -> Some (Printf.sprintf "%s: missing explicit metadata" schema.name)
+      | Some metadata ->
+        (match
+           Tool_catalog.execution_policy_of_metadata
+             ~tool_name:schema.name
+             metadata
+         with
+         | Ok _ -> None
+         | Error error ->
+           Some (Tool_catalog.execution_policy_error_to_string error)))
+  in
+  Alcotest.(check (list string))
+    "every Keeper schema has total catalog-owned execution policy"
+    []
+    errors
+;;
+
 let test_retired_tools_are_absent () =
   init ();
   (* Only fully retired tools — no live dispatch handler and no keeper
@@ -225,6 +259,16 @@ let () =
             test_workspace_schemas_match_dispatch_bindings
         ; test_case "workspace schemas have ToolSpec metadata" `Quick
             test_workspace_schemas_have_tool_spec_metadata
+        ] )
+    ; ( "keeper_tool_policy"
+      , [ test_case
+            "default metadata does not invent execution policy"
+            `Quick
+            test_default_metadata_has_no_implicit_execution_policy
+        ; test_case
+            "Keeper schemas have explicit execution policy"
+            `Quick
+            test_keeper_schemas_have_explicit_execution_policy
         ] )
     ; ( "retired_tools"
       , [ test_case "retired tools are absent" `Quick test_retired_tools_are_absent

@@ -783,13 +783,22 @@ let dispatch_stream_if_free
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
 
-let tool_spec_read_only =
-  [ "masc_persona_list"; "masc_keeper_list";
-    "masc_keeper_status"; "masc_keeper_persona_audit";
-    "masc_keeper_sandbox_status"; "masc_keeper_msg_queue";
-    "masc_keeper_adversarial_review" ]
+exception Keeper_surface_registration_error of Tool_catalog.execution_policy_error
+
+let () =
+  Printexc.register_printer (function
+    | Keeper_surface_registration_error error ->
+      Some (Tool_catalog.execution_policy_error_to_string error)
+    | _ -> None)
+;;
 
 let register_keeper_surface_schema (s : Masc_domain.tool_schema) =
+  let metadata = Tool_catalog.metadata s.name in
+  let policy =
+    match Tool_catalog.execution_policy_of_metadata ~tool_name:s.name metadata with
+    | Ok policy -> policy
+    | Error error -> raise (Keeper_surface_registration_error error)
+  in
   Tool_spec.register
     (Tool_spec.create
        ~name:s.name
@@ -797,9 +806,18 @@ let register_keeper_surface_schema (s : Masc_domain.tool_schema) =
        ~module_tag:Tool_dispatch.Mod_external
        ~input_schema:s.input_schema
        ~handler_binding:Tag_dispatch
-       ~is_read_only:(List.mem s.name tool_spec_read_only)
-       ~is_idempotent:(List.mem s.name tool_spec_read_only)
-       ~is_destructive:(String.equal s.name "masc_keeper_clear")
+       ~is_read_only:policy.is_read_only
+       ~mcp_context_required:policy.mcp_context_required
+       ~is_idempotent:policy.is_idempotent
+       ~is_destructive:policy.is_destructive
+       ~visibility:metadata.visibility
+       ~implementation_status:metadata.implementation_status
+       ?canonical_name:metadata.canonical_name
+       ?replacement:metadata.replacement
+       ?reason:metadata.reason
+       ~allow_direct_call_when_hidden:metadata.allow_direct_call_when_hidden
+       ?effect_domain:metadata.effect_domain
+       ?requires_actor_binding:metadata.requires_actor_binding
        ())
 let () =
   List.iter register_keeper_surface_schema schemas

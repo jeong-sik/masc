@@ -72,6 +72,66 @@ type metadata = {
   requires_actor_binding : bool option;
 }
 
+type execution_policy_axis =
+  | Read_only_axis
+  | Idempotent_axis
+  | Destructive_axis
+  | Mcp_context_required_axis
+
+type execution_policy = {
+  is_read_only : bool;
+  is_idempotent : bool;
+  is_destructive : bool;
+  mcp_context_required : bool;
+}
+
+type execution_policy_error =
+  | Missing_execution_policy of
+      { tool_name : string
+      ; missing_axes : execution_policy_axis list
+      }
+
+let execution_policy_axis_to_string = function
+  | Read_only_axis -> "readonly"
+  | Idempotent_axis -> "idempotent"
+  | Destructive_axis -> "destructive"
+  | Mcp_context_required_axis -> "mcp_context_required"
+;;
+
+let execution_policy_error_to_string = function
+  | Missing_execution_policy { tool_name; missing_axes } ->
+    Printf.sprintf
+      "tool %s is missing required execution policy metadata: %s"
+      tool_name
+      (missing_axes
+       |> List.map execution_policy_axis_to_string
+       |> String.concat ", ")
+;;
+
+let execution_policy_of_metadata ~tool_name (metadata : metadata) =
+  match
+    ( metadata.readonly
+    , metadata.idempotent
+    , metadata.destructive
+    , metadata.mcp_context_required )
+  with
+  | Some is_read_only, Some is_idempotent, Some is_destructive, Some mcp_context_required ->
+    Ok { is_read_only; is_idempotent; is_destructive; mcp_context_required }
+  | readonly, idempotent, destructive, mcp_context_required ->
+    let missing_axes =
+      [ Option.fold ~none:(Some Read_only_axis) ~some:(fun _ -> None) readonly
+      ; Option.fold ~none:(Some Idempotent_axis) ~some:(fun _ -> None) idempotent
+      ; Option.fold ~none:(Some Destructive_axis) ~some:(fun _ -> None) destructive
+      ; Option.fold
+          ~none:(Some Mcp_context_required_axis)
+          ~some:(fun _ -> None)
+          mcp_context_required
+      ]
+      |> List.filter_map Fun.id
+    in
+    Error (Missing_execution_policy { tool_name; missing_axes })
+;;
+
 (* ================================================================ *)
 (* Metadata constructors                                            *)
 (* ================================================================ *)
@@ -144,15 +204,43 @@ let with_semantic_flags ?readonly ?mcp_context_required
       | None -> meta.requires_actor_binding);
   }
 
+let with_execution_policy
+    ~readonly
+    ~idempotent
+    ~destructive
+    ?(mcp_context_required = false)
+    meta
+  =
+  with_semantic_flags
+    ~readonly
+    ~idempotent
+    ~destructive
+    ~mcp_context_required
+    meta
+;;
+
 let readonly_tool =
-  with_semantic_flags ~readonly:true ~idempotent:true
-    ~effect_domain:Read_only default_metadata
+  with_execution_policy
+    ~readonly:true
+    ~idempotent:true
+    ~destructive:false
+    default_metadata
+  |> with_semantic_flags ~effect_domain:Read_only
 
 let destructive_tool =
-  with_semantic_flags ~destructive:true default_metadata
+  with_execution_policy
+    ~readonly:false
+    ~idempotent:false
+    ~destructive:true
+    default_metadata
 
 let masc_workspace_tool =
-  with_semantic_flags ~effect_domain:Masc_workspace default_metadata
+  with_execution_policy
+    ~readonly:false
+    ~idempotent:false
+    ~destructive:false
+    default_metadata
+  |> with_semantic_flags ~effect_domain:Masc_workspace
 
 let actor_bound_masc_workspace_tool =
   with_semantic_flags ~requires_actor_binding:true masc_workspace_tool
@@ -247,11 +335,25 @@ let explicit_metadata : (string * metadata) list =
     ("masc_plan_update", broadcast_tool);
     ("masc_keeper_list", read_state_tool);
     ("masc_keeper_status", read_state_tool);
+    ( "masc_keeper_sandbox_start",
+      with_semantic_flags ~effect_domain:Playground_write broadcast_tool );
+    ( "masc_keeper_sandbox_stop",
+      with_semantic_flags ~effect_domain:Playground_write destructive_tool );
+    ("masc_keeper_create_from_persona", broadcast_tool);
+    ("masc_keeper_msg", broadcast_tool);
+    ("masc_keeper_msg_result", read_state_tool);
+    ("masc_keeper_msg_cancel", broadcast_tool);
+    ("masc_keeper_msg_queue", read_state_tool);
+    ("masc_keeper_persona_audit", read_state_tool);
+    ("masc_keeper_sandbox_status", read_state_tool);
+    ("masc_keeper_adversarial_review", read_state_tool);
     ("masc_keeper_waiting_inventory", read_state_tool);
     ("masc_keeper_up", broadcast_tool);
     ( "masc_keeper_down",
-      with_semantic_flags ~destructive:true ~effect_domain:Masc_workspace
-        default_metadata );
+      with_semantic_flags ~effect_domain:Masc_workspace destructive_tool );
+    ("masc_keeper_compact", broadcast_tool);
+    ("masc_keeper_clear", destructive_tool);
+    ("masc_keeper_reset", destructive_tool);
     ("masc_plan_get_task", read_state_tool);
     ("masc_plan_clear_task", actor_broadcast_tool);
     ("masc_note_add", broadcast_tool);

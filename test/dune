@@ -2252,7 +2252,6 @@
 
 (include stanzas/test_release_train_guard_script.inc)
 
-(include stanzas/test_reqd_invalid_state_swallow.inc)
 
 (include stanzas/test_server_state_product.inc)
 

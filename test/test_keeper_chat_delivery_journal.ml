@@ -413,7 +413,7 @@ let test_queue_restart_finalizes_receipt_without_redispatch () =
           |> Identity.Receipt_ids.of_list
           |> function
           | Ok receipt_ids -> receipt_ids
-          | Error detail -> fail detail
+          | Error error -> fail (Identity.Receipt_ids.error_to_string error)
         in
         Identity.Queue_receipts receipt_ids
       | `Empty -> fail "queue was empty after enqueue"
@@ -548,7 +548,7 @@ let test_dashboard_queue_origin_uses_typed_handoff_journal () =
     let origin receipt_ids =
       Identity.Receipt_ids.of_list receipt_ids
       |> function
-      | Error detail -> fail detail
+      | Error error -> fail (Identity.Receipt_ids.error_to_string error)
       | Ok receipt_ids ->
         Journal.dashboard_queue_user_row_origin
           ~base_path

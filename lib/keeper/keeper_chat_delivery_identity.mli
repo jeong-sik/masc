@@ -21,8 +21,10 @@ end
 
 module Receipt_ids : sig
   type t
+  type error = Empty
 
-  val of_list : Receipt_id.t list -> (t, string) result
+  val of_list : Receipt_id.t list -> (t, error) result
+  val error_to_string : error -> string
   val to_list : t -> Receipt_id.t list
 end
 

@@ -376,6 +376,8 @@ let start ~sw ~clock ~base_path ~handle_turn =
                             |> Result.map (fun receipt_ids ->
                               Keeper_chat_delivery_identity.Queue_receipts
                                 receipt_ids)
+                            |> Result.map_error
+                                 Keeper_chat_delivery_identity.Receipt_ids.error_to_string
                           in
                           let admission =
                             Keeper_turn_admission.snapshot_for ~base_path

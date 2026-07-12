@@ -759,7 +759,7 @@ let recovered_queue_terminal ~base_path ~keeper_name receipts =
       receipts
   in
   match Keeper_chat_delivery_identity.Receipt_ids.of_list inflight_ids with
-  | Error _ -> Ok None
+  | Error Keeper_chat_delivery_identity.Receipt_ids.Empty -> Ok None
   | Ok receipt_ids ->
     let delivery_key =
       Keeper_chat_delivery_identity.Queue_receipts receipt_ids

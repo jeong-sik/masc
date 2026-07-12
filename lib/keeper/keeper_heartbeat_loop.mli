@@ -70,21 +70,19 @@ type single_claim_admission =
   | Admit_ready_single
   | Defer_failure_judgment
 
-(** Closed pre-intake admission result. Blocking approval and explicit Keeper
-    pause are classified before durable dequeue, just like fd/disk pressure, so
-    a blocked cycle does not repeatedly lease and requeue the same stimulus. *)
+(** Closed pre-intake admission result. Lifecycle, blocking approval, and
+    fd/disk pressure are classified before durable dequeue, so a blocked cycle
+    does not repeatedly lease and requeue the same stimulus. *)
 type turn_intake_admission =
   | Intake_admitted
   | Intake_lifecycle_blocked of Keeper_lifecycle_admission.autonomous_denial
   | Intake_pressure_blocked of Keeper_pressure_admission.block
   | Intake_blocking_approval_pending
-  | Intake_keeper_paused
 
 val classify_turn_intake_admission :
   lifecycle:Keeper_lifecycle_admission.autonomous_admission ->
   pressure:Keeper_pressure_admission.decision ->
   blocking_approval_pending:bool ->
-  keeper_paused:bool ->
   turn_intake_admission
 
 val heartbeat_event_intake :

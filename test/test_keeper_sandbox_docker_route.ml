@@ -2097,10 +2097,12 @@ let test_execute_duplicate_env_rejected_before_docker () =
            "echo")
       ()
   in
-  Alcotest.(check (option bool)) "duplicate env execution rejected" (Some false)
-    (parse_bool_field raw "ok");
-  Alcotest.(check bool) "duplicate key is explicit" true
-    (response_mentions raw "error" "env key \"TOKEN\" is duplicated");
+  (* Duplicate env keys are a malformed typed-input shape, rejected at
+     input validation with the [command_shape_blocked] deterministic-retry
+     envelope (no ["ok"] field) — same class as shell-metachar-in-argv.
+     Reserved-key rejection differs: that is a runtime sandbox-boundary
+     policy caught during dispatch, so it carries ["ok":false]. *)
+  check_typed_validation_error "env key \"TOKEN\" is duplicated" raw;
   Alcotest.(check bool) "docker was not invoked" false (Sys.file_exists log_path)
 
 let test_turn_runtime_projects_keeper_secret_dir () =

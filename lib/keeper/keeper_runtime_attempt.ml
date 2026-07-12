@@ -140,6 +140,8 @@ let sdk_error_to_runtime_outcome err =
            Llm_provider.Http_client.HttpError { code = status; body = message }
          | AuthError { message } ->
            Llm_provider.Http_client.HttpError { code = 401; body = message }
+         | AuthorizationError { message } ->
+           Llm_provider.Http_client.HttpError { code = 403; body = message }
          | Overloaded { message } ->
            Llm_provider.Http_client.HttpError { code = 529; body = message }
          | NetworkError { message; kind } ->

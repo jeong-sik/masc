@@ -1419,7 +1419,7 @@ let run_blocks
          reason_digest=%s"
         config.name
         (String.concat "," tool_names)
-        Digestif.SHA256.(digest_string reason |> to_hex);
+        (Auth.sha256_hash reason);
       let runtime_observation =
         runtime_observation_for_completed_config
           ~total_duration_ms:run_total_duration_ms

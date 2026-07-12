@@ -84,7 +84,7 @@ val consume_board_stimulus_batch
     non-board single-stimulus fallback. [Defer_failure_judgment] leaves only a
     failure-judgment stimulus pending; it cannot suppress unrelated kinds. *)
 val heartbeat_event_intake
-  :  ?single_claim_admission:single_claim_admission
+  :  single_claim_admission:single_claim_admission
   -> ctx:'a context
   -> meta_after_triage:keeper_meta
   -> pending_board_events:Keeper_world_observation.pending_board_event list

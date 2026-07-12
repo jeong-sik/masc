@@ -342,7 +342,7 @@ let stimulus_ready_for_intake (stimulus : Keeper_event_queue.stimulus) =
 ;;
 
 let heartbeat_event_intake
-      ?(single_claim_admission = Admit_ready_single)
+      ~single_claim_admission
       ~ctx
       ~meta_after_triage
       ~pending_board_events

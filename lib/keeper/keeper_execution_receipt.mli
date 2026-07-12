@@ -261,6 +261,11 @@ type operator_disposition_reason =
       [Disp_fail_open_next_runtime]; suppresses the operator page that the
       pre-fix [Reason_provider_runtime_error] / [Disp_pause_human]
       fall-through emitted. *)
+  | Reason_capacity_backpressure
+  (** Typed provider-capacity pacing before a retry/rotation has completed.
+      Paired with [Disp_fail_open_next_runtime]: the keeper keeps moving and
+      no operator broadcast is emitted, while the receipt does not falsely
+      claim [Reason_runtime_fallback]. *)
   | Reason_provider_runtime_error
   | Reason_internal_error
   | Reason_tool_route_recoverable_failure

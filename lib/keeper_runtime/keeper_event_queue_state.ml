@@ -14,7 +14,17 @@ type requeue_reason =
 
 type escalation_reason =
   | Failure_judgment_requested
-  | Failure_judgment_failed
+  | Failure_judgment_boundary_failed of { detail : string }
+  | Failure_judgment_operator_required of
+      { judge_runtime_id : string
+      ; rationale : string
+      }
+
+let escalation_reason_requires_operator_attention = function
+  | Failure_judgment_requested -> false
+  | Failure_judgment_boundary_failed _
+  | Failure_judgment_operator_required _ -> true
+;;
 
 type settlement =
   | Ack
@@ -226,15 +236,94 @@ let requeue_reason_of_label = function
   | label -> Error (Printf.sprintf "unknown event queue requeue reason: %s" label)
 ;;
 
+let ( let* ) = Result.bind
+
 let escalation_reason_label = function
   | Failure_judgment_requested -> "failure_judgment_requested"
-  | Failure_judgment_failed -> "failure_judgment_failed"
+  | Failure_judgment_boundary_failed _ -> "failure_judgment_boundary_failed"
+  | Failure_judgment_operator_required _ -> "failure_judgment_operator_required"
 ;;
 
-let escalation_reason_of_label = function
-  | "failure_judgment_requested" -> Ok Failure_judgment_requested
-  | "failure_judgment_failed" -> Ok Failure_judgment_failed
-  | label -> Error (Printf.sprintf "unknown event queue escalation reason: %s" label)
+let escalation_reason_detail_to_yojson = function
+  | Failure_judgment_requested -> `Null
+  | Failure_judgment_boundary_failed { detail } ->
+    `Assoc [ "detail", `String detail ]
+  | Failure_judgment_operator_required { judge_runtime_id; rationale } ->
+    `Assoc
+      [ "judge_runtime_id", `String judge_runtime_id
+      ; "rationale", `String rationale
+      ]
+;;
+
+let required_nonempty_reason_string ~context name fields =
+  match List.assoc_opt name fields with
+  | Some (`String value) ->
+    let value = String.trim value in
+    if String.equal value ""
+    then Error (Printf.sprintf "%s.%s must not be empty" context name)
+    else Ok value
+  | Some _ -> Error (Printf.sprintf "%s.%s must be a string" context name)
+  | None -> Error (Printf.sprintf "%s.%s is required" context name)
+;;
+
+let exact_reason_fields ~context expected fields =
+  let actual = List.map fst fields |> List.sort String.compare in
+  let expected = List.sort String.compare expected in
+  if actual = expected
+  then Ok ()
+  else
+    Error
+      (Printf.sprintf
+         "%s fields must be exactly [%s], got [%s]"
+         context
+         (String.concat "," expected)
+         (String.concat "," actual))
+;;
+
+let escalation_reason_of_wire ~label ~detail_json =
+  match label, detail_json with
+  | "failure_judgment_requested", `Null -> Ok Failure_judgment_requested
+  | "failure_judgment_boundary_failed", `Assoc fields ->
+    let* () =
+      exact_reason_fields
+        ~context:"failure_judgment_boundary_failed"
+        [ "detail" ]
+        fields
+    in
+    let* detail =
+      required_nonempty_reason_string
+        ~context:"failure_judgment_boundary_failed"
+        "detail"
+        fields
+    in
+    Ok (Failure_judgment_boundary_failed { detail })
+  | "failure_judgment_operator_required", `Assoc fields ->
+    let* () =
+      exact_reason_fields
+        ~context:"failure_judgment_operator_required"
+        [ "judge_runtime_id"; "rationale" ]
+        fields
+    in
+    let* judge_runtime_id =
+      required_nonempty_reason_string
+        ~context:"failure_judgment_operator_required"
+        "judge_runtime_id"
+        fields
+    in
+    let* rationale =
+      required_nonempty_reason_string
+        ~context:"failure_judgment_operator_required"
+        "rationale"
+        fields
+    in
+    Ok (Failure_judgment_operator_required { judge_runtime_id; rationale })
+  | "failure_judgment_requested", _ ->
+    Error (Printf.sprintf "%s reason_detail must be null" label)
+  | ( "failure_judgment_boundary_failed"
+    | "failure_judgment_operator_required" ), _ ->
+    Error (Printf.sprintf "%s reason_detail must be an object" label)
+  | unknown, _ ->
+    Error (Printf.sprintf "unknown event queue escalation reason: %s" unknown)
 ;;
 
 let settlement_kind_label = function
@@ -273,8 +362,6 @@ let settlement_equal left right =
     false
 ;;
 
-let ( let* ) = Result.bind
-
 let validate_settlement = function
   | Ack | Requeue _ -> Ok ()
   | Escalate
@@ -287,13 +374,35 @@ let validate_settlement = function
             }
       } ->
     Ok ()
-  | Escalate { reason = Failure_judgment_failed; successor = None } -> Ok ()
+  | Escalate
+      { reason = Failure_judgment_boundary_failed { detail }
+      ; successor = None
+      }
+    when String.equal (String.trim detail) "" ->
+    Error "failure judgment boundary failure detail must not be empty"
+  | Escalate
+      { reason = Failure_judgment_operator_required { judge_runtime_id; rationale }
+      ; successor = None
+      }
+    when
+      String.equal (String.trim judge_runtime_id) ""
+      || String.equal (String.trim rationale) "" ->
+    Error "operator-required failure judgment evidence must not be empty"
+  | Escalate
+      { reason =
+          ( Failure_judgment_boundary_failed _
+          | Failure_judgment_operator_required _ )
+      ; successor = None
+      } ->
+    Ok ()
   | Escalate { reason = Failure_judgment_requested; successor = None } ->
     Error "failure judgment request settlement requires a typed successor"
   | Escalate { reason = Failure_judgment_requested; successor = Some _ } ->
     Error "failure judgment request successor has the wrong payload kind"
-  | Escalate { reason = Failure_judgment_failed; successor = Some _ } ->
-    Error "failed failure judgment must not enqueue a successor"
+  | Escalate { reason = Failure_judgment_boundary_failed _; successor = Some _ } ->
+    Error "failure judgment boundary failure must not enqueue a successor"
+  | Escalate { reason = Failure_judgment_operator_required _; successor = Some _ } ->
+    Error "operator-required failure judgment must not enqueue a successor"
 ;;
 
 let receipt_for_lease ~settled_at ~settlement (lease : lease) =
@@ -551,6 +660,7 @@ let settlement_to_yojson = function
     `Assoc
       [ "kind", `String "escalate"
       ; "reason", `String (escalation_reason_label reason)
+      ; "reason_detail", escalation_reason_detail_to_yojson reason
       ; ( "successor"
         , match successor with
           | None -> `Null
@@ -569,8 +679,13 @@ let settlement_of_yojson json =
     let* reason = requeue_reason_of_label reason in
     Ok (Requeue reason)
   | "escalate" ->
-    let* reason = string_field ~context "reason" fields in
-    let* reason = escalation_reason_of_label reason in
+    let* reason_label = string_field ~context "reason" fields in
+    let reason_detail =
+      match List.assoc_opt "reason_detail" fields with
+      | Some json -> json
+      | None -> `Null
+    in
+    let* reason = escalation_reason_of_wire ~label:reason_label ~detail_json:reason_detail in
     let* successor =
       match List.assoc_opt "successor" fields with
       | None | Some `Null -> Ok None
@@ -595,7 +710,7 @@ let transition_receipt_to_yojson receipt =
     ]
 ;;
 
-let receipt_of_yojson json =
+let transition_receipt_of_yojson json =
   let context = "event queue transition receipt" in
   let* fields = assoc_fields ~context json in
   let* transition_id = string_field ~context "transition_id" fields in
@@ -638,7 +753,7 @@ let outbox_entry_of_yojson json =
   let context = "event queue outbox entry" in
   let* fields = assoc_fields ~context json in
   let* receipt_json = required_field ~context "receipt" fields in
-  let* receipt = receipt_of_yojson receipt_json in
+  let* receipt = transition_receipt_of_yojson receipt_json in
   let* stimuli =
     list_field ~context "stimuli" Keeper_event_queue.stimulus_of_yojson fields
   in
@@ -741,7 +856,7 @@ let of_yojson json =
     let* last_settlement =
       match List.assoc_opt "last_settlement" fields with
       | Some `Null -> Ok None
-      | Some json -> receipt_of_yojson json |> Result.map Option.some
+      | Some json -> transition_receipt_of_yojson json |> Result.map Option.some
       | None -> Error "keeper event queue state missing required field last_settlement"
     in
     let* transition_outbox =

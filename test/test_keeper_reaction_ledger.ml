@@ -71,6 +71,55 @@ let schedule_due_stimulus ?(schedule_id = "sched-ledger-1") () :
   }
 ;;
 
+let failure_judgment_stimulus () : Keeper_event_queue.stimulus =
+  let judgment : Keeper_event_queue.failure_judgment =
+    { fj_runtime_id = "failed-runtime"
+    ; fj_judgment = Keeper_runtime_failure_route.Config_mismatch
+    ; fj_provenance = Keeper_runtime_failure_route.Oas_config_error
+    ; fj_detail = "configuration unavailable"
+    }
+  in
+  { post_id = Keeper_event_queue.failure_judgment_post_id judgment
+  ; urgency = Keeper_event_queue.Immediate
+  ; arrived_at = 1234.5
+  ; payload = Keeper_event_queue.Failure_judgment judgment
+  }
+;;
+
+let require_ok label = function
+  | Ok value -> value
+  | Error message -> failf "%s: %s" label message
+;;
+
+let transition_receipt ~settlement stimulus =
+  let pending = Keeper_event_queue.enqueue Keeper_event_queue.empty stimulus in
+  let state = Keeper_event_queue_state.with_pending pending Keeper_event_queue_state.empty in
+  let state, lease =
+    Keeper_event_queue_state.claim_when
+      ~claimed_at:1235.0
+      ~ready:(fun _ -> true)
+      state
+    |> require_ok "claim transition receipt stimulus"
+  in
+  let lease =
+    match lease with
+    | Some lease -> lease
+    | None -> fail "transition receipt stimulus was not claimed"
+  in
+  let _state, result =
+    Keeper_event_queue_state.settle
+      ~settled_at:1236.0
+      ~lease
+      ~settlement
+      state
+    |> require_ok "settle transition receipt stimulus"
+  in
+  match result with
+  | Keeper_event_queue_state.Settled receipt -> receipt
+  | Keeper_event_queue_state.Already_settled _ ->
+    fail "first transition receipt settlement was already settled"
+;;
+
 let check_member_string label expected key json =
   check string label expected (json |> member key |> to_string)
 ;;
@@ -223,6 +272,60 @@ let test_event_queue_reaction_evidence_matches_exact_stimulus_id () =
   check bool "missing reaction absent" false missing.turn_started_seen;
   check bool "missing ack absent" false missing.event_queue_ack_seen;
   check int "missing exact rows" 0 missing.matched_record_count
+;;
+
+let test_failure_judgment_operator_attention_is_typed_and_visible () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "judgment-attention-keeper" in
+  let stimulus = failure_judgment_stimulus () in
+  let receipt =
+    transition_receipt
+      ~settlement:
+        (Keeper_event_queue_state.Escalate
+           { reason =
+               Keeper_event_queue_state.Failure_judgment_operator_required
+                 { judge_runtime_id = "opaque-judge-runtime"
+                 ; rationale = "Operator-owned configuration must change."
+                 }
+           ; successor = None
+           })
+      stimulus
+  in
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path
+    ~keeper_name
+    stimulus;
+  Keeper_reaction_ledger.record_event_queue_transition_reaction_result
+    ~base_path
+    ~keeper_name
+    ~reaction_kind:Keeper_reaction_ledger.Event_queue_escalated
+    ~receipt
+    stimulus
+  |> require_ok "record operator-required judgment transition";
+  let summary =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  check_member_string "operator-required judgment degrades" "degraded" "status" summary;
+  check bool "operator-required judgment requires action" true
+    (summary |> member "operator_action_required" |> to_bool);
+  check int "terminal judgment attention counted" 1
+    (summary |> member "event_queue_operator_attention_count" |> to_int);
+  check int "typed transition receipt parsed" 0
+    (summary |> member "event_queue_transition_parse_error_count" |> to_int);
+  let fleet =
+    Keeper_reaction_ledger.fleet_summary_json
+      ~base_path
+      ~keeper_names:[ keeper_name ]
+      ~limit_per_keeper:10
+  in
+  check bool "fleet judgment attention requires action" true
+    (fleet |> member "operator_action_required" |> to_bool);
+  check int "fleet judgment attention counted" 1
+    (fleet |> member "event_queue_operator_attention_count" |> to_int);
+  check_list_has_string
+    "fleet explains judgment attention"
+    "event_queue_operator_attention"
+    (fleet |> member "status_reasons")
 ;;
 
 let test_cursor_ack_is_replayable_state_entry () =
@@ -1298,6 +1401,9 @@ let test_stimulus_kind_string_roundtrip () =
     ; Keeper_reaction_ledger.Connector_attention
     ; Keeper_reaction_ledger.Hitl_resolved
     ; Keeper_reaction_ledger.Goal_verification_failed
+    ; Keeper_reaction_ledger.Failure_judgment
+    ; Keeper_reaction_ledger.Goal_assigned
+    ; Keeper_reaction_ledger.Goal_stagnation
     ];
   check bool "unknown stimulus kind string is None" true
     (Option.is_none (Keeper_reaction_ledger.stimulus_kind_of_string "totally_unknown"))
@@ -1344,6 +1450,10 @@ let () =
             "event queue reaction evidence matches exact stimulus id"
             `Quick
             test_event_queue_reaction_evidence_matches_exact_stimulus_id
+        ; test_case
+            "failure judgment operator attention is typed and visible"
+            `Quick
+            test_failure_judgment_operator_attention_is_typed_and_visible
         ; test_case
             "cursor ack is replayable state entry"
             `Quick

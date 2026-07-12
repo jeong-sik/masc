@@ -173,6 +173,7 @@ let run_model_by_label
 
 let run_named_with_masc_tools
     ~runtime_id
+    ?(keeper_name = "")
     ~goal
     ~base_path
     ?priority
@@ -206,7 +207,7 @@ let run_named_with_masc_tools
       ~input_schema:td.input_schema
       (fun input -> dispatch ~name:td.name ~args:input)
   ) masc_tools in
-  Keeper_turn_driver.run_named ~runtime_id ~goal ~base_path ?priority ~system_prompt ~tools:oas_tools
+  Keeper_turn_driver.run_named ~runtime_id ~keeper_name ~goal ~base_path ?priority ~system_prompt ~tools:oas_tools
     ?max_turns
     ~max_idle_turns
     ~temperature ?max_tokens

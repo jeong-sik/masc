@@ -1,6 +1,10 @@
 (** Structured keeper-internal error envelopes carried through
     [Agent_sdk.Error.Internal]. *)
 
+(** Canonical wire kind emitted for {!Capacity_backpressure}.  Receipt
+    terminal projection and decoding consume this same value. *)
+val capacity_backpressure_kind : string
+
 type provider_rejection = {
   provider_label : string;
   reason : string;

@@ -16,10 +16,3 @@ val heartbeat_fields_from_disk : t
 (** {!monotonic_usage_counters}, plus preservation of an operator-owned pause
     already present on disk. This prevents stale turn/heartbeat writers from
     clearing [paused=true] after an operator paused the keeper. *)
-
-val dead_tombstone_cleanup_from_disk : t
-(** {!monotonic_usage_counters}, with [paused] and [latched_reason] owned by the
-    caller. Used by the dead-tombstone cleanup so a CAS retry that re-reads an
-    operator pause cannot copy the operator reason back over [Dead_tombstone].
-    The inverse of {!heartbeat_fields_from_disk}, which lets a disk operator
-    pause win. *)

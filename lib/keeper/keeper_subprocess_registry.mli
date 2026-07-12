@@ -69,6 +69,11 @@ val drain : keeper_id:string -> grace_ms:int -> drain_result
     bootstrap. *)
 val register_default_cleanup_hook : unit -> unit
 
+(** Exact process-local readiness of the mandatory default tombstone cleanup
+    hook. Durable completion recovery uses this to avoid acknowledging a
+    receipt before the cleanup subscriber is installed. *)
+val default_cleanup_hook_registered : unit -> bool
+
 (** Test-only escape hatch: clear the registry. Production code should
     never call this. *)
 val reset_for_testing : unit -> unit

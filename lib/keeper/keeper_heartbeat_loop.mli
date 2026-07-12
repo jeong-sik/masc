@@ -60,20 +60,27 @@ type heartbeat_event_intake = {
   event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
 }
 
-(** Closed pre-intake admission result. A blocking approval is classified
-    before durable dequeue, just like fd/disk pressure, so a blocked cycle does
-    not repeatedly lease and requeue the same stimulus. *)
+type single_claim_admission =
+  | Admit_ready_single
+  | Defer_failure_judgment
+
+(** Closed pre-intake admission result. Blocking approval and explicit Keeper
+    pause are classified before durable dequeue, just like fd/disk pressure, so
+    a blocked cycle does not repeatedly lease and requeue the same stimulus. *)
 type turn_intake_admission =
   | Intake_admitted
   | Intake_pressure_blocked of Keeper_pressure_admission.block
   | Intake_blocking_approval_pending
+  | Intake_keeper_paused
 
 val classify_turn_intake_admission :
   pressure:Keeper_pressure_admission.decision ->
   blocking_approval_pending:bool ->
+  keeper_paused:bool ->
   turn_intake_admission
 
 val heartbeat_event_intake :
+  single_claim_admission:single_claim_admission ->
   ctx:'a context ->
   meta_after_triage:keeper_meta ->
   pending_board_events:Keeper_world_observation.pending_board_event list ->
@@ -136,13 +143,22 @@ val record_crashed_cycle_failure :
 
 val settlement_of_failure :
   settled_at:float ->
-  lease:Keeper_registry_event_queue.lease ->
   Keeper_unified_turn.turn_failure ->
   Keeper_registry_event_queue.settlement
-(** Pure queue disposition for a failed cycle.  Retry/rotation requeue;
-    deterministic failure creates one judgment successor; failure of an
-    already-leased judgment emits an operator-visible escalation with no
-    recursive successor. *)
+(** Pure queue disposition for a failed cycle. Retry/rotation requeue and a
+    deterministic failure creates one judgment successor. This mapping is
+    identical when the source lease carried an earlier judgment: the failed
+    action's new typed route remains authoritative rather than being collapsed
+    into a generic judgment failure. *)
+
+val settlement_of_cycle_outcome :
+  settled_at:float ->
+  stop_requested:bool ->
+  lease:Keeper_registry_event_queue.lease ->
+  Keeper_heartbeat_loop_cycle.cycle_outcome option ->
+  Keeper_registry_event_queue.settlement
+(** Pure lease settlement boundary. Completed work acknowledges; typed
+    cancellation and non-executable-phase skips requeue. *)
 
 val project_transition_outbox :
   base_path:string -> keeper_name:string -> (unit, string) result

@@ -228,9 +228,10 @@ let stimulus_payload_preview (payload : Keeper_event_queue.stimulus_payload) =
       failure.rejected_by
   | Keeper_event_queue.Failure_judgment fj ->
     Printf.sprintf
-      "failure_judgment runtime=%s class=%s"
+      "failure_judgment runtime=%s class=%s provenance=%s"
       fj.fj_runtime_id
       (Keeper_runtime_failure_route.judgment_class_label fj.fj_judgment)
+      (Keeper_runtime_failure_route.judgment_provenance_label fj.fj_provenance)
   | Keeper_event_queue.Goal_assigned ga ->
     Printf.sprintf
       "goal_assigned goal_id=%s assigned_by=%s"
@@ -868,6 +869,8 @@ let summarize_rows ~keeper_name ~limit rows =
   let event_queue_ack_count = ref 0 in
   let event_queue_requeue_count = ref 0 in
   let event_queue_escalation_count = ref 0 in
+  let event_queue_operator_attention_count = ref 0 in
+  let event_queue_transition_parse_error_count = ref 0 in
   let cursor_ack_count = ref 0 in
   let execution_receipt_count = ref 0 in
   let terminal_reason_count = ref 0 in
@@ -953,14 +956,40 @@ let summarize_rows ~keeper_name ~limit rows =
        | _ -> ())
     | None -> ()
   in
-  let note_reaction_kind = function
+  let note_event_queue_transition_attention row =
+    match assoc_field "reaction" row with
+    | Some reaction ->
+      (match assoc_field "transition_receipt" reaction with
+       | None -> incr event_queue_transition_parse_error_count
+       | Some json ->
+         (match Keeper_event_queue_state.transition_receipt_of_yojson json with
+          | Error _ -> incr event_queue_transition_parse_error_count
+          | Ok
+              { settlement =
+                  ( Keeper_event_queue_state.Ack
+                  | Keeper_event_queue_state.Requeue _ )
+              ; _
+              } ->
+            incr event_queue_transition_parse_error_count
+          | Ok
+              { settlement = Keeper_event_queue_state.Escalate { reason; _ }
+              ; _
+              } ->
+            if Keeper_event_queue_state.escalation_reason_requires_operator_attention reason
+            then incr event_queue_operator_attention_count))
+    | None -> incr event_queue_transition_parse_error_count
+  in
+  let note_reaction_kind row =
+    match nested_string_field "reaction" "kind" row with
     | None -> incr unknown_reaction_count
     | Some raw ->
       (match reaction_kind_of_string raw with
        | Turn_started -> incr turn_started_count
        | Event_queue_ack -> incr event_queue_ack_count
        | Event_queue_requeued -> incr event_queue_requeue_count
-       | Event_queue_escalated -> incr event_queue_escalation_count
+       | Event_queue_escalated ->
+         incr event_queue_escalation_count;
+         note_event_queue_transition_attention row
        | Cursor_ack -> incr cursor_ack_count
        | Execution_receipt -> incr execution_receipt_count
        | Terminal_reason -> incr terminal_reason_count
@@ -1051,7 +1080,7 @@ let summarize_rows ~keeper_name ~limit rows =
       | Some "reaction", Some id ->
         incr reaction_count;
         note_reaction_time id (float_field "recorded_at_unix" row);
-        note_reaction_kind (nested_string_field "reaction" "kind" row);
+        note_reaction_kind row;
         note_completion_contract_result row;
         mark_reacted id
       | Some "cursor_ack", Some _id ->
@@ -1066,7 +1095,7 @@ let summarize_rows ~keeper_name ~limit rows =
          | None -> ())
       | Some "reaction", None ->
         incr reaction_count;
-        note_reaction_kind (nested_string_field "reaction" "kind" row);
+        note_reaction_kind row;
         note_completion_contract_result row
       | Some "cursor_ack", None ->
         incr reaction_count;
@@ -1121,6 +1150,8 @@ let summarize_rows ~keeper_name ~limit rows =
   in
   let degraded_signal_count =
     pending_stimulus_count
+    + !event_queue_operator_attention_count
+    + !event_queue_transition_parse_error_count
     + !unsupported_stimulus_count
     + !payload_parse_error_count
     + !unknown_reaction_count
@@ -1144,6 +1175,10 @@ let summarize_rows ~keeper_name ~limit rows =
     ; "event_queue_ack_count", `Int !event_queue_ack_count
     ; "event_queue_requeue_count", `Int !event_queue_requeue_count
     ; "event_queue_escalation_count", `Int !event_queue_escalation_count
+    ; ( "event_queue_operator_attention_count"
+      , `Int !event_queue_operator_attention_count )
+    ; ( "event_queue_transition_parse_error_count"
+      , `Int !event_queue_transition_parse_error_count )
     ; "cursor_ack_count", `Int !cursor_ack_count
     ; "execution_receipt_count", `Int !execution_receipt_count
     ; "terminal_reason_count", `Int !terminal_reason_count
@@ -1196,6 +1231,8 @@ let error_summary ~keeper_name ~limit error =
     ; "execution_receipt_count", `Int 0
     ; "terminal_reason_count", `Int 0
     ; "operator_escalation_count", `Int 0
+    ; "event_queue_operator_attention_count", `Int 0
+    ; "event_queue_transition_parse_error_count", `Int 0
     ; "supervisor_recovery_requested_count", `Int 0
     ; "completion_contract_attention_count", `Int 0
     ; "completion_contract_passive_only_count", `Int 0
@@ -1441,6 +1478,12 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
   let pending_no_progress_recovery_count =
     total_int "pending_no_progress_recovery_count"
   in
+  let event_queue_operator_attention_count =
+    total_int "event_queue_operator_attention_count"
+  in
+  let event_queue_transition_parse_error_count =
+    total_int "event_queue_transition_parse_error_count"
+  in
   let unknown_reaction_count = total_int "unknown_reaction_count" in
   let completion_contract_unknown_result_count =
     total_int "completion_contract_unknown_result_count"
@@ -1467,6 +1510,14 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
     |> (fun reasons ->
       if pending_count > 0 then "reaction_ledger_pending_stimulus" :: reasons else reasons)
     |> (fun reasons ->
+      if event_queue_operator_attention_count > 0
+      then "event_queue_operator_attention" :: reasons
+      else reasons)
+    |> (fun reasons ->
+      if event_queue_transition_parse_error_count > 0
+      then "event_queue_transition_parse_error" :: reasons
+      else reasons)
+    |> (fun reasons ->
       if durable_event_queue_stale_count > 0
       then "durable_event_queue_stale" :: reasons
       else reasons)
@@ -1490,6 +1541,8 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
     then "unknown"
     else if
       pending_count > 0
+      || event_queue_operator_attention_count > 0
+      || event_queue_transition_parse_error_count > 0
       || durable_event_queue_stale_count > 0
       || unknown_reaction_count > 0
       || completion_contract_unknown_result_count > 0
@@ -1519,6 +1572,10 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
     ; "event_queue_requeue_count", `Int (total_int "event_queue_requeue_count")
     ; ( "event_queue_escalation_count"
       , `Int (total_int "event_queue_escalation_count") )
+    ; ( "event_queue_operator_attention_count"
+      , `Int event_queue_operator_attention_count )
+    ; ( "event_queue_transition_parse_error_count"
+      , `Int event_queue_transition_parse_error_count )
     ; "cursor_ack_count", `Int (total_int "cursor_ack_count")
     ; "execution_receipt_count", `Int (total_int "execution_receipt_count")
     ; "terminal_reason_count", `Int (total_int "terminal_reason_count")

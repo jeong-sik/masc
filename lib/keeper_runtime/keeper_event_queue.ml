@@ -181,6 +181,7 @@ and goal_verification_failure = {
 and failure_judgment = {
   fj_runtime_id : string;
   fj_judgment : Keeper_runtime_failure_route.judgment_class;
+  fj_provenance : Keeper_runtime_failure_route.judgment_provenance;
   fj_detail : string;
   (* display-only failure summary for the judgment prompt, bounded by
      [Keeper_internal_error.cap_blocker_detail] at the producer. Never
@@ -225,10 +226,13 @@ let goal_verification_failure_post_id (failure : goal_verification_failure) =
   "goal-verification-failed:" ^ failure.goal_id ^ ":" ^ failure.request_id
 
 let failure_judgment_post_id (fj : failure_judgment) =
-  (* Stable per (runtime, class) so repeats of the same deterministic failure
-     collapse under queue identity dedup instead of accumulating a backlog. *)
+  (* Stable per (runtime, class, typed boundary) so repeats from the same
+     execution boundary collapse under queue identity dedup without merging
+     failures that require materially different judgment context. *)
   "failure-judgment:" ^ fj.fj_runtime_id ^ ":"
   ^ Keeper_runtime_failure_route.judgment_class_label fj.fj_judgment
+  ^ ":"
+  ^ Keeper_runtime_failure_route.judgment_provenance_label fj.fj_provenance
 
 let goal_assignment_post_id (ga : goal_assignment) =
   (* Stable per goal: re-assigning the same goal before the keeper consumes
@@ -296,10 +300,21 @@ let identity_payload = function
     | Goal_verification_failed _ ) as payload ->
     payload
 
+let failure_judgment_identity_equal left right =
+  String.equal left.fj_runtime_id right.fj_runtime_id
+  && left.fj_judgment = right.fj_judgment
+  && Keeper_runtime_failure_route.judgment_provenance_same_boundary
+       left.fj_provenance
+       right.fj_provenance
+
 let stimulus_identity_equal a b =
   String.equal a.post_id b.post_id
   && a.urgency = b.urgency
-  && identity_payload a.payload = identity_payload b.payload
+  &&
+  match a.payload, b.payload with
+  | Failure_judgment left, Failure_judgment right ->
+    failure_judgment_identity_equal left right
+  | _ -> identity_payload a.payload = identity_payload b.payload
 
 let to_list (queue : t) : stimulus list =
   match queue.back_rev with
@@ -608,6 +623,8 @@ let payload_to_yojson = function
       ; "runtime_id", `String fj.fj_runtime_id
       ; "judgment_class",
         `String (Keeper_runtime_failure_route.judgment_class_label fj.fj_judgment)
+      ; ( "provenance"
+        , Keeper_runtime_failure_route.judgment_provenance_to_yojson fj.fj_provenance )
       ; "detail", `String fj.fj_detail
       ]
   | Goal_assigned ga ->
@@ -741,10 +758,23 @@ let payload_of_yojson json =
       | None ->
         Error (Printf.sprintf "unknown failure_judgment class: %s" judgment_label)
     in
+    let* provenance =
+      match List.assoc_opt "provenance" fields with
+      | Some json -> Keeper_runtime_failure_route.judgment_provenance_of_yojson json
+      | None ->
+        (* Explicit migration state for pre-provenance durable envelopes. New
+           producers never emit it, but old queues remain replayable without
+           inventing an execution boundary. *)
+        Ok Keeper_runtime_failure_route.Legacy_unattributed
+    in
     let* detail = string_field ~context "detail" fields in
     Ok
       (Failure_judgment
-         { fj_runtime_id = runtime_id; fj_judgment = judgment; fj_detail = detail })
+         { fj_runtime_id = runtime_id
+         ; fj_judgment = judgment
+         ; fj_provenance = provenance
+         ; fj_detail = detail
+         })
   | "goal_assigned" ->
     let* goal_id = string_field ~context "goal_id" fields in
     let* goal_title = string_field ~context "goal_title" fields in

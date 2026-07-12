@@ -621,6 +621,16 @@ let compact_memory_bank_if_needed
             consolidated_parsed
         in
         let deduped = dedup_by_key memory_row_key by_recency in
+        (* RFC-0327 §A1: after exact-key dedup, also drop similarity
+           duplicates (jaccard >= 0.85).  This catches paraphrase rows
+           that share enough tokens with an earlier row. *)
+        let deduped, _sim_dropped, _sim_merge_map =
+          similarity_dedup
+            ~threshold:0.85
+            ~key_of:memory_row_key
+            ~text_of:(fun row -> row.text)
+            deduped
+        in
         let dedup_dropped = max 0 (before_notes - List.length deduped) in
         if List.length deduped <= target_notes && dedup_dropped = 0 && invalid = 0
         then
@@ -666,7 +676,9 @@ let compact_memory_bank_if_needed
                   Hashtbl.replace kind_dropped_keys key row.kind
           in
           let recent_floor = max 16 (min 64 (target_notes / 5)) in
-          by_recency
+          (* P0 fix: use deduped (not by_recency) to prevent
+             similarity-deduped rows from being re-introduced. *)
+          deduped
           |> take recent_floor
           |> List.iter (fun row -> add_row ~ignore_kind_cap:false row);
           let by_priority =
@@ -682,7 +694,8 @@ let compact_memory_bank_if_needed
           in
           List.iter (fun row -> add_row ~ignore_kind_cap:false row) by_priority;
           if !selected_count < target_notes then
-            List.iter (fun row -> add_row ~ignore_kind_cap:true row) by_recency;
+            (* P0 fix: use deduped (not by_recency) for fallback too. *)
+            List.iter (fun row -> add_row ~ignore_kind_cap:true row) deduped;
           let selected =
             !selected_rev
             |> List.rev

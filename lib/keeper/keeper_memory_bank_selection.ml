@@ -41,6 +41,56 @@ let dedup_by_key (key_of : 'a -> string) (items : 'a list) : 'a list =
 
 let jaccard_similarity = Text_similarity.jaccard_similarity
 
+(** RFC-0327 §A1 — Remove rows that are similarity-duplicates of earlier rows.
+
+    For each row, compare its text against all preceding rows.  When the
+    jaccard similarity is >= [threshold], the later row is considered a
+    duplicate and is dropped.  Returns the filtered list together with
+    the count of dropped rows and a mapping from dropped-row identities
+    to the identity of the surviving (earlier) row.
+
+    This is intentionally separate from [dedup_by_key]: key-based dedup
+    catches exact matches cheaply; similarity dedup catches paraphrase
+    duplicates that share enough tokens. *)
+let similarity_dedup
+    ~(threshold : float)
+    ~(key_of : 'a -> string)
+    ~(text_of : 'a -> string)
+    (items : 'a list)
+  : 'a list * int * (string * string) list =
+  let n = List.length items in
+  if n <= 1 then (items, 0, [])
+  else
+    let arr = Array.of_list items in
+    let alive = Array.make n true in
+    let merge_map : (string * string) list ref = ref [] in
+    let drop_count = ref 0 in
+    for i = 1 to n - 1 do
+      if alive.(i) then begin
+        let ti = text_of arr.(i) in
+        let dominated = ref false in
+        for j = 0 to i - 1 do
+          if alive.(j) && not !dominated then begin
+            let tj = text_of arr.(j) in
+            let sim = jaccard_similarity ti tj in
+            if Float.compare sim threshold >= 0 then begin
+              dominated := true;
+              alive.(i) <- false;
+              incr drop_count;
+              merge_map :=
+                (key_of arr.(i), key_of arr.(j)) :: !merge_map
+            end
+          end
+        done
+      end
+    done;
+    let result =
+      Array.to_list arr
+      |> List.mapi (fun idx item -> (alive.(idx), item))
+      |> List.filter_map (fun (keep, item) -> if keep then Some item else None)
+    in
+    (result, !drop_count, List.rev !merge_map)
+
 (* Punctuation strip used by the dedup key — fully static, hoist to
    module level so the DFA is built once per process. *)
 let normalize_punct_re =

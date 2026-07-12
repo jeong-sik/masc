@@ -100,6 +100,12 @@ type judgment_provenance =
   | Completion_contract
   | Legacy_unattributed
 
+type error_boundary =
+  | Masc_execution
+  | Oas_execution
+(** Actual producer boundary supplied by the caller. Ambiguous SDK constructors
+    such as [Config] and [Internal] do not carry their own origin. *)
+
 type route =
   | Retry_after_pacing of
       { pacing : pacing_class
@@ -117,12 +123,11 @@ type route =
             by [Keeper_internal_error.cap_blocker_detail]. Never matched. *)
       }
 
-val route_of_error : Agent_sdk.Error.sdk_error -> route
-(** Total over every [sdk_error] class: MASC-internal classified errors
-    route by their [Keeper_internal_error.masc_internal_error] variant;
-    raw API/Provider errors route by their typed payloads; the non-provider
-    families ([Agent]/[Mcp]/[Config]/[Serialization]/[Io]/[Orchestration]/
-    [Internal]) escalate for judgment. No arm returns "no route". *)
+val route_of_error : boundary:error_boundary -> Agent_sdk.Error.sdk_error -> route
+(** Total over every [sdk_error] class. The caller supplies the actual execution
+    boundary so constructors shared by MASC and OAS are never used as provenance
+    inference. MASC-internal typed envelopes are decoded only at
+    [Masc_execution]. No arm returns "no route". *)
 
 val retry_after_of_route : route -> float option
 (** [Some hint] only for [Retry_after_pacing] carrying a provider hint.

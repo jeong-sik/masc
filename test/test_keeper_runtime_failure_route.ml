@@ -7,10 +7,16 @@
 
 module KFR = Keeper_runtime_failure_route
 
+let route_of_oas_error = KFR.route_of_error ~boundary:KFR.Oas_execution
+let route_of_masc_error = KFR.route_of_error ~boundary:KFR.Masc_execution
+
 let route = Alcotest.testable (fun fmt r -> Format.pp_print_string fmt (KFR.route_kind_label r ^ ":" ^ KFR.route_class_label r)) ( = )
 
 let check_route name expected err =
-  Alcotest.check route name expected (KFR.route_of_error err)
+  Alcotest.check route name expected (route_of_oas_error err)
+
+let check_masc_route name expected err =
+  Alcotest.check route name expected (route_of_masc_error err)
 
 let internal_err masc_internal =
   Keeper_internal_error.sdk_error_of_masc_internal_error masc_internal
@@ -33,7 +39,7 @@ let test_api_hard_quota_message_wins () =
       (Llm_provider.Retry.RateLimited
          { retry_after = None; message = "You have exceeded your current quota." })
   in
-  match KFR.route_of_error err with
+  match route_of_oas_error err with
   | KFR.Retry_after_pacing { pacing = KFR.Hard_quota; _ } -> ()
   | (KFR.Retry_after_pacing _ | KFR.Rotate_now _ | KFR.Escalate_judgment _) as other ->
     (* Guards against OAS predicate drift: [Retry.is_hard_quota] owns the
@@ -63,7 +69,7 @@ let test_api_server_error_status_split () =
     (Agent_sdk.Error.Api
        (Llm_provider.Retry.ServerError { status = 503; message = "unavailable" }));
   match
-    KFR.route_of_error
+    route_of_oas_error
       (Agent_sdk.Error.Api
          (Llm_provider.Retry.ServerError { status = 418; message = "teapot" }))
   with
@@ -78,7 +84,7 @@ let test_api_auth_rotates_invalid_request_judges () =
     (KFR.Rotate_now { rotate = KFR.Auth_failed })
     (Agent_sdk.Error.Api (Llm_provider.Retry.AuthError { message = "401" }));
   match
-    KFR.route_of_error
+    route_of_oas_error
       (Agent_sdk.Error.Api
          (Llm_provider.Retry.InvalidRequest
             { message = "bad body"
@@ -111,7 +117,7 @@ let test_provider_quota_family_threads_hint () =
 
 let test_provider_config_judges () =
   match
-    KFR.route_of_error
+    route_of_oas_error
       (Agent_sdk.Error.Provider
          (Llm_provider.Error.MissingApiKey { var_name = "GLM_API_KEY" }))
   with
@@ -131,7 +137,7 @@ let test_masc_internal_backpressure_hint () =
          ; cooldown_cause = None
          })
   in
-  check_route
+  check_masc_route
     "masc backpressure carries typed Explicit hint"
     (KFR.Retry_after_pacing
        { pacing = KFR.Capacity_backpressure; retry_after = Some 45.0 })
@@ -139,11 +145,11 @@ let test_masc_internal_backpressure_hint () =
   Alcotest.(check (option (float 1e-6)))
     "retry_after_of_route extracts the hint"
     (Some 45.0)
-    (KFR.retry_after_of_route (KFR.route_of_error err))
+    (KFR.retry_after_of_route (route_of_masc_error err))
 
 let test_masc_internal_judgment_classes () =
   (match
-     KFR.route_of_error
+     route_of_masc_error
        (internal_err
           (Keeper_internal_error.Ambiguous_post_commit
              { is_timeout = false; tools = [ "masc_done" ]; original_error = "eio" }))
@@ -153,7 +159,7 @@ let test_masc_internal_judgment_classes () =
      Alcotest.failf "ambiguous post-commit should judge, got %s"
        (KFR.route_kind_label other));
   (match
-     KFR.route_of_error
+     route_of_masc_error
        (internal_err
           (Keeper_internal_error.Internal_contract_rejected { reason = "empty" }))
    with
@@ -166,14 +172,14 @@ let test_masc_internal_judgment_classes () =
    | other ->
      Alcotest.failf "contract rejection should judge, got %s"
        (KFR.route_kind_label other));
-  check_route
+  check_masc_route
     "admission rejection paces (lane backpressure)"
     (KFR.Retry_after_pacing
        { pacing = KFR.Admission_backpressure; retry_after = None })
     (internal_err
        (Keeper_internal_error.Admission_queue_rejected
           { keeper_name = "k"; reason = "lane full" }));
-  check_route
+  check_masc_route
     "capacity-exhausted runtime paces"
     (KFR.Retry_after_pacing
        { pacing = KFR.Capacity_backpressure; retry_after = None })
@@ -182,15 +188,26 @@ let test_masc_internal_judgment_classes () =
           { runtime_id = "r"; reason = Keeper_internal_error.Capacity_exhausted }))
 
 let test_non_provider_families_judge () =
-  (match KFR.route_of_error (Agent_sdk.Error.Internal "boom") with
-   | KFR.Escalate_judgment { judgment = KFR.Internal_opaque; _ } -> ()
+  let raw_internal = Agent_sdk.Error.Internal "boom" in
+  (match route_of_oas_error raw_internal with
+   | KFR.Escalate_judgment
+       { judgment = KFR.Internal_opaque; provenance = KFR.Oas_internal_error; _ } ->
+     ()
    | other ->
      Alcotest.failf "raw Internal should judge, got %s" (KFR.route_kind_label other));
+  (match route_of_masc_error raw_internal with
+   | KFR.Escalate_judgment
+       { judgment = KFR.Internal_opaque; provenance = KFR.Masc_internal_error; _ } ->
+     ()
+   | other ->
+     Alcotest.failf
+       "MASC-produced raw Internal must preserve its actual boundary, got %s"
+       (KFR.route_kind_label other));
   (* RFC-0313 W3: an idle loop is a behavioral contract judgment, not an
      opaque internal error (it was the legacy ladder's manual-resume pause
      class). *)
   (match
-     KFR.route_of_error
+     route_of_oas_error
        (Agent_sdk.Error.Agent
           (Agent_sdk.Error.IdleDetected { consecutive_idle_turns = 3 }))
    with
@@ -204,7 +221,7 @@ let test_non_provider_families_judge () =
      Alcotest.failf "idle loop should judge contract, got %s"
        (KFR.route_kind_label other));
   match
-    KFR.route_of_error
+    route_of_oas_error
       (Agent_sdk.Error.Mcp (Agent_sdk.Error.InitializeFailed { detail = "handshake" }))
   with
   | KFR.Escalate_judgment { judgment = KFR.Protocol_error; _ } -> ()

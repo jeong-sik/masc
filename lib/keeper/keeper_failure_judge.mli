@@ -22,22 +22,14 @@ type run_result =
   ; verdict : Keeper_failure_judgment_contract.verdict
   }
 
-type error_disposition =
-  | Requeue_after_pacing of
-      { runtime_id : string
-      ; retry_after : float option
-      }
-  | Requeue_after_rotation of { runtime_id : string }
-  | Escalate_judge_failure
+type error_disposition = Escalate_judge_failure
 
 val error_detail : run_error -> string
 val error_disposition : run_error -> error_disposition
 val error_disposition_label : error_disposition -> string
-(** Total typed routing for judge-boundary failures. Retryable dispositions
-    retain the exact configured runtime identity and provider retry hint so the
-    owning Keeper lane can record pacing before it requeues. Configuration,
-    prompt, response, and deterministic OAS failures terminate the judgment
-    stimulus explicitly. *)
+(** A failure of the single configured structured-judge boundary terminates the
+    judgment stimulus explicitly. There is no alternate judge runtime to rotate
+    to, and a process-local pacing table is not durable retry authority. *)
 
 val resolve_runtime_id : unit -> (string, run_error) result
 (** Resolve the same configured structured-judge lane used by {!run}. This

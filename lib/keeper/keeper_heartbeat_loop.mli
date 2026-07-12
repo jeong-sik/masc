@@ -60,17 +60,19 @@ type heartbeat_event_intake = {
   event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
 }
 
-(** Closed pre-intake admission result. A blocking approval is classified
-    before durable dequeue, just like fd/disk pressure, so a blocked cycle does
-    not repeatedly lease and requeue the same stimulus. *)
+(** Closed pre-intake admission result. Blocking approval and explicit Keeper
+    pause are classified before durable dequeue, just like fd/disk pressure, so
+    a blocked cycle does not repeatedly lease and requeue the same stimulus. *)
 type turn_intake_admission =
   | Intake_admitted
   | Intake_pressure_blocked of Keeper_pressure_admission.block
   | Intake_blocking_approval_pending
+  | Intake_keeper_paused
 
 val classify_turn_intake_admission :
   pressure:Keeper_pressure_admission.decision ->
   blocking_approval_pending:bool ->
+  keeper_paused:bool ->
   turn_intake_admission
 
 val heartbeat_event_intake :

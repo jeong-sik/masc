@@ -45,6 +45,10 @@ type judgment_provenance =
   | Completion_contract
   | Legacy_unattributed
 
+type error_boundary =
+  | Masc_execution
+  | Oas_execution
+
 type route =
   | Retry_after_pacing of
       { pacing : pacing_class
@@ -167,36 +171,73 @@ let route_of_provider_error ~err (p : Llm_provider.Error.provider_error) =
   | Llm_provider.Error.ProviderTerminal _ ->
     judge Provider_integration
 
-let route_of_error (err : Agent_sdk.Error.sdk_error) : route =
-  match Keeper_internal_error.classify_masc_internal_error err with
-  | Some internal -> route_of_masc_internal ~err internal
-  | None ->
-    (match err with
-     | Agent_sdk.Error.Api api -> route_of_api_error ~err api
-     | Agent_sdk.Error.Provider p -> route_of_provider_error ~err p
-     | Agent_sdk.Error.Mcp _ -> judge ~err ~provenance:Oas_mcp_error Protocol_error
-     | Agent_sdk.Error.Config _ ->
-       judge ~err ~provenance:Oas_config_error Config_mismatch
-     | Agent_sdk.Error.Agent
-         (Agent_sdk.Error.IdleDetected { consecutive_idle_turns }) ->
-       (* RFC-0313 W3: an idle loop (repeated no-usable-progress turns) was
-          a manual-resume pause class on the legacy ladder; under existence
-          invariance it escalates as a behavioral contract judgment, not as
-          an opaque internal error. *)
-       judge
-         ~err
-         ~provenance:(Oas_agent_idle_detected { consecutive_idle_turns })
-         Contract_violation
-     | Agent_sdk.Error.Agent _ ->
-       judge ~err ~provenance:Oas_agent_error Internal_opaque
-     | Agent_sdk.Error.Serialization _ ->
-       judge ~err ~provenance:Oas_serialization_error Internal_opaque
-     | Agent_sdk.Error.Io _ ->
-       judge ~err ~provenance:Oas_io_error Internal_opaque
-     | Agent_sdk.Error.Orchestration _ ->
-       judge ~err ~provenance:Oas_orchestration_error Internal_opaque
-     | Agent_sdk.Error.Internal _ ->
-       judge ~err ~provenance:Oas_internal_error Internal_opaque)
+let provenance_for_boundary boundary oas_provenance =
+  match boundary with
+  | Oas_execution -> oas_provenance
+  | Masc_execution -> Masc_internal_error
+;;
+
+let route_of_error_family ~boundary (err : Agent_sdk.Error.sdk_error) : route =
+  match err with
+  | Agent_sdk.Error.Api api -> route_of_api_error ~err api
+  | Agent_sdk.Error.Provider p -> route_of_provider_error ~err p
+  | Agent_sdk.Error.Mcp _ ->
+    judge
+      ~err
+      ~provenance:(provenance_for_boundary boundary Oas_mcp_error)
+      Protocol_error
+  | Agent_sdk.Error.Config _ ->
+    judge
+      ~err
+      ~provenance:(provenance_for_boundary boundary Oas_config_error)
+      Config_mismatch
+  | Agent_sdk.Error.Agent
+      (Agent_sdk.Error.IdleDetected { consecutive_idle_turns }) ->
+    (* RFC-0313 W3: an idle loop (repeated no-usable-progress turns) was
+       a manual-resume pause class on the legacy ladder; under existence
+       invariance it escalates as a behavioral contract judgment, not as
+       an opaque internal error. *)
+    judge
+      ~err
+      ~provenance:
+        (provenance_for_boundary
+           boundary
+           (Oas_agent_idle_detected { consecutive_idle_turns }))
+      Contract_violation
+  | Agent_sdk.Error.Agent _ ->
+    judge
+      ~err
+      ~provenance:(provenance_for_boundary boundary Oas_agent_error)
+      Internal_opaque
+  | Agent_sdk.Error.Serialization _ ->
+    judge
+      ~err
+      ~provenance:(provenance_for_boundary boundary Oas_serialization_error)
+      Internal_opaque
+  | Agent_sdk.Error.Io _ ->
+    judge
+      ~err
+      ~provenance:(provenance_for_boundary boundary Oas_io_error)
+      Internal_opaque
+  | Agent_sdk.Error.Orchestration _ ->
+    judge
+      ~err
+      ~provenance:(provenance_for_boundary boundary Oas_orchestration_error)
+      Internal_opaque
+  | Agent_sdk.Error.Internal _ ->
+    judge
+      ~err
+      ~provenance:(provenance_for_boundary boundary Oas_internal_error)
+      Internal_opaque
+;;
+
+let route_of_error ~boundary (err : Agent_sdk.Error.sdk_error) : route =
+  match boundary with
+  | Oas_execution -> route_of_error_family ~boundary err
+  | Masc_execution ->
+    (match Keeper_internal_error.classify_masc_internal_error err with
+     | Some internal -> route_of_masc_internal ~err internal
+     | None -> route_of_error_family ~boundary err)
 
 let retry_after_of_route = function
   | Retry_after_pacing { retry_after; _ } -> retry_after

@@ -15,13 +15,7 @@ type run_result =
   ; verdict : Keeper_failure_judgment_contract.verdict
   }
 
-type error_disposition =
-  | Requeue_after_pacing of
-      { runtime_id : string
-      ; retry_after : float option
-      }
-  | Requeue_after_rotation of { runtime_id : string }
-  | Escalate_judge_failure
+type error_disposition = Escalate_judge_failure
 
 let prompt_name = Keeper_prompt_names.failure_judgment
 let schema_name = "keeper_failure_judgment"
@@ -43,23 +37,9 @@ let error_detail = function
       detail
 ;;
 
-let error_disposition = function
-  | Runtime_configuration_error _
-  | Prompt_contract_error _
-  | Response_contract_error _ ->
-    Escalate_judge_failure
-  | Oas_error { runtime_id; error } ->
-    (match Keeper_runtime_failure_route.route_of_error error with
-     | Keeper_runtime_failure_route.Retry_after_pacing { retry_after; _ } ->
-       Requeue_after_pacing { runtime_id; retry_after }
-     | Keeper_runtime_failure_route.Rotate_now _ ->
-       Requeue_after_rotation { runtime_id }
-     | Keeper_runtime_failure_route.Escalate_judgment _ -> Escalate_judge_failure)
-;;
+let error_disposition _ = Escalate_judge_failure
 
 let error_disposition_label = function
-  | Requeue_after_pacing _ -> "requeue_after_pacing"
-  | Requeue_after_rotation _ -> "requeue_after_rotation"
   | Escalate_judge_failure -> "escalate_judge_failure"
 ;;
 

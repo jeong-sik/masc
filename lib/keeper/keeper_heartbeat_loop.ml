@@ -67,13 +67,16 @@ type turn_intake_admission =
   | Intake_admitted
   | Intake_pressure_blocked of Keeper_pressure_admission.block
   | Intake_blocking_approval_pending
+  | Intake_keeper_paused
 
-let classify_turn_intake_admission ~pressure ~blocking_approval_pending =
+let classify_turn_intake_admission ~pressure ~blocking_approval_pending ~keeper_paused =
   match pressure with
   | Keeper_pressure_admission.Blocked block -> Intake_pressure_blocked block
   | Keeper_pressure_admission.Admitted ->
     if blocking_approval_pending
     then Intake_blocking_approval_pending
+    else if keeper_paused
+    then Intake_keeper_paused
     else Intake_admitted
 ;;
 
@@ -339,11 +342,6 @@ let settlement_of_cycle_outcome ~settled_at ~stop_requested ~lease:_ = function
     settlement_of_failure ~settled_at failure
   | Some (Cycle.Judgment_settled { outcome; _ }) ->
     (match outcome with
-     | Cycle.Judgment_requeue_after_pacing ->
-       Keeper_registry_event_queue.Requeue
-         Keeper_registry_event_queue.Retry_after_pacing
-     | Cycle.Judgment_requeue_after_rotation ->
-       Keeper_registry_event_queue.Requeue Keeper_registry_event_queue.Rotate_now
      | Cycle.Judgment_boundary_failed { detail } ->
        Keeper_registry_event_queue.Escalate
          { reason =
@@ -1331,11 +1329,15 @@ let run_heartbeat_loop
           classify_turn_intake_admission
             ~pressure:turn_admission
             ~blocking_approval_pending:approval_pending
+            ~keeper_paused:meta_current.paused
         in
         let admitted_turn =
           match intake_admission with
           | Intake_admitted -> true
-          | Intake_pressure_blocked _ | Intake_blocking_approval_pending -> false
+          | Intake_pressure_blocked _
+          | Intake_blocking_approval_pending
+          | Intake_keeper_paused ->
+            false
         in
         let keeper_health_blocker =
           if Health.is_healthy ~agent_name:meta_current.name then None else Some "unhealthy"
@@ -1364,6 +1366,17 @@ let run_heartbeat_loop
              ~reasons:
                [ Keeper_world_observation.skip_reason_to_string
                    Keeper_world_observation.Approval_pending
+               ];
+           Keeper_registry.touch_last_turn_ts
+             ~base_path:ctx.config.base_path
+             meta_current.name
+         | Intake_keeper_paused ->
+           Keeper_registry.record_skip_reasons
+             ~base_path:ctx.config.base_path
+             meta_current.name
+             ~reasons:
+               [ Keeper_world_observation.skip_reason_to_string
+                   Keeper_world_observation.Keeper_paused
                ];
            Keeper_registry.touch_last_turn_ts
              ~base_path:ctx.config.base_path

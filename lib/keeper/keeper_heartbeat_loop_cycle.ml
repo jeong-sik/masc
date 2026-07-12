@@ -57,8 +57,6 @@ type cycle_outcome =
       }
 
 and failure_judgment_terminal =
-  | Judgment_requeue_after_pacing
-  | Judgment_requeue_after_rotation
   | Judgment_boundary_failed of { detail : string }
   | Judgment_operator_required of
       { judge_runtime_id : string
@@ -117,18 +115,6 @@ let prepare_failure_judgment_turn
       (Keeper_runtime_failure_route.judgment_provenance_label request.fj_provenance)
       detail;
     (match disposition with
-     | Keeper_failure_judge.Requeue_after_pacing { runtime_id; retry_after } ->
-       Keeper_pacing_shadow.observe_failure
-         ~keeper_name
-         ~runtime_id
-         ~retry_after;
-       `Settle Judgment_requeue_after_pacing
-     | Keeper_failure_judge.Requeue_after_rotation { runtime_id } ->
-       Keeper_pacing_shadow.observe_failure
-         ~keeper_name
-         ~runtime_id
-         ~retry_after:None;
-       `Settle Judgment_requeue_after_rotation
      | Keeper_failure_judge.Escalate_judge_failure ->
        `Settle (Judgment_boundary_failed { detail }))
   | Ok { runtime_id = judge_runtime_id; verdict } ->

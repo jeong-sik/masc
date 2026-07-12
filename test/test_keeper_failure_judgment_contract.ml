@@ -118,17 +118,16 @@ let test_canonical_roundtrip () =
 ;;
 
 let test_typed_judge_error_disposition () =
-  let check_disposition label expected error =
+  let check_disposition label error =
     check
       bool
       label
       true
-      (Keeper_failure_judge.error_disposition error = expected)
+      (Keeper_failure_judge.error_disposition error
+       = Keeper_failure_judge.Escalate_judge_failure)
   in
   check_disposition
-    "OAS pacing error requeues"
-    (Keeper_failure_judge.Requeue_after_pacing
-       { runtime_id = "structured-judge"; retry_after = None })
+    "OAS pacing error terminates at the single judge boundary"
     (Keeper_failure_judge.Oas_error
        { runtime_id = "structured-judge"
        ; error =
@@ -137,9 +136,7 @@ let test_typed_judge_error_disposition () =
                 { retry_after = None; message = "slow down" })
        });
   check_disposition
-    "OAS credential error rotates"
-    (Keeper_failure_judge.Requeue_after_rotation
-       { runtime_id = "structured-judge" })
+    "OAS credential error cannot rotate a single judge runtime"
     (Keeper_failure_judge.Oas_error
        { runtime_id = "structured-judge"
        ; error =
@@ -148,7 +145,6 @@ let test_typed_judge_error_disposition () =
        });
   check_disposition
     "deterministic OAS error escalates"
-    Keeper_failure_judge.Escalate_judge_failure
     (Keeper_failure_judge.Oas_error
        { runtime_id = "structured-judge"
        ; error =
@@ -160,7 +156,6 @@ let test_typed_judge_error_disposition () =
        });
   check_disposition
     "judge idle loop terminates instead of requeueing itself"
-    Keeper_failure_judge.Escalate_judge_failure
     (Keeper_failure_judge.Oas_error
        { runtime_id = "structured-judge"
        ; error =
@@ -169,7 +164,6 @@ let test_typed_judge_error_disposition () =
        });
   check_disposition
     "response contract error escalates"
-    Keeper_failure_judge.Escalate_judge_failure
     (Keeper_failure_judge.Response_contract_error
        { runtime_id = "structured-judge"; detail = "invalid JSON" })
 ;;

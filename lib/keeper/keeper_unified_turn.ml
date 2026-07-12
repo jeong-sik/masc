@@ -981,7 +981,11 @@ dominant source of the observed CAS race exhaustion after
                      the heartbeat settles the current lease and, for
                      [Escalate_judgment], enqueues its typed successor in the
                      same durable event-queue transaction. *)
-                  let failure_route = Keeper_runtime_failure_route.route_of_error err in
+                  let failure_route =
+                    Keeper_runtime_failure_route.route_of_error
+                      ~boundary:Keeper_runtime_failure_route.Oas_execution
+                      err
+                  in
                   exact_failure_execution :=
                     Some
                       ( final_execution.runtime_id
@@ -1122,7 +1126,10 @@ dominant source of the observed CAS race exhaustion after
     | None ->
       { error
       ; runtime_id = Keeper_meta_contract.runtime_id_of_meta meta
-      ; route = Keeper_runtime_failure_route.route_of_error error
+      ; route =
+          Keeper_runtime_failure_route.route_of_error
+            ~boundary:Keeper_runtime_failure_route.Masc_execution
+            error
       ; source_lease_disposition = Follow_failure_route
       }
   in

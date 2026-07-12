@@ -18,8 +18,6 @@ type cycle_outcome =
       }
 
 and failure_judgment_terminal =
-  | Judgment_requeue_after_pacing
-  | Judgment_requeue_after_rotation
   | Judgment_boundary_failed of { detail : string }
   | Judgment_operator_required of
       { judge_runtime_id : string

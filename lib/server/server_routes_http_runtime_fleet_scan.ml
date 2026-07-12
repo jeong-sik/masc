@@ -35,13 +35,17 @@ let pause_elapsed_sec now (meta : Keeper_meta_contract.keeper_meta) =
   | Some updated_ts when updated_ts > 0.0 -> Some (max 0.0 (now -. updated_ts))
   | Some _ | None -> None
 
-let pause_kind (meta : Keeper_meta_contract.keeper_meta) =
-  if Keeper_supervisor_types.paused_meta_requires_reconcile_recovery meta then
-    "reconcile_gated"
-  else
-    match Keeper_supervisor_types.paused_meta_effective_auto_resume_after_sec meta with
-    | Some _ -> "auto_recoverable"
-    | None -> "operator_paused"
+type pause_kind = Keeper_activation_readiness.pause_kind =
+  | Active
+  | Reconcile_gated
+  | Auto_recoverable
+  | Operator_paused
+  | Latched_paused
+  | Unclassified_paused
+  | Dead_tombstone
+
+let pause_kind = Keeper_activation_readiness.pause_kind
+let pause_kind_to_wire = Keeper_activation_readiness.pause_kind_to_wire
 
 let pause_auto_resume_source (meta : Keeper_meta_contract.keeper_meta) =
   match meta.auto_resume_after_sec with
@@ -67,7 +71,7 @@ let paused_keeper_detail_json ~now ~name ~(autoboot_enabled : bool)
   `Assoc [
     ("name", `String name);
     ("autoboot_enabled", `Bool autoboot_enabled);
-    ("pause_kind", `String (pause_kind meta));
+    ("pause_kind", `String (pause_kind_to_wire (pause_kind meta)));
     ("auto_resume_after_sec", Json_util.float_opt_to_json effective_auto_resume_after_sec);
     ( "persisted_auto_resume_after_sec"
     , Json_util.float_opt_to_json meta.auto_resume_after_sec );

@@ -488,24 +488,36 @@ module For_testing : sig
     bool
 end
 
-(** Set fiber_wakeup for a specific keeper. RFC-0303 Phase 3: the no-progress
-    wake-tombstone gate is removed (retired detector), so a wake always signals
-    the fiber. *)
-val wakeup : base_path:string -> string -> unit
+type wakeup_intent =
+  | Reactive_signal
+  | Scheduled_signal
+  | Goal_signal
+  | Supervisor_resume
+  | Hitl_resolution
+  | Broadcast_signal
 
-type wakeup_running_outcome =
+type wakeup_outcome =
   | Signaled
   | Deferred_unregistered
   | Deferred_not_running of Keeper_state_machine.phase
+  | Deferred_lifecycle of Keeper_lifecycle_admission.autonomous_denial
 
-val wakeup_running : base_path:string -> string -> wakeup_running_outcome
+(** Signal a registered keeper without requiring a Running phase. Lifecycle
+    admission is still mandatory: paused and dead-tombstone lanes are never
+    made runnable by a hint signal. The typed intent is observability data,
+    not a policy bypass. *)
+val wakeup :
+  intent:wakeup_intent -> base_path:string -> string -> wakeup_outcome
+
+val wakeup_running :
+  intent:wakeup_intent -> base_path:string -> string -> wakeup_outcome
 (** Signal a registered Keeper only while its fiber phase is [Running]. The
     typed deferred outcomes let durable event producers distinguish an absent
     or inactive live hint without treating the already-committed payload as a
     delivery failure. *)
 
 (** Set fiber_wakeup for all running keepers. *)
-val wakeup_all : ?base_path:string -> unit -> unit
+val wakeup_all : intent:wakeup_intent -> ?base_path:string -> unit -> unit
 
 (** Fiber-level health based on Promise resolution state.
     Returns Fiber_unknown if the keeper is not registered. *)

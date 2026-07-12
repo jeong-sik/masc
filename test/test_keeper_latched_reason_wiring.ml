@@ -289,7 +289,7 @@ let test_operator_resume_clears_dead_tombstone_latch () =
        ~now:after_auto_resume
        { paused_due with latched_reason = None })
 
-let test_heartbeat_merge_preserves_only_typed_operator_pause () =
+let test_heartbeat_merge_preserves_typed_latched_pause () =
   let caller =
     { (make_meta "typed-operator-pause-merge-caller") with
       paused = false
@@ -315,6 +315,22 @@ let test_heartbeat_merge_preserves_only_typed_operator_pause () =
     "typed operator pause preserves reason"
     (Some wire_keeper_down)
     (latched_reason_wire preserved);
+  let latest_dead_tombstone =
+    { latest_operator_pause with
+      latched_reason = Some Keeper_latched_reason.Dead_tombstone
+    }
+  in
+  let dead_preserved =
+    Keeper_meta_merge.heartbeat_fields_from_disk
+      ~latest:latest_dead_tombstone
+      ~caller
+  in
+  check bool "typed dead tombstone remains paused" true dead_preserved.paused;
+  check
+    (option string)
+    "typed dead tombstone preserves terminal reason"
+    (Some wire_dead_tombstone)
+    (latched_reason_wire dead_preserved);
   let latest_unlabeled_pause =
     { latest_operator_pause with latched_reason = None }
   in
@@ -354,7 +370,7 @@ let () =
             test_dead_tombstone_latch_blocks_legacy_auto_resume
         ; test_case "operator resume clears dead-tombstone latch to re-enable recovery"
             `Quick test_operator_resume_clears_dead_tombstone_latch
-        ; test_case "heartbeat merge uses typed operator latch, not pause shape" `Quick
-            test_heartbeat_merge_preserves_only_typed_operator_pause
+        ; test_case "heartbeat merge preserves typed latch, not pause shape" `Quick
+            test_heartbeat_merge_preserves_typed_latched_pause
         ] )
     ]

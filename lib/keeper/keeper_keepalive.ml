@@ -809,6 +809,7 @@ let record_keeper_crashed
 type start_keepalive_outcome =
   | Keepalive_started of Keeper_registry.registry_entry
   | Keepalive_already_registered of Keeper_registry.registry_entry
+  | Keepalive_lifecycle_denied of Keeper_lifecycle_admission.autonomous_denial
   | Keepalive_identity_unrepairable
   | Keepalive_spawn_slot_denied of Keeper_registry.spawn_slot_denial_reason
   | Keepalive_registration_rejected of Keeper_registry.registration_error
@@ -824,6 +825,8 @@ let start_keepalive_outcome_to_string = function
       "already registered phase=%s lane=%s"
       (Keeper_state_machine.phase_to_string entry.phase)
       (Keeper_lane.Id.to_string (Keeper_lane.id entry.lane))
+  | Keepalive_lifecycle_denied denial ->
+    Keeper_lifecycle_admission.autonomous_denial_to_wire denial
   | Keepalive_identity_unrepairable -> "keeper identity drift could not be repaired"
   | Keepalive_spawn_slot_denied reason ->
     Keeper_registry.spawn_slot_denial_reason_to_detail reason
@@ -850,13 +853,65 @@ let start_keepalive_outcome_to_string = function
   | Keepalive_lane_ownership_lost -> "lane ownership lost before fiber fork"
   | Keepalive_fork_rejected error -> Keeper_lane.start_error_to_string error
 
+let record_lifecycle_start_denial
+      (meta : keeper_meta)
+      (denial : Keeper_lifecycle_admission.autonomous_denial)
+  =
+  let reason = Keeper_lifecycle_admission.autonomous_denial_to_wire denial in
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string LifecycleDispatchRejections)
+    ~labels:
+      [ "keeper", meta.name
+      ; "event", "autonomous_keepalive_start"
+      ; "reason", reason
+      ]
+    ();
+  publish_keeper_lifecycle
+    ~event:
+      (Keeper_lifecycle_events.Custom_event
+         { verb = Keeper_lifecycle_events.Admission_denied
+         ; phase = Some Keeper_state_machine.Offline
+         })
+    ~keeper_name:meta.name
+    ~detail:reason
+    ();
+  Log.Keeper.emit
+    Log.Info
+    ~category:Log.Heartbeat
+    ~details:
+      (`Assoc
+        [ "keeper", `String meta.name
+        ; "reason", `String reason
+        ; "lifecycle_state"
+        , `String
+            (Keeper_lifecycle_admission.state_to_wire
+               (Keeper_lifecycle_admission.state
+                  ~paused:meta.paused
+                  ~latched_reason:meta.latched_reason))
+        ])
+    (Printf.sprintf
+       "start_keepalive denied for %s by lifecycle admission: %s"
+       meta.name
+       reason)
+;;
+
 let start_keepalive
       ?(proactive_warmup_sec = 0)
       ?lifecycle_token
       (ctx : _ context)
-      (m : keeper_meta)
+  (m : keeper_meta)
   : start_keepalive_outcome
   =
+  let lifecycle_state =
+    Keeper_lifecycle_admission.state
+      ~paused:m.paused
+      ~latched_reason:m.latched_reason
+  in
+  match Keeper_lifecycle_admission.admit_autonomous lifecycle_state with
+  | Keeper_lifecycle_admission.Autonomous_denied denial ->
+    record_lifecycle_start_denial m denial;
+    Keepalive_lifecycle_denied denial
+  | Keeper_lifecycle_admission.Autonomous_admitted ->
   match repair_identity_drift_for_keepalive ?lifecycle_token ~ctx m with
   | None ->
     Otel_metric_store.inc_counter

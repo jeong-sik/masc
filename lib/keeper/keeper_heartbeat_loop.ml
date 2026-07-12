@@ -69,19 +69,25 @@ type single_claim_admission = Stimulus_intake.single_claim_admission =
 
 type turn_intake_admission =
   | Intake_admitted
+  | Intake_lifecycle_blocked of Keeper_lifecycle_admission.autonomous_denial
   | Intake_pressure_blocked of Keeper_pressure_admission.block
   | Intake_blocking_approval_pending
-  | Intake_keeper_paused
 
-let classify_turn_intake_admission ~pressure ~blocking_approval_pending ~keeper_paused =
-  match pressure with
-  | Keeper_pressure_admission.Blocked block -> Intake_pressure_blocked block
-  | Keeper_pressure_admission.Admitted ->
-    if blocking_approval_pending
-    then Intake_blocking_approval_pending
-    else if keeper_paused
-    then Intake_keeper_paused
-    else Intake_admitted
+let classify_turn_intake_admission
+      ~lifecycle
+      ~pressure
+      ~blocking_approval_pending
+  =
+  match lifecycle with
+  | Keeper_lifecycle_admission.Autonomous_denied denial ->
+    Intake_lifecycle_blocked denial
+  | Keeper_lifecycle_admission.Autonomous_admitted ->
+    (match pressure with
+     | Keeper_pressure_admission.Blocked block -> Intake_pressure_blocked block
+     | Keeper_pressure_admission.Admitted ->
+       if blocking_approval_pending
+       then Intake_blocking_approval_pending
+       else Intake_admitted)
 ;;
 
 let consume_single_heartbeat_stimulus = Stimulus_intake.consume_single_heartbeat_stimulus
@@ -1329,8 +1335,8 @@ let run_heartbeat_loop
           proactive_warmup_sec <= 0
           || now_ts -. keepalive_started_ts >= float_of_int proactive_warmup_sec
         in
-        (* Turn-intake preconditions (fd/disk pressure and a typed Blocking HITL
-           lane) are evaluated ONCE here, BEFORE board collection and durable
+        (* Turn-intake preconditions (typed lifecycle, fd/disk pressure, and a
+           typed Blocking HITL lane) are evaluated ONCE here, BEFORE board collection and durable
            stimulus intake. A blocked keeper therefore neither advances the
            board cursor nor leases and requeues the same event every heartbeat.
            Nonblocking approvals never enter this gate.
@@ -1349,19 +1355,40 @@ let run_heartbeat_loop
           Keeper_approval_queue.has_blocking_pending_for_keeper
             ~keeper_name:meta_current.name
         in
+        let lifecycle_state =
+          Keeper_lifecycle_admission.state
+            ~paused:meta_current.paused
+            ~latched_reason:meta_current.latched_reason
+        in
         let intake_admission =
           classify_turn_intake_admission
+            ~lifecycle:
+              (Keeper_lifecycle_admission.admit_autonomous lifecycle_state)
             ~pressure:turn_admission
             ~blocking_approval_pending:approval_pending
-            ~keeper_paused:meta_current.paused
         in
         let admitted_turn =
           match intake_admission with
           | Intake_admitted -> true
+          | Intake_lifecycle_blocked _
           | Intake_pressure_blocked _
-          | Intake_blocking_approval_pending
-          | Intake_keeper_paused ->
-            false
+          | Intake_blocking_approval_pending -> false
+        in
+        let lifecycle_blocked =
+          match intake_admission with
+          | Intake_lifecycle_blocked _ -> true
+          | Intake_admitted
+          | Intake_pressure_blocked _
+          | Intake_blocking_approval_pending -> false
+        in
+        let terminal_lifecycle_blocked =
+          match intake_admission with
+          | Intake_lifecycle_blocked
+              Keeper_lifecycle_admission.Autonomous_dead_tombstone -> true
+          | Intake_lifecycle_blocked (Keeper_lifecycle_admission.Autonomous_paused _) -> false
+          | Intake_admitted
+          | Intake_pressure_blocked _
+          | Intake_blocking_approval_pending -> false
         in
         let keeper_health_blocker =
           if Health.is_healthy ~agent_name:meta_current.name then None else Some "unhealthy"
@@ -1375,6 +1402,35 @@ let run_heartbeat_loop
         let provider_cooldown_pending = Option.is_some provider_cooldown_remaining_sec in
         (match intake_admission with
          | Intake_admitted -> ()
+         | Intake_lifecycle_blocked denial ->
+           let reason =
+             Keeper_lifecycle_admission.autonomous_denial_to_wire denial
+           in
+           Otel_metric_store.inc_counter
+             Keeper_metrics.(to_string LifecycleDispatchRejections)
+             ~labels:
+               [ "keeper", meta_current.name
+               ; "event", "heartbeat_pre_intake"
+               ; "reason", reason
+               ]
+             ();
+           Keeper_registry.record_skip_reasons
+             ~base_path:ctx.config.base_path
+             meta_current.name
+             ~reasons:[ "lifecycle_" ^ reason ];
+           Log.Keeper.info
+             "%s: heartbeat intake denied by lifecycle admission: %s"
+             meta_current.name
+             reason;
+           if terminal_lifecycle_blocked
+           then
+             (* A dead tombstone owns no runnable lane. Ordinary pause keeps
+                its lane parked so an explicit resume remains local. *)
+             Atomic.set stop true
+           else
+             Keeper_registry.touch_last_turn_ts
+               ~base_path:ctx.config.base_path
+               meta_current.name
          | Intake_pressure_blocked block ->
            Keeper_registry.record_skip_reasons
              ~base_path:ctx.config.base_path
@@ -1390,17 +1446,6 @@ let run_heartbeat_loop
              ~reasons:
                [ Keeper_world_observation.skip_reason_to_string
                    Keeper_world_observation.Approval_pending
-               ];
-           Keeper_registry.touch_last_turn_ts
-             ~base_path:ctx.config.base_path
-             meta_current.name
-         | Intake_keeper_paused ->
-           Keeper_registry.record_skip_reasons
-             ~base_path:ctx.config.base_path
-             meta_current.name
-             ~reasons:
-               [ Keeper_world_observation.skip_reason_to_string
-                   Keeper_world_observation.Keeper_paused
                ];
            Keeper_registry.touch_last_turn_ts
              ~base_path:ctx.config.base_path
@@ -1475,51 +1520,61 @@ let run_heartbeat_loop
             r)
         in
         let meta_after_proactive = turn_outcome.meta in
-        (* Turn failure threshold: registry tracks count (via unified_turn,
-                 and via [record_crashed_cycle_failure] for swallowed cycle
-                 exceptions), keepalive raises to terminate the fiber for
-                 supervisor restart. *)
-        let turn_fail_count =
-          Keeper_registry.get_turn_failures ~base_path:ctx.config.base_path m.name
-        in
-        (* RFC-0002: dispatch turn status event *)
-        Keeper_keepalive_signal.dispatch_keepalive_event
-          ~ctx
-          ~keeper_name:m.name
-          (turn_status_event
-             ~turn_fail_count
-             ~max_allowed:(Keeper_heartbeat_snapshot.max_consecutive_turn_failures ()));
-        if turn_fail_count >= Keeper_heartbeat_snapshot.max_consecutive_turn_failures ()
+        if not lifecycle_blocked
         then (
-          Keeper_registry.set_failure_reason
-            ~base_path:ctx.config.base_path
-            m.name
-            (Some (Keeper_registry.Turn_consecutive_failures turn_fail_count));
-          raise Keeper_registry.Keeper_fiber_crash);
-        (* Phase 1: work-as-heartbeat — renew point (b).
-                 After turn, call Workspace.heartbeat to prove workspace I/O health.
-                 On success: refresh freshness lease + reset consecutive_failures.
-                 On failure: leave timestamp unchanged → presence sync resumes next cycle.
-                 T6 audit: a crashed cycle proves nothing about health — do not
-                 refresh the lease or reset consecutive_failures for it. *)
-        if turn_outcome.cycle_crashed
-        then
-          Log.Keeper.info
-            "%s: skipping work-as-heartbeat refresh after crashed keepalive cycle"
-            m.name
-        else
-          refresh_work_as_heartbeat
+          (* Turn failure threshold: registry tracks count (via unified_turn,
+             and via [record_crashed_cycle_failure] for swallowed cycle
+             exceptions), keepalive raises to terminate the fiber for
+             supervisor restart. A lifecycle-blocked cycle did not run a turn
+             and must not emit a false [Turn_succeeded]. *)
+          let turn_fail_count =
+            Keeper_registry.get_turn_failures
+              ~base_path:ctx.config.base_path
+              m.name
+          in
+          (* RFC-0002: dispatch turn status event *)
+          Keeper_keepalive_signal.dispatch_keepalive_event
             ~ctx
-            ~meta_after_proactive
-            ~proactive_warmup_elapsed
-            ~work_as_hb
-            ~last_successful_heartbeat_ts
-            ~consecutive_failures;
+            ~keeper_name:m.name
+            (turn_status_event
+               ~turn_fail_count
+               ~max_allowed:
+                 (Keeper_heartbeat_snapshot.max_consecutive_turn_failures ()));
+          if
+            turn_fail_count
+            >= Keeper_heartbeat_snapshot.max_consecutive_turn_failures ()
+          then (
+            Keeper_registry.set_failure_reason
+              ~base_path:ctx.config.base_path
+              m.name
+              (Some (Keeper_registry.Turn_consecutive_failures turn_fail_count));
+            raise Keeper_registry.Keeper_fiber_crash);
+          (* Phase 1: work-as-heartbeat — renew point (b).
+             After turn, call Workspace.heartbeat to prove workspace I/O health.
+             On success: refresh freshness lease + reset consecutive_failures.
+             On failure: leave timestamp unchanged → presence sync resumes next cycle.
+             T6 audit: a crashed cycle proves nothing about health — do not
+             refresh the lease or reset consecutive_failures for it. *)
+          if turn_outcome.cycle_crashed
+          then
+            Log.Keeper.info
+              "%s: skipping work-as-heartbeat refresh after crashed keepalive cycle"
+              m.name
+          else
+            refresh_work_as_heartbeat
+              ~ctx
+              ~meta_after_proactive
+              ~proactive_warmup_elapsed
+              ~work_as_hb
+              ~last_successful_heartbeat_ts
+              ~consecutive_failures);
         let t_turn_end = Time_compat.now () in
         let t_recurring_start = t_turn_end in
         (* Recurring task dispatch (#3190) *)
-        let _recurring_dispatched =
-          dispatch_recurring_keepalive ~ctx ~meta_after_proactive ~now_ts
+        let _recurring_dispatch_count =
+          if lifecycle_blocked
+          then 0
+          else dispatch_recurring_keepalive ~ctx ~meta_after_proactive ~now_ts
         in
         let t_recurring_end = Time_compat.now () in
         let base =

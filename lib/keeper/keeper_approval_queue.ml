@@ -888,7 +888,12 @@ let record_resolution_delivery_failure ~keeper_name ~approval_id reason =
 
 let signal_resolution_after_commit ~base_path ~keeper_name ~approval_id =
   try
-    let outcome = Keeper_registry.wakeup_running ~base_path keeper_name in
+    let outcome =
+      Keeper_registry.wakeup_running
+        ~intent:Keeper_registry.Hitl_resolution
+        ~base_path
+        keeper_name
+    in
     let outcome_label, detail =
       match outcome with
       | Keeper_registry.Signaled -> "signaled", "running"
@@ -896,6 +901,9 @@ let signal_resolution_after_commit ~base_path ~keeper_name ~approval_id =
         "deferred_unregistered", "unregistered"
       | Keeper_registry.Deferred_not_running phase ->
         "deferred_not_running", Keeper_state_machine.phase_to_string phase
+      | Keeper_registry.Deferred_lifecycle denial ->
+        ( "deferred_lifecycle"
+        , Keeper_lifecycle_admission.autonomous_denial_to_wire denial )
     in
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string ApprovalResolutionSignal)

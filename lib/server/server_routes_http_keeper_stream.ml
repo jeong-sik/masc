@@ -1467,7 +1467,8 @@ let process_single_turn ~queued_turn
                  ; detail = persist_error
                  })
     in
-    push_worker_event (Stream_terminal { status; body; queued_outcome })
+    push_worker_event (Stream_terminal { status; body; queued_outcome });
+    Ok ()
   in
   let submit_result =
     match Keeper_msg_async.server_background_switch () with

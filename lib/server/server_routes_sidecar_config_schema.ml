@@ -201,8 +201,7 @@ let schema_field_types ?base_path id : (string * declared_type) list =
          Otel_metric_store.metric_sidecar_schema_field_types_json_parse_failures
          ~labels:[ "error_kind", "other" ]
          ();
-       [])
-;;
+       []))
 
 let coerce_value (typ : declared_type) (raw : string) : (toml_value, string) result =
   if String.length raw > max_value_bytes

@@ -67,22 +67,34 @@ let is_valid_branch_name s =
 (* Git Repository Utilities                     *)
 (* ============================================ *)
 
-(** Fast check for .git marker by walking parent directories.
+(** Walk parent directories to find .git marker.
+    Returns the directory containing .git, or None.
     Avoids spawning a subprocess when clearly not in a git repo. *)
-let has_git_marker path =
+let find_git_root path =
   let rec walk dir =
     let marker = Filename.concat dir ".git" in
-    if Sys.file_exists marker then true
+    if Sys.file_exists marker then Some dir
     else
       let parent = Filename.dirname dir in
-      if String.equal parent dir then false else walk parent
+      if String.equal parent dir then None else walk parent
   in
-  try walk path with Sys_error _ -> false
+  try walk path with Sys_error _ -> None
 
-(** Get git root directory *)
+(** Fast check for .git marker by walking parent directories. *)
+let has_git_marker path =
+  match find_git_root path with
+  | Some _ -> true
+  | None -> false
+
+(** Get git root directory.
+    Tries rev-parse first (most reliable when exec gate works),
+    falls back to parent-walk .git marker when rev-parse fails
+    (e.g. sandbox exec gate blocks subprocess). *)
 let git_root ~base_path =
   if not (has_git_marker base_path) then None
-  else run_argv_line ["git"; "-C"; base_path; "rev-parse"; "--show-toplevel"]
+  else match run_argv_line ["git"; "-C"; base_path; "rev-parse"; "--show-toplevel"] with
+    | Some root -> Some root
+    | None -> find_git_root base_path
 
 (** Check if directory is a git repository *)
 let is_git_repo ~base_path =

@@ -53,22 +53,3 @@ let preserve_operator_pause_from_disk
   else merged
 
 let heartbeat_fields_from_disk = preserve_operator_pause_from_disk
-
-(* Dead-tombstone cleanup is the authoritative writer of [paused] and
-   [latched_reason]: it records that the supervisor is tearing the keeper down
-   as a dead tombstone. This is the inverse ownership of
-   [preserve_operator_pause_from_disk], which lets a disk operator pause win so a
-   racing heartbeat (stale [latched_reason = None]) cannot erase it. On a CAS
-   retry the cleanup re-reads disk; were the retry to reuse the heartbeat merge
-   and find an operator pause on disk, [preserve_operator_pause_from_disk] would
-   copy the operator reason back and [write_meta_with_merge] would return [Ok ()]
-   while persisting [paused = true] with the wrong reason instead of
-   [Dead_tombstone]. This merge keeps [paused]/[latched_reason] with the cleanup
-   caller and still merges heartbeat-owned usage counters monotonically
-   (RFC-0225 §3.2) so a racing heartbeat increment is not lost. *)
-let dead_tombstone_cleanup_from_disk
-      ~(latest : Keeper_meta_contract.keeper_meta)
-      ~(caller : Keeper_meta_contract.keeper_meta)
-  =
-  let merged = monotonic_usage_counters ~latest ~caller in
-  { merged with paused = caller.paused; latched_reason = caller.latched_reason }

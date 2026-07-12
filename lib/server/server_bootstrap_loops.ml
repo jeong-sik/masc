@@ -348,79 +348,12 @@ let start_keeper_loops
   in
   let shutdown_inventory_p, shutdown_inventory_r = Eio.Promise.create () in
   let config = Mcp_server.workspace_config state in
-  fork_subsystem "keeper_shutdown_recovery" (fun () ->
-    let operation_requires_fence operation =
-      match operation.Keeper_shutdown_types.phase with
-      | Keeper_shutdown_types.Finalized _ -> false
-      | Keeper_shutdown_types.Prepared
-      | Keeper_shutdown_types.Joined_idle
-      | Keeper_shutdown_types.Finalizing_tasks _
-      | Keeper_shutdown_types.Cleanup_ready _
-      | Keeper_shutdown_types.Reconciliation_required _
-      | Keeper_shutdown_types.Blocked _ -> true
-    in
-    let inventory =
-      match Keeper_shutdown_store.list_all ~config with
-      | Error error -> Error (Keeper_shutdown_store.error_to_string error)
-      | Ok operations ->
-        List.fold_left
-          (fun restored operation ->
-             match restored with
-             | Error _ as error -> error
-             | Ok () when not (operation_requires_fence operation) -> Ok ()
-             | Ok () ->
-               (match
-                  Keeper_turn_admission.restore_shutdown
-                    ~base_path:config.base_path
-                    ~keeper_name:operation.keeper_name
-                    ~operation_id:operation.operation_id
-                with
-                | Keeper_turn_admission.Shutdown_restored
-                | Keeper_turn_admission.Shutdown_already_restored -> Ok ()
-                | Keeper_turn_admission.Shutdown_restore_conflict existing ->
-                  Error
-                    (Printf.sprintf
-                       "shutdown admission restore conflict: keeper=%s durable=%s existing=%s"
-                       operation.keeper_name
-                       (Keeper_shutdown_types.Operation_id.to_string
-                          operation.operation_id)
-                       (Keeper_shutdown_types.Operation_id.to_string existing))))
-          (Ok ())
-          operations
-        |> Result.map (fun () -> operations)
-    in
-    Eio.Promise.resolve shutdown_inventory_r inventory;
-    match inventory with
-    | Error detail ->
-      Log.Keeper.error "shutdown recovery inventory failed: %s" detail;
-      failwith detail
-    | Ok operations ->
-      Eio.Switch.run (fun recovery_sw ->
-        List.iter
-          (fun operation ->
-             Eio.Fiber.fork ~sw:recovery_sw (fun () ->
-               try
-                 match Keeper_shutdown_runtime.recover_operation ~config operation with
-                 | Ok recovered ->
-                   Log.Keeper.info
-                     "recovered shutdown operation keeper=%s operation=%s"
-                     recovered.Keeper_shutdown_types.keeper_name
-                     (Keeper_shutdown_types.Operation_id.to_string recovered.operation_id)
-                 | Error detail ->
-                   Log.Keeper.error
-                     "shutdown recovery failed keeper=%s operation=%s error=%s"
-                     operation.Keeper_shutdown_types.keeper_name
-                     (Keeper_shutdown_types.Operation_id.to_string operation.operation_id)
-                     detail
-               with
-               | Eio.Cancel.Cancelled _ as exn -> raise exn
-               | exn ->
-                 Log.Keeper.error
-                   "shutdown recovery crashed keeper=%s operation=%s error=%s"
-                   operation.Keeper_shutdown_types.keeper_name
-                   (Keeper_shutdown_types.Operation_id.to_string operation.operation_id)
-                   (Printexc.to_string exn)))
-          operations));
+  (* Completion recovery can publish [Dead_cleaned] and invoke
+     [Tombstone_reaped]. Install the production hook before any durable
+     receipt is replayed. *)
+  Keeper_subprocess_registry.register_default_cleanup_hook ();
+  Keeper_shutdown_finalize.register_completion_handler
+    Keeper_supervisor_cleanup_tombstone.handle_completion;
   let wait_for_lazy_startup () =
     (* Combines #10843 (per-task elapsed diagnostic, merged via #10854) with
        a per-task boot guard.  The diagnostic surface stays as #10854
@@ -569,6 +502,58 @@ let start_keeper_loops
   in
   Eio.Switch.on_release sw (fun () ->
     Agent_sdk_metrics_bridge.unsubscribe masc_event_bus keeper_lifecycle_sub);
+  (* Replay durable completion receipts only after the MASC event bus has its
+     SSE/metrics subscribers and lifecycle hooks are installed. Otherwise a
+     boot-time [Dead_cleaned] publish can return successfully while every
+     process-local sink is still absent. *)
+  fork_subsystem "keeper_shutdown_recovery" (fun () ->
+    let inventory =
+      match Keeper_shutdown_store.scan_inventory ~config with
+      | Error error -> Error (Keeper_shutdown_store.error_to_string error)
+      | Ok entries ->
+        Keeper_shutdown_runtime.restore_inventory_admission ~config entries
+    in
+    Eio.Promise.resolve shutdown_inventory_r inventory;
+    match inventory with
+    | Error detail ->
+      Log.Keeper.error "shutdown recovery inventory failed: %s" detail;
+      failwith detail
+    | Ok restored ->
+      List.iter
+        (fun corrupt ->
+           Log.Keeper.error
+             "corrupt shutdown operation retained under an exact Keeper admission fence: keeper=%s operation=%s path=%s error=%s"
+             corrupt.Keeper_shutdown_store.keeper_name
+             (Keeper_shutdown_types.Operation_id.to_string corrupt.operation_id)
+             corrupt.path
+             (Keeper_shutdown_store.error_to_string corrupt.error))
+        restored.corrupt_records;
+      Eio.Switch.run (fun recovery_sw ->
+        List.iter
+          (fun operation ->
+             Eio.Fiber.fork ~sw:recovery_sw (fun () ->
+               try
+                 match Keeper_shutdown_runtime.recover_operation ~config operation with
+                 | Ok recovered ->
+                   Log.Keeper.info
+                     "recovered shutdown operation keeper=%s operation=%s"
+                     recovered.Keeper_shutdown_types.keeper_name
+                     (Keeper_shutdown_types.Operation_id.to_string recovered.operation_id)
+                 | Error detail ->
+                   Log.Keeper.error
+                     "shutdown recovery failed keeper=%s operation=%s error=%s"
+                     operation.Keeper_shutdown_types.keeper_name
+                     (Keeper_shutdown_types.Operation_id.to_string operation.operation_id)
+                     detail
+               with
+               | Eio.Cancel.Cancelled _ as exn -> raise exn
+               | exn ->
+                 Log.Keeper.error
+                   "shutdown recovery crashed keeper=%s operation=%s error=%s"
+                   operation.Keeper_shutdown_types.keeper_name
+                   (Keeper_shutdown_types.Operation_id.to_string operation.operation_id)
+                   (Printexc.to_string exn)))
+          restored.operations));
   (* Spawn the OAS bus depth sampler so warnings surface on stdout
      even when no external telemetry backend is attached.
 
@@ -768,10 +753,6 @@ let start_keeper_loops
      Log.Server.error
        "subsystem orchestrator failed to start: %s"
        (Printexc.to_string exn));
-  (* RFC-0036 Phase A.3: register default keeper-lifecycle cleanup hooks
-     once during bootstrap. The call is Atomic-guarded and idempotent so
-     re-bootstrapping (e.g. tests) is safe. *)
-  Keeper_subprocess_registry.register_default_cleanup_hook ();
   (* Build read-only tool surface shared by both judges. *)
   let judge_tool_names =
     [ "masc_status"
@@ -940,19 +921,7 @@ let start_keeper_loops
       let shutdown_blocked_names_result =
         match shutdown_inventory with
         | Error detail -> Error detail
-        | Ok operations ->
-          Ok
-            (operations
-             |> List.filter_map (fun operation ->
-               match operation.Keeper_shutdown_types.phase with
-               | Keeper_shutdown_types.Finalized _ -> None
-               | Keeper_shutdown_types.Prepared
-               | Keeper_shutdown_types.Joined_idle
-               | Keeper_shutdown_types.Finalizing_tasks _
-               | Keeper_shutdown_types.Cleanup_ready _
-               | Keeper_shutdown_types.Reconciliation_required _
-               | Keeper_shutdown_types.Blocked _ -> Some operation.keeper_name)
-             |> List.sort_uniq String.compare)
+        | Ok restored -> Ok restored.Keeper_shutdown_runtime.blocked_keeper_names
       in
       let all_names = Keeper_meta_store.keeper_names config in
       let all_count = List.length all_names in

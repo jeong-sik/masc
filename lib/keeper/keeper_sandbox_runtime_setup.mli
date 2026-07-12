@@ -48,7 +48,12 @@ val docker_preflight_min_sec : float
 val docker_preflight_max_sec : float
 val docker_preflight_timeout : timeout_sec:float -> float
 val required_commands : string list
-type cleanup_result = { scanned : int; removed : int; errors : string list; }
+type cleanup_result =
+  { scanned : int
+  ; removed : int
+  ; already_absent : int
+  ; errors : string list
+  }
 val sandbox_component_label_key : string
 val sandbox_component_label_value : string
 val sandbox_base_path_hash_label_key : string

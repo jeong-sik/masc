@@ -86,7 +86,10 @@ let handle_keeper_down (ctx : _ context) args : tool_result =
       let request : Keeper_shutdown_prepare_join.request =
         { actor = ctx.agent_name
         ; cleanup_intent =
-            { remove_meta = get_bool args "remove_meta" false
+            { meta_disposition =
+                (if get_bool args "remove_meta" false
+                 then Keeper_shutdown_types.Remove_meta
+                 else Keeper_shutdown_types.Retain_operator_pause)
             ; remove_session = get_bool args "remove_session" false
             }
         }

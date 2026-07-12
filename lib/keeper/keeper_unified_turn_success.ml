@@ -814,6 +814,7 @@ let record_completion_contract_attention_failure
   let fj : Keeper_event_queue.failure_judgment =
     { fj_runtime_id = runtime_id
     ; fj_judgment = Keeper_runtime_failure_route.Contract_violation
+    ; fj_provenance = Keeper_runtime_failure_route.Completion_contract
     ; fj_detail = detail
     }
   in

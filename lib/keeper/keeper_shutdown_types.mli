@@ -11,8 +11,20 @@ module Operation_id : sig
   val equal : t -> t -> bool
 end
 
+type meta_disposition =
+  | Retain_operator_pause
+  | Retain_dead_tombstone
+  | Remove_meta
+
+type completion_action = Dead_tombstone_reaped
+
+type completion_receipt =
+  | Completion_not_requested
+  | Completion_pending of completion_action
+  | Completion_delivered of completion_action
+
 type cleanup_intent =
-  { remove_meta : bool
+  { meta_disposition : meta_disposition
   ; remove_session : bool
   }
 
@@ -78,6 +90,7 @@ type finalization_evidence =
   ; meta_removed : bool
   ; session_removed : bool
   ; registry_unregistered : bool
+  ; completion : completion_receipt
   }
 
 type phase =
@@ -108,7 +121,32 @@ type t =
   ; updated_at : string
   }
 
+type invariant_error =
+  | Schema_version_mismatch of
+      { expected_schema_version : int
+      ; actual_schema_version : int
+      }
+  | Finalized_meta_removed_mismatch of
+      { expected_meta_removed : bool
+      ; actual_meta_removed : bool
+      }
+  | Finalized_session_removed_mismatch of
+      { expected_session_removed : bool
+      ; actual_session_removed : bool
+      }
+  | Finalized_completion_mismatch of meta_disposition * completion_receipt
+
 val schema_version : int
+val meta_disposition_to_string : meta_disposition -> string
+val meta_disposition_of_string : string -> (meta_disposition, string) result
+val completion_action_to_string : completion_action -> string
+val completion_action_of_string : string -> (completion_action, string) result
+val invariant_error_to_string : invariant_error -> string
+val validate : t -> (unit, invariant_error) result
+val immutable_fields_equal : t -> t -> bool
+(** Compare every operation field that must remain fixed across revision
+    replacement. Progress fields ([revision], backlog version, join/finalization
+    evidence, phase, and [updated_at]) are intentionally excluded. *)
 val admission_lane_to_string : admission_lane -> string
 val admission_lane_of_string : string -> (admission_lane, string) result
 val failure_stage_to_string : failure_stage -> string

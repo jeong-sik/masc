@@ -775,6 +775,11 @@
  (libraries alcotest masc_test_deps))
 
 (test
+ (name test_keeper_failure_judgment_contract)
+ (modules test_keeper_failure_judgment_contract)
+ (libraries alcotest masc_test_deps))
+
+(test
  (name test_server_request_authority)
  (modules test_server_request_authority)
  (libraries alcotest masc_test_deps eio_main h2))

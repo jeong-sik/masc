@@ -20,6 +20,9 @@ module KFP = Keeper_failure_policy
 module KSP = Masc.Keeper_supervisor_self_preservation
 module KSR = Masc.Keeper_supervisor_reconcile_keepalive
 module Lane = Masc.Keeper_lane
+module Shutdown_finalize = Masc.Keeper_shutdown_finalize
+module Subprocess_registry = Masc.Keeper_subprocess_registry
+module Tombstone_cleanup = Masc.Keeper_supervisor_cleanup_tombstone
 
 let supervisor_agent_name = Sup.supervisor_agent_name
 
@@ -1945,10 +1948,13 @@ let test_max_restarts_exhaustion_preserves_current_task_when_owned_task_query_fa
 let with_reap_ready_dead_keeper name f =
   Eio_main.run @@ fun env ->
   ensure_fs env;
-  Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
+      Shutdown_finalize.For_testing.reset_remove_pending_confirms_by_target ();
+      Shutdown_finalize.For_testing.reset_completion_handler ();
+      Subprocess_registry.reset_for_testing ();
+      Masc.Keeper_process_switch.For_testing.clear ();
       KLH.reset_for_testing ();
       Reg.clear ();
       Masc.Keeper_runtime.reset_test_state base_dir;
@@ -1962,17 +1968,29 @@ let with_reap_ready_dead_keeper name f =
        | Error err -> fail err);
       ignore (Reg.register ~base_path:config.base_path name meta);
       Reg.mark_dead ~base_path:config.base_path name ~at:0.0;
-      let ctx : _ Keeper_types_profile.context =
-        {
-          config;
-          agent_name = supervisor_agent_name;
-          sw;
-          clock = Eio.Stdenv.clock env;
-          proc_mgr = Some (Eio.Stdenv.process_mgr env);
-          net = Some (Eio.Stdenv.net env);
-        }
+      let completion_bus =
+        Agent_sdk.Event_bus.create ~policy:Agent_sdk.Event_bus.Drop_oldest ()
       in
-      f ~config ctx)
+      Masc_event_bus.set completion_bus;
+      Subprocess_registry.register_default_cleanup_hook ();
+      Shutdown_finalize.register_remove_pending_confirms_by_target
+        (fun _config ~target_type:_ ~target_id:_ -> Ok 0);
+      Shutdown_finalize.register_completion_handler Tombstone_cleanup.handle_completion;
+      let run_sweep () =
+        Eio.Switch.run @@ fun sw ->
+        Sup.set_global_switch sw;
+        let ctx : _ Keeper_types_profile.context =
+          { config
+          ; agent_name = supervisor_agent_name
+          ; sw
+          ; clock = Eio.Stdenv.clock env
+          ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
+          ; net = Some (Eio.Stdenv.net env)
+          }
+        in
+        sweep_and_recover_no_materialize ctx
+      in
+      f ~config ~run_sweep)
 
 let event_label = function
   | KLH.Tombstone_reaped -> "tombstone_reaped"
@@ -1984,8 +2002,8 @@ let test_sweep_and_recover_fires_tombstone_reaped_hook () =
   let fired = ref [] in
   KLH.register (fun ~keeper_id event ->
     fired := (keeper_id, event_label event) :: !fired);
-  with_reap_ready_dead_keeper name @@ fun ~config ctx ->
-  sweep_and_recover_no_materialize ctx;
+  with_reap_ready_dead_keeper name @@ fun ~config ~run_sweep ->
+  run_sweep ();
   check (list (pair string string))
     "single Tombstone_reaped event"
     [ (name, "tombstone_reaped") ] (List.rev !fired);
@@ -2002,8 +2020,8 @@ let test_sweep_and_recover_swallows_failing_tombstone_hook () =
     raise (Failure "intentional tombstone hook failure"));
   KLH.register (fun ~keeper_id event ->
     later_hook_events := (keeper_id, event_label event) :: !later_hook_events);
-  with_reap_ready_dead_keeper name @@ fun ~config ctx ->
-  sweep_and_recover_no_materialize ctx;
+  with_reap_ready_dead_keeper name @@ fun ~config ~run_sweep ->
+  run_sweep ();
   check int "failing hook invoked exactly once" 1 !failing_hook_calls;
   check (list (pair string string))
     "later hook still observes Tombstone_reaped"

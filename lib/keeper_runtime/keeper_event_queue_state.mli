@@ -21,7 +21,16 @@ type requeue_reason =
 
 type escalation_reason =
   | Failure_judgment_requested
-  | Failure_judgment_failed
+  | Failure_judgment_boundary_failed of { detail : string }
+  | Failure_judgment_operator_required of
+      { judge_runtime_id : string
+      ; rationale : string
+      }
+
+val escalation_reason_requires_operator_attention : escalation_reason -> bool
+(** Closed policy for terminal escalation visibility.  Requesting an
+    independent failure judgment is a normal queue transition; a boundary
+    failure or explicit operator verdict requires operator attention. *)
 
 type settlement =
   | Ack
@@ -123,6 +132,7 @@ val release_legacy_inflight :
 val lease_to_yojson : lease -> Yojson.Safe.t
 val lease_of_yojson : Yojson.Safe.t -> (lease, string) result
 val transition_receipt_to_yojson : transition_receipt -> Yojson.Safe.t
+val transition_receipt_of_yojson : Yojson.Safe.t -> (transition_receipt, string) result
 val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result
 

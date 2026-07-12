@@ -9,8 +9,8 @@
 
    2. The NEW [Keeper_execution_receipt.operator_disposition] (which now
       parses [terminal_reason_code] once via [Keeper_terminal_reason.of_wire]
-      and exhaustive-matches) returns the SAME (disposition, reason) pair as
-      the frozen independent oracle over the cartesian product of
+      and exhaustive-matches) returns the same pair as the independent oracle,
+      including focused policy updates, over the cartesian product of
       (producer-string corpus) x (the small finite field matrix the
       classifier branches on). The oracle is intentionally NOT refactored to
       share code with production, so a priority-order regression in production
@@ -72,6 +72,7 @@ let read_meta_exn config keeper_name =
 let roundtrip_corpus =
   [ (* exact-match buckets *)
     "runtime_exhausted"
+  ; Keeper_internal_error.capacity_backpressure_kind
   ; "internal_error"
   ; "pre_dispatch_success"
   ; "provider_error"
@@ -254,6 +255,9 @@ let frozen_operator_disposition (receipt : R.t)
   in
   if String.equal terminal_reason "runtime_exhausted"
   then R.Disp_alert_exhausted, R.Reason_runtime_exhausted
+  else if
+    String.equal terminal_reason Keeper_internal_error.capacity_backpressure_kind
+  then R.Disp_fail_open_next_runtime, R.Reason_capacity_backpressure
   else if preflight_config_failure
   then R.Disp_pause_human, R.Reason_preflight_config_error
   else if
@@ -645,6 +649,78 @@ let () =
     "test_keeper_terminal_reason_typed: matrix cases=%d mismatches=%d\n"
     !count
     !mismatches
+;;
+
+let () =
+  let internal_error =
+    Keeper_internal_error.Capacity_backpressure
+      { runtime_id = "runtime-capacity"
+      ; source = Keeper_internal_error.Provider_capacity
+      ; detail = "provider health cooldown active before dispatch"
+      ; retry_after = Keeper_internal_error.No_retry_hint
+      ; cooldown_cause = None
+      }
+  in
+  let code =
+    internal_error
+    |> Keeper_internal_error.sdk_error_of_masc_internal_error
+    |> Masc.Keeper_agent_error.terminal_reason_code_of_sdk_error
+  in
+  check
+    "capacity producer uses canonical terminal kind"
+    (String.equal code Keeper_internal_error.capacity_backpressure_kind);
+  check
+    "capacity terminal kind decodes to closed variant"
+    (match Tr.of_wire code with
+     | Tr.Capacity_backpressure wire -> String.equal wire code
+     | _ -> false);
+  let receipt =
+    { base_receipt with
+      terminal_reason_code = code
+    ; error_kind = Some (R.error_kind_of_string "internal")
+    ; outcome = `Error
+    ; runtime_outcome = R.Runtime_not_observed
+    }
+  in
+  let got = R.operator_disposition receipt in
+  let want = R.Disp_fail_open_next_runtime, R.Reason_capacity_backpressure in
+  check
+    (Printf.sprintf
+       "capacity disposition want=%s got=%s"
+       (disp_pair_to_string want)
+       (disp_pair_to_string got))
+    (got = want);
+  check
+    "capacity pacing does not emit operator broadcast"
+    (not (R.needs_operator_broadcast (fst got)));
+  let opaque_internal =
+    { receipt with terminal_reason_code = code ^ "_unexpected" }
+  in
+  let got = R.operator_disposition opaque_internal in
+  let want = R.Disp_pause_human, R.Reason_internal_error in
+  check
+    (Printf.sprintf
+       "capacity lookalike remains opaque internal want=%s got=%s"
+       (disp_pair_to_string want)
+       (disp_pair_to_string got))
+    (got = want);
+  check
+    "opaque internal lookalike still emits operator broadcast"
+    (R.needs_operator_broadcast (fst got));
+  let noncanonical_case =
+    { receipt with terminal_reason_code = String.uppercase_ascii code }
+  in
+  let got = R.operator_disposition noncanonical_case in
+  let want = R.Disp_pause_human, R.Reason_internal_error in
+  check
+    (Printf.sprintf
+       "noncanonical capacity casing stays opaque want=%s got=%s"
+       (disp_pair_to_string want)
+       (disp_pair_to_string got))
+    (got = want);
+  check
+    "noncanonical capacity casing still emits operator broadcast"
+    (R.needs_operator_broadcast (fst got))
 ;;
 
 let () =

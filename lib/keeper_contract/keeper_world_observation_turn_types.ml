@@ -41,6 +41,10 @@ type event_queue_trigger =
           outlived it), the wake arrives with no live tool call to resume, so
           the keeper must be steered back to the originating conversation
           instead of proceeding on its own state. *)
+  | Failure_judgment_stimulus
+      (** Durable recovery control for a deterministic failed turn. This opens
+          the independent judge even when the failed Keeper is unhealthy or
+          its ordinary reactive lane is disabled. *)
 
 type turn_reason =
   | Mention_pending
@@ -50,6 +54,7 @@ type turn_reason =
   | No_progress_recovery_stimulus_pending
   | Connector_attention_pending
   | Hitl_resolved_pending
+  | Failure_judgment_pending
   | Scheduled_autonomous_turn
   | Scheduled_automation_due
   | Idle_cooldown_elapsed of
@@ -90,6 +95,7 @@ let turn_reason_to_string = function
   | No_progress_recovery_stimulus_pending -> "no_progress_recovery_stimulus_pending"
   | Connector_attention_pending -> "connector_attention_pending"
   | Hitl_resolved_pending -> "hitl_resolved_pending"
+  | Failure_judgment_pending -> "failure_judgment_pending"
   | Scheduled_autonomous_turn -> "scheduled_autonomous_turn"
   | Scheduled_automation_due -> "scheduled_automation_due"
   | Idle_cooldown_elapsed _ -> "idle_cooldown_elapsed"
@@ -106,6 +112,7 @@ let turn_reason_of_event_queue_trigger = function
   | Scheduled_automation_stimulus -> Scheduled_automation_due
   | Connector_attention_stimulus -> Connector_attention_pending
   | Hitl_resolved_stimulus -> Hitl_resolved_pending
+  | Failure_judgment_stimulus -> Failure_judgment_pending
 ;;
 
 let skip_reason_to_string = function

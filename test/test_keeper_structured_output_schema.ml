@@ -58,6 +58,7 @@ let all_provider_native_schema_cases =
   ; "governance_judge", Keeper_structured_output_schema.governance_judge_output_schema
   ; "fusion_judge", Keeper_structured_output_schema.fusion_judge_output_schema
   ; "verification_verdict", Keeper_structured_output_schema.verification_verdict_output_schema
+  ; "failure_judgment", Keeper_structured_output_schema.failure_judgment_output_schema
   ; ( "anti_rationalization_verdict"
     , Keeper_structured_output_schema.anti_rationalization_verdict_output_schema )
   ]
@@ -456,6 +457,22 @@ let test_tool_failure_recovery_judge_adapter_preserves_sdk_error () =
   | Ok text -> failf "expected SDK error, got %s" text
 ;;
 
+let test_failure_judgment_schema_uses_contract_ssot () =
+  let schema = Keeper_structured_output_schema.failure_judgment_output_schema in
+  check
+    (list string)
+    "failure judgment required fields"
+    [ "decision"; "guidance"; "rationale" ]
+    (required_strings schema);
+  check
+    (list string)
+    "failure judgment decision enum"
+    (List.sort String.compare Keeper_failure_judgment_contract.decision_tokens)
+    (schema |> schema_property "decision" |> enum_strings);
+  check bool "failure judgment verdict is closed" false
+    (allows_additional_properties schema)
+;;
+
 let () =
   run
     "keeper-structured-output-schema"
@@ -520,6 +537,10 @@ let () =
             "anti-rationalization verdict schema uses task SSOT"
             `Quick
             test_anti_rationalization_verdict_schema_uses_task_ssot
+        ; test_case
+            "failure judgment schema uses contract SSOT"
+            `Quick
+            test_failure_judgment_schema_uses_contract_ssot
         ] )
     ]
 ;;

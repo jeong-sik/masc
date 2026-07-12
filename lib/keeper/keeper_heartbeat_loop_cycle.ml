@@ -41,6 +41,8 @@ module Observations = Keeper_heartbeat_loop_observations
 
 type cycle_outcome =
   | Completed of keeper_meta
+  | Cancelled of keeper_meta
+  | Skipped of keeper_meta
   | Failed of
       { meta : keeper_meta
       ; failure : Keeper_unified_turn.turn_failure
@@ -49,9 +51,130 @@ type cycle_outcome =
       { meta : keeper_meta
       ; block : Keeper_turn_admission.autonomous_block
       }
+  | Judgment_settled of
+      { meta : keeper_meta
+      ; outcome : failure_judgment_terminal
+      }
+
+and failure_judgment_terminal =
+  | Judgment_boundary_failed of { detail : string }
+  | Judgment_operator_required of
+      { judge_runtime_id : string
+      ; rationale : string
+      }
 
 let meta = function
-  | Completed meta | Failed { meta; _ } | Busy { meta; _ } -> meta
+  | Completed meta
+  | Cancelled meta
+  | Skipped meta
+  | Failed { meta; _ }
+  | Busy { meta; _ }
+  | Judgment_settled { meta; _ } ->
+    meta
+;;
+
+let record_failure_judgment_outcome
+      ~keeper_name
+      (request : Keeper_event_queue.failure_judgment)
+      outcome
+  =
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string FailureJudgmentOutcome)
+    ~labels:
+      [ "keeper", keeper_name
+      ; "outcome", outcome
+      ; ( "judgment_class"
+        , Keeper_runtime_failure_route.judgment_class_label request.fj_judgment )
+      ; ( "provenance"
+        , Keeper_runtime_failure_route.judgment_provenance_label
+            request.fj_provenance )
+      ]
+    ()
+;;
+
+let prepare_failure_judgment_turn
+      ~base_path
+      ~keeper_name
+      ~(request : Keeper_event_queue.failure_judgment)
+      (obs : Keeper_world_observation.world_observation)
+  =
+  match Keeper_failure_judge.run ~base_path ~keeper_name request with
+  | Error error ->
+    let detail =
+      Keeper_failure_judge.error_detail error
+      |> Keeper_internal_error.cap_blocker_detail
+    in
+    let disposition = Keeper_failure_judge.error_disposition error in
+    let outcome = Keeper_failure_judge.error_disposition_label disposition in
+    record_failure_judgment_outcome ~keeper_name request outcome;
+    Log.Keeper.warn
+      "%s: independent failure judgment failed outcome=%s class=%s provenance=%s: %s"
+      keeper_name
+      outcome
+      (Keeper_runtime_failure_route.judgment_class_label request.fj_judgment)
+      (Keeper_runtime_failure_route.judgment_provenance_label request.fj_provenance)
+      detail;
+    (match disposition with
+     | Keeper_failure_judge.Escalate_judge_failure ->
+       `Settle (Judgment_boundary_failed { detail }))
+  | Ok { runtime_id = judge_runtime_id; verdict } ->
+    Keeper_pacing_shadow.observe_success
+      ~keeper_name
+      ~runtime_id:judge_runtime_id;
+    (match verdict with
+     | Keeper_failure_judgment_contract.Resume_with_guidance
+         { guidance; rationale } ->
+       (match
+          Keeper_world_observation.apply_failure_judgment_guidance
+            ~post_id:(Keeper_event_queue.failure_judgment_post_id request)
+            ~judge_runtime_id
+            ~guidance
+            ~rationale
+            obs.pending_board_events
+        with
+        | Error detail ->
+          let detail = Keeper_internal_error.cap_blocker_detail detail in
+          record_failure_judgment_outcome
+            ~keeper_name
+            request
+            (Keeper_failure_judge.error_disposition_label
+               Keeper_failure_judge.Escalate_judge_failure);
+          Log.Keeper.error
+            "%s: independent failure judgment could not bind guidance to its \
+             observation: %s"
+            keeper_name
+            detail;
+          `Settle (Judgment_boundary_failed { detail })
+        | Ok pending_board_events ->
+          record_failure_judgment_outcome
+            ~keeper_name
+            request
+            (Keeper_failure_judgment_contract.decision_label verdict);
+          Log.Keeper.info
+            "%s: independent failure judgment admitted action turn \
+             judge_runtime=%s class=%s provenance=%s"
+            keeper_name
+            judge_runtime_id
+            (Keeper_runtime_failure_route.judgment_class_label request.fj_judgment)
+            (Keeper_runtime_failure_route.judgment_provenance_label
+               request.fj_provenance);
+          `Run { obs with pending_board_events })
+     | Keeper_failure_judgment_contract.Escalate_to_operator { rationale } ->
+       let rationale = Keeper_internal_error.cap_blocker_detail rationale in
+       record_failure_judgment_outcome
+         ~keeper_name
+         request
+         (Keeper_failure_judgment_contract.decision_label verdict);
+       Log.Keeper.warn
+         "%s: independent failure judgment requires operator \
+          judge_runtime=%s class=%s provenance=%s rationale=%s"
+         keeper_name
+         judge_runtime_id
+         (Keeper_runtime_failure_route.judgment_class_label request.fj_judgment)
+         (Keeper_runtime_failure_route.judgment_provenance_label
+            request.fj_provenance)
+         rationale;
+       `Settle (Judgment_operator_required { judge_runtime_id; rationale }))
 ;;
 
 (* Body of [run_keeper_cycle], runnable only while holding the keeper's
@@ -68,26 +191,43 @@ let run_keeper_cycle_admitted
       ~(turn_decision : Keeper_world_observation.keeper_cycle_decision)
       ~shared_context
       ~(wake : Keeper_registry.wake_reason)
+      ?failure_judgment
       ()
   =
-  match
+  let admitted_execution =
     In_turn_pulse.with_in_turn_liveness_pulse ~ctx ~meta:meta_after_triage ~stop (fun () ->
-      Keeper_unified_turn.run_keeper_cycle
-        ~config:ctx.config
-        ~meta:meta_after_triage
-        ~observation:obs
-        ~generation:meta_after_triage.runtime.generation
-        ~wake
-        ~channel:turn_decision.channel
-        ?hitl_resolution
-        (* RFC-0315: pass the whole decision, not just its channel — the
-           prompt renders the verdict reasons so the turn knows why it woke. *)
-        ~turn_decision
-        ~shared_context
-        ?event_bus
-        ())
-  with
-  | Error failure ->
+      let prepared =
+        match failure_judgment with
+        | None -> `Run obs
+        | Some request ->
+          prepare_failure_judgment_turn
+            ~base_path:ctx.config.base_path
+            ~keeper_name:meta_after_triage.name
+            ~request
+            obs
+      in
+      match prepared with
+      | `Settle outcome -> `Judgment outcome
+      | `Run observation ->
+        `Turn
+          (Keeper_unified_turn.run_keeper_cycle
+             ~config:ctx.config
+             ~meta:meta_after_triage
+             ~observation
+             ~generation:meta_after_triage.runtime.generation
+             ~wake
+             ~channel:turn_decision.channel
+             ?hitl_resolution
+             (* RFC-0315: pass the whole decision, not just its channel — the
+                prompt renders the verdict reasons so the turn knows why it woke. *)
+             ~turn_decision
+             ~shared_context
+             ?event_bus
+             ()))
+  in
+  match admitted_execution with
+  | `Judgment outcome -> Judgment_settled { meta = meta_after_triage; outcome }
+  | `Turn (Error failure) ->
     let err = failure.Keeper_unified_turn.error in
     let e_str = Agent_sdk.Error.to_string err in
     Log.Keeper.debug "%s: keeper cycle failed: %s" meta_after_triage.name e_str;
@@ -145,12 +285,14 @@ let run_keeper_cycle_admitted
         meta_after_triage
     in
     Failed { meta; failure }
-  | Ok updated ->
+  | `Turn (Ok (Keeper_unified_turn.Turn_completed updated)) ->
     Keeper_turn_holders.reset_budget_exhaustion ~keeper_name:meta_after_triage.name;
     Observations.clear_provider_timeout_failure_reason
       ~base_path:ctx.config.base_path
       ~keeper_name:meta_after_triage.name;
     Completed updated
+  | `Turn (Ok (Keeper_unified_turn.Turn_cancelled meta)) -> Cancelled meta
+  | `Turn (Ok (Keeper_unified_turn.Turn_skipped meta)) -> Skipped meta
 ;;
 
 let run_keeper_cycle
@@ -163,6 +305,7 @@ let run_keeper_cycle
       ~(turn_decision : Keeper_world_observation.keeper_cycle_decision)
       ~shared_context
       ~(wake : Keeper_registry.wake_reason)
+      ?failure_judgment
       ()
   =
   match
@@ -177,6 +320,7 @@ let run_keeper_cycle
          ~turn_decision
          ~shared_context
          ~wake
+         ?failure_judgment
          ?event_bus
          ?hitl_resolution)
   with

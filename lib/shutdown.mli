@@ -21,13 +21,38 @@ type config = {
 }
 
 val default_config : config
+
+type config_field =
+  | Notify_delay
+  | Drain_timeout
+  | Cleanup_timeout
+  | Force_timeout
+
+val config_field_env_name : config_field -> string
+
+type config_error =
+  | Invalid_config_number of { field : config_field; raw_value : string }
+  | Non_finite_config_duration of { field : config_field; value : float }
+  | Negative_config_duration of { field : config_field; value : float }
+  | Non_positive_config_duration of { field : config_field; value : float }
+
+val config_error_to_string : config_error -> string
+val config_from_env_result : unit -> (config, config_error) result
+(** Read and validate the shutdown duration environment variables. A present
+    malformed, non-finite, or out-of-range value is an explicit error; it is
+    never replaced with a default. *)
+
 val config_from_env : unit -> config
+(** Source-compatible configuration front door. Invalid present values raise
+    [Invalid_argument] with {!config_error_to_string}; callers that need typed
+    startup handling should use {!config_from_env_result}. *)
 
 (** {1 Process deadline supervision} *)
 
 type deadline_error =
   | Non_finite_deadline_timeout of float
   | Non_positive_deadline_timeout of float
+  | Watchdog_thread_start_failed of string
 
 val deadline_error_to_string : deadline_error -> string
 
@@ -37,6 +62,10 @@ val process_deadline_exit_code : int
 (** Dedicated non-zero process status for a fired shutdown deadline. Process
     supervisors and runtime telemetry may use this SSOT to distinguish a hard
     deadline from generic exit status [1]. *)
+
+val process_deadline_start_failure_exit_code : int
+(** Dedicated terminal status used when the process cannot arm its hard
+    shutdown deadline authority. *)
 
 type disarm_result =
   | Disarmed
@@ -55,6 +84,13 @@ val start_process_deadline_watchdog :
     cooperative cancellation, or a stalled Eio domain cannot cancel its own
     process deadline. The process entrypoint must own the returned handle and
     disarm it only after the supervised switch has actually returned. *)
+
+val start_process_deadline_watchdog_or_exit :
+  timeout_s:float -> watchdog
+(** Start the watchdog or terminate immediately via {!Unix._exit} with
+    {!process_deadline_start_failure_exit_code}. No callback runs before the
+    terminal action, so logging or another observer cannot block fail-closed
+    process termination. *)
 
 val disarm_deadline_watchdog : watchdog -> disarm_result
 (** Atomically disarm an armed watchdog. The result distinguishes a successful

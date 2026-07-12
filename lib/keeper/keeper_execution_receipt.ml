@@ -102,6 +102,7 @@ type operator_disposition_reason =
   | Reason_degraded_retry
   | Reason_runtime_fallback
   | Reason_transient_runtime_retry
+  | Reason_capacity_backpressure
   | Reason_provider_runtime_error
   | Reason_internal_error
   | Reason_tool_route_recoverable_failure
@@ -128,6 +129,7 @@ let operator_disposition_reason_to_string = function
   | Reason_degraded_retry -> "degraded_retry"
   | Reason_runtime_fallback -> "runtime_fallback"
   | Reason_transient_runtime_retry -> "transient_runtime_retry"
+  | Reason_capacity_backpressure -> Keeper_internal_error.capacity_backpressure_kind
   | Reason_provider_runtime_error -> "provider_runtime_error"
   | Reason_internal_error -> "internal_error"
   | Reason_tool_route_recoverable_failure -> "tool_route_recoverable_failure"
@@ -274,6 +276,13 @@ let operator_disposition (receipt : t)
   | _ when input_required -> Disp_pass, Reason_input_required
   | Keeper_terminal_reason.Runtime_exhausted _ ->
     Disp_alert_exhausted, Reason_runtime_exhausted
+  | Keeper_terminal_reason.Capacity_backpressure _ ->
+    (* The typed runtime route treats provider-capacity cooldown as pacing and
+       continues with another eligible runtime.  This receipt is written for
+       the failed pre-dispatch attempt before that rotation is reflected in
+       [runtime_fallback_applied], so it must neither claim a completed
+       fallback nor page a human. *)
+    Disp_fail_open_next_runtime, Reason_capacity_backpressure
   | _ when preflight_config_failure ->
     Disp_pause_human, Reason_preflight_config_error
   | _
@@ -370,6 +379,7 @@ let operator_disposition (receipt : t)
       match terminal_reason with
       | Keeper_terminal_reason.Turn_budget_exhausted _ -> true
       | Runtime_exhausted _
+      | Capacity_backpressure _
       | Config_or_auth _
       | Provider_runtime_failure _
       | Completion_contract_violation _
@@ -419,6 +429,7 @@ let operator_disposition (receipt : t)
       (match terminal_reason with
        | Keeper_terminal_reason.Pre_dispatch_success _ -> true
        | Runtime_exhausted _
+       | Capacity_backpressure _
        | Config_or_auth _
        | Provider_runtime_failure _
        | Completion_contract_violation _

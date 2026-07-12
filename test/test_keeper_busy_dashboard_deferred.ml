@@ -56,9 +56,12 @@ let with_env body =
       ignore (Workspace.init config ~agent_name:(Some keeper_name));
       Keeper_turn_admission.For_testing.reset ();
       Keeper_chat_queue.For_testing.reset ();
-      let report = Keeper_chat_queue.configure_persistence ~base_path:base in
-      check "chat queue persistence configured without load errors"
-        (report.load_errors = []);
+      check "startup queue configuration succeeds before consumers"
+        (Result.is_ok
+           (Server_bootstrap_loops.prepare_keeper_chat_persistence
+              ~workspace_config:config));
+      check "startup queue owns the server BasePath"
+        (Keeper_chat_queue.persistence_matches_base_path ~base_path:base);
       Eio.Switch.run (fun sw ->
         Eio.Switch.on_release sw Keeper_chat_queue.For_testing.reset;
         body ~base ~clock))
@@ -98,6 +101,38 @@ let with_busy_slots ~base ~sw keeper_names f =
     ~finally:(fun () ->
       List.iter (fun (_, set_release) -> Eio.Promise.resolve set_release ()) slots)
     f
+;;
+
+let test_registry_discovery_failure_blocks_readiness () =
+  Printf.printf "Test: queue registry discovery failure blocks readiness\n%!";
+  let base =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf
+         "masc-chat-registry-failure-%d-%d"
+         (Unix.getpid ())
+         (int_of_float (Unix.gettimeofday () *. 1_000_000.)))
+  in
+  Unix.mkdir base 0o755;
+  Fun.protect
+    ~finally:(fun () -> Fs_compat.remove_tree base)
+    (fun () ->
+      let keepers_dir = Common.keepers_runtime_dir_of_base ~base_path:base in
+      Fs_compat.mkdir_p (Filename.dirname keepers_dir);
+      let output = open_out_bin keepers_dir in
+      output_string output "not a directory";
+      close_out output;
+      Eio_main.run
+      @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Keeper_chat_queue.For_testing.reset ();
+      let result =
+        Server_bootstrap_loops.prepare_keeper_chat_persistence
+          ~workspace_config:(Workspace.default_config base)
+      in
+      check "registry discovery error rejects startup readiness"
+        (Result.is_error result);
+      Keeper_chat_queue.For_testing.reset ())
 ;;
 
 let test_busy_dashboard_enqueues () =
@@ -287,6 +322,39 @@ let test_stream_headers_close_per_turn_response () =
     (Httpun.Headers.get headers "connection" = Some "close")
 ;;
 
+let test_direct_transcript_failure_is_terminal () =
+  Printf.printf "Test: direct transcript failure is a terminal outcome\n%!";
+  let outcome =
+    Server_routes_http_keeper_stream.For_testing.delivery_outcome_after_persist
+      ~queued_turn:false ~turn_ref:None (Error "disk unavailable")
+  in
+  check "direct persistence failure is not reported as success"
+    (match outcome with
+     | Some (Server_routes_http_keeper_stream.Failed failure) ->
+       failure.kind = Server_routes_http_keeper_stream.Transcript_persist_failed
+       && String.equal failure.detail "disk unavailable"
+     | Some
+         (Server_routes_http_keeper_stream.Delivered _
+         | Server_routes_http_keeper_stream.Deferred _)
+     | None -> false);
+  let timeout_outcome =
+    Server_routes_http_keeper_stream.For_testing.failure_outcome_after_persist
+      ~queued_turn:false
+      ~failure_kind:Server_routes_http_keeper_stream.Turn_timed_out
+      ~detail:"request timed out"
+      (Error "disk unavailable")
+  in
+  check "direct timeout persistence failure is not discarded"
+    (match timeout_outcome with
+     | Some (Server_routes_http_keeper_stream.Failed failure) ->
+       failure.kind = Server_routes_http_keeper_stream.Transcript_persist_failed
+       && String.equal failure.detail "disk unavailable"
+     | Some
+         (Server_routes_http_keeper_stream.Delivered _
+         | Server_routes_http_keeper_stream.Deferred _)
+     | None -> false)
+;;
+
 let test_shutdown_fenced_dashboard_ack_preserves_cause () =
   Printf.printf
     "Test: shutdown-fenced dashboard ACK preserves operation cause\n%!";
@@ -367,12 +435,14 @@ let test_stream_surface_preserves_typed_shutdown_rejection () =
 ;;
 
 let () =
+  test_registry_discovery_failure_blocks_readiness ();
   test_busy_dashboard_enqueues ();
   test_free_dashboard_not_enqueued ();
   test_existing_backlog_defers_new_dashboard_message ();
   test_concurrent_busy_dashboard_enqueues_are_per_keeper ();
   test_busy_dashboard_persist_failure_is_explicit ();
   test_stream_headers_close_per_turn_response ();
+  test_direct_transcript_failure_is_terminal ();
   test_shutdown_fenced_dashboard_ack_preserves_cause ();
   test_stream_surface_preserves_typed_shutdown_rejection ();
   if !failures > 0

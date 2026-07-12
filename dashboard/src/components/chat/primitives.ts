@@ -541,13 +541,13 @@ function streamContractBadgeInfo(entry: KeeperConversationEntry): StreamContract
   ].filter((value): value is string => Boolean(value)).join(' · ')
   switch (contract.deliveryReceipt) {
     case 'server_lifecycle_replay_only':
-      return { label: '서버 replay', title, state: 'server-replay' }
+      return { label: '서버 기록 복구', title, state: 'server-replay' }
     case 'no_delivery_receipt':
       switch (contract.status) {
         case 'history_without_turn_ref':
-          return { label: '턴 연결 없음', title, state: 'no-turn-ref' }
+          return { label: '턴 연결 정보 없음', title, state: 'no-turn-ref' }
         case 'contract_gap':
-          return { label: '수신 gap', title, state: 'contract-gap' }
+          return { label: '전달 상태 확인 필요', title, state: 'contract-gap' }
         default:
           return null
       }

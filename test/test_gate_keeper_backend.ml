@@ -158,10 +158,13 @@ let test_persist_connector_assistant_reply_records_lane_reply () =
         ~content:"<@bot> factorio?"
         ~surface
         ~conversation_id:"discord:guild-1:channel:chan-9" ();
-      Gate_keeper_backend.persist_connector_assistant_reply ~base_dir
-        ~keeper_name ~source:"discord" ~surface
-        ~conversation_id:"discord:guild-1:channel:chan-9"
-        ~reply:"already answered" ();
+      ignore
+        (Gate_keeper_backend.persist_connector_assistant_reply ~base_dir
+           ~keeper_name ~source:"discord" ~surface
+           ~conversation_id:"discord:guild-1:channel:chan-9"
+           ~reply:"already answered" ()
+         |> Result.get_ok
+          : unit);
       match K.load ~base_dir ~keeper_name with
       | [ user; assistant ] ->
           check string "user line first" "user" (K.Role.to_label user.K.role);
@@ -185,8 +188,11 @@ let test_persist_connector_assistant_reply_ignores_empty_reply () =
     ~finally:(fun () -> try remove_tree base_dir with _ -> ())
     (fun () ->
       let keeper_name = "discord-empty-reply-keeper" in
-      Gate_keeper_backend.persist_connector_assistant_reply ~base_dir
-        ~keeper_name ~source:"discord" ~reply:"   " ();
+      ignore
+        (Gate_keeper_backend.persist_connector_assistant_reply ~base_dir
+           ~keeper_name ~source:"discord" ~reply:"   " ()
+         |> Result.get_ok
+          : unit);
       check int "empty reply does not create chat file" 0
         (List.length (K.load ~base_dir ~keeper_name)))
 

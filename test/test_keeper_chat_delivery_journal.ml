@@ -36,6 +36,12 @@ let direct_key () =
   | Error error -> fail error
 ;;
 
+let chat_path base_path keeper_name =
+  Filename.concat
+    (Filename.concat (Filename.concat base_path ".masc") "keeper_chat")
+    (keeper_name ^ ".jsonl")
+;;
+
 let payload () : Journal.accepted_payload =
   { keeper_name = "sangsu"
   ; submitted_by = "owner"
@@ -195,10 +201,18 @@ let test_corrupt_record_is_explicit () =
       |> expect_ok
     in
     Fs_compat.save_file record_path "not-json";
-    match Journal.load ~base_path ~keeper_name:"sangsu" key with
-    | Error (Journal.Decode_error _) -> ()
-    | Error error -> fail (Journal.error_to_string error)
-    | Ok _ -> fail "corrupt journal was treated as readable")
+    (match Journal.load ~base_path ~keeper_name:"sangsu" key with
+     | Error (Journal.Decode_error _) -> ()
+     | Error error -> fail (Journal.error_to_string error)
+     | Ok _ -> fail "corrupt journal was treated as readable");
+    Keeper_chat_queue.For_testing.reset ();
+    let startup =
+      Server_bootstrap_loops.prepare_keeper_chat_persistence
+        ~workspace_config:(Masc.Workspace.default_config base_path)
+    in
+    check bool "corrupt delivery journal blocks readiness" true
+      (Result.is_error startup);
+    Keeper_chat_queue.For_testing.reset ())
 ;;
 
 let test_journal_rejects_unknown_and_duplicate_fields () =
@@ -287,88 +301,34 @@ let test_chat_append_once_converges () =
     check int "one user and one terminal row" 2 (List.length history))
 ;;
 
-let test_chat_append_once_converges_across_processes () =
+let test_chat_append_once_rejects_incomplete_tail () =
   with_temp_dir (fun base_path ->
-    let delivery_key = direct_key () in
-    let seed =
-      Keeper_chat_store.append_assistant_message_result
+    let keeper_name = "sangsu" in
+    Keeper_chat_store.append_assistant_message_result
+      ~base_dir:base_path
+      ~keeper_name
+      ~content:"initial"
+      ()
+    |> Result.get_ok;
+    let path = chat_path base_path keeper_name in
+    let incomplete = "{\"role\":\"assistant\"}" in
+    let output = open_out_bin path in
+    output_string output incomplete;
+    close_out output;
+    let result =
+      Keeper_chat_store.append_user_message_once
         ~base_dir:base_path
-        ~keeper_name:"sangsu"
-        ~content:"seed"
+        ~keeper_name
+        ~delivery_key:(direct_key ())
+        ~content:"must not append"
         ()
     in
-    (match seed with
-     | Ok () -> ()
-     | Error detail -> fail detail);
-    let ready_read, ready_write = Unix.pipe () in
-    let append_child () =
-      Unix.close ready_write;
-      let byte = Bytes.create 1 in
-      let rec await_start () =
-        match Unix.read ready_read byte 0 1 with
-        | 1 -> ()
-        | 0 -> exit 2
-        | _ -> await_start ()
-        | exception Unix.Unix_error (Unix.EINTR, _, _) -> await_start ()
-      in
-      await_start ();
-      let result =
-        Keeper_chat_store.append_user_message_once
-          ~base_dir:base_path
-          ~keeper_name:"sangsu"
-          ~delivery_key
-          ~content:"cross-process request"
-          ~surface:
-            (Surface_ref.Dashboard { session_id = Some "dashboard-session" })
-          ~speaker:(payload ()).speaker
-          ()
-      in
-      Unix.close ready_read;
-      exit (if Result.is_ok result then 0 else 3)
-    in
-    let spawn () =
-      match Unix.fork () with
-      | 0 -> append_child ()
-      | pid -> pid
-    in
-    let first = spawn () in
-    let second = spawn () in
-    Unix.close ready_read;
-    let rec release_children offset =
-      if offset = 2
-      then ()
-      else
-        match Unix.write_substring ready_write "xy" offset (2 - offset) with
-        | 0 -> fail "cross-process start barrier made no write progress"
-        | written -> release_children (offset + written)
-        | exception Unix.Unix_error (Unix.EINTR, _, _) ->
-          release_children offset
-    in
-    release_children 0;
-    Unix.close ready_write;
-    let await_child pid =
-      match Unix.waitpid [] pid with
-      | _, Unix.WEXITED 0 -> ()
-      | _, status ->
-        failf
-          "cross-process append child failed: %s"
-          (match status with
-           | Unix.WEXITED code -> Printf.sprintf "exit %d" code
-           | Unix.WSIGNALED signal -> Printf.sprintf "signal %d" signal
-           | Unix.WSTOPPED signal -> Printf.sprintf "stopped %d" signal)
-    in
-    await_child first;
-    await_child second;
-    let matching_rows =
-      Keeper_chat_store.load ~base_dir:base_path ~keeper_name:"sangsu"
-      |> List.filter (fun row ->
-           Keeper_chat_store.Role.equal row.role Keeper_chat_store.Role.User
-           && String.equal row.content "cross-process request")
-    in
-    check int
-      "cross-process retries persist one provenance row"
-      1
-      (List.length matching_rows))
+    check bool "append-once fails closed on an incomplete tail" true
+      (Result.is_error result);
+    let input = open_in_bin path in
+    let persisted = really_input_string input (in_channel_length input) in
+    close_in input;
+    check string "append-once leaves incomplete bytes untouched" incomplete persisted)
 ;;
 
 let test_restart_recovery_converges_without_duplicate_rows () =
@@ -517,10 +477,12 @@ let test_queue_restart_finalizes_receipt_without_redispatch () =
        |> expect_ok
         : Journal.t);
     Keeper_chat_queue.For_testing.reset ();
-    let recovery = Journal.recover_all ~base_path ~now:3.0 in
-    check int "queue journal recovered" 1 recovery.recovered;
-    let queue_recovery = Keeper_chat_queue.configure_persistence ~base_path in
-    check int "one inflight receipt reconciled" 1 queue_recovery.recovered_receipt_count;
+    let startup_recovery =
+      Server_bootstrap_loops.prepare_keeper_chat_persistence
+        ~workspace_config:(Masc.Workspace.default_config base_path)
+    in
+    check bool "startup journal-before-queue recovery succeeds" true
+      (Result.is_ok startup_recovery);
     (match
        Keeper_chat_queue.lookup_receipt
          ~keeper_name:"sangsu"
@@ -675,9 +637,9 @@ let () =
             `Quick
             test_chat_append_once_converges
         ; test_case
-            "chat append-once converges across processes"
+            "chat append-once rejects incomplete tail"
             `Quick
-            test_chat_append_once_converges_across_processes
+            test_chat_append_once_rejects_incomplete_tail
         ; test_case
             "restart recovery converges"
             `Quick

@@ -37,6 +37,7 @@ type ambient_outcome =
   | Ambient_dropped_unbound
   | Ambient_dropped_empty
   | Ambient_dropped_too_long
+  | Ambient_persistence_failed
 
 type reply_outcome =
   | Reply_empty

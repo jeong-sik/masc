@@ -1224,6 +1224,24 @@ let queued_delivery_outcome_of_turn_ref = function
             "queued turn persisted a reply but the reply payload had no valid turn_ref"
         }
 
+let delivery_outcome_after_persist ~queued_turn ~turn_ref = function
+  | Ok () ->
+    if queued_turn
+    then Some (queued_delivery_outcome_of_turn_ref turn_ref)
+    else None
+  | Error detail ->
+    Some (Failed { kind = Transcript_persist_failed; detail })
+
+let failure_outcome_after_persist ~queued_turn ~failure_kind ~detail = function
+  | Ok () ->
+    if queued_turn then Some (Failed { kind = failure_kind; detail }) else None
+  | Error persist_error ->
+    Some
+      (Failed
+         { kind = Transcript_persist_failed
+         ; detail = persist_error
+         })
+
 type keeper_stream_bridge_state = Keeper_chat_oas_stream_bridge.state
 
 type translated_keeper_stream_event =
@@ -1338,10 +1356,6 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
   let journal_error error =
     Keeper_chat_delivery_journal.error_to_string error
   in
-  let row_id_of_append_once = function
-    | Keeper_chat_store.Appended { row_id }
-    | Keeper_chat_store.Already_present { row_id } -> row_id
-  in
   let set_direct_delivery_journal journal =
     direct_delivery_journal := Some journal
   in
@@ -1374,8 +1388,8 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
       |> Result.map_error journal_error
     in
     set_direct_delivery_journal prepared;
-    let* user_row =
-      Keeper_chat_store.append_user_message_once
+    let* user_row_id =
+      Keeper_chat_store.append_delivery_user_message_result
         ~base_dir:base_path
         ~keeper_name:payload.name
         ~delivery_key
@@ -1390,7 +1404,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
         ~base_path
         ~expected_revision:prepared.revision
         ~identity:prepared
-        ~user_row_id:(Some (row_id_of_append_once user_row))
+        ~user_row_id:(Some user_row_id)
         ~now:(Time_compat.now ())
       |> Result.map_error journal_error
     in
@@ -1454,7 +1468,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
       | Keeper_chat_delivery_journal.Already_persisted { row_id } ->
         Ok (Some row_id)
       | Keeper_chat_delivery_journal.Needs_append ->
-        Keeper_chat_store.append_user_message_once
+        Keeper_chat_store.append_delivery_user_message_result
           ~base_dir:base_path
           ~keeper_name:payload.name
           ~delivery_key
@@ -1463,7 +1477,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
           ~surface:chat_surface
           ~speaker:chat_speaker
           ()
-        |> Result.map (fun result -> Some (row_id_of_append_once result))
+        |> Result.map Option.some
     in
     let* accepted =
       Keeper_chat_delivery_journal.mark_accepted
@@ -1509,7 +1523,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
           match persisted_terminal.delivery with
           | Keeper_chat_delivery_journal.Assistant_reply
               { content; blocks; turn_ref } ->
-            Keeper_chat_store.append_assistant_message_once
+            Keeper_chat_store.append_delivery_assistant_message_result
               ~base_dir:base_path
               ~keeper_name:payload.name
               ~delivery_key
@@ -1519,9 +1533,8 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
               ?turn_ref
               ~stream_lifecycle:completed_stream_lifecycle
               ()
-            |> Result.map row_id_of_append_once
           | Keeper_chat_delivery_journal.Transport_failure { content } ->
-            Keeper_chat_store.append_assistant_message_once
+            Keeper_chat_store.append_delivery_assistant_message_result
               ~base_dir:base_path
               ~keeper_name:payload.name
               ~delivery_key
@@ -1530,7 +1543,6 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
               ~assistant_kind:Keeper_chat_store.Row_kind.Transport_failure
               ~stream_lifecycle:errored_stream_lifecycle
               ()
-            |> Result.map row_id_of_append_once
           | Keeper_chat_delivery_journal.No_assistant_reply
               { reason =
                   ( Keeper_chat_delivery_journal.Continuation_checkpoint
@@ -1598,9 +1610,11 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
        connector user line (Discord/Slack busy message enqueued onto the chat
        queue), re-recording it here would double-write. The gate inbound line is
        assistant-less, so the message is already "pending" — nothing to add. *)
-    if Option.is_some !direct_delivery_journal then ()
-    else if not connector_user_line_recorded_upstream then
-      Keeper_chat_store.append_user_message
+    if Option.is_some !direct_delivery_journal
+       || connector_user_line_recorded_upstream
+    then Ok ()
+    else
+      Keeper_chat_store.append_user_message_result
         ~base_dir:base_path
         ~keeper_name:payload.name
         ~content:payload.message
@@ -1695,16 +1709,11 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
     in
     let persisted = persist_failure_reply body in
     let queued_outcome =
-      if not queued_turn then None
-      else
-        match persisted with
-        | Ok () -> Some (Failed { kind = failure_kind; detail = body })
-        | Error persist_error ->
-            Some
-              (Failed
-                 { kind = Transcript_persist_failed
-                 ; detail = persist_error
-                 })
+      failure_outcome_after_persist
+        ~queued_turn
+        ~failure_kind
+        ~detail:body
+        persisted
     in
     push_worker_event (Stream_terminal { status; body; queued_outcome });
     persisted
@@ -1876,21 +1885,17 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                  visible_reply
              with
              | Some err ->
+                 let persisted = persist_failure_reply err in
                  let queued_outcome =
-                   if not queued_turn then None
-                   else
-                     match persist_failure_reply err with
-                     | Ok () -> Some (Failed { kind = Turn_failed; detail = err })
-                     | Error persist_error ->
-                         Some
-                           (Failed
-                              { kind = Transcript_persist_failed
-                              ; detail = persist_error
-                              })
+                   failure_outcome_after_persist
+                     ~queued_turn
+                     ~failure_kind:Turn_failed
+                     ~detail:err
+                     persisted
                  in
                  if not queued_turn
                  then
-                   (match persist_failure_reply err with
+                   (match persisted with
                     | Ok () -> ()
                     | Error persist_error ->
                       Log.Keeper.error
@@ -1943,23 +1948,12 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                        ()
                  in
                  let delivered_after_persist ?content persisted =
-                   match persisted with
-                   | Ok () ->
+                   (match persisted with
+                    | Ok () ->
                        Keeper_chat_broadcast.chat_appended
-                         ~keeper_name:payload.name ~source:chat_source ?content ();
-                       if queued_turn
-                       then
-                         Some (queued_delivery_outcome_of_turn_ref turn_ref)
-                       else None
-                   | Error persist_error ->
-                       if queued_turn
-                       then
-                         Some
-                           (Failed
-                              { kind = Transcript_persist_failed
-                              ; detail = persist_error
-                              })
-                       else None
+                         ~keeper_name:payload.name ~source:chat_source ?content ()
+                    | Error _ -> ());
+                   delivery_outcome_after_persist ~queued_turn ~turn_ref persisted
                  in
                  let turn_outcome =
                    Keeper_turn_outcome.of_reply_payload payload_json_opt
@@ -2003,8 +1997,10 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                                (Failed
                                   { kind = Transcript_persist_failed; detail }))
                         | None ->
-                          persist_user_message_only ();
-                          None)
+                          persist_user_message_only ()
+                          |> delivery_outcome_after_persist
+                               ~queued_turn:false
+                               ~turn_ref:None)
                    | Keeper_turn_outcome.No_visible_reply, _
                    | Keeper_turn_outcome.Visible_reply, None ->
                        if has_visible_blocks
@@ -2024,9 +2020,11 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                                    { kind = Transcript_persist_failed
                                    ; detail = persist_error
                                    }))
-                       else (
-                         persist_user_message_only ();
-                         None)
+                       else
+                         persist_user_message_only ()
+                         |> delivery_outcome_after_persist
+                              ~queued_turn:false
+                              ~turn_ref:None
                    | Keeper_turn_outcome.Visible_reply, Some visible_reply ->
                        persist_assistant_reply ~assistant_content:visible_reply
                        |> delivered_after_persist ~content:visible_reply
@@ -2062,16 +2060,11 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
         | Ok (`Ran (false, err)) ->
             let persisted = persist_failure_reply err in
             let queued_outcome =
-              if not queued_turn then None
-              else
-                match persisted with
-                | Ok () -> Some (Failed { kind = Turn_failed; detail = err })
-                | Error persist_error ->
-                    Some
-                      (Failed
-                         { kind = Transcript_persist_failed
-                         ; detail = persist_error
-                         })
+              failure_outcome_after_persist
+                ~queued_turn
+                ~failure_kind:Turn_failed
+                ~detail:err
+                persisted
             in
             push_worker_event
               (Stream_terminal
@@ -2080,16 +2073,11 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
         | Error err ->
             let persisted = persist_failure_reply err in
             let queued_outcome =
-              if not queued_turn then None
-              else
-                match persisted with
-                | Ok () -> Some (Failed { kind = Turn_failed; detail = err })
-                | Error persist_error ->
-                    Some
-                      (Failed
-                         { kind = Transcript_persist_failed
-                         ; detail = persist_error
-                         })
+              failure_outcome_after_persist
+                ~queued_turn
+                ~failure_kind:Turn_failed
+                ~detail:err
+                persisted
             in
             push_worker_event
               (Stream_terminal
@@ -2105,16 +2093,11 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
     | Error body ->
         let persisted = persist_failure_reply body in
         let queued_outcome =
-          if not queued_turn then None
-          else
-            match persisted with
-            | Ok () -> Some (Failed { kind = Turn_failed; detail = body })
-            | Error persist_error ->
-                Some
-                  (Failed
-                     { kind = Transcript_persist_failed
-                     ; detail = persist_error
-                     })
+          failure_outcome_after_persist
+            ~queued_turn
+            ~failure_kind:Turn_failed
+            ~detail:body
+            persisted
         in
         push_worker_event
           (Stream_terminal
@@ -2260,7 +2243,15 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
         ; body = message
         ; queued_outcome
         } ->
-        let message = redact_text message in
+        let message =
+          match queued_outcome with
+          | Some (Failed { kind = Transcript_persist_failed; _ }) when queued_turn ->
+            "The queued cancellation could not be durably recorded. Check the Keeper queue receipt in the Dashboard; internal storage detail is available to operators only."
+          | Some (Failed { kind = Transcript_persist_failed; _ }) ->
+            "The Keeper cancellation could not be durably recorded. Internal storage detail is available to operators only."
+          | Some (Failed _ | Delivered _ | Deferred _) | None ->
+            redact_text message
+        in
         publish_terminal ~status:(Request_stream Stream_cancelled) ~message ();
         Keeper_chat_events.publish events Text_message_end;
         Keeper_chat_events.publish events (Run_finished { run_id });
@@ -2270,7 +2261,17 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
         ; body = err
         ; queued_outcome
         } ->
-        let err = redact_text err in
+        let err =
+          match queued_outcome with
+          | Some (Failed { kind = Transcript_persist_failed; _ }) when queued_turn ->
+            "The queued response could not be durably recorded. Check the Keeper queue receipt in the Dashboard; internal storage detail is available to operators only."
+          | Some (Failed { kind = Transcript_persist_failed; _ }) ->
+            "The Keeper response could not be durably recorded. Internal storage detail is available to operators only."
+          | Some (Failed { kind = Stream_projection_failed; _ }) ->
+            "The queued response reached an internal projection failure. Check the Keeper queue receipt in the Dashboard."
+          | Some (Failed _ | Delivered _ | Deferred _) | None ->
+            redact_text err
+        in
         publish_terminal ~status:(Request_stream status) ~message:err ();
         Keeper_chat_events.publish events Text_message_end;
         Keeper_chat_events.publish events (Event_error { message = err });
@@ -2757,6 +2758,8 @@ module For_testing = struct
   let direct_reply_terminal_error = direct_reply_terminal_error
   let queued_delivery_outcome_of_turn_ref =
     queued_delivery_outcome_of_turn_ref
+  let delivery_outcome_after_persist = delivery_outcome_after_persist
+  let failure_outcome_after_persist = failure_outcome_after_persist
   let visible_reply_with_stream_fallback = visible_reply_with_stream_fallback
   let redacted_visible_reply_with_stream_fallback =
     redacted_visible_reply_with_stream_fallback

@@ -469,7 +469,9 @@ let ensure_metadata key value metadata =
 let persist_connector_assistant_reply ~base_dir ~keeper_name ~source ?surface
     ?conversation_id ?turn_ref ~reply () =
   let content = String.trim reply in
-  if content <> "" then begin
+  if String.equal content ""
+  then Ok ()
+  else
     let surface =
       match surface with
       | Some surface -> surface
@@ -477,10 +479,14 @@ let persist_connector_assistant_reply ~base_dir ~keeper_name ~source ?surface
     in
     (* RFC-0233 §7: [turn_ref] is the join key the keeper minted into the
        reply payload, carried onto this connector turn's assistant row. *)
-    Keeper_chat_store.append_assistant_message ~base_dir ~keeper_name
-      ~content ~surface ?conversation_id ?turn_ref ();
-    Keeper_chat_broadcast.chat_appended ~keeper_name ~source ~content ()
-  end
+    (match
+       Keeper_chat_store.append_assistant_message_result ~base_dir ~keeper_name
+         ~content ~surface ?conversation_id ?turn_ref ()
+     with
+     | Error _ as error -> error
+     | Ok () ->
+       Keeper_chat_broadcast.chat_appended ~keeper_name ~source ~content ();
+       Ok ())
 
 (* Trailing [()] keeps [?on_text_snapshot] erasable (warning 16): the wrappers
    below either pass it ([dispatch_with_text_snapshot]) or omit it so it defaults
@@ -552,20 +558,30 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~submission_owne
         Option.to_list (Keeper_identity.Keeper_id.of_string keeper_name)
     | Some _ | None -> []
   in
-  Keeper_chat_store.append_user_message
-    ~base_dir:config.Workspace.base_path
-    ~keeper_name
-    ~content:(String.trim content)
-    ~surface
-    ?conversation_id
-    ?external_message_id
-    ~speaker:
-      { Keeper_chat_store.speaker_id = opt channel_user_id
-      ; speaker_name = opt channel_user_name
-      ; speaker_authority = Keeper_chat_store.External
-      }
-    ~extra_mentions
-    ();
+  let user_persisted =
+    Keeper_chat_store.append_user_message_result
+      ~base_dir:config.Workspace.base_path
+      ~keeper_name
+      ~content:(String.trim content)
+      ~surface
+      ?conversation_id
+      ?external_message_id
+      ~speaker:
+        { Keeper_chat_store.speaker_id = opt channel_user_id
+        ; speaker_name = opt channel_user_name
+        ; speaker_authority = Keeper_chat_store.External
+        }
+      ~extra_mentions
+      ()
+  in
+  match user_persisted with
+  | Error detail ->
+    Log.Server.error
+      "channel gate inbound transcript persistence failed keeper=%s lane=%s error=%s"
+      keeper_name lane detail;
+    Gate_protocol.Keeper_error_result
+      "The connector message could not be durably recorded and was not dispatched."
+  | Ok () ->
   Keeper_chat_broadcast.chat_appended
     ~keeper_name ~source:lane ();
   let args =
@@ -778,10 +794,20 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~submission_owne
           (try Some (Yojson.Safe.from_string body)
            with Yojson.Json_error _ -> None)
       in
-      persist_connector_assistant_reply
-        ~base_dir:config.Workspace.base_path ~keeper_name ~source:lane
-        ~surface ?conversation_id ?turn_ref ~reply ();
-      Gate_protocol.Reply { content = reply; structured; stats; message_request = None }
+      (match
+         persist_connector_assistant_reply
+           ~base_dir:config.Workspace.base_path ~keeper_name ~source:lane
+           ~surface ?conversation_id ?turn_ref ~reply ()
+       with
+       | Ok () ->
+         Gate_protocol.Reply
+           { content = reply; structured; stats; message_request = None }
+       | Error detail ->
+         Log.Server.error
+           "channel gate assistant transcript persistence failed keeper=%s lane=%s error=%s"
+           keeper_name lane detail;
+         Gate_protocol.Keeper_error_result
+           "The Keeper reply could not be durably recorded.")
   | `Async_ack (_, Some result) | `Streaming (Some result) ->
       Gate_protocol.Keeper_error_result (redact_text (Tool_result.message result))
   | `Async_ack (_, None) | `Streaming None ->

@@ -158,6 +158,11 @@ val configure_persistence : base_path:string -> configure_report
 
 val persistence_configured : unit -> bool
 
+val persistence_matches_base_path : base_path:string -> bool
+(** Verify that queue persistence is configured for the exact workspace root.
+    This lets startup publish route readiness only after the queue owns the same
+    BasePath as the server state. *)
+
 (** Enqueue only after the receipt-bearing version-2 snapshot commits. *)
 val enqueue :
   keeper_name:string -> queued_message -> (enqueue_receipt, mutation_error) result

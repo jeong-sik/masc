@@ -539,7 +539,7 @@ let snapshot_to_yojson ~revision receipts =
     ]
 
 let save_json_atomic path json =
-  Fs_compat.mkdir_p (Filename.dirname path);
+  ignore (Keeper_fs.ensure_dir (Filename.dirname path) : string);
   json
   |> Yojson.Safe.pretty_to_string
   |> Fs_compat.save_file_atomic path
@@ -921,6 +921,12 @@ let with_entry_lock entry f =
     Printexc.raise_with_backtrace exception_ backtrace
 
 let persistence_configured () = Option.is_some (Atomic.get persistence_base_path)
+
+let persistence_matches_base_path ~base_path =
+  match Atomic.get persistence_base_path with
+  | Some configured -> String.equal configured base_path
+  | None -> false
+;;
 
 let first_snapshot_error entry =
   match entry.load_errors with

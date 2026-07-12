@@ -426,7 +426,7 @@ describe('ChatTranscript', () => {
     expect(legacy.getAttribute('data-chat-stream-contract-delivery-receipt')).toBe('no_delivery_receipt')
     expect(legacy.getAttribute('data-chat-stream-contract-badge-state')).toBe('no-turn-ref')
     const noTurnBadge = legacy.querySelector('[data-chat-stream-contract-badge]')
-    expect(noTurnBadge?.textContent).toContain('턴 연결 없음')
+    expect(noTurnBadge?.textContent).toContain('턴 연결 정보 없음')
     expect(noTurnBadge?.getAttribute('title')).toContain('conversation_id=discord:guild-1:channel:chan-1')
     expect(noTurnBadge?.getAttribute('title')).toContain('speaker_name=Minsu')
 
@@ -440,7 +440,7 @@ describe('ChatTranscript', () => {
     expect(failure.getAttribute('data-chat-stream-contract-lifecycle-events')).toBe('RUN_STARTED,RUN_ERROR')
     expect(failure.getAttribute('data-chat-stream-contract-delivery-receipt')).toBe('server_lifecycle_replay_only')
     expect(failure.getAttribute('data-chat-stream-contract-badge-state')).toBe('server-replay')
-    expect(failure.querySelector('[data-chat-stream-contract-badge]')?.textContent).toContain('서버 replay')
+    expect(failure.querySelector('[data-chat-stream-contract-badge]')?.textContent).toContain('서버 기록 복구')
     // transport_failure renders the typed card, so the raw diagnostic is
     // collapsed by default (the legacy banner is suppressed for card rows)
     // and surfaces only on expand.

@@ -116,6 +116,14 @@ let with_fs_or_fallback ~path ~fallback f =
   | None -> fallback ()
 ;;
 
+let run_blocking_unix_io f =
+  match Atomic.get global_fs with
+  | None -> f ()
+  | Some _ ->
+    (try Eio_unix.run_in_systhread ~label:"fs-compat-blocking-io" f with
+     | Stdlib.Effect.Unhandled _ -> f ())
+;;
+
 let load_file_unix (path : string) : string =
   let ic = Stdlib.open_in path in
   Stdlib.Fun.protect
@@ -212,6 +220,49 @@ let mkdir_p_unix (path : string) : unit =
   ensure_dir path
 ;;
 
+let fsync_directory_unix path =
+  let fd = Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 in
+  Fun.protect
+    ~finally:(fun () -> Unix.close fd)
+    (fun () -> Unix.fsync fd)
+;;
+
+let directory_exists_unix path =
+  match Unix.stat path with
+  | { Unix.st_kind = Unix.S_DIR; _ } -> true
+  | { Unix.st_kind = (Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK
+                     | Unix.S_FIFO | Unix.S_SOCK)
+    ; _
+    } ->
+    raise (Unix.Unix_error (Unix.ENOTDIR, "mkdir_p_durable", path))
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> false
+;;
+
+let mkdir_p_durable_unix path =
+  let rec ensure path =
+    if String.equal path ""
+       || String.equal path "."
+       || String.equal path "/"
+    then ()
+    else if directory_exists_unix path
+    then ()
+    else (
+      let parent = Filename.dirname path in
+      ensure parent;
+      (try Unix.mkdir path 0o755 with
+       | Unix.Unix_error (Unix.EEXIST, _, _) ->
+         ignore (directory_exists_unix path : bool));
+      fsync_directory_unix parent)
+  in
+  let existed = directory_exists_unix path in
+  ensure path;
+  if existed
+     && not (String.equal path "")
+     && not (String.equal path ".")
+     && not (String.equal path "/")
+  then fsync_directory_unix (Filename.dirname path)
+;;
+
 (** Load entire file contents as string.
     Eio-native when available, fallback to Unix.
     @raises Sys_error on all I/O failures. Eio.Io is normalized internally. *)
@@ -238,7 +289,9 @@ let save_file (path : string) (content : string) : unit =
 ;;
 
 let save_file_atomic path content =
-  Atomic_write.save_file_atomic ~save_file path content
+  test_exec_home_guard ~op:"save_file_atomic" path;
+  run_blocking_unix_io (fun () ->
+    Atomic_write.save_file_atomic ~save_file:save_file_unix path content)
 ;;
 
 let is_atomic_orphan_name = Atomic_write.is_atomic_orphan_name
@@ -391,6 +444,15 @@ let mkdir_p (path : string) : unit =
     (fun fs ->
        let eio_path = Eio.Path.(fs / path) in
        Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 eio_path)
+;;
+
+(** Create a directory hierarchy and durably publish every newly-created
+    directory entry before returning. Existing leaf directories have their
+    parent entry synced once as well, so retry after an uncertain fsync cannot
+    report success without re-establishing the durability boundary. *)
+let mkdir_p_durable path =
+  test_exec_home_guard ~op:"mkdir_p_durable" path;
+  run_blocking_unix_io (fun () -> mkdir_p_durable_unix path)
 ;;
 
 (* RFC-0162 §3.1: once-per-path mkdir memoize. Hot append paths
@@ -662,20 +724,28 @@ let reset_fd_cache_for_testing () = Fd_cache.reset_for_testing ()
 
 let with_cached_writer_for_testing path f = Fd_cache.with_writer path f
 
-let rec read_fd_chunks fd buffer =
+let read_fd_contents fd =
   let chunk = Bytes.create 65536 in
-  match Unix.read fd chunk 0 (Bytes.length chunk) with
-  | 0 -> Buffer.contents buffer
-  | count ->
-    Buffer.add_subbytes buffer chunk 0 count;
-    read_fd_chunks fd buffer
-  | exception Unix.Unix_error (Unix.EINTR, _, _) -> read_fd_chunks fd buffer
+  let buffer = Buffer.create 4096 in
+  let rec loop () =
+    match Unix.read fd chunk 0 (Bytes.length chunk) with
+    | 0 -> Buffer.contents buffer
+    | count ->
+      Buffer.add_subbytes buffer chunk 0 count;
+      loop ()
+    | exception Unix.Unix_error (Unix.EINTR, _, _) -> loop ()
+  in
+  loop ()
+;;
 
 type durable_append_operation =
   | Write
   | Append_fsync
   | Rollback_truncate
   | Rollback_fsync
+  | Parent_directory_open
+  | Parent_directory_fsync
+  | Parent_directory_close
 
 type durable_append_failure =
   | Unix_error of
@@ -691,11 +761,16 @@ type durable_append_error =
   ; rollback_failures : durable_append_failure list
   }
 
+exception Durable_append_failed of durable_append_error
+
 let durable_append_operation_to_string = function
   | Write -> "write"
   | Append_fsync -> "append fsync"
   | Rollback_truncate -> "rollback truncate"
   | Rollback_fsync -> "rollback fsync"
+  | Parent_directory_open -> "parent directory open"
+  | Parent_directory_fsync -> "parent directory fsync"
+  | Parent_directory_close -> "parent directory close"
 ;;
 
 let durable_append_failure_to_string = function
@@ -720,6 +795,16 @@ let durable_append_error_to_string { append_failure; rollback_failures } =
       (failures
        |> List.map durable_append_failure_to_string
        |> String.concat "; ")
+;;
+
+let () =
+  Printexc.register_printer (function
+    | Durable_append_failed error ->
+      Some
+        (Printf.sprintf
+           "Fs_compat.Durable_append_failed(%s)"
+           (durable_append_error_to_string error))
+    | _ -> None)
 ;;
 
 type durable_append_io_for_testing =
@@ -784,65 +869,174 @@ let append_fd_durable ~io ~fd ~original_length suffix =
 let append_fd_durable_for_testing = append_fd_durable
 
 let durable_append_unix_io =
-  { write = Unix.write; ftruncate = Unix.ftruncate; fsync = Unix.fsync }
+  { write = Unix.single_write; ftruncate = Unix.ftruncate; fsync = Unix.fsync }
 ;;
 
-let fsync_parent_directory dir =
-  let fd = Unix.openfile dir [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 in
-  Fun.protect
-    ~finally:(fun () -> Unix.close fd)
-    (fun () -> Unix.fsync fd)
+type durable_append_eio_mutex_entry =
+  { mutex : Eio.Mutex.t
+  ; mutable users : int
+  }
+
+let durable_append_eio_mutex_registry
+  : (string, durable_append_eio_mutex_entry) Hashtbl.t
+  =
+  Hashtbl.create 32
 ;;
 
-let rec lock_whole_file fd =
-  match Unix.lockf fd Unix.F_LOCK 0 with
-  | () -> ()
-  | exception Unix.Unix_error (Unix.EINTR, _, _) -> lock_whole_file fd
+let durable_append_eio_mutex_registry_mu = Stdlib.Mutex.create ()
+
+let acquire_durable_append_eio_mutex path =
+  Stdlib.Mutex.protect durable_append_eio_mutex_registry_mu (fun () ->
+    match Hashtbl.find_opt durable_append_eio_mutex_registry path with
+    | Some entry ->
+      entry.users <- entry.users + 1;
+      entry
+    | None ->
+      let entry = { mutex = Eio.Mutex.create (); users = 1 } in
+      Hashtbl.add durable_append_eio_mutex_registry path entry;
+      entry)
 ;;
 
-let run_blocking_durable_append ~path f =
-  with_fs_or_fallback
-    ~path
-    ~fallback:f
-    (fun _fs ->
-       Eio_unix.run_in_systhread ~label:"fs-compat-durable-append" f)
+let release_durable_append_eio_mutex path entry =
+  Stdlib.Mutex.protect durable_append_eio_mutex_registry_mu (fun () ->
+    entry.users <- entry.users - 1;
+    if entry.users = 0
+    then
+      match Hashtbl.find_opt durable_append_eio_mutex_registry path with
+      | Some current when current == entry ->
+        Hashtbl.remove durable_append_eio_mutex_registry path
+      | Some _ | None -> ())
 ;;
 
-let update_private_file_durable_locked_result path decide =
-  test_exec_home_guard ~op:"update_private_file_durable_locked" path;
+let fsync_directory_result dir =
+  match Unix.openfile dir [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 with
+  | exception Unix.Unix_error (error, function_name, argument) ->
+    Error
+      { append_failure =
+          unix_failure
+            ~operation:Parent_directory_open
+            error
+            function_name
+            argument
+      ; rollback_failures = []
+      }
+  | fd ->
+    let fsync_result =
+      run_unix_io ~operation:Parent_directory_fsync (fun () -> Unix.fsync fd)
+    in
+    let close_result =
+      run_unix_io ~operation:Parent_directory_close (fun () -> Unix.close fd)
+    in
+    (match fsync_result, close_result with
+     | Ok (), Ok () -> Ok ()
+     | Error append_failure, Ok () | Ok (), Error append_failure ->
+       Error { append_failure; rollback_failures = [] }
+     | Error fsync_failure, Error close_failure ->
+       Error
+         { append_failure = fsync_failure
+         ; rollback_failures = [ close_failure ]
+         })
+;;
+
+let open_append_file path =
+  try
+    ( Unix.openfile path
+        [ Unix.O_RDWR
+        ; Unix.O_CREAT
+        ; Unix.O_EXCL
+        ; Unix.O_APPEND
+        ; Unix.O_CLOEXEC
+        ]
+        0o600
+    , true )
+  with
+  | Unix.Unix_error (Unix.EEXIST, _, _) ->
+    ( Unix.openfile path
+        [ Unix.O_RDWR; Unix.O_APPEND; Unix.O_CLOEXEC ]
+        0o600
+    , false )
+;;
+
+let with_private_append_fd_locked ~op path f =
+  test_exec_home_guard ~op path;
   let dir = Filename.dirname path in
   mkdir_p_memoized dir;
   let path_mu = get_append_path_mutex path in
-  run_blocking_durable_append ~path (fun () ->
-    Stdlib.Mutex.protect path_mu (fun () ->
-      let fd =
-        Unix.openfile path
-          [ Unix.O_RDWR; Unix.O_CREAT; Unix.O_APPEND; Unix.O_CLOEXEC ]
-          0o600
-      in
-      Fun.protect
-        ~finally:(fun () -> Unix.close fd)
-        (fun () ->
-           Unix.fchmod fd 0o600;
-           fsync_parent_directory dir;
-           (* See Unix.lseek: only the file-position side effect is required. *)
-           ignore (Unix.lseek fd 0 Unix.SEEK_SET : int);
-           lock_whole_file fd;
-           (* See Unix.lseek: only the file-position side effect is required. *)
-           ignore (Unix.lseek fd 0 Unix.SEEK_SET : int);
-           let existing = read_fd_chunks fd (Buffer.create 4096) in
-           let suffix, result = decide existing in
-           match suffix with
-            | None -> Ok result
-            | Some suffix ->
-              (* See Unix.lseek: only the file-position side effect is required. *)
-              let original_length = Unix.lseek fd 0 Unix.SEEK_END in
-              append_fd_durable
-                ~io:durable_append_unix_io
-                ~fd
-                ~original_length
-                suffix
-              |> Result.map (fun () -> result))))
+  let run () =
+    run_blocking_unix_io (fun () ->
+      Stdlib.Mutex.protect path_mu (fun () ->
+        Fd_cache.invalidate path;
+        let lock_path = path ^ ".lock" in
+        let lock_fd =
+          Unix.openfile lock_path
+            [ Unix.O_RDWR; Unix.O_CREAT; Unix.O_CLOEXEC ]
+            0o600
+        in
+        Fun.protect
+          ~finally:(fun () -> Unix.close lock_fd)
+          (fun () ->
+             Unix.fchmod lock_fd 0o600;
+             ignore (Unix.lseek lock_fd 0 Unix.SEEK_SET : int);
+             Unix.lockf lock_fd Unix.F_LOCK 0;
+             let fd, created = open_append_file path in
+             Fun.protect
+               ~finally:(fun () -> Unix.close fd)
+               (fun () ->
+                  Unix.fchmod fd 0o600;
+                  let needs_parent_sync =
+                    created || (Unix.fstat fd).Unix.st_size = 0
+                  in
+                  if needs_parent_sync
+                  then
+                    match fsync_directory_result dir with
+                    | Error error -> Error error
+                    | Ok () -> Ok (f fd)
+                  else Ok (f fd)))))
+  in
+  match Atomic.get global_fs with
+  | Some _ ->
+    let entry = acquire_durable_append_eio_mutex path in
+    Fun.protect
+      ~finally:(fun () -> release_durable_append_eio_mutex path entry)
+      (fun () ->
+         match
+           Eio.Mutex.use_rw ~protect:true entry.mutex (fun () ->
+             try Ok (run ()) with
+             | exn -> Error (exn, Printexc.get_raw_backtrace ()))
+         with
+         | Ok result -> result
+         | Error (exn, backtrace) ->
+           Printexc.raise_with_backtrace exn backtrace)
+  | None -> run ()
+;;
+
+let update_private_file_durable_locked_result path decide =
+  match with_private_append_fd_locked
+    ~op:"update_private_file_durable_locked"
+    path
+    (fun fd ->
+       ignore (Unix.lseek fd 0 Unix.SEEK_SET : int);
+       let existing = read_fd_contents fd in
+       let suffix, result = decide existing in
+       match suffix with
+       | None -> Ok result
+       | Some suffix ->
+         let original_length = Unix.lseek fd 0 Unix.SEEK_END in
+         append_fd_durable
+           ~io:durable_append_unix_io
+           ~fd
+           ~original_length
+           suffix
+         |> Result.map (fun () -> result))
+  with
+  | Error error -> Error error
+  | Ok result -> result
+;;
+
+let update_private_file_durable_locked path decide =
+  match update_private_file_durable_locked_result path decide with
+  | Ok result -> result
+  | Error error -> raise (Durable_append_failed error)
 ;;
 
 type private_jsonl_append_error =
@@ -851,8 +1045,7 @@ type private_jsonl_append_error =
   | Durable_jsonl_append_failed of durable_append_error
 
 let private_jsonl_append_error_to_string = function
-  | Incomplete_jsonl_tail ->
-    "existing JSONL file ends with an incomplete row"
+  | Incomplete_jsonl_tail -> "existing JSONL file ends with an incomplete row"
   | Invalid_jsonl_suffix ->
     "JSONL append suffix must be non-empty and newline-terminated"
   | Durable_jsonl_append_failed error -> durable_append_error_to_string error
@@ -863,53 +1056,39 @@ let append_private_jsonl_durable_locked_result path suffix =
      || not (Char.equal suffix.[String.length suffix - 1] '\n')
   then Error Invalid_jsonl_suffix
   else (
-    test_exec_home_guard ~op:"append_private_jsonl_durable_locked" path;
-    let dir = Filename.dirname path in
-    mkdir_p_memoized dir;
-    let path_mu = get_append_path_mutex path in
-    run_blocking_durable_append ~path (fun () ->
-      Stdlib.Mutex.protect path_mu (fun () ->
-        let fd =
-          Unix.openfile path
-            [ Unix.O_RDWR; Unix.O_CREAT; Unix.O_APPEND; Unix.O_CLOEXEC ]
-            0o600
-        in
-        Fun.protect
-          ~finally:(fun () -> Unix.close fd)
-          (fun () ->
-             Unix.fchmod fd 0o600;
-             fsync_parent_directory dir;
-             (* See Unix.lseek: only the file-position side effect is required. *)
-             ignore (Unix.lseek fd 0 Unix.SEEK_SET : int);
-             lock_whole_file fd;
-             let original_length = Unix.lseek fd 0 Unix.SEEK_END in
-             let tail_is_complete =
-               if original_length = 0
-               then true
-               else (
-                 (* See Unix.lseek: only the file-position side effect is required. *)
-                 ignore (Unix.lseek fd (original_length - 1) Unix.SEEK_SET : int);
-                 let byte = Bytes.create 1 in
-                 let rec read_tail () =
-                   match Unix.read fd byte 0 1 with
-                   | 1 -> Char.equal (Bytes.get byte 0) '\n'
-                   | 0 -> false
-                   | _ -> false
-                   | exception Unix.Unix_error (Unix.EINTR, _, _) -> read_tail ()
-                 in
-                 read_tail ())
-             in
-             if not tail_is_complete
-             then Error Incomplete_jsonl_tail
+    match with_private_append_fd_locked
+      ~op:"append_private_jsonl_durable_locked"
+      path
+      (fun fd ->
+           let original_length = Unix.lseek fd 0 Unix.SEEK_END in
+           let tail_is_complete =
+             if original_length = 0
+             then true
              else (
-               (* See Unix.lseek: only the file-position side effect is required. *)
-               ignore (Unix.lseek fd 0 Unix.SEEK_END : int);
-               append_fd_durable
-                 ~io:durable_append_unix_io
-                 ~fd
-                 ~original_length
-                 suffix
-               |> Result.map_error (fun error -> Durable_jsonl_append_failed error))))))
+               ignore (Unix.lseek fd (original_length - 1) Unix.SEEK_SET : int);
+               let byte = Bytes.create 1 in
+               let rec read_tail () =
+                 match Unix.read fd byte 0 1 with
+                 | 1 -> Char.equal (Bytes.get byte 0) '\n'
+                 | 0 -> false
+                 | _ -> false
+                 | exception Unix.Unix_error (Unix.EINTR, _, _) -> read_tail ()
+               in
+               read_tail ())
+           in
+           if not tail_is_complete
+           then Error Incomplete_jsonl_tail
+           else (
+             ignore (Unix.lseek fd 0 Unix.SEEK_END : int);
+             append_fd_durable
+               ~io:durable_append_unix_io
+               ~fd
+               ~original_length
+               suffix
+             |> Result.map_error (fun error -> Durable_jsonl_append_failed error)))
+    with
+    | Error error -> Error (Durable_jsonl_append_failed error)
+    | Ok result -> result)
 ;;
 
 let append_jsonl (path : string) (json : Yojson.Safe.t) : unit =

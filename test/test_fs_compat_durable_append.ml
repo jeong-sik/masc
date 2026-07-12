@@ -221,7 +221,109 @@ let with_temp_jsonl original f =
   let output = open_out_bin path in
   output_string output original;
   close_out output;
-  Fun.protect ~finally:(fun () -> Sys.remove path) (fun () -> f path)
+  Fun.protect
+    ~finally:(fun () ->
+      Sys.remove path;
+      let lock_path = path ^ ".lock" in
+      if Sys.file_exists lock_path then Sys.remove lock_path)
+    (fun () -> f path)
+;;
+
+let test_private_jsonl_first_creation_is_durable () =
+  let dir = Filename.temp_file "masc_private_jsonl_dir_" "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o700;
+  let path = Filename.concat dir "keeper.jsonl" in
+  Fun.protect
+    ~finally:(fun () ->
+      Sys.readdir dir
+      |> Array.iter (fun name -> Sys.remove (Filename.concat dir name));
+      Unix.rmdir dir)
+    (fun () ->
+      match
+        Fs_compat.append_private_jsonl_durable_locked_result
+          path
+          "{\"row\":1}\n"
+      with
+      | Error error -> fail (Fs_compat.private_jsonl_append_error_to_string error)
+      | Ok () ->
+        check string "new durable JSONL content" "{\"row\":1}\n"
+          (Fs_compat.load_file path);
+        check int "new durable JSONL mode" 0o600
+          ((Unix.stat path).Unix.st_perm land 0o777);
+        check bool "separate cross-process lock inode exists" true
+          (Sys.file_exists (path ^ ".lock")))
+;;
+
+let write_signal fd =
+  let byte = Bytes.make 1 'x' in
+  ignore (Unix.single_write fd byte 0 1 : int)
+;;
+
+let read_signal fd =
+  let byte = Bytes.create 1 in
+  match Unix.read fd byte 0 1 with
+  | 1 -> ()
+  | count -> failf "expected one synchronization byte, got %d" count
+;;
+
+let test_transcript_read_close_does_not_release_writer_lock () =
+  with_temp_jsonl "{\"row\":0}\n" @@ fun path ->
+  let ready_read, ready_write = Unix.pipe ~cloexec:true () in
+  let release_read, release_write = Unix.pipe ~cloexec:true () in
+  let holder_pid =
+    match Unix.fork () with
+    | 0 ->
+      Unix.close ready_read;
+      Unix.close release_write;
+      let result =
+        Fs_compat.update_private_file_durable_locked_result path (fun _existing ->
+          write_signal ready_write;
+          read_signal release_read;
+          None, ())
+      in
+      (match result with Ok () -> exit 0 | Error _ -> exit 2)
+    | pid -> pid
+  in
+  Unix.close ready_write;
+  Unix.close release_read;
+  read_signal ready_read;
+  let read_fd = Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 in
+  Unix.close read_fd;
+  let acquired_read, acquired_write = Unix.pipe ~cloexec:true () in
+  let contender_pid =
+    match Unix.fork () with
+    | 0 ->
+      Unix.close acquired_read;
+      let result =
+        Fs_compat.append_private_jsonl_durable_locked_result
+          path
+          "{\"row\":1}\n"
+      in
+      (match result with
+       | Ok () ->
+         write_signal acquired_write;
+         exit 0
+       | Error _ -> exit 3)
+    | pid -> pid
+  in
+  Unix.close acquired_write;
+  let readable_before_release, _, _ = Unix.select [ acquired_read ] [] [] 0.05 in
+  write_signal release_write;
+  let readable_after_release, _, _ = Unix.select [ acquired_read ] [] [] 2.0 in
+  if readable_after_release = [] then Unix.kill contender_pid Sys.sigkill
+  else read_signal acquired_read;
+  Unix.close ready_read;
+  Unix.close release_write;
+  Unix.close acquired_read;
+  let _, holder_status = Unix.waitpid [] holder_pid in
+  let _, contender_status = Unix.waitpid [] contender_pid in
+  check int "read-close does not release the writer lock" 0
+    (List.length readable_before_release);
+  check int "contender acquires after writer release" 1
+    (List.length readable_after_release);
+  check bool "holder exits cleanly" true (holder_status = Unix.WEXITED 0);
+  check bool "contender exits cleanly" true (contender_status = Unix.WEXITED 0)
 ;;
 
 let test_private_jsonl_append_preserves_complete_history () =
@@ -287,6 +389,14 @@ let () =
             "private JSONL append preserves complete history"
             `Quick
             test_private_jsonl_append_preserves_complete_history
+        ; test_case
+            "private JSONL first creation is durable"
+            `Quick
+            test_private_jsonl_first_creation_is_durable
+        ; test_case
+            "transcript reads preserve cross-process writer lock"
+            `Quick
+            test_transcript_read_close_does_not_release_writer_lock
         ; test_case
             "private JSONL append rejects incomplete tail"
             `Quick

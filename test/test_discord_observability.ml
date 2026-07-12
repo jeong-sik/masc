@@ -22,6 +22,8 @@ let test_label_contract () =
     (Obs.inbound_outcome_label Obs.Dispatch_unavailable);
   check string "ambient too_long" "dropped_too_long"
     (Obs.ambient_outcome_label Obs.Ambient_dropped_too_long);
+  check string "ambient persistence failure" "persistence_failed"
+    (Obs.ambient_outcome_label Obs.Ambient_persistence_failed);
   check string "reply failed" "send_error"
     (Obs.reply_outcome_label Obs.Reply_send_failed)
 

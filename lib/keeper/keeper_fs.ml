@@ -26,7 +26,7 @@ let ensure_dir (path : string) : string =
     if not (Hashtbl.mem ensured_dirs path) || not (Fs_compat.file_exists path) then begin
       match
         try
-          Fs_compat.mkdir_p path;
+          Fs_compat.mkdir_p_durable path;
           Hashtbl.replace ensured_dirs path ();
           Ok ()
         with

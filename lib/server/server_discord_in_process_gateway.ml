@@ -591,30 +591,40 @@ let handle_ambient ~base_dir
     else begin
       let parent_channel_id = State.parent_channel_of_thread ~channel_id in
       let thread_id = Option.map (fun _ -> channel_id) parent_channel_id in
+      let persisted =
+        Keeper_chat_store.append_user_message_result
+          ~base_dir ~keeper_name ~content:trimmed
+          ~surface:
+            (Surface_ref.Discord
+               {
+                 guild_id;
+                 channel_id;
+                 parent_channel_id;
+                 thread_id;
+               })
+          ~conversation_id:(discord_conversation_id ~guild_id ~channel_id)
+          ~external_message_id:message_id
+          ~speaker:
+            { Keeper_chat_store.speaker_id = Some author_id
+            ; speaker_name = author_name
+            ; speaker_authority = Keeper_chat_store.External
+            }
+          ()
+      in
+      (match persisted with
+       | Error detail ->
+         Log.Server.error
+           "discord ambient transcript persistence failed keeper=%s channel=%s message=%s error=%s"
+           keeper_name channel_id message_id detail;
+         Discord_observability.record_ambient
+           Discord_observability.Ambient_persistence_failed
+       | Ok () ->
       let attention_event_id =
         record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id
           ~message_id ~author_id ~author_name ~content:trimmed
           ~mentions_bot:false ~route:"ambient"
           ~urgency:Keeper_external_attention.Ambient
       in
-      Keeper_chat_store.append_user_message
-        ~base_dir ~keeper_name ~content:trimmed
-        ~surface:
-          (Surface_ref.Discord
-             {
-               guild_id;
-               channel_id;
-               parent_channel_id;
-               thread_id;
-             })
-        ~conversation_id:(discord_conversation_id ~guild_id ~channel_id)
-        ~external_message_id:message_id
-        ~speaker:
-          { Keeper_chat_store.speaker_id = Some author_id
-          ; speaker_name = author_name
-          ; speaker_authority = Keeper_chat_store.External
-          }
-        ();
       Keeper_chat_broadcast.chat_appended ~keeper_name ~source:State.channel ();
       (* RFC-connector-ambient-attention-wake P3: wake the (possibly idle) keeper
          on this ambient message via an edge stimulus carrying the external-
@@ -664,7 +674,7 @@ let handle_ambient ~base_dir
          ()
        | Some _ | None -> ());
       Discord_observability.record_ambient
-        Discord_observability.Ambient_recorded
+        Discord_observability.Ambient_recorded)
     end
 
 let on_ambient ~base_dir (ev : Gw.gateway_event) =

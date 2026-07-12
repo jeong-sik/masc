@@ -271,6 +271,17 @@ module For_testing : sig
     ?has_visible_blocks:bool -> Yojson.Safe.t option -> string -> string option
   val queued_delivery_outcome_of_turn_ref :
     Ids.Turn_ref.t option -> queued_turn_outcome
+  val delivery_outcome_after_persist :
+    queued_turn:bool ->
+    turn_ref:Ids.Turn_ref.t option ->
+    (unit, string) result ->
+    queued_turn_outcome option
+  val failure_outcome_after_persist :
+    queued_turn:bool ->
+    failure_kind:queued_turn_failure_kind ->
+    detail:string ->
+    (unit, string) result ->
+    queued_turn_outcome option
   val visible_reply_with_stream_fallback :
     streamed_text:string -> string -> string
   val redacted_visible_reply_with_stream_fallback :

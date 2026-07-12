@@ -6,6 +6,8 @@ module Mcp_server = Mcp_server
 module Mcp_eio = Mcp_server_eio
 module Config_root_bootstrap = Server_runtime_config_root_bootstrap
 
+exception Keeper_chat_queue_bootstrap_failed of string
+
 let config_bootstrap_mode = Config_root_bootstrap.config_bootstrap_mode
 let bootstrap_base_path_config_root = Config_root_bootstrap.bootstrap_base_path_config_root
 let startup_config_resolution = Config_root_bootstrap.startup_config_resolution
@@ -1075,9 +1077,15 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       let state, path_diagnostics =
         init_state_blocking ()
       in
+      let workspace_config = Mcp_server.workspace_config state in
+      (match
+         Server_bootstrap_loops.prepare_keeper_chat_persistence ~workspace_config
+       with
+       | Ok () -> ()
+       | Error detail -> raise (Keeper_chat_queue_bootstrap_failed detail));
       server_state := Some state;
       Server_startup_state.mark_state_ready
-        ~backend_mode:(Workspace.backend_name (Mcp_server.workspace_config state));
+        ~backend_mode:(Workspace.backend_name workspace_config);
       let resolved_base, masc_dir =
         Server_bootstrap_loops.start_background_maintenance ~sw ~clock ~env state
       in

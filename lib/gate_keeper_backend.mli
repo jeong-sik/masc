@@ -135,9 +135,10 @@ val persist_connector_assistant_reply :
   ?turn_ref:Ids.Turn_ref.t ->
   reply:string ->
   unit ->
-  unit
+  (unit, string) result
 (** Persist a completed connector direct reply on the same chat lane that
-    received the inbound user line. Empty replies are ignored.
+    received the inbound user line. Empty replies return [Ok ()]. The broadcast
+    is emitted only after durable persistence succeeds.
     [turn_ref] (RFC-0233 §7) is the join key the keeper minted into the
     reply payload, stamped on the assistant row. *)
 

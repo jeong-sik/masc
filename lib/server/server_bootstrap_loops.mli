@@ -15,6 +15,13 @@ val install_tooling :
     according to [governance_level] (e.g. ["restricted"], ["full"]).
     Idempotent; safe to call once per server instance. *)
 
+val prepare_keeper_chat_persistence :
+  workspace_config:Workspace.config -> (unit, string) result
+(** Recover delivery journals, restore the durable Keeper chat queue, and only
+    then reconcile disk-only request records. Registry discovery failure is a
+    readiness error; individual corrupt keeper snapshots remain isolated.
+    Startup calls this before publishing server route readiness. *)
+
 val start_keeper_loops :
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->

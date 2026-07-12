@@ -268,6 +268,24 @@ val append_assistant_message_result :
   unit ->
   (unit, string) result
 
+val append_delivery_assistant_message_result :
+  base_dir:string ->
+  keeper_name:string ->
+  delivery_key:Keeper_chat_delivery_identity.delivery_key ->
+  content:string ->
+  ?surface:Surface_ref.t ->
+  ?conversation_id:string ->
+  ?assistant_kind:Row_kind.t ->
+  ?blocks:chat_block list ->
+  ?turn_ref:Ids.Turn_ref.t ->
+  ?stream_lifecycle:stream_lifecycle_event list ->
+  unit ->
+  (string, string) result
+(** O(suffix) normal-path terminal append for a newly transitioned delivery
+    journal. Returns the persisted row id. Restart recovery must use
+    {!append_assistant_message_once}, whose O(history) lookup is reserved for
+    the ambiguous crash window. *)
+
 (** Idempotent terminal assistant append. The per-Keeper lookup and append are
     serialized, so callback re-entry and restart recovery converge on one row
     for the exact typed delivery slot. A malformed persisted provenance row is
@@ -322,6 +340,39 @@ val append_user_message :
   ?extra_mentions:Keeper_identity.Keeper_id.t list ->
   unit ->
   unit
+
+val append_user_message_result :
+  base_dir:string ->
+  keeper_name:string ->
+  content:string ->
+  ?attachments:attachment list ->
+  ?surface:Surface_ref.t ->
+  ?conversation_id:string ->
+  ?external_message_id:string ->
+  ?speaker:speaker ->
+  ?extra_mentions:Keeper_identity.Keeper_id.t list ->
+  unit ->
+  (unit, string) result
+(** Result-returning inbound recorder for connector and admission boundaries.
+    A caller must not broadcast or dispatch the message unless this returns
+    [Ok ()]. *)
+
+val append_delivery_user_message_result :
+  base_dir:string ->
+  keeper_name:string ->
+  delivery_key:Keeper_chat_delivery_identity.delivery_key ->
+  content:string ->
+  ?attachments:attachment list ->
+  ?surface:Surface_ref.t ->
+  ?conversation_id:string ->
+  ?external_message_id:string ->
+  ?speaker:speaker ->
+  ?extra_mentions:Keeper_identity.Keeper_id.t list ->
+  unit ->
+  (string, string) result
+(** O(suffix) normal-path accepted-user append for a newly prepared delivery
+    journal. Returns the persisted row id. Restart recovery retains the exact
+    append-once scan for crash reconciliation. *)
 
 (** Idempotent accepted-user append for a direct/queued delivery identity. *)
 val append_user_message_once :

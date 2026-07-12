@@ -283,19 +283,8 @@ let filteri_with_fair_yield =
   Server_bootstrap_loops_fiber.filteri_with_fair_yield
 let iteri_with_fair_yield = Server_bootstrap_loops_fiber.iteri_with_fair_yield
 
-let start_keeper_loops
-      ~sw
-      ~clock
-      ~net
-      ~domain_mgr
-      ~proc_mgr
-      (state : Mcp_server.server_state)
-  =
-  Progress.set_sse_callback Sse.broadcast;
-  (* Wire stop_keeper hook so zombie GC can terminate keeper fibers *)
-  Atomic.set Workspace_hooks.stop_keeper_fn Keeper_keepalive.stop_keepalive;
-  Atomic.set Workspace_hooks.runtime_agents_fn keeper_registry_runtime_agents;
-  let base_path = (Mcp_server.workspace_config state).base_path in
+let prepare_keeper_chat_persistence ~(workspace_config : Workspace.config) =
+  let base_path = workspace_config.base_path in
   let delivery_recovery =
     Keeper_chat_delivery_journal.recover_all
       ~base_path
@@ -316,17 +305,73 @@ let start_keeper_loops
       delivery_recovery.recovered
       delivery_recovery.already_final
       (List.length delivery_recovery.failures);
-  (* Request status is recovered only after transcript journals converge: a
-     poller must never observe a final Lost status while its durable terminal
-     row is still absent. *)
-  let recovered_keeper_msg_requests =
-    Keeper_msg_async.recover_lost_disk_records ~base_path
-  in
-  if recovered_keeper_msg_requests > 0
-  then
-    Log.Keeper.warn
-      "keeper_msg_async: recovered %d disk-only non-terminal request record(s) as lost"
-      recovered_keeper_msg_requests;
+  match delivery_recovery.failures with
+  | failure :: _ ->
+    Error
+      (Printf.sprintf
+         "keeper chat delivery recovery failed before queue readiness: keeper=%s delivery_ref=%s error=%s"
+         failure.keeper_name
+         failure.delivery_ref
+         (Keeper_chat_delivery_journal.error_to_string failure.error))
+  | [] ->
+    Keeper_chat_queue.set_transition_observer
+      (Some
+         (fun ~keeper_name ~revision ->
+            Keeper_chat_broadcast.queue_changed ~keeper_name ~revision ()));
+    let queue_report = Keeper_chat_queue.configure_persistence ~base_path in
+    List.iter
+      (fun (keeper_name, (error : Keeper_chat_queue.snapshot_load_error)) ->
+         let keeper_label = Option.value keeper_name ~default:"<registry>" in
+         Log.Keeper.error
+           "keeper_chat_queue: snapshot unavailable keeper=%s: %s"
+           keeper_label
+           error.Keeper_chat_queue.message)
+      queue_report.load_errors;
+    if queue_report.recovered_receipt_count > 0
+    then
+      Log.Keeper.warn
+        "keeper_chat_queue: recovered %d inflight receipt(s) during startup"
+        queue_report.recovered_receipt_count;
+    let registry_errors =
+      List.filter_map
+        (function
+          | None, error -> Some error
+          | Some _, _ -> None)
+        queue_report.load_errors
+    in
+    (match registry_errors with
+     | error :: _ ->
+       Error
+         (Printf.sprintf
+            "keeper chat queue registry recovery failed: %s"
+            error.Keeper_chat_queue.message)
+     | [] ->
+       if not (Keeper_chat_queue.persistence_matches_base_path ~base_path)
+       then Error "keeper chat queue did not acquire the server BasePath"
+       else (
+         let recovered_keeper_msg_requests =
+           Keeper_msg_async.recover_lost_disk_records ~base_path
+         in
+         if recovered_keeper_msg_requests > 0
+         then
+           Log.Keeper.warn
+             "keeper_msg_async: recovered %d disk-only non-terminal request record(s) as lost"
+             recovered_keeper_msg_requests;
+         Ok ()))
+;;
+
+let start_keeper_loops
+      ~sw
+      ~clock
+      ~net
+      ~domain_mgr
+      ~proc_mgr
+      (state : Mcp_server.server_state)
+  =
+  Progress.set_sse_callback Sse.broadcast;
+  (* Wire stop_keeper hook so zombie GC can terminate keeper fibers *)
+  Atomic.set Workspace_hooks.stop_keeper_fn Keeper_keepalive.stop_keepalive;
+  Atomic.set Workspace_hooks.runtime_agents_fn keeper_registry_runtime_agents;
   (* Shared Agent_sdk Event_bus used as the runtime transport between subsystems.
      Configuration is sourced from [Masc_event_bus_policy.oas_runtime] so the
      buffer-size/policy choice is auditable in source rather than implicit in
@@ -1132,24 +1177,6 @@ let start_keeper_loops
          handle_turn wires process_single_turn for actual turn execution. *)
       (try
          let base_path = (Mcp_server.workspace_config state).base_path in
-         Keeper_chat_queue.set_transition_observer
-           (Some
-              (fun ~keeper_name ~revision ->
-                 Keeper_chat_broadcast.queue_changed ~keeper_name
-                   ~revision ()));
-         let queue_report = Keeper_chat_queue.configure_persistence ~base_path in
-         List.iter
-           (fun (keeper_name, (error : Keeper_chat_queue.snapshot_load_error)) ->
-              let keeper_label =
-                match keeper_name with
-                | Some keeper_name -> keeper_name
-                | None -> "<registry>"
-              in
-              Log.Keeper.error
-                "keeper_chat_queue: snapshot unavailable keeper=%s: %s"
-                keeper_label
-                error.Keeper_chat_queue.message)
-           queue_report.load_errors;
          Keeper_chat_consumer.start ~sw ~clock
            ~base_path
            ~handle_turn:(fun ~sw ~keeper_name ~delivery_key ~queued_message ->

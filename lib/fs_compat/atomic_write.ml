@@ -7,19 +7,8 @@
 let fsync_path path =
   let fd = Unix.openfile path [ Unix.O_RDONLY ] 0 in
   Stdlib.Fun.protect
-    ~finally:(fun () ->
-      try Unix.close fd with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | exn ->
-        Stdlib.Printf.eprintf
-          "[fs_compat] fsync_path close failed: %s\n%!"
-          (Printexc.to_string exn))
-    (fun () ->
-      try Unix.fsync fd with
-      | Unix.Unix_error ((Unix.EINVAL | Unix.EOPNOTSUPP), _, _) ->
-        (* Some filesystems (tmpfs on some kernels) reject fsync. The data
-           is still durable to the extent the underlying FS offers. *)
-        ())
+    ~finally:(fun () -> Unix.close fd)
+    (fun () -> Unix.fsync fd)
 ;;
 
 (* #10205 finding 2: keep the atomic-tmp filename shape in one place
@@ -45,8 +34,7 @@ let save_file_atomic
     save_file tmp content;
     fsync_path tmp;
     Stdlib.Sys.rename tmp path;
-    (try fsync_path dir with
-     | Unix.Unix_error _ -> ());
+    fsync_path dir;
     Ok ()
   with
   | Eio.Cancel.Cancelled _ as e ->

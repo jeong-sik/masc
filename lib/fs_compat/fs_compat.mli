@@ -102,6 +102,11 @@ val realpath : string -> string
 (** Create directory recursively. *)
 val mkdir_p : string -> unit
 
+val mkdir_p_durable : string -> unit
+(** Recursively create a directory and fsync each newly published parent
+    entry. Runs blocking Unix operations on a system thread when Eio is active.
+    Raises on any mkdir/open/fsync/close failure. *)
+
 (** [mkdir_p_memoized path] is [mkdir_p] but skips the stat/mkdir
     syscalls on every call after the first for the same [path].
     Use on hot append paths (jsonl writers, ledger appends) where the
@@ -182,6 +187,9 @@ type durable_append_operation =
   | Append_fsync
   | Rollback_truncate
   | Rollback_fsync
+  | Parent_directory_open
+  | Parent_directory_fsync
+  | Parent_directory_close
 
 type durable_append_failure =
   | Unix_error of
@@ -197,42 +205,30 @@ type durable_append_error =
   ; rollback_failures : durable_append_failure list
   }
 
-(** Render a structured durable-append failure without discarding the original
-    [Unix.error] or rollback failures. *)
+exception Durable_append_failed of durable_append_error
+
 val durable_append_error_to_string : durable_append_error -> string
 
-(** [update_private_file_durable_locked_result path decide] serializes in-process
-    callers with the shared per-path append mutex, takes a cross-process file
-    lock, reads the exact existing bytes, and calls [decide]. [Some suffix]
-    appends the complete suffix and fsyncs it before returning [Ok]; [None]
-    performs no write. If writing or the append fsync fails, the file is
-    truncated to its original length and that rollback is fsynced. [Error]
-    preserves the append failure and every rollback failure. Setup, read, and
-    [decide] exceptions still propagate. The file is created with mode [0600],
-    and every transaction fsyncs its parent directory before touching payload
-    bytes so a failed creation can be retried without silently skipping that
-    durability boundary. Filesystems that reject directory fsync fail
-    explicitly. The shared path mutex serializes this operation with cached
-    JSONL writers without closing their already-flushed descriptors. When the
-    Eio filesystem is active, the transaction and [decide] run in a system
-    thread so a contended file cannot stop unrelated fibers; [decide] therefore
-    must not perform Eio effects. *)
+(** Serialize in-process and cross-process writers, read the current bytes, and
+    append the suffix selected by [decide]. A successful append is fsynced.
+    Partial write/fsync failure rolls back to the original length and fsyncs the
+    rollback; both primary and rollback failures remain typed. Blocking Unix
+    I/O and per-path lock waits run on an Eio system thread when available. *)
 val update_private_file_durable_locked_result :
   string -> (string -> string option * 'a) -> ('a, durable_append_error) result
+
+val update_private_file_durable_locked :
+  string -> (string -> string option * 'a) -> 'a
 
 type private_jsonl_append_error =
   | Incomplete_jsonl_tail
   | Invalid_jsonl_suffix
   | Durable_jsonl_append_failed of durable_append_error
 
-(** Append one or more complete JSONL rows without reading the existing file.
-    The operation holds the same in-process and cross-process path locks as
-    {!update_private_file_durable_locked_result}, verifies only that an existing
-    file ends at a newline boundary, then appends and fsyncs with rollback on
-    failure. Every transaction also fsyncs the parent directory. Runtime cost
-    is proportional to [suffix], not to historical file size. When the Eio
-    filesystem is active, the entire blocking lock/write/fsync transaction runs
-    in a system thread so one contended file cannot stop unrelated fibers. *)
+(** Append complete JSONL rows after checking only the existing final byte.
+    The hot-path cost is proportional to the appended suffix, not history size.
+    Blocking Unix I/O and per-path lock waits run on an Eio system thread when
+    available. *)
 val append_private_jsonl_durable_locked_result :
   string -> string -> (unit, private_jsonl_append_error) result
 
@@ -244,8 +240,6 @@ type durable_append_io_for_testing =
   ; fsync : Unix.file_descr -> unit
   }
 
-(** Direct fd-level seam for deterministic partial-write and rollback tests.
-    Production code uses the same implementation with [Unix] operations. *)
 val append_fd_durable_for_testing :
   io:durable_append_io_for_testing ->
   fd:Unix.file_descr ->

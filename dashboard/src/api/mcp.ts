@@ -23,7 +23,6 @@ import { errorToString } from '../lib/format-string'
 // --- MCP Session Management ---
 
 const MCP_BLOCKED_MESSAGE = 'MCP 연결이 차단되었습니다.'
-const MCP_UNKNOWN_SESSION_MESSAGE = 'Unknown Mcp-Session-Id'
 const MCP_AUTH_CHANGED_MESSAGE = 'MCP authentication changed during request'
 
 interface McpSessionBinding {
@@ -41,22 +40,25 @@ interface McpInitAttempt {
   cooldownTimer: ReturnType<typeof setTimeout> | null
 }
 
+interface McpRequestTrace {
+  binding: McpSessionBinding | null
+}
+
+type McpErrorResponseContract =
+  | { readonly kind: 'unknown_session'; readonly replacementSessionId: string }
+  | { readonly kind: 'other' }
+
 let mcpSessionState: McpSessionState | null = null
 let observedTokenRevision = currentStoredTokenRevision()
 let initGeneration = 0
 let initAttempt: McpInitAttempt | null = null
-
-function activeSessionId(): string | null {
-  return mcpSessionState?.kind === 'ready'
-    ? mcpSessionState.binding.sessionId
-    : null
-}
 
 async function bestEffortReportToolHostFailure(payload: {
   toolName: string
   message: string
   phase: string
   requestId?: string
+  sessionId?: string
   timeoutMs?: number
 }) {
   try {
@@ -67,7 +69,7 @@ async function bestEffortReportToolHostFailure(payload: {
       phase: payload.phase,
       message: payload.message,
       request_id: payload.requestId,
-      session_id: activeSessionId() ?? undefined,
+      session_id: payload.sessionId,
       timeout_ms: payload.timeoutMs,
     })
   } catch {
@@ -180,12 +182,24 @@ function canRetryUnknownSession(body: unknown): boolean {
     && method !== 'server/discover'
 }
 
-async function responseTextSnippet(res: Response): Promise<string> {
-  try {
-    return await res.clone().text()
-  } catch {
-    return ''
+function classifyMcpErrorResponse(
+  res: Response,
+  body: unknown,
+): McpErrorResponseContract {
+  const replacementSessionId = res.headers.get('Mcp-Session-Id')
+  if (
+    res.status === 404
+    && replacementSessionId
+    && canRetryUnknownSession(body)
+  ) {
+    return { kind: 'unknown_session', replacementSessionId }
   }
+  return { kind: 'other' }
+}
+
+function invalidatePublishedBinding(binding: McpSessionBinding): void {
+  assertPublishedBinding(binding)
+  resetMcpSessionOnly()
 }
 
 async function mcpPost(
@@ -194,8 +208,10 @@ async function mcpPost(
   timeoutMs = DEFAULT_MCP_TIMEOUT_MS,
   actorName?: string | null,
   retryUnknownSession = true,
+  requestTrace?: McpRequestTrace,
 ): Promise<string> {
   assertPublishedBinding(binding)
+  if (requestTrace) requestTrace.binding = binding
   const res = await fetchWithTimeout('/mcp', {
     method: 'POST',
     headers: mcpHeadersForActor(binding, actorName),
@@ -210,18 +226,15 @@ async function mcpPost(
       }
       throw new Error(MCP_BLOCKED_MESSAGE)
     }
-    const bodyText = res.status === 404 ? await responseTextSnippet(res) : ''
+    const responseContract = classifyMcpErrorResponse(res, body)
     const err = await apiRequestErrorFromResponse('POST', '/mcp', res)
-    const message = `${bodyText}\n${errorToString(err)}`
     if (
       retryUnknownSession
-      && res.status === 404
-      && canRetryUnknownSession(body)
-      && message.includes(MCP_UNKNOWN_SESSION_MESSAGE)
+      && responseContract.kind === 'unknown_session'
     ) {
-      resetMcpSessionOnly()
+      invalidatePublishedBinding(binding)
       const freshBinding = await ensureSession()
-      return mcpPost(body, freshBinding, timeoutMs, actorName, false)
+      return mcpPost(body, freshBinding, timeoutMs, actorName, false, requestTrace)
     }
     throw err
   }
@@ -291,7 +304,7 @@ async function initializeSession(
   }
   if (binding.sessionId) {
     try {
-      await fetchWithTimeout('/mcp', {
+      const initializedRes = await fetchWithTimeout('/mcp', {
         method: 'POST',
         headers: mcpHeadersForActor(binding),
         body: JSON.stringify({
@@ -300,9 +313,17 @@ async function initializeSession(
         }),
       }, MCP_INITIALIZED_NOTIFY_TIMEOUT_MS)
       assertCurrentInitAttempt(attempt, authRevision)
+      if (!initializedRes.ok) {
+        throw await apiRequestErrorFromResponse(
+          'POST',
+          '/mcp notifications/initialized',
+          initializedRes,
+        )
+      }
     } catch (err) {
       assertCurrentInitAttempt(attempt, authRevision)
       console.warn('[mcp] initialized notification failed:', err)
+      throw err
     }
   }
   assertCurrentInitAttempt(attempt, authRevision)
@@ -392,6 +413,7 @@ async function callMcpToolInternal(
   const requestId = String(Math.floor(Date.now() % 1000000))
   synchronizeMcpAuthRevision()
   let phase = mcpSessionState?.kind === 'ready' ? 'tools/call' : 'initialize'
+  const requestTrace: McpRequestTrace = { binding: null }
   try {
     const binding = await ensureSession()
     phase = 'tools/call'
@@ -409,7 +431,7 @@ async function callMcpToolInternal(
         arguments: toolArgs,
       },
       id: Number.parseInt(requestId, 10),
-    }, binding, DEFAULT_MCP_TIMEOUT_MS, actor)
+    }, binding, DEFAULT_MCP_TIMEOUT_MS, actor, true, requestTrace)
     const parsed = parseMcpHttpResponse(text)
     return extractMcpText(parsed)
   } catch (err) {
@@ -420,6 +442,7 @@ async function callMcpToolInternal(
         message,
         phase,
         requestId: phase === 'tools/call' ? requestId : undefined,
+        sessionId: requestTrace.binding?.sessionId ?? undefined,
         timeoutMs: phase === 'initialize' ? MCP_INITIALIZE_TIMEOUT_MS : DEFAULT_MCP_TIMEOUT_MS,
       })
     }

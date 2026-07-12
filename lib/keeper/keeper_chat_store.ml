@@ -612,43 +612,6 @@ let encode_line ~(role : Role.t) ~content ~ts ?message_id ?attachments ?tool_cal
   in
   Yojson.Safe.to_string (`Assoc all_fields)
 
-type writer_lock =
-  { mutex : Stdlib.Mutex.t
-  ; mutable users : int
-  }
-
-let writer_locks : (string, writer_lock) Hashtbl.t = Hashtbl.create 16
-let writer_locks_mutex = Stdlib.Mutex.create ()
-
-let acquire_writer_lock path =
-  Stdlib.Mutex.protect writer_locks_mutex (fun () ->
-    match Hashtbl.find_opt writer_locks path with
-    | Some lock ->
-      lock.users <- lock.users + 1;
-      lock
-    | None ->
-      let lock = { mutex = Stdlib.Mutex.create (); users = 1 } in
-      Hashtbl.add writer_locks path lock;
-      lock)
-;;
-
-let release_writer_lock path lock =
-  Stdlib.Mutex.protect writer_locks_mutex (fun () ->
-    lock.users <- lock.users - 1;
-    if lock.users = 0
-    then
-      match Hashtbl.find_opt writer_locks path with
-      | Some current when current == lock -> Hashtbl.remove writer_locks path
-      | Some _ | None -> ())
-;;
-
-let with_writer_lock path f =
-  let lock = acquire_writer_lock path in
-  Fun.protect
-    ~finally:(fun () -> release_writer_lock path lock)
-    (fun () -> Stdlib.Mutex.protect lock.mutex f)
-;;
-
 let provenance_of_line ~line_number line =
   let fail detail =
     Error
@@ -685,61 +648,65 @@ let provenance_of_line ~line_number line =
   | Yojson.Json_error detail -> fail detail
 ;;
 
-let find_provenance_unlocked path ~delivery_key ~transcript_slot =
-  if not (Fs_compat.file_exists path)
-  then Ok None
-  else
-    try
-      let lines =
-        Fs_compat.load_file path
-        |> String.split_on_char '\n'
-        |> List.mapi (fun index line -> index + 1, line)
-      in
-      List.fold_left
-           (fun result (line_number, line) ->
-              let ( let* ) = Result.bind in
-              let* found = result in
-              if String.equal line ""
-              then Ok found
-              else
-                let* provenance = provenance_of_line ~line_number line in
-                match provenance, found with
-                | None, _ -> Ok found
-                | Some (candidate_key, candidate_slot, row_id), None
-                  when
-                    Keeper_chat_delivery_identity.delivery_key_equal
-                      delivery_key
-                      candidate_key
-                    && Keeper_chat_delivery_identity.transcript_slot_equal
-                         transcript_slot
-                         candidate_slot ->
-                  Ok (Some row_id)
-                | Some (candidate_key, candidate_slot, _), Some _
-                  when
-                    Keeper_chat_delivery_identity.delivery_key_equal
-                      delivery_key
-                      candidate_key
-                    && Keeper_chat_delivery_identity.transcript_slot_equal
-                         transcript_slot
-                         candidate_slot ->
-                  Error "duplicate Keeper chat delivery provenance rows"
-                | Some _, _ -> Ok found)
-           (Ok None)
-           lines
-    with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn -> Error (Printexc.to_string exn)
+let find_provenance existing ~delivery_key ~transcript_slot =
+  existing
+  |> String.split_on_char '\n'
+  |> List.mapi (fun index line -> index + 1, line)
+  |> List.fold_left
+       (fun result (line_number, line) ->
+          let ( let* ) = Result.bind in
+          let* found = result in
+          if String.equal line ""
+          then Ok found
+          else
+            let* provenance = provenance_of_line ~line_number line in
+            match provenance, found with
+            | None, _ -> Ok found
+            | Some (candidate_key, candidate_slot, row_id), None
+              when
+                Keeper_chat_delivery_identity.delivery_key_equal
+                  delivery_key
+                  candidate_key
+                && Keeper_chat_delivery_identity.transcript_slot_equal
+                     transcript_slot
+                     candidate_slot ->
+              Ok (Some row_id)
+            | Some (candidate_key, candidate_slot, _), Some _
+              when
+                Keeper_chat_delivery_identity.delivery_key_equal
+                  delivery_key
+                  candidate_key
+                && Keeper_chat_delivery_identity.transcript_slot_equal
+                     transcript_slot
+                     candidate_slot ->
+              Error "duplicate Keeper chat delivery provenance rows"
+            | Some _, _ -> Ok found)
+       (Ok None)
 ;;
 
 let append_line_once path ~delivery_key ~transcript_slot ~row_id line =
-  with_writer_lock path (fun () ->
-    match find_provenance_unlocked path ~delivery_key ~transcript_slot with
-    | Error _ as error -> error
-    | Ok (Some existing_row_id) ->
-      Ok (Already_present { row_id = existing_row_id })
-    | Ok None ->
-      Fs_compat.append_file path (line ^ "\n");
-      Ok (Appended { row_id }))
+  match
+    Fs_compat.update_private_file_durable_locked_result path (fun existing ->
+      match find_provenance existing ~delivery_key ~transcript_slot with
+      | Error detail -> None, Error detail
+      | Ok (Some existing_row_id) ->
+        None, Ok (Already_present { row_id = existing_row_id })
+      | Ok None -> Some (line ^ "\n"), Ok (Appended { row_id }))
+  with
+  | Ok result -> result
+  | Error error -> Error (Fs_compat.durable_append_error_to_string error)
+;;
+
+let append_chat_payload_durable path payload =
+  match Fs_compat.append_private_jsonl_durable_locked_result path payload with
+  | Ok () -> ()
+  | Error error ->
+    raise
+      (Sys_error
+         (Printf.sprintf
+            "%s: %s"
+            path
+            (Fs_compat.private_jsonl_append_error_to_string error)))
 ;;
 
 (* Tool calls with empty accumulated arguments are normalised to "{}" so
@@ -814,7 +781,7 @@ let append_turn_result ~base_dir ~keeper_name ~(user_content : string)
     let payload =
       String.concat "\n" ((user_line :: tool_lines) @ [ asst_line ]) ^ "\n"
     in
-    Fs_compat.append_file path payload;
+    append_chat_payload_durable path payload;
     Ok ()
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -862,7 +829,7 @@ let append_assistant_message_result ~base_dir ~keeper_name ~(content : string)
       encode_line ~role:Role.Assistant ~content ~ts ?surface ?conversation_id
         ?audio ?blocks ?turn_ref ?stream_lifecycle ()
     in
-    Fs_compat.append_file path (line ^ "\n");
+    append_chat_payload_durable path (line ^ "\n");
     Ok ()
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -961,7 +928,7 @@ let append_user_message ~base_dir ~keeper_name ~(content : string)
         ?external_message_id ?speaker
         ~mentions:(user_line_mentions ~extra_mentions content) ()
     in
-    Fs_compat.append_file path (line ^ "\n")
+    append_chat_payload_durable path (line ^ "\n")
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->

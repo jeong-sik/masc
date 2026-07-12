@@ -429,7 +429,8 @@ let () =
     { base_receipt with
       outcome = `Ok
     ; terminal_reason_code =
-        Keeper_turn_disposition.to_wire Keeper_turn_disposition.Input_required
+        Masc.Keeper_turn_disposition.to_wire
+          Masc.Keeper_turn_disposition.Input_required
     ; completion_contract_result = R.Contract_passive_only
     ; runtime_outcome = R.Runtime_completed
     }

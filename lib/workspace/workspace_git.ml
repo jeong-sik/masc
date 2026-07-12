@@ -70,22 +70,37 @@ let is_valid_branch_name s =
 (* Git Repository Utilities                     *)
 (* ============================================ *)
 
+(** Walk parent directories to find the git work-tree root.
+    Returns [Some dir] where [.git] exists, or [None].
+    Avoids spawning a subprocess when clearly not in a git repo. *)
+let find_git_marker_root path =
+  let rec walk dir =
+    let marker = Filename.concat dir ".git" in
+    if Sys.file_exists marker then Some dir
+    else
+      let parent = Filename.dirname dir in
+      if String.equal parent dir then None else walk parent
+  in
+  try walk path with Sys_error _ -> None
+
 (** Fast check for .git marker by walking parent directories.
     Avoids spawning a subprocess when clearly not in a git repo. *)
 let has_git_marker path =
-  let rec walk dir =
-    let marker = Filename.concat dir ".git" in
-    if Sys.file_exists marker then true
-    else
-      let parent = Filename.dirname dir in
-      if String.equal parent dir then false else walk parent
-  in
-  try walk path with Sys_error _ -> false
+  match find_git_marker_root path with
+  | Some _ -> true
+  | None -> false
 
-(** Get git root directory *)
+(** Get git root directory.
+    Tries [rev-parse --show-toplevel] first; falls back to the
+    parent-walk [.git] marker when the subprocess is unavailable
+    (e.g. sandbox exec gate). *)
 let git_root ~base_path =
-  if not (has_git_marker base_path) then None
-  else git_first_line ~repo_path:base_path [ "rev-parse"; "--show-toplevel" ]
+  match find_git_marker_root base_path with
+  | None -> None
+  | Some marker_root ->
+    (match git_first_line ~repo_path:base_path [ "rev-parse"; "--show-toplevel" ] with
+     | Some _ as root -> root
+     | None -> Some marker_root)
 
 (** Check if directory is a git repository *)
 let is_git_repo ~base_path =

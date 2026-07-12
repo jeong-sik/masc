@@ -1325,7 +1325,7 @@ let test_keeper_shutdown_prepare_failure_rolls_back_fence () =
         | Ok path -> Filename.dirname path
         | Error error -> fail (Shutdown_store.error_to_string error)
       in
-      mkdir_p (Filename.dirname records_dir);
+      Fs_compat.mkdir_p (Filename.dirname records_dir);
       let blocker = open_out records_dir in
       close_out blocker;
       (match

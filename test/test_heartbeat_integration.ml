@@ -113,6 +113,18 @@ let remove_meta_cleanup : Shutdown_types.cleanup_intent =
   }
 ;;
 
+(* Keepalive resolves its sandbox profile from the persisted keeper TOML. Seed
+   the fixture explicitly so this test exercises the lifecycle path rather than
+   the intentional missing-profile rejection. *)
+let seed_keeper_sandbox_profile ~base_dir name =
+  let keepers_dir =
+    List.fold_left Filename.concat base_dir [ ".masc"; "config"; "keepers" ]
+  in
+  Fs_compat.mkdir_p keepers_dir;
+  Fs_compat.save_file
+    (Filename.concat keepers_dir (name ^ ".toml"))
+    "[keeper]\nsandbox_profile = \"local\"\n"
+
 let configure_keeper_chat_persistence ~base_path =
   let report = Masc.Keeper_chat_queue.configure_persistence ~base_path in
   match report.load_errors with
@@ -637,6 +649,7 @@ let test_direct_start_keepalive_resolves_done_on_stop () =
           net = None;
         }
       in
+      seed_keeper_sandbox_profile ~base_dir keeper_name;
       ignore
         (Masc.Keeper_keepalive.start_keepalive ctx meta
           : Masc.Keeper_keepalive.start_keepalive_outcome);
@@ -1933,6 +1946,7 @@ let test_start_keepalive_preserves_unresolved_failing_entry () =
           net = None;
         }
       in
+      seed_keeper_sandbox_profile ~base_dir keeper_name;
       ignore
         (Masc.Keeper_keepalive.start_keepalive ctx meta
           : Masc.Keeper_keepalive.start_keepalive_outcome);
@@ -1978,6 +1992,7 @@ let test_start_keepalive_reclaims_finished_failing_entry () =
           net = None;
         }
       in
+      seed_keeper_sandbox_profile ~base_dir keeper_name;
       ignore
         (Masc.Keeper_keepalive.start_keepalive ctx meta
           : Masc.Keeper_keepalive.start_keepalive_outcome);

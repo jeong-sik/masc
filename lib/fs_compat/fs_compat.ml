@@ -662,6 +662,254 @@ let reset_fd_cache_for_testing () = Fd_cache.reset_for_testing ()
 
 let with_cached_writer_for_testing path f = Fd_cache.with_writer path f
 
+let rec read_fd_chunks fd buffer =
+  let chunk = Bytes.create 65536 in
+  match Unix.read fd chunk 0 (Bytes.length chunk) with
+  | 0 -> Buffer.contents buffer
+  | count ->
+    Buffer.add_subbytes buffer chunk 0 count;
+    read_fd_chunks fd buffer
+  | exception Unix.Unix_error (Unix.EINTR, _, _) -> read_fd_chunks fd buffer
+
+type durable_append_operation =
+  | Write
+  | Append_fsync
+  | Rollback_truncate
+  | Rollback_fsync
+
+type durable_append_failure =
+  | Unix_error of
+      { operation : durable_append_operation
+      ; error : Unix.error
+      ; function_name : string
+      ; argument : string
+      }
+  | No_write_progress
+
+type durable_append_error =
+  { append_failure : durable_append_failure
+  ; rollback_failures : durable_append_failure list
+  }
+
+let durable_append_operation_to_string = function
+  | Write -> "write"
+  | Append_fsync -> "append fsync"
+  | Rollback_truncate -> "rollback truncate"
+  | Rollback_fsync -> "rollback fsync"
+;;
+
+let durable_append_failure_to_string = function
+  | No_write_progress -> "write made no progress"
+  | Unix_error { operation; error; function_name; argument } ->
+    Printf.sprintf
+      "%s failed: %s (function=%S argument=%S)"
+      (durable_append_operation_to_string operation)
+      (Unix.error_message error)
+      function_name
+      argument
+;;
+
+let durable_append_error_to_string { append_failure; rollback_failures } =
+  let append = durable_append_failure_to_string append_failure in
+  match rollback_failures with
+  | [] -> Printf.sprintf "durable append failed and rollback succeeded: %s" append
+  | failures ->
+    Printf.sprintf
+      "durable append failed: %s; rollback failed: %s"
+      append
+      (failures
+       |> List.map durable_append_failure_to_string
+       |> String.concat "; ")
+;;
+
+type durable_append_io_for_testing =
+  { write : Unix.file_descr -> bytes -> int -> int -> int
+  ; ftruncate : Unix.file_descr -> int -> unit
+  ; fsync : Unix.file_descr -> unit
+  }
+
+let unix_failure ~operation error function_name argument =
+  Unix_error { operation; error; function_name; argument }
+;;
+
+let rec write_fd_all ~write fd bytes offset remaining =
+  if remaining = 0
+  then Ok ()
+  else
+    match write fd bytes offset remaining with
+    | 0 -> Error No_write_progress
+    | written -> write_fd_all ~write fd bytes (offset + written) (remaining - written)
+    | exception Unix.Unix_error (Unix.EINTR, _, _) ->
+      write_fd_all ~write fd bytes offset remaining
+    | exception Unix.Unix_error (error, function_name, argument) ->
+      Error (unix_failure ~operation:Write error function_name argument)
+;;
+
+let rec run_unix_io ~operation f =
+  match f () with
+  | () -> Ok ()
+  | exception Unix.Unix_error (Unix.EINTR, _, _) -> run_unix_io ~operation f
+  | exception Unix.Unix_error (error, function_name, argument) ->
+    Error (unix_failure ~operation error function_name argument)
+;;
+
+let rollback_durable_append ~io ~fd ~original_length =
+  let truncate_result =
+    run_unix_io ~operation:Rollback_truncate (fun () ->
+      io.ftruncate fd original_length)
+  in
+  let fsync_result =
+    run_unix_io ~operation:Rollback_fsync (fun () -> io.fsync fd)
+  in
+  [ truncate_result; fsync_result ]
+  |> List.filter_map (function
+    | Ok () -> None
+    | Error failure -> Some failure)
+;;
+
+let append_fd_durable ~io ~fd ~original_length suffix =
+  let bytes = Bytes.of_string suffix in
+  let append_result =
+    match write_fd_all ~write:io.write fd bytes 0 (Bytes.length bytes) with
+    | Error _ as error -> error
+    | Ok () -> run_unix_io ~operation:Append_fsync (fun () -> io.fsync fd)
+  in
+  match append_result with
+  | Ok () -> Ok ()
+  | Error append_failure ->
+    let rollback_failures = rollback_durable_append ~io ~fd ~original_length in
+    Error { append_failure; rollback_failures }
+;;
+
+let append_fd_durable_for_testing = append_fd_durable
+
+let durable_append_unix_io =
+  { write = Unix.write; ftruncate = Unix.ftruncate; fsync = Unix.fsync }
+;;
+
+let fsync_parent_directory dir =
+  let fd = Unix.openfile dir [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 in
+  Fun.protect
+    ~finally:(fun () -> Unix.close fd)
+    (fun () -> Unix.fsync fd)
+;;
+
+let rec lock_whole_file fd =
+  match Unix.lockf fd Unix.F_LOCK 0 with
+  | () -> ()
+  | exception Unix.Unix_error (Unix.EINTR, _, _) -> lock_whole_file fd
+;;
+
+let run_blocking_durable_append ~path f =
+  with_fs_or_fallback
+    ~path
+    ~fallback:f
+    (fun _fs ->
+       Eio_unix.run_in_systhread ~label:"fs-compat-durable-append" f)
+;;
+
+let update_private_file_durable_locked_result path decide =
+  test_exec_home_guard ~op:"update_private_file_durable_locked" path;
+  let dir = Filename.dirname path in
+  mkdir_p_memoized dir;
+  let path_mu = get_append_path_mutex path in
+  run_blocking_durable_append ~path (fun () ->
+    Stdlib.Mutex.protect path_mu (fun () ->
+      let fd =
+        Unix.openfile path
+          [ Unix.O_RDWR; Unix.O_CREAT; Unix.O_APPEND; Unix.O_CLOEXEC ]
+          0o600
+      in
+      Fun.protect
+        ~finally:(fun () -> Unix.close fd)
+        (fun () ->
+           Unix.fchmod fd 0o600;
+           fsync_parent_directory dir;
+           (* See Unix.lseek: only the file-position side effect is required. *)
+           ignore (Unix.lseek fd 0 Unix.SEEK_SET : int);
+           lock_whole_file fd;
+           (* See Unix.lseek: only the file-position side effect is required. *)
+           ignore (Unix.lseek fd 0 Unix.SEEK_SET : int);
+           let existing = read_fd_chunks fd (Buffer.create 4096) in
+           let suffix, result = decide existing in
+           match suffix with
+            | None -> Ok result
+            | Some suffix ->
+              (* See Unix.lseek: only the file-position side effect is required. *)
+              let original_length = Unix.lseek fd 0 Unix.SEEK_END in
+              append_fd_durable
+                ~io:durable_append_unix_io
+                ~fd
+                ~original_length
+                suffix
+              |> Result.map (fun () -> result))))
+;;
+
+type private_jsonl_append_error =
+  | Incomplete_jsonl_tail
+  | Invalid_jsonl_suffix
+  | Durable_jsonl_append_failed of durable_append_error
+
+let private_jsonl_append_error_to_string = function
+  | Incomplete_jsonl_tail ->
+    "existing JSONL file ends with an incomplete row"
+  | Invalid_jsonl_suffix ->
+    "JSONL append suffix must be non-empty and newline-terminated"
+  | Durable_jsonl_append_failed error -> durable_append_error_to_string error
+;;
+
+let append_private_jsonl_durable_locked_result path suffix =
+  if String.equal suffix ""
+     || not (Char.equal suffix.[String.length suffix - 1] '\n')
+  then Error Invalid_jsonl_suffix
+  else (
+    test_exec_home_guard ~op:"append_private_jsonl_durable_locked" path;
+    let dir = Filename.dirname path in
+    mkdir_p_memoized dir;
+    let path_mu = get_append_path_mutex path in
+    run_blocking_durable_append ~path (fun () ->
+      Stdlib.Mutex.protect path_mu (fun () ->
+        let fd =
+          Unix.openfile path
+            [ Unix.O_RDWR; Unix.O_CREAT; Unix.O_APPEND; Unix.O_CLOEXEC ]
+            0o600
+        in
+        Fun.protect
+          ~finally:(fun () -> Unix.close fd)
+          (fun () ->
+             Unix.fchmod fd 0o600;
+             fsync_parent_directory dir;
+             (* See Unix.lseek: only the file-position side effect is required. *)
+             ignore (Unix.lseek fd 0 Unix.SEEK_SET : int);
+             lock_whole_file fd;
+             let original_length = Unix.lseek fd 0 Unix.SEEK_END in
+             let tail_is_complete =
+               if original_length = 0
+               then true
+               else (
+                 ignore (Unix.lseek fd (original_length - 1) Unix.SEEK_SET : int);
+                 let byte = Bytes.create 1 in
+                 let rec read_tail () =
+                   match Unix.read fd byte 0 1 with
+                   | 1 -> Char.equal (Bytes.get byte 0) '\n'
+                   | 0 -> false
+                   | _ -> false
+                   | exception Unix.Unix_error (Unix.EINTR, _, _) -> read_tail ()
+                 in
+                 read_tail ())
+             in
+             if not tail_is_complete
+             then Error Incomplete_jsonl_tail
+             else (
+               ignore (Unix.lseek fd 0 Unix.SEEK_END : int);
+               append_fd_durable
+                 ~io:durable_append_unix_io
+                 ~fd
+                 ~original_length
+                 suffix
+               |> Result.map_error (fun error -> Durable_jsonl_append_failed error))))))
+;;
+
 let append_jsonl (path : string) (json : Yojson.Safe.t) : unit =
   test_exec_home_guard ~op:"append_jsonl" path;
   let dir = Stdlib.Filename.dirname path in

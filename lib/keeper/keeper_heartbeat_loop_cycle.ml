@@ -184,6 +184,7 @@ let prepare_failure_judgment_turn
 let run_keeper_cycle_admitted
       ?event_bus
       ?hitl_resolution
+      ?continuation_delivery_channel
       ~ctx
       ~meta_after_triage
       ~stop
@@ -218,6 +219,7 @@ let run_keeper_cycle_admitted
              ~wake
              ~channel:turn_decision.channel
              ?hitl_resolution
+             ?continuation_delivery_channel
              (* RFC-0315: pass the whole decision, not just its channel — the
                 prompt renders the verdict reasons so the turn knows why it woke. *)
              ~turn_decision
@@ -298,6 +300,7 @@ let run_keeper_cycle_admitted
 let run_keeper_cycle
       ?event_bus
       ?hitl_resolution
+      ?continuation_delivery_channel
       ~ctx
       ~meta_after_triage
       ~stop
@@ -322,7 +325,8 @@ let run_keeper_cycle
          ~wake
          ?failure_judgment
          ?event_bus
-         ?hitl_resolution)
+         ?hitl_resolution
+         ?continuation_delivery_channel)
   with
   | `Ran outcome -> outcome
   | `Busy ((Keeper_turn_admission.Shutdown_requested operation_id) as block) ->

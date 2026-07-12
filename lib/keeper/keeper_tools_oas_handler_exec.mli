@@ -21,6 +21,7 @@ val execute_with_observers
   -> ?proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t
   -> ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> ?mcp_session_id:string
+  -> ?continuation_channel:Keeper_continuation_channel.t
   -> failure_counts:Keeper_tools_oas.failure_counts
   -> key:string
   -> input:Yojson.Safe.t

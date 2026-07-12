@@ -154,6 +154,7 @@ let handle_keeper_catchup_judge_post state req reqd body_str =
                   ~run_id
                   ~policy
                   ~args:fusion_args
+                  ()
               in
               let fusion_json = parse_fusion_result raw in
               (match Json_util.assoc_member_opt "ok" fusion_json with

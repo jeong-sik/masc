@@ -282,28 +282,74 @@ let broadcast_run_status ~registry ~run_id =
     Log.Keeper.warn "fusion_run_broadcast run_id=%s failed: %s" run_id
       (Printexc.to_string exn)
 
+(* Fail-closed durable wake. The reply route is the sole in-memory carrier of
+   the originating channel, so it must not be destroyed before the stimulus that
+   carries it is durably persisted. [peek] reads the route WITHOUT removing it;
+   the completion stimulus is committed through the shared fail-closed durable
+   path ([enqueue_durable_result] — the same commit boundary HITL uses for its
+   sole-carrier resolution); only on [Ok] is the route consumed ([take]) and the
+   best-effort wake hint flipped. A failed commit leaves the route intact for a
+   later retry and returns [Error] to the caller instead of swallowing the loss.
+   The wake hint (Running-gated) is best-effort AFTER a committed payload — its
+   failure is logged, not raised, because the keeper replays the durable
+   stimulus on its next admitted turn (mirrors HITL's post-commit signal).
+   Eio structural cancellation (Cancelled) is always re-raised. *)
 let wake_keeper_on_fusion_completion
-      ~base_dir ~keeper ~run_id ~ok ~resolved_answer ~board_post_id =
-  try
-    let fusion_completion =
-      Keeper_event_queue.{ run_id; ok; resolved_answer; board_post_id }
-    in
-    let post_id = Keeper_event_queue.fusion_completion_post_id fusion_completion in
-    let stimulus : Keeper_event_queue.stimulus =
-      { Keeper_event_queue.post_id
-      ; urgency = Keeper_event_queue.Normal
-      ; arrived_at = Time_compat.now ()
-      ; payload = Keeper_event_queue.Fusion_completed fusion_completion
-      }
-    in
-    Log.Keeper.info "fusion completion wake: keeper=%s run_id=%s ok=%b" keeper run_id ok;
-    Keeper_keepalive_signal.wakeup_keeper ~base_path:base_dir ~stimulus keeper
+      ~base_dir ~keeper ~run_id ~ok ~resolved_answer ~board_post_id :
+    (unit, string) result =
+  (* A run started outside a connector conversation has no route; the wake then
+     says so explicitly instead of inventing a destination. *)
+  let channel =
+    match Fusion_wake_route.peek ~run_id with
+    | Some channel -> channel
+    | None -> Keeper_continuation_channel.unrouted "no originating connector"
+  in
+  let fusion_completion =
+    Keeper_event_queue.{ run_id; ok; resolved_answer; board_post_id; channel }
+  in
+  let post_id = Keeper_event_queue.fusion_completion_post_id fusion_completion in
+  let stimulus : Keeper_event_queue.stimulus =
+    { Keeper_event_queue.post_id
+    ; urgency = Keeper_event_queue.Normal
+    ; arrived_at = Time_compat.now ()
+    ; payload = Keeper_event_queue.Fusion_completed fusion_completion
+    }
+  in
+  match
+    try
+      Keeper_registry_event_queue.enqueue_durable_result
+        ~base_path:base_dir keeper stimulus
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> Error (Printexc.to_string exn)
   with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn ->
-    Log.Keeper.warn ~keeper_name:keeper "fusion completion wake failed run_id=%s: %s"
-      run_id
-      (Printexc.to_string exn)
+  | Error reason ->
+    (* Route left intact (peek, not take): the reply channel survives the
+       failed write so a later retry can still deliver it. *)
+    Log.Keeper.error ~keeper_name:keeper
+      "fusion completion wake durable-commit failed run_id=%s: %s" run_id reason;
+    Error reason
+  | Ok () ->
+    (* RFC-0266: [take] removes the route now that its channel is durably committed above; the discarded value is exactly that already-committed channel, so this is pure route cleanup, not a dropped contract. *)
+    ignore (Fusion_wake_route.take ~run_id);
+    Log.Keeper.info "fusion completion wake: keeper=%s run_id=%s ok=%b" keeper run_id ok;
+    (* Best-effort wake hint: the payload is already durable, so a withheld or
+       failed hint only defers pickup to the keeper's next turn. The Running-gate
+       outcome is intentionally discarded (typed [_] so a signature change surfaces
+       here), and a hint exception is logged — not swallowed — then dropped. *)
+    (try
+       let (_ : Keeper_registry.wakeup_running_outcome) =
+         Keeper_registry.wakeup_running ~base_path:base_dir keeper
+       in
+       ()
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Log.Keeper.warn ~keeper_name:keeper
+         "fusion completion wake hint failed after durable commit run_id=%s: %s"
+         run_id
+         (Printexc.to_string exn));
+    Ok ()
 
 let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge ~judges ~judge_usage :
     (unit, string) result =
@@ -468,23 +514,38 @@ let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge ~judges ~judge_usage 
        (* RFC-0266 §7: registry를 Completed로 갱신(가시성). wake 직전 무조건 호출.
           실패 시 사유/태그를 함께 기록해 masc_fusion_status·SSE가 opaque
           "failed"가 되지 않게 한다. *)
-       (match judge with
-        | Ok j ->
-          Fusion_run_registry.mark_completed (Fusion_run_registry.global ()) ~run_id
-            ~ok:true ();
-          broadcast_run_status ~registry:(Fusion_run_registry.global ()) ~run_id;
-          wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~ok:true
-            ~resolved_answer:j.Fusion_types.resolved_answer ~board_post_id
-        | Error e ->
-          Fusion_run_registry.mark_completed (Fusion_run_registry.global ()) ~run_id
-            ~failure:(Fusion_types.judge_failure_text e)
-            ~failure_code:(Fusion_types.judge_failure_tag e)
-            ~ok:false ();
-          broadcast_run_status ~registry:(Fusion_run_registry.global ()) ~run_id;
-          wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~ok:false
-            ~resolved_answer:
-              (Printf.sprintf "fusion run failed — %s" (render_failure e))
-            ~board_post_id);
+       let wake_result =
+         match judge with
+         | Ok j ->
+           Fusion_run_registry.mark_completed (Fusion_run_registry.global ()) ~run_id
+             ~ok:true ();
+           broadcast_run_status ~registry:(Fusion_run_registry.global ()) ~run_id;
+           wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~ok:true
+             ~resolved_answer:j.Fusion_types.resolved_answer ~board_post_id
+         | Error e ->
+           Fusion_run_registry.mark_completed (Fusion_run_registry.global ()) ~run_id
+             ~failure:(Fusion_types.judge_failure_text e)
+             ~failure_code:(Fusion_types.judge_failure_tag e)
+             ~ok:false ();
+           broadcast_run_status ~registry:(Fusion_run_registry.global ()) ~run_id;
+           wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~ok:false
+             ~resolved_answer:
+               (Printf.sprintf "fusion run failed — %s" (render_failure e))
+             ~board_post_id
+       in
+       (* The conclusion is already durable on the keeper chat lane
+          ([chat_lane_result = Ok] above), so a failed completion wake is
+          degraded delivery of the *reply-channel routing*, not a sink failure.
+          Record it for operators (the wake itself ERROR-logs the reason) but do
+          NOT raise [Sink_failed] — that would double-notify a "(sink failed)"
+          note over a conclusion the keeper already received. *)
+       (match wake_result with
+        | Ok () -> ()
+        | Error _reason ->
+          Otel_metric_store.inc_counter
+            Keeper_metrics.(to_string KeepaliveSignalFailures)
+            ~labels:[ ("keeper", keeper); ("phase", "fusion_completion_wake") ]
+            ());
        Ok ())
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn

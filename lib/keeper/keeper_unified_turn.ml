@@ -47,6 +47,7 @@ let run_keeper_cycle
       ?shared_context
       ?event_bus
       ?hitl_resolution
+      ?continuation_delivery_channel
       ()
   : (turn_success, turn_failure) result
   =
@@ -65,11 +66,6 @@ let run_keeper_cycle
      phases like Overflowed. *)
   let registry_base_path = config.base_path in
   let exact_failure_execution = ref None in
-  let hitl_delivery_channel =
-    Option.map
-      (fun (resolution : Keeper_event_queue.hitl_resolution) -> resolution.channel)
-      hitl_resolution
-  in
   let hitl_approval_grant =
     Option.bind
       hitl_resolution
@@ -525,7 +521,7 @@ let run_keeper_cycle
                            ; base_dir
                            ; build_turn_prompt
                            ; channel
-                           ; hitl_delivery_channel
+                           ; continuation_delivery_channel
                            ; hitl_approval_grant
                            ; cleanup
                            ; committed_mutating_tools_snapshot

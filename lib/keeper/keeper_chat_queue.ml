@@ -780,6 +780,11 @@ let recovered_queue_terminal ~base_path ~keeper_name receipts =
          ; updated_at
          ; _
          } ->
+       (* The journal proves transcript commit, not Discord/Slack delivery.
+          If the queue snapshot is still Inflight, no durable connector receipt
+          exists. Fail explicitly and never redispatch inference; #24180's
+          connector outbox is the boundary that can later make outbound delivery
+          itself resumable. *)
        let detail =
          if terminal.ok
          then

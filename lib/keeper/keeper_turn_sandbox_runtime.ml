@@ -983,7 +983,7 @@ let run_exec_with_status_split
   | Error _ as err -> err
   | Ok (((Unix.WEXITED 126 | Unix.WEXITED 127) as status), stdout, stderr) as failed ->
     (match failed_exec_recovery t with
-     | Preserve_failed_exec -> Ok failed
+     | Preserve_failed_exec -> failed
      | Restart_failed_exec ->
        set_state t Not_started;
        (match
@@ -1113,7 +1113,7 @@ let run_exec_pipeline_with_status ?on_stdout_chunk ?on_stderr_chunk ~timeout_sec
   | Error _ as err -> err
   | Ok (((Unix.WEXITED 126 | Unix.WEXITED 127) as status), stdout, stderr) as failed ->
     (match failed_exec_recovery t with
-     | Preserve_failed_exec -> Ok failed
+     | Preserve_failed_exec -> failed
      | Restart_failed_exec ->
        set_state t Not_started;
        (match

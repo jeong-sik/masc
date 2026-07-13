@@ -21,12 +21,37 @@ let write_initial_meta config meta =
     ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
     config meta
 
-let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
-  Log.Keeper.info "create_keeper: starting for name=%s" p.name;
-  let task_id = Printf.sprintf "keeper_create_%s" p.name in
-  let tracker = Progress.start_tracking ~task_id ~total_steps:6 () in
-  Progress.Tracker.step tracker ~message:"Resolving keeper configuration" ();
-  let now_ts = Time_compat.now () in
+(* Single derivation of the create-time keeper fields from [parsed_args]
+   (operator args > profile defaults > env/runtime-param defaults). The boot
+   create path and the configured-only (no_boot) create path must resolve
+   these identically — one function is what keeps the two paths from
+   drifting. Deterministic given [p] and the config/env snapshot: no clock,
+   no id generation, no filesystem writes. Validation (empty goal, unknown
+   active_goal_ids, sandbox settings) stays with the callers because the
+   error surfaces differ per path. *)
+type derived_create_inputs = {
+  goal : string;
+  autoboot_enabled : bool;
+  allowed_paths : string list;
+  active_goal_ids : string list;
+  sandbox_profile : Keeper_types_profile.sandbox_profile;
+  network_mode : Keeper_types_profile.network_mode;
+  multimodal_policy : Keeper_types_profile.multimodal_policy;
+  mention_targets : string list;
+  proactive_enabled : bool;
+  auto_handoff : bool;
+  handoff_threshold : float;
+  handoff_cooldown_sec : int;
+  instructions : string;
+  compaction_profile : string;
+  compaction_ratio_gate : float;
+  compaction_message_gate : int;
+  compaction_token_gate : int;
+  compaction_cooldown_sec : int;
+  primary_max_context : int;
+}
+
+let derive_create_inputs (p : parsed_args) : derived_create_inputs =
   let goal =
     match p.goal_opt with
     | Some goal -> normalize_goal_text goal
@@ -47,21 +72,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
     match p.active_goal_ids_opt with
     | Some ids -> ids
     | None -> Option.value ~default:[] p.profile_defaults.active_goal_ids
-  in
-  let active_goal_ids_error =
-    match p.active_goal_ids_opt with
-    | None -> None
-    | Some _ ->
-        let missing =
-          List.filter
-            (fun goal_id -> Option.is_none (Goal_store.get_goal ctx.config ~goal_id))
-            active_goal_ids
-        in
-        if missing = [] then None
-        else
-          Some
-            (Printf.sprintf "unknown active_goal_ids: %s"
-               (String.concat ", " missing))
   in
   let sandbox_profile =
     resolve_sandbox_profile ~fallback:p.profile_defaults.sandbox_profile
@@ -84,6 +94,132 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       ~fallback_targets:p.profile_defaults.mention_targets
       ~name:p.name
   in
+  let proactive_enabled =
+    Option.value
+      ~default:
+        (Option.value ~default:default_proactive_enabled
+           p.profile_defaults.proactive_enabled)
+      p.proactive_enabled_opt
+  in
+  let auto_handoff = Option.value ~default:true p.auto_handoff_opt in
+  let handoff_threshold =
+    match p.handoff_threshold_opt with
+    | Some threshold -> threshold
+    | None ->
+        Runtime_params.get Runtime_settings.keeper_handoff_threshold
+  in
+  let handoff_cooldown_sec =
+    match p.handoff_cooldown_sec_opt with
+    | Some cooldown_sec -> cooldown_sec
+    | None ->
+        Runtime_params.get Runtime_settings.keeper_handoff_cooldown_sec
+  in
+  let instructions = Option.value ~default:"" p.instructions_opt in
+  let (env_ratio_gate, env_message_gate, env_token_gate) =
+    keeper_compaction_policy_from_env ()
+  in
+  let compaction_cooldown_sec =
+    Option.value
+      ~default:(keeper_compaction_cooldown_sec ())
+      p.compaction_cooldown_sec_opt
+    |> normalize_compaction_cooldown_sec
+  in
+  let
+    ( compaction_profile,
+      compaction_ratio_gate,
+      compaction_message_gate,
+      compaction_token_gate )
+    =
+    resolve_compaction_policy
+      ~profile_opt:p.compaction_profile_opt
+      ~ratio_opt:p.compaction_ratio_gate_opt
+      ~message_opt:p.compaction_message_gate_opt
+      ~token_opt:p.compaction_token_gate_opt
+      ~fallback_profile:default_compaction_profile
+      ~fallback_ratio:env_ratio_gate
+      ~fallback_message:env_message_gate
+      ~fallback_token:env_token_gate
+  in
+  let primary_max_context =
+    match p.max_context_override_opt with
+    | Some v -> v
+    (* Boundary: Keeper consumes an opaque context budget, not a
+       provider/model identity. *)
+    | None -> Runtime.default_max_context ()
+  in
+  {
+    goal;
+    autoboot_enabled;
+    allowed_paths;
+    active_goal_ids;
+    sandbox_profile;
+    network_mode;
+    multimodal_policy;
+    mention_targets;
+    proactive_enabled;
+    auto_handoff;
+    handoff_threshold;
+    handoff_cooldown_sec;
+    instructions;
+    compaction_profile;
+    compaction_ratio_gate;
+    compaction_message_gate;
+    compaction_token_gate;
+    compaction_cooldown_sec;
+    primary_max_context;
+  }
+
+(* Unknown [active_goal_ids] check — only explicit operator input is
+   validated; profile-default ids were validated when the profile was
+   written. Reads Goal_store, so it lives outside [derive_create_inputs]. *)
+let unknown_active_goal_ids_error (ctx : _ context) (p : parsed_args)
+    ~(active_goal_ids : string list) : string option =
+  match p.active_goal_ids_opt with
+  | None -> None
+  | Some _ ->
+      let missing =
+        List.filter
+          (fun goal_id -> Option.is_none (Goal_store.get_goal ctx.config ~goal_id))
+          active_goal_ids
+      in
+      if missing = [] then None
+      else
+        Some
+          (Printf.sprintf "unknown active_goal_ids: %s"
+             (String.concat ", " missing))
+
+let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
+  Log.Keeper.info "create_keeper: starting for name=%s" p.name;
+  let task_id = Printf.sprintf "keeper_create_%s" p.name in
+  let tracker = Progress.start_tracking ~task_id ~total_steps:6 () in
+  Progress.Tracker.step tracker ~message:"Resolving keeper configuration" ();
+  let now_ts = Time_compat.now () in
+  let {
+    goal;
+    autoboot_enabled;
+    allowed_paths;
+    active_goal_ids;
+    sandbox_profile;
+    network_mode;
+    multimodal_policy;
+    mention_targets;
+    proactive_enabled;
+    auto_handoff;
+    handoff_threshold;
+    handoff_cooldown_sec;
+    instructions;
+    compaction_profile;
+    compaction_ratio_gate;
+    compaction_message_gate;
+    compaction_token_gate;
+    compaction_cooldown_sec;
+    primary_max_context;
+  } =
+    derive_create_inputs p
+  in
+  let active_goal_ids_error =
+    unknown_active_goal_ids_error ctx p ~active_goal_ids
+  in
   if goal = "" then begin
     Log.Keeper.warn "create_keeper failed: goal is required (name=%s)" p.name;
     tool_result_error "goal is required when creating a keeper"
@@ -103,59 +239,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           p.name err;
         tool_result_error err
     | Ok () ->
-            let proactive_enabled =
-                Option.value
-                  ~default:
-                    (Option.value ~default:default_proactive_enabled
-                       p.profile_defaults.proactive_enabled)
-                  p.proactive_enabled_opt
-            in
-              let auto_handoff = Option.value ~default:true p.auto_handoff_opt in
-              let handoff_threshold =
-                match p.handoff_threshold_opt with
-                | Some threshold -> threshold
-                | None ->
-                    Runtime_params.get Runtime_settings.keeper_handoff_threshold
-              in
-              let handoff_cooldown_sec =
-                match p.handoff_cooldown_sec_opt with
-                | Some cooldown_sec -> cooldown_sec
-                | None ->
-                    Runtime_params.get Runtime_settings.keeper_handoff_cooldown_sec
-              in
-              let instructions = Option.value ~default:"" p.instructions_opt in
-              let (env_ratio_gate, env_message_gate, env_token_gate) =
-                keeper_compaction_policy_from_env ()
-              in
-              let compaction_cooldown_sec =
-                Option.value
-                  ~default:(keeper_compaction_cooldown_sec ())
-                  p.compaction_cooldown_sec_opt
-                |> normalize_compaction_cooldown_sec
-              in
-              let
-                ( compaction_profile,
-                  compaction_ratio_gate,
-                  compaction_message_gate,
-                  compaction_token_gate )
-                =
-                resolve_compaction_policy
-                  ~profile_opt:p.compaction_profile_opt
-                  ~ratio_opt:p.compaction_ratio_gate_opt
-                  ~message_opt:p.compaction_message_gate_opt
-                  ~token_opt:p.compaction_token_gate_opt
-                  ~fallback_profile:default_compaction_profile
-                  ~fallback_ratio:env_ratio_gate
-                  ~fallback_message:env_message_gate
-                  ~fallback_token:env_token_gate
-              in
-              let primary_max_context =
-                match p.max_context_override_opt with
-                | Some v -> v
-                (* Boundary: Keeper consumes an opaque context budget, not a
-                   provider/model identity. *)
-                | None -> Runtime.default_max_context ()
-              in
               Progress.Tracker.step tracker ~message:"Initializing session directory" ();
               let trace_id = generate_trace_id () in
               match Keeper_id.Trace_id.of_string trace_id with

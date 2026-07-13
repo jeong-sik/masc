@@ -59,7 +59,7 @@ let tool_failure_episode_observation
       (episode : Agent_sdk.Tool_failure_episode.t)
   =
   `Assoc
-    [ "previous", tool_failure_attempt_observation episode.previous
+    [ "previous", `List (List.map tool_failure_attempt_observation episode.previous)
     ; "current", tool_failure_attempt_observation episode.current
     ]
 ;;

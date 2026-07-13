@@ -10,9 +10,16 @@ val sdk_error_kind_for_receipt
 
 (** Which side of the OAS boundary [err] originates from, for typed
     downstream classification (e.g. keeper chat Row_kind). [Transport_layer]
-    is the wire-level Api/Provider failure surface reaching the LLM
-    backend; every other constructor is the agent's own execution, config,
-    or orchestration outcome — not a transport-layer failure. *)
+    means the failure surfaced while actually talking to (or being
+    rejected by) the remote LLM backend over the wire: connectivity,
+    auth-to-connect, protocol drift, or a wire-level service refusal
+    (rate limit / overload / quota / 5xx). Within [Api] and [Provider],
+    nested payloads are classified individually — e.g. a missing local
+    credential ([Provider (MissingApiKey _)]) or an agent-authored
+    malformed request ([Api (InvalidRequest _)]) is [Agent_layer], not
+    [Transport_layer], because no wire fault occurred. Every other
+    top-level constructor is the agent's own execution, config, or
+    orchestration outcome — not a transport-layer failure. *)
 type failure_origin =
   | Transport_layer
   | Agent_layer

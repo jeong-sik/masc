@@ -53,13 +53,25 @@ end
 
 (** What an assistant line {e is}, declared by the writer at append.
     [Utterance] is something the keeper actually said.
-    [Transport_failure] is the server persisting a failed request
-    terminal (["Keeper request failed: ..."]) caused by a wire-level
-    (Api/Provider) error reaching the LLM backend. [Agent_failure] is the
-    same terminal marker for every other cause: a typed OAS Agent error
-    (e.g. ToolFailureRecoveryFailed), a turn that completed with no
-    visible reply, or an admission/validation rejection that never
-    reached the runtime — none of these are transport problems. Neither
+
+    The failure terminal (["Keeper request failed: ..."]) splits into two
+    kinds by {e where} the turn stopped, not by whether an OAS call was
+    ever made:
+    - [Transport_failure]: the turn failed outside the agent's own
+      reasoning output. This covers a wire-level SDK error classified
+      {!Keeper_agent_error.Transport_layer}, a delivery-layer cutoff
+      before any OAS Agent error boundary was reached (worker timeout,
+      operator/system cancellation), a raw exception or admission
+      rejection with no typed OAS boundary reached at all, and any case
+      where no failure-origin classification is available — none of
+      these are the agent choosing an outcome.
+    - [Agent_failure]: an SDK error classified
+      {!Keeper_agent_error.Agent_layer} — a typed OAS Agent error (e.g.
+      ToolFailureRecoveryFailed), or another agent-side execution/config/
+      orchestration outcome.
+
+    A turn that completed with no visible reply is also persisted as a
+    failure terminal (kind depends on the same split above). Neither kind
     is a self reply: neither advances the lane watermark, so the user
     line it failed to answer stays pending until the keeper's next real
     utterance, and observation never quotes either back as the keeper's

@@ -18,18 +18,98 @@ let sdk_error_kind_for_receipt err =
 
 (* masc#24314 / oas#2585: which side of the OAS <-> keeper boundary
    produced [err], for typed downstream failure display (e.g. keeper chat
-   Row_kind). [Transport_layer] is the wire-level Api/Provider failure
-   surface reaching the LLM backend; every other constructor is the
-   agent's own execution, config, or orchestration outcome — not evidence
-   of a transport-layer failure, even though today every [sdk_error] ends
-   up rendered through the same "Keeper request failed: ..." terminal
-   marker. *)
+   Row_kind). [Transport_layer] means the failure surfaced while actually
+   talking to (or being rejected by) the remote LLM backend over the
+   wire: connectivity, auth-to-connect, protocol drift, or a wire-level
+   service refusal (rate limit / overload / quota / 5xx). [Agent_layer]
+   means the failure is about the agent's own local state or authored
+   request content (missing host config, a malformed payload the agent
+   built, its own context-window bookkeeping) or its execution/config/
+   orchestration outcome generally — the wire itself is not at fault,
+   even though today every [sdk_error] ends up rendered through the same
+   "Keeper request failed: ..." terminal marker. *)
 type failure_origin =
   | Transport_layer
   | Agent_layer
 
+(* [Agent_sdk.Retry.api_error]: every arm named explicitly (no catch-all)
+   so a new oas variant forces a compile-time decision here. *)
+let api_error_failure_origin : Agent_sdk.Retry.api_error -> failure_origin = function
+  | Agent_sdk.Retry.RateLimited _ ->
+    Transport_layer (* wire-level service rate-limit signal *)
+  | Agent_sdk.Retry.Overloaded _ ->
+    Transport_layer (* wire-level service overload signal *)
+  | Agent_sdk.Retry.ServerError _ -> Transport_layer (* HTTP 5xx from the provider *)
+  | Agent_sdk.Retry.AuthError _ ->
+    Transport_layer (* provider rejected credentials over the wire (401) *)
+  | Agent_sdk.Retry.AuthorizationError _ ->
+    Transport_layer (* provider refused authorization over the wire (403) *)
+  | Agent_sdk.Retry.PaymentRequired _ ->
+    Transport_layer (* external service refusal: billing/quota (402) *)
+  | Agent_sdk.Retry.InvalidRequest _ ->
+    Agent_layer (* agent-authored malformed payload, not a wire fault *)
+  | Agent_sdk.Retry.NotFound _ ->
+    Transport_layer
+    (* a definitive wire rejection reached us (provider says the
+       resource doesn't exist), same bucket as AuthError/
+       AuthorizationError -- Keeper_runtime_failure_route.route_of_api_error
+       groups this with [rotate Model_unavailable], distinct from
+       [judge Deterministic_request]/[Context_overflow]'s agent-local
+       arms *)
+  | Agent_sdk.Retry.ContextOverflow _ ->
+    Agent_layer (* agent's own context-window management *)
+  | Agent_sdk.Retry.NetworkError _ ->
+    Transport_layer (* connection-level failure reaching the provider *)
+  | Agent_sdk.Retry.Timeout _ -> Transport_layer (* wire-level request timeout *)
+;;
+
+(* [Llm_provider.Error.provider_error]: every arm named explicitly (no
+   catch-all) so a new oas variant forces a compile-time decision here. *)
+let provider_error_failure_origin : Llm_provider.Error.provider_error -> failure_origin = function
+  | Llm_provider.Error.MissingApiKey _ ->
+    Agent_layer
+    (* host never sent a request: no credential configured, mirrors
+       Config.MissingEnvVar *)
+  | Llm_provider.Error.InvalidConfig _ -> Agent_layer (* host configuration problem *)
+  | Llm_provider.Error.ParseError _ ->
+    Transport_layer (* provider sent unparseable bytes over the wire *)
+  | Llm_provider.Error.UnknownVariant _ ->
+    Transport_layer (* protocol drift from the provider *)
+  | Llm_provider.Error.ProviderUnavailable _ ->
+    Transport_layer (* remote service unreachable *)
+  | Llm_provider.Error.RateLimit _ ->
+    Transport_layer (* wire-level service rate-limit signal *)
+  | Llm_provider.Error.HardQuota _ ->
+    Transport_layer (* wire-level service quota refusal *)
+  | Llm_provider.Error.CapacityExhausted _ ->
+    Transport_layer (* wire-level service capacity refusal *)
+  | Llm_provider.Error.AuthError _ ->
+    Transport_layer (* provider rejected credentials over the wire *)
+  | Llm_provider.Error.AuthorizationError _ ->
+    Transport_layer (* provider refused authorization over the wire *)
+  | Llm_provider.Error.ServerError _ -> Transport_layer (* HTTP 5xx from the provider *)
+  | Llm_provider.Error.NetworkError _ ->
+    Transport_layer (* connection-level failure reaching the provider *)
+  | Llm_provider.Error.Timeout _ -> Transport_layer (* wire-level request timeout *)
+  | Llm_provider.Error.InvalidRequest _ ->
+    Agent_layer (* agent-authored malformed payload, not a wire fault *)
+  | Llm_provider.Error.NotFound _ ->
+    Transport_layer
+    (* a definitive wire rejection reached us (provider says the
+       resource doesn't exist), same bucket as AuthError/
+       AuthorizationError -- Keeper_runtime_failure_route.route_of_provider_error
+       groups this with [rotate Model_unavailable], distinct from
+       [judge Deterministic_request]'s agent-local arm *)
+  | Llm_provider.Error.ProviderTerminal _ ->
+    Transport_layer
+    (* provider-issued terminal rejection over the wire (e.g. account
+       suspended) -- still a wire response, just non-retryable; same
+       bucket as AuthError/HardQuota's "service refusal" *)
+;;
+
 let failure_origin_of_sdk_error = function
-  | Agent_sdk.Error.Api _ | Agent_sdk.Error.Provider _ -> Transport_layer
+  | Agent_sdk.Error.Api err -> api_error_failure_origin err
+  | Agent_sdk.Error.Provider err -> provider_error_failure_origin err
   | Agent_sdk.Error.Agent _
   | Agent_sdk.Error.Mcp _
   | Agent_sdk.Error.Config _

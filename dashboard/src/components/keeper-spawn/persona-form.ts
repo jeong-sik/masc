@@ -288,7 +288,7 @@ export function PersonaForm(): any {
         </div>
 
         ${isEdit ? null : html`
-        <label class="flex items-center gap-2 text-2xs text-[var(--color-fg-secondary)]">
+        <label class="v2-mobile-operator-target cursor-pointer flex items-center gap-2 text-2xs text-[var(--color-fg-secondary)]">
           <${Checkbox}
             checked=${f.proactive_enabled}
             ariaLabel="능동 활성화"

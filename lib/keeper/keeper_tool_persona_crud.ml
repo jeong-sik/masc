@@ -270,6 +270,8 @@ let delete_persona_dir persona_name : (Yojson.Safe.t, string) result =
   let dir = Filename.concat (personas_dir ()) persona_name in
   try
     Fs_compat.remove_tree dir;
+    (* Audit trail for a destructive operator action. *)
+    Log.Keeper.info "masc_persona_delete: removed persona %s (%s)" persona_name dir;
     Ok
       (ok_assoc
          [ ("persona_name", `String persona_name)

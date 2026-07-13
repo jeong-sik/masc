@@ -47,35 +47,6 @@ let supervise_keepalive
       (ctx : _ context)
       (meta : keeper_meta)
   =
-  match
-    Keeper_persistence_admission.block_reason
-      ~base_path:ctx.config.base_path
-      ~keeper_name:meta.name
-  with
-  | Some reason ->
-    let reason_label = Keeper_persistence_admission.block_reason_to_wire reason in
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string LifecycleDispatchRejections)
-      ~labels:
-        [ "keeper", meta.name
-        ; "event", "supervisor_keepalive_start"
-        ; "reason", reason_label
-        ]
-      ();
-    publish_lifecycle
-      ~event:
-        (Keeper_lifecycle_events.Custom_event
-           { verb = Keeper_lifecycle_events.Admission_denied
-           ; phase = Some Keeper_state_machine.Offline
-           })
-      meta.name
-      reason_label
-      ();
-    Log.Keeper.error
-      "%s: supervisor keepalive start denied by startup persistence admission: %s"
-      meta.name
-      reason_label
-  | None ->
   let lifecycle_state =
     Keeper_lifecycle_admission.state
       ~paused:meta.paused

@@ -90,7 +90,6 @@ val percentile : float array -> float -> float
 type start_keepalive_outcome =
   | Keepalive_started of Keeper_registry.registry_entry
   | Keepalive_already_registered of Keeper_registry.registry_entry
-  | Keepalive_persistence_denied of Keeper_persistence_admission.block_reason
   | Keepalive_lifecycle_denied of Keeper_lifecycle_admission.autonomous_denial
   | Keepalive_identity_unrepairable
   | Keepalive_registration_rejected of Keeper_registry.registration_error

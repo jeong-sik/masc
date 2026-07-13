@@ -120,17 +120,16 @@ let temp_dir prefix =
   let path = Filename.temp_file prefix "" in
   Sys.remove path;
   Unix.mkdir path 0o755;
-  path
+  Unix.realpath path
 ;;
 
 let rec rm_rf path =
-  if Sys.file_exists path
-  then
-    if Sys.is_directory path
-    then (
-      Sys.readdir path |> Array.iter (fun entry -> rm_rf (Filename.concat path entry));
-      Unix.rmdir path)
-    else Sys.remove path
+  match Unix.lstat path with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+  | stat when stat.Unix.st_kind = Unix.S_DIR ->
+    Sys.readdir path |> Array.iter (fun entry -> rm_rf (Filename.concat path entry));
+    Unix.rmdir path
+  | _ -> Unix.unlink path
 ;;
 
 let with_eio_env f =
@@ -145,6 +144,29 @@ let with_eio_env f =
     (fun () -> f env)
 ;;
 
+let test_keeper_msg_async_persistence_lane_samples_are_unique () =
+  let samples = Keeper_msg_async.For_testing.persistence_lane_samples () in
+  let assert_sample metric expected_kind =
+    let name = Keeper_metrics.to_string metric in
+    let matching =
+      List.filter
+        (fun (sample : Otel_metrics.sample) ->
+           String.equal sample.name name && sample.labels = [])
+        samples
+    in
+    match matching with
+    | [ sample ] ->
+      check bool (name ^ " kind") true (sample.kind = expected_kind);
+      check bool (name ^ " nonnegative") true (sample.value >= 0.0)
+    | matches ->
+      failf "%s direct sample count=%d" name (List.length matches)
+  in
+  assert_sample Keeper_metrics.PersistenceLaneWaits Otel_metrics.Counter;
+  assert_sample Keeper_metrics.PersistenceLanePending Otel_metrics.Gauge;
+  assert_sample Keeper_metrics.PersistenceLaneInFlight Otel_metrics.Gauge;
+  check int "only the three direct lane samples" 3 (List.length samples)
+;;
+
 let test_keeper_msg_async_roundtrip () =
   with_eio_env
   @@ fun env ->
@@ -157,7 +179,7 @@ let test_keeper_msg_async_roundtrip () =
       ~background_sw:sw
       ~base_path
       ~caller
-      ~keeper_name:"alpha"
+      ~keeper_name:"alpha.with.dot"
       ~f:(fun _request_sw ->
         Eio.Fiber.yield ();
         tr_ok (Yojson.Safe.to_string (`Assoc [ "kind", `String "done" ])))
@@ -170,6 +192,8 @@ let test_keeper_msg_async_roundtrip () =
     "base_path stored as canonical identity"
     (Fs_compat.realpath base_path)
     entry.base_path;
+  Alcotest.(check string) "dotted keeper name accepted" "alpha.with.dot"
+    entry.keeper_name;
   Alcotest.(check bool)
     "request completed"
     true
@@ -413,12 +437,11 @@ let test_keeper_msg_async_request_id_collision_uses_reservation_index () =
       rm_rf base_path)
     (fun () ->
        let generated = Atomic.make 0 in
-       Keeper_msg_async.For_testing.set_request_id_hook
-         (Some
-            (fun () ->
-               match Atomic.fetch_and_add generated 1 with
-               | 0 | 1 -> "kmsg-reserved-collision"
-               | ordinal -> Printf.sprintf "kmsg-reserved-unique-%d" ordinal));
+       let generate_request_id () =
+         match Atomic.fetch_and_add generated 1 with
+         | 0 | 1 -> "kmsg-reserved-collision"
+         | ordinal -> Printf.sprintf "kmsg-reserved-unique-%d" ordinal
+       in
        let first_at_write, resolve_first_at_write = Eio.Promise.create () in
        let release_mutex = Mutex.create () in
        let release_condition = Condition.create () in
@@ -431,26 +454,32 @@ let test_keeper_msg_async_request_id_collision_uses_reservation_index () =
              Condition.broadcast release_condition))
        in
        let block_first = Atomic.make true in
-       Keeper_msg_async.For_testing.set_durable_write_hook
-         (Some
-            (fun stage ->
-               if
-                 stage = Keeper_fs.Payload_write
-                 && Atomic.compare_and_set block_first true false
-               then (
-                 Eio.Promise.resolve resolve_first_at_write ();
-                 Mutex.lock release_mutex;
-                 Fun.protect
-                   ~finally:(fun () -> Mutex.unlock release_mutex)
-                   (fun () ->
-                      while not !release_first do
-                        Condition.wait release_condition release_mutex
-                      done))));
+       let before_durable_write stage =
+         if
+           stage = Keeper_fs.Payload_write
+           && Atomic.compare_and_set block_first true false
+         then (
+           Eio.Promise.resolve resolve_first_at_write ();
+           Mutex.lock release_mutex;
+           Fun.protect
+             ~finally:(fun () -> Mutex.unlock release_mutex)
+             (fun () ->
+                while not !release_first do
+                  Condition.wait release_condition release_mutex
+                done))
+       in
+       let request_ops =
+         Keeper_msg_async.For_testing.make_request_ops
+           ~before_durable_write
+           ~generate_request_id
+           ()
+       in
        let first_result, resolve_first_result = Eio.Promise.create () in
        Eio.Fiber.fork ~sw (fun () ->
          Eio.Promise.resolve
            resolve_first_result
-           (Keeper_msg_async.submit
+           (Keeper_msg_async.For_testing.submit
+              request_ops
               ~background_sw:sw
               ~base_path
               ~caller
@@ -462,7 +491,8 @@ let test_keeper_msg_async_request_id_collision_uses_reservation_index () =
          (fun () ->
             Eio.Promise.await first_at_write;
             let second_request_id =
-              Keeper_msg_async.submit
+              Keeper_msg_async.For_testing.submit
+                request_ops
                 ~background_sw:sw
                 ~base_path
                 ~caller
@@ -506,12 +536,16 @@ let test_keeper_msg_async_initial_post_publish_failure_rolls_back () =
       rm_rf base_path)
     (fun () ->
        let worker_ran = Atomic.make false in
-       Keeper_msg_async.For_testing.set_durable_write_hook
-         (Some
-            (fail_once_on_write_stage
-               Keeper_fs.Parent_directory_fsync_after_rename));
+       let request_ops =
+         Keeper_msg_async.For_testing.make_request_ops
+           ~before_durable_write:
+             (fail_once_on_write_stage
+                Keeper_fs.Parent_directory_fsync_after_rename)
+           ()
+       in
        match
-         Keeper_msg_async.submit
+         Keeper_msg_async.For_testing.submit
+           request_ops
            ~background_sw
            ~base_path
            ~caller
@@ -546,14 +580,17 @@ let test_keeper_msg_async_initial_rollback_failure_preserves_request_id () =
       rm_rf base_path)
     (fun () ->
        let worker_ran = Atomic.make false in
-       Keeper_msg_async.For_testing.set_durable_write_hook
-         (Some
-            (fail_once_on_write_stage
-               Keeper_fs.Parent_directory_fsync_after_rename));
-       Keeper_msg_async.For_testing.set_durable_remove_hook
-         (Some (fail_once_on_remove_stage Keeper_fs.Unlink));
+       let request_ops =
+         Keeper_msg_async.For_testing.make_request_ops
+           ~before_durable_write:
+             (fail_once_on_write_stage
+                Keeper_fs.Parent_directory_fsync_after_rename)
+           ~before_durable_remove:(fail_once_on_remove_stage Keeper_fs.Unlink)
+           ()
+       in
        match
-         Keeper_msg_async.submit
+         Keeper_msg_async.For_testing.submit
+           request_ops
            ~background_sw
            ~base_path
            ~caller
@@ -575,7 +612,25 @@ let test_keeper_msg_async_initial_rollback_failure_preserves_request_id () =
            (Json_field.string json "request_id" |> Json_field.to_option);
          (match Keeper_msg_async.poll ~base_path ~caller request_id with
           | Keeper_msg_async.Found { status = Queued; _ } -> ()
-          | _ -> Alcotest.fail "published uncertain request cannot be reconciled")
+          | _ -> Alcotest.fail "published uncertain request cannot be reconciled");
+         Alcotest.(check int)
+           "uncertain request keeps only its own id reserved"
+           1
+           (Keeper_msg_async.For_testing.reserved_request_id_count ());
+         let subsequent_request_id =
+           Keeper_msg_async.submit
+             ~background_sw
+             ~base_path
+             ~caller
+             ~keeper_name:"initial-uncertain"
+             ~f:(fun _request_sw -> tr_ok "{}")
+             ()
+           |> accepted_request_id
+         in
+         Alcotest.(check bool)
+           "request-local reconciliation does not fence later work"
+           true
+           (not (String.equal request_id subsequent_request_id))
        | Ok outcome ->
          Alcotest.failf
            "uncertain write was reported durable: %s"
@@ -601,16 +656,19 @@ let test_keeper_msg_async_running_double_write_failure_is_terminal_in_memory () 
        let payload_writes = Atomic.make 0 in
        let worker_ran = Atomic.make false in
        let settlements = ref [] in
-       Keeper_msg_async.For_testing.set_durable_write_hook
-         (Some
-            (fun stage ->
-               if stage = Keeper_fs.Payload_write
-               then (
-                 let ordinal = Atomic.fetch_and_add payload_writes 1 + 1 in
-                 if ordinal >= 2
-                 then failwith "synthetic repeated request persistence failure")));
+       let request_ops =
+         Keeper_msg_async.For_testing.make_request_ops
+           ~before_durable_write:(fun stage ->
+             if stage = Keeper_fs.Payload_write
+             then (
+               let ordinal = Atomic.fetch_and_add payload_writes 1 + 1 in
+               if ordinal >= 2
+               then failwith "synthetic repeated request persistence failure"))
+           ()
+       in
        let request_id =
-         Keeper_msg_async.submit
+         Keeper_msg_async.For_testing.submit
+           request_ops
            ~on_worker_settled:(fun settlement ->
              settlements := settlement :: !settlements)
            ~background_sw
@@ -653,16 +711,19 @@ let test_keeper_msg_async_running_write_failure_projects_durable_marker_once () 
        let worker_ran = Atomic.make false in
        let aborts = ref [] in
        let settlements = ref [] in
-       Keeper_msg_async.For_testing.set_durable_write_hook
-         (Some
-            (fun stage ->
-               if stage = Keeper_fs.Payload_write
-               then (
-                 let ordinal = Atomic.fetch_and_add payload_writes 1 + 1 in
-                 if ordinal = 2
-                 then failwith "synthetic Running persistence failure")));
+       let request_ops =
+         Keeper_msg_async.For_testing.make_request_ops
+           ~before_durable_write:(fun stage ->
+             if stage = Keeper_fs.Payload_write
+             then (
+               let ordinal = Atomic.fetch_and_add payload_writes 1 + 1 in
+               if ordinal = 2
+               then failwith "synthetic Running persistence failure"))
+           ()
+       in
        let request_id =
-         Keeper_msg_async.submit
+         Keeper_msg_async.For_testing.submit
+           request_ops
            ~on_worker_aborted:(fun reason ->
              aborts := reason :: !aborts;
              Ok ())
@@ -946,8 +1007,21 @@ let test_keeper_msg_async_live_cancel_signals_after_post_publish_failure () =
       Keeper_msg_async.For_testing.clear ();
       rm_rf base_path)
     (fun () ->
+       let fail_cancel_persistence = Atomic.make false in
+       let failed = Atomic.make false in
+       let request_ops =
+         Keeper_msg_async.For_testing.make_request_ops
+           ~before_durable_write:(fun stage ->
+             if
+               Atomic.get fail_cancel_persistence
+               && stage = Keeper_fs.Parent_directory_fsync_after_rename
+               && Atomic.compare_and_set failed false true
+             then failwith "synthetic durable write failure")
+           ()
+       in
        let request_id =
-         Keeper_msg_async.submit
+         Keeper_msg_async.For_testing.submit
+           request_ops
            ~background_sw:sw
            ~base_path
            ~caller
@@ -959,12 +1033,14 @@ let test_keeper_msg_async_live_cancel_signals_after_post_publish_failure () =
          |> accepted_request_id
        in
        ignore (wait_for_running ~base_path request_id : Keeper_msg_async.entry);
-       Keeper_msg_async.For_testing.set_durable_write_hook
-         (Some
-            (fail_once_on_write_stage
-               Keeper_fs.Parent_directory_fsync_after_rename));
-       let result = Keeper_msg_async.cancel ~base_path ~caller request_id in
-       Keeper_msg_async.For_testing.set_durable_write_hook None;
+       Atomic.set fail_cancel_persistence true;
+       let result =
+         Keeper_msg_async.For_testing.cancel
+           request_ops
+           ~base_path
+           ~caller
+           request_id
+       in
        (match result with
         | Keeper_msg_async.Cancellation_requested
             (Keeper_msg_async.Published_unconfirmed _) -> ()
@@ -990,8 +1066,19 @@ let test_keeper_msg_async_explicit_cancel_retries_failed_worker_signal () =
     (fun () ->
        let settlements = ref [] in
        let aborts = ref [] in
+       let signal_attempts = Atomic.make 0 in
+       let request_ops =
+         Keeper_msg_async.For_testing.make_request_ops
+           ~signal_cancel:(fun request_sw cause ->
+             let attempt = Atomic.fetch_and_add signal_attempts 1 + 1 in
+             if attempt = 1
+             then failwith "synthetic worker signal failure"
+             else Eio.Switch.fail request_sw cause)
+           ()
+       in
        let request_id =
-         Keeper_msg_async.submit
+         Keeper_msg_async.For_testing.submit
+           request_ops
            ~on_worker_aborted:(fun reason ->
              aborts := reason :: !aborts;
              Ok ())
@@ -1009,15 +1096,13 @@ let test_keeper_msg_async_explicit_cancel_retries_failed_worker_signal () =
        in
        ignore (wait_for_running ~base_path request_id : Keeper_msg_async.entry);
        wait_for_active_switch_count (Eio.Stdenv.clock env) 1;
-       let signal_attempts = Atomic.make 0 in
-       Keeper_msg_async.For_testing.set_cancel_signal_hook
-         (Some
-            (fun request_sw cause ->
-               let attempt = Atomic.fetch_and_add signal_attempts 1 + 1 in
-               if attempt = 1
-               then failwith "synthetic worker signal failure"
-               else Eio.Switch.fail request_sw cause));
-       (match Keeper_msg_async.cancel ~base_path ~caller request_id with
+       (match
+          Keeper_msg_async.For_testing.cancel
+            request_ops
+            ~base_path
+            ~caller
+            request_id
+        with
         | Keeper_msg_async.Cancel_worker_signal_failed
             { durability = Keeper_msg_async.Durably_committed; _ } ->
           ()
@@ -1031,7 +1116,13 @@ let test_keeper_msg_async_explicit_cancel_retries_failed_worker_signal () =
         | _ -> Alcotest.fail "failed signal did not preserve cancelling intent");
        Alcotest.(check int) "no premature settlement callback" 0
          (List.length !settlements);
-       (match Keeper_msg_async.cancel ~base_path ~caller request_id with
+       (match
+          Keeper_msg_async.For_testing.cancel
+            request_ops
+            ~base_path
+            ~caller
+            request_id
+        with
         | Keeper_msg_async.Cancellation_requested
             Keeper_msg_async.Durably_committed ->
           ()
@@ -1357,8 +1448,37 @@ let test_keeper_msg_async_integrity_conflict_projects_canonical_terminal () =
       rm_rf base_path)
     (fun () ->
        let settlements = ref [] in
+       let injection : (Keeper_msg_async.entry * string) option Atomic.t =
+         Atomic.make None
+       in
+       let inject_terminal = Atomic.make true in
+       let request_ops =
+         Keeper_msg_async.For_testing.make_request_ops
+           ~before_durable_write:(fun stage ->
+             match Atomic.get injection with
+             | Some (running, request_id)
+               when stage = Keeper_fs.Payload_write
+                    && Atomic.compare_and_set inject_terminal true false ->
+               write_request_record
+                 ~location:Terminal_record
+                 ~keeper_name:running.Keeper_msg_async.keeper_name
+                 ~submitted_at:running.submitted_at
+                 ~base_path
+                 ~request_id
+                 ~status:"done"
+                 ~status_fields:
+                   [ "completed_at", `Float 42.0
+                   ; "ok", `Bool true
+                   ; "body", `String {|{"canonical":"result"}|}
+                   ]
+                 ();
+               failwith "synthetic terminal write failure"
+             | Some _ | None -> ())
+           ()
+       in
        let request_id =
-         Keeper_msg_async.submit
+         Keeper_msg_async.For_testing.submit
+           request_ops
            ~on_worker_settled:(fun settlement ->
              settlements := settlement :: !settlements)
            ~background_sw:sw
@@ -1371,29 +1491,10 @@ let test_keeper_msg_async_integrity_conflict_projects_canonical_terminal () =
            ()
          |> accepted_request_id
        in
-       let running = wait_for_running ~base_path request_id in
-       let inject_terminal = Atomic.make true in
-       Keeper_msg_async.For_testing.set_durable_write_hook
-         (Some
-            (fun stage ->
-               if
-                 stage = Keeper_fs.Payload_write
-                 && Atomic.compare_and_set inject_terminal true false
-               then (
-                 write_request_record
-                   ~location:Terminal_record
-                   ~keeper_name:running.keeper_name
-                   ~submitted_at:running.submitted_at
-                   ~base_path
-                   ~request_id
-                   ~status:"done"
-                   ~status_fields:
-                     [ "completed_at", `Float 42.0
-                     ; "ok", `Bool true
-                     ; "body", `String {|{"canonical":"result"}|}
-                     ]
-                   ();
-                 failwith "synthetic terminal write failure")));
+       let running : Keeper_msg_async.entry =
+         wait_for_running ~base_path request_id
+       in
+       Atomic.set injection (Some (running, request_id));
        Eio.Promise.resolve resolve_release ();
        let rec await_settlement remaining =
          match !settlements with
@@ -1407,7 +1508,7 @@ let test_keeper_msg_async_integrity_conflict_projects_canonical_terminal () =
        let callback_body =
          match !settlements with
          | [ Keeper_msg_async.Status_settlement
-               { status = Done { ok = true; body }
+               { status = Done { ok = true; body; _ }
                ; durability = Keeper_msg_async.Durable
                ; origin = Keeper_msg_async.Canonical_reconciliation
                }
@@ -1425,7 +1526,7 @@ let test_keeper_msg_async_integrity_conflict_projects_canonical_terminal () =
              (List.length settlements)
        in
        match Keeper_msg_async.poll ~base_path ~caller request_id with
-       | Keeper_msg_async.Found { status = Done { ok = true; body }; _ } ->
+       | Keeper_msg_async.Found { status = Done { ok = true; body; _ }; _ } ->
          Alcotest.(check string) "callback equals canonical poll truth" body
            callback_body
        | Keeper_msg_async.Found entry ->
@@ -1439,7 +1540,10 @@ let test_keeper_msg_async_integrity_conflict_projects_canonical_terminal () =
 ;;
 
 let test_keeper_stream_canonical_settlement_ignores_staged_worker_result () =
-  let status = Keeper_msg_async.Done { ok = true; body = "canonical-disk" } in
+  let status =
+    Keeper_msg_async.Done
+      { ok = true; body = "canonical-disk"; data = None }
+  in
   let project origin =
     Server_routes_http_keeper_stream.For_testing.worker_settlement_terminal_body
       ~staged_body:(Some "staged-worker")
@@ -1763,16 +1867,252 @@ let test_keeper_msg_async_recovery_excludes_terminal_history () =
          ~status:"running"
          ~status_fields:[]
          ();
+       let terminal_path =
+         require_record_path ~location:Terminal_record ~base_path ~request_id
+       in
+       let terminal_orphan =
+         Filename.concat
+           (Filename.dirname terminal_path)
+           ".keeper_atomic_terminal_history.tmp"
+       in
+       Fs_compat.save_file terminal_orphan "legacy terminal evidence";
        let report =
          Keeper_msg_async.For_testing.recover_lost_disk_records ~base_path ()
        in
        Alcotest.(check int) "terminal history is not scanned" 0
          (report.lost + report.migrated + report.cleaned + report.unreadable + report.failed);
+       Alcotest.(check int) "terminal orphan inventory is not scanned" 0
+         (report.atomic_orphans_deleted + report.atomic_orphans_preserved);
+       Alcotest.(check bool) "terminal history row is untouched" true
+         (Sys.file_exists terminal_path);
+       Alcotest.(check bool) "legacy terminal orphan is deferred" true
+         (Sys.file_exists terminal_orphan))
+;;
+
+let test_keeper_msg_async_legacy_atomic_migration_is_versioned () =
+  with_eio_env
+  @@ fun _env ->
+  let base_path = temp_dir "keeper-msg-atomic-migration-" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+       let staging =
+         Keeper_msg_async.For_testing.atomic_staging_dir ~base_path
+       in
+       let request_root = Filename.dirname staging in
+       let active = Filename.concat request_root "active" in
+       let terminal = Filename.concat request_root "terminal" in
+       Fs_compat.mkdir_p active;
+       Fs_compat.mkdir_p terminal;
+       let empty = Filename.concat active ".keeper_atomic_empty.tmp" in
+       let evidence = Filename.concat terminal ".atomic_evidence.tmp" in
+       Fs_compat.save_file empty "";
+       Fs_compat.save_file evidence "terminal evidence";
+       let first = Keeper_msg_async.migrate_legacy_atomic_orphans ~base_path in
+       Alcotest.(check int) "legacy empty deleted" 1
+         first.atomic_orphans_deleted;
+       Alcotest.(check int) "legacy evidence preserved" 1
+         first.atomic_orphans_preserved;
+       Alcotest.(check int) "first migration succeeds" 0 first.failed;
+       let marker =
+         Keeper_msg_async.For_testing.legacy_atomic_migration_marker ~base_path
+       in
+       Alcotest.(check bool) "durable migration marker created" true
+         (Sys.file_exists marker);
+       let recovery =
+         Keeper_msg_async.For_testing.recover_lost_disk_records ~base_path ()
+       in
+       Alcotest.(check int)
+         "migration metadata is outside the legacy record namespace"
+         0
+         (recovery.unreadable + recovery.failed);
+       Alcotest.(check int)
+         "migration metadata creates no record or store errors"
+         0
+         (List.length recovery.record_errors + List.length recovery.store_errors);
+       let deferred = Filename.concat terminal ".atomic_after_marker.tmp" in
+       Fs_compat.save_file deferred "must not be enumerated again";
+       let second = Keeper_msg_async.migrate_legacy_atomic_orphans ~base_path in
+       Alcotest.(check int) "marked migration performs no cleanup" 0
+         (second.atomic_orphans_deleted + second.atomic_orphans_preserved);
+       Alcotest.(check int) "marked migration remains successful" 0 second.failed;
+       Alcotest.(check bool) "historical terminal is skipped after marker" true
+         (Sys.file_exists deferred))
+;;
+
+let test_keeper_msg_async_legacy_atomic_migration_retries_failure () =
+  with_eio_env
+  @@ fun _env ->
+  let base_path = temp_dir "keeper-msg-atomic-migration-retry-" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+       let staging =
+         Keeper_msg_async.For_testing.atomic_staging_dir ~base_path
+       in
+       let request_root = Filename.dirname staging in
+       let active = Filename.concat request_root "active" in
+       Fs_compat.mkdir_p active;
+       let orphan = Filename.concat active ".atomic_evidence.tmp" in
+       let recovery_blocker = Filename.concat active ".recovered" in
+       Fs_compat.save_file orphan "evidence";
+       Fs_compat.save_file recovery_blocker "occupied";
+       let first = Keeper_msg_async.migrate_legacy_atomic_orphans ~base_path in
+       Alcotest.(check bool) "cleanup failure is typed" true (first.failed > 0);
+       let marker =
+         Keeper_msg_async.For_testing.legacy_atomic_migration_marker ~base_path
+       in
+       Alcotest.(check bool) "failed migration has no marker" false
+         (Sys.file_exists marker);
+       Alcotest.(check bool) "failed migration retains source" true
+         (Sys.file_exists orphan);
+       Sys.remove recovery_blocker;
+       let second = Keeper_msg_async.migrate_legacy_atomic_orphans ~base_path in
+       Alcotest.(check int) "retry preserves evidence" 1
+         second.atomic_orphans_preserved;
+       Alcotest.(check int) "retry succeeds" 0 second.failed;
+       Alcotest.(check bool) "successful retry creates marker" true
+         (Sys.file_exists marker))
+;;
+
+let test_keeper_msg_async_legacy_atomic_migration_rejects_oversized_marker () =
+  with_eio_env
+  @@ fun _env ->
+  let base_path = temp_dir "keeper-msg-atomic-migration-marker-bound-" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+       let initial = Keeper_msg_async.migrate_legacy_atomic_orphans ~base_path in
+       Alcotest.(check int) "initial migration succeeds" 0 initial.failed;
+       let marker =
+         Keeper_msg_async.For_testing.legacy_atomic_migration_marker ~base_path
+       in
+       let canonical_marker = Fs_compat.load_file marker in
+       Fs_compat.save_file marker (canonical_marker ^ " ");
+       let active =
+         Keeper_msg_async.For_testing.atomic_staging_dir ~base_path
+         |> Filename.dirname
+         |> fun request_root -> Filename.concat request_root "active"
+       in
+       Fs_compat.mkdir_p active;
+       let orphan = Filename.concat active ".atomic_after_oversized_marker.tmp" in
+       Fs_compat.save_file orphan "";
+       let repaired = Keeper_msg_async.migrate_legacy_atomic_orphans ~base_path in
+       Alcotest.(check int)
+         "overlong marker cannot suppress cleanup"
+         1
+         repaired.atomic_orphans_deleted;
+       Alcotest.(check int) "marker repair succeeds" 0 repaired.failed;
+       Alcotest.(check bool) "orphan was cleaned" false (Sys.file_exists orphan);
+       Alcotest.(check string)
+         "marker is restored from the canonical SSOT"
+         canonical_marker
+         (Fs_compat.load_file marker))
+;;
+
+let test_keeper_msg_async_recovery_rejects_linked_request_root () =
+  with_eio_env
+  @@ fun _env ->
+  let base_path = temp_dir "keeper-msg-recovery-linked-base-" in
+  let outside = temp_dir "keeper-msg-recovery-linked-outside-" in
+  let linked_masc = Filename.concat base_path ".masc" in
+  Fun.protect
+    ~finally:(fun () ->
+      (match Unix.lstat linked_masc with
+       | { Unix.st_kind = Unix.S_LNK; _ } -> Unix.unlink linked_masc
+       | _ -> ()
+       | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ());
+      rm_rf base_path;
+      rm_rf outside)
+    (fun () ->
+       Fs_compat.mkdir_p (Filename.concat outside ".masc");
+       Unix.symlink (Filename.concat outside ".masc") linked_masc;
+       let request_id = "kmsg_linked_duplicate_0_0" in
+       write_request_record
+         ~location:Active_record
+         ~base_path
+         ~request_id
+         ~status:"running"
+         ~status_fields:[]
+         ();
+       write_request_record
+         ~location:Terminal_record
+         ~base_path
+         ~request_id
+         ~status:"done"
+         ~status_fields:
+           [ "completed_at", `Float 2.0
+           ; "ok", `Bool true
+           ; "body", `String "terminal"
+           ; "data", `Null
+           ]
+         ();
+       let active_path =
+         require_record_path ~location:Active_record ~base_path ~request_id
+       in
        let terminal_path =
          require_record_path ~location:Terminal_record ~base_path ~request_id
        in
-       Alcotest.(check bool) "terminal history row is untouched" true
+       let report =
+         Keeper_msg_async.For_testing.recover_lost_disk_records ~base_path ()
+       in
+       Alcotest.(check bool)
+         "linked request root is a typed store failure"
+         true
+         (report.failed > 0 && report.store_errors <> []);
+       Alcotest.(check bool)
+         "outside active source remains untouched"
+         true
+         (Sys.file_exists active_path);
+       Alcotest.(check bool)
+         "outside terminal source remains untouched"
+         true
          (Sys.file_exists terminal_path))
+;;
+
+let test_keeper_msg_async_legacy_atomic_migration_rejects_symlink_ancestor () =
+  with_eio_env
+  @@ fun _env ->
+  let base_path = temp_dir "keeper-msg-atomic-migration-linked-base-" in
+  let outside = temp_dir "keeper-msg-atomic-migration-linked-outside-" in
+  Fun.protect
+    ~finally:(fun () ->
+      let linked_masc = Filename.concat base_path ".masc" in
+      (match Unix.lstat linked_masc with
+       | { Unix.st_kind = Unix.S_LNK; _ } -> Unix.unlink linked_masc
+       | _ -> ()
+       | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ());
+      rm_rf base_path;
+      rm_rf outside)
+    (fun () ->
+       let outside_initial =
+         Keeper_msg_async.migrate_legacy_atomic_orphans ~base_path:outside
+       in
+       Alcotest.(check int) "outside marker setup succeeds" 0 outside_initial.failed;
+       Unix.symlink
+         (Filename.concat outside ".masc")
+         (Filename.concat base_path ".masc");
+       let outside_active =
+         Keeper_msg_async.For_testing.atomic_staging_dir ~base_path:outside
+         |> Filename.dirname
+         |> fun request_root -> Filename.concat request_root "active"
+       in
+       Fs_compat.mkdir_p outside_active;
+       let outside_orphan =
+         Filename.concat outside_active ".atomic_after_linked_marker.tmp"
+       in
+       Fs_compat.save_file outside_orphan "must remain outside ownership root";
+       let report =
+         Keeper_msg_async.migrate_legacy_atomic_orphans ~base_path
+       in
+       Alcotest.(check bool)
+         "linked marker ancestor is a typed migration failure"
+         true
+         (report.failed > 0);
+       Alcotest.(check bool)
+         "outside orphan is never suppressed or mutated"
+         true
+         (Sys.file_exists outside_orphan))
 ;;
 
 let test_keeper_persistence_preparation_configures_queue_before_request_recovery () =
@@ -1782,8 +2122,10 @@ let test_keeper_persistence_preparation_configures_queue_before_request_recovery
   Fun.protect
     ~finally:(fun () ->
       Keeper_chat_queue.For_testing.reset ();
+      Server_bootstrap_loops.For_testing.reset_keeper_persistence_lifecycle ();
       rm_rf base_path)
     (fun () ->
+       Server_bootstrap_loops.For_testing.reset_keeper_persistence_lifecycle ();
        Keeper_chat_queue.For_testing.reset ();
        let request_id = "kmsg_prepare_running_0_0" in
        write_request_record
@@ -1796,6 +2138,7 @@ let test_keeper_persistence_preparation_configures_queue_before_request_recovery
          match
            Server_bootstrap_loops.prepare_keeper_persistence
              ~config:(Workspace.default_config base_path)
+             ()
          with
          | Ok prepared -> prepared
          | Error error ->
@@ -1816,15 +2159,17 @@ let test_keeper_persistence_preparation_configures_queue_before_request_recovery
        | _ -> Alcotest.fail "prepared request was published before recovery")
 ;;
 
-let test_keeper_persistence_preparation_rejects_structural_request_store () =
+let test_keeper_persistence_preparation_observes_structural_request_store () =
   with_eio_env
   @@ fun _env ->
   let base_path = temp_dir "keeper-persistence-structural-store-" in
   Fun.protect
     ~finally:(fun () ->
       Keeper_chat_queue.For_testing.reset ();
+      Server_bootstrap_loops.For_testing.reset_keeper_persistence_lifecycle ();
       rm_rf base_path)
     (fun () ->
+       Server_bootstrap_loops.For_testing.reset_keeper_persistence_lifecycle ();
        let request_id = "kmsg_structural_store_0_0" in
        let active_path =
          require_record_path ~location:Active_record ~base_path ~request_id
@@ -1832,25 +2177,38 @@ let test_keeper_persistence_preparation_rejects_structural_request_store () =
        let active_store = Filename.dirname active_path in
        mkdir_p (Filename.dirname active_store);
        Fs_compat.save_file active_store "not-a-directory";
-       match
+       let prepared =
+         match
          Server_bootstrap_loops.prepare_keeper_persistence
            ~config:(Workspace.default_config base_path)
+           ()
+         with
+         | Ok prepared -> prepared
+         | Error error ->
+           Alcotest.failf
+             "structural request observation blocked preparation: %s"
+             (Server_bootstrap_loops.keeper_persistence_prepare_error_to_string
+                error)
+       in
+       let report = Server_bootstrap_loops.keeper_persistence_report prepared in
+       Alcotest.(check bool)
+         "active store error remains typed"
+         true
+         (List.exists
+            (fun (error : Keeper_msg_async.recovery_store_error) ->
+               error.store = Keeper_msg_async.Active_store
+               && String.equal error.path active_store)
+            report.requests.store_errors);
+       match
+         Server_bootstrap_loops.claim_prepared_keeper_persistence
+           ~config:(Workspace.default_config base_path)
+           prepared
        with
-       | Error (Server_bootstrap_loops.Request_inventory_unavailable errors) ->
-         Alcotest.(check bool)
-           "active store error remains typed"
-           true
-           (List.exists
-              (fun (error : Keeper_msg_async.recovery_store_error) ->
-                 error.store = Keeper_msg_async.Active_store
-                 && String.equal error.path active_store)
-              errors)
+       | Ok _ -> ()
        | Error error ->
          Alcotest.failf
-           "unexpected preparation error: %s"
-           (Server_bootstrap_loops.keeper_persistence_prepare_error_to_string
-              error)
-       | Ok _ -> Alcotest.fail "structural request store was published as ready")
+           "typed request-store observation poisoned owner claim: %s"
+           (Server_bootstrap_loops.keeper_persistence_claim_error_to_string error))
 ;;
 
 let test_keeper_persistence_preparation_preserves_unattributed_request_record () =
@@ -1860,8 +2218,10 @@ let test_keeper_persistence_preparation_preserves_unattributed_request_record ()
   Fun.protect
     ~finally:(fun () ->
       Keeper_chat_queue.For_testing.reset ();
+      Server_bootstrap_loops.For_testing.reset_keeper_persistence_lifecycle ();
       rm_rf base_path)
     (fun () ->
+       Server_bootstrap_loops.For_testing.reset_keeper_persistence_lifecycle ();
        let request_id = "kmsg_unattributed_record_0_0" in
        write_disk_record
          ~location:Active_record
@@ -1872,6 +2232,7 @@ let test_keeper_persistence_preparation_preserves_unattributed_request_record ()
          match
            Server_bootstrap_loops.prepare_keeper_persistence
              ~config:(Workspace.default_config base_path)
+             ()
          with
          | Ok prepared -> prepared
          | Error error ->
@@ -1893,7 +2254,187 @@ let test_keeper_persistence_preparation_preserves_unattributed_request_record ()
 ;;
 
 
-let test_keeper_persistence_claim_is_latest_and_one_shot () =
+let test_keeper_persistence_ready_rejects_second_preparation () =
+  with_eio_env
+  @@ fun _env ->
+  let base_a = temp_dir "keeper-persistence-ready-a-" in
+  let base_b = temp_dir "keeper-persistence-ready-b-" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_chat_queue.For_testing.reset ();
+      Server_bootstrap_loops.For_testing.reset_keeper_persistence_lifecycle ();
+      rm_rf base_a;
+      rm_rf base_b)
+    (fun () ->
+       Server_bootstrap_loops.For_testing.reset_keeper_persistence_lifecycle ();
+       let config_a = Workspace.default_config base_a in
+       let config_b = Workspace.default_config base_b in
+       let request_id = "kmsg_ready_reject_b_0_0" in
+       write_request_record
+         ~base_path:base_b
+         ~request_id
+         ~status:"running"
+         ~status_fields:[]
+         ();
+       (match Server_bootstrap_loops.prepare_keeper_persistence ~config:config_a () with
+        | Ok _ -> ()
+        | Error error ->
+          Alcotest.failf
+            "first persistence preparation failed: %s"
+            (Server_bootstrap_loops.keeper_persistence_prepare_error_to_string
+               error));
+       (match Server_bootstrap_loops.prepare_keeper_persistence ~config:config_b () with
+        | Error Server_bootstrap_loops.Preparation_awaiting_claim -> ()
+        | Error error ->
+          Alcotest.failf
+            "ready preparation returned the wrong second-owner error: %s"
+            (Server_bootstrap_loops.keeper_persistence_prepare_error_to_string
+               error)
+        | Ok _ -> Alcotest.fail "ready persistence preparation was replaced");
+       match
+         Keeper_msg_async.For_testing.load_record
+           ~base_path:base_b
+           ~request_id
+       with
+       | Keeper_msg_async.Found { status = Running; _ } -> ()
+       | _ -> Alcotest.fail "rejected second preparation mutated its BasePath")
+;;
+
+let test_keeper_persistence_canonical_start_token_is_affine () =
+  with_eio_env
+  @@ fun _env ->
+  let parent = temp_dir "keeper-persistence-canonical-" in
+  let real_a = Filename.concat parent "real-a" in
+  let real_b = Filename.concat parent "real-b" in
+  let alias = Filename.concat parent "owner" in
+  mkdir_p real_a;
+  mkdir_p real_b;
+  Unix.symlink real_a alias;
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_chat_queue.For_testing.reset ();
+      Server_bootstrap_loops.For_testing.reset_keeper_persistence_lifecycle ();
+      rm_rf parent)
+    (fun () ->
+       Server_bootstrap_loops.For_testing.reset_keeper_persistence_lifecycle ();
+       let canonical_config = Workspace.default_config (Unix.realpath real_a) in
+       let config =
+         { canonical_config with base_path = alias; workspace_path = alias }
+       in
+       let prepared =
+         match
+           Server_bootstrap_loops.prepare_keeper_persistence
+             ~requested_base_path:alias
+             ~config:canonical_config
+             ()
+         with
+         | Ok prepared -> prepared
+         | Error error ->
+           Alcotest.failf
+             "canonical fixture preparation failed: %s"
+             (Server_bootstrap_loops.keeper_persistence_prepare_error_to_string
+                error)
+       in
+       let requested, canonical =
+         Server_bootstrap_loops.For_testing.prepared_base_paths prepared
+       in
+       Alcotest.(check string) "requested alias is retained" config.base_path requested;
+       Alcotest.(check string) "canonical BasePath is frozen" (Unix.realpath real_a)
+         canonical;
+       Sys.remove alias;
+       Unix.symlink real_b alias;
+       (match
+          Server_bootstrap_loops.claim_prepared_keeper_persistence ~config prepared
+        with
+        | Error Server_bootstrap_loops.Claim_base_path_mismatch -> ()
+        | Error error ->
+          Alcotest.failf
+            "retargeted claim returned the wrong error: %s"
+            (Server_bootstrap_loops.keeper_persistence_claim_error_to_string error)
+       | Ok _ -> Alcotest.fail "retargeted BasePath claimed stale recovery");
+       Sys.remove alias;
+       Unix.symlink real_a alias;
+       let claimed =
+         match
+           Server_bootstrap_loops.claim_prepared_keeper_persistence
+             ~config:canonical_config
+             prepared
+         with
+         | Ok claimed -> claimed
+         | Error error ->
+           Alcotest.failf
+             "restored canonical claim failed: %s"
+             (Server_bootstrap_loops.keeper_persistence_claim_error_to_string error)
+       in
+       Sys.remove alias;
+       Unix.symlink real_b alias;
+       (match
+          Server_bootstrap_loops.claim_prepared_keeper_persistence ~config prepared
+        with
+        | Error Server_bootstrap_loops.Claim_already_claimed -> ()
+        | Error error ->
+          Alcotest.failf
+            "terminal claim state was hidden by retargeted path: %s"
+            (Server_bootstrap_loops.keeper_persistence_claim_error_to_string error)
+        | Ok _ -> Alcotest.fail "claimed token was reused after path retarget");
+       (match
+          Server_bootstrap_loops.For_testing.begin_keeper_loops_start
+            ~config
+            claimed
+        with
+        | Error (Server_bootstrap_loops.Start_base_path_mismatch _) -> ()
+        | Error error ->
+          Alcotest.failf
+            "retargeted start returned the wrong error: %s"
+            (Server_bootstrap_loops.keeper_persistence_start_error_to_string error)
+        | Ok _ -> Alcotest.fail "retargeted BasePath started stale recovery");
+       Sys.remove alias;
+       Unix.symlink real_a alias;
+       let ownership =
+         match
+           Server_bootstrap_loops.For_testing.begin_keeper_loops_start
+             ~config:canonical_config
+             claimed
+         with
+         | Ok ownership -> ownership
+         | Error error ->
+           Alcotest.failf
+             "canonical start ownership failed: %s"
+             (Server_bootstrap_loops.keeper_persistence_start_error_to_string error)
+       in
+       (match
+          Server_bootstrap_loops.For_testing.begin_keeper_loops_start
+            ~config
+            claimed
+        with
+        | Error Server_bootstrap_loops.Start_in_progress -> ()
+        | Error error ->
+          Alcotest.failf
+            "concurrent start returned the wrong error: %s"
+            (Server_bootstrap_loops.keeper_persistence_start_error_to_string error)
+        | Ok _ -> Alcotest.fail "claimed token started twice concurrently");
+       (match
+          Server_bootstrap_loops.For_testing.finish_keeper_loops_start ownership
+        with
+        | Ok () -> ()
+        | Error error ->
+          Alcotest.failf
+            "canonical start ownership did not finish: %s"
+            (Server_bootstrap_loops.keeper_persistence_start_error_to_string error));
+       Sys.remove alias;
+       Unix.symlink real_b alias;
+       match
+         Server_bootstrap_loops.For_testing.begin_keeper_loops_start ~config claimed
+       with
+       | Error Server_bootstrap_loops.Start_already_started -> ()
+       | Error error ->
+         Alcotest.failf
+           "reused start token returned the wrong error: %s"
+           (Server_bootstrap_loops.keeper_persistence_start_error_to_string error)
+       | Ok _ -> Alcotest.fail "claimed token started Keeper loops twice")
+;;
+
+let test_keeper_persistence_claim_is_one_shot_for_process () =
   with_eio_env
   @@ fun _env ->
   let base_a = temp_dir "keeper-persistence-claim-a-" in
@@ -1901,13 +2442,15 @@ let test_keeper_persistence_claim_is_latest_and_one_shot () =
   Fun.protect
     ~finally:(fun () ->
       Keeper_chat_queue.For_testing.reset ();
+      Server_bootstrap_loops.For_testing.reset_keeper_persistence_lifecycle ();
       rm_rf base_a;
       rm_rf base_b)
     (fun () ->
+       Server_bootstrap_loops.For_testing.reset_keeper_persistence_lifecycle ();
        let config_a = Workspace.default_config base_a in
        let config_b = Workspace.default_config base_b in
        let prepare config =
-         match Server_bootstrap_loops.prepare_keeper_persistence ~config with
+         match Server_bootstrap_loops.prepare_keeper_persistence ~config () with
          | Ok prepared -> prepared
          | Error error ->
            Alcotest.failf
@@ -1937,14 +2480,14 @@ let test_keeper_persistence_claim_is_latest_and_one_shot () =
         with
         | Error Server_bootstrap_loops.Claim_already_claimed -> ()
         | _ -> Alcotest.fail "second claim was not rejected");
-       let _prepared_b = prepare config_b in
-       match
-         Server_bootstrap_loops.claim_prepared_keeper_persistence
-           ~config:config_a
-           prepared_a
-       with
-       | Error Server_bootstrap_loops.Claim_superseded -> ()
-       | _ -> Alcotest.fail "superseded preparation became claimable again")
+       match Server_bootstrap_loops.prepare_keeper_persistence ~config:config_b () with
+       | Error Server_bootstrap_loops.Preparation_already_claimed -> ()
+       | Error error ->
+         Alcotest.failf
+           "second startup owner returned the wrong error: %s"
+           (Server_bootstrap_loops.keeper_persistence_prepare_error_to_string
+              error)
+       | Ok _ -> Alcotest.fail "second startup owner mutated claimed persistence")
 ;;
 
 let test_keeper_msg_async_loads_v2_done_without_typed_data () =
@@ -2233,7 +2776,11 @@ let () =
   run
     "keeper_mutex_coverage"
     [ ( "keeper_msg_async"
-      , [ test_case "submit/poll roundtrip" `Quick test_keeper_msg_async_roundtrip
+      , [ test_case
+            "persistence lane direct samples are unique"
+            `Quick
+            test_keeper_msg_async_persistence_lane_samples_are_unique
+        ; test_case "submit/poll roundtrip" `Quick test_keeper_msg_async_roundtrip
         ; test_case
             "list isolates canonical BasePath owner lanes"
             `Quick
@@ -2355,21 +2902,49 @@ let () =
             `Quick
             test_keeper_msg_async_recovery_excludes_terminal_history
         ; test_case
+            "legacy atomic migration is versioned"
+            `Quick
+            test_keeper_msg_async_legacy_atomic_migration_is_versioned
+        ; test_case
+            "legacy atomic migration retries typed failure"
+            `Quick
+            test_keeper_msg_async_legacy_atomic_migration_retries_failure
+        ; test_case
+            "legacy atomic migration bounds and repairs its marker"
+            `Quick
+            test_keeper_msg_async_legacy_atomic_migration_rejects_oversized_marker
+        ; test_case
+            "legacy atomic migration rejects a linked marker ancestor"
+            `Quick
+            test_keeper_msg_async_legacy_atomic_migration_rejects_symlink_ancestor
+        ; test_case
+            "request recovery rejects a linked store root"
+            `Quick
+            test_keeper_msg_async_recovery_rejects_linked_request_root
+        ; test_case
             "persistence preparation configures queue then recovers requests"
             `Quick
             test_keeper_persistence_preparation_configures_queue_before_request_recovery
         ; test_case
-            "persistence preparation rejects structural request store"
+            "persistence preparation observes structural request store"
             `Quick
-            test_keeper_persistence_preparation_rejects_structural_request_store
+            test_keeper_persistence_preparation_observes_structural_request_store
         ; test_case
             "persistence preparation preserves unattributed request record"
             `Quick
             test_keeper_persistence_preparation_preserves_unattributed_request_record
         ; test_case
-            "persistence claim is latest and one-shot"
+            "ready persistence preparation rejects a second owner"
             `Quick
-            test_keeper_persistence_claim_is_latest_and_one_shot
+            test_keeper_persistence_ready_rejects_second_preparation
+        ; test_case
+            "canonical persistence start token is affine"
+            `Quick
+            test_keeper_persistence_canonical_start_token_is_affine
+        ; test_case
+            "persistence claim is one-shot for the process"
+            `Quick
+            test_keeper_persistence_claim_is_one_shot_for_process
         ; test_case
             "oversized request id rejected"
             `Quick

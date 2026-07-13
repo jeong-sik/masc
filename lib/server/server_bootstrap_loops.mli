@@ -12,33 +12,87 @@ type keeper_persistence_report =
   ; delivery : Keeper_chat_delivery_journal.recovery_report
   ; queue : Keeper_chat_queue.configure_report
   ; requests : Keeper_msg_async.recovery_report
-  ; blocked_keeper_names : string list
+  }
+
+type keeper_persistence_failure_phase =
+  | Resolving_base_path
+  | Restoring_shutdown
+  | Recovering_delivery
+  | Configuring_queue
+  | Recovering_requests
+  | Starting_keeper_loops
+
+type keeper_persistence_raised_cause =
+  { exception_ : exn
+  ; backtrace : Printexc.raw_backtrace
+  }
+
+type keeper_persistence_failure_cause =
+  | Base_path_identity_unavailable_cause of keeper_persistence_raised_cause
+  | Noncanonical_config_cause of
+      { configured_base_path : string
+      ; canonical_base_path : string
+      ; configured_backend_base_path : string
+      ; expected_backend_base_path : string
+      }
+  | Shutdown_inventory_unavailable_cause of Keeper_shutdown_store.error
+  | Shutdown_admission_unavailable_cause of string
+  | Unexpected_exception_cause of keeper_persistence_raised_cause
+  | Lifecycle_invariant_cause of string
+
+type keeper_persistence_failure =
+  { phase : keeper_persistence_failure_phase
+  ; base_path : string
+  ; cause : keeper_persistence_failure_cause
   }
 
 type keeper_persistence_prepare_error =
   | Shutdown_inventory_unavailable of Keeper_shutdown_store.error
   | Shutdown_admission_unavailable of string
-  | Delivery_inventory_unavailable of Keeper_chat_delivery_journal.error list
-  | Queue_inventory_unavailable of Keeper_chat_queue.snapshot_load_error list
-  | Request_inventory_unavailable of Keeper_msg_async.recovery_store_error list
-  | Preparation_superseded
+  | Preparation_base_path_identity_unavailable of keeper_persistence_failure
+  | Preparation_config_not_canonical of keeper_persistence_failure
+  | Preparation_in_progress
+  | Preparation_awaiting_claim
+  | Preparation_already_claimed
+  | Preparation_failed_previously of keeper_persistence_failure
+  | Preparation_ownership_lost
 
 type prepared_keeper_persistence
 type claimed_keeper_persistence
 
 type keeper_persistence_claim_error =
   | Claim_base_path_mismatch
+  | Claim_base_path_identity_unavailable of keeper_persistence_failure
   | Claim_superseded
   | Claim_already_claimed
-  | Claim_admission_install_failed of Keeper_persistence_admission.install_error
+  | Claim_failed_previously of keeper_persistence_failure
+
+type keeper_persistence_start_error =
+  | Start_base_path_mismatch of
+      { claimed_base_path : string
+      ; state_base_path : string
+      }
+  | Start_base_path_identity_unavailable of keeper_persistence_failure
+  | Start_superseded
+  | Start_in_progress
+  | Start_already_started
+  | Start_execution_failed of keeper_persistence_failure
+  | Start_failed_previously of keeper_persistence_failure
+
+exception Keeper_persistence_start_failed of keeper_persistence_start_error
 
 val prepare_keeper_persistence :
+  ?requested_base_path:string ->
   config:Workspace.config ->
+  unit ->
   (prepared_keeper_persistence, keeper_persistence_prepare_error) result
 (** Synchronously reconcile delivery journals, configure/restore the durable
-    queue, then recover keeper message requests. Call this before publishing
-    request routes. Per-record failures remain typed in the report and do not
-    stop unrelated Keeper lanes. *)
+    queue, then recover keeper message requests against one canonical BasePath
+    identity captured at entry. Only an idle process lifecycle may prepare;
+    ready state cannot be replaced by a second preparation. Per-record failures
+    remain typed in the report and do not stop unrelated Keeper lanes.
+    [requested_base_path] is diagnostic identity only; every persistence and
+    backend operation uses the canonical [config]. *)
 
 val keeper_persistence_report :
   prepared_keeper_persistence -> keeper_persistence_report
@@ -46,17 +100,24 @@ val keeper_persistence_report :
 val keeper_persistence_prepare_error_to_string :
   keeper_persistence_prepare_error -> string
 
+val keeper_persistence_failure_to_string : keeper_persistence_failure -> string
+
 val claim_prepared_keeper_persistence :
   config:Workspace.config ->
   prepared_keeper_persistence ->
   (claimed_keeper_persistence, keeper_persistence_claim_error) result
-(** Atomically claim the latest successful preparation exactly once. Call this
-    before publishing HTTP readiness; a stale, mismatched, or repeated claim
-    remains a typed startup error, as does failure to establish the fence's
-    canonical BasePath identity. *)
+(** Atomically claim the ready preparation exactly once. The current config
+    path is resolved again and must identify the canonical BasePath captured by
+    preparation, including across symlink retargeting. A racing or repeated
+    claim returns [Claim_already_claimed]; stale tokens and retained lifecycle
+    failures remain distinct typed errors. Call only after every other fallible
+    pre-readiness step. *)
 
 val keeper_persistence_claim_error_to_string :
   keeper_persistence_claim_error -> string
+
+val keeper_persistence_start_error_to_string :
+  keeper_persistence_start_error -> string
 
 val start_keeper_loops :
   claimed_persistence:claimed_keeper_persistence ->
@@ -68,10 +129,15 @@ val start_keeper_loops :
   Mcp_server.server_state -> unit
 (** Spawn the keepalive bootstrap, supervisor sweep, and tool-execution
     fibers under [sw].  Each fiber is bound to the switch so a graceful
-    shutdown cancels them in order. The opaque preparation token makes queue
-    consumption impossible to start through this API before durable recovery. *)
+    shutdown cancels them in order. The claimed token is affine: start reserves
+    it before spawning, rejects concurrent or repeated use, and revalidates the
+    current state BasePath against the preparation's canonical identity.
+    Synchronous startup failure is retained in the lifecycle and raised as
+    [Keeper_persistence_start_failed]. *)
 
 module For_testing : sig
+  type keeper_loops_start_ownership
+
   type queued_chat_projection = {
     payload_channel : string;
     payload_channel_user_id : string;
@@ -90,6 +156,19 @@ module For_testing : sig
 
   val queued_chat_projection :
     Keeper_chat_queue.queued_message -> queued_chat_projection
+
+  val reset_keeper_persistence_lifecycle : unit -> unit
+
+  val prepared_base_paths : prepared_keeper_persistence -> string * string
+
+  val begin_keeper_loops_start :
+    config:Workspace.config ->
+    claimed_keeper_persistence ->
+    (keeper_loops_start_ownership, keeper_persistence_start_error) result
+
+  val finish_keeper_loops_start :
+    keeper_loops_start_ownership ->
+    (unit, keeper_persistence_start_error) result
 end
 
 val start_background_maintenance :

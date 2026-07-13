@@ -1247,7 +1247,7 @@ let completion_of_worker_settlement ~queued_turn ~staged_completion
             })
      | ( Keeper_msg_async.Durable
        , Keeper_msg_async.Transition_commit
-       , Keeper_msg_async.Done { ok; body } ) ->
+       , Keeper_msg_async.Done { ok; body; _ } ) ->
        (match staged_completion with
         | Some completion -> Some completion
         | None ->
@@ -1261,7 +1261,7 @@ let completion_of_worker_settlement ~queued_turn ~staged_completion
                }))
      | ( Keeper_msg_async.Durable
        , Keeper_msg_async.Canonical_reconciliation
-       , Keeper_msg_async.Done { ok; body } ) ->
+       , Keeper_msg_async.Done { ok; body; _ } ) ->
        let stream_status = if ok then Stream_done else Stream_error in
        Some
          (Completion_terminal

@@ -36,9 +36,14 @@ type durable_write_stage =
   | Temp_file_close
   | Atomic_rename
   | Parent_directory_fsync_after_rename
+  | Temp_directory_fsync_after_rename
 
 type directory_chain_error =
   | Non_directory_ancestor of { path : string }
+  | Outside_ownership_root of
+      { ownership_root : string
+      ; path : string
+      }
   | Missing_root of { path : string }
   | Creation_not_observed of { path : string }
 
@@ -54,9 +59,18 @@ type durable_write_error =
 
 (** Strict durable atomic JSON write. Unlike the compatibility
     [save_json_atomic] boundary, parent-directory fsync failure is returned as
-    an error and never downgraded to success. *)
-val save_json_durable_atomic :
-  string -> Yojson.Safe.t -> (unit, durable_write_error) result
+    an error and never downgraded to success. When [temp_dir] differs from the
+    target parent, the rename is anchored by fsyncing both directories. When
+    [ownership_root] is supplied, both directory chains must be lexically
+    contained below it and symbolic-link components are rejected. The caller
+    keeps that subtree process-owned while the write runs because OCaml 5.4
+    has no portable dirfd-relative rename API. *)
+val save_json_durable_atomic
+  :  ?ownership_root:string
+  -> ?temp_dir:string
+  -> string
+  -> Yojson.Safe.t
+  -> (unit, durable_write_error) result
 
 val durable_write_error_to_string : durable_write_error -> string
 
@@ -69,8 +83,13 @@ type durable_remove_error =
   ; failure : durable_remove_stage * string
   }
 
-(** Idempotently unlink [path] and fsync its parent directory. *)
-val remove_file_durable : string -> (unit, durable_remove_error) result
+(** Idempotently unlink [path] and fsync its parent directory. When
+    [ownership_root] is supplied, the parent chain is inspected without
+    following symbolic links immediately before the mutation. *)
+val remove_file_durable
+  :  ?ownership_root:string
+  -> string
+  -> (unit, durable_remove_error) result
 val durable_remove_error_to_string : durable_remove_error -> string
 
 module For_testing : sig
@@ -81,12 +100,15 @@ module For_testing : sig
   val save_json_durable_atomic
     :  before_stage:(durable_write_stage -> unit)
     -> ?before_directory_fsync:(string -> unit)
+    -> ?ownership_root:string
+    -> ?temp_dir:string
     -> string
     -> Yojson.Safe.t
     -> (unit, durable_write_error) result
 
   val remove_file_durable
     :  before_stage:(durable_remove_stage -> unit)
+    -> ?ownership_root:string
     -> string
     -> (unit, durable_remove_error) result
 end

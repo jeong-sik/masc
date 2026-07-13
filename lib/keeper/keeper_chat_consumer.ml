@@ -299,9 +299,7 @@ let run ~sw ~clock ~base_path ~handle_turn =
             turn instead of one turn per message — the keeper then answers
             with the full accumulated context (RFC-0225 single-flight
             makes the in-flight state observable). *)
-         if Keeper_persistence_admission.is_blocked ~base_path ~keeper_name
-         then ()
-         else if is_dispatching dispatch_state keeper_name
+         if is_dispatching dispatch_state keeper_name
          then ()
          else
            match retry_pending_finalization dispatch_state ~keeper_name with

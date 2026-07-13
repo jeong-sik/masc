@@ -39,6 +39,13 @@ let bool_of_env_opt name =
 
 let validate_name = Safe_identifier.is_portable_name
 
+let invalid_name_error name =
+  Printf.sprintf
+    "invalid keeper name %S: %s"
+    name
+    (Safe_identifier.portable_name_error ~field:"keeper name")
+;;
+
 (* ── Configuration constants ────────────────────────────────── *)
 
 let default_proactive_enabled = true

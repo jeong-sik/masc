@@ -170,11 +170,7 @@ let resolve_status_target_config ~(config : Workspace.config) ~(agent_name : str
     |> List.filter validate_name
   in
   if candidates = [] then
-    Error
-      (Printf.sprintf
-         "invalid keeper name %S (must be non-empty and match \
-          [A-Za-z0-9._-]+; see Keeper_config.validate_name)"
-         requested_name)
+    Error (invalid_name_error requested_name)
   else
     let rec loop = function
       | [] -> Error (Printf.sprintf "keeper not found: %s" requested_name)

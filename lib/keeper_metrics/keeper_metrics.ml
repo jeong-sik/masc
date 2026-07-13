@@ -73,6 +73,10 @@ type t =
   | FsFailures
   | PersistencePreparationStageDuration
   | PersistencePreparationExamined
+  | PersistenceLaneWaits
+  | PersistenceLanePending
+  | PersistenceLaneInFlight
+  | PersistenceLaneDuration
   | CrashPersistenceFailures
   | GenerationLineageFailures
   | KeepaliveSignalFailures
@@ -296,6 +300,10 @@ let to_string = function
     "masc_keeper_persistence_preparation_stage_duration_seconds"
   | PersistencePreparationExamined ->
     "masc_keeper_persistence_preparation_examined_records"
+  | PersistenceLaneWaits -> "masc_keeper_persistence_lane_waits_total"
+  | PersistenceLanePending -> "masc_keeper_persistence_lane_pending"
+  | PersistenceLaneInFlight -> "masc_keeper_persistence_lane_in_flight"
+  | PersistenceLaneDuration -> "masc_keeper_persistence_lane_duration_seconds"
   | CrashPersistenceFailures -> "masc_keeper_crash_persistence_failures_total"
   | GenerationLineageFailures -> "masc_keeper_generation_lineage_failures_total"
   | KeepaliveSignalFailures -> "masc_keeper_keepalive_signal_failures_total"
@@ -452,6 +460,16 @@ let to_string = function
   | WireCaptureRecordSkipped -> "masc_keeper_wire_capture_record_skipped_total"
 ;;
 
+type collection =
+  | Metric_store
+  | External_observable
+
+let collection = function
+  | PersistenceLaneWaits | PersistenceLanePending | PersistenceLaneInFlight ->
+    External_observable
+  | _ -> Metric_store
+;;
+
 let emit_runtime_selected ~keeper_name ~runtime_id ~fallback_reason =
   Otel_metric_store_core.inc_counter
     (to_string RuntimeSelected)
@@ -490,8 +508,11 @@ let () =
   List.iter
     (fun m ->
       let name = to_string m in
-      if String.ends_with ~suffix:"_total" name then
-        Otel_metric_store_core.register_counter ~name ~help:name ())
+      match collection m with
+      | External_observable -> ()
+      | Metric_store ->
+        if String.ends_with ~suffix:"_total" name
+        then Otel_metric_store_core.register_counter ~name ~help:name ())
     all;
   Otel_metric_store_core.register_gauge
     ~name:(to_string SupervisorLastSweepUnixtime)

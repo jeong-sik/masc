@@ -3,6 +3,9 @@
 
 module Keeper_name : sig
   type t = private string
+  (** Keeper name parsed with the shared portable-name grammar
+      [[A-Za-z0-9._-]+] used by {!Keeper_config.validate_name}, excluding the
+      reserved path components [.] and [..]. *)
   val of_string : string -> (t, string) result
   val to_string : t -> string
   val equal : t -> t -> bool

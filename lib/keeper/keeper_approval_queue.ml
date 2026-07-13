@@ -1842,9 +1842,15 @@ let complete_delivery delivery =
 ;;
 
 let install_persistence ~base_path =
+  (* Snapshot I/O and JSON parsing may yield. Keep them outside the
+     process-global commit mutex so a slow filesystem cannot block the Eio
+     domain through a contending [Stdlib.Mutex] waiter. The immutable loaded
+     maps are merged with the latest in-memory state inside the short commit
+     section below. *)
+  let loaded_snapshot = load_snapshot_unlocked ~base_path in
   let installed =
     Stdlib.Mutex.protect pending_store_mu (fun () ->
-      match load_snapshot_unlocked ~base_path with
+      match loaded_snapshot with
       | Error storage_error ->
         mark_store_unavailable_unlocked ~base_path storage_error;
         Error storage_error

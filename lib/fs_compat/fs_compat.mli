@@ -3,6 +3,8 @@
     @since 2026-02 - Keeper Emergent Identity v2.0
 *)
 
+module Atomic_orphan_size_class = Atomic_orphan_size_class
+
 (** #9921: raised by mutating [Fs_compat] entry points
     ([append_file], [save_file], [mkdir_p]) when the target path falls
     under [HOME] and the process is a test executable. Defense in depth
@@ -33,6 +35,36 @@ type path_kind =
     explicit. *)
 val path_kind : ?follow:bool -> string -> path_kind
 
+type owned_directory_chain_rejection = Owned_directory_chain.rejection =
+  | Owned_path_outside_root of
+      { ownership_root : string
+      ; path : string
+      }
+  | Owned_path_non_directory of
+      { path : string
+      ; kind : Unix.file_kind
+      }
+
+type owned_directory_chain_observation = Owned_directory_chain.observation =
+  | Owned_directory_missing
+  | Owned_directory of Unix.stats
+
+val inspect_owned_directory_chain
+  :  ownership_root:string
+  -> string
+  -> (owned_directory_chain_observation, owned_directory_chain_rejection) result
+(** Shared no-follow ownership-boundary inspection. *)
+
+val owned_directory_chain_rejection_to_string
+  :  owned_directory_chain_rejection
+  -> string
+
+val owned_directory_paths
+  :  ownership_root:string
+  -> string
+  -> (string list, owned_directory_chain_rejection) result
+(** Lexical ordered descendant paths for ownership-aware directory creation. *)
+
 (** Eio-native, deterministically sorted directory inventory. *)
 val read_dir : string -> string list
 
@@ -52,33 +84,74 @@ val save_file : string -> string -> unit
     Returns [Error msg] on I/O failure instead of raising. *)
 val save_file_atomic : string -> string -> (unit, string) Result.t
 
-(** [true] iff [name] matches the [.atomic_*.tmp] pattern produced
-    by [Filename.temp_file ~temp_dir:dir ".atomic_" ".tmp"] inside
-    {!save_file_atomic}.  Exposed for tests and for a potential
-    periodic sweep. *)
+(** [open_atomic_temp_file ~temp_dir ()] creates and opens a fresh
+    temp file in [temp_dir] using the canonical [.atomic_*.tmp]
+    filename shape. The caller owns the returned channel and file. *)
+val open_atomic_temp_file : temp_dir:string -> unit -> string * out_channel
+
+(** [true] iff [name] matches either the canonical [.atomic_*.tmp]
+    pattern produced by this module or the retired
+    [.keeper_atomic_*.tmp] pattern. Exposed for tests and recovery
+    sweeps. *)
 val is_atomic_orphan_name : string -> bool
 
-(** #10130: boot-time sweep for [.atomic_*.tmp] orphans left
-    behind when [save_file_atomic]'s with-handler never ran (the
-    owning process was SIGKILL'd, or [Filename.temp_file] itself
-    raised ENFILE/EMFILE before the cleanup was registered).
+type atomic_orphan_cleanup_scope =
+  | Directory_only
+  | Directory_and_immediate_subdirectories
 
-    Scans [base_path] and its immediate subdirectories (skipping
-    [recovered_subdir] and anything that isn't a directory).
-    - Zero-byte orphans are deleted.
-    - Non-zero orphans are moved to
-      [<base_path>/<recovered_subdir>/<original-name>.<ts-ms>]
-      so operators can forensically inspect data-loss events
-      instead of having them silently cleaned up.
+type atomic_orphan_cleanup_operation =
+  | Inspect_cleanup_root
+  | Read_cleanup_directory
+  | Inspect_orphan
+  | Create_recovery_directory
+  | Sync_recovery_parent
+  | Link_preserved_orphan
+  | Verify_preserved_orphan
+  | Sync_preserved_orphan
+  | Sync_recovery_directory
+  | Delete_empty_orphan
+  | Delete_preserved_source
+  | Sync_source_directory
+  | Close_cleanup_descriptor
 
-    Returns [(deleted, preserved)]:
-    - [deleted]: zero-byte orphans removed.
-    - [preserved]: non-zero orphans moved to [recovered_subdir]. *)
+type atomic_orphan_cleanup_cause =
+  | Unix_failure of Unix.error * string * string
+  | Sys_failure of string
+  | Unexpected_file_kind of Unix.file_kind
+  | Outside_ownership_root of { ownership_root : string }
+  | Identity_changed
+  | Other_failure of exn
+
+type atomic_orphan_cleanup_failure =
+  { operation : atomic_orphan_cleanup_operation
+  ; path : string
+  ; cause : atomic_orphan_cleanup_cause
+  }
+
+type atomic_orphan_cleanup_report =
+  { inspected : int
+  ; deleted : int
+  ; preserved : int
+  ; failures : atomic_orphan_cleanup_failure list
+  }
+
+val atomic_orphan_cleanup_failure_to_string
+  :  atomic_orphan_cleanup_failure
+  -> string
+
+(** No-follow orphan cleanup. [Directory_only] is bounded by the named
+    staging inventory. The broader scope also scans real immediate child
+    directories. Every failed mutation or unexpected orphan-shaped entry is
+    returned in the typed report. The caller must own stable directory
+    identities and quiesce the matching temp namespace; see
+    {!Atomic_write.cleanup_atomic_orphans} for the OCaml 5.4 dirfd
+    limitation. *)
 val cleanup_atomic_orphans
-  :  base_path:string
-  -> ?recovered_subdir:string
+  :  ownership_root:string
+  -> base_path:string
+  -> scope:atomic_orphan_cleanup_scope
   -> unit
-  -> int * int
+  -> atomic_orphan_cleanup_report
 
 (** Append string to file. *)
 val append_file : string -> string -> unit

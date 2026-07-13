@@ -407,11 +407,11 @@ let ensure_thompson_persistence ~base_path =
     Shutdown.register ~name:"thompson_sampling_save" ~priority:24 (fun () ->
       Thompson_sampling.save_stats ())
 
-let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
-    ?env ()
+let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
+    ~proc_mgr ~fs ?env ()
     : Mcp_server.server_state =
   let input_base_path =
-    match String.trim base_path with
+    match String.trim (Option.value input_base_path ~default:base_path) with
     | "" -> None
     | raw -> Some raw
   in
@@ -592,6 +592,8 @@ type owner_initialization_error =
       Server_bootstrap_loops.keeper_persistence_prepare_error
   | Keeper_persistence_claim_failed of
       Server_bootstrap_loops.keeper_persistence_claim_error
+  | Keeper_persistence_start_failed of
+      Server_bootstrap_loops.keeper_persistence_start_error
   | Startup_path_guard_rejected of Server_base_path_diagnostics.t
   | Strict_path_guard_rejected of Server_base_path_diagnostics.t
   | Lazy_startup_barrier_failed of Server_startup_state.lazy_prepare_error
@@ -607,7 +609,13 @@ exception Owner_initialization_failed of owner_initialization_error
 type initialized_owner_state =
   { state : Mcp_server.server_state
   ; path_diagnostics : Server_base_path_diagnostics.t
-  ; claimed_keeper_persistence : Server_bootstrap_loops.claimed_keeper_persistence
+  ; prepared_keeper_persistence : Server_bootstrap_loops.prepared_keeper_persistence
+  ; domain_pool : Domain_pool.t
+  }
+
+type activated_owner_state =
+  { state : Mcp_server.server_state
+  ; path_diagnostics : Server_base_path_diagnostics.t
   ; domain_pool : Domain_pool.t
   }
 
@@ -623,6 +631,9 @@ let owner_initialization_error_to_string = function
   | Keeper_persistence_claim_failed error ->
     "Keeper persistence claim failed: "
     ^ Server_bootstrap_loops.keeper_persistence_claim_error_to_string error
+  | Keeper_persistence_start_failed error ->
+    "Keeper persistence Keeper-loop start failed: "
+    ^ Server_bootstrap_loops.keeper_persistence_start_error_to_string error
   | Startup_path_guard_rejected diagnostics ->
     Option.value
       diagnostics.Server_base_path_diagnostics.warning
@@ -647,6 +658,7 @@ let initialize_owner_state_blocking
       ~sw
       ~env
       ~base_path
+      ?input_base_path
       ~clock
       ~mono_clock
       ~net
@@ -655,6 +667,51 @@ let initialize_owner_state_blocking
       ~fs
       ()
   =
+  let requested_base_path = Option.value input_base_path ~default:base_path in
+  let base_path =
+    match Eio_unix.run_in_systhread (fun () -> Unix.realpath base_path) with
+    | canonical -> canonical
+    | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+    | exception ((Unix.Unix_error _ | Sys_error _) as exception_) ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      let failure : Server_bootstrap_loops.keeper_persistence_failure =
+        { phase = Server_bootstrap_loops.Resolving_base_path
+        ; base_path
+        ; cause =
+            Server_bootstrap_loops.Base_path_identity_unavailable_cause
+              { exception_; backtrace }
+        }
+      in
+      raise
+        (Owner_initialization_failed
+           (Keeper_persistence_preparation_failed
+              (Server_bootstrap_loops.Preparation_base_path_identity_unavailable
+                 failure)))
+  in
+  let path_diagnostics =
+    Server_base_path_diagnostics.detect
+      ~input_base_path:requested_base_path
+      ?env_masc_base_path:((Host_config.from_env ()).base_path_raw)
+      ~effective_base_path:base_path
+      ~effective_masc_root:(Common.masc_dir_from_base_path ~base_path)
+      ()
+  in
+  Server_base_path_diagnostics.log_startup_warning path_diagnostics;
+  if Server_base_path_diagnostics.startup_should_abort path_diagnostics
+  then
+    raise
+      (Owner_initialization_failed
+         (Startup_path_guard_rejected path_diagnostics));
+  if Server_base_path_diagnostics.strict_violation path_diagnostics
+  then
+    raise
+      (Owner_initialization_failed
+         (Strict_path_guard_rejected path_diagnostics));
+  (* [main_eio] caches the normalized operator input before entering Eio.
+     Replace that preflight value with the canonical owner identity before
+     [Workspace.default_config_eio] constructs its backend, otherwise the
+     config record says canonical while its backend still follows an alias. *)
+  Workspace_utils_backend_setup.cache_resolved_base_path base_path;
   Discovery_cache.set_env ~sw ~net;
   Discovery_cache.set_base_path base_path;
   Gc_sampler.run ~sw ~clock ~interval:30.0;
@@ -724,6 +781,7 @@ let initialize_owner_state_blocking
     create_server_state
       ~sw
       ~base_path
+      ~input_base_path:requested_base_path
       ~clock
       ~mono_clock
       ~net
@@ -763,7 +821,9 @@ let initialize_owner_state_blocking
   let prepared_keeper_persistence =
     match
       Server_bootstrap_loops.prepare_keeper_persistence
+        ~requested_base_path
         ~config:(Mcp_server.workspace_config state)
+        ()
     with
     | Ok prepared -> prepared
     | Error error ->
@@ -771,64 +831,10 @@ let initialize_owner_state_blocking
         (Owner_initialization_failed
            (Keeper_persistence_preparation_failed error))
   in
-  let claimed_keeper_persistence =
-    match
-      Server_bootstrap_loops.claim_prepared_keeper_persistence
-        ~config:(Mcp_server.workspace_config state)
-        prepared_keeper_persistence
-    with
-    | Ok claimed -> claimed
-    | Error error ->
-      raise
-        (Owner_initialization_failed (Keeper_persistence_claim_failed error))
-  in
-  let path_diagnostics = runtime_path_diagnostics ~input_base_path:base_path state in
-  Server_base_path_diagnostics.log_startup_warning path_diagnostics;
-  if Server_base_path_diagnostics.startup_should_abort path_diagnostics
-  then
-    raise
-      (Owner_initialization_failed
-         (Startup_path_guard_rejected path_diagnostics));
-  if Server_base_path_diagnostics.strict_violation path_diagnostics
-  then
-    raise
-      (Owner_initialization_failed
-         (Strict_path_guard_rejected path_diagnostics));
   Runtime_settings.ensure_init ();
   Runtime_params.restore ~base_path;
   Log.Server.info "Runtime_params restored from %s" base_path;
   Keeper_crash_persistence.start_drain_fiber ~sw ~clock;
-  Eio.Fiber.fork ~sw (fun () ->
-    try
-      let deleted, preserved = Fs_compat.cleanup_atomic_orphans ~base_path () in
-      if deleted > 0
-      then
-        Otel_metric_store.inc_counter
-          Otel_metric_store.metric_fs_atomic_orphans_cleaned
-          ~labels:[ "size_class", Atomic_orphan_size_class.(to_label Empty) ]
-          ~delta:(float_of_int deleted)
-          ();
-      if preserved > 0
-      then
-        Otel_metric_store.inc_counter
-          Otel_metric_store.metric_fs_atomic_orphans_cleaned
-          ~labels:
-            [ "size_class", Atomic_orphan_size_class.(to_label With_data) ]
-          ~delta:(float_of_int preserved)
-          ();
-      if deleted + preserved > 0
-      then
-        Log.Server.warn
-          "boot: cleaned %d save_file_atomic orphans (%d empty, %d preserved with data in .recovered/ — see #10130)"
-          (deleted + preserved)
-          deleted
-          preserved
-    with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn ->
-      Log.Server.error
-        "boot: atomic orphan sweep failed: %s"
-        (Printexc.to_string exn));
   (try
      Auth.audit_token_uniqueness base_path
      |> List.iter (fun (token_hash_prefix, agent_names) ->
@@ -870,7 +876,7 @@ let initialize_owner_state_blocking
   Log.Server.info
     "Domain_pool created (%d domains) for dashboard/keeper compute"
     (Domain_pool.domain_count domain_pool);
-  { state; path_diagnostics; claimed_keeper_persistence; domain_pool }
+  { state; path_diagnostics; prepared_keeper_persistence; domain_pool }
 
 (* Cap the per-boot file list in the sync log line; full counts are always
    logged, names are illustrative. *)
@@ -1039,6 +1045,43 @@ let start_owner_lazy_tasks ~sw state =
      raise (Owner_initialization_failed (Lazy_startup_barrier_failed error)));
   Eio.Fiber.fork ~sw (fun () -> List.iter run_lazy_task_group task_groups)
 
+let claim_and_start_keeper_persistence
+      ~prepared_persistence
+      ~sw
+      ~clock
+      ~net
+      ~domain_mgr
+      ~proc_mgr
+      state
+  =
+  let claimed_persistence =
+    match
+      Server_bootstrap_loops.claim_prepared_keeper_persistence
+        ~config:(Mcp_server.workspace_config state)
+        prepared_persistence
+    with
+    | Ok claimed -> claimed
+    | Error error ->
+      raise
+        (Owner_initialization_failed
+           (Keeper_persistence_claim_failed error))
+  in
+  try
+    Server_bootstrap_loops.start_keeper_loops
+      ~claimed_persistence
+      ~sw
+      ~clock
+      ~net
+      ~domain_mgr
+      ~proc_mgr
+      state
+  with
+  | Server_bootstrap_loops.Keeper_persistence_start_failed error ->
+    raise
+      (Owner_initialization_failed
+         (Keeper_persistence_start_failed error))
+;;
+
 let mark_owner_state_ready state =
   let backend =
     match (Mcp_server.workspace_config state).Workspace.backend with
@@ -1110,14 +1153,116 @@ let install_keeper_gate_persistence state =
       resume_report.failures
 ;;
 
+let run_legacy_atomic_orphan_migration ~clock state =
+  let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
+  try
+    let started = Eio.Time.now clock in
+    let report = Keeper_msg_async.migrate_legacy_atomic_orphans ~base_path in
+    let elapsed_seconds = Eio.Time.now clock -. started in
+    let examined = report.atomic_orphans_inspected in
+    let labels = [ "stage", "legacy_atomic_orphan_migration" ] in
+    Otel_metric_store.observe_histogram
+      Keeper_metrics.(to_string PersistencePreparationStageDuration)
+      ~labels
+      elapsed_seconds;
+    Otel_metric_store.observe_histogram
+      Keeper_metrics.(to_string PersistencePreparationExamined)
+      ~labels
+      (Float.of_int examined);
+    List.iter
+      (fun (error : Keeper_msg_async.recovery_store_error) ->
+         Log.Server.error
+           "boot: legacy atomic orphan migration store failure path=%s reason=%s"
+           error.path
+           error.reason)
+      report.store_errors;
+    List.iter
+      (fun (error : Keeper_msg_async.recovery_record_error) ->
+         Log.Server.error
+           "boot: legacy atomic orphan migration record failure path=%s request_id=%s keeper=%s"
+           error.path
+           error.request_id
+           (Option.value error.keeper_name ~default:"<unattributed>"))
+      report.record_errors;
+    Log.Server.info
+      "boot: legacy atomic orphan migration elapsed_seconds=%.6f examined=%d deleted=%d preserved=%d failed=%d store_errors=%d record_errors=%d"
+      elapsed_seconds
+      examined
+      report.atomic_orphans_deleted
+      report.atomic_orphans_preserved
+      report.failed
+      (List.length report.store_errors)
+      (List.length report.record_errors)
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Log.Server.error
+      "boot: legacy atomic orphan migration raised: %s"
+      (Printexc.to_string exn)
+;;
+
+let start_legacy_atomic_orphan_migration ~sw ~clock state =
+  try
+    Eio.Fiber.fork_daemon ~sw (fun () ->
+      run_legacy_atomic_orphan_migration ~clock state;
+      `Stop_daemon)
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string FsFailures)
+      ~labels:
+        [ "subsystem", "server_runtime_bootstrap"
+        ; "operation", "legacy_atomic_orphan_migration_fork"
+        ]
+      ();
+    Log.Server.error
+      "boot: legacy atomic orphan migration fiber was not started: %s"
+      (Printexc.to_string exn)
+;;
+
+let activate_owner_state
+      ~sw
+      ~clock
+      ~net
+      ~domain_mgr
+      ~proc_mgr
+      (initialized : initialized_owner_state)
+  =
+  let state = initialized.state in
+  (* Establish the complete barrier before the irreversible ownership commit.
+     Gate restore, claim, and start stay ordered inside one transport-neutral
+     function. Each composition root publishes readiness only after its own
+     required transport surfaces are installed. *)
+  install_keeper_gate_persistence state;
+  (* Retired temp names and current writes occupy disjoint namespaces: current
+     request writes stage only below [.atomic-staging-v1]. Keep the bounded
+     forensic migration under the exclusive BasePath lease, but outside the
+     readiness critical path. Its failures remain observations and never gain
+     Keeper lifecycle authority. *)
+  start_legacy_atomic_orphan_migration ~sw ~clock state;
+  start_owner_lazy_tasks ~sw state;
+  claim_and_start_keeper_persistence
+    ~prepared_persistence:initialized.prepared_keeper_persistence
+    ~sw
+    ~clock
+    ~net
+    ~domain_mgr
+    ~proc_mgr
+    state;
+  { state
+  ; path_diagnostics = initialized.path_diagnostics
+  ; domain_pool = initialized.domain_pool
+  }
+;;
 
 (* bootstrap_keepers removed: the keeper_autoboot subsystem in
    start_keeper_loops now handles keeper startup in a dedicated
    fiber with a 5-second delay, avoiding runtime bootstrap contention with
    the 7+ dashboard refresh loops that start alongside it. *)
 
-let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
-    ~make_h2_request_handler ~make_h2_error_handler =
+let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_request_handler
+    ~make_h2_request_handler ~make_h2_error_handler () =
   let clock, mono_clock, net, domain_mgr, proc_mgr, fs =
     init_runtime_context env
   in
@@ -1194,35 +1339,32 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
     try
       Server_startup_state.mark_blocking ~backend_mode:initial_backend_mode;
       let initialized_owner =
-        initialize_owner_state_blocking ~sw ~env ~base_path ~clock ~mono_clock
-          ~net ~domain_mgr ~proc_mgr ~fs ()
+        initialize_owner_state_blocking ~sw ~env ~base_path ?input_base_path
+          ~clock ~mono_clock ~net ~domain_mgr ~proc_mgr ~fs ()
       in
-      let state = initialized_owner.state in
-      let path_diagnostics = initialized_owner.path_diagnostics in
-      let claimed_keeper_persistence =
-        initialized_owner.claimed_keeper_persistence
-      in
-      (* Publish the HTTP state before readiness, then install the independent
-         durable Gate queue before any Keeper loop can originate effects. *)
-      server_state := Some state;
-      install_keeper_gate_persistence state;
-      (* Publish the complete lazy-task barrier before spawning Keeper autoboot.
-         Each lazy task owns its own failure transition, so unrelated transport
-         and dashboard initialization cannot strand Keeper boot behind an
-         unresolved promise. A structural failure to start this barrier remains
-         a blocking startup failure and therefore occurs before readiness. *)
-      start_owner_lazy_tasks ~sw state;
-      Server_bootstrap_loops.start_keeper_loops
-        ~claimed_persistence:claimed_keeper_persistence
+      let activated_owner =
+        activate_owner_state
         ~sw
         ~clock
         ~net
         ~domain_mgr
         ~proc_mgr
-        state;
+        initialized_owner
+      in
+      let state = activated_owner.state in
+      (* Authentication wrappers treat [server_state = Some _] as the mutation
+         capability boundary. Publish only after transport-neutral activation
+         has restored Gate state and started the owner persistence lanes. *)
+      server_state := Some state;
+      (* Global readiness is the transport-neutral owner capability, not a
+         quorum over optional transports. Mark it before starting fallible
+         Discord/gRPC/WS/WebRTC/dashboard auxiliaries so one transport cannot
+         turn an already-published HTTP owner into a process-wide fatal
+         pre-readiness failure. Each auxiliary owns its typed health state. *)
       (match mark_owner_state_ready state with
        | Ok () -> ()
        | Error error -> raise (Owner_initialization_failed error));
+      let path_diagnostics = activated_owner.path_diagnostics in
       let resolved_base, masc_dir =
         Server_bootstrap_loops.start_background_maintenance ~sw ~clock ~env state
       in
@@ -1241,10 +1383,10 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
          belongs to the transport-neutral owner bootstrap so stdio Keepers get
          the same offload behavior. *)
       Server_dashboard_http.set_executor_pool
-        (Domain_pool.executor_pool initialized_owner.domain_pool);
-      (* Start auxiliary transports before optional warmups and keeper loops.
-         Otherwise HTTP can report ready while gRPC/WS startup is still stuck
-         behind heavier startup work. *)
+        (Domain_pool.executor_pool activated_owner.domain_pool);
+      (* Auxiliary transports start after owner readiness and report their own
+         availability. They must not gain lifecycle authority over HTTP or
+         unrelated Keeper lanes. *)
       (* gRPC workspace transport (default-on, opt-out via MASC_GRPC_ENABLED=0) *)
       let tool_dispatcher tool_name args_json =
         let arguments =

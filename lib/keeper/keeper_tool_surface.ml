@@ -369,13 +369,7 @@ let should_bootstrap_existing_keepalives name args =
   | _ -> false
 
 let maybe_bootstrap_existing_keepalives ctx ~name ~args =
-  let keeper_name = String.trim (get_string args "name" "") in
-  if
-    should_bootstrap_existing_keepalives name args
-    && not
-         (Keeper_persistence_admission.is_blocked
-            ~base_path:ctx.config.base_path
-            ~keeper_name)
+  if should_bootstrap_existing_keepalives name args
   then
     (try start_existing_keepalives ctx
      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->

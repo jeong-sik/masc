@@ -996,10 +996,10 @@ let test_stdio_entrypoint_uses_shared_base_path_guard () =
   check bool "HTTP runtime uses common owner initialization" true
     (contains_substring http_runtime_source
        "initialize_owner_state_blocking ~sw ~env ~base_path");
-  check bool "stdio uses common lazy startup" true
-    (contains_substring source "Server_runtime_bootstrap.start_owner_lazy_tasks");
-  check bool "HTTP runtime uses common lazy startup" true
-    (contains_substring http_runtime_source "start_owner_lazy_tasks ~sw state")
+  check bool "stdio uses common owner activation" true
+    (contains_substring source "Server_runtime_bootstrap.activate_owner_state");
+  check bool "HTTP runtime uses common owner activation" true
+    (contains_substring http_runtime_source "activate_owner_state")
 
 let test_stdio_skips_dashboard_build_and_http_preflight () =
   with_temp_dir "start-masc-script-stdio" (fun dir ->

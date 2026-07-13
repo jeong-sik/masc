@@ -70,6 +70,9 @@ type recovery_report =
   { lost : int
   ; migrated : int
   ; cleaned : int
+  ; atomic_orphans_inspected : int
+  ; atomic_orphans_deleted : int
+  ; atomic_orphans_preserved : int
   ; deferred : int
   ; unreadable : int
   ; failed : int
@@ -80,6 +83,7 @@ type recovery_report =
 and recovery_store =
   | Active_store
   | Legacy_store
+  | Atomic_orphan_store
 
 and recovery_store_error =
   { store : recovery_store
@@ -108,10 +112,7 @@ and recovery_record_error_kind =
 
 type submit_error =
   | Submit_rejected of access_rejection
-  | Submit_admission_blocked of
-      { keeper_name : string
-      ; reason : Keeper_persistence_admission.block_reason
-      }
+  | Submit_invalid_keeper_name of { reason : string }
   | Initial_persistence_failed of { reason : string }
   | Acceptance_persistence_failed of
       { request_id : string
@@ -262,7 +263,17 @@ val poll : base_path:string -> caller:string -> string -> load_result
     [Queued]/[Running]/[Cancelling]
     records from a previous process stop looking indefinitely active. *)
 val recover_lost_disk_records :
-  ?blocked_keeper_names:string list -> base_path:string -> unit -> recovery_report
+  base_path:string -> unit -> recovery_report
+
+(** One-time owner maintenance for temp files created before the dedicated
+    atomic staging layout. It requires exclusive BasePath ownership and a
+    quiescent retired temp namespace; current request writers satisfy that by
+    staging only below [.atomic-staging-v1]. The durable marker is a one-way
+    writer epoch: a binary that still writes the retired temp layout must not
+    be run against that BasePath after completion. Every cleanup,
+    namespace-seal, or marker failure is retained in the report and never
+    acquires Keeper lifecycle authority. *)
+val migrate_legacy_atomic_orphans : base_path:string -> recovery_report
 
 (** [cancel ~base_path ~caller request_id] validates exact request ownership,
     durably commits a non-terminal [Cancelling] intent, publishes it, and only
@@ -303,6 +314,34 @@ val cancel_result_to_json : request_id:string -> cancel_result -> Yojson.Safe.t
 val entry_to_json : entry -> Yojson.Safe.t
 
 module For_testing : sig
+  type request_ops
+
+  val make_request_ops
+    :  ?before_durable_write:(Keeper_fs.durable_write_stage -> unit)
+    -> ?before_durable_remove:(Keeper_fs.durable_remove_stage -> unit)
+    -> ?generate_request_id:(unit -> string)
+    -> ?before_integrity_projection:(unit -> unit)
+    -> ?signal_cancel:(Eio.Switch.t -> exn -> unit)
+    -> unit
+    -> request_ops
+  (** Build immutable dependencies for one test request family. They are
+      supplied explicitly to [submit] and [cancel]; production entry points
+      always use the closed production dependencies. *)
+
+  val submit
+    :  request_ops
+    -> ?on_accepted:(string -> (unit, string) result)
+    -> ?on_worker_aborted:(worker_abort_reason -> (unit, string) result)
+    -> ?on_worker_settled:(worker_settlement -> unit)
+    -> background_sw:Eio.Switch.t
+    -> base_path:string
+    -> caller:string
+    -> f:(Eio.Switch.t -> Keeper_types_profile.tool_result)
+    -> keeper_name:string
+    -> unit
+    -> (submit_outcome, submit_error) result
+
+  val cancel : request_ops -> base_path:string -> caller:string -> string -> cancel_result
   val record_schema_version : int
   val is_safe_request_id : string -> bool
   val forget : base_path:string -> caller:string -> request_id:string -> unit
@@ -310,17 +349,13 @@ module For_testing : sig
   val active_record_path : base_path:string -> request_id:string -> string option
   val terminal_record_path : base_path:string -> request_id:string -> string option
   val legacy_record_path : base_path:string -> request_id:string -> string option
+  val atomic_staging_dir : base_path:string -> string
+  val legacy_atomic_migration_marker : base_path:string -> string
   val load_record : base_path:string -> request_id:string -> load_result
   val recover_lost_disk_records :
-    ?blocked_keeper_names:string list -> base_path:string -> unit -> recovery_report
-  val set_durable_write_hook :
-    (Keeper_fs.durable_write_stage -> unit) option -> unit
-  val set_durable_remove_hook :
-    (Keeper_fs.durable_remove_stage -> unit) option -> unit
-  val set_cancel_signal_hook :
-    (Eio.Switch.t -> exn -> unit) option -> unit
-  val set_request_id_hook : (unit -> string) option -> unit
-  val set_integrity_projection_hook : (unit -> unit) option -> unit
+    base_path:string -> unit -> recovery_report
   val reserved_request_id_count : unit -> int
   val active_switch_count : unit -> int
+  val persistence_lane_observation : unit -> int * int * int
+  val persistence_lane_samples : unit -> Otel_metrics.sample list
 end

@@ -280,11 +280,7 @@ let handle_keeper_list ctx args : tool_result =
 let handle_keeper_trajectory ctx args : tool_result =
   let requested_name = String.trim (get_string args "name" "") in
   if not (validate_name requested_name) then
-    tool_result_error
-      (Printf.sprintf
-         "invalid keeper name %S (must be non-empty and match \
-          [A-Za-z0-9._-]+; see Keeper_config.validate_name)"
-         requested_name)
+    tool_result_error (invalid_name_error requested_name)
   else
     match read_meta_resolved ctx.config requested_name with
     | Error e -> tool_result_error ("read error: " ^ e)
@@ -324,11 +320,7 @@ let handle_keeper_trajectory ctx args : tool_result =
 let handle_keeper_eval ctx args : tool_result =
   let requested_name = String.trim (get_string args "name" "") in
   if not (validate_name requested_name) then
-    tool_result_error
-      (Printf.sprintf
-         "invalid keeper name %S (must be non-empty and match \
-          [A-Za-z0-9._-]+; see Keeper_config.validate_name)"
-         requested_name)
+    tool_result_error (invalid_name_error requested_name)
   else
     match read_meta_resolved ctx.config requested_name with
     | Error e -> tool_result_error ("read error: " ^ e)

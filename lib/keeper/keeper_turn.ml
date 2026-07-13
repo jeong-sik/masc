@@ -219,38 +219,13 @@ let user_oas_blocks_of_args args =
       | Ok [] -> Ok None
       | Ok blocks -> Ok (Some blocks)
 
-let persistence_admission_error ~base_path ~keeper_name =
-  match
-    Keeper_persistence_admission.block_reason ~base_path ~keeper_name
-  with
-  | Some Keeper_persistence_admission.Recovery_failed ->
-    Some
-      (Printf.sprintf
-         "keeper %s is fenced because its durable queue or delivery inventory failed startup recovery; repair the typed recovery error and restart before dispatch"
-         keeper_name)
-  | Some Keeper_persistence_admission.Reconciliation_required ->
-    Some
-      (Printf.sprintf
-         "keeper %s is fenced because request acceptance durability requires reconciliation; inspect the preserved request id and restart after repairing canonical persistence"
-         keeper_name)
-  | None -> None
-;;
-
 let preflight_keeper_msg ctx args : (unit, string) result =
   let name = get_string args "name" "" in
   let message = get_string args "message" "" in
   if not (validate_name name) then
-    Error
-      (Printf.sprintf
-         "invalid keeper name %S (must be non-empty and match \
-          [A-Za-z0-9._-]+; see Keeper_config.validate_name)"
-         name)
+    Error (invalid_name_error name)
+  else if message = "" then Error "message is required"
   else
-    match persistence_admission_error ~base_path:ctx.config.base_path ~keeper_name:name with
-    | Some detail -> Error detail
-    | None ->
-    if message = "" then Error "message is required"
-    else
     let direct_reply = get_bool args "direct_reply" false in
     match Keeper_meta_contract.reject_removed_model_args ~tool_name:"masc_keeper_msg" args with
     | Error e -> Error e
@@ -412,11 +387,7 @@ let run_keeper_msg_turn_admitted
   let name = get_string args "name" "" in
   let message = get_string args "message" "" in
   if not (validate_name name) then
-    tool_result_error
-      (Printf.sprintf
-         "invalid keeper name %S (must be non-empty and match \
-          [A-Za-z0-9._-]+; see Keeper_config.validate_name)"
-         name)
+    tool_result_error (invalid_name_error name)
   else if message = "" then
     tool_result_error "message is required"
   else
@@ -1043,9 +1014,6 @@ let handle_keeper_msg
       ctx
       args
   else
-    match persistence_admission_error ~base_path:ctx.config.base_path ~keeper_name:name with
-    | Some detail -> tool_result_error detail
-    | None ->
     match
       Keeper_turn_admission.run_serialized
         ~base_path:ctx.config.base_path
@@ -1132,9 +1100,6 @@ let handle_keeper_msg_if_free
          ctx
          args)
   else
-    match persistence_admission_error ~base_path:ctx.config.base_path ~keeper_name:name with
-    | Some detail -> `Ran (tool_result_error detail)
-    | None ->
     Keeper_turn_admission.run_chat_if_free
       ~base_path:ctx.config.base_path
       ~keeper_name:name

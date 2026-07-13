@@ -294,6 +294,75 @@ let test_durable_write_post_publish_failure_reports_visible_target () =
          (read_file path);
        check bool "renamed temp is absent" false (has_tmp_files base))
 
+let test_durable_write_uses_explicit_atomic_staging_directory () =
+  Eio_main.run
+  @@ fun _env ->
+  let base = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base)
+    (fun () ->
+       let target_dir = Filename.concat base "active" in
+       let staging_dir = Filename.concat base ".atomic-staging-v1" in
+       let path = Filename.concat target_dir "request.json" in
+       let observed_staging_temp = Atomic.make false in
+       let observed_target_temp = Atomic.make false in
+       let result =
+         KF.For_testing.save_json_durable_atomic
+           ~temp_dir:staging_dir
+           ~before_stage:(function
+             | KF.Payload_write ->
+               Atomic.set observed_staging_temp (has_tmp_files staging_dir);
+               Atomic.set observed_target_temp (has_tmp_files target_dir)
+             | _ -> ())
+           path
+           (`Assoc [ "status", `String "queued" ])
+       in
+       (match result with
+        | Ok () -> ()
+        | Error error ->
+          failf
+            "staged durable write failed: %s"
+            (KF.durable_write_error_to_string error));
+       check bool "temp observed in staging" true
+         (Atomic.get observed_staging_temp);
+       check bool "no temp observed beside target" false
+         (Atomic.get observed_target_temp);
+       check bool "staging drained after rename" false
+         (has_tmp_files staging_dir);
+       check bool "target published" true (Sys.file_exists path))
+
+let test_durable_write_reports_staging_directory_fsync_failure () =
+  Eio_main.run
+  @@ fun _env ->
+  let base = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base)
+    (fun () ->
+       let staging_dir = Filename.concat base ".atomic-staging-v1" in
+       let path = Filename.concat base "active/request.json" in
+       let result =
+         KF.For_testing.save_json_durable_atomic
+           ~temp_dir:staging_dir
+           ~before_stage:(function
+             | KF.Temp_directory_fsync_after_rename ->
+               failwith "injected staging directory fsync failure"
+             | _ -> ())
+           path
+           (`Assoc [ "status", `String "queued" ])
+       in
+       (match result with
+        | Error
+            { renamed = true
+            ; stage = KF.Temp_directory_fsync_after_rename
+            ; _
+            } -> ()
+        | Error error ->
+          failf
+            "unexpected staged write error: %s"
+            (KF.durable_write_error_to_string error)
+        | Ok () -> fail "staging directory fsync failure was hidden");
+       check bool "rename remains visible" true (Sys.file_exists path))
+
 let test_durable_remove_absent_path_still_fsyncs_parent () =
   Eio_main.run
   @@ fun _env ->
@@ -432,6 +501,14 @@ let () =
             "post-publish failure reports visible target"
             `Quick
             test_durable_write_post_publish_failure_reports_visible_target;
+          test_case
+            "explicit staging directory owns temp file"
+            `Quick
+            test_durable_write_uses_explicit_atomic_staging_directory;
+          test_case
+            "staging directory fsync failure is typed"
+            `Quick
+            test_durable_write_reports_staging_directory_fsync_failure;
           test_case
             "absent remove still fsyncs parent"
             `Quick

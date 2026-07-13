@@ -92,6 +92,31 @@ let test_save_file_atomic_leaves_no_tmp_on_success () =
   check (list string) "no leftover .atomic_ tmp files" [] leftover_tmps
 ;;
 
+let test_open_atomic_temp_file_uses_canonical_shape () =
+  Fs_compat.clear_fs ();
+  with_tmp_dir
+  @@ fun base ->
+  let path, channel = Fs_compat.open_atomic_temp_file ~temp_dir:base () in
+  Fun.protect
+    ~finally:(fun () ->
+      close_out_noerr channel;
+      if Sys.file_exists path then Sys.remove path)
+    (fun () ->
+       let name = Filename.basename path in
+       check string "temp file is created in requested directory" base
+         (Filename.dirname path);
+       check bool "canonical prefix" true
+         (String.starts_with name ~prefix:".atomic_");
+       check bool "shared orphan matcher recognizes writer output" true
+         (Fs_compat.is_atomic_orphan_name name);
+       check bool "retired Keeper prefix is not generated" false
+         (String.starts_with name ~prefix:".keeper_atomic_");
+       output_string channel "payload";
+       close_out channel;
+       check string "returned channel writes the temp file" "payload"
+         (Fs_compat.load_file path))
+;;
+
 let test_save_file_atomic_overwrites_existing () =
   Fs_compat.clear_fs ();
   with_tmp_dir
@@ -357,6 +382,10 @@ let () =
             "overwrites existing target"
             `Quick
             test_save_file_atomic_overwrites_existing
+        ; test_case
+            "temp writer uses canonical shared shape"
+            `Quick
+            test_open_atomic_temp_file_uses_canonical_shape
         ] )
     ; ( "inventory"
       , [ test_case

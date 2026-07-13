@@ -244,7 +244,7 @@ let broadcast_mention_wakeup_action = function
   | Some target when String.trim target <> "" -> `Wake_keeper target
   | Some _ | None -> `Suppress_no_target
 
-module For_testing = struct
+module Projection_for_testing = struct
   type queued_chat_projection = {
     payload_channel : string;
     payload_channel_user_id : string;
@@ -282,44 +282,106 @@ type keeper_persistence_report =
   ; delivery : Keeper_chat_delivery_journal.recovery_report
   ; queue : Keeper_chat_queue.configure_report
   ; requests : Keeper_msg_async.recovery_report
-  ; blocked_keeper_names : string list
+  }
+
+type keeper_persistence_failure_phase =
+  | Resolving_base_path
+  | Restoring_shutdown
+  | Recovering_delivery
+  | Configuring_queue
+  | Recovering_requests
+  | Starting_keeper_loops
+
+type keeper_persistence_raised_cause =
+  { exception_ : exn
+  ; backtrace : Printexc.raw_backtrace
+  }
+
+type keeper_persistence_failure_cause =
+  | Base_path_identity_unavailable_cause of keeper_persistence_raised_cause
+  | Noncanonical_config_cause of
+      { configured_base_path : string
+      ; canonical_base_path : string
+      ; configured_backend_base_path : string
+      ; expected_backend_base_path : string
+      }
+  | Shutdown_inventory_unavailable_cause of Keeper_shutdown_store.error
+  | Shutdown_admission_unavailable_cause of string
+  | Unexpected_exception_cause of keeper_persistence_raised_cause
+  | Lifecycle_invariant_cause of string
+
+type keeper_persistence_failure =
+  { phase : keeper_persistence_failure_phase
+  ; base_path : string
+  ; cause : keeper_persistence_failure_cause
   }
 
 type keeper_persistence_prepare_error =
   | Shutdown_inventory_unavailable of Keeper_shutdown_store.error
   | Shutdown_admission_unavailable of string
-  | Delivery_inventory_unavailable of Keeper_chat_delivery_journal.error list
-  | Queue_inventory_unavailable of Keeper_chat_queue.snapshot_load_error list
-  | Request_inventory_unavailable of Keeper_msg_async.recovery_store_error list
-  | Preparation_superseded
+  | Preparation_base_path_identity_unavailable of keeper_persistence_failure
+  | Preparation_config_not_canonical of keeper_persistence_failure
+  | Preparation_in_progress
+  | Preparation_awaiting_claim
+  | Preparation_already_claimed
+  | Preparation_failed_previously of keeper_persistence_failure
+  | Preparation_ownership_lost
 
-type prepared_keeper_persistence =
-  { base_path : string
-  ; report : keeper_persistence_report
-  ; claim_state : preparation_claim_state Atomic.t
+type keeper_persistence_base_path =
+  { requested : string
+  ; canonical : string
+  ; backend_base_path : string
   }
 
-and preparation_claim_state =
-  | Unclaimed
-  | Claimed
+type prepared_keeper_persistence =
+  { base_path : keeper_persistence_base_path
+  ; config : Workspace.config
+  ; report : keeper_persistence_report
+  }
 
 type claimed_keeper_persistence =
-  { claimed_base_path : string
+  { claimed_base_path : keeper_persistence_base_path
+  ; claimed_config : Workspace.config
   ; claimed_report : keeper_persistence_report
   }
 
 type keeper_persistence_claim_error =
   | Claim_base_path_mismatch
+  | Claim_base_path_identity_unavailable of keeper_persistence_failure
   | Claim_superseded
   | Claim_already_claimed
-  | Claim_admission_install_failed of Keeper_persistence_admission.install_error
+  | Claim_failed_previously of keeper_persistence_failure
 
-type preparation_slot =
-  | Preparing of int
+type keeper_persistence_start_error =
+  | Start_base_path_mismatch of
+      { claimed_base_path : string
+      ; state_base_path : string
+      }
+  | Start_base_path_identity_unavailable of keeper_persistence_failure
+  | Start_superseded
+  | Start_in_progress
+  | Start_already_started
+  | Start_execution_failed of keeper_persistence_failure
+  | Start_failed_previously of keeper_persistence_failure
+
+exception Keeper_persistence_start_failed of keeper_persistence_start_error
+
+type failed_lifecycle =
+  { failure : keeper_persistence_failure
+  ; prepared : prepared_keeper_persistence option
+  ; claimed : claimed_keeper_persistence option
+  }
+
+type preparation_lifecycle =
+  | Idle
+  | Preparing of unit ref
   | Ready of prepared_keeper_persistence
+  | Claimed of prepared_keeper_persistence * claimed_keeper_persistence
+  | Starting of prepared_keeper_persistence * claimed_keeper_persistence
+  | Started of prepared_keeper_persistence * claimed_keeper_persistence
+  | Failed of failed_lifecycle
 
-let preparation_generation = Atomic.make 0
-let latest_prepared_persistence = Atomic.make (Preparing 0)
+let persistence_lifecycle = Atomic.make Idle
 
 module Keeper_name_set = Set.Make (String)
 
@@ -348,43 +410,95 @@ let observe_preparation_stage ~stage ~started ~examined ~failures =
     failures
 ;;
 
+let keeper_persistence_failure_phase_to_string = function
+  | Resolving_base_path -> "resolving_base_path"
+  | Restoring_shutdown -> "restoring_shutdown"
+  | Recovering_delivery -> "recovering_delivery"
+  | Configuring_queue -> "configuring_queue"
+  | Recovering_requests -> "recovering_requests"
+  | Starting_keeper_loops -> "starting_keeper_loops"
+;;
+
+let keeper_persistence_raised_cause_to_string { exception_; backtrace } =
+  let exception_text = Printexc.to_string exception_ in
+  let backtrace_text = Printexc.raw_backtrace_to_string backtrace in
+  if String.equal backtrace_text ""
+  then exception_text
+  else exception_text ^ "\n" ^ backtrace_text
+;;
+
+let keeper_persistence_failure_cause_to_string = function
+  | Base_path_identity_unavailable_cause cause
+  | Unexpected_exception_cause cause ->
+    keeper_persistence_raised_cause_to_string cause
+  | Noncanonical_config_cause
+      { configured_base_path
+      ; canonical_base_path
+      ; configured_backend_base_path
+      ; expected_backend_base_path
+      } ->
+    Printf.sprintf
+      "noncanonical workspace config base_path=%S canonical=%S backend_base_path=%S expected_backend_base_path=%S"
+      configured_base_path
+      canonical_base_path
+      configured_backend_base_path
+      expected_backend_base_path
+  | Shutdown_inventory_unavailable_cause error ->
+    Keeper_shutdown_store.error_to_string error
+  | Shutdown_admission_unavailable_cause detail -> detail
+  | Lifecycle_invariant_cause detail -> detail
+;;
+
+let keeper_persistence_failure_to_string failure =
+  Printf.sprintf
+    "keeper persistence failed phase=%s base_path=%S detail=%s"
+    (keeper_persistence_failure_phase_to_string failure.phase)
+    failure.base_path
+    (keeper_persistence_failure_cause_to_string failure.cause)
+;;
+
 let keeper_persistence_prepare_error_to_string = function
   | Shutdown_inventory_unavailable error ->
     "shutdown inventory unavailable: " ^ Keeper_shutdown_store.error_to_string error
   | Shutdown_admission_unavailable detail ->
     "shutdown admission restore unavailable: " ^ detail
-  | Delivery_inventory_unavailable errors ->
-    Printf.sprintf
-      "delivery root inventory unavailable (%d error(s)): %s"
-      (List.length errors)
-      (String.concat "; " (List.map Keeper_chat_delivery_journal.error_to_string errors))
-  | Queue_inventory_unavailable errors ->
-    Printf.sprintf
-      "queue root inventory unavailable (%d error(s)): %s"
-      (List.length errors)
-      (String.concat
-         "; "
-         (List.map
-            (fun (error : Keeper_chat_queue.snapshot_load_error) -> error.message)
-            errors))
-  | Request_inventory_unavailable errors ->
-    Printf.sprintf
-      "keeper_msg request inventory unavailable (%d error(s)): %s"
-      (List.length errors)
-      (String.concat
-         "; "
-         (List.map
-            (fun (error : Keeper_msg_async.recovery_store_error) -> error.reason)
-            errors))
-  | Preparation_superseded ->
-    "keeper persistence preparation was superseded by a newer preparation"
+  | Preparation_base_path_identity_unavailable failure ->
+    keeper_persistence_failure_to_string failure
+  | Preparation_config_not_canonical failure ->
+    keeper_persistence_failure_to_string failure
+  | Preparation_in_progress ->
+    "keeper persistence preparation is already in progress"
+  | Preparation_awaiting_claim ->
+    "keeper persistence preparation is ready and awaiting its owning claim"
+  | Preparation_already_claimed ->
+    "keeper persistence ownership was already claimed for this process"
+  | Preparation_failed_previously failure ->
+    "keeper persistence lifecycle already failed in this process: "
+    ^ keeper_persistence_failure_to_string failure
+  | Preparation_ownership_lost ->
+    "keeper persistence preparation lost its lifecycle ownership"
 ;;
 
-let prepare_keeper_persistence ~config =
-  let generation = Atomic.fetch_and_add preparation_generation 1 + 1 in
-  let preparing = Preparing generation in
-  Atomic.set latest_prepared_persistence preparing;
+let failure_cause_of_prepare_error = function
+  | Shutdown_inventory_unavailable error ->
+    Shutdown_inventory_unavailable_cause error
+  | Shutdown_admission_unavailable detail ->
+    Shutdown_admission_unavailable_cause detail
+  | Preparation_base_path_identity_unavailable failure
+  | Preparation_config_not_canonical failure ->
+    failure.cause
+  | ( Preparation_in_progress
+    | Preparation_awaiting_claim
+    | Preparation_already_claimed
+    | Preparation_failed_previously _
+    | Preparation_ownership_lost ) as error ->
+    Lifecycle_invariant_cause
+      (keeper_persistence_prepare_error_to_string error)
+;;
+
+let prepare_keeper_persistence_owned ~base_path_identity ~set_phase ~config =
   let base_path = config.Workspace.base_path in
+  set_phase Restoring_shutdown;
   let shutdown_started = preparation_stage_started () in
   let shutdown_inventory =
     match Keeper_shutdown_store.scan_inventory ~config with
@@ -411,6 +525,7 @@ let prepare_keeper_persistence ~config =
   match shutdown_inventory with
   | Error _ as error -> error
   | Ok shutdown ->
+  set_phase Recovering_delivery;
   let delivery_started = preparation_stage_started () in
   let delivery_recovery =
     Keeper_chat_delivery_journal.recover_all
@@ -449,21 +564,10 @@ let prepare_keeper_persistence ~config =
       delivery_recovery.recovered
       delivery_recovery.already_final
       (List.length delivery_recovery.failures);
-  let delivery_root_errors, delivery_blocked =
-    List.fold_left
-      (fun (root_errors, blocked) failure ->
-         match failure.Keeper_chat_delivery_journal.scope with
-         | Keeper_chat_delivery_journal.Root_inventory ->
-           failure.error :: root_errors, blocked
-         | Keeper_chat_delivery_journal.Keeper_inventory { keeper_name }
-         | Keeper_chat_delivery_journal.Delivery_record { keeper_name; _ } ->
-           root_errors, Keeper_name_set.add keeper_name blocked)
-      ([], Keeper_name_set.empty)
-      delivery_recovery.failures
-  in
-  if delivery_root_errors <> []
-  then Error (Delivery_inventory_unavailable (List.rev delivery_root_errors))
-  else
+  (* Recovery failures remain typed observations. They are not Keeper
+     lifecycle authority and therefore cannot prevent the process owner from
+     publishing the independent lanes that are still healthy. *)
+  set_phase Configuring_queue;
   let queue_started = preparation_stage_started () in
   let queue_recovery = Keeper_chat_queue.configure_persistence ~base_path in
   observe_preparation_stage
@@ -498,32 +602,16 @@ let prepare_keeper_persistence ~config =
       queue_recovery.migrated_keeper_count
       queue_recovery.recovered_receipt_count
       (List.length queue_recovery.load_errors);
-  let queue_root_errors, blocked_keeper_names =
-    List.fold_left
-      (fun (root_errors, blocked) (keeper_name, error) ->
-         match keeper_name with
-         | None -> error :: root_errors, blocked
-         | Some keeper_name ->
-           root_errors, Keeper_name_set.add keeper_name blocked)
-      ([], delivery_blocked)
-      queue_recovery.load_errors
-  in
-  if queue_root_errors <> []
-  then Error (Queue_inventory_unavailable (List.rev queue_root_errors))
-  else
-  let blocked_keeper_names = Keeper_name_set.elements blocked_keeper_names in
   (* Request status is recovered only after transcript journals and queue
      receipts converge: a
      poller must never observe a final Lost status while its durable terminal
      row is still absent. [server_runtime_bootstrap] calls this entire
      boundary before publishing [server_state], so no poll/cancel route can
      race a disk-only transition. *)
+  set_phase Recovering_requests;
   let request_started = preparation_stage_started () in
   let keeper_msg_recovery =
-    Keeper_msg_async.recover_lost_disk_records
-      ~blocked_keeper_names
-      ~base_path
-      ()
+    Keeper_msg_async.recover_lost_disk_records ~base_path ()
   in
   observe_preparation_stage
     ~stage:"request"
@@ -532,6 +620,7 @@ let prepare_keeper_persistence ~config =
       (keeper_msg_recovery.lost
        + keeper_msg_recovery.migrated
        + keeper_msg_recovery.cleaned
+       + keeper_msg_recovery.atomic_orphans_inspected
        + keeper_msg_recovery.deferred
        + keeper_msg_recovery.unreadable
        + keeper_msg_recovery.failed)
@@ -543,84 +632,359 @@ let prepare_keeper_persistence ~config =
     keeper_msg_recovery.lost > 0
     || keeper_msg_recovery.migrated > 0
     || keeper_msg_recovery.cleaned > 0
+    || keeper_msg_recovery.atomic_orphans_inspected > 0
     || keeper_msg_recovery.unreadable > 0
     || keeper_msg_recovery.failed > 0
   then
     Log.Keeper.warn
-      "keeper_msg_async: recovery lost=%d migrated=%d cleaned=%d deferred=%d unreadable=%d failed=%d"
+      "keeper_msg_async: recovery lost=%d migrated=%d cleaned=%d atomic_orphans_inspected=%d atomic_orphans_deleted=%d atomic_orphans_preserved=%d deferred=%d unreadable=%d failed=%d"
       keeper_msg_recovery.lost
       keeper_msg_recovery.migrated
       keeper_msg_recovery.cleaned
+      keeper_msg_recovery.atomic_orphans_inspected
+      keeper_msg_recovery.atomic_orphans_deleted
+      keeper_msg_recovery.atomic_orphans_preserved
       keeper_msg_recovery.deferred
       keeper_msg_recovery.unreadable
       keeper_msg_recovery.failed;
-  if keeper_msg_recovery.store_errors <> []
-  then Error (Request_inventory_unavailable keeper_msg_recovery.store_errors)
-  else
-    let request_blocked_keeper_names =
-      List.fold_left
-        (fun blocked error ->
-           match error.Keeper_msg_async.keeper_name with
-           | None -> blocked
-           | Some keeper_name -> Keeper_name_set.add keeper_name blocked)
-        (Keeper_name_set.of_list blocked_keeper_names)
-        keeper_msg_recovery.record_errors
+  let prepared =
+    { base_path = base_path_identity
+    ; config
+    ; report =
+        { shutdown
+        ; delivery = delivery_recovery
+        ; queue = queue_recovery
+        ; requests = keeper_msg_recovery
+        }
+    }
+  in
+  Ok prepared
+;;
+
+let rec acquire_preparation_ownership preparing =
+  let current = Atomic.get persistence_lifecycle in
+  match current with
+  | Idle ->
+    if Atomic.compare_and_set persistence_lifecycle current preparing
+    then Ok ()
+    else acquire_preparation_ownership preparing
+  | Ready _ -> Error Preparation_awaiting_claim
+  | Preparing _ -> Error Preparation_in_progress
+  | Claimed _ | Starting _ | Started _ -> Error Preparation_already_claimed
+  | Failed failed -> Error (Preparation_failed_previously failed.failure)
+;;
+
+let persistence_failure ~phase ~base_path ~cause = { phase; base_path; cause }
+
+let raised_cause exception_ backtrace = { exception_; backtrace }
+
+let failed_lifecycle ?prepared ?claimed failure =
+  Failed { failure; prepared; claimed }
+;;
+
+let log_lifecycle_transition_loss ~from_phase ~failure =
+  Log.Server.error
+    "keeper persistence lifecycle lost terminal transition from=%s failure=%s"
+    from_phase
+    (keeper_persistence_failure_to_string failure)
+;;
+
+let prepare_keeper_persistence ?requested_base_path ~config () =
+  let preparing = Preparing (ref ()) in
+  match acquire_preparation_ownership preparing with
+  | Error _ as error -> error
+  | Ok () ->
+    let config_base_path = config.Workspace.base_path in
+    let requested_base_path =
+      Option.value requested_base_path ~default:config_base_path
     in
-    let blocked_keeper_names =
-      Keeper_name_set.elements request_blocked_keeper_names
+    let phase = ref Resolving_base_path in
+    let outcome =
+      match
+        let canonical_result =
+          match Fs_compat.realpath config_base_path with
+          | canonical -> Ok canonical
+          | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+          | exception ((Unix.Unix_error _ | Sys_error _) as exception_) ->
+            Error
+              (raised_cause exception_ (Printexc.get_raw_backtrace ()))
+        in
+        match canonical_result with
+        | Error raised ->
+          let failure =
+            persistence_failure
+              ~phase:Resolving_base_path
+              ~base_path:config_base_path
+              ~cause:(Base_path_identity_unavailable_cause raised)
+          in
+          Error (Preparation_base_path_identity_unavailable failure)
+        | Ok canonical_base_path ->
+          let base_path_identity =
+            let expected_backend_base_path =
+            (Workspace.backend_config_for canonical_base_path)
+              .Backend_types.base_path
+            in
+            { requested = requested_base_path
+            ; canonical = canonical_base_path
+            ; backend_base_path = expected_backend_base_path
+            }
+          in
+          let expected_backend_base_path = base_path_identity.backend_base_path in
+          let configured_backend_base_path =
+            config.backend_config.Backend_types.base_path
+          in
+          if
+            not (String.equal config_base_path canonical_base_path)
+            || not
+                 (String.equal
+                    configured_backend_base_path
+                    expected_backend_base_path)
+          then
+            let failure =
+              persistence_failure
+                ~phase:Resolving_base_path
+                ~base_path:config_base_path
+                ~cause:
+                  (Noncanonical_config_cause
+                     { configured_base_path = config_base_path
+                     ; canonical_base_path
+                     ; configured_backend_base_path
+                     ; expected_backend_base_path
+                     })
+            in
+            Error (Preparation_config_not_canonical failure)
+          else
+            prepare_keeper_persistence_owned
+              ~base_path_identity
+              ~set_phase:(fun next_phase -> phase := next_phase)
+              ~config
+      with
+      | outcome -> outcome
+      | exception exn ->
+        let backtrace = Printexc.get_raw_backtrace () in
+        let failure =
+          persistence_failure
+            ~phase:!phase
+            ~base_path:requested_base_path
+            ~cause:
+              (Unexpected_exception_cause (raised_cause exn backtrace))
+        in
+        if
+          not
+            (Atomic.compare_and_set
+               persistence_lifecycle
+               preparing
+               (failed_lifecycle failure))
+        then log_lifecycle_transition_loss ~from_phase:"preparing" ~failure;
+        Printexc.raise_with_backtrace exn backtrace
     in
-    let prepared =
-      { base_path
-      ; report =
-          { shutdown
-          ; delivery = delivery_recovery
-          ; queue = queue_recovery
-          ; requests = keeper_msg_recovery
-          ; blocked_keeper_names
-          }
-      ; claim_state = Atomic.make Unclaimed
-      }
-    in
-    if Atomic.compare_and_set latest_prepared_persistence preparing (Ready prepared)
-    then Ok prepared
-    else Error Preparation_superseded
+    (match outcome with
+     | Ok prepared ->
+       if Atomic.compare_and_set persistence_lifecycle preparing (Ready prepared)
+       then Ok prepared
+       else Error Preparation_ownership_lost
+     | Error error ->
+       let failure =
+         match error with
+         | Preparation_base_path_identity_unavailable failure
+         | Preparation_config_not_canonical failure -> failure
+         | _ ->
+           persistence_failure
+             ~phase:!phase
+             ~base_path:requested_base_path
+             ~cause:(failure_cause_of_prepare_error error)
+       in
+       if
+         Atomic.compare_and_set
+           persistence_lifecycle
+           preparing
+           (failed_lifecycle failure)
+       then Error error
+       else Error Preparation_ownership_lost)
 ;;
 
 let keeper_persistence_report prepared = prepared.report
 
-let claim_prepared_keeper_persistence ~config prepared =
-  if not (String.equal prepared.base_path config.Workspace.base_path)
-  then Error Claim_base_path_mismatch
-  else
-    match Atomic.get latest_prepared_persistence with
-    | Ready current when current == prepared ->
-      if Atomic.compare_and_set prepared.claim_state Unclaimed Claimed
-      then (
-        match
-          Keeper_persistence_admission.install
-            ~base_path:prepared.base_path
-            ~blocked_keeper_names:prepared.report.blocked_keeper_names
-        with
-        | Ok () ->
-          Ok
-            { claimed_base_path = prepared.base_path
-            ; claimed_report = prepared.report
-            }
-        | Error error -> Error (Claim_admission_install_failed error))
-      else Error Claim_already_claimed
-    | Preparing _ | Ready _ -> Error Claim_superseded
+type base_path_validation_error =
+  | Base_path_mismatch of { observed_canonical : string }
+  | Base_path_identity_unavailable of keeper_persistence_failure
+
+let validate_config_base_path ~phase base_path config =
+  let state_base_path = config.Workspace.base_path in
+  let state_backend_base_path =
+    config.backend_config.Backend_types.base_path
+  in
+  match Fs_compat.realpath state_base_path with
+  | observed_canonical ->
+    if
+      String.equal state_base_path base_path.canonical
+      && String.equal observed_canonical base_path.canonical
+      && String.equal state_backend_base_path base_path.backend_base_path
+    then Ok ()
+    else Error (Base_path_mismatch { observed_canonical })
+  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+  | exception ((Unix.Unix_error _ | Sys_error _) as cause) ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    Error
+      (Base_path_identity_unavailable
+         (persistence_failure
+            ~phase
+            ~base_path:state_base_path
+            ~cause:
+              (Base_path_identity_unavailable_cause
+                 (raised_cause cause backtrace))))
+;;
+
+let rec claim_prepared_keeper_persistence ~config prepared =
+  let current = Atomic.get persistence_lifecycle in
+  match current with
+  | Ready latest when latest == prepared ->
+    (match
+       validate_config_base_path
+         ~phase:Resolving_base_path
+         prepared.base_path
+         config
+     with
+     | Error (Base_path_mismatch _) -> Error Claim_base_path_mismatch
+     | Error (Base_path_identity_unavailable failure) ->
+       Error (Claim_base_path_identity_unavailable failure)
+     | Ok () ->
+      let claimed =
+        { claimed_base_path = prepared.base_path
+        ; claimed_config = prepared.config
+        ; claimed_report = prepared.report
+        }
+      in
+      if
+        Atomic.compare_and_set
+          persistence_lifecycle
+          current
+          (Claimed (prepared, claimed))
+      then Ok claimed
+      else claim_prepared_keeper_persistence ~config prepared)
+  | Claimed (latest, _) when latest == prepared -> Error Claim_already_claimed
+  | Starting (latest, _) when latest == prepared -> Error Claim_already_claimed
+  | Started (latest, _) when latest == prepared -> Error Claim_already_claimed
+  | Failed { prepared = Some latest; failure; _ } when latest == prepared ->
+    Error (Claim_failed_previously failure)
+  | Idle
+  | Preparing _
+  | Ready _
+  | Claimed _
+  | Starting _
+  | Started _
+  | Failed _ ->
+    Error Claim_superseded
 ;;
 
 let keeper_persistence_claim_error_to_string = function
   | Claim_base_path_mismatch ->
     "prepared persistence BasePath does not match server state"
+  | Claim_base_path_identity_unavailable failure ->
+    "server state BasePath identity is unavailable during persistence claim: "
+    ^ keeper_persistence_failure_to_string failure
   | Claim_superseded -> "prepared persistence token is stale"
   | Claim_already_claimed -> "prepared persistence token was already claimed"
-  | Claim_admission_install_failed error ->
-    Keeper_persistence_admission.install_error_to_string error
+  | Claim_failed_previously failure ->
+    "prepared persistence token claim already failed: "
+    ^ keeper_persistence_failure_to_string failure
 ;;
 
-let start_keeper_loops
+type keeper_loops_start_ownership =
+  { starting : preparation_lifecycle
+  ; prepared : prepared_keeper_persistence
+  ; claimed : claimed_keeper_persistence
+  }
+
+let rec acquire_keeper_loops_start ~config claimed =
+  let current = Atomic.get persistence_lifecycle in
+  match current with
+  | Claimed (prepared, latest) when latest == claimed ->
+    (match
+       validate_config_base_path
+         ~phase:Starting_keeper_loops
+         claimed.claimed_base_path
+         config
+     with
+     | Error (Base_path_mismatch _) ->
+       Error
+         (Start_base_path_mismatch
+            { claimed_base_path = claimed.claimed_base_path.canonical
+            ; state_base_path = config.Workspace.base_path
+            })
+     | Error (Base_path_identity_unavailable failure) ->
+       Error (Start_base_path_identity_unavailable failure)
+     | Ok () ->
+      let starting = Starting (prepared, claimed) in
+      if Atomic.compare_and_set persistence_lifecycle current starting
+      then Ok { starting; prepared; claimed }
+      else acquire_keeper_loops_start ~config claimed)
+  | Starting (_, latest) when latest == claimed -> Error Start_in_progress
+  | Started (_, latest) when latest == claimed -> Error Start_already_started
+  | Failed { claimed = Some latest; failure; _ } when latest == claimed ->
+    Error (Start_failed_previously failure)
+  | Idle
+  | Preparing _
+  | Ready _
+  | Claimed _
+  | Starting _
+  | Started _
+  | Failed _ ->
+    Error Start_superseded
+;;
+
+let finish_keeper_loops_start ownership =
+  if
+    Atomic.compare_and_set
+      persistence_lifecycle
+      ownership.starting
+      (Started (ownership.prepared, ownership.claimed))
+  then Ok ()
+  else
+    match Atomic.get persistence_lifecycle with
+    | Started (_, latest) when latest == ownership.claimed ->
+      Error Start_already_started
+    | Failed { claimed = Some latest; failure; _ }
+      when latest == ownership.claimed ->
+      Error (Start_failed_previously failure)
+    | Idle
+    | Preparing _
+    | Ready _
+    | Claimed _
+    | Starting _
+    | Started _
+    | Failed _ ->
+      Error Start_superseded
+;;
+
+let keeper_persistence_start_error_to_string = function
+  | Start_base_path_mismatch { claimed_base_path; state_base_path } ->
+    Printf.sprintf
+      "claimed persistence BasePath %S does not match server state BasePath %S"
+      claimed_base_path
+      state_base_path
+  | Start_base_path_identity_unavailable failure ->
+    "server state BasePath identity is unavailable during Keeper-loop start: "
+    ^ keeper_persistence_failure_to_string failure
+  | Start_superseded -> "claimed persistence token is stale"
+  | Start_in_progress -> "claimed persistence token is already starting Keeper loops"
+  | Start_already_started -> "claimed persistence token already started Keeper loops"
+  | Start_execution_failed failure ->
+    "claimed persistence token failed while starting Keeper loops: "
+    ^ keeper_persistence_failure_to_string failure
+  | Start_failed_previously failure ->
+    "claimed persistence token start already failed: "
+    ^ keeper_persistence_failure_to_string failure
+;;
+
+let () =
+  Printexc.register_printer (function
+    | Keeper_persistence_start_failed error ->
+      Some (keeper_persistence_start_error_to_string error)
+    | _ -> None)
+;;
+
+let start_keeper_loops_owned
       ~claimed_persistence
       ~sw
       ~clock
@@ -652,7 +1016,7 @@ let start_keeper_loops
         Log.Server.error "subsystem %s crashed: %s" name (Printexc.to_string exn))
       f
   in
-  let config = Mcp_server.workspace_config state in
+  let config = claimed_persistence.claimed_config in
   (* [claimed_persistence] can only be constructed by the typed one-shot claim
      boundary before readiness publication. No late exception can turn an
      already-visible HTTP state into a degraded bootstrap. *)
@@ -1152,7 +1516,7 @@ let start_keeper_loops
       Log.Keeper.info "autoboot: lazy startup complete; keeper bootstrap will start last";
       (* Brief delay so other subsystems (SSE, board, orchestrator) settle first. *)
       Eio.Time.sleep clock Env_config_keeper.KeeperBootstrap.post_startup_settle_sec;
-      let config = Mcp_server.workspace_config state in
+      let config = claimed_persistence.claimed_config in
       let masc_root = Workspace.masc_root_dir config in
       let keeper_dir = Keeper_fs.keeper_dir config in
       let shutdown_blocked_names =
@@ -1170,11 +1534,7 @@ let start_keeper_loops
       let names =
         Keeper_runtime.bootable_keeper_names config
         |> List.filter (fun name ->
-          (not (Keeper_name_set.mem name shutdown_blocked_names))
-          && not
-               (Keeper_persistence_admission.is_blocked
-                  ~base_path:config.base_path
-                  ~keeper_name:name))
+          not (Keeper_name_set.mem name shutdown_blocked_names))
       in
       let exclusions = Keeper_runtime.autoboot_excluded_keeper_reasons config in
       let keeper_boot_ctx : _ Keeper_types_profile.context =
@@ -1607,6 +1967,87 @@ let start_keeper_loops
   (* Phase 5: unified startup subsystem summary *)
   Log.Startup.info "subsystems: keeper loops started"
 ;;
+
+let start_keeper_loops
+      ~claimed_persistence
+      ~sw
+      ~clock
+      ~net
+      ~domain_mgr
+      ~proc_mgr
+      (state : Mcp_server.server_state)
+  =
+  let state_config = Mcp_server.workspace_config state in
+  (* Claim has already committed admission. Mask cancellation only across the
+     second BasePath validation and [Claimed -> Starting] CAS so a cancelled
+     startup cannot strand a claimed token. The long-running startup body is
+     deliberately outside protection and terminalizes cancellation below. *)
+  match
+    Eio.Cancel.protect (fun () ->
+      acquire_keeper_loops_start ~config:state_config claimed_persistence)
+  with
+  | Error error -> raise (Keeper_persistence_start_failed error)
+  | Ok ownership ->
+    let outcome =
+      match
+        start_keeper_loops_owned
+          ~claimed_persistence
+          ~sw
+          ~clock
+          ~net
+          ~domain_mgr
+          ~proc_mgr
+          state
+      with
+      | () -> Ok ()
+      | exception exn -> Error (exn, Printexc.get_raw_backtrace ())
+    in
+    (match outcome with
+     | Ok () ->
+       (match finish_keeper_loops_start ownership with
+        | Ok () -> ()
+        | Error error -> raise (Keeper_persistence_start_failed error))
+     | Error (exn, backtrace) ->
+       let failure =
+         persistence_failure
+           ~phase:Starting_keeper_loops
+           ~base_path:claimed_persistence.claimed_base_path.canonical
+           ~cause:
+             (Unexpected_exception_cause (raised_cause exn backtrace))
+       in
+       if
+         not
+           (Atomic.compare_and_set
+              persistence_lifecycle
+              ownership.starting
+              (failed_lifecycle
+                 ~prepared:ownership.prepared
+                 ~claimed:ownership.claimed
+                 failure))
+       then log_lifecycle_transition_loss ~from_phase:"starting" ~failure;
+       (match exn with
+        | Eio.Cancel.Cancelled _ -> Printexc.raise_with_backtrace exn backtrace
+        | _ ->
+          Printexc.raise_with_backtrace
+            (Keeper_persistence_start_failed
+               (Start_execution_failed failure))
+            backtrace))
+;;
+
+module For_testing = struct
+  include Projection_for_testing
+
+  type nonrec keeper_loops_start_ownership = keeper_loops_start_ownership
+
+  let reset_keeper_persistence_lifecycle () = Atomic.set persistence_lifecycle Idle
+
+  let prepared_base_paths prepared =
+    prepared.base_path.requested, prepared.base_path.canonical
+  ;;
+
+  let begin_keeper_loops_start = acquire_keeper_loops_start
+  let finish_keeper_loops_start = finish_keeper_loops_start
+end
 
 
 (* Background maintenance loops

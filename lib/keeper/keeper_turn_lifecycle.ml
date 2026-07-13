@@ -43,11 +43,7 @@ let handle_keeper_down (ctx : _ context) args : tool_result =
   let requested_name = String.trim (get_string args "name" "") in
   if not (validate_name requested_name)
   then
-    tool_result_error
-      (Printf.sprintf
-         "invalid keeper name %S (must be non-empty and match \
-          [A-Za-z0-9._-]+; see Keeper_config.validate_name)"
-         requested_name)
+    tool_result_error (invalid_name_error requested_name)
   else
     match Keeper_registry.get ~base_path:ctx.config.base_path requested_name with
     | None ->

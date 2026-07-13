@@ -434,7 +434,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         ] in
         tool_result_ok_data json
          | ( Keepalive_already_registered _
-           | Keepalive_persistence_denied _
            | Keepalive_lifecycle_denied _
            | Keepalive_identity_unrepairable
            | Keepalive_registration_rejected _

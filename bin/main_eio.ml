@@ -424,7 +424,7 @@ let make_extended_handler ~trust_policy routes =
              | None -> try_internal_error_response reqd msg)))
 
 (** Main server loop *)
-let run_server ~sw ~env ~host ~port ~base_path =
+let run_server ~sw ~env ~host ~port ~base_path ~input_base_path =
   (* Use the parent switch directly so that ALL fibers spawned by
      Server_runtime_bootstrap (background maintenance, keeper loops,
      dashboard refresh, etc.) are children of this switch.  Graceful
@@ -433,10 +433,12 @@ let run_server ~sw ~env ~host ~port ~base_path =
      switch propagates cancellation to every child fiber, preventing
      the 10s force-exit timeout. *)
   try
-    Server_runtime_bootstrap.run ~sw ~env ~host ~port ~base_path ~make_routes
+    Server_runtime_bootstrap.run ~sw ~env ~host ~port ~base_path
+      ~input_base_path ~make_routes
       ~make_request_handler:make_extended_handler
       ~make_h2_request_handler:Server_h2_gateway.make_request_handler
       ~make_h2_error_handler:Server_h2_gateway.make_error_handler
+      ()
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
@@ -545,8 +547,8 @@ let acquire_pid_lock port =
            pid port pid);
       exit 1
 
-let acquire_base_path_lock base_path =
-  match Server_startup_takeover.acquire_base_path_lock base_path with
+let acquire_base_path_lock ~run_dir base_path =
+  match Server_startup_takeover.acquire_base_path_lock ~run_dir base_path with
   | Server_startup_takeover.Base_path_acquired lease -> lease
   | Server_startup_takeover.Base_path_already_owned { pid } ->
       let owner = Option.fold ~none:"unknown" ~some:string_of_int pid in
@@ -554,6 +556,13 @@ let acquire_base_path_lock base_path =
         (Printf.sprintf
            "[FATAL] Another MASC runtime (PID %s) already owns base path %s"
            owner base_path);
+      exit 1
+  | Server_startup_takeover.Base_path_rejected rejection ->
+      Log.legacy_stderr ~level:Log.Error ~module_name:"Server"
+        (Printf.sprintf
+           "[FATAL] BasePath ownership boundary rejected %s: %s"
+           base_path
+           (Server_startup_takeover.base_path_lock_rejection_to_string rejection));
       exit 1
 
 let run_cmd host port cli_base_path =
@@ -573,10 +582,26 @@ let run_cmd host port cli_base_path =
   let stripped_base_path =
     Env_config.strip_path_trailing_slashes (String.trim raw_base_path)
   in
-  let masc_dir = Filename.concat normalized_base_path Common.masc_dirname in
-  Fs_compat.mkdir_p masc_dir;
+  (* Preserve support for a not-yet-created explicit workspace root, then
+     freeze one canonical identity before acquiring any ownership lease or
+     constructing paths that survive startup. *)
+  Fs_compat.mkdir_p normalized_base_path;
+  let canonical_base_path =
+    match Server_base_path_guard.canonicalize_existing normalized_base_path with
+    | Ok canonical -> canonical
+    | Error error ->
+      Printf.eprintf
+        "%s\n"
+        (Server_base_path_guard.format_canonicalization_error error);
+      exit 1
+  in
+  Server_base_path_guard.exit_on_violation
+    (Server_base_path_guard.enforce
+       { resolved_base_path with normalized_base_path = canonical_base_path });
+  let masc_dir = Filename.concat canonical_base_path Common.masc_dirname in
+  let run_dir = (Host_config.host ()).run_dir in
+  let _base_path_lease = acquire_base_path_lock ~run_dir canonical_base_path in
   acquire_pid_lock port;
-  let _base_path_lease = acquire_base_path_lock normalized_base_path in
   Log.init_from_env ();
   let shutdown_cfg =
     match Masc.Shutdown.config_from_env_result () with
@@ -596,10 +621,10 @@ let run_cmd host port cli_base_path =
   then
     Log.Server.warn
       "Normalizing --base-path from %s to %s because runtime base paths must point at the workspace root, not the .masc directory."
-      raw_base_path normalized_base_path;
+      raw_base_path canonical_base_path;
   Unix.putenv "MASC_BASE_PATH_INPUT" raw_base_path;
-  Unix.putenv "MASC_BASE_PATH" normalized_base_path;
-  Workspace_utils_backend_setup.cache_resolved_base_path normalized_base_path;
+  Unix.putenv "MASC_BASE_PATH" canonical_base_path;
+  Workspace_utils_backend_setup.cache_resolved_base_path canonical_base_path;
   Unix.putenv "MASC_BASE_PATH_RESOLUTION_SOURCE" resolution_source;
   (* Persist logs inside .masc/logs/ — colocated with state, not a sibling.
      Previous code wrote to base_path/logs/ which diverged from .masc/ when
@@ -607,7 +632,7 @@ let run_cmd host port cli_base_path =
   let log_dir = Filename.concat masc_dir "logs" in
   Fs_compat.mkdir_p log_dir;
   (* Migration: move .jsonl files from old base_path/logs/ if they exist *)
-  let old_log_dir = Filename.concat normalized_base_path "logs" in
+  let old_log_dir = Filename.concat canonical_base_path "logs" in
   (if Sys.file_exists old_log_dir && Sys.is_directory old_log_dir then
      let files = try Sys.readdir old_log_dir with Sys_error _ -> [||] in
      Array.iter (fun fname ->
@@ -752,7 +777,14 @@ let run_cmd host port cli_base_path =
             ()
             in
             Eio.Fiber.first
-            (fun () -> run_server ~sw ~env ~host ~port ~base_path:normalized_base_path)
+            (fun () ->
+              run_server
+                ~sw
+                ~env
+                ~host
+                ~port
+                ~base_path:canonical_base_path
+                ~input_base_path:raw_base_path)
             await_shutdown_signal;
             (* Server stopped; close SSE connections after server is down. *)
             (try close_all_sse_connections ()

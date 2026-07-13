@@ -58,8 +58,11 @@ type t =
             ([auto-responder.log], [auto_debug.log], ...).  Default [<tmp>]
             from [host ()]; configurable via env in [resolve]. *)
   ; run_dir : string
-        (** Directory for runtime state files (PID locks, sockets).
-            Default [<tmp>] from [host ()]. *)
+        (** Host-selected root for runtime state files (PID locks, sockets).
+            Default [<tmp>] from [host ()]. BasePath ownership establishes its
+            current-UID private lease directory below this root and rejects an
+            unprotected group/world-writable root; callers do not select a
+            fallback. *)
   ; policy_dir : string
         (** Directory for runtime policy files.  Default [<tmp>] from
             [host ()]. *)

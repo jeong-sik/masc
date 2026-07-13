@@ -3681,6 +3681,30 @@ let test_startup_state_readiness_after_init () =
   Alcotest.(check string) "phase is ready" "ready"
     (Server_startup_state.phase_to_string current.phase)
 
+let test_mcp_transport_requires_explicit_readiness () =
+  let previous_state = !Server_auth.server_state in
+  Fun.protect
+    ~finally:(fun () -> Server_auth.server_state := previous_state)
+    (fun () ->
+       Server_startup_state.reset ~backend_mode:"filesystem" ();
+       Server_startup_state.mark_blocking ~backend_mode:"filesystem";
+       Server_auth.server_state :=
+         Some
+           (Mcp_server.create_state
+              ~base_path:(Filename.get_temp_dir_name ()));
+       let deps = Server_routes_http_common.mcp_transport_http_deps () in
+       Alcotest.(check bool)
+         "state publication alone does not admit MCP"
+         false
+         (deps.is_ready ());
+       Server_startup_state.mark_state_ready
+         ~backend:Server_startup_state.Filesystem_backend
+       |> Result.get_ok;
+       Alcotest.(check bool)
+         "explicit readiness admits MCP"
+         true
+         (deps.is_ready ()))
+
 let test_startup_state_lazy_inventory_does_not_publish_readiness () =
   Server_startup_state.reset ~backend_mode:"filesystem" ();
   Server_startup_state.mark_blocking ~backend_mode:"filesystem";
@@ -4888,6 +4912,8 @@ let () =
             test_startup_state_readiness_before_init;
           Alcotest.test_case "readiness true after init" `Quick
             test_startup_state_readiness_after_init;
+          Alcotest.test_case "MCP requires explicit readiness" `Quick
+            test_mcp_transport_requires_explicit_readiness;
           Alcotest.test_case
             "lazy inventory stays blocking until explicit readiness"
             `Quick

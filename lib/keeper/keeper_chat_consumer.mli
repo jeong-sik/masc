@@ -31,10 +31,6 @@ type turn_outcome =
     The loop polls [Keeper_chat_queue]
     every [MASC_KEEPER_QUEUE_POLL_SEC] seconds (default 1.0).
 
-    The consumer consults the immutable startup persistence admission SSOT and
-    never leases blocked lanes; their durable receipts remain pending for
-    explicit repair and a later clean restart.
-
     Per keeper and per tick: when a turn is in flight
     ([Keeper_turn_admission.in_flight]), queued messages are left to
     accumulate; once the slot is free, the head run of same-source messages

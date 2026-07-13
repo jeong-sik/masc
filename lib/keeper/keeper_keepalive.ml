@@ -703,7 +703,6 @@ let record_keeper_crashed
 type start_keepalive_outcome =
   | Keepalive_started of Keeper_registry.registry_entry
   | Keepalive_already_registered of Keeper_registry.registry_entry
-  | Keepalive_persistence_denied of Keeper_persistence_admission.block_reason
   | Keepalive_lifecycle_denied of Keeper_lifecycle_admission.autonomous_denial
   | Keepalive_identity_unrepairable
   | Keepalive_registration_rejected of Keeper_registry.registration_error
@@ -719,8 +718,6 @@ let start_keepalive_outcome_to_string = function
       "already registered phase=%s lane=%s"
       (Keeper_state_machine.phase_to_string entry.phase)
       (Keeper_lane.Id.to_string (Keeper_lane.id entry.lane))
-  | Keepalive_persistence_denied reason ->
-    Keeper_persistence_admission.block_reason_to_wire reason
   | Keepalive_lifecycle_denied denial ->
     Keeper_lifecycle_admission.autonomous_denial_to_wire denial
   | Keepalive_identity_unrepairable -> "keeper identity drift could not be repaired"
@@ -796,36 +793,6 @@ let start_keepalive
   (m : keeper_meta)
   : start_keepalive_outcome
   =
-  match
-    Keeper_persistence_admission.block_reason
-      ~base_path:ctx.config.base_path
-      ~keeper_name:m.name
-  with
-  | Some reason ->
-    let reason_label = Keeper_persistence_admission.block_reason_to_wire reason in
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string LifecycleDispatchRejections)
-      ~labels:
-        [ "keeper", m.name
-        ; "event", "autonomous_keepalive_start"
-        ; "reason", reason_label
-        ]
-      ();
-    publish_keeper_lifecycle
-      ~event:
-        (Keeper_lifecycle_events.Custom_event
-           { verb = Keeper_lifecycle_events.Admission_denied
-           ; phase = Some Keeper_state_machine.Offline
-           })
-      ~keeper_name:m.name
-      ~detail:reason_label
-      ();
-    Log.Keeper.error
-      "start_keepalive denied for %s by startup persistence admission: %s"
-      m.name
-      reason_label;
-    Keepalive_persistence_denied reason
-  | None ->
   let lifecycle_state =
     Keeper_lifecycle_admission.state
       ~paused:m.paused

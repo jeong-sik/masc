@@ -69,6 +69,9 @@ type recovery_report =
   { lost : int
   ; migrated : int
   ; cleaned : int
+  ; atomic_orphans_inspected : int
+  ; atomic_orphans_deleted : int
+  ; atomic_orphans_preserved : int
   ; deferred : int
   ; unreadable : int
   ; failed : int
@@ -79,6 +82,7 @@ type recovery_report =
 and recovery_store =
   | Active_store
   | Legacy_store
+  | Atomic_orphan_store
 
 and recovery_store_error =
   { store : recovery_store
@@ -107,10 +111,7 @@ and recovery_record_error_kind =
 
 type submit_error =
   | Submit_rejected of access_rejection
-  | Submit_admission_blocked of
-      { keeper_name : string
-      ; reason : Keeper_persistence_admission.block_reason
-      }
+  | Submit_invalid_keeper_name of { reason : string }
   | Initial_persistence_failed of { reason : string }
   | Acceptance_persistence_failed of
       { request_id : string
@@ -218,21 +219,24 @@ end
 
 module Store_transition_table = Hashtbl.Make (Store_transition_key)
 
-module Keeper_submission_key = struct
+module Keeper_lane_key = struct
   type t =
     { base_path : string
-    ; keeper_name : string
+    ; keeper_name : Keeper_id.Keeper_name.t
     }
 
   let equal a b =
     String.equal a.base_path b.base_path
-    && String.equal a.keeper_name b.keeper_name
+    && Keeper_id.Keeper_name.equal a.keeper_name b.keeper_name
   ;;
 
-  let hash key = Hashtbl.hash (key.base_path, key.keeper_name)
+  let hash key =
+    Hashtbl.hash
+      (key.base_path, Keeper_id.Keeper_name.to_string key.keeper_name)
+  ;;
 end
 
-module Keeper_submission_table = Hashtbl.Make (Keeper_submission_key)
+module Keeper_lane_table = Hashtbl.Make (Keeper_lane_key)
 
 type store_transition_lock =
   { mutex : Eio.Mutex.t
@@ -247,26 +251,43 @@ let store_transition_locks : store_transition_lock Store_transition_table.t =
   Store_transition_table.create 16
 let reserved_request_ids : unit Store_transition_table.t =
   Store_transition_table.create 16
-let keeper_submission_locks : store_transition_lock Keeper_submission_table.t =
-  Keeper_submission_table.create 16
+let keeper_submission_locks : store_transition_lock Keeper_lane_table.t =
+  Keeper_lane_table.create 16
+let keeper_persistence_locks : store_transition_lock Keeper_lane_table.t =
+  Keeper_lane_table.create 16
 
-let durable_write_hook_for_testing :
-    (Keeper_fs.durable_write_stage -> unit) option Atomic.t =
-  Atomic.make None
+type request_ops =
+  { save_json_durable :
+      ownership_root:string
+      -> temp_dir:string
+      -> string
+      -> Yojson.Safe.t
+      -> (unit, Keeper_fs.durable_write_error) result
+  ; remove_file_durable :
+      ownership_root:string
+      -> string
+      -> (unit, Keeper_fs.durable_remove_error) result
+  ; generate_request_id : unit -> string
+  ; before_integrity_projection : unit -> unit
+  ; signal_cancel : Eio.Switch.t -> exn -> unit
+  }
 
-let durable_remove_hook_for_testing :
-    (Keeper_fs.durable_remove_stage -> unit) option Atomic.t =
-  Atomic.make None
-
-let cancel_signal_hook_for_testing :
-    (Eio.Switch.t -> exn -> unit) option Atomic.t =
-  Atomic.make None
-
-let request_id_hook_for_testing : (unit -> string) option Atomic.t =
-  Atomic.make None
-
-let integrity_projection_hook_for_testing : (unit -> unit) option Atomic.t =
-  Atomic.make None
+let production_request_ops =
+  { save_json_durable =
+      (fun ~ownership_root ~temp_dir path json ->
+         Keeper_fs.save_json_durable_atomic
+           ~ownership_root
+           ~temp_dir
+           path
+           json)
+  ; remove_file_durable =
+      (fun ~ownership_root path ->
+         Keeper_fs.remove_file_durable ~ownership_root path)
+  ; generate_request_id =
+      (fun () -> Random_id.prefixed ~prefix:"kmsg-" ~bytes:16)
+  ; before_integrity_projection = (fun () -> ())
+  ; signal_cancel = Eio.Switch.fail
+  }
 
 let with_store_transition_lock ~base_path ~request_id f =
   let key : Store_transition_key.t = { base_path; request_id } in
@@ -297,33 +318,169 @@ let with_store_transition_lock ~base_path ~request_id f =
     (fun () -> Eio.Mutex.use_rw ~protect:true lock.mutex f)
 ;;
 
-let with_keeper_submission_lock ~base_path ~keeper_name f =
-  let key : Keeper_submission_key.t = { base_path; keeper_name } in
+type lane_observation =
+  | Unobserved_lane
+  | Persistence_lane
+
+type 'a lane_lock_outcome =
+  | Lane_lock_returned of 'a
+  | Lane_lock_raised of exn * Printexc.raw_backtrace
+
+let persistence_lane_waits_metric =
+  Keeper_metrics.(to_string PersistenceLaneWaits)
+;;
+
+let persistence_lane_pending_metric =
+  Keeper_metrics.(to_string PersistenceLanePending)
+;;
+
+let persistence_lane_in_flight_metric =
+  Keeper_metrics.(to_string PersistenceLaneInFlight)
+;;
+
+let persistence_lane_duration_metric =
+  Keeper_metrics.(to_string PersistenceLaneDuration)
+;;
+
+let persistence_lane_waits = Atomic.make_contended 0
+let persistence_lane_pending = Atomic.make_contended 0
+let persistence_lane_in_flight = Atomic.make_contended 0
+
+let persistence_lane_samples () =
+  [ { Otel_metrics.name = persistence_lane_waits_metric
+      ; value = Float.of_int (Atomic.get persistence_lane_waits)
+      ; labels = []
+      ; kind = Otel_metrics.Counter
+      }
+    ; { Otel_metrics.name = persistence_lane_pending_metric
+      ; value = Float.of_int (Atomic.get persistence_lane_pending)
+      ; labels = []
+      ; kind = Otel_metrics.Gauge
+      }
+    ; { Otel_metrics.name = persistence_lane_in_flight_metric
+      ; value = Float.of_int (Atomic.get persistence_lane_in_flight)
+      ; labels = []
+      ; kind = Otel_metrics.Gauge
+      }
+  ]
+;;
+
+let () = Otel_metrics.register_source persistence_lane_samples
+;;
+
+let elapsed_seconds started =
+  Mtime.Span.to_float_ns (Mtime.span started (Mtime_clock.now ())) /. 1e9
+;;
+
+let with_lane_gate ~on_wait mutex f =
+  let acquired_without_wait = Eio.Mutex.try_lock mutex in
+  if not acquired_without_wait
+  then (
+    on_wait ();
+    Eio.Mutex.lock mutex);
+  (* A started durable systhread cannot be cancelled. Keep the lane held until
+     its transaction and lock release finish. Deliberately do not re-check the
+     parent cancellation here: the caller must first settle the committed
+     receipt/status, matching [Keeper_event_queue_owner_lock.with_durable_lock]. *)
+  Fun.protect
+    ~finally:(fun () -> Eio.Mutex.unlock mutex)
+    (fun () -> Eio.Cancel.protect f)
+;;
+
+let with_keeper_lane_lock observation table ~base_path ~keeper_name f =
+  let key : Keeper_lane_key.t = { base_path; keeper_name } in
   let lock =
     Eio.Mutex.use_rw ~protect:true mu (fun () ->
-      match Keeper_submission_table.find_opt keeper_submission_locks key with
+      match Keeper_lane_table.find_opt table key with
       | Some lock ->
         lock.users <- lock.users + 1;
         lock
       | None ->
         let lock = { mutex = Eio.Mutex.create (); users = 1 } in
-        Keeper_submission_table.add keeper_submission_locks key lock;
+        Keeper_lane_table.add table key lock;
         lock)
+  in
+  let pending_observed = ref false in
+  let on_wait () =
+    match observation with
+    | Unobserved_lane -> ()
+    | Persistence_lane ->
+      pending_observed := true;
+      ignore (Atomic.fetch_and_add persistence_lane_waits 1 : int);
+      ignore (Atomic.fetch_and_add persistence_lane_pending 1 : int)
+  in
+  let leave_pending () =
+    if !pending_observed
+    then (
+      pending_observed := false;
+      ignore (Atomic.fetch_and_add persistence_lane_pending (-1) : int))
+  in
+  let run () =
+    match
+      with_lane_gate ~on_wait lock.mutex (fun () ->
+        leave_pending ();
+        match observation with
+        | Unobserved_lane -> `Unobserved (f ())
+        | Persistence_lane ->
+          let started = Mtime_clock.now () in
+          ignore (Atomic.fetch_and_add persistence_lane_in_flight 1 : int);
+          let outcome =
+            match f () with
+            | value -> Lane_lock_returned value
+            | exception exn ->
+              Lane_lock_raised (exn, Printexc.get_raw_backtrace ())
+          in
+          `Persistence (outcome, elapsed_seconds started))
+    with
+    | `Unobserved value -> value
+    | `Persistence (outcome, elapsed) ->
+      (* Keep blocking metrics-store work outside the per-Keeper persistence
+         gate. The transaction outcome and elapsed time were captured while
+         holding the gate, and [with_lane_gate] has released it before this
+         point. Do not re-check parent cancellation here: a committed result
+         must reach its caller before cancellation propagates. *)
+      Eio.Cancel.protect (fun () ->
+        ignore (Atomic.fetch_and_add persistence_lane_in_flight (-1) : int);
+        Otel_metric_store.observe_histogram persistence_lane_duration_metric elapsed);
+      (match outcome with
+       | Lane_lock_returned value -> value
+       | Lane_lock_raised (exn, backtrace) ->
+         Printexc.raise_with_backtrace exn backtrace)
   in
   (* fun-protect-finally-ok: the registry user-count cleanup acquires only the
      cancellation-protected bookkeeping mutex; it awaits no external event and
      cannot strand the protected exception behind cancellable cleanup. *)
   Fun.protect
     ~finally:(fun () ->
-      Eio.Mutex.use_rw ~protect:true mu (fun () ->
-        lock.users <- lock.users - 1;
-        if lock.users = 0
-        then
-          match Keeper_submission_table.find_opt keeper_submission_locks key with
-          | Some current when current == lock ->
-            Keeper_submission_table.remove keeper_submission_locks key
-          | Some _ | None -> ()))
-    (fun () -> Eio.Mutex.use_rw ~protect:true lock.mutex f)
+      leave_pending ();
+      Eio.Cancel.protect (fun () ->
+        Eio.Mutex.use_rw ~protect:true mu (fun () ->
+          lock.users <- lock.users - 1;
+          if lock.users = 0
+          then
+            match Keeper_lane_table.find_opt table key with
+            | Some current when current == lock ->
+              Keeper_lane_table.remove table key
+            | Some _ | None -> ())))
+    run
+;;
+
+let with_keeper_submission_lock ~base_path ~keeper_name f =
+  with_keeper_lane_lock
+    Unobserved_lane
+    keeper_submission_locks
+    ~base_path
+    ~keeper_name
+    f
+;;
+
+let with_keeper_persistence_lock ~base_path ~keeper_name f =
+  with_keeper_lane_lock
+    Persistence_lane
+    keeper_persistence_locks
+    ~base_path
+    ~keeper_name
+    f
 ;;
 
 exception CancelledByOperator
@@ -347,6 +504,38 @@ let request_dir ~base_path =
 
 let active_request_dir ~base_path = Filename.concat (request_dir ~base_path) "active"
 let terminal_request_dir ~base_path = Filename.concat (request_dir ~base_path) "terminal"
+let atomic_staging_dir ~base_path =
+  Filename.concat (request_dir ~base_path) ".atomic-staging-v1"
+;;
+
+let legacy_atomic_migration_marker ~base_path =
+  Filename.concat
+    (atomic_staging_dir ~base_path)
+    "legacy-atomic-orphans-migrated.json"
+;;
+
+let legacy_atomic_migration_schema_version = 1
+
+let legacy_atomic_migration_marker_json =
+  `Assoc
+    [ "schema_version", `Int legacy_atomic_migration_schema_version
+    ]
+;;
+
+let legacy_atomic_migration_marker_max_bytes =
+  Yojson.Safe.pretty_to_string legacy_atomic_migration_marker_json
+  |> String.length
+;;
+
+let unix_file_kind_to_string = function
+  | Unix.S_REG -> "regular_file"
+  | Unix.S_DIR -> "directory"
+  | Unix.S_CHR -> "character_device"
+  | Unix.S_BLK -> "block_device"
+  | Unix.S_LNK -> "symbolic_link"
+  | Unix.S_FIFO -> "fifo"
+  | Unix.S_SOCK -> "socket"
+;;
 
 let canonical_base_path base_path =
   let normalized = Workspace_utils_backend_setup.normalize_base_path base_path in
@@ -464,19 +653,10 @@ let access_rejection_to_json = function
 
 let submit_error_to_json = function
   | Submit_rejected rejection -> access_rejection_to_json rejection
-  | Submit_admission_blocked { keeper_name; reason } ->
-    let message =
-      match reason with
-      | Keeper_persistence_admission.Recovery_failed ->
-        "The Keeper lane is fenced because durable queue or delivery recovery failed; repair the typed recovery error and restart before dispatch."
-      | Keeper_persistence_admission.Reconciliation_required ->
-        "The Keeper lane is fenced because a prior request acceptance requires canonical persistence reconciliation; inspect its preserved request id and repair before restart."
-    in
+  | Submit_invalid_keeper_name { reason } ->
     `Assoc
-      [ "error", `String "keeper_persistence_admission_blocked"
-      ; "keeper_name", `String keeper_name
-      ; "reason", `String (Keeper_persistence_admission.block_reason_to_wire reason)
-      ; "message", `String message
+      [ "error", `String "invalid_keeper_name"
+      ; "message", `String reason
       ]
   | Initial_persistence_failed { reason } ->
     `Assoc
@@ -802,6 +982,10 @@ let entry_of_record_json ~base_path ~request_id:expected_request_id json :
            expected_request_id)
   in
   let* keeper_name = required_string "keeper_name" json in
+  let* keeper_name =
+    Keeper_id.Keeper_name.of_string keeper_name
+    |> Result.map Keeper_id.Keeper_name.to_string
+  in
   let* persisted_base_path = required_string "base_path" json in
   let* submitted_by = required_string "submitted_by" json in
   let* () =
@@ -887,12 +1071,9 @@ let observe_namespace_degradation ~operation (entry : entry) detail =
     detail
 ;;
 
-let remove_duplicate_source ~(entry : entry) path =
+let remove_duplicate_source_unlocked ~ops ~(entry : entry) path =
   let result =
-    match Atomic.get durable_remove_hook_for_testing with
-    | None -> Keeper_fs.remove_file_durable path
-    | Some before_stage ->
-      Keeper_fs.For_testing.remove_file_durable ~before_stage path
+    ops.remove_file_durable ~ownership_root:entry.base_path path
   in
   match result with
   | Ok () -> true
@@ -909,6 +1090,7 @@ let remove_duplicate_source ~(entry : entry) path =
 
 type persist_integrity_error =
   | Unsafe_request_id
+  | Invalid_keeper_name of string
   | Terminal_partition_nonterminal
   | Terminal_conflict
   | Terminal_unreadable of string
@@ -925,6 +1107,7 @@ type persist_error =
 
 let persist_integrity_error_to_string = function
   | Unsafe_request_id -> "request_id is unsafe for persistence"
+  | Invalid_keeper_name reason -> reason
   | Terminal_partition_nonterminal ->
     "terminal partition contains a non-terminal request record"
   | Terminal_conflict ->
@@ -949,14 +1132,13 @@ let persist_error_published = function
   | Integrity_failed _ -> false
 ;;
 
-let save_entry_durable path (entry : entry) =
-  (match Atomic.get durable_write_hook_for_testing with
-   | None -> Keeper_fs.save_json_durable_atomic path (entry_record_to_json entry)
-   | Some before_stage ->
-     Keeper_fs.For_testing.save_json_durable_atomic
-       ~before_stage
-       path
-       (entry_record_to_json entry))
+let save_entry_durable ~ops path (entry : entry) =
+  let temp_dir = atomic_staging_dir ~base_path:entry.base_path in
+  ops.save_json_durable
+    ~ownership_root:entry.base_path
+    ~temp_dir
+    path
+    (entry_record_to_json entry)
   |> Result.map_error (fun error ->
     Write_failed
       (if error.Keeper_fs.renamed
@@ -964,12 +1146,12 @@ let save_entry_durable path (entry : entry) =
        else Not_published error))
 ;;
 
-let persist_terminal_from_source ~(entry : entry) ~source_path =
+let persist_terminal_from_source ~ops ~(entry : entry) ~source_path =
   match terminal_record_path ~base_path:entry.base_path ~request_id:entry.request_id with
   | None -> Error (Integrity_failed Unsafe_request_id)
   | Some terminal_path ->
     if String.equal source_path terminal_path
-    then save_entry_durable source_path entry
+    then save_entry_durable ~ops source_path entry
     else if Fs_compat.file_exists terminal_path
     then (
       match
@@ -984,7 +1166,7 @@ let persist_terminal_from_source ~(entry : entry) ~source_path =
         if entry_record_to_json terminal_entry = entry_record_to_json entry
         then (
           (* See lossless namespace protocol: observed cleanup failure is retried. *)
-          ignore (remove_duplicate_source ~entry source_path : bool);
+          ignore (remove_duplicate_source_unlocked ~ops ~entry source_path : bool);
           Ok ())
         else
           Error (Integrity_failed Terminal_conflict)
@@ -1002,13 +1184,13 @@ let persist_terminal_from_source ~(entry : entry) ~source_path =
          after destination commit may leave both names, and exact lookup gives
          terminal precedence. Never rename the sole source across directories:
          partial parent-directory fsync can otherwise lose both names. *)
-      let* () = save_entry_durable terminal_path entry in
+      let* () = save_entry_durable ~ops terminal_path entry in
       (* See lossless namespace protocol: observed cleanup failure is retried. *)
-      ignore (remove_duplicate_source ~entry source_path : bool);
+      ignore (remove_duplicate_source_unlocked ~ops ~entry source_path : bool);
       Ok ())
 ;;
 
-let persist_entry ?source_path (entry : entry) =
+let persist_entry_unlocked ~ops ?source_path (entry : entry) =
   match active_record_path ~base_path:entry.base_path ~request_id:entry.request_id with
   | None -> Error (Integrity_failed Unsafe_request_id)
   | Some active_path ->
@@ -1020,9 +1202,25 @@ let persist_entry ?source_path (entry : entry) =
         | None -> active_path
       in
       persist_terminal_from_source
+        ~ops
         ~entry
         ~source_path)
-    else save_entry_durable active_path entry
+    else save_entry_durable ~ops active_path entry
+;;
+
+let with_entry_persistence_transaction (entry : entry) f =
+  match Keeper_id.Keeper_name.of_string entry.keeper_name with
+  | Error reason -> Error (Integrity_failed (Invalid_keeper_name reason))
+  | Ok keeper_name ->
+    with_keeper_persistence_lock
+      ~base_path:entry.base_path
+      ~keeper_name
+      f
+;;
+
+let persist_entry ~ops ?source_path (entry : entry) =
+  with_entry_persistence_transaction entry (fun () ->
+    persist_entry_unlocked ~ops ?source_path entry)
 ;;
 
 let load_record_canonical_located ~base_path ~request_id : located_load_result =
@@ -1159,13 +1357,8 @@ let request_id_of_record_filename name =
   else None
 ;;
 
-let rollback_rejected_record_file path =
-  let result =
-    match Atomic.get durable_remove_hook_for_testing with
-    | None -> Keeper_fs.remove_file_durable path
-    | Some before_stage ->
-      Keeper_fs.For_testing.remove_file_durable ~before_stage path
-  in
+let rollback_rejected_record_file_unlocked ~ops ~ownership_root path =
+  let result = ops.remove_file_durable ~ownership_root path in
   match result with
   | Ok () -> Ok ()
   | Error error ->
@@ -1186,7 +1379,7 @@ let mark_lost_after_recovery ?source_path (entry : entry) =
     { entry with status = Lost { reason }; completed_at = Some (Time_compat.now ()) }
   in
   match
-    persist_entry ?source_path lost
+    persist_entry ~ops:production_request_ops ?source_path lost
     |> observe_persist_error ~operation:"recovery" lost
   with
   | Ok () -> Ok lost
@@ -1201,6 +1394,7 @@ let request_has_live_worker ~base_path ~submitted_by request_id =
 let recovery_terminal_operation = function
   | Active_store -> "active_terminal_finalize"
   | Legacy_store -> "legacy_terminal_finalize"
+  | Atomic_orphan_store -> "atomic_orphan_cleanup"
 ;;
 
 type terminal_destination_state =
@@ -1213,19 +1407,29 @@ type recovery_source_state =
   | Recovery_duplicate_waiting_for_active
   | Recovery_source_conflict of string
 
+let recovery_source_peer ~source (entry : entry) =
+  match source with
+  | Atomic_orphan_store ->
+    Error "atomic orphan inventory is not a request record source"
+  | Active_store ->
+    Ok
+      ( legacy_record_path ~base_path:entry.base_path ~request_id:entry.request_id
+      , Recovery_source_ready )
+  | Legacy_store ->
+    Ok
+      ( active_record_path ~base_path:entry.base_path ~request_id:entry.request_id
+      , Recovery_duplicate_waiting_for_active )
+;;
+
 let recovery_source_state ~source (entry : entry) =
+  match recovery_source_peer ~source entry with
+  | Error reason -> Recovery_source_conflict reason
+  | Ok (peer_path, exact_duplicate_state) ->
   match terminal_record_path ~base_path:entry.base_path ~request_id:entry.request_id with
   | None -> Recovery_source_conflict "request_id is unsafe for persistence"
   | Some terminal_path when Fs_compat.file_exists terminal_path ->
     Recovery_source_ready
   | Some _ ->
-    let peer_path =
-      match source with
-      | Active_store ->
-        legacy_record_path ~base_path:entry.base_path ~request_id:entry.request_id
-      | Legacy_store ->
-        active_record_path ~base_path:entry.base_path ~request_id:entry.request_id
-    in
     (match peer_path with
      | None -> Recovery_source_conflict "request_id is unsafe for persistence"
      | Some peer_path when not (Fs_compat.file_exists peer_path) ->
@@ -1239,10 +1443,7 @@ let recovery_source_state ~source (entry : entry) =
         with
         | Found peer_entry ->
           (match compare_source_entries entry peer_entry with
-           | Exact_source_duplicate ->
-             (match source with
-              | Active_store -> Recovery_source_ready
-              | Legacy_store -> Recovery_duplicate_waiting_for_active)
+           | Exact_source_duplicate -> exact_duplicate_state
            | (Conflicting_source_identity | Conflicting_source_state) as conflict ->
              Recovery_source_conflict (source_conflict_to_string conflict))
         | Unreadable reason ->
@@ -1288,17 +1489,25 @@ let terminal_destination_state (entry : entry) =
 ;;
 
 let finalize_existing_terminal_source ~(entry : entry) source_path =
-  match terminal_record_path ~base_path:entry.base_path ~request_id:entry.request_id with
-  | None -> Error (Integrity_failed Unsafe_request_id)
-  | Some terminal_path ->
-    let* () = save_entry_durable terminal_path entry in
-    Ok (remove_duplicate_source ~entry source_path)
+  with_entry_persistence_transaction entry (fun () ->
+    match terminal_record_path ~base_path:entry.base_path ~request_id:entry.request_id with
+    | None -> Error (Integrity_failed Unsafe_request_id)
+    | Some terminal_path ->
+      let* () = save_entry_durable ~ops:production_request_ops terminal_path entry in
+      Ok
+        (remove_duplicate_source_unlocked
+           ~ops:production_request_ops
+           ~entry
+           source_path))
 ;;
 
 let empty_recovery_report =
   { lost = 0
   ; migrated = 0
   ; cleaned = 0
+  ; atomic_orphans_inspected = 0
+  ; atomic_orphans_deleted = 0
+  ; atomic_orphans_preserved = 0
   ; deferred = 0
   ; unreadable = 0
   ; failed = 0
@@ -1306,8 +1515,6 @@ let empty_recovery_report =
   ; record_errors = []
   }
 ;;
-
-module Keeper_name_set = Set.Make (String)
 
 let recovery_record_error_kind_to_string = function
   | Recovery_record_unreadable reason -> "unreadable: " ^ reason
@@ -1333,7 +1540,8 @@ let record_error ~store ~path ~request_id ?keeper_name kind report =
     "keeper_msg_async: recovery record failed store=%s request_id=%s keeper=%s path=%s error=%s"
     (match store with
      | Active_store -> "active"
-    | Legacy_store -> "legacy")
+     | Legacy_store -> "legacy"
+     | Atomic_orphan_store -> "atomic_orphan")
     request_id
     keeper_label
     path
@@ -1344,7 +1552,7 @@ let record_error ~store ~path ~request_id ?keeper_name kind report =
   }
 ;;
 
-let recover_record_path ~base_path ~source ~blocked_keeper_names ~request_id path report =
+let recover_record_path ~base_path ~source ~request_id path report =
   match load_record_at_path ~base_path ~request_id path with
   | Found entry ->
     (match recovery_source_state ~source entry with
@@ -1368,18 +1576,41 @@ let recover_record_path ~base_path ~source ~blocked_keeper_names ~request_id pat
      | Recovery_source_ready ->
        (match terminal_destination_state entry with
      | Cleanup_source ->
-       if remove_duplicate_source ~entry path
-       then { report with cleaned = report.cleaned + 1 }
-       else
-         { (record_error
-              ~store:source
-              ~path
-              ~request_id
-              ~keeper_name:entry.keeper_name
-              Recovery_source_cleanup_failed
-              report) with
-           failed = report.failed + 1
-         }
+       (match
+          with_entry_persistence_transaction entry (fun () ->
+            Ok
+              (remove_duplicate_source_unlocked
+                 ~ops:production_request_ops
+                 ~entry
+                 path))
+        with
+        | Ok true -> { report with cleaned = report.cleaned + 1 }
+        | Ok false ->
+          { (record_error
+               ~store:source
+               ~path
+               ~request_id
+               ~keeper_name:entry.keeper_name
+               Recovery_source_cleanup_failed
+               report) with
+            failed = report.failed + 1
+          }
+        | Error error ->
+          ignore
+            (observe_persist_error
+               ~operation:"recovery_source_cleanup"
+               entry
+               (Error error)
+              : (unit, persist_error) result);
+          { (record_error
+               ~store:source
+               ~path
+               ~request_id
+               ~keeper_name:entry.keeper_name
+               (Recovery_persistence_failed (persist_error_to_string error))
+               report) with
+            failed = report.failed + 1
+          })
      | Invalid_terminal_destination integrity_error ->
        ignore
          (observe_persist_error
@@ -1436,8 +1667,6 @@ let recover_record_path ~base_path ~source ~blocked_keeper_names ~request_id pat
            ~submitted_by:entry.submitted_by
            request_id
        then report
-       else if Keeper_name_set.mem entry.keeper_name blocked_keeper_names
-       then { report with deferred = report.deferred + 1 }
        else (
          match mark_lost_after_recovery ~source_path:path entry with
          | Ok _ -> { report with lost = report.lost + 1 }
@@ -1487,17 +1716,352 @@ let store_error ~store ~path reason report =
   }
 ;;
 
-let recover_record_directory ~base_path ~source ~blocked_keeper_names dir report =
+let merge_atomic_cleanup_report cleanup report =
+  let record_cleaned size_class count =
+    if count > 0
+    then
+      Otel_metric_store.inc_counter
+        Otel_metric_store.metric_fs_atomic_orphans_cleaned
+        ~labels:
+          [ "size_class", Fs_compat.Atomic_orphan_size_class.to_label size_class ]
+        ~delta:(Float.of_int count)
+        ()
+  in
+  record_cleaned Fs_compat.Atomic_orphan_size_class.Empty cleanup.Fs_compat.deleted;
+  record_cleaned
+    Fs_compat.Atomic_orphan_size_class.With_data
+    cleanup.Fs_compat.preserved;
+  let report =
+    { report with
+      atomic_orphans_inspected =
+        report.atomic_orphans_inspected + cleanup.Fs_compat.inspected
+    ; atomic_orphans_deleted = report.atomic_orphans_deleted + cleanup.Fs_compat.deleted
+    ; atomic_orphans_preserved =
+        report.atomic_orphans_preserved + cleanup.Fs_compat.preserved
+    }
+  in
+  List.fold_left
+    (fun report failure ->
+       store_error
+         ~store:Atomic_orphan_store
+         ~path:failure.Fs_compat.path
+         (Fs_compat.atomic_orphan_cleanup_failure_to_string failure)
+         report)
+    report
+    cleanup.Fs_compat.failures
+;;
+
+let run_atomic_cleanup_in_systhread ~ownership_root path =
+  let result =
+    Eio_guard.run_in_systhread (fun () ->
+      Fs_compat.cleanup_atomic_orphans
+        ~ownership_root
+        ~base_path:path
+        ~scope:Fs_compat.Directory_only
+        ())
+  in
+  Eio_guard.check_if_ready ();
+  result
+;;
+
+let sweep_request_atomic_orphans ~base_path report =
+  let staging = atomic_staging_dir ~base_path in
+  let cleanup = run_atomic_cleanup_in_systhread ~ownership_root:base_path staging in
+  if cleanup.deleted + cleanup.preserved > 0
+  then
+    Log.Keeper.warn
+      "keeper_msg_async: startup atomic staging cleanup deleted=%d preserved=%d staging=%s"
+      cleanup.deleted
+      cleanup.preserved
+      staging;
+  merge_atomic_cleanup_report cleanup report
+;;
+
+type legacy_atomic_migration_state =
+  | Legacy_atomic_migration_missing
+  | Legacy_atomic_migration_complete
+  | Legacy_atomic_migration_invalid of string
+  | Legacy_atomic_migration_unavailable of string
+
+type legacy_atomic_marker_read_error =
+  | Marker_invalid_file_kind of Unix.file_kind
+  | Marker_invalid_size of { max_bytes : int }
+  | Marker_identity_changed
+  | Marker_io_unavailable of string
+
+let legacy_atomic_marker_read_error_to_string = function
+  | Marker_invalid_file_kind kind ->
+    Printf.sprintf
+      "migration marker is not a regular file (kind=%s)"
+      (unix_file_kind_to_string kind)
+  | Marker_invalid_size { max_bytes } ->
+    Printf.sprintf "migration marker exceeds canonical size (max=%d)" max_bytes
+  | Marker_identity_changed ->
+    "migration marker identity changed while opening"
+  | Marker_io_unavailable reason -> reason
+;;
+
+let legacy_atomic_marker_error_is_repairable = function
+  | Marker_invalid_file_kind _
+  | Marker_invalid_size _ -> true
+  | Marker_identity_changed
+  | Marker_io_unavailable _ -> false
+;;
+
+let read_file_no_follow ~max_bytes path =
+  let initial = Unix.lstat path in
+  if initial.Unix.st_kind <> Unix.S_REG
+  then Error (Marker_invalid_file_kind initial.Unix.st_kind)
+  else (
+    let fd_result =
+      try
+        Ok
+          (Unix.openfile
+             path
+             [ Unix.O_RDONLY; Unix.O_CLOEXEC; Unix.O_NONBLOCK ]
+             0)
+      with
+      | exn -> Error (Marker_io_unavailable (Printexc.to_string exn))
+    in
+    match fd_result with
+    | Error _ as error -> error
+    | Ok fd ->
+    let read_result =
+      try
+        let opened = Unix.fstat fd in
+        if
+          opened.Unix.st_kind <> Unix.S_REG
+          || opened.Unix.st_dev <> initial.Unix.st_dev
+          || opened.Unix.st_ino <> initial.Unix.st_ino
+        then Error Marker_identity_changed
+        else if opened.Unix.st_size > max_bytes
+        then Error (Marker_invalid_size { max_bytes })
+        else (
+          (* The extra byte detects growth after [fstat] without allocating
+             from attacker-controlled metadata or reading an unbounded file. *)
+          let content = Bytes.create (max_bytes + 1) in
+          let rec read offset =
+            if offset = Bytes.length content
+            then Error (Marker_invalid_size { max_bytes })
+            else
+              match
+                Unix.read fd content offset (Bytes.length content - offset)
+              with
+              | 0 -> Ok (Bytes.sub_string content 0 offset)
+            | count ->
+              read (offset + count)
+          in
+          read 0)
+      with
+      | exn -> Error (Marker_io_unavailable (Printexc.to_string exn))
+    in
+    let close_result =
+      try Unix.close fd; Ok () with
+      | exn -> Error (Marker_io_unavailable (Printexc.to_string exn))
+    in
+    match read_result, close_result with
+    | Ok content, Ok () -> Ok content
+    | Error reason, Ok () -> Error reason
+    | Ok _, Error (Marker_io_unavailable close_error) ->
+      Error
+        (Marker_io_unavailable
+           ("migration marker close failed: " ^ close_error))
+    | Error reason, Error (Marker_io_unavailable close_error) ->
+      Error
+        (Marker_io_unavailable
+           (Printf.sprintf
+              "%s; migration marker close also failed: %s"
+              (legacy_atomic_marker_read_error_to_string reason)
+              close_error))
+    | Ok _, Error error
+    | Error _, Error error -> Error error)
+;;
+
+let inspect_legacy_atomic_migration_marker ~base_path =
+  let marker = legacy_atomic_migration_marker ~base_path in
+  let result =
+    Eio_guard.run_in_systhread (fun () ->
+      try
+        match
+          Fs_compat.inspect_owned_directory_chain
+            ~ownership_root:base_path
+            (Filename.dirname marker)
+        with
+        | Error rejection ->
+          Legacy_atomic_migration_unavailable
+            (Fs_compat.owned_directory_chain_rejection_to_string rejection)
+        | Ok Fs_compat.Owned_directory_missing ->
+          Legacy_atomic_migration_missing
+        | Ok (Fs_compat.Owned_directory _) ->
+          (match
+             read_file_no_follow
+               ~max_bytes:legacy_atomic_migration_marker_max_bytes
+               marker
+           with
+           | Error error ->
+             let reason = legacy_atomic_marker_read_error_to_string error in
+             if legacy_atomic_marker_error_is_repairable error
+             then Legacy_atomic_migration_invalid reason
+             else Legacy_atomic_migration_unavailable reason
+           | Ok content ->
+             (try
+                match Yojson.Safe.from_string content with
+                | `Assoc [ ("schema_version", `Int version) ]
+                  when version = legacy_atomic_migration_schema_version ->
+                  Legacy_atomic_migration_complete
+                | `Assoc _ ->
+                  Legacy_atomic_migration_invalid
+                    "migration marker does not match the canonical schema"
+                | _ ->
+                  Legacy_atomic_migration_invalid
+                    "migration marker root is not an object"
+              with
+              | Yojson.Json_error detail ->
+                Legacy_atomic_migration_invalid
+                  ("migration marker is malformed: " ^ detail)))
+      with
+      | Unix.Unix_error (Unix.ENOENT, _, _) ->
+        Legacy_atomic_migration_missing
+      | exn -> Legacy_atomic_migration_unavailable (Printexc.to_string exn))
+  in
+  Eio_guard.check_if_ready ();
+  result
+;;
+
+let fsync_owned_directory ~ownership_root path =
+  let result =
+    Eio_guard.run_in_systhread (fun () ->
+      match Fs_compat.inspect_owned_directory_chain ~ownership_root path with
+      | Error rejection ->
+        Error (Fs_compat.owned_directory_chain_rejection_to_string rejection)
+      | Ok Fs_compat.Owned_directory_missing -> Ok ()
+      | Ok (Fs_compat.Owned_directory expected) ->
+        let fd_result =
+          try Ok (Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0) with
+          | exn -> Error (Printexc.to_string exn)
+        in
+        (match fd_result with
+         | Error _ as error -> error
+         | Ok fd ->
+           let sync_result =
+             try
+               let opened = Unix.fstat fd in
+               if
+                 opened.Unix.st_kind <> Unix.S_DIR
+                 || opened.Unix.st_dev <> expected.Unix.st_dev
+                 || opened.Unix.st_ino <> expected.Unix.st_ino
+               then Error "directory identity changed before migration fsync"
+               else (
+                 Unix.fsync fd;
+                 Ok ())
+             with
+             | exn -> Error (Printexc.to_string exn)
+           in
+           let close_result =
+             try Unix.close fd; Ok () with
+             | exn -> Error (Printexc.to_string exn)
+           in
+           (match sync_result, close_result with
+            | Ok (), Ok () -> Ok ()
+            | Error reason, Ok () -> Error reason
+            | Ok (), Error reason ->
+              Error ("migration directory close failed: " ^ reason)
+            | Error reason, Error close_reason ->
+              Error
+                (Printf.sprintf
+                   "%s; migration directory close also failed: %s"
+                   reason
+                   close_reason))))
+  in
+  Eio_guard.check_if_ready ();
+  result
+;;
+
+let migrate_legacy_atomic_orphans ~base_path =
+  match canonical_base_path base_path with
+  | Error rejection ->
+    store_error
+      ~store:Atomic_orphan_store
+      ~path:base_path
+      (Yojson.Safe.to_string (access_rejection_to_json rejection))
+      empty_recovery_report
+  | Ok base_path ->
+    let marker_state = inspect_legacy_atomic_migration_marker ~base_path in
+    (match marker_state with
+     | Legacy_atomic_migration_complete -> empty_recovery_report
+     | Legacy_atomic_migration_unavailable reason ->
+       store_error
+         ~store:Atomic_orphan_store
+         ~path:(legacy_atomic_migration_marker ~base_path)
+         reason
+         empty_recovery_report
+     | Legacy_atomic_migration_missing
+     | Legacy_atomic_migration_invalid _ ->
+       (match marker_state with
+        | Legacy_atomic_migration_invalid reason ->
+          Log.Keeper.warn
+            "keeper_msg_async: legacy atomic migration marker will be repaired path=%s reason=%s"
+            (legacy_atomic_migration_marker ~base_path)
+            reason
+        | Legacy_atomic_migration_missing
+        | Legacy_atomic_migration_complete
+        | Legacy_atomic_migration_unavailable _ -> ());
+       let migration_directories =
+         [ request_dir ~base_path
+         ; active_request_dir ~base_path
+         ; terminal_request_dir ~base_path
+         ]
+       in
+       let report =
+         migration_directories
+         |> List.fold_left
+              (fun report path ->
+                 run_atomic_cleanup_in_systhread ~ownership_root:base_path path
+                 |> fun cleanup -> merge_atomic_cleanup_report cleanup report)
+              empty_recovery_report
+       in
+       let report =
+         if report.failed > 0
+         then report
+         else
+           List.fold_left
+             (fun report path ->
+                match fsync_owned_directory ~ownership_root:base_path path with
+                | Ok () -> report
+                | Error reason ->
+                  store_error ~store:Atomic_orphan_store ~path reason report)
+             report
+             migration_directories
+       in
+       if report.failed > 0 then report else (
+         let marker = legacy_atomic_migration_marker ~base_path in
+         match
+           Keeper_fs.save_json_durable_atomic
+             ~ownership_root:base_path
+             ~temp_dir:(atomic_staging_dir ~base_path)
+             marker
+             legacy_atomic_migration_marker_json
+         with
+         | Ok () -> report
+         | Error error ->
+           store_error
+             ~store:Atomic_orphan_store
+             ~path:marker
+             (Keeper_fs.durable_write_error_to_string error)
+             report))
+;;
+
+let recover_record_directory ~base_path ~source dir report =
   try
-    match Fs_compat.path_kind dir with
-    | Fs_compat.Missing -> report
-    | Fs_compat.Other ->
+    match Fs_compat.inspect_owned_directory_chain ~ownership_root:base_path dir with
+    | Ok Fs_compat.Owned_directory_missing -> report
+    | Error rejection ->
       store_error
         ~store:source
         ~path:dir
-        "keeper_msg request store path is not a directory"
+        (Fs_compat.owned_directory_chain_rejection_to_string rejection)
         report
-    | Fs_compat.Directory ->
+    | Ok (Fs_compat.Owned_directory _) ->
       Fs_compat.read_dir dir
       |> List.fold_left
            (fun report name ->
@@ -1507,8 +2071,19 @@ let recover_record_directory ~base_path ~source ~blocked_keeper_names dir report
               | Some request_id ->
                 let path = Filename.concat dir name in
                 (try
-                   match Fs_compat.path_kind path with
-                   | Fs_compat.Directory ->
+                   match Unix.lstat path with
+                   | stat when stat.Unix.st_kind = Unix.S_REG ->
+                     with_store_transition_lock
+                       ~base_path
+                       ~request_id
+                       (fun () ->
+                          recover_record_path
+                            ~base_path
+                            ~source
+                            ~request_id
+                            path
+                            report)
+                   | _ ->
                      { (record_error
                           ~store:source
                           ~path
@@ -1517,7 +2092,7 @@ let recover_record_directory ~base_path ~source ~blocked_keeper_names dir report
                           report) with
                        failed = report.failed + 1
                      }
-                   | Fs_compat.Missing ->
+                   | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
                      { (record_error
                           ~store:source
                           ~path
@@ -1526,18 +2101,6 @@ let recover_record_directory ~base_path ~source ~blocked_keeper_names dir report
                           report) with
                        failed = report.failed + 1
                      }
-                   | Fs_compat.Other ->
-                     with_store_transition_lock
-                       ~base_path
-                       ~request_id
-                       (fun () ->
-                          recover_record_path
-                            ~base_path
-                            ~source
-                            ~blocked_keeper_names
-                            ~request_id
-                            path
-                            report)
                  with
                  | Eio.Cancel.Cancelled _ as exn -> raise exn
                  | exn ->
@@ -1565,21 +2128,18 @@ let recover_record_directory ~base_path ~source ~blocked_keeper_names dir report
     store_error ~store:source ~path:dir (Printexc.to_string exn) report
 ;;
 
-let recover_lost_disk_records_canonical ~base_path ~blocked_keeper_names =
-  let blocked_keeper_names = Keeper_name_set.of_list blocked_keeper_names in
+let recover_lost_disk_records_canonical ~base_path =
   let active_dir = active_request_dir ~base_path in
   let legacy_dir = request_dir ~base_path in
   let report =
-    recover_record_directory
-    ~base_path
-    ~source:Active_store
-    ~blocked_keeper_names
-    active_dir
-    empty_recovery_report
+    sweep_request_atomic_orphans ~base_path empty_recovery_report
+    |> recover_record_directory
+         ~base_path
+         ~source:Active_store
+         active_dir
       |> recover_record_directory
            ~base_path
            ~source:Legacy_store
-           ~blocked_keeper_names
            legacy_dir
   in
   { report with
@@ -1588,10 +2148,9 @@ let recover_lost_disk_records_canonical ~base_path ~blocked_keeper_names =
   }
 ;;
 
-let recover_lost_disk_records ?(blocked_keeper_names = []) ~base_path () =
+let recover_lost_disk_records ~base_path () =
   match canonical_base_path base_path with
-  | Ok base_path ->
-    recover_lost_disk_records_canonical ~base_path ~blocked_keeper_names
+  | Ok base_path -> recover_lost_disk_records_canonical ~base_path
   | Error rejection ->
     Log.Keeper.error
       "keeper_msg_async: recovery rejected base_path error=%s"
@@ -1599,17 +2158,11 @@ let recover_lost_disk_records ?(blocked_keeper_names = []) ~base_path () =
     { empty_recovery_report with failed = 1 }
 ;;
 
-let generate_request_id () =
-  match Atomic.get request_id_hook_for_testing with
-  | None -> Random_id.prefixed ~prefix:"kmsg-" ~bytes:16
-  | Some generate -> generate ()
-;;
-
 let with_lock f = Eio.Mutex.use_rw ~protect:true mu (fun () -> f ())
 
-let reserve_new_request ~base_path ~submitted_by ~keeper_name =
+let reserve_new_request ~ops ~base_path ~submitted_by ~keeper_name =
   let rec reserve () =
-    let request_id = generate_request_id () in
+    let request_id = ops.generate_request_id () in
     if not (is_safe_request_id request_id)
     then reserve ()
     else
@@ -1682,14 +2235,14 @@ let publish_if_owned key transition_lock entry =
     | Some _ | None -> ())
 ;;
 
-let project_canonical_integrity_failure_locked key transition_lock
+let project_canonical_integrity_failure_locked ~ops key transition_lock
     (attempted_entry : entry) =
   (* An integrity error means another durable record is already authoritative
      or the namespace cannot be trusted. Do not attempt a competing marker
      write and do not shadow it with process-local polling truth. The closed
      projection carries exact canonical lookup truth, including an explicit
      load error when no terminal [request_status] can represent it. *)
-  Option.iter (fun hook -> hook ()) (Atomic.get integrity_projection_hook_for_testing);
+  ops.before_integrity_projection ();
   let poll_result =
     load_record_canonical
       ~base_path:attempted_entry.base_path
@@ -1697,13 +2250,9 @@ let project_canonical_integrity_failure_locked key transition_lock
   in
   (match poll_result with
    | Absent ->
-     (* Publish the lane fence before detaching volatile ownership. A submit
-        that has not yet crossed its per-Keeper admission check then fails
-        before allocating another request id; at most the one submit already
-        inside that lane's acceptance critical section can precede the fence. *)
-     Keeper_persistence_admission.block_reconciliation_required
-       ~base_path:attempted_entry.base_path
-       ~keeper_name:attempted_entry.keeper_name;
+     (* Keep the ambiguous request id reserved for request-local
+        reconciliation, but do not turn one request's persistence failure into
+        lifecycle authority over later work in the Keeper lane. *)
      detach_runtime_preserving_reservation_if_owned key transition_lock
    | Found _ | Unreadable _ | Rejected _ ->
      remove_runtime_if_owned key transition_lock);
@@ -1717,7 +2266,7 @@ let project_canonical_integrity_failure_locked key transition_lock
   | poll_result -> Settlement_projection_error { poll_result }
 ;;
 
-let persist_failure_locked key transition_lock (attempted_entry : entry) reason =
+let persist_failure_locked ~ops key transition_lock (attempted_entry : entry) reason =
   let failure_entry =
     { attempted_entry with
       status =
@@ -1727,7 +2276,7 @@ let persist_failure_locked key transition_lock (attempted_entry : entry) reason 
     }
   in
   match
-    persist_entry failure_entry
+    persist_entry ~ops failure_entry
     |> observe_persist_error ~operation:"persistence_failure_marker" failure_entry
   with
   | Ok () ->
@@ -1756,14 +2305,18 @@ let persist_failure_locked key transition_lock (attempted_entry : entry) reason 
       ; origin = Transition_commit
       }
   | Error (Integrity_failed _) ->
-    project_canonical_integrity_failure_locked key transition_lock failure_entry
+    project_canonical_integrity_failure_locked
+      ~ops
+      key
+      transition_lock
+      failure_entry
 ;;
 
 let transition_lock_for_key key =
   with_lock (fun () -> Request_table.find_opt transition_locks key)
 ;;
 
-let set_status ?(preserve_terminal = false) key status =
+let set_status ~ops ?(preserve_terminal = false) key status =
   match transition_lock_for_key key with
   | None -> None
   | Some transition_lock ->
@@ -1792,7 +2345,7 @@ let set_status ?(preserve_terminal = false) key status =
         in
         let updated = { entry with status; completed_at } in
         (match
-           persist_entry updated
+           persist_entry ~ops updated
            |> observe_persist_error ~operation:"status_update" updated
          with
          | Ok () ->
@@ -1820,6 +2373,7 @@ let set_status ?(preserve_terminal = false) key status =
          | Error (Write_failed (Not_published error)) ->
            Some
              (persist_failure_locked
+                ~ops
                 key
                 transition_lock
                 updated
@@ -1827,13 +2381,14 @@ let set_status ?(preserve_terminal = false) key status =
          | Error (Integrity_failed _) ->
            Some
              (project_canonical_integrity_failure_locked
+                ~ops
                 key
                 transition_lock
                 updated)))
 ;;
 
-let set_status_protected ?preserve_terminal key status =
-  Eio.Cancel.protect (fun () -> set_status ?preserve_terminal key status)
+let set_status_protected ~ops ?preserve_terminal key status =
+  Eio.Cancel.protect (fun () -> set_status ~ops ?preserve_terminal key status)
 ;;
 
 let clear_active_switch key =
@@ -1865,56 +2420,78 @@ let runtime_cancelled_status () =
     "keeper_msg worker was cancelled by runtime before terminal result"
 ;;
 
-let submit ?on_accepted ?on_worker_aborted ?on_worker_settled ~background_sw
+let submit_with_ops ops ?on_accepted ?on_worker_aborted ?on_worker_settled ~background_sw
     ~base_path ~caller ~(f : Eio.Switch.t -> tool_result) ~keeper_name () :
     (submit_outcome, submit_error) result =
   match resolve_access_identity ~base_path ~caller with
   | Error rejection -> Error (Submit_rejected rejection)
   | Ok (base_path, submitted_by) ->
-    with_keeper_submission_lock ~base_path ~keeper_name (fun () ->
-    (match Keeper_persistence_admission.block_reason ~base_path ~keeper_name with
-     | Some reason -> Error (Submit_admission_blocked { keeper_name; reason })
-     | None ->
+    (match Keeper_id.Keeper_name.of_string keeper_name with
+     | Error reason -> Error (Submit_invalid_keeper_name { reason })
+     | Ok keeper_name_id ->
+    let keeper_name = Keeper_id.Keeper_name.to_string keeper_name_id in
+    with_keeper_submission_lock ~base_path ~keeper_name:keeper_name_id (fun () ->
     let request_id, entry, key, transition_lock =
-      reserve_new_request ~base_path ~submitted_by ~keeper_name
+      reserve_new_request ~ops ~base_path ~submitted_by ~keeper_name
     in
     let reconciliation_outcome reason =
-      Keeper_persistence_admission.block_reconciliation_required
-        ~base_path
-        ~keeper_name;
       Ok
         { request_id
         ; acceptance = Reconciliation_required { reason }
         }
     in
-    (match persist_entry entry |> observe_persist_error ~operation:"initial" entry with
-     | Error error ->
-       let reason = persist_error_to_string error in
-       (match error with
-        | Write_failed (Published_uncertain _) ->
-          (match active_record_path ~base_path ~request_id with
-           | None ->
-             detach_runtime_preserving_reservation_if_owned key transition_lock;
-             reconciliation_outcome
-               (Printf.sprintf
-                  "%s; published request path could not be reconstructed for durable rollback"
-                  reason)
-           | Some path ->
-             (match rollback_rejected_record_file path with
-              | Ok () ->
+    let initial_persistence =
+      with_keeper_persistence_lock
+        ~base_path
+        ~keeper_name:keeper_name_id
+        (fun () ->
+           match
+             persist_entry_unlocked ~ops entry
+             |> observe_persist_error ~operation:"initial" entry
+           with
+           | Ok () -> `Persisted
+           | Error error ->
+             let reason = persist_error_to_string error in
+             (match error with
+              | Write_failed (Published_uncertain _) ->
+                (match active_record_path ~base_path ~request_id with
+                 | None ->
+                   detach_runtime_preserving_reservation_if_owned
+                     key
+                     transition_lock;
+                   `Settled
+                     (reconciliation_outcome
+                        (Printf.sprintf
+                           "%s; published request path could not be reconstructed for durable rollback"
+                           reason))
+                 | Some path ->
+                   (match
+                      rollback_rejected_record_file_unlocked
+                        ~ops
+                        ~ownership_root:base_path
+                        path
+                    with
+                    | Ok () ->
+                      remove_runtime_if_owned key transition_lock;
+                      `Settled (Error (Initial_persistence_failed { reason }))
+                    | Error rollback_error ->
+                      detach_runtime_preserving_reservation_if_owned
+                        key
+                        transition_lock;
+                      `Settled
+                        (reconciliation_outcome
+                           (Printf.sprintf
+                              "%s; rollback=%s"
+                              reason
+                              (Keeper_fs.durable_remove_error_to_string
+                                 rollback_error)))))
+              | Write_failed (Not_published _) | Integrity_failed _ ->
                 remove_runtime_if_owned key transition_lock;
-                Error (Initial_persistence_failed { reason })
-              | Error rollback_error ->
-                detach_runtime_preserving_reservation_if_owned key transition_lock;
-                reconciliation_outcome
-                  (Printf.sprintf
-                     "%s; rollback=%s"
-                     reason
-                     (Keeper_fs.durable_remove_error_to_string rollback_error))))
-        | Write_failed (Not_published _) | Integrity_failed _ ->
-          remove_runtime_if_owned key transition_lock;
-          Error (Initial_persistence_failed { reason }))
-     | Ok () ->
+                `Settled (Error (Initial_persistence_failed { reason }))))
+    in
+    (match initial_persistence with
+     | `Settled result -> result
+     | `Persisted ->
        let acceptance_result =
          match on_accepted with
          | None -> Ok ()
@@ -1929,6 +2506,7 @@ let submit ?on_accepted ?on_worker_aborted ?on_worker_settled ~background_sw
         | Error reason ->
           ignore
             (set_status_protected
+               ~ops
                key
                (Persistence_failed
                   { attempted_status = "accepted"; reason })
@@ -1976,9 +2554,10 @@ let submit ?on_accepted ?on_worker_aborted ?on_worker_settled ~background_sw
           in
           let persist_abort_status ~attempted_status reason =
             match notify_aborted reason with
-            | Ok () -> set_status_protected key attempted_status
+            | Ok () -> set_status_protected ~ops key attempted_status
             | Error callback_error ->
               set_status_protected
+                ~ops
                 key
                 (Persistence_failed
                    { attempted_status = status_to_string attempted_status
@@ -1997,7 +2576,8 @@ let submit ?on_accepted ?on_worker_aborted ?on_worker_settled ~background_sw
                publish a false cancellation first and duplicate transcript
                persistence. *)
             ignore
-              (set_status_protected key (Lost { reason }) : worker_settlement option);
+              (set_status_protected ~ops key (Lost { reason })
+                : worker_settlement option);
             Error (Background_fork_failed { request_id; reason })
           in
           let worker_started = Atomic.make false in
@@ -2005,7 +2585,7 @@ let submit ?on_accepted ?on_worker_aborted ?on_worker_settled ~background_sw
           Eio.Fiber.fork_daemon ~sw:background_sw (fun () ->
     Atomic.set worker_started true;
     let running_settlement =
-      set_status_protected ~preserve_terminal:true key Running
+      set_status_protected ~ops ~preserve_terminal:true key Running
     in
     match running_settlement with
     | Some (Status_settlement { status; _ } as settlement)
@@ -2119,7 +2699,7 @@ let submit ?on_accepted ?on_worker_aborted ?on_worker_settled ~background_sw
           ; data = None
           }
       in
-      set_status_protected ~preserve_terminal:true key result
+      set_status_protected ~ops ~preserve_terminal:true key result
       |> Option.iter notify_settled;
       clear_active_switch key;
       `Stop_daemon)
@@ -2138,6 +2718,8 @@ let submit ?on_accepted ?on_worker_aborted ?on_worker_settled ~background_sw
         | exception exn ->
           background_start_failed (Printexc.to_string exn))))))
 ;;
+
+let submit = submit_with_ops production_request_ops
 
 (** Exact owner check for both the process-global table and persisted rows. *)
 let owner_rejection ~caller (entry : entry) =
@@ -2285,13 +2867,11 @@ let cancel_disk_record ~base_path ~caller ~request_id =
        Cancel_worker_ownership_unknown entry.status)
 ;;
 
-let signal_operator_cancel request_sw =
-  match Atomic.get cancel_signal_hook_for_testing with
-  | None -> Eio.Switch.fail request_sw CancelledByOperator
-  | Some signal -> signal request_sw CancelledByOperator
+let signal_operator_cancel ~ops request_sw =
+  ops.signal_cancel request_sw CancelledByOperator
 ;;
 
-let cancel ~base_path ~caller request_id : cancel_result =
+let cancel_with_ops ops ~base_path ~caller request_id : cancel_result =
   match resolve_access_identity ~base_path ~caller with
   | Error rejection -> Cancel_rejected rejection
   | Ok (base_path, caller) ->
@@ -2332,7 +2912,7 @@ let cancel ~base_path ~caller request_id : cancel_result =
                  let commit_and_signal cancelling =
                     let persistence =
                       match
-                        persist_entry cancelling
+                        persist_entry ~ops cancelling
                         |> observe_persist_error ~operation:"operator_cancel" cancelling
                       with
                       | Ok () -> Ok `Durable
@@ -2374,7 +2954,7 @@ let cancel ~base_path ~caller request_id : cancel_result =
                         | `Published None -> `Result accepted_result
                         | `Published (Some request_sw) ->
                           (try
-                             signal_operator_cancel request_sw;
+                             signal_operator_cancel ~ops request_sw;
                              `Result accepted_result
                            with
                            | Eio.Cancel.Cancelled _ as e -> raise e
@@ -2412,7 +2992,46 @@ let cancel ~base_path ~caller request_id : cancel_result =
          | `Result result -> result))
 ;;
 
+let cancel = cancel_with_ops production_request_ops
+
 module For_testing = struct
+  type nonrec request_ops = request_ops
+
+  let make_request_ops ?before_durable_write ?before_durable_remove
+      ?(generate_request_id = production_request_ops.generate_request_id)
+      ?(before_integrity_projection =
+        production_request_ops.before_integrity_projection)
+      ?(signal_cancel = production_request_ops.signal_cancel) () =
+    let save_json_durable =
+      match before_durable_write with
+      | None -> production_request_ops.save_json_durable
+      | Some before_stage ->
+        (fun ~ownership_root ~temp_dir path json ->
+           Keeper_fs.For_testing.save_json_durable_atomic
+             ~before_stage
+             ~ownership_root
+             ~temp_dir
+             path
+             json)
+    in
+    let remove_file_durable =
+      match before_durable_remove with
+      | None -> production_request_ops.remove_file_durable
+      | Some before_stage ->
+        (fun ~ownership_root path ->
+           Keeper_fs.For_testing.remove_file_durable
+             ~before_stage
+             ~ownership_root
+             path)
+    in
+    { save_json_durable
+    ; remove_file_durable
+    ; generate_request_id
+    ; before_integrity_projection
+    ; signal_cancel
+    }
+  ;;
+
   let record_schema_version = record_schema_version
   let is_safe_request_id = is_safe_request_id
   let forget ~base_path ~caller ~request_id =
@@ -2436,42 +3055,36 @@ module For_testing = struct
   ;;
 
   let clear () =
-    Atomic.set durable_write_hook_for_testing None;
-    Atomic.set durable_remove_hook_for_testing None;
-    Atomic.set cancel_signal_hook_for_testing None;
-    Atomic.set request_id_hook_for_testing None;
-    Atomic.set integrity_projection_hook_for_testing None;
     with_lock (fun () ->
       Request_table.clear pending;
       Request_table.clear transition_locks;
       Request_table.clear active_switches;
       Store_transition_table.clear store_transition_locks;
       Store_transition_table.clear reserved_request_ids;
-      Keeper_submission_table.clear keeper_submission_locks)
+      Keeper_lane_table.clear keeper_submission_locks;
+      Keeper_lane_table.clear keeper_persistence_locks)
   ;;
   let active_record_path = active_record_path
   let terminal_record_path = terminal_record_path
   let legacy_record_path = legacy_record_path
+  let atomic_staging_dir = atomic_staging_dir
+  let legacy_atomic_migration_marker = legacy_atomic_migration_marker
   let load_record = load_record
   let recover_lost_disk_records = recover_lost_disk_records
-  let set_durable_write_hook hook =
-    Atomic.set durable_write_hook_for_testing hook
-  ;;
-  let set_durable_remove_hook hook =
-    Atomic.set durable_remove_hook_for_testing hook
-  ;;
-  let set_cancel_signal_hook hook =
-    Atomic.set cancel_signal_hook_for_testing hook
-  ;;
-  let set_request_id_hook hook = Atomic.set request_id_hook_for_testing hook
-  let set_integrity_projection_hook hook =
-    Atomic.set integrity_projection_hook_for_testing hook
-  ;;
+  let submit = submit_with_ops
+  let cancel = cancel_with_ops
   let reserved_request_id_count () =
     Eio.Mutex.use_ro mu (fun () -> Store_transition_table.length reserved_request_ids)
   ;;
   let active_switch_count () =
     Eio.Mutex.use_ro mu (fun () -> Request_table.length active_switches)
   ;;
+
+  let persistence_lane_observation () =
+    ( Atomic.get persistence_lane_waits
+    , Atomic.get persistence_lane_pending
+    , Atomic.get persistence_lane_in_flight )
+  ;;
+  let persistence_lane_samples = persistence_lane_samples
 
 end

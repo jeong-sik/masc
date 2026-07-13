@@ -13,6 +13,8 @@
     @since 2026-02 - Keeper Emergent Identity v2.0
 *)
 
+module Atomic_orphan_size_class = Atomic_orphan_size_class
+
 (** Global fs — WORM Atomic (write-once at startup, read from any domain).
     Using Atomic.t is required for OCaml 5 multi-domain safety:
     Executor_pool workers run on a separate domain and read this value. *)
@@ -241,10 +243,57 @@ let save_file_atomic path content =
   Atomic_write.save_file_atomic ~save_file path content
 ;;
 
-let is_atomic_orphan_name = Atomic_write.is_atomic_orphan_name
+let open_atomic_temp_file ~temp_dir () =
+  Atomic_write.open_atomic_temp_file ~temp_dir ()
+;;
 
-let cleanup_atomic_orphans ~base_path ?recovered_subdir () =
-  Atomic_write.cleanup_atomic_orphans ~mkdir_p_unix ~base_path ?recovered_subdir ()
+let is_atomic_orphan_name = Atomic_write.is_atomic_orphan_name
+type atomic_orphan_cleanup_scope = Atomic_write.atomic_orphan_cleanup_scope =
+  | Directory_only
+  | Directory_and_immediate_subdirectories
+
+type atomic_orphan_cleanup_operation = Atomic_write.atomic_orphan_cleanup_operation =
+  | Inspect_cleanup_root
+  | Read_cleanup_directory
+  | Inspect_orphan
+  | Create_recovery_directory
+  | Sync_recovery_parent
+  | Link_preserved_orphan
+  | Verify_preserved_orphan
+  | Sync_preserved_orphan
+  | Sync_recovery_directory
+  | Delete_empty_orphan
+  | Delete_preserved_source
+  | Sync_source_directory
+  | Close_cleanup_descriptor
+
+type atomic_orphan_cleanup_cause = Atomic_write.atomic_orphan_cleanup_cause =
+  | Unix_failure of Unix.error * string * string
+  | Sys_failure of string
+  | Unexpected_file_kind of Unix.file_kind
+  | Outside_ownership_root of { ownership_root : string }
+  | Identity_changed
+  | Other_failure of exn
+
+type atomic_orphan_cleanup_failure = Atomic_write.atomic_orphan_cleanup_failure =
+  { operation : atomic_orphan_cleanup_operation
+  ; path : string
+  ; cause : atomic_orphan_cleanup_cause
+  }
+
+type atomic_orphan_cleanup_report = Atomic_write.atomic_orphan_cleanup_report =
+  { inspected : int
+  ; deleted : int
+  ; preserved : int
+  ; failures : atomic_orphan_cleanup_failure list
+  }
+
+let atomic_orphan_cleanup_failure_to_string =
+  Atomic_write.atomic_orphan_cleanup_failure_to_string
+;;
+
+let cleanup_atomic_orphans ~ownership_root ~base_path ~scope () =
+  Atomic_write.cleanup_atomic_orphans ~ownership_root ~base_path ~scope ()
 ;;
 
 (** Append string to file.
@@ -294,6 +343,27 @@ let path_kind ?(follow = true) (path : string) : path_kind =
        | `Directory -> Directory
        | (`Unknown | `Fifo | `Character_special | `Block_device
          | `Regular_file | `Symbolic_link | `Socket) -> Other)
+;;
+
+type owned_directory_chain_rejection = Owned_directory_chain.rejection =
+  | Owned_path_outside_root of
+      { ownership_root : string
+      ; path : string
+      }
+  | Owned_path_non_directory of
+      { path : string
+      ; kind : Unix.file_kind
+      }
+
+type owned_directory_chain_observation = Owned_directory_chain.observation =
+  | Owned_directory_missing
+  | Owned_directory of Unix.stats
+
+let inspect_owned_directory_chain = Owned_directory_chain.inspect
+let owned_directory_paths = Owned_directory_chain.paths
+
+let owned_directory_chain_rejection_to_string =
+  Owned_directory_chain.rejection_to_string
 ;;
 
 let read_dir (path : string) : string list =

@@ -12,7 +12,6 @@ type in_flight_info =
 type autonomous_block =
   | Turn_busy of in_flight_info option
   | Shutdown_requested of Keeper_shutdown_types.Operation_id.t
-  | Persistence_blocked of Keeper_persistence_admission.block_reason
 
 type rejection =
   { waiting : int
@@ -198,9 +197,6 @@ let run_if_free ~base_path ~keeper_name f =
      receipt remains active until its terminal decision commits, so the
      autonomous lane must also yield during the short lease-to-admission and
      admission-to-finalization windows. *)
-  match Keeper_persistence_admission.block_reason ~base_path ~keeper_name with
-  | Some reason -> `Busy (Persistence_blocked reason)
-  | None ->
   match peek_shutdown slot with
   | Some operation_id -> `Busy (Shutdown_requested operation_id)
   | None when waiting_count slot > 0 -> `Busy (Turn_busy (peek_info slot))

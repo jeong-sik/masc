@@ -94,8 +94,7 @@ let make_preparation ~cache_revision =
 ;;
 
 let finish preparation =
-  (* See [release]: waking is intentionally idempotent because a durable-prefix
-     publication may resolve the ticket before final ownership cleanup. *)
+  (* See [release]: durable-prefix publication makes this wake idempotent. *)
   ignore (Eio.Promise.try_resolve preparation.resolver ())
 ;;
 
@@ -228,8 +227,7 @@ let prepare_owned ~before_prepare ~before_directory_fsync owned =
            let parent = Filename.dirname path in
            before_directory_fsync parent;
            fsync_directory parent;
-           (* See [ensure]: an invalidation revision race is observed by the
-              final target cache check and retried under the new revision. *)
+           (* See [ensure]: final cache recheck retries an invalidation race. *)
            ignore (mark_if_current ~revision:preparation.cache_revision path);
            finish preparation)
         pending);

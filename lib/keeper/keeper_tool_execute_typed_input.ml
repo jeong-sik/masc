@@ -197,18 +197,30 @@ let optional_redirect_target ~path fields key =
       (json_type_name value)
 ;;
 
-(* [timeout_sec] shape check only: accepts a JSON int or float and stores it
-   unvalidated.  Positivity/finiteness is [validate]'s job (check_timeout_sec
-   below), mirroring how [cwd]'s absolute-path check lives in [validate]
-   rather than here. *)
+(* [timeout_sec] shape check only: accepts a JSON int, float, or numeric
+   string, storing the parsed float unvalidated.  The LLM-facing schema
+   advertises ["number","string"] (numeric strings such as "30"), so a
+   string form must parse rather than regress a schema-legal input.
+   Positivity/finiteness is [validate]'s job (check_timeout_sec below),
+   mirroring how [cwd]'s absolute-path check lives in [validate] rather than
+   here — so "inf"/"nan" coerce here and are rejected there. *)
 let optional_timeout_sec ~path fields key =
   match member fields key with
   | None | Some `Null -> Ok None
   | Some (`Float value) -> Ok (Some value)
   | Some (`Int value) -> Ok (Some (float_of_int value))
+  | Some (`String value) ->
+    (match float_of_string_opt value with
+     | Some parsed -> Ok (Some parsed)
+     | None ->
+       result_errorf
+         "%s.%s must be a number or numeric string, got %S"
+         path
+         key
+         value)
   | Some value ->
     result_errorf
-      "%s.%s must be number, got %s"
+      "%s.%s must be a number or numeric string, got %s"
       path
       key
       (json_type_name value)

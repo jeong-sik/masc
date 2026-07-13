@@ -105,23 +105,23 @@ let tool_execute_cwd_field =
 ;;
 
 let tool_execute_timeout_sec_field =
-  (* Historical schema carry-over (Issue #18472, 2026-06-08 cleanup):
-     caller-side timeout fields were removed as part of the spirit of
-     PR #20479 ("tool 자체가 알아서 타임아웃으로 튕기든 해야지 그걸
-     왜 되나 안 되나 우리가 관찰하고 있나?"). The LLM-facing JSON
-     schema is preserved for backwards compatibility with callers
-     that still emit the field; the wire-format quirk (string vs
-     number) is still accepted but is now advisory only — the
-     dispatch path no longer reads it. *)
+  (* Re-wired live: caller-side timeout was removed as advisory-only in the
+     Issue #18472 / PR #20479 cleanup, but the dispatch path now reads it
+     again and forwards it to Process_eio (a timed-out command exits 124).
+     The wire-format quirk (string vs number) stays: both ["number","string"]
+     are accepted and a numeric string is parsed as a number by
+     [Keeper_tool_execute_typed_input.optional_timeout_sec] — so the schema
+     and the parser agree on the accepted domain. *)
   ( "timeout_sec"
   , `Assoc
       [ ( "type"
         , `List [ `String "number"; `String "string" ] )
       ; ( "description"
         , `String
-            "Deprecated. The caller-side timeout knob is no longer \
-             observed; the tool itself owns hang protection. Numeric \
-             strings (e.g. \"30\") are accepted but ignored." )
+            "Per-call wall-clock timeout in seconds for this command. \
+             Observed by the dispatch path; a command that exceeds it is \
+             terminated (exit code 124). Numeric strings (e.g. \"30\") are \
+             accepted and parsed as numbers." )
       ] )
 ;;
 

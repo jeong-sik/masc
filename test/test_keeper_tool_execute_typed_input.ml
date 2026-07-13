@@ -1272,8 +1272,8 @@ let test_of_json_rejects_redirect_with_both_discard_and_file () =
    field to store it in, so a caller-supplied timeout never reached
    [Exec_dispatch] and the "increase timeout_sec" recovery hint in
    [Exec_core] pointed at a no-op.  These tests cover the fix: JSON shape
-   parsing (int/float/absent) here, and positivity/finiteness in
-   [validate]. *)
+   parsing (int/float/numeric-string/absent) here, and positivity/finiteness
+   in [validate]. *)
 
 let test_of_json_accepts_timeout_sec_as_float () =
   let input =
@@ -1313,13 +1313,33 @@ let test_of_json_timeout_sec_absent_is_none () =
   | Execute_input.Pipeline _ -> Alcotest.fail "expected Exec"
 ;;
 
+let test_of_json_accepts_timeout_sec_as_numeric_string () =
+  (* The LLM-facing schema advertises ["number","string"] with the example
+     "30", so a numeric string must parse (not regress a schema-legal input). *)
+  let input =
+    parse_json_exn
+      (`Assoc
+          [ "executable", `String "sleep"
+          ; "argv", `List [ `String "5" ]
+          ; "timeout_sec", `String "30"
+          ])
+  in
+  match input with
+  | Execute_input.Exec { timeout_sec; _ } ->
+    Alcotest.(check (option (float 0.001)))
+      "numeric string coerces to number"
+      (Some 30.0)
+      timeout_sec
+  | Execute_input.Pipeline _ -> Alcotest.fail "expected Exec"
+;;
+
 let test_of_json_rejects_non_numeric_timeout_sec () =
   let msg =
     parse_json_error
       (`Assoc
           [ "executable", `String "sleep"
           ; "argv", `List [ `String "5" ]
-          ; "timeout_sec", `String "30"
+          ; "timeout_sec", `String "soon"
           ])
   in
   Alcotest.(check bool)
@@ -1556,6 +1576,10 @@ let suite =
           "timeout_sec_of_json_absent_is_none"
           `Quick
           test_of_json_timeout_sec_absent_is_none
+      ; Alcotest.test_case
+          "timeout_sec_of_json_accepts_numeric_string"
+          `Quick
+          test_of_json_accepts_timeout_sec_as_numeric_string
       ; Alcotest.test_case
           "timeout_sec_of_json_rejects_non_numeric"
           `Quick

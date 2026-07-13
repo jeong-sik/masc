@@ -592,6 +592,8 @@ type memory_write_validation =
   | Memory_write_ok of
       { kind : Keeper_memory_policy.memory_kind
       ; body : string
+      ; episode_id : string option
+      ; causal_chain : string list
       }
   | Memory_write_invalid of
       { error_kind : memory_write_error_kind
@@ -635,8 +637,22 @@ let validate_memory_write_args (args : Yojson.Safe.t) : memory_write_validation 
       let body =
         if title = "" then content else Printf.sprintf "**%s** %s" title content
       in
+      let episode_id =
+        match Safe_ops.json_string ~default:"" "episode_id" args with
+        | "" -> None
+        | s -> Some s
+      in
+      let causal_chain =
+        match args with
+        | `Assoc kv ->
+          (match List.assoc_opt "causal_chain" kv with
+           | Some (`List items) ->
+             List.filter_map (function `String s -> Some s | _ -> None) items
+           | _ -> [])
+        | _ -> []
+      in
       if Keeper_memory_bank.is_meaningful_memory_text body
-      then Memory_write_ok { kind; body }
+      then Memory_write_ok { kind; body; episode_id; causal_chain }
       else Memory_write_invalid { error_kind = Content_rejected; extras = [] }
 ;;
 
@@ -654,7 +670,7 @@ let keeper_memory_write_json
   match validate_memory_write_args args with
   | Memory_write_invalid { error_kind; extras } ->
     respond ~ok:false ~error_kind extras
-  | Memory_write_ok { kind; body } ->
+  | Memory_write_ok { kind; body; episode_id; causal_chain } ->
     (match
        Keeper_memory_bank.append_explicit_memory_note
          config
@@ -662,6 +678,8 @@ let keeper_memory_write_json
          ~turn:meta.runtime.usage.total_turns
          ~kind
          ~text:body
+         ~episode_id
+         ~causal_chain
      with
      | Error (Keeper_memory_bank.Explicit_memory_kind_not_writable provided_kind) ->
       respond

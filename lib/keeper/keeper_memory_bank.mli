@@ -221,6 +221,8 @@ val append_explicit_memory_note :
   turn:int ->
   kind:memory_kind ->
   text:string ->
+  episode_id:string option ->
+  causal_chain:string list ->
   (unit, explicit_memory_write_error) result
 (** Persist one note produced by the explicit memory tool. The result carries
     validation and persistence failures instead of silently dropping the note. *)

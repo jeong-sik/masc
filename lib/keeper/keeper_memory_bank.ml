@@ -801,6 +801,8 @@ let append_explicit_memory_note
     ~(turn : int)
     ~(kind : memory_kind)
     ~(text : string)
+    ~(episode_id : string option)
+    ~(causal_chain : string list)
     : (unit, explicit_memory_write_error) result
   =
   let text = String.trim text in
@@ -832,8 +834,8 @@ let append_explicit_memory_note
              ; "schema_version", `Int keeper_memory_schema_version
              ; "priority", `Int (tuned_priority_for_candidate ~kind ~text)
              ; "text", `String text
-             ; "episode_id", `String ""
-             ; "causal_chain", `List []
+             ; "episode_id", `String (Option.value ~default:"" episode_id)
+             ; "causal_chain", `List (List.map (fun s -> `String s) causal_chain)
              ]));
        Ok ()
      with

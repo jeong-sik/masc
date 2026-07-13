@@ -75,7 +75,9 @@ val cycle_grant_of_resolution :
     explicit Keeper profile switch; it carries no inferred semantics. Manual,
     Auto Judge, and invalid-mode outcomes enqueue durably and return without
     suspending the caller. Explicit Keeper/workspace Always Allow modes do not
-    depend on the optional exact-rule store being readable. *)
+    depend on the optional exact-rule store being readable. A supplied one-shot
+    grant that cannot be consumed returns [Unavailable] without evaluating a
+    second authorization path, so the durable grant remains single-use. *)
 val decide :
   ?cycle_grant:cycle_grant ->
   keeper_always_allow:bool ->
@@ -93,9 +95,3 @@ val authorization_source_to_string : authorization_source -> string
 val deferred_reason_to_string : deferred_reason -> string
 val unavailable_reason_to_string : unavailable_reason -> string
 val decision_to_yojson : decision -> Yojson.Safe.t
-
-module For_testing : sig
-  val claim_auto_judge : string -> bool
-  val release_auto_judge : string -> unit
-  val auto_judge_is_active : string -> bool
-end

@@ -5,26 +5,6 @@ open Keeper_types_profile
 val keeper_model_tool_names : unit -> string list
 val keeper_model_tool_schemas : unit -> Masc_domain.tool_schema list
 
-(** Keeper-local read-only tools that do not always flow through Tool_spec. *)
-val keeper_read_only_tools : string list
-
-(** [true] when a keeper-only tool is inherently read-only. *)
-val is_keeper_read_only_tool : string -> bool
-
-(** [true] when [name] is read-only or idempotent (safe to retry).
-    Keeper-local fast-path (no mutex), then descriptor-aware capability
-    projection. Prefer {!has_mutating_side_effect}
-    at call sites for positive-sense readability. *)
-val is_effectively_read_only_tool : string -> bool
-
-(** [true] when calling [name] may produce non-idempotent side effects.
-    Used by the side-effect observer to block retry after committed mutations. *)
-val has_mutating_side_effect : string -> bool
-
-(** Input-aware mutation check for mixed tools where read-only and mutating
-    subcommands share the same tool name. *)
-val has_mutating_side_effect_with_input : tool_name:string -> input:Yojson.Safe.t -> bool
-
 (** Schema for the keeper_tool_search tool. *)
 val keeper_tool_search_schema : Masc_domain.tool_schema
 
@@ -70,38 +50,22 @@ end
     Must be called once during server initialization. *)
 val inject_masc_schemas : Masc_domain.tool_schema list -> unit
 
-(** Classification of a keeper tool result payload for circuit-breaker
-    bookkeeping.
-
-    Plain text is treated as a valid success path because some keeper tools
-    intentionally return markdown/text on success. JSON-looking payloads
-    (leading [{] or [[] after whitespace) are parsed so malformed structured
-    output does not silently reset the breaker. *)
-type tool_result_payload =
-  | Structured_success
-  | Structured_error
-  | Plain_text
-  | Malformed_structured of string
-
 (** Bridge-facing execution outcome. *)
 type execution_outcome =
   [ `Success
-  | `Failure
+  | `Failure of Tool_result.tool_failure_class
   ]
 
 (** Typed keeper tool execution result.
-    [raw_output] preserves the original payload, [outcome] is the
-    authoritative success/failure decision for bridge consumers, and
-    [payload_shape] captures the post-execution wire shape for telemetry
-    and malformed-payload handling. *)
+    [raw_output] preserves opaque producer text. [data] preserves explicitly
+    typed producer JSON. [outcome] is derived only from the producer's typed
+    result and carries the failure class on failure; consumers must never
+    recover either value by inspecting [raw_output]. *)
 type executed_tool_result =
   { raw_output : string
+  ; data : Yojson.Safe.t option
   ; outcome : execution_outcome
-  ; payload_shape : tool_result_payload
   }
-
-(** Inspect a keeper tool result payload without applying side effects. *)
-val classify_tool_result_payload : string -> tool_result_payload
 
 (** Tag-based dispatch callback for masc_* tools without handler registry entries.
     Set at server init to [Keeper_tag_dispatch.dispatch]. Default: returns None.
@@ -118,7 +82,7 @@ val execute_keeper_tool_call_with_outcome
   -> ctx_work:working_context
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
   -> exec_cache:Masc_exec.Exec_cache.t option
-  -> ?search_fn:(unit -> Yojson.Safe.t)
+  -> ?search_fn:(unit -> Keeper_tool_execution.t)
   -> ?sw:Eio.Switch.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t
@@ -138,7 +102,7 @@ val execute_keeper_tool_call
   -> ctx_work:working_context
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
   -> exec_cache:Masc_exec.Exec_cache.t option
-  -> ?search_fn:(unit -> Yojson.Safe.t)
+  -> ?search_fn:(unit -> Keeper_tool_execution.t)
   -> name:string
   -> input:Yojson.Safe.t
   -> unit

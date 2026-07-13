@@ -342,152 +342,6 @@ let wakeup_all_keepers ?base_path () =
       ~base_path:expected
       ()
 
-(* ── Board-reactive policy constants ── *)
-
-let board_reactive_debounce_sec = 60.0
-
-let board_reactive_wakeup_max =
-  Keeper_config.int_of_env_default
-    "MASC_KEEPER_BOARD_WAKEUP_MAX" ~default:4 ~min_v:1 ~max_v:64
-;;
-
-(* RFC-0239 R4: collapse runs of whitespace and lowercase so trivial spacing
-   or case differences do not split a re-post into a fresh dedup key. *)
-let normalize_for_fingerprint s =
-  let b = Buffer.create (String.length s) in
-  let prev_space = ref true in
-  String.iter
-    (fun c ->
-      match Char.lowercase_ascii c with
-      | ' ' | '\t' | '\n' | '\r' ->
-        if not !prev_space then Buffer.add_char b ' ';
-        prev_space := true
-      | c ->
-        Buffer.add_char b c;
-        prev_space := false)
-    s;
-  let r = Buffer.contents b in
-  let n = String.length r in
-  if n > 0 && r.[n - 1] = ' ' then String.sub r 0 (n - 1) else r
-;;
-
-(* RFC-0239 R4: a keeper that re-posts the same conclusion mints a fresh
-   post_id every cycle, so the prior post_id-keyed debounce never matched
-   across re-posts. Key the debounce on a fingerprint of normalized
-   (author,title,content) so identical re-posts collapse into one peer wake per
-   window. Empty title+content falls back to post_id so content-less signals
-   keep their original per-post behaviour. *)
-let board_wakeup_dedup_key ~post_id ~author ~title ~content =
-  if String.trim (title ^ content) = "" then post_id
-  else (
-    let normalized = normalize_for_fingerprint (title ^ "\n" ^ content) in
-    "cfp:" ^ Digest.to_hex (Digest.string (author ^ "\x00" ^ normalized)))
-;;
-
-let board_signal_wakeup_dedup_key (signal : Board_dispatch.board_signal) =
-  let base =
-    board_wakeup_dedup_key
-      ~post_id:signal.post_id
-      ~author:signal.author
-      ~title:signal.title
-      ~content:signal.content
-  in
-  match signal.kind with
-  | Board_dispatch.Board_post_created | Board_dispatch.Board_comment_added -> base
-  | Board_dispatch.Board_reaction_changed reaction ->
-    let reaction_key =
-      String.concat
-        "\x00"
-        [ Board.reaction_target_type_to_string reaction.target_type
-        ; reaction.target_id
-        ; reaction.user_id
-        ; reaction.emoji
-        ; string_of_bool reaction.reacted
-        ]
-    in
-    base ^ ":reaction:" ^ Digest.to_hex (Digest.string reaction_key)
-;;
-
-let board_reactive_wakeup_allowed
-      ~base_path
-      ~keeper_name
-      ~(signal : Board_dispatch.board_signal)
-  =
-  Keeper_registry.board_wakeup_allowed
-    ~base_path
-    keeper_name
-    ~dedup_key:(board_signal_wakeup_dedup_key signal)
-    ~debounce_sec:board_reactive_debounce_sec
-;;
-
-(* ── Connector-reactive policy (RFC-connector-ambient-attention-wake P4) ── *)
-
-let connector_reactive_debounce_sec = 60.0
-
-(* Throttle ambient connector wakes with the SAME proven primitive as
-   board-reactive: the RFC-0246 tombstone gate (a latched no-progress keeper is
-   not re-woken) plus a per-key debounce. Keyed per channel, so a chatty channel
-   wakes the keeper at most once per window; the keeper then sees every
-   accumulated message in its chat history (RFC-0226) and decides whether to
-   reply. The dedup_key is namespaced ("connector-ambient:") so it never collides
-   with board dedup keys in the shared per-keeper wakeup map. A dedicated
-   [Connector_reactive] tombstone origin is a follow-up — [Board_reactive]'s
-   suppression is already correct here: a latched keeper must not wake on
-   connector chatter either. *)
-let connector_reactive_wakeup_allowed ~base_path ~keeper_name ~channel_id =
-  Keeper_registry.board_wakeup_allowed
-    ~base_path
-    keeper_name
-    ~dedup_key:("connector-ambient:" ^ channel_id)
-    ~debounce_sec:connector_reactive_debounce_sec
-;;
-
-let take = List.take
-
-(* RFC-0020: select which keepers wake for a board signal from typed
-   [Board_wake.wake_reason] candidates. Explicit mentions short-circuit and
-   wake unconditionally; thread-reply/reaction followups compete for
-   [total_limit] immediate-wake slots in candidate order. [None] reasons are
-   dropped (the structural reactive pipeline found no deterministic address
-   for that keeper). Semantic relatedness is intentionally not a wake reason
-   here: it must enter through an LLM/Judge attention boundary, not
-   goal-keyword matching in the board publish hook.
-
-   RFC-0334 W1: the cap bounds WAKES, not delivery. Addressed candidates
-   beyond the wake budget — cap overflow, or followups shadowed by an
-   explicit-mention short-circuit — return as [deferred]: the caller appends
-   the stimulus to their mailboxes and they observe it on their next turn.
-   Only [None]-reason candidates receive nothing. *)
-let select_board_wakeup_candidates
-    ?(total_limit = board_reactive_wakeup_max)
-    candidates =
-  let followups =
-    candidates
-    |> List.filter_map (fun (item, reason) ->
-      match reason with
-      | Some
-          (( Board_wake.Thread_reply_after_self_comment
-           | Board_wake.Reaction_after_self_activity ) as r) -> Some (item, r)
-      | Some Board_wake.Explicit_mention | None -> None)
-  in
-  let explicit =
-    candidates
-    |> List.filter_map (fun (item, reason) ->
-      match reason with
-      | Some Board_wake.Explicit_mention -> Some (item, Board_wake.Explicit_mention)
-      | Some
-          ( Board_wake.Thread_reply_after_self_comment
-          | Board_wake.Reaction_after_self_activity )
-      | None -> None)
-  in
-  match explicit with
-  | _ :: _ -> explicit, followups
-  | [] ->
-    let selected = take total_limit followups in
-    let deferred = List.drop total_limit followups in
-    selected, deferred
-;;
-
 (* RFC-0020: enqueue the board signal as a typed [stimulus_payload] (PR-1).
    [reason] is the typed {!Board_wake.wake_reason} that selected this keeper;
    here it only picks urgency (explicit mentions are [Immediate]). It is not
@@ -541,10 +395,8 @@ let board_signal_stimulus
   }
 ;;
 
-let board_signal_entry_is_wakeup_candidate (entry : Keeper_registry.registry_entry) =
-  match entry.phase with
-  | Keeper_state_machine.Running | Keeper_state_machine.Paused -> true
-  | _ -> false
+let board_signal_entry_accepts_delivery (entry : Keeper_registry.registry_entry) =
+  not (Keeper_state_machine.is_terminal entry.phase)
 ;;
 
 let record_board_attention_candidate
@@ -553,52 +405,62 @@ let record_board_attention_candidate
       ~(meta : keeper_meta)
       (signal : Board_dispatch.board_signal)
   =
-  let candidate =
+  match
     Keeper_board_attention_candidate.of_board_signal
-      ~keeper_name:meta.name
+      ~meta
       ~recorded_at:(Time_compat.now ())
       signal
-  in
-  match Keeper_board_attention_candidate.record ~base_path:config.base_path candidate with
-  | `Recorded ->
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string BoardSignalAttentionCandidateTotal)
-      ~labels:
-        [ ("keeper", meta.name)
-        ; ("kind", signal_kind_label)
-        ; ( "attention_authority"
-          , Keeper_board_attention_candidate.attention_authority_to_string
-              candidate.attention_authority )
-        ; ( "wake_authority"
-          , Keeper_board_attention_candidate.wake_authority_to_string
-              candidate.wake_authority )
-        ]
-      ()
-  | `Duplicate _ -> ()
-  | `Error err ->
+  with
+  | Keeper_world_observation_board_signal.Unavailable unavailable ->
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string KeepaliveSignalFailures)
-      ~labels:[ ("keeper", meta.name); ("phase", "board_attention_candidate_record") ]
+      ~labels:[ ("keeper", meta.name); ("phase", "board_attention_evidence_read") ]
       ();
     Log.Keeper.warn
-      "board attention candidate record failed: keeper=%s post=%s error=%s"
+      "board attention evidence unavailable: keeper=%s post=%s error=%s"
       meta.name
       signal.post_id
-      err
+      (Keeper_world_observation_board_signal.unavailable_to_string unavailable)
+  | Keeper_world_observation_board_signal.Available candidate ->
+    (match
+       Keeper_board_attention_candidate.record_and_start
+         ~base_path:config.base_path
+         candidate
+     with
+     | Ok _ ->
+       Otel_metric_store.inc_counter
+         Keeper_metrics.(to_string BoardSignalAttentionCandidateTotal)
+         ~labels:[ ("keeper", meta.name); ("kind", signal_kind_label) ]
+         ()
+     | Error err ->
+       Otel_metric_store.inc_counter
+         Keeper_metrics.(to_string KeepaliveSignalFailures)
+         ~labels:
+           [ ("keeper", meta.name); ("phase", "board_attention_candidate_record") ]
+         ();
+       Log.Keeper.warn
+         "board attention candidate record failed: keeper=%s post=%s error=%s"
+         meta.name
+         signal.post_id
+         err)
 ;;
 
-let board_signal_wake_keeper
+let deliver_addressed_board_signal
       ~(config : Workspace.config)
       ~(reason : Board_wake.wake_reason)
       ~(signal : Board_dispatch.board_signal)
       (meta : keeper_meta)
   =
   let stimulus = board_signal_stimulus ~reason signal in
-  if meta.paused
-  then Ok ()
-  else (
-    wakeup_keeper ~base_path:config.base_path ~stimulus meta.name;
-    Ok ())
+  match
+    Keeper_registry_event_queue.enqueue_stimulus_durable_result
+      ~base_path:config.base_path
+      meta.name
+      stimulus
+  with
+  | Keeper_registry_event_queue.Stimulus_enqueued
+  | Keeper_registry_event_queue.Stimulus_already_present -> Ok ()
+  | Keeper_registry_event_queue.Stimulus_storage_error detail -> Error detail
 ;;
 
 let wakeup_relevant_keeper_for_board_signal
@@ -607,7 +469,7 @@ let wakeup_relevant_keeper_for_board_signal
   =
   let registry_entries =
     Keeper_registry.all ~base_path:config.base_path ()
-    |> List.filter board_signal_entry_is_wakeup_candidate
+    |> List.filter board_signal_entry_accepts_delivery
   in
   let signal_kind_label =
     match signal.kind with
@@ -615,108 +477,114 @@ let wakeup_relevant_keeper_for_board_signal
     | Board_dispatch.Board_comment_added -> "comment_added"
     | Board_dispatch.Board_reaction_changed _ -> "reaction_changed"
   in
-  (* Yield meter: scanning all running keepers' meta files is CPU-bound
-     when many keepers share a domain.  Yield every ~1000 iterations. *)
+  (* Every lane is independent: persist and signal each addressed Keeper
+     without a fleet-wide cap, ordering dependency, or content debounce. *)
   let board_ym = Eio_guard.create_yield_meter () in
-  let candidates =
-    registry_entries
-    |> List.filter_map (fun (entry : Keeper_registry.registry_entry) ->
-      let result =
-        match read_meta config entry.name with
+  List.iter
+    (fun (entry : Keeper_registry.registry_entry) ->
+       (try
+          match read_meta config entry.name with
+        | Error detail ->
+          Otel_metric_store.inc_counter
+            Keeper_metrics.(to_string KeepaliveSignalFailures)
+            ~labels:[ ("keeper", entry.name); ("phase", "board_meta_read") ]
+            ();
+          Log.Keeper.warn
+            "board signal Keeper metadata unavailable: keeper=%s error=%s"
+            entry.name
+            detail
+        | Ok None ->
+          Otel_metric_store.inc_counter
+            Keeper_metrics.(to_string KeepaliveSignalFailures)
+            ~labels:[ ("keeper", entry.name); ("phase", "board_meta_missing") ]
+            ();
+          Log.Keeper.warn
+            "board signal Keeper metadata missing: keeper=%s"
+            entry.name
         | Ok (Some meta) ->
-          let wake_reason =
-            Keeper_world_observation.board_signal_wake_reason
-              ~meta
-              ~signal
-          in
-          (* Visibility for the REPO_WAKE_UP audit finding: a [None]
-             wake_reason means the running keeper had no explicit mention
-             match and (for comments) no external reply after its own comment.
-             Without this counter, operators cannot distinguish between a
-             board post that legitimately had no deterministic addressee and
-             one that was silently dropped by a keeper whose mention_targets
-             configuration is too narrow. *)
-          (match wake_reason, entry.phase with
-           | None, Keeper_state_machine.Running ->
+          (match
+             Keeper_world_observation.board_signal_wake_reason
+               ~meta
+               ~signal
+           with
+           | Keeper_world_observation_board_signal.Unavailable unavailable ->
+             Otel_metric_store.inc_counter
+               Keeper_metrics.(to_string KeepaliveSignalFailures)
+               ~labels:[ ("keeper", meta.name); ("phase", "board_signal_read") ]
+               ();
+             Log.Keeper.warn
+               "board signal relevance read unavailable: keeper=%s post=%s error=%s"
+               meta.name
+               signal.post_id
+               (Keeper_world_observation_board_signal.unavailable_to_string unavailable)
+           | Keeper_world_observation_board_signal.Available None ->
              Otel_metric_store.inc_counter
                Keeper_metrics.(to_string BoardSignalNoWakeTotal)
-               ~labels:[
-                 ("keeper", meta.name);
-                 ("kind", signal_kind_label);
-               ]
+               ~labels:[ ("keeper", meta.name); ("kind", signal_kind_label) ]
                ();
-             record_board_attention_candidate ~config ~signal_kind_label ~meta signal
-           | None, _ | Some _, _ -> ());
-          (match entry.phase, wake_reason with
-           | Keeper_state_machine.Paused, _ -> None
-           | Keeper_state_machine.Running, _ -> Some (meta, wake_reason)
-           | _ -> None)
-        | _ -> None
-      in
-      Eio_guard.yield_step board_ym;
-      result)
-  in
-  let wake_meta (meta : keeper_meta) reason =
-    if
-      board_reactive_wakeup_allowed
-        ~base_path:config.base_path
-        ~keeper_name:meta.name
-        ~signal
-    then (
-      match board_signal_wake_keeper ~config ~reason ~signal meta with
-      | Ok () ->
-        Log.Keeper.info
-          "board signal wakeup: keeper=%s reason=%s post=%s"
-          meta.name
-          (Board_wake.wake_reason_label reason)
-          signal.post_id
-      | Error err ->
-        Log.Keeper.warn
-          "board signal wakeup failed: keeper=%s reason=%s post=%s error=%s"
-          meta.name
-          (Board_wake.wake_reason_label reason)
-          signal.post_id
-          err)
-  in
-  let selected, deferred = select_board_wakeup_candidates candidates in
-  let yield_meter = Eio_guard.create_yield_meter ~interval:1 () in
-  selected
-  |> List.iter (fun (meta, reason) ->
-         wake_meta meta reason;
-         Eio_guard.yield_step yield_meter);
-  (* RFC-0334 W1: the wake budget defers, it does not drop. Every addressed
-     candidate beyond the budget still receives the stimulus in its mailbox
-     ([Keeper_registry_event_queue.enqueue]: identity-dedup + durable
-     persist, no wakeup-flag flip) and observes it on its next turn —
-     whatever triggers that turn. The wake debounce
-     ([board_reactive_wakeup_allowed]) guards wakes, not delivery; queue
-     identity dedup already collapses repeats on this path. *)
-  deferred
-  |> List.iter (fun (meta, reason) ->
-         let stimulus = board_signal_stimulus ~reason signal in
-         Keeper_registry_event_queue.enqueue
-           ~base_path:config.base_path
-           meta.name
-           stimulus;
-         Eio_guard.yield_step yield_meter);
-  let deferred_count = List.length deferred in
-  if deferred_count > 0 then begin
-    (* Counter semantics per RFC-0334 W1: wakes deferred to the mailbox by
-       the wake budget — no longer a loss count. Under high fanout it can
-       be >1 per signal, so add the actual amount (not a fixed 1) to keep
-       the compact dashboard accurate. *)
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string BoardSignalWakeupCappedTotal)
-      ~labels:[("kind", signal_kind_label)]
-      ~delta:(float_of_int deferred_count)
-      ();
-    Log.Keeper.info
-      "board signal wake budget reached: deferred=%d to mailboxes post=%s \
-       total_limit=%d (delivered, not dropped — RFC-0334 W1)"
-      deferred_count
-      signal.post_id
-      board_reactive_wakeup_max
-  end
+             record_board_attention_candidate
+               ~config
+               ~signal_kind_label
+               ~meta
+               signal
+           | Keeper_world_observation_board_signal.Available (Some reason) ->
+             (match deliver_addressed_board_signal ~config ~reason ~signal meta with
+              | Error detail ->
+                Otel_metric_store.inc_counter
+                  Keeper_metrics.(to_string KeepaliveSignalFailures)
+                  ~labels:
+                    [ ("keeper", meta.name); ("phase", "board_signal_delivery") ]
+                  ();
+                Log.Keeper.warn
+                  "board signal durable delivery failed: keeper=%s reason=%s post=%s error=%s"
+                  meta.name
+                  (Board_wake.wake_reason_label reason)
+                  signal.post_id
+                  detail
+              | Ok () ->
+                if meta.paused || entry.phase = Keeper_state_machine.Paused
+                then
+                  Log.Keeper.info
+                    "board signal queued for paused Keeper: keeper=%s reason=%s post=%s"
+                    meta.name
+                    (Board_wake.wake_reason_label reason)
+                    signal.post_id
+                else (
+                  let outcome =
+                    Keeper_registry.wakeup
+                      ~intent:Keeper_registry.Reactive_signal
+                      ~base_path:config.base_path
+                      meta.name
+                  in
+                  match outcome with
+                  | Keeper_registry.Signaled ->
+                    Log.Keeper.info
+                      "board signal wakeup: keeper=%s reason=%s post=%s"
+                      meta.name
+                      (Board_wake.wake_reason_label reason)
+                      signal.post_id
+                  | Keeper_registry.Deferred_unregistered
+                  | Keeper_registry.Deferred_not_running _
+                  | Keeper_registry.Deferred_lifecycle _ ->
+                    Log.Keeper.info
+                      "board signal durably queued; live wake deferred: keeper=%s reason=%s post=%s"
+                      meta.name
+                      (Board_wake.wake_reason_label reason)
+                      signal.post_id)))
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn ->
+          Otel_metric_store.inc_counter
+            Keeper_metrics.(to_string KeepaliveSignalFailures)
+            ~labels:[ ("keeper", entry.name); ("phase", "board_lane_failure") ]
+            ();
+          Log.Keeper.warn
+            "board signal lane failed independently: keeper=%s post=%s error=%s"
+            entry.name
+            signal.post_id
+            (Printexc.to_string exn));
+       Eio_guard.yield_step board_ym)
+    registry_entries
 ;;
 
 (* Per-stage timing accumulator for Phase 0 profiling.

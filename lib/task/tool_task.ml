@@ -21,6 +21,36 @@ let task_log_error ~task_id fmt =
     (fun message -> Log.Task.error "task_id=%s %s" task_id message)
     fmt
 
+let workflow_rejection_result
+      ~tool_name
+      ~start_time
+      ?rule_id
+      ?tool_suggestion
+      ?hint
+      ?scope_policy
+      ?recoverable
+      ?alternatives
+      ?extra_fields
+      message
+  =
+  let data =
+    workflow_rejection_payload
+      ?rule_id
+      ?tool_suggestion
+      ?hint
+      ?scope_policy
+      ?recoverable
+      ?alternatives
+      ?extra_fields
+      message
+  in
+  Tool_result.make_err
+    ~tool_name
+    ~class_:Tool_result.Workflow_rejection
+    ~start_time
+    ~data
+    (Yojson.Safe.to_string data)
+
 let missing_live_task_transition_rejection ~task_list_projection ~tool_name
       ~start_time ctx ~task_id ~action_s =
   let task_list_name =
@@ -31,29 +61,27 @@ let missing_live_task_transition_rejection ~task_list_projection ~tool_name
   task_log_warn ~task_id
     "transition rejected stale task_id for action=%s agent=%s; reconciled current task bindings"
     action_s ctx.agent_name;
-  Tool_result.error
-    ~failure_class:(Some Tool_result.Workflow_rejection)
+  workflow_rejection_result
     ~tool_name
     ~start_time
-    (workflow_rejection_payload_json
-       ~rule_id:"stale_task_id_not_found"
-       ~tool_suggestion:task_list_name
-       ~hint:
-         "The requested task_id is absent from the live backlog. Do not retry \
-          this task_id from memory; refresh the projected task-list tool and \
-          choose a live task."
-       ~scope_policy:"observe"
-       ~alternatives:[ task_list_name; "keeper_task_claim" ]
-       ~extra_fields:
-         [ "task_id", `String task_id
-         ; "action", `String action_s
-         ; "requested_agent", `String ctx.agent_name
-         ; "stale_context", `Bool true
-         ]
-       (Printf.sprintf
-          "Task %s is absent from the live backlog; cleared stale current-task \
-           bindings and suppressed transition action=%s."
-          task_id action_s))
+    ~rule_id:"stale_task_id_not_found"
+    ~tool_suggestion:task_list_name
+    ~hint:
+      "The requested task_id is absent from the live backlog. Do not retry \
+       this task_id from memory; refresh the projected task-list tool and \
+       choose a live task."
+    ~scope_policy:"observe"
+    ~alternatives:[ task_list_name; "keeper_task_claim" ]
+    ~extra_fields:
+      [ "task_id", `String task_id
+      ; "action", `String action_s
+      ; "requested_agent", `String ctx.agent_name
+      ; "stale_context", `Bool true
+      ]
+    (Printf.sprintf
+       "Task %s is absent from the live backlog; cleared stale current-task \
+        bindings and suppressed transition action=%s."
+       task_id action_s)
 
 let rec handle_done
       ?(task_list_projection = Tool_capability_projection.External_masc_tasks)
@@ -219,27 +247,25 @@ and handle_transition
              ctx.agent_name
          in
          Some
-           (Tool_result.error
-              ~failure_class:(Some Tool_result.Workflow_rejection)
+           (workflow_rejection_result
               ~tool_name
               ~start_time
-              (workflow_rejection_payload_json
-                 ~rule_id:"task_release_requires_current_owner"
-                 ~tool_suggestion:"keeper_board_post"
-                 ~hint:
-                   "Do not retry masc_transition(action=release) for a task owned \
-                    by another keeper. Ask the current assignee for handoff/release \
-                    on the board, or inspect and claim different unowned work."
-                 ~scope_policy:"observe"
-                 ~alternatives:
-                   [ "keeper_board_post"; "masc_board_post"; task_list_name; "keeper_task_claim" ]
-                 ~extra_fields:
-                   [ "task_id", `String task_id
-                   ; "task_status", `String status
-                   ; "current_assignee", `String assignee
-                   ; "requested_agent", `String ctx.agent_name
-                   ]
-                 message))
+              ~rule_id:"task_release_requires_current_owner"
+              ~tool_suggestion:"keeper_board_post"
+              ~hint:
+                "Do not retry masc_transition(action=release) for a task owned \
+                 by another keeper. Ask the current assignee for handoff/release \
+                 on the board, or inspect and claim different unowned work."
+              ~scope_policy:"observe"
+              ~alternatives:
+                [ "keeper_board_post"; "masc_board_post"; task_list_name; "keeper_task_claim" ]
+              ~extra_fields:
+                [ "task_id", `String task_id
+                ; "task_status", `String status
+                ; "current_assignee", `String assignee
+                ; "requested_agent", `String ctx.agent_name
+                ]
+              message)
        | Some _ | None -> None)
     | Masc_domain.Release, None -> None
     | ( Masc_domain.Claim
@@ -310,45 +336,41 @@ and handle_transition
         , Some "Inspect the task status before trying another lifecycle action."
         , [ task_list_name; "masc_transition" ] )
     in
-    Tool_result.error
-      ~failure_class:(Some Tool_result.Workflow_rejection)
+    workflow_rejection_result
       ~tool_name
       ~start_time
-      (workflow_rejection_payload_json
-         ?rule_id
-         ?tool_suggestion
-         ?hint
-         ?recoverable:
-           (match rule_id with
-            | Some "task_done_requires_claimed_or_started" -> Some true
-            | _ -> None)
-         ~scope_policy:"observe"
-         ~alternatives
-         message)
+      ?rule_id
+      ?tool_suggestion
+      ?hint
+      ?recoverable:
+        (match rule_id with
+         | Some "task_done_requires_claimed_or_started" -> Some true
+         | _ -> None)
+      ~scope_policy:"observe"
+      ~alternatives
+      message
   | None ->
   match client_side_transition_gate_error ~task_opt ~action ~action_s with
   | Some (Masc_domain.Task_error.InvalidState message as err) ->
     log_task_transition_failed ~agent_name:ctx.agent_name (Masc_domain.Task err);
-    Tool_result.error
-      ~failure_class:(Some Tool_result.Workflow_rejection)
+    workflow_rejection_result
       ~tool_name
       ~start_time
-      (workflow_rejection_payload_json
-         ~rule_id:"task_transition_invalid_state"
-         ~tool_suggestion:task_list_name
-         ~hint:
-           "The requested lifecycle transition is not valid for the task's current \
-            state. Inspect the task status and use a valid next action instead of \
-            retrying the same transition."
-         ~scope_policy:"observe"
-         ~recoverable:false
-         ~alternatives:[ task_list_name; "masc_transition" ]
-         ~extra_fields:
-           [ "task_id", `String task_id
-           ; "action", `String action_s
-           ; "requested_agent", `String ctx.agent_name
-           ]
-         (Printf.sprintf "Invalid task state: %s" message))
+      ~rule_id:"task_transition_invalid_state"
+      ~tool_suggestion:task_list_name
+      ~hint:
+        "The requested lifecycle transition is not valid for the task's current \
+         state. Inspect the task status and use a valid next action instead of \
+         retrying the same transition."
+      ~scope_policy:"observe"
+      ~recoverable:false
+      ~alternatives:[ task_list_name; "masc_transition" ]
+      ~extra_fields:
+        [ "task_id", `String task_id
+        ; "action", `String action_s
+        ; "requested_agent", `String ctx.agent_name
+        ]
+      (Printf.sprintf "Invalid task state: %s" message)
   | Some err ->
     log_task_transition_failed ~agent_name:ctx.agent_name (Masc_domain.Task err);
     result_to_response ~tool_name ~start_time (Error (Masc_domain.Task err))
@@ -431,22 +453,6 @@ and handle_transition
         | _ -> (default_time, []))
     | None -> (default_time, [])
   in
-  let max_cas_retries = 3 in
-  let cas_retry_delay_s = 0.05 in
-  let version_mismatch_prefix = "Version mismatch" in
-  (* TODO(task-cas): replace this string bridge with a typed
-     [Task_error.Version_mismatch] variant.  Today [transition_task_r] emits
-     this prefix only for caller-supplied [expected_version=Some _] guards, so
-     the retry below is intentionally gated to [expected_version=None]; a stale
-     explicit CAS guard must fail instead of becoming a blind retry. *)
-  let is_version_mismatch = function
-    | Error (Masc_domain.Task (Masc_domain.Task_error.InvalidState msg)) ->
-        String.length msg >= String.length version_mismatch_prefix
-        && String.equal
-             (Stdlib.String.sub msg 0 (String.length version_mismatch_prefix))
-             version_mismatch_prefix
-    | _ -> false
-  in
   let prepare_verification_request =
     match action with
     | Masc_domain.Submit_for_verification ->
@@ -527,28 +533,6 @@ and handle_transition
     | Masc_domain.Submit_for_verification ->
       None
   in
-  let rec try_transition attempt =
-      let r = Workspace.transition_task_r ctx.config ~agent_name:ctx.agent_name
-                ~task_id ~action ?expected_version ~notes ~reason
-                ?configured_llm_verdict
-                ?handoff_context ?prepare_verification_request
-                ?compensate_verification_request
-                ?prepare_verification_verdict () in
-      if
-        is_version_mismatch r
-        && Option.is_none expected_version
-        && attempt < max_cas_retries
-      then begin
-        task_log_info ~task_id "CAS version mismatch on %s (attempt %d/%d), retrying in %.0fms"
-          task_id (attempt + 1) max_cas_retries (cas_retry_delay_s *. 1000.0);
-        try
-          Time_compat.sleep cas_retry_delay_s;
-          try_transition (attempt + 1)
-        with Failure msg when String.starts_with ~prefix:"Time_compat.sleep:" msg ->
-          r
-      end else
-        r
-  in
   (* Capture verification_id from AwaitingVerification state BEFORE transition.
      approve/reject transitions change state, destroying the verification_id.
      Issue #7543. *)
@@ -559,12 +543,27 @@ and handle_transition
         | _ -> None)
     | None -> None
   in
-  let result = try_transition 0 in
-  (match result with
-   | Ok _ ->
-     sync_owner_current_task_binding ctx;
-     sync_planning_current_task_with_owned_task ctx
-   | Error _ -> ());
+  let result =
+    Workspace.transition_task_r
+      ctx.config
+      ~agent_name:ctx.agent_name
+      ~task_id
+      ~action
+      ?expected_version
+      ~notes
+      ~reason
+      ?configured_llm_verdict
+      ?handoff_context
+      ?prepare_verification_request
+      ?compensate_verification_request
+      ?prepare_verification_verdict
+      ()
+  in
+  Result.iter
+    (fun _ ->
+       sync_owner_current_task_binding ctx;
+       sync_planning_current_task_with_owned_task ctx)
+    result;
   (* Notify A2A subscribers on successful transition *)
   (match result with
    | Ok _ ->
@@ -753,7 +752,11 @@ let task_history_events_json (config : Workspace.config) ~task_id ~limit =
 let handle_task_history ~tool_name ~start_time ctx args =
   let task_id = get_string args "task_id" "" in
   let limit = get_int args "limit" 50 in
-  Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string (task_history_events_json ctx.config ~task_id ~limit))
+  Tool_result.make_ok
+    ~tool_name
+    ~start_time
+    ~data:(task_history_events_json ctx.config ~task_id ~limit)
+    ()
 
 include Tool_task_schemas
 (* Dispatch function *)

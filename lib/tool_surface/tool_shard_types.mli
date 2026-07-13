@@ -1,11 +1,4 @@
-(** Tool_shard_types — pure types + enum-string SSOT mirrors extracted
-    from Tool_shard (2165 LoC godfile).
-
-    Holds the [shard] record + enum-string lists hand-mirrored from
-    keeper-side validators (#8480/#8484/#8490/#8506/#8513/#8524/#8527).
-    State-touching shard registries remain in Tool_shard. Re-included
-    by Tool_shard so existing callers continue to use [Tool_shard.shard]
-    etc. unchanged. *)
+(** Tool_shard_types — pure Keeper schema families and enum-string mirrors. *)
 
 val sort_order_enum_strings : string list
 (** Hand-mirrored from [Board_dispatch.valid_sort_order_strings] (#8513). *)
@@ -28,27 +21,11 @@ val fs_write_mode_enum_strings : string list
 val vote_direction_enum_strings : string list
 (** Hand-mirrored from [Board_votes.valid_vote_direction_strings] (#8506). *)
 
-(** A named collection of tools that can be granted/revoked. *)
-type shard = {
-  name : string;
-  tools : Masc_domain.tool_schema list;
-  read_only_tools : string list;
-  removable : bool;
-  description : string;
-}
-
-module StringMap : Map.S with type key = string
-
-(** {1 Schema selection + agent shard helpers} *)
+(** {1 Schema selection} *)
 
 val select_named_schemas :
   string list -> Masc_domain.tool_schema list -> Masc_domain.tool_schema list
 (** Pure: pick the named schemas (in input order) from the given pool. *)
-
-val default_shard_names : string list
-(** Pure: the default shards granted to a fresh agent. *)
-
-val tool_spec_read_only : string list
 
 val base_tools : Masc_domain.tool_schema list
 (** Pure: base tool schemas (always-on tools every keeper sees). *)

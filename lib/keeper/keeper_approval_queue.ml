@@ -1267,6 +1267,14 @@ let publish_summary_update ~id =
   | None -> ()
 ;;
 
+let publish_summary_transition ~id = function
+  | Ok true ->
+    publish_summary_update ~id;
+    Ok true
+  | Ok false -> Ok false
+  | Error error -> Error error
+;;
+
 let mark_summary_pending ~id =
   let result =
     Stdlib.Mutex.protect pending_store_mu (fun () ->
@@ -1292,26 +1300,17 @@ let mark_summary_pending ~id =
         } ->
       Ok false)
   in
-  (match result with
-   | Ok true -> publish_summary_update ~id
-   | Ok false | Error _ -> ());
-  result
+  publish_summary_transition ~id result
 ;;
 
 let attach_summary ~id summary =
   let updated = complete_summary ~id (Summary_available summary) in
-  (match updated with
-   | Ok true -> publish_summary_update ~id
-   | Ok false | Error _ -> ());
-  updated
+  publish_summary_transition ~id updated
 ;;
 
 let mark_summary_failed ~id ~reason ~retryable =
   let updated = complete_summary ~id (Summary_failed { reason; retryable }) in
-  (match updated with
-   | Ok true -> publish_summary_update ~id
-   | Ok false | Error _ -> ());
-  updated
+  publish_summary_transition ~id updated
 ;;
 
 let restart_retryable_summary ~id =
@@ -1344,10 +1343,7 @@ let restart_retryable_summary ~id =
           } ->
         Ok false)
   in
-  (match updated with
-   | Ok true -> publish_summary_update ~id
-   | Ok false | Error _ -> ());
-  updated
+  publish_summary_transition ~id updated
 ;;
 
 let record_resolution_delivery_failure ~keeper_name ~approval_id reason =

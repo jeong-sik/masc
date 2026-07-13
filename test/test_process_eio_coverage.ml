@@ -392,6 +392,51 @@ let test_run_argv_with_status_split_streaming_callback_cancelled_propagates () =
   in
   check bool "callback cancellation propagates" true cancelled
 
+let test_run_argv_with_status_split_streaming_cancel_reaps_child () =
+  Eio_main.run @@ fun env ->
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let cwd_default = Eio.Stdenv.fs env in
+  Process_eio.init ~cwd_default ~proc_mgr ~clock;
+  let marker = Filename.temp_file "process-eio-cancel-reap" ".marker" in
+  Sys.remove marker;
+  Fun.protect
+    ~finally:(fun () -> if Sys.file_exists marker then Sys.remove marker)
+    (fun () ->
+      let cancellation_requested = Atomic.make false in
+      let cancelled =
+        try
+          Eio.Cancel.sub (fun cc ->
+              ignore
+                (Process_eio.run_argv_with_status_split_streaming
+                   ~on_stdout_chunk:(fun _ ->
+                     if Atomic.compare_and_set cancellation_requested false true
+                     then Eio.Cancel.cancel cc (Failure "cancel running child"))
+                   ~on_stderr_chunk:(fun _ -> ())
+                   [ "/bin/sh"
+                   ; "-c"
+                   ; "printf '%d\\n' \"$$\" > \"$1\"; printf 'ready\\n'; while :; do sleep 1; done"
+                   ; "process-eio-cancel-reap"
+                   ; marker
+                   ]));
+          false
+        with Eio.Cancel.Cancelled _ -> true
+      in
+      check bool "external cancellation propagates" true cancelled;
+      let ic = open_in marker in
+      let child_pid =
+        Fun.protect
+          ~finally:(fun () -> close_in_noerr ic)
+          (fun () -> input_line ic |> int_of_string)
+      in
+      let child_reaped =
+        try
+          Unix.kill child_pid 0;
+          false
+        with Unix.Unix_error (Unix.ESRCH, _, _) -> true
+      in
+      check bool "child reaped before cancellation propagation" true child_reaped)
+
 let test_run_argv_with_status_split_streaming_multiple_chunks () =
   Eio_main.run @@ fun env ->
   let proc_mgr = Eio.Stdenv.process_mgr env in
@@ -547,6 +592,10 @@ let () =
              "run_argv_with_status_split_streaming-callback-cancelled-propagates"
              `Quick
              test_run_argv_with_status_split_streaming_callback_cancelled_propagates;
+           test_case
+             "run_argv_with_status_split_streaming-cancel-reaps-child"
+             `Quick
+             test_run_argv_with_status_split_streaming_cancel_reaps_child;
            test_case "run_argv_with_status_split_streaming-multiple-chunks" `Quick
              test_run_argv_with_status_split_streaming_multiple_chunks;
            test_case "run_argv_with_status-rejects-invalid-timeout" `Quick

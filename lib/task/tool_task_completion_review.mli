@@ -3,10 +3,6 @@
 val persisted_completion_contract :
   task_opt:Masc_domain.task option -> string list option
 
-val placeholder_evidence_refs : string list
-
-val is_placeholder_evidence_ref : string -> bool
-
 val blank_evidence_ref : string -> bool
 (** [true] when the entry trims to the empty string. Shared element-level
     predicate for evidence-ref boundary checks (RFC-0337 decision 4):

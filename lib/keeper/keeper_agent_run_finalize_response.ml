@@ -142,7 +142,6 @@ let checkpoint_for_replay_persistence
           pre-turn history prefix")
   | ( Runtime_agent.Completed
     | Runtime_agent.TurnBudgetExhausted _
-    | Runtime_agent.MutationBoundaryReached _
     | Runtime_agent.Yielded_to_chat_waiting _
     | Runtime_agent.Yielded_to_durable_stimulus _ ) ->
     canonical_success_replay_checkpoint

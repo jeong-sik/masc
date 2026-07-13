@@ -25,7 +25,7 @@ val make_keeper_tool_handler
   -> ctx_snapshot:Keeper_types.working_context
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
   -> exec_cache:Masc_exec.Exec_cache.t option
-  -> ?search_fn:(unit -> Yojson.Safe.t)
+  -> ?search_fn:(unit -> Keeper_tool_execution.t)
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?continuation_channel:Keeper_continuation_channel.t
   -> ?gate_context:(unit -> Keeper_gate.causal_context)

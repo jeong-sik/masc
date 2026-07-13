@@ -30,7 +30,7 @@ let load_from_path ~name path : (keeper_profile_defaults, load_error) result =
           | None -> `Null
         in
         let removed_fields =
-          [ "tool_access"; "tool_denylist" ]
+          [ "tool_access"; "tool_denylist"; "shards"; "policy_voice_enabled" ]
           |> List.filter (fun key ->
             Option.is_some (Json_util.assoc_member_opt key keeper_json))
         in
@@ -68,10 +68,6 @@ let load_from_path ~name path : (keeper_profile_defaults, load_error) result =
               autoboot_enabled = None;
               mention_targets = Safe_ops.json_string_list "mention_targets" keeper_json;
               proactive_enabled = Safe_ops.json_bool_opt "proactive_enabled" keeper_json;
-              shards =
-                (match Safe_ops.json_string_list "shards" keeper_json with
-                 | [] -> None
-                 | xs -> Some xs);
               allowed_paths = None;
               sandbox_profile = None;
               sandbox_image = None;

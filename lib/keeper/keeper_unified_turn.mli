@@ -81,15 +81,13 @@ val turn_event_bus_overflow_evidence_detail : turn_event_bus_summary -> string
     evidence inside the keeper overflow blocker detail. *)
 
 (** Turn-local tool-event pairing state used to detect event-bus integrity
-    failures before side-effect retry logic falls back to unknown input.
-    Exposed for targeted tests. *)
+    failures. Exposed for targeted tests. *)
 type turn_tool_event_tracker
 
 val create_turn_tool_event_tracker : unit -> turn_tool_event_tracker
 
 val record_turn_tool_events
-  :  ?has_mutating_side_effect_with_input:(tool_name:string -> input:Yojson.Safe.t -> bool)
-  -> keeper_name:string
+  :  keeper_name:string
   -> turn_tool_event_tracker
   -> Agent_sdk.Event_bus.event list
   -> turn_tool_event_tracker
@@ -97,8 +95,6 @@ val record_turn_tool_events
 val turn_tool_event_integrity_error
   :  turn_tool_event_tracker
   -> Agent_sdk.Error.sdk_error option
-
-val committed_mutating_tools_from_events : turn_tool_event_tracker -> string list
 
 (** Build the keeper overflow event from either a drained event-bus
     signal or the structured OAS error fallback. Exposed for tests. *)

@@ -22,6 +22,15 @@
 
 type t
 
+exception Corrupt_jsonl of {
+  path : string;
+  line_number : int;
+  detail : string;
+}
+(** Raised when an audit JSONL reader encounters a malformed JSON value or an
+    invalid audit envelope. Audit-chain corruption is fail-closed rather than
+    skipped, and identifies the exact file and line. *)
+
 val create : base_dir:string -> t
 (** Create or open a store rooted at [base_dir]. The directory is
     created (with parents) if it does not exist. The latest entry's
@@ -37,10 +46,12 @@ val append :
     on-disk entry. Returns the appended entry. *)
 
 val recent : t -> n:int -> Envelope.t list
-(** Read the most recent [n] entries (chronologically increasing). *)
+(** Read the most recent [n] entries (chronologically increasing).
+    Raises {!Corrupt_jsonl} when persisted audit evidence is malformed. *)
 
 val since : t -> ts:float -> Envelope.t list
-(** Read all entries whose [ts] is >= the given timestamp. *)
+(** Read all entries whose [ts] is >= the given timestamp.
+    Raises {!Corrupt_jsonl} when persisted audit evidence is malformed. *)
 
 val verify_chain : Envelope.t list -> (unit, int * string) result
 (** Verify the [prev_hash] chain over a list of entries assumed in

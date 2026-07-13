@@ -16,6 +16,7 @@ val tool_preferred_empty : string
 val tool_unknown_guard : string
 val recovery_block : string
 val failure_judgment : string
+val board_attention_judgment : string
 val gate_judgment : string
 val turn_intent : string
 val librarian_system : string

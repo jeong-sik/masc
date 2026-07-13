@@ -6,39 +6,6 @@
 
     @since Unified Keeper Loop *)
 
-(** RFC-0247: typed provenance of a board observation, classified once at the
-    world-observation boundary by {!provenance_of}. Drives the trusted-vs-
-    observational split in the unified prompt: fleet-authored narrative
-    ({Self_narrative}/{Peer_keeper}/{Automation}/{Unknown}) is rendered inside
-    the observational-data envelope so a keeper cannot treat its own or a
-    peer's board narrative as trusted instruction. *)
-type observation_provenance =
-  | Self_narrative
-  | Peer_keeper
-  | Human_direct
-  | Automation
-  | Unknown
-
-(** RFC-0247: classify a board event's provenance from primitives already
-    present at the boundary ([post_kind] + [author] + the keeper's own identity
-    set [self_ids]). Pure, no new data plumbing.
-
-    - own author ([is_self_author]) -> [Self_narrative]
-    - [Human_post] + non-keeper author -> [Human_direct]
-    - [Human_post] + keeper author -> [Unknown] (classification drift)
-    - [Automation_post]/[System_post] + typed keeper author -> [Peer_keeper]
-    - [Automation_post]/[System_post] + non-keeper author -> [Automation] *)
-val provenance_of :
-  self_ids:Keeper_identity.Keeper_id.t list ->
-  Board_types.post_kind ->
-  author:string ->
-  observation_provenance
-
-(** RFC-0247: trust tier for rendering. [Unknown] defaults to [true]
-    (defense-in-depth: unclassifiable events are untrusted fleet output, never
-    trusted operator direction). *)
-val should_quarantine : observation_provenance -> bool
-
 (** Structured board activity delivered to keepers without routing heuristics. *)
 type board_reaction_event = {
   target_type : Board_types.reaction_target_type;
@@ -82,9 +49,6 @@ type pending_board_event = {
   (** Author of the most recent external comment (for prompt context). *)
   latest_external_preview : string option;
   (** Preview of the most recent external comment content. *)
-  provenance : observation_provenance;
-  (** RFC-0247: provenance classified at construction; drives the
-      trusted-vs-observational rendering split. *)
 }
 
 (** Read-only projection of one schedule row that needs keeper attention. *)
@@ -236,7 +200,6 @@ type keeper_cycle_decision = {
 type board_signal_match = {
   explicit_mention : bool;
   matched_targets : string list;
-  score : int;
 }
 
 (** Collect recent board activity within the keeper's heartbeat window.
@@ -262,11 +225,11 @@ val board_signal_wake_reason :
   meta:Keeper_meta_contract.keeper_meta ->
   signal:Board_dispatch.board_signal ->
   Keeper_world_observation_board_signal.wake_reason option
+  Keeper_world_observation_board_signal.board_read
 
 (** RFC-0266: build the actionable [pending_board_event] for a completed async
     [masc_fusion] deliberation. Surfaces the sink's board result as a just-arrived
-    event so the woken turn acts on it; classified [Self_narrative] (own author +
-    System_post) so it renders inside the observational-data envelope (RFC-0247).
+    event so the woken turn can inspect it as neutral Board context.
     [board_post_id = ""] falls back to a synthetic [fusion-run:<id>] post id. *)
 val pending_board_event_of_fusion_completion :
   meta:Keeper_meta_contract.keeper_meta ->
@@ -276,18 +239,15 @@ val pending_board_event_of_fusion_completion :
 
 (** RFC-0290: build the actionable [pending_board_event] for a completed
     background job. Mirrors {!pending_board_event_of_fusion_completion}: the
-    synthetic System_post event wakes the keeper with the job outcome, while
-    provenance keeps it in the observational-data envelope. [bg_board_post_id =
-    ""] falls back to a synthetic [bg-run:<id>] post id. *)
+    synthetic System_post event wakes the keeper with the job outcome.
+    [bg_board_post_id = ""] falls back to a synthetic [bg-run:<id>] post id. *)
 val pending_board_event_of_bg_job_completion :
   meta:Keeper_meta_contract.keeper_meta ->
   arrived_at:float ->
   Keeper_event_queue.bg_job_completion ->
   pending_board_event
 
-(** Build the actionable observation for a direct scheduled keeper wake. The
-    schedule itself is the trusted timing source; the message is rendered as
-    automation-origin observational data, not trusted operator instruction. *)
+(** Build the actionable observation for a direct scheduled keeper wake. *)
 val pending_board_event_of_scheduled_wake :
   meta:Keeper_meta_contract.keeper_meta ->
   arrived_at:float ->
@@ -295,9 +255,8 @@ val pending_board_event_of_scheduled_wake :
   pending_board_event
 
 (** Build the actionable observation for a connector-recorded external
-    attention item. Ambient connector chatter remains observational by default:
-    it is not trusted operator instruction unless another typed path makes it
-    an explicit mention. *)
+    attention item. Mention state and connector coordinates remain context
+    fields; they do not grant instruction authority. *)
 val pending_board_event_of_external_attention :
   meta:Keeper_meta_contract.keeper_meta ->
   Keeper_external_attention.item ->

@@ -94,7 +94,8 @@ Keeper의 전체 상태를 담는 레코드. `lib/keeper/keeper_types.ml`에 정
 - **Lineage**: `generation`, `trace_id`, `trace_history`, `last_handoff_ts`
 - **Goal/Task links**: `active_goal_ids`, `current_task_id`, typed goal/task transitions
 - **Model**: `runtime_id`, `last_model_used`, derived `active_model`
-- **Capability**: `policy_voice_enabled`, `allowed_paths`
+- **Capability boundary**: the flat Tool catalog plus objective `allowed_paths`
+  containment; external effects pass through the Gate.
 - **Scope**: `mention_targets`, `bound_workspace_ids`
 - **Proactive**: `proactive_enabled`, `proactive_idle_sec`, `proactive_cooldown_sec`
 - **Compaction**: `compaction_profile`, `compaction_ratio_gate`, `compaction_message_gate`
@@ -541,6 +542,12 @@ Provider가 보고한 token/cache/cost 값은 원값 그대로 ledger, runtime a
 ### INV-KEEPER-008: non-hierarchical effect Gate
 
 외부 효과는 exact Always Allowed, configured LLM Auto Judge, non-blocking HITL 중 하나로 판정하며, 한 요청의 대기는 다른 Keeper나 작업을 차단하지 않는다.
+
+Gate 입력은 제품·도구·명령·위험 등급을 해석하지 않는 opaque operation과 완전히 정규화된 입력이다. 판정은 exact rule/profile, configured LLM, durable HITL 응답, exact one-shot grant만으로 이루어지고, HITL 완료는 해당 Keeper lane만 깨운다. Executor가 Gate 판정을 뒤집거나 추가로 거부할 수 있는 근거는 typed input, capability identity, path jail, sandbox confinement처럼 실행 시점에 직접 증명되는 불변식뿐이다.
+
+한 번 admit한 User 입력 뒤 `ToolCompleted`가 관측된 같은 턴을 다시 실행하려면, 최신 ToolResult checkpoint를 보존하면서 User 입력을 다시 append하지 않는 typed continuation이 있어야 한다. continuation이 없는 runtime 후보 교체는 현재 턴의 명시적 실패로 끝내고 Keeper lane과 다음 cycle은 계속 사용할 수 있게 한다. 이 조건은 tool 이름, read/write 분류, 명령 의미로 추론하지 않는다.
+
+Filesystem capability는 같은 부모에 동등한 쓰기 권한을 이미 가진 독립 same-UID hostile writer와의 MAC 격리를 제공한다고 주장하지 않는다. 그런 격리가 필요하면 Gate 분류를 추가하지 않고 UID, mount namespace, 또는 exclusive writer 경계에서 제공한다.
 
 ### INV-KEEPER-009: fiber_health 정합성
 

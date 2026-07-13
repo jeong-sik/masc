@@ -9,7 +9,6 @@ code_refs:
   - lib/config/env_config_runtime.ml
   - lib/config/feature_flag_registry.ml
   - lib/config/env_config_sandbox.ml
-  - lib/tool_resource_gate.ml
   - lib/keeper/keeper_tool_surface_ops.ml
   - lib/keeper/keeper_memory_bank_env.ml
   - lib/workspace/workspace_gc.ml
@@ -146,7 +145,6 @@ The repo has correctly moved toward `<base-path>/.masc`, but current gates mostl
 
 **Evidence**:
 
-- `lib/tool_resource_gate.ml:42-68` defines local bool/int/float env parsers over `Sys.getenv_opt`.
 - `lib/keeper/keeper_tool_surface_ops.ml:38-65` defines local TTL parsing over `Sys.getenv_opt`.
 - `lib/keeper/keeper_memory_bank_env.ml:14-67` defines a separate keeper-memory env parser family.
 

@@ -384,7 +384,7 @@ let test_local_env_uses_keeper_secret_env_without_ambient_credentials () =
       "second ambient token stripped"
       None
       (env_value "SECOND_SERVICE_TOKEN" env);
-    Alcotest.(check bool)
+    Alcotest.(check (option string))
       "ambient service config stripped"
       None
       (env_value "SERVICE_CONFIG_DIR" env);

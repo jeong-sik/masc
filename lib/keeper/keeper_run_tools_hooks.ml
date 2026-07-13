@@ -203,7 +203,12 @@ let assemble_hooks
              acc.meta <- entry.meta;
              meta_ref := entry.meta
            | None -> ());
-          let task_id = Keeper_run_tools_task_scope.task_id_scope_of_tool_call ~tool_name ~input ~output_text ~meta:acc.meta in
+          let task_id =
+            Keeper_run_tools_task_scope.task_id_scope_of_tool_call
+              ~tool_name
+              ~input
+              ~meta:acc.meta
+          in
           acc.tool_calls
           <- { tool_name
              ; provider
@@ -613,17 +618,6 @@ let assemble_hooks
       }
     in
     let hooks = Agent_sdk.Hooks.compose ~outer:before_turn_hook ~inner:base_hooks in
-    (* Tier K4b/K4c: install the tool-emission PostToolUse hook so
-     tagged tool results flow into this keeper's own accumulator
-     during Agent.run. The drain happens in keeper_post_turn.ml
-     [apply_tool_emission_wirein] BEFORE [apply_multimodal_wirein],
-     keyed by the SAME keeper name (stable across turns).
-     When [MASC_TOOL_EMISSION] is off the hook is a no-op (see
-     [Keeper_tool_emission_hook] for the gating). *)
-    let hooks =
-      let acc = Keeper_tool_emission_hook.accumulator_for_keeper agent_name in
-      Keeper_tool_emission_hook.install_into_hooks acc hooks
-    in
     let reducer =
       let hydrator_steps =
         match Keeper_artifact_hydrator.reducer_from_env () with

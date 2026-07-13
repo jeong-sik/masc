@@ -7,7 +7,6 @@
 
     Provides three functions used by [Keeper_post_turn]:
 
-    - {!masc_multimodal_enabled} — env flag gate.
     - {!extract_raw_artifacts} — pull raw artifact JSON from a
       [working_context] bag.
     - {!upsert_workspace_meta} — record a workspace summary into
@@ -38,24 +37,21 @@
     The wire-in consumes (and removes) these entries each turn so
     they are not double-counted. *)
 
-val masc_multimodal_enabled : unit -> bool
-(** [true] iff [MASC_MULTIMODAL] is set to one of ["1"], ["true"],
-    ["yes"], or ["on"]. Default ([false]) keeps the wire-in inert. *)
-
 val extract_raw_artifacts :
   Yojson.Safe.t option ->
-  Multimodal_keeper_bridge.raw_artifact list * Yojson.Safe.t option
+  (Multimodal_keeper_bridge.raw_artifact list * Yojson.Safe.t option, string) result
 (** [extract_raw_artifacts wc] returns
     [(raws, wc_without_multimodal_key)]:
 
     - [raws] = parsed [raw_artifact] values from
-      [wc.multimodal_artifacts]. Malformed entries are silently
-      skipped; the function never raises.
+      [wc.multimodal_artifacts]. Every producer row must satisfy the exact
+      typed envelope; malformed or duplicate fields return [Error] and leave
+      the caller in control of the unchanged checkpoint.
     - [wc_without_multimodal_key] = the same working_context with
       the consumed key dropped (so the next turn does not
       re-process them).
 
-    [wc = None] or non-[`Assoc] payload → [([], wc)]. *)
+    [wc = None] or non-[`Assoc] payload → [Ok ([], wc)]. *)
 
 val upsert_workspace_meta :
   Yojson.Safe.t option -> Yojson.Safe.t -> Yojson.Safe.t option

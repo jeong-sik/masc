@@ -226,6 +226,7 @@ describe('IdeActivityPanel', () => {
         content: 'Task status belongs next to this line',
         goal_id: 'goal-runtime',
         task_id: 'task-runtime',
+        references: [],
         created_at_ms: 1,
         updated_at_ms: 1,
       }],

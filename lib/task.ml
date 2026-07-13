@@ -34,6 +34,5 @@ let () =
             ~input_schema:s.input_schema
             ~handler_binding:Tag_dispatch
             ~is_read_only:(List.mem s.name tool_spec_read_only)
-            ~is_idempotent:(List.mem s.name tool_spec_read_only)
             ()))
     Schemas.schemas

@@ -1009,7 +1009,7 @@ let run_keeper_msg_turn_admitted
                     Ids.Turn_ref.to_yojson turn_ref );
                 ]
               in
-              tool_result_ok (Yojson.Safe.to_string reply_json)
+              tool_result_ok_data reply_json
 
 )))))))))
 

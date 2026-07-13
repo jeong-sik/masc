@@ -44,7 +44,11 @@ let write_file path content =
     (fun () -> output_string oc content)
 ;;
 
-let make_meta ?(sandbox = Keeper_types_profile_sandbox.Local) name =
+let make_meta
+      ?(sandbox = Keeper_types_profile_sandbox.Local)
+      ?(always_allow = false)
+      name
+  =
   let json =
     `Assoc
       [ "name", `String name
@@ -56,7 +60,7 @@ let make_meta ?(sandbox = Keeper_types_profile_sandbox.Local) name =
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
-  | Ok meta -> meta
+  | Ok meta -> if always_allow then { meta with always_allow = Some true } else meta
   | Error e -> Alcotest.fail e
 ;;
 
@@ -71,7 +75,7 @@ let with_eio_fs f =
   f ()
 ;;
 
-let setup ?sandbox f =
+let setup ?sandbox ?always_allow f =
   with_eio_fs
   @@ fun () ->
   let base = temp_dir () in
@@ -81,7 +85,7 @@ let setup ?sandbox f =
     (fun () ->
        Keeper_registry.clear ();
        let config = Workspace.default_config base in
-       let meta = make_meta ?sandbox "tester" in
+       let meta = make_meta ?sandbox ?always_allow "tester" in
        let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
        ensure_dir playground;
        ignore (Keeper_registry.register ~base_path:base meta.name meta);
@@ -144,27 +148,48 @@ let test_visible_mind_read_resolves_to_private_storage () =
   | Error e -> Alcotest.fail ("visible mind path should resolve: " ^ e)
 ;;
 
-let test_playground_internal_path_now_allowed () =
-  (* RFC-0006: the keeper playground (.masc/playground/<keeper>/...) is the
-     keeper's own working area — its internal paths (mind/, drafts) are
-     reachable. #23843 unblocked the whole arm; this keeps the playground half
-     unblocked after re-narrowing the helper to exempt .masc/playground. *)
+let test_absolute_playground_path_is_allowed () =
   setup
   @@ fun ~config ~meta ~playground ->
-  let private_raw =
-    Masc.Keeper_sandbox.allowed_root_rel_of_meta ~meta ^ "mind/README.md"
-  in
   let target = Filename.concat playground "mind/README.md" in
   write_file target "private storage fixture\n";
   (match
      Keeper_tool_shared_runtime.resolve_keeper_read_path
        ~config
        ~meta
-       ~raw_path:private_raw
+       ~raw_path:target
    with
    | Ok path ->
      Alcotest.(check string) "resolved private path" target path
    | Error e -> Alcotest.fail ("playground-internal path should resolve: " ^ e))
+;;
+
+let test_relative_path_does_not_depend_on_project_root_allowlist () =
+  setup
+  @@ fun ~config ~meta ~playground ->
+  let target = Filename.concat playground "mind/README.md" in
+  let project_root_meta = { meta with allowed_paths = [ "mind" ] } in
+  match
+    Keeper_tool_shared_runtime.resolve_keeper_read_path
+      ~config
+      ~meta:project_root_meta
+      ~raw_path:"mind/README.md"
+  with
+  | Ok path -> Alcotest.(check string) "relative path stays in playground" target path
+  | Error e -> Alcotest.fail ("relative path should resolve in playground: " ^ e)
+;;
+
+let test_relative_parent_escape_is_rejected () =
+  setup
+  @@ fun ~config ~meta ~playground:_ ->
+  match
+    Keeper_tool_shared_runtime.resolve_keeper_read_path
+      ~config
+      ~meta
+      ~raw_path:"../outside.txt"
+  with
+  | Error _ -> ()
+  | Ok path -> Alcotest.failf "relative parent escape resolved unexpectedly: %s" path
 ;;
 
 let test_read_with_visible_repo_cwd_and_relative_file_path () =
@@ -244,7 +269,7 @@ let test_repo_prefixed_missing_read_preserves_exact_input () =
 ;;
 
 let test_write_visible_mind_path () =
-  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker ~always_allow:true
   @@ fun ~config ~meta ~playground ->
   let raw =
     Keeper_tool_filesystem_runtime.handle_file_write
@@ -257,6 +282,7 @@ let test_write_visible_mind_path () =
             ; "mode", `String "overwrite"
             ; "content", `String "allowed"
             ])
+      ()
   in
   if not (parse_ok raw) then Alcotest.failf "expected Write ok, got: %s" raw;
   Alcotest.(check string)
@@ -274,9 +300,17 @@ let () =
             `Quick
             test_visible_mind_read_resolves_to_private_storage
         ; Alcotest.test_case
-            "direct private storage read is allowed"
+            "absolute playground storage read is allowed"
             `Quick
-            test_playground_internal_path_now_allowed
+            test_absolute_playground_path_is_allowed
+        ; Alcotest.test_case
+            "relative path ignores project-root allowlist additions"
+            `Quick
+            test_relative_path_does_not_depend_on_project_root_allowlist
+        ; Alcotest.test_case
+            "relative parent escape is rejected"
+            `Quick
+            test_relative_parent_escape_is_rejected
         ] )
     ; ( "file_tools"
       , [ Alcotest.test_case

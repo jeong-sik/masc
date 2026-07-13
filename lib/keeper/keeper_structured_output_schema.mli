@@ -42,6 +42,10 @@ val failure_judgment_output_schema : Yojson.Safe.t
 (** Strict independent Keeper failure-judgment verdict. Decision tokens are
     owned by {!Keeper_failure_judgment_contract}. *)
 
+val board_attention_judgment_output_schema : Yojson.Safe.t
+(** Strict relevance verdict for one durable Board-attention candidate. Decision
+    tokens are owned by {!Keeper_board_attention_judgment}. *)
+
 val anti_rationalization_verdict_output_schema : Yojson.Safe.t
 (** JSON object the task anti-rationalization reviewer provider must return. *)
 

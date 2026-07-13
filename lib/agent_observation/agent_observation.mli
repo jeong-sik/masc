@@ -70,6 +70,21 @@ type annotation_kind =
 val annotation_kind_to_string : annotation_kind -> string
 val annotation_kind_of_string : string -> annotation_kind option
 
+type annotation_reference =
+  { relation : string
+  ; reference : string
+  }
+(** Product-neutral link carried by an annotation.  Both fields are opaque to
+    the observation bus: producers choose the relation label and reference
+    value, while consumers may render but must not interpret them. *)
+
+val annotation_references_to_json : annotation_reference list -> Yojson.Safe.t
+
+val annotation_references_of_json :
+  Yojson.Safe.t -> (annotation_reference list, string) result
+(** Decode a [references] array.  [`Null] means no references.  Malformed or
+    blank entries are rejected explicitly instead of being dropped. *)
+
 type annotation_request =
   { base_path : string
   ; partition : codebase_partition
@@ -81,14 +96,7 @@ type annotation_request =
   ; content : string
   ; goal_id : string option
   ; task_id : string option
-  ; board_post_id : string option
-  ; comment_id : string option
-  ; pr_id : string option
-  ; git_ref : string option
-  ; log_id : string option
-  ; session_id : string option
-  ; operation_id : string option
-  ; worker_run_id : string option
+  ; references : annotation_reference list
   }
 
 type annotation_result =

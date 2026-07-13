@@ -46,7 +46,6 @@ let make_meta ?(allowed_paths = []) ~name ~sandbox () =
         ("name", `String name);
         ("agent_name", `String name);
         ("trace_id", `String "test-trace-containment");
-        ("policy_voice_enabled", `Bool false);
         ("sandbox_profile",
          `String (Keeper_types_profile_sandbox.sandbox_profile_to_string sandbox));
         ("allowed_paths", `List (List.map (fun path -> `String path) allowed_paths));

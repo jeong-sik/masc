@@ -89,6 +89,39 @@ val enqueue_durable_result :
     write. An existing identical [post_id] is idempotent; the same [post_id]
     with a different typed payload is an explicit conflict. *)
 
+type enqueue_if_missing_durable_result =
+  | Enqueued
+  | Already_present
+  | Identity_conflict of string
+  | Storage_error of string
+
+val enqueue_if_missing_durable_result :
+  base_path:string
+  -> event_id:string
+  -> string
+  -> Keeper_event_queue.stimulus
+  -> enqueue_if_missing_durable_result
+(** Durably enqueue a judged Board-attention event by its opaque producer
+    identity. [event_id] must byte-equal the [candidate_id] carried by the
+    typed [Board_attention] payload. No post id, content, or other derived
+    field participates in identity. *)
+
+type enqueue_stimulus_durable_result =
+  | Stimulus_enqueued
+  | Stimulus_already_present
+  | Stimulus_storage_error of string
+
+val enqueue_stimulus_durable_result :
+  base_path:string
+  -> string
+  -> Keeper_event_queue.stimulus
+  -> enqueue_stimulus_durable_result
+(** Durably enqueue an already-typed deterministic stimulus by
+    {!Keeper_event_queue.stimulus_identity_equal}. This explicit-result path is
+    for structurally addressed signals whose delivery must commit before a
+    wake hint. Board-attention judgments use the stricter opaque-event-id API
+    above. *)
+
 val enqueue_hitl_resolution_durable_result :
   base_path:string
   -> keeper_name:string

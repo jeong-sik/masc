@@ -42,9 +42,6 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
   | Some (Keeper_turn_driver.Accept_rejected _) -> None
   | Some (Keeper_turn_driver.Provider_timeout _) -> None
   | Some (Keeper_turn_driver.Turn_timeout _) -> Some Turn_timeout
-  | Some (Keeper_turn_driver.Ambiguous_post_commit { is_timeout; _ }) ->
-    Some
-      (if is_timeout then Ambiguous_post_commit_timeout else Ambiguous_post_commit_failure)
   (* RFC-0159 Phase A: typed [Internal_*] variants carry an opaque exception
      repr.  They are not yet mapped to a dedicated [blocker_class]; returning
      [None] keeps Phase A scope to typed substrate only.  A follow-up RFC may
@@ -52,12 +49,10 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
   | Some (Keeper_turn_driver.Internal_unhandled_exception _) -> None
   | Some (Keeper_turn_driver.Internal_bridge_exception _) -> None
   | Some (Keeper_turn_driver.Internal_contract_rejected _) -> None
+  | Some (Keeper_turn_driver.Receipt_persistence_failed _) -> None
   | None ->
     (match err with
      | Agent_sdk.Error.Internal _ -> None
-     | Agent_sdk.Error.Api (Agent_sdk.Retry.Timeout { message })
-       when Keeper_error_classify.is_structural_oas_timeout_message message ->
-       Some Oas_agent_execution_timeout
      | Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionTimeout _)
      | Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionIdleTimeout _) ->
        Some Oas_agent_execution_timeout
@@ -125,10 +120,10 @@ let runtime_blocker_surface_of_masc_internal_error = function
   | Keeper_turn_driver.Resumable_cli_session _
   | Keeper_turn_driver.Turn_timeout _
   | Keeper_turn_driver.Provider_timeout _
-  | Keeper_turn_driver.Ambiguous_post_commit _
   | Keeper_turn_driver.Internal_unhandled_exception _
   | Keeper_turn_driver.Internal_bridge_exception _
-  | Keeper_turn_driver.Internal_contract_rejected _ ->
+  | Keeper_turn_driver.Internal_contract_rejected _
+  | Keeper_turn_driver.Receipt_persistence_failed _ ->
     None
 
 let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
@@ -160,8 +155,6 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
       else summary
     (* All remaining blocker_class variants carry no class-specific summary
        transformation — fall back to the live summary or the typed name. *)
-    | Ambiguous_post_commit_timeout
-    | Ambiguous_post_commit_failure
     | Turn_timeout
     | Stale_fleet_batch
     | Sdk_max_turns_exceeded
@@ -271,13 +264,6 @@ let runtime_blocker_surface_of_failure_reason (reason : Keeper_registry.failure_
                code
                detail
          })
-  | Keeper_registry.Ambiguous_partial_commit { kind; detail } ->
-    let blocker_class =
-      match kind with
-      | Keeper_registry.Post_commit_timeout -> "ambiguous_post_commit_timeout"
-      | Keeper_registry.Post_commit_failure -> "ambiguous_post_commit_failure"
-    in
-    Some { blocker_class; summary = detail }
   | Keeper_registry.Fiber_unresolved _ ->
     Some
       (runtime_blocker_surface_of_typed_class

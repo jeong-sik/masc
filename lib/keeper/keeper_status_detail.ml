@@ -32,7 +32,7 @@ let read_tail_lines_or_empty ~site path ~max_bytes ~max_lines =
 type cache_entry = {
   updated_at : string;
   args_hash : string;
-  response : string;
+  response : Yojson.Safe.t;
 }
 
 let _cache : (string, cache_entry) Hashtbl.t = Hashtbl.create 8
@@ -365,7 +365,7 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
        | Some entry
          when entry.updated_at = m.updated_at
            && entry.args_hash = args_hash ->
-         tool_result_ok entry.response
+         tool_result_ok_data entry.response
        | _ ->
       let tail_turns = max 0 (get_int args "tail_turns" 3) in
       let tail_messages = max 0 (get_int args "tail_messages" 5) in
@@ -1019,10 +1019,9 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
                with Sys_error _ -> `List []);
            ]);
          ]) in
-         let response = Yojson.Safe.pretty_to_string json in
          Eio_guard.with_mutex cache_mu (fun () ->
            Hashtbl.replace _cache cache_key
-             { updated_at = m.updated_at; args_hash; response });
-         tool_result_ok response)
+             { updated_at = m.updated_at; args_hash; response = json });
+         tool_result_ok_data json)
 (* TEL-OK: 1-line delegate to ctx-free body. *)
 let handle_keeper_status (ctx : _ context) args = handle_keeper_status_config ~config:ctx.config ~agent_name:ctx.agent_name args

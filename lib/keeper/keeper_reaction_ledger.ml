@@ -104,7 +104,8 @@ let board_stimulus_id ~post_id = "board:" ^ post_id
 
 let stimulus_kind_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
   match stimulus.payload with
-  | Keeper_event_queue.Board_signal _ -> Board_signal
+  | Keeper_event_queue.Board_signal _ | Keeper_event_queue.Board_attention _ ->
+    Board_signal
   | Keeper_event_queue.Bootstrap -> Bootstrap
   | Keeper_event_queue.Fusion_completed _ -> Fusion_completed
   | Keeper_event_queue.Bg_completed _ -> Bg_completed
@@ -116,9 +117,12 @@ let stimulus_kind_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
 ;;
 
 let stimulus_id_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
-  match stimulus_kind_of_event_queue stimulus with
-  | Board_signal -> board_stimulus_id ~post_id:stimulus.post_id
-  | kind ->
+  match stimulus.payload, stimulus_kind_of_event_queue stimulus with
+  | Keeper_event_queue.Board_attention attention, Board_signal ->
+    "board-attention:" ^ attention.candidate_id
+  | Keeper_event_queue.Board_signal _, Board_signal ->
+    board_stimulus_id ~post_id:stimulus.post_id
+  | _, kind ->
     digest_id
       "stimulus"
       (String.concat
@@ -164,7 +168,8 @@ let base_fields ~record_kind ~event_id ~keeper_name ~recorded_at =
 
 let stimulus_payload_preview (payload : Keeper_event_queue.stimulus_payload) =
   match payload with
-  | Keeper_event_queue.Board_signal bs ->
+  | Keeper_event_queue.Board_signal bs
+  | Keeper_event_queue.Board_attention { signal = bs; _ } ->
     let limit = 256 in
     let title =
       if String.length bs.title <= limit
@@ -224,7 +229,8 @@ let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
   let recorded_at = Time_compat.now () in
   let board_updated_at =
     match stimulus.payload with
-    | Keeper_event_queue.Board_signal bs -> bs.updated_at
+    | Keeper_event_queue.Board_signal bs
+    | Keeper_event_queue.Board_attention { signal = bs; _ } -> bs.updated_at
     | Keeper_event_queue.Bootstrap
     | Keeper_event_queue.Fusion_completed _
     | Keeper_event_queue.Bg_completed _

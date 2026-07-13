@@ -17,10 +17,6 @@ let keep_last_n = Startup_helpers.keep_last_n
     (intra-library file split, 2026-05-16). *)
 include Keeper_supervisor_types
 
-let committed_tools_of_ambiguous_blocker =
-  Startup_helpers.committed_tools_of_ambiguous_blocker
-;;
-
 type done_signal_resolution =
   | Done_signal_resolved_now
   | Done_signal_already_resolved

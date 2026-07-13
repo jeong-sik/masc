@@ -26,8 +26,6 @@ lib/auth.ml:1291:E1
 lib/board_core.ml:1370:E1
 lib/board_core.ml:1595:E1
 lib/server/server_dashboard_http_keeper_api.ml:487:E2
-lib/tool_task.ml:736:E1
-lib/tool_task.ml:1160:E1
 lib/keeper/keeper_tool_emission_hook.ml:80:E1
 lib/shared_audit/store.ml:40:E1
 lib/keeper/keeper_tool_execute_runtime.ml:666:E2

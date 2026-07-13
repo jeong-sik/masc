@@ -53,24 +53,10 @@ type context = Mcp_tool_runtime_types.context = {
 }
 
 (* RFC-0189 PR-2: MCP runtime helpers return [Tool_result.result] directly.
-   Two patterns:
-
-   - [runtime_ok] handles both plain-text and JSON-string success bodies.
-     [structured_payload_of_message] lifts JSON envelopes into [data];
-     plain strings fall through as [`String body].
-   - [runtime_err_workflow] commits caller-input rejections to
+   [runtime_err_workflow] commits caller-input rejections to
      [Workflow_rejection]: every error path in this dispatch
      ("id is required", unknown enum action, not-found lookups) is
      caller-side. *)
-let runtime_ok ~tool_name ~start_time body : Tool_result.result =
-  let data =
-    match Tool_result.structured_payload_of_message body with
-    | Some json -> json
-    | None -> `String body
-  in
-  Tool_result.make_ok ~tool_name ~start_time ~data ()
-;;
-
 let runtime_err_workflow ~tool_name ~start_time msg : Tool_result.result =
   Tool_result.make_err
     ~tool_name
@@ -195,7 +181,8 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.result option =
             end
       in
       (match response with
-       | Ok json -> Some (runtime_ok ~tool_name:name ~start_time:start (Yojson.Safe.to_string json))
+       | Ok json ->
+         Some (Tool_result.make_ok ~tool_name:name ~start_time:start ~data:json ())
        | Error e -> Some (runtime_err_workflow ~tool_name:name ~start_time:start e)))
 
   (* ── Fallthrough to extra dispatch ──────────────────────────── *)
@@ -248,6 +235,5 @@ let () =
            ~input_schema:schema.input_schema
            ~handler_binding:Tag_dispatch
            ~is_read_only
-           ~is_idempotent:is_read_only
            ~mcp_context_required:(List.mem name runtime_tool_mcp_context_required)
            ()))

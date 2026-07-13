@@ -33,19 +33,6 @@ let raw_api_timeout_error () =
 let turn_timeout_error () =
   KTD.sdk_error_of_masc_internal_error (KTD.Turn_timeout { elapsed_sec = 600.0 })
 
-let ambiguous_post_commit_error () =
-  KTD.sdk_error_of_masc_internal_error
-    (KTD.Ambiguous_post_commit
-       { is_timeout = true
-       ; tools = [ "keeper_board_post" ]
-       ; original_error = "provider timeout after board post"
-       })
-
-let legacy_ambiguous_internal_error () =
-  Agent_sdk.Error.Internal
-    "turn outcome ambiguous after committed mutating tool call(s): []; \
-     original_error=provider_timeout"
-
 let tls_handshake_internal_error () =
   KTD.sdk_error_of_masc_internal_error
     (KTD.Internal_unhandled_exception
@@ -153,39 +140,6 @@ let test_first_attempt_timeout_ignores_expired_outer_turn_budget () =
     "remaining turn budget is telemetry only"
     0.0
     budget.remaining_turn_budget_sec
-
-let test_provider_timeout_is_not_ambiguous_side_effect () =
-  Alcotest.(check bool)
-    "provider timeout is not ambiguous without committed tools"
-    false
-    (EC.is_ambiguous_side_effect_error
-       (provider_timeout_error ~phase:"runtime_attempt_watchdog"))
-
-let test_ambiguous_gate_requires_committed_tool_evidence () =
-  Alcotest.(check bool)
-    "provider timeout has no ambiguous commit evidence"
-    false
-    (EC.has_ambiguous_side_effect_commit
-       ~tool_names:[]
-       (provider_timeout_error ~phase:"runtime_attempt_watchdog"));
-  Alcotest.(check bool)
-    "legacy ambiguous string without committed tools has no gate evidence"
-    false
-    (EC.has_ambiguous_side_effect_commit
-       ~tool_names:[]
-       (legacy_ambiguous_internal_error ()));
-  Alcotest.(check (list string))
-    "structured ambiguous error carries mutating tool evidence"
-    [ "keeper_board_post" ]
-    (EC.ambiguous_side_effect_commit_tools
-       ~tool_names:[]
-       (ambiguous_post_commit_error ()))
-
-let test_turn_timeout_is_not_ambiguous_side_effect () =
-  Alcotest.(check bool)
-    "turn timeout is not ambiguous without committed tools"
-    false
-    (EC.is_ambiguous_side_effect_error (turn_timeout_error ()))
 
 let test_internal_timeout_preserves_typed_stream_phase () =
   let err = provider_timeout_error ~phase:"stream_idle:streaming_thinking" in
@@ -563,18 +517,6 @@ let () =
           "first attempt timeout ignores expired outer turn budget"
           `Quick
           test_first_attempt_timeout_ignores_expired_outer_turn_budget;
-        Alcotest.test_case
-          "provider timeout is not ambiguous partial commit"
-          `Quick
-          test_provider_timeout_is_not_ambiguous_side_effect;
-        Alcotest.test_case
-          "ambiguous gate requires committed tool evidence"
-          `Quick
-          test_ambiguous_gate_requires_committed_tool_evidence;
-        Alcotest.test_case
-          "turn timeout is not ambiguous partial commit"
-          `Quick
-          test_turn_timeout_is_not_ambiguous_side_effect;
         Alcotest.test_case "internal timeout stream phase remains typed" `Quick
           test_internal_timeout_preserves_typed_stream_phase;
         Alcotest.test_case "capacity phase remains a typed observation" `Quick

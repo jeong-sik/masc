@@ -1244,18 +1244,17 @@ let test_handle_request_tools_call_transition_done_requires_llm_verdict () =
     (match List.assoc_opt "status" envelope with
      | Some (`String status) -> status
      | _ -> Alcotest.fail "status missing");
-  Alcotest.(check bool) "done rejection reports missing LLM verdict" true
-    (let rendered = Yojson.Safe.to_string response in
-     contains_substring rendered "evaluator unavailable"
-     || contains_substring rendered "no LLM verdict");
+  Alcotest.(check bool) "done rejection is an MCP tool error" true
+    (match List.assoc_opt "isError" (result_fields_exn response) with
+     | Some (`Bool value) -> value
+     | _ -> Alcotest.fail "missing isError");
   let task =
     Masc.Workspace.get_tasks_raw (Mcp_server.workspace_config state)
     |> List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id "task-001")
   in
   (match task with
-   | Some { task_status = Masc_domain.Done _; _ } ->
-     Alcotest.fail "task-001 must not complete without an LLM verdict"
-   | Some _ -> ()
+   | Some { task_status = Masc_domain.Claimed _; _ } -> ()
+   | Some _ -> Alcotest.fail "task-001 must remain claimed without an LLM verdict"
    | None -> Alcotest.fail "task-001 missing");
   Alcotest.(check (option string)) "rejected done keeps current_task"
     (Some "task-001")

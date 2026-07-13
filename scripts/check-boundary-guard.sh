@@ -103,7 +103,7 @@ check "V2-importance-scores" 0 \
 # Allowed: keeper_working_context.ml (goal_prefix),
 #          context_compact_oas.ml (memory_summary_prefix),
 #          tool_goals.ml (goal_prefix)
-check "V4-marker-definitions" 2 \
+check "V4-marker-definitions" 0 \
   'let goal_prefix\|let memory_summary_prefix' \
   "lib/"
 
@@ -136,7 +136,7 @@ check_forbidden_active "V7-retired-command-semantics-gates" \
 
 # V7b: retired authorization hierarchy and its derived floors must stay gone.
 check_forbidden_active "V7b-retired-authorization-hierarchy" \
-  'hard_forbidden|auto_approval_hard_forbidden|R0_Read|R1_Reversible|R2_Irreversible|Destructive_protected|requires_operator_authorization|requires_separate_human_grant|risk_floor|max_risk|privileged_floor|destructive_floor|catastrophic_floor|operator_only_floor|automatic_eligibility' \
+  'hard_forbidden|auto_approval_hard_forbidden|R0_Read|R1_Reversible|R2_Irreversible|Destructive_protected|requires_operator_authorization|requires_separate_human_grant|risk_floor|max_risk|privileged_floor|destructive_floor|catastrophic_floor|operator_only_floor|automatic_eligibility|External_only|external_only_board_route' \
   "lib/" \
   "bin/" \
   "test/" \
@@ -211,13 +211,182 @@ check_forbidden_active "V7i-retired-dispatch-tool-search-heuristics" \
 # V7j: one failed call cannot create state that blocks, suppresses, or rewrites
 # a later tool call. Exact results remain independent observations.
 check_forbidden_active "V7j-retired-consecutive-tool-failure-guard" \
-  'Keeper_tool_retry_state|keeper_tool_retry_state|MASC_KEEPER_MAX_CONSECUTIVE_TOOL_FAILURES|max_consecutive_tool_failures|workflow_rejection_recovery_fields|workflow_rejection_recovery_instruction|self_correction_required|retry_skipped|ToolsOasDeterministicFailures|transient_mutex_contention_error_class' \
+  'Keeper_tool_retry_state|keeper_tool_retry_state|Keeper_tool_hook_error_state|keeper_tool_hook_error_state|MASC_KEEPER_MAX_CONSECUTIVE_TOOL_FAILURES|max_consecutive_tool_failures|workflow_rejection_recovery_fields|workflow_rejection_recovery_instruction|self_correction_required|retry_skipped|ToolsOasDeterministicFailures|transient_mutex_contention_error_class' \
   "lib/" \
   "bin/" \
   "test/" \
   "config/" \
   "dashboard/src/" \
   "specs/"
+
+# V7k: dispatch and failover must use exact producer outcomes. Read-only,
+# idempotency, inferred path keys, or a generic mutation boundary must not be
+# reintroduced as behavioral retry/authorization classifiers.
+check_forbidden_active "V7k-retired-dispatch-effect-inference" \
+  'read_only_retry|readonly_retry|MASC_TOOL_READONLY_RETRY_LIMIT|masc_path_blocked|oas_descriptor_of_masc_tool|MutationBoundaryReached|mutation_boundary_reached|is_idempotent.*is_read_only|idempotent[[:space:]]*=[[:space:]]*readonly|Tool_capability\.Idempotent,[[:space:]]*Some[[:space:]]+true' \
+  "lib/" \
+  "bin/" \
+  "test/" \
+  "config/" \
+  "dashboard/src/"
+
+# V7l: the generic Gate/dispatch bridge receives opaque operation identities.
+# Product and CLI names belong to connector/tool adapters, never this boundary.
+check_forbidden_active "V7l-generic-gate-product-knowledge" \
+  'GitHub|github_app|github-app|(^|[^[:alnum:]_])gh([^[:alnum:]_]|$)' \
+  "lib/keeper/keeper_gate.ml" \
+  "lib/keeper/keeper_gate.mli" \
+  "lib/keeper/keeper_tool_shared_runtime.ml" \
+  "lib/keeper/keeper_tool_shared_runtime.mli" \
+  "lib/keeper/keeper_tool_dispatch_runtime.ml" \
+  "lib/keeper/keeper_tool_dispatch_runtime.mli" \
+  "lib/tool_bridge.ml" \
+  "lib/tool_bridge.mli"
+
+# V7m: MCP transport projects the producer's typed Tool_result. Free-form
+# message prose must not synthesize follow-up actions, quality verdicts, or
+# recovery instructions in the model-facing response.
+check_forbidden_active "V7m-mcp-message-semantics" \
+  'contains_casefold|Masc_error_recovery|parse_status_from_message|quality_from_result|required_follow_up|Recovery:' \
+  "lib/mcp_server_eio_call_tool.ml" \
+  "lib/mcp_server_eio_call_tool.mli" \
+  "lib/mcp_server_eio_protocol.ml" \
+  "lib/mcp_server_eio_protocol.mli"
+
+# V7n: the generic IDE/filesystem annotation boundary stores opaque
+# relation/reference pairs. Product route identifiers belong to their owning
+# adapters and must not return to this transport/storage path.
+check_forbidden_active "V7n-generic-ide-product-routes" \
+  'board_post_id|comment_id|pr_id|git_ref|log_id|session_id|operation_id|worker_run_id|(^|[^[:alnum:]_])Board([^[:alnum:]_]|$)|GitHub|github' \
+  "lib/tool_surface/tool_shard_types_schemas_filesystem.ml" \
+  "lib/keeper/keeper_tool_ide_runtime.ml" \
+  "lib/agent_observation/agent_observation.ml" \
+  "lib/agent_observation/agent_observation.mli" \
+  "lib/ide/ide_annotation_types.ml" \
+  "lib/ide/ide_annotation_types.mli" \
+  "lib/ide/ide_annotations.ml" \
+  "lib/ide/ide_annotations.mli" \
+  "lib/ide/ide_bridge.ml" \
+  "lib/server/lsp_overlay_provider.ml" \
+  "lib/server/server_ide_http.ml" \
+  "dashboard/src/api/schemas/ide-annotations.ts" \
+  "dashboard/src/api/ide.ts" \
+  "dashboard/src/components/ide/ide-annotation-rail.ts" \
+  "dashboard/src/components/ide/ide-editor-annotation-ui.ts" \
+  "dashboard/src/components/ide/ide-lsp-client.ts"
+
+# Dashboard annotation consumers may display opaque reference pairs, but may
+# not recover retired product routes by inspecting relation names or legacy
+# annotation fields. Other IDE activity/event models retain their own typed
+# product context and are intentionally outside this annotation-only ratchet.
+check_forbidden_active "V7n-dashboard-annotation-reference-semantics" \
+  'annotation\.(board_post_id|comment_id|pr_id|git_ref|log_id|session_id|operation_id|worker_run_id)|annotation\.references\.(find|filter|some)|reference\.relation[[:space:]]*(===|!==|==|!=)' \
+  "dashboard/src/components/ide/"
+
+# V7o: Keeper dispatch consumes producer-owned typed outcomes. Opaque output
+# payloads must never be parsed or shape-tagged to reconstruct success/failure.
+check_forbidden_active "V7o-retired-keeper-payload-outcome-classifier" \
+  'classify_tool_result_payload|looks_like_structured_payload|inferred_outcome_of_result|payload_shape' \
+  "lib/keeper/keeper_tool_dispatch_runtime.ml" \
+  "lib/keeper/keeper_tool_dispatch_runtime.mli"
+
+# V7p: the MASC/OAS tool-result bridge receives an opaque typed result. Tool
+# identity and message JSON must not override externalization or failure class.
+check_forbidden_active "V7p-tool-bridge-message-and-product-semantics" \
+  'Board_post_get|masc_board_post_get|success_result_preserves_full_content|tool_error_metadata_from_json_message|tool_error_class_of_string|json_recoverable|json_error_class' \
+  "lib/tool_bridge.ml" \
+  "lib/tool_bridge.mli"
+
+# V7q: timeout control flow comes from Agent SDK/provider constructors and
+# typed timeout phases, never diagnostics embedded in message prose.
+check_forbidden_active "V7q-timeout-message-semantics" \
+  'Keeper_oas_timeout_message|is_structural_oas_timeout_message|api_error_oas_agent_execution_timeout' \
+  "lib/keeper/" \
+  "lib/keeper_runtime/"
+
+# V7r: terminal reason decoding accepts canonical producer wires. Arbitrary
+# text containing config/auth words must remain the typed unknown route.
+check_forbidden_active "V7r-terminal-config-auth-substring-semantics" \
+  'contains_config_or_auth|lowercase_ascii[[:space:]]+receipt\.terminal_reason_code|String_util\.contains_substring[^;]*(config|auth)' \
+  "lib/keeper_runtime/keeper_terminal_reason.ml" \
+  "lib/keeper_runtime/keeper_terminal_reason.mli" \
+  "lib/keeper/keeper_execution_receipt.ml"
+
+# V7s: schema families are an immutable catalog organization, never a second
+# runtime authorization system. Keepers see the complete catalog and the Gate
+# decides external effects.
+check_forbidden_active "V7s-retired-runtime-tool-family-authorization" \
+  'Mod_shard|masc_shard_|masc_tool_(list|grant|revoke)|get_agent_shards|set_agent_shards|remove_agent_shards|grant_shard|revoke_shard|recovery_minimum_shard_names|default_shard_names|tools_of_shards|agent_shards|read_only_tools[[:space:]]*:|removable[[:space:]]*:' \
+  "lib/" \
+  "bin/" \
+  "config/"
+
+# V7t: the withdrawn completion-trust hierarchy must not return as a public
+# fixed-threshold CLI or its dedicated deterministic corpus.
+check_forbidden_active "V7t-retired-completion-trust-cli" \
+  'masc_completion_trust_eval|masc-completion-trust-eval|data/eval/completion_trust' \
+  "bin/" \
+  "data/" \
+  "lib/" \
+  "test/"
+
+# V7u: dashboards expose typed runtime/FSM state, not the retired Thompson,
+# recovery-floor, or runtime-shard worldview.
+check_forbidden_active "V7u-retired-decision-pipeline-diagram" \
+  'decision_pipeline_to_mermaid|decision_pipeline_mermaid|decision_pipeline_diagram' \
+  "lib/" \
+  "dashboard/src/"
+
+# V7v: generic Tool_result constructors keep messages opaque. Structure and
+# failure classes come only from explicitly typed producer fields.
+check_forbidden_active "V7v-retired-tool-result-message-inference" \
+  'structured_payload_of_message|classify_from_structured_failure_message' \
+  "lib/" \
+  "test/" \
+  "dashboard/src/"
+
+# V7w: dashboard presentation may pretty-print an outer JSON envelope but may
+# not recover hidden structure from newline suffixes or nested string fields.
+check_forbidden_active "V7w-retired-dashboard-embedded-json-coercion" \
+  'extractEmbeddedJson|extractEmbeddedJsonSuffix|coerceEmbeddedJson|parseJsonContainer|ensureObject|prettyJsonDeep' \
+  "dashboard/src/components/tool-call-shared.ts" \
+  "dashboard/src/components/tool-call-shared.test.ts"
+
+# V7x: task evidence, CAS retries, and recording outcomes remain typed producer
+# facts. Free-form placeholders, prefixes, and local outcome classifiers stay
+# retired.
+check_forbidden_active "V7x-retired-task-and-recording-message-heuristics" \
+  'placeholder_evidence_refs|is_placeholder_evidence_ref|max_cas_retries|version_mismatch_prefix|Keeper_recording_error_state\.classify_error|classify_outcome' \
+  "lib/task/" \
+  "lib/keeper_runtime/keeper_recording_error_state.ml" \
+  "lib/keeper_runtime/keeper_recording_error_state.mli" \
+  "test/"
+
+# V7y: Keeper execution carries producer-owned typed data. The OAS/MCP
+# projection must never reconstruct it from raw output strings or revive the
+# retired product-marker/workflow parsers.
+check_forbidden_active "V7y-retired-keeper-raw-output-reinterpretation" \
+  'structured_error_payload|metadata_from_assoc|nested_payload_of_json|tool_exec_result_markers|Keeper_tools_oas_(markers|workflow|json)|data:[[:space:]]*\(`String result\.raw_output\)' \
+  "lib/keeper/" \
+  "lib/mcp_server_eio_execute.ml" \
+  "test/"
+
+# V7z: Connector ingress commits every exact producer event to its Keeper lane.
+# Feature flags, time windows, channel activity, and Board wake-dedup state must
+# not suppress durable Connector delivery.
+check_forbidden_active "V7z-retired-connector-wake-suppression" \
+  'MASC_CONNECTOR_AMBIENT_WAKE_ENABLED|connector_reactive_debounce_sec|connector_reactive_wakeup_allowed|connector_reactive_wake_throttle' \
+  "lib/" \
+  "test/" \
+  "config/"
+
+# V7aa: image/audio/document tool artifacts are normal typed Keeper data.
+# Default-off rollout flags must not silently sever capture or wire-in.
+check_forbidden_active "V7aa-retired-multimodal-rollout-gates" \
+  'MASC_TOOL_EMISSION|MASC_MULTIMODAL|masc_tool_emission_enabled|masc_multimodal_enabled' \
+  "lib/" \
+  "config/" \
+  "test/"
 
 # V8: Direct OAS Agent.state mutation from keeper code
 # Baseline 0: legacy keeper_extend_turns.ml was removed.

@@ -86,10 +86,6 @@ These are the identity fields that should live in persona by default.
 | `goal` | Required for a standalone operational persona | Primary goal | If absent, a caller must override it explicitly. |
 | `instructions` | Optional | Persona-specific behavior and voice instructions | Used as prompt default unless a keeper TOML overlay overrides it. |
 | `mention_targets` | Optional | Default mention aliases | If omitted, create-from-persona falls back to `[persona_name]`. |
-| `tool_access` | Optional | Default tool candidate profile list | String array of tool names used as profile input; omitted means `[]`. It is not the complete execution gate. |
-| `tool_denylist` | Optional | Tools to remove after candidate profile resolution | Optional policy refinement. |
-| `policy_voice_enabled` | Optional | Whether voice tools should be surfaced | Policy default, not runtime state. |
-| `shards` | Optional | Default tool shards | Optional specialization hook. |
 
 There is no compatibility-only persona surface. Removed or unknown fields are
 rejected instead of being interpreted as alternate state/config protocols.
@@ -123,7 +119,6 @@ persona_name = "analyst"
 | `name` | Optional | Override keeper handle | Usually redundant because filename is already the keeper name. |
 | `sandbox_profile` | Optional | Process/filesystem sandbox profile | `local` runs on the host with fs scoped to the keeper playground. `docker` runs in a hardened ephemeral container. Hard mode requires `docker`. |
 | `network_mode` | Optional | Sandbox network policy | `docker` defaults to `none`; `local` defaults to `inherit`. Hard mode requires `none`. |
-| `tool_access` | Optional | Deployment-specific tool candidate profile override | Only when intentionally overriding persona default. |
 | `active_goal_ids` | Optional | Goal-scoped claim filter | When set, `keeper_task_claim` only claims tasks linked to these goals and reports scope health in audit/status surfaces. |
 
 ### Additional supported overlay fields
@@ -134,16 +129,16 @@ These are still accepted by the loader, but for consistency they should be used 
 | --- | --- | --- |
 | `goal`, `instructions` | string | Override persona prompt identity |
 | `mention_targets` | string array | Override persona mention aliases |
-| `policy_voice_enabled` | bool | Override persona voice policy |
 | `proactive_enabled` | bool | Override default proactive scheduling |
 | `proactive_idle_sec`, `proactive_cooldown_sec` | int | Proactive scheduling intervals |
 | `allowed_paths` | string array | Exceptional path override only; prefer empty and rely on the single sandbox root |
-| `tool_access` | string array | Explicit tool candidate profile names |
-| `tool_denylist` | string array | Tool names blocked after candidate profile resolution |
 | `active_goal_ids` | string array | Declarative goal scope for task claim eligibility |
 | `telemetry_feedback_enabled` | bool | Surface recent telemetry in the keeper prompt |
 | `telemetry_feedback_window_hours` | int | Window size for telemetry summarization |
-| `shards` | string array | Tool shard override |
+
+The retired `shards` field is rejected in both persona `keeper` objects and
+Keeper TOML. Tool-family membership is not a Keeper configuration axis; the
+flat Tool catalog and execution-time Gate are the only relevant boundaries.
 
 Runtime/model selection is not a keeper TOML field. Assign keepers in
 `runtime.toml` under `[runtime.assignments]`, keyed by keeper name. Unassigned
@@ -157,7 +152,6 @@ Enumerated fields only accept the values below. The loader rejects invalid input
 | --- | --- |
 | `sandbox_profile` | `local`, `docker` |
 | `network_mode` | `none`, `inherit` |
-| `tool_access` | string array of registered tool names used as the candidate profile list |
 
 Deprecated personality-state axes are not allowed public keeper TOML values.
 The retired non-public keeper input list is currently empty in code.
@@ -184,7 +178,7 @@ These keys are **rejected at load time** with an `Error`. They are retained only
 
 | Field | Replacement / rationale |
 | --- | --- |
-| Retired tool-policy aliases | Tool policy uses the canonical `tool_access` string-array candidate profile list plus `tool_denylist`; runtime execution is still constrained by descriptor/registry availability, per-turn OAS allowlists, and eval gates. |
+| `tool_access`, `tool_denylist`, `shards`, `policy_voice_enabled` | Per-Keeper tool hierarchies are removed. The immutable catalog and descriptor/registry projection define which typed tools exist; each concrete external effect then reaches the Gate. |
 | `runtime_id`, `model`, `runtime_ref` | Runtime assignment lives in `runtime.toml` `[runtime.assignments]`, keyed by keeper name. |
 | `models`, `allowed_models`, `active_model` | Models are resolved from the assigned runtime. Do not pin per-keeper. |
 | `allowed_providers` | Provider/model ownership lives in `runtime.toml` and OAS runtime receipts. Do not pin providers per keeper. |

@@ -65,100 +65,29 @@ let recent_tools_for_keeper ?(limit = 5) keeper_name : string list =
    @param meta Keeper metadata (determines which tools are allowed)
    @param ctx_snapshot Immutable snapshot of current working context *)
 
-(** Normalize a raw tool result string into a consistent JSON envelope.
+(** Project a producer-owned outcome into the model-facing envelope.
 
-    The LLM sees this output directly. Without normalization, tool results
-    use 6+ different schemas ({ok,error,status,...} in various combinations),
-    making it hard for the LLM to parse success/failure reliably.
-
-    After normalization, all results follow:
-    - Success: {"ok": true, "result": <original_json_or_string>}
-    - Success with changes: {"ok": true, "result": ..., "changes": <delta>}
-    - Failure: {"ok": false, "error": <message>, "detail": <original_json|null>}
-
-    The [success] flag comes from the typed outcome returned by
-    [Keeper_tool_dispatch_runtime.execute_keeper_tool_call_with_outcome]. *)
-let normalize_tool_result ~(success : bool) (raw : string)
-  : string
+    [raw] is always opaque text.  Only [data], supplied explicitly by the
+    producer, can become structured JSON.  No field name or string content can
+    alter success/failure or synthesize metadata. *)
+let normalize_tool_result
+      ~(success : bool)
+      ~(data : Yojson.Safe.t option)
+      (raw : string)
+  : Yojson.Safe.t
   =
-  let metadata_from_assoc fields =
-    fields
-    |> List.filter (fun (key, _) ->
-      not
-        (List.mem
-           key
-           [ "ok"; "error"; "detail"; "result"; "output"; "message"; "status" ]))
-  in
-  let structured_error_payload error_msg =
-    try
-      match Yojson.Safe.from_string error_msg with
-      | `Assoc fields -> Some fields
-      | _ -> None
-    with
-    | Yojson.Json_error _ -> None
-  in
-  let merge_metadata primary secondary =
-    let primary_keys = List.map fst primary in
-    primary
-    @ List.filter
-        (fun (key, _) -> not (List.mem key primary_keys))
-        secondary
-  in
-  try
-    let json = Yojson.Safe.from_string raw in
-    if success
-    then
-      (* Success: wrap original JSON under "result" key.
-         If original already has "ok":true, the normalized envelope
-         is still consistent — "ok" at the top level is authoritative. *)
-      Yojson.Safe.to_string (`Assoc [ "ok", `Bool true; "result", json ])
-    else (
-      (* Failure: extract error message from whichever field is present,
-         preserve original JSON as "detail" for debugging. *)
-      let error_msg =
-        match Safe_ops.json_string_opt "error" json with
-        | Some msg when String.trim msg <> "" -> msg
-        | _ ->
-          (match Safe_ops.json_string_opt "output" json with
-           | Some msg when String.trim msg <> "" -> msg
-           | _ ->
-             (match Safe_ops.json_string_opt "message" json with
-              | Some msg when String.trim msg <> "" -> msg
-              | _ ->
-                (match Safe_ops.json_string_opt "status" json with
-                 | Some s when String.lowercase_ascii (String.trim s) = "error" ->
-                   "tool returned error status"
-                 | _ -> "tool call failed")))
-      in
-      let error_msg, nested_fields =
-        match structured_error_payload error_msg with
-        | Some fields ->
-          let nested_error =
-            match List.assoc_opt "error" fields with
-            | Some (`String msg) when String.trim msg <> "" -> msg
-            | _ -> error_msg
-          in
-          nested_error, metadata_from_assoc fields
-        | None -> error_msg, []
-      in
-      let preserved_fields =
-        (match json with
-         | `Assoc fields -> merge_metadata (metadata_from_assoc fields) nested_fields
-         | _ -> nested_fields)
-      in
-      Yojson.Safe.to_string
-        (`Assoc
-          ([ "ok", `Bool false; "error", `String error_msg; "detail", json ]
-           @ preserved_fields)))
-  with
-  | Yojson.Json_error _ ->
-    (* Raw is not JSON (e.g. plain text from keeper_tasks_list).
-       Wrap as-is. *)
-    if success
-    then Yojson.Safe.to_string (`Assoc [ "ok", `Bool true; "result", `String raw ])
-    else
-      Yojson.Safe.to_string
-        (`Assoc [ "ok", `Bool false; "error", `String raw; "detail", `Null ])
+  if success
+  then
+    `Assoc
+      [ "ok", `Bool true
+      ; "result", Option.value ~default:(`String raw) data
+      ]
+  else
+    `Assoc
+      [ "ok", `Bool false
+      ; "error", `String raw
+      ; "detail", Option.value ~default:`Null data
+      ]
 ;;
 
 (** RFC-0006 Phase A.2: build the per-tool handler closure.

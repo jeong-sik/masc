@@ -13,7 +13,7 @@ val execute_with_observers
   -> ctx_snapshot:Keeper_types.working_context
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
   -> exec_cache:Masc_exec.Exec_cache.t option
-  -> ?search_fn:(unit -> Yojson.Safe.t)
+  -> ?search_fn:(unit -> Keeper_tool_execution.t)
   -> ?sw:Eio.Switch.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t

@@ -19,31 +19,25 @@ the exact active schema names, such as the public `Execute` alias when it is
 listed.
 Triage and trigger detection run on each heartbeat using the proactive idle/cooldown settings.
 
-## Tool Shards and Descriptor Surface
+## Tool Catalog and Descriptor Surface
 
-Legacy shards still group older schema families, but they are no longer the
-authoritative model-facing contract. Current keeper schemas are assembled from
-the descriptor/registry surface, legacy shard schemas, injected keeper-safe
-`masc_*` schemas, and denylist/maintenance filters. Descriptor-backed schemas
-win dedupe over older shard entries.
+`Tool_shard` is a legacy module name for an immutable catalog facade. It has no
+runtime membership, grant/revoke API, per-Keeper override, recovery floor, or
+read-only/removable classification. Its schema families are flattened and
+de-duplicated into one complete Keeper catalog. The descriptor/registry
+projection determines exact model-facing names; execution-time external
+effects converge on the Gate.
 
 Current exact tool names must come from the active schema. Use
 `keeper_tools_list` / `keeper_tool_search` when unsure.
 
-| Legacy group | Purpose | Current notes |
-|--------------|---------|---------------|
-| **base** | time, context, memory, tool discovery | Non-removable core family. |
-| **board** | board posts, comments, votes, curation, sub-boards | Use exact names such as `keeper_board_post_get`, `keeper_board_list`, `keeper_board_search`, `keeper_board_comment`, and `keeper_board_vote`. Older board-get shorthand is legacy wording. |
-| **filesystem** | file read/edit/write schemas | Prefer public aliases `Read`, `Edit`, and `Write` when the active schema exposes them. |
-| **search_files** | content search | `tool_search_files` backs the public `Grep` alias. It is ripgrep-style content search only; directory listing, file reads, find, and git views use `Execute` when visible. |
-| **library** | shared knowledge search/read | Use after a topic exists in shared reference material; do not treat it as repository search. |
-| **surface** | connected surface lane reads/posts/person notes | Dashboard/Discord/Slack lane context, not a connector-wide channel registry. |
-| **taskboard** | task list/audit/claim/create/done and broadcast | Model-facing keeper task tools are `keeper_tasks_list`, `keeper_tasks_audit`, `keeper_task_claim`, `keeper_task_create`, `keeper_task_done`, and `keeper_broadcast`. Force-release / force-done task cleanup is not exposed under current keeper-facing task names. |
-| **voice** | voice output/input/session tools | Conditional on voice policy/config; absent by default for many keepers. |
+Schema files remain grouped by domain only for code ownership: base/context,
+Board, filesystem/search/execute, library, Channel/Connector surface, Task, and
+voice. These groups do not affect availability or authorization.
 
 Notes:
 - The old governance petition/case subsystem is retired. Collaboration uses Board/Goal/Task, while external effects use the product-neutral Gate and its approval audit.
-- Write-capable tools such as `tool_edit_file` and `tool_write_file` are present in the keeper surface. `tool_access` is an explicit profile selection; descriptor/registry availability determines which typed tools exist, and external effects converge on the Gate.
+- Write-capable tools such as `tool_edit_file` and `tool_write_file` are present in the Keeper catalog. Descriptor/registry availability determines which typed tools exist, and external effects converge on the Gate.
 - Typed command execution is model-facing as `Execute`, backed by the `tool_execute` descriptor route.
 
 ## Tool Surface
@@ -53,7 +47,8 @@ is: call only exact names in the active schema, and inspect with
 `keeper_tools_list` / `keeper_tool_search` when unsure.
 
 Core model-facing public aliases include `Execute`, `Grep`, `Read`, `Edit`,
-`Write`, `WebSearch`, and `WebFetch` when policy exposes them. Internal
+`Write`, `WebSearch`, and `WebFetch` when the descriptor/registry projection
+contains them. Internal
 descriptor-backed families can also appear by exact keeper or masc tool name.
 Important families:
 
@@ -82,12 +77,12 @@ Important families:
   `masc_keeper_sandbox_stop`, `masc_keeper_reset`,
   `masc_keeper_adversarial_review`, `masc_keeper_down`, and `masc_keeper_up`
   may exist in code, but normal keeper prompts must not assume them unless
-  those exact names are visible and the operator authorized that class of work
+  those exact names are visible; each concrete external effect is then
+  evaluated independently by the Gate
 - advisory deliberation and media: `masc_fusion`, `masc_fusion_status`,
   `analyze_image`
 
-Voice tools are added when voice policy/config exposes them.
-`write_done = true` returns empty tool list (session terminated).
+Voice schemas are part of the same flat Keeper catalog.
 
 Excluded from keeper exposure:
 - inline MCP-runtime tools such as `masc_start`, `masc_bind`, `masc_unbind`,
@@ -161,11 +156,9 @@ BoardActivity, IdleTimeout, MetricsAnomaly, StrategicReview.
 | 저장 이미지 artifact 분석 | `analyze_image` |
 | 코드 작성 / 수정 | `Read` / `Grep` -> `Edit` / `Write`, then `Execute` with typed `git` argv |
 | 테스트 실행 | `Execute` with typed argv from the worktree `cwd` |
-| GitHub PR / 이슈 작업 | `Execute` with `executable="gh"` and typed `argv` from a bound repo context for PR reads and reversible PR mutations such as `pr create` / `pr edit`. |
-| GitHub repo 생성 / GitHub Discussions mutation | `Execute` with typed `gh` argv can request reversible repo/discussion mutations through non-blocking HITL approval (`Requires_approval`). `gh repo create` requires explicit `OWNER/NAME` plus exactly one visibility flag before HITL. Repo delete, PR merge, and irreversible discussion deletion stay denied by the Shell IR floor. Prefer MASC board tools for workspace-local durable discussion unless the requested artifact explicitly belongs on GitHub. |
 
-The goal lifecycle surface is descriptor/registry-driven with denylist
-filtering. Social and messaging keepers should keep board/task workspace
+The goal lifecycle surface is descriptor/registry-driven. Social and messaging
+keepers should keep board/task workspace
 collaboration without assuming goal mutation execution surface unless the exact
 goal tools are visible.
 
@@ -174,17 +167,15 @@ goal tools are visible.
 Research-profile keepers use the active web, board, task, code, and goal
 surfaces.
 
-## Safety Gates (applied to all keepers)
+## Execution Boundary
 
-| Gate | Description | Config |
-|------|-------------|--------|
-| Cost telemetry | Advisory threshold only; never gates tool execution | `max_cost_usd` (default: $0.50) |
-| Turn limit | Max tool calls per turn | `max_tool_calls_per_turn` (default: 10) |
-| Entropy | Consecutive same-tool detection | `entropy_threshold` (default: 3) |
-| Destructive | Pattern-match on bash/edit commands | 19 patterns, substring match |
-| Allowlist/Denylist | Explicit tool filtering | `allowed_tools`, `denied_tools` |
+External effects use one non-hierarchical Gate: exact Always Allow, configured
+LLM Auto Judge, or nonblocking HITL. A pending decision does not block the
+Keeper lane. Objective typed-input, path-jail, and sandbox-confinement
+invariants remain at their owning execution boundaries. Cost, token, and turn
+data are observations rather than stop/pause authorization classes.
 
-Source: `lib/eval_gate.ml`, `lib/tool_shard.ml`,
+Source: `lib/keeper/keeper_gate.ml`, `lib/tool_shard.ml`,
 `lib/keeper/keeper_tool_descriptor.ml`, `lib/keeper/keeper_tool_policy.ml`,
 `lib/keeper/keeper_tool_dispatch_runtime.ml`,
 `lib/tool_surface/tool_shard_types_schemas_search_files.ml`

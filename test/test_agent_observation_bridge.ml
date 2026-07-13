@@ -2,6 +2,8 @@
 
 open Alcotest
 
+let yojson = testable Yojson.Safe.pp Yojson.Safe.equal
+
 let with_temp_dir f =
   let dir = Filename.temp_file "agent_observation_bridge_test" "" in
   Sys.remove dir;
@@ -178,14 +180,8 @@ let test_annotation_request_reaches_ide_storage () =
         ; content = "route through neutral observation bus"
         ; goal_id = Some "goal-17"
         ; task_id = None
-        ; board_post_id = Some "post-3"
-        ; comment_id = None
-        ; pr_id = None
-        ; git_ref = None
-        ; log_id = None
-        ; session_id = None
-        ; operation_id = None
-        ; worker_run_id = None
+        ; references =
+            [ { relation = "discussion"; reference = "thread-3" } ]
         }
     in
     match result with
@@ -205,11 +201,51 @@ let test_annotation_request_reaches_ide_storage () =
        | [ annotation ] ->
          check string "id" created.id annotation.id;
          check string "content" "route through neutral observation bus" annotation.content;
-         check (option string) "board post" (Some "post-3") annotation.board_post_id;
+         check yojson "opaque reference preserved"
+           (`List
+             [ `Assoc
+                 [ "relation", `String "discussion"
+                 ; "reference", `String "thread-3"
+                 ]
+             ])
+           (Agent_observation.annotation_references_to_json annotation.references);
          (match annotation.kind with
           | Ide_annotation_types.Decision -> ()
           | _ -> fail "expected Decision annotation kind")
        | rows -> failf "expected one annotation, got %d" (List.length rows)))
+;;
+
+let test_annotation_references_reject_malformed_entries () =
+  let malformed =
+    `List
+      [ `Assoc
+          [ "relation", `String "discussion"
+          ; "reference", `String ""
+          ]
+      ]
+  in
+  match Agent_observation.annotation_references_of_json malformed with
+  | Ok _ -> fail "blank opaque reference was accepted"
+  | Error msg ->
+    check string "explicit malformed reference error"
+      "references[0] relation and reference must be non-empty strings"
+      msg
+;;
+
+let test_annotation_references_preserve_unknown_relations () =
+  let opaque =
+    `List
+      [ `Assoc
+          [ "relation", `String "producer-defined-relation"
+          ; "reference", `String "opaque://value"
+          ]
+      ]
+  in
+  match Agent_observation.annotation_references_of_json opaque with
+  | Error msg -> failf "opaque reference rejected: %s" msg
+  | Ok references ->
+    check yojson "unknown relation round-trips without interpretation" opaque
+      (Agent_observation.annotation_references_to_json references)
 ;;
 
 let test_snapshot_reset_clears_accumulated_observations () =
@@ -294,6 +330,10 @@ let () =
             "annotation request reaches IDE storage"
             `Quick
             test_annotation_request_reaches_ide_storage
+        ; test_case "annotation references reject malformed entries" `Quick
+            test_annotation_references_reject_malformed_entries
+        ; test_case "annotation references preserve unknown relations" `Quick
+            test_annotation_references_preserve_unknown_relations
         ; test_case
             "snapshot reset clears accumulated observations"
             `Quick

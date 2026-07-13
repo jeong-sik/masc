@@ -66,11 +66,8 @@ let success () = make ~source:"turn_result" "success"
    (string classifier where typed variant is possible). Removed in
    commit 3 of the keeper typed-reason series. *)
 
-let of_failure ?(post_commit_ambiguous = false) ?(tool_call_count = 0) ~raw_error err =
-  if post_commit_ambiguous
-  then make ~source:"typed_error" "post_commit_ambiguous"
-  else (
-    match Keeper_turn_driver.classify_masc_internal_error err with
+let of_failure ?(tool_call_count = 0) ~raw_error err =
+  match Keeper_turn_driver.classify_masc_internal_error err with
     | Some (Keeper_turn_driver.Provider_timeout _) ->
       of_disposition
         ~source:"typed_error"
@@ -87,10 +84,10 @@ let of_failure ?(post_commit_ambiguous = false) ?(tool_call_count = 0) ~raw_erro
     | Some
         ( Keeper_turn_driver.Resumable_cli_session _
         | Keeper_turn_driver.Accept_rejected _
-        | Keeper_turn_driver.Ambiguous_post_commit _
         | Keeper_turn_driver.Internal_unhandled_exception _
         | Keeper_turn_driver.Internal_bridge_exception _
-        | Keeper_turn_driver.Internal_contract_rejected _ ) ->
+        | Keeper_turn_driver.Internal_contract_rejected _
+        | Keeper_turn_driver.Receipt_persistence_failed _ ) ->
       of_disposition
         ~source:"typed_error"
         (Keeper_turn_disposition.Provider_error
@@ -104,7 +101,7 @@ let of_failure ?(post_commit_ambiguous = false) ?(tool_call_count = 0) ~raw_erro
       of_disposition
         ~source:"typed_error"
         (Keeper_turn_disposition.Provider_error
-           (Keeper_agent_error.terminal_reason_code_of_sdk_error_typed err)))
+           (Keeper_agent_error.terminal_reason_code_of_sdk_error_typed err))
 ;;
 
 let of_code ?source ?summary ?next_action code =

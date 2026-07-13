@@ -5,8 +5,6 @@ val alert_error_detail_max_chars : int
 val alert_excerpt_min_chars : int
 val alert_message_preview_max_chars : int
 val alert_reply_preview_max_chars : int
-val tool_policy_count_warn_threshold : int
-val tool_first_sentence_max_chars : int
 val default_proactive_enabled : bool
 val default_goal_max_chars : int
 val prompt_render_max_bytes : int
@@ -108,7 +106,6 @@ type keeper_profile_defaults =
   autoboot_enabled : bool option;
   mention_targets : string list;
   proactive_enabled : bool option;
-  shards : string list option;
   allowed_paths : string list option;
   sandbox_profile :
     Keeper_types_profile_sandbox.sandbox_profile option;

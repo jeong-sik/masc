@@ -29,9 +29,8 @@ let make_dispatch_handler (tool : (_, _) t) : Tool_dispatch.handler =
     | Error { message; recoverable; error_class } ->
       (* RFC-0189: source-typed mapping from [Agent_sdk.tool_error]
          to [Tool_result.tool_failure_class].  The SDK's typed
-         error already carries the signal — previously discarded
-         in favour of the auto-classify path's [Runtime_failure]
-         default.
+         error already carries the signal, so this boundary maps it
+         directly instead of deriving semantics from [message].
 
          Mapping (matches the SDK's own [recoverable] /
          [error_class] semantics — see
@@ -42,8 +41,8 @@ let make_dispatch_handler (tool : (_, _) t) : Tool_dispatch.handler =
            -> [Workflow_rejection] (caller input rejected;
               retry without changes won't help).
          - Otherwise ([Unknown] / [None] / non-recoverable)
-           -> [Runtime_failure] (preserve original auto-classify
-              default; surface as severity-elevated upstream). *)
+           -> [Runtime_failure] (explicit source-level fallback;
+              surface as severity-elevated upstream). *)
       let failure_class : Tool_result.tool_failure_class =
         if recoverable then Tool_result.Transient_error
         else

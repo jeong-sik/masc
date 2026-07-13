@@ -128,19 +128,3 @@ val run_bash_with_status :
   cmd:string ->
   unit ->
   (Unix.process_status * string, string) result
-
-val overwrite_file :
-  timeout_sec:float ->
-  t ->
-  host_path:string ->
-  content:string ->
-  unit ->
-  (unit, string) result
-
-val append_file :
-  timeout_sec:float ->
-  t ->
-  host_path:string ->
-  content:string ->
-  unit ->
-  (unit, string) result

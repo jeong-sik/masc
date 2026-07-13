@@ -445,8 +445,6 @@ function isHeartbeatAlive(heartbeat: string): boolean {
 }
 
 const runtimeBlockerLabels = {
-  ambiguous_post_commit_timeout: '커밋 후 응답 없음',
-  ambiguous_post_commit_failure: '커밋 후 실패',
   turn_timeout: '턴 응답 만료',
   runtime_exhausted: '런타임 후보 소진',
   provider_runtime_error: '런타임 호출 오류',
@@ -485,12 +483,6 @@ export function keeperRuntimeBlockerHint(keeper: Keeper | null | undefined): str
   const runtimeBlocker = normalizeKeeperBlockerText(keeper.runtime_blocker_summary)
   if (runtimeBlocker && runtimeBlocker !== blockerClass) {
     return runtimeBlocker
-  }
-  if (blockerClass === 'ambiguous_post_commit_timeout') {
-    return '최근 변경 이후 응답이 끊겨 상태 확인이 필요합니다.'
-  }
-  if (blockerClass === 'ambiguous_post_commit_failure') {
-    return '최근 변경 이후 실패가 있어 상태 확인이 필요합니다.'
   }
   if (blockerClass === 'turn_timeout') {
     return '턴 실행 시간이 제한 시간을 초과했습니다.'

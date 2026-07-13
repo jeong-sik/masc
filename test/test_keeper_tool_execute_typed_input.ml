@@ -634,6 +634,7 @@ let test_pipeline_lowers_to_shell_ir_pipeline () =
           ]
       ; cwd = Some "/tmp"
       ; env = [ "LC_ALL", "C" ]
+      ; timeout_sec = None
       }
   in
   match to_shell_ir_exn input with
@@ -1051,13 +1052,14 @@ let mk_exec_with_redirects
       ?(argv = [ "pattern" ])
       ?(cwd = Some "/tmp")
       ?(env = [])
+      ?(timeout_sec = None)
       ?(stdin = Execute_input.Inherit)
       ?(stdout = Execute_input.Inherit)
       ?(stderr = Execute_input.Inherit)
       ()
   =
   Execute_input.Exec
-    { executable; argv; cwd; env; stdin; stdout; stderr }
+    { executable; argv; cwd; env; timeout_sec; stdin; stdout; stderr }
 ;;
 
 let count_redirects ir =

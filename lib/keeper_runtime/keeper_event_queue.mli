@@ -63,6 +63,10 @@ type board_stimulus = {
 
 type stimulus_payload =
   | Board_signal of board_stimulus
+  | Board_attention of board_attention
+      (** A Board signal admitted by the configured relevance judge. The
+          opaque [candidate_id] is the producer-owned durable event identity;
+          queue deduplication never derives it from post text or metadata. *)
   | Bootstrap
   | Fusion_completed of fusion_completion
   | Bg_completed of bg_job_completion
@@ -95,6 +99,11 @@ type stimulus_payload =
     [Fusion_completed] (RFC-0266) wakes the calling keeper when an async
     [masc_fusion] deliberation finishes so the result arrives as actionable
     turn input rather than being discovered passively. *)
+
+and board_attention = {
+  candidate_id : string;
+  signal : board_stimulus;
+}
 
 and fusion_completion = {
   run_id : string;

@@ -24,7 +24,7 @@ let observation_timestamp_ms () =
 
 let normalize_response_text_for_finalization
       ~runtime_id
-      ~initial_messages
+      ~initial_messages:_
       ~(run_result : Runtime_agent.run_result)
       ~text
       ~tool_names
@@ -38,17 +38,11 @@ let normalize_response_text_for_finalization
     match Keeper_tool_response.normalize_response_text ~text ~tool_names () with
   | Ok response_text -> Ok response_text
   | Error _ ->
-    (* Finalization intentionally exposes the higher-level accept-rejected
-       error with tool context and raw runtime response. The normalizer error
-       only says the response text could not be canonicalized. *)
-    let last_tool_context =
-      Keeper_turn_driver_try_provider.accept_rejection_context_of_run_result
-        ~initial_messages
-        run_result
-    in
+    (* Finalization exposes the typed accept-rejected response itself. Tool
+       execution history stays in the OAS checkpoint; it is not projected into
+       a read/mutating behavioral classification. *)
     Error
       (Keeper_turn_driver_try_provider.accept_rejected_error
-         ~last_tool_context
          ~runtime_id
          ~response:run_result.response)
 ;;
@@ -231,6 +225,7 @@ let run_turn
       ?continuation_delivery_channel
       ?hitl_resolution
       ?autonomous_yield_requested
+      ?on_checkpoint_stage
       ()
   : (run_result, Agent_sdk.Error.sdk_error) result
   =
@@ -696,6 +691,12 @@ let run_turn
                            Log.Keeper.error ~keeper_name:meta.name "%s" message;
                            invalid_arg message) )
               in
+              let checkpoint_sink (snapshot : Agent_sdk.Agent.checkpoint_snapshot) =
+                Option.iter (fun observe -> observe snapshot.stage) on_checkpoint_stage;
+                Keeper_checkpoint_store.save_oas
+                  ~session_dir:session.session_dir
+                  snapshot.checkpoint
+              in
               let call_run_named ?raw_trace ~initial_messages () =
                 (* The keeper turn deadline must own the OAS Agent.run switch.
                    Stream/body idle budgets catch liveness gaps; this hard
@@ -714,6 +715,7 @@ let run_turn
                     ~compact_ratio:meta.compaction.ratio_gate
                     ~context_window_tokens:max_context
                     ~oas_auto_context_overflow_retry:true
+                    ~checkpoint_sink
                     ~initial_messages
                     ~hooks
                     ~context_reducer:reducer

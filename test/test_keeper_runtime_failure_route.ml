@@ -162,16 +162,6 @@ let test_masc_internal_judgment_classes () =
   (match
      route_of_masc_error
        (internal_err
-          (Keeper_internal_error.Ambiguous_post_commit
-             { is_timeout = false; tools = [ "masc_done" ]; original_error = "eio" }))
-   with
-   | KFR.Escalate_judgment { judgment = KFR.Mutating_ambiguity; _ } -> ()
-   | other ->
-     Alcotest.failf "ambiguous post-commit should judge, got %s"
-       (KFR.route_kind_label other));
-  (match
-     route_of_masc_error
-       (internal_err
           (Keeper_internal_error.Internal_contract_rejected { reason = "empty" }))
    with
    | KFR.Escalate_judgment
@@ -248,7 +238,6 @@ let test_judgment_label_roundtrip () =
     [ KFR.Deterministic_request
     ; KFR.Context_overflow
     ; KFR.Contract_violation
-    ; KFR.Mutating_ambiguity
     ; KFR.Protocol_error
     ; KFR.Config_mismatch
     ; KFR.Provider_integration

@@ -683,7 +683,7 @@ let decide ?cycle_grant ~keeper_always_allow request =
   | Cycle_grant_temporarily_unavailable (approval_id, reason) ->
     Log.Keeper.warn
       ~keeper_name:request.keeper_name
-      "one-shot Gate grant unavailable; evaluating ordinary authorization operation=%s reason=%s"
+      "one-shot Gate grant unavailable; preserving the unconsumed grant operation=%s reason=%s"
       request.operation
       (unavailable_reason_to_string reason);
     Keeper_approval_queue.audit_approval_event
@@ -701,14 +701,5 @@ let decide ?cycle_grant ~keeper_always_allow request =
       Keeper_metrics.(to_string ApprovalQueueFailures)
       ~labels:[ "keeper", request.keeper_name; "site", "cycle_grant_lookup" ]
       ();
-    decide_without_cycle_grant ~keeper_always_allow request
+    Unavailable reason
 ;;
-
-module For_testing = struct
-  let claim_auto_judge = claim_auto_judge
-  let release_auto_judge = release_auto_judge
-
-  let auto_judge_is_active id =
-    Auto_judge_ids.mem id (Atomic.get active_auto_judges)
-  ;;
-end

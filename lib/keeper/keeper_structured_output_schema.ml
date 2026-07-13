@@ -223,6 +223,16 @@ let failure_judgment_output_schema =
   object_schema ~required:(List.map fst fields) fields
 ;;
 
+let board_attention_judgment_output_schema =
+  let fields =
+    [ ( "decision"
+      , enum_schema Keeper_board_attention_judgment.decision_tokens )
+    ; "rationale", string_schema
+    ]
+  in
+  object_schema ~required:(List.map fst fields) fields
+;;
+
 let anti_rationalization_verdict_output_schema =
   let fields =
     [ "verdict", enum_schema Task.Anti_rationalization.valid_verdict_strings

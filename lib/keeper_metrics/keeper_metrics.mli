@@ -64,7 +64,6 @@ type t =
   | CrashPersistenceFailures
   | GenerationLineageFailures
   | KeepaliveSignalFailures
-  | BoardSignalWakeupCappedTotal
   | BoardSignalNoWakeTotal
   | BoardSignalAttentionCandidateTotal
   | MetaJsonFailures
@@ -199,7 +198,6 @@ type t =
   | KeeperTurnInstructionHash
   | KeeperToolCallRetryLoop
   | ShellIrEffectTotal
-  | ToolExecutePrActionTotal
   | RawTraceSinkDegraded
   | WireCaptureResponseSuppressed
   | WireCaptureWriteFailures

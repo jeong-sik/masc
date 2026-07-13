@@ -102,14 +102,22 @@ let resolve_read_file_target
     |> Result.map_error (fun error -> Read_path_error error)
 ;;
 
-let handle_read_file
+type read_file_attempt =
+  | Read_succeeded of string
+  | Read_failed_payload of string
+  | Read_failed_message of string
+
+let handle_read_file_with_outcome
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~(config : Workspace.config)
       ~(keeper_name : string)
       ~(args : Yojson.Safe.t)
   =
-  with_registry_meta ~keeper_name ~source_layer:"fs_resolver"
-  @@ fun meta ->
+  match find_registry_meta ~keeper_name ~source_layer:"fs_resolver" with
+  | None ->
+    Keeper_tool_execution.failure
+      (error_json (Printf.sprintf "keeper not found in registry: %s" keeper_name))
+  | Some meta ->
   let path = Safe_ops.json_string ~default:"" "path" args in
   let max_bytes =
     Safe_ops.json_int ~default:read_file_default_max_bytes "max_bytes" args
@@ -117,7 +125,7 @@ let handle_read_file
   in
   let cwd = string_opt_nonempty "cwd" args in
   match resolve_read_file_target ~config ~meta ~args ~raw_path:path with
-  | Error (Read_path_error e) -> error_json e
+  | Error (Read_path_error e) -> Keeper_tool_execution.failure (error_json e)
   | Ok target ->
     let run_read () =
          (* RFC-0006 Phase B-1: Docker keepers are always contained to their
@@ -147,25 +155,27 @@ let handle_read_file
            in
            let total = String.length body in
            let truncated = total >= max_bytes in
-           Yojson.Safe.to_string
-             (`Assoc
-                 [ "ok", `Bool true
-                 ; "path", `String target
-                 ; "bytes", `Int total
-                 ; "truncated", `Bool truncated
-                 ; "content", `String body
-                 ; "via", `String Keeper_sandbox_read_runner.backend_via
-                 ]))
+           Read_succeeded
+             (Yojson.Safe.to_string
+                (`Assoc
+                    [ "ok", `Bool true
+                    ; "path", `String target
+                    ; "bytes", `Int total
+                    ; "truncated", `Bool truncated
+                    ; "content", `String body
+                    ; "via", `String Keeper_sandbox_read_runner.backend_via
+                    ])))
          else (
            match Safe_ops.read_file_safe target with
            | Error e when String.starts_with ~prefix:file_not_found_prefix e ->
              Ok
-               (missing_file_error_json
-                  ~cwd
-                  ~raw_path:(Some path)
-                  ~target
-                  ~error:e)
-           | Error e -> Error e
+               (Read_failed_payload
+                  (missing_file_error_json
+                     ~cwd
+                     ~raw_path:(Some path)
+                     ~target
+                     ~error:e))
+           | Error e -> Ok (Read_failed_message e)
            | Ok content ->
              let total = String.length content in
              let truncated = total > max_bytes in
@@ -173,18 +183,33 @@ let handle_read_file
                if truncated then String.sub content 0 max_bytes else content
              in
              Ok
-               (Yojson.Safe.to_string
-                  (`Assoc
-                       [ "ok", `Bool true
-                       ; "path", `String target
-                       ; "bytes", `Int total
-                       ; "truncated", `Bool truncated
-                       ; "content", `String body
-                       ])))
+               (Read_succeeded
+                  (Yojson.Safe.to_string
+                     (`Assoc
+                          [ "ok", `Bool true
+                          ; "path", `String target
+                          ; "bytes", `Int total
+                          ; "truncated", `Bool truncated
+                          ; "content", `String body
+                          ]))))
     in
     (match run_read () with
-     | Ok json -> json
-     | Error msg -> error_json ~fields:[ "path", `String target ] msg)
+     | Ok (Read_succeeded json) -> Keeper_tool_execution.success json
+     | Ok (Read_failed_payload payload) -> Keeper_tool_execution.failure payload
+     | Ok (Read_failed_message msg) ->
+       Keeper_tool_execution.failure
+         (error_json ~fields:[ "path", `String target ] msg)
+     | Error msg ->
+       Keeper_tool_execution.failure
+         (error_json ~fields:[ "path", `String target ] msg))
+;;
+
+let handle_read_file ~turn_sandbox_factory ~config ~keeper_name ~args =
+  (handle_read_file_with_outcome
+     ~turn_sandbox_factory
+     ~config
+     ~keeper_name
+     ~args).raw_output
 ;;
 
 (* RFC-0006 Phase A.4: replace [old] with [new] in [text]. When
@@ -394,15 +419,289 @@ let ide_observation_failure_fields = function
     ]
 ;;
 
-let validate_write_target ~config ~meta ~target =
-  Keeper_sandbox_containment.check_write_target ~config ~meta ~target
-  |> Result.map_error (fun e -> error_json ~fields:[ "path", `String target ] e)
+let atomic_tmp_rng = Random.State.make_self_init ()
+let atomic_tmp_rng_mutex = Stdlib.Mutex.create ()
+
+let fresh_atomic_tmp_name () =
+  Stdlib.Mutex.protect atomic_tmp_rng_mutex (fun () ->
+    Uuidm.v4_gen atomic_tmp_rng () |> Uuidm.to_string)
+  |> Printf.sprintf ".atomic_%s.tmp"
+;;
+
+let cleanup_confined_tmp tmp =
+  Eio.Cancel.protect @@ fun () ->
+  try
+    match Eio.Path.kind ~follow:false tmp with
+    | `Not_found -> ()
+    | _ -> Eio.Path.unlink tmp
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Log.Keeper.warn
+      "filesystem_runtime: confined temp cleanup failed: %s"
+      (Printexc.to_string exn)
+;;
+
+let fsync_confined_directory_best_effort dir =
+  try
+    Eio.Path.with_open_in Eio.Path.(dir / ".") @@ fun directory_file ->
+    match Eio_unix.Resource.fd_opt directory_file with
+    | None ->
+      Log.Keeper.warn
+        "filesystem_runtime: opened confined directory has no POSIX fd; directory fsync skipped"
+    | Some fd ->
+       Eio_unix.run_in_systhread ~label:"keeper-fs-dir-fsync" (fun () ->
+         Eio_unix.Fd.use_exn "keeper-fs-dir-fsync" fd Unix.fsync)
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | Unix.Unix_error ((Unix.EINVAL | Unix.EOPNOTSUPP) as error, operation, _) ->
+    Log.Keeper.info
+      "filesystem_runtime: confined directory fsync unsupported operation=%s error=%s"
+      operation
+      (Unix.error_message error)
+  | exn ->
+    Log.Keeper.warn
+      "filesystem_runtime: confined directory fsync failed: %s"
+      (Printexc.to_string exn)
+;;
+
+let created_file_permissions = 0o644
+let created_directory_permissions = 0o755
+
+let set_open_resource_permissions ~label resource permissions =
+  match Eio_unix.Resource.fd_opt resource with
+  | None ->
+    Error
+      (Printf.sprintf
+         "filesystem resource has no POSIX fd; cannot apply exact permissions: %s"
+         label)
+  | Some fd ->
+    (try
+       Eio_unix.run_in_systhread ~label (fun () ->
+         Eio_unix.Fd.use_exn label fd (fun unix_fd ->
+           Unix.fchmod unix_fd permissions));
+       Ok ()
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn -> Error (Printexc.to_string exn))
+;;
+
+let same_file_resource (left : Eio.File.Stat.t) (right : Eio.File.Stat.t) =
+  Int64.equal left.dev right.dev && Int64.equal left.ino right.ino
+;;
+
+let set_created_directory_permissions ~expected path permissions =
+  Eio.Path.with_open_in path @@ fun directory_file ->
+  let opened = Eio.File.stat directory_file in
+  if opened.kind <> `Directory || not (same_file_resource expected opened)
+  then Error "filesystem created directory changed before exact permissions were applied"
+  else
+    set_open_resource_permissions
+      ~label:"keeper-fs-created-directory-fchmod"
+      directory_file
+      permissions
+;;
+
+let replacement_file_permissions ~parent_dir ~leaf =
+  let target = Eio.Path.(parent_dir / leaf) in
+  match Eio.Path.kind ~follow:false target with
+  | `Not_found | `Symbolic_link -> Ok created_file_permissions
+  | `Regular_file -> Ok (Eio.Path.stat ~follow:false target).perm
+  | (`Block_device
+    | `Character_special
+    | `Directory
+    | `Fifo
+    | `Socket
+    | `Unknown) as kind ->
+    Error
+      (Fmt.str
+         "filesystem atomic replacement target must be a regular file, symbolic link, or missing entry; found %a"
+         Eio.File.Stat.pp_kind
+         kind)
+;;
+
+let save_confined_atomic ~parent_dir ~leaf ~permissions content =
+  let target = Eio.Path.(parent_dir / leaf) in
+  let tmp = Eio.Path.(parent_dir / fresh_atomic_tmp_name ()) in
+  let prepared =
+    match
+      Eio.Path.with_open_out ~create:(`Exclusive 0o600) tmp (fun file ->
+        Eio.Flow.copy_string content file;
+        let* () =
+          set_open_resource_permissions
+            ~label:"keeper-fs-atomic-temp-fchmod"
+            file
+            permissions
+        in
+        Eio.File.sync file;
+        Ok ())
+    with
+    | result -> result
+    | exception exn ->
+      let bt = Printexc.get_raw_backtrace () in
+      cleanup_confined_tmp tmp;
+      Printexc.raise_with_backtrace exn bt
+  in
+  match prepared with
+  | Error _ as error ->
+    cleanup_confined_tmp tmp;
+    error
+  | Ok () ->
+    (match Eio.Path.rename tmp target with
+     | () -> ()
+     | exception exn ->
+       let bt = Printexc.get_raw_backtrace () in
+       cleanup_confined_tmp tmp;
+       Printexc.raise_with_backtrace exn bt);
+    fsync_confined_directory_best_effort parent_dir;
+    Ok ()
+;;
+
+let append_open_file file content =
+  Eio.Flow.copy_string content file;
+  Eio.File.sync file;
+  Ok ()
+;;
+
+let load_open_file file =
+  Eio.Buf_read.parse_exn ~max_size:max_int Eio.Buf_read.take_all file
+;;
+
+let create_file_exclusive ~parent_dir ~leaf ~permissions content =
+  let target = Eio.Path.(parent_dir / leaf) in
+  let created =
+    match
+      Eio.Path.with_open_out ~create:(`Exclusive 0o600) target (fun file ->
+        Eio.Flow.copy_string content file;
+        let* () =
+          set_open_resource_permissions
+            ~label:"keeper-fs-created-file-fchmod"
+            file
+            permissions
+        in
+        Eio.File.sync file;
+        Ok ())
+    with
+    | result -> result
+    | exception exn ->
+      let bt = Printexc.get_raw_backtrace () in
+      cleanup_confined_tmp target;
+      Printexc.raise_with_backtrace exn bt
+  in
+  match created with
+  | Error _ as error ->
+    cleanup_confined_tmp target;
+    error
+  | Ok () ->
+    fsync_confined_directory_best_effort parent_dir;
+    Ok ()
+;;
+
+let rec with_created_parent_directories
+          ~permissions
+          parent_dir
+          missing_parents
+          f
+  =
+  match missing_parents with
+  | [] -> f parent_dir
+  | component :: rest ->
+    let child = Eio.Path.(parent_dir / component) in
+    Eio.Path.mkdir ~perm:0o700 child;
+    let created = Eio.Path.stat ~follow:false child in
+    let* () = set_created_directory_permissions ~expected:created child permissions in
+    Eio.Path.with_open_dir child @@ fun child_dir ->
+    let lexical = Eio.Path.stat ~follow:false child in
+    let opened = Eio.Path.stat ~follow:true child_dir in
+    if created.kind <> `Directory
+       || lexical.kind <> `Directory
+       || opened.kind <> `Directory
+       || not (same_file_resource created lexical)
+       || not (same_file_resource lexical opened)
+    then
+      Error
+        (Printf.sprintf
+           "filesystem parent directory changed during capability acquisition: %s"
+           component)
+    else with_created_parent_directories ~permissions child_dir rest f
+;;
+
+let rec with_deepest_existing_parent
+          parent
+          parent_relative_path
+          missing_parents
+          f
+  =
+  Eio.Switch.run @@ fun sw ->
+  match
+    try Ok (Eio.Path.open_dir ~sw parent) with
+    | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) -> Error `Missing
+  with
+  | Ok parent_dir ->
+    f ~parent_dir ~parent_relative_path ~missing_parents
+  | Error `Missing ->
+    (match Eio.Path.split parent with
+     | None ->
+       Error
+         "filesystem capability acquisition failed: no existing parent directory"
+     | Some (ancestor, missing_component) ->
+       with_deepest_existing_parent
+         ancestor
+         (Filename.dirname parent_relative_path)
+         (missing_component :: missing_parents)
+         f)
+;;
+
+let with_confined_write_parent confined f =
+  match Fs_compat.get_fs_opt () with
+  | None ->
+    Error
+      "filesystem capability unavailable: Eio filesystem was not installed at runtime startup"
+  | Some fs ->
+    (try
+       let anchor_root = Keeper_alerting_path.confined_anchor_root confined in
+       let root_relative_path =
+         Keeper_alerting_path.confined_root_relative_path confined
+       in
+       let relative_path =
+         Keeper_alerting_path.confined_relative_path confined
+       in
+       let with_root root_dir =
+         let* () =
+           Keeper_alerting_path.verify_confined_root_capability confined root_dir
+         in
+         match Eio.Path.split Eio.Path.(root_dir / relative_path) with
+         | None -> Error "filesystem target has no writable leaf"
+         | Some (parent, leaf) ->
+           with_deepest_existing_parent
+             parent
+             (Filename.dirname relative_path)
+             []
+             (fun ~parent_dir ~parent_relative_path ~missing_parents ->
+                f
+                  ~root_dir
+                  ~parent_dir
+                  ~parent_relative_path
+                  ~missing_parents
+                  ~leaf)
+       in
+       Eio.Path.with_open_dir Eio.Path.(fs / anchor_root) @@ fun anchor_dir ->
+       if String.equal root_relative_path "."
+       then with_root anchor_dir
+       else
+         Eio.Path.with_open_dir Eio.Path.(anchor_dir / root_relative_path)
+         @@ fun root_dir ->
+         with_root root_dir
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | Eio.Io _ as exn -> Error (Printexc.to_string exn))
 ;;
 
 let check_invariant_sandbox_isolation
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
-      ~target
+      ~confined
   =
+  let target = Keeper_alerting_path.confined_containment_path confined in
   match turn_sandbox_factory with
   | None -> Ok ()
   | Some factory ->
@@ -417,8 +716,8 @@ let check_invariant_sandbox_isolation
 ;;
 
 let file_write_gate_input
-      ~target
-      ~mode
+      ~gate_effect
+      ~requested_target
       ~content
       ?old_string
       ?new_string
@@ -434,8 +733,8 @@ let file_write_gate_input
     | Some value -> [ name, `Bool value ]
   in
   `Assoc
-    ([ "target", `String target
-     ; "mode", `String mode
+    ([ "effect", Keeper_alerting_path.path_effect_to_yojson gate_effect
+     ; "requested_target", `String requested_target
      ; "content", `String content
      ]
      @ optional_string "old_string" old_string
@@ -479,7 +778,19 @@ let file_write_deferred_json ~target ~approval_id ~reason =
     "External effect deferred without blocking this Keeper. Continue other work; the originating Keeper lane will wake after resolution."
 ;;
 
-let handle_file_write
+type file_write_attempt =
+  | Write_succeeded of string
+  | Write_failed of
+      { payload : string
+      ; class_ : Tool_result.tool_failure_class
+      }
+
+let file_write_attempt_to_execution = function
+  | Write_succeeded payload -> Keeper_tool_execution.success payload
+  | Write_failed { payload; class_ } -> Keeper_tool_execution.failure ~class_ payload
+;;
+
+let handle_file_write_with_outcome
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~(config : Workspace.config)
       ~(keeper_name : string)
@@ -489,8 +800,11 @@ let handle_file_write
       ~(args : Yojson.Safe.t)
       ()
   =
-  with_registry_meta ~keeper_name ~source_layer:"fs_resolver"
-  @@ fun meta ->
+  match find_registry_meta ~keeper_name ~source_layer:"fs_resolver" with
+  | None ->
+    Keeper_tool_execution.failure
+      (error_json (Printf.sprintf "keeper not found in registry: %s" keeper_name))
+  | Some meta ->
   let via_field =
     match turn_sandbox_factory with
     | Some _ ->
@@ -517,17 +831,25 @@ let handle_file_write
         ()
     with
     | Keeper_gate.Deferred { approval_id; reason } ->
-      Ok (file_write_deferred_json ~target ~approval_id ~reason)
+      Ok
+        (Write_failed
+           { payload = file_write_deferred_json ~target ~approval_id ~reason
+           ; class_ = Tool_result.Workflow_rejection
+           })
     | Keeper_gate.Unavailable reason ->
       Ok
-        (error_json
-           ~fields:
-             [ "path", `String target
-             ; "error", `String "gate_unavailable"
-             ; "gate_reason"
-             , `String (Keeper_gate.unavailable_reason_to_string reason)
-             ]
-           "External effect was not executed because the Gate could not durably record its decision state. This Keeper remains active and may continue other work.")
+        (Write_failed
+           { payload =
+               error_json
+                 ~fields:
+                   [ "path", `String target
+                   ; "error", `String "gate_unavailable"
+                   ; "gate_reason"
+                   , `String (Keeper_gate.unavailable_reason_to_string reason)
+                   ]
+                 "External effect was not executed because the Gate could not durably record its decision state. This Keeper remains active and may continue other work."
+           ; class_ = Tool_result.Runtime_failure
+           })
     | Keeper_gate.Allow authorization ->
       Log.Keeper.info
         ~keeper_name:meta.name
@@ -538,188 +860,402 @@ let handle_file_write
   let protect_write ~target f =
     try f () with
     | Eio.Cancel.Cancelled _ as e -> raise e
+    | Eio.Io _ as e ->
+      Ok
+        (Write_failed
+           { payload =
+               error_json ~fields:[ "path", `String target ] (Printexc.to_string e)
+           ; class_ = Tool_result.Runtime_failure
+           })
     | Invalid_argument e | Sys_error e ->
-      Ok (error_json ~fields:[ "path", `String target ] e)
+      Ok
+        (Write_failed
+           { payload = error_json ~fields:[ "path", `String target ] e
+           ; class_ = Tool_result.Runtime_failure
+           })
     | Unix.Unix_error (err, _, _) ->
       Ok
-        (error_json
-           ~fields:[ "path", `String target ]
-           (Unix.error_message err))
+        (Write_failed
+           { payload =
+               error_json
+                 ~fields:[ "path", `String target ]
+                 (Unix.error_message err)
+           ; class_ = Tool_result.Runtime_failure
+           })
+  in
+  let finish_content_write ~target ~mode_label ~gate_effect write =
+    let input =
+      file_write_gate_input
+        ~gate_effect
+        ~requested_target:target
+        ~content
+        ()
+    in
+    after_gate ~target ~input
+    @@ fun () ->
+    protect_write ~target
+    @@ fun () ->
+    let* () = write () in
+    Log.Keeper.info
+      "WRITE_AUDIT: keeper=%s fs_edit path=%s mode=%s bytes=%d"
+      meta.name
+      target
+      mode_label
+      (String.length content);
+    let ide_observation_error =
+      track_write_region
+        ~config
+        ~keeper_name:meta.name
+        ~file_path:target
+        ~content
+        ~mode_raw:mode_label
+        ~old_string:""
+        ~new_string:""
+        ()
+    in
+    Ok
+      (Write_succeeded
+         (Yojson.Safe.to_string
+            (`Assoc
+                ([ "ok", `Bool true
+                 ; "path", `String target
+                 ; "mode", `String mode_label
+                 ; "bytes_written", `Int (String.length content)
+                 ]
+                 @ ide_observation_failure_fields ide_observation_error
+                 @ via_field))))
+  in
+  let parent_effect_scope ~parent_dir ~parent_relative_path ~missing_parents =
+    Keeper_alerting_path.path_effect_parent_scope
+      ~relative_path:parent_relative_path
+      ~resource:(Eio.Path.stat ~follow:true parent_dir)
+      ~create_missing_parents:missing_parents
+      ~created_directory_permissions
+  in
+  let handle_atomic_content_write ~mode_label ~make_effect =
+    match
+      resolve_keeper_confined_write_path
+        ~config
+        ~meta
+        ~endpoint:Keeper_alerting_path.Lexical_entry
+        ~raw_path:path
+    with
+    | Error msg -> Keeper_tool_execution.failure (error_json msg)
+    | Ok confined ->
+      let target = Keeper_alerting_path.confined_host_path confined in
+      let run () =
+        let* () =
+          check_invariant_sandbox_isolation ~turn_sandbox_factory ~confined
+        in
+        with_confined_write_parent confined
+        @@ fun ~root_dir:_ ~parent_dir ~parent_relative_path ~missing_parents ~leaf ->
+        let* parent =
+          parent_effect_scope ~parent_dir ~parent_relative_path ~missing_parents
+        in
+        let* result_file_permissions =
+          if missing_parents = []
+          then replacement_file_permissions ~parent_dir ~leaf
+          else Ok created_file_permissions
+        in
+        let* gate_effect =
+          make_effect ~parent ~result_file_permissions confined
+        in
+        finish_content_write ~target ~mode_label ~gate_effect (fun () ->
+          with_created_parent_directories
+            ~permissions:created_directory_permissions
+            parent_dir
+            missing_parents
+          @@ fun final_parent ->
+          save_confined_atomic
+            ~parent_dir:final_parent
+            ~leaf
+            ~permissions:result_file_permissions
+            content)
+      in
+      (match run () with
+       | Ok attempt -> file_write_attempt_to_execution attempt
+       | Error msg ->
+         Keeper_tool_execution.failure
+           (error_json ~fields:[ "path", `String target ] msg))
+  in
+  let handle_append () =
+    let mode_label = fs_write_mode_to_string Append in
+    match
+      resolve_keeper_confined_write_path
+        ~config
+        ~meta
+        ~endpoint:Keeper_alerting_path.Follow_referent
+        ~raw_path:path
+    with
+    | Error msg -> Keeper_tool_execution.failure (error_json msg)
+    | Ok confined ->
+      let target = Keeper_alerting_path.confined_host_path confined in
+      let run () =
+        let* () =
+          check_invariant_sandbox_isolation ~turn_sandbox_factory ~confined
+        in
+        with_confined_write_parent confined
+        @@ fun ~root_dir ~parent_dir ~parent_relative_path ~missing_parents ~leaf ->
+        let create_missing_entry () =
+          let* parent =
+            parent_effect_scope ~parent_dir ~parent_relative_path ~missing_parents
+          in
+          let* gate_effect =
+            Keeper_alerting_path.create_entry_exclusive_effect
+              ~parent
+              ~result_file_permissions:created_file_permissions
+              confined
+          in
+          finish_content_write ~target ~mode_label ~gate_effect (fun () ->
+            with_created_parent_directories
+              ~permissions:created_directory_permissions
+              parent_dir
+              missing_parents
+            @@ fun final_parent ->
+            create_file_exclusive
+              ~parent_dir:final_parent
+              ~leaf
+              ~permissions:created_file_permissions
+              content)
+        in
+        if missing_parents <> []
+        then create_missing_entry ()
+        else
+          let endpoint_relative_path =
+            Keeper_alerting_path.confined_endpoint_relative_path confined
+          in
+          Eio.Switch.run @@ fun sw ->
+          (match
+             try
+               Ok
+                 (Eio.Path.open_out
+                    ~sw
+                    ~append:true
+                    ~create:`Never
+                    Eio.Path.(root_dir / endpoint_relative_path))
+             with
+             | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) -> Error `Missing
+           with
+           | Error `Missing -> create_missing_entry ()
+           | Ok file ->
+             let stat = Eio.File.stat file in
+             if stat.kind <> `Regular_file
+             then Error "filesystem append target is not a regular file"
+             else
+               let* gate_effect =
+                 Keeper_alerting_path.append_pinned_resource_effect confined stat
+               in
+               finish_content_write ~target ~mode_label ~gate_effect (fun () ->
+                 append_open_file file content))
+      in
+      (match run () with
+       | Ok attempt -> file_write_attempt_to_execution attempt
+       | Error msg ->
+         Keeper_tool_execution.failure
+           (error_json ~fields:[ "path", `String target ] msg))
   in
   if String.trim path = ""
-  then error_json "path is required. Good: path='lib/foo.ml'. Bad: path=''."
+  then
+    Keeper_tool_execution.failure
+      ~class_:Tool_result.Policy_rejection
+      (error_json "path is required. Good: path='lib/foo.ml'. Bad: path=''.")
   else (
     match mode_opt with
     | None ->
-      error_json
-        (Printf.sprintf
-           "mode must be one of [%s], got %S."
-           (String.concat ", " valid_fs_write_mode_strings)
-           mode_raw)
+      Keeper_tool_execution.failure
+        ~class_:Tool_result.Policy_rejection
+        (error_json
+           (Printf.sprintf
+              "mode must be one of [%s], got %S."
+              (String.concat ", " valid_fs_write_mode_strings)
+              mode_raw))
     | Some Patch ->
       let old_string = Safe_ops.json_string ~default:"" "old_string" args in
       let new_string = Safe_ops.json_string ~default:"" "new_string" args in
       let replace_all = Safe_ops.json_bool ~default:false "replace_all" args in
       if old_string = ""
       then
-        error_json
-          "mode=patch requires non-empty old_string. Good: old_string='let x = 1'."
+        Keeper_tool_execution.failure
+          ~class_:Tool_result.Policy_rejection
+          (error_json
+             "mode=patch requires non-empty old_string. Good: old_string='let x = 1'.")
       else
-        (match resolve_keeper_path ~config ~meta ~raw_path:path with
-         | Error e -> error_json e
-         | Ok target ->
-           (match validate_write_target ~config ~meta ~target with
-            | Error json -> json
-            | Ok () ->
-              let run () =
-                let* () = check_invariant_sandbox_isolation ~turn_sandbox_factory ~target in
-                if not (safe_file_exists target)
-                then
-                  Ok
-                    (error_json
-                       ~fields:[ "path", `String target ]
-                       "patch target file does not exist. Use mode=overwrite to create it.")
-                else
-                  let* current = Safe_ops.read_file_safe target in
-                  let* updated, occurrences =
-                    apply_patch ~old_string ~new_string ~replace_all current
-                  in
-                  let input =
-                    file_write_gate_input
-                      ~target
-                      ~mode:"patch"
-                      ~content:updated
-                      ~old_string
-                      ~new_string
-                      ~replace_all
-                      ()
-                  in
-                  after_gate ~target ~input
-                  @@ fun () ->
-                  protect_write ~target
-                  @@ fun () ->
-                  let* () =
-                    match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd:target with
-                    | Runtime runtime ->
-                      Keeper_turn_sandbox_runtime.overwrite_file
-                        runtime
-                        ~host_path:target
-                        ~content:updated
-                        ~timeout_sec:
-                          (Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Io ())
-                        ()
-                    | No_factory | Local_profile -> Keeper_fs.save_atomic target updated
-                  in
-                  Log.Keeper.info
-                    "WRITE_AUDIT: keeper=%s fs_edit path=%s mode=patch replace_all=%b \
-                     occurrences=%d bytes=%d"
-                    meta.name
-                    target
-                    replace_all
-                    occurrences
-                    (String.length updated);
-                  let ide_observation_error =
-                    track_write_region
-                      ~config
-                      ~keeper_name:meta.name
-                      ~file_path:target
-                      ~content:updated
-                      ~mode_raw:"patch"
-                      ~old_string
-                      ~new_string
-                      ()
-                  in
-                  Ok
-                    (Yojson.Safe.to_string
-                       (`Assoc
-                           ([ "ok", `Bool true
-                            ; "path", `String target
-                            ; "mode", `String "patch"
-                            ; "replace_all", `Bool replace_all
-                            ; "occurrences", `Int occurrences
-                            ; "bytes_written", `Int (String.length updated)
-                            ]
-                            @ ide_observation_failure_fields ide_observation_error
-                            @ via_field)))
-              in
-              (match run () with
-               | Ok json -> json
-               | Error msg -> error_json ~fields:[ "path", `String target ] msg)))
-    | Some ((Overwrite | Append) as mode) ->
-      let mode_label = fs_write_mode_to_string mode in
-      (match resolve_keeper_path ~config ~meta ~raw_path:path with
-         | Error e -> error_json e
-         | Ok target ->
-           (match validate_write_target ~config ~meta ~target with
-            | Error json -> json
-            | Ok () ->
-              let run () =
-                let* () = check_invariant_sandbox_isolation ~turn_sandbox_factory ~target in
-                let input = file_write_gate_input ~target ~mode:mode_label ~content () in
+        (match
+           resolve_keeper_confined_write_path
+             ~config
+             ~meta
+             ~endpoint:Keeper_alerting_path.Follow_referent
+             ~raw_path:path
+         with
+         | Error msg -> Keeper_tool_execution.failure (error_json msg)
+         | Ok confined ->
+              let target = Keeper_alerting_path.confined_host_path confined in
+              let finish_write ~gate_effect ~updated ~occurrences write =
+                let input =
+                  file_write_gate_input
+                    ~gate_effect
+                    ~requested_target:target
+                    ~content:updated
+                    ~old_string
+                    ~new_string
+                    ~replace_all
+                    ()
+                in
                 after_gate ~target ~input
                 @@ fun () ->
                 protect_write ~target
                 @@ fun () ->
-                let* () =
-                  match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd:target with
-                  | Runtime runtime ->
-                    (match mode with
-                     | Append ->
-                       Keeper_turn_sandbox_runtime.append_file
-                         runtime
-                         ~host_path:target
-                         ~content
-                         ~timeout_sec:
-                           (Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Io ())
-                         ()
-                     | Overwrite ->
-                       Keeper_turn_sandbox_runtime.overwrite_file
-                         runtime
-                         ~host_path:target
-                         ~content
-                         ~timeout_sec:
-                           (Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Io ())
-                         ()
-                     | Patch -> Ok ())
-                  | No_factory | Local_profile ->
-                    (match mode with
-                     | Append ->
-                       let parent = Filename.dirname target in
-                       Fs_compat.mkdir_p parent;
-                       Fs_compat.append_file target content;
-                       Ok ()
-                     | Overwrite -> Keeper_fs.save_atomic target content
-                     | Patch -> Ok ())
-                in
+                let* () = write updated in
                 Log.Keeper.info
-                  "WRITE_AUDIT: keeper=%s fs_edit path=%s mode=%s bytes=%d"
+                  "WRITE_AUDIT: keeper=%s fs_edit path=%s mode=patch replace_all=%b \
+                   occurrences=%d bytes=%d"
                   meta.name
                   target
-                  mode_label
-                  (String.length content);
+                  replace_all
+                  occurrences
+                  (String.length updated);
                 let ide_observation_error =
                   track_write_region
                     ~config
                     ~keeper_name:meta.name
                     ~file_path:target
-                    ~content
-                    ~mode_raw:mode_label
-                    ~old_string:""
-                    ~new_string:""
+                    ~content:updated
+                    ~mode_raw:"patch"
+                    ~old_string
+                    ~new_string
                     ()
                 in
                 Ok
-                  (Yojson.Safe.to_string
-                     (`Assoc
-                         ([ "ok", `Bool true
-                          ; "path", `String target
-                          ; "mode", `String mode_label
-                          ; "bytes_written", `Int (String.length content)
-                          ]
-                          @ ide_observation_failure_fields ide_observation_error
-                          @ via_field)))
+                  (Write_succeeded
+                     (Yojson.Safe.to_string
+                        (`Assoc
+                            ([ "ok", `Bool true
+                             ; "path", `String target
+                             ; "mode", `String "patch"
+                             ; "replace_all", `Bool replace_all
+                             ; "occurrences", `Int occurrences
+                             ; "bytes_written", `Int (String.length updated)
+                             ]
+                             @ ide_observation_failure_fields ide_observation_error
+                             @ via_field))))
+              in
+              let patch_current
+                    ~parent
+                    ~source_relative_path
+                    ~source_resource
+                    ~result_file_permissions
+                    current
+                    write
+                =
+                let* updated, occurrences =
+                  apply_patch ~old_string ~new_string ~replace_all current
+                in
+                let* gate_effect =
+                  Keeper_alerting_path.patch_then_atomic_replace_effect
+                    ~parent
+                    ~source_relative_path
+                    ~source_resource
+                    ~result_file_permissions
+                    confined
+                in
+                finish_write ~gate_effect ~updated ~occurrences write
+              in
+              let missing_target () =
+                Ok
+                  (Write_failed
+                     { payload =
+                         error_json
+                           ~fields:[ "path", `String target ]
+                           "patch target file does not exist. Use mode=overwrite to create it."
+                     ; class_ = Tool_result.Workflow_rejection
+                     })
+              in
+              let run () =
+                let* () =
+                  check_invariant_sandbox_isolation ~turn_sandbox_factory ~confined
+                in
+                with_confined_write_parent confined
+                @@ fun ~root_dir ~parent_dir ~parent_relative_path ~missing_parents ~leaf ->
+                if missing_parents <> []
+                then missing_target ()
+                else
+                  let source_relative_path =
+                    Keeper_alerting_path.confined_endpoint_relative_path confined
+                  in
+                  let confined_source = Eio.Path.(root_dir / source_relative_path) in
+                  (match Eio.Path.kind ~follow:true confined_source with
+                   | `Not_found -> missing_target ()
+                   | `Regular_file ->
+                     Eio.Path.with_open_in confined_source @@ fun source_file ->
+                     let source_resource = Eio.File.stat source_file in
+                     if source_resource.kind <> `Regular_file
+                     then Error "filesystem patch source changed before capability acquisition"
+                     else
+                       let current = load_open_file source_file in
+                       let* result_file_permissions =
+                         replacement_file_permissions ~parent_dir ~leaf
+                       in
+                       let* parent =
+                         parent_effect_scope
+                           ~parent_dir
+                           ~parent_relative_path
+                           ~missing_parents:[]
+                       in
+                       patch_current
+                         ~parent
+                         ~source_relative_path
+                         ~source_resource
+                         ~result_file_permissions
+                         current
+                         (fun updated ->
+                            save_confined_atomic
+                              ~parent_dir
+                              ~leaf
+                              ~permissions:result_file_permissions
+                              updated)
+                   | (`Block_device
+                     | `Character_special
+                     | `Directory
+                     | `Fifo
+                     | `Socket
+                     | `Symbolic_link
+                     | `Unknown) as kind ->
+                     Error
+                       (Fmt.str
+                          "filesystem patch target must resolve to a regular file; found %a"
+                          Eio.File.Stat.pp_kind
+                          kind))
               in
               (match run () with
-               | Ok json -> json
-               | Error msg -> error_json ~fields:[ "path", `String target ] msg))))
+               | Ok attempt -> file_write_attempt_to_execution attempt
+               | Error msg ->
+                 Keeper_tool_execution.failure
+                   (error_json ~fields:[ "path", `String target ] msg)))
+    | Some Overwrite ->
+      handle_atomic_content_write
+        ~mode_label:(fs_write_mode_to_string Overwrite)
+        ~make_effect:Keeper_alerting_path.atomic_replace_effect
+    | Some Append -> handle_append ()
+  )
+;;
+
+let handle_file_write
+      ~turn_sandbox_factory
+      ~config
+      ~keeper_name
+      ?continuation_channel
+      ?gate_context
+      ?gate_grant
+      ~args
+      ()
+  =
+  (handle_file_write_with_outcome
+     ~turn_sandbox_factory
+     ~config
+     ~keeper_name
+     ?continuation_channel
+     ?gate_context
+     ?gate_grant
+     ~args
+     ()).raw_output
 ;;

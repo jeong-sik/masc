@@ -397,6 +397,7 @@ type removed_keeper_meta_field =
   | Persona_profile_path
   | Tool_access
   | Tool_denylist
+  | Policy_voice_enabled
   | Last_blocker
 
 let removed_keeper_meta_field_of_key = function
@@ -404,6 +405,7 @@ let removed_keeper_meta_field_of_key = function
   | "persona_profile_path" -> Some Persona_profile_path
   | "tool_access" -> Some Tool_access
   | "tool_denylist" -> Some Tool_denylist
+  | "policy_voice_enabled" -> Some Policy_voice_enabled
   | "last_blocker" -> Some Last_blocker
   | _ -> None
 ;;
@@ -413,6 +415,7 @@ let removed_keeper_meta_field_to_wire = function
   | Persona_profile_path -> "persona_profile_path"
   | Tool_access -> "tool_access"
   | Tool_denylist -> "tool_denylist"
+  | Policy_voice_enabled -> "policy_voice_enabled"
   | Last_blocker -> "last_blocker"
 ;;
 
@@ -429,7 +432,8 @@ let reject_removed_keeper_meta_shapes (json : Yojson.Safe.t) =
        | Some (Initiative_enabled as field)
        | Some (Persona_profile_path as field)
        | Some (Tool_access as field)
-       | Some (Tool_denylist as field) ->
+       | Some (Tool_denylist as field)
+       | Some (Policy_voice_enabled as field) ->
          Error
            ( "removed keeper meta field is no longer supported: "
              ^ removed_keeper_meta_field_to_wire field )

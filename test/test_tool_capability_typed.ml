@@ -62,6 +62,24 @@ let test_has_catalog_metadata () =
     Tool_capability.all_kinds
 ;;
 
+let test_read_only_does_not_imply_idempotent () =
+  let name = "__cap_read_only_not_idempotent" in
+  Tool_catalog.register_metadata
+    name
+    { Tool_catalog.default_metadata with
+      readonly = Some true
+    ; idempotent = None
+    };
+  (check bool)
+    "explicit read-only metadata grants Read_only"
+    true
+    (Tool_capability.has Read_only name);
+  (check bool)
+    "absent idempotent metadata does not grant Idempotent"
+    false
+    (Tool_capability.has Idempotent name)
+;;
+
 let test_has_catalog_capabilities () =
   (check bool)
     "explicit read-only metadata grants Read_only"
@@ -135,6 +153,10 @@ let () =
         ; test_case "of-string-unknown-returns-none" `Quick test_of_string_unknown_returns_none
         ; test_case "has-unknown-tool-returns-false" `Quick test_has_unknown_tool_returns_false
         ; test_case "has-catalog-metadata" `Quick test_has_catalog_metadata
+        ; test_case
+            "read-only-does-not-imply-idempotent"
+            `Quick
+            test_read_only_does_not_imply_idempotent
         ; test_case "has-catalog-capabilities" `Quick test_has_catalog_capabilities
         ; test_case "granted-unknown-tool-is-empty" `Quick test_granted_unknown_tool_is_empty
         ; test_case "check-empty-required-is-ok" `Quick test_check_empty_required_is_ok

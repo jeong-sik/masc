@@ -1,4 +1,4 @@
-(** Keeper_error_classify — Error classification, side-effect safety,
+(** Keeper_error_classify — Error classification
     and retry constants for the unified keeper cycle.
 
     Pure predicates and classification functions over [Agent_sdk.Error.sdk_error].
@@ -24,11 +24,6 @@ type error_classification =
   | Transient_capacity
   | Non_transient
   | Unclassified
-
-let string_contains_substring = String_util.string_contains_substring
-
-let is_structural_oas_timeout_message message =
-  Keeper_oas_timeout_message.is_structural message
 
 (** Detect transient network errors that warrant retry with short backoff.
     Uses structured [Agent_sdk.Error.sdk_error] pattern matching instead of
@@ -59,9 +54,9 @@ let is_transient_internal_runner_error (err : Agent_sdk.Error.sdk_error) : bool 
       | Keeper_turn_driver.Accept_rejected _
       | Keeper_turn_driver.Provider_timeout _
       | Keeper_turn_driver.Turn_timeout _
-      | Keeper_turn_driver.Ambiguous_post_commit _
       | Keeper_turn_driver.Internal_bridge_exception _
-      | Keeper_turn_driver.Internal_contract_rejected _ )
+      | Keeper_turn_driver.Internal_contract_rejected _
+      | Keeper_turn_driver.Receipt_persistence_failed _ )
   | None -> false
 
 (** Classify an [sdk_error] into a static [error_classification] variant.
@@ -72,9 +67,7 @@ let classify_error (err : Agent_sdk.Error.sdk_error) : error_classification =
   then Transient_internal_runner
   else match err with
   | Agent_sdk.Error.Api (NetworkError _) -> Transient_network
-  | Agent_sdk.Error.Api (Timeout { message }) ->
-      if is_structural_oas_timeout_message message then Transient_oas_timeout
-      else Transient_network
+  | Agent_sdk.Error.Api (Timeout _) -> Transient_network
   | Agent_sdk.Error.Api (Overloaded _) -> Transient_capacity
   | Agent_sdk.Error.Api (ServerError { status = 503; _ }) -> Transient_network
   | Agent_sdk.Error.Api (ServerError { status = 522; _ }) -> Transient_network
@@ -89,9 +82,7 @@ let classify_error (err : Agent_sdk.Error.sdk_error) : error_classification =
          }) ->
       Non_transient
   | Agent_sdk.Error.Provider (Llm_provider.Error.NetworkError _) -> Transient_network
-  | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout { detail; _ }) ->
-      if is_structural_oas_timeout_message detail then Transient_oas_timeout
-      else Transient_network
+  | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _) -> Transient_network
   | Agent_sdk.Error.Provider (Llm_provider.Error.ServerError { code = 524; _ }) ->
       Transient_network
   | Agent_sdk.Error.Provider (Llm_provider.Error.ServerError { transient; _ }) ->
@@ -110,6 +101,9 @@ let classify_error (err : Agent_sdk.Error.sdk_error) : error_classification =
   | Agent_sdk.Error.Provider (Llm_provider.Error.MissingApiKey _) -> Non_transient
   | Agent_sdk.Error.Provider (Llm_provider.Error.InvalidConfig _) -> Non_transient
   | Agent_sdk.Error.Provider (Llm_provider.Error.UnknownVariant _) -> Unclassified
+  | Agent_sdk.Error.Agent
+      (AgentExecutionTimeout _ | AgentExecutionIdleTimeout _) ->
+      Transient_oas_timeout
   | Agent_sdk.Error.Api (InvalidRequest _ | ServerError _ | AuthError _
     | AuthorizationError _
     | NotFound _ | PaymentRequired _ | ContextOverflow _) -> Non_transient
@@ -118,31 +112,20 @@ let classify_error (err : Agent_sdk.Error.sdk_error) : error_classification =
   | Agent_sdk.Error.Io _ | Agent_sdk.Error.Orchestration _
   | Agent_sdk.Error.Internal _ -> Unclassified
 
-(** {1 Retry & Side-Effect Safety}
-
-    @boundary-contract
-    - MASC owns: side-effect detection (blocking retry after mutating tools),
-      cross-provider retry (2 attempts after all OAS per-provider retries
-      exhaust), error reclassification for ambiguous outcomes.
-    - OAS owns: per-provider retry (3 attempts), HTTP backoff, timeout
-      handling, provider failover within a single runtime call.
-    - Neither may: retry silently after a mutating tool succeeded (integrity
-      over availability); duplicate OAS per-provider retry counts. *)
+(** {1 Typed retry classification} *)
 
 let is_transient_network_error (err : Agent_sdk.Error.sdk_error) : bool =
   if is_transient_internal_runner_error err
   then true
   else match err with
   | Agent_sdk.Error.Api (NetworkError _) -> true
-  | Agent_sdk.Error.Api (Timeout { message }) ->
-      not (is_structural_oas_timeout_message message)
+  | Agent_sdk.Error.Api (Timeout _) -> true
   | Agent_sdk.Error.Provider (Llm_provider.Error.NetworkError
       { kind = Llm_provider.Http_client.Tls_error
              | Llm_provider.Http_client.Local_resource_exhaustion; _ }) ->
       false
   | Agent_sdk.Error.Provider (Llm_provider.Error.NetworkError _) -> true
-  | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout { detail; _ }) ->
-      not (is_structural_oas_timeout_message detail)
+  | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _) -> true
   | Agent_sdk.Error.Api (Overloaded _) -> true
   | Agent_sdk.Error.Api (ServerError { status = 503; _ }) -> true
   (* Cloudflare 52x timeout family — origin server unreachable or
@@ -231,21 +214,12 @@ let is_server_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
   is_provider_rejected_parse_error err || is_model_rejected_parse_error err
 
 (** Receipt I/O failure: the turn body succeeded but the authoritative
-    receipt could not be persisted.  See
-    [keeper_agent_run.ml::execution_receipt_append_failed]. *)
+    receipt could not be persisted. The producer carries a typed MASC error;
+    free-form error prose is never used as a behavioral discriminator. *)
 let is_receipt_lost_error (err : Agent_sdk.Error.sdk_error) : bool =
-  match err with
-  | Agent_sdk.Error.Internal msg ->
-      string_contains_substring ~needle:"execution_receipt_append_failed" msg
-  (* Not a receipt I/O failure. *)
-  | Agent_sdk.Error.Api _ -> false
-  | Agent_sdk.Error.Provider _ -> false
-  | Agent_sdk.Error.Agent _ -> false
-  | Agent_sdk.Error.Mcp _ -> false
-  | Agent_sdk.Error.Config _ -> false
-  | Agent_sdk.Error.Serialization _ -> false
-  | Agent_sdk.Error.Io _ -> false
-  | Agent_sdk.Error.Orchestration _ -> false
+  match Keeper_turn_driver.classify_masc_internal_error err with
+  | Some (Keeper_turn_driver.Receipt_persistence_failed _) -> true
+  | Some _ | None -> false
 
 let is_provider_timeout_error (err : Agent_sdk.Error.sdk_error) : bool =
   Keeper_provider_runtime_boundary.is_provider_timeout_error err
@@ -284,11 +258,11 @@ let is_auto_recoverable_runtime_exhausted_error (err : Agent_sdk.Error.sdk_error
   | Some (Keeper_turn_driver.Resumable_cli_session _)
   | Some (Keeper_turn_driver.Turn_timeout _)
   | Some (Keeper_turn_driver.Provider_timeout _)
-  | Some (Keeper_turn_driver.Ambiguous_post_commit _)
   (* RFC-0159 Phase A: opaque internal failures. *)
   | Some (Keeper_turn_driver.Internal_unhandled_exception _)
   | Some (Keeper_turn_driver.Internal_bridge_exception _)
   | Some (Keeper_turn_driver.Internal_contract_rejected _)
+  | Some (Keeper_turn_driver.Receipt_persistence_failed _)
   | None ->
       false
 
@@ -300,11 +274,11 @@ let is_resumable_cli_session_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Keeper_turn_driver.Accept_rejected _)
   | Some (Keeper_turn_driver.Turn_timeout _)
   | Some (Keeper_turn_driver.Provider_timeout _)
-  | Some (Keeper_turn_driver.Ambiguous_post_commit _)
   (* RFC-0159 Phase A: opaque internal failures. *)
   | Some (Keeper_turn_driver.Internal_unhandled_exception _)
   | Some (Keeper_turn_driver.Internal_bridge_exception _)
   | Some (Keeper_turn_driver.Internal_contract_rejected _)
+  | Some (Keeper_turn_driver.Receipt_persistence_failed _)
   | None ->
       false
 
@@ -328,10 +302,10 @@ let is_accept_no_usable_progress_error (err : Agent_sdk.Error.sdk_error) : bool 
       | Keeper_turn_driver.Resumable_cli_session _
       | Keeper_turn_driver.Turn_timeout _
       | Keeper_turn_driver.Provider_timeout _
-      | Keeper_turn_driver.Ambiguous_post_commit _
       | Keeper_turn_driver.Internal_unhandled_exception _
       | Keeper_turn_driver.Internal_bridge_exception _
-      | Keeper_turn_driver.Internal_contract_rejected _ )
+      | Keeper_turn_driver.Internal_contract_rejected _
+      | Keeper_turn_driver.Receipt_persistence_failed _ )
   | None ->
     false
 
@@ -351,7 +325,6 @@ type degraded_retry_reason =
   | Rate_limit
   | Server_error
   | Auth_error
-  | Read_only_no_progress
   | Empty_no_progress
   | Thinking_only_no_progress
 
@@ -366,7 +339,6 @@ let degraded_retry_reason_to_string = function
   | Rate_limit -> "rate_limit"
   | Server_error -> "server_error"
   | Auth_error -> "auth_error"
-  | Read_only_no_progress -> "read_only_no_progress"
   | Empty_no_progress -> "empty_no_progress"
   | Thinking_only_no_progress -> "thinking_only_no_progress"
 
@@ -375,7 +347,6 @@ let accept_rejection_degraded_retry_reason err =
   | Some internal_error ->
     (match Keeper_turn_driver.accept_no_progress_retry_kind internal_error with
      | Some `Empty_no_progress -> Some Empty_no_progress
-     | Some `Read_only_no_progress -> Some Read_only_no_progress
      | Some `Thinking_only_no_progress -> Some Thinking_only_no_progress
      | None -> None)
   | None -> None
@@ -383,17 +354,8 @@ let accept_rejection_degraded_retry_reason err =
 let is_recoverable_no_progress_accept_rejection
     (err : Agent_sdk.Error.sdk_error) : bool =
   match accept_rejection_degraded_retry_reason err with
-  | Some
-      ( Empty_no_progress
-      | Read_only_no_progress
-      | Thinking_only_no_progress ) ->
+  | Some (Empty_no_progress | Thinking_only_no_progress) ->
     true
-  | Some _ | None -> false
-
-let is_read_only_no_progress_accept_rejection
-    (err : Agent_sdk.Error.sdk_error) : bool =
-  match accept_rejection_degraded_retry_reason err with
-  | Some Read_only_no_progress -> true
   | Some _ | None -> false
 
 type degraded_retry =
@@ -473,12 +435,12 @@ let degraded_retry_after_recoverable_error
          | None -> None)
     | Some
         (Keeper_turn_driver.Runtime_exhausted _)
-    | Some (Keeper_turn_driver.Ambiguous_post_commit _)
     (* RFC-0159 Phase A: opaque internal failures have no
        local-recovery retry mapping. *)
     | Some (Keeper_turn_driver.Internal_unhandled_exception _)
     | Some (Keeper_turn_driver.Internal_bridge_exception _)
     | Some (Keeper_turn_driver.Internal_contract_rejected _)
+    | Some (Keeper_turn_driver.Receipt_persistence_failed _)
     | None ->
         None
 
@@ -515,12 +477,12 @@ let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
         Some Runtime_exhausted
     | Some (Keeper_turn_driver.Accept_rejected _) ->
         accept_rejection_degraded_retry_reason err
-    | Some (Keeper_turn_driver.Ambiguous_post_commit _)
     (* RFC-0159 Phase A: typed [Internal_*] variants are not runtime-rotation
        reasons; they expose previously-opaque raw exception payloads.  *)
     | Some (Keeper_turn_driver.Internal_unhandled_exception _)
     | Some (Keeper_turn_driver.Internal_bridge_exception _)
-    | Some (Keeper_turn_driver.Internal_contract_rejected _) ->
+    | Some (Keeper_turn_driver.Internal_contract_rejected _)
+    | Some (Keeper_turn_driver.Receipt_persistence_failed _) ->
         None
     | None ->
         (* Status-code-aware runtime rotation: raw provider API errors that are
@@ -649,7 +611,7 @@ let default_degraded_rotation_candidates
     dedupe_keep_order (default_candidates @ catalog_runtimes)
   in
   match fallback_reason with
-  | Some (Read_only_no_progress | Empty_no_progress | Thinking_only_no_progress) ->
+  | Some (Empty_no_progress | Thinking_only_no_progress) ->
     let tool_capable =
       Runtime.get_runtimes ()
       |> List.filter (fun (runtime : Runtime.t) -> runtime.model.tools_support)
@@ -767,7 +729,6 @@ let degraded_rotation_after_recoverable_error
             ~credential_pool_of_runtime_id
             ~effective_runtime
             candidates
-        | Read_only_no_progress
         | Empty_no_progress
         | Thinking_only_no_progress
         | Resumable_cli_session
@@ -850,18 +811,15 @@ let should_warn_keeper_cycle_failed (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Keeper_turn_driver.Accept_rejected _)
   | Some (Keeper_turn_driver.Provider_timeout _)
   | Some (Keeper_turn_driver.Turn_timeout _)
-  | Some (Keeper_turn_driver.Ambiguous_post_commit _)
   (* RFC-0159 Phase A: opaque internal failures should not trigger the
      keeper-cycle-failed WARN by themselves; the surrounding handler
      already logs the exception detail. *)
   | Some (Keeper_turn_driver.Internal_unhandled_exception _)
   | Some (Keeper_turn_driver.Internal_bridge_exception _)
   | Some (Keeper_turn_driver.Internal_contract_rejected _)
+  | Some (Keeper_turn_driver.Receipt_persistence_failed _)
   | None ->
     false
-
-
-include Keeper_error_classify_post_commit
 
 (* [is_context_overflow] now lives earlier in this file, above
    [is_auto_recoverable_turn_error], since that predicate depends on it. *)
@@ -913,9 +871,9 @@ let is_runtime_exhausted_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Keeper_turn_driver.Accept_rejected _)
   | Some (Keeper_turn_driver.Provider_timeout _)
   | Some (Keeper_turn_driver.Turn_timeout _)
-  | Some (Keeper_turn_driver.Ambiguous_post_commit _)
   (* RFC-0159 Phase A: opaque internal failures are not runtime exhaustion. *)
   | Some (Keeper_turn_driver.Internal_unhandled_exception _)
   | Some (Keeper_turn_driver.Internal_bridge_exception _)
-  | Some (Keeper_turn_driver.Internal_contract_rejected _) -> false
+  | Some (Keeper_turn_driver.Internal_contract_rejected _)
+  | Some (Keeper_turn_driver.Receipt_persistence_failed _) -> false
   | None -> false

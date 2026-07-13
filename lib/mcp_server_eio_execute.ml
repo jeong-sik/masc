@@ -171,11 +171,6 @@ let execute_tool_eio
          ~agent_name
          (runtime_error_result (Masc_domain.masc_error_to_string err))
      | Ok () ->
-          let is_read_only =
-            Keeper_tool_descriptor_resolution.capability_has
-              Tool_capability.Read_only
-              name
-          in
           (match owner_keeper_identity with
            | Some (keeper_name, keeper_id)
              when agent_name <> "unknown" && workspace_init_cached ->
@@ -205,8 +200,9 @@ let execute_tool_eio
                   agent_name
                   (Printexc.to_string exn))
            | Some _ | None -> ());
-          (* Auto-register session for non-read-only tools *)
-          if agent_name <> "unknown" && not is_read_only
+          (* Every identified caller participates in the same session timeline,
+             independent of tool metadata. *)
+          if agent_name <> "unknown"
           then (
             let (_ : Session.session) = Session.register registry ~agent_name in
             ());
@@ -216,17 +212,9 @@ let execute_tool_eio
           if agent_name <> "unknown"
           then (
             Session.update_activity registry ~agent_name ();
-            (* Keep read-only/fast tools non-blocking; heartbeat is best-effort. *)
-            let skip_heartbeat =
-              is_read_only
-              || Tool_catalog.is_placeholder name
-              ||
-              match Tool_catalog.implementation_status name with
-              | Tool_catalog.Simulation -> true
-              | Tool_catalog.Real | Tool_catalog.Adapter | Tool_catalog.Placeholder ->
-                false
-            in
-            if (not skip_heartbeat) && workspace_init_cached
+            (* Every identified call follows the same best-effort workspace
+               heartbeat path, independent of tool metadata. *)
+            if workspace_init_cached
             then (
               try
                 let (_ : string) = Workspace.heartbeat config ~agent_name in
@@ -371,14 +359,6 @@ let execute_tool_eio
                         (Printf.sprintf
                            "tool '%s' is a keeper task tool; use the keeper in-process task handler"
                            name))
-                 (* Removed tool families are intentionally not dispatchable. *)
-                 | Mod_shard ->
-                   let ok, json = Tool_shard.execute name coerced_args in
-                   let message = Yojson.Safe.to_string json in
-                   Some
-                     (if ok
-                      then Tool_result.ok ~tool_name:name ~start_time message
-                      else Tool_result.error ~tool_name:name ~start_time message)
                  | Mod_inline ->
                    let mcp_runtime_ctx : Mcp_tool_runtime.context =
                      { config
@@ -508,15 +488,27 @@ let execute_tool_eio
                          ~input:coerced_args
                          ())
                    in
-                   let success =
-                     match result.Keeper_tool_dispatch_runtime.outcome with
-                     | `Success -> true
-                     | `Failure -> false
-                   in
                    Some
-                     (if success
-                      then Tool_result.ok ~tool_name:name ~start_time result.raw_output
-                      else Tool_result.error ~tool_name:name ~start_time result.raw_output))
+                     (match result.Keeper_tool_dispatch_runtime.outcome with
+                      | `Success ->
+                        Tool_result.make_ok
+                          ~tool_name:name
+                          ~start_time
+                          ~data:
+                            (Option.value
+                               ~default:(`String result.raw_output)
+                               result.data)
+                          ()
+                      | `Failure failure_class ->
+                        Tool_result.make_err
+                          ~tool_name:name
+                          ~class_:failure_class
+                          ~start_time
+                          ~data:
+                            (Option.value
+                               ~default:(`String result.raw_output)
+                               result.data)
+                          result.raw_output))
             in
             (* Primary dispatch: mint token at I/O boundary, then O(1) tag lookup.
      Tool_token validates the name exists in the tag registry (Parse, Don't
@@ -598,9 +590,10 @@ let execute_tool_eio
 ;;
 
 (* RFC-0182 §3.1 — register Tool_workspace.dispatch with the dependency
-   inversion ref so [Keeper_tool_in_process_runtime.handle_masc_workspace]
-   (compiled early) can dispatch workspace tools without statically
-   importing [Tool_workspace] (compiled late). *)
+   inversion ref so
+   [Keeper_tool_in_process_runtime.handle_masc_workspace_with_outcome]
+   (compiled early) can dispatch workspace tools without statically importing
+   [Tool_workspace] (compiled late). *)
 let () =
   Workspace_dispatch_ref.dispatch
   := fun ~config ~agent_name ~name ~args ->

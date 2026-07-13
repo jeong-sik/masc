@@ -79,29 +79,13 @@ in_baseline() {
 # TLA+ set identifiers.  Extend this list as new `[@@deriving tla]`
 # types appear.
 #
-# Two source forms supported:
-#   "<ocaml_type>:<set_name>"          — TLA+ in-spec set definition
-#                                        (`SetName == { "a", "b" }`)
-#   "<ocaml_type>:cfg:<const_name>"    — TLC cfg CONSTANT block
-#                                        (`CONSTANTS  ConstName = { "a", "b" }`)
-# The `cfg:` form is needed when a spec models its alphabet as a
-# CONSTANT supplied by the TLC config (e.g. KCAF's `ProviderOutcomes`).
-# Added in R-D-1.b (iter 32) following the KCAF D-1 audit
-# (`docs/tla-audit/kcaf-d1-attempt-fsm-coverage-2026-05-12.md`).
 declare -a TYPE_SET_PAIRS=(
   "turn_phase:TurnPhaseSet"
   "decision_stage:DecisionSet"
-  "runtime_state:RuntimeSet"
   # KSM `phase` variant uses a different spec representation (Phase
   # constant via DerivePhase, not a closed set literal).  R-B-1.c can
   # extend to KSM in a follow-up by adding spec-side `PhaseSet` first
   # and matching here.
-  #
-  # KCAF pair — activated iter 33 (R-D-1.b activation, this PR).  The
-  # known `call_err` drift (iter 30 audit Gap 1) is recorded in the
-  # paired baseline file with R-D-1.a as the removal trigger.  CI now
-  # enforces zero NEW drift on provider_outcome going forward.
-  "provider_outcome:cfg:ProviderOutcomes"
 )
 
 # Aux: extract spec set members.  Greps the `XxxSet == { ... }` block,
@@ -165,26 +149,6 @@ extract_set_members_per_spec() {
   done
 }
 
-# Aux: extract TLC cfg CONSTANT members.  Greps the
-# `ConstName = { ... }` block from `*.cfg` files, bounded the same way
-# as the spec-set extractor.  Used for CONSTANT-style spec alphabets
-# (e.g. KCAF's `ProviderOutcomes`) where the set is cfg-supplied rather
-# than declared in the `.tla` file.
-extract_cfg_constant_members() {
-  local const_name="$1"
-  awk -v const="${const_name}" '
-    BEGIN { capturing = 0 }
-    $0 ~ "^[[:space:]]*" const "[[:space:]]*=" && index($0, "{") > 0 { capturing = 1 }
-    capturing == 1 {
-      buf = buf $0 " "
-      if (index($0, "}") > 0) { capturing = 0; print buf; buf = "" }
-    }
-  ' "${SPEC_DIR}"/*.cfg 2>/dev/null \
-    | rg -o '"[a-z_]+"' \
-    | tr -d '"' \
-    | sort -u
-}
-
 # Aux: extract OCaml constructor names tagged with `[@tla.*]` for a
 # given type.  Returns lowercase symbols (cd.pcd_name.txt → lowercased).
 #
@@ -212,27 +176,13 @@ TOTAL_CHECKED=0
 for pair in "${TYPE_SET_PAIRS[@]}"; do
   TOTAL_PAIRS=$((TOTAL_PAIRS + 1))
   ocaml_type="${pair%%:*}"
-  rest="${pair#*:}"
-  # Dispatch on source form.  "cfg:<name>" → TLC cfg CONSTANT; anything
-  # else is a TLA+ spec set name.  See TYPE_SET_PAIRS comment for the
-  # supported forms.
-  if [[ "${rest}" == cfg:* ]]; then
-    spec_set="${rest#cfg:}"
-    spec_origin="cfg"
-  else
-    spec_set="${rest}"
-    spec_origin="tla"
-  fi
+  spec_set="${pair#*:}"
 
   if [[ "${VERBOSE}" == "1" ]]; then
-    echo "── ${ocaml_type} ↔ ${spec_set} (${spec_origin}) ──"
+    echo "── ${ocaml_type} ↔ ${spec_set} ──"
   fi
 
-  if [[ "${spec_origin}" == "cfg" ]]; then
-    spec_members=$(extract_cfg_constant_members "${spec_set}" || true)
-  else
-    spec_members=$(extract_spec_members "${spec_set}" || true)
-  fi
+  spec_members=$(extract_spec_members "${spec_set}" || true)
   ocaml_members=$(extract_ocaml_members "${ocaml_type}" || true)
 
   if [[ -z "${spec_members}" ]]; then
@@ -245,8 +195,7 @@ for pair in "${TYPE_SET_PAIRS[@]}"; do
   fi
 
   # First underscore-separated word of the type name is the meaningful
-  # constructor prefix: turn_phase → "turn", decision_stage → "decision",
-  # runtime_state → "runtime", phase → "phase" (no strip).
+  # constructor prefix: turn_phase → "turn", decision_stage → "decision".
   prefix_word="${ocaml_type%%_*}"
 
   while IFS= read -r ocaml_sym; do

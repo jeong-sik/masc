@@ -141,5 +141,5 @@ let handle_check ~(inspect_state : context -> agent_state) ~tool_name ~start_tim
       ; "fix_hint", fix_hint
       ]
   in
-  Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string result)
+  Tool_result.make_ok ~tool_name ~start_time ~data:result ()
 ;;

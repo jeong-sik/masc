@@ -80,15 +80,30 @@ val keeper_observation_host_path_of_visible_path
 val safe_file_exists : string -> bool
 val safe_is_dir : string -> bool
 
-(** Resolve a write target without path rewriting, using objective allowed-root
-    containment via [Keeper_alerting_path.resolve_keeper_target_path]. *)
+(** Project a Keeper-visible write path into its deterministic logical
+    namespace and return the opaque allowed-root capability locator. This is
+    the single owner of relative-path and Docker-visible-path projection for
+    local filesystem writes. *)
+val resolve_keeper_confined_write_path
+  :  config:Workspace.config
+  -> meta:Keeper_meta_contract.keeper_meta
+  -> endpoint:Keeper_alerting_path.confined_path_endpoint
+  -> raw_path:string
+  -> (Keeper_alerting_path.confined_path, string) result
+
+(** Resolve a write target in the Keeper's deterministic logical namespace.
+    Relative paths are always rooted at that Keeper's playground. Absolute
+    paths, including a Docker-visible path projected to its host mount, retain
+    their explicit identity. The resulting path is checked once against the
+    objective allowed-root containment boundary. *)
 val resolve_keeper_path
   :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> raw_path:string
   -> (string, string) result
 
-(** Resolve a read target without path rewriting or existence inference. *)
+(** Resolve a read target using the same deterministic namespace as
+    {!resolve_keeper_path}, without existence inference. *)
 val resolve_keeper_read_path
   :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta

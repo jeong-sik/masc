@@ -17,8 +17,8 @@ let test_transition_json_preserves_observed_facts () =
   let json = T.to_json record in
   let open Yojson.Safe.Util in
   check string "event type" "operator_pause" (json |> member "event_type" |> to_string);
-  check string "previous phase" "Running" (json |> member "prev_phase" |> to_string);
-  check string "new phase" "Paused" (json |> member "new_phase" |> to_string);
+  check string "previous phase" "running" (json |> member "prev_phase" |> to_string);
+  check string "new phase" "paused" (json |> member "new_phase" |> to_string);
   check string "outcome" "applied" (json |> member "transition_outcome" |> to_string);
   check (float 1e-9) "decision timestamp" 1.25
     (json |> member "wall_clock_at_decision" |> to_float);

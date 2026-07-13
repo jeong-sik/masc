@@ -286,7 +286,6 @@ type module_tag = Tool_tag_types.module_tag =
   | Mod_control | Mod_agent_timeline | Mod_schedule | Mod_misc
   | Mod_library | Mod_recurring | Mod_external
   | Mod_inline
-  | Mod_shard
   | Mod_keeper_task
 
 let tag_registry : (string, module_tag) Hashtbl.t = Hashtbl.create 512

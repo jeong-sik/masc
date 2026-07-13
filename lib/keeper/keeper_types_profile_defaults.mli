@@ -14,7 +14,6 @@ type keeper_profile_defaults = {
   autoboot_enabled : bool option;
   mention_targets : string list;
   proactive_enabled : bool option;
-  shards : string list option;
   allowed_paths : string list option;
   sandbox_profile : Keeper_types_profile_sandbox.sandbox_profile option;
   sandbox_image : string option;

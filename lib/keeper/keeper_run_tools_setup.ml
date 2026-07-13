@@ -81,8 +81,10 @@ let prepare_agent_setup
     ; extra_system_context_size = None
     }
   in
-  let local_search_fn_ref : (unit -> Yojson.Safe.t) ref =
-    ref (fun () -> `Assoc [ "results", `List [] ])
+  let local_search_fn_ref : (unit -> Keeper_tool_execution.t) ref =
+    ref (fun () ->
+      Keeper_tool_execution.success
+        (Yojson.Safe.to_string (`Assoc [ "results", `List [] ])))
   in
   let { Keeper_tools_oas.tools = keeper_tools; cleanup = keeper_tools_cleanup } =
     Keeper_tools_oas_bundle.make_tool_bundle
@@ -172,18 +174,20 @@ let prepare_agent_setup
   in
   (local_search_fn_ref
    := fun () ->
-        `Assoc
-          [ "ok", `Bool true
-          ; "results", `List tool_catalog_results
-          ; "result_count", `Int (List.length tool_catalog_results)
-          ; "registered_descriptor_count", `Int (List.length registered_descriptors)
-          ; "model_visible_descriptor_count", `Int (List.length model_visible_descriptors)
-          ; "transport_alias_count", `Int transport_alias_count
-          ; "invalid_schema_count", `Int invalid_schema_count
-          ; "unexplained_exclusion_count", `Int unexplained_exclusion_count
-          ; ( "all_model_eligible_tools_visible"
-            , `Bool all_model_eligible_tools_visible )
-          ]);
+        Keeper_tool_execution.success
+          (Yojson.Safe.to_string
+             (`Assoc
+               [ "ok", `Bool true
+               ; "results", `List tool_catalog_results
+               ; "result_count", `Int (List.length tool_catalog_results)
+               ; "registered_descriptor_count", `Int (List.length registered_descriptors)
+               ; "model_visible_descriptor_count", `Int (List.length model_visible_descriptors)
+               ; "transport_alias_count", `Int transport_alias_count
+               ; "invalid_schema_count", `Int invalid_schema_count
+               ; "unexplained_exclusion_count", `Int unexplained_exclusion_count
+               ; ( "all_model_eligible_tools_visible"
+                 , `Bool all_model_eligible_tools_visible )
+               ])));
   Log.Keeper.routine
     "keeper:%s tool visibility: registered=%d visible=%d transport_alias=%d \
      invalid_schema=%d unexplained=%d"

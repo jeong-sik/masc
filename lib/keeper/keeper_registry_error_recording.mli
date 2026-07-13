@@ -1,9 +1,9 @@
 (** Keeper error recording: log + Otel_metric_store dedup + last_error persistence. *)
 
 (** Record [err] on keeper [name].
-    - First occurrence emits at ERROR (with [?details] sandbox context).
-    - Repeated occurrences demote to DEBUG and bump
-      [metric_keeper_recording_error_dedup] (label [error_kind]).
+    - Every occurrence emits at ERROR with caller-supplied [?details].
+    - Exact repeated [(keeper, err)] pairs also increment the observational
+      [metric_keeper_recording_error_dedup] counter.
     - Finally writes [last_error = Some err] through
       [Keeper_registry.set_last_error_entry] (CAS retry). *)
 val record :

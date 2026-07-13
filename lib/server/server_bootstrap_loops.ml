@@ -832,28 +832,6 @@ let start_keeper_loops
           ~include_keepers:true
           operator_judge_ctx)
       ());
-  fork_subsystem "interaction_judge" (fun () ->
-    let interaction_judge_ctx : _ Operator_control.context =
-      { config = (Mcp_server.workspace_config state)
-      ; agent_name = "interaction-judge"
-      ; sw
-      ; clock
-      ; proc_mgr = Some proc_mgr
-      ; net = state.net
-      ; mcp_session_id = None
-      }
-    in
-    Dashboard_interaction_judge.start
-      ~sw
-      ~clock
-      ~base_path:(Mcp_server.workspace_config state).workspace_path
-      ~build_facts:(fun () ->
-        Operator_control.snapshot_json
-          ~actor:"interaction-judge"
-          ~view:"summary"
-          ~include_messages:false
-          ~include_keepers:true
-          interaction_judge_ctx));
   fork_subsystem "session_cleanup" (fun () ->
     Session.start_mcp_session_cleanup_loop ~sw ~clock ());
   (* No verification_timeout fork: RFC-0220 §11 PR-3 deleted the sweep —

@@ -419,13 +419,16 @@ let handle_set_goal ~tool_name ~start_time ctx args =
     else (
       match Task_goal_assignment.set_task_goal ctx.config ~task_id ~goal_id with
       | Ok () ->
-        Tool_result.ok ~tool_name ~start_time
-          (Yojson.Safe.to_string
+        Tool_result.make_ok
+          ~tool_name
+          ~start_time
+          ~data:
             (`Assoc
-              [ ("ok", `Bool true)
-              ; ("task_id", `String task_id)
-              ; ("goal_id", `String goal_id)
-              ]))
+               [ ("ok", `Bool true)
+               ; ("task_id", `String task_id)
+               ; ("goal_id", `String goal_id)
+               ])
+          ()
       | Error err ->
         Tool_result.error
           ~failure_class:(Some Tool_result.Workflow_rejection)
@@ -661,15 +664,8 @@ let handle_claim_next ~tool_name ~start_time ctx _args =
         ~explicit_excluded_count
         ~claim_pool_candidate_count
     in
-    (* #18954: build the structured payload directly via [make_ok ~data]
-       so the message and diagnostics live in the JSON [data] field.
-       The previous form [Tool_result.ok (message ^ "\n" ^ payload)]
-       routed through [structured_payload_of_message], which parsed the
-       trailing JSON object out and discarded the prefix line — leaving
-       [Tool_result.message] able to round-trip only the JSON, not the
-       human-readable lead.  LLM/JSON consumers still see the message
-       inside the JSON [.message] field; we keep the same Assoc shape
-       that callers already inspect. *)
+    (* Build the structured payload directly so message and diagnostics
+       remain first-class typed fields. *)
     let data =
       `Assoc [ "message", `String message; "diagnostics", diagnostics ]
     in
@@ -713,11 +709,11 @@ let handle_release ~tool_name ~start_time ctx args =
            Workspace.release_task_r ctx.config ~agent_name:ctx.agent_name ~task_id
              ?expected_version ?handoff_context ()
          in
-         (match result with
-          | Ok _ ->
-            sync_owner_current_task_binding ctx;
-            sync_planning_current_task_with_owned_task ctx
-          | Error _ -> ());
+         Result.iter
+           (fun _ ->
+              sync_owner_current_task_binding ctx;
+              sync_planning_current_task_with_owned_task ctx)
+           result;
          result_to_response ~tool_name ~start_time result)
 
 let transition_known_args =

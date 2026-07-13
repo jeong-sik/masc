@@ -89,7 +89,7 @@ adversarial 검증에서 교정된 사실: 대시보드-소스 queued 턴의 결
 | **G3** re-engagement | wake가 owning lane에만 전달됨 | 발화 대화로 복귀 안 함 | wake가 `continuation_channel`을 LLM context에 주입하고 Connector가 응답 대상을 해석 | `keeper_heartbeat_stimulus_intake`, `keeper_unified_prompt` | 승인→해당 Channel에 응답 도착; Unrouted면 자율진행 | continuation은 권한이 아님; 실제 외부 송신은 ordinary Gate |
 | **G4** keeper↔keeper | `Connector_attention` wake만 존재 | 부른 채널로 응답 루프 안 닫힘 → "서로 안 도와줌" | A가 B를 mention→B가 A가 부른 채널에서 응답. G1–G3를 mention 경로에 적용 | `connector_attention`, reactive wake 경로 | A@B→B가 같은 채널 응답 관측; 무응답률 지표 하락 | 각 Keeper lane과 event queue는 독립 |
 | **G5** observability | resolve만 audit | wake→continuation 전달/누락 불가시 | 모든 wake→continuation을 attributed; Unrouted·dropped-continuation을 대시보드에 표면화(silent 금지) | `audit_approval_event`, `agent_timeline`, dashboard | continuation 전달률·Unrouted 카운트 노출 | telemetry-as-fix 금지 — 카운트는 알람이지 fix 아님 |
-| **G6** Gate invariant | — | continuation이 권한으로 오해될 위험 | continuation은 대화 provenance일 뿐이며 새 외부 효과는 exact Always Allowed / configured LLM Auto Judge / non-blocking HITL의 ordinary Gate를 다시 통과 | `keeper_gate` / Connector dispatch | TLA+ must-fail: `ContinuationNeverAuthorizesEffect` | one-shot grant와 channel ref를 분리; 이중 실행 방지 |
+| **G6** Gate invariant | — | continuation이 권한으로 오해될 위험 | continuation은 대화 provenance일 뿐이며 새 외부 효과는 exact Always Allowed / configured LLM Auto Judge / non-blocking HITL의 ordinary Gate를 다시 통과 | `keeper_gate` / Connector dispatch | TLA+ must-fail: `ContinuationNeverAuthorizesOperation` | one-shot grant와 channel ref를 분리; 이중 실행 방지 |
 
 ## 5. 데이터 모델 델타
 
@@ -136,7 +136,7 @@ and connector_attention =
 
 - **Explicit unrouted state**: 커넥터를 결정 못 하면 `Unrouted` — 임의 채널로 보내지 않고 자율진행 + 표면화.
 - **Exhaustive 매치**: `continuation_channel`·wake variant는 catch-all(`_ ->`) 금지. 새 wake는 라우팅 지점에서 컴파일 에러.
-- **No authorization carry-over (G6)**: 재개는 대화 계속일 뿐이다. 재개 턴의 새 외부 효과는 ordinary Gate를 통과한다. TLA+ `ContinuationNeverAuthorizesEffect` must-fail 모델로 one-shot grant와 channel provenance가 합쳐지지 않음을 고정한다.
+- **No authorization carry-over (G6)**: 재개는 대화 계속일 뿐이다. 재개 턴의 새 외부 효과는 ordinary Gate를 통과한다. TLA+ `ContinuationNeverAuthorizesOperation` must-fail 모델로 one-shot grant와 channel provenance가 합쳐지지 않음을 고정한다.
 - **At-most-once continuation**: 한 resolution이 두 번 재개하지 않음(중복 wake 멱등).
 - **Observable**: continuation 전달률 + Unrouted 카운트가 대시보드에 노출 — dropped continuation이 silent가 아님.
 - **Regression**: `appr_7bf611289364` 시나리오 재현 — 대시보드 채팅 발화→gated→30초 승인→같은 스레드에 응답 도착.

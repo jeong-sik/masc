@@ -12,16 +12,6 @@ open Keeper_types_profile
 
 module StringMap : Map.S with type key = string
 
-(** Structured failure reason for crash cohort detection. *)
-type ambiguous_partial_commit_kind =
-  | Post_commit_timeout
-  | Post_commit_failure
-
-type ambiguous_partial_commit = {
-  kind : ambiguous_partial_commit_kind;
-  detail : string;
-}
-
 (** Phase B PR-6 (2026-04-28): the stale watchdog's three distinct kill
     causes used to collapse into a single [Stale_turn_timeout of float]
     variant.  Operators / dashboards could not tell whether a kill was an
@@ -98,7 +88,6 @@ type failure_reason =
           adapter, or runtime fails before useful keeper progress. A later
           idle watchdog should preserve this root cause instead of recasting
           the keeper as generically stale. *)
-  | Ambiguous_partial_commit of ambiguous_partial_commit
   | Fiber_unresolved of fiber_drop_cause
   | Exception of string
   | Turn_overflow_failure
@@ -112,9 +101,6 @@ exception Operator_interrupt
 (** Raised by [interrupt_current_turn] to cancel the live turn switch.
     The turn runtime may catch this via [Eio.Cancel.Cancelled] and record
     [failure_reason.Operator_interrupt] for observability. *)
-
-val ambiguous_partial_commit_kind_to_string :
-  ambiguous_partial_commit_kind -> string
 
 val failure_reason_to_string : failure_reason -> string
 

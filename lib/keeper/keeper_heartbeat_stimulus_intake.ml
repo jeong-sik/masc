@@ -97,6 +97,7 @@ let event_queue_trigger_of_stimulus (stim : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Failure_judgment _ ->
     Some Keeper_world_observation.Failure_judgment_stimulus
   | Keeper_event_queue.Board_signal _
+  | Keeper_event_queue.Board_attention _
   | Keeper_event_queue.Fusion_completed _
   | Keeper_event_queue.Bg_completed _
   | Keeper_event_queue.Goal_assigned _ ->
@@ -123,7 +124,7 @@ let consume_single_heartbeat_stimulus
     class_str
     meta_after_triage.name;
   match stim.payload with
-  | Keeper_event_queue.Board_signal _ ->
+  | Keeper_event_queue.Board_signal _ | Keeper_event_queue.Board_attention _ ->
     pending_board_event_of_stimulus ~meta_after_triage stim |> Option.to_list
   | Keeper_event_queue.Fusion_completed c ->
     (* RFC-0266: an async fusion deliberation finished and woke this keeper.
@@ -269,6 +270,7 @@ let stimulus_ready_for_intake (stimulus : Keeper_event_queue.stimulus) =
     Option.is_none
       (Keeper_approval_queue.get_pending_entry ~id:resolution.approval_id)
   | Keeper_event_queue.Board_signal _
+  | Keeper_event_queue.Board_attention _
   | Keeper_event_queue.Bootstrap
   | Keeper_event_queue.Fusion_completed _
   | Keeper_event_queue.Bg_completed _

@@ -287,23 +287,6 @@ let keeper_config_json (config : Workspace.config) (name : string)
         Keeper_state_machine_mermaid.phase_to_mermaid
           ~current:(Option.value ~default:Keeper_state_machine.Offline current_phase)
       in
-      let decision_pipeline_diagram =
-        let phase = Option.value ~default:Keeper_state_machine.Offline current_phase in
-        let stats = Thompson_sampling.get_stats m.agent_name in
-        let turn_outcome : [`Ok | `Failed] option =
-          match Keeper_registry.get ~base_path:config.base_path m.name with
-          | Some entry when entry.turn_consecutive_failures > 0 ->
-            Some `Failed
-          | Some _ -> Some `Ok
-          | None -> None
-        in
-        Keeper_decision_audit.decision_pipeline_to_mermaid
-          ?turn_outcome
-          ~phase
-          ~thompson_alpha:stats.alpha
-          ~thompson_beta:stats.beta
-          ()
-      in
       let sandbox_last_error =
         match Keeper_registry.get ~base_path:config.base_path m.name with
         | Some entry -> entry.last_error
@@ -338,7 +321,6 @@ let keeper_config_json (config : Workspace.config) (name : string)
            Json_util.option_to_yojson
              Keeper_types_profile.keeper_toml_config_error_to_json
              profile_config_error );
-         ("decision_pipeline_diagram", `String decision_pipeline_diagram);
          ("prompt", prompt);
          ("execution", execution);
          ("compaction", compaction);

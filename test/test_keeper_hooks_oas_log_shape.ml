@@ -21,7 +21,69 @@ let test_tool_arg_shapes_keep_field_names () =
   check string "keys preserve input order" "argv,cwd,executable"
     (Under_test.tool_input_keys_for_log input)
 
-    true
+let test_output_fingerprint_keeps_json_looking_text_opaque () =
+  let digest output_text =
+    match
+      Masc.Keeper_tool_progress_identity.digest_tool_io
+        ~tool_name:"opaque_tool"
+        ~input:(`Assoc [ "value", `Int 1 ])
+        ~output_text
+    with
+    | Some fingerprints -> fingerprints.output_fingerprint
+    | None -> fail "expected fingerprints"
+  in
+  check bool
+    "changing a formerly stripped key changes opaque bytes"
+    false
+    (String.equal
+       (digest {|{"ts":1,"result":"same"}|})
+       (digest {|{"ts":2,"result":"same"}|}))
+
+let test_input_fingerprint_canonicalizes_typed_field_order () =
+  let digest input =
+    match
+      Masc.Keeper_tool_progress_identity.digest_tool_io
+        ~tool_name:"opaque_tool"
+        ~input
+        ~output_text:"opaque"
+    with
+    | Some fingerprints -> fingerprints.input_fingerprint
+    | None -> fail "expected fingerprints"
+  in
+  check string
+    "typed object order"
+    (digest (`Assoc [ "a", `Int 1; "b", `Int 2 ]))
+    (digest (`Assoc [ "b", `Int 2; "a", `Int 1 ]))
+
+let task_scope_meta () =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+        [ "name", `String "task-scope-test"
+        ; "agent_name", `String "task-scope-test"
+        ; "trace_id", `String "trace-task-scope-test"
+        ; "current_task_id", `String "task-meta"
+        ])
+  with
+  | Ok meta -> meta
+  | Error message -> fail message
+
+let test_task_scope_uses_typed_input_or_meta () =
+  let meta = task_scope_meta () in
+  check (option string)
+    "transition uses typed input"
+    (Some "task-input")
+    (Masc.Keeper_run_tools_task_scope.task_id_scope_of_tool_call
+       ~tool_name:"masc_transition"
+       ~input:(`Assoc [ "task_id", `String "task-input" ])
+       ~meta);
+  check (option string)
+    "claim uses persisted current task"
+    (Some "task-meta")
+    (Masc.Keeper_run_tools_task_scope.task_id_scope_of_tool_call
+       ~tool_name:"keeper_task_claim"
+       ~input:(`Assoc [])
+       ~meta)
 
 (* F2 canonical projection consumption: block counting in
    [summarize_thinking_blocks] is delegated to OAS [Response_shape.summarize_blocks];
@@ -79,6 +141,18 @@ let () =
             test_empty_tool_args_are_explicit_object_shape
         ; test_case "field shapes are explicit" `Quick
             test_tool_arg_shapes_keep_field_names
+        ; test_case
+            "output JSON-looking text remains opaque"
+            `Quick
+            test_output_fingerprint_keeps_json_looking_text_opaque
+        ; test_case
+            "typed input field order is canonical"
+            `Quick
+            test_input_fingerprint_canonicalizes_typed_field_order
+        ; test_case
+            "task scope uses typed input or meta"
+            `Quick
+            test_task_scope_uses_typed_input_or_meta
         ] )
     ; ( "thinking-summary-classifier"
       , [ test_case "empty -> none" `Quick test_thinking_summary_none_empty

@@ -48,9 +48,6 @@ type t =
   (** Runtime aggregate outcome: all candidate attempts were exhausted.
           Operators should inspect per-attempt root causes instead of treating
           this as the root cause. *)
-  | Post_commit_ambiguous
-  (** Provider failed after a mutating tool may have committed side
-          effects. Reconcile required. *)
   | Turn_budget_exhausted of turn_budget_exhausted
   (** Typed vocabulary for the legacy "turn_budget_exhausted(%d/%d)"
       free-text label that was emitted across 4+ call sites. The
@@ -120,7 +117,6 @@ val next_action : t -> string option
     - [External_cancel] → ["external_cancel"]
     - [Turn_wall_clock_timeout] → ["turn_wall_clock_timeout"]
     - [Runtime_attempts_exhausted] → ["runtime_attempts_exhausted"]
-    - [Post_commit_ambiguous] → ["post_commit_ambiguous"]
     - [Provider_error code] → [Keeper_turn_terminal_code.to_wire code]
     - [Unknown { raw_error = "" }] → ["unknown_error"]
     - [Unknown { raw_error }] → [raw_error] (verbatim) *)

@@ -46,16 +46,6 @@ let alert_message_preview_max_chars = 300
 (** Reply preview cap for alert formatting. *)
 let alert_reply_preview_max_chars = 420
 
-(* ── Tool policy display thresholds ───────────────────────── *)
-
-(** Warn when tool policy allows more than this many schemas. *)
-let tool_policy_count_warn_threshold = 100
-
-(** Truncate tool description auto-hints at this many chars.
-    150 chars preserves op enums and parameter hints that
-    9B models need to call tools correctly on the first attempt. *)
-let tool_first_sentence_max_chars = 150
-
 let () =
   if not
        (alert_excerpt_min_chars < alert_message_preview_max_chars
@@ -64,12 +54,7 @@ let () =
     invalid_arg
       "Keeper_config alert preview lengths must satisfy excerpt < message < reply";
   if alert_error_detail_max_chars <= 0 then
-    invalid_arg "Keeper_config alert_error_detail_max_chars must be positive";
-  if tool_policy_count_warn_threshold <= 0 then
-    invalid_arg
-      "Keeper_config tool_policy_count_warn_threshold must be positive";
-  if tool_first_sentence_max_chars <= 0 then
-    invalid_arg "Keeper_config tool_first_sentence_max_chars must be positive"
+    invalid_arg "Keeper_config alert_error_detail_max_chars must be positive"
 
 include Keeper_config_text
 

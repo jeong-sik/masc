@@ -8,24 +8,6 @@ let keep_last_n n item lst =
   if List.length full <= n then full else List.filteri (fun i _ -> i < n) full
 ;;
 
-let committed_tools_of_ambiguous_blocker (blocker : string) =
-  let trimmed = String.trim blocker in
-  match Keeper_internal_error.classify_masc_internal_error_of_string trimmed with
-  | Some (Keeper_internal_error.Ambiguous_post_commit { tools; _ }) -> tools
-  | _ ->
-    (* Legacy: extract from bracket notation "prefix: [tool1, tool2]; ..." *)
-    (match String.index_opt trimmed '[' with
-     | None -> []
-     | Some open_idx ->
-       (match String.index_from_opt trimmed (open_idx + 1) ']' with
-        | Some close_idx when close_idx > open_idx + 1 ->
-          String.sub trimmed (open_idx + 1) (close_idx - open_idx - 1)
-          |> String.split_on_char ','
-          |> List.map String.trim
-          |> List.filter (fun tool -> tool <> "")
-        | _ -> []))
-;;
-
 let persona_name_for_drift_check (meta : keeper_meta) =
   match Keeper_types_profile.load_keeper_profile_defaults_result meta.name with
   | Ok defaults ->

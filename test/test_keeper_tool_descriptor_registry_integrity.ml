@@ -20,8 +20,6 @@
 open Alcotest
 module Descriptor = Masc.Keeper_tool_descriptor
 module Policy = Masc.Keeper_tool_policy
-module Exec = Masc.Keeper_tool_dispatch_runtime
-module Registry = Masc.Keeper_tool_registry
 module Resolution = Masc.Keeper_tool_descriptor_resolution
 module Surface = Masc.Keeper_agent_tool_surface
 module Board = Tool_shard_types
@@ -1004,8 +1002,7 @@ let test_masc_board_registry_has_descriptor_projection () =
       | Keeper_tool_name.Keeper_wrapper keeper_tool ->
         Some (Keeper_tool_name.to_string keeper_tool)
       | Keeper_tool_name.Direct_masc ->
-        Some (Tool_name.Board_name.to_string board_name)
-      | Keeper_tool_name.External_only -> None)
+        Some (Tool_name.Board_name.to_string board_name))
   in
   Alcotest.(check int)
     "Board Keeper projections are injective"
@@ -1039,7 +1036,7 @@ let test_masc_board_registry_has_descriptor_projection () =
             (keeper_name ^ " is the model projection")
             true
             (wrapper_descriptor.keeper_model_projection = Descriptor.Internal_name)
-        | Keeper_tool_name.Direct_masc | Keeper_tool_name.External_only -> ());
+        | Keeper_tool_name.Direct_masc -> ());
        match Descriptor.descriptors_for_internal schema.name with
        | [ descriptor ] ->
          Alcotest.(check string)
@@ -1073,7 +1070,7 @@ let test_masc_board_registry_has_descriptor_projection () =
            | Keeper_tool_name.Keeper_wrapper keeper_tool ->
              Descriptor.Transport_alias
                { projected_by = Keeper_tool_name.to_string keeper_tool }
-           | Keeper_tool_name.Direct_masc | Keeper_tool_name.External_only ->
+           | Keeper_tool_name.Direct_masc ->
              Descriptor.Internal_name
          in
          Alcotest.(check bool)
@@ -1100,7 +1097,7 @@ let test_library_search_descriptor_has_recoverable_query_schema () =
     (List.mem "query" (schema_required_fields descriptor.input_schema))
 ;;
 
-let test_readonly_policy_projects_to_registry () =
+let test_readonly_policy_projection_is_descriptor_owned () =
   let projected = Descriptor.readonly_internal_names () in
   List.iter
     (fun d ->
@@ -1109,11 +1106,7 @@ let test_readonly_policy_projects_to_registry () =
         Alcotest.(check bool)
           (d.Descriptor.internal_name ^ " is in descriptor readonly projection")
           true
-          (List.mem d.Descriptor.internal_name projected);
-        Alcotest.(check bool)
-          (d.Descriptor.internal_name ^ " is effectively read-only")
-          true
-          (Registry.is_effectively_read_only_tool d.Descriptor.internal_name)
+          (List.mem d.Descriptor.internal_name projected)
       | Some false | None -> ())
     (all_descriptors ());
   Alcotest.(check bool)
@@ -1160,82 +1153,6 @@ let test_readonly_policy_is_descriptor_input_aware () =
        ~tool_name:"tool_search_files"
        ~input:internal_input)
 
-let test_readonly_policy_projects_to_input_aware_registry () =
-  let search_input = `Assoc [ "pattern", `String "Keeper_tool_descriptor" ] in
-  Alcotest.(check bool)
-    "Grep public alias is input-aware read-only"
-    true
-    (Registry.is_read_only_with_input ~tool_name:"Grep" ~input:search_input);
-  Alcotest.(check bool)
-    "Search public alias is input-aware read-only"
-    true
-    (Registry.is_read_only_with_input ~tool_name:"Search" ~input:search_input);
-  Alcotest.(check bool)
-    "MCP-prefixed Grep is input-aware read-only"
-    true
-    (Registry.is_read_only_with_input
-       ~tool_name:"mcp__masc__Grep"
-       ~input:search_input);
-  Alcotest.(check bool)
-    "tool_search_files is descriptor read-only without legacy op"
-    true
-    (Registry.is_read_only_with_input ~tool_name:"tool_search_files" ~input:search_input);
-  Alcotest.(check bool)
-    "Read public alias is input-aware read-only"
-    true
-    (Registry.is_read_only_with_input
-       ~tool_name:"Read"
-       ~input:(`Assoc [ "file_path", `String "lib/keeper/keeper_tool_registry.ml" ]));
-  Alcotest.(check bool)
-    "Write public alias remains mutating"
-    false
-    (Registry.is_read_only_with_input
-       ~tool_name:"Write"
-       ~input:(`Assoc [ "file_path", `String "x"; "content", `String "y" ]));
-  Alcotest.(check bool)
-    "tool_write_file remains mutating"
-    false
-    (Registry.is_read_only_with_input
-       ~tool_name:"tool_write_file"
-       ~input:(`Assoc [ "path", `String "x"; "content", `String "y" ]))
-
-let test_strict_readonly_policy_excludes_workspace_mutations () =
-  let search_input = `Assoc [ "pattern", `String "Keeper_tool_descriptor" ] in
-  Alcotest.(check bool)
-    "Grep public alias is strict read-only"
-    true
-    (Registry.is_strictly_read_only_with_input ~tool_name:"Grep" ~input:search_input);
-  Alcotest.(check bool)
-    "Read public alias is strict read-only"
-    true
-    (Registry.is_strictly_read_only_with_input
-       ~tool_name:"Read"
-       ~input:(`Assoc [ "file_path", `String "lib/keeper/keeper_tool_registry.ml" ]));
-  Alcotest.(check bool)
-    "WebFetch public alias is strict read-only"
-    true
-    (Registry.is_strictly_read_only_with_input
-       ~tool_name:"WebFetch"
-       ~input:(`Assoc [ "url", `String "https://example.com" ]));
-  Alcotest.(check bool)
-    "keeper_board_post remains mutating for no-side-effect retry"
-    false
-    (Registry.is_strictly_read_only_with_input
-       ~tool_name:"keeper_board_post"
-       ~input:(`Assoc [ "title", `String "t"; "body", `String "b" ]));
-  Alcotest.(check bool)
-    "keeper_broadcast remains mutating for no-side-effect retry"
-    false
-    (Registry.is_strictly_read_only_with_input
-       ~tool_name:"keeper_broadcast"
-       ~input:(`Assoc [ "message", `String "hello" ]));
-  Alcotest.(check bool)
-    "masc_transition remains mutating for no-side-effect retry"
-    false
-    (Registry.is_strictly_read_only_with_input
-       ~tool_name:"masc_transition"
-       ~input:(`Assoc [ "task_id", `String "t1"; "status", `String "done" ]))
-
 let test_inline_policy_uses_descriptor_resolution () =
   Alcotest.(check (list string))
     "safe inline tools project from descriptors"
@@ -1280,36 +1197,6 @@ let test_run_tools_setup_has_no_direct_public_mcp_catalog_read () =
     false
     (contains_substring source "Tool_catalog.is_public_mcp")
 ;;
-
-let test_mutation_boundary_delegates_to_descriptor_policy () =
-  let search_input = `Assoc [ "pattern", `String "Keeper_tool_descriptor" ] in
-  Alcotest.(check bool)
-    "Grep public alias is not mutating"
-    false
-    (Exec.has_mutating_side_effect_with_input ~tool_name:"Grep" ~input:search_input);
-  Alcotest.(check bool)
-    "Search public alias is not mutating"
-    false
-    (Exec.has_mutating_side_effect_with_input ~tool_name:"Search" ~input:search_input);
-  Alcotest.(check bool)
-    "MCP-prefixed Grep is not mutating"
-    false
-    (Exec.has_mutating_side_effect_with_input
-       ~tool_name:"mcp__masc__Grep"
-       ~input:search_input);
-  Alcotest.(check bool)
-    "tool_search_files without legacy op is not mutating"
-    false
-    (Exec.has_mutating_side_effect_with_input
-       ~tool_name:"tool_search_files"
-       ~input:search_input);
-  Alcotest.(check bool)
-    "Write public alias remains mutating"
-    true
-    (Exec.has_mutating_side_effect_with_input
-       ~tool_name:"Write"
-       ~input:(`Assoc [ "file_path", `String "x"; "content", `String "y" ]));
-  ()
 
 (* RFC-0182 §3.1 — verify keeper / surface_audit descriptors project from name
    → descriptor
@@ -1638,21 +1525,13 @@ let () =
         ] )
     ; ( "policy-projection"
       , [ test_case
-            "descriptor read-only policy projects to registry"
+            "descriptor owns the read-only metadata projection"
             `Quick
-            test_readonly_policy_projects_to_registry
+            test_readonly_policy_projection_is_descriptor_owned
         ; test_case
             "descriptor read-only policy evaluates tool input"
             `Quick
             test_readonly_policy_is_descriptor_input_aware
-        ; test_case
-            "descriptor read-only policy projects to input-aware registry"
-            `Quick
-            test_readonly_policy_projects_to_input_aware_registry
-        ; test_case
-            "strict read-only policy excludes workspace mutations"
-            `Quick
-            test_strict_readonly_policy_excludes_workspace_mutations
         ; test_case
             "MCP context policy uses descriptor resolution"
             `Quick
@@ -1665,9 +1544,5 @@ let () =
             "keeper_run_tools_setup avoids public MCP catalog classifier"
             `Quick
             test_run_tools_setup_has_no_direct_public_mcp_catalog_read
-        ; test_case
-            "mutation boundary delegates to descriptor policy"
-            `Quick
-            test_mutation_boundary_delegates_to_descriptor_policy
         ] )
     ]

@@ -532,11 +532,6 @@ let generate_compact ?(scope = All) (config : Workspace_utils.config) : string =
       let write_meta_failures =
         Otel_metric_store.metric_total Keeper_metrics.(to_string WriteMetaFailures) |> int_of_float
       in
-      let board_capped =
-        Otel_metric_store.metric_total
-          Keeper_metrics.(to_string BoardSignalWakeupCappedTotal)
-        |> int_of_float
-      in
       let tool_failures =
         (Otel_metric_store.metric_total Keeper_metrics.(to_string ToolSelectionFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string TaskLoadFailures) |> int_of_float)
@@ -598,21 +593,15 @@ let generate_compact ?(scope = All) (config : Workspace_utils.config) : string =
         then Printf.sprintf " | TOOL-ERR: %d" tool_failures
         else ""
       in
-      let board_suffix =
-        if board_capped > 0
-        then Printf.sprintf " | BOARD-CAPPED: %d" board_capped
-        else ""
-      in
       Printf.sprintf
         "KEEPERS: %d running / %d dead / %d other | GUARD: %d | \
-         META-WRITE-ERR: %d%s%s"
+         META-WRITE-ERR: %d%s"
         k_running
         k_dead
         k_other
         guard_violations
         write_meta_failures
-        tool_suffix
-        board_suffix;
+        tool_suffix;
     ]
 
 let () =

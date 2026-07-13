@@ -36,7 +36,6 @@ let sample_board_event : WO.pending_board_event =
     new_external_since = 0;
     latest_external_author = None;
     latest_external_preview = None;
-    provenance = WO.Human_direct;
   }
 
 let scheduled_automation_observation : WO.scheduled_automation_observation =
@@ -126,38 +125,19 @@ let test_task_verify_affordance_without_meta () =
   check bool "task_verify present without meta" true
     (List.mem "task_verify" affordances)
 
-let test_board_curation_affordance_requires_multi_event_window () =
-  let second_board_event =
-    {
-      sample_board_event with
-      post_id = "board-post-2";
-      title = "Follow-up";
-      preview = "Another board item needs routing.";
-    }
-  in
+let test_board_activity_exposes_curation_affordance_without_threshold () =
   let obs =
-    {
-      base_observation with
-      pending_board_events = [ sample_board_event; second_board_event ];
-    }
+    { base_observation with pending_board_events = [ sample_board_event ] }
   in
   let affordances = UM.observed_affordances_of_observation obs in
   check bool "board_curation present" true
     (List.mem "board_curation" affordances)
 
-let test_single_board_event_skips_curation_gate () =
-  let obs =
-    { base_observation with pending_board_events = [ sample_board_event ] }
-  in
-  let affordances = UM.observed_affordances_of_observation obs in
-  check bool "board_curation absent" false
+let test_no_board_activity_has_no_curation_affordance () =
+  let affordances = UM.observed_affordances_of_observation base_observation in
+  check bool "board_curation absent without Board activity" false
     (List.mem "board_curation" affordances)
 
-(* RFC-0248 PR-2 behavioral proof: the trust boundary reaches the assembled
-   prompt. A fleet-authored board event (peer/self/automation) renders ONLY
-   inside the observational-data envelope; a human-authored event renders as
-   trusted instruction without it. This closes the test gap left since PR-1,
-   whose provenance tests covered classification only, not prompt rendering. *)
 let contains_sub sub s =
   let sub_len = String.length sub in
   let s_len = String.length s in
@@ -169,7 +149,7 @@ let contains_sub sub s =
   if sub_len = 0 then true else aux 0
 ;;
 
-let test_quarantined_board_event_wraps_in_envelope () =
+let test_board_authors_share_one_neutral_observation_boundary () =
   Masc_test_deps.init_keeper_tool_registry ();
   let peer_event =
     {
@@ -177,12 +157,12 @@ let test_quarantined_board_event_wraps_in_envelope () =
       post_id = "peer-post-1";
       author = "keeper-ramarama-agent";
       preview = "I assert the build is green.";
-      provenance = WO.Peer_keeper;
+      post_kind = Masc.Board.Automation_post;
+      explicit_mention = true;
+      matched_targets = [ "test-keeper" ];
     }
   in
-  let human_event =
-    { sample_board_event with post_id = "human-1"; provenance = WO.Human_direct }
-  in
+  let human_event = { sample_board_event with post_id = "human-1" } in
   let obs_peer = { base_observation with pending_board_events = [ peer_event ] } in
   let obs_human = { base_observation with pending_board_events = [ human_event ] } in
   let _, peer_msg =
@@ -193,10 +173,26 @@ let test_quarantined_board_event_wraps_in_envelope () =
     Masc.Keeper_unified_prompt.build_prompt ~meta:minimal_meta ~base_path:"/tmp"
       ~observation:obs_human ()
   in
-  check bool "peer (fleet) event wrapped in observational-data envelope" true
-    (contains_sub "observational-data" peer_msg);
-  check bool "human event NOT wrapped in envelope (trusted instruction)" false
-    (contains_sub "observational-data" human_msg)
+  let neutral_boundary = "Rows below are Board context." in
+  check bool "automation event uses neutral boundary" true
+    (contains_sub neutral_boundary peer_msg);
+  check bool "human event uses the same neutral boundary" true
+    (contains_sub neutral_boundary human_msg);
+  check bool "metadata does not create a local authority ranking" true
+    (contains_sub "not a local authority ranking" peer_msg
+     && contains_sub "not a local authority ranking" human_msg);
+  check bool "configured model judges content and context" true
+    (contains_sub "Judge relevance and response from the content" peer_msg
+     && contains_sub "Judge relevance and response from the content" human_msg);
+  check bool "external effects stay behind the Gate" true
+    (contains_sub "external effects cross the Gate" peer_msg
+     && contains_sub "external effects cross the Gate" human_msg);
+  check bool "automation post kind remains context" true
+    (contains_sub "post_kind=automation" peer_msg);
+  check bool "human post kind remains context" true
+    (contains_sub "post_kind=direct" human_msg);
+  check bool "exact mention remains context" true
+    (contains_sub "[mentions test-keeper]" peer_msg)
 ;;
 
 let test_board_reaction_event_renders_reaction_context () =
@@ -348,13 +344,13 @@ let () =
             `Quick test_task_verify_affordance_for_verifier_tag;
           test_case "affordance: no meta keeps legacy surface-to-all" `Quick
             test_task_verify_affordance_without_meta;
-          test_case "affordance: board curation requires multi-event window"
-            `Quick test_board_curation_affordance_requires_multi_event_window;
-          test_case "affordance: single board event skips curation gate" `Quick
-            test_single_board_event_skips_curation_gate;
+          test_case "affordance: Board activity exposes curation without threshold"
+            `Quick test_board_activity_exposes_curation_affordance_without_threshold;
+          test_case "affordance: no Board activity has no curation affordance" `Quick
+            test_no_board_activity_has_no_curation_affordance;
           test_case
-            "trust: quarantined board event wraps in envelope (RFC-0248 PR-2)"
-            `Quick test_quarantined_board_event_wraps_in_envelope;
+            "prompt: all Board authors share one neutral observation boundary"
+            `Quick test_board_authors_share_one_neutral_observation_boundary;
           test_case
             "prompt: board reaction event renders reaction context"
             `Quick test_board_reaction_event_renders_reaction_context;

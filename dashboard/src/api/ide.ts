@@ -1,12 +1,19 @@
 import { get, post, fetchWithTimeout, authHeaders, type GetOptions } from './core'
 import {
   type IdeAnnotation,
+  type IdeAnnotationReference,
   type IdeCodeRegion,
   type AnnotationKind,
+  parseIdeAnnotation,
 } from './schemas/ide-annotations'
 import { isRecord } from '../lib/type-guards'
 
-export type { IdeAnnotation, IdeCodeRegion, AnnotationKind } from './schemas/ide-annotations'
+export type {
+  IdeAnnotation,
+  IdeAnnotationReference,
+  IdeCodeRegion,
+  AnnotationKind,
+} from './schemas/ide-annotations'
 
 export interface IdeApiOptions extends GetOptions {
   readonly keeper?: string
@@ -110,14 +117,7 @@ export interface CreateAnnotationInput {
   readonly content: string
   readonly goal_id?: string
   readonly task_id?: string
-  readonly board_post_id?: string
-  readonly comment_id?: string
-  readonly pr_id?: string
-  readonly git_ref?: string
-  readonly log_id?: string
-  readonly session_id?: string
-  readonly operation_id?: string
-  readonly worker_run_id?: string
+  readonly references?: ReadonlyArray<IdeAnnotationReference>
 }
 
 function appendFilterParams(
@@ -246,82 +246,8 @@ function positiveIntegerField(record: Record<string, unknown>, key: string): num
   return value !== null && value > 0 ? value : null
 }
 
-function annotationKindField(record: Record<string, unknown>): AnnotationKind | null {
-  const kind = stringField(record, 'kind')
-  return kind === 'Comment'
-    || kind === 'Decision'
-    || kind === 'Question'
-    || kind === 'Bookmark'
-    ? kind
-    : null
-}
-
 function parseStrictIdeAnnotation(raw: unknown): IdeAnnotation | null {
-  if (!isRecord(raw)) return null
-  const id = stringField(raw, 'id')
-  const filePath = stringField(raw, 'file_path')
-  const lineStart = positiveIntegerField(raw, 'line_start')
-  const lineEnd = positiveIntegerField(raw, 'line_end')
-  const keeperId = stringField(raw, 'keeper_id')
-  const kind = annotationKindField(raw)
-  const content = typeof raw.content === 'string' ? raw.content : null
-  const goalId = nullableStringField(raw, 'goal_id')
-  const taskId = nullableStringField(raw, 'task_id')
-  const boardPostId = nullableStringField(raw, 'board_post_id')
-  const commentId = nullableStringField(raw, 'comment_id')
-  const prId = nullableStringField(raw, 'pr_id')
-  const gitRef = nullableStringField(raw, 'git_ref')
-  const logId = nullableStringField(raw, 'log_id')
-  const sessionId = nullableStringField(raw, 'session_id')
-  const operationId = nullableStringField(raw, 'operation_id')
-  const workerRunId = nullableStringField(raw, 'worker_run_id')
-  const createdAtMs = numberField(raw, 'created_at_ms')
-  const updatedAtMs = numberField(raw, 'updated_at_ms')
-  if (
-    !id
-    || !filePath
-    || lineStart === null
-    || lineEnd === null
-    || lineEnd < lineStart
-    || !keeperId
-    || kind === null
-    || content === null
-    || goalId === undefined
-    || taskId === undefined
-    || boardPostId === undefined
-    || commentId === undefined
-    || prId === undefined
-    || gitRef === undefined
-    || logId === undefined
-    || sessionId === undefined
-    || operationId === undefined
-    || workerRunId === undefined
-    || createdAtMs === null
-    || updatedAtMs === null
-  ) {
-    return null
-  }
-  return {
-    id,
-    file_path: filePath,
-    line_start: lineStart,
-    line_end: lineEnd,
-    keeper_id: keeperId,
-    kind,
-    content,
-    goal_id: goalId,
-    task_id: taskId,
-    board_post_id: boardPostId,
-    comment_id: commentId,
-    pr_id: prId,
-    git_ref: gitRef,
-    log_id: logId,
-    session_id: sessionId,
-    operation_id: operationId,
-    worker_run_id: workerRunId,
-    created_at_ms: createdAtMs,
-    updated_at_ms: updatedAtMs,
-  }
+  return parseIdeAnnotation(raw)
 }
 
 function parseStrictIdeCodeRegion(raw: unknown): IdeCodeRegion | null {

@@ -24,7 +24,7 @@ let persona_list_handler args : tool_result =
         ("personas", payload);
       ]
   in
-  tool_result_ok (Yojson.Safe.to_string json)
+  tool_result_ok_data json
 
 (* TEL-OK: thin wrapper — telemetry stays in [persona_list_handler]. *)
 let handle_persona_list _ctx args : tool_result = persona_list_handler args
@@ -45,33 +45,22 @@ let handle_keeper_create_from_persona ctx args : tool_result =
               ("resolved_args", resolved_args);
             ]
         in
-        tool_result_ok (Yojson.Safe.to_string json)
+        tool_result_ok_data json
       else if errors <> [] then
-        tool_result_error
-          (Yojson.Safe.pretty_to_string
-             (`Assoc
-               [
-                 ("persona", persona_summary_to_json persona);
-                 ("ready", `Bool false);
-                 ("errors", Json_util.json_string_list errors);
-                 ("resolved_args", resolved_args);
-               ]))
+        tool_result_error_data
+          (`Assoc
+             [
+               ("persona", persona_summary_to_json persona);
+               ("ready", `Bool false);
+               ("errors", Json_util.json_string_list errors);
+               ("resolved_args", resolved_args);
+             ])
       else
         let result = Turn.handle_keeper_up ctx resolved_args in
         if not (tool_result_success result) then
           result
         else begin
-          let body = tool_result_body result in
-          (* Apply per-persona shard configuration after keeper creation *)
-          let name = Safe_ops.json_string ~default:"" "name" resolved_args in
-          if name <> "" then
-            (match Safe_ops.json_string_list "shards" resolved_args with
-             | _ :: _ as shard_names ->
-                 Tool_shard.set_agent_shards name shard_names
-             | [] -> ());
-          let created_json =
-            try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
-          in
+          let created_json = Tool_result.data result in
           let json =
             `Assoc
               [
@@ -81,5 +70,5 @@ let handle_keeper_create_from_persona ctx args : tool_result =
                 ("resolved_args", resolved_args);
               ]
           in
-          tool_result_ok (Yojson.Safe.to_string json)
+          tool_result_ok_data json
         end

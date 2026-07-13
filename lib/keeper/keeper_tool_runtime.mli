@@ -15,7 +15,7 @@ type context =
   ; ctx_work : Keeper_types.working_context
   ; turn_sandbox_factory : Keeper_sandbox_factory.t option
   ; exec_cache : Masc_exec.Exec_cache.t option
-  ; search_fn : unit -> Yojson.Safe.t
+  ; search_fn : unit -> Keeper_tool_execution.t
   ; sw : Eio.Switch.t option
   ; clock : float Eio.Time.clock_ty Eio.Resource.t option
   ; proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option
@@ -34,4 +34,7 @@ type context =
 val descriptor_for_internal : string -> Keeper_tool_descriptor.t option
 
 val handle :
-  context -> descriptor:Keeper_tool_descriptor.t -> args:Yojson.Safe.t -> string option
+  context ->
+  descriptor:Keeper_tool_descriptor.t ->
+  args:Yojson.Safe.t ->
+  Keeper_tool_execution.t option

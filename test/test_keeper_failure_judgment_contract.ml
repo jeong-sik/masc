@@ -183,7 +183,6 @@ let failure_event post_id : Keeper_world_observation.pending_board_event =
   ; new_external_since = 1
   ; latest_external_author = None
   ; latest_external_preview = None
-  ; provenance = Keeper_world_observation.Self_narrative
   }
 ;;
 

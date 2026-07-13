@@ -324,6 +324,33 @@ let test_post_annotations_rejects_client_keeper_id () =
     check_status "POST with keeper_id returns 403" 403 response)
 ;;
 
+let test_post_annotations_rejects_unknown_route_fields () =
+  with_ide_server (fun ~base_path ~state:_ ~router ->
+    let token = create_worker_token base_path "alice" in
+    let body =
+      Yojson.Safe.to_string
+        (`Assoc
+            [ "file_path", `String "lib/a.ml"
+            ; "line_start", `Int 1
+            ; "line_end", `Int 2
+            ; "content", `String "note"
+            ; ("pr_" ^ "id"), `String "external-product-value"
+            ])
+    in
+    let request =
+      http_request
+        ~meth:`POST
+        ~path:"/api/v1/ide/annotations"
+        ~body
+        ~token:(Some token)
+        ()
+    in
+    let response = dispatch router request in
+    check_status "POST with unknown route field returns 400" 400 response;
+    check string "unknown route field has typed error code" "invalid_annotation_request"
+      (error_code_of_response response))
+;;
+
 let test_post_cursors_rejects_client_keeper_id () =
   with_ide_server (fun ~base_path ~state:_ ~router ->
     let token = create_worker_token base_path "alice" in
@@ -983,6 +1010,8 @@ let () =
     ; ( "mutation_auth"
       , [ test_case "POST annotation rejects client keeper_id" `Quick
             test_post_annotations_rejects_client_keeper_id
+        ; test_case "POST annotation rejects unknown route fields" `Quick
+            test_post_annotations_rejects_unknown_route_fields
         ; test_case "POST cursor rejects client keeper_id" `Quick
             test_post_cursors_rejects_client_keeper_id
         ; test_case "POST cursor rejects invalid focus_mode" `Quick

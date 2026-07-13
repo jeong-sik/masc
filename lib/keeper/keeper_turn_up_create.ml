@@ -406,13 +406,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         Progress.Tracker.step tracker ~message:"Starting keepalive loop" ();
         Log.Keeper.info "create_keeper: starting keepalive for name=%s" p.name;
         let launch_outcome = start_keepalive ctx meta in
-        (* Apply per-persona shard configuration if present *)
-        (match p.profile_defaults.shards with
-         | Some (_ :: _ as shard_names) ->
-             Log.Keeper.debug "create_keeper: applying shard config for name=%s shards=%d"
-               p.name (List.length shard_names);
-             Tool_shard.set_agent_shards p.name shard_names
-         | Some [] | None -> ());
         (match launch_outcome with
          | Keepalive_started _ ->
         Progress.Tracker.complete tracker ~message:"Keeper created" ();
@@ -436,7 +429,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           ("handoff_threshold", `Float meta.handoff_threshold);
           ("oas_env", `Assoc (List.map (fun (k, v) -> (k, `String v)) meta.oas_env));
         ] in
-        tool_result_ok (Yojson.Safe.to_string json)
+        tool_result_ok_data json
            | ( Keepalive_already_registered _
            | Keepalive_lifecycle_denied _
            | Keepalive_identity_unrepairable

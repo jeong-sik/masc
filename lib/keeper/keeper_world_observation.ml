@@ -10,26 +10,6 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_memory
 
-(* RFC-0247: typed provenance of a board observation. Classified once at the
-   world-observation boundary (see {!provenance_of}) from primitives that
-   already exist on every pending_board_event ([post_kind], [author],
-   [is_self_author]). The renderer uses {!should_quarantine} to route
-   fleet-authored narrative into the observational-data envelope so a keeper
-   cannot treat its own or a peer's board narrative as trusted instruction. *)
-type observation_provenance =
-  | Self_narrative
-      (* this keeper's own prior post — highest confabulation risk *)
-  | Peer_keeper
-      (* another keeper's post, by typed keeper identity *)
-  | Human_direct
-      (* a human's post ([Board.Human_post]) — operator-direction-adjacent *)
-  | Automation
-      (* non-keeper automation: harness/qa/probe/smoke authors *)
-  | Unknown
-      (* classification drift (e.g. [Human_post] but author parses as a keeper
-         id); defaults to the quarantine side — see {!should_quarantine} *)
-[@@deriving show, eq]
-
 type board_reaction_event =
   { target_type : Board.reaction_target_type
   ; target_id : string
@@ -64,8 +44,6 @@ type pending_board_event =
   ; new_external_since : int
   ; latest_external_author : string option
   ; latest_external_preview : string option
-  ; provenance : observation_provenance
-      (* RFC-0247: computed at construction; drives trusted-vs-observational split *)
   }
 
 type scheduled_automation_item =
@@ -172,7 +150,6 @@ module Board_signal = Keeper_world_observation_board_signal
 type board_signal_match = Board_signal.match_result =
   { explicit_mention : bool
   ; matched_targets : string list
-  ; score : int
   }
 
 module Message_scope = Keeper_world_observation_message_scope
@@ -180,41 +157,6 @@ module Inputs = Keeper_world_observation_inputs
 
 let self_ids = Message_scope.self_ids
 let is_self_author = Message_scope.is_self_author
-
-(* RFC-0247: classify a board event's provenance from primitives already present
-   at the boundary. Pure function of [post_kind] + [author] + the keeper's own
-   identity set ([self_ids]). No new data plumbing — every pending_board_event
-   already carries [post_kind] and [author]. *)
-let provenance_of ~self_ids (post_kind : Board.post_kind) ~author : observation_provenance
-  =
-  if is_self_author ~self_ids author then Self_narrative
-  else
-    match post_kind with
-    | Board.Human_post ->
-      (* Drift guard: a Human_post whose author is nevertheless a typed keeper
-         identity (e.g. a keeper posted via the dashboard where post_kind falls
-         back to Human_post) is classification drift, not human direction —
-         quarantine rather than trust. *)
-      (match Keeper_identity.canonical_keeper_name_from_agent_name author with
-       | Some _ -> Unknown
-       | None -> Human_direct)
-    | Board.Automation_post | Board.System_post ->
-      (* Board.post_kind has no Keeper variant, so a peer keeper's narrative and
-         a CI probe both land here as automation; the typed keeper-name check
-         separates them. *)
-      (match Keeper_identity.canonical_keeper_name_from_agent_name author with
-       | Some _ -> Peer_keeper
-       | None -> Automation)
-;;
-
-(* RFC-0247: trust tier. [Unknown] defaults to the quarantine side
-   (defense-in-depth: an unclassifiable event is treated as untrusted fleet
-   output, never as trusted operator direction). *)
-let should_quarantine (p : observation_provenance) : bool =
-  match p with
-  | Self_narrative | Peer_keeper | Automation | Unknown -> true
-  | Human_direct -> false
-;;
 
 let collect_message_scope = Message_scope.collect_message_scope
 let read_backlog_counts = Inputs.read_backlog_counts
@@ -389,7 +331,7 @@ let pending_board_event_kind_of_signal (signal : Board_dispatch.board_signal) =
 
 let pending_board_event_of_board_signal
       ~(meta : keeper_meta)
-      ~(arrived_at : float)
+      ~arrived_at:(_ : float)
       (signal : Board_dispatch.board_signal)
   : pending_board_event
   =
@@ -397,23 +339,18 @@ let pending_board_event_of_board_signal
   let matched = board_signal_match ~meta ~signal in
   let post_snapshot =
     match Board_dispatch.get_post ~post_id:signal.post_id with
-    | Ok post -> Some post
-    | Error _ -> None
+    | Ok post -> post
+    | Error error ->
+      Board_signal.raise_unavailable
+        { operation = Board_signal.Get_post; post_id = signal.post_id; error }
   in
   let title, preview, hearth, post_kind, updated_at =
-    match post_snapshot with
-    | Some (post : Board.post) ->
-      ( post.title
-      , short_preview ~max_len:80 post.content
-      , post.hearth
-      , post.post_kind
-      , post.updated_at )
-    | None ->
-      ( signal.title
-      , short_preview ~max_len:80 signal.content
-      , signal.hearth
-      , Board.Human_post
-      , arrived_at )
+    let post : Board.post = post_snapshot in
+    ( post.title
+    , short_preview ~max_len:80 post.content
+    , post.hearth
+    , post.post_kind
+    , post.updated_at )
   in
   let event_kind = pending_board_event_kind_of_signal signal in
   let self_commented, new_external_since, latest_external_author, latest_external_preview =
@@ -421,15 +358,21 @@ let pending_board_event_of_board_signal
     | Board_dispatch.Board_post_created -> false, 0, None, None
     | Board_dispatch.Board_comment_added ->
       (match check_self_comment_status ~self_ids ~post_id:signal.post_id with
-       | `New_external (count, author, preview) -> true, count, Some author, Some preview
-       | `No_new_external ->
+       | Board_signal.Unavailable unavailable ->
+         Board_signal.raise_unavailable unavailable
+       | Board_signal.Available (`New_external (count, author, preview)) ->
+         true, count, Some author, Some preview
+       | Board_signal.Available `No_new_external ->
          true, 0, Some signal.author, Some (short_preview ~max_len:60 signal.content)
-       | `Never ->
+       | Board_signal.Available `Never ->
          false, 1, Some signal.author, Some (short_preview ~max_len:60 signal.content))
     | Board_dispatch.Board_reaction_changed _ ->
       (match check_self_comment_status ~self_ids ~post_id:signal.post_id with
-       | `Never -> false, 0, None, None
-       | `No_new_external | `New_external _ -> true, 0, None, None)
+       | Board_signal.Unavailable unavailable ->
+         Board_signal.raise_unavailable unavailable
+       | Board_signal.Available `Never -> false, 0, None, None
+       | Board_signal.Available (`No_new_external | `New_external _) ->
+         true, 0, None, None)
   in
   { event_kind
   ; post_id = signal.post_id
@@ -445,7 +388,6 @@ let pending_board_event_of_board_signal
   ; new_external_since
   ; latest_external_author
   ; latest_external_preview
-  ; provenance = provenance_of ~self_ids post_kind ~author:signal.author
   }
 ;;
 
@@ -455,15 +397,9 @@ let pending_board_event_of_board_signal
 let fusion_result_preview_max_len = 480
 
 (* RFC-0266: turn a completed async fusion deliberation into actionable turn
-   input. The sink already created a System_post board record (authored by this
-   keeper) carrying the panel/judge detail; here we surface that result as a
-   just-arrived [pending_board_event] so the woken turn's act judgment fires
-   (actionable_signal_present only checks [pending_board_events <> []], not
-   provenance/mention). Provenance is classified exactly as the keeper would see
-   the real post on the normal board path — own author + System_post ->
-   Self_narrative -> rendered inside the observational-data envelope (RFC-0247:
-   a keeper reasons over the deliberation it requested, it is not trusted
-   operator instruction). When the sink failed to create the board post
+   input. The sink already created a System_post board record carrying the
+   panel/judge detail; here we surface that result as a just-arrived
+   [pending_board_event]. When the sink failed to create the board post
    ([board_post_id = ""]) we still deliver the answer under a synthetic
    [fusion-run:<id>] id so it is never silently dropped. *)
 let pending_board_event_of_fusion_completion
@@ -472,7 +408,6 @@ let pending_board_event_of_fusion_completion
       (fc : Keeper_event_queue.fusion_completion)
   : pending_board_event
   =
-  let self_ids = self_ids meta in
   let post_id = Keeper_event_queue.fusion_completion_post_id fc in
   let title =
     if fc.ok
@@ -493,7 +428,6 @@ let pending_board_event_of_fusion_completion
   ; new_external_since = 0
   ; latest_external_author = None
   ; latest_external_preview = None
-  ; provenance = provenance_of ~self_ids Board.System_post ~author:meta.name
   }
 ;;
 
@@ -505,15 +439,13 @@ let bg_job_completion_message = function
 (* RFC-0290: mirror the async-fusion delivery contract for generic background
    jobs. A [Bg_completed] stimulus already means the background producer has
    decided the job is finished; converting it here keeps the queue consumer from
-   silently dropping the result while still classifying the synthesized event as
-   observational data, not operator direction. *)
+   silently dropping the result. *)
 let pending_board_event_of_bg_job_completion
       ~(meta : keeper_meta)
       ~(arrived_at : float)
       (c : Keeper_event_queue.bg_job_completion)
   : pending_board_event
   =
-  let self_ids = self_ids meta in
   let post_id = Keeper_event_queue.bg_job_completion_post_id c in
   let kind = Keeper_event_queue.bg_job_kind_to_string c.bg_kind in
   let title =
@@ -540,19 +472,17 @@ let pending_board_event_of_bg_job_completion
   ; new_external_since = 0
   ; latest_external_author = None
   ; latest_external_preview = None
-  ; provenance = provenance_of ~self_ids Board.System_post ~author:meta.name
   }
 ;;
 
 let scheduled_automation_actor = "scheduled_automation"
 
 let pending_board_event_of_scheduled_wake
-      ~(meta : keeper_meta)
+      ~meta:(_ : keeper_meta)
       ~(arrived_at : float)
       (sw : Keeper_event_queue.scheduled_wake)
   : pending_board_event
   =
-  let self_ids = self_ids meta in
   let title =
     match sw.title with
     | Some title -> title
@@ -572,7 +502,6 @@ let pending_board_event_of_scheduled_wake
   ; new_external_since = 0
   ; latest_external_author = None
   ; latest_external_preview = None
-  ; provenance = provenance_of ~self_ids Board.System_post ~author:scheduled_automation_actor
   }
 ;;
 
@@ -621,23 +550,17 @@ let pending_board_event_of_external_attention
   ; new_external_since = 1
   ; latest_external_author = Some actor
   ; latest_external_preview = Some (short_preview ~max_len:80 item.content_preview)
-  ; provenance = Unknown
   }
 ;;
 
 (* RFC-0313 W2: surface a deterministic turn failure as actionable turn input
-   for an LLM-boundary verdict. Same provenance choice as
-   [pending_board_event_of_fusion_completion]: own author + System_post ->
-   Self_narrative -> rendered inside the observational-data envelope
-   (RFC-0247) — a keeper reasons over its own failure, it is not trusted
-   operator instruction. *)
+   for an LLM-boundary verdict. *)
 let pending_board_event_of_failure_judgment
       ~(meta : keeper_meta)
       ~(arrived_at : float)
       (fj : Keeper_event_queue.failure_judgment)
   : pending_board_event
   =
-  let self_ids = self_ids meta in
   let author = meta.name in
   { event_kind = Failure_judgment
   ; post_id = Keeper_event_queue.failure_judgment_post_id fj
@@ -658,7 +581,6 @@ let pending_board_event_of_failure_judgment
   ; new_external_since = 1
   ; latest_external_author = None
   ; latest_external_preview = None
-  ; provenance = provenance_of ~self_ids Board.System_post ~author
   }
 
 let apply_failure_judgment_guidance
@@ -714,16 +636,14 @@ let apply_failure_judgment_guidance
 ;;
 
 (* RFC-0315 P3 W0: surface a fresh goal assignment as actionable turn input.
-   Author is the assigning actor (tool caller or "toml_reconcile"), rendered
-   as a System_post inside the observational-data envelope — the keeper
-   decides what to do with the goal; the event only states the fact. *)
+   Author is the assigning actor (tool caller or "toml_reconcile"); the event
+   records the assignment context and the keeper decides what to do with it. *)
 let pending_board_event_of_goal_assignment
-      ~(meta : keeper_meta)
+      ~meta:(_ : keeper_meta)
       ~(arrived_at : float)
       (ga : Keeper_event_queue.goal_assignment)
   : pending_board_event
   =
-  let self_ids = self_ids meta in
   let author = ga.ga_assigned_by in
   { event_kind = Goal_assigned
   ; post_id = Keeper_event_queue.goal_assignment_post_id ga
@@ -747,7 +667,6 @@ let pending_board_event_of_goal_assignment
   ; new_external_since = 1
   ; latest_external_author = Some ga.ga_assigned_by
   ; latest_external_preview = None
-  ; provenance = provenance_of ~self_ids Board.System_post ~author
   }
 ;;
 
@@ -763,6 +682,14 @@ let pending_board_event_of_stimulus
          ~meta
          ~arrived_at:stimulus.arrived_at
          (Board_signal.board_signal_of_board_stimulus ~post_id:stimulus.post_id bs))
+  | Keeper_event_queue.Board_attention attention ->
+    Some
+      (pending_board_event_of_board_signal
+         ~meta
+         ~arrived_at:stimulus.arrived_at
+         (Board_signal.board_signal_of_board_stimulus
+            ~post_id:stimulus.post_id
+            attention.signal))
   | Keeper_event_queue.Fusion_completed fc ->
     Some (pending_board_event_of_fusion_completion ~meta ~arrived_at:stimulus.arrived_at fc)
   | Keeper_event_queue.Bg_completed c ->
@@ -804,6 +731,14 @@ let collect_board_events_with_cursor_policy
   : pending_board_event list * int * int
   =
   try
+    (match
+       Keeper_board_attention_candidate.resume_pending
+         ~base_path
+         ~keeper_name:meta.name
+     with
+     | Ok _ -> ()
+     | Error detail ->
+       raise (Keeper_board_attention_candidate.Candidate_unavailable detail));
     let cursor_ts, cursor_post_id =
       Keeper_registry.get_board_cursor ~base_path meta.name
     in
@@ -821,21 +756,21 @@ let collect_board_events_with_cursor_policy
         posts
     in
     let new_count = List.length recent in
-    let targets =
-      if meta.mention_targets <> [] then meta.mention_targets else [ meta.name ]
-    in
     let mention_count =
       List.length
         (List.filter
            (fun (p : Board.post) ->
-              let haystack =
-                String.lowercase_ascii (p.title ^ " " ^ p.body ^ " " ^ p.content)
+              let signal : Board_dispatch.board_signal =
+                { kind = Board_dispatch.Board_post_created
+                ; post_id = Board.Post_id.to_string p.id
+                ; author = Board.Agent_id.to_string p.author
+                ; title = p.title
+                ; content = p.content
+                ; hearth = p.hearth
+                ; updated_at = Some p.updated_at
+                }
               in
-              List.exists
-                (fun target ->
-                   let needle = "@" ^ String.lowercase_ascii target in
-                   String_util.contains_substring haystack needle)
-                targets)
+              (board_signal_match ~meta ~signal).explicit_mention)
            recent)
     in
     let rec consume_posts last_cursor acc = function
@@ -845,12 +780,14 @@ let collect_board_events_with_cursor_policy
         let next_cursor = board_cursor_token_of_post p in
         let comment_status = check_self_comment_status ~self_ids ~post_id in
         (match comment_status with
-         | `No_new_external ->
+         | Board_signal.Unavailable unavailable ->
+           Board_signal.raise_unavailable unavailable
+         | Board_signal.Available `No_new_external ->
            Log.Keeper.debug
              "board dedup: skipping post_id=%s (no new external since my comment)"
              post_id;
            consume_posts (Some next_cursor) acc rest
-         | `Never ->
+         | Board_signal.Available `Never ->
            let signal : Board_dispatch.board_signal =
              { kind = Board_dispatch.Board_post_created
              ; post_id
@@ -864,10 +801,25 @@ let collect_board_events_with_cursor_policy
            let matched = board_signal_match ~meta ~signal in
            if not matched.explicit_mention
            then (
-             Log.Keeper.debug
-               "board dedup: skipping post_id=%s (no explicit mention and no prior \
-                keeper participation)"
-               post_id;
+             (match
+                Keeper_board_attention_candidate.of_board_signal
+                  ~meta
+                  ~recorded_at:(Time_compat.now ())
+                  signal
+              with
+              | Board_signal.Unavailable unavailable ->
+                Board_signal.raise_unavailable unavailable
+              | Board_signal.Available candidate ->
+                (match
+                   Keeper_board_attention_candidate.record_and_start
+                     ~base_path
+                     candidate
+                 with
+                 | Ok _ -> ()
+                 | Error detail ->
+                   raise
+                     (Keeper_board_attention_candidate.Candidate_unavailable
+                        detail)));
              consume_posts (Some next_cursor) acc rest)
            else
              consume_posts
@@ -887,13 +839,10 @@ let collect_board_events_with_cursor_policy
                 ; new_external_since = 0
                 ; latest_external_author = None
                 ; latest_external_preview = None
-                ; provenance =
-                    provenance_of ~self_ids p.post_kind
-                      ~author:(Board.Agent_id.to_string p.author)
                 }
                 :: acc)
                rest
-         | `New_external (count, ext_author, ext_preview) ->
+         | Board_signal.Available (`New_external (count, ext_author, ext_preview)) ->
            (
              let signal : Board_dispatch.board_signal =
                { kind = Board_dispatch.Board_post_created
@@ -923,9 +872,6 @@ let collect_board_events_with_cursor_policy
                 ; new_external_since = count
                 ; latest_external_author = Some ext_author
                 ; latest_external_preview = Some ext_preview
-                ; provenance =
-                    provenance_of ~self_ids p.post_kind
-                      ~author:(Board.Agent_id.to_string p.author)
                 }
                 :: acc)
                rest))
@@ -969,13 +915,37 @@ let collect_board_events_with_cursor_policy
     final_events, new_count, mention_count
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
+  | Board_signal.Board_unavailable unavailable as exn ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string ObservationQueryFailures)
+      ~labels:
+        [ ( "operation"
+          , Runtime_observation_query_operation.(to_label Board_events) )
+        ]
+      ();
+    Log.Keeper.warn
+      "board event collection retained cursor: %s"
+      (Board_signal.unavailable_to_string unavailable);
+    raise exn
+  | Keeper_board_attention_candidate.Candidate_unavailable detail as exn ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string ObservationQueryFailures)
+      ~labels:
+        [ ( "operation"
+          , Runtime_observation_query_operation.(to_label Board_events) )
+        ]
+      ();
+    Log.Keeper.warn
+      "board event collection retained cursor: candidate storage unavailable: %s"
+      detail;
+    raise exn
   | exn ->
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string ObservationQueryFailures)
       ~labels:[ ("operation", Runtime_observation_query_operation.(to_label Board_events)) ]
       ();
     Log.Keeper.warn "board event collection failed: %s" (Printexc.to_string exn);
-    [], 0, 0
+    raise exn
 ;;
 
 let collect_board_events

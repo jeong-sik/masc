@@ -38,6 +38,7 @@ type board_stimulus = {
 
 type stimulus_payload =
   | Board_signal of board_stimulus
+  | Board_attention of board_attention
   | Bootstrap
   | Fusion_completed of fusion_completion
       (* RFC-0266: an async [masc_fusion] deliberation finished. Wakes the
@@ -83,6 +84,11 @@ type stimulus_payload =
          discovered only if some unrelated stimulus happened to fire.
          Uses the same no-dedicated-reason pattern as async completions:
          turn_reason; the injected pending observation drives the turn. *)
+
+and board_attention = {
+  candidate_id : string;
+  signal : board_stimulus;
+}
 
 and fusion_completion = {
   run_id : string;
@@ -238,7 +244,7 @@ let identity_payload = function
   | Failure_judgment fj -> Failure_judgment { fj with fj_detail = "" }
   | Goal_assigned ga ->
     Goal_assigned { ga with ga_goal_title = ""; ga_assigned_by = "" }
-  | ( Board_signal _ | Bootstrap | Fusion_completed _
+  | ( Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
     | Bg_completed _ | Schedule_due _ | Connector_attention _ | Hitl_resolved _
     ) as payload ->
     payload
@@ -334,6 +340,7 @@ let sort_by_urgency (queue : t) : t =
 
 let payload_kind_label = function
   | Board_signal _ -> "board_signal"
+  | Board_attention _ -> "board_attention"
   | Bootstrap -> "bootstrap"
   | Fusion_completed _ -> "fusion_completed"
   | Bg_completed _ -> "bg_completed"
@@ -344,7 +351,7 @@ let payload_kind_label = function
   | Goal_assigned _ -> "goal_assigned"
 
 let is_board_signal = function
-  | Board_signal _ -> true
+  | Board_signal _ | Board_attention _ -> true
   | Bootstrap | Fusion_completed _ | Bg_completed _
   | Schedule_due _ | Connector_attention _ | Hitl_resolved _
   | Failure_judgment _ | Goal_assigned _ ->
@@ -406,6 +413,19 @@ let board_reaction_change_fields (reaction : board_reaction_change) =
   ; "reaction_emoji", `String reaction.emoji
   ; "reaction_active", `Bool reaction.reacted
   ]
+
+let board_stimulus_fields board =
+  [ "board_kind", `String (board_stimulus_kind_to_string board.kind)
+  ; "author", `String board.author
+  ; "title", `String board.title
+  ; "content", `String board.content
+  ; "hearth", option_json (fun value -> `String value) board.hearth
+  ; "updated_at_unix", option_json (fun value -> `Float value) board.updated_at
+  ]
+  @
+  match board.kind with
+  | Post_created | Comment_added -> []
+  | Reaction_changed reaction -> board_reaction_change_fields reaction
 
 let assoc_fields ~context = function
   | `Assoc fields -> Ok fields
@@ -476,18 +496,13 @@ let float_field ~context name fields =
 let payload_to_yojson = function
   | Board_signal board ->
     `Assoc
-      ([ "kind", `String "board_signal"
-       ; "board_kind", `String (board_stimulus_kind_to_string board.kind)
-       ; "author", `String board.author
-       ; "title", `String board.title
-       ; "content", `String board.content
-       ; "hearth", option_json (fun value -> `String value) board.hearth
-       ; "updated_at_unix", option_json (fun value -> `Float value) board.updated_at
+      ([ "kind", `String "board_signal" ] @ board_stimulus_fields board)
+  | Board_attention attention ->
+    `Assoc
+      ([ "kind", `String "board_attention"
+       ; "candidate_id", `String attention.candidate_id
        ]
-       @
-       (match board.kind with
-       | Post_created | Comment_added -> []
-       | Reaction_changed reaction -> board_reaction_change_fields reaction))
+       @ board_stimulus_fields attention.signal)
   | Bootstrap -> `Assoc [ "kind", `String "bootstrap" ]
   | Fusion_completed fusion ->
     `Assoc
@@ -567,8 +582,7 @@ let payload_of_yojson json =
   let context = "stimulus.payload" in
   let* fields = assoc_fields ~context json in
   let* kind = string_field ~context "kind" fields in
-  match kind with
-  | "board_signal" ->
+  let parse_board_stimulus () =
     let* board_kind = string_field ~context "board_kind" fields in
     let* kind =
       match board_kind with
@@ -587,7 +601,19 @@ let payload_of_yojson json =
     let* content = string_field ~context "content" fields in
     let* hearth = optional_string_field ~context "hearth" fields in
     let* updated_at = optional_float_field ~context "updated_at_unix" fields in
-    Ok (Board_signal { kind; author; title; content; hearth; updated_at })
+    Ok { kind; author; title; content; hearth; updated_at }
+  in
+  match kind with
+  | "board_signal" ->
+    let* signal = parse_board_stimulus () in
+    Ok (Board_signal signal)
+  | "board_attention" ->
+    let* candidate_id = string_field ~context "candidate_id" fields in
+    if String.equal candidate_id ""
+    then Error "stimulus.payload.candidate_id must not be empty"
+    else
+      let* signal = parse_board_stimulus () in
+      Ok (Board_attention { candidate_id; signal })
   | "bootstrap" -> Ok Bootstrap
   | "fusion_completed" ->
     let* run_id = string_field ~context "run_id" fields in

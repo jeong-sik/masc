@@ -1,33 +1,23 @@
 (** Mcp_server_eio_call_tool — [tools/call] handler with
-    timeout, read-only retry, runtime-MCP keeper tracing.
+    single dispatch and runtime-MCP keeper tracing.
 
-    The .ml is intentionally kept behind this interface.  External
-    runtime callers reach six operational symbols — {!handle_call_tool_eio}
-    (the dispatcher
-    entry point invoked from
-    {!Mcp_server_eio_protocol.handle_request}),
-    {!contains_casefold} (re-used by the protocol layer
-    for log-line classification), and four runtime-MCP
-    keeper tracing helpers ({!quality_from_result},
-    {!record_runtime_mcp_keeper_tool_trace},
-    {!runtime_mcp_keeper_log_context_of_entry},
-    {!tool_timeout_sec_opt}).
+    The .ml is intentionally kept behind this interface. External runtime
+    callers reach {!handle_call_tool_eio}, the metric helpers, and the
+    runtime-MCP keeper tracing surface declared below.
 
     The {!For_testing} module exposes a narrow pure helper for regression
     tests only.
 
     Internal helpers stay private at this boundary
     ([log_mcp_exn], [int_of_env_default],
-    [classify_tool_failure_severity],
-    [parse_status_from_message], [quality_issue],
+    [classify_tool_failure_severity], [status_of_result],
+    [structured_content_of_result],
     [nonempty_string_opt], [json_nonempty_string_opt],
     [runtime_mcp_keeper_error_preview],
     [runtime_mcp_keeper_tool_call_sse_payload],
     [runtime_mcp_masc_root],
     [record_runtime_mcp_trajectory_coverage_gap],
     [record_runtime_mcp_keeper_trajectory],
-    [read_only_retry_limit], [read_only_retry_wait],
-    [call_tool_with_readonly_retry],
     [resolve_managed_agent_call]).
 
     [tool_profile] is referenced by {!handle_call_tool_eio}
@@ -35,31 +25,6 @@
     here — external callers reach it via
     {!Mcp_server_eio_types.tool_profile} and the
     {!Mcp_server_eio_protocol} facade. *)
-
-(** {1 Casefold substring search} *)
-
-val contains_casefold : string -> string -> bool
-(** [contains_casefold haystack needle] — true iff
-    [needle] occurs in [haystack] under
-    [String_util.contains_substring_ci] (case-insensitive).
-    Empty needle returns [true].  Pinned because the
-    protocol layer's tool-call log path
-    ({!Mcp_server_eio_protocol.mcp_tool_call_log_details})
-    re-uses it for outcome classification. *)
-
-(** {1 Quality JSON} *)
-
-val quality_from_result :
-  success:bool ->
-  message:string ->
-  attempts:int ->
-  Yojson.Safe.t
-(** Builds the [quality] envelope attached to a tool-call
-    response.  On success returns
-    [`Assoc [("passed", `Bool true); ("issues", `List [])]].
-    On failure classifies [message] (timeout / cancellation
-    / generic) and emits a single issue entry with
-    [severity], [code], [message], [attempts]. *)
 
 val record_mcp_server_operation_duration_sample :
   tool_name:string -> success:bool -> duration_seconds:float -> unit
@@ -176,10 +141,8 @@ val handle_call_tool_eio :
     when the call is known to alter the tool catalogue
     (long-running mutations, etc).
 
-    The dispatcher retries read-only failures (subject to
-    [Env_config.Tools.readonly_retry_limit]), times the
-    execution for telemetry, and on the keeper-runtime
-    path threads
+    The dispatcher invokes the concrete tool exactly once, times that
+    execution for telemetry, and on the keeper-runtime path threads
     {!record_runtime_mcp_keeper_tool_trace} into the
     success / failure branches.
 

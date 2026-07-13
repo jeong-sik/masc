@@ -75,8 +75,6 @@ type failure_payload =
     rather than reading [.success] / [.failure_class] off a record. *)
 type result = (success_payload, failure_payload) Stdlib.Result.t
 
-val structured_payload_of_message : string -> Yojson.Safe.t option
-
 (** {2 Accessors} *)
 
 (** [Ok ok] returns the JSON-stringified [ok.data] (or the bare string
@@ -100,12 +98,12 @@ val is_success : result -> bool
     execution metadata at the boundary; zero-duration compatibility
     constructors have been removed. *)
 
-(** Successful result.  [data] is parsed from the message when it
-    contains structured JSON, otherwise [`String message]. *)
+(** Successful result with an opaque string body.  Producers with typed JSON
+    must use {!make_ok} and pass [~data] directly. *)
 val ok : tool_name:string -> start_time:float -> string -> result
 
-(** Failure result.  Classifies from the structured message when no
-    explicit class is provided; defaults to [Runtime_failure]. *)
+(** Failure result with an opaque string body.  An absent explicit class
+    defaults to [Runtime_failure]; message contents never affect the class. *)
 val error
   :  ?failure_class:tool_failure_class option
   -> tool_name:string

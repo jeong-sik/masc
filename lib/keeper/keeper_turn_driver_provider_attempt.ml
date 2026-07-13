@@ -2,9 +2,6 @@
 
 let provider_attempt_status_of_result = function
   | Ok _ -> "provider_returned"
-  | Error (Agent_sdk.Error.Api (Llm_provider.Retry.Timeout { message }))
-    when Keeper_oas_timeout_message.is_structural message ->
-    "timeout"
   | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionTimeout _)) ->
     "timeout"
   | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionIdleTimeout _)) ->
@@ -14,9 +11,6 @@ let provider_attempt_status_of_result = function
   | Error _ -> "error"
 
 let provider_attempt_exception_kind_of_result = function
-  | Error (Agent_sdk.Error.Api (Llm_provider.Retry.Timeout { message }))
-    when Keeper_oas_timeout_message.is_structural message ->
-    Some "oas_agent_execution_timeout"
   | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionTimeout _)) ->
     Some "oas_agent_execution_timeout"
   | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionIdleTimeout _)) ->

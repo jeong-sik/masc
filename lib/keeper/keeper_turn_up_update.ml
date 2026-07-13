@@ -262,9 +262,7 @@ let update_keeper ?(preserve_prompt_defaults = false)
                    (Keeper_dead_revival_transaction.error_to_string error)
                | Ok success ->
                  enqueue_goal_assignment_wakes success.meta;
-                 tool_result_ok
-                   (Yojson.Safe.to_string
-                      (Keeper_meta_json.meta_to_json success.meta)))
+                 tool_result_ok_data (Keeper_meta_json.meta_to_json success.meta))
             else
             (* CAS-merge instead of a force write: a dashboard/turn-up edit
                builds [updated] from a meta snapshot ([old]), so a concurrent
@@ -299,8 +297,7 @@ let update_keeper ?(preserve_prompt_defaults = false)
                let launch_outcome = start_keepalive ctx updated in
                (match launch_outcome with
                 | Keepalive_started _ ->
-                  tool_result_ok
-                    (Yojson.Safe.to_string (Keeper_meta_json.meta_to_json updated))
+                  tool_result_ok_data (Keeper_meta_json.meta_to_json updated)
                 | Keepalive_already_registered entry ->
                   let stop_detail =
                     match stop_outcome with

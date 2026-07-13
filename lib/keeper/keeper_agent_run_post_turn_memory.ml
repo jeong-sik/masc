@@ -23,13 +23,9 @@ let run
      Reading the live accumulator from a detached fiber could fold a later
      turn's emissions into this turn's notes. *)
   let tool_results_snapshot =
-    if Keeper_tool_emission_hook.masc_tool_emission_enabled ()
-    then
-      Some
-        (Keeper_tool_emission_hook.snapshot
-           (Keeper_tool_emission_hook.accumulator_for_keeper
-              meta.Keeper_meta_contract.name))
-    else None
+    Keeper_tool_emission_hook.snapshot
+      (Keeper_tool_emission_hook.accumulator_for_keeper
+         meta.Keeper_meta_contract.name)
   in
   (* (1) deterministic write, (2) librarian extraction, (3) compaction run on
      this keeper's memory lane (RFC-0257), detached from the turn lane. All
@@ -40,10 +36,11 @@ let run
   let memory_series () =
   (try
      let notes_written =
-       match tool_results_snapshot with
-       | Some tool_results ->
-         Memory.append_from_tool_results config meta ~turn ~results:tool_results
-       | None -> 0
+       Memory.append_from_tool_results
+         config
+         meta
+         ~turn
+         ~results:tool_results_snapshot
      in
      let kinds_written =
        if notes_written > 0 then [ "long_term" ] else []

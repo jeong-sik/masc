@@ -786,9 +786,8 @@ describe('normalizeKeepers lifecycle metrics', () => {
         keepalive_running: true,
         pause_state: 'paused',
         runtime_blocker_state: 'blocked',
-        runtime_blocker_class: 'ambiguous_post_commit_timeout',
-        runtime_blocker_summary:
-          'Mutating tools [keeper_fs_edit] committed before the turn timed out.',
+        runtime_blocker_class: 'turn_timeout',
+        runtime_blocker_summary: 'Provider turn timed out.',
         last_blocker: 'missing social headers',
         last_autonomous_action_at: '2026-04-04T14:08:35Z',
         created_at: '2026-04-03T14:59:29Z',
@@ -802,9 +801,8 @@ describe('normalizeKeepers lifecycle metrics', () => {
       keepalive_running: true,
       pause_state: 'paused',
       runtime_blocker_state: 'blocked',
-      runtime_blocker_class: 'ambiguous_post_commit_timeout',
-      runtime_blocker_summary:
-        'Mutating tools [keeper_fs_edit] committed before the turn timed out.',
+      runtime_blocker_class: 'turn_timeout',
+      runtime_blocker_summary: 'Provider turn timed out.',
       last_blocker: 'missing social headers',
       last_autonomous_action_at: '2026-04-04T14:08:35Z',
       created_at: '2026-04-03T14:59:29Z',

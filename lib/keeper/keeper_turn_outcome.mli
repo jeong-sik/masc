@@ -3,7 +3,7 @@
     The keeper reply payload declares at the write boundary whether its
     [reply] text is model output ([Visible_reply]), absent from the
     visible surface ([No_visible_reply]), or the synthetic continuation
-    notice substituted when a run stops at a budget / mutation boundary
+    notice substituted when a run stops at a checkpoint boundary
     ([Continuation_checkpoint]).  Consumers (lane persistence, stream
     terminal, direct-reply surface, dashboard) match on the decoded
     variant; the legacy ["Continuation checkpoint saved;"] prefix sniff
@@ -39,17 +39,14 @@ val of_stop_reason : Runtime_agent.stop_reason -> t
     {!of_result_surface} at payload production sites where the actual
     [response_text] is available.  [TurnBudgetExhausted] replaces the
     reply with the synthetic continuation notice ({!Runtime_agent}
-    MaxTurnsExceeded arm); [MutationBoundaryReached] shares the
-    resume-next-cycle contract (currently unreachable: no production
-    caller passes [exit_condition_result]). *)
+    MaxTurnsExceeded arm). *)
 
 val of_result_surface : response_text:string -> Runtime_agent.stop_reason -> t
 (** Classify the reply-surface contract for a completed keeper run.
     [Completed] with blank [response_text] is [No_visible_reply], not
     [Visible_reply].  This keeps hidden read-only/tool-only runtime turns
     from being reported as user-visible replies while preserving the
-    explicit continuation checkpoint outcome for budget and mutation
-    boundaries. *)
+    explicit continuation checkpoint outcome for typed checkpoint stops. *)
 
 val of_reply_payload : Yojson.Safe.t option -> t
 (** Decode from a parsed keeper reply payload.  Known labels decode to

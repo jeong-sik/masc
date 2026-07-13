@@ -217,8 +217,8 @@ val hitl_summary_runtime_id : unit -> string option
     runtime. *)
 
 val runtime_id_for_structured_judge : unit -> string
-(** Resolved runtime id for dashboard/operator structured-output judge
-    calls. Uses [\[runtime\].structured_judge] first, then the existing
+(** Resolved runtime id for configured structured-output judgment calls.
+    Uses [\[runtime\].structured_judge] first, then the existing
     [\[runtime\].librarian] migration lane, then [\[runtime\].default]. The final
     default path still fails loudly at each caller's schema validation if the
     runtime cannot satisfy provider-native structured output. *)

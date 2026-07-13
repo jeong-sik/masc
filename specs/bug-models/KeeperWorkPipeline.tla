@@ -1,1 +1,0 @@
-../keeper-state-machine/KeeperWorkPipeline.tla

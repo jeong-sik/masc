@@ -158,7 +158,6 @@ let operator_disposition (receipt : t)
     | External_cancel
     | Turn_wall_clock_timeout
     | Runtime_attempts_exhausted
-    | Post_commit_ambiguous
     | Turn_budget_exhausted _
     | Provider_error _
     | Unknown _ -> false
@@ -226,12 +225,12 @@ let operator_disposition (receipt : t)
   | Provider_runtime_failure _
   | Turn_budget_exhausted _
   | Pre_dispatch_success _
-  | Other _ ->
+  | Unknown _ ->
     (* Generic fall-through. [Config_or_auth] and
        [Provider_runtime_failure] are caught by the guarded branches above
        (their constructors force [preflight_config_failure] /
        [provider_runtime_failure] true), so only [Turn_budget_exhausted],
-       [Pre_dispatch_success], and [Other] reach here in practice;
+       [Pre_dispatch_success], and [Unknown] reach here in practice;
        [Config_or_auth] and [Provider_runtime_failure] are listed to keep the
        match exhaustive without a wildcard. *)
     if receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_runtime
@@ -250,7 +249,7 @@ let operator_disposition (receipt : t)
       | Internal_error _
       | Auto_recoverable_budget _
       | Pre_dispatch_success _
-      | Other _ -> false
+      | Unknown _ -> false
     then
       Disp_pass, Reason_turn_budget_exhausted
     else if
@@ -266,7 +265,7 @@ let operator_disposition (receipt : t)
        | Internal_error _
        | Turn_budget_exhausted _
        | Auto_recoverable_budget _
-       | Other _ -> false)
+       | Unknown _ -> false)
     then Disp_pass, Reason_healthy
     (* "healthy" requires an explicit success signal: turn completed without
        error AND runtime reached the configured terminal. Any other fallthrough

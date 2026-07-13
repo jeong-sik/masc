@@ -66,7 +66,6 @@ let make_meta ?(name = "keeper-completion-trust") () =
         ; ("agent_name", `String name)
         ; ("trace_id", `String "completion-trust-harness-trace")
         ; ("allowed_paths", `List [ `String "*" ])
-        ; ("policy_voice_enabled", `Bool false)
         ])
   with
   | Ok meta -> meta
@@ -91,15 +90,9 @@ let with_ws name fn =
           Masc.Keeper_registry.unregister ~base_path:config.base_path meta.name)
         (fun () -> fn ~config ~meta ~ctx_work:(make_ctx ())))
 
-let payload_kind = function
-  | KET.Structured_success -> "structured_success"
-  | KET.Structured_error -> "structured_error"
-  | KET.Plain_text -> "plain_text"
-  | KET.Malformed_structured _ -> "malformed_structured"
-
 let outcome_label = function
   | `Success -> "success"
-  | `Failure -> "failure"
+  | `Failure _ -> "failure"
 
 let parse_json raw =
   try Yojson.Safe.from_string raw with
@@ -203,8 +196,6 @@ let test_completion_denied_for_non_owner () =
         ()
     in
     check string "non-owner completion outcome" "failure" (outcome_label result.KET.outcome);
-    check string "non-owner completion payload shape" "structured_error"
-      (payload_kind result.KET.payload_shape);
     let json = parse_json result.KET.raw_output in
     check bool "rejection is ok=false" false Yojson.Safe.Util.(member "ok" json |> to_bool);
     check string "ownership reject is a deterministic workflow rejection" "workflow_rejection"
@@ -232,8 +223,6 @@ let test_completion_denied_when_unclaimed () =
         ()
     in
     check string "unclaimed completion outcome" "failure" (outcome_label result.KET.outcome);
-    check string "unclaimed completion payload shape" "structured_error"
-      (payload_kind result.KET.payload_shape);
     let json = parse_json result.KET.raw_output in
     check string "unclaimed reject is a workflow rejection" "workflow_rejection"
       Yojson.Safe.Util.(member "failure_class" json |> to_string);
@@ -304,8 +293,6 @@ let test_completion_with_evidence_refs_succeeds () =
         ()
     in
     check string "completion outcome" "success" (outcome_label result.KET.outcome);
-    check string "completion payload shape" "structured_success"
-      (payload_kind result.KET.payload_shape);
     match
       List.find_opt
         (fun (t : Masc_domain.task) -> String.equal t.id "task-001")
@@ -418,8 +405,6 @@ let test_legitimate_claim_succeeds () =
          ~description:"unowned backlog work");
     let result = claim_via_dispatch ~config ~meta ~ctx_work ~task_id:"task-001" in
     check string "legitimate claim outcome" "success" (outcome_label result.KET.outcome);
-    check string "legitimate claim payload shape" "structured_success"
-      (payload_kind result.KET.payload_shape);
     match assignee_of config "task-001" with
     | Some assignee -> check string "claimed task is owned by the caller" meta.agent_name assignee
     | None -> fail "task-001 must be Claimed/InProgress after a legitimate claim")

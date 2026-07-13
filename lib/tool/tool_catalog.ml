@@ -183,7 +183,7 @@ let with_execution_policy
 let readonly_tool =
   with_execution_policy
     ~readonly:true
-    ~idempotent:true
+    ~idempotent:false
     default_metadata
 
 let mutating_tool =

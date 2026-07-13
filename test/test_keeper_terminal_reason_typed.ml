@@ -79,7 +79,8 @@ let roundtrip_corpus =
     (* config/auth preflight (ranked above provider) *)
   ; "config_error"
   ; "api_error_auth"
-  ; "provider_error_auth:openai"
+  ; "provider_error_auth"
+  ; "provider_error_auth:legacy-payload"
   ; "provider_error_invalid_config:field_x"
     (* provider family *)
   ; "api_error_rate_limited"
@@ -88,7 +89,6 @@ let roundtrip_corpus =
   ; "api_error_timeout"
   ; "api_error_network"
   ; "api_error_context_overflow"
-  ; "api_error_oas_agent_execution_timeout"
   ; "provider_error_parse"
   ; "provider_error_server:500"
   ; "provider_error_missing_api_key"
@@ -98,7 +98,7 @@ let roundtrip_corpus =
   ; "agent_error_execution_timeout:elapsed_sec=120.0,timeout_sec=120.0,turn_count=7,max_turns=8"
   ; "agent_error_idle_timeout:idle_sec=120.0,idle_timeout_sec=120.0,turn_count=7,max_turns=8"
   ; "turn_budget_exhausted:8/8"
-    (* genuine Other (preserve-don't-fix) *)
+    (* genuine Unknown (preserve-don't-fix) *)
   ; "no_capable_provider"
   ; "mcp_error"
   ; "serialization_error"
@@ -113,6 +113,8 @@ let roundtrip_corpus =
     (* adversarial: mixed case must round-trip to the original bytes *)
   ; "Runtime_Exhausted"
   ; "API_ERROR_Auth"
+  ; "unrelated authentication failed"
+  ; "not_a_config_error"
   ; ""
   ]
 
@@ -127,14 +129,12 @@ let () =
 ;;
 
 (* ------------------------------------------------------------------ *)
-(* 2. (disposition, reason) equivalence vs a frozen copy of the OLD    *)
-(*    substring classifier.                                            *)
+(* 2. (disposition, reason) equivalence vs an independent strict-wire *)
+(*    oracle.                                                           *)
 (* ------------------------------------------------------------------ *)
 
-(* Frozen copy of the pre-typing [operator_disposition] body plus explicit
-   policy updates pinned by focused regressions below. DO NOT refactor to call
-   production helpers — this is the oracle. *)
-let string_contains_ci = String_util.contains_substring_ci
+(* Independent copy of the intended canonical-wire policy. DO NOT refactor to
+   call production helpers — this is the oracle. *)
 
 let frozen_terminal_prefix_max_turns_exceeded = "agent_error_max_turns_exceeded"
 let frozen_terminal_prefix_execution_timeout = "agent_error_execution_timeout"
@@ -156,19 +156,25 @@ let frozen_is_transient_provider_runtime_failure terminal_reason =
   || String.equal terminal_reason "api_error_network"
 ;;
 
+let frozen_is_config_or_auth_wire = function
+  | "config_error"
+  | "api_error_auth"
+  | "api_error_authorization"
+  | "provider_error_auth"
+  | "provider_error_authorization" -> true
+  | wire -> String.starts_with ~prefix:"provider_error_invalid_config:" wire
+;;
+
 let frozen_operator_disposition (receipt : R.t)
   : R.operator_disposition_kind * R.operator_disposition_reason
   =
-  let terminal_reason = String.lowercase_ascii receipt.terminal_reason_code in
+  let terminal_reason = receipt.terminal_reason_code in
   let provider_runtime_failure =
     String.starts_with ~prefix:"api_error_" terminal_reason
     || String.equal terminal_reason "provider_error"
     || String.starts_with ~prefix:"provider_error_" terminal_reason
   in
-  let preflight_config_failure =
-    string_contains_ci terminal_reason "config"
-    || string_contains_ci terminal_reason "auth"
-  in
+  let preflight_config_failure = frozen_is_config_or_auth_wire terminal_reason in
   if String.equal terminal_reason "runtime_exhausted"
   then R.Disp_fail_open_next_runtime, R.Reason_runtime_exhausted
   else if
@@ -271,6 +277,34 @@ let base_receipt : R.t =
   ; pre_dispatch_compaction_before_tokens = None
   ; pre_dispatch_compaction_after_tokens = None
   }
+;;
+
+let () =
+  List.iter
+    (fun wire ->
+       check
+         (Printf.sprintf "free-form terminal %S stays typed Unknown" wire)
+         (match Tr.of_wire wire with
+          | Tr.Unknown original -> String.equal original wire
+          | _ -> false);
+       let got =
+         R.operator_disposition
+           { base_receipt with terminal_reason_code = wire }
+       in
+       check
+         (Printf.sprintf "free-form terminal %S uses generic disposition" wire)
+         (got = (R.Disp_unknown, R.Reason_unmapped_runtime_state)))
+    [ "unrelated authentication failed"
+    ; "not_a_config_error"
+    ; "API_ERROR_Auth"
+    ];
+  let canonical =
+    R.operator_disposition
+      { base_receipt with terminal_reason_code = "config_error" }
+  in
+  check
+    "canonical typed config wire keeps its explicit route"
+    (canonical = (R.Disp_fail_open_next_runtime, R.Reason_preflight_config_error))
 ;;
 
 let () =

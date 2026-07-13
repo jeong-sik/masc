@@ -204,12 +204,21 @@ let find_agent_name_by_prefix config prefix =
   | None -> Alcotest.failf "agent with prefix %s not found" prefix
 ;;
 
+let configured_llm_completion_pass : Masc_domain.configured_llm_completion_verdict =
+  { decision = Masc_domain.Completion_pass
+  ; runtime_id = "workspace-coverage-test-reviewer"
+  ; rationale = None
+  ; evaluated_at = "2026-07-13T00:00:00Z"
+  }
+;;
+
 let transition_done_r config ~agent_name ~task_id ~notes =
   Workspace.transition_task_r
     config
     ~agent_name
     ~task_id
     ~action:Masc_domain.Done_action
+    ~configured_llm_verdict:configured_llm_completion_pass
     ~notes
     ()
 ;;
@@ -1318,21 +1327,11 @@ let test_transition_done_idempotent () =
     let _ = Workspace.add_task config ~title:"Test" ~priority:1 ~description:"" in
     let _ = Workspace.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
     let _ =
-      Workspace.transition_task_r
-        config
-        ~agent_name:"claude"
-        ~task_id:"task-001"
-        ~action:Masc_domain.Done_action
-        ()
+      transition_done_r config ~agent_name:"claude" ~task_id:"task-001" ~notes:""
     in
     (* Second done call should succeed as no-op *)
     let result =
-      Workspace.transition_task_r
-        config
-        ~agent_name:"claude"
-        ~task_id:"task-001"
-        ~action:Masc_domain.Done_action
-        ()
+      transition_done_r config ~agent_name:"claude" ~task_id:"task-001" ~notes:""
     in
     match result with
     | Ok msg -> Alcotest.(check bool) "done idempotent" true (str_contains msg "no-op")
@@ -2136,9 +2135,12 @@ let test_scope_widen_claims_unscoped_when_scope_blocks_all () =
 
 let test_gc_no_cleanup_needed () =
   with_test_env (fun config ->
-    let result = Workspace.gc config () in
+    let result = Workspace.gc config ~days:30 () in
     Alcotest.(check bool) "gc result has content" true (String.length result > 0);
-    Alcotest.(check bool) "no zombie cleanup" true (str_contains result "No zombie"))
+    Alcotest.(check bool)
+      "no terminal task archive"
+      true
+      (str_contains result "No terminal tasks to archive"))
 ;;
 
 let test_gc_with_tasks () =
@@ -2498,6 +2500,7 @@ let test_predecessor_terminal_accepted_and_persisted () =
         ~agent_name:claude
         ~task_id:"task-001"
         ~action:Masc_domain.Done_action
+        ~configured_llm_verdict:configured_llm_completion_pass
         ~notes:"done"
         ()
     in

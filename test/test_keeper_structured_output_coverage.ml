@@ -84,17 +84,9 @@ let expected_structured_tool_agent_runs =
   List.sort
     String.compare
     [ "lib/keeper/keeper_adversarial_review.ml"
+    ; "lib/keeper/keeper_failure_judge.ml"
     ; "lib/verifier_oas.ml"
     ; "lib/workspace_metric_hooks.ml"
-    ]
-;;
-
-let expected_freeform_masc_tool_agent_run_files =
-  List.sort
-    String.compare
-    [ (* Eval harness: measures live tool-call attempts and arbitrary terminal text.
-         Tool arguments remain structured through [completion_tools]. *)
-      "bin/masc_completion_trust_eval.ml"
     ]
 ;;
 
@@ -102,8 +94,7 @@ let expected_masc_tool_agent_run_files =
   List.sort
     String.compare
     (expected_structured_dashboard_agent_run_json_judges
-     @ expected_structured_tool_agent_runs
-     @ expected_freeform_masc_tool_agent_run_files)
+     @ expected_structured_tool_agent_runs)
 ;;
 
 let expected_freeform_direct_agent_run_files =
@@ -402,6 +393,9 @@ let test_structured_tool_agent_runs_use_tool_schema_output () =
     [ ( "lib/keeper/keeper_adversarial_review.ml"
       , "dispatch"
       , "Verifier_core.parse_grounded_verdict_from_json" )
+    ; ( "lib/keeper/keeper_failure_judge.ml"
+      , "parse_response"
+      , "Keeper_failure_judgment_contract.of_yojson" )
     ; "lib/verifier_oas.ml", "dispatch", "Core.parse_verdict_from_json"
     ; ( "lib/workspace_metric_hooks.ml"
       , "dispatch"

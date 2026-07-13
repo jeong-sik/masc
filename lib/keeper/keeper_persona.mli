@@ -8,7 +8,6 @@ val handle_persona_list :
 val persona_list_handler : Yojson.Safe.t -> tool_result
 
 (** Create a keeper from a persona definition. Honors a [dry_run] arg
-    that returns a preview without invoking [handle_keeper_up]. Applies
-    per-persona shard configuration after successful creation. *)
+    that returns a preview without invoking [handle_keeper_up]. *)
 val handle_keeper_create_from_persona :
   _ Keeper_types_profile.context -> Yojson.Safe.t -> tool_result

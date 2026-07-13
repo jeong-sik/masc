@@ -215,61 +215,6 @@ let flush_if_needed ~base_path ~keeper_name =
       end
 
 (* ================================================================ *)
-(* Decision Pipeline Mermaid diagram                               *)
-(* ================================================================ *)
-
-let decision_pipeline_to_mermaid
-    ?(turn_outcome : [`Ok | `Failed] option)
-    ~(phase : Keeper_state_machine.phase)
-    ~(thompson_alpha : float)
-    ~(thompson_beta : float)
-    ()
-    : string =
-  let b = Buffer.create 512 in
-  let p fmt = Printf.bprintf b fmt in
-  let score =
-    if thompson_alpha +. thompson_beta > 0.0
-    then thompson_alpha /. (thompson_alpha +. thompson_beta)
-    else 0.5
-  in
-  p "stateDiagram-v2\n";
-  p "    state Running {\n";
-  p "        [*] --> NormalOps\n";
-  p "    }\n";
-  p "    state Failing {\n";
-  p "        [*] --> RecoveryPending\n";
-  p "        RecoveryPending --> TurnAttempt: recovery floor\n";
-  p "        TurnAttempt --> TurnAttempt: turn fails\n";
-  p "        TurnAttempt --> RecoveryReady: turn succeeds\n";
-  p "    }\n";
-  p "    Running --> Failing: consecutive failures\n";
-  p "    Failing --> Running: heartbeat_ok\n";
-  p "    Running --> Running: shard restored\n";
-  p "\n";
-  p "    classDef active fill:#22c55e,stroke:#16a34a,color:#fff,stroke-width:3px\n";
-  p "    classDef warn fill:#f59e0b,stroke:#d97706,color:#fff,stroke-width:3px\n";
-  p "    classDef off fill:#6b7280,stroke:#4b5563,color:#fff\n";
-  (match phase with
-   | Keeper_state_machine.Running ->
-     p "    class Running active\n"
-   | Keeper_state_machine.Failing ->
-     p "    class Failing warn\n"
-   | _ ->
-     p "    class Running off\n";
-     p "    class Failing off\n");
-  p "\n";
-  let outcome_str = match turn_outcome with
-    | Some `Ok -> "ok"
-    | Some `Failed -> "failed"
-    | None -> "n/a"
-  in
-  p "    note right of Running\n";
-  p "      Thompson: %.2f (α=%.1f β=%.1f)\n" score thompson_alpha thompson_beta;
-  p "      Turn outcome: %s\n" outcome_str;
-  p "    end note\n";
-  Buffer.contents b
-
-(* ================================================================ *)
 (* Runtime FSM Mermaid diagram                                      *)
 (* ================================================================ *)
 

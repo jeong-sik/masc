@@ -149,7 +149,7 @@ describe('ChatTranscript', () => {
   })
 
   it('renders failure rows as a typed card with collapsed diagnostic detail', async () => {
-    const text = 'Keeper request failed: Internal error: [masc_oas_error] {"kind":"accept_rejected","scope":"ollama_cloud.deepseek-v4-flash","reason_kind":"no_usable_progress","last_tool_effect":"mutating"}'
+    const text = 'Keeper request failed: Internal error: [masc_oas_error] {"kind":"accept_rejected","scope":"ollama_cloud.deepseek-v4-flash","reason_kind":"no_usable_progress"}'
     render(
       html`<${ChatTranscript}
         entries=${[

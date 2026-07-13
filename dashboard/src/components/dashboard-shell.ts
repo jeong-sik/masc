@@ -831,29 +831,6 @@ function shortCommit(commit: string | null | undefined): string {
   return value.length > 10 ? value.slice(0, 10) : value
 }
 
-/** Canonical upstream repo. Used to resolve commit-hash text into a
-    clickable GitHub permalink. Hard-coded because this is the only
-    origin the dashboard is ever built from — a future fork would
-    override this via a build-time constant, not a runtime flag. */
-const UPSTREAM_REPO = 'jeong-sik/masc'
-
-/** Pure: turn a raw commit hash into a GitHub commit URL. Returns
-    null for empty / non-hex-looking input so the dropdown renders
-    the plain string for dev builds without creating a bogus link.
-    Reference: Vercel / Railway / Render deployment dashboards always
-    link commit hashes out to the source host — operators who land
-    on the build identity dropdown usually want the diff, not the
-    hash itself. */
-function githubCommitUrl(commit: string | null | undefined): string | null {
-  const value = commit?.trim() ?? ''
-  if (value === '') return null
-  // Accept full (40-char) or short (≥ 7 char) hex SHAs only. Anything
-  // else (dev labels, semver, free text) gets rendered as plain text
-  // so we never produce a link to github.com/.../commit/dev.
-  if (!/^[0-9a-f]{7,40}$/i.test(value)) return null
-  return `https://github.com/${UPSTREAM_REPO}/commit/${value}`
-}
-
 /** Pure: render uptime seconds as a human-readable duration for the
     build-identity dropdown. Delegates to formatElapsedCompact ("3s",
     "5m 10s", "2h 30m"). Negative / NaN / non-number inputs return
@@ -925,20 +902,7 @@ export function BuildIdentityBadge() {
                 <strong class="text-[color:var(--color-fg-secondary)] text-right">${build?.release_version ?? status?.version ?? 'unknown'}</strong>
               <//>
               <${BuildInfoRow} label="Commit">
-                ${(() => {
-                  const url = githubCommitUrl(build?.commit)
-                  const text = build?.commit ?? 'git not detected (dev)'
-                  return url !== null
-                    ? html`<a
-                        href=${url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        class="v2-mobile-operator-target inline-flex items-center text-right font-bold text-[color:var(--color-fg-secondary)] underline decoration-dotted underline-offset-2 decoration-[color:var(--color-fg-disabled)] hover:decoration-[color:var(--color-accent-fg)] hover:text-[color:var(--color-accent-fg)]"
-                        data-build-commit-link
-                        title="View this commit on GitHub"
-                      >${text} ↗</a>`
-                    : html`<strong class="text-[color:var(--color-fg-secondary)] text-right">${text}</strong>`
-                })()}
+                <strong class="text-[color:var(--color-fg-secondary)] text-right">${build?.commit ?? 'git not detected (dev)'}</strong>
               <//>
               <${BuildInfoRow} label="Server started">
                 <strong class="text-[color:var(--color-fg-secondary)] text-right">${build?.started_at ? html`<${TimeAgo} timestamp=${build.started_at} />` : 'Unknown'}</strong>

@@ -392,7 +392,8 @@ let with_unix_capture ?env ?cwd ?stdin_content ?(capture_stderr = false)
                     kill_and_wait status_ref
                   end else
                     (try
-                       ignore (Unix.select [] [] [] (select_wait ()))
+                       let _ready = Unix.select [] [] [] (select_wait ()) in
+                       ()
                      with Unix.Unix_error (Unix.EINTR, _, _) -> ())
             done;
             close_quietly stdout_r;
@@ -502,7 +503,13 @@ let reap_proc_with_clock clock proc =
     try
       Eio.Process.signal proc sig_;
       Eio.Process.await proc |> ignore
-    with _ -> ()
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn ->
+      Log.Misc.warn
+        "[Process_eio] failed to signal/reap child with signal=%d: %s"
+        sig_
+        (Printexc.to_string exn)
   in
   try
     Eio.Process.signal proc Sys.sigterm;
@@ -510,7 +517,34 @@ let reap_proc_with_clock clock proc =
        Eio.Time.with_timeout_exn clock 2.0 (fun () ->
          Eio.Process.await proc |> ignore)
      with Eio.Time.Timeout -> signal_and_await Sys.sigkill)
-  with _ -> signal_and_await Sys.sigkill
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Log.Misc.warn
+      "[Process_eio] graceful child reap failed; escalating to SIGKILL: %s"
+      (Printexc.to_string exn);
+    signal_and_await Sys.sigkill
+
+let finalize_spawned_proc ~clock proc status flows =
+  (* The spawned process handle owns a daemon that resolves [await]. Once the
+     owning switch is cancelled that daemon is cancelled too, so awaiting it
+     here would deadlock the switch before its release hook can reap the child.
+     Record that state before entering the protected cleanup context. *)
+  let owning_switch_cancelled = Eio.Fiber.is_cancelled () in
+  Eio.Cancel.protect (fun () ->
+    List.iter (fun (label, flow) -> close_flow_best_effort label flow) flows;
+    if Option.is_none !status then
+      if owning_switch_cancelled then
+        (* The owning Eio switch release hook performs the non-cancellable
+           SIGKILL/waitpid before [Switch.run] re-raises the cancellation. *)
+        (try Eio.Process.signal proc Sys.sigterm with
+         | Eio.Cancel.Cancelled _ as exn -> raise exn
+         | exn ->
+           Log.Misc.warn
+             "[Process_eio] failed to request child termination during switch cancellation: %s"
+             (Printexc.to_string exn))
+      else
+        reap_proc_with_clock clock proc)
 
 (** Spawn a process with explicit pipes and drain stdout/stderr into buffers
     before returning.  This avoids a race where [Eio.Process.await] returns
@@ -533,16 +567,12 @@ let spawn_and_drain_stdout ?phase_ref ~sw pm ~cwd ?env ?stdin_source ~clock argv
   Option.iter (fun r -> r := Timeout_origin.Command) phase_ref;
   Eio.Flow.close stdout_w;
   let status = ref None in
-  (* fun-protect-finally-ok: finalizer only closes pipe FDs and reaps an
-     already-spawned Eio.Process handle bound to [sw]; it does not acquire new
-     Eio resources or yield to the scheduler. *)
+  (* The finalizer closes pipe FDs and cancellation-protects the complete
+     cleanup. On ordinary exceptions it reaps directly; on switch cancellation
+     the owning Eio process hook performs the protected reap. *)
   Fun.protect
     ~finally:(fun () ->
-      if Option.is_none !status then (
-        close_flow_best_effort "stdout" stdout_r;
-        reap_proc_with_clock clock proc
-      ) else
-        Eio.Flow.close stdout_r)
+      finalize_spawned_proc ~clock proc status [ "stdout", stdout_r ])
     (fun () ->
       Eio.Flow.copy stdout_r (Eio.Flow.buffer_sink stdout_buf);
       Eio.Flow.close stdout_r;
@@ -570,19 +600,11 @@ let spawn_and_drain_both ?phase_ref ~sw pm ~cwd ?env ?stdin_source ~clock argv s
   Eio.Flow.close stdout_w;
   Eio.Flow.close stderr_w;
   let status = ref None in
-  (* fun-protect-finally-ok: finalizer only closes pipe FDs and reaps an
-     already-spawned Eio.Process handle bound to [sw]; it does not acquire new
-     Eio resources or yield to the scheduler. *)
+  (* Cancellation-protected yielding cleanup; see [spawn_and_drain_stdout]. *)
   Fun.protect
     ~finally:(fun () ->
-      if Option.is_none !status then (
-        close_flow_best_effort "stdout" stdout_r;
-        close_flow_best_effort "stderr" stderr_r;
-        reap_proc_with_clock clock proc
-      ) else (
-        Eio.Flow.close stdout_r;
-        Eio.Flow.close stderr_r
-      ))
+      finalize_spawned_proc ~clock proc status
+        [ "stdout", stdout_r; "stderr", stderr_r ])
     (fun () ->
       Eio.Fiber.both
         (fun () ->
@@ -632,19 +654,11 @@ let spawn_and_drain_both_streaming ?phase_ref ~sw pm ~cwd ?env ?stdin_source ~cl
       drain r buf ~on_chunk chunk
   in
   let status = ref None in
-  (* fun-protect-finally-ok: finalizer only closes pipe FDs and reaps an
-     already-spawned Eio.Process handle bound to [sw]; it does not acquire new
-     Eio resources or yield to the scheduler. *)
+  (* Cancellation-protected yielding cleanup; see [spawn_and_drain_stdout]. *)
   Fun.protect
     ~finally:(fun () ->
-      if Option.is_none !status then (
-        close_flow_best_effort "stdout" stdout_r;
-        close_flow_best_effort "stderr" stderr_r;
-        reap_proc_with_clock clock proc
-      ) else (
-        Eio.Flow.close stdout_r;
-        Eio.Flow.close stderr_r
-      ))
+      finalize_spawned_proc ~clock proc status
+        [ "stdout", stdout_r; "stderr", stderr_r ])
     (fun () ->
       Eio.Fiber.both
         (fun () ->

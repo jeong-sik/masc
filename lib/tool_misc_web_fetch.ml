@@ -364,7 +364,7 @@ let truncate_text ~max_chars text =
 (** Response cache. Authorization and admission belong to the Keeper Gate; this
     leaf does not maintain a second, process-local request limiter. *)
 type cache_entry = {
-  response : string;
+  response : Yojson.Safe.t;
   expires_at : float;
 }
 
@@ -624,21 +624,7 @@ let handle ~tool_name ~start_time args : Tool_result.result =
     | None -> make_workflow_err "extractMode must be one of: markdown, text"
     | Some extract_mode ->
       let extract_mode_label = extract_mode_to_string extract_mode in
-            (* RFC-0189 follow-up — store the parsed JSON envelope in
-               [~data] instead of wrapping as [`Assoc [ "text", `String body ]].
-               The wrapped form corrupted [result.message] for callers (and
-               tests) that round-tripped through [parse_json result.message],
-               because the wrapper was serialised instead of the envelope. Both
-               the cache and fresh paths produce [Tool_args.ok_response] strings,
-               so both go through
-               [structured_payload_of_message]; plain-text fallback retained
-               only for defence in depth. *)
-      let ok_from_envelope body =
-        let data =
-          match Tool_result.structured_payload_of_message body with
-          | Some json -> json
-          | None -> `String body
-        in
+      let ok_from_data data =
         Tool_result.make_ok ~tool_name ~start_time ~data ()
       in
       let now = Unix.gettimeofday () in
@@ -648,7 +634,7 @@ let handle ~tool_name ~start_time args : Tool_result.result =
           [ url; Int.to_string timeout; extract_mode_label; Int.to_string max_chars ]
       in
       match cache_lookup key now with
-      | Some cached -> ok_from_envelope cached
+      | Some cached -> ok_from_data cached
       | None ->
         (match fetch_impl ~url ~timeout_sec:timeout ~extract_mode ~max_chars with
                     | Ok
@@ -691,9 +677,9 @@ let handle ~tool_name ~start_time args : Tool_result.result =
                           | Some d -> [ ("description", `String d) ]
                           | None -> [])
                         in
-                        let json = Tool_args.ok_response fields in
-                        cache_store key json now;
-                        ok_from_envelope json
+                        let data = Tool_args.ok_assoc fields in
+                        cache_store key data now;
+                        ok_from_data data
          | Error failure ->
            Tool_result.make_err
              ~tool_name

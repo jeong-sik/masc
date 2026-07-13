@@ -131,8 +131,6 @@ type runtime_exhaustion_reason = Keeper_internal_error.runtime_exhaustion_reason
 type blocker_class =
   | Runtime_exhausted of runtime_exhaustion_reason
   | Capacity_backpressure
-  | Ambiguous_post_commit_timeout
-  | Ambiguous_post_commit_failure
   | Turn_timeout
   | Fiber_unresolved
   | Stale_turn_timeout

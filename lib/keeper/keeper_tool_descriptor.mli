@@ -1,7 +1,7 @@
 (** Agent-facing tool descriptor spine.
 
     This module owns the schema-allowed capability names and their projection to
-    internal keeper handlers.  Domain modules such as shell, GitHub, and
+    internal keeper handlers.  Domain modules such as shell, connector, and
     filesystem remain implementation details behind the descriptor-selected
     executor/backend/sandbox route. *)
 

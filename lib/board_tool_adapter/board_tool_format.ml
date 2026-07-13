@@ -77,8 +77,7 @@ let board_error_failure_class = function
 ;;
 
 (* RFC-0189 PR-1b.2 — typed helper. Returns [Tool_result.result] directly
-   so the [~class_] decision is committed at the catch boundary instead
-   of going through [classify_from_structured_failure_message]. Pre-RFC
+   so the [~class_] decision is committed at the catch boundary. Pre-RFC
    version returned legacy [t] with [?failure_class:option] — the new
    shape collapses two illegal states (None-on-failure, Some-on-success)
    by construction. *)

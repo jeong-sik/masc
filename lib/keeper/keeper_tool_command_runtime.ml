@@ -12,6 +12,7 @@ let rewrite_docker_host_paths_to_container =
 (* TEL-OK: facade alias only; the Execute handler owns
    execution telemetry and history recording. *)
 let handle_tool_execute = Keeper_tool_execute_runtime.handle_tool_execute
+let handle_tool_execute_with_outcome = Keeper_tool_execute_runtime.handle_tool_execute_with_outcome
 
 include Keeper_workspace_ops
 

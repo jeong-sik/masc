@@ -602,6 +602,40 @@ runtime_ref = "tool-runtime"
            check bool "mentions removed runtime_ref" true
              (contains_substring msg "keeper.runtime_ref"))
 
+let test_profile_rejects_removed_shards_key () =
+  let input = {|
+[keeper]
+goal = "test"
+shards = ["base", "voice"]
+|} in
+  match TL.parse_toml input with
+  | Error e -> fail e
+  | Ok doc ->
+    (match KTP.profile_defaults_of_toml doc with
+     | Ok _ -> fail "expected removed keeper.shards error"
+     | Error msg ->
+       check bool
+         "mentions removed shards key"
+         true
+         (contains_substring msg "keeper.shards"))
+
+let test_profile_rejects_removed_voice_policy_key () =
+  let input = {|
+[keeper]
+goal = "test"
+policy_voice_enabled = true
+|} in
+  match TL.parse_toml input with
+  | Error e -> fail e
+  | Ok doc ->
+    (match KTP.profile_defaults_of_toml doc with
+     | Ok _ -> fail "expected removed keeper.policy_voice_enabled error"
+     | Error msg ->
+       check bool
+         "mentions removed voice policy key"
+         true
+         (contains_substring msg "keeper.policy_voice_enabled"))
+
 (* ================================================================ *)
 (* File loading tests                                                *)
 (* ================================================================ *)
@@ -1195,6 +1229,32 @@ let test_persona_defaults_load_prompt_fields () =
     defaults.goal;
   check (option string) "instructions load" (Some "legacy instructions")
     defaults.instructions
+
+let test_persona_defaults_reject_removed_shards () =
+  with_personas_dir @@ fun personas_dir ->
+  let persona_dir = Filename.concat personas_dir "probe" in
+  mkdir_p persona_dir;
+  write_file
+    (Filename.concat persona_dir "profile.json")
+    {|
+{
+  "name": "Probe",
+  "keeper": {
+    "goal": "test persona keeper",
+    "shards": ["base", "voice"],
+    "policy_voice_enabled": true
+  }
+}
+|};
+  match KTP.load_keeper_profile_defaults_result "probe" with
+  | Ok _ -> fail "removed persona keeper.shards must fail loading"
+  | Error error ->
+    let detail = KTP.keeper_toml_load_error_to_string error in
+    check bool "persona error names shards" true (contains_substring detail "shards");
+    check bool
+      "persona error names voice policy"
+      true
+      (contains_substring detail "policy_voice_enabled")
 
 let test_persona_resolver_rejects_operator_todo_profile () =
   with_personas_dir @@ fun personas_dir ->
@@ -1970,6 +2030,10 @@ let () =
             test_profile_rejects_removed_initiative_keys;
           test_case "rejects removed ref keys" `Quick
             test_profile_rejects_removed_ref_keys;
+          test_case "rejects removed shards key" `Quick
+            test_profile_rejects_removed_shards_key;
+          test_case "rejects removed voice policy key" `Quick
+            test_profile_rejects_removed_voice_policy_key;
           test_case "rejects keeper.runtime_id key" `Quick
             test_profile_rejects_runtime_id_key;
           test_case "rejects keeper.model key" `Quick
@@ -2068,6 +2132,8 @@ let () =
             test_bundled_issue_king_uses_local_sandbox;
           test_case "persona defaults load prompt fields" `Quick
             test_persona_defaults_load_prompt_fields;
+          test_case "persona defaults reject removed shards" `Quick
+            test_persona_defaults_reject_removed_shards;
           test_case "persona resolver rejects OPERATOR_TODO profile" `Quick
             test_persona_resolver_rejects_operator_todo_profile;
           test_case "persona resolver reports placeholder defaults source" `Quick

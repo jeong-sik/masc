@@ -162,7 +162,7 @@ let direct_no_progress_retry_reason err =
     (match Keeper_turn_driver.accept_no_progress_retry_kind internal_error with
      | Some `Empty_no_progress -> Some EC.Empty_no_progress
      | Some `Thinking_only_no_progress -> Some EC.Thinking_only_no_progress
-     | Some `Read_only_no_progress | None -> None)
+     | None -> None)
   | None -> None
 
 let retry_reason_is_direct_no_progress (retry : EC.degraded_retry) =

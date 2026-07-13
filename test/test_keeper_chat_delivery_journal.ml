@@ -361,7 +361,7 @@ let test_chat_append_once_converges_across_processes () =
     await_child second;
     let matching_rows =
       Keeper_chat_store.load ~base_dir:base_path ~keeper_name:"sangsu"
-      |> List.filter (fun row ->
+      |> List.filter (fun (row : Keeper_chat_store.chat_message) ->
            Keeper_chat_store.Role.equal row.role Keeper_chat_store.Role.User
            && String.equal row.content "cross-process request")
     in

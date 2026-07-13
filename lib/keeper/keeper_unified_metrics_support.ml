@@ -460,9 +460,11 @@ let observed_affordances_of_observation
     (observation : Keeper_world_observation.world_observation) : string list =
   let affordances = ref [] in
   let add affordance = affordances := affordance :: !affordances in
-  if observation.pending_board_events <> [] then add "board_post_or_comment";
+  if observation.pending_board_events <> []
+  then (
+    add "board_post_or_comment";
+    add "board_curation");
   let _ = meta in
-  if List.length observation.pending_board_events >= 2 then add "board_curation";
   if Keeper_world_observation_message_scope.has_kind
        Keeper_world_observation_message_scope.Scope observation.pending_messages
   then add "message_sweep";

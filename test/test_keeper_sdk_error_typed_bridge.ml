@@ -54,13 +54,13 @@ let api_cases : (string * SdkE.api_error * string) list =
     , Retry.NetworkError { message = "ECONNRESET"; kind = Http.Connection_refused }
     , "api_error_network" )
   ; "Timeout", Retry.Timeout { message = "60s"; phase = None }, "api_error_timeout"
-  ; ( "StructuralTimeout"
+  ; ( "TimeoutWithExecutionBudgetProse"
     , Retry.Timeout
         { message =
             "Turn wall-clock budget exhausted during runtime attempt (budget=554.9s)"
         ; phase = None
         }
-    , "api_error_oas_agent_execution_timeout" )
+    , "api_error_timeout" )
   ]
 ;;
 
@@ -274,9 +274,6 @@ let test_user_message_of_masc_accept_rejected () =
          ; reason_kind = Some KTD.Accept_no_usable_progress
          ; response_shape = Some KTD.Accept_response_empty
          ; stop_reason = None
-         ; last_tool_effect = None
-         ; any_mutating_tool = None
-         ; tool_effects_seen = []
          ; reason =
              "response rejected by accept (runtime=runpod_fable5.gemma4-coder-fable5): \
               shape=empty; stop_reason=end_turn"
@@ -419,7 +416,7 @@ let runtime_runner_legacy_tls_text_error () =
 ;;
 
 let test_static_error_classification_preserves_retry_semantics () =
-  let structural_timeout =
+  let execution_budget_prose =
     "Turn wall-clock budget exhausted during runtime attempt (budget=554.9s)"
   in
   check_classification
@@ -429,13 +426,23 @@ let test_static_error_classification_preserves_retry_semantics () =
        (Retry.NetworkError
           { message = "connection refused"; kind = Http.Connection_refused }));
   check_classification
-    "api structural timeout"
-    EC.Transient_oas_timeout
-    (SdkE.Api (Retry.Timeout { message = structural_timeout; phase = None }));
+    "api timeout prose is not behavioral"
+    EC.Transient_network
+    (SdkE.Api (Retry.Timeout { message = execution_budget_prose; phase = None }));
   check_classification
     "api transport timeout"
     EC.Transient_network
     (SdkE.Api (Retry.Timeout { message = "read timed out"; phase = None }));
+  check_classification
+    "typed agent execution timeout"
+    EC.Transient_oas_timeout
+    (SdkE.Agent
+       (SdkE.AgentExecutionTimeout
+          { elapsed_sec = 60.0
+          ; timeout_sec = 60.0
+          ; turn_count = 2
+          ; max_turns = 10
+          }));
   check_classification
     "internal runner tls"
     EC.Transient_internal_runner
@@ -471,11 +478,14 @@ let test_static_error_classification_preserves_retry_semantics () =
           ; detail = "tls failed"
           }));
   check_classification
-    "provider timeout structural"
-    EC.Transient_oas_timeout
+    "provider timeout prose is not behavioral"
+    EC.Transient_network
     (SdkE.Provider
        (Llm_provider.Error.Timeout
-          { provider = "p"; timeout_phase = None; detail = structural_timeout }));
+          { provider = "p"
+          ; timeout_phase = Some Http.Http_operation
+          ; detail = execution_budget_prose
+          }));
   check_classification
     "provider server 524"
     EC.Transient_network
@@ -636,23 +646,6 @@ let provider_unavailable =
        { provider = "server-error-test"; detail = "HTTP 503 retry-after exhausted" })
 ;;
 
-let read_only_no_progress_err ~scope =
-  KTD.sdk_error_of_masc_internal_error
-    (KTD.Accept_rejected
-       { scope
-       ; model = None
-       ; reason_kind = Some KTD.Accept_no_usable_progress
-       ; response_shape = Some KTD.Accept_response_thinking_only
-       ; stop_reason = None
-       ; last_tool_effect = Some KTD.Tool_effect_read_only
-       ; any_mutating_tool = Some false
-       ; tool_effects_seen = [ KTD.Tool_effect_read_only ]
-       ; reason =
-           "response rejected by accept (runtime=same.b): shape=thinking_only; \
-            stop_reason=end_turn; last_tool=WebFetch; last_tool_effect=read_only"
-       })
-;;
-
 let generic_accept_rejected_err ~scope =
   KTD.sdk_error_of_masc_internal_error
     (KTD.Accept_rejected
@@ -661,9 +654,6 @@ let generic_accept_rejected_err ~scope =
        ; reason_kind = Some KTD.Accept_predicate_rejected
        ; response_shape = Some KTD.Accept_response_mixed_without_deliverable_content
        ; stop_reason = None
-       ; last_tool_effect = None
-       ; any_mutating_tool = Some false
-       ; tool_effects_seen = []
        ; reason =
            "response rejected by accept: predicate failed without accepted \
             deliverable content"
@@ -678,17 +668,6 @@ let test_generic_accept_rejected_is_not_locally_recoverable () =
     Alcotest.failf
       "generic accept rejection should not be recoverable, got %s"
       (EC.degraded_retry_reason_to_string reason)
-;;
-
-let test_read_only_no_progress_remains_recoverable_not_contract () =
-  let err = read_only_no_progress_err ~scope:"same.a" in
-  match EC.recoverable_runtime_failure_reason err with
-  | Some EC.Read_only_no_progress -> ()
-  | Some reason ->
-    Alcotest.failf
-      "expected read_only_no_progress, got %s"
-      (EC.degraded_retry_reason_to_string reason)
-  | None -> Alcotest.fail "expected read_only_no_progress recoverable reason"
 ;;
 
 let test_soft_rate_limit_skips_same_credential_pool () =
@@ -787,54 +766,6 @@ let test_server_error_classifies_as_runtime_recoverable () =
   | None -> Alcotest.fail "expected server_error recoverable reason"
 ;;
 
-let test_read_only_no_progress_rotates_to_default_runtime () =
-  init_rate_limit_pool_runtime ();
-  let err = read_only_no_progress_err ~scope:"same.b" in
-  (match EC.recoverable_runtime_failure_reason err with
-   | Some EC.Read_only_no_progress -> ()
-   | Some reason ->
-     Alcotest.failf
-       "expected read_only_no_progress, got %s"
-       (EC.degraded_retry_reason_to_string reason)
-   | None -> Alcotest.fail "expected read_only_no_progress recoverable reason");
-  match
-    EC.degraded_rotation_after_recoverable_error
-      ~base_runtime:"same.b"
-      ~effective_runtime:"same.b"
-      ~attempted_runtimes:[ "same.b" ]
-      err
-  with
-  | Some { EC.next_runtime = "same.a"; fallback_reason = EC.Read_only_no_progress } ->
-    ()
-  | Some { next_runtime; fallback_reason } ->
-    Alcotest.failf
-      "expected read_only_no_progress -> same.a, got %s -> %s"
-      (EC.degraded_retry_reason_to_string fallback_reason)
-      next_runtime
-  | None -> Alcotest.fail "expected read-only no-progress rotation"
-;;
-
-let test_read_only_no_progress_default_runtime_uses_tool_capable_candidate () =
-  init_rate_limit_pool_runtime ();
-  let err = read_only_no_progress_err ~scope:"same.a" in
-  match
-    EC.degraded_rotation_after_recoverable_error
-      ~base_runtime:"same.a"
-      ~effective_runtime:"same.a"
-      ~attempted_runtimes:[ "same.a" ]
-      err
-  with
-  | Some { EC.next_runtime = "same.b"; fallback_reason = EC.Read_only_no_progress } ->
-    ()
-  | Some { next_runtime; fallback_reason } ->
-    Alcotest.failf
-      "expected read_only_no_progress -> same.b, got %s -> %s"
-      (EC.degraded_retry_reason_to_string fallback_reason)
-      next_runtime
-  | None ->
-    Alcotest.fail "expected read-only no-progress to rotate to a tool-capable runtime"
-;;
-
 let test_rate_limit_exhaustion_stops_after_candidate_pass () =
   init_rate_limit_pool_runtime ();
   let attempted = [ "same.a"; "same.b"; "other.c" ] in
@@ -852,6 +783,30 @@ let test_rate_limit_exhaustion_stops_after_candidate_pass () =
     Alcotest.failf
       "an exhausted candidate pass must not invent another cycle, got %s"
       next_runtime
+;;
+
+let test_receipt_persistence_failure_is_typed () =
+  let err =
+    KTD.sdk_error_of_masc_internal_error
+      (KTD.Receipt_persistence_failed { detail = "disk unavailable" })
+  in
+  Alcotest.(check bool)
+    "typed receipt failure is recognized"
+    true
+    (EC.is_receipt_lost_error err);
+  Alcotest.(check bool)
+    "similar free-form prose is not recognized"
+    false
+    (EC.is_receipt_lost_error
+       (SdkE.Internal "execution_receipt_append_failed: disk unavailable"));
+  match KTD.classify_masc_internal_error err with
+  | Some (KTD.Receipt_persistence_failed { detail }) ->
+    Alcotest.(check string) "detail round-trips" "disk unavailable" detail
+  | Some other ->
+    Alcotest.failf
+      "expected typed receipt failure, got %s"
+      (KTD.kind_of_masc_internal_error other)
+  | None -> Alcotest.fail "typed receipt failure did not decode"
 ;;
 
 let () =
@@ -878,6 +833,12 @@ let () =
             "provider and model parse rejections remain distinguishable"
             `Quick
             test_server_parse_rejection_split
+        ] )
+    ; ( "receipt persistence"
+      , [ Alcotest.test_case
+            "receipt failure uses typed provenance"
+            `Quick
+            test_receipt_persistence_failure_is_typed
         ] )
     ; ( "user-facing error message"
       , [ Alcotest.test_case
@@ -934,18 +895,6 @@ let () =
             "generic accept rejection is not locally recoverable"
             `Quick
             test_generic_accept_rejected_is_not_locally_recoverable
-        ; Alcotest.test_case
-            "read-only no-progress remains recoverable"
-            `Quick
-            test_read_only_no_progress_remains_recoverable_not_contract
-        ; Alcotest.test_case
-            "read-only no-progress accept rejection rotates to default runtime"
-            `Quick
-            test_read_only_no_progress_rotates_to_default_runtime
-        ; Alcotest.test_case
-            "default runtime read-only no-progress uses tool-capable candidate"
-            `Quick
-            test_read_only_no_progress_default_runtime_uses_tool_capable_candidate
         ; Alcotest.test_case
             "rate-limit exhaustion stops after one candidate pass"
             `Quick

@@ -570,35 +570,6 @@ let test_unknown_workspace_op_is_unsupported_before_docker () =
     (Some "future_repo_op")
     (parse_string_field raw "op")
 
-let test_turn_sandbox_file_write_uses_host_bind_mount () =
-  setup ~sandbox:Keeper_types_profile_sandbox.Docker
-  @@ fun ~config ~meta ~playground ->
-  let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta ~turn_id:1 () in
-  let target = Filename.concat playground "nested/result.txt" in
-  (match
-     Keeper_turn_sandbox_runtime.overwrite_file
-       runtime
-       ~timeout_sec:30.0
-       ~host_path:target
-       ~content:"alpha\n"
-       ()
-   with
-   | Error msg -> Alcotest.fail msg
-   | Ok () -> ());
-  (match
-     Keeper_turn_sandbox_runtime.append_file
-       runtime
-       ~timeout_sec:30.0
-       ~host_path:target
-       ~content:"beta\n"
-       ()
-   with
-   | Error msg -> Alcotest.fail msg
-   | Ok () -> ());
-  Alcotest.(check string) "content written via bind-mounted host path"
-    "alpha\nbeta\n"
-    (Fs_compat.load_file target)
-
 let tool_execute_typed_pipeline_args ~cwd =
   `Assoc
     [
@@ -2092,9 +2063,6 @@ let () =
             test_rg_no_match_remains_successful_in_docker_route;
           Alcotest.test_case "unknown workspace op is unsupported before docker" `Quick
             test_unknown_workspace_op_is_unsupported_before_docker;
-          Alcotest.test_case
-            "turn sandbox file writes use bind-mounted host path"
-            `Quick test_turn_sandbox_file_write_uses_host_bind_mount;
           Alcotest.test_case
             "turn sandbox factory uses refreshed registry meta"
             `Quick test_turn_sandbox_factory_uses_refreshed_registry_meta;

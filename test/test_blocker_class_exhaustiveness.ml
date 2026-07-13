@@ -28,8 +28,6 @@ let all_variants : blocker_class list =
   ; Runtime_exhausted (Structural_attempt_timeout { detail = "30" })
   ; Runtime_exhausted Capacity_exhausted
   ; Capacity_backpressure
-  ; Ambiguous_post_commit_timeout
-  ; Ambiguous_post_commit_failure
   ; Turn_timeout
   ; Fiber_unresolved
   ; Stale_turn_timeout
@@ -207,23 +205,40 @@ let test_agent_variant_count_pin () =
     expected_agent_variant_count count
 ;;
 
-let test_structural_timeout_maps_to_oas_timeout () =
+let test_typed_agent_timeout_maps_to_oas_timeout () =
   let structural =
-    SdkE.Api
-      (SdkRetry.Timeout
-         { message =
-             "Turn wall-clock budget exhausted during runtime attempt \
-              (budget=554.9s)"
-         ; phase = None
+    SdkE.Agent
+      (SdkE.AgentExecutionTimeout
+         { elapsed_sec = 554.9
+         ; timeout_sec = 554.9
+         ; turn_count = 4
+         ; max_turns = 10
          })
   in
   match KSB.blocker_class_of_sdk_error structural with
   | Some klass ->
     check string
-      "structural timeout maps to oas_agent_execution_timeout"
+      "typed agent timeout maps to oas_agent_execution_timeout"
       "oas_agent_execution_timeout"
       (blocker_class_to_string klass)
-  | None -> fail "structural timeout should map to Some blocker_class"
+  | None -> fail "typed agent timeout should map to Some blocker_class"
+;;
+
+let test_api_timeout_prose_does_not_map_to_agent_timeout () =
+  let api_timeout =
+    SdkE.Api
+      (SdkRetry.Timeout
+         { message =
+             "Turn wall-clock budget exhausted during runtime attempt \
+              (budget=554.9s)"
+         ; phase = Some Llm_provider.Http_client.Http_operation
+         })
+  in
+  check (option string)
+    "API timeout prose does not synthesize an agent blocker"
+    None
+    (KSB.blocker_class_of_sdk_error api_timeout
+     |> Option.map blocker_class_to_string)
 ;;
 
 let test_provider_timeout_is_not_runtime_blocker () =
@@ -336,9 +351,6 @@ let test_masc_accept_rejected_provider_record_does_not_reparse_detail () =
          ; reason_kind = Some KTD.Accept_no_usable_progress
          ; response_shape = Some KTD.Accept_response_empty
          ; stop_reason = None
-         ; last_tool_effect = None
-         ; any_mutating_tool = None
-         ; tool_effects_seen = []
          ; reason = "shape=empty; stop_reason=end_turn"
          })
   in
@@ -370,8 +382,10 @@ let () =
       , [ test_case "all Agent variants are intentionally classified" `Quick
             test_all_agent_variants_classified_intentionally
         ; test_case "Agent variant count pin" `Quick test_agent_variant_count_pin
-        ; test_case "structural timeout → oas_agent_execution_timeout" `Quick
-            test_structural_timeout_maps_to_oas_timeout
+        ; test_case "typed agent timeout → oas_agent_execution_timeout" `Quick
+            test_typed_agent_timeout_maps_to_oas_timeout
+        ; test_case "API timeout prose does not synthesize agent timeout" `Quick
+            test_api_timeout_prose_does_not_map_to_agent_timeout
         ; test_case "provider timeout is not a runtime blocker" `Quick
             test_provider_timeout_is_not_runtime_blocker
         ] )

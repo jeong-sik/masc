@@ -11,7 +11,6 @@
 type turn_state =
   { cycle_completed : bool
   ; manifest_seq : int
-  ; post_commit_failure_reason : Keeper_registry.failure_reason option
   ; current_turn_blocker_info : Keeper_meta_contract.blocker_info option
   ; last_execution : Keeper_turn_runtime_budget.runtime_execution option
   ; last_provider_timeout_budget : Keeper_turn_runtime_budget.provider_timeout_budget option
@@ -47,8 +46,7 @@ type turn_tool_event_tracker
 val create_turn_tool_event_tracker : unit -> turn_tool_event_tracker
 val turn_tool_event_integrity_error :
   turn_tool_event_tracker -> Agent_sdk.Error.sdk_error option
-val committed_mutating_tools_from_events :
-  turn_tool_event_tracker -> string list
+val turn_tool_completed_count : turn_tool_event_tracker -> int
 
 (** Append [input] to the pending FIFO queue for [tool_name]. Returns the
     updated tracker. *)
@@ -62,24 +60,19 @@ val pop_turn_tool_input :
   turn_tool_event_tracker -> string -> Yojson.Safe.t option * turn_tool_event_tracker
 
 (** Record an unmatched [ToolCompleted] (no prior [ToolCalled]) into the
-    tracker. Logs an integrity error via [Log.Keeper.error], appends to
-    the committed mutating tools when [tool_committed] AND the tool has a
-    mutating side-effect, and stores the first observed integrity error.
+    tracker. Logs the violation and stores the first observed integrity error.
     Returns the updated tracker. *)
 val record_unmatched_tool_completed :
   turn_tool_event_tracker ->
   keeper_name:string ->
   tool_name:string ->
   outcome:string ->
-  tool_committed:bool ->
   turn_tool_event_tracker
 
 (** Drive the tracker over a batch of [Agent_sdk.Event_bus.event]s,
-    matching [ToolCalled] <-> [ToolCompleted] pairs and recording
-    integrity violations + committed mutating tools. Returns the updated
-    tracker. *)
+    matching [ToolCalled] <-> [ToolCompleted] pairs and recording integrity
+    violations. Returns the updated tracker. *)
 val record_turn_tool_events :
-  ?has_mutating_side_effect_with_input:(tool_name:string -> input:Yojson.Safe.t -> bool) ->
   keeper_name:string ->
   turn_tool_event_tracker ->
   Agent_sdk.Event_bus.event list ->

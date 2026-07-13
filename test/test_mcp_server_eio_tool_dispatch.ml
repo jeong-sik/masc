@@ -1,6 +1,7 @@
 module Mcp_eio = Masc.Mcp_server_eio
 module Mcp_server = Masc.Mcp_server
 module Tool_dispatch = Tool_dispatch
+module Tool_catalog = Tool_catalog
 module Tool_result = Tool_result
 
 let () = Mirage_crypto_rng_unix.use_default ()
@@ -21,10 +22,9 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
-let create_admin_token base_path =
+let create_admin_token ?(agent_name = "stable-admin") base_path =
   match
-    Masc.Auth.create_token base_path ~agent_name:"stable-admin"
-      ~role:Masc_domain.Admin
+    Masc.Auth.create_token base_path ~agent_name ~role:Masc_domain.Admin
   with
   | Ok (token, _cred) -> token
   | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e)
@@ -106,6 +106,67 @@ let test_execute_tool_tag_dispatch_respects_pre_hooks () =
       Alcotest.(check string) "blocked message returned" "blocked-by-pre-hook"
         ((Tool_result.message hook_result)))
 
+let test_tool_metadata_does_not_gate_heartbeat () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let tool_name = "masc_tool_help" in
+  let original_metadata = Tool_catalog.metadata tool_name in
+  Fun.protect
+    ~finally:(fun () ->
+      Tool_catalog.register_metadata tool_name original_metadata;
+      cleanup_dir base_path)
+    (fun () ->
+      let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+      let config = Mcp_server.workspace_config state in
+      let agent_name = "heartbeat-test-agent" in
+      ignore (Masc.Workspace.init config ~agent_name:(Some agent_name));
+      let raw_token = create_admin_token ~agent_name base_path in
+      let agent_file =
+        Filename.concat
+          (Masc.Workspace.agents_dir config)
+          (Masc.Workspace.safe_filename agent_name ^ ".json")
+      in
+      let stale_last_seen = "2000-01-01T00:00:00Z" in
+      let set_stale_last_seen () =
+        let agent =
+          Masc.Workspace.get_agents_raw config
+          |> List.find (fun (agent : Masc_domain.agent) ->
+            String.equal agent.name agent_name)
+        in
+        Masc.Workspace.write_json
+          config
+          agent_file
+          (Masc_domain.agent_to_yojson { agent with last_seen = stale_last_seen })
+      in
+      let assert_heartbeat implementation_status label =
+        Tool_catalog.register_metadata
+          tool_name
+          { original_metadata with implementation_status };
+        set_stale_last_seen ();
+        ignore
+          (Mcp_eio.execute_tool_eio
+             ~sw
+             ~clock
+             ~auth_token:raw_token
+             state
+             ~name:tool_name
+             ~arguments:(`Assoc [ "tool_name", `String "masc_status" ]));
+        let last_seen =
+          Masc.Workspace.get_agents_raw config
+          |> List.find (fun (agent : Masc_domain.agent) ->
+            String.equal agent.name agent_name)
+          |> fun (agent : Masc_domain.agent) -> agent.last_seen
+        in
+        Alcotest.(check bool) label true (not (String.equal last_seen stale_last_seen))
+      in
+      assert_heartbeat Tool_catalog.Simulation "simulation call heartbeats";
+      assert_heartbeat Tool_catalog.Placeholder "placeholder call heartbeats")
+
 let () =
   Alcotest.run "Mcp_server_eio_tool_dispatch"
     [
@@ -115,5 +176,8 @@ let () =
           ( "execute tag dispatch respects pre-hooks",
             `Quick,
             test_execute_tool_tag_dispatch_respects_pre_hooks );
+          ( "tool metadata does not gate heartbeat",
+            `Quick,
+            test_tool_metadata_does_not_gate_heartbeat );
         ] );
     ]

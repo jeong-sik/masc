@@ -513,9 +513,7 @@ let toggle_reaction store ~target_type ~target_id ~user_id ~emoji
           in
           Ok { target_type; target_id; user_id = user_id_string; emoji; reacted; summary })
     in
-    (match result with
-     | Ok _ -> rewrite_reactions store
-     | Error _ -> ());
+    Result.iter (fun _ -> rewrite_reactions store) result;
     result
 ;;
 
@@ -668,9 +666,7 @@ let update_sub_board
         Hashtbl.replace store.sub_boards (Sub_board_id.to_string sb.id) updated;
         Ok updated)
   in
-  (match result with
-   | Ok _ -> rewrite_sub_boards store
-   | Error _ -> ());
+  Result.iter (fun _ -> rewrite_sub_boards store) result;
   result
 ;;
 

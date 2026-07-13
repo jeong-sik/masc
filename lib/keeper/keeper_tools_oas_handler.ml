@@ -38,8 +38,19 @@ let make_keeper_tool_handler
   fun raw_input ->
     let t0 = Time_compat.now () in
     let handle_validation_error ~input validation_result =
-      let raw_result = Yojson.Safe.to_string (Tool_result.data validation_result) in
-      let output_text = normalize_tool_result ~success:false raw_result in
+      let raw_result = Tool_result.message validation_result in
+      let producer_data =
+        match Tool_result.data validation_result with
+        | `String _ -> None
+        | data -> Some data
+      in
+      let output_data =
+        normalize_tool_result
+          ~success:false
+          ~data:producer_data
+          raw_result
+      in
+      let output_text = Yojson.Safe.to_string output_data in
       let duration_ms = 0 in
       let ts = Time_compat.now () in
       let error_text = Tool_result.message validation_result in
@@ -88,10 +99,13 @@ let make_keeper_tool_handler
             ; "ok", `Bool false
             ; "error", `String error_text
             ]);
-      Tool_result.error
-        ~failure_class:(Tool_result.failure_class validation_result)
+      Tool_result.make_err
+        ~class_:
+          (Tool_result.failure_class validation_result
+           |> Option.value ~default:Tool_result.Runtime_failure)
         ~tool_name:name
         ~start_time:t0
+        ~data:output_data
         output_text
       |> record_result ~input
     in

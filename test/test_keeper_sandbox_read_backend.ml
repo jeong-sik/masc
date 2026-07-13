@@ -161,6 +161,11 @@ let with_fake_docker script f =
   with_env "MASC_TEST_FAKE_DOCKER_PATH" docker_path @@ fun () ->
   with_env "PATH" path f
 
+let fake_docker_log_path () =
+  Filename.concat
+    (Filename.dirname (Sys.getenv "MASC_TEST_FAKE_DOCKER_PATH"))
+    "docker.log"
+
 let test_container_path_root_maps () =
   let base, config, meta = setup_config "minjae" in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
@@ -362,7 +367,7 @@ exit 0\n"
 
 let fake_docker_slow_run_script =
   "#!/bin/sh\n\
-log_file=${MASC_KEEPER_TEST_DOCKER_LOG:-}\n\
+log_file=\"$(dirname \"$0\")/docker.log\"\n\
 if [ \"$1\" = \"info\" ]; then\n\
   printf '[]\\n'\n\
   exit 0\n\
@@ -384,7 +389,7 @@ exit 2\n"
 
 let fake_docker_log_run_script =
   "#!/bin/sh\n\
-log_file=${MASC_KEEPER_TEST_DOCKER_LOG:-}\n\
+log_file=\"$(dirname \"$0\")/docker.log\"\n\
 if [ -n \"$log_file\" ]; then\n\
   printf '%s\\n' \"$*\" >> \"$log_file\"\n\
 fi\n\
@@ -414,7 +419,7 @@ if [ \"$1\" = \"image\" ] && [ \"$2\" = \"inspect\" ] && [ \"$3\" = \"alpine:tes
   exit 0\n\
 fi\n\
 if [ \"$1\" = \"run\" ]; then\n\
-  env > \"${MASC_KEEPER_TEST_DOCKER_LOG}.env\"\n\
+  env > \"$(dirname \"$0\")/docker.log.env\"\n\
   printf 'ok\\n'\n\
   exit 0\n\
 fi\n\
@@ -423,7 +428,7 @@ exit 2\n"
 
 let fake_docker_turn_runtime_script =
   "#!/bin/sh\n\
-log_file=${MASC_KEEPER_TEST_DOCKER_LOG:-}\n\
+log_file=\"$(dirname \"$0\")/docker.log\"\n\
 if [ -n \"$log_file\" ]; then\n\
   printf '%s\\n' \"$*\" >> \"$log_file\"\n\
 fi\n\
@@ -468,7 +473,7 @@ exit 2\n"
 
 let fake_docker_stale_streaming_retry_script =
   "#!/bin/sh\n\
-log_file=${MASC_KEEPER_TEST_DOCKER_LOG:-}\n\
+log_file=\"$(dirname \"$0\")/docker.log\"\n\
 inspect_count_file=${KEEPER_DOCKER_INSPECT_COUNT:-}\n\
 exec_count_file=${KEEPER_DOCKER_EXEC_COUNT:-}\n\
 if [ -n \"$log_file\" ]; then\n\
@@ -541,7 +546,7 @@ exit 2\n"
 
 let fake_docker_stopped_streaming_retry_script =
   "#!/bin/sh\n\
-log_file=${MASC_KEEPER_TEST_DOCKER_LOG:-}\n\
+log_file=\"$(dirname \"$0\")/docker.log\"\n\
 state_dir=$(dirname \"$0\")\n\
 run_count_file=\"$state_dir/stopped-run.count\"\n\
 exec_count_file=\"$state_dir/stopped-exec.count\"\n\
@@ -620,7 +625,7 @@ exit 2\n"
 
 let fake_docker_streaming_script =
   "#!/bin/sh\n\
-log_file=${MASC_KEEPER_TEST_DOCKER_LOG:-}\n\
+log_file=\"$(dirname \"$0\")/docker.log\"\n\
 state_dir=$(dirname \"$0\")\n\
 literal_failure_count_file=\"$state_dir/literal-failure.count\"\n\
 if [ -n \"$log_file\" ]; then\n\
@@ -782,7 +787,7 @@ exit 2\n"
 
 let fake_docker_cleanup_script =
   "#!/bin/sh\n\
-log_file=${MASC_KEEPER_TEST_DOCKER_LOG:-}\n\
+log_file=\"$(dirname \"$0\")/docker.log\"\n\
 if [ -n \"$log_file\" ]; then\n\
   printf '%s\\n' \"$*\" >> \"$log_file\"\n\
 fi\n\
@@ -821,7 +826,7 @@ exit 2\n"
 
 let fake_docker_cleanup_fail_script =
   "#!/bin/sh\n\
-log_file=${MASC_KEEPER_TEST_DOCKER_LOG:-}\n\
+log_file=\"$(dirname \"$0\")/docker.log\"\n\
 if [ -n \"$log_file\" ]; then\n\
   printf '%s\\n' \"$*\" >> \"$log_file\"\n\
 fi\n\
@@ -836,7 +841,7 @@ exit 2\n"
 
 let fake_docker_cleanup_disappeared_script =
   "#!/bin/sh\n\
-log_file=${MASC_KEEPER_TEST_DOCKER_LOG:-}\n\
+log_file=\"$(dirname \"$0\")/docker.log\"\n\
 if [ -n \"$log_file\" ]; then\n\
   printf '%s\\n' \"$*\" >> \"$log_file\"\n\
 fi\n\
@@ -1146,9 +1151,8 @@ let test_docker_workspace_state_mount_args_expose_safe_subset () =
 let test_cleanup_stale_containers_removes_only_stale_masc_scope () =
   with_fake_docker fake_docker_cleanup_script @@ fun () ->
   let base = temp_dir () in
-  let log_path = Filename.concat base "docker.log" in
+  let log_path = fake_docker_log_path () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
-  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
   with_env "KEEPER_TEST_PID" (string_of_int (Unix.getpid ())) @@ fun () ->
   let result =
     Keeper_sandbox_runtime.cleanup_stale_containers
@@ -1169,9 +1173,8 @@ let test_cleanup_stale_containers_removes_only_stale_masc_scope () =
 let test_cleanup_stale_containers_accepts_concurrent_disappearance () =
   with_fake_docker fake_docker_cleanup_disappeared_script @@ fun () ->
   let base = temp_dir () in
-  let log_path = Filename.concat base "docker.log" in
+  let log_path = fake_docker_log_path () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
-  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
   let result =
     Keeper_sandbox_runtime.cleanup_stale_containers
       ~now:1000.0
@@ -1249,13 +1252,12 @@ let test_maybe_cleanup_disappearance_allows_next_interval () =
 let test_maybe_cleanup_stale_containers_runs_once_per_interval () =
   with_fake_docker fake_docker_cleanup_script @@ fun () ->
   let base = temp_dir () in
-  let log_path = Filename.concat base "docker.log" in
+  let log_path = fake_docker_log_path () in
   Fun.protect
     ~finally:(fun () ->
       Keeper_sandbox_runtime.reset_last_cleanup_for_tests ();
       cleanup_dir base)
   @@ fun () ->
-  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
   with_env "KEEPER_TEST_PID" (string_of_int (Unix.getpid ())) @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "true" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC" "10" @@ fun () ->
@@ -1299,13 +1301,12 @@ let test_maybe_cleanup_stale_containers_runs_once_per_interval () =
 let test_maybe_cleanup_stale_containers_retries_next_explicit_interval () =
   with_fake_docker fake_docker_cleanup_fail_script @@ fun () ->
   let base = temp_dir () in
-  let log_path = Filename.concat base "docker.log" in
+  let log_path = fake_docker_log_path () in
   Fun.protect
     ~finally:(fun () ->
       Keeper_sandbox_runtime.reset_last_cleanup_for_tests ();
       cleanup_dir base)
   @@ fun () ->
-  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "true" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC" "10" @@ fun () ->
   Keeper_sandbox_runtime.reset_last_cleanup_for_tests ();
@@ -1357,7 +1358,7 @@ let test_docker_preflight_reports_ready_image () =
       true
       Yojson.Safe.Util.(member "missing_commands" json = `Null)
 
-let test_docker_preflight_surfaces_missing_image_actions () =
+let test_docker_preflight_surfaces_image_inspect_error () =
   with_fake_docker fake_docker_preflight_missing_image_script @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "true" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "missing:test" @@ fun () ->
@@ -1368,24 +1369,17 @@ let test_docker_preflight_surfaces_missing_image_actions () =
   | None -> Alcotest.fail "expected docker preflight report"
   | Some preflight ->
       Alcotest.(check bool) "preflight fails" false preflight.ok;
-      Alcotest.(check bool) "image missing" false preflight.image_present;
-      Alcotest.(check bool) "failure class is image_missing" true
-        (List.mem "image_missing" preflight.failure_classes);
+      Alcotest.(check bool) "image unavailable" false preflight.image_present;
+      Alcotest.(check bool) "failure class is image_inspect_error" true
+        (List.mem "image_inspect_error" preflight.failure_classes);
       Alcotest.(check bool) "failure class is not image timeout" false
         (List.mem "image_inspect_timeout" preflight.failure_classes);
-      Alcotest.(check bool) "next actions mention build script" true
-        (List.exists
-           (fun action ->
-             String.contains action 'b'
-             && contains_substring action
-                  "scripts/build-keeper-sandbox-image.sh")
-           preflight.next_actions);
-      Alcotest.(check bool) "failure message mentions build script" true
-        (contains_substring
-           (Keeper_sandbox_runtime.docker_preflight_failure_message preflight)
-           "scripts/build-keeper-sandbox-image.sh")
+      Alcotest.(check (list string))
+        "next action preserves the generic inspect boundary"
+        [ "Inspect the configured Docker image and daemon using the exact command output above." ]
+        preflight.next_actions
 
-let test_docker_preflight_classifies_daemon_unavailable () =
+let test_docker_preflight_does_not_infer_daemon_state_from_stderr () =
   with_fake_docker fake_docker_preflight_daemon_unavailable_script @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "true" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
@@ -1396,10 +1390,10 @@ let test_docker_preflight_classifies_daemon_unavailable () =
   | None -> Alcotest.fail "expected docker preflight report"
   | Some preflight ->
       Alcotest.(check bool) "preflight fails" false preflight.ok;
-      Alcotest.(check bool) "failure class is daemon unavailable" true
-        (List.mem "docker_daemon_unavailable" preflight.failure_classes);
-      Alcotest.(check bool) "not misclassified as image missing" false
-        (List.mem "image_missing" preflight.failure_classes)
+      Alcotest.(check bool) "failure class is generic runtime error" true
+        (List.mem "docker_runtime_error" preflight.failure_classes);
+      Alcotest.(check bool) "stderr does not create daemon semantic class" false
+        (List.mem "docker_daemon_unavailable" preflight.failure_classes)
 
 let test_docker_preflight_classifies_image_inspect_timeout () =
   with_fake_docker fake_docker_preflight_image_timeout_script @@ fun () ->
@@ -1495,9 +1489,8 @@ let test_run_command_fallback_uses_docker_spawn_slot ~clock () =
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
   let base, config, meta = setup_config "minjae" in
-  let log_path = Filename.concat base "docker.log" in
+  let log_path = fake_docker_log_path () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
-  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
   let result = ref None in
   Eio.Switch.run (fun sw ->
       Eio.Fiber.fork ~sw (fun () ->
@@ -1539,12 +1532,7 @@ let test_run_command_projects_keeper_secret_dir () =
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
   let base, config, meta = setup_config "minjae" in
-  let log_path = Filename.concat base "docker.log" in
-  let count_path =
-    Filename.concat
-      (Filename.dirname (Sys.getenv "MASC_TEST_FAKE_DOCKER_PATH"))
-      "literal-failure.count"
-  in
+  let log_path = fake_docker_log_path () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   let secret_root =
     Filename.concat
@@ -1561,7 +1549,6 @@ let test_run_command_projects_keeper_secret_dir () =
   ensure_dir (Filename.dirname ssh_path);
   write_file token_path "projected-token\n";
   write_file ssh_path "PRIVATE KEY";
-  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
   match
     Keeper_sandbox_read_backend.run_command_with_status
       ~config
@@ -1592,9 +1579,8 @@ let test_run_command_scrubs_sensitive_env () =
   with_env "GH_TOKEN" "ghp_secret" @@ fun () ->
   with_env "ANTHROPIC_API_KEY" "sk-ant-secret" @@ fun () ->
   let base, config, meta = setup_config "minjae" in
-  let log_path = Filename.concat base "docker.log" in
+  let log_path = fake_docker_log_path () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
-  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
   match
     Keeper_sandbox_read_backend.run_command_with_status ~config ~meta
       ~command_argv:[ "echo"; "hello" ]
@@ -1616,14 +1602,13 @@ let test_turn_runtime_reuses_single_container () =
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
   let base, config, meta = setup_config "minjae" in
-  let log_path = Filename.concat base "docker.log" in
+  let log_path = fake_docker_log_path () in
   let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   let host_config_dir =
     Filename.concat (Filename.concat base Common.masc_dirname) "config"
   in
   ensure_dir host_root;
   ensure_dir host_config_dir;
-  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
   let factory = Keeper_sandbox_factory.create ~config ~meta () in
   Fun.protect ~finally:(fun () ->
     Keeper_sandbox_factory.cleanup factory;
@@ -1693,7 +1678,6 @@ let test_streaming_exec_validates_cached_container_before_retry () =
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
   let base, config, meta = setup_config "minjae" in
-  let log_path = Filename.concat base "docker.log" in
   let inspect_count_path = Filename.concat base "inspect.count" in
   let exec_count_path = Filename.concat base "exec.count" in
   let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
@@ -1702,7 +1686,6 @@ let test_streaming_exec_validates_cached_container_before_retry () =
   in
   ensure_dir host_root;
   ensure_dir host_config_dir;
-  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
   with_env "KEEPER_DOCKER_INSPECT_COUNT" inspect_count_path @@ fun () ->
   with_env "KEEPER_DOCKER_EXEC_COUNT" exec_count_path @@ fun () ->
   let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta ~turn_id:1 () in
@@ -1877,7 +1860,6 @@ let test_streaming_exec_restarts_stopped_container_before_exec () =
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
   let base, config, meta = setup_config "minjae" in
-  let log_path = Filename.concat base "docker.log" in
   let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   let host_config_dir =
     Filename.concat (Filename.concat base Common.masc_dirname) "config"
@@ -1925,14 +1907,17 @@ let test_streaming_exec_surfaces_process_failure_once () =
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
   let base, config, meta = setup_config "minjae" in
-  let log_path = Filename.concat base "docker.log" in
+  let count_path =
+    Filename.concat
+      (Filename.dirname (Sys.getenv "MASC_TEST_FAKE_DOCKER_PATH"))
+      "literal-failure.count"
+  in
   let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   let host_config_dir =
     Filename.concat (Filename.concat base Common.masc_dirname) "config"
   in
   ensure_dir host_root;
   ensure_dir host_config_dir;
-  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
   let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta ~turn_id:1 () in
   Fun.protect ~finally:(fun () ->
     Keeper_turn_sandbox_runtime.cleanup runtime;
@@ -2125,10 +2110,9 @@ let test_turn_runtime_relaxed_fs_omits_readonly_and_noexec () =
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_RELAX_FS" "true" @@ fun () ->
   let base, config, meta = setup_config "minjae" in
-  let log_path = Filename.concat base "docker.log" in
+  let log_path = fake_docker_log_path () in
   let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   ensure_dir host_root;
-  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
   let factory = Keeper_sandbox_factory.create ~config ~meta () in
   Fun.protect ~finally:(fun () ->
     Keeper_sandbox_factory.cleanup factory;
@@ -2260,10 +2244,10 @@ let run_tests ~clock () =
         [
           Alcotest.test_case "ready image reports ok" `Quick
             test_docker_preflight_reports_ready_image;
-          Alcotest.test_case "missing image surfaces remediation" `Quick
-            test_docker_preflight_surfaces_missing_image_actions;
-          Alcotest.test_case "daemon unavailable has distinct failure class" `Quick
-            test_docker_preflight_classifies_daemon_unavailable;
+          Alcotest.test_case "image inspect error stays structural" `Quick
+            test_docker_preflight_surfaces_image_inspect_error;
+          Alcotest.test_case "daemon stderr does not create a semantic class" `Quick
+            test_docker_preflight_does_not_infer_daemon_state_from_stderr;
           Alcotest.test_case "image inspect timeout has distinct failure class" `Quick
             test_docker_preflight_classifies_image_inspect_timeout;
         ] );

@@ -39,6 +39,7 @@ let allow_exact : string list =
   ; "MASC_DATA_DIR"; "MASC_PERSONAS_DIR"
   ; "MASC_SECRET_DIR"
   ; "MASC_TEST_FAKE_DOCKER_PATH"
+  ; "MASC_KEEPER_TEST_DOCKER_LOG"
   ]
 
 let allow_exact_table =

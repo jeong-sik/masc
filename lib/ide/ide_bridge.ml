@@ -788,14 +788,7 @@ let install_agent_observation_sinks () =
            ; content
            ; goal_id
            ; task_id
-           ; board_post_id
-           ; comment_id
-           ; pr_id
-           ; git_ref
-           ; log_id
-           ; session_id
-           ; operation_id
-           ; worker_run_id
+           ; references
            }
           : Agent_observation.annotation_request) ->
       match
@@ -810,14 +803,7 @@ let install_agent_observation_sinks () =
           ~content
           ?goal_id
           ?task_id
-          ?board_post_id
-          ?comment_id
-          ?pr_id
-          ?git_ref
-          ?log_id
-          ?session_id
-          ?operation_id
-          ?worker_run_id
+          ~references
           ()
       with
       | Error msg -> Error msg

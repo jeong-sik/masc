@@ -66,8 +66,13 @@ let test_annotations_use_catalog_capabilities () =
     "tool_read_file readOnlyHint from catalog capability"
     true
     (bool_annotation "readOnlyHint" "tool_read_file");
-  check bool "tool_read_file idempotentHint from catalog capability" true
-    (bool_annotation "idempotentHint" "tool_read_file")
+  check
+    (option string)
+    "tool_read_file does not infer idempotentHint from read-only"
+    None
+    (Option.map
+       Yojson.Safe.to_string
+       (annotation_field "idempotentHint" "tool_read_file"))
 ;;
 
 let test_annotations_use_descriptor_public_alias_capabilities () =

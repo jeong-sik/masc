@@ -4,7 +4,7 @@
     - [Keeper_tool_registry]: declarative tool name lists (data)
     - [Keeper_tool_policy]: exact descriptor/registry schema join
     - [Keeper_tool_*_runtime]: dedicated runtime modules for tool categories
-    - This module: execution dispatch + shared helpers (side-effects) *)
+    - This module: execution dispatch + shared bookkeeping *)
 
 open Keeper_types
 open Keeper_meta_contract
@@ -12,12 +12,6 @@ open Keeper_types_profile
 open Keeper_tool_shared_runtime
 include Keeper_tool_registry
 include Keeper_tool_policy
-
-let has_mutating_side_effect_with_input ~(tool_name : string) ~(input : Yojson.Safe.t)
-  : bool
-  =
-  not (Keeper_tool_registry.is_read_only_with_input ~tool_name ~input)
-;;
 
 type keeper_tool_call_recorder =
   tool_name:string -> success:bool -> duration_ms:int -> unit
@@ -35,92 +29,54 @@ let record_keeper_tool_call ~tool_name ~success ~duration_ms =
 ;;
 
 let unavailable_tool_search () =
-  `Assoc
-    [ "ok", `Bool false
-    ; "error", `String "tool_search_unavailable"
-    ; "reason", `String "catalog_provider_not_injected"
-    ]
+  let data =
+    `Assoc
+      [ "ok", `Bool false
+      ; "error", `String "tool_search_unavailable"
+      ; "reason", `String "catalog_provider_not_injected"
+      ]
+  in
+  Keeper_tool_execution.failure_data
+    ~class_:Tool_result.Runtime_failure
+    ~message:(Yojson.Safe.to_string data)
+    data
 ;;
-
-type tool_result_payload =
-  | Structured_success
-  | Structured_error
-  | Plain_text
-  | Malformed_structured of string
 
 type execution_outcome =
   [ `Success
-  | `Failure
+  | `Failure of Tool_result.tool_failure_class
   ]
 
 type executed_tool_result =
   { raw_output : string
+  ; data : Yojson.Safe.t option
   ; outcome : execution_outcome
-  ; payload_shape : tool_result_payload
   }
 
-let looks_like_structured_payload payload =
-  let len = String.length payload in
-  let rec find_first_nonspace i =
-    if i >= len
-    then None
-    else (
-      match payload.[i] with
-      | ' ' | '\t' | '\n' | '\r' -> find_first_nonspace (i + 1)
-      | c -> Some c)
-  in
-  match find_first_nonspace 0 with
-  | Some ('{' | '[') -> true
-  | Some _ | None -> false
-;;
-
-let classify_tool_result_payload payload =
-  if not (looks_like_structured_payload payload)
-  then Plain_text
-  else (
-    match
-      Safe_ops.parse_json_safe
-        ~context:"Keeper_tool_dispatch_runtime.classify_tool_result_payload"
-        payload
-    with
-    | Error msg -> Malformed_structured msg
-    | Ok (`Assoc fields) ->
-      let is_error =
-        match List.assoc_opt "ok" fields with
-        | Some (`Bool false) -> true
-        | _ -> List.mem_assoc "error" fields
-      in
-      if is_error then Structured_error else Structured_success
-    | Ok _ -> Structured_success)
-;;
-
-let inferred_outcome_of_result ~payload_shape =
-  match payload_shape with
-  | Structured_success | Plain_text -> `Success
-  | Structured_error -> `Failure
-  | Malformed_structured _ -> `Failure
-;;
-
-let make_executed_tool_result ?outcome raw_output =
-  let payload_shape = classify_tool_result_payload raw_output in
-  let outcome =
-    match outcome with
-    | Some explicit -> explicit
-    | None -> inferred_outcome_of_result ~payload_shape
-  in
-  { raw_output; outcome; payload_shape }
+let executed_tool_result_of_execution (execution : Keeper_tool_execution.t) =
+  match execution.outcome with
+  | Keeper_tool_execution.Succeeded ->
+    { raw_output = execution.raw_output
+    ; data = execution.data
+    ; outcome = `Success
+    }
+  | Keeper_tool_execution.Failed failure_class ->
+    { raw_output = execution.raw_output
+    ; data = execution.data
+    ; outcome = `Failure failure_class
+    }
 ;;
 
 (* Descriptor and registered-only routes are distinct dispatch sources.
-   Outcome is inferred from raw JSON via [classify_tool_result_payload]. *)
+   The selected producer supplies the authoritative typed outcome. *)
 
 type descriptor_dispatch =
-  | Descriptor_route of Keeper_tool_descriptor.t * string option
-  | Validation_rejected of string
+  | Descriptor_route of Keeper_tool_descriptor.t * Keeper_tool_execution.t option
+  | Validation_rejected of Keeper_tool_execution.t
   | Undescribed_route
 
 type descriptor_dispatch_resolution =
-  | Return_output of string
+  | Return_output of Keeper_tool_execution.t
   | Return_descriptor_invariant of Keeper_tool_descriptor.t
   | Try_registered_only_route
 
@@ -183,7 +139,10 @@ let descriptor_route_invariant_error ~keeper_name ~tool_name descriptor =
          ; "runtime_handler", `String runtime_handler
          ])
     "keeper descriptor route resolved but its typed runtime handler returned no result";
-  Yojson.Safe.to_string payload
+  Keeper_tool_execution.failure_data
+    ~class_:Tool_result.Runtime_failure
+    ~message:(Yojson.Safe.to_string payload)
+    payload
 ;;
 
 (* ── Tool execution dispatch ──────────────────────────────────── *)
@@ -236,25 +195,7 @@ let execute_keeper_tool_call_with_outcome
       meta
     | None -> meta
   in
-  let observe_malformed_result (result : executed_tool_result) =
-    match result.outcome, result.payload_shape with
-    | (`Success | `Failure), Malformed_structured parse_error ->
-      Otel_metric_store.inc_counter
-        Keeper_metrics.(to_string AgentToolDispatchRuntimeFailures)
-        ~labels:[ "keeper", meta.name; "tool", name ]
-        ();
-      Log.Keeper.error ~keeper_name:meta.name
-        "tool:%s produced malformed structured payload: %s"
-        name
-        parse_error;
-      result
-    | (`Success | `Failure),
-      (Structured_error | Structured_success | Plain_text) ->
-      result
-  in
-  observe_malformed_result
-    (
-       let effective_search_fn =
+  let effective_search_fn =
          match search_fn with
          | Some f -> f
          | None -> unavailable_tool_search
@@ -294,14 +235,13 @@ let execute_keeper_tool_call_with_outcome
                  ~descriptor
                  ~args:translated_args )
          | Some (Error validation_result) ->
-           let raw_payload = Yojson.Safe.to_string (Tool_result.data validation_result) in
-           Validation_rejected raw_payload
+           Validation_rejected (Keeper_tool_execution.of_tool_result validation_result)
          | None -> Undescribed_route
        in
        match resolve_descriptor_dispatch descriptor_dispatch with
-       | Return_output raw_output -> make_executed_tool_result raw_output
+       | Return_output execution -> executed_tool_result_of_execution execution
        | Return_descriptor_invariant descriptor ->
-         make_executed_tool_result
+         executed_tool_result_of_execution
            (descriptor_route_invariant_error
               ~keeper_name:meta.name
               ~tool_name:name
@@ -312,13 +252,13 @@ let execute_keeper_tool_call_with_outcome
             invariant failure and can never fall through to this backend. *)
          let unknown_name = name in
          (match
-            Keeper_tool_registered_runtime.handle_registered_tool
+            Keeper_tool_registered_runtime.handle_registered_tool_with_outcome
               ~config
               ~keeper_name:meta.name
               ~name:unknown_name
               ~args
           with
-          | Some raw_output -> make_executed_tool_result raw_output
+          | Some execution -> executed_tool_result_of_execution execution
           | None ->
             let fields =
               [ "ok", `Bool false
@@ -326,7 +266,12 @@ let execute_keeper_tool_call_with_outcome
               ; "tool", `String unknown_name
               ]
             in
-            make_executed_tool_result (Yojson.Safe.to_string (`Assoc fields))))
+            let data = `Assoc fields in
+            executed_tool_result_of_execution
+              (Keeper_tool_execution.failure_data
+                 ~class_:Tool_result.Runtime_failure
+                 ~message:(Yojson.Safe.to_string data)
+                 data))
 ;;
 
 let execute_keeper_tool_call
@@ -367,6 +312,7 @@ module For_testing = struct
   let descriptor_route_invariant_payload = descriptor_route_invariant_payload
 
   let descriptor_route_kind ~descriptor ~output =
+    let output = Option.map Keeper_tool_execution.success output in
     match resolve_descriptor_dispatch (Descriptor_route (descriptor, output)) with
     | Return_output _ -> Output
     | Return_descriptor_invariant _ -> Invariant

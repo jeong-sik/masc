@@ -29,10 +29,6 @@ val is_transient_network_error : Agent_sdk.Error.sdk_error -> bool
     diagnostic-only and are not parsed heuristically. *)
 val is_transient_internal_runner_error : Agent_sdk.Error.sdk_error -> bool
 
-(** [true] when an OAS timeout message describes an execution budget expiry,
-    not a transport-level timeout. *)
-val is_structural_oas_timeout_message : string -> bool
-
 (** Detect request body parse errors from either the provider or the API
     (e.g. Ollama yyjson rejecting a malformed request body or the API
     rejecting invalid JSON). The typed distinction is used for observability
@@ -60,28 +56,6 @@ val is_accept_no_usable_progress_error : Agent_sdk.Error.sdk_error -> bool
     heartbeat policy layer will handle the failure as a provider/OAS budget
     strike with cooldown or work-level pause. *)
 val should_warn_keeper_cycle_failed : Agent_sdk.Error.sdk_error -> bool
-
-(** Reclassify any post-commit turn error as a persistent integrity error when
-    mutating tool calls already committed in the same turn. *)
-val reclassify_error_after_side_effect :
-  tool_names:string list ->
-  Agent_sdk.Error.sdk_error ->
-  Agent_sdk.Error.sdk_error
-
-val post_commit_failure_kind_of_error :
-  Agent_sdk.Error.sdk_error -> Keeper_registry.ambiguous_partial_commit_kind
-
-(** [true] when an error represents an ambiguous partial commit after a
-    mutating tool call succeeded but the turn failed before a clean result. *)
-val is_ambiguous_side_effect_error : Agent_sdk.Error.sdk_error -> bool
-
-val ambiguous_side_effect_commit_tools :
-  tool_names:string list ->
-  Agent_sdk.Error.sdk_error -> string list
-
-val has_ambiguous_side_effect_commit :
-  tool_names:string list ->
-  Agent_sdk.Error.sdk_error -> bool
 
 (** [true] when a structured error indicates context overflow. *)
 val is_context_overflow : Agent_sdk.Error.sdk_error -> bool
@@ -116,16 +90,10 @@ type degraded_retry_reason =
   | Rate_limit
   | Server_error
   | Auth_error
-  | Read_only_no_progress
   | Empty_no_progress
   | Thinking_only_no_progress
 
 val degraded_retry_reason_to_string : degraded_retry_reason -> string
-
-val is_read_only_no_progress_accept_rejection : Agent_sdk.Error.sdk_error -> bool
-(** [true] for typed accept rejections whose only progress was read-only tool
-    observation. These can remain terminal for direct retry without affecting
-    Keeper lifecycle. *)
 
 val normalized_runtime_id : catalog_names:string list -> string -> string
 (** Normalize a runtime name for rotation matching.
@@ -202,21 +170,6 @@ val degraded_rotation_after_recoverable_error :
   attempted_runtimes:string list ->
   Agent_sdk.Error.sdk_error ->
   degraded_retry option
-
-(** Filter and deduplicate tool names to those with mutating side effects. *)
-val committed_mutating_tools : string list -> string list
-
-val classify_post_commit_failure :
-  tool_names:string list ->
-  ?kind:Keeper_registry.ambiguous_partial_commit_kind ->
-  Agent_sdk.Error.sdk_error ->
-  (Agent_sdk.Error.sdk_error * Keeper_registry.failure_reason) option
-
-val summarize_post_commit_failure :
-  tool_names:string list ->
-  kind:Keeper_registry.ambiguous_partial_commit_kind ->
-  Agent_sdk.Error.sdk_error ->
-  string
 
 val is_provider_timeout_error : Agent_sdk.Error.sdk_error -> bool
 (** True when [err] is a provider-timeout class failure (deadline,

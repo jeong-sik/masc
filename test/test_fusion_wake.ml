@@ -285,15 +285,9 @@ let test_fusion_completion_is_actionable () =
   in
   check string "post_id correlates to the board post" "post-77" ev.post_id;
   check bool "preview carries the resolved answer" true (contains ~needle:"ANSWER-TOKEN-xyz" ev.preview);
-  (* RFC-0247: a self-authored System_post fusion result renders observationally,
-     not as trusted operator instruction. *)
-  check
-    bool
-    "provenance is Self_narrative"
-    true
-    (match ev.provenance with
-     | Keeper_world_observation.Self_narrative -> true
-     | _ -> false);
+  check string "author remains context" meta.name ev.author;
+  check bool "post kind remains context" true
+    (ev.post_kind = Board.System_post);
   (* the stimulus path yields Some (not None like Bootstrap) *)
   match
     Keeper_world_observation.pending_board_event_of_stimulus
@@ -333,13 +327,9 @@ let test_bg_completion_is_actionable () =
     "preview carries the background output"
     true
     (contains ~needle:"BG-ANSWER-TOKEN" ev.preview);
-  check
-    bool
-    "provenance is Self_narrative"
-    true
-    (match ev.provenance with
-     | Keeper_world_observation.Self_narrative -> true
-     | _ -> false);
+  check string "author remains context" meta.name ev.author;
+  check bool "post kind remains context" true
+    (ev.post_kind = Board.System_post);
   match
     Keeper_world_observation.pending_board_event_of_stimulus
       ~meta
@@ -390,10 +380,9 @@ let test_scheduled_wake_is_actionable () =
   check string "post_id correlates to schedule" "schedule-due:sched-1" ev.post_id;
   check bool "preview carries schedule message" true
     (contains ~needle:"SCHEDULE-ANSWER-TOKEN" ev.preview);
-  check bool "provenance is Automation" true
-    (match ev.provenance with
-     | Keeper_world_observation.Automation -> true
-     | _ -> false);
+  check string "schedule actor remains context" "scheduled_automation" ev.author;
+  check bool "post kind remains context" true
+    (ev.post_kind = Board.System_post);
   match
     Keeper_world_observation.pending_board_event_of_stimulus
       ~meta

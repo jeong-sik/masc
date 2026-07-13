@@ -134,7 +134,7 @@ let handle_tool_execute_typed
       ~write_enabled:true
       ~args
   with
-    | Error e -> error_json e
+    | Error e -> Keeper_tool_execution.failure (error_json e)
     | Ok cwd ->
         let execution_location_fields cwd =
           [ ( "execution_location"
@@ -144,11 +144,13 @@ let handle_tool_execute_typed
       let typed_args = assoc_upsert "cwd" (`String cwd) args in
       match Keeper_tool_execute_typed_input.of_json typed_args with
       | Error e ->
-        error_json
-          ~fields:
-            ([ "typed", `Bool true; "cwd", `String cwd ]
-             @ execution_location_fields cwd)
-          e
+        Keeper_tool_execution.failure
+          ~class_:Tool_result.Policy_rejection
+          (error_json
+             ~fields:
+               ([ "typed", `Bool true; "cwd", `String cwd ]
+                @ execution_location_fields cwd)
+             e)
       | Ok input ->
         (match Keeper_tool_execute_typed_input.validate input with
          | Error e ->
@@ -156,7 +158,9 @@ let handle_tool_execute_typed
              [ "typed", `Bool true; "cwd", `String cwd ]
              @ execution_location_fields cwd
            in
-           error_json ~fields (typed_validation_error_text e)
+           Keeper_tool_execution.failure
+             ~class_:Tool_result.Policy_rejection
+             (error_json ~fields (typed_validation_error_text e))
          | Ok () ->
         let cmd = typed_input_command_text input in
         let timeout_sec = typed_input_timeout_sec input in
@@ -213,12 +217,13 @@ let handle_tool_execute_typed
         in
         (match dispatch_sandbox with
          | Error ({ message; fields } : Keeper_sandbox_shell_ir_target.target_error) ->
-           error_json
-             ~fields:
-               ([ "typed", `Bool true; "cmd", `String cmd; "cwd", `String cwd ]
-                @ execution_location_fields cwd
-                @ fields)
-             message
+           Keeper_tool_execution.failure
+             (error_json
+                ~fields:
+                  ([ "typed", `Bool true; "cmd", `String cmd; "cwd", `String cwd ]
+                   @ execution_location_fields cwd
+                   @ fields)
+                message)
          | Ok (dispatch_sandbox, sandbox_extra_fields, base_host_env) ->
         let response_cwd_json =
           typed_execute_response_cwd_json
@@ -237,7 +242,9 @@ let handle_tool_execute_typed
             @ response_cwd_field
             @ execution_location_fields cwd
           in
-          error_json ~fields (typed_validation_error_text e)
+          Keeper_tool_execution.failure
+            ~class_:Tool_result.Policy_rejection
+            (error_json ~fields (typed_validation_error_text e))
         | Ok ir ->
         let cmd_for_log =
           Exec_policy.sanitize_command_for_log_of_ir ~fallback_cmd:cmd ir
@@ -256,10 +263,16 @@ let handle_tool_execute_typed
           @ response_cwd_field
           @ execution_location_fields cwd
         in
-        let typed_error_json ?(extra_fields = []) msg =
-          error_json
-            ~fields:(typed_error_fields @ extra_fields)
-            msg
+        let typed_error_json
+              ?(class_ = Tool_result.Runtime_failure)
+              ?(extra_fields = [])
+              msg
+          =
+          Keeper_tool_execution.failure
+            ~class_
+            (error_json
+               ~fields:(typed_error_fields @ extra_fields)
+               msg)
         in
         let sandbox_profile_label =
           Keeper_types_profile_sandbox.sandbox_profile_to_string sandbox_profile
@@ -291,6 +304,7 @@ let handle_tool_execute_typed
          with
          | Keeper_gate.Deferred { approval_id; reason } ->
            typed_error_json
+             ~class_:Tool_result.Workflow_rejection
              ~extra_fields:
                [ "error", `String "gate_deferred"
                ; "approval_request_id", `String approval_id
@@ -476,32 +490,36 @@ let handle_tool_execute_typed
                  "execute output callback failed keeper=%s: %s"
                  meta.name
                  (Printexc.to_string exn));
+            let succeeded =
+              match result.status with
+              | Unix.WEXITED 0 -> true
+              | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> false
+            in
             let failure_error_fields =
               match result.status, String.trim stderr with
               | Unix.WEXITED 0, _ | _, "" -> []
               | _, stderr -> [ "error", `String stderr; "stderr", `String stderr ]
             in
-            Yojson.Safe.to_string
-              (`Assoc
-                 ([ ( "ok"
-                    , `Bool
-                        (match result.status with
-                         | Unix.WEXITED 0 -> true
-                         | Unix.WEXITED _
-                         | Unix.WSIGNALED _
-                         | Unix.WSTOPPED _ -> false) )
-                  ; "status", status_json
-                  ; "output", `String output
-                  ; "typed", `Bool true
-                  ; "execution_time_ms", `Int elapsed_ms
-                  ]
-                  @ failure_error_fields
-                  @ sandbox_extra_fields
-                  @ response_cwd_field
-                  @ execution_location_fields cwd)))
-        ))
+            let payload =
+              Yojson.Safe.to_string
+                (`Assoc
+                   ([ "ok", `Bool succeeded
+                    ; "status", status_json
+                    ; "output", `String output
+                    ; "typed", `Bool true
+                    ; "execution_time_ms", `Int elapsed_ms
+                    ]
+                    @ failure_error_fields
+                    @ sandbox_extra_fields
+                    @ response_cwd_field
+                    @ execution_location_fields cwd))
+            in
+            if succeeded
+            then Keeper_tool_execution.success payload
+            else Keeper_tool_execution.failure payload
+        )))
 
-let handle_tool_execute
+let handle_tool_execute_with_outcome
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~exec_cache:_
       ~(config : Workspace.config)
@@ -524,7 +542,32 @@ let handle_tool_execute
       ~args
       ()
   else
-    error_json
-      ~fields:[ "typed", `Bool true ]
-      "Typed Shell IR input is required. Provide executable/argv or pipeline."
+    Keeper_tool_execution.failure
+      ~class_:Tool_result.Policy_rejection
+      (error_json
+         ~fields:[ "typed", `Bool true ]
+         "Typed Shell IR input is required. Provide executable/argv or pipeline.")
+;;
+
+let handle_tool_execute
+      ~turn_sandbox_factory
+      ~exec_cache
+      ~config
+      ~meta
+      ?continuation_channel
+      ?gate_context
+      ?gate_grant
+      ~args
+      ()
+  =
+  (handle_tool_execute_with_outcome
+     ~turn_sandbox_factory
+     ~exec_cache
+     ~config
+     ~meta
+     ?continuation_channel
+     ?gate_context
+     ?gate_grant
+     ~args
+     ()).raw_output
 ;;

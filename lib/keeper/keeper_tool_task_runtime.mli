@@ -13,3 +13,10 @@ val handle_keeper_task_tool :
   name:string ->
   args:Yojson.Safe.t ->
   string
+
+val handle_keeper_task_tool_with_outcome :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  name:string ->
+  args:Yojson.Safe.t ->
+  Keeper_tool_execution.t

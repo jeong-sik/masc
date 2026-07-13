@@ -34,11 +34,18 @@ let ok_result ~tool_name ~start_time fields : Tool_result.result =
 ;;
 
 let error_result_typed ~tool_name ~start_time ~code msg : Tool_result.result =
+  let data =
+    error_assoc
+      [ "error_code", `String (error_code_to_string code)
+      ; "message", `String msg
+      ]
+  in
   Tool_result.make_err
     ~tool_name
     ~class_:Tool_result.Workflow_rejection
     ~start_time
-    (error_response_typed ~code msg)
+    ~data
+    (Yojson.Safe.to_string data)
 ;;
 
 let validation_error_result
@@ -47,11 +54,13 @@ let validation_error_result
       (errors : field_error list)
   : Tool_result.result
   =
+  let data = validation_error_assoc errors in
   Tool_result.make_err
     ~tool_name
     ~class_:Tool_result.Workflow_rejection
     ~start_time
-    (validation_error_response errors)
+    ~data
+    (Yojson.Safe.to_string data)
 ;;
 
 let goal_status_strings = [ "active"; "paused"; "done"; "dropped" ]

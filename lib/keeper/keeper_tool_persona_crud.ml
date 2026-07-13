@@ -52,17 +52,28 @@ let read_profile persona_name =
 let write_profile persona_name json =
   let dir = Filename.concat (personas_dir ()) persona_name in
   let path = Filename.concat dir "profile.json" in
-  (try Fs_compat.mkdir_p dir with _ -> ());
-  let tmp = path ^ ".tmp" in
-  let content = Yojson.Safe.to_string ~std:true json in
-  match Fs_compat.save_file_atomic tmp content with
-  | Error msg -> Error ("Failed to write " ^ path ^ ": " ^ msg)
+  match
+    try
+      Fs_compat.mkdir_p dir;
+      Ok ()
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> Error (Printexc.to_string exn)
+  with
+  | Error detail -> Error ("Failed to create " ^ dir ^ ": " ^ detail)
   | Ok () ->
-      (try
-         Fs_compat.rename tmp path;
-         Ok (ok_assoc [("persona_name", `String persona_name); ("path", `String path)])
-       with exn ->
-         Error ("Failed to rename tmp file: " ^ Printexc.to_string exn))
+    let tmp = path ^ ".tmp" in
+    let content = Yojson.Safe.to_string ~std:true json in
+    (match Fs_compat.save_file_atomic tmp content with
+     | Error msg -> Error ("Failed to write " ^ path ^ ": " ^ msg)
+     | Ok () ->
+       (try
+          Fs_compat.rename tmp path;
+          Ok (ok_assoc [("persona_name", `String persona_name); ("path", `String path)])
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn ->
+          Error ("Failed to rename tmp file: " ^ Printexc.to_string exn)))
 
 let validate_create_args args =
   match reject_removed_keeper_input_keys ~tool_name:"masc_persona_create" args with
@@ -168,59 +179,55 @@ let merge_update_args_into_profile existing_json args : (Yojson.Safe.t, string) 
         (Printf.sprintf "Corrupt persona profile: expected a JSON object, got %s"
            (Json_util.kind_name other))
 
-(* The [*_json] handlers build a Yojson result; [tool_result_of_json] projects
-   it into the keeper [tool_result] the tool surface expects. A result carrying
-   an ["error"]/["errors"] field is an error verdict, otherwise success —
-   mirroring the ok_assoc/error_assoc shapes these handlers emit. *)
-let tool_result_of_json (json : Yojson.Safe.t) : tool_result =
-  let is_error =
-    match json with
-    | `Assoc fields ->
-        List.exists (fun (k, _) -> k = "error" || k = "errors") fields
-    | _ -> false
-  in
-  let body = Yojson.Safe.to_string ~std:true json in
-  if is_error then tool_result_error body else tool_result_ok body
+(* Outcome is carried by [Result], while the payload remains first-class JSON.
+   Error-object keys are presentation data and never determine control flow. *)
+let tool_result_of_json_result = function
+  | Ok data -> tool_result_ok_data data
+  | Error data -> tool_result_error_data data
 
 let handle_persona_create_json args =
   let errors = validate_create_args args in
   if errors <> [] then
-    error_assoc [("errors", `List (List.map (fun e -> `String e) errors))]
+    Error (error_assoc [("errors", `List (List.map (fun e -> `String e) errors))])
   else
     let persona_name = get_string args "persona_name" "" in
     if persona_exists persona_name then
-      error_assoc
-        [("error", `String ("Persona '" ^ persona_name ^ "' already exists. Use masc_persona_update to modify it."))]
+      Error
+        (error_assoc
+           [("error", `String ("Persona '" ^ persona_name ^ "' already exists. Use masc_persona_update to modify it."))])
     else
       let profile = profile_from_create_args args in
       match write_profile persona_name profile with
-      | Ok result -> result
-      | Error msg -> error_assoc [("error", `String msg)]
+      | Ok result -> Ok result
+      | Error msg -> Error (error_assoc [("error", `String msg)])
 
 let handle_persona_update_json args =
   let persona_name = get_string_opt args "persona_name" in
   match persona_name with
-  | None -> error_assoc [("error", `String "Missing required field: persona_name")]
+  | None ->
+      Error
+        (error_assoc [("error", `String "Missing required field: persona_name")])
   | Some pn ->
-      (match validate_persona_name pn with
-       | Error msg -> error_assoc [("error", `String msg)]
-       | Ok () ->
-           if not (persona_exists pn) then
-             error_assoc
-               [("error", `String ("Persona '" ^ pn ^ "' does not exist. Use masc_persona_create first."))]
-           else
-             (match read_profile pn with
-              | Error msg -> error_assoc [("error", `String msg)]
-              | Ok existing_json ->
-                  (match merge_update_args_into_profile existing_json args with
-                   | Error msg -> error_assoc [("error", `String msg)]
-                   | Ok updated ->
-                       (match write_profile pn updated with
-                        | Ok result -> result
-                        | Error msg -> error_assoc [("error", `String msg)]))))
+      match validate_persona_name pn with
+      | Error msg -> Error (error_assoc [("error", `String msg)])
+      | Ok () ->
+          if not (persona_exists pn) then
+            Error
+              (error_assoc
+                 [("error", `String ("Persona '" ^ pn ^ "' does not exist. Use masc_persona_create first."))])
+          else
+            match read_profile pn with
+            | Error msg -> Error (error_assoc [("error", `String msg)])
+            | Ok existing_json ->
+                match merge_update_args_into_profile existing_json args with
+                | Error msg -> Error (error_assoc [("error", `String msg)])
+                | Ok updated ->
+                    match write_profile pn updated with
+                    | Ok result -> Ok result
+                    | Error msg -> Error (error_assoc [("error", `String msg)])
 
 let handle_persona_create _ctx args : tool_result =
-  tool_result_of_json (handle_persona_create_json args)
+  tool_result_of_json_result (handle_persona_create_json args)
 
 let handle_persona_update _ctx args : tool_result =
-  tool_result_of_json (handle_persona_update_json args)
+  tool_result_of_json_result (handle_persona_update_json args)

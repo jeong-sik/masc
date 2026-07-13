@@ -47,6 +47,121 @@ val absolute_allowed_paths_result :
   allowed_paths:string list ->
   (string list, string) result
 
+type confined_path
+(** A path projected to one concrete allowed root. The constructor is hidden so
+    callers cannot manufacture an absolute or parent-relative capability path. *)
+
+type confined_path_endpoint =
+  | Lexical_entry
+  | Follow_referent
+(** Objective endpoint semantics used for containment. [Lexical_entry]
+    canonicalises the parent and retains the final directory-entry name;
+    [Follow_referent] canonicalises the final referent as well. *)
+
+type path_effect_operation =
+  | Atomic_replace_entry
+  | Patch_then_atomic_replace_entry
+  | Append_pinned_resource
+  | Create_entry_exclusive
+(** Concrete filesystem semantics evaluated by Gate. These constructors name
+    what the I/O primitive actually does; they are not risk levels. In
+    particular, atomic replacement addresses the lexical directory entry and
+    does not follow a symlink in the leaf position. *)
+
+type path_effect
+(** Typed Gate projection of one confined filesystem operation. The locator is
+    the allowed-root capability plus its lexical relative path. Operations on
+    an already-open file additionally carry that resource's device/inode
+    identity, so a post-Gate path lookup cannot redirect the effect. *)
+
+type path_effect_parent_scope
+(** A parent directory capability pinned before Gate evaluation, plus the
+    exact lexical directory segments that do not exist yet and may therefore
+    be created only after Gate allows the composite operation. *)
+
+val confined_root : confined_path -> string
+val confined_anchor_root : confined_path -> string
+val confined_root_relative_path : confined_path -> string
+val confined_relative_path : confined_path -> string
+val confined_host_path : confined_path -> string
+val confined_containment_path : confined_path -> string
+(** Canonical containment projection computed exactly once by the resolver
+    using the requested endpoint semantics. *)
+val confined_endpoint_relative_path : confined_path -> string
+(** The same endpoint projection relative to [confined_root], suitable for
+    opening the already-confined referent through the root capability. *)
+
+val verify_confined_root_capability :
+  confined_path -> _ Eio.Path.t -> (unit, string) result
+(** Compare the root directory opened through Eio with the device/inode
+    identity captured during resolution. A missing identity or a changed root
+    is an explicit error; there is no string-path fallback. *)
+
+val path_effect_parent_scope :
+  relative_path:string ->
+  resource:Eio.File.Stat.t ->
+  create_missing_parents:string list ->
+  created_directory_permissions:int ->
+  (path_effect_parent_scope, string) result
+(** Build a checked parent scope. [relative_path] is relative to the selected
+    root capability. [create_missing_parents] contains individual lexical
+    child names, in creation order; absolute paths, separators, [.], and [..]
+    are rejected. [created_directory_permissions] is the exact mode applied to
+    every listed directory and included in the Gate projection. *)
+
+val atomic_replace_effect :
+  parent:path_effect_parent_scope ->
+  result_file_permissions:int ->
+  confined_path ->
+  (path_effect, string) result
+val patch_then_atomic_replace_effect :
+  parent:path_effect_parent_scope ->
+  source_relative_path:string ->
+  source_resource:Eio.File.Stat.t ->
+  result_file_permissions:int ->
+  confined_path ->
+  (path_effect, string) result
+val create_entry_exclusive_effect :
+  parent:path_effect_parent_scope ->
+  result_file_permissions:int ->
+  confined_path ->
+  (path_effect, string) result
+(** Describe operations whose destination is the lexical directory entry.
+    [result_file_permissions] is the exact mode applied to the replacement
+    resource before it is renamed. A replaced symlink or missing entry becomes
+    a regular file with the supplied mode; an existing regular file caller can
+    preserve its pre-Gate mode by supplying that value. *)
+
+val append_pinned_resource_effect :
+  confined_path -> Eio.File.Stat.t -> (path_effect, string) result
+(** Describe append on the already-open file resource represented by the
+    supplied stat. This is deliberately the only constructor for a pinned
+    effect, so append cannot accidentally degrade to a post-Gate path lookup. *)
+
+val path_effect_to_yojson : path_effect -> Yojson.Safe.t
+(** Stable, complete Gate input projection. *)
+
+val resolve_keeper_confined_path :
+  config:Workspace.config ->
+  allowed_paths:string list ->
+  endpoint:confined_path_endpoint ->
+  raw_path:string ->
+  (confined_path, keeper_path_rejection) result
+(** Resolve a Keeper path to an allowed root plus a path relative to that root.
+    The string projection selects the capability and is not the I/O boundary;
+    callers must open [confined_anchor_root], descend through
+    [confined_root_relative_path] with [Eio.Path.open_dir], and perform all
+    filesystem operations on [confined_relative_path]. [endpoint] makes final
+    leaf containment explicit: atomic replacement uses [Lexical_entry], while
+    operations that read or mutate an existing referent use [Follow_referent].
+    After opening the root, callers must run
+    [verify_confined_root_capability] before Gate evaluation.
+
+    For roots inside the project, the project root is the anchor. The project
+    root's parent is an operator-owned trust boundary and must not be writable
+    by the Keeper. Explicit roots outside the project carry the same parent
+    trust requirement. *)
+
 (** Resolve a write target using objective allowed-root containment.
     Relative inputs are joined to the project root; absolute inputs remain
     exact. Explicit allowed roots may be outside the project root. *)

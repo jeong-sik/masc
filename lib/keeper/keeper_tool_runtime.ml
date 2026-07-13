@@ -16,7 +16,7 @@ type context =
   ; ctx_work : Keeper_types.working_context
   ; turn_sandbox_factory : Keeper_sandbox_factory.t option
   ; exec_cache : Masc_exec.Exec_cache.t option
-  ; search_fn : unit -> Yojson.Safe.t
+  ; search_fn : unit -> Keeper_tool_execution.t
   ; sw : Eio.Switch.t option
   ; clock : float Eio.Time.clock_ty Eio.Resource.t option
   ; proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option
@@ -45,14 +45,14 @@ let handle_filesystem ctx descriptor args =
   match descriptor.Keeper_tool_descriptor.runtime_handler with
   | Tool_read_file ->
     Some
-      (Keeper_tool_filesystem_runtime.handle_read_file
+      (Keeper_tool_filesystem_runtime.handle_read_file_with_outcome
          ~turn_sandbox_factory:ctx.turn_sandbox_factory
          ~config:ctx.config
          ~keeper_name:ctx.meta.name
          ~args)
   | Tool_edit_file | Tool_write_file ->
     Some
-      (Keeper_tool_filesystem_runtime.handle_file_write
+      (Keeper_tool_filesystem_runtime.handle_file_write_with_outcome
          ~turn_sandbox_factory:ctx.turn_sandbox_factory
          ~config:ctx.config
          ~keeper_name:ctx.meta.name
@@ -107,7 +107,7 @@ let handle_shell_ir ctx descriptor args =
   match descriptor.Keeper_tool_descriptor.runtime_handler with
   | Tool_execute ->
       Some
-        (Keeper_tool_command_runtime.handle_tool_execute
+        (Keeper_tool_command_runtime.handle_tool_execute_with_outcome
            ~turn_sandbox_factory:ctx.turn_sandbox_factory
            ~exec_cache:ctx.exec_cache
          ~config:ctx.config
@@ -119,7 +119,7 @@ let handle_shell_ir ctx descriptor args =
          ())
   | Tool_search_files ->
     Some
-      (Keeper_tool_command_runtime.handle_tool_search_files
+      (Keeper_tool_command_runtime.handle_tool_search_files_with_outcome
          ~turn_sandbox_factory:ctx.turn_sandbox_factory
          ~exec_cache:ctx.exec_cache
          ~config:ctx.config
@@ -169,49 +169,55 @@ let handle_in_process ctx descriptor args =
   let name = descriptor.Keeper_tool_descriptor.internal_name in
   match descriptor.Keeper_tool_descriptor.runtime_handler with
   | Tool_time_now ->
-    Some (Keeper_tool_in_process_runtime.handle_time_now ~args)
-  | Tool_tools_list ->
-    Some (Keeper_tool_in_process_runtime.handle_tools_list ~meta:ctx.meta ~args)
-  | Tool_tool_search ->
     Some
-      (Keeper_tool_in_process_runtime.handle_tool_search
-         ~search_fn:ctx.search_fn
-         ~args)
+      (Keeper_tool_execution.success
+         (Keeper_tool_in_process_runtime.handle_time_now ~args))
+  | Tool_tools_list ->
+    Some
+      (Keeper_tool_execution.success
+         (Keeper_tool_in_process_runtime.handle_tools_list ~meta:ctx.meta ~args))
+  | Tool_tool_search -> Some (ctx.search_fn ())
   | Tool_context_status ->
     Some
-      (Keeper_tool_in_process_runtime.handle_context_status
-         ~config:ctx.config
-         ~meta:ctx.meta
-         ~ctx_work:ctx.ctx_work
-         ~args)
+      (Keeper_tool_execution.success
+         (Keeper_tool_in_process_runtime.handle_context_status
+            ~config:ctx.config
+            ~meta:ctx.meta
+            ~ctx_work:ctx.ctx_work
+            ~args))
   | Tool_memory_search ->
     Some
-      (Keeper_tool_in_process_runtime.handle_memory_search
+      (Keeper_tool_memory_runtime.keeper_memory_search_with_outcome
          ~config:ctx.config
          ~meta:ctx.meta
          ~ctx_work:ctx.ctx_work
          ~args)
   | Tool_memory_write ->
     Some
-      (Keeper_tool_in_process_runtime.handle_memory_write
+      (Keeper_tool_memory_runtime.keeper_memory_write_with_outcome
          ~config:ctx.config
          ~meta:ctx.meta
          ~args)
   | Tool_library_search ->
     Some
-      (Keeper_tool_in_process_runtime.handle_library_search ~meta:ctx.meta ~args)
-  | Tool_library_read ->
-    Some
-      (Keeper_tool_in_process_runtime.handle_library_read ~meta:ctx.meta ~args)
-  | Tool_surface_read ->
-    Some
-      (Keeper_tool_in_process_runtime.handle_surface_read
-         ~config:ctx.config
+      (Keeper_tool_in_process_runtime.handle_library_search_with_outcome
          ~meta:ctx.meta
          ~args)
+  | Tool_library_read ->
+    Some
+      (Keeper_tool_in_process_runtime.handle_library_read_with_outcome
+         ~meta:ctx.meta
+         ~args)
+  | Tool_surface_read ->
+    Some
+      (Keeper_tool_execution.success
+         (Keeper_tool_in_process_runtime.handle_surface_read
+            ~config:ctx.config
+            ~meta:ctx.meta
+            ~args))
   | Tool_surface_post ->
     Some
-      (Keeper_tool_in_process_runtime.handle_surface_post
+      (Keeper_tool_in_process_runtime.handle_surface_post_with_outcome
          ~config:ctx.config
          ~meta:ctx.meta
          ?continuation_channel:ctx.continuation_channel
@@ -221,19 +227,19 @@ let handle_in_process ctx descriptor args =
          ())
   | Tool_person_note_set ->
     Some
-      (Keeper_tool_in_process_runtime.handle_person_note_set
+      (Keeper_tool_in_process_runtime.handle_person_note_set_with_outcome
          ~config:ctx.config
          ~meta:ctx.meta
          ~args)
   | Tool_ide_annotate ->
     Some
-      (Keeper_tool_in_process_runtime.handle_ide_annotate
+      (Keeper_tool_in_process_runtime.handle_ide_annotate_with_outcome
          ~config:ctx.config
          ~meta:ctx.meta
          ~args)
   | Tool_voice_dispatch ->
     Some
-      (Keeper_tool_in_process_runtime.handle_voice
+      (Keeper_tool_in_process_runtime.handle_voice_with_outcome
          ~config:ctx.config
          ~meta:ctx.meta
          ~name
@@ -241,64 +247,67 @@ let handle_in_process ctx descriptor args =
          ())
   | Tool_task_dispatch ->
     Some
-      (Keeper_tool_in_process_runtime.handle_task
+      (Keeper_tool_task_runtime.handle_keeper_task_tool_with_outcome
          ~config:ctx.config
          ~meta:ctx.meta
          ~name
          ~args)
   | Board_tool_dispatch ->
     Some
-      (Keeper_tool_in_process_runtime.handle_board ~meta:ctx.meta ~name ~args)
+      (Keeper_tool_board_runtime.handle_keeper_board_tool_with_outcome
+         ~meta:ctx.meta
+         ~name
+         ~args)
   | Tool_masc_board_dispatch ->
     Some
-      (Keeper_tool_in_process_runtime.handle_masc_board
+      (Keeper_tool_in_process_runtime.handle_masc_board_with_outcome
          ~meta:ctx.meta
          ~name
          ~args)
   | Tool_masc_task_dispatch ->
     Some
-      (Keeper_tool_in_process_runtime.handle_masc_task
+      (Keeper_tool_in_process_runtime.handle_masc_task_with_outcome
          ~config:ctx.config
          ~meta:ctx.meta
          ~name
          ~args)
   | Tool_masc_plan_dispatch ->
     Some
-      (Keeper_tool_in_process_runtime.handle_masc_plan
+      (Keeper_tool_in_process_runtime.handle_masc_plan_with_outcome
          ~config:ctx.config
          ~name
          ~args)
   | Tool_masc_run_dispatch ->
     Some
-      (Keeper_tool_in_process_runtime.handle_masc_run
+      (Keeper_tool_in_process_runtime.handle_masc_run_with_outcome
          ~config:ctx.config
          ~meta:ctx.meta
          ~name
          ~args)
   | Tool_masc_agent_dispatch ->
     Some
-      (Keeper_tool_in_process_runtime.handle_masc_agent
+      (Keeper_tool_in_process_runtime.handle_masc_agent_with_outcome
          ~config:ctx.config
          ~meta:ctx.meta
          ~name
          ~args)
   | Tool_masc_workspace_dispatch ->
     Some
-      (Keeper_tool_in_process_runtime.handle_masc_workspace
+      (Keeper_tool_in_process_runtime.handle_masc_workspace_with_outcome
          ~config:ctx.config
          ~meta:ctx.meta
          ~name
          ~args)
   | Tool_masc_misc_dispatch ->
     Some
-      (Keeper_tool_in_process_runtime.handle_masc_misc
+      (Keeper_tool_in_process_runtime.handle_masc_misc_with_outcome
          ~config:ctx.config
          ~meta:ctx.meta
          ~name
          ~args)
   | Tool_web_search ->
     Some
-      (Keeper_tool_in_process_runtime.handle_web_search
+      (Keeper_tool_in_process_runtime.handle_web_search_with_outcome
          ~config:ctx.config
          ~meta:ctx.meta
          ?continuation_channel:ctx.continuation_channel
@@ -308,7 +317,7 @@ let handle_in_process ctx descriptor args =
          ())
   | Tool_web_fetch ->
     Some
-      (Keeper_tool_in_process_runtime.handle_web_fetch
+      (Keeper_tool_in_process_runtime.handle_web_fetch_with_outcome
          ~config:ctx.config
          ~meta:ctx.meta
          ?continuation_channel:ctx.continuation_channel
@@ -318,28 +327,28 @@ let handle_in_process ctx descriptor args =
          ())
   | Tool_masc_control_dispatch ->
     Some
-      (Keeper_tool_in_process_runtime.handle_masc_control
+      (Keeper_tool_in_process_runtime.handle_masc_control_with_outcome
          ~config:ctx.config
          ~meta:ctx.meta
          ~name
          ~args)
   | Tool_masc_agent_timeline_dispatch ->
     Some
-      (Keeper_tool_in_process_runtime.handle_masc_agent_timeline
+      (Keeper_tool_in_process_runtime.handle_masc_agent_timeline_with_outcome
          ~config:ctx.config
          ~meta:ctx.meta
          ~name
          ~args)
   | Tool_masc_schedule_dispatch ->
     Some
-      (Keeper_tool_in_process_runtime.handle_masc_schedule
+      (Keeper_tool_in_process_runtime.handle_masc_schedule_with_outcome
          ~config:ctx.config
          ~meta:ctx.meta
          ~name
          ~args)
   | Tool_masc_keeper_dispatch ->
     Some
-      (Keeper_tool_in_process_runtime.handle_masc_keeper
+      (Keeper_tool_in_process_runtime.handle_masc_keeper_with_outcome
          ?sw:ctx.sw
          ?clock:ctx.clock
          ?proc_mgr:ctx.proc_mgr
@@ -354,12 +363,14 @@ let handle_in_process ctx descriptor args =
          ~args
          ())
   | Tool_masc_surface_audit ->
-    Some (Keeper_tool_in_process_runtime.handle_masc_surface_audit ~args)
+    Some
+      (Keeper_tool_execution.success
+         (Keeper_tool_in_process_runtime.handle_masc_surface_audit ~args))
   | Tool_masc_fusion_dispatch ->
     (* sw/net는 핸들러가 Eio_context(서버 root switch + net)에서 직접 해석한다 —
        턴 스코프 ctx.sw를 쓰면 out-of-band 심의가 턴 종료 시 취소된다. *)
     Some
-      (Keeper_tool_in_process_runtime.handle_masc_fusion
+      (Keeper_tool_in_process_runtime.handle_masc_fusion_with_outcome
          ~config:ctx.config
          ~meta:ctx.meta
          ?continuation_channel:ctx.continuation_channel
@@ -368,20 +379,21 @@ let handle_in_process ctx descriptor args =
   | Tool_masc_fusion_status ->
     (* read-only: reads the in-memory run registry, no server context needed. *)
     Some
-      (Keeper_tool_in_process_runtime.handle_masc_fusion_status
-         ~meta:ctx.meta
-         ~args
-         ())
+      (Keeper_tool_execution.success
+         (Keeper_tool_in_process_runtime.handle_masc_fusion_status
+            ~meta:ctx.meta
+            ~args
+            ()))
   | Tool_masc_library_dispatch
   | Tool_masc_recurring_dispatch ->
-    Keeper_tool_registered_runtime.handle_registered_tool
+    Keeper_tool_registered_runtime.handle_registered_tool_with_outcome
       ~config:ctx.config
       ~keeper_name:ctx.meta.name
       ~name
       ~args
   | Tool_masc_local_runtime_dispatch ->
     Some
-      (Keeper_tool_in_process_runtime.handle_masc_local_runtime
+      (Keeper_tool_in_process_runtime.handle_masc_local_runtime_with_outcome
          ~config:ctx.config
          ~meta:ctx.meta
          ?continuation_channel:ctx.continuation_channel
@@ -394,7 +406,7 @@ let handle_in_process ctx descriptor args =
     (* read-only vision sub-call; needs [net] (like masc_fusion), threaded from
        the turn-scoped dispatch context. *)
     Some
-      (Keeper_tool_in_process_runtime.handle_analyze_image
+      (Keeper_tool_in_process_runtime.handle_analyze_image_with_outcome
          ?sw:ctx.sw
          ?clock:ctx.clock
          ?net:ctx.net

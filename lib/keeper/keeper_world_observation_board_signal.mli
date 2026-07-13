@@ -3,10 +3,35 @@
 type match_result =
   { explicit_mention : bool
   ; matched_targets : string list
-  ; score : int
   }
 
-type comment_status = [ `Never | `No_new_external | `New_external of int * string * string ]
+type board_read_operation =
+  | Get_post
+  | Get_comments
+
+type board_unavailable =
+  { operation : board_read_operation
+  ; post_id : string
+  ; error : Board.board_error
+  }
+
+type 'a board_read =
+  | Available of 'a
+  | Unavailable of board_unavailable
+
+type comment_state =
+  [ `Never
+  | `No_new_external
+  | `New_external of int * string * string
+  ]
+
+type comment_status = comment_state board_read
+
+exception Board_unavailable of board_unavailable
+
+val board_read_operation_to_string : board_read_operation -> string
+val unavailable_to_string : board_unavailable -> string
+val raise_unavailable : board_unavailable -> 'a
 
 val board_signal_of_board_stimulus
   :  post_id:string
@@ -15,11 +40,17 @@ val board_signal_of_board_stimulus
 (** Total conversion from the typed event-queue board payload to the
     [Board_dispatch.board_signal] the matchers consume (RFC-0020). *)
 
+val board_stimulus_of_board_signal
+  :  Board_dispatch.board_signal
+  -> Keeper_event_queue.board_stimulus
+(** Total inverse conversion used by durable Board-signal producers. *)
+
 val post_id_string : Board.post -> string
 val compare_cursor_token : float * string -> float * string -> int
 val cursor_token_of_post : Board.post -> float * string
 val list_posts_after_cursor : float * string option -> Board.post list
 val text : Board_dispatch.board_signal -> string
+val mention_ids_of_signal : Board_dispatch.board_signal -> Keeper_identity.Keeper_id.t list
 
 val match_signal
   :  meta:Keeper_meta_contract.keeper_meta
@@ -47,6 +78,7 @@ val wake_reason_label : wake_reason -> string
 val wake_reason
   :  meta:Keeper_meta_contract.keeper_meta
   -> signal:Board_dispatch.board_signal
-  -> wake_reason option
-(** [None] means the structural reactive pipeline found no deterministic
-    address for this keeper (counted as [BoardSignalNoWakeTotal] by the caller). *)
+  -> wake_reason option board_read
+(** [Available None] means the structural reactive pipeline found no
+    deterministic address for this keeper. [Unavailable _] preserves a typed
+    Board read failure so callers can retain durable work and avoid acking it. *)

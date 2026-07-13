@@ -85,53 +85,6 @@ let classify_from_exception (exn : exn) : tool_failure_class =
   | _ -> Runtime_failure
 ;;
 
-let classify_from_structured_failure_message message =
-  try
-    match Yojson.Safe.from_string message with
-    | `Assoc fields ->
-      (match List.assoc_opt "failure_class" fields with
-       | Some (`String value) -> tool_failure_class_of_string value
-       | _ -> None)
-    | _ -> None
-  with
-  | Yojson.Json_error _ -> None
-;;
-
-let structured_payload_of_message (message : string) : Yojson.Safe.t option =
-  let parse_json raw =
-    try Some (Yojson.Safe.from_string raw) with
-    | Yojson.Json_error _ -> None
-  in
-  let trimmed = String.trim message in
-  let ensure_object = function
-    | `Assoc _ as obj -> Some obj
-    | `List _ as arr -> Some (`Assoc [ "items", arr ])
-    | _ -> None
-  in
-  match parse_json trimmed with
-  | Some json -> ensure_object json
-  | None ->
-    let len = String.length message in
-    let rec loop from =
-      match String.index_from_opt message from '\n' with
-      | None -> None
-      | Some newline_idx ->
-        let suffix =
-          String.sub message (newline_idx + 1) (len - newline_idx - 1) |> String.trim
-        in
-        if String.equal suffix ""
-        then loop (newline_idx + 1)
-        else (
-          match suffix.[0] with
-          | '{' | '[' ->
-            (match parse_json suffix with
-             | Some json -> ensure_object json
-             | None -> loop (newline_idx + 1))
-          | _ -> loop (newline_idx + 1))
-    in
-    loop 0
-;;
-
 (** Payload carried by a successful tool invocation. *)
 type success_payload =
   { data : Yojson.Safe.t
@@ -220,31 +173,20 @@ let is_success : result -> bool = function
 let ok ~tool_name ~start_time message_str : result =
   let end_time = Time_compat.now () in
   let duration_ms = (end_time -. start_time) *. 1000.0 in
-  let data =
-    match structured_payload_of_message message_str with
-    | Some json -> json
-    | None -> `String message_str
-  in
-  Ok { data; tool_name; duration_ms }
+  Ok { data = `String message_str; tool_name; duration_ms }
 ;;
 
 let error ?(failure_class = None) ~tool_name ~start_time message_str : result =
   let end_time = Time_compat.now () in
   let duration_ms = (end_time -. start_time) *. 1000.0 in
-  let data =
-    match structured_payload_of_message message_str with
-    | Some json -> json
-    | None -> `String message_str
-  in
-  let class_ =
-    match failure_class with
-    | Some cls -> cls
-    | None ->
-      (match classify_from_structured_failure_message message_str with
-       | Some cls -> cls
-       | None -> Runtime_failure)
-  in
-  Error { class_; message = message_str; data; tool_name; duration_ms }
+  let class_ = Option.value ~default:Runtime_failure failure_class in
+  Error
+    { class_
+    ; message = message_str
+    ; data = `String message_str
+    ; tool_name
+    ; duration_ms
+    }
 ;;
 
 let of_exn ?failure_class ~tool_name ~start_time exn : result =

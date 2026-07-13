@@ -949,7 +949,7 @@ let () = test "handle_transition_start_on_todo_points_at_claim_first" (fun () ->
   assert (str_contains (Tool_result.message result) "claim");
   (* The output must be a structured workflow rejection so the OAS retry
      ladder treats it as deterministic non-retryable. *)
-  let rejection_json = Yojson.Safe.from_string (Tool_result.message result) in
+  let rejection_json = Tool_result.data result in
   assert (json_string [ "failure_class" ] rejection_json = "workflow_rejection");
   assert (json_string [ "error_class" ] rejection_json = "deterministic");
   assert (not (json_bool [ "recoverable" ] rejection_json));

@@ -43,12 +43,6 @@ type t =
   | Provider_runtime_error of string
   (** [Keeper_registry.Provider_runtime_error]: payload is the
           original [code] field. *)
-  | Ambiguous_partial_commit_post_commit_timeout
-  (** [Keeper_registry.Ambiguous_partial_commit] with
-          [kind = Post_commit_timeout]. *)
-  | Ambiguous_partial_commit_post_commit_failure
-  (** [Keeper_registry.Ambiguous_partial_commit] with
-          [kind = Post_commit_failure]. *)
   | Fiber_unresolved (** [Keeper_registry.Fiber_unresolved]. *)
   | Turn_overflow_failure
   (** [Keeper_registry.Turn_overflow_failure]: context overflow with
@@ -79,11 +73,9 @@ type t =
     compatible with the receipt JSON consumed by dashboards,
     [bin/masc-trace], and external consumers.
 
-    The [Stale_turn_timeout_*] variants and the two
-    [Ambiguous_partial_commit_*] variants intentionally collapse to a
-    single wire string each ([stale_turn_timeout],
-    [ambiguous_partial_commit]) to preserve the existing cohort keys;
-    the typed sub-class is still available to OCaml callers. *)
+    The [Stale_turn_timeout_*] variants intentionally collapse to the
+    [stale_turn_timeout] wire string; the typed sub-class is still available
+    to OCaml callers. *)
 val to_wire : t -> string
 
 (** Best-effort reverse of [to_wire]. Returned [None] for unknown wire

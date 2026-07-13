@@ -167,7 +167,6 @@ let run_keeper_cycle
   let initial_turn_state : Keeper_unified_turn_types.turn_state =
     { cycle_completed = false
     ; manifest_seq = 0
-    ; post_commit_failure_reason = None
     ; current_turn_blocker_info = None
     ; last_execution = None
     ; last_provider_timeout_budget = None
@@ -428,19 +427,11 @@ let run_keeper_cycle
                let prompt_timeout_estimate_tokens =
                  max 1 prompt_timeout_metrics.estimated_total_tokens
                in
-               (* 5. Run via OAS Agent.run() with transient-error retry *)
-               (* Track whether side-effecting tool calls have been executed.
-         If a board_post/comment/shell/file edit succeeded and then a
-         transient error occurs, retrying would replay those tool calls and
-         produce duplicates. In that case, we propagate the error instead of
-         retrying.
-
-         Uses the OAS Event_bus (ToolCalled + ToolCompleted) rather than
-         MASC-side observers. The per-turn subscription is scoped by
-         [filter_agent meta.name], so no cross-keeper contamination.
-         The same events now drive Streaming⇄Awaiting_tool_result FSM
-         transitions unconditionally (see
-         [Keeper_unified_turn_event_bus.record_fsm_tool_transitions]). *)
+               (* 5. Run via OAS Agent.run() with transient-error retry.
+                  The turn-local OAS Event_bus preserves factual
+                  ToolCalled/ToolCompleted pairing and drives
+                  Streaming⇄Awaiting_tool_result FSM transitions. It does
+                  not infer tool effects or veto retry. *)
                let turn_state =
                  { turn_state with last_execution = Some initial_execution }
                in
@@ -467,12 +458,11 @@ let run_keeper_cycle
                let drain_turn_event_bus ?(site = "unspecified") () =
                  Keeper_unified_turn_event_bus.drain ~site turn_event_bus_state
                in
-               let committed_mutating_tools_snapshot () =
-                 Keeper_unified_turn_event_bus.committed_mutating_tools
-                   turn_event_bus_state
-               in
                let event_bus_integrity_error_snapshot () =
                  Keeper_unified_turn_event_bus.integrity_error turn_event_bus_state
+               in
+               let tool_completed_count_snapshot () =
+                 Keeper_unified_turn_event_bus.tool_completed_count turn_event_bus_state
                in
                let start_background_turn_event_bus_drain ~clock =
                  Keeper_unified_turn_event_bus.start_background_drain
@@ -583,11 +573,11 @@ let run_keeper_cycle
                            ; continuation_delivery_channel
                            ; hitl_resolution
                            ; cleanup
-                           ; committed_mutating_tools_snapshot
                            ; config
                            ; drain_turn_event_bus
                            ; event_bus
                            ; event_bus_integrity_error_snapshot
+                           ; tool_completed_count_snapshot
                            ; generation
                            ; keeper_turn_id
                            ; meta
@@ -726,27 +716,20 @@ let run_keeper_cycle
                        ()
                    | _ ->
                      (match err with
-                      | Agent_sdk.Error.Api (Timeout { message }) ->
-                        let classification =
-                          if is_transient
-                          then "transient_network"
-                          else if EC.is_structural_oas_timeout_message message
-                          then "structural_budget"
-                          else "other_timeout"
-                        in
+                      | Agent_sdk.Error.Agent
+                          (AgentExecutionTimeout _ | AgentExecutionIdleTimeout _) ->
                         Otel_metric_store.inc_counter
                           Keeper_metrics.(to_string OasTimeoutClassifications)
-                          ~labels:[ "classification", classification ]
+                          ~labels:[ "classification", "structural_budget" ]
+                          ()
+                      | Agent_sdk.Error.Api (Timeout _) ->
+                        Otel_metric_store.inc_counter
+                          Keeper_metrics.(to_string OasTimeoutClassifications)
+                          ~labels:[ "classification", "transient_network" ]
                           ()
                       | _ -> ()));
                   let is_server_parse_rejection = EC.is_server_rejected_parse_error err in
                   let is_auto_recoverable = EC.is_auto_recoverable_turn_error err in
-                  let ambiguous_commit_tools =
-                    EC.ambiguous_side_effect_commit_tools
-                      ~tool_names:(committed_mutating_tools_snapshot ())
-                      err
-                  in
-                  let is_ambiguous_partial = ambiguous_commit_tools <> [] in
                   Otel_metric_store.inc_counter
                     Keeper_metrics.(to_string Turns)
                     ~labels:[ "keeper", meta.name; "outcome", "failure" ]
@@ -806,9 +789,7 @@ let run_keeper_cycle
                     prompt_timeout_estimate_tokens
                     failure_context_ratio
                     latency_ms
-                    (if is_ambiguous_partial
-                     then " (ambiguous partial commit)"
-                     else if is_server_parse_rejection
+                    (if is_server_parse_rejection
                      then " (server parse rejection, auto-recoverable)"
                      else if is_transient
                      then " (transient, cooldown preserved)"
@@ -829,46 +810,30 @@ let run_keeper_cycle
                       ~sdk_error:err
                       ()
                   in
-                  (if is_ambiguous_partial
-                   then (
-                     Otel_metric_store.inc_counter
-                       Keeper_metrics.(to_string TurnErrorAfterTools)
-                       ~labels:[ "keeper", meta.name; "reason", "ambiguous_partial" ]
-                       ();
-                     Log.Keeper.warn
-                       ~keeper_name:meta.name
-                       "%s: ambiguous partial commit recorded after tools=[%s]; \
-                        Keeper lane remains available and the failure follows the \
-                        ordinary durable event/failure route"
-                       meta.name
-                       (String.concat ", " ambiguous_commit_tools)));
                   let e_str = Agent_sdk.Error.to_string err in
                   let terminal_reason =
                     Keeper_turn_terminal.of_failure
-                      ~post_commit_ambiguous:is_ambiguous_partial
                       ~raw_error:e_str
                       err
                   in
-                  if not is_ambiguous_partial
-                  then (
-                    match
-                      registry_failure_reason_of_terminal_reason
-                        terminal_reason
-                        ~raw_error:e_str
-                    with
-                    | Some failure_reason ->
-                      Keeper_registry.set_failure_reason
-                        ~base_path:config.base_path
-                        meta.name
-                        (Some failure_reason)
-                    | None -> ());
+                  (match
+                     registry_failure_reason_of_terminal_reason
+                       terminal_reason
+                       ~raw_error:e_str
+                   with
+                   | Some failure_reason ->
+                     Keeper_registry.set_failure_reason
+                       ~base_path:config.base_path
+                       meta.name
+                       (Some failure_reason)
+                   | None -> ());
                   Keeper_unified_metrics.append_decision_record
                     ~config
                     ~meta:updated_meta
                     ~turn_ctx_cell
                     ~observation
                     ~latency_ms
-                    ~outcome:(if is_ambiguous_partial then "partial" else "error")
+                    ~outcome:"error"
                     ~degraded_retry_applied
                     ?degraded_retry_runtime
                     ?fallback_reason:
@@ -913,32 +878,6 @@ dominant source of the observed CAS race exhaustion after
                     Keeper_metrics.(to_string WriteMetaCycleFailures)
                     ~labels:[ "keeper", meta.name; "site", Keeper_write_meta_cycle_failure_site.(to_label Turn_failure) ]
                     ();
-                  if is_ambiguous_partial
-                  then (
-                    let failure_reason =
-                      Option.value
-                        ~default:
-                          (Keeper_registry.Ambiguous_partial_commit
-                             { kind = Keeper_registry.Post_commit_failure
-                             ; detail = e_str
-                             })
-                        turn_state.post_commit_failure_reason
-                    in
-                    Keeper_registry.set_failure_reason
-                      ~base_path:config.base_path
-                      meta.name
-                      (Some failure_reason);
-                    let committed_tools = ambiguous_commit_tools in
-                    let turn_event_summary = turn_event_bus in
-                    Log.Keeper.info
-                      ~keeper_name:meta.name
-                      "%s: reconcile-required failure latched as %s after \
-                       committed_mutating_tools [%s] (turn_events=%d, payload_kinds=[%s])"
-                      meta.name
-                      (Keeper_registry.failure_reason_to_string failure_reason)
-                      (String.concat ", " committed_tools)
-                      turn_event_summary.event_count
-                      (String.concat ", " turn_event_summary.payload_kinds));
                   (* RFC-0313: route the failure (total over sdk_error), retain
                      the exact final execution identity, and record failure plus
                      telemetry here. Queue ownership lives one boundary out:

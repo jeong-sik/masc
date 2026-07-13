@@ -528,7 +528,6 @@ let () =
            ~input_schema:schema.input_schema
            ~handler_binding:Tag_dispatch
            ~is_read_only
-           ~is_idempotent:is_read_only
            ()))
     Tool_schemas_schedule.definitions
 ;;

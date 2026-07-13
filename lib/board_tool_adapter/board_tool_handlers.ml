@@ -213,12 +213,7 @@ let handle_vote ~tool_name ~start_time args =
 
 let handle_stats ~tool_name ~start_time _args : Tool_result.result =
   let stats = Board_dispatch.stats () in
-  (* Structured result via [Tool_result.ok] so [stats] is parsed back into
-     structured [data] instead of a `String that double-encodes the JSON. *)
-  Tool_result.ok
-    ~tool_name
-    ~start_time
-    (Printf.sprintf "Board Stats:\n%s" (Yojson.Safe.pretty_to_string stats))
+  Tool_result.make_ok ~tool_name ~start_time ~data:stats ()
 ;;
 
 (** Search posts by keyword. *)

@@ -477,7 +477,7 @@ Phase ordering follows `docs/design/checkpoint-truth-and-replay-rfc.md`.
 | Phase | Scope | Primary modules | Expected output |
 |------|-------|-----------------|-----------------|
 | A | truth surface cleanup | `keeper_checkpoint_store`, `keeper_agent_run`, `keeper_post_turn` | native OAS checkpoint is documented and treated as runtime truth |
-| B | replay semantics + side-effect boundary | `keeper_agent_run`, `keeper_post_turn`, `agent_tool_command_runtime`, `retired_file_write_tool` | typed replay target facts and mutation-boundary rules |
+| B | replay semantics + checkpoint boundary | `keeper_agent_run`, `keeper_post_turn`, `agent_tool_command_runtime`, `retired_file_write_tool` | typed replay target facts and checkpoint rules |
 | C | wrapper reduction | `keeper_context_runtime`, `keeper_agent_run`, `keeper_post_turn`, `context_compact_oas` | `working_context` dependency inventory and marker-leakage backlog |
 | D | optional delta path | `keeper_checkpoint_store`, `delta-checkpoint-read-path` | delta restore remains subordinate to full checkpoint truth |
 
@@ -485,7 +485,7 @@ Phase ordering follows `docs/design/checkpoint-truth-and-replay-rfc.md`.
 
 - **A1** native OAS checkpoint truth wording and legacy fallback removal
 - **A2** canonical vs derived continuity read-surface labeling
-- **B1** mutation-boundary typed fact inventory
+- **B1** checkpoint-boundary typed fact inventory
 - **B2** external-effect adapter inventory against the product-neutral Keeper Gate
 - **C1** `working_context` dependency inventory
 - **C2** prose/domain-state separation audit

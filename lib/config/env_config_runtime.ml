@@ -360,9 +360,6 @@ module Tools = struct
     let v = get_int ~default:512 "MASC_LIST_PAGE_SIZE" in
     max 10 (min 1024 v)
 
-  (** Read-only tool retry limit. Default: 2. *)
-  let readonly_retry_limit = get_int ~default:2 "MASC_TOOL_READONLY_RETRY_LIMIT"
-
   (** Extra public tools (comma-separated names). *)
   let public_tools_extra_opt () =
     Sys.getenv_opt "MASC_PUBLIC_TOOLS_EXTRA" |> trim_opt

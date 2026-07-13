@@ -48,6 +48,13 @@ val handle_read_file :
   args:Yojson.Safe.t ->
   string
 
+val handle_read_file_with_outcome :
+  turn_sandbox_factory:Keeper_sandbox_factory.t option ->
+  config:Workspace.config ->
+  keeper_name:string ->
+  args:Yojson.Safe.t ->
+  Keeper_tool_execution.t
+
 val handle_file_write :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->
   config:Workspace.config ->
@@ -58,3 +65,23 @@ val handle_file_write :
   args:Yojson.Safe.t ->
   unit ->
   string
+
+val handle_file_write_with_outcome :
+  turn_sandbox_factory:Keeper_sandbox_factory.t option ->
+  config:Workspace.config ->
+  keeper_name:string ->
+  ?continuation_channel:Keeper_continuation_channel.t ->
+  ?gate_context:(unit -> Keeper_gate.causal_context) ->
+  ?gate_grant:Keeper_gate.cycle_grant ->
+  args:Yojson.Safe.t ->
+  unit ->
+  Keeper_tool_execution.t
+(** Local writes acquire the project-root anchor and selected allowed root with
+    [Eio.Path.open_dir] before Gate evaluation, then keep those directory
+    capabilities through read, append, temp-file creation, and atomic rename.
+    No local write is performed through a validated native path string.
+
+    The project root's parent is the operator-owned capability-acquisition
+    boundary. An explicit allowed root outside the project likewise requires
+    an operator-owned parent; Keeper-writable components must begin below the
+    opened root capability. *)

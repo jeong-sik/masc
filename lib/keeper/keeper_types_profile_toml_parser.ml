@@ -127,10 +127,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         autoboot_enabled = bool_ "autoboot_enabled";
         mention_targets = strs "mention_targets";
         proactive_enabled = bool_ "proactive_enabled";
-        shards =
-          (match strs "shards" with
-           | [] -> None
-           | xs -> Some xs);
         allowed_paths =
           if has "allowed_paths" then Some (strs "allowed_paths")
           else None;
@@ -166,7 +162,6 @@ let parsed_field_key_names =
   ; "autoboot_enabled"
   ; "mention_targets"
   ; "proactive_enabled"
-  ; "shards"
   ; "allowed_paths"
   ; "sandbox_profile"
   ; "sandbox_image"
@@ -196,7 +191,6 @@ let canonical_keeper_toml_key_names =
   ; "autoboot_enabled"
   ; "mention_targets"
   ; "proactive_enabled"
-  ; "shards"
   ; "allowed_paths"
   ; "sandbox_profile"
   ; "sandbox_image"
@@ -323,7 +317,6 @@ let merge_keeper_profile_defaults
     mention_targets =
       merge_string_list ~base:base.mention_targets overlay.mention_targets;
     proactive_enabled = prefer overlay.proactive_enabled base.proactive_enabled;
-    shards = prefer overlay.shards base.shards;
     allowed_paths = prefer overlay.allowed_paths base.allowed_paths;
     sandbox_profile = prefer overlay.sandbox_profile base.sandbox_profile;
     sandbox_image = prefer overlay.sandbox_image base.sandbox_image;

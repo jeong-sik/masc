@@ -2,6 +2,7 @@
 
 type keeper_path_rejection =
   | Path_required
+  | Invalid_lexical_endpoint
   | Allowed_paths_normalized_empty of { count : int }
   | Outside_sandbox of { raw : string }
 

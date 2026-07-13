@@ -38,7 +38,6 @@ let canonical_app_codes : (string * D.t) list =
   [ "success", D.Success
   ; "external_cancel", D.External_cancel
   ; "turn_wall_clock_timeout", D.Turn_wall_clock_timeout
-  ; "post_commit_ambiguous", D.Post_commit_ambiguous
   ; "provider_error", D.Provider_error (Code.Provider_runtime_error "provider_error")
   ; "unknown_error", D.Unknown { raw_error = "" }
   ]
@@ -144,7 +143,6 @@ let round_trippable : (string * D.t) list =
   [ "Success", D.Success
   ; "External_cancel", D.External_cancel
   ; "Turn_wall_clock_timeout", D.Turn_wall_clock_timeout
-  ; "Post_commit_ambiguous", D.Post_commit_ambiguous
   ; ( "Turn_budget_exhausted/Turns/Oas"
     , D.Turn_budget_exhausted
         { detail = Some { dimension = `Turns; source = `Oas_sdk }; used = 10; limit = 10 } )
@@ -330,12 +328,6 @@ let runtime_codes_to_projection : (string * Code.t * D.t) list =
     , Code.Stale_turn_timeout_no_progress
     , D.Turn_wall_clock_timeout )
   ; "Stale_turn_timeout/noop", Code.Stale_turn_timeout_noop, D.Turn_wall_clock_timeout
-  ; ( "Ambiguous/timeout"
-    , Code.Ambiguous_partial_commit_post_commit_timeout
-    , D.Post_commit_ambiguous )
-  ; ( "Ambiguous/failure"
-    , Code.Ambiguous_partial_commit_post_commit_failure
-    , D.Post_commit_ambiguous )
   ; "Heartbeat", Code.Heartbeat_failures, D.Provider_error Code.Heartbeat_failures
   ; "Turn_failures", Code.Turn_failures, D.Provider_error Code.Turn_failures
   ; "Storm", Code.Stale_termination_storm, D.Provider_error Code.Stale_termination_storm
@@ -420,7 +412,6 @@ let test_registry_failure_reason_preserves_no_provider_runtime_reason () =
 let empty_turn_state : Unified_types.turn_state =
   { cycle_completed = false
   ; manifest_seq = 0
-  ; post_commit_failure_reason = None
   ; current_turn_blocker_info = None
   ; last_execution = None
   ; last_provider_timeout_budget = None

@@ -30,7 +30,7 @@ module Set = Stdlib.Set.Make (struct
     ;;
   end)
 
-let rec has kind tool_name =
+let has kind tool_name =
   let metadata = Tool_catalog.metadata tool_name in
   match kind with
   | Read_only ->
@@ -44,8 +44,7 @@ let rec has kind tool_name =
   | Idempotent ->
     (match metadata.idempotent with
      | Some true -> true
-     | Some false -> false
-     | None -> has Read_only tool_name)
+     | Some false | None -> false)
 ;;
 
 let granted tool_name =

@@ -132,57 +132,6 @@ val wakeup_keeper :
 (** Wake up all running keepers. [None] preserves legacy global wakeup. *)
 val wakeup_all_keepers : ?base_path:string -> unit -> unit
 
-(** Board-reactive debounce interval (seconds), from runtime config. *)
-val board_reactive_debounce_sec : float
-
-(** Connector-reactive (ambient connector message) debounce interval, seconds.
-    RFC-connector-ambient-attention-wake P4. *)
-val connector_reactive_debounce_sec : float
-
-val connector_reactive_wakeup_allowed :
-  base_path:string -> keeper_name:string -> channel_id:string -> bool
-(** Whether an ambient connector message on [channel_id] may wake [keeper_name]
-    now. Reuses the board-reactive primitive: the RFC-0246 tombstone gate (a
-    latched no-progress keeper is not re-woken) plus a per-channel debounce
-    ({!connector_reactive_debounce_sec}). Returns [false] within the debounce
-    window so a chatty channel wakes the keeper at most once per window; the
-    keeper then sees every accumulated message in its chat history. Records the
-    wakeup timestamp as a side effect when it returns [true]. *)
-
-val board_reactive_wakeup_max : int
-
-(** [board_wakeup_dedup_key] is the content fingerprint a board wakeup is
-    deduped under (RFC-0239 R4): normalized (author,title,content), or the
-    [post_id] when title+content are empty. Exposed for testing. *)
-val board_wakeup_dedup_key :
-  post_id:string -> author:string -> title:string -> content:string -> string
-
-(** Check if a board-reactive wakeup is allowed for [keeper_name] given the
-    incoming [signal]. Debounced on the signal's content fingerprint
-    (RFC-0239 R4), not its post_id, so identical re-posts collapse. *)
-val board_reactive_wakeup_allowed :
-  base_path:string
-  -> keeper_name:string
-  -> signal:Board_dispatch.board_signal
-  -> bool
-
-(** Select which keepers wake for a board signal (RFC-0020). Explicit
-    mentions short-circuit and wake unconditionally; thread-reply/reaction
-    followups compete for [?total_limit] immediate-wake slots in candidate
-    order. [None] reasons receive nothing (no deterministic address).
-    Semantic relatedness is not a deterministic board wake reason; it belongs
-    behind an LLM/Judge attention boundary.
-
-    RFC-0334 W1: returns [(selected, deferred)] — the wake budget bounds
-    wakes, not delivery. [deferred] carries every addressed followup beyond
-    the budget (cap overflow, or all followups when an explicit mention
-    short-circuits); the caller appends the stimulus to their mailboxes. *)
-val select_board_wakeup_candidates :
-  ?total_limit:int ->
-  ('a * Keeper_world_observation_board_signal.wake_reason option) list ->
-  ('a * Keeper_world_observation_board_signal.wake_reason) list
-  * ('a * Keeper_world_observation_board_signal.wake_reason) list
-
 val wakeup_relevant_keeper_for_board_signal :
   config:Workspace.config -> Board_dispatch.board_signal -> unit
 

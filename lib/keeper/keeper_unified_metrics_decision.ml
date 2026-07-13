@@ -281,12 +281,6 @@ let append_decision_record
                         to_wire
                           (Turn_budget_exhausted
                              { detail = None; used = turns_used; limit }))
-                  | Runtime_agent.MutationBoundaryReached { turns_used; tool_name } ->
-                      (match tool_name with
-                       | Some tool ->
-                           Printf.sprintf "mutation_boundary(%d:%s)" turns_used tool
-                       | None ->
-                           Printf.sprintf "mutation_boundary(%d)" turns_used)
                   | Runtime_agent.Yielded_to_chat_waiting { turns_used } ->
                       Printf.sprintf "yielded_to_chat_waiting(%d)" turns_used
                   | Runtime_agent.Yielded_to_durable_stimulus { turns_used } ->

@@ -68,6 +68,14 @@ let test_evaluator_failure_is_unavailable_not_reject () =
        Alcotest.(check bool) "no fabricated reject" true (Option.is_none result.verdict))
 ;;
 
+let test_evidence_text_is_not_classified_before_llm_review () =
+  Alcotest.(check (list string))
+    "only blank values are removed"
+    [ "n/a"; "tbd" ]
+    (Masc.Task.Completion_review.non_empty_trimmed_strings
+       [ " tbd "; ""; " n/a "; "   " ])
+;;
+
 let () =
   configure_prompt_registry ();
   Alcotest.run
@@ -85,5 +93,9 @@ let () =
             "provider failure unavailable"
             `Quick
             test_evaluator_failure_is_unavailable_not_reject
+        ; Alcotest.test_case
+            "evidence meaning stays with reviewer"
+            `Quick
+            test_evidence_text_is_not_classified_before_llm_review
         ] )
     ]

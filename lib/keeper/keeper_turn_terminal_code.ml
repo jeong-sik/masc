@@ -15,8 +15,6 @@ type t =
   | Heartbeat_failures
   | Turn_failures
   | Provider_runtime_error of string
-  | Ambiguous_partial_commit_post_commit_timeout
-  | Ambiguous_partial_commit_post_commit_failure
   | Fiber_unresolved
   | Turn_overflow_failure
   | Operator_interrupt
@@ -38,8 +36,6 @@ let to_wire = function
   | Heartbeat_failures -> "heartbeat_failures"
   | Turn_failures -> "turn_failures"
   | Provider_runtime_error code -> code
-  | Ambiguous_partial_commit_post_commit_timeout
-  | Ambiguous_partial_commit_post_commit_failure -> "ambiguous_partial_commit"
   | Fiber_unresolved -> "fiber_unresolved"
   | Turn_overflow_failure -> "turn_overflow_failure"
   | Operator_interrupt -> "operator_interrupt"
@@ -59,10 +55,6 @@ let of_wire = function
   | "stale_fleet_batch" -> Some Stale_fleet_batch
   | "heartbeat_failures" -> Some Heartbeat_failures
   | "turn_failures" -> Some Turn_failures
-  | "ambiguous_partial_commit" ->
-    (* Lossy in the same way as [stale_turn_timeout]. Canonicalise
-         to [Post_commit_timeout]. *)
-    Some Ambiguous_partial_commit_post_commit_timeout
   | "fiber_unresolved" -> Some Fiber_unresolved
   | "turn_overflow_failure" -> Some Turn_overflow_failure
   | "operator_interrupt" -> Some Operator_interrupt
@@ -87,12 +79,6 @@ let of_failure_reason : Keeper_registry.failure_reason -> t = function
   | Keeper_registry.Stale_termination_storm _ -> Stale_termination_storm
   | Keeper_registry.Stale_fleet_batch _ -> Stale_fleet_batch
   | Keeper_registry.Provider_runtime_error { code; _ } -> Provider_runtime_error code
-  | Keeper_registry.Ambiguous_partial_commit
-      { kind = Keeper_registry.Post_commit_timeout; _ } ->
-    Ambiguous_partial_commit_post_commit_timeout
-  | Keeper_registry.Ambiguous_partial_commit
-      { kind = Keeper_registry.Post_commit_failure; _ } ->
-    Ambiguous_partial_commit_post_commit_failure
   | Keeper_registry.Fiber_unresolved _ -> Fiber_unresolved
   | Keeper_registry.Turn_overflow_failure -> Turn_overflow_failure
   | Keeper_registry.Operator_interrupt -> Operator_interrupt

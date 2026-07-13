@@ -8,7 +8,6 @@ let stop_reason_suppresses_visible_response = function
   | Runtime_agent.ToolFailureRecoveryDeferred _ -> true
   | Runtime_agent.Completed
   | Runtime_agent.TurnBudgetExhausted _
-  | Runtime_agent.MutationBoundaryReached _
   | Runtime_agent.Yielded_to_chat_waiting _
   | Runtime_agent.Yielded_to_durable_stimulus _
   | Runtime_agent.InputRequired _ ->

@@ -22,8 +22,8 @@ let tool_result_error_json (tr : Tool_result.result) =
     | Some cls ->
       [ "failure_class", `String (Tool_result.tool_failure_class_to_string cls) ]
   in
-  match Tool_result.structured_payload_of_message (Tool_result.message tr) with
-  | Some (`Assoc payload_fields) ->
+  match Tool_result.data tr with
+  | `Assoc payload_fields ->
     let payload_fields =
       List.fold_left
         (fun acc (key, value) ->
@@ -32,8 +32,7 @@ let tool_result_error_json (tr : Tool_result.result) =
         fields
     in
     Yojson.Safe.to_string (`Assoc payload_fields)
-  | Some _
-  | None ->
+  | _ ->
     error_json ~fields (Tool_result.message tr)
 ;;
 
@@ -177,6 +176,20 @@ let user_message_error (rej : Keeper_alerting_path.keeper_path_rejection) =
   Error (Keeper_alerting_path.rejection_to_user_message rej)
 ;;
 
+let project_keeper_logical_path
+      ~(config : Workspace.config)
+      ~(meta : keeper_meta)
+      (raw_path : string)
+  =
+  let raw_path =
+    String.trim raw_path
+    |> keeper_observation_host_path_of_visible_path ~config ~meta
+  in
+  if String.equal raw_path "" || not (Filename.is_relative raw_path)
+  then raw_path
+  else Filename.concat (Keeper_sandbox.host_root_abs_of_meta ~config meta) raw_path
+;;
+
 let resolve_projected_keeper_read_path
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
@@ -194,19 +207,32 @@ let resolve_projected_keeper_read_path
   | Error rejection -> user_message_error rejection
 ;;
 
-let resolve_keeper_path
+let resolve_keeper_confined_write_path
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
+      ~(endpoint : Keeper_alerting_path.confined_path_endpoint)
       ~(raw_path : string)
   =
+  let allowed_paths = keeper_effective_write_allowed_paths ~meta in
+  let projected_path = project_keeper_logical_path ~config ~meta raw_path in
   match
-    Keeper_alerting_path.resolve_keeper_target_path
+    Keeper_alerting_path.resolve_keeper_confined_path
       ~config
-      ~allowed_paths:(keeper_effective_write_allowed_paths ~meta)
-      ~raw_path
+      ~allowed_paths
+      ~endpoint
+      ~raw_path:projected_path
   with
+  | Ok confined -> Ok confined
   | Error rejection -> user_message_error rejection
-  | Ok path -> Ok path
+;;
+
+let resolve_keeper_path ~config ~meta ~raw_path =
+  resolve_keeper_confined_write_path
+    ~config
+    ~meta
+    ~endpoint:Keeper_alerting_path.Follow_referent
+    ~raw_path
+  |> Result.map Keeper_alerting_path.confined_host_path
 ;;
 
 let resolve_keeper_read_path
@@ -214,11 +240,13 @@ let resolve_keeper_read_path
       ~(meta : keeper_meta)
       ~(raw_path : string)
   =
+  let allowed_paths = keeper_effective_allowed_paths ~meta in
+  let projected_path = project_keeper_logical_path ~config ~meta raw_path in
   match
     Keeper_alerting_path.resolve_keeper_read_path
       ~config
-      ~allowed_paths:(keeper_effective_allowed_paths ~meta)
-      ~raw_path
+      ~allowed_paths
+      ~raw_path:projected_path
   with
   | Error rejection -> user_message_error rejection
   | Ok path -> Ok path

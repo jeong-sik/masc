@@ -912,6 +912,51 @@ let test_direct_board_reaction_binds_keeper_identity () =
   Alcotest.(check string) "reaction identity is runtime-owned" "reaction-keeper"
     Yojson.Safe.Util.(reacted |> member "user_id" |> to_string)
 
+let test_model_visible_board_maintenance_dispatches_in_process () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let model_names = Keeper_tool_policy.keeper_model_tool_names () in
+  Alcotest.(check bool) "cleanup descriptor is model-visible" true
+    (List.mem "masc_board_cleanup" model_names);
+  Alcotest.(check bool) "delete descriptor is model-visible" true
+    (List.mem "masc_board_delete" model_names);
+  let keeper_meta = make_keeper_meta ~name:"maintenance-keeper" () in
+  let cleanup_result =
+    Masc.Keeper_tool_in_process_runtime.handle_masc_board
+      ~meta:keeper_meta
+      ~name:"masc_board_cleanup"
+      ~args:(make_args [ "dry_run", `Bool true ])
+  in
+  Alcotest.(check bool) "cleanup reaches its Board handler" true
+    (String.starts_with ~prefix:"Scan complete:" cleanup_result
+     || String.starts_with ~prefix:"Dry-run:" cleanup_result);
+  let ok, created =
+    dispatch
+      "masc_board_post"
+      (make_args
+         [ "content", `String "in-process delete target"
+         ; "author", `String keeper_meta.name
+         ])
+  in
+  Alcotest.(check bool) "delete target created" true ok;
+  let post_id =
+    Yojson.Safe.Util.(parse_create_response_json created |> member "id" |> to_string)
+  in
+  let delete_result =
+    Masc.Keeper_tool_in_process_runtime.handle_masc_board
+      ~meta:keeper_meta
+      ~name:"masc_board_delete"
+      ~args:
+        (make_args
+           [ "post_id", `String post_id; "author", `String "spoofed-author" ])
+  in
+  Alcotest.(check bool) "delete reaches its Board handler" true
+    (contains_substring delete_result post_id);
+  match Board_dispatch.get_post ~post_id with
+  | Ok _ -> Alcotest.fail "model-visible in-process delete left the post behind"
+  | Error _ -> ()
+
 let test_keeper_board_dispatch_uses_typed_tool_names () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1847,7 +1892,7 @@ let test_curation_schema_omits_health_score () =
   check_absent "raw curation submit"
     (find_tool "masc_board_curation_submit" Board_tool.tools);
   check_absent "keeper curation submit"
-    (find_tool "keeper_board_curation_submit" Tool_shard.shard_board.tools)
+    (find_tool "keeper_board_curation_submit" Tool_shard.board_tools)
 
 let test_post_update_schema_exposes_new_author () =
   let update_properties =
@@ -1926,6 +1971,10 @@ let () =
             test_keeper_board_sub_board_owner_is_runtime_bound;
           Alcotest.test_case "direct Board reaction binds keeper identity" `Quick
             test_direct_board_reaction_binds_keeper_identity;
+          Alcotest.test_case
+            "model-visible Board maintenance dispatches in process"
+            `Quick
+            test_model_visible_board_maintenance_dispatches_in_process;
           Alcotest.test_case "keeper board dispatch uses typed names" `Quick
             test_keeper_board_dispatch_uses_typed_tool_names;
           Alcotest.test_case "curation read empty returns JSON null" `Quick

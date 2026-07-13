@@ -80,14 +80,13 @@ let bind_board_identity ~keeper_name board_name args =
     (Board_tool_registry.identity_fields_for_board_name board_name)
 ;;
 
-let handle_keeper_board_tool
+let handle_keeper_board_tool_with_outcome
       ~(meta : keeper_meta)
       ~(name : string)
       ~(args : Yojson.Safe.t)
   =
   let dispatch tool_name tool_args =
-    tool_result_or_error
-      (Board_tool.handle_tool tool_name tool_args)
+    Keeper_tool_execution.of_tool_result (Board_tool.handle_tool tool_name tool_args)
   in
   (* PR-S1: the board runtime speaks the domain name type [Board_name.t]
      directly rather than routing through the MASC god-enum. *)
@@ -124,25 +123,37 @@ let handle_keeper_board_tool
       "handle_tool result: ok=%b msg=%s"
       ok
       (String_util.utf8_safe ~max_bytes:203 ~suffix:"..." msg |> String_util.to_string);
-    tool_result_or_error result
+    Keeper_tool_execution.of_tool_result result
   | Some Keeper_tool_name.Board_post_get ->
     (match string_arg "post_id" args with
      | Some pid when String.trim pid <> "" ->
        dispatch_board Tool_name.Board_name.Board_post_get args
      | _ ->
-       error_json
-         ~fields:[ "reason", `String "missing_post_id"
-                 ; "recovery", `String "call keeper_board_list or keeper_board_search first" ]
-         "keeper_board_post_get requires post_id (format: p-xxxx). \
-          You sent empty or missing post_id. Call keeper_board_list \
-          or keeper_board_search first to discover available post IDs, \
-          then retry with the post_id you want to read.")
+       Keeper_tool_execution.failure
+         ~class_:Tool_result.Policy_rejection
+         (error_json
+            ~fields:[ "reason", `String "missing_post_id"
+                    ; "recovery", `String "call keeper_board_list or keeper_board_search first" ]
+            "keeper_board_post_get requires post_id (format: p-xxxx). \
+             You sent empty or missing post_id. Call keeper_board_list \
+             or keeper_board_search first to discover available post IDs, \
+             then retry with the post_id you want to read."))
   | Some keeper_tool ->
     (match Keeper_tool_name.masc_board_name_of_keeper_tool keeper_tool with
      | Some board_name ->
        dispatch_board
          board_name
          (bind_board_identity ~keeper_name:meta.name board_name args)
-     | None -> error_json ~fields:[ "tool", `String name ] "unknown_board_tool")
-  | None -> error_json ~fields:[ "tool", `String name ] "unknown_board_tool"
+     | None ->
+       Keeper_tool_execution.failure
+         ~class_:Tool_result.Policy_rejection
+         (error_json ~fields:[ "tool", `String name ] "unknown_board_tool"))
+  | None ->
+    Keeper_tool_execution.failure
+      ~class_:Tool_result.Policy_rejection
+      (error_json ~fields:[ "tool", `String name ] "unknown_board_tool")
+;;
+
+let handle_keeper_board_tool ~meta ~name ~args =
+  (handle_keeper_board_tool_with_outcome ~meta ~name ~args).raw_output
 ;;

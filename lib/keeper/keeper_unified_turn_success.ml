@@ -72,7 +72,6 @@ let terminal_outcome_of_result result =
   | Runtime_agent.Completed -> Terminal_done
   | Runtime_agent.InputRequired _ -> Terminal_input_required
   | Runtime_agent.TurnBudgetExhausted _
-  | Runtime_agent.MutationBoundaryReached _
   | Runtime_agent.Yielded_to_chat_waiting _
   | Runtime_agent.Yielded_to_durable_stimulus _
   | Runtime_agent.ToolFailureRecoveryDeferred _ ->
@@ -275,10 +274,6 @@ let emit_usage_metrics_and_log
     | Runtime_agent.Completed -> "completed"
     | Runtime_agent.TurnBudgetExhausted { turns_used; limit; _ } ->
       Printf.sprintf "budget_exhausted(%d/%d)" turns_used limit
-    | Runtime_agent.MutationBoundaryReached { turns_used; tool_name } ->
-      (match tool_name with
-       | Some tool -> Printf.sprintf "mutation_boundary(%d:%s)" turns_used tool
-       | None -> Printf.sprintf "mutation_boundary(%d)" turns_used)
     | Runtime_agent.Yielded_to_chat_waiting { turns_used } ->
       Printf.sprintf "yielded_to_chat_waiting(%d)" turns_used
     | Runtime_agent.Yielded_to_durable_stimulus { turns_used } ->
@@ -295,7 +290,6 @@ let emit_usage_metrics_and_log
     | Terminal_checkpoint ->
       (match result.stop_reason with
        | Runtime_agent.TurnBudgetExhausted _ -> "budget_exhausted"
-       | Runtime_agent.MutationBoundaryReached _ -> "mutation_boundary"
        | Runtime_agent.Yielded_to_chat_waiting _ -> "yielded_to_chat_waiting"
        | Runtime_agent.Yielded_to_durable_stimulus _ ->
          "yielded_to_durable_stimulus"
@@ -421,7 +415,6 @@ let terminal_reason_of_outcome result = function
          ~source:"runtime_stop_reason"
          (Keeper_turn_disposition.Turn_budget_exhausted
             { detail = None; used = turns_used; limit })
-     | Runtime_agent.MutationBoundaryReached _
      | Runtime_agent.Yielded_to_chat_waiting _
      | Runtime_agent.Yielded_to_durable_stimulus _
      | Runtime_agent.InputRequired _ ->
@@ -492,13 +485,6 @@ let reset_turn_failures_for_stop_reason ~config ~updated_meta result =
        and resumes on its next lane cycle"
       turns_used
       limit;
-    reset_failure_state ()
-  | Runtime_agent.MutationBoundaryReached { tool_name; _ } ->
-    Log.Keeper.info ~keeper_name:updated_meta.name
-      "mutation boundary reached after %s, checkpoint saved — will resume next cycle"
-      (match tool_name with
-       | Some tool -> tool
-       | None -> "committed tool");
     reset_failure_state ()
   | Runtime_agent.Yielded_to_chat_waiting { turns_used } ->
     (* A clean, intentional yield to a parked chat, not a degraded outcome:

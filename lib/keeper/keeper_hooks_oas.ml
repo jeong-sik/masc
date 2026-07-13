@@ -76,53 +76,6 @@ let one_line_preview_for_log text =
   |> String_util.utf8_safe ~max_bytes:240 ~suffix:"..."
   |> String_util.to_string
 
-let failure_class_of_tool_error_json json =
-  let direct = Safe_ops.json_string_opt "failure_class" json in
-  let nested =
-    match Json_util.assoc_member_opt "detail" json with
-    | Some (`Assoc _ as detail) -> Safe_ops.json_string_opt "failure_class" detail
-    | _ -> None
-  in
-  match direct with
-  | Some _ -> direct
-  | None -> nested
-
-let failure_class_of_tool_error_text error =
-  try
-    let json = Yojson.Safe.from_string error in
-    failure_class_of_tool_error_json json
-  with
-  | Yojson.Json_error _ | Failure _ -> None
-
-let tool_error_failure_class ?base_path error =
-  match Tool_output.decode_from_oas error with
-  | Tool_output.Inline inline -> failure_class_of_tool_error_text inline
-  | Tool_output.Stored { sha256; preview; _ } ->
-    let from_store =
-      match base_path with
-      | None -> None
-      | Some base_path ->
-        Safe_ops.protect ~default:None (fun () ->
-            let store = Tool_blob_store.create ~base_path in
-            match Tool_blob_store.fetch store ~sha256 with
-            | Some payload -> failure_class_of_tool_error_text payload
-            | None -> None)
-    in
-    (match from_store with
-     | Some _ -> from_store
-     | None -> failure_class_of_tool_error_text preview)
-
-let self_correcting_tool_failure_class ?base_path error =
-  match tool_error_failure_class ?base_path error with
-  | Some failure_class -> (
-    match Tool_result.tool_failure_class_of_string failure_class with
-    | Some Tool_result.Workflow_rejection ->
-      Some (Tool_result.tool_failure_class_to_string Tool_result.Workflow_rejection)
-    | Some Tool_result.Policy_rejection ->
-      Some (Tool_result.tool_failure_class_to_string Tool_result.Policy_rejection)
-    | Some (Tool_result.Transient_error | Tool_result.Runtime_failure) | None -> None)
-  | None -> None
-
 include Keeper_hooks_oas_response_metrics
 
 (* cost_status / thinking_log_summary types + telemetry helpers
@@ -432,26 +385,14 @@ let make_hooks
           { tool_name; input; output; duration_ms = hook_duration_ms; tool_use_id; _ } ->
         record_progress ("tool_completed:" ^ tool_name);
         incr tool_call_count_ref;
-        (* Extract typed_outcome from structured tool output JSON and strip it
-           from the LLM-facing output so the internal metadata does not leak
-           into the next turn's context. *)
+        (* OAS exposes the provider-facing tool body here as text.  It is not a
+           semantic authority: JSON-looking bytes must stay opaque.  A future
+           typed OAS hook field may carry [Keeper_tool_outcome]; until then the
+           explicit typed value is unavailable rather than reconstructed from
+           content. *)
         let output_text, typed_outcome =
           match output with
-          | Ok { Agent_sdk.Types.content; _ } ->
-            (match Yojson.Safe.from_string content with
-             | json ->
-               let typed_outcome =
-                 match json with
-                 | `Assoc fields ->
-                   (match List.assoc_opt "typed_outcome" fields with
-                    | Some nested -> Keeper_tool_outcome.of_json nested
-                    | None -> None)
-                 | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
-                   None
-               in
-               let stripped = Keeper_tool_outcome.strip_from_json json in
-               (Yojson.Safe.to_string stripped, typed_outcome)
-             | exception _ -> (content, None))
+          | Ok { Agent_sdk.Types.content; _ } -> content, None
           | Error { Agent_sdk.Types.message; _ } -> (message, None)
         in
         let input_keys = tool_input_keys_for_log input in
@@ -671,57 +612,16 @@ let make_hooks
     on_tool_error = Some (function
       | Agent_sdk.Hooks.OnToolError { tool_name; error } ->
         let keeper_name = (!meta_ref).name in
-        (match self_correcting_tool_failure_class ~base_path:config.base_path error with
-         | Some failure_class ->
-           Log.Keeper.warn ~keeper_name "tool_%s: %s — %s"
-             failure_class tool_name error
-         | None ->
-           (* Always increment the durable Otel_metric_store signal for real
-              tool/runtime failures: noise dedupe is a log-surface concern
-              only; the counter carries the count for dashboards and alert
-              rules. Deterministic workflow/policy rejections are handled
-              above as self-correcting control flow. *)
-           Otel_metric_store.inc_counter
-             Keeper_metrics.(to_string LifecycleCallbackFailures)
-             ~labels:
-               [ (label_keeper, keeper_name)
-               ; (label_callback, callback_label_on_tool_error)
-               ]
-             ();
-           (* λ-HOOK-ERROR (2026-05-19) — typed dedupe of repeated
-              [on_tool_error] hook ERROR lines. system_log 1000-line
-              sample (keeper:verifier x Execute x 2, lifecycle-worker-fast-1
-              × Execute × 2, analyst × masc_transition × 2)
-              shows the same (keeper, tool, error) triple recurring across
-              time; only the first occurrence carries operator-visible ERROR
-              value. See
-              lib/keeper_tool_hook_error_state for rationale. *)
-           let error_signature = Keeper_tool_hook_error_state.normalize error in
-           (match
-              Keeper_tool_hook_error_state.record
-                ~keeper_name
-                ~tool_name
-                ~error_signature
-                ()
-            with
-            | `First ->
-              Log.Keeper.error ~keeper_name "tool_error: %s — %s"
-                tool_name error
-            | `Repeated n ->
-              Log.Keeper.debug ~keeper_name:keeper_name
-                "tool_error repeated (total=%d, dedup): %s — %s"
-                n tool_name error
-            | `Threshold_silence n ->
-              Log.Keeper.error ~keeper_name:keeper_name
-                "tool_error threshold-silence after %d identical: %s — %s"
-                n tool_name error;
-              Otel_metric_store.inc_counter
-                Keeper_metrics.(to_string LifecycleCallbackFailures)
-                ~labels:
-                  [ (label_keeper, keeper_name)
-                  ; (label_callback, "on_tool_error_threshold_silence")
-                  ]
-                ()));
+        (* [OnToolError] carries opaque text but no typed MASC failure class.
+           Do not reclassify it by decoding a JSON-looking message. *)
+        Otel_metric_store.inc_counter
+          Keeper_metrics.(to_string LifecycleCallbackFailures)
+          ~labels:
+            [ (label_keeper, keeper_name)
+            ; (label_callback, callback_label_on_tool_error)
+            ]
+          ();
+        Log.Keeper.error ~keeper_name "tool_error: %s — %s" tool_name error;
         Agent_sdk.Hooks.Continue
       | _event -> Agent_sdk.Hooks.Continue);
 

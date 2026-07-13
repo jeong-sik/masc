@@ -6,9 +6,7 @@ code_refs:
   - lib/keeper/keeper_memory_bank.ml
   - lib/keeper/keeper_memory_recall.ml
   - lib/keeper/keeper_librarian.ml
-  - lib/context_compact_oas.ml
   - lib/institution_eio.ml
-  - lib/procedural_memory.ml
 ---
 
 # Memory Systems

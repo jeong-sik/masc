@@ -108,9 +108,6 @@ let make_tool_bundle
                  ~validate_translated_input:descriptor.validate_translated_input
                  ()
              in
-             (* The projected model name may differ from the internal route,
-                so derive OAS metadata from the internal handler identity. *)
-             let oas_descriptor = Tool_bridge.oas_descriptor_of_masc_tool internal in
              let description =
                match descriptor.model_description_projection with
                | Keeper_tool_descriptor.Static_description -> descriptor.description
@@ -118,7 +115,6 @@ let make_tool_bundle
                  descriptor.description ^ "\n\n" ^ task_state_hint ~config ~meta
              in
              Tool_bridge.oas_tool_of_masc
-               ?descriptor:oas_descriptor
                ~name:model_name
                ~description
                ~input_schema:descriptor.input_schema

@@ -73,7 +73,6 @@ type t =
   | CrashPersistenceFailures
   | GenerationLineageFailures
   | KeepaliveSignalFailures
-  | BoardSignalWakeupCappedTotal
   | BoardSignalNoWakeTotal
   | BoardSignalAttentionCandidateTotal
   | MetaJsonFailures
@@ -209,7 +208,6 @@ type t =
   | KeeperTurnInstructionHash   (* gauge: hash of system+user prompt for change detection *)
   | KeeperToolCallRetryLoop     (* counter: consecutive identical tool calls with errors *)
   | ShellIrEffectTotal          (* counter: fine-grained Shell IR effect decomposition *)
-  | ToolExecutePrActionTotal    (* counter: raw tool_execute gh PR actions *)
   | RawTraceSinkDegraded        (* counter: raw-trace sink create failed; turn dispatched untraced *)
   | WireCaptureResponseSuppressed (* counter: keeper-visible response suppressed before wire capture *)
   | WireCaptureWriteFailures    (* counter: wire-capture write raised an exception *)
@@ -292,7 +290,6 @@ let to_string = function
   | CrashPersistenceFailures -> "masc_keeper_crash_persistence_failures_total"
   | GenerationLineageFailures -> "masc_keeper_generation_lineage_failures_total"
   | KeepaliveSignalFailures -> "masc_keeper_keepalive_signal_failures_total"
-  | BoardSignalWakeupCappedTotal -> "masc_keeper_board_signal_wakeup_capped_total"
   | BoardSignalNoWakeTotal -> "masc_keeper_board_signal_no_wake_total"
   | BoardSignalAttentionCandidateTotal ->
     "masc_keeper_board_signal_attention_candidate_total"
@@ -439,7 +436,6 @@ let to_string = function
   | KeeperTurnInstructionHash -> "masc_keeper_turn_instruction_hash"
   | KeeperToolCallRetryLoop -> "masc_keeper_tool_call_retry_loop_total"
   | ShellIrEffectTotal -> "masc_keeper_shell_ir_effect_total"
-  | ToolExecutePrActionTotal -> "masc_keeper_tool_execute_pr_action_total"
   | RawTraceSinkDegraded -> "masc_keeper_raw_trace_sink_degraded_total"
   | WireCaptureResponseSuppressed ->
     "masc_keeper_wire_capture_response_suppressed_total"

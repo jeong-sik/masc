@@ -1,8 +1,8 @@
 (** Mcp_server_eio_call_tool — Tool call handler and result envelope
 
     Extracted from mcp_server_eio.ml.
-    Handles tools/call JSON-RPC method: read-only retry, result
-    envelope, telemetry, and audit logging. Per-tool timeout was
+    Handles tools/call JSON-RPC method: single dispatch, result envelope,
+    telemetry, and audit logging. Per-tool timeout was
     removed (2026-06-08 fleet-wide cleanup); the tool itself is
     responsible for any hang protection. *)
 
@@ -18,58 +18,24 @@ type tool_profile = Mcp_server_eio_types.tool_profile =
    [Mcp_server_eio_helpers.mcp_exn_level_and_tag]. *)
 let log_mcp_exn = Mcp_server_eio_helpers.log_mcp_exn
 
-(* Substring containment, ASCII case-insensitive.  Delegates to
-   [String_util.contains_substring_ci] (which scans byte-wise without
-   allocating) and preserves the local "empty needle matches all"
-   semantic with an explicit guard. *)
-let contains_casefold haystack needle =
-  String.length needle = 0
-  || String_util.contains_substring_ci haystack needle
+let status_of_result : Tool_result.result -> string = function
+  | Ok _ -> "ok"
+  | Error _ -> "error"
+;;
 
-let parse_status_from_message ~success ~message =
-  if not success then
-    if
-      contains_casefold message "input required"
-      || contains_casefold message "ask agent"
-      || contains_casefold message "ask agent question"
-    then
-      ("ask_agent_question", Some "ask_agent_question")
-    else if
-      contains_casefold message "auth required"
-      || contains_casefold message "authentication required"
-      || contains_casefold message "unauthorized"
-    then
-      ("ask_for_auth", Some "ask_for_auth")
-    else
-      ("error", None)
-  else
-    ("ok", None)
-
-let quality_issue severity code message attempts =
-  `Assoc [
-    ("severity", `String severity);
-    ("code", `String code);
-    ("message", `String message);
-    ("retry_attempts", `Int attempts);
-  ]
-
-let quality_from_result ~success ~message ~attempts =
-  if success then
-    `Assoc [
-      ("passed", `Bool true);
-      ("issues", `List []);
-    ]
-  else
-    let issue =
-      if contains_casefold message "timeout" || contains_casefold message "timed out" then
-        quality_issue "error" "tool_timeout" message attempts
-      else
-        quality_issue "error" "tool_failure" message attempts
-    in
-    `Assoc [
-      ("passed", `Bool false);
-      ("issues", `List [issue]);
-    ]
+let structured_content_of_result : Tool_result.result -> Yojson.Safe.t option =
+  function
+  | Ok { data = (`Assoc _ as data); _ }
+  | Error { data = (`Assoc _ as data); _ } -> Some data
+  | Ok
+      { data = (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _)
+      ; _
+      }
+  | Error
+      { data = (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _)
+      ; _
+      } -> None
+;;
 
 let activity_preview_string value =
   value
@@ -473,37 +439,6 @@ let record_runtime_mcp_keeper_tool_trace
        ~arguments
        ~message)
 
-let read_only_retry_limit () =
-  Env_config.Tools.readonly_retry_limit
-
-let read_only_retry_wait ~attempt =
-  let attempt = float_of_int attempt in
-  min 1.5 (0.2 *. attempt)
-
-let call_tool_with_readonly_retry
-    ~clock
-    ~run_tool
-    ~is_read_only
-    () =
-  let max_attempts = read_only_retry_limit () in
-  let rec loop attempt =
-    let result = run_tool () in
-    let success = Tool_result.is_success result in
-    if
-      success
-      || attempt >= max_attempts
-      || not is_read_only
-      || (match Tool_result.failure_class result with
-          | Some cls -> not (Tool_result.is_retryable cls)
-          | None -> false)
-    then
-      (result, attempt)
-    else (
-      Eio.Time.sleep clock (read_only_retry_wait ~attempt);
-      loop (attempt + 1))
-  in
-  loop 1
-
 (** Resolve managed agent tool call to canonical operation *)
 let resolve_managed_agent_call ?mcp_session_id params =
   let requested_name = Json_util.get_string params "name" |> Option.value ~default:"" in
@@ -532,10 +467,6 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
     | Full | Operator_remote ->
         (Json_util.get_string params "name" |> Option.value ~default:"", Yojson.Safe.Util.member "arguments" params)
   in
-  let is_read_only =
-    Keeper_tool_descriptor_resolution.capability_has Tool_capability.Read_only name
-  in
-
   (* Measure execution time for telemetry *)
   let start_time = Eio.Time.now clock in
   let execute () =
@@ -576,16 +507,8 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
            ~tool_name:name ~start_time
            (Printf.sprintf "Internal error: %s" err_detail))
   in
-  let (result, attempts) =
-    if is_read_only then
-      call_tool_with_readonly_retry
-        ~clock
-        ~run_tool:execute
-        ~is_read_only
-        ()
-    else
-      (execute (), 1)
-  in
+  let result = execute () in
+  let attempts = 1 in
   let success = Tool_result.is_success result
   and message = Tool_result.message result
   in
@@ -793,15 +716,6 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
     | Some tid -> tid
     | None -> jsonrpc_id_str
   in
-  (* Append recovery hint on failure *)
-  let message =
-    if success then message
-    else
-      let hint = Masc_error_recovery.recovery_hint message in
-      match hint with
-      | None -> message
-      | Some h -> message ^ "\n\nRecovery: " ^ h
-  in
   (match keeper_entry with
    | Some entry ->
        (try
@@ -816,17 +730,13 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
           log_mcp_exn ~label:"runtime MCP keeper tool trace failed" exn)
    | None -> ());
-  let (status, required_follow_up) = parse_status_from_message ~success ~message in
-  let quality = quality_from_result ~success ~message ~attempts in
+  let status = status_of_result result in
   let envelope =
     `Assoc [
       ("kind", `String "tool_call");
       ("summary", `String message);
       ("status", `String status);
       ("tool", `String name);
-      ("required_follow_up", Json_util.string_opt_to_json required_follow_up);
-      ("trace_id", `String trace_id);
-      ("quality", quality);
     ]
   in
   let content_items =
@@ -838,7 +748,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
         ]
     ]
   in
-  let structured_content = Tool_result.structured_payload_of_message message in
+  let structured_content = structured_content_of_result result in
   let meta_fields =
     [
       ("trace_id", `String trace_id);
@@ -848,6 +758,12 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
       ("attempts", `Int attempts);
       ("timestamp", `String (Masc_domain.now_iso ()));
     ]
+    @
+    match Tool_result.failure_class result with
+    | Some failure_class ->
+      [ ( "failure_class"
+        , `String (Tool_result.tool_failure_class_to_string failure_class) ) ]
+    | None -> []
   in
   let result_fields =
     [

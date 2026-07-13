@@ -52,6 +52,14 @@ let init_runtime_default_for_tests () =
   | Error e -> Alcotest.failf "Runtime.init_default failed: %s" e
 ;;
 
+let defaults_with_prompt_fields =
+  { Keeper_types_profile.empty_keeper_profile_defaults with
+    goal = Some "profile goal"
+  ; instructions = Some "profile instructions"
+  ; mention_targets = [ "profile-target" ]
+  }
+;;
+
  let test_empty_live_meta_does_not_mask_profile_defaults_as_overrides () =
   init_runtime_default_for_tests ();
   let meta =

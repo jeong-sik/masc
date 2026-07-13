@@ -423,8 +423,6 @@ export interface ProviderHealth {
 }
 
 export const KEEPER_RUNTIME_BLOCKER_CLASSES = [
-  'ambiguous_post_commit_timeout',
-  'ambiguous_post_commit_failure',
   'turn_timeout',
   'runtime_exhausted',
   'provider_runtime_error',
@@ -942,7 +940,7 @@ export interface KeeperConversationStreamContract {
 }
 
 export interface SurfaceRef {
-  kind: 'dashboard' | 'discord' | 'slack' | 'github' | 'webhook' | 'agent' | 'gate' | string
+  kind: 'dashboard' | 'discord' | 'slack' | 'webhook' | 'agent' | 'gate' | string
   session_id?: string
   guild_id?: string
   channel_id?: string
@@ -950,8 +948,6 @@ export interface SurfaceRef {
   thread_id?: string
   team_id?: string
   thread_ts?: string
-  repo?: string
-  notification_id?: string
   source?: string
   event_id?: string
   label?: string

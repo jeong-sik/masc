@@ -172,7 +172,6 @@ module Tools : sig
   (* RFC-0084 host-config-cleanup-J — [val dispatch_v2_enabled : bool]
      removed alongside the [MASC_DISPATCH_V2] feature flag. *)
   val list_page_size : unit -> int
-  val readonly_retry_limit : int
   val public_tools_extra_opt : unit -> string option
   val web_search_provider_opt : unit -> string option
   val web_search_provider_order_opt : unit -> string option

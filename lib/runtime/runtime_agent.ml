@@ -63,7 +63,6 @@ type stop_reason =
   Runtime_agent_context.stop_reason =
   | Completed
   | TurnBudgetExhausted of { turns_used : int; limit : int }
-  | MutationBoundaryReached of { turns_used : int; tool_name : string option }
   | Yielded_to_chat_waiting of { turns_used : int }
   | Yielded_to_durable_stimulus of { turns_used : int }
   | InputRequired of {
@@ -981,8 +980,6 @@ let run_duration_ms_since started_at =
 let dashboard_status_of_stop_reason = function
   | Completed -> Dashboard_oas_bridge.Success
   | TurnBudgetExhausted _ -> Dashboard_oas_bridge.Error { transient = false }
-  | MutationBoundaryReached _ ->
-      Dashboard_oas_bridge.Cancelled { reason = "mutation_boundary_reached" }
   | Yielded_to_chat_waiting _ ->
       Dashboard_oas_bridge.Cancelled { reason = "yielded_to_chat_waiting" }
   | Yielded_to_durable_stimulus _ ->
@@ -1072,6 +1069,7 @@ let resume_from_checkpoint
         (Agent_sdk.Agent.resume ~net ~checkpoint:prepared_resume.patched_checkpoint
            ~tools:config.tools ?context:config.context
            ~options ~config:prepared_resume.agent_config
+           ?checkpoint_sink:config.checkpoint_sink
            ?tool_failure_judge:config.tool_failure_judge
            ~auto_context_overflow_retry:config.oas_auto_context_overflow_retry
            ()))

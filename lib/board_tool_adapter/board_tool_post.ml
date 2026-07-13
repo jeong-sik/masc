@@ -128,19 +128,7 @@ let handle_post_create ~tool_name ~start_time args : Tool_result.result =
          with
          | Ok post ->
               let json = Board.post_to_yojson post in
-              (* Use [Tool_result.ok] (not [make_ok ~data:(`String ...)]) so the
-              embedded JSON after the "<label>:\n" prefix is parsed into
-              structured [data] via [structured_payload_of_message]. Passing a
-              raw [`String] double-encodes the JSON: consumers that re-serialize
-              the result (e.g. the dashboard's JSON.stringify) escape the inner
-              newlines back to literal "\n". The prose prefix is dropped once
-              the structure is extracted, matching the board_curation idiom. *)
-              Tool_result.ok
-                ~tool_name
-                ~start_time
-                (Printf.sprintf
-                   "Post created:\n%s"
-                   (Yojson.Safe.pretty_to_string json))
+              Tool_result.make_ok ~tool_name ~start_time ~data:json ()
          | Error e ->
            Board_tool_format.error_of_board_error ~tool_name ~start_time e)
 ;;
@@ -202,11 +190,7 @@ let handle_post_edit ~tool_name ~start_time args : Tool_result.result =
       (match Board_dispatch.update_post ~post_id ~editor ~content ?title ?body ?new_author () with
        | Ok post ->
          let json = Board.post_to_yojson post in
-         (* Structured result via [Tool_result.ok]; see "Post created" note above. *)
-         Tool_result.ok
-           ~tool_name
-           ~start_time
-           (Printf.sprintf "Post updated:\n%s" (Yojson.Safe.pretty_to_string json))
+         Tool_result.make_ok ~tool_name ~start_time ~data:json ()
        | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e))
 ;;
 
@@ -474,11 +458,7 @@ let handle_comment_add ~tool_name ~start_time args : Tool_result.result =
        with
        | Ok comment ->
          let json = Board.comment_to_yojson comment in
-         (* Structured result via [Tool_result.ok]; see "Post created" note above. *)
-         Tool_result.ok
-           ~tool_name
-           ~start_time
-           (Printf.sprintf "Comment added:\n%s" (Yojson.Safe.pretty_to_string json))
+         Tool_result.make_ok ~tool_name ~start_time ~data:json ()
        | Error e ->
          Board_tool_format.error_of_board_error ~tool_name ~start_time e)
 ;;

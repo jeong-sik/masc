@@ -87,13 +87,6 @@ val accept_response_shape_of_string : string -> accept_response_shape option
 val accept_response_shape_of_agent_sdk :
   Agent_sdk.Response_shape.content_shape -> accept_response_shape
 
-type tool_progress_effect =
-  | Tool_effect_read_only
-  | Tool_effect_mutating
-
-val tool_progress_effect_to_string : tool_progress_effect -> string
-val tool_progress_effect_of_string : string -> tool_progress_effect option
-
 type masc_internal_error =
   | Runtime_exhausted of {
       runtime_id : string;
@@ -123,9 +116,6 @@ type masc_internal_error =
          from a clean [EndTurn] no-progress terminal. Groundwork slice: threaded
          and serialized, not yet consumed by classification. *)
       stop_reason : Agent_sdk.Types.stop_reason option;
-      last_tool_effect : tool_progress_effect option;
-      any_mutating_tool : bool option;
-      tool_effects_seen : tool_progress_effect list;
       reason : string;
     }
   | Turn_timeout of { elapsed_sec : float }
@@ -138,11 +128,6 @@ type masc_internal_error =
       min_required_sec : float;
       phase : string;
     }
-  | Ambiguous_post_commit of {
-      is_timeout : bool;
-      tools : string list;
-      original_error : string;
-    }
   | Internal_unhandled_exception of {
       site : string;
       exn_repr : string;
@@ -153,6 +138,7 @@ type masc_internal_error =
       exn_repr : string;
     }
   | Internal_contract_rejected of { reason : string }
+  | Receipt_persistence_failed of { detail : string }
 
 val masc_internal_error_prefix : string
 
@@ -178,12 +164,9 @@ val runtime_id_of_masc_internal_error : masc_internal_error -> string
 
 val accept_no_progress_retry_kind :
   masc_internal_error ->
-  [ `Empty_no_progress | `Read_only_no_progress | `Thinking_only_no_progress ] option
+  [ `Empty_no_progress | `Thinking_only_no_progress ] option
 
 val accept_rejection_has_no_progress_retry_hint : masc_internal_error -> bool
-
-val accept_rejection_has_read_only_no_progress_retry_hint :
-  masc_internal_error -> bool
 
 val sdk_error_of_masc_internal_error :
   masc_internal_error -> Agent_sdk.Error.sdk_error

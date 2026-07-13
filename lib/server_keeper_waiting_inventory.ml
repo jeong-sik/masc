@@ -21,6 +21,7 @@ type keeper_state =
 
 type wake_producer =
   | Board_dispatch
+  | Board_attention_judge
   | Keeper_chat_queue_store
   | Keeper_supervisor
   | Fusion_sink
@@ -93,6 +94,7 @@ let all_keeper_states = [ Idle; Busy; Waiting; Deferred ]
 
 let wake_producer_to_string = function
   | Board_dispatch -> "board_dispatch"
+  | Board_attention_judge -> "board_attention_judge"
   | Keeper_chat_queue_store -> "keeper_chat_queue_store"
   | Keeper_supervisor -> "keeper_supervisor"
   | Fusion_sink -> "fusion_sink"
@@ -112,6 +114,7 @@ let wake_producer_to_string = function
 let wake_producer_of_payload : Keeper_event_queue.stimulus_payload -> wake_producer =
   function
   | Board_signal _ -> Board_dispatch
+  | Board_attention _ -> Board_attention_judge
   | Bootstrap -> Keeper_supervisor
   | Fusion_completed _ -> Fusion_sink
   | Bg_completed _ -> Bg_task_completion

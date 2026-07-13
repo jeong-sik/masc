@@ -935,7 +935,7 @@ let test_restart_launch_noop_scope_restores_nested_state () =
 (* ── Runtime override: fiber_health_of ─────────────────── *)
 
 
-let test_sweep_does_not_synthesize_reconcile_gate () =
+let test_sweep_does_not_synthesize_gate_from_runtime_blocker () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->
@@ -961,8 +961,8 @@ let test_sweep_does_not_synthesize_reconcile_gate () =
               last_blocker =
                 Some
                   (Keeper_meta_contract.blocker_info_of_class
-                     ~detail:"turn outcome ambiguous after committed mutating tool call(s): [keeper_board_post]; retry disabled to avoid duplicate mutation; original_error=Completion contract [completion_contract] violated"
-                     Keeper_meta_contract.Ambiguous_post_commit_timeout);
+                     ~detail:"provider turn timed out"
+                     Keeper_meta_contract.Turn_timeout);
             };
         }
       in
@@ -1971,8 +1971,8 @@ let () =
     "nonhierarchical_hitl_visibility", [
       test_case "pending HITL approval names include only persisted keepers" `Quick
         test_pending_hitl_approval_keeper_names_filters_persisted_pending;
-      test_case "sweep does not synthesize reconcile gate" `Quick
-        test_sweep_does_not_synthesize_reconcile_gate;
+      test_case "sweep does not synthesize a gate from runtime blockers" `Quick
+        test_sweep_does_not_synthesize_gate_from_runtime_blocker;
       test_case "sweep warns for pending HITL approval" `Quick
         test_sweep_reports_pending_hitl_approval;
     ];

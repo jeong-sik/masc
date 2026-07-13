@@ -37,7 +37,7 @@ let test_preview_falls_back_to_tools_then_evidence () =
        ~is_visible_reply:true ~has_substantive_tools:false ~tool_names:[]
        ~response_text:"" ~validated_evidence_preview:(Some "(validated evidence)"))
 
-let test_empty_no_tool_response_violates_contract () =
+let test_empty_no_tool_response_is_no_visible_output () =
   let result ~response_text_present =
     KAR.Contract_helpers.observed_completion_evidence
       ~actual_keeper_tool_names:[]
@@ -47,13 +47,13 @@ let test_empty_no_tool_response_violates_contract () =
   in
   check
     string
-    "empty no-tool response is not satisfied completion"
-    "violated"
+    "empty no-tool response is observed without visible output"
+    "no_visible_output"
     (result ~response_text_present:false);
   check
     string
-    "visible no-tool response remains completion"
-    "satisfied_completion"
+    "visible no-tool response records response evidence"
+    "response_observed"
     (result ~response_text_present:true)
 ;;
 
@@ -154,9 +154,9 @@ let () =
     "keeper_unified_claim_progress"
     [ ( "claim_progress"
       , [ test_case
-            "empty no-tool response violates completion contract"
+            "empty no-tool response records no visible output"
             `Quick
-            test_empty_no_tool_response_violates_contract
+            test_empty_no_tool_response_is_no_visible_output
         ; test_case
             "budget exhaustion is completion-contract neutral"
             `Quick

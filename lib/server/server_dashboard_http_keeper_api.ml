@@ -1809,24 +1809,8 @@ let handle_keeper_get_subroutes state req request reqd =
       let current = match phase with Some p -> p | None -> Keeper_state_machine.Offline in
       let mermaid = Keeper_state_machine_mermaid.phase_to_mermaid ~current in
       let phase_str = Keeper_state_machine.phase_to_string current in
-      let stats = Thompson_sampling.get_stats name in
       let meta = Keeper_meta_store.read_meta
           (Mcp_server.workspace_config state) name in
-      let turn_outcome : [`Ok | `Failed] option =
-        match Keeper_registry.get ~base_path:(Mcp_server.workspace_config state).base_path name with
-        | Some entry when entry.turn_consecutive_failures > 0 ->
-          Some `Failed
-        | Some _ -> Some `Ok
-        | None -> None
-      in
-      let decision_pipeline_mermaid =
-        Keeper_decision_audit.decision_pipeline_to_mermaid
-          ?turn_outcome
-          ~phase:current
-          ~thompson_alpha:stats.alpha
-          ~thompson_beta:stats.beta
-          ()
-      in
       let runtime_projection =
         state_diagram_runtime_projection
           (match meta with
@@ -1908,11 +1892,8 @@ let handle_keeper_get_subroutes state req request reqd =
           ([ "keeper", `String name
            ; "current_phase", `String phase_str
            ; "mermaid", `String mermaid
-           ; "decision_pipeline_mermaid", `String decision_pipeline_mermaid
            ; "runtime_fsm_mermaid", `String runtime_fsm_mermaid
            ; "compaction_submachine_mermaid", compaction_submachine_mermaid
-           ; "thompson_alpha", `Float stats.alpha
-           ; "thompson_beta", `Float stats.beta
            ]
            @ runtime_projection_fields
            @ [ "memory_kind_usage", memory_kind_usage

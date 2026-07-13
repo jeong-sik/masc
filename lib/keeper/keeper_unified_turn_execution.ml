@@ -68,11 +68,11 @@ type ctx =
       (* Typed decision for the originating Keeper's exact external-effect
          Gate. It is never converted to a generic OAS approval. *)
   ; cleanup : unit -> unit
-  ; committed_mutating_tools_snapshot : unit -> string list
   ; config : Workspace.config
   ; drain_turn_event_bus : ?site:string -> unit -> Keeper_turn_runtime_budget.turn_event_bus_summary
   ; event_bus : Agent_sdk.Event_bus.t option
   ; event_bus_integrity_error_snapshot : unit -> Agent_sdk.Error.sdk_error option
+  ; tool_completed_count_snapshot : unit -> int
   ; generation : int
   ; keeper_turn_id : int
   ; meta : keeper_meta
@@ -118,7 +118,7 @@ let run (ctx : ctx)
       ; drain_turn_event_bus
       ; event_bus
       ; event_bus_integrity_error_snapshot
-      ; committed_mutating_tools_snapshot
+      ; tool_completed_count_snapshot
       ; attempt = _attempt
       } =
     ctx
@@ -126,6 +126,7 @@ let run (ctx : ctx)
   (match Eio_context.get_clock () with
    | Error msg -> Error (Agent_sdk.Error.Internal msg), turn_state
    | Ok clock ->
+   let checkpoint_stage_observed = Atomic.make false in
    let do_run
         ~(execution : runtime_execution)
         ~run_meta
@@ -221,6 +222,9 @@ let run (ctx : ctx)
                  ?shared_context
                  ?event_bus
                  ?trace_link:(trace_link ())
+                 ~on_checkpoint_stage:
+                   (Keeper_turn_driver_try_provider.observe_checkpoint_stage
+                      checkpoint_stage_observed)
                    (* This module is the autonomous lane's turn runner
                       ([Keeper_unified_turn.run_keeper_cycle] → here, only ever
                       reached via [Keeper_turn_admission.run_if_free]); the chat
@@ -350,76 +354,33 @@ let run (ctx : ctx)
         | Some integrity_err -> integrity_err
         | None -> err
       in
-      let committed_tools = committed_mutating_tools_snapshot () in
-      if committed_tools <> []
-      then (
-        let reclassified, failure_reason =
-          match
-            EC.classify_post_commit_failure
-              ~tool_names:committed_tools
-              err
-          with
-          | Some classified -> classified
-          | None ->
-            ( EC.reclassify_error_after_side_effect
-                ~tool_names:committed_tools
-                err
-            , Keeper_registry.Ambiguous_partial_commit
-                { kind = Keeper_registry.Post_commit_failure
-                ; detail =
-                    EC.summarize_post_commit_failure
-                      ~tool_names:committed_tools
-                      ~kind:Keeper_registry.Post_commit_failure
-                      err
-                } )
-        in
-        let turn_state =
-          { turn_state with
-            post_commit_failure_reason = Some failure_reason
-          }
-        in
-        let err_preview =
-          short_preview (Agent_sdk.Error.to_string err)
-        in
-        if EC.is_transient_network_error err
-        then (
-          Otel_metric_store.inc_counter
-            Keeper_metrics.(to_string PostTurnWireinFailures)
-            ~labels:
-              [ "keeper", meta.name
-              ; "site", Keeper_post_turn_wirein_failure_site.(to_label Post_commit_transient)
-              ]
-            ();
-          Log.Keeper.error
-            "%s: transient provider error after committed mutating \
-             tool call(s) [%s] — treating as integrity failure, \
-             skipping retry to prevent duplicate (error: %s)"
-            meta.name
-            (String.concat ", " committed_tools)
-            err_preview)
-        else
-          Log.Keeper.error
-            "%s: error after committed mutating tool call(s) [%s] — \
-             turn outcome is ambiguous and requires reconcile \
-             (error: %s)"
-            meta.name
-            (String.concat ", " committed_tools)
-            err_preview;
-        Otel_metric_store.inc_counter
-          Keeper_metrics.(to_string TurnErrorAfterTools)
-          ~labels:[ "keeper", meta.name ]
-          ();
-        mark_terminal_error reclassified;
-        Error reclassified, turn_state)
-      else (
-        match
+      let tool_completed_count = tool_completed_count_snapshot () in
+      let checkpoint_observed =
+        not
+          (Keeper_turn_driver_try_provider.same_run_retry_allowed
+             checkpoint_stage_observed)
+      in
+      let same_run_retry_has_input_authority =
+        tool_completed_count = 0 && not checkpoint_observed
+      in
+      if not same_run_retry_has_input_authority
+      then
+        Log.Keeper.info
+          ~keeper_name:meta.name
+          "%s: same-run runtime retry deferred after durable run progress \
+           (event_count=%d checkpoint_observed=%b); \
+           current OAS contract cannot continue without admitting the input again"
+          meta.name
+          tool_completed_count
+          checkpoint_observed;
+      match
           Keeper_turn_runtime_budget.plan_degraded_retry_step
             ~base_runtime:(runtime_id_of_meta meta)
             ~current_runtime_id:execution_runtime_id
             ~attempted_runtimes
             ~attempt
             ~err
-            ~allow_retry:(fun _ -> true)
+            ~allow_retry:(fun _ -> same_run_retry_has_input_authority)
             ~publish_cascade_resolution:
               (fun ~runtime_id ~decision ~reason ~next_runtime ~attempt err ->
                  Keeper_unified_turn_cascade_resolution.publish_cascade_resolution
@@ -608,7 +569,7 @@ let run (ctx : ctx)
             ~error_kind:(Some (Keeper_agent_error.sdk_error_kind err))
             ~error_message:(Some (Agent_sdk.Error.to_string err));
           mark_terminal_error err;
-          Error err, turn_state)
+          Error err, turn_state
   in
   (* Do not wrap the full keeper turn in a cumulative wall-clock timeout.
      Long voice/OAS turns can keep making stream or tool progress beyond the

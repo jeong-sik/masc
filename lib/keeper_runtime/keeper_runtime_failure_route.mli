@@ -48,7 +48,6 @@ type rotate_class =
   | Candidates_filtered  (** candidate set emptied after cycles *)
   | Runtime_exhausted  (** generic whole-runtime exhaustion *)
   | No_progress_empty
-  | No_progress_read_only
   | No_progress_thinking_only
       (** accept-rejections carrying an explicit no-progress recovery hint:
           a different model may make progress *)
@@ -60,9 +59,6 @@ type judgment_class =
   | Contract_violation
       (** completion/progress contract rejections without a recovery hint,
           max-tokens ceiling violations, internal contract rejections *)
-  | Mutating_ambiguity
-      (** ambiguous post-commit failure after mutating tools; needs
-          reconcile-grade judgment, HITL for mutating scope *)
   | Protocol_error  (** MCP protocol failures *)
   | Config_mismatch  (** invalid/missing configuration or API key *)
   | Provider_integration

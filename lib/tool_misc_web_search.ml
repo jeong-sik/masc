@@ -347,7 +347,7 @@ let normalize_hits ~source tuples =
            published_at = None;
          })
 
-let result_json ~query ~search_url ~engine hits =
+let result_data ~query ~search_url ~engine hits =
   let results =
     hits
     |> List.map (fun hit ->
@@ -361,7 +361,7 @@ let result_json ~query ~search_url ~engine hits =
                ("published_at", Json_util.string_opt_to_json hit.published_at);
              ])
   in
-  Tool_args.ok_response
+  Tool_args.ok_assoc
     [
       ( "result",
         `Assoc
@@ -657,7 +657,7 @@ let cache_key ~query ~limit =
     [ query; Int.to_string limit; String.concat "," (provider_plan ()) ]
 
 type cache_entry = {
-  response : string;
+  response : Yojson.Safe.t;
   expires_at : float;
 }
 
@@ -764,15 +764,7 @@ let with_simulated_search_for_test ~outcomes f =
    [simulate_for_test] uses the same boundary: empty outcomes
    list or aggregate failure → [Runtime_failure]. *)
 
-(* When [body] is a JSON envelope string (from
-   [Tool_args.ok_response] / [result_json]) we parse-and-store the
-   structured payload. Plain strings fall back to [`String body]. *)
-let text_ok ~tool_name ~start_time body : Tool_result.result =
-  let data =
-    match Tool_result.structured_payload_of_message body with
-    | Some json -> json
-    | None -> `String body
-  in
+let data_ok ~tool_name ~start_time data : Tool_result.result =
   Tool_result.make_ok ~tool_name ~start_time ~data ()
 
 let workflow_err ~tool_name ~start_time msg : Tool_result.result =
@@ -798,23 +790,23 @@ let handle ~tool_name ~start_time args : Tool_result.result =
       let now = Unix.gettimeofday () in
       let key = cache_key ~query ~limit in
       match cache_lookup key now with
-      | Some cached -> text_ok ~tool_name ~start_time cached
+      | Some cached -> data_ok ~tool_name ~start_time cached
       | None ->
         (match (current_search_impl ()) ~query ~limit with
          | Ok response ->
-           let json =
-             result_json ~query ~search_url:response.search_url
+           let data =
+             result_data ~query ~search_url:response.search_url
                ~engine:response.engine response.hits
            in
-           cache_store key json now;
-           text_ok ~tool_name ~start_time json
+           cache_store key data now;
+           data_ok ~tool_name ~start_time data
          | Error message -> runtime_err ~tool_name ~start_time message)
 
 let simulate_for_test ~query ~limit outcomes : Tool_result.result =
   match simulated_search_impl ~outcomes ~query ~limit with
   | Ok response ->
-      text_ok ~tool_name:"masc_web_search" ~start_time:0.0
-        (result_json ~query
+      data_ok ~tool_name:"masc_web_search" ~start_time:0.0
+        (result_data ~query
            ~search_url:response.search_url
            ~engine:response.engine
            response.hits)

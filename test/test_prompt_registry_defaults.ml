@@ -34,9 +34,10 @@ let prompt_metadata key =
       ("test prompt for " ^ key,
        [ "keeper_name"; "soul_profile"; "goal"; "triggers"; "world_state" ])
   | "dashboard.operator_judge"
-  | "dashboard.gate_judge"
-  | "dashboard_interaction_judge" ->
+  | "dashboard.gate_judge" ->
       ("test prompt for " ^ key, [ "facts_json" ])
+  | "keeper.board_attention_judgment" ->
+      ("test prompt for " ^ key, [ "judgment_request_json" ])
   | _ -> ("test prompt for " ^ key, [])
 
 let markdown_fixture key body =
@@ -70,7 +71,8 @@ let fixtures =
     ("analysis.dry_run", "DRY RUN analysis prompt");
     ("dashboard.operator_judge", "operator facts {{facts_json}}");
     ("dashboard.gate_judge", "Gate facts {{facts_json}}");
-    ("dashboard_interaction_judge", "interaction facts {{facts_json}}");
+    ( "keeper.board_attention_judgment"
+    , "Board attention {{judgment_request_json}}" );
     ("test.unlisted.vars", "template body still has {{missing_var}}");
   ]
 
@@ -141,7 +143,10 @@ let () =
           test_case "all markdown-backed prompts are registered" `Quick (fun () ->
               with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
               let prompts = Prompt_registry.list_prompts () in
-              check int "registered prompt count" 11 (List.length prompts));
+              check int
+                "registered prompt count"
+                (List.length fixtures)
+                (List.length prompts));
           test_case "get_prompt resolves markdown content" `Quick (fun () ->
               with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
               check string "keeper.constitution"
@@ -197,18 +202,6 @@ let () =
                             rendered 0);
                        true
                      with Not_found -> false)
-              | Error msg -> fail msg);
-          test_case "interaction judge prompt renders from registry" `Quick
-            (fun () ->
-              with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
-              match
-                Prompt_registry.render_prompt_template "dashboard_interaction_judge"
-                  [ ("facts_json", {|{"keepers":[]}|}) ]
-              with
-              | Ok rendered ->
-                  check string "rendered interaction prompt"
-                    {|interaction facts {"keepers":[]}|}
-                    rendered
               | Error msg -> fail msg);
           test_case "render_prompt_template replaces whitespace placeholders" `Quick
             (fun () ->

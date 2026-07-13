@@ -60,14 +60,10 @@ let tag_opt label value =
 let annotation_route_tags (a : annotation) =
   tag_opt "goal" a.goal_id
   @ tag_opt "task" a.task_id
-  @ tag_opt "board" a.board_post_id
-  @ tag_opt "comment" a.comment_id
-  @ tag_opt "PR" a.pr_id
-  @ tag_opt "git" a.git_ref
-  @ tag_opt "log" a.log_id
-  @ tag_opt "session" a.session_id
-  @ tag_opt "op" a.operation_id
-  @ tag_opt "worker" a.worker_run_id
+  @ List.map
+      (fun ({ relation; reference } : annotation_reference) ->
+         Printf.sprintf "%s:%s" relation reference)
+      a.references
 ;;
 
 let annotation_context_label (a : annotation) =

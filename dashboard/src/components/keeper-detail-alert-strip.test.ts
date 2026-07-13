@@ -148,7 +148,6 @@ describe('KeeperRuntimeAlertStrip', () => {
     ['inspect_turn_finalization', '턴 정리 상태 확인'],
     ['inspect_stale_turn_root_cause', '응답 지연(stale) 원인 확인'],
     ['provide_input_or_decline', '입력 제공 또는 거절'],
-    ['reconcile_partial_commit', '부분 커밋 정합성 확인'],
   ])('labels first-class next_human_action %s distinctly', (action, label) => {
     const { container } = render(h(KeeperRuntimeAlertStrip, {
       keeper: keeper({

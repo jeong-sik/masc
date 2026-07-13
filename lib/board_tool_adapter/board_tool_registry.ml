@@ -188,7 +188,7 @@ let operation_policy board_name =
   let readonly = not (Tool_name.Board_name.is_resource_write board_name) in
   { visibility = Tool_catalog.Default
   ; readonly
-  ; idempotent = readonly
+  ; idempotent = false
   }
 ;;
 

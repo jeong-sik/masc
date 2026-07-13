@@ -11,7 +11,7 @@ import { UNREAD_DIVIDER_LABEL, unreadDividerAnchorKey } from './unread-divider'
 import { showToast } from '../common/toast'
 import { copyToClipboard } from '../common/copyable-code'
 import { ExternalLink, Mic, Square } from 'lucide-preact'
-import { prettyJsonDeep } from '../tool-call-shared'
+import { prettyJson } from '../tool-call-shared'
 import { useVoiceInput } from './voice-input'
 
 const CHAT_FOCUS_RING = ringFocusClasses({ tone: 'accent-medium', width: 2 })
@@ -257,23 +257,6 @@ function surfaceLink(surface?: SurfaceRef | null): ChatMetaInfo | null {
           url: `https://slack.com/app_redirect?channel=${surface.channel_id}${team}`,
           label: `Slack Channel ${labelTarget}`,
           icon: '💬',
-          title,
-          tone: 'accent',
-        }
-      }
-      break
-    case 'github':
-      if (surface.repo) {
-        const path = surface.notification_id ? `/notifications/${surface.notification_id}` : ''
-        const title = compactKeyValues([
-          ['surface', 'github'],
-          ['repo', surface.repo],
-          ['notification_id', surface.notification_id],
-        ])
-        return {
-          url: `https://github.com/${surface.repo}${path}`,
-          label: `GitHub: ${surface.repo}`,
-          icon: '🐙',
           title,
           tone: 'accent',
         }
@@ -2779,10 +2762,7 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
 function prettyJsonish(text: string): string {
   const trimmed = text.trimStart()
   if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-    // prettyJsonDeep recursively un-nests double-encoded JSON in string values
-    // so legacy "<label>\n{json}" tool rows render structurally instead of
-    // showing literal "\n". Returns null when not valid JSON.
-    const pretty = prettyJsonDeep(text)
+    const pretty = prettyJson(text)
     if (pretty !== null) return pretty
     // not valid JSON — show as-is
   }

@@ -8,7 +8,6 @@
   (language c)
   (names nofile_stubs))
  (modules
-  keeper_oas_timeout_message
   keeper_sandbox_error
   keeper_terminal_reason
   keeper_synthetic_marker

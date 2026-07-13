@@ -100,8 +100,6 @@ let runtime_exhaustion_reason_retryable (reason : runtime_exhaustion_reason) : b
 type blocker_class =
   | Runtime_exhausted of runtime_exhaustion_reason
   | Capacity_backpressure
-  | Ambiguous_post_commit_timeout
-  | Ambiguous_post_commit_failure
   | Turn_timeout
   | Fiber_unresolved
     (** 2026-05-05: turn fiber finished without invoking [resolve_done]
@@ -138,8 +136,6 @@ type blocker_class =
 let blocker_class_to_string = function
   | Runtime_exhausted _ -> "runtime_exhausted"
   | Capacity_backpressure -> "capacity_backpressure"
-  | Ambiguous_post_commit_timeout -> "ambiguous_post_commit_timeout"
-  | Ambiguous_post_commit_failure -> "ambiguous_post_commit_failure"
   | Turn_timeout -> "turn_timeout"
   | Fiber_unresolved -> "fiber_unresolved"
   | Stale_turn_timeout -> "stale_turn_timeout"
@@ -160,8 +156,6 @@ let blocker_class_to_string = function
 let blocker_class_of_serialized_string = function
   | "runtime_exhausted" -> Some (Runtime_exhausted (Other_detail "runtime_exhausted"))
   | "capacity_backpressure" -> Some Capacity_backpressure
-  | "ambiguous_post_commit_timeout" -> Some Ambiguous_post_commit_timeout
-  | "ambiguous_post_commit_failure" -> Some Ambiguous_post_commit_failure
   | "turn_timeout" -> Some Turn_timeout
   | "fiber_unresolved" -> Some Fiber_unresolved
   | "stale_turn_timeout" -> Some Stale_turn_timeout

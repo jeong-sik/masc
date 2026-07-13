@@ -97,10 +97,8 @@ let test_record_verdict_reject () =
   check string "verdict = reject:vague notes" "reject:vague notes" v;
   Cal.reset_store_for_testing ()
 
-(* The runner's --record-verdicts path wires AR.review's on_verdict callback to
-   Cal.record_verdict (record_self_owned_verdict in
-   bin/masc_completion_trust_eval.ml). Prove that composition deterministically
-   with a fake reviewer, so the wiring is covered without a live judge LLM. *)
+(* Prove that [AR.review]'s [on_verdict] callback composes with
+   [Cal.record_verdict] without requiring a live judge LLM. *)
 let test_review_on_verdict_records () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);

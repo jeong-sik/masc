@@ -544,8 +544,24 @@ let test_masc_keeper_create_from_persona_schema () =
       match get_json_assoc "properties" schema.input_schema with
       | Some props ->
           Alcotest.(check bool) "has persona_name" true
-            (List.mem_assoc "persona_name" props)
+            (List.mem_assoc "persona_name" props);
+          Alcotest.(check bool) "omits retired shards" false
+            (List.mem_assoc "shards" props)
       | None -> Alcotest.fail "masc_keeper_create_from_persona missing properties"
+
+let test_keeper_shards_arg_rejected () =
+  let args = `Assoc [ "shards", `List [ `String "base" ] ] in
+  match
+    Masc.Keeper_config.reject_removed_keeper_input_keys
+      ~tool_name:"masc_keeper_create_from_persona"
+      args
+  with
+  | Ok () -> Alcotest.fail "retired shards arg should be rejected"
+  | Error msg ->
+    Alcotest.(check bool)
+      "shards mentioned"
+      true
+      (contains_substring ~needle:"shards" msg)
 
 let test_masc_keeper_up_schema () =
   match find_registered_tool "masc_keeper_up" with
@@ -829,6 +845,8 @@ let () =
     "keeper_runtime_tools", [
       Alcotest.test_case "keeper-create-from-persona" `Quick
         test_masc_keeper_create_from_persona_schema;
+      Alcotest.test_case "keeper-shards-arg-rejected" `Quick
+        test_keeper_shards_arg_rejected;
       Alcotest.test_case "keeper-up" `Quick
         test_masc_keeper_up_schema;
       Alcotest.test_case "keeper-sandbox-args-rejected" `Quick

@@ -154,40 +154,6 @@
  (package masc)
  (libraries masc masc_core masc.config_dir_resolver unix eio eio_main))
 
-;; RFC-0262 §9 PR-C: live-LLM behavioural eval for completion-trust.
-;; Drives a real keeper through the masc runtime, so it links the same
-;; live-LLM bootstrap as fusion_run (Eio + runtime init + provider path).
-
-(executable
- (name masc_completion_trust_eval)
- (modules masc_completion_trust_eval)
- (public_name masc-completion-trust-eval)
- (package masc)
- (libraries
-  masc
-  masc.runtime
-  masc.config_dir_resolver
-  masc.masc_types
-  masc.tool_types
-  masc.trajectory
-  masc.runtime_model
-  masc_core
-  unix
-  yojson
-  fmt
-  eio
-  eio_main
-  time_compat
-  masc_eio_context
-  mirage-crypto-rng.unix
-  httpun
-  cohttp
-  cohttp-eio
-  masc.prompt_registry
-  masc.mcp_transport_protocol
-  agent_sdk
-  agent_sdk.llm_provider))
-
 ;; RFC-0232 P4: offline mention backfill for keeper chat lanes.
 ;; Stamps the [mentions] field onto pre-P4 user rows; run with the
 ;; server stopped.

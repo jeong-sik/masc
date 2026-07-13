@@ -40,13 +40,6 @@ type context = {
 (* ================================================================ *)
 
 (* RFC-0189 PR-1b.10 — facade handlers return typed [Tool_result.result].
-
-   [text_ok] mirrors the corrected helper from [tool_library] /
-   [tool_misc_web_fetch] (PR-1b.7 / #18767 fix): JSON-string bodies
-   parse through [structured_payload_of_message]; plain text falls through as
-   [`String body]. Defined locally — extracting a shared helper
-   module is a separate refactor (PR-2 territory).
-
    Failure-class mapping (caller-input violations only in this cluster):
    - [Workflow_rejection] : invalid dashboard scope; missing
                             tool_name; unknown tool.
@@ -57,12 +50,7 @@ type context = {
      appropriate class at that time. *)
 
 let text_ok ~tool_name ~start_time body : Tool_result.result =
-  let data =
-    match Tool_result.structured_payload_of_message body with
-    | Some json -> json
-    | None -> `String body
-  in
-  Tool_result.make_ok ~tool_name ~start_time ~data ()
+  Tool_result.ok ~tool_name ~start_time body
 
 let workflow_err ~tool_name ~start_time msg : Tool_result.result =
   Tool_result.make_err
@@ -144,7 +132,7 @@ let handle_tool_stats ~tool_name ~start_time _ctx args : Tool_result.result =
       Config.all_tool_schemas
   in
   let report = Tool_registry.stats_report ~top_n ~all_tool_names in
-  text_ok ~tool_name ~start_time (Yojson.Safe.to_string report)
+  Tool_result.make_ok ~tool_name ~start_time ~data:report ()
 
 let handle_keeper_waiting_inventory ~tool_name ~start_time ctx args : Tool_result.result =
   match expect_no_args ~tool_name ~start_time args with
@@ -174,8 +162,11 @@ let handle_tool_help ~tool_name ~start_time _ctx args : Tool_result.result =
         workflow_err ~tool_name ~start_time
           (Printf.sprintf "unknown tool: %s" raw_name)
     | Some entry ->
-        text_ok ~tool_name ~start_time
-          (Yojson.Safe.to_string (Tool_help_registry.entry_json entry))
+        Tool_result.make_ok
+          ~tool_name
+          ~start_time
+          ~data:(Tool_help_registry.entry_json entry)
+          ()
 
 (* PR-1b.8 / PR-1b.9 web_* handlers are already typed at the source.
    With dispatch lifting internally now, these wrappers can pass
@@ -248,7 +239,6 @@ let () =
            ~input_schema:s.input_schema
            ~handler_binding:Tag_dispatch
            ~is_read_only:(List.mem s.name tool_spec_read_only)
-           ~is_idempotent:(List.mem s.name tool_spec_read_only)
            ()))
     schemas
 let looks_like_rss_payload = Tool_misc_web_search.looks_like_rss_payload

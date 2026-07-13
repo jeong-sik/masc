@@ -33,7 +33,6 @@ let test_implicit_default_ignores_spoofed_resolution_env () =
   match Server_base_path_guard.enforce resolved with
   | Error (Server_base_path_guard.Implicit_base_path _) -> ()
   | Ok () -> fail "expected implicit default to fail closed"
-  | Error _ -> fail "expected implicit base-path violation"
 
 let test_cli_source_wins_over_env () =
   let resolved =

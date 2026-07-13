@@ -177,11 +177,6 @@ let test_not_in_registry_warn_state_is_bounded () =
 module KKS = Masc.Keeper_keepalive_signal
 module KWOBS = Masc.Keeper_world_observation_board_signal
 
-(* Compare selected wake reasons by their stable label so the typed variant
-   stays printable in Alcotest's (string) testable. *)
-let reason_label = KWOBS.wake_reason_label
-let labeled selected = List.map (fun (item, r) -> item, reason_label r) selected
-
 let make_board_resume_meta name =
   let json =
     `Assoc
@@ -233,63 +228,6 @@ let test_explicit_stop_cuts_configured_sleep () =
        | KKS.Woken | KKS.Timeout -> false))
 ;;
 
-let test_board_wakeup_selection_keeps_explicit_mentions () =
-  let selected, deferred =
-    KKS.select_board_wakeup_candidates
-      [
-        "a", Some KWOBS.Thread_reply_after_self_comment;
-        "b", Some KWOBS.Explicit_mention;
-        "c", Some KWOBS.Explicit_mention;
-      ]
-  in
-  (* Explicit mentions short-circuit the WAKE; the shadowed followup is
-     deferred to its mailbox, not discarded (RFC-0334 W1). *)
-  check (list (pair string string)) "selected explicit wakeups"
-    [ "b", "explicit_mention"; "c", "explicit_mention" ]
-    (labeled selected);
-  check (list (pair string string)) "shadowed followup deferred, not dropped"
-    [ "a", "thread_reply_after_self_comment" ]
-    (labeled deferred)
-
-let test_board_wakeup_selection_drops_none_reasons () =
-  let selected, deferred =
-    KKS.select_board_wakeup_candidates
-      [
-        "a", Some KWOBS.Thread_reply_after_self_comment;
-        "b", None;
-        "c", None;
-      ]
-  in
-  (* [None] reasons (no deterministic address) receive nothing — neither a
-     wake nor a mailbox delivery; structural followup reasons survive in
-     candidate order. *)
-  check (list (pair string string)) "None dropped, real reasons kept"
-    [ "a", "thread_reply_after_self_comment" ]
-    (labeled selected);
-  check (list (pair string string)) "nothing deferred under the limit" []
-    (labeled deferred)
-
-let test_board_wakeup_selection_caps_thread_followups () =
-  let selected, deferred =
-    KKS.select_board_wakeup_candidates
-      ~total_limit:2
-      [
-        "a", Some KWOBS.Thread_reply_after_self_comment;
-        "b", Some KWOBS.Thread_reply_after_self_comment;
-        "c", Some KWOBS.Thread_reply_after_self_comment;
-        "d", Some KWOBS.Thread_reply_after_self_comment;
-      ]
-  in
-  (* Thread followups compete for [total_limit] immediate-wake slots in
-     candidate order; the overflow is deferred to mailboxes with its reasons
-     intact (RFC-0334 W1: the cap bounds wakes, not delivery). *)
-  check (list (pair string string)) "first two non-explicit kept in order"
-    [ "a", "thread_reply_after_self_comment"; "b", "thread_reply_after_self_comment" ]
-    (labeled selected);
-  check (list (pair string string)) "overflow deferred in order with reasons"
-    [ "c", "thread_reply_after_self_comment"; "d", "thread_reply_after_self_comment" ]
-    (labeled deferred)
-
 let test_board_goal_keyword_overlap_is_not_wake_reason () =
   let meta = make_board_resume_meta "keyword-overlap" in
   let signal : Board_dispatch.board_signal =
@@ -302,9 +240,193 @@ let test_board_goal_keyword_overlap_is_not_wake_reason () =
     ; updated_at = Some 123.0
     }
   in
-  check (option string) "goal keyword overlap no longer wakes" None
-    (Option.map KWOBS.wake_reason_label
-       (KWOBS.wake_reason ~meta ~signal))
+  match KWOBS.wake_reason ~meta ~signal with
+  | KWOBS.Available None -> ()
+  | KWOBS.Available (Some reason) ->
+    failf "goal keyword overlap woke as %s" (KWOBS.wake_reason_label reason)
+  | KWOBS.Unavailable unavailable ->
+    failf "Board fixture unavailable: %s" (KWOBS.unavailable_to_string unavailable)
+
+let check_exact_board_mention ~content ~expected =
+  let meta = make_board_resume_meta "foo" in
+  let signal : Board_dispatch.board_signal =
+    { kind = Board_dispatch.Board_post_created
+    ; post_id = "post-exact-mention"
+    ; author = "external-author"
+    ; title = "test"
+    ; content
+    ; hearth = None
+    ; updated_at = Some 123.0
+    }
+  in
+  let matched = KWOBS.match_signal ~meta ~signal in
+  check bool content expected matched.explicit_mention
+
+let test_board_mentions_use_exact_typed_keeper_ids () =
+  check_exact_board_mention ~content:"@foo please inspect" ~expected:true;
+  check_exact_board_mention ~content:"@foobar is a different lane" ~expected:false;
+  check_exact_board_mention ~content:"mail foo@example.com" ~expected:false
+
+let persist_and_register_board_lane config meta =
+  (match Keeper_meta_store.write_meta config meta with
+   | Ok () -> ()
+   | Error detail -> fail ("write_meta failed: " ^ detail));
+  ignore
+    (Keeper_registry.register
+       ~base_path:config.Workspace.base_path
+       meta.Keeper_meta_contract.name
+       meta)
+;;
+
+let board_queue_length config keeper_name =
+  Keeper_registry_event_queue.snapshot
+    ~base_path:config.Workspace.base_path
+    keeper_name
+  |> Keeper_event_queue.length
+;;
+
+let overwrite_file path contents =
+  let channel = open_out_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr channel)
+    (fun () -> output_string channel contents)
+;;
+
+let test_exact_mentions_deliver_and_wake_each_lane_independently () =
+  with_temp_workspace @@ fun config ->
+  Fun.protect
+    ~finally:Keeper_registry.clear
+    (fun () ->
+       let alpha = make_board_resume_meta "alpha" in
+       let beta = make_board_resume_meta "beta" in
+       persist_and_register_board_lane config alpha;
+       persist_and_register_board_lane config beta;
+       let signal : Board_dispatch.board_signal =
+         { kind = Board_dispatch.Board_post_created
+         ; post_id = "post-multi-lane"
+         ; author = "external-author"
+         ; title = "addressed"
+         ; content = "@alpha @beta inspect independently"
+         ; hearth = None
+         ; updated_at = Some 123.0
+         }
+       in
+       KKS.wakeup_relevant_keeper_for_board_signal ~config signal;
+       check int "alpha durable queue" 1 (board_queue_length config "alpha");
+       check int "beta durable queue" 1 (board_queue_length config "beta");
+       List.iter
+         (fun keeper_name ->
+            match Keeper_registry.get ~base_path:config.base_path keeper_name with
+            | Some entry ->
+              check bool (keeper_name ^ " independently woken") true
+                (Atomic.get entry.fiber_wakeup)
+            | None -> fail (keeper_name ^ " registry entry missing"))
+         [ "alpha"; "beta" ])
+;;
+
+let test_paused_exact_mention_is_durable_without_wake () =
+  with_temp_workspace @@ fun config ->
+  Fun.protect
+    ~finally:Keeper_registry.clear
+    (fun () ->
+       let meta = make_board_resume_meta "pausedlane" in
+       persist_and_register_board_lane config meta;
+       (match
+          Keeper_registry.dispatch_event
+            ~base_path:config.base_path
+            meta.name
+            Keeper_state_machine.Operator_pause
+        with
+        | Ok _ -> ()
+        | Error _ -> fail "failed to pause Keeper fixture");
+       let signal : Board_dispatch.board_signal =
+         { kind = Board_dispatch.Board_post_created
+         ; post_id = "post-paused-lane"
+         ; author = "external-author"
+         ; title = "addressed"
+         ; content = "@pausedlane retain this"
+         ; hearth = None
+         ; updated_at = Some 124.0
+         }
+       in
+       KKS.wakeup_relevant_keeper_for_board_signal ~config signal;
+       check int "paused durable queue" 1 (board_queue_length config meta.name);
+       match Keeper_registry.get ~base_path:config.base_path meta.name with
+       | Some entry ->
+         check bool "paused lane wake hint remains false" false
+           (Atomic.get entry.fiber_wakeup)
+       | None -> fail "paused registry entry missing")
+;;
+
+let test_restarting_exact_mention_is_durable_with_deferred_wake () =
+  with_temp_workspace @@ fun config ->
+  Fun.protect
+    ~finally:Keeper_registry.clear
+    (fun () ->
+       let meta = make_board_resume_meta "restartlane" in
+       (match Keeper_meta_store.write_meta config meta with
+        | Ok () -> ()
+        | Error detail -> fail ("write_meta failed: " ^ detail));
+       (match
+          Keeper_registry.register_restarting
+            ~base_path:config.base_path
+            meta.name
+            meta
+        with
+        | Ok _ -> ()
+        | Error _ -> fail "failed to register Restarting Keeper fixture");
+       let signal : Board_dispatch.board_signal =
+         { kind = Board_dispatch.Board_post_created
+         ; post_id = "post-restarting-lane"
+         ; author = "external-author"
+         ; title = "addressed"
+         ; content = "@restartlane retain this while relaunching"
+         ; hearth = None
+         ; updated_at = Some 124.5
+         }
+       in
+       KKS.wakeup_relevant_keeper_for_board_signal ~config signal;
+       check int "Restarting durable queue" 1
+         (board_queue_length config meta.name);
+       match Keeper_registry.get ~base_path:config.base_path meta.name with
+       | Some entry ->
+         check bool "Restarting lane keeps deferred wake hint" false
+           (Atomic.get entry.fiber_wakeup)
+       | None -> fail "Restarting registry entry missing")
+;;
+
+let test_lane_meta_failure_does_not_block_next_durable_delivery () =
+  with_temp_workspace @@ fun config ->
+  Fun.protect
+    ~finally:Keeper_registry.clear
+    (fun () ->
+       let broken = make_board_resume_meta "zzzbroken" in
+       let healthy = make_board_resume_meta "aaahealthy" in
+       persist_and_register_board_lane config broken;
+       persist_and_register_board_lane config healthy;
+       (match Keeper_registry.all ~base_path:config.base_path () with
+        | first :: _ ->
+          check string "fixture processes failing lane first" broken.name first.name
+        | [] -> fail "lane-isolation registry fixture is empty");
+       overwrite_file
+         (Keeper_types_profile.keeper_meta_path config broken.name)
+         "{ malformed Keeper metadata";
+       let signal : Board_dispatch.board_signal =
+         { kind = Board_dispatch.Board_post_created
+         ; post_id = "post-lane-isolation"
+         ; author = "external-author"
+         ; title = "addressed"
+         ; content = "@zzzbroken @aaahealthy inspect independently"
+         ; hearth = None
+         ; updated_at = Some 125.0
+         }
+       in
+       KKS.wakeup_relevant_keeper_for_board_signal ~config signal;
+       check int "unreadable lane has no queued signal" 0
+         (board_queue_length config broken.name);
+       check int "next lane receives durable signal" 1
+         (board_queue_length config healthy.name))
+;;
 
 let test_status_tick_usage_json_includes_cache_fields () =
   let usage = KK.status_tick_usage_json () in
@@ -347,15 +469,19 @@ let () =
         ; test_case "warn gate state is bounded" `Quick
             test_not_in_registry_warn_state_is_bounded
         ] )
-    ; ( "board_wakeup_selection"
-      , [ test_case "explicit mentions bypass and win" `Quick
-            test_board_wakeup_selection_keeps_explicit_mentions
-        ; test_case "None reasons are dropped, real reasons kept" `Quick
-            test_board_wakeup_selection_drops_none_reasons
-        ; test_case "thread followup fanout is capped" `Quick
-            test_board_wakeup_selection_caps_thread_followups
-        ; test_case "goal keyword overlap is not a wake reason" `Quick
+    ; ( "board_signal_delivery"
+      , [ test_case "goal keyword overlap is not a wake reason" `Quick
             test_board_goal_keyword_overlap_is_not_wake_reason
+        ; test_case "mentions use exact typed Keeper ids" `Quick
+            test_board_mentions_use_exact_typed_keeper_ids
+        ; test_case "exact mentions deliver and wake every lane" `Quick
+            test_exact_mentions_deliver_and_wake_each_lane_independently
+        ; test_case "paused exact mention is durable without wake" `Quick
+            test_paused_exact_mention_is_durable_without_wake
+        ; test_case "Restarting exact mention is durable with deferred wake" `Quick
+            test_restarting_exact_mention_is_durable_with_deferred_wake
+        ; test_case "lane metadata failure does not block next durable delivery" `Quick
+            test_lane_meta_failure_does_not_block_next_durable_delivery
         ] )
     ; ( "interruptible_cadence"
       , [ test_case "directed wake cuts configured sleep" `Quick

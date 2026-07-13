@@ -8,7 +8,7 @@ val make_tool_bundle
   :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> ctx_snapshot:Keeper_types.working_context
-  -> ?search_fn:(unit -> Yojson.Safe.t)
+  -> ?search_fn:(unit -> Keeper_tool_execution.t)
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?continuation_channel:Keeper_continuation_channel.t
   -> ?gate_context:Keeper_gate_causal_context.t
@@ -21,7 +21,7 @@ val make_tools
   :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> ctx_snapshot:Keeper_types.working_context
-  -> ?search_fn:(unit -> Yojson.Safe.t)
+  -> ?search_fn:(unit -> Keeper_tool_execution.t)
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> unit
   -> Agent_sdk.Tool.t list

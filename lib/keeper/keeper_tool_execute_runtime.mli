@@ -15,6 +15,18 @@ val handle_tool_execute :
   unit ->
   string
 
+val handle_tool_execute_with_outcome :
+  turn_sandbox_factory:Keeper_sandbox_factory.t option ->
+  exec_cache:Masc_exec.Exec_cache.t option ->
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  ?continuation_channel:Keeper_continuation_channel.t ->
+  ?gate_context:(unit -> Keeper_gate.causal_context) ->
+  ?gate_grant:Keeper_gate.cycle_grant ->
+  args:Yojson.Safe.t ->
+  unit ->
+  Keeper_tool_execution.t
+
 module For_testing : sig
   val elapsed_duration_ms : start_time:float -> end_time:float -> int
   val typed_execute_response_cwd_json :

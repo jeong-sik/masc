@@ -62,7 +62,6 @@ let capability_has kind tool_name =
   in
   match kind, descriptor_readonly_hint with
   | Tool_capability.Read_only, Some readonly -> readonly
-  | Tool_capability.Idempotent, Some true -> true
   | _ ->
     Tool_capability.has kind tool_name
     ||

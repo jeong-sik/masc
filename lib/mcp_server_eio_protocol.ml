@@ -196,12 +196,7 @@ let affected_resource_ids_for_tool = function
 ;;
 
 let maybe_emit_resource_notifications ~success ~tool_name =
-  if
-    success
-    && not
-         (Keeper_tool_descriptor_resolution.capability_has
-            Tool_capability.Read_only
-            tool_name)
+  if success
   then (
     let affected_ids = affected_resource_ids_for_tool tool_name in
     with_resource_subscription_lock (fun () ->
@@ -626,8 +621,6 @@ let handle_dashboard_ack_notification ?mcp_session_id params =
   ignore (handle_dashboard_ack_eio `Null ?mcp_session_id params);
   `Null
 ;;
-
-let contains_casefold = Mcp_server_eio_call_tool.contains_casefold
 
 let tool_call_outcome (json : Yojson.Safe.t) : Tool_result.tool_call_outcome =
   match json with

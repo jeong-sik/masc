@@ -254,50 +254,40 @@ let apply_resilience_wirein
           lifecycle)
 
 (* ── Tier K1: multimodal post-turn wire-in (Cycle 27) ─────────────
-   Feature-flag-gated wire-in that runs after the A5/A6 pair. Reads
+   Wire-in that runs after the A5/A6 pair. Reads
    raw multimodal artifacts the keeper agent dropped into
    [working_context["multimodal_artifacts"]], hydrates them via
    [Multimodal_keeper_bridge.hydrate_one], and accumulates them into
    the process-wide [Multimodal.Workspace_holder].
 
-   When [MASC_MULTIMODAL] is off (default), the wire-in is a pure
-   pass-through. When on, it consumes the artifact bag and replaces
-   it with a [workspace_meta] summary so the next turn does not
-   re-process the same entries.
+   It consumes the artifact bag and replaces it with a [workspace_meta]
+   summary so the next turn does not re-process the same entries.
 
    Failures inside the wire-in do not propagate — they are logged
    and the unmodified lifecycle result is returned, preserving the
    keeper's primary turn outcome. *)
 
 (* ── Tier K4b: tool-emission drain (Cycle 27) ──────────────────────
-   Drains the K4 hook accumulator (parsed JSONs captured by
-   [Keeper_tool_emission_hook.make_post_tool_use_hook] during
-   Agent.run) into [working_context["multimodal_artifacts"]] so the
+   Drains producer-owned typed JSON captured at the Keeper tool execution
+   boundary into [working_context["multimodal_artifacts"]] so the
    K1 wirein below picks them up.
 
    Strict ordering: this MUST run BEFORE [apply_multimodal_wirein].
    K4b emit + K1 hydrate is a producer/consumer pair on the same
    working_context bag.
 
-   Feature flag: [MASC_TOOL_EMISSION] (default off). When off, the
-   drain is a no-op (the hook itself is also a no-op when the flag
-   is off, so the accumulator is empty). *)
+   Typed tool emission is a normal Keeper capability, not a rollout gate. *)
 let apply_tool_emission_wirein
     ~(now : float)
     (lifecycle : post_turn_lifecycle) : post_turn_lifecycle =
   let _ = now in
-  if not (Keeper_tool_emission_hook.masc_tool_emission_enabled ()) then
-    lifecycle
-  else
-    match lifecycle.checkpoint with
-    | None -> lifecycle
-    | Some cp -> (
+  match lifecycle.checkpoint with
+  | None -> lifecycle
+  | Some cp -> (
         try
           let acc =
-            (* Tier K4c — pull THIS keeper's accumulator. Producer
-               side ([Keeper_run_tools]) registered it under the
-               same name pre-Agent.run, so the items captured during
-               this turn drain into this turn's working_context. *)
+            (* Tier K4c — pull THIS keeper's accumulator. The typed execution
+               boundary records items under the same stable keeper name. *)
             Keeper_tool_emission_hook.accumulator_for_keeper
               lifecycle.updated_meta.name
           in
@@ -326,17 +316,25 @@ let apply_tool_emission_wirein
 let apply_multimodal_wirein
     ~(now : float)
     (lifecycle : post_turn_lifecycle) : post_turn_lifecycle =
-  if not (Multimodal.Wirein_helpers.masc_multimodal_enabled ()) then
-    lifecycle
-  else
-    match lifecycle.checkpoint with
-    | None -> lifecycle
-    | Some cp -> (
-        try
-          let raws, wc_rest =
-            Multimodal.Wirein_helpers.extract_raw_artifacts
-              cp.Agent_sdk.Checkpoint.working_context
-          in
+  match lifecycle.checkpoint with
+  | None -> lifecycle
+  | Some cp ->
+    (match
+       Multimodal.Wirein_helpers.extract_raw_artifacts
+         cp.Agent_sdk.Checkpoint.working_context
+     with
+     | Error detail ->
+       Log.Keeper.warn
+         "keeper:%s multimodal wire-in contract unavailable: %s"
+         lifecycle.updated_meta.name
+         detail;
+       Otel_metric_store.inc_counter
+         Keeper_metrics.(to_string PostTurnWireinFailures)
+         ~labels:[ ("keeper", lifecycle.updated_meta.name); ("phase", "multimodal_contract") ]
+         ();
+       lifecycle
+     | Ok (raws, wc_rest) ->
+       (try
           let added_count = ref 0 in
           let last_id = ref None in
           Multimodal.Workspace_holder.update (fun ws ->
@@ -387,7 +385,7 @@ let apply_multimodal_wirein
             Keeper_metrics.(to_string PostTurnWireinFailures)
             ~labels:[("keeper", lifecycle.updated_meta.name); ("phase", "multimodal")]
             ();
-          lifecycle)
+          lifecycle))
 
 let apply_post_turn_lifecycle_with_resilience_handles
     ~(resilience_audit_store : Shared_audit.Store.t option)

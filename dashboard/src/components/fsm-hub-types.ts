@@ -227,7 +227,6 @@ const FAILURE_REASON_BASE_LABELS = {
   stale_termination_storm: 'Stale 종료 폭주',
   stale_fleet_batch: 'Fleet stale 배치',
   provider_runtime_error: '런타임 호출 오류',
-  ambiguous_partial_commit: '부분 commit 모호',
   fiber_unresolved: 'Fiber 미해결',
   exception: '런타임 예외',
 } as const
@@ -447,7 +446,6 @@ const TERMINAL_REASON_CODE_LABELS: Record<string, string> = {
   stale_fleet_batch: 'Fleet stale 배치',
   heartbeat_failures: '하트비트 실패',
   turn_failures: '턴 실패 반복',
-  ambiguous_partial_commit: '부분 commit 모호',
   fiber_unresolved: 'Fiber 미해결',
   exception: '런타임 예외',
   // Keeper_agent_run completion

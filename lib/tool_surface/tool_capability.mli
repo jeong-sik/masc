@@ -20,8 +20,9 @@ val all_kinds : kind list
 (** Ordered Set of capability kinds. *)
 module Set : Stdlib.Set.S with type elt = kind
 
-(** [has kind tool_name] returns [true] when [Tool_catalog.metadata]
-    grants [kind] for [tool_name]. *)
+(** [has kind tool_name] returns [true] only when [Tool_catalog.metadata]
+    explicitly grants [kind] for [tool_name]. Read-only metadata never implies
+    idempotency. *)
 val has : kind -> string -> bool
 
 (** [granted tool_name] returns every capability kind currently granted

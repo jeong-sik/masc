@@ -83,6 +83,8 @@ let removed_keeper_input_key_names =
     "runtime_ref";
     "tool_access";
     "tool_denylist";
+    "shards";
+    "policy_voice_enabled";
   ]
 
 let removed_keeper_sandbox_input_key_names =

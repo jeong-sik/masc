@@ -143,6 +143,43 @@ let () =
   assert (String.equal (payload_kind_label (board_payload ())) "board_signal");
   assert (String.equal (payload_kind_label Bootstrap) "bootstrap");
 
+  let board_attention_payload ?(content = "c") candidate_id =
+    Board_attention
+      { candidate_id
+      ; signal =
+          { kind = Post_created
+          ; author = "a"
+          ; title = "t"
+          ; content
+          ; hearth = None
+          ; updated_at = None
+          }
+      }
+  in
+  assert (is_board_signal (board_attention_payload "candidate-1"));
+  assert (
+    String.equal
+      (payload_kind_label (board_attention_payload "candidate-1"))
+      "board_attention");
+  (match
+     stimulus_of_yojson
+       (stimulus_to_yojson
+          { post_id = "post-attention"
+          ; urgency = Normal
+          ; arrived_at = 4.0
+          ; payload = board_attention_payload "candidate-1"
+          })
+   with
+   | Ok
+       { payload =
+           Board_attention
+             { candidate_id = "candidate-1"; signal = { content = "c"; _ } }
+       ; _
+       } ->
+     ()
+   | Ok _ -> Alcotest.fail "Board_attention round-trip changed opaque identity"
+   | Error detail -> Alcotest.fail ("Board_attention round-trip failed: " ^ detail));
+
   let reaction_payload () =
     Board_signal
       { kind =
@@ -1382,6 +1419,62 @@ let () =
       with
       | [ { payload = Hitl_resolved { decision = Hitl_approved; _ }; _ } ] -> ()
       | _ -> Alcotest.fail "first committed approval decision was not preserved");
+
+  (* --- judged Board delivery: only the opaque candidate id participates in
+     admission identity. Exact replay is idempotent; the same id carrying a
+     different typed signal is an explicit conflict. --- *)
+  let base_path = temp_dir "keeper-event-queue-board-attention-identity" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+      let keeper_name = "keeper-event-queue-board-attention-identity-test" in
+      let first : Keeper_event_queue.stimulus =
+        { post_id = "post-shared"
+        ; urgency = Normal
+        ; arrived_at = 10.0
+        ; payload = board_attention_payload "candidate-exact"
+        }
+      in
+      let replay = { first with arrived_at = 11.0 } in
+      let conflict =
+        { first with
+          payload = board_attention_payload ~content:"different" "candidate-exact"
+        }
+      in
+      (match
+         Masc.Keeper_registry_event_queue.enqueue_if_missing_durable_result
+           ~base_path
+           ~event_id:"candidate-exact"
+           keeper_name
+           first
+       with
+       | Masc.Keeper_registry_event_queue.Enqueued -> ()
+       | _ -> Alcotest.fail "first exact Board-attention event was not enqueued");
+      (match
+         Masc.Keeper_registry_event_queue.enqueue_if_missing_durable_result
+           ~base_path
+           ~event_id:"candidate-exact"
+           keeper_name
+           replay
+       with
+       | Masc.Keeper_registry_event_queue.Already_present -> ()
+       | _ -> Alcotest.fail "exact Board-attention replay was not idempotent");
+      (match
+         Masc.Keeper_registry_event_queue.enqueue_if_missing_durable_result
+           ~base_path
+           ~event_id:"candidate-exact"
+           keeper_name
+           conflict
+       with
+       | Masc.Keeper_registry_event_queue.Identity_conflict _ -> ()
+       | _ -> Alcotest.fail "same candidate id with different payload did not conflict");
+      match
+        Keeper_event_queue_persistence.load ~base_path ~keeper_name
+        |> Keeper_event_queue.to_list
+      with
+      | [ { payload = Board_attention { signal = { content = "c"; _ }; _ }; _ } ] ->
+        ()
+      | _ -> Alcotest.fail "identity conflict changed the first durable payload");
 
   (* --- critical delivery: a registered but non-running keeper still owns a
      durable lane; only the wake hint is phase-gated. --- *)

@@ -184,9 +184,8 @@
   ;; Bounded_event_dedupe — shared stdlib-only Hashtbl + Mutex +
   ;; threshold-once state machine for keeper/task log-noise reducers.
   masc.bounded_event_dedupe
-  ;; Keeper_recording_error_state — typed dedupe state for
-  ;; Keeper_registry.record_error log noise (MASC/OAS Error-Warn
-  ;; Reduction Goal §P6). Domain adapter over Bounded_event_dedupe so
+  ;; Keeper_recording_error_state — exact-message occurrence state for
+  ;; Keeper_registry.record_error observability. Domain adapter over Bounded_event_dedupe so
   ;; the standalone test executable can link in seconds without the
   ;; main library.
   ;; LAMBDA-HOOK-ERROR (2026-05-19): typed dedupe state for the

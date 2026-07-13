@@ -47,20 +47,16 @@ let execute_with_observers
           ())
     in
     let raw_result = result.raw_output in
-    let is_failure =
-      match result.outcome with
-      | `Failure -> true
-      | `Success -> false
-    in
-    if is_failure
-    then (
+    let producer_data = result.data in
+    match result.outcome with
+    | `Failure failure_class ->
       let dispatch_result =
-        Tool_result.error ~tool_name:name ~start_time:t0 raw_result
-      in
-      let failure_class =
-        match dispatch_result with
-        | Error failure -> failure.class_
-        | Ok _ -> Tool_result.Runtime_failure
+        Tool_result.make_err
+          ~tool_name:name
+          ~class_:failure_class
+          ~start_time:t0
+          ~data:(Option.value ~default:(`String raw_result) producer_data)
+          raw_result
       in
       Keeper_registry.record_tool_use
         ~base_path:config.base_path
@@ -76,12 +72,7 @@ let execute_with_observers
       Tool_dispatch.run_dispatch_observers
         Dispatch_outcome.Handled (Some dispatch_result);
       let detail =
-        let s = String.trim raw_result in
-        String_util.utf8_safe
-          ~max_bytes:(Keeper_tools_oas_markers.sse_error_preview_max_chars + 3)
-          ~suffix:"..."
-          s
-        |> String_util.to_string
+        raw_result |> String.trim |> Safe_ops.sanitize_text_utf8
       in
       let ts = Time_compat.now () in
       broadcast_keeper_tool_call_event
@@ -100,7 +91,10 @@ let execute_with_observers
         ~labels:[ "tool", name; "site", "error_result" ]
         ();
       Log.Keeper.error "tool %s returned error result: %s" name detail;
-      let normalized_error = normalize_tool_result ~success:false raw_result in
+      let normalized_error_json =
+        normalize_tool_result ~success:false ~data:producer_data raw_result
+      in
+      let normalized_error = Yojson.Safe.to_string normalized_error_json in
       append_tool_exec_decision_log
         ~config
         ~keeper_name:meta.name
@@ -119,13 +113,17 @@ let execute_with_observers
         ~keeper_name:meta.name
         ~original_bytes:(String.length normalized_error)
         ();
-      let output_text = Tool_output_validation.cap normalized_error in
-      Tool_result.error
-        ~failure_class:(Some failure_class)
+      Tool_result.make_err
+        ~class_:failure_class
         ~tool_name:name
         ~start_time:t0
-        output_text)
-    else (
+        ~data:normalized_error_json
+        normalized_error
+    | `Success ->
+      Option.iter
+        (Keeper_tool_emission_hook.capture_typed_result_for_keeper
+           ~keeper_name:meta.name)
+        producer_data;
       Keeper_registry.record_tool_use
         ~base_path:config.base_path
         meta.name
@@ -136,7 +134,7 @@ let execute_with_observers
       (let tr : Tool_result.result =
          Ok
            { Tool_result.tool_name = name
-           ; data = `String raw_result
+           ; data = Option.value ~default:(`String raw_result) producer_data
            ; duration_ms = Float.of_int duration_ms
            }
        in
@@ -155,26 +153,11 @@ let execute_with_observers
         ~site:"success"
         ~ts
         ();
-      let final_result = normalize_tool_result ~success:true raw_result in
-      let original_len = String.length final_result in
-      let truncated_result = Tool_output_validation.cap final_result in
-      let was_truncated = original_len > Tool_output_validation.max_output_chars in
-      let result_markers = Keeper_tools_oas_markers.tool_exec_result_markers ~input ~output:final_result in
-      let result_marker_fields =
-        match result_markers with
-        | [] -> []
-        | markers ->
-          [ ( "result_markers"
-            , `List (List.map (fun marker -> `String marker) markers) )
-          ]
+      let final_result_json =
+        normalize_tool_result ~success:true ~data:producer_data raw_result
       in
-      if was_truncated
-      then
-        Log.Keeper.info
-          "tool %s output truncated: %d -> %d chars"
-          name
-          original_len
-          (String.length truncated_result);
+      let final_result = Yojson.Safe.to_string final_result_json in
+      let original_len = String.length final_result in
       append_tool_exec_decision_log
         ~config
         ~keeper_name:meta.name
@@ -187,20 +170,16 @@ let execute_with_observers
              ; "duration_ms", `Int duration_ms
              ; "result_bytes", `Int original_len
              ; "ok", `Bool true
-             ]
-             @ result_marker_fields
-             @
-             if was_truncated
-             then [ "truncated_to", `Int (String.length truncated_result) ]
-             else []));
-      (* Publish truncation info for OAS hook's tool_call_log *)
+             ]));
       Keeper_tool_call_log.set_truncation_info
         ~keeper_name:meta.name
         ~original_bytes:original_len
-        ?truncated_to:
-          (if was_truncated then Some (String.length truncated_result) else None)
         ();
-      Tool_result.ok ~tool_name:name ~start_time:t0 truncated_result)
+      Tool_result.make_ok
+        ~tool_name:name
+        ~start_time:t0
+        ~data:final_result_json
+        ()
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
@@ -231,7 +210,10 @@ let execute_with_observers
       ~labels:[ "tool", name; "site", "exception" ]
       ();
     Log.Keeper.error "%s" msg;
-    let normalized_exn = normalize_tool_result ~success:false error_text in
+    let normalized_exn_json =
+      normalize_tool_result ~success:false ~data:None error_text
+    in
+    let normalized_exn = Yojson.Safe.to_string normalized_exn_json in
     append_tool_exec_decision_log
       ~config
       ~keeper_name:meta.name
@@ -250,10 +232,10 @@ let execute_with_observers
       ~keeper_name:meta.name
       ~original_bytes:(String.length normalized_exn)
       ();
-    let output_text = Tool_output_validation.cap normalized_exn in
-    Tool_result.error
-      ~failure_class:(Some Tool_result.Runtime_failure)
+    Tool_result.make_err
+      ~class_:Tool_result.Runtime_failure
       ~tool_name:name
       ~start_time:t0
-      output_text
+      ~data:normalized_exn_json
+      normalized_exn
 ;;

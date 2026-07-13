@@ -1,10 +1,7 @@
 (** In-process runtime handlers for descriptor-backed workspace tools.
 
-    Each handler reproduces the exact JSON the legacy
-    [Keeper_tool_dispatch_runtime.execute_keeper_tool_call_with_outcome] match arm used
-    to produce. Outcome inference via [classify_tool_result_payload] yields
-    the same Success/Failure label as the legacy
-    [success_tool_result]/[failure_tool_result] forces. *)
+    Each producer commits to a typed execution outcome before its opaque raw
+    payload reaches dispatch. *)
 
 open Keeper_types
 open Keeper_meta_contract
@@ -176,11 +173,35 @@ let with_external_gate_tool_result_option
          blocked.payload)
 ;;
 
-let handle_tool_search ~search_fn ~args:_ =
-  Yojson.Safe.to_string (search_fn ())
+let with_external_gate_execution
+      ~config
+      ~(meta : keeper_meta)
+      ?continuation_channel
+      ?gate_context
+      ?gate_grant
+      ~operation
+      ~input
+      continue
+  =
+  match
+    external_gate_decision
+      ~config
+      ~meta
+      ?continuation_channel
+      ?gate_context
+      ?gate_grant
+      ~operation
+      ~input
+      ()
+  with
+  | Ok () -> continue ()
+  | Error blocked ->
+    Keeper_tool_execution.failure
+      ~class_:blocked.failure_class
+      blocked.payload
 ;;
 
-let handle_web_search
+let handle_web_search_with_outcome
       ~config
       ~(meta : keeper_meta)
       ?continuation_channel
@@ -190,7 +211,7 @@ let handle_web_search
       ()
   =
   let input = `Assoc [ "capability", `String "web_search"; "input", args ] in
-  with_external_gate
+  with_external_gate_execution
     ~config
     ~meta
     ?continuation_channel
@@ -206,10 +227,10 @@ let handle_web_search
        ~tool_name
        ~start_time
        args
-  |> Keeper_tool_shared_runtime.tool_result_or_error
+  |> Keeper_tool_execution.of_tool_result
 ;;
 
-let handle_web_fetch
+let handle_web_fetch_with_outcome
       ~config
       ~(meta : keeper_meta)
       ?continuation_channel
@@ -219,7 +240,7 @@ let handle_web_fetch
       ()
   =
   let input = `Assoc [ "capability", `String "web_fetch"; "input", args ] in
-  with_external_gate
+  with_external_gate_execution
     ~config
     ~meta
     ?continuation_channel
@@ -232,7 +253,7 @@ let handle_web_fetch
     ~tool_name:"masc_web_fetch"
     ~start_time:(Time_compat.now ())
     args
-  |> Keeper_tool_shared_runtime.tool_result_or_error
+  |> Keeper_tool_execution.of_tool_result
 ;;
 
 let handle_context_status ~config ~(meta : keeper_meta) ~ctx_work ~args:_ =
@@ -247,36 +268,22 @@ let handle_memory_write ~config ~(meta : keeper_meta) ~args =
   Keeper_tool_memory_runtime.keeper_memory_write_json ~config ~meta ~args
 ;;
 
-let handle_library_search ~(meta : keeper_meta) ~args =
-  let result =
-    Tool_library.handle_search
-      ~tool_name:"keeper_library_search"
-      ~start_time:0.0
-      Tool_library.{ agent_name = meta.name }
-      args
-
-  in
-  if Tool_result.is_success result
-  then Tool_result.message result
-  else
-    Yojson.Safe.to_string
-      (`Assoc [ "error", `String (Tool_result.message result) ])
+let handle_library_search_with_outcome ~(meta : keeper_meta) ~args =
+  Keeper_tool_execution.of_tool_result
+    (Tool_library.handle_search
+       ~tool_name:"keeper_library_search"
+       ~start_time:0.0
+       Tool_library.{ agent_name = meta.name }
+       args)
 ;;
 
-let handle_library_read ~(meta : keeper_meta) ~args =
-  let result =
-    Tool_library.handle_read
-      ~tool_name:"keeper_library_read"
-      ~start_time:0.0
-      Tool_library.{ agent_name = meta.name }
-      args
-
-  in
-  if Tool_result.is_success result
-  then Tool_result.message result
-  else
-    Yojson.Safe.to_string
-      (`Assoc [ "error", `String (Tool_result.message result) ])
+let handle_library_read_with_outcome ~(meta : keeper_meta) ~args =
+  Keeper_tool_execution.of_tool_result
+    (Tool_library.handle_read
+       ~tool_name:"keeper_library_read"
+       ~start_time:0.0
+       Tool_library.{ agent_name = meta.name }
+       args)
 ;;
 
 let handle_surface_read ~config ~(meta : keeper_meta) ~args =
@@ -303,18 +310,18 @@ let handle_surface_read ~config ~(meta : keeper_meta) ~args =
     page.Keeper_chat_store.messages
 ;;
 
-let handle_person_note_set ~config ~(meta : keeper_meta) ~args =
+let handle_person_note_set_with_outcome ~config ~(meta : keeper_meta) ~args =
+  let reject message =
+    Keeper_tool_execution.failure
+      ~class_:Tool_result.Workflow_rejection
+      (Yojson.Safe.to_string (`Assoc [ "error", `String message ]))
+  in
   let speaker_id =
     String.trim (Safe_ops.json_string ~default:"" "speaker_id" args)
   in
   if speaker_id = "" then
-    Yojson.Safe.to_string
-      (`Assoc
-        [ ( "error"
-          , `String
-              "speaker_id is required. Use the id field from the \
-               keeper_surface_read roster." )
-        ])
+    reject
+      "speaker_id is required. Use the id field from the keeper_surface_read roster."
   else begin
     (* Distinguish field-absent (LLM omission) from field-present-empty:
        [json_string_opt] returns [None] when [note] is absent and [Some s] when
@@ -327,13 +334,8 @@ let handle_person_note_set ~config ~(meta : keeper_meta) ~args =
        tracked in #21875. *)
     match Safe_ops.json_string_opt "note" args with
     | None ->
-      Yojson.Safe.to_string
-        (`Assoc
-          [ ( "error"
-            , `String
-                "note is required. Send an empty string to clear (tombstone) \
-                 an existing note." )
-          ])
+      reject
+        "note is required. Send an empty string to clear (tombstone) an existing note."
     | Some note ->
       Keeper_person_notes.set_note
         ~base_dir:config.Workspace.base_path
@@ -341,13 +343,18 @@ let handle_person_note_set ~config ~(meta : keeper_meta) ~args =
         ~speaker_id
         ~note
         ();
-      Yojson.Safe.to_string
-        (`Assoc
-          [ "ok", `Bool true
-          ; "speaker_id", `String speaker_id
-          ; "cleared", `Bool (String.trim note = "")
-          ])
+      Keeper_tool_execution.success
+        (Yojson.Safe.to_string
+           (`Assoc
+             [ "ok", `Bool true
+             ; "speaker_id", `String speaker_id
+             ; "cleared", `Bool (String.trim note = "")
+             ]))
   end
+;;
+
+let handle_person_note_set ~config ~meta ~args =
+  (handle_person_note_set_with_outcome ~config ~meta ~args).raw_output
 ;;
 
 (* Slack bot token, resolved through the config boundary ({!Env_config_slack})
@@ -389,7 +396,27 @@ let with_connector_post_gate
     continue
 ;;
 
-let handle_surface_post
+let with_connector_post_gate_execution
+      ~config
+      ~(meta : keeper_meta)
+      ?continuation_channel
+      ?gate_context
+      ?gate_grant
+      ~input
+      continue
+  =
+  with_external_gate_execution
+    ~config
+    ~meta
+    ?continuation_channel
+    ?gate_context
+    ?gate_grant
+    ~operation:"connector_post"
+    ~input
+    continue
+;;
+
+let handle_surface_post_with_outcome
       ~config
       ~(meta : keeper_meta)
       ?continuation_channel
@@ -398,6 +425,10 @@ let handle_surface_post
       ~args
       ()
   =
+  let succeed payload = Keeper_tool_execution.success payload in
+  let fail ?(class_ = Tool_result.Workflow_rejection) payload =
+    Keeper_tool_execution.failure ~class_ payload
+  in
   let surface = String.trim (Safe_ops.json_string ~default:"" "surface" args) in
   let content = Safe_ops.json_string ~default:"" "content" args in
   let redaction =
@@ -412,10 +443,12 @@ let handle_surface_post
     | id -> Some id
   in
   if surface = "" then
-    Keeper_surface_post.error_json
-      "surface is required. Good: surface='dashboard'."
+    fail
+      (Keeper_surface_post.error_json
+         "surface is required. Good: surface='dashboard'.")
   else if String.trim content = "" then
-    Keeper_surface_post.error_json "content is required and must be non-empty."
+    fail
+      (Keeper_surface_post.error_json "content is required and must be non-empty.")
   else
     let bound_discord_channels =
       Channel_gate_discord_state.bound_channels ~keeper_name:meta.name
@@ -427,7 +460,7 @@ let handle_surface_post
       Keeper_surface_post.resolve_target ~surface ~channel_id
         ~bound_slack_channels ~bound_discord_channels ()
     with
-    | Error message -> Keeper_surface_post.error_json message
+    | Error message -> fail (Keeper_surface_post.error_json message)
     | Ok Keeper_surface_post.To_dashboard ->
         Keeper_chat_store.append_assistant_message
           ~base_dir:config.Workspace.base_path
@@ -439,7 +472,7 @@ let handle_surface_post
           ~source:"dashboard"
           ~content:safe_content
           ();
-        Keeper_surface_post.ok_json ~surface ()
+        succeed (Keeper_surface_post.ok_json ~surface ())
     | Ok (Keeper_surface_post.To_discord { channel_id }) ->
       let input =
         connector_post_gate_input
@@ -448,7 +481,7 @@ let handle_surface_post
           ~content:safe_content
           ()
       in
-      with_connector_post_gate
+      with_connector_post_gate_execution
         ~config
         ~meta
         ?continuation_channel
@@ -458,11 +491,13 @@ let handle_surface_post
       @@ fun () ->
       (match Channel_gate_discord_state.send_message ~channel_id ~content:safe_content () with
        | Error send_error ->
-         Keeper_surface_post.error_json
-           (Format.asprintf
-              "discord send failed: %a"
-              Channel_gate_discord_state.pp_send_error
-              send_error)
+         fail
+           ~class_:Tool_result.Runtime_failure
+           (Keeper_surface_post.error_json
+              (Format.asprintf
+                 "discord send failed: %a"
+                 Channel_gate_discord_state.pp_send_error
+                 send_error))
        | Ok message_id ->
          Keeper_chat_store.append_assistant_message
            ~base_dir:config.Workspace.base_path
@@ -481,7 +516,7 @@ let handle_surface_post
            ~source:"discord"
            ~content:safe_content
            ();
-         Keeper_surface_post.ok_json ~surface ~message_id ())
+         succeed (Keeper_surface_post.ok_json ~surface ~message_id ()))
     | Ok (Keeper_surface_post.To_slack { channel_id; blocks = _ }) ->
         let slack_blocks =
           Keeper_chat_slack.content_blocks_of_text safe_content
@@ -499,7 +534,7 @@ let handle_surface_post
             ~blocks:slack_blocks
             ()
         in
-        with_connector_post_gate
+        with_connector_post_gate_execution
           ~config
           ~meta
           ?continuation_channel
@@ -509,7 +544,9 @@ let handle_surface_post
         @@ fun () ->
         (match slack_token_opt () with
          | None ->
-           Keeper_surface_post.error_json "SLACK_BOT_TOKEN is unset or empty"
+           fail
+             ~class_:Tool_result.Runtime_failure
+             (Keeper_surface_post.error_json "SLACK_BOT_TOKEN is unset or empty")
          | Some token ->
            (match
               Keeper_chat_slack.send_message_with_blocks
@@ -520,11 +557,13 @@ let handle_surface_post
                 ()
             with
             | Error err ->
-              Keeper_surface_post.error_json
-                (Format.asprintf
-                   "slack send failed: %a"
-                   Keeper_chat_slack.pp_error
-                   err)
+              fail
+                ~class_:Tool_result.Runtime_failure
+                (Keeper_surface_post.error_json
+                   (Format.asprintf
+                      "slack send failed: %a"
+                      Keeper_chat_slack.pp_error
+                      err))
             | Ok () ->
               Keeper_chat_store.append_assistant_message
                 ~base_dir:config.Workspace.base_path
@@ -539,15 +578,24 @@ let handle_surface_post
                 ~source:"slack"
                 ~content:safe_content
                 ();
-              Keeper_surface_post.ok_json ~surface ()))
+              succeed (Keeper_surface_post.ok_json ~surface ())))
 ;;
 
 let handle_ide_annotate ~config ~(meta : keeper_meta) ~args =
   Keeper_tool_ide_runtime.handle_ide_annotate ~config ~meta ~args
 ;;
 
-let handle_voice ~config ~(meta : keeper_meta) ~name ~args () =
-  Keeper_tool_voice_runtime.handle_voice_tool ~config ~meta ~name ~args ()
+let handle_ide_annotate_with_outcome ~config ~(meta : keeper_meta) ~args =
+  Keeper_tool_ide_runtime.handle_ide_annotate_with_outcome ~config ~meta ~args
+;;
+
+let handle_voice_with_outcome ~config ~(meta : keeper_meta) ~name ~args () =
+  Keeper_tool_voice_runtime.handle_voice_tool_with_outcome
+    ~config
+    ~meta
+    ~name
+    ~args
+    ()
 ;;
 
 let handle_task ~config ~(meta : keeper_meta) ~name ~args =
@@ -564,18 +612,15 @@ type board_projection_error =
       { board_name : Tool_name.Board_name.t
       ; keeper_tool : Keeper_tool_name.t
       }
-  | External_only_board_route of Tool_name.Board_name.t
 
 let board_projection_error_kind = function
   | Unknown_board_route -> "unknown_board_route"
   | Keeper_wrapper_required _ -> "keeper_wrapper_required"
-  | External_only_board_route _ -> "external_only_board_route"
 ;;
 
 let board_projection_error_class = function
   | Unknown_board_route -> Tool_result.Runtime_failure
-  | Keeper_wrapper_required _ | External_only_board_route _ ->
-    Tool_result.Policy_rejection
+  | Keeper_wrapper_required _ -> Tool_result.Policy_rejection
 ;;
 
 let board_projection_error_fields error =
@@ -586,13 +631,11 @@ let board_projection_error_fields error =
       [ "board_operation", `String (Tool_name.Board_name.operation_name board_name)
       ; "required_tool", `String (Keeper_tool_name.to_string keeper_tool)
       ]
-    | External_only_board_route board_name ->
-      [ "board_operation", `String (Tool_name.Board_name.operation_name board_name) ]
   in
   ("error_kind", `String (board_projection_error_kind error)) :: route_fields
 ;;
 
-let reject_board_projection ~(meta : keeper_meta) ~name error =
+let reject_board_projection_with_outcome ~(meta : keeper_meta) ~name error =
   let class_ = board_projection_error_class error in
   let fields =
     ("ok", `Bool false)
@@ -609,80 +652,78 @@ let reject_board_projection ~(meta : keeper_meta) ~name error =
     ~category:Log.Tool
     ~details:data
     "board projection rejected";
-  Tool_result.make_err
-    ~tool_name:name
-    ~class_
-    ~start_time:(Time_compat.now ())
-    ~data
-    (Yojson.Safe.to_string data)
-  |> Keeper_tool_shared_runtime.tool_result_or_error
+  Keeper_tool_execution.failure ~class_ (Yojson.Safe.to_string data)
 ;;
 
-let handle_masc_board ~(meta : keeper_meta) ~name ~args =
+let reject_board_projection ~meta ~name error =
+  (reject_board_projection_with_outcome ~meta ~name error).raw_output
+;;
+
+let handle_masc_board_with_outcome ~(meta : keeper_meta) ~name ~args =
   match Tool_name.Board_name.of_string name with
-  | None -> reject_board_projection ~meta ~name Unknown_board_route
+  | None -> reject_board_projection_with_outcome ~meta ~name Unknown_board_route
   | Some board_name ->
     (match Keeper_tool_name.board_projection_of_masc_board_name board_name with
      | Keeper_tool_name.Keeper_wrapper keeper_tool ->
-       reject_board_projection
+       reject_board_projection_with_outcome
          ~meta
          ~name
          (Keeper_wrapper_required { board_name; keeper_tool })
-     | Keeper_tool_name.External_only ->
-       reject_board_projection ~meta ~name (External_only_board_route board_name)
      | Keeper_tool_name.Direct_masc ->
-      let args =
-      List.fold_left
-        (fun args field ->
-           Keeper_tool_shared_runtime.assoc_override_string field meta.name args)
-        args
-        (Board_tool_registry.identity_fields_for_board_name board_name)
-      in
-      Board_tool_dispatch.handle_tool name args
-      |> Keeper_tool_shared_runtime.tool_result_or_error)
+       let args =
+         List.fold_left
+           (fun args field ->
+              Keeper_tool_shared_runtime.assoc_override_string field meta.name args)
+           args
+           (Board_tool_registry.identity_fields_for_board_name board_name)
+       in
+       Board_tool_dispatch.handle_tool name args
+       |> Keeper_tool_execution.of_tool_result)
+;;
+
+let handle_masc_board ~meta ~name ~args =
+  (handle_masc_board_with_outcome ~meta ~name ~args).raw_output
 ;;
 
 (* RFC-0182 §3.1 — shared helper. Converts the [Tool_result.result option]
-   returned by [Tool_*.dispatch] to the in_process_runtime string-output
-   convention. [None] means the dispatcher does not recognise the name
-   (the descriptor → dispatcher mapping is misconfigured if this fires
-   for a tool reachable via [descriptors_for_internal]). *)
-let dispatch_option_to_string ~name = function
-  | Some (result : Tool_result.result) ->
-    if Tool_result.is_success result
-    then Tool_result.message result
-    else Keeper_tool_shared_runtime.tool_result_error_json result
+   returned by [Tool_*.dispatch] to the producer-owned execution outcome.
+   [None] means the dispatcher does not recognise the name (the descriptor →
+   dispatcher mapping is misconfigured if this fires for a tool reachable via
+   [descriptors_for_internal]). *)
+let dispatch_option_to_execution ~name = function
+  | Some result -> Keeper_tool_execution.of_tool_result result
   | None ->
-    Yojson.Safe.to_string
-      (`Assoc
-         [ "error"
-         , `String
-             (Printf.sprintf
-                "descriptor projection: cluster dispatcher did not recognise %S"
-                name)
-         ])
+    Keeper_tool_execution.failure
+      (Yojson.Safe.to_string
+         (`Assoc
+            [ "error"
+            , `String
+                (Printf.sprintf
+                   "descriptor projection: cluster dispatcher did not recognise %S"
+                   name)
+            ]))
 ;;
 
-let handle_masc_task ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
+let handle_masc_task_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
   let ctx : Task.Tool.context =
     { config; agent_name = meta.name; sw = None }
   in
-  Task.Tool.dispatch_for_keeper ctx ~name ~args |> dispatch_option_to_string ~name
+  Task.Tool.dispatch_for_keeper ctx ~name ~args |> dispatch_option_to_execution ~name
 ;;
 
-let handle_masc_plan ~(config : Workspace.config) ~name ~args =
+let handle_masc_plan_with_outcome ~(config : Workspace.config) ~name ~args =
   let ctx : Tool_plan.context = { config } in
-  Tool_plan.dispatch ctx ~name ~args |> dispatch_option_to_string ~name
+  Tool_plan.dispatch ctx ~name ~args |> dispatch_option_to_execution ~name
 ;;
 
-let handle_masc_run ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
+let handle_masc_run_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
   let ctx : Tool_run.context = { config; agent_name = Some meta.name } in
-  Tool_run.dispatch ctx ~name ~args |> dispatch_option_to_string ~name
+  Tool_run.dispatch ctx ~name ~args |> dispatch_option_to_execution ~name
 ;;
 
-let handle_masc_agent ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
+let handle_masc_agent_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
   let ctx : Tool_agent.context = { config; agent_name = meta.name } in
-  Tool_agent.dispatch ctx ~name ~args |> dispatch_option_to_string ~name
+  Tool_agent.dispatch ctx ~name ~args |> dispatch_option_to_execution ~name
 ;;
 
 (* RFC-0182 §3.1 — masc_workspace_ cluster. Tool_workspace lies LATE in module
@@ -695,40 +736,40 @@ let handle_masc_agent ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~
    [Tool_workspace.dispatch] into the ref. Until registered the ref returns
    [None], surfacing a clear projection error rather than silently
    succeeding with stale state. *)
-let handle_masc_workspace ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
+let handle_masc_workspace_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
   let dispatched =
     !Workspace_dispatch_ref.dispatch ~config ~agent_name:meta.name ~name ~args
   in
-  dispatch_option_to_string ~name dispatched
+  dispatch_option_to_execution ~name dispatched
 ;;
 
 (* RFC-0182 §3.1 — masc_misc cluster. Active after Turn_mode_codec
    extraction (2026-05-27) broke the Tool_agent_timeline → Keeper_*
    back edge that previously cycled Config → ... →
    Keeper_tool_in_process_runtime. *)
-let handle_masc_misc ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
+let handle_masc_misc_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
   let ctx : Tool_misc.context = { config; agent_name = meta.name } in
-  Tool_misc.dispatch ctx ~name ~args |> dispatch_option_to_string ~name
+  Tool_misc.dispatch ctx ~name ~args |> dispatch_option_to_execution ~name
 ;;
 
-let handle_masc_control ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
+let handle_masc_control_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
   let ctx : Tool_control.context = { config; agent_name = meta.name } in
-  Tool_control.dispatch ctx ~name ~args |> dispatch_option_to_string ~name
+  Tool_control.dispatch ctx ~name ~args |> dispatch_option_to_execution ~name
 ;;
 
-let handle_masc_agent_timeline ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
+let handle_masc_agent_timeline_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
   let ctx : Tool_agent_timeline.context = { config; agent_name = meta.name } in
   Tool_agent_timeline.dispatch
     ~load_chat:(fun ~agent_name ->
       Keeper_chat_timeline_source.lines_for_self
         ~base_dir:config.base_path ~caller_keeper_name:meta.name ~agent_name)
     ctx ~name ~args
-  |> dispatch_option_to_string ~name
+  |> dispatch_option_to_execution ~name
 ;;
 
-let handle_masc_schedule ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
+let handle_masc_schedule_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
   let ctx : Tool_schedule.context = { config; agent_name = meta.name } in
-  Tool_schedule.dispatch ctx ~name ~args |> dispatch_option_to_string ~name
+  Tool_schedule.dispatch ctx ~name ~args |> dispatch_option_to_execution ~name
 ;;
 
 (* RFC-0252 — masc_fusion out-of-band panel+judge deliberation.  The
@@ -744,17 +785,20 @@ let handle_masc_schedule ~(config : Workspace.config) ~(meta : keeper_meta) ~nam
    the server net capability (not turn-scoped) from the same context.  When
    either is unavailable we return an explicit error JSON rather than
    silently dropping the request (CLAUDE.md Silent-Failure avoidance). *)
-let handle_masc_fusion ~(config : Workspace.config) ~(meta : keeper_meta)
+let handle_masc_fusion_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta)
       ?continuation_channel ~args () =
   match Eio_context.get_root_switch_opt (), Eio_context.get_net_opt () with
   | Some sw, Some net ->
     (match Fusion_config_loader.load ~base_path:config.Workspace.base_path with
      | Error msg ->
-       Yojson.Safe.to_string (`Assoc [ "ok", `Bool false; "error", `String msg ])
+       Keeper_tool_execution.failure
+         ~class_:Tool_result.Runtime_failure
+         (Yojson.Safe.to_string
+            (`Assoc [ "ok", `Bool false; "error", `String msg ]))
      | Ok policy ->
        let now_unix = Time_compat.now () in
        let run_id = Random_id.prefixed ~prefix:"fus-" ~bytes:16 in
-       Fusion_tool.handle
+       Fusion_tool.handle_result
          ~sw
          ~net
          ~base_dir:config.Workspace.base_path
@@ -764,14 +808,17 @@ let handle_masc_fusion ~(config : Workspace.config) ~(meta : keeper_meta)
          ~policy
          ?continuation_channel
          ~args
-         ())
+         ()
+       |> Keeper_tool_execution.of_tool_result)
   | _ ->
-    Yojson.Safe.to_string
-      (`Assoc
-         [ "ok", `Bool false
-         ; ( "error"
-           , `String "fusion requires the server root switch + net (unavailable)" )
-         ])
+    Keeper_tool_execution.failure
+      ~class_:Tool_result.Runtime_failure
+      (Yojson.Safe.to_string
+         (`Assoc
+            [ "ok", `Bool false
+            ; ( "error"
+              , `String "fusion requires the server root switch + net (unavailable)" )
+            ]))
 ;;
 
 (* RFC-0266 §7 Phase 3 — masc_fusion_status: read-only view of the caller's
@@ -827,11 +874,11 @@ let handle_masc_fusion_status ~(meta : keeper_meta) ~args () =
 (* RFC-keeper-vision-delegation-tool §2.6 — analyze_image. Thin delegate to the
    vision sub-call shell in [Keeper_vision_tool], which threads the Eio net/clock
    it receives (the read-only sub-call needs net like masc_fusion needs it). *)
-let handle_analyze_image ?sw ?clock ?net ~(meta : keeper_meta) ~args () =
-  Keeper_vision_tool.handle ?sw ?clock ?net ~meta ~args ()
+let handle_analyze_image_with_outcome ?sw ?clock ?net ~(meta : keeper_meta) ~args () =
+  Keeper_vision_tool.handle_with_outcome ?sw ?clock ?net ~meta ~args ()
 ;;
 
-let handle_masc_local_runtime
+let handle_masc_local_runtime_with_outcome
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ?continuation_channel
@@ -859,16 +906,30 @@ let handle_masc_local_runtime
     }
     ~name
     ~args
-  |> dispatch_option_to_string ~name
+  |> dispatch_option_to_execution ~name
 ;;
 
-(* RFC-0182 §3.1 — masc_tool_shard cluster.  [Tool_shard.execute]
-   returns the older [(bool * Yojson.Safe.t)] tuple (predates RFC-0189
-   typed-result migration), same shape as Tool_local_runtime.  Tool_shard
-   has no Keeper/Workspace deps so no cycle concern.
+let handle_masc_local_runtime
+      ~config
+      ~meta
+      ?continuation_channel
+      ?gate_context
+      ?gate_grant
+      ~name
+      ~args
+      ()
+  =
+  (handle_masc_local_runtime_with_outcome
+     ~config
+     ~meta
+     ?continuation_channel
+     ?gate_context
+     ?gate_grant
+     ~name
+     ~args
+     ()).raw_output
+;;
 
-   TEL-OK: descriptor projection — telemetry lives in [Tool_shard.execute]
-   and the upstream [Keeper_tool_dispatch_runtime] dispatch wrapper. *)
 let dashboard_surface_readiness_callback
     : (?surface_id:string -> unit -> Yojson.Safe.t) Atomic.t
   =
@@ -895,7 +956,7 @@ let handle_masc_surface_audit ~args =
    TEL-OK: descriptor projection — telemetry lives in the underlying
    [Keeper_tool_surface] / [Keeper_tool_surface_ops] / [Keeper_status_detail] handlers
    that the registered ref delegates to. *)
-let handle_masc_keeper
+let handle_masc_keeper_with_outcome
       ?sw
       ?clock
       ?proc_mgr
@@ -933,5 +994,36 @@ let handle_masc_keeper
       ~name
       ~args
       ()
-  |> dispatch_option_to_string ~name
+  |> dispatch_option_to_execution ~name
+;;
+
+let handle_masc_keeper
+      ?sw
+      ?clock
+      ?proc_mgr
+      ?net
+      ?mcp_session_id
+      ?continuation_channel
+      ?gate_context
+      ?gate_grant
+      ~config
+      ~meta
+      ~name
+      ~args
+      ()
+  =
+  (handle_masc_keeper_with_outcome
+     ?sw
+     ?clock
+     ?proc_mgr
+     ?net
+     ?mcp_session_id
+     ?continuation_channel
+     ?gate_context
+     ?gate_grant
+     ~config
+     ~meta
+     ~name
+     ~args
+     ()).raw_output
 ;;

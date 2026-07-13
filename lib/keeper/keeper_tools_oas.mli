@@ -33,12 +33,14 @@ val record_keeper_internal_tool_call
   -> duration_ms:int
   -> unit
 
-(** Normalize a raw tool result string into the canonical JSON
-    envelope. Success → [{"ok":true,"result":...}]; failure →
-    [{"ok":false,"error":...,"detail":...}], preserving structured
-    [failure_class]/[recoverable]/[error_class] fields when present.
-    Plain text is wrapped as a string under [result] / [error]. *)
-val normalize_tool_result : success:bool -> string -> string
+(** Project a producer-owned outcome into the canonical JSON envelope.
+    [raw] remains opaque text. Only explicit [data] is structured; field names
+    or JSON-looking bytes in [raw] never affect the projection. *)
+val normalize_tool_result
+  :  success:bool
+  -> data:Yojson.Safe.t option
+  -> string
+  -> Yojson.Safe.t
 
 (* Handlers moved to [Keeper_tools_oas_handler] — see
    keeper_tools_oas_handler.mli for [make_keeper_tool_handler],

@@ -180,6 +180,68 @@ let annotation_kind_of_string = function
   | _ -> None
 ;;
 
+type annotation_reference =
+  { relation : string
+  ; reference : string
+  }
+
+let annotation_reference_to_json reference =
+  `Assoc
+    [ "relation", `String reference.relation
+    ; "reference", `String reference.reference
+    ]
+;;
+
+let annotation_references_to_json references =
+  `List (List.map annotation_reference_to_json references)
+;;
+
+let annotation_references_of_json = function
+  | `Null -> Ok []
+  | `List items ->
+    let parse_one index = function
+      | `Assoc fields ->
+        let field_values key =
+          List.filter_map
+            (fun (candidate, value) -> if String.equal key candidate then Some value else None)
+            fields
+        in
+        (match
+           List.find_opt
+             (fun (key, _) ->
+                not (String.equal key "relation" || String.equal key "reference"))
+             fields
+         with
+         | Some (key, _) ->
+           Error (Printf.sprintf "references[%d] has unknown field: %s" index key)
+         | None ->
+           match field_values "relation", field_values "reference" with
+         | [ `String relation ], [ `String reference ]
+           when String.trim relation <> "" && String.trim reference <> "" ->
+           Ok { relation; reference }
+         | [ `String _ ], [ `String _ ] ->
+           Error
+             (Printf.sprintf
+                "references[%d] relation and reference must be non-empty strings"
+                index)
+         | _ ->
+           Error
+             (Printf.sprintf
+                "references[%d] requires string relation and reference fields"
+                index))
+      | _ -> Error (Printf.sprintf "references[%d] must be an object" index)
+    in
+    let rec loop index acc = function
+      | [] -> Ok (List.rev acc)
+      | item :: rest ->
+        (match parse_one index item with
+         | Ok reference -> loop (index + 1) (reference :: acc) rest
+         | Error _ as error -> error)
+    in
+    loop 0 [] items
+  | _ -> Error "references must be an array"
+;;
+
 type annotation_request =
   { base_path : string
   ; partition : codebase_partition
@@ -191,14 +253,7 @@ type annotation_request =
   ; content : string
   ; goal_id : string option
   ; task_id : string option
-  ; board_post_id : string option
-  ; comment_id : string option
-  ; pr_id : string option
-  ; git_ref : string option
-  ; log_id : string option
-  ; session_id : string option
-  ; operation_id : string option
-  ; worker_run_id : string option
+  ; references : annotation_reference list
   }
 
 type annotation_result =
@@ -320,6 +375,7 @@ let annotation_to_json (a : annotation_request) =
     ; ("kind", `String (annotation_kind_to_string a.kind))
     ; ("content", `String a.content)
     ; ("partition", partition_to_json a.partition)
+    ; ("references", annotation_references_to_json a.references)
     ]
 ;;
 

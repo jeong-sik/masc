@@ -71,6 +71,32 @@ let test_task_create_multi_active_goals_without_goal_id_is_unscoped () =
        | tasks ->
            failf "expected exactly one persisted task, got %d" (List.length tasks))
 
+let test_tasks_list_returns_producer_owned_typed_data () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let meta = meta_with_active_goals [] in
+       let execution =
+         Task.handle_keeper_task_tool_with_outcome
+           ~config
+           ~meta
+           ~name:"keeper_tasks_list"
+           ~args:(`Assoc [])
+       in
+       match execution.data with
+       | Some (`List tasks) ->
+         check int "empty typed task list" 0 (List.length tasks);
+         check string
+           "raw rendering derives from typed data"
+           "[]"
+           execution.raw_output
+       | Some other ->
+         failf "expected typed list, got %s" (Yojson.Safe.to_string other)
+       | None -> fail "expected producer-owned typed list")
+
 let test_response_finalization_keeps_visible_reply_only () =
   let finalized =
     Response_text.finalize
@@ -94,11 +120,9 @@ let test_response_finalization_keeps_visible_reply_only () =
   check string "explicit suppression is empty" "" suppressed.response_text
 ;;
 
-(* RFC-0239 / audit D1: a rejected keeper_task_done must carry a typed
-   [Error] outcome so the no-progress loop detector demotes it (PR #22127
-   wired the detector to read typed_outcome; this proves the producer emits
-   it on rejection instead of leaving it [None] and being counted as
-   evidence by tool name alone). *)
+(* A rejected [keeper_task_done] carries producer-owned typed outcome data.
+   Consumers may decode this typed payload at an explicit schema boundary;
+   model-facing output text is not an authority for reconstructing it. *)
 let rejected_done_typed_outcome ~base_path:_ config meta args =
   let payload =
     Task.handle_keeper_task_tool ~config ~meta ~name:"keeper_task_done" ~args
@@ -187,6 +211,10 @@ let () =
             "keeper_task_create treats ambiguous active_goal_ids as advisory"
             `Quick
             test_task_create_multi_active_goals_without_goal_id_is_unscoped
+        ; test_case
+            "keeper_tasks_list returns typed data"
+            `Quick
+            test_tasks_list_returns_producer_owned_typed_data
         ; test_case "response finalization keeps visible reply only" `Quick
             test_response_finalization_keeps_visible_reply_only
         ; test_case "rejected done (missing task_id) emits typed Error (D1)"

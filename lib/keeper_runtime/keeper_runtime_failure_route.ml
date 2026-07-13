@@ -16,14 +16,12 @@ type rotate_class =
   | Candidates_filtered
   | Runtime_exhausted
   | No_progress_empty
-  | No_progress_read_only
   | No_progress_thinking_only
 
 type judgment_class =
   | Deterministic_request
   | Context_overflow
   | Contract_violation
-  | Mutating_ambiguity
   | Protocol_error
   | Config_mismatch
   | Provider_integration
@@ -111,11 +109,11 @@ let route_of_masc_internal ~err (internal : Keeper_internal_error.masc_internal_
   | Keeper_internal_error.Accept_rejected _ ->
     (match Keeper_internal_error.accept_no_progress_retry_kind internal with
      | Some `Empty_no_progress -> rotate No_progress_empty
-     | Some `Read_only_no_progress -> rotate No_progress_read_only
      | Some `Thinking_only_no_progress -> rotate No_progress_thinking_only
      | None -> judge Internal_opaque)
-  | Keeper_internal_error.Internal_contract_rejected _ -> judge Internal_opaque
-  | Keeper_internal_error.Ambiguous_post_commit _ -> judge Mutating_ambiguity
+  | Keeper_internal_error.Internal_contract_rejected _
+  | Keeper_internal_error.Receipt_persistence_failed _ ->
+    judge Internal_opaque
   | Keeper_internal_error.Internal_unhandled_exception _
   | Keeper_internal_error.Internal_bridge_exception _ ->
     judge Internal_opaque
@@ -264,14 +262,12 @@ let rotate_class_label = function
   | Candidates_filtered -> "candidates_filtered"
   | Runtime_exhausted -> "runtime_exhausted"
   | No_progress_empty -> "no_progress_empty"
-  | No_progress_read_only -> "no_progress_read_only"
   | No_progress_thinking_only -> "no_progress_thinking_only"
 
 let judgment_class_label = function
   | Deterministic_request -> "deterministic_request"
   | Context_overflow -> "context_overflow"
   | Contract_violation -> "contract_violation"
-  | Mutating_ambiguity -> "mutating_ambiguity"
   | Protocol_error -> "protocol_error"
   | Config_mismatch -> "config_mismatch"
   | Provider_integration -> "provider_integration"
@@ -422,7 +418,6 @@ let judgment_class_of_label = function
   | "deterministic_request" -> Some Deterministic_request
   | "context_overflow" -> Some Context_overflow
   | "contract_violation" -> Some Contract_violation
-  | "mutating_ambiguity" -> Some Mutating_ambiguity
   | "protocol_error" -> Some Protocol_error
   | "config_mismatch" -> Some Config_mismatch
   | "provider_integration" -> Some Provider_integration

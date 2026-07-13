@@ -3,19 +3,6 @@
    Contains kill-class type re-exports, failure_reason ADT, cohort key,
    and stale watchdog failure classification. *)
 
-(** Structured failure reason for typed crash-observation grouping.
-    ADT matching replaces string prefix matching. *)
-type ambiguous_partial_commit_kind =
-  Keeper_registry_types_kill_class.ambiguous_partial_commit_kind =
-  | Post_commit_timeout
-  | Post_commit_failure
-
-type ambiguous_partial_commit =
-  Keeper_registry_types_kill_class.ambiguous_partial_commit =
-  { kind : ambiguous_partial_commit_kind
-  ; detail : string
-  }
-
 type stale_kill_class = Keeper_registry_types_kill_class.stale_kill_class =
   | Idle_turn of { stall_seconds : float }
   | Mid_turn_no_progress of
@@ -82,7 +69,6 @@ type failure_reason =
               instead of reparsing [code]. [None] for non-exhaustion
               provider/runtime errors. *)
       }
-  | Ambiguous_partial_commit of ambiguous_partial_commit
   | Fiber_unresolved of fiber_drop_cause
   (** Fiber exited without resolving [done_r].
           Issue #18901: cause payload distinguishes graceful shutdown
@@ -95,9 +81,6 @@ type failure_reason =
   | Exception of string
   | Turn_overflow_failure
   | Operator_interrupt
-
-let ambiguous_partial_commit_kind_to_string =
-  Keeper_registry_types_kill_class.ambiguous_partial_commit_kind_to_string
 
 let failure_reason_to_string = function
   | Heartbeat_consecutive_failures n ->
@@ -119,11 +102,6 @@ let failure_reason_to_string = function
         ~some:(Printf.sprintf " http=%d")
     in
     Printf.sprintf "provider_runtime_error(%s:%s%s%s)" code detail prov http
-  | Ambiguous_partial_commit { kind; detail } ->
-    Printf.sprintf
-      "ambiguous_partial_commit(%s:%s)"
-      (ambiguous_partial_commit_kind_to_string kind)
-      detail
   | Fiber_unresolved Graceful_shutdown -> "fiber_unresolved(graceful_shutdown)"
   | Fiber_unresolved Cancelled_by_parent -> "fiber_unresolved(cancelled_by_parent)"
   | Fiber_unresolved Unexpected -> "fiber_unresolved"
@@ -155,7 +133,6 @@ let failure_reason_cohort_key = function
   | Some (Stale_termination_storm _) -> "stale_termination_storm"
   | Some (Stale_fleet_batch _) -> "stale_fleet_batch"
   | Some (Provider_runtime_error _) -> "provider_runtime_error"
-  | Some (Ambiguous_partial_commit _) -> "ambiguous_partial_commit"
   | Some (Fiber_unresolved Graceful_shutdown) -> "fiber_unresolved_graceful"
   | Some (Fiber_unresolved Cancelled_by_parent) -> "fiber_unresolved_cancelled"
   | Some (Fiber_unresolved Unexpected) -> "fiber_unresolved"
@@ -171,7 +148,6 @@ let stale_kill_failure_reason ~prior ~kill_class =
   match prior with
   | Some
       ( Provider_runtime_error _
-      | Ambiguous_partial_commit _
       | Turn_consecutive_failures _
       | Turn_overflow_failure
       | Heartbeat_consecutive_failures _

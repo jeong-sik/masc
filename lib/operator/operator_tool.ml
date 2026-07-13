@@ -32,30 +32,25 @@ type 'a context = 'a Tool_operator.context
    [Yojson.Safe.t]; passing it as [~data:json] keeps the structured
    payload first-class.
 
-   Failure: wrapped through [Tool_args.error_response] (the legacy
-   JSON envelope shape). Class is [Workflow_rejection] — the
+   Failure: wrapped in a typed [Tool_args.error_assoc] envelope. Class is
+   [Workflow_rejection] — the
    operator control plane rejects caller-side input (unknown
    action, target not found, schema violation). When
    [Operator_control] later distinguishes runtime / transient
    failures via a typed Error variant, the construction site here
    gets the appropriate class at that time. *)
 
-let envelope_data envelope : Yojson.Safe.t =
-  match Tool_result.structured_payload_of_message envelope with
-  | Some json -> json
-  | None -> `String envelope
-
 let result_of_json ~tool_name ~start_time = function
   | Ok json ->
       Tool_result.make_ok ~tool_name ~start_time ~data:json ()
   | Error message ->
-      let envelope = Tool_args.error_response message in
+      let data = Tool_args.error_assoc [ "message", `String message ] in
       Tool_result.make_err
         ~tool_name
         ~class_:Tool_result.Workflow_rejection
         ~start_time
-        ~data:(envelope_data envelope)
-        envelope
+        ~data
+        (Yojson.Safe.to_string data)
 
 let json_ok ~tool_name ~start_time (json : Yojson.Safe.t) : Tool_result.result =
   Tool_result.make_ok ~tool_name ~start_time ~data:json ()
@@ -361,7 +356,6 @@ let () =
            ~input_schema:s.input_schema
            ~handler_binding:Tag_dispatch
            ~is_read_only:(List.mem s.name tool_spec_read_only)
-           ~is_idempotent:(List.mem s.name tool_spec_read_only)
            ~visibility:(if is_hidden then Tool_catalog.Hidden else Tool_catalog.Default)
            ~allow_direct_call_when_hidden:is_hidden
            ?reason:existing.reason

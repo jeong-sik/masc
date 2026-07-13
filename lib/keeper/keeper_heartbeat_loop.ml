@@ -127,6 +127,7 @@ let connector_attention_event_ids_of_stimuli stimuli =
       match stimulus.payload with
       | Keeper_event_queue.Connector_attention { event_id } -> Some event_id
       | Keeper_event_queue.Board_signal _
+      | Keeper_event_queue.Board_attention _
       | Keeper_event_queue.Fusion_completed _
       | Keeper_event_queue.Bg_completed _
       | Keeper_event_queue.Schedule_due _
@@ -145,6 +146,7 @@ let record_schedule_due_turn_started_reactions ~ctx ~keeper_name stimuli =
        | Keeper_event_queue.Schedule_due _ ->
          record_event_queue_stimulus_turn_started ~ctx ~keeper_name stimulus
        | Keeper_event_queue.Board_signal _
+       | Keeper_event_queue.Board_attention _
        | Keeper_event_queue.Fusion_completed _
        | Keeper_event_queue.Bg_completed _
        | Keeper_event_queue.Bootstrap
@@ -213,6 +215,7 @@ let failure_judgment_of_stimuli = function
            match stimulus.payload with
            | Keeper_event_queue.Failure_judgment _ -> true
            | Keeper_event_queue.Board_signal _
+           | Keeper_event_queue.Board_attention _
            | Keeper_event_queue.Fusion_completed _
            | Keeper_event_queue.Bg_completed _
            | Keeper_event_queue.Schedule_due _

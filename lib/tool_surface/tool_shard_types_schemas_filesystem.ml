@@ -119,9 +119,10 @@ let filesystem_tools : Masc_domain.tool_schema list =
   ; { name = "keeper_ide_annotate"
     ; description =
         "Attach a keeper-authored annotation to a source file line range. Use this to \
-         leave durable IDE context that links code to goal/task/board/comment/PR/git/log \
-         evidence. file_path, line_start, and content are required; optional route \
-         fields are preserved for dashboard Context Lens links."
+         leave durable IDE context linked to an optional goal, task, or opaque external \
+         reference. file_path, line_start, and content are required. The IDE transport \
+         stores and renders reference relation/value pairs without interpreting the \
+         producer's product vocabulary."
     ; input_schema =
         `Assoc
           [ "type", `String "object"
@@ -165,24 +166,43 @@ let filesystem_tools : Masc_domain.tool_schema list =
                   , `Assoc [ "type", `String "string"; "description", `String "Optional Goal route id" ] )
                 ; ( "task_id"
                   , `Assoc [ "type", `String "string"; "description", `String "Optional Task route id" ] )
-                ; ( "board_post_id"
-                  , `Assoc [ "type", `String "string"; "description", `String "Optional Board post route id" ] )
-                ; ( "comment_id"
-                  , `Assoc [ "type", `String "string"; "description", `String "Optional Board/GitHub comment route id" ] )
-                ; ( "pr_id"
-                  , `Assoc [ "type", `String "string"; "description", `String "Optional PR number or id" ] )
-                ; ( "git_ref"
-                  , `Assoc [ "type", `String "string"; "description", `String "Optional branch, commit, or ref" ] )
-                ; ( "log_id"
-                  , `Assoc [ "type", `String "string"; "description", `String "Optional runtime audit log id" ] )
-                ; ( "session_id"
-                  , `Assoc [ "type", `String "string"; "description", `String "Optional telemetry session id" ] )
-                ; ( "operation_id"
-                  , `Assoc [ "type", `String "string"; "description", `String "Optional telemetry operation id" ] )
-                ; ( "worker_run_id"
-                  , `Assoc [ "type", `String "string"; "description", `String "Optional telemetry worker run id" ] )
+                ; ( "references"
+                  , `Assoc
+                      [ "type", `String "array"
+                      ; ( "items"
+                        , `Assoc
+                            [ "type", `String "object"
+                            ; ( "properties"
+                              , `Assoc
+                                  [ ( "relation"
+                                    , `Assoc
+                                        [ "type", `String "string"
+                                        ; ( "description"
+                                          , `String
+                                              "Opaque relation label supplied by the producer"
+                                          )
+                                        ] )
+                                  ; ( "reference"
+                                    , `Assoc
+                                        [ "type", `String "string"
+                                        ; ( "description"
+                                          , `String
+                                              "Opaque reference value preserved without interpretation"
+                                          )
+                                        ] )
+                                  ] )
+                            ; ( "required"
+                              , `List [ `String "relation"; `String "reference" ] )
+                            ; "additionalProperties", `Bool false
+                            ] )
+                      ; ( "description"
+                        , `String
+                            "Optional opaque links rendered by the IDE without product-specific routing"
+                        )
+                      ] )
                 ] )
           ; "required", `List [ `String "file_path"; `String "line_start"; `String "content" ]
+          ; "additionalProperties", `Bool false
           ]
     }
   ]

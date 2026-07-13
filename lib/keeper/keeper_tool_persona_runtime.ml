@@ -46,7 +46,7 @@ let resolved_keeper_args_to_json
     ~mention_targets
     ~allowed_paths_opt
     ~autoboot_enabled_opt
-    ~proactive_enabled ~shards
+    ~proactive_enabled
     ~auto_handoff ~handoff_threshold ~handoff_cooldown_sec =
   let base =
     [
@@ -71,13 +71,8 @@ let resolved_keeper_args_to_json
     | Some value -> [ ("autoboot_enabled", `Bool value) ]
     | None -> []
   in
-  let shards_field =
-    match shards with
-    | Some xs -> [("shards", Json_util.json_string_list xs)]
-    | None -> []
-  in
   `Assoc
-    (base @ allowed_paths_field @ autoboot_field @ shards_field)
+    (base @ allowed_paths_field @ autoboot_field)
 
 let validate_resolved_keeper_create_json (json : Yojson.Safe.t) : string list =
   let errors = ref [] in
@@ -189,7 +184,6 @@ let render_keeper_toml_from_resolved_args (json : Yojson.Safe.t) :
               let fields =
                 append_optional_bool_field fields "proactive_enabled" json
               in
-              let fields = append_present_string_list_field fields "shards" json in
               let fields =
                 append_present_string_list_field fields "allowed_paths" json
               in
@@ -327,11 +321,6 @@ let resolved_keeper_args_from_persona args :
                    | Some _ as paths -> paths
                    | None -> defaults.allowed_paths
                  in
-                 let shards =
-                   match get_string_list args "shards" with
-                   | _ :: _ as xs -> Some xs
-                   | [] -> defaults.shards
-                 in
                  let auto_handoff = get_bool args "auto_handoff" true in
                  let handoff_threshold =
                    Safe_ops.json_float_opt "handoff_threshold" args
@@ -350,7 +339,7 @@ let resolved_keeper_args_from_persona args :
                      ~mention_targets
                      ~allowed_paths_opt:allowed_paths
                      ~autoboot_enabled_opt:autoboot_enabled
-                     ~proactive_enabled ~shards
+                     ~proactive_enabled
                      ~auto_handoff ~handoff_threshold
                      ~handoff_cooldown_sec
                  in

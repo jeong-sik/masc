@@ -40,7 +40,7 @@ type read_target_result =
   | Read_target of string
   | Read_target_error of string
 
-let try_handle
+let try_handle_with_outcome
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
@@ -52,9 +52,10 @@ let try_handle
     Keeper_sandbox_containment.check_read_target ~config ~meta ~target
   in
   let path_error e =
-    error_json
-      ~fields:[ "ok", `Bool false; "op", `String op; "path", `String raw_path ]
-      e
+    Keeper_tool_execution.failure
+      (error_json
+         ~fields:[ "ok", `Bool false; "op", `String op; "path", `String raw_path ]
+         e)
   in
   let read_target () =
     match Keeper_tool_execute_path.resolve_tool_read_path ~config ~meta ~args with
@@ -87,10 +88,15 @@ let try_handle
         | Some path -> [ "path", `String path ]
     in
     match dispatch_host_shell_ir ~workdir ir with
-    | Error (Gate_reject diagnostic) -> error_json ~fields diagnostic
-    | Error Cannot_parse -> error_json ~fields "Cannot parse command"
-    | Error Too_complex -> error_json ~fields "Command too complex"
-    | Error (Path_reject e) -> error_json ~fields:[ "blocked_cmd", `String cmd ] e
+    | Error (Gate_reject diagnostic) ->
+      Keeper_tool_execution.failure (error_json ~fields diagnostic)
+    | Error Cannot_parse ->
+      Keeper_tool_execution.failure (error_json ~fields "Cannot parse command")
+    | Error Too_complex ->
+      Keeper_tool_execution.failure (error_json ~fields "Command too complex")
+    | Error (Path_reject e) ->
+      Keeper_tool_execution.failure
+        (error_json ~fields:[ "blocked_cmd", `String cmd ] e)
     | Ok result -> on_ok result
   in
   let sandbox_read_error ~target msg =
@@ -133,10 +139,18 @@ let try_handle
       (let pattern = Safe_ops.json_string ~default:"" "pattern" args |> String.trim in
        let file_type = Safe_ops.json_string ~default:"" "type" args |> String.trim in
        if pattern = ""
-       then error_json ~fields:[ "op", `String op ] "pattern is required for rg. Good: pattern='handle_request'. Bad: pattern=''."
+       then
+         Keeper_tool_execution.failure
+           ~class_:Tool_result.Policy_rejection
+           (error_json
+              ~fields:[ "op", `String op ]
+              "pattern is required for rg. Good: pattern='handle_request'. Bad: pattern=''.")
        else (
          match validate_rg_inputs ~pattern ~file_type with
-         | Error msg -> error_json ~fields:[ "op", `String op ] msg
+         | Error msg ->
+           Keeper_tool_execution.failure
+             ~class_:Tool_result.Policy_rejection
+             (error_json ~fields:[ "op", `String op ] msg)
          | Ok () -> (
            match read_target () with
            | Read_target_error e -> path_error e
@@ -160,18 +174,19 @@ let try_handle
                     ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ())
                     ()
                 with
-                | Error response -> response
+                | Error response -> Keeper_tool_execution.failure response
                 | Ok (st, out) ->
-                  Yojson.Safe.to_string
-                    (`Assoc
-                        [ "ok", `Bool true
-                        ; "op", `String op
-                        ; "path", `String target
-                        ; "pattern", `String pattern
-                        ; "via", `String Keeper_sandbox_read_runner.backend_via
-                        ; "status", Keeper_alerting_path.process_status_to_json st
-                        ; "matches", lines_to_json ~limit out
-                        ]))
+                  Keeper_tool_execution.success
+                    (Yojson.Safe.to_string
+                       (`Assoc
+                           [ "ok", `Bool true
+                           ; "op", `String op
+                           ; "path", `String target
+                           ; "pattern", `String pattern
+                           ; "via", `String Keeper_sandbox_read_runner.backend_via
+                           ; "status", Keeper_alerting_path.process_status_to_json st
+                           ; "matches", lines_to_json ~limit out
+                           ])))
            else
              let rg_available = Keeper_tool_execute_path.shell_command_available "rg" in
              if not rg_available then
@@ -220,16 +235,33 @@ let try_handle
                      then []
                      else [ "error_detail", `String trimmed_stderr ]
                    in
-                   Yojson.Safe.to_string
-                     (`Assoc
-                         ([ "ok", `Bool is_ok
-                          ; "op", `String op
-                          ; "path", `String target
-                          ; "pattern", `String pattern
-                          ; "via", `String "host"
-                          ; "status", Keeper_alerting_path.process_status_to_json result.status
-                          ; "matches", lines_to_json ~limit result.stdout
-                          ]
-                         @ error_detail)))))))
+                   let payload =
+                     Yojson.Safe.to_string
+                       (`Assoc
+                          ([ "ok", `Bool is_ok
+                           ; "op", `String op
+                           ; "path", `String target
+                           ; "pattern", `String pattern
+                           ; "via", `String "host"
+                           ; "status", Keeper_alerting_path.process_status_to_json result.status
+                           ; "matches", lines_to_json ~limit result.stdout
+                           ]
+                           @ error_detail))
+                   in
+                   if is_ok
+                   then Keeper_tool_execution.success payload
+                   else Keeper_tool_execution.failure payload)))))
   | _ -> None
+;;
+
+let try_handle ~turn_sandbox_factory ~config ~meta ~args ~op ~raw_path =
+  Option.map
+    (fun (result : Keeper_tool_execution.t) -> result.raw_output)
+    (try_handle_with_outcome
+       ~turn_sandbox_factory
+       ~config
+       ~meta
+       ~args
+       ~op
+       ~raw_path)
 ;;

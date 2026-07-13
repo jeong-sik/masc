@@ -264,14 +264,7 @@ let create
       ~content
       ?goal_id
       ?task_id
-      ?board_post_id
-      ?comment_id
-      ?pr_id
-      ?git_ref
-      ?log_id
-      ?session_id
-      ?operation_id
-      ?worker_run_id
+      ?(references = [])
       ()
   =
   ensure_store ~base_dir ~partition ();
@@ -281,7 +274,14 @@ let create
   then Error "invalid line range"
   else if content = ""
   then Error "content is required"
-  else (
+  else
+    match
+      references
+      |> Agent_observation.annotation_references_to_json
+      |> Agent_observation.annotation_references_of_json
+    with
+    | Error msg -> Error msg
+    | Ok references ->
     let ts = now_ms () in
     (* RFC-0128 PR-2: UUID minting is the non-determinism boundary.
        Previous code captured a copy of the global RNG state without
@@ -300,14 +300,7 @@ let create
       ; content
       ; goal_id
       ; task_id
-      ; board_post_id
-      ; comment_id
-      ; pr_id
-      ; git_ref
-      ; log_id
-      ; session_id
-      ; operation_id
-      ; worker_run_id
+      ; references
       ; created_at_ms = ts
       ; updated_at_ms = ts
       }
@@ -315,7 +308,7 @@ let create
     Fs_compat.append_jsonl
       (annotations_file_for ~base_dir partition)
       (annotation_to_json annotation);
-    Ok annotation)
+    Ok annotation
 ;;
 
 let list ~base_dir ?(partition = Ide_paths.Legacy_default) ~filter () =

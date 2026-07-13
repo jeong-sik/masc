@@ -1257,7 +1257,7 @@ let masc_board_descriptor board_name =
     match Keeper_tool_name.board_projection_of_masc_board_name board_name with
     | Keeper_tool_name.Keeper_wrapper keeper_tool ->
       Transport_alias { projected_by = Keeper_tool_name.to_string keeper_tool }
-    | Keeper_tool_name.Direct_masc | Keeper_tool_name.External_only -> Internal_name
+    | Keeper_tool_name.Direct_masc -> Internal_name
   in
   let policy = policy ~readonly ~retryable:readonly () in
   let input_schema =

@@ -32,7 +32,7 @@ let observed_completion_evidence
   | Runtime_agent.Yielded_to_chat_waiting _
   | Runtime_agent.Yielded_to_durable_stimulus _ ->
     Keeper_execution_receipt.Completion_observation_unknown
-  | Runtime_agent.Completed | Runtime_agent.MutationBoundaryReached _ ->
+  | Runtime_agent.Completed ->
     if actual_keeper_tool_names <> []
     then Keeper_execution_receipt.Completion_tool_execution_observed
     else if response_text_present

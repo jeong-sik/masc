@@ -49,8 +49,6 @@ export function asKeeperRuntimeBlockerClass(
 
 const BACKEND_KEEPER_META_BLOCKER_CLASSES = [
   'runtime_exhausted',
-  'ambiguous_post_commit_timeout',
-  'ambiguous_post_commit_failure',
   'turn_timeout',
   'fiber_unresolved',
   'stale_turn_timeout',

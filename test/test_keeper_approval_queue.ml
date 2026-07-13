@@ -637,10 +637,6 @@ let test_retryable_auto_judge_recovery_is_lane_local () =
          "lane b failed"
          true
          (AQ.mark_summary_failed ~id:id_b ~reason:"lane-b-original" ~retryable:true);
-       Alcotest.(check bool)
-         "old worker holds lane-a claim"
-         true
-         (Gate.For_testing.claim_auto_judge id_a);
        let request : Gate.request =
          { keeper_name = keeper_a
          ; operation = "external-effect"
@@ -658,17 +654,14 @@ let test_retryable_auto_judge_recovery_is_lane_local () =
           Alcotest.fail "lane activity did not retain Keeper Always Allow");
        (match AQ.get_pending_entry ~id:id_a with
         | Some
-            { summary_status =
-                AQ.Summary_failed
-                  { reason = "lane-a-original"; retryable = true }
+            { summary_status = AQ.Summary_failed { reason; retryable = true }
             ; _
-            } -> ()
-        | Some _ | None ->
-          Alcotest.fail "active old worker allowed failed-to-pending transition");
-       Alcotest.(check bool)
-         "old claim remains owned until worker finish"
-         true
-         (Gate.For_testing.auto_judge_is_active id_a);
+            } ->
+          Alcotest.(check bool)
+            "same lane attempted retry"
+            true
+            (not (String.equal reason "lane-a-original"))
+        | Some _ | None -> Alcotest.fail "same-lane retry state is not observable");
        (match AQ.get_pending_entry ~id:id_b with
         | Some
             { summary_status =
@@ -678,25 +671,6 @@ let test_retryable_auto_judge_recovery_is_lane_local () =
           ()
         | Some _ | None ->
           Alcotest.fail "lane A activity retried another Keeper's judge");
-       Gate.For_testing.release_auto_judge id_a;
-       (match Gate.decide ~keeper_always_allow:true request with
-        | Gate.Allow { source = Gate.Keeper_always_allow } -> ()
-        | Gate.Allow _ | Gate.Deferred _ | Gate.Unavailable _ ->
-          Alcotest.fail "lane activity after worker finish lost Always Allow");
-       (match AQ.get_pending_entry ~id:id_a with
-        | Some
-            { summary_status = AQ.Summary_failed { reason; retryable = true }
-            ; _
-            } ->
-          Alcotest.(check bool)
-            "same lane retried after old worker released"
-            true
-            (not (String.equal reason "lane-a-original"))
-        | Some _ | None -> Alcotest.fail "same-lane retry state is not observable");
-       Alcotest.(check bool)
-         "pre-worker failure releases claim"
-         false
-         (Gate.For_testing.auto_judge_is_active id_a);
        reject_and_cleanup id_a;
        reject_and_cleanup id_b;
        List.iter
@@ -1074,7 +1048,7 @@ let test_default_auto_judge_defers_without_blocking () =
          Alcotest.fail (Gate.unavailable_reason_to_string reason))
 ;;
 
-let test_unavailable_cycle_grant_does_not_poison_always_allow () =
+let test_unavailable_cycle_grant_never_falls_through () =
   let base_path = temp_dir () in
   let keeper_name = "queue-stale-grant" in
   let input = `Assoc [ "target", `String "exact" ] in
@@ -1108,14 +1082,13 @@ let test_unavailable_cycle_grant_does_not_poison_always_allow () =
        in
        AQ.For_testing.reset_runtime_state ();
        (match Gate.decide ~cycle_grant:grant ~keeper_always_allow:true request with
-        | Gate.Allow { source = Gate.Keeper_always_allow } -> ()
+        | Gate.Unavailable (Gate.Approval_grant_unavailable _) -> ()
         | Gate.Allow _ ->
-          Alcotest.fail "unreadable one-shot grant became an authorization source"
-        | Gate.Deferred _ -> Alcotest.fail "independent Always Allow was ignored"
-        | Gate.Unavailable reason ->
-          Alcotest.fail
-            ("stale grant poisoned ordinary Gate: "
-             ^ Gate.unavailable_reason_to_string reason));
+          Alcotest.fail "unconsumed grant failure fell through to Always Allow"
+        | Gate.Deferred _ ->
+          Alcotest.fail "unconsumed grant failure created a second approval"
+        | Gate.Unavailable _ ->
+          Alcotest.fail "unexpected unavailable reason for unreadable grant");
        ignore (install_exn ~base_path);
        (match Gate.decide ~cycle_grant:grant ~keeper_always_allow:false request with
         | Gate.Allow { source = Gate.One_shot_resolution actual } ->
@@ -1256,9 +1229,9 @@ let () =
             `Quick
             test_default_auto_judge_defers_without_blocking
         ; Alcotest.test_case
-            "stale grant does not poison Always Allow"
+            "unavailable grant never falls through"
             `Quick
-            test_unavailable_cycle_grant_does_not_poison_always_allow
+            test_unavailable_cycle_grant_never_falls_through
         ; Alcotest.test_case
             "non-approved resolution payload is delivered"
             `Quick

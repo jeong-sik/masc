@@ -33,7 +33,6 @@
   test_keeper_memory_os_io_fd
   test_keeper_memory_os_external_state_decay
   test_keeper_memory_os_recall_echo
-  test_connector_reactive_wake_throttle
   test_keeper_bank_longterm_inject_flag
   test_keeper_memory_lane
   test_keeper_verification_audit
@@ -250,7 +249,6 @@
   test_keeper_surface_presence_prompt
   test_keeper_wake_turn_context
   test_keeper_unified_verification_surface
-  test_keeper_observation_provenance
   test_keeper_fsm_guard_actions
   test_keeper_callback_hardening
   test_keeper_secret_projection
@@ -360,7 +358,6 @@
   test_keeper_memory_os_io_fd
   test_keeper_memory_os_external_state_decay
   test_keeper_memory_os_recall_echo
-  test_connector_reactive_wake_throttle
   test_keeper_bank_longterm_inject_flag
   test_keeper_memory_lane
   test_env_keeper_scrub
@@ -580,7 +577,6 @@
   test_keeper_surface_presence_prompt
   test_keeper_wake_turn_context
   test_keeper_unified_verification_surface
-  test_keeper_observation_provenance
   test_keeper_fsm_guard_actions
   test_keeper_callback_hardening
   test_keeper_secret_projection
@@ -1390,9 +1386,11 @@
  (modules test_schedule_runner)
  (libraries
   alcotest
+  dated_jsonl
   eio
   eio_main
   fs_compat
+  masc_core
   masc_workspace
   masc_schedule
   unix
@@ -2000,8 +1998,6 @@
 
 
 (include stanzas/test_normalized_actor.inc)
-
-(include stanzas/test_dashboard_interaction_judge_contract.inc)
 
 (include stanzas/test_oas_bridge_judge_callers_9629.inc)
 

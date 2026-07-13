@@ -332,7 +332,6 @@ let purge_agent_filesystem_artifacts config agent_names =
             List.map
               (fun agent_name ->
                  let heartbeats_stopped = Heartbeat.stop_by_agent ~agent_name in
-                 Tool_shard.remove_agent_shards agent_name;
                  { agent_name
                  ; heartbeats_stopped
                  ; workspace_unbound =

@@ -248,7 +248,10 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
          | None -> None
        in
        observe_inference_cost ~provider ~model_bucket cost_usd
-     | Error _ -> ());
+     | Error error ->
+       Log.Oas_event.routine
+         "agent completion has no inference cost observation because the run failed: %s"
+         (Agent_sdk.Error.to_string error));
     let payload =
       `Assoc
         ([ "agent_name", `String agent_name

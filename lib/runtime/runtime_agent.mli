@@ -24,10 +24,6 @@
 type stop_reason = Runtime_agent_context.stop_reason =
   | Completed
   | TurnBudgetExhausted of { turns_used : int; limit : int }
-  | MutationBoundaryReached of {
-      turns_used : int;
-      tool_name : string option;
-    }
   | Yielded_to_chat_waiting of { turns_used : int }
   | Yielded_to_durable_stimulus of { turns_used : int }
   | InputRequired of {
@@ -44,11 +40,9 @@ type stop_reason = Runtime_agent_context.stop_reason =
     turn budget checkpoint was reached. It is not a completed
     deliverable; callers must classify it from typed stop reason plus
     durable-progress evidence before deciding whether to continue from
-    the persisted checkpoint. [MutationBoundaryReached] fires when the
-    keeper hit a mutation tool while in read-only mode (the [tool_name]
-    surfaces which tool triggered the gate). [Yielded_to_chat_waiting]
-    fires when an autonomous-lane run stopped at a turn boundary to hand
-    the keeper's turn slot to a parked dashboard/connector chat request.
+    the persisted checkpoint. [Yielded_to_chat_waiting] fires when an
+    autonomous-lane run stopped at a turn boundary to hand the keeper's
+    turn slot to a parked dashboard/connector chat request.
     [Yielded_to_durable_stimulus] fires after at least one provider turn when
     another durable event is waiting behind the event currently leased by the
     cycle. [InputRequired] means OAS returned a typed elicitation request whose

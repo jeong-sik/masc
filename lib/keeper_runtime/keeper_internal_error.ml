@@ -240,21 +240,6 @@ let accept_response_shape_of_agent_sdk = function
     Accept_response_has_deliverable_content
 ;;
 
-type tool_progress_effect =
-  | Tool_effect_read_only
-  | Tool_effect_mutating
-
-let tool_progress_effect_to_string = function
-  | Tool_effect_read_only -> "read_only"
-  | Tool_effect_mutating -> "mutating"
-;;
-
-let tool_progress_effect_of_string = function
-  | "read_only" -> Some Tool_effect_read_only
-  | "mutating" -> Some Tool_effect_mutating
-  | _ -> None
-;;
-
 type masc_internal_error =
   | Runtime_exhausted of {
       runtime_id : string;
@@ -288,9 +273,6 @@ type masc_internal_error =
          this reason. Groundwork only in this slice: threaded and serialized,
          not yet consumed by classification (§4.5 slices 2-3). *)
       stop_reason : Agent_sdk.Types.stop_reason option;
-      last_tool_effect : tool_progress_effect option;
-      any_mutating_tool : bool option;
-      tool_effects_seen : tool_progress_effect list;
       reason : string;
     }
   | Turn_timeout of {
@@ -305,11 +287,6 @@ type masc_internal_error =
       min_required_sec : float;
       phase : string;
     }
-  | Ambiguous_post_commit of {
-      is_timeout : bool;
-      tools : string list;
-      original_error : string;
-    }
   | Internal_unhandled_exception of {
       site : string;
       exn_repr : string;
@@ -321,6 +298,9 @@ type masc_internal_error =
     }
   | Internal_contract_rejected of {
       reason : string;
+    }
+  | Receipt_persistence_failed of {
+      detail : string;
     }
 
 let masc_internal_error_prefix = "[masc_oas_error] "
@@ -432,26 +412,6 @@ let transport_error_kind_json_fields = function
   | Some kind -> [ "transport_error_kind", `String (network_error_kind_to_string kind) ]
 ;;
 
-let bool_opt_of_assoc key = function
-  | `Assoc fields -> (
-    match List.assoc_opt key fields with
-    | Some (`Bool value) -> Some value
-    | _ -> None)
-  | _ -> None
-;;
-
-let tool_progress_effects_to_json effects =
-  `List
-    (List.map
-       (fun tool_effect -> `String (tool_progress_effect_to_string tool_effect))
-       effects)
-;;
-
-let tool_progress_effects_of_assoc key json =
-  string_list_of_assoc key json
-  |> List.filter_map tool_progress_effect_of_string
-;;
-
 let masc_internal_error_to_json = function
   | Runtime_exhausted { runtime_id; reason } ->
     let runtime_id = runtime_id_to_string runtime_id in
@@ -499,9 +459,6 @@ let masc_internal_error_to_json = function
         reason_kind;
         response_shape;
         stop_reason;
-        last_tool_effect;
-        any_mutating_tool;
-        tool_effects_seen;
         reason;
       } ->
     `Assoc
@@ -518,14 +475,6 @@ let masc_internal_error_to_json = function
         ( "stop_reason",
           Json_util.string_opt_to_json
             (Option.map Agent_sdk.Types.stop_reason_to_string stop_reason) );
-        ( "last_tool_effect",
-          Json_util.string_opt_to_json
-            (Option.map tool_progress_effect_to_string last_tool_effect) );
-        ( "any_mutating_tool",
-          (match any_mutating_tool with
-           | Some value -> `Bool value
-           | None -> `Null) );
-        ("tool_effects_seen", tool_progress_effects_to_json tool_effects_seen);
         ("reason", `String reason);
       ]
   | Turn_timeout { elapsed_sec } ->
@@ -556,14 +505,6 @@ let masc_internal_error_to_json = function
         ("min_required_sec", `Float min_required_sec);
         ("phase", `String phase);
       ]
-  | Ambiguous_post_commit { is_timeout; tools; original_error } ->
-    `Assoc
-      [
-        ("kind", `String "ambiguous_post_commit");
-        ("is_timeout", `Bool is_timeout);
-        ("tools", Json_util.json_string_list tools);
-        ("original_error", `String original_error);
-      ]
   | Internal_unhandled_exception { site; exn_repr; transport_error_kind } ->
     `Assoc
       ([ ("kind", `String "internal_unhandled_exception")
@@ -583,6 +524,12 @@ let masc_internal_error_to_json = function
       [
         ("kind", `String "internal_contract_rejected");
         ("reason", `String reason);
+      ]
+  | Receipt_persistence_failed { detail } ->
+    `Assoc
+      [
+        ("kind", `String "receipt_persistence_failed");
+        ("detail", `String detail);
       ]
 
 let summarize_list ?(empty = "none") values =
@@ -613,41 +560,13 @@ let accept_response_shape_display = function
   | Some shape -> accept_response_shape_to_string shape
   | None -> "unknown"
 
-let accept_rejection_is_empty_no_progress
-    ~reason_kind
-    ~response_shape
-    ~last_tool_effect
-    ~any_mutating_tool
-    ~tool_effects_seen =
+let accept_rejection_is_empty_no_progress ~reason_kind ~response_shape =
   reason_kind = Some Accept_no_usable_progress
   && response_shape = Some Accept_response_empty
-  && Option.is_none last_tool_effect
-  && Option.is_none any_mutating_tool
-  && tool_effects_seen = []
 
-let accept_rejection_is_thinking_only_no_progress
-    ~reason_kind
-    ~response_shape
-    ~last_tool_effect
-    ~any_mutating_tool
-    ~tool_effects_seen =
+let accept_rejection_is_thinking_only_no_progress ~reason_kind ~response_shape =
   reason_kind = Some Accept_no_usable_progress
   && response_shape = Some Accept_response_thinking_only
-  && Option.is_none last_tool_effect
-  && Option.is_none any_mutating_tool
-  && tool_effects_seen = []
-
-let accept_rejection_is_read_only_no_progress
-    ~reason_kind
-    ~response_shape
-    ~last_tool_effect
-    ~any_mutating_tool
-    ~tool_effects_seen =
-  reason_kind = Some Accept_no_usable_progress
-  && response_shape = Some Accept_response_thinking_only
-  && last_tool_effect = Some Tool_effect_read_only
-  && any_mutating_tool = Some false
-  && tool_effects_seen <> []
 
 let summary_of_masc_internal_error = function
   | Capacity_backpressure { runtime_id; source; detail; retry_after; cooldown_cause } ->
@@ -696,17 +615,11 @@ let summary_of_masc_internal_error = function
         scope;
         reason_kind;
         response_shape;
-        last_tool_effect;
-        any_mutating_tool;
-        tool_effects_seen = [];
         _;
       }
     when accept_rejection_is_empty_no_progress
            ~reason_kind
-           ~response_shape
-           ~last_tool_effect
-           ~any_mutating_tool
-           ~tool_effects_seen:[] ->
+           ~response_shape ->
     Some
       (Printf.sprintf
          "Provider returned an empty assistant turn for runtime %s; no text or tool progress was produced."
@@ -716,40 +629,14 @@ let summary_of_masc_internal_error = function
         scope;
         reason_kind;
         response_shape;
-        last_tool_effect;
-        any_mutating_tool;
-        tool_effects_seen = [];
         _;
       }
     when accept_rejection_is_thinking_only_no_progress
            ~reason_kind
-           ~response_shape
-           ~last_tool_effect
-           ~any_mutating_tool
-           ~tool_effects_seen:[] ->
+           ~response_shape ->
     Some
       (Printf.sprintf
          "Provider returned a thinking-only assistant turn for runtime %s; no text or tool progress was produced."
-         (nonempty_or_unknown scope))
-  | Accept_rejected
-      {
-        scope;
-        reason_kind;
-        response_shape;
-        last_tool_effect;
-        any_mutating_tool;
-        tool_effects_seen;
-        _;
-      }
-    when accept_rejection_is_read_only_no_progress
-           ~reason_kind
-           ~response_shape
-           ~last_tool_effect
-           ~any_mutating_tool
-           ~tool_effects_seen ->
-    Some
-      (Printf.sprintf
-         "Provider produced only read-only tool activity for runtime %s; no mutating keeper progress was accepted."
          (nonempty_or_unknown scope))
   | Accept_rejected
       {
@@ -784,10 +671,10 @@ let summary_of_masc_internal_error = function
          (runtime_exhaustion_reason_to_label reason))
   | Resumable_cli_session _
   | Turn_timeout _
-  | Ambiguous_post_commit _
   | Internal_unhandled_exception _
   | Internal_bridge_exception _
-  | Internal_contract_rejected _ -> None
+  | Internal_contract_rejected _
+  | Receipt_persistence_failed _ -> None
 
 let kind_of_masc_internal_error = function
   | Runtime_exhausted _ -> "runtime_exhausted"
@@ -796,10 +683,10 @@ let kind_of_masc_internal_error = function
   | Accept_rejected _ -> "accept_rejected"
   | Turn_timeout _ -> "turn_timeout"
   | Provider_timeout _ -> "provider_timeout"
-  | Ambiguous_post_commit _ -> "ambiguous_post_commit"
   | Internal_unhandled_exception _ -> "internal_unhandled_exception"
   | Internal_bridge_exception _ -> "internal_bridge_exception"
   | Internal_contract_rejected _ -> "internal_contract_rejected"
+  | Receipt_persistence_failed _ -> "receipt_persistence_failed"
 
 let runtime_id_of_masc_internal_error = function
   | Runtime_exhausted { runtime_id; _ }
@@ -812,85 +699,47 @@ let runtime_id_of_masc_internal_error = function
       nonempty_or_unknown scope
   | Turn_timeout _
   | Provider_timeout _
-  | Ambiguous_post_commit _
   | Internal_unhandled_exception _
   | Internal_bridge_exception _
-  | Internal_contract_rejected _ -> "unknown"
+  | Internal_contract_rejected _
+  | Receipt_persistence_failed _ -> "unknown"
 
 let accept_no_progress_retry_kind = function
   | Accept_rejected
       {
         reason_kind;
         response_shape;
-        last_tool_effect;
-        any_mutating_tool;
-        tool_effects_seen;
         _;
       }
     when accept_rejection_is_empty_no_progress
            ~reason_kind
-           ~response_shape
-           ~last_tool_effect
-           ~any_mutating_tool
-           ~tool_effects_seen ->
+           ~response_shape ->
     Some `Empty_no_progress
   | Accept_rejected
       {
         reason_kind;
         response_shape;
-        last_tool_effect;
-        any_mutating_tool;
-        tool_effects_seen;
         _;
       }
     when accept_rejection_is_thinking_only_no_progress
            ~reason_kind
-           ~response_shape
-           ~last_tool_effect
-           ~any_mutating_tool
-           ~tool_effects_seen ->
+           ~response_shape ->
     Some `Thinking_only_no_progress
-  | Accept_rejected
-      {
-        tool_effects_seen;
-        reason_kind;
-        response_shape;
-        last_tool_effect;
-        any_mutating_tool;
-        _;
-      }
-    when accept_rejection_is_read_only_no_progress
-           ~reason_kind
-           ~response_shape
-           ~last_tool_effect
-           ~any_mutating_tool
-           ~tool_effects_seen ->
-    Some `Read_only_no_progress
   | Accept_rejected _
   | Runtime_exhausted _
   | Capacity_backpressure _
   | Resumable_cli_session _
   | Turn_timeout _
   | Provider_timeout _
-  | Ambiguous_post_commit _
   | Internal_unhandled_exception _
   | Internal_bridge_exception _
-  | Internal_contract_rejected _ ->
+  | Internal_contract_rejected _
+  | Receipt_persistence_failed _ ->
     None
-
-let accept_rejection_has_read_only_no_progress_retry_hint err =
-  match accept_no_progress_retry_kind err with
-  | Some `Read_only_no_progress -> true
-  | Some (`Empty_no_progress | `Thinking_only_no_progress)
-  | None ->
-    false
 
 let accept_rejection_has_no_progress_retry_hint err =
   match accept_no_progress_retry_kind err with
-  | Some
-      ( `Empty_no_progress
-      | `Read_only_no_progress
-      | `Thinking_only_no_progress ) ->
+  | Some (`Empty_no_progress | `Thinking_only_no_progress) ->
     true
   | None -> false
 
@@ -1016,13 +865,6 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                      Option.map
                        Agent_sdk.Types.stop_reason_of_string
                        (string_opt_of_assoc "stop_reason" json);
-                   last_tool_effect =
-                     Option.bind
-                       (string_opt_of_assoc "last_tool_effect" json)
-                       tool_progress_effect_of_string;
-                   any_mutating_tool = bool_opt_of_assoc "any_mutating_tool" json;
-                   tool_effects_seen =
-                     tool_progress_effects_of_assoc "tool_effects_seen" json;
                    reason;
                  })
           | _ -> None)
@@ -1066,31 +908,6 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                        })
               | _ -> None)
           | _ -> None)
-      | Some (`String "ambiguous_post_commit") -> (
-          match string_opt_of_assoc "original_error" json with
-          | Some original_error ->
-            let is_timeout =
-              match json with
-              | `Assoc fields -> (
-                  match List.assoc_opt "is_timeout" fields with
-                  | Some (`Bool b) -> b
-                  | _ -> false)
-              | _ -> false
-            in
-            let tools =
-              match json with
-              | `Assoc fields -> (
-                  match List.assoc_opt "tools" fields with
-                  | Some (`List values) ->
-                    values
-                    |> List.filter_map (function
-                         | `String value -> Some value
-                         | _ -> None)
-                  | _ -> [])
-              | _ -> []
-            in
-            Some (Ambiguous_post_commit { is_timeout; tools; original_error })
-          | _ -> None)
       | Some (`String "internal_unhandled_exception") -> (
           match string_opt_of_assoc "site" json, string_opt_of_assoc "exn_repr" json with
           | Some site, Some exn_repr ->
@@ -1117,6 +934,10 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
       | Some (`String "internal_contract_rejected") -> (
           match string_opt_of_assoc "reason" json with
           | Some reason -> Some (Internal_contract_rejected { reason })
+          | _ -> None)
+      | Some (`String "receipt_persistence_failed") -> (
+          match string_opt_of_assoc "detail" json with
+          | Some detail -> Some (Receipt_persistence_failed { detail })
           | _ -> None)
       | _ -> None)
   | _ -> None

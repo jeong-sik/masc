@@ -115,6 +115,7 @@ let test_dequeue_only_consumes_enqueued () =
 (* Typed payload (RFC-0020): the kind is carried as a closed variant,
    not classified from a JSON-prefixed string. *)
 let test_typed_payload_surface () =
+  let stay = make_stim "p8" in
   assert (not (is_board_signal stay.payload));
   let board =
     make_stim

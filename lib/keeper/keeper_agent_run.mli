@@ -175,5 +175,6 @@ val run_turn
           [autonomous_yield_reason], releasing the lane for queued chat or
           durable stimulus work. Only the heartbeat-scheduled path passes it; a
           chat turn never receives this hook. *)
+  -> ?on_checkpoint_stage:(Agent_sdk.Agent.checkpoint_stage -> unit)
   -> unit
   -> (run_result, Agent_sdk.Error.sdk_error) result

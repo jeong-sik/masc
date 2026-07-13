@@ -55,10 +55,10 @@ let is_accept_rejected_sdk_error err =
       | Keeper_internal_error.Resumable_cli_session _
       | Keeper_internal_error.Turn_timeout _
       | Keeper_internal_error.Provider_timeout _
-      | Keeper_internal_error.Ambiguous_post_commit _
       | Keeper_internal_error.Internal_unhandled_exception _
       | Keeper_internal_error.Internal_bridge_exception _
-      | Keeper_internal_error.Internal_contract_rejected _ )
+      | Keeper_internal_error.Internal_contract_rejected _
+      | Keeper_internal_error.Receipt_persistence_failed _ )
   | None ->
     false
 
@@ -66,13 +66,6 @@ let accept_no_progress_should_try_next err =
   match Keeper_internal_error.classify_masc_internal_error err with
   | Some err ->
     Keeper_internal_error.accept_rejection_has_no_progress_retry_hint err
-  | None -> false
-
-let accept_no_progress_read_only_should_try_next err =
-  match Keeper_internal_error.classify_masc_internal_error err with
-  | Some err ->
-    Keeper_internal_error.accept_rejection_has_read_only_no_progress_retry_hint
-      err
   | None -> false
 
 let accept_no_progress_retry_kind err =
@@ -83,7 +76,7 @@ let accept_no_progress_retry_kind err =
 (* RFC-0271 §4.1 [Retry_no_thinking] gate: a [Thinking_only_no_progress]
    rejection is retried once on the SAME candidate with thinking forced off,
    provided the rejected attempt had thinking enabled and this turn has not
-   already spent its single re-shape. [Empty]/[Read_only] rejections and
+   already spent its single re-shape. [Empty] rejections and
    thinking-already-off attempts are not re-shaped (nothing to change). *)
 let should_retry_no_thinking ~recovered ~enable_thinking ~retry_kind =
   let thinking_was_enabled =
@@ -94,18 +87,23 @@ let should_retry_no_thinking ~recovered ~enable_thinking ~retry_kind =
   let is_thinking_only =
     match retry_kind with
     | Some `Thinking_only_no_progress -> true
-    | Some (`Empty_no_progress | `Read_only_no_progress) | None -> false
+    | Some `Empty_no_progress | None -> false
   in
   (not recovered) && is_thinking_only && thinking_was_enabled
 
 let accept_rejected_result_should_try_next ~is_last err =
   (not is_last) && accept_no_progress_should_try_next err
 
-let checkpoint_for_accept_rejected_retry ~resume_checkpoint ~checkpoint_after err =
-  match accept_no_progress_retry_kind err with
-  | Some (`Empty_no_progress | `Thinking_only_no_progress) -> resume_checkpoint
-  | Some `Read_only_no_progress -> checkpoint_after
-  | None -> checkpoint_after
+let same_run_retry_has_input_authority ctx =
+  Keeper_turn_driver_try_provider.same_run_retry_allowed
+    ctx.try_provider_ctx.checkpoint_stage_observed
+
+let report_continuation_required ctx =
+  Log.Keeper.info
+    ~keeper_name:ctx.keeper_name
+    "%s: same-run provider retry deferred after a typed OAS checkpoint stage; \
+     current OAS contract cannot continue without admitting the input again"
+    ctx.keeper_name
 
 let http_status_of_http_error = function
   | Some (Llm_provider.Http_client.HttpError { code; _ }) -> Some code
@@ -256,7 +254,6 @@ let emit_attempt_finished ctx candidate ~started_at result checkpoint_after =
 let run
       ?(on_success = fun ~provider_key:_ -> ())
       ?(pre_dispatch_required_tool_rejections_rev = [])
-      ?resume_checkpoint
       ?per_provider_timeout_s
       ?last_capacity_source:_
       ?last_capacity_backpressure:_
@@ -282,7 +279,7 @@ let run
     , ctx.filter_provider_health_fail_open
     , ctx.turn_deadline )
   in
-  let rec loop resume_checkpoint last_err recovered_no_thinking = function
+  let rec loop last_err recovered_no_thinking = function
     | [] -> Error (sdk_error_of_exhausted ~runtime_id:ctx.error_runtime_id last_err)
     | candidate :: rest ->
       let is_last = rest = [] in
@@ -297,42 +294,36 @@ let run
       let result, checkpoint_after, _success_sample =
         Keeper_turn_driver_try_provider.run_try_provider
           ctx.try_provider_ctx
-          ?resume_checkpoint
           ?per_provider_timeout_s
           candidate
       in
-      ignore (emit_attempt_finished ctx candidate ~started_at result checkpoint_after);
+      let _latency_ms =
+        emit_attempt_finished ctx candidate ~started_at result checkpoint_after
+      in
       (match result with
        | Ok run_result when ctx.accept run_result.Runtime_agent.response ->
          record_attempt_success run_result
        | Ok run_result ->
-         let last_tool_context =
-           Keeper_turn_driver_try_provider.accept_rejection_context_of_run_result
-             ~initial_messages:ctx.try_provider_ctx.initial_messages
-             run_result
-         in
          let err =
            Keeper_turn_driver_try_provider.accept_rejected_error
-             ~last_tool_context
              ~runtime_id:ctx.error_runtime_id
              ~response:run_result.Runtime_agent.response
          in
          let try_next_or_error err ~recovered =
-           if accept_rejected_result_should_try_next ~is_last err
+           if
+             accept_rejected_result_should_try_next ~is_last err
+             && same_run_retry_has_input_authority ctx
            then
-             let checkpoint_for_retry =
-               checkpoint_for_accept_rejected_retry
-                 ~resume_checkpoint
-                 ~checkpoint_after
-                 err
-             in
              let next_last_err =
                match sdk_error_to_http_error err with
                | Some http_err -> Some http_err
                | None -> last_err
              in
-             loop checkpoint_for_retry next_last_err recovered rest
-           else Error err
+             loop next_last_err recovered rest
+           else (
+             if not (same_run_retry_has_input_authority ctx)
+             then report_continuation_required ctx;
+             Error err)
          in
          (* RFC-0271 §4.1 [Retry_no_thinking]: a [Thinking_only_no_progress]
             rejection on a thinking-enabled attempt gets ONE same-candidate retry
@@ -345,23 +336,17 @@ let run
              ~recovered:recovered_no_thinking
              ~enable_thinking:ctx.try_provider_ctx.enable_thinking
              ~retry_kind:(accept_no_progress_retry_kind err)
+           && same_run_retry_has_input_authority ctx
          then begin
            (* Mark progress so the RFC-0012 mid-turn watchdog does not kill the
               recovery attempt as no-progress (RFC-0271 §4.3). *)
            maybe_mark_provider_attempt_started ctx;
            emit_attempt_started ctx candidate ~is_last ~per_provider_timeout_s;
            let retry_started_at = Mtime_clock.now () in
-           let retry_resume =
-             checkpoint_for_accept_rejected_retry
-               ~resume_checkpoint
-               ~checkpoint_after
-               err
-           in
            let retry_result, retry_checkpoint_after, _retry_sample =
              Keeper_turn_driver_try_provider.run_try_provider
                ctx.try_provider_ctx
                ~enable_thinking_override:false
-               ?resume_checkpoint:retry_resume
                ?per_provider_timeout_s
                candidate
            in
@@ -375,9 +360,15 @@ let run
            (match retry_result with
             | Ok retry_run when ctx.accept retry_run.Runtime_agent.response ->
               record_attempt_success retry_run
-            | Ok _ | Error _ -> try_next_or_error err ~recovered:true)
+            | Ok _ | Error _ ->
+              try_next_or_error
+                err
+                ~recovered:true)
          end
-         else try_next_or_error err ~recovered:recovered_no_thinking
+         else
+           try_next_or_error
+             err
+             ~recovered:recovered_no_thinking
        | Error err ->
          let original_error = err in
          let http_err = sdk_error_to_http_error err in
@@ -385,13 +376,19 @@ let run
            candidate
            ~success:false
            ~http_status:(http_status_of_http_error http_err);
+         let same_run_retry_has_input_authority =
+           same_run_retry_has_input_authority ctx
+         in
+         if not same_run_retry_has_input_authority
+         then report_continuation_required ctx;
          match http_err with
          | Some http_err
            when (not is_last)
+                && same_run_retry_has_input_authority
                 && (Runtime_attempt_fsm.should_try_next http_err
                     || accept_no_progress_should_try_next original_error)
            ->
-           loop checkpoint_after (Some http_err) recovered_no_thinking rest
+           loop (Some http_err) recovered_no_thinking rest
          | Some http_err ->
            Error
              (sdk_error_of_nonretryable_attempt_error
@@ -399,18 +396,16 @@ let run
                 ~original_error
                 http_err)
          | None ->
-           if is_last
+           if is_last || not same_run_retry_has_input_authority
            then Error err
-           else loop checkpoint_after last_err recovered_no_thinking rest)
+           else
+             loop last_err recovered_no_thinking rest)
   in
-  loop resume_checkpoint last_err false candidates
+  loop last_err false candidates
 
 module For_testing = struct
   let accept_no_progress_should_try_next = accept_no_progress_should_try_next
   let should_retry_no_thinking = should_retry_no_thinking
-
-  let accept_no_progress_read_only_should_try_next =
-    accept_no_progress_read_only_should_try_next
 
   let accept_rejected_result_should_try_next =
     accept_rejected_result_should_try_next

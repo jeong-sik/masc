@@ -33,13 +33,13 @@ let ok_response ~tool_name ~start_time fields : Core.tool_result =
 ;;
 
 let err_response ~tool_name ~start_time ~class_ msg : Core.tool_result =
-  let body = Tool_args.error_response msg in
-  let data =
-    match Tool_result.structured_payload_of_message body with
-    | Some json -> json
-    | None -> `String body
-  in
-  Tool_result.make_err ~tool_name ~class_ ~start_time ~data body
+  let data = Tool_args.error_assoc [ "message", `String msg ] in
+  Tool_result.make_err
+    ~tool_name
+    ~class_
+    ~start_time
+    ~data
+    (Yojson.Safe.to_string data)
 ;;
 
 let handle_models _ctx : Core.tool_result =

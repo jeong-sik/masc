@@ -25,7 +25,7 @@
     \[provider_of_string] / \[parse_provider_csv] /
     \[default_provider_order] / \[provider_order],
     \[take_results], \[normalize_hits], \[provider_error],
-    \[result_json], all 7 \[fetch_*] HTTP fetchers,
+    \[result_data], all 7 \[fetch_*] HTTP fetchers,
     \[fetch_provider], the cache state cells
     (\[initial_cache_capacity = 32], \[cache_entries] hashtable,
     \[cache_mutex]),
@@ -136,9 +136,7 @@ val handle : tool_name:string -> start_time:float -> Yojson.Safe.t -> Tool_resul
     and [contentTimeout] controls. This module remains the search-provider
     boundary to avoid depending on fetch.
 
-    On success the payload [data] is wrapped as
-    [`Assoc [ "text", `String json ]] where [json] is the
-    serialized search result envelope.
+    On success [data] is the typed search result envelope.
 
     Failure classes (RFC-0189):
     - [Workflow_rejection]: empty query input.

@@ -673,8 +673,6 @@ let tool_entries =
       "Enable placeholder tool exposure";
     entry ~default:"(none)" "MASC_PUBLIC_TOOLS_EXTRA"
       "Extra public tools (comma-separated names); None when unset";
-    entry ~default:"2" "MASC_TOOL_READONLY_RETRY_LIMIT"
-      "Read-only tool retry limit";
   ]
 
 let web_search_entries =

@@ -150,9 +150,6 @@ let run_model_by_label
                                   rejection.response_shape;
                               (* RFC-0271 §4.5: preserve provider stop_reason. *)
                               stop_reason = Some result.response.stop_reason;
-                              last_tool_effect = None;
-                              any_mutating_tool = None;
-                              tool_effects_seen = [];
                               reason = rejection.reason;
                             }))
                 | Error e -> Error e))

@@ -25,7 +25,11 @@ let test_append_preserves_exact_command_and_status () =
     (match Masc_exec.Bash_history.append ~base_path ~keeper_name:"k" entry with
      | Ok () -> ()
      | Error exn -> fail (Printexc.to_string exn));
-    let path = Filename.concat base_path ".masc/keeper/k/bash_history.jsonl" in
+    let path =
+      Filename.concat
+        (Common.masc_dir_from_base_path ~base_path)
+        "keeper/k/bash_history.jsonl"
+    in
     let ic = open_in path in
     let json = Fun.protect ~finally:(fun () -> close_in ic) (fun () -> input_line ic) in
     let json = Yojson.Safe.from_string json in

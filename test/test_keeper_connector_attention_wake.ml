@@ -1,11 +1,10 @@
 (* test_keeper_connector_attention_wake.ml —
    RFC-connector-ambient-attention-wake P1.
 
-   Pins the wake decision plumbing: a Connector_attention_stimulus event-queue
-   trigger yields a Run { Connector_attention_pending } reactive decision, the
-   same path Mention_pending / Bootstrap_stimulus take. Dormant in production —
-   nothing enqueues this stimulus yet (P3 wires handle_ambient) — so this is a
-   pure decision-layer test with no I/O. *)
+   Pins the durable Connector event and wake-decision plumbing. Every accepted
+   ambient event is queued by its producer identity before the wake hint; the
+   event-queue trigger then yields a Run { Connector_attention_pending }
+   reactive decision. *)
 
 open Alcotest
 module WO = Masc.Keeper_world_observation
@@ -66,6 +65,15 @@ let make_meta name =
   match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta -> meta
   | Error err -> Alcotest.fail ("make_meta failed: " ^ err)
+
+let rec rm_rf path =
+  if Sys.file_exists path
+  then
+    if Sys.is_directory path
+    then (
+      Sys.readdir path |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      Unix.rmdir path)
+    else Unix.unlink path
 
 let discord_surface =
   A.Discord
@@ -192,6 +200,62 @@ let test_connector_attention_codec_roundtrips () =
     | _ -> check bool "round-trip payload stays Connector_attention" true false)
   | Error e -> check bool ("round-trip decode failed: " ^ e) true false
 
+let connector_stimulus ~event_id ~arrived_at =
+  let module Q = Keeper_event_queue in
+  { Q.post_id = event_id
+  ; urgency = Q.Low
+  ; arrived_at
+  ; payload =
+      Q.Connector_attention
+        { event_id
+        ; channel =
+            Keeper_continuation_channel.Discord
+              { guild_id = Some "guild-durable"
+              ; channel_id = "channel-durable"
+              ; parent_channel_id = None
+              ; thread_id = None
+              ; user_id = "user-durable"
+              }
+        }
+  }
+
+let test_distinct_connector_events_are_not_collapsed () =
+  let base_path = Filename.temp_dir "connector-attention-durable" "" in
+  let keeper_name = "connector-attention-durable-keeper" in
+  let first = connector_stimulus ~event_id:"event-1" ~arrived_at:1.0 in
+  let second = connector_stimulus ~event_id:"event-2" ~arrived_at:2.0 in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+      let enqueue expected stimulus =
+        match
+          Masc.Keeper_registry_event_queue.enqueue_stimulus_durable_result
+            ~base_path
+            keeper_name
+            stimulus
+        with
+        | actual when actual = expected -> ()
+        | Masc.Keeper_registry_event_queue.Stimulus_storage_error detail ->
+          Alcotest.failf "durable Connector delivery failed: %s" detail
+        | Masc.Keeper_registry_event_queue.Stimulus_enqueued
+        | Masc.Keeper_registry_event_queue.Stimulus_already_present ->
+          Alcotest.fail "unexpected durable Connector delivery result"
+      in
+      enqueue Masc.Keeper_registry_event_queue.Stimulus_enqueued first;
+      enqueue Masc.Keeper_registry_event_queue.Stimulus_enqueued second;
+      enqueue Masc.Keeper_registry_event_queue.Stimulus_already_present first;
+      let event_ids =
+        Keeper_event_queue_persistence.load ~base_path ~keeper_name
+        |> Keeper_event_queue.to_list
+        |> List.filter_map (fun (stimulus : Keeper_event_queue.stimulus) ->
+          match stimulus.payload with
+          | Keeper_event_queue.Connector_attention { event_id; _ } -> Some event_id
+          | _ -> None)
+        |> List.sort String.compare
+      in
+      check (list string) "each producer event has one durable row"
+        [ "event-1"; "event-2" ] event_ids)
+
 let test_external_attention_projects_to_prompt_event () =
   let meta = make_meta "conn-keeper" in
   let item = external_attention_item () in
@@ -204,10 +268,9 @@ let test_external_attention_projects_to_prompt_event () =
   check bool "preview carries connector message" true
     (contains ~needle:"TOKEN-123" ev.WO.preview);
   check bool "ambient is not an explicit mention" false ev.WO.explicit_mention;
-  check bool "ambient stays observational" true
-    (match ev.WO.provenance with
-     | WO.Unknown -> true
-     | _ -> false)
+  check string "connector actor remains context" "Alex" ev.WO.author;
+  check bool "post kind remains context" true
+    (ev.WO.post_kind = Masc.Board.Human_post)
 
 let test_external_attention_prompt_steers_continuation () =
   (* RFC-0320 W3(a): the rendered prompt line for an external-attention wake must
@@ -234,6 +297,8 @@ let () =
     ; ( "codec",
         [ test_case "Connector_attention payload JSON round-trips" `Quick
             test_connector_attention_codec_roundtrips
+        ; test_case "distinct events are durable without channel debounce" `Quick
+            test_distinct_connector_events_are_not_collapsed
         ] )
     ; ( "projection",
         [ test_case "external attention becomes prompt event" `Quick

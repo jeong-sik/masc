@@ -983,7 +983,9 @@ let record_and_start ~base_path candidate =
   match record ~base_path candidate with
   | Record_error detail -> Error detail
   | Recorded persisted | Duplicate persisted ->
-    ignore (start_async ~base_path persisted : bool);
+    (* The durable candidate is the authority. Worker startup is best-effort
+       scheduling only; [start_async] records every startup failure itself. *)
+    let (_worker_started : bool) = start_async ~base_path persisted in
     Ok persisted
 ;;
 

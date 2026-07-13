@@ -14,6 +14,44 @@ module KP = Keeper_pacing
 let policy = { KP.base_sec = 30.0; multiplier = 2.0; cap_sec = 3600.0 }
 let feq = Alcotest.(check (float 1e-6))
 
+let test_runtime_toml =
+  {|
+[runtime]
+default = "test_provider.test_model"
+
+[providers.test_provider]
+display-name = "Test Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[test_provider.test_model]
+is-default = true
+max-concurrent = 1
+|}
+;;
+
+let with_test_runtime f =
+  let snapshot = Runtime.For_testing.snapshot () in
+  let path = Filename.temp_file "keeper_pacing_runtime_" ".toml" in
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore snapshot;
+      try Sys.remove path with
+      | Sys_error _ -> ())
+    (fun () ->
+       Out_channel.with_open_text path (fun channel ->
+         output_string channel test_runtime_toml);
+       match Runtime.init_default ~config_path:path with
+       | Error detail -> Alcotest.failf "Runtime.init_default failed: %s" detail
+       | Ok () -> f ())
+;;
+
 let revisit_exn t runtime_id =
   match KP.revisit_of ~runtime_id t with
   | Some r -> r
@@ -136,6 +174,8 @@ let test_shadow_exact_runtime_ignores_other_failure () =
   | None -> Alcotest.fail "judge runtime failure did not retain pacing"
 
 let test_failure_judgment_claim_uses_exact_judge_pacing () =
+  with_test_runtime
+  @@ fun () ->
   Eio_main.run
   @@ fun _env ->
   let keeper_name = "test-failure-judgment-claim-pacing" in

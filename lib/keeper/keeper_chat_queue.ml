@@ -1373,18 +1373,30 @@ let configure_persistence ~base_path =
   in
   List.iter
     (fun keeper_name ->
-       let path = Filename.concat (Filename.concat keepers_dir keeper_name) persistence_file in
+       let keeper_dir = Filename.concat keepers_dir keeper_name in
+       let path = Filename.concat keeper_dir persistence_file in
        match
-         try Ok (Fs_compat.path_kind path) with
+         try Ok (Fs_compat.path_kind keeper_dir) with
          | Eio.Cancel.Cancelled _ as exception_ -> raise exception_
          | exception_ ->
            Error
-             (load_error Read_failed ~path (Printexc.to_string exception_))
+             (load_error Read_failed ~path:keeper_dir (Printexc.to_string exception_))
        with
        | Error error ->
          load_errors := (Some keeper_name, error) :: !load_errors
-       | Ok Fs_compat.Missing -> ()
-       | Ok (Fs_compat.Directory | Fs_compat.Other) ->
+       | Ok (Fs_compat.Missing | Fs_compat.Other) -> ()
+       | Ok Fs_compat.Directory ->
+         (match
+            try Ok (Fs_compat.path_kind path) with
+            | Eio.Cancel.Cancelled _ as exception_ -> raise exception_
+            | exception_ ->
+              Error
+                (load_error Read_failed ~path (Printexc.to_string exception_))
+          with
+          | Error error ->
+            load_errors := (Some keeper_name, error) :: !load_errors
+          | Ok Fs_compat.Missing -> ()
+          | Ok (Fs_compat.Directory | Fs_compat.Other) ->
          if not (valid_keeper_name keeper_name)
          then
            let error =
@@ -1412,7 +1424,7 @@ let configure_persistence ~base_path =
              load_errors := (Some keeper_name, error) :: !load_errors;
              with_registry_rw (fun () ->
                Hashtbl.replace registry keeper_name
-                 (create_entry ~load_errors:[ error ] ())))
+                 (create_entry ~load_errors:[ error ] ()))))
     keeper_names;
   Atomic.set persistence_base_path (Some base_path);
   List.rev !restored_mutations

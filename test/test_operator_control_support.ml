@@ -18,8 +18,10 @@ let temp_dir () =
     Call inside Eio_main.run before creating Workspace config. *)
 let ensure_fs env =
   Masc_test_deps.init_eio_clock env;
-  if not (Fs_compat.has_fs ()) then
-    Fs_compat.set_fs (Eio.Stdenv.fs env)
+  (* An Eio filesystem capability is owned by the current scheduler. This test
+     executable creates a fresh [Eio_main.run] per case, so retaining the first
+     capability would leak a dead scheduler resource into later cases. *)
+  Fs_compat.set_fs (Eio.Stdenv.fs env)
 
 let cleanup_dir dir =
   let rec rm path =

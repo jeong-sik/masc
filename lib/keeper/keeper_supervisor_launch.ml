@@ -38,6 +38,20 @@ let should_publish_lifecycle_for_done_signal = function
   | Done_signal_already_seen -> false
 ;;
 
+type cleanup_attempt_outcome =
+  | Cleanup_completed
+  | Cleanup_cancelled
+  | Cleanup_failed of exn
+
+let run_cleanup_best_effort cleanup =
+  try
+    cleanup ();
+    Cleanup_completed
+  with
+  | Eio.Cancel.Cancelled _ -> Cleanup_cancelled
+  | exn -> Cleanup_failed exn
+;;
+
 (* ── Event publishing (see Keeper_supervisor_publish_lifecycle, #8856/#8605) ─ *)
 
 let publish_lifecycle = Keeper_supervisor_publish_lifecycle.publish_lifecycle
@@ -438,7 +452,7 @@ let launch_supervised_fiber_body
            crashing the server (see masc crash 2026-04-17). Swallow
            everything and log — cleanup is advisory, state-machine events
            already fired on the body's happy/error paths. *)
-          try
+          match run_cleanup_best_effort (fun () ->
             Keeper_registry.cleanup_tracking ~base_path meta.name;
             (* #14187 follow-up: a keeper that crashed after exhausting its
              turn-livelock budget would restart into the same turn_id
@@ -634,9 +648,10 @@ let launch_supervised_fiber_body
                     ~phase:Keeper_state_machine.Crashed
                     meta.name
                     reason
-                    ())
+                    ()))
           with
-          | Eio.Cancel.Cancelled _ ->
+          | Cleanup_completed -> ()
+          | Cleanup_cancelled ->
             (* Swallow cleanup cancellation without incrementing the cleanup
              failure counter. Re-raising Cancelled here is what the docstring
              above warns against: [Fun.protect] would wrap it as
@@ -648,7 +663,7 @@ let launch_supervised_fiber_body
               "%s: supervisor finally cleanup cancelled (suppressed to avoid \
                Fun.Finally_raised)"
               meta.name
-          | exn ->
+          | Cleanup_failed exn ->
             (* Swallow non-cancellation cleanup failures too. Cleanup is
              advisory; re-raising here would still become [Fun.Finally_raised]
              and could mask the body outcome. Count only these unexpected

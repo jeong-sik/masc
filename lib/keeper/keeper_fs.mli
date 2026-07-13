@@ -37,10 +37,19 @@ type durable_write_stage =
   | Atomic_rename
   | Parent_directory_fsync_after_rename
 
+type directory_chain_error =
+  | Non_directory_ancestor of { path : string }
+  | Missing_root of { path : string }
+  | Creation_not_observed of { path : string }
+
+type durable_write_failure =
+  | Directory_chain_failed of directory_chain_error
+  | Operation_failed of string
+
 type durable_write_error =
   { renamed : bool
   ; stage : durable_write_stage
-  ; reason : string
+  ; failure : durable_write_failure
   }
 
 (** Strict durable atomic JSON write. Unlike the compatibility
@@ -66,9 +75,12 @@ val durable_remove_error_to_string : durable_remove_error -> string
 
 module For_testing : sig
   (** Deterministic fault boundary. [before_stage] runs immediately before the
-      named filesystem operation and may raise to verify the typed contract. *)
+      named filesystem operation. [before_directory_fsync] runs immediately
+      before anchoring one directory component in the durability systhread.
+      Either may raise to verify the typed contract and retry behavior. *)
   val save_json_durable_atomic
     :  before_stage:(durable_write_stage -> unit)
+    -> ?before_directory_fsync:(string -> unit)
     -> string
     -> Yojson.Safe.t
     -> (unit, durable_write_error) result

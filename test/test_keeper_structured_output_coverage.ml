@@ -86,6 +86,7 @@ let expected_structured_tool_agent_runs =
   List.sort
     String.compare
     [ "lib/keeper/keeper_adversarial_review.ml"
+    ; "lib/keeper/keeper_failure_judge.ml"
     ; "lib/verifier_oas.ml"
     ; "lib/workspace_metric_hooks.ml"
     ]

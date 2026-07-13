@@ -119,10 +119,14 @@ let with_episode_bundle_lock ?clock ~keeper_id f =
   File_lock_eio.with_lock ?clock (episode_bundle_lock_path ~keeper_id) f
 ;;
 
-let episodes_dir ~keeper_id =
-  let d = Filename.concat (keepers_dir ()) (Filename.concat keeper_id "episodes") in
+let episodes_dir_for_keepers_dir ~keepers_dir ~keeper_id =
+  let d = Filename.concat keepers_dir (Filename.concat keeper_id "episodes") in
   ensure_dir d;
   d
+;;
+
+let episodes_dir ~keeper_id =
+  episodes_dir_for_keepers_dir ~keepers_dir:(keepers_dir ()) ~keeper_id
 ;;
 
 let tool_results_dir ~keeper_id =
@@ -180,12 +184,14 @@ let write_file_atomically path content =
   | Error msg -> raise (Atomic_write_failed msg)
 ;;
 
-let generation_counter_path ~keeper_id ~trace_id =
-  Filename.concat (episodes_dir ~keeper_id) (Printf.sprintf "%s.generation" trace_id)
+let generation_counter_path_for_keepers_dir ~keepers_dir ~keeper_id ~trace_id =
+  Filename.concat
+    (episodes_dir_for_keepers_dir ~keepers_dir ~keeper_id)
+    (Printf.sprintf "%s.generation" trace_id)
 ;;
 
-let max_generation_from_files ~keeper_id ~trace_id =
-  let dir = episodes_dir ~keeper_id in
+let max_generation_from_files_for_keepers_dir ~keepers_dir ~keeper_id ~trace_id =
+  let dir = episodes_dir_for_keepers_dir ~keepers_dir ~keeper_id in
   let prefix = Printf.sprintf "%s-g" trace_id in
   Sys.readdir dir
   |> Array.to_list
@@ -217,10 +223,20 @@ let read_generation_counter path =
     lock. The counter intentionally allows gaps when extraction later fails;
     uniqueness is more important than contiguous numbering across fibers or
     processes. *)
-let next_generation_with_floor ~floor ~keeper_id ~trace_id =
-  let counter_path = generation_counter_path ~keeper_id ~trace_id in
+let next_generation_with_floor_for_keepers_dir
+      ~keepers_dir
+      ~floor
+      ~keeper_id
+      ~trace_id
+  =
+  let counter_path =
+    generation_counter_path_for_keepers_dir ~keepers_dir ~keeper_id ~trace_id
+  in
   File_lock_eio.with_lock counter_path (fun () ->
-    let next_from_files = max_generation_from_files ~keeper_id ~trace_id + 1 in
+    let next_from_files =
+      max_generation_from_files_for_keepers_dir ~keepers_dir ~keeper_id ~trace_id
+      + 1
+    in
     let next_from_counter =
       match read_generation_counter counter_path with
       | Some next -> next
@@ -231,8 +247,32 @@ let next_generation_with_floor ~floor ~keeper_id ~trace_id =
     generation)
 ;;
 
+let next_generation_with_floor ~floor ~keeper_id ~trace_id =
+  next_generation_with_floor_for_keepers_dir
+    ~keepers_dir:(keepers_dir ())
+    ~floor
+    ~keeper_id
+    ~trace_id
+;;
+
 let next_generation ~keeper_id ~trace_id =
   next_generation_with_floor ~floor:0 ~keeper_id ~trace_id
+;;
+
+let next_generation_with_floor_for_base_path ~base_path ~floor ~keeper_id ~trace_id =
+  next_generation_with_floor_for_keepers_dir
+    ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path)
+    ~floor
+    ~keeper_id
+    ~trace_id
+;;
+
+let next_generation_for_base_path ~base_path ~keeper_id ~trace_id =
+  next_generation_with_floor_for_base_path
+    ~base_path
+    ~floor:0
+    ~keeper_id
+    ~trace_id
 ;;
 
 let unique_episode_path ~keeper_id episode =

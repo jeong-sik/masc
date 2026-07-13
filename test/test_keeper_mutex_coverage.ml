@@ -408,7 +408,16 @@ let test_keeper_msg_async_request_id_collision_uses_reservation_index () =
                | 0 | 1 -> "kmsg-reserved-collision"
                | ordinal -> Printf.sprintf "kmsg-reserved-unique-%d" ordinal));
        let first_at_write, resolve_first_at_write = Eio.Promise.create () in
-       let release_first, resolve_release_first = Eio.Promise.create () in
+       let release_mutex = Mutex.create () in
+       let release_condition = Condition.create () in
+       let release_first = ref false in
+       let release_first_write () =
+         Stdlib.Mutex.protect release_mutex (fun () ->
+           if not !release_first
+           then (
+             release_first := true;
+             Condition.broadcast release_condition))
+       in
        let block_first = Atomic.make true in
        Keeper_msg_async.For_testing.set_durable_write_hook
          (Some
@@ -418,49 +427,52 @@ let test_keeper_msg_async_request_id_collision_uses_reservation_index () =
                  && Atomic.compare_and_set block_first true false
                then (
                  Eio.Promise.resolve resolve_first_at_write ();
-                 Eio.Promise.await release_first)));
-       let first_result = ref None in
+                 Mutex.lock release_mutex;
+                 Fun.protect
+                   ~finally:(fun () -> Mutex.unlock release_mutex)
+                   (fun () ->
+                      while not !release_first do
+                        Condition.wait release_condition release_mutex
+                      done))));
+       let first_result, resolve_first_result = Eio.Promise.create () in
        Eio.Fiber.fork ~sw (fun () ->
-         first_result :=
-           Some
-             (Keeper_msg_async.submit
+         Eio.Promise.resolve
+           resolve_first_result
+           (Keeper_msg_async.submit
+              ~background_sw:sw
+              ~base_path
+              ~caller
+              ~keeper_name:"reservation-first"
+              ~f:(fun _ -> tr_ok "{}")
+              ()));
+       Fun.protect
+         ~finally:release_first_write
+         (fun () ->
+            Eio.Promise.await first_at_write;
+            let second_request_id =
+              Keeper_msg_async.submit
                 ~background_sw:sw
                 ~base_path
                 ~caller
-                ~keeper_name:"reservation-first"
+                ~keeper_name:"reservation-second"
                 ~f:(fun _ -> tr_ok "{}")
-                ()));
-       Eio.Promise.await first_at_write;
-       let second_request_id =
-         Keeper_msg_async.submit
-           ~background_sw:sw
-           ~base_path
-           ~caller
-           ~keeper_name:"reservation-second"
-           ~f:(fun _ -> tr_ok "{}")
-           ()
-         |> accepted_request_id
-       in
-       Eio.Promise.resolve resolve_release_first ();
-       let rec await_first remaining =
-         match !first_result with
-         | Some result -> accepted_request_id result
-         | None when remaining > 0 ->
-           Eio.Time.sleep (Eio.Stdenv.clock env) 0.01;
-           await_first (remaining - 1)
-         | None -> Alcotest.fail "first reserved submission did not resume"
-       in
-       let first_request_id = await_first 100 in
-       Alcotest.(check string)
-         "first request keeps deterministic id"
-         "kmsg-reserved-collision"
-         first_request_id;
-       Alcotest.(check bool)
-         "second request skips in-memory collision before disk publication"
-         true
-         (not (String.equal first_request_id second_request_id));
-       Alcotest.(check bool) "generator retried collision" true
-         (Atomic.get generated >= 3))
+                ()
+              |> accepted_request_id
+            in
+            release_first_write ();
+            let first_request_id =
+              Eio.Promise.await first_result |> accepted_request_id
+            in
+            Alcotest.(check string)
+              "first request keeps deterministic id"
+              "kmsg-reserved-collision"
+              first_request_id;
+            Alcotest.(check bool)
+              "second request skips in-memory collision before disk publication"
+              true
+              (not (String.equal first_request_id second_request_id));
+            Alcotest.(check bool) "generator retried collision" true
+              (Atomic.get generated >= 3)))
 ;;
 
 let fail_once_on_remove_stage expected =

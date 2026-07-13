@@ -14,40 +14,6 @@
 
 let dir_mu = Eio.Mutex.create ()
 let ensured_dirs : (string, unit) Hashtbl.t = Hashtbl.create 16
-module String_set = Set.Make (String)
-
-let durable_dirs = Atomic.make String_set.empty
-
-(* Cold directory preparation is globally serialized. Two sibling leaves can
-   share an ancestor created during this boot; a leaf-keyed lock would let one
-   sibling observe that ancestor before the creator fsyncs its parent and then
-   publish a record whose successful durability still depends on the creator.
-   Warm writes remain lock-free through [durable_dirs]. *)
-let durable_prepare_mu = Eio.Mutex.create ()
-
-let rec update_durable_dirs f =
-  let current = Atomic.get durable_dirs in
-  let updated = f current in
-  if current == updated || Atomic.compare_and_set durable_dirs current updated
-  then ()
-  else update_durable_dirs f
-;;
-
-let mark_dir_durable path =
-  update_durable_dirs (fun paths ->
-    if String_set.mem path paths then paths else String_set.add path paths)
-;;
-
-let path_is_at_or_below ~root path =
-  String.equal root path
-  ||
-  let prefix =
-    if String.ends_with ~suffix:Filename.dir_sep root
-    then root
-    else root ^ Filename.dir_sep
-  in
-  String.starts_with ~prefix path
-;;
 
 let ensure_dir (path : string) : string =
   (* Capture exceptions inside the mutex body so the lock exits normally,
@@ -95,14 +61,11 @@ let ensure_dir (path : string) : string =
 
 let invalidate_dir (path : string) : unit =
   Eio_guard.with_mutex dir_mu (fun () -> Hashtbl.remove ensured_dirs path);
-  update_durable_dirs (fun paths ->
-    String_set.filter
-      (fun candidate -> not (path_is_at_or_below ~root:path candidate))
-      paths)
+  Keeper_fs_durable_directory.invalidate path
 
 let clear_dir_cache () : unit =
   Eio_guard.with_mutex dir_mu (fun () -> Hashtbl.clear ensured_dirs);
-  Atomic.set durable_dirs String_set.empty
+  Keeper_fs_durable_directory.clear ()
 
 (* ================================================================ *)
 (* Atomic File Write (write-to-temp + rename)                       *)
@@ -162,12 +125,6 @@ type durable_write_stage =
   | Atomic_rename
   | Parent_directory_fsync_after_rename
 
-type durable_write_error =
-  { renamed : bool
-  ; stage : durable_write_stage
-  ; reason : string
-  }
-
 let durable_write_stage_to_string = function
   | Directory_prepare -> "directory_prepare"
   | Temp_file_create -> "temp_file_create"
@@ -179,12 +136,40 @@ let durable_write_stage_to_string = function
     "parent_directory_fsync_after_rename"
 ;;
 
+type directory_chain_error = Keeper_fs_durable_directory.chain_error =
+  | Non_directory_ancestor of { path : string }
+  | Missing_root of { path : string }
+  | Creation_not_observed of { path : string }
+
+let directory_chain_error_to_string = function
+  | Non_directory_ancestor { path } ->
+    Printf.sprintf "directory path is occupied by a non-directory: %s" path
+  | Missing_root { path } -> Printf.sprintf "cannot create filesystem root: %s" path
+  | Creation_not_observed { path } ->
+    Printf.sprintf "directory creation returned without a visible directory: %s" path
+;;
+
+type durable_write_failure =
+  | Directory_chain_failed of directory_chain_error
+  | Operation_failed of string
+
+type durable_write_error =
+  { renamed : bool
+  ; stage : durable_write_stage
+  ; failure : durable_write_failure
+  }
+
+let durable_write_failure_to_string = function
+  | Directory_chain_failed error -> directory_chain_error_to_string error
+  | Operation_failed detail -> detail
+;;
+
 let durable_write_error_to_string error =
   Printf.sprintf
     "stage=%s renamed=%b reason=%s"
     (durable_write_stage_to_string error.stage)
     error.renamed
-    error.reason
+    (durable_write_failure_to_string error.failure)
 ;;
 
 exception Durable_write_failed of durable_write_error
@@ -198,69 +183,38 @@ let run_durable_write_stage ~renamed ~before_stage stage f =
   | exn ->
     raise
       (Durable_write_failed
-         { renamed; stage; reason = Printexc.to_string exn })
+         { renamed; stage; failure = Operation_failed (Printexc.to_string exn) })
 ;;
 
-let fsync_directory path =
-  let fd = Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 in
-  Fun.protect
-    ~finally:(fun () -> Unix.close fd)
-    (fun () -> Unix.fsync fd)
+let ensure_dir_durable ~before_stage ?(before_directory_fsync = fun _ -> ()) dir =
+  match
+    Keeper_fs_durable_directory.ensure
+      ~before_prepare:(fun () -> before_stage Directory_prepare)
+      ~before_directory_fsync
+      dir
+  with
+  | Ok () -> ()
+  | Error (Keeper_fs_durable_directory.Directory_chain_failed cause) ->
+    raise
+      (Durable_write_failed
+         { renamed = false
+         ; stage = Directory_prepare
+         ; failure = Directory_chain_failed cause
+         })
+  | Error (Keeper_fs_durable_directory.Operation_failed (exn, _)) ->
+    raise
+      (Durable_write_failed
+         { renamed = false
+         ; stage = Directory_prepare
+         ; failure = Operation_failed (Printexc.to_string exn)
+         })
 ;;
 
-let missing_directory_chain path =
-  let rec loop missing current =
-    match Fs_compat.path_kind current with
-    | Fs_compat.Directory -> missing
-    | Fs_compat.Other ->
-      failwith (Printf.sprintf "directory path is occupied by a non-directory: %s" current)
-    | Fs_compat.Missing ->
-      let parent = Filename.dirname current in
-      if String.equal parent current
-      then failwith (Printf.sprintf "cannot create filesystem root: %s" current)
-      else loop (current :: missing) parent
-  in
-  loop [] path
-;;
-
-let ensure_dir_durable ~before_stage dir =
-  if not (String_set.mem dir (Atomic.get durable_dirs))
-  then (
-    let prepared =
-      Eio.Mutex.use_rw ~protect:true durable_prepare_mu (fun () ->
-        try
-          if not (String_set.mem dir (Atomic.get durable_dirs))
-          then
-            run_durable_write_stage
-              ~renamed:false
-              ~before_stage
-              Directory_prepare
-              (fun () ->
-                 let created = missing_directory_chain dir in
-                 Fs_compat.mkdir_p dir;
-                 (* Persist only names created by this operation. The cold
-                    preparation mutex ensures an existing same-boot ancestor
-                    was fully anchored by its creator before it is trusted. *)
-                 Eio_guard.run_in_systhread (fun () ->
-                   List.iter
-                     (fun created_dir ->
-                        fsync_directory (Filename.dirname created_dir))
-                     created);
-                 mark_dir_durable dir);
-          Ok ()
-        with
-        | exn -> Error (exn, Printexc.get_raw_backtrace ()))
-    in
-    match prepared with
-    | Ok () -> ()
-    | Error (exn, backtrace) -> Printexc.raise_with_backtrace exn backtrace)
-;;
-
-let save_json_durable_atomic_with ~before_stage path json =
+let save_json_durable_atomic_with ~before_stage ?before_directory_fsync path json =
   let dir = Filename.dirname path in
   let content = Yojson.Safe.pretty_to_string json in
   try
-    ensure_dir_durable ~before_stage dir;
+    ensure_dir_durable ~before_stage ?before_directory_fsync dir;
     Eio_guard.run_in_systhread (fun () ->
       let temp_path = ref None in
       let channel = ref None in
@@ -312,7 +266,7 @@ let save_json_durable_atomic_with ~before_stage path json =
              ~renamed:true
              ~before_stage
              Parent_directory_fsync_after_rename
-             (fun () -> fsync_directory dir);
+             (fun () -> Keeper_fs_durable_directory.fsync_directory dir);
            Ok ()))
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -321,7 +275,7 @@ let save_json_durable_atomic_with ~before_stage path json =
     Error
       { renamed = false
       ; stage = Directory_prepare
-      ; reason = Printexc.to_string exn
+      ; failure = Operation_failed (Printexc.to_string exn)
       }
 ;;
 
@@ -365,7 +319,7 @@ let remove_file_durable_with ~before_stage path =
     | Ok removed ->
       (try
          before_stage Parent_directory_fsync;
-         fsync_directory parent;
+         Keeper_fs_durable_directory.fsync_directory parent;
          Ok ()
        with
        | exn ->
@@ -380,8 +334,8 @@ let remove_file_durable path =
 ;;
 
 module For_testing = struct
-  let save_json_durable_atomic ~before_stage path json =
-    save_json_durable_atomic_with ~before_stage path json
+  let save_json_durable_atomic ~before_stage ?before_directory_fsync path json =
+    save_json_durable_atomic_with ~before_stage ?before_directory_fsync path json
   ;;
 
   let remove_file_durable ~before_stage path =

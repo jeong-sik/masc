@@ -802,6 +802,17 @@
  (libraries alcotest ast_grep masc_test_deps masc.fusion_core))
 
 (test
+ (name test_keeper_keepalive_launch_order_ast)
+ (modules test_keeper_keepalive_launch_order_ast)
+ (libraries alcotest ast_grep))
+
+(test
+ (name test_keeper_memory_os_generation_base_path)
+ (modules test_keeper_memory_os_generation_base_path)
+ (libraries masc_test_deps)
+ (action (setenv MASC_CONFIG_DIR "" (run %{test}))))
+
+(test
  (name test_oas_canonical_delegation)
  (modules test_oas_canonical_delegation)
  (libraries alcotest ast_grep masc_test_deps))
@@ -2124,8 +2135,6 @@
 (include stanzas/test_keeper_supervisor_observability_10125.inc)
 
 (include stanzas/test_keeper_supervisor_write_meta_source.inc)
-
-(include stanzas/test_keeper_supervisor_finally_cancel_swallow.inc)
 
 (include stanzas/test_keeper_surface_status.inc)
 

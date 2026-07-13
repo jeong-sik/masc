@@ -311,7 +311,10 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
          [trace_id_t]. Reuse the reservation for metadata and checkpoint
          creation so they cannot diverge. *)
       let generation =
-        Keeper_memory_os_io.next_generation ~keeper_id:p.name ~trace_id
+        Keeper_memory_os_io.next_generation_for_base_path
+          ~base_path:ctx.config.base_path
+          ~keeper_id:p.name
+          ~trace_id
       in
       let meta = {
         id = None;

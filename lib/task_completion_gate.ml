@@ -79,14 +79,31 @@ let artifact_file_path ~base_path ref_path =
   if existing_base_path_file ~base_path candidate then Some candidate else None
 
 let git_commit_exists ~base_path commit =
+  let check_root root =
+    try Workspace_git.commit_exists ~root ~commit with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | _ -> false
+  in
   match Workspace_git.git_root ~base_path with
-  | None -> false
-  | Some root ->
+  | Some root -> check_root root
+  | None ->
+    (* base_path itself is not a git repo (e.g. sandbox root);
+       search repos/ subdirectories for keeper git repos *)
+    let repos_dir = Filename.concat base_path "repos" in
     (try
-       Workspace_git.commit_exists ~root ~commit
+       let entries = Sys.readdir repos_dir in
+       let len = Array.length entries in
+       let rec loop i =
+         if i >= len then false
+         else
+           let candidate = Filename.concat repos_dir entries.(i) in
+           match Workspace_git.git_root ~base_path:candidate with
+           | Some root when check_root root -> true
+           | _ -> loop (i + 1)
+       in
+       loop 0
      with
-     | Eio.Cancel.Cancelled _ as e -> raise e
-     | _ -> false)
+     | Sys_error _ -> false)
 
 let trajectory_paths_for_trace ~base_path trace_id =
   if not (is_safe_ref_segment trace_id)

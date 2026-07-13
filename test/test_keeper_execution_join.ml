@@ -194,10 +194,11 @@ let recovery_failed_attempt ~tool_use_id ~input ~error =
 
 let recovery_episode () : Agent_sdk.Tool_failure_episode.t =
   { previous =
-      recovery_failed_attempt
-        ~tool_use_id:"tool-previous"
-        ~input:(`Assoc [ "cmd", `String "secret previous input" ])
-        ~error:"secret previous error"
+      [ recovery_failed_attempt
+          ~tool_use_id:"tool-previous"
+          ~input:(`Assoc [ "cmd", `String "secret previous input" ])
+          ~error:"secret previous error"
+      ]
   ; current =
       recovery_failed_attempt
         ~tool_use_id:"tool-current"
@@ -213,18 +214,22 @@ let test_tool_failure_episode_projection_omits_inputs_and_error_text () =
             { agent_name = "oas-r1"; turn = 3; episodes = [ recovery_episode () ] }))
     |> Option.get
   in
-  let previous =
+  let episode =
     match payload_member "episodes" json with
-    | Some (`List [ `Assoc episode ]) ->
-      (match List.assoc_opt "previous" episode with
-       | Some (`Assoc fields) -> fields
-       | _ -> fail "missing previous failed-attempt projection")
+    | Some (`List [ `Assoc episode ]) -> episode
     | _ -> fail "missing tool-failure episode projection"
   in
-  check bool "input omitted" true (List.assoc_opt "input" previous = None);
-  check bool "error prose omitted" true (List.assoc_opt "error" previous = None);
+  check bool "input omitted" true (List.assoc_opt "input" episode = None);
+  check bool "error prose omitted" true (List.assoc_opt "error" episode = None);
+  check bool "previous ids retained" true
+    (List.assoc_opt "previous_tool_use_ids" episode
+     = Some (`List [ `String "tool-previous" ]));
+  check (option int) "previous count retained" (Some 1)
+    (match List.assoc_opt "previous_count" episode with
+     | Some (`Int count) -> Some count
+     | _ -> None);
   check (option string) "tool identity retained" (Some "Execute")
-    (string_of_field (List.assoc_opt "tool_name" previous))
+    (string_of_field (List.assoc_opt "tool_name" episode))
 
 let recovery_defer_decision () =
   Eio_main.run

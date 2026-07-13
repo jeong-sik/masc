@@ -48,13 +48,6 @@ const KeeperCompositeRuntimeStateSchema = string()
 
 const KeeperCompositeCompactionStageSchema = string()
 
-// LT-16-KCB Phase 3: 6th axis. KCB is counter-based, not a classical
-// Closed/Open/Half_open FSM — only three states are observable between
-// tool calls because `record_failure` resets `consecutive_count` to 0
-// inside the trip transition. See
-// `lib/keeper/keeper_failure_circuit_breaker.mli`.
-const KeeperCompositeCircuitBreakerStateSchema = string()
-
 const KeeperCompositeContextActionsSchema = object({
   compact: boolean(),
   handoff: boolean(),
@@ -97,12 +90,9 @@ const KeeperPhaseDiagnosisSchema = object({
     handoff_active: boolean(),
     operator_paused: boolean(),
     stop_requested: boolean(),
-    restart_budget_remaining: boolean(),
-    backoff_elapsed: boolean(),
+    dead_tombstone_latched: boolean(),
     drain_complete: boolean(),
     context_overflow: boolean(),
-    compact_retry_exhausted: boolean(),
-    terminal_failure_latched: boolean(),
   }),
   determining_condition: nullable(string()),
   rows: array(KeeperPhaseDiagnosisRowSchema),
@@ -135,9 +125,8 @@ const KeeperLastSkipSchema = object({
   reasons: array(string()),
 })
 
-// Turn-livelock retry history (A-PR-2 G10). Present only while the
-// turn-livelock guard is tracking retries for the current turn.
-const KeeperLivelockSchema = object({
+// Objective turn-attempt history. This field is observability-only.
+const KeeperTurnAttemptSchema = object({
   turn_id: number(),
   attempts: number(),
   first_started_at: number(),
@@ -279,16 +268,6 @@ export const KeeperCompositeSnapshotSchema = object({
   decision: object({ stage: KeeperCompositeDecisionStageSchema }),
   runtime: object({ state: KeeperCompositeRuntimeStateSchema }),
   compaction: object({ stage: KeeperCompositeCompactionStageSchema }),
-  // `circuit_breaker` is `optional` during the Phase 2 → Phase 3
-  // rollout window: pinned backends that have not yet picked up
-  // PR #7801 emit snapshots without this key, and the dashboard must
-  // keep rendering instead of hard-failing the parse. Once the
-  // backend pin catches up everywhere, a follow-up can drop
-  // `optional` (promote the key to required with the `clean` fallback
-  // alone).
-  circuit_breaker: optional(
-    object({ state: KeeperCompositeCircuitBreakerStateSchema }),
-  ),
   measurement: KeeperCompositeMeasurementSchema,
   invariants: KeeperCompositeInvariantsSchema,
   fsm_guard_violations: number(),
@@ -305,7 +284,7 @@ export const KeeperCompositeSnapshotSchema = object({
   // tolerance: a pinned backend that predates PR A-PR-2 omits them and the
   // dashboard must keep rendering rather than raising CompositeSchemaDriftError.
   last_skip: optional(nullable(KeeperLastSkipSchema)),
-  livelock: optional(nullable(KeeperLivelockSchema)),
+  turn_attempt: optional(nullable(KeeperTurnAttemptSchema)),
   board_cursor: optional(KeeperBoardCursorSchema),
   board_wakeups: optional(number()),
   idle_seconds: optional(number()),
@@ -327,7 +306,7 @@ export type KeeperLastOutcome = InferOutput<typeof KeeperLastOutcomeSchema>
 export type KeeperLiveTurn = InferOutput<typeof KeeperLiveTurnSchema>
 export type KeeperRunState = InferOutput<typeof KeeperRunStateSchema>
 export type KeeperLastSkip = InferOutput<typeof KeeperLastSkipSchema>
-export type KeeperLivelock = InferOutput<typeof KeeperLivelockSchema>
+export type KeeperTurnAttempt = InferOutput<typeof KeeperTurnAttemptSchema>
 export type KeeperBoardCursor = InferOutput<typeof KeeperBoardCursorSchema>
 export type KeeperCompositeExecution = InferOutput<typeof KeeperCompositeExecutionSchema>
 export type KeeperRuntimeAttention = InferOutput<typeof KeeperRuntimeAttentionSchema>

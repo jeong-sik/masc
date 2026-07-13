@@ -111,7 +111,6 @@ const COVERAGE_REASON_LABELS: Record<string, string> = {
   missing_usage_and_inference: 'usage/inference missing',
   missing_usage: 'usage missing',
   missing_inference: 'inference missing',
-  untrusted_usage: 'usage untrusted',
   text_only_unmetered: 'text-only n/a',
   unknown: 'unknown reason',
 }
@@ -255,11 +254,9 @@ function runtimeProviderBehaviorText(provider: DashboardRuntimeProviderSnapshot)
   if (!behavior) return null
   return textList([
     flagText(behavior.supports_inline_tools, 'inline-tools'),
-    flagText(behavior.requires_per_keeper_bridging_for_bound_actor_tools, 'keeper-bridge'),
     flagText(behavior.argv_prompt_preflight, 'argv-preflight'),
     flagText(behavior.uses_anthropic_caching, 'anthropic-cache'),
     typeof behavior.max_turns_per_attempt === 'number' ? `max-turns ${behavior.max_turns_per_attempt}` : null,
-    flagText(behavior.tolerates_bound_actor_fallback, 'bound-fallback'),
   ])
 }
 
@@ -456,11 +453,6 @@ function runtimeParameterDetailRows(
     detailRow('declared provider', 'non-interactive', boolText(spec?.provider?.is_non_interactive)),
     detailRow('declared provider', 'capabilities block', boolText(spec?.provider?.has_capabilities)),
     detailRow('declared provider', 'behavior', runtimeProviderBehaviorText(provider)),
-    detailRow(
-      'declared provider',
-      'mcp headers',
-      stringArrayText(spec?.provider?.behavior_capabilities?.identity_runtime_mcp_header_keys),
-    ),
     detailRow('declared provider', 'custom headers', numberText(spec?.provider?.custom_header_count)),
     detailRow('declared provider', 'connect timeout', numberText(spec?.provider?.connect_timeout_s)),
     detailRow('declared model', 'model id', declaredModel?.id),

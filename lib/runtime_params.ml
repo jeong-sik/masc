@@ -1,4 +1,4 @@
-(** Runtime_params — Typed parameter store with governance override.
+(** Runtime_params — Typed runtime parameter store.
 
     Architecture:
     - Each parameter has a [default] thunk (reads env_config at call time),
@@ -167,7 +167,7 @@ let restore ~base_path =
 
 (* ── audit ───────────────────────────────────────────────────── *)
 
-let record_audit ~base_path ~key ~old_value ~new_value ?case_id ~actor () =
+let record_audit ~base_path ~key ~old_value ~new_value ?correlation_id ~actor () =
   let path = audit_file base_path in
   ensure_dir path;
   let entry =
@@ -178,7 +178,9 @@ let record_audit ~base_path ~key ~old_value ~new_value ?case_id ~actor () =
          ("new_value", new_value);
          ("actor", `String actor);
        ]
-      @ (match case_id with Some id -> [ ("case_id", `String id) ] | None -> []))
+      @ (match correlation_id with
+         | Some id -> [ "correlation_id", `String id ]
+         | None -> []))
   in
   Fs_compat.append_jsonl path entry
 

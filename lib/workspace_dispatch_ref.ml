@@ -9,7 +9,8 @@
 
     Resolution: register [Tool_workspace.dispatch] into this ref from a
     late-compiled bootstrap module ([Mcp_server_eio_execute]).
-    [Keeper_tool_in_process_runtime.handle_masc_workspace] reads the ref.
+    [Keeper_tool_in_process_runtime.handle_masc_workspace_with_outcome] reads
+    the ref.
     Until registered the ref is a no-op returning [None] (the same
     behavior the descriptor projection stub had).
 

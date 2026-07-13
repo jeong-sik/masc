@@ -170,7 +170,6 @@ type module_tag =
      stays agnostic to which subsystem (e.g. keeper) actually handles it. *)
   | Mod_external
   | Mod_inline
-  | Mod_shard
   | Mod_keeper_task
 
 val register_module_tag : schemas:Masc_domain.tool_schema list -> tag:module_tag -> unit

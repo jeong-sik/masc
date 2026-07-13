@@ -181,9 +181,9 @@ let run_command_with_status ?turn_sandbox_factory
           Eio_guard.protect
             ~finally:secret_projection.cleanup
             (fun () ->
-               Docker_spawn_throttle.with_slot (fun () ->
+               Fd_accountant.observe ~kind:Fd_accountant.Docker_spawn (fun () ->
                  Masc_exec.Exec_gate.run_argv_with_status
-                   ~actor:`System_sandbox
+                   ~actor:(Masc_exec.Agent_id.of_string "system/sandbox")
                    ~raw_source:(String.concat " " argv)
                    ~summary:"keeper docker read sandboxed command"
                    ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))

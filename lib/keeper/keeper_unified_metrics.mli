@@ -31,20 +31,18 @@ type usage_trust = Keeper_usage_trust.t =
 val classify_usage_trust :
   usage_reported:bool ->
   usage:Agent_sdk.Types.api_usage ->
-  context_max:int ->
   usage_trust
 (** Classify usage counters without reconstructing concrete provider/model
     identity. *)
 
-val usage_trust_is_trusted : usage_trust -> bool
-
 val estimate_usage_cost_usd :
   Agent_sdk.Types.api_usage ->
   float
-(** Return the OAS-reported turn cost. cost_usd is the provider's authoritative
+(** Return the OAS-reported turn cost verbatim. cost_usd is the provider's authoritative
     cost field and is accounted independently of token-count trust (token⊥cost).
-    MASC does not estimate provider/model pricing locally; missing or
-    non-positive cost remains [0.0]. *)
+    MASC does not estimate provider/model pricing locally. Missing cost uses
+    the aggregate identity [0.0]; a reported zero or negative value is not
+    rewritten. *)
 
 val usage_trust_to_string : usage_trust -> string
 
@@ -84,7 +82,7 @@ val record_keeper_total_cost_usd :
   total_cost_usd:float ->
   unit
 (** Set [masc_keeper_total_cost_usd{keeper_name}] to the keeper runtime's
-    accumulated trusted USD cost. *)
+    accumulated provider-reported USD cost. *)
 
 val context_max_bucket : int -> string
 (** #9953: bucket a raw [context_max] integer into a bounded
@@ -140,7 +138,6 @@ val update_metrics_from_result :
   observation:Keeper_world_observation.world_observation ->
   ?is_autonomous_turn:bool ->
   ?update_proactive_rt:bool ->
-  ?context_max:int ->
   Keeper_agent_run.run_result ->
   Keeper_meta_contract.keeper_meta
 

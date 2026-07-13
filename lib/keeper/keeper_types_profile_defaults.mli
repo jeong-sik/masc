@@ -14,22 +14,17 @@ type keeper_profile_defaults = {
   autoboot_enabled : bool option;
   mention_targets : string list;
   proactive_enabled : bool option;
-  proactive_idle_sec : int option;
-  proactive_cooldown_sec : int option;
-  shards : string list option;
   allowed_paths : string list option;
   sandbox_profile : Keeper_types_profile_sandbox.sandbox_profile option;
   sandbox_image : string option;
   network_mode : Keeper_types_profile_sandbox.network_mode option;
   multimodal_policy : Keeper_types_profile_sandbox.multimodal_policy option;
-  tool_access : string list option;
-  tool_denylist : string list option;
   active_goal_ids : string list option;
   telemetry_feedback_enabled : bool option;
   telemetry_feedback_window_hours : int option;
   per_provider_timeout_state : per_provider_timeout_state;
   per_provider_timeout : float option;
-  always_approve : bool option;
+  always_allow : bool option;
   (* No per-keeper [model]/[runtime_id] field: keeper→runtime assignment lives
      solely in runtime.toml [[runtime.assignments]] (persona⊥{model,runtime}). *)
   oas_env : (string * string) list;

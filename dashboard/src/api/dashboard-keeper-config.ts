@@ -169,7 +169,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
   const runtime = isRecord(data.runtime) ? data.runtime : {}
   const runtimeTrust = isRecord(data.runtime_trust) ? data.runtime_trust : null
   const workspace = isRecord(data.workspace) ? data.workspace : {}
-  const tools = isRecord(data.tools) ? data.tools : {}
   const sources = isRecord(data.sources) ? data.sources : {}
   const metrics = isRecord(data.metrics) ? data.metrics : {}
   const limits = isRecord(data.limits) ? data.limits : {}
@@ -230,8 +229,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
     },
     proactive: {
       enabled: asLooseBoolean(proactive.enabled),
-      idle_sec: asInt(proactive.idle_sec) ?? 0,
-      cooldown_sec: asInt(proactive.cooldown_sec) ?? 0,
     },
     drift: {
       status: normalizeKeeperFeatureStatus(drift.status),
@@ -250,7 +247,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
           slots: normalizeKeeperHookSlots(hooks.slots),
           deny_list: normalizeStringList(hooks.deny_list),
           // deny_list_count is derived (deny_list.length); not stored.
-          destructive_check_tools: normalizeStringList(hooks.destructive_check_tools),
           cost_budget: {
             max_cost_usd: asLooseNullableNumber(isRecord(hooks.cost_budget) ? hooks.cost_budget.max_cost_usd : undefined),
             active: asLooseBoolean(isRecord(hooks.cost_budget) ? hooks.cost_budget.active : undefined),
@@ -267,7 +263,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
       active_model_label: null,
       last_model_used_label: null,
       runtime_blocker_summary: asNullableString(runtime.runtime_blocker_summary),
-      runtime_blocker_continue_gate: asLooseNullableBoolean(runtime.runtime_blocker_continue_gate),
     },
     runtime_trust: runtimeTrust,
     workspace: {
@@ -277,14 +272,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
       active_goals: normalizeKeeperConfigActiveGoals(workspace.active_goals),
       active_goal_count: asInt(workspace.active_goal_count) ?? 0,
       missing_active_goal_ids: normalizeStringList(workspace.missing_active_goal_ids),
-    },
-    tools: {
-      tool_access: normalizeStringList(tools.tool_access),
-      resolved_allowlist: normalizeStringList(tools.resolved_allowlist),
-      tool_denylist: normalizeStringList(tools.tool_denylist),
-      active_masc_tool_count: asInt(tools.active_masc_tool_count) ?? 0,
-      active_keeper_tool_count: asInt(tools.active_keeper_tool_count) ?? 0,
-      total_active: asInt(tools.total_active) ?? 0,
     },
     sources: {
       live_meta_path: asNullableString(sources.live_meta_path) ?? '',
@@ -339,8 +326,6 @@ export type KeeperConfigUpdatePayload = {
   instructions?: string
   // Proactive
   proactive_enabled?: boolean
-  proactive_idle_sec?: number
-  proactive_cooldown_sec?: number
   // Compaction
   compaction_profile?: string
   compaction_ratio_gate?: number
@@ -362,23 +347,4 @@ export async function patchKeeperConfig(
     `/api/v1/keepers/${encodeURIComponent(name)}/config`,
     payload,
   ).then(raw => normalizeKeeperConfig(raw, name))
-}
-
-// Tool policy is set atomically (tool_access + denylist) via the dedicated
-// /tools endpoint with action=set_policy — a different mutation shape from the
-// /config PATCH above. The endpoint overwrites both tool_access and denylist,
-// and runtime execution gating keys only off the denylist, not tool_access.
-// It returns the updated tools block (not the full config), so we re-fetch the
-// config to get a consistent normalized snapshot.
-export async function setKeeperToolPolicy(
-  name: string,
-  policy: { tool_access: string[]; deny: string[] },
-): Promise<KeeperConfig> {
-  await ensureDevToken()
-  await post<unknown>(`/api/v1/keepers/${encodeURIComponent(name)}/tools`, {
-    action: 'set_policy',
-    tool_access: policy.tool_access,
-    deny: policy.deny,
-  })
-  return fetchKeeperConfig(name)
 }

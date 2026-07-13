@@ -12,32 +12,7 @@ let check_string label expected actual =
 let check_bool label expected actual =
   Alcotest.(check bool) label expected actual
 
-let test_checkpoint_compaction_uses_summarize_old () =
-  let strategies =
-    KCP.checkpoint_compaction_strategies ~mode:Keeper_config.Deterministic
-    |> List.map Context_compact_oas.strategy_name
-  in
-  Alcotest.(check (list string))
-    "checkpoint compaction summarizes old context before importance pruning"
-    [ "PruneToolOutputs"; "MergeContiguous"; "SummarizeOld"; "DropLowImportance" ]
-    strategies
-
 (* ── compaction_mode (RFC-0313-adjacent) ─────────────────────────────── *)
-
-(* Floor invariant: the [Llm] plan is a pre-step; both modes share the
-   identical deterministic strategy chain as the guaranteed fallback floor.
-   If this ever diverges the fallback semantics changed and this test must
-   be updated deliberately (not a silent behavior flip). *)
-let test_llm_mode_shares_deterministic_floor () =
-  let names mode =
-    KCP.checkpoint_compaction_strategies ~mode
-    |> List.map Context_compact_oas.strategy_name
-  in
-  Alcotest.(check (list string))
-    "Llm mode shares the deterministic fallback chain"
-    (names Keeper_config.Deterministic)
-    (names Keeper_config.Llm)
-
 (* 38-bug campaign #3: compaction is a judgment call, so the LLM boundary is
    the default; Deterministic is the explicit opt-out. Guards against a
    silent flip back to extractive-only compaction. *)
@@ -260,13 +235,6 @@ let () =
         [
           Alcotest.test_case "emergency threshold in (0,1]" `Quick
             test_emergency_threshold_in_range;
-        ] );
-      ( "strategies",
-        [
-          Alcotest.test_case "checkpoint compaction summarizes old context"
-            `Quick test_checkpoint_compaction_uses_summarize_old;
-          Alcotest.test_case "Llm mode shares the deterministic floor"
-            `Quick test_llm_mode_shares_deterministic_floor;
         ] );
       ( "compaction_mode",
         [

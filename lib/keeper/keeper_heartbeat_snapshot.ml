@@ -13,7 +13,7 @@ open Keeper_memory
 open Keeper_execution
 
 let keepalive_interval_sec () =
-  Runtime_params.get Governance_registry.keeper_keepalive_interval_sec
+  Runtime_params.get Runtime_settings.keeper_keepalive_interval_sec
 ;;
 
 (* ── Heartbeat history fallback read limits ── *)
@@ -51,14 +51,6 @@ let status_tick_usage_json () =
       ("total_tokens", `Int 0);
     ]
 
-let max_consecutive_heartbeat_failures () =
-  Runtime_params.get Governance_registry.keeper_max_hb_failures
-;;
-
-let max_consecutive_turn_failures () =
-  Runtime_params.get Governance_registry.keeper_max_turn_failures
-;;
-
 let write_heartbeat_snapshot
       ~(ctx : _ context)
       ~(meta_current : keeper_meta)
@@ -87,7 +79,6 @@ let write_heartbeat_snapshot
   ignore (Keeper_fs.ensure_dir (Filename.concat base_dir (Keeper_id.Trace_id.to_string meta_current.runtime.trace_id)));
   let _session, ctx_opt =
     load_context_from_checkpoint
-      ~max_checkpoint_messages:meta_current.compaction.max_checkpoint_messages
       ~trace_id:(Keeper_id.Trace_id.to_string meta_current.runtime.trace_id)
       ~primary_model_max_tokens:max_runtime_context
       ~base_dir
@@ -223,8 +214,6 @@ let write_heartbeat_snapshot
       ; handoff_threshold = meta_current.handoff_threshold
       ; handoff_cooldown_sec = meta_current.handoff_cooldown_sec
       ; auto_handoff_enabled = meta_current.auto_handoff
-      ; max_consecutive_hb_failures = max_consecutive_heartbeat_failures ()
-      ; max_consecutive_turn_failures = max_consecutive_turn_failures ()
       ; model_ratio_multiplier = 1.0
       ; model_handoff_multiplier = 1.0
       }

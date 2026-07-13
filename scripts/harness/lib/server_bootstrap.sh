@@ -123,15 +123,6 @@ harness_seed_server_config() {
     "$config_dir/personas" \
     "$config_dir/prompts"
 
-  if [[ ! -f "$config_dir/tool_policy.toml" ]]; then
-    if [[ -f "$repo_root/config/tool_policy.toml" ]]; then
-      cp "$repo_root/config/tool_policy.toml" "$config_dir/tool_policy.toml"
-    else
-      echo "tool_policy.toml fixture not found under repo root: $repo_root" >&2
-      return 1
-    fi
-  fi
-
   if [[ ! -f "$config_dir/runtime.toml" ]]; then
     cat >"$config_dir/runtime.toml" <<'EOF'
 [runtime]

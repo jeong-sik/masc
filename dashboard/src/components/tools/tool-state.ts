@@ -29,8 +29,8 @@ export const surfaceFilter = signal<SurfaceFilter>('all')
 export const SURFACE_MAP: Record<Exclude<SurfaceFilter, 'all'>, string[]> = {
   public_mcp: ['public_mcp'],
   agent: ['spawned_agent_mcp'],
-  keeper: ['keeper_standard', 'keeper_privileged'],
-  internal: ['local_worker', 'privileged_executor'],
+  keeper: ['keeper'],
+  internal: ['local_worker'],
 }
 
 export const SURFACE_LABELS: Record<SurfaceFilter, string> = {

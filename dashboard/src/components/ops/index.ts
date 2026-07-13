@@ -238,7 +238,7 @@ export function Ops() {
         <section class="${CARD_STANDARD} v2-command-panel grid gap-3 order-2 max-[1200px]:order-1" aria-label="Recent operator activity">
           <div>
             <h2 class="text-sm font-semibold text-[var(--color-fg-secondary)]">Recent Activity</h2>
-            <p class="mt-1 text-xs text-[var(--color-fg-muted)]">Interventions and review outcomes, newest first. Governance queues stay in the governance view.</p>
+            <p class="mt-1 text-xs text-[var(--color-fg-muted)]">Interventions and review outcomes, newest first. Gate/HITL requests stay in the Gate view.</p>
           </div>
           <${renderActivityTimeline} />
         </section>

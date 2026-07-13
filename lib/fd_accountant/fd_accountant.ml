@@ -1,8 +1,20 @@
-type kind = Docker_spawn | Provider_http | Provider_cli | Sandbox_exec | Log_writer
+type kind =
+  | Docker_spawn
+  | Provider_http
+  | Provider_cli
+  | Sandbox_exec
+  | Log_writer
 
-(* TEL-OK: this low-level gate stays Otel_metric_store-free; [fd_snapshot] is the
-   runtime telemetry surface exported by dashboard health and OTel paths. *)
+type resource_error =
+  | Process_fd_exhausted
+  | System_fd_exhausted
+  | Storage_space_exhausted
+
 let all_kinds = [ Docker_spawn; Provider_http; Provider_cli; Sandbox_exec; Log_writer ]
+
+let all_resource_errors =
+  [ Process_fd_exhausted; System_fd_exhausted; Storage_space_exhausted ]
+;;
 
 let kind_to_string = function
   | Docker_spawn -> "docker_spawn"
@@ -10,6 +22,7 @@ let kind_to_string = function
   | Provider_cli -> "provider_cli"
   | Sandbox_exec -> "sandbox_exec"
   | Log_writer -> "log_writer"
+;;
 
 let kind_of_string = function
   | "docker_spawn" -> Some Docker_spawn
@@ -18,320 +31,178 @@ let kind_of_string = function
   | "sandbox_exec" -> Some Sandbox_exec
   | "log_writer" -> Some Log_writer
   | _ -> None
+;;
 
-let env_var = function
-  | Docker_spawn -> "MASC_DOCKER_SPAWN_CONCURRENCY"
-  | Provider_http -> "MASC_PROVIDER_HTTP_CONCURRENCY"
-  | Provider_cli -> "MASC_PROVIDER_CLI_CONCURRENCY"
-  | Sandbox_exec -> "MASC_SANDBOX_EXEC_CONCURRENCY"
-  | Log_writer -> "MASC_LOG_WRITER_CONCURRENCY"
+let resource_error_to_string = function
+  | Process_fd_exhausted -> "process_fd_exhausted"
+  | System_fd_exhausted -> "system_fd_exhausted"
+  | Storage_space_exhausted -> "storage_space_exhausted"
+;;
 
-let default_cap = function
-  | Docker_spawn -> 8
-  | Provider_http -> 16
-  | Provider_cli -> 8
-  | Sandbox_exec -> 32
-  | Log_writer -> 64
+let resource_error_of_exn = function
+  | Unix.Unix_error (Unix.EMFILE, _, _) -> Some Process_fd_exhausted
+  | Unix.Unix_error (Unix.ENFILE, _, _) -> Some System_fd_exhausted
+  | Unix.Unix_error (Unix.ENOSPC, _, _) -> Some Storage_space_exhausted
+  | _ -> None
+;;
 
-let read_cap kind =
-  match Sys.getenv_opt (env_var kind) with
-  | Some s -> (
-      match int_of_string_opt (String.trim s) with
-      | Some n when n >= 1 && n <= 1024 -> n
-      | _ -> default_cap kind)
-  | None -> default_cap kind
-
-(* Per-kind state: configured cap + semaphore (lazily realised; first
-   acquire is during startup which is sequential, so a Lazy.force race
-   is harmless).
-
-   The holding invariant is a typed state machine, not an int counter.
-   PR-C1 (follow-up to PR-B / PR #20583) replaces the
-   `int Atomic.t` (which was paired with a
-   `Eio.Switch.on_release` callback that could
-   *over-decrement* under parent-fibre cancellation and was
-   hidden by a `max 0 (current - 1)` clamp) with a variant that
-   the type system protects from stuck-positive states.
-
-   - [Idle] — no slot held.
-   - [In_flight { acquired_at; hold_id }] — slot held;
-     [hold_id] is strictly monotonic and [acquired_at] is the
-     wall-clock at acquire time.
-
-   All transitions go through [mark_acquire] / [mark_release]
-   under [slot_state.mutex].  The 0/1 projection for the
-   dashboard ([in_flight]) is derived from the variant on
-   read; there is no [max 0] clamp because the type system
-   makes underflow unrepresentable.  The semaphore and the
-   holding state are *separate* concerns: the semaphore is
-   the back-pressure primitive, the holding state is the
-   counter-style invariant.  PR-C1 does not touch the
-   semaphore; only the counter site is replaced. *)
-type fd_holding_state =
-  | Idle
-  | In_flight of { acquired_at : float; hold_id : int }
-
-type slot_state =
-  { cap : int
-  ; sem : Eio.Semaphore.t
-  ; mutex : Stdlib.Mutex.t
-  ; mutable holding_state : fd_holding_state
-  ; mutable next_hold_id : int
+type observers =
+  { nofile_soft_limit : unit -> int option
+  ; on_resource_error : kind:kind -> resource_error -> exn -> unit
   }
 
-let pressure_active_hook = ref (fun () -> false)
-let nofile_soft_limit_hook = ref (fun () -> None)
+let default_resource_error_observer ~kind error exn =
+  Printf.eprintf
+    "fd_accountant: resource error kind=%s error=%s exception=%s\n%!"
+    (kind_to_string kind)
+    (resource_error_to_string error)
+    (Printexc.to_string exn)
+;;
 
-let set_pressure_hooks ~active ~nofile_soft_limit =
-  pressure_active_hook := active;
-  nofile_soft_limit_hook := nofile_soft_limit
+let observers =
+  Atomic.make
+    { nofile_soft_limit = (fun () -> None)
+    ; on_resource_error = default_resource_error_observer
+    }
+;;
 
-let _state_for_kind : (kind * slot_state) list =
-  List.map
+let install_observers ~nofile_soft_limit ~on_resource_error =
+  Atomic.set observers { nofile_soft_limit; on_resource_error }
+;;
+
+type kind_state = { active : int Atomic.t }
+
+let states =
+  List.map (fun kind -> kind, { active = Atomic.make 0 }) all_kinds
+;;
+
+let state_of kind = List.assoc kind states
+let active_count ~kind = Atomic.get (state_of kind).active
+
+let resource_error_counts =
+  List.concat_map
     (fun kind ->
-      let cap = read_cap kind in
-      (kind, { cap
-              ; sem = Eio.Semaphore.make cap
-              ; mutex = Stdlib.Mutex.create ()
-              ; holding_state = Idle
-              ; next_hold_id = 0
-              }))
+      List.map
+        (fun error -> (kind, error), Atomic.make 0)
+        all_resource_errors)
     all_kinds
+;;
 
-let state_of kind = List.assoc kind _state_for_kind
+let resource_error_counter ~kind error =
+  List.assoc (kind, error) resource_error_counts
+;;
 
-(* Typed-state transitions under the per-slot mutex.  The mutex scope is one
-   record update; it does not span the caller's [f ()] so contention is
-   bounded.  This uses [Stdlib.Mutex], not [Eio_guard.with_mutex], because the
-   accountant is observed from both Eio fibers and non-Eio synchronous export
-   hooks; the lock must never disappear after [Eio_guard.enable ()]. *)
-(* Internal per-slot state-record form.  Not exported -- callers
-   go through the kind-level entry points below. *)
-let with_slot_mutex state f =
-  Stdlib.Mutex.protect state.mutex f
+let resource_error_count ~kind error =
+  Atomic.get (resource_error_counter ~kind error)
+;;
 
-let mark_acquire_slot state =
-  with_slot_mutex state (fun () ->
-      let hold_id = state.next_hold_id in
-      state.next_hold_id <- hold_id + 1;
-      let acquired_at = Unix.gettimeofday () in
-      state.holding_state <- In_flight { acquired_at; hold_id };
-      hold_id)
+let report_typed_resource_error ~kind exn =
+  match resource_error_of_exn exn with
+  | None -> ()
+  | Some error ->
+    Atomic.incr (resource_error_counter ~kind error);
+    let observer = (Atomic.get observers).on_resource_error in
+    (match observer ~kind error exn with
+     | () -> ()
+     | exception observer_exn ->
+       Printf.eprintf
+         "fd_accountant: resource-error observer failed kind=%s error=%s \
+          observer_exception=%s original_exception=%s\n%!"
+         (kind_to_string kind)
+         (resource_error_to_string error)
+         (Printexc.to_string observer_exn)
+         (Printexc.to_string exn))
+;;
 
-let mark_release_slot state ~hold_id =
-  with_slot_mutex state (fun () ->
-      match state.holding_state with
-      | Idle -> ()
-      | In_flight _ -> state.holding_state <- Idle)
+let observe ~kind f =
+  let active = (state_of kind).active in
+  Atomic.incr active;
+  Fun.protect
+    ~finally:(fun () -> Atomic.decr active)
+    (fun () ->
+       try f () with
+       | exn ->
+         report_typed_resource_error ~kind exn;
+         raise exn)
+;;
 
-let read_holding_slot state =
-  with_slot_mutex state (fun () ->
-      match state.holding_state with
-      | Idle -> 0 | In_flight _ -> 1)
-
-(* Public kind-level entry points -- the typed-state transition
-   API the regression suite drives.  PR-C1 (follow-up to PR-B
-   / PR #20583) mirrors [dashboard_governance_judge]':s
-   [read_in_flight] / [mark_compute_start] / [mark_compute_finish]
-   pattern: typed variant, [hold_id] monotonic, no [max 0] clamp. *)
-let read_holding ~kind = read_holding_slot (state_of kind)
-let mark_acquire ~kind = mark_acquire_slot (state_of kind)
-let mark_release ~kind ~hold_id = mark_release_slot (state_of kind) ~hold_id
-
-(* Shared FD-pressure gate — when Keeper_fd_pressure.active () is true,
-   all top-level kinds serialize through one global slot. Nested cross-kind
-   acquisitions skip this gate only while the parent slot scope is still
-   active; forked children that outlive the parent must re-enter the gate. *)
-let _shared_pressure_gate = Eio.Semaphore.make 1
-
-type held_kind = { kind : kind ; active : bool Atomic.t }
-
-let held_kinds_key : held_kind list Eio.Fiber.key = Eio.Fiber.create_key ()
-
-let held_kinds () =
-  (* NDT-OK: fiber-local runtime state only prevents same-fiber slot
-     double-accounting; policy decisions stay outside this boundary.
-     [Eio.Fiber.get] is normally a fiber-local HashMap lookup that
-     does not raise, but defend against future Eio changes with the
-     RFC-0106 standard split: Cancelled propagates so the fiber
-     unwinds; anything else falls back to the empty default. *)
-  try Option.value ~default:[] (Eio.Fiber.get held_kinds_key)
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | _ -> []
-
-let active_held_kinds () =
-  List.filter (fun held -> Atomic.get held.active) (held_kinds ())
-
-let holds_kind kind =
-  List.exists (fun held -> held.kind = kind) (active_held_kinds ())
-
-let pressure_gate_needed () =
-  !pressure_active_hook () && active_held_kinds () = []
-
-let acquire_pressure_gate_if_needed () =
-  if not (pressure_gate_needed ())
-  then fun () -> ()
-  else (
-    Eio.Semaphore.acquire _shared_pressure_gate;
-    let released = Atomic.make false in
-    fun () ->
-      if Atomic.compare_and_set released false true then
-        Eio.Semaphore.release _shared_pressure_gate)
-
-let with_slot ~kind f =
-  if holds_kind kind then
-    f ()
-  else
-    let release_pressure = acquire_pressure_gate_if_needed () in
-    let ({ sem ; _ } as state) = state_of kind in
-    Eio.Switch.run @@ fun sw ->
-    Eio.Switch.on_release sw release_pressure ;
-    Eio.Semaphore.acquire sem ;
-    let hold_id = mark_acquire_slot state in
-    let held = { kind ; active = Atomic.make true } in
-    Fun.protect
-      ~finally:(fun () ->
-          mark_release_slot state ~hold_id ;
-          Eio.Semaphore.release sem ;
-          Atomic.set held.active false)
-      (fun () -> Eio.Fiber.with_binding held_kinds_key (held :: held_kinds ()) f)
-
-let acquire_lifetime_slot ~kind () =
-  let release_pressure = acquire_pressure_gate_if_needed () in
-  let ({ sem ; _ } as state) = state_of kind in
-  (try Eio.Semaphore.acquire sem with
-   | exn ->
-     release_pressure ();
-     raise exn);
-  let hold_id = mark_acquire_slot state in
+let acquire_lifetime_observation ~kind () =
+  let active = (state_of kind).active in
+  Atomic.incr active;
   let released = Atomic.make false in
   fun () ->
-    if Atomic.compare_and_set released false true then (
-      mark_release_slot state ~hold_id ;
-      Eio.Semaphore.release sem;
-      release_pressure ())
+    if Atomic.compare_and_set released false true then Atomic.decr active
+;;
 
-let configured_concurrency ~kind = (state_of kind).cap
+let install_dated_jsonl_log_writer_observer () =
+  Dated_jsonl.set_append_guard (fun f -> observe ~kind:Log_writer f)
+;;
 
-let effective_concurrency ~kind =
-  if !pressure_active_hook () then 1
-  else (state_of kind).cap
-
-let install_dated_jsonl_log_writer_guard () =
-  Dated_jsonl.set_append_guard (fun f ->
-    if Eio_guard.is_ready () then
-      with_slot ~kind:Log_writer f
-    else
-      f ())
-
-let install_process_eio_sandbox_exec_guard () =
+let install_process_eio_sandbox_exec_observer () =
   Process_eio.set_spawn_guard
-    { Process_eio.run =
-        (fun f ->
-          if Eio_guard.is_ready () then
-            with_slot ~kind:Sandbox_exec f
-          else
-            f ())
-    }
+    { Process_eio.run = (fun f -> observe ~kind:Sandbox_exec f) }
+;;
 
-let install_with_process_sandbox_exec_guard () =
+let install_with_process_sandbox_exec_observer () =
   With_process.set_process_guard
-    { With_process.run =
-        (fun f ->
-          if Eio_guard.is_ready () then
-            with_slot ~kind:Sandbox_exec f
-          else
-            f ())
-    }
+    { With_process.run = (fun f -> observe ~kind:Sandbox_exec f) }
+;;
 
-let install_autonomy_exec_sandbox_exec_guard () =
+let install_autonomy_exec_sandbox_exec_observer () =
   Masc_cdal_runtime.Autonomy_exec.set_run_guard
     { Masc_cdal_runtime.Autonomy_exec.run =
-        (fun f ->
-          if Eio_guard.is_ready () then
-            with_slot ~kind:Sandbox_exec f
-          else
-            f ())
+        (fun f -> observe ~kind:Sandbox_exec f)
     }
+;;
 
-let install_bg_sandbox_exec_guard () =
+let install_bg_sandbox_exec_observer () =
   Bg_task.set_lifetime_guard
     { Bg_task.acquire =
-        (fun () ->
-          if Eio_guard.is_ready () then
-            acquire_lifetime_slot ~kind:Sandbox_exec ()
-          else
-            fun () -> ())
+        (fun () -> acquire_lifetime_observation ~kind:Sandbox_exec ())
     }
+;;
 
 let () =
-  install_dated_jsonl_log_writer_guard ();
-  install_process_eio_sandbox_exec_guard ();
-  install_with_process_sandbox_exec_guard ();
-  install_autonomy_exec_sandbox_exec_guard ();
-  install_bg_sandbox_exec_guard ()
+  install_dated_jsonl_log_writer_observer ();
+  install_process_eio_sandbox_exec_observer ();
+  install_with_process_sandbox_exec_observer ();
+  install_autonomy_exec_sandbox_exec_observer ();
+  install_bg_sandbox_exec_observer ()
+;;
 
-(* Dashboard projections run on worker domains, while the semaphores are used
-   by the main Eio domain; observing them through [get_value] can cross Eio
-   domain ownership boundaries.
-
-   The in-flight count is now a pure projection of the typed
-   state machine ([Idle] → 0, [In_flight _] → 1) — the previous
-   [max 0 (Atomic.get …)] clamp is gone because the typed
-   invariant does not admit underflow. *)
-let in_flight kind =
-  read_holding_slot (state_of kind)
-
-(* Best-effort FD-open count using /dev/fd (macOS) or /proc/self/fd
-   (Linux). Returns -1 on other platforms. *)
 let read_fd_open () =
-  let candidates =
-    [ "/dev/fd" ; "/proc/self/fd" ; "/proc/self/task/self/fd" ]
-  in
-  let rec try_dirs = function
-    | [] -> -1
+  let rec first_observable = function
+    | [] -> None
     | dir :: rest ->
-        (try
-           let entries = Sys.readdir dir in
-           Array.length entries
-         with
-         | Eio.Cancel.Cancelled _ as e -> raise e
-         | _ -> try_dirs rest)
-         (* [Sys.readdir] raising on a non-existent path is *expected*
-            (we are probing 3 platform-dependent candidates and the
-            first hit wins).  [Eio.Cancel.Cancelled] is not a probe
-            miss — the fiber is being cancelled and must unwind
-            instead of walking through the remaining candidates
-            (RFC-0106). *)
+      (match Sys.readdir dir with
+       | entries -> Some (Array.length entries)
+       | exception Sys_error _ | exception Unix.Unix_error _ ->
+         first_observable rest)
   in
-  try_dirs candidates
-
-let fd_limit_cache : int option Atomic.t = Atomic.make None
+  first_observable [ "/dev/fd"; "/proc/self/fd"; "/proc/self/task/self/fd" ]
+;;
 
 let read_fd_limit () =
-  match Atomic.get fd_limit_cache with
-  | Some value -> value
-  | None ->
-    let value =
-      match !nofile_soft_limit_hook () with
-      | Some n -> n
-      | None -> -1
-    in
-    Atomic.set fd_limit_cache (Some value);
-    value
+  (Atomic.get observers).nofile_soft_limit ()
+;;
 
-type snapshot = {
-  per_kind : (kind * int) list ;
-  fd_open : int ;
-  fd_limit : int ;
-  pressure_active : bool ;
-}
+type snapshot =
+  { per_kind : (kind * int) list
+  ; resource_errors : (kind * resource_error * int) list
+  ; fd_open : int option
+  ; fd_limit : int option
+  }
 
 let fd_snapshot () =
-  {
-    per_kind = List.map (fun k -> (k, in_flight k)) all_kinds ;
-    fd_open = read_fd_open () ;
-    fd_limit = read_fd_limit () ;
-    pressure_active = !pressure_active_hook () ;
+  { per_kind = List.map (fun kind -> kind, active_count ~kind) all_kinds
+  ; resource_errors =
+      List.concat_map
+        (fun kind ->
+          List.map
+            (fun error -> kind, error, resource_error_count ~kind error)
+            all_resource_errors)
+        all_kinds
+  ; fd_open = read_fd_open ()
+  ; fd_limit = read_fd_limit ()
   }
+;;

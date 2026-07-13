@@ -37,8 +37,7 @@
     [worker_meta_removed_fields],
     [validate_worker_meta_fields], [worker_meta_to_yojson],
     [worker_meta_of_yojson], [worker_container_state],
-    [append_worker_turn_log], [start_worker_heartbeat],
-    [oas_tool_names]). *)
+    [append_worker_turn_log], [start_worker_heartbeat]). *)
 
 include module type of struct
   include Worker_container_types
@@ -210,13 +209,10 @@ val build_resume_config :
 (** Assembles the [(config, options)] pair consumed by
     [Agent_sdk.Agent.resume].  [config] inherits
     {!Agent_sdk.Types.default_config} and overrides
-    [name] / [model] / [system_prompt] / [max_tokens]
-    ({!local_worker_max_tokens}) / [max_turns] /
-    [temperature] / [top_p] / [top_k] / [enable_thinking]
-    / [tool_choice = Auto].  [min_p] stays [None] —
-    cloud providers reject the field even at no-op 0.0.
-    [guardrails] defaults to an [AllowList] of every tool
-    name in [tools]. *)
+    [name] / [model] / [system_prompt] / [max_turns] /
+    [enable_thinking] / [tool_choice = Auto]. Provider/model sampling and
+    output defaults remain OAS-owned. [guardrails] defaults to the unrestricted
+    worker surface; the concrete [tools] list is the exposure SSOT. *)
 
 (** {1 Direct-evidence persistence} *)
 

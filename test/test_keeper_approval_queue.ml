@@ -1,15 +1,9 @@
-(** Tests for the typed pending_phase HITL state machine (RFC-0304).
-
-    Proves:
-    1. Fresh pending approvals start in [Awaiting_operator].
-    2. The phase is included in pending-entry JSON/SSE payloads.
-    3. Critical approvals transition to [Escalated] when the escalation timer
-       fires, and the updated phase is reflected in-memory and in JSON. *)
-
 module AQ = Masc.Keeper_approval_queue
-module Chat_queue = Masc.Keeper_chat_queue
-module Summary_worker = Masc.Hitl_summary_worker
+module Gate = Masc.Keeper_gate
 module Registry_queue = Masc.Keeper_registry_event_queue
+module Queue_state = Keeper_event_queue_state
+
+let yojson = Alcotest.testable Yojson.Safe.pp Yojson.Safe.equal
 
 let temp_dir () =
   let dir = Filename.temp_file "test_keeper_approval_queue_" "" in
@@ -19,23 +13,23 @@ let temp_dir () =
 ;;
 
 let cleanup_dir dir =
-  let rec rm_rf path =
+  let rec remove path =
     if Sys.is_directory path
     then (
-      Array.iter (fun name -> rm_rf (Filename.concat path name)) (Sys.readdir path);
+      Array.iter (fun name -> remove (Filename.concat path name)) (Sys.readdir path);
       Unix.rmdir path)
     else Sys.remove path
   in
-  try rm_rf dir with
-  | _ -> ()
+  try remove dir with
+  | Sys_error _ -> ()
 ;;
 
-let rec yield_until ?(attempts = 50) predicate =
-  if predicate () || attempts <= 0
+let rec ensure_dir path =
+  if Sys.file_exists path
   then ()
   else (
-    Eio.Fiber.yield ();
-    yield_until ~attempts:(attempts - 1) predicate)
+    ensure_dir (Filename.dirname path);
+    Unix.mkdir path 0o755)
 ;;
 
 let durable_resolution_opt ~base_path ~keeper_name ~approval_id =
@@ -45,1124 +39,1203 @@ let durable_resolution_opt ~base_path ~keeper_name ~approval_id =
     match stimulus.payload with
     | Keeper_event_queue.Hitl_resolved resolution
       when String.equal resolution.approval_id approval_id ->
-      Some (stimulus, resolution)
+      Some resolution
     | _ -> None)
 ;;
 
-let require_durable_resolution ~base_path ~keeper_name ~approval_id =
-  match durable_resolution_opt ~base_path ~keeper_name ~approval_id with
-  | None -> Alcotest.fail "typed HITL resolution was not durably enqueued"
-  | Some (stimulus, resolution) ->
-    Alcotest.(check string)
-      "durable post id is canonical"
-      (Keeper_event_queue.hitl_resolution_post_id resolution)
-      stimulus.post_id;
-    resolution
+let require_some message = function
+  | Some value -> value
+  | None -> Alcotest.fail message
 ;;
 
-let drop_durable_resolution ~base_path ~keeper_name resolution =
+let drop_resolution ~base_path ~keeper_name resolution =
   let post_id = Keeper_event_queue.hitl_resolution_post_id resolution in
   match Registry_queue.drop_by_post_id ~base_path keeper_name ~post_id with
   | Ok _ -> ()
-  | Error reason -> Alcotest.fail ("durable resolution cleanup failed: " ^ reason)
+  | Error reason -> Alcotest.fail reason
 ;;
 
-let with_temp_runtime_toml content f =
-  let path = Filename.temp_file "runtime" ".toml" in
-  let runtime_snapshot = Runtime.For_testing.snapshot () in
-  let oc = open_out path in
-  output_string oc content;
-  close_out oc;
-  Fun.protect
-    ~finally:(fun () ->
-      Runtime.For_testing.restore runtime_snapshot;
-      try Sys.remove path with
-      | Sys_error _ -> ())
-    (fun () -> f path)
-;;
-
-let summary_routing_runtime_toml ~with_hitl_summary =
-  let base =
-    "[providers.local]\n\
-     display-name = \"Local\"\n\
-     protocol = \"ollama-http\"\n\
-     endpoint = \"http://localhost:11434\"\n\
-     \n\
-     [models.chat]\n\
-     api-name = \"chat\"\n\
-     max-context = 1024\n\
-     \n\
-     [models.judge]\n\
-     api-name = \"judge\"\n\
-     max-context = 1024\n\
-     \n\
-     [models.judge.capabilities]\n\
-     supports-structured-output = true\n\
-     \n\
-     [models.kimi_like]\n\
-     api-name = \"kimi-like-summary\"\n\
-     max-context = 1024\n\
-     temperature = 1.0\n\
-     \n\
-     [local.chat]\n\
-     \n\
-     [local.judge]\n\
-     \n\
-     [local.kimi_like]\n\
-     \n\
-     [runtime]\n\
-     default = \"local.chat\"\n\
-     structured_judge = \"local.judge\"\n"
+let lease_for_resolution (resolution : Keeper_event_queue.hitl_resolution) =
+  let stimulus : Keeper_event_queue.stimulus =
+    { post_id = Keeper_event_queue.hitl_resolution_post_id resolution
+    ; urgency = Keeper_event_queue.Immediate
+    ; arrived_at = 1.0
+    ; payload = Keeper_event_queue.Hitl_resolved resolution
+    }
   in
-  if with_hitl_summary then base ^ "hitl_summary = \"local.kimi_like\"\n" else base
+  let pending = Keeper_event_queue.enqueue Keeper_event_queue.empty stimulus in
+  let state = Queue_state.with_pending pending Queue_state.empty in
+  match Queue_state.claim_when ~claimed_at:2.0 ~ready:(fun _ -> true) state with
+  | Ok (_, Some lease) -> lease
+  | Ok (_, None) -> Alcotest.fail "approved resolution was not claimed"
+  | Error reason -> Alcotest.fail reason
 ;;
 
-(* Proves the HITL summary worker consumes the [runtime].hitl_summary lane
-   (not the structured-judge lane directly): the operator-selected lane must
-   win, and unset deployments must fall back to structured_judge. *)
-let test_provider_config_for_summary_routes_hitl_summary_lane () =
-  let load_and_resolve ~with_hitl_summary =
-    let text = summary_routing_runtime_toml ~with_hitl_summary in
-    with_temp_runtime_toml text (fun path ->
-      match Runtime.save_config_text ~runtime_config_path:path text with
-      | Error msg -> Alcotest.failf "runtime config should load: %s" msg
-      | Ok () ->
-        (match AQ.provider_config_for_summary ~keeper_name:"no-such-keeper" with
-         | None -> None
-         | Some selected ->
-           let worker_cfg, _mode =
-             Summary_worker.For_testing.provider_config_for_summary
-               ~runtime_id:selected.runtime_id
-               selected.provider_config
-           in
-           Some (selected, worker_cfg)))
-  in
-  (match load_and_resolve ~with_hitl_summary:true with
-   | None -> Alcotest.fail "expected a provider config for the hitl_summary lane"
-   | Some (selected, worker_cfg) ->
-     Alcotest.(check string)
-       "hitl_summary runtime id is preserved"
-       "local.kimi_like"
-       selected.runtime_id;
-     Alcotest.(check string)
-       "hitl_summary lane model is used"
-       "kimi-like-summary"
-       selected.provider_config.Llm_provider.Provider_config.model_id;
-     Alcotest.(check (option (float 0.0001)))
-       "HITL worker preserves runtime.toml temperature"
-       (Some 1.0)
-       worker_cfg.temperature);
-  match load_and_resolve ~with_hitl_summary:false with
-  | None -> Alcotest.fail "expected structured_judge fallback config"
-  | Some (selected, _worker_cfg) ->
-    Alcotest.(check string)
-      "structured_judge fallback runtime id is preserved"
-      "local.judge"
-      selected.runtime_id;
-    Alcotest.(check string)
-      "structured_judge fallback model is used"
-      "judge"
-      selected.provider_config.Llm_provider.Provider_config.model_id
+let submit_with_context
+      ?turn_id
+      ?request_context
+      ?task_id
+      ?goal_id
+      ?(goal_ids = [])
+      ?continuation_channel
+      ~base_path
+      ~keeper_name
+      ~input
+      ()
+  =
+  match
+    AQ.submit_pending
+      ~keeper_name
+      ~tool_name:"external-effect"
+      ~input
+      ~base_path
+      ?turn_id
+      ?request_context
+      ?task_id
+      ?goal_id
+      ~goal_ids
+      ?continuation_channel
+      ()
+  with
+  | Ok id -> id
+  | Error error -> Alcotest.fail (AQ.storage_error_to_string error)
 ;;
 
-let pending_id_for_keeper ~keeper_name =
-  match AQ.list_pending_json () with
-  | `List entries ->
-    List.find_map
-      (function
-        | `Assoc kvs ->
-          (match List.assoc_opt "keeper_name" kvs, List.assoc_opt "id" kvs with
-           | Some (`String name), Some (`String id) when String.equal name keeper_name ->
-             Some id
-           | _ -> None)
-        | _ -> None)
-      entries
-  | _ -> None
+let submit ~base_path ~keeper_name ~input =
+  submit_with_context ~base_path ~keeper_name ~input ()
 ;;
 
-let phase_in_json json =
-  let open Yojson.Safe.Util in
-  json |> member "phase" |> to_string
+let reject_and_cleanup id =
+  match AQ.resolve ~id ~decision:(Agent_sdk.Hooks.Reject "test cleanup") with
+  | Ok () -> ()
+  | Error error -> Alcotest.fail (AQ.resolve_error_to_string error)
 ;;
 
-let test_fresh_critical_entry_phase_is_awaiting_operator () =
-  Eio_main.run @@ fun _env ->
+let test_dedup_never_merges_distinct_origins () =
   let base_path = temp_dir () in
+  let keeper_name = "queue-distinct-origin" in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_path)
     (fun () ->
-       Eio.Switch.run @@ fun sw ->
-       let keeper_name = "fresh-critical-phase-test" in
-       let result = ref None in
-       Eio.Fiber.fork ~sw (fun () ->
-         let decision =
-           AQ.submit_and_await
-             ~keeper_name
-             ~tool_name:"keeper_continue_after_reconcile"
-             ~input:(`Assoc [ ("kind", `String "critical_gate") ])
-             ~risk_level:AQ.Critical
-             ~base_path
-             ()
-         in
-         result := Some decision);
-       yield_until (fun () -> Option.is_some (pending_id_for_keeper ~keeper_name));
-       let id =
-         match pending_id_for_keeper ~keeper_name with
-         | Some id -> id
-         | None -> Alcotest.fail "Critical approval was not queued"
+       let input = `Assoc [ "target", `String "same-action" ] in
+       let dashboard_a =
+         Keeper_continuation_channel.Dashboard { thread_id = "thread-a" }
        in
-       let entry =
-         match AQ.get_pending_entry ~id with
-         | Some entry -> entry
-         | None -> Alcotest.fail "in-memory entry not found"
+       let dashboard_b =
+         Keeper_continuation_channel.Dashboard { thread_id = "thread-b" }
        in
-       Alcotest.(check bool)
-         "submit_and_await entry owns a blocking lane"
-         true
-         (AQ.has_blocking_pending_for_keeper ~keeper_name);
-       Alcotest.(check bool)
-         "fresh Critical entry is Awaiting_operator in-memory"
-         true
-         (entry.phase = AQ.Awaiting_operator);
-       let detail =
-         match AQ.get_pending_json ~id with
-         | Some json -> json
-         | None -> Alcotest.fail "pending detail JSON not found"
-       in
-       Alcotest.(check string)
-         "fresh Critical entry is awaiting_operator in JSON"
-         "awaiting_operator"
-         (phase_in_json detail);
-       (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
-        | Ok () -> ()
-        | Error err ->
-          Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
-       yield_until (fun () -> Option.is_some !result);
-       match !result with
-       | Some Agent_sdk.Hooks.Approve -> ()
-       | Some decision ->
-         Alcotest.fail
-           ("expected Approve, got " ^ AQ.approval_decision_to_string decision)
-       | None -> Alcotest.fail "Critical approval did not resume after resolve")
-;;
-
-(* Blocking approvals resume through their live resolver and therefore do not
-   create a second durable lane event. *)
-let test_resolve_with_live_resolver_does_not_enqueue_durable_wake () =
-  Eio_main.run
-  @@ fun _env ->
-  let base_path = temp_dir () in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_path)
-    (fun () ->
-       Eio.Switch.run
-       @@ fun sw ->
-       let keeper_name = "resolve-wake-test" in
-       let result = ref None in
-       Eio.Fiber.fork ~sw (fun () ->
-         let decision =
-           AQ.submit_and_await
-             ~keeper_name
-             ~tool_name:"keeper_continue_after_reconcile"
-             ~input:(`Assoc [ "kind", `String "critical_gate" ])
-             ~risk_level:AQ.Critical
-             ~base_path
-             ()
-         in
-         result := Some decision);
-       yield_until (fun () -> Option.is_some (pending_id_for_keeper ~keeper_name));
-       let id =
-         match pending_id_for_keeper ~keeper_name with
-         | Some id -> id
-         | None -> Alcotest.fail "Critical approval was not queued"
-       in
-       (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
-        | Ok () -> ()
-        | Error err ->
-          Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
-       Alcotest.(check bool)
-         "blocking resolver emits no durable duplicate"
-         true
-         (Option.is_none
-            (durable_resolution_opt ~base_path ~keeper_name ~approval_id:id));
-       yield_until (fun () -> Option.is_some !result))
-;;
-
-let test_submit_pending_resolve_commits_before_callback_and_signal () =
-  Eio_main.run
-  @@ fun _env ->
-  let base_path = temp_dir () in
-  let callback_saw_pending = ref false in
-  let callback_saw_durable = ref false in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_path)
-    (fun () ->
-       let keeper_name = "pending-resolve-wake-test" in
-       let callback_decision = ref None in
-       let input = `Assoc [ "kind", `String "critical_gate" ] in
-       let signal_metric = Keeper_metrics.(to_string ApprovalResolutionSignal) in
-       let signal_labels =
-         [ "keeper", keeper_name; "outcome", "deferred_unregistered" ]
-       in
-       let signal_before =
-         Masc.Otel_metric_store.metric_value_or_zero
-           signal_metric
-           ~labels:signal_labels
-           ()
-       in
-       let id =
-         AQ.submit_pending
+       let first =
+         submit_with_context
+           ~turn_id:1
+           ~goal_ids:[ "goal-a" ]
+           ~continuation_channel:dashboard_a
+           ~base_path
            ~keeper_name
-           ~tool_name:"keeper_continue_after_reconcile"
            ~input
-           ~risk_level:AQ.Critical
-           ~base_path
-           ~on_resolution:(fun decision ->
-             callback_saw_pending := AQ.has_pending_for_keeper ~keeper_name;
-             callback_saw_durable :=
-               (match pending_id_for_keeper ~keeper_name with
-                | None -> false
-                | Some callback_id ->
-                  Option.is_some
-                    (durable_resolution_opt
-                       ~base_path
-                       ~keeper_name
-                       ~approval_id:callback_id));
-             callback_decision := Some decision)
            ()
        in
-       (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
-        | Ok () -> ()
-        | Error err ->
-          Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
-       Alcotest.(check bool)
-         "on_resolution callback ran"
-         true
-         (Option.is_some !callback_decision);
-       Alcotest.(check bool)
-         "pending id remains visible throughout domain callback"
-         true
-         !callback_saw_pending;
-       Alcotest.(check bool)
-         "durable commit precedes domain callback"
-         true
-         !callback_saw_durable;
-       Alcotest.(check bool)
-         "pending id is removed after callback"
-         false
-         (AQ.has_pending_for_keeper ~keeper_name);
-       Alcotest.(check (float 0.0001))
-         "post-callback signal outcome is observed"
-         (signal_before +. 1.0)
-         (Masc.Otel_metric_store.metric_value_or_zero
-            signal_metric
-            ~labels:signal_labels
-            ());
-       let resolution =
-         require_durable_resolution ~base_path ~keeper_name ~approval_id:id
+       let same =
+         submit_with_context
+           ~turn_id:1
+           ~goal_ids:[ "goal-a" ]
+           ~continuation_channel:dashboard_a
+           ~base_path
+           ~keeper_name
+           ~input
+           ()
        in
-       match resolution.decision with
-       | Keeper_event_queue.Hitl_approved action ->
-         Alcotest.(check bool)
-           "durable wake carries the exact approved action"
-           true
-           (AQ.approved_action_matches_request
-              action
-              ~keeper_name
-              ~tool_name:"keeper_continue_after_reconcile"
-              ~input)
-       | Keeper_event_queue.Hitl_rejected | Keeper_event_queue.Hitl_edited ->
-         Alcotest.fail "approved queue entry emitted a non-approved durable wake")
+       Alcotest.(check string) "same origin deduplicates" first same;
+       let another_turn =
+         submit_with_context
+           ~turn_id:2
+           ~goal_ids:[ "goal-a" ]
+           ~continuation_channel:dashboard_a
+           ~base_path
+           ~keeper_name
+           ~input
+           ()
+       in
+       let another_channel =
+         submit_with_context
+           ~turn_id:1
+           ~goal_ids:[ "goal-a" ]
+           ~continuation_channel:dashboard_b
+           ~base_path
+           ~keeper_name
+           ~input
+           ()
+       in
+       let another_goal_context =
+         submit_with_context
+           ~turn_id:1
+           ~goal_ids:[ "goal-b" ]
+           ~continuation_channel:dashboard_a
+           ~base_path
+           ~keeper_name
+           ~input
+           ()
+       in
+       List.iter
+         (fun id ->
+            Alcotest.(check bool) "distinct origin has its own request" true
+              (not (String.equal first id)))
+         [ another_turn; another_channel; another_goal_context ];
+       List.iter reject_and_cleanup
+         [ first; another_turn; another_channel; another_goal_context ])
 ;;
 
-let test_delivery_failure_keeps_nonblocking_approval_pending () =
+let check_update label expected = function
+  | Ok actual -> Alcotest.(check bool) label expected actual
+  | Error error -> Alcotest.fail (AQ.storage_error_to_string error)
+;;
+
+let read_pending_snapshot ~base_path =
+  Yojson.Safe.from_file (AQ.For_testing.pending_store_path ~base_path)
+;;
+
+let write_pending_snapshot ~base_path json =
+  let path = AQ.For_testing.pending_store_path ~base_path in
+  ensure_dir (Filename.dirname path);
+  Out_channel.with_open_text path (fun channel ->
+    output_string channel (Yojson.Safe.pretty_to_string json))
+;;
+
+let delivery_json ~entry ~remember_rule =
+  `Assoc
+    [ "entry", entry
+    ; "decision", `Assoc [ "kind", `String "approve" ]
+    ; "source", `String "human_operator"
+    ; "remember_rule", `Bool remember_rule
+    ; "created_by", `Null
+    ; "grant_consumed", `Bool false
+    ]
+;;
+
+let install_exn ~base_path =
+  match AQ.install_persistence ~base_path with
+  | Ok report -> report
+  | Error error -> Alcotest.fail (AQ.install_error_to_string error)
+;;
+
+let test_submit_is_nonblocking_and_exactly_deduplicated () =
   let base_path = temp_dir () in
-  let callback_decision = ref None in
+  let keeper_name = "queue-exact-submit" in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_path)
     (fun () ->
-       let keeper_name = "delivery-failure-pending-test" in
-       let id =
-         AQ.submit_pending
-           ~keeper_name
-           ~tool_name:"keeper_continue_after_reconcile"
-           ~input:(`Assoc [ "kind", `String "medium_gate" ])
-           ~risk_level:AQ.Medium
+       let input =
+         `Assoc
+           [ "target", `String "document"
+           ; "payload", `Assoc [ "text", `String "hello"; "nonce", `Int 1 ]
+           ]
+       in
+       let request_context =
+         `Assoc [ "user_message", `String "write the exact document" ]
+       in
+       let first =
+         submit_with_context
+           ~turn_id:12
+           ~request_context
            ~base_path
-           ~on_resolution:(fun decision -> callback_decision := Some decision)
+           ~keeper_name
+           ~input
            ()
        in
-       let entry =
-         match AQ.get_pending_entry ~id with
-         | Some entry -> entry
-         | None -> Alcotest.fail "pending approval disappeared before conflict setup"
+       let reordered =
+         `Assoc
+           [ "payload", `Assoc [ "nonce", `Int 1; "text", `String "hello" ]
+           ; "target", `String "document"
+           ]
        in
-       let conflicting_resolution : Keeper_event_queue.hitl_resolution =
-         { approval_id = id
-         ; decision = Keeper_event_queue.Hitl_rejected
-         ; channel = entry.continuation_channel
-         }
-       in
-       (match
-          Registry_queue.enqueue_hitl_resolution_durable_result
-            ~base_path
-            ~keeper_name
-            ~approval_id:id
-            ~decision:conflicting_resolution.decision
-            ~channel:conflicting_resolution.channel
-        with
-        | Ok () -> ()
-        | Error reason -> Alcotest.fail ("conflict setup failed: " ^ reason));
-       (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
-        | Error (AQ.Delivery_failed { approval_id; reason }) ->
-          Alcotest.(check string) "failure identifies approval" id approval_id;
-          Alcotest.(check bool) "failure reason is explicit" true
-            (String.length reason > 0)
-        | Error err ->
-          Alcotest.fail
-            ("expected Delivery_failed, got " ^ AQ.resolve_error_to_string err)
-        | Ok () -> Alcotest.fail "resolve accepted a conflicting durable decision");
-       Alcotest.(check bool) "failed delivery keeps pending entry" true
-         (Option.is_some (AQ.get_pending_entry ~id));
-       Alcotest.(check bool) "failed delivery does not run callback" true
-         (Option.is_none !callback_decision);
-       drop_durable_resolution
-         ~base_path
-         ~keeper_name
-         conflicting_resolution;
-       (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
-        | Ok () -> ()
-        | Error err -> Alcotest.fail (AQ.resolve_error_to_string err));
-       Alcotest.(check bool) "successful retry removes pending entry" true
-         (Option.is_none (AQ.get_pending_entry ~id));
-       Alcotest.(check bool) "successful retry runs callback" true
-         (Option.is_some !callback_decision))
-;;
-
-let test_blocking_callback_policy_owns_lane_without_resolver () =
-  let base_path = temp_dir () in
-  let callback_decision = ref None in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_path)
-    (fun () ->
-       let keeper_name = "blocking-callback-policy-test" in
-       let id =
-         AQ.submit_pending
-           ~keeper_name
-           ~tool_name:"keeper_continue_after_reconcile"
-           ~input:(`Assoc [ "kind", `String "lifecycle_gate" ])
-           ~risk_level:AQ.Critical
+       let same =
+         submit_with_context
+           ~turn_id:12
+           ~request_context
            ~base_path
-           ~lane_policy:AQ.Blocking
-           ~on_resolution:(fun decision -> callback_decision := Some decision)
+           ~keeper_name
+           ~input:reordered
            ()
        in
-       Alcotest.(check bool)
-         "explicit blocking callback owns the lane"
-         true
-         (AQ.has_blocking_pending_for_keeper ~keeper_name);
-       (match AQ.get_pending_entry ~id with
+       Alcotest.(check string) "same exact request" first same;
+       let changed =
+         submit
+           ~base_path
+           ~keeper_name
+           ~input:
+             (`Assoc
+                [ "target", `String "document"
+                ; "payload", `Assoc [ "text", `String "hello"; "nonce", `Int 2 ]
+                ])
+       in
+       Alcotest.(check bool) "changed field is a different request" true
+         (not (String.equal first changed));
+       (match AQ.get_pending_entry ~id:first with
+        | None -> Alcotest.fail "pending request missing"
         | Some entry ->
-          Alcotest.(check bool) "lane policy is typed as Blocking" true
-            (entry.lane_policy = AQ.Blocking)
-        | None -> Alcotest.fail "blocking callback entry not found");
-       (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
-        | Ok () -> ()
-        | Error err -> Alcotest.fail (AQ.resolve_error_to_string err));
-       Alcotest.(check bool)
-         "blocking callback does not emit duplicate durable wake"
-         true
-         (Option.is_none
-            (durable_resolution_opt ~base_path ~keeper_name ~approval_id:id));
-       Alcotest.(check bool)
-         "resolved blocking callback releases the lane"
-         false
-         (AQ.has_blocking_pending_for_keeper ~keeper_name);
-       match !callback_decision with
-       | Some Agent_sdk.Hooks.Approve -> ()
-       | Some decision ->
-         Alcotest.fail
-           ("unexpected callback decision: "
-            ^ AQ.approval_decision_to_string decision)
-       | None -> Alcotest.fail "blocking callback did not run")
+          Alcotest.(check bool) "summary is not started by queue" true
+            (entry.summary_status = AQ.Summary_not_requested);
+          Alcotest.check (Alcotest.option yojson)
+            "exact outer-turn context"
+            (Some request_context)
+            entry.request_context);
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       (match AQ.get_pending_entry ~id:first with
+        | Some entry ->
+          Alcotest.check (Alcotest.option yojson)
+            "outer-turn context survives restart"
+            (Some request_context)
+            entry.request_context
+        | None -> Alcotest.fail "pending request was not restored");
+       reject_and_cleanup first;
+       reject_and_cleanup changed)
 ;;
 
-let test_durable_resolution_carries_originating_continuation_channel () =
+let test_resolution_is_durable_and_origin_scoped () =
   let base_path = temp_dir () in
-  let submit_resolve_capture ?continuation_channel ~keeper_name () =
-    let id =
-      AQ.submit_pending
-        ~keeper_name
-        ~tool_name:"keeper_continue_after_reconcile"
-        ~input:(`Assoc [ "kind", `String "medium_gate" ])
-        ~risk_level:AQ.Medium
-        ~base_path
-        ?continuation_channel
-        ~on_resolution:(fun _decision -> ())
-        ()
-    in
-    (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
-     | Ok () -> ()
-     | Error err -> Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
-    require_durable_resolution ~base_path ~keeper_name ~approval_id:id
-  in
+  let keeper_name = "queue-origin" in
+  let unrelated_keeper = "queue-unrelated" in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_path)
     (fun () ->
-       let dashboard_channel =
-         Chat_queue.continuation_channel_of_message_source
-           ~dashboard_thread_id:"dashboard-thread-1"
-           Chat_queue.Dashboard
-       in
-       let dashboard_resolution =
-         submit_resolve_capture
-           ~keeper_name:"wake-dashboard-origin-test"
-           ~continuation_channel:dashboard_channel
+       let input = `Assoc [ "target", `String "document"; "body", `String "hello" ] in
+       let id = submit ~base_path ~keeper_name ~input in
+       let result =
+         AQ.resolve_with_policy
+           ~id
+           ~decision:Agent_sdk.Hooks.Approve
+           ~remember_rule:true
+           ~created_by:"operator"
            ()
        in
-       Alcotest.(check bool)
-         "dashboard wake payload keeps the originating route"
-         true
-         (Keeper_continuation_channel.same_route
-            dashboard_channel
-            dashboard_resolution.channel);
-       let discord_channel =
-         Chat_queue.continuation_channel_of_message_source
-           (Chat_queue.Discord
-              { channel_id = "discord-channel-1"; user_id = "discord-user-1" })
+       let resolution_result =
+         match result with
+         | Ok result -> result
+         | Error error -> Alcotest.fail (AQ.resolve_error_to_string error)
        in
-       let discord_resolution =
-         submit_resolve_capture
-           ~keeper_name:"wake-discord-origin-test"
-           ~continuation_channel:discord_channel
-           ()
-       in
-       Alcotest.(check bool)
-         "discord wake payload keeps the originating route"
-         true
-         (Keeper_continuation_channel.same_route
-            discord_channel
-            discord_resolution.channel);
-       let unrouted_resolution =
-         submit_resolve_capture ~keeper_name:"wake-unrouted-origin-test" ()
-       in
-       match unrouted_resolution.channel with
-       | Keeper_continuation_channel.Unrouted { reason } ->
-         Alcotest.(check string) "missing connector fails closed"
-           "no originating connector"
-           reason
-       | Keeper_continuation_channel.Dashboard _
-       | Keeper_continuation_channel.Discord _
-       | Keeper_continuation_channel.Slack _ ->
-        Alcotest.fail "missing connector must not synthesize a routable channel")
-;;
-
-let test_expire_stale_submit_and_await_does_not_enqueue_durable_wake () =
-  Eio_main.run @@ fun _env ->
-  let base_path = temp_dir () in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_path)
-    (fun () ->
-       let keeper_name = "expire-stale-await-no-wake-test" in
-       let result = ref None in
-       Eio.Switch.run
-       @@ fun sw ->
-       Eio.Fiber.fork ~sw (fun () ->
-         let decision =
-           AQ.submit_and_await
-             ~keeper_name
-             ~tool_name:"keeper_continue_after_reconcile"
-             ~input:(`Assoc [ "kind", `String "medium_gate" ])
-             ~risk_level:AQ.Medium
-             ~base_path
-             ()
-       in
-       result := Some decision);
-       yield_until (fun () -> Option.is_some (pending_id_for_keeper ~keeper_name));
-       let id =
-         match pending_id_for_keeper ~keeper_name with
-         | Some id -> id
-         | None -> Alcotest.fail "blocking stale approval was not queued"
-       in
-       AQ.expire_stale ~max_wait_s:0.0;
-       yield_until (fun () -> Option.is_some !result);
-       Alcotest.(check bool) "expire path resolves blocking entry via resolver" true
-         (Option.is_some !result);
-       (match !result with
-        | Some (Agent_sdk.Hooks.Reject _reason) -> ()
-        | Some _ -> Alcotest.fail "expire path should reject in stale blocking entry"
-        | None -> Alcotest.fail "blocking stale entry should resolve");
-       Alcotest.(check bool)
-         "blocking stale resolution does not enqueue a durable wake"
-         true
-         (Option.is_none
-            (durable_resolution_opt ~base_path ~keeper_name ~approval_id:id)))
-;;
-
-let test_expire_stale_submit_pending_enqueues_durable_wake () =
-  let base_path = temp_dir () in
-  let resolved = ref None in
-  let continuation_channel =
-    Chat_queue.continuation_channel_of_message_source
-      ~dashboard_thread_id:"dashboard-thread-1"
-      Chat_queue.Dashboard
-  in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_path)
-    (fun () ->
-       let keeper_name = "expire-stale-pending-wake-test" in
-       let id =
-         AQ.submit_pending
-           ~keeper_name
-           ~tool_name:"keeper_continue_after_reconcile"
-           ~input:(`Assoc [ "kind", `String "medium_gate" ])
-           ~risk_level:AQ.Medium
-           ~base_path
-           ~continuation_channel
-           ~on_resolution:(fun decision -> resolved := Some decision)
-           ()
-       in
-       AQ.expire_stale ~max_wait_s:0.0;
-       Alcotest.(check bool) "on_resolution callback runs on stale expiry" true
-         (Option.is_some !resolved);
+       Alcotest.(check bool) "exact rule persisted" true
+         (Option.is_some resolution_result.remembered_rule);
+       Alcotest.(check bool) "pending removed" false
+         (Option.is_some (AQ.get_pending_entry ~id));
        let resolution =
-         require_durable_resolution ~base_path ~keeper_name ~approval_id:id
+         match durable_resolution_opt ~base_path ~keeper_name ~approval_id:id with
+         | None -> Alcotest.fail "origin Keeper did not receive durable resolution"
+         | Some resolution -> resolution
        in
-       Alcotest.(check bool)
-         "durable wake carries reject decision"
-         true
-         (resolution.decision = Keeper_event_queue.Hitl_rejected);
-       Alcotest.(check bool)
-         "durable wake channel is preserved on stale expiry"
-         true
-         (Keeper_continuation_channel.same_route
-            continuation_channel
-            resolution.channel)
-       )
+       (match resolution.decision with
+        | Keeper_event_queue.Hitl_approved -> ()
+        | Keeper_event_queue.Hitl_rejected _ | Keeper_event_queue.Hitl_edited _ ->
+          Alcotest.fail "expected approved resolution");
+       (match AQ.approved_resolution_request ~base_path ~id with
+        | Ok (Some request) ->
+          Alcotest.(check string) "journal keeper" keeper_name request.keeper_name;
+          Alcotest.(check string) "journal operation" "external-effect" request.tool_name;
+          Alcotest.(check bool) "journal complete input" true
+            (Yojson.Safe.equal input request.input)
+        | Ok None -> Alcotest.fail "approved journal was consumed before Gate use"
+        | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+       Alcotest.(check bool) "unrelated Keeper receives no resolution" true
+         (Option.is_none
+            (durable_resolution_opt
+               ~base_path
+               ~keeper_name:unrelated_keeper
+               ~approval_id:id));
+       Alcotest.(check bool) "exact remembered request matches" true
+         (match
+            AQ.find_matching_rule
+              ~base_path
+              ~keeper_name
+              ~tool_name:"external-effect"
+              ~input
+              ()
+          with
+          | Ok matched -> Option.is_some matched
+          | Error error -> Alcotest.fail (AQ.rule_store_error_to_string error));
+       (match
+          AQ.consume_approved_resolution
+            ~base_path
+            ~id
+            ~keeper_name
+            ~tool_name:"external-effect"
+            ~input:(`Assoc [ "target", `String "other" ])
+        with
+        | Ok AQ.Consumption_not_matching -> ()
+        | Ok (AQ.Consumption_committed | AQ.Consumption_already_committed) ->
+          Alcotest.fail "changed input consumed the exact grant"
+        | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+       (match
+          AQ.consume_approved_resolution
+            ~base_path
+            ~id
+            ~keeper_name
+            ~tool_name:"external-effect"
+            ~input
+        with
+        | Ok AQ.Consumption_committed -> ()
+        | Ok (AQ.Consumption_already_committed | AQ.Consumption_not_matching) ->
+          Alcotest.fail "exact request did not consume its grant"
+        | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+       drop_resolution ~base_path ~keeper_name resolution)
 ;;
 
-let test_expire_stale_retries_after_delivery_failure () =
+let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
   let base_path = temp_dir () in
-  let callback_decision = ref None in
+  let keeper_name = "queue-one-shot-origin" in
+  let input =
+    `Assoc
+      [ "target", `String "same-shape"
+      ; "payload", `Assoc [ "value", `Int 1 ]
+      ]
+  in
+  let continuation_channel =
+    Keeper_continuation_channel.Dashboard { thread_id = "origin-thread" }
+  in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_path)
     (fun () ->
-       let keeper_name = "expire-delivery-failure-test" in
-       let id =
-         AQ.submit_pending
-           ~keeper_name
-           ~tool_name:"keeper_continue_after_reconcile"
-           ~input:(`Assoc [ "kind", `String "medium_gate" ])
-           ~risk_level:AQ.Medium
+       let approval_id =
+         submit_with_context
+           ~turn_id:17
+           ~task_id:"task-origin"
+           ~goal_ids:[ "goal-origin" ]
+           ~continuation_channel
            ~base_path
-           ~on_resolution:(fun decision -> callback_decision := Some decision)
+           ~keeper_name
+           ~input
            ()
        in
-       let entry =
-         match AQ.get_pending_entry ~id with
-         | Some entry -> entry
-         | None -> Alcotest.fail "pending approval disappeared before conflict setup"
+       (match AQ.resolve ~id:approval_id ~decision:Agent_sdk.Hooks.Approve with
+        | Ok () -> ()
+        | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
+       let resolution =
+         match
+           durable_resolution_opt ~base_path ~keeper_name ~approval_id
+         with
+         | Some resolution -> resolution
+         | None -> Alcotest.fail "approved resolution was not delivered"
        in
-       let conflicting_resolution : Keeper_event_queue.hitl_resolution =
-         { approval_id = id
-         ; decision =
-             Keeper_event_queue.Hitl_approved
-               { keeper_name
-               ; tool_name = entry.tool_name
-               ; input_hash = entry.input_hash
-               }
-         ; channel = entry.continuation_channel
+       AQ.For_testing.reset_runtime_state ();
+       let report = install_exn ~base_path in
+       Alcotest.(check int) "unconsumed grant restored" 1 report.replayed_deliveries;
+       (match AQ.approved_resolution_state ~base_path ~id:approval_id with
+        | Ok AQ.Resolution_unconsumed -> ()
+        | Ok AQ.Resolution_consumed -> Alcotest.fail "restart lost the unconsumed grant"
+        | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+       let grant =
+         match Gate.cycle_grant_of_resolution resolution with
+         | Some grant -> grant
+         | None -> Alcotest.fail "approved resolution did not create a cycle grant"
+       in
+       let lease = lease_for_resolution resolution in
+       (match
+          Masc.Keeper_heartbeat_loop.settlement_of_cycle_outcome
+            ~base_path
+            ~settled_at:3.0
+            ~stop_requested:false
+            ~lease
+            None
+        with
+        | Masc.Keeper_registry_event_queue.Requeue
+            Masc.Keeper_registry_event_queue.Approval_grant_unconsumed ->
+          ()
+        | _ -> Alcotest.fail "unconsumed grant wake was acknowledged");
+       let request ~input ~task_id ~goal_ids : Gate.request =
+         { keeper_name
+         ; operation = "external-effect"
+         ; input
+         ; base_path
+         ; causal_context =
+             Some { Gate.turn_id = Some 99; snapshot = `Assoc [] }
+         ; task_id
+         ; goal_ids
+         ; continuation_channel = None
          }
        in
+       let source_of = function
+         | Gate.Allow { source } -> source
+         | Gate.Deferred _ -> Alcotest.fail "keeper Always Allow unexpectedly deferred"
+         | Gate.Unavailable reason ->
+           Alcotest.fail (Gate.unavailable_reason_to_string reason)
+       in
        (match
-          Registry_queue.enqueue_hitl_resolution_durable_result
-            ~base_path
-            ~keeper_name
-            ~approval_id:id
-            ~decision:conflicting_resolution.decision
-            ~channel:conflicting_resolution.channel
+          Gate.decide
+            ~cycle_grant:grant
+            ~keeper_always_allow:true
+            (request
+               ~input:(`Assoc [ "target", `String "different" ])
+               ~task_id:(Some "task-other")
+               ~goal_ids:[ "goal-other" ])
+          |> source_of
         with
-        | Ok () -> ()
-        | Error reason -> Alcotest.fail ("conflict setup failed: " ^ reason));
-       AQ.expire_stale ~max_wait_s:0.0;
-       Alcotest.(check bool) "failed expiry delivery keeps pending entry" true
-         (Option.is_some (AQ.get_pending_entry ~id));
-       Alcotest.(check bool) "failed expiry delivery does not run callback" true
-         (Option.is_none !callback_decision);
-       drop_durable_resolution
-         ~base_path
-         ~keeper_name
-         conflicting_resolution;
-       AQ.expire_stale ~max_wait_s:0.0;
-       Alcotest.(check bool) "retry removes expired entry" true
-         (Option.is_none (AQ.get_pending_entry ~id));
-       match !callback_decision with
-       | Some (Agent_sdk.Hooks.Reject _) -> ()
-       | Some decision ->
-         Alcotest.fail
-           ("expected Reject, got " ^ AQ.approval_decision_to_string decision)
-       | None -> Alcotest.fail "successful expiry retry did not run callback")
+        | Gate.Keeper_always_allow -> ()
+        | Gate.One_shot_resolution _
+        | Gate.Exact_always_rule _
+        | Gate.Workspace_always_allow ->
+          Alcotest.fail "different exact input consumed the grant");
+       (match
+          Gate.decide
+            ~cycle_grant:grant
+            ~keeper_always_allow:true
+            (request
+               ~input
+               ~task_id:(Some "task-other")
+               ~goal_ids:[ "goal-other" ])
+          |> source_of
+        with
+        | Gate.One_shot_resolution actual_id ->
+          Alcotest.(check string) "exact approval id" approval_id actual_id
+        | Gate.Exact_always_rule _
+        | Gate.Keeper_always_allow
+        | Gate.Workspace_always_allow ->
+          Alcotest.fail "exact effect did not consume its one-shot grant");
+       (match
+          Gate.decide
+            ~cycle_grant:grant
+            ~keeper_always_allow:true
+            (request ~input ~task_id:None ~goal_ids:[])
+          |> source_of
+        with
+        | Gate.Keeper_always_allow -> ()
+        | Gate.One_shot_resolution _
+        | Gate.Exact_always_rule _
+        | Gate.Workspace_always_allow ->
+          Alcotest.fail "one-shot grant was consumed more than once");
+       (match
+          Masc.Keeper_heartbeat_loop.settlement_of_cycle_outcome
+            ~base_path
+            ~settled_at:4.0
+            ~stop_requested:false
+            ~lease
+            None
+        with
+        | Masc.Keeper_registry_event_queue.Ack -> ()
+        | _ -> Alcotest.fail "consumed grant wake was not acknowledged");
+       AQ.For_testing.reset_runtime_state ();
+       let _ = install_exn ~base_path in
+       (match AQ.approved_resolution_state ~base_path ~id:approval_id with
+        | Ok AQ.Resolution_consumed -> ()
+        | Ok AQ.Resolution_unconsumed ->
+          Alcotest.fail "consumed grant reappeared after restart"
+        | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+       drop_resolution ~base_path ~keeper_name resolution)
 ;;
 
-let test_critical_entry_phase_becomes_escalated_after_timer () =
-  Eio_main.run @@ fun env ->
-  let clock = Eio.Stdenv.clock env in
+let test_summary_updates_never_resolve_pending_request () =
   let base_path = temp_dir () in
-  AQ.For_testing.reset_audit_store ();
+  let keeper_name = "queue-summary-advisory" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let id = submit ~base_path ~keeper_name ~input:(`Assoc [ "request", `String "x" ]) in
+       check_update "mark pending" true (AQ.mark_summary_pending ~id);
+       check_update
+         "duplicate judge worker rejected"
+         false
+         (AQ.mark_summary_pending ~id);
+       let summary : AQ.hitl_context_summary =
+         { summary_version = 2
+         ; generated_at = Unix.gettimeofday ()
+         ; model_run_id = "judge-run"
+         ; context_summary = "The model recommends approval."
+         ; key_questions = []
+         ; judgment = AQ.Approve
+         ; rationale = "Visible context supports the exact request."
+         }
+       in
+       check_update "attach advisory judgment" true (AQ.attach_summary ~id summary);
+       check_update "terminal summary cannot be replaced" false
+         (AQ.attach_summary ~id { summary with judgment = AQ.Deny });
+       check_update "terminal summary cannot become failure" false
+         (AQ.mark_summary_failed ~id ~reason:"late failure" ~retryable:true);
+       Alcotest.(check bool) "model judgment remains pending" true
+         (Option.is_some (AQ.get_pending_entry ~id));
+       Alcotest.(check bool) "resolved entry cannot be updated" true
+         (match AQ.resolve ~id ~decision:(Agent_sdk.Hooks.Reject "operator denied") with
+          | Error error -> Alcotest.fail (AQ.resolve_error_to_string error)
+          | Ok () ->
+            (match AQ.attach_summary ~id summary with
+             | Ok updated -> not updated
+             | Error error -> Alcotest.fail (AQ.storage_error_to_string error))))
+;;
+
+let test_only_retryable_summary_failure_restarts () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-summary-retry" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let retryable_id =
+         submit ~base_path ~keeper_name ~input:(`Assoc [ "request", `String "retry" ])
+       in
+       let terminal_id =
+         submit
+           ~base_path
+           ~keeper_name
+           ~input:(`Assoc [ "request", `String "terminal" ])
+       in
+       List.iter
+         (fun id -> check_update "mark pending" true (AQ.mark_summary_pending ~id))
+         [ retryable_id; terminal_id ];
+       check_update
+         "retryable failure"
+         true
+         (AQ.mark_summary_failed
+            ~id:retryable_id
+            ~reason:"interrupted"
+            ~retryable:true);
+       check_update
+         "nonretryable failure"
+         true
+         (AQ.mark_summary_failed
+            ~id:terminal_id
+            ~reason:"terminal"
+            ~retryable:false);
+       check_update
+         "retryable CAS restarts"
+         true
+         (AQ.restart_retryable_summary ~id:retryable_id);
+       check_update
+         "nonretryable state is unchanged"
+         false
+         (AQ.restart_retryable_summary ~id:terminal_id);
+       (match AQ.get_pending_entry ~id:retryable_id with
+        | Some { summary_status = AQ.Summary_pending; _ } -> ()
+        | Some _ | None -> Alcotest.fail "retryable summary did not return to pending");
+       reject_and_cleanup retryable_id;
+       reject_and_cleanup terminal_id)
+;;
+
+let test_retryable_auto_judge_recovery_is_lane_local () =
+  let base_path = temp_dir () in
+  let keeper_a = "queue-retry-lane-a" in
+  let keeper_b = "queue-retry-lane-b" in
   Fun.protect
     ~finally:(fun () ->
-      AQ.For_testing.reset_audit_store ();
+      AQ.For_testing.reset_runtime_state ();
       cleanup_dir base_path)
     (fun () ->
-       Eio.Switch.run @@ fun sw ->
-       let keeper_name = "critical-escalated-phase-test" in
-       let result = ref None in
-       Eio.Fiber.fork ~sw (fun () ->
-         let decision =
-           AQ.submit_and_await
-             ~keeper_name
-             ~tool_name:"keeper_continue_after_partial_commit"
-             ~input:(`Assoc [ ("kind", `String "critical_gate") ])
-             ~risk_level:AQ.Critical
-             ~base_path
-             ~clock
-             ~critical_escalation_after_s:0.01
-             ()
-         in
-         result := Some decision);
-       yield_until (fun () -> Option.is_some (pending_id_for_keeper ~keeper_name));
+       let id_a =
+         submit
+           ~base_path
+           ~keeper_name:keeper_a
+           ~input:(`Assoc [ "request", `String "lane-a" ])
+       in
+       let id_b =
+         submit
+           ~base_path
+           ~keeper_name:keeper_b
+           ~input:(`Assoc [ "request", `String "lane-b" ])
+       in
+       List.iter
+         (fun id -> check_update "mark pending" true (AQ.mark_summary_pending ~id))
+         [ id_a; id_b ];
+       check_update
+         "lane a failed"
+         true
+         (AQ.mark_summary_failed ~id:id_a ~reason:"lane-a-original" ~retryable:true);
+       check_update
+         "lane b failed"
+         true
+         (AQ.mark_summary_failed ~id:id_b ~reason:"lane-b-original" ~retryable:true);
+       let request : Gate.request =
+         { keeper_name = keeper_a
+         ; operation = "external-effect"
+         ; input = `Assoc [ "request", `String "new-lane-a-activity" ]
+         ; base_path
+         ; causal_context = None
+         ; task_id = None
+         ; goal_ids = []
+         ; continuation_channel = None
+         }
+       in
+       (match Gate.decide ~keeper_always_allow:true request with
+        | Gate.Allow { source = Gate.Keeper_always_allow } -> ()
+        | Gate.Allow _ | Gate.Deferred _ | Gate.Unavailable _ ->
+          Alcotest.fail "lane activity did not retain Keeper Always Allow");
+       (match AQ.get_pending_entry ~id:id_a with
+        | Some
+            { summary_status = AQ.Summary_failed { reason; retryable = true }
+            ; _
+            } ->
+          Alcotest.(check bool)
+            "same lane attempted retry"
+            true
+            (not (String.equal reason "lane-a-original"))
+        | Some _ | None -> Alcotest.fail "same-lane retry state is not observable");
+       (match AQ.get_pending_entry ~id:id_b with
+        | Some
+            { summary_status =
+                AQ.Summary_failed { reason = "lane-b-original"; retryable = true }
+            ; _
+            } ->
+          ()
+        | Some _ | None ->
+          Alcotest.fail "lane A activity retried another Keeper's judge");
+       reject_and_cleanup id_a;
+       reject_and_cleanup id_b;
+       List.iter
+         (fun (keeper_name, approval_id) ->
+            match durable_resolution_opt ~base_path ~keeper_name ~approval_id with
+            | Some resolution -> drop_resolution ~base_path ~keeper_name resolution
+            | None -> Alcotest.fail "lane-local retry cleanup was not durable")
+         [ keeper_a, id_a; keeper_b, id_b ])
+;;
+
+let test_decisive_summary_finalizes_after_restart () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-summary-finalize-restart" in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
        let id =
-         match pending_id_for_keeper ~keeper_name with
-         | Some id -> id
-         | None -> Alcotest.fail "Critical approval was not queued"
+         submit
+           ~base_path
+           ~keeper_name
+           ~input:(`Assoc [ "request", `String "finalize-after-restart" ])
        in
-       Eio.Time.sleep clock 0.03;
-       yield_until (fun () ->
-         match AQ.get_pending_entry ~id with
-         | Some entry -> entry.phase = AQ.Escalated
-         | None -> false);
-       let entry =
-         match AQ.get_pending_entry ~id with
-         | Some entry -> entry
-         | None -> Alcotest.fail "in-memory entry missing after escalation"
+       check_update "mark pending" true (AQ.mark_summary_pending ~id);
+       let summary : AQ.hitl_context_summary =
+         { summary_version = 2
+         ; generated_at = Unix.gettimeofday ()
+         ; model_run_id = "judge-before-restart"
+         ; context_summary = "The exact request is justified."
+         ; key_questions = []
+         ; judgment = AQ.Approve
+         ; rationale = "Visible context supports this exact request."
+         }
+       in
+       check_update "persist decisive summary" true (AQ.attach_summary ~id summary);
+       AQ.For_testing.reset_runtime_state ();
+       let _ = install_exn ~base_path in
+       let report = Gate.resume_persisted_auto_judges ~base_path in
+       Alcotest.(check int) "one recovery candidate" 1 report.requested;
+       Alcotest.(check (list string)) "judgment finalized" [ id ] report.finalized_ids;
+       Alcotest.(check int) "no worker restart" 0 (List.length report.started_ids);
+       Alcotest.(check int) "no skipped recovery" 0 (List.length report.skipped_ids);
+       Alcotest.(check int) "no recovery failure" 0 (List.length report.failures);
+       Alcotest.(check bool) "pending removed" true
+         (Option.is_none (AQ.get_pending_entry ~id));
+       let resolution =
+         match durable_resolution_opt ~base_path ~keeper_name ~approval_id:id with
+         | Some resolution -> resolution
+         | None -> Alcotest.fail "decisive summary did not reach origin Keeper"
+       in
+       drop_resolution ~base_path ~keeper_name resolution)
+;;
+
+let test_inflight_auto_judge_preserves_durable_restart_marker () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-restart-restore" in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       let id =
+         submit
+           ~base_path
+           ~keeper_name
+           ~input:(`Assoc [ "target", `String "restart" ])
+       in
+       check_update "judge marked in flight" true (AQ.mark_summary_pending ~id);
+       AQ.For_testing.reset_runtime_state ();
+       Alcotest.(check int) "process state cleared" 0 (AQ.pending_count ());
+       let report = install_exn ~base_path in
+       Alcotest.(check int) "one pending restored" 1 report.loaded_pending;
+       Alcotest.(check int) "no delivery replay" 0 report.replayed_deliveries;
+       Alcotest.(check int)
+         "no delivery replay failure"
+         0
+         (List.length report.delivery_replay_failures);
+       (match AQ.get_pending_entry ~id with
+        | None -> Alcotest.fail "same approval id was not restored"
+        | Some entry ->
+          Alcotest.(check bool)
+            "in-flight state remains the durable restart marker"
+            true
+            (entry.summary_status = AQ.Summary_pending));
+       let open Yojson.Safe.Util in
+       let persisted = read_pending_snapshot ~base_path in
+       let persisted_status =
+         persisted
+         |> member "pending"
+         |> to_list
+         |> List.hd
+         |> member "summary_status"
        in
        Alcotest.(check bool)
-         "Critical entry is Escalated in-memory after timer"
+         "restart marker remains persisted"
          true
-         (entry.phase = AQ.Escalated);
-       let detail =
-         match AQ.get_pending_json ~id with
-         | Some json -> json
-         | None -> Alcotest.fail "pending detail JSON missing after escalation"
-       in
-       Alcotest.(check string)
-         "Critical entry is escalated in JSON after timer"
-         "escalated"
-         (phase_in_json detail);
-       Alcotest.(check bool)
-         "Critical escalation does not auto-resolve"
-         true
-         (Option.is_none !result);
-       (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
-        | Ok () -> ()
-        | Error err ->
-          Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
-       yield_until (fun () -> Option.is_some !result);
-       match !result with
-       | Some Agent_sdk.Hooks.Approve -> ()
-       | Some decision ->
-         Alcotest.fail
-           ("expected Approve, got " ^ AQ.approval_decision_to_string decision)
-       | None -> Alcotest.fail "Critical approval did not resume after escalation")
+         (Yojson.Safe.equal persisted_status (`String "pending"));
+       reject_and_cleanup id;
+       (match durable_resolution_opt ~base_path ~keeper_name ~approval_id:id with
+        | Some resolution -> drop_resolution ~base_path ~keeper_name resolution
+        | None -> Alcotest.fail "cleanup resolution was not durable"))
 ;;
 
-(* Regression: the HITL context summary must survive every JSON emission path,
-   including the [include_input:true] dashboard paths. A previous
-   [if include_input then ... else [] @ summary] precedence trap parsed the
-   trailing summary fields into the [else] branch, so [include_input:true]
-   ([list_pending_dashboard_json], [pending_entry_detail_json],
-   [broadcast_pending]) silently dropped the operator-facing summary the HITL
-   worker had computed. *)
-let sample_summary : AQ.hitl_context_summary =
-  { summary_version = 1
-  ; generated_at = 1_700_000_000.0
-  ; model_run_id = "test-model-run"
-  ; context_summary = "HITL-SUMMARY-MARKER"
-  ; key_questions = [ "is this action reversible?" ]
-  ; suggested_options =
-      [ { AQ.label = "approve once"
-        ; rationale = "blast radius is bounded to the sandbox"
-        ; estimated_risk_delta = Some AQ.Low
-        }
-      ]
-  ; risk_rationale = Some "irreversible write outside sandbox"
-  ; uncertainty = 0.25
-  }
-;;
-
-let entry_json_for_keeper ~keeper_name = function
-  | `List entries ->
-    List.find_opt
-      (function
-        | `Assoc kvs ->
-          (match List.assoc_opt "keeper_name" kvs with
-           | Some (`String name) -> String.equal name keeper_name
-           | _ -> false)
-        | _ -> false)
-      entries
-  | _ -> None
-;;
-
-let context_summary_text_opt json =
-  let open Yojson.Safe.Util in
-  match json |> member "context_summary" with
-  | `Null -> None
-  | summary_obj ->
-    (match summary_obj |> member "context_summary" with
-     | `String s -> Some s
-     | _ -> None)
-;;
-
-let summary_status_status json =
-  let open Yojson.Safe.Util in
-  match json |> member "summary_status" with
-  | `Null -> None
-  | `Assoc _ as obj -> obj |> member "status" |> to_string_option
-  | `String s -> Some s
-  | _ -> None
-;;
-
-let test_summary_survives_include_input_paths () =
-  Eio_main.run
-  @@ fun _env ->
+let test_malformed_snapshot_fails_install_and_is_observed () =
   let base_path = temp_dir () in
   Fun.protect
-    ~finally:(fun () -> cleanup_dir base_path)
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
     (fun () ->
-       Eio.Switch.run
-       @@ fun sw ->
-       let keeper_name = "summary-json-emission-test" in
-       let result = ref None in
-       Eio.Fiber.fork ~sw (fun () ->
-         let decision =
-           AQ.submit_and_await
-             ~keeper_name
-             ~tool_name:"keeper_continue_after_reconcile"
-             ~input:(`Assoc [ "kind", `String "critical_gate" ])
-             ~risk_level:AQ.Critical
-             ~base_path
-             ()
-         in
-         result := Some decision);
-       yield_until (fun () -> Option.is_some (pending_id_for_keeper ~keeper_name));
-       let id =
-         match pending_id_for_keeper ~keeper_name with
-         | Some id -> id
-         | None -> Alcotest.fail "Critical approval was not queued"
+       AQ.For_testing.reset_runtime_state ();
+       write_pending_snapshot
+         ~base_path
+         (`Assoc
+            [ "version", `Int 2
+            ; "pending", `List [ `String "malformed-entry" ]
+            ; "deliveries", `List []
+            ]);
+       let before =
+         Masc.Otel_metric_store.metric_value_or_zero
+           Masc.Otel_metric_store.metric_persistence_read_drops
+           ~labels:[ "surface", "keeper_gate_pending"; "reason", "invalid_payload" ]
+           ()
        in
-       (* Attach a known summary, then read synchronously (no [yield]) so the
-          async summary worker cannot overwrite the entry between write and
-          read under Eio's cooperative scheduler. *)
-       AQ.update_pending_entry ~id (fun e ->
-         { e with
-           context_summary = Some sample_summary
-         ; summary_status = AQ.Summary_available sample_summary
-         });
-       let dashboard_entry =
+       (match AQ.install_persistence ~base_path with
+        | Ok _ -> Alcotest.fail "malformed snapshot must not install"
+       | Error (AQ.Install_storage_failed _) -> ()
+        );
+       Alcotest.(check int) "no partial install" 0 (AQ.pending_count ());
+       (match
+          AQ.submit_pending
+            ~keeper_name:"queue-invalid-store"
+            ~tool_name:"external-effect"
+            ~input:(`Assoc [ "target", `String "must-not-overwrite" ])
+            ~base_path
+            ()
+        with
+        | Error _ -> ()
+        | Ok _ -> Alcotest.fail "an invalid installed store must remain unavailable");
+       let persisted = read_pending_snapshot ~base_path in
+       Alcotest.(check bool) "invalid store is not overwritten" true
+         (Yojson.Safe.equal
+            persisted
+            (`Assoc
+               [ "version", `Int 2
+               ; "pending", `List [ `String "malformed-entry" ]
+               ; "deliveries", `List []
+               ]));
+       let after =
+         Masc.Otel_metric_store.metric_value_or_zero
+           Masc.Otel_metric_store.metric_persistence_read_drops
+           ~labels:[ "surface", "keeper_gate_pending"; "reason", "invalid_payload" ]
+           ()
+       in
+       Alcotest.(check bool) "malformed snapshot observed" true (after -. before >= 1.0))
+;;
+
+let test_persisted_delivery_replays_before_origin_wake () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-replay-origin" in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       let id =
+         submit
+           ~base_path
+           ~keeper_name
+           ~input:(`Assoc [ "target", `String "replay" ])
+       in
+       let pending_entry =
+         match read_pending_snapshot ~base_path with
+         | `Assoc fields ->
+           (match List.assoc_opt "pending" fields with
+            | Some (`List [ entry ]) -> entry
+            | _ -> Alcotest.fail "expected one persisted pending entry")
+         | _ -> Alcotest.fail "expected pending snapshot object"
+       in
+       write_pending_snapshot
+         ~base_path
+         (`Assoc
+            [ "version", `Int 2
+            ; "pending", `List []
+            ; ( "deliveries"
+              , `List
+                  [ `Assoc
+                      [ "entry", pending_entry
+                      ; "decision", `Assoc [ "kind", `String "approve" ]
+                      ; "source", `String "human_operator"
+                      ; "remember_rule", `Bool false
+                      ; "created_by", `Null
+                      ; "grant_consumed", `Bool false
+                      ]
+                  ] )
+            ]);
+       AQ.For_testing.reset_runtime_state ();
+       let report = install_exn ~base_path in
+       Alcotest.(check int) "no pending restored" 0 report.loaded_pending;
+       Alcotest.(check int) "delivery replayed" 1 report.replayed_deliveries;
+       let resolution =
+         match durable_resolution_opt ~base_path ~keeper_name ~approval_id:id with
+         | Some resolution -> resolution
+         | None -> Alcotest.fail "replayed delivery did not reach origin queue"
+       in
+       let open Yojson.Safe.Util in
+       let snapshot = read_pending_snapshot ~base_path in
+       Alcotest.(check int) "unconsumed delivery remains journaled" 1
+         (snapshot |> member "deliveries" |> to_list |> List.length);
+       (match
+          AQ.consume_approved_resolution
+            ~base_path
+            ~id
+            ~keeper_name
+            ~tool_name:"external-effect"
+            ~input:(`Assoc [ "target", `String "replay" ])
+        with
+        | Ok AQ.Consumption_committed -> ()
+        | Ok (AQ.Consumption_already_committed | AQ.Consumption_not_matching) ->
+          Alcotest.fail "replayed exact grant was not consumed"
+        | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+       let snapshot = read_pending_snapshot ~base_path in
+       Alcotest.(check int) "consumption tombstone remains explicit" 1
+         (snapshot |> member "deliveries" |> to_list |> List.length);
+       Alcotest.(check bool) "consumption tombstone is committed" true
+         (snapshot
+          |> member "deliveries"
+          |> to_list
+          |> List.hd
+          |> member "grant_consumed"
+          |> to_bool);
+       drop_resolution ~base_path ~keeper_name resolution)
+;;
+
+let test_one_delivery_replay_failure_does_not_stop_others () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-independent-replay" in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       let failing_id =
+         submit
+           ~base_path
+           ~keeper_name
+           ~input:(`Assoc [ "target", `String "remember-fails" ])
+       in
+       let successful_id =
+         submit
+           ~base_path
+           ~keeper_name
+           ~input:(`Assoc [ "target", `String "independent-success" ])
+       in
+       let pending_entries =
+         let open Yojson.Safe.Util in
+         read_pending_snapshot ~base_path |> member "pending" |> to_list
+       in
+       let entry_for id =
+         let open Yojson.Safe.Util in
          match
-           entry_json_for_keeper ~keeper_name (AQ.list_pending_dashboard_json ())
+           List.find_opt
+             (fun json -> String.equal (json |> member "id" |> to_string) id)
+             pending_entries
          with
-         | Some json -> json
-         | None -> Alcotest.fail "entry missing from list_pending_dashboard_json"
-       in
-       let detail_entry =
-         match AQ.get_pending_json ~id with
-         | Some json -> json
-         | None -> Alcotest.fail "pending detail JSON not found"
-       in
-       let list_entry =
-         match entry_json_for_keeper ~keeper_name (AQ.list_pending_json ()) with
-         | Some json -> json
-         | None -> Alcotest.fail "entry missing from list_pending_json"
-       in
-       let expected = Some "HITL-SUMMARY-MARKER" in
-       Alcotest.(check (option string))
-         "dashboard list (include_input:true) carries context_summary"
-         expected
-         (context_summary_text_opt dashboard_entry);
-       Alcotest.(check (option string))
-         "detail view (include_input:true) carries context_summary"
-         expected
-         (context_summary_text_opt detail_entry);
-       Alcotest.(check (option string))
-         "plain list (include_input:false) carries context_summary"
-         expected
-         (context_summary_text_opt list_entry);
-       Alcotest.(check (option string))
-         "dashboard list exposes summary_status=available"
-         (Some "available")
-         (summary_status_status dashboard_entry);
-       Alcotest.(check (option string))
-         "detail view exposes summary_status=available"
-         (Some "available")
-         (summary_status_status detail_entry);
-       (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
-        | Ok () -> ()
-       | Error err ->
-          Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
-       yield_until (fun () -> Option.is_some !result))
-;;
-
-let test_summary_worker_missing_root_switch_is_explicit_failure () =
-  Eio_main.run
-  @@ fun _env ->
-  let base_path = temp_dir () in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_path)
-    (fun () ->
-       Eio.Switch.run
-       @@ fun turn_sw ->
-       let keeper_name = "summary-root-switch-missing-test" in
-       let id =
-         Eio_context.with_turn_switch turn_sw (fun () ->
-           AQ.submit_pending
-             ~keeper_name
-             ~tool_name:"keeper_continue_after_reconcile"
-             ~input:(`Assoc [ "kind", `String "medium_gate" ])
-             ~risk_level:AQ.Medium
-             ~base_path
-             ~on_resolution:(fun _decision -> ())
-             ())
-       in
-       let entry =
-         match AQ.get_pending_entry ~id with
          | Some entry -> entry
-         | None -> Alcotest.fail "pending entry missing"
+         | None -> Alcotest.fail ("missing persisted entry " ^ id)
        in
-       (match entry.summary_status with
-        | AQ.Summary_failed { reason; retryable } ->
-          Alcotest.(check string)
-            "missing root switch is explicit"
-            "HITL summary: server root switch unavailable"
-            reason;
-          Alcotest.(check bool) "not retryable without a root switch" false retryable
-        | other ->
-          Alcotest.failf
-            "expected Summary_failed, got %s"
-            (Yojson.Safe.to_string (AQ.summary_status_to_yojson other)));
-       match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
-       | Ok () -> ()
-       | Error err ->
-         Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err))
+       write_pending_snapshot
+         ~base_path
+         (`Assoc
+            [ "version", `Int 2
+            ; "pending", `List []
+            ; ( "deliveries"
+              , `List
+                  [ delivery_json
+                      ~entry:(entry_for failing_id)
+                      ~remember_rule:true
+                  ; delivery_json
+                      ~entry:(entry_for successful_id)
+                      ~remember_rule:false
+                  ] )
+            ]);
+       let rules_path = AQ.For_testing.always_allowed_store_path ~base_path in
+       ensure_dir (Filename.dirname rules_path);
+       Unix.mkdir rules_path 0o755;
+       AQ.For_testing.reset_runtime_state ();
+       let report = install_exn ~base_path in
+       Alcotest.(check int) "independent delivery replayed" 1 report.replayed_deliveries;
+       Alcotest.(check int)
+         "one replay failure reported"
+         1
+         (List.length report.delivery_replay_failures);
+       Alcotest.(check string)
+         "failing approval identified"
+         failing_id
+         (List.hd report.delivery_replay_failures).approval_id;
+       Alcotest.(check bool) "later delivery reached origin" true
+         (Option.is_some
+            (durable_resolution_opt
+               ~base_path
+               ~keeper_name
+               ~approval_id:successful_id));
+       List.iter
+         (fun approval_id ->
+            match durable_resolution_opt ~base_path ~keeper_name ~approval_id with
+            | Some resolution -> drop_resolution ~base_path ~keeper_name resolution
+            | None -> ())
+         [ failing_id; successful_id ])
 ;;
 
-let test_pending_phase_conversions () =
-  Alcotest.(check string)
-    "Awaiting_operator string"
-    "awaiting_operator"
-    (AQ.pending_phase_to_string AQ.Awaiting_operator);
-  Alcotest.(check string)
-    "Escalated string"
-    "escalated"
-    (AQ.pending_phase_to_string AQ.Escalated);
-  Alcotest.(check bool)
-    "parse awaiting_operator"
-    true
-    (match AQ.pending_phase_of_string "awaiting_operator" with
-     | Some AQ.Awaiting_operator -> true
-     | _ -> false);
-  Alcotest.(check bool)
-    "parse escalated"
-    true
-    (match AQ.pending_phase_of_string "escalated" with
-     | Some AQ.Escalated -> true
-     | _ -> false);
-  Alcotest.(check bool)
-    "unknown phase returns None"
-    true
-    (Option.is_none (AQ.pending_phase_of_string "unknown"))
+let test_submit_surfaces_storage_failure () =
+  let base_path = Filename.temp_file "queue-storage-error" "" in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      try Sys.remove base_path with
+      | Sys_error _ -> ())
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       match
+         AQ.submit_pending
+           ~keeper_name:"queue-storage-error"
+           ~tool_name:"external-effect"
+           ~input:(`Assoc [ "target", `String "x" ])
+           ~base_path
+           ()
+       with
+       | Ok _ -> Alcotest.fail "submission must not succeed without durable storage"
+       | Error _ -> Alcotest.(check int) "memory not mutated" 0 (AQ.pending_count ()))
 ;;
 
-(* RFC-0320 W3c: the delivery gate is fail-closed and dedups with the W3b
-   prompt steer. [gate_decision] is pure, so we assert the decision matrix
-   without a live connector. *)
-let test_w3c_continuation_delivery_gate () =
-  let module D = Masc.Keeper_continuation_delivery in
-  let dashboard =
-    Keeper_continuation_channel.Dashboard { thread_id = "thread-1" }
-  in
-  let unrouted = Keeper_continuation_channel.unrouted "no originating connector" in
-  let is_skip_empty = function D.Skip D.Skipped_empty -> true | _ -> false in
-  let is_skip_replied =
-    function D.Skip D.Skipped_already_replied -> true | _ -> false
-  in
-  let is_skip_unrouted =
-    function D.Skip D.Skipped_unrouted -> true | _ -> false
-  in
-  let is_deliver = function D.Deliver -> true | _ -> false in
-  Alcotest.(check bool) "empty content is skipped" true
-    (is_skip_empty
-       (D.gate_decision ~channel:dashboard ~already_replied:false ~content:"   "));
-  Alcotest.(check bool) "already-replied turn is skipped (dedup with W3b)" true
-    (is_skip_replied
-       (D.gate_decision ~channel:dashboard ~already_replied:true ~content:"hi"));
-  Alcotest.(check bool) "unrouted channel is skipped (fail-closed)" true
-    (is_skip_unrouted
-       (D.gate_decision ~channel:unrouted ~already_replied:false ~content:"hi"));
-  Alcotest.(check bool) "routable + fresh + non-empty delivers" true
-    (is_deliver
-       (D.gate_decision ~channel:dashboard ~already_replied:false ~content:"hi"))
+let test_default_auto_judge_defers_without_blocking () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-default-auto-judge" in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       let request : Gate.request =
+         { keeper_name
+         ; operation = "external-effect"
+         ; input = `Assoc [ "target", `String "auto-judge" ]
+         ; base_path
+         ; causal_context =
+             Some { Gate.turn_id = Some 9; snapshot = `Assoc [] }
+         ; task_id = Some "task-auto-judge"
+         ; goal_ids = [ "goal-auto-judge" ]
+         ; continuation_channel = None
+         }
+       in
+       match Gate.decide ~keeper_always_allow:false request with
+       | Gate.Deferred { approval_id; reason = Gate.Auto_judge_unavailable detail } ->
+         Alcotest.(check bool) "unavailable reason is explicit" true
+           (String.length detail > 0);
+         (match AQ.get_pending_entry ~id:approval_id with
+          | Some { summary_status = AQ.Summary_failed { retryable = true; _ }; _ } ->
+            ()
+          | Some _ -> Alcotest.fail "Auto Judge failure was not durably retryable"
+          | None -> Alcotest.fail "Auto Judge request was not durably queued");
+         reject_and_cleanup approval_id
+       | Gate.Deferred { reason = Gate.Judge_requested; _ } ->
+         Alcotest.fail "test unexpectedly has a running server Auto Judge context"
+       | Gate.Deferred { reason = (Gate.Human_requested | Gate.Mode_state_invalid _); _ } ->
+         Alcotest.fail "default Gate mode did not select Auto Judge"
+       | Gate.Allow _ -> Alcotest.fail "default Auto Judge allowed without a verdict"
+       | Gate.Unavailable reason ->
+         Alcotest.fail (Gate.unavailable_reason_to_string reason))
 ;;
 
-let reply_tool_call ?typed_outcome ~execution_outcome tool_name
-  : Masc.Keeper_agent_result.tool_call_detail
-  =
-  { tool_name
-  ; provider = "test"
-  ; outcome = Tool_result.string_of_tool_call_outcome execution_outcome
-  ; execution_outcome
-  ; typed_outcome
-  ; latency_ms = 1.0
-  ; task_id = None
-  ; route_evidence = None
-  ; input_fingerprint = None
-  ; output_fingerprint = None
-  }
+let test_unavailable_cycle_grant_never_falls_through () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-stale-grant" in
+  let input = `Assoc [ "target", `String "exact" ] in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       let approval_id = submit ~base_path ~keeper_name ~input in
+       (match AQ.resolve ~id:approval_id ~decision:Agent_sdk.Hooks.Approve with
+        | Ok () -> ()
+        | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
+       let resolution =
+         durable_resolution_opt ~base_path ~keeper_name ~approval_id
+         |> require_some "approved resolution was not delivered"
+       in
+       let grant =
+         Gate.cycle_grant_of_resolution resolution
+         |> require_some "approved resolution lacked grant"
+       in
+       let request : Gate.request =
+         { keeper_name
+         ; operation = "external-effect"
+         ; input
+         ; base_path
+         ; causal_context = None
+         ; task_id = None
+         ; goal_ids = []
+         ; continuation_channel = None
+         }
+       in
+       AQ.For_testing.reset_runtime_state ();
+       (match Gate.decide ~cycle_grant:grant ~keeper_always_allow:true request with
+        | Gate.Unavailable (Gate.Approval_grant_unavailable _) -> ()
+        | Gate.Allow _ ->
+          Alcotest.fail "unconsumed grant failure fell through to Always Allow"
+        | Gate.Deferred _ ->
+          Alcotest.fail "unconsumed grant failure created a second approval"
+        | Gate.Unavailable _ ->
+          Alcotest.fail "unexpected unavailable reason for unreadable grant");
+       ignore (install_exn ~base_path);
+       (match Gate.decide ~cycle_grant:grant ~keeper_always_allow:false request with
+        | Gate.Allow { source = Gate.One_shot_resolution actual } ->
+          Alcotest.(check string) "grant remains unconsumed" approval_id actual
+        | Gate.Allow _ -> Alcotest.fail "restored exact grant used the wrong source"
+        | Gate.Deferred _ -> Alcotest.fail "restored exact grant did not authorize"
+        | Gate.Unavailable reason ->
+          Alcotest.fail (Gate.unavailable_reason_to_string reason));
+       drop_resolution ~base_path ~keeper_name resolution)
 ;;
 
-let test_w3c_reply_delivery_effect_requires_success () =
-  let module F = Masc.Keeper_agent_run_finalize_response in
-  let is_delivered detail =
-    match F.For_testing.reply_delivery_effect_of_tool_call detail with
-    | F.Reply_delivered -> true
-    | F.No_reply_delivery -> false
-  in
-  Alcotest.(check bool) "failed surface post has no delivery effect" false
-    (is_delivered
-       (reply_tool_call
-          ~execution_outcome:Tool_result.Error
-          "keeper_surface_post"));
-  Alcotest.(check bool) "successful surface post has delivery effect" true
-    (is_delivered
-       (reply_tool_call
-          ~execution_outcome:Tool_result.Ok
-          "keeper_surface_post"));
-  Alcotest.(check bool) "typed semantic error cannot claim delivery" false
-    (is_delivered
-       (reply_tool_call
-          ~typed_outcome:(Keeper_tool_outcome.Error { reason = "send failed" })
-          ~execution_outcome:Tool_result.Ok
-          "keeper_surface_post"));
-  Alcotest.(check bool) "keeper message is not a surface reply" false
-    (is_delivered
-       (reply_tool_call
-          ~execution_outcome:Tool_result.Ok
-          "masc_keeper_msg"));
-  Alcotest.(check bool) "MCP-prefixed keeper message is not a surface reply" false
-    (is_delivered
-       (reply_tool_call
-          ~execution_outcome:Tool_result.Ok
-          "mcp__masc__masc_keeper_msg"));
-  let keeper_message =
-    reply_tool_call ~execution_outcome:Tool_result.Ok "masc_keeper_msg"
-  in
-  let channel = Keeper_continuation_channel.Dashboard { thread_id = "thread-1" } in
-  let module D = Masc.Keeper_continuation_delivery in
-  Alcotest.(check bool) "keeper message leaves continuation fallback enabled" true
-    (match
-       F.For_testing.continuation_delivery_gate
-         ~channel
-         ~tool_calls:[ keeper_message ]
-         ~content:"fallback"
-     with
-     | D.Deliver -> true
-     | D.Skip _ -> false);
-  Alcotest.(check bool) "failed keeper message has no delivery effect" false
-    (is_delivered
-       (reply_tool_call
-          ~execution_outcome:Tool_result.Error
-          "masc_keeper_msg"));
-  Alcotest.(check bool) "unrelated successful tool has no delivery effect" false
-    (is_delivered
-       (reply_tool_call
-          ~execution_outcome:Tool_result.Ok
-          "keeper_tasks_list"))
+let test_nonapproved_resolution_payload_is_delivered () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-resolution-payload" in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       let reject_id =
+         submit
+           ~base_path
+           ~keeper_name
+           ~input:(`Assoc [ "target", `String "reject" ])
+       in
+       let rationale = "Use the project-scoped target." in
+       (match
+          AQ.resolve
+            ~id:reject_id
+            ~decision:(Agent_sdk.Hooks.Reject rationale)
+        with
+        | Ok () -> ()
+        | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
+       let rejected =
+         durable_resolution_opt
+           ~base_path
+           ~keeper_name
+           ~approval_id:reject_id
+         |> require_some "rejection resolution was not delivered"
+       in
+       (match rejected.decision with
+        | Keeper_event_queue.Hitl_rejected actual ->
+          Alcotest.(check string) "rejection rationale" rationale actual
+        | _ -> Alcotest.fail "rejection resolution lost its typed decision");
+       Alcotest.(check bool)
+         "rejection is not a grant"
+         true
+         (Option.is_none (Gate.cycle_grant_of_resolution rejected));
+       let edit_id =
+         submit
+           ~base_path
+           ~keeper_name
+           ~input:(`Assoc [ "target", `String "before" ])
+       in
+       let edited_input =
+         `Assoc [ "target", `String "after"; "confirmed", `Bool true ]
+       in
+       (match AQ.resolve ~id:edit_id ~decision:(Agent_sdk.Hooks.Edit edited_input) with
+        | Ok () -> ()
+        | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
+       let edited =
+         durable_resolution_opt ~base_path ~keeper_name ~approval_id:edit_id
+         |> require_some "edited resolution was not delivered"
+       in
+       (match edited.decision with
+        | Keeper_event_queue.Hitl_edited actual ->
+          Alcotest.(check bool)
+            "edited input"
+            true
+            (Yojson.Safe.equal edited_input actual)
+        | _ -> Alcotest.fail "edited resolution lost its typed input");
+       Alcotest.(check bool)
+         "edit is not a grant"
+         true
+         (Option.is_none (Gate.cycle_grant_of_resolution edited));
+       drop_resolution ~base_path ~keeper_name rejected;
+       drop_resolution ~base_path ~keeper_name edited)
 ;;
 
 let () =
   Alcotest.run
     "Keeper_approval_queue"
-    [ ( "phase"
+    [ ( "nonhierarchical queue"
       , [ Alcotest.test_case
-            "fresh Critical entry starts in Awaiting_operator"
+            "submit is nonblocking and exact"
             `Quick
-            test_fresh_critical_entry_phase_is_awaiting_operator
+            test_submit_is_nonblocking_and_exactly_deduplicated
         ; Alcotest.test_case
-            "Critical entry becomes Escalated after escalation timer"
+            "dedup keeps distinct origins"
             `Quick
-            test_critical_entry_phase_becomes_escalated_after_timer
-        ] )
-      ; ( "wake"
-      , [ Alcotest.test_case
-            "submit_and_await resolve emits no durable duplicate"
-            `Quick
-            test_resolve_with_live_resolver_does_not_enqueue_durable_wake
+            test_dedup_never_merges_distinct_origins
         ; Alcotest.test_case
-            "submit_pending commits before callback and signal"
+            "resolution wakes only origin"
             `Quick
-            test_submit_pending_resolve_commits_before_callback_and_signal
+            test_resolution_is_durable_and_origin_scoped
         ; Alcotest.test_case
-            "delivery failure keeps nonblocking approval pending"
+            "cycle grant binds origin and is consumed once"
             `Quick
-            test_delivery_failure_keeps_nonblocking_approval_pending
+            test_cycle_grant_uses_exact_effect_and_is_consumed_once
         ; Alcotest.test_case
-            "explicit blocking callback owns a lane without resolver"
+            "summary is advisory"
             `Quick
-            test_blocking_callback_policy_owns_lane_without_resolver
+            test_summary_updates_never_resolve_pending_request
         ; Alcotest.test_case
-            "expire_stale emits no durable wake for blocking submit_and_await"
+            "only retryable summary failure restarts"
             `Quick
-            test_expire_stale_submit_and_await_does_not_enqueue_durable_wake
+            test_only_retryable_summary_failure_restarts
         ; Alcotest.test_case
-            "expire_stale enqueues durable wake for non-blocking submit_pending"
+            "retryable Auto Judge recovery is lane-local"
             `Quick
-            test_expire_stale_submit_pending_enqueues_durable_wake
+            test_retryable_auto_judge_recovery_is_lane_local
         ; Alcotest.test_case
-            "expire_stale retries after delivery failure"
+            "decisive summary finalizes after restart"
             `Quick
-            test_expire_stale_retries_after_delivery_failure
+            test_decisive_summary_finalizes_after_restart
         ; Alcotest.test_case
-            "durable resolution carries originating continuation channel"
+            "interrupted judge keeps restart marker"
             `Quick
-            test_durable_resolution_carries_originating_continuation_channel
+            test_inflight_auto_judge_preserves_durable_restart_marker
         ; Alcotest.test_case
-            "W3c continuation delivery gate is fail-closed"
+            "malformed snapshot is explicit"
             `Quick
-            test_w3c_continuation_delivery_gate
+            test_malformed_snapshot_fails_install_and_is_observed
         ; Alcotest.test_case
-            "W3c reply delivery effect requires success"
+            "delivery journal replays"
             `Quick
-            test_w3c_reply_delivery_effect_requires_success
-        ] )
-    ; ( "summary"
-      , [ Alcotest.test_case
-            "provider_config_for_summary preserves HITL runtime identity and temperature"
-            `Quick
-            test_provider_config_for_summary_routes_hitl_summary_lane
+            test_persisted_delivery_replays_before_origin_wake
         ; Alcotest.test_case
-            "context summary survives include_input:true JSON paths"
+            "one replay failure does not stop others"
             `Quick
-            test_summary_survives_include_input_paths
+            test_one_delivery_replay_failure_does_not_stop_others
         ; Alcotest.test_case
-            "missing root switch marks summary failed"
+            "storage failure is returned"
             `Quick
-            test_summary_worker_missing_root_switch_is_explicit_failure
-        ] )
-    ; ( "conversions"
-      , [ Alcotest.test_case
-            "pending_phase string conversions round-trip"
+            test_submit_surfaces_storage_failure
+        ; Alcotest.test_case
+            "default Auto Judge defers without blocking"
             `Quick
-            test_pending_phase_conversions
+            test_default_auto_judge_defers_without_blocking
+        ; Alcotest.test_case
+            "unavailable grant never falls through"
+            `Quick
+            test_unavailable_cycle_grant_never_falls_through
+        ; Alcotest.test_case
+            "non-approved resolution payload is delivered"
+            `Quick
+            test_nonapproved_resolution_payload_is_delivered
         ] )
     ]
 ;;

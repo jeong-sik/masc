@@ -17,15 +17,10 @@ type sandbox =
   | Docker_profile
   | Backend_selected
 
-type approval =
-  | No_approval
-  | Policy_selected
-  | Human_required
-
 type keeper_model_projection =
   | Preferred_public_name
   | Internal_name
-  | Dispatch_only
+  | Transport_alias of { projected_by : string }
 
 type model_description_projection =
   | Static_description
@@ -78,6 +73,8 @@ type runtime_handler =
   | Tool_masc_agent_dispatch
   | Tool_masc_workspace_dispatch
   | Tool_masc_misc_dispatch
+  | Tool_web_search
+  | Tool_web_fetch
   | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_schedule_dispatch
@@ -91,15 +88,11 @@ type runtime_handler =
   | Tool_analyze_image
 
 type policy =
-  { visibility : Tool_catalog.visibility
-  ; readonly_of_input : readonly_of_input
+  { readonly_of_input : readonly_of_input
   ; readonly_hint : bool option
-  ; effect_domain : Tool_catalog.effect_domain option
-  ; approval : approval
   ; retryable : bool
   ; cwd_scope : string option
   ; inline_safe : bool
-  ; maintenance_only : bool
   ; polling_read : bool
   }
 
@@ -146,16 +139,10 @@ let sandbox_to_string = function
   | Backend_selected -> "backend_selected"
 ;;
 
-let approval_to_string = function
-  | No_approval -> "none"
-  | Policy_selected -> "policy_selected"
-  | Human_required -> "human_required"
-;;
-
 let keeper_model_projection_to_string = function
   | Preferred_public_name -> "preferred_public_name"
   | Internal_name -> "internal_name"
-  | Dispatch_only -> "dispatch_only"
+  | Transport_alias _ -> "transport_alias"
 ;;
 
 let model_description_projection_to_string = function
@@ -210,6 +197,8 @@ let runtime_handler_to_string = function
   | Tool_masc_agent_dispatch -> "tool_masc_agent_dispatch"
   | Tool_masc_workspace_dispatch -> "tool_masc_workspace_dispatch"
   | Tool_masc_misc_dispatch -> "tool_masc_misc_dispatch"
+  | Tool_web_search -> "tool_web_search"
+  | Tool_web_fetch -> "tool_web_fetch"
   | Tool_masc_control_dispatch -> "tool_masc_control_dispatch"
   | Tool_masc_agent_timeline_dispatch -> "tool_masc_agent_timeline_dispatch"
   | Tool_masc_schedule_dispatch -> "tool_masc_schedule_dispatch"
@@ -241,6 +230,8 @@ let keeper_tool_group_of_runtime_handler = function
   | Tool_masc_fusion_dispatch
   | Tool_masc_fusion_status
   | Tool_masc_misc_dispatch
+  | Tool_web_search
+  | Tool_web_fetch
   | Tool_masc_surface_audit
   | Tool_masc_local_runtime_dispatch
   | Tool_analyze_image -> Core_group
@@ -272,24 +263,19 @@ let discovery_example ~label ?cwd ~executable ~argv () =
   `Assoc [ "label", `String label; "input", input ]
 ;;
 
-let policy ?(visibility = Tool_catalog.Default) ?readonly ?readonly_of_input
-      ?effect_domain ?(approval = Policy_selected) ?cwd_scope ?(retryable = false)
-      ?(inline_safe = false) ?(maintenance_only = false) ?(polling_read = false) ()
+let policy ?readonly ?readonly_of_input ?cwd_scope ?(retryable = false)
+      ?(inline_safe = false) ?(polling_read = false) ()
   =
   let readonly_of_input =
     match readonly_of_input with
     | Some readonly_of_input -> readonly_of_input
     | None -> fun _input -> readonly
   in
-  { visibility
-  ; readonly_of_input
+  { readonly_of_input
   ; readonly_hint = readonly
-  ; effect_domain
-  ; approval
   ; retryable
   ; cwd_scope
   ; inline_safe
-  ; maintenance_only
   ; polling_read
   }
 ;;
@@ -590,6 +576,10 @@ let descriptor_with_public_aliases
           (keeper_tool_group_of_runtime_handler runtime_handler) )
     ; "input_schema_source", input_schema_source_to_string input_schema_source
     ]
+    @ (match keeper_model_projection with
+       | Transport_alias { projected_by } ->
+         [ "transport_alias_of", projected_by ]
+       | Preferred_public_name | Internal_name -> [])
   in
   { id
   ; keeper_model_projection
@@ -664,27 +654,16 @@ let public_descriptors =
       ~public_name:"Execute"
       ~internal_name:"tool_execute"
       ~description:
-        "Execute one typed command through deterministic execution gates with \
-         sandbox/policy-scoped filesystem access for allowed read, write, and \
-         execute operations. Git and GitHub CLI commands are supported through \
-         typed argv when Execute is visible and the call is scoped to an allowed \
-         repo cwd; repo-hosting mutations remain subject to Shell IR/policy and \
-         keeper-scoped credentials. Provide executable plus argv arguments after \
-         the executable, or pipeline. Do not repeat executable as argv[0]. \
-         Examples: executable='git' argv=['status', '--short']; executable='gh' \
-         argv=['pr', 'list', '--repo', 'owner/name']. Use cwd for repo-scoped \
-         operations. Each Execute call is typed, not shell-parsed: use \
-         pipeline=[...] for pipelines, typed stdin/stdout/stderr fields for \
-         redirection-like I/O, typed env for environment variables, and \
-         explicit argv/path literals instead of shell glob expansion. To EDIT a \
-         file, use the Edit tool, not 'sed -i' or 'cat >' — in-place shell \
-         edits fail here. If a command fails, do not repeat the same argv: fix \
-         the invocation or use a different tool (Edit for edits, Read/Grep for \
-         inspection)."
+        "Execute one opaque typed process invocation inside the Keeper sandbox. \
+         Provide executable plus argv, or an explicit typed pipeline; do not \
+         repeat executable as argv[0]. Use typed stdin/stdout/stderr fields for \
+         I/O and typed env for environment variables. MASC validates the input \
+         shape, path jail, sandbox target, and external-effect Gate but never \
+         interprets executable or subcommand meaning. The invoked program owns \
+         its syntax and exit result."
       ~input_schema:execute_schema
       ~policy:
         (policy
-           ~effect_domain:Tool_catalog.Playground_write
            ~cwd_scope:"keeper_sandbox_or_allowed_path"
            ~retryable:false
            ())
@@ -694,28 +673,10 @@ let public_descriptors =
       ~runtime_handler:Tool_execute
       ~examples:
         [ discovery_example
-            ~label:"Inspect pull request metadata"
-            ~cwd:"<repository-root>"
-            ~executable:"gh"
-            ~argv:
-              [ "pr"
-              ; "view"
-              ; "<pull-request-number>"
-              ; "--json"
-              ; "number,state,headRefOid"
-              ]
-            ()
-        ; discovery_example
-            ~label:"Read repository status"
-            ~cwd:"<repository-root>"
-            ~executable:"git"
-            ~argv:[ "status"; "--short" ]
-            ()
-        ; discovery_example
-            ~label:"Search source text"
-            ~cwd:"<repository-root>"
-            ~executable:"rg"
-            ~argv:[ "--line-number"; "<pattern>"; "<path>" ]
+            ~label:"Run an opaque typed program"
+            ~cwd:"<allowed-directory>"
+            ~executable:"program"
+            ~argv:[ "--version" ]
             ()
         ]
       ~validate_translated_input:true
@@ -740,7 +701,6 @@ let public_descriptors =
         (policy
            ~readonly:true
            ~readonly_of_input:search_files_readonly_of_input
-           ~effect_domain:Tool_catalog.Read_only
            ~cwd_scope:"keeper_sandbox_or_allowed_path"
            ~retryable:true
            ())
@@ -766,7 +726,6 @@ let public_descriptors =
       ~policy:
         (policy
            ~readonly:true
-           ~effect_domain:Tool_catalog.Read_only
            ~cwd_scope:"keeper_sandbox_or_allowed_path"
            ~retryable:true
            ())
@@ -793,7 +752,6 @@ let public_descriptors =
       ~policy:
         (policy
            ~readonly:false
-           ~effect_domain:Tool_catalog.Playground_write
            ~cwd_scope:"keeper_sandbox_or_allowed_path"
            ())
       ~executor:Filesystem
@@ -814,7 +772,6 @@ let public_descriptors =
       ~policy:
         (policy
            ~readonly:false
-           ~effect_domain:Tool_catalog.Playground_write
            ~cwd_scope:"keeper_sandbox_or_allowed_path"
            ())
       ~executor:Filesystem
@@ -840,14 +797,12 @@ let public_descriptors =
       ~policy:
         (policy
            ~readonly:true
-           ~effect_domain:Tool_catalog.Read_only
-           ~approval:Policy_selected
            ~retryable:true
            ())
       ~executor:In_process
       ~backend:Ocaml_runtime
       ~sandbox:No_sandbox
-      ~runtime_handler:Tool_masc_misc_dispatch
+      ~runtime_handler:Tool_web_search
       ~validate_translated_input:true
       ~translate:translate_identity
       ()
@@ -867,14 +822,12 @@ let public_descriptors =
       ~policy:
         (policy
            ~readonly:true
-           ~effect_domain:Tool_catalog.Read_only
-           ~approval:Policy_selected
            ~retryable:true
            ())
       ~executor:In_process
       ~backend:Ocaml_runtime
       ~sandbox:No_sandbox
-      ~runtime_handler:Tool_masc_misc_dispatch
+      ~runtime_handler:Tool_web_fetch
       ~validate_translated_input:true
       ~translate:translate_identity
       ()
@@ -1000,11 +953,6 @@ let base_schema_input name =
   | None ->
     ( Missing_canonical_registry
     , unavailable_input_schema ("missing base tool schema for " ^ name) )
-
-let model_projection_for_schema_source requested = function
-  | Descriptor_owned | Canonical_registry -> requested
-  | Missing_canonical_registry -> Dispatch_only
-
 
 let tool_search_schema =
   object_schema
@@ -1176,32 +1124,22 @@ let analyze_image_schema =
     ]
 ;;
 
-let read_only_in_process_policy ?(inline_safe = false) ?(maintenance_only = false)
-      ?(polling_read = false) ?(visibility = Tool_catalog.Hidden) ()
+let read_only_in_process_policy ?(inline_safe = false) ?(polling_read = false) ()
   =
   policy
-    ~visibility
     ~readonly:true
-    ~effect_domain:Tool_catalog.Read_only
-    ~approval:No_approval
     ~retryable:true
     ~inline_safe
-    ~maintenance_only
     ~polling_read
     ()
 ;;
 
-let write_in_process_policy ?(retryable = false) ?(inline_safe = false)
-      ?(maintenance_only = false) ?(visibility = Tool_catalog.Hidden) ()
+let write_in_process_policy ?(retryable = false) ?(inline_safe = false) ()
   =
   policy
-    ~visibility
     ~readonly:false
-    ~effect_domain:Tool_catalog.Playground_write
-    ~approval:No_approval
     ~retryable
     ~inline_safe
-    ~maintenance_only
     ()
 ;;
 
@@ -1244,28 +1182,20 @@ let in_process_descriptor ~keeper_model_projection ~id ~name ~description
    [runtime_handler] variant but expose distinct [internal_name]s so each
    tool retains its own descriptor entry and receipt evidence. The
    [keeper_tool_in_process_runtime] handler routes by descriptor.internal_name. *)
-let cluster_policy ?(polling_read = false) ~readonly ~inline_safe ~maintenance_only
-      () =
+let cluster_policy ?(polling_read = false) ~readonly ~inline_safe () =
   if polling_read && not readonly then
     invalid_arg "polling_read descriptors must declare readonly=true";
   if inline_safe && not readonly then
     invalid_arg "inline_safe descriptors must declare readonly=true";
   if readonly
-  then read_only_in_process_policy ~inline_safe ~maintenance_only ~polling_read ()
-  else write_in_process_policy ~inline_safe ~maintenance_only ()
+  then read_only_in_process_policy ~inline_safe ~polling_read ()
+  else write_in_process_policy ~inline_safe ()
 ;;
 
 let cluster_descriptor_with_schema_source ?(polling_read = false)
       ~keeper_model_projection ~input_schema_source ~input_schema ~id ~name
-      ~description ~handler ~readonly ~inline_safe ~maintenance_only () =
-  let keeper_model_projection =
-    if Tool_catalog_surfaces.is_system_internal_hidden name
-    then Dispatch_only
-    else keeper_model_projection
-  in
-  let policy =
-    cluster_policy ~polling_read ~readonly ~inline_safe ~maintenance_only ()
-  in
+      ~description ~handler ~readonly ~inline_safe () =
+  let policy = cluster_policy ~polling_read ~readonly ~inline_safe () in
   in_process_descriptor_with_schema_source
     ~keeper_model_projection
     ~input_schema_source
@@ -1278,8 +1208,7 @@ let cluster_descriptor_with_schema_source ?(polling_read = false)
 ;;
 
 let cluster_descriptor ?(polling_read = false) ~keeper_model_projection ~id ~name
-      ~description ~handler ~readonly ~inline_safe ~maintenance_only
-      ()
+      ~description ~handler ~readonly ~inline_safe ()
   =
   let input_schema_source, input_schema =
     match find_cluster_schema_opt name with
@@ -1287,9 +1216,6 @@ let cluster_descriptor ?(polling_read = false) ~keeper_model_projection ~id ~nam
     | None ->
       ( Missing_canonical_registry
       , unavailable_input_schema ("missing canonical registry schema for " ^ name) )
-  in
-  let keeper_model_projection =
-    model_projection_for_schema_source keeper_model_projection input_schema_source
   in
   cluster_descriptor_with_schema_source
     ~polling_read
@@ -1302,7 +1228,6 @@ let cluster_descriptor ?(polling_read = false) ~keeper_model_projection ~id ~nam
     ~handler
     ~readonly
     ~inline_safe
-    ~maintenance_only
     ()
 ;;
 
@@ -1320,7 +1245,6 @@ let board_descriptor name description ~readonly =
     ~handler:Board_tool_dispatch
     ~readonly
     ~inline_safe:false
-    ~maintenance_only:false
     ()
 ;;
 
@@ -1329,32 +1253,13 @@ let masc_board_descriptor board_name =
   let name = Tool_name.Board_name.to_string board_name in
   let operation_policy = Board_tool_registry.operation_policy board_name in
   let readonly = operation_policy.readonly in
-  let effect_domain =
-    if readonly then Tool_catalog.Read_only else Tool_catalog.Masc_workspace
-  in
-  let visibility =
-    match Keeper_tool_name.board_projection_of_masc_board_name board_name with
-    | Keeper_tool_name.Direct_masc ->
-      Tool_catalog.effective_registered_visibility
-        ~name
-        ~declared:operation_policy.visibility
-    | Keeper_tool_name.Keeper_wrapper _ | Keeper_tool_name.External_only ->
-      Tool_catalog.Hidden
-  in
   let keeper_model_projection =
-    match visibility with
-    | Tool_catalog.Default -> Internal_name
-    | Tool_catalog.Hidden -> Dispatch_only
+    match Keeper_tool_name.board_projection_of_masc_board_name board_name with
+    | Keeper_tool_name.Keeper_wrapper keeper_tool ->
+      Transport_alias { projected_by = Keeper_tool_name.to_string keeper_tool }
+    | Keeper_tool_name.Direct_masc -> Internal_name
   in
-  let policy =
-    policy
-      ~visibility
-      ~readonly
-      ~effect_domain
-      ~approval:No_approval
-      ~retryable:readonly
-      ()
-  in
+  let policy = policy ~readonly ~retryable:readonly () in
   let input_schema =
     remove_schema_fields
       (Board_tool_registry.identity_fields_for_board_name board_name)
@@ -1385,7 +1290,6 @@ let voice_descriptor name description ~readonly =
     ~handler:Tool_voice_dispatch
     ~readonly
     ~inline_safe:false
-    ~maintenance_only:false
     ()
 ;;
 
@@ -1398,7 +1302,6 @@ let task_descriptor id name description ~readonly =
     ~handler:Tool_task_dispatch
     ~readonly
     ~inline_safe:false
-    ~maintenance_only:false
     ()
 ;;
 
@@ -1418,20 +1321,19 @@ let masc_task_descriptor id name description ~readonly =
     ~handler:Tool_masc_task_dispatch
     ~readonly
     ~inline_safe:false
-    ~maintenance_only:false
     ()
 ;;
 
 let masc_task_transport_descriptor id name description ~readonly =
   cluster_descriptor
-    ~keeper_model_projection:Dispatch_only
+    ~keeper_model_projection:
+      (Transport_alias { projected_by = "keeper_tasks_list" })
     ~id:("masc.task." ^ id)
     ~name
     ~description
     ~handler:Tool_masc_task_dispatch
     ~readonly
     ~inline_safe:false
-    ~maintenance_only:false
     ()
 ;;
 
@@ -1444,7 +1346,6 @@ let masc_plan_descriptor id name description ~readonly =
     ~handler:Tool_masc_plan_dispatch
     ~readonly
     ~inline_safe:false
-    ~maintenance_only:false
     ()
 ;;
 
@@ -1458,7 +1359,6 @@ let masc_run_descriptor name description ~readonly =
     ~handler:Tool_masc_run_dispatch
     ~readonly
     ~inline_safe:false
-    ~maintenance_only:false
     ()
 ;;
 
@@ -1471,7 +1371,6 @@ let masc_agent_descriptor id name description ~readonly =
     ~handler:Tool_masc_agent_dispatch
     ~readonly
     ~inline_safe:false
-    ~maintenance_only:false
     ()
 ;;
 
@@ -1485,20 +1384,6 @@ let masc_workspace_descriptor id name description ~readonly
     ~handler:Tool_masc_workspace_dispatch
     ~readonly
     ~inline_safe:false
-    ~maintenance_only:false
-    ()
-;;
-
-let masc_workspace_maintenance_descriptor id name description ~readonly =
-  cluster_descriptor
-    ~keeper_model_projection:Dispatch_only
-    ~id:("masc.workspace." ^ id)
-    ~name
-    ~description
-    ~handler:Tool_masc_workspace_dispatch
-    ~readonly
-    ~inline_safe:false
-    ~maintenance_only:true
     ()
 ;;
 
@@ -1513,14 +1398,13 @@ let masc_misc_descriptor id name description ~readonly =
     ~handler:Tool_masc_misc_dispatch
     ~readonly
     ~inline_safe:false
-    ~maintenance_only:false
     ()
 ;;
 
 let masc_control_descriptor operation =
   let schema = Tool_schemas_misc.control_schema operation in
   cluster_descriptor_with_schema_source
-    ~keeper_model_projection:Dispatch_only
+    ~keeper_model_projection:Internal_name
     ~input_schema_source:Canonical_registry
     ~input_schema:schema.input_schema
     ~id:("masc.control." ^ Tool_schemas_misc.control_operation_id operation)
@@ -1529,7 +1413,6 @@ let masc_control_descriptor operation =
     ~handler:Tool_masc_control_dispatch
     ~readonly:false
     ~inline_safe:false
-    ~maintenance_only:false
     ()
 ;;
 
@@ -1542,7 +1425,6 @@ let masc_agent_timeline_descriptor name description ~readonly =
     ~handler:Tool_masc_agent_timeline_dispatch
     ~readonly
     ~inline_safe:false
-    ~maintenance_only:false
     ()
 ;;
 
@@ -1558,7 +1440,6 @@ let masc_schedule_descriptor (definition : Tool_schemas_schedule.definition) =
     ~handler:Tool_masc_schedule_dispatch
     ~readonly:definition.read_only
     ~inline_safe:false
-    ~maintenance_only:false
     ()
 ;;
 
@@ -1572,7 +1453,6 @@ let masc_keeper_descriptor ?(polling_read = false) id name description ~readonly
     ~handler:Tool_masc_keeper_dispatch
     ~readonly
     ~inline_safe:false
-    ~maintenance_only:false
     ()
 ;;
 
@@ -1585,8 +1465,10 @@ let masc_library_descriptor (definition : Tool_schemas_library.definition) =
       , "List all documents in the agent knowledge library with title, confidence, \
          source, and tags. Use keeper_library_read to fetch a document or \
          keeper_library_search to query by content." )
-    | Tool_schemas_library.Read_document
-    | Tool_schemas_library.Search_documents -> Dispatch_only, schema.description
+    | Tool_schemas_library.Read_document ->
+      Transport_alias { projected_by = "keeper_library_read" }, schema.description
+    | Tool_schemas_library.Search_documents ->
+      Transport_alias { projected_by = "keeper_library_search" }, schema.description
     | Tool_schemas_library.Add_document
     | Tool_schemas_library.Promote_document -> Internal_name, schema.description
   in
@@ -1600,7 +1482,6 @@ let masc_library_descriptor (definition : Tool_schemas_library.definition) =
     ~handler:Tool_masc_library_dispatch
     ~readonly:definition.read_only
     ~inline_safe:false
-    ~maintenance_only:false
     ()
 ;;
 
@@ -1620,7 +1501,6 @@ let masc_recurring_descriptor (definition : Tool_schemas_recurring.definition) =
     ~handler:Tool_masc_recurring_dispatch
     ~readonly:definition.read_only
     ~inline_safe:false
-    ~maintenance_only:false
     ()
 ;;
 
@@ -1643,7 +1523,6 @@ let masc_local_runtime_descriptor
     ~handler:Tool_masc_local_runtime_dispatch
     ~readonly:true
     ~inline_safe:false
-    ~maintenance_only:false
     ()
 ;;
 
@@ -1701,8 +1580,7 @@ let internal_descriptors : t list =
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_context_status
   ; in_process_descriptor_with_schema_source
-      ~keeper_model_projection:
-        (model_projection_for_schema_source Internal_name memory_search_schema_source)
+      ~keeper_model_projection:Internal_name
       ~input_schema_source:memory_search_schema_source
       ~id:"keeper.memory.search"
       ~name:"keeper_memory_search"
@@ -1712,8 +1590,7 @@ let internal_descriptors : t list =
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_memory_search
   ; in_process_descriptor_with_schema_source
-      ~keeper_model_projection:
-        (model_projection_for_schema_source Internal_name memory_write_schema_source)
+      ~keeper_model_projection:Internal_name
       ~input_schema_source:memory_write_schema_source
       ~id:"keeper.memory.write"
       ~name:"keeper_memory_write"
@@ -1780,8 +1657,7 @@ let internal_descriptors : t list =
       ~handler:Tool_person_note_set
     (* ── IDE (RFC-0179 PR-3) ──────────────────────────────────── *)
   ; in_process_descriptor_with_schema_source
-      ~keeper_model_projection:
-        (model_projection_for_schema_source Internal_name ide_annotate_schema_source)
+      ~keeper_model_projection:Internal_name
       ~input_schema_source:ide_annotate_schema_source
       ~id:"keeper.ide.annotate"
       ~name:"keeper_ide_annotate"
@@ -1809,10 +1685,8 @@ let internal_descriptors : t list =
          their answers with web_search / web_fetch. Gated by runtime.toml \
          [fusion] (disabled by default)."
       ~input_schema:masc_fusion_schema
-      (* RFC-0252 §159/§177: the explicit [Internal_name] projection above
-         makes Fusion available to the Keeper model. Catalog visibility remains
-         metadata only and no longer decides Keeper exposure. *)
-      ~policy:(write_in_process_policy ~visibility:Tool_catalog.Default ())
+      (* The explicit [Internal_name] projection makes Fusion available. *)
+      ~policy:(write_in_process_policy ())
       ~handler:Tool_masc_fusion_dispatch
     (* ── fusion status (RFC-0266 §7 Phase 3) ──────────────────── *)
   ; in_process_descriptor
@@ -1830,9 +1704,8 @@ let internal_descriptors : t list =
          start a deliberation. In-memory and server-lifetime: runs do not \
          survive a restart."
       ~input_schema:masc_fusion_status_schema
-      (* [Internal_name] is the model exposure authority. Keep the catalog
-         visibility metadata unchanged in this migration-only slice. *)
-      ~policy:(read_only_in_process_policy ~visibility:Tool_catalog.Default ())
+      (* [Internal_name] is the model exposure authority. *)
+      ~policy:(read_only_in_process_policy ())
       ~handler:Tool_masc_fusion_status
     (* ── vision delegation (RFC-keeper-vision-delegation-tool §2.6) ─ *)
   ; in_process_descriptor
@@ -1848,9 +1721,8 @@ let internal_descriptors : t list =
          invalid_request | no_capable_runtime | empty_extraction | \
          truncated_extraction | timeout | provider_error)."
       ~input_schema:analyze_image_schema
-      (* [Internal_name] keeps the read-only vision sub-call model-visible;
-         catalog visibility remains separate metadata. *)
-      ~policy:(read_only_in_process_policy ~visibility:Tool_catalog.Default ())
+      (* [Internal_name] keeps the read-only vision sub-call model-visible. *)
+      ~policy:(read_only_in_process_policy ())
       ~handler:Tool_analyze_image
     (* ── voice cluster (RFC-0179 PR-3, 6 tools) ───────────────── *)
   ; voice_descriptor
@@ -1912,7 +1784,7 @@ let internal_descriptors : t list =
     (* ── board cluster (RFC-0179 PR-3, 15 tools) ──────────────── *)
   ; board_descriptor
       "keeper_board_comment"
-      "Comment on one board post. Requires an exact post_id from board activity, keeper_board_list, keeper_board_search, or keeper_board_post_get. Board content has a maximum length; keep comments concise — summarize and link rather than pasting long output."
+      "Comment on one board post. Requires an exact post_id from board activity, keeper_board_list, keeper_board_search, or keeper_board_post_get."
       ~readonly:false
   ; board_descriptor
       "keeper_board_comment_vote"
@@ -1936,10 +1808,7 @@ let internal_descriptors : t list =
       ~readonly:true
   ; board_descriptor
       "keeper_board_post"
-      "Post a new board entry. Quantitative claims require code-anchor \
-       evidence. Board content has a maximum length; keep entries concise — \
-       post a short summary of the key points and reference a file path, PR, \
-       or issue link instead of pasting full logs, diffs, or analyses."
+      "Post a new board entry with the content and metadata supplied by the keeper."
       ~readonly:false
   ; board_descriptor
       "keeper_board_search"
@@ -2030,7 +1899,7 @@ let internal_descriptors : t list =
   (* ── RFC-0182 §3.1 — masc_workspace_* cluster (8 entries) ────────── *)
   ; masc_workspace_descriptor "status" "masc_status"
       "Read overall workspace status." ~readonly:true
-  ; masc_workspace_maintenance_descriptor
+  ; masc_workspace_descriptor
       "heartbeat"
       "masc_heartbeat"
       "Emit an agent heartbeat." ~readonly:false
@@ -2042,15 +1911,8 @@ let internal_descriptors : t list =
       "List workspace goals." ~readonly:true
   ; masc_workspace_descriptor "goal_upsert" "masc_goal_upsert"
       "Create or update a workspace goal." ~readonly:false
-  ; masc_workspace_descriptor
-      "goal_hygiene_review"
-      "masc_goal_hygiene_review"
-      "Review Goal Store hygiene and optionally block executable hygiene violations."
-      ~readonly:false
   ; masc_workspace_descriptor "goal_transition" "masc_goal_transition"
       "Transition a goal status." ~readonly:false
-  ; masc_workspace_descriptor "goal_verify" "masc_goal_verify"
-      "Verify goal completion criteria." ~readonly:false
   (* ── RFC-0182 §3.1 — masc_misc_* cluster (9 entries) ─────────── *)
   ; masc_misc_descriptor "config" "masc_config"
       "Read workspace configuration." ~readonly:true
@@ -2126,7 +1988,6 @@ let internal_descriptors : t list =
       ~handler:Tool_masc_surface_audit
       ~readonly:true
       ~inline_safe:false
-      ~maintenance_only:false
       ()
   ]
   @ masc_board_descriptors
@@ -2137,25 +1998,39 @@ let internal_descriptors : t list =
 
 let all_descriptors () = public_descriptors @ internal_descriptors
 
+let model_schema_errors descriptor =
+  match descriptor.input_schema_source, descriptor.input_schema with
+  | Missing_canonical_registry, _ ->
+    [ "missing canonical input schema for " ^ descriptor.internal_name ]
+  | (Descriptor_owned | Canonical_registry), `Assoc _ ->
+    (Tool_input_validation.schema_shape descriptor.input_schema).errors
+  | (Descriptor_owned | Canonical_registry), other ->
+    [ Printf.sprintf
+        "input schema for %s must be an object, got %s"
+        descriptor.internal_name
+        (Json_util.kind_name other)
+    ]
+;;
+
 let keeper_model_names descriptor =
-  match descriptor.input_schema_source, descriptor.keeper_model_projection with
-  | Missing_canonical_registry, _ -> []
-  | (Descriptor_owned | Canonical_registry), Preferred_public_name ->
+  match model_schema_errors descriptor, descriptor.keeper_model_projection with
+  | _ :: _, _ -> []
+  | [], Preferred_public_name ->
     [ descriptor.public_name ]
-  | (Descriptor_owned | Canonical_registry), Internal_name ->
+  | [], Internal_name ->
     [ descriptor.internal_name ]
-  | (Descriptor_owned | Canonical_registry), Dispatch_only -> []
+  | [], Transport_alias _ -> []
 ;;
 
 let keeper_candidate_names descriptor =
-  match descriptor.input_schema_source, descriptor.keeper_model_projection with
-  | Missing_canonical_registry, _ -> []
-  | (Descriptor_owned | Canonical_registry), Preferred_public_name ->
+  match model_schema_errors descriptor, descriptor.keeper_model_projection with
+  | _ :: _, _ -> []
+  | [], Preferred_public_name ->
     descriptor.public_name :: descriptor.internal_name :: descriptor.public_aliases
     |> List.sort_uniq String.compare
-  | (Descriptor_owned | Canonical_registry), Internal_name ->
+  | [], Internal_name ->
     [ descriptor.internal_name ]
-  | (Descriptor_owned | Canonical_registry), Dispatch_only -> []
+  | [], Transport_alias _ -> []
 ;;
 
 let registered_names descriptor =
@@ -2166,10 +2041,9 @@ let registered_names descriptor =
 let model_visible_descriptors () =
   all_descriptors ()
   |> List.filter (fun descriptor ->
-    match descriptor.input_schema_source, keeper_model_names descriptor with
-    | Missing_canonical_registry, _ -> false
-    | (Descriptor_owned | Canonical_registry), [] -> false
-    | (Descriptor_owned | Canonical_registry), _ :: _ -> true)
+    match model_schema_errors descriptor, keeper_model_names descriptor with
+    | _ :: _, _ | [], [] -> false
+    | [], _ :: _ -> true)
 ;;
 
 let public_names_of_descriptor d = d.public_name :: d.public_aliases
@@ -2220,13 +2094,6 @@ let keeper_safe_inline_names () =
   |> List.sort_uniq String.compare
 ;;
 
-let keeper_maintenance_only_names () =
-  all_descriptors ()
-  |> List.concat_map (fun d ->
-       if d.policy.maintenance_only then internal_names d else [])
-  |> List.sort_uniq String.compare
-;;
-
 let polling_read_internal_names () =
   all_descriptors ()
   |> List.concat_map (fun d ->
@@ -2259,25 +2126,11 @@ let eval_tags_json d =
   `List (List.map (fun tag -> `String tag) d.eval_tags)
 ;;
 
-let effect_domain_json = function
-  | Some effect_domain -> `String (Tool_catalog.effect_domain_to_string effect_domain)
-  | None -> `Null
-;;
-
-let effect_domain_fields = function
-  | Some domain ->
-    [ "effect_domain", `String (Tool_catalog.effect_domain_to_string domain) ]
-  | None -> []
-;;
-
 let common_policy_json_fields ~readonly_key policy =
-  [ "visibility", `String (Tool_catalog.visibility_to_string policy.visibility)
-  ; readonly_key, Json_util.bool_opt_to_json policy.readonly_hint
-  ; "approval", `String (approval_to_string policy.approval)
+  [ readonly_key, Json_util.bool_opt_to_json policy.readonly_hint
   ; "retryable", `Bool policy.retryable
   ; "cwd_scope", Json_util.string_opt_to_json policy.cwd_scope
   ; "inline_safe", `Bool policy.inline_safe
-  ; "maintenance_only", `Bool policy.maintenance_only
   ; "polling_read", `Bool policy.polling_read
   ]
 ;;
@@ -2300,14 +2153,16 @@ let route_evidence_json d =
      ; "receipt_labels", receipt_labels_json d
      ; "eval_tags", eval_tags_json d
      ]
-     @ common_policy_json_fields ~readonly_key:"readonly" policy
-     @ effect_domain_fields policy.effect_domain)
+     @
+     (match d.keeper_model_projection with
+      | Transport_alias { projected_by } ->
+        [ "transport_alias_of", `String projected_by ]
+      | Preferred_public_name | Internal_name -> [])
+     @ common_policy_json_fields ~readonly_key:"readonly" policy)
 ;;
 
 let discovery_policy_json policy =
-  `Assoc
-    (common_policy_json_fields ~readonly_key:"readonly_hint" policy
-     @ [ "effect_domain", effect_domain_json policy.effect_domain ])
+  `Assoc (common_policy_json_fields ~readonly_key:"readonly_hint" policy)
 ;;
 
 let discovery_fields d =
@@ -2316,25 +2171,30 @@ let discovery_fields d =
     | [] -> []
     | examples -> [ "examples", `List examples ]
   in
-  [ "id", `String d.id
-  ; ( "keeper_model_projection"
-    , `String (keeper_model_projection_to_string d.keeper_model_projection) )
-  ; ( "model_description_projection"
-    , `String
-        (model_description_projection_to_string d.model_description_projection) )
-  ; "keeper_tool_group", `String (keeper_tool_group_to_string d.keeper_tool_group)
-  ; "input_schema_source", `String (input_schema_source_to_string d.input_schema_source)
-  ; "public_name", `String d.public_name
-  ; "public_aliases", Json_util.json_string_list d.public_aliases
-  ; "internal_name", `String d.internal_name
-  ; "description", `String d.description
-  ; "executor", `String (executor_to_string d.executor)
-  ; "backend", `String (backend_to_string d.backend)
-  ; "sandbox", `String (sandbox_to_string d.sandbox)
-  ; "runtime_handler", `String (runtime_handler_to_string d.runtime_handler)
-  ; "policy", discovery_policy_json d.policy
-  ; "schema_shape", Tool_input_validation.schema_shape_json d.input_schema
-  ]
+  ([ "id", `String d.id
+   ; ( "keeper_model_projection"
+     , `String (keeper_model_projection_to_string d.keeper_model_projection) )
+   ; ( "model_description_projection"
+     , `String
+         (model_description_projection_to_string d.model_description_projection) )
+   ; "keeper_tool_group", `String (keeper_tool_group_to_string d.keeper_tool_group)
+   ; "input_schema_source", `String (input_schema_source_to_string d.input_schema_source)
+   ; "public_name", `String d.public_name
+   ; "public_aliases", Json_util.json_string_list d.public_aliases
+   ; "internal_name", `String d.internal_name
+   ; "description", `String d.description
+   ; "executor", `String (executor_to_string d.executor)
+   ; "backend", `String (backend_to_string d.backend)
+   ; "sandbox", `String (sandbox_to_string d.sandbox)
+   ; "runtime_handler", `String (runtime_handler_to_string d.runtime_handler)
+   ; "policy", discovery_policy_json d.policy
+   ; "schema_shape", Tool_input_validation.schema_shape_json d.input_schema
+   ]
+   @
+   match d.keeper_model_projection with
+   | Transport_alias { projected_by } ->
+     [ "transport_alias_of", `String projected_by ]
+   | Preferred_public_name | Internal_name -> [])
   @ examples_field
 ;;
 

@@ -48,19 +48,10 @@ val decide_compaction
     tuple. *)
 val compaction_policy_of_keeper : Keeper_meta_contract.keeper_meta -> float * int * int
 
-(** OAS strategy chain used by checkpoint compaction before the
-    keeper-private tool-result fold reducer. *)
-val checkpoint_compaction_strategies
-  :  mode:Keeper_config.compaction_mode
-  -> Context_compact_oas.strategy list
-(** OAS strategy chain for checkpoint compaction, selected by the
-    per-keeper [compaction_mode]. Both modes expose the extractive chain as
-    the deterministic floor; [Llm] selects its provider-backed plan in
-    [compact_if_needed_typed] when the compaction is not an emergency. *)
-
-(** [compact_if_needed_typed ~meta ~now_ts ctx] evaluates the compaction
-    gates and either returns [ctx] unchanged or applies the OAS
-    strategy chain plus the keeper-private fold reducer.
+(** [compact_if_needed_typed ~meta ~now_ts ctx] evaluates the configured
+    observation gates and either returns [ctx] unchanged or applies a valid
+    configured-LLM plan. Missing/invalid LLM output and the retired
+    deterministic mode preserve the original messages exactly.
 
     Return triple:
     - the (possibly compacted) working context;

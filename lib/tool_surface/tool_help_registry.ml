@@ -201,7 +201,7 @@ let manual_help_entry name =
           prompt_hints = [ "Prefer this over retired task verification wrapper tools." ];
           examples =
             [
-              "task_id='task-123' result='Implemented the task; checks passed.' evidence_refs=['https://github.com/org/repo/pull/42']";
+              "task_id='task-123' result='Implemented the task; checks passed.' evidence_refs=['artifact:review-42']";
             ];
           alternatives = [];
         }

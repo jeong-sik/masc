@@ -74,9 +74,6 @@ if [[ -z "$CONFIG_DIR" ]]; then
   else
     printf '# self-contained harness runtime seed\n' >"$CONFIG_DIR/runtime.toml"
   fi
-  if [[ -f "$REPO_ROOT/config/tool_policy.toml" ]]; then
-    cp "$REPO_ROOT/config/tool_policy.toml" "$CONFIG_DIR/tool_policy.toml"
-  fi
 elif [[ ! -d "$CONFIG_DIR" ]]; then
   echo "CONFIG_DIR does not exist: $CONFIG_DIR" >&2
   exit 1

@@ -1,7 +1,7 @@
 // Goal creation form — right-hand side panel in the Work surface.
 // Design reference: prototype NewGoalComposer (work.jsx ~line 437).
 // RFC-0294: no horizon; no lead keeper (live Goal type has no owner field).
-// Fields: title (required), priority (1-5), require_completion_approval (checkbox).
+// Fields: title (required), priority (1-5).
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
@@ -24,12 +24,10 @@ import {
 
 const titleSignal = signal('')
 const prioritySignal = signal(GOAL_PRIORITY_DEFAULT)
-const approvalSignal = signal(false)
 
 export function resetGoalCreateFormLocal(): void {
   titleSignal.value = ''
   prioritySignal.value = GOAL_PRIORITY_DEFAULT
-  approvalSignal.value = false
   resetGoalCreateForm()
 }
 
@@ -59,7 +57,6 @@ export function GoalCreateForm() {
     void createGoal({
       title: titleSignal.value,
       priority: prioritySignal.value,
-      require_completion_approval: approvalSignal.value,
     }).then(ok => {
       if (ok) resetLocalForm()
     })
@@ -134,26 +131,6 @@ export function GoalCreateForm() {
             value=${prioritySignal.value}
             onInput=${(e: Event) => { prioritySignal.value = Number((e.target as HTMLInputElement).value) }}
           />
-        </div>
-
-        <div class="wk-goal-create-sec">
-          <label class="wk-goal-create-label">예상 위험도 · priority</label>
-          <div class="wk-goal-create-risk">
-            <span class="wk-goal-create-risk-level">Safe</span>
-            <span class="wk-goal-create-risk-desc">가드 통과 · 자율 실행</span>
-          </div>
-        </div>
-
-        <div class="wk-goal-create-sec">
-          <label class="wk-goal-create-check v2-mobile-operator-target">
-            <input
-              type="checkbox"
-              data-testid="goal-create-approval-checkbox"
-              checked=${approvalSignal.value}
-              onChange=${(e: Event) => { approvalSignal.value = (e.target as HTMLInputElement).checked }}
-            />
-            <span>완료 승인 필요 <b>operator 검증 게이트</b></span>
-          </label>
         </div>
 
         ${goalCreateError.value?.kind === 'submit' ? html`

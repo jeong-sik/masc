@@ -25,20 +25,8 @@ describe('lifecycleEventTone', () => {
     expect(lifecycleEventTone('reconciled')).toBe('ok')
   })
 
-  it('auto_resumed returns ok', () => {
-    expect(lifecycleEventTone('auto_resumed')).toBe('ok')
-  })
-
   it('restarted returns warn', () => {
     expect(lifecycleEventTone('restarted')).toBe('warn')
-  })
-
-  it('paused_pruned returns warn', () => {
-    expect(lifecycleEventTone('paused_pruned')).toBe('warn')
-  })
-
-  it('self_preservation returns warn', () => {
-    expect(lifecycleEventTone('self_preservation')).toBe('warn')
   })
 
   it('dead_cleaned returns bad', () => {
@@ -71,10 +59,6 @@ describe('lifecycleEventLabel', () => {
 
   it('maps dead_cleaned to Korean label', () => {
     expect(lifecycleEventLabel('dead_cleaned')).toBe('종료 정리됨')
-  })
-
-  it('maps auto_resumed to Korean label', () => {
-    expect(lifecycleEventLabel('auto_resumed')).toBe('자동 재개됨')
   })
 
   it('maps purged to Korean label', () => {

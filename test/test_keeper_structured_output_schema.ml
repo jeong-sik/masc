@@ -55,10 +55,11 @@ let all_provider_native_schema_cases =
   ; "memory_bank_summary", Keeper_structured_output_schema.memory_bank_summary_output_schema
   ; "vision_analyze", Keeper_structured_output_schema.vision_analyze_output_schema
   ; "operator_judge", Keeper_structured_output_schema.operator_judge_output_schema
-  ; "governance_judge", Keeper_structured_output_schema.governance_judge_output_schema
   ; "fusion_judge", Keeper_structured_output_schema.fusion_judge_output_schema
   ; "verification_verdict", Keeper_structured_output_schema.verification_verdict_output_schema
   ; "failure_judgment", Keeper_structured_output_schema.failure_judgment_output_schema
+  ; ( "board_attention_judgment"
+    , Keeper_structured_output_schema.board_attention_judgment_output_schema )
   ; ( "anti_rationalization_verdict"
     , Keeper_structured_output_schema.anti_rationalization_verdict_output_schema )
   ]
@@ -174,13 +175,6 @@ let operator_recommended_action_schema () =
   |> schema_property "recommended_action"
 ;;
 
-let governance_recommended_action_schema () =
-  Keeper_structured_output_schema.governance_judge_output_schema
-  |> schema_property "items"
-  |> schema_items
-  |> schema_property "recommended_action"
-;;
-
 let test_operator_judge_schema_uses_action_approval_ssot () =
   let action_schema =
     operator_recommended_action_schema () |> schema_property "action_type"
@@ -188,15 +182,8 @@ let test_operator_judge_schema_uses_action_approval_ssot () =
   check
     (list string)
     "operator action enum"
-    (List.sort String.compare Operator_approval.allowed_actions)
-    (enum_strings action_schema);
-  check
-    bool
-    "goal completion decision is schema-admitted"
-    true
-    (List.mem
-       Operator_action_constants.goal_completion_decision
-       (enum_strings action_schema))
+    (List.sort String.compare Operator_action_catalog.strings)
+    (enum_strings action_schema)
 ;;
 
 let test_operator_judge_schema_allows_payload_objects () =
@@ -205,17 +192,6 @@ let test_operator_judge_schema_allows_payload_objects () =
   in
   check bool "suggested_payload admits object members" true
     (allows_additional_properties payload_schema)
-;;
-
-let test_governance_judge_schema_uses_resolved_tool_ssot () =
-  let tool_schema =
-    governance_recommended_action_schema () |> schema_property "resolved_tool"
-  in
-  check
-    (list string)
-    "governance resolved_tool enum"
-    (List.sort String.compare Tool_name.Operator_remote_name.all_strings)
-    (enum_strings tool_schema)
 ;;
 
 let test_operator_remote_tool_name_ssot_matches_remote_schemas () =
@@ -234,14 +210,6 @@ let test_operator_remote_tool_name_ssot_matches_remote_schemas () =
     "operator remote exported names"
     (List.sort String.compare Tool_name.Operator_remote_name.all_strings)
     (List.sort String.compare Operator_tool.remote_tool_names)
-;;
-
-let test_governance_judge_schema_allows_payload_objects () =
-  let payload_schema =
-    governance_recommended_action_schema () |> schema_property "payload_preview"
-  in
-  check bool "payload_preview admits object members" true
-    (allows_additional_properties payload_schema)
 ;;
 
 let test_fusion_judge_schema_uses_parser_wire_contract () =
@@ -473,6 +441,24 @@ let test_failure_judgment_schema_uses_contract_ssot () =
     (allows_additional_properties schema)
 ;;
 
+let test_board_attention_judgment_schema_uses_contract_ssot () =
+  let schema =
+    Keeper_structured_output_schema.board_attention_judgment_output_schema
+  in
+  check
+    (list string)
+    "Board attention required fields"
+    [ "decision"; "rationale" ]
+    (required_strings schema);
+  check
+    (list string)
+    "Board attention decision enum"
+    (List.sort String.compare Keeper_board_attention_judgment.decision_tokens)
+    (schema |> schema_property "decision" |> enum_strings);
+  check bool "Board attention verdict is closed" false
+    (allows_additional_properties schema)
+;;
+
 let () =
   run
     "keeper-structured-output-schema"
@@ -510,17 +496,9 @@ let () =
             `Quick
             test_operator_judge_schema_allows_payload_objects
         ; test_case
-            "governance judge schema uses resolved-tool SSOT"
-            `Quick
-            test_governance_judge_schema_uses_resolved_tool_ssot
-        ; test_case
             "operator remote tool-name SSOT matches remote schemas"
             `Quick
             test_operator_remote_tool_name_ssot_matches_remote_schemas
-        ; test_case
-            "governance judge schema admits payload objects"
-            `Quick
-            test_governance_judge_schema_allows_payload_objects
         ] )
     ; ( "fusion schemas"
       , [ test_case
@@ -541,6 +519,10 @@ let () =
             "failure judgment schema uses contract SSOT"
             `Quick
             test_failure_judgment_schema_uses_contract_ssot
+        ; test_case
+            "Board attention judgment schema uses contract SSOT"
+            `Quick
+            test_board_attention_judgment_schema_uses_contract_ssot
         ] )
     ]
 ;;

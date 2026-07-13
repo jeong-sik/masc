@@ -86,7 +86,7 @@ let sanitize_command_for_log cmd =
 ;;
 
 let sanitize_command_for_log_of_ir ~fallback_cmd ir =
-  match Exec_policy_mutation_classifier.flat_stage_words ir with
+  match Exec_policy_literal_words.flat_stage_words ir with
   | [] -> sanitize_command_for_log fallback_cmd
   | parts -> sanitize_parts parts
 ;;

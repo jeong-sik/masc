@@ -21,9 +21,7 @@ val handle : tool_name:string -> start_time:float -> Yojson.Safe.t -> Tool_resul
     Optional: [extractMode] ("markdown" or "text", default "markdown").
     Optional: [maxChars] (int, clamped to [\[1, 100000\]], default {!default_max_chars}).
 
-    On success the payload [data] is wrapped as
-    [`Assoc [ "text", `String json ]] where [json] is the serialized
-    [Tool_args.ok_response] envelope holding:
+    On success [data] is the typed [Tool_args.ok_assoc] envelope holding:
 	    - [url]: the requested URL
 	    - [final_url]: final URL after validated redirects
 	    - [http_status]: HTTP status code
@@ -60,7 +58,7 @@ type fetch_failure =
   | Transport_error of string
   | Http_status of int
   | No_http_status
-  | Redirect_blocked of string
+  | Invalid_redirect of string
   | Redirect_limit_exceeded
   | Unsupported_content_type of string
 

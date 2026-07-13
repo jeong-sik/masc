@@ -7,7 +7,9 @@ include Server_dashboard_http_namespace_truth
 open Masc_domain
 open Server_utils
 
-let board_governance_cache_ttl_s = Server_dashboard_http_core_cache.board_governance_cache_ttl_s
+let dashboard_projection_cache_ttl_s =
+  Server_dashboard_http_core_cache.dashboard_projection_cache_ttl_s
+;;
 
 (* Repository observation snapshot handler *)
 let handle_repository_observation_snapshot ~sw:_ ~clock request reqd =
@@ -90,7 +92,7 @@ let dashboard_board_json
       (Option.value ~default:"-" voter)
       blind_votes
   in
-  Dashboard_cache.get_or_compute cache_key ~ttl:board_governance_cache_ttl_s (fun () ->
+  Dashboard_cache.get_or_compute cache_key ~ttl:dashboard_projection_cache_ttl_s (fun () ->
     (* /api/v1/dashboard/board was measured at 30-44s on hot keeper
        fleets.  The compute below scans the post store, fetches the
        karma map, and per-post enriches with vote + contributor
@@ -125,7 +127,6 @@ let dashboard_board_json
       let total_json : Yojson.Safe.t = if has_more then `Null else `Int fetched_len in
       let paged = posts |> drop offset |> take limit in
       let contributor_quality_for = board_contributor_quality_lookup ?config () in
-      let claim_evidence_for = board_claim_evidence_lookup () in
       let posts_json =
         List.map
           (fun (post : Board.post) ->
@@ -133,12 +134,10 @@ let dashboard_board_json
              let post_id = Board.Post_id.to_string post.id in
              let current_vote = board_current_vote_for_post ~voter ~post_id in
              let contributor_quality = contributor_quality_for author in
-             let claim_evidence = claim_evidence_for post_id in
              board_post_dashboard_json
                ~blind_votes
                ?current_vote
                ?contributor_quality
-               ?claim_evidence
                ~author_karma:(get_karma author)
                post)
           paged
@@ -195,22 +194,7 @@ let dashboard_memory_http_json ?config request : Yojson.Safe.t =
 
 include Server_dashboard_http_memory_subsystems
 
-(* /api/v1/dashboard/governance ran [Dashboard_governance.dashboard_json]
-   inline on the Eio main domain.  That compute calls
-   [Dashboard_governance_judge.fresh_judgments_json], which iterates the
-   per-judge log files via [Fs_compat.load_file] — a synchronous disk
-   read on every request.
-
-   Same fix pattern as PR #18991 / #18993 / #18994 / #19007 / #19015 /
-   #19023: wrap in [Dashboard_cache.get_or_compute] for
-   stale-while-revalidate and push the compute through
-   [Domain_pool_ref.submit_io_or_inline] so the main HTTP domain keeps
-   serving other fibers during refresh.
-
-   Cache key includes [base_path] + the [limit]/[offset] knobs the
-   query exposes; [status_filter] is always [None] today, so it is
-   not part of the key. *)
-let dashboard_governance_http_json request ~base_path : Yojson.Safe.t =
+let dashboard_gate_http_json request ~base_path : Yojson.Safe.t =
   let limit = int_query_param request "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
   let offset =
     int_query_param request "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000
@@ -218,23 +202,23 @@ let dashboard_governance_http_json request ~base_path : Yojson.Safe.t =
   let status_filter = None in
   let force = bool_query_param request "force" ~default:false in
   let cache_key =
-    Printf.sprintf "governance:%s;%d;%d" base_path limit offset
+    Printf.sprintf "gate:%s;%d;%d" base_path limit offset
   in
   let compute () =
     Domain_pool_ref.submit_io_or_inline (fun () ->
-      Dashboard_governance.dashboard_json ~base_path ~limit ~offset ~status_filter)
+      Dashboard_gate.dashboard_json ~base_path ~limit ~offset ~status_filter)
   in
   if force then Dashboard_cache.invalidate cache_key;
-  Dashboard_cache.get_or_compute cache_key ~ttl:board_governance_cache_ttl_s compute
+  Dashboard_cache.get_or_compute cache_key ~ttl:dashboard_projection_cache_ttl_s compute
 ;;
 
 (** Read the optional [?window=<minutes>] query param.
     Defaults to 60 minutes; clamped to [5..1440]. *)
-let dashboard_governance_tool_events_http_json request : Yojson.Safe.t =
+let dashboard_gate_tool_events_http_json request : Yojson.Safe.t =
   let window =
     int_query_param request "window" ~default:60 |> clamp ~min_v:5 ~max_v:1440
   in
-  Dashboard_governance_metrics.governance_tool_events_json ~window_minutes:window ()
+  Dashboard_gate_metrics.gate_tool_events_json ~window_minutes:window ()
 ;;
 
 (* /api/v1/dashboard/proof was measured at 28-60s (timeout) under
@@ -328,7 +312,7 @@ let dashboard_proof_http_json ~config request : Yojson.Safe.t =
   let key =
     Printf.sprintf "dashboard.proof:%s;%d;%d" config.Workspace.base_path limit recent
   in
-  Dashboard_cache.get_or_compute key ~ttl:board_governance_cache_ttl_s (fun () ->
+  Dashboard_cache.get_or_compute key ~ttl:dashboard_projection_cache_ttl_s (fun () ->
     Domain_pool_ref.submit_io_or_inline (fun () ->
       dashboard_proof_compute ~config ~limit ~recent ()))
 ;;
@@ -382,7 +366,7 @@ let approval_resolve_http_error_to_string = function
   | Unavailable err -> Keeper_approval_queue.resolve_error_to_string err
 ;;
 
-let dashboard_governance_approval_resolve_http_json ~base_path ~(args : Yojson.Safe.t)
+let dashboard_gate_resolve_http_json ~created_by ~(args : Yojson.Safe.t)
   : (Yojson.Safe.t, approval_resolve_http_error) result
   =
   match Safe_ops.json_string_opt "id" args with
@@ -406,9 +390,8 @@ let dashboard_governance_approval_resolve_http_json ~base_path ~(args : Yojson.S
           Keeper_approval_queue.resolve_with_policy
             ~id
             ~decision
-            ~base_path
             ~remember_rule
-            ~created_by:"dashboard"
+            ~created_by
             ()
         with
         | Ok result ->
@@ -424,13 +407,15 @@ let dashboard_governance_approval_resolve_http_json ~base_path ~(args : Yojson.S
                 ])
         | Error (Keeper_approval_queue.Delivery_failed _ as err) ->
           Error (Unavailable err)
+        | Error (Keeper_approval_queue.Persistence_failed _ as err) ->
+          Error (Unavailable err)
         | Error
             (( Keeper_approval_queue.Not_found _
              | Keeper_approval_queue.Already_resolved _ ) as err) ->
           Error (Gone err)))
 ;;
 
-let dashboard_governance_approval_rule_delete_http_json ~base_path ~(args : Yojson.Safe.t)
+let dashboard_gate_rule_delete_http_json ~base_path ~(args : Yojson.Safe.t)
   : (Yojson.Safe.t, string) result
   =
   match Safe_ops.json_string_opt "id" args with
@@ -443,19 +428,8 @@ let dashboard_governance_approval_rule_delete_http_json ~base_path ~(args : Yojs
            ~event_type:"rule_deleted"
            deleted;
          Ok (`Assoc [ "ok", `Bool true; "id", `String deleted.id ])
-       | Error message -> Error message)
-;;
-
-let dashboard_schedule_resolve_http_json
-      ~config
-      ~operator_name
-      ~(args : Yojson.Safe.t)
-  : (Yojson.Safe.t, string) result
-  =
-  Server_dashboard_http_schedule_actions.resolve_http_json
-    ~config
-    ~operator_name
-    ~args
+       | Error error ->
+         Error (Keeper_approval_queue.rule_store_error_to_string error))
 ;;
 
 let dashboard_schedule_prune_http_json
@@ -516,74 +490,66 @@ let dashboard_verification_resolve_http_json
     | other ->
       Error (Printf.sprintf "decision must be 'approve' or 'reject' (got %s)" other)
   in
-  let prepare_verification_verdict ~task:_ ~verifier ~verification_id:state_vid ~decision =
-    if state_vid <> verification_id
-    then
+  let* task =
+    Workspace.get_tasks_raw config
+    |> List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id task_id)
+    |> function
+    | None -> Error (Printf.sprintf "task %s not found" task_id)
+    | Some task -> Ok task
+  in
+  let* () =
+    match task.task_status with
+    | Masc_domain.AwaitingVerification { verification_id = state_id; _ }
+      when String.equal state_id verification_id -> Ok ()
+    | Masc_domain.AwaitingVerification { verification_id = state_id; _ } ->
       Error
         (Printf.sprintf
            "verification_id mismatch for task %s: request=%s state=%s"
            task_id
            verification_id
-           state_vid)
-    else (
-      match decision with
-      | `Approve notes ->
-        Verification_protocol.record_approve_verification
-          ~config
-          ~task_id
-          ~verifier
-          ~verification_id:state_vid
-          ~notes
-      | `Reject reason ->
-        Verification_protocol.record_reject_verification
-          ~config
-          ~task_id
-          ~verifier
-          ~verification_id:state_vid
-          ~reason)
+           state_id)
+    | status ->
+      Error
+        (Printf.sprintf
+           "task %s is %s, not awaiting verification"
+           task_id
+           (Masc_domain.task_status_to_string status))
   in
-  let fsm_result =
-    Workspace.transition_task_r
-      config
-      ~agent_name:verifier
-      ~task_id
-      ~action
-      ~prepare_verification_verdict
-      ~notes:reason
-      ~reason
-      ()
+  let handoff_context =
+    match task.handoff_context with
+    | Some handoff -> Masc_domain.task_handoff_context_to_yojson handoff
+    | None ->
+      `Assoc
+        [ "summary", `String reason
+        ; "evidence_refs", `List []
+        ]
   in
-  match fsm_result with
-  | Error err -> Error (Masc_domain.masc_error_to_string err)
-  | Ok _ ->
-    (match action with
-     | Masc_domain.Approve_verification ->
-       Verification_protocol.notify_approve_verification
-         ~task_id
-         ~verifier
-         ~verification_id
-         ~notes:reason
-     | Masc_domain.Reject_verification ->
-       Verification_protocol.notify_reject_verification
-         ~task_id
-         ~verifier
-         ~verification_id
-         ~reason
-     | Masc_domain.Claim
-     | Masc_domain.Start
-     | Masc_domain.Done_action
-     | Masc_domain.Cancel
-     | Masc_domain.Release
-     | Masc_domain.Submit_for_verification
-     -> ());
+  let transition_args =
+    `Assoc
+      [ "task_id", `String task_id
+      ; "action", `String (Masc_domain.task_action_to_string action)
+      ; "notes", `String reason
+      ; "reason", `String reason
+      ; "handoff_context", handoff_context
+      ]
+  in
+  let task_context : Task.Tool.context =
+    { config; agent_name = verifier; sw = None }
+  in
+  match Task.Tool.dispatch task_context ~name:"masc_transition" ~args:transition_args with
+  | None -> Error "Task transition handler is unavailable"
+  | Some result when not (Tool_result.is_success result) ->
+    Error (Tool_result.message result)
+  | Some result ->
     Ok
       (`Assoc
-          [ "ok", `Bool true
-          ; "task_id", `String task_id
-          ; "verification_id", `String verification_id
-          ; "decision", `String decision_name
-          ; "verifier", `String verifier
-          ])
+         [ "ok", `Bool true
+         ; "task_id", `String task_id
+         ; "verification_id", `String verification_id
+         ; "decision", `String decision_name
+         ; "verifier", `String verifier
+         ; "result", Tool_result.data result
+         ])
 ;;
 
 let dashboard_planning_http_json ~(config : Workspace.config) : Yojson.Safe.t =

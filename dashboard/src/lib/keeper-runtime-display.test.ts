@@ -9,7 +9,6 @@ import {
   keeperPauseDisplay,
   keeperRuntimeBlockerHint,
   keeperRuntimeBlockerLabel,
-  keeperRuntimeHint,
   keeperWorkPreview,
 } from './keeper-runtime-display'
 
@@ -317,39 +316,6 @@ describe('keeperRuntimeBlockerHint', () => {
         runtime_blocker_summary: 'runtime_exhausted',
       })),
     ).toBe('런타임 후보가 모두 소진되어 runtime 상태 확인이 필요합니다.')
-  })
-
-  it('explains admission queue waits as keeper FIFO waits, not OAS waits', () => {
-    expect(
-      keeperRuntimeBlockerHint(makeKeeper({
-        runtime_blocker_class: 'admission_queue_wait_timeout',
-        runtime_blocker_summary: 'admission_queue_wait_timeout',
-      })),
-    ).toBe('Keeper admission FIFO 대기 시간이 초과되었습니다.')
-  })
-
-  it('explains no-progress loop as a safety latch cleared by resume', () => {
-    expect(
-      keeperRuntimeBlockerHint(makeKeeper({
-        runtime_blocker_class: 'no_progress_loop',
-        runtime_blocker_summary: 'no_progress_loop',
-      })),
-    ).toBe(
-      '반복된 무증거 턴으로 자동 정지된 progress-safety latch입니다. provider 실패가 아니며 Resume이 latch를 해제합니다.',
-    )
-  })
-
-  it('normalizes legacy no-progress pause detail before rendering runtime hints', () => {
-    const hint = keeperRuntimeHint(makeKeeper({
-      status: 'paused',
-      paused: true,
-      last_blocker: 'no_progress loop detected: streak=10 threshold=10; manual pause applied',
-    }))
-
-    expect(hint).toBe(
-      '일시정지 · 반복된 무증거 턴으로 자동 정지된 progress-safety latch입니다. provider 실패가 아니며 Resume이 latch를 해제합니다.',
-    )
-    expect(hint).not.toContain('manual pause applied')
   })
 
   const registryBlockerHintCases: Array<[KeeperRuntimeBlockerClass, string]> = [

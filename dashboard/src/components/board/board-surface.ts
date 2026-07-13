@@ -45,11 +45,6 @@ import {
   boardActorDisplayName,
   boardActorSigilLabel,
   boardActorTitle,
-  boardClaimEvidenceBadgeClass,
-  boardClaimEvidenceLabel,
-  boardClaimEvidenceTitle,
-  contributorQualityBadgeClass,
-  contributorQualityPercent,
   navigateToAuthor,
   stripInlineMarkdown,
   dedupeLeadingHeading,
@@ -371,12 +366,6 @@ function PostCard({ post }: { post: BoardPost }) {
   const voteScoreLabel = post.vote_blind ? '투표 후 공개' : String(post.votes ?? 0)
   const voteScoreAria = post.vote_blind ? '점수 투표 후 공개' : `점수 ${post.votes ?? 0}`
   const isMod = post.moderation_status && post.moderation_status !== 'none' && post.moderation_status !== 'approved'
-  const qualityPercent = contributorQualityPercent(post.contributor_quality)
-  const qualityTitle = qualityPercent === null
-    ? undefined
-    : `기여자 품질 ${qualityPercent}점`
-  const claimEvidenceLabel = boardClaimEvidenceLabel(post.claim_evidence)
-  const claimEvidenceTitle = boardClaimEvidenceTitle(post.claim_evidence)
   const selected = selectedBoardPostId.value === post.id
 
   const handleVote = async (dir: 'up' | 'down', event: Event) => {
@@ -458,14 +447,6 @@ function PostCard({ post }: { post: BoardPost }) {
         ${post.pinned ? html`<span class="bd-badge pin" title="고정된 게시글">고정</span>` : null}
         ${isMod ? html`<span class="bd-badge mod">모더레이션 대기</span>` : null}
         ${post.flair ? html`<span class="bd-badge">flair:${post.flair}</span>` : null}
-        ${qualityPercent !== null ? html`<span class="bd-badge ${contributorQualityBadgeClass(post.contributor_quality)}" aria-label=${qualityTitle} title=${qualityTitle}>품질 ${qualityPercent}</span>` : null}
-        ${claimEvidenceLabel !== null ? html`
-          <span
-            class=${`bd-badge ${boardClaimEvidenceBadgeClass(post.claim_evidence)}`}
-            aria-label=${claimEvidenceTitle}
-            title=${claimEvidenceTitle}
-          >${claimEvidenceLabel}</span>
-        ` : null}
         ${boardHearthFilter.value === '' && post.hearth ? html`<span class="bd-badge">${post.hearth}</span>` : null}
         <span class="ts"><${TimeAgo} timestamp=${post.created_at} /></span>
         <label class="bd-post-select-target v2-mobile-operator-target" onClick=${(e: Event) => e.stopPropagation()}>

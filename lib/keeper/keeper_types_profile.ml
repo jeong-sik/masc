@@ -23,17 +23,19 @@ type 'a context = {
 
 type tool_result = Tool_result.result
 
-let tool_result_payload body =
-  match Tool_result.structured_payload_of_message body with
-  | Some json -> json
-  | None -> `String body
-;;
-
 let tool_result_ok ?(tool_name = "") body : tool_result =
   Tool_result.make_ok
     ~tool_name
     ~start_time:(Time_compat.now ())
-    ~data:(tool_result_payload body)
+    ~data:(`String body)
+    ()
+;;
+
+let tool_result_ok_data ?(tool_name = "") data : tool_result =
+  Tool_result.make_ok
+    ~tool_name
+    ~start_time:(Time_compat.now ())
+    ~data
     ()
 ;;
 
@@ -47,8 +49,22 @@ let tool_result_error
     ~tool_name
     ~class_
     ~start_time:(Time_compat.now ())
-    ~data:(tool_result_payload body)
+    ~data:(`String body)
     body
+;;
+
+let tool_result_error_data
+      ?(tool_name = "")
+      ?(class_ = Tool_result.Runtime_failure)
+      data
+  : tool_result
+  =
+  Tool_result.make_err
+    ~tool_name
+    ~class_
+    ~start_time:(Time_compat.now ())
+    ~data
+    (Yojson.Safe.to_string data)
 ;;
 
 let tool_result_with_tool_name ~tool_name : tool_result -> tool_result = function

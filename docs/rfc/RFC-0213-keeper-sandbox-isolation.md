@@ -76,7 +76,7 @@ then: shell_ir path_reject keeper=umberto reason=sandbox_repo_not_ready
   effect, is not confined.
 
 Boundary classification (per CLAUDE.md product-boundary discipline):
-- Deterministic: the path gate + risk classifier (typed).
+- Deterministic: typed input, BasePath path jail, and sandbox confinement only.
 - The host exposure: `local` profile = no OS confinement (the gap).
 
 ## 3. Competitive comparison (currency-caveated — re-verify)

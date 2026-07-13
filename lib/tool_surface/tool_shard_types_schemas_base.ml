@@ -146,8 +146,8 @@ let base_tools : Masc_domain.tool_schema list =
          this to answer connector content questions or channel registry questions; use \
          keeper_surface_read only for current connected-surface lane context and state \
          the limitation if a connector-wide registry is unavailable. Returns tool names \
-         organized by category plus descriptor_surface metadata with executor, policy, \
-         schema-shape, and typed usage examples after denylist filtering."
+         organized by category plus descriptor_surface metadata with executor, \
+         schema-shape, and typed usage examples."
     ; input_schema = `Assoc [ "type", `String "object"; "properties", `Assoc [] ]
     }
   ]

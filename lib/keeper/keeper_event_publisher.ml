@@ -82,14 +82,13 @@ let publish_keeper_snapshot ~keeper_name
     Event names are pinned by
     {!Keeper_lifecycle_events.all_event_names}, which covers both the
     custom verbs (\[started\] / \[reconciled\] / \[restarted\] /
-    \[dead_cleaned\] / \[self_preservation\] / \[paused_pruned\]) and
+    \[dead_cleaned\] / \[purged\] / \[admission_denied\]) and
     the phase-derived names (\[stopped\] / \[crashed\] / \[dead\] /
     \[running\]).
 
     Issue #8575: the previous docstring listed only five names, so
-    operators silently missed the cleanup and self-healing events
-    (\[reconciled\] / \[dead_cleaned\] / \[self_preservation\] /
-    \[paused_pruned\] / \[admission_denied\]) — exactly the events that signal supervisor
+    operators silently missed the cleanup and recovery events
+    (\[reconciled\] / \[dead_cleaned\] / \[admission_denied\]) — exactly the events that signal supervisor
     recovery actions where observability matters most. Subscribe to
     {!Keeper_lifecycle_events.all_event_names} to receive the full
     stream; the sync test in [test_types.ml ::
@@ -123,27 +122,6 @@ let publish_keeper_lifecycle
   ] in
   masc_publish
     (Agent_sdk.Event_bus.mk_event (Custom ("masc.keeper.lifecycle", payload)))
-
-(** Publish a structured keeper-Dead event.
-
-    Emitted when [Keeper_supervisor.sweep_and_recover] gives up on a keeper
-    after [restart_count >= max_restarts]. Operators should treat this as
-    actionable: the supervisor will NOT retry the keeper. Independent from
-    the [event="dead"] entry on [masc.keeper.lifecycle] (which is unstructured
-    free-form [detail]) so subscribers can filter on a stable topic and pull
-    the structured fields directly. Topic: [masc.keeper.dead]. *)
-let publish_keeper_dead
-    ~keeper_name ~reason ~restart_count ~last_failure_reason () =
-  let last_failure_json = Json_util.string_opt_to_json last_failure_reason in
-  let payload = `Assoc [
-    ("keeper_name", `String keeper_name);
-    ("reason", `String reason);
-    ("restart_count", `Int restart_count);
-    ("last_failure_reason", last_failure_json);
-    ("timestamp", `Float (Time_compat.now ()));
-  ] in
-  masc_publish
-    (Agent_sdk.Event_bus.mk_event (Custom ("masc.keeper.dead", payload)))
 
 (** {1 Audit Ledger Events} *)
 

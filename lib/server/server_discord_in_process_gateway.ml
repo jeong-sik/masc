@@ -616,23 +616,14 @@ let handle_ambient ~base_dir
           }
         ();
       Keeper_chat_broadcast.chat_appended ~keeper_name ~source:State.channel ();
-      (* RFC-connector-ambient-attention-wake P3: wake the (possibly idle) keeper
-         on this ambient message via an edge stimulus carrying the external-
-         attention event_id (not content — content stays in the durable store),
-         plus a wakeup hint for sub-second propagation. Gated off by default:
-         until the spurious-wake throttle (P4) lands, running a turn on every
-         ambient line in a chatty channel is the anti-pattern the trigger policy
-         deliberately filtered. *)
+      (* Every accepted Connector event is a durable per-Keeper stimulus. The
+         event identity comes from the producer-owned external-attention row;
+         no content, channel activity, elapsed-time window, or rollout flag may
+         suppress it. The wake is only a hint after the durable commit, so a
+         busy or lifecycle-deferred Keeper retains the exact event for its next
+         lane cycle. *)
       (match attention_event_id with
-       | Some event_id
-         when Feature_flag_registry.get_bool "MASC_CONNECTOR_AMBIENT_WAKE_ENABLED"
-              (* P4 throttle: the flag short-circuits first (cheap, no side
-                 effect); the debounce records a timestamp only when reached, so
-                 a chatty channel wakes the keeper at most once per window and a
-                 no-progress-latched keeper is not re-woken (RFC-0246). *)
-              && Keeper_keepalive_signal.connector_reactive_wakeup_allowed
-                   ~base_path:base_dir ~keeper_name ~channel_id
-         ->
+       | Some event_id ->
          let stimulus =
            { Keeper_event_queue.post_id = event_id
            ; urgency = Keeper_event_queue.Low
@@ -654,15 +645,52 @@ let handle_ambient ~base_dir
                  }
            }
          in
-         Keeper_registry_event_queue.enqueue ~base_path:base_dir keeper_name stimulus;
-         let (_ : Keeper_registry.wakeup_outcome) =
-           Keeper_registry.wakeup
-             ~intent:Keeper_registry.Reactive_signal
-             ~base_path:base_dir
-             keeper_name
-         in
-         ()
-       | Some _ | None -> ());
+         (match
+            Keeper_registry_event_queue.enqueue_stimulus_durable_result
+              ~base_path:base_dir
+              keeper_name
+              stimulus
+          with
+          | Keeper_registry_event_queue.Stimulus_storage_error detail ->
+            Otel_metric_store.inc_counter
+              Keeper_metrics.(to_string KeepaliveSignalFailures)
+              ~labels:
+                [ ("keeper", keeper_name)
+                ; ("phase", "connector_attention_delivery")
+                ]
+              ();
+            Log.Server.error
+              "connector attention durable delivery failed (keeper=%s event=%s): %s"
+              keeper_name
+              event_id
+              detail
+          | Keeper_registry_event_queue.Stimulus_enqueued
+          | Keeper_registry_event_queue.Stimulus_already_present ->
+            (match
+               Keeper_registry.wakeup
+                 ~intent:Keeper_registry.Reactive_signal
+                 ~base_path:base_dir
+                 keeper_name
+             with
+             | Keeper_registry.Signaled -> ()
+             | Keeper_registry.Deferred_unregistered ->
+               Log.Server.info
+                 "connector attention durably queued; wake deferred for unregistered Keeper (keeper=%s event=%s)"
+                 keeper_name
+                 event_id
+             | Keeper_registry.Deferred_not_running phase ->
+               Log.Server.info
+                 "connector attention durably queued; wake deferred by Keeper phase (keeper=%s event=%s phase=%s)"
+                 keeper_name
+                 event_id
+                 (Keeper_state_machine.phase_to_string phase)
+             | Keeper_registry.Deferred_lifecycle denial ->
+               Log.Server.info
+                 "connector attention durably queued; wake deferred by lifecycle (keeper=%s event=%s reason=%s)"
+                 keeper_name
+                 event_id
+                 (Keeper_lifecycle_admission.autonomous_denial_to_wire denial)))
+       | None -> ());
       Discord_observability.record_ambient
         Discord_observability.Ambient_recorded
     end

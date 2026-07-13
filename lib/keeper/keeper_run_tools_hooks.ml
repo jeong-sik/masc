@@ -30,9 +30,7 @@ type ctx =
   ; agent_name : string
   ; all_tool_names : string list
   ; compute_tool_surface :
-      turn:int -> messages:Agent_sdk.Types.message list ->
-      current_tool_choice:Agent_sdk.Types.tool_choice option ->
-      decay_discovered:bool -> unit ->
+      turn:int -> current_tool_choice:Agent_sdk.Types.tool_choice option -> unit ->
       string list * turn_lane
   ; record_tool_assignment :
       turn:int -> tool_list:string list -> lane:turn_lane -> unit
@@ -133,11 +131,9 @@ let assemble_hooks
       ~(start_turn_count : int)
       ~(generation : int)
       ~(runtime_id_string : string)
-      ~(is_retry : bool)
-      ~(turn_affordances : string list)
+      ~is_retry:(_ : bool)
       ~(config_root : string)
       ~(runtime_config_path : string option)
-      ?max_cost_usd
       ~(trajectory_acc : Trajectory.accumulator option)
       ?runtime_manifest_context
       ?runtime_manifest_append
@@ -165,9 +161,7 @@ let assemble_hooks
   let initial_schema_filter, initial_turn_lane =
     compute_tool_surface
       ~turn:(start_turn_count + 1)
-      ~messages:history_messages
       ~current_tool_choice:None
-      ~decay_discovered:false
       ()
   in
   acc.tool_surface
@@ -179,18 +173,12 @@ let assemble_hooks
       acc
       initial_schema_filter;
     let meta_ref = ref acc.meta in
-    let public_alias_pre_tool_use_guard ~tool_name ~input:_ =
-      Keeper_tool_resolution.public_alias_guidance_for_internal_call
-        ~allowed_tool_names:acc.requested_tool_names
-        tool_name
-    in
     let base_hooks =
       Keeper_hooks_oas.make_hooks
         ~config
         ~meta_ref
         ~turn_ctx_cell
         ~generation
-        ?max_cost_usd
         ?trajectory_acc
         ~on_tool_executed:
           (fun
@@ -208,21 +196,19 @@ let assemble_hooks
               ~output_text
           in
           let outcome =
-            if not success
-            then "error"
-            else if
-              Keeper_tool_progress.tool_result_has_material_progress
-                ~tool_name
-                ~output_text
-            then "ok"
-            else "ok_no_progress"
+            if success then "ok" else "error"
           in
           (match Keeper_registry.get ~base_path:config.base_path meta.name with
            | Some entry ->
              acc.meta <- entry.meta;
              meta_ref := entry.meta
            | None -> ());
-          let task_id = Keeper_run_tools_task_scope.task_id_scope_of_tool_call ~tool_name ~input ~output_text ~meta:acc.meta in
+          let task_id =
+            Keeper_run_tools_task_scope.task_id_scope_of_tool_call
+              ~tool_name
+              ~input
+              ~meta:acc.meta
+          in
           acc.tool_calls
           <- { tool_name
              ; provider
@@ -282,15 +268,6 @@ let assemble_hooks
              ; output_text
              ; input
              };
-           Agent_observation.emit_pr_event
-             { base_path = config.base_path
-             ; partition
-             ; keeper_id = acc.meta.name
-             ; turn_id
-             ; output_text
-             ; tool_name
-             ; success
-             };
            (* #23540: keeper in-turn tool executions never reached the
               activity log ([tool.called] is emitted only by the external MCP
               path), so the agent timeline reported tool_calls = 0 for any
@@ -307,7 +284,6 @@ let assemble_hooks
              ~oas_turn:acc.current_turn
              ~task_id
              ()))
-        ~pre_tool_use_guard:public_alias_pre_tool_use_guard
         ()
     in
     let before_turn_hook : Agent_sdk.Hooks.hooks =
@@ -335,21 +311,12 @@ let assemble_hooks
                 let runtime_seed =
                   Runtime_inference.for_runtime ~name:runtime_id_string
                 in
-                let current_budget =
-                  match runtime_seed.thinking_budget with
-                  | Some _ as v -> v
-                  | None -> current_params.thinking_budget
-                in
-                let adaptive_thinking_budget =
-                  adaptive_thinking_budget
-                    ~enabled:(Keeper_config.keeper_adaptive_thinking_enabled ())
-                    ~is_retry
-                    ~last_tool_results
-                    ~current_budget
-                in
                 let current_params =
                   { current_params with
-                    thinking_budget = adaptive_thinking_budget
+                    thinking_budget =
+                      (match runtime_seed.thinking_budget with
+                       | Some _ as configured -> configured
+                       | None -> current_params.thinking_budget)
                   ; enable_thinking =
                       (match runtime_seed.thinking_enabled with
                        | Some enabled -> Some enabled
@@ -387,85 +354,18 @@ let assemble_hooks
                    record_preflight_accounted_block
                      Prompt_block_id.Temporal_summary
                      temporal);
-                (match acc.meta.current_task_id with
-                  | Some task_id ->
-                    let last_tool_names =
-                      let rev = List.rev messages in
-                      let rec scan = function
-                        | [] -> []
-                        | (msg : Agent_sdk.Types.message) :: rest ->
-                          let names =
-                            List.filter_map
-                              (fun block ->
-                                Agent_sdk.Canonical_tool.tool_call_of_block block
-                                |> Option.map (fun call ->
-                                  call.Agent_sdk.Canonical_tool.name))
-                              msg.content
-                          in
-                          if names <> [] then names else scan rest
-                      in
-                      scan rev
-                    in
-                    let is_claim_only_turn =
-                      List.exists is_claim_tool_name last_tool_names
-                      && List.for_all is_claim_context_tool_name last_tool_names
-                    in
-                    if is_claim_only_turn
-                    then (
-                      let nudge =
-                        Printf.sprintf
-                           "[CLAIMED TASK] You hold %s. Do NOT call claim_next again. Use \
-                           an execution tool from your active runtime schema to start \
-                           working on it now. If no execution tool is available, explain \
-                           the blocker explicitly instead of inventing a tool name."
-                          (Keeper_id.Task_id.to_string task_id)
-                      in
-                      record_block Prompt_block_id.Claimed_task_nudge nudge;
-                      ())
-                  | None -> ());
                 let schema_filter, computed_turn_lane =
                   compute_tool_surface
                     ~turn
-                    ~messages
                     ~current_tool_choice:current_params.tool_choice
-                    ~decay_discovered:true
                     ()
                 in
-                (if is_retry
-                 then (
-                    let retry_nudge =
-                      "[RETRY] The previous attempt overflowed the model context. \
-                       Stay concise, prefer already-loaded context, and only use the \
-                       smallest essential tool set if a tool call is strictly \
-                       necessary."
-                    in
-                    record_block Prompt_block_id.Retry_nudge retry_nudge));
                 (match
-                   (* Off-main: [render_if_enabled] performs synchronous file I/O
-                      (stat/readdir/open over the persisted memory store). Running
-                      it directly on the main Eio domain blocks the cooperative
-                      scheduler, head-of-line-blocking every sibling keeper fiber
-                      until the syscalls return. Push the I/O onto the shared
-                      domain pool ([submit_io_or_inline] runs inline when no pool
-                      is configured, e.g. tests). The render is read-side only and
-                      keeps no module-level mutable state, so it is domain-safe. *)
-                   Domain_pool_ref.submit_io_or_inline (fun () ->
-                     Keeper_user_model.render_if_enabled
-                       ~keeper_id:meta.name
-                       ~now:(Time_compat.now ())
-                       ())
-                 with
-                 | None -> ()
-                 | Some block -> record_block Prompt_block_id.User_model block);
-                (match
-                   (* Memory OS recall — bounded advisory block rendered from
+                   (* Memory OS recall — advisory block rendered from every
                       persisted facts/episodes (read side; the write side is
-                      the librarian wired in #20897). Opt-in via
-                      MASC_KEEPER_MEMORY_OS_RECALL. RFC-0247 removed the lexical
-                      seed: recall now orders by structural recency, so the
-                      current-turn text no longer reranks the recalled facts. *)
-                   (* Off-main: same rationale as the user-model render above —
-                      the recall reads persisted facts/episodes via synchronous
+                      the librarian wired in #20897), in persisted source order.
+                      Opt-in via MASC_KEEPER_MEMORY_OS_RECALL. *)
+                   (* Off-main: recall reads persisted facts/episodes via synchronous
                       file I/O, which would starve the main Eio domain and HOL
                       sibling keepers. Read-side only, no module-level mutable
                       state, so it is domain-safe on the shared pool. *)
@@ -480,8 +380,8 @@ let assemble_hooks
                  with
                  | None -> ()
                  | Some block -> record_block Prompt_block_id.Memory_os_recall block);
-                let extra_system_context_budget =
-                  Keeper_run_prompt.budget_extra_system_context
+                let extra_system_context_assembly =
+                  Keeper_run_prompt.assemble_extra_system_context
                     ~estimated_input_tokens_with_tools:
                       tool_context_estimate.estimated_input_tokens_with_tools
                     ~max_context
@@ -491,12 +391,9 @@ let assemble_hooks
                       (List.rev !preflight_accounted_blocks)
                     ~blocks:(List.rev !recorded_blocks)
                 in
-                let ctx = extra_system_context_budget.extra_system_context in
+                let ctx = extra_system_context_assembly.extra_system_context in
                 let recorded_blocks_for_receipt =
-                  extra_system_context_budget.included_blocks
-                in
-                let tool_filter =
-                  Agent_sdk.Guardrails.AllowList schema_filter
+                  extra_system_context_assembly.blocks
                 in
                 (* OAS treats [None] in AdjustParams as "keep the base
                    config", so strict choices must be explicitly relaxed.
@@ -612,32 +509,23 @@ let assemble_hooks
                   Option.map Keeper_context_core_accessors.estimate_char_tokens ctx
                 in
                 let hook_extra_system_context_estimated_tokens =
-                  extra_system_context_budget
+                  extra_system_context_assembly
                     .hook_extra_system_context_estimated_tokens
                 in
                 let post_hook_estimated_input_tokens =
-                  extra_system_context_budget.post_hook_estimated_input_tokens
+                  extra_system_context_assembly.post_hook_estimated_input_tokens
                 in
-                let post_hook_context_window_budget =
-                  extra_system_context_budget.post_hook_context_window_budget
+                let post_hook_context_window_observation =
+                  extra_system_context_assembly
+                    .post_hook_context_window_observation
                 in
-                (* [budget_extra_system_context] computes the post-hook ledger
-                   from the assembled [extra_system_context] string, subtracting
-                   only blocks already represented in the pre-dispatch estimate.
-                   When the base tool-inclusive estimate fits the window, hook
-                   additions that would push the request over are skipped before
-                   this check. Any remaining overflow is therefore the base
-                   request overflow that must reach OAS' typed ContextOverflow
-                   retry path, not a silent hook-induced overrun. *)
-                let post_hook_context_window_error =
-                  Keeper_run_prompt.preflight_context_window
-                    ~estimated_input_tokens:post_hook_estimated_input_tokens
-                    ~max_context
-                in
+                (* The complete block sequence is already assembled into [ctx].
+                   This estimate is manifest-only: OAS receives [ctx] unchanged
+                   and owns typed ContextOverflow/compaction. *)
                 let post_hook_over_context_window =
-                  match post_hook_context_window_error with
-                  | Ok () -> false
-                  | Error _ -> true
+                  post_hook_context_window_observation
+                    .observed_over_context_tokens
+                  > 0
                 in
                 (match runtime_manifest_context, runtime_manifest_append with
                  | Some manifest_context, Some append_manifest ->
@@ -687,30 +575,18 @@ let assemble_hooks
                                    `Int max_context )
                                ; ( "post_hook_remaining_context_tokens",
                                    `Int
-                                     post_hook_context_window_budget
-                                       .remaining_context_tokens )
+                                     post_hook_context_window_observation
+                                       .observed_remaining_context_tokens )
                                ; ( "post_hook_over_context_tokens",
                                    `Int
-                                     post_hook_context_window_budget
-                                       .over_context_tokens )
+                                     post_hook_context_window_observation
+                                       .observed_over_context_tokens )
                                ; ( "post_hook_context_usage_ratio",
                                    `Float
-                                     post_hook_context_window_budget
-                                       .context_usage_ratio )
+                                     post_hook_context_window_observation
+                                       .observed_context_usage_ratio )
                                ; ( "post_hook_over_context_window",
                                    `Bool post_hook_over_context_window )
-                               ; ( "skipped_extra_system_context_blocks",
-                                   `List
-                                     (List.map
-                                        (fun block ->
-                                           `String
-                                             (Prompt_block_id.to_string block))
-                                        extra_system_context_budget
-                                          .skipped_blocks) )
-                               ; ( "skipped_extra_system_context_estimated_tokens",
-                                   `Int
-                                     extra_system_context_budget
-                                       .skipped_estimated_tokens )
                                ]))
                         ())
                  | _ -> ());
@@ -736,23 +612,12 @@ let assemble_hooks
                   { current_params with
                     extra_system_context = ctx
                   ; tool_choice
-                  ; tool_filter_override = Some tool_filter
+                  ; tool_filter_override = None
                   }
               | _event -> Agent_sdk.Hooks.Continue)
       }
     in
     let hooks = Agent_sdk.Hooks.compose ~outer:before_turn_hook ~inner:base_hooks in
-    (* Tier K4b/K4c: install the tool-emission PostToolUse hook so
-     tagged tool results flow into this keeper's own accumulator
-     during Agent.run. The drain happens in keeper_post_turn.ml
-     [apply_tool_emission_wirein] BEFORE [apply_multimodal_wirein],
-     keyed by the SAME keeper name (stable across turns).
-     When [MASC_TOOL_EMISSION] is off the hook is a no-op (see
-     [Keeper_tool_emission_hook] for the gating). *)
-    let hooks =
-      let acc = Keeper_tool_emission_hook.accumulator_for_keeper agent_name in
-      Keeper_tool_emission_hook.install_into_hooks acc hooks
-    in
     let reducer =
       let hydrator_steps =
         match Keeper_artifact_hydrator.reducer_from_env () with
@@ -809,13 +674,7 @@ let assemble_hooks
       in
       Agent_sdk.Context_reducer.compose
         (hydrator_steps
-         @ [ Agent_sdk.Context_reducer.drop_thinking
-           ; Agent_sdk.Context_reducer.stub_tool_results ~keep_recent:3
-           ; Agent_sdk.Context_reducer.prune_tool_outputs ~max_output_len:4000
-           ; Agent_sdk.Context_reducer.cap_message_tokens
-               ~max_tokens:Env_config_keeper.KeeperReducer.cap_message_tokens
-               ~keep_recent:Env_config_keeper.KeeperReducer.cap_message_keep_recent
-           ; { Agent_sdk.Context_reducer.strategy =
+         @ [ { Agent_sdk.Context_reducer.strategy =
                  Agent_sdk.Context_reducer.Custom
                    repair_broken_tool_call_pairs_observed
              }

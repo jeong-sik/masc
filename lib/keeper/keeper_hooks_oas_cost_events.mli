@@ -12,7 +12,6 @@ val cost_emit_source_metric : string
 
 val classify_cost_usd_source
   :  usage_missing:bool
-  -> usage_trusted:bool
   -> runtime_unmetered:bool
   -> cost_usd:float
   -> string

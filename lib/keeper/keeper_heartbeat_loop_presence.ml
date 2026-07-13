@@ -138,7 +138,7 @@ let keeper_agent_status (meta : keeper_meta) =
     successful heartbeat may recover [heartbeat_healthy], but it must not emit
     [Turn_succeeded] or reset provider/tool failure counters. Otherwise a
     runtime_exhausted turn can be erased by the next keepalive heartbeat before
-    auto-pause and diagnostics see the failure streak. *)
+    diagnostics observe the failure streak. *)
 let note_turn_failures_preserved_after_heartbeat ~(ctx : _ context) ~(meta : keeper_meta)
   =
   let turn_failures =
@@ -196,17 +196,14 @@ let sync_keeper_presence
       ~labels:[ "keeper", meta_current.name ]
       ();
     Log.Keeper.error
-      "workspace heartbeat failed (%d/%d): %s"
+      "workspace heartbeat failed (consecutive=%d): %s"
       !consecutive_failures
-      (Keeper_heartbeat_snapshot.max_consecutive_heartbeat_failures ())
       (Printexc.to_string exn);
     (* RFC-0002: dispatch heartbeat failure *)
     Keeper_registry.dispatch_event_unit
       ~base_path:ctx.config.base_path
       meta_current.name
       (Keeper_state_machine.Heartbeat_failed
-         { consecutive = !consecutive_failures
-         ; max_allowed = Keeper_heartbeat_snapshot.max_consecutive_heartbeat_failures ()
-         });
+         { consecutive = !consecutive_failures });
     meta_current
 ;;

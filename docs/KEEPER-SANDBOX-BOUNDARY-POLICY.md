@@ -1,6 +1,6 @@
 # Keeper Sandbox Boundary Policy
 
-Last updated: 2026-06-01
+Last updated: 2026-07-13
 
 ## Goal
 
@@ -21,7 +21,6 @@ failure just because a keeper uses the Docker backend.
 | `Keeper_workspace_op` | Structured `tool_search_files` operation vocabulary and valid op strings | Dispatch implementation, timeout policy, path resolution |
 | `Agent_tool_execute_timeout` | Execute timeout constants, user timeout clamping, typed Shell IR timeout floors | Tool dispatch, command parsing, path resolution |
 | `Agent_tool_execute_runtime_paths` | Runtime path rewrites between container-visible and host-visible paths | Cwd/path validation, command execution, Docker lifecycle |
-| `Agent_tool_execute_readonly_policy` | Readonly Execute rejection categories, Good/Bad hints, and structured recovery diagnoses | Shell IR dispatch, cwd/path resolution, Docker runtime ownership |
 | `Keeper_tool_execute_shell_ir` | Shell IR construction, gate/path validation, and classified dispatch facade for Execute/SearchFiles surfaces | Tool request parsing, remote workflow semantics |
 | `Agent_tool_execute_path` | `tool_search_files` cwd/path resolution, path autocorrect, and PATH executable probes | Shell IR dispatch, process execution, Docker runtime ownership |
 | `Agent_tool_execute_command_parse` | Raw shell command parsing into Shell IR | Command-shape policy, Docker process execution |
@@ -39,6 +38,9 @@ failure just because a keeper uses the Docker backend.
 - Keeper TOML is parsed with `Otoml`, not ad hoc string parsing.
 - Docker container roots are path projections from the config contract,
   not literals in tool code.
+- Docker subprocess status, stdout, and stderr are surfaced from one execution.
+  Rendered error text must not trigger retries or output suppression; typed
+  Unix I/O errors are handled only at the process boundary.
 - Per-command `git`/`gh` behavior is command semantics, not a sandbox
   profile.
 - Raw command parsing is centralized in `Agent_tool_execute_command_parse`.
@@ -52,8 +54,6 @@ failure just because a keeper uses the Docker backend.
 - SearchFiles op vocabulary, Execute timeout policy, and runtime path rewrites are
   centralized in `Keeper_workspace_op`, `Agent_tool_execute_timeout`, and
   `Agent_tool_execute_runtime_paths`.
-- Readonly Execute hints and block diagnoses are centralized in
-  `Agent_tool_execute_readonly_policy`.
 - `shared shell compatibility facade` is retired; do not reintroduce it as a compatibility
   facade or implementation owner.
 - Tool modules must not branch on `meta.sandbox_profile = Docker` or call
@@ -116,8 +116,8 @@ The boundary test intentionally fails if:
 - `shared shell compatibility facade` source files return;
 - SearchFiles ops or GitHub `Execute` routes cwd/path resolution outside
   `Agent_tool_execute_path`;
-- production shell modules bypass the dedicated op, timeout, runtime-path,
-  readonly-policy, or path owner modules;
+- production shell modules bypass the dedicated op, timeout, runtime-path, or
+  path owner modules;
 - keeper modules outside `Agent_tool_execute_command_parse` call
   `Exec_policy.parse_string_to_ir`;
 - keeper modules outside `Agent_tool_execute_command_words` call

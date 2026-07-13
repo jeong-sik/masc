@@ -223,7 +223,7 @@ describe('KeeperWorkspaceRoster', () => {
         name: 'gate',
         status: 'running',
         lifecycle_phase: 'Running',
-        current_gate: { kind: 'approval_required', tool: 'shell', risk: 'high' },
+        current_gate: { kind: 'approval_required', tool: 'shell' },
       }),
     ])
 

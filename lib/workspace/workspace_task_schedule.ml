@@ -1,7 +1,7 @@
-(** Workspace_task_schedule — Scheduling: claim_next, release_stale_claims.
+(** Workspace_task_schedule — Scheduling: claim_next.
 
     Extracted from Workspace_task to separate scheduling logic (priority queue,
-    stale detection, existing-claim preservation) from task CRUD and state
+    existing-claim preservation) from task CRUD and state
     transitions. *)
 
 open Masc_domain
@@ -197,8 +197,8 @@ let reconcile_all_agent_current_tasks_with_fresh_backlog ?(touch_last_seen = tru
     Scheduling logic:
     - Preserves any active claim held by this agent; callers must explicitly
       release or finish before claiming different work.
-    - Applies starvation prevention: tasks waiting >24h get priority boost
-    - Within same effective priority, prefers older tasks (FIFO) *)
+    - Uses the task's explicit priority without time-derived rewriting
+    - Within the same priority, prefers older tasks (FIFO) *)
 let claim_next_r
       config
       ~agent_name
@@ -274,26 +274,12 @@ let claim_next_r
                    ; scope_widened = false
                    })));
         let released_task_id, working_tasks = None, backlog.tasks in
-        (* Starvation prevention: Calculate effective priority
-         Tasks waiting >24h get priority boost (-1 per 24h, min 1) *)
-        let now = Time_compat.now () in
-        (* Reuse canonical UTC parser from Types_core *)
-        let parse_time = Types_core.parse_iso8601_opt in
-        let effective_priority (task : Masc_domain.task) =
-          let age_hours =
-            match parse_time task.created_at with
-            | Some created -> (now -. created) /. Masc_time_constants.hour
-            | None -> 0.0
-          in
-          let boost = Float.to_int (Float.round (age_hours /. 24.0)) in
-          max 1 (task.priority - boost)
-        in
-        (* Find highest priority (lowest number) unclaimed task
-         Within same priority, prefer older tasks (FIFO) *)
+        (* Explicit task priority is the scheduling input. Waiting time is
+           observable through [created_at], but never rewrites that priority. *)
         let sorted =
           List.sort
             (fun a b ->
-               let priority_cmp = compare (effective_priority a) (effective_priority b) in
+               let priority_cmp = compare a.priority b.priority in
                if priority_cmp <> 0
                then priority_cmp
                else compare a.created_at b.created_at)
@@ -604,72 +590,4 @@ let claim_next config ~agent_name =
       scope_excluded_count
       verification_blocked_count
   | Claim_next_error e -> Printf.sprintf "Error: %s" e
-;;
-
-(** Release stale task claims older than [ttl_seconds].
-    A Claimed or InProgress task whose assignee has no recent heartbeat
-    and whose task-status timestamp exceeds the TTL is considered stale.
-    Returns list of (task_id, assignee) pairs that were released. *)
-let release_stale_claims config ~ttl_seconds =
-  ensure_initialized config;
-  match read_backlog_r config with
-  | Error msg ->
-    Log.TaskState.warn "release_stale_claims: skipped unreadable backlog: %s" msg;
-    []
-  | Ok _ ->
-    let now = Time_compat.now () in
-    let status_timestamp = function
-      | Masc_domain.Claimed { claimed_at; _ } -> Some claimed_at
-      | Masc_domain.InProgress { started_at; _ } -> Some started_at
-      | Masc_domain.Todo
-      | Masc_domain.AwaitingVerification _
-      | Masc_domain.Done _
-      | Masc_domain.Cancelled _ -> None
-    in
-    let older_than_ttl task =
-      match status_timestamp task.task_status with
-      | None -> false
-      | Some raw_ts ->
-        (match Masc_domain.parse_iso8601_opt raw_ts with
-         | Some ts -> now -. ts > ttl_seconds
-         | None ->
-           Log.TaskState.warn
-             "release_stale_claims: refusing to release task=%s with unparsable \
-              status timestamp %S"
-             task.id
-             raw_ts;
-           false)
-    in
-    let release_one ((task : Masc_domain.task), assignee) =
-      if not (older_than_ttl task)
-      then None
-      else (
-        match
-          Workspace_task.force_release_task_r
-            config
-            ~agent_name:"keeper-stale-claim-gc"
-            ~task_id:task.id
-            ()
-        with
-        | Ok _ ->
-          Task_cache_invariant.clear_stale_agent_task
-            config
-            ~agent_name:assignee
-            ~task_id:task.id
-            ~status:Masc_domain.Todo
-            ~module_name:"release_stale_claims";
-          Some (task.id, assignee)
-        | Error err ->
-          log_event
-            config
-            (`Assoc
-                [ "type", `String "stale_claim_release_error"
-                ; "task_id", `String task.id
-                ; "agent", `String assignee
-                ; "error", `String (Masc_domain.masc_error_to_string err)
-                ; "ts", `String (now_iso ())
-                ]);
-          None)
-    in
-    Workspace_query.audit_orphan_tasks config |> List.filter_map release_one
 ;;

@@ -43,12 +43,12 @@
    17% / 41% split for [claude_code:auto] reported in #9953 is
    directly visible here as three counter rows. *)
 
-(* #10121: keeper turn livelock observer.  Each turn-start
+(* Objective Keeper turn-attempt observations. Each turn start
    bumps [Keeper_metrics.(to_string TurnStarts)]; a re-start of the SAME
    turn id (turn counter did not advance) bumps the dedicated
    [Keeper_metrics.(to_string TurnReattempts)].  Operators alert on
    [rate(masc_keeper_turn_reattempts_total[5m]) > 0] and pick
-   up stuck-turn pairs without grepping log lines.  See also
+   up repeated-turn pairs without grepping log lines. See also
    [Keeper_metrics.(to_string TurnRegressions)] when the FSM moves to a
    strictly LOWER turn id (very unusual; indicative of
    write_meta race losing an in-memory counter increment,
@@ -146,15 +146,8 @@ let metric_keeper_waiting_count = "masc_keeper_waiting_count"
 let metric_keeper_waiting_age_seconds = "masc_keeper_waiting_age_seconds"
 let metric_keeper_waiting_keeper_count = "masc_keeper_waiting_keeper_count"
 
-let metric_schedule_approval_blocked_count =
-  "masc_schedule_approval_blocked_count"
-
-let metric_schedule_approval_wait_seconds =
-  "masc_schedule_approval_wait_seconds"
-
 (* Schedule unsupported payload counter. Labels:
-   - [phase] in {creation, dispatch}
-   - [risk_class] in [Schedule_domain.risk_class_to_string] labels.
+   - [phase] in {creation, dispatch}.
    Raw payload kinds are intentionally not labels; they remain in typed
    errors/projections to avoid unbounded metric cardinality. *)
 let metric_schedule_payload_unsupported_total =
@@ -249,9 +242,8 @@ let metric_timeout_policy_overshoot = Otel_metric_store_core.declare_counter "ma
    The leak lives strictly in the user-visible string; the
    structured side-channel (Eio.traceln + this counter) keeps
    the rejection observable for operators without echoing the
-   roots list back to the LLM.  Labels:
-   - [kind] = "out_of_roots" (path resolved outside allowed)
-              | "not_found_relative" (relative path matched no root) *)
+   roots list back to the LLM.  Label [kind="out_of_roots"] means the
+   symlink-resolved candidate was outside every explicit allowed root. *)
 
 (* Retired RFC-0026 admission-router shadow metric name. Kept only for
    historical Otel_metric_store compatibility; active keeper scheduling uses the

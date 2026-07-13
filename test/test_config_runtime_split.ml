@@ -3,8 +3,7 @@ open Masc
 let () =
   (* Test 1: Seed round-trip — minimal JSON should parse + serialize *)
   let seed = Yojson.Safe.from_string {|
-{"name": "test-keeper", "agent_name": "test-agent", "trace_id": "trace-001",
- "tool_access": []}
+{"name": "test-keeper", "agent_name": "test-agent", "trace_id": "trace-001"}
 |} in
   let result = Keeper_meta_json_parse.meta_of_json seed in
   match result with
@@ -30,7 +29,6 @@ let () =
   let existing = Yojson.Safe.from_string {|
 {"name": "analyst", "agent_name": "keeper-analyst", "trace_id": "trace-001",
  "goal": "test goal", "sandbox_profile": "docker", "network_mode": "inherit",
- "tool_access": ["masc_status"],
  "compaction_profile": "balanced",
  "total_turns": 42, "total_input_tokens": 1000}
 |} in
@@ -57,7 +55,6 @@ let () =
   (* Test 3: meta_to_json output has no config keys *)
   let existing = Yojson.Safe.from_string {|
 {"name": "analyst", "agent_name": "keeper-analyst", "trace_id": "trace-001",
- "tool_access": ["masc_status"],
  "total_turns": 100}
 |} in
   (match Keeper_meta_json_parse.meta_of_json existing with
@@ -79,7 +76,6 @@ let () =
   (* Test 4: a persisted typo in compaction_mode must fail closed. *)
   let invalid_compaction_mode = Yojson.Safe.from_string {|
 {"name": "analyst", "agent_name": "keeper-analyst", "trace_id": "trace-001",
- "tool_access": ["masc_status"],
  "compaction_mode": "aggressive",
  "total_turns": 100}
 |} in

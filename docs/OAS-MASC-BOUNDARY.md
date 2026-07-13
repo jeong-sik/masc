@@ -38,7 +38,7 @@ consumer → MASC (workspace collaboration/orchestration) → OAS (agent runtime
 | ContextOverflow retry | overflow detection, structured error, standalone/keeper compact retry | 최종 overflow 결과를 keeper state, receipt, operator surfaces에 attribution |
 | 이벤트 전달 | `Event_bus` | 어떤 MASC 사건을 custom event로 publish할지 정의, SSE/dashboard에 연결 |
 | 장기 메모리 | 없음 | keeper memory bank, institution episodes, procedural memory, workspace/task/social semantics |
-| 조율 상태 | 없음 | workspace, tasks, team sessions, governance, social runtime |
+| 조율 상태 | 없음 | workspace, tasks, board, Gate/HITL, social runtime |
 
 ## 의존 방향
 
@@ -55,9 +55,8 @@ OAS  ──does not know──→ MASC
 
 - `config/runtime.toml`은 **MASC runtime contract**다. On-disk
   `runtime.json`은 retired compatibility input이며 더 이상 생성/소비하지 않는다. (MASC는 TOML에서 in-memory JSON representation을 렌더해 dashboard 등 소비자에게 제공한다.)
-- MASC owns keeper-facing logical runtime policy: named runtime/profile,
-  required capabilities, tool visibility, health/capacity gates, and
-  operator-facing lane/status projections.
+- MASC owns keeper-facing logical runtime configuration: named runtime/profile,
+  declared capabilities, typed tool visibility, and lane/status projections.
 - OAS owns concrete provider/model identity and execution. MASC must not branch
   on vendor/model literals or surface concrete provider/model ids in keeper
   runtime products; compatibility fields are redacted to `runtime`, `null`, or
@@ -65,7 +64,7 @@ OAS  ──does not know──→ MASC
 - OAS provider capability manifest / pricing override는 generic
   provider runtime contract다. MASC may pass logical runtime intent and
   capability requirements into those OAS contracts, but OAS must not learn MASC routes,
-  keeper phases, runtimes, board/governance semantics, or dashboard policy.
+  keeper phases, runtimes, Board/Goal/Task/Gate semantics, or dashboard policy.
 - `provider/model-free` in MASC means MASC policy code routes by logical use,
   declared capability, profile order, health, capacity, and receipt state; it
   does not branch on vendor/model literals. Provider/model ids remain
@@ -121,7 +120,7 @@ OAS  ──does not know──→ MASC
   Dashboard normalizers and product UI should not resurrect concrete
   model/provider labels from older payloads; they should show runtime lane,
   outcome, attempt, fallback, tool, sandbox, and runtime-trust evidence instead.
-  Governance/board dashboard adapters should likewise keep judge/approval
+  Gate/Board dashboard adapters should likewise keep judge/approval
   runtime evidence while nulling or hiding `model_used` and `selected_model`.
   Model-inference and cost/latency API projections may keep legacy field names
   such as `model_id`, `provider`, `agent`, `matrix.providers`, and
@@ -129,7 +128,7 @@ OAS  ──does not know──→ MASC
   lane labels or `null`, not concrete OAS provider/model identities. Keeper cost
   and decision dashboards must not display raw `model_used`. SSE journal text
   and operator digest normalizers follow the same redaction rule.
-  Governance judge API/status records, operator-judgment records, keeper detail
+  Gate judge API/status records, human-judgment records, keeper detail
   metric windows, and handoff summaries should preserve runtime status and
   transition counts while keeping concrete `model_used`, `to_model`, and
   model-breakdown labels null or neutral. Operator control snapshots follow
@@ -223,7 +222,7 @@ OAS  ──does not know──→ MASC
 
 - MASC owns the delivery contract itself: `contract_id`, acceptance checks, required artifacts, repair budget, evaluator role/runtime, proof/report surfaces.
 - OAS should stay generic and receive only reusable harness/runtime primitives.
-- Current local implementation keeps the contract in MASC workspace collaboration state (board posts, keeper FSM, governance queues) and feeds it into worker verification and proof artifacts without teaching OAS about MASC session semantics.
+- Current local implementation keeps the contract in MASC workspace collaboration state (Board, Goal, Task, Keeper FSM, and Gate requests) and feeds it into worker verification and proof artifacts without teaching OAS about MASC semantics.
 
 ## Candidate Upstream Work
 
@@ -237,7 +236,7 @@ These are the next changes that are generic enough to propose upstream:
 
 These stay in MASC:
 
-- workspace/task/board/operator/governance semantics
+- workspace/Task/Goal/Board/Keeper/Gate semantics
 - planner session policy and repair-budget policy
 - proof/report JSON/markdown contracts and workspace collaboration-specific evidence rules
 
@@ -267,7 +266,7 @@ These stay in MASC:
 Use this checklist when reviewing boundary-touching PRs:
 
 1. **OAS가 MASC를 새로 알게 되는가?**
-   - generic runtime/harness primitive가 아니라 workspace/task/governance/session semantics가 OAS public contract로 새어 나오면 안 된다.
+   - generic runtime/harness primitive가 아니라 Workspace/Task/Goal/Board/Keeper/Gate semantics가 OAS public contract로 새어 나오면 안 된다.
 2. **MASC core가 provider/model 세부를 새로 배우는가?**
    - model ID, vendor, token/cost detail은 config 또는 OAS-facing adapter/bridge에 머물러야 한다.
    - routing/policy code가 vendor/model literal로 분기하면 provider/model-free 위반이다.
@@ -279,7 +278,7 @@ Use this checklist when reviewing boundary-touching PRs:
 ## Boundary Rules for Future Work
 
 1. If the problem is “single agent execution contract”, prefer fixing `oas_worker` / `worker_oas` / OAS-facing adapters.
-2. If the problem is “workspace, board, governance, operator, workflow semantics”, keep it in MASC.
+2. If the problem is “Workspace, Task, Goal, Board, Keeper, Gate, Connector semantics”, keep it in MASC.
 3. If a bridge is lossy, fix the MASC-side adapter first before proposing OAS API expansion.
 4. Do not claim a subsystem is “migrated” if the runtime path works but key semantics are still dropped.
 

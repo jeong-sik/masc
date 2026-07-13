@@ -144,7 +144,6 @@ let prepare_run_context
   (* 2. Load checkpoint *)
   let session, ctx_opt =
     Keeper_context_runtime.load_context_from_checkpoint
-      ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages
       ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
       ~primary_model_max_tokens:max_context
       ~base_dir
@@ -174,77 +173,20 @@ let prepare_run_context
   let ctx_work =
     Keeper_context_runtime.set_system_prompt base_ctx ~system_prompt:base_system_prompt
   in
-  let checkpoint_hygiene =
-    Keeper_agent_checkpoint_hygiene.prepare_resume_checkpoint_for_dispatch
-      ~meta
-      ~now_ts:(Time_compat.now ())
-      ~loaded_checkpoint_present
-      ~save_checkpoint:(fun compacted_ctx ->
-        Keeper_context_runtime.save_oas_checkpoint
-          ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages
-          ~multimodal_policy:meta.multimodal_policy
-          ~keeper_name:meta.name
-          ~session
-          ~agent_name:meta.agent_name
-          ~ctx:compacted_ctx
-          ~generation)
-      ctx_work
+  (* Preserve the restored context exactly. MASC does not classify, compact,
+     truncate, or re-persist it before dispatch; OAS owns provider context
+     handling. Checkpoint persistence failure therefore cannot block this
+     turn before the provider has observed the input. *)
+  let resume_oas_checkpoint =
+    if loaded_checkpoint_present
+    then Some (Keeper_context_runtime.checkpoint_of_context ctx_work)
+    else None
   in
-  let ctx_work = checkpoint_hygiene.context in
-  let resume_oas_checkpoint = checkpoint_hygiene.resume_checkpoint in
-  let pre_dispatch_compacted = checkpoint_hygiene.compacted in
-  let pre_dispatch_compaction_trigger =
-    match checkpoint_hygiene.trigger with
-    | Some trigger -> Some (Compaction_trigger.to_human trigger)
-    | None -> None
-  in
-  let pre_dispatch_compaction_before_tokens =
-    if checkpoint_hygiene.applied then Some checkpoint_hygiene.before_tokens else None
-  in
-  let pre_dispatch_compaction_after_tokens =
-    if checkpoint_hygiene.applied then Some checkpoint_hygiene.after_tokens else None
-  in
-  let pre_dispatch_checkpoint_error =
-    match checkpoint_hygiene.save_error with
-    | Some detail ->
-      Otel_metric_store.inc_counter
-        Keeper_metrics.(to_string RunContextFailures)
-        ~labels:[("keeper", meta.name)]
-        ();
-      Log.Keeper.error
-        "%s: pre-dispatch checkpoint compaction save failed: %s"
-        meta.name detail;
-      Some
-        (Keeper_agent_error.checkpoint_persistence_error
-           ~keeper_name:meta.name
-           ~detail:("pre-dispatch checkpoint compaction save failed: " ^ detail))
-    | None -> None
-  in
-  (let decision =
-     match checkpoint_hygiene.trigger with
-     | Some trigger -> Compaction_trigger.to_human trigger
-     | None ->
-       Keeper_compact_policy.compaction_decision_to_string
-         checkpoint_hygiene.decision
-   in
-   let before_ratio =
-     if max_context <= 0 then 0.0
-     else float_of_int checkpoint_hygiene.before_tokens /. float_of_int max_context
-   in
-   if checkpoint_hygiene.applied then
-     Log.Keeper.info
-       "%s: pre-dispatch compaction %s trigger=%s tokens=%d->%d \
-        max_context=%d ratio=%.4f checkpoint=%b"
-       meta.name
-       (if checkpoint_hygiene.meaningful_reduction then "applied" else "attempted")
-       decision checkpoint_hygiene.before_tokens checkpoint_hygiene.after_tokens
-       max_context before_ratio loaded_checkpoint_present
-  else
-     Log.Keeper.routine
-       "%s: pre-dispatch compaction skipped decision=%s tokens=%d \
-        max_context=%d ratio=%.4f checkpoint=%b"
-       meta.name decision checkpoint_hygiene.before_tokens max_context before_ratio
-       loaded_checkpoint_present);
+  let pre_dispatch_compacted = false in
+  let pre_dispatch_compaction_trigger = None in
+  let pre_dispatch_compaction_before_tokens = None in
+  let pre_dispatch_compaction_after_tokens = None in
+  let pre_dispatch_checkpoint_error = None in
   let start_turn_count =
     match resume_oas_checkpoint with
     | Some cp -> cp.turn_count

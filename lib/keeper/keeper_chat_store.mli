@@ -345,6 +345,12 @@ val append_user_message_once :
 val load :
   base_dir:string -> keeper_name:string -> chat_message list
 
+(** [load_all ~base_dir ~keeper_name] returns every valid persisted row in
+    source order. It is intentionally uncapped and is reserved for durable
+    acknowledgement scans whose correctness cannot tolerate a tail window. *)
+val load_all :
+  base_dir:string -> keeper_name:string -> chat_message list
+
 type page = { messages : chat_message list; has_more : bool }
 
 (** [load_page ~base_dir ~keeper_name ?before ()] is the paged form of

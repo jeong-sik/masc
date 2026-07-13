@@ -167,7 +167,7 @@ let test_keeper_msg_async_roundtrip () =
     "request completed"
     true
     (match entry.Keeper_msg_async.status with
-     | Done { ok = true; body } -> String.length body > 0
+     | Done { ok = true; body; _ } -> String.length body > 0
      | _ -> false);
   Alcotest.(check int)
     "one pending entry"
@@ -236,6 +236,7 @@ let test_keeper_msg_async_recovers_done_from_disk () =
   @@ fun sw ->
   let clock = Eio.Stdenv.clock env in
   let base_path = temp_dir "keeper-msg-async-done-" in
+  let expected_data = `Assoc [ "kind", `String "done" ] in
   let request_id =
     Keeper_msg_async.submit
       ~background_sw:sw
@@ -244,7 +245,11 @@ let test_keeper_msg_async_recovers_done_from_disk () =
       ~keeper_name:"beta"
       ~f:(fun _request_sw ->
         Eio.Fiber.yield ();
-        tr_ok (Yojson.Safe.to_string (`Assoc [ "kind", `String "done" ])))
+        Tool_result.make_ok
+          ~tool_name:"keeper-test"
+          ~start_time:0.0
+          ~data:expected_data
+          ())
       ()
     |> accepted_request_id
   in
@@ -260,8 +265,16 @@ let test_keeper_msg_async_recovers_done_from_disk () =
       : Keeper_msg_async.entry);
   Keeper_msg_async.For_testing.forget ~base_path ~caller ~request_id;
   match Keeper_msg_async.poll ~base_path ~caller request_id with
-  | Keeper_msg_async.Found { Keeper_msg_async.status = Done { ok = true; body }; _ } ->
-    Alcotest.(check bool) "body persisted" true (String.length body > 0)
+  | Keeper_msg_async.Found
+      { Keeper_msg_async.status = Done { ok = true; body; data = Some data }; _ } ->
+    Alcotest.(check bool) "body persisted" true (String.length body > 0);
+    Alcotest.(check bool)
+      "typed data persisted"
+      true
+      (Yojson.Safe.equal expected_data data)
+  | Keeper_msg_async.Found
+      { Keeper_msg_async.status = Done { ok = true; data = None; _ }; _ } ->
+    Alcotest.fail "expected persisted typed data"
   | Keeper_msg_async.Found entry ->
     Alcotest.failf
       "expected recovered done, got %s"
@@ -633,13 +646,13 @@ let test_keeper_msg_async_timeout_is_terminal_error () =
   let entry = wait_for_done_with_clock clock ~base_path request_id in
   let timeout_body =
     match entry.Keeper_msg_async.status with
-    | Done { ok = false; body } ->
+    | Done { ok = false; body; _ } ->
       Alcotest.(check bool)
         "timeout completion timestamp"
         true
         (Option.is_some entry.completed_at);
       body
-    | Done { ok = true; body } ->
+    | Done { ok = true; body; _ } ->
       Alcotest.failf "expected timeout error, got ok body=%s" body
     | status ->
       Alcotest.failf
@@ -667,7 +680,7 @@ let test_keeper_msg_async_timeout_is_terminal_error () =
   Eio.Promise.resolve notify_release_late ();
   Eio.Time.sleep clock 0.05;
   match Keeper_msg_async.poll ~base_path ~caller request_id with
-  | Keeper_msg_async.Found { Keeper_msg_async.status = Done { ok = false; body }; _ } ->
+  | Keeper_msg_async.Found { Keeper_msg_async.status = Done { ok = false; body; _ }; _ } ->
     Alcotest.(check string) "late worker result cannot overwrite timeout" timeout_body body
   | Keeper_msg_async.Found entry ->
     Alcotest.failf
@@ -815,6 +828,49 @@ let write_disk_record ~base_path ~request_id content =
   | Some path ->
     mkdir_p (Filename.dirname path);
     Fs_compat.save_file path content
+;;
+
+let test_keeper_msg_async_loads_v2_done_without_typed_data () =
+  with_eio_env
+  @@ fun _env ->
+  let base_path = temp_dir "keeper-msg-load-v2-" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+       let request_id = "kmsg_v2_done_0_0" in
+       let body = {|{"legacy":"opaque"}|} in
+       write_disk_record
+         ~base_path
+         ~request_id
+         (Yojson.Safe.to_string
+            (`Assoc
+                [ "schema_version", `Int 2
+                ; "request_id", `String request_id
+                ; "keeper_name", `String "alpha"
+                ; "base_path", `String (Fs_compat.realpath base_path)
+                ; "submitted_by", `String caller
+                ; "status", `String "done"
+                ; "submitted_at", `Float 1.0
+                ; "completed_at", `Float 2.0
+                ; "ok", `Bool true
+                ; "body", `String body
+                ]));
+       match Keeper_msg_async.poll ~base_path ~caller request_id with
+       | Keeper_msg_async.Found
+           ({ status = Done { ok = true; body = loaded; data = None }; _ } as entry) ->
+         Alcotest.(check string) "v2 body stays opaque" body loaded;
+         Alcotest.(check string)
+           "v2 poll projection stays a string"
+           body
+           Yojson.Safe.Util.(Keeper_msg_async.entry_to_json entry |> member "result" |> to_string)
+       | Keeper_msg_async.Found entry ->
+         Alcotest.failf
+           "expected recovered v2 done, got %s"
+           (Keeper_msg_async.status_to_string entry.status)
+       | Keeper_msg_async.Unreadable reason ->
+         Alcotest.failf "expected v2 compatibility, got unreadable: %s" reason
+       | Keeper_msg_async.Absent -> Alcotest.fail "expected v2 record"
+       | Keeper_msg_async.Rejected _ -> Alcotest.fail "expected v2 owner access")
 ;;
 
 let test_keeper_msg_async_load_record_absent_id () =
@@ -1112,6 +1168,10 @@ let () =
             "load_record absent id is Absent"
             `Quick
             test_keeper_msg_async_load_record_absent_id
+        ; test_case
+            "v2 terminal record preserves opaque body"
+            `Quick
+            test_keeper_msg_async_loads_v2_done_without_typed_data
         ; test_case
             "load_record corrupt JSON is Unreadable"
             `Quick

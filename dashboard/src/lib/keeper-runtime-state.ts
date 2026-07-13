@@ -4,9 +4,8 @@
 // hardening pattern (string → closed-union narrowing at the wire
 // boundary, `null` for anything else).
 //
-// Why a parser at all? Backend (`lib/keeper/keeper_status_bridge.ml:720–725`)
-// emits `pause_state` ∈ {"active","paused"} and `runtime_blocker_state` ∈
-// {"clear","blocked","continue_gate"} — both *closed* vocabularies.
+// Why a parser at all? Backend emits closed `pause_state` and
+// `runtime_blocker_state` vocabularies.
 // Previously `KeeperPauseState` carried a `| string` catch-all that
 // hid this fact and let unmapped values flow silently through type
 // narrowing (workaround-rejection-bar §5).
@@ -23,7 +22,6 @@ const PAUSE_STATE_VALUES: ReadonlySet<string> = new Set([
 const RUNTIME_BLOCKER_STATE_VALUES: ReadonlySet<string> = new Set([
   'clear',
   'blocked',
-  'continue_gate',
 ] satisfies readonly KeeperRuntimeBlockerState[])
 
 export function isKeeperPauseState(value: string): value is KeeperPauseState {

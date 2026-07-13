@@ -4,7 +4,7 @@ import { render } from 'preact'
 import { signal } from '@preact/signals'
 import { act, waitFor } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { DashboardGovernanceResponse, Keeper, KeeperApprovalQueueItem } from '../../types'
+import type { DashboardGateResponse, Keeper, KeeperApprovalQueueItem } from '../../types'
 
 const mockKeeper: Keeper = {
   name: 'sangsu',
@@ -12,34 +12,30 @@ const mockKeeper: Keeper = {
   status: 'running',
 }
 
-// The pending-approval cue reads the governance approval_queue (the HITL SSOT)
-// via governanceData — NOT keeper.trust.approval_state (#23678). Tests drive the
+// The pending-approval cue reads the Gate approval_queue (the HITL SSOT)
+// via gateData — NOT keeper.trust.approval_state (#23678). Tests drive the
 // cue by setting this signal, which loadChat() injects in place of the real
 // computed. Reset in beforeEach so it never leaks across cases.
-const mockGovernanceData = signal<DashboardGovernanceResponse | undefined>(undefined)
+const mockGateData = signal<DashboardGateResponse | undefined>(undefined)
 
 function approvalItem(id: string, keeperName: string, toolName: string): KeeperApprovalQueueItem {
   return {
     id,
     keeper_name: keeperName,
     tool_name: toolName,
-    risk_level: 'critical',
     waiting_s: 10,
     input_preview: 'x',
     task_id: 'T-1',
   } as KeeperApprovalQueueItem
 }
 
-function governanceResponse(queue: KeeperApprovalQueueItem[]): DashboardGovernanceResponse {
+function gateResponse(queue: KeeperApprovalQueueItem[]): DashboardGateResponse {
   return {
     generated_at: '2026-07-08T00:00:00Z',
-    summary: { judge_online: false },
-    items: [],
-    activity: [],
-    judgments: [],
-    pending_actions: [],
     approval_queue: queue,
-  } as DashboardGovernanceResponse
+    recent_resolved: [],
+    approval_rules: [],
+  } as DashboardGateResponse
 }
 
 async function loadChat() {
@@ -122,11 +118,11 @@ async function loadChat() {
     ...(await importOriginal<typeof import('../../router')>()),
     navigate: vi.fn(),
   }))
-  // The badge reads governanceData.approval_queue; inject a controllable signal in
+  // The badge reads gateData.approval_queue; inject a controllable signal in
   // place of the real computed so a test can populate the queue directly.
-  vi.doMock('../governance-signals', async (importOriginal) => ({
-    ...(await importOriginal<typeof import('../governance-signals')>()),
-    governanceData: mockGovernanceData,
+  vi.doMock('../gate-signals', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('../gate-signals')>()),
+    gateData: mockGateData,
   }))
   return import('./keeper-workspace-chat')
 }
@@ -137,13 +133,13 @@ describe('KeeperWorkspaceChat', () => {
   beforeEach(() => {
     container = document.createElement('div')
     document.body.appendChild(container)
-    mockGovernanceData.value = undefined
+    mockGateData.value = undefined
   })
 
   afterEach(() => {
     render(null, container)
     container.remove()
-    mockGovernanceData.value = undefined
+    mockGateData.value = undefined
     vi.clearAllMocks()
     vi.restoreAllMocks()
     vi.resetModules()
@@ -156,15 +152,15 @@ describe('KeeperWorkspaceChat', () => {
     vi.doUnmock('../keeper-action-panel')
     vi.doUnmock('../keeper-detail-state')
     vi.doUnmock('../../router')
-    vi.doUnmock('../governance-signals')
+    vi.doUnmock('../gate-signals')
   })
 
   it('links the compact pending-approval header badge to the approvals queue', async () => {
     const { KeeperWorkspaceChat } = await loadChat()
     const { navigate } = await import('../../router')
-    // The badge derives from the governance approval_queue (HITL SSOT), not
+    // The badge derives from the Gate approval_queue (HITL SSOT), not
     // keeper.trust.approval_state (#23678).
-    mockGovernanceData.value = governanceResponse([approvalItem('appr-1', 'sangsu', 'fs_write')])
+    mockGateData.value = gateResponse([approvalItem('appr-1', 'sangsu', 'fs_write')])
 
     await act(async () => {
       render(html`<${KeeperWorkspaceChat} keeper=${mockKeeper} />`, container)
@@ -278,7 +274,7 @@ describe('KeeperWorkspaceChat', () => {
 
   it('keeps runtime scope/path out of the slim chat header', async () => {
     const { KeeperWorkspaceChat } = await loadChat()
-    const keeperWithSlug = { ...mockKeeper, sandbox_target: '~/wt/sangsu', skill_primary: 'skill-primary' }
+    const keeperWithSlug = { ...mockKeeper, sandbox_target: '~/wt/sangsu' }
 
     await act(async () => {
       render(html`

@@ -176,18 +176,10 @@ let emergency_compact_ratio_threshold : float =
   effective
 ;;
 
-(* The former tool_heavy trigger (msg_count > 40 && ratio > 0.15,
-   cooldown-bypassing) was removed: it gated on stored-history bulk that the
-   OAS call-time pruner (Agent_turn.prepare_messages: stub_tool_results
-   keep_recent + keep_last, applied on every LLM call without mutating
-   stored history) already bounds, while its destructive remedy
-   (prune/stub/drop on the checkpoint) erased in-flight investigation
-   state and did not push msg_count back under its own threshold —
-   re-arming itself within seconds.  Fleet logs 2026-06-08..10: 26/26
-   compactions fired via tool_heavy, none via the pressure gates below;
-   68k tokens saved vs ~1.2-2.6M re-spent on forced re-reads.
-   Real context pressure remains covered by ratio/message/token gates,
-   the emergency floor above, and the OAS overflow-retry summarizer. *)
+(* MASC never reduces stored history from tool density or message shape.
+   Provider context pressure is owned by OAS; the gates below only decide
+   whether to request a configured LLM plan and never authorize a local
+   fallback reducer. *)
 
 type compaction_decision =
   | Applied of Compaction_trigger.t
@@ -250,23 +242,6 @@ let compaction_policy_of_keeper (meta : keeper_meta) : float * int * int =
   meta.compaction.ratio_gate, meta.compaction.message_gate, meta.compaction.token_gate
 ;;
 
-let deterministic_checkpoint_strategies =
-  Context_compact_oas.
-    [ PruneToolOutputs; MergeContiguous; SummarizeOld; DropLowImportance ]
-;;
-
-(* RFC-0313-adjacent: expose the extractive OAS chain used for checkpoint
-   observability and as the deterministic floor. In [Llm] mode the actual
-   provider-backed plan is selected in [compact_if_needed_typed] when the
-   compaction is not an emergency; unavailable or invalid provider plans
-   fall back to this chain. *)
-let checkpoint_compaction_strategies ~(mode : Keeper_config.compaction_mode) =
-  match mode with
-  | Keeper_config.Deterministic -> deterministic_checkpoint_strategies
-  | Keeper_config.Llm ->
-    deterministic_checkpoint_strategies
-;;
-
 let compact_if_needed_typed
       ~(meta : keeper_meta)
       ~(now_ts : float)
@@ -296,20 +271,10 @@ let compact_if_needed_typed
   | Blocked_below_thresholds | Skipped_no_checkpoint | Skipped_cooldown _ ->
     ctx, None, decision
   | Applied trigger ->
-    (* PreCompact observability: log strategy and context state (#3165) *)
-    let strategies = checkpoint_compaction_strategies ~mode:meta.compaction.mode in
-    (* Use OAS stub_tool_results instead of MASC's FoldCompleted —
-         OAS owns context reduction, MASC is a consumer. *)
-    (* V12: per-keeper config replaces the prior hardcoded
-         [~keep_recent:2].  Default preserved via
-         [Keeper_config.default_keep_recent_tool_results] = 2 so
-         existing configs see no behavior change. *)
-    let fold_reducer =
-      Agent_sdk.Context_reducer.stub_tool_results
-        ~keep_recent:meta.compaction.keep_recent_tool_results
-    in
     let strategy_names =
-      List.map Context_compact_oas.strategy_name strategies @ [ "StubToolResults" ]
+      match meta.compaction.mode with
+      | Keeper_config.Llm -> [ "ConfiguredLlm" ]
+      | Keeper_config.Deterministic -> [ "NoLocalReducer" ]
     in
     let trigger_human = Compaction_trigger.to_human trigger in
     let trigger_label = Compaction_trigger.to_label trigger in
@@ -385,68 +350,50 @@ let compact_if_needed_typed
          ~context_ratio:ratio
          ~message_count:msg_count);
     let messages, pair_repair_stats =
-      let deterministic_compact () =
-        (* Issue #8597 #1: dropped [~system_prompt] arg — compact
-               ignored it (system prompt already present in messages
-               when role=System). *)
-        Context_compact_oas.compact ~messages:(messages_of_context ctx) ~strategies ()
+      let preserve_original reason =
+        Log.Keeper.warn
+          ~keeper_name:meta.name
+          "MASC context compaction preserved the original checkpoint: %s"
+          reason;
+        messages_of_context ctx
       in
-      (* RFC-0313-adjacent W2: [Llm] mode asks a librarian-lane summarizer for a
-         structured kept/summarized/dropped plan and applies it; any failure
-         (no Eio context, no schema provider, invalid plan) yields
-         [None] and falls back to the deterministic chain — the [Deterministic]
-         floor is always the guaranteed result. Emergency compaction (a
-         near-full context, [emergency] above) never calls the LLM: the reply
-         itself needs headroom and the cooldown is bypassed, so it stays on the
-         cheap deterministic path. *)
       let msgs_after_compact =
         match meta.compaction.mode with
-        | Keeper_config.Deterministic -> deterministic_compact ()
+        | Keeper_config.Deterministic ->
+          preserve_original
+            "the retired deterministic reducer mode cannot judge message importance"
         | Keeper_config.Llm ->
-          let emergency = ratio >= emergency_compact_ratio_threshold in
-          if emergency
-          then deterministic_compact ()
-          else
-            let runtime_id =
-              try
-                let runtime_id = Keeper_meta_contract.runtime_id_of_meta meta in
-                if String.trim runtime_id = ""
-                then (
-                  Log.Keeper.warn ~keeper_name:meta.name
-                    "compaction LLM summarizer skipped: runtime identity resolved to an empty \
-                     id; using deterministic fallback";
-                  None)
-                else Some runtime_id
+          let runtime_id =
+            try
+              let runtime_id = Keeper_meta_contract.runtime_id_of_meta meta in
+              if String.trim runtime_id = "" then None else Some runtime_id
+            with
+            | Failure reason ->
+              Log.Keeper.warn
+                ~keeper_name:meta.name
+                "compaction LLM runtime identity failed: %s"
+                reason;
+              None
+          in
+          (match runtime_id with
+           | None -> preserve_original "configured LLM runtime is unavailable"
+           | Some runtime_id ->
+             (match
+                Keeper_compaction_llm_summarizer.make
+                  ~runtime_id
+                  ~keeper_name:meta.name
+                  ()
               with
-              | Failure reason ->
-                Log.Keeper.warn ~keeper_name:meta.name
-                  "compaction LLM summarizer runtime identity failed: %s; using \
-                   deterministic fallback"
-                  reason;
-                None
-            in
-            (match runtime_id with
-             | None -> deterministic_compact ()
-             | Some runtime_id ->
-               (match
-                  Keeper_compaction_llm_summarizer.make
-                    ~runtime_id
-                    ~keeper_name:meta.name
-                    ()
-                with
-                | None -> deterministic_compact ()
-                | Some summarizer ->
-                  let msgs = messages_of_context ctx in
-                  (match summarizer ~messages:msgs with
-                   | Some plan ->
-                     Keeper_compaction_llm_summarizer.apply plan ~messages:msgs
-                   | None -> deterministic_compact ())))
+              | None -> preserve_original "configured LLM summarizer is unavailable"
+              | Some summarizer ->
+                let msgs = messages_of_context ctx in
+                (match summarizer ~messages:msgs with
+                 | Some plan ->
+                   Keeper_compaction_llm_summarizer.apply plan ~messages:msgs
+                 | None ->
+                   preserve_original "configured LLM returned no valid plan")))
       in
-      (* Apply keeper-private fold after standard strategies *)
-      let msgs_after_fold =
-        Agent_sdk.Context_reducer.reduce fold_reducer msgs_after_compact
-      in
-      Keeper_context_core.repair_broken_tool_call_pairs_with_stats msgs_after_fold
+      Keeper_context_core.repair_broken_tool_call_pairs_with_stats msgs_after_compact
     in
     let compacted_ctx =
       sync_oas_context

@@ -28,20 +28,11 @@ let transition_task_outcome_r
       ?(notes = "")
       ?(reason = "")
       ?handoff_context
-      ?(authority = Masc_domain.Assignee)
+      ?configured_llm_verdict
       ()
   : transition_outcome Masc_domain.masc_result
   =
   let open Result.Syntax in
-  (* RFC-0262: project the typed authority back to the legacy [forced] bool for
-     the drift / completion-path / audit-log / telemetry sinks, preserving their
-     existing shape. Operator/System override ownership (the old force=true);
-     Assignee does not. *)
-  let forced =
-    match (authority : Masc_domain.completion_authority) with
-    | Assignee -> false
-    | Operator | System -> true
-  in
   let* () =
     if not (is_initialized config)
     then Error (Masc_domain.System Masc_domain.System_error.NotInitialized)
@@ -79,54 +70,10 @@ let transition_task_outcome_r
           | None -> Error (Masc_domain.Task (Masc_domain.Task_error.NotFound task_id))
           | Some task -> Ok task
         in
-        (* RFC-0323 G-10: the typed reclaim claim precheck is retired — the
-           FSM decision below owns claimability by status alone. The evidence
-           requirements for submission/approval (#23719) stay. *)
-        let* () =
-          match action with
-          | Masc_domain.Claim
-          | Masc_domain.Start
-          | Masc_domain.Cancel
-          | Masc_domain.Release -> Ok ()
-          | Masc_domain.Done_action
-          | Masc_domain.Submit_for_verification ->
-            (* #23719 evidence gate, scoped to the RFC-0323 Phase A predicate
-               (contract.strict, same as the G-1 done guard). Unconditional
-               enforcement regressed the G-2 deterministic probe and broke the
-               invariant documented below (empty evidence is valid for
-               analysis-only / advisory-contract tasks) — an unannounced
-               Phase B, exactly what the G-1 predicate decision avoided.
-               "Declared evidence" mirrors the verifier-request projection
-               (contract refs + typed handoff refs, prose excluded): a
-               contract that names its evidence up front satisfies the
-               gate without re-supplying refs at submit time. *)
-            if not (Masc_domain.task_requires_verification task)
-            then Ok ()
-            else if
-              Workspace_task_verification.declared_verification_evidence_refs
-                task handoff_context
-              = []
-            then
-              Error
-                (Masc_domain.Task
-                   (Masc_domain.Task_error.InvalidState
-                      "Strict-contract task completion requires declared evidence: contract required_evidence/verify_gate_evidence or handoff_context.evidence_refs (a verifier needs something to approve)"))
-            else Ok ()
-          | Masc_domain.Approve_verification
-          | Masc_domain.Reject_verification ->
-            if not (Masc_domain.task_requires_verification task)
-            then Ok ()
-            else if
-              Workspace_task_verification.declared_verification_evidence_refs
-                task None
-              = []
-            then
-              Error
-                (Masc_domain.Task
-                   (Masc_domain.Task_error.InvalidState
-                      "Approve/reject on a strict-contract task requires declared evidence: contract required_evidence/verify_gate_evidence or persisted handoff_context.evidence_refs"))
-            else Ok ()
-        in
+        (* Task completion evidence is judged by the configured LLM reviewer
+           at the Task boundary. The workspace FSM owns only lifecycle and
+           identity invariants; it does not infer completion quality from the
+           presence or shape of evidence fields. *)
         let* () =
           (match action, task.task_status with
           | Masc_domain.Claim, Masc_domain.Todo ->
@@ -156,19 +103,6 @@ let transition_task_outcome_r
         let* decision =
           match
             Workspace_task_lifecycle.decide
-              ~verification_enabled:(Env_config_runtime.Verification.fsm_enabled ())
-              (* RFC-0323 G-5 Phase B: when [Verification.default_on] is set,
-                 treat every task as verification-required so completion
-                 routes through submit→approve. The evidence gate above
-                 reads [task_requires_verification] (= contract.strict)
-                 directly and is intentionally NOT flipped here — keeping
-                 it on Phase-A scope avoids the #23719 G-2 regression
-                 (unannounced Phase B). Default off (readiness gate §5). *)
-              ~requires_verification:
-                (Masc_domain.task_requires_verification task
-                 || Env_config_runtime.Verification.default_on ())
-              ~verification_timeout_seconds:
-                (Env_config_runtime.Verification.timeout_deadline_seconds ())
               ~new_verification_id:(fun () -> Random_id.prefixed ~prefix:"vrf-" ~bytes:16)
               ~same_agent:(same_task_actor config agent_name)
               ~agent_name
@@ -176,32 +110,35 @@ let transition_task_outcome_r
               ~task_status:task.task_status
               ~action
               ~now
-              ~authority
-              ~system_gate_exempt:false
+              ~configured_llm_verdict
               ~notes
               ~reason
           with
           | Ok decision -> Ok decision
-          | Error Workspace_task_lifecycle.Self_approval ->
+          | Error Workspace_task_lifecycle.Completion_verdict_required ->
             Error
               (Masc_domain.Task
                  (Masc_domain.Task_error.InvalidState
-                    "Self-approval not allowed: verifier must be a different agent"))
-          | Error Workspace_task_lifecycle.Self_rejection ->
+                    "Configured LLM completion verdict required; task remains nonterminal"))
+          | Error (Workspace_task_lifecycle.Completion_rejected rejection) ->
             Error
               (Masc_domain.Task
                  (Masc_domain.Task_error.InvalidState
-                    "Self-rejection not allowed: verifier must be a different agent"))
-          | Error Workspace_task_lifecycle.Verification_disabled ->
+                    (Printf.sprintf
+                       "Configured LLM rejected task completion: %s"
+                       rejection)))
+          | Error (Workspace_task_lifecycle.Completion_verdict_unavailable reason) ->
             Error
               (Masc_domain.Task
                  (Masc_domain.Task_error.InvalidState
-                    "Verification FSM not enabled (MASC_VERIFICATION_FSM_ENABLED=false)"))
-          | Error Workspace_task_lifecycle.Verification_required_use_submit ->
+                    (Printf.sprintf
+                       "Configured LLM completion verifier unavailable: %s; task remains nonterminal"
+                       reason)))
+          | Error Workspace_task_lifecycle.Completion_verdict_action_mismatch ->
             Error
               (Masc_domain.Task
                  (Masc_domain.Task_error.InvalidState
-                    "Task has a strict verification contract (contract.strict=true); use submit_for_verification — a verifier (not the assignee) then approves it to done (RFC-0323 G-1, implements RFC-0308)"))
+                    "Requested verification transition does not match the configured LLM verdict"))
           | Error Workspace_task_lifecycle.Invalid_transition ->
             let assignee_hint =
               match task_assignee_of_status task.task_status with
@@ -227,9 +164,8 @@ let transition_task_outcome_r
                  action=claim first, then action=release once you own it."
               | Masc_domain.Todo, (Masc_domain.Done_action | Masc_domain.Cancel) ->
                 " Remediation: task is still in 'todo'. Call masc_transition \
-                 action=claim then action=start; complete via \
-                 submit_for_verification → approve (action=done only for \
-                 non-strict tasks)."
+                 action=claim; action=done then invokes the configured LLM \
+                 completion reviewer."
               | Masc_domain.Todo, Masc_domain.Start ->
                 " Remediation: task is still in 'todo'. Call masc_transition \
                  action=claim first — start needs ownership."
@@ -255,8 +191,9 @@ let transition_task_outcome_r
                  keeper_task_claim for unclaimed work."
               | Masc_domain.InProgress _, Masc_domain.Start ->
                 " Remediation: task is already in_progress. Valid actions from \
-                 in_progress: submit_for_verification (→ verifier approve), done \
-                 (non-strict tasks only), release, cancel."
+                 in_progress: done (configured LLM review), release, cancel, or \
+                 submit_for_verification when an asynchronous review lane was \
+                 explicitly requested."
               | Masc_domain.Done _, _ ->
                 " Remediation: task is already in a terminal state (done). To \
                  re-run this work, create a new task with predecessor_task_id \
@@ -307,12 +244,9 @@ let transition_task_outcome_r
             , _
             , Masc_domain.AwaitingVerification { assignee; verification_id; _ }
             , prepare_opt ) ->
-            (* RFC-0109 Phase E: gating is owned by Task_completion_gate (called
-               from tool_task.ml before transition_task_r). Here we only
-               collect typed evidence refs as observability metadata for
+            (* Collect evidence refs as observability metadata for
                the verifier request output. Empty list is valid for
-               analysis-only / no-contract tasks — Phase D's decision
-               matrix row 5 already passed them. *)
+               analysis-only and no-contract tasks. *)
             let evidence_refs =
               Workspace_task_verification.verification_submission_evidence_refs task ~notes handoff_context
             in
@@ -371,24 +305,11 @@ let transition_task_outcome_r
    it is written best-effort AFTER [write_backlog] commits — see below. The
    old pre-write gate made an audit-write failure block a decided outcome and
    re-admitted the drift (record Completed, task AwaitingVerification). *)
-        (match decision.drift with
-         | Some Workspace_task_lifecycle.Claimed_to_done_skip ->
-(* FSM drift: TLA+ KeeperTaskInterlock.DoneTask requires in_progress. *)
-           (Atomic.get Workspace_hooks.fsm_drift_observer_fn)
-             ~variant:(drift_variant_label Workspace_task_lifecycle.Claimed_to_done_skip)
-             ~force:forced
-             ~agent_name;
-           Log.TaskState.warn
-             "fsm_drift claimed_to_done_skip task=%s agent=%s force=%b"
-             task_id
-             agent_name
-             forced
-         | None -> ());
 (* #10449: Observe task completion path + contract presence so operators can split bypass-rate by cause (no contract vs. *)
         (match new_status with
          | Masc_domain.Done _ ->
            let contract_state = classify_contract_state task.contract in
-           let path = classify_completion_path ~action ~drift:decision.drift ~force:forced in
+           let path = classify_completion_path ~action in
            (Atomic.get Workspace_hooks.task_completion_path_observed_fn)
              ~path
              ~contract_state
@@ -587,8 +508,7 @@ let transition_task_outcome_r
                ~from_status:task.task_status
                ~to_status:new_status
                ~action:action_s
-               ~forced:forced
-               ~authority
+               ?configured_llm_verdict
                ?assignee:(Masc_domain.task_assignee_of_status task.task_status)
                ?notes:(trim_opt (Some notes))
                ?reason:(trim_opt (Some reason))
@@ -719,7 +639,7 @@ let transition_task_outcome_r
                  ?notes:(if notes = "" then None else Some notes)
                  ?reason:(if reason = "" then None else Some reason)
                  ?duration_ms
-                 ~forced:forced
+                 ?configured_llm_verdict
                  ());
           (* RFC-0323 G-3: done hooks (economy earn, relation/hebbian) fire for
              every transition that PRODUCES Done — Done via
@@ -776,7 +696,7 @@ let transition_task_r
       ?notes
       ?reason
       ?handoff_context
-      ?authority
+      ?configured_llm_verdict
       ()
   : string Masc_domain.masc_result
   =
@@ -792,7 +712,7 @@ let transition_task_r
     ?notes
     ?reason
     ?handoff_context
-    ?authority
+    ?configured_llm_verdict
     ()
   |> Result.map (fun outcome -> outcome.message)
 ;;

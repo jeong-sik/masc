@@ -7,14 +7,10 @@ import { useEffect, useState } from 'preact/hooks'
 import { signal } from '@preact/signals'
 import {
   fetchDashboardGoalsTree,
-  fetchDashboardTools,
   patchKeeperConfig,
-  setKeeperToolPolicy,
 } from '../api/dashboard'
-import { fetchKeeperComposite, pauseKeeper, resumeKeeper, wakeKeeper } from '../api/keeper'
-import { KeeperGithubAppConfigPanel } from './keeper-github-app-config'
-import type { KeeperSecretProjection } from '../api/schemas/keeper-composite'
-import type { DashboardRuntimeProviderSnapshot, DashboardToolInventoryItem, KeeperConfigUpdatePayload, SandboxProfile, SandboxNetworkMode } from '../api/dashboard'
+import { pauseKeeper, resumeKeeper, wakeKeeper } from '../api/keeper'
+import type { DashboardRuntimeProviderSnapshot, KeeperConfigUpdatePayload, SandboxProfile, SandboxNetworkMode } from '../api/dashboard'
 import type { GoalTreeNode, KeeperConfig, KeeperHookSlot } from '../types'
 import { formatTokens, formatPct, formatCost } from '../lib/format-number'
 import { isVerifierRoleKeeper } from '../lib/keeper-utils'
@@ -24,7 +20,6 @@ import { showToast } from './common/toast'
 import { ErrorState, LoadingState } from './common/feedback-state'
 import { BTN_FILLED_BASE } from './common/button-filled-base'
 import { ExpandableTextarea } from './common/expandable-textarea'
-import { KeeperToolAccessSummary } from './keeper-tool-access'
 import { createAsyncResource } from '../lib/async-state'
 import {
   findRuntimeCatalogEntry,
@@ -120,9 +115,7 @@ export type KeeperConfigFieldPath = ConfigFieldPath<KeeperConfig>
 export type KeeperConfigControlEndpoint =
   | '/api/v1/keepers/:name/config'
   | '/api/v1/keepers/:name/directive'
-  | '/api/v1/keepers/:name/tools'
   | '/api/v1/dashboard/goals'
-  | '/api/v1/dashboard/tools'
   | '/api/v1/providers'
 
 export type KeeperConfigBrowserStateKey =
@@ -168,11 +161,6 @@ const goalOptionsState = goalOptionsResource.state
 // Client-only search over the goal catalogue (title/id substring). The catalogue
 // can be large, so the goals tab filters the rendered list without a fetch.
 const goalSearchQuery = signal('')
-// Live tool registry (GET /api/v1/dashboard/tools) — the per-tool policy grid is
-// derived from this, never a hardcoded catalogue, so a tool added to the runtime
-// surfaces here on the next load.
-const toolInventoryResource = createAsyncResource<DashboardToolInventoryItem[]>()
-const toolInventoryState = toolInventoryResource.state
 const editMode = signal(false)
 const saving = signal(false)
 const saveError = signal<string | null>(null)
@@ -295,8 +283,6 @@ export type RuntimeDraft = {
   network_mode: SandboxNetworkMode
   allowed_paths_text: string
   proactive_enabled: boolean
-  proactive_idle_sec: number
-  proactive_cooldown_sec: number
   compaction_profile: string
   compaction_ratio_gate: number
   compaction_message_gate: number
@@ -310,17 +296,9 @@ export type RuntimeDraft = {
 const runtimeDraft = signal<RuntimeDraft | null>(null)
 const runtimeSaving = signal(false)
 const runtimeDirectiveSaving = signal<'pause' | 'resume' | 'wakeup' | null>(null)
-// Tool policy is saved via the separate /tools set_policy endpoint (not the
-// /config PATCH), so it has its own draft/saving state. null draft = "show the
-// live policy"; a string = the operator's in-progress edit.
-const toolAccessDraftText = signal<string | null>(null)
-const denylistDraftText = signal<string | null>(null)
-const denylistSaving = signal(false)
-
 function resetKeeperConfigPanelDrafts(): void {
   goalOptionsResource.reset()
   goalSearchQuery.value = ''
-  toolInventoryResource.reset()
   editMode.value = false
   editDraft.value = null
   saveError.value = null
@@ -329,9 +307,6 @@ function resetKeeperConfigPanelDrafts(): void {
   runtimeDraft.value = null
   runtimeSaving.value = false
   runtimeDirectiveSaving.value = null
-  toolAccessDraftText.value = null
-  denylistDraftText.value = null
-  denylistSaving.value = false
   hookFilterQuery.value = ''
   globalArchExpanded.value = false
   kcfTab.value = 'identity'
@@ -387,8 +362,6 @@ export function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
     network_mode: coerceNetworkMode(c.network_mode),
     allowed_paths_text: (c.allowed_paths ?? []).join('\n'),
     proactive_enabled: c.proactive.enabled,
-    proactive_idle_sec: c.proactive.idle_sec,
-    proactive_cooldown_sec: c.proactive.cooldown_sec,
     compaction_profile: c.compaction.profile,
     compaction_ratio_gate: c.compaction.ratio_gate,
     compaction_message_gate: c.compaction.message_gate,
@@ -424,9 +397,7 @@ function keeperConfigManifestSource(c: KeeperConfig): string {
 
 const KEEPER_CONFIG_API = '/api/v1/keepers/:name/config'
 const KEEPER_DIRECTIVE_API = '/api/v1/keepers/:name/directive'
-const KEEPER_TOOLS_API = '/api/v1/keepers/:name/tools'
 const DASHBOARD_GOALS_API = '/api/v1/dashboard/goals'
-const DASHBOARD_TOOLS_API = '/api/v1/dashboard/tools'
 const RUNTIME_PROVIDERS_API = '/api/v1/providers'
 
 function configField(path: KeeperConfigFieldPath): KeeperConfigControlEvidence {
@@ -558,22 +529,6 @@ export function keeperConfigControlInventory(
             'sources.override_fields',
           ]),
         },
-        {
-          id: 'kcf-identity-tool-access',
-          tab,
-          label: 'Tool access summary',
-          kind: 'live-read',
-          source: `${configApiSource} tools.*`,
-          action: 'read-only tool access summary',
-          contracts: configReadContracts([
-            'tools.tool_access',
-            'tools.resolved_allowlist',
-            'tools.tool_denylist',
-            'tools.active_masc_tool_count',
-            'tools.active_keeper_tool_count',
-            'tools.total_active',
-          ]),
-        },
       ]
     case 'prompt':
       return [
@@ -671,26 +626,11 @@ export function keeperConfigControlInventory(
             'compaction.token_gate',
             'compaction.cooldown_sec',
             'proactive.enabled',
-            'proactive.idle_sec',
-            'proactive.cooldown_sec',
             'handoff.auto',
             'handoff.threshold',
             'handoff.cooldown_sec',
           ],
         ),
-        {
-          id: 'kcf-policy-tool-policy',
-          tab,
-          label: 'Tool policy',
-          kind: 'live-write',
-          source: `${configApiSource} tools.* + GET /api/v1/dashboard/tools`,
-          action: 'set_policy tool_access/tool_denylist',
-          contracts: [
-            ...configReadContracts(['tools.tool_access', 'tools.tool_denylist', 'tools.resolved_allowlist']),
-            apiContract('GET', DASHBOARD_TOOLS_API),
-            apiContract('POST', KEEPER_TOOLS_API, 'set_policy'),
-          ],
-        },
       ]
     case 'access':
       return [
@@ -811,7 +751,6 @@ export function keeperConfigControlInventory(
             'runtime.fiber_health',
             'runtime.runtime_blocker_class',
             'runtime.runtime_blocker_summary',
-            'runtime.runtime_blocker_continue_gate',
             'runtime_trust',
           ]),
         },
@@ -878,8 +817,6 @@ export function buildRuntimePayload(draft: RuntimeDraft, orig: KeeperConfig): Ke
   if (draft.sandbox_profile !== coerceSandboxProfile(orig.sandbox_profile)) payload.sandbox_profile = draft.sandbox_profile
   if (draft.network_mode !== coerceNetworkMode(orig.network_mode)) payload.network_mode = draft.network_mode
   if (draft.proactive_enabled !== orig.proactive.enabled) payload.proactive_enabled = draft.proactive_enabled
-  if (draft.proactive_idle_sec !== orig.proactive.idle_sec) payload.proactive_idle_sec = draft.proactive_idle_sec
-  if (draft.proactive_cooldown_sec !== orig.proactive.cooldown_sec) payload.proactive_cooldown_sec = draft.proactive_cooldown_sec
   if (draft.compaction_profile !== orig.compaction.profile) payload.compaction_profile = draft.compaction_profile
   if (draft.compaction_ratio_gate !== orig.compaction.ratio_gate) payload.compaction_ratio_gate = draft.compaction_ratio_gate
   if (draft.compaction_message_gate !== orig.compaction.message_gate) payload.compaction_message_gate = draft.compaction_message_gate
@@ -925,8 +862,6 @@ function computeRuntimeDirtyFlags(rd: RuntimeDraft, c: KeeperConfig): Record<str
     sandbox_profile: 'sandbox_profile' in payload,
     network_mode: 'network_mode' in payload,
     proactive_enabled: 'proactive_enabled' in payload,
-    proactive_idle_sec: 'proactive_idle_sec' in payload,
-    proactive_cooldown_sec: 'proactive_cooldown_sec' in payload,
     compaction_profile: 'compaction_profile' in payload,
     compaction_ratio_gate: 'compaction_ratio_gate' in payload,
     compaction_message_gate: 'compaction_message_gate' in payload,
@@ -1041,16 +976,6 @@ async function loadGoalOptions(options?: { force?: boolean }): Promise<void> {
   })
 }
 
-async function loadToolInventory(options?: { force?: boolean }): Promise<void> {
-  const force = options?.force === true
-  if (!force && toolInventoryState.value.status === 'loaded') return
-  if (force) toolInventoryResource.reset()
-  await toolInventoryResource.load(async () => {
-    const response = await fetchDashboardTools()
-    return response.tool_inventory?.tools ?? []
-  })
-}
-
 // Case-insensitive title/id substring filter for the goals catalogue.
 export function filterGoalOptions(
   goals: readonly GoalTreeNode[],
@@ -1139,9 +1064,7 @@ function keeperConfigControlEvidenceLabels(
 function keeperConfigControlEndpointShortLabel(endpoint: KeeperConfigControlEndpoint): string {
   if (endpoint === KEEPER_CONFIG_API) return 'config'
   if (endpoint === KEEPER_DIRECTIVE_API) return 'directive'
-  if (endpoint === KEEPER_TOOLS_API) return 'tools'
   if (endpoint === DASHBOARD_GOALS_API) return 'goals'
-  if (endpoint === DASHBOARD_TOOLS_API) return 'tool catalog'
   return 'providers'
 }
 
@@ -1478,14 +1401,6 @@ function BoolBadge({ value }: { value: boolean }) {
     : html`<span class="text-2xs font-bold px-2 py-0.5 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] text-text-dim border border-[var(--color-border-default)] shadow-1">OFF</span>`
 }
 
-function formatHookDestructiveTools(value: string[] | string): string {
-  if (Array.isArray(value)) {
-    return value.length > 0 ? value.join(', ') : MISSING_DATA_DASH
-  }
-  const text = value.trim()
-  return text !== '' ? text : MISSING_DATA_DASH
-}
-
 function ModelList({ models }: { models: string[] }) {
   if (models.length === 0) return html`<span class="text-2xs text-text-muted italic">none</span>`
   return html`
@@ -1702,32 +1617,12 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
 
   useEffect(() => retainKeeperConfigPanelSubscriptions(), [])
 
-  // GitHub App credentials live in the keeper secret projection, which the
-  // config payload does not carry. Fetch it once per keeper (same source the
-  // monitoring detail reads via composite.secret_projection) so the access-tab
-  // panel can detect existing config; mutations return the fresh projection and
-  // update this state without a refetch.
-  const [secretProjection, setSecretProjection] = useState<KeeperSecretProjection | null>(null)
-  useEffect(() => {
-    const controller = new AbortController()
-    fetchKeeperComposite(keeperName, { signal: controller.signal })
-      .then((snapshot) => setSecretProjection(snapshot.secret_projection ?? null))
-      .catch(() => {
-        // A failed/aborted secret fetch leaves the panel in its empty-projection
-        // state (save still works); it must not break the rest of the config UI.
-      })
-    return () => controller.abort()
-  }, [keeperName])
-
   // Trigger load on first render or name change
   if (configKeeperName.value !== keeperName || state.status === 'idle') {
     void loadKeeperConfig(keeperName)
   }
   if (goalOptionsState.value.status === 'idle') {
     void loadGoalOptions()
-  }
-  if (toolInventoryState.value.status === 'idle') {
-    void loadToolInventory()
   }
   if (runtimeCatalogState.value.status === 'idle') {
     loadRuntimeCatalog()
@@ -1849,34 +1744,6 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
 
   function resetRuntimeDraft() {
     runtimeDraft.value = initRuntimeDraftFromConfig(c)
-  }
-
-  // Parse tool policy textareas into deduped, trimmed tool-name lists.
-  function parseToolPolicyListDraft(text: string): string[] {
-    return [...new Set(text.split('\n').map((s) => s.trim()).filter(Boolean))]
-  }
-
-  async function saveToolPolicy() {
-    const accessText = toolAccessDraftText.value ?? c.tools.tool_access.join('\n')
-    const denyText = denylistDraftText.value ?? c.tools.tool_denylist.join('\n')
-    const toolAccess = parseToolPolicyListDraft(accessText)
-    const deny = parseToolPolicyListDraft(denyText)
-    denylistSaving.value = true
-    try {
-      const updated = await setKeeperToolPolicy(keeperName, {
-        tool_access: toolAccess,
-        deny,
-      })
-      applyKeeperConfigUpdate(keeperName, updated)
-      void refreshKeeperSurfacesAfterConfigSave()
-      toolAccessDraftText.value = null
-      denylistDraftText.value = null
-      showToast('도구 정책 저장 완료', 'success')
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : '저장 실패', 'error')
-    } finally {
-      denylistSaving.value = false
-    }
   }
 
   function enterEditMode() {
@@ -2016,10 +1883,8 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     : []
 
   // ── Tab content (the live fields, regrouped under the 8 prototype tabs) ──
-  // identity ◈ — access-summary facts + source provenance + verifier role
+  // identity ◈ — source provenance + verifier role
   const identityTab = html`
-    <${KeeperToolAccessSummary} config=${c} />
-
     <${KcfSec} title="편집 가능 범위" desc="여기서 저장되는 값은 keeper 프롬프트, live override 계층, runtime.toml의 [runtime.assignments]입니다.">
       <${KcfFacts} rows=${[
         ['기본 소스', c.sources.default_source_kind],
@@ -2160,19 +2025,9 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         <${SetToggle} ariaLabel="프로액티브 활성" on=${rd.proactive_enabled}
           onChange=${(v: boolean) => updateRuntimeDraft('proactive_enabled', v)} />
       </${SetRow}>
-      <${InlineNumberRow} label="유휴 트리거 (초)" value=${rd.proactive_idle_sec}
-        onChange=${(v: number) => updateRuntimeDraft('proactive_idle_sec', v)}
-        min=${10} max=${3600} step=${10} suffix="s"
-        dirty=${dirtyFlags.proactive_idle_sec} />
-      <${InlineNumberRow} label="쿨다운 (초)" value=${rd.proactive_cooldown_sec}
-        onChange=${(v: number) => updateRuntimeDraft('proactive_cooldown_sec', v)}
-        min=${10} max=${3600} step=${10} suffix="s"
-        dirty=${dirtyFlags.proactive_cooldown_sec} />
     ` : html`
       <${BoolRow} label="자동 부팅" value=${c.autoboot_enabled} />
       <${BoolRow} label="활성" value=${c.proactive.enabled} />
-      <${ConfigRow} label="유휴 트리거" value=${c.proactive.idle_sec + 's'} />
-      <${ConfigRow} label="쿨다운" value=${c.proactive.cooldown_sec + 's'} />
     `}
 
     <${SectionHeader} title="핸드오프" />
@@ -2196,112 +2051,6 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       <${ConfigRow} label="쿨다운" value=${c.handoff.cooldown_sec + 's'} />
     `}
 
-    ${(() => {
-      const accessText = toolAccessDraftText.value ?? c.tools.tool_access.join('\n')
-      const denyText = denylistDraftText.value ?? c.tools.tool_denylist.join('\n')
-      const accessDeduped = parseToolPolicyListDraft(accessText)
-      const denyDeduped = parseToolPolicyListDraft(denyText)
-      const changed =
-        JSON.stringify(accessDeduped) !== JSON.stringify(c.tools.tool_access)
-        || JSON.stringify(denyDeduped) !== JSON.stringify(c.tools.tool_denylist)
-      // Per-tool grid edits the SAME tool_access draft the textarea below shows —
-      // one draft, two views. Toggling only rewrites tool_access membership; the
-      // server (set_policy) still validates every name (RFC-0273 fail-closed) and
-      // the denylist keeps its own control, so no execution-gating claim is implied.
-      //
-      // Empty tool_access is NOT "every tool off": keeper_tool_policy.ml expands an
-      // empty allowlist to the full candidate universe (runtime gates on
-      // candidate-minus-denylist). So in that mode the grid shows every tool as ON
-      // and read-only — an enabled toggle would silently narrow [] (all candidates)
-      // to a single explicit candidate. The operator opts into an explicit allowlist
-      // via the textarea below, at which point the grid becomes interactive.
-      const allCandidatesMode = accessDeduped.length === 0
-      const accessSet = new Set(accessDeduped)
-      const toggleToolAccess = (name: string) => {
-        if (allCandidatesMode) return
-        const next = new Set(accessDeduped)
-        if (next.has(name)) next.delete(name)
-        else next.add(name)
-        toolAccessDraftText.value = [...next].join('\n')
-      }
-      const toolState = toolInventoryState.value
-      return html`
-        <${SectionHeader} title="도구 정책" />
-        <p class="text-3xs text-text-muted mb-2 px-1 leading-relaxed">
-          저장 시 set_policy 로 tool_access 와 tool_denylist 를 함께 적용합니다. tool_access 는 후보 프로필이고 실행 차단은 denylist가 담당합니다.
-        </p>
-        ${toolState.status === 'loading' ? html`
-          <div class="text-2xs text-[var(--color-fg-muted)] mb-2 px-1" role="status">도구 목록 로딩 중...</div>
-        ` : toolState.status === 'error' ? html`
-          <div class="text-2xs text-[var(--color-status-err)] mb-2 px-1">도구 목록 로드 실패: ${toolState.message}</div>
-        ` : toolState.status === 'loaded' && toolState.data.length > 0 ? html`
-          ${allCandidatesMode ? html`
-            <div class="text-2xs text-[var(--color-fg-muted)] mb-2 px-1" role="note" data-testid="tool-all-candidates-note">
-              빈 tool_access — 전체 후보 도구 허용 (실행 차단은 denylist). 개별 도구를 제한하려면 아래 tool_access 목록에 이름을 입력해 명시적 허용목록으로 전환하세요.
-            </div>
-          ` : null}
-          <div class="kcf-tools mb-3" role="group" aria-label="tool_access 후보 도구">
-            ${toolState.data.map((tool) => {
-              const on = allCandidatesMode || accessSet.has(tool.name)
-              return html`
-                <div key=${tool.name} class=${`kcf-tool ${on ? 'on' : ''}`}>
-                  <button
-                    type="button"
-                    class="kcf-tool-toggle"
-                    role="switch"
-                    aria-checked=${on ? 'true' : 'false'}
-                    aria-disabled=${allCandidatesMode ? 'true' : 'false'}
-                    disabled=${allCandidatesMode}
-                    aria-label=${`${tool.name} ${on ? '켜짐' : '꺼짐'}`}
-                    onClick=${() => { toggleToolAccess(tool.name) }}
-                  >${on ? '✓' : ''}</button>
-                  <span class="kcf-tool-id mono">${tool.name}</span>
-                  <span class="kcf-tool-risk" title="tool_inventory.category">${tool.category}</span>
-                  <span class="kcf-tool-desc">${tool.description}</span>
-                </div>
-              `
-            })}
-          </div>
-        ` : null}
-        <div class="py-2.5 px-4 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] mb-2 ${changed ? 'border-l-4 border-l-[var(--color-accent-fg)]' : ''} v2-monitoring-panel">
-          <div class="flex items-center justify-between mb-2">
-            <span class="text-sm text-[var(--color-fg-secondary)]">tool_access</span>
-            <span class="text-xs text-[var(--color-fg-muted)]">${accessDeduped.length}개</span>
-          </div>
-          <textarea aria-label="tool_access" class="w-full text-sm font-mono bg-[var(--color-bg-hover)] border border-[var(--color-border-default)] rounded-[var(--r-1)] px-3 py-2 text-[var(--color-fg-secondary)] resize-y mb-3"
-            rows=${3}
-            value=${accessText}
-            placeholder="예: tool_read_file"
-            onInput=${(e: Event) => { toolAccessDraftText.value = (e.target as HTMLTextAreaElement).value }}
-          ></textarea>
-          <div class="flex items-center justify-between mb-2">
-            <span class="text-sm text-[var(--color-fg-secondary)]">tool_denylist</span>
-            <span class="text-xs text-[var(--color-fg-muted)]">${denyDeduped.length}개</span>
-          </div>
-          <textarea aria-label="tool_denylist" class="w-full text-sm font-mono bg-[var(--color-bg-hover)] border border-[var(--color-border-default)] rounded-[var(--r-1)] px-3 py-2 text-[var(--color-fg-secondary)] resize-y"
-            rows=${4}
-            value=${denyText}
-            placeholder="예: Execute"
-            onInput=${(e: Event) => { denylistDraftText.value = (e.target as HTMLTextAreaElement).value }}
-          ></textarea>
-          <div class="flex items-center gap-2 mt-2">
-            <span class="text-3xs text-text-muted">${accessDeduped.length} access · ${denyDeduped.length} deny</span>
-            <div class="flex-1"></div>
-            <button type="button"
-              class="${BTN_FILLED_BASE} bg-[var(--color-status-ok)] text-[var(--color-fg-on-ok)] text-xs"
-              onClick=${saveToolPolicy}
-              disabled=${denylistSaving.value || !changed}
-            >${denylistSaving.value ? '저장 중...' : '정책 저장'}</button>
-            <button type="button"
-              class="${BTN_FILLED_BASE} bg-[var(--color-bg-hover)] text-[var(--color-fg-secondary)] text-xs"
-              title="초기화: 편집한 도구 정책을 서버 값으로 되돌립니다"
-              onClick=${() => { toolAccessDraftText.value = null; denylistDraftText.value = null }}
-              disabled=${denylistSaving.value || !changed}
-            >초기화하기</button>
-          </div>
-        </div>
-      `
-    })()}
   `
 
   // access ⚿ — sandbox / network / allowed_paths + mention targets + bound namespaces
@@ -2395,16 +2144,6 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       <${ModelList} models=${c.workspace.bound_workspace_ids} />
     </div>
 
-    ${'' /* GitHub App per-keeper credentials — surfaced here in 설정 → 권한·샌드박스
-       alongside the monitoring detail's 진단/운영 copy, because credentials are a
-       settings concept and this is where operators look for them. Both call sites
-       render the same KeeperGithubAppConfigPanel against secret_projection. */}
-    <${MajorSectionHeader} title="GitHub App 자격증명" />
-    <${KeeperGithubAppConfigPanel}
-      keeperName=${keeperName}
-      projection=${secretProjection}
-      onProjectionChange=${setSecretProjection}
-    />
   `
 
   // goals ◎ — assigned goal-store bindings (active_goal_ids picker)
@@ -2531,7 +2270,6 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         <div style="margin-top:14px;">
           <${KcfFacts} rows=${[
             ['거부 목록 수', String(c.hooks.deny_list.length), true],
-            ['파괴 검사 도구', formatHookDestructiveTools(c.hooks.destructive_check_tools), true],
             ['비용 예산 (텔레메트리·미강제)', c.hooks.cost_budget.active ? formatCost(c.hooks.cost_budget.max_cost_usd ?? 0) : '미설정'],
           ]} />
         </div>

@@ -47,7 +47,6 @@ import { serverStatus, shellRuntimeResolution } from '../store'
 import { operatorSnapshot } from '../operator-store'
 import type { KeeperDetailEvidenceState } from './keeper-detail-hooks'
 import {
-  allowlistEmptyState,
   auditMetadataState,
   linkedRuntimeState,
   observedToolsEmptyState,
@@ -57,13 +56,7 @@ import {
 import {
   resolveKeeperMissionBrief,
   resolveKeeperObservedToolAudit,
-  resolveKeeperToolPolicy,
 } from './keeper-detail-source'
-import {
-  loadKeeperConfig,
-  peekKeeperConfigLoadStatus,
-  peekLoadedKeeperConfig,
-} from './keeper-config-panel'
 import {
   findRuntimeCatalogEntry,
   loadRuntimeCatalog,
@@ -77,7 +70,6 @@ import {
   runtimeCatalogSnapshotFacts,
 } from '../lib/runtime-provider-summary'
 
-const DEFAULT_ALLOWLIST_PREVIEW_LIMIT = 12
 
 // ── Utility functions ────────────────────────────────────
 
@@ -418,7 +410,7 @@ export function KeeperSecretProjectionPanel({
 }: KeeperSecretProjectionPanelProps) {
   const [localProjection, setLocalProjection] = useState<KeeperSecretProjection | null>(projection ?? null)
   const [envScope, setEnvScope] = useState<KeeperSecretScope>('keeper')
-  const [envName, setEnvName] = useState('GH_TOKEN')
+  const [envName, setEnvName] = useState('')
   const [secretValue, setSecretValue] = useState('')
   const [fileScope, setFileScope] = useState<KeeperSecretScope>('keeper')
   const [filePath, setFilePath] = useState('/home/keeper/.ssh/id_ed25519')
@@ -789,71 +781,6 @@ function ToolChip({ name }: { name: string }) {
       <span class="font-mono font-bold ${cat.color}">${cat.icon}</span>
       <span>${name}</span>
     <//>
-  `
-}
-
-export function resolveAllowlistPreview(
-  tools: string[],
-  previewLimit = DEFAULT_ALLOWLIST_PREVIEW_LIMIT,
-): { visibleTools: string[]; hiddenCount: number } {
-  const normalizedLimit = Math.max(0, previewLimit)
-  const visibleTools = tools.slice(0, normalizedLimit)
-  return {
-    visibleTools,
-    hiddenCount: Math.max(0, tools.length - visibleTools.length),
-  }
-}
-
-export function AllowlistPreview({
-  tools,
-  emptyLabel,
-  previewLimit = DEFAULT_ALLOWLIST_PREVIEW_LIMIT,
-}: {
-  tools: string[]
-  emptyLabel: string
-  previewLimit?: number
-}) {
-  const [expanded, setExpanded] = useState(false)
-  const firstTool = tools[0] ?? null
-  const lastTool = tools.length > 0 ? tools[tools.length - 1] : null
-
-  useEffect(() => {
-    setExpanded(false)
-  }, [tools.length, firstTool, lastTool, previewLimit])
-
-  if (tools.length === 0) {
-    return html`<span class="text-2xs text-[var(--color-fg-muted)] italic">${emptyLabel}</span>`
-  }
-
-  const { visibleTools, hiddenCount } = expanded
-    ? { visibleTools: tools, hiddenCount: 0 }
-    : resolveAllowlistPreview(tools, previewLimit)
-
-  return html`
-    <div class="flex flex-col gap-2">
-      <div class="flex flex-wrap gap-1.5">
-        ${visibleTools.map(tool => html`<${ToolChip} name=${tool} />`)}
-        ${!expanded && hiddenCount > 0
-          ? html`
-              <span class="inline-flex items-center py-0.5 px-2 rounded-[var(--r-0)] text-3xs font-medium border border-dashed border-[var(--color-border-default)] text-[var(--color-fg-muted)]">
-                +${hiddenCount}
-              </span>
-            `
-          : null}
-      </div>
-      ${tools.length > previewLimit
-        ? html`
-            <button type="button"
-              class="self-start text-3xs text-[var(--color-fg-muted)] hover:text-[var(--color-fg-primary)] cursor-pointer transition-colors"
-              aria-expanded=${expanded}
-              aria-label=${expanded ? '허용된 도구 접기' : `허용된 도구 나머지 ${hiddenCount}개 보기`}
-              onClick=${() => setExpanded(value => !value)}
-            >
-              ${expanded ? '접기' : `나머지 ${hiddenCount}개 보기`}
-            </button>
-          `
-        : null}
-    </div>
   `
 }
 
@@ -1738,17 +1665,9 @@ export function RuntimeLensSection({
 // ── Neighborhood & Tool Audit ────────────────────────────
 
 export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
-  useEffect(() => {
-    void loadKeeperConfig(keeper.name)
-  }, [keeper.name])
-
-  const keeperConfig = peekLoadedKeeperConfig(keeper.name)
-  const configLoadStatus = peekKeeperConfigLoadStatus(keeper.name)
   const namespaceStatus = operatorSnapshot.value?.root ?? {}
   const missionBrief = resolveKeeperMissionBrief(keeper)
-  const toolPolicy = resolveKeeperToolPolicy(keeperConfig, configLoadStatus)
   const observedAudit = resolveKeeperObservedToolAudit(keeper, missionBrief)
-  const allowedTools = toolPolicy.resolvedAllowlist
   const observedTools = observedAudit.latestToolNames
   const toolCallCount = observedAudit.latestToolCallCount
   const auditSource = observedAudit.toolAuditSource
@@ -1758,27 +1677,10 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
   const project = namespaceStatus.project ?? serverStatus.value?.project ?? 'N/A'
   const clusterRaw = namespaceStatus.cluster ?? serverStatus.value?.cluster ?? null
   const clusterVisible = clusterRaw && clusterRaw !== 'unknown' && clusterRaw !== 'default' && clusterRaw !== 'N/A'
-  const allowlistFallback = toolAuditStateLabel(allowlistEmptyState(keeper))
   const observedFallback = toolAuditStateLabel(observedToolsEmptyState(keeper, auditSource))
   const metadataFallback = toolAuditStateLabel(auditMetadataState(keeper, auditSource))
-  const runtimeState = linkedRuntimeState(keeper)
   const currentTaskLabel = resolveKeeperCurrentTaskLabel(keeper)
-  const skillRouteLabel =
-    keeper.skill_primary
-    ?? (runtimeState === 'offline' ? 'offline' : 'not_collected')
-  const policyLoading = toolPolicy.source === 'loading'
-  const policyError = toolPolicy.source === 'error'
-  const policyLoaded = toolPolicy.source === 'keeper_config'
-  const unavailablePolicyLabel = policyError ? 'config_error' : 'config_unavailable'
-  const allowedToolCountLabel =
-    allowedTools.length > 0
-      ? String(allowedTools.length)
-      : policyLoading
-        ? 'loading'
-        : policyLoaded
-          ? allowlistFallback
-          : unavailablePolicyLabel
-  const openToolsQuery = allowedTools[0] ?? observedTools[0] ?? null
+  const openToolsQuery = observedTools[0] ?? null
 
   return html`
     <div class="flex flex-col gap-1.5">
@@ -1786,10 +1688,7 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
       <${SignalRow} label="프로젝트" value=${project} />
       ${clusterVisible ? html`<${SignalRow} label="클러스터" value=${clusterRaw} />` : null}
       <${SignalRow} label="현재 태스크" value=${currentTaskLabel} />
-      <${SignalRow} label="스킬 경로" value=${skillRouteLabel} />
       <${SignalRow} label="컨텍스트 출처" value=${keeper.context_source ?? keeper.context?.source ?? '-'} />
-      <${SignalRow} label="허용 도구 수" value=${allowedToolCountLabel} />
-
       <div class="flex justify-end mt-1">
         <${ActionButton}
           variant="ghost"
@@ -1801,25 +1700,6 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
           도구 패널 열기
         <//>
       </div>
-
-      <div class="flex items-center justify-between mt-3">
-        <${SectionHeader} size="xs">허용된 도구</${SectionHeader}>
-        <span class="text-3xs text-[var(--color-fg-muted)]">${policyLoading ? '로딩 중' : policyError ? '설정 오류' : 'read-only'}</span>
-      </div>
-
-      <span class="text-2xs text-[var(--color-fg-muted)] leading-snug">
-        ${policyLoading
-          ? '허용 도구 목록을 불러오는 중입니다.'
-          : policyLoaded
-            ? '이 키퍼가 현재 사용할 수 있는 도구 목록입니다.'
-            : policyError
-              ? '허용 도구 목록 로드에 실패했습니다.'
-              : '허용 도구 목록을 아직 확인할 수 없습니다.'}
-      </span>
-      <${AllowlistPreview}
-        tools=${allowedTools}
-        emptyLabel=${policyLoading ? 'loading' : policyLoaded ? allowlistFallback : unavailablePolicyLabel}
-      />
 
       <${ToolSection}
         title="관측된 도구"

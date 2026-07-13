@@ -1,5 +1,5 @@
 import type { Agent, BoardPost, StopCause, ExecutionSignalTruth, EvidenceSourceCore } from './core'
-import type { BoardMonitoring, GovernanceMonitoring, GovernanceDecisionItem, GovernanceTimelineEvent, GovernanceJudgeSummary, GovernanceJudgment, KeeperApprovalQueueItem, KeeperApprovalRule, KeeperResolvedApprovalItem, PendingConfirmation, PendingConfirmSummary } from './governance'
+import type { BoardMonitoring, PendingConfirmSummary } from './gate'
 
 // --- Dashboard projection responses ---
 
@@ -58,22 +58,6 @@ export interface DashboardRuntimeDiagnostic {
   message: string
 }
 
-export interface DashboardShellIrTrust {
-  safe: string
-  audited: string
-  privileged: string
-}
-
-export interface DashboardShellIrApproval {
-  schema: string
-  enabled: boolean
-  env_key: string
-  raw_overlay: string | null
-  trust: DashboardShellIrTrust | null
-  source: string | null
-  reason: string | null
-}
-
 export type KeeperRuntimeSource = 'env' | 'toml' | 'default' | 'derived'
 
 export interface KeeperRuntimeField<T> {
@@ -82,11 +66,7 @@ export interface KeeperRuntimeField<T> {
 }
 
 export interface KeeperRuntimeResolved {
-  bootstrap_max_active_keepers: KeeperRuntimeField<number>
-  reactive_max_idle_turns: KeeperRuntimeField<number>
-  autonomous_max_idle_turns: KeeperRuntimeField<number>
   turn_timeout_sec: KeeperRuntimeField<number>
-  admission_wait_timeout_sec: KeeperRuntimeField<number>
   oas_timeout_override_sec: KeeperRuntimeField<number | null>
   oas_timeout_per_1k: KeeperRuntimeField<number>
   oas_timeout_per_turn: KeeperRuntimeField<number>
@@ -109,17 +89,49 @@ export interface DashboardRuntimeResolution {
   server_workspace_mismatch: boolean
   diagnostics: DashboardRuntimeDiagnostic[]
   build: ServerBuildIdentity
-  shell_ir_approval?: DashboardShellIrApproval | null
   keeper_runtime: KeeperRuntimeResolved | null
   fleet_safety: DashboardFleetSafetyHealth | null
   fd_accountant: DashboardFdAccountant | null
+  disk_observation: DashboardDiskObservation | null
   cdal: DashboardCdalHealth | null
 }
 
 export interface DashboardFdAccountant {
   fd_open: number | null
   fd_limit: number | null
-  pressure_active: boolean | null
+  per_kind: DashboardFdActiveOperations[]
+  resource_errors: DashboardFdResourceError[]
+}
+
+export interface DashboardFdActiveOperations {
+  kind: string
+  active_operations: number
+}
+
+export interface DashboardFdResourceError {
+  kind: string
+  error: string
+  count: number
+}
+
+export interface DashboardDiskObservation {
+  mode: string | null
+  masc_root: string | null
+  storage_space_exhaustion_observations_total: number | null
+  last_storage_space_exhaustion_ts: number | null
+  filesystem: DashboardDiskFilesystemObservation | null
+}
+
+export interface DashboardDiskFilesystemObservation {
+  path: string | null
+  filesystem: string | null
+  mounted_on: string | null
+  total_bytes: number | null
+  used_bytes: number | null
+  available_bytes: number | null
+  capacity_percent: number | null
+  available_percent: number | null
+  error: string | null
 }
 
 export interface DashboardFleetSafetyHealth {
@@ -127,7 +139,6 @@ export interface DashboardFleetSafetyHealth {
   paused_keepers: number | null
   paused_keepers_health: DashboardPausedKeepersHealth | null
   keeper_fleet_no_fibers: boolean | null
-  keeper_fd_pressure: DashboardFleetPressureHealth | null
   keeper_fleet_safety: DashboardFleetPressureHealth | null
   keeper_reaction_ledger: DashboardKeeperReactionLedgerHealth | null
 }
@@ -148,11 +159,7 @@ export interface DashboardPausedKeeperDetail {
   name: string
   autoboot_enabled: boolean | null
   pause_kind: string | null
-  auto_resume_after_sec: number | null
-  persisted_auto_resume_after_sec: number | null
-  auto_resume_source: string | null
   paused_elapsed_sec: number | null
-  auto_resume_remaining_sec: number | null
   last_blocker: DashboardBlockerInfo | null
   missing_pause_root_cause: boolean | null
 }
@@ -254,8 +261,6 @@ export interface DashboardFleetPressureHealth {
   status: string | null
   reason: string | null
   blocker?: string | null
-  admission_blocked: boolean | null
-  admission_blocked_keepers: number | null
   blocked_keepers: number | null
   blocked_count: number | null
   bootable_keeper_count?: number | null
@@ -543,7 +548,6 @@ export interface DashboardExecutionContinuityBrief {
   model?: string | null
   emoji?: string
   korean_name?: string | null
-  skill_reason?: string | null
   recent_input_preview?: string | null
   recent_output_preview?: string | null
   recent_tool_names?: string[]
@@ -552,7 +556,6 @@ export interface DashboardExecutionContinuityBrief {
   tool_audit_source?: string | null
   tool_audit_at?: string | null
   last_proactive_preview?: string | null
-  skill_route_summary?: string | null
 }
 
 export interface DashboardExecutionResponse {
@@ -591,56 +594,6 @@ export interface DashboardMemoryResponse {
   /** Total number of matching posts when the server could determine it; null when has_more=true. */
   total?: number | null
   sort_by?: string
-}
-
-// RFC-0319 operator approval mode. Closed union mirrors the backend
-// `approval_mode_to_string` (manual | auto_low_risk); any other wire value is
-// normalized to 'manual' (fail-closed) at the api-normalize boundary.
-export type ApprovalMode = 'manual' | 'auto_low_risk'
-
-export interface HitlApprovalModeStatus {
-  mode: ApprovalMode
-  // Bands the backend will auto-approve in auto_low_risk mode (SSOT: ['low']).
-  // critical/high/medium are structurally excluded by the separation-of-duties
-  // floor in Operator_approval.decide_approval_mode, not by this list.
-  auto_eligible_bands: string[]
-  // True when the backend could not read the persisted mode and fell back to
-  // manual — surfaced so the operator knows the toggle reflects a fallback.
-  fail_closed: boolean
-  read_error?: string
-}
-
-export interface DashboardGovernanceResponse {
-  generated_at?: string
-  note?: string
-  summary?: {
-    cases_open?: number
-    pending_ruling?: number
-    ready_auto_execute?: number
-    needs_human_gate?: number
-    executed?: number
-    blocked?: number
-    ready_to_execute?: number
-    oldest_open_case_age_s?: number | null
-    last_activity_age_s?: number | null
-    judge_online?: boolean
-    judge_last_seen_at?: string | null
-  }
-  items?: GovernanceDecisionItem[]
-  activity?: GovernanceTimelineEvent[]
-  judge?: GovernanceJudgeSummary
-  judgments?: GovernanceJudgment[]
-  pending_actions?: PendingConfirmation[]
-  approval_queue?: KeeperApprovalQueueItem[]
-  recent_resolved?: KeeperResolvedApprovalItem[]
-  approval_rules?: KeeperApprovalRule[]
-  hitl?: {
-    enabled: boolean
-    disabled_by_env: boolean
-    env_name: string
-    default_enabled: boolean
-    approval_mode?: HitlApprovalModeStatus
-  }
 }
 
 export interface DashboardPlanningResponse {
@@ -757,59 +710,13 @@ export interface GoalCompletionSummary {
   is_complete: boolean
   is_terminal: boolean
   ready_to_request_completion: boolean
-  gate: 'none' | 'verification' | 'approval' | string
-  requires_verifier: boolean
-  requires_completion_approval: boolean
-  active_verification_request: boolean
-  blocking_source: GoalTreeNode['blocking_source']
-  blocking_reason: string
-}
-
-export interface GoalVerificationVote {
-  principal: {
-    id: string
-    display_name?: string | null
-  }
-  decision: 'approve' | 'reject' | string
-  note?: string | null
-  evidence_refs?: string[]
-  submitted_at: string
-}
-
-export interface GoalVerificationRequest {
-  id: string
-  goal_id: string
-  target_phase: string
-  requested_by: {
-    id: string
-    display_name?: string | null
-  }
-  policy_snapshot: {
-    principals: Array<{ id: string; display_name?: string | null }>
-    eligible_principals: Array<{ id: string; display_name?: string | null }>
-    required_verdicts: number
-  }
-  votes: GoalVerificationVote[]
-  status: string
-  created_at: string
-  resolved_at?: string | null
-}
-
-export interface GoalVerificationSummary {
-  effective_policy?: GoalVerificationRequest['policy_snapshot'] | null
-  open_request?: GoalVerificationRequest | null
-  latest_request?: GoalVerificationRequest | null
-  approve_count: number
-  reject_count: number
-  remaining_possible: number
 }
 
 export interface GoalFsmProjection {
   state: string
   source: 'goal.phase' | string
   next_actions: string[]
-  activity_observation: 'runtime' | 'approval' | 'task' | 'child' | 'goal_metadata' | string
-  stagnation_status: 'recent' | 'stalled' | 'unobserved' | string
+  activity_observation: 'runtime' | 'approval' | 'task' | 'goal_metadata' | string
 }
 
 export interface GoalKeeperTrustLatestEvent {
@@ -851,7 +758,7 @@ export interface GoalKeeperTrustExecutionSummary {
   runtime_outcome?: string | null
   sandbox_summary?: string | null
   sandbox_root?: string | null
-  mutation_guard_summary?: string | null
+  completion_observation_summary?: string | null
   latest_receipt_at?: string | null
 }
 
@@ -864,6 +771,8 @@ export interface GoalKeeperTrustTerminalReason {
 }
 
 export interface GoalKeeperTrustSummary {
+  snapshot_status?: string | null
+  snapshot_error?: string | null
   disposition?: string | null
   disposition_reason?: string | null
   operator_disposition?: string | null
@@ -884,21 +793,14 @@ export interface GoalTreeStatusProjection {
   phase: string
   phase_color: string
   goal_fsm: GoalFsmProjection
-  health: 'done' | 'paused' | 'blocked' | 'at_risk' | 'on_track' | string
-  health_color: string
-  badges: string[]
-  status_reason: string
   priority: number
 }
 
 export interface GoalTreeMetricProjection {
   metric: string | null
   target_value: string | null
-  require_completion_approval: boolean
   due_date: string | null
   parent_goal_id: string | null
-  convergence: number
-  convergence_pct: number
   attainment: GoalAttainmentProjection
 }
 
@@ -910,32 +812,19 @@ export interface GoalTreeTaskProjection {
   completion_summary?: GoalCompletionSummary
 }
 
-export interface GoalTreeVerificationProjection {
-  verification_summary: GoalVerificationSummary
-  effective_verifier_policy?: GoalVerificationRequest['policy_snapshot'] | null
-  active_verification_request?: GoalVerificationRequest | null
-  pending_verification_count: number
-}
-
 export interface GoalTreeActivityProjection {
   timeline_events: unknown[]
   last_activity_at: string
-  stagnation_seconds: number
+  stagnation_seconds: number | null
   activity_observation: GoalFsmProjection['activity_observation']
-  stagnation_status: GoalFsmProjection['stagnation_status']
   linked_keeper_names: string[]
   pending_approval_count: number
-  infra_risk_count: number
 }
 
 export interface GoalTreeLinkageProjection {
   linkage_source: 'explicit' | 'title_tag' | 'mixed' | 'none' | string
-  linkage_warning_count: number
-  blocking_source: 'goal_phase' | 'child_goal' | 'approval' | 'keeper_runtime' | 'task_fsm' | 'goal_linkage' | 'stalled' | 'none' | string
-  blocking_reason: string
   latest_keeper_ref?: string | null
   latest_turn_ref?: number | null
-  stalled_since?: string | null
 }
 
 export interface GoalTreeTimestamps {
@@ -947,7 +836,6 @@ export interface GoalTreeNode extends
   GoalTreeStatusProjection,
   GoalTreeMetricProjection,
   GoalTreeTaskProjection,
-  GoalTreeVerificationProjection,
   GoalTreeActivityProjection,
   GoalTreeLinkageProjection,
   GoalTreeTimestamps {
@@ -983,17 +871,10 @@ export interface GoalAttainmentProjection {
 export interface GoalTreeSummary {
   total_goals: number
   active_goals: number
-  on_track_goals: number
-  done_goals: number
-  paused_goals: number
-  at_risk_goals: number
-  blocked_goals: number
+  phase_counts: Record<string, number>
   total_tasks: number
   done_tasks: number
   pending_approvals: number
-  infra_risk_count: number
-  overall_convergence: number
-  overall_convergence_pct: number
 }
 
 export interface DashboardGoalsTreeResponse {
@@ -1070,11 +951,10 @@ export interface ServerStatus {
   }
   monitoring?: {
     board?: BoardMonitoring
-    governance?: GovernanceMonitoring
   }
   data_quality?: {
     board_contract_ok?: boolean
-    governance_feed_ok?: boolean
+    gate_feed_ok?: boolean
     last_sync_at?: string
   }
 }

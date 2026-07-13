@@ -1,5 +1,5 @@
-(** Keeper_deliberation — typed action space, deliberation triggers,
-    world observation builder, triage logic, and MODEL-driven deliberation.
+(** Keeper_deliberation — typed action space, world observation, and
+    MODEL-driven deliberation.
 
     @since 2.90.0 *)
 
@@ -62,7 +62,6 @@ type world_observation = {
   keeper_fiber_count_changed: bool;
   active_goal_count: int;
   idle_seconds: int;
-  idle_gate: int;
   board_new_post_count: int;
   board_mention_count: int;
 }
@@ -111,8 +110,9 @@ type triage_result =
 
 val triage_result_to_json : triage_result -> Yojson.Safe.t
 
-(** Evaluate a world observation and return triggers that warrant deliberation.
-    Pure heuristic — no MODEL calls, no I/O. *)
+(** Project objective typed signal labels for the model prompt. Always returns
+    [Triggered _], including [Triggered []], so local code never gates the
+    configured model call. *)
 val triage : world_observation -> triage_result
 
 (** {1 Deliberation meta (tracking fields for keeper_meta)} *)

@@ -17,9 +17,9 @@ import { toKeeperPhase } from '../keeper-store-normalize'
 // sub-FSMs is captured by the invariants panel, not the graph edges.
 
 interface CompositeFsmParams {
-  phase: string            // KSM — offline | running | failing | overflowed | compacting | handing_off | draining | paused | stopped | crashed | restarting | dead | zombie
+  phase: string            // KSM — offline | running | failing | overflowed | compacting | handing_off | draining | paused | stopped | crashed | restarting | dead
   turnPhase: string        // KTC — idle | prompting | routing | executing | compacting | finalizing | exhausted
-  decisionStage: string    // KDP — undecided | guard_ok | gate_rejected | tool_policy_selected
+  decisionStage: string    // KDP — undecided | guard_ok | tool_policy_selected
   runtimeState: string     // KCL — idle | selecting | trying | done | exhausted
   compactionStage: string  // KMC — accumulating | compacting | done
 }
@@ -27,10 +27,10 @@ interface CompositeFsmParams {
 const KSM_STATES = [
   'offline', 'running', 'failing', 'overflowed', 'compacting',
   'handing_off', 'draining', 'paused', 'stopped', 'crashed',
-  'restarting', 'dead', 'zombie',
+  'restarting', 'dead',
 ]
 const KTC_STATES = ['idle', 'prompting', 'routing', 'executing', 'compacting', 'finalizing', 'exhausted']
-const KDP_STATES = ['undecided', 'guard_ok', 'gate_rejected', 'tool_policy_selected']
+const KDP_STATES = ['undecided', 'guard_ok', 'tool_policy_selected']
 const KCL_STATES = ['idle', 'selecting', 'trying', 'done', 'exhausted']
 const KMC_STATES = ['accumulating', 'compacting', 'done']
 
@@ -149,8 +149,7 @@ export function buildCompositeFsmSpec(params: CompositeFsmParams): FsmGraphSpec 
   const nodes: FsmNode[] = [
     ...clusterNodes('KSM', 'KSM · keeper lifecycle', KSM_STATES, params.phase, ksmTone),
     ...clusterNodes('KTC', 'KTC · turn cycle', KTC_STATES, params.turnPhase, 'active'),
-    ...clusterNodes('KDP', 'KDP · decision pipeline', KDP_STATES, params.decisionStage,
-      params.decisionStage === 'gate_rejected' ? 'err' : 'active'),
+    ...clusterNodes('KDP', 'KDP · decision pipeline', KDP_STATES, params.decisionStage, 'active'),
     ...clusterNodes('KCL', 'KCL · runtime state', KCL_STATES, params.runtimeState,
       params.runtimeState === 'exhausted' ? 'err' : 'active'),
     ...clusterNodes('KMC', 'KMC · memory compaction', KMC_STATES, params.compactionStage, 'warn'),

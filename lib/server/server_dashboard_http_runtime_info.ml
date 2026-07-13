@@ -1578,14 +1578,9 @@ let runtime_provider_behavior_capabilities_json
   | Some caps ->
     `Assoc
       [ "supports_inline_tools", `Bool caps.supports_inline_tools
-      ; ( "requires_per_keeper_bridging_for_bound_actor_tools"
-        , `Bool caps.requires_per_keeper_bridging_for_bound_actor_tools )
-      ; ( "identity_runtime_mcp_header_keys"
-        , Json_util.json_string_list caps.identity_runtime_mcp_header_keys )
       ; "argv_prompt_preflight", `Bool caps.argv_prompt_preflight
       ; "uses_anthropic_caching", `Bool caps.uses_anthropic_caching
       ; "max_turns_per_attempt", Json_util.int_opt_to_json caps.max_turns_per_attempt
-      ; "tolerates_bound_actor_fallback", `Bool caps.tolerates_bound_actor_fallback
       ]
 ;;
 
@@ -1865,7 +1860,7 @@ let runtime_unique_count values =
   values |> List.sort_uniq String.compare |> List.length
 ;;
 
-let runtime_assignment_governance_json ~default_id =
+let runtime_assignment_status_json ~default_id =
   let assignments =
     Runtime.keeper_assignments ()
     |> List.sort (fun (left, _) (right, _) -> String.compare left right)
@@ -1906,7 +1901,7 @@ let runtime_assignment_governance_json ~default_id =
     else "watch"
   in
   `Assoc
-    [ "schema", `String "masc.runtime_assignment_governance.v1"
+    [ "schema", `String "masc.runtime_assignment_status.v1"
     ; "source", `String runtime_inventory_source
     ; "status", `String status
     ; "degraded", `Bool (String.equal status "degraded")
@@ -1939,74 +1934,11 @@ let runtime_assignment_governance_json ~default_id =
     ]
 ;;
 
-let governance_hitl_json () =
-  (* doc-03 P0#1 acceptance: surface whether human-in-the-loop approval is active
-     and why, so an operator can confirm the fail-closed default at runtime instead
-     of inferring it from the environment. [Env_config_core.disable_hitl] reads
-     MASC_DISABLE_HITL with a fail-closed [~default:false] — HITL stays enabled
-     unless an operator explicitly disables it; the thresholds mirror
-     [Governance_pipeline] so the "why" travels with the "whether". *)
-  let enabled = not (Env_config_core.disable_hitl ()) in
-  let threshold_json resolver =
-    match resolver "production" with
-    | Some level -> `String (Governance_pipeline.risk_level_to_string level)
-    | None -> `Null
-  in
+let gate_hitl_json () =
   `Assoc
-    [ "schema", `String "masc.governance_hitl.v1"
-    ; "enabled", `Bool enabled
-    ; "disable_env_key", `String Env_config_core.disable_hitl_env_key
-    ; "default_when_unset", `String "enabled"
-    ; ( "production_confirm_threshold"
-      , threshold_json Governance_pipeline.confirm_threshold )
-    ; ( "keeper_production_confirm_threshold"
-      , threshold_json Governance_pipeline.keeper_confirm_threshold )
-    ; ( "reason"
-      , `String
-          (if enabled
-           then "human approval required for high/critical actions (fail-closed default)"
-           else
-             "human approval gates disabled via " ^ Env_config_core.disable_hitl_env_key) )
-    ]
-;;
-
-let shell_ir_approval_json () =
-  let gate_enabled = Env_config_runtime.Shell_ir_approval_gate.enabled () in
-  let raw_overlay = Env_config_runtime.Shell_ir_approval.raw_overlay () in
-  let resolution =
-    Masc_exec.Approval_config.resolve_shell_ir_approval_overlay raw_overlay
-  in
-  let source, reason =
-    match gate_enabled, resolution.source with
-    | false, _ ->
-      ( `String "gate_disabled"
-      , `String
-          "shell-ir approval gate disabled via MASC_SHELL_IR_APPROVAL_GATE_ENABLED" )
-    | true, Masc_exec.Approval_config.Default_autonomous ->
-      ( `String "default_autonomous"
-      , `String "using default overlay: Masc_exec.Approval_config.autonomous" )
-    | true, Masc_exec.Approval_config.Configured_overlay raw ->
-      ( `String "raw_overlay"
-      , `String ("using parsed MASC_SHELL_IR_APPROVAL value: " ^ raw) )
-    | true, Masc_exec.Approval_config.Invalid_overlay_fail_closed raw ->
-      ( `String "invalid_overlay_fail_closed"
-      , `String
-          ("invalid MASC_SHELL_IR_APPROVAL value; using fail-closed enforced overlay: "
-           ^ raw) )
-  in
-  `Assoc
-    [ "schema", `String "masc.shell_ir_approval.v1"
-    ; "enabled", `Bool gate_enabled
-    ; "env_key", `String "MASC_SHELL_IR_APPROVAL"
-    ; "raw_overlay", Json_util.string_opt_to_json raw_overlay
-    ; ( "trust"
-      , `Assoc
-          [ "safe", `String (Masc_exec.Approval_config.trust_level_to_string resolution.effective.safe_trust)
-          ; "audited", `String (Masc_exec.Approval_config.trust_level_to_string resolution.effective.audited_trust)
-          ; "privileged", `String (Masc_exec.Approval_config.trust_level_to_string resolution.effective.privileged_trust)
-          ] )
-    ; "source", source
-    ; "reason", reason
+    [ "schema", `String "masc.gate_hitl.v1"
+    ; "state", `String "available"
+    ; "nonblocking", `Bool true
     ]
 ;;
 
@@ -2038,7 +1970,7 @@ let runtime_inventory_json () =
           ; "cli_models", `Int (count_models "cli")
           ; "default_runtime_id", Json_util.string_opt_to_json default_id
           ] )
-    ; "assignment_governance", runtime_assignment_governance_json ~default_id
+    ; "assignment_status", runtime_assignment_status_json ~default_id
     ; "providers", `List (List.map (runtime_inventory_entry_json ~default_id) runtimes)
     ]
 ;;
@@ -2294,8 +2226,7 @@ let runtime_resolution_json (config : Workspace.config) =
       ; ( "deployment_state"
         , deployment_state_json ~build ~server_repo_commit ~workspace_commit
             ~resolved_base_commit ~upstream_status ~source_mismatch )
-      ; "governance_hitl", governance_hitl_json ()
-      ; "shell_ir_approval", shell_ir_approval_json ()
+      ; "gate_hitl", gate_hitl_json ()
       ]
       @ Server_routes_http_runtime.keeper_fleet_runtime_resolution_fields () )
 ;;
@@ -2375,7 +2306,6 @@ let light_runtime_resolution_json (config : Workspace.config) =
       ; "diagnostics", `List []
       ; ("keeper_runtime", Keeper_runtime_resolved.(current () |> to_yojson))
       ; "build", Build_identity.to_yojson build
-      ; "shell_ir_approval", shell_ir_approval_json ()
       ]
       @ fleet_fields )
 ;;
@@ -2483,62 +2413,21 @@ let schedule_request_active (request : Schedule_domain.schedule_request) =
   not (Schedule_domain.is_terminal request.status)
 ;;
 
-let schedule_effectively_expired ~now (request : Schedule_domain.schedule_request) =
-  match request.status, request.expires_at with
-  | (Schedule_domain.Pending_approval | Schedule_domain.Scheduled | Schedule_domain.Due), Some expires_at
-    when expires_at <= now -> true
-  | _ -> false
-;;
-
-let schedule_request_effectively_active ~now request =
-  schedule_request_active request && not (schedule_effectively_expired ~now request)
-;;
-
-let schedule_readiness_counts_as_live_supported = function
-  | Schedule_projection.Blocked_approval
-  | Schedule_projection.Awaiting_approval
-  | Schedule_projection.Due_pending_refresh
-  | Schedule_projection.Ready
-  | Schedule_projection.Approved
-  | Schedule_projection.Scheduled
-  | Schedule_projection.Running ->
-    true
-  | Schedule_projection.Expired | Schedule_projection.Terminal -> false
-;;
-
-let schedule_effectively_due ~now (request : Schedule_domain.schedule_request) =
-  (not (schedule_effectively_expired ~now request))
-  &&
-  match request.status with
-  | Schedule_domain.Due -> true
-  | Schedule_domain.Scheduled -> request.due_at <= now
-  | Schedule_domain.Pending_approval
-  | Schedule_domain.Running
-  | Schedule_domain.Succeeded
-  | Schedule_domain.Failed
-  | Schedule_domain.Rejected
-  | Schedule_domain.Cancelled
-  | Schedule_domain.Expired ->
-    false
-;;
-
 let schedule_due_candidate (request : Schedule_domain.schedule_request) =
   match request.status with
-  | Schedule_domain.Pending_approval | Schedule_domain.Scheduled | Schedule_domain.Due ->
+  | Schedule_domain.Scheduled | Schedule_domain.Due ->
     true
   | Schedule_domain.Running
   | Schedule_domain.Succeeded
   | Schedule_domain.Failed
-  | Schedule_domain.Rejected
   | Schedule_domain.Cancelled
   | Schedule_domain.Expired ->
     false
 ;;
 
-let schedule_next_due_at ~now schedules =
+let schedule_next_due_at schedules =
   schedules
-  |> List.filter (fun request ->
-    schedule_due_candidate request && not (schedule_effectively_expired ~now request))
+  |> List.filter schedule_due_candidate
   |> List.fold_left
        (fun acc (request : Schedule_domain.schedule_request) ->
          match acc with
@@ -2547,171 +2436,14 @@ let schedule_next_due_at ~now schedules =
        None
 ;;
 
-let schedule_blocked_approval ~now state (request : Schedule_domain.schedule_request) =
-  (not (schedule_effectively_expired ~now request))
-  && request.due_at <= now
-  && Schedule_domain.requires_separate_human_grant request
-  &&
-  match request.status with
-  | Schedule_domain.Pending_approval -> true
-  | Schedule_domain.Due -> not (Schedule_store.has_current_approved_grant state request)
-  | Schedule_domain.Scheduled
-  | Schedule_domain.Running
-  | Schedule_domain.Succeeded
-  | Schedule_domain.Failed
-  | Schedule_domain.Rejected
-  | Schedule_domain.Cancelled
-  | Schedule_domain.Expired ->
-    false
-;;
-
-let schedule_effective_status ~now state (request : Schedule_domain.schedule_request) =
-  if schedule_effectively_expired ~now request
-  then "expired"
-  else
-    match request.status with
-    | Schedule_domain.Pending_approval when request.due_at <= now -> "blocked_approval"
-    | Pending_approval -> "pending_approval"
-    | Scheduled when request.due_at <= now -> "due"
-    | Scheduled -> "scheduled"
-    | Due when schedule_blocked_approval ~now state request -> "blocked_approval"
-    | Due -> "ready"
-    | Running -> "running"
-    | Succeeded -> "succeeded"
-    | Failed -> "failed"
-    | Rejected -> "rejected"
-    | Cancelled -> "cancelled"
-    | Expired -> "expired"
-;;
-
-let schedule_execution_readiness ~now state (request : Schedule_domain.schedule_request) =
-  if schedule_effectively_expired ~now request
-  then Schedule_projection.Expired
-  else if Schedule_domain.is_terminal request.status
-  then Schedule_projection.Terminal
-  else if request.status = Schedule_domain.Running
-  then Schedule_projection.Running
-  else if schedule_blocked_approval ~now state request
-  then Schedule_projection.Blocked_approval
-  else if Schedule_store.has_current_approved_grant state request
-  then Schedule_projection.Approved
-  else
-    match request.status with
-    | Schedule_domain.Pending_approval -> Schedule_projection.Awaiting_approval
-    | Schedule_domain.Scheduled when request.due_at <= now ->
-      Schedule_projection.Due_pending_refresh
-    | Schedule_domain.Scheduled -> Schedule_projection.Scheduled
-    | Schedule_domain.Due -> Schedule_projection.Ready
-    | Schedule_domain.Running -> Schedule_projection.Running
-    | Schedule_domain.Succeeded
-    | Schedule_domain.Failed
-    | Schedule_domain.Rejected
-    | Schedule_domain.Cancelled
-    | Schedule_domain.Expired ->
-      Schedule_projection.Terminal
-;;
-
-let schedule_operator_action readiness =
-  match Schedule_projection.operator_action_for_execution_readiness readiness with
-  | Some action -> `String action
-  | None -> `Null
-;;
-
-let tool_projection_surfaces_for tool_name =
-  let surfaces = ref [] in
-  let add_surface surface =
-    if not (List.exists (String.equal surface) !surfaces)
-    then surfaces := surface :: !surfaces
-  in
-  if Tool_catalog.is_public_mcp tool_name then add_surface "public_mcp";
-  Capability_registry.all_projection_seeds_from Config.raw_all_tool_schemas
-  |> List.iter (fun (seed : Capability_registry.capability_seed) ->
-    let surface = Capability_registry.surface_to_string seed.projection.surface in
-    if
-      (not (String.equal surface "public_mcp"))
-      && (String.equal seed.projection.tool_name tool_name
-          || String.equal seed.projection.backend_tool_name tool_name)
-    then add_surface surface);
-  List.sort String.compare !surfaces
-;;
-
-let schedule_keeper_next_tool_status_json = function
-  | None -> `Null
-  | Some tool_name ->
-    let registered_schema =
-      List.exists
-        (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name tool_name)
-        Config.raw_all_tool_schemas
-    in
-    let dispatch_registered = Option.is_some (Tool_dispatch.lookup_tag tool_name) in
-    let metadata = Tool_catalog.metadata tool_name in
-    let surfaces = tool_projection_surfaces_for tool_name in
-    let effect_domain =
-      match metadata.effect_domain with
-      | None -> `Null
-      | Some domain -> `String (Tool_catalog.effect_domain_to_string domain)
-    in
-    `Assoc
-      [ "name", `String tool_name
-      ; "registered_schema", `Bool registered_schema
-      ; "dispatch_registered", `Bool dispatch_registered
-      ; "direct_call_allowed", `Bool (Tool_catalog.allow_direct_call tool_name)
-      ; "visibility", `String (Tool_catalog.visibility_to_string metadata.visibility)
-      ; ( "surfaces"
-        , `List (List.map (fun surface -> `String surface) surfaces) )
-      ; "surface_count", `Int (List.length surfaces)
-      ; "effect_domain", effect_domain
-      ; ( "read_only"
-        , match metadata.readonly with
-          | None -> `Null
-          | Some read_only -> `Bool read_only )
-      ; ( "requires_actor_binding"
-        , match metadata.requires_actor_binding with
-          | None -> `Null
-          | Some requires_actor_binding -> `Bool requires_actor_binding )
-      ]
-;;
-
-let schedule_keeper_next_action readiness =
-  match Schedule_projection.keeper_next_action_for_execution_readiness readiness with
-  | Some action -> `String action
-  | None -> `Null
-;;
-
-let schedule_fsm_state ~now state schedules =
+let schedule_fsm_state schedules =
   let count status = schedule_status_count schedules status in
-  let count_non_expired status =
-    List.fold_left
-      (fun count (request : Schedule_domain.schedule_request) ->
-         if request.status = status && not (schedule_effectively_expired ~now request)
-         then count + 1
-         else count)
-      0 schedules
-  in
-  let due_effective_count =
-    List.fold_left
-      (fun count request -> if schedule_effectively_due ~now request then count + 1 else count)
-      0 schedules
-  in
-  let blocked_approval_count =
-    List.fold_left
-      (fun count request ->
-         if schedule_blocked_approval ~now state request then count + 1 else count)
-      0 schedules
-  in
   if count Schedule_domain.Running > 0
   then "running"
-  else if blocked_approval_count > 0
-  then "blocked_approval"
-  else if due_effective_count > 0
+  else if count Schedule_domain.Due > 0
   then "due"
-  else if count_non_expired Schedule_domain.Pending_approval > 0
-  then "pending_approval"
-  else if count_non_expired Schedule_domain.Scheduled > 0
+  else if count Schedule_domain.Scheduled > 0
   then "scheduled"
-  else if
-    List.exists (fun request -> schedule_effectively_expired ~now request) schedules
-  then "expired"
   else "idle"
 ;;
 
@@ -3015,7 +2747,6 @@ let schedule_signal_dashboard_json (signal : Schedule_runner.wake_signal) =
     ; "emitted_at_iso", unix_iso_json signal.emitted_at
     ; "due_at", `Float signal.due_at
     ; "due_at_iso", unix_iso_json signal.due_at
-    ; "risk_class", `String (Schedule_domain.risk_class_to_string signal.risk_class)
     ; "payload_digest", `String signal.payload_digest
     ; "payload_kind", schedule_signal_payload_kind_json signal
     ]
@@ -3052,36 +2783,18 @@ let schedule_signal_rows_and_errors config limit =
 let schedule_request_dashboard_json
   ~now
   ~config
-  ~state
   ?last_execution
   (request : Schedule_domain.schedule_request)
   =
   let next_due_at =
     if Schedule_domain.is_terminal request.status then None else Some request.due_at
   in
-  let requires_grant = Schedule_domain.requires_separate_human_grant request in
   let payload_target, payload_summary =
     Schedule_payload_projection.target_summary request
-  in
-  let execution_readiness = schedule_execution_readiness ~now state request in
-  let keeper_next_tool =
-    Schedule_projection.keeper_next_tool_for_execution_readiness execution_readiness
   in
   `Assoc
     [ "schedule_id", `String request.schedule_id
     ; "status", `String (Schedule_domain.schedule_status_to_string request.status)
-    ; "effective_status", `String (schedule_effective_status ~now state request)
-    ; ( "execution_readiness"
-      , `String (Schedule_projection.execution_readiness_to_string execution_readiness) )
-    ; "operator_action", schedule_operator_action execution_readiness
-    ; ( "keeper_next_tool"
-      , match keeper_next_tool with
-        | None -> `Null
-        | Some tool -> `String tool )
-    ; "keeper_next_tool_status", schedule_keeper_next_tool_status_json keeper_next_tool
-    ; "keeper_next_action", schedule_keeper_next_action execution_readiness
-    ; "risk_class", `String (Schedule_domain.risk_class_to_string request.risk_class)
-    ; "approval_required", `Bool request.approval_required
     ; "source", `String (Schedule_domain.schedule_source_to_string request.source)
     ; "requested_by", Schedule_domain.actor_to_yojson request.requested_by
     ; "scheduled_by", Schedule_domain.actor_to_yojson request.scheduled_by
@@ -3099,12 +2812,6 @@ let schedule_request_dashboard_json
     ; "recurrence", Schedule_domain.recurrence_to_yojson request.recurrence
     ; "recurrence_kind", `String (Schedule_domain.recurrence_kind_to_string request.recurrence)
     ; "recurrence_summary", `String (Schedule_domain.recurrence_summary request.recurrence)
-    ; ( "requires_separate_human_grant", `Bool requires_grant )
-    ; ( "approval_policy"
-      , `String
-          (if requires_grant
-           then "separate_human_grant_required"
-           else "no_separate_grant_required") )
     ; "payload_digest", `String (Schedule_domain.payload_digest request.payload)
     ; ( "payload_kind"
       , match Schedule_payload_projection.kind request with
@@ -3141,7 +2848,7 @@ let schedule_request_dashboard_json
 
 let live_supported_evidence_ids_limit = 8
 
-let schedule_live_supported_non_terminal_evidence_json ~now ~state schedules =
+let schedule_live_supported_non_terminal_evidence_json schedules =
   let
     ( supported_request_count
     , supported_non_terminal_count
@@ -3164,11 +2871,8 @@ let schedule_live_supported_non_terminal_evidence_json ~now ~state schedules =
         , ids )
         (request : Schedule_domain.schedule_request)
        ->
-         let readiness = schedule_execution_readiness ~now state request in
-         let live_readiness =
-           schedule_readiness_counts_as_live_supported readiness
-         in
-         let terminal_or_expired_row = not live_readiness in
+         let live_row = schedule_request_active request in
+         let terminal_or_expired_row = not live_row in
          let terminal_or_expired =
            if terminal_or_expired_row then terminal_or_expired + 1 else terminal_or_expired
          in
@@ -3178,7 +2882,7 @@ let schedule_live_supported_non_terminal_evidence_json ~now ~state schedules =
            let supported_non_terminal =
              if non_terminal then supported_non_terminal + 1 else supported_non_terminal
            in
-           if live_readiness
+           if live_row
            then (
              let ids =
                if List.length ids < live_supported_evidence_ids_limit
@@ -3233,10 +2937,10 @@ let schedule_live_supported_non_terminal_evidence_json ~now ~state schedules =
   in
   let reason =
     if supported_live_count > 0
-    then "live schedule_store contains supported rows whose readiness is not terminal or expired"
+    then "live schedule_store contains supported non-terminal rows"
     else if supported_request_count = 0 && request_count > 0
     then "current live schedule_store has no rows with a supported payload kind"
-    else "supported rows are currently terminal or effectively expired"
+    else "supported rows are currently terminal"
   in
   `Assoc
     [ "schema", `String "masc.dashboard.scheduled_automation.live_supported_non_terminal_evidence.v1"
@@ -3244,7 +2948,7 @@ let schedule_live_supported_non_terminal_evidence_json ~now ~state schedules =
     ; "projection_status", `String projection_status
     ; ( "criteria"
       , `String
-          "payload_support=supported && execution_readiness not in {terminal,expired}" )
+          "payload_support=supported && status is non-terminal" )
     ; "reason", `String reason
     ; "request_count", `Int request_count
     ; "supported_request_count", `Int supported_request_count
@@ -3261,8 +2965,7 @@ let schedule_live_supported_non_terminal_evidence_json ~now ~state schedules =
 ;;
 
 let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Safe.t =
-  (* NDT-OK: dashboard read-model freshness clock; it derives display-only
-     effective-due state and never mutates the schedule store or runs work. *)
+  (* Read-only projection; the schedule store remains the status SSOT. *)
   let now = Unix.gettimeofday () in
   let signal_rows, signal_errors =
     schedule_signal_rows_and_errors config schedule_signal_projection_limit
@@ -3293,7 +2996,6 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
          ; "request_limit", `Int schedule_projection_request_limit
          ; "truncated", `Bool false
          ; "counts", `Null
-         ; "derived_counts", `Null
          ; "payload_support", `Null
          ; "live_supported_non_terminal_evidence", `Null
          ; ( "fsm"
@@ -3310,75 +3012,22 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
     let active_count =
       List.fold_left
         (fun count request ->
-           if schedule_request_effectively_active ~now request then count + 1 else count)
+           if schedule_request_active request then count + 1 else count)
         0 schedules
     in
     let terminal_count = List.length schedules - active_count in
-    let expired_effective_count =
-      List.fold_left
-        (fun count request ->
-           if schedule_effectively_expired ~now request then count + 1 else count)
-        0 schedules
-    in
-    let due_effective_count =
-      List.fold_left
-        (fun count request -> if schedule_effectively_due ~now request then count + 1 else count)
-        0 schedules
-    in
-    let blocked_approval_count =
-      List.fold_left
-        (fun count request ->
-           if schedule_blocked_approval ~now state request then count + 1 else count)
-        0 schedules
-    in
-    let approval_wait_seconds =
-      List.fold_left
-        (fun oldest_wait request ->
-           if schedule_blocked_approval ~now state request
-           then max oldest_wait (max 0.0 (now -. request.due_at))
-           else oldest_wait)
-        0.0
-        schedules
-    in
-    let due_execution_ready_count =
-      state
-      |> Schedule_store.due_execution_candidates
-      |> List.filter (fun request -> not (schedule_effectively_expired ~now request))
-      |> List.length
-    in
     let payload_support = schedule_payload_support_json schedules in
-    let unsupported_payload_kind_count, unknown_payload_kind_count =
-      match payload_support with
-      | `Assoc fields ->
-        ( (match List.assoc_opt "unsupported_request_count" fields with
-           | Some (`Int count) -> count
-           | _ -> 0)
-        , (match List.assoc_opt "unknown_request_count" fields with
-           | Some (`Int count) -> count
-           | _ -> 0) )
-      | _ -> 0, 0
-    in
-    Otel_metric_store.set_gauge
-      Otel_metric_store.metric_schedule_approval_blocked_count
-      (Float.of_int blocked_approval_count);
-    Otel_metric_store.set_gauge
-      Otel_metric_store.metric_schedule_approval_wait_seconds
-      approval_wait_seconds;
     let sorted =
       schedules
       |> List.sort (fun left right ->
         match
           ( schedule_request_active left
           , schedule_request_active right
-          , schedule_request_effectively_active ~now left
-          , schedule_request_effectively_active ~now right
           , compare left.due_at right.due_at )
         with
-        | _, _, true, false, _ -> -1
-        | _, _, false, true, _ -> 1
-        | true, false, _, _, _ -> -1
-        | false, true, _, _, _ -> 1
-        | _, _, _, _, due_cmp when due_cmp <> 0 -> due_cmp
+        | true, false, _ -> -1
+        | false, true, _ -> 1
+        | _, _, due_cmp when due_cmp <> 0 -> due_cmp
         | _ -> String.compare left.schedule_id right.schedule_id)
     in
     let request_rows = take schedule_projection_request_limit sorted in
@@ -3391,24 +3040,15 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
          ; "request_limit", `Int schedule_projection_request_limit
          ; "truncated", `Bool (List.length schedules > schedule_projection_request_limit)
          ; "counts", schedule_counts_json schedules
-         ; ( "derived_counts"
-           , `Assoc
-               [ "due_effective", `Int due_effective_count
-               ; "blocked_approval", `Int blocked_approval_count
-               ; "due_execution_ready", `Int due_execution_ready_count
-               ; "expired_effective", `Int expired_effective_count
-               ; "unsupported_payload_kind", `Int unsupported_payload_kind_count
-               ; "unknown_payload_kind", `Int unknown_payload_kind_count
-               ] )
          ; "payload_support", payload_support
          ; ( "live_supported_non_terminal_evidence"
-           , schedule_live_supported_non_terminal_evidence_json ~now ~state schedules )
+           , schedule_live_supported_non_terminal_evidence_json schedules )
          ; ( "fsm"
            , `Assoc
-               [ "state", `String (schedule_fsm_state ~now state schedules)
+               [ "state", `String (schedule_fsm_state schedules)
                ; "active_count", `Int active_count
                ; "terminal_count", `Int terminal_count
-               ; "next_due_at", unix_iso_option_json (schedule_next_due_at ~now schedules)
+               ; "next_due_at", unix_iso_option_json (schedule_next_due_at schedules)
                ] )
          ; ( "requests"
            , `List
@@ -3418,7 +3058,7 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
                        Schedule_store.last_execution_for_schedule state
                          ~schedule_id:request.Schedule_domain.schedule_id
                      in
-                     schedule_request_dashboard_json ~now ~config ~state ?last_execution request)
+                     schedule_request_dashboard_json ~now ~config ?last_execution request)
                   request_rows) )
          ])
 ;;

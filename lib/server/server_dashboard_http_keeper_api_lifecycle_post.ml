@@ -135,38 +135,10 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
       match Keeper_meta_store.read_meta config name with
       | Ok (Some meta) when Bool.equal meta.paused paused -> true
       | Ok (Some meta) ->
-        let source_meta_result =
-          if paused
-          then Ok meta
-          else
-            Keeper_unified_turn_no_progress.clear_for_operator_resume
-              ~base_path:config.base_path
-              meta
-        in
-        (match source_meta_result with
-         | Error err ->
-           Log.Keeper.error
-             "keeper %s %s: no_progress resume clear failed: %s"
-             name
-             (if paused then "pause" else "resume")
-             err;
-           Otel_metric_store.inc_counter
-             Keeper_metrics.(to_string PausedStatePersistErrors)
-             ~labels:
-               [ ( "phase"
-                 , Keeper_paused_state_persist_phase.(to_label Boot_resume_persist)
-                 )
-               ; ("reason", "no_progress_clear_error")
-               ]
-             ();
-           false
-         | Ok source_meta ->
            let updated_meta =
              {
-               source_meta with
+               meta with
                paused;
-               auto_resume_after_sec =
-                 (if paused then source_meta.auto_resume_after_sec else None);
                updated_at = Keeper_meta_contract.now_iso ();
              }
            in
@@ -181,11 +153,11 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
                 name
                 (if paused then "pause" else "resume")
                 err;
-              false))
+              false)
       (* Issue #8391 HIGH #1: split [Ok None] (meta vanished) from
          [Error _] (IO/parse failure) so silent failures become visible.
-         The boot HTTP contract is unchanged — auto-resume cleanup is a
-         best-effort side effect of [boot], not the primary action. *)
+         The boot HTTP contract is unchanged — explicit resume persistence is
+         a best-effort side effect of [boot], not the primary action. *)
       | Ok None ->
           Log.Keeper.warn
             "keeper %s %s: meta missing — skipping paused-state persist"
@@ -217,7 +189,9 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
           then (
             match resolve_keeper_agent_name () with
             | Some keeper_agent_name ->
-              Keeper_keepalive.process_directive ~agent_name:keeper_agent_name "resume"
+              Keeper_keepalive.process_directive
+                ~agent_name:keeper_agent_name
+                Keeper_directive.Resume
             | None ->
               Log.Keeper.warn
                 "keeper boot: agent_name not found for paused keeper %s"
@@ -228,7 +202,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
          HTTP status. We make the failure observable instead. *)
       | Ok None ->
           Log.Keeper.warn
-            "keeper %s boot: meta missing — skipping auto-resume check"
+            "keeper %s boot: meta missing — skipping resume check"
             name;
           Otel_metric_store.inc_counter
             Keeper_metrics.(to_string PausedStatePersistErrors)
@@ -237,7 +211,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
             ()
       | Error err ->
           Log.Keeper.error
-            "keeper %s boot: read_meta failed during auto-resume check: %s"
+            "keeper %s boot: read_meta failed during resume check: %s"
             name
             err;
           Otel_metric_store.inc_counter
@@ -327,7 +301,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
            resume_booted_keeper_if_needed ();
            Keeper_keepalive.process_directive
              ~agent_name:entry.meta.agent_name
-             "wakeup";
+             Keeper_directive.Wakeup;
            refresh_keeper_execution_surfaces ~config ~name "started";
            let detail =
              match Keeper_registry.get ~base_path:config.base_path name with

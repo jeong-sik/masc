@@ -37,54 +37,29 @@ let pause_elapsed_sec now (meta : Keeper_meta_contract.keeper_meta) =
 
 type pause_kind = Keeper_activation_readiness.pause_kind =
   | Active
-  | Reconcile_gated
-  | Auto_recoverable
   | Operator_paused
-  | Latched_paused
   | Unclassified_paused
   | Dead_tombstone
 
 let pause_kind = Keeper_activation_readiness.pause_kind
 let pause_kind_to_wire = Keeper_activation_readiness.pause_kind_to_wire
 
-let pause_auto_resume_source (meta : Keeper_meta_contract.keeper_meta) =
-  match meta.auto_resume_after_sec with
-  | Some _ -> Some "explicit"
-  | None ->
-    (match Keeper_supervisor_types.paused_meta_effective_auto_resume_after_sec meta with
-     | Some _ -> Some "implicit_turn_timeout"
-     | None -> None)
-
 let paused_keeper_detail_json ~now ~name ~(autoboot_enabled : bool)
     (meta : Keeper_meta_contract.keeper_meta) =
   let elapsed = pause_elapsed_sec now meta in
-  let effective_auto_resume_after_sec =
-    Keeper_supervisor_types.paused_meta_effective_auto_resume_after_sec meta
-  in
-  let remaining =
-    match (effective_auto_resume_after_sec, elapsed) with
-    | Some resume_after, Some elapsed -> Some (max 0.0 (resume_after -. elapsed))
-    | Some resume_after, None -> Some resume_after
-    | None, _ -> None
-  in
   let last_blocker = meta.runtime.last_blocker in
   `Assoc [
     ("name", `String name);
     ("autoboot_enabled", `Bool autoboot_enabled);
     ("pause_kind", `String (pause_kind_to_wire (pause_kind meta)));
-    ("auto_resume_after_sec", Json_util.float_opt_to_json effective_auto_resume_after_sec);
-    ( "persisted_auto_resume_after_sec"
-    , Json_util.float_opt_to_json meta.auto_resume_after_sec );
-    ("auto_resume_source", Json_util.string_opt_to_json (pause_auto_resume_source meta));
     ("paused_elapsed_sec", Json_util.float_opt_to_json elapsed);
-    ("auto_resume_remaining_sec", Json_util.float_opt_to_json remaining);
     ( "last_blocker"
     , match last_blocker with
       | Some info -> Keeper_meta_contract.blocker_info_to_json info
       | None -> `Null );
-    ( "missing_pause_root_cause",
-      `Bool
-        (Option.is_some meta.auto_resume_after_sec
+    ( "missing_pause_root_cause"
+    , `Bool
+        (Option.is_none meta.latched_reason
          && Option.is_none meta.runtime.last_blocker) );
   ]
 
@@ -112,8 +87,7 @@ let running_keeper_names ?base_path () =
        | Keeper_state_machine.Stopped
        | Keeper_state_machine.Crashed
        | Keeper_state_machine.Restarting
-       | Keeper_state_machine.Dead
-       | Keeper_state_machine.Zombie -> None)
+       | Keeper_state_machine.Dead -> None)
   |> sorted_unique_strings
 
 let durable_paused_keeper_scan ?(include_details = true) config =
@@ -463,14 +437,12 @@ let keeper_phase_snapshot ?base_path () =
             if can_execute then entry.name :: acc.executable_names
             else acc.executable_names
           in
-          (* Keepers in Failing phase with restart budget remaining are
-             expected to recover on the next heartbeat cycle — count them
-             separately so fleet safety does not report a spurious shortfall
-             during transient failures (issue #17218). *)
+          (* Failing remains executable and can recover on the next successful
+             heartbeat or turn. Count it separately without a restart gate. *)
           let is_recovering =
             match entry.phase with
             | Keeper_state_machine.Failing
-              when capacity_eligible && entry.conditions.restart_budget_remaining ->
+              when capacity_eligible ->
               true
             | _ -> false
           in
@@ -511,8 +483,7 @@ let keeper_phase_snapshot ?base_path () =
           | Keeper_state_machine.Stopped
           | Keeper_state_machine.Crashed
           | Keeper_state_machine.Restarting
-          | Keeper_state_machine.Dead
-          | Keeper_state_machine.Zombie ->
+          | Keeper_state_machine.Dead ->
             { acc with counts = { counts with executable }; executable_names })
        {
          counts = empty_keeper_phase_counts;
@@ -678,7 +649,6 @@ type blocked_keeper_operator_action =
   | Inspect_keeper_autoboot_logs
   | Enable_keeper_bootstrap_or_start_manually
   | Inspect_dead_keeper_root_cause
-  | Repair_terminal_keeper_failure
   | Restart_or_disable_stopped_keeper
   | Start_or_recover_keeper
   | Inspect_capacity_accounting
@@ -705,7 +675,6 @@ let blocked_keeper_operator_action_to_string = function
   | Enable_keeper_bootstrap_or_start_manually ->
       "enable_keeper_bootstrap_or_start_manually"
   | Inspect_dead_keeper_root_cause -> "inspect_dead_keeper_root_cause"
-  | Repair_terminal_keeper_failure -> "repair_terminal_keeper_failure"
   | Restart_or_disable_stopped_keeper -> "restart_or_disable_stopped_keeper"
   | Start_or_recover_keeper -> "start_or_recover_keeper"
   | Inspect_capacity_accounting -> "inspect_capacity_accounting"
@@ -734,7 +703,6 @@ let blocked_keeper_action = function
       Inspect_keeper_autoboot_logs
   | Bootstrap_disabled -> Enable_keeper_bootstrap_or_start_manually
   | Phase Keeper_state_machine.Dead -> Inspect_dead_keeper_root_cause
-  | Phase Keeper_state_machine.Zombie -> Repair_terminal_keeper_failure
   | Phase Keeper_state_machine.Stopped -> Restart_or_disable_stopped_keeper
   | Phase Keeper_state_machine.Paused -> Resume_or_leave_paused
   | Phase Keeper_state_machine.Offline -> Start_or_recover_keeper
@@ -777,8 +745,7 @@ let blocked_keeper_operator_action = function
       | Keeper_state_machine.HandingOff
       | Keeper_state_machine.Draining
       | Keeper_state_machine.Paused
-      | Keeper_state_machine.Stopped
-      | Keeper_state_machine.Zombie )
+      | Keeper_state_machine.Stopped )
   | Not_registered
   | Not_running
   | No_keeper_binding
@@ -829,8 +796,7 @@ let phase_supports_crash_log_failure_reason = function
   | Keeper_state_machine.Draining
   | Keeper_state_machine.Paused
   | Keeper_state_machine.Stopped
-  | Keeper_state_machine.Restarting
-  | Keeper_state_machine.Zombie ->
+  | Keeper_state_machine.Restarting ->
       false
 
 let active_task_owner_fiber_scan_semantics =
@@ -1393,8 +1359,8 @@ let keeper_fleet_safety_health_json
     target_count > 1 && phase_counts.running < minimum_running_fibers
   in
   (* Recovering lanes are deliberately capacity-bearing for the fleet verdict:
-     [Failing] remains executable in the FSM, and restart budget marks the lane
-     eligible for heartbeat-driven recovery. Keep that policy in one value so
+     [Failing] remains executable in the FSM and is eligible for
+     heartbeat-driven recovery. Keep that policy in one value so
      the advertised effective count and its derived shortfall cannot diverge.
      Actual healthy execution remains available separately as
      [healthy_running_keeper_fiber_count]. *)

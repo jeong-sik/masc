@@ -152,15 +152,7 @@ describe('Tools', () => {
         request_count: 1,
         request_limit: 20,
         truncated: false,
-        counts: { pending_approval: 1 },
-        derived_counts: {
-          due_effective: 0,
-          blocked_approval: 1,
-          due_execution_ready: 0,
-          expired_effective: 0,
-          unsupported_payload_kind: 1,
-          unknown_payload_kind: 0,
-        },
+        counts: { due: 1 },
         payload_support: {
           supported_kinds: ['masc.board_post'],
           unsupported_request_count: 1,
@@ -168,7 +160,7 @@ describe('Tools', () => {
           unknown_request_count: 0,
         },
         fsm: {
-          state: 'blocked_approval',
+          state: 'due',
           active_count: 1,
           terminal_count: 0,
           next_due_at: '2026-06-13T01:00:00Z',
@@ -176,27 +168,7 @@ describe('Tools', () => {
         requests: [
           {
             schedule_id: 'sched-1',
-            status: 'pending_approval',
-            effective_status: 'blocked_approval',
-            execution_readiness: 'blocked_approval',
-            operator_action: 'approve_or_reject',
-            keeper_next_tool: 'masc_schedule_get',
-            keeper_next_tool_status: {
-              name: 'masc_schedule_get',
-              registered_schema: true,
-              dispatch_registered: true,
-              direct_call_allowed: true,
-              visibility: 'hidden',
-              surfaces: [],
-              surface_count: 0,
-              effect_domain: 'read_only',
-              read_only: true,
-              requires_actor_binding: null,
-            },
-            keeper_next_action:
-              'Inspect details, then wait for the dashboard operator approval or rejection action to resolve this schedule.',
-            risk_class: 'workspace_write',
-            approval_required: true,
+            status: 'due',
             source: 'operator_request',
             requested_by: { id: 'operator', kind: 'human_operator', display_name: null },
             scheduled_by: { id: 'scheduler-agent', kind: 'automated_actor', display_name: null },
@@ -223,25 +195,15 @@ describe('Tools', () => {
     render(html`<${Tools} />`, container)
     await flush()
 
-    expect(container.textContent).toContain('blocked approval')
-    expect(container.textContent).toContain('원본 pending approval')
-    expect(container.textContent).toContain('approve or reject')
-    expect(container.textContent).toContain('masc_schedule_get')
-    expect(container.textContent).toContain('dashboard operator approval or rejection')
-    expect(container.textContent).toContain('Approve')
-    expect(container.textContent).toContain('Reject')
-    expect(container.textContent).toContain('callable')
-    expect(container.textContent).toContain('hidden')
-    expect(container.textContent).toContain('no surface')
+    expect(container.textContent).toContain('due')
+    expect(container.querySelectorAll('[data-schedule-mutation]')).toHaveLength(0)
     expect(container.textContent).toContain('sched-1')
-    expect(container.textContent).toContain('workspace write')
     expect(container.textContent).toContain('cron 0 9 * * 1-5 Asia/Seoul')
     expect(container.textContent).toContain('succeeded')
     expect(container.textContent).toContain('test.reminder')
     expect(container.textContent).toContain('unsupported payload')
     expect(container.textContent).toContain('unsupported')
     expect(container.textContent).toContain('wake signal feed')
-    expect(container.textContent).toContain('키퍼 다음 단계')
     expect(container.textContent).toContain('operator (human operator)')
     expect(container.textContent).toContain('Keeper Waiting Inventory')
     expect(container.textContent).toContain('sangsu')

@@ -3,9 +3,7 @@ module Types = Masc_domain
 open Alcotest
 
 module U = Yojson.Safe.Util
-
-let first_issue quality =
-  quality |> U.member "issues" |> U.to_list |> List.hd
+let yojson = testable Yojson.Safe.pp Yojson.Safe.equal
 
 let temp_dir () =
   let dir = Filename.temp_file "test_mcp_server_eio_call_tool_" "" in
@@ -23,8 +21,7 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
-let make_keeper_meta ?agent_name ?current_task_id ?(goal_ids = [])
-    ?tool_access name =
+let make_keeper_meta ?agent_name ?current_task_id ?(goal_ids = []) name =
   let agent_name =
     Option.value agent_name
       ~default:(Masc.Keeper_identity.keeper_agent_name name)
@@ -47,14 +44,6 @@ let make_keeper_meta ?agent_name ?current_task_id ?(goal_ids = [])
            ( "active_goal_ids",
              `List (List.map (fun goal_id -> `String goal_id) goal_ids) );
          ])
-    @
-    (match tool_access with
-     | Some tool_access ->
-         [
-           ( "tool_access",
-             Json_util.json_string_list tool_access );
-         ]
-     | None -> [])
   in
   match Masc_test_deps.meta_of_json_fixture (`Assoc fields) with
   | Ok meta -> meta
@@ -100,37 +89,209 @@ let rec check_json_strings_valid_utf8 label = function
         values
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ -> ()
 
-let test_timeout_quality_is_error () =
-  let quality =
-    Masc.Mcp_server_eio_call_tool.quality_from_result
-      ~success:false
-      ~message:"Tool timed out after 30s"
-      ~attempts:1
-  in
-  let issue = first_issue quality in
-  check string "timeout code" "tool_timeout" (issue |> U.member "code" |> U.to_string);
-  check string "timeout severity" "error" (issue |> U.member "severity" |> U.to_string)
+let with_call_tool_state f =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_path in
+      ignore (Masc.Workspace.init config ~agent_name:(Some "projection-test"));
+      let state = Masc.Mcp_server_eio.create_state ~test_mode:true ~base_path () in
+      f env sw state)
+;;
 
-let test_generic_failure_quality_is_error () =
-  let quality =
-    Masc.Mcp_server_eio_call_tool.quality_from_result
-      ~success:false
-      ~message:"subprocess exited 1"
-      ~attempts:2
-  in
-  let issue = first_issue quality in
-  check string "failure code" "tool_failure" (issue |> U.member "code" |> U.to_string);
-  check string "failure severity" "error" (issue |> U.member "severity" |> U.to_string)
+let call_with_result ~env ~sw state result =
+  Masc.Mcp_server_eio_call_tool.handle_call_tool_eio
+    ~execute_tool_eio:
+      (fun
+        ~sw:_
+        ~clock:_
+        ?profile:_
+        ?mcp_session_id:_
+        ?auth_token:_
+        ?internal_keeper_runtime:_
+        _state
+        ~name:_
+        ~arguments:_ -> result)
+    ~maybe_emit_resource_notifications:(fun ~success:_ ~tool_name:_ -> ())
+    ~broadcast_tools_list_changed:(fun () -> ())
+    ~sw
+    ~clock:(Eio.Stdenv.clock env)
+    state
+    (`Int 1)
+    (`Assoc
+      [ "name", `String "masc_status"
+      ; "arguments", `Assoc [ "_agent_name", `String "projection-test" ]
+      ])
+;;
 
-let test_success_quality_has_no_issues () =
-  let quality =
-    Masc.Mcp_server_eio_call_tool.quality_from_result
-      ~success:true
-      ~message:"ok"
-      ~attempts:1
-  in
-  check bool "passed" true (quality |> U.member "passed" |> U.to_bool);
-  check int "issue count" 0 (quality |> U.member "issues" |> U.to_list |> List.length)
+let result_fields response = response |> U.member "result"
+let result_envelope response = result_fields response |> U.member "resultEnvelope"
+
+let has_field key = function
+  | `Assoc fields -> List.mem_assoc key fields
+  | _ -> false
+;;
+
+let test_free_form_failure_text_does_not_control_response () =
+  with_call_tool_state (fun env sw state ->
+    List.iter
+      (fun message ->
+         let producer_data = `Assoc [ "producer", `String "typed" ] in
+         let result =
+           Tool_result.make_err
+             ~tool_name:"masc_status"
+             ~class_:Tool_result.Runtime_failure
+             ~start_time:0.0
+             ~data:producer_data
+             message
+         in
+         let response = call_with_result ~env ~sw state result in
+         let envelope = result_envelope response in
+         check string "generic error status" "error"
+           (envelope |> U.member "status" |> U.to_string);
+         check string "producer message is unchanged" message
+           (envelope |> U.member "summary" |> U.to_string);
+         check yojson "typed producer data is structured content" producer_data
+           (result_fields response |> U.member "structuredContent");
+         check bool "required_follow_up is not fabricated" false
+           (has_field "required_follow_up" envelope);
+         check bool "quality is not fabricated" false (has_field "quality" envelope);
+         check bool "telemetry trace is outside model envelope" false
+           (has_field "trace_id" envelope);
+         check string "typed failure class is telemetry metadata" "runtime_failure"
+           (result_fields response
+            |> U.member "_meta"
+            |> U.member "failure_class"
+            |> U.to_string);
+         check string "model text is producer text only" message
+           (result_fields response
+            |> U.member "content"
+            |> U.to_list
+            |> List.hd
+            |> U.member "text"
+            |> U.to_string))
+      [ "input required: this is only prose"
+      ; "authentication required: this is only prose"
+      ; "operation timed out: this is only prose"
+      ])
+;;
+
+let test_typed_outcome_alone_controls_projection () =
+  with_call_tool_state (fun env sw state ->
+    let success =
+      Tool_result.make_ok
+        ~tool_name:"masc_status"
+        ~start_time:0.0
+        ~data:(`String "authentication required and timed out")
+        ()
+    in
+    let success_response = call_with_result ~env ~sw state success in
+    check string "success remains ok despite prose" "ok"
+      (result_envelope success_response |> U.member "status" |> U.to_string);
+    check bool "success has no failure metadata" false
+      (has_field "failure_class" (result_fields success_response |> U.member "_meta"));
+    let json_looking_text = {|{"producer":"text-only"}|} in
+    let text_success =
+      Tool_result.ok
+        ~tool_name:"masc_status"
+        ~start_time:0.0
+        json_looking_text
+    in
+    let text_response = call_with_result ~env ~sw state text_success in
+    check bool "JSON-looking text has no structured content" false
+      (has_field "structuredContent" (result_fields text_response));
+    check string "JSON-looking text is unchanged" json_looking_text
+      (result_fields text_response
+       |> U.member "content"
+       |> U.to_list
+       |> List.hd
+       |> U.member "text"
+       |> U.to_string);
+    let list_success =
+      Tool_result.make_ok
+        ~tool_name:"masc_status"
+        ~start_time:0.0
+        ~data:(`List [ `String "producer-item" ])
+        ()
+    in
+    let list_response = call_with_result ~env ~sw state list_success in
+    check bool "list data is not reclassified into an invented object" false
+      (has_field "structuredContent" (result_fields list_response));
+    let transient =
+      Tool_result.make_err
+        ~tool_name:"masc_status"
+        ~class_:Tool_result.Transient_error
+        ~start_time:0.0
+        "ordinary producer failure"
+    in
+    let transient_response = call_with_result ~env ~sw state transient in
+    check string "typed transient class is preserved" "transient_error"
+      (result_fields transient_response
+       |> U.member "_meta"
+       |> U.member "failure_class"
+       |> U.to_string))
+;;
+
+let test_handle_call_executes_transient_failure_once () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_path in
+      ignore (Masc.Workspace.init config ~agent_name:(Some "single-call-test"));
+      let state = Masc.Mcp_server_eio.create_state ~test_mode:true ~base_path () in
+      let calls = ref 0 in
+      let response =
+        Masc.Mcp_server_eio_call_tool.handle_call_tool_eio
+          ~execute_tool_eio:
+            (fun
+              ~sw:_
+              ~clock:_
+              ?profile:_
+              ?mcp_session_id:_
+              ?auth_token:_
+              ?internal_keeper_runtime:_
+              _state
+              ~name
+              ~arguments:_
+            ->
+              incr calls;
+              Tool_result.make_err
+                ~tool_name:name
+                ~class_:Tool_result.Transient_error
+                ~start_time:0.0
+                "transient failure")
+          ~maybe_emit_resource_notifications:(fun ~success:_ ~tool_name:_ -> ())
+          ~broadcast_tools_list_changed:(fun () -> ())
+          ~sw
+          ~clock:(Eio.Stdenv.clock env)
+          state
+          (`Int 1)
+          (`Assoc
+            [ "name", `String "masc_status"
+            ; "arguments", `Assoc [ "_agent_name", `String "single-call-test" ]
+            ])
+      in
+      check int "transient tool invoked once" 1 !calls;
+      check int
+        "response records one attempt"
+        1
+        (response
+         |> U.member "result"
+         |> U.member "_meta"
+         |> U.member "attempts"
+         |> U.to_int))
 
 let test_activity_payload_sanitizes_invalid_utf8 () =
   let payload =
@@ -201,19 +362,6 @@ let test_records_mcp_server_operation_duration_metric () =
   check (float 0.0001) "duration count delta" 1.0
     (Masc.Otel_metric_store.metric_value_or_zero (metric_name ^ "_count") ~labels ()
      -. before_count)
-
-let test_contains_casefold_keeps_semantics () =
-  let contains = Masc.Mcp_server_eio_call_tool.contains_casefold in
-  check bool "empty needle" true (contains "anything" "");
-  check bool "exact match" true (contains "auth required" "auth required");
-  check bool "ascii casefold" true
-    (contains "Auth REQUIRED by server" "auth required");
-  check bool "middle substring" true
-    (contains "prefix temporary network suffix" "TEMPORARY NETWORK");
-  check bool "numeric literal" true
-    (contains "HTTP 503 Service Unavailable" "503");
-  check bool "needle longer than haystack" false (contains "short" "shorter");
-  check bool "absent substring" false (contains "Invalid JSON" "timeout")
 
 (* Per-caller wrapper timeout was removed on 2026-06-08 (PR cleanup,
    spirit: "tool 자체가 알아서 타임아웃으로 튕기든 해야지 그걸 왜 되나 안
@@ -291,7 +439,6 @@ let test_runtime_mcp_keeper_log_context_loads_current_task_contract () =
   let meta =
     make_keeper_meta
       ~current_task_id:"task-001"
-      ~tool_access:([ "tool_execute" ])
       keeper_name
   in
   Fun.protect
@@ -487,17 +634,18 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
 let () =
   run "mcp_server_eio_call_tool"
     [
-      ( "quality",
+      ( "typed projection",
         [
-          test_case "timeout is error" `Quick test_timeout_quality_is_error;
-          test_case "generic failure is error" `Quick test_generic_failure_quality_is_error;
-          test_case "success has no issues" `Quick test_success_quality_has_no_issues;
+          test_case "free-form text does not control response" `Quick
+            test_free_form_failure_text_does_not_control_response;
+          test_case "typed outcome alone controls projection" `Quick
+            test_typed_outcome_alone_controls_projection;
+          test_case "transient failure executes once" `Quick
+            test_handle_call_executes_transient_failure_once;
           test_case "activity payload sanitizes invalid UTF-8" `Quick
             test_activity_payload_sanitizes_invalid_utf8;
           test_case "records MCP server operation duration metric" `Quick
             test_records_mcp_server_operation_duration_metric;
-          test_case "contains casefold keeps semantics" `Quick
-            test_contains_casefold_keeps_semantics;
           test_case "runtime MCP log context uses keeper trace/current turn" `Quick
             test_runtime_mcp_keeper_log_context_uses_keeper_trace_and_current_turn;
           test_case "runtime MCP log context loads current task contract" `Quick

@@ -86,7 +86,6 @@ type tool_surface =
 type runtime_rotation_outcome =
   | Rotation_setup_failed
   | Rotation_retry_scheduled
-  | Rotation_slot_phase_exhausted
 
 val runtime_rotation_outcome_to_string : runtime_rotation_outcome -> string
 
@@ -101,54 +100,19 @@ type runtime_outcome =
 
 val runtime_outcome_to_string : runtime_outcome -> string
 
-(** Receipt-level completion-contract evaluation result. Closed union of three
-    producer paths: (i) initial-state marker [Contract_unknown];
-    (ii) boundary-state overrides [Contract_not_dispatched],
-    [Contract_violated], [Contract_no_capable_provider]; (iii) the
-    six classifier outcomes mirrored from
-    [Keeper_contract_classifier.contract_status]. *)
+(** Receipt-level observation of visible completion evidence. This field is
+    telemetry only and cannot affect failure, lifecycle, authorization, or
+    operator disposition. *)
 type completion_contract_result =
-  | Contract_unknown
-  | Contract_not_dispatched
-  | Contract_violated
-  | Contract_surface_mismatch
-  | Contract_no_capable_provider
-  | Contract_claim_only_after_owned_task
-  | Contract_needs_execution_progress
-  | Contract_passive_only
-  | Contract_satisfied_completion
-  | Contract_satisfied_execution
+  | Completion_observation_unknown
+  | Completion_not_dispatched
+  | Completion_no_visible_output
+  | Completion_response_observed
+  | Completion_tool_execution_observed
 
 val completion_contract_result_to_string : completion_contract_result -> string
 
 val completion_contract_result_of_string : string -> completion_contract_result option
-
-val completion_contract_result_requires_attention : completion_contract_result -> bool
-
-(** {2 Structured contract-violation encoding} *)
-
-(** Encode a tool list into the wire bracket format.
-    [[] for empty, [t1,t2] for non-empty. *)
-val encode_tool_list : string list -> string
-
-(** Build an extended terminal_reason_code with called and satisfying
-    tool lists. Produces:
-    [completion_contract_violation:<contract_id>:called[...]:satisfying[...]]
-    The prefix [completion_contract_violation:] is preserved so existing
-    prefix-matching consumers remain backward-compatible. *)
-val encode_contract_violation_reason
-  :  called_tools:string list
-  -> satisfying_tools:string list
-  -> string
-  -> string
-
-(** Decode a terminal_reason_code back into its components.
-    Returns [Some (contract_id, called_tools, satisfying_tools)] for
-    both legacy and extended formats, [None] for non-violation codes.
-    Legacy format yields empty tool lists. *)
-val decode_contract_violation_reason
-  :  string
-  -> (string * string list * string list) option
 
 type runtime_rotation_attempt =
   { from_runtime : string
@@ -179,11 +143,8 @@ type t =
   ; model_used : string option
   ; completion_contract_result : completion_contract_result
   ; actionable_signal : Keeper_contract_classifier.actionable_signal option
-    (** Root B (#22710): world-observation actionable signal captured at turn
-        time, consumed by [operator_disposition] to replace the [goal_ids = []]
-        proxy in [passive_only_without_work_scope]. [None] when no world
-        observation was threaded (disposition falls back to broadcast-required;
-        conservative, never silently suppressed). *)
+    (** World-observation signal captured at turn time. It is independent of
+        completion evidence and does not authorize or block the turn. *)
   ; tool_surface : tool_surface
   ; sandbox_kind : Keeper_types_profile_sandbox.sandbox_profile
   ; sandbox_root : string option
@@ -216,15 +177,11 @@ val stop_reason_to_string : Runtime_agent.stop_reason -> string
 
 (** Receipt terminal-reason projection for the runtime-stop axis. Unlike
     {!stop_reason_to_string}, normal completion serialises as canonical
-    [Keeper_turn_disposition.Success]. Completion-contract truth remains a
-    separate typed receipt field and feeds the final operator disposition. *)
+    [Keeper_turn_disposition.Success]. *)
 val receipt_terminal_reason_code_of_stop_reason : Runtime_agent.stop_reason -> string
 
 val sandbox_kind_of_meta : Keeper_meta_contract.keeper_meta -> Keeper_types_profile_sandbox.sandbox_profile
 val to_json : t -> Yojson.Safe.t
-
-(** Return the receipt terminal reason without deriving extra tool evidence. *)
-val enrich_contract_violation_reason : t -> string
 
 (** Operator-facing classification of a finished turn. Closed set.
 
@@ -234,8 +191,6 @@ val enrich_contract_violation_reason : t -> string
     pre-typing string ([operator_disposition_kind_to_string]). *)
 type operator_disposition_kind =
   | Disp_pass
-  | Disp_pause_human
-  | Disp_alert_exhausted
   | Disp_fail_open_next_runtime
   | Disp_pass_next_model
   | Disp_user_cancelled
@@ -258,28 +213,16 @@ type operator_disposition_reason =
       ([api_error_timeout] / [api_error_network]) that the keeper's in-turn
       retry self-healed on the SAME runtime — distinct from
       [Reason_runtime_fallback] (cross-runtime fallback). Paired with
-      [Disp_fail_open_next_runtime]; suppresses the operator page that the
-      pre-fix [Reason_provider_runtime_error] / [Disp_pause_human]
-      fall-through emitted. *)
+      [Disp_fail_open_next_runtime]. *)
   | Reason_capacity_backpressure
-  (** Typed provider-capacity pacing before a retry/rotation has completed.
+  (** Typed provider-capacity observation before a retry/rotation has completed.
       Paired with [Disp_fail_open_next_runtime]: the keeper keeps moving and
       no operator broadcast is emitted, while the receipt does not falsely
       claim [Reason_runtime_fallback]. *)
   | Reason_provider_runtime_error
   | Reason_internal_error
-  | Reason_tool_route_recoverable_failure
-  | Reason_completion_contract_unsatisfied
   | Reason_input_required
-  | Reason_passive_no_action
-  (** RFC-0303 Phase 0: a passive-only turn ([Contract_passive_only]) paired with
-      [Disp_pass]. The turn produced activity (thinking / defer / choosing to
-      wait) but took no execution/completion action; it is not an operator page.
-      Distinct from [Reason_completion_contract_unsatisfied] ([Disp_pause_human]),
-      which remains for the genuinely-unsatisfied contract variants. Kept as
-      inert dashboard telemetry — it does not raise needs_attention. *)
   | Reason_turn_budget_exhausted
-  | Reason_turn_livelock_blocked
   | Reason_cancelled
   | Reason_phase_skipped
   | Reason_unmapped_runtime_state
@@ -298,8 +241,8 @@ val terminal_prefix_idle_timeout : string
 
 (** [true] when [terminal_reason] is a turn/time-budget cut-off
     ([MaxTurnsExceeded] / [AgentExecutionTimeout] / [AgentExecutionIdleTimeout]):
-    auto-recoverable, the keeper resumes from its checkpoint, so it must NOT be
-    classified as a completion-contract failure. *)
+    retryable from its checkpoint, so it must NOT be classified as a
+    completion-contract failure. *)
 val is_auto_recoverable_turn_budget_terminal : string -> bool
 
 (** Derived display pair (disposition, reason) computed from receipt fields.
@@ -347,22 +290,6 @@ val latest_json_by_keeper : Workspace.config -> string list -> (string * Yojson.
 type stale_broadcast_dedupe_key
 
 module For_testing : sig
-  val emit_operator_broadcast_dedupe_for_testing
-    :  ?turn_count:int
-    -> ?current_task_id:string
-    -> keeper_name:string
-    -> agent_name:string
-    -> trace_id:string
-    -> generation:int
-    -> disposition:operator_disposition_kind
-    -> reason:operator_disposition_reason
-    -> terminal_reason_code:string
-    -> emit:(unit -> unit)
-    -> unit
-    -> bool
-
-  val reset_operator_broadcast_dedupe : unit -> unit
-
   val stale_broadcast_dedupe_key
     :  keeper_name:string
     -> agent_name:string

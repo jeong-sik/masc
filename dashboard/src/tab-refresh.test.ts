@@ -303,7 +303,7 @@ describe('refreshPlanForRoute', () => {
 // -----------------------------------------------------------------------------
 // Fleet Health view-aware refresh — Phase 1 active
 //
-// Fleet Health absorbs telemetry + tool-quality + fleet + governance (monitoring).
+// Fleet Health absorbs telemetry + tool-quality + fleet + Gate monitoring.
 // The refresh pipeline branches on the `view` query param so SSE reconnect
 // (sse-store.ts:232) and manual navigation hydrate the correct data.
 // -----------------------------------------------------------------------------
@@ -322,10 +322,10 @@ describe('refreshPlanForRoute fleet-health view-aware branching', () => {
     })).toEqual(['namespaceTruth'])
   })
 
-  it('view=governance avoids mission and operator-heavy route refreshes', () => {
+  it('view=gate avoids mission and operator-heavy route refreshes', () => {
     expect(refreshPlanForRoute({
       tab: 'monitoring',
-      params: { section: 'fleet-health', view: 'governance' },
+      params: { section: 'fleet-health', view: 'gate' },
     })).toEqual(['namespaceTruth'])
   })
 

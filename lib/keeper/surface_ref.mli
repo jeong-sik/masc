@@ -1,8 +1,8 @@
 (** Surface_ref — the shared typed surface vocabulary (RFC-0232 §3.6).
 
     One immutable value names the surface a lane event came from or
-    goes to: the dashboard, a Discord/Slack coordinate, a GitHub
-    notification, a webhook, the keeper's own agent-initiated path, or
+    goes to: the dashboard, a Discord/Slack coordinate, a webhook,
+    the keeper's own agent-initiated path, or
     any other connector speaking the generic gate protocol.  Extracted
     from [Keeper_external_attention.surface_ref] (which re-exports it
     unchanged) so the lane ({!Keeper_chat_store}), the attention store,
@@ -27,7 +27,6 @@ type t =
       channel_id : string;
       thread_ts : string option;
     }
-  | Github of { repo : string; notification_id : string option }
   | Webhook of { source : string; event_id : string }
   | Agent
       (** Keeper/agent-initiated lane traffic with no external surface
@@ -40,7 +39,7 @@ val compare : t -> t -> int
 
 val lane_label : t -> string
 (** The legacy [source] label this surface writes on a lane row:
-    ["dashboard"] / ["discord"] / ["slack"] / ["github"] / ["webhook"]
+    ["dashboard"] / ["discord"] / ["slack"] / ["webhook"]
     / ["agent"] / the gate channel label verbatim.  The single
     derivation site — writers no longer invent label strings. *)
 

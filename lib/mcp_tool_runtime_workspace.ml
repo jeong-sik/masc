@@ -29,12 +29,7 @@ open Mcp_tool_runtime_types
    directly, matching the shared MCP runtime alias. *)
 
 let runtime_ok ~tool_name ~start_time body : Tool_result.result =
-  let data =
-    match Tool_result.structured_payload_of_message body with
-    | Some json -> json
-    | None -> `String body
-  in
-  Tool_result.make_ok ~tool_name ~start_time ~data ()
+  Tool_result.ok ~tool_name ~start_time body
 ;;
 
 let runtime_err_runtime ~tool_name ~start_time msg : Tool_result.result =

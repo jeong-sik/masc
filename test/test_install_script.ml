@@ -406,10 +406,6 @@ let test_config_seed_skips_each_existing_file_without_force () =
     script
     {|if [ -e "$dest" ] && [ "$FORCE" -eq 0 ]; then|};
   assert_contains
-    "tool policy uses per-file seed"
-    script
-    {|seed_config_if_missing "tool_policy.toml" "$CONFIG_FILE"|};
-  assert_contains
     "runtime uses per-file seed"
     script
     {|seed_config_if_missing "runtime.toml" "$RUNTIME_FILE"|};
@@ -421,11 +417,6 @@ let test_config_seed_skips_each_existing_file_without_force () =
     "model catalog uses root release seed"
     script
     {|seed_raw_if_missing "oas-models.toml" "oas-models.toml" "$MODEL_CATALOG_FILE"|};
-  assert_not_contains
-    "no all-or-nothing seed calls"
-    script
-    {|seed_config "tool_policy.toml" "$CONFIG_FILE"
-    seed_config "runtime.toml" "$RUNTIME_FILE"|}
 ;;
 
 let test_release_requires_advertised_binary_assets () =
@@ -1201,7 +1192,7 @@ let test_release_checksums_include_model_catalog_seed () =
   assert_contains
     "release checksum includes runtime config seeds"
     workflow
-    "(cd ../config && sha256sum tool_policy.toml runtime.toml) >> SHA256SUMS";
+    "(cd ../config && sha256sum runtime.toml) >> SHA256SUMS";
   assert_contains
     "release checksum includes model catalog seed"
     workflow

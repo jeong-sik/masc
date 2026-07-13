@@ -63,9 +63,7 @@ let expected_unstructured_completion_exemptions =
 let expected_structured_dashboard_agent_run_json_judges =
   List.sort
     String.compare
-    [ "lib/dashboard/dashboard_governance_judge.ml"
-    ; "lib/dashboard/dashboard_operator_judge.ml"
-    ]
+    [ "lib/dashboard/dashboard_operator_judge.ml" ]
 ;;
 
 let expected_structured_fusion_agent_build_files =
@@ -86,17 +84,9 @@ let expected_structured_tool_agent_runs =
   List.sort
     String.compare
     [ "lib/keeper/keeper_adversarial_review.ml"
+    ; "lib/keeper/keeper_failure_judge.ml"
     ; "lib/verifier_oas.ml"
     ; "lib/workspace_metric_hooks.ml"
-    ]
-;;
-
-let expected_freeform_masc_tool_agent_run_files =
-  List.sort
-    String.compare
-    [ (* Eval harness: measures live tool-call attempts and arbitrary terminal text.
-         Tool arguments remain structured through [completion_tools]. *)
-      "bin/masc_completion_trust_eval.ml"
     ]
 ;;
 
@@ -104,8 +94,7 @@ let expected_masc_tool_agent_run_files =
   List.sort
     String.compare
     (expected_structured_dashboard_agent_run_json_judges
-     @ expected_structured_tool_agent_runs
-     @ expected_freeform_masc_tool_agent_run_files)
+     @ expected_structured_tool_agent_runs)
 ;;
 
 let expected_freeform_direct_agent_run_files =
@@ -404,6 +393,9 @@ let test_structured_tool_agent_runs_use_tool_schema_output () =
     [ ( "lib/keeper/keeper_adversarial_review.ml"
       , "dispatch"
       , "Verifier_core.parse_grounded_verdict_from_json" )
+    ; ( "lib/keeper/keeper_failure_judge.ml"
+      , "parse_response"
+      , "Keeper_failure_judgment_contract.of_yojson" )
     ; "lib/verifier_oas.ml", "dispatch", "Core.parse_verdict_from_json"
     ; ( "lib/workspace_metric_hooks.ml"
       , "dispatch"
@@ -479,14 +471,15 @@ let test_verifier_oas_uses_structured_judge_runtime () =
        ~callee:"Runtime.get_default_runtime_id")
 ;;
 
-let test_verifier_oas_response_text_fallback_is_strict_json () =
+let test_verifier_oas_response_text_fallback_uses_structured_parser () =
   check
     int
-    "verifier_oas must not call prose verdict parser for provider-native response text"
-    0
-    (Ast_grep.count_calls
+    "verifier_oas parses provider-native response text through the JSON verdict parser"
+    1
+    (Ast_grep.count_calls_in_value_binding
        ~module_path:"lib/verifier_oas.ml"
-       ~callee:"Core.parse_verdict")
+       ~binding_name:"parse_verdict_from_response_text"
+       ~callee:"Core.parse_verdict_from_json")
 ;;
 
 let test_model_label_wrappers_can_receive_provider_config_transform () =
@@ -589,9 +582,9 @@ let () =
             `Quick
             test_verifier_oas_uses_structured_judge_runtime
         ; test_case
-            "verifier_oas response fallback is strict JSON"
+            "verifier_oas response fallback uses the structured parser"
             `Quick
-            test_verifier_oas_response_text_fallback_is_strict_json
+            test_verifier_oas_response_text_fallback_uses_structured_parser
         ] )
     ; ( "model-label wrappers"
       , [ test_case

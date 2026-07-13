@@ -129,7 +129,7 @@ let test_ok_none_branch_observable () =
      >= 1);
   check bool "Ok None warn log: boot resume check phase" true
     (count_occurrences
-       ~needle:"meta missing — skipping auto-resume check"
+       ~needle:"meta missing — skipping resume check"
        src
      >= 1);
   check bool "Ok None directive 404 response" true
@@ -150,7 +150,7 @@ let test_error_branch_observable () =
      >= 1);
   check bool "Error err: boot check phase logs reason" true
     (count_occurrences
-       ~needle:"read_meta failed during auto-resume check"
+       ~needle:"read_meta failed during resume check"
        src
      >= 1);
   check bool "Error err: directive 500 response" true
@@ -176,71 +176,7 @@ let test_write_error_branch_observable () =
   check bool "write_meta error counter labelled write_meta_error" true
     (count_occurrences ~needle:"write_meta_error" src >= 1)
 
-let test_no_progress_clear_failure_observable () =
-  let src =
-    String.concat
-      "\n"
-      [
-        target_source ();
-        load_source keeper_up_update_file;
-        load_source "lib/keeper/keeper_keepalive.ml";
-      ]
-  in
-  check bool "no-progress clear error labelled in pause/resume metrics" true
-    (count_occurrences ~needle:"no_progress_clear_error" src >= 2);
-  check bool "keeper_up no-progress clear site is typed" true
-    (count_occurrences ~needle:"No_progress_resume_clear" src >= 1);
-  check bool "directive no-progress clear failure is observable" true
-    (count_occurrences ~needle:"no_progress_resume_clear" src >= 2)
-
-let test_klv2_directive_resume_no_progress_clear_best_effort () =
-  (* KLV-2 / RFC-0152: on operator resume, dropping the no-progress recovery
-     stimulus is a cosmetic cleanup. A transient disk failure there must NOT
-     gate the authoritative unpause. Previously the [Error] arm logged at
-     [error] level and short-circuited the whole [set_keeper_paused_state]
-     body, so the keeper never reached [persist_directive_meta_update] and
-     stayed paused forever (no_progress pause is [Manual_resume_required] — no
-     other recovery path exists). After the fix the clear result is bound into
-     [directive_source_meta] best-effort and execution always falls through to
-     the authoritative persist, which stays fail-closed.
-
-     Structural guard: the existing rationale for source-pattern over
-     integration applies (injecting a clear failure needs the full server +
-     event-queue harness). Non-vacuous — reverting the fix restores the
-     [..._result] binding name and the [error]-level short-circuit log, so both
-     the [let directive_source_meta =] and ["proceeding with unpause"] markers
-     disappear and these checks turn red. *)
-  let src = load_source "lib/keeper/keeper_keepalive.ml" in
-  check bool "resume no-progress clear is bound best-effort (not a gate)" true
-    (count_occurrences ~needle:"let directive_source_meta =" src >= 1);
-  check bool "resume clear failure proceeds with unpause (no short-circuit)"
-    true
-    (count_occurrences ~needle:"proceeding with unpause" src >= 1);
-  check int "fail-closed short-circuit error log on clear removed" 0
-    (count_occurrences
-       ~needle:"directive resume: no_progress clear failed for"
-       src);
-  check bool "authoritative unpause persist is still reached" true
-    (count_occurrences
-       ~needle:"persist_directive_meta_update entry ~updated_meta"
-       src
-     >= 1);
-  (* The cosmetic clear site is handled strictly before the authoritative
-     persist site, proving the two carry distinct failure policies. *)
-  (match
-     ( first_index ~needle:"no_progress_resume_clear" src,
-       first_index ~needle:"pause_resume_persist" src )
-   with
-   | Some clear_pos, Some persist_pos ->
-       check bool "best-effort clear site precedes fail-closed persist site"
-         true (clear_pos < persist_pos)
-   | _ -> Alcotest.failf "missing KLV-2 site markers in keeper_keepalive.ml");
-  (* Fail-closed preserved: the authoritative persist still rolls the registry
-     failure reason back on [Error] rather than swallowing it. *)
-  check bool "authoritative persist stays fail-closed (rolls back reason)" true
-    (count_occurrences ~needle:"previous_failure_reason" src >= 1)
-
-let test_counter_inc_calls () =
+ let test_counter_inc_calls () =
   let src = target_source () in
   (* The metric must actually be incremented at least 6 times: 2 in
      [persist_keeper_paused_state] (Ok None / Error), 2 in
@@ -254,29 +190,7 @@ let test_counter_inc_calls () =
        src
      >= 6)
 
-let test_resume_paths_clear_no_progress_latch () =
-  let lifecycle_src =
-    load_source "lib/server/server_dashboard_http_keeper_api_lifecycle_post.ml"
-  in
-  let directive_src = load_source "lib/server/server_dashboard_http_keeper_api_post.ml" in
-  let update_src = load_source keeper_up_update_file in
-  check bool "boot resume clears no-progress latch" true
-    (count_occurrences
-       ~needle:"Keeper_unified_turn_no_progress.clear_for_operator_resume"
-       lifecycle_src
-     >= 1);
-  check bool "directive resume clears no-progress latch" true
-    (count_occurrences
-       ~needle:"Keeper_unified_turn_no_progress.clear_for_operator_resume"
-       directive_src
-     >= 1);
-  check bool "masc_keeper_up resume clears no-progress latch" true
-    (count_occurrences
-       ~needle:"Keeper_unified_turn_no_progress.clear_for_operator_resume"
-       update_src
-     >= 1)
-
-let test_directive_resume_boots_missing_registry_keeper () =
+ let test_directive_resume_boots_missing_registry_keeper () =
   let directive_src = load_source "lib/server/server_dashboard_http_keeper_api_post.ml" in
   check bool "directive resume has registry-missing boot helper" true
     (count_occurrences ~needle:"ensure_registered_for_resume" directive_src >= 3);
@@ -377,14 +291,8 @@ let () =
             test_error_branch_observable
         ; test_case "write_meta error branch observable" `Quick
             test_write_error_branch_observable
-        ; test_case "no-progress clear failure observable" `Quick
-            test_no_progress_clear_failure_observable
-        ; test_case "KLV-2 directive resume no-progress clear best-effort"
-            `Quick test_klv2_directive_resume_no_progress_clear_best_effort
         ; test_case "counter inc calls present" `Quick
             test_counter_inc_calls
-        ; test_case "resume paths clear no-progress latch" `Quick
-            test_resume_paths_clear_no_progress_latch
         ; test_case "directive resume boots missing registry keeper" `Quick
             test_directive_resume_boots_missing_registry_keeper
         ; test_case "directive resume ensures before meta mutation" `Quick

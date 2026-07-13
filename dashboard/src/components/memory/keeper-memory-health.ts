@@ -16,7 +16,6 @@ import {
 } from '../../api/dashboard'
 import { DEFAULT_PANEL_REFRESH_MS, formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../../lib/auto-refresh'
 
-const EVENT_RATIO_ALERT_TARGET: KeeperMemoryHealthAlertTarget = 'events_to_facts_ratio'
 const TTL_ALERT_TARGET: KeeperMemoryHealthAlertTarget = 'ttl_expired_on_disk'
 const NEAR_DUPLICATE_ALERT_TARGET: KeeperMemoryHealthAlertTarget = 'near_duplicate'
 const PROVIDER_SLOT_BUSY_ALERT_TARGET: KeeperMemoryHealthAlertTarget = 'provider_slot_busy'
@@ -47,7 +46,6 @@ function KeeperRow({ entry }: { entry: KeeperMemoryHealthKeeperEntry }) {
   const ratioStr = entry.events_to_facts_ratio.toFixed(2)
   const alerts = entryAlerts(entry)
   const warn = isRowWarning(entry)
-  const ratioWarn = hasTargetAlert(alerts, EVENT_RATIO_ALERT_TARGET)
   const ttlWarn = hasTargetAlert(alerts, TTL_ALERT_TARGET)
   const nearDuplicateWarn = hasTargetAlert(alerts, NEAR_DUPLICATE_ALERT_TARGET)
   const providerSlotBusyWarn = hasTargetAlert(alerts, PROVIDER_SLOT_BUSY_ALERT_TARGET)
@@ -59,9 +57,7 @@ function KeeperRow({ entry }: { entry: KeeperMemoryHealthKeeperEntry }) {
       <td>${entry.facts.toLocaleString()}</td>
       <td>${formatBytes(entry.facts_bytes)}</td>
       <td>
-        ${ratioWarn
-          ? html`<span class="kmh-badge kmh-badge--warn">${ratioStr}</span>`
-          : html`<span>${ratioStr}</span>`}
+        <span>${ratioStr}</span>
       </td>
       <td>
         ${ttlWarn

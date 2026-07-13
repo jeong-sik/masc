@@ -797,7 +797,6 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
      fibers to live on the child switch. *)
   Eio.Fiber.fork ~sw (fun () ->
     Eio.Switch.run @@ fun init_sw ->
-    let governance_level = Env_config_core.governance_level () in
     let init_state_blocking () =
       let t0 = Eio.Time.now clock in
       (* Install the LLM provider metrics bridge BEFORE any subsystem
@@ -824,10 +823,25 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
             ~labels:[ ("op", op) ]
             seconds);
       Log.Server.info "Backend_mutex_metrics installed (masc_backend_mutex_* metrics)";
-      Fd_accountant.set_pressure_hooks
-        ~active:Keeper_fd_pressure.active
-        ~nofile_soft_limit:Keeper_fd_pressure.process_nofile_soft_limit;
-      Log.Server.info "Fd_accountant pressure hooks installed";
+      Fd_accountant.install_observers
+        ~nofile_soft_limit:Keeper_fd_pressure.process_nofile_soft_limit
+        ~on_resource_error:(fun ~kind error exn ->
+          let kind_name = Fd_accountant.kind_to_string kind in
+          let error_name = Fd_accountant.resource_error_to_string error in
+          let site = "fd_accountant." ^ kind_name in
+          Log.Server.error
+            "Fd_accountant observed OS resource error kind=%s error=%s \
+             exception=%s"
+            kind_name
+            error_name
+            (Printexc.to_string exn);
+          match error with
+          | Fd_accountant.Process_fd_exhausted
+          | Fd_accountant.System_fd_exhausted ->
+            Keeper_fd_pressure.note_exception ~site exn
+          | Fd_accountant.Storage_space_exhausted ->
+            Keeper_disk_pressure.note_exception ~site exn);
+      Log.Server.info "Fd_accountant OS resource observers installed";
       (* Forward Agent_sdk.Log records (per-turn timing from oas#816 and
          any subsequent structured emits) into the masc log ring so
          they land in <base_path>/.masc/logs/system_log_*.jsonl alongside
@@ -907,7 +921,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
                "strict base-path guard triggered without a diagnostic warning");
         exit 1
       end;
-      Governance_registry.ensure_init ();
+      Runtime_settings.ensure_init ();
       Runtime_params.restore ~base_path;
       Log.Server.info "Runtime_params restored from %s" base_path;
       Keeper_crash_persistence.start_drain_fiber ~sw ~clock;
@@ -921,8 +935,8 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
 
          #10205 finding 5: the sweep walks every keeper subdirectory
          under [base_path] ([Sys.readdir] per directory + [Unix.stat]
-         per orphan candidate).  It does NOT need to gate
-         [install_tooling] or the [Bootstrap completed] log line —
+         per orphan candidate).  It does NOT need to gate the
+         [Bootstrap completed] log line —
          the sweep results are advisory diagnostics, not a
          precondition for serving.  Fork it into a background fiber
          so the boot hot path completes immediately; the counter
@@ -986,8 +1000,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
             Log.Server.error
               "boot: credential token uniqueness audit failed: %s"
               (Printexc.to_string exn));
-      let t2 = Eio.Time.now clock in
-      Log.Server.info "Bootstrap completed in %.1fs" (t2 -. t1);
+      Log.Server.info "Bootstrap completed in %.1fs" (Eio.Time.now clock -. t1);
       (* 2026-05-05 deploy-gap audit (#12943 follow-up): warn loudly when
          the running binary is more than [stale_threshold_hours] behind
          the build-env commit timestamp.  Runtime repo HEAD is intentionally
@@ -1006,8 +1019,6 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
            binary_commit
            hours stale_threshold_hours
        | _ -> ());
-      Server_bootstrap_loops.install_tooling ~governance_level state;
-      Log.Server.info "Tooling + schemas in %.1fs" (Eio.Time.now clock -. t2);
       (state, path_diagnostics)
     in
     let run_lazy_task (task_name, task_fn) =
@@ -1076,6 +1087,55 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
         init_state_blocking ()
       in
       server_state := Some state;
+      let gate_base_path = (Mcp_server.workspace_config state).base_path in
+      (match Keeper_approval_queue.install_persistence ~base_path:gate_base_path with
+       | Ok report ->
+         Log.Server.info
+           "keeper_gate: installed durable queue base_path=%s pending=%d replayed=%d replay_failed=%d"
+           gate_base_path
+           report.loaded_pending
+           report.replayed_deliveries
+           (List.length report.delivery_replay_failures);
+         List.iter
+           (fun (failure : Keeper_approval_queue.delivery_replay_failure) ->
+              Log.Server.error
+                "keeper_gate: durable delivery replay failed approval=%s error=%s"
+                failure.approval_id
+                failure.reason)
+           report.delivery_replay_failures;
+         let resume_report =
+           Keeper_gate.resume_persisted_auto_judges ~base_path:gate_base_path
+         in
+         Log.Server.info
+           "keeper_gate: recovered Auto Judge work requested=%d started=%d finalized=%d skipped=%d failed=%d"
+           resume_report.requested
+           (List.length resume_report.started_ids)
+           (List.length resume_report.finalized_ids)
+           (List.length resume_report.skipped_ids)
+           (List.length resume_report.failures);
+         List.iter
+           (fun approval_id ->
+              Log.Server.warn
+                "keeper_gate: recovered Auto Judge no longer startable approval=%s"
+                approval_id)
+           resume_report.skipped_ids;
+         List.iter
+           (fun (failure : Keeper_gate.auto_judge_resume_failure) ->
+              Log.Server.error
+                "keeper_gate: recovered Auto Judge start failed approval=%s error=%s"
+                failure.approval_id
+                failure.reason)
+           resume_report.failures
+       | Error error ->
+         (* The queue reports malformed snapshots through the shared
+            persistence-read-drop metric and delivery failures through the
+            approval queue metric. Keep unrelated server subsystems available,
+            but leave an explicit startup error instead of treating the queue
+            as empty. *)
+         Log.Server.error
+           "keeper_gate: durable queue install failed base_path=%s error=%s"
+           gate_base_path
+           (Keeper_approval_queue.install_error_to_string error));
       Server_startup_state.mark_state_ready
         ~backend_mode:(Workspace.backend_name (Mcp_server.workspace_config state));
       let resolved_base, masc_dir =

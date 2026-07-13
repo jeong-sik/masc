@@ -51,7 +51,8 @@ message HeartbeatAck {
   int64 timestamp_ms = 1;
   int32 active_agent_count = 2;
   int32 pending_task_count = 3;
-  // Directives from server (e.g., "rebalance", "pause").
+  // Exact legacy wire codec: pause | resume | wakeup | claim:<task_id>.
+  // Application code decodes this field to a closed Keeper_directive type.
   repeated string directives = 4;
 }
 

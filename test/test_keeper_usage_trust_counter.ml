@@ -1,13 +1,12 @@
 (* test/test_keeper_usage_trust_counter.ml
 
-   #9959 defensive layer test: verify the new [record_usage_trust]
+   Usage observation test: verify [record_usage_trust]
    helper increments the right Otel_metric_store counters for each
    [usage_trust] variant and isolates labels across keepers.
 
-   The upstream root cause (accumulated values leaking into
-   per-response api_usage) is tracked in jeong-sik/oas#1181; the
-   counters here surface the anomaly rate so operators can alert
-   while that fix is in-flight. *)
+   Only objective negative-counter violations are invalid. Zero or large
+   provider-reported counts remain observations and are never rejected by a
+   local threshold. *)
 
 module UM = Masc.Keeper_unified_metrics
 module UT = Keeper_usage_trust
@@ -52,7 +51,7 @@ let test_missing_outcome_only () =
   let keeper = "test-keeper-9959-missing" in
   let outcome_before = outcome_for ~keeper ~outcome:"missing" in
   let reason_before =
-    reason_for ~keeper ~reason:"input_tokens_gt_1m"
+    reason_for ~keeper ~reason:"negative_input_tokens"
   in
   UM.record_usage_trust ~keeper_name:keeper ~trust:UM.Usage_missing;
   Alcotest.(check (float 0.0001))
@@ -62,36 +61,33 @@ let test_missing_outcome_only () =
   Alcotest.(check (float 0.0001))
     "no reason counter movement for missing"
     reason_before
-    (reason_for ~keeper ~reason:"input_tokens_gt_1m")
+    (reason_for ~keeper ~reason:"negative_input_tokens")
 
 let test_untrusted_bumps_per_reason () =
-  (* The #9959 path: per-response api_usage carries accumulated
-     values — [input_tokens_gt_1m] fires together with
-     [input_tokens_gt_2x_context_max]. Both reason counters must
-     tick alongside the outcome counter. *)
+  (* Invalid negative counters remain explicit and observable. *)
   let keeper = "test-keeper-9959-untrusted" in
   let outcome_before = outcome_for ~keeper ~outcome:"untrusted" in
-  let gt1m_before = reason_for ~keeper ~reason:"input_tokens_gt_1m" in
-  let gt2x_before =
-    reason_for ~keeper ~reason:"input_tokens_gt_2x_context_max"
+  let input_before = reason_for ~keeper ~reason:"negative_input_tokens" in
+  let output_before =
+    reason_for ~keeper ~reason:"negative_output_tokens"
   in
   UM.record_usage_trust
     ~keeper_name:keeper
     ~trust:
       (UM.Usage_untrusted
-         [ "input_tokens_gt_1m"; "input_tokens_gt_2x_context_max" ]);
+         [ "negative_input_tokens"; "negative_output_tokens" ]);
   Alcotest.(check (float 0.0001))
     "untrusted outcome +1"
     (outcome_before +. 1.0)
     (outcome_for ~keeper ~outcome:"untrusted");
   Alcotest.(check (float 0.0001))
-    "input_tokens_gt_1m reason +1"
-    (gt1m_before +. 1.0)
-    (reason_for ~keeper ~reason:"input_tokens_gt_1m");
+    "negative input reason +1"
+    (input_before +. 1.0)
+    (reason_for ~keeper ~reason:"negative_input_tokens");
   Alcotest.(check (float 0.0001))
-    "input_tokens_gt_2x_context_max reason +1"
-    (gt2x_before +. 1.0)
-    (reason_for ~keeper ~reason:"input_tokens_gt_2x_context_max")
+    "negative output reason +1"
+    (output_before +. 1.0)
+    (reason_for ~keeper ~reason:"negative_output_tokens")
 
 let test_per_keeper_isolation () =
   let a = "test-keeper-9959-a" in
@@ -99,7 +95,7 @@ let test_per_keeper_isolation () =
   let a_before = outcome_for ~keeper:a ~outcome:"untrusted" in
   let b_before = outcome_for ~keeper:b ~outcome:"untrusted" in
   UM.record_usage_trust ~keeper_name:a
-    ~trust:(UM.Usage_untrusted [ "zero_token_usage_reported" ]);
+    ~trust:(UM.Usage_untrusted [ "negative_input_tokens" ]);
   Alcotest.(check (float 0.0001))
     "A untrusted +1"
     (a_before +. 1.0)
@@ -108,19 +104,27 @@ let test_per_keeper_isolation () =
     "B untrusted unchanged" b_before
     (outcome_for ~keeper:b ~outcome:"untrusted")
 
-let test_zero_token_usage_is_info_severity () =
+let test_zero_and_large_usage_are_reported () =
+  let zero = Agent_sdk.Types.zero_api_usage in
+  let large = { zero with input_tokens = 2_000_000; output_tokens = 3_000_000 } in
   Alcotest.(check bool)
-    "zero-token-only remains non-WARN"
-    false
-    (UT.warns_operator (UT.Usage_untrusted [ "zero_token_usage_reported" ]))
-
-let test_compound_usage_anomaly_warns_operator () =
-  Alcotest.(check bool)
-    "compound anomaly remains WARN"
+    "zero usage is an ordinary report"
     true
-    (UT.warns_operator
-       (UT.Usage_untrusted
-          [ "zero_token_usage_reported"; "input_tokens_gt_1m" ]))
+    (match UT.classify ~usage_reported:true ~usage:zero with
+     | UT.Usage_trusted -> true
+     | UT.Usage_missing | UT.Usage_untrusted _ -> false);
+  Alcotest.(check bool)
+    "large usage is not rejected by a local threshold"
+    true
+    (match UT.classify ~usage_reported:true ~usage:large with
+     | UT.Usage_trusted -> true
+     | UT.Usage_missing | UT.Usage_untrusted _ -> false)
+
+let test_negative_usage_warns_operator () =
+  Alcotest.(check bool)
+    "objective invalid counter warns"
+    true
+    (UT.warns_operator (UT.Usage_untrusted [ "negative_input_tokens" ]))
 
 let () =
   Alcotest.run "keeper_usage_trust_counter_9959"
@@ -146,9 +150,9 @@ let () =
         ] );
       ( "severity",
         [
-          Alcotest.test_case "zero-token-only is info" `Quick
-            test_zero_token_usage_is_info_severity;
-          Alcotest.test_case "compound anomaly warns" `Quick
-            test_compound_usage_anomaly_warns_operator;
+          Alcotest.test_case "zero and large usage are reported" `Quick
+            test_zero_and_large_usage_are_reported;
+          Alcotest.test_case "negative usage warns" `Quick
+            test_negative_usage_warns_operator;
         ] );
     ]

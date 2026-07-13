@@ -11,7 +11,6 @@
 //   컨텍스트 구성        ← real prompt-assembly block bytes (entries[latest].blocks)
 //   장기 메모리 스토어    ← real memory_os.facts.items (typed category, provenance, TTL)
 //   압축 유지·요약        ← real memory_os.episodes.items (summary + terminal_marker)
-//   핵심 회상 후보        ← real memory_os.facts.items where prompt_recallable=true
 //   최근 회상·주입        ← real memory_os_recall prompt blocks (entries[*].blocks)
 // Any future-only section must render an honest disclosure rather than fabricated
 // rows (no-stub): disclose absence instead of faking presence.
@@ -24,7 +23,6 @@ import { formatDateTimeKo, formatTimeAgo, formatTimeUntil } from '../lib/format-
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { isAbortError } from '../lib/async-state'
 import {
-  MEMORY_OS_LIBRARIAN_UNSTRUCTURED_FALLBACK_MARKER,
   fetchKeeperTurnRecords,
   type TurnRecordsResponse,
   type MemoryOsTurnRecordSnapshot,
@@ -82,8 +80,8 @@ interface BlockMeta {
   readonly lbl: string
   readonly color: string
   // Whether this block is the memory-os contribution to the prompt. Mirrors the
-  // prototype MEM_BLOCKS `mem` flag (memory.jsx) — only memory_os_recall and
-  // user_model carry recalled memory; the rest are persona/context/surface.
+  // prototype MEM_BLOCKS `mem` flag (memory.jsx) — only memory_os_recall
+  // carries recalled memory; the rest are persona/context/surface.
   readonly mem: boolean
 }
 const PROMPT_BLOCK_META: Readonly<Record<string, BlockMeta>> = {
@@ -94,7 +92,6 @@ const PROMPT_BLOCK_META: Readonly<Record<string, BlockMeta>> = {
   claimed_task_nudge: { lbl: '태스크 넛지', color: 'var(--status-ok)', mem: false },
   retry_nudge: { lbl: '재시도 넛지', color: 'var(--status-bad)', mem: false },
   memory_os_recall: { lbl: '메모리 회상', color: 'var(--volt-strong)', mem: true },
-  user_model: { lbl: '사용자 모델', color: 'var(--info)', mem: true },
   connected_surface: { lbl: '연결 표면', color: 'var(--status-warn)', mem: false },
 }
 export function promptBlockMeta(token: string): BlockMeta {
@@ -219,25 +216,8 @@ export function factTtlLabel(fact: MemoryOsFact): string {
     : `만료됨 ${formatTimeAgo(fact.valid_until)}`
 }
 
-const DEFAULT_FACT_ROW_LIMIT = 12
-type FactVisibilityFilter = 'recallable' | 'diagnostic' | 'all'
-
 export function sortMemoryFactsForReview(facts: readonly MemoryOsFact[]): MemoryOsFact[] {
-  return [...facts].sort((a, b) => {
-    const aRecallable = a.current && a.prompt_recallable
-    const bRecallable = b.current && b.prompt_recallable
-    if (aRecallable !== bRecallable) return aRecallable ? -1 : 1
-    if (a.current !== b.current) return a.current ? -1 : 1
-    return b.reference_time - a.reference_time
-  })
-}
-
-function isPromptRecallableFact(fact: MemoryOsFact): boolean {
-  return fact.current && fact.prompt_recallable
-}
-
-function isDiagnosticEvidenceFact(fact: MemoryOsFact): boolean {
-  return fact.current && !fact.prompt_recallable
+  return [...facts]
 }
 
 function formatFactInstant(ts: number, iso: string | null): string {
@@ -265,9 +245,7 @@ function factClaimKindLabel(fact: MemoryOsFact): string {
 
 export function factSelectionReason(fact: MemoryOsFact): string {
   const meta = factCategoryMeta(fact.category)
-  const state = !fact.prompt_recallable
-    ? 'diagnostic evidence row'
-    : fact.current ? 'active recall candidate' : 'expired evidence row'
+  const state = fact.current ? 'current row' : 'expired row'
   return `${state} · ${meta.lbl} · ${factClaimKindLabel(fact)}`
 }
 
@@ -326,25 +304,21 @@ function MemoryTrustStrip({
 }) {
   const policy = snapshot.selection_policy
   const memoryBlock = latestMemoryRecallBlock(latestPromptRow)
-  const recallableFacts = snapshot.facts.items.filter(isPromptRecallableFact).length
-  const diagnosticFacts = snapshot.facts.items.filter(isDiagnosticEvidenceFact).length
   const promptTurn = latestPromptRow
     ? `${latestPromptRow.record.trace_id}#${latestPromptRow.record.absolute_turn}`
     : 'none'
-  const scopeLabel = policy?.shared_scope
-    ? `${policy.keeper_scope} + ${policy.shared_scope}`
-    : (policy?.keeper_scope ?? snapshot.keeper)
+  const scopeLabel = policy?.keeper_scope ?? snapshot.keeper
   return html`
     <div class="mem-trust">
       <div class="mem-trust-card">
         <span class="mem-trust-k">store</span>
-        <span class="mem-trust-v mono">${recallableFacts}/${snapshot.facts.shown} recallable</span>
-        <span class="mem-trust-sub mono">${diagnosticFacts} diagnostic/evidence · ${snapshot.source}</span>
+        <span class="mem-trust-v mono">${snapshot.facts.current}/${snapshot.facts.shown} current</span>
+        <span class="mem-trust-sub mono">${snapshot.facts.expired} expired · ${snapshot.source}</span>
       </div>
       <div class="mem-trust-card">
         <span class="mem-trust-k">scope</span>
         <span class="mem-trust-v mono">${scopeLabel}</span>
-        <span class="mem-trust-sub">${policy?.shared_scope ? 'private + shared recall tiers' : 'keeper-local recall tier'}</span>
+        <span class="mem-trust-sub">keeper-local persisted source order</span>
       </div>
       <div class="mem-trust-card">
         <span class="mem-trust-k">prompt link</span>
@@ -361,11 +335,8 @@ function MemoryPolicyDisclosure({ policy }: { policy: MemoryOsSelectionPolicy | 
   }
   return html`
     <div class="mem-policy">
-      <div class="mem-policy-row"><span>private facts</span><code>${policy.facts_source}</code><b>dashboard ${policy.dashboard_fact_tail_limit} · prompt ${policy.recall_private_fact_limit}</b></div>
-      ${policy.shared_scope && policy.shared_facts_source
-        ? html`<div class="mem-policy-row"><span>shared facts</span><code>${policy.shared_facts_source}</code><b>${policy.shared_scope} · prompt ${policy.recall_shared_fact_limit}</b></div>`
-        : null}
-      <div class="mem-policy-row"><span>episodes</span><code>${policy.episodes_source}</code><b>dashboard ${policy.dashboard_episode_tail_limit} · prompt ${policy.recall_episode_limit}</b></div>
+      <div class="mem-policy-row"><span>facts</span><code>${policy.facts_source}</code><b>all rows · source order</b></div>
+      <div class="mem-policy-row"><span>episodes</span><code>${policy.episodes_source}</code><b>all rows · source order</b></div>
       <div class="mem-policy-row"><span>librarian</span><code>${policy.category_source} + ${policy.claim_kind_source}</code><b>typed labels</b></div>
       <div class="mem-policy-row"><span>prompt</span><code>${policy.recall_block}</code><b>${policy.prompt_record}</b></div>
     </div>
@@ -453,25 +424,6 @@ function FactRow({ fact, srcOverride }: { fact: MemoryOsFact; srcOverride?: stri
     </div>`
 }
 
-function RecallCandidatePreview({
-  facts,
-  total,
-}: {
-  facts: readonly MemoryOsFact[]
-  total: number
-}) {
-  if (facts.length === 0) {
-    return html`
-      <${DisclosureNote} text="현재 표시할 prompt recall 후보 없음." />
-    `
-  }
-  return html`
-    <${Fragment}>
-      <div class="mem-store">${facts.map(f => html`<${FactRow} key=${factTag(f) + f.source.trace_id + f.source.turn + f.claim} fact=${f} />`)}</div>
-      <${DisclosureNote} text=${`실제 prompt recall 후보 ${facts.length}/${total}개를 표시.`} />
-    </>`
-}
-
 // Honest disclosure for a section whose backend source lands in a later RFC
 // phase. NOT a stub: it states the absence and the phase, renders no fabricated
 // data, and is visually distinct from a real-data section.
@@ -543,32 +495,12 @@ function OneKeeperMemoryReal({
   rows: readonly TurnRecordRow[]
 }) {
   const kindFilter = useSignal<string>('all')
-  const visibilityFilter = useSignal<FactVisibilityFilter>('recallable')
-  const factRowLimit = useSignal(DEFAULT_FACT_ROW_LIMIT)
   const latestPromptRow = latestEntryWithBlocks(rows)
   const facts = sortMemoryFactsForReview(snapshot.facts.items)
-  const recallableFacts = facts.filter(isPromptRecallableFact)
-  const diagnosticFacts = facts.filter(isDiagnosticEvidenceFact)
-  const allEpisodes = [...snapshot.episodes.items].reverse()
-  const recallPreviewFacts = recallableFacts.slice(0, 3)
-  const episodes = allEpisodes
-    .filter(ep => ep.terminal_marker !== MEMORY_OS_LIBRARIAN_UNSTRUCTURED_FALLBACK_MARKER)
-    .slice(0, 5)
-  const allFallbackEpisodes = allEpisodes
-    .filter(ep => ep.terminal_marker === MEMORY_OS_LIBRARIAN_UNSTRUCTURED_FALLBACK_MARKER)
-  const fallbackEpisodes = allFallbackEpisodes.slice(0, 5)
-  const visibilityRows =
-    visibilityFilter.value === 'recallable'
-      ? recallableFacts
-      : visibilityFilter.value === 'diagnostic'
-        ? diagnosticFacts
-        : facts
-  // Category chips follow the current visibility lane. Otherwise diagnostic-only
-  // fallback categories (for example ephemeral librarian parse failures) still
-  // look selectable in the default recall view even though their rows are hidden.
+  const episodes = snapshot.episodes.items
   const seen = new Set<string>()
   const cats: MemoryOsFactCategory[] = []
-  for (const f of visibilityRows) {
+  for (const f of facts) {
     const tag = factTag(f)
     if (!seen.has(tag)) {
       seen.add(tag)
@@ -578,11 +510,7 @@ function OneKeeperMemoryReal({
   const filter = kindFilter.value
   const effectiveFilter = filter === 'all' || seen.has(filter) ? filter : 'all'
   const storeRows =
-    effectiveFilter === 'all' ? visibilityRows : visibilityRows.filter(f => factTag(f) === effectiveFilter)
-  const visibleStoreRows = storeRows.slice(0, factRowLimit.value)
-  const hiddenStoreRows = Math.max(0, storeRows.length - visibleStoreRows.length)
-  const showFallbackEpisodes = visibilityFilter.value !== 'recallable'
-
+    effectiveFilter === 'all' ? facts : facts.filter(f => factTag(f) === effectiveFilter)
   return html`
     <${Fragment}>
       <${ReadErrors} snapshot=${snapshot} />
@@ -605,54 +533,21 @@ function OneKeeperMemoryReal({
 
       <div class="turn-sec">
         <div class="mem-sec-head">
-          <h4>핵심 회상 후보</h4>
-          <span class="mem-n mono">${recallPreviewFacts.length}/${recallableFacts.length}</span>
-        </div>
-        <${RecallCandidatePreview} facts=${recallPreviewFacts} total=${recallableFacts.length} />
-      </div>
-
-      <div class="turn-sec">
-        <div class="mem-sec-head">
           <h4>장기 메모리 스토어 · memory-os</h4>
-          <span class="mem-n mono">${recallableFacts.length}/${snapshot.facts.shown}</span>
+          <span class="mem-n mono">${snapshot.facts.shown}</span>
         </div>
         ${facts.length
           ? html`
             <${Fragment}>
-              <div class="mem-filters">
-                <button
-                  class=${`mem-filter ${visibilityFilter.value === 'recallable' ? 'on' : ''}`}
-                  onClick=${() => { visibilityFilter.value = 'recallable'; kindFilter.value = 'all'; factRowLimit.value = DEFAULT_FACT_ROW_LIMIT }}
-                >회상 ${recallableFacts.length}</button>
-                <button
-                  class=${`mem-filter ${visibilityFilter.value === 'diagnostic' ? 'on' : ''}`}
-                  onClick=${() => { visibilityFilter.value = 'diagnostic'; kindFilter.value = 'all'; factRowLimit.value = DEFAULT_FACT_ROW_LIMIT }}
-                >진단/증거 ${diagnosticFacts.length}</button>
-                <button
-                  class=${`mem-filter ${visibilityFilter.value === 'all' ? 'on' : ''}`}
-                  onClick=${() => { visibilityFilter.value = 'all'; kindFilter.value = 'all'; factRowLimit.value = DEFAULT_FACT_ROW_LIMIT }}
-                >전체 ${facts.length}</button>
-              </div>
               <${CategoryFilters} cats=${cats} active=${effectiveFilter} onPick=${(t: string) => { kindFilter.value = t }} />
-              ${visibleStoreRows.length > 0
-                ? html`<div class="mem-store">${visibleStoreRows.map(f => html`<${FactRow} key=${factTag(f) + f.source.trace_id + f.source.turn + f.claim} fact=${f} />`)}</div>`
+              ${storeRows.length > 0
+                ? html`<div class="mem-store">${storeRows.map(f => html`<${FactRow} key=${factTag(f) + f.source.trace_id + f.source.turn + f.claim} fact=${f} />`)}</div>`
                 : html`
                   <div class="mem-empty">
                     현재 필터에 표시할 memory-os fact가 없습니다.<br />
-                    <span class="mono">recallable=${recallableFacts.length} · diagnostic=${diagnosticFacts.length} · total=${facts.length}</span>
+                    <span class="mono">current=${snapshot.facts.current} · expired=${snapshot.facts.expired} · total=${facts.length}</span>
                   </div>
                 `}
-              ${hiddenStoreRows > 0
-                ? html`
-                  <button
-                    type="button"
-                    class="mem-more"
-                    onClick=${() => { factRowLimit.value += DEFAULT_FACT_ROW_LIMIT }}
-                  >
-                    ${hiddenStoreRows}개 더 보기
-                  </button>
-                `
-                : null}
             </>`
           : html`<div class="mem-empty">장기 메모리 항목 없음.</div>`}
       </div>
@@ -673,22 +568,7 @@ function OneKeeperMemoryReal({
               <${DisclosureNote} text="유지/요약/폐기 3열 diff는 Phase 3에서 연결 예정 — episode 요약만 표시." />
             </>`
           : html`<div class="mem-empty">압축(episode) 이력 없음.</div>`}
-        ${!showFallbackEpisodes && allFallbackEpisodes.length > 0
-          ? html`<${DisclosureNote} text=${`librarian fallback 진단 ${allFallbackEpisodes.length}개는 기본 회상 화면에서 접힘 — 진단/증거 필터에서 확인.`} />`
-          : null}
       </div>
-
-      ${showFallbackEpisodes && fallbackEpisodes.length
-        ? html`
-          <div class="turn-sec">
-            <h4>진단 fallback · librarian</h4>
-            <div class="mem-store">
-              ${fallbackEpisodes.map(ep => html`<${EpisodeRow} key=${ep.trace_id + ep.generation} episode=${ep} />`)}
-            </div>
-            <${DisclosureNote} text="unstructured fallback은 recall 후보가 아니라 librarian 진단 증거로 분리 표시." />
-          </div>
-        `
-        : null}
     </>`
 }
 
@@ -719,7 +599,6 @@ function EpisodeRow({ episode }: { episode: MemoryOsEpisodeSummary }) {
 
 // Bound on the recent-facts list each keeper contributes to (and the fleet-wide
 // slice) so the aggregate never carries an unbounded fact tail into the client.
-const AGGREGATE_RECENT_FACTS_LIMIT = 8
 
 interface AggregateCategoryCount {
   readonly category: MemoryOsFactCategory
@@ -736,11 +615,10 @@ interface AggregateMemoryRow {
   readonly memoryPresent: boolean
   readonly error: string | null
   readonly source: string
-  readonly recallableFacts: number
-  readonly diagnosticFacts: number
+  readonly currentFacts: number
+  readonly expiredFacts: number
   readonly shownFacts: number
   readonly episodes: number
-  readonly fallbackEpisodes: number
   readonly recallBlockBytes: number
   readonly latestPrompt: string
   readonly readErrors: number
@@ -764,13 +642,6 @@ function tallyFactCategories(facts: readonly MemoryOsFact[]): readonly Aggregate
   return [...byTag.values()]
 }
 
-function recentFactsByReferenceTime(
-  facts: readonly MemoryOsFact[],
-  limit: number,
-): readonly MemoryOsFact[] {
-  return [...facts].sort((a, b) => b.reference_time - a.reference_time).slice(0, limit)
-}
-
 // Merge per-keeper category tallies into a fleet distribution, sorted by count
 // descending (ties keep first-seen order). Reuses factTag as the merge key.
 function mergeAggregateCategoryCounts(
@@ -791,17 +662,14 @@ function mergeAggregateCategoryCounts(
 
 // Fleet-wide most-recently-verified facts with their owning keeper, newest first
 // (reference_time = last_verified_at else first_seen). NOT a salience sort (RFC-0247).
-function mergeAggregateRecentFacts(
-  rows: readonly AggregateMemoryRow[],
-  limit: number = AGGREGATE_RECENT_FACTS_LIMIT,
-): readonly AggregateRecentFact[] {
+function mergeAggregateFacts(rows: readonly AggregateMemoryRow[]): readonly AggregateRecentFact[] {
   const flattened: AggregateRecentFact[] = []
   for (const row of rows) {
     for (const fact of row.recentFacts) {
       flattened.push({ keeperId: row.keeper.id, fact })
     }
   }
-  return flattened.sort((a, b) => b.fact.reference_time - a.fact.reference_time).slice(0, limit)
+  return flattened
 }
 
 function aggregateMemoryRowFromResponse(
@@ -820,11 +688,10 @@ function aggregateMemoryRowFromResponse(
       memoryPresent: false,
       error: null,
       source: response.source ?? 'turn_record',
-      recallableFacts: 0,
-      diagnosticFacts: 0,
+      currentFacts: 0,
+      expiredFacts: 0,
       shownFacts: 0,
       episodes: 0,
-      fallbackEpisodes: 0,
       recallBlockBytes: memoryBlock?.bytes ?? 0,
       latestPrompt,
       readErrors: 0,
@@ -832,26 +699,20 @@ function aggregateMemoryRowFromResponse(
       recentFacts: [],
     }
   }
-  const recallableFacts = snapshot.facts.items.filter(isPromptRecallableFact).length
-  const diagnosticFacts = snapshot.facts.items.filter(isDiagnosticEvidenceFact).length
-  const fallbackEpisodes = snapshot.episodes.items
-    .filter(ep => ep.terminal_marker === MEMORY_OS_LIBRARIAN_UNSTRUCTURED_FALLBACK_MARKER)
-    .length
   return {
     keeper,
     memoryPresent: true,
     error: null,
     source: snapshot.source,
-    recallableFacts,
-    diagnosticFacts,
+    currentFacts: snapshot.facts.current,
+    expiredFacts: snapshot.facts.expired,
     shownFacts: snapshot.facts.shown,
-    episodes: Math.max(0, snapshot.episodes.items.length - fallbackEpisodes),
-    fallbackEpisodes,
+    episodes: snapshot.episodes.items.length,
     recallBlockBytes: memoryBlock?.bytes ?? 0,
     latestPrompt,
     readErrors: snapshot.read_errors.length,
     categoryCounts: tallyFactCategories(snapshot.facts.items),
-    recentFacts: recentFactsByReferenceTime(snapshot.facts.items, AGGREGATE_RECENT_FACTS_LIMIT),
+    recentFacts: snapshot.facts.items,
   }
 }
 
@@ -861,11 +722,10 @@ function aggregateMemoryErrorRow(keeper: MemoryKeeper, error: unknown): Aggregat
     memoryPresent: false,
     error: error instanceof Error ? error.message : String(error),
     source: 'fetch_error',
-    recallableFacts: 0,
-    diagnosticFacts: 0,
+    currentFacts: 0,
+    expiredFacts: 0,
     shownFacts: 0,
     episodes: 0,
-    fallbackEpisodes: 0,
     recallBlockBytes: 0,
     latestPrompt: 'none',
     readErrors: 0,
@@ -923,16 +783,15 @@ function AggregateMemoryReal({
   const loadedCount = data.length
   const failedCount = data.filter(row => row.error != null).length
   const noMemoryCount = data.filter(row => row.error == null && !row.memoryPresent).length
-  const recallableTotal = data.reduce((sum, row) => sum + row.recallableFacts, 0)
+  const currentTotal = data.reduce((sum, row) => sum + row.currentFacts, 0)
   const shownTotal = data.reduce((sum, row) => sum + row.shownFacts, 0)
-  const diagnosticTotal = data.reduce((sum, row) => sum + row.diagnosticFacts, 0)
+  const expiredTotal = data.reduce((sum, row) => sum + row.expiredFacts, 0)
   const episodeTotal = data.reduce((sum, row) => sum + row.episodes, 0)
-  const fallbackTotal = data.reduce((sum, row) => sum + row.fallbackEpisodes, 0)
   const linkedCount = data.filter(row => row.recallBlockBytes > 0).length
   const recallBytes = data.reduce((sum, row) => sum + row.recallBlockBytes, 0)
   const categoryTotals = mergeAggregateCategoryCounts(data)
   const categorizedFacts = categoryTotals.reduce((sum, entry) => sum + entry.count, 0)
-  const recentFacts = mergeAggregateRecentFacts(data)
+  const recentFacts = mergeAggregateFacts(data)
   return html`
     <${Fragment}>
       <div class="turn-sec">
@@ -945,8 +804,8 @@ function AggregateMemoryReal({
           </div>
           <div class="mem-trust-card">
             <span class="mem-trust-k">facts</span>
-            <span class="mem-trust-v mono">${recallableTotal}/${shownTotal} recallable</span>
-            <span class="mem-trust-sub mono">${diagnosticTotal} diagnostic/evidence</span>
+            <span class="mem-trust-v mono">${currentTotal}/${shownTotal} current</span>
+            <span class="mem-trust-sub mono">${expiredTotal} expired</span>
           </div>
           <div class="mem-trust-card">
             <span class="mem-trust-k">prompt links</span>
@@ -978,7 +837,7 @@ function AggregateMemoryReal({
       <div class="turn-sec">
         <h4>keeper별 메모리 · ${keepers.length}</h4>
         <div class="mem-table">
-          <div class="mem-tr mem-th"><span>keeper</span><span>회상</span><span>진단</span><span>episode</span><span>prompt link</span></div>
+          <div class="mem-tr mem-th"><span>keeper</span><span>current</span><span>expired</span><span>episode</span><span>prompt link</span></div>
           ${data.map(row => html`
             <button key=${row.keeper.id} type="button" class="mem-tr" title=${row.error ?? row.source} onClick=${() => onPick(row.keeper.id)}>
               <span class="mem-td-id"><span class=${`mem-dot ${memDotState(row.keeper.status)}`}></span><span class="mono">${row.keeper.id}</span></span>
@@ -990,9 +849,9 @@ function AggregateMemoryReal({
                   <span class="mono">${row.error}</span>
                 `
                 : html`
-                  <span class="mono">${row.recallableFacts}/${row.shownFacts}</span>
-                  <span class="mono">${row.diagnosticFacts}${row.readErrors > 0 ? html` · err ${row.readErrors}` : null}</span>
-                  <span class="mono">${row.episodes}${row.fallbackEpisodes > 0 ? html` +${row.fallbackEpisodes} diag` : null}</span>
+                  <span class="mono">${row.currentFacts}/${row.shownFacts}</span>
+                  <span class="mono">${row.expiredFacts}${row.readErrors > 0 ? html` · err ${row.readErrors}` : null}</span>
+                  <span class="mono">${row.episodes}</span>
                   <span class="mono">${row.recallBlockBytes > 0 ? html`${memFmtBytes(row.recallBlockBytes)} · ${row.latestPrompt}` : html`no memory block · ${row.latestPrompt}`}</span>
                 `}
             </button>`)}
@@ -1000,12 +859,12 @@ function AggregateMemoryReal({
         ${!loading && data.length === 0
           ? html`<div class="mem-empty">집계할 keeper memory-os 행 없음.</div>`
           : null}
-        <${DisclosureNote} text=${`전체 탭은 keeper별 turn-records를 직접 조회한 읽기 전용 집계 — episodes ${episodeTotal}, librarian fallback 진단 ${fallbackTotal}.`} />
+        <${DisclosureNote} text=${`전체 탭은 keeper별 turn-records를 직접 조회한 읽기 전용 집계 — episodes ${episodeTotal}.`} />
       </div>
       ${recentFacts.length > 0
         ? html`
           <div class="turn-sec">
-            <h4>최근 확인된 사실 · 전체 <span class="mem-hint">salience 정렬 아님 (RFC-0247)</span></h4>
+            <h4>저장된 사실 · 전체 <span class="mem-hint">keeper별 source order</span></h4>
             <div class="mem-store">
               ${recentFacts.map(({ keeperId, fact }) => html`<${FactRow}
                 key=${keeperId + factTag(fact) + fact.source.trace_id + fact.source.turn + fact.claim}

@@ -24,7 +24,6 @@ let required_string args key =
 
 let optional_float args key = Json_util.get_float args key
 let optional_int args key = Json_util.get_int args key
-let optional_bool args key = Json_util.get_bool args key
 
 let parse_due_at args =
   match optional_float args "due_at_unix", string_opt args "due_at_iso" with
@@ -64,13 +63,6 @@ let source_of_arg args =
     (match Schedule_domain.schedule_source_of_string raw with
      | Ok source -> Ok source
      | Error msg -> Error msg)
-;;
-
-let risk_class_of_arg args =
-  let* raw = required_string args "risk_class" in
-  match Schedule_domain.risk_class_of_string raw with
-  | Ok risk_class -> Ok risk_class
-  | Error msg -> Error msg
 ;;
 
 let status_of_arg args =
@@ -244,32 +236,27 @@ let payload_from_args args =
     else generic_payload_from_args args
 ;;
 
-let schedule_payload_unsupported_labels ~phase ~risk_class =
-  [ "phase", phase
-  ; "risk_class", Schedule_domain.risk_class_to_string risk_class
-  ]
-;;
+let schedule_payload_unsupported_labels ~phase = [ "phase", phase ]
 
-let record_unsupported_payload_creation ~risk_class rejection =
+let record_unsupported_payload_creation rejection =
   match rejection with
-  | Schedule_payload_projection.Creation_unsupported_side_effecting_kind _ ->
+  | Schedule_payload_projection.Creation_unsupported_kind _ ->
     Otel_metric_store.inc_counter
       Otel_metric_store.metric_schedule_payload_unsupported_total
-      ~labels:(schedule_payload_unsupported_labels ~phase:"creation" ~risk_class)
+      ~labels:(schedule_payload_unsupported_labels ~phase:"creation")
       ()
   | Schedule_payload_projection.Creation_invalid_payload _
   | Schedule_payload_projection.Creation_invalid_supported_payload _ -> ()
 ;;
 
-let validate_known_payload_request ~payload ~risk_class =
+let validate_known_payload_request ~payload =
   match
     Schedule_payload_projection.validate_request_payload_for_creation_detailed
       ~payload
-      ~risk_class
   with
   | Ok () -> Ok ()
   | Error rejection ->
-    record_unsupported_payload_creation ~risk_class rejection;
+    record_unsupported_payload_creation rejection;
     Error (Schedule_payload_projection.creation_rejection_message rejection)
 ;;
 
@@ -277,7 +264,6 @@ let schedule_request_json ?last_execution (request : Schedule_domain.schedule_re
   let next_due_at =
     if Schedule_domain.is_terminal request.status then None else Some request.due_at
   in
-  let requires_grant = Schedule_domain.requires_separate_human_grant request in
   let payload_target, payload_summary =
     Schedule_payload_projection.target_summary request
   in
@@ -301,13 +287,6 @@ let schedule_request_json ?last_execution (request : Schedule_domain.schedule_re
            , `String (Schedule_domain.recurrence_kind_to_string request.recurrence) )
          ; ( "recurrence_summary"
            , `String (Schedule_domain.recurrence_summary request.recurrence) )
-         ; ( "requires_separate_human_grant"
-           , `Bool requires_grant )
-         ; ( "approval_policy"
-           , `String
-               (if requires_grant
-                then "separate_human_grant_required"
-               else "no_separate_grant_required") )
          ; "payload_digest", `String (Schedule_domain.payload_digest request.payload)
          ; ( "payload_kind"
            , match Schedule_payload_projection.kind request with
@@ -383,18 +362,7 @@ let request_result ~tool_name ~start_time = function
 let handle_create ~tool_name ~start_time ctx args =
   let result =
     let* payload = payload_from_args args in
-    let* requested_risk_class = risk_class_of_arg args in
-    (* Clamp the caller-supplied risk_class to the payload kind's intrinsic risk
-       when the kind mandates one. A keeper_wake is intrinsically reminder_only;
-       without this a keeper can request a side-effecting risk_class, forcing its
-       own wake into Pending_approval and then deadlocking as it polls a status
-       no self-waking keeper can advance. *)
-    let risk_class =
-      match Schedule_payload_projection.intrinsic_risk_class_of_payload payload with
-      | Some intrinsic -> intrinsic
-      | None -> requested_risk_class
-    in
-    let* () = validate_known_payload_request ~payload ~risk_class in
+    let* () = validate_known_payload_request ~payload in
     let* source = source_of_arg args in
     let* recurrence = recurrence_of_arg args in
     let requested_at =
@@ -413,14 +381,8 @@ let handle_create ~tool_name ~start_time ctx args =
     in
     let schedule_id = string_opt args "schedule_id" in
     let expires_at = optional_float args "expires_at_unix" in
-    let approval_required =
-      (* DET-OK: omitted approval_required uses the domain risk policy; callers
-         must opt in only to stricter approval. *)
-      optional_bool args "approval_required" |> Option.value ~default:false
-    in
     Schedule_service.create ctx.config ?schedule_id ~requested_at ?expires_at
-      ~approval_required ~requested_by ~scheduled_by ~due_at ~payload ~risk_class
-      ~source ~recurrence ()
+      ~requested_by ~scheduled_by ~due_at ~payload ~source ~recurrence ()
     |> Result.map_error Schedule_service.service_error_to_string
   in
   match result with
@@ -566,11 +528,6 @@ let () =
            ~input_schema:schema.input_schema
            ~handler_binding:Tag_dispatch
            ~is_read_only
-           ~is_idempotent:is_read_only
-           ~effect_domain:
-             (if is_read_only
-              then Tool_catalog.Read_only
-              else Tool_catalog.Masc_workspace)
            ()))
     Tool_schemas_schedule.definitions
 ;;

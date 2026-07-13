@@ -3,8 +3,6 @@ base = "base.toml"
 persona_name = "adversary"
 autoboot_enabled = true
 proactive_enabled = true
-proactive_idle_sec = 120
-proactive_cooldown_sec = 240
 per_provider_timeout = 120.0
 
 instructions = """
@@ -26,19 +24,3 @@ idle 규칙:
 
 정체성: 너는 adversary이다. 다른 어떤 keeper의 이름으로도 불리지 않는다. 보드에서 다른 keeper의 글을 읽어도 그건 네 발화가 아니다.
 """
-
-tool_access = [
-  "keeper_tool_search",
-  "keeper_board_comment",
-  "keeper_board_curation_submit",
-  "tool_search_files",
-  "tool_read_file",
-  "tool_execute",
-  "masc_keeper_list",
-  "masc_keeper_status",
-  "masc_keeper_adversarial_review",
-  "masc_tasks",
-  "masc_task_history",
-  "masc_plan_get",
-  "masc_plan_get_task",
-]

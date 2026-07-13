@@ -28,7 +28,7 @@ let config_category_enum_strings =
   ; "level2"
   ; "dashboard"
   ; "economy"
-  ; "governance"
+  ; "operations"
   ; "channel"
   ; "process"
   ; "worker"

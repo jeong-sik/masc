@@ -219,12 +219,12 @@ let active_heartbeat_streams = Atomic.make 0
 let active_subscribe_streams = Atomic.make 0
 
 (** Compute directives for a keeper based on current workspace state.
-    Returns a list of string directives to include in HeartbeatAck.
+    Returns typed directives to include in HeartbeatAck.
     Reads agent paused state and unclaimed tasks from the filesystem. *)
 let compute_directives
       ~(workspace_config : Workspace_utils_backend_setup.config)
       ~(agent_name : string)
-  : string list
+  : Keeper_directive.t list
   =
   let masc_dir = Common.masc_dir_from_base_path ~base_path:workspace_config.base_path in
   let directives = ref [] in
@@ -239,7 +239,7 @@ let compute_directives
     try
       let json = Yojson.Safe.from_string (read_file_safe agent_file) in
       match Json_util.assoc_member_opt "paused" json with
-      | Some (`Bool true) -> directives := "pause" :: !directives
+      | Some (`Bool true) -> directives := Keeper_directive.Pause :: !directives
       | Some (`Bool false)
       | Some `Null | Some (`Int _) | Some (`Intlit _) | Some (`Float _) | Some (`String _) | Some (`Assoc _) | Some (`List _) | None -> ()
     with
@@ -264,7 +264,16 @@ let compute_directives
         | Masc_domain.Cancelled _ -> None)
     in
     match unclaimed with
-    | task_id :: _ -> directives := ("claim:" ^ task_id) :: !directives
+    | task_id :: _ ->
+      (match Keeper_id.Task_id.of_string task_id with
+       | Ok parsed_task_id ->
+         directives := Keeper_directive.Assign_task parsed_task_id :: !directives
+       | Error error ->
+         Log.Transport.error
+           "compute_directives: invalid task id %S for keeper %s: %s"
+           task_id
+           agent_name
+           error)
     | [] -> ());
   List.rev !directives
 ;;

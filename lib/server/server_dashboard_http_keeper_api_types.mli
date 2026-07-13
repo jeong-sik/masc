@@ -12,7 +12,6 @@
 val keeper_api_prefix : string
 
 (** Per-route URL suffixes for the keeper API. *)
-val keeper_suffix_tools : string
 val keeper_suffix_config : string
 val keeper_suffix_secrets : string
 val keeper_suffix_boot : string
@@ -52,7 +51,6 @@ val keeper_runtime_trace_cache_key :
     fields are tagged so absent values cannot collide with literal payloads. *)
 
 type keeper_post_route_kind =
-  | Keeper_post_tools
   | Keeper_post_config
   | Keeper_post_secrets
   | Keeper_post_boot

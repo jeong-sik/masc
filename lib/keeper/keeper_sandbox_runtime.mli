@@ -9,11 +9,6 @@
     Pure leaf module — no upward dependencies on other [Keeper_*]
     modules. *)
 
-type required_command_check =
-  { command : string
-  ; available : bool
-  }
-
 type docker_preflight =
   { ok : bool
   ; image : string
@@ -24,8 +19,6 @@ type docker_preflight =
   ; image_present : bool
   ; image_error : string option
   ; failure_classes : string list
-  ; required_commands : required_command_check list
-  ; missing_commands : string list
   ; next_actions : string list
   }
 
@@ -83,19 +76,14 @@ val docker_command_argv : unit -> string list
     execution. *)
 val docker_run_pull_never_args : unit -> string list
 
-(** Canonical operator action for a missing keeper sandbox image. *)
-val docker_image_missing_next_action : string
+(** Generic next action when Docker image inspection fails. *)
+val docker_image_inspect_next_action : string
 
 (** [docker_image_present ~image ~timeout_sec] checks whether the configured
     keeper sandbox image can be inspected locally. [Error message] includes
     daemon/socket access failures as well as missing-image failures. *)
 val docker_image_present : image:string -> timeout_sec:float -> (unit, string) result
-
-(** [true] when a docker run result/status/output proves Docker daemon
-    unavailability or back-pressure before command execution. Generic
-    [docker run] timeouts are terminal because the container command may have
-    already started and replaying it can duplicate side effects. *)
-val docker_run_looks_daemon_pressure : status:Unix.process_status -> output:string -> bool
+val docker_image_present_optional : image:string -> ?timeout_sec:float -> unit -> (unit, string) result
 
 (** Docker [--label] argv fragment for containers owned by the keeper
     sandbox runtime. *)
@@ -183,9 +171,8 @@ val docker_mount_failure_details :
 
 (** Docker network argv fragment and the MASC network label.  In
     particular, [Network_inherit] maps to [--network host] so the
-    container shares the host network namespace (needed for
-    `git clone` / `gh push` from keepers running under this profile;
-    see #10431).  The MASC label remains ["inherit"]. *)
+    container shares the host network namespace. The MASC label remains
+    ["inherit"]. *)
 val docker_network_args : Keeper_types_profile_sandbox.network_mode -> string list * string
 
 (** Docker [--ulimit nofile=<soft>:<hard>] argv fragment for keeper
@@ -315,13 +302,18 @@ val probe_container_state
   -> timeout_sec:float
   -> (docker_container_state, string) result
 
+val probe_container_state_optional
+  :  container_name:string
+  -> ?timeout_sec:float
+  -> unit
+  -> (docker_container_state, string) result
+
 (** Best-effort cleanup for stale MASC keeper sandbox containers under the
     same base path. Only containers with the keeper sandbox labels are
     considered. [already_absent] counts containers that disappeared after the
     labeled Docker snapshot and before inspect/removal completed. *)
 val cleanup_stale_containers
   :  ?now:float
-  -> ?max_age_sec:float
   -> base_path:string
   -> timeout_sec:float
   -> unit
@@ -330,9 +322,8 @@ val cleanup_stale_containers
 (** Interval-throttled wrapper used before launching keeper Docker
     containers. Concurrent fibers entering the same interval window are
     serialized by a CAS gate on the internal [last_cleanup_at] timestamp;
-    losers receive [None] and skip the sweep. Failed cleanup sweeps also
-    activate a longer daemon-failure backoff so an unhealthy Docker socket
-    does not emit the same cleanup WARN every interval. See
+    losers receive [None] and skip the sweep. A failed sweep remains an
+    explicit result and does not create a hidden retry delay. See
     {!reset_last_cleanup_for_tests}. *)
 val maybe_cleanup_stale_containers
   :  ?now:float
@@ -353,27 +344,30 @@ val docker_preflight : timeout_sec:float -> unit -> docker_preflight option
 val docker_preflight_to_yojson : docker_preflight -> Yojson.Safe.t
 val docker_preflight_failure_message : docker_preflight -> string
 
-(** Fail-fast keeper-up preflight for [sandbox_profile=docker].
-    This stays on the lightweight request path: it checks runtime
-    hardening and image presence, while the full required-command
-    inventory remains in [docker_preflight] for diagnostic/status surfaces. *)
-val ensure_keeper_startup_preflight
-  :  timeout_sec:float
-  -> sandbox_profile:Keeper_types_profile_sandbox.sandbox_profile
-  -> (unit, string) result
-
-(** Lightweight image-presence gate for per-command execution paths. The
-    startup preflight can pass and the image can later be pruned, so docker
-    execution paths call this before [docker run] to fail locally rather than
-    falling through to a registry pull. *)
+(** Lightweight image-presence check for the concrete execution path. Docker
+    execution calls it immediately before [docker run] so an absent image is
+    reported explicitly instead of triggering an implicit registry pull. It is
+    not Keeper lifecycle authority. *)
 val ensure_keeper_sandbox_image_present
   :  image:string
   -> timeout_sec:float
   -> (unit, string) result
 
+val ensure_keeper_sandbox_image_present_optional
+  :  image:string
+  -> ?timeout_sec:float
+  -> unit
+  -> (unit, string) result
+
 val ensure_keeper_sandbox_image_present_with_class
   :  image:string
   -> timeout_sec:float
+  -> (unit, classified_error) result
+
+val ensure_keeper_sandbox_image_present_with_class_optional
+  :  image:string
+  -> ?timeout_sec:float
+  -> unit
   -> (unit, classified_error) result
 
 val docker_image_preflight_error_code : classified_error -> string
@@ -385,6 +379,7 @@ val docker_image_preflight_failure_message : prefix:string -> classified_error -
     The fragment is empty when the env config has no seccomp profile
     set; the caller should still concat it into the docker argv. *)
 val ensure_keeper_sandbox_runtime : timeout_sec:float -> (string list, string) result
+val ensure_keeper_sandbox_runtime_optional : ?timeout_sec:float -> unit -> (string list, string) result
 
 (** Internals exposed for unit testing the docker inspect output
     parser (#10488 regression coverage).  The parser result is

@@ -29,7 +29,6 @@ else
   export MASC_TOOL_TIMEOUT_DEFAULT_SEC="${MASC_TOOL_TIMEOUT_DEFAULT_SEC:-$CURL_TIMEOUT_SEC}"
 fi
 export HARNESS_LOG_FILE="${HARNESS_LOG_FILE:-$LOG_FILE}"
-export MASC_KEEPER_BOOTSTRAP_MAX_ACTIVE_KEEPERS="${MASC_KEEPER_BOOTSTRAP_MAX_ACTIVE_KEEPERS:-32}"
 # shellcheck source=scripts/harness/lib/mcp_jsonrpc.sh
 source "${ROOT_DIR}/scripts/harness/lib/mcp_jsonrpc.sh"
 

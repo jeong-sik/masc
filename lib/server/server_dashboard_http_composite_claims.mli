@@ -39,8 +39,6 @@ val composite_execution_claim_no_eligible : Yojson.Safe.t -> bool
 val composite_execution_config_drift : Yojson.Safe.t -> bool
 val keeper_activation_readiness_json :
   Keeper_meta_contract.keeper_meta -> Yojson.Safe.t
-val composite_execution_contract_blocker_reason : Yojson.Safe.t -> string option
-val composite_execution_contract_blocked : Yojson.Safe.t -> bool
 val composite_execution_blocked : Yojson.Safe.t -> bool
 val composite_execution_receipt_present : Yojson.Safe.t -> bool
 val composite_execution_receipt_epoch : Yojson.Safe.t -> float option

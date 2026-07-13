@@ -19,19 +19,19 @@
 # lib/bounded_proc/bounded_proc.ml:37  — the canonical helper itself.
 lib/bounded_proc/bounded_proc.ml:37
 
-# lib/process/process_eio.ml:493, 531, 580 — `spawn_and_drain_{stdout,both}`
+# lib/process/process_eio.ml:559, 593, 634 — `spawn_and_drain_{stdout,both}`
 # and `spawn_and_drain_both_streaming`.
 # Private functions. Every caller (run_argv*, run_argv_with_status*,
 # run_argv_with_stdin*) wraps in `Eio.Time.with_timeout_exn clk timeout_sec`
 # + `Eio.Switch.run` and the process-wide spawn guard.
-lib/process/process_eio.ml:493
-lib/process/process_eio.ml:531
-lib/process/process_eio.ml:580
+lib/process/process_eio.ml:559
+lib/process/process_eio.ml:593
+lib/process/process_eio.ml:634
 
-# lib/process/process_eio.ml:1160 — native pipeline stage spawn. Wrapped in
+# lib/process/process_eio.ml:1206 — native pipeline stage spawn. Wrapped in
 # Eio.Time.with_timeout_exn + fresh Eio.Switch.run inside
 # run_argv_pipeline_with_status_split.
-lib/process/process_eio.ml:1160
+lib/process/process_eio.ml:1206
 
 # lib/server/lsp_process_manager.ml:170 — LSP child process. Lifetime is
 # bound to the LSP session switch; idle eviction handled by the LSP

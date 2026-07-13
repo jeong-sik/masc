@@ -77,24 +77,21 @@ let run_grpc_heartbeat_stream
 let log_grpc_heartbeat_stream_failure ~agent_name ~attempts = function
   | `Closed ->
     Log.Keeper.warn
-      "gRPC heartbeat stream closed for %s (attempt %d/%d)"
+      "gRPC heartbeat stream closed for %s (reconnect=%d)"
       agent_name
       (attempts + 1)
-      Env_config.KeeperGrpc.max_reconnect_attempts
   | `Error exn ->
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string HeartbeatFailures)
       ~labels:[ "keeper", agent_name; "site", "grpc_stream" ]
       ();
     Log.Keeper.warn
-      "gRPC heartbeat stream error for %s: %s (attempt %d/%d)"
+      "gRPC heartbeat stream error for %s: %s (reconnect=%d)"
       agent_name
       (Printexc.to_string exn)
       (attempts + 1)
-      Env_config.KeeperGrpc.max_reconnect_attempts
 ;;
 
-let max_reconnect_attempts = Env_config.KeeperGrpc.max_reconnect_attempts
 let reconnect_backoff_sec = Env_config.KeeperGrpc.reconnect_backoff_sec
 
 let run_grpc_heartbeat_fiber
@@ -145,16 +142,6 @@ let run_grpc_heartbeat_fiber
       let rec connect_loop attempts =
         if Atomic.get stop || Atomic.get close_ref
         then ()
-        else if attempts >= max_reconnect_attempts
-        then (
-          Otel_metric_store.inc_counter
-            Keeper_metrics.(to_string HeartbeatFailures)
-            ~labels:[ "keeper", agent_name; "site", "grpc_reconnect_exhausted" ]
-            ();
-          Log.Keeper.error
-            "gRPC heartbeat: exceeded %d reconnect attempts for %s, stopping"
-            max_reconnect_attempts
-            agent_name)
         else (
           let send, recv, close_stream =
             Masc_grpc_client.heartbeat_stream grpc_client ~sw ~env

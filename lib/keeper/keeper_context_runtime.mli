@@ -25,8 +25,7 @@ val token_count : working_context -> int
 val message_count : working_context -> int
 val context_ratio : working_context -> float
 val checkpoint_of_context : working_context -> Agent_sdk.Checkpoint.t
-val resume_checkpoint_of_context :
-  max_checkpoint_messages:int -> working_context -> Agent_sdk.Checkpoint.t
+val resume_checkpoint_of_context : working_context -> Agent_sdk.Checkpoint.t
 val oas_context_of_context : working_context -> Agent_sdk.Context.t
 val with_max_tokens : working_context -> int -> working_context
 val system_prompt_of_context : working_context -> string
@@ -65,34 +64,18 @@ val log_keeper_exn : label:string -> exn -> unit
 val checkpoint_max_tokens : Agent_sdk.Checkpoint.t -> fallback:int -> int
 
 val context_of_oas_checkpoint
-  :  ?repair_orphans:bool
-  -> max_checkpoint_messages:int
-  -> Agent_sdk.Checkpoint.t
+  :  Agent_sdk.Checkpoint.t
   -> primary_model_max_tokens:int
   -> working_context
 
 val save_oas_checkpoint
-  :  max_checkpoint_messages:int
-  -> multimodal_policy:Keeper_types_profile.multimodal_policy
+  :  multimodal_policy:Keeper_types_profile.multimodal_policy
   -> keeper_name:string
   -> session:session_context
   -> agent_name:string
   -> ctx:working_context
   -> generation:int
   -> (Agent_sdk.Checkpoint.t, string) result
-
-(** {1 Handoff Rollover} *)
-
-type handoff_rollover =
-  { updated_meta : keeper_meta
-  ; handoff_json : Yojson.Safe.t option
-  ; attempted : bool
-  ; failure_reason : string option
-  ; context_ratio : float
-  ; context_tokens : int
-  ; context_max : int
-  ; message_count : int
-  }
 
 type compaction_event =
   { attempted : bool
@@ -139,49 +122,10 @@ type overflow_retry_recovery =
   ; turn_generation : int
   }
 
-val maybe_rollover_oas_handoff
-  :  on_started:(unit -> unit)
-  -> base_dir:string
-  -> meta:keeper_meta
-  -> model:string
-  -> primary_model_max_tokens:int
-  -> current_turn_blocker_info:blocker_info option
-  -> checkpoint:Agent_sdk.Checkpoint.t option
-  -> handoff_rollover
-
-(** {2 Pure gate helpers (for testing)} *)
-
-type rollover_gate_decision =
-  | Skip of string
-  | Go of string
-
-(** [blocker_class_indicates_overflow klass] returns true when [klass] is
-    the typed equivalent of a provider context-overflow signal.  Pure —
-    keeper layer reasons over [blocker_class], never substring-matching
-    error phrasing. *)
-val blocker_class_indicates_overflow : blocker_class -> bool
-
-(** [classify_rollover_gate] is the pure decision function used by
-    [maybe_rollover_oas_handoff]. Exposed for unit tests.
-
-    Returns [Go reason] when a handoff should be attempted; [Skip reason]
-    otherwise. The [reason] string is surfaced in logs and [handoff_json]. *)
-val classify_rollover_gate
-  :  auto_handoff:bool
-  -> cooldown_elapsed:bool
-  -> ratio:float
-  -> handoff_threshold:float
-  -> last_outcome:proactive_cycle_outcome
-  -> last_blocker_info:blocker_info option
-  -> ?current_turn_blocker_info:blocker_info option
-  -> unit
-  -> rollover_gate_decision
-
 (** {1 Checkpoint Loading} *)
 
 val load_context_from_checkpoint
-  :  max_checkpoint_messages:int
-  -> trace_id:string
+  :  trace_id:string
   -> primary_model_max_tokens:int
   -> base_dir:string
   -> session_context * working_context option
@@ -277,7 +221,6 @@ val recover_latest_checkpoint_for_overflow_retry
 
 val generate_trace_id : ?now:float -> unit -> string
 val keeper_board_write_tool_names : string list
-val keeper_write_done : string list -> bool
 val keeper_action_kind_of_tool_names : string list -> string
 
 (** {1 Model and Workspace Utilities} *)
@@ -322,10 +265,6 @@ val build_keeper_system_prompt
   -> string
 
 val append_trait_clause : base:string -> clause:string -> string
-
-(** {1 Text Processing} *)
-
-val user_visible_reply_text : ?fallback:string -> string -> string
 
 (** {1 Fragment Detection (used by dashboard)} *)
 

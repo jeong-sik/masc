@@ -10,24 +10,16 @@ type t =
   | TotalCostUsd
   | TurnScheduled
   | TurnCompleted
-  | PacingShadowEvents
-  | PacingShadowNextDueSec
   | FailureRoute
   | FailureJudgmentOutcome
-  | FailureDrivenPause
   | IdleSeconds
-  | ContractViolations
   | MetricEmitDropped
   | ContextMaxObserved
   | TurnStarts
   | TurnReattempts
   | TurnRegressions
-  | TurnLivelockBlocks
-  | TurnLivelockBlocksRepeated
-  | TurnLivelockBlocksThresholdPark
   | TurnLatencyBucket
   | TurnLatencyByModelBucket
-  | ProviderCooldownSkip
   | ProviderCooldownRemainingSec
   | ProviderBlockDurationSec
   | TurnQueueDepth
@@ -63,7 +55,6 @@ type t =
   | MetaReadFailures
   | ApprovalQueueFailures
   | ApprovalResolutionSignal
-  | GuardsFailures
   | ProfileLoadFailures
   | CompactAuditFailures
   | CompactAuditRetentionParse
@@ -73,15 +64,12 @@ type t =
   | CrashPersistenceFailures
   | GenerationLineageFailures
   | KeepaliveSignalFailures
-  | BoardSignalWakeupCappedTotal
   | BoardSignalNoWakeTotal
   | BoardSignalAttentionCandidateTotal
   | MetaJsonFailures
   | ToolsOasFailures
-  | ToolsOasDeterministicFailures
   | TurnUpUpdateFailures
   | AgentToolDispatchRuntimeFailures
-  | CircuitBreakerTrips
   | PromptFailures
   | RunContextFailures
   | SearchFilesFailures
@@ -114,9 +102,7 @@ type t =
   | PersonaDriftMissing
   | WorkspaceInitFailures
   | PresenceSyncFailures
-  | SelfPreservationUniversal
   | StaleStormPaused
-  | ProviderTimeoutLoopPaused
   | TurnFailureStreakPaused
   | CycleExceptions
   | SnapshotReadFailures
@@ -141,12 +127,9 @@ type t =
   | ThinkingPersistFailures
   | CheckpointFailures
   | DecisionAuditRingOverflows
-  | ReplySkillRouteStrips
-  | ReplySkillRouteLinesRemoved
   | MemoryLlmSummaryOutcomes
   | MemoryLlmSummaryChainExhausted
   | HitlSummaryOutcomes
-  | UserVisibleReplySource
   | OasEnvKeyRejections
   | MemoryWriteFailures
   | MemoryLaneUnitFailures
@@ -177,41 +160,23 @@ type t =
   | CompactionCallbackRecoveries
   | EventBusDrain
   | SupervisorCleanupFailures
-  | SpawnSlotDenied
   | RegistryUpdateDropped
   | RegistryOrphanThresholdBreached
   | RegistryInvalidEntry
-  | DeadTotal
-  | AutoResumedTotal
-  | AutoResumeBlockedTotal
-  | SkipIdleWakeResumed
-  | EventQueueOverride
   | StimulusConsumed
   | UnsupportedStimulus
-  | NearExhaustionTotal
   | RestartAttempts
   | RestartOutcomes
-  | LastProductiveTs
-  | ProviderTimeoutStrike
-  | StaleTerminationTotal
-  | StaleTerminationByClass
-  | ProviderTimeoutWatchdogTermination
-  | StaleTerminationThresholdBreached
-  | StaleTerminationBatch
-  | StaleBroadcastEmitFailures
   | OasRunTimeout
-  | RuntimeSaturationSignal
   | RuntimeSelected
   | RuntimeRotation
   | ToolUseFailure
   | ToolNotAllowed
-  | TurnGateRejectedTerminal
   | ReceiptUnmappedDisposition
   | ExecuteNetworkUpgrade
   | ExecuteLocalExecution
   | DockerRuntimeDiscarded
   | ProactiveSkip
-  | NoProgressLoopDetected
   | NoProgressStreak
   | UsageTrust
   | UsageAnomalyReason
@@ -232,22 +197,11 @@ type t =
   | ToolCallParamCompleteness
   | KeeperTurnInstructionHash
   | KeeperToolCallRetryLoop
-  | AttemptWatchdogFired
   | ShellIrEffectTotal
-  | ToolExecutePrActionTotal
-  | GhClassificationTotal
-  | GatedGhLifecycleTotal
-  | GatedGhBlockTimeSeconds
-  | KeeperRepoMappingDefaultScopeAllowed
-  | KeeperRepoMappingDeniedUnregistered
-  | KeeperRepoMappingLoadError
-  | KeeperRepoMappingRepositoryIdentityMismatch
-  | KeeperRepoMappingRepositoryStoreError
   | RawTraceSinkDegraded
   | WireCaptureResponseSuppressed
   | WireCaptureWriteFailures
   | WireCaptureRecordSkipped
-  | ContinuationDeliveryOutcome
 
 val to_string : t -> string
 

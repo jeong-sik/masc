@@ -48,22 +48,6 @@ type t =
   (** Runtime aggregate outcome: all candidate attempts were exhausted.
           Operators should inspect per-attempt root causes instead of treating
           this as the root cause. *)
-  | Completion_contract_unsatisfied
-  (** The keeper turn completed its tool-use block but did not satisfy
-      the completion contract. Distinct from
-      [Completion_contract_no_progress] (no progress at all) and from
-      [Post_commit_ambiguous] (a tool may have committed side effects).
-      Operator action: review the contract and either widen the turn
-      or adjust the runtime. *)
-  | Completion_contract_no_progress
-  (** The keeper turn neither progressed nor produced a tool call. The
-      supervisor's no-progress latch fires on this condition. Operator
-      action: same as [Completion_contract_unsatisfied]; once the
-      operator resumes, the latch is cleared by
-      [Keeper_unified_turn_completion_contract.clear_for_operator_resume]. *)
-  | Post_commit_ambiguous
-  (** Provider failed after a mutating tool may have committed side
-          effects. Reconcile required. *)
   | Turn_budget_exhausted of turn_budget_exhausted
   (** Typed vocabulary for the legacy "turn_budget_exhausted(%d/%d)"
       free-text label that was emitted across 4+ call sites. The
@@ -133,9 +117,6 @@ val next_action : t -> string option
     - [External_cancel] → ["external_cancel"]
     - [Turn_wall_clock_timeout] → ["turn_wall_clock_timeout"]
     - [Runtime_attempts_exhausted] → ["runtime_attempts_exhausted"]
-    - [Completion_contract_no_progress] → ["completion_contract_no_progress"]
-    - [Completion_contract_unsatisfied] → ["completion_contract_unsatisfied"]
-    - [Post_commit_ambiguous] → ["post_commit_ambiguous"]
     - [Provider_error code] → [Keeper_turn_terminal_code.to_wire code]
     - [Unknown { raw_error = "" }] → ["unknown_error"]
     - [Unknown { raw_error }] → [raw_error] (verbatim) *)
@@ -144,8 +125,7 @@ val to_wire : t -> string
 (** Best-effort deserialiser. Canonical application strings round-trip
     exactly. Unrecognised strings first try
     [Keeper_turn_terminal_code.of_wire]; if that succeeds, the result
-    is wrapped via [of_termination_code] (which may itself collapse to
-    a non-Provider_error disposition such as [Completion_contract_unsatisfied]).
+    is wrapped via [of_termination_code].
     Otherwise [Unknown { raw_error = wire }] is returned. *)
 val of_wire : string -> t
 
@@ -167,7 +147,7 @@ val is_turn_budget_exhausted_wire : string -> bool
 
     A runtime cause maps to a non-[Provider_error] disposition only
     when the runtime classification fully determines the operator
-    action (e.g., [Tool_required_unsatisfied → Completion_contract_unsatisfied]).
+    action.
     Otherwise the runtime cause is preserved by wrapping with
     [Provider_error] so dashboards keep the typed runtime trace. *)
 val of_termination_code : Keeper_turn_terminal_code.t -> t

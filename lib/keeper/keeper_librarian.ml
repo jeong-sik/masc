@@ -195,6 +195,26 @@ let claim_source ~trace_id turn tool_call_id =
   { trace_id; turn; tool_call_id }
 ;;
 
+let claim_kind_field fields =
+  match List.assoc_opt wire_field_claim_kind fields with
+  | None -> Some None
+  | Some (`String raw) -> Option.map (fun kind -> Some kind) (claim_kind_of_string raw)
+  | Some _ -> None
+;;
+
+let optional_string_field_strict key fields =
+  match List.assoc_opt key fields with
+  | None -> Some None
+  | Some (`String value) -> Some (Some value)
+  | Some _ -> None
+;;
+
+let claim_id_field fields =
+  match optional_string_field_strict wire_field_claim_id fields with
+  | Some (Some id) when String.equal (String.trim id) "" -> None
+  | value -> value
+;;
+
 let fact_of_json ~trace_id ~now (json : Yojson.Safe.t) : fact option =
   match json with
   | `Assoc fields ->
@@ -202,52 +222,38 @@ let fact_of_json ~trace_id ~now (json : Yojson.Safe.t) : fact option =
        string_field wire_field_claim fields
        , string_field wire_field_category fields
        , int_field wire_field_source_turn fields
+       , claim_kind_field fields
+       , claim_id_field fields
+       , optional_string_field_strict wire_field_source_tool_call_id fields
      with
-     | Some claim, Some category_str, Some turn when turn >= 0 ->
-       let tool_call_id = optional_string_field wire_field_source_tool_call_id fields in
-      (* RFC-0259 §3.7 (P6): a stable conclusion slug the model emits so a reworded
-         re-extraction of the same conclusion reuses the id and UPSERTs the existing
-         row (defect E/F). Pass-through only — absent => [None] (conservative
-         fallback to [normalize_claim] keying); we never derive/hash an id in code,
-         which would be the string-classifier workaround the RFC rejects. *)
-      let claim_id = optional_string_field wire_field_claim_id fields in
-      (* RFC-0285 §3.1/§3.2(a): the producer-emitted origin tag. Pass-through only —
-         the librarian LLM classifies at the live-context boundary; deriving
-         claim_kind in code would be the read-time string-classifier workaround the
-         RFC rejects. Absent/unrecognized => [None], routing to the durable path. *)
-      let claim_kind =
-        Option.bind (optional_string_field wire_field_claim_kind fields) claim_kind_of_string
-      in
-      (* Parse-once at the producer boundary: the LLM's free-text category becomes
-         a typed [category] here, so no surface string reaches the store or the
-         consolidator (RFC-0244 §2.3 / #21241; RFC-0247 §2.5). The category drives
-         retention (RFC-0247 §2.3) — an [Ephemeral] coordination claim is born
-         with a short TTL, durable knowledge with none. RFC-0247 also stopped
-         parsing the LLM's [confidence] number: the score it fed is gone. *)
+     | ( Some claim
+       , Some category_str
+       , Some turn
+       , Some claim_kind
+       , Some claim_id
+       , Some tool_call_id )
+       when turn >= 0 ->
+      (* Parse the provider's category once at the producer boundary. It remains
+         context and never creates a validity horizon. *)
       let category = category_of_string category_str in
-      (* No code-side external-ref inference from claim prose. The claim text is
-         context for the model; it may mention a PR/issue/task as history or a
-         durable lesson, so retention must not be changed by a string matcher. *)
-      let external_ref = None in
       Some
         { claim
         ; category
-        ; external_ref
         ; claim_kind
          ; source = claim_source ~trace_id turn tool_call_id
          (* Tier-1 (per-keeper) facts carry no distinct-keeper corroboration set;
             the consolidator populates observed_by only on promotion (RFC-0244). *)
          ; observed_by = []
          ; first_seen = now
-         ; valid_until = fact_valid_until ~now ~external_ref ~claim_kind category
+         ; valid_until = None
          ; last_verified_at = None (* RFC-0285 §3.3 / RFC-0259 P7: re-extraction must not advance last_verified_at *)
          ; schema_version
          ; claim_id
          }
-     | (Some _, Some _, Some _)
-     | (Some _, Some _, None)
-     | (Some _, None, _)
-     | (None, _, _) -> None)
+     | (Some _, Some _, Some _, _, _, _)
+     | (Some _, Some _, None, _, _, _)
+     | (Some _, None, _, _, _, _)
+     | (None, _, _, _, _, _) -> None)
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
 ;;
 

@@ -216,7 +216,6 @@ this section keeps auth credential operations backend-neutral in the meantime.
 ## Related
 
 - `docs/observability/runtime-metrics.md` -- same observability pattern for runtime routing decisions.
-- `docs/observability/goal-loop-verify-pipeline.md` -- the Verify artifact contract that consumes production metric snapshots.
 - `RFC-0019 Keeper Credential Unification` is withdrawn; this auth metric surface
   remains scoped to bearer/admin credential aliasing, not repository GitHub
   identity materialization.

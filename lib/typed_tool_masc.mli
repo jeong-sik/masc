@@ -23,10 +23,8 @@ val create :
   handler:('input -> ('output, string) result) ->
   encode:('output -> Yojson.Safe.t) ->
   ?is_read_only:bool ->
-  ?is_destructive:bool ->
   ?is_idempotent:bool ->
   ?visibility:Tool_catalog.visibility ->
-  ?effect_domain:Tool_catalog.effect_domain ->
   unit ->
   ('input, 'output) t
 

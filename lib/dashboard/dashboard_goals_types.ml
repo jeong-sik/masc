@@ -12,11 +12,10 @@
     - [Dashboard_goals_types_accessor]   — types + task/list/receipt/trust
                                             inspectors + iso/duration helpers
     - [Dashboard_goals_types_attainment] — metric tokenizer + attainment JSON
-    - [Dashboard_goals_types_health]     — health badges, FSM, disposition
+    - [Dashboard_goals_types_health]     — explicit Goal FSM + linkage helpers
     - [Dashboard_goals_types_timeline]   — color helpers, goal-detail JSON,
                                             timeline composition
-    - [Dashboard_goals_types_builder]    — convergence, runtime-trust
-                                            fallback, recursive build_tree *)
+    - [Dashboard_goals_types_builder]    — recursive build_tree *)
 
 include Dashboard_goals_types_accessor
 include Dashboard_goals_types_attainment

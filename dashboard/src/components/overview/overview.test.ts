@@ -524,14 +524,13 @@ describe('deriveKeeperAttentionReason', () => {
     expect(reason.act).toBe('상태 상세')
   })
 
-  it('marks continue_gate keepers as warn with approval action', () => {
+  it('uses runtime blocker semantics without a separate continuation approval state', () => {
     const reason = deriveKeeperAttentionReason(makeKeeper({
       name: 'gate',
-      runtime_blocker_continue_gate: true,
-      runtime_blocker_class: 'ambiguous_post_commit_timeout',
+      runtime_blocker_class: 'turn_timeout',
     }))
     expect(reason.sev).toBe('warn')
-    expect(reason.act).toBe('승인 검토')
+    expect(reason.act).toBe('상태 상세')
   })
 
   it('marks critical lifecycle states as bad', () => {
@@ -568,12 +567,12 @@ describe('deriveKeeperAttentionReason', () => {
     expect(reason.act).toBe('최근 오류 확인')
   })
 
-  it('humanizes known completion-contract composite reason codes', () => {
+  it('humanizes known runtime reason codes', () => {
     const reason = deriveKeeperAttentionReason(makeKeeper({
       name: 'composite',
-      attention_reason: 'passive_only',
+      attention_reason: 'provider_runtime_error',
     }))
-    expect(reason.text).toBe('진행 작업 없는 수동 응답')
+    expect(reason.text).toBe('런타임 호출 오류')
   })
 })
 
@@ -827,9 +826,8 @@ function makeFusionRun(partial: Partial<FusionRunRecord>): FusionRunRecord {
 
 describe('computeOverviewDigest', () => {
   it('returns zeroed digest with no data', () => {
-    const digest = computeOverviewDigest([], [], [])
-    expect(digest.openApprovals).toBe(0)
-    expect(digest.approvalsCritical).toBe(false)
+    const digest = computeOverviewDigest(0, [], [])
+    expect(digest.openGateRequests).toBe(0)
     expect(digest.topGoals).toEqual([])
     expect(digest.topGoalLabel).toBeNull()
     expect(digest.fusionRunning).toBe(0)
@@ -838,32 +836,18 @@ describe('computeOverviewDigest', () => {
     expect(digest.fusionLatest).toBeNull()
   })
 
-  it('counts operator-awaiting keepers as open approvals', () => {
+  it('uses the exact Gate queue count supplied by its SSOT', () => {
     const digest = computeOverviewDigest(
-      [
-        makeKeeper({ name: 'gate', runtime_blocker_continue_gate: true }),
-        makeKeeper({ name: 'op', runtime_blocker_class: 'awaiting_operator' }),
-        makeKeeper({ name: 'fine' }),
-      ],
+      2,
       [],
       [],
     )
-    expect(digest.openApprovals).toBe(2)
-    expect(digest.approvalsCritical).toBe(false)
-  })
-
-  it('flags approvals critical when a keeper is in a bad runtime state', () => {
-    const digest = computeOverviewDigest(
-      [makeKeeper({ name: 'dead', lifecycle_phase: 'Dead', runtime_blocker_class: 'exception' })],
-      [],
-      [],
-    )
-    expect(digest.approvalsCritical).toBe(true)
+    expect(digest.openGateRequests).toBe(2)
   })
 
   it('orders top goals by priority and labels the leader by due date', () => {
     const digest = computeOverviewDigest(
-      [],
+      0,
       [
         makeGoal({ id: 'low', priority: 2 }),
         makeGoal({ id: 'lead', priority: 9, due_date: '2026-07-01' }),
@@ -876,13 +860,13 @@ describe('computeOverviewDigest', () => {
   })
 
   it('falls back to priority label when the leader has no due date', () => {
-    const digest = computeOverviewDigest([], [makeGoal({ id: 'lead', priority: 8, due_date: null })], [])
+    const digest = computeOverviewDigest(0, [makeGoal({ id: 'lead', priority: 8, due_date: null })], [])
     expect(digest.topGoalLabel).toBe('P8')
   })
 
   it('summarizes fusion runs by status and picks the newest as latest', () => {
     const digest = computeOverviewDigest(
-      [],
+      0,
       [],
       [
         makeFusionRun({ runId: 'older', status: 'completed', startedAt: 100 }),
@@ -909,7 +893,7 @@ describe('Overview prototype surface', () => {
     const head = container.querySelector('[data-testid="overview-head"]')
     expect(head?.querySelector('.ov-eyebrow')?.textContent).toBe('운영 홈')
     expect(head?.querySelector('h1')?.textContent).toBe('지금, 전체')
-    expect(head?.querySelector('.ov-sub')?.textContent).toBe('fleet 전체 — 목표 · 승인 · 심의 · 연결 한눈에')
+    expect(head?.querySelector('.ov-sub')?.textContent).toBe('fleet 전체 — 목표 · Gate · Fusion · 연결 한눈에')
   })
 
   it('renders exactly 7 cross-surface KPI cells with the prototype labels', () => {
@@ -920,10 +904,10 @@ describe('Overview prototype surface', () => {
     expect(labels).toEqual([
       '실행 중 keeper',
       '주의 필요',
-      '열린 승인',
+      '열린 Gate',
       '최우선 목표',
       '활성 커넥터',
-      '예약 승인',
+      '예약 HITL',
       '진행 심의',
     ])
   })
@@ -949,7 +933,7 @@ describe('Overview prototype surface', () => {
     const titles = [...cards].map(c => c.querySelector('.ov-dcard-h h3')?.textContent)
     expect(titles).toEqual([
       '작업 · 목표',
-      '승인 큐',
+      'Gate · HITL',
       '예약 · 자동화',
       'Fusion 심의',
       '보드',

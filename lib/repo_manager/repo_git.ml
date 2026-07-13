@@ -45,6 +45,80 @@ type status_summary = {
   conflicted_files : int;
 }
 
+let empty_status_summary =
+  { changed_files = 0
+  ; staged_files = 0
+  ; unstaged_files = 0
+  ; untracked_files = 0
+  ; conflicted_files = 0
+  }
+;;
+
+let is_porcelain_status_char = function
+  | ' ' | 'M' | 'A' | 'D' | 'R' | 'C' | 'T' | 'U' | '?' | '!' -> true
+  | _ -> false
+;;
+
+let is_unmerged_status x y =
+  match x, y with
+  | ('D', 'D')
+  | ('A', 'U')
+  | ('U', 'D')
+  | ('U', 'A')
+  | ('D', 'U')
+  | ('A', 'A')
+  | ('U', 'U') -> true
+  | _ -> false
+;;
+
+let update_status_summary summary line =
+  if String.length line < 3
+  then Stdlib.Error "git status --porcelain=v1 returned a malformed status row"
+  else
+    let x = line.[0] in
+    let y = line.[1] in
+    let path = String.sub line 2 (String.length line - 2) |> String.trim in
+    if not (is_porcelain_status_char x && is_porcelain_status_char y)
+    then Stdlib.Error (Printf.sprintf "git status --porcelain=v1 returned unknown status row %S" line)
+    else if String.equal path ""
+    then Stdlib.Error "git status --porcelain=v1 returned a status row without a path"
+    else
+      let untracked = Char.equal x '?' && Char.equal y '?' in
+      let ignored = Char.equal x '!' && Char.equal y '!' in
+      let conflicted = is_unmerged_status x y in
+      if ignored
+      then Stdlib.Ok summary
+      else if
+        ((Char.equal x '?' || Char.equal y '?') && not untracked)
+        || ((Char.equal x '!' || Char.equal y '!') && not ignored)
+        || ((Char.equal x 'U' || Char.equal y 'U') && not conflicted)
+      then
+        Stdlib.Error
+          (Printf.sprintf
+             "git status --porcelain=v1 returned unknown status row %S"
+             line)
+      else
+        let staged = not conflicted && not untracked && not (Char.equal x ' ') in
+        let unstaged = not conflicted && not untracked && not (Char.equal y ' ') in
+        Stdlib.Ok
+          { changed_files = summary.changed_files + 1
+          ; staged_files = summary.staged_files + if staged then 1 else 0
+          ; unstaged_files = summary.unstaged_files + if unstaged then 1 else 0
+          ; untracked_files = summary.untracked_files + if untracked then 1 else 0
+          ; conflicted_files = summary.conflicted_files + if conflicted then 1 else 0
+          }
+;;
+
+let status_summary_of_porcelain_lines lines =
+  let ( let* ) = Result.bind in
+  List.fold_left
+    (fun result line ->
+       let* summary = result in
+       update_status_summary summary line)
+    (Stdlib.Ok empty_status_summary)
+    lines
+;;
+
 let run_git ~cwd ?(env = []) ?timeout_sec args : (string list, string) result =
   let argv = "git" :: "-C" :: cwd :: args in
   let envp = merge_env env in
@@ -229,18 +303,4 @@ let status_summary ~repository =
       ["--no-optional-locks"; "status"; "--porcelain=v1"; "--untracked-files=normal"]
   with
   | Stdlib.Error msg -> Stdlib.Error msg
-  | Stdlib.Ok lines -> (
-      match
-        Masc_exec.Output_parse.summarize_git_status_porcelain
-          (String.concat "\n" lines)
-      with
-      | Error msg -> Error msg
-      | Ok summary ->
-          Ok
-            {
-              changed_files = summary.changed_files;
-              staged_files = summary.staged_files;
-              unstaged_files = summary.unstaged_files;
-              untracked_files = summary.untracked_files;
-              conflicted_files = summary.conflicted_files;
-            })
+  | Stdlib.Ok lines -> status_summary_of_porcelain_lines lines

@@ -160,108 +160,23 @@ let surface_orphan_tasks_gauge workspace_config =
          (Float.of_int count))
     counts
 
-(** Build the zero-zombie cleanup consumer.
-    Runs Workspace.cleanup_zombies and logs if zombies were found. *)
-let make_zero_zombie_consumer ~sw ~workspace_config
+(** Build the legacy zero-zombie pulse consumer as an observation-only orphan
+    surfacer. Inactivity is not an objective lifecycle transition, so a pulse
+    must never stop a keeper, release its task, or delete its registry file. *)
+let make_zero_zombie_consumer ~sw:_ ~workspace_config
     : (module Pulse.Consumer) =
-  let cleanup_running = Atomic.make false in
   (module struct
     let name = "zero-zombie-cleanup"
     let should_act _beat = true
     let on_beat _beat =
-      (* Run GC in background fiber to avoid blocking Pulse consumers.
-         Heartbeat and other consumers proceed without waiting for
-         cleanup_zombies I/O. See RFC #3646 M5 / #3626. *)
-      (* Typed outcome for stale-claim release. Carries a structured
-         [reason] so the catch-all wildcard and untyped [Printexc.to_string]
-         warn cannot hide error classification.  benign := matches
-         {!Workspace_resilience.ZeroZombie.is_benign_error} (transient FS race
-         or MASC-not-initialized at startup), in which case operators
-         expect no log noise.
-
-         Kept local to the consumer body — release_stale_claims itself
-         still raises and is wrapped here, because lifting Result into
-         the public signature would force every test-suite caller
-         (test_workspace.ml:909-964) to be rewritten.  Follow-up RFC =
-         typed recovery consumer can decide whether to escalate to operators
-         (see project_keeper-reaction-chain-break). *)
-      let module Stale_claim_outcome = struct
-        type t =
-          | Released of (string * string) list
-          | Empty
-          | Failed of { benign : bool; reason : string }
-      end in
-      let release_stale_claims_typed () : Stale_claim_outcome.t =
-        let ttl = Env_config_runtime.Claim.ttl_seconds in
-        match
-          Workspace_task_schedule.release_stale_claims workspace_config ~ttl_seconds:ttl
-        with
-        | exception (Eio.Cancel.Cancelled _ as e) -> raise e
-        | exception exn ->
-          Stale_claim_outcome.Failed
-            { benign = Workspace_resilience.ZeroZombie.is_benign_error exn
-            ; reason = Printexc.to_string exn
-            }
-        | [] -> Stale_claim_outcome.Empty
-        | released -> Stale_claim_outcome.Released released
-      in
-      if not (Atomic.compare_and_set cleanup_running false true)
-      then Log.Orchestrator.debug "[zombie] cleanup already running; skipping beat"
-      else
-        Eio.Fiber.fork ~sw (fun () ->
-          Fun.protect
-            ~finally:(fun () -> Atomic.set cleanup_running false)
-            (fun () ->
-              try
-                let zombie_result = Workspace.cleanup_zombies workspace_config in
-                (* Explicit variant match — no catch-all.  Adding a new
-                   [cleanup_zombie_result] constructor must surface as a
-                   compile error here, not a silent debug. *)
-                (match zombie_result with
-                 | Workspace.Cleaned { count = 0; _ } ->
-                     Log.Orchestrator.debug "[zombie] no zombies to clean"
-                 | Workspace.Cleaned { count; names; _ } ->
-                     let status =
-                       Printf.sprintf "Cleaned up %d zombie agent(s): %s"
-                         count (String.concat ", " names)
-                     in
-                     Log.Orchestrator.info "[zombie] %s" status
-                 | Workspace.No_zombies ->
-                     Log.Orchestrator.debug "[zombie] no zombies to clean"
-                 | Workspace.No_agents_dir ->
-                     (* Misconfiguration signal: workspace has no agents/ directory.
-                        Distinct from No_zombies — operators should know GC
-                        ran against a missing target. *)
-                     Log.Orchestrator.warn
-                       "[zombie] skipped: agents directory missing for workspace");
-                (match release_stale_claims_typed () with
-                 | Stale_claim_outcome.Empty ->
-                     Log.Orchestrator.debug "[stale-claims] no stale claims to release"
-                 | Stale_claim_outcome.Released released ->
-                     Log.Orchestrator.info "[stale-claims] released %d stale task(s): %s"
-                       (List.length released)
-                       (String.concat ", " (List.map (fun (tid, agent) ->
-                         Printf.sprintf "%s(%s)" tid agent) released))
-                 | Stale_claim_outcome.Failed { benign = true; reason } ->
-                     (* Same policy as zombie-loop benign-error filter:
-                        startup FS races / MASC-not-initialized should not
-                        page operators. *)
-                     Log.Orchestrator.debug "[stale-claims] benign: %s" reason
-                 | Stale_claim_outcome.Failed { benign = false; reason } ->
-                     (* Real failure — not silent.  Promoted from .warn to
-                        .error so it surfaces past the default WARN→DEBUG
-                        demote of repeated lines. *)
-                     Log.Orchestrator.error
-                       "[stale-claims] non-benign failure: %s"
-                       reason);
-                (* RFC-0294 PR-4: refresh the orphan-task gauge each beat, after
-                   cleanup + stale-claim release so it reflects post-GC state. The
-                   surrounding catch (benign filter) covers a surfacer fault. *)
-                surface_orphan_tasks_gauge workspace_config
-              with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-                if not (Workspace_resilience.ZeroZombie.is_benign_error exn) then
-                  Log.Orchestrator.warn "[zombie] error: %s" (Printexc.to_string exn)));
-      Ok ()
+      (try surface_orphan_tasks_gauge workspace_config; Ok () with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+         let msg =
+           Printf.sprintf "orphan observation failed: %s" (Printexc.to_string exn)
+         in
+         Log.Orchestrator.warn "%s" msg;
+         Error msg)
   end)
 
 (** Start the orchestrator background services using Pulse.
@@ -270,7 +185,7 @@ let start ~sw ~proc_mgr ~clock ?domain_mgr workspace_config =
   let config = load_config () in
 
   (* Zero-Zombie cleanup: always enabled, configurable interval *)
-  let neo4j_interval = Env_config_governance.Timeouts.neo4j_timeout_sec in
+  let neo4j_interval = Env_config_runtime_services.Timeouts.neo4j_timeout_sec in
   Log.Orchestrator.debug "zero-zombie cleanup enabled (interval: %.0fs)" neo4j_interval;
   let zombie_consumer = make_zero_zombie_consumer ~sw ~workspace_config in
   let dedup_consumer = Channel_gate.make_dedup_cleanup_consumer () in

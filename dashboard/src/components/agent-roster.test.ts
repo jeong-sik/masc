@@ -162,7 +162,6 @@ describe('rosterStateNote — RFC-0135 §1.1 typed-state conditioning', () => {
           kind: 'approval_required',
           source: 'audit_approvals',
           tool: 'Write',
-          risk: 'high',
           disposition_reason: 'waiting_approval',
         },
       }),
@@ -170,8 +169,8 @@ describe('rosterStateNote — RFC-0135 §1.1 typed-state conditioning', () => {
       null,
     )
     expect(note).toEqual({
-      label: '승인 대기',
-      text: '도구 Write · 위험도 high · 사유 waiting_approval',
+      label: 'HITL 대기',
+      text: '작업 Write · 사유 waiting_approval',
     })
   })
 
@@ -848,14 +847,11 @@ describe('AgentRoster live-only cards', () => {
     expect(text).toContain('runtime rows')
   })
 
-  it('renders admission capacity only from the live operator projection', async () => {
+  it('renders the exact inference observation from the live operator projection', async () => {
     operatorSnapshot.value = {
-      admission_queue: {
-        throttle_owner: 'oas_runtime',
-        max_concurrent: 6,
+      inference_inflight: {
+        boundary_owner: 'oas_runtime',
         active: 4,
-        available: 2,
-        queue_depth: 1,
       },
     } as any
 
@@ -863,24 +859,9 @@ describe('AgentRoster live-only cards', () => {
       render(html`<${AgentRoster} />`, container)
     })
 
-    const capacity = container.querySelector('[data-testid="fleet-admission-capacity"]')
-    expect(capacity?.textContent).toContain('4 / 6')
-    expect(capacity?.textContent).toContain('oas_runtime')
-  })
-
-  it('shows an explicit diagnostic when the admission projection is invalid', async () => {
-    operatorSnapshot.value = {
-      admission_queue: null,
-      admission_queue_error: 'Admission projection counters are inconsistent.',
-    } as any
-
-    await act(async () => {
-      render(html`<${AgentRoster} />`, container)
-    })
-
-    expect(container.querySelector('[data-testid="fleet-admission-capacity"]')).toBeNull()
-    expect(container.querySelector('[data-testid="fleet-admission-error"]')?.textContent)
-      .toContain('counters are inconsistent')
+    const observation = container.querySelector('[data-testid="fleet-inference-inflight"]')
+    expect(observation?.textContent).toContain('4')
+    expect(observation?.textContent).toContain('oas_runtime')
   })
 
   it('owns the Keeper Fleet h1 when the generic monitoring header is absent', async () => {

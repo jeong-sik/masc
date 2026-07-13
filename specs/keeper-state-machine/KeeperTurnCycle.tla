@@ -8,8 +8,7 @@
 (* a 3-axis machine:                                                        *)
 (*   - turn_phase      : prompting | routing | executing | compacting |    *)
 (*                       finalizing | exhausted                            *)
-(*   - decision_stage  : undecided | guard_ok | gate_rejected |            *)
-(*                       tool_policy_selected                              *)
+(*   - decision_stage  : undecided | guard_ok | tool_policy_selected       *)
 (*   - runtime_state   : idle | selecting | trying | done | exhausted      *)
 (*                                                                         *)
 (* Turn idle is represented by [turn_live = FALSE] plus cleared substate.  *)
@@ -17,7 +16,6 @@
 (*   - keeper_registry.ml                                                  *)
 (*   - keeper_agent_run.ml                                                 *)
 (*   - keeper_unified_turn.ml                                              *)
-(*   - keeper_guards.ml                                                    *)
 (***************************************************************************)
 (*                                                                         *)
 (* OCaml <-> TLA+ mapping (see #8642 family):                              *)
@@ -31,7 +29,7 @@
 (*   measurement_bound    | observation.measurement_bound : bool     | record field *)
 (*   selected_model_bound | observation.selected_model = Some _      | record field *)
 (*                                                                         *)
-(* Authoritative write points -- 4 OCaml files cooperate.                  *)
+(* Authoritative write points -- 3 OCaml files cooperate.                  *)
 (* Line numbers verified against main as of 2026-04-28. Function names are *)
 (* stable identifiers; lines drift across edits and are informational only.*)
 (*                                                                         *)
@@ -42,7 +40,6 @@
 (*     line 544   set_turn_runtime_state                                   *)
 (*     line 566   set_turn_selected_model                                  *)
 (*     line 575   prepare_turn_retry_after_compaction                      *)
-(*     line 590   mark_turn_gate_rejected_by_name                          *)
 (*     line 614   mark_turn_finished                                       *)
 (*                                                                         *)
 (*   lib/keeper/keeper_unified_turn.ml -- top-level turn orchestration     *)
@@ -65,16 +62,11 @@
 (*        SelectingRequiresToolPolicy and avoids the idle-to-trying jump   *)
 (*        that PR #14153's runtime guard rejects.)                         *)
 (*                                                                         *)
-(*   lib/keeper/keeper_guards.ml -- pre_tool_use override / approval gate  *)
-(*     line 143   mark_turn_gate_rejected_by_name  (GateRejected)          *)
-(*       (called from inside [emit_gate_event]; #11634 added the OCaml-side*)
-(*        navigation block citing this spec)                               *)
-(*                                                                         *)
 (* Composite contract (why this spec exists alongside the 1-axis specs):   *)
 (*                                                                         *)
 (*   - KeeperDecisionPipeline   covers decision_stage in isolation.        *)
 (*   - KeeperRuntimeLifecycle   covers runtime_state in isolation.         *)
-(*   - KeeperConditionsGovernPhase covers handoff signal in isolation.    *)
+(*   - handoff is an orthogonal lifecycle event outside this turn model.  *)
 (*                                                                         *)
 (*   This spec is the COMPOSITE -- the 3-axis invariants below             *)
 (*     (SelectingRequiresToolPolicy, ExecutingRequiresTrying,              *)
@@ -153,14 +145,13 @@ vars ==
 \* conditional on specific phase membership and are not affected.
 TurnPhaseSet == {"idle", "prompting", "routing", "executing",
                  "compacting", "finalizing", "exhausted"}
-DecisionSet  == {"undecided", "guard_ok", "gate_rejected", "tool_policy_selected"}
+DecisionSet  == {"undecided", "guard_ok", "tool_policy_selected"}
 RuntimeSet   == {"idle", "selecting", "trying", "done", "exhausted"}
 ActionSet    == {
     "StartTurn",
     "BindMeasurement",
     "GuardOk",
     "SelectToolPolicy",
-    "GateRejected",
     "RuntimeTrying",
     "RuntimeDone",
     "RuntimeExhausted",
@@ -171,7 +162,6 @@ ActionSet    == {
 InvariantSet == {
     "NoLiveTurnClearsState",
     "IdleRequiresNotLive",
-    "GateRejectedRequiresFinalizing",
     "SelectingRequiresToolPolicy",
     "ExecutingRequiresTrying",
     "CompactingRequiresTrying",
@@ -240,19 +230,6 @@ SelectToolPolicy ==
     /\ decision_stage' = "tool_policy_selected"
     /\ runtime_state' = "selecting"
     /\ UNCHANGED <<turn_live, turn_phase, measurement_bound,
-                    selected_model_bound>>
-
-\* keeper_guards.ml: override/approval_required short-circuits during the live
-\* pre_tool_use attempt. The runtime preserves the current trying edge and only
-\* moves the turn into finalizing.
-GateRejected ==
-    /\ turn_live
-    /\ turn_phase = "executing"
-    /\ decision_stage = "tool_policy_selected"
-    /\ runtime_state = "trying"
-    /\ turn_phase' = "finalizing"
-    /\ decision_stage' = "gate_rejected"
-    /\ UNCHANGED <<turn_live, runtime_state, measurement_bound,
                     selected_model_bound>>
 
 \* keeper_unified_turn.ml: retry_loop sets Runtime_trying before OAS run.
@@ -324,7 +301,6 @@ Next ==
     \/ BindMeasurement
     \/ GuardOk
     \/ SelectToolPolicy
-    \/ GateRejected
     \/ RuntimeTrying
     \/ RuntimeDone
     \/ RuntimeExhausted
@@ -369,9 +345,6 @@ NoLiveTurnClearsState ==
 IdleRequiresNotLive ==
     turn_phase = "idle" => ~turn_live
 
-GateRejectedRequiresFinalizing ==
-    decision_stage = "gate_rejected" => turn_phase = "finalizing"
-
 SelectingRequiresToolPolicy ==
     runtime_state = "selecting" =>
         /\ turn_live
@@ -400,7 +373,6 @@ Safety ==
     /\ TypeOK
     /\ NoLiveTurnClearsState
     /\ IdleRequiresNotLive
-    /\ GateRejectedRequiresFinalizing
     /\ SelectingRequiresToolPolicy
     /\ ExecutingRequiresTrying
     /\ CompactingRequiresTrying

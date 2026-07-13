@@ -11,18 +11,14 @@ let reaction_ledger_record_failed_label = "record_failed"
 
 let ( let* ) = Result.bind
 
-let unsupported_payload_labels ~phase (request : Schedule_domain.schedule_request) =
-  [ "phase", phase
-  ; "risk_class", Schedule_domain.risk_class_to_string request.risk_class
-  ]
-;;
+let unsupported_payload_labels ~phase = [ "phase", phase ]
 
-let record_unsupported_payload_dispatch request rejection =
+let record_unsupported_payload_dispatch _request rejection =
   match rejection with
   | Schedule_payload_projection.Dispatch_unsupported_kind _ ->
     Otel_metric_store.inc_counter
       Otel_metric_store.metric_schedule_payload_unsupported_total
-      ~labels:(unsupported_payload_labels ~phase:"dispatch" request)
+      ~labels:(unsupported_payload_labels ~phase:"dispatch")
       ()
   | Schedule_payload_projection.Dispatch_invalid_payload _
   | Schedule_payload_projection.Dispatch_invalid_supported_payload _ -> ()
@@ -216,7 +212,6 @@ let schedule_meta_json (request : Schedule_domain.schedule_request) payload user
     ; "payload_digest", `String (Schedule_domain.payload_digest request.payload)
     ; "requested_by", `String request.requested_by.id
     ; "scheduled_by", `String request.scheduled_by.id
-    ; "risk_class", `String (Schedule_domain.risk_class_to_string request.risk_class)
     ; "due_at", `Float request.due_at
     ]
   in

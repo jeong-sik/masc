@@ -19,7 +19,6 @@
 
 type caller =
   | Anti_rationalization
-  | Governance_judge
   | Operator_judge
   | Unknown of string
 
@@ -33,7 +32,6 @@ let dashboard_judge_default_sec = 180.0
 
 let caller_key = function
   | Anti_rationalization -> "anti_rationalization"
-  | Governance_judge -> "governance_judge"
   | Operator_judge -> "operator_judge"
   | Unknown caller -> caller
 ;;
@@ -41,14 +39,13 @@ let caller_key = function
 (** Exported for tests that pin the per-caller default table. *)
 let known_callers () =
   [ Anti_rationalization
-  ; Governance_judge
   ; Operator_judge
   ]
 ;;
 
 let known_default_sec = function
   | Anti_rationalization -> Some 180.0
-  | Governance_judge | Operator_judge -> Some dashboard_judge_default_sec
+  | Operator_judge -> Some dashboard_judge_default_sec
   | Unknown _ -> None
 ;;
 

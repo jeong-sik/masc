@@ -140,19 +140,6 @@ describe('deriveOperationalInsight', () => {
     expect(insight.headline).toContain('runtime exhaustion')
   })
 
-  it('reports warn from the typed gate_rejected stage', () => {
-    const insight = deriveOperationalInsight(
-      makeSnapshot({
-        decision: { stage: 'gate_rejected' },
-      }),
-      noObservations,
-      now,
-    )
-    expect(insight.tone).toBe('warn')
-    expect(insight.headline).toContain('Guardrail')
-    expect(insight.evidence).toEqual(['KDP gate_rejected', 'KTC idle'])
-  })
-
   it('reports warn when a lane is stalled', () => {
     const stalledLanes: ObservedLaneSummary[] = [{
       field: 'phase',
@@ -390,15 +377,6 @@ describe('deriveOperationalInsight', () => {
     // !is_live with last_outcome → nextExpectedStep runs
     // phase=Stable, no special case → default return
     expect(insight.nextStep.length).toBeGreaterThan(0)
-  })
-
-  it('gives correct nextStep for gate_rejected', () => {
-    const insight = deriveOperationalInsight(
-      makeSnapshot({ decision: { stage: 'gate_rejected' } }),
-      noObservations,
-      now,
-    )
-    expect(insight.nextStep).toContain('blocked turn')
   })
 
   it('gives correct nextStep for prompting turn', () => {

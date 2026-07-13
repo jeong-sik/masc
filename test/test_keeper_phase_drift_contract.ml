@@ -14,8 +14,8 @@ module KSM = Keeper_state_machine
 
 (* ── Keeper phase round-trip completeness ─────────────────── *)
 
-let all_phases_count_is_13 =
-  List.length KSM.all_phases = 13
+let all_phases_count_is_12 =
+  List.length KSM.all_phases = 12
 
 let roundtrip_every_phase () =
   List.iter (fun p ->
@@ -75,14 +75,13 @@ let oas_terminal_is_subset_of_all () =
 let oas_stop_reason_strings =
   [ "completed"
   ; "turn_budget_exhausted"
-  ; "mutation_boundary_reached"
   ]
 
 let () =
   Alcotest.run "keeper_phase_drift_contract"
     [ ( "keeper_phase_roundtrip"
-      , [ Alcotest.test_case "all_phases has 13 variants" `Quick (fun () ->
-            Alcotest.(check bool) "13 phases" true all_phases_count_is_13)
+      , [ Alcotest.test_case "all_phases has 12 variants" `Quick (fun () ->
+            Alcotest.(check bool) "12 phases" true all_phases_count_is_12)
         ; Alcotest.test_case "roundtrip: to_string -> of_string = id" `Quick roundtrip_every_phase
         ; Alcotest.test_case "no orphan strings" `Quick no_orphan_strings
         ; Alcotest.test_case "all phase strings are unique" `Quick
@@ -96,7 +95,7 @@ let () =
         ; Alcotest.test_case "oas terminal phases are subset of all phases" `Quick
             (fun () -> Alcotest.(check bool) "subset" true (oas_terminal_is_subset_of_all ()))
         ; Alcotest.test_case "oas stop reason strings documented" `Quick (fun () ->
-            Alcotest.(check bool) "3 stop reasons" true
-              (List.length oas_stop_reason_strings = 3))
+            Alcotest.(check bool) "2 stop reasons" true
+              (List.length oas_stop_reason_strings = 2))
         ] )
     ]

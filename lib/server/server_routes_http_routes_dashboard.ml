@@ -379,6 +379,120 @@ let respond_runtime_config_reload state agent_name ~operation request reqd =
       ~status:(runtime_config_path_error_status msg)
       ~request reqd msg
 
+let handle_gate_mode_body state operator_name request reqd body_str =
+  try
+    let args = Yojson.Safe.from_string body_str in
+    let mode_json =
+      match args with
+      | `Assoc fields -> List.assoc_opt "mode" fields
+      | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+        None
+    in
+    match mode_json with
+    | None ->
+      respond_json_value_with_cors
+        ~status:`Bad_request
+        request
+        reqd
+        (operator_error_json "mode is required")
+    | Some mode_json ->
+      (match Keeper_gate_mode.parse_json mode_json with
+       | Error message ->
+         respond_json_value_with_cors
+           ~status:`Bad_request
+           request
+           reqd
+           (operator_error_json message)
+       | Ok mode ->
+         let config = Mcp_server.workspace_config state in
+         (match Keeper_gate_mode.set config ~actor:operator_name mode with
+          | Error message ->
+            respond_json_value_with_cors
+              ~status:`Bad_request
+              request
+              reqd
+              (operator_error_json message)
+          | Ok change ->
+            Dashboard_cache.invalidate_prefix
+              (Printf.sprintf "gate:%s;" config.base_path);
+            Sse.broadcast
+              (`Assoc
+                 [ "type", `String "gate_mode_changed"
+                 ; "mode", `String (Keeper_gate_mode.to_string mode)
+                 ; ( "previous_mode"
+                   , match change.previous with
+                     | Some previous -> `String (Keeper_gate_mode.to_string previous)
+                     | None -> `Null )
+                 ; "actor", `String operator_name
+                 ; "changed_at", `String change.changed_at
+                 ]);
+            respond_json_value_with_cors
+              request
+              reqd
+              (Keeper_gate_mode.change_json change)))
+  with
+  | Eio.Cancel.Cancelled _ as error -> raise error
+  | Yojson.Json_error message ->
+    respond_json_value_with_cors
+      ~status:`Bad_request
+      request
+      reqd
+      (operator_error_json (Printf.sprintf "invalid json: %s" message))
+;;
+
+let handle_gate_resolve_body operator_name request reqd body_str =
+  try
+    let args = Yojson.Safe.from_string body_str in
+    match dashboard_gate_resolve_http_json ~created_by:operator_name ~args with
+    | Ok json -> respond_json_value_with_cors request reqd json
+    | Error (Gone _ as error) ->
+      respond_json_value_with_cors
+        ~status:`Not_found
+        request
+        reqd
+        (operator_error_json (approval_resolve_http_error_to_string error))
+    | Error (Unavailable _ as error) ->
+      respond_json_value_with_cors
+        ~status:`Service_unavailable
+        request
+        reqd
+        (operator_error_json (approval_resolve_http_error_to_string error))
+    | Error (Bad_request _ as error) ->
+      respond_json_value_with_cors
+        ~status:`Bad_request
+        request
+        reqd
+        (operator_error_json (approval_resolve_http_error_to_string error))
+  with
+  | Yojson.Json_error message ->
+    respond_json_value_with_cors
+      ~status:`Bad_request
+      request
+      reqd
+      (operator_error_json (Printf.sprintf "invalid json: %s" message))
+;;
+
+let handle_gate_rule_delete_body state request reqd body_str =
+  try
+    let args = Yojson.Safe.from_string body_str in
+    let base_path = (Mcp_server.workspace_config state).base_path in
+    match dashboard_gate_rule_delete_http_json ~base_path ~args with
+    | Ok json -> respond_json_value_with_cors request reqd json
+    | Error message ->
+      respond_json_value_with_cors
+        ~status:`Bad_request
+        request
+        reqd
+        (operator_error_json message)
+  with
+  | Yojson.Json_error message ->
+    respond_json_value_with_cors
+      ~status:`Bad_request
+      request
+      reqd
+      (operator_error_json (Printf.sprintf "invalid json: %s" message))
+;;
+
 let add_routes ~sw ~clock router =
   router
   |> Http.Router.post "/api/v1/broadcast" (fun request reqd ->
@@ -610,7 +724,7 @@ let add_routes ~sw ~clock router =
              | Error msg ->
                respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
              | Ok source_text ->
-               (* RFC-0273 §3.3 — record the runtime.toml write to the governance
+               (* RFC-0273 §3.3 — record the runtime.toml write to the audit
                   audit trail (actor + path + size) on top of the CanAdmin gate.
                   The config body is deliberately excluded: runtime.toml can carry
                   provider secrets (RFC-0132 redaction). *)
@@ -908,46 +1022,6 @@ let add_routes ~sw ~clock router =
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
-  |> Http.Router.get "/api/v1/dashboard/config/excuse-patterns" (fun request reqd ->
-       with_public_read (fun _state req reqd ->
-         let cache_key = "excuse_patterns" in
-         let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:config_cache_ttl_s (fun () ->
-             Domain_pool_ref.submit_io_or_inline (fun () ->
-               let patterns = Task.Anti_rationalization.load_excuse_patterns () in
-               let json_items =
-                 List.map
-                   (fun (pat, reason) -> `List [ `String pat; `String reason ])
-                   patterns
-               in
-               `List json_items))
-         in
-         Http.Response.json_value ~compress:true ~request:req json reqd
-       ) request reqd)
-  |> Http.Router.post "/api/v1/dashboard/config/excuse-patterns" (fun request reqd ->
-       with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun _state _agent_name req reqd ->
-           Http.Request.read_body_async reqd (fun body_str ->
-             try
-               let json = Yojson.Safe.from_string body_str in
-               match Task.Anti_rationalization.parse_excuse_patterns_json json with
-               | Error msg ->
-                 Http.Response.json_value ~status:`Bad_request ~request:req
-                   (`Assoc [("ok", `Bool false); ("error", `String msg)]) reqd
-               | Ok patterns ->
-                 (match Task.Anti_rationalization.save_excuse_patterns patterns with
-                 | Ok () ->
-                     respond_dashboard_ok ~request:req reqd
-                 | Error msg ->
-                     Http.Response.json_value ~status:`Internal_server_error ~request:req
-                       (`Assoc [("ok", `Bool false); ("error", `String msg)]) reqd)
-             with
-             | Eio.Cancel.Cancelled _ as exn -> raise exn
-             | _exn ->
-               Http.Response.json_value ~status:`Bad_request ~request:req
-                 (`Assoc [("ok", `Bool false); ("error", `String "Invalid JSON body")]) reqd
-           )
-         ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/project-snapshot" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let timing = Server_timing.create () in
@@ -1085,89 +1159,22 @@ let add_routes ~sw ~clock router =
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
-  |> Http.Router.get "/api/v1/dashboard/governance" (fun request reqd ->
+  |> Http.Router.get "/api/v1/dashboard/gate" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let base_path = (Mcp_server.workspace_config state).base_path in
-         let json = dashboard_governance_http_json req ~base_path in
+         let json = dashboard_gate_http_json req ~base_path in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
-  |> Http.Router.get "/api/v1/dashboard/interaction-judge" (fun request reqd ->
-       with_public_read (fun state req reqd ->
-         let base_path = (Mcp_server.workspace_config state).base_path in
-         let json = Dashboard_interaction_judge.fresh_interactions_json ~base_path in
-         Http.Response.json_value ~compress:true ~request:req json reqd
-       ) request reqd)
-  |> Http.Router.get "/api/v1/dashboard/governance/tool-events" (fun request reqd ->
+  |> Http.Router.get "/api/v1/dashboard/gate/tool-events" (fun request reqd ->
        with_public_read (fun _state req reqd ->
-         let json = dashboard_governance_tool_events_http_json req in
+         let json = dashboard_gate_tool_events_http_json req in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
-  |> Http.Router.get "/api/v1/dashboard/governance/approval-mode" (fun request reqd ->
-       with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun state _operator_name _req reqd ->
-           let config = Mcp_server.workspace_config state in
-           let json =
-             Operator_approval.approval_mode_status_json
-               ~base_path:config.base_path
-           in
-           respond_json_value_with_cors request reqd json)
-         request reqd)
-  |> Http.Router.post "/api/v1/dashboard/governance/approval-mode" (fun request reqd ->
+  |> Http.Router.post "/api/v1/dashboard/gate/mode" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun state operator_name _req reqd ->
-           Http.Request.read_body_async reqd (fun body_str ->
-             try
-               let args = Yojson.Safe.from_string body_str in
-               let mode_json =
-                 match args with
-                 | `Assoc fields -> List.assoc_opt "mode" fields
-                 | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null
-                 | `String _ ->
-                   None
-               in
-               match mode_json with
-               | None ->
-                 respond_json_value_with_cors ~status:`Bad_request request reqd
-                   (operator_error_json "mode is required")
-               | Some mode_json ->
-                 (match Operator_approval.parse_approval_mode_json mode_json with
-                  | Error msg ->
-                    respond_json_value_with_cors ~status:`Bad_request request reqd
-                      (operator_error_json msg)
-                  | Ok mode ->
-                    let config = Mcp_server.workspace_config state in
-                    (match
-                       Operator_approval.set_approval_mode
-                         config
-                         ~actor:operator_name
-                         mode
-                     with
-                     | Error msg ->
-                       respond_json_value_with_cors ~status:`Bad_request request reqd
-                         (operator_error_json msg)
-                     | Ok change ->
-                       Dashboard_cache.invalidate_prefix
-                         (Printf.sprintf "governance:%s;" config.base_path);
-                       Sse.broadcast
-                         (`Assoc
-                            [ "type", `String "approval_mode_changed"
-                            ; "mode",
-                              `String (Operator_approval.approval_mode_to_string mode)
-                            ; "previous_mode",
-                              `String
-                                (Operator_approval.approval_mode_to_string
-                                   change.previous)
-                            ; "actor", `String operator_name
-                            ; "changed_at", `String change.changed_at
-                            ]);
-                       respond_json_value_with_cors request reqd
-                         (Operator_approval.approval_mode_change_json change)))
-             with
-             | Eio.Cancel.Cancelled _ as e -> raise e
-             | Yojson.Json_error msg ->
-               respond_json_value_with_cors ~status:`Bad_request request reqd
-                 (operator_error_json (Printf.sprintf "invalid json: %s" msg)))
-         )
+           Http.Request.read_body_async reqd
+             (handle_gate_mode_body state operator_name request reqd))
          request reqd)
   |> Http.Router.get "/api/v1/dashboard/repository-observation-snapshot" (fun request reqd ->
        Server_dashboard_http.handle_repository_observation_snapshot ~sw ~clock request reqd)
@@ -1178,44 +1185,11 @@ let add_routes ~sw ~clock router =
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
-  |> Http.Router.post "/api/v1/dashboard/governance/approvals/resolve" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_operator_confirm" (fun state _req reqd ->
-         Http.Request.read_body_async reqd (fun body_str ->
-           try
-             let args = Yojson.Safe.from_string body_str in
-             let base_path = (Mcp_server.workspace_config state).base_path in
-             match dashboard_governance_approval_resolve_http_json ~base_path ~args with
-             | Ok json ->
-                 respond_json_value_with_cors request reqd json
-             | Error (Gone _ as err) ->
-                 respond_json_value_with_cors ~status:`Not_found request reqd (operator_error_json (approval_resolve_http_error_to_string err))
-             | Error (Unavailable _ as err) ->
-                 respond_json_value_with_cors ~status:`Service_unavailable request reqd (operator_error_json (approval_resolve_http_error_to_string err))
-             | Error (Bad_request _ as err) ->
-                 respond_json_value_with_cors ~status:`Bad_request request reqd (operator_error_json (approval_resolve_http_error_to_string err))
-           with Yojson.Json_error msg ->
-             respond_json_value_with_cors ~status:`Bad_request request reqd (operator_error_json (Printf.sprintf "invalid json: %s" msg))
-         )
-       ) request reqd)
-  |> Http.Router.post "/api/v1/dashboard/schedule/resolve" (fun request reqd ->
+  |> Http.Router.post "/api/v1/dashboard/gate/resolve" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun state operator_name _req reqd ->
-           Http.Request.read_body_async reqd (fun body_str ->
-             try
-                 let args = Yojson.Safe.from_string body_str in
-                 let config = Mcp_server.workspace_config state in
-                 match
-                   dashboard_schedule_resolve_http_json ~config ~operator_name ~args
-                 with
-               | Ok json -> respond_json_value_with_cors request reqd json
-               | Error message ->
-                 respond_json_value_with_cors ~status:`Bad_request request reqd
-                   (operator_error_json message)
-             with
-             | Yojson.Json_error msg ->
-               respond_json_value_with_cors ~status:`Bad_request request reqd
-                 (operator_error_json (Printf.sprintf "invalid json: %s" msg)))
-         )
+         (fun _state operator_name _req reqd ->
+           Http.Request.read_body_async reqd
+             (handle_gate_resolve_body operator_name request reqd))
          request reqd)
   |> Http.Router.post "/api/v1/dashboard/schedule/prune" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
@@ -1228,23 +1202,12 @@ let add_routes ~sw ~clock router =
                (operator_error_json message)
          )
          request reqd)
-  |> Http.Router.post "/api/v1/dashboard/governance/approvals/rules/delete" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_operator_confirm" (fun state _req reqd ->
-         Http.Request.read_body_async reqd (fun body_str ->
-           try
-             let args = Yojson.Safe.from_string body_str in
-             let base_path = (Mcp_server.workspace_config state).base_path in
-             match
-               dashboard_governance_approval_rule_delete_http_json ~base_path ~args
-             with
-             | Ok json ->
-                 respond_json_value_with_cors request reqd json
-             | Error message ->
-                 respond_json_value_with_cors ~status:`Bad_request request reqd (operator_error_json message)
-           with Yojson.Json_error msg ->
-             respond_json_value_with_cors ~status:`Bad_request request reqd (operator_error_json (Printf.sprintf "invalid json: %s" msg))
-         )
-       ) request reqd)
+  |> Http.Router.post "/api/v1/dashboard/gate/rules/delete" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state _operator_name _req reqd ->
+           Http.Request.read_body_async reqd
+             (handle_gate_rule_delete_body state request reqd))
+         request reqd)
 
   (* Operator surface restored after cp-purge (#7349): handlers existed in
      server_dashboard_http_core/.ml but their Router.get/post registrations
@@ -1708,17 +1671,9 @@ let add_routes ~sw ~clock router =
        with_tool_auth ~tool_name:"masc_keeper_msg" (fun state _req reqd ->
          handle_keeper_turn_interrupt state request reqd) request reqd)
 
-  (* Keeper config or tools update.  This prefix_post catches ALL POST
-     /api/v1/keepers/* requests.  We check the suffix BEFORE auth so that
-     /tools gets with_tool_auth (localhost-friendly) while /config keeps
-     with_token_permission_auth (admin token required). *)
+  (* Keeper POST sub-routes. *)
   |> Http.Router.prefix_post "/api/v1/keepers/" (fun request reqd ->
        match Keeper_api.classify_keeper_post_route (Http.Request.path request) with
-       | Keeper_api.Keeper_post_tools ->
-           with_tool_auth ~tool_name:"masc_keeper_up"
-             (fun state req reqd ->
-               Keeper_api.handle_keeper_tools_post state req reqd
-             ) request reqd
        | Keeper_api.Keeper_post_config ->
            with_token_permission_auth ~permission:Masc_domain.CanAdmin
              (fun state agent_name req reqd ->

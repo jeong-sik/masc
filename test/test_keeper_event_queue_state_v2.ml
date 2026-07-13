@@ -106,7 +106,7 @@ let test_requeue_and_escalation_are_total () =
     State.settle
       ~settled_at:2.0
       ~lease
-      ~settlement:(State.Requeue State.Retry_after_pacing)
+      ~settlement:(State.Requeue State.Rotate_now)
       state
     |> require_ok "retry requeue"
   in
@@ -222,23 +222,23 @@ let test_requeue_and_escalation_are_total () =
 ;;
 
 let test_judgment_terminal_evidence_is_durable () =
-  Alcotest.(check bool)
-    "judgment request is a normal transition"
-    false
-    (State.escalation_reason_requires_operator_attention
-       State.Failure_judgment_requested);
   List.iter
     (fun reason ->
       Alcotest.(check bool)
-        "terminal judgment escalation requires attention"
-        true
-        (State.escalation_reason_requires_operator_attention reason))
-    [ State.Failure_judgment_boundary_failed { detail = "schema drift" }
-    ; State.Failure_judgment_operator_required
-        { judge_runtime_id = "structured-judge"
-        ; rationale = "Operator-owned configuration must change."
-        }
+        "non-verdict judgment transitions do not request external input"
+        false
+        (State.escalation_reason_requests_external_input reason))
+    [ State.Failure_judgment_requested
+    ; State.Failure_judgment_boundary_failed { detail = "schema drift" }
     ];
+  Alcotest.(check bool)
+    "explicit external-input verdict remains visible"
+    true
+    (State.escalation_reason_requests_external_input
+       (State.Failure_judgment_external_input_requested
+          { judge_runtime_id = "structured-judge"
+          ; rationale = "Required external input is unavailable."
+          }));
   let judgment : Queue.failure_judgment =
     { fj_runtime_id = "failed-runtime"
     ; fj_judgment = Keeper_runtime_failure_route.Config_mismatch
@@ -254,7 +254,7 @@ let test_judgment_terminal_evidence_is_durable () =
   in
   let state = State.with_pending (queue [ source ]) State.empty in
   let state, lease = claim_head state in
-  let lease = require_some "operator judgment lease" lease in
+  let lease = require_some "external-input judgment lease" lease in
   let state, _ =
     State.settle
       ~settled_at:2.0
@@ -262,26 +262,26 @@ let test_judgment_terminal_evidence_is_durable () =
       ~settlement:
         (State.Escalate
            { reason =
-               State.Failure_judgment_operator_required
+               State.Failure_judgment_external_input_requested
                  { judge_runtime_id = "structured-judge"
-                 ; rationale = "Operator-owned configuration must change."
+                 ; rationale = "Required external input is unavailable."
                  }
            ; successor = None
            })
       state
-    |> require_ok "operator judgment settlement"
+    |> require_ok "external-input judgment settlement"
   in
   let restored =
     State.to_yojson state
     |> State.of_yojson
-    |> require_ok "operator judgment evidence roundtrip"
+    |> require_ok "external-input judgment evidence roundtrip"
   in
   (match State.transition_outbox restored with
    | [ { receipt =
            { settlement =
                State.Escalate
                  { reason =
-                     State.Failure_judgment_operator_required
+                     State.Failure_judgment_external_input_requested
                        { judge_runtime_id; rationale }
                  ; successor = None
                  }
@@ -294,10 +294,10 @@ let test_judgment_terminal_evidence_is_durable () =
        "structured-judge"
        judge_runtime_id;
      Alcotest.(check string)
-       "operator rationale preserved"
-       "Operator-owned configuration must change."
+       "external-input rationale preserved"
+       "Required external input is unavailable."
        rationale
-   | _ -> Alcotest.fail "operator judgment evidence changed during roundtrip");
+   | _ -> Alcotest.fail "external-input judgment evidence changed during roundtrip");
   let open Yojson.Safe.Util in
   let settlement_json =
     State.to_yojson state
@@ -308,12 +308,12 @@ let test_judgment_terminal_evidence_is_durable () =
     |> member "settlement"
   in
   Alcotest.(check string)
-    "operator reason wire label"
-    "failure_judgment_operator_required"
+    "external-input reason wire label"
+    "failure_judgment_external_input_requested"
     (settlement_json |> member "reason" |> to_string);
   Alcotest.(check string)
-    "operator rationale wire evidence"
-    "Operator-owned configuration must change."
+    "external-input rationale wire evidence"
+    "Required external input is unavailable."
     (settlement_json |> member "reason_detail" |> member "rationale" |> to_string);
   let invalid_state = State.with_pending (queue [ source ]) State.empty in
   let invalid_state, invalid_lease = claim_head invalid_state in
@@ -351,8 +351,8 @@ let turn_failure route : Masc.Keeper_unified_turn.turn_failure =
 let test_failed_cycle_route_mapping () =
   let retry_failure =
     turn_failure
-      (Keeper_runtime_failure_route.Retry_after_pacing
-         { pacing = Keeper_runtime_failure_route.Rate_limited
+      (Keeper_runtime_failure_route.Retry_after_observed
+         { retry_class = Keeper_runtime_failure_route.Rate_limited
          ; retry_after = None
          })
   in
@@ -361,10 +361,8 @@ let test_failed_cycle_route_mapping () =
        ~settled_at:2.0
        retry_failure
    with
-   | Masc.Keeper_registry_event_queue.Requeue
-       Masc.Keeper_registry_event_queue.Retry_after_pacing ->
-     ()
-   | _ -> Alcotest.fail "retry route did not requeue the lease");
+   | Masc.Keeper_registry_event_queue.Ack -> ()
+   | _ -> Alcotest.fail "observed retry route did not acknowledge the lease");
   let judgment_failure =
     turn_failure
       (Keeper_runtime_failure_route.Escalate_judgment
@@ -421,6 +419,7 @@ let test_cancelled_and_skipped_cycles_requeue () =
   let meta = cycle_meta () in
   let settlement outcome =
     Masc.Keeper_heartbeat_loop.settlement_of_cycle_outcome
+      ~base_path:"/tmp/non-approval-cycle"
       ~settled_at:2.0
       ~stop_requested:false
       ~lease
@@ -436,6 +435,60 @@ let test_cancelled_and_skipped_cycles_requeue () =
       Masc.Keeper_registry_event_queue.Turn_not_scheduled ->
     ()
   | _ -> Alcotest.fail "non-executable phase acknowledged leased work"
+;;
+
+let test_unconsumed_approval_requeues_behind_other_work () =
+  List.iter
+    (fun reason ->
+       let resolution : Queue.hitl_resolution =
+         { approval_id = "approval-tail"
+         ; decision = Queue.Hitl_approved
+         ; channel = Keeper_continuation_channel.unrouted "queue fairness test"
+         }
+       in
+       let approval =
+         stimulus
+           ~payload:(Queue.Hitl_resolved resolution)
+           (Queue.hitl_resolution_post_id resolution)
+           1.0
+       in
+       let board = stimulus "board-next" 2.0 in
+       let state = State.with_pending (queue [ approval; board ]) State.empty in
+       let state, lease = claim_head state in
+       let lease = require_some "approval lease" lease in
+       let state, _ =
+         State.settle
+           ~settled_at:3.0
+           ~lease
+           ~settlement:(State.Requeue reason)
+           state
+         |> require_ok "tail requeue approval"
+       in
+       Alcotest.(check (list string))
+         "approval remains durable at the FIFO tail"
+         [ "board-next"; Queue.hitl_resolution_post_id resolution ]
+         (post_ids (State.pending state));
+       let receipt =
+         match State.transition_outbox state with
+         | [ entry ] -> entry.receipt
+         | _ -> Alcotest.fail "approval requeue must create one receipt"
+       in
+       let state =
+         State.mark_transition_projected ~transition_id:receipt.transition_id state
+         |> require_ok "project approval requeue"
+       in
+       let _state, next = claim_head state in
+       let next = require_some "next fair lease" next in
+       match next.stimuli with
+       | [ next ] ->
+         Alcotest.(check string)
+           "unrelated work leases before the retained approval"
+           "board-next"
+           next.post_id
+       | _ -> Alcotest.fail "fairness fixture expected one leased stimulus")
+    [ State.Approval_grant_unconsumed
+    ; State.Approval_grant_state_unavailable
+    ]
 ;;
 
 let rec remove_tree path =
@@ -708,6 +761,10 @@ let () =
             "cancelled and skipped cycles requeue"
             `Quick
             test_cancelled_and_skipped_cycles_requeue
+        ; Alcotest.test_case
+            "unconsumed approval yields FIFO"
+            `Quick
+            test_unconsumed_approval_requeues_behind_other_work
         ] )
     ; ( "persistence"
       , [ Alcotest.test_case "legacy pair migration" `Quick test_legacy_pair_migrates_once

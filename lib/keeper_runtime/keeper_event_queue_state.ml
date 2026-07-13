@@ -6,24 +6,25 @@ type lease_kind =
 type requeue_reason =
   | Cycle_busy
   | Turn_not_scheduled
-  | Retry_after_pacing
   | Rotate_now
   | Cancelled
   | Cycle_crashed
   | Registration_recovery
+  | Approval_grant_unconsumed
+  | Approval_grant_state_unavailable
 
 type escalation_reason =
   | Failure_judgment_requested
   | Failure_judgment_boundary_failed of { detail : string }
-  | Failure_judgment_operator_required of
+  | Failure_judgment_external_input_requested of
       { judge_runtime_id : string
       ; rationale : string
       }
 
-let escalation_reason_requires_operator_attention = function
-  | Failure_judgment_requested -> false
-  | Failure_judgment_boundary_failed _
-  | Failure_judgment_operator_required _ -> true
+let escalation_reason_requests_external_input = function
+  | Failure_judgment_external_input_requested _ -> true
+  | Failure_judgment_requested
+  | Failure_judgment_boundary_failed _ -> false
 ;;
 
 type settlement =
@@ -135,6 +136,13 @@ let prepend_missing stimuli queue =
   Keeper_event_queue.prepend_list missing queue
 ;;
 
+let append_missing stimuli queue =
+  List.fold_left
+    (fun pending stimulus -> enqueue_if_missing pending stimulus)
+    queue
+    stimuli
+;;
+
 let remove_stimuli queue stimuli =
   let should_remove stimulus =
     List.exists
@@ -218,21 +226,23 @@ let lease_kind_of_label = function
 let requeue_reason_label = function
   | Cycle_busy -> "cycle_busy"
   | Turn_not_scheduled -> "turn_not_scheduled"
-  | Retry_after_pacing -> "retry_after_pacing"
   | Rotate_now -> "rotate_now"
   | Cancelled -> "cancelled"
   | Cycle_crashed -> "cycle_crashed"
   | Registration_recovery -> "registration_recovery"
+  | Approval_grant_unconsumed -> "approval_grant_unconsumed"
+  | Approval_grant_state_unavailable -> "approval_grant_state_unavailable"
 ;;
 
 let requeue_reason_of_label = function
   | "cycle_busy" -> Ok Cycle_busy
   | "turn_not_scheduled" -> Ok Turn_not_scheduled
-  | "retry_after_pacing" -> Ok Retry_after_pacing
   | "rotate_now" -> Ok Rotate_now
   | "cancelled" -> Ok Cancelled
   | "cycle_crashed" -> Ok Cycle_crashed
   | "registration_recovery" -> Ok Registration_recovery
+  | "approval_grant_unconsumed" -> Ok Approval_grant_unconsumed
+  | "approval_grant_state_unavailable" -> Ok Approval_grant_state_unavailable
   | label -> Error (Printf.sprintf "unknown event queue requeue reason: %s" label)
 ;;
 
@@ -241,14 +251,15 @@ let ( let* ) = Result.bind
 let escalation_reason_label = function
   | Failure_judgment_requested -> "failure_judgment_requested"
   | Failure_judgment_boundary_failed _ -> "failure_judgment_boundary_failed"
-  | Failure_judgment_operator_required _ -> "failure_judgment_operator_required"
+  | Failure_judgment_external_input_requested _ ->
+    "failure_judgment_external_input_requested"
 ;;
 
 let escalation_reason_detail_to_yojson = function
   | Failure_judgment_requested -> `Null
   | Failure_judgment_boundary_failed { detail } ->
     `Assoc [ "detail", `String detail ]
-  | Failure_judgment_operator_required { judge_runtime_id; rationale } ->
+  | Failure_judgment_external_input_requested { judge_runtime_id; rationale } ->
     `Assoc
       [ "judge_runtime_id", `String judge_runtime_id
       ; "rationale", `String rationale
@@ -297,30 +308,30 @@ let escalation_reason_of_wire ~label ~detail_json =
         fields
     in
     Ok (Failure_judgment_boundary_failed { detail })
-  | "failure_judgment_operator_required", `Assoc fields ->
+  | "failure_judgment_external_input_requested", `Assoc fields ->
     let* () =
       exact_reason_fields
-        ~context:"failure_judgment_operator_required"
+        ~context:"failure_judgment_external_input_requested"
         [ "judge_runtime_id"; "rationale" ]
         fields
     in
     let* judge_runtime_id =
       required_nonempty_reason_string
-        ~context:"failure_judgment_operator_required"
+        ~context:"failure_judgment_external_input_requested"
         "judge_runtime_id"
         fields
     in
     let* rationale =
       required_nonempty_reason_string
-        ~context:"failure_judgment_operator_required"
+        ~context:"failure_judgment_external_input_requested"
         "rationale"
         fields
     in
-    Ok (Failure_judgment_operator_required { judge_runtime_id; rationale })
+    Ok (Failure_judgment_external_input_requested { judge_runtime_id; rationale })
   | "failure_judgment_requested", _ ->
     Error (Printf.sprintf "%s reason_detail must be null" label)
   | ( "failure_judgment_boundary_failed"
-    | "failure_judgment_operator_required" ), _ ->
+    | "failure_judgment_external_input_requested" ), _ ->
     Error (Printf.sprintf "%s reason_detail must be an object" label)
   | unknown, _ ->
     Error (Printf.sprintf "unknown event queue escalation reason: %s" unknown)
@@ -381,17 +392,19 @@ let validate_settlement = function
     when String.equal (String.trim detail) "" ->
     Error "failure judgment boundary failure detail must not be empty"
   | Escalate
-      { reason = Failure_judgment_operator_required { judge_runtime_id; rationale }
+      { reason =
+          Failure_judgment_external_input_requested
+            { judge_runtime_id; rationale }
       ; successor = None
       }
     when
       String.equal (String.trim judge_runtime_id) ""
       || String.equal (String.trim rationale) "" ->
-    Error "operator-required failure judgment evidence must not be empty"
+    Error "external-input failure judgment evidence must not be empty"
   | Escalate
       { reason =
           ( Failure_judgment_boundary_failed _
-          | Failure_judgment_operator_required _ )
+          | Failure_judgment_external_input_requested _ )
       ; successor = None
       } ->
     Ok ()
@@ -401,8 +414,10 @@ let validate_settlement = function
     Error "failure judgment request successor has the wrong payload kind"
   | Escalate { reason = Failure_judgment_boundary_failed _; successor = Some _ } ->
     Error "failure judgment boundary failure must not enqueue a successor"
-  | Escalate { reason = Failure_judgment_operator_required _; successor = Some _ } ->
-    Error "operator-required failure judgment must not enqueue a successor"
+  | Escalate
+      { reason = Failure_judgment_external_input_requested _; successor = Some _ }
+    ->
+    Error "external-input failure judgment must not enqueue a successor"
 ;;
 
 let receipt_for_lease ~settled_at ~settlement (lease : lease) =
@@ -467,6 +482,12 @@ let settle ~settled_at ~lease ~settlement state =
     let pending =
       match settlement with
       | Ack -> state.pending
+      | Requeue (Approval_grant_unconsumed | Approval_grant_state_unavailable) ->
+        (* The durable one-shot grant must survive a missed exact effect or a
+           transient journal read failure, but its wake must not monopolize
+           the FIFO front. Tail requeue lets unrelated Board/Connector work
+           claim the next lane cycle. *)
+        append_missing committed.stimuli state.pending
       | Requeue _ -> prepend_missing committed.stimuli state.pending
       | Escalate { successor = None; _ } -> state.pending
       | Escalate { successor = Some successor; _ } ->

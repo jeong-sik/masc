@@ -1,4 +1,4 @@
-; #9629: judge callers (Governance_judge, Operator_judge) added to
+; #9629: typed Operator_judge caller added to
 ; the OAS bridge SSOT.  Dedicated stanza for the same MASC_BASE_PATH
 ; reason as #10094.
 

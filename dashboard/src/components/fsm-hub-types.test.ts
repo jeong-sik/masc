@@ -137,14 +137,14 @@ describe('fmtDuration', () => {
 })
 
 describe('constants', () => {
-  it('TRANSITION_FIELDS has 6 entries', () => {
-    expect(TRANSITION_FIELDS).toHaveLength(6)
-    expect(TRANSITION_FIELDS.map(f => f.field)).toEqual(['KSM', 'KTC', 'KDP', 'KCL', 'KMC', 'KCB'])
+  it('TRANSITION_FIELDS has 5 entries', () => {
+    expect(TRANSITION_FIELDS).toHaveLength(5)
+    expect(TRANSITION_FIELDS.map(f => f.field)).toEqual(['KSM', 'KTC', 'KDP', 'KCL', 'KMC'])
   })
 
-  it('LANE_LABELS has all 6 lanes', () => {
+  it('LANE_LABELS has all 5 lanes', () => {
     const keys = Object.keys(LANE_LABELS)
-    expect(keys).toEqual(['phase', 'turn', 'decision', 'runtime', 'compaction', 'breaker'])
+    expect(keys).toEqual(['phase', 'turn', 'decision', 'runtime', 'compaction'])
   })
 
   it('INVARIANT_LABELS has all 5 invariants', () => {
@@ -169,7 +169,7 @@ describe('failureReasonLabel', () => {
 
   it('preserves parametric detail after the base', () => {
     expect(failureReasonLabel('heartbeat_consecutive_failures(3)')).toBe('하트비트 연속 실패(3)')
-    expect(failureReasonLabel('tool_route_recoverable_failure(code:detail)')).toBe('도구 라우팅 복구 가능 실패(code:detail)')
+    expect(failureReasonLabel('provider_runtime_error(code:detail)')).toBe('런타임 호출 오류(code:detail)')
   })
 
   it('falls back to raw string for unknown bases', () => {

@@ -9,12 +9,6 @@ type t =
   | Usage_trusted
   | Usage_untrusted of string list
 
-let absurd_token_threshold = 1_000_000
-
-let is_trusted = function
-  | Usage_trusted -> true
-  | Usage_missing | Usage_untrusted _ -> false
-
 let to_string = function
   | Usage_missing -> "missing"
   | Usage_trusted -> "trusted"
@@ -25,7 +19,6 @@ let reasons = function
   | Usage_missing | Usage_trusted -> []
 
 let warns_operator = function
-  | Usage_untrusted [ "zero_token_usage_reported" ] -> false
   | Usage_missing | Usage_trusted -> false
   | Usage_untrusted _ -> true
 
@@ -45,8 +38,7 @@ let add_reason reason reasons =
   if List.mem reason reasons then reasons else reason :: reasons
 
 let classify ~(usage_reported : bool)
-    ~(usage : Agent_sdk.Types.api_usage)
-    ~(context_max : int) : t =
+    ~(usage : Agent_sdk.Types.api_usage) : t =
   if not usage_reported then Usage_missing
   else
     let reasons = ref [] in
@@ -56,14 +48,6 @@ let classify ~(usage_reported : bool)
     if usage.cache_creation_input_tokens < 0 then
       add "negative_cache_creation_tokens";
     if usage.cache_read_input_tokens < 0 then add "negative_cache_read_tokens";
-    if usage.input_tokens = 0 && usage.output_tokens = 0 then
-      add "zero_token_usage_reported";
-    if usage.input_tokens > absurd_token_threshold then
-      add "input_tokens_gt_1m";
-    if usage.output_tokens > absurd_token_threshold then
-      add "output_tokens_gt_1m";
-    if context_max > 0 && usage.input_tokens > context_max * 2 then
-      add "input_tokens_gt_2x_context_max";
     match List.rev !reasons with
     | [] -> Usage_trusted
     | reasons -> Usage_untrusted reasons

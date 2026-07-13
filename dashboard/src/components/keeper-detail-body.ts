@@ -53,7 +53,6 @@ import { KeeperPromptAssemblyPanel } from './keeper-prompt-assembly-panel'
 import { KeeperRuntimeModelEditor } from './keeper-runtime-model-editor'
 import { KeeperConditionsDivergent } from './keeper-conditions-divergent'
 import { KeeperActivitySummary } from './keeper-detail-activity-summary'
-import { KeeperGithubAppConfigPanel } from './keeper-github-app-config'
 import { FsmHub } from './fsm-hub'
 import { currentDashboardActor } from '../api'
 import type { Keeper } from '../types'
@@ -199,7 +198,6 @@ export function KeeperDetailBody({
           <${KeeperRuntimeModelEditor} keeperName=${keeper.name} onOpenRuntimeConfig=${onOpenRuntimeConfig} />
           <${KeeperToolTelemetry} keeperName=${keeper.name} />
           <${KeeperSecretProjectionPanel} keeperName=${keeper.name} projection=${compositeSnapshot?.secret_projection} />
-          <${KeeperGithubAppConfigPanel} keeperName=${keeper.name} projection=${compositeSnapshot?.secret_projection} />
           <${KeeperEvalQualityPanel} keeperName=${keeper.name} />
           <${CollapsibleSection} title="Live Truth (composite/runtime 합성)" open=${false}>
             <${KeeperLiveTruthPanel}
@@ -256,15 +254,6 @@ export function KeeperDetailBody({
                 <span class="text-[var(--color-fg-muted)]">핵심 가치:</span>
                 <span class="font-medium text-[var(--color-status-ok)]">${keeper.primaryValue}</span>
               </div>`
-            : null}
-          ${keeper.skill_primary
-            ? html`<div class="flex items-center gap-2 mt-2 text-xs text-[var(--color-fg-muted)]">
-                <span>스킬 경로:</span>
-                <span class="font-medium text-[var(--cyan)]">${keeper.skill_primary}</span>
-              </div>`
-            : null}
-          ${keeper.skill_reason
-            ? html`<div class="text-2xs text-[var(--color-fg-muted)] mt-1 leading-relaxed">${keeper.skill_reason}</div>`
             : null}
             <//>
 

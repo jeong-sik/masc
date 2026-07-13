@@ -365,51 +365,30 @@ let emit_post_created (post : Board.post) =
          content = post.content; post_kind = post.post_kind;
          hearth = post.hearth })
 
-let create_post_with_outcome ?after_fresh_persist ?after_rollup_persist ~author
-    ~content ?title ?body ~post_kind ?meta_json ?(visibility = Board.Internal)
-    ?(ttl_hours = Board.Limits.default_ttl_hours) ?hearth ?thread_id ?origin () =
-  match backend () with
-  | Jsonl store ->
-      (match
-         Board.create_post_with_outcome ?after_rollup_persist store ~author
-           ~content ?title ?body ~post_kind ?meta_json ~visibility ~ttl_hours
-           ?hearth ?thread_id ?origin ()
-       with
-      | Ok (Board.Fresh_post post) ->
-          (match after_fresh_persist with
-           | None ->
-               emit_post_created post;
-               Ok (Board.Fresh_post post)
-           | Some hook ->
-               (match hook post with
-                | Ok () ->
-                    emit_post_created post;
-                    Ok (Board.Fresh_post post)
-                | Error msg ->
-                    let post_id = Board.Post_id.to_string post.id in
-                    let rollback_error =
-                      match Board.delete_post store ~post_id with
-                      | Ok () -> None
-                      | Error e -> Some (Board.show_board_error e)
-                    in
-                    let message =
-                      match rollback_error with
-                      | None -> msg
-                      | Some rollback -> msg ^ "; rollback failed: " ^ rollback
-                    in
-                    Error (Board.Validation_error message)))
-      | Ok (Board.Dedup_hit post) -> Ok (Board.Dedup_hit post)
-      | Ok (Board.Rolled_up_post post) -> Ok (Board.Rolled_up_post post)
-      | Error _ as err -> err)
-
 let create_post ~author ~content ?title ?body ~post_kind ?meta_json
     ?visibility ?ttl_hours ?hearth ?thread_id ?origin () =
-  match
-    create_post_with_outcome ~author ~content ?title ?body ~post_kind
-      ?meta_json ?visibility ?ttl_hours ?hearth ?thread_id ?origin ()
-  with
-  | Ok outcome -> Ok (Board.post_of_create_post_outcome outcome)
-  | Error _ as err -> err
+  match backend () with
+  | Jsonl store ->
+    (match
+       Board.create_post
+         store
+         ~author
+         ~content
+         ?title
+         ?body
+         ~post_kind
+         ?meta_json
+         ?visibility
+         ?ttl_hours
+         ?hearth
+         ?thread_id
+         ?origin
+         ()
+     with
+     | Ok post ->
+       emit_post_created post;
+       Ok post
+     | Error _ as error -> error)
 
 let update_post ~post_id ~editor ~content ?title ?body ?new_author () =
   match backend () with
@@ -460,9 +439,7 @@ let list_posts ?(visibility_filter = None) ?hearth ?author_filter ?exclude_autho
         | Hot -> false
         | Trending | Recent | Updated | Discussed -> true
       in
-      let fetch_limit =
-        if needs_full_scan then Board.Limits.max_posts else max limit 500
-      in
+      let fetch_limit = if needs_full_scan then Stdlib.max_int else max limit 500 in
       let posts =
         if needs_full_scan then
           Board.search_posts store ~predicate:(fun _ -> true) ~limit:fetch_limit
@@ -518,10 +495,10 @@ let add_comment ~post_id ~author ~content ?parent_id
   match backend () with
   | Jsonl store ->
       (match
-         Board.add_comment_with_status store ~post_id ~author ~content ?parent_id
+         Board.add_comment store ~post_id ~author ~content ?parent_id
            ~ttl_hours ()
        with
-      | Ok (comment, `Fresh) ->
+      | Ok comment ->
           let cid = Board.Comment_id.to_string comment.id in
           let auth = Board.Agent_id.to_string comment.author in
           (match Board.get_post store ~post_id with
@@ -542,7 +519,6 @@ let add_comment ~post_id ~author ~content ?parent_id
           emit_board_sse_event
             (Comment_added { post_id; comment_id = cid; author = auth });
           Ok comment
-      | Ok (comment, `Dedup) -> Ok comment
       | Error _ as err -> err)
 
 let current_vote_for_post ~voter ~post_id =
@@ -746,10 +722,6 @@ let get_karma_ledger ?agent ?(limit = max_int) () =
 
 let post_to_yojson_with_karma (p : Board.post) ~author_karma =
   Board.post_to_yojson_with_karma p ~author_karma
-
-let reclassify_posts ?(limit = 5200) ?(dry_run = true) () =
-  match backend () with
-  | Jsonl store -> Board.reclassify_posts store ~limit ~dry_run ()
 
 let backend_name () =
   match Atomic.get backend_state with

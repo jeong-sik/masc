@@ -24,11 +24,7 @@ let dedupe_schemas (schemas : Masc_domain.tool_schema list) =
    AND the public MCP surface (RFC-0218 §1.1), and the operator-surface
    exclusion is enforced separately and downstream by [Tool_catalog.is_public_mcp]
    / [public_mcp_surface_tools] (contract stated in tool_schemas_misc.mli).
-   Excluding the web backends here re-creates the #19864/#20060 split-brain:
-   the substrate denies a tool the keeper still dispatches, so [masc_web_search]
-   never enters [injected_masc_tool_names ()], [effective_core_tools] drops
-   WebSearch from the always-visible core, and every keeper turn prunes + WARNs
-   (~3.5k/day "AllowList pruned ... WebSearch"). *)
+   The Keeper model surface itself comes directly from descriptors. *)
 let descriptor_owned_internal_tool_schemas : Masc_domain.tool_schema list =
   Keeper_tool_descriptor.public_descriptors
   |> List.filter_map (fun (descriptor : Keeper_tool_descriptor.t) ->

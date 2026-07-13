@@ -5,8 +5,7 @@ val progress_keeper_tool_names_for_contract :
   tool_calls:Keeper_agent_result.tool_call_detail list ->
   string list
 
-val observed_completion_contract_status :
-  had_owned_active_task_at_turn_start:bool ->
+val observed_completion_evidence :
   actual_keeper_tool_names:string list ->
   stop_reason:Runtime_agent.stop_reason ->
   response_text_present:bool ->

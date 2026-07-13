@@ -99,8 +99,8 @@ describe('buildFleetRows sort order', () => {
         keepalive_running: true,
         context_ratio: 0.1,
         total_turns: 12,
-        runtime_blocker_class: 'admission_queue_wait_timeout',
-        runtime_blocker_summary: 'Admission queue wait timeout after 45.0s.',
+        runtime_blocker_class: 'provider_runtime_error',
+        runtime_blocker_summary: 'Provider runtime request timed out after 45.0s.',
       },
       {
         name: 'healthy-busy',

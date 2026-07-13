@@ -1,10 +1,9 @@
-(** Keeper_deliberation — typed action space, deliberation triggers,
-    world observation builder, triage logic, and MODEL-driven deliberation
+(** Keeper_deliberation — typed action space, world observation, and
+    MODEL-driven deliberation
     for the keeper deliberation engine.
 
-    Phase 1: Pure heuristic triage (no MODEL calls).
-    Phase 2: MODEL-driven deliberation (L1 Reactive) — when triage detects
-    triggers, call an MODEL to decide what action to take.
+    Every observation crosses the model boundary. Local code may label typed
+    signals for the prompt, but it never suppresses deliberation.
 
     @since 2.90.0 *)
 
@@ -147,7 +146,6 @@ type world_observation = {
   keeper_fiber_count_changed: bool;
   active_goal_count: int;
   idle_seconds: int;
-  idle_gate: int;
   board_new_post_count: int;
   board_mention_count: int;
 }
@@ -164,7 +162,6 @@ let empty_world_observation ~keeper_name =
     keeper_fiber_count_changed = false;
     active_goal_count = 0;
     idle_seconds = 0;
-    idle_gate = 300;
     board_new_post_count = 0;
     board_mention_count = 0;
   }
@@ -182,7 +179,6 @@ let world_observation_to_json (obs : world_observation) : Yojson.Safe.t =
       ("keeper_fiber_count_changed", `Bool obs.keeper_fiber_count_changed);
       ("active_goal_count", `Int obs.active_goal_count);
       ("idle_seconds", `Int obs.idle_seconds);
-      ("idle_gate", `Int obs.idle_gate);
       ("board_new_post_count", `Int obs.board_new_post_count);
       ("board_mention_count", `Int obs.board_mention_count);
     ]
@@ -204,61 +200,21 @@ let triage_result_to_json = function
             `List (List.map deliberation_trigger_to_json triggers) );
         ]
 
-(* ---------- Triage function: cheap gate before deliberation ---------- *)
-
-(** Evaluate a world observation and return triggers that warrant action.
-    Returns [Skip _] when nothing interesting happened,
-    [Triggered triggers] when the keeper should evaluate further. *)
+(** Project objective typed signals for the model prompt. [Triggered []] is a
+    valid evaluation request: the configured model may choose [Noop]. *)
 let triage (obs : world_observation) : triage_result =
   let triggers = ref [] in
   let add t = triggers := t :: !triggers in
 
-  (* L1 Reactive triggers *)
   if obs.direct_mention then add DirectMention;
   if obs.unclaimed_task_count > 0 then add NewUnclaimedTask;
-  (* RFC-keeper-proactive-wake-actionability-invariant: failed_task (orphan) is NOT an actionable trigger.  Its only
-     affordance, Task_audit, is read-only, so the keeper cannot clear the
-     signal; waking on it produced the executor livelock.  Orphan resolution is
-     the GC/supervisor's job and visibility is the orphan surfacer's — not a
-     proactive wake.  Mirrors [affordance_can_mutate Task_audit = false] in
-     keeper_world_observation.  (The [FailedTask] variant is retained for the
-     Broadcast/ProposeSpawn legality gates below: communicating ABOUT an orphan
-     is a deliberate action, distinct from being woken by it.) *)
+  if obs.failed_task_count > 0 then add FailedTask;
   if obs.keeper_fiber_count_changed then add KeeperFiberStartedOrStopped;
-
-  (* L2 Proactive triggers — goal-directed *)
   if obs.board_mention_count > 0 then
     add (BoardActivity "mentioned_in_post");
-  if obs.idle_seconds > obs.idle_gate && obs.active_goal_count > 0 then
-    add IdleTimeout;
-  if obs.active_goal_count > 0
-     && obs.idle_seconds > obs.idle_gate * 2 then
-    add GoalDeadline;
-  if obs.idle_seconds > obs.idle_gate * 5
-     && obs.active_goal_count > 0 then
-    add StrategicReview;
-
-  (* L3 Self-directed triggers — no goal requirement.
-     Deterministic gates with longer cooldowns to prevent noise.
-
-     Board-reactive: engage with new posts after idle_gate/2 cooldown.
-     Enables community participation without requiring @mention.
-     Gate: idle_seconds >= idle_gate/2 prevents every heartbeat from triggering.
-
-     Self-directed explore: keepers without explicit goals can still act.
-     4x idle_gate (~20min) provides generous cooldown.
-     Allows curiosity-driven behavior: board posts, discussions, findings.
-     Ref: Deepset "spectrum" — self-directed at the autonomy end. *)
-  if obs.board_new_post_count > 0 && obs.idle_seconds >= obs.idle_gate / 2
-     && obs.board_mention_count = 0 then
+  if obs.board_new_post_count > 0 then
     add (BoardActivity "new_posts");
-  if obs.active_goal_count = 0
-     && obs.idle_seconds > obs.idle_gate * 4 then
-    add SelfDirectedExplore;
-
-  match List.rev !triggers with
-  | [] -> Skip "no triggers detected"
-  | ts -> Triggered ts
+  Triggered (List.rev !triggers)
 
 (* ---------- Deliberation meta: tracking fields for keeper_meta ---------- *)
 
@@ -340,7 +296,7 @@ let world_observation_to_prompt_section (obs : world_observation) : string =
     \  - Running keeper fibers: %d\n\
     \  - Keeper fiber count changed: %b\n\
     \  - Active goals: %d\n\
-    \  - Idle seconds: %d (gate: %d)\n\
+    \  - Idle seconds: %d\n\
     \  - Board new posts: %d\n\
     \  - Board mentions: %d\n\
     \  - Direct mention: %b\n\
@@ -350,7 +306,7 @@ let world_observation_to_prompt_section (obs : world_observation) : string =
     obs.running_keeper_fiber_count
     obs.keeper_fiber_count_changed
     obs.active_goal_count
-    obs.idle_seconds obs.idle_gate
+    obs.idle_seconds
     obs.board_new_post_count
     obs.board_mention_count
     obs.direct_mention
@@ -425,52 +381,10 @@ let rec policy_labels_of_action = function
   | action ->
       [ deliberation_action_to_policy_label action ]
 
-let has_board_signal (obs : world_observation) =
-  obs.board_new_post_count > 0 || obs.board_mention_count > 0
-
-let has_workspace_signal (obs : world_observation) =
-  obs.direct_mention || obs.has_question
-
-let has_operational_signal (obs : world_observation) =
-  has_workspace_signal obs
-  || obs.failed_task_count > 0
-  || obs.unclaimed_task_count > 0
-  || obs.keeper_fiber_count_changed
-  || has_board_signal obs
-
-(** Self-directed context: keeper is idle with no goals.
-    Deterministic predicate — same conditions as the L3 SelfDirectedExplore
-    trigger in [triage]. Used in [legality_error] to relax action gates
-    for keepers exploring autonomously.
-    Ref: CSA autonomy Level 2-3 — human monitors, agent acts. *)
-let is_self_directed (obs : world_observation) =
-  obs.active_goal_count = 0 && obs.idle_seconds > obs.idle_gate * 4
-
-let rec legality_error (obs : world_observation) = function
+let rec legality_error (_obs : world_observation) = function
   | Noop _ -> None
-  | BoardPost _ ->
-      if has_board_signal obs || obs.active_goal_count > 0
-         || is_self_directed obs then None
-      else Some "board_post requires board activity, active goals, or self-directed context"
-  | BoardComment _ ->
-      if has_board_signal obs then None
-      else Some "board_comment requires board activity"
-  | BoardVote _ ->
-      if has_board_signal obs then None
-      else Some "board_vote requires board activity"
-  | TaskClaim _ ->
-      if obs.unclaimed_task_count > 0 then None
-      else Some "task_claim requires unclaimed tasks"
-  | TaskCreate _ ->
-      if obs.active_goal_count > 0 && obs.unclaimed_task_count = 0 then None
-      else Some "task_create requires active goals and no unclaimed tasks"
-  | Broadcast _ ->
-      if has_operational_signal obs then None
-      else Some "broadcast requires an operational signal"
-  | ProposeSpawn _ ->
-      if obs.failed_task_count > 0 || obs.unclaimed_task_count > 0
-         || obs.active_goal_count > 0 then None
-      else Some "propose_spawn requires failed tasks, unclaimed tasks, or active goals"
+  | BoardPost _ | BoardComment _ | BoardVote _ | TaskClaim _ | TaskCreate _
+  | Broadcast _ | ProposeSpawn _ -> None
   | MultiStep actions -> (
       match actions with
       | [] -> Some "multi_step requires non-empty steps"
@@ -483,7 +397,7 @@ let rec legality_error (obs : world_observation) = function
                      "multi_step step %d cannot contain nested multi_step"
                      index)
             | action :: rest -> (
-                match legality_error obs action with
+                match legality_error _obs action with
                 | Some msg ->
                     Some
                       (Printf.sprintf "multi_step step %d illegal: %s" index

@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import * as Vitest from 'vitest'
-import type { DashboardGovernanceResponse, KeeperApprovalQueueItem, KeeperApprovalRule, KeeperResolvedApprovalItem } from '../../types'
+import type { DashboardGateResponse, KeeperApprovalQueueItem, KeeperApprovalRule, KeeperResolvedApprovalItem } from '../../types'
 
 const { afterEach, beforeEach, describe, expect, it, vi } = Vitest
 
@@ -18,9 +18,8 @@ function queueItem(overrides: Partial<KeeperApprovalQueueItem> & { id: string })
   return {
     keeper_name: 'keeper-x',
     tool_name: 'fs_write',
-    risk_level: 'critical',
     waiting_s: 92,
-    input_preview: 'echo hello > /etc/config',
+    input_preview: '{"path":"config.json","content":"hello"}',
     task_id: 'T-1',
     ...overrides,
   }
@@ -30,58 +29,46 @@ function responseWithQueue(
   approval_queue: KeeperApprovalQueueItem[],
   recent_resolved: KeeperResolvedApprovalItem[] = [],
   approval_rules: KeeperApprovalRule[] = [],
-  hitl: DashboardGovernanceResponse['hitl'] = {
-    enabled: true,
-    disabled_by_env: false,
-    env_name: 'MASC_DISABLE_HITL',
-    default_enabled: true,
+  hitl: DashboardGateResponse['hitl'] = {
+    gate_mode: { mode: 'manual', configured: true, state: 'ready' },
   },
-): DashboardGovernanceResponse {
+): DashboardGateResponse {
   return {
     generated_at: '2026-06-19T00:00:00Z',
-    summary: { judge_online: false },
-    items: [],
-    activity: [],
-    judgments: [],
-    pending_actions: [],
     approval_queue,
     recent_resolved,
     approval_rules,
     hitl,
-  } as DashboardGovernanceResponse
+  } as DashboardGateResponse
 }
 
-// Mirrors governance.test.ts loadComponentWithApi: mock the api seam that
-// refreshGovernance() reaches on mount, plus the sse-store refresh registry.
+// Mock the API seam refreshGate() reaches on mount, plus the SSE refresh
+// registry.
 async function loadSurface(
   approval_queue: KeeperApprovalQueueItem[],
   recent_resolved: KeeperResolvedApprovalItem[] = [],
   approval_rules: KeeperApprovalRule[] = [],
-  hitl?: DashboardGovernanceResponse['hitl'],
+  hitl?: DashboardGateResponse['hitl'],
 ) {
   vi.resetModules()
-  const resolveGovernanceApproval = vi
+  const resolveGateApproval = vi
     .fn()
     .mockResolvedValue({ ok: true, id: 'appr-1', decision: 'approve' })
-  const setApprovalMode = vi
+  const setGateMode = vi
     .fn()
-    .mockResolvedValue({ ok: true, mode: 'auto_low_risk', previous_mode: 'manual', actor: 'op', changed_at: '2026-06-19T00:00:00Z' })
+    .mockResolvedValue({ ok: true, mode: 'auto_judge', previous_mode: 'manual', actor: 'op', changed_at: '2026-06-19T00:00:00Z' })
   const response = hitl
     ? responseWithQueue(approval_queue, recent_resolved, approval_rules, hitl)
     : responseWithQueue(approval_queue, recent_resolved, approval_rules)
   const apiMock = () => ({
-    decideGovernanceExecutionOrder: vi.fn().mockResolvedValue(undefined),
-    fetchDashboardGovernance: vi.fn().mockResolvedValue(response),
-    fetchGovernanceCaseStatus: vi.fn().mockResolvedValue(null),
-    resolveGovernanceApproval,
-    deleteGovernanceApprovalRule: vi.fn().mockResolvedValue({ ok: true }),
-    setApprovalMode,
-    submitGovernanceCaseBrief: vi.fn().mockResolvedValue(null),
-    submitGovernancePetition: vi.fn().mockResolvedValue({ case: { id: 'x' } }),
+    fetchDashboardGate: vi.fn().mockResolvedValue(response),
+    resolveGateApproval,
+    deleteGateApprovalRule: vi.fn().mockResolvedValue({ ok: true }),
+    setGateMode,
   })
   vi.doMock('../../api', apiMock)
-  vi.doMock('../../api/dashboard-governance', apiMock)
-  vi.doMock('../../sse-store', () => ({ registerGovernanceRefresh: vi.fn() }))
+  vi.doMock('../../api/dashboard-gate', apiMock)
+  vi.doMock('../../sse-store', () => ({ registerGateRefresh: vi.fn() }))
   // Preserve the real router (route signal etc.) but capture navigate() so the
   // "open keeper conversation" wiring can be asserted without a real route change.
   const navigate = vi.fn()
@@ -90,7 +77,7 @@ async function loadSurface(
     navigate,
   }))
   const mod = await import('./approvals-surface')
-  return { ApprovalsSurface: mod.ApprovalsSurface, resolveGovernanceApproval, setApprovalMode, navigate }
+  return { ApprovalsSurface: mod.ApprovalsSurface, resolveGateApproval, setGateMode, navigate }
 }
 
 describe('ApprovalsSurface', () => {
@@ -107,16 +94,16 @@ describe('ApprovalsSurface', () => {
     vi.resetModules()
     vi.clearAllMocks()
     vi.doUnmock('../../api')
-    vi.doUnmock('../../api/dashboard-governance')
+    vi.doUnmock('../../api/dashboard-gate')
     vi.doUnmock('../../sse-store')
   })
 
   it('renders a card per pending approval bound to the live queue fields', async () => {
     const { ApprovalsSurface } = await loadSurface([
-      queueItem({ id: 'appr-1', keeper_name: 'masc-improver', tool_name: 'fs_write', risk_level: 'critical' }),
-      queueItem({ id: 'appr-2', keeper_name: 'issue-king', tool_name: 'shell', risk_level: 'low', waiting_s: 12 }),
-      queueItem({ id: 'appr-3', keeper_name: 'risk-checker', tool_name: 'shell', risk_level: 'high' }),
-      queueItem({ id: 'appr-4', keeper_name: 'risk-checker', tool_name: 'shell', risk_level: 'medium' }),
+      queueItem({ id: 'appr-1', keeper_name: 'masc-improver', tool_name: 'filesystem_write' }),
+      queueItem({ id: 'appr-2', keeper_name: 'issue-king', tool_name: 'execute', waiting_s: 12 }),
+      queueItem({ id: 'appr-3', keeper_name: 'reviewer', tool_name: 'connector_post' }),
+      queueItem({ id: 'appr-4', keeper_name: 'reviewer', tool_name: 'image_generate' }),
     ])
 
     render(html`<${ApprovalsSurface} />`, container)
@@ -130,16 +117,12 @@ describe('ApprovalsSurface', () => {
     const cards = container.querySelectorAll('[data-testid="approval-card"]')
     expect(cards.length).toBe(4)
     expect(container.textContent).toContain('masc-improver')
-    expect(container.textContent).toContain('fs_write')
-    // risk_level is surfaced as a humanized Korean label on the .ap-kind badge
-    // (keeperApprovalRiskLabel — exhaustive over the closed risk-level union).
-    expect(container.textContent).toContain('심각')
-    expect(container.textContent).toContain('높음')
-    expect(container.textContent).toContain('보통')
-    expect(container.textContent).toContain('낮음')
-    expect(container.querySelector('[data-approval-id="appr-1"]')?.className).toContain('sev-bad')
-    expect(container.querySelector('[data-approval-id="appr-3"]')?.className).toContain('sev-warn')
-    expect(container.querySelector('[data-approval-id="appr-4"]')?.className).toContain('sev-accent')
+    expect(container.textContent).toContain('filesystem_write')
+    expect(container.textContent).toContain('Human HITL')
+    expect(container.textContent).toContain('nonblocking')
+    expect(container.querySelector('[data-approval-id="appr-1"]')?.className).toContain('sev-info')
+    expect(container.querySelector('[data-approval-id="appr-3"]')?.className).toContain('sev-info')
+    expect(container.querySelector('[data-approval-id="appr-4"]')?.className).toContain('sev-info')
     expect(container.querySelector('[data-approval-id="appr-2"]')?.className).toContain('sev-info')
     // the three live decisions are exposed; the prototype's defer/undo are not
     expect(container.textContent).toContain('승인')
@@ -151,9 +134,9 @@ describe('ApprovalsSurface', () => {
     // KPI strip counts the queue
     expect(container.querySelector('[data-testid="approvals-queue"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="approvals-aside"]')?.textContent)
-      .toContain('HITL 상태')
+      .toContain('Gate 모드')
     expect(container.querySelector('[data-testid="approvals-aside"]')?.textContent)
-      .toContain('enabled')
+      .toContain('Human')
   }, 20000)
 
   it('formats a multi-hour HITL wait with an hour tier, not a minute-only breakdown', async () => {
@@ -180,15 +163,12 @@ describe('ApprovalsSurface', () => {
           status: 'available',
           summary: {
             summary_version: 1,
-            generated_at_iso: '2026-07-04T00:00:00Z',
+            generated_at: '2026-07-04T00:00:00Z',
             model_run_id: 'run-1',
-            context_summary: 'Deletes the production database — irreversible.',
+            context_summary: 'The request needs workspace context.',
             key_questions: ['Is there a verified backup?'],
-            suggested_options: [
-              { label: '거부', rationale: '복구 불가', estimated_risk_delta: 'critical' },
-            ],
-            risk_rationale: 'writes outside the sandbox',
-            uncertainty: 0.6,
+            judgment: 'require_human',
+            rationale: 'A Human should confirm the intended target.',
           },
         },
       }),
@@ -200,11 +180,10 @@ describe('ApprovalsSurface', () => {
     const summaryEl = container.querySelector('[data-testid="approval-summary"]')
     expect(summaryEl).not.toBeNull()
     expect(summaryEl?.getAttribute('data-summary-state')).toBe('available')
-    expect(container.textContent).toContain('Deletes the production database')
+    expect(container.textContent).toContain('The request needs workspace context')
     expect(container.textContent).toContain('Is there a verified backup?')
-    expect(container.textContent).toContain('복구 불가')
-    // uncertainty rendered as a rounded percentage
-    expect(container.textContent).toContain('60%')
+    expect(container.textContent).toContain('A Human should confirm the intended target.')
+    expect(container.textContent).toContain('Human 판단 필요')
   }, 20000)
 
   it('surfaces pending and failed summary states rather than hiding them', async () => {
@@ -237,28 +216,19 @@ describe('ApprovalsSurface', () => {
     expect(container.querySelector('[data-testid="approval-summary"]')).toBeNull()
   }, 20000)
 
-  it('counts only the bad (critical) visual band in the 비가역·위험 KPI, matching the red card rails', async () => {
+  it('reports the observed Keeper count without classifying the queue', async () => {
     const { ApprovalsSurface } = await loadSurface([
-      queueItem({ id: 'c1', risk_level: 'critical' }),
-      queueItem({ id: 'h1', risk_level: 'high' }),
-      queueItem({ id: 'm1', risk_level: 'medium' }),
-      queueItem({ id: 'l1', risk_level: 'low' }),
-      queueItem({ id: 'c2', risk_level: 'critical' }),
+      queueItem({ id: 'a1', keeper_name: 'keeper-a' }),
+      queueItem({ id: 'a2', keeper_name: 'keeper-a' }),
+      queueItem({ id: 'b1', keeper_name: 'keeper-b' }),
     ])
 
     render(html`<${ApprovalsSurface} />`, container)
     await flushUi()
 
-    // Two critical items render the red sev-bad rail; high/medium/low do not.
-    const badCards = container.querySelectorAll('.ap-card.sev-bad')
-    expect(badCards.length).toBe(2)
-
-    // The KPI must equal that bad-band card count (not high+critical), so the
-    // red-styled value never claims irreversible items no card flags red.
-    const kpi = container.querySelector('[data-testid="approvals-kpi-irreversible"]')
+    const kpi = container.querySelector('[data-testid="gate-kpi-keepers"]')
     expect(kpi).not.toBeNull()
     expect(kpi?.textContent?.trim()).toBe('2')
-    expect(kpi?.className).toContain('bad')
   }, 20000)
 
   it('renders a selected request dossier from backed approval queue fields', async () => {
@@ -267,37 +237,19 @@ describe('ApprovalsSurface', () => {
         id: 'appr-1',
         keeper_name: 'masc-improver',
         tool_name: 'fs_write',
-        action_key: 'write guarded config',
         waiting_s: 125,
         requested_at: '2026-06-19T00:00:00Z',
         turn_id: 7,
         goal_id: 'G-1',
-        sandbox_target: 'project-root',
-        runtime_contract: {
-          sandbox_profile: 'workspace-write',
-          network_mode: 'restricted',
-          backend: 'eio',
-          task_id: 'T-runtime',
-          goal_id: 'G-runtime',
-          goal_ids: ['G-extra'],
-        },
-        disposition: 'manual_review',
-        disposition_reason: 'requires operator signoff',
-        rule_match: { rule_id: 'rule-1', matched_by: 'fingerprint' },
         input_preview: 'first approval preview',
+        input: { path: 'config.json', content: 'first' },
       }),
       queueItem({
         id: 'appr-2',
         keeper_name: 'issue-king',
         tool_name: 'shell',
-        risk_level: 'low',
-        action_key: 'run read-only check',
         input_preview: 'second approval preview',
-        runtime_contract: {
-          sandbox_profile: 'read-only',
-          network_mode: 'restricted',
-          backend: 'local',
-        },
+        input: { argv: ['status'] },
       }),
     ])
 
@@ -307,14 +259,9 @@ describe('ApprovalsSurface', () => {
     const panel = container.querySelector('[data-testid="approval-detail-panel"]')
     expect(panel).not.toBeNull()
     expect(panel?.getAttribute('data-approval-id')).toBe('appr-1')
-    expect(panel?.textContent).toContain('write guarded config')
-    expect(panel?.textContent).toContain('workspace-write')
-    expect(panel?.textContent).toContain('restricted')
-    expect(panel?.textContent).toContain('eio')
+    expect(panel?.textContent).toContain('fs_write Gate 요청')
+    expect(panel?.textContent).toContain('Keeper lane nonblocking')
     expect(panel?.textContent).toContain('goal G-1')
-    expect(panel?.textContent).toContain('runtime task T-runtime')
-    expect(panel?.textContent).toContain('requires operator signoff')
-    expect(panel?.textContent).toContain('rule rule-1')
     expect(panel?.textContent).toContain('first approval preview')
     expect(container.querySelector('[data-approval-id="appr-1"]')?.getAttribute('data-selected')).toBe('true')
 
@@ -323,8 +270,7 @@ describe('ApprovalsSurface', () => {
 
     const switchedPanel = container.querySelector('[data-testid="approval-detail-panel"]')
     expect(switchedPanel?.getAttribute('data-approval-id')).toBe('appr-2')
-    expect(switchedPanel?.textContent).toContain('run read-only check')
-    expect(switchedPanel?.textContent).toContain('read-only')
+    expect(switchedPanel?.textContent).toContain('shell Gate 요청')
     expect(switchedPanel?.textContent).toContain('second approval preview')
     expect(switchedPanel?.textContent).not.toContain('first approval preview')
     expect(container.querySelector('[data-approval-id="appr-1"]')?.getAttribute('data-selected')).toBe('false')
@@ -336,14 +282,11 @@ describe('ApprovalsSurface', () => {
       queueItem({
         id: 'appr-1',
         keeper_name: 'masc-improver',
-        action_key: 'write guarded config',
         input_preview: 'first approval preview',
       }),
       queueItem({
         id: 'appr-2',
         keeper_name: 'issue-king',
-        risk_level: 'low',
-        action_key: 'run read-only check',
         input_preview: 'second approval preview',
       }),
     ])
@@ -397,8 +340,8 @@ describe('ApprovalsSurface', () => {
           id: 'appr-done',
           keeper_name: 'masc-improver',
           tool_name: 'fs_write',
-          risk_level: 'medium',
           decision: 'reject',
+          decision_source: 'human_operator',
           decision_raw: 'reject:operator denied',
           resolved_at: '2026-06-27T01:02:03Z',
         },
@@ -417,6 +360,7 @@ describe('ApprovalsSurface', () => {
     expect(history?.textContent).toContain('거부')
     expect(history?.textContent).toContain('fs_write')
     expect(history?.textContent).toContain('masc-improver')
+    expect(history?.textContent).toContain('Human')
     expect(history?.textContent).toContain('appr-done')
     expect(history?.querySelector('.ap-history-decision')?.className).toContain('decision-reject')
     expect(history?.querySelector('.ap-history-decision')?.className).not.toContain('operator denied')
@@ -431,17 +375,17 @@ describe('ApprovalsSurface', () => {
           id: 'appr-approved',
           keeper_name: 'keeper-a',
           tool_name: 'fs_write',
-          risk_level: 'medium',
           decision: 'approve',
+          decision_source: 'always_allowed',
           resolved_at: '2026-06-27T02:02:03Z',
-          rule_match: { rule_id: 'rule-1', matched_by: 'fingerprint' },
+          rule_match: { rule_id: 'rule-1' },
         },
         {
           id: 'appr-rejected',
           keeper_name: 'keeper-b',
           tool_name: 'shell',
-          risk_level: 'critical',
           decision: 'reject',
+          decision_source: 'auto_judge',
           resolved_at: '2026-06-27T01:02:03Z',
         },
       ],
@@ -450,8 +394,7 @@ describe('ApprovalsSurface', () => {
           id: 'rule-1',
           keeper_name: 'keeper-a',
           tool_name: 'fs_write',
-          max_risk: 'medium',
-          match_count: 3,
+          request_fingerprint: 'abcdef1234567890',
         },
       ],
     )
@@ -463,7 +406,8 @@ describe('ApprovalsSurface', () => {
     expect(aside?.textContent).toContain('Always Rules')
     expect(aside?.textContent).toContain('keeper-a')
     expect(aside?.textContent).toContain('fs_write')
-    expect(aside?.textContent).toContain('match 3')
+    expect(aside?.textContent).toContain('abcdef123456')
+    expect(aside?.textContent).not.toContain('abcdef1234567890')
 
     container.querySelector<HTMLButtonElement>('.ap-viewbtn:not(.on)')?.click()
     await flushUi()
@@ -486,8 +430,7 @@ describe('ApprovalsSurface', () => {
       id: `rule-${i}`,
       keeper_name: 'keeper-a',
       tool_name: 'fs_write',
-      max_risk: 'medium',
-      match_count: 1,
+      request_fingerprint: `fp-${i}`,
     })) as KeeperApprovalRule[]
     const { ApprovalsSurface } = await loadSurface([], [], rules)
 
@@ -506,8 +449,7 @@ describe('ApprovalsSurface', () => {
       id: `rule-${i}`,
       keeper_name: 'k',
       tool_name: 't',
-      max_risk: 'low',
-      match_count: 1,
+      request_fingerprint: `fp-${i}`,
     })) as KeeperApprovalRule[]
     const { ApprovalsSurface } = await loadSurface([], [], rules)
 
@@ -524,39 +466,33 @@ describe('ApprovalsSurface', () => {
     await flushUi()
 
     expect(container.querySelector('[data-testid="approvals-empty"]')).not.toBeNull()
-    expect(container.textContent).toContain('열린 승인이 없습니다')
+    expect(container.textContent).toContain('열린 Human 판단이 없습니다')
     expect(container.querySelector('[data-testid="approvals-queue"]')).toBeNull()
   })
 
   it('shows a loading state on first load, not the empty state, before data arrives', async () => {
-    // governanceResource is stale-while-revalidate, so governanceData is null
+    // gateResource is stale-while-revalidate, so gateData is null
     // ONLY before the first fetch resolves. Hold the fetch pending and assert the
-    // surface shows the loading state — not "열린 승인이 없습니다", which would
+    // surface shows the loading state, not an unverified empty-state claim.
     // assert an empty queue we have not actually loaded yet.
     vi.resetModules()
-    let resolveFetch: (value: DashboardGovernanceResponse) => void = () => {}
-    const fetchDashboardGovernance = vi.fn(
-      () => new Promise<DashboardGovernanceResponse>(resolve => { resolveFetch = resolve }),
+    let resolveFetch: (value: DashboardGateResponse) => void = () => {}
+    const fetchDashboardGate = vi.fn(
+      () => new Promise<DashboardGateResponse>(resolve => { resolveFetch = resolve }),
     )
     vi.doMock('../../api', () => ({
-      decideGovernanceExecutionOrder: vi.fn().mockResolvedValue(undefined),
-      fetchDashboardGovernance,
-      fetchGovernanceCaseStatus: vi.fn().mockResolvedValue(null),
-      resolveGovernanceApproval: vi.fn().mockResolvedValue({ ok: true }),
-      deleteGovernanceApprovalRule: vi.fn().mockResolvedValue({ ok: true }),
-      submitGovernanceCaseBrief: vi.fn().mockResolvedValue(null),
-      submitGovernancePetition: vi.fn().mockResolvedValue({ case: { id: 'x' } }),
+      fetchDashboardGate,
+      resolveGateApproval: vi.fn().mockResolvedValue({ ok: true }),
+      deleteGateApprovalRule: vi.fn().mockResolvedValue({ ok: true }),
+      setGateMode: vi.fn().mockResolvedValue({ ok: true }),
     }))
-    vi.doMock('../../api/dashboard-governance', () => ({
-      decideGovernanceExecutionOrder: vi.fn().mockResolvedValue(undefined),
-      fetchDashboardGovernance,
-      fetchGovernanceCaseStatus: vi.fn().mockResolvedValue(null),
-      resolveGovernanceApproval: vi.fn().mockResolvedValue({ ok: true }),
-      deleteGovernanceApprovalRule: vi.fn().mockResolvedValue({ ok: true }),
-      submitGovernanceCaseBrief: vi.fn().mockResolvedValue(null),
-      submitGovernancePetition: vi.fn().mockResolvedValue({ case: { id: 'x' } }),
+    vi.doMock('../../api/dashboard-gate', () => ({
+      fetchDashboardGate,
+      resolveGateApproval: vi.fn().mockResolvedValue({ ok: true }),
+      deleteGateApprovalRule: vi.fn().mockResolvedValue({ ok: true }),
+      setGateMode: vi.fn().mockResolvedValue({ ok: true }),
     }))
-    vi.doMock('../../sse-store', () => ({ registerGovernanceRefresh: vi.fn() }))
+    vi.doMock('../../sse-store', () => ({ registerGateRefresh: vi.fn() }))
     const { ApprovalsSurface } = await import('./approvals-surface')
 
     render(html`<${ApprovalsSurface} />`, container)
@@ -564,9 +500,9 @@ describe('ApprovalsSurface', () => {
 
     // fetch still pending → first load → loading state, NOT empty state
     expect(container.querySelector('.loading-state')).not.toBeNull()
-    expect(container.textContent).toContain('승인 큐 불러오는 중')
+    expect(container.textContent).toContain('Gate 큐 불러오는 중')
     expect(container.querySelector('[data-testid="approvals-empty"]')).toBeNull()
-    expect(container.querySelector('[data-testid="approvals-kpi-irreversible"]')).toBeNull()
+    expect(container.querySelector('[data-testid="gate-kpi-keepers"]')).toBeNull()
 
     // resolve so the surface transitions out of loading (and no pending promise leaks)
     resolveFetch(responseWithQueue([]))
@@ -577,30 +513,24 @@ describe('ApprovalsSurface', () => {
 
   it('shows the error banner without the all-clear empty state when the first fetch fails', async () => {
     // On a failed first fetch the managed resource sets loading=false with null
-    // data, so items=[] and governanceError is set. The "✓ 큐가 비어 있습니다 —
+    // data, so items=[] and gateError is set. The "✓ 큐가 비어 있습니다 —
     // keeper들이 진행 중" panel is a success claim and must NOT render under the
     // error banner (it would contradict the failure).
     vi.resetModules()
-    const fetchDashboardGovernance = vi.fn().mockRejectedValue(new Error('승인 큐 로드 실패'))
+    const fetchDashboardGate = vi.fn().mockRejectedValue(new Error('승인 큐 로드 실패'))
     vi.doMock('../../api', () => ({
-      decideGovernanceExecutionOrder: vi.fn().mockResolvedValue(undefined),
-      fetchDashboardGovernance,
-      fetchGovernanceCaseStatus: vi.fn().mockResolvedValue(null),
-      resolveGovernanceApproval: vi.fn().mockResolvedValue({ ok: true }),
-      deleteGovernanceApprovalRule: vi.fn().mockResolvedValue({ ok: true }),
-      submitGovernanceCaseBrief: vi.fn().mockResolvedValue(null),
-      submitGovernancePetition: vi.fn().mockResolvedValue({ case: { id: 'x' } }),
+      fetchDashboardGate,
+      resolveGateApproval: vi.fn().mockResolvedValue({ ok: true }),
+      deleteGateApprovalRule: vi.fn().mockResolvedValue({ ok: true }),
+      setGateMode: vi.fn().mockResolvedValue({ ok: true }),
     }))
-    vi.doMock('../../api/dashboard-governance', () => ({
-      decideGovernanceExecutionOrder: vi.fn().mockResolvedValue(undefined),
-      fetchDashboardGovernance,
-      fetchGovernanceCaseStatus: vi.fn().mockResolvedValue(null),
-      resolveGovernanceApproval: vi.fn().mockResolvedValue({ ok: true }),
-      deleteGovernanceApprovalRule: vi.fn().mockResolvedValue({ ok: true }),
-      submitGovernanceCaseBrief: vi.fn().mockResolvedValue(null),
-      submitGovernancePetition: vi.fn().mockResolvedValue({ case: { id: 'x' } }),
+    vi.doMock('../../api/dashboard-gate', () => ({
+      fetchDashboardGate,
+      resolveGateApproval: vi.fn().mockResolvedValue({ ok: true }),
+      deleteGateApprovalRule: vi.fn().mockResolvedValue({ ok: true }),
+      setGateMode: vi.fn().mockResolvedValue({ ok: true }),
     }))
-    vi.doMock('../../sse-store', () => ({ registerGovernanceRefresh: vi.fn() }))
+    vi.doMock('../../sse-store', () => ({ registerGateRefresh: vi.fn() }))
     const { ApprovalsSurface } = await import('./approvals-surface')
 
     render(html`<${ApprovalsSurface} />`, container)
@@ -617,7 +547,7 @@ describe('ApprovalsSurface', () => {
 
   it('labels the surface with the shared data-screen-label convention', async () => {
     // Every v2 surface (fusion/schedule/settings/connector/copilot) tags its
-    // <main> with data-screen-label; the prototype names this screen 승인 큐.
+    // <main> with data-screen-label.
     // Asserting it keeps the approvals surface consistent with that convention.
     const { ApprovalsSurface } = await loadSurface([])
 
@@ -625,11 +555,11 @@ describe('ApprovalsSurface', () => {
     await flushUi()
 
     const main = container.querySelector('[data-testid="approvals-surface"]')
-    expect(main?.getAttribute('data-screen-label')).toBe('승인 큐')
+    expect(main?.getAttribute('data-screen-label')).toBe('Gate HITL 큐')
   })
 
-  it('routes the 승인 action through respondToKeeperApproval → resolveGovernanceApproval', async () => {
-    const { ApprovalsSurface, resolveGovernanceApproval } = await loadSurface([
+  it('routes the 승인 action through respondToKeeperApproval → resolveGateApproval', async () => {
+    const { ApprovalsSurface, resolveGateApproval } = await loadSurface([
       queueItem({ id: 'appr-9', keeper_name: 'masc-improver' }),
     ])
 
@@ -641,11 +571,11 @@ describe('ApprovalsSurface', () => {
     approveBtn?.click()
     await flushUi()
 
-    expect(resolveGovernanceApproval).toHaveBeenCalledWith('appr-9', 'approve', false)
+    expect(resolveGateApproval).toHaveBeenCalledWith('appr-9', 'approve', false)
   })
 
-  it('routes the 거부 action through resolveGovernanceApproval with the reject decision', async () => {
-    const { ApprovalsSurface, resolveGovernanceApproval } = await loadSurface([
+  it('routes the 거부 action through resolveGateApproval with the reject decision', async () => {
+    const { ApprovalsSurface, resolveGateApproval } = await loadSurface([
       queueItem({ id: 'appr-r', keeper_name: 'masc-improver' }),
     ])
 
@@ -655,11 +585,11 @@ describe('ApprovalsSurface', () => {
     container.querySelector<HTMLButtonElement>('.ap-card .ap-act.deny')?.click()
     await flushUi()
 
-    expect(resolveGovernanceApproval).toHaveBeenCalledWith('appr-r', 'reject', false)
+    expect(resolveGateApproval).toHaveBeenCalledWith('appr-r', 'reject', false)
   })
 
-  it('routes the 항상 승인 action through resolveGovernanceApproval with rememberRule=true', async () => {
-    const { ApprovalsSurface, resolveGovernanceApproval } = await loadSurface([
+  it('routes the 항상 승인 action through resolveGateApproval with rememberRule=true', async () => {
+    const { ApprovalsSurface, resolveGateApproval } = await loadSurface([
       queueItem({ id: 'appr-a', keeper_name: 'masc-improver' }),
     ])
 
@@ -669,99 +599,64 @@ describe('ApprovalsSurface', () => {
     container.querySelector<HTMLButtonElement>('.ap-card .ap-act.always')?.click()
     await flushUi()
 
-    expect(resolveGovernanceApproval).toHaveBeenCalledWith('appr-a', 'approve', true)
+    expect(resolveGateApproval).toHaveBeenCalledWith('appr-a', 'approve', true)
   })
 
-  it('binds the RFC-0319 approval-mode toggle to hitl.approval_mode (auto_low_risk → on)', async () => {
+  it('binds the three non-hierarchical choices to hitl.gate_mode', async () => {
     const { ApprovalsSurface } = await loadSurface([], [], [], {
-      enabled: true,
-      disabled_by_env: false,
-      env_name: 'MASC_DISABLE_HITL',
-      default_enabled: true,
-      approval_mode: { mode: 'auto_low_risk', auto_eligible_bands: ['low'], fail_closed: false },
+      gate_mode: { mode: 'auto_judge', configured: true, state: 'ready' },
     })
 
     render(html`<${ApprovalsSurface} />`, container)
     await flushUi()
 
-    const toggle = container.querySelector<HTMLButtonElement>('[data-testid="approval-mode-toggle"]')
-    expect(toggle).not.toBeNull()
-    // A real toggle switch, not the former display-only aria-hidden span.
-    expect(toggle?.getAttribute('role')).toBe('switch')
-    expect(toggle?.getAttribute('aria-checked')).toBe('true')
-    expect(toggle?.className).toContain('on')
+    const selector = container.querySelector('[data-testid="gate-mode-selector"]')
+    expect(selector?.getAttribute('role')).toBe('radiogroup')
+    const choices = Array.from(selector?.querySelectorAll<HTMLButtonElement>('[role="radio"]') ?? [])
+    expect(choices.map(choice => choice.textContent)).toEqual(['Human', 'Auto Judge', 'Always Allow'])
+    expect(choices.find(choice => choice.textContent === 'Auto Judge')?.getAttribute('aria-checked')).toBe('true')
     const aside = container.querySelector('[data-testid="approvals-aside"]')
-    expect(aside?.textContent).toContain('자동 승인 (low-risk)')
-    // the enforced separation-of-duties floor is stated, not decorative
-    expect(aside?.textContent).toContain('비가역·파괴적·high-risk 요청은 항상 수동 결재')
-    expect(aside?.textContent).toContain('자동 승인 대상: low')
+    expect(aside?.textContent).toContain('Auto Judge')
+    expect(aside?.textContent).toContain('workspace의 명시적 선택')
   }, 20000)
 
-  it('defaults the approval-mode toggle to off when hitl.approval_mode is manual', async () => {
+  it('shows Human as the selected Gate mode when configured', async () => {
     const { ApprovalsSurface } = await loadSurface([], [], [], {
-      enabled: true,
-      disabled_by_env: false,
-      env_name: 'MASC_DISABLE_HITL',
-      default_enabled: true,
-      approval_mode: { mode: 'manual', auto_eligible_bands: ['low'], fail_closed: false },
+      gate_mode: { mode: 'manual', configured: true, state: 'ready' },
     })
 
     render(html`<${ApprovalsSurface} />`, container)
     await flushUi()
 
-    const toggle = container.querySelector<HTMLButtonElement>('[data-testid="approval-mode-toggle"]')
-    expect(toggle?.getAttribute('aria-checked')).toBe('false')
-    expect(toggle?.className).not.toContain('on')
-    expect(container.querySelector('[data-testid="approvals-aside"]')?.textContent).toContain('수동 결재')
+    const human = Array.from(container.querySelectorAll<HTMLButtonElement>('[data-testid="gate-mode-selector"] [role="radio"]'))
+      .find(choice => choice.textContent === 'Human')
+    expect(human?.getAttribute('aria-checked')).toBe('true')
   }, 20000)
 
-  it('routes the approval-mode toggle through setApprovalMode (manual → auto_low_risk)', async () => {
-    const { ApprovalsSurface, setApprovalMode } = await loadSurface([], [], [], {
-      enabled: true,
-      disabled_by_env: false,
-      env_name: 'MASC_DISABLE_HITL',
-      default_enabled: true,
-      approval_mode: { mode: 'manual', auto_eligible_bands: ['low'], fail_closed: false },
+  it('routes a Gate mode choice through setGateMode', async () => {
+    const { ApprovalsSurface, setGateMode } = await loadSurface([], [], [], {
+      gate_mode: { mode: 'manual', configured: true, state: 'ready' },
     })
 
     render(html`<${ApprovalsSurface} />`, container)
     await flushUi()
 
-    const toggle = container.querySelector<HTMLButtonElement>('[data-testid="approval-mode-toggle"]')
-    expect(toggle?.disabled).toBe(false)
-    toggle?.click()
+    const autoJudge = Array.from(container.querySelectorAll<HTMLButtonElement>('[data-testid="gate-mode-selector"] [role="radio"]'))
+      .find(choice => choice.textContent === 'Auto Judge')
+    expect(autoJudge?.disabled).toBe(false)
+    autoJudge?.click()
     await flushUi()
 
-    expect(setApprovalMode).toHaveBeenCalledWith('auto_low_risk')
-  }, 20000)
-
-  it('disables the approval-mode toggle when HITL is disabled by env (nothing gates)', async () => {
-    const { ApprovalsSurface, setApprovalMode } = await loadSurface([], [], [], {
-      enabled: false,
-      disabled_by_env: true,
-      env_name: 'MASC_DISABLE_HITL',
-      default_enabled: true,
-      approval_mode: { mode: 'manual', auto_eligible_bands: ['low'], fail_closed: false },
-    })
-
-    render(html`<${ApprovalsSurface} />`, container)
-    await flushUi()
-
-    const toggle = container.querySelector<HTMLButtonElement>('[data-testid="approval-mode-toggle"]')
-    expect(toggle?.disabled).toBe(true)
-    toggle?.click()
-    await flushUi()
-
-    expect(setApprovalMode).not.toHaveBeenCalled()
+    expect(setGateMode).toHaveBeenCalledWith('auto_judge')
   }, 20000)
 
   it('surfaces a visible error and re-enables the actions when a decision fails (no silent failure)', async () => {
-    const { ApprovalsSurface, resolveGovernanceApproval } = await loadSurface([
+    const { ApprovalsSurface, resolveGateApproval } = await loadSurface([
       queueItem({ id: 'appr-e', keeper_name: 'masc-improver' }),
     ])
     // The next decision call rejects: the operator must SEE the failure, because a
     // silently-failed reject would let the keeper proceed while the queue clears.
-    resolveGovernanceApproval.mockRejectedValueOnce(new Error('승인 서버 연결 실패'))
+    resolveGateApproval.mockRejectedValueOnce(new Error('승인 서버 연결 실패'))
 
     render(html`<${ApprovalsSurface} />`, container)
     await flushUi()
@@ -799,27 +694,24 @@ describe('ApprovalsSurface', () => {
     })
   })
 
-  it('renders sandbox metadata as a non-interactive span, not a clickable goal link', async () => {
+  it('renders nonblocking state separately from the clickable task link', async () => {
     const { ApprovalsSurface } = await loadSurface([
-      queueItem({ id: 'appr-sb', keeper_name: 'masc-improver', sandbox_target: 'project-root', task_id: 'T-1' }),
+      queueItem({ id: 'appr-sb', keeper_name: 'masc-improver', task_id: 'T-1' }),
     ])
 
     render(html`<${ApprovalsSurface} />`, container)
     await flushUi()
 
     const card = container.querySelector('[data-approval-id="appr-sb"]')
-    // sandbox text is a static .ap-req-meta span (no click affordance)
     const meta = card?.querySelector('.ap-req-meta')
     expect(meta).not.toBeNull()
     expect(meta?.tagName).toBe('SPAN')
-    expect(meta?.textContent).toContain('sandbox')
-    expect(meta?.textContent).toContain('project-root')
-    // the clickable .ap-req-goal is the task/goal button only — never the sandbox
+    expect(meta?.textContent).toContain('nonblocking')
     const goalEls = Array.from(card?.querySelectorAll('.ap-req-goal') ?? [])
     expect(goalEls.length).toBeGreaterThan(0)
     for (const el of goalEls) {
       expect(el.tagName).toBe('BUTTON')
-      expect(el.textContent).not.toContain('sandbox')
+      expect(el.textContent).not.toContain('nonblocking')
     }
   })
 

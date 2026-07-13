@@ -1461,45 +1461,14 @@ let test_judge_outcome_roundtrip () =
       | Error e -> Alcotest.failf "judge_outcome roundtrip failed: %s" e)
     nodes
 
-(* RFC-0252 all-panel-fail guard: 0 answered panels => judge skipped with a
-   typed quorum reason; >= 1 answered => judge runs. Reverting [judge_skip_reason]
-   to always-[None] turns the first two checks red (non-vacuous). *)
-let test_judge_skip_reason () =
-  let answered m a : panel_outcome = Answered { model = m; answer = a; usage = zero_usage } in
-  let failed m : panel_outcome = Failed { failed_model = m; reason = Provider_error "x" } in
-  let skips ~min_answered os = Option.is_some (judge_skip_reason ~min_answered os) in
-  (* default floor 1: all-failed/empty => skip; >= 1 answered => run *)
-  Alcotest.(check bool) "min1 all failed => skip" true
-    (skips ~min_answered:1 [ failed "a"; failed "b" ]);
-  Alcotest.(check bool) "min1 empty => skip" true (skips ~min_answered:1 []);
-  Alcotest.(check bool) "min1 one answered => run" false
-    (skips ~min_answered:1 [ failed "a"; answered "b" "hi" ]);
-  (* quorum 2 (e.g. trio min_answered=2): 1 answered => skip, 2 answered => run *)
-  Alcotest.(check bool) "min2 one answered => skip" true
-    (skips ~min_answered:2 [ answered "a" "x"; failed "b"; failed "c" ]);
-  Alcotest.(check bool) "min2 two answered => run" false
-    (skips ~min_answered:2 [ answered "a" "x"; answered "b" "y"; failed "c" ]);
-  (* skip reason reports structured quorum counts; rendering is boundary-only. *)
-  match judge_skip_reason ~min_answered:2 [ answered "a" "x"; failed "b" ] with
-  | Some (Quorum_not_met { answered; total; required } as reason) ->
-    Alcotest.(check int) "answered count" 1 answered;
-    Alcotest.(check int) "total count" 2 total;
-    Alcotest.(check int) "required count" 2 required;
-    Alcotest.(check string) "rendered reason"
-      "fusion aborted: 1 of 2 panels answered, preset requires at least 2"
-      (render_skip_reason reason)
-  | None -> Alcotest.fail "expected skip when 1 < min_answered 2"
-
-(* 패널 정족수 미달은 typed [Panels_unavailable]로 propagate된다 — 2026-07-01
-   사고에서 이 사유가 [Internal_error] 문자열로 압축돼 failure_code=internal_error
-   로 오귀속됐던 것의 회귀 가드. tag/text가 패널 실패를 패널 실패로 말해야 한다. *)
+(* An empty panel result is objective input absence, not an N-of-M policy. *)
 let test_panels_unavailable_failure () =
-  let reason = Quorum_not_met { answered = 0; total = 3; required = 1 } in
+  let reason = No_panel_answers { total = 3 } in
   let failure : judge_failure = Panels_unavailable reason in
   Alcotest.(check string) "failure_code tag" "panels_unavailable"
     (judge_failure_tag failure);
   Alcotest.(check string) "failure text = rendered skip reason"
-    "fusion aborted: 0 of 3 panels answered, preset requires at least 1"
+    "fusion aborted: none of 3 panels returned an answer"
     (judge_failure_text failure);
   Alcotest.(check bool) "not a timeout" false (judge_failure_is_timeout failure);
   Alcotest.(check bool) "not timeout-or-budget (no fallback judge trigger)" false
@@ -1905,8 +1874,7 @@ let () =
             test_judge_error_node_timed_out
         ] )
     ; ( "panel_guard"
-      , [ Alcotest.test_case "judge_skip_reason" `Quick test_judge_skip_reason
-        ; Alcotest.test_case "min_answered_range" `Quick test_validated_bad_min_answered
+      , [ Alcotest.test_case "min_answered_range" `Quick test_validated_bad_min_answered
         ; Alcotest.test_case "min_answered_constants" `Quick test_min_answered_constants
         ; Alcotest.test_case "panels_unavailable_failure" `Quick
             test_panels_unavailable_failure

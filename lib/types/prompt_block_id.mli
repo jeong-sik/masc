@@ -23,7 +23,6 @@ type t =
   | Claimed_task_nudge
   | Retry_nudge
   | Memory_os_recall
-  | User_model
   | Connected_surface
   | Other of string
 

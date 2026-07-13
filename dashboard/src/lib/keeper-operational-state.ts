@@ -25,7 +25,7 @@
 //      an explicitly-stale marker.
 //
 //   paused   ⇐ keeper.paused | phase==='Paused' | pause_state==='paused'
-//   offline  ⇐ phase ∈ Offline/Stopped/Dead/Crashed/Zombie  OR
+//   offline  ⇐ phase ∈ Offline/Stopped/Dead/Crashed  OR
 //              status ∈ offline/inactive/unbooted
 //   stuck    ⇐ (runtime_blocker_class set AND NOT explicitlyStale
 //                 AND class is execution-blocking)
@@ -214,7 +214,7 @@ function isOffline(k: Keeper, c: KeeperCompositeSnapshot | null): boolean {
 
 function deriveOfflineCause(k: Keeper): OfflineCause {
   if (k.phase === 'Crashed') return 'crashed'
-  if (k.phase === 'Dead' || k.phase === 'Zombie') return 'dead'
+  if (k.phase === 'Dead') return 'dead'
   if (k.phase === 'Stopped') return 'shutdown'
   const normalizedStatus = (k.status ?? '').toLowerCase()
   if (normalizedStatus === 'unbooted') return 'unbooted'
@@ -293,7 +293,6 @@ export function compositePhaseTone(phase: KeeperPhase): 'active' | 'warn' | 'err
     case 'Stopped':
     case 'Crashed':
     case 'Dead':
-    case 'Zombie':
       return 'err'
   }
 }

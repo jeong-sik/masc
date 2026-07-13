@@ -4,10 +4,7 @@
     Re-homed from the deleted runtime attempt FSM (RFC-0206); generic
     provider-error classification, not runtime-specific. *)
 
-val message_looks_like_cli_wrapped_hard_quota : string -> bool
 val sdk_error_is_hard_quota : Agent_sdk.Error.sdk_error -> bool
-val sdk_error_is_terminal_provider_runtime_failure :
-  Agent_sdk.Error.sdk_error -> bool
 val sdk_error_is_max_turns_exceeded : Agent_sdk.Error.sdk_error -> bool
 val sdk_error_soft_rate_limited :
   Agent_sdk.Error.sdk_error -> float option option
@@ -64,43 +61,5 @@ val client_capacity_full_decision :
 
 val success_selected_model_raw :
   Runtime_candidate.t -> string option
-
-val health_error_kind : string -> Keeper_binding_health.error_kind
-
-type provider_cooldown_block =
-  { blocked_provider_keys : string list
-  ; cooldown_remaining_sec : int
-  ; cooldown_cause : Keeper_internal_error.provider_cooldown_cause option
-    (** Aggregate arming cause across all blocking providers ([None] when
-        unknown); deterministic only when every blocker is deterministic.
-        #23438. *)
-  }
-
-val provider_cooldown_block :
-  keeper_name:string -> Runtime_candidate.t -> provider_cooldown_block option
-
-(** Exposed for the #23456 P1 regression: the aggregate must treat a
-    restored/unknown blocker ([cooldown_cause = None]) as
-    possibly-transient, so a mixed unknown+deterministic block stays
-    auto-recoverable. Candidates carry a single health key today, so the
-    mixed shape is only reachable through this function directly. *)
-val aggregate_cooldown_cause :
-  (string * Keeper_binding_health.provider_info) list ->
-  Keeper_internal_error.provider_cooldown_cause option
-
-val provider_cooldown_block_decision :
-  provider_cooldown_block -> Yojson.Safe.t
-
-val provider_cooldown_block_error :
-  runtime_id:string -> provider_cooldown_block -> Agent_sdk.Error.sdk_error
-
-val record_candidate_health_success :
-  keeper_name:string -> Runtime_candidate.t -> latency_ms:float -> unit
-
-val record_candidate_health_rejected :
-  keeper_name:string -> Runtime_candidate.t -> reason:string -> unit
-
-val record_candidate_health_error :
-  keeper_name:string -> Runtime_candidate.t -> Agent_sdk.Error.sdk_error -> unit
 
 val runtime_candidate_label : string

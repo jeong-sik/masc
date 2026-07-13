@@ -53,53 +53,27 @@ let run_first_judge
   : judge_run
   =
   let id = Fusion_policy.panelist_id ~label:j.jlabel ~model:j.jmodel in
+  let _ = preset, judge_web_tools, judge_max_tool_calls, already_timed_out in
+  let result =
+    Fusion_judge.run
+      ~sw
+      ~net
+      ~timeout_s:j.jtimeout_s
+      ~judge_system_prompt:j.jsystem_prompt
+      ~judge_model:j.jmodel
+      ~question
+      ~panel
+      ~web_tools:j.jweb_tools
+      ~max_tool_calls:0
+      ()
+  in
   let elapsed_s = elapsed_since_t0 clock in
-  if not (clock_available clock)
-  then j, id, missing_clock_result clock, elapsed_s, false
-  else
-    match
-      Fusion_policy.adjust_judge_timeout
-        ~base_s:j.jtimeout_s
-        ~max_s:j.jmax_timeout_s
-        ~factor:preset.Fusion_policy.adaptive_timeout_factor
-        ~wave_budget_s:preset.Fusion_policy.judge_wave_budget_s
-        ~elapsed_s
-        ~already_timed_out
-    with
-    | None ->
-      let detail =
-        if already_timed_out
-        then Printf.sprintf "adaptive timeout recovery for judge %s exceeded wave budget" id
-        else
-          Printf.sprintf
-            "judge %s skipped: would exceed wave budget (elapsed %.3f, budget %.3f)"
-            id
-            elapsed_s
-            preset.Fusion_policy.judge_wave_budget_s
-      in
-      j, id, Error (Fusion_types.Budget_exceeded detail, Fusion_types.zero_usage), elapsed_s, false
-    | Some timeout_s ->
-      let result =
-        Fusion_judge.run
-          ~sw
-          ~net
-          ~timeout_s
-          ?max_tokens:j.jmax_output_tokens
-          ~judge_system_prompt:j.jsystem_prompt
-          ~judge_model:j.jmodel
-          ~question
-          ~panel
-          ~web_tools:j.jweb_tools
-          ~max_tool_calls:j.jmax_tool_calls
-          ()
-      in
-      let elapsed_s = elapsed_since_t0 clock in
-      let timed_out =
-        match result with
-        | Error (f, _) -> Fusion_types.judge_failure_is_timeout f
-        | Ok _ -> false
-      in
-      j, id, result, elapsed_s, timed_out
+  let timed_out =
+    match result with
+    | Error (f, _) -> Fusion_types.judge_failure_is_timeout f
+    | Ok _ -> false
+  in
+  j, id, result, elapsed_s, timed_out
 ;;
 
 let run_first_judges
@@ -125,24 +99,11 @@ let run_first_judges
       ~judge_web_tools
       ~judge_max_tool_calls
   in
-  let first_pass =
-    Eio.Fiber.List.map
-      ~max_fibers:max_concurrent_judges
-      (run_first_judge ~already_timed_out:false)
-      judges
-  in
-  if not (Fusion_policy.adaptive_timeout_enabled preset)
-  then first_pass
-  else
-    Eio.Fiber.List.map
-      ~max_fibers:max_concurrent_judges
-      (fun ((j, _, _, _, timed_out) as run) ->
-         if timed_out
-         then (
-           Fusion_metrics.record_adaptive_timeout ();
-           run_first_judge ~already_timed_out:true j)
-         else run)
-      first_pass
+  let _ = max_concurrent_judges in
+  Eio.Fiber.List.map
+    ~max_fibers:(max 1 (List.length judges))
+    (run_first_judge ~already_timed_out:false)
+    judges
 ;;
 
 let first_judge_nodes runs =

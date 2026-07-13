@@ -9,28 +9,19 @@ let () =
   Otel_metric_store.register_counter
     ~name:cost_emit_source_metric
     ~help:
-      "Total cost.jsonl emits where cost_usd ended up as 0.0 due to a \
-       known classification path (vs an actually-zero call).  Labels: \
-       source ∈ {missing_usage, untrusted_usage, unmetered_provider, \
-       oas_cost_unreported, zero_token_call}.  A high \
+      "Total cost.jsonl emits whose cost source is not a reported non-zero \
+       value. Labels: \
+       source ∈ {missing_usage, unmetered_provider, \
+       oas_cost_unreported}. A high \
        [oas_cost_unreported] rate means OAS did not annotate usage with cost; \
-       a high [untrusted_usage] rate points at the trust classifier; a high \
        [missing_usage] rate points at the provider adapter not surfacing usage. \
        See #10318 and #13698."
     ()
 
-let classify_cost_usd_source ~usage_missing ~usage_trusted ~runtime_unmetered
-    ~cost_usd =
+let classify_cost_usd_source ~usage_missing ~runtime_unmetered ~cost_usd =
   if usage_missing then cost_label_usage_missing
-  (* token⊥cost: an untrusted *token count* does not gate the provider's
-     authoritative cost_usd. A positive cost_usd is labelled [computed] even when
-     token usage is untrusted; only zero/absent cost on an untrusted turn keeps
-     the [usage_untrusted] source label. Keeps the value and the source label in
-     sync with [cost_status_for_event]. *)
-  else if (not usage_trusted) && not (cost_usd > 0.0) then
-    cost_label_usage_untrusted
   else if runtime_unmetered then cost_source_unmetered_provider
-  else if cost_usd > 0.0 then cost_source_computed
+  else if Float.compare cost_usd 0.0 <> 0 then cost_source_computed
   else cost_label_oas_cost_unreported
 
 let record_cost_emit_source source =
@@ -41,7 +32,7 @@ let record_cost_emit_source source =
 
 let cache_miss_input_tokens ~input_tokens ~cache_creation_input_tokens
     ~cache_read_input_tokens =
-  max 0 (input_tokens - cache_creation_input_tokens - cache_read_input_tokens)
+  input_tokens - cache_creation_input_tokens - cache_read_input_tokens
 
 (** Append a cost event to .masc/costs.jsonl for per-task cost attribution.
     Schema matches bin/masc_cost.ml with an additional "source" field to
@@ -94,40 +85,23 @@ let assemble_cost_event_payload
     | None ->
         classify_usage_trust
           ?usage:(if usage_missing then None else Some usage_for_trust)
-          ~telemetry ()
+          ()
   in
-  let usage_trusted = Keeper_usage_trust.is_trusted usage_trust in
-  let safe_input_tokens = if usage_trusted then input_tokens else 0 in
-  let safe_output_tokens = if usage_trusted then output_tokens else 0 in
-  let safe_cache_creation_input_tokens =
-    if usage_trusted then cache_creation_input_tokens else 0
-  in
-  let safe_cache_read_input_tokens =
-    if usage_trusted then cache_read_input_tokens else 0
-  in
-  let safe_cache_miss_input_tokens =
-    if usage_trusted then
-      cache_miss_input_tokens
-        ~input_tokens
-        ~cache_creation_input_tokens
-        ~cache_read_input_tokens
-    else 0
+  let cache_miss_input_tokens =
+    cache_miss_input_tokens
+      ~input_tokens
+      ~cache_creation_input_tokens
+      ~cache_read_input_tokens
   in
   let provider = runtime_lane_label in
   let runtime_unknown = false in
   let runtime_unmetered = false in
-  (* Classify cost_status from the raw cost_usd. cost_usd is the provider's
-     authoritative cost field and is accounted independently of token-count
-     trust (token⊥cost): a positive cost_usd yields Cost_reported (and is kept
-     by the safe-value mask below) even when token usage is untrusted. Only the
-     token COUNTS are zeroed for untrusted usage (safe_input/output_tokens
-     above). *)
+  (* Cost and token validity are independent observations. *)
   let cost_status =
     cost_status_for_event
       ~runtime_unknown
       ~runtime_unmetered
       ~usage_missing
-      ~usage_trusted
       ~input_tokens
       ~output_tokens
       ~cost_usd
@@ -140,32 +114,10 @@ let assemble_cost_event_payload
     | Some canonical_id -> canonical_id
     | None -> runtime_lane_label
   in
-  let default_safe_cost_usd = 0.0 in
-  let safe_cost_usd =
-    match cost_status with
-    | Cost_reported -> cost_usd
-    | Cost_known_free
-    | Cost_no_tokens
-    | Cost_usage_missing
-    | Cost_usage_untrusted
-    | Cost_runtime_unknown
-    | Cost_oas_cost_unreported -> default_safe_cost_usd
-  in
   let cost_status_label = cost_status_to_string cost_status in
   let cost_status_reason_label = cost_status_reason cost_status in
-  let raw_usage_fields =
-    if usage_missing || usage_trusted then []
-    else
-      [
-        (key_raw_input_tokens, `Int input_tokens);
-        (key_raw_output_tokens, `Int output_tokens);
-        ("raw_cache_creation_tokens", `Int cache_creation_input_tokens);
-        ("raw_cache_read_tokens", `Int cache_read_input_tokens);
-        (key_raw_cost_usd, `Float cost_usd);
-      ]
-  in
   let cache_token_fields =
-    if usage_missing || not usage_trusted then
+    if usage_missing then
       [
         ("cache_creation_tokens", `Null);
         ("cache_read_tokens", `Null);
@@ -173,9 +125,9 @@ let assemble_cost_event_payload
       ]
     else
       [
-        ("cache_creation_tokens", `Int safe_cache_creation_input_tokens);
-        ("cache_read_tokens", `Int safe_cache_read_input_tokens);
-        ("cache_miss_input_tokens", `Int safe_cache_miss_input_tokens);
+        ("cache_creation_tokens", `Int cache_creation_input_tokens);
+        ("cache_read_tokens", `Int cache_read_input_tokens);
+        ("cache_miss_input_tokens", `Int cache_miss_input_tokens);
       ]
   in
   let telemetry_fields = match telemetry with
@@ -197,13 +149,10 @@ let assemble_cost_event_payload
   in
   let wall_tok_s_fields =
     float_field "tokens_per_second"
-      (if usage_trusted then
-         wall_tokens_per_second ~usage_missing ~output_tokens ~telemetry
-       else None)
+      (wall_tokens_per_second ~usage_missing ~output_tokens ~telemetry)
   in
   let cost_usd_source =
-    classify_cost_usd_source ~usage_missing ~usage_trusted
-      ~runtime_unmetered ~cost_usd
+    classify_cost_usd_source ~usage_missing ~runtime_unmetered ~cost_usd
   in
   let source_auto_trajectory = "auto_trajectory" in
   let entry = `Assoc ([
@@ -211,9 +160,9 @@ let assemble_cost_event_payload
     ("task_id", Json_util.string_opt_to_json task_id);
     (key_provider, `String runtime_lane_label);
     (key_model, `String key_model_value);
-    (key_input_tokens, `Int safe_input_tokens);
-    (key_output_tokens, `Int safe_output_tokens);
-    (key_cost_usd, `Float safe_cost_usd);
+    (key_input_tokens, if usage_missing then `Null else `Int input_tokens);
+    (key_output_tokens, if usage_missing then `Null else `Int output_tokens);
+    (key_cost_usd, if usage_missing then `Null else `Float cost_usd);
     (key_cost_status, `String cost_status_label);
     (key_cost_status_reason, `String cost_status_reason_label);
     (* #10318: self-describing reason for [cost_usd]'s value. *)
@@ -224,7 +173,6 @@ let assemble_cost_event_payload
   ]
   @ Keeper_usage_trust.json_fields usage_trust
   @ cache_token_fields
-  @ raw_usage_fields
   @ wall_tok_s_fields @ telemetry_fields) in
   {
     payload = entry;

@@ -191,9 +191,6 @@ val json_string_list_field : string -> (string * Yojson.Safe.t) list -> string l
 val infer_usage_trust_from_fields :
   (string * Yojson.Safe.t) list ->
   usage_reported:bool option ->
-  model:string ->
   input_tokens:int option ->
   output_tokens:int option ->
   string option * string list
-
-val usage_trust_untrusted : string option -> bool

@@ -174,7 +174,6 @@ let create_schedule_exn config ~schedule_id ~scheduled_by =
       ~scheduled_by
       ~due_at:200.0
       ~payload:schedule_payload
-      ~risk_class:Schedule_domain.Read_only
       ~source:Schedule_domain.Operator_request
       ()
   with
@@ -192,7 +191,7 @@ let test_event_queue_pending_and_inflight_are_visible () =
     stimulus ~post_id:"pending-1" ~arrived_at:100.0 Keeper_event_queue.Bootstrap
   in
   let inflight =
-    stimulus ~post_id:"inflight-1" ~arrived_at:110.0 Keeper_event_queue.No_progress_recovery
+    stimulus ~post_id:"inflight-1" ~arrived_at:110.0 Keeper_event_queue.Bootstrap
   in
   Keeper_event_queue_persistence.persist
     ~base_path:config.Workspace_utils_backend_setup.base_path
@@ -235,7 +234,7 @@ let test_event_queue_pending_and_inflight_are_visible () =
      | pending_row :: inflight_row :: _ ->
        check string "pending wake producer" "keeper_supervisor"
          (json_string_member "wake_producer" pending_row);
-       check string "inflight wake producer" "keeper_no_progress_recovery"
+       check string "inflight wake producer" "keeper_supervisor"
         (json_string_member "wake_producer" inflight_row)
      | rows -> failf "expected two queue rows, got %d" (List.length rows))
 ;;

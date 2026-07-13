@@ -18,7 +18,6 @@ type keeper_result =
       ; ttl_expired_ephemeral : int
       ; ttl_expired_non_ephemeral : int
       ; ttl_expired_by_category : (string * int) list
-      ; dedup_removed : int
       ; written : int
       }
   | Keeper_error of
@@ -34,7 +33,6 @@ type t =
   ; ttl_expired_ephemeral : int
   ; ttl_expired_non_ephemeral : int
   ; ttl_expired_by_category : (string * int) list
-  ; dedup_removed : int
   ; written : int
   ; error_count : int
   }
@@ -123,7 +121,6 @@ let run_one ~keepers_dir ~run_gc_for_keepers_dir ~explicit ~keeper_id ~now =
         ; ttl_expired_ephemeral = report.ttl_expired_ephemeral
         ; ttl_expired_non_ephemeral = report.ttl_expired_non_ephemeral
         ; ttl_expired_by_category = report.ttl_expired_by_category
-        ; dedup_removed = report.dedup_removed
         ; written = report.written
         }
     with
@@ -165,7 +162,6 @@ let run_for_keepers_dir_with_runner
     ttl_expired_ephemeral,
     ttl_expired_non_ephemeral,
     ttl_expired_by_category,
-    dedup_removed,
     written,
     error_count
     =
@@ -176,7 +172,6 @@ let run_for_keepers_dir_with_runner
         , ttl_expired_ephemeral
         , ttl_expired_non_ephemeral
         , ttl_expired_by_category
-        , dedup_removed
         , written
         , error_count )
         -> function
@@ -186,7 +181,6 @@ let run_for_keepers_dir_with_runner
            , ttl_expired_ephemeral + row.ttl_expired_ephemeral
            , ttl_expired_non_ephemeral + row.ttl_expired_non_ephemeral
            , merge_category_counts ttl_expired_by_category row.ttl_expired_by_category
-           , dedup_removed + row.dedup_removed
            , written + row.written
            , error_count )
          | Keeper_error _ ->
@@ -195,10 +189,9 @@ let run_for_keepers_dir_with_runner
            , ttl_expired_ephemeral
            , ttl_expired_non_ephemeral
            , ttl_expired_by_category
-           , dedup_removed
            , written
            , error_count + 1 ))
-      (0, 0, 0, 0, [], 0, 0, 0)
+      (0, 0, 0, 0, [], 0, 0)
       results
   in
   { keepers_dir
@@ -208,7 +201,6 @@ let run_for_keepers_dir_with_runner
   ; ttl_expired_ephemeral
   ; ttl_expired_non_ephemeral
   ; ttl_expired_by_category
-  ; dedup_removed
   ; written
   ; error_count
   }
@@ -248,8 +240,6 @@ let result_to_json = function
       ; "ttl_expired_ephemeral", `Int row.ttl_expired_ephemeral
       ; "ttl_expired_non_ephemeral", `Int row.ttl_expired_non_ephemeral
       ; "ttl_expired_by_category", category_counts_to_json row.ttl_expired_by_category
-      ; "migration_candidate_expired", `Int row.ttl_expired_non_ephemeral
-      ; "dedup_removed", `Int row.dedup_removed
       ; "written", `Int row.written
       ]
   | Keeper_error row ->
@@ -272,8 +262,6 @@ let to_json report =
     ; "ttl_expired_ephemeral", `Int report.ttl_expired_ephemeral
     ; "ttl_expired_non_ephemeral", `Int report.ttl_expired_non_ephemeral
     ; "ttl_expired_by_category", category_counts_to_json report.ttl_expired_by_category
-    ; "migration_candidate_expired", `Int report.ttl_expired_non_ephemeral
-    ; "dedup_removed", `Int report.dedup_removed
     ; "written", `Int report.written
     ; "keepers", `List (List.map result_to_json report.results)
     ]
@@ -282,13 +270,12 @@ let to_json report =
 let render_result = function
   | Keeper_ok row ->
     Printf.sprintf
-      "%s\tok\ttotal=%d\tttl_expired=%d\tephemeral_expired=%d\tmigration_candidates=%d\tdedup_removed=%d\twould_write=%d\n"
+      "%s\tok\ttotal=%d\tttl_expired=%d\tephemeral_expired=%d\tnon_ephemeral_expired=%d\twould_write=%d\n"
       row.keeper_id
       row.total_input
       row.ttl_expired
       row.ttl_expired_ephemeral
       row.ttl_expired_non_ephemeral
-      row.dedup_removed
       row.written
   | Keeper_error row ->
     Printf.sprintf
@@ -308,7 +295,7 @@ let render_text report =
     "Memory OS GC dry-run\n\
      keepers_dir: %s\n\
      keepers: %d, errors: %d\n\
-     totals: total=%d ttl_expired=%d ephemeral_expired=%d migration_candidates=%d dedup_removed=%d would_write=%d\n\
+     totals: total=%d ttl_expired=%d ephemeral_expired=%d non_ephemeral_expired=%d would_write=%d\n\
      %s"
     report.keepers_dir
     (List.length report.results)
@@ -317,7 +304,6 @@ let render_text report =
     report.ttl_expired
     report.ttl_expired_ephemeral
     report.ttl_expired_non_ephemeral
-    report.dedup_removed
     report.written
     body
 ;;

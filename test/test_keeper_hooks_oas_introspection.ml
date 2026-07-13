@@ -8,7 +8,7 @@
 
     - lib/keeper/keeper_hooks_oas.ml ([make_hooks]) — the keeper_hooks_oas slots
     - lib/keeper/keeper_run_tools.ml — before_turn_params
-    - lib/keeper/keeper_guards.ml — pre_tool_use
+    - lib/keeper/keeper_hooks_oas.ml — passive pre_tool_use timing
 
     [before_turn_params] is assembled by [Keeper_run_tools_hooks], not
     [make_hooks], so its source/active claim remains a sibling-module contract
@@ -16,7 +16,7 @@
 
 open Alcotest
 
-let json = Masc.Keeper_hooks_oas_introspection.hook_introspection_json ~denied_tools:[] ()
+let json = Masc.Keeper_hooks_oas_introspection.hook_introspection_json ()
 
 let slots_of (j : Yojson.Safe.t) =
   match j with
@@ -72,9 +72,9 @@ let test_active_split () =
     expected_inactive
 
 let test_sources () =
-  (* pre_tool_use and before_turn_params come from sibling modules, not the
-     keeper_hooks_oas record; the rest of the active slots are keeper_hooks_oas. *)
-  check (option string) "pre_tool_use source" (Some "keeper_guards")
+  (* before_turn_params comes from a sibling module; the remaining active
+     slots, including passive pre_tool_use timing, are keeper_hooks_oas. *)
+  check (option string) "pre_tool_use source" (Some "keeper_hooks_oas")
     (slot_string "pre_tool_use" "source");
   check (option string) "before_turn_params source" (Some "keeper_run_tools")
     (slot_string "before_turn_params" "source");
@@ -92,7 +92,6 @@ let make_meta_ref (name : string) : Masc.Keeper_meta_contract.keeper_meta ref =
         "name", `String name;
         "agent_name", `String name;
         "trace_id", `String "keeper-hooks-introspection-test";
-        "tool_access", Json_util.json_string_list [];
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
@@ -134,28 +133,34 @@ let test_runtime_active_claims_match_make_hooks () =
       active
       (slot_active slot_name))
 
-(* The cost budget is advisory-only: keeper_guards.cost_guard ignores
-   max_cost_usd and always returns Continue. The introspection must therefore
-   report enforced:false in BOTH the "no budget" and "budget set" branches —
-   relabelling it as enforced would be a false claim of a control that does not
-   block anything. *)
-let enforced_of (j : Yojson.Safe.t) =
-  match j with
-  | `Assoc fields -> (
-    match List.assoc_opt "cost_telemetry" fields with
-    | Some (`Assoc ct) -> (
-      match List.assoc_opt "enforced" ct with Some (`Bool b) -> Some b | _ -> None)
-    | _ -> None)
-  | _ -> None
-
-let test_cost_telemetry_never_enforced () =
-  check (option bool) "enforced is false with no budget" (Some false) (enforced_of json);
-  let with_budget =
-    Masc.Keeper_hooks_oas_introspection.hook_introspection_json ~denied_tools:[]
-      ~max_cost_usd:5.0 ()
+let test_pre_tool_use_is_observation_only () =
+  let hooks = make_runtime_hooks () in
+  let event =
+    Agent_sdk.Hooks.PreToolUse
+      { tool_use_id = "toolu_observation_only"
+      ; tool_name = "opaque_internal_name"
+      ; input = `Assoc [ "command", `String "opaque external effect" ]
+      ; accumulated_cost_usd = 1234.0
+      ; turn = 7
+      ; schedule =
+          { planned_index = 0
+          ; batch_index = 0
+          ; batch_size = 1
+          ; concurrency_class = "opaque"
+          ; batch_kind = "opaque"
+          }
+      }
   in
-  check (option bool) "enforced is false even when a budget is set" (Some false)
-    (enforced_of with_budget)
+  match Agent_sdk.Hooks.invoke hooks.pre_tool_use event with
+  | Agent_sdk.Hooks.Continue -> ()
+  | Skip -> fail "pre_tool_use timing hook returned Skip"
+  | Override _ -> fail "pre_tool_use timing hook returned Override"
+  | ApprovalRequired -> fail "pre_tool_use timing hook requested approval"
+  | AdjustParams _ -> fail "pre_tool_use timing hook adjusted parameters"
+  | ElicitInput _ -> fail "pre_tool_use timing hook elicited input"
+  | Nudge _ -> fail "pre_tool_use timing hook returned Nudge"
+  | HookFailed _ -> fail "pre_tool_use timing hook failed"
+  | Block _ -> fail "pre_tool_use timing hook returned Block"
 
 let () =
   Alcotest.run "Keeper_hooks_oas_introspection"
@@ -165,6 +170,7 @@ let () =
         ; test_case "slot sources" `Quick test_sources
         ; test_case "make_hooks active claims match runtime record" `Quick
             test_runtime_active_claims_match_make_hooks
-        ; test_case "cost telemetry is never enforced" `Quick test_cost_telemetry_never_enforced
+        ; test_case "pre_tool_use is observation only" `Quick
+            test_pre_tool_use_is_observation_only
         ] )
     ]

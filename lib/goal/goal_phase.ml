@@ -1,7 +1,5 @@
 type t =
   | Executing
-  | Awaiting_verification
-  | Awaiting_approval
   | Blocked
   | Paused
   | Completed
@@ -9,8 +7,6 @@ type t =
 
 let to_string = function
   | Executing -> "executing"
-  | Awaiting_verification -> "awaiting_verification"
-  | Awaiting_approval -> "awaiting_approval"
   | Blocked -> "blocked"
   | Paused -> "paused"
   | Completed -> "completed"
@@ -18,8 +14,6 @@ let to_string = function
 
 let of_string = function
   | "executing" -> Some Executing
-  | "awaiting_verification" -> Some Awaiting_verification
-  | "awaiting_approval" -> Some Awaiting_approval
   | "blocked" -> Some Blocked
   | "paused" -> Some Paused
   | "completed" -> Some Completed
@@ -46,44 +40,32 @@ let of_yojson = function
    a new constructor breaks it; the round-trip test guards this list. *)
 let all =
   [ Executing
-  ; Awaiting_verification
-  ; Awaiting_approval
   ; Blocked
   ; Paused
   ; Completed
   ; Dropped
   ]
 
-(* Phases from which a keeper can make self-directed progress on the goal.
-   RFC-0310 §3.3: only [Executing] qualifies for a stagnation wake — the
-   others are terminal ([Completed]/[Dropped]), operator-gated
-   ([Paused]/[Blocked]), or waiting on an external verdict ([Awaiting_*]),
-   so waking the keeper cannot advance them. Exhaustive: a new phase forces
-   a decision here rather than silently admitting or suppressing a wake. *)
+(* Phases from which a keeper can make self-directed progress on the goal. *)
 let admits_self_directed_progress = function
   | Executing -> true
-  | Awaiting_verification | Awaiting_approval | Blocked | Paused | Completed
-  | Dropped -> false
+  | Blocked | Paused | Completed | Dropped -> false
 
 type action =
   | Request_complete
-  | Approve_completion
-  | Reject_completion
   | Pause
   | Resume
-  | Operator_block
-  | Operator_unblock
+  | Block
+  | Unblock
   | Drop
   | Reopen
 
 let action_to_string = function
   | Request_complete -> "request_complete"
-  | Approve_completion -> "approve_completion"
-  | Reject_completion -> "reject_completion"
   | Pause -> "pause"
   | Resume -> "resume"
-  | Operator_block -> "operator_block"
-  | Operator_unblock -> "operator_unblock"
+  | Block -> "block"
+  | Unblock -> "unblock"
   | Drop -> "drop"
   | Reopen -> "reopen"
 
@@ -91,24 +73,20 @@ let action_to_string = function
    (see [all]). [action_to_string] is the exhaustive witness. *)
 let all_actions =
   [ Request_complete
-  ; Approve_completion
-  ; Reject_completion
   ; Pause
   ; Resume
-  ; Operator_block
-  ; Operator_unblock
+  ; Block
+  ; Unblock
   ; Drop
   ; Reopen
   ]
 
 let action_of_string = function
   | "request_complete" -> Some Request_complete
-  | "approve_completion" -> Some Approve_completion
-  | "reject_completion" -> Some Reject_completion
   | "pause" -> Some Pause
   | "resume" -> Some Resume
-  | "operator_block" -> Some Operator_block
-  | "operator_unblock" -> Some Operator_unblock
+  | "block" -> Some Block
+  | "unblock" -> Some Unblock
   | "drop" -> Some Drop
   | "reopen" -> Some Reopen
   | _ -> None
@@ -118,43 +96,18 @@ let parse_action s =
 
 type transition_outcome =
   | Move_to of t
-  | Open_verification
-  | Open_approval
   | Complete
 
-let decide_transition ~phase ~(action : action) ~has_effective_verifier_policy
-    ~require_completion_approval =
+let decide_transition ~phase ~(action : action) =
   match phase, action with
-  | Executing, Request_complete ->
-      if has_effective_verifier_policy then
-        Ok Open_verification
-      else if require_completion_approval then
-        Ok Open_approval
-      else
-        Ok Complete
+  | Executing, Request_complete -> Ok Complete
   | Executing, Pause -> Ok (Move_to Paused)
-  | Executing, Operator_block -> Ok (Move_to Blocked)
+  | Executing, Block -> Ok (Move_to Blocked)
   | Executing, Drop -> Ok (Move_to Dropped)
   | Paused, Resume -> Ok (Move_to Executing)
   | Paused, Drop -> Ok (Move_to Dropped)
-  | Blocked, Operator_unblock -> Ok (Move_to Executing)
+  | Blocked, Unblock -> Ok (Move_to Executing)
   | Blocked, Drop -> Ok (Move_to Dropped)
-  | Awaiting_approval, Approve_completion -> Ok Complete
-  | Awaiting_approval, Reject_completion -> Ok (Move_to Blocked)
-  | Awaiting_approval, Drop -> Ok (Move_to Dropped)
-  (* #10411: pre-fix [Awaiting_verification] only had a [Drop]
-     transition, so a goal that entered verification (via
-     [verifier_policy] on [Request_complete]) could never exit
-     to [Completed] or [Blocked] — the verifier emitted its
-     verdict but the goal stayed pinned indefinitely.  Mirror
-     the [Awaiting_approval] outcomes for verification verdicts
-     and add the [Pause] / [Operator_block] manual escapes that
-     sibling phases already carry. *)
-  | Awaiting_verification, Approve_completion -> Ok Complete
-  | Awaiting_verification, Reject_completion -> Ok (Move_to Blocked)
-  | Awaiting_verification, Pause -> Ok (Move_to Paused)
-  | Awaiting_verification, Operator_block -> Ok (Move_to Blocked)
-  | Awaiting_verification, Drop -> Ok (Move_to Dropped)
   | Completed, Reopen -> Ok (Move_to Executing)
   | Completed, Drop -> Ok (Move_to Dropped)
   | Dropped, Reopen -> Ok (Move_to Executing)

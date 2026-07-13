@@ -227,16 +227,8 @@ let temp_dir prefix =
   dir
 
 (* Must equal the keeper registry's normalized identity for the keeper
-   fixture registered in test_keeper_tool_matrix_cases.ml's [make_fixture]
-   ("tool-matrix" — Keeper_registry strips the "keeper-" prefix from
-   meta.name when resolving the keeper's own agent_name for dispatch
-   context). Confirmed empirically: ctx.agent_name inside
-   Workspace_goals.principal_matches_authenticated_caller is "tool-matrix",
-   not meta.name/meta.agent_name ("keeper-tool-matrix"). Self-attested
-   actor/principal fields built here (via [goal_principal]) must match, or
-   masc_goal_transition/masc_goal_verify's identity-binding guard rejects
-   every matrix call ("<field> id must match authenticated caller") instead
-   of exercising the real transition/verification path. *)
+   fixture registered in [make_fixture]. The auth token and dispatch context
+   use this identity for tools that require an authenticated actor. *)
 let tool_matrix_agent_name = "tool-matrix"
 
 let rec waitpid_nointr pid =
@@ -638,7 +630,6 @@ let field_value fixture ~tool_name field_name schema =
   | "progress" -> `String "tool matrix progress"
   | "reason" when tool_name = "masc_handover_create" -> `String "explicit"
   | "notes" | "note" | "reason" -> `String "tool matrix note"
-  | "override_note" -> `String "tool matrix override"
   | "priority" -> `Int 2
   | "assertions" -> `List [ `String "joined" ]
   | "agents" -> `List [ `String "definitely-missing-agent" ]
@@ -766,8 +757,7 @@ let tool_arguments fixture (schema : Masc_domain.tool_schema) =
              (validated at the handler layer), but the matrix fixture must
              supply a non-empty body or the handler rejects the edit. *)
           [ "body" ]
-      | "masc_goal_transition" ->
-          [ "override_note"; "note" ]
+      | "masc_goal_transition" -> [ "note" ]
       | _ -> []
     in
     List.sort_uniq String.compare (required @ optional)

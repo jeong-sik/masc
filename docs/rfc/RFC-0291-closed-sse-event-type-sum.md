@@ -95,11 +95,11 @@ Plain literals set at a single (or few) site(s). Examples: `project_snapshot`,
 `keeper_chat_appended`, `keeper_composite_changed`, `keeper_phase_changed`,
 `keeper_heartbeat`, `keeper_compaction`, `keeper_handoff`, `keeper_tool_skipped`,
 `keeper_turn_complete`, `keeper_tool_call`, `approval:pending`,
-`approval:resolved`, `fusion_run_status`, `governance_param_changed`,
+`approval:resolved`, `fusion_run_status`, `gate_configuration_changed`,
 `dashboard_yjs_update`. These close into fixed variants directly.
 
 Some literals are emitted from **multiple sites** (`keeper_heartbeat` ×2,
-`keeper_tool_call` ×2, `governance_param_changed` ×2, and the
+`keeper_tool_call` ×2, `gate_configuration_changed` ×2, and the
 `project_snapshot`/`namespace_truth_snapshot` alias pair). A typed constructor
 centralizes them; §8 requires confirming payload-shape compatibility before
 collapsing co-emitters to one variant.

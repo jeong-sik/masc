@@ -53,26 +53,40 @@ let test_redact_json_strings_redacts_sensitive_keys () =
 let test_redact_json_strings_redacts_secrets_in_values () =
   let json =
     `Assoc
-      [ ("message", `String "Retry with Authorization: Bearer ghp_xxxxxxxx");
+      [ ("message", `String "Retry with Authorization: Bearer opaque_xxxxxxxx");
         ("url", `String "https://user:secret@api.example.com/v1")
       ]
   in
   let redacted = Observability_redact.redact_json_strings json in
   let raw = Yojson.Safe.to_string redacted in
   Alcotest.(check bool) "bearer token hidden" false
-    (String_util.contains_substring raw "ghp_xxxxxxxx");
+    (String_util.contains_substring raw "opaque_xxxxxxxx");
   Alcotest.(check bool) "URL credential hidden" false
     (String_util.contains_substring raw "user:secret")
 
-let test_denied_tool_input_returns_none () =
+let test_tool_name_does_not_hide_input () =
   let result = Observability_redact.redact_tool_input
-    ~tool_name:"tool_auth_create" (`String "secret data") in
-  Alcotest.(check (option string)) "denied tool" None result
+    ~tool_name:"tool_auth_create" (`Assoc [ "token", `String "secret data" ]) in
+  Alcotest.(check bool) "tool input remains observable" true (Option.is_some result);
+  Alcotest.(check bool)
+    "secret value is redacted"
+    false
+    (Option.fold
+       ~none:false
+       ~some:(fun value -> String_util.contains_substring value "secret data")
+       result)
 
-let test_denied_tool_output_returns_none () =
+let test_tool_name_does_not_hide_output () =
   let result = Observability_redact.redact_tool_output
-    ~tool_name:"keeper_encryption_key" "secret" in
-  Alcotest.(check (option string)) "denied tool" None result
+    ~tool_name:"keeper_encryption_key" "Bearer opaque-secret" in
+  Alcotest.(check bool) "tool output remains observable" true (Option.is_some result);
+  Alcotest.(check bool)
+    "bearer value is redacted"
+    false
+    (Option.fold
+       ~none:false
+       ~some:(fun value -> String_util.contains_substring value "opaque-secret")
+       result)
 
 let test_normal_tool_input_returns_some () =
   let result = Observability_redact.redact_tool_input
@@ -154,9 +168,7 @@ let test_preview_json_strings_preserves_embedded_marker () =
    identifiers. Without a word-boundary anchor, the sk- pattern matched the
    substring "sk-1234" inside the task id "task-1234" and redacted it to
    "ta[REDACTED]", corrupting error-preview diagnostics (and any observability
-   field carrying a task-XXXX reference). Same root cause affected ghp_ (inside
-   e.g. "baghp_12"). bow rejects these because the prefix is preceded by an
-   identifier char. *)
+   field carrying a task-XXXX reference). *)
 let test_no_false_positive_on_task_ids () =
   let inputs =
     [ "task-1234"; "desk-1234"; "mask-abc"; "disk-99"
@@ -166,12 +178,12 @@ let test_no_false_positive_on_task_ids () =
     (fun input ->
       let r = Observability_redact.redact_text input in
       Alcotest.(check string)
-        (input ^ " not corrupted by sk-/ghp_ false positive") input r)
+        (input ^ " not corrupted by sk- false positive") input r)
     inputs
 
 let test_no_false_positive_on_keeper_identities () =
   let inputs =
-    [ "task-claim-bot"; "heartbeat-keeper"; "baghp_12"; "diagnostic-judge"
+    [ "task-claim-bot"; "heartbeat-keeper"; "diagnostic-judge"
       (* 20+ char identities: these were redacted to [REDACTED] by the former
          generic "20+ alphanumeric run" matcher (keeper-issue_king-agent=23,
          keeper-ramarama-agent=21 chars) and are preserved now that the length
@@ -227,10 +239,10 @@ let () =
           Alcotest.test_case "modern sk- key fully redacted" `Quick
             test_sk_modern_key_fully_redacted;
         ] );
-      ( "deny_list",
+      ( "tool_observability",
         [
-          Alcotest.test_case "denied tool input -> None" `Quick test_denied_tool_input_returns_none;
-          Alcotest.test_case "denied tool output -> None" `Quick test_denied_tool_output_returns_none;
+          Alcotest.test_case "tool name does not hide input" `Quick test_tool_name_does_not_hide_input;
+          Alcotest.test_case "tool name does not hide output" `Quick test_tool_name_does_not_hide_output;
           Alcotest.test_case "normal tool input -> Some" `Quick test_normal_tool_input_returns_some;
           Alcotest.test_case "normal tool output -> Some" `Quick test_normal_tool_output_returns_some;
         ] );

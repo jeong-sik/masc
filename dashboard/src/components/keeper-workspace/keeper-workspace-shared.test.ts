@@ -45,7 +45,6 @@ describe('keeperStatusTone', () => {
     expect(keeperStatusTone(mk({ lifecycle_phase: 'Overflowed' }))).toBe('bad')
     expect(keeperStatusTone(mk({ lifecycle_phase: 'Crashed' }))).toBe('bad')
     expect(keeperStatusTone(mk({ lifecycle_phase: 'Dead' }))).toBe('bad')
-    expect(keeperStatusTone(mk({ lifecycle_phase: 'Zombie' }))).toBe('bad')
   })
   it('maps transient phases to busy (working-through, not paused)', () => {
     // Fleet SSOT PHASE_TONE (lib/fleet-tone.ts) classifies the transient
@@ -114,7 +113,6 @@ describe('keeperPhaseLabel', () => {
     expect(keeperPhaseLabel(mk({ lifecycle_phase: 'Compacting' }))).toBe('압축 중')
     expect(keeperPhaseLabel(mk({ lifecycle_phase: 'Failing' }))).toBe('오류 발생')
     expect(keeperPhaseLabel(mk({ lifecycle_phase: 'HandingOff' }))).toBe('인계 중')
-    expect(keeperPhaseLabel(mk({ lifecycle_phase: 'Zombie' }))).toBe('응답 없음')
   })
   it('collapses unknown tokens to the 알 수 없음 fallback (no raw wire string leak)', () => {
     // Closed-sum SSOT: phaseTokenFromKeeper returns 'unknown' for unmapped
@@ -145,7 +143,7 @@ describe('keeperFleetTone', () => {
   it('surfaces attention and approval gates as bad even when the keeper is running', () => {
     expect(keeperFleetTone(mk({ needs_attention: true }))).toBe('bad')
     expect(keeperFleetTone(mk({ blocked_task_count: 2 }))).toBe('bad')
-    expect(keeperFleetTone(mk({ current_gate: { kind: 'approval_required', tool: 'shell', risk: 'high' } }))).toBe('bad')
+    expect(keeperFleetTone(mk({ current_gate: { kind: 'approval_required', tool: 'shell' } }))).toBe('bad')
   })
 
   it('falls back to the canonical status tone when no fleet attention is present', () => {
@@ -160,7 +158,6 @@ describe('phaseTokenFromKeeper', () => {
     expect(phaseTokenFromKeeper(mk({ lifecycle_phase: 'Compacting' }))).toBe('compacting')
     expect(phaseTokenFromKeeper(mk({ lifecycle_phase: 'HandingOff' }))).toBe('handoff')
     expect(phaseTokenFromKeeper(mk({ lifecycle_phase: 'Draining' }))).toBe('draining')
-    expect(phaseTokenFromKeeper(mk({ lifecycle_phase: 'Zombie' }))).toBe('zombie')
   })
   it('returns unknown for tokens outside the closed sum', () => {
     expect(phaseTokenFromKeeper(mk({ status: 'bootstrapping' }))).toBe('unknown')

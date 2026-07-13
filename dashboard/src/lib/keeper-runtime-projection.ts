@@ -55,7 +55,7 @@ export interface KeeperRuntimeProjectionRuntimeInput {
 }
 
 export interface KeeperRuntimeProjectionFsmLane {
-  readonly axis: 'KSM' | 'KTC' | 'KDP' | 'KCL' | 'KMC' | 'KCB'
+  readonly axis: 'KSM' | 'KTC' | 'KDP' | 'KCL' | 'KMC'
   readonly source: string
   readonly value: string
   readonly contributesToAttention: boolean
@@ -353,7 +353,6 @@ function deriveFsmLanes(
     { axis: 'KDP', source: 'composite.decision.stage', value: compactToken(composite?.decision?.stage ?? null, 'decision unknown'), contributesToAttention: false },
     { axis: 'KCL', source: 'composite.runtime.state', value: compactToken(composite?.runtime?.state ?? null, 'runtime unknown'), contributesToAttention: false },
     { axis: 'KMC', source: 'composite.compaction.stage', value: compactToken(composite?.compaction?.stage ?? null, 'compaction unknown'), contributesToAttention: false },
-    { axis: 'KCB', source: 'composite.circuit_breaker.state', value: compactToken(composite?.circuit_breaker?.state ?? null, 'breaker unknown'), contributesToAttention: false },
   ]
 }
 

@@ -6,18 +6,13 @@
     fact set and JUDGES which claims say the same thing (merge them into one
     consolidated claim) and which are now obsolete (forget them).
 
-    Not to be confused with {!Keeper_memory_os_consolidator}: that is the
-    cross-keeper Tier-2 pass (promote a claim several DISTINCT keepers hold into
-    the shared store); this is the intra-keeper pass (shrink ONE keeper's own
-    store via the LLM).
-
     Boundary (the design tenet): the DECISION — what to merge, what to forget, how
     to word a consolidated claim — is the LLM's. The STRUCTURE — numbering the
     facts, parsing the plan, applying it, preserving provenance, writing back — is
     deterministic and lives here, fully testable without an LLM. There is no score:
     the LLM names the groups directly.
 
-    Safety (RFC-0247 §7, R7 — never lose a good fact to a hallucinated plan):
+    Plan application is conservative:
     apply is conservative. The LLM references existing facts only by index, so it
     cannot fabricate a survivor; a fact named in no group and no drop list is kept
     unchanged; a "group" with fewer than two valid members is a no-op (we do not
@@ -77,46 +72,24 @@ let render_numbered_facts facts =
   |> String.concat "\n"
 ;;
 
-let category_specificity = function
-  | Ephemeral | Unknown _ -> 0
-  | Fact -> 1
-  | Code_change | Preference | Blocker | Goal | Constraint -> 2
-  | Validated_approach | Lesson -> 3
-;;
-
-let group_preserves_category ~members (group : merge_group) =
-  let group_specificity = category_specificity group.category in
-  let member_specificity =
-    List.fold_left
-      (fun acc (fact : fact) -> max acc (category_specificity fact.category))
-      0
-      members
-  in
-  group_specificity = member_specificity
-  && List.exists
-       (fun (fact : fact) ->
-          String.equal
-            (category_to_string fact.category)
-            (category_to_string group.category))
-       members
-;;
-
-(* RFC-0285 §3.1: a merge must not mix [claim_kind]s. [consolidated_fact] takes the
-   earliest member's tag and [valid_until_for_group] inherits the member-min horizon;
-   both are sound ONLY if every member shares one [claim_kind]. Unlike the
-   [claim_identity]-keyed cross-keeper consolidator, an LLM index-group carries no
-   such constraint — and [claim_kind] is orthogonal to [category], so
-   [group_preserves_category] does NOT prevent grouping a [Self_observation] with a
-   durable claim of the same category. Letting [first_seen] order then pick the
-   volatility class would either immortalize the self-observation (earliest durable)
-   or expire the durable claim (earliest self-observation). Refusing the merge keeps
-   the self-observation finite AND the durable claim immortal — strictly safer
-   (RFC-0247 §7 R7: never lose a good fact to a hallucinated plan). *)
+(* A merged row has one [claim_kind] slot, so members with different explicit
+   tags cannot be represented without losing information. Reject that group and
+   preserve every member. *)
 let group_preserves_claim_kind ~members =
   match members with
   | [] -> true
   | (first : fact) :: rest ->
     List.for_all (fun (m : fact) -> m.claim_kind = first.claim_kind) rest
+;;
+
+(* A merged row has only one [valid_until] slot. If members carry different
+   explicit values, choosing min/max/earliest would invent policy and discard
+   information, so the group is rejected and every member remains unchanged. *)
+let group_preserves_valid_until ~members =
+  match members with
+  | [] -> true
+  | (first : fact) :: rest ->
+    List.for_all (fun (member : fact) -> member.valid_until = first.valid_until) rest
 ;;
 
 (* ---------- JSON parsing (defensive, like the librarian) ---------- *)
@@ -227,18 +200,6 @@ let plan_of_string raw =
 
 (* ---------- Apply (pure, deterministic) ---------- *)
 
-let min_optional_float values =
-  List.fold_left
-    (fun acc -> function
-       | None -> acc
-       | Some value ->
-         (match acc with
-          | None -> Some value
-          | Some current -> Some (Float.min current value)))
-    None
-    values
-;;
-
 let max_optional_float values =
   List.fold_left
     (fun acc -> function
@@ -251,31 +212,9 @@ let max_optional_float values =
     values
 ;;
 
-let valid_until_for_group ~now ~external_ref:_ ~claim_kind ~members category =
-  match claim_kind with
-  (* RFC-0285 §3.3/§4 re-mint property: a self-observation group inherits the
-     earliest member's horizon so a reworded re-mint does NOT extend it past the
-     first-mint anchor; only when no member carried one does it get a fresh horizon. *)
-  | Some Self_observation ->
-    (match min_optional_float (List.map (fun (m : fact) -> m.valid_until) members) with
-     | Some _ as valid_until -> valid_until
-     | None -> Some (now +. self_observation_ttl_seconds))
-  | Some External_state ->
-    (* RFC-0259 P7: consolidation must not collapse legacy External_state rows
-       back into [valid_until = None]. Inherit the earliest stored or
-       compatibility-derived member horizon so a reworded merge cannot extend a
-       volatile external-state claim. *)
-    (match min_optional_float (List.map fact_effective_valid_until members) with
-     | Some _ as valid_until -> valid_until
-     | None -> Some (external_state_valid_until_from_first_seen ~first_seen:now))
-  | Some Durable_knowledge | Some Diagnostic | None ->
-    (match category with
-     | Ephemeral ->
-       (match min_optional_float (List.map (fun (m : fact) -> m.valid_until) members) with
-        | Some _ as valid_until -> valid_until
-        | None -> category_valid_until ~now category)
-     | Fact | Constraint | Preference | Blocker | Goal | Code_change
-     | Validated_approach | Lesson | Unknown _ -> category_valid_until ~now category)
+let valid_until_for_members = function
+  | [] -> None
+  | (first : fact) :: _ -> first.valid_until
 ;;
 
 let last_verified_for_members members =
@@ -285,7 +224,7 @@ let last_verified_for_members members =
 let shared_claim_id_for_members members =
   let ids =
     members
-    |> List.filter_map (fun (m : fact) -> Option.bind m.claim_id normalize_claim_id)
+    |> List.filter_map (fun (m : fact) -> m.claim_id)
     |> List.sort_uniq String.compare
   in
   match ids with
@@ -293,12 +232,10 @@ let shared_claim_id_for_members members =
   | [] | _ :: _ :: _ -> None
 ;;
 
-(* The consolidated fact for one group: its claim/category come from the LLM; its
-   provenance and temporal metadata are reconstructed structurally from the
-   members so nothing is fabricated — earliest source/first_seen, the union of
-   corroborating keepers, existing Ephemeral expiry, the newest verification
-   timestamp, and any non-conflicting producer claim id from the merged members. *)
-let consolidated_fact ~now ~members (group : merge_group) =
+(* The consolidated fact for one group: claim/category come from the LLM;
+   provenance is reconstructed structurally. The exact common [valid_until] is
+   preserved; groups with different explicit horizons never reach this function. *)
+let consolidated_fact ~now:_ ~members (group : merge_group) =
   let earliest =
     match members with
     | [] -> invalid_arg "Keeper_memory_os_consolidation.consolidated_fact: empty members"
@@ -314,14 +251,9 @@ let consolidated_fact ~now ~members (group : merge_group) =
   let observed_by =
     List.concat_map (fun m -> m.observed_by) members |> List.sort_uniq String.compare
   in
-  (* No code-side external-ref inference from consolidated prose. The model gets
-     the text as context; retention policy should not be changed by a string
-     matcher over the rewritten claim. *)
-  let external_ref = None in
   { claim = group.consolidated_claim
   ; category = group.category
-  ; external_ref
-    (* RFC-0285 §3.1: carry the earliest member's tag. The merge gate
+    (* Carry the earliest member's tag. The merge gate
        ([group_preserves_claim_kind] in [apply_plan]) guarantees every member shares
        one claim_kind, so the earliest's tag IS the group's — sound regardless of
        which member is earliest. *)
@@ -329,13 +261,7 @@ let consolidated_fact ~now ~members (group : merge_group) =
   ; source = earliest.source
   ; observed_by
   ; first_seen
-  ; valid_until =
-      valid_until_for_group
-        ~now
-        ~external_ref
-        ~claim_kind:earliest.claim_kind
-        ~members
-        group.category
+  ; valid_until = valid_until_for_members members
   ; last_verified_at = last_verified_for_members members
   ; schema_version
   ; claim_id = shared_claim_id_for_members members
@@ -367,8 +293,8 @@ let apply_plan ~now ~facts plan =
        if List.length members >= 2
        then (
          let member_facts = List.map (fun i -> facts_arr.(i)) members in
-         if group_preserves_category ~members:member_facts group
-            && group_preserves_claim_kind ~members:member_facts
+         if group_preserves_claim_kind ~members:member_facts
+            && group_preserves_valid_until ~members:member_facts
          then (
            let anchor =
              (* members is guaranteed non-empty by the [>= 2] guard above *)

@@ -21,7 +21,7 @@ let run_git ~clone_path args =
   let argv = [ "git"; "-C"; clone_path; "--no-optional-locks" ] @ args in
   let status, output =
     Masc_exec.Exec_gate.run_argv_with_status
-      ~actor:`Workspace_git
+      ~actor:(Masc_exec.Agent_id.of_string "workspace/git")
       ~raw_source:(String.concat " " argv)
       ~summary:"playground repo readiness git probe"
       argv
@@ -398,7 +398,7 @@ let ensure_ready ~(config : Workspace.config) ~(meta : keeper_meta) ~repo_name (
           in
           let _ =
             Masc_exec.Exec_gate.run_argv_with_status
-              ~actor:`Workspace_git
+              ~actor:(Masc_exec.Agent_id.of_string "workspace/git")
               ~raw_source:
                 (Printf.sprintf "mv %s %s" (Filename.quote path)
                    (Filename.quote quarantine))

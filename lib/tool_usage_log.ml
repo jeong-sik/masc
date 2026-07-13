@@ -15,27 +15,20 @@ module Char = Stdlib.Char
 module Int = Stdlib.Int
 module Float = Stdlib.Float
 
-module StringSet = Set_util.StringSet
 module StringMap = Set_util.StringMap
 
-(** Tool_usage_log -- Durable call logging for System_internal surface tools.
+(** Tool_usage_log -- Durable call logging for non-public registered tools.
 
     Persists tool invocations to [.masc/tool_usage/YYYY-MM/DD.jsonl] via
-    {!Dated_jsonl}. Only tools on the {!Tool_catalog_surfaces.System_internal}
-    surface are logged, providing evidence for safe pruning decisions.
+    {!Dated_jsonl}. External MCP discovery membership is not reused as a
+    Keeper visibility or authorization policy.
 
-    Writes are immediate (no buffering) since System_internal call volume
+    Writes are immediate (no buffering) since non-public call volume
     is low. All I/O failures are caught and logged (best-effort).
 
     @since 2.190.0 -- Issue #5120 *)
 
-(* -- System_internal membership set (O(log n) lookup) -- *)
-
-let system_internal_set : StringSet.t =
-  let tools = Tool_catalog_surfaces.system_internal_hidden in
-  List.fold_left (fun s name -> StringSet.add name s) StringSet.empty tools
-
-let is_system_internal name = StringSet.mem name system_internal_set
+let is_non_public name = not (Tool_catalog.is_public_mcp name)
 
 (* -- Store management -- *)
 
@@ -43,8 +36,7 @@ let store_ref : Dated_jsonl.t option ref = ref None
 let source_name = "tool_usage"
 let source_producer = "tool_usage_log"
 let dashboard_surface = "/api/v1/dashboard/tools"
-(* Sparse-source SLO. Tool_usage logs only Tool_catalog_surfaces.System_internal
-   surface tools, which are admin-only invocations driven by operators. Real
+(* Sparse-source SLO. Tool_usage logs non-public registered calls. Real
    workloads can legitimately go an hour or more without an admin tool call,
    so the original 900 s SLO inherited from high-volume sources caused false
    "stale" alerts on healthy fleets. 3600 s matches the operational rhythm
@@ -295,14 +287,14 @@ let extract_caller (result : Tool_result.result) : string option =
        | _ -> None)
   | _ -> None
 
-(* Log only handled System_internal dispatches. Non-handled outcomes are
+(* Log only handled non-public dispatches. Non-handled outcomes are
    represented by dispatch telemetry, not tool-usage rows. *)
 let install ~on_io_failure =
   Tool_dispatch.register_dispatch_observer (fun outcome result ->
     match outcome, result with
     | Dispatch_outcome.Handled, Some (result : Tool_result.result) ->
       let tool_name = Tool_result.tool_name result in
-      if is_system_internal tool_name then
+      if is_non_public tool_name then
         log_call
           ~on_io_failure
           ~tool_name

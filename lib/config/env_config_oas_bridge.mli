@@ -20,7 +20,6 @@
     env / hardcoded fallback rather than failing closed. *)
 type caller =
   | Anti_rationalization
-  | Governance_judge
   | Operator_judge
   | Unknown of string
 
@@ -52,6 +51,5 @@ val known_callers : unit -> caller list
     fallback without hardcoding the literal. *)
 val global_default_sec : float
 
-(** Current checked-in finite default for advisory dashboard judge callers
-    ({!Governance_judge} / {!Operator_judge}). *)
+(** Current checked-in finite default for the advisory operator judge. *)
 val dashboard_judge_default_sec : float

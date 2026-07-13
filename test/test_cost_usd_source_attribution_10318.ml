@@ -1,7 +1,7 @@
 (** #10318 — pin the cost ledger source-attribution contract.
 
     Pre-fix [costs.jsonl] showed 100% [cost_usd=0] across 1697
-    entries.  Each silent path (untrusted usage, missing usage,
+    entries.  Each missing/reporting path (missing usage,
     OAS cost omission, structurally-unmetered runtime, actual
     zero-token call) collapsed to the same [0.0] field with no
     way for an operator to distinguish "tracking is broken" from
@@ -17,11 +17,9 @@
     | path                | source string         |
     |---------------------|-----------------------|
     | usage_missing       | missing_usage         |
-    | not usage_trusted   | untrusted_usage       |
     | structurally_unmetered runtime | unmetered_provider |
-    | trusted + cost > 0  | computed              |
-    | trusted + tokens + 0 cost | oas_cost_unreported |
-    | trusted + 0 cost and not free | oas_cost_unreported |
+    | reported non-zero cost | computed              |
+    | tokens + 0 cost | oas_cost_unreported |
 
     Precedence is fixed (top-down) so a missing-usage call on a
     pricing-known model still labels [missing_usage], not
@@ -32,11 +30,10 @@ open Alcotest
 
 module H = Masc.Keeper_hooks_oas
 
-let check_source ~msg ~usage_missing ~usage_trusted ~runtime_unmetered
+let check_source ~msg ~usage_missing ~runtime_unmetered
     ~cost_usd expected =
   let actual =
-    H.classify_cost_usd_source ~usage_missing ~usage_trusted
-      ~runtime_unmetered ~cost_usd
+    H.classify_cost_usd_source ~usage_missing ~runtime_unmetered ~cost_usd
   in
   check string msg expected actual
 
@@ -49,35 +46,27 @@ let test_missing_usage_wins_over_everything () =
      usage at all). *)
   check_source
     ~msg:"missing_usage even with priced model + positive cost"
-    ~usage_missing:true ~usage_trusted:false
+    ~usage_missing:true
     ~runtime_unmetered:false
     ~cost_usd:0.42
     "missing_usage"
 
-let test_untrusted_wins_over_unmetered_and_catalog () =
-  check_source
-    ~msg:"untrusted_usage wins over unmetered_provider"
-    ~usage_missing:false ~usage_trusted:false
-    ~runtime_unmetered:true
-    ~cost_usd:0.0
-    "untrusted_usage"
-
 (* --- canonical paths --------------------------------------------- *)
 
-let test_unmetered_provider_when_trusted () =
-  (* ollama is structurally unmetered; trusted+0 should label as
+let test_unmetered_provider () =
+  (* A structurally unmetered runtime with zero cost labels as
      [unmetered_provider], without MASC inspecting provider/model pricing. *)
   check_source
-    ~msg:"trusted ollama => unmetered_provider"
-    ~usage_missing:false ~usage_trusted:true
+    ~msg:"unmetered runtime => unmetered_provider"
+    ~usage_missing:false
     ~runtime_unmetered:true
     ~cost_usd:0.0
     "unmetered_provider"
 
-let test_computed_when_trusted_and_positive () =
+let test_computed_when_cost_reported () =
   check_source
-    ~msg:"trusted + paid + cost > 0 => computed"
-    ~usage_missing:false ~usage_trusted:true
+    ~msg:"reported non-zero cost => computed"
+    ~usage_missing:false
     ~runtime_unmetered:false
     ~cost_usd:0.0042
     "computed"
@@ -87,8 +76,8 @@ let test_oas_cost_unreported_for_zero_cost_tokens () =
      through to [oas_cost_unreported]. MASC must not inspect a local
      provider/model pricing catalog to guess why. *)
   check_source
-    ~msg:"trusted tokens without OAS cost => oas_cost_unreported"
-    ~usage_missing:false ~usage_trusted:true
+    ~msg:"reported tokens without OAS cost => oas_cost_unreported"
+    ~usage_missing:false
     ~runtime_unmetered:false
     ~cost_usd:0.0
     "oas_cost_unreported"
@@ -96,7 +85,7 @@ let test_oas_cost_unreported_for_zero_cost_tokens () =
 let test_preview_runtime_without_oas_cost_is_unreported () =
   check_source
     ~msg:"preview runtime without OAS cost => oas_cost_unreported"
-    ~usage_missing:false ~usage_trusted:true
+    ~usage_missing:false
     ~runtime_unmetered:false
     ~cost_usd:0.0
     "oas_cost_unreported"
@@ -142,16 +131,13 @@ let () =
         [
           test_case "missing_usage wins over everything" `Quick
             test_missing_usage_wins_over_everything;
-          test_case
-            "untrusted_usage wins over unmetered + catalog" `Quick
-            test_untrusted_wins_over_unmetered_and_catalog;
         ] );
       ( "canonical-paths",
         [
-          test_case "unmetered provider when trusted" `Quick
-            test_unmetered_provider_when_trusted;
-          test_case "computed when trusted and positive" `Quick
-            test_computed_when_trusted_and_positive;
+          test_case "unmetered provider" `Quick
+            test_unmetered_provider;
+          test_case "computed when cost is reported" `Quick
+            test_computed_when_cost_reported;
           test_case "OAS cost unreported for token usage" `Quick
             test_oas_cost_unreported_for_zero_cost_tokens;
           test_case "preview runtime without OAS cost" `Quick

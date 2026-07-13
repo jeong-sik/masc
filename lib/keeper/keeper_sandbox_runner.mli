@@ -10,8 +10,6 @@ type command_result =
   ; image : string
   ; network_label : string
   ; cwd : string
-  ; semantic_status : Exec_core.semantic_status option
-  ; semantic_ok : bool
   }
 
 type command_trust =
@@ -53,8 +51,6 @@ module type Backend = sig
 
   val ensure_runtime :
     timeout_sec:float -> (string list, string) result
-
-  val command_uses_nested_runtime : string -> bool
 
   val private_workspace_cwd :
     config:Workspace.config ->
@@ -99,8 +95,6 @@ module Make (Backend : Backend) : sig
   val ensure_runtime :
     timeout_sec:float -> (string list, string) result
 
-  val command_uses_nested_runtime : string -> bool
-
   val private_workspace_cwd :
     config:Workspace.config ->
     meta:Keeper_meta_contract.keeper_meta ->
@@ -142,8 +136,6 @@ val effective_sandbox_profile :
 
 val ensure_runtime :
   timeout_sec:float -> (string list, string) result
-
-val command_uses_nested_runtime : string -> bool
 
 val private_workspace_cwd :
   config:Workspace.config ->

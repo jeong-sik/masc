@@ -4,6 +4,15 @@
 let status_json ~ok fields =
   Yojson.Safe.to_string (`Assoc (("ok", `Bool ok) :: fields))
 
+let status_result ~tool_name ~class_ ~ok fields =
+  let data = `Assoc (("ok", `Bool ok) :: fields) in
+  if ok
+  then Tool_result.make_ok ~tool_name ~start_time:0.0 ~data ()
+  else
+    let message = Yojson.Safe.to_string data in
+    Tool_result.make_err ~tool_name ~class_ ~start_time:0.0 ~data message
+;;
+
 let append_chat_failure ~base_dir ~keeper ~run_id ~failure_code content =
   (* 실패 알림도 성공 결론(fusion_sink.emit)과 동일하게 키퍼 *메인* conversation에
      남긴다(conversation_id 생략). recent_direct_conversation observation 필터는
@@ -51,7 +60,13 @@ let append_chat_failure ~base_dir ~keeper ~run_id ~failure_code content =
     Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~ok:false
       ~resolved_answer:content ~board_post_id:""
   with
-  | Ok () | Error _ -> ()
+  | Ok () -> ()
+  | Error reason ->
+    Log.Keeper.warn
+      ~keeper_name:keeper
+      "fusion run %s completion wake was not durably queued: %s"
+      run_id
+      reason
 
 type orchestrator_runner =
   sw:Eio.Switch.t
@@ -63,8 +78,9 @@ type orchestrator_runner =
   -> unit
   -> Fusion_orchestrator.outcome
 
-let handle_with_runner ~run_orchestrator ~sw ~net ~base_dir ~keeper ~now_unix ~run_id
-      ~policy ?continuation_channel ~args () : string =
+let handle_with_runner_result ~run_orchestrator ~sw ~net ~base_dir ~keeper ~now_unix ~run_id
+      ~policy ?continuation_channel ~args () : Tool_result.result =
+  let tool_name = "masc_fusion" in
   let prompt = Tool_args.get_string args "prompt" "" in
   let preset = Tool_args.get_string args "preset" policy.Fusion_policy.default_preset in
   let web_tools = Tool_args.get_bool args "web_tools" false in
@@ -80,9 +96,17 @@ let handle_with_runner ~run_orchestrator ~sw ~net ~base_dir ~keeper ~now_unix ~r
     ( String.equal (String.trim prompt) ""
     , Fusion_types.fusion_topology_of_string topology_str )
   with
-  | true, _ -> status_json ~ok:false [ ("error", `String "prompt is required") ]
+  | true, _ ->
+    status_result
+      ~tool_name
+      ~class_:Tool_result.Workflow_rejection
+      ~ok:false
+      [ "error", `String "prompt is required" ]
   | _, None ->
-    status_json ~ok:false
+    status_result
+      ~tool_name
+      ~class_:Tool_result.Workflow_rejection
+      ~ok:false
       [ ( "error"
         , `String
             (Printf.sprintf "topology must be one of: %s"
@@ -101,7 +125,10 @@ let handle_with_runner ~run_orchestrator ~sw ~net ~base_dir ~keeper ~now_unix ~r
     in
     match Fusion_policy.decide ~policy request with
     | Fusion_types.Deny reason ->
-      status_json ~ok:false
+      status_result
+        ~tool_name
+        ~class_:Tool_result.Workflow_rejection
+        ~ok:false
         [ ("status", `String "denied")
         ; ("reason", `String (Fusion_types.deny_reason_label reason))
         ]
@@ -165,7 +192,10 @@ let handle_with_runner ~run_orchestrator ~sw ~net ~base_dir ~keeper ~now_unix ~r
          [Fusion_completed] wake로 깨워지고 결론/실패 사유가 chat lane에 durable하게
          남는다. 2026-07-01 관측: 이 계약이 결과 JSON에 없어서 키퍼들이 3-5초 간격
          masc_fusion_status 폴링으로 턴을 소모했다(8 run에 35 poll + nudge 8회). *)
-      status_json ~ok:true
+      status_result
+        ~tool_name
+        ~class_:Tool_result.Runtime_failure
+        ~ok:true
         [ ("status", `String "fusion_started")
         ; ("run_id", `String run_id)
         ; ( "delivery"
@@ -175,13 +205,42 @@ let handle_with_runner ~run_orchestrator ~sw ~net ~base_dir ~keeper ~now_unix ~r
                your chat lane. No need to poll masc_fusion_status." )
         ]
 
+let handle_result ~sw ~net ~base_dir ~keeper ~now_unix ~run_id ~policy
+      ?continuation_channel ~args () =
+  handle_with_runner_result ~run_orchestrator:Fusion_orchestrator.run ~sw ~net ~base_dir
+    ~keeper ~now_unix ~run_id ~policy ?continuation_channel ~args ()
+
 let handle ~sw ~net ~base_dir ~keeper ~now_unix ~run_id ~policy ?continuation_channel
       ~args () : string =
-  handle_with_runner ~run_orchestrator:Fusion_orchestrator.run ~sw ~net ~base_dir
-    ~keeper ~now_unix ~run_id ~policy ?continuation_channel ~args ()
+  Tool_result.message
+    (handle_result
+       ~sw
+       ~net
+       ~base_dir
+       ~keeper
+       ~now_unix
+       ~run_id
+       ~policy
+       ?continuation_channel
+       ~args
+       ())
 
 module For_test = struct
   type nonrec orchestrator_runner = orchestrator_runner
 
-  let handle_with_runner = handle_with_runner
+  let handle_with_runner ~run_orchestrator ~sw ~net ~base_dir ~keeper ~now_unix
+        ~run_id ~policy ?continuation_channel ~args () =
+    Tool_result.message
+      (handle_with_runner_result
+         ~run_orchestrator
+         ~sw
+         ~net
+         ~base_dir
+         ~keeper
+         ~now_unix
+         ~run_id
+         ~policy
+         ?continuation_channel
+         ~args
+         ())
 end

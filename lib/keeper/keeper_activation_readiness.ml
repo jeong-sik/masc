@@ -5,10 +5,7 @@ type autonomous_blocker =
 
 type pause_kind =
   | Active
-  | Reconcile_gated
-  | Auto_recoverable
   | Operator_paused
-  | Latched_paused
   | Unclassified_paused
   | Dead_tombstone
 
@@ -21,25 +18,17 @@ let pause_kind (meta : Keeper_meta_contract.keeper_meta) =
   | Keeper_lifecycle_admission.Dead_tombstone -> Dead_tombstone
   | Keeper_lifecycle_admission.Active -> Active
   | Keeper_lifecycle_admission.Paused latch ->
-    if Keeper_supervisor_types.paused_meta_requires_reconcile_recovery meta
-    then Reconcile_gated
-    else
-      (match Keeper_supervisor_types.paused_meta_effective_auto_resume_after_sec meta with
-       | Some _ -> Auto_recoverable
-       | None ->
-         (match latch with
-          | Keeper_lifecycle_admission.Classified
-              (Keeper_latched_reason.Operator_paused _) -> Operator_paused
-          | Keeper_lifecycle_admission.Classified _ -> Latched_paused
-          | Keeper_lifecycle_admission.Unclassified -> Unclassified_paused))
+    (match latch with
+     | Keeper_lifecycle_admission.Classified
+         (Keeper_latched_reason.Operator_paused _) -> Operator_paused
+     | Keeper_lifecycle_admission.Classified Keeper_latched_reason.Dead_tombstone ->
+       Dead_tombstone
+     | Keeper_lifecycle_admission.Unclassified -> Unclassified_paused)
 ;;
 
 let pause_kind_to_wire = function
   | Active -> "active"
-  | Reconcile_gated -> "reconcile_gated"
-  | Auto_recoverable -> "auto_recoverable"
   | Operator_paused -> "operator_paused"
-  | Latched_paused -> "latched_paused"
   | Unclassified_paused -> "unclassified_paused"
   | Dead_tombstone -> "dead_tombstone"
 ;;

@@ -36,9 +36,6 @@ let with_timeout ?clock ~timeout_sec f =
      | Eio.Time.Timeout -> Timed_out)
 ;;
 
-(* Below this many facts there is nothing to consolidate; skip the LLM call. *)
-let min_facts_to_consolidate = 4
-
 (* The plan can list many groups over a large store, so allow more than the
    512-token summary budget. *)
 let consolidation_max_tokens = 2048
@@ -151,7 +148,7 @@ let invalid_structured_response_detail detail =
 let consolidate_keeper
       ?(complete = default_complete)
       ?clock
-      ?(timeout_sec = Env_config_governance.Inference.timeout_seconds)
+      ?(timeout_sec = Env_config_runtime_services.Inference.timeout_seconds)
       ?(dry_run = false)
       ~sw
       ~net
@@ -165,7 +162,7 @@ let consolidate_keeper
   | Error msg -> Unparseable ("consolidation fact store read failed: " ^ msg)
   | Ok facts ->
     let before = List.length facts in
-    if before < min_facts_to_consolidate
+    if before = 0
     then Skipped_too_few before
     else
       match messages_for_consolidation facts with

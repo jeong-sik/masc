@@ -8,7 +8,6 @@ import {
   type CockpitMode,
 } from '../../cockpit-entrypoints'
 import { RouteLink } from '../common/route-link'
-import { WorldVisualizer } from '../world-visualizer'
 
 type CockpitPlane = Extract<CockpitMode, 'work' | 'comms' | 'observe' | 'cognition' | 'ide'>
 
@@ -198,10 +197,6 @@ function PlaneSection({ plane, entries }: { plane: CockpitPlane; entries: Cockpi
 export function Cockpit() {
   return html`
     <div class="cp-body" data-testid="cockpit-command-map">
-      <aside class="cp-world">
-        <${WorldVisualizer} />
-      </aside>
-
       <main class="cp-main">
         <div class="cp-inner">
           <header class="cp-head">

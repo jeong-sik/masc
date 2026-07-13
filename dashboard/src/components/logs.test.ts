@@ -84,7 +84,7 @@ describe('log diagnostics', () => {
         entry({
           level: 'INFO',
           message:
-            'keeper:analyst after_turn usage telemetry unavailable runtime_lane=runtime reasons=zero_token_usage_reported input=0 output=0 context_max=200000',
+            'keeper:analyst after_turn usage telemetry invalid runtime_lane=runtime reasons=negative_input_tokens input=-1 output=0 context_max=200000',
         }),
       ),
     ).toBeNull()

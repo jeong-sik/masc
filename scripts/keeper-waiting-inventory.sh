@@ -360,8 +360,6 @@ build_preflight_report() {
                            "masc_keeper_waiting_inventory dispatch_registered must be true")
                     + emit(($tool.direct_call_allowed == true);
                            "masc_keeper_waiting_inventory direct_call_allowed must be true")
-                    + emit(($tool.effectDomain == "read_only");
-                           "masc_keeper_waiting_inventory effectDomain must be read_only")
                     + emit(($tool.implementationStatus == "real");
                            "masc_keeper_waiting_inventory implementationStatus must be real")
                   end

@@ -1,12 +1,11 @@
 (** Keeper State Machine — Deterministic Core (RFC-0002).
 
-    This module defines the 13-state keeper lifecycle as a pure state machine.
+    This module defines the keeper lifecycle as a pure state machine.
     All functions are deterministic: no I/O, no clock reads, no mutable state.
 
     Phase count history:
       - 11 phases at RFC-0002 Phase 1 introduction (#5229, 2026-04-05)
       - +1 → 12 when [Overflowed] was added (MASC-1, 2026-04)
-      - +1 → 13 when [Zombie] was added (#14707, /loop iter 4)
     Single Source of Truth (SSOT) is the [type phase] declaration below;
     spec doc counts are
     cross-checked by [scripts/audit-tla-phase-count.sh] (R-H-1.c #14874).
@@ -37,22 +36,17 @@ type phase =
   | Compacting    (** Context compaction in progress *)
   | HandingOff    (** Generation rollover in progress *)
   | Draining      (** Graceful shutdown: completing current turn *)
-  | Paused        (** Operator-paused or auto-compact-retry-exhausted,
-                      fiber sleeping *)
+  | Paused        (** Explicitly operator-paused; fiber sleeping *)
   | Stopped       (** Clean exit, terminal *)
   | Crashed       (** Unrecoverable error, restart candidate *)
   | Restarting    (** Supervisor backoff wait before re-launch *)
-  | Dead          (** Restart budget exhausted, tombstone, terminal *)
-  | Zombie        (** Terminal structural failure, non-recoverable.
-                      Distinct from [Dead]: restart budget may remain,
-                      but the keeper encountered a permanent provider
-                      or adapter error and cannot continue. *)
+  | Dead          (** Explicit durable tombstone, terminal *)
 
 val phase_to_string : phase -> string
 val phase_of_string : string -> phase option
 val all_phases : phase list
 
-(** [is_terminal phase] is true for Stopped/Dead/Zombie — phases with no
+(** [is_terminal phase] is true for Stopped/Dead — phases with no
     outgoing transition (see {!can_transition}). Shared by health surfaces
     and the mermaid renderer so the terminal triple is defined once in the
     FSM instead of re-matched at each consumer. *)
@@ -69,9 +63,9 @@ type conditions = {
   fiber_alive : bool;
   (** [done_p] unresolved AND [fiber_stop] not set *)
   heartbeat_healthy : bool;
-  (** [consecutive_failures < max_hb_failures] *)
+  (** Result of the latest heartbeat observation. *)
   turn_healthy : bool;
-  (** [turn_consecutive_failures < max_turn_failures] *)
+  (** Result of the latest completed turn observation. *)
   context_within_budget : bool;
   (** [context_ratio < compaction.ratio_gate] *)
   context_handoff_needed : bool;
@@ -84,10 +78,10 @@ type conditions = {
   (** [meta.paused = true] *)
   stop_requested : bool;
   (** [Atomic.get fiber_stop = true] *)
-  restart_budget_remaining : bool;
-  (** [restart_count < max_restarts] *)
-  backoff_elapsed : bool;
-  (** [now - last_restart_ts >= backoff_delay(restart_count)] *)
+  dead_tombstone_latched : bool;
+  (** Explicit durable Dead tombstone observed by lifecycle admission. *)
+  restart_requested : bool;
+  (** Supervisor has requested immediate restart of a stopped fiber. *)
   drain_complete : bool;
   (** Current turn finished, no pending work *)
   context_overflow : bool;
@@ -97,22 +91,8 @@ type conditions = {
       by the provider. Cleared by a [Compaction_completed] whose payload
       reports real token savings ([before_tokens > after_tokens]) or by
       an operator clear action. A noop compaction ([before = after])
-      leaves this flag set so the overflow can be escalated instead of
-      re-entering an infinite compact→clear→overflow loop (#9988). *)
-  compact_retry_exhausted : bool;
-  (** Consecutive auto-compact attempts failed to resolve the overflow.
-      While set, the next [Context_overflow_detected] derives [Paused]
-      instead of [Overflowed] so operator intervention is required.
-      Reset by a [Compaction_completed] with real savings or by
-      [Fiber_started]; a noop compaction does not reset this latch. *)
-  terminal_failure_latched : bool;
-  (** Set when the keeper encounters a permanent structural error
-      (provider adapter failure, unresumable session conflict, etc).
-      Once latched, [derive_phase] returns [Zombie] regardless of
-      fiber or budget state. Reset only by [Fiber_started] so a
-      full restart can attempt recovery with a fresh trace. *)
+      leaves this flag set for observability and later recovery. *)
   credential_archived : bool;
-  zombie_timeout_reached : bool;
 }
 
 val default_conditions : conditions
@@ -160,9 +140,9 @@ type context_actions = {
     code path. *)
 type event =
   | Heartbeat_ok
-  | Heartbeat_failed of { consecutive : int; max_allowed : int }
+  | Heartbeat_failed of { consecutive : int }
   | Turn_succeeded
-  | Turn_failed of { consecutive : int; max_allowed : int }
+  | Turn_failed of { consecutive : int }
   | Context_measured of {
       context_ratio : float;
       message_count : int;
@@ -195,13 +175,7 @@ type event =
       ; http_status : int option
       }
   | Supervisor_restart_attempt of { attempt : int }
-  | Restart_budget_exhausted
   | Credential_archived
-  | Zombie_timeout
-  | Terminal_failure_detected of { reason : string }
-    (** Permanent structural error (provider adapter failure, unresumable
-        session conflict, etc). Latches [terminal_failure_latched] and
-        drives the keeper to [Zombie] on the next [derive_phase]. *)
   | Context_overflow_detected of {
       source : [`Prompt_rejected | `Oas_signal];
       token_count : int;
@@ -217,19 +191,9 @@ type event =
     (** Emitted as part of [Overflowed] entry actions to mark the
         start of auto-recovery. Sets [compaction_active] so the next
         [derive_phase] returns [Compacting]. *)
-  | Compact_retry_exhausted
-    (** Issue #8581: latches [compact_retry_exhausted]. Mirrors the
-        TLA+ [CompactRetryExhausted] action. Dispatchers fire this
-        before [Operator_pause] so the Paused phase carries the real
-        reason ("auto-compact retry budget exhausted") for operator
-        observability. Before this event existed, the
-        [compact_retry_exhausted] field was read by [derive_phase]
-        but never set in OCaml — the right disjunct of the Paused
-        promotion was dead code. *)
   | Operator_compact_requested
     (** Operator invoked [masc_keeper_compact] MCP tool. Behaves like
-        [Auto_compact_triggered] but also clears [compact_retry_exhausted]
-        so a subsequent compaction failure restarts the retry counter. *)
+        [Auto_compact_triggered] without requiring a preceding overflow. *)
   | Operator_clear_requested of { preserve_system : bool; reason : string }
     (** Operator invoked [masc_keeper_clear]. Last-resort: drops
         conversation context entirely. Bypasses [Compacting] buffer
@@ -256,7 +220,6 @@ type entry_action =
   | Schedule_restart of { delay_sec : float }
   | Publish_lifecycle of { event_name : string; detail : string }
   | Mark_dead_tombstone
-  | Mark_zombie_tombstone
   | Cleanup_and_unregister
   | Trigger_immediate_cleanup
   | Cancel_pending_oas
@@ -291,22 +254,22 @@ val transition_error_to_string : transition_error -> string
 
     Priority (first match wins) — mirrors the [DerivePhase] action in
     [specs/keeper-state-machine/KeeperStateMachine.tla]:
-    1.  Stopped (stop_requested + drain_complete + ~compaction_active +
+    1.  Dead (explicit durable [dead_tombstone_latched])
+    2.  Stopped (stop_requested + drain_complete + ~compaction_active +
                  ~handoff_active)
         -- Checked first because a clean drain wins even if the fiber
         subsequently exits.  Buffer-state guards prevent a TLC deadlock
         where Stopped is entered while compaction/handoff is still in
         flight (see comment on [keeper_state_machine.ml:derive_phase]).
-    2.  Offline (launch_pending + ~fiber_alive) -- pre-start registration
-    3.  Dead (~fiber_alive + ~restart_budget_remaining) -- terminal
-    4.  Restarting (~fiber_alive + budget + backoff_elapsed)
-    5.  Crashed (~fiber_alive + budget remaining)
+    3.  Offline (launch_pending + ~fiber_alive) -- pre-start registration
+    4.  Restarting (~fiber_alive + restart_requested)
+    5.  Crashed (~fiber_alive)
     6.  Draining (stop_requested) -- in-progress stop
-    7.  Paused (operator_paused OR context_overflow + compact_retry_exhausted)
+    7.  Paused (operator_paused)
     8.  HandingOff (handoff_active)
     9.  Compacting (compaction_active)
     10. Overflowed (context_overflow) -- transient, auto-compact pending
-    11. Failing (~heartbeat_healthy OR ~turn_healthy)
+    11. Failing (latest health failure or structural failure observation)
     12. Running (fiber_alive)
     13. Offline (default fallback for inconsistent zero-state)
 

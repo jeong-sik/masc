@@ -63,19 +63,17 @@ let handle_keeper_down (ctx : _ context) args : tool_result =
            "Keeper shutdown operation observed: keeper=%s operation=%s"
            requested_name
            (Keeper_shutdown_types.Operation_id.to_string operation.operation_id);
-         tool_result_ok
-           (Yojson.Safe.to_string (operation_json ~accepted:false operation))
+         tool_result_ok_data (operation_json ~accepted:false operation)
        | Ok None ->
          (match Keeper_meta_store.read_meta_resolved ctx.config requested_name with
           | Error detail -> tool_result_error detail
           | Ok None ->
             Log.Keeper.info "Keeper shutdown found already absent: keeper=%s" requested_name;
-            tool_result_ok
-              (Yojson.Safe.to_string
-                 (`Assoc
-                    [ "name", `String requested_name
-                    ; "already_absent", `Bool true
-                    ]))
+            tool_result_ok_data
+              (`Assoc
+                 [ "name", `String requested_name
+                 ; "already_absent", `Bool true
+                 ])
           | Ok (Some _) ->
             Log.Keeper.error
               "Keeper shutdown refused metadata-only identity: keeper=%s"
@@ -111,8 +109,7 @@ let handle_keeper_down (ctx : _ context) args : tool_result =
            "Keeper shutdown operation accepted: keeper=%s operation=%s"
            requested_name
            (Keeper_shutdown_types.Operation_id.to_string operation.operation_id);
-         tool_result_ok
-           (Yojson.Safe.to_string (operation_json ~accepted:true operation)))
+         tool_result_ok_data (operation_json ~accepted:true operation))
 ;;
 
 module For_testing = struct

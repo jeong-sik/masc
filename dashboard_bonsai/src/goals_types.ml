@@ -24,16 +24,12 @@ type node =
   ; metric : string option
   ; target_value : string option
   ; due_date : string option
-  ; convergence : float
-  ; convergence_pct : int
   ; tasks : task list
   ; task_count : int
   ; task_done_count : int
-  ; blocking_source : string
-  ; blocking_reason : string
+  ; stagnation_seconds : int option
   ; latest_keeper_ref : string option
   ; latest_turn_ref : int option
-  ; stalled_since : string option
   ; children : node list
   ; child_count : int
   }
@@ -43,7 +39,6 @@ type summary =
   ; active_goals : int
   ; total_tasks : int
   ; done_tasks : int
-  ; overall_convergence_pct : int
   }
 
 type fetch_status =
@@ -66,7 +61,6 @@ let fixture_summary : summary =
   ; active_goals = 0
   ; total_tasks = 0
   ; done_tasks = 0
-  ; overall_convergence_pct = 0
   }
 ;;
 
@@ -89,17 +83,16 @@ let int_field ?(default = 0) json key =
   | _ -> default
 ;;
 
-let float_field ?(default = 0.0) json key =
-  match Yojson.Safe.Util.member key json with
-  | `Float f -> f
-  | `Int i -> Float.of_int i
-  | `Intlit s -> (try Float.of_string s with _ -> default)
-  | _ -> default
-;;
-
 let string_opt_field json key =
   match Yojson.Safe.Util.member key json with
   | `String s -> Some s
+  | _ -> None
+;;
+
+let int_opt_field json key =
+  match Yojson.Safe.Util.member key json with
+  | `Int i -> Some i
+  | `Intlit s -> (try Some (Int.of_string s) with _ -> None)
   | _ -> None
 ;;
 
@@ -137,20 +130,16 @@ let rec node_of_yojson json : node =
   ; metric = string_opt_field json "metric"
   ; target_value = string_opt_field json "target_value"
   ; due_date = string_opt_field json "due_date"
-  ; convergence = float_field json "convergence"
-  ; convergence_pct = int_field json "convergence_pct"
   ; tasks
   ; task_count = int_field json "task_count"
   ; task_done_count = int_field json "task_done_count"
-  ; blocking_source = string_field ~default:"none" json "blocking_source"
-  ; blocking_reason = string_field ~default:"" json "blocking_reason"
+  ; stagnation_seconds = int_opt_field json "stagnation_seconds"
   ; latest_keeper_ref = string_opt_field json "latest_keeper_ref"
   ; latest_turn_ref =
       (match Yojson.Safe.Util.member "latest_turn_ref" json with
        | `Int i -> Some i
        | `Intlit s -> (try Some (Int.of_string s) with _ -> None)
        | _ -> None)
-  ; stalled_since = string_opt_field json "stalled_since"
   ; children
   ; child_count = int_field json "child_count"
   }
@@ -161,7 +150,6 @@ let summary_of_yojson json : summary =
   ; active_goals = int_field json "active_goals"
   ; total_tasks = int_field json "total_tasks"
   ; done_tasks = int_field json "done_tasks"
-  ; overall_convergence_pct = int_field json "overall_convergence_pct"
   }
 ;;
 

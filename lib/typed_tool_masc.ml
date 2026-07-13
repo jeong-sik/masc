@@ -6,20 +6,17 @@ type ('input, 'output) t = {
   oas_tool : ('input, 'output) Agent_sdk.Typed_tool.t;
   module_tag : Tool_dispatch.module_tag;
   is_read_only : bool;
-  is_destructive : bool;
   is_idempotent : bool;
   visibility : Tool_catalog.visibility;
-  effect_domain : Tool_catalog.effect_domain option;
 }
 
 let create ~name ~description ~module_tag ~params ~parse ~handler ~encode
-    ?(is_read_only = false) ?(is_destructive = false) ?(is_idempotent = false)
+    ?(is_read_only = false) ?(is_idempotent = false)
     ?(visibility = Tool_catalog.Default)
-    ?effect_domain () =
+    () =
   let oas_tool = Agent_sdk.Typed_tool.create
     ~name ~description ~params ~parse ~handler ~encode () in
-  { oas_tool; module_tag; is_read_only; is_destructive;
-    is_idempotent; visibility; effect_domain }
+  { oas_tool; module_tag; is_read_only; is_idempotent; visibility }
 
 (** Build a dispatch handler for the typed tool.
     The handler is registered via [Tool_spec.Direct] for a specific tool name,
@@ -32,9 +29,8 @@ let make_dispatch_handler (tool : (_, _) t) : Tool_dispatch.handler =
     | Error { message; recoverable; error_class } ->
       (* RFC-0189: source-typed mapping from [Agent_sdk.tool_error]
          to [Tool_result.tool_failure_class].  The SDK's typed
-         error already carries the signal — previously discarded
-         in favour of the auto-classify path's [Runtime_failure]
-         default.
+         error already carries the signal, so this boundary maps it
+         directly instead of deriving semantics from [message].
 
          Mapping (matches the SDK's own [recoverable] /
          [error_class] semantics — see
@@ -45,8 +41,8 @@ let make_dispatch_handler (tool : (_, _) t) : Tool_dispatch.handler =
            -> [Workflow_rejection] (caller input rejected;
               retry without changes won't help).
          - Otherwise ([Unknown] / [None] / non-recoverable)
-           -> [Runtime_failure] (preserve original auto-classify
-              default; surface as severity-elevated upstream). *)
+           -> [Runtime_failure] (explicit source-level fallback;
+              surface as severity-elevated upstream). *)
       let failure_class : Tool_result.tool_failure_class =
         if recoverable then Tool_result.Transient_error
         else
@@ -73,10 +69,8 @@ let to_spec tool =
     ~input_schema
     ~handler_binding:(Tool_spec.Direct (make_dispatch_handler tool))
     ~is_read_only:tool.is_read_only
-    ~is_destructive:tool.is_destructive
     ~is_idempotent:tool.is_idempotent
     ~visibility:tool.visibility
-    ?effect_domain:tool.effect_domain
     ()
 
 let register tool =

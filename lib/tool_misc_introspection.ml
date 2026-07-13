@@ -26,21 +26,6 @@ open Tool_args
 
 type tool_result = Tool_result.result
 
-(* RFC-0189: typed [Tool_result.result] helper, scoped to this module.
-
-   - [text_ok]: success carrying a free-form (often JSON-string) body.
-     Falls back to [`String body] when [structured_payload_of_message]
-     can't parse — same pattern as #18767. *)
-
-let text_ok ~tool_name ~start_time body : Tool_result.result =
-  let data =
-    match Tool_result.structured_payload_of_message body with
-    | Some json -> json
-    | None -> `String body
-  in
-  Tool_result.make_ok ~tool_name ~start_time ~data ()
-;;
-
 (* ================================================================ *)
 (* JSON builders                                                    *)
 (* ================================================================ *)
@@ -48,7 +33,7 @@ let text_ok ~tool_name ~start_time body : Tool_result.result =
 let tool_inventory_json _ctx ~include_hidden =
   (* Returns all tool schemas from catalog with metadata.
      enabled_in_current_mode=false because this is dashboard context (no keeper).
-     Keeper-specific tool availability is determined by keeper_allowed_tool_names. *)
+     Keeper model visibility is the complete descriptor-declared surface. *)
   let surface_map : (string, string list) Hashtbl.t = Hashtbl.create 256 in
   let add_surface name s =
     let prev =
@@ -121,5 +106,5 @@ let tool_inventory_json _ctx ~include_hidden =
 let handle_config ~tool_name ~start_time args : tool_result =
   let cat = get_string_opt args "category" in
   let json = Env_config_introspect.to_json_filtered ?cat () in
-  text_ok ~tool_name ~start_time (Yojson.Safe.to_string json)
+  Tool_result.make_ok ~tool_name ~start_time ~data:json ()
 ;;

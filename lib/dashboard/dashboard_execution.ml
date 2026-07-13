@@ -46,11 +46,7 @@ let messages_safe config =
 let assoc_upsert fields key value = (key, value) :: List.remove_assoc key fields
 
 let compact_keeper_trust_json ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_meta) =
-  let runtime_trust =
-    if Keeper_fd_pressure.active ()
-    then Keeper_fd_pressure.degraded_trust_json ()
-    else Keeper_runtime_trust_snapshot.summary_json ~config ~meta
-  in
+  let runtime_trust = Keeper_runtime_trust_snapshot.summary_json ~config ~meta in
   let member key = Option.value ~default:`Null (Json_util.assoc_member_opt key runtime_trust) in
   `Assoc
     [ "disposition", member "disposition"

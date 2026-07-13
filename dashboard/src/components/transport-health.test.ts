@@ -533,7 +533,7 @@ describe('shouldRefreshFromEvent', () => {
     [{ type: 'keeper_state_changed' }, true],
     [{ type: 'masc/keeper_offline' }, true],
     [{ type: 'decision_created' }, true],
-    [{ type: 'governance_param_changed' }, true],
+    [{ type: 'runtime_param_changed' }, true],
     [{ type: 'client_input_received' }, true],
     [{ type: 'unknown_type' }, false],
   ] as const)('shouldRefreshFromEvent(%o) → %s', (event, expected) => {

@@ -1,4 +1,4 @@
-// MASC Dashboard — Goals projections (goal tree + detail + verification).
+// MASC Dashboard — Goals projections (goal tree + detail).
 // Extracted from dashboard.ts (domain split). Public symbols re-exported
 // from dashboard.ts so existing consumers (`from './api/dashboard'`) are unchanged.
 
@@ -20,112 +20,7 @@ import type {
   GoalTreeNode,
   GoalTreeSummary,
   GoalTreeTask,
-  GoalVerificationRequest,
-  GoalVerificationSummary,
-  GoalVerificationVote,
 } from '../types'
-
-function decodeGoalVerificationPrincipal(
-  raw: unknown,
-): GoalVerificationRequest['requested_by'] | null {
-  if (!isRecord(raw)) return null
-  const id = asString(raw.id)
-  if (!id) return null
-  return {
-    id,
-    display_name: asNullableString(raw.display_name),
-  }
-}
-
-function decodeGoalVerificationPolicySnapshot(
-  raw: unknown,
-): GoalVerificationRequest['policy_snapshot'] | null {
-  if (!isRecord(raw)) return null
-  const principals = asRecordArray(raw.principals)
-    .map(decodeGoalVerificationPrincipal)
-    .filter(
-      (
-        principal,
-      ): principal is NonNullable<GoalVerificationRequest['policy_snapshot']>['principals'][number] =>
-        principal !== null,
-    )
-  const eligiblePrincipals = asRecordArray(raw.eligible_principals)
-    .map(decodeGoalVerificationPrincipal)
-    .filter(
-      (
-        principal,
-      ): principal is NonNullable<GoalVerificationRequest['policy_snapshot']>['eligible_principals'][number] =>
-        principal !== null,
-    )
-  return {
-    principals,
-    eligible_principals: eligiblePrincipals,
-    required_verdicts: asInt(raw.required_verdicts) ?? 0,
-  }
-}
-
-function decodeGoalVerificationVote(raw: unknown): GoalVerificationVote | null {
-  if (!isRecord(raw)) return null
-  const principal = decodeGoalVerificationPrincipal(raw.principal)
-  const decision = asString(raw.decision)
-  const submittedAt = asString(raw.submitted_at)
-  if (!principal || !decision || !submittedAt) return null
-  return {
-    principal,
-    decision,
-    note: asNullableString(raw.note),
-    evidence_refs: asStringArray(raw.evidence_refs),
-    submitted_at: submittedAt,
-  }
-}
-
-function decodeGoalVerificationRequest(raw: unknown): GoalVerificationRequest | null {
-  if (!isRecord(raw)) return null
-  const id = asString(raw.id)
-  const goalId = asString(raw.goal_id)
-  const targetPhase = asString(raw.target_phase)
-  const requestedBy = decodeGoalVerificationPrincipal(raw.requested_by)
-  const policySnapshot = decodeGoalVerificationPolicySnapshot(raw.policy_snapshot)
-  const status = asString(raw.status)
-  const createdAt = asString(raw.created_at)
-  if (!id || !goalId || !targetPhase || !requestedBy || !policySnapshot || !status || !createdAt) {
-    return null
-  }
-  return {
-    id,
-    goal_id: goalId,
-    target_phase: targetPhase,
-    requested_by: requestedBy,
-    policy_snapshot: policySnapshot,
-    votes: asRecordArray(raw.votes)
-      .map(decodeGoalVerificationVote)
-      .filter((vote): vote is GoalVerificationVote => vote !== null),
-    status,
-    created_at: createdAt,
-    resolved_at: asNullableString(raw.resolved_at),
-  }
-}
-
-function decodeGoalVerificationSummary(raw: unknown): GoalVerificationSummary {
-  if (!isRecord(raw)) {
-    return {
-      effective_policy: null,
-      open_request: null,
-      latest_request: null,
-      approve_count: 0,
-      reject_count: 0,
-      remaining_possible: 0,
-    }
-  }
-  return {
-    effective_policy: decodeGoalVerificationPolicySnapshot(raw.effective_policy),
-    open_request: decodeGoalVerificationRequest(raw.open_request),
-    latest_request: decodeGoalVerificationRequest(raw.latest_request),
-    approve_count: asInt(raw.approve_count) ?? 0,
-    reject_count: asInt(raw.reject_count) ?? 0,
-    remaining_possible: asInt(raw.remaining_possible) ?? 0,
-  }
-}
 
 function decodeGoalTreeTask(raw: unknown): GoalTreeTask | null {
   if (!isRecord(raw)) return null
@@ -155,7 +50,6 @@ function decodeGoalFsmProjection(raw: unknown, phase: string) {
       source: 'goal.phase',
       next_actions: [],
       activity_observation: 'goal_metadata',
-      stagnation_status: 'recent',
     }
   }
   const state = asString(raw.state, phase)
@@ -164,7 +58,6 @@ function decodeGoalFsmProjection(raw: unknown, phase: string) {
     source: asString(raw.source, 'goal.phase'),
     next_actions: asStringArray(raw.next_actions),
     activity_observation: asString(raw.activity_observation, 'goal_metadata'),
-    stagnation_status: asString(raw.stagnation_status, 'recent'),
   }
 }
 
@@ -222,7 +115,7 @@ function decodeGoalKeeperTrustExecutionSummary(raw: unknown): GoalKeeperTrustExe
     runtime_outcome: asNullableString(raw.runtime_outcome),
     sandbox_summary: asNullableString(raw.sandbox_summary),
     sandbox_root: asNullableString(raw.sandbox_root),
-    mutation_guard_summary: asNullableString(raw.mutation_guard_summary),
+    completion_observation_summary: asNullableString(raw.completion_observation_summary),
     latest_receipt_at: asNullableString(raw.latest_receipt_at),
   }
 }
@@ -230,6 +123,8 @@ function decodeGoalKeeperTrustExecutionSummary(raw: unknown): GoalKeeperTrustExe
 function decodeGoalKeeperTrustSummary(raw: unknown): GoalKeeperTrustSummary | null {
   if (!isRecord(raw)) return null
   return {
+    snapshot_status: asNullableString(raw.snapshot_status),
+    snapshot_error: asNullableString(raw.snapshot_error),
     disposition: asNullableString(raw.disposition),
     disposition_reason: asNullableString(raw.disposition_reason),
     operator_disposition: asNullableString(raw.operator_disposition),
@@ -350,12 +245,6 @@ function decodeGoalCompletionSummary(raw: unknown): GoalCompletionSummary | unde
     is_complete: asBoolean(raw.is_complete) ?? false,
     is_terminal: asBoolean(raw.is_terminal) ?? false,
     ready_to_request_completion: asBoolean(raw.ready_to_request_completion) ?? false,
-    gate: asString(raw.gate, 'none'),
-    requires_verifier: asBoolean(raw.requires_verifier) ?? false,
-    requires_completion_approval: asBoolean(raw.requires_completion_approval) ?? false,
-    active_verification_request: asBoolean(raw.active_verification_request) ?? false,
-    blocking_source: asString(raw.blocking_source, 'none'),
-    blocking_reason: asString(raw.blocking_reason, ''),
   }
 }
 
@@ -381,7 +270,6 @@ function decodeGoalTreeNode(raw: unknown): GoalTreeNode | null {
     taskDoneCount,
     taskCount,
   })
-  const verificationSummary = decodeGoalVerificationSummary(raw.verification_summary)
   return {
     id,
     title,
@@ -390,18 +278,11 @@ function decodeGoalTreeNode(raw: unknown): GoalTreeNode | null {
     phase: asString(raw.phase, 'unknown'),
     phase_color: asString(raw.phase_color, ''),
     goal_fsm: decodeGoalFsmProjection(raw.goal_fsm, asString(raw.phase, 'unknown')),
-    health: asString(raw.health, 'at_risk'),
-    health_color: asString(raw.health_color, ''),
-    badges: asStringArray(raw.badges),
-    status_reason: asString(raw.status_reason, ''),
     priority: asInt(raw.priority) ?? 0,
     metric,
     target_value: targetValue,
-    require_completion_approval: asBoolean(raw.require_completion_approval) ?? false,
     due_date: asNullableString(raw.due_date),
     parent_goal_id: asNullableString(raw.parent_goal_id),
-    convergence: asNumber(raw.convergence, 0),
-    convergence_pct: asInt(raw.convergence_pct) ?? 0,
     attainment,
     tasks,
     task_count: taskCount,
@@ -412,27 +293,17 @@ function decodeGoalTreeNode(raw: unknown): GoalTreeNode | null {
       tasks,
     }),
     completion_summary: decodeGoalCompletionSummary(raw.completion_summary),
-    verification_summary: verificationSummary,
-    effective_verifier_policy: decodeGoalVerificationPolicySnapshot(raw.effective_verifier_policy),
-    active_verification_request: decodeGoalVerificationRequest(raw.active_verification_request),
-    pending_verification_count: asInt(raw.pending_verification_count) ?? 0,
     timeline_events: Array.isArray(raw.timeline_events) ? raw.timeline_events : [],
     children,
     child_count: asInt(raw.child_count) ?? children.length,
     last_activity_at: asString(raw.last_activity_at, ''),
-    stagnation_seconds: asInt(raw.stagnation_seconds) ?? 0,
+    stagnation_seconds: asInt(raw.stagnation_seconds) ?? null,
     activity_observation: asString(raw.activity_observation, 'goal_metadata'),
-    stagnation_status: asString(raw.stagnation_status, 'recent'),
     linked_keeper_names: asStringArray(raw.linked_keeper_names),
     pending_approval_count: asInt(raw.pending_approval_count) ?? 0,
-    infra_risk_count: asInt(raw.infra_risk_count) ?? 0,
     linkage_source: asString(raw.linkage_source, 'none'),
-    linkage_warning_count: asInt(raw.linkage_warning_count) ?? 0,
-    blocking_source: asString(raw.blocking_source, 'none'),
-    blocking_reason: asString(raw.blocking_reason, ''),
     latest_keeper_ref: asNullableString(raw.latest_keeper_ref),
     latest_turn_ref: asInt(raw.latest_turn_ref) ?? null,
-    stalled_since: asNullableString(raw.stalled_since),
     created_at: asString(raw.created_at, ''),
     updated_at: asString(raw.updated_at, ''),
   }
@@ -443,33 +314,19 @@ function decodeGoalTreeSummary(raw: unknown): GoalTreeSummary {
     return {
       total_goals: 0,
       active_goals: 0,
-      done_goals: 0,
-      on_track_goals: 0,
-      paused_goals: 0,
-      at_risk_goals: 0,
-      blocked_goals: 0,
+      phase_counts: {},
       total_tasks: 0,
       done_tasks: 0,
       pending_approvals: 0,
-      infra_risk_count: 0,
-      overall_convergence: 0,
-      overall_convergence_pct: 0,
     }
   }
   return {
     total_goals: asInt(raw.total_goals) ?? 0,
     active_goals: asInt(raw.active_goals) ?? 0,
-    on_track_goals: asInt(raw.on_track_goals) ?? 0,
-    done_goals: asInt(raw.done_goals) ?? 0,
-    paused_goals: asInt(raw.paused_goals) ?? 0,
-    at_risk_goals: asInt(raw.at_risk_goals) ?? 0,
-    blocked_goals: asInt(raw.blocked_goals) ?? 0,
+    phase_counts: decodeNumberRecord(raw.phase_counts),
     total_tasks: asInt(raw.total_tasks) ?? 0,
     done_tasks: asInt(raw.done_tasks) ?? 0,
     pending_approvals: asInt(raw.pending_approvals) ?? 0,
-    infra_risk_count: asInt(raw.infra_risk_count) ?? 0,
-    overall_convergence: asNumber(raw.overall_convergence, 0),
-    overall_convergence_pct: asInt(raw.overall_convergence_pct) ?? 0,
   }
 }
 

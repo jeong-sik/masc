@@ -75,10 +75,10 @@ PATTERNS: tuple[PatternSpec, ...] = (
         "Keeper credential archived because of starvation recovery.",
     ),
     PatternSpec(
-        "governance_unparseable",
-        r"Governance judge returned unparseable",
+        "structured_judge_unparseable",
+        r"judge returned (?:unparseable structured|structurally invalid) response",
         "warning",
-        "Governance judge response was unparseable.",
+        "Structured judge response was unparseable.",
     ),
     PatternSpec(
         "utf8_repair",

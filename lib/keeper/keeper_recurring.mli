@@ -21,7 +21,6 @@ type recurring_task = {
   mutable last_run_ts : float;
   mutable run_count : int;
   mutable failure_count : int;
-  max_failures : int;      (** Auto-disable after this many consecutive failures, 0 = unlimited *)
   mutable enabled : bool;
 }
 
@@ -33,7 +32,6 @@ val add :
   keeper_name:string ->
   label:string ->
   interval_sec:int ->
-  ?max_failures:int ->
   action ->
   recurring_task
 
@@ -54,21 +52,6 @@ val dispatch_due :
   keeper_name:string ->
   now_ts:float ->
   dispatch:(recurring_task -> action -> (unit, string) result) ->
-  int
-
-(** Re-enable disabled recurring tasks for [keeper_name] whose
-    [last_run_ts] is older than [2 * interval_sec].
-
-    Tasks are auto-disabled by [dispatch_due] after [max_failures]
-    consecutive failures; without periodic re-enable, the keeper's
-    heartbeat broadcasts go silent permanently and dependent
-    keepers eventually stale-kill the entire fleet.
-
-    Returns the number of tasks re-enabled this call.  Should be
-    invoked from the keeper heartbeat tick before [dispatch_due]. *)
-val reenable_due_tasks :
-  keeper_name:string ->
-  now_ts:float ->
   int
 
 (** Serialize a task to JSON. *)

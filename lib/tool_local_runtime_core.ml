@@ -17,12 +17,19 @@ module Float = Stdlib.Float
 
 (** Tool_local_runtime core — types, helpers, process discovery, model fetching. *)
 
+type tool_result = Tool_result.result
+
+type external_effect_authorizer =
+  operation:string ->
+  input:Yojson.Safe.t ->
+  continue:(unit -> tool_result) ->
+  tool_result
+
 type context = {
   config : Workspace.config;
   agent_name : string;
+  authorize_external_effect : external_effect_authorizer option;
 }
-
-type tool_result = Tool_result.result
 
 type llama_process = {
   pid : int option;

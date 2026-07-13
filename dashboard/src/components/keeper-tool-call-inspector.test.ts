@@ -89,20 +89,7 @@ describe('blobMarkerOfOutput', () => {
   })
 })
 
-describe('deriveKeeperToolCallDossier semantic outcome', () => {
-  it('counts a transport-ok but semantic-fail call as failed', () => {
-    const dossier = deriveKeeperToolCallDossier(
-      [toolCall({ success: true, semantic_success: false, semantic_outcome: 'blocked' })],
-      null,
-    )
-    expect(dossier.headline).toBe('1 failed / 1')
-    expect(dossier.tone).toBe('bad')
-    const latest = dossier.cards.find(c => c.key === 'latest')
-    // The latest card surfaces the failure mode, not a bare 'ok'/'failed'.
-    expect(latest?.detail).toContain('blocked')
-    expect(latest?.tone).toBe('bad')
-  })
-
+describe('deriveKeeperToolCallDossier outcome', () => {
   it('keeps a clean call clean and falls back to transport success', () => {
     const dossier = deriveKeeperToolCallDossier(
       [toolCall({ success: true })],

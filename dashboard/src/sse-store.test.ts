@@ -188,11 +188,11 @@ describe('setupSSEReaction reconnect hydration', () => {
     cleanup()
   })
 
-  it('refreshes the governance approval queue on reconnect (nav-rail badge recovery)', async () => {
+  it('refreshes the Gate approval queue on reconnect (nav-rail badge recovery)', async () => {
     const { sseStore, sse } = await loadSseStore()
     const cleanup = sseStore.setupSSEReaction()
-    const refreshGovernance = vi.fn<(opts?: { force?: boolean }) => void>()
-    sseStore.registerGovernanceRefresh(refreshGovernance)
+    const refreshGate = vi.fn<(opts?: { force?: boolean }) => void>()
+    sseStore.registerGateRefresh(refreshGate)
 
     sse.connected.value = true
     sse.lastDisconnectedAt.value = Date.now() - 1_000
@@ -200,8 +200,8 @@ describe('setupSSEReaction reconnect hydration', () => {
     await flushAsyncWork()
 
     // Approvals can arrive/resolve during a disconnect; the always-visible
-    // badge must recover them on reconnect, not only on the governance surface.
-    expect(refreshGovernance).toHaveBeenCalled()
+    // badge must recover them on reconnect, not only on the Gate surface.
+    expect(refreshGate).toHaveBeenCalled()
 
     vi.clearAllTimers()
     cleanup()
@@ -250,13 +250,13 @@ describe('setupSSEReaction reconnect hydration', () => {
     consoleWarn.mockRestore()
   })
 
-  it('routes an approval:pending SSE event to the governance refresh (HITL badge contract)', async () => {
+  it('routes an approval:pending SSE event to the Gate refresh (HITL badge contract)', async () => {
     const { sseStore } = await loadSseStore()
-    const refreshGovernance = vi.fn<(opts?: { force?: boolean }) => void>()
-    sseStore.registerGovernanceRefresh(refreshGovernance)
+    const refreshGate = vi.fn<(opts?: { force?: boolean }) => void>()
+    sseStore.registerGateRefresh(refreshGate)
 
     // Pins the FRONTEND routing contract: an `approval:pending` event must
-    // reach the governance refresh (and thus the nav-rail/topbar badge). This
+    // reach the Gate refresh (and thus the nav-rail/topbar badge). This
     // asserts only the FE literal — the cross-boundary pin that also fails when
     // the backend (keeper_approval_queue.ml) renames the emitted string lives
     // in sse-approval-event-drift.test.ts.
@@ -264,7 +264,7 @@ describe('setupSSEReaction reconnect hydration', () => {
     vi.advanceTimersByTime(1_000)
     await flushAsyncWork()
 
-    expect(refreshGovernance).toHaveBeenCalledWith({ force: true })
+    expect(refreshGate).toHaveBeenCalledWith({ force: true })
   })
 
   it('hydrates the canonical project_snapshot SSE event without an HTTP fetch', async () => {

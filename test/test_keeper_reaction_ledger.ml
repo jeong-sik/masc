@@ -32,16 +32,6 @@ let board_stimulus ?(post_id = "post-42") ?updated_at () :
   }
 ;;
 
-let no_progress_recovery_stimulus ?(keeper_name = "no-progress-keeper") () :
-  Keeper_event_queue.stimulus
-  =
-  { post_id = "no-progress-loop:" ^ keeper_name
-  ; urgency = Immediate
-  ; arrived_at = 1234.5
-  ; payload = Keeper_event_queue.No_progress_recovery
-  }
-;;
-
 let fusion_completed_stimulus ?(run_id = "fus-ledger-1") () :
   Keeper_event_queue.stimulus
   =
@@ -279,7 +269,7 @@ let test_event_queue_reaction_evidence_matches_exact_stimulus_id () =
   check int "missing exact rows" 0 missing.matched_record_count
 ;;
 
-let test_failure_judgment_operator_attention_is_typed_and_visible () =
+let test_failure_judgment_external_input_is_typed_history () =
   with_temp_base @@ fun base_path ->
   let keeper_name = "judgment-attention-keeper" in
   let stimulus = failure_judgment_stimulus () in
@@ -288,9 +278,9 @@ let test_failure_judgment_operator_attention_is_typed_and_visible () =
       ~settlement:
         (Keeper_event_queue_state.Escalate
            { reason =
-               Keeper_event_queue_state.Failure_judgment_operator_required
+               Keeper_event_queue_state.Failure_judgment_external_input_requested
                  { judge_runtime_id = "opaque-judge-runtime"
-                 ; rationale = "Operator-owned configuration must change."
+                 ; rationale = "Required external input is unavailable."
                  }
            ; successor = None
            })
@@ -306,15 +296,15 @@ let test_failure_judgment_operator_attention_is_typed_and_visible () =
     ~reaction_kind:Keeper_reaction_ledger.Event_queue_escalated
     ~receipt
     stimulus
-  |> require_ok "record operator-required judgment transition";
+  |> require_ok "record external-input judgment transition";
   let summary =
     Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
   in
-  check_member_string "operator-required judgment degrades" "degraded" "status" summary;
-  check bool "operator-required judgment requires action" true
+  check_member_string "resolved judgment is historical" "ok" "status" summary;
+  check bool "historical judgment is not current action" false
     (summary |> member "operator_action_required" |> to_bool);
-  check int "terminal judgment attention counted" 1
-    (summary |> member "event_queue_operator_attention_count" |> to_int);
+  check int "external-input judgment counted" 1
+    (summary |> member "event_queue_external_input_count" |> to_int);
   check int "typed transition receipt parsed" 0
     (summary |> member "event_queue_transition_parse_error_count" |> to_int);
   let fleet =
@@ -323,14 +313,12 @@ let test_failure_judgment_operator_attention_is_typed_and_visible () =
       ~keeper_names:[ keeper_name ]
       ~limit_per_keeper:10
   in
-  check bool "fleet judgment attention requires action" true
+  check bool "fleet history is not current action" false
     (fleet |> member "operator_action_required" |> to_bool);
-  check int "fleet judgment attention counted" 1
-    (fleet |> member "event_queue_operator_attention_count" |> to_int);
-  check_list_has_string
-    "fleet explains judgment attention"
-    "event_queue_operator_attention"
-    (fleet |> member "status_reasons")
+  check int "fleet external-input history counted" 1
+    (fleet |> member "event_queue_external_input_count" |> to_int);
+  check (list string) "fleet has no false current reason" []
+    (fleet |> member "status_reasons" |> to_list |> List.map to_string)
 ;;
 
 let test_cursor_ack_is_replayable_state_entry () =
@@ -364,7 +352,7 @@ let test_execution_receipt_links_to_reaction_ledger () =
       [ "schema", `String "keeper.execution_receipt.v1"
       ; "trace_id", `String "trace-1"
       ; "outcome", `String "receipt_failed"
-      ; "terminal_reason_code", `String "completion_contract_violation"
+      ; "terminal_reason_code", `String "provider_error"
       ]
   in
   Keeper_reaction_ledger.record_execution_receipt_reaction
@@ -376,7 +364,7 @@ let test_execution_receipt_links_to_reaction_ledger () =
     ~goal_ids:[ "goal-world-reactivity-p0-20260517" ]
     ~outcome:"receipt_failed"
     ~reaction_kind:Keeper_reaction_ledger.Terminal_reason
-    ~terminal_reason_code:"completion_contract_violation"
+    ~terminal_reason_code:"provider_error"
     ~receipt_json
     ();
   let row =
@@ -389,7 +377,7 @@ let test_execution_receipt_links_to_reaction_ledger () =
   check_member_string "terminal reaction kind" "terminal_reason" "kind" reaction;
   check_member_string
     "terminal reason"
-    "completion_contract_violation"
+    "provider_error"
     "terminal_reason_code"
     reaction;
   check_member_string
@@ -399,10 +387,10 @@ let test_execution_receipt_links_to_reaction_ledger () =
     (reaction |> member "receipt")
 ;;
 
-let test_summary_observes_passive_only_without_attention () =
+let test_summary_observes_completion_evidence_without_attention () =
   with_temp_base @@ fun base_path ->
   let config = Workspace.default_config base_path in
-  let keeper_name = "contract-attention-keeper" in
+  let keeper_name = "completion-observation-keeper" in
   let record ?(terminal_reason_code = "success") ?current_task_id
         ~trace_id ~completion_contract_result () =
     let receipt_json =
@@ -411,8 +399,8 @@ let test_summary_observes_passive_only_without_attention () =
         ; "trace_id", `String trace_id
         ; "outcome", `String "receipt_done"
         ; "terminal_reason_code", `String terminal_reason_code
-        ; "operator_disposition", `String "pause_human"
-        ; "operator_disposition_reason", `String "completion_contract_unsatisfied"
+        ; "operator_disposition", `String "pass"
+        ; "operator_disposition_reason", `String "healthy"
         ; "completion_contract_result", `String completion_contract_result
         ]
     in
@@ -430,41 +418,30 @@ let test_summary_observes_passive_only_without_attention () =
       ()
   in
   record
-    ~trace_id:"trace-passive-1"
-    ~current_task_id:"task-passive-1"
-    ~completion_contract_result:"passive_only"
+    ~trace_id:"trace-no-output-1"
+    ~current_task_id:"task-no-output-1"
+    ~completion_contract_result:"no_visible_output"
     ();
   record
-    ~trace_id:"trace-passive-2"
-    ~current_task_id:"task-passive-2"
-    ~completion_contract_result:"passive_only"
+    ~trace_id:"trace-no-output-2"
+    ~current_task_id:"task-no-output-2"
+    ~completion_contract_result:"no_visible_output"
     ();
   record
-    ~trace_id:"trace-satisfied"
-    ~current_task_id:"task-satisfied"
-    ~completion_contract_result:"satisfied_execution"
-    ();
-  record
-    ~trace_id:"trace-violated"
-    ~current_task_id:"task-violated"
-    ~completion_contract_result:"violated"
+    ~trace_id:"trace-tool-observed"
+    ~current_task_id:"task-tool-observed"
+    ~completion_contract_result:"tool_execution_observed"
     ();
   let summary =
     Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
   in
   check_member_string "contract summary remains mechanically ok" "ok" "status" summary;
-  check int "completion contract attention count" 1
-    (summary |> member "completion_contract_attention_count" |> to_int);
-  check int "passive-only observation count" 2
-    (summary |> member "completion_contract_passive_only_count" |> to_int);
-  check string "latest contract attention" "violated"
-    (summary |> member "latest_completion_contract_attention" |> to_string);
   let result_count =
-    match result_count_by_label summary "passive_only" with
+    match result_count_by_label summary "no_visible_output" with
     | Some value -> value
-    | None -> fail "passive_only observation count missing"
+    | None -> fail "no_visible_output observation count missing"
   in
-  check_member_string "contract result label" "passive_only" "result" result_count;
+  check_member_string "observation result label" "no_visible_output" "result" result_count;
   check int "contract result count" 2 (result_count |> member "count" |> to_int);
   let fleet =
     Keeper_reaction_ledger.fleet_summary_json
@@ -472,23 +449,9 @@ let test_summary_observes_passive_only_without_attention () =
       ~keeper_names:[ keeper_name ]
       ~limit_per_keeper:10
   in
-  check int "fleet contract attention count" 1
-    (fleet |> member "completion_contract_attention_count" |> to_int);
-  check int "fleet passive-only observation count" 2
-    (fleet |> member "completion_contract_passive_only_count" |> to_int);
-  let keeper_attention =
-    fleet
-    |> member "completion_contract_attention_by_keeper"
-    |> to_list
-    |> List.hd
-  in
-  check_member_string
-    "fleet contract attention keeper"
-    keeper_name
-    "keeper_name"
-    keeper_attention;
-  check int "fleet keeper contract attention count" 1
-    (keeper_attention |> member "completion_contract_attention_count" |> to_int)
+  check_member_string "fleet observations remain healthy" "ok" "status" fleet;
+  check bool "fleet observations require no operator action" false
+    (fleet |> member "operator_action_required" |> to_bool)
 ;;
 
 let test_summary_degrades_unknown_completion_contract_result () =
@@ -523,20 +486,18 @@ let test_summary_degrades_unknown_completion_contract_result () =
   record ~trace_id:"trace-unknown" ~completion_contract_result:"passive-only" ();
   record
     ~trace_id:"trace-satisfied"
-    ~completion_contract_result:"satisfied_execution"
+    ~completion_contract_result:"tool_execution_observed"
     ();
   let summary =
     Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
   in
   check_member_string
-    "unknown contract result degrades summary"
-    "degraded"
+    "unknown completion observation remains informational"
+    "ok"
     "status"
     summary;
-  check bool "unknown contract result requires operator action" true
+  check bool "unknown completion observation requires no operator action" false
     (summary |> member "operator_action_required" |> to_bool);
-  check int "unknown contract result is not attention" 0
-    (summary |> member "completion_contract_attention_count" |> to_int);
   check int "unknown contract result counted" 1
     (summary |> member "completion_contract_unknown_result_count" |> to_int);
   check int "unknown contract result does not use reaction bucket" 0
@@ -557,9 +518,9 @@ let test_summary_degrades_unknown_completion_contract_result () =
       ~keeper_names:[ keeper_name ]
       ~limit_per_keeper:10
   in
-  check_member_string "fleet unknown contract result degrades" "degraded" "status"
+  check_member_string "fleet unknown observation remains healthy" "ok" "status"
     fleet;
-  check bool "fleet unknown contract result requires operator action" true
+  check bool "fleet unknown observation requires no operator action" false
     (fleet |> member "operator_action_required" |> to_bool);
   check int "fleet unknown contract result counted" 1
     (fleet |> member "completion_contract_unknown_result_count" |> to_int);
@@ -581,20 +542,15 @@ let test_summary_degrades_unknown_completion_contract_result () =
 let test_completion_contract_result_canonical_roundtrip () =
   let module Receipt = Keeper_execution_receipt_types in
   let cases =
-    [ Receipt.Contract_unknown, false
-    ; Receipt.Contract_not_dispatched, false
-    ; Receipt.Contract_violated, true
-    ; Receipt.Contract_surface_mismatch, true
-    ; Receipt.Contract_no_capable_provider, true
-    ; Receipt.Contract_claim_only_after_owned_task, true
-    ; Receipt.Contract_needs_execution_progress, true
-    ; Receipt.Contract_passive_only, false
-    ; Receipt.Contract_satisfied_completion, false
-    ; Receipt.Contract_satisfied_execution, false
+    [ Receipt.Completion_observation_unknown
+    ; Receipt.Completion_not_dispatched
+    ; Receipt.Completion_no_visible_output
+    ; Receipt.Completion_response_observed
+    ; Receipt.Completion_tool_execution_observed
     ]
   in
   List.iter
-    (fun (result, requires_attention) ->
+    (fun result ->
        let label = Receipt.completion_contract_result_to_string result in
        let parsed_label =
          Receipt.completion_contract_result_of_string label
@@ -604,70 +560,14 @@ let test_completion_contract_result_canonical_roundtrip () =
          (option string)
          ("completion-contract parser roundtrip: " ^ label)
          (Some label)
-         parsed_label;
-       check
-         bool
-         ("completion-contract attention classification: " ^ label)
-         requires_attention
-         (Receipt.completion_contract_result_requires_attention result))
+         parsed_label)
     cases;
   check
     (option string)
-    "completion-contract parser rejects prose drift"
+    "completion observation parser rejects retired heuristic label"
     None
-    (Receipt.completion_contract_result_of_string "passive-only"
+    (Receipt.completion_contract_result_of_string "retired_policy_label"
      |> Option.map Receipt.completion_contract_result_to_string)
-;;
-
-let test_summary_observes_passive_only_without_work_scope_attention () =
-  with_temp_base @@ fun base_path ->
-  let config = Workspace.default_config base_path in
-  let keeper_name = "passive-no-work-keeper" in
-  let receipt_json =
-    `Assoc
-      [ "schema", `String "keeper.execution_receipt.v1"
-      ; "trace_id", `String "trace-passive-no-work"
-      ; "outcome", `String "receipt_done"
-      ; "terminal_reason_code", `String "success"
-      ; "operator_disposition", `String "pass"
-      ; "operator_disposition_reason", `String "healthy"
-      ; "completion_contract_result", `String "passive_only"
-      ]
-  in
-  Keeper_reaction_ledger.record_execution_receipt_reaction
-    config
-    ~keeper_name
-    ~trace_id:"trace-passive-no-work"
-    ~turn_count:1
-    ~current_task_id:None
-    ~goal_ids:[]
-    ~outcome:"receipt_done"
-    ~reaction_kind:Keeper_reaction_ledger.Execution_receipt
-    ~terminal_reason_code:"success"
-    ~receipt_json
-    ();
-  let summary =
-    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
-  in
-  check int "passive-only no-work attention not counted" 0
-    (summary |> member "completion_contract_attention_count" |> to_int);
-  check int "passive-only no-work observation counted" 1
-    (summary |> member "completion_contract_passive_only_count" |> to_int);
-  check
-    string
-    "passive-only no-work summary remains ok"
-    "ok"
-    (summary |> member "status" |> to_string);
-  let fleet =
-    Keeper_reaction_ledger.fleet_summary_json
-      ~base_path
-      ~keeper_names:[ keeper_name ]
-      ~limit_per_keeper:10
-  in
-  check int "fleet passive-only no-work attention not counted" 0
-    (fleet |> member "completion_contract_attention_count" |> to_int);
-  check int "fleet passive-only no-work observation counted" 1
-    (fleet |> member "completion_contract_passive_only_count" |> to_int)
 ;;
 
 let test_summary_marks_unreacted_and_reacted_stimuli () =
@@ -787,236 +687,7 @@ let test_summary_cursor_ack_respects_post_id_tiebreaker () =
     (complete_summary |> member "pending_stimulus_count" |> to_int)
 ;;
 
-let test_no_progress_recovery_stimulus_is_typed () =
-  with_temp_base @@ fun base_path ->
-  let keeper_name = "no-progress-keeper" in
-  let stimulus = no_progress_recovery_stimulus ~keeper_name () in
-  Keeper_reaction_ledger.record_event_queue_stimulus
-    ~base_path
-    ~keeper_name
-    stimulus;
-  let row =
-    Keeper_reaction_ledger.read_recent_for_keeper ~base_path ~keeper_name ~limit:1
-    |> latest_row
-  in
-  check_member_string
-    "no-progress stimulus kind"
-    "no_progress_recovery"
-    "kind"
-    (row |> member "stimulus");
-  check string "stable stimulus prefix" "stimulus:"
-    (String.sub (row |> member "stimulus_id" |> to_string) 0 9)
-;;
-
-let test_no_progress_recovery_reaction_clears_pending () =
-  with_temp_base @@ fun base_path ->
-  let keeper_name = "no-progress-keeper" in
-  let stimulus = no_progress_recovery_stimulus ~keeper_name () in
-  Keeper_reaction_ledger.record_event_queue_stimulus
-    ~base_path
-    ~keeper_name
-    stimulus;
-  let pending_summary =
-    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
-  in
-  check_member_string "pending recovery summary status" "degraded" "status" pending_summary;
-  check int "recovery stimulus pending" 1
-    (pending_summary |> member "pending_stimulus_count" |> to_int);
-  check int "pending recovery stimulus kind counted" 1
-    (pending_summary |> member "pending_no_progress_recovery_count" |> to_int);
-  check int "pending recovery stimulus id surfaced" 1
-    (pending_summary
-     |> member "pending_no_progress_recovery_ids"
-     |> to_list
-     |> List.length);
-  Keeper_reaction_ledger.record_event_queue_reaction
-    ~base_path
-    ~keeper_name
-    ~reaction_kind:Keeper_reaction_ledger.Turn_started
-    stimulus;
-  let reacted_summary =
-    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
-  in
-  check_member_string "reacted recovery summary status" "ok" "status" reacted_summary;
-  check bool "reacted recovery needs no operator action" false
-    (reacted_summary |> member "operator_action_required" |> to_bool);
-  check int "recovery stimulus cleared" 0
-    (reacted_summary |> member "pending_stimulus_count" |> to_int);
-  check int "pending recovery stimulus kind cleared" 0
-    (reacted_summary |> member "pending_no_progress_recovery_count" |> to_int);
-  check int "turn-start reaction counted" 1
-    (reacted_summary |> member "turn_started_count" |> to_int)
-;;
-
-let test_no_progress_recovery_unrelated_reaction_does_not_clear_pending () =
-  with_temp_base @@ fun base_path ->
-  let config = Workspace.default_config base_path in
-  let keeper_name = "no-progress-unrelated-reaction-keeper" in
-  let stimulus = no_progress_recovery_stimulus ~keeper_name () in
-  Keeper_reaction_ledger.record_event_queue_stimulus
-    ~base_path
-    ~keeper_name
-    stimulus;
-  let pending_summary =
-    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
-  in
-  check_member_string "pending recovery summary status" "degraded" "status" pending_summary;
-  check int "recovery stimulus initially pending" 1
-    (pending_summary |> member "pending_no_progress_recovery_count" |> to_int);
-  let receipt_json =
-    `Assoc
-      [ "schema", `String "keeper.execution_receipt.v1"
-      ; "trace_id", `String "trace-later-reaction"
-      ; "outcome", `String "receipt_done"
-      ; "terminal_reason_code", `String "success"
-      ; "operator_disposition", `String "pass"
-      ; "operator_disposition_reason", `String "healthy"
-      ; "completion_contract_result", `String "satisfied_execution"
-      ]
-  in
-  Keeper_reaction_ledger.record_execution_receipt_reaction
-    config
-    ~keeper_name
-    ~trace_id:"trace-later-reaction"
-    ~turn_count:1
-    ~current_task_id:None
-    ~goal_ids:[]
-    ~outcome:"receipt_done"
-    ~reaction_kind:Keeper_reaction_ledger.Execution_receipt
-    ~terminal_reason_code:"success"
-    ~receipt_json
-    ();
-  let unrelated_reaction_summary =
-    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
-  in
-  check_member_string
-    "unrelated reaction recovery summary remains degraded"
-    "degraded"
-    "status"
-    unrelated_reaction_summary;
-  check bool "unrelated reaction recovery still needs operator action" true
-    (unrelated_reaction_summary |> member "operator_action_required" |> to_bool);
-  check int "unrelated reaction leaves recovery stimulus pending" 1
-    (unrelated_reaction_summary |> member "pending_stimulus_count" |> to_int);
-  check int "unrelated reaction leaves no-progress recovery kind pending" 1
-    (unrelated_reaction_summary |> member "pending_no_progress_recovery_count" |> to_int);
-  check int "execution receipt reaction still counted" 1
-    (unrelated_reaction_summary |> member "execution_receipt_count" |> to_int)
-;;
-
-let test_no_progress_recovery_cursor_ack_does_not_clear_pending () =
-  with_temp_base @@ fun base_path ->
-  let keeper_name = "no-progress-cursor-only-keeper" in
-  let stimulus = no_progress_recovery_stimulus ~keeper_name () in
-  Keeper_reaction_ledger.record_event_queue_stimulus
-    ~base_path
-    ~keeper_name
-    stimulus;
-  let pending_summary =
-    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
-  in
-  let stimulus_id =
-    pending_summary
-    |> member "pending_no_progress_recovery_ids"
-    |> to_list
-    |> List.hd
-    |> to_string
-  in
-  Keeper_reaction_ledger.record_board_cursor_ack
-    ~base_path
-    ~keeper_name
-    ~stimulus_id
-    ~cursor_ts:9999.0
-    ~post_id:(Some "cursor-only-post")
-    ();
-  let cursor_only_summary =
-    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
-  in
-  check_member_string
-    "cursor-only recovery summary remains degraded"
-    "degraded"
-    "status"
-    cursor_only_summary;
-  check bool "cursor-only recovery still needs operator action" true
-    (cursor_only_summary |> member "operator_action_required" |> to_bool);
-  check int "cursor-only recovery stimulus remains pending" 1
-    (cursor_only_summary |> member "pending_stimulus_count" |> to_int);
-  check int "cursor-only recovery kind remains pending" 1
-    (cursor_only_summary |> member "pending_no_progress_recovery_count" |> to_int);
-  check int "cursor ack still counted" 1
-    (cursor_only_summary |> member "cursor_ack_count" |> to_int);
-  check int "cursor ack does not sweep non-board recovery stimulus" 0
-    (cursor_only_summary |> member "cursor_swept_stimulus_count" |> to_int)
-;;
-
-let test_summary_links_passive_only_observation_to_pending_recovery () =
-  with_temp_base @@ fun base_path ->
-  let config = Workspace.default_config base_path in
-  let keeper_name = "passive-recovery-keeper" in
-  let receipt_json =
-    `Assoc
-      [ "schema", `String "keeper.execution_receipt.v1"
-      ; "trace_id", `String "trace-passive"
-      ; "outcome", `String "receipt_done"
-      ; "terminal_reason_code", `String "success"
-      ; "operator_disposition", `String "pause_human"
-      ; "operator_disposition_reason", `String "completion_contract_unsatisfied"
-      ; "completion_contract_result", `String "passive_only"
-      ]
-  in
-  Keeper_reaction_ledger.record_execution_receipt_reaction
-    config
-    ~keeper_name
-    ~trace_id:"trace-passive"
-    ~turn_count:1
-    ~current_task_id:(Some "task-passive")
-    ~goal_ids:[]
-    ~outcome:"receipt_done"
-    ~reaction_kind:Keeper_reaction_ledger.Terminal_reason
-    ~terminal_reason_code:"success"
-    ~receipt_json
-    ();
-  Keeper_reaction_ledger.record_event_queue_stimulus
-    ~base_path
-    ~keeper_name
-    (no_progress_recovery_stimulus ~keeper_name ());
-  let summary =
-    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
-  in
-  check int "passive-only observation counted" 1
-    (summary |> member "completion_contract_passive_only_count" |> to_int);
-  check int "passive-only does not count as attention" 0
-    (summary |> member "completion_contract_attention_count" |> to_int);
-  check int "pending no-progress recovery counted" 1
-    (summary |> member "pending_no_progress_recovery_count" |> to_int);
-  let fleet =
-    Keeper_reaction_ledger.fleet_summary_json
-      ~base_path
-      ~keeper_names:[ keeper_name ]
-      ~limit_per_keeper:10
-  in
-  check int "fleet passive-only observation counted" 1
-    (fleet |> member "completion_contract_passive_only_count" |> to_int);
-  check int "fleet passive-only does not count as attention" 0
-    (fleet |> member "completion_contract_attention_count" |> to_int);
-  check int "fleet pending no-progress recovery counted" 1
-    (fleet |> member "pending_no_progress_recovery_count" |> to_int);
-  let recovery_keeper =
-    fleet
-    |> member "pending_no_progress_recovery_by_keeper"
-    |> to_list
-    |> List.hd
-  in
-  check_member_string
-    "fleet pending recovery keeper"
-    keeper_name
-    "keeper_name"
-    recovery_keeper;
-  check int "fleet keeper pending recovery count" 1
-    (recovery_keeper |> member "pending_no_progress_recovery_count" |> to_int)
-;;
-
-let test_fleet_summary_surfaces_durable_event_queue_backlog () =
+ let test_fleet_summary_surfaces_durable_event_queue_backlog () =
   with_temp_base @@ fun base_path ->
   let keeper_name = "durable-backlog-keeper" in
   Keeper_registry_event_queue.enqueue
@@ -1026,7 +697,7 @@ let test_fleet_summary_surfaces_durable_event_queue_backlog () =
   Keeper_registry_event_queue.enqueue
     ~base_path
     keeper_name
-    (no_progress_recovery_stimulus ~keeper_name ());
+    (board_stimulus ~post_id:"post-live-backlog-2" ());
   Keeper_event_queue_persistence.record_inflight
     ~base_path
     ~keeper_name
@@ -1086,15 +757,7 @@ let test_fleet_summary_surfaces_durable_event_queue_backlog () =
     (List.exists
        (fun json ->
          String.equal (json |> member "payload_kind" |> to_string) "board_signal"
-         && json |> member "count" |> to_int = 1)
-       payload_counts);
-  check bool "no_progress_recovery durable payload count is surfaced" true
-    (List.exists
-       (fun json ->
-         String.equal
-           (json |> member "payload_kind" |> to_string)
-           "no_progress_recovery"
-         && json |> member "count" |> to_int = 1)
+         && json |> member "count" |> to_int = 2)
        payload_counts);
   check bool "inflight fusion_completed durable payload count is surfaced" true
     (List.exists
@@ -1360,7 +1023,7 @@ let test_unknown_reaction_degrades_summary () =
 
 (* RFC-0266 regression: a recorded [Fusion_completed] stimulus is a recognized
    closed-sum kind and must NOT be miscounted as an unsupported stimulus.  The
-   prior string whitelist ([board_signal]/[bootstrap]/[no_progress_recovery])
+   prior string whitelist
    dropped [fusion_completed] into [unsupported_stimulus_count], degrading the
    summary on every async fusion wake.  (We assert only the unsupported counter:
    with no reaction row the stimulus is still legitimately pending.) *)
@@ -1399,16 +1062,13 @@ let test_stimulus_kind_string_roundtrip () =
       check bool "stimulus_kind round-trips through string" true (roundtrips k))
     [ Keeper_reaction_ledger.Board_signal
     ; Keeper_reaction_ledger.Bootstrap
-    ; Keeper_reaction_ledger.No_progress_recovery
     ; Keeper_reaction_ledger.Fusion_completed
     ; Keeper_reaction_ledger.Bg_completed
     ; Keeper_reaction_ledger.Schedule_due
     ; Keeper_reaction_ledger.Connector_attention
     ; Keeper_reaction_ledger.Hitl_resolved
-    ; Keeper_reaction_ledger.Goal_verification_failed
     ; Keeper_reaction_ledger.Failure_judgment
     ; Keeper_reaction_ledger.Goal_assigned
-    ; Keeper_reaction_ledger.Goal_stagnation
     ];
   check bool "unknown stimulus kind string is None" true
     (Option.is_none (Keeper_reaction_ledger.stimulus_kind_of_string "totally_unknown"))
@@ -1456,9 +1116,9 @@ let () =
             `Quick
             test_event_queue_reaction_evidence_matches_exact_stimulus_id
         ; test_case
-            "failure judgment operator attention is typed and visible"
+            "failure judgment external input is typed history"
             `Quick
-            test_failure_judgment_operator_attention_is_typed_and_visible
+            test_failure_judgment_external_input_is_typed_history
         ; test_case
             "cursor ack is replayable state entry"
             `Quick
@@ -1468,21 +1128,17 @@ let () =
             `Quick
             test_execution_receipt_links_to_reaction_ledger
         ; test_case
-            "summary observes passive-only without attention"
+            "summary observes completion evidence without attention"
             `Quick
-            test_summary_observes_passive_only_without_attention
+            test_summary_observes_completion_evidence_without_attention
         ; test_case
-            "summary degrades unknown completion-contract result"
+            "summary observes unknown completion result without attention"
             `Quick
             test_summary_degrades_unknown_completion_contract_result
         ; test_case
-            "completion-contract parser and attention use canonical receipt type"
+            "completion observation parser uses canonical receipt type"
             `Quick
             test_completion_contract_result_canonical_roundtrip
-        ; test_case
-            "summary observes passive-only without work-scope attention"
-            `Quick
-            test_summary_observes_passive_only_without_work_scope_attention
         ; test_case
             "summary marks unreacted and reacted stimuli"
             `Quick
@@ -1495,26 +1151,6 @@ let () =
             "summary cursor ack respects board post id tiebreaker"
             `Quick
             test_summary_cursor_ack_respects_post_id_tiebreaker
-        ; test_case
-            "no-progress recovery stimulus is typed"
-            `Quick
-            test_no_progress_recovery_stimulus_is_typed
-        ; test_case
-            "no-progress recovery reaction clears pending"
-            `Quick
-            test_no_progress_recovery_reaction_clears_pending
-        ; test_case
-            "unrelated keeper reaction does not clear no-progress recovery pending"
-            `Quick
-            test_no_progress_recovery_unrelated_reaction_does_not_clear_pending
-        ; test_case
-            "cursor ack alone does not clear no-progress recovery pending"
-            `Quick
-            test_no_progress_recovery_cursor_ack_does_not_clear_pending
-        ; test_case
-            "summary links passive-only observation to pending recovery"
-            `Quick
-            test_summary_links_passive_only_observation_to_pending_recovery
         ; test_case
             "fleet summary surfaces durable event queue backlog"
             `Quick

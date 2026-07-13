@@ -39,17 +39,6 @@ export type ToolCallEntry = {
   // join this entry's output onto the transcript. Absent when the call carried
   // no provider id (synthesised tc-<position> rows) or on pre-PR-2 logs.
   tool_use_id?: string
-  // Parsed-output failure mode, distinct from the transport `success` above
-  // (keeper_tool_call_log.ml semantic_outcome_of_output): success / no_match /
-  // partial / blocked / timeout / runtime_error / policy_denied /
-  // structured_error / tool_failure. Left open-string for forward-compat — the
-  // backend can mint a new outcome ahead of the dashboard; the renderer maps
-  // known values and shows the raw label otherwise.
-  semantic_outcome?: string
-  // Whether the parsed output signals success. A call can be transport
-  // success=true while semantic_success=false (e.g. blocked/timeout), which the
-  // binary `success` flag alone renders as green/ok.
-  semantic_success?: boolean
   // Goal id(s) this call was attributed to (conditional on the row carrying
   // them), for goal-scoped drill-down alongside task_id/turn.
   goal_ids?: string[]
@@ -105,8 +94,6 @@ function decodeToolCallEntry(raw: unknown): ToolCallEntry | null {
     lane: asString(raw.lane),
     execution_id: asString(raw.execution_id),
     tool_use_id: asString(raw.tool_use_id),
-    semantic_outcome: asString(raw.semantic_outcome),
-    semantic_success: asBoolean(raw.semantic_success),
     goal_ids: asStringArray(raw.goal_ids),
   }
 }

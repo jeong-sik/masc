@@ -31,12 +31,10 @@ type failure_reason =
       detail : string;
     }
   | Failure_provider_error of { kind : string; detail : string }
-  | Failure_completion_contract_violation of { reason_code : string }
   | Failure_receipt_lost of {
       primary_error : string;
       fallback_path : string option;
     }
-  | Failure_turn_livelock_blocked of { reason : string }
   | Failure_runtime_error of string
   | Failure_unexpected_exception of {
       exn : string;
@@ -104,9 +102,7 @@ let failure_reason_label = function
   | Failure_runtime_unavailable _ -> "runtime_unavailable"
   | Failure_no_capable_provider _ -> "no_capable_provider"
   | Failure_provider_error _ -> "provider_error"
-  | Failure_completion_contract_violation _ -> "completion_contract_violation"
   | Failure_receipt_lost _ -> "receipt_lost"
-  | Failure_turn_livelock_blocked _ -> "turn_livelock_blocked"
   | Failure_runtime_error _ -> "runtime_error"
   | Failure_unexpected_exception _ -> "unexpected_exception"
 
@@ -130,14 +126,10 @@ let pp_failure_reason fmt = function
         runtime_id detail
   | Failure_provider_error { kind; detail } ->
       Format.fprintf fmt "provider_error(kind=%s,detail=%s)" kind detail
-  | Failure_completion_contract_violation { reason_code } ->
-      Format.fprintf fmt "completion_contract_violation(%s)" reason_code
   | Failure_receipt_lost { primary_error; fallback_path } ->
       Format.fprintf fmt "receipt_lost(err=%s,fallback=%s)"
         primary_error
         (Option.value fallback_path ~default:"-")
-  | Failure_turn_livelock_blocked { reason } ->
-      Format.fprintf fmt "turn_livelock_blocked(%s)" reason
   | Failure_runtime_error msg ->
       Format.fprintf fmt "runtime_error(%s)" msg
   | Failure_unexpected_exception { exn; _ } ->
@@ -157,10 +149,8 @@ type transition_action =
   | StreamYieldsTool
   | ToolReturned
   | StreamComplete
-  | ContractOk
-  | ContractViolation
+  | FinishTurn
   | ReceiptLost
-  | LivelockBlocked
   | NoToolCapableProvider
   | ProviderError
   | GenericFail
@@ -179,10 +169,8 @@ let transition_action_label = function
   | StreamYieldsTool -> "StreamYieldsTool"
   | ToolReturned -> "ToolReturned"
   | StreamComplete -> "StreamComplete"
-  | ContractOk -> "ContractOk"
-  | ContractViolation -> "ContractViolation"
+  | FinishTurn -> "FinishTurn"
   | ReceiptLost -> "ReceiptLost"
-  | LivelockBlocked -> "LivelockBlocked"
   | NoToolCapableProvider -> "NoToolCapableProvider"
   | ProviderError -> "ProviderError"
   | GenericFail -> "GenericFail"
@@ -254,9 +242,6 @@ let classify_transition ?ctx ~(from_state: _ turn_state) ~(to_state: _ turn_stat
   | Any Runtime_routing, Any (Failed (Failure_runtime_unavailable _))
     when not stop_signaled_before ->
       Some RuntimeUnavailable
-  | Any Runtime_routing, Any (Failed (Failure_turn_livelock_blocked _))
-    when not stop_signaled_before ->
-      Some LivelockBlocked
   | Any Runtime_routing, Any (Failed (Failure_no_capable_provider _))
     when not stop_signaled_before ->
       Some NoToolCapableProvider
@@ -274,9 +259,6 @@ let classify_transition ?ctx ~(from_state: _ turn_state) ~(to_state: _ turn_stat
       Some ToolReturned
   | Any Streaming, Any Completing when not stop_signaled_before ->
       Some StreamComplete
-  | Any Streaming, Any (Failed (Failure_completion_contract_violation _))
-    when not stop_signaled_before ->
-      Some ContractViolation
   | Any Streaming, Any (Failed (Failure_receipt_lost _))
     when not stop_signaled_before ->
       Some ReceiptLost
@@ -287,10 +269,7 @@ let classify_transition ?ctx ~(from_state: _ turn_state) ~(to_state: _ turn_stat
     when not stop_signaled_before ->
       Some ProviderTimeout
   | Any Completing, Any Done when not stop_signaled_before ->
-      Some ContractOk
-  | Any Completing, Any (Failed (Failure_completion_contract_violation _))
-    when not stop_signaled_before ->
-      Some ContractViolation
+      Some FinishTurn
   | Any Completing, Any (Failed (Failure_receipt_lost _))
     when not stop_signaled_before ->
       Some ReceiptLost

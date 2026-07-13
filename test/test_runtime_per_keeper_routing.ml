@@ -397,10 +397,10 @@ let test_runtime_assignment_writer_updates_runtime_toml () =
       (KMC.runtime_id_of_meta (make_meta "routingtest")))
 ;;
 
-let test_runtime_inventory_surfaces_assignment_governance () =
+let test_runtime_inventory_surfaces_assignment_status () =
   with_runtime_initialized (fun () ->
     let json = Server_dashboard_http_runtime_info.runtime_inventory_json () in
-    let governance = J.member "assignment_governance" json in
+    let assignment_status = J.member "assignment_status" json in
     let providers = json |> J.member "providers" |> J.to_list in
     let provider_by_runtime_id runtime_id =
       List.find
@@ -414,33 +414,33 @@ let test_runtime_inventory_surfaces_assignment_governance () =
     let gpt = provider_by_runtime_id "openai.gpt" in
     Alcotest.(check string)
       "schema"
-      "masc.runtime_assignment_governance.v1"
-      (governance |> J.member "schema" |> J.to_string);
+      "masc.runtime_assignment_status.v1"
+      (assignment_status |> J.member "schema" |> J.to_string);
     Alcotest.(check string)
       "status"
       "degraded"
-      (governance |> J.member "status" |> J.to_string);
+      (assignment_status |> J.member "status" |> J.to_string);
     Alcotest.(check int)
       "assignment count"
       2
-      (governance |> J.member "assignment_count" |> J.to_int);
+      (assignment_status |> J.member "assignment_count" |> J.to_int);
     Alcotest.(check int)
       "assigned runtime count"
       1
-      (governance |> J.member "assigned_runtime_count" |> J.to_int);
+      (assignment_status |> J.member "assigned_runtime_count" |> J.to_int);
     Alcotest.(check int)
       "default assignment count"
       0
-      (governance |> J.member "default_assignment_count" |> J.to_int);
+      (assignment_status |> J.member "default_assignment_count" |> J.to_int);
     Alcotest.(check bool)
       "operator action required"
       true
-      (governance |> J.member "operator_action_required" |> J.to_bool);
+      (assignment_status |> J.member "operator_action_required" |> J.to_bool);
     Alcotest.(check bool)
       "single runtime warning"
       true
       (string_contains
-         (Yojson.Safe.to_string governance)
+         (Yojson.Safe.to_string assignment_status)
          "single_runtime_assignment_pin");
     Alcotest.(check (float 0.0001))
       "model temperature override"
@@ -1789,9 +1789,9 @@ let () =
             `Quick
             test_runtime_assignment_writer_updates_runtime_toml
         ; Alcotest.test_case
-            "dashboard runtime inventory exposes assignment governance"
+            "dashboard runtime inventory exposes assignment status"
             `Quick
-            test_runtime_inventory_surfaces_assignment_governance
+            test_runtime_inventory_surfaces_assignment_status
         ; Alcotest.test_case
             "unknown assignment is rejected before runtime.toml write"
             `Quick

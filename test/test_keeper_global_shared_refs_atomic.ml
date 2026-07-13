@@ -75,7 +75,6 @@ let compact_policy_meta () =
         [ "name", `String "compact-policy-window"
         ; "agent_name", `String "compact-policy-window"
         ; "trace_id", `String "trace-compact-policy-window"
-        ; "tool_access", `List []
         ])
   with
   | Error err -> fail ("meta_of_json failed: " ^ err)
@@ -159,16 +158,8 @@ let test_tool_dispatch_runtime () =
     recorded := Some (tool_name, success, duration_ms));
   Keeper_tool_dispatch_runtime.For_testing.record_keeper_tool_call ~tool_name:"t" ~success:true ~duration_ms:42;
   check (option (triple string bool int)) "recorder received call" (Some ("t", true, 42)) !recorded;
-  (* Search path. *)
-  let searched = ref None in
-  Keeper_tool_dispatch_runtime.For_testing.set_tool_search_fn (fun ~query ~max_results ->
-    searched := Some (query, max_results);
-    `Assoc [ "query", `String query; "max_results", `Int max_results ]);
-  let _ = Keeper_tool_dispatch_runtime.For_testing.search_tools ~query:"foo" ~max_results:3 in
-  check (option (pair string int)) "searcher received call" (Some ("foo", 3)) !searched;
   (* Restore defaults. *)
-  Keeper_tool_dispatch_runtime.For_testing.set_on_keeper_tool_call (fun ~tool_name:_ ~success:_ ~duration_ms:_ -> ());
-  Keeper_tool_dispatch_runtime.For_testing.set_tool_search_fn (fun ~query ~max_results:_ -> `Assoc [ "query", `String query ])
+  Keeper_tool_dispatch_runtime.For_testing.set_on_keeper_tool_call (fun ~tool_name:_ ~success:_ ~duration_ms:_ -> ())
 ;;
 
 let test_tool_in_process_runtime () =

@@ -1,4 +1,4 @@
-; RFC v5 Phase A0 — typed IR for local exec gate.
+; Typed IR and sandbox-aware local process dispatch.
 ; Internal sub-library of masc.  No public name.
 
 (include_subdirs no)
@@ -20,17 +20,3 @@
   yojson
   re
   logs))
-
-; RFC-0054 PR-3 — auto-generate parallel-verification walkers for
-; Shell_ir_typed. The generator's spec lives in
-; bin/gen_shell_ir_walkers.ml; the generated file is included in this
-; library automatically because (modules) is unspecified.
-
-(rule
- (target shell_ir_typed_walkers_gen.ml)
- (deps
-  (:gen %{exe:../../bin/gen_shell_ir_walkers.exe}))
- (action
-  (with-stdout-to
-   %{target}
-   (run %{gen}))))

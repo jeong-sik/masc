@@ -32,7 +32,6 @@ The key distinction is:
 | File | Purpose | Load point | Reload trigger | Reload class | Notes |
 | --- | --- | --- | --- | --- | --- |
 | `<base_path>/.masc/config/runtime.toml` | startup env seeding for `MASC_KEEPER_*` and WebSearch knobs | server bootstrap before env-backed consumers initialize | none | `boot_static` | values are recorded in a process-local boot override store; edits require restart |
-| ~~`<resolved-config-root>/tool_policy.toml`~~ | ~~keeper tool group policy~~ | ~~deleted~~ | — | — | Loader (`keeper_tool_policy_config.ml`) removed. Tool access is descriptor/registry-driven. |
 | `<resolved-config-root>/keepers/*.toml` | declarative keeper profile defaults | keeper create/up, explicit keeper operations, supervisor reconcile | next supervisor sweep or next keeper create/up | `sweep_dynamic` | running keepers re-sync declarative fields; no standalone file watcher |
 | `<resolved-config-root>/runtime.toml` | runtime catalog source + optional `[fusion]` policy | model resolve path in OAS/MASC; `masc_fusion` handler reloads `[fusion]` per request | next resolve / next turn / next `masc_fusion` request | `request_dynamic` | invalid TOML blocks runtime or fusion policy load; `runtime.json` is retired |
 
@@ -51,12 +50,6 @@ Operational meaning:
 
 - This file is a startup default injector, not a live runtime tuning plane.
 - If live tuning is needed, the correct target is `Runtime_params`.
-
-### `tool_policy.toml` (retired)
-
-- **Deleted**: `keeper_tool_policy_config.ml` and its TOML loader were removed.
-  Tool access is now descriptor/registry-driven with denylist filtering only.
-- The `config/tool_policy.toml` file is no longer read at boot.
 
 ### `keepers/*.toml`
 

@@ -102,9 +102,7 @@ let execute_tool_eio
      back without a substring re-probe. *)
   record_mcp_session_agent ~is_ephemeral:caller_identity.agent_name_is_ephemeral
     agent_name;
-  let is_system_internal_tool =
-    Tool_catalog_surfaces.is_system_internal_hidden name
-  in
+  let is_non_public_tool = not (Tool_catalog.is_public_mcp name) in
   let preview ?(max_len = 240) text =
     String_util.utf8_safe ~max_bytes:(max_len + 3) ~suffix:"..." text
     |> String_util.to_string
@@ -126,8 +124,8 @@ let execute_tool_eio
       ~data:(`String msg)
       msg
   in
-  let with_system_internal_audit ~agent_name (result : Tool_result.result) =
-    if is_system_internal_tool
+  let with_non_public_tool_audit ~agent_name (result : Tool_result.result) =
+    if is_non_public_tool
     then (
       let error_msg =
         if Tool_result.is_success result then None else Some (preview (Tool_result.message result))
@@ -141,7 +139,7 @@ let execute_tool_eio
           ; "argument_keys", `List argument_keys_json
           ]
       in
-      Audit_log.log_system_internal_tool_call
+      Audit_log.log_non_public_tool_call
         config
         ~agent_id:agent_name
         ~tool_name:name
@@ -153,7 +151,7 @@ let execute_tool_eio
     result
   in
   match mode_gate_error with
-  | Some msg -> with_system_internal_audit ~agent_name (runtime_error_result msg)
+  | Some msg -> with_non_public_tool_audit ~agent_name (runtime_error_result msg)
   | None ->
     (* Enforce tool authorization when enabled *)
     let auth_enabled = Auth.is_auth_enabled config.base_path in
@@ -169,15 +167,10 @@ let execute_tool_eio
     in
     (match auth_result with
      | Error err ->
-       with_system_internal_audit
+       with_non_public_tool_audit
          ~agent_name
          (runtime_error_result (Masc_domain.masc_error_to_string err))
      | Ok () ->
-          let is_read_only =
-            Keeper_tool_descriptor_resolution.capability_has
-              Tool_capability.Read_only
-              name
-          in
           (match owner_keeper_identity with
            | Some (keeper_name, keeper_id)
              when agent_name <> "unknown" && workspace_init_cached ->
@@ -207,8 +200,9 @@ let execute_tool_eio
                   agent_name
                   (Printexc.to_string exn))
            | Some _ | None -> ());
-          (* Auto-register session for non-read-only tools *)
-          if agent_name <> "unknown" && not is_read_only
+          (* Every identified caller participates in the same session timeline,
+             independent of tool metadata. *)
+          if agent_name <> "unknown"
           then (
             let (_ : Session.session) = Session.register registry ~agent_name in
             ());
@@ -218,17 +212,9 @@ let execute_tool_eio
           if agent_name <> "unknown"
           then (
             Session.update_activity registry ~agent_name ();
-            (* Keep read-only/fast tools non-blocking; heartbeat is best-effort. *)
-            let skip_heartbeat =
-              is_read_only
-              || Tool_catalog.is_placeholder name
-              ||
-              match Tool_catalog.implementation_status name with
-              | Tool_catalog.Simulation -> true
-              | Tool_catalog.Real | Tool_catalog.Adapter | Tool_catalog.Placeholder ->
-                false
-            in
-            if (not skip_heartbeat) && workspace_init_cached
+            (* Every identified call follows the same best-effort workspace
+               heartbeat path, independent of tool metadata. *)
+            if workspace_init_cached
             then (
               try
                 let (_ : string) = Workspace.heartbeat config ~agent_name in
@@ -280,7 +266,11 @@ let execute_tool_eio
                    Tool_operator.dispatch ctx ~name ~args:coerced_args
                  | Mod_local_runtime ->
                    Tool_local_runtime.dispatch
-                     ({ Tool_local_runtime_core.config; agent_name } : Tool_local_runtime_core.context)
+                     ({ Tool_local_runtime_core.config
+                      ; agent_name
+                      ; authorize_external_effect = None
+                      }
+                      : Tool_local_runtime_core.context)
                      ~name
                      ~args:coerced_args
                  (* Mod_handover, Mod_heartbeat, Mod_auth removed: tools pruned *)
@@ -369,14 +359,6 @@ let execute_tool_eio
                         (Printf.sprintf
                            "tool '%s' is a keeper task tool; use the keeper in-process task handler"
                            name))
-                 (* Removed tool families are intentionally not dispatchable. *)
-                 | Mod_shard ->
-                   let ok, json = Tool_shard.execute name coerced_args in
-                   let message = Yojson.Safe.to_string json in
-                   Some
-                     (if ok
-                      then Tool_result.ok ~tool_name:name ~start_time message
-                      else Tool_result.error ~tool_name:name ~start_time message)
                  | Mod_inline ->
                    let mcp_runtime_ctx : Mcp_tool_runtime.context =
                      { config
@@ -396,10 +378,8 @@ let execute_tool_eio
                      ; wait_for_message =
                          (fun registry ~agent_name ~timeout ->
                            wait_for_message_eio ~clock registry ~agent_name ~timeout)
-                     ; governance_defaults = Mcp_server_eio_governance.governance_defaults
-                     ; save_governance = Mcp_server_eio_governance.save_governance
-                     ; load_mcp_sessions = Mcp_server_eio_governance.load_mcp_sessions
-                     ; save_mcp_sessions = Mcp_server_eio_governance.save_mcp_sessions
+                     ; load_mcp_sessions = Mcp_session_store.load_mcp_sessions
+                     ; save_mcp_sessions = Mcp_session_store.save_mcp_sessions
                      }
                    in
                    Mcp_tool_runtime.dispatch mcp_runtime_ctx ~name)
@@ -508,15 +488,27 @@ let execute_tool_eio
                          ~input:coerced_args
                          ())
                    in
-                   let success =
-                     match result.Keeper_tool_dispatch_runtime.outcome with
-                     | `Success -> true
-                     | `Failure -> false
-                   in
                    Some
-                     (if success
-                      then Tool_result.ok ~tool_name:name ~start_time result.raw_output
-                      else Tool_result.error ~tool_name:name ~start_time result.raw_output))
+                     (match result.Keeper_tool_dispatch_runtime.outcome with
+                      | `Success ->
+                        Tool_result.make_ok
+                          ~tool_name:name
+                          ~start_time
+                          ~data:
+                            (Option.value
+                               ~default:(`String result.raw_output)
+                               result.data)
+                          ()
+                      | `Failure failure_class ->
+                        Tool_result.make_err
+                          ~tool_name:name
+                          ~class_:failure_class
+                          ~start_time
+                          ~data:
+                            (Option.value
+                               ~default:(`String result.raw_output)
+                               result.data)
+                          result.raw_output))
             in
             (* Primary dispatch: mint token at I/O boundary, then O(1) tag lookup.
      Tool_token validates the name exists in the tag registry (Parse, Don't
@@ -525,7 +517,7 @@ let execute_tool_eio
                dispatch paths wrap their existing run_pre_hooks + handler
                chains with Tool_telemetry.with_span so every MCP-originated
                tool call emits the telemetry 4-tuple (Span / Metric /
-               trace_id; Audit slot via with_system_internal_audit below).
+               trace_id; audit slot via [with_non_public_tool_audit] below).
                This brings MCP-originated calls to behavioural parity with
                the keeper turn migration in PR-7. *)
             let dispatch_internal_with_telemetry () =
@@ -550,11 +542,11 @@ let execute_tool_eio
               then dispatch_internal_with_telemetry ()
               else None
             with
-            | Some result -> with_system_internal_audit ~agent_name result
+            | Some result -> with_non_public_tool_audit ~agent_name result
             | None ->
               (match Tool_dispatch.mint_token ~name with
                | Error reason ->
-                 with_system_internal_audit
+                 with_non_public_tool_audit
                    ~agent_name
                    (runtime_error_result
                       ~tool_name:name
@@ -587,10 +579,10 @@ let execute_tool_eio
                    | None -> None
                  in
                  (match tag_result with
-                  | Some result -> with_system_internal_audit ~agent_name result
+                  | Some result -> with_non_public_tool_audit ~agent_name result
                   | None ->
                     Log.Mcp.warn "registry inconsistency: %s minted but no tag" name;
-                    with_system_internal_audit
+                    with_non_public_tool_audit
                       ~agent_name
                       (runtime_error_result
                          ~tool_name:name
@@ -598,9 +590,10 @@ let execute_tool_eio
 ;;
 
 (* RFC-0182 §3.1 — register Tool_workspace.dispatch with the dependency
-   inversion ref so [Keeper_tool_in_process_runtime.handle_masc_workspace]
-   (compiled early) can dispatch workspace tools without statically
-   importing [Tool_workspace] (compiled late). *)
+   inversion ref so
+   [Keeper_tool_in_process_runtime.handle_masc_workspace_with_outcome]
+   (compiled early) can dispatch workspace tools without statically importing
+   [Tool_workspace] (compiled late). *)
 let () =
   Workspace_dispatch_ref.dispatch
   := fun ~config ~agent_name ~name ~args ->

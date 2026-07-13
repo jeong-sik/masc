@@ -53,7 +53,7 @@ let test_tool_io_preview_fields_are_redacted () =
     (Yojson.Safe.Util.to_string tool_result)
 ;;
 
-let test_denied_tool_omits_io_previews () =
+let test_sensitive_named_tool_preserves_redacted_io () =
   let fields =
     Keeper_tools_oas_handler_telemetry.tool_io_preview_fields
       ~tool_name:"keeper_auth_token"
@@ -62,26 +62,26 @@ let test_denied_tool_omits_io_previews () =
       ()
   in
   let json = `Assoc fields in
-  Alcotest.(check (option bool))
-    "redacted flag"
-    (Some true)
-    (bool_member "tool_io_redacted" json);
   Alcotest.(check bool)
-    "input preview omitted"
+    "input preview present"
     true
-    (Option.is_none (string_member "tool_args_preview" json));
+    (Option.is_some (string_member "tool_args_preview" json));
   Alcotest.(check bool)
-    "output preview omitted"
+    "output preview present"
     true
-    (Option.is_none (string_member "tool_output_preview" json));
+    (Option.is_some (string_member "tool_output_preview" json));
   Alcotest.(check bool)
-    "structured input omitted"
+    "structured input present"
     true
-    (member "tool_args" json = `Null);
+    (member "tool_args" json <> `Null);
   Alcotest.(check bool)
-    "structured output omitted"
+    "structured output present"
     true
-    (member "tool_result" json = `Null)
+    (member "tool_result" json <> `Null);
+  Alcotest.(check string)
+    "input secret redacted"
+    "[REDACTED]"
+    (member "tool_args" json |> member "token" |> Yojson.Safe.Util.to_string)
 ;;
 
 let () =
@@ -93,9 +93,9 @@ let () =
             `Quick
             test_tool_io_preview_fields_are_redacted
         ; Alcotest.test_case
-            "omits denied tool io"
+            "preserves redacted sensitive-named tool io"
             `Quick
-            test_denied_tool_omits_io_previews
+            test_sensitive_named_tool_preserves_redacted_io
         ] )
     ]
 ;;

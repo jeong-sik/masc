@@ -6,7 +6,7 @@ import {
 
 // Minimal snapshot carrying every required key of
 // `KeeperCompositeSnapshotSchema`. Optional keys (keeper, collapsed_from,
-// circuit_breaker, phase_diagnosis, execution, runtime_attention,
+// phase_diagnosis, execution, runtime_attention,
 // recommended_actions) are added per-test. Value shapes here mirror what
 // `keeper_composite_observer.ml` `snapshot_to_json` emits: lowercase
 // snake_case phase / turn_phase / decision / runtime / compaction (via
@@ -92,7 +92,7 @@ describe('parseKeeperCompositeSnapshot', () => {
     for (const phase of [
       'offline', 'running', 'failing', 'overflowed', 'compacting',
       'handing_off', 'draining', 'paused', 'stopped', 'crashed',
-      'restarting', 'dead', 'zombie',
+      'restarting', 'dead',
     ]) {
       const result = parseKeeperCompositeSnapshot({ ...VALID_SNAPSHOT, phase })
       expect(result.phase).toBe(phase)
@@ -238,19 +238,19 @@ describe('parseKeeperCompositeSnapshot', () => {
     expect(result.board_wakeups).toBe(2)
   })
 
-  it('parses a livelock retry state (A-PR-2 G10)', () => {
+  it('parses an objective turn-attempt observation', () => {
     const result = parseKeeperCompositeSnapshot({
       ...VALID_SNAPSHOT,
-      livelock: { turn_id: 4, attempts: 3, first_started_at: 1713398000 },
+      turn_attempt: { turn_id: 4, attempts: 3, first_started_at: 1713398000 },
     })
-    expect(result.livelock).not.toBeNull()
-    expect(result.livelock!.attempts).toBe(3)
+    expect(result.turn_attempt).not.toBeNull()
+    expect(result.turn_attempt!.attempts).toBe(3)
   })
 
   it('leaves A-PR-2 fields undefined for old payloads that omit them', () => {
     const result = parseKeeperCompositeSnapshot(VALID_SNAPSHOT)
     expect(result.last_skip).toBeUndefined()
-    expect(result.livelock).toBeUndefined()
+    expect(result.turn_attempt).toBeUndefined()
     expect(result.board_cursor).toBeUndefined()
     expect(result.board_wakeups).toBeUndefined()
   })
@@ -264,7 +264,7 @@ describe('parseKeeperCompositeSnapshot', () => {
         outcome: 'error',
         terminal_reason_code: 'config_error',
         operator_disposition: 'pause_human',
-        operator_disposition_reason: 'tool_route_recoverable_failure',
+        operator_disposition_reason: 'provider_runtime_error',
         model_used: 'claude-code:auto',
         stop_reason: 'max_turns',
         duration_ms: 87736,
@@ -328,7 +328,7 @@ describe('parseKeeperCompositeSnapshot', () => {
         needs_attention: true,
         blocked: true,
         fiber_stop_requested: false,
-        reason: 'passive_only',
+        reason: 'provider_runtime_error',
         raw_phase: 'Running',
         is_live: false,
         source: 'execution_receipt',
@@ -336,7 +336,7 @@ describe('parseKeeperCompositeSnapshot', () => {
     })
 
     expect(result.runtime_attention?.state).toBe('blocked')
-    expect(result.runtime_attention?.reason).toBe('passive_only')
+    expect(result.runtime_attention?.reason).toBe('provider_runtime_error')
     expect(result.runtime_attention?.fiber_stop_requested).toBe(false)
   })
 
@@ -407,7 +407,7 @@ describe('parseKeeperCompositeSnapshot', () => {
 
   it('parses collapsed_from when Stable hides a raw keeper phase', () => {
     // `Stable` is the TLA+ composite projection of seven raw keeper phases
-    // (Offline/Paused/Stopped/Crashed/Restarting/Dead/Zombie). The runtime
+    // (Offline/Paused/Stopped/Crashed/Restarting/Dead). The runtime
     // observer does not emit it today; the schema supports it for a planned
     // backend that surfaces the collapse with the raw phase in `collapsed_from`.
     const result = parseKeeperCompositeSnapshot({
@@ -439,29 +439,4 @@ describe('parseKeeperCompositeSnapshot', () => {
     }
   })
 
-  // LT-16-KCB Phase 3 — 6th axis parsing
-  it('accepts snapshot with circuit_breaker.state = warning', () => {
-    const result = parseKeeperCompositeSnapshot({
-      ...VALID_SNAPSHOT,
-      circuit_breaker: { state: 'warning' },
-    })
-    expect(result.circuit_breaker).toBeDefined()
-    expect(result.circuit_breaker!.state).toBe('warning')
-  })
-
-  it('preserves unknown circuit_breaker.state for operator visibility', () => {
-    const result = parseKeeperCompositeSnapshot({
-      ...VALID_SNAPSHOT,
-      circuit_breaker: { state: 'completely-new-future-variant' },
-    })
-    expect(result.circuit_breaker!.state).toBe('completely-new-future-variant')
-  })
-
-  it('tolerates missing circuit_breaker during Phase 2 → 3 rollout', () => {
-    // Pinned backends that have not yet picked up LT-16-KCB Phase 2
-    // emit snapshots without the key. The dashboard must keep
-    // rendering instead of hard-failing the parse.
-    const result = parseKeeperCompositeSnapshot(VALID_SNAPSHOT)
-    expect(result.circuit_breaker).toBeUndefined()
-  })
 })

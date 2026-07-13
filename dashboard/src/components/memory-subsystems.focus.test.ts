@@ -44,67 +44,6 @@ const baseResponse: MemorySubsystemsResponse = {
       },
     ],
   },
-  user_model: {
-    schema: 'masc.user_model.memory_projection.v1',
-    source: 'memory_os_facts',
-    prompt: {
-      enabled: true,
-      block_id: 'user_model',
-      injection: 'extra_system_context',
-      runtime_hook: 'keeper_run_tools_hooks.before_turn_params',
-      producer: 'keeper_user_model',
-    },
-    total: 2,
-    filtered: 2,
-    shown: 2,
-    limit: 100,
-    items: [
-      {
-        keeper: 'keeper-alpha',
-        kind: 'preference',
-        claim: 'User prefers terse operational summaries',
-        source_ref: 'memory-os-fact://keeper-alpha/trace-1/user-prefers-terse-operational-summaries',
-        source_trace_id: 'trace-1',
-        source_turn: 7,
-        first_seen: 1,
-        last_verified_at: 2,
-        observed_by: [],
-      },
-      {
-        keeper: 'keeper-alpha',
-        kind: 'constraint',
-        claim: 'Use worktrees for repo changes',
-        source_ref: 'memory-os-fact://keeper-alpha/trace-2/use-worktrees-for-repo-changes',
-        source_trace_id: 'trace-2',
-        source_turn: 8,
-        first_seen: 1,
-        last_verified_at: null,
-        observed_by: [],
-      },
-    ],
-    errors: [],
-  },
-  draft_skill_candidates: {
-    total: 1,
-    shown: 1,
-    limit: 100,
-    index_path: '<base-path>/.masc/draft-skills/index.jsonl',
-    items: [
-      {
-        id: 'skill-candidate-repeatable-debug-loop',
-        agent_name: 'keeper-alpha',
-        source_kind: 'procedure',
-        source_ref: 'procedure://keeper-alpha/repeatable-debug-loop',
-        promotion_state: 'candidate',
-        dir: '<base-path>/.masc/draft-skills/skill-candidate-repeatable-debug-loop',
-        json_path: '<base-path>/.masc/draft-skills/skill-candidate-repeatable-debug-loop/candidate.json',
-        toml_path: '<base-path>/.masc/draft-skills/skill-candidate-repeatable-debug-loop/candidate.toml',
-        skill_md_path: '<base-path>/.masc/draft-skills/skill-candidate-repeatable-debug-loop/SKILL.md',
-        created_at: 1,
-      },
-    ],
-    error: null,
-  },
   delegation_requests: {
     total: 1,
     shown: 1,
@@ -211,64 +150,6 @@ describe('MemorySubsystems focus targets', () => {
     })
   })
 
-  it('renders user model projection rows from memory facts', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(baseResponse))
-    vi.stubGlobal('fetch', fetchMock)
-
-    render(html`<${MemorySubsystems} />`, container)
-
-    await vi.waitFor(() => {
-      expect(container.textContent).toContain('User model')
-      expect(container.textContent).toContain('prompt on · user_model')
-      expect(container.textContent).toContain('User prefers terse operational summaries')
-      expect(container.textContent).toContain('Use worktrees for repo changes')
-    })
-    expect(container.querySelector('[data-testid="user-model-projection"]')).not.toBeNull()
-    expect(container.querySelector('[data-testid="user-model-prompt-surface"]')).not.toBeNull()
-  })
-
-  it('renders draft skill candidates from the memory subsystem payload', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(baseResponse))
-    vi.stubGlobal('fetch', fetchMock)
-
-    render(html`<${MemorySubsystems} />`, container)
-
-    await vi.waitFor(() => {
-      expect(container.textContent).toContain('skill-candidate-repeatable-debug-loop')
-      expect(container.textContent).toContain('candidate')
-      expect(container.textContent).toContain('<base-path>/.masc/draft-skills/skill-candidate-repeatable-debug-loop/SKILL.md')
-    })
-    expect(container.querySelector('[data-testid="draft-skill-candidates"]')).not.toBeNull()
-  })
-
-  it('renders draft skill candidate empty and error states', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      jsonResponse({
-        ...baseResponse,
-        draft_skill_candidates: {
-          total: 0,
-          shown: 0,
-          limit: 100,
-          index_path: '<base-path>/.masc/draft-skills/index.jsonl',
-          items: [],
-          error: 'draft skill index read failed',
-        },
-      }),
-    )
-    vi.stubGlobal('fetch', fetchMock)
-
-    render(html`<${MemorySubsystems} />`, container)
-
-    await vi.waitFor(() => {
-      expect(container.querySelector('[data-testid="draft-skill-candidates"]')).not.toBeNull()
-      expect(container.querySelector('[role="alert"]')?.textContent).toContain(
-        'draft skill index read failed',
-      )
-      expect(container.textContent).toContain('draft skill 후보 없음')
-      expect(container.textContent).toContain('total 0 · shown 0')
-    })
-  })
-
   it('renders delegation requests from the memory subsystem payload', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(baseResponse))
     vi.stubGlobal('fetch', fetchMock)
@@ -308,47 +189,6 @@ describe('MemorySubsystems focus targets', () => {
       )
       expect(container.textContent).toContain('delegation request 없음')
       expect(container.textContent).toContain('total 0 · shown 0')
-    })
-  })
-
-  it('renders non-candidate draft skill states with nullable creation time', async () => {
-    const original = baseResponse.draft_skill_candidates!.items[0]!
-    const fetchMock = vi.fn().mockResolvedValue(
-      jsonResponse({
-        ...baseResponse,
-        draft_skill_candidates: {
-          ...baseResponse.draft_skill_candidates!,
-          total: 2,
-          shown: 2,
-          items: [
-            {
-              ...original,
-              id: 'skill-promoted-debug-loop',
-              promotion_state: 'promoted',
-              skill_md_path: '<base-path>/.masc/skills/debug-loop/SKILL.md',
-              created_at: null,
-            },
-            {
-              ...original,
-              id: 'skill-rejected-debug-loop',
-              promotion_state: 'rejected',
-              skill_md_path: '<base-path>/.masc/draft-skills/rejected/SKILL.md',
-              created_at: null,
-            },
-          ],
-        },
-      }),
-    )
-    vi.stubGlobal('fetch', fetchMock)
-
-    render(html`<${MemorySubsystems} />`, container)
-
-    await vi.waitFor(() => {
-      expect(container.textContent).toContain('skill-promoted-debug-loop')
-      expect(container.textContent).toContain('promoted')
-      expect(container.textContent).toContain('skill-rejected-debug-loop')
-      expect(container.textContent).toContain('rejected')
-      expect(container.textContent).toContain('<base-path>/.masc/skills/debug-loop/SKILL.md')
     })
   })
 

@@ -9,7 +9,7 @@
 # Boundaries covered here:
 #   - Goal domain may not learn new Task state coupling. Existing files that
 #     still inspect Masc_domain.task / Workspace_query are baselined debt.
-#   - Leaf Tool / Turn FSM / Board types / Task transition / Memory JSONL
+#   - Leaf Tool / Turn FSM / Board types / Task state / Memory JSONL
 #     modules may not learn Keeper, OAS provider/runtime, workspace-task, or
 #     DB/vector persistence concepts.
 #   - MASC persistence remains filesystem/JSONL; DB/vector backend terms are
@@ -104,11 +104,13 @@ current_entries() {
     emit_rule_matches "board_types_to_oas_provider" "$oas_provider_pattern" lib/board_types
     emit_rule_matches "board_types_to_workspace_task" "$workspace_task_pattern" lib/board_types
 
-    emit_rule_matches "task_transition_to_keeper_runtime" "$keeper_pattern" lib/task_transition_state
-    emit_rule_matches "task_transition_to_oas_provider" "$oas_provider_pattern" lib/task_transition_state
+    emit_rule_matches "task_transition_to_keeper_runtime" "$keeper_pattern" \
+      lib/types/types_core.ml lib/types/types_core.mli
+    emit_rule_matches "task_transition_to_oas_provider" "$oas_provider_pattern" \
+      lib/types/types_core.ml lib/types/types_core.mli
 
     emit_rule_matches "leaf_state_to_db_backend" "$db_pattern" \
-      lib/board_types lib/goal lib/task_transition_state
+      lib/board_types lib/goal lib/types/types_core.ml lib/types/types_core.mli
   } | sort -u
 }
 

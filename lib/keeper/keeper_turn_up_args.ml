@@ -21,16 +21,12 @@ type parsed_args = {
   max_context_override_opt : int option;
   max_context_override_present : bool;
   proactive_enabled_opt : bool option;
-  proactive_idle_sec_opt : int option;
-  proactive_cooldown_sec_opt : int option;
   compaction_ratio_gate_opt : float option;
   compaction_message_gate_opt : int option;
   compaction_token_gate_opt : int option;
   compaction_cooldown_sec_opt : int option;
   sandbox_profile_opt : string option;
   network_mode_opt : string option;
-  tool_access_opt : string list option;
-  tool_denylist_opt : string list option;
   auto_handoff_opt : bool option;
   handoff_threshold_opt : float option;
   handoff_cooldown_sec_opt : int option;
@@ -39,13 +35,6 @@ type parsed_args = {
   instructions_opt : string option;
 }
 
-let normalize_tool_name_list names =
-  names
-  |> List.map String.trim
-  |> List.filter (fun name -> name <> "")
-  |> dedupe_keep_order
-
-
 let json_non_null_member_present key (json : Yojson.Safe.t) =
   match json with
   | `Assoc fields -> (
@@ -53,25 +42,6 @@ let json_non_null_member_present key (json : Yojson.Safe.t) =
       | Some `Null | None -> false
       | Some _ -> true)
   | _ -> false
-
-let parse_present_tool_name_list_opt args key =
-  match Json_util.assoc_member_opt key args with
-  | None -> Ok None
-  | Some (`List items) ->
-      let rec collect acc index = function
-        | [] -> Ok (Some (normalize_tool_name_list (List.rev acc)))
-        | `String value :: rest -> collect (value :: acc) (index + 1) rest
-        | bad :: _ ->
-            Error
-              (Printf.sprintf "%s[%d] must be a string (received %s)" key
-                 index (Json_util.kind_name bad))
-      in
-      collect [] 0 items
-  | Some `Null -> Error (Printf.sprintf "%s must not be null" key)
-  | Some other ->
-      Error
-        (Printf.sprintf "%s must be an array of strings (received %s)" key
-           (Json_util.kind_name other))
 
 let parse_present_string_list_opt args key =
   match Json_util.assoc_member_opt key args with
@@ -144,26 +114,6 @@ let parse_max_context_override args =
            "max_context_override must be an integer or null (received %s)"
            (Json_util.kind_name other))
 
-let resolve_tool_name_list ~preferred ~fallback =
-  Dashboard_utils.first_some preferred fallback
-  |> Option.value ~default:[]
-  |> normalize_tool_name_list
-
-let parse_tool_access_input (args : Yojson.Safe.t) :
-    (string list option, string) result =
-  match Json_util.assoc_member_opt "tool_access" args with
-  | Some (`List _ as access_json) -> (
-      match tool_access_of_meta_json (`Assoc [ ("tool_access", access_json) ]) with
-      | Ok access -> Ok (Some access)
-      | Error msg -> Error msg)
-  | Some `Null -> Ok None
-  | Some other ->
-      Error
-        (Printf.sprintf
-           "tool_access must be an array of strings (received %s)"
-           (Json_util.kind_name other))
-  | None -> Ok None
-
 let parse ?(allow_sandbox_fields = false) (ctx : _ context) (args : Yojson.Safe.t) :
     (parsed_args, tool_result) result =
   let name = get_string args "name" "" in
@@ -182,23 +132,20 @@ let parse ?(allow_sandbox_fields = false) (ctx : _ context) (args : Yojson.Safe.
     let compaction_profile_opt_res =
       parse_compaction_profile_opt args "compaction_profile"
     in
-    let tool_access_input_res = parse_tool_access_input args in
     let allowed_paths_opt_res = parse_present_string_list_opt args "allowed_paths" in
     let active_goal_ids_opt_res = parse_present_string_list_opt args "active_goal_ids" in
     let mention_targets_opt_res = parse_present_string_list_opt args "mention_targets" in
     let runtime_id_opt_res = parse_runtime_id_opt args in
     match
-      compaction_profile_opt_res, tool_access_input_res, allowed_paths_opt_res,
+      compaction_profile_opt_res, allowed_paths_opt_res,
       active_goal_ids_opt_res, mention_targets_opt_res, runtime_id_opt_res
     with
-    | Error e, _, _, _, _, _
-    | _, Error e, _, _, _, _
-    | _, _, Error e, _, _, _
-    | _, _, _, Error e, _, _
-    | _, _, _, _, Error e, _
-    | _, _, _, _, _, Error e -> Error (tool_result_error e)
+    | Error e, _, _, _, _
+    | _, Error e, _, _, _
+    | _, _, Error e, _, _
+    | _, _, _, Error e, _
+    | _, _, _, _, Error e -> Error (tool_result_error e)
     | Ok compaction_profile_opt,
-      Ok tool_access_opt,
       Ok allowed_paths_opt,
       Ok active_goal_ids_opt,
       Ok mention_targets_opt,
@@ -207,8 +154,6 @@ let parse ?(allow_sandbox_fields = false) (ctx : _ context) (args : Yojson.Safe.
     let autoboot_enabled_opt = get_bool_opt args "autoboot_enabled" in
     let max_context_override_res = parse_max_context_override args in
     let proactive_enabled_opt = get_bool_opt args "proactive_enabled" in
-    let proactive_idle_sec_opt = Safe_ops.json_int_opt "proactive_idle_sec" args in
-    let proactive_cooldown_sec_opt = Safe_ops.json_int_opt "proactive_cooldown_sec" args in
     let compaction_ratio_gate_opt = Safe_ops.json_float_opt "compaction_ratio_gate" args in
     let compaction_message_gate_opt = Safe_ops.json_int_opt "compaction_message_gate" args in
     let compaction_token_gate_opt = Safe_ops.json_int_opt "compaction_token_gate" args in
@@ -217,7 +162,6 @@ let parse ?(allow_sandbox_fields = false) (ctx : _ context) (args : Yojson.Safe.
     in
     let sandbox_profile_opt = Safe_ops.json_string_opt "sandbox_profile" args in
     let network_mode_opt = Safe_ops.json_string_opt "network_mode" args in
-    let tool_denylist_opt_res = parse_present_tool_name_list_opt args "tool_denylist" in
     let auto_handoff_opt = get_bool_opt args "auto_handoff" in
     let handoff_threshold_opt = Safe_ops.json_float_opt "handoff_threshold" args in
     let handoff_cooldown_sec_opt = Safe_ops.json_int_opt "handoff_cooldown_sec" args in
@@ -253,11 +197,10 @@ let parse ?(allow_sandbox_fields = false) (ctx : _ context) (args : Yojson.Safe.
       | Some _ -> instructions_arg
       | None -> profile_defaults.instructions
     in
-    match sandbox_profile_error, tool_denylist_opt_res, max_context_override_res with
-    | Some msg, _, _ -> Error (tool_result_error msg)
-    | None, Error msg, _ -> Error (tool_result_error msg)
-    | None, _, Error msg -> Error (tool_result_error msg)
-    | None, Ok tool_denylist_opt, Ok (max_context_override_present, max_context_override_opt) ->
+    match sandbox_profile_error, max_context_override_res with
+    | Some msg, _ -> Error (tool_result_error msg)
+    | None, Error msg -> Error (tool_result_error msg)
+    | None, Ok (max_context_override_present, max_context_override_opt) ->
     Ok {
       name;
       compaction_profile_opt;
@@ -270,16 +213,12 @@ let parse ?(allow_sandbox_fields = false) (ctx : _ context) (args : Yojson.Safe.
       max_context_override_opt;
       max_context_override_present;
       proactive_enabled_opt;
-      proactive_idle_sec_opt;
-      proactive_cooldown_sec_opt;
       compaction_ratio_gate_opt;
       compaction_message_gate_opt;
       compaction_token_gate_opt;
       compaction_cooldown_sec_opt;
       sandbox_profile_opt;
       network_mode_opt;
-      tool_access_opt;
-      tool_denylist_opt;
       auto_handoff_opt;
       handoff_threshold_opt;
       handoff_cooldown_sec_opt;

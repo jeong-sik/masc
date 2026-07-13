@@ -21,13 +21,11 @@ type try_provider_ctx =
   ; temperature : float
   ; max_tokens : int option
   ; accept : Agent_sdk_response.api_response -> bool
-  ; guardrails : Agent_sdk.Guardrails.t option
   ; hooks : Agent_sdk.Hooks.hooks option
   ; context_reducer : Agent_sdk.Context_reducer.t option
   ; raw_trace : Agent_sdk.Raw_trace.t option
   ; trace_link : (string * string) option
   ; transport_resolved : Masc_grpc_transport.t
-  ; runtime_mcp_policy : Llm_provider.Llm_transport.runtime_mcp_policy option
   ; allowed_paths : string list
   ; checkpoint_sidecar : Yojson.Safe.t option
   ; cache_system_prompt : bool
@@ -37,6 +35,8 @@ type try_provider_ctx =
   ; context_window_tokens : int option
   ; oas_auto_context_overflow_retry : bool
   ; checkpoint_dir : string option
+  ; checkpoint_sink : Agent_sdk.Agent.checkpoint_sink option
+  ; checkpoint_stage_observed : bool Atomic.t
   ; context_injector : Agent_sdk.Hooks.context_injector option
   ; context : Agent_sdk.Context.t option
   ; enable_thinking : bool option
@@ -61,16 +61,13 @@ type try_provider_ctx =
   ; seq_ref : int ref
   }
 
-type last_tool_progress_context =
-  { tool_name : string
-  ; tool_effect : Keeper_internal_error.tool_progress_effect
-  ; any_mutating_tool : bool
-  ; tool_effects_seen : Keeper_internal_error.tool_progress_effect list
-  }
+val observe_checkpoint_stage :
+  bool Atomic.t -> Agent_sdk.Agent.checkpoint_stage -> unit
+
+val same_run_retry_allowed : bool Atomic.t -> bool
 
 val run_try_provider :
   try_provider_ctx ->
-  ?resume_checkpoint:Agent_sdk.Checkpoint.t ->
   ?per_provider_timeout_s:float ->
   ?enable_thinking_override:bool ->
   Runtime_candidate.t ->
@@ -79,15 +76,9 @@ val run_try_provider :
   * (string * Obj.t) option
 
 val accept_rejected_error :
-  last_tool_context:last_tool_progress_context option ->
   runtime_id:string ->
   response:Agent_sdk_response.api_response ->
   Agent_sdk.Error.sdk_error
-
-val accept_rejection_context_of_run_result :
-  ?initial_messages:Agent_sdk.Types.message list ->
-  Runtime_agent.run_result ->
-  last_tool_progress_context option
 
 module For_testing : sig
   val max_execution_time_for_attempt :
@@ -96,21 +87,9 @@ module For_testing : sig
   val stream_idle_timeout_for_attempt :
     configured:float option -> float option
 
-  val sanitize_runtime_mcp_external_tool_choice :
-    runtime_mcp_external_tools:bool ->
-    Agent_sdk.Hooks.turn_params ->
-    Agent_sdk.Hooks.turn_params
-
   val apply_accept :
-    ?initial_messages:Agent_sdk.Types.message list ->
     runtime_id:string ->
     accept:(Agent_sdk_response.api_response -> bool) ->
     Runtime_agent.run_result ->
     (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
-
-  val last_tool_progress_context_of_messages :
-    Agent_sdk.Types.message list -> last_tool_progress_context option
-
-  val format_last_tool_progress_context :
-    last_tool_progress_context option -> string option
 end

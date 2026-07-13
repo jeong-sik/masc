@@ -84,7 +84,7 @@ let add_json_bool buf value =
 
 (* ── argv secret redaction ─────────────────────────────────────── *)
 
-let token_prefixes = [ "ghp_"; "github_pat_"; "sk-" ]
+let token_prefixes = [ "sk-" ]
 
 let is_token_char c =
   match c with

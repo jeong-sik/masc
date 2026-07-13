@@ -1,13 +1,4 @@
-(** Prompt metrics and adaptive inference helpers for keeper Agent.run turns. *)
-
-(** Promote the per-turn thinking budget when structured runtime signals
-    show a retry or previous tool error. *)
-val adaptive_thinking_budget :
-  enabled:bool ->
-  is_retry:bool ->
-  last_tool_results:Agent_sdk.Types.tool_result list ->
-  current_budget:int option ->
-  int option
+(** Prompt metrics for keeper Agent.run turns. *)
 
 (** Structured prompt result from [build_turn_prompt] callback.
     [system_prompt] holds hard constraints; [dynamic_context]

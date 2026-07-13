@@ -387,10 +387,15 @@ let handle ~(config : Workspace.config) args : tool_result =
   let names = requested_names ~config args in
   let invalid_names = List.filter (fun name -> not (validate_name name)) names in
   if Stdlib.List.length invalid_names > 0 then
-    tool_result_error
-      (error_response_typed
-         ~code:Validation_error
-         (Printf.sprintf "invalid keeper name(s): %s" (String.concat ", " invalid_names)))
+    tool_result_error_data
+      (error_assoc
+         [ "error_code", `String (error_code_to_string Validation_error)
+         ; ( "message"
+           , `String
+               (Printf.sprintf
+                  "invalid keeper name(s): %s"
+                  (String.concat ", " invalid_names)) )
+         ])
   else
     let limit = get_int args "limit" 100 |> max 0 |> min 500 in
     let include_ok = get_bool args "include_ok" true in
@@ -431,4 +436,4 @@ let handle ~(config : Workspace.config) args : tool_result =
         ("items", `List returned_items);
       ]
     in
-    tool_result_ok (ok_response base_fields)
+    tool_result_ok_data (ok_assoc base_fields)

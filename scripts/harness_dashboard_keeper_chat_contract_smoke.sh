@@ -163,7 +163,6 @@ fs.writeFileSync(metaPath, `${JSON.stringify({
   agent_name: `${keeper}-agent`,
   trace_id: 'trace-chat-contract-smoke',
   goal: 'fixture keeper for dashboard chat contract smoke',
-  tool_access: [],
 })}\n`);
 NODE
 

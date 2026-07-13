@@ -27,7 +27,7 @@ Scope:
 | `hook-observation` | OAS hook event parsing, metrics, and observational adapters. | OAS tool handler execution or keeper runtime dispatch. |
 | `oas-tool-bridge` | Keeper tool bridge for OAS bundle, handler, telemetry, JSON, markers, workflow, and deterministic errors. | Generic tool policy or non-OAS hook observation. |
 | `sandbox-runtime` | Sandbox containment, Docker runtime, read/session runners, executor, and shell IR target plumbing. | Tool naming policy or GitHub runtime. |
-| `shell-surface` | Shell command parsing, typed Execute input, shell ops, path, readonly policy, runtime paths, and timeout semantics. | Sandbox runtime or keeper tool registry/policy. |
+| `shell-surface` | Shell command parsing, typed Execute input, shell ops, path, runtime paths, and timeout semantics. | Sandbox runtime or keeper tool registry/policy. |
 | `tool-surface-policy` | Keeper tool aliasing, boundary, disclosure, diversity, emission, registry, policy, resolution, and tool-specific policy records. | OAS bridge implementation, shell parsing, sandbox execution. |
 
 ## Coverage Manifest
@@ -94,8 +94,6 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_sandbox_control_contract.mli` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_docker_container_name.ml` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_docker_container_name.mli` - sandbox-runtime
-- `lib/keeper/keeper_sandbox_docker_nested_runtime.ml` - sandbox-runtime
-- `lib/keeper/keeper_sandbox_docker_nested_runtime.mli` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_docker.ml` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_docker.mli` - sandbox-runtime
 - `lib/keeper_sandbox_error/keeper_sandbox_error.ml` - sandbox-runtime
@@ -128,29 +126,20 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tool_execute_input.mli` - shell-surface
 - `lib/keeper/keeper_tool_execute_runtime.ml` - shell-surface
 - `lib/keeper/keeper_tool_execute_runtime.mli` - shell-surface
-- `lib/keeper/keeper_tool_execute_command_semantics.ml` - shell-surface
-- `lib/keeper/keeper_tool_execute_command_semantics.mli` - shell-surface
 - `lib/keeper_tool_execute_shell_ir/keeper_tool_execute_shell_ir.ml` - shell-surface
 - `lib/keeper_tool_execute_shell_ir/keeper_tool_execute_shell_ir.mli` - shell-surface
 - `lib/keeper/keeper_tool_execute_path.ml` - shell-surface
 - `lib/keeper/keeper_tool_execute_path.mli` - shell-surface
-- `lib/keeper/keeper_tool_execute_readonly_policy.ml` - shell-surface
 - `lib/keeper/keeper_tool_execute_runtime_paths.ml` - shell-surface
 - `lib/keeper/keeper_tool_execute_runtime_paths.mli` - shell-surface
 - `lib/keeper_tool_execute_timeout/keeper_tool_execute_timeout.ml` - shell-surface
 - `lib/keeper_tool_execute_timeout/keeper_tool_execute_timeout.mli` - shell-surface
-- `lib/keeper/keeper_tool_affinity.ml` - tool-surface-policy
-- `lib/keeper/keeper_tool_affinity.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_alias.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_alias.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_execute_typed_input.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_execute_typed_input.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_boundary.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_boundary.mli` - tool-surface-policy
-- `lib/keeper/keeper_tool_capability_axis.ml` - tool-surface-policy
-- `lib/keeper/keeper_tool_capability_axis.mli` - tool-surface-policy
-- `lib/keeper/keeper_tool_deterministic_error.ml` - tool-surface-policy
-- `lib/keeper/keeper_tool_deterministic_error.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_descriptor.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_descriptor.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_descriptor_resolution.ml` - tool-surface-policy
@@ -159,8 +148,6 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper_tool_name/keeper_tool_name.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_query.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_query.mli` - tool-surface-policy
-- `lib/keeper/keeper_tool_selection.ml` - tool-surface-policy
-- `lib/keeper/keeper_tool_selection.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_diversity.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_diversity.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_emission_hook.ml` - tool-surface-policy
@@ -171,8 +158,6 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tool_persona_audit.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_policy.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_policy.mli` - tool-surface-policy
-- `lib/keeper/keeper_tool_progress.ml` - tool-surface-policy
-- `lib/keeper/keeper_tool_progress.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_progress_identity.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_progress_identity.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_inflight.ml` - tool-surface-policy
@@ -190,10 +175,6 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tool_visibility_projection.mli` - tool-surface-policy
 - `lib/keeper/keeper_tools_oas_bundle.ml` - oas-tool-bridge
 - `lib/keeper/keeper_tools_oas_bundle.mli` - oas-tool-bridge
-- `lib/keeper/keeper_tools_oas_deterministic_error.ml` - oas-tool-bridge
-- `lib/keeper/keeper_tools_oas_deterministic_error.mli` - oas-tool-bridge
-- `lib/keeper/keeper_tools_oas_failure_boundary.ml` - oas-tool-bridge
-- `lib/keeper/keeper_tools_oas_failure_boundary.mli` - oas-tool-bridge
 - `lib/keeper/keeper_tools_oas_handler_exec.ml` - oas-tool-bridge
 - `lib/keeper/keeper_tools_oas_handler_exec.mli` - oas-tool-bridge
 - `lib/keeper/keeper_tools_oas_handler_telemetry.ml` - oas-tool-bridge

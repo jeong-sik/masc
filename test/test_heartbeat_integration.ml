@@ -6,9 +6,7 @@
 
     1. Structured crash flow (3 catch branches)
     2. Dead tombstone lifecycle
-    3. Self-preservation gate (dominant cohort suppression)
-    4. Self-preservation passthrough (below threshold)
-    5. Reconcile predicate logic (sweep-owned vs reconcile-eligible)
+    3. Reconcile predicate logic (sweep-owned vs reconcile-eligible)
 
     @since Phase 2 post-merge improvement *)
 
@@ -23,7 +21,6 @@ module KSM = Keeper_state_machine
 module Cfg = Env_config
 module KHL = Masc.Keeper_heartbeat_loop
 module Keeper_lifecycle_admission = Masc.Keeper_lifecycle_admission
-module Obs = Masc.Keeper_heartbeat_loop_observations
 module WO = Masc.Keeper_world_observation
 module Health = Masc.Health
 module Lane = Masc.Keeper_lane
@@ -160,19 +157,6 @@ let configure_keeper_chat_persistence ~base_path =
     Alcotest.failf
       "keeper chat persistence fixture failed: %s"
       (String.concat "; " (List.map describe errors))
-let stale_paused_cleanup (meta : Keeper_meta_contract.keeper_meta)
-    : Shutdown_types.cleanup_intent
-  =
-  { reason =
-      Shutdown_types.Stale_paused_prune
-        { meta_version = meta.meta_version
-        ; last_updated = meta.updated_at
-        ; latched_reason = meta.latched_reason
-        }
-  ; remove_session = false
-  }
-;;
-
 let dashboard_purge_cleanup requested_name
     (meta : Keeper_meta_contract.keeper_meta)
     : Shutdown_types.cleanup_intent
@@ -203,8 +187,6 @@ let shutdown_schema3_fixture (operation : Shutdown_types.t) =
     | Shutdown_types.Operator_stop_retain_meta -> "retain_operator_pause"
     | Shutdown_types.Operator_stop_remove_meta -> "remove_meta"
     | Shutdown_types.Dead_tombstone_cleanup -> "retain_dead_tombstone"
-    | Shutdown_types.Stale_paused_prune _ ->
-      fail "schema 3 fixture cannot encode stale paused cleanup"
     | Shutdown_types.Dashboard_keeper_purge _ ->
       fail "schema 3 fixture cannot encode dashboard Keeper purge"
   in
@@ -262,15 +244,13 @@ let eio_test name fn =
   Fs_compat.set_fs (Eio.Stdenv.fs env); fn ())
 
 let base_observation : WO.world_observation =
-  { pending_mentions = []
+  { pending_messages = []
   ; pending_board_events = []
-  ; pending_scope_messages = []
   ; idle_seconds = 0
   ; active_goals = []
   ; context_ratio = lazy 0.0
   ; unclaimed_task_count = 0
   ; claimable_task_count = 0
-  ; provider_capacity_blocked_task_count = 0
   ; failed_task_count = 0
   ; pending_verification_count = 0
   ; scheduled_automation = WO.empty_scheduled_automation_observation
@@ -369,7 +349,7 @@ let test_crash_fiber_unresolved () =
    2. Dead tombstone lifecycle
    ══════════════════════════════════════════════════════════ *)
 
-(** Full lifecycle: Running → Crashed → budget exhausted → Dead.
+(** Full lifecycle: Running → Crashed → explicit tombstone → Dead.
     Verifies: Dead is terminal, is_registered=true, Dead→Running blocked,
     only unregister can remove a Dead entry. *)
 let test_dead_tombstone_full_lifecycle () =
@@ -382,14 +362,7 @@ let test_dead_tombstone_full_lifecycle () =
   resolve_done_for_test reg (`Crashed "test");
   ignore (R.dispatch_event ~base_path:bp "mortal"
     (KSM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }));
-  (* Simulate budget exhaustion *)
-  let max_restarts = Cfg.KeeperSupervisor.max_restarts in
-  R.restore_supervisor_state ~base_path:bp "mortal"
-    ~restart_count:max_restarts ~last_restart_ts:0.0 ~crash_log:[];
-  (match R.get ~base_path:bp "mortal" with
-   | Some e -> check bool "budget exhausted" true (e.restart_count >= max_restarts)
-   | None -> fail "expected mortal");
-  (* Transition to Dead (what sweep does) *)
+  (* Only an explicit durable tombstone transitions to Dead. *)
   R.mark_dead ~base_path:bp "mortal" ~at:(Unix.gettimeofday ());
   (* Invariant checks *)
   check bool "Dead is registered" true (R.is_registered ~base_path:bp "mortal");
@@ -412,75 +385,6 @@ let test_dead_tombstone_full_lifecycle () =
   R.unregister ~base_path:bp "mortal";
   check bool "gone after unregister" false
     (R.is_registered ~base_path:bp "mortal")
-
-(* ══════════════════════════════════════════════════════════
-   3. Self-preservation: dominant cohort suppressed
-   ══════════════════════════════════════════════════════════ *)
-
-(** 3 keepers crashed with same reason, 1 non-dominant.
-    With total_keepers=4, ratio=3/4=0.75 > 0.3, candidates=3 >= min(2).
-    Dominant cohort (heartbeat) suppressed, non-dominant (exception) passes. *)
-let test_self_preservation_suppresses_dominant () =
-  R.clear ();
-  (* Create 3 heartbeat-failure entries + 1 exception entry *)
-  let names = ["sp-hb1"; "sp-hb2"; "sp-hb3"; "sp-exn"] in
-  let entries = List.map (fun name ->
-    let _reg = R.register ~base_path:bp name (make_meta name) in
-    ignore (R.dispatch_event ~base_path:bp name
-      (KSM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }));
-    let reason = if String.length name > 4 && String.sub name 3 2 = "hb"
-      then Some (R.Heartbeat_consecutive_failures 5)
-      else Some (R.Exception "timeout") in
-    R.set_failure_reason ~base_path:bp name reason;
-    match R.get ~base_path:bp name with
-    | Some e -> (e, "crash msg")
-    | None -> fail ("missing entry: " ^ name)
-  ) names in
-  (* Only the first 3 are heartbeat failures *)
-  let to_restart = List.filteri (fun i _ -> i <> 3) entries in
-  (* total=4: all keepers including the running one *)
-  let result = Sup.apply_self_preservation ~keepers_dir:"/tmp/test-keepers" ~total_keepers:4
-    (to_restart @ [List.nth entries 3]) in
-  (* Dominant cohort (heartbeat, 3 entries) should be suppressed.
-     Only the exception entry (1) should remain. *)
-  check int "only non-dominant survives" 1 (List.length result);
-  let survivor_name = (fst (List.hd result)).R.name in
-  check string "survivor is exception entry" "sp-exn" survivor_name
-
-(* ══════════════════════════════════════════════════════════
-   4. Self-preservation: below threshold — all pass through
-   ══════════════════════════════════════════════════════════ *)
-
-(** 1 crashed out of 10 total: ratio=0.1 < 0.3.
-    Self-preservation gate does not activate. *)
-let test_self_preservation_below_threshold () =
-  R.clear ();
-  let _reg = R.register ~base_path:bp "lone" (make_meta "lone") in
-  ignore (R.dispatch_event ~base_path:bp "lone"
-    (KSM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }));
-  R.set_failure_reason ~base_path:bp "lone"
-    (Some (R.Heartbeat_consecutive_failures 3));
-  let entry = match R.get ~base_path:bp "lone" with
-    | Some e -> e | None -> fail "missing lone" in
-  let to_restart = [(entry, "crash")] in
-  let result = Sup.apply_self_preservation ~keepers_dir:"/tmp/test-keepers" ~total_keepers:10 to_restart in
-  check int "all pass through" 1 (List.length result)
-
-(** min_candidates not met: 1 candidate < 2 minimum.
-    Even with high ratio, gate does not activate. *)
-let test_self_preservation_min_candidates_not_met () =
-  R.clear ();
-  let _reg = R.register ~base_path:bp "solo" (make_meta "solo") in
-  ignore (R.dispatch_event ~base_path:bp "solo"
-    (KSM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }));
-  R.set_failure_reason ~base_path:bp "solo"
-    (Some (R.Heartbeat_consecutive_failures 3));
-  let entry = match R.get ~base_path:bp "solo" with
-    | Some e -> e | None -> fail "missing solo" in
-  let to_restart = [(entry, "crash")] in
-  (* ratio = 1/1 = 1.0 > 0.3, BUT candidates=1 < min(2) *)
-  let result = Sup.apply_self_preservation ~keepers_dir:"/tmp/test-keepers" ~total_keepers:1 to_restart in
-  check int "passes despite high ratio" 1 (List.length result)
 
 (* ══════════════════════════════════════════════════════════
    5. Reconcile predicate: sweep-owned vs reconcile-eligible
@@ -529,7 +433,7 @@ let test_reconcile_predicate_stopped_resolved () =
        (Option.is_some (Eio.Promise.peek e.done_p));
      (* dominated_by_sweep logic: Stopped with resolved → NOT dominated *)
      let dominated = match e.phase with
-       | KSM.Running | KSM.Paused | KSM.Crashed | KSM.Dead | KSM.Zombie -> true
+       | KSM.Running | KSM.Paused | KSM.Crashed | KSM.Dead -> true
        | KSM.Failing | KSM.Overflowed | KSM.Compacting | KSM.HandingOff
        | KSM.Draining | KSM.Restarting -> true
        | KSM.Offline -> false
@@ -550,7 +454,7 @@ let test_reconcile_predicate_stopped_unresolved () =
      check bool "done_p NOT resolved" true
        (Option.is_none (Eio.Promise.peek e.done_p));
      let dominated = match e.phase with
-       | KSM.Running | KSM.Paused | KSM.Crashed | KSM.Dead | KSM.Zombie -> true
+       | KSM.Running | KSM.Paused | KSM.Crashed | KSM.Dead -> true
        | KSM.Failing | KSM.Overflowed | KSM.Compacting | KSM.HandingOff
        | KSM.Draining | KSM.Restarting -> true
        | KSM.Offline -> false
@@ -619,9 +523,9 @@ let test_crash_turn_failures () =
      | _ -> fail "expected Turn_consecutive_failures");
     check bool "crash log" true (List.length e.crash_log > 0)
 
-(** Turn failures produce a distinct cohort key for self-preservation. *)
+(** Turn failures retain a distinct typed grouping key for crash observation. *)
 let test_cohort_key_turn_failures () =
-  let key = Sup.cohort_key_of_reason
+  let key = R.failure_reason_cohort_key
     (Some (R.Turn_consecutive_failures 10)) in
   check string "turn failure cohort" "turn_failures" key
 
@@ -658,7 +562,7 @@ let test_fresh_presence_preserves_turn_failures () =
         (R.dispatch_event
            ~base_path:config.base_path
            meta.name
-           (KSM.Turn_failed { consecutive = 1; max_allowed = 3 }));
+           (KSM.Turn_failed { consecutive = 1 }));
       (match R.get_phase ~base_path:config.base_path meta.name with
        | Some phase -> check string "phase after turn failure" "failing" (KSM.phase_to_string phase)
        | None -> fail "expected registered keeper phase");
@@ -706,11 +610,10 @@ let test_crashed_cycle_records_turn_failure () =
       check int "crash recorded as turn failure" 1 count;
       (* Same registry read + event mapping the caller loop performs
          after [run_keepalive_unified_turn] returns. *)
-      let event = KHL.turn_status_event ~turn_fail_count:count ~max_allowed:10 in
+      let event = KHL.turn_status_event ~turn_fail_count:count in
       (match event with
-       | KSM.Turn_failed { consecutive; max_allowed } ->
-         check int "consecutive" 1 consecutive;
-         check int "max_allowed" 10 max_allowed
+       | KSM.Turn_failed { consecutive } ->
+         check int "consecutive" 1 consecutive
        | _ -> fail "expected Turn_failed for crashed cycle");
       ignore (R.dispatch_event ~base_path:config.base_path meta.name event);
       (match R.get_phase ~base_path:config.base_path meta.name with
@@ -719,7 +622,7 @@ let test_crashed_cycle_records_turn_failure () =
            (KSM.phase_to_string phase)
        | None -> fail "expected registered keeper phase");
       (* Clean cycle (count = 0) still maps to Turn_succeeded. *)
-      match KHL.turn_status_event ~turn_fail_count:0 ~max_allowed:10 with
+      match KHL.turn_status_event ~turn_fail_count:0 with
       | KSM.Turn_succeeded -> ()
       | _ -> fail "expected Turn_succeeded when no failures recorded")
 
@@ -1507,268 +1410,6 @@ let test_dashboard_purge_resolution_is_fail_closed () =
       | Error error -> fail (Dashboard_purge.resolve_error_to_string error)
       | Ok _ -> fail "configuration-only Keeper fell through to agent purge")
 ;;
-
-let test_stale_prune_dormant_prepare_rejects_version_change () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let base_dir = temp_dir "stale-prune-prepare-version" in
-  Fun.protect
-    ~finally:(fun () ->
-      Masc.Keeper_turn_admission.For_testing.reset ();
-      R.clear ();
-      cleanup_dir base_dir)
-    (fun () ->
-      let config = Masc.Workspace.default_config base_dir in
-      let (_init_message : string) =
-        Masc.Workspace.init config ~agent_name:(Some "supervisor")
-      in
-      let name = "stale-prune-version-race" in
-      let initial =
-        { (make_meta name) with
-          paused = true
-        ; updated_at = "2026-01-01T00:00:00Z"
-        }
-      in
-      (match Keeper_meta_store.write_meta config initial with
-       | Ok () -> ()
-       | Error detail -> fail detail);
-      let observed =
-        match Keeper_meta_store.read_meta config name with
-        | Ok (Some meta) -> meta
-        | Ok None -> fail "stale prune fixture metadata disappeared"
-        | Error detail -> fail detail
-      in
-      (match Keeper_meta_store.write_meta config observed with
-       | Ok () -> ()
-       | Error detail -> fail detail);
-      let latest =
-        match Keeper_meta_store.read_meta config name with
-        | Ok (Some meta) -> meta
-        | Ok None -> fail "version-raced metadata disappeared"
-        | Error detail -> fail detail
-      in
-      check int
-        "precondition: metadata version advanced"
-        (observed.meta_version + 1)
-        latest.meta_version;
-      (match
-         Shutdown_prepare_join.prepare_dormant
-           ~config
-           ~meta:observed
-           ~request:
-             { actor = "supervisor"
-             ; cleanup_intent = stale_paused_cleanup observed
-             }
-       with
-       | Error
-           (Shutdown_prepare_join.Meta_snapshot_version_changed
-             { expected; actual }) ->
-         check int "guard expected version" observed.meta_version expected;
-         check int "guard actual version" latest.meta_version actual
-       | Error error -> fail (Shutdown_prepare_join.error_to_string error)
-       | Ok _ -> fail "stale prune accepted metadata after its version changed");
-      let snapshot =
-        Masc.Keeper_turn_admission.snapshot_for
-          ~base_path:config.base_path
-          ~keeper_name:name
-      in
-      check bool
-        "failed dormant prepare rolls back admission"
-        true
-        (Option.is_none snapshot.snapshot_shutdown_operation_id);
-      (match Shutdown_store.list_for_keeper ~config ~keeper_name:name with
-       | Ok [] -> ()
-       | Ok _ -> fail "failed dormant prepare persisted a shutdown operation"
-       | Error error -> fail (Shutdown_store.error_to_string error)))
-
-let test_stale_prune_registered_prepare_requires_paused_lane () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let base_dir = temp_dir "stale-prune-phase-guard" in
-  Fun.protect
-    ~finally:(fun () ->
-      Masc.Keeper_turn_admission.For_testing.reset ();
-      R.clear ();
-      cleanup_dir base_dir)
-    (fun () ->
-      let config = Masc.Workspace.default_config base_dir in
-      let (_init_message : string) =
-        Masc.Workspace.init config ~agent_name:(Some "supervisor")
-      in
-      let name = "stale-prune-running-lane" in
-      let initial =
-        { (make_meta name) with
-          paused = true
-        ; updated_at = "2026-01-01T00:00:00Z"
-        }
-      in
-      (match Keeper_meta_store.write_meta config initial with
-       | Ok () -> ()
-       | Error detail -> fail detail);
-      let observed =
-        match Keeper_meta_store.read_meta config name with
-        | Ok (Some meta) -> meta
-        | Ok None -> fail "stale prune fixture metadata disappeared"
-        | Error detail -> fail detail
-      in
-      let entry = R.register ~base_path:config.base_path name observed in
-      check string
-        "precondition: registered lane is running"
-        "running"
-        (KSM.phase_to_string entry.phase);
-      (match
-         Shutdown_prepare_join.prepare
-           ~config
-           ~entry
-           ~request:
-             { actor = "supervisor"
-             ; cleanup_intent = stale_paused_cleanup observed
-             }
-       with
-       | Error (Shutdown_prepare_join.Stale_prune_lane_not_paused KSM.Running) ->
-         ()
-       | Error error -> fail (Shutdown_prepare_join.error_to_string error)
-       | Ok _ -> fail "stale prune accepted a non-paused registered lane");
-      let snapshot =
-        Masc.Keeper_turn_admission.snapshot_for
-          ~base_path:config.base_path
-          ~keeper_name:name
-      in
-      check bool
-        "failed registered prepare rolls back admission"
-        true
-        (Option.is_none snapshot.snapshot_shutdown_operation_id))
-
-let test_stale_prune_cleanup_ready_preserves_newer_meta () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let base_dir = temp_dir "stale-prune-finalize-version" in
-  Fun.protect
-    ~finally:(fun () ->
-      Masc.Keeper_turn_admission.For_testing.reset ();
-      R.clear ();
-      cleanup_dir base_dir)
-    (fun () ->
-      let config = Masc.Workspace.default_config base_dir in
-      let (_init_message : string) =
-        Masc.Workspace.init config ~agent_name:(Some "supervisor")
-      in
-      let name = "stale-prune-finalize-race" in
-      let initial =
-        { (make_meta name) with
-          paused = true
-        ; updated_at = "2026-01-01T00:00:00Z"
-        }
-      in
-      (match Keeper_meta_store.write_meta config initial with
-       | Ok () -> ()
-       | Error detail -> fail detail);
-      let observed =
-        match Keeper_meta_store.read_meta config name with
-        | Ok (Some meta) -> meta
-        | Ok None -> fail "stale prune fixture metadata disappeared"
-        | Error detail -> fail detail
-      in
-      let backlog_version =
-        match Workspace_backlog.read_backlog_r config with
-        | Ok backlog -> backlog.version
-        | Error detail -> fail detail
-      in
-      let operation : Shutdown_types.t =
-        { schema_version = Shutdown_types.schema_version
-        ; revision = 0
-        ; operation_id = Shutdown_types.Operation_id.generate ()
-        ; keeper_name = name
-        ; lane_ownership = Shutdown_types.Dormant_meta
-        ; trace_id = observed.runtime.trace_id
-        ; generation = observed.runtime.generation
-        ; actor = "supervisor"
-        ; cleanup_intent = stale_paused_cleanup observed
-        ; turn_disposition = Shutdown_types.No_inflight_turn
-        ; expected_backlog_version = backlog_version
-        ; owned_task_ids = []
-        ; join_evidence = None
-        ; phase =
-            Shutdown_types.Cleanup_ready
-              { settled_task_ids = []; pending_confirms_removed = 0 }
-        ; created_at = Masc_domain.now_iso ()
-        ; updated_at = Masc_domain.now_iso ()
-        }
-      in
-      (match Shutdown_store.persist_new ~config operation with
-       | Ok () -> ()
-       | Error error -> fail (Shutdown_store.error_to_string error));
-      (match
-         Masc.Keeper_turn_admission.restore_shutdown
-           ~base_path:config.base_path
-           ~keeper_name:name
-           ~operation_id:operation.operation_id
-       with
-       | Masc.Keeper_turn_admission.Shutdown_restored -> ()
-       | Masc.Keeper_turn_admission.Shutdown_already_restored
-       | Masc.Keeper_turn_admission.Shutdown_restore_conflict _ ->
-         fail "stale prune fixture could not restore its admission owner");
-      (match Keeper_meta_store.write_meta config observed with
-       | Ok () -> ()
-       | Error detail -> fail detail);
-      let latest =
-        match Keeper_meta_store.read_meta config name with
-        | Ok (Some meta) -> meta
-        | Ok None -> fail "version-raced metadata disappeared"
-        | Error detail -> fail detail
-      in
-      (match Shutdown_finalize.run ~config ~entry:None operation with
-       | Error
-           (Shutdown_finalize.Finalization_blocked
-             { phase =
-                 Shutdown_types.Blocked
-                   { stage = Shutdown_types.Meta_remove; _ }
-             ; _
-             }) -> ()
-       | Error error -> fail (Shutdown_finalize.error_to_string error)
-       | Ok _ -> fail "stale prune deleted metadata after its version changed");
-      let preserved =
-        match Keeper_meta_store.read_meta config name with
-        | Ok (Some meta) -> meta
-        | Ok None -> fail "stale prune removed newer metadata"
-        | Error detail -> fail detail
-      in
-      check int
-        "newer metadata version is preserved"
-        latest.meta_version
-        preserved.meta_version;
-      let durable =
-        match
-          Shutdown_store.load
-            ~config
-            ~keeper_name:name
-            operation.operation_id
-        with
-        | Ok operation -> operation
-        | Error error -> fail (Shutdown_store.error_to_string error)
-      in
-      (match durable.phase with
-       | Shutdown_types.Blocked { stage = Shutdown_types.Meta_remove; _ } -> ()
-       | Shutdown_types.Prepared
-       | Shutdown_types.Joined_idle
-       | Shutdown_types.Finalizing_tasks _
-       | Shutdown_types.Cleanup_ready _
-       | Shutdown_types.Reconciliation_required _
-       | Shutdown_types.Finalized _
-       | Shutdown_types.Blocked _ ->
-         fail "stale prune version race was not durably blocked");
-      let snapshot =
-        Masc.Keeper_turn_admission.snapshot_for
-          ~base_path:config.base_path
-          ~keeper_name:name
-      in
-      check bool
-        "blocked destructive cleanup keeps admission fenced"
-        true
-        (match snapshot.snapshot_shutdown_operation_id with
-         | Some operation_id ->
-           Shutdown_types.Operation_id.equal operation.operation_id operation_id
-         | None -> false))
 
 let test_keeper_shutdown_prepare_joins_idle_lane () =
   Eio_main.run @@ fun env ->
@@ -2799,7 +2440,7 @@ let test_start_keepalive_preserves_unresolved_failing_entry () =
         (R.dispatch_event
            ~base_path:config.base_path
            keeper_name
-           (KSM.Turn_failed { consecutive = 1; max_allowed = 3 }));
+           (KSM.Turn_failed { consecutive = 1 }));
       Eio.Switch.run @@ fun sw ->
       let ctx : _ Keeper_types_profile.context =
         {
@@ -2844,7 +2485,7 @@ let test_start_keepalive_reclaims_finished_failing_entry () =
         (R.dispatch_event
            ~base_path:config.base_path
            keeper_name
-           (KSM.Turn_failed { consecutive = 1; max_allowed = 3 }));
+           (KSM.Turn_failed { consecutive = 1 }));
       resolve_done_for_test original (`Crashed "provider runtime error");
       Eio.Switch.run @@ fun sw ->
       let ctx : _ Keeper_types_profile.context =
@@ -2933,9 +2574,7 @@ let test_resolve_done_reports_prior_outcome () =
 (* ══════════════════════════════════════════════════════════
    9. RFC-0002: pipeline_stage_of_phase deterministic mapping
 
-   NOTE: The "set_failure_reason before raise Keeper_fiber_crash"
-   ordering invariant is a code convention enforced by review,
-   not a runtime property testable by unit tests. See PR #5560.
+   Failure streaks are observational and do not terminate the Keeper lane.
    ══════════════════════════════════════════════════════════ *)
 
 module ES = Masc.Keeper_status_runtime
@@ -2968,7 +2607,7 @@ let test_pipeline_stage_detail_distinguishes_offline_projection () =
   let cases = [
     (KSM.Offline, "offline", "launch_pending_no_fiber");
     (KSM.Stopped, "offline", "clean_stop_terminal");
-    (KSM.Dead, "offline", "restart_budget_exhausted_terminal");
+    (KSM.Dead, "offline", "dead_tombstone_terminal");
   ] in
   List.iter
     (fun (phase, expected_stage, expected_detail) ->
@@ -3035,138 +2674,74 @@ let test_pipeline_stage_sensitivity () =
       "offline" stage
   ) offline_phases
 
-let test_runtime_backpressure_blocks_requested_turn () =
-  let meta = make_meta "runtime-backpressure" in
+let test_runtime_observation_cannot_block_requested_turn () =
+  let meta = make_meta "runtime-observation" in
   let obs =
     { base_observation with
-      pending_mentions = [ "operator", "please run" ]
+      pending_messages =
+        [ { Masc.Keeper_world_observation_message_scope.message_id = "mention-1"
+          ; speaker = "operator"
+          ; content = "please run"
+          ; kind = Mention
+          }
+        ]
     }
   in
   let decision =
     KHL.decide_keepalive_scheduling
-      ~runtime_id_of_meta:(fun _ -> "runtime-test")
-      ~runtime_resilience_of_name:(fun _ -> Some "provider_capacity")
       ~stop:(Atomic.make false)
       ~meta
       obs
   in
-  check bool "world observation requested a turn" true
-    decision.requested_should_run_turn;
-  check bool "runtime backpressure blocks admission" false decision.should_run_turn;
-  (match decision.runtime_backpressure with
-   | Obs.Runtime_backpressured { reason; _ } ->
-     check string "backpressure reason" "runtime_resilience_provider_capacity" reason
-   | Obs.Runtime_admitted -> fail "runtime backpressure should reject turn");
-  check bool "verdict reasons include runtime backpressure" true
-    (List.mem "runtime_backpressure" decision.verdict_reasons)
+  check bool "eligible turn reaches runtime boundary" true decision.should_run_turn;
+  check (list string) "only the typed mention reason is retained"
+    [ "mention_pending" ]
+    decision.verdict_reasons
 
-let test_keeper_health_backpressure_uses_keeper_name () =
-  let meta = make_meta "keeper-health-gate" in
-  let obs = { base_observation with pending_mentions = [ "operator", "please run" ] } in
-  let consulted = ref [] in
-  let decision =
-    KHL.decide_keepalive_scheduling
-      ~runtime_id_of_meta:(fun _ -> "runtime-test")
-      ~runtime_resilience_of_name:(fun _ ->
-        fail "runtime resilience should not be consulted after keeper health blocks")
-      ~keeper_resilience_of_name:(fun keeper_name ->
-        consulted := keeper_name :: !consulted;
-        Some "unhealthy")
-      ~stop:(Atomic.make false)
-      ~meta
-      obs
-  in
-  check (list string) "keeper health consulted by keeper name" [ meta.name ] !consulted;
-  check bool "world observation requested a turn" true decision.requested_should_run_turn;
-  check bool "keeper health blocks admission" false decision.should_run_turn;
-  (match decision.runtime_backpressure with
-   | Obs.Runtime_backpressured { reason; _ } ->
-     check string "keeper health reason" "keeper_health_unhealthy" reason
-   | Obs.Runtime_admitted -> fail "keeper health should reject turn")
-
-let test_pacing_block_delays_requested_turn () =
-  (* RFC-0313 W3: with pacing enforced, the caller wires
-     [Keeper_pacing_shadow.next_due_remaining] as [pacing_block_of_name];
-     a positive remaining delay gates the requested turn without touching
-     keeper existence. *)
-  let meta = make_meta "pacing-gate" in
+let test_explicit_stop_blocks_requested_turn () =
+  let meta = make_meta "stopped-scheduling" in
   let obs =
-    { base_observation with pending_mentions = [ "operator", "please run" ] }
+    { base_observation with
+      pending_messages =
+        [ { Masc.Keeper_world_observation_message_scope.message_id = "mention-1"
+          ; speaker = "operator"
+          ; content = "please run"
+          ; kind = Mention
+          }
+        ]
+    }
   in
-  let consulted = ref [] in
   let decision =
     KHL.decide_keepalive_scheduling
-      ~runtime_id_of_meta:(fun _ -> "runtime-test")
-      ~pacing_block_of_name:(fun keeper_name ->
-        consulted := keeper_name :: !consulted;
-        Some 42.0)
-      ~stop:(Atomic.make false)
+      ~stop:(Atomic.make true)
       ~meta
       obs
   in
-  check (list string) "pacing consulted by keeper name" [ meta.name ] !consulted;
-  check bool "world observation requested a turn" true
-    decision.requested_should_run_turn;
-  check bool "pacing block delays admission" false decision.should_run_turn;
-  (match decision.pacing_block with
-   | Some remaining ->
-     check (float 1e-6) "remaining seconds surfaced" 42.0 remaining
-   | None -> fail "pacing_block should carry the remaining delay");
-  check bool "verdict reasons include pacing_pending" true
-    (List.mem "pacing_pending" decision.verdict_reasons);
-  let admitted =
-    KHL.decide_keepalive_scheduling
-      ~runtime_id_of_meta:(fun _ -> "runtime-test")
-      ~stop:(Atomic.make false)
-      ~meta
-      obs
-  in
-  check bool "default pacing closure never blocks" true admitted.should_run_turn
+  check bool "explicit loop stop prevents dispatch" false decision.should_run_turn
 
-let test_blocking_gates_are_classified_before_intake () =
+let test_turn_intake_uses_only_lifecycle () =
   let lifecycle =
     Keeper_lifecycle_admission.Autonomous_admitted
   in
   (match
-     KHL.classify_turn_intake_admission
-       ~lifecycle
-       ~pressure:Keeper_pressure_admission.Admitted
-       ~blocking_approval_pending:true
+     KHL.classify_turn_intake_admission ~lifecycle
    with
-   | KHL.Intake_blocking_approval_pending -> ()
-   | KHL.Intake_admitted
-   | KHL.Intake_lifecycle_blocked _
-   | KHL.Intake_pressure_blocked _ ->
-     fail "blocking approval must stop intake before durable dequeue");
+   | KHL.Intake_admitted -> ()
+   | KHL.Intake_lifecycle_blocked _ ->
+     fail "active lifecycle must admit intake");
   let paused_lifecycle =
     Keeper_lifecycle_admission.state ~paused:true ~latched_reason:None
     |> Keeper_lifecycle_admission.admit_autonomous
   in
   (match
-     KHL.classify_turn_intake_admission
-       ~lifecycle:paused_lifecycle
-       ~pressure:Keeper_pressure_admission.Admitted
-       ~blocking_approval_pending:false
+     KHL.classify_turn_intake_admission ~lifecycle:paused_lifecycle
    with
    | KHL.Intake_lifecycle_blocked
        (Keeper_lifecycle_admission.Autonomous_paused _) -> ()
    | KHL.Intake_admitted
    | KHL.Intake_lifecycle_blocked
-       Keeper_lifecycle_admission.Autonomous_dead_tombstone
-   | KHL.Intake_blocking_approval_pending
-   | KHL.Intake_pressure_blocked _ ->
-     fail "explicit Keeper pause must stop intake before durable dequeue");
-  match
-    KHL.classify_turn_intake_admission
-      ~lifecycle
-      ~pressure:Keeper_pressure_admission.Admitted
-      ~blocking_approval_pending:false
-  with
-  | KHL.Intake_admitted -> ()
-  | KHL.Intake_lifecycle_blocked _
-  | KHL.Intake_blocking_approval_pending
-  | KHL.Intake_pressure_blocked _ ->
-    fail "no blocking approval should leave intake admitted"
+       Keeper_lifecycle_admission.Autonomous_dead_tombstone ->
+     fail "explicit Keeper pause must stop intake before durable dequeue")
 
 let test_lifecycle_is_classified_before_intake () =
   let lifecycle =
@@ -3174,18 +2749,13 @@ let test_lifecycle_is_classified_before_intake () =
       Keeper_lifecycle_admission.Autonomous_dead_tombstone
   in
   match
-    KHL.classify_turn_intake_admission
-      ~lifecycle
-      ~pressure:Keeper_pressure_admission.Admitted
-      ~blocking_approval_pending:false
+    KHL.classify_turn_intake_admission ~lifecycle
   with
   | KHL.Intake_lifecycle_blocked
       Keeper_lifecycle_admission.Autonomous_dead_tombstone -> ()
   | KHL.Intake_admitted
   | KHL.Intake_lifecycle_blocked
-      (Keeper_lifecycle_admission.Autonomous_paused _)
-  | KHL.Intake_blocking_approval_pending
-  | KHL.Intake_pressure_blocked _ ->
+      (Keeper_lifecycle_admission.Autonomous_paused _) ->
     fail "dead lifecycle must stop intake before durable dequeue"
 
 let test_crashed_cycle_records_health_failure () =
@@ -3218,11 +2788,6 @@ let () =
     ];
     "dead_tombstone", [
       eio_test "full lifecycle" test_dead_tombstone_full_lifecycle;
-    ];
-    "self_preservation", [
-      eio_test "suppresses dominant cohort" test_self_preservation_suppresses_dominant;
-      eio_test "below threshold passes" test_self_preservation_below_threshold;
-      eio_test "min candidates not met" test_self_preservation_min_candidates_not_met;
     ];
     "reconcile_predicates", [
       eio_test "sweep-owned states" test_reconcile_predicate_sweep_owned;
@@ -3259,12 +2824,6 @@ let () =
         test_keeper_shutdown_store_isolates_corrupt_owner;
       test_case "dashboard purge resolution is fail closed" `Quick
         test_dashboard_purge_resolution_is_fail_closed;
-      test_case "stale dormant prepare rejects a newer meta version" `Quick
-        test_stale_prune_dormant_prepare_rejects_version_change;
-      test_case "stale registered prepare requires a paused lane" `Quick
-        test_stale_prune_registered_prepare_requires_paused_lane;
-      test_case "stale cleanup-ready preserves a newer meta version" `Quick
-        test_stale_prune_cleanup_ready_preserves_newer_meta;
       test_case "shutdown prepare joins idle lane" `Quick
         test_keeper_shutdown_prepare_joins_idle_lane;
       test_case "shutdown prepare joins not-started lane" `Quick
@@ -3305,15 +2864,13 @@ let () =
         test_pipeline_stage_sensitivity;
     ];
     "scheduling", [
-      test_case "runtime backpressure blocks requested turn" `Quick
-        test_runtime_backpressure_blocks_requested_turn;
-      test_case "keeper health blocks by keeper name" `Quick
-        test_keeper_health_backpressure_uses_keeper_name;
-      test_case "pacing block delays requested turn (RFC-0313 W3)" `Quick
-        test_pacing_block_delays_requested_turn;
-      test_case "blocking gates are classified before intake" `Quick
-        test_blocking_gates_are_classified_before_intake;
-      test_case "lifecycle is classified before intake" `Quick
+      test_case "runtime observations cannot block requested turn" `Quick
+        test_runtime_observation_cannot_block_requested_turn;
+      test_case "explicit stop blocks requested turn" `Quick
+        test_explicit_stop_blocks_requested_turn;
+      test_case "active and paused lifecycle classify intake" `Quick
+        test_turn_intake_uses_only_lifecycle;
+      test_case "dead lifecycle is classified before intake" `Quick
         test_lifecycle_is_classified_before_intake;
       test_case "crashed cycles feed agent health breaker" `Quick
         test_crashed_cycle_records_health_failure;

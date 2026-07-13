@@ -37,9 +37,6 @@ val key_cost_status_reason : string
 val key_cost_usd_source : string
 val key_usage_missing : string
 val key_timestamp : string
-val key_raw_input_tokens : string
-val key_raw_output_tokens : string
-val key_raw_cost_usd : string
 val key_reasoning_tokens : string
 val key_cache_n : string
 val key_prompt_per_second : string
@@ -75,7 +72,6 @@ val key_duration_ms : string
 val key_channel : string
 val key_error : string
 val key_ts : string
-val key_max_cost_usd : string
 
 (** Callback name labels used as Otel_metric_store + log identifiers. *)
 val callback_label_after_turn_sse_broadcast : string
@@ -85,14 +81,13 @@ val callback_label_on_error : string
 val callback_label_on_tool_error : string
 
 type cost_status =
-  | Cost_reported         (** Cost trusted because OAS reported it. *)
+  | Cost_reported         (** Cost value was reported by OAS. *)
   | Cost_known_free       (** Runtime is structurally unmetered. *)
   | Cost_no_tokens        (** Usage carried zero tokens and no positive cost. *)
   | Cost_usage_missing    (** OAS returned no usage record. *)
-  | Cost_usage_untrusted  (** Usage failed [classify_usage_trust]. *)
   | Cost_runtime_unknown  (** Runtime owner could not be classified. *)
   | Cost_oas_cost_unreported
-      (** OAS returned trusted billable usage but did not report cost. *)
+      (** OAS returned token usage but did not report cost. *)
 (** Per-event cost-ledger verdict. *)
 
 val cost_status_to_string : cost_status -> string
@@ -105,7 +100,6 @@ val cost_status_for_event :
   runtime_unknown:bool ->
   runtime_unmetered:bool ->
   usage_missing:bool ->
-  usage_trusted:bool ->
   input_tokens:int -> output_tokens:int -> cost_usd:float -> cost_status
 (** Pure decision: which [cost_status] applies given the inputs above? *)
 
@@ -113,7 +107,6 @@ val cost_status_for_event :
     [classify_cost_usd_source] which composes a string verdict separately
     from [cost_status_to_string]. *)
 val cost_label_usage_missing : string
-val cost_label_usage_untrusted : string
 val cost_label_oas_cost_unreported : string
 
 val redact_inference_telemetry_json : Yojson.Safe.t -> Yojson.Safe.t
@@ -166,7 +159,6 @@ val tool_execution_summary :
 val usage_has_tokens : Agent_sdk.Types.api_usage -> bool
 (** [true] when the usage record carries a non-zero token count. *)
 
-val is_keeper_board_write_tool_name : string -> bool
 (** [true] when the tool writes to the shared MASC board; subject to
     extra guard rules. *)
 
@@ -211,4 +203,4 @@ val cost_source_computed : string
 (** Internal: cost-source labels used by classify_cost_usd_source. *)
 
 val oas_reported_cost : Agent_sdk.Types.api_usage -> float
-(** Internal: extract positive cost from usage; clamps None/0/negative to 0.0. *)
+(** Internal: preserve a reported cost verbatim; missing uses [0.0]. *)

@@ -48,7 +48,6 @@ let string_of_tag (tag : Tool_dispatch.module_tag) : string =
   | Mod_keeper_task -> "keeper_task"
   | Mod_library -> "library"
   | Mod_task -> "task"
-  | Mod_shard -> "shard"
   | Mod_plan -> "plan"
   | Mod_local_runtime -> "local_runtime"
   | Mod_run -> "run"
@@ -86,15 +85,14 @@ let dispatch
   : Tool_result.result option
   =
   let start_time = Time_compat.now () in
-  let ok msg = Tool_result.ok ~tool_name:name ~start_time msg in
   let err msg = Tool_result.error ~tool_name:name ~start_time msg in
   (* RFC-0189: separate *deliberate caller-misuse rejections* (wrong
      client, wrong surface, deprecated tool) from *runtime/dispatch
      errors* (Tool_local_runtime non-zero exit, try-catch fallback).
      The [workflow_err] sites below answer caller-misuse: keeper
-     used a tool from the wrong surface or context.  [err] retains
-     auto-classify for branches where the upstream message lacks a
-     typed failure variant. *)
+     used a tool from the wrong surface or context.  [err] uses the
+     constructor's explicit [Runtime_failure] fallback where the upstream
+     boundary has no typed failure variant; message text remains opaque. *)
   let workflow_err msg =
     Tool_result.error
       ~failure_class:(Some Tool_result.Workflow_rejection)
@@ -110,7 +108,11 @@ let dispatch
     | Mod_plan -> Tool_plan.dispatch { config } ~name ~args
     | Mod_local_runtime ->
       Tool_local_runtime.dispatch
-        ({ Tool_local_runtime_core.config; agent_name } : Tool_local_runtime_core.context)
+        ({ Tool_local_runtime_core.config
+         ; agent_name
+         ; authorize_external_effect = None
+         }
+         : Tool_local_runtime_core.context)
         ~name
         ~args
     | Mod_run ->
@@ -122,15 +124,7 @@ let dispatch
         ~name
         ~args
     | Mod_control ->
-      if name = "masc_pause_status"
-      then Tool_control.dispatch { Tool_control.config; agent_name } ~name ~args
-      else
-        Some
-          (err
-             (Printf.sprintf
-                "tool '%s' is blocked in keeper context (lifecycle-mutating Mod_control \
-                 tools are operator-only)"
-                name))
+      Tool_control.dispatch { Tool_control.config; agent_name } ~name ~args
     | Mod_agent_timeline ->
       Tool_agent_timeline.dispatch
         ~load_chat:(fun ~agent_name:requested_agent_name ->
@@ -143,11 +137,6 @@ let dispatch
     | Mod_misc -> Tool_misc.dispatch { Tool_misc.config; agent_name } ~name ~args
     | Mod_library -> Tool_library.dispatch { Tool_library.agent_name } ~name ~args
     | Mod_recurring -> Keeper_recurring_tool.dispatch ~agent_name ~name ~args
-    (* ── Tier A special: Tool_shard returns Yojson.Safe.t ──────── *)
-    | Mod_shard ->
-      let success, json = Tool_shard.execute name args in
-      let message = Yojson.Safe.to_string json in
-      Some (if success then ok message else err message)
     (* ── Tier B: Eio-dependent ─────────────────────────────────── *)
     | Mod_task ->
       Task.Tool.dispatch_for_keeper

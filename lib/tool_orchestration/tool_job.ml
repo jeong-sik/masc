@@ -1,9 +1,3 @@
-type policy_verdict =
-  | Approved
-  | Pending of string
-  | Denied of string
-[@@deriving yojson, show, eq]
-
 type t = {
   job_id : string;
   batch_id : string;
@@ -18,7 +12,6 @@ type t = {
   resource_keys : string list;
   idempotency_key : string option [@default None];
   deadline_ms : int option [@default None];
-  approval : policy_verdict;
   attempt : int;
 }
 [@@deriving yojson, show]
@@ -49,11 +42,9 @@ let read_only_of_tool_name name =
   (* DET-OK: sound-partial allow — unknown tools default to writer semantics, which
      makes the scheduler use the conservative [write:any] resource key below. *)
   let metadata = Tool_catalog.metadata name in
-  match metadata.readonly, metadata.effect_domain with
-  | Some true, _
-  | _, Some Tool_catalog.Read_only -> true
-  | Some false, _
-  | None, _ -> false
+  match metadata.readonly with
+  | Some true -> true
+  | Some false | None -> false
 
 let default_resource_keys_of_tool ~read_only ~tool_name:_ ~input_json:_ =
   if read_only then [] else [ "write:any" ]
@@ -74,7 +65,6 @@ let make
     ?tool_version
     ?idempotency_key
     ?deadline_ms
-    ?(approval = Approved)
     ?(attempt = 1)
     ?resource_keys
     ~batch_id
@@ -105,9 +95,7 @@ let make
   ; resource_keys
   ; idempotency_key
   ; deadline_ms
-  ; approval
   ; attempt
   }
 
-let with_approval t approval = { t with approval }
 let with_attempt t attempt = { t with attempt }

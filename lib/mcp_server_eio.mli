@@ -147,21 +147,6 @@ val clear_resource_subscriptions_for_session : string -> unit
     @param state Server state *)
 val run_stdio : sw:Eio.Switch.t -> env:Eio_unix.Stdenv.base -> server_state -> unit
 
-(** {1 Governance} *)
-
-(** Governance configuration *)
-type governance_config = {
-  level: string;
-  audit_enabled: bool;
-  anomaly_detection: bool;
-}
-
-(** Get default governance config for a given level.
-    - "development" (default): audit=false, anomaly=false
-    - "production": audit=true, anomaly=false
-    - "enterprise"/"paranoid": audit=true, anomaly=true *)
-val governance_defaults : string -> governance_config
-
 (** {1 MCP Sessions} *)
 
 (** MCP session record for HTTP session persistence *)

@@ -353,9 +353,6 @@ let resolve_oas_provider_of_label (label : string) :
       ( Agent_sdk.Provider.config_of_provider_config pc,
         pc.Llm_provider.Provider_config.model_id )
 
-let oas_tool_names (tools : Agent_sdk.Tool.t list) =
-  List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name) tools
-
 let make_worker_meta ~base_path ~workspace_path ~worker_name
     ~mcp_session_id ~role ~selection_note ~runtime_backend
     ~effective_model ~thinking_enabled
@@ -420,25 +417,14 @@ let build_resume_config ~worker_name ~provider ~model_id ~system_prompt ~tools
       name = worker_name;
       model = model_id;
       system_prompt = Some system_prompt;
-      max_tokens = Some (local_worker_max_tokens ());
       max_turns;
-      temperature = Some Runtime_provider_defaults.worker_default_temperature;
-      top_p = Some 0.95;
-      top_k = Some 40;
-      (* min_p is effectively disabled (0.0) and some cloud providers
-         reject the field itself even when the value is a no-op. *)
-      min_p = None;
       enable_thinking = Some thinking_enabled;
     }
   in
   let effective_guardrails =
     match guardrails with
     | Some g -> g
-    | None ->
-        { Agent_sdk.Guardrails.tool_filter =
-            Agent_sdk.Guardrails.AllowList (oas_tool_names tools);
-          max_tool_calls_per_turn = Some 30;
-        }
+    | None -> Agent_sdk.Guardrails.permissive
   in
   let options =
     {

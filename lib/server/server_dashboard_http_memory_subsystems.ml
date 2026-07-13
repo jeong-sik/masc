@@ -107,40 +107,6 @@ let load_memory_subsystems_entries ~(config : Workspace_utils.config) =
        rows, errors)
 ;;
 
-let load_user_model_facts ~(config : Workspace_utils.config) =
-  let now = Time_compat.now () in
-  let base_path = config.base_path in
-  Keeper_memory_os_io.list_fact_store_keeper_ids_for_base_path ~base_path
-  |> List.fold_left
-       (fun (items_acc, errors_acc) keeper ->
-         try
-           let items =
-             Keeper_memory_os_io.read_facts_tail_for_base_path
-               ~base_path
-               ~keeper_id:keeper
-               ~n:Keeper_memory_os_io.fact_store_max
-             |> List.filter Keeper_memory_os_types.fact_is_user_model
-             |> List.filter (Keeper_memory_os_types.fact_is_current ~now)
-             |> List.map (fun fact -> keeper, fact)
-           in
-           List.rev_append items items_acc, errors_acc
-         with
-         | Eio.Cancel.Cancelled _ as exn -> raise exn
-         | exn -> items_acc, (keeper, Printexc.to_string exn) :: errors_acc)
-       ([], [])
-  |> fun (items, errors) -> List.rev items, List.rev errors
-;;
-
-let user_model_prompt_json () =
-  `Assoc
-    [ "enabled", `Bool (Keeper_user_model.enabled ())
-    ; "block_id", `String (Prompt_block_id.to_string Prompt_block_id.User_model)
-    ; "injection", `String "extra_system_context"
-    ; "runtime_hook", `String "keeper_run_tools_hooks.before_turn_params"
-    ; "producer", `String "keeper_user_model"
-    ]
-;;
-
 (* The Hebbian synapse weight is a DISPLAY-only saturation scale for the
    dashboard graph, not a learned or normalized synaptic strength: a keeper pair
    reaches [max_synapse_weight] once they co-observe [synapse_saturation_facts]
@@ -504,36 +470,11 @@ let dashboard_memory_subsystems_http_json
       ; "ts_unix", `Float row.ts_unix
       ]
   in
-  let user_model_item_to_json
-        (keeper : string)
-        (fact : Keeper_memory_os_types.fact)
-    : Yojson.Safe.t
-    =
-    `Assoc
-      [ "keeper", `String keeper
-      ; "kind", `String (Keeper_memory_os_types.category_to_string fact.category)
-      ; "claim", `String fact.claim
-      ; ( "source_ref"
-        , `String
-            (Skill_candidate_projection.source_memory_fact_ref ~agent_name:keeper fact)
-        )
-      ; "source_trace_id", `String fact.source.trace_id
-      ; "source_turn", `Int fact.source.turn
-      ; "first_seen", `Float fact.first_seen
-      ; ( "last_verified_at"
-        , match fact.last_verified_at with
-          | Some ts -> `Float ts
-          | None -> `Null )
-      ; ( "observed_by"
-        , `List (List.map (fun keeper -> `String keeper) fact.observed_by) )
-      ]
-  in
   let all_memory_entries, memory_entry_errors =
     if include_memory_entries
     then load_memory_subsystems_entries ~config
     else [], []
   in
-  let all_user_model_items, user_model_errors = load_user_model_facts ~config in
   let memory_total = List.length all_memory_entries in
   let memory_filtered =
     all_memory_entries
@@ -559,36 +500,6 @@ let dashboard_memory_subsystems_http_json
              (_, (a : Keeper_memory_policy.keeper_memory_line))
               (_, (b : Keeper_memory_policy.keeper_memory_line))
             -> compare b.ts_unix a.ts_unix)
-    |> take limit
-  in
-  let user_model_filtered =
-    all_user_model_items
-    |> List.filter (fun (keeper, (fact : Keeper_memory_os_types.fact)) ->
-      let keeper_ok =
-        match keeper_filter with
-        | None -> true
-        | Some k -> String.equal keeper k
-      in
-      let search_ok =
-        match search with
-        | None -> true
-        | Some q ->
-          contains_ci keeper q
-          || contains_ci (Keeper_memory_os_types.category_to_string fact.category) q
-          || contains_ci fact.claim q
-      in
-      keeper_ok && search_ok)
-  in
-  let user_model_items =
-    user_model_filtered
-    |> List.sort
-         (fun
-             (_, (a : Keeper_memory_os_types.fact))
-            (_, (b : Keeper_memory_os_types.fact))
-            ->
-            Float.compare
-              (Keeper_memory_os_types.reference_time b)
-              (Keeper_memory_os_types.reference_time a))
     |> take limit
   in
   let filtered =
@@ -633,36 +544,13 @@ let dashboard_memory_subsystems_http_json
       |> List.concat_map (fun (e : Institution_eio.episode) -> e.participants)
     in
     let memory_keepers = List.map fst all_memory_entries in
-    let user_model_keepers = List.map fst all_user_model_items in
-    episode_keepers @ memory_keepers @ user_model_keepers
+    episode_keepers @ memory_keepers
     |> List.sort_uniq String.compare
   in
   let known_memory_kinds =
     all_memory_entries
     |> List.map (fun (_, (row : Keeper_memory_policy.keeper_memory_line)) -> row.kind)
     |> List.sort_uniq String.compare
-  in
-  let draft_skill_candidates =
-    match Skill_candidate_store.list_drafts ~base_path:config.base_path ~limit with
-    | Ok listing ->
-      `Assoc
-        [ "total", `Int listing.total
-        ; "shown", `Int listing.shown
-        ; "limit", `Int listing.limit
-        ; "index_path", `String listing.index_path
-        ; ( "items"
-          , `List (List.map Skill_candidate_store.draft_summary_to_json listing.items) )
-        ; "error", `Null
-        ]
-    | Error msg ->
-      `Assoc
-        [ "total", `Int 0
-        ; "shown", `Int 0
-        ; "limit", `Int limit
-        ; "index_path", `String (Skill_candidate_store.index_path ~base_path:config.base_path)
-        ; "items", `List []
-        ; "error", `String msg
-        ]
   in
   let delegation_requests =
     match
@@ -732,28 +620,6 @@ let dashboard_memory_subsystems_http_json
                        ])
                    memory_entry_errors) )
           ] )
-    ; ( "user_model"
-      , `Assoc
-          [ "schema", `String "masc.user_model.memory_projection.v1"
-          ; "source", `String "memory_os_facts"
-          ; "prompt", user_model_prompt_json ()
-          ; "total", `Int (List.length all_user_model_items)
-          ; "filtered", `Int (List.length user_model_filtered)
-          ; "shown", `Int (List.length user_model_items)
-          ; "limit", `Int limit
-          ; ( "items"
-            , `List
-                (List.map
-                   (fun (keeper, fact) -> user_model_item_to_json keeper fact)
-                   user_model_items) )
-          ; ( "errors"
-            , `List
-                (List.map
-                   (fun (keeper, error) ->
-                     `Assoc [ "keeper", `String keeper; "error", `String error ])
-                   user_model_errors) )
-          ] )
-    ; "draft_skill_candidates", draft_skill_candidates
     ; "delegation_requests", delegation_requests
     ; ( "filters"
       , `Assoc

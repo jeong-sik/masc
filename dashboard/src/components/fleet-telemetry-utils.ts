@@ -59,7 +59,6 @@ export interface FleetRow {
   active_goal_count: number
   sandbox_profile: string | null
   sandbox_last_error: string | null
-  decision_required: boolean
   budget_source: 'override' | 'override_invalid' | 'env' | null
   provider_health_status: 'healthy' | 'degraded' | 'unhealthy' | null
   provider_health_label: string | null
@@ -472,7 +471,6 @@ export function buildFleetRows(keepers: Keeper[], toolQuality: ToolQualityRespon
             active_goal_count: keeper.active_goal_ids?.length ?? 0,
             sandbox_profile: keeper.sandbox_profile ?? null,
             sandbox_last_error: keeper.sandbox_last_error ?? null,
-            decision_required: keeper.runtime_blocker_continue_gate === true,
             budget_source:
               keeper.turn_budget?.reactive.source === 'override' ||
               keeper.turn_budget?.reactive.source === 'override_invalid' ||
@@ -653,20 +651,10 @@ export function buildTelemetryWarnings(sources: TelemetrySourceSummary[]): strin
 
 export function buildRuntimeWarnings(rows: FleetRow[]): string[] {
   const warnings: string[] = []
-  const admissionBlocked = rows.filter(row => row.runtime_blocker_class === 'admission_queue_wait_timeout')
-  if (admissionBlocked.length > 0) {
+  const blocked = rows.filter(row => row.runtime_blocker_class != null)
+  if (blocked.length > 0) {
     warnings.push(
-      `${admissionBlocked.length} keepers are blocked in the keeper admission FIFO; tool telemetry can look stale because turns never reached tool execution.`,
-    )
-  }
-
-  const otherBlocked = rows.filter(row =>
-    row.runtime_blocker_class != null
-    && row.runtime_blocker_class !== 'admission_queue_wait_timeout',
-  )
-  if (otherBlocked.length > 0) {
-    warnings.push(
-      `${otherBlocked.length} keepers have other runtime blockers; inspect the row-level blocker hints for details.`,
+      `${blocked.length} keepers have runtime blockers; inspect the row-level blocker hints for details.`,
     )
   }
 
@@ -731,8 +719,7 @@ export function summaryCounts(rows: FleetRow[]): FleetSummaryCounts {
     && row.last_activity_ago_s >= STALE_ACTIVITY_SEC,
   ).length
   // 2026-05-05 fleet-stuck visibility: count keepers carrying a typed
-  // [runtime_blocker_class] (admission_queue_wait_timeout,
-  // provider_tool_capability_missing, completion_contract_violation, …).
+  // [runtime_blocker_class] (provider_runtime_error, runtime_exhausted, …).
   // These are alive-but-blocked keepers that
   // the live/stale gauges miss — fiber is up, but the next turn cannot
   // start.  Pairs with runtime fallback-cycle detection so

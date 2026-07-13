@@ -20,8 +20,6 @@ function req(
   return {
     schedule_id: 'sched-1',
     status: 'scheduled',
-    risk_class: 'read_only',
-    approval_required: false,
     source: 'automated_request',
     recurrence: { kind: 'one_shot' },
     keeper_queue_evidence: queue === null ? null : { projection_status: queue },

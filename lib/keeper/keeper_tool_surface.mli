@@ -32,8 +32,8 @@ module For_testing : sig
   val reset_keeper_list_cache : unit -> unit
   val invalidate_keeper_list_cache : unit -> unit
 
-  val cached_keeper_list_text :
-    key:string -> ttl_s:float -> (unit -> string) -> string
+  val cached_keeper_list_data :
+    key:string -> ttl_s:float -> (unit -> Yojson.Safe.t) -> Yojson.Safe.t
 end
 
 (** Streaming dispatch: handles keeper_msg with real-time text delta callback.

@@ -22,9 +22,6 @@ val validate_name : string -> bool
 (* ── Configuration constants ────────────────────────────────── *)
 
 val default_proactive_enabled : bool
-val default_proactive_idle_sec : int
-val default_proactive_cooldown_sec : int
-val approval_queue_stale_max_wait_sec : float
 val default_goal_max_chars : int
 val prompt_render_max_bytes : int
 

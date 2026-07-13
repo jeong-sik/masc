@@ -117,7 +117,13 @@ let clear_stale_agent_task_for_task
                         ~task_id
                         ~status
                         ~module_name
-                  | Ok _ | Error _ -> ())))
+                  | Ok _ -> ()
+                  | Error msg ->
+                    Log.Misc.warn
+                      "task_cache_invariant: agent parse failed for %s (%s): %s"
+                      agent_file
+                      module_name
+                      msg)))
          agent_files
      with
      | Eio.Cancel.Cancelled _ as e -> raise e

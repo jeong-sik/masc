@@ -38,8 +38,8 @@ Standalone Eio binaries:
 
 - After `Eio_main.run` and `Eio.Switch.run`, use `Eio.Stdenv.clock env` and
   `Eio.Stdenv.net env` to initialize `Masc_eio_env`.
-- `bin/fusion_run.ml` and `bin/masc_completion_trust_eval.ml` are the current
-  standalone entrypoint examples. `bin/main_stdio_eio.ml` goes through
+- `bin/fusion_run.ml` is the standalone entrypoint example.
+  `bin/main_stdio_eio.ml` goes through
   `create_server_state`.
 
 Additional OCaml domains:

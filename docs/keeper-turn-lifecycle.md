@@ -64,25 +64,20 @@ flowchart TD
     C -- yes --> Z[exit; supervisor dispatches Stop_requested/Drain_complete]
     C -- no --> D[fair_yield + read changed keeper meta]
     D --> E[repair identity drift and sync registry meta]
-    E --> F{smart heartbeat gate}
-    F -- Skip_idle and no wake/signal --> B
-    F -- Emit/Skip_busy/woken --> G[sync workspace presence / heartbeat_ok or heartbeat_failed]
-    G --> H{consecutive heartbeat failures over threshold?}
-    H -- yes --> X[set failure reason; raise Keeper_fiber_crash]
-    H -- no --> I[expire approval queue; maybe write heartbeat snapshot]
+    E --> G[sync workspace presence / observe heartbeat result]
+    G --> I[expire approval queue; maybe write heartbeat snapshot]
     I --> J[collect board events and event queue stimuli]
     J --> K[world observation + scheduling decision]
     K --> L{should_run_turn?}
-    L -- no --> M[record skip reasons / backpressure / cursor updates]
-    L -- yes --> N[FD/disk gates]
-    N -- blocked --> M
-    N -- admitted --> O[record holder diagnostics]
-    O --> P[Keeper_unified_turn.run_keeper_cycle]
+    L -- no --> M[record skip reasons / cursor updates]
+    L -- yes --> P[Keeper_unified_turn.run_keeper_cycle]
     P --> Q[OAS-backed keeper turn path]
     Q --> R[refresh work-as-heartbeat; recurring dispatch; stage timing]
     M --> R
-    R --> B
-    X --> Y[Supervisor records crash, lifecycle Crashed, recovery sweep may restart]
+    R --> S[interruptible_sleep exact configured interval]
+    S -- Woken --> B
+    S -- Timeout --> B
+    S -- Stopped --> Z
 ```
 
 ## Direct keeper message turn

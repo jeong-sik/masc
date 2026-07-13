@@ -42,14 +42,14 @@ Adjacent tool-surface sample from the same 240h window:
 | Retired path-tokenizer diagnostic | 540 | `lib/keeper/keeper_path_check_error.ml`, Shell IR path checks | Retired. Path safety now validates literal Shell IR argv/redirect values for containment; quote/glob/brace/backslash syntax no longer has a separate log bucket. |
 | `other` / unclassified failures | 459 | `lib/keeper_tool_call_log.ml`, `lib/dashboard/dashboard_http_tool_quality.ml` | Promote structured `semantic_status`, `shape_block`, and diagnosis fields into stable failure categories. |
 | `shape_block:unknown` | 352 | historical `tool_execute` raw command logs, `scripts/analyze-keeper-execute-failures.sh` | Historical only for public `Execute`; new calls fail typed input validation before raw shape parsing. Keep the bucket for old samples and adjacent shell surfaces that still report parser-unknown shape blocks. |
-| Multi-repo cwd required | 286 | `lib/keeper/keeper_sandbox_docker.ml`, `lib/keeper/keeper_tool_alias.ml` | Return a typed public `Execute { executable, argv, cwd }` retry shape when sandbox-root git/gh cannot be resolved. Do not infer repository scope from `cd ... &&` command text. |
+| Multi-repo cwd required | 286 | historical Execute samples | Retired as a MASC policy class. Execute never infers repository or product semantics; the invoked CLI reports its own cwd/syntax error and the Keeper may retry with a corrected typed cwd. |
 | Timeout | 271 | `lib/exec_core.ml`, Docker shell runtime | Classify as `semantic_status:timeout` for the quality loop; command scoping remains the caller-side correction. |
 | Repeat/streak gates | 203 | OAS retry cache, keeper tool diversity gates | Measure separately as `repeat_or_streak_gate` so retries are not mistaken for new Execute defects. |
-| Wrong tool channel | 164 | typed `tool_execute` allowlist, descriptor-routed MASC tools, `scripts/analyze-keeper-execute-failures.sh` | Preserve pre-exec rejection, but do it through typed command allowlists and descriptor-owned tool routing. Public `gh` PR/status mutations belong to `Execute` with scoped typed argv, not a raw shell string channel. |
-| Command not allowed by validator | 110 | `lib/keeper/agent_tool_execute_runtime.ml`, `retired file-write tool module` | Keep the explicit validator block, but measure it separately from path syntax, wrong-tool, and shell shape classes. |
+| Wrong tool channel | 164 | historical Execute samples | Retired for typed Execute. Descriptor routing validates Tool identity, while Execute treats executable/argv as opaque input and leaves program availability to the actual execution result. |
+| Command not allowed by validator | 110 | historical Execute samples | Retired. Structural typed-input validation remains, but MASC has no executable-name allowlist. |
 | Docker image missing | 108 | Docker sandbox runtime | Measure separately from command-shape failures; this is an infrastructure/runtime availability class. |
 | Command usage or regex errors | 59 | command-specific handlers | Keep as caller-command defects rather than path or sandbox defects. |
-| Approval / PR policy bypass | 20 | typed `tool_execute` allowlist and descriptor-owned MASC tools | Preserve pre-exec policy rejection and classify it separately from runtime shell failures. Approval/PR operations should enter through descriptor-owned tools or scoped `Execute` typed argv. |
+| Approval / PR policy bypass | 20 | historical product-specific policy | Retired. The neutral external-effect Gate receives exact opaque operation/input and owns Always Allowed, Auto Judge, and nonblocking HITL without product semantics. |
 
 ## Adjacent Surface Fixes
 

@@ -102,11 +102,11 @@ let test_operator_action_rejects_legacy_action_aliases () =
       Alcotest.(check bool)
         (action_type ^ " not allowed")
         false
-        (Operator_approval.is_allowed action_type);
+        (Operator_action_catalog.is_allowed action_type);
       Alcotest.(check bool)
         (action_type ^ " not confirm-required")
         false
-        (Operator_approval.confirm_required action_type))
+        (Operator_action_catalog.requires_confirmation action_type))
     retired_actions;
   Eio_main.run @@ fun env ->
   ensure_fs env;

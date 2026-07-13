@@ -61,13 +61,7 @@ val register_offline_if_admitted_for_lifecycle :
   keeper_meta ->
   (registry_entry, registration_error) result
 
-(** R-A-6.a — error variant for [register_restarting].
-    [Budget_already_exhausted] is returned (not raised — the API is
-    Result-based) when the caller attempts to revive a keeper whose
-    [restart_budget_remaining] was previously cleared, which would
-    violate TLA+ §S3 BudgetNeverRevives. *)
 type register_restarting_error =
-  | Budget_already_exhausted of { name : string }
   | Restart_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
   | Restart_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
   | Restart_event_queue_unavailable of
@@ -77,12 +71,8 @@ type register_restarting_error =
 
 (** Register a keeper that is about to relaunch after a crash.
     The entry starts in [Restarting] and must receive [Fiber_started] when the
-    replacement fiber launches.
-
-    Refuses to revive a keeper whose [restart_budget_remaining] was
-    previously cleared — preserves the TLA+ §S3 BudgetNeverRevives
-    invariant.  See [docs/tla-audit/ksm-a6-budget-never-revives-2026-05-12.md]
-    for the three revival vectors this guard closes. *)
+    replacement fiber launches. Durable pause or Dead-tombstone admission is
+    checked by the caller before this registration CAS. *)
 val register_restarting :
   base_path:string -> string -> keeper_meta ->
   (registry_entry, register_restarting_error) result
@@ -249,11 +239,9 @@ val mark_turn_started : base_path:string -> wake:wake_reason -> string -> unit
 val record_turn_progress :
   base_path:string -> string -> event_kind:string -> unit
 
-(** RFC-0197 (P1-4a): write-through mirror of the turn event bus
-    [pending_tool_count] into the live turn's [active_tool_count]. No-op when no
-    turn is active. Does not touch [last_progress_at]. Read by
-    [Keeper_supervisor.assess_in_turn_progress] to exclude active tool execution
-    from the [Mid_turn_no_progress] window. *)
+(** Write-through observation of the turn event bus [pending_tool_count] in the
+    live turn's [active_tool_count]. No-op when no turn is active. This is
+    telemetry only and has no timeout or lifecycle authority. *)
 val record_turn_tool_inflight : base_path:string -> string -> count:int -> unit
 
 (** Mark the beginning of an SDK turn within an existing keeper turn.
@@ -335,9 +323,6 @@ val set_turn_selected_model :
     from [Prompting + Guard_ok + Runtime_idle]. *)
 val prepare_turn_retry_after_compaction :
   base_path:string -> string -> unit
-
-(** Cross-registry convenience for hooks that only know the keeper name. *)
-val mark_turn_gate_rejected_by_name : string -> unit
 
 (** Mark the end of a keeper turn. Clears [current_turn_observation]
     so the composite observer reverts to idle and stamps
@@ -435,12 +420,10 @@ val is_boot_already_live : base_path:string -> string -> bool
     Used by reconcile to skip Crashed/Dead keepers. *)
 val is_registered : base_path:string -> string -> bool
 
-(** Mark a keeper as dead tombstone and record the transition timestamp. *)
+(** Restore an already-authoritative durable Dead tombstone into the in-memory
+    registry. Runtime failures, cancellation, retry exhaustion, and resource
+    observations must never call this function. *)
 val mark_dead : base_path:string -> string -> at:float -> unit
-
-(** Mark only [entry]'s lane dead. The running-count transition is applied
-    once, after the exact-lane CAS succeeds. *)
-val mark_dead_exact : registry_entry -> at:float -> exact_update_result
 
 (** Return the started_at timestamp, or None if not registered. *)
 val started_at : base_path:string -> string -> float option
@@ -452,40 +435,12 @@ val set_started_at_for_test : base_path:string -> string -> float -> unit
 (** Count keepers in Running state. *)
 val count_running : ?base_path:string -> unit -> int
 
-(** Closed reason for a keeper launch/admission denial. *)
-type spawn_slot_denial_reason =
-  | Fd_pressure_active
-  | Fd_admission_blocked
-  | Max_active_keepers of { running_count : int; max_keepers : int }
-
-val spawn_slot_denial_reason_to_label : spawn_slot_denial_reason -> string
-val spawn_slot_denial_reason_to_detail : spawn_slot_denial_reason -> string
-
-(** Check if there are available spawn slots and return the denial reason when blocked. *)
-val spawn_slots_decision : unit -> (unit, spawn_slot_denial_reason) result
-
-(** Compatibility bool wrapper over [spawn_slots_decision]. *)
-val spawn_slots_available : unit -> bool
-
-(** Emit the durable signal for a denied keeper launch/admission. *)
-val record_spawn_slot_denied :
-  keeper_name:string -> surface:string -> spawn_slot_denial_reason -> unit
-
 module For_testing : sig
   (** Test-only bypass: install an entry without validation so tests can seed
       corrupted registry state. *)
   val unsafe_put_entry :
     base_path:string -> string -> registry_entry -> unit
 
-  val spawn_slots_decision :
-    ?fd_admitted:bool ->
-    unit ->
-    (unit, spawn_slot_denial_reason) result
-
-  val spawn_slots_available :
-    ?fd_admitted:bool ->
-    unit ->
-    bool
 end
 
 type wakeup_intent =

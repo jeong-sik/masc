@@ -4,8 +4,8 @@
    - the boundary mention parse + match (RFC-0232 P4: parse at append,
      match persisted ids; the substring bug that made "@alicex" /
      "email@alice.com" false-match "@alice" must not recur).
-   - pending_mentions_of_messages: the lane-is-the-state watermark — a mention
-     is pending iff it arrives after the keeper's own last line. *)
+   - pending message acknowledgement: stable row ids advance only through the
+     exact source range injected into a completed turn. *)
 
 open Alcotest
 
@@ -43,12 +43,12 @@ let test_empty_targets () =
        (Lane.mention_ids_of_content "@alice"))
 ;;
 
-let msg ~role ?(ts = Some 1.0) ?(source = None) ?(speaker = None)
+let msg ~role ?(id = "test-msg") ?(ts = Some 1.0) ?(source = None) ?(speaker = None)
     ?(audio = None)
-    ?(kind = Store.Row_kind.Utterance) content
+    ?(kind = Store.Row_kind.Utterance) ?(turn_ref = None) content
   : Store.chat_message
   =
-  { id = "test-msg"
+  { id
   ; role
   ; content
   ; ts
@@ -64,12 +64,14 @@ let msg ~role ?(ts = Some 1.0) ?(source = None) ?(speaker = None)
   ; blocks = None
   ; mentions = Masc.Keeper_lane_mentions.mention_ids_of_content content
   ; kind
-  ; turn_ref = None
+  ; turn_ref
   ; stream_lifecycle = None
   }
 ;;
 
 let contents pms = List.map snd pms
+
+let turn_ref n = Some (Ids.Turn_ref.make ~trace_id:"trace-scope" ~absolute_turn:n)
 
 let test_unanswered_mention_is_pending () =
   let messages = [ msg ~role:Store.Role.User ~ts:(Some 10.0) "@alice please look" ] in
@@ -78,9 +80,10 @@ let test_unanswered_mention_is_pending () =
 ;;
 
 let test_answered_mention_is_cleared () =
+  let turn_ref = turn_ref 1 in
   let messages =
-    [ msg ~role:Store.Role.User ~ts:(Some 10.0) "@alice please look"
-    ; msg ~role:Store.Role.Assistant ~ts:(Some 11.0) "on it"
+    [ msg ~role:Store.Role.User ~ts:(Some 10.0) ~turn_ref "@alice please look"
+    ; msg ~role:Store.Role.Assistant ~ts:(Some 11.0) ~turn_ref "on it"
     ]
   in
   check (list string) "own line after mention -> cleared" []
@@ -88,9 +91,10 @@ let test_answered_mention_is_cleared () =
 ;;
 
 let test_rementioned_after_reply_is_pending () =
+  let turn_ref = turn_ref 2 in
   let messages =
-    [ msg ~role:Store.Role.User ~ts:(Some 10.0) "@alice first"
-    ; msg ~role:Store.Role.Assistant ~ts:(Some 11.0) "done"
+    [ msg ~role:Store.Role.User ~ts:(Some 10.0) ~turn_ref "@alice first"
+    ; msg ~role:Store.Role.Assistant ~ts:(Some 11.0) ~turn_ref "done"
     ; msg ~role:Store.Role.User ~ts:(Some 12.0) "@alice again"
     ]
   in
@@ -131,25 +135,27 @@ let test_external_unmentioned_is_not_scope () =
 ;;
 
 let test_answered_owner_line_is_cleared () =
+  let turn_ref = turn_ref 3 in
   let messages =
-    [ msg ~role:Store.Role.User ~ts:(Some 10.0) ~speaker:owner "please check"
-    ; msg ~role:Store.Role.Assistant ~ts:(Some 11.0) "done"
+    [ msg ~role:Store.Role.User ~ts:(Some 10.0) ~speaker:owner ~turn_ref "please check"
+    ; msg ~role:Store.Role.Assistant ~ts:(Some 11.0) ~turn_ref "done"
     ]
   in
   check (list string) "answered owner line -> cleared" []
     (contents (MS.pending_scope_of_messages ~targets messages))
 ;;
 
-(* RFC-0232 P1 — positional watermark properties. The lane's file order is
-   the only order; timestamps cannot change pending semantics. *)
+(* Exact causal acknowledgement properties. Stable lane ids and typed
+   [turn_ref] joins decide consumption; wall-clock timestamps do not. *)
 
 let test_skewed_clock_cannot_unanswer () =
   (* The reply's wall clock is *behind* the mention's (NTP step, skewed
-     writer). Lane order says answered; a ts-based watermark would say
-     pending. Positional semantics must clear it. *)
+     writer). The shared typed [turn_ref] still proves that it answers the
+     user row. *)
+  let turn_ref = turn_ref 4 in
   let messages =
-    [ msg ~role:Store.Role.User ~ts:(Some 100.0) "@alice please look"
-    ; msg ~role:Store.Role.Assistant ~ts:(Some 5.0) "on it"
+    [ msg ~role:Store.Role.User ~ts:(Some 100.0) ~turn_ref "@alice please look"
+    ; msg ~role:Store.Role.Assistant ~ts:(Some 5.0) ~turn_ref "on it"
     ]
   in
   check (list string) "skewed reply ts still clears" []
@@ -160,8 +166,9 @@ let test_ts_fuzz_does_not_change_pending () =
   (* Same lane, three ts assignments (ordered, reversed, absent): the
      pending set depends on lane order alone. *)
   let lane ts_of =
-    [ msg ~role:Store.Role.User ~ts:(ts_of 0) "@alice first"
-    ; msg ~role:Store.Role.Assistant ~ts:(ts_of 1) "done"
+    let turn_ref = turn_ref 5 in
+    [ msg ~role:Store.Role.User ~ts:(ts_of 0) ~turn_ref "@alice first"
+    ; msg ~role:Store.Role.Assistant ~ts:(ts_of 1) ~turn_ref "done"
     ; msg ~role:Store.Role.User ~ts:(ts_of 2) "@alice again"
     ]
   in
@@ -177,11 +184,12 @@ let test_ts_fuzz_does_not_change_pending () =
 ;;
 
 let test_none_ts_assistant_still_clears () =
-  (* A legacy assistant line without a timestamp is still the keeper
-     speaking; it must advance the watermark. *)
+  (* A paired assistant line without a timestamp still acknowledges the
+     user row because the typed [turn_ref] is the causal join. *)
+  let turn_ref = turn_ref 6 in
   let messages =
-    [ msg ~role:Store.Role.User ~ts:(Some 10.0) "@alice please look"
-    ; msg ~role:Store.Role.Assistant ~ts:None "on it"
+    [ msg ~role:Store.Role.User ~ts:(Some 10.0) ~turn_ref "@alice please look"
+    ; msg ~role:Store.Role.Assistant ~ts:None ~turn_ref "on it"
     ]
   in
   check (list string) "ts-less reply clears" []
@@ -211,8 +219,7 @@ let tool_line : Store.chat_message =
 ;;
 
 let test_tool_lines_do_not_clear () =
-  (* Tool lines are the keeper *working*, not the keeper *answering*;
-     they must not advance the watermark. *)
+  (* Tool lines are the keeper *working*, not a causal acknowledgement. *)
   let messages =
     [ msg ~role:Store.Role.User ~ts:(Some 10.0) "@alice please look"; tool_line ]
   in
@@ -225,18 +232,20 @@ let test_transport_failure_does_not_clear () =
      terminal ("Keeper request failed: ..."), not the keeper answering;
      the user line stays pending so the keeper revisits it on its next
      turn. A real utterance afterwards still clears. *)
+  let turn_ref = turn_ref 7 in
   let failure =
     msg ~role:Store.Role.Assistant ~ts:(Some 10.5)
+      ~turn_ref
       ~kind:Store.Row_kind.Transport_failure
       "Keeper request failed: Idle detected"
   in
   let messages =
-    [ msg ~role:Store.Role.User ~ts:(Some 10.0) "@alice please look"; failure ]
+    [ msg ~role:Store.Role.User ~ts:(Some 10.0) ~turn_ref "@alice please look"; failure ]
   in
   check (list string) "failure marker is not an answer" [ "@alice please look" ]
     (contents (MS.pending_mentions_of_messages ~targets messages));
   let answered =
-    messages @ [ msg ~role:Store.Role.Assistant ~ts:(Some 11.0) "done" ]
+    messages @ [ msg ~role:Store.Role.Assistant ~ts:(Some 11.0) ~turn_ref "done" ]
   in
   check (list string) "a real utterance still clears" []
     (contents (MS.pending_mentions_of_messages ~targets answered))
@@ -273,32 +282,48 @@ let test_voice_audio_self_output_is_not_recent_context () =
     (List.map (fun (line : MS.recent_direct_line) -> line.content) lines)
 ;;
 
-let test_assistant_append_empties_pending () =
-  (* Appending the keeper's own line can only shrink pending — for any
-     prefix of a lane, prefix @ [assistant] has no pending mentions or
-     scope. Exhaustive over every prefix of a mixed sample lane. *)
-  let sample =
-    [ msg ~role:Store.Role.User ~ts:(Some 1.0) "@alice a"
-    ; msg ~role:Store.Role.User ~ts:(Some 2.0) ~speaker:owner "status?"
-    ; msg ~role:Store.Role.Assistant ~ts:(Some 3.0) "reply"
-    ; msg ~role:Store.Role.User ~ts:(Some 4.0) ~speaker:external_ "chatter"
-    ; tool_line
-    ; msg ~role:Store.Role.User ~ts:(Some 5.0) "@alice b"
+let test_unrelated_assistant_does_not_clear_pending () =
+  let lane =
+    [ msg ~id:"m1" ~role:Store.Role.User "@alice a"
+    ; msg ~id:"m2" ~role:Store.Role.User ~speaker:owner "status?"
+    ; msg ~id:"a1" ~role:Store.Role.Assistant "unrelated output"
     ]
   in
-  let self_reply = msg ~role:Store.Role.Assistant ~ts:(Some 99.0) "ack" in
-  let rec prefixes acc rev_prefix = function
-    | [] -> List.rev (List.rev rev_prefix :: acc)
-    | m :: rest -> prefixes (List.rev rev_prefix :: acc) (m :: rev_prefix) rest
+  check (list string) "unrelated assistant keeps mention pending" [ "@alice a" ]
+    (contents (MS.pending_mentions_of_messages ~targets lane));
+  check (list string) "unrelated assistant keeps scope pending" [ "status?" ]
+    (contents (MS.pending_scope_of_messages ~targets lane))
+;;
+
+let test_ack_clears_only_injected_prefix () =
+  let lane =
+    [ msg ~id:"m1" ~role:Store.Role.User "@alice first"
+    ; msg ~id:"m2" ~role:Store.Role.User ~speaker:owner "second"
+    ; msg ~id:"m3" ~role:Store.Role.User "@alice arrived during turn"
+    ]
   in
-  List.iter
-    (fun prefix ->
-      let lane = prefix @ [ self_reply ] in
-      check (list string) "own line empties pending mentions" []
-        (contents (MS.pending_mentions_of_messages ~targets lane));
-      check (list string) "own line empties pending scope" []
-        (contents (MS.pending_scope_of_messages ~targets lane)))
-    (prefixes [] [] sample)
+  let pending = MS.pending_messages_of_messages ~ack_id:"m2" ~targets lane in
+  check (list string) "only rows after exact ack remain"
+    [ "@alice arrived during turn" ]
+    (List.map (fun (message : MS.pending_message) -> message.content) pending)
+;;
+
+let test_all_pending_rows_preserve_source_order_without_cap () =
+  let lane =
+    List.init 20 (fun index ->
+      msg
+        ~id:(Printf.sprintf "m%d" index)
+        ~role:Store.Role.User
+        (Printf.sprintf "@alice message-%d" index))
+  in
+  let pending = MS.pending_messages_of_messages ~targets lane in
+  check int "no fixed pending cap" 20 (List.length pending);
+  check (list string) "source order preserved"
+    (List.init 20 (fun index -> Printf.sprintf "message-%d" index))
+    (List.map
+       (fun (message : MS.pending_message) ->
+          String.sub message.content 7 (String.length message.content - 7))
+       pending)
 ;;
 
 let () =
@@ -324,7 +349,7 @@ let () =
         ; test_case "external_unmentioned_ignored" `Quick test_external_unmentioned_is_not_scope
         ; test_case "answered_owner_cleared" `Quick test_answered_owner_line_is_cleared
         ] )
-    ; ( "positional_watermark"
+    ; ( "causal_acknowledgement"
       , [ test_case "skewed_clock_cannot_unanswer" `Quick test_skewed_clock_cannot_unanswer
         ; test_case "ts_fuzz_invariant" `Quick test_ts_fuzz_does_not_change_pending
         ; test_case "none_ts_assistant_clears" `Quick test_none_ts_assistant_still_clears
@@ -333,8 +358,12 @@ let () =
             test_transport_failure_does_not_clear
         ; test_case "voice_audio_self_output_not_recent_context" `Quick
             test_voice_audio_self_output_is_not_recent_context
-        ; test_case "assistant_append_empties_pending" `Quick
-            test_assistant_append_empties_pending
+        ; test_case "unrelated_assistant_does_not_clear" `Quick
+            test_unrelated_assistant_does_not_clear_pending
+        ; test_case "ack_clears_only_injected_prefix" `Quick
+            test_ack_clears_only_injected_prefix
+        ; test_case "all_rows_source_order_no_cap" `Quick
+            test_all_pending_rows_preserve_source_order_without_cap
         ] )
     ]
 ;;

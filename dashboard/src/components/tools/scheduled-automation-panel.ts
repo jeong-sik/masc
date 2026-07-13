@@ -1,8 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import {
-  resolveScheduleApproval,
-  type DashboardScheduleDecision,
   type DashboardScheduledAutomationActor,
   type DashboardScheduledAutomation,
   type DashboardScheduledAutomationDispatchReceipt,
@@ -14,26 +12,22 @@ import {
   type DashboardScheduledAutomationSignal,
 } from '../../api'
 import { formatDateTimeKo } from '../../lib/format-time'
-import { ActionButton } from '../common/button'
 import { StatusChip, type StatusChipTone } from '../common/status-chip'
-import { showToast } from '../common/toast'
 import { SigilBadge } from '../v2/primitives-v2'
 import { kSigil, kSlot } from '../keeper-badge'
 import {
   schedPayloadSpec,
-  schedRiskSpec,
   schedStatusSpec,
   type SchedStatusSpec,
 } from '../v2/schedule-constants'
 
-type ScheduleFilterKey = 'all' | 'pending' | 'due' | 'ready' | 'scheduled' | 'terminal'
+type ScheduleFilterKey = 'all' | 'scheduled' | 'due' | 'running' | 'terminal'
 
 const SCHEDULE_FILTERS: ReadonlyArray<{ key: ScheduleFilterKey; label: string }> = [
   { key: 'all', label: '전체' },
-  { key: 'pending', label: '승인 대기' },
-  { key: 'due', label: '기한 도래' },
-  { key: 'ready', label: '실행 준비' },
-  { key: 'scheduled', label: '예약/실행' },
+  { key: 'scheduled', label: '예약됨' },
+  { key: 'due', label: 'due' },
+  { key: 'running', label: '실행 중' },
   { key: 'terminal', label: '완료' },
 ]
 
@@ -60,40 +54,15 @@ function normalized(value: string | null | undefined): string {
   return normalizedScheduleStatus(value)
 }
 
-// Pending-approval count for the always-visible nav badge + topbar schedule chip
-// (schedule.jsx: onSchedule lift keeps the chip/badge in sync). Same derivation
-// as the surface's '승인 대기' KPI: sparse backend counts vs materialized request
-// statuses, whichever is larger, so a projection that ships only one is honored.
-const SCHEDULE_PENDING_STATUSES = ['pending', 'pending_approval', 'awaiting_approval']
-export function scheduledPendingApprovalCount(
-  automation: DashboardScheduledAutomation | null | undefined,
-): number {
-  if (!automation) return 0
-  const statuses = SCHEDULE_PENDING_STATUSES.map(normalizedScheduleStatus)
-  const fromCounts = statuses.reduce((sum, status) => sum + (automation.counts?.[status] ?? 0), 0)
-  const fromRequests = (automation.requests ?? [])
-    .filter(request => statuses.includes(normalizedScheduleStatus(request.effective_status ?? request.status)))
-    .length
-  return Math.max(fromCounts, fromRequests)
-}
-
 export function automationTone(status: string | null | undefined): StatusChipTone {
   switch (normalized(status)) {
     case 'running':
     case 'scheduled':
-    case 'ready':
-    case 'approved':
       return 'ok'
-    case 'pending_approval':
     case 'due':
-    case 'blocked_approval':
-    case 'awaiting_approval':
-    case 'due_pending_refresh':
       return 'warn'
     case 'failed':
-    case 'rejected':
     case 'expired':
-    case 'canceled':
       return 'bad'
     case 'succeeded':
       return 'info'
@@ -105,7 +74,7 @@ export function automationTone(status: string | null | undefined): StatusChipTon
 }
 
 function effectiveStatus(request: DashboardScheduledAutomationRequest): string {
-  return request.effective_status ?? request.status
+  return request.status
 }
 
 function dueTimestamp(request: DashboardScheduledAutomationRequest): number {
@@ -136,19 +105,15 @@ function assertNever(value: never): never {
 export function filterMatches(filter: ScheduleFilterKey, request: DashboardScheduledAutomationRequest): boolean {
   if (filter === 'all') return true
   const status = normalized(effectiveStatus(request))
-  const readiness = normalized(request.execution_readiness)
-  const operatorAction = normalized(request.operator_action)
   switch (filter) {
-    case 'pending':
-      return status.includes('approval') || operatorAction.includes('approve')
-    case 'due':
-      return status === 'due' || status === 'due_pending_refresh' || status === 'blocked_approval'
-    case 'ready':
-      return ['ready', 'execution_ready'].includes(readiness)
     case 'scheduled':
-      return status === 'scheduled' || status === 'running'
+      return status === 'scheduled'
+    case 'due':
+      return status === 'due'
+    case 'running':
+      return status === 'running'
     case 'terminal':
-      return ['succeeded', 'failed', 'rejected', 'expired', 'cancelled', 'canceled'].includes(status)
+      return ['succeeded', 'failed', 'expired', 'cancelled'].includes(status)
     default:
       // Exhaustiveness: a new ScheduleFilterKey must fail to compile here rather
       // than silently fall through to "show all" (Unknown->Permissive-Default).
@@ -194,14 +159,14 @@ export function recurrenceLabel(request: DashboardScheduledAutomationRequest): s
 /**
  * RFC-0234 §10 "Dashboard and operator UX" — a wake-signal feed surfaces the
  * upcoming scheduler wakes ("future rows with ... due time, payload summary,
- * and risk") ordered soonest-first. The scheduler is a turn-start channel
+ * and payload identity") ordered soonest-first. The scheduler is a turn-start channel
  * (RFC-0234 §2: proactive turn mechanisms decide whether an agent should wake);
  * this feed answers "what wakes next" rather than auditing every row like the
  * full table below.
  *
  * Every field is read verbatim from what the backend already emits (#21852):
  * id = schedule_id, at = next_due_at ?? due_at, kind = payload_kind (else the
- * recurrence label), risk = risk_class. Nothing is fabricated — a row without a
+ * recurrence label). Nothing is fabricated — a row without a
  * concrete next wake time is not a signal and is dropped.
  */
 export interface WakeSignal {
@@ -209,23 +174,19 @@ export interface WakeSignal {
   at: number
   atIso: string | null
   kind: string
-  risk: string
-  readiness: string
+  status: string
   tone: StatusChipTone
 }
 
 // Readiness / status values that are not upcoming wake signals. Terminal rows
 // are history, and running rows have already woken.
-const NON_UPCOMING_WAKE_READINESS: ReadonlySet<string> = new Set(['terminal', 'expired', 'running'])
 const NON_UPCOMING_WAKE_STATUS: ReadonlySet<string> = new Set([
   'running',
   'terminal',
   'expired',
   'cancelled',
-  'canceled',
   'succeeded',
   'failed',
-  'rejected',
 ])
 
 function payloadSupportBlocksWake(request: DashboardScheduledAutomationRequest): boolean {
@@ -234,9 +195,7 @@ function payloadSupportBlocksWake(request: DashboardScheduledAutomationRequest):
 
 function canProjectUpcomingWake(request: DashboardScheduledAutomationRequest): boolean {
   if (payloadSupportBlocksWake(request)) return false
-  const readiness = normalized(request.execution_readiness)
   const status = normalized(effectiveStatus(request))
-  if (readiness && NON_UPCOMING_WAKE_READINESS.has(readiness)) return false
   if (NON_UPCOMING_WAKE_STATUS.has(status)) return false
   return true
 }
@@ -306,16 +265,14 @@ export function selectWakeSignals(
     const at = request.next_due_at ?? request.due_at ?? null
     // No concrete wake time → no signal to surface (parse, don't validate).
     if (at == null) continue
-    const readiness = request.execution_readiness ?? null
-    const status = request.effective_status ?? request.status
+    const status = request.status
     signals.push({
       id: request.schedule_id,
       at,
       atIso: request.next_due_at_iso ?? request.due_at_iso ?? null,
       kind: request.payload_kind?.trim() || recurrenceLabel(request),
-      risk: request.risk_class,
-      readiness: readiness ?? status,
-      tone: automationTone(readiness ?? status),
+      status,
+      tone: automationTone(status),
     })
   }
   return signals.sort((a, b) => a.at - b.at)
@@ -340,10 +297,9 @@ function WakeSignalFeed({ signals }: { signals: WakeSignal[] }) {
             <span class="sch-signal-at font-mono text-xs text-[var(--color-fg-secondary)]">
               ${formatDateTimeKo(signal.atIso ?? signal.at)}
             </span>
-            <${StatusChip} tone=${signal.tone} uppercase=${false}>${enumLabel(signal.readiness)}<//>
+            <${StatusChip} tone=${signal.tone} uppercase=${false}>${enumLabel(signal.status)}<//>
             <span class="sch-signal-kind font-mono text-2xs text-[var(--color-fg-muted)]">${signal.kind}</span>
             <span class="sch-signal-id font-mono text-3xs text-[var(--color-fg-disabled)]">${signal.id}</span>
-            <span class="sch-signal-risk text-2xs text-[var(--color-fg-muted)]">risk ${enumLabel(signal.risk)}</span>
           </li>
         `,
       )}
@@ -740,144 +696,16 @@ function PayloadCell({ request }: { request: DashboardScheduledAutomationRequest
   `
 }
 
-function keeperToolStatusTone(request: DashboardScheduledAutomationRequest): StatusChipTone {
-  const status = request.keeper_next_tool_status
-  if (!status) return 'neutral'
-  if (status.registered_schema === false || status.dispatch_registered === false) return 'bad'
-  if (status.direct_call_allowed === false) return 'warn'
-  return 'ok'
-}
-
-function keeperToolStatusLabel(request: DashboardScheduledAutomationRequest): string {
-  const status = request.keeper_next_tool_status
-  if (!status) return 'unknown'
-  if (status.registered_schema === false || status.dispatch_registered === false) return 'orphan'
-  if (status.direct_call_allowed === false) return 'blocked'
-  return 'callable'
-}
-
-function keeperToolSurfaceLabel(request: DashboardScheduledAutomationRequest): string {
-  const status = request.keeper_next_tool_status
-  if (!status) return 'surface unknown'
-  const surfaces = status.surfaces ?? []
-  const surfaceCount = status.surface_count ?? surfaces.length
-  if (surfaceCount <= 0) return 'no surface'
-  if (surfaceCount === 1 && surfaces[0]) return surfaces[0].replace(/_/g, ' ')
-  return `${surfaceCount} surfaces`
-}
-
-function KeeperActionCell({ request }: { request: DashboardScheduledAutomationRequest }) {
-  const nextTool = request.keeper_next_tool?.trim() || null
-  const nextAction = request.keeper_next_action?.trim() || null
-  const status = request.keeper_next_tool_status
-  const visibility = status?.visibility?.trim() || null
-  if (!nextTool && !nextAction) return html`<span class="text-xs text-[var(--color-fg-disabled)]">-</span>`
-  return html`
-    <div class="max-w-[16rem]">
-      ${nextTool
-        ? html`<div class="truncate font-mono text-3xs text-[var(--color-fg-secondary)]" title=${nextTool}>${nextTool}</div>`
-        : null}
-      ${status
-        ? html`
-            <div class="mt-1 flex flex-wrap items-center gap-1">
-              <${StatusChip} tone=${keeperToolStatusTone(request)} uppercase=${false}>
-                ${keeperToolStatusLabel(request)}
-              <//>
-              ${visibility
-                ? html`<span class="rounded-[var(--r-0)] bg-[var(--color-bg-hover)] px-1.5 py-0.5 text-3xs text-[var(--color-fg-muted)]">${visibility.replace(/_/g, ' ')}</span>`
-                : null}
-              <span class="rounded-[var(--r-0)] bg-[var(--color-bg-hover)] px-1.5 py-0.5 text-3xs text-[var(--color-fg-muted)]">${keeperToolSurfaceLabel(request)}</span>
-            </div>
-          `
-        : null}
-      ${nextAction
-        ? html`<div class="mt-1 truncate text-3xs text-[var(--color-fg-muted)]" title=${nextAction}>${nextAction}</div>`
-        : null}
-    </div>
-  `
-}
-
 function isTerminalStatus(status: string | null | undefined): boolean {
   switch (status) {
     case 'succeeded':
     case 'failed':
-    case 'rejected':
     case 'cancelled':
     case 'expired':
       return true
     default:
       return false
   }
-}
-
-function isApprovalActionable(request: DashboardScheduledAutomationRequest): boolean {
-  if (isTerminalStatus(request.status) || isTerminalStatus(request.effective_status)) return false
-  return request.operator_action === 'approve_or_reject'
-    || request.execution_readiness === 'blocked_approval'
-    || request.execution_readiness === 'awaiting_approval'
-    || request.effective_status === 'blocked_approval'
-    || request.effective_status === 'awaiting_approval'
-}
-
-function ApprovalCell({
-  request,
-  onResolved,
-}: {
-  request: DashboardScheduledAutomationRequest
-  onResolved?: () => Promise<void> | void
-}) {
-  const [pendingDecision, setPendingDecision] = useState<DashboardScheduleDecision | null>(null)
-  const approval = request.approval_policy ?? (request.approval_required ? 'required' : 'not_required')
-  const actionable = isApprovalActionable(request)
-  const busy = pendingDecision !== null
-
-  async function decide(decision: DashboardScheduleDecision) {
-    setPendingDecision(decision)
-    try {
-      await resolveScheduleApproval(
-        request.schedule_id,
-        decision,
-        decision === 'reject' ? 'rejected from dashboard' : undefined,
-      )
-      showToast(
-        `${request.schedule_id} ${decision === 'approve' ? 'approved' : 'rejected'}`,
-        'success',
-      )
-      await onResolved?.()
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : 'schedule approval failed', 'error')
-    } finally {
-      setPendingDecision(null)
-    }
-  }
-
-  return html`
-    <div class="grid gap-1">
-      <span>${enumLabel(approval)}</span>
-      ${actionable
-        ? html`
-            <div class="flex flex-wrap gap-1">
-              <${ActionButton}
-                variant="ok"
-                size="sm"
-                disabled=${busy}
-                ariaBusy=${pendingDecision === 'approve'}
-                testId=${`schedule-approve-${request.schedule_id}`}
-                onClick=${() => { void decide('approve') }}
-              >Approve<//>
-              <${ActionButton}
-                variant="danger"
-                size="sm"
-                disabled=${busy}
-                ariaBusy=${pendingDecision === 'reject'}
-                testId=${`schedule-reject-${request.schedule_id}`}
-                onClick=${() => { void decide('reject') }}
-              >Reject<//>
-            </div>
-          `
-        : null}
-    </div>
-  `
 }
 
 function InfoBlock({
@@ -907,10 +735,7 @@ function ScheduleCard({
   onSelect: (request: DashboardScheduledAutomationRequest) => void
 }) {
   const requestStatus = effectiveStatus(request)
-  const readiness = request.execution_readiness ?? '-'
-  const action = request.operator_action ?? '-'
   const dueIso = request.next_due_at_iso ?? request.due_at_iso ?? null
-  const approval = request.approval_policy ?? (request.approval_required ? 'required' : 'not_required')
   return html`
     <article
       class=${`v2-lab-card rounded-[var(--r-1)] border bg-[var(--color-bg-surface)] p-4 ${selected ? 'border-[var(--color-accent-fg)]' : 'border-[var(--color-border-default)]'}`}
@@ -938,21 +763,13 @@ function ScheduleCard({
       </div>
 
       <div class="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-        <${InfoBlock} label="실행 준비" value=${enumLabel(readiness)} />
-        <${InfoBlock} label="운영자 조치" value=${enumLabel(action)} />
-        <${InfoBlock} label="위험도" value=${enumLabel(request.risk_class)} />
-        <${InfoBlock} label="승인 정책" value=${enumLabel(approval)} />
         <${InfoBlock} label="반복" value=${recurrenceLabel(request)} />
         <${InfoBlock} label="마지막 실행" value=${lastExecutionLabel(request)} />
         <${InfoBlock} label="예정 시각" value=${formatDateTimeKo(dueIso)} mono=${true} />
         <${InfoBlock} label="출처" value=${enumLabel(request.source)} />
       </div>
 
-      <div class="mt-3 grid gap-3 lg:grid-cols-2">
-        <section class="min-w-0 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-2">
-          <div class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">키퍼 다음 단계</div>
-          <div class="mt-2"><${KeeperActionCell} request=${request} /></div>
-        </section>
+      <div class="mt-3">
         <section class="min-w-0 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-2">
           <div class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">페이로드</div>
           <div class="mt-2"><${PayloadCell} request=${request} /></div>
@@ -960,12 +777,6 @@ function ScheduleCard({
       </div>
 
       <div class="mt-3 flex flex-wrap gap-2 text-3xs text-[var(--color-fg-muted)]">
-        ${requestStatus !== request.status
-          ? html`<span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-2 py-0.5">원본 ${enumLabel(request.status)}</span>`
-          : null}
-        ${request.requires_separate_human_grant
-          ? html`<span class="rounded-[var(--r-0)] border border-[var(--color-status-warn)] px-2 py-0.5 text-[var(--color-status-warn)]">별도 human grant 필요</span>`
-          : null}
         ${request.payload_digest
           ? html`<span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-2 py-0.5 font-mono">${request.payload_digest}</span>`
           : null}
@@ -1032,10 +843,8 @@ function LastExecutionBlock({
 
 function ScheduleDetailPanel({
   request,
-  onResolved,
 }: {
   request: DashboardScheduledAutomationRequest | null
-  onResolved?: () => Promise<void> | void
 }) {
   if (!request) {
     return html`
@@ -1082,32 +891,12 @@ function ScheduleDetailPanel({
           <span>${actorLabel(request.scheduled_by)}</span>
         </div>
         <div class="grid grid-cols-[7rem_minmax(0,1fr)] gap-2">
-          <span class="text-[var(--color-fg-disabled)]">실행 준비</span>
-          <span>${enumLabel(request.execution_readiness)}</span>
-        </div>
-        <div class="grid grid-cols-[7rem_minmax(0,1fr)] gap-2">
-          <span class="text-[var(--color-fg-disabled)]">운영자 조치</span>
-          <span>${enumLabel(request.operator_action)}</span>
-        </div>
-        <div class="grid grid-cols-[7rem_minmax(0,1fr)] gap-2">
-          <span class="text-[var(--color-fg-disabled)]">승인</span>
-          <span><${ApprovalCell} request=${request} onResolved=${onResolved} /></span>
-        </div>
-        <div class="grid grid-cols-[7rem_minmax(0,1fr)] gap-2">
-          <span class="text-[var(--color-fg-disabled)]">위험도</span>
-          <span>${enumLabel(request.risk_class)}</span>
-        </div>
-        <div class="grid grid-cols-[7rem_minmax(0,1fr)] gap-2">
           <span class="text-[var(--color-fg-disabled)]">반복</span>
           <span>${recurrenceLabel(request)}</span>
         </div>
       </div>
 
       <div class="mt-3 grid gap-3">
-        <div>
-          <div class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">키퍼 다음 단계</div>
-          <div class="mt-1"><${KeeperActionCell} request=${request} /></div>
-        </div>
         <div>
           <div class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">페이로드</div>
           <div class="mt-1"><${PayloadCell} request=${request} /></div>
@@ -1135,8 +924,6 @@ function WakeSignalItem({
 }) {
   const requestStatus = effectiveStatus(request)
   const dueIso = request.next_due_at_iso ?? request.due_at_iso ?? null
-  const action = request.operator_action ? enumLabel(request.operator_action) : 'observe'
-  const nextTool = request.keeper_next_tool?.trim() || null
   return html`
     <li class="grid grid-cols-[3.25rem_minmax(0,1fr)] items-start gap-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-2">
       <span
@@ -1161,12 +948,6 @@ function WakeSignalItem({
             ${request.schedule_id}
           </button>
         </div>
-        <div class="mt-1 truncate text-3xs text-[var(--color-fg-disabled)]" title=${action}>
-          ${action}
-        </div>
-        ${nextTool
-          ? html`<div class="mt-1 truncate font-mono text-3xs text-[var(--color-fg-disabled)]" title=${nextTool}>${nextTool}</div>`
-          : null}
       </div>
     </li>
   `
@@ -1183,7 +964,6 @@ function DurableSignalItem({
   const emittedIso = signal.emitted_at_iso ?? null
   const dueIso = signal.due_at_iso ?? null
   const payloadKind = signal.payload_kind?.trim() || null
-  const risk = enumLabel(signal.risk_class)
   const digest = signal.payload_digest?.trim() || null
   const payloadLine = [payloadKind, digest].filter(Boolean).join(' / ')
   return html`
@@ -1223,12 +1003,6 @@ function DurableSignalItem({
             : null}
         </div>
       </div>
-      <span
-        class="col-start-2 justify-self-start font-mono text-3xs text-[var(--color-fg-disabled)] sm:col-start-auto sm:justify-self-end"
-        data-schedule-signal-risk=${signal.signal_id}
-      >
-        ${risk}
-      </span>
     </li>
   `
 }
@@ -1240,40 +1014,20 @@ function DurableSignalItem({
    reused by the Tools surface and must stay byte-stable.
 
    Live data only — no fabricated operator/timestamps. Live fields absent in the
-   prototype model (relative due text "4h 12m 후", structured decision
-   provenance, payload `body`) are rendered from the real ISO timestamps /
-   marked data-stub rather than invented (audit P2 #11, #12). The live approval
-   API supports approve/reject only (no cancel), so the prototype's cancel
-   action is omitted here rather than wired to a no-op. */
+   prototype model (relative due text "4h 12m 후", payload `body`) are rendered
+   from the real ISO timestamps / marked data-stub rather than invented. */
 
-// Live status strings are lower_snake (pending_approval); the vendored
-// SCHED_STATUS map is keyed on Schedule_domain PascalCase. Total function:
+// Live status strings are lower_snake; the vendored SCHED_STATUS map is keyed
+// on Schedule_domain PascalCase. Total function:
 // unknown statuses fall back to schedStatusSpec's dim spec.
 const LIVE_STATUS_TO_SPEC_KEY: Readonly<Record<string, string>> = {
-  pending_approval: 'Pending_approval',
-  awaiting_approval: 'Pending_approval',
-  blocked_approval: 'Pending_approval',
   scheduled: 'Scheduled',
   due: 'Due',
-  due_pending_refresh: 'Due',
   running: 'Running',
   succeeded: 'Succeeded',
   failed: 'Failed',
-  rejected: 'Rejected',
   cancelled: 'Cancelled',
-  canceled: 'Cancelled',
   expired: 'Expired',
-}
-
-// Live risk_class strings are lower_snake (workspace_write); SCHED_RISK is keyed
-// PascalCase. Same total-function fallback contract.
-const LIVE_RISK_TO_SPEC_KEY: Readonly<Record<string, string>> = {
-  reminder_only: 'Reminder_only',
-  read_only: 'Read_only',
-  workspace_write: 'Workspace_write',
-  external_write: 'External_write',
-  destructive: 'Destructive',
-  cost_bearing: 'Cost_bearing',
 }
 
 function statusSpecForLive(status: string | null | undefined): SchedStatusSpec {
@@ -1281,11 +1035,6 @@ function statusSpecForLive(status: string | null | undefined): SchedStatusSpec {
   // Pass the resolved PascalCase key when known, else the raw value so the
   // fallback renders the original string rather than a generic placeholder.
   return schedStatusSpec(key ?? status ?? undefined)
-}
-
-function riskSpecForLive(risk: string | null | undefined): { lbl: string; cls: string } {
-  const key = LIVE_RISK_TO_SPEC_KEY[normalized(risk)]
-  return schedRiskSpec(key ?? risk ?? undefined)
 }
 
 type PayloadSupportState = NonNullable<DashboardScheduledAutomationRequest['payload_support']>
@@ -1350,15 +1099,11 @@ function payloadSupportSummary(automation: DashboardScheduledAutomation): Payloa
   const unsupportedRequests = requests.filter(isUnsupportedPayloadRequest)
   const unknownRequests = requests.filter(isUnknownPayloadRequest)
   const unsupportedCount = Math.max(
-    automation.payload_support?.unsupported_request_count
-      ?? automation.derived_counts?.unsupported_payload_kind
-      ?? 0,
+    automation.payload_support?.unsupported_request_count ?? 0,
     unsupportedRequests.length,
   )
   const unknownCount = Math.max(
-    automation.payload_support?.unknown_request_count
-      ?? automation.derived_counts?.unknown_payload_kind
-      ?? 0,
+    automation.payload_support?.unknown_request_count ?? 0,
     unknownRequests.length,
   )
   const projectedKinds = automation.payload_support?.unsupported_kinds ?? []
@@ -1467,7 +1212,7 @@ function liveSupportedEvidenceLabel(status: LiveSupportedEvidenceStatus): string
 function liveSupportedEvidenceBannerClass(status: LiveSupportedEvidenceStatus): string {
   switch (status) {
     case 'matched_supported_non_terminal':
-      return 'approve'
+      return 'ok'
     case 'no_supported_payload_rows':
       return 'payload bad'
     case 'no_supported_non_terminal':
@@ -1484,10 +1229,6 @@ type LiveSupportedMatchedRowIntegrity =
       status: 'matched_row_mismatch'
       mismatches: Array<{ scheduleId: string; reason: string }>
     }
-
-function liveSupportedReadinessIsTerminalOrExpired(readiness: string | null | undefined): boolean {
-  return readiness === 'terminal' || readiness === 'expired'
-}
 
 function liveSupportedMatchedRowIntegrity(
   evidence: DashboardScheduledAutomationLiveSupportedNonTerminalEvidence,
@@ -1510,8 +1251,8 @@ function liveSupportedMatchedRowIntegrity(
           if (row.payload_support !== 'supported') {
             return [{ scheduleId, reason: 'payload_support_not_supported' }]
           }
-          if (liveSupportedReadinessIsTerminalOrExpired(row.execution_readiness)) {
-            return [{ scheduleId, reason: 'execution_readiness_terminal_or_expired' }]
+          if (isTerminalStatus(row.status)) {
+            return [{ scheduleId, reason: 'status_terminal' }]
           }
           return []
         })
@@ -1661,7 +1402,7 @@ function cardRailTone(cls: string): string {
 }
 
 // Prototype filter tabs (audit P0 #3): 5 tabs, prototype labels/ordering.
-type SchTabKey = 'pending' | 'scheduled' | 'active' | 'done' | 'all'
+type SchTabKey = 'scheduled' | 'due' | 'running' | 'done' | 'all'
 type SchCadenceKey = 'oneshot' | 'interval' | 'daily' | 'cron' | 'unknown'
 interface SchTabDef {
   readonly key: SchTabKey
@@ -1676,11 +1417,11 @@ interface SchCadenceDef {
   readonly glyph: string
   readonly cls: string
 }
-const SCH_TERMINAL_STATUSES = ['succeeded', 'failed', 'rejected', 'cancelled', 'canceled', 'expired'] as const
+const SCH_TERMINAL_STATUSES = ['succeeded', 'failed', 'cancelled', 'expired'] as const
 const SCH_TABS: readonly SchTabDef[] = [
-  { key: 'pending', label: '승인 대기', statuses: ['pending_approval', 'awaiting_approval', 'blocked_approval'] },
   { key: 'scheduled', label: '예약됨', statuses: ['scheduled'] },
-  { key: 'active', label: 'due · 실행', statuses: ['due', 'due_pending_refresh', 'running'] },
+  { key: 'due', label: 'due', statuses: ['due'] },
+  { key: 'running', label: '실행 중', statuses: ['running'] },
   { key: 'done', label: '완료 · 종료', statuses: SCH_TERMINAL_STATUSES },
   { key: 'all', label: '전체', statuses: null },
 ]
@@ -1824,7 +1565,6 @@ function SchPollingStrip({
                     <div class="sch-poll-title">${payload.glyph} ${request.payload_summary?.trim() || request.payload_kind || request.schedule_id}</div>
                     <div class="sch-poll-foot">
                       <${SchKeeperMeta} actor=${request.scheduled_by} />
-                      <${SchRiskChip} risk=${request.risk_class} />
                       <span class="sch-poll-next mono" title="next_due_at">${formatDateTimeKo(dueIso)}</span>
                     </div>
                   </button>
@@ -1844,12 +1584,6 @@ function recurrenceText(request: DashboardScheduledAutomationRequest): string {
 function SchStatusPill({ status }: { status: string | null | undefined }) {
   const spec = statusSpecForLive(status)
   return html`<span class=${`sch-pill ${spec.cls}`}>${spec.glyph} ${spec.lbl}</span>`
-}
-
-/** `.sch-risk` chip (audit P0 #1 head row). */
-function SchRiskChip({ risk }: { risk: string | null | undefined }) {
-  const spec = riskSpecForLive(risk)
-  return html`<span class=${`sch-risk ${spec.cls}`} title=${`risk_class = ${risk ?? '-'}`}>${spec.lbl}</span>`
 }
 
 /** Keeper attribution on `.sch-meta` — sigil + id (audit P0/P1 #8). No live
@@ -1894,7 +1628,6 @@ function SchCard({
           <span class="sch-kind">${payload.glyph} ${payload.lbl}</span>
           <span class="sch-id mono">${request.schedule_id}</span>
           <${SchCadenceTag} request=${request} />
-          <${SchRiskChip} risk=${request.risk_class} />
           ${request.payload_support && request.payload_support !== 'supported'
             ? html`<${SchPayloadSupportChip} support=${request.payload_support} />`
             : null}
@@ -1908,9 +1641,6 @@ function SchCard({
         <div class="sch-meta">
           <${SchKeeperMeta} actor=${request.scheduled_by} />
           <span class="sch-due" title="due_at"><span class="sub-k">due</span> ${formatDateTimeKo(dueIso)}</span>
-          ${request.requires_separate_human_grant
-            ? html`<span class="sch-need mono" title="별도 사람(operator) 승인 필요">⊙ 승인 필요</span>`
-            : null}
         </div>
         <${WakeEvidenceSummary} request=${request} />
       </div>
@@ -1922,11 +1652,9 @@ function SchCard({
 export function SchDetail({
   request,
   onClose,
-  onResolved,
 }: {
   request: DashboardScheduledAutomationRequest
   onClose: () => void
-  onResolved?: () => Promise<void> | void
 }) {
   // External-system sync: Escape-to-close keyboard listener (legitimate effect).
   useEffect(() => {
@@ -1947,7 +1675,6 @@ export function SchDetail({
   const expiresAtIso = request.expires_at_iso ?? null
   const execution = request.last_execution
   const summary = request.payload_summary?.trim() || null
-  const approval = request.approval_policy ?? (request.approval_required ? 'required' : 'not_required')
   // Live payload has no `body` — only kind/digest/target/summary. Render what is
   // available in the envelope and mark the absent body honestly (audit #12).
   const payloadEnvelope = JSON.stringify(
@@ -1983,22 +1710,17 @@ export function SchDetail({
               ? html`<p class="sch-d-summary">${summary}</p>`
               : html`<p class="sch-d-summary" data-stub="no payload_summary">요약 없음</p>`}
             <div class="sch-badges">
-              <${SchRiskChip} risk=${request.risk_class} />
               <span class="sch-rec mono">↻ ${recurrenceText(request)}</span>
               <span class="sch-src mono">${enumLabel(request.source)}</span>
             </div>
           </div>
 
           <div class="turn-sec">
-            <h4>주체 · 직무분리</h4>
+            <h4>요청 출처</h4>
             <div class="sch-kvs">
               <div class="sch-kv"><span class="k">requested_by</span><span class="v mono">${actorLabel(request.requested_by)}</span></div>
               <div class="sch-kv"><span class="k">scheduled_by</span><span class="v mono">${actorLabel(request.scheduled_by)}</span></div>
-              <div class="sch-kv"><span class="k">approval_required</span><span class="v mono">${String(request.approval_required)}</span></div>
             </div>
-            ${request.scheduled_by?.id
-              ? html`<div class="sch-sod">승인자(operator)는 요청자·예약자와 달라야 실행 grant가 발급됩니다 — 예약 주체는 keeper(<b>${request.scheduled_by.id}</b>), 승인 주체는 operator.</div>`
-              : html`<div class="sch-sod">승인자(operator)는 요청자·예약자와 달라야 실행 grant가 발급됩니다.</div>`}
           </div>
 
           <div class="turn-sec">
@@ -2008,15 +1730,6 @@ export function SchDetail({
               <div class="sch-kv"><span class="k">due</span><span class="v mono">${formatDateTimeKo(dueIso)}</span></div>
               <div class="sch-kv"><span class="k">만료</span><span class="v mono">${formatDateTimeKo(expiresAtIso)}</span></div>
               <div class="sch-kv"><span class="k">recurrence</span><span class="v mono">${recurrenceText(request)}</span></div>
-            </div>
-          </div>
-
-          <div class="turn-sec">
-            <h4>승인 정책</h4>
-            <div class="sch-kvs">
-              <div class="sch-kv"><span class="k">approval_policy</span><span class="v mono">${enumLabel(approval)}</span></div>
-              <div class="sch-kv"><span class="k">운영자 조치</span><span class="v mono">${enumLabel(request.operator_action)}</span></div>
-              <div class="sch-kv"><span class="k">실행 준비</span><span class="v mono">${enumLabel(request.execution_readiness)}</span></div>
             </div>
           </div>
 
@@ -2049,7 +1762,6 @@ export function SchDetail({
             />
           </div>
 
-          <${SchDetailActions} request=${request} onResolved=${onResolved} onClose=${onClose} />
         </div>
       </div>
     </div>
@@ -2087,79 +1799,18 @@ function SchExecution({
   `
 }
 
-/** Detail-overlay actions. Wired to the real approve/reject API only — the
- *  prototype's cancel action has no live endpoint, so it is omitted. Buttons
- *  render only when an `onResolved` refresh callback exists (mirrors the
- *  diagnostics ApprovalCell contract: no callback → read-only). */
-function SchDetailActions({
-  request,
-  onResolved,
-  onClose,
-}: {
-  request: DashboardScheduledAutomationRequest
-  onResolved?: () => Promise<void> | void
-  onClose: () => void
-}) {
-  const [pendingDecision, setPendingDecision] = useState<DashboardScheduleDecision | null>(null)
-  if (!onResolved || !isApprovalActionable(request)) return null
-  const busy = pendingDecision !== null
-
-  async function decide(decision: DashboardScheduleDecision) {
-    setPendingDecision(decision)
-    try {
-      await resolveScheduleApproval(
-        request.schedule_id,
-        decision,
-        decision === 'reject' ? 'rejected from dashboard' : undefined,
-      )
-      showToast(`${request.schedule_id} ${decision === 'approve' ? 'approved' : 'rejected'}`, 'success')
-      await onResolved?.()
-      onClose()
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : 'schedule approval failed', 'error')
-    } finally {
-      setPendingDecision(null)
-    }
-  }
-
-  return html`
-    <div class="turn-sec sch-detail-actions">
-      <button
-        type="button"
-        class="sch-act approve"
-        data-schedule-mutation="approve"
-        data-testid=${`schedule-approve-${request.schedule_id}`}
-        disabled=${busy}
-        aria-busy=${pendingDecision === 'approve' ? 'true' : 'false'}
-        onClick=${() => { void decide('approve') }}
-      >승인 — grant 발급</button>
-      <button
-        type="button"
-        class="sch-act deny"
-        data-schedule-mutation="reject"
-        data-testid=${`schedule-reject-${request.schedule_id}`}
-        disabled=${busy}
-        aria-busy=${pendingDecision === 'reject' ? 'true' : 'false'}
-        onClick=${() => { void decide('reject') }}
-      >거부</button>
-    </div>
-  `
-}
-
 function SchedulePrototypeSurface({
   automation,
-  onResolved,
   selectedScheduleId: controlledSelectedId,
   onSelectSchedule,
 }: {
   automation: DashboardScheduledAutomation
-  onResolved?: () => Promise<void> | void
   // Optional controlled selection so a sibling (the operations aside) can drive
   // the same detail overlay. Uncontrolled (internal state) when omitted.
   selectedScheduleId?: string | null
   onSelectSchedule?: (scheduleId: string | null) => void
 }) {
-  const [tab, setTab] = useState<SchTabKey>('pending')
+  const [tab, setTab] = useState<SchTabKey>('scheduled')
   const [cadenceFilter, setCadenceFilter] = useState<SchCadenceKey | null>(null)
   const [internalSelectedId, setInternalSelectedId] = useState<string | null>(null)
   const selectedScheduleId = controlledSelectedId !== undefined ? controlledSelectedId : internalSelectedId
@@ -2268,7 +1919,6 @@ function SchedulePrototypeSurface({
                         data-schedule-signal-schedule=${signal.schedule_id}
                         onClick=${() => { setSelectedScheduleId(signal.schedule_id) }}
                       >${signal.schedule_id}</button>
-                      <span class="sch-sig-risk mono" data-schedule-signal-risk=${signal.signal_id}>${enumLabel(signal.risk_class)}</span>
                     </div>
                   `
                 })}
@@ -2277,21 +1927,17 @@ function SchedulePrototypeSurface({
       </section>
 
       ${selected
-        ? html`<${SchDetail} request=${selected} onClose=${() => { setSelectedScheduleId(null) }} onResolved=${onResolved} />`
+        ? html`<${SchDetail} request=${selected} onClose=${() => { setSelectedScheduleId(null) }} />`
         : null}
     </div>
   `
 }
 
-// Aside triage buckets. Approval-needed statuses (pending family) surface under
-// '해야 할 일 → 승인'; imminent due statuses under 'due'; terminal statuses feed
-// the '최근 실행' recency list. Derived only from the projection — read-only.
-const SCHEDULE_ASIDE_PENDING: ReadonlySet<string> = new Set([
-  'pending', 'pending_approval', 'awaiting_approval', 'blocked_approval',
-])
-const SCHEDULE_ASIDE_DUE: ReadonlySet<string> = new Set(['due', 'due_pending_refresh'])
+// Aside triage buckets. Due schedules surface under '해야 할 일'; terminal
+// schedules feed the recent-execution list. Derived only from the projection.
+const SCHEDULE_ASIDE_DUE: ReadonlySet<string> = new Set(['due'])
 const SCHEDULE_ASIDE_TERMINAL: ReadonlySet<string> = new Set([
-  'succeeded', 'failed', 'rejected', 'cancelled', 'canceled', 'expired',
+  'succeeded', 'failed', 'cancelled', 'expired',
 ])
 const SCHEDULE_ASIDE_RECENT_MAX = 6
 
@@ -2300,7 +1946,7 @@ function scheduleAsideSummary(request: DashboardScheduledAutomationRequest): str
 }
 
 /** Right-column operations aside for the schedule surface (schedule.jsx SchAside):
- *  a read-only pulse (예약됨/due·실행/승인대기) + failed/pending/due/recent triage
+ *  a read-only pulse (예약됨/due·실행) + failed/due/recent triage
  *  derived from the same scheduled-automation projection. A row click opens the
  *  shared detail overlay via `onOpen`; there are no mutation controls, so the
  *  surface stays read-only. */
@@ -2310,19 +1956,18 @@ export function ScheduleAside({
   onOpen,
 }: {
   requests: readonly DashboardScheduledAutomationRequest[]
-  sum: { readonly scheduled: number; readonly dueRunning: number; readonly pending: number; readonly total: number }
+  sum: { readonly scheduled: number; readonly dueRunning: number; readonly total: number }
   onOpen: (scheduleId: string) => void
 }) {
   const asideStatus = (request: DashboardScheduledAutomationRequest): string =>
     normalized(effectiveStatus(request))
   const payloadBlocked = requests.filter(payloadSupportBlocksWake)
   const failed = requests.filter(request => asideStatus(request) === 'failed' && !payloadSupportBlocksWake(request))
-  const pending = requests.filter(request => SCHEDULE_ASIDE_PENDING.has(asideStatus(request)) && !payloadSupportBlocksWake(request))
   const due = requests.filter(request => SCHEDULE_ASIDE_DUE.has(asideStatus(request)) && !payloadSupportBlocksWake(request))
   const recent = requests
     .filter(request => SCHEDULE_ASIDE_TERMINAL.has(asideStatus(request)))
     .slice(0, SCHEDULE_ASIDE_RECENT_MAX)
-  const needTotal = pending.length + due.length
+  const needTotal = due.length
 
   return html`
     <aside class="ov-aside" aria-label="예약 운영 상태" data-testid="schedule-aside">
@@ -2331,7 +1976,6 @@ export function ScheduleAside({
         <div class="wka-pulse">
           <span class="wka-pulse-i"><b class="mono">${sum.scheduled}</b> 예약됨</span>
           <span class="wka-pulse-i"><b class=${`mono ${sum.dueRunning > 0 ? 'volt' : ''}`}>${sum.dueRunning}</b> due·실행</span>
-          <span class="wka-pulse-i"><b class=${`mono ${sum.pending > 0 ? 'warn' : ''}`}>${sum.pending}</b> 승인대기</span>
         </div>
         ${payloadBlocked.length === 0 && failed.length === 0
           ? html`<div class="wka-calm mono">실패한 실행 없음</div>`
@@ -2374,18 +2018,6 @@ export function ScheduleAside({
       <section class="wka-sec">
         <div class="wka-h">해야 할 일 <span class="n mono">${needTotal}</span></div>
         <div class="wka-list">
-          ${pending.map(request => html`
-            <button
-              type="button"
-              class="wka-todo approve"
-              data-schedule-aside-open=${request.schedule_id}
-              onClick=${() => { onOpen(request.schedule_id) }}
-            >
-              <span class="wka-todo-k">승인</span>
-              <span class="wka-todo-t">${scheduleAsideSummary(request)}</span>
-              <span class="wka-todo-m mono">${riskSpecForLive(request.risk_class).lbl} · ${formatDateTimeKo(request.next_due_at_iso ?? request.due_at_iso ?? null)}</span>
-            </button>
-          `)}
           ${due.map(request => html`
             <button
               type="button"
@@ -2398,7 +2030,7 @@ export function ScheduleAside({
               <span class="wka-todo-m mono">${recurrenceText(request)} · 실행 대기</span>
             </button>
           `)}
-          ${needTotal === 0 ? html`<div class="wka-calm mono">승인·실행 대기 없음</div>` : null}
+          ${needTotal === 0 ? html`<div class="wka-calm mono">실행 대기 없음</div>` : null}
         </div>
       </section>
 
@@ -2430,13 +2062,11 @@ export function ScheduleAside({
 
 export function ScheduledAutomationPanel({
   automation,
-  onResolved,
   variant = 'diagnostics',
   selectedScheduleId: controlledSelectedId,
   onSelectSchedule,
 }: {
   automation?: DashboardScheduledAutomation | null
-  onResolved?: () => Promise<void> | void
   variant?: 'diagnostics' | 'v2'
   // Forwarded to the v2 surface so the schedule aside can control the overlay.
   selectedScheduleId?: string | null
@@ -2456,7 +2086,6 @@ export function ScheduledAutomationPanel({
   if (variant === 'v2') {
     return html`<${SchedulePrototypeSurface}
       automation=${automation}
-      onResolved=${onResolved}
       selectedScheduleId=${controlledSelectedId}
       onSelectSchedule=${onSelectSchedule}
     />`
@@ -2484,18 +2113,8 @@ export function ScheduledAutomationPanel({
       rows.filter(request => filterMatches(filter.key, request)).length,
     ]),
   )
-  const dueEffective = automation.derived_counts?.due_effective ?? 0
-  const blockedApproval = automation.derived_counts?.blocked_approval ?? 0
-  const dueExecutionReady = automation.derived_counts?.due_execution_ready ?? 0
-  const expiredEffective = automation.derived_counts?.expired_effective ?? 0
-  const unsupportedPayloads =
-    automation.payload_support?.unsupported_request_count
-      ?? automation.derived_counts?.unsupported_payload_kind
-      ?? 0
-  const unknownPayloads =
-    automation.payload_support?.unknown_request_count
-      ?? automation.derived_counts?.unknown_payload_kind
-      ?? 0
+  const unsupportedPayloads = automation.payload_support?.unsupported_request_count ?? 0
+  const unknownPayloads = automation.payload_support?.unknown_request_count ?? 0
   const unsupportedKinds = automation.payload_support?.unsupported_kinds ?? []
 
   return html`
@@ -2512,18 +2131,6 @@ export function ScheduledAutomationPanel({
         </span>
         <span class="text-[var(--color-fg-muted)]">
           종료 <span class="font-mono text-[var(--color-fg-secondary)]">${automation.fsm.terminal_count.toLocaleString()}</span>
-        </span>
-        <span class="text-[var(--color-fg-muted)]">
-          유효 도래 <span class="font-mono text-[var(--color-fg-secondary)]">${dueEffective.toLocaleString()}</span>
-        </span>
-        <span class="text-[var(--color-fg-muted)]">
-          승인 차단 <span class="font-mono text-[var(--color-fg-secondary)]">${blockedApproval.toLocaleString()}</span>
-        </span>
-        <span class="text-[var(--color-fg-muted)]">
-          실행 준비 <span class="font-mono text-[var(--color-fg-secondary)]">${dueExecutionReady.toLocaleString()}</span>
-        </span>
-        <span class="text-[var(--color-fg-muted)]">
-          만료 <span class="font-mono text-[var(--color-fg-secondary)]">${expiredEffective.toLocaleString()}</span>
         </span>
         <span class=${unsupportedPayloads > 0 ? 'text-[var(--color-danger-fg)]' : 'text-[var(--color-fg-muted)]'}>
           unsupported payload <span class="font-mono">${unsupportedPayloads.toLocaleString()}</span>
@@ -2613,7 +2220,7 @@ export function ScheduledAutomationPanel({
                   : html`<div class="rounded-[var(--r-1)] border border-dashed border-[var(--color-border-default)] px-4 py-8 text-center text-xs text-[var(--color-fg-muted)]">이 필터에 해당하는 예약이 없습니다.</div>`}
               </div>
               <aside class="grid content-start gap-2">
-                <${ScheduleDetailPanel} request=${selectedRequest} onResolved=${onResolved} />
+                <${ScheduleDetailPanel} request=${selectedRequest} />
                 <div
                   data-schedule-durable-signal-contract="payload_support"
                   data-schedule-durable-signal-raw=${durableSignalContract.rawCount}

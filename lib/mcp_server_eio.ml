@@ -10,7 +10,7 @@
     - Mcp_server_eio_call_tool: Tool call handler (retry, timeout, result envelope)
     - Mcp_server_eio_tool_profile: Profile/schema/annotation/pagination helpers
     - Mcp_server_eio_protocol: JSON-RPC handlers, subscriptions, transport
-    - Mcp_server_eio_governance: Governance and MCP session helpers
+    - Mcp_session_store: durable MCP session helpers
 *)
 
 (** {1 Re-exported Types} *)
@@ -61,25 +61,15 @@ let validate_initialize_params = Mcp_transport_protocol.validate_initialize_para
 let has_field = Mcp_transport_protocol.has_field
 let get_field = Mcp_transport_protocol.get_field
 
-(** {1 Governance Re-exports} *)
-
-type governance_config = Mcp_server_eio_governance.governance_config =
-  { level : string
-  ; audit_enabled : bool
-  ; anomaly_detection : bool
-  }
-
-let governance_defaults = Mcp_server_eio_governance.governance_defaults
-
-type mcp_session_record = Mcp_server_eio_governance.mcp_session_record =
+type mcp_session_record = Mcp_session_store.mcp_session_record =
   { id : string
   ; agent_name : string option
   ; created_at : float
   ; last_seen : float
   }
 
-let mcp_session_to_json = Mcp_server_eio_governance.mcp_session_to_json
-let mcp_session_of_json = Mcp_server_eio_governance.mcp_session_of_json
+let mcp_session_to_json = Mcp_session_store.mcp_session_to_json
+let mcp_session_of_json = Mcp_session_store.mcp_session_of_json
 
 (* Tag registry initialization.
    Most modules register via Tool_spec.register at module load time.

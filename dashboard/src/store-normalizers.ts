@@ -410,7 +410,6 @@ export function normalizeExecutionContinuityBrief(raw: unknown): DashboardExecut
     model: asString(raw.model) ?? null,
     emoji: asString(raw.emoji),
     korean_name: asString(raw.korean_name),
-    skill_reason: asString(raw.skill_reason) ?? null,
     recent_input_preview: asString(raw.recent_input_preview) ?? null,
     recent_output_preview: asString(raw.recent_output_preview) ?? null,
     recent_tool_names: asStringArray(raw.recent_tool_names) ?? [],
@@ -419,7 +418,6 @@ export function normalizeExecutionContinuityBrief(raw: unknown): DashboardExecut
     tool_audit_source: asString(raw.tool_audit_source) ?? null,
     tool_audit_at: asString(raw.tool_audit_at) ?? null,
     last_proactive_preview: asString(raw.last_proactive_preview) ?? null,
-    skill_route_summary: asString(raw.skill_route_summary) ?? null,
   }
 }
 
@@ -499,12 +497,6 @@ function normalizeKeeperRuntimeResolved(raw: unknown): KeeperRuntimeResolved | n
     const n = asNumber(v)
     return n !== null && n !== undefined ? n : _MISSING
   }
-  const intField = (key: string) => normalizeKeeperRuntimeField(
-    (raw as Record<string, unknown>)[key], v => {
-      const n = toNumber(v)
-      return n === _MISSING ? _MISSING : Math.round(n as number)
-    },
-  )
   const floatField = (key: string) => normalizeKeeperRuntimeField(
     (raw as Record<string, unknown>)[key], toNumber,
   )
@@ -512,58 +504,16 @@ function normalizeKeeperRuntimeResolved(raw: unknown): KeeperRuntimeResolved | n
     (raw as Record<string, unknown>)[key],
     v => v === null || v === undefined ? null : toNumber(v) === _MISSING ? _MISSING : (toNumber(v) as number),
   )
-  const bootstrap = intField('bootstrap_max_active_keepers')
-  const reactiveMaxIdle = intField('reactive_max_idle_turns')
-  const autonomousMaxIdle = intField('autonomous_max_idle_turns')
   const turnTimeout = floatField('turn_timeout_sec')
-  const admissionWait = floatField('admission_wait_timeout_sec')
   const oasTimeoutOverride = optFloatField('oas_timeout_override_sec')
   const oasTimeoutPer1k = floatField('oas_timeout_per_1k')
   const oasTimeoutPerTurn = floatField('oas_timeout_per_turn')
-  if (!bootstrap || !reactiveMaxIdle || !autonomousMaxIdle || !turnTimeout
-    || !admissionWait || !oasTimeoutPer1k || !oasTimeoutPerTurn) return null
+  if (!turnTimeout || !oasTimeoutPer1k || !oasTimeoutPerTurn) return null
   return {
-    bootstrap_max_active_keepers: bootstrap,
-    reactive_max_idle_turns: reactiveMaxIdle,
-    autonomous_max_idle_turns: autonomousMaxIdle,
     turn_timeout_sec: turnTimeout,
-    admission_wait_timeout_sec: admissionWait,
     oas_timeout_override_sec: oasTimeoutOverride as KeeperRuntimeField<number | null>,
     oas_timeout_per_1k: oasTimeoutPer1k,
     oas_timeout_per_turn: oasTimeoutPerTurn,
-  }
-}
-
-function normalizeDashboardShellIrApproval(
-  raw: unknown,
-): DashboardRuntimeResolution['shell_ir_approval'] {
-  if (!isRecord(raw)) return null
-  const schema = asString(raw.schema)
-  const enabled = asBoolean(raw.enabled)
-  const envKey = asString(raw.env_key)
-  const rawOverlay = asString(raw.raw_overlay)
-  const reason = asString(raw.reason)
-  const source = asString(raw.source)
-  const trust = isRecord(raw.trust)
-    ? {
-      safe: asString(raw.trust.safe),
-      audited: asString(raw.trust.audited),
-      privileged: asString(raw.trust.privileged),
-    }
-    : null
-  const normalizedTrust =
-    trust === null || trust.safe === undefined || trust.audited === undefined || trust.privileged === undefined
-      ? null
-      : { safe: trust.safe, audited: trust.audited, privileged: trust.privileged }
-  if (schema === undefined || enabled === undefined || envKey === undefined) return null
-  return {
-    schema,
-    enabled,
-    env_key: envKey,
-    raw_overlay: rawOverlay ?? null,
-    trust: normalizedTrust,
-    source: source ?? null,
-    reason: reason ?? null,
   }
 }
 
@@ -601,10 +551,10 @@ export function normalizeDashboardRuntimeResolution(
       .map(normalizeDashboardRuntimeDiagnostic)
       .filter((item): item is DashboardRuntimeDiagnostic => item !== null),
     build,
-    shell_ir_approval: normalizeDashboardShellIrApproval(raw.shell_ir_approval),
     keeper_runtime: normalizeKeeperRuntimeResolved(raw.keeper_runtime),
     fleet_safety: normalizeDashboardFleetSafetyHealth(raw),
     fd_accountant: normalizeDashboardFdAccountant(raw.fd_accountant),
+    disk_observation: normalizeDashboardDiskObservation(raw.disk_observation),
     cdal: normalizeDashboardCdalHealth(raw.cdal),
   }
 }
@@ -613,12 +563,62 @@ function normalizeDashboardFdAccountant(raw: unknown): DashboardRuntimeResolutio
   if (!isRecord(raw)) return null
   const fdOpen = asNumber(raw.fd_open)
   const fdLimit = asNumber(raw.fd_limit)
-  const pressureActive = asBoolean(raw.pressure_active)
-  if (fdOpen == null && fdLimit == null && pressureActive == null) return null
+  const perKind = (Array.isArray(raw.per_kind) ? raw.per_kind : [])
+    .map((row) => {
+      if (!isRecord(row)) return null
+      const kind = asString(row.kind)
+      const activeOperations = asNumber(row.active_operations)
+      return kind && activeOperations != null
+        ? { kind, active_operations: activeOperations }
+        : null
+    })
+    .filter((row): row is { kind: string; active_operations: number } => row !== null)
+  const resourceErrors = (Array.isArray(raw.resource_errors) ? raw.resource_errors : [])
+    .map((row) => {
+      if (!isRecord(row)) return null
+      const kind = asString(row.kind)
+      const error = asString(row.error)
+      const count = asNumber(row.count)
+      return kind && error && count != null ? { kind, error, count } : null
+    })
+    .filter((row): row is { kind: string; error: string; count: number } => row !== null)
+  if (fdOpen == null && fdLimit == null && perKind.length === 0 && resourceErrors.length === 0) return null
   return {
     fd_open: fdOpen ?? null,
     fd_limit: fdLimit ?? null,
-    pressure_active: pressureActive ?? null,
+    per_kind: perKind,
+    resource_errors: resourceErrors,
+  }
+}
+
+function normalizeDashboardDiskObservation(raw: unknown): DashboardRuntimeResolution['disk_observation'] {
+  if (!isRecord(raw)) return null
+  const filesystemRaw = isRecord(raw.filesystem) ? raw.filesystem : null
+  const filesystem = filesystemRaw
+    ? {
+        path: asString(filesystemRaw.path) ?? null,
+        filesystem: asString(filesystemRaw.filesystem) ?? null,
+        mounted_on: asString(filesystemRaw.mounted_on) ?? null,
+        total_bytes: asNumber(filesystemRaw.total_bytes) ?? null,
+        used_bytes: asNumber(filesystemRaw.used_bytes) ?? null,
+        available_bytes: asNumber(filesystemRaw.available_bytes) ?? null,
+        capacity_percent: asNumber(filesystemRaw.capacity_percent) ?? null,
+        available_percent: asNumber(filesystemRaw.available_percent) ?? null,
+        error: asString(filesystemRaw.error) ?? null,
+      }
+    : null
+  const mode = asString(raw.mode) ?? null
+  const mascRoot = asString(raw.masc_root) ?? null
+  const exhaustionTotal = asNumber(raw.storage_space_exhaustion_observations_total)
+  const lastExhaustion = asNumber(raw.last_storage_space_exhaustion_ts)
+  if (mode == null && mascRoot == null && exhaustionTotal == null
+    && lastExhaustion == null && filesystem == null) return null
+  return {
+    mode,
+    masc_root: mascRoot,
+    storage_space_exhaustion_observations_total: exhaustionTotal ?? null,
+    last_storage_space_exhaustion_ts: lastExhaustion ?? null,
+    filesystem,
   }
 }
 
@@ -649,11 +649,7 @@ function normalizeDashboardPausedKeeperDetail(raw: unknown): DashboardPausedKeep
     name,
     autoboot_enabled: asBoolean(raw.autoboot_enabled) ?? null,
     pause_kind: asString(raw.pause_kind) ?? null,
-    auto_resume_after_sec: asNumber(raw.auto_resume_after_sec) ?? null,
-    persisted_auto_resume_after_sec: asNumber(raw.persisted_auto_resume_after_sec) ?? null,
-    auto_resume_source: asString(raw.auto_resume_source) ?? null,
     paused_elapsed_sec: asNumber(raw.paused_elapsed_sec) ?? null,
-    auto_resume_remaining_sec: asNumber(raw.auto_resume_remaining_sec) ?? null,
     last_blocker: normalizeDashboardBlockerInfo(raw.last_blocker),
     missing_pause_root_cause: asBoolean(raw.missing_pause_root_cause) ?? null,
   }
@@ -719,12 +715,6 @@ function normalizeDashboardFleetPressureHealth(raw: unknown): DashboardFleetPres
   const status = asString(raw.status) ?? asString(raw.state) ?? null
   const reason = asString(raw.reason) ?? asString(raw.message) ?? null
   const blocker = asString(raw.blocker) ?? null
-  const admissionBlocked = asBoolean(raw.admission_blocked)
-    ?? asBoolean(raw.admission_blocks)
-    ?? null
-  const admissionBlockedKeepers = asNumber(raw.admission_blocked_keepers)
-    ?? asNumber(raw.admission_blocked_count)
-    ?? null
   const blockedKeepers = asNumber(raw.blocked_keepers)
     ?? asNumber(raw.keepers_blocked)
     ?? null
@@ -755,8 +745,6 @@ function normalizeDashboardFleetPressureHealth(raw: unknown): DashboardFleetPres
     status == null
     && reason == null
     && blocker == null
-    && admissionBlocked == null
-    && admissionBlockedKeepers == null
     && blockedKeepers == null
     && blockedCount == null
     && bootableKeeperCount == null
@@ -786,8 +774,6 @@ function normalizeDashboardFleetPressureHealth(raw: unknown): DashboardFleetPres
     status,
     reason,
     blocker,
-    admission_blocked: admissionBlocked,
-    admission_blocked_keepers: admissionBlockedKeepers,
     blocked_keepers: blockedKeepers,
     blocked_count: blockedCount,
     bootable_keeper_count: bootableKeeperCount ?? null,
@@ -897,7 +883,6 @@ function normalizeDashboardFleetSafetyHealth(raw: Record<string, unknown>): Dash
   const pausedKeepers = asNumber(raw.paused_keepers)
   const pausedKeepersHealth = normalizeDashboardPausedKeepersHealth(raw.paused_keepers_health)
   const noFibers = asBoolean(raw.keeper_fleet_no_fibers)
-  const fdPressure = normalizeDashboardFleetPressureHealth(raw.keeper_fd_pressure)
   const fleetSafety = normalizeDashboardFleetPressureHealth(raw.keeper_fleet_safety)
   const reactionLedger = normalizeDashboardKeeperReactionLedgerHealth(raw.keeper_reaction_ledger)
   if (
@@ -905,7 +890,6 @@ function normalizeDashboardFleetSafetyHealth(raw: Record<string, unknown>): Dash
     && pausedKeepers == null
     && pausedKeepersHealth == null
     && noFibers == null
-    && fdPressure == null
     && fleetSafety == null
     && reactionLedger == null
   ) {
@@ -916,7 +900,6 @@ function normalizeDashboardFleetSafetyHealth(raw: Record<string, unknown>): Dash
     paused_keepers: pausedKeepers ?? null,
     paused_keepers_health: pausedKeepersHealth,
     keeper_fleet_no_fibers: noFibers ?? null,
-    keeper_fd_pressure: fdPressure,
     keeper_fleet_safety: fleetSafety,
     keeper_reaction_ledger: reactionLedger,
   }

@@ -27,8 +27,6 @@
     - {b Persistence loaders}: [load_persisted_posts],
       [load_persisted_comments], [load_persisted_votes],
       [recalculate_reply_counts].
-    - {b Quarantine helpers}: [classify_voter_target],
-      [quarantine_enabled].
     - {b Global store}: [global_lazy] ref.
     - {b Flair extractor internals}: [flair_tag_re],
       [extract_flair]. *)
@@ -130,10 +128,9 @@ val visibility_of_string : string -> visibility option
 val post_of_yojson : Yojson.Safe.t -> post option
 (** Decodes a single persisted-post JSON row.  Returns
     [None] when any required field is missing or any id /
-    visibility / post-kind parser rejects the value;
-    legacy rows missing [updated_at] / [post_kind] /
-    [hearth] are accepted with the canonical defaults
-    derived via {!legacy_migrate_post_kind}. *)
+    visibility / post-kind parser rejects the value. Rows without an
+    explicit [post_kind] are rejected rather than classified from prose,
+    author names, or timing metadata. *)
 
 val comment_of_yojson : Yojson.Safe.t -> comment option
 (** Decodes a single persisted-comment JSON row.  Same
@@ -260,37 +257,7 @@ val post_to_yojson_with_karma :
   post -> author_karma:int -> Yojson.Safe.t
 (** Karma-enriched serialiser used by the dashboard:
     extends {!post_to_yojson} with [author_karma],
-    [classification_reason], extracted [flair], and a
+    caller-supplied [classification_reason] when present in metadata,
+    extracted [flair], and a
     pre-computed [score = votes_up - votes_down] so the
     client does not have to derive it. *)
-
-(** {1 Fixture-voter quarantine (#9886, RFC-0089 §4-3 G2)} *)
-
-type fixture_voter_kind =
-  | Hot_voter           (** ["hot-voter-"] prefix. *)
-  | Synthetic_voter     (** ["synthetic-voter-"] prefix. *)
-  | Test_voter          (** ["test-voter-"] prefix. *)
-
-type voter_kind =
-  | Production_voter
-  | Fixture_voter of fixture_voter_kind
-
-val classify_voter_target : string -> voter_kind
-(** [classify_voter_target target] derives the typed {!voter_kind}
-    from a vote-log target key ([workspace:agent] tuple or bare agent
-    name).  Extracts the voter segment after the rightmost [':']
-    then dispatches on the [hot-voter-] / [synthetic-voter-] /
-    [test-voter-] prefixes (matching the legacy
-    [is_fixture_voter_target] semantics exactly).
-
-    Returns [Production_voter] for every target that does not
-    match a fixture prefix.  Pinned for behaviour-tests under
-    {!test/test_board_fixture_detector}. *)
-
-val quarantine_enabled : unit -> bool
-(** Reads [MASC_BOARD_VOTE_QUARANTINE] (default [true] —
-    production-ledger #9886 measured 100% fixture-pattern votes
-    orphaning ranking).  Returns [false] only when the env is
-    explicitly set to [0] / [false] / [off] / empty.  Pinned
-    for behaviour-tests under
-    {!test/test_board_vote_quarantine}. *)

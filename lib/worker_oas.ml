@@ -28,50 +28,18 @@ let oas_model_of_effective_model (model_id : string) : string = model_id
 (* worker_container_meta -> OAS Masc_domain.agent_config                   *)
 (* ================================================================ *)
 
-let worker_max_turns_cap = 20
-
-(* Worker sampling overrides. The [worker_default] inference profile leaves
-   top_p/top_k unset (None); these are worker_oas's own fixed sampling
-   choice, applied at both the agent_config record and the Builder below.
-   Named here so the two send sites cannot drift (CLAUDE.md magic-number
-   rule). See also the min_p note in [agent_config_of_worker_meta]. *)
-let worker_top_p = 0.95
-let worker_top_k = 40
-
-(** Derive max_turns from worker meta timeout budget.
-    Worker runtime no longer stores a separate max_turns contract. *)
-let effective_max_turns (meta : Worker_container_types.worker_container_meta) : int =
-  let from_timeout =
-    match meta.timeout_seconds with
-    | Some sec -> max 2 (sec / 20)
-    | None -> 8
-  in
-  max 2 (min worker_max_turns_cap from_timeout)
-;;
-
 (** Convert MASC worker_container_meta to OAS agent_config.
-    Maps worker_name, model, thinking, max_turns, and temperature. *)
+    Maps worker_name, model, and thinking. OAS owns provider/model defaults;
+    MASC does not synthesize token, turn, or sampling limits. *)
 let agent_config_of_worker_meta
       (meta : Worker_container_types.worker_container_meta)
       ~(system_prompt : string)
   : Agent_sdk.Types.agent_config
   =
-  let max_tokens = Worker_container_types.local_worker_max_tokens () in
   { Agent_sdk.Types.default_config with
     name = meta.worker_name
   ; model = oas_model_of_effective_model meta.effective_model
   ; system_prompt = Some system_prompt
-  ; max_tokens = Some max_tokens
-  ; max_turns = effective_max_turns meta
-  ; temperature = Some Runtime_provider_defaults.worker_default_temperature
-  ; top_p = Some worker_top_p
-  ; top_k = Some worker_top_k
-  ; (* min_p intentionally omitted: the constant is 0.0 (no-op) and some
-       cloud providers (Groq, GLM) reject the field itself with
-       "Invalid request: property 'min_p' is unsupported". OAS capability
-       gate in #6653 handles this too, but keeping the send-site explicit
-       avoids ambiguous_partial_commit when the gate has not propagated. *)
-    min_p = None
   ; enable_thinking = Some (Option.value ~default:false meta.thinking_enabled)
   }
 ;;
@@ -110,27 +78,6 @@ let description_of_meta (meta : Worker_container_types.worker_container_meta) : 
 let oas_provider_of_label = Worker_container.oas_provider_of_label
 
 (* ================================================================ *)
-(* gate_config                                                       *)
-(* ================================================================ *)
-
-(* Local model (Qwen3.5 Q4) — no cloud cost, so generous turn budget. *)
-let local_model_gate =
-  { Eval_gate.default_config with
-    destructive_check_enabled = true
-  ; max_tool_calls_per_turn = 30
-  ; max_cost_usd = 1.00
-  }
-;;
-
-(* Boundary: MASC does not impose a tool-retry budget on workers. Retrying a
-   malformed tool call is the keeper's own competence — the SDK delivers the
-   validation error back to the model (pipeline [None] branch) and the agent
-   loop decides whether to re-emit. OAS owns retry classification, feedback
-   synthesis, and loop control; runaway is bounded by token budget + idle
-   turns, not a code-level retry count. *)
-let default_gate_config () = { local_model_gate with denied_tools = [] }
-
-(* ================================================================ *)
 (* Build OAS Agent.t via Builder                                     *)
 (* ================================================================ *)
 
@@ -151,46 +98,25 @@ let build_agent
       ~(hooks : Agent_sdk.Hooks.hooks)
       ~(raw_trace : Agent_sdk.Raw_trace.t)
       ~(heartbeat_callbacks : Agent_sdk.Agent.periodic_callback list)
-      ?(gate_config : Eval_gate.gate_config option)
       ?context_injector
       ?context
       ?(approval : Agent_sdk.Hooks.approval_callback =
-        Approval_callbacks.reject_by_default)
+        Approval_callbacks.auto_approve)
       ()
   : (Agent_sdk.Agent.t, string) result
   =
   let config = agent_config_of_worker_meta meta ~system_prompt in
-  let tool_names = List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name) tools in
-  let guardrails =
-    match gate_config with
-    | Some gate -> Verifier_oas.eval_gate_to_oas_guardrails gate
-    | None ->
-      { Agent_sdk.Guardrails.tool_filter = AllowList tool_names
-      ; max_tool_calls_per_turn =
-          Some 30
-      }
-  in
   let builder =
     Agent_sdk.Builder.create ~net ~model:config.model
     |> Agent_sdk.Builder.with_name config.name
     |> Agent_sdk.Builder.with_system_prompt system_prompt
-    |> (fun b ->
-    match config.max_tokens with
-    | Some n -> Agent_sdk.Builder.with_max_tokens n b
-    | None -> b)
     |> Agent_sdk.Builder.with_max_turns config.max_turns
-    |> Agent_sdk.Builder.with_temperature Runtime_provider_defaults.worker_default_temperature
-    |> Agent_sdk.Builder.with_top_p worker_top_p
-    |> Agent_sdk.Builder.with_top_k worker_top_k
-    (* with_min_p intentionally omitted — see agent_config_of_worker_meta
-       above for the reason. min_p of 0.0 is a no-op and cloud providers
-       (Groq, GLM) reject the field itself. *)
     |> Agent_sdk.Builder.with_enable_thinking
          (Option.value ~default:false meta.thinking_enabled)
     |> Agent_sdk.Builder.with_provider provider
     |> Agent_sdk.Builder.with_tools tools
     |> Agent_sdk.Builder.with_hooks hooks
-    |> Agent_sdk.Builder.with_guardrails guardrails
+    |> Agent_sdk.Builder.with_guardrails Agent_sdk.Guardrails.permissive
     |> Agent_sdk.Builder.with_raw_trace raw_trace
     |> Agent_sdk.Builder.with_periodic_callbacks heartbeat_callbacks
     |> Agent_sdk.Builder.with_description (description_of_meta meta)
@@ -244,83 +170,9 @@ let make_heartbeat_callbacks
     ]
 ;;
 
-(** Convert a JSON field value into a string suitable for safety screening. *)
-let string_of_screening_value (value : Yojson.Safe.t) : string =
-  match value with
-  | `String s -> s
-  | `Int i -> string_of_int i
-  | `Intlit s -> s
-  | `Float f -> string_of_float f
-  | `Bool b -> string_of_bool b
-  | `Null -> ""
-  | (`Assoc _ | `List _) as json -> Yojson.Safe.to_string json
-;;
-
-(** Extract command-like content from tool input JSON for screening.
-    Reads "command", "cmd", "content", "action"/"args", or "path" keys.
-    Shared pattern with keeper_hooks_oas.ml extract_command_from_input. *)
-let extract_command_from_input (input : Yojson.Safe.t) : string =
-  let string_member key =
-    Json_util.get_string input key |> Option.value ~default:""
-  in
-  let member_to_string key =
-    match Json_util.assoc_member_opt key input with
-    | None | Some `Null -> ""
-    | Some value -> string_of_screening_value value
-  in
-  try
-    let command = string_member "command" in
-    if command <> ""
-    then command
-    else (
-      let cmd = string_member "cmd" in
-      if cmd <> ""
-      then cmd
-      else (
-        let content = string_member "content" in
-        if content <> ""
-        then content
-        else (
-          let action = string_member "action" in
-          let args = member_to_string "args" in
-          match action, args with
-          | "", "" ->
-            let path = string_member "path" in
-            if path <> "" then path else ""
-          | a, "" -> a
-          | "", b -> b
-          | a, b -> String.trim (a ^ " " ^ b))))
-  with
-  | Yojson.Safe.Util.Type_error _ -> ""
-;;
-
-(** Render inline skip reason for blocked tool calls.
-    Returns a text block that OAS displays instead of executing the tool. *)
-let render_worker_skip_reason ~tool_name ~reason_code ~reason_text =
-  Printf.sprintf
-    "[tool_blocked] tool=%s reason_code=%s reason=%s"
-    tool_name
-    reason_code
-    reason_text
-;;
-
-(** Build pre_tool_use hook with optional safety gates.
-
-    When [gate_config] is provided, adds safety defense-in-depth
-    (same pattern as keeper_hooks_oas.ml):
-    - Gate 0: Deny list — reject tools in [gate_config.denied_tools]
-    - Gate 1: Destructive pattern detection — reject dangerous shell commands
-
-    [gate_config.max_cost_usd] is advisory telemetry only and must not reject.
-
-    When [gate_config] is None, only name tracking is performed (backward compat).
-
-    @since Audit #2 — Worker safety gates *)
-let make_tool_tracking_hooks
-      ?gate_config
-      ?(destructive_ops_policy = Destructive_ops_policy.default)
-      ?context
-      () =
+(** Build observation hooks for worker tool names and failures. Authorization
+    belongs to the external-effect boundary, not to a worker-local heuristic. *)
+let make_tool_tracking_hooks ?context () =
   let tool_names_ref = ref [] in
   let tracking =
     { Agent_sdk.Hooks.empty with
@@ -328,42 +180,9 @@ let make_tool_tracking_hooks
         Some
           (fun event ->
             match event with
-            | Agent_sdk.Hooks.PreToolUse { tool_name; input; _ } ->
-              (* Always track tool names *)
+            | Agent_sdk.Hooks.PreToolUse { tool_name; _ } ->
               tool_names_ref := tool_name :: !tool_names_ref;
-              (* Safety gates (when gate_config is provided) *)
-              (match gate_config with
-               | None -> Agent_sdk.Hooks.Continue
-               | Some (gate : Eval_gate.gate_config) ->
-                 (* Gate 0: Deny list *)
-                 if List.mem tool_name gate.denied_tools then (
-                   Log.LocalWorker.warn "worker deny list: blocked %s" tool_name;
-                   Agent_sdk.Hooks.Override
-                     (render_worker_skip_reason
-                        ~tool_name
-                        ~reason_code:"worker_deny"
-                        ~reason_text:"tool is on the worker deny list"))
-                 else if
-                   (* Gate 1: Destructive pattern detection *)
-                   gate.destructive_check_enabled
-                   && Tool_capability.has Tool_capability.Destructive tool_name
-                 then (
-                   let cmd = extract_command_from_input input in
-                   match Eval_gate.detect_destructive destructive_ops_policy cmd with
-                   | Some (pattern, desc) ->
-                     let reason_text = Printf.sprintf "pattern='%s' (%s)" pattern desc in
-                     Log.LocalWorker.warn
-                       "worker destructive pattern in %s: '%s' (%s)"
-                       tool_name
-                       pattern
-                       desc;
-                     Agent_sdk.Hooks.Override
-                       (render_worker_skip_reason
-                          ~tool_name
-                          ~reason_code:"destructive_guard"
-                          ~reason_text)
-                   | None -> Agent_sdk.Hooks.Continue)
-                 else Agent_sdk.Hooks.Continue)
+              Agent_sdk.Hooks.Continue
             | Agent_sdk.Hooks.BeforeTurn _
             | Agent_sdk.Hooks.BeforeTurnParams _
             | Agent_sdk.Hooks.AfterTurn _
@@ -527,7 +346,6 @@ let rec run_worker_via_oas
           ~(prompt : string)
           ~(tools : Agent_sdk.Tool.t list)
           ~(raw_trace : Agent_sdk.Raw_trace.t)
-          ?(gate_config : Eval_gate.gate_config option)
           ?worker_run_id
           ()
   : (Worker_container_types.run_result, string) result
@@ -541,7 +359,7 @@ let rec run_worker_via_oas
   let context_injector = Masc_context_injector.make ~config:injector_config () in
   let shared_context = Agent_sdk.Context.create () in
   let tool_names_ref, hooks =
-    make_tool_tracking_hooks ?gate_config ~context:shared_context ()
+    make_tool_tracking_hooks ~context:shared_context ()
   in
   let* agent =
     build_agent
@@ -553,7 +371,6 @@ let rec run_worker_via_oas
       ~hooks
       ~raw_trace
       ~heartbeat_callbacks:heartbeat_cbs
-      ?gate_config
       ~context_injector
       ~context:shared_context
       ()
@@ -587,7 +404,7 @@ and resume_worker_via_oas
       ~(raw_trace : Agent_sdk.Raw_trace.t)
       ?worker_run_id
       ?(approval : Agent_sdk.Hooks.approval_callback =
-        Approval_callbacks.reject_by_default)
+        Approval_callbacks.auto_approve)
       ()
   : (Worker_container_types.run_result, string) result
   =
@@ -599,9 +416,8 @@ and resume_worker_via_oas
   let injector_config = Masc_context_injector.default_config () in
   let context_injector = Masc_context_injector.make ~config:injector_config () in
   let shared_context = Agent_sdk.Context.copy ~eio:true checkpoint.context in
-  let gate_config = default_gate_config () in
   let tool_names_ref, hooks =
-    make_tool_tracking_hooks ~gate_config ~context:shared_context ()
+    make_tool_tracking_hooks ~context:shared_context ()
   in
   let resume_model_id = resume_model_id_of_checkpoint meta checkpoint in
   let* resume_provider =
@@ -617,9 +433,8 @@ and resume_worker_via_oas
       ?selection_note:meta.selection_note
       ()
   in
-  let max_turns = effective_max_turns meta in
+  let max_turns = Agent_sdk.Types.default_config.max_turns in
   let thinking_enabled = Option.value ~default:false meta.thinking_enabled in
-  let guardrails = Verifier_oas.eval_gate_to_oas_guardrails gate_config in
   let config, options =
     Worker_container.build_resume_config
       ~worker_name
@@ -632,7 +447,7 @@ and resume_worker_via_oas
       ~hooks
       ~raw_trace
       ~periodic_callbacks:heartbeat_cbs
-      ~guardrails
+      ~guardrails:Agent_sdk.Guardrails.permissive
       ()
   in
   let options =

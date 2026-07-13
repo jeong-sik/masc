@@ -221,20 +221,6 @@ let parse_capabilities ~(path : string) (tbl : Otoml.t) : Runtime_schema.capabil
           path
           key
   in
-  let string_list_field key =
-    match Otoml.find_opt tbl Fun.id [ key ] with
-    | None -> []
-    | Some v ->
-      (* RFC-0145 — narrow to the only exception [Otoml.get_array]
-         raises on a wrong-typed value.  Unrelated runtime exceptions
-         propagate. *)
-      (try Otoml.get_array Otoml.get_string v with
-       | Otoml.Type_error _ ->
-         Log.Runtime.warn "runtime_toml: %s.capabilities.%s — expected string array, ignoring"
-             path
-             key;
-         [])
-  in
   let positive_int_opt_field key =
     (* Reject non-positive values at parse time: a cap of 0 or -N would
        clamp every attempt to a meaningless budget downstream. *)
@@ -252,17 +238,11 @@ let parse_capabilities ~(path : string) (tbl : Otoml.t) : Runtime_schema.capabil
     warn_deprecated
     [ "supports-runtime-mcp-tools"
     ; "supports-runtime-tool-events"
-    ; "supports-runtime-mcp-http-headers"
     ];
   { Runtime_schema.supports_inline_tools = b "supports-inline-tools"
-  ; requires_per_keeper_bridging_for_bound_actor_tools =
-      b "requires-per-keeper-bridging-for-bound-actor-tools"
-  ; identity_runtime_mcp_header_keys =
-      string_list_field "identity-runtime-mcp-header-keys"
   ; argv_prompt_preflight = b "argv-prompt-preflight"
   ; uses_anthropic_caching = b "uses-messages-caching"
   ; max_turns_per_attempt = positive_int_opt_field "max-turns-per-attempt"
-  ; tolerates_bound_actor_fallback = b "tolerates-bound-actor-fallback"
   }
 ;;
 
@@ -960,114 +940,6 @@ let parse_keeper_assignments (toml : Otoml.t)
       ]
 ;;
 
-(* [\[pause\]] section → typed [Runtime_schema.pause_threshold].
-
-   Fails soft: a malformed value (e.g. wrong type) is logged + ignored rather
-   than aborting config load, mirroring the existing [runtime].media_failover
-   pattern above. Missing section / missing keys → [pause_threshold_default],
-   which mirrors the legacy fallback values in [Keeper_behavioral_regime.ml].
-   Operational pause paths consume this through [Runtime.pause_threshold]. *)
-let parse_pause_threshold (toml : Otoml.t) : Runtime_schema.pause_threshold =
-  let read_field ~path ~key ~getter =
-    try
-      Ok (Otoml.find_opt toml getter [ path; key ])
-    with
-    | Otoml.Type_error msg ->
-      Error (Printf.sprintf "[%s].%s: %s" path key msg)
-  in
-  let pick_int ~path ~key ~default =
-    match read_field ~path ~key ~getter:Otoml.get_integer with
-    | Ok (Some v) -> v
-    | Ok None -> default
-    | Error msg ->
-      Log.Runtime.warn
-        "runtime_toml: %s — using default %d" msg default;
-      default
-  in
-  let pick_float ~path ~key ~default =
-    match read_field ~path ~key ~getter:Otoml.get_float with
-    | Ok (Some v) -> v
-    | Ok None -> default
-    | Error msg ->
-      Log.Runtime.warn
-        "runtime_toml: %s — using default %g" msg default;
-      default
-  in
-  let d = Runtime_schema.pause_threshold_default in
-  { turn_fail_streak_threshold =
-      pick_int
-        ~path:"pause" ~key:"turn_fail_streak_threshold"
-        ~default:d.turn_fail_streak_threshold
-  ; recent_restart_window_sec =
-      pick_float
-        ~path:"pause" ~key:"recent_restart_window_sec"
-        ~default:d.recent_restart_window_sec
-  ; recent_restart_count_threshold =
-      pick_int
-        ~path:"pause" ~key:"recent_restart_count_threshold"
-        ~default:d.recent_restart_count_threshold
-  ; tool_failure_count_threshold =
-      pick_int
-        ~path:"pause" ~key:"tool_failure_count_threshold"
-        ~default:d.tool_failure_count_threshold
-  ; tool_failure_ratio_threshold =
-      pick_float
-        ~path:"pause" ~key:"tool_failure_ratio_threshold"
-        ~default:d.tool_failure_ratio_threshold
-  }
-;;
-
-(* [\[pacing\]] section → typed [Runtime_schema.pacing] (RFC-0313 W3).
-
-   Numeric knobs fail soft like [\[pause\]] above (warn + default). [mode]
-   fails closed: an unknown value aborts config load instead of defaulting,
-   because a typo such as "enfoce" silently reverting the W3 behavior flip
-   to shadow is exactly the permissive-default failure the flip removes.
-   Operational callers read this through [Runtime.pacing]. *)
-let parse_pacing (toml : Otoml.t)
-  : (Runtime_schema.pacing, parse_error list) result
-  =
-  let d = Runtime_schema.pacing_default in
-  let read_field ~key ~getter =
-    try Ok (Otoml.find_opt toml getter [ "pacing"; key ]) with
-    | Otoml.Type_error msg -> Error (Printf.sprintf "[pacing].%s: %s" key msg)
-  in
-  let pick_float ~key ~default =
-    match read_field ~key ~getter:Otoml.get_float with
-    | Ok (Some v) -> v
-    | Ok None -> default
-    | Error msg ->
-      Log.Runtime.warn "runtime_toml: %s — using default %g" msg default;
-      default
-  in
-  let mode_result =
-    match read_field ~key:"mode" ~getter:Otoml.get_string with
-    | Ok None -> Ok d.Runtime_schema.pacing_mode
-    | Ok (Some "shadow") -> Ok Runtime_schema.Pacing_shadow
-    | Ok (Some "enforce") -> Ok Runtime_schema.Pacing_enforce
-    | Ok (Some other) ->
-      Error
-        (error
-           "pacing.mode"
-           (Printf.sprintf
-              "unknown pacing mode %S (expected \"shadow\" or \"enforce\")"
-              other))
-    | Error msg -> Error (error "pacing.mode" msg)
-  in
-  match mode_result with
-  | Error _ as e -> e
-  | Ok pacing_mode ->
-    Ok
-      { Runtime_schema.pacing_mode
-      ; pacing_base_sec =
-          pick_float ~key:"base_sec" ~default:d.Runtime_schema.pacing_base_sec
-      ; pacing_multiplier =
-          pick_float ~key:"multiplier" ~default:d.Runtime_schema.pacing_multiplier
-      ; pacing_cap_sec =
-          pick_float ~key:"cap_sec" ~default:d.Runtime_schema.pacing_cap_sec
-      }
-;;
-
 type runtime_section =
   { default_runtime_id : string option
   ; librarian_runtime_id : string option
@@ -1251,7 +1123,6 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
   let assignments_result = parse_keeper_assignments toml in
   let bindings_result = parse_bindings toml in
   let lanes_result = parse_lanes toml in
-  let pacing_result = parse_pacing toml in
   let errs = function Ok _ -> [] | Error errs -> errs in
   let all_errors =
     errs providers_result
@@ -1260,7 +1131,6 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
     @ errs assignments_result
     @ errs bindings_result
     @ errs lanes_result
-    @ errs pacing_result
   in
   if all_errors <> []
   then Error all_errors
@@ -1281,10 +1151,6 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
     let lane_decls =
       extract_after_all_errors_guard ~label:"lanes" lanes_result
     in
-    let pacing =
-      extract_after_all_errors_guard ~label:"pacing" pacing_result
-    in
-    let pause_threshold = parse_pause_threshold toml in
     Ok
       { Runtime_schema.providers
       ; models
@@ -1296,8 +1162,6 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
       ; cross_verifier_runtime_id = runtime_section.cross_verifier_runtime_id
       ; keeper_assignments
       ; media_failover = runtime_section.media_failover
-      ; pause_threshold
-      ; pacing
       ; lane_decls
       })
 ;;

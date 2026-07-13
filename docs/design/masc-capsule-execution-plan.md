@@ -52,7 +52,7 @@ OAS remains the agent runtime layer underneath that system.
 Keep these rules hard:
 
 1. OAS owns reusable execution primitives.
-2. MASC owns workspace, task, team-session, proof, operator, and governance semantics.
+2. MASC owns Workspace, Task, Goal, Board, Connector, Gate, Keeper, and proof semantics.
 3. If a bridge is lossy, fix the MASC adapter first.
 4. Only ask OAS for changes when the new shape is generic for non-MASC consumers.
 5. MCP truth, persisted truth, dashboard truth, and proof truth must agree.
@@ -77,7 +77,7 @@ Only propose upstream work when it is clearly reusable:
 Do not upstream:
 
 - MASC delivery-contract semantics
-- workspace/board/governance concepts
+- Workspace/Board/Gate product concepts
 - team-session proof/report JSON contracts
 
 ## Execution Order

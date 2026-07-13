@@ -1,4 +1,4 @@
-(** Verifier_core — Pure verification types, parsing, and read-only detection.
+(** Verifier_core — Pure verification types and structured verdict parsing.
 
     No Agent_sdk or OAS dependency. Extracted from verifier_oas.ml to enforce
     the MASC-OAS boundary: core domain logic stays OAS-free.
@@ -18,10 +18,6 @@ type verification_request = {
   action_result : string;
   goal : string;
   context_summary : string;
-  effect_class : Effect_class.t;
-      (* RFC-0331: the tool's declared effect class. [Read_only] skips
-         verification; [Mutating] (the default for unknown/undeclared tools)
-         runs it. Replaces the removed free-text skip classifier. *)
 }
 
 type verdict =
@@ -39,13 +35,6 @@ type grounded_verdict = {
   verdict : verdict;
   evidence : grounded_ref list;
 }
-
-(* RFC-0331 — the free-text read-only substring classifier (an 18-pattern
-   word-boundary matcher) was removed here. The skip decision now reads the
-   tool's declared {!Effect_class.t} (resolved at the boundary via
-   [Keeper_tool_descriptor_resolution.effect_class_for_tool_name]), never the
-   action description text. A mutating tool whose description happens to
-   contain "list"/"get"/"status" can no longer skip verification. *)
 
 (* ================================================================ *)
 (* Verdict Parsing                                                  *)
@@ -70,45 +59,6 @@ let verdict_constructor_name = function
   | Fail _ -> "FAIL"
 
 let valid_verdict_strings = [ "PASS"; "WARN"; "FAIL" ]
-
-(* Generic word-char predicate, shared by the verdict-prefix boundary check
-   below. (Formerly also used by the removed RFC-0331 read-only classifier.) *)
-let is_word_char c =
-  match c with
-  | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' -> true
-  | _ -> false
-
-let has_keyword_boundary upper len =
-  let tlen = String.length upper in
-  len >= tlen || not (is_word_char upper.[len])
-
-let extract_reason trimmed keyword_len default_reason =
-  let reason =
-    if String.length trimmed > keyword_len + 1 then
-      String.trim (String.sub trimmed (keyword_len + 1) (String.length trimmed - keyword_len - 1))
-    else default_reason
-  in
-  if String.length reason > 0 && (reason.[0] = ':' || reason.[0] = '-') then
-    String.trim (String.sub reason 1 (String.length reason - 1))
-  else reason
-
-let parse_verdict (text : string) : (verdict, string) result =
-  let trimmed = String.trim text in
-  let upper = String.uppercase_ascii trimmed in
-  let len = String.length upper in
-  if String.starts_with upper ~prefix:"PASS" && has_keyword_boundary upper 4 then
-    Ok Pass
-  else if String.starts_with upper ~prefix:"WARN" && has_keyword_boundary upper 4 then
-    Ok (Warn (extract_reason trimmed 4 "unspecified concern"))
-  else if String.starts_with upper ~prefix:"FAIL" && has_keyword_boundary upper 4 then
-    Ok (Fail (extract_reason trimmed 4 "action did not achieve goal"))
-  else if len = 0 then
-    Error "empty verifier output"
-  else
-    Error (sprintf "unrecognized verdict format: %s"
-      (let _ = len in
-       String_util.utf8_safe ~max_bytes:83 ~suffix:"..." trimmed
-       |> String_util.to_string))
 
 let validate_grounded_ref idx (ref_ : grounded_ref) =
   let path = String.trim ref_.path in
@@ -222,7 +172,6 @@ let parse_verdict_from_json (args : Yojson.Safe.t) : (verdict, string) result =
     let verdict_str =
       Json_util.get_string args "verdict"
       |> Option.value ~default:""
-      |> String.uppercase_ascii
     in
     let reason =
       Json_util.get_string args "reason"

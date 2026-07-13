@@ -43,22 +43,6 @@ module For_testing : sig
   (** Format a dashboard co-view context object ({ label, route, scene, fields })
       into turn instructions when no explicit [turn_instructions] is supplied. *)
 
-  val direct_success_may_clear_no_progress_pause :
-    Keeper_agent_run.run_result -> bool
-  (** Typed recovery predicate for direct-message success: only a healthy
-      operator disposition plus non-passive typed progress or validated run
-      evidence may clear a no-progress forced pause. Text-only visible replies
-      are not sufficient. *)
-
-  val clear_direct_success_no_progress_pause :
-    config:Workspace.config ->
-    pre_turn_meta:Keeper_meta_contract.keeper_meta ->
-    result:Keeper_agent_run.run_result ->
-    Keeper_meta_contract.keeper_meta ->
-    Keeper_meta_contract.keeper_meta
-  (** Apply the direct-message success recovery that clears a no-progress
-      forced pause without running a live LLM turn. *)
-
   val direct_no_progress_retry_reason :
     Agent_sdk.Error.sdk_error -> Keeper_error_classify.degraded_retry_reason option
   (** Return a direct-message no-progress retry reason for accept rejections
@@ -68,23 +52,17 @@ module For_testing : sig
     base_runtime:string ->
     effective_runtime:string ->
     attempted_runtimes:string list ->
-    estimated_input_tokens:int ->
-    ?time_spent_in_turn_s:float ->
-    remaining_turn_budget_s:float ->
     Agent_sdk.Error.sdk_error ->
-    Keeper_turn_runtime_budget.degraded_retry_budget_decision
-  (** Shared-budget retry decision for direct-message no-progress accept
-      rejections. Read-only no-progress remains terminal here because it
-      already consumed tool execution in the current attempt. *)
+    Keeper_turn_runtime_budget.degraded_retry_decision
+  (** Retry decision for direct-message no-progress accept rejections.
+      Read-only no-progress remains terminal here because it already consumed
+      tool execution in the current attempt. *)
 
   val run_direct_no_progress_retry_loop :
     keeper_name:string ->
     base_runtime:string ->
     initial_runtime:string ->
     initial_max_context:int ->
-    estimated_input_tokens:int ->
-    timeout_sec:float ->
-    remaining_turn_budget_s:(unit -> float) ->
     current_turn_phase_elapsed_ms:(float option -> int * int option) ->
     now_s:(unit -> float) ->
     setup_retry_runtime:

@@ -152,30 +152,6 @@ val create_post :
   unit ->
   (Board.post, Board.board_error) Result.t
 
-val create_post_with_outcome :
-  ?after_fresh_persist:(Board.post -> (unit, string) result) ->
-  ?after_rollup_persist:(Board.post -> (unit, string) result) ->
-  author:string ->
-  content:string ->
-  ?title:string ->
-  ?body:string ->
-  post_kind:Board.post_kind ->
-  ?meta_json:Yojson.Safe.t ->
-  ?visibility:Board.visibility ->
-  ?ttl_hours:int ->
-  ?hearth:string ->
-  ?thread_id:string ->
-  ?origin:Board.post_origin ->
-  unit ->
-  (Board.create_post_outcome, Board.board_error) Result.t
-(** Same post creation semantics as {!create_post}, but preserves whether the
-    result was a fresh persist, dedup hit, or rollup.  [after_fresh_persist] is
-    invoked only for [Fresh_post] after the post is durable and before board
-    signal/SSE fanout.  [after_rollup_persist] is invoked only for
-    [Rolled_up_post] after the rollup snapshot is durable and before success is
-    returned.  If either hook fails, the mutation is rolled back via the same
-    board store and the error is returned explicitly. *)
-
 (** Owner-gated in-place edit of an existing post's title/body.  Returns
     [Unauthorized] when [editor] does not own the post, [Post_not_found] for a
     missing id, and [Validation_error] for empty/oversized content or invalid
@@ -224,9 +200,6 @@ val search :
   query:string ->
   limit:int ->
   Board.post list
-
-val reclassify_posts :
-  ?limit:int -> ?dry_run:bool -> unit -> Board.reclassify_report
 
 val post_to_yojson_with_karma :
   Board.post -> author_karma:int -> Yojson.Safe.t

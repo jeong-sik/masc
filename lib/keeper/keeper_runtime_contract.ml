@@ -209,9 +209,6 @@ let goal_progress_json ~(config : Workspace.config) (meta : keeper_meta) =
           ("convergence", convergence);
         ]
 
-let approval_policy_effective_json ~base_path (meta : keeper_meta) =
-  Keeper_approval_queue.policy_summary_json ~base_path ~keeper_name:meta.name
-
 let string_opt_json = function
   | Some value when String.trim value <> "" -> `String value
   | _ -> `Null
@@ -266,7 +263,7 @@ let path_resolution_contract_json =
 
 let runtime_observability_contract_json_from_fields ~keeper_name ?agent_name ?trace_id
     ?session_id ?generation ?keeper_turn_id ?task_id ?goal_ids
-    ?sandbox_profile ?sandbox_root ?allowed_paths ?network_mode ?approval_mode
+    ?sandbox_profile ?sandbox_root ?allowed_paths ?network_mode
     ?runtime_profile () : Yojson.Safe.t =
   `Assoc
     [
@@ -283,13 +280,12 @@ let runtime_observability_contract_json_from_fields ~keeper_name ?agent_name ?tr
       ("allowed_paths", Json_util.json_string_list (nonempty_list allowed_paths));
       ("path_resolution", path_resolution_contract_json);
       ("network_mode", string_opt_json network_mode);
-      ("approval_mode", string_opt_json approval_mode);
       ("runtime_profile", string_opt_json runtime_profile);
     ]
 
 let runtime_contract_json_from_fields ~keeper_name ?agent_name ?trace_id
     ?session_id ?generation ?keeper_turn_id ?task_id ?goal_ids
-    ?sandbox_profile ?sandbox_root ?allowed_paths ?network_mode ?approval_mode
+    ?sandbox_profile ?sandbox_root ?allowed_paths ?network_mode
     ?runtime_profile () : Yojson.Safe.t =
   runtime_observability_contract_json_from_fields
     ~keeper_name
@@ -304,7 +300,6 @@ let runtime_contract_json_from_fields ~keeper_name ?agent_name ?trace_id
     ?sandbox_root
     ?allowed_paths
     ?network_mode
-    ?approval_mode
     ?runtime_profile
     ()
   |> redact_backend_details
@@ -391,7 +386,6 @@ let runtime_contract_json ~(config : Workspace.config) (meta : keeper_meta) : Yo
       ("goal_ids", `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids));
       ("goal_progress", goal_progress);
       ("blocked_task_count", `Int blocked_task_count);
-      ("approval_policy_effective", approval_policy_effective_json ~base_path:config.base_path meta);
     ]
 
 let runtime_observability_contract_json ~(config : Workspace.config) (meta : keeper_meta) : Yojson.Safe.t =

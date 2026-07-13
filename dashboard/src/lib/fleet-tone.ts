@@ -31,11 +31,8 @@ export const FL_TONE_LABEL: Readonly<Record<FleetTone, string>> = {
  *  by `keeperLifecycleStatus` (or any future status surface) forces the
  *  compiler to flag a missing entry here.
  *
- *  Derivation: `KeeperPhase` (13 variants) collapses via `keeperLifecycleStatus`
- *  to 13 lowercase tokens, plus `unknown` for the fallback path. We
- *  promote `Zombie` to a first-class entry because the live wire emits it
- *  as a distinct phase (`KeeperPhase | null`), so the closed sum must cover
- *  it. Zombie is classified as `bad` (degraded, operator must act).
+ *  Derivation: `KeeperPhase` collapses via `keeperLifecycleStatus`
+ *  to lowercase tokens, plus `unknown` for the fallback path.
  */
 export type KeeperPhaseToken =
   | 'running'
@@ -50,7 +47,6 @@ export type KeeperPhaseToken =
   | 'unbooted'
   | 'crashed'
   | 'dead'
-  | 'zombie'
   | 'unknown'
 
 /** Closed tone map. Keys MUST match `KeeperPhaseToken` and MUST be kept in
@@ -93,7 +89,6 @@ export const PHASE_TONE: Readonly<Record<KeeperPhaseToken, FleetTone>> =
       unbooted: 'idle',
       crashed: 'bad',
       dead: 'bad',
-      zombie: 'bad',
       unknown: 'idle',
     }) as Record<KeeperPhaseToken, FleetTone>,
   )
@@ -121,7 +116,6 @@ export const PHASE_LABEL_KO: Readonly<Record<KeeperPhaseToken, string>> =
       unbooted: '미기동',
       crashed: '비정상 종료',
       dead: '종료됨',
-      zombie: '응답 없음',
       unknown: '알 수 없음',
     }) as Record<KeeperPhaseToken, string>,
   )

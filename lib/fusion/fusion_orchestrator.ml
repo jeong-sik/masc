@@ -31,13 +31,12 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
               groups
           in
           let panel =
-            (* 외곽 타임아웃은 fan-out에 실제 쓰는 동시성과 같은 max_fibers로
-               웨이브 직렬화를 반영해야 한다 (panel_outer_timeout_of 주석). *)
+            let panel_count = max 1 (List.length (Fusion_policy.preset_models preset)) in
             Fusion_panel.run ~sw ~net
-              ~max_fibers:policy.Fusion_policy.max_concurrent_panels
+              ~max_fibers:panel_count
               ~outer_timeout_s:
                 (Fusion_policy.panel_outer_timeout_of
-                   ~max_fibers:policy.Fusion_policy.max_concurrent_panels groups)
+                   ~max_fibers:panel_count groups)
               ~groups:effective_groups ~prompt:req.Fusion_types.prompt ()
           in
           let judge_web_tools =
@@ -102,7 +101,7 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
             Fusion_orchestrator_judge_wave.run_first_judges
               ~sw
               ~net
-              ~max_concurrent_judges:policy.Fusion_policy.max_concurrent_judges
+              ~max_concurrent_judges:(max 1 (List.length judges))
               ~preset
               ~panel
               ~question:req.Fusion_types.prompt
@@ -319,7 +318,7 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
               let indexed_groups = List.mapi (fun i group -> (i + 1, group)) first_groups in
               let stage_runs =
                 Eio.Fiber.List.map
-                  ~max_fibers:policy.Fusion_policy.max_concurrent_judges
+                  ~max_fibers:(max 1 (List.length indexed_groups))
                   run_stage_meta indexed_groups
               in
               let stage_results = List.map fst stage_runs in
@@ -385,17 +384,15 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                            ] ))))
           in
           let judge_full, judge_nodes =
-            match
-              Fusion_types.judge_skip_reason
-                ~min_answered:preset.Fusion_policy.min_answered panel
-            with
-            | Some reason ->
+            match Fusion_types.answered_of panel with
+            | [] ->
+              let reason = Fusion_types.No_panel_answers { total = List.length panel } in
               (* typed 그대로 propagate — 문자열로 렌더해 [Internal_error]에 압축하면
                  패널 전멸이 "judge failed"/failure_code=internal_error로 오귀속된다
                  (2026-07-01 사고: 8 run 전부 이 경로였는데 keeper 표면은 judge
                  메커니즘 고장으로 보고했다). 렌더는 sink/텍스트 경계에서 한다. *)
               (Error (Fusion_types.Panels_unavailable reason, Fusion_types.zero_usage), [])
-            | None ->
+            | _ :: _ ->
             match topology with
             | Fusion_types.Simple ->
               (match run_single_judge () with

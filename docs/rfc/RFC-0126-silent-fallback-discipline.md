@@ -284,7 +284,7 @@ grep으로 보이지 않는 패턴까지 확장:
 
 ## 9. References
 
-- RFC-0042 — Closed sum type for completion contract violations (sibling — string classifier 영역)
+- RFC-0042 — withdrawn terminal/disposition hierarchy (historical context only)
 - RFC-0088 — Counter-as-Fix umbrella (sibling — workaround §1 영역)
 - RFC-0106 — Cancel-safe try-with discipline (sibling — same ppxlib infrastructure)
 - `~/me/instructions/software-development.md §AI 코드 생성 안티패턴` — anti-pattern §1 (하드코딩 산포), §2 (unknown → permissive default)

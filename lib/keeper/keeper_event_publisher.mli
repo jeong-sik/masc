@@ -84,30 +84,9 @@ val publish_keeper_lifecycle :
     Subscribe to {!Keeper_lifecycle_events.all_event_names} to
     receive the full stream.  Issue #8575: prior docstring
     listed only five names, so operators silently missed
-    cleanup / self-healing events ([reconciled],
-    [dead_cleaned], [self_preservation], [paused_pruned]) —
+    cleanup / recovery events ([reconciled], [dead_cleaned]) —
     exactly the events that signal supervisor recovery actions
     where observability matters most. *)
-
-val publish_keeper_dead :
-  keeper_name:string ->
-  reason:string ->
-  restart_count:int ->
-  last_failure_reason:string option ->
-  unit ->
-  unit
-(** Publishes [masc.keeper.dead] with payload
-    [{keeper_name, reason, restart_count, last_failure_reason, timestamp}].
-
-    Emitted when {!Keeper_supervisor.sweep_and_recover} gives
-    up on a keeper after [restart_count >= max_restarts].
-    Operators should treat this as actionable: the supervisor
-    will NOT retry the keeper.
-
-    Independent from the [event="dead"] entry on
-    [masc.keeper.lifecycle] (which is unstructured free-form
-    [detail]) so subscribers can filter on a stable topic and
-    pull the structured fields directly. *)
 
 (** {1 Audit Ledger Events} *)
 

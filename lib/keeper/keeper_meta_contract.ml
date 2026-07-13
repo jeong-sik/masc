@@ -8,49 +8,6 @@ open Keeper_types_profile
 
 let now_iso () = Masc_domain.now_iso ()
 
-let normalize_tool_names names =
-  names
-  |> List.map String.trim
-  |> List.filter (fun name -> name <> "")
-  |> dedupe_keep_order
-;;
-
-let string_list_field_result ?label ~field_name (json : Yojson.Safe.t) =
-  let label = Option.value ~default:field_name label in
-  match Json_util.assoc_member_opt field_name json with
-  | Some (`List items) ->
-    let rec collect acc index = function
-      | [] -> Ok (List.rev acc)
-      | `String value :: rest -> collect (value :: acc) (index + 1) rest
-      | bad :: _ ->
-        Error
-          (Printf.sprintf "keeper %s[%d] must be a string (received %s)" label
-             index (Json_util.kind_name bad))
-    in
-    collect [] 0 items
-  | Some `Null | None -> Error (Printf.sprintf "keeper %s must be an array of strings" label)
-  | Some other ->
-    Error
-      (Printf.sprintf "keeper %s must be an array of strings (received %s)"
-         label (Json_util.kind_name other))
-;;
-
-let tool_access_of_meta_json (json : Yojson.Safe.t) =
-  match Json_util.assoc_member_opt "tool_access" json with
-  | Some `Null | None -> Error "keeper tool_access must be an array of strings"
-  | Some (`List _ as list_json) ->
-    (match
-       string_list_field_result ~field_name:"tool_access"
-         (`Assoc [ "tool_access", list_json ])
-     with
-     | Ok tools -> Ok (normalize_tool_names tools)
-     | Error msg -> Error msg)
-  | Some other ->
-    Error
-      (Printf.sprintf "keeper tool_access must be an array of strings (received %s)"
-         (Json_util.kind_name other))
-;;
-
 (* -- Policy types (remain in keeper_meta top-level) -- *)
 
 type compaction_policy =
@@ -63,19 +20,10 @@ type compaction_policy =
   ; message_gate : int
   ; token_gate : int
   ; cooldown_sec : int
-  ; max_checkpoint_messages : int
-  ; keep_recent_tool_results : int
-    (* Verbatim tool-result tail length for OAS context compaction
-       (consumed by [Agent_sdk.Context_reducer.stub_tool_results
-       ~keep_recent]).  Default 2; parsers clamp to
-       [[0, Keeper_config.keep_recent_tool_results_max]]. *)
   }
 
 type proactive_policy =
-  { enabled : bool
-  ; idle_sec : int
-  ; cooldown_sec : int
-  }
+  { enabled : bool }
 
 type proactive_cycle_outcome =
   | Proactive_never_started
@@ -152,30 +100,20 @@ let runtime_exhaustion_reason_retryable (reason : runtime_exhaustion_reason) : b
 type blocker_class =
   | Runtime_exhausted of runtime_exhaustion_reason
   | Capacity_backpressure
-  | Ambiguous_post_commit_timeout
-  | Ambiguous_post_commit_failure
-  | Admission_queue_wait_timeout
-  | Turn_timeout_after_queue_wait
   | Turn_timeout
-  | Turn_livelock_blocked
-  | Completion_contract_violation
-  | No_progress_loop
   | Fiber_unresolved
     (** 2026-05-05: turn fiber finished without invoking [resolve_done]
         (cancelled mid-turn, raised an exception not handled by the
         body, or the OAS request returned but the keeper switch tore
         down before completion bookkeeping ran).  Maps 1:1 to the
-        supervisor's [Keeper_registry.Fiber_unresolved] cohort key
-        used by self-preservation, so blocker_class stamping mirrors
-        the same diagnosis on keeper_meta. *)
+        supervisor's [Keeper_registry.Fiber_unresolved] observation key, so
+        blocker_class stamping mirrors the same diagnosis on keeper_meta. *)
   | Stale_turn_timeout
     (** 2026-05-05 cycle 9: stale watchdog forced fiber termination
         because the running turn exceeded [idle_turn] threshold (~5m).
         Maps to [Keeper_registry.Stale_turn_timeout _] cohort.  Like
         [Fiber_unresolved], this path runs through
-        [force_unresolved_watchdog_crash] and never visits
-        [handle_crash_auto_pause], so historical string-only blocker
-        stamping did not apply. Without this variant, dashboards and
+        [force_unresolved_watchdog_crash]. Without this variant, dashboards and
         per-keeper meta lacked a structured blocker class for the majority
         cohort during a fleet stall (observed: 6/14 keepers in
         cohort=stale_turn_timeout). *)
@@ -198,14 +136,7 @@ type blocker_class =
 let blocker_class_to_string = function
   | Runtime_exhausted _ -> "runtime_exhausted"
   | Capacity_backpressure -> "capacity_backpressure"
-  | Ambiguous_post_commit_timeout -> "ambiguous_post_commit_timeout"
-  | Ambiguous_post_commit_failure -> "ambiguous_post_commit_failure"
-  | Admission_queue_wait_timeout -> "admission_queue_wait_timeout"
-  | Turn_timeout_after_queue_wait -> "turn_timeout_after_queue_wait"
   | Turn_timeout -> "turn_timeout"
-  | Turn_livelock_blocked -> "turn_livelock_blocked"
-  | Completion_contract_violation -> "completion_contract_violation"
-  | No_progress_loop -> "no_progress_loop"
   | Fiber_unresolved -> "fiber_unresolved"
   | Stale_turn_timeout -> "stale_turn_timeout"
   | Stale_fleet_batch -> "stale_fleet_batch"
@@ -225,14 +156,7 @@ let blocker_class_to_string = function
 let blocker_class_of_serialized_string = function
   | "runtime_exhausted" -> Some (Runtime_exhausted (Other_detail "runtime_exhausted"))
   | "capacity_backpressure" -> Some Capacity_backpressure
-  | "ambiguous_post_commit_timeout" -> Some Ambiguous_post_commit_timeout
-  | "ambiguous_post_commit_failure" -> Some Ambiguous_post_commit_failure
-  | "admission_queue_wait_timeout" -> Some Admission_queue_wait_timeout
-  | "turn_timeout_after_queue_wait" -> Some Turn_timeout_after_queue_wait
   | "turn_timeout" -> Some Turn_timeout
-  | "turn_livelock_blocked" -> Some Turn_livelock_blocked
-  | "completion_contract_violation" -> Some Completion_contract_violation
-  | "no_progress_loop" -> Some No_progress_loop
   | "fiber_unresolved" -> Some Fiber_unresolved
   | "stale_turn_timeout" -> Some Stale_turn_timeout
   | "stale_fleet_batch" -> Some Stale_fleet_batch
@@ -272,72 +196,6 @@ let runtime_exhaustion_summary = function
     "Runtime exhausted; inspect runtime attempts for the dominant root cause."
 ;;
 
-let blocker_class_continue_gate = function
-  | Ambiguous_post_commit_timeout
-  | Ambiguous_post_commit_failure -> true
-  | Runtime_exhausted _
-  | Capacity_backpressure
-  | Admission_queue_wait_timeout
-  | Turn_timeout_after_queue_wait
-  | Turn_timeout
-  | Turn_livelock_blocked
-  | Completion_contract_violation
-  | No_progress_loop
-  | Fiber_unresolved
-  | Stale_turn_timeout
-  | Stale_fleet_batch
-  | Oas_agent_execution_timeout
-  | Sdk_max_turns_exceeded
-  | Sdk_token_budget_exceeded
-  | Sdk_cost_budget_exceeded
-  | Sdk_unrecognized_stop_reason
-  | Sdk_idle_detected
-  | Sdk_guardrail_violation
-  | Sdk_tripwire_violation
-  | Sdk_exit_condition_met
-  | Sdk_input_required
-  | Sdk_tool_failure_recovery_failed -> false
-;;
-
-(** [blocker_class_auto_approval_blocked b] is [true] iff the presence of
-    this blocker should prevent auto-approval (including [always_approve]
-    and remembered allow-rules) for the keeper's next tool call.
-
-    Only blockers that signal genuine safety/uncertainty conditions are
-    hard-forbidden.  Transient liveness signals — capacity backpressure,
-    queue timeouts, turn timeouts, SDK budget/idle/input conditions — do
-    NOT block auto-approval, so automated recovery flows are not stalled
-    by a momentary runtime hiccup.
-
-    This classifier is exhaustive so adding a new [blocker_class] variant
-    forces an explicit auto-approval policy decision. *)
-let blocker_class_auto_approval_blocked = function
-  | Ambiguous_post_commit_timeout
-  | Ambiguous_post_commit_failure
-  | Completion_contract_violation
-  | Runtime_exhausted _
-  | Fiber_unresolved
-  | Stale_turn_timeout
-  | Stale_fleet_batch
-  | Turn_livelock_blocked
-  | No_progress_loop
-  | Oas_agent_execution_timeout
-  | Sdk_guardrail_violation
-  | Sdk_tripwire_violation
-  | Sdk_exit_condition_met
-  | Sdk_tool_failure_recovery_failed -> true
-  | Capacity_backpressure
-  | Admission_queue_wait_timeout
-  | Turn_timeout_after_queue_wait
-  | Turn_timeout
-  | Sdk_max_turns_exceeded
-  | Sdk_token_budget_exceeded
-  | Sdk_cost_budget_exceeded
-  | Sdk_unrecognized_stop_reason
-  | Sdk_idle_detected
-  | Sdk_input_required -> false
-;;
-
 let runtime_exhaustion_reason_to_json reason =
   Keeper_internal_error.runtime_exhaustion_reason_to_json reason
 
@@ -352,86 +210,12 @@ let runtime_exhaustion_reason_of_json json =
    [blocker_class] the only authoritative class eliminates that recovery path;
    [detail] carries free-form context for UI / Otel_metric_store labels (no
    classification semantics). *)
-type no_progress_blocker_facts =
-  { no_progress_reason : string
-  ; no_progress_streak : int
-  ; no_progress_threshold : int
-  ; no_progress_latched : bool
-  }
-
-type blocker_facts =
-  | No_progress_loop_facts of no_progress_blocker_facts
-
 type blocker_info = {
   klass : blocker_class;
   detail : string;
-  facts : blocker_facts option;
 }
 
-let blocker_info_of_class ?(detail = "") ?facts klass = { klass; detail; facts }
-
-let blocker_info_of_no_progress_loop
-      ?(detail = "")
-      ~reason
-      ~streak
-      ~threshold
-      ~latched
-      ()
-  =
-  blocker_info_of_class
-    ~detail
-    ~facts:
-      (No_progress_loop_facts
-         { no_progress_reason = reason
-         ; no_progress_streak = streak
-         ; no_progress_threshold = threshold
-         ; no_progress_latched = latched
-         })
-    No_progress_loop
-;;
-
-let no_progress_blocker_facts_to_json facts : Yojson.Safe.t =
-  `Assoc
-    [ "kind", `String "no_progress_loop"
-    ; "reason", `String facts.no_progress_reason
-    ; "streak", `Int facts.no_progress_streak
-    ; "threshold", `Int facts.no_progress_threshold
-    ; "latched", `Bool facts.no_progress_latched
-    ]
-;;
-
-let blocker_facts_to_json = function
-  | No_progress_loop_facts facts -> no_progress_blocker_facts_to_json facts
-;;
-
-let no_progress_blocker_facts_of_fields fields =
-  match
-    ( List.assoc_opt "reason" fields
-    , List.assoc_opt "streak" fields
-    , List.assoc_opt "threshold" fields
-    , List.assoc_opt "latched" fields )
-  with
-  | Some (`String reason), Some (`Int streak), Some (`Int threshold), Some (`Bool latched)
-    when String.trim reason <> "" ->
-    Some
-      { no_progress_reason = reason
-      ; no_progress_streak = streak
-      ; no_progress_threshold = threshold
-      ; no_progress_latched = latched
-      }
-  | _ -> None
-;;
-
-let blocker_facts_of_json = function
-  | `Assoc fields ->
-    (match List.assoc_opt "kind" fields with
-     | Some (`String "no_progress_loop") ->
-       Option.map
-         (fun facts -> No_progress_loop_facts facts)
-         (no_progress_blocker_facts_of_fields fields)
-     | _ -> None)
-  | _ -> None
-;;
+let blocker_info_of_class ?(detail = "") klass = { klass; detail }
 
 let blocker_info_to_json (info : blocker_info) : Yojson.Safe.t =
   let klass_payload = match info.klass with
@@ -445,11 +229,6 @@ let blocker_info_to_json (info : blocker_info) : Yojson.Safe.t =
     [ "klass", klass_payload
     ; "detail", `String info.detail
     ]
-  in
-  let fields =
-    match info.facts with
-    | Some facts -> fields @ [ "facts", blocker_facts_to_json facts ]
-    | None -> fields
   in
   `Assoc fields
 ;;
@@ -484,12 +263,7 @@ let blocker_info_of_json (json : Yojson.Safe.t) : blocker_info option =
          | Some (`String s) -> s
          | _ -> ""
        in
-       let facts =
-         match List.assoc_opt "facts" fields with
-         | Some raw -> blocker_facts_of_json raw
-         | None -> None
-       in
-       Some { klass; detail; facts })
+       Some { klass; detail })
   | _ -> None
 ;;
 
@@ -606,9 +380,9 @@ type agent_runtime_state =
   ; last_blocker : blocker_info option
   ; last_runtime_attempt : runtime_attempt_record option
   ; last_turn_tool_calls : tool_call_summary list
-  ; last_seen_message_seq : int
-    (** Highest message seq this keeper has scanned for direct
-        mentions. Persisted across heartbeats so mentions are not re-surfaced. *)
+  ; message_scope_ack_id : string option
+    (** Stable chat-row id of the newest message-scope row actually injected
+        into a completed Keeper turn. Rows after this id remain pending. *)
   }
 
 type keeper_meta =
@@ -624,8 +398,6 @@ type keeper_meta =
   ; sandbox_image : string option
   ; network_mode : Keeper_types_profile.network_mode
   ; allowed_paths : string list
-  ; tool_access : string list
-  ; tool_denylist : string list
   ; mention_targets : string list
   ; proactive : proactive_policy
   ; compaction : compaction_policy
@@ -642,20 +414,9 @@ type keeper_meta =
     active_goal_ids : string list
   ; paused : bool
   ; latched_reason : Keeper_latched_reason.t option
-    (** Typed companion to [paused]: {i why} this keeper is latched.
-        Producers set it alongside [paused = true] (bool-only pause sites
-        record their [Keeper_latched_reason.t]); consumers surface it via
-        the status bridge. [paused] remains the pause authority, while
-        [Dead_tombstone] refines it into a terminal lifecycle state. [None]
-        while paused is a fail-closed unclassified pause. *)
-  ; auto_resume_after_sec : float option
-    (** Self-healing circuit breaker: when [Some sec] the supervisor will
-        auto-resume this keeper after [sec] seconds following the last
-        [updated_at] timestamp recorded at auto-pause time.  Doubles on
-        each successive auto-pause (exponential back-off), capped at
-        [Env_config.KeeperSupervisor.auto_resume_max_sec].  Reset to
-        [None] after a successful turn so a healthy run re-arms the
-        initial delay.  [None] = operator-owned pause, no auto-resume. *)
+    (** Typed companion to [paused]. Only explicit operator pause and terminal
+        dead-tombstone paths may write it. [None] while paused is a fail-closed
+        unclassified legacy state that requires an operator resume. *)
   ; autoboot_enabled : bool
   ; current_task_id : Keeper_id.Task_id.t option
     (** Currently claimed task ID for cost attribution.
@@ -663,7 +424,7 @@ type keeper_meta =
       Propagated to trajectory accumulator for per-task cost tracking. *)
   ; telemetry_feedback_enabled : bool option
   ; telemetry_feedback_window_hours : int option
-  ; always_approve : bool option
+  ; always_allow : bool option
   ; (* -- Agent runtime state (usage, tracing, autonomy metrics) -- *)
     runtime : agent_runtime_state
   ; (* -- Identity & concurrency -- *)
@@ -719,28 +480,14 @@ let effective_meta_of_profile_defaults
       let network_mode =
         apply_profile_default defaults.network_mode default_network_mode
       in
-      let tool_access =
-        match defaults.tool_access with
-        | Some tools -> normalize_tool_names tools
-        | None -> meta.tool_access
-      in
       Ok
         { meta with
           persona = apply_profile_default_opt defaults.persona_name meta.persona;
           proactive =
-            {
-              enabled =
+            { enabled =
                 apply_profile_default defaults.proactive_enabled
-                  Keeper_config.default_proactive_enabled;
-              idle_sec =
-                apply_profile_default defaults.proactive_idle_sec
-                  Keeper_config.default_proactive_idle_sec;
-              cooldown_sec =
-                apply_profile_default defaults.proactive_cooldown_sec
-                  Keeper_config.default_proactive_cooldown_sec;
+                  Keeper_config.default_proactive_enabled
             };
-          tool_denylist =
-            apply_profile_default defaults.tool_denylist meta.tool_denylist;
           goal = apply_profile_default defaults.goal meta.goal;
           instructions =
             apply_profile_default defaults.instructions meta.instructions;
@@ -753,7 +500,6 @@ let effective_meta_of_profile_defaults
              | targets -> targets);
           active_goal_ids =
             apply_profile_default defaults.active_goal_ids meta.active_goal_ids;
-          tool_access;
           sandbox_profile;
           sandbox_image =
             apply_profile_default_opt defaults.sandbox_image meta.sandbox_image;
@@ -771,9 +517,9 @@ let effective_meta_of_profile_defaults
           telemetry_feedback_window_hours =
             apply_profile_default_opt defaults.telemetry_feedback_window_hours
               meta.telemetry_feedback_window_hours;
-          always_approve =
-            apply_profile_default_opt defaults.always_approve
-              meta.always_approve;
+          always_allow =
+            apply_profile_default_opt defaults.always_allow
+              meta.always_allow;
           oas_env =
             (match defaults.oas_env with
              | [] -> meta.oas_env

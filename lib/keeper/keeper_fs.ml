@@ -83,12 +83,6 @@ let save_atomic (path : string) (content : string) : (unit, string) result =
     match Fs_compat.save_file_atomic path content with
     | Ok () -> Ok ()
     | Error msg ->
-        Keeper_fd_pressure.note_if_fd_exhaustion
-          ~site:"filesystem_runtime.save_atomic"
-          msg;
-        Keeper_disk_pressure.note_if_disk_exhaustion
-          ~site:"filesystem_runtime.save_atomic"
-          msg;
         Otel_metric_store.inc_counter
           Keeper_metrics.(to_string FsFailures)
           ~labels:[("path", path); ("site", Keeper_fs_failure_site.(to_label Save_atomic_failed))]

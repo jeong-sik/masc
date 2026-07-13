@@ -749,10 +749,9 @@ function IdeCursorRailPanel() {
           ${overlay.collisions.slice(0, 4).map(collision => html`
             <span
               key=${`${collision.line}:${collision.keeper_ids.join(',')}`}
-              data-risk=${collision.risk_level}
               title=${collision.keeper_ids.join(', ')}
             >
-              L${collision.line} · ${collision.risk_level} · ${collision.keeper_ids.length}
+              L${collision.line} · ${collision.keeper_ids.length} keepers
             </span>
           `)}
         </div>

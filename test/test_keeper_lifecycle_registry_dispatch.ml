@@ -131,7 +131,6 @@ let make_keeper_meta ?(name = "keeper-lifecycle-test")
           ("agent_name", `String name);
           ("trace_id", `String trace_id);
           ("last_model_used", `String "llama:auto");
-          ("tool_access", `List []);
         ])
   with
   | Ok meta -> meta
@@ -222,15 +221,15 @@ let test_registry_reload_meta_from_disk_repairs_stale_meta () =
       write_keeper_toml
         ~base_dir
         name
-        [ "[keeper]"; {|sandbox_profile = "local"|}; {|tool_denylist = ["Write"]|} ];
+        [ "[keeper]"; {|sandbox_profile = "local"|}; {|goal = "fresh goal"|} ];
       let persisted_meta = make_keeper_meta ~name () in
-      let stale_meta = { persisted_meta with tool_denylist = [ "stale_tool" ] } in
+      let stale_meta = { persisted_meta with goal = "stale goal" } in
       ignore (KR.register ~base_path:config.base_path name stale_meta);
       write_keeper_meta_json_for_name config name persisted_meta;
       match KR.reload_meta_from_disk ~base_path:config.base_path name with
       | Ok (Some entry) ->
-          check (list string) "reload applies base-path TOML denylist" [ "Write" ]
-            entry.meta.tool_denylist
+          check string "reload applies base-path TOML goal" "fresh goal"
+            entry.meta.goal
       | Ok None -> fail "expected reload to update registered keeper"
       | Error msg -> fail ("reload_meta_from_disk failed: " ^ msg))
 
@@ -315,7 +314,7 @@ let test_post_turn_compaction_runs_from_failing_health_lane () =
       KEC.dispatch_keeper_phase_event
         ~config
         ~keeper_name:meta.name
-        (KST.Heartbeat_failed { consecutive = 1; max_allowed = 3 });
+        (KST.Heartbeat_failed { consecutive = 1 });
       (match KR.get ~base_path:config.base_path meta.name with
        | Some entry ->
            check string "heartbeat failure reaches failing" "failing"
@@ -641,23 +640,6 @@ let test_heartbeat_history_fallback_counts_malformed_rows () =
       check_persistence_read_drop_delta ~surface ~reason:invalid_reason
         ~before:before_invalid ~delta:2)
 
-(* RFC-0239 R4: the board-wakeup debounce keys on a content fingerprint, not
-   the post_id, so a keeper that re-posts the same conclusion (fresh post_id
-   each cycle) does not re-wake peers. *)
-let test_board_wakeup_dedup_key_collapses_reposts () =
-  let k ~post_id ~content =
-    KHS.board_wakeup_dedup_key ~post_id ~author:"garnet" ~title:"closure" ~content
-  in
-  check string "identical content, different post_id => same dedup key"
-    (k ~post_id:"p1" ~content:"operator's turn now")
-    (k ~post_id:"p2" ~content:"operator's   turn   NOW");
-  check bool "different content => different dedup key" false
-    (String.equal
-       (k ~post_id:"p1" ~content:"operator's turn")
-       (k ~post_id:"p1" ~content:"keeper layer complete"));
-  check string "empty title+content => post_id fallback" "p9"
-    (KHS.board_wakeup_dedup_key ~post_id:"p9" ~author:"garnet" ~title:"" ~content:"")
-
 let () =
   run "keeper_lifecycle_registry_dispatch"
     [
@@ -687,7 +669,5 @@ let () =
             test_registry_reload_meta_from_disk_repairs_stale_meta;
           test_case "heartbeat history fallback counts malformed rows" `Quick
             test_heartbeat_history_fallback_counts_malformed_rows;
-          test_case "board wakeup dedup key collapses reposts (RFC-0239 R4)" `Quick
-            test_board_wakeup_dedup_key_collapses_reposts;
         ] );
     ]

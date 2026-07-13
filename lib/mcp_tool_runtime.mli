@@ -25,13 +25,10 @@ type context = Mcp_tool_runtime_types.context = {
     agent_name:string ->
     timeout:float ->
     Yojson.Safe.t option;
-  governance_defaults : string -> Mcp_server_eio_governance.governance_config;
-  save_governance :
-    Workspace.config -> Mcp_server_eio_governance.governance_config -> unit;
   load_mcp_sessions :
-    Workspace.config -> Mcp_server_eio_governance.mcp_session_record list;
+    Workspace.config -> Mcp_session_store.mcp_session_record list;
   save_mcp_sessions :
-    Workspace.config -> Mcp_server_eio_governance.mcp_session_record list -> unit;
+    Workspace.config -> Mcp_session_store.mcp_session_record list -> unit;
 }
 
 (** {1 Dispatch} *)

@@ -27,3 +27,11 @@ val handle_voice_tool :
   args:Yojson.Safe.t ->
   unit ->
   string
+
+val handle_voice_tool_with_outcome :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  name:string ->
+  args:Yojson.Safe.t ->
+  unit ->
+  Keeper_tool_execution.t

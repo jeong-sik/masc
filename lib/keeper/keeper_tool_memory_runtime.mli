@@ -20,6 +20,13 @@ val keeper_memory_search_json
   -> args:Yojson.Safe.t
   -> string
 
+val keeper_memory_search_with_outcome
+  :  config:Workspace.config
+  -> meta:Keeper_meta_contract.keeper_meta
+  -> ctx_work:Keeper_types.working_context
+  -> args:Yojson.Safe.t
+  -> Keeper_tool_execution.t
+
 val keeper_context_status_json
   :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
@@ -53,6 +60,12 @@ val keeper_memory_write_json
   -> meta:Keeper_meta_contract.keeper_meta
   -> args:Yojson.Safe.t
   -> string
+
+val keeper_memory_write_with_outcome
+  :  config:Workspace.config
+  -> meta:Keeper_meta_contract.keeper_meta
+  -> args:Yojson.Safe.t
+  -> Keeper_tool_execution.t
 
 (** Title length cap exposed for sync regression tests. *)
 val keeper_memory_write_max_title_chars : int

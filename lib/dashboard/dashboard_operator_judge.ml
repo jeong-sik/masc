@@ -31,7 +31,6 @@ type state = {
 }
 
 let keeper_name = "operator-judge"
-let backoff_status = "Backoff: local slots saturated"
 
 let states : (string, state) Hashtbl.t = Hashtbl.create 4
 
@@ -64,7 +63,6 @@ let key_provenance = "provenance"
 let key_authoritative = "authoritative"
 let key_confirm_required = "confirm_required"
 let keeper_name_operator_judge = "operator-judge"
-let backoff_status_slots_saturated = "Backoff: local slots saturated"
 let severity_warn = "warn"
 let provenance_judgment = "judgment"
 let model_used_runtime = "runtime"
@@ -127,9 +125,9 @@ let parse_string_list json key =
              | _ -> None)
   | _ -> []
 
-let allowed_action_type = Operator_approval.is_allowed
+let allowed_action_type = Operator_action_catalog.is_allowed
 
-let confirm_required = Operator_approval.confirm_required
+let confirm_required = Operator_action_catalog.requires_confirmation
 
 let build_recommended_action ~actor ~target_type ~target_id json =
   match json with
@@ -182,7 +180,7 @@ let prompt_for_facts facts_json =
   match
     Prompt_registry.render_prompt_template prompt_dashboard_operator_judge
       [ field_facts_json, Yojson.Safe.to_string facts_json
-      ; field_allowed_action_types, String.concat ", " Operator_approval.allowed_actions
+      ; field_allowed_action_types, String.concat ", " Operator_action_catalog.strings
       ]
   with
   | Ok value -> value
@@ -288,67 +286,39 @@ let compute_judgments
       | exn ->
           Error (Printf.sprintf "Operator judge parse error: %s" (Printexc.to_string exn)))
 
-let should_backoff ~sw:_ ~net:_ =
-  (* RFC-0206 single-binding: the deleted
-     [Runtime_runtime.local_capacity_for_selections] probed local-runtime
-     endpoint queues live. Under single-binding the runtime pool tracks lease
-     saturation directly, so back off when every configured concurrency slot on
-     a healthy runtime is already leased.
-     NB: this reads MASC's own lease accounting ([allocated_slots]), not the
-     server-reported queue depth ([process_available]) the old probe used — a
-     documented semantic shift, not a removal. Restoring a true live server-queue
-     probe is RFC-shaped follow-up. *)
-  let configured = Local_runtime_pool.configured_capacity () in
-  configured > 0
-  && Local_runtime_pool.healthy_runtime_count () > 0
-  && Local_runtime_pool.allocated_slots () >= configured
-
-let refresh_once ~sw ~net
+let refresh_once
     ~(masc_tools : Masc_domain.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result)
     ~(config : Workspace.config) ~build_facts =
   let st = get_state config.base_path in
-  if should_backoff ~sw ~net then
-    let was_online =
+  with_lock st (fun () -> st.refreshing <- true);
+  match compute_judgments ~masc_tools ~dispatch ~base_path:config.base_path
+          ~facts_json:(build_facts ()) with
+  | Error message ->
       with_lock st (fun () ->
-          let was_online = st.judge_online in
           st.refreshing <- false;
           st.judge_online <- false;
-          st.last_error <- Some backoff_status;
-          was_online)
-    in
-    if was_online then
-      Log.Dashboard.info "operator: backoff: local slots saturated, skipping cycle"
-  else begin
-    with_lock st (fun () -> st.refreshing <- true);
-    match compute_judgments ~masc_tools ~dispatch ~base_path:config.base_path
-            ~facts_json:(build_facts ()) with
-    | Error message ->
-        with_lock st (fun () ->
-            st.refreshing <- false;
-            st.judge_online <- false;
-            st.last_error <- Some message)
-    | Ok (model_used, result_json) ->
-        let generated_at_unix = Unix.gettimeofday () in
-        let generated_at = Masc_domain.iso8601_of_unix_seconds generated_at_unix in
-        let expires_at =
-          Masc_domain.iso8601_of_unix_seconds (generated_at_unix +. float_of_int (workspace_ttl_sec ()))
-        in
-        let workspace_judgment =
-          parse_workspace_judgment ~config ~generated_at ~generated_at_unix
-            ~model_used result_json
-        in
-        let has_any = Option.is_some workspace_judgment in
-        with_lock st (fun () ->
-            st.refreshing <- false;
-            st.judge_online <- has_any;
-            st.generated_at <- Some generated_at;
-            st.expires_at <- Some expires_at;
-            st.model_used <- Some model_used;
-            st.last_error <- None)
-  end
+          st.last_error <- Some message)
+  | Ok (model_used, result_json) ->
+      let generated_at_unix = Unix.gettimeofday () in
+      let generated_at = Masc_domain.iso8601_of_unix_seconds generated_at_unix in
+      let expires_at =
+        Masc_domain.iso8601_of_unix_seconds (generated_at_unix +. float_of_int (workspace_ttl_sec ()))
+      in
+      let workspace_judgment =
+        parse_workspace_judgment ~config ~generated_at ~generated_at_unix
+          ~model_used result_json
+      in
+      let has_any = Option.is_some workspace_judgment in
+      with_lock st (fun () ->
+          st.refreshing <- false;
+          st.judge_online <- has_any;
+          st.generated_at <- Some generated_at;
+          st.expires_at <- Some expires_at;
+          st.model_used <- Some model_used;
+          st.last_error <- None)
 
-let start ~sw ~clock ~net ~(config : Workspace.config)
+let start ~sw ~clock ~(config : Workspace.config)
     ~(masc_tools : Masc_domain.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result)
     ~build_facts () =
@@ -362,21 +332,9 @@ let start ~sw ~clock ~net ~(config : Workspace.config)
   in
   if should_start then
     Eio.Fiber.fork_daemon ~sw (fun () ->
-        let consecutive_backoffs = Atomic.make 0 in
         let rec loop () =
-          let was_backoff = should_backoff ~sw ~net in
-          refresh_once ~sw ~net ~masc_tools ~dispatch ~config ~build_facts;
-          if was_backoff then Atomic.incr consecutive_backoffs
-          else Atomic.set consecutive_backoffs 0;
-          let base = float_of_int (interval_sec ()) in
-          let n = Atomic.get consecutive_backoffs in
-          let sleep_s =
-            if n = 0 then base
-            else min (base *. Float.pow 2.0 (float_of_int (min n 5))) 300.0
-          in
-          if n > 0 then
-            Log.Dashboard.debug "operator: backoff: sleeping %.0fs (consecutive=%d)" sleep_s n;
-          Eio.Time.sleep clock sleep_s;
+          refresh_once ~masc_tools ~dispatch ~config ~build_facts;
+          Eio.Time.sleep clock (float_of_int (interval_sec ()));
           loop ()
         in
         loop ())

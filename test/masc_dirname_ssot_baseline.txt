@@ -1,4 +1,3 @@
-bin/masc_completion_trust_audit.ml	| Some p when String.trim p <> "" -> Some (Filename.concat (Filename.concat p ".masc") "events")
 bin/masc_trace.ml	List.fold_left Filename.concat base_path [ ".masc"; "logs" ]
 bin/masc_trace.ml	List.fold_left Filename.concat base_path [ ".masc"; "tool_calls" ]
 bin/masc_trace.ml	[ ".masc"; "keepers"; keeper; "execution-receipts" ]

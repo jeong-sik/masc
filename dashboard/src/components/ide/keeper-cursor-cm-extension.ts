@@ -28,7 +28,6 @@ import {
 interface CollisionEntry {
   readonly line: number
   readonly keeperIds: ReadonlyArray<string>
-  readonly riskLevel: 'low' | 'medium' | 'high'
 }
 
 const setCollisionData = StateEffect.define<ReadonlyArray<CollisionEntry>>()
@@ -80,37 +79,23 @@ class CollisionWarningWidget extends WidgetType {
   constructor(
     private readonly line: number,
     private readonly keeperIds: ReadonlyArray<string>,
-    private readonly riskLevel: 'low' | 'medium' | 'high',
   ) { super() }
 
   toDOM(): HTMLElement {
     const el = document.createElement('div')
     el.className = 'cm-collision-warning'
 
-    const bg =
-      this.riskLevel === 'high' ? 'rgb(var(--color-status-err-glow) / 0.12)' :
-      this.riskLevel === 'medium' ? 'rgb(var(--color-status-warn-glow) / 0.12)' :
-      'rgb(var(--color-accent-glow) / 0.08)'
-
-    const border =
-      this.riskLevel === 'high' ? 'rgb(var(--color-status-err-glow) / 0.4)' :
-      this.riskLevel === 'medium' ? 'rgb(var(--color-status-warn-glow) / 0.4)' :
-      'rgb(var(--color-accent-glow) / 0.2)'
-
-    const iconColor = this.riskLevel === 'high'
-      ? 'var(--color-status-err)'
-      : 'var(--color-status-warn)'
-
     el.style.cssText =
       `display:flex;align-items:center;gap:4px;` +
       `padding:2px 6px;margin-left:8px;` +
-      `background:${bg};border:1px solid ${border};` +
+      `background:rgb(var(--color-accent-glow) / 0.08);` +
+      `border:1px solid rgb(var(--color-accent-glow) / 0.2);` +
       `border-radius:3px;font-size:10px;` +
       `pointer-events:none;user-select:none;white-space:nowrap;`
 
     const icon = document.createElement('span')
-    icon.textContent = this.riskLevel === 'high' ? '!!' : '!'
-    icon.style.cssText = `font-weight:700;color:${iconColor}`
+    icon.textContent = '↔'
+    icon.style.cssText = 'font-weight:700;color:var(--color-fg-warning)'
     el.appendChild(icon)
 
     const text = document.createElement('span')
@@ -123,7 +108,6 @@ class CollisionWarningWidget extends WidgetType {
 
   eq(other: CollisionWarningWidget): boolean {
     return this.line === other.line
-      && this.riskLevel === other.riskLevel
       && this.keeperIds.length === other.keeperIds.length
       && this.keeperIds.every((id, i) => id === other.keeperIds[i])
   }
@@ -149,12 +133,11 @@ function buildCursorLabel(cursor: KeeperCursor, color: KeeperCursorColor): Decor
   })
 }
 
-function buildCollisionWarning(collision: { line: number; keeper_ids: string[]; risk_level: 'low' | 'medium' | 'high' }): Decoration {
+function buildCollisionWarning(collision: { line: number; keeper_ids: string[] }): Decoration {
   return Decoration.widget({
     widget: new CollisionWarningWidget(
       collision.line,
       collision.keeper_ids,
-      collision.risk_level,
     ),
     side: -1,
   })
@@ -241,7 +224,6 @@ const keeperCursorPlugin = ViewPlugin.fromClass(
         collisionEffects.push({
           line: collision.line,
           keeperIds: collision.keeper_ids,
-          riskLevel: collision.risk_level,
         })
       }
 
@@ -264,7 +246,7 @@ const keeperCursorPlugin = ViewPlugin.fromClass(
         parts.push(`${id}:${c.line}:${c.focus_mode}`)
       }
       for (const col of overlay.collisions) {
-        parts.push(`c:${col.line}:${col.risk_level}`)
+        parts.push(`c:${col.line}:${col.keeper_ids.join(',')}`)
       }
       return parts.join('|')
     }

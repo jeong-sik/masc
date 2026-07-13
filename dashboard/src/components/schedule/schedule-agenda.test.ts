@@ -30,8 +30,6 @@ function req(
 ): DashboardScheduledAutomationRequest {
   return {
     status: 'scheduled',
-    risk_class: 'read_only',
-    approval_required: false,
     source: 'automated_request',
     recurrence: { kind: 'one_shot' },
     ...overrides,
@@ -74,8 +72,8 @@ describe('cadenceCounts', () => {
 describe('isTerminalRequest', () => {
   it('treats terminal statuses (case-insensitive, effective first) as terminal', () => {
     expect(isTerminalRequest(req({ schedule_id: 'a', status: 'succeeded' }))).toBe(true)
-    expect(isTerminalRequest(req({ schedule_id: 'b', status: 'scheduled', effective_status: 'cancelled' }))).toBe(true)
-    expect(isTerminalRequest(req({ schedule_id: 'c', status: 'Expired' }))).toBe(true)
+    expect(isTerminalRequest(req({ schedule_id: 'b', status: 'cancelled' }))).toBe(true)
+    expect(isTerminalRequest(req({ schedule_id: 'c', status: 'expired' }))).toBe(true)
     expect(isTerminalRequest(req({ schedule_id: 'd', status: 'scheduled' }))).toBe(false)
     expect(isTerminalRequest(req({ schedule_id: 'e', status: 'due' }))).toBe(false)
   })

@@ -22,9 +22,8 @@
     3. {b compact_session_json fallback contract} — empty
        [recent_events] produces [last_event = null].
 
-    4. {b compact_keeper_json strict shape} — 13 keys with
-       max_len 160 truncation on current_task / last_reply_preview
-       and 120 on skill_primary.
+    4. {b compact_keeper_json strict shape} — 12 keys with
+       max_len 160 truncation on current_task / last_reply_preview.
 
     5. {b compact_agent_json}
        - 9-key shape pin.
@@ -110,7 +109,7 @@ let recent_event ?(event_type = "task_done") ?(ts_iso = "2026-05-05T03:00:00Z")
 let keeper_fixture ?(name = "k-1") ?(status = "active")
     ?(agent_name = "claude-1") ?(generation = 2) ?(context_ratio = 0.42)
     ?(current_task = "do thing") ?(last_reply_status = "replied")
-    ?(last_reply_preview = "preview text") ?(skill_primary = "ocaml")
+    ?(last_reply_preview = "preview text")
     () =
   `Assoc
     [
@@ -123,7 +122,6 @@ let keeper_fixture ?(name = "k-1") ?(status = "active")
       ("compaction_count", `Int 1);
       ("handoff_count_total", `Int 0);
       ("active_goal_ids", `List [ json_string "g1"; json_string "g2" ]);
-      ("skill_primary", json_string skill_primary);
       ( "diagnostic",
         `Assoc
           [
@@ -371,7 +369,7 @@ let test_compact_keeper_strict_keys () =
         "name"; "status"; "agent_name"; "generation"; "context_ratio";
         "last_turn_ago_s"; "compaction_count"; "handoff_count_total";
         "current_task"; "last_reply_status"; "last_reply_preview";
-        "active_goal_ids"; "skill_primary";
+        "active_goal_ids";
       ]
   in
   assert (assoc_keys_sorted out = expected_keys)

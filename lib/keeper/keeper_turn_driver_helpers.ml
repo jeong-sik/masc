@@ -12,22 +12,6 @@
 
     @since RFC-0048 — keeper_turn_driver split, helpers slice *)
 
-let resolved_tool_lane_label ~effective_tools ~runtime_mcp_policy =
-  let inline_names =
-    List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name) effective_tools
-  in
-  let runtime_ids =
-    match runtime_mcp_policy with
-    | Some policy -> policy.Llm_provider.Llm_transport.allowed_tool_names
-    | None -> []
-  in
-  match inline_names <> [], runtime_ids <> [], runtime_mcp_policy with
-  | true, true, _ -> "mixed"
-  | true, false, _ -> "inline"
-  | false, true, _ -> "runtime_mcp"
-  | false, false, Some _ -> "runtime_mcp_connect_only"
-  | false, false, None -> "none"
-
 (* RFC-0206: provider_rejections_for_no_tool_error deleted — multi-candidate
    tool-filter rejection lists have no meaning under single-runtime dispatch. *)
 

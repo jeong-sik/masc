@@ -80,6 +80,8 @@ type t =
   | CompactAuditDrainBatches
   | CompactAuditDrainBatchSizeBucket
   | FsFailures
+  | PersistencePreparationStageDuration
+  | PersistencePreparationExamined
   | CrashPersistenceFailures
   | GenerationLineageFailures
   | KeepaliveSignalFailures
@@ -346,6 +348,10 @@ let to_string = function
   | CompactAuditDrainBatchSizeBucket ->
     "masc_keeper_compact_audit_drain_batch_size_bucket_total"
   | FsFailures -> "masc_keeper_fs_failures_total"
+  | PersistencePreparationStageDuration ->
+    "masc_keeper_persistence_preparation_stage_duration_seconds"
+  | PersistencePreparationExamined ->
+    "masc_keeper_persistence_preparation_examined_records"
   | CrashPersistenceFailures -> "masc_keeper_crash_persistence_failures_total"
   | GenerationLineageFailures -> "masc_keeper_generation_lineage_failures_total"
   | KeepaliveSignalFailures -> "masc_keeper_keepalive_signal_failures_total"

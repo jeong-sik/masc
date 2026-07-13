@@ -282,7 +282,346 @@ let filteri_with_fair_yield =
   Server_bootstrap_loops_fiber.filteri_with_fair_yield
 let iteri_with_fair_yield = Server_bootstrap_loops_fiber.iteri_with_fair_yield
 
+type keeper_persistence_report =
+  { shutdown : Keeper_shutdown_runtime.restored_inventory
+  ; delivery : Keeper_chat_delivery_journal.recovery_report
+  ; queue : Keeper_chat_queue.configure_report
+  ; requests : Keeper_msg_async.recovery_report
+  ; blocked_keeper_names : string list
+  }
+
+type keeper_persistence_prepare_error =
+  | Shutdown_inventory_unavailable of Keeper_shutdown_store.error
+  | Shutdown_admission_unavailable of string
+  | Delivery_inventory_unavailable of Keeper_chat_delivery_journal.error list
+  | Queue_inventory_unavailable of Keeper_chat_queue.snapshot_load_error list
+  | Request_inventory_unavailable of Keeper_msg_async.recovery_store_error list
+  | Preparation_superseded
+
+type prepared_keeper_persistence =
+  { base_path : string
+  ; report : keeper_persistence_report
+  ; claim_state : preparation_claim_state Atomic.t
+  }
+
+and preparation_claim_state =
+  | Unclaimed
+  | Claimed
+
+type claimed_keeper_persistence =
+  { claimed_base_path : string
+  ; claimed_report : keeper_persistence_report
+  }
+
+type keeper_persistence_claim_error =
+  | Claim_base_path_mismatch
+  | Claim_superseded
+  | Claim_already_claimed
+  | Claim_admission_install_failed of Keeper_persistence_admission.install_error
+
+type preparation_slot =
+  | Preparing of int
+  | Ready of prepared_keeper_persistence
+
+let preparation_generation = Atomic.make 0
+let latest_prepared_persistence = Atomic.make (Preparing 0)
+
+module Keeper_name_set = Set.Make (String)
+
+let preparation_stage_started () = Mtime_clock.now ()
+
+let preparation_stage_elapsed_seconds started =
+  Mtime.Span.to_float_ns (Mtime.span started (Mtime_clock.now ())) /. 1e9
+;;
+
+let observe_preparation_stage ~stage ~started ~examined ~failures =
+  let elapsed_seconds = preparation_stage_elapsed_seconds started in
+  let labels = [ "stage", stage ] in
+  Otel_metric_store.observe_histogram
+    Keeper_metrics.(to_string PersistencePreparationStageDuration)
+    ~labels
+    elapsed_seconds;
+  Otel_metric_store.observe_histogram
+    Keeper_metrics.(to_string PersistencePreparationExamined)
+    ~labels
+    (Float.of_int examined);
+  Log.Server.info
+    "keeper_persistence_prepare: stage=%s elapsed_seconds=%.6f examined=%d failures=%d"
+    stage
+    elapsed_seconds
+    examined
+    failures
+;;
+
+let keeper_persistence_prepare_error_to_string = function
+  | Shutdown_inventory_unavailable error ->
+    "shutdown inventory unavailable: " ^ Keeper_shutdown_store.error_to_string error
+  | Shutdown_admission_unavailable detail ->
+    "shutdown admission restore unavailable: " ^ detail
+  | Delivery_inventory_unavailable errors ->
+    Printf.sprintf
+      "delivery root inventory unavailable (%d error(s)): %s"
+      (List.length errors)
+      (String.concat "; " (List.map Keeper_chat_delivery_journal.error_to_string errors))
+  | Queue_inventory_unavailable errors ->
+    Printf.sprintf
+      "queue root inventory unavailable (%d error(s)): %s"
+      (List.length errors)
+      (String.concat
+         "; "
+         (List.map
+            (fun (error : Keeper_chat_queue.snapshot_load_error) -> error.message)
+            errors))
+  | Request_inventory_unavailable errors ->
+    Printf.sprintf
+      "keeper_msg request inventory unavailable (%d error(s)): %s"
+      (List.length errors)
+      (String.concat
+         "; "
+         (List.map
+            (fun (error : Keeper_msg_async.recovery_store_error) -> error.reason)
+            errors))
+  | Preparation_superseded ->
+    "keeper persistence preparation was superseded by a newer preparation"
+;;
+
+let prepare_keeper_persistence ~config =
+  let generation = Atomic.fetch_and_add preparation_generation 1 + 1 in
+  let preparing = Preparing generation in
+  Atomic.set latest_prepared_persistence preparing;
+  let base_path = config.Workspace.base_path in
+  let shutdown_started = preparation_stage_started () in
+  let shutdown_inventory =
+    match Keeper_shutdown_store.scan_inventory ~config with
+    | Error error -> Error (Shutdown_inventory_unavailable error)
+    | Ok entries ->
+      (match Keeper_shutdown_runtime.restore_inventory_admission ~config entries with
+       | Ok restored -> Ok restored
+       | Error detail -> Error (Shutdown_admission_unavailable detail))
+  in
+  (match shutdown_inventory with
+   | Ok restored ->
+     observe_preparation_stage
+       ~stage:"shutdown"
+       ~started:shutdown_started
+       ~examined:
+         (List.length restored.operations + List.length restored.corrupt_records)
+       ~failures:(List.length restored.corrupt_records)
+   | Error _ ->
+     observe_preparation_stage
+       ~stage:"shutdown"
+       ~started:shutdown_started
+       ~examined:0
+       ~failures:1);
+  match shutdown_inventory with
+  | Error _ as error -> error
+  | Ok shutdown ->
+  let delivery_started = preparation_stage_started () in
+  let delivery_recovery =
+    Keeper_chat_delivery_journal.recover_all
+      ~base_path
+      ~now:(Time_compat.now ())
+  in
+  observe_preparation_stage
+    ~stage:"delivery"
+    ~started:delivery_started
+    ~examined:
+      (delivery_recovery.recovered
+       + delivery_recovery.already_final
+       + List.length delivery_recovery.failures)
+    ~failures:(List.length delivery_recovery.failures);
+  List.iter
+    (fun (failure : Keeper_chat_delivery_journal.recovery_failure) ->
+       let keeper_name, delivery_ref =
+         match failure.scope with
+         | Keeper_chat_delivery_journal.Root_inventory ->
+           "<root-inventory>", "inventory"
+         | Keeper_chat_delivery_journal.Keeper_inventory { keeper_name } ->
+           keeper_name, "inventory"
+         | Keeper_chat_delivery_journal.Delivery_record
+             { keeper_name; delivery_ref } -> keeper_name, delivery_ref
+       in
+       Log.Keeper.error
+         "keeper_chat_delivery_journal: recovery failed keeper=%s delivery_ref=%s error=%s"
+         keeper_name
+         delivery_ref
+         (Keeper_chat_delivery_journal.error_to_string failure.error))
+    delivery_recovery.failures;
+  if delivery_recovery.recovered > 0 || delivery_recovery.failures <> []
+  then
+    Log.Keeper.warn
+      "keeper_chat_delivery_journal: recovery completed recovered=%d already_final=%d failures=%d"
+      delivery_recovery.recovered
+      delivery_recovery.already_final
+      (List.length delivery_recovery.failures);
+  let delivery_root_errors, delivery_blocked =
+    List.fold_left
+      (fun (root_errors, blocked) failure ->
+         match failure.Keeper_chat_delivery_journal.scope with
+         | Keeper_chat_delivery_journal.Root_inventory ->
+           failure.error :: root_errors, blocked
+         | Keeper_chat_delivery_journal.Keeper_inventory { keeper_name }
+         | Keeper_chat_delivery_journal.Delivery_record { keeper_name; _ } ->
+           root_errors, Keeper_name_set.add keeper_name blocked)
+      ([], Keeper_name_set.empty)
+      delivery_recovery.failures
+  in
+  if delivery_root_errors <> []
+  then Error (Delivery_inventory_unavailable (List.rev delivery_root_errors))
+  else
+  let queue_started = preparation_stage_started () in
+  let queue_recovery = Keeper_chat_queue.configure_persistence ~base_path in
+  observe_preparation_stage
+    ~stage:"queue"
+    ~started:queue_started
+    ~examined:
+      (queue_recovery.restored_keeper_count
+       + List.length queue_recovery.load_errors)
+    ~failures:(List.length queue_recovery.load_errors);
+  List.iter
+    (fun (keeper_name, (error : Keeper_chat_queue.snapshot_load_error)) ->
+       Log.Keeper.error
+         "keeper_chat_queue: snapshot unavailable keeper=%s kind=%s error=%s"
+         (Option.value keeper_name ~default:"<registry>")
+         (Keeper_chat_queue.snapshot_load_error_kind_to_string error.kind)
+         error.message)
+    queue_recovery.load_errors;
+  if
+    queue_recovery.restored_keeper_count > 0
+    || queue_recovery.migrated_keeper_count > 0
+    || queue_recovery.recovered_receipt_count > 0
+    || queue_recovery.load_errors <> []
+  then
+    Log.Keeper.warn
+      "keeper_chat_queue: recovery restored_keepers=%d migrated_keepers=%d recovered_receipts=%d failures=%d"
+      queue_recovery.restored_keeper_count
+      queue_recovery.migrated_keeper_count
+      queue_recovery.recovered_receipt_count
+      (List.length queue_recovery.load_errors);
+  let queue_root_errors, blocked_keeper_names =
+    List.fold_left
+      (fun (root_errors, blocked) (keeper_name, error) ->
+         match keeper_name with
+         | None -> error :: root_errors, blocked
+         | Some keeper_name ->
+           root_errors, Keeper_name_set.add keeper_name blocked)
+      ([], delivery_blocked)
+      queue_recovery.load_errors
+  in
+  if queue_root_errors <> []
+  then Error (Queue_inventory_unavailable (List.rev queue_root_errors))
+  else
+  let blocked_keeper_names = Keeper_name_set.elements blocked_keeper_names in
+  (* Request status is recovered only after transcript journals and queue
+     receipts converge: a
+     poller must never observe a final Lost status while its durable terminal
+     row is still absent. [server_runtime_bootstrap] calls this entire
+     boundary before publishing [server_state], so no poll/cancel route can
+     race a disk-only transition. *)
+  let request_started = preparation_stage_started () in
+  let keeper_msg_recovery =
+    Keeper_msg_async.recover_lost_disk_records
+      ~blocked_keeper_names
+      ~base_path
+      ()
+  in
+  observe_preparation_stage
+    ~stage:"request"
+    ~started:request_started
+    ~examined:
+      (keeper_msg_recovery.lost
+       + keeper_msg_recovery.migrated
+       + keeper_msg_recovery.cleaned
+       + keeper_msg_recovery.deferred
+       + keeper_msg_recovery.unreadable
+       + keeper_msg_recovery.failed)
+    ~failures:
+      (keeper_msg_recovery.unreadable
+       + keeper_msg_recovery.failed
+       + List.length keeper_msg_recovery.store_errors);
+  if
+    keeper_msg_recovery.lost > 0
+    || keeper_msg_recovery.migrated > 0
+    || keeper_msg_recovery.cleaned > 0
+    || keeper_msg_recovery.unreadable > 0
+    || keeper_msg_recovery.failed > 0
+  then
+    Log.Keeper.warn
+      "keeper_msg_async: recovery lost=%d migrated=%d cleaned=%d deferred=%d unreadable=%d failed=%d"
+      keeper_msg_recovery.lost
+      keeper_msg_recovery.migrated
+      keeper_msg_recovery.cleaned
+      keeper_msg_recovery.deferred
+      keeper_msg_recovery.unreadable
+      keeper_msg_recovery.failed;
+  if keeper_msg_recovery.store_errors <> []
+  then Error (Request_inventory_unavailable keeper_msg_recovery.store_errors)
+  else
+    let request_blocked_keeper_names =
+      List.fold_left
+        (fun blocked error ->
+           match error.Keeper_msg_async.keeper_name with
+           | None -> blocked
+           | Some keeper_name -> Keeper_name_set.add keeper_name blocked)
+        (Keeper_name_set.of_list blocked_keeper_names)
+        keeper_msg_recovery.record_errors
+    in
+    let blocked_keeper_names =
+      Keeper_name_set.elements request_blocked_keeper_names
+    in
+    let prepared =
+      { base_path
+      ; report =
+          { shutdown
+          ; delivery = delivery_recovery
+          ; queue = queue_recovery
+          ; requests = keeper_msg_recovery
+          ; blocked_keeper_names
+          }
+      ; claim_state = Atomic.make Unclaimed
+      }
+    in
+    if Atomic.compare_and_set latest_prepared_persistence preparing (Ready prepared)
+    then Ok prepared
+    else Error Preparation_superseded
+;;
+
+let keeper_persistence_report prepared = prepared.report
+
+let claim_prepared_keeper_persistence ~config prepared =
+  if not (String.equal prepared.base_path config.Workspace.base_path)
+  then Error Claim_base_path_mismatch
+  else
+    match Atomic.get latest_prepared_persistence with
+    | Ready current when current == prepared ->
+      if Atomic.compare_and_set prepared.claim_state Unclaimed Claimed
+      then (
+        match
+          Keeper_persistence_admission.install
+            ~base_path:prepared.base_path
+            ~blocked_keeper_names:prepared.report.blocked_keeper_names
+        with
+        | Ok () ->
+          Ok
+            { claimed_base_path = prepared.base_path
+            ; claimed_report = prepared.report
+            }
+        | Error error -> Error (Claim_admission_install_failed error))
+      else Error Claim_already_claimed
+    | Preparing _ | Ready _ -> Error Claim_superseded
+;;
+
+let keeper_persistence_claim_error_to_string = function
+  | Claim_base_path_mismatch ->
+    "prepared persistence BasePath does not match server state"
+  | Claim_superseded -> "prepared persistence token is stale"
+  | Claim_already_claimed -> "prepared persistence token was already claimed"
+  | Claim_admission_install_failed error ->
+    Keeper_persistence_admission.install_error_to_string error
+;;
+
 let start_keeper_loops
+      ~claimed_persistence
       ~sw
       ~clock
       ~net
@@ -294,47 +633,6 @@ let start_keeper_loops
   (* Wire stop_keeper hook so zombie GC can terminate keeper fibers *)
   Atomic.set Workspace_hooks.stop_keeper_fn Keeper_keepalive.stop_keepalive;
   Atomic.set Workspace_hooks.runtime_agents_fn keeper_registry_runtime_agents;
-  let base_path = (Mcp_server.workspace_config state).base_path in
-  let delivery_recovery =
-    Keeper_chat_delivery_journal.recover_all
-      ~base_path
-      ~now:(Time_compat.now ())
-  in
-  List.iter
-    (fun (failure : Keeper_chat_delivery_journal.recovery_failure) ->
-       Log.Keeper.error
-         "keeper_chat_delivery_journal: recovery failed keeper=%s delivery_ref=%s error=%s"
-         failure.keeper_name
-         failure.delivery_ref
-         (Keeper_chat_delivery_journal.error_to_string failure.error))
-    delivery_recovery.failures;
-  if delivery_recovery.recovered > 0 || delivery_recovery.failures <> []
-  then
-    Log.Keeper.warn
-      "keeper_chat_delivery_journal: recovery completed recovered=%d already_final=%d failures=%d"
-      delivery_recovery.recovered
-      delivery_recovery.already_final
-      (List.length delivery_recovery.failures);
-  (* Request status is recovered only after transcript journals converge: a
-     poller must never observe a final Lost status while its durable terminal
-     row is still absent. *)
-  let keeper_msg_recovery =
-    Keeper_msg_async.recover_lost_disk_records ~base_path
-  in
-  if
-    keeper_msg_recovery.lost > 0
-    || keeper_msg_recovery.migrated > 0
-    || keeper_msg_recovery.cleaned > 0
-    || keeper_msg_recovery.unreadable > 0
-    || keeper_msg_recovery.failed > 0
-  then
-    Log.Keeper.warn
-      "keeper_msg_async: recovery lost=%d migrated=%d cleaned=%d unreadable=%d failed=%d"
-      keeper_msg_recovery.lost
-      keeper_msg_recovery.migrated
-      keeper_msg_recovery.cleaned
-      keeper_msg_recovery.unreadable
-      keeper_msg_recovery.failed;
   (* Shared Agent_sdk Event_bus used as the runtime transport between subsystems.
      Configuration is sourced from [Masc_event_bus_policy.oas_runtime] so the
      buffer-size/policy choice is auditable in source rather than implicit in
@@ -354,8 +652,10 @@ let start_keeper_loops
         Log.Server.error "subsystem %s crashed: %s" name (Printexc.to_string exn))
       f
   in
-  let shutdown_inventory_p, shutdown_inventory_r = Eio.Promise.create () in
   let config = Mcp_server.workspace_config state in
+  (* [claimed_persistence] can only be constructed by the typed one-shot claim
+     boundary before readiness publication. No late exception can turn an
+     already-visible HTTP state into a degraded bootstrap. *)
   (* Completion recovery can publish [Dead_cleaned] and invoke
      [Tombstone_reaped]. Install the production hook before any durable
      receipt is replayed. *)
@@ -370,8 +670,9 @@ let start_keeper_loops
        fail-out tasks that exceed it via [Server_startup_state.fail_lazy_task].
        Without a hard ceiling, a single hung task (e.g. [restore_sessions]
        hanging 17 min, #10843) blocks keeper boot indefinitely; the 240s
-       startup watchdog does NOT cover this case because [activate_lazy]
-       sets state_ready=true before the lazy fibers finish. *)
+       startup watchdog still observes the blocking phase because
+       [prepare_lazy_tasks] records the pending inventory without publishing
+       readiness. *)
     let started_at = Hashtbl.create 16 in
     let hung_threshold_sec = 60.0 in
     let boot_guard_sec =
@@ -515,18 +816,7 @@ let start_keeper_loops
      boot-time [Dead_cleaned] publish can return successfully while every
      process-local sink is still absent. *)
   fork_subsystem "keeper_shutdown_recovery" (fun () ->
-    let inventory =
-      match Keeper_shutdown_store.scan_inventory ~config with
-      | Error error -> Error (Keeper_shutdown_store.error_to_string error)
-      | Ok entries ->
-        Keeper_shutdown_runtime.restore_inventory_admission ~config entries
-    in
-    Eio.Promise.resolve shutdown_inventory_r inventory;
-    match inventory with
-    | Error detail ->
-      Log.Keeper.error "shutdown recovery inventory failed: %s" detail;
-      failwith detail
-    | Ok restored ->
+    let restored = claimed_persistence.claimed_report.shutdown in
       List.iter
         (fun corrupt ->
            Log.Keeper.error
@@ -925,11 +1215,9 @@ let start_keeper_loops
       let config = Mcp_server.workspace_config state in
       let masc_root = Workspace.masc_root_dir config in
       let keeper_dir = Keeper_fs.keeper_dir config in
-      let shutdown_inventory = Eio.Promise.await shutdown_inventory_p in
-      let shutdown_blocked_names_result =
-        match shutdown_inventory with
-        | Error detail -> Error detail
-        | Ok restored -> Ok restored.Keeper_shutdown_runtime.blocked_keeper_names
+      let shutdown_blocked_names =
+        claimed_persistence.claimed_report.shutdown.blocked_keeper_names
+        |> Keeper_name_set.of_list
       in
       let all_names = Keeper_meta_store.keeper_names config in
       let all_count = List.length all_names in
@@ -940,15 +1228,13 @@ let start_keeper_loops
         keeper_dir
         all_count;
       let names =
-        match shutdown_blocked_names_result with
-        | Error detail ->
-          Log.Keeper.error
-            "autoboot blocked because shutdown inventory is uncertain: %s"
-            detail;
-          []
-        | Ok shutdown_blocked_names ->
-          Keeper_runtime.bootable_keeper_names config
-          |> List.filter (fun name -> not (List.mem name shutdown_blocked_names))
+        Keeper_runtime.bootable_keeper_names config
+        |> List.filter (fun name ->
+          (not (Keeper_name_set.mem name shutdown_blocked_names))
+          && not
+               (Keeper_persistence_admission.is_blocked
+                  ~base_path:config.base_path
+                  ~keeper_name:name))
       in
       let exclusions = Keeper_runtime.autoboot_excluded_keeper_reasons config in
       let keeper_boot_ctx : _ Keeper_types_profile.context =
@@ -1135,30 +1421,30 @@ let start_keeper_loops
       | exn ->
         Log.Keeper.error
           "autoboot: supervisor sweep failed to start: %s"
-          (Printexc.to_string exn)));
-      (* Start queue consumer fiber for async queue drain.
-         handle_turn wires process_single_turn for actual turn execution. *)
-      (try
-         let base_path = (Mcp_server.workspace_config state).base_path in
-         Keeper_chat_queue.set_transition_observer
-           (Some
-              (fun ~keeper_name ~revision ->
-                 Keeper_chat_broadcast.queue_changed ~keeper_name
-                   ~revision ()));
-         let queue_report = Keeper_chat_queue.configure_persistence ~base_path in
-         List.iter
-           (fun (keeper_name, (error : Keeper_chat_queue.snapshot_load_error)) ->
-              let keeper_label =
-                match keeper_name with
-                | Some keeper_name -> keeper_name
-                | None -> "<registry>"
-              in
-              Log.Keeper.error
-                "keeper_chat_queue: snapshot unavailable keeper=%s: %s"
-                keeper_label
-                error.Keeper_chat_queue.message)
-           queue_report.load_errors;
-         Keeper_chat_consumer.start ~sw ~clock
+          (Printexc.to_string exn))));
+  (* Queue acceptance and draining are runtime persistence concerns, not an
+     autoboot policy. The blocking control loop is the supervised subsystem
+     body, so a loop exception cannot fail the server root through an
+     unobserved child fiber. *)
+  let consumer_started, consumer_started_resolver = Eio.Promise.create () in
+  fork_subsystem "keeper_chat_consumer" (fun () ->
+    let base_path = config.base_path in
+    let setup =
+      try
+        Keeper_chat_queue.set_transition_observer
+          (Some
+             (fun ~keeper_name ~revision ->
+                Keeper_chat_broadcast.queue_changed ~keeper_name ~revision ()));
+        Ok ()
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error exn
+    in
+    Eio.Promise.resolve consumer_started_resolver setup;
+    (match setup with
+     | Ok () -> ()
+     | Error exn -> raise exn);
+    Keeper_chat_consumer.run ~sw ~clock
            ~base_path
            ~handle_turn:(fun ~sw ~keeper_name ~delivery_key ~queued_message ->
              let open Server_routes_http_keeper_stream in
@@ -1381,13 +1667,10 @@ let start_keeper_loops
                    ; detail =
                        "queued turn returned no terminal outcome (invariant violation)"
                    ; outcome_ref = None
-                   })
-       with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | exn ->
-           Log.Keeper.warn
-             "keeper_chat_consumer: failed to start: %s"
-             (Printexc.to_string exn)));
+                   }));
+  (match Eio.Promise.await consumer_started with
+   | Ok () -> ()
+   | Error exn -> raise exn);
   (* Discord presence bridge — syncs keeper liveness to bot status. *)
   fork_subsystem "discord_presence" (fun () ->
     Discord_presence_bridge.start

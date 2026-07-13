@@ -28,7 +28,13 @@ let caller = "terminal-event-test-caller"
 exception Synthetic_background_switch_closed
 
 let accepted_request_id = function
-  | Ok request_id -> request_id
+  | Ok
+      ({ acceptance = Keeper_msg_async.Durably_accepted; request_id }
+        : Keeper_msg_async.submit_outcome) ->
+      request_id
+  | Ok outcome ->
+    fail
+      (Keeper_msg_async.submit_outcome_to_json outcome |> Yojson.Safe.to_string)
   | Error error ->
     fail
       (Keeper_msg_async.submit_error_to_json error |> Yojson.Safe.to_string)
@@ -101,7 +107,10 @@ let test_operator_cancel_running_worker_invokes_on_worker_aborted () =
         Eio.Promise.await worker_started;
         let cancelled = Keeper_msg_async.cancel ~base_path ~caller request_id in
         check bool "cancel accepted the running request" true
-          (cancelled = Keeper_msg_async.Cancellation_requested);
+          (match cancelled with
+           | Keeper_msg_async.Cancellation_requested
+               Keeper_msg_async.Durably_committed -> true
+           | _ -> false);
         let fired =
           wait_until ~clock ~max_iterations:300 ~interval_sec:0.01 (fun () ->
             not (List.is_empty !aborted))
@@ -123,14 +132,19 @@ let test_operator_cancel_running_worker_invokes_on_worker_aborted () =
              (Printf.sprintf "on_worker_aborted fired %d times, expected 1"
              (List.length reasons)));
         (match !settled with
-         | [ { Keeper_msg_async.status = Keeper_msg_async.Cancelled _
-             ; durability = Keeper_msg_async.Durable
-             } ] ->
+         | [ Keeper_msg_async.Status_settlement
+               { status = Keeper_msg_async.Cancelled _
+               ; durability = Keeper_msg_async.Durable
+               ; origin = Keeper_msg_async.Transition_commit
+               }
+           ] ->
            ()
-         | [ settlement ] ->
+         | [ Keeper_msg_async.Status_settlement { status; _ } ] ->
            failf
              "unexpected settlement status=%s"
-             (Keeper_msg_async.status_to_string settlement.status)
+             (Keeper_msg_async.status_to_string status)
+         | [ Keeper_msg_async.Settlement_projection_error _ ] ->
+           fail "unexpected settlement projection error"
          | settlements ->
            failf "settlement callback count=%d, expected 1" (List.length settlements));
         check bool "f was running before cancellation" true !f_was_called)))
@@ -162,8 +176,10 @@ let test_abort_callback_failure_does_not_fail_server_switch () =
         check bool
           "operator cancellation remains accepted"
           true
-          (Keeper_msg_async.cancel ~base_path ~caller request_id
-           = Keeper_msg_async.Cancellation_requested);
+          (match Keeper_msg_async.cancel ~base_path ~caller request_id with
+           | Keeper_msg_async.Cancellation_requested
+               Keeper_msg_async.Durably_committed -> true
+           | _ -> false);
         let reached_persistence_failure =
           wait_until ~clock ~max_iterations:300 ~interval_sec:0.01 (fun () ->
             match Keeper_msg_async.poll ~base_path ~caller request_id with
@@ -305,8 +321,10 @@ let test_closed_background_switch_rejects_worker_acceptance () =
         fail
           (Keeper_msg_async.submit_error_to_json error
            |> Yojson.Safe.to_string)
-      | Some (Ok request_id) ->
-        failf "closed background switch accepted request_id=%s" request_id
+      | Some (Ok outcome) ->
+        failf
+          "closed background switch produced submit outcome=%s"
+          (Keeper_msg_async.submit_outcome_to_json outcome |> Yojson.Safe.to_string)
       | None -> fail "submit did not return before the background switch closed"))
 ;;
 

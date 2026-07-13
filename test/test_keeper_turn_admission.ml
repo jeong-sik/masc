@@ -23,6 +23,7 @@ let base_path = "/tmp/masc_test_turn_admission"
 let keeper_name = "admission-keeper"
 let reset () =
   Keeper_turn_admission.For_testing.reset ();
+  Keeper_persistence_admission.For_testing.clear ();
   Keeper_chat_queue.For_testing.reset ();
   ignore
     (Keeper_chat_queue.configure_persistence ~base_path
@@ -155,6 +156,75 @@ let test_autonomous_skips_in_flight_chat () =
      | `Busy _ -> check "run_if_free reports Busy with the in-flight chat lane" false
      | `Ran () -> check "run_if_free must not admit during an in-flight turn" false);
     Eio.Promise.resolve set_release ())
+;;
+
+let test_autonomous_observes_persistence_fence () =
+  reset ();
+  Printf.printf "Test 2b: autonomous lane observes startup persistence fence\n%!";
+  (match
+     Keeper_persistence_admission.install
+       ~base_path
+       ~blocked_keeper_names:[ keeper_name ]
+   with
+   | Ok () -> ()
+   | Error error ->
+     failwith (Keeper_persistence_admission.install_error_to_string error));
+  let ran = ref false in
+  (match
+     Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () ->
+       ran := true)
+   with
+   | `Busy
+       (Keeper_turn_admission.Persistence_blocked
+          Keeper_persistence_admission.Recovery_failed) ->
+     check "run_if_free reports the exact persistence denial" true
+   | `Busy _ | `Ran () ->
+     check "run_if_free cannot cross the persistence fence" false);
+  check "persistence-fenced autonomous body never runs" (not !ran)
+;;
+
+let test_persistence_fence_matches_installed_symlink_identity () =
+  reset ();
+  Printf.printf "Test 2c: persistence fence matches raw and canonical BasePath\n%!";
+  let root = Filename.temp_file "masc-admission-alias-" "" in
+  Sys.remove root;
+  Unix.mkdir root 0o755;
+  let canonical_base = Filename.concat root "workspace" in
+  let alias_base = Filename.concat root "workspace-alias" in
+  let unrelated_base = Filename.concat root "unrelated" in
+  Unix.mkdir canonical_base 0o755;
+  Unix.mkdir unrelated_base 0o755;
+  Unix.symlink canonical_base alias_base;
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_persistence_admission.For_testing.clear ();
+      Sys.remove alias_base;
+      Fs_compat.remove_tree root)
+    (fun () ->
+       match
+         Keeper_persistence_admission.install
+           ~base_path:alias_base
+           ~blocked_keeper_names:[ keeper_name ]
+       with
+       | Error error ->
+         failwith (Keeper_persistence_admission.install_error_to_string error)
+       | Ok () ->
+         check
+           "raw symlink identity remains fenced"
+           (Keeper_persistence_admission.is_blocked
+              ~base_path:alias_base
+              ~keeper_name);
+         check
+           "canonical identity cannot bypass the fence"
+           (Keeper_persistence_admission.is_blocked
+              ~base_path:canonical_base
+              ~keeper_name);
+         check
+           "unrelated exact BasePath remains open"
+           (not
+              (Keeper_persistence_admission.is_blocked
+                 ~base_path:unrelated_base
+                 ~keeper_name)))
 ;;
 
 let test_chat_turns_serialize () =
@@ -562,7 +632,10 @@ let test_shutdown_reservation_fences_and_rolls_back () =
      check
        "autonomous lane sees typed shutdown fence"
        (Keeper_shutdown_types.Operation_id.equal reserved operation_id)
-   | `Busy (Keeper_turn_admission.Turn_busy _) | `Ran () ->
+   | `Busy
+       ( Keeper_turn_admission.Turn_busy _
+       | Keeper_turn_admission.Persistence_blocked _ )
+   | `Ran () ->
      check "autonomous lane cannot cross shutdown fence" false);
   (match Keeper_turn_admission.run_serialized ~base_path ~keeper_name (fun () -> ()) with
    | `Rejected { shutdown_operation_id = Some reserved; _ } ->
@@ -653,6 +726,8 @@ let () =
   test_chat_if_free_never_parks ();
   test_chat_if_free_rechecks_durable_queue_after_stale_peek ();
   test_autonomous_skips_in_flight_chat ();
+  test_autonomous_observes_persistence_fence ();
+  test_persistence_fence_matches_installed_symlink_identity ();
   test_chat_turns_serialize ();
   test_distinct_keepers_do_not_block_each_other ();
   test_waiting_cap_rejects ();

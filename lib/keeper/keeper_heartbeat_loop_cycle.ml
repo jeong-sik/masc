@@ -335,6 +335,23 @@ let run_keeper_cycle
       meta_after_triage.name
       (Keeper_shutdown_types.Operation_id.to_string operation_id);
     Busy { meta = meta_after_triage; block }
+  | `Busy ((Keeper_turn_admission.Persistence_blocked reason) as block) ->
+    let reason_label =
+      Keeper_persistence_admission.block_reason_to_wire reason
+    in
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string LifecycleDispatchRejections)
+      ~labels:
+        [ "keeper", meta_after_triage.name
+        ; "event", "autonomous_turn"
+        ; "reason", reason_label
+        ]
+      ();
+    Log.Keeper.error
+      "%s: autonomous turn denied by startup persistence admission: %s"
+      meta_after_triage.name
+      reason_label;
+    Busy { meta = meta_after_triage; block }
   | `Busy ((Keeper_turn_admission.Turn_busy in_flight) as block) ->
     (* Another lane holds this keeper's turn slot (RFC-0225 §3.1): skip the
        cycle and return the pre-cycle meta unchanged. The next heartbeat

@@ -695,7 +695,7 @@ run_live_case() {
 
   start_epoch="$(date +%s)"
   if ! call_mcp_tool 3000 "masc_keeper_msg" \
-    "$(jq -cn --arg name "${keeper_name}" --arg message "${message}" --argjson timeout "${TIMEOUT_SEC}" '{name:$name, message:$message, timeout_sec:$timeout}')" \
+    "$(jq -cn --arg name "${keeper_name}" --arg message "${message}" '{name:$name, message:$message}')" \
     "$((TIMEOUT_SEC + 30))"; then
     local msg_error
     msg_error="$(tool_error_text)"

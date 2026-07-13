@@ -859,9 +859,9 @@ let load_snapshot ~base_path ~keeper_name =
   match snapshot_path ~base_path ~keeper_name with
   | Error message -> Error (load_error Invalid_path message)
   | Ok path ->
-    if not (Sys.file_exists path)
-    then Ok None
-    else
+    (match Fs_compat.path_kind path with
+     | Fs_compat.Missing -> Ok None
+     | Fs_compat.Directory | Fs_compat.Other ->
       match Safe_ops.read_json_file_safe path with
       | Error message -> Error (load_error Read_failed ~path message)
       | Ok json ->
@@ -891,7 +891,7 @@ let load_snapshot ~base_path ~keeper_name =
          | Ok schema ->
            Error
              (load_error Parse_failed ~path
-                (Printf.sprintf "unsupported chat queue schema: %s" schema)))
+                (Printf.sprintf "unsupported chat queue schema: %s" schema))))
 
 let create_entry ?(revision = 0L) ?(receipts = []) ?(load_errors = []) () =
   { mutex = Eio.Mutex.create (); revision; receipts; load_errors }
@@ -1020,6 +1020,8 @@ let enqueue ~keeper_name message =
 
 let lease_id () = Random_id.prefixed ~prefix:"lease_" ~bytes:16
 
+module Receipt_id_string_set = Set.Make (String)
+
 let take_same_source_run (items : leased_message list) =
   match items with
   | [] -> []
@@ -1063,9 +1065,12 @@ let lease_batch ~keeper_name =
               let lease_id = lease_id () in
               let started_at = Time_compat.now () in
               let leased_ids =
-                List.map
-                  (fun (item : leased_message) ->
-                     Receipt_id.to_string item.receipt_id)
+                List.fold_left
+                  (fun ids (item : leased_message) ->
+                     Receipt_id_string_set.add
+                       (Receipt_id.to_string item.receipt_id)
+                       ids)
+                  Receipt_id_string_set.empty
                   items
               in
               let receipts =
@@ -1073,7 +1078,7 @@ let lease_batch ~keeper_name =
                   (fun receipt ->
                      match receipt.state with
                      | Stored_pending message
-                       when List.mem
+                       when Receipt_id_string_set.mem
                               (Receipt_id.to_string receipt.receipt_id)
                               leased_ids ->
                        { receipt with
@@ -1342,25 +1347,45 @@ let configure_persistence ~base_path =
   let restored_mutations = ref [] in
   let keepers_dir = Common.keepers_runtime_dir_of_base ~base_path in
   let keeper_names =
-    if not (Sys.file_exists keepers_dir)
-    then []
-    else
-      try Array.to_list (Sys.readdir keepers_dir) with
-      | exception_ ->
-        let error =
-          load_error Read_failed ~path:keepers_dir
-            ("failed to discover keeper chat queue snapshots: "
-             ^ Printexc.to_string exception_)
-        in
-        load_errors := (None, error) :: !load_errors;
-        Atomic.set global_load_errors [ error ];
-        []
+    let inventory_error kind reason =
+      let error =
+        load_error kind ~path:keepers_dir
+          ("failed to discover keeper chat queue snapshots: " ^ reason)
+      in
+      load_errors := (None, error) :: !load_errors;
+      Atomic.set global_load_errors [ error ];
+      []
+    in
+    (match
+       try Ok (Fs_compat.path_kind keepers_dir) with
+       | Eio.Cancel.Cancelled _ as exception_ -> raise exception_
+       | exception_ -> Error exception_
+     with
+     | Error exception_ ->
+       inventory_error Read_failed (Printexc.to_string exception_)
+     | Ok Fs_compat.Missing -> []
+     | Ok Fs_compat.Other ->
+       inventory_error Invalid_path "keeper runtime inventory is not a directory"
+     | Ok Fs_compat.Directory ->
+       (try Fs_compat.read_dir keepers_dir with
+        | Eio.Cancel.Cancelled _ as exception_ -> raise exception_
+        | exception_ -> inventory_error Read_failed (Printexc.to_string exception_)))
   in
   List.iter
     (fun keeper_name ->
        let path = Filename.concat (Filename.concat keepers_dir keeper_name) persistence_file in
-       if Sys.file_exists path
-       then if not (valid_keeper_name keeper_name)
+       match
+         try Ok (Fs_compat.path_kind path) with
+         | Eio.Cancel.Cancelled _ as exception_ -> raise exception_
+         | exception_ ->
+           Error
+             (load_error Read_failed ~path (Printexc.to_string exception_))
+       with
+       | Error error ->
+         load_errors := (Some keeper_name, error) :: !load_errors
+       | Ok Fs_compat.Missing -> ()
+       | Ok (Fs_compat.Directory | Fs_compat.Other) ->
+         if not (valid_keeper_name keeper_name)
          then
            let error =
              load_error Invalid_path ~path
@@ -1376,9 +1401,9 @@ let configure_persistence ~base_path =
              recovered_receipt_count :=
                !recovered_receipt_count + loaded.recovered_count;
              with_registry_rw (fun () ->
-                 Hashtbl.replace registry keeper_name
-                   (create_entry ~revision:loaded.revision
-                      ~receipts:loaded.receipts ()));
+               Hashtbl.replace registry keeper_name
+                 (create_entry ~revision:loaded.revision
+                    ~receipts:loaded.receipts ()));
              if loaded.migrated || loaded.recovered_count > 0
              then
                restored_mutations :=
@@ -1386,8 +1411,8 @@ let configure_persistence ~base_path =
            | Error error ->
              load_errors := (Some keeper_name, error) :: !load_errors;
              with_registry_rw (fun () ->
-                 Hashtbl.replace registry keeper_name
-                   (create_entry ~load_errors:[ error ] ())))
+               Hashtbl.replace registry keeper_name
+                 (create_entry ~load_errors:[ error ] ())))
     keeper_names;
   Atomic.set persistence_base_path (Some base_path);
   List.rev !restored_mutations
@@ -1409,4 +1434,5 @@ module For_testing = struct
 
   let fail_next_persist () = Atomic.set fail_next_persist_for_testing true
   let failure_kind_of_string = failure_kind_of_string
+  let snapshot_path = snapshot_path
 end

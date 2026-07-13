@@ -6,6 +6,18 @@ module Keeper_chat_store = Masc.Keeper_chat_store
 module Keeper_chat_queue = Masc.Keeper_chat_queue
 module Surface_ref = Masc.Surface_ref
 
+let eio_test_case name speed test =
+  test_case name speed (fun () ->
+    Eio_main.run (fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Eio_guard.enable ();
+      Fun.protect
+        ~finally:(fun () ->
+          Eio_guard.disable ();
+          Fs_compat.clear_fs ())
+        test))
+;;
+
 let expect_ok = function
   | Ok value -> value
   | Error error -> fail (Journal.error_to_string error)
@@ -174,6 +186,47 @@ let test_stale_revision_and_phase_fail_closed () =
     | Error (Journal.Invalid_transition _) -> ()
     | Error error -> fail (Journal.error_to_string error)
     | Ok _ -> fail "terminal result skipped the Running phase")
+;;
+
+let test_concurrent_same_key_transition_is_cooperative () =
+  with_temp_dir (fun base_path ->
+    let key = direct_key () in
+    let prepared =
+      Journal.prepare
+        ~base_path
+        ~delivery_key:key
+        ~payload:(payload ())
+        ~now:1.0
+      |> expect_ok
+    in
+    let transition row_id () =
+      Journal.mark_accepted
+        ~base_path
+        ~expected_revision:prepared.revision
+        ~identity:prepared
+        ~user_row_id:(Some row_id)
+        ~now:2.0
+    in
+    let left = ref None in
+    let right = ref None in
+    Eio.Fiber.both
+      (fun () -> left := Some (transition "msg-left" ()))
+      (fun () -> right := Some (transition "msg-right" ()));
+    match !left, !right with
+    | Some (Ok _), Some (Error (Journal.Revision_conflict _))
+    | Some (Error (Journal.Revision_conflict _)), Some (Ok _) -> ()
+    | Some (Error left), Some (Error right) ->
+      failf
+        "both concurrent transitions failed: left=%s right=%s"
+        (Journal.error_to_string left)
+        (Journal.error_to_string right)
+    | Some (Ok _), Some (Error error)
+    | Some (Error error), Some (Ok _) ->
+      failf
+        "concurrent loser returned the wrong error: %s"
+        (Journal.error_to_string error)
+    | Some (Ok _), Some (Ok _) -> fail "same revision committed twice"
+    | None, _ | _, None -> fail "concurrent transition did not return")
 ;;
 
 let test_corrupt_record_is_explicit () =
@@ -468,7 +521,6 @@ let test_checkpoint_commits_without_fake_assistant_row () =
 ;;
 
 let test_queue_restart_finalizes_receipt_without_redispatch () =
-  Eio_main.run @@ fun _env ->
   with_temp_dir (fun base_path ->
     Keeper_chat_queue.For_testing.reset ();
     ignore
@@ -657,20 +709,27 @@ let () =
   run
     "keeper chat delivery journal"
     [ ( "journal"
-      , [ test_case "full transition and reload" `Quick test_full_transition_and_reload
-        ; test_case
+      , [ eio_test_case
+            "full transition and reload"
+            `Quick
+            test_full_transition_and_reload
+        ; eio_test_case
             "stale writers and skipped phases fail closed"
             `Quick
             test_stale_revision_and_phase_fail_closed
-        ; test_case
+        ; eio_test_case
+            "same-key concurrent transition uses cooperative lock"
+            `Quick
+            test_concurrent_same_key_transition_is_cooperative
+        ; eio_test_case
             "corrupt records are explicit"
             `Quick
             test_corrupt_record_is_explicit
-        ; test_case
+        ; eio_test_case
             "schema drift fails closed"
             `Quick
             test_journal_rejects_unknown_and_duplicate_fields
-        ; test_case
+        ; eio_test_case
             "chat append-once converges"
             `Quick
             test_chat_append_once_converges
@@ -678,19 +737,19 @@ let () =
             "chat append-once converges across processes"
             `Quick
             test_chat_append_once_converges_across_processes
-        ; test_case
+        ; eio_test_case
             "restart recovery converges"
             `Quick
             test_restart_recovery_converges_without_duplicate_rows
-        ; test_case
+        ; eio_test_case
             "checkpoint has no fake reply"
             `Quick
             test_checkpoint_commits_without_fake_assistant_row
-        ; test_case
+        ; eio_test_case
             "queue restart finalizes without redispatch"
             `Quick
             test_queue_restart_finalizes_receipt_without_redispatch
-        ; test_case
+        ; eio_test_case
             "Dashboard queue origin is typed"
             `Quick
             test_dashboard_queue_origin_uses_typed_handoff_journal

@@ -15,7 +15,59 @@ val install_tooling :
     according to [governance_level] (e.g. ["restricted"], ["full"]).
     Idempotent; safe to call once per server instance. *)
 
+type keeper_persistence_report =
+  { shutdown : Keeper_shutdown_runtime.restored_inventory
+  ; delivery : Keeper_chat_delivery_journal.recovery_report
+  ; queue : Keeper_chat_queue.configure_report
+  ; requests : Keeper_msg_async.recovery_report
+  ; blocked_keeper_names : string list
+  }
+
+type keeper_persistence_prepare_error =
+  | Shutdown_inventory_unavailable of Keeper_shutdown_store.error
+  | Shutdown_admission_unavailable of string
+  | Delivery_inventory_unavailable of Keeper_chat_delivery_journal.error list
+  | Queue_inventory_unavailable of Keeper_chat_queue.snapshot_load_error list
+  | Request_inventory_unavailable of Keeper_msg_async.recovery_store_error list
+  | Preparation_superseded
+
+type prepared_keeper_persistence
+type claimed_keeper_persistence
+
+type keeper_persistence_claim_error =
+  | Claim_base_path_mismatch
+  | Claim_superseded
+  | Claim_already_claimed
+  | Claim_admission_install_failed of Keeper_persistence_admission.install_error
+
+val prepare_keeper_persistence :
+  config:Workspace.config ->
+  (prepared_keeper_persistence, keeper_persistence_prepare_error) result
+(** Synchronously reconcile delivery journals, configure/restore the durable
+    queue, then recover keeper message requests. Call this before publishing
+    request routes. Per-record failures remain typed in the report and do not
+    stop unrelated Keeper lanes. *)
+
+val keeper_persistence_report :
+  prepared_keeper_persistence -> keeper_persistence_report
+
+val keeper_persistence_prepare_error_to_string :
+  keeper_persistence_prepare_error -> string
+
+val claim_prepared_keeper_persistence :
+  config:Workspace.config ->
+  prepared_keeper_persistence ->
+  (claimed_keeper_persistence, keeper_persistence_claim_error) result
+(** Atomically claim the latest successful preparation exactly once. Call this
+    before publishing HTTP readiness; a stale, mismatched, or repeated claim
+    remains a typed startup error, as does failure to establish the fence's
+    canonical BasePath identity. *)
+
+val keeper_persistence_claim_error_to_string :
+  keeper_persistence_claim_error -> string
+
 val start_keeper_loops :
+  claimed_persistence:claimed_keeper_persistence ->
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
@@ -24,7 +76,8 @@ val start_keeper_loops :
   Mcp_server.server_state -> unit
 (** Spawn the keepalive bootstrap, supervisor sweep, and tool-execution
     fibers under [sw].  Each fiber is bound to the switch so a graceful
-    shutdown cancels them in order. *)
+    shutdown cancels them in order. The opaque preparation token makes queue
+    consumption impossible to start through this API before durable recovery. *)
 
 module For_testing : sig
   type queued_chat_projection = {

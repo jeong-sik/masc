@@ -3,7 +3,10 @@ open Masc
 module Types = Masc_domain
 
 let () = Mirage_crypto_rng_unix.use_default ()
-let () = Server_startup_state.mark_state_ready ~backend_mode:"test"
+let () =
+  Server_startup_state.mark_state_ready
+    ~backend:Server_startup_state.Filesystem_backend
+  |> Result.get_ok
 
 let temp_dir () =
   let dir = Filename.temp_file "test_operator_control_" "" in

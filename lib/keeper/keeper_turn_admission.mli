@@ -26,6 +26,7 @@ type in_flight_info =
 type autonomous_block =
   | Turn_busy of in_flight_info option
   | Shutdown_requested of Keeper_shutdown_types.Operation_id.t
+  | Persistence_blocked of Keeper_persistence_admission.block_reason
 
 type rejection =
   { waiting : int (** chat requests already waiting on this keeper's slot *)
@@ -103,8 +104,10 @@ val run_if_free
     [`Busy (Turn_busy None)] means the slot is held but the holder has not yet
     published its info (admission in progress on another fiber).
     [`Busy (Shutdown_requested id)] means a durable shutdown reservation owns
-    admission. Exceptions from [f] (including [Eio.Cancel.Cancelled]) release
-    the slot and re-raise.
+    admission. [`Busy (Persistence_blocked reason)] means startup recovery
+    fenced this exact Keeper lane; no slot is acquired and no turn body runs.
+    Exceptions from [f] (including [Eio.Cancel.Cancelled]) release the slot and
+    re-raise.
 
     Also returns [`Busy] without attempting the lock when a chat request is
     already parked on this slot ([chat_waiting] is true), or when a busy

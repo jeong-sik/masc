@@ -127,11 +127,13 @@ let validate_terminal terminal =
 ;;
 
 type operation_lock =
-  { mutex : Stdlib.Mutex.t
+  { mutex : Eio.Mutex.t
   ; mutable users : int
   }
 
 let operation_locks : (string, operation_lock) Hashtbl.t = Hashtbl.create 16
+(* Module-global registry bookkeeping never yields and is also exercised by
+   synchronous codec/store tests before an Eio runtime exists. *)
 let operation_locks_mutex = Stdlib.Mutex.create ()
 
 let acquire_operation_lock key =
@@ -141,7 +143,7 @@ let acquire_operation_lock key =
       lock.users <- lock.users + 1;
       lock
     | None ->
-      let lock = { mutex = Stdlib.Mutex.create (); users = 1 } in
+      let lock = { mutex = Eio.Mutex.create (); users = 1 } in
       Hashtbl.add operation_locks key lock;
       lock)
 ;;
@@ -158,9 +160,14 @@ let release_operation_lock key lock =
 
 let with_operation_lock key f =
   let lock = acquire_operation_lock key in
-  Fun.protect
-    ~finally:(fun () -> release_operation_lock key lock)
-    (fun () -> Stdlib.Mutex.protect lock.mutex f)
+  match Eio.Mutex.use_rw ~protect:true lock.mutex f with
+  | value ->
+    release_operation_lock key lock;
+    value
+  | exception exn ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    release_operation_lock key lock;
+    Printexc.raise_with_backtrace exn backtrace
 ;;
 
 let valid_keeper_name name =
@@ -1063,9 +1070,16 @@ let rec recover_record ~base_path ~now journal =
   | Final _ -> Ok journal
 ;;
 
+type recovery_failure_scope =
+  | Root_inventory
+  | Keeper_inventory of { keeper_name : string }
+  | Delivery_record of
+      { keeper_name : string
+      ; delivery_ref : string
+      }
+
 type recovery_failure =
-  { keeper_name : string
-  ; delivery_ref : string
+  { scope : recovery_failure_scope
   ; error : error
   }
 
@@ -1091,20 +1105,21 @@ let list_for_keeper ~base_path ~keeper_name =
   then Error (Invalid_keeper_name keeper_name)
   else
     let directory = records_dir ~base_path ~keeper_name in
-    if not (Fs_compat.file_exists directory)
-    then Ok []
-    else
-      try
-        Sys.readdir directory
-        |> Array.to_list
-        |> List.sort String.compare
+    try
+      match Fs_compat.path_kind directory with
+      | Fs_compat.Missing -> Ok []
+      | Fs_compat.Other ->
+        Error (Io_error "delivery journal inventory is not a directory")
+      | Fs_compat.Directory ->
+        Fs_compat.read_dir directory
         |> List.fold_left
              (fun result filename ->
+                Eio_guard.fair_yield ();
                 let* records = result in
                 let record_path = Filename.concat directory filename in
-                if Sys.is_directory record_path
-                then Ok records
-                else
+                match Fs_compat.path_kind record_path with
+                | Fs_compat.Directory | Fs_compat.Missing -> Ok records
+                | Fs_compat.Other ->
                   let* journal =
                     with_operation_lock record_path (fun () ->
                       load_path_unlocked record_path)
@@ -1114,9 +1129,9 @@ let list_for_keeper ~base_path ~keeper_name =
                   else Error Identity_mismatch)
              (Ok [])
         |> Result.map List.rev
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Io_error (Printexc.to_string exn))
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> Error (Io_error (Printexc.to_string exn))
 ;;
 
 let dashboard_queue_user_row_origin ~base_path ~keeper_name receipt_ids =
@@ -1161,24 +1176,42 @@ let dashboard_queue_user_row_origin ~base_path ~keeper_name receipt_ids =
 
 let recover_all ~base_path ~now =
   let keepers_dir = Common.keepers_runtime_dir_of_base ~base_path in
-  if not (Fs_compat.file_exists keepers_dir)
-  then { recovered = 0; already_final = 0; failures = [] }
-  else
-    try
-      Sys.readdir keepers_dir
-      |> Array.to_list
-      |> List.sort String.compare
+  try
+    match Fs_compat.path_kind keepers_dir with
+    | Fs_compat.Missing -> { recovered = 0; already_final = 0; failures = [] }
+    | Fs_compat.Other ->
+      { recovered = 0
+      ; already_final = 0
+      ; failures =
+          [ { scope = Root_inventory
+            ; error = Io_error "keeper runtime inventory is not a directory"
+            }
+          ]
+      }
+    | Fs_compat.Directory ->
+      Fs_compat.read_dir keepers_dir
       |> List.fold_left
            (fun report keeper_name ->
+              Eio_guard.fair_yield ();
               let keeper_path = Filename.concat keepers_dir keeper_name in
-              if not (Sys.is_directory keeper_path)
-              then report
-              else
+              match
+                try Ok (Fs_compat.path_kind keeper_path) with
+                | Eio.Cancel.Cancelled _ as exn -> raise exn
+                | exn -> Error (Io_error (Printexc.to_string exn))
+              with
+              | Error error ->
+                { report with
+                  failures =
+                    { scope = Keeper_inventory { keeper_name }; error }
+                    :: report.failures
+                }
+              | Ok (Fs_compat.Missing | Fs_compat.Other) -> report
+              | Ok Fs_compat.Directory ->
                 match list_for_keeper ~base_path ~keeper_name with
                 | Error error ->
                   { report with
                     failures =
-                      { keeper_name; delivery_ref = "inventory"; error }
+                      { scope = Keeper_inventory { keeper_name }; error }
                       :: report.failures
                   }
                 | Ok records ->
@@ -1196,25 +1229,26 @@ let recover_all ~base_path ~now =
                           | Error error ->
                             { report with
                               failures =
-                                { keeper_name; delivery_ref; error }
+                                { scope = Delivery_record { keeper_name; delivery_ref }
+                                ; error
+                                }
                                 :: report.failures
                             }))
                     report
                     records)
            { recovered = 0; already_final = 0; failures = [] }
       |> fun report -> { report with failures = List.rev report.failures }
-    with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn ->
-      { recovered = 0
-      ; already_final = 0
-      ; failures =
-          [ { keeper_name = "<inventory>"
-            ; delivery_ref = "inventory"
-            ; error = Io_error (Printexc.to_string exn)
-            }
-          ]
-      }
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    { recovered = 0
+    ; already_final = 0
+    ; failures =
+        [ { scope = Root_inventory
+          ; error = Io_error (Printexc.to_string exn)
+          }
+        ]
+    }
 ;;
 
 module For_testing = struct

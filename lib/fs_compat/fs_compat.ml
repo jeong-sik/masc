@@ -274,6 +274,39 @@ let file_exists (path : string) : bool =
        | Eio.Io _ -> false)
 ;;
 
+type path_kind =
+  | Missing
+  | Directory
+  | Other
+
+let path_kind ?(follow = true) (path : string) : path_kind =
+  with_fs_or_fallback
+    ~path
+    ~fallback:(fun () ->
+      try
+        let stats = if follow then Unix.stat path else Unix.lstat path in
+        if stats.Unix.st_kind = Unix.S_DIR then Directory else Other
+      with
+      | Unix.Unix_error (Unix.ENOENT, _, _) -> Missing)
+    (fun fs ->
+       match Eio.Path.kind ~follow Eio.Path.(fs / path) with
+       | `Not_found -> Missing
+       | `Directory -> Directory
+       | (`Unknown | `Fifo | `Character_special | `Block_device
+         | `Regular_file | `Symbolic_link | `Socket) -> Other)
+;;
+
+let read_dir (path : string) : string list =
+  with_fs_or_fallback
+    ~path
+    ~fallback:(fun () ->
+      Stdlib.Sys.readdir path
+      |> Array.to_list
+      |> List.sort String.compare)
+    (fun fs ->
+       Eio.Path.read_dir Eio.Path.(fs / path) |> List.sort String.compare)
+;;
+
 (** Load entire file contents as string, or [None] when the file is
     missing. Option-returning sibling of {!load_file} (which raises on a
     missing path). [Sys_error] from a vanished file (TOCTOU race after the

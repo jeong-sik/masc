@@ -2,6 +2,18 @@ type acquire_result =
   | Acquired
   | Already_running of { pid : int }
 
+type base_path_lease =
+  { fd : Unix.file_descr
+  ; path : string
+  }
+
+type base_path_acquire_result =
+  | Base_path_acquired of base_path_lease
+  | Base_path_already_owned of { pid : int option }
+
+let base_path_lease_mu = Mutex.create ()
+let base_path_leases : (string, base_path_lease) Hashtbl.t = Hashtbl.create 2
+
 let pid_lock_path port =
   Filename.concat (Host_config.host ()).run_dir (Printf.sprintf "masc-%d.pid" port)
 ;;
@@ -255,46 +267,101 @@ let acquire_pid_lock
   | Acquired -> claim_pid_file path
 ;;
 
+let write_all fd content =
+  let rec loop offset =
+    if offset < String.length content
+    then
+      let written =
+        Unix.write_substring fd content offset (String.length content - offset)
+      in
+      if written = 0 then raise End_of_file else loop (offset + written)
+  in
+  loop 0
+;;
+
+let release_base_path_lease lease =
+  Mutex.protect base_path_lease_mu (fun () ->
+    let owns_table_entry =
+      match Hashtbl.find_opt base_path_leases lease.path with
+      | Some current -> current == lease
+      | None -> false
+    in
+    (try
+       ignore (Unix.lseek lease.fd 0 Unix.SEEK_SET : int);
+       Unix.lockf lease.fd Unix.F_ULOCK 0
+     with
+     | Unix.Unix_error (error, syscall, argument) ->
+       Log.Server.error
+         "BasePath lease unlock failed: path=%s error=%s syscall=%s argument=%s"
+         lease.path
+         (Unix.error_message error)
+         syscall
+         argument);
+    let closed =
+      try
+        Unix.close lease.fd;
+        true
+      with
+      | Unix.Unix_error (error, syscall, argument) ->
+        Log.Server.error
+          "BasePath lease close failed: path=%s error=%s syscall=%s argument=%s"
+          lease.path
+          (Unix.error_message error)
+          syscall
+          argument;
+        false
+    in
+    (* A failed close leaves descriptor ownership ambiguous. Retain the
+       process-local fence in that case; admitting an alias after a failed
+       release would be worse than an explicit fail-closed leak. *)
+    if owns_table_entry && closed then Hashtbl.remove base_path_leases lease.path)
+;;
+
+let canonical_lock_path path =
+  try Unix.realpath path with
+  | Unix.Unix_error (Unix.ENOENT, _, _) ->
+    let parent = Filename.dirname path in
+    Filename.concat (Unix.realpath parent) (Filename.basename path)
+;;
+
 let acquire_base_path_lock ?lock_path base_path =
-  let path =
+  let requested_path =
     match lock_path with
     | Some value -> value
     | None -> base_path_lock_path base_path
   in
-  (match read_pid_file path with
-   | Some data ->
-     (match String.trim data |> int_of_string_opt with
-      | Some pid when pid > 0 ->
-        if pid_exists pid
-        then (
-          match process_command pid with
-          | Some command when looks_like_server_command command -> Already_running { pid }
-          | Some _ | None ->
-            Log.legacy_stderr
-              ~level:Log.Error
-              ~module_name:"Server"
-              (Printf.sprintf
-                 "[FATAL] PID %d owns %s but does not look like a masc server; \
-                  refusing takeover"
-                 pid
-                 path);
-            Already_running { pid })
-        else (
-          Log.legacy_stderr
-            ~level:Log.Warn
-            ~module_name:"Server"
-            (Printf.sprintf
-               "[WARN] Removing stale base-path owner file (PID %d no longer running)"
-               pid);
-          Acquired)
-      | _ ->
-        Log.legacy_stderr
-          ~level:Log.Warn
-          ~module_name:"Server"
-          "[WARN] Invalid base-path owner file contents, overwriting";
-        Acquired)
-   | None -> Acquired)
-  |> function
-  | Already_running _ as result -> result
-  | Acquired -> claim_pid_file path
+  Fs_compat.mkdir_p (Filename.dirname requested_path);
+  (* [lockf] locks are process-associated on POSIX, so a second descriptor in
+     this process may successfully acquire the same kernel lock.  Key the
+     process-local lease table and the opened descriptor by one filesystem
+     identity, including when BasePath is reached through a symlink alias. *)
+  let path = canonical_lock_path requested_path in
+  Mutex.protect base_path_lease_mu (fun () ->
+    match Hashtbl.find_opt base_path_leases path with
+    | Some _ -> Base_path_already_owned { pid = Some (Unix.getpid ()) }
+    | None ->
+      let fd =
+        Unix.openfile
+          path
+          [ Unix.O_RDWR; Unix.O_CREAT; Unix.O_CLOEXEC ]
+          0o600
+      in
+      (try
+         Unix.lockf fd Unix.F_TLOCK 0;
+         let pid = Unix.getpid () in
+         let payload = Printf.sprintf "%d\n" pid in
+         Unix.ftruncate fd 0;
+         ignore (Unix.lseek fd 0 Unix.SEEK_SET : int);
+         write_all fd payload;
+         Unix.fsync fd;
+         let lease = { fd; path } in
+         Hashtbl.add base_path_leases path lease;
+         Base_path_acquired lease
+       with
+       | Unix.Unix_error ((Unix.EACCES | Unix.EAGAIN), _, _) ->
+         close_quietly fd;
+         Base_path_already_owned { pid = parsed_pid path }
+       | exn ->
+         close_quietly fd;
+         raise exn))
 ;;

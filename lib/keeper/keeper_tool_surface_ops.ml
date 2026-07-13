@@ -107,6 +107,19 @@ let submit_keeper_msg_with_captured_event_bus
     ~f:(fun request_sw -> f ?event_bus request_sw)
     ()
 
+let submit_outcome_with_keeper_json ~keeper_name outcome =
+  match Keeper_msg_async.submit_outcome_to_json outcome with
+  | `Assoc fields ->
+    `Assoc
+      (("keeper_name", `String keeper_name)
+       :: ( "operator_instruction"
+          , `String
+              "Keeper request publication is uncertain. Poll this exact request_id; do not resubmit."
+          )
+       :: fields)
+  | json -> json
+;;
+
 module For_testing = struct
   let reset_keeper_list_cache () =
     Atomic.set keeper_list_cache (empty_text_cache ~generation:0)
@@ -115,6 +128,7 @@ module For_testing = struct
     cached_text_by_key keeper_list_cache ~key ~ttl_s compute
   let submit_keeper_msg_with_captured_event_bus =
     submit_keeper_msg_with_captured_event_bus
+  let submit_outcome_with_keeper_json = submit_outcome_with_keeper_json
 end
 let annotate_keeper_json ~runtime_class json =
   match json with
@@ -655,7 +669,7 @@ let keeper_msg_body
       |> Result.map_error (fun error ->
         Yojson.Safe.to_string (Keeper_msg_async.submit_error_to_json error))
     in
-    let* request_id =
+    let* submission =
       submit_keeper_msg_with_captured_event_bus
         ~background_sw
         ~base_path:config.base_path
@@ -685,17 +699,24 @@ let keeper_msg_body
       |> Result.map_error (fun error ->
         Yojson.Safe.to_string (Keeper_msg_async.submit_error_to_json error))
     in
-    let json =
-      `Assoc
-        [ "request_id", `String request_id
-        ; "keeper_name", `String name
-        ; "status", `String "queued"
-        ; ( "message"
-          , `String
-              "Keeper turn submitted. Poll with keeper_msg_result." )
-        ]
-    in
-    Ok (tool_result_ok (Yojson.Safe.to_string json))
+    (match submission.acceptance with
+     | Keeper_msg_async.Reconciliation_required _ ->
+       Ok
+         (tool_result_ok
+            (submit_outcome_with_keeper_json ~keeper_name:name submission
+             |> Yojson.Safe.to_string))
+     | Keeper_msg_async.Durably_accepted ->
+       let json =
+         `Assoc
+           [ "request_id", `String submission.request_id
+           ; "keeper_name", `String name
+           ; "status", `String "queued"
+           ; ( "message"
+             , `String
+                 "Keeper turn submitted. Poll with keeper_msg_result." )
+           ]
+       in
+       Ok (tool_result_ok (Yojson.Safe.to_string json)))
   with
   | Ok result -> result
   | Error err -> tool_result_error err
@@ -711,7 +732,7 @@ let handle_keeper_msg ?continuation_channel ~submitted_by ctx args : tool_result
       |> Result.map_error (fun error ->
         Yojson.Safe.to_string (Keeper_msg_async.submit_error_to_json error))
     in
-    let* request_id =
+    let* submission =
       submit_keeper_msg_with_captured_event_bus
         ~background_sw
         ~base_path:ctx.config.base_path
@@ -741,17 +762,24 @@ let handle_keeper_msg ?continuation_channel ~submitted_by ctx args : tool_result
       |> Result.map_error (fun error ->
         Yojson.Safe.to_string (Keeper_msg_async.submit_error_to_json error))
     in
-    let json =
-      `Assoc
-        [ "request_id", `String request_id
-        ; "keeper_name", `String name
-        ; "status", `String "queued"
-        ; ( "message"
-          , `String
-              "Keeper turn submitted. Poll with keeper_msg_result." )
-        ]
-    in
-    Ok (tool_result_ok (Yojson.Safe.to_string json))
+    (match submission.acceptance with
+     | Keeper_msg_async.Reconciliation_required _ ->
+       Ok
+         (tool_result_ok
+            (submit_outcome_with_keeper_json ~keeper_name:name submission
+             |> Yojson.Safe.to_string))
+     | Keeper_msg_async.Durably_accepted ->
+       let json =
+         `Assoc
+           [ "request_id", `String submission.request_id
+           ; "keeper_name", `String name
+           ; "status", `String "queued"
+           ; ( "message"
+             , `String
+                 "Keeper turn submitted. Poll with keeper_msg_result." )
+           ]
+       in
+       Ok (tool_result_ok (Yojson.Safe.to_string json)))
   with
   | Ok result -> result
   | Error err -> tool_result_error err
@@ -799,13 +827,12 @@ let keeper_msg_cancel_body ~(config : Workspace.config) ~caller args : tool_resu
     in
     let json = Keeper_msg_async.cancel_result_to_json ~request_id result in
     match result with
-    | Keeper_msg_async.Cancellation_requested
-    | Keeper_msg_async.Cancelled_request
-    | Keeper_msg_async.Cancel_in_progress ->
+    | Keeper_msg_async.Cancellation_requested _ ->
       tool_result_ok (Yojson.Safe.to_string json)
     | Keeper_msg_async.Cancel_not_found
     | Keeper_msg_async.Cancel_unreadable _
     | Keeper_msg_async.Cancel_rejected _
+    | Keeper_msg_async.Cancel_worker_ownership_unknown _
     | Keeper_msg_async.Cancel_already_terminal _
     | Keeper_msg_async.Cancel_persistence_failed _
     | Keeper_msg_async.Cancel_worker_signal_failed _

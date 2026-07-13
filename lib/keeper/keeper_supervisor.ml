@@ -794,6 +794,38 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
   List.iter
     (fun ((old_entry : Keeper_registry.registry_entry), crash_msg) ->
        let attempt = old_entry.restart_count + 1 in
+       match
+         Keeper_persistence_admission.block_reason
+           ~base_path
+           ~keeper_name:old_entry.name
+       with
+       | Some reason ->
+         let reason_label =
+           Keeper_persistence_admission.block_reason_to_wire reason
+         in
+         Otel_metric_store.inc_counter
+           Keeper_metrics.(to_string LifecycleDispatchRejections)
+           ~labels:
+             [ "keeper", old_entry.name
+             ; "event", "supervisor_restart"
+             ; "reason", reason_label
+           ]
+           ();
+         publish_lifecycle
+           ~event:
+             (Keeper_lifecycle_events.Custom_event
+                { verb = Keeper_lifecycle_events.Admission_denied
+                ; phase = Some Keeper_state_machine.Offline
+                })
+           old_entry.name
+           reason_label
+           ();
+         Log.Keeper.error
+           "%s: supervisor restart denied by startup persistence admission: %s"
+           old_entry.name
+           reason_label;
+         unregister_exact_and_drop old_entry
+       | None ->
        match read_effective_meta ctx.config old_entry.name with
        | Ok (Some meta) ->
          let lifecycle_state =

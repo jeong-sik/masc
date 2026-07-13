@@ -2,6 +2,12 @@ type acquire_result =
   | Acquired
   | Already_running of { pid : int }
 
+type base_path_lease
+
+type base_path_acquire_result =
+  | Base_path_acquired of base_path_lease
+  | Base_path_already_owned of { pid : int option }
+
 val pid_lock_path : int -> string
 
 val base_path_lock_path : string -> string
@@ -27,4 +33,6 @@ val acquire_pid_lock :
 val acquire_base_path_lock :
   ?lock_path:string ->
   string ->
-  acquire_result
+  base_path_acquire_result
+
+val release_base_path_lease : base_path_lease -> unit

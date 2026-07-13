@@ -43,6 +43,7 @@ end
 module Backend : sig
   type phase =
     | Uninitialized (** Backend not yet resolved *)
+    | Memory        (** In-process fallback backend *)
     | Filesystem    (** Fallback to filesystem backend *)
     | Degraded      (** Backend connection failed *)
 
@@ -50,6 +51,7 @@ module Backend : sig
   val all_phases : phase list
 
   type event =
+    | Resolve_memory
     | Resolve_fs
     | Degrade of string
     | Recover

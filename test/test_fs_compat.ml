@@ -104,6 +104,40 @@ let test_save_file_atomic_overwrites_existing () =
   check string "overwrite succeeded" "new" (Fs_compat.load_file target)
 ;;
 
+let test_read_dir_and_path_kind_use_typed_inventory ~fs () =
+  with_tmp_dir
+  @@ fun base ->
+  let directory = Filename.concat base "inventory" in
+  let regular = Filename.concat directory "b.json" in
+  let nested = Filename.concat directory "a-dir" in
+  let nested_link = Filename.concat directory "c-link" in
+  Fs_compat.mkdir_p directory;
+  Fs_compat.mkdir_p nested;
+  Fs_compat.save_file regular "{}";
+  Unix.symlink nested nested_link;
+  let check_inventory implementation =
+    check bool (implementation ^ " directory classified") true
+      (Fs_compat.path_kind directory = Fs_compat.Directory);
+    check bool (implementation ^ " regular file classified") true
+      (Fs_compat.path_kind regular = Fs_compat.Other);
+    check bool (implementation ^ " missing path classified") true
+      (Fs_compat.path_kind (Filename.concat directory "missing") = Fs_compat.Missing);
+    check bool (implementation ^ " symlink target followed") true
+      (Fs_compat.path_kind nested_link = Fs_compat.Directory);
+    check bool (implementation ^ " symlink itself remains non-directory") true
+      (Fs_compat.path_kind ~follow:false nested_link = Fs_compat.Other);
+    check
+      (list string)
+      (implementation ^ " directory inventory is deterministic")
+      [ "a-dir"; "b.json"; "c-link" ]
+      (Fs_compat.read_dir directory)
+  in
+  Fs_compat.clear_fs ();
+  check_inventory "fallback";
+  Fs_compat.set_fs fs;
+  check_inventory "Eio"
+;;
+
 let with_redirected_stderr (f : unit -> 'a) : 'a * string =
   let tmp = Filename.temp_file "masc_stderr_" ".log" in
   let saved = Unix.dup Unix.stderr in
@@ -323,6 +357,13 @@ let () =
             "overwrites existing target"
             `Quick
             test_save_file_atomic_overwrites_existing
+        ] )
+    ; ( "inventory"
+      , [ test_case
+            "typed path kind and sorted read_dir"
+            `Quick
+            (test_read_dir_and_path_kind_use_typed_inventory
+               ~fs:(Eio.Stdenv.fs env))
         ] )
     ; ( "load_jsonl_diagnostics"
       , [ test_case

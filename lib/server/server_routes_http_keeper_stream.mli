@@ -307,4 +307,8 @@ module For_testing : sig
     error_body:string ->
     failure_class:Tool_result.tool_failure_class ->
     Yojson.Safe.t
+  val worker_settlement_terminal_body :
+    staged_body:string option ->
+    Keeper_msg_async.worker_settlement ->
+    string option
 end

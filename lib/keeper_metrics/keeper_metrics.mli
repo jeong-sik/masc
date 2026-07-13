@@ -71,6 +71,8 @@ type t =
   | CompactAuditDrainBatches
   | CompactAuditDrainBatchSizeBucket
   | FsFailures
+  | PersistencePreparationStageDuration
+  | PersistencePreparationExamined
   | CrashPersistenceFailures
   | GenerationLineageFailures
   | KeepaliveSignalFailures

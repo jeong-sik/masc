@@ -217,4 +217,5 @@ module For_testing : sig
   val reset : unit -> unit
   val fail_next_persist : unit -> unit
   val failure_kind_of_string : string -> (failure_kind, string) result
+  val snapshot_path : base_path:string -> keeper_name:string -> (string, string) result
 end

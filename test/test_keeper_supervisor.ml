@@ -1286,6 +1286,126 @@ let test_spawn_admission_denial_does_not_register_or_fork () =
     (denial_count "supervisor");
   check (float 0.001) "spawn denial does not fork heartbeat" fork_before (fork_total ())
 
+let test_persistence_admission_denies_every_keepalive_entry () =
+  with_restart_launch_noop @@ fun () ->
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Eio.Switch.on_release sw (fun () ->
+    Masc.Keeper_persistence_admission.For_testing.clear ();
+    Reg.clear ();
+    Masc.Keeper_runtime.reset_test_state base_dir;
+    cleanup_dir base_dir);
+  let config = Masc.Workspace.default_config base_dir in
+  let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
+  let name = "persistence-denied-no-fork" in
+  let meta = make_meta name in
+  (match
+     Masc.Keeper_persistence_admission.install
+       ~base_path:config.base_path
+       ~blocked_keeper_names:[ name ]
+   with
+   | Ok () -> ()
+   | Error error ->
+     fail
+       (Masc.Keeper_persistence_admission.install_error_to_string error));
+  let ctx : _ Keeper_types_profile.context =
+    { config
+    ; agent_name = supervisor_agent_name
+    ; sw
+    ; clock = Eio.Stdenv.clock env
+    ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
+    ; net = Some (Eio.Stdenv.net env)
+    }
+  in
+  let fork_before =
+    Masc.Otel_metric_store.metric_total
+      Keeper_metrics.(to_string DomainPoolFork)
+  in
+  (match KA.start_keepalive ctx meta with
+   | KA.Keepalive_persistence_denied
+       Masc.Keeper_persistence_admission.Recovery_failed -> ()
+   | outcome ->
+     fail
+       ("direct keepalive returned unexpected persistence outcome: "
+        ^ KA.start_keepalive_outcome_to_string outcome));
+  check bool "direct keepalive fence does not register keeper" false
+    (Reg.is_registered ~base_path:config.base_path name);
+  Sup.supervise_keepalive ~proactive_warmup_sec:0 ctx meta;
+  check bool "supervisor keepalive fence does not register keeper" false
+    (Reg.is_registered ~base_path:config.base_path name);
+  check (float 0.001) "persistence denial does not fork heartbeat" fork_before
+    (Masc.Otel_metric_store.metric_total
+       Keeper_metrics.(to_string DomainPoolFork))
+
+let test_persistence_admission_denies_supervisor_restart () =
+  with_restart_launch_noop @@ fun () ->
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_persistence_admission.For_testing.clear ();
+      Reg.clear ();
+      Masc.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_dir in
+       let _init_msg =
+         Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name)
+       in
+       let name = "persistence-denied-restart" in
+       let meta = make_meta name in
+       (match Keeper_meta_store.write_meta config meta with
+        | Ok () -> ()
+        | Error error -> fail error);
+       let entry = Reg.register ~base_path:config.base_path name meta in
+       resolve_done_for_test entry (`Crashed "ordinary crash");
+       Reg.restore_supervisor_state
+         ~base_path:config.base_path
+         name
+         ~restart_count:0
+         ~last_restart_ts:0.0
+         ~crash_log:[];
+       (match
+          Masc.Keeper_persistence_admission.install
+            ~base_path:config.base_path
+            ~blocked_keeper_names:[ name ]
+        with
+        | Ok () -> ()
+        | Error error ->
+          fail
+            (Masc.Keeper_persistence_admission.install_error_to_string error));
+       let attempt_labels = [ "keeper", name ] in
+       let attempts_before =
+         Masc.Otel_metric_store.metric_value_or_zero
+           Keeper_metrics.(to_string RestartAttempts)
+           ~labels:attempt_labels
+           ()
+       in
+       let ctx : _ Keeper_types_profile.context =
+         { config
+         ; agent_name = supervisor_agent_name
+         ; sw
+         ; clock = Eio.Stdenv.clock env
+         ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
+         ; net = Some (Eio.Stdenv.net env)
+         }
+       in
+       sweep_and_recover_no_materialize ctx;
+       check
+         (float 0.001)
+         "persistence fence does not consume restart budget"
+         attempts_before
+         (Masc.Otel_metric_store.metric_value_or_zero
+            Keeper_metrics.(to_string RestartAttempts)
+            ~labels:attempt_labels
+            ());
+       check bool "persistence-fenced crashed lane is unregistered" false
+         (Reg.is_registered ~base_path:config.base_path name))
+
 let test_active_supervision_keeper_count_uses_current_entries () =
   let entries = registered_entries [ "alpha"; "bravo" ] in
   check int "initial active count" 2
@@ -4432,6 +4552,12 @@ let () =
         test_restart_path_emits_meta_unavailable_outcome_metric;
       test_case "restart denies persisted dead tombstone" `Quick
         test_restart_denies_persisted_dead_tombstone;
+    ];
+    "persistence_admission", [
+      test_case "blocked lane cannot enter direct or supervisor keepalive" `Quick
+        test_persistence_admission_denies_every_keepalive_entry;
+      test_case "blocked crashed lane cannot restart" `Quick
+        test_persistence_admission_denies_supervisor_restart;
     ];
     "dead_state_alert", [
       test_case "max_restarts exhaustion emits Dead alert" `Quick

@@ -547,12 +547,13 @@ let acquire_pid_lock port =
 
 let acquire_base_path_lock base_path =
   match Server_startup_takeover.acquire_base_path_lock base_path with
-  | Server_startup_takeover.Acquired -> ()
-  | Server_startup_takeover.Already_running { pid } ->
+  | Server_startup_takeover.Base_path_acquired lease -> lease
+  | Server_startup_takeover.Base_path_already_owned { pid } ->
+      let owner = Option.fold ~none:"unknown" ~some:string_of_int pid in
       Log.legacy_stderr ~level:Log.Error ~module_name:"Server"
         (Printf.sprintf
-           "[FATAL] Another MASC server (PID %d) already owns base path %s. Kill it first: kill %d"
-           pid base_path pid);
+           "[FATAL] Another MASC runtime (PID %s) already owns base path %s"
+           owner base_path);
       exit 1
 
 let run_cmd host port cli_base_path =
@@ -575,7 +576,7 @@ let run_cmd host port cli_base_path =
   let masc_dir = Filename.concat normalized_base_path Common.masc_dirname in
   Fs_compat.mkdir_p masc_dir;
   acquire_pid_lock port;
-  acquire_base_path_lock normalized_base_path;
+  let _base_path_lease = acquire_base_path_lock normalized_base_path in
   Log.init_from_env ();
   let shutdown_cfg =
     match Masc.Shutdown.config_from_env_result () with

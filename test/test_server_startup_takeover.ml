@@ -247,22 +247,52 @@ let test_escalates_sigkill_for_unresponsive_holder () =
           | Server_startup_takeover.Already_running _ ->
               Alcotest.fail "unresponsive holder should be reclaimed"))
 
-let test_base_path_lock_rejects_live_server_holder () =
+let test_base_path_lock_rejects_concurrent_lease () =
   with_temp_dir "startup-takeover-base-path-live" (fun dir ->
-      with_forever_process ~argv0:"main_eio.exe" ~ignore_sigterm:false (fun pid ->
-          let path = base_path_lock_path dir in
-          rm_rf (Filename.dirname path);
-          Unix.mkdir (Filename.dirname path) 0o755;
-          write_file path (Printf.sprintf "%d\n" pid);
-          match
-            Server_startup_takeover.acquire_base_path_lock ~lock_path:path dir
-          with
-          | Server_startup_takeover.Already_running { pid = running_pid } ->
-              Alcotest.(check int) "pid preserved" pid running_pid;
-              Alcotest.(check bool) "server process stays alive" true
-                (process_alive pid)
-          | Server_startup_takeover.Acquired ->
-              Alcotest.fail "live base-path owner should block takeover"))
+    let path = base_path_lock_path dir in
+    rm_rf (Filename.dirname path);
+    Unix.mkdir (Filename.dirname path) 0o755;
+    let ready_read, ready_write = Unix.pipe () in
+    let release_read, release_write = Unix.pipe () in
+    match Unix.fork () with
+    | 0 ->
+      close_quietly ready_read;
+      close_quietly release_write;
+      (match Server_startup_takeover.acquire_base_path_lock ~lock_path:path dir with
+       | Server_startup_takeover.Base_path_acquired lease ->
+         ignore (Unix.write_substring ready_write "1" 0 1 : int);
+         let buffer = Bytes.create 1 in
+         ignore (Unix.read release_read buffer 0 1 : int);
+         Server_startup_takeover.release_base_path_lease lease;
+         exit 0
+       | Server_startup_takeover.Base_path_already_owned _ -> exit 2)
+    | child_pid ->
+      close_quietly ready_write;
+      close_quietly release_read;
+      Fun.protect
+        ~finally:(fun () ->
+          close_quietly ready_read;
+          close_quietly release_write;
+          if process_alive child_pid then stop_process child_pid)
+        (fun () ->
+           let buffer = Bytes.create 1 in
+           Alcotest.(check int)
+             "child acquired lease"
+             1
+             (Unix.read ready_read buffer 0 1);
+           (match
+              Server_startup_takeover.acquire_base_path_lock ~lock_path:path dir
+            with
+            | Server_startup_takeover.Base_path_already_owned { pid } ->
+              Alcotest.(check (option int)) "owner pid is observable"
+                (Some child_pid) pid
+            | Server_startup_takeover.Base_path_acquired lease ->
+              Server_startup_takeover.release_base_path_lease lease;
+              Alcotest.fail "concurrent BasePath lease was acquired twice");
+           ignore (Unix.write_substring release_write "1" 0 1 : int);
+           match waitpid_nointr child_pid with
+           | Some (_, Unix.WEXITED 0) -> ()
+           | _ -> Alcotest.fail "BasePath lease holder did not exit cleanly"))
 
 let test_base_path_lock_reclaims_stale_pid_file () =
   with_temp_dir "startup-takeover-base-path-stale" (fun dir ->
@@ -275,11 +305,38 @@ let test_base_path_lock_reclaims_stale_pid_file () =
           match
             Server_startup_takeover.acquire_base_path_lock ~lock_path:path dir
           with
-          | Server_startup_takeover.Acquired ->
+          | Server_startup_takeover.Base_path_acquired lease ->
               Alcotest.(check int) "current pid written" (Unix.getpid ())
-                (pid_from_file path)
-          | Server_startup_takeover.Already_running _ ->
+                (pid_from_file path);
+              Server_startup_takeover.release_base_path_lease lease
+          | Server_startup_takeover.Base_path_already_owned _ ->
               Alcotest.fail "stale base-path owner should be reclaimed"))
+
+let test_base_path_lock_rejects_same_process_symlink_alias () =
+  with_temp_dir "startup-takeover-base-path-alias" (fun dir ->
+    let real_base = Filename.concat dir "real" in
+    let alias_base = Filename.concat dir "alias" in
+    Unix.mkdir real_base 0o755;
+    Unix.symlink real_base alias_base;
+    match Server_startup_takeover.acquire_base_path_lock real_base with
+    | Server_startup_takeover.Base_path_already_owned _ ->
+      Alcotest.fail "first BasePath identity was already owned"
+    | Server_startup_takeover.Base_path_acquired lease ->
+      Fun.protect
+        ~finally:(fun () ->
+          Server_startup_takeover.release_base_path_lease lease;
+          Sys.remove alias_base)
+        (fun () ->
+           match Server_startup_takeover.acquire_base_path_lock alias_base with
+           | Server_startup_takeover.Base_path_already_owned { pid } ->
+             Alcotest.(check (option int))
+               "symlink alias observes the same process-local owner"
+               (Some (Unix.getpid ()))
+               pid
+           | Server_startup_takeover.Base_path_acquired alias_lease ->
+             Server_startup_takeover.release_base_path_lease alias_lease;
+             Alcotest.fail
+               "symlink alias bypassed the process-local BasePath lease"))
 
 let () =
   Alcotest.run "Server_startup_takeover"
@@ -301,9 +358,11 @@ let () =
             test_tolerates_invalid_pid_file;
           Alcotest.test_case "unresponsive holder escalates to sigkill" `Quick
             test_escalates_sigkill_for_unresponsive_holder;
-          Alcotest.test_case "live base-path owner blocks takeover" `Quick
-            test_base_path_lock_rejects_live_server_holder;
+          Alcotest.test_case "concurrent BasePath lease blocks takeover" `Quick
+            test_base_path_lock_rejects_concurrent_lease;
           Alcotest.test_case "stale base-path owner is reclaimed" `Quick
             test_base_path_lock_reclaims_stale_pid_file;
+          Alcotest.test_case "same-process symlink alias is rejected" `Quick
+            test_base_path_lock_rejects_same_process_symlink_alias;
         ] );
     ]

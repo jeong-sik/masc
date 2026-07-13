@@ -3672,10 +3672,13 @@ let test_lazy_startup_plan_groups_independent_tasks () =
   | _ -> Alcotest.fail "unexpected lazy startup group shape"
 
 let test_startup_state_json () =
-  Server_startup_state.reset ~backend_mode:"postgres-native" ();
-  Server_startup_state.mark_state_ready ~backend_mode:"postgres-native";
-  Server_startup_state.activate_lazy ~backend_mode:"postgres-native"
-    ~tasks:[ "restore_sessions"; "keeper_bootstrap" ];
+  Server_startup_state.reset ~backend_mode:"memory" ();
+  Server_startup_state.mark_state_ready
+    ~backend:Server_startup_state.Memory_backend
+  |> Result.get_ok;
+  Server_startup_state.prepare_lazy_tasks
+    ~tasks:[ "restore_sessions"; "keeper_bootstrap" ]
+  |> Result.get_ok;
   Server_startup_state.finish_lazy_task ~task:"restore_sessions";
   Server_startup_state.fail_lazy_task ~task:"keeper_bootstrap"
     ~error:"keeper failed";
@@ -3689,9 +3692,11 @@ let test_startup_state_json () =
 
 let test_startup_state_catalog_degraded_survives_lazy_activation () =
   Server_startup_state.reset ~backend_mode:"filesystem" ();
-  Server_startup_state.mark_state_ready ~backend_mode:"filesystem";
-  Server_startup_state.activate_lazy ~backend_mode:"filesystem"
-    ~tasks:[ "restore_sessions" ];
+  Server_startup_state.mark_state_ready
+    ~backend:Server_startup_state.Filesystem_backend
+  |> Result.get_ok;
+  Server_startup_state.prepare_lazy_tasks ~tasks:[ "restore_sessions" ]
+  |> Result.get_ok;
   Server_startup_state.mark_degraded
     ~error:"startup catalog validation failed: synthetic";
   Server_startup_state.finish_lazy_task ~task:"restore_sessions";
@@ -3714,7 +3719,7 @@ let test_startup_state_liveness () =
     (Server_startup_state.elapsed_since_start () >= 0.0)
 
 let test_startup_state_readiness_before_init () =
-  Server_startup_state.reset ~backend_mode:"postgres-native" ();
+  Server_startup_state.reset ~backend_mode:"unknown" ();
   let current = Server_startup_state.(!state) in
   Alcotest.(check bool) "not ready before init" false current.state_ready;
   Alcotest.(check string) "phase is blocking" "blocking"
@@ -3722,11 +3727,80 @@ let test_startup_state_readiness_before_init () =
 
 let test_startup_state_readiness_after_init () =
   Server_startup_state.reset ~backend_mode:"filesystem" ();
-  Server_startup_state.mark_state_ready ~backend_mode:"filesystem";
+  Server_startup_state.mark_state_ready
+    ~backend:Server_startup_state.Filesystem_backend
+  |> Result.get_ok;
   let current = Server_startup_state.(!state) in
   Alcotest.(check bool) "ready after init" true current.state_ready;
   Alcotest.(check string) "phase is ready" "ready"
     (Server_startup_state.phase_to_string current.phase)
+
+let test_startup_state_lazy_inventory_does_not_publish_readiness () =
+  Server_startup_state.reset ~backend_mode:"filesystem" ();
+  Server_startup_state.mark_blocking ~backend_mode:"filesystem";
+  (match
+     Server_startup_state.prepare_lazy_tasks
+       ~tasks:[ "restore_sessions"; "keeper_history_migration" ]
+   with
+   | Ok () -> ()
+   | Error error ->
+     Alcotest.fail
+       (Server_startup_state.lazy_prepare_error_to_string error));
+  let current = Server_startup_state.(!state) in
+  Alcotest.(check bool) "lazy inventory remains not ready" false current.state_ready;
+  Alcotest.(check string) "startup remains blocking" "blocking"
+    (Server_startup_state.phase_to_string current.phase);
+  Alcotest.(check (list string))
+    "autoboot observes the complete lazy barrier"
+    [ "restore_sessions"; "keeper_history_migration" ]
+    current.pending_lazy_tasks;
+  Server_startup_state.mark_state_ready
+    ~backend:Server_startup_state.Filesystem_backend
+  |> Result.get_ok;
+  let ready = Server_startup_state.(!state) in
+  Alcotest.(check bool) "consumer ACK may publish readiness" true ready.state_ready;
+  Alcotest.(check string) "pending lazy work projects lazy phase" "lazy"
+    (Server_startup_state.phase_to_string ready.phase);
+  Alcotest.(check string)
+    "ready owner preserves resolved backend"
+    "filesystem"
+    ready.backend_mode
+
+let test_startup_state_lazy_inventory_rejects_invalid_product_state () =
+  (* [reset] preserves the diagnostic backend label. Until [mark_blocking]
+     normalizes it to Uninitialized, Booting + Filesystem violates the product
+     invariant. The barrier must report that structural error, not publish an
+     empty inventory and let autoboot pass. *)
+  Server_startup_state.reset ~backend_mode:"filesystem" ();
+  (match Server_startup_state.prepare_lazy_tasks ~tasks:[ "restore_sessions" ] with
+   | Error (Server_startup_state.Lazy_state_transition_rejected reason) ->
+     Alcotest.(check bool)
+       "typed invariant rejection is explicit"
+       true
+       (String.length reason > 0)
+   | Ok () -> Alcotest.fail "invalid lazy barrier transition was silently accepted");
+  Alcotest.(check (list string))
+    "failed transition publishes no partial inventory"
+    []
+    (Server_startup_state.pending_lazy_tasks ())
+
+let test_startup_failure_disposition_requires_readiness_for_degraded_serving () =
+  Alcotest.(check bool)
+    "pre-ready failure is fatal"
+    true
+    (match
+       Server_runtime_bootstrap.startup_failure_disposition ~state_ready:false
+     with
+     | Server_runtime_bootstrap.Fatal_pre_ready -> true
+     | Server_runtime_bootstrap.Degraded_after_ready -> false);
+  Alcotest.(check bool)
+    "post-ready failure may degrade"
+    true
+    (match
+       Server_runtime_bootstrap.startup_failure_disposition ~state_ready:true
+     with
+     | Server_runtime_bootstrap.Degraded_after_ready -> true
+     | Server_runtime_bootstrap.Fatal_pre_ready -> false)
 
 let test_watchdog_timeout_env () =
   with_env "MASC_STARTUP_WATCHDOG_SEC" (Some "90") (fun () ->
@@ -4874,6 +4948,18 @@ let () =
             test_startup_state_readiness_before_init;
           Alcotest.test_case "readiness true after init" `Quick
             test_startup_state_readiness_after_init;
+          Alcotest.test_case
+            "lazy inventory stays blocking until explicit readiness"
+            `Quick
+            test_startup_state_lazy_inventory_does_not_publish_readiness;
+          Alcotest.test_case
+            "lazy inventory rejects invalid product state explicitly"
+            `Quick
+            test_startup_state_lazy_inventory_rejects_invalid_product_state;
+          Alcotest.test_case
+            "pre-ready init failure cannot degrade-continue"
+            `Quick
+            test_startup_failure_disposition_requires_readiness_for_degraded_serving;
           Alcotest.test_case "watchdog timeout env parsing" `Quick
             test_watchdog_timeout_env;
           Alcotest.test_case "startup json includes watchdog fields" `Quick

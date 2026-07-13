@@ -945,36 +945,18 @@ let load ~config ~keeper_name operation_id =
 
 let scan_keeper_dir ~config ~keeper_name =
   let* dir = keeper_records_dir config keeper_name in
-  if not (Fs_compat.file_exists dir)
-  then Ok []
-  else
+  match Fs_compat.path_kind ~follow:false dir with
+  | Fs_compat.Missing -> Ok []
+  | Fs_compat.Other ->
+    Error
+      (Decode_error
+         (Printf.sprintf
+            "shutdown store owner entry is not a directory: %s"
+            dir))
+  | Fs_compat.Directory ->
     with_operation_lock ~access:Read dir (fun () ->
-    let* () =
-      try
-        match (Unix.lstat dir).Unix.st_kind with
-        | Unix.S_DIR -> Ok ()
-        | Unix.S_REG
-        | Unix.S_LNK
-        | Unix.S_CHR
-        | Unix.S_BLK
-        | Unix.S_FIFO
-        | Unix.S_SOCK ->
-          Error
-            (Decode_error
-               (Printf.sprintf
-                  "shutdown store owner entry is not a directory: %s"
-                  dir))
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn ->
-        Error
-          (Io_error
-             (Printf.sprintf "%s: %s" dir (Printexc.to_string exn)))
-    in
     (try
-      Sys.readdir dir
-      |> Array.to_list
-      |> List.sort String.compare
+      Fs_compat.read_dir dir
       |> List.fold_left
            (fun result filename ->
               let* entries = result in
@@ -1017,13 +999,17 @@ let scan_keeper_dir ~config ~keeper_name =
 
 let scan_inventory ~config =
   let dir = records_dir config in
-  if not (Fs_compat.file_exists dir)
-  then Ok []
-  else
-    try
-      Sys.readdir dir
-      |> Array.to_list
-      |> List.sort String.compare
+  try
+    match Fs_compat.path_kind ~follow:false dir with
+    | Fs_compat.Missing -> Ok []
+    | Fs_compat.Other ->
+      Error
+        (Decode_error
+           (Printf.sprintf
+              "shutdown store inventory is not a directory: %s"
+              dir))
+    | Fs_compat.Directory ->
+      Fs_compat.read_dir dir
       |> List.fold_left
            (fun result owner_dir_name ->
               let* entries = result in
@@ -1043,9 +1029,9 @@ let scan_inventory ~config =
               Ok (List.rev_append keeper_entries entries))
            (Ok [])
       |> Result.map List.rev
-    with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn -> Error (Io_error (Printexc.to_string exn))
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (Io_error (Printexc.to_string exn))
 ;;
 
 let list_for_keeper ~config ~keeper_name =

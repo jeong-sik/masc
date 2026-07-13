@@ -520,6 +520,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         ] in
         tool_result_ok (Yojson.Safe.to_string json)
          | ( Keepalive_already_registered _
+           | Keepalive_persistence_denied _
            | Keepalive_lifecycle_denied _
            | Keepalive_identity_unrepairable
            | Keepalive_spawn_slot_denied _

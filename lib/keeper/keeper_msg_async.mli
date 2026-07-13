@@ -69,12 +69,48 @@ type recovery_report =
   { lost : int
   ; migrated : int
   ; cleaned : int
+  ; deferred : int
   ; unreadable : int
   ; failed : int
+  ; store_errors : recovery_store_error list
+  ; record_errors : recovery_record_error list
   }
+
+and recovery_store =
+  | Active_store
+  | Legacy_store
+
+and recovery_store_error =
+  { store : recovery_store
+  ; path : string
+  ; reason : string
+  }
+
+and recovery_record_error =
+  { store : recovery_store
+  ; path : string
+  ; request_id : string
+  ; keeper_name : string option
+  ; kind : recovery_record_error_kind
+  }
+
+and recovery_record_error_kind =
+  | Recovery_record_unreadable of string
+  | Recovery_record_missing
+  | Recovery_record_not_file
+  | Recovery_record_rejected of access_rejection
+  | Recovery_source_ambiguity of string
+  | Recovery_terminal_integrity of string
+  | Recovery_persistence_failed of string
+  | Recovery_source_cleanup_failed
+  | Recovery_entry_exception of string
 
 type submit_error =
   | Submit_rejected of access_rejection
+  | Submit_admission_blocked of
+      { keeper_name : string
+      ; reason : Keeper_persistence_admission.block_reason
+      }
   | Initial_persistence_failed of { reason : string }
   | Acceptance_persistence_failed of
       { request_id : string
@@ -86,16 +122,31 @@ type submit_error =
       ; reason : string
       }
 
+type submission_acceptance =
+  | Durably_accepted
+  | Reconciliation_required of { reason : string }
+
+type submit_outcome =
+  { request_id : string
+  ; acceptance : submission_acceptance
+  }
+
+type persistence_durability =
+  | Durably_committed
+  | Published_unconfirmed of { reason : string }
+
 type cancel_result =
-  | Cancellation_requested
-  | Cancelled_request
+  | Cancellation_requested of persistence_durability
   | Cancel_not_found
   | Cancel_unreadable of string
   | Cancel_rejected of access_rejection
-  | Cancel_in_progress
+  | Cancel_worker_ownership_unknown of request_status
   | Cancel_already_terminal of request_status
   | Cancel_persistence_failed of { reason : string }
-  | Cancel_worker_signal_failed of { reason : string }
+  | Cancel_worker_signal_failed of
+      { durability : persistence_durability
+      ; reason : string
+      }
   | Cancel_state_invariant_failed of { reason : string }
 
 (** Reason [f] was cut off before it could reach its own completion. [f] is
@@ -121,10 +172,17 @@ type settlement_durability =
   | Durable
   | Volatile_persistence_failure
 
+type settlement_origin =
+  | Transition_commit
+  | Canonical_reconciliation
+
 type worker_settlement =
-  { status : request_status
-  ; durability : settlement_durability
-  }
+  | Status_settlement of
+      { status : request_status
+      ; durability : settlement_durability
+      ; origin : settlement_origin
+      }
+  | Settlement_projection_error of { poll_result : load_result }
 
 (** {1 Submit and poll} *)
 
@@ -137,8 +195,11 @@ val server_background_switch : unit -> (Eio.Switch.t, submit_error) result
     ~keeper_name ~base_path ~caller] forks a background daemon fiber on the
     explicitly supplied server-lifetime [background_sw].  The per-request
     worker switch passed to [f] is distinct: cancellation fails that switch,
-    never the server root.  Returns the fresh [request_id] synchronously only
-    after the owner-bearing v2 request record is durably accepted. The async
+    never the server root. Returns the fresh [request_id] synchronously after
+    the owner-bearing v2 request record is durably accepted. If an atomic
+    rename publishes the record but its directory fsync and the compensating
+    rollback both fail, [Reconciliation_required] preserves the request id so
+    the caller can poll instead of creating an unreachable orphan. The async
     transport has no outer wall-clock deadline: provider progress, tool-local
     deadlines, typed runtime completion, and explicit operator cancellation own
     their respective boundaries. Cancellation of the
@@ -163,10 +224,13 @@ val server_background_switch : unit -> (Eio.Switch.t, submit_error) result
     delivery callback succeeds. Callback failures never escape to the server
     root switch.
 
-    [on_worker_settled] is invoked only after the terminal request status has
-    committed. It is the single projection boundary for SSE or other live
-    terminal notifications. Projection exceptions are observed and isolated
-    from the already-committed request truth. *)
+    [on_worker_settled] is invoked only for terminal truth that exact in-process
+    poll also returns: a durably committed status, a typed volatile persistence
+    overlay, or an already-existing canonical durable terminal discovered
+    during an integrity conflict. Ambiguous durable evidence has no fabricated
+    callback projection. It is the single projection boundary for SSE or other
+    live terminal notifications. Projection exceptions are observed and
+    isolated from request truth. *)
 val submit
   :  ?on_accepted:(string -> (unit, string) result)
   -> ?on_worker_aborted:(worker_abort_reason -> (unit, string) result)
@@ -177,14 +241,15 @@ val submit
   -> f:(Eio.Switch.t -> Keeper_types_profile.tool_result)
   -> keeper_name:string
   -> unit
-  -> (string, submit_error) result
+  -> (submit_outcome, submit_error) result
 
 (** [poll ~base_path ~caller request_id] returns [Found entry] for a known request,
     [Absent] when no record exists, and [Unreadable reason] when a persisted
     record exists but cannot be decoded. [Rejected reason] means the request
-    exists outside the exact canonical base-path/caller lane. If a
-    persisted non-terminal request exists without an in-memory worker, it is
-    returned as [Lost] and the terminal lost state is persisted. *)
+    exists outside the exact canonical base-path/caller lane. A disk-only
+    non-terminal record is returned unchanged: a poller cannot infer that a
+    different process does not own its worker. Only the exclusive startup
+    recovery boundary may transition such records to [Lost]. *)
 val poll : base_path:string -> caller:string -> string -> load_result
 
 (** Mark persisted non-terminal request records that have no live in-memory
@@ -195,13 +260,20 @@ val poll : base_path:string -> caller:string -> string -> load_result
     active table, while disk-only
     [Queued]/[Running]/[Cancelling]
     records from a previous process stop looking indefinitely active. *)
-val recover_lost_disk_records : base_path:string -> recovery_report
+val recover_lost_disk_records :
+  ?blocked_keeper_names:string list -> base_path:string -> unit -> recovery_report
 
 (** [cancel ~base_path ~caller request_id] validates exact request ownership,
     durably commits a non-terminal [Cancelling] intent, publishes it, and only
     then fails the per-request worker switch. The worker's abort callback owns
     the actual [Cancelled] or [Persistence_failed] settlement. A disk-only
-    recovered request has no live callback and is settled directly. *)
+    non-terminal request is rejected as [Cancel_worker_ownership_unknown]:
+    process-local absence cannot prove that another runtime does not own the
+    worker. If switch signalling fails after [Cancelling] is published, the
+    next explicit [cancel] call re-persists that same intent and retries the
+    owned switch signal; there is no timer, retry count, or permanently inert
+    [Cancelling] branch. Exclusive startup recovery settles true restart
+    residue. *)
 val cancel : base_path:string -> caller:string -> string -> cancel_result
 
 (** [list_for_keeper ~base_path ~caller ?keeper_name ()] returns active
@@ -221,6 +293,7 @@ val list_for_keeper
 val status_to_string : request_status -> string
 val access_rejection_to_json : access_rejection -> Yojson.Safe.t
 val submit_error_to_json : submit_error -> Yojson.Safe.t
+val submit_outcome_to_json : submit_outcome -> Yojson.Safe.t
 val cancel_result_to_json : request_id:string -> cancel_result -> Yojson.Safe.t
 
 (** JSON encoding with [request_id], [keeper_name], [status],
@@ -237,6 +310,16 @@ module For_testing : sig
   val terminal_record_path : base_path:string -> request_id:string -> string option
   val legacy_record_path : base_path:string -> request_id:string -> string option
   val load_record : base_path:string -> request_id:string -> load_result
-  val recover_lost_disk_records : base_path:string -> recovery_report
+  val recover_lost_disk_records :
+    ?blocked_keeper_names:string list -> base_path:string -> unit -> recovery_report
+  val set_durable_write_hook :
+    (Keeper_fs.durable_write_stage -> unit) option -> unit
+  val set_durable_remove_hook :
+    (Keeper_fs.durable_remove_stage -> unit) option -> unit
+  val set_cancel_signal_hook :
+    (Eio.Switch.t -> exn -> unit) option -> unit
+  val set_request_id_hook : (unit -> string) option -> unit
+  val set_integrity_projection_hook : (unit -> unit) option -> unit
+  val reserved_request_id_count : unit -> int
   val active_switch_count : unit -> int
 end

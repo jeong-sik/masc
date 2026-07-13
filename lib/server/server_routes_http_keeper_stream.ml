@@ -405,14 +405,14 @@ let handle_keeper_chat_request_cancel ~caller state request reqd =
       in
       let status =
         match result with
-        | Keeper_msg_async.Cancelled_request -> `OK
-        | Keeper_msg_async.Cancellation_requested
-        | Keeper_msg_async.Cancel_in_progress ->
+        | Keeper_msg_async.Cancellation_requested _ ->
             `Accepted
         | Keeper_msg_async.Cancel_not_found -> `Not_found
         | Keeper_msg_async.Cancel_rejected rejection ->
             http_status_of_access_rejection rejection
-        | Keeper_msg_async.Cancel_already_terminal _ -> `Conflict
+        | Keeper_msg_async.Cancel_already_terminal _
+        | Keeper_msg_async.Cancel_worker_ownership_unknown _ ->
+            `Conflict
         | Keeper_msg_async.Cancel_unreadable _
         | Keeper_msg_async.Cancel_persistence_failed _
         | Keeper_msg_async.Cancel_worker_signal_failed _
@@ -1112,6 +1112,7 @@ type keeper_stream_terminal_status =
   | Stream_error
   | Stream_cancelled
   | Stream_rejected
+  | Stream_reconciliation_required
 
 type keeper_request_terminal_status =
   | Request_deferred
@@ -1123,6 +1124,7 @@ let keeper_stream_terminal_status_to_string = function
   | Stream_error -> "error"
   | Stream_cancelled -> "cancelled"
   | Stream_rejected -> "rejected"
+  | Stream_reconciliation_required -> "acceptance_uncertain"
 ;;
 
 let keeper_request_terminal_status_to_string = function
@@ -1132,7 +1134,10 @@ let keeper_request_terminal_status_to_string = function
 ;;
 
 let keeper_request_terminal_status_ok = function
-  | Request_deferred | Request_queued | Request_stream Stream_done -> true
+  | Request_deferred
+  | Request_queued
+  | Request_stream (Stream_done | Stream_reconciliation_required) ->
+    true
   | Request_stream (Stream_error | Stream_cancelled | Stream_rejected) ->
     false
 ;;
@@ -1140,7 +1145,8 @@ let keeper_request_terminal_status_ok = function
 let keeper_request_terminal_status_is_routine = function
   | Request_deferred
   | Request_queued
-  | Request_stream (Stream_done | Stream_cancelled) -> true
+  | Request_stream (Stream_done | Stream_cancelled | Stream_reconciliation_required) ->
+    true
   | Request_stream (Stream_error | Stream_rejected) -> false
 ;;
 
@@ -1200,6 +1206,124 @@ and queued_turn_outcome =
       ; detail : string
       }
   | Deferred of { rejection : Keeper_turn_admission.rejection }
+
+let completion_of_worker_settlement ~queued_turn ~staged_completion
+    (settlement : Keeper_msg_async.worker_settlement) =
+  let queued_failure kind detail =
+    if queued_turn then Some (Failed { kind; detail }) else None
+  in
+  match settlement with
+  | Keeper_msg_async.Settlement_projection_error { poll_result } ->
+    let body =
+      match poll_result with
+      | Keeper_msg_async.Unreadable reason -> reason
+      | Keeper_msg_async.Absent ->
+        "keeper request terminal projection is absent from canonical storage"
+      | Keeper_msg_async.Rejected rejection ->
+        Keeper_msg_async.access_rejection_to_json rejection
+        |> Yojson.Safe.to_string
+      | Keeper_msg_async.Found entry ->
+        Printf.sprintf
+          "keeper request integrity projection is non-terminal (status=%s)"
+          (Keeper_msg_async.status_to_string entry.status)
+    in
+    Some
+      (Completion_terminal
+         { status = Stream_error
+         ; body
+         ; queued_outcome = queued_failure Transcript_persist_failed body
+         })
+  | Keeper_msg_async.Status_settlement { status; durability; origin } ->
+    (match durability, origin, status with
+     | Keeper_msg_async.Volatile_persistence_failure, _, _ ->
+       let body =
+         Printf.sprintf
+           "keeper request terminal state is not durable (status=%s)"
+           (Keeper_msg_async.status_to_string status)
+       in
+       Some
+         (Completion_terminal
+            { status = Stream_error
+            ; body
+            ; queued_outcome = queued_failure Transcript_persist_failed body
+            })
+     | ( Keeper_msg_async.Durable
+       , Keeper_msg_async.Transition_commit
+       , Keeper_msg_async.Done { ok; body } ) ->
+       (match staged_completion with
+        | Some completion -> Some completion
+        | None ->
+          let stream_status = if ok then Stream_done else Stream_error in
+          Some
+            (Completion_terminal
+               { status = stream_status
+               ; body
+               ; queued_outcome =
+                   (if ok then None else queued_failure Turn_failed body)
+               }))
+     | ( Keeper_msg_async.Durable
+       , Keeper_msg_async.Canonical_reconciliation
+       , Keeper_msg_async.Done { ok; body } ) ->
+       let stream_status = if ok then Stream_done else Stream_error in
+       Some
+         (Completion_terminal
+            { status = stream_status
+            ; body
+            ; queued_outcome =
+                (if ok then None else queued_failure Turn_failed body)
+            })
+     | ( Keeper_msg_async.Durable
+       , Keeper_msg_async.Transition_commit
+       , Keeper_msg_async.Cancelled { reason; cancelled_by } ) ->
+       (match staged_completion with
+        | Some
+            ((Completion_terminal
+                { status = (Stream_cancelled | Stream_error); _ }) as completion) ->
+          Some completion
+        | Some _ | None ->
+          let body = Printf.sprintf "%s (cancelled_by=%s)" reason cancelled_by in
+          Some
+            (Completion_terminal
+               { status = Stream_cancelled
+               ; body
+               ; queued_outcome = queued_failure Turn_cancelled body
+               }))
+     | ( Keeper_msg_async.Durable
+       , Keeper_msg_async.Canonical_reconciliation
+       , Keeper_msg_async.Cancelled { reason; cancelled_by } ) ->
+       let body = Printf.sprintf "%s (cancelled_by=%s)" reason cancelled_by in
+       Some
+         (Completion_terminal
+            { status = Stream_cancelled
+            ; body
+            ; queued_outcome = queued_failure Turn_cancelled body
+            })
+     | ( Keeper_msg_async.Durable
+       , _
+       , Keeper_msg_async.Persistence_failed { attempted_status; reason } ) ->
+       let body =
+         Printf.sprintf
+           "keeper request terminal persistence failed (attempted_status=%s): %s"
+           attempted_status
+           reason
+       in
+       Some
+         (Completion_terminal
+            { status = Stream_error
+            ; body
+            ; queued_outcome = queued_failure Transcript_persist_failed body
+            })
+     | Keeper_msg_async.Durable, _, Keeper_msg_async.Lost { reason } ->
+       Some
+         (Completion_terminal
+            { status = Stream_rejected
+            ; body = reason
+            ; queued_outcome = queued_failure Turn_failed reason
+            })
+     | Keeper_msg_async.Durable, _, Keeper_msg_async.Queued
+     | Keeper_msg_async.Durable, _, Keeper_msg_async.Running
+     | Keeper_msg_async.Durable, _, Keeper_msg_async.Cancelling _ ->
+       None)
 
 let admission_rejection_to_json
     ({ Keeper_turn_admission.waiting
@@ -1323,98 +1447,43 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
     Eio.Mutex.use_rw ~protect:true terminal_delivery_mu (fun () ->
       if not (Atomic.get terminal_pushed) then staged_completion := Some completion)
   in
-  let queued_failure kind detail =
-    if queued_turn then Some (Failed { kind; detail }) else None
-  in
   let publish_committed_completion
       (settlement : Keeper_msg_async.worker_settlement) =
-    let status = settlement.status in
     let completion =
-      match settlement.durability, status with
-      | Keeper_msg_async.Volatile_persistence_failure, _ ->
-        let body =
-          Printf.sprintf
-            "keeper request terminal state is not durable (status=%s)"
-            (Keeper_msg_async.status_to_string status)
-        in
-        Some
-          (Completion_terminal
-             { status = Stream_error
-             ; body
-             ; queued_outcome = queued_failure Transcript_persist_failed body
-             })
-      | Keeper_msg_async.Durable, Keeper_msg_async.Done { ok; body } ->
-        (match !staged_completion with
-         | Some completion -> Some completion
-         | None ->
-           let stream_status = if ok then Stream_done else Stream_error in
-           Some
-             (Completion_terminal
-                { status = stream_status
-                ; body
-                ; queued_outcome =
-                    (if ok then None else queued_failure Turn_failed body)
-                }))
-      | Keeper_msg_async.Durable, Keeper_msg_async.Cancelled { reason; cancelled_by } ->
-        (match !staged_completion with
-         | Some
-             (Completion_terminal
-                { status = (Stream_cancelled | Stream_error); _ } as completion) ->
-           Some (Completion_terminal completion)
-         | Some _ | None ->
-           let body = Printf.sprintf "%s (cancelled_by=%s)" reason cancelled_by in
-           Some
-             (Completion_terminal
-                { status = Stream_cancelled
-                ; body
-                ; queued_outcome = queued_failure Turn_cancelled body
-                }))
-      | ( Keeper_msg_async.Durable
-        , Keeper_msg_async.Persistence_failed { attempted_status; reason } ) ->
-        let body =
-          Printf.sprintf
-            "keeper request terminal persistence failed (attempted_status=%s): %s"
-            attempted_status
-            reason
-        in
-        Some
-          (Completion_terminal
-             { status = Stream_error
-             ; body
-             ; queued_outcome = queued_failure Transcript_persist_failed body
-             })
-      | Keeper_msg_async.Durable, Keeper_msg_async.Lost { reason } ->
-        Some
-          (Completion_terminal
-             { status = Stream_rejected
-             ; body = reason
-             ; queued_outcome = queued_failure Turn_failed reason
-             })
-      | Keeper_msg_async.Durable, Keeper_msg_async.Queued
-      | Keeper_msg_async.Durable, Keeper_msg_async.Running
-      | Keeper_msg_async.Durable, Keeper_msg_async.Cancelling _ ->
-        None
+      completion_of_worker_settlement
+        ~queued_turn
+        ~staged_completion:!staged_completion
+        settlement
     in
     match completion with
     | Some completion -> publish_completion completion
     | None ->
+      let status =
+        match settlement with
+        | Keeper_msg_async.Status_settlement { status; _ } ->
+          Keeper_msg_async.status_to_string status
+        | Keeper_msg_async.Settlement_projection_error _ -> "projection_error"
+      in
       Log.Keeper.error
         "keeper_stream: worker settlement callback received non-terminal status keeper=%s status=%s"
         payload.name
-        (Keeper_msg_async.status_to_string status)
+        status
   in
   let await_projection_cutoff () =
-    Eio.Fiber.first
-      ~combine:(fun left right ->
-        match left, right with
-        | `Terminal, _ | _, `Terminal -> `Terminal
-        | `Client_disconnected, `Client_disconnected -> `Client_disconnected)
-      (fun () ->
-         ignore (Eio.Promise.await worker_completion : keeper_stream_completion);
-         `Terminal)
-      (fun () ->
-         Eio.Promise.await client_disconnect;
-         `Client_disconnected)
+    let cutoff =
+      Eio.Fiber.first
+        ~combine:(fun left right ->
+          match left, right with
+          | `Terminal, _ | _, `Terminal -> `Terminal
+          | `Client_disconnected, `Client_disconnected -> `Client_disconnected)
+        (fun () ->
+           ignore (Eio.Promise.await worker_completion : keeper_stream_completion);
+           `Terminal)
+        (fun () ->
+           Eio.Promise.await client_disconnect;
+           `Client_disconnected)
+    in
+    (cutoff :> [ `Added | `Client_disconnected | `Terminal ])
   in
   let observe_stream_event_cutoff reason =
     Otel_metric_store.inc_counter
@@ -1428,8 +1497,9 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
         stage_completion (Completion_dashboard_queued queued)
     | Stream_queued_turn_deferred rejection ->
         stage_completion (Completion_queued_turn_deferred rejection)
-    | Stream_terminal terminal ->
-        stage_completion (Completion_terminal terminal)
+    | Stream_terminal { status; body; queued_outcome } ->
+        stage_completion
+          (Completion_terminal { status; body; queued_outcome })
     | Stream_client_disconnected ->
         Atomic.set client_disconnected true;
         ignore (Eio.Promise.try_resolve client_disconnect_resolver () : bool)
@@ -2244,9 +2314,25 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
       |> Result.map_error (fun error ->
         Keeper_msg_async.submit_error_to_json error |> Yojson.Safe.to_string)
   in
-  let request_id =
+  let request_id, durably_accepted =
     match submit_result with
-    | Ok request_id -> Some request_id
+    | Ok
+        ({ acceptance = Keeper_msg_async.Durably_accepted; request_id }
+          : Keeper_msg_async.submit_outcome) ->
+        Some request_id, true
+    | Ok
+        ({ acceptance = Keeper_msg_async.Reconciliation_required _; _ } as
+          outcome) ->
+        let body =
+          Keeper_msg_async.submit_outcome_to_json outcome |> Yojson.Safe.to_string
+        in
+        publish_completion
+          (Completion_terminal
+             { status = Stream_reconciliation_required
+             ; body
+             ; queued_outcome = None
+             });
+        Some outcome.request_id, false
     | Error body ->
         let persisted = persist_failure_reply body in
         let queued_outcome =
@@ -2267,7 +2353,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
              ; body
              ; queued_outcome
              });
-        None
+        None, false
   in
   (match client_disconnects, request_id with
    | None, _ | _, None -> ()
@@ -2322,7 +2408,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                       ]
                   }
             }))
-    request_id;
+    (if durably_accepted then request_id else None);
   let publish_terminal ~status ?(message = "") () =
     let message = redact_text message in
     let status_label = keeper_request_terminal_status_to_string status in
@@ -2371,17 +2457,24 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
             | `Client_disconnected, `Client_disconnected -> `Client_disconnected)
           (fun () -> `Stream_event (Eio.Stream.take worker_events))
           (fun () ->
-             Eio.Fiber.first
-               ~combine:(fun left right ->
-                 match left, right with
-                 | `Completion _, _ -> left
-                 | _, `Completion _ -> right
-                 | `Client_disconnected, `Client_disconnected ->
-                   `Client_disconnected)
-               (fun () -> `Completion (Eio.Promise.await worker_completion))
-               (fun () ->
-                  Eio.Promise.await client_disconnect;
-                  `Client_disconnected)))
+             let completion_or_disconnect =
+               Eio.Fiber.first
+                 ~combine:(fun left right ->
+                   match left, right with
+                   | `Completion _, _ -> left
+                   | _, `Completion _ -> right
+                   | `Client_disconnected, `Client_disconnected ->
+                     `Client_disconnected)
+                 (fun () -> `Completion (Eio.Promise.await worker_completion))
+                 (fun () ->
+                    Eio.Promise.await client_disconnect;
+                    `Client_disconnected)
+             in
+             (completion_or_disconnect
+              :> [ `Client_disconnected
+                  | `Completion of keeper_stream_completion
+                  | `Stream_event of Agent_sdk.Types.sse_event
+                  ])))
   in
   let rec consume_worker_events bridge_state =
     match next_worker_projection () with
@@ -2438,6 +2531,21 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
         }) ->
         let message = redact_text message in
         publish_terminal ~status:(Request_stream Stream_cancelled) ~message ();
+        Keeper_chat_events.publish events Text_message_end;
+        Keeper_chat_events.publish events (Run_finished { run_id });
+        queued_outcome
+    | `Completion
+        (Completion_terminal
+        { status = Stream_reconciliation_required
+        ; body = message
+        ; queued_outcome
+        }) ->
+        let message = redact_text message in
+        publish_terminal
+          ~status:(Request_stream Stream_reconciliation_required)
+          ~message
+          ();
+        Keeper_chat_events.publish events (Text_delta message);
         Keeper_chat_events.publish events Text_message_end;
         Keeper_chat_events.publish events (Run_finished { run_id });
         queued_outcome
@@ -2943,4 +3051,23 @@ module For_testing = struct
   let translate_oas_stream_event = translate_oas_stream_event
   let keeper_tool_failure_log_details = keeper_tool_failure_log_details
   let keeper_chat_stream_headers = keeper_chat_stream_headers
+  let worker_settlement_terminal_body ~staged_body settlement =
+    let staged_completion =
+      Option.map
+        (fun body ->
+           Completion_terminal
+             { status = Stream_done; body; queued_outcome = None })
+        staged_body
+    in
+    match
+      completion_of_worker_settlement
+        ~queued_turn:false
+        ~staged_completion
+        settlement
+    with
+    | Some (Completion_terminal { body; _ }) -> Some body
+    | Some (Completion_dashboard_queued _ | Completion_queued_turn_deferred _)
+    | None ->
+      None
+  ;;
 end

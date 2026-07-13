@@ -288,7 +288,7 @@ let dispatch_queued_turn state ~sw ~clock ~handle_turn ~keeper_name ~lease_id
             keeper_name
             (Printexc.to_string exn))
 
-let start ~sw ~clock ~base_path ~handle_turn =
+let run ~sw ~clock ~base_path ~handle_turn =
   let dispatch_state = create_dispatch_state () in
   let rec poll_loop () =
     let keeper_names = Keeper_chat_queue.all_keeper_names () in
@@ -299,7 +299,9 @@ let start ~sw ~clock ~base_path ~handle_turn =
             turn instead of one turn per message — the keeper then answers
             with the full accumulated context (RFC-0225 single-flight
             makes the in-flight state observable). *)
-         if is_dispatching dispatch_state keeper_name
+         if Keeper_persistence_admission.is_blocked ~base_path ~keeper_name
+         then ()
+         else if is_dispatching dispatch_state keeper_name
          then ()
          else
            match retry_pending_finalization dispatch_state ~keeper_name with
@@ -432,4 +434,4 @@ let start ~sw ~clock ~base_path ~handle_turn =
     Eio.Time.sleep clock poll_interval_sec;
     poll_loop ()
   in
-  Eio.Fiber.fork ~sw poll_loop
+  poll_loop ()

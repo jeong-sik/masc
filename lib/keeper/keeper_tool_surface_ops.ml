@@ -407,6 +407,14 @@ let handle_keeper_create_from_persona ctx args : tool_result =
         |> Result.map_error (fun e -> "" ^ e)
       in
       let dry_run = get_bool args "dry_run" false in
+      (* Validate on both branches: dry_run reports [ready]/[errors] as a
+         preview, and a real create rejects with the same structured payload
+         before any boot side effect — the boot path's own goal gate stays as
+         the last line of defense, this one just fails earlier and typed. *)
+      let errors =
+        Keeper_tool_persona_runtime.validate_resolved_keeper_create_json
+          resolved_args
+      in
       if dry_run then
         Ok
           (tool_result_ok_data
@@ -415,6 +423,19 @@ let handle_keeper_create_from_persona ctx args : tool_result =
                   ( "persona",
                     Keeper_tool_persona_runtime.persona_summary_to_json persona );
                   ("created", `Bool false);
+                  ("ready", `Bool (errors = []));
+                  ("errors", Json_util.json_string_list errors);
+                  ("resolved_args", resolved_args);
+                ]))
+      else if errors <> [] then
+        Ok
+          (tool_result_error_data
+             (`Assoc
+                [
+                  ( "persona",
+                    Keeper_tool_persona_runtime.persona_summary_to_json persona );
+                  ("ready", `Bool false);
+                  ("errors", Json_util.json_string_list errors);
                   ("resolved_args", resolved_args);
                 ]))
       else

@@ -108,7 +108,7 @@ let phase1_producer_emission () =
 (* ── Phase 2: consumer side — extraction ──────────────────────── *)
 let phase2_consumer_extraction wc =
   print_endline "── Phase 2: consumer side ──";
-  let raws, wc_rest = Wirein.extract_raw_artifacts wc in
+  let raws, wc_rest = Result.get_ok (Wirein.extract_raw_artifacts wc) in
   assert_eq_int ~label:"extracted_raws" 3 (List.length raws);
   (* multimodal_artifacts key drained from wc_rest *)
   (match wc_rest with
@@ -167,7 +167,7 @@ let phase5_incremental_turn () =
       ~payload_json:(`String "data:audio/wav;base64,UklGRg==")
       ~metadata:(`Assoc [ ("duration_ms", `Int 1500) ])
   in
-  let raws, _ = Wirein.extract_raw_artifacts wc in
+  let raws, _ = Result.get_ok (Wirein.extract_raw_artifacts wc) in
   H.update (fun ws ->
       let ws', _ =
         B.hydrate_with_workspace ws raws ~now:(now +. 1.0)

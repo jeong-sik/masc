@@ -148,6 +148,8 @@ type keeper_memory_row_raw = {
   text : string;
   priority : int;
   ts_unix : float;
+  episode_id : string option;
+  causal_chain : string list;
 }
 (** Raw row from [memory_bank.jsonl] with both the original JSON and
     parsed columns kept side by side. *)

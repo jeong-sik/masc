@@ -56,6 +56,7 @@ type memory_kind =
   | Decision
   | Open_question
   | Long_term
+  | Episode
 
 val memory_kind_to_wire : memory_kind -> string
 val memory_kind_of_wire : string -> memory_kind option

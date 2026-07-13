@@ -72,7 +72,7 @@ let no_memory_bank_compaction =
   }
 ;;
 
-let keeper_memory_schema_version = 2
+let keeper_memory_schema_version = 3
 let short_term_horizon = "short_term"
 let mid_term_horizon = "mid_term"
 let long_term_horizon = "long_term"
@@ -83,6 +83,7 @@ type memory_kind =
   | Decision
   | Open_question
   | Long_term
+  | Episode
 
 let memory_kind_to_wire = function
   | Goal -> "goal"
@@ -90,6 +91,7 @@ let memory_kind_to_wire = function
   | Decision -> "decision"
   | Open_question -> "open_question"
   | Long_term -> "long_term"
+  | Episode -> "episode"
 ;;
 
 let memory_kind_of_wire = function
@@ -98,14 +100,15 @@ let memory_kind_of_wire = function
   | "decision" -> Some Decision
   | "open_question" -> Some Open_question
   | "long_term" -> Some Long_term
+  | "episode" -> Some Episode
   | _ -> None
 ;;
 
-let all_memory_kinds = [ Decision; Goal; Progress; Open_question; Long_term ]
+let all_memory_kinds = [ Decision; Goal; Progress; Open_question; Long_term; Episode ]
 
 let memory_kind_is_writable = function
   | Long_term -> false
-  | Goal | Progress | Decision | Open_question -> true
+  | Goal | Progress | Decision | Open_question | Episode -> true
 ;;
 
 let writable_memory_kinds = List.filter memory_kind_is_writable all_memory_kinds
@@ -114,7 +117,7 @@ let writable_memory_kind_strings = List.map memory_kind_to_wire writable_memory_
 
 let memory_horizon_of_kind = function
   | Open_question | Progress -> short_term_horizon
-  | Goal | Decision -> mid_term_horizon
+  | Goal | Decision | Episode -> mid_term_horizon
   | Long_term -> long_term_horizon
 ;;
 
@@ -137,6 +140,7 @@ let priority_for_kind ~kind =
   | Open_question -> 76
   | Goal -> 72
   | Progress -> 66
+  | Episode -> 70
 ;;
 
 let tuned_priority_for_candidate ~kind ~text =
@@ -153,6 +157,7 @@ let kind_caps () =
          match kind with
          | Long_term -> 4
          | Goal | Progress | Decision | Open_question -> 2
+         | Episode -> 2
        in
        kind, cap)
     all_memory_kinds

@@ -86,6 +86,8 @@ type keeper_memory_row_raw = {
   text: string;
   priority: int;
   ts_unix: float;
+  episode_id: string option;
+  causal_chain: string list;
 }
 
 type memory_consolidation_summarizer =
@@ -110,6 +112,20 @@ let parse_memory_bank_row (line : string) : keeper_memory_row_raw option =
       if raw < 1 then 1 else if raw > 100 then 100 else raw
     in
     let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" j in
+    let episode_id =
+      match Safe_ops.json_string ~default:"" "episode_id" j with
+      | "" -> None
+      | s -> Some s
+    in
+    let causal_chain =
+      match j with
+      | `Assoc kv ->
+        (match List.assoc_opt "causal_chain" kv with
+         | Some (`List items) ->
+           List.filter_map (function `String s -> Some s | _ -> None) items
+         | _ -> [])
+      | _ -> []
+    in
     match kind, horizon with
     | Some kind, Some horizon
       when String.equal (memory_horizon_of_kind kind) horizon
@@ -126,6 +142,8 @@ let parse_memory_bank_row (line : string) : keeper_memory_row_raw option =
         ; text
         ; priority
         ; ts_unix
+        ; episode_id
+        ; causal_chain
         }
     | _ -> None
   with Yojson.Json_error _ ->
@@ -293,6 +311,8 @@ let consolidate_memory_notes ?summarizer (rows : keeper_memory_row_raw list)
         text = summary_text;
         priority = consolidation_progress_priority;
         ts_unix = now;
+        episode_id = None;
+        causal_chain = [];
       } :: !consolidated;
       incr consolidated_count
     end)
@@ -352,6 +372,8 @@ let consolidate_memory_notes ?summarizer (rows : keeper_memory_row_raw list)
           text = row.text;
           priority = consolidation_recurrence_priority;
           ts_unix = now;
+          episode_id = None;
+          causal_chain = [];
         } :: !consolidated;
         incr consolidated_count
       | None -> ()
@@ -400,7 +422,7 @@ let compaction_priority
     | Long_term -> 12
     | Progress | Open_question ->
         if row.generation >= current_generation then 4 else -18
-    | Goal | Decision -> 0
+    | Goal | Decision | Episode -> 0
   in
   let source_bonus =
     match row.source with
@@ -810,6 +832,8 @@ let append_explicit_memory_note
              ; "schema_version", `Int keeper_memory_schema_version
              ; "priority", `Int (tuned_priority_for_candidate ~kind ~text)
              ; "text", `String text
+             ; "episode_id", `String ""
+             ; "causal_chain", `List []
              ]));
        Ok ()
      with
@@ -937,6 +961,8 @@ let append_voice_output
       ; "schema_version", `Int keeper_memory_schema_version
       ; "priority", `Int (tuned_priority_for_candidate ~kind ~text)
       ; "text", `String text
+      ; "episode_id", `String ""
+      ; "causal_chain", `List []
       ; "tool", `String "keeper_voice_speak"
       ; "execution", `String execution
       ; "voice_priority", `Int (max 1 voice_priority)

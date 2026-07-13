@@ -4,7 +4,7 @@
     the status bridge surfaces it.
 
     Sites under test:
-    - gRPC pause directive ([Keeper_keepalive.process_directive "pause"]
+    - gRPC pause directive ([Keeper_keepalive.process_directive Pause]
       -> [directive_paused_meta]) -> [Operator_paused {grpc_directive}]
     - keeper_down retain ([Keeper_shutdown_finalize.For_testing.paused_meta],
       remove_meta=false) -> [Operator_paused {keeper_down}]
@@ -23,6 +23,7 @@ module Keeper_meta_json_parse = Masc.Keeper_meta_json_parse
 module Keeper_meta_merge = Masc.Keeper_meta_merge
 module Keeper_registry = Masc.Keeper_registry
 module Keeper_keepalive = Masc.Keeper_keepalive
+module Keeper_directive = Masc.Keeper_directive
 module Keeper_turn_lifecycle = Masc.Keeper_turn_lifecycle
 module Keeper_status_bridge = Masc.Keeper_status_bridge
 module Keeper_supervisor_types = Masc.Keeper_supervisor_types
@@ -32,7 +33,6 @@ let base_json name =
     [ "name", `String name
     ; "agent_name", `String (name ^ "-agent")
     ; "trace_id", `String ("trace-" ^ name)
-    ; "tool_access", `List []
     ]
 
 let make_meta name =
@@ -114,6 +114,35 @@ let test_no_latched_reason_serializes_as_null () =
   check (option string) "unset latched_reason round-trips to None" None
     (latched_reason_wire reparsed)
 
+let test_retired_auto_resume_field_is_diagnostic_only () =
+  let before =
+    Masc.Otel_metric_store.metric_total
+      Keeper_metrics.(to_string MetaReadFailures)
+  in
+  let json =
+    match base_json "retired-auto-resume-field" with
+    | `Assoc fields ->
+      `Assoc
+        (("paused", `Bool true)
+         :: ("auto_resume_after_sec", `Null)
+         :: fields)
+    | _ -> fail "base_json must be an object"
+  in
+  let parsed =
+    match Keeper_meta_json_parse.meta_of_json json with
+    | Ok meta -> meta
+    | Error error -> failf "retired field parse failed: %s" error
+  in
+  let after =
+    Masc.Otel_metric_store.metric_total
+      Keeper_metrics.(to_string MetaReadFailures)
+  in
+  check bool "retired field does not activate paused keeper" true parsed.paused;
+  check (option string) "retired field does not invent a latch" None
+    (latched_reason_wire parsed);
+  check (float 0.001) "retired field emits migration-needed diagnostic"
+    (before +. 1.0) after
+
 (* ── Status bridge surfacing ────────────────────────────────── *)
 
 let test_status_bridge_surfaces_latched_reason () =
@@ -160,7 +189,9 @@ let test_grpc_pause_directive_records_reason () =
        let meta = make_meta keeper_name in
        Keeper_registry.clear ();
        ignore (Keeper_registry.register ~base_path:config.base_path keeper_name meta);
-       Keeper_keepalive.process_directive ~agent_name:keeper_name "pause";
+       Keeper_keepalive.process_directive
+         ~agent_name:keeper_name
+         Keeper_directive.Pause;
        (match Keeper_registry.get ~base_path:config.base_path keeper_name with
         | Some entry ->
           check bool "pause directive pauses keeper" true entry.meta.paused;
@@ -170,7 +201,9 @@ let test_grpc_pause_directive_records_reason () =
             (Some wire_grpc_directive)
             (latched_reason_wire entry.meta)
         | None -> fail "expected registered keeper after pause directive");
-       Keeper_keepalive.process_directive ~agent_name:keeper_name "resume";
+       Keeper_keepalive.process_directive
+         ~agent_name:keeper_name
+         Keeper_directive.Resume;
        match Keeper_registry.get ~base_path:config.base_path keeper_name with
        | Some entry ->
          check bool "resume directive resumes keeper" false entry.meta.paused;
@@ -210,7 +243,6 @@ let test_dead_tombstone_final_meta_records_reason () =
         Some
           (Keeper_latched_reason.Operator_paused
              { operator_actor = Keeper_latched_reason.operator_actor_keeper_down })
-    ; auto_resume_after_sec = Some 1.0
     ; runtime =
         { (make_meta "dead-tombstone-final-meta").runtime with
           last_blocker = Some timeout_blocker
@@ -226,68 +258,8 @@ let test_dead_tombstone_final_meta_records_reason () =
     "dead final meta records Dead_tombstone"
     (Some wire_dead_tombstone)
     (latched_reason_wire finalized);
-  check bool "dead final meta clears auto-resume" true
-    (Option.is_none finalized.auto_resume_after_sec);
   check bool "dead final meta clears stale blocker" true
     (Option.is_none finalized.runtime.last_blocker)
-
-let test_dead_tombstone_latch_blocks_legacy_auto_resume () =
-  let timeout_blocker =
-    Keeper_meta_contract.blocker_info_of_class
-      ~detail:"stale timeout pause before dead cleanup"
-      Keeper_meta_contract.Turn_timeout
-  in
-  let meta =
-    { (make_meta "dead-tombstone-legacy-auto-resume") with
-      paused = true
-    ; latched_reason = Some Keeper_latched_reason.Dead_tombstone
-    ; auto_resume_after_sec = Some 1.0
-    ; updated_at = "1970-01-01T00:00:00Z"
-    ; runtime =
-        { (make_meta "dead-tombstone-legacy-auto-resume").runtime with
-          last_blocker = Some timeout_blocker
-        }
-    }
-  in
-  check
-    bool
-    "Dead_tombstone latch blocks explicit and legacy auto-resume"
-    false
-    (Keeper_supervisor_types.paused_meta_auto_resume_due
-       ~now:(Unix.time () +. 7200.0)
-       meta)
-
-(* Regression for the "permanent zombie" bug: operator [masc_keeper_up]
-   ([Keeper_turn_up_update] resume branch) must clear [latched_reason], not
-   only [paused].  A [Dead_tombstone] latch that survives a paused-clearing
-   resume keeps [paused_meta_auto_resume_due] false forever, so the keeper can
-   never recover.  This pins that clearing the latch re-enables recovery. *)
-let test_operator_resume_clears_dead_tombstone_latch () =
-  let base = make_meta "revive-after-operator-up" in
-  let auto_resume_after_sec = 1.0 in
-  let paused_at = 1.0 in
-  let after_auto_resume = paused_at +. auto_resume_after_sec +. 1.0 in
-  let paused_due =
-    { base with
-      paused = true
-    ; auto_resume_after_sec = Some auto_resume_after_sec
-    ; updated_at = Masc_domain.iso8601_of_unix_seconds paused_at
-    }
-  in
-  check
-    bool
-    "Dead_tombstone latch blocks auto-resume"
-    false
-    (Keeper_supervisor_types.paused_meta_auto_resume_due
-       ~now:after_auto_resume
-       { paused_due with latched_reason = Some Keeper_latched_reason.Dead_tombstone });
-  check
-    bool
-    "operator-cleared latch re-enables auto-resume"
-    true
-    (Keeper_supervisor_types.paused_meta_auto_resume_due
-       ~now:after_auto_resume
-       { paused_due with latched_reason = None })
 
 let test_heartbeat_merge_preserves_typed_latched_pause () =
   let caller =
@@ -334,17 +306,17 @@ let test_heartbeat_merge_preserves_typed_latched_pause () =
   let latest_unlabeled_pause =
     { latest_operator_pause with latched_reason = None }
   in
-  let not_preserved =
+  let unclassified_preserved =
     Keeper_meta_merge.heartbeat_fields_from_disk
       ~latest:latest_unlabeled_pause
       ~caller
   in
-  check bool "unlabeled pause shape no longer owns the merge" false not_preserved.paused;
+  check bool "unclassified pause remains durable" true unclassified_preserved.paused;
   check
     (option string)
-    "unlabeled pause does not copy a reason"
+    "unclassified pause remains explicitly unlabeled"
     None
-    (latched_reason_wire not_preserved)
+    (latched_reason_wire unclassified_preserved)
 
 let () =
   run
@@ -354,6 +326,8 @@ let () =
             test_latched_reason_survives_serialization
         ; test_case "unset reason serializes as null and round-trips to None" `Quick
             test_no_latched_reason_serializes_as_null
+        ; test_case "retired auto-resume field is diagnostic only" `Quick
+            test_retired_auto_resume_field_is_diagnostic_only
         ] )
     ; ( "status bridge"
       , [ test_case "attention fields surface the typed pause reason wire" `Quick
@@ -366,10 +340,6 @@ let () =
             test_keeper_down_retain_records_reason
         ; test_case "dead final meta records terminal tombstone reason" `Quick
             test_dead_tombstone_final_meta_records_reason
-        ; test_case "dead-tombstone latch blocks legacy auto-resume" `Quick
-            test_dead_tombstone_latch_blocks_legacy_auto_resume
-        ; test_case "operator resume clears dead-tombstone latch to re-enable recovery"
-            `Quick test_operator_resume_clears_dead_tombstone_latch
         ; test_case "heartbeat merge preserves typed latch, not pause shape" `Quick
             test_heartbeat_merge_preserves_typed_latched_pause
         ] )

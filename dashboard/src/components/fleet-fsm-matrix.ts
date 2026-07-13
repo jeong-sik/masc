@@ -6,9 +6,7 @@
  * the current state. A top strip summarises the 4 joint invariant
  * counts from KeeperCompositeLifecycle.tla.
  *
- * Design: docs/observability/composite-fsm-matrix-design.md (LT-12).
  * Backend: #7723 (LT-16a) → GET /api/v1/keepers/composite.
- * Spec↔code drift: docs/observability/fsm-spec-code-drift.md (LT-15).
  *
  * LT-16c added a per-(keeper, axis) observation ring and a horizontal
  * sparkline renderer so each cell now carries its last 30 poll ticks.
@@ -55,18 +53,12 @@ export const FLEET_HISTORY_LEN = 30
 // Keep it identical to TRANSITION_FIELDS so an operator scanning
 // left-to-right sees "lifecycle → turn → decision → runtime →
 // compaction" — the natural causal order of a turn.
-// 6 axes (LT-16-KCB Phase 3 added KCB). Causal order: lifecycle →
-// turn → decision → runtime → compaction → circuit-breaker. KCB sits
-// at the tail because its state is derived from the *outcome* of the
-// runtime's tool calls (failure streak counter), so it is temporally
-// downstream of the other five for any given turn.
 const AXES: Array<{ key: LaneKey; label: string; acronym: string }> = [
   { key: 'phase',      label: '생명주기',   acronym: 'KSM' },
   { key: 'turn',       label: '턴',        acronym: 'KTC' },
   { key: 'decision',   label: '결정',      acronym: 'KDP' },
   { key: 'runtime',    label: 'Runtime',   acronym: 'KCL' },
   { key: 'compaction', label: '압축',      acronym: 'KMC' },
-  { key: 'breaker',    label: '차단기',    acronym: 'KCB' },
 ]
 
 const INVARIANT_KEYS = Object.keys(INVARIANT_LABELS) as Array<
@@ -88,7 +80,6 @@ const CHIP_CLASS_BY_STATE: Record<string, string> = {
   Crashed:      'bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-20)]',
   Restarting:   'bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]',
   Dead:         'bg-[var(--color-bg-elevated)] text-[var(--bad-light)] border-[var(--bad-20)]',
-  Zombie:       'bg-[var(--color-bg-elevated)] text-[var(--bad-light)] border-[var(--bad-20)]',
   Offline:      'bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]',
   // KTC (unique keys — shared keys like idle/exhausted/compacting/donelisten under KCL/KMC below)
   prompting:    'bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]',
@@ -98,7 +89,6 @@ const CHIP_CLASS_BY_STATE: Record<string, string> = {
   // KDP
   undecided:          'bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]',
   guard_ok:           'bg-[var(--ok-10)] text-[var(--color-status-ok)] border-[var(--ok-20)]',
-  gate_rejected:      'bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-20)]',
   tool_policy_selected: 'bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]',
   // KCL + KMC + shared keys (idle, exhausted, compacting, done)
   idle:         'bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]',
@@ -108,15 +98,6 @@ const CHIP_CLASS_BY_STATE: Record<string, string> = {
   exhausted:    'bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-20)]',
   accumulating: 'bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]',
   compacting:   'bg-[var(--warn-10)] text-[var(--color-status-warn)] border-[var(--warn-20)]',
-  // KCB (LT-16-KCB Phase 3). Clean = baseline grey same as any other
-  // "nothing happening" state; warning = amber (partial failure
-  // streak); cooling = blue (at least one past trip, currently
-  // recovered). "tripped" is unobservable at snapshot time and has no
-  // chip colour by design — the mutator resets the count before any
-  // observer can see it.
-  clean:   'bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]',
-  warning: 'bg-[var(--warn-10)] text-[var(--color-status-warn)] border-[var(--warn-20)]',
-  cooling: 'bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]',
 }
 
 const DEFAULT_CHIP = 'bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]'
@@ -142,7 +123,7 @@ export function sparkClassFor(value: string): string {
 /** Per-axis observation ring keyed by keeper name. */
 export type KeeperFleetHistory = Record<string, Record<LaneKey, string[]>>
 
-const AXIS_KEYS: LaneKey[] = ['phase', 'turn', 'decision', 'runtime', 'compaction', 'breaker']
+const AXIS_KEYS: LaneKey[] = ['phase', 'turn', 'decision', 'runtime', 'compaction']
 
 export type FleetRuntimeAttentionLevel = 'ok' | 'stale' | 'idle' | 'blocked'
 
@@ -263,7 +244,6 @@ function isIdleComposite(snapshot: KeeperCompositeSnapshot): boolean {
     && snapshot.decision.stage === 'undecided'
     && snapshot.runtime.state === 'idle'
     && snapshot.compaction.stage === 'accumulating'
-    && (snapshot.circuit_breaker?.state ?? 'clean') === 'clean'
 }
 
 function executionEvidence(snapshot: KeeperCompositeSnapshot): string[] {
@@ -450,7 +430,6 @@ export function buildRuntimeAssistPrompt(
   snapshot: KeeperCompositeSnapshot,
   attention: FleetRuntimeAttention,
 ): string {
-  const breaker = snapshot.circuit_breaker?.state ?? 'clean'
   const receipt = snapshot.execution
     ? JSON.stringify({
       outcome: snapshot.execution.outcome,
@@ -471,7 +450,7 @@ export function buildRuntimeAssistPrompt(
     `next_hint=${attention.nextStep}`,
     `evidence=${attention.reason}`,
     `is_live=${String(snapshot.is_live)}`,
-    `KSM=${snapshot.phase} KTC=${snapshot.turn_phase} KDP=${snapshot.decision.stage} KCL=${snapshot.runtime.state} KMC=${snapshot.compaction.stage} KCB=${breaker}`,
+    `KSM=${snapshot.phase} KTC=${snapshot.turn_phase} KDP=${snapshot.decision.stage} KCL=${snapshot.runtime.state} KMC=${snapshot.compaction.stage}`,
     `last_receipt=${receipt}`,
     '',
     '응답 형식:',
@@ -680,7 +659,6 @@ export function pushObservation(
       decision:   prev?.decision   ? prev.decision.slice()   : [],
       runtime:    prev?.runtime    ? prev.runtime.slice()    : [],
       compaction: prev?.compaction ? prev.compaction.slice() : [],
-      breaker:    prev?.breaker    ? prev.breaker.slice()    : [],
     }
     for (const axis of AXIS_KEYS) {
       perAxis[axis].push(extractLaneValue(snap, axis))
@@ -981,7 +959,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
       aria-label="Fleet FSM 통합 상태"
     >
       <header class="flex flex-wrap items-baseline gap-3 border-b border-[var(--color-border-default)] p-3">
-        <h2 class="text-sm font-semibold text-[var(--color-fg-muted)]">Fleet 통합 (KSM × KTC × KDP × KCL × KMC × KCB)</h2>
+        <h2 class="text-sm font-semibold text-[var(--color-fg-muted)]">Fleet 통합 (KSM × KTC × KDP × KCL × KMC)</h2>
         <span class="text-xs text-[var(--color-fg-muted)]">
           키퍼 ${data.count}명 · ${unixSecondsToDate(data.generated_at).toLocaleTimeString()} 업데이트
         </span>

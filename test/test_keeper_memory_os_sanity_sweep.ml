@@ -15,7 +15,6 @@ let fact
   =
   { Types.claim
   ; category
-  ; external_ref = None
   ; claim_kind
   ; source = { Types.trace_id = "trace-sanity"; turn = 1; tool_call_id = None }
   ; observed_by = []
@@ -46,15 +45,12 @@ let result_for keeper_id report =
 let test_sweep_projects_typed_memory_state_without_rewrite () =
   with_eio (fun () ->
     with_temp_keepers_dir (fun keepers_dir ->
-      let old_external_first_seen =
-        now -. Types.external_state_ttl_seconds -. 1.0
-      in
       let rows =
         [ fact ~claim_id:"same-conclusion" "first wording"
         ; fact ~claim_id:"same-conclusion" "second wording"
         ; fact
             ~claim_kind:(Some Types.External_state)
-            ~first_seen:old_external_first_seen
+            ~first_seen:(now -. 1_000_000.0)
             "external state claim"
         ; fact ~claim_kind:(Some Types.Diagnostic) "diagnostic evidence"
         ]
@@ -62,26 +58,18 @@ let test_sweep_projects_typed_memory_state_without_rewrite () =
       List.iter (Memory_io.append_fact ~keeper_id:"alpha") rows;
       let report = Sweep.run_for_keepers_dir ~keepers_dir ~keeper_ids:[ "alpha" ] ~now () in
       Alcotest.(check int) "total facts" 4 report.total_facts;
-      Alcotest.(check int) "current facts" 3 report.current_facts;
-      Alcotest.(check int) "expired facts" 1 report.expired_facts;
-      Alcotest.(check int)
-        "diagnostic excluded from prompt recall"
-        2
-        report.prompt_recallable_current_facts;
+      Alcotest.(check int) "current facts" 4 report.current_facts;
+      Alcotest.(check int) "expired facts" 0 report.expired_facts;
       Alcotest.(check int) "duplicate groups" 1 report.duplicate_group_count;
-      Alcotest.(check int) "gc ttl expired" 1 report.deterministic_ttl_expired;
-      Alcotest.(check int) "gc dedup removed" 1 report.deterministic_dedup_removed;
+      Alcotest.(check int) "gc ttl expired" 0 report.deterministic_ttl_expired;
       Alcotest.(check int) "dry-run does not rewrite" 4
         (List.length (Memory_io.read_facts_all ~keeper_id:"alpha"));
       match result_for "alpha" report with
       | Some (Sweep.Keeper_ok row) ->
         Alcotest.(check int) "row total" 4 row.total_facts;
-        Alcotest.(check int) "row gc written" 2 row.gc_preview.written;
+        Alcotest.(check int) "row gc written" 4 row.gc_preview.written;
         (match row.duplicate_groups with
          | [ group ] ->
-           (* [claim_identity] keys are namespaced by construction ("id:" /
-              "claim:", RFC-0259 §3.7): producer-id keys and normalized-prose
-              keys stay disjoint so equal text cannot over-merge across them. *)
            Alcotest.(check string)
              "claim identity from claim_id"
              "id:same-conclusion"
@@ -90,24 +78,16 @@ let test_sweep_projects_typed_memory_state_without_rewrite () =
          | groups ->
            Alcotest.failf "expected one duplicate group, got %d" (List.length groups));
         (match List.nth_opt row.facts 2 with
-         | Some expired ->
-           Alcotest.(check bool) "external state is expired by typed horizon" false expired.current;
+         | Some external_state ->
+           Alcotest.(check bool) "old unbounded external state stays current" true external_state.current;
            Alcotest.(check bool)
-             "expired external state is not prompt recallable"
-             false
-             expired.prompt_recallable;
-           Alcotest.(check bool)
-             "legacy external state has effective horizon"
+             "no implicit horizon"
              true
-             (Option.is_some expired.effective_valid_until)
+             (Option.is_none external_state.effective_valid_until)
          | None -> Alcotest.fail "missing expired row");
         (match List.nth_opt row.facts 3 with
          | Some diagnostic ->
-           Alcotest.(check bool) "diagnostic current" true diagnostic.current;
-           Alcotest.(check bool)
-             "diagnostic excluded by claim_kind"
-             false
-             diagnostic.prompt_recallable
+           Alcotest.(check bool) "diagnostic current" true diagnostic.current
          | None -> Alcotest.fail "missing diagnostic row")
       | Some (Sweep.Keeper_error row) ->
         Alcotest.failf "unexpected error for alpha: %s" row.keeper_id
@@ -125,17 +105,17 @@ let test_duplicate_groups_follow_claim_identity_only () =
         ~index:1
         (fact ~claim_id:"second-identity" "same topic")
     ; Sweep.For_testing.row_of_fact ~now ~index:2 (fact "exact same")
-    ; Sweep.For_testing.row_of_fact ~now ~index:3 (fact " exact same ")
+    ; Sweep.For_testing.row_of_fact ~now ~index:3 (fact "exact same")
     ]
   in
   let groups = Sweep.For_testing.duplicate_groups rows in
   Alcotest.(check int) "only exact claim identity groups" 1 (List.length groups);
   match groups with
   | [ group ] ->
-    Alcotest.(check string)
-      "normalized prose identity"
-      "claim:exact same"
-      group.claim_identity;
+    Alcotest.(check bool)
+      "exact observation identity"
+      true
+      (String.starts_with ~prefix:"observation:" group.claim_identity);
     Alcotest.(check (list int)) "members" [ 2; 3 ] group.member_indices
   | _ -> Alcotest.fail "unexpected duplicate group shape"
 ;;

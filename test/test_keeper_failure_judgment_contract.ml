@@ -36,27 +36,27 @@ let test_resume_with_guidance () =
       "rationale preserved"
       "The lane can act without external mutation."
       rationale
-  | Contract.Escalate_to_operator _ -> fail "resume verdict changed variant"
+  | Contract.Await_external_input _ -> fail "resume verdict changed variant"
 ;;
 
-let test_operator_escalation () =
+let test_await_external_input () =
   let verdict =
     Contract.of_yojson
       (`Assoc
-        [ "decision", `String "escalate_to_operator"
+        [ "decision", `String "await_external_input"
         ; "guidance", `Null
-        ; "rationale", `String "External configuration authority is required."
+        ; "rationale", `String "Required external input is unavailable."
         ])
     |> require_ok
   in
   match verdict with
-  | Contract.Escalate_to_operator { rationale } ->
+  | Contract.Await_external_input { rationale } ->
     check
       string
       "rationale preserved"
-      "External configuration authority is required."
+      "Required external input is unavailable."
       rationale
-  | Contract.Resume_with_guidance _ -> fail "operator verdict changed variant"
+  | Contract.Resume_with_guidance _ -> fail "external-input verdict changed variant"
 ;;
 
 let test_invalid_shapes_fail_closed () =
@@ -70,15 +70,15 @@ let test_invalid_shapes_fail_closed () =
   expect_error
     "extra field"
     (`Assoc
-      [ "decision", `String "escalate_to_operator"
+      [ "decision", `String "await_external_input"
       ; "guidance", `Null
-      ; "rationale", `String "operator required"
+      ; "rationale", `String "external input required"
       ; "score", `Float 0.9
       ]);
   expect_error
     "duplicate field"
     (`Assoc
-      [ "decision", `String "escalate_to_operator"
+      [ "decision", `String "await_external_input"
       ; "decision", `String "resume_with_guidance"
       ; "guidance", `Null
       ; "rationale", `String "ambiguous"
@@ -91,16 +91,16 @@ let test_invalid_shapes_fail_closed () =
       ; "rationale", `String "missing instruction"
       ]);
   expect_error
-    "operator with guidance"
+    "external-input verdict with guidance"
     (`Assoc
-      [ "decision", `String "escalate_to_operator"
+      [ "decision", `String "await_external_input"
       ; "guidance", `String "keep going"
       ; "rationale", `String "contradictory payload"
       ]);
   expect_error
     "empty rationale"
     (`Assoc
-      [ "decision", `String "escalate_to_operator"
+      [ "decision", `String "await_external_input"
       ; "guidance", `Null
       ; "rationale", `String "  "
       ])
@@ -110,7 +110,7 @@ let test_canonical_roundtrip () =
   let original =
     Contract.Resume_with_guidance
       { guidance = "Move to a different actionable task."
-      ; rationale = "The failure does not require operator authority."
+      ; rationale = "The Keeper has enough evidence for another action."
       }
   in
   let parsed = Contract.to_yojson original |> Contract.of_yojson |> require_ok in
@@ -127,7 +127,7 @@ let test_typed_judge_error_disposition () =
        = Keeper_failure_judge.Escalate_judge_failure)
   in
   check_disposition
-    "OAS pacing error terminates at the single judge boundary"
+    "OAS retryable error terminates at the single judge boundary"
     (Keeper_failure_judge.Oas_error
        { runtime_id = "structured-judge"
        ; error =
@@ -183,7 +183,6 @@ let failure_event post_id : Keeper_world_observation.pending_board_event =
   ; new_external_since = 1
   ; latest_external_author = None
   ; latest_external_preview = None
-  ; provenance = Keeper_world_observation.Self_narrative
   }
 ;;
 
@@ -195,7 +194,7 @@ let test_guidance_binds_exact_observation () =
       ~post_id
       ~judge_runtime_id:"structured-judge"
       ~guidance
-      ~rationale:"No operator-only state change is required."
+      ~rationale:"The Keeper has enough evidence for another action."
       [ failure_event post_id ]
     |> require_ok
   in
@@ -220,7 +219,7 @@ let test_guidance_binds_exact_observation () =
   (match verdict with
    | Contract.Resume_with_guidance { guidance = actual; _ } ->
      check string "full guidance preserved" guidance actual
-   | Contract.Escalate_to_operator _ -> fail "guidance changed verdict");
+   | Contract.Await_external_input _ -> fail "guidance changed verdict");
   match
     Keeper_world_observation.apply_failure_judgment_guidance
       ~post_id:"missing"
@@ -238,7 +237,7 @@ let () =
     "keeper_failure_judgment_contract"
     [ ( "decode"
       , [ test_case "resume with guidance" `Quick test_resume_with_guidance
-        ; test_case "operator escalation" `Quick test_operator_escalation
+        ; test_case "await external input" `Quick test_await_external_input
         ; test_case "invalid shapes fail closed" `Quick test_invalid_shapes_fail_closed
         ; test_case "canonical roundtrip" `Quick test_canonical_roundtrip
         ; test_case

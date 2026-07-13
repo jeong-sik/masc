@@ -1,6 +1,5 @@
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
-import { useSignal } from '@preact/signals'
 import { SurfaceCard } from '../common/card'
 import { ActionButton } from '../common/button'
 import { SchemaForm } from './schema-form'
@@ -11,28 +10,13 @@ import {
   schemasLoading, schemasError, loadToolSchemas, updateFormValues, executeTool, clearSelection, selectedToolAccess,
 } from './tool-executor-state'
 
-function ConfirmDialog({ toolName, onConfirm, onCancel }: { toolName: string; onConfirm: () => void; onCancel: () => void }) {
-  return html`
-    <div class="v2-lab-card rounded-[var(--r-1)] border border-[var(--err-border)] bg-[var(--bad-10)] p-3">
-      <p class="text-xs text-[var(--bad-light)] mb-2"><strong>${toolName}</strong> 은 파괴적(destructive) 도구입니다. 실행하시겠습니까?</p>
-      <div class="flex gap-2">
-        <${ActionButton} variant="danger" size="sm" onClick=${onConfirm} title="실행: 파괴적 도구를 그대로 실행합니다">실행하기<//>
-        <${ActionButton} variant="ghost" size="sm" onClick=${onCancel}>취소<//>
-      </div>
-    </div>
-  `
-}
-
 function ToolDetail() {
-  const showConfirm = useSignal(false)
   const tool = selectedTool.value
   if (!tool) return html`<div class="flex items-center justify-center h-full text-[var(--color-fg-muted)] text-sm">좌측에서 도구를 선택하세요.</div>`
 
-  const isDestructive = tool.annotations?.destructiveHint === true
   const missing = validationErrors.value
   const toolAccess = selectedToolAccess.value
-  const handleExecute = () => { if (isDestructive) { showConfirm.value = true } else { void executeTool() } }
-  const handleConfirmedExecute = () => { showConfirm.value = false; void executeTool() }
+  const handleExecute = () => { void executeTool() }
 
   return html`
     <div class="flex flex-col gap-3 h-full overflow-y-auto">
@@ -40,7 +24,6 @@ function ToolDetail() {
         <h3 class="text-base text-[var(--color-fg-secondary)] font-mono font-medium">${tool.name}</h3>
         <p class="text-xs text-[var(--color-fg-muted)] mt-1">${tool.description}</p>
         ${tool.annotations?.readOnlyHint === true ? html`<span class="text-3xs text-[var(--color-status-ok)] mt-1">읽기 전용</span>` : null}
-        ${isDestructive ? html`<span class="text-3xs text-[var(--color-status-err)] mt-1 ml-2">파괴적</span>` : null}
       </div>
       <div class="border-t border-[var(--color-border-default)] pt-3">
         <${SchemaForm} schema=${tool.inputSchema} values=${formValues.value} onChange=${updateFormValues} />
@@ -51,14 +34,11 @@ function ToolDetail() {
         </p>
       `}
       ${missing.length > 0 ? html`<p class="text-2xs text-[var(--color-status-err)]">필수 필드 누락: ${missing.join(', ')}</p>` : null}
-      ${showConfirm.value
-        ? html`<${ConfirmDialog} toolName=${tool.name} onConfirm=${handleConfirmedExecute} onCancel=${() => { showConfirm.value = false }} />`
-        : html`
-          <div class="flex gap-2">
-            <${ActionButton} variant=${isDestructive ? 'danger' : 'primary'} size="md" disabled=${executing.value || !toolAccess.allowed} onClick=${handleExecute} title="실행: 입력값으로 도구를 호출합니다">
-              ${executing.value ? '실행 중...' : '실행하기'}<//>
-            <${ActionButton} variant="ghost" size="md" onClick=${() => { clearSelection(); showConfirm.value = false }} title="초기화: 선택과 입력값을 비웁니다">초기화하기<//>
-          </div>`}
+      <div class="flex gap-2">
+        <${ActionButton} variant="primary" size="md" disabled=${executing.value || !toolAccess.allowed} onClick=${handleExecute} title="실행: 정확한 입력을 Gate로 전달합니다">
+          ${executing.value ? '실행 중...' : '실행하기'}<//>
+        <${ActionButton} variant="ghost" size="md" onClick=${clearSelection} title="초기화: 선택과 입력값을 비웁니다">초기화하기<//>
+      </div>
       ${lastResult.value ? html`<${ToolResultDisplay} key=${lastResult.value.timestamp} ...${lastResult.value} />` : null}
     </div>
   `

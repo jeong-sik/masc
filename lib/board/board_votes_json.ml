@@ -65,6 +65,11 @@ let post_of_yojson (json : Yojson.Safe.t) : post option =
       | Some raw -> post_kind_of_string raw
       | None -> None
     in
+    if Option.is_none post_kind_opt
+    then
+      Log.BoardLog.warn
+        "dropping persisted board post %s: missing or invalid post_kind"
+        id_str;
     let meta_json =
       match Safe_ops.json_member_opt "meta" json with
       | Some (`Assoc _ as meta) -> Some meta
@@ -85,26 +90,16 @@ let post_of_yojson (json : Yojson.Safe.t) : post option =
     (match
        ( Post_id.of_string id_str
        , Agent_id.of_string author_str
-       , visibility_of_string vis_str )
+       , visibility_of_string vis_str
+       , post_kind_opt )
      with
-     | Ok id, Ok author, Some visibility ->
-       let resolved_kind =
-         match post_kind_opt with
-         | Some kind -> kind
-         | None ->
-           legacy_migrate_post_kind
-             ~author:author_str
-             ~meta_json
-             ~visibility
-             ~expires_at
-             ~hearth
-       in
+     | Ok id, Ok author, Some visibility, Some post_kind ->
        (match
           normalize_post_payload
             ~content
             ?title:title_opt
             ?body:body_opt
-            ~post_kind:resolved_kind
+            ~post_kind
             ?meta_json
             ()
         with

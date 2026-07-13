@@ -1,6 +1,6 @@
 (** Workspace_goal_index — Reverse index from goal_id to linked tasks.
 
-    Eliminates O(n) linear scans in [validate_goal_completion_ready]
+    Eliminates repeated O(n) linear scans in Goal/task projections
     (workspace_goals.ml) and [open_task_count_for_goal]
     (workspace_task_capacity.ml) by building a Hashtbl-based reverse
     index on demand from explicit goal-task link mappings.

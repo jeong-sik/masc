@@ -73,11 +73,8 @@ let keeper_turn_admission_health_json () =
       ; "status_reasons", `List []
       ; "keeper_count", `Int 0
       ; "keeper_names", `List []
-      ; "max_waiting_chat_requests", `Int Keeper_turn_admission.max_waiting_chat_requests
       ; "chat_waiting_keeper_count", `Int 0
       ; "chat_waiting_total_count", `Int 0
-      ; "chat_waiting_full_keeper_count", `Int 0
-      ; "chat_rejected_total_count", `Int 0
       ; "in_flight_keeper_count", `Int 0
       ; "shutdown_keeper_count", `Int 0
       ; "keepers", `List []
@@ -216,14 +213,23 @@ let keeper_fleet_runtime_resolution_base_fields
       ~paused_keepers_json
       ()
   in
+  let disk_observation =
+    match base_path with
+    | Some base_path ->
+      Keeper_disk_pressure.snapshot_json
+        ~masc_root:(Workspace_utils.masc_dir_from_base_path ~base_path)
+        ()
+    | None -> `Null
+  in
   let fields =
     [ "keeper_fibers", `Int keeper_fibers
     ; "paused_keepers", `Int (paused_keeper_count paused_keepers_json)
     ; "paused_keepers_health", paused_keepers_json
     ; "keeper_fleet_no_fibers", `Bool (bool_field "no_running_fibers" fleet_safety)
-    ; ( "keeper_fd_pressure"
+    ; ( "fd_observation"
       , Keeper_fd_pressure.runtime_state_json ~active_keepers:keeper_fibers
-          ~starting_keepers:0 ~requested_keepers:24 () )
+          () )
+    ; "disk_observation", disk_observation
     ; "keeper_fleet_safety", fleet_safety
     ; "keeper_turn_admission", keeper_turn_admission_health_json ()
     ; "keeper_board_event_collection", keeper_board_event_collection_health_json ()
@@ -236,22 +242,33 @@ let keeper_fleet_runtime_resolution_base_fields
 
 let fd_accountant_snapshot_json () =
   let snapshot = Fd_accountant.fd_snapshot () in
+  let observed_int = function
+    | Some value -> `Int value
+    | None -> `Null
+  in
   let per_kind =
     snapshot.per_kind
-    |> List.map (fun (kind, in_flight) ->
+    |> List.map (fun (kind, active_operations) ->
       let kind_name = Fd_accountant.kind_to_string kind in
       `Assoc
         [ "kind", `String kind_name
-        ; "in_flight", `Int in_flight
-        ; "configured_concurrency", `Int (Fd_accountant.configured_concurrency ~kind)
-        ; "effective_concurrency", `Int (Fd_accountant.effective_concurrency ~kind)
+        ; "active_operations", `Int active_operations
+        ])
+  in
+  let resource_errors =
+    snapshot.resource_errors
+    |> List.map (fun (kind, error, count) ->
+      `Assoc
+        [ "kind", `String (Fd_accountant.kind_to_string kind)
+        ; "error", `String (Fd_accountant.resource_error_to_string error)
+        ; "count", `Int count
         ])
   in
   `Assoc
-    [ "fd_open", `Int snapshot.fd_open
-    ; "fd_limit", `Int snapshot.fd_limit
-    ; "pressure_active", `Bool snapshot.pressure_active
+    [ "fd_open", observed_int snapshot.fd_open
+    ; "fd_limit", observed_int snapshot.fd_limit
     ; "per_kind", `List per_kind
+    ; "resource_errors", `List resource_errors
     ]
 ;;
 
@@ -280,7 +297,6 @@ let runtime_truth_json ~build ~path_diagnostics ~keeper_fibers ~fd_accountant =
     ; "keeper_fibers", `Int keeper_fibers
     ; "fd_open", (match Json_util.assoc_member_opt "fd_open" fd_accountant with Some v -> v | None -> `Null)
     ; "fd_limit", (match Json_util.assoc_member_opt "fd_limit" fd_accountant with Some v -> v | None -> `Null)
-    ; "fd_pressure_active", (match Json_util.assoc_member_opt "pressure_active" fd_accountant with Some v -> v | None -> `Null)
     ]
 ;;
 

@@ -3,23 +3,8 @@
 // from dashboard.ts so existing consumers (`from './api/dashboard'`) are unchanged.
 
 import { get, type AbortableRequestOptions } from './core'
-import { isRecord, asBoolean, asNumber, asNullableString, asString, asStringArray, asRecordArray } from '../components/common/normalize'
+import { isRecord, asBoolean, asNumber, asNullableString, asString, asRecordArray } from '../components/common/normalize'
 import { decodeTelemetryFreshnessMetadata, type TelemetryFreshnessMetadata } from './dashboard-shared'
-
-// Mirror of Keeper_memory_os_types.librarian_unstructured_fallback_terminal_marker
-// (lib/keeper/keeper_memory_os_types.ml). Keep this string literal in sync with the
-// backend SSOT; there is no codegen for this boundary.
-export const MEMORY_OS_LIBRARIAN_UNSTRUCTURED_FALLBACK_MARKER = 'librarian_unstructured_fallback'
-
-// Accepts either a string array or a single string; mirrors the keeper-config
-// normalizeStringList (duplicated here to keep this domain self-contained).
-function normalizeStringList(value: unknown): string[] {
-  const array = asStringArray(value)
-  if (array.length > 0) return array
-  const single = asNullableString(value)
-  return single ? [single] : []
-}
-
 
 export type TurnBlock = {
   block: string
@@ -181,21 +166,13 @@ export type MemoryOsFact = {
   readonly valid_until_iso: string | null
   readonly last_verified_at: number | null
   readonly current: boolean
-  readonly prompt_recallable: boolean
   readonly claim_kind: MemoryOsClaimKind | null
 }
 
 export type MemoryOsSelectionPolicy = {
   readonly keeper_scope: string
-  readonly shared_scope: string | null
   readonly facts_source: string
-  readonly shared_facts_source: string | null
   readonly episodes_source: string
-  readonly dashboard_fact_tail_limit: number
-  readonly dashboard_episode_tail_limit: number
-  readonly recall_private_fact_limit: number
-  readonly recall_shared_fact_limit: number
-  readonly recall_episode_limit: number
   readonly category_source: string
   readonly claim_kind_source: string
   readonly recall_block: string
@@ -215,7 +192,6 @@ export type MemoryOsTurnRecordSnapshot = {
   now_iso: string | null
   read_errors: { scope: string; error: string }[]
   episodes: {
-    tail_limit: number
     shown: number
     current: number
     expired: number
@@ -223,43 +199,12 @@ export type MemoryOsTurnRecordSnapshot = {
     items: MemoryOsEpisodeSummary[]
   }
   facts: {
-    tail_limit: number
     shown: number
     current: number
     expired: number
-    // RFC-keeper-memory-panel-real-data §4a: the individual fact rows (bounded by tail_limit; `shown`
-    // documents the bound so a truncated tail is visible, not silent).
+    // RFC-keeper-memory-panel-real-data §4a: every persisted fact row.
     items: MemoryOsFact[]
   }
-}
-
-export type KeeperUserModelItem = {
-  claim: string
-  category: string
-  source: 'keeper' | 'shared' | string
-  observed_by: string[]
-  turn: number
-  first_seen: number
-  first_seen_iso: string | null
-  last_verified_at: number | null
-  last_verified_at_iso: string | null
-}
-
-export type KeeperUserModelSnapshot = {
-  schema: string
-  keeper: string
-  source: string
-  producer: string
-  facts_store: string
-  shared_facts_store: string
-  enabled: boolean
-  now: number | null
-  now_iso: string | null
-  read_errors: { scope: string; error: string }[]
-  source_fact_count: number
-  shared_fact_count: number
-  preferences: KeeperUserModelItem[]
-  constraints: KeeperUserModelItem[]
 }
 
 export type TurnRecordsResponse = TelemetryFreshnessMetadata & {
@@ -268,7 +213,6 @@ export type TurnRecordsResponse = TelemetryFreshnessMetadata & {
   // malformed JSONL rows the server refused to decode (never repaired)
   skipped_rows: number
   memory_os: MemoryOsTurnRecordSnapshot | null
-  user_model: KeeperUserModelSnapshot | null
   entries: TurnRecordRow[]
 }
 
@@ -435,14 +379,6 @@ function decodeMemoryOsFactProvenance(raw: unknown): MemoryOsFactProvenance | nu
   return { trace_id, turn, tool_call_id: asNullableString(raw.tool_call_id) }
 }
 
-function warnLegacyMemoryOsExternalRef(raw: Record<string, unknown>): void {
-  if (!Object.prototype.hasOwnProperty.call(raw, 'external_ref')) return
-  if (typeof console === 'undefined' || typeof console.warn !== 'function') return
-  console.warn(
-    'Ignoring legacy memory_os.external_ref payload; dashboard memory facts no longer render external_ref status tags.',
-  )
-}
-
 function decodeMemoryOsFact(raw: unknown): MemoryOsFact | null {
   if (!isRecord(raw)) return null
   const claim = asString(raw.claim)
@@ -451,7 +387,6 @@ function decodeMemoryOsFact(raw: unknown): MemoryOsFact | null {
   const first_seen = asNumber(raw.first_seen)
   const reference_time = asNumber(raw.reference_time)
   const current = asBoolean(raw.current)
-  const prompt_recallable = asBoolean(raw.prompt_recallable)
   // Required keys are exactly the always-present ones in memory_os_fact_json.
   // A row missing any of them is a contract violation — dropped here rather
   // than rendered with a guessed default (no silent fabrication).
@@ -462,13 +397,11 @@ function decodeMemoryOsFact(raw: unknown): MemoryOsFact | null {
     || first_seen == null
     || reference_time == null
     || current == null
-    || prompt_recallable == null
   ) {
     return null
   }
   // claim_kind is omitted by the server when None.
   const claimKindToken = asString(raw.claim_kind)
-  warnLegacyMemoryOsExternalRef(raw)
   return {
     claim,
     category: parseMemoryOsFactCategory(categoryToken),
@@ -480,7 +413,6 @@ function decodeMemoryOsFact(raw: unknown): MemoryOsFact | null {
     valid_until_iso: asNullableString(raw.valid_until_iso),
     last_verified_at: asNumber(raw.last_verified_at) ?? null,
     current,
-    prompt_recallable,
     claim_kind: claimKindToken ? (parseMemoryOsClaimKind(claimKindToken) ?? null) : null,
   }
 }
@@ -488,32 +420,16 @@ function decodeMemoryOsFact(raw: unknown): MemoryOsFact | null {
 function decodeMemoryOsSelectionPolicy(raw: unknown): MemoryOsSelectionPolicy | null {
   if (!isRecord(raw)) return null
   const keeper_scope = asString(raw.keeper_scope)
-  const shared_scope = raw.shared_scope == null ? null : (asString(raw.shared_scope) ?? null)
   const facts_source = asString(raw.facts_source)
-  const shared_facts_source = raw.shared_facts_source == null
-    ? null
-    : (asString(raw.shared_facts_source) ?? null)
   const episodes_source = asString(raw.episodes_source)
-  const dashboard_fact_tail_limit = asNumber(raw.dashboard_fact_tail_limit)
-  const dashboard_episode_tail_limit = asNumber(raw.dashboard_episode_tail_limit)
-  const recall_private_fact_limit = asNumber(raw.recall_private_fact_limit)
-  const recall_shared_fact_limit = asNumber(raw.recall_shared_fact_limit)
-  const recall_episode_limit = asNumber(raw.recall_episode_limit)
   const category_source = asString(raw.category_source)
   const claim_kind_source = asString(raw.claim_kind_source)
   const recall_block = asString(raw.recall_block)
   const prompt_record = asString(raw.prompt_record)
   if (
     !keeper_scope
-    || (raw.shared_scope != null && !shared_scope)
     || !facts_source
-    || (raw.shared_facts_source != null && !shared_facts_source)
     || !episodes_source
-    || dashboard_fact_tail_limit == null
-    || dashboard_episode_tail_limit == null
-    || recall_private_fact_limit == null
-    || recall_shared_fact_limit == null
-    || recall_episode_limit == null
     || !category_source
     || !claim_kind_source
     || !recall_block
@@ -523,15 +439,8 @@ function decodeMemoryOsSelectionPolicy(raw: unknown): MemoryOsSelectionPolicy | 
   }
   return {
     keeper_scope,
-    shared_scope,
     facts_source,
-    shared_facts_source,
     episodes_source,
-    dashboard_fact_tail_limit,
-    dashboard_episode_tail_limit,
-    recall_private_fact_limit,
-    recall_shared_fact_limit,
-    recall_episode_limit,
     category_source,
     claim_kind_source,
     recall_block,
@@ -540,14 +449,12 @@ function decodeMemoryOsSelectionPolicy(raw: unknown): MemoryOsSelectionPolicy | 
 }
 
 function decodeMemoryOsCounts(raw: unknown): {
-  tail_limit: number
   shown: number
   current: number
   expired: number
 } | null {
   if (!isRecord(raw)) return null
   return {
-    tail_limit: asNumber(raw.tail_limit, 0) ?? 0,
     shown: asNumber(raw.shown, 0) ?? 0,
     current: asNumber(raw.current, 0) ?? 0,
     expired: asNumber(raw.expired, 0) ?? 0,
@@ -604,68 +511,6 @@ function decodeMemoryOsSnapshot(raw: unknown): MemoryOsTurnRecordSnapshot | null
   }
 }
 
-function decodeKeeperUserModelItem(raw: unknown): KeeperUserModelItem | null {
-  if (!isRecord(raw)) return null
-  const claim = asString(raw.claim)
-  const category = asString(raw.category)
-  const source = asString(raw.source)
-  const turn = asNumber(raw.turn)
-  const first_seen = asNumber(raw.first_seen)
-  if (!claim || !category || !source || turn == null || first_seen == null) {
-    return null
-  }
-  return {
-    claim,
-    category,
-    source,
-    observed_by: normalizeStringList(raw.observed_by),
-    turn,
-    first_seen,
-    first_seen_iso: asNullableString(raw.first_seen_iso),
-    last_verified_at: asNumber(raw.last_verified_at) ?? null,
-    last_verified_at_iso: asNullableString(raw.last_verified_at_iso),
-  }
-}
-
-function decodeKeeperUserModelSnapshot(raw: unknown): KeeperUserModelSnapshot | null {
-  if (!isRecord(raw)) return null
-  const schema = asString(raw.schema)
-  const keeper = asString(raw.keeper)
-  const source = asString(raw.source)
-  const producer = asString(raw.producer)
-  const facts_store = asString(raw.facts_store)
-  const shared_facts_store = asString(raw.shared_facts_store)
-  if (!schema || !keeper || !source || !producer || !facts_store || !shared_facts_store) {
-    return null
-  }
-  return {
-    schema,
-    keeper,
-    source,
-    producer,
-    facts_store,
-    shared_facts_store,
-    enabled: asBoolean(raw.enabled, true) ?? true,
-    now: asNumber(raw.now) ?? null,
-    now_iso: asNullableString(raw.now_iso),
-    read_errors: asRecordArray(raw.read_errors)
-      .map((item) => {
-        const scope = asString(item.scope)
-        const error = asString(item.error)
-        return scope && error ? { scope, error } : null
-      })
-      .filter((item): item is { scope: string; error: string } => item !== null),
-    source_fact_count: asNumber(raw.source_fact_count, 0) ?? 0,
-    shared_fact_count: asNumber(raw.shared_fact_count, 0) ?? 0,
-    preferences: asRecordArray(raw.preferences)
-      .map(decodeKeeperUserModelItem)
-      .filter((item): item is KeeperUserModelItem => item !== null),
-    constraints: asRecordArray(raw.constraints)
-      .map(decodeKeeperUserModelItem)
-      .filter((item): item is KeeperUserModelItem => item !== null),
-  }
-}
-
 function decodeTurnRecordsResponse(raw: unknown): TurnRecordsResponse | null {
   if (!isRecord(raw)) return null
   const keeper = asString(raw.keeper)
@@ -676,7 +521,6 @@ function decodeTurnRecordsResponse(raw: unknown): TurnRecordsResponse | null {
     count: asNumber(raw.count, 0),
     skipped_rows: asNumber(raw.skipped_rows, 0),
     memory_os: decodeMemoryOsSnapshot(raw.memory_os),
-    user_model: decodeKeeperUserModelSnapshot(raw.user_model),
     entries: asRecordArray(raw.entries)
       .map(decodeTurnRecordRow)
       .filter((row): row is TurnRecordRow => row !== null),

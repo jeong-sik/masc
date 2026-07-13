@@ -13,16 +13,12 @@ type stop_reason =
       { turns_used : int
       ; limit : int
       }
-  | MutationBoundaryReached of
-      { turns_used : int
-      ; tool_name : string option
-      }
   | Yielded_to_chat_waiting of { turns_used : int }
     (* The autonomous lane's OAS run stopped at a turn boundary because a
        dashboard/connector chat request was parked on the keeper's turn slot.
        Progress is checkpointed and the keeper resumes on the next cycle — the
-       same disposition as [MutationBoundaryReached], but a distinct reason so
-       receipts do not conflate an on-demand yield with a budget/mutation stop. *)
+       same checkpoint disposition as a turn-budget stop, but a distinct reason
+       so receipts do not conflate an on-demand yield with budget exhaustion. *)
   | Yielded_to_durable_stimulus of { turns_used : int }
     (* The current autonomous cycle completed at least one OAS provider turn,
        then released its lane because another durable stimulus was queued

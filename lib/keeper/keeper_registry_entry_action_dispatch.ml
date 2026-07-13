@@ -40,7 +40,6 @@ let execute_observability
   | Start_drain
   | Schedule_restart _
   | Mark_dead_tombstone
-  | Mark_zombie_tombstone
   | Cleanup_and_unregister
   | Trigger_immediate_cleanup
   | Cancel_pending_oas -> ()

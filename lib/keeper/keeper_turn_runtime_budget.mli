@@ -1,6 +1,6 @@
 (* Keeper_turn_runtime_budget — runtime execution types, fail-open rotation,
-   provider timeout resolution, context overflow observation, keeper pause/resume
-   sync, partial-commit continue gate, and context budget resolution.
+   provider timeout resolution, context overflow observation, Keeper lifecycle
+   sync, and context budget resolution.
 
    Public sub-module included by [Keeper_unified_turn]. *)
 
@@ -47,8 +47,7 @@ type provider_timeout_budget = {
 val provider_timeout_budget_to_yojson :
   provider_timeout_budget -> Yojson.Safe.t
 
-val resolve_bounded_provider_timeout_budget_with_turn_budget :
-  allow_wall_clock_retry_budget:bool ->
+val resolve_provider_timeout_budget :
   is_retry:bool ->
   estimated_input_tokens:int ->
   remaining_turn_budget_s:float ->
@@ -57,29 +56,8 @@ val resolve_bounded_provider_timeout_budget_with_turn_budget :
     telemetry here, not an admission gate; provider liveness, stream idle, and
     idle-turn limits own attempt termination. *)
 
-val allow_wall_clock_retry_budget_for_attempt :
-  is_retry:bool ->
-  degraded_rotation_first_attempt:bool ->
-  attempt:int ->
-  attempted_runtimes:string list ->
-  bool
-
-val degraded_retry_slot_phase_budget_sec : float
-(** Maximum outer-slot hold time before degraded runtime rotation is
-    suppressed. This is a guardrail for #12888: once the productive
-    phase has already consumed this much wall clock, rotation should end
-    the cycle instead of holding the same slot for another provider
-    attempt. provider-timeout failures may still rotate to the next
-    degraded runtime when retry budget remains, because the failed attempt
-    already represents the budgeted provider wait. *)
-
-val degraded_retry_slot_phase_available :
-  time_spent_in_turn_s:float -> bool
-
-
-type degraded_retry_budget_decision =
+type degraded_retry_decision =
   | No_degraded_retry
-  | Degraded_retry_slot_phase_exhausted of EC.degraded_retry
   | Degraded_retry_allowed of EC.degraded_retry
 
 type 'a degraded_retry_prepare_result =
@@ -96,10 +74,6 @@ type 'a degraded_retry_prepare_result =
 
 type 'a degraded_retry_step =
   | Degraded_retry_step_not_allowed
-  | Degraded_retry_step_slot_phase_exhausted of {
-      retry : EC.degraded_retry;
-      reason : string;
-    }
   | Degraded_retry_step_setup_failed of {
       retry : EC.degraded_retry;
       reason : string;
@@ -111,15 +85,12 @@ type 'a degraded_retry_step =
       next : 'a;
     }
 
-val next_fail_open_runtime_for_turn_with_budget :
+val decide_degraded_retry :
   base_runtime:string ->
   effective_runtime:string ->
   attempted_runtimes:string list ->
-  estimated_input_tokens:int ->
-  ?time_spent_in_turn_s:float ->
-  remaining_turn_budget_s:float ->
   Agent_sdk.Error.sdk_error ->
-  degraded_retry_budget_decision
+  degraded_retry_decision
 
 val prepare_degraded_retry_allowed :
   current_runtime_id:string ->
@@ -146,9 +117,6 @@ val plan_degraded_retry_step :
   base_runtime:string ->
   current_runtime_id:string ->
   attempted_runtimes:string list ->
-  estimated_input_tokens:int ->
-  time_spent_in_turn_s:float option ->
-  remaining_turn_budget_s:float ->
   attempt:int ->
   err:Agent_sdk.Error.sdk_error ->
   allow_retry:(EC.degraded_retry -> bool) ->
@@ -183,23 +151,17 @@ val direct_no_progress_retry_decision :
   base_runtime:string ->
   effective_runtime:string ->
   attempted_runtimes:string list ->
-  estimated_input_tokens:int ->
-  ?time_spent_in_turn_s:float ->
-  remaining_turn_budget_s:float ->
   Agent_sdk.Error.sdk_error ->
-  degraded_retry_budget_decision
-(** Shared-budget retry decision for direct-message no-progress accept
-    rejections. Read-only no-progress remains terminal here because it already
-    consumed tool execution in the current attempt. *)
+  degraded_retry_decision
+(** Retry decision for direct-message no-progress accept rejections. Read-only
+    no-progress remains terminal here because it already consumed tool
+    execution in the current attempt. *)
 
 val run_direct_no_progress_retry_loop :
   keeper_name:string ->
   base_runtime:string ->
   initial_runtime:string ->
   initial_max_context:int ->
-  estimated_input_tokens:int ->
-  timeout_sec:float ->
-  remaining_turn_budget_s:(unit -> float) ->
   current_turn_phase_elapsed_ms:(float option -> int * int option) ->
   now_s:(unit -> float) ->
   setup_retry_runtime:
@@ -279,35 +241,13 @@ val context_overflow_event_of_error :
   Agent_sdk.Error.sdk_error ->
   Keeper_state_machine.event
 
-val pause_keeper_for_overflow :
+val record_overflow_failure :
   config:Workspace.config ->
   meta:keeper_meta ->
   reason:string ->
-  keeper_meta
-(** Pause a keeper after unresolved context overflow. Writes meta with merge-CAS
-    using the [Turn_overflow_pause] failure-policy resume decision, records
-    [Sdk_token_budget_exceeded] typed blocker metadata, latches
-    [Turn_overflow_pause], and dispatches [Compact_retry_exhausted] then
-    [Operator_pause]. Returns the paused meta. *)
-
-val sync_keeper_paused_state :
-  config:Workspace.config ->
-  meta:keeper_meta ->
-  paused:bool ->
-  (keeper_meta, string) result
-(** Persist paused/resumed state before mutating the live registry/phase.
-    Returns [Error] when disk sync fails so callers can surface the failure
-    instead of silently diverging runtime vs persisted state. *)
-
-val sync_keeper_paused_state_with_resume_policy :
-  config:Workspace.config ->
-  meta:keeper_meta ->
-  paused:bool ->
-  resume_policy:Keeper_supervisor_pause_policy.crash_pause_resume_policy ->
-  (keeper_meta, string) result
-(** Like {!sync_keeper_paused_state}, but also applies [resume_policy] when
-    pausing so automatic pause paths can enter the supervisor self-healing
-    sweep instead of becoming an indefinite manual pause. *)
+  unit
+(** Record unresolved context overflow as explicit failure evidence without
+    rewriting Keeper lifecycle. *)
 
 val current_keeper_meta :
   config:Workspace.config ->
@@ -326,10 +266,9 @@ type post_turn_resilience_handles = {
 (** Runtime handles for the feature-flagged post-turn resilience wire-in.
 
     When [MASC_RESILIENCE] is off or the audit store cannot be opened, both
-    handles are [None] and [sync_lifecycle_meta] is identity. When execution
-    pauses a keeper for operator handoff/abort, [sync_lifecycle_meta] folds the
-    persisted paused meta back into the lifecycle so the caller's normal final
-    meta write does not accidentally unpause it. *)
+    handles are [None] and [sync_lifecycle_meta] is identity. Failure strategies
+    record explicit evidence without rewriting Keeper lifecycle; therefore
+    [sync_lifecycle_meta] remains identity when execution is enabled as well. *)
 
 val resilience_audit_dir :
   config:Workspace.config ->
@@ -344,14 +283,6 @@ val post_turn_resilience_handles :
 (** Create per-turn resilience audit/executor handles. The audit store is
     per keeper to respect [Shared_audit.Store]'s single-writer chain
     contract. *)
-
-val enqueue_partial_commit_continue_gate :
-  config:Workspace.config ->
-  meta:keeper_meta ->
-  failure_reason:Keeper_registry.failure_reason ->
-  committed_tools:string list ->
-  error_detail:string ->
-  string
 
 val resolved_max_context_for_turn : meta:keeper_meta -> int
 (** Resolve the initial keeper turn context budget from the keeper's routed

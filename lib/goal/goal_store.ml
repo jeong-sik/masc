@@ -41,9 +41,6 @@ type goal = {
   priority : int;
   status : goal_status;
   phase : Goal_phase.t;
-  verifier_policy : Goal_verification.goal_verifier_policy option;
-  require_completion_approval : bool;
-  active_verification_request_id : string option;
   parent_goal_id : string option;
   last_review_note : string option;
   last_review_at : string option;
@@ -76,12 +73,6 @@ and goal_to_yojson (goal : goal) =
       ("priority", `Int goal.priority);
       ("status", goal_status_to_yojson goal.status);
       ("phase", Goal_phase.to_yojson goal.phase);
-      ( "verifier_policy",
-        match goal.verifier_policy with
-        | Some policy -> Goal_verification.goal_verifier_policy_to_yojson policy
-        | None -> `Null );
-      ("require_completion_approval", `Bool goal.require_completion_approval);
-      ("active_verification_request_id", Json_util.string_opt_to_json goal.active_verification_request_id);
       ("parent_goal_id", Json_util.string_opt_to_json goal.parent_goal_id);
       ("last_review_note", Json_util.string_opt_to_json goal.last_review_note);
       ("last_review_at", Json_util.string_opt_to_json goal.last_review_at);
@@ -110,11 +101,38 @@ and state_of_yojson = function
       Error ("state_of_yojson: " ^ Yojson.Safe.to_string json)
 
 and goal_of_yojson = function
-  | `Assoc _ as json ->
+  | `Assoc fields as json ->
+      let accepted_fields =
+        [ "id"
+        ; "title"
+        ; "metric"
+        ; "target_value"
+        ; "due_date"
+        ; "priority"
+        ; "status"
+        ; "phase"
+        ; "parent_goal_id"
+        ; "last_review_note"
+        ; "last_review_at"
+        ; "created_at"
+        ; "updated_at"
+        ]
+      in
+      let unknown_field =
+        List.find_map
+          (fun (field, _) ->
+            if List.mem field accepted_fields then None else Some field)
+          fields
+      in
       let id_opt = Json_util.assoc_member_opt "id" json in
       let title_opt = Json_util.assoc_member_opt "title" json in
-      (match id_opt, title_opt with
-      | Some (`String id), Some (`String title) ->
+      (match unknown_field, id_opt, title_opt with
+      | Some field, _, _ ->
+          Error
+            (Printf.sprintf
+               "goal_of_yojson: unknown Goal field %S is not accepted"
+               field)
+      | None, Some (`String id), Some (`String title) ->
           let legacy_status =
             match Json_util.assoc_member_opt "status" json with
             | None | Some `Null -> Ok Active
@@ -131,14 +149,6 @@ and goal_of_yojson = function
             | None | Some `Null -> Result.map phase_of_goal_status legacy_status
             | Some phase_json -> Goal_phase.of_yojson phase_json
           in
-          let verifier_policy =
-            match Json_util.assoc_member_opt "verifier_policy" json with
-            | None | Some `Null -> Ok None
-            | Some policy_json ->
-                Result.map
-                  Option.some
-                  (Goal_verification.goal_verifier_policy_of_yojson policy_json)
-          in
           let created_at =
             match Json_util.assoc_member_opt "created_at" json with
             | Some (`String value) -> Ok value
@@ -150,11 +160,10 @@ and goal_of_yojson = function
             | _ -> Error "goal_of_yojson: updated_at missing"
           in
           (match
-             legacy_status, phase, verifier_policy, created_at, updated_at
+             legacy_status, phase, created_at, updated_at
            with
            | ( Ok _legacy_status
              , Ok phase
-             , Ok verifier_policy
              , Ok created_at
              , Ok updated_at ) ->
              Ok
@@ -171,52 +180,25 @@ and goal_of_yojson = function
                       | _ -> 3);
                     status = goal_status_of_phase phase;
                     phase;
-                    verifier_policy;
-                    require_completion_approval =
-                      (match Json_util.assoc_member_opt "require_completion_approval" json with
-                      | Some (`Bool value) -> value
-                      | _ -> false);
-                    active_verification_request_id =
-                      Json_util.get_string json "active_verification_request_id";
                     parent_goal_id = Json_util.get_string json "parent_goal_id";
                     last_review_note = Json_util.get_string json "last_review_note";
                     last_review_at = Json_util.get_string json "last_review_at";
                     created_at;
                     updated_at;
                   })
-           | Error msg, _, _, _, _ -> Error msg
-           | _, Error msg, _, _, _ -> Error msg
-           | _, _, Error msg, _, _ -> Error msg
-           | _, _, _, Error msg, _ -> Error msg
-           | _, _, _, _, Error msg -> Error msg)
-      | _ -> Error "goal_of_yojson: invalid goal")
+           | Error msg, _, _, _ -> Error msg
+           | _, Error msg, _, _ -> Error msg
+           | _, _, Error msg, _ -> Error msg
+           | _, _, _, Error msg -> Error msg)
+      | None, _, _ -> Error "goal_of_yojson: invalid goal")
   | other_json ->
       Error ("goal_of_yojson: " ^ Yojson.Safe.to_string other_json)
 
 and normalize_goal (goal : goal) =
-  {
-    goal with
-    status = goal_status_of_phase goal.phase;
-    active_verification_request_id =
-      (* Enumerate every [Goal_phase.t] variant so the compiler flags any
-         new phase added here. Only [Awaiting_verification] keeps an
-         active verification request_id; all other phases clear it as part
-         of [normalize_goal]. A future phase added to [Goal_phase.t] (e.g.
-         a hypothetical [Awaiting_review]) that should also retain the
-         request_id would silently inherit "clear" under the previous
-         [_, _ -> None] catch-all. *)
-      (match goal.phase, goal.active_verification_request_id with
-      | Goal_phase.Awaiting_verification, request_id -> request_id
-      | ( Goal_phase.Executing | Goal_phase.Awaiting_approval
-        | Goal_phase.Blocked | Goal_phase.Paused
-        | Goal_phase.Completed | Goal_phase.Dropped ), _ -> None);
-  }
+  { goal with status = goal_status_of_phase goal.phase }
 
 and goal_status_of_phase = function
-  | Goal_phase.Executing
-  | Goal_phase.Awaiting_verification
-  | Goal_phase.Awaiting_approval ->
-      Active
+  | Goal_phase.Executing -> Active
   | Goal_phase.Paused
   | Goal_phase.Blocked ->
       Paused
@@ -506,8 +488,7 @@ let validate_parent_goal_id goals ~goal_id ~parent_goal_id =
         Ok ()
 
 let upsert_goal config ?id ?title ?metric ?target_value ?due_date
-    ?priority ?status ?phase ?parent_goal_id ?verifier_policy
-    ?require_completion_approval () =
+    ?priority ?status ?phase ?parent_goal_id () =
   let is_new_goal = id = None in
   if is_new_goal && (title = None || title = Some "") then
     Error "title required for new goal"
@@ -583,16 +564,6 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
                             (Option.value priority ~default:existing.priority);
                         status = goal_status_of_phase next_phase;
                         phase = next_phase;
-                        verifier_policy =
-                          (match verifier_policy with
-                          | Some _ -> verifier_policy
-                          | None -> existing.verifier_policy);
-                        require_completion_approval =
-                          (match require_completion_approval with
-                          | Some value -> value
-                          | None -> existing.require_completion_approval);
-                        active_verification_request_id =
-                          existing.active_verification_request_id;
                         parent_goal_id =
                           (match parent_goal_id with
                           | Some _ -> parent_goal_id
@@ -617,10 +588,6 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
                         priority = clamp_priority (Option.value priority ~default:3);
                         status = goal_status_of_phase default_phase;
                         phase = default_phase;
-                        verifier_policy;
-                        require_completion_approval =
-                          Option.value require_completion_approval ~default:false;
-                        active_verification_request_id = None;
                         parent_goal_id;
                         last_review_note = None;
                         last_review_at = None;

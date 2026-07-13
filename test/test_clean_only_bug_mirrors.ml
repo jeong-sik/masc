@@ -9,35 +9,7 @@
     Helper predicates are inlined here (not added to production
     modules) — the goal is spec parity verification, not runtime
     enforcement.  Where a production guard already exists (e.g.,
-    Keeper_composite_observer for KeeperCompositeLifecycle), that
-    pattern is preferred.  These specs lacked such guards. *)
-
-(* ============================================================
-   1. AmbiguousPartialCommit / BugOrphanMutations
-   ============================================================ *)
-
-type turn_phase_amb =
-  | Init
-  | Running_amb
-  | Completed_amb
-  | Failed_amb
-  | Continue_gate
-
-(* TLA+ MutationsNeverOrphan ==
-     ~(turn_phase = "failed" /\ mutating_committed > 0) *)
-let check_mutations_never_orphan ~(turn_phase : turn_phase_amb) ~(mutating_committed : int) =
-  not (turn_phase = Failed_amb && mutating_committed > 0)
-;;
-
-let test_bug_orphan_mutations_caught () =
-  let invariant_holds =
-    check_mutations_never_orphan ~turn_phase:Failed_amb ~mutating_committed:1
-  in
-  Alcotest.(check bool)
-    "MutationsNeverOrphan violated by BugOrphanMutations"
-    false
-    invariant_holds
-;;
+    Keeper_composite_observer), that pattern is preferred. *)
 
 (* ============================================================
    2. KeeperTraceSpec / BugDerivePhaseMismatch
@@ -98,7 +70,6 @@ type turn_phase_tc =
 type decision_stage_tc =
   | Ds_undecided
   | Ds_guard_ok
-  | Ds_gate_rejected
   | Ds_tool_policy_selected
 
 (* TLA+ SelectingRequiresToolPolicy ==
@@ -133,21 +104,6 @@ let test_bug_selecting_without_tool_policy_caught () =
 
 (* Sanity tests — clean states must hold *)
 
-let test_clean_holds_mutations_never_orphan () =
-  Alcotest.(check bool)
-    "Running with mutations is fine"
-    true
-    (check_mutations_never_orphan ~turn_phase:Running_amb ~mutating_committed:3);
-  Alcotest.(check bool)
-    "Continue_gate with mutations is fine"
-    true
-    (check_mutations_never_orphan ~turn_phase:Continue_gate ~mutating_committed:3);
-  Alcotest.(check bool)
-    "Failed with no mutations is fine"
-    true
-    (check_mutations_never_orphan ~turn_phase:Failed_amb ~mutating_committed:0)
-;;
-
 let test_clean_holds_selecting_with_tool_policy () =
   Alcotest.(check bool)
     "Selecting with tool_policy is fine"
@@ -171,17 +127,7 @@ let test_clean_holds_selecting_with_tool_policy () =
 let () =
   Alcotest.run
     "Clean_only_bug_mirrors"
-    [ ( "AmbiguousPartialCommit"
-      , [ Alcotest.test_case
-            "BugOrphanMutations caught"
-            `Quick
-            test_bug_orphan_mutations_caught
-        ; Alcotest.test_case
-            "clean states hold"
-            `Quick
-            test_clean_holds_mutations_never_orphan
-        ] )
-    ; ( "KeeperTraceSpec"
+    [ ( "KeeperTraceSpec"
       , [ Alcotest.test_case
             "BugDerivePhaseMismatch caught"
             `Quick

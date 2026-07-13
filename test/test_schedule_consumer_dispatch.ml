@@ -69,7 +69,6 @@ let keeper_meta_for_name keeper_name =
         ; "agent_name", `String keeper_name
         ; "trace_id", `String ("trace-" ^ keeper_name)
         ; "last_model_used", `String "llama:auto"
-        ; "tool_access", `List []
         ])
   with
   | Ok meta -> meta
@@ -127,46 +126,43 @@ let unsupported_payload =
     ]
 ;;
 
-let create_pending_board_schedule config =
+let create_board_schedule config =
   match
     Schedule_service.create config ~schedule_id:"board-sched-1"
       ~requested_at:100.0 ~requested_by:(human "operator")
       ~scheduled_by:(automated "scheduler-agent") ~due_at:200.0
-      ~payload:board_post_payload ~risk_class:Schedule_domain.Workspace_write
-      ~source:Schedule_domain.Operator_request ()
+      ~payload:board_post_payload ~source:Schedule_domain.Operator_request ()
   with
   | Ok request -> request
   | Error err ->
     fail ("create failed: " ^ Schedule_service.service_error_to_string err)
 ;;
 
-let create_pending_keeper_wake_schedule config =
+let create_keeper_wake_schedule config =
   match
     Schedule_service.create config ~schedule_id:"keeper-wake-sched-1"
       ~requested_at:100.0 ~requested_by:(human "operator")
       ~scheduled_by:(automated "scheduler-agent") ~due_at:200.0
-      ~payload:keeper_wake_payload ~risk_class:Schedule_domain.Workspace_write
-      ~source:Schedule_domain.Operator_request ()
+      ~payload:keeper_wake_payload ~source:Schedule_domain.Operator_request ()
   with
   | Ok request -> request
   | Error err ->
     fail ("create failed: " ^ Schedule_service.service_error_to_string err)
 ;;
 
-let create_pending_unsupported_schedule config =
+let create_unsupported_schedule config =
   match
     Schedule_service.create config ~schedule_id:"unsupported-live-sched"
       ~requested_at:100.0 ~requested_by:(human "operator")
       ~scheduled_by:(automated "scheduler-agent") ~due_at:200.0
-      ~payload:unsupported_payload ~risk_class:Schedule_domain.Read_only
-      ~source:Schedule_domain.Operator_request ()
+      ~payload:unsupported_payload ~source:Schedule_domain.Operator_request ()
   with
   | Ok request -> request
   | Error err ->
     fail ("create failed: " ^ Schedule_service.service_error_to_string err)
 ;;
 
-let create_pending_invalid_keeper_wake_schedule config =
+let create_invalid_keeper_wake_schedule config =
   let payload =
     `Assoc
       [ "kind", `String "masc.keeper_wake"
@@ -182,22 +178,11 @@ let create_pending_invalid_keeper_wake_schedule config =
     Schedule_service.create config ~schedule_id:"invalid-keeper-wake-sched"
       ~requested_at:100.0 ~requested_by:(human "operator")
       ~scheduled_by:(automated "scheduler-agent") ~due_at:200.0
-      ~payload ~risk_class:Schedule_domain.Workspace_write
-      ~source:Schedule_domain.Operator_request ()
+      ~payload ~source:Schedule_domain.Operator_request ()
   with
   | Ok request -> request
   | Error err ->
     fail ("create failed: " ^ Schedule_service.service_error_to_string err)
-;;
-
-let approve_schedule config (request : Schedule_domain.schedule_request) =
-  match
-    Schedule_service.approve config ~schedule_id:request.Schedule_domain.schedule_id
-      ~approved_by:(human "approver") ()
-  with
-  | Ok request -> request
-  | Error err ->
-    fail ("approve failed: " ^ Schedule_service.service_error_to_string err)
 ;;
 
 let tick_ok config ~now =
@@ -225,10 +210,9 @@ let runner_status_json_after_dispatches (result : Schedule_runner.tick_result) =
 let test_board_post_consumer_creates_post_and_succeeds_schedule () =
   with_workspace
   @@ fun config ->
-  let request = create_pending_board_schedule config in
-  check string "initial status" "pending_approval"
+  let request = create_board_schedule config in
+  check string "initial status" "scheduled"
     (Schedule_domain.schedule_status_to_string request.status);
-  ignore (approve_schedule config request : Schedule_domain.schedule_request);
   let result = tick_ok config ~now:201.0 in
   check int "one dispatch" 1 (List.length result.dispatches);
   check string "dispatch status" "succeeded"
@@ -270,49 +254,10 @@ let test_board_post_consumer_creates_post_and_succeeds_schedule () =
   | posts -> failf "expected one board post, got %d" (List.length posts)
 ;;
 
-let test_board_post_consumer_rejects_read_only_risk () =
-  with_workspace
-  @@ fun config ->
-  let request =
-    match
-      Schedule_service.create config ~schedule_id:"board-read-only"
-        ~requested_at:100.0 ~requested_by:(human "operator")
-        ~scheduled_by:(automated "scheduler-agent") ~due_at:200.0
-        ~payload:board_post_payload ~risk_class:Schedule_domain.Read_only
-        ~source:Schedule_domain.Operator_request ()
-    with
-    | Ok request -> request
-    | Error err ->
-      fail ("create failed: " ^ Schedule_service.service_error_to_string err)
-  in
-  let result = tick_ok config ~now:201.0 in
-  check int "one unsupported decision" 1 (List.length result.dispatches);
-  check string "dispatch status" "unsupported"
-    (Schedule_runner.dispatch_status_to_string (List.hd result.dispatches).status);
-  (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
-   | None -> fail "schedule missing"
-   | Some stored ->
-     check string "schedule failed" "failed"
-       (Schedule_domain.schedule_status_to_string stored.status));
-  (match
-     Schedule_store.last_execution_for_schedule (Schedule_store.read_state config)
-       ~schedule_id:request.schedule_id
-   with
-   | None -> fail "missing unsupported execution"
-   | Some execution ->
-     check string "execution failed" "failed"
-       (Schedule_domain.execution_status_to_string execution.status);
-     check (option string) "execution error"
-       (Some "masc.board_post requires a side-effecting risk_class")
-       execution.error);
-  check int "no post" 0 (List.length (Board_dispatch.list_posts ~limit:10 ()))
-;;
-
 let test_keeper_wake_consumer_enqueues_typed_stimulus_and_succeeds_schedule () =
   with_workspace
   @@ fun config ->
-  let request = create_pending_keeper_wake_schedule config in
-  ignore (approve_schedule config request : Schedule_domain.schedule_request);
+  let request = create_keeper_wake_schedule config in
   let result = tick_ok config ~now:201.0 in
   check int "one dispatch" 1 (List.length result.dispatches);
   check string "dispatch status" "succeeded"
@@ -436,8 +381,7 @@ let test_keeper_wake_queue_evidence_rejects_stale_occurrence () =
   @@ fun config ->
   let keeper_name = "schedule-keeper" in
   let base_path = config.Workspace_utils.base_path in
-  let request = create_pending_keeper_wake_schedule config in
-  ignore (approve_schedule config request : Schedule_domain.schedule_request);
+  let request = create_keeper_wake_schedule config in
   ignore (tick_ok config ~now:201.0 : Schedule_runner.tick_result);
   let expected_wake : Keeper_event_queue.scheduled_wake =
     { schedule_id = request.schedule_id
@@ -518,7 +462,7 @@ let test_keeper_wake_queue_evidence_rejects_stale_occurrence () =
 let test_dashboard_live_supported_non_terminal_evidence_matches_supported_request () =
   with_workspace
   @@ fun config ->
-  let request = create_pending_keeper_wake_schedule config in
+  let request = create_keeper_wake_schedule config in
   let dashboard =
     Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
   in
@@ -545,7 +489,7 @@ let test_dashboard_live_supported_non_terminal_evidence_reports_absent_supported
   =
   with_workspace
   @@ fun config ->
-  ignore (create_pending_unsupported_schedule config : Schedule_domain.schedule_request);
+  ignore (create_unsupported_schedule config : Schedule_domain.schedule_request);
   let dashboard =
     Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
   in
@@ -575,8 +519,7 @@ let test_keeper_wake_dashboard_tracks_runtime_inflight_lease () =
     ~finally:(fun () ->
       Keeper_registry.unregister ~base_path:config.Workspace_utils.base_path keeper_name)
     (fun () ->
-      let request = create_pending_keeper_wake_schedule config in
-      ignore (approve_schedule config request : Schedule_domain.schedule_request);
+      let request = create_keeper_wake_schedule config in
       let result = tick_ok config ~now:201.0 in
       check int "one dispatch" 1 (List.length result.dispatches);
       check string "dispatch status" "succeeded"
@@ -727,8 +670,7 @@ let test_keeper_wake_ledger_failure_keeps_dispatch_success_visible () =
   in
   mkdir_p keeper_dir;
   write_empty_file (Filename.concat keeper_dir "reaction-ledger");
-  let request = create_pending_keeper_wake_schedule config in
-  ignore (approve_schedule config request : Schedule_domain.schedule_request);
+  let request = create_keeper_wake_schedule config in
   let result = tick_ok config ~now:201.0 in
   check int "one dispatch" 1 (List.length result.dispatches);
   check string "dispatch status stays succeeded" "succeeded"
@@ -774,8 +716,7 @@ let test_keeper_wake_ledger_failure_keeps_dispatch_success_visible () =
 let test_keeper_wake_consumer_rejects_invalid_keeper_name () =
   with_workspace
   @@ fun config ->
-  let request = create_pending_invalid_keeper_wake_schedule config in
-  ignore (approve_schedule config request : Schedule_domain.schedule_request);
+  let request = create_invalid_keeper_wake_schedule config in
   let result = tick_ok config ~now:201.0 in
   check int "one dispatch" 1 (List.length result.dispatches);
   check string "dispatch status" "unsupported"
@@ -806,43 +747,11 @@ let test_keeper_wake_consumer_rejects_invalid_keeper_name () =
     (List.mem "../bad" queue_discovery.keeper_names)
 ;;
 
-let test_dashboard_schedule_resolve_uses_authenticated_operator () =
-  with_workspace
-  @@ fun config ->
-  let request = create_pending_board_schedule config in
-  let args =
-    `Assoc
-      [ "schedule_id", `String request.schedule_id
-      ; "decision", `String "approve"
-      ; "approved_by_id", `String "attacker"
-      ]
-    in
-    match
-      Server_dashboard_http.dashboard_schedule_resolve_http_json
-        ~config ~operator_name:"dashboard-admin" ~args
-    with
-  | Error message -> fail message
-  | Ok json ->
-    let open Yojson.Safe.Util in
-    let approved_by_id = json |> member "approved_by" |> member "id" |> to_string in
-    check string "response approver is token-bound actor" "dashboard-admin"
-      approved_by_id;
-    check bool "body spoofed approver ignored" true
-      (not (String.equal approved_by_id "attacker"));
-    (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
-     | None -> fail "schedule missing"
-     | Some stored ->
-       check string "schedule moved to scheduled" "scheduled"
-         (Schedule_domain.schedule_status_to_string stored.status))
-;;
-
 let () =
   run "Schedule_consumer_dispatch"
     [ ( "board_post"
       , [ test_case "creates board post and succeeds schedule" `Quick
             test_board_post_consumer_creates_post_and_succeeds_schedule
-        ; test_case "rejects read-only risk" `Quick
-            test_board_post_consumer_rejects_read_only_risk
         ; test_case "keeper wake enqueues typed stimulus" `Quick
             test_keeper_wake_consumer_enqueues_typed_stimulus_and_succeeds_schedule
         ; test_case "keeper wake queue evidence rejects stale occurrence" `Quick
@@ -859,8 +768,6 @@ let () =
             test_keeper_wake_ledger_failure_keeps_dispatch_success_visible
         ; test_case "keeper wake rejects invalid keeper name" `Quick
             test_keeper_wake_consumer_rejects_invalid_keeper_name
-        ; test_case "dashboard resolve uses authenticated operator" `Quick
-            test_dashboard_schedule_resolve_uses_authenticated_operator
         ] )
     ]
 ;;

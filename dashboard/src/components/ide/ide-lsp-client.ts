@@ -15,6 +15,7 @@ import {
 } from '@codemirror/view'
 import { StateField, StateEffect, RangeSetBuilder, type Extension } from '@codemirror/state'
 import { signal } from '@preact/signals'
+import type { IdeAnnotation } from '../../api/schemas/ide-annotations'
 import { normalizeIdeContextFilePath } from './ide-state'
 import {
   DEFAULT_MASC_ORIGIN,
@@ -89,17 +90,19 @@ export const lspStatusSnapshot = signal<LspStatusSnapshot>(EMPTY_LSP_STATUS_SNAP
 
 const LSP_TERMINAL_CLOSE_CODES = new Set([1008, 4401, 4403])
 
-export interface SelectedAnnotation {
-  readonly id: string
-  readonly keeper_id: string
-  readonly kind: string
-  readonly content: string
-  readonly goal_id: string | null
-  readonly task_id: string | null
-  readonly file_path: string
-  readonly line_start: number
-  readonly line_end: number
-}
+export type SelectedAnnotation = Pick<
+  IdeAnnotation,
+  | 'id'
+  | 'keeper_id'
+  | 'kind'
+  | 'content'
+  | 'goal_id'
+  | 'task_id'
+  | 'references'
+  | 'file_path'
+  | 'line_start'
+  | 'line_end'
+>
 
 // ── State Effects ────────────────────────────────────────────────
 

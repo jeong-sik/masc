@@ -1,4 +1,4 @@
-(** Runtime schema, admission queue, agent-health, and GC sampler
+(** Runtime schema, inference observation, agent-health, and GC sampler
     metric-name constants.
 
     Included by {!Otel_metric_store} so existing callers keep using
@@ -11,17 +11,8 @@ val metric_mcp_tool_schema_count : string
 val metric_mcp_tool_schema_tokens_approx : string
 
 
-val metric_inference_queue_inflight : string
-val metric_inference_queue_acquired : string
-val metric_inference_queue_wait : string
-
-(** Total admission requests rejected before execution. Labels:
-    [surface=with_permit|try_with_permit] and
-    [reason=host_resource_saturated]. *)
-val metric_inference_queue_rejected : string
-
-(** Maximum configured concurrent inference permits. *)
-val metric_inference_queue_max_concurrent : string
+val metric_inference_inflight : string
+val metric_inference_started : string
 
 (** {1 Agent health metrics} *)
 

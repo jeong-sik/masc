@@ -4,8 +4,7 @@
 
     Regression guard for the keeper-path bug (incident: keeper:umberto): an
     OMITTED optional [contract] was wrongly rejected via a catch-all that
-    conflated [None] (key omitted) with a wrong-typed value. That false
-    validation error then tripped the keeper failure circuit breaker. The fix
+    conflated [None] (key omitted) with a wrong-typed value. The fix
     deletes the drifted keeper-local copy and routes through this canonical
     parser, which handles [None | Some `Null -> Ok None]. *)
 

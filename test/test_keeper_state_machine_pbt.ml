@@ -22,10 +22,10 @@ let gen_event_chaos : SM.event QCheck.Gen.t =
   oneof [
     return SM.Heartbeat_ok;
     (let* consecutive = int_range 1 10 in
-     return (SM.Heartbeat_failed { consecutive; max_allowed = 5 }));
+    return (SM.Heartbeat_failed { consecutive }));
     return SM.Turn_succeeded;
     (let* consecutive = int_range 1 5 in
-     return (SM.Turn_failed { consecutive; max_allowed = 3 }));
+    return (SM.Turn_failed { consecutive }));
     (let* ratio = float_range 0.0 1.0 in
      let* context_actions = gen_context_actions in
      return (SM.Context_measured {
@@ -49,7 +49,6 @@ let gen_event_chaos : SM.event QCheck.Gen.t =
     return (SM.Fiber_terminated { outcome = "pbt_test"; provider_id = None; http_status = None });
     (let* attempt = int_range 1 5 in
      return (SM.Supervisor_restart_attempt { attempt }));
-    return SM.Restart_budget_exhausted;
   ]
 
 (* ── Guided Generator: phase-aware valid events ────────── *)
@@ -58,9 +57,9 @@ let valid_events_for_phase (phase : SM.phase) (c : SM.conditions) : SM.event lis
   let base = match phase with
     | SM.Running ->
       [ SM.Heartbeat_ok;
-        SM.Heartbeat_failed { consecutive = 1; max_allowed = 5 };
+        SM.Heartbeat_failed { consecutive = 1 };
         SM.Turn_succeeded;
-        SM.Turn_failed { consecutive = 1; max_allowed = 3 };
+        SM.Turn_failed { consecutive = 1 };
         SM.Context_measured {
           context_ratio = 0.5; message_count = 50; token_count = 5000;
           context_actions = { compact = false; handoff = false }};
@@ -94,14 +93,14 @@ let valid_events_for_phase (phase : SM.phase) (c : SM.conditions) : SM.event lis
     | SM.Compacting ->
       [ SM.Compaction_completed { before_tokens = 100; after_tokens = 50 };
         SM.Compaction_failed { reason = "test" };
-        SM.Heartbeat_failed { consecutive = 1; max_allowed = 5 };
+        SM.Heartbeat_failed { consecutive = 1 };
         SM.Fiber_terminated { outcome = "crash"; provider_id = None; http_status = None };
         SM.Stop_requested;
       ]
     | SM.HandingOff ->
       [ SM.Handoff_completed { new_trace_id = "t"; generation = 1 };
         SM.Handoff_failed { reason = "test" };
-        SM.Heartbeat_failed { consecutive = 1; max_allowed = 5 };
+        SM.Heartbeat_failed { consecutive = 1 };
         SM.Fiber_terminated { outcome = "crash"; provider_id = None; http_status = None };
         SM.Stop_requested;
       ]
@@ -117,15 +116,12 @@ let valid_events_for_phase (phase : SM.phase) (c : SM.conditions) : SM.event lis
         SM.Fiber_terminated { outcome = "crash"; provider_id = None; http_status = None };
       ]
     | SM.Crashed ->
-      [ SM.Supervisor_restart_attempt { attempt = 1 };
-        SM.Restart_budget_exhausted;
-      ]
+      [ SM.Supervisor_restart_attempt { attempt = 1 } ]
     | SM.Restarting ->
       [ SM.Fiber_started;
         SM.Fiber_terminated { outcome = "fail"; provider_id = None; http_status = None };
-        SM.Restart_budget_exhausted;
       ]
-    | SM.Stopped | SM.Dead | SM.Zombie -> []
+    | SM.Stopped | SM.Dead -> []
     | SM.Offline -> [ SM.Fiber_started ]
   in
   let _ = c in
@@ -149,7 +145,6 @@ let init_state : sim_state = {
   phase = SM.Running;
   conditions = { SM.default_conditions with
     fiber_alive = true;
-    restart_budget_remaining = true;
   };
   restart_count = 0;
 }

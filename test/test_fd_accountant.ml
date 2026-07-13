@@ -1,572 +1,245 @@
-(** Unit tests for [Fd_accountant] (RFC-0101).
-
-    Pins down:
-    - Per-kind cap enforcement under concurrent fan-in.
-    - Slot release on normal return and on exception.
-    - Round-trip of [kind_to_string] / [kind_of_string].
-    - Delegation: [Docker_spawn_throttle] public API still works and
-      produces the same observable behaviour as direct
-      [Fd_accountant.with_slot ~kind:Docker_spawn]. *)
+(** Observation-only contract tests for [Fd_accountant]. *)
 
 open Alcotest
+
 module FA = Fd_accountant
-module DST = Masc.Docker_spawn_throttle
-module DP = Domain_pool
 
-let install_pressure_hooks () =
-  FA.set_pressure_hooks
-    ~active:Keeper_fd_pressure.active
-    ~nofile_soft_limit:Keeper_fd_pressure.process_nofile_soft_limit
+let observer_calls = Atomic.make 0
+let observer_should_raise = Atomic.make false
 
-let bg_spawn_error_to_string = function
-  | Bg_task.Spawn_failed msg -> "Spawn_failed: " ^ msg
-  | Bg_task.Too_many_tasks { keeper; limit } ->
-      Printf.sprintf "Too_many_tasks: keeper=%s limit=%d" keeper limit
-  | Bg_task.Invalid_cwd cwd -> "Invalid_cwd: " ^ cwd
+let install_test_observers () =
+  FA.install_observers
+    ~nofile_soft_limit:(fun () -> Some 4242)
+    ~on_resource_error:(fun ~kind:_ _error _exn ->
+      Atomic.incr observer_calls;
+      if Atomic.get observer_should_raise
+      then raise (Failure "synthetic observer failure"))
 ;;
 
-let tmpdir prefix =
-  Filename.concat
-    (Filename.get_temp_dir_name ())
-    (Printf.sprintf "%s_%d_%.0f" prefix (Unix.getpid ())
-       (Unix.gettimeofday ()))
+let active kind = FA.active_count ~kind
 
 let test_kind_round_trip () =
   List.iter
-    (fun k ->
-      let s = FA.kind_to_string k in
-      match FA.kind_of_string s with
-      | Some k' when k' = k -> ()
-      | _ -> Alcotest.failf "kind round-trip drift for %s" s)
+    (fun kind ->
+      let encoded = FA.kind_to_string kind in
+      check
+        (option string)
+        "kind round-trip"
+        (Some encoded)
+        (Option.map FA.kind_to_string (FA.kind_of_string encoded)))
     FA.all_kinds
+;;
 
-let test_kind_unknown_rejected () =
-  match FA.kind_of_string "carrier_pigeon" with
-  | None -> ()
-  | Some _ -> Alcotest.fail "unknown kind must return None"
+let test_unknown_kind_rejected () =
+  check bool "unknown kind" true (Option.is_none (FA.kind_of_string "carrier_pigeon"))
+;;
 
-let test_configured_within_bounds () =
-  List.iter
-    (fun k ->
-      let cap = FA.configured_concurrency ~kind:k in
-      if cap < 1 || cap > 1024 then
-        Alcotest.failf "configured cap out of range for %s: %d"
-          (FA.kind_to_string k) cap)
-    FA.all_kinds
-
-let test_fd_limit_reuses_keeper_pressure_cache () =
-  Eio_main.run @@ fun _env ->
-  Eio.Switch.run @@ fun _sw ->
-  let expected = 4242 in
-  Atomic.set
-    Keeper_fd_pressure.nofile_soft_limit_cache
-    (Keeper_fd_pressure.Resolved (Some expected));
-  let snapshot = FA.fd_snapshot () in
-  check int "fd_limit from Keeper_fd_pressure cache" expected snapshot.fd_limit
-
-let test_with_slot_runs_callback () =
-  Eio_main.run @@ fun _env ->
-  let result = FA.with_slot ~kind:Docker_spawn (fun () -> 42) in
-  check int "callback result returned" 42 result
-
-let test_with_slot_releases_on_exception () =
-  Eio_main.run @@ fun _env ->
-  let exn = Failure "boom" in
-  (try
-     FA.with_slot ~kind:Provider_http (fun () -> raise exn) |> ignore
-   with Failure _ -> ()) ;
-  (* Re-acquire should succeed — release happened via [Fun.protect]'s
-     [finally] (PR-C1 removed the [Eio.Switch.on_release] counter
-     callback, see plan sharded-swinging-mccarthy.md PR-C1). *)
-  let v = FA.with_slot ~kind:Provider_http (fun () -> 7) in
-  check int "slot reusable after exception" 7 v
-
-let test_cap_bounds_fan_in () =
-  (* Fan-out 4× the configured cap and assert that the
-     simultaneous-in-flight count never exceeds the cap. Uses a
-     hand-rolled high-water tracker, atomically updated. *)
-  Eio_main.run @@ fun env ->
-  let kind = FA.Sandbox_exec in
-  let cap = FA.configured_concurrency ~kind in
-  let fanout = cap * 4 in
-  let in_flight = Atomic.make 0 in
-  let high_water = Atomic.make 0 in
-  let update_high () =
-    let cur = Atomic.get in_flight in
-    let rec bump () =
-      let h = Atomic.get high_water in
-      if cur > h then
-        if Atomic.compare_and_set high_water h cur then () else bump ()
-    in
-    bump ()
+let test_observe_returns_and_releases () =
+  let result =
+    FA.observe ~kind:Provider_http (fun () ->
+      check int "active inside callback" 1 (active Provider_http);
+      42)
   in
-  Eio.Switch.run @@ fun sw ->
-  for _ = 1 to fanout do
-    Eio.Fiber.fork ~sw (fun () ->
-        FA.with_slot ~kind (fun () ->
-            Atomic.incr in_flight ;
-            update_high () ;
-            Eio.Time.sleep (Eio.Stdenv.clock env) 0.001 ;
-            Atomic.decr in_flight))
-  done ;
-  Eio.Switch.run (fun _ -> ()) ; (* ensure all fibers complete *)
-  let hw = Atomic.get high_water in
-  if hw > cap then
-    Alcotest.failf "peak in-flight %d exceeded cap %d" hw cap
+  check int "callback result" 42 result;
+  check int "released after return" 0 (active Provider_http)
+;;
 
-let test_docker_delegation_consistent () =
-  (* DST.configured_max () must equal
-     Fd_accountant.configured_concurrency ~kind:Docker_spawn — the
-     whole point of the delegation. *)
-  let via_legacy = DST.configured_max () in
-  let via_accountant = FA.configured_concurrency ~kind:Docker_spawn in
-  check int "docker delegation cap parity" via_accountant via_legacy
+let test_nested_observations_count_every_scope () =
+  FA.observe ~kind:Sandbox_exec (fun () ->
+    check int "outer observation" 1 (active Sandbox_exec);
+    FA.observe ~kind:Sandbox_exec (fun () ->
+      check int "nested observation" 2 (active Sandbox_exec)));
+  check int "nested observations released" 0 (active Sandbox_exec)
+;;
 
-let test_snapshot_shape () =
-  Eio_main.run @@ fun _env ->
-  Eio.Switch.run @@ fun _sw ->
-  let s = FA.fd_snapshot () in
-  (* per_kind must include all kinds *)
-  check int "snapshot covers all kinds" (List.length FA.all_kinds)
-    (List.length s.per_kind) ;
-  List.iter
-    (fun k ->
-      match List.assoc_opt k s.per_kind with
-      | Some v when v >= 0 -> ()
-      | Some v ->
-          Alcotest.failf "negative in_flight for %s: %d"
-            (FA.kind_to_string k) v
-      | None ->
-          Alcotest.failf "missing kind in snapshot: %s"
-            (FA.kind_to_string k))
-    FA.all_kinds ;
-  (* pressure_active matches Keeper_fd_pressure.active *)
-  let expected = Keeper_fd_pressure.active () in
-  check bool "pressure_active mirrors Keeper_fd_pressure" expected
-    s.pressure_active
-
-let test_snapshot_safe_from_worker_domain () =
-  Eio_main.run @@ fun env ->
-  Eio.Switch.run @@ fun sw ->
-  let pool = DP.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
-  let caller_domain = (Domain.self () :> int) in
-  let worker_domain, snapshot =
-    DP.submit_io pool (fun () -> ((Domain.self () :> int), FA.fd_snapshot ()))
+let test_exception_releases () =
+  let raised =
+    match
+      FA.observe ~kind:Provider_cli (fun () -> raise (Failure "callback failure"))
+    with
+    | _ -> false
+    | exception Failure message when String.equal message "callback failure" -> true
+    | exception _ -> false
   in
-  check bool "snapshot ran off caller domain" true
-    (worker_domain <> caller_domain);
-  check int "worker snapshot covers all kinds" (List.length FA.all_kinds)
-    (List.length snapshot.per_kind)
-
-let log_writer_in_flight () =
-  let snapshot = FA.fd_snapshot () in
-  List.assoc FA.Log_writer snapshot.per_kind
-
-let kind_in_flight kind =
-  let snapshot = FA.fd_snapshot () in
-  List.assoc kind snapshot.per_kind
+  check bool "original callback exception" true raised;
+  check int "released after exception" 0 (active Provider_cli)
+;;
 
 let wait_until ~clock ~attempts predicate =
   let rec loop remaining =
-    if predicate () then true
-    else if remaining <= 0 then false
+    if predicate ()
+    then true
+    else if remaining = 0
+    then false
     else (
-      Eio.Time.sleep clock 0.001 ;
+      Eio.Fiber.yield ();
+      Eio.Time.sleep clock 0.001;
       loop (remaining - 1))
   in
   loop attempts
+;;
 
-let test_with_slot_reentrant_same_kind () =
-  Eio_main.run @@ fun _env ->
-  FA.with_slot ~kind:FA.Sandbox_exec (fun () ->
-      check int "outer sandbox slot held" 1
-        (kind_in_flight FA.Sandbox_exec) ;
-      FA.with_slot ~kind:FA.Sandbox_exec (fun () ->
-          check int "inner sandbox slot reuses outer slot" 1
-            (kind_in_flight FA.Sandbox_exec))) ;
-	  check int "sandbox slot released" 0 (kind_in_flight FA.Sandbox_exec)
+let test_concurrent_observations_are_not_capped () =
+  Eio_main.run
+  @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let entered = Atomic.make 0 in
+  let release, release_resolver = Eio.Promise.create () in
+  Eio.Switch.run
+  @@ fun sw ->
+  for _ = 1 to 4 do
+    Eio.Fiber.fork ~sw (fun () ->
+      FA.observe ~kind:Docker_spawn (fun () ->
+        Atomic.incr entered;
+        Eio.Promise.await release))
+  done;
+  let all_entered = wait_until ~clock ~attempts:100 (fun () -> Atomic.get entered = 4) in
+  check bool "all callbacks entered without admission" true all_entered;
+  check int "all callbacks observed concurrently" 4 (active Docker_spawn);
+  Eio.Promise.resolve release_resolver ();
+  check bool "all concurrent observations released" true
+    (wait_until ~clock ~attempts:100 (fun () -> active Docker_spawn = 0))
+;;
 
-let test_with_slot_nested_cross_kind_under_fd_pressure () =
-  Eio_main.run @@ fun _env ->
-  Keeper_fd_pressure.reset_for_tests () ;
+let test_lifetime_observation_release_is_idempotent () =
+  let release = FA.acquire_lifetime_observation ~kind:Log_writer () in
+  check int "lifetime observation active" 1 (active Log_writer);
+  release ();
+  check int "lifetime observation released" 0 (active Log_writer);
+  release ();
+  check int "second release is a no-op" 0 (active Log_writer)
+;;
+
+let expect_resource_error unix_error expected_error =
+  let kind = FA.Provider_http in
+  let internal_before = FA.resource_error_count ~kind expected_error in
+  let observer_before = Atomic.get observer_calls in
+  let raised_original =
+    match
+      FA.observe ~kind (fun () ->
+        raise (Unix.Unix_error (unix_error, "open", "fixture")))
+    with
+    | _ -> false
+    | exception Unix.Unix_error (actual, function_name, argument)
+      when actual = unix_error
+           && String.equal function_name "open"
+           && String.equal argument "fixture" -> true
+    | exception _ -> false
+  in
+  check bool "typed Unix error re-raised unchanged" true raised_original;
+  check
+    int
+    "internal error telemetry increments"
+    (internal_before + 1)
+    (FA.resource_error_count ~kind expected_error);
+  check int "external observer invoked" (observer_before + 1) (Atomic.get observer_calls)
+;;
+
+let test_typed_resource_errors_are_reported () =
+  expect_resource_error Unix.EMFILE FA.Process_fd_exhausted;
+  expect_resource_error Unix.ENFILE FA.System_fd_exhausted;
+  expect_resource_error Unix.ENOSPC FA.Storage_space_exhausted
+;;
+
+let test_unrelated_exception_is_not_reported () =
+  let before = Atomic.get observer_calls in
+  (match FA.observe ~kind:Provider_http (fun () -> raise (Failure "unrelated")) with
+   | _ -> fail "unrelated exception should be re-raised"
+   | exception Failure message when String.equal message "unrelated" -> ()
+   | exception exn -> failf "unexpected exception: %s" (Printexc.to_string exn));
+  check int "observer not called" before (Atomic.get observer_calls)
+;;
+
+let test_observer_failure_does_not_replace_os_error () =
+  Atomic.set observer_should_raise true;
   Fun.protect
-    ~finally:Keeper_fd_pressure.reset_for_tests
+    ~finally:(fun () -> Atomic.set observer_should_raise false)
     (fun () ->
-      Keeper_fd_pressure.note ~site:"fd_accountant_test"
-        ~detail:"too many open files" () ;
-      FA.with_slot ~kind:FA.Docker_spawn (fun () ->
-          check int "outer docker slot held" 1
-            (kind_in_flight FA.Docker_spawn) ;
-          FA.with_slot ~kind:FA.Sandbox_exec (fun () ->
-              check int "nested sandbox slot held" 1
-                (kind_in_flight FA.Sandbox_exec))) ;
-      check int "docker slot released" 0 (kind_in_flight FA.Docker_spawn) ;
-      check int "sandbox slot released" 0 (kind_in_flight FA.Sandbox_exec))
-
-let test_forked_child_reenters_pressure_gate_after_parent_slot () =
-  Eio_main.run @@ fun env ->
-  Keeper_fd_pressure.reset_for_tests () ;
-  Fun.protect
-    ~finally:Keeper_fd_pressure.reset_for_tests
-    (fun () ->
-      Keeper_fd_pressure.note ~site:"fd_accountant_test"
-        ~detail:"too many open files" () ;
-      let clock = Eio.Stdenv.clock env in
-      let child_go = Atomic.make false in
-      let child_entered = Atomic.make false in
-      let blocker_running = Atomic.make false in
-      let release_blocker = Atomic.make false in
-      Eio.Switch.run @@ fun sw ->
-      FA.with_slot ~kind:FA.Docker_spawn (fun () ->
-          Eio.Fiber.fork ~sw (fun () ->
-              while not (Atomic.get child_go) do
-                Eio.Time.sleep clock 0.001
-              done ;
-              FA.with_slot ~kind:FA.Sandbox_exec (fun () ->
-                  Atomic.set child_entered true))) ;
-      Eio.Fiber.fork ~sw (fun () ->
-          FA.with_slot ~kind:FA.Provider_http (fun () ->
-              Atomic.set blocker_running true ;
-              while not (Atomic.get release_blocker) do
-                Eio.Time.sleep clock 0.001
-              done)) ;
-      check bool "blocker acquired pressure gate" true
-        (wait_until ~clock ~attempts:100 (fun () ->
-             Atomic.get blocker_running)) ;
-      Atomic.set child_go true ;
-      Eio.Time.sleep clock 0.01 ;
-      check bool "inherited child binding does not bypass pressure gate" false
-        (Atomic.get child_entered) ;
-      Atomic.set release_blocker true ;
-      check bool "child enters after pressure gate release" true
-        (wait_until ~clock ~attempts:100 (fun () -> Atomic.get child_entered)))
-
-let test_dated_jsonl_append_uses_log_writer_slot () =
-  Eio_main.run @@ fun env ->
-  Eio_guard.enable () ;
-  let dir = tmpdir "fd_accountant_dated_jsonl_log_writer" in
-  Fs_compat.mkdir_p dir ;
-  Fs_compat.set_fs (Eio.Stdenv.fs env) ;
-  Fun.protect ~finally:Eio_guard.disable (fun () ->
-      Dated_jsonl.For_testing.reset_append_guard () ;
-      FA.install_dated_jsonl_log_writer_guard () ;
-      let store = Dated_jsonl.create ~base_dir:dir () in
-      let mutex = Dated_jsonl.For_testing.mutex store in
-      let clock = Eio.Stdenv.clock env in
-      let () =
-        Eio.Switch.run @@ fun sw ->
-        Eio.Mutex.use_rw ~protect:true mutex (fun () ->
-            Eio.Fiber.fork ~sw (fun () ->
-                Dated_jsonl.append store (`Assoc [ ("i", `Int 1) ])) ;
-            check bool "append waits while holding log writer slot" true
-              (wait_until ~clock ~attempts:100 (fun () ->
-                   log_writer_in_flight () > 0)))
+      let raised_original =
+        match
+          FA.observe ~kind:Sandbox_exec (fun () ->
+            raise (Unix.Unix_error (Unix.EMFILE, "dup", "fixture")))
+        with
+        | _ -> false
+        | exception Unix.Unix_error (Unix.EMFILE, function_name, argument)
+          when String.equal function_name "dup"
+               && String.equal argument "fixture" -> true
+        | exception _ -> false
       in
-      check int "log writer slot released" 0 (log_writer_in_flight ()))
+      check bool "observer failure preserves original OS error" true raised_original)
+;;
 
-let test_process_eio_run_argv_uses_sandbox_slot () =
-  Eio_main.run @@ fun env ->
-  Eio_guard.enable () ;
+let test_snapshot_is_observation_only () =
+  let snapshot = FA.fd_snapshot () in
+  check int "all kinds present" (List.length FA.all_kinds) (List.length snapshot.per_kind);
+  check int "all typed error series present"
+    (List.length FA.all_kinds * List.length FA.all_resource_errors)
+    (List.length snapshot.resource_errors);
+  check (option int) "installed nofile observer" (Some 4242) snapshot.fd_limit;
+  List.iter
+    (fun (kind, count) ->
+      if count < 0
+      then failf "negative active count for %s" (FA.kind_to_string kind))
+    snapshot.per_kind;
+  List.iter
+    (fun (kind, error, count) ->
+      if count < 0
+      then
+        failf
+          "negative resource error count for %s/%s"
+          (FA.kind_to_string kind)
+          (FA.resource_error_to_string error))
+    snapshot.resource_errors
+;;
+
+let test_with_process_observer_wiring () =
+  Eio_main.run
+  @@ fun _env ->
+  Eio_guard.enable ();
   Fun.protect
     ~finally:(fun () ->
-      Process_eio.reset_for_testing () ;
+      With_process.reset_process_guard_for_testing ();
       Eio_guard.disable ())
     (fun () ->
-      Process_eio.reset_for_testing () ;
-      Process_eio.init
-        ~cwd_default:(Eio.Stdenv.fs env)
-        ~proc_mgr:(Eio.Stdenv.process_mgr env)
-        ~clock:(Eio.Stdenv.clock env) ;
-      FA.install_process_eio_sandbox_exec_guard () ;
-      let clock = Eio.Stdenv.clock env in
-      let () =
-        Eio.Switch.run @@ fun sw ->
-        Eio.Fiber.fork ~sw (fun () ->
-            ignore
-              (Process_eio.run_argv_with_status ~timeout_sec:2.0
-                 [ "/bin/sleep"; "0.05" ])) ;
-        check bool "Process_eio holds sandbox slot while child runs" true
-          (wait_until ~clock ~attempts:100 (fun () ->
-               kind_in_flight FA.Sandbox_exec > 0))
-      in
-      check int "Process_eio sandbox slot released" 0
-        (kind_in_flight FA.Sandbox_exec))
-
-let test_with_process_uses_sandbox_slot () =
-  Eio_main.run @@ fun _env ->
-  Eio_guard.enable () ;
-  Fun.protect
-    ~finally:(fun () ->
-      With_process.reset_process_guard_for_testing () ;
-      Eio_guard.disable ())
-    (fun () ->
-      With_process.reset_process_guard_for_testing () ;
-      FA.install_with_process_sandbox_exec_guard () ;
+      With_process.reset_process_guard_for_testing ();
+      FA.install_with_process_sandbox_exec_observer ();
       let (observed, lines), status =
-        With_process.with_process_args_in "/bin/echo"
-          [| "/bin/echo" ; "with-process-slot" |]
-          (fun ic ->
-            let observed = kind_in_flight FA.Sandbox_exec in
-            (observed, With_process.drain_lines ic))
+        With_process.with_process_args_in
+          "/bin/echo"
+          [| "/bin/echo"; "fd-observation" |]
+          (fun ic -> active Sandbox_exec, With_process.drain_lines ic)
       in
-      check int "With_process holds sandbox slot during callback" 1
-        observed ;
-      check (list string) "With_process stdout" [ "with-process-slot" ]
-        lines ;
+      check int "process callback observed" 1 observed;
+      check (list string) "process stdout" [ "fd-observation" ] lines;
       (match status with
-      | Unix.WEXITED 0 -> ()
-      | _ -> Alcotest.fail "expected With_process child to exit 0") ;
-      check int "With_process sandbox slot released" 0
-        (kind_in_flight FA.Sandbox_exec))
-
-let test_autonomy_exec_uses_sandbox_slot () =
-  Eio_main.run @@ fun env ->
-  Eio_guard.enable () ;
-  Fun.protect
-    ~finally:(fun () ->
-      Masc_cdal_runtime.Autonomy_exec.reset_run_guard_for_testing () ;
-      Eio_guard.disable ())
-    (fun () ->
-      Masc_cdal_runtime.Autonomy_exec.reset_run_guard_for_testing () ;
-      FA.install_autonomy_exec_sandbox_exec_guard () ;
-      let clock = Eio.Stdenv.clock env in
-      let () =
-        Eio.Switch.run @@ fun sw ->
-        Eio.Fiber.fork ~sw (fun () ->
-            ignore
-              (Masc_cdal_runtime.Autonomy_exec.run
-                 ~sw
-                 ~clock
-                 ~config:Masc_cdal_runtime.Autonomy_exec.default_config
-                 ~argv:[ "/bin/sleep"; "0.05" ]
-                 ~timeout_s:2.0)) ;
-        check bool "Autonomy_exec holds sandbox slot while child runs" true
-          (wait_until ~clock ~attempts:100 (fun () ->
-               kind_in_flight FA.Sandbox_exec > 0))
-      in
-      check int "Autonomy_exec sandbox slot released" 0
-        (kind_in_flight FA.Sandbox_exec))
-
-let test_bg_task_uses_sandbox_lifetime_slot () =
-  Eio_main.run @@ fun env ->
-  Eio_guard.enable () ;
-  Fun.protect
-    ~finally:(fun () ->
-      Bg_task.reset_lifetime_guard_for_testing () ;
-      Eio_guard.disable ())
-    (fun () ->
-      Bg_task.reset_lifetime_guard_for_testing () ;
-      FA.install_bg_sandbox_exec_guard () ;
-      let tid =
-        match
-          Bg_task.spawn ~keeper:"fd-accountant-bg-task"
-            ~argv:[ "/bin/sleep"; "0.05" ]
-            ~cwd:"" ~envp:(Unix.environment ()) ~timeout_sec:0.0 ()
-        with
-        | Ok tid -> tid
-        | Error err ->
-            Alcotest.failf "Bg_task spawn failed: %s"
-              (bg_spawn_error_to_string err)
-      in
-      check int "Bg_task holds sandbox slot after spawn" 1
-        (kind_in_flight FA.Sandbox_exec) ;
-      let clock = Eio.Stdenv.clock env in
-      check bool "Bg_task eventually closes" true
-        (wait_until ~clock ~attempts:200 (fun () ->
-             match Bg_task.read tid ~since_stdout:0 ~since_stderr:0 with
-             | Ok snapshot -> snapshot.closed
-             | Error _ -> false)) ;
-      check int "Bg_task sandbox slot released on close" 0
-        (kind_in_flight FA.Sandbox_exec))
-
-let test_bg_task_lifetime_serializes_under_fd_pressure () =
-  Eio_main.run @@ fun env ->
-  Eio_guard.enable () ;
-  Keeper_fd_pressure.reset_for_tests () ;
-  Fun.protect
-    ~finally:(fun () ->
-      Keeper_fd_pressure.reset_for_tests () ;
-      Bg_task.reset_lifetime_guard_for_testing () ;
-      Eio_guard.disable ())
-    (fun () ->
-      Bg_task.reset_lifetime_guard_for_testing () ;
-      FA.install_bg_sandbox_exec_guard () ;
-      Keeper_fd_pressure.note ~site:"fd_accountant_test"
-        ~detail:"too many open files" () ;
-      let clock = Eio.Stdenv.clock env in
-      let first =
-        match
-          Bg_task.spawn ~keeper:"fd-accountant-pressure-a"
-            ~argv:[ "/bin/sleep"; "0.05" ]
-            ~cwd:"" ~envp:(Unix.environment ()) ~timeout_sec:0.0 ()
-        with
-        | Ok tid -> tid
-        | Error err ->
-            Alcotest.failf "first Bg_task spawn failed: %s"
-              (bg_spawn_error_to_string err)
-      in
-      check int "first Bg_task holds sandbox slot" 1
-        (kind_in_flight FA.Sandbox_exec) ;
-      let second_started = Atomic.make false in
-      Eio.Switch.run @@ fun sw ->
-      Eio.Fiber.fork ~sw (fun () ->
-          match
-            Bg_task.spawn ~keeper:"fd-accountant-pressure-b"
-              ~argv:[ "/bin/sleep"; "0.01" ]
-              ~cwd:"" ~envp:(Unix.environment ()) ~timeout_sec:0.0 ()
-          with
-          | Ok tid ->
-              Atomic.set second_started true ;
-              ignore
-                (wait_until ~clock ~attempts:200 (fun () ->
-                   match Bg_task.read tid ~since_stdout:0 ~since_stderr:0 with
-                   | Ok snapshot -> snapshot.closed
-                   | Error _ -> false))
-          | Error err ->
-              Alcotest.failf "second Bg_task spawn failed: %s"
-                (bg_spawn_error_to_string err)) ;
-      Eio.Time.sleep clock 0.005 ;
-      check bool "second Bg_task waits for pressure slot" false
-        (Atomic.get second_started) ;
-      check bool "first Bg_task eventually closes" true
-        (wait_until ~clock ~attempts:200 (fun () ->
-           match Bg_task.read first ~since_stdout:0 ~since_stderr:0 with
-           | Ok snapshot -> snapshot.closed
-           | Error _ -> false)) ;
-      check bool "second Bg_task starts after pressure slot release" true
-        (wait_until ~clock ~attempts:200 (fun () -> Atomic.get second_started)) ;
-      check bool "Bg_task sandbox slots eventually release" true
-        (wait_until ~clock ~attempts:200 (fun () ->
-           kind_in_flight FA.Sandbox_exec = 0)))
-
-let test_bg_task_lifetime_releases_after_exit_without_read () =
-  Eio_main.run @@ fun env ->
-  Eio_guard.enable () ;
-  Fun.protect
-    ~finally:(fun () ->
-      Bg_task.reset_lifetime_guard_for_testing () ;
-      Eio_guard.disable ())
-    (fun () ->
-      Bg_task.reset_lifetime_guard_for_testing () ;
-      FA.install_bg_sandbox_exec_guard () ;
-      let tid =
-        match
-          Bg_task.spawn ~keeper:"fd-accountant-exit-watch"
-            ~argv:[ "/bin/sleep"; "0.01" ]
-            ~cwd:"" ~envp:(Unix.environment ()) ~timeout_sec:0.0 ()
-        with
-        | Ok tid -> tid
-        | Error err ->
-            Alcotest.failf "Bg_task spawn failed: %s"
-              (bg_spawn_error_to_string err)
-      in
-      check int "Bg_task holds sandbox slot after spawn" 1
-        (kind_in_flight FA.Sandbox_exec) ;
-      let clock = Eio.Stdenv.clock env in
-      check bool "Bg_task sandbox slot releases after process exit" true
-        (wait_until ~clock ~attempts:500 (fun () ->
-           kind_in_flight FA.Sandbox_exec = 0)) ;
-      ignore (Bg_task.read tid ~since_stdout:0 ~since_stderr:0))
-
-let test_bg_task_cancelled_lifetime_acquire_releases_pending_slot () =
-  Eio_main.run @@ fun env ->
-  let keeper = "fd-accountant-cancelled-acquire" in
-  Fun.protect
-    ~finally:Bg_task.reset_lifetime_guard_for_testing
-    (fun () ->
-      Bg_task.set_lifetime_guard
-        { Bg_task.acquire =
-            (fun () -> raise (Eio.Cancel.Cancelled (Failure "synthetic")))
-        } ;
-      for _ = 1 to 2 do
-        try
-          ignore
-            (Bg_task.spawn ~keeper ~argv:[ "/bin/sleep"; "0.01" ]
-               ~cwd:"" ~envp:(Unix.environment ()) ~timeout_sec:0.0 ())
-        with
-        | Eio.Cancel.Cancelled _ -> ()
-      done ;
-      Bg_task.reset_lifetime_guard_for_testing () ;
-      let tid =
-        match
-          Bg_task.spawn ~keeper ~argv:[ "/bin/sleep"; "0.01" ]
-            ~cwd:"" ~envp:(Unix.environment ()) ~timeout_sec:0.0 ()
-        with
-        | Ok tid -> tid
-        | Error (Bg_task.Too_many_tasks _) ->
-            Alcotest.fail "cancelled lifetime acquire leaked pending slot"
-        | Error err ->
-            Alcotest.failf "Bg_task spawn failed: %s"
-              (bg_spawn_error_to_string err)
-      in
-      let clock = Eio.Stdenv.clock env in
-      check bool "Bg_task closes after cancelled acquire recovery" true
-        (wait_until ~clock ~attempts:500 (fun () ->
-           match Bg_task.read tid ~since_stdout:0 ~since_stderr:0 with
-           | Ok snapshot -> snapshot.closed
-           | Error _ -> false)))
+       | Unix.WEXITED 0 -> ()
+       | _ -> fail "expected process to exit 0");
+      check int "process observation released" 0 (active Sandbox_exec))
+;;
 
 let () =
-  install_pressure_hooks ();
-  Alcotest.run "Fd_accountant"
-    [
-      ( "kind discrimination",
-        [
-          test_case "round-trip" `Quick test_kind_round_trip ;
-          test_case "unknown rejected" `Quick test_kind_unknown_rejected ;
-          test_case "cap within bounds" `Quick
-            test_configured_within_bounds ;
-          test_case "fd limit reuses Keeper_fd_pressure cache" `Quick
-            test_fd_limit_reuses_keeper_pressure_cache ;
-        ] ) ;
-      ( "slot semantics",
-        [
-          test_case "callback result returned" `Quick
-            test_with_slot_runs_callback ;
-          test_case "release on exception" `Quick
-            test_with_slot_releases_on_exception ;
-          test_case "cap bounds fan-in" `Quick test_cap_bounds_fan_in ;
-          test_case "reentrant same-kind slot" `Quick
-            test_with_slot_reentrant_same_kind ;
-          test_case "nested cross-kind slot under FD pressure" `Quick
-            test_with_slot_nested_cross_kind_under_fd_pressure ;
-          test_case "forked child re-enters pressure gate" `Quick
-            test_forked_child_reenters_pressure_gate_after_parent_slot ;
-        ] ) ;
-      ( "delegation",
-        [
-          test_case "docker delegation cap parity" `Quick
-            test_docker_delegation_consistent ;
-        ] ) ;
-      ( "snapshot",
-        [
-          test_case "shape" `Quick test_snapshot_shape ;
-        ] ) ;
-      ( "log writer",
-        [
-          test_case "Dated_jsonl append uses slot" `Quick
-            test_dated_jsonl_append_uses_log_writer_slot ;
-        ] ) ;
-      ( "process",
-        [
-          test_case "Process_eio run_argv uses sandbox slot" `Quick
-            test_process_eio_run_argv_uses_sandbox_slot ;
-          test_case "With_process uses sandbox slot" `Quick
-            test_with_process_uses_sandbox_slot ;
-          test_case "Autonomy_exec run uses sandbox slot" `Quick
-            test_autonomy_exec_uses_sandbox_slot ;
-          test_case "Bg_task uses sandbox lifetime slot" `Quick
-            test_bg_task_uses_sandbox_lifetime_slot ;
-          test_case "Bg_task lifetime serializes under FD pressure" `Quick
-            test_bg_task_lifetime_serializes_under_fd_pressure ;
-          test_case "Bg_task lifetime releases after process exit" `Quick
-            test_bg_task_lifetime_releases_after_exit_without_read ;
-          test_case "Bg_task cancelled lifetime acquire releases pending slot" `Quick
-            test_bg_task_cancelled_lifetime_acquire_releases_pending_slot ;
-        ] ) ;
-      ( "domain snapshot",
-        [
-          test_case "safe from worker domain" `Quick
-            test_snapshot_safe_from_worker_domain ;
-        ] ) ;
+  install_test_observers ();
+  run
+    "Fd_accountant"
+    [ ( "typed surface"
+      , [ test_case "kind round-trip" `Quick test_kind_round_trip
+        ; test_case "unknown kind rejected" `Quick test_unknown_kind_rejected
+        ] )
+    ; ( "observation semantics"
+      , [ test_case "return and release" `Quick test_observe_returns_and_releases
+        ; test_case "nested scopes are counted" `Quick test_nested_observations_count_every_scope
+        ; test_case "exception releases" `Quick test_exception_releases
+        ; test_case "concurrency is not capped" `Quick test_concurrent_observations_are_not_capped
+        ; test_case "lifetime release is idempotent" `Quick
+            test_lifetime_observation_release_is_idempotent
+        ] )
+    ; ( "resource errors"
+      , [ test_case "typed OS errors are reported" `Quick test_typed_resource_errors_are_reported
+        ; test_case "unrelated errors are ignored" `Quick test_unrelated_exception_is_not_reported
+        ; test_case "observer failure preserves original" `Quick
+            test_observer_failure_does_not_replace_os_error
+        ] )
+    ; "snapshot", [ test_case "observation-only shape" `Quick test_snapshot_is_observation_only ]
+    ; "process wiring", [ test_case "With_process observer" `Quick test_with_process_observer_wiring ]
     ]
+;;

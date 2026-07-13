@@ -22,13 +22,7 @@ let hook_slot_json ?(features = []) ?(gates = []) ?(effects = []) ?reason
      @ list_field "effects" effects)
 ;;
 
-let hook_introspection_json ~denied_tools ?(max_cost_usd : float option)
-    ?(destructive_ops_policy : Destructive_ops_policy.t =
-        Destructive_ops_policy.default)
-    () : Yojson.Safe.t =
-  let destructive_enabled = Destructive_ops_policy.enabled destructive_ops_policy in
-  let denied_json = `List (List.map (fun s -> `String s) denied_tools) in
-  let destructive_json = `String "dynamic_boundary (Tool_capability.Destructive)" in
+let hook_introspection_json () : Yojson.Safe.t =
   let slot ?features ?gates ?effects ?reason ~active ~source name =
     let features = Option.value features ~default:[] in
     let gates = Option.value gates ~default:[] in
@@ -49,7 +43,6 @@ let hook_introspection_json ~denied_tools ?(max_cost_usd : float option)
         ~features:
           [
             "dynamic_context";
-            "adaptive_thinking_budget";
             "tool_surface_selection";
             "memory_injection";
           ]
@@ -67,22 +60,8 @@ let hook_introspection_json ~denied_tools ?(max_cost_usd : float option)
         "after_turn";
       slot
         ~active:true
-        ~source:"keeper_guards"
-        ~gates:
-          [
-            "timing";
-            "custom_guard";
-            "readonly_observation_duplicate";
-            "keeper_deny_list";
-            (if destructive_enabled then "destructive_pattern" else "destructive_pattern_off");
-            "governance_approval";
-          ]
-        ~features:
-          [
-            (if Option.is_some max_cost_usd
-             then "cost_telemetry_threshold"
-             else "cost_telemetry_threshold_off");
-          ]
+        ~source:"keeper_hooks_oas"
+        ~features:[ "tool_start_timing" ]
         "pre_tool_use";
       slot
         ~active:true
@@ -134,21 +113,11 @@ let hook_introspection_json ~denied_tools ?(max_cost_usd : float option)
     ]
   in
   let slot_assoc = List.map (fun (name, _active, json) -> name, json) slot_entries in
-  (* Derived counts (slot_count / active_slot_count / inactive_slot_count /
-     slot_names / deny_list_count) are intentionally NOT emitted: every
-     consumer computes them from [slots] / [deny_list] directly. Emitting them
-     was redundant derived state with no reader. *)
+  (* Derived slot counts are intentionally not emitted: every consumer can
+     compute them from [slots]. *)
   `Assoc
     [
       (key_scope, `String "keeper_runtime_composite");
       (key_slots, `Assoc slot_assoc);
-      ("deny_list", denied_json);
-      ("destructive_check_tools", destructive_json);
-      ( "cost_telemetry",
-        match max_cost_usd with
-        | Some v ->
-          `Assoc
-            [ (key_max_cost_usd, `Float v); (key_active, `Bool true); ("enforced", `Bool false) ]
-        | None -> `Assoc [ (key_active, `Bool false); ("enforced", `Bool false) ] );
     ]
 ;;

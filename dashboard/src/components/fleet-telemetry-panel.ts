@@ -257,9 +257,9 @@ function ControlWorkspacePanel({ state }: { state: FleetTelemetryState }) {
           tone=${readinessTone(readiness.status)}
         />
         <${SummaryCard}
-          title="승인 대기"
+          title="Gate 대기"
           value=${pendingApprovals.toString()}
-          detail=${pendingApprovals > 0 ? '오퍼레이터 승인 대기열이 비어있지 않습니다.' : '대기 중인 승인이 없습니다.'}
+          detail=${pendingApprovals > 0 ? 'Gate/HITL 요청이 대기 중입니다.' : '대기 중인 Gate/HITL 요청이 없습니다.'}
           tone=${pendingApprovals > 0 ? 'warn' : 'ok'}
         />
         <${SummaryCard}
@@ -443,9 +443,6 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
                   >
                     ${row.sandbox_profile ? `sandbox ${row.sandbox_profile}` : 'sandbox unknown'}
                   </span>
-                  ${row.decision_required
-                    ? html`<span class="rounded-[var(--r-1)] bg-[var(--bad-10)] px-1.5 py-0.5 text-3xs text-[var(--bad-light)]">decision</span>`
-                    : null}
                   ${row.stop_cause
                     ? html`
                       <span
@@ -848,7 +845,7 @@ export function FleetTelemetryPanel() {
           value=${counts.blocked.toString()}
           detail=${counts.blocked > 0
             ? '런타임은 살아있지만 typed blocker_class를 가진 키퍼 — 행 필터에서 blocker 클래스 이름으로 검색해 원인 확인.'
-            : '활성 차단 사유가 보고된 키퍼가 없습니다 (admission_queue_wait_timeout, provider_runtime_error 등).'}
+            : '활성 차단 사유가 보고된 키퍼가 없습니다.'}
           tone=${counts.blocked > 0 ? 'warn' : 'ok'}
         />
         <${SummaryCard}

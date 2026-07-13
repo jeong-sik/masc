@@ -100,17 +100,21 @@ let test_read_recent_keeper_filter () =
     Alcotest.(check int) "bob gets 1 entry" 1 (List.length bob_entries);
     Alcotest.(check int) "all gets 2 entries" 2 (List.length all_entries))
 
-(* ── Redaction: denied tools are skipped ────────────── *)
+(* ── Redaction: tool names do not suppress evidence ────────────── *)
 
-let test_denied_tool_not_logged () =
+let test_sensitive_named_tool_logged_with_redaction () =
   with_tmp_log (fun () ->
-    (* tool name containing "_auth" infix is denied by Observability_redact *)
     Keeper_tool_call_log.log_call
       ~keeper_name:"k" ~tool_name:"mcp_auth_create"
       ~input:(`Assoc [("token", `String "secret123")]) ~output_text:"done"
       ~success:true ~duration_ms:1.0 ();
     let result = Keeper_tool_call_log.read_recent () in
-    Alcotest.(check int) "denied tool not logged" 0 (List.length result))
+    Alcotest.(check int) "tool call logged" 1 (List.length result);
+    let encoded = Yojson.Safe.to_string (List.hd result) in
+    Alcotest.(check bool)
+      "sensitive value redacted"
+      false
+      (String_util.contains_substring encoded "secret123"))
 
 (* ── Redaction: sensitive fields stripped ────────────── *)
 
@@ -153,83 +157,6 @@ let test_model_field_stored () =
       (Some "local_qwen3_27b_only")
       (Safe_ops.json_string_opt "runtime_profile" (List.hd entries)))
 
-let test_policy_denied_structured_error_gets_semantic_failure () =
-  with_tmp_log (fun () ->
-    Keeper_tool_call_log.log_call
-      ~keeper_name:"k" ~tool_name:"tool_read_file"
-      ~input:(`Assoc [("path", `String "blocked.txt")])
-      ~output_text:
-        {|{"ok":false,"error":"tool_not_allowed","tool":"tool_read_file"}|}
-      ~success:true ~duration_ms:1.0 ();
-    let entries = Keeper_tool_call_log.read_recent ~n:1 () in
-    Alcotest.(check int) "one entry" 1 (List.length entries);
-    let entry = List.hd entries in
-    Alcotest.(check bool) "transport success preserved" true
-      (Safe_ops.json_bool ~default:false "success" entry);
-    Alcotest.(check bool) "semantic success is false" false
-      (Safe_ops.json_bool ~default:true "semantic_success" entry);
-    Alcotest.(check (option string)) "semantic outcome"
-      (Some "policy_denied")
-      (Safe_ops.json_string_opt "semantic_outcome" entry);
-    let summary = Dashboard_http_tool_quality.aggregate ~n:10 () in
-    Alcotest.(check int) "dashboard semantic success count" 0
-      (Safe_ops.json_int ~default:(-1) "success" summary);
-    Alcotest.(check int) "dashboard semantic failure count" 1
-      (Safe_ops.json_int ~default:(-1) "failure" summary);
-    let failure_category =
-      summary
-      |> Yojson.Safe.Util.member "failure_categories"
-      |> Yojson.Safe.Util.to_list
-      |> List.hd
-    in
-    Alcotest.(check (option string)) "failure category"
-      (Some "policy_denied")
-      (Safe_ops.json_string_opt "category" failure_category))
-
-let test_structured_ok_overrides_transport_failure_for_semantic_success () =
-  with_tmp_log (fun () ->
-    Keeper_tool_call_log.log_call
-      ~keeper_name:"k" ~tool_name:"tool_execute"
-      ~input:(`Assoc [ "cmd", `String "rg missing lib" ])
-      ~output_text:
-        {|{"ok":true,"semantic_status":"no_match","summary":"Search completed with no matches."}|}
-      ~success:false ~duration_ms:1.0 ();
-    let entries = Keeper_tool_call_log.read_recent ~n:1 () in
-    let entry = List.hd entries in
-    Alcotest.(check bool) "transport failure preserved" false
-      (Safe_ops.json_bool ~default:true "success" entry);
-    Alcotest.(check bool) "semantic success follows structured output" true
-      (Safe_ops.json_bool ~default:false "semantic_success" entry);
-    Alcotest.(check (option string)) "semantic outcome"
-      (Some "no_match")
-      (Safe_ops.json_string_opt "semantic_outcome" entry))
-
-let test_blocked_structured_output_keeps_semantic_category () =
-  with_tmp_log (fun () ->
-    Keeper_tool_call_log.log_call
-      ~keeper_name:"k" ~tool_name:"tool_execute"
-      ~input:(`Assoc [ "cmd", `String "git log --oneline | head -5" ])
-      ~output_text:
-        {|{"ok":false,"error":"tool_execute_command_shape_blocked","failure_class":"workflow_rejection","semantic_status":"blocked","shape_block":"pipe_or_redirect"}|}
-      ~success:false ~duration_ms:1.0 ();
-    let entries = Keeper_tool_call_log.read_recent ~n:1 () in
-    let entry = List.hd entries in
-    Alcotest.(check bool) "semantic success is false" false
-      (Safe_ops.json_bool ~default:true "semantic_success" entry);
-    Alcotest.(check (option string)) "semantic outcome"
-      (Some "blocked")
-      (Safe_ops.json_string_opt "semantic_outcome" entry);
-    let summary = Dashboard_http_tool_quality.aggregate ~n:10 () in
-    let failure_category =
-      summary
-      |> Yojson.Safe.Util.member "failure_categories"
-      |> Yojson.Safe.Util.to_list
-      |> List.hd
-    in
-    Alcotest.(check (option string)) "failure category keeps shape tag"
-      (Some "shape_block:pipe_or_redirect")
-      (Safe_ops.json_string_opt "category" failure_category))
-
 let test_turn_context_fields_stored () =
   with_tmp_log (fun () ->
     (* Mirrors the production reader (keeper_hooks_oas): context is
@@ -255,7 +182,6 @@ let test_turn_context_fields_stored () =
       ~sandbox_root:"/tmp/k-sandbox"
       ~allowed_paths:["/tmp/k-sandbox"; "/tmp/shared"]
       ~network_mode:"inherit"
-      ~approval_mode:"manual"
       ~runtime_profile:"tool_use_strict"
       ();
     let tctx : Keeper_tool_call_log_context.turn_context =
@@ -279,7 +205,6 @@ let test_turn_context_fields_stored () =
       ?sandbox_root:tctx.sandbox_root
       ?allowed_paths:tctx.allowed_paths
       ?network_mode:tctx.network_mode
-      ?approval_mode:tctx.approval_mode
       ?runtime_profile:tctx.runtime_profile
       ();
     let entries = Keeper_tool_call_log.read_recent () in
@@ -327,9 +252,6 @@ let test_turn_context_fields_stored () =
     Alcotest.(check (option string)) "network_mode field"
       (Some "inherit")
       (Safe_ops.json_string_opt "network_mode" entry);
-    Alcotest.(check (option string)) "approval_mode field"
-      (Some "manual")
-      (Safe_ops.json_string_opt "approval_mode" entry);
     let runtime_contract =
       Yojson.Safe.Util.member "runtime_contract" entry
     in
@@ -755,9 +677,6 @@ let test_route_evidence_records_masc_board_descriptor () =
       Alcotest.(check (option string)) "executor"
         (Some "in_process")
         (Safe_ops.json_string_opt "executor" evidence);
-      Alcotest.(check (option string)) "effect domain"
-        (Some "masc_workspace")
-        (Safe_ops.json_string_opt "effect_domain" evidence);
       Alcotest.(check (option string)) "runtime handler"
         (Some "tool_masc_board_dispatch")
         (Safe_ops.json_string_opt "runtime_handler" evidence)
@@ -796,7 +715,7 @@ let test_non_object_input_still_logs_action_radius () =
       ~keeper_name:"executor"
       ~tool_name:"tool_write_file"
       ~input:(`String "raw pre-tool gate payload")
-      ~output_text:"approval_required:governance_approval"
+      ~output_text:"gate_waiting_for_operator"
       ~success:false
       ~duration_ms:3.0
       ();
@@ -1271,15 +1190,10 @@ let () =
         ; eio_test "keeper filter" test_read_recent_keeper_filter
         ] )
     ; ( "redaction",
-        [ eio_test "denied tool not logged" test_denied_tool_not_logged
+        [ eio_test "sensitive-named tool logged with redaction"
+            test_sensitive_named_tool_logged_with_redaction
         ; eio_test "sensitive input fields redacted" test_sensitive_input_fields_redacted
         ; eio_test "model field stored" test_model_field_stored
-        ; eio_test "policy denied is semantic failure"
-            test_policy_denied_structured_error_gets_semantic_failure
-        ; eio_test "structured ok overrides transport failure"
-            test_structured_ok_overrides_transport_failure_for_semantic_success
-        ; eio_test "blocked output keeps semantic category"
-            test_blocked_structured_output_keeps_semantic_category
         ; eio_test "turn context fields stored" test_turn_context_fields_stored
         ; Alcotest.test_case "turn context cells do not cross runs" `Quick
             test_turn_context_cells_do_not_cross_runs

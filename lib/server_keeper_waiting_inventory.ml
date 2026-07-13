@@ -21,9 +21,9 @@ type keeper_state =
 
 type wake_producer =
   | Board_dispatch
+  | Board_attention_judge
   | Keeper_chat_queue_store
   | Keeper_supervisor
-  | Keeper_no_progress_recovery
   | Fusion_sink
   | Bg_task_completion
   | Connector_attention_hook
@@ -33,10 +33,8 @@ type wake_producer =
   | Schedule_runner
   | Keeper_turn_admission
   | Operator_pending_confirm_store
-  | Goal_verification_store
   | Keeper_turn_failure_route
   | Keeper_goal_assignment
-  | Keeper_goal_stagnation
   | Read_model_reader
 
 type waiting_row =
@@ -96,9 +94,9 @@ let all_keeper_states = [ Idle; Busy; Waiting; Deferred ]
 
 let wake_producer_to_string = function
   | Board_dispatch -> "board_dispatch"
+  | Board_attention_judge -> "board_attention_judge"
   | Keeper_chat_queue_store -> "keeper_chat_queue_store"
   | Keeper_supervisor -> "keeper_supervisor"
-  | Keeper_no_progress_recovery -> "keeper_no_progress_recovery"
   | Fusion_sink -> "fusion_sink"
   | Bg_task_completion -> "bg_task_completion"
   | Connector_attention_hook -> "connector_attention_hook"
@@ -108,27 +106,23 @@ let wake_producer_to_string = function
   | Schedule_runner -> "schedule_runner"
   | Keeper_turn_admission -> "keeper_turn_admission"
   | Operator_pending_confirm_store -> "operator_pending_confirm_store"
-  | Goal_verification_store -> "goal_verification_store"
   | Keeper_turn_failure_route -> "keeper_turn_failure_route"
   | Keeper_goal_assignment -> "keeper_goal_assignment"
-  | Keeper_goal_stagnation -> "keeper_goal_stagnation"
   | Read_model_reader -> "read_model_reader"
 ;;
 
 let wake_producer_of_payload : Keeper_event_queue.stimulus_payload -> wake_producer =
   function
   | Board_signal _ -> Board_dispatch
+  | Board_attention _ -> Board_attention_judge
   | Bootstrap -> Keeper_supervisor
-  | No_progress_recovery -> Keeper_no_progress_recovery
   | Fusion_completed _ -> Fusion_sink
   | Bg_completed _ -> Bg_task_completion
   | Schedule_due _ -> Schedule_runner
   | Connector_attention _ -> Connector_attention_hook
   | Hitl_resolved _ -> Hitl_resolution_hook
-  | Goal_verification_failed _ -> Goal_verification_store
   | Failure_judgment _ -> Keeper_turn_failure_route
   | Goal_assigned _ -> Keeper_goal_assignment
-  | Goal_stagnation _ -> Keeper_goal_stagnation
 ;;
 
 let unix_iso_json = function
@@ -414,8 +408,6 @@ let turn_admission_rows ~base_path keeper_name =
             ; "waiting_since", float_json snapshot.snapshot_waiting_since
             ; "waiting_since_iso", unix_iso_json snapshot.snapshot_waiting_since
             ; "chat_waiting_count", `Int snapshot.snapshot_waiting
-            ; "chat_waiting_cap", `Int snapshot.snapshot_waiting_cap
-            ; "chat_waiting_full", `Bool snapshot.snapshot_waiting_full
             ; "in_flight", in_flight_detail
             ]
       }
@@ -440,8 +432,7 @@ let hitl_rows keeper_name pending =
         `Assoc
           [ "approval_id", `String entry.id
           ; "tool_name", `String entry.tool_name
-          ; "risk_level", `String (Keeper_approval_queue.risk_level_to_string entry.risk_level)
-          ; "phase", `String (Keeper_approval_queue.pending_phase_to_string entry.phase)
+          ; "summary_status", Keeper_approval_queue.summary_status_to_yojson entry.summary_status
           ; "turn_id", Json_util.int_opt_to_json entry.turn_id
           ; "task_id", Json_util.string_opt_to_json entry.task_id
           ; "goal_id", Json_util.string_opt_to_json entry.goal_id
@@ -584,11 +575,10 @@ let schedule_active (request : Schedule_domain.schedule_request) =
 
 let schedule_next_action (request : Schedule_domain.schedule_request) =
   match request.status with
-  | Pending_approval -> "operator_grant_schedule"
   | Scheduled -> "wait_until_due"
   | Due -> "schedule_runner_dispatch"
   | Running -> "await_schedule_completion"
-  | Succeeded | Failed | Rejected | Cancelled | Expired -> "none"
+  | Succeeded | Failed | Cancelled | Expired -> "none"
 ;;
 
 let schedule_waiting_on (request : Schedule_domain.schedule_request) =
@@ -615,8 +605,7 @@ let schedule_rows ~keeper_names state =
     ; wake_producer =
         (match request.status with
          | Scheduled | Due | Running -> Schedule_runner
-         | Pending_approval -> Schedule_store
-         | Succeeded | Failed | Rejected | Cancelled | Expired -> Schedule_store)
+         | Succeeded | Failed | Cancelled | Expired -> Schedule_store)
     ; since = Some request.requested_at
     ; due_at = Some request.due_at
     ; next_action = schedule_next_action request
@@ -624,7 +613,6 @@ let schedule_rows ~keeper_names state =
         `Assoc
           [ "schedule_id", `String request.schedule_id
           ; "status", `String (Schedule_domain.schedule_status_to_string request.status)
-          ; "risk_class", `String (Schedule_domain.risk_class_to_string request.risk_class)
           ; "payload_digest", `String (Schedule_domain.payload_digest request.payload)
           ; ( "payload_kind"
             , match Schedule_payload_projection.kind request with

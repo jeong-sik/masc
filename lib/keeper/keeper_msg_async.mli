@@ -29,6 +29,7 @@ type request_status =
   | Done of
       { ok : bool
       ; body : string
+      ; data : Yojson.Safe.t option
       }
 
 type entry =

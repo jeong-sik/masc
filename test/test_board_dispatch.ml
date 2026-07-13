@@ -616,24 +616,12 @@ let test_author_filter_treats_wildcards_literally () =
   Alcotest.(check int) "percent does not match all authors" 0
     (List.length filtered)
 
-let test_reclassify_posts_dry_run_and_apply () =
+let test_legacy_post_without_kind_is_rejected () =
   let post_id = seed_legacy_keeper_post () in
-  let dry_run = Board_dispatch.reclassify_posts ~dry_run:true () in
-  Alcotest.(check int) "dry run changed" 1 dry_run.changed;
-  (match Board_dispatch.get_post ~post_id with
-   | Error e -> Alcotest.fail (Board.show_board_error e)
-   | Ok fetched ->
-       Alcotest.(check string) "legacy row resolves as automation" "automation"
-         (Board.post_kind_to_string fetched.post_kind));
-  let applied = Board_dispatch.reclassify_posts ~dry_run:false () in
-  Alcotest.(check int) "apply changed" 1 applied.changed;
-  Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ();
   match Board_dispatch.get_post ~post_id with
+  | Error (Board.Post_not_found _) -> ()
   | Error e -> Alcotest.fail (Board.show_board_error e)
-  | Ok fetched ->
-      Alcotest.(check string) "persisted as automation" "automation"
-        (Board.post_kind_to_string fetched.post_kind)
+  | Ok _ -> Alcotest.fail "legacy post without post_kind must not be classified"
 
 (** {1 Comment Operations} *)
 
@@ -1857,8 +1845,8 @@ let () =
         (with_eio test_list_posts_matches_comment_author);
       Alcotest.test_case "literal wildcard filter" `Quick
         (with_eio test_author_filter_treats_wildcards_literally);
-      Alcotest.test_case "reclassify dry-run and apply" `Quick
-        (with_eio test_reclassify_posts_dry_run_and_apply);
+      Alcotest.test_case "legacy post without kind is rejected" `Quick
+        (with_eio test_legacy_post_without_kind_is_rejected);
     ];
     "comments", [
       Alcotest.test_case "add and get" `Quick (with_eio test_add_and_get_comments);

@@ -1,5 +1,4 @@
-(** Verifier_core — Pure verification types, parsing, and read-only
-    detection.
+(** Verifier_core — Pure verification types and structured verdict parsing.
 
     No [Agent_sdk] or OAS dependency. Extracted from [verifier_oas.ml]
     to enforce the MASC-OAS boundary: core domain logic stays
@@ -16,10 +15,6 @@ type verification_request = {
   action_result : string;
   goal : string;
   context_summary : string;
-  effect_class : Effect_class.t;
-      (** RFC-0331: the tool's declared effect class. [Read_only] skips
-          verification; [Mutating] (the fail-closed default for
-          unknown/undeclared tools) runs it. *)
 }
 
 type verdict =
@@ -38,10 +33,6 @@ type grounded_verdict = private {
   evidence : grounded_ref list;
 }
 
-(* RFC-0331: the free-text read-only substring classifier was removed. The
-   verifier skips iff [request.effect_class = Read_only], resolved from tool
-   registration at the boundary — the description text is never classified. *)
-
 (** {1 Verdict Parsing} *)
 
 (** ["PASS"] / ["WARN: <reason>"] / ["FAIL: <reason>"]. *)
@@ -54,12 +45,6 @@ val verdict_to_string : verdict -> string
 val verdict_constructor_name : verdict -> string
 
 val valid_verdict_strings : string list
-
-(** Parse a free-form verifier text line. Accepts [PASS | WARN | FAIL]
-    followed optionally by [:] or [-] and a reason. Returns [Error]
-    on empty input or unrecognised prefix; reason-less [Warn] /
-    [Fail] fill in a default reason. *)
-val parse_verdict : string -> (verdict, string) result
 
 (** [grounded_of verdict evidence] builds a grounded verdict. [Pass]
     does not require evidence. [Warn]/[Fail] require at least one
@@ -82,10 +67,9 @@ val grounded_verdict_to_yojson : grounded_verdict -> Yojson.Safe.t
 val report_verdict_schema : Masc_domain.tool_schema
 
 (** Parse a [report_verdict] JSON arg payload. Empty/missing [reason]
-    on [Warn]/[Fail] fills in a default reason (same as
-    {!parse_verdict}). Errors on type mismatch or unknown [verdict]
-    values. Optional [evidence] is accepted but ignored by this
-    compatibility parser. *)
+    on [Warn]/[Fail] fills in a default reason. Errors on type mismatch or
+    unknown [verdict] values. Optional [evidence] is accepted but ignored by
+    this verdict-only parser. *)
 val parse_verdict_from_json : Yojson.Safe.t -> (verdict, string) result
 
 (** Parse a [report_verdict] JSON arg payload and enforce grounding.

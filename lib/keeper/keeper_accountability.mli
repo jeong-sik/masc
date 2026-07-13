@@ -56,12 +56,6 @@ val enable_window_read_count_for_testing : unit -> unit
 val disable_window_read_count_for_testing : unit -> unit
 val window_read_count_for_testing : unit -> int
 
-val accountability_risk_is_high :
-  Workspace_query.config ->
-  keeper_name:string ->
-  agent_name:string ->
-  bool
-
 (** {1 Attribution envelope (Layer 1)}
 
     Convert a [claim_status] into the typed attribution envelope used by

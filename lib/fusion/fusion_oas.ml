@@ -164,6 +164,7 @@ let build_agent
     (model : string)
   : (Agent_sdk.Agent.t, Fusion_types.panel_failure) result
   =
+  let _ = max_tool_calls, max_tokens in
   (* 카드명(Async_agent.all이 결과 키로 반환)은 패널 정체성([name], 예 "skeptic (claude)").
      provider 라우팅·에러 귀속은 원 [model]로 따로 한다 — 정체성과 routable model을 한
      문자열에 압축하지 않는다 (RFC-0278). [name] 미지정(judge·label 없는 panel)이면 카드명=model.
@@ -199,27 +200,8 @@ let build_agent
            ~system_prompt
            ~tools
        in
-       let base_config = apply_timeout_budget ?timeout_s base_config in
-       let base_config
-         : (Runtime_agent.config, Fusion_types.panel_failure) result
-         =
-         match max_tokens with
-         | None -> Ok base_config
-         | Some n when Fusion_policy.valid_max_output_tokens (Some n) ->
-           Ok { base_config with max_tokens = Some n }
-         | Some n -> Error (Fusion_types.Invalid_max_output_tokens n)
-       in
-       (match base_config with
-        | Error _ as err -> err
-        | Ok base_config ->
-          (* max_tool_calls는 OpenRouter Fusion의 per-panel tool budget에 대응.
-             Runtime_agent의 max_turns로 근사: tool 호출 횟수 + 최종 답변 1턴. *)
-          let config =
-            if max_tool_calls > 0
-            then { base_config with max_turns = max_tool_calls + 1 }
-            else base_config
-          in
-    match Runtime_agent.build ~sw ~net ~config with
+       let config = apply_timeout_budget ?timeout_s base_config in
+       match Runtime_agent.build ~sw ~net ~config with
            | Ok agent -> Ok agent
            | Error e ->
              Error
@@ -227,7 +209,7 @@ let build_agent
                    (provider_error_detail
                       ~runtime_id:model
                       (Agent_sdk.Error.to_string e))
-                 : Fusion_types.panel_failure))))
+                 : Fusion_types.panel_failure)))
 
 module For_testing = struct
   let apply_timeout_budget = apply_timeout_budget

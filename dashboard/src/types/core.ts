@@ -137,40 +137,13 @@ export type BoardVoteDirection = 'up' | 'down'
 export type BoardModerationStatus = 'none' | 'flagged' | 'approved' | 'removed' | 'hidden' | 'warned'
 
 export interface BoardContributorQuality {
-  score?: number
-  band?: 'low' | 'watch' | 'strong' | 'excellent'
   source?: string
   completion_rate?: number
   response_rate?: number
   board_posts?: number
   board_comments?: number
-  accountability_score?: number
-  autonomy_level?: string
   thompson_confidence?: number
   evidence_state?: 'default' | 'measured'
-}
-
-export type BoardClaimEvidenceState =
-  | 'needs_evidence'
-  | 'source_snapshot_stale'
-  | 'artifact_missing'
-  | 'verified'
-
-export interface BoardClaimEvidenceProjection {
-  source?: string
-  target_post_id?: string
-  state: BoardClaimEvidenceState
-  label: string
-  total_count: number
-  allowed_count: number
-  rejected_count: number
-  artifact_missing_count: number
-  artifact_unknown_count: number
-  missing_source_snapshot_count: number
-  stale_source_snapshot_count: number
-  artifact_not_verified_count: number
-  latest_decision?: string
-  latest_recorded_at?: number
 }
 
 export interface BoardActorIdentity {
@@ -225,7 +198,6 @@ export interface BoardPost {
   report_count?: number
   moderation_status?: BoardModerationStatus
   contributor_quality?: BoardContributorQuality | null
-  claim_evidence?: BoardClaimEvidenceProjection | null
   reactions?: BoardReactionSummary[]
   supported_reaction_emojis?: string[]
   origin?: BoardPostOrigin | null
@@ -451,20 +423,9 @@ export interface ProviderHealth {
 }
 
 export const KEEPER_RUNTIME_BLOCKER_CLASSES = [
-  'ambiguous_post_commit_timeout',
-  'ambiguous_post_commit_failure',
-  'admission_queue_wait_timeout',
-  'turn_timeout_after_queue_wait',
   'turn_timeout',
-  // Emitted by `lib/keeper/keeper_meta_contract.ml:101` (Turn_livelock_blocked)
-  // serialized via `blocker_class_to_string` → `"turn_livelock_blocked"`.
-  // Korean label already exists at `fsm-hub-types.ts:572` — the union
-  // omission caused silent string-fallback narrowing on the wire.
-  'turn_livelock_blocked',
-  'completion_contract_violation',
   'runtime_exhausted',
   'provider_runtime_error',
-  'tool_route_recoverable_failure',
   'fiber_unresolved',
   'stale_turn_timeout',
   'stale_termination_storm',
@@ -477,11 +438,6 @@ export const KEEPER_RUNTIME_BLOCKER_CLASSES = [
   'supervisor_paused',
   'synthetic_stall',
   'self_imposed_idle',
-  // Emitted by `lib/keeper/keeper_unified_turn_no_progress.ml` when
-  // a keeper produces consecutive no-progress turns above the configured
-  // threshold. Serialized via
-  // `keeper_meta_contract.ml` blocker_class_to_string No_progress_loop.
-  'no_progress_loop',
   'sdk_max_turns_exceeded',
   'sdk_token_budget_exceeded',
   'sdk_cost_budget_exceeded',
@@ -513,7 +469,6 @@ export interface KeeperCurrentGate {
   source?: string | null
   id?: string | null
   tool?: string | null
-  risk?: string | null
   turn_id?: number | null
   at?: string | null
   age_s?: number | null
@@ -528,9 +483,7 @@ export interface KeeperCurrentGate {
 // silently through narrowing.
 export type KeeperPauseState = 'active' | 'paused'
 
-// Wire emit: `lib/keeper/keeper_status_bridge.ml:721–724` — derived
-// from `runtime_blocker_surface_opt` + `continue_gate`. Closed 3-arm.
-export type KeeperRuntimeBlockerState = 'clear' | 'blocked' | 'continue_gate'
+export type KeeperRuntimeBlockerState = 'clear' | 'blocked'
 
 export type StopCauseSource =
   | 'runtime_blocker_class'
@@ -586,7 +539,7 @@ export interface KeeperTrustExecutionSummary {
   runtime_outcome?: string | null
   sandbox_summary?: string | null
   sandbox_root?: string | null
-  mutation_guard_summary?: string | null
+  completion_observation_summary?: string | null
   latest_receipt_at?: string | null
 }
 
@@ -631,7 +584,6 @@ export type KeeperLifecycleState =
   | 'paused'
   | 'crashed'
   | 'dead'
-  | 'zombie'
   | 'unknown'
 
 export interface Goal {
@@ -643,25 +595,11 @@ export interface Goal {
   priority: number
   status: string
   phase: string
-  verifier_policy?: GoalVerifierPolicy | null
-  require_completion_approval?: boolean
-  active_verification_request_id?: string | null
   parent_goal_id?: string | null
   last_review_note?: string | null
   last_review_at?: string | null
   created_at: string
   updated_at: string
-}
-
-export interface GoalVerifierPrincipal {
-  id: string
-  display_name?: string | null
-}
-
-export interface GoalVerifierPolicy {
-  inherit_mode: 'extend' | 'replace'
-  principals: GoalVerifierPrincipal[]
-  required_verdicts?: number | null
 }
 
 // --- Keeper ---
@@ -794,8 +732,6 @@ export interface KeeperConversationDetails {
   latencyMs?: number | null
   costUsd?: number | null
   usage?: KeeperConversationUsage | null
-  skillPrimary?: string | null
-  skillReason?: string | null
   replyText?: string | null
   turnOutcome?: KeeperTurnOutcome | null
   /** Durable server receipt for a busy chat message accepted into the Keeper
@@ -1004,7 +940,7 @@ export interface KeeperConversationStreamContract {
 }
 
 export interface SurfaceRef {
-  kind: 'dashboard' | 'discord' | 'slack' | 'github' | 'webhook' | 'agent' | 'gate' | string
+  kind: 'dashboard' | 'discord' | 'slack' | 'webhook' | 'agent' | 'gate' | string
   session_id?: string
   guild_id?: string
   channel_id?: string
@@ -1012,8 +948,6 @@ export interface SurfaceRef {
   thread_id?: string
   team_id?: string
   thread_ts?: string
-  repo?: string
-  notification_id?: string
   source?: string
   event_id?: string
   label?: string
@@ -1193,7 +1127,6 @@ export type KeeperPhase =
   | 'Crashed'
   | 'Restarting'
   | 'Dead'
-  | 'Zombie'
 
 export const KEEPER_AUTOBOOT_EXCLUSION_REASONS = [
   'declarative_autoboot_disabled',
@@ -1259,13 +1192,10 @@ export interface Keeper {
   diagnostic?: KeeperDiagnostic | null
   registry_state?: string | null
   proactive_enabled?: boolean
-  proactive_idle_sec?: number
-  proactive_cooldown_sec?: number
   pause_state?: KeeperPauseState | null
   runtime_blocker_state?: KeeperRuntimeBlockerState | null
   runtime_blocker_class?: KeeperRuntimeBlockerClass | null
   runtime_blocker_summary?: string | null
-  runtime_blocker_continue_gate?: boolean | null
   stop_cause?: StopCause | null
   needs_attention?: boolean | null
   attention_reason?: string | null
@@ -1284,11 +1214,6 @@ export interface Keeper {
     open_task_count?: number
     blocked_task_count?: number
     convergence?: number | null
-  } | null
-  approval_policy_effective?: {
-    allow_rules?: number
-    deny_rules?: number
-    persisted_rules?: number
   } | null
   last_autonomous_action_at?: string | null
   autonomous_action_count?: number
@@ -1377,9 +1302,6 @@ export interface Keeper {
   handoff_count_total?: number
   compaction_count?: number
   last_compaction_saved_tokens?: number
-  skill_primary?: string | null
-  skill_secondary?: string[]
-  skill_reason?: string | null
   metrics_window?: MetricsWindow
   agent?: {
     name?: string
@@ -1410,8 +1332,7 @@ export interface Keeper {
  *  [Dashboard_http_keeper.compute_outcomes_rollup]. See
  *  [specs/keeper-state-machine/KeeperOutcomesConservation.tla] for the
  *  conservation invariant:
- *    successes.substantive_turns + failures.turn_failed + failures.gate_rejected
- *      = observed_turns
+ *    successes.substantive_turns + failures.turn_failed = observed_turns
  */
 export interface KeeperOutcomes {
   window: string
@@ -1423,7 +1344,6 @@ export interface KeeperOutcomes {
   }
   failures: {
     turn_failed: number
-    gate_rejected: number
     compaction_failed: number
     handoff_failed: number
     crashes: number
@@ -1447,7 +1367,7 @@ export interface KeeperOutcomes {
   }
 }
 
-/** 16 observable conditions that drive the keeper FSM (RFC-0002 §4).
+/** Observable conditions that drive the keeper FSM.
  *  Serialized by [Keeper_state_machine.conditions_to_json]. */
 export interface KeeperConditions {
   launch_pending: boolean
@@ -1460,11 +1380,9 @@ export interface KeeperConditions {
   handoff_active: boolean
   operator_paused: boolean
   stop_requested: boolean
-  restart_budget_remaining: boolean
-  backoff_elapsed: boolean
+  dead_tombstone_latched: boolean
   drain_complete: boolean
   context_overflow: boolean
-  compact_retry_exhausted: boolean
 }
 
 export interface KeeperSupervisorCrashLogEntry {
@@ -1474,13 +1392,9 @@ export interface KeeperSupervisorCrashLogEntry {
 
 interface KeeperSupervisorDiagnostics {
   restart_count?: number
-  max_restarts?: number
   crash_log?: KeeperSupervisorCrashLogEntry[]
   last_failure_reason?: string | null
   dead_since?: number | null
-  sp_events?: unknown[]
-  health_score?: number
-  dead_eta_sec?: number | null
 }
 
 // --- Keeper Config (structured read-only view) ---
@@ -1534,8 +1448,6 @@ interface KeeperConfigCompaction {
 
 interface KeeperConfigProactive {
   enabled: boolean
-  idle_sec: number
-  cooldown_sec: number
 }
 
 export interface RuntimeRef {
@@ -1585,7 +1497,6 @@ interface KeeperConfigRuntime {
   active_model_label?: string | null
   last_model_used_label?: string | null
   runtime_blocker_summary?: string | null
-  runtime_blocker_continue_gate?: boolean | null
 }
 
 interface KeeperConfigWorkspace {
@@ -1595,18 +1506,6 @@ interface KeeperConfigWorkspace {
   active_goals: KeeperConfigActiveGoal[]
   active_goal_count: number
   missing_active_goal_ids: string[]
-}
-
-export interface KeeperConfigTools {
-  // Raw configured tool-access allowlist (tool-name strings). The backend
-  // serialises this as a JSON string list (Json_util.json_string_list); the
-  // earlier `unknown` typing masked that and left it unread.
-  tool_access: string[]
-  resolved_allowlist: string[]
-  tool_denylist: string[]
-  active_masc_tool_count: number
-  active_keeper_tool_count: number
-  total_active: number
 }
 
 interface KeeperConfigSources {
@@ -1659,7 +1558,6 @@ interface KeeperHookIntrospection {
   deny_list: string[]
   // deny_list_count dropped: it is pure derived state (deny_list.length).
   // Consumers compute the count from the array directly.
-  destructive_check_tools: string[]
   cost_budget: { max_cost_usd?: number | null; active: boolean }
 }
 
@@ -1684,7 +1582,6 @@ export interface KeeperConfig {
   runtime: KeeperConfigRuntime
   runtime_trust?: KeeperConfigRuntimeTrust | null
   workspace: KeeperConfigWorkspace
-  tools: KeeperConfigTools
   sources: KeeperConfigSources
   metrics: KeeperConfigMetrics
   field_presence?: KeeperConfigFieldPresence

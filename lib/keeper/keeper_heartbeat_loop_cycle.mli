@@ -19,7 +19,7 @@ type cycle_outcome =
 
 and failure_judgment_terminal =
   | Judgment_boundary_failed of { detail : string }
-  | Judgment_operator_required of
+  | Judgment_external_input_requested of
       { judge_runtime_id : string
       ; rationale : string
       }

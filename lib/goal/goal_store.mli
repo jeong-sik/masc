@@ -5,15 +5,12 @@
     integer [version] counter and an ISO-8601 [updated_at]
     stamp.  Each goal carries:
 
-    - a {!Goal_phase.t} (canonical lifecycle: [Executing] /
-      [Awaiting_verification] / [Blocked] / [Completed] /
-      [Paused] / [Dropped]),
+    - a {!Goal_phase.t} (canonical lifecycle: [Executing] / [Blocked] /
+      [Completed] / [Paused] / [Dropped]),
     - a legacy {!goal_status} kept for backward-compat with
       consumers that have not migrated to phases yet
       (derived from phase on write, inferred on read for
-      old rows),
-    - an optional {!Goal_verification.goal_verifier_policy}
-      that gates entry into [Goal_phase.Completed].
+      old rows).
 
     Every type is exposed concretely because external
     callers ([test/test_dashboard_goals],
@@ -68,10 +65,10 @@ val parse_goal_phase : string option -> Goal_phase.t option
 val goal_status_of_phase : Goal_phase.t -> goal_status
 (** Forward derivation used on write.  Maps every phase to
     its canonical legacy status:
-    - [Executing] / [Awaiting_verification] → [Active]
-    - [Paused] → [Paused]
+    - [Executing] → [Active]
+    - [Paused] / [Blocked] → [Paused]
     - [Completed] → [Done]
-    - [Blocked] / [Dropped] → [Dropped] *)
+    - [Dropped] → [Dropped] *)
 
 val phase_of_goal_status : goal_status -> Goal_phase.t
 (** Reverse inference used on read for rows persisted
@@ -90,21 +87,14 @@ type goal = {
   priority : int;
   status : goal_status;
   phase : Goal_phase.t;
-  verifier_policy : Goal_verification.goal_verifier_policy option;
-  require_completion_approval : bool;
-  active_verification_request_id : string option;
   parent_goal_id : string option;
   last_review_note : string option;
   last_review_at : string option;
   created_at : string;
   updated_at : string;
 }
-(** A single goal entry.  [priority] is clamped to [1..5]
-    on every write through the internal [normalize_goal]
-    pass.  [active_verification_request_id] tracks an open
-    {!Goal_verification.goal_verification_request} when the
-    phase is [Awaiting_verification]; cleared on every
-    phase transition out of the verification path. *)
+(** A single goal entry. [priority] is clamped to [1..5] on every write
+    through the internal [normalize_goal] pass. *)
 
 val goal_to_yojson : goal -> Yojson.Safe.t
 
@@ -225,8 +215,6 @@ val upsert_goal :
   ?status:goal_status ->
   ?phase:Goal_phase.t ->
   ?parent_goal_id:string ->
-  ?verifier_policy:Goal_verification.goal_verifier_policy ->
-  ?require_completion_approval:bool ->
   unit ->
   (goal * [ `created | `updated ], string) result
 (** Creates a new goal when [id] is omitted (mints

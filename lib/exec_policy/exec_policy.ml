@@ -6,7 +6,7 @@
 module Paths = Exec_policy_paths
 module Log_sanitize = Exec_policy_log_sanitize
 
-module Mutation_classifier = Exec_policy_mutation_classifier
+module Literal_words = Exec_policy_literal_words
 module Exec_shell_gate = Masc_exec_command_gate.Shell_command_gate
 
 let resolve_path = Paths.resolve_path
@@ -19,20 +19,19 @@ type block_reason =
   | Process_substitution
   | Unsafe_redirect
   | Pipes_not_allowed
-  | Direct_dune_invocation
 
 let block_reason_to_string = function
   | Empty_command -> "command must not be empty"
   | Chain_or_redirect ->
     "Blocked: chaining (&&/||/;) and redirects (|/>) are not allowed. Run ONE command \
      per call. To change directory, use the `cwd` argument instead of `cd` - Good: \
-     cwd='repos/masc', cmd='scripts/dune-local.sh build'. Bad:  cmd='cd repos/masc && dune \
-     build'. For pipelines like `rg foo | wc -l`, run the primary command and process \
+     cwd='repos/project', cmd='ls'. Bad: cmd='cd repos/project && ls'. For pipelines \
+     like `rg foo | wc -l`, run the primary command and process \
      output at the LLM layer. To write files, use Write."
   | Injection ->
     "Shell injection syntax (;, &&, standalone &, `, $) not allowed. Run ONE command per \
      call. To change directory, use the `cwd` argument - Good: cwd='repos/masc', \
-     cmd='scripts/dune-local.sh build'. Bad:  cmd='cd repos/masc && dune build' or cmd='cmd1 ; cmd2'. \
+     cmd='ls'. Bad: cmd='cd repos/masc && ls' or cmd='cmd1 ; cmd2'. \
      Relative paths resolve from `cwd` (defaults to playground root). For file writes, \
      use Edit or Write."
   | Process_substitution -> "Process substitution (<(...) or >(...)) is not allowed."
@@ -40,11 +39,6 @@ let block_reason_to_string = function
     "Redirect syntax is not allowed in this shell surface. Consume stdout/stderr \
      directly from the tool response, and use a dedicated write tool for files."
   | Pipes_not_allowed -> "Pipes are not allowed. Run one command per call."
-  | Direct_dune_invocation ->
-    "Direct `dune` is blocked in local agent shells because it bypasses \
-     scripts/dune-local.sh's machine-wide build lock and can trigger \
-     host-wide ENFILE/EMFILE pressure. Use `scripts/dune-local.sh build ...` \
-     from the repo root instead."
 ;;
 
 
@@ -115,8 +109,7 @@ let validate_no_unquoted_glob ast =
 let block_reason_of_exec_reject : Exec_shell_gate.reject_reason -> block_reason =
   function
   | Pipes_not_allowed _ -> Pipes_not_allowed
-  | Redirect_disallowed_in_caller _
-  | Path_outside_policy _ -> Unsafe_redirect
+  | Redirect_disallowed_in_caller _ -> Unsafe_redirect
 ;;
 
 let block_reason_of_exec_too_complex
@@ -158,22 +151,15 @@ let command_context ir =
     Exec_shell_gate.gate_typed
       ~ir
       ~syntax_policy:strict_syntax_policy
-      ~path_policy:Exec_shell_gate.allow_all_paths
       ~sandbox:Exec_shell_gate.host_sandbox
       ()
   in
   match verdict with
   | Allow context ->
-    if context.Exec_shell_gate.direct_dune_seen
-    then Error Direct_dune_invocation
-    else (
-      match validate_no_unquoted_glob context.Exec_shell_gate.ast with
-      | Error _ as err -> err
-      | Ok () -> Ok context)
-  | Reject { context; reason; _ } ->
-    if context.Exec_shell_gate.direct_dune_seen
-    then Error Direct_dune_invocation
-    else Error (block_reason_of_exec_reject reason)
+    (match validate_no_unquoted_glob context.Exec_shell_gate.ast with
+     | Error _ as err -> err
+     | Ok () -> Ok context)
+  | Reject { reason; _ } -> Error (block_reason_of_exec_reject reason)
   | Cannot_parse _ -> Error Chain_or_redirect
   | Too_complex { reason } -> Error (block_reason_of_exec_too_complex reason)
 ;;
@@ -190,23 +176,17 @@ let command_context_tool_execute
     Exec_shell_gate.gate_typed
       ~ir
       ~syntax_policy:(tool_execute_syntax_policy ~allow_pipes ())
-      ~path_policy:Exec_shell_gate.allow_all_paths
       ~sandbox:Exec_shell_gate.host_sandbox
       ()
   in
   match verdict with
   | Allow context ->
-    if context.Exec_shell_gate.direct_dune_seen
-    then Error Direct_dune_invocation
-    else (
-      match validate_no_unquoted_glob context.Exec_shell_gate.ast with
-      | Error _ as err -> err
-      | Ok () -> Ok context)
-  | Reject { context; reason; _ } ->
+    (match validate_no_unquoted_glob context.Exec_shell_gate.ast with
+     | Error _ as err -> err
+     | Ok () -> Ok context)
+  | Reject { reason; _ } ->
     (match reason with
      | Pipes_not_allowed _ -> Error Pipes_not_allowed
-     | _ when context.Exec_shell_gate.direct_dune_seen ->
-       Error Direct_dune_invocation
      | _ -> Error (block_reason_of_exec_reject reason))
   | Cannot_parse _ -> Error Injection
   | Too_complex { reason } -> Error (block_reason_of_exec_too_complex reason)
@@ -217,35 +197,6 @@ let validate_command_tool_execute ?allow_pipes ir =
     ?allow_pipes
     ir
   |> Result.map (fun _ -> ())
-;;
-
-let looks_like_url token =
-  match String.index_opt token ':' with
-  | Some idx when idx + 2 < String.length token ->
-    token.[idx + 1] = '/' && token.[idx + 2] = '/'
-  | _ -> false
-;;
-
-(* Path-argument descriptors moved to [Exec_policy_path_arg_descriptor]
-   under Shell IR Adjacent Surfaces Plan §P11. The descriptor module
-   is consulted before the [looks_like_path_token] heuristic so path
-   validation routes through typed metadata first. *)
-let is_path_flag = Exec_policy_path_arg_descriptor.is_path_flag
-
-let path_flag_requires_existing_dir =
-  Exec_policy_path_arg_descriptor.path_flag_requires_existing_dir
-;;
-
-let path_value_of_flagged_token =
-  Exec_policy_path_arg_descriptor.path_value_of_flagged_token
-;;
-
-let inline_path_flag_requires_existing_dir =
-  Exec_policy_path_arg_descriptor.inline_path_flag_requires_existing_dir
-;;
-
-let command_materializes_path_arg =
-  Exec_policy_path_arg_descriptor.command_materializes_path_arg
 ;;
 
 let path_is_existing_dir ?workdir path =
@@ -304,338 +255,14 @@ let existing_sibling_dirs_hint ?workdir path =
                suffix)))
 ;;
 
-(** Classification of path-like token prefixes.
-    Replaces ad-hoc [String.starts_with] prefix matching with a typed
-    variant so the compiler enforces exhaustive handling. *)
-type path_prefix =
-  | Root_relative  (** Starts with "/" (absolute path) *)
-  | Current_dir  (** Starts with "./" (explicit current directory) *)
-  | Parent_dir  (** Starts with "../" (parent directory traversal) *)
-  | Home_dir  (** Starts with "~/" (home directory expansion) *)
-  | Dot_entry  (** Exactly "." or ".." (directory entry references) *)
-  | Not_a_path  (** No recognized path prefix *)
-
-let classify_path_prefix token : path_prefix =
-  if token = "." || token = ".." then Dot_entry
-  else (
-    let len = String.length token in
-    if len >= 1 && token.[0] = '/'
-    then Root_relative
-    else if len >= 2 && token.[0] = '.' && token.[1] = '/'
-    then Current_dir
-    else if len >= 3 && token.[0] = '.' && token.[1] = '.' && token.[2] = '/'
-    then Parent_dir
-    else if len >= 2 && token.[0] = '~' && token.[1] = '/'
-    then Home_dir
-    else Not_a_path)
-;;
-
-let is_path_prefix token =
-  match classify_path_prefix token with
-  | Root_relative | Current_dir | Parent_dir | Home_dir | Dot_entry -> true
-  | Not_a_path -> false
-;;
-
-let looks_like_path_token token =
-  token <> ""
-  && (not (looks_like_url token))
-  && (is_path_prefix token || String.contains token '/')
-;;
-
-let token_value_is_explicit_path token = is_path_prefix token
-;;
-
-let token_has_parent_dir_segment token =
-  token
-  |> String.split_on_char '/'
-  |> List.exists (String.equal "..")
-;;
-
-let git_revisionish_token ?workdir token =
-  let token = String.trim token in
-  token <> ""
-  && String.contains token '/'
-  && (not (token_value_is_explicit_path token))
-  && not (token_has_parent_dir_segment token)
-  &&
-  let resolved = resolve_path ?base_dir:workdir token in
-  not (Sys.file_exists resolved)
-;;
-
-(* [gh] positional args are issue/PR numbers, refs, repo specs, and REST or
-   GraphQL API endpoints (e.g. [gh api /repos/owner/repo/check-runs]) — not
-   filesystem paths.  The descriptor intentionally excludes [gh] from
-   [command_materializes_path_arg], but the [looks_like_path_token] fallback
-   still flagged a leading-[/] endpoint as an absolute path and jailed it,
-   blocking legitimate [gh api /repos/...] calls.
-
-   A token is endpoint-ish when it contains [/], has no [..] traversal
-   segment, and does NOT resolve to an existing file.  This mirrors
-   [git_revisionish_token] but permits the explicit leading-[/] form that gh
-   api endpoints use.  The not-existing-file clause keeps real file arguments
-   jailed: [gh release upload v1 /etc/passwd] resolves to an existing file, so
-   it stays subject to the whitelist, and any [..] traversal is rejected. *)
-let gh_endpointish_token ?workdir token =
-  let token = String.trim token in
-  token <> ""
-  && String.contains token '/'
-  && not (token_has_parent_dir_segment token)
-  &&
-  let resolved = resolve_path ?base_dir:workdir token in
-  not (Sys.file_exists resolved)
-;;
-
-let token_value_is_redirect_to_dev_null value =
-  String.equal value ">/dev/null"
-  || String.equal value "2>/dev/null"
-  || String.equal value "1>/dev/null"
-  || String.equal value ">>/dev/null"
-  || String.equal value "2>>/dev/null"
-  || String.equal value "1>>/dev/null"
-;;
-
-let token_value_is_redirect_op value =
-  match value with
-  | ">" | ">>" | "<" | "2>" | "2>>" | "1>" | "1>>" -> true
-  | _ -> false
-;;
-
-let command_pattern_arg_flags cmd =
-  match cmd with
-  | "find" ->
-    [ "-name", false
-    ; "-iname", false
-    ; "-path", false
-    ; "-ipath", false
-    ; "-wholename", false
-    ; "-iwholename", false
-    ; "-regex", false
-    ; "-iregex", false
-    ]
-  | "rg" ->
-    [ "-e", true
-    ; "--regexp", true
-    ; "-f", true
-    ; "--file", true
-    ; "-A", false
-    ; "--after-context", false
-    ; "-B", false
-    ; "--before-context", false
-    ; "-C", false
-    ; "--context", false
-    ; "-g", false
-    ; "--glob", false
-    ; "--iglob", false
-    ; "--type", false
-    ; "-t", false
-    ; "--type-not", false
-    ; "-T", false
-    ]
-  | "grep" ->
-    [ "-e", true
-    ; "--regexp", true
-    ; "-f", true
-    ; "--file", true
-    ; "-A", false
-    ; "--after-context", false
-    ; "-B", false
-    ; "--before-context", false
-    ; "-C", false
-    ; "--context", false
-    ; "--include", false
-    ; "--exclude", false
-    ; "--exclude-dir", false
-    ]
-  | "sed" -> [ "-e", true; "--expression", true ]
-  | "gh" ->
-    [ "-R", false
-    ; "--repo", false
-    ; "--json", false
-    ; "--jq", false
-    ; "--template", false
-    ; "--search", false
-    ; "--state", false
-    ; "--author", false
-    ; "--assignee", false
-    ; "--label", false
-    ; "--base", false
-    ; "--head", false
-    ]
-  | "git" ->
-    [ "--branches", false
-    ; "--remotes", false
-    ; "--glob", false
-    ; "--exclude", false
-    ; "--format", false
-    ; "--pretty", false
-    ; "--author", false
-    ; "--grep", false
-    ]
-  | _ -> []
-;;
-
-let token_is_inline_pattern_flag cmd value =
-  command_pattern_arg_flags cmd
-  |> List.find_map (fun (flag, consumes_primary_pattern) ->
-    if String.starts_with ~prefix:(flag ^ "=") value
-    then Some consumes_primary_pattern
-    else None)
-;;
-
-let command_flag_pattern_arity cmd value =
-  command_pattern_arg_flags cmd
-  |> List.find_map (fun (flag, consumes_primary_pattern) ->
-    if String.equal flag value then Some consumes_primary_pattern else None)
-;;
-
-let rg_token_is_option_value value =
-  String.starts_with ~prefix:"-" value && String.length value > 1
-;;
-
-let command_treats_plain_args_as_content = function
-  | "echo" | "printf" -> true
-  | _ -> false
-;;
-
-let path_argument_values command_name args =
-  let rg_files_mode =
-    String.equal command_name "rg"
-    && List.exists (String.equal "--files") args
-  in
-  let rec loop ~skip_next_pattern ~redirect_target ~seen_primary_pattern acc = function
-    | [] -> List.rev acc
-    | token :: rest ->
-      if redirect_target
-      then
-        let acc = if String.equal token "/dev/null" then acc else token :: acc in
-        loop ~skip_next_pattern:None ~redirect_target:false ~seen_primary_pattern acc rest
-      else if token_value_is_redirect_to_dev_null token
-      then loop ~skip_next_pattern:None ~redirect_target:false ~seen_primary_pattern acc rest
-      else (
-        match skip_next_pattern with
-        | Some consumes_primary_pattern ->
-          loop
-            ~skip_next_pattern:None
-            ~redirect_target:false
-            ~seen_primary_pattern:(seen_primary_pattern || consumes_primary_pattern)
-            acc
-            rest
-        | None ->
-          if token_value_is_redirect_op token
-          then loop ~skip_next_pattern:None ~redirect_target:true ~seen_primary_pattern acc rest
-          else (
-            match command_flag_pattern_arity command_name token with
-            | Some consumes_primary_pattern ->
-              loop
-                ~skip_next_pattern:(Some consumes_primary_pattern)
-                ~redirect_target:false
-                ~seen_primary_pattern
-                acc
-                rest
-            | None ->
-              (match token_is_inline_pattern_flag command_name token with
-               | Some consumes_primary_pattern ->
-                 loop
-                   ~skip_next_pattern:None
-                   ~redirect_target:false
-                   ~seen_primary_pattern:(seen_primary_pattern || consumes_primary_pattern)
-                   acc
-                   rest
-               | None when command_treats_plain_args_as_content command_name ->
-                 loop ~skip_next_pattern:None ~redirect_target:false ~seen_primary_pattern acc rest
-               | None when command_name = "sed"
-                           && (not seen_primary_pattern)
-                           && not (rg_token_is_option_value token) ->
-                 loop
-                   ~skip_next_pattern:None
-                   ~redirect_target:false
-                   ~seen_primary_pattern:true
-                   acc
-                   rest
-               | None when command_name = "rg"
-                           && (not rg_files_mode)
-                           && (not seen_primary_pattern)
-                           && not (rg_token_is_option_value token) ->
-                 loop
-                   ~skip_next_pattern:None
-                   ~redirect_target:false
-                   ~seen_primary_pattern:true
-                   acc
-                   rest
-               | None when command_name = "grep"
-                           && (not seen_primary_pattern)
-                           && not (rg_token_is_option_value token) ->
-                 loop
-                   ~skip_next_pattern:None
-                   ~redirect_target:false
-                   ~seen_primary_pattern:true
-                   acc
-                   rest
-               | None ->
-                 loop
-                   ~skip_next_pattern:None
-                   ~redirect_target:false
-                   ~seen_primary_pattern
-                   (token :: acc)
-                   rest)))
-  in
-  loop
-    ~skip_next_pattern:None
-    ~redirect_target:false
-    ~seen_primary_pattern:false
-    []
-    args
-;;
-
-let literal_args_of_simple (simple : Masc_exec.Shell_ir.simple) =
-  let rec loop acc = function
-    | [] -> Some (List.rev acc)
-    | Masc_exec.Shell_ir.Lit (value, _) :: rest -> loop (value :: acc) rest
-    | Masc_exec.Shell_ir.Concat _ :: _ | Masc_exec.Shell_ir.Var (_, _) :: _ -> None
-  in
-  loop [] simple.args
-;;
-
-let existing_dir_path_values_of_simple (simple : Masc_exec.Shell_ir.simple) =
-  let command_name = Masc_exec.Exec_program.to_string simple.bin |> Filename.basename in
-  let rec loop expect_existing_dir acc = function
-    | [] -> List.rev acc
-    | value :: rest ->
-      if value = ""
-      then loop expect_existing_dir acc rest
-      else if expect_existing_dir
-      then loop false (value :: acc) rest
-      else (
-        match path_value_of_flagged_token value with
-        | Some value when inline_path_flag_requires_existing_dir value ->
-          loop false (value :: acc) rest
-        | Some _ -> loop false acc rest
-        | None when is_path_flag value -> loop (path_flag_requires_existing_dir value) acc rest
-        | None
-          when command_materializes_path_arg command_name
-               && looks_like_path_token value ->
-          loop false (value :: acc) rest
-        | None -> loop false acc rest)
-  in
-  match literal_args_of_simple simple with
-  | None -> []
-  | Some args -> loop false [] (path_argument_values command_name args)
-;;
-
-let rec existing_dir_path_values_of_shell_ir = function
-  | Masc_exec.Shell_ir.Simple simple -> existing_dir_path_values_of_simple simple
-  | Masc_exec.Shell_ir.Pipeline stages ->
-    List.concat_map existing_dir_path_values_of_shell_ir stages
-;;
-
-let validate_shell_ir_paths ?keeper_id ?base_path ?workdir shell_ir =
+let validate_shell_ir_paths ?workdir shell_ir =
   match workdir with
   | None -> Ok ()
   | Some _ ->
       let validate_path_value ~requires_existing_dir value =
         if String.equal value "/dev/null"
         then Ok ()
-        else if not (validate_path ?keeper_id ?base_path ?workdir value)
+        else if not (validate_path ?workdir value)
         then
           Error
             (Keeper_path_check_error.(
@@ -653,45 +280,6 @@ let validate_shell_ir_paths ?keeper_id ?base_path ?workdir shell_ir =
                     })))
         else Ok ()
       in
-      let rec validate_path_values ~command_name expect_existing_dir = function
-        | [] -> Ok ()
-        | value :: rest ->
-          if value = ""
-          then validate_path_values ~command_name expect_existing_dir rest
-          else if expect_existing_dir
-          then
-            (match validate_path_value ~requires_existing_dir:true value with
-             | Ok () -> validate_path_values ~command_name false rest
-             | Error _ as err -> err)
-          else (
-            match path_value_of_flagged_token value with
-            | Some flagged_value ->
-              (match
-                 validate_path_value
-                   ~requires_existing_dir:(inline_path_flag_requires_existing_dir value)
-                   flagged_value
-               with
-               | Ok () -> validate_path_values ~command_name false rest
-               | Error _ as err -> err)
-            | None when is_path_flag value ->
-              validate_path_values
-                ~command_name
-                (path_flag_requires_existing_dir value)
-                rest
-            | None
-              when String.equal command_name "git"
-                   && git_revisionish_token ?workdir value ->
-              validate_path_values ~command_name false rest
-            | None
-              when String.equal command_name "gh"
-                   && gh_endpointish_token ?workdir value ->
-              validate_path_values ~command_name false rest
-            | None when looks_like_path_token value ->
-              (match validate_path_value ~requires_existing_dir:false value with
-               | Ok () -> validate_path_values ~command_name false rest
-               | Error _ as err -> err)
-            | None -> validate_path_values ~command_name false rest)
-      in
       let rec validate_redirects = function
         | [] -> Ok ()
         | Masc_exec.Redirect_scope.File { target; _ } :: rest ->
@@ -708,20 +296,9 @@ let validate_shell_ir_paths ?keeper_id ?base_path ?workdir shell_ir =
           |> validate_path_value ~requires_existing_dir:true
       in
       let validate_simple (simple : Masc_exec.Shell_ir.simple) =
-        let command_name = Masc_exec.Exec_program.to_string simple.bin |> Filename.basename in
-        let argv_result =
-          match literal_args_of_simple simple with
-          | None -> Ok ()
-          | Some args ->
-            path_argument_values command_name args
-            |> validate_path_values ~command_name false
-        in
         match validate_cwd simple.cwd with
         | Error _ as err -> err
-        | Ok () ->
-          (match argv_result with
-           | Error _ as err -> err
-           | Ok () -> validate_redirects simple.redirects)
+        | Ok () -> validate_redirects simple.redirects
       in
       let rec validate_parsed_shell_ir = function
         | Masc_exec.Shell_ir.Simple simple -> validate_simple simple
@@ -743,9 +320,7 @@ let validate_shell_ir_paths ?keeper_id ?base_path ?workdir shell_ir =
 ;;
 
 
-let is_git_branch_switch = Mutation_classifier.is_git_branch_switch
-let is_destructive_bash_operation = Mutation_classifier.is_destructive_bash_operation
-let flat_stage_words = Mutation_classifier.flat_stage_words
+let flat_stage_words = Literal_words.flat_stage_words
 
 let sanitize_command_for_log cmd =
   let trimmed = String.trim cmd in
@@ -767,7 +342,6 @@ let block_reason_tag = function
   | Process_substitution -> "process_substitution"
   | Unsafe_redirect -> "unsafe_redirect"
   | Pipes_not_allowed -> "pipes_not_allowed"
-  | Direct_dune_invocation -> "direct_dune_invocation"
 ;;
 
 let attribution_of_validation ~cmd (result : (unit, block_reason) result) : Attribution.t =
@@ -776,32 +350,12 @@ let attribution_of_validation ~cmd (result : (unit, block_reason) result) : Attr
     let evidence : Yojson.Safe.t = `Assoc [ "cmd", `String cmd ] in
     Attribution.passed ~origin:Det ~gate:"exec_policy" ~evidence
   | Error br ->
-    let command_name =
-      match br with
-      | Direct_dune_invocation -> Some "dune"
-      | _ -> None
-    in
     let evidence : Yojson.Safe.t =
-      `Assoc
-        ([ "cmd", `String cmd; "block_reason", `String (block_reason_tag br) ]
-         @
-         match command_name with
-         | Some n -> [ "command_name", `String n ]
-         | None -> [])
+      `Assoc [ "cmd", `String cmd; "block_reason", `String (block_reason_tag br) ]
     in
     Attribution.policy_failed
       ~origin:Det
       ~gate:"exec_policy"
       ~evidence
       ~reason:(block_reason_to_string br)
-;;
-
-type safe = Typed_capabilities.safe
-type unsafe = Typed_capabilities.unsafe
-type 'a verified_ir = 'a Typed_capabilities.verified_ir
-
-let verify_static_safe_ir ir =
-  let ( let* ) = Result.bind in
-  let* () = validate_command ir in
-  Ok (Typed_capabilities.Safe_IR ir)
 ;;

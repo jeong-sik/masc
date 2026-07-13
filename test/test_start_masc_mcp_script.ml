@@ -169,7 +169,6 @@ capture="${FAKE_CAPTURE_FILE:?}"
   printf 'MASC_WS_PORT=%%s\n' "${MASC_WS_PORT:-}"
   printf 'MASC_WS_ENABLED=%%s\n' "${MASC_WS_ENABLED:-}"
   printf 'MASC_WEBRTC_ENABLED=%%s\n' "${MASC_WEBRTC_ENABLED:-}"
-  printf 'MASC_KEEPER_HOST_FD_HOTSPOT_HEADROOM=%%s\n' "${MASC_KEEPER_HOST_FD_HOTSPOT_HEADROOM:-}"
   printf 'ARGS=%%s\n' "$*"
 } >"$capture"
 exit 0
@@ -353,32 +352,7 @@ let test_explicit_env_overrides_repo_env_files () =
         (contains_substring captured
            ("MASC_BASE_PATH=" ^ canonical_path dir));
       check bool "explicit config dir preserved" true
-        (contains_substring captured ("MASC_CONFIG_DIR=" ^ Filename.concat dir "config"));
-      check bool "Docker hotspot blocking default is exported as disabled" true
-        (contains_substring captured "MASC_KEEPER_HOST_FD_HOTSPOT_HEADROOM=0"))
-
-let test_fd_hotspot_headworkspace_override_is_preserved () =
-  with_temp_dir "start-masc-script" (fun dir ->
-      let script = Filename.concat dir "start-masc.sh" in
-      copy_script (script_path ()) script;
-      make_fake_eio_exe dir;
-      let capture = Filename.concat dir "captured-fd-hotspot.txt" in
-      let code, stdout, stderr =
-        run_script ~cwd:dir script
-          ~env:
-            [
-              ("FAKE_CAPTURE_FILE", capture);
-              ("MASC_BASE_PATH", dir);
-              ("MASC_KEEPER_HOST_FD_HOTSPOT_HEADROOM", "1024");
-            ]
-          [ "--http"; "--port"; "9973"; "--base-path"; dir ]
-      in
-      if code <> 0 then
-        failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
-          stderr;
-      let captured = read_file capture in
-      check bool "explicit Docker hotspot headroom is preserved" true
-        (contains_substring captured "MASC_KEEPER_HOST_FD_HOTSPOT_HEADROOM=1024"))
+        (contains_substring captured ("MASC_CONFIG_DIR=" ^ Filename.concat dir "config")))
 
 let test_realtime_transports_default_to_base_path_config_and_preserve_override ()
     =
@@ -1203,8 +1177,6 @@ let () =
         [
           test_case "explicit env overrides repo env files" `Quick
             test_explicit_env_overrides_repo_env_files;
-          test_case "FD hotspot headroom override is preserved" `Quick
-            test_fd_hotspot_headworkspace_override_is_preserved;
           test_case
             "realtime transports default to base path config and preserve override"
             `Quick

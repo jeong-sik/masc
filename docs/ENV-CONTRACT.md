@@ -63,7 +63,6 @@ should be treated as restart-required.
 | Server bind and socket topology | `MASC_HOST`, `MASC_HTTP_PORT`, `MASC_GRPC_PORT`, `MASC_WS_PORT`, `MASC_GRPC_ENABLED`, `MASC_WS_ENABLED`, `MASC_WEBRTC_ENABLED` | listeners and advertised base URLs are fixed during server startup |
 | Backend/bootstrap wiring | `MASC_STARTUP_WATCHDOG_SEC` | boot-time watchdog setup; storage is filesystem-only by construction |
 | Startup-only TOML seeding | every `MASC_KEEPER_*` value sourced from `runtime.toml` | TOML is loaded once and injected into the process env during boot |
-| Startup-loaded policy | tool policy related env plus `tool_policy.toml`-driven behavior | tool groups are loaded once at startup |
 
 Representative code paths:
 
@@ -80,13 +79,12 @@ operator control plane is `Runtime_params`, not the parent shell env.
 
 | Effective contract | Examples | Operator path |
 | --- | --- | --- |
-| `immediate_dynamic` | `keeper.keepalive_interval_sec`, `keeper.supervisor_sweep_sec`, `keeper.work_as_hb_enabled`, `keeper.smart_hb_enabled` | update via governance/dashboard APIs backed by `Runtime_params` |
+| `immediate_dynamic` | `keeper.keepalive_interval_sec`, `keeper.supervisor_sweep_sec`, `keeper.work_as_hb_enabled`, `keeper.smart_hb_enabled` | update via the typed `Runtime_params` dashboard endpoints |
 | `request_dynamic` | keeper temperature/max_tokens and similar registered params | next `Runtime_params.get` call observes the override |
 
 Representative code paths:
 
 - [`runtime_params.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/runtime_params.ml)
-- [`governance_registry.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/governance_registry.ml)
 - [`keeper_config.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/keeper/keeper_config.ml)
 - [`server_routes_http_routes_activity.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/server/server_routes_http_routes_activity.ml)
 

@@ -63,12 +63,10 @@ type tool_surface =
 type runtime_rotation_outcome =
   | Rotation_setup_failed
   | Rotation_retry_scheduled
-  | Rotation_slot_phase_exhausted
 
 let runtime_rotation_outcome_to_string = function
   | Rotation_setup_failed -> "setup_failed"
   | Rotation_retry_scheduled -> "retry_scheduled"
-  | Rotation_slot_phase_exhausted -> "slot_phase_exhausted"
 ;;
 
 (* Receipt-level summary of how the in-turn runtime attempt sequence
@@ -97,51 +95,26 @@ let runtime_outcome_to_string = function
   | Runtime_not_dispatched -> "not_dispatched"
 ;;
 
-(* Receipt-level result of the completion-contract evaluation for the turn.
-   Closed union of three producer paths:
-     1. Initial-state marker from [keeper_run_tools]: [Contract_unknown].
-     2. Boundary-state overrides: [Contract_violated] (text-only turn
-        with no keeper tool names), [Contract_not_dispatched]
-        (turn_helpers pre-dispatch), [Contract_no_capable_provider]
-        (run_tools no-provider escape).
-     3. Six outcomes mirrored from
-        [Keeper_contract_classifier.contract_status_label]:
-        [Contract_surface_mismatch], [Contract_claim_only_after_owned_task],
-        [Contract_needs_execution_progress], [Contract_passive_only],
-        [Contract_satisfied_completion],
-        [Contract_satisfied_execution].
-   JSON wire form is the lowercase string via
-   [completion_contract_result_to_string].  No raw ["satisfied"] variant —
-   producer never emits it; closed type makes the fictional test fixture
-   string unrepresentable. *)
+(* Receipt-level observation of visible completion evidence.  This axis is
+   deliberately independent of turn outcome, terminal reason, lifecycle,
+   authorization, and operator disposition.  It records only whether dispatch
+   happened and whether a response or tool execution was observed. *)
 type completion_contract_result =
-  | Contract_unknown
-  | Contract_not_dispatched
-  | Contract_violated
-  | Contract_surface_mismatch
-  | Contract_no_capable_provider
-  | Contract_claim_only_after_owned_task
-  | Contract_needs_execution_progress
-  | Contract_passive_only
-  | Contract_satisfied_completion
-  | Contract_satisfied_execution
+  | Completion_observation_unknown
+  | Completion_not_dispatched
+  | Completion_no_visible_output
+  | Completion_response_observed
+  | Completion_tool_execution_observed
 
 module Completion_contract_label = Keeper_completion_contract_result_label
 
 let completion_contract_result_to_label = function
-  | Contract_unknown -> Completion_contract_label.Unknown
-  (* TEL-OK: pure label bridge; not a dispatch/action handler. *)
-  | Contract_not_dispatched -> Completion_contract_label.Not_dispatched
-  | Contract_violated -> Completion_contract_label.Violated
-  | Contract_surface_mismatch -> Completion_contract_label.Surface_mismatch
-  | Contract_no_capable_provider -> Completion_contract_label.No_capable_provider
-  | Contract_claim_only_after_owned_task ->
-    Completion_contract_label.Claim_only_after_owned_task
-  | Contract_needs_execution_progress ->
-    Completion_contract_label.Needs_execution_progress
-  | Contract_passive_only -> Completion_contract_label.Passive_only
-  | Contract_satisfied_completion -> Completion_contract_label.Satisfied_completion
-  | Contract_satisfied_execution -> Completion_contract_label.Satisfied_execution
+  | Completion_observation_unknown -> Completion_contract_label.Unknown
+  | Completion_not_dispatched -> Completion_contract_label.Not_dispatched
+  | Completion_no_visible_output -> Completion_contract_label.No_visible_output
+  | Completion_response_observed -> Completion_contract_label.Response_observed
+  | Completion_tool_execution_observed ->
+    Completion_contract_label.Tool_execution_observed
 ;;
 
 let completion_contract_result_to_string result =
@@ -151,105 +124,18 @@ let completion_contract_result_to_string result =
 ;;
 
 let completion_contract_result_of_label = function
-  | Completion_contract_label.Unknown -> Contract_unknown
-  (* TEL-OK: pure label bridge; not a dispatch/action handler. *)
-  | Completion_contract_label.Not_dispatched -> Contract_not_dispatched
-  | Completion_contract_label.Violated -> Contract_violated
-  | Completion_contract_label.Surface_mismatch -> Contract_surface_mismatch
-  | Completion_contract_label.No_capable_provider -> Contract_no_capable_provider
-  | Completion_contract_label.Claim_only_after_owned_task ->
-    Contract_claim_only_after_owned_task
-  | Completion_contract_label.Needs_execution_progress ->
-    Contract_needs_execution_progress
-  | Completion_contract_label.Passive_only -> Contract_passive_only
-  | Completion_contract_label.Satisfied_completion -> Contract_satisfied_completion
-  | Completion_contract_label.Satisfied_execution -> Contract_satisfied_execution
+  | Completion_contract_label.Unknown -> Completion_observation_unknown
+  | Completion_contract_label.Not_dispatched -> Completion_not_dispatched
+  | Completion_contract_label.No_visible_output -> Completion_no_visible_output
+  | Completion_contract_label.Response_observed -> Completion_response_observed
+  | Completion_contract_label.Tool_execution_observed ->
+    Completion_tool_execution_observed
 ;;
 
 let completion_contract_result_of_string raw =
   raw
   |> Completion_contract_label.of_string
   |> Option.map completion_contract_result_of_label
-;;
-
-let completion_contract_result_requires_attention result =
-  result
-  |> completion_contract_result_to_label
-  |> Completion_contract_label.requires_attention
-;;
-
-(* Structured contract-violation terminal_reason_code encoding.
-   The legacy wire format is:
-     completion_contract_violation:<contract_id>
-   The extended format adds called and satisfying tool lists:
-     completion_contract_violation:<contract_id>:called[t1,t2]:satisfying[t3,t4]
-   Both forms start with the same prefix so existing prefix-matching
-   consumers (dashboard, disposition logic) remain backward-compatible.
-   Empty tool lists are encoded as empty brackets: called[]:satisfying[]. *)
-
-let encode_tool_list = function
-  | [] -> "[]"
-  | tools -> "[" ^ String.concat "," tools ^ "]"
-;;
-
-let encode_contract_violation_reason
-    ~called_tools
-    ~satisfying_tools
-    (contract_id : string)
-  : string
-  =
-  Printf.sprintf
-    "completion_contract_violation:%s:called%s:satisfying%s"
-    contract_id
-    (encode_tool_list called_tools)
-    (encode_tool_list satisfying_tools)
-;;
-
-(* Decode the extended terminal_reason_code back into its components.
-   Returns [None] if the string is not a contract-violation code.
-   For the legacy format (no called/satisfying suffix), both lists are [ [] ]. *)
-let decode_tool_list str =
-  let len = String.length str in
-  if len < 2 then None
-  else if String.sub str 0 1 <> "[" || String.sub str (len - 1) 1 <> "]"
-  then None
-  else
-    let inner = String.sub str 1 (len - 2) in
-    if inner = "" then Some []
-    else Some (String.split_on_char ',' inner)
-;;
-
-let decode_contract_violation_reason (wire : string)
-  : (string * string list * string list) option
-  =
-  let prefix = "completion_contract_violation:" in
-  if not (String.starts_with ~prefix wire) then None
-  else
-    let rest = String.sub wire (String.length prefix) (String.length wire - String.length prefix) in
-    match String.split_on_char ':' rest with
-    | [] -> None
-    | [ contract_id ] ->
-      Some (contract_id, [], [])
-    | contract_id :: parts ->
-      let called = ref [] in
-      let satisfying = ref [] in
-      let consumed = ref 0 in
-      List.iter (fun part ->
-        if String.length part > 6 && String.sub part 0 6 = "called"
-        then (
-          match decode_tool_list (String.sub part 6 (String.length part - 6)) with
-          | Some tools -> called := tools; incr consumed
-          | None -> ())
-        else if String.length part > 10 && String.sub part 0 10 = "satisfying"
-        then (
-          match decode_tool_list (String.sub part 10 (String.length part - 10)) with
-          | Some tools -> satisfying := tools; incr consumed
-          | None -> ())
-        else ()
-      ) parts;
-      if !consumed > 0
-      then Some (contract_id, !called, !satisfying)
-      else Some (contract_id, [], [])
 ;;
 
 type runtime_rotation_attempt =
@@ -281,14 +167,8 @@ type t =
   ; model_used : string option
   ; completion_contract_result : completion_contract_result
   ; actionable_signal : Keeper_contract_classifier.actionable_signal option
-    (* Root B (#22710): the world-observation actionable signal captured at
-       turn time, consumed by [operator_disposition] to decide whether a
-       passive-only turn is healthy. Replaces the [goal_ids = []] structural
-       proxy in [passive_only_without_work_scope]: a coordination keeper always
-       carries goals yet may legitimately have nothing actionable in a given
-       turn. [None] when no world observation was threaded, in which case the
-       disposition falls back to the prior broadcast-required behavior
-       (conservative; a needed broadcast is never silently suppressed). *)
+    (* World-observation signal captured at turn time. It is independent of
+       completion evidence and does not authorize or block the turn. *)
   ; tool_surface : tool_surface
   ; sandbox_kind : Keeper_types_profile_sandbox.sandbox_profile
   ; sandbox_root : string option
@@ -330,10 +210,6 @@ let stop_reason_to_string = function
     Keeper_turn_disposition.to_wire
       (Keeper_turn_disposition.Turn_budget_exhausted
          { detail = None; used = turns_used; limit })
-  | Runtime_agent.MutationBoundaryReached { turns_used; tool_name } ->
-    (match tool_name with
-     | Some tool -> Printf.sprintf "mutation_boundary:%s:%d" tool turns_used
-     | None -> Printf.sprintf "mutation_boundary:%d" turns_used)
   | Runtime_agent.Yielded_to_chat_waiting { turns_used } ->
     Printf.sprintf "yielded_to_chat_waiting:%d" turns_used
   | Runtime_agent.Yielded_to_durable_stimulus { turns_used } ->
@@ -354,14 +230,9 @@ let receipt_terminal_reason_code_of_stop_reason = function
   | Runtime_agent.ToolFailureRecoveryDeferred _ ->
     Keeper_turn_disposition.to_wire Keeper_turn_disposition.Success
   | ( Runtime_agent.TurnBudgetExhausted _
-    | Runtime_agent.MutationBoundaryReached _
     | Runtime_agent.Yielded_to_chat_waiting _
     | Runtime_agent.Yielded_to_durable_stimulus _ ) as stop_reason ->
     stop_reason_to_string stop_reason
-;;
-
-let enrich_contract_violation_reason (receipt : t) : string =
-  receipt.terminal_reason_code
 ;;
 
 let sandbox_kind_of_meta (meta : Keeper_meta_contract.keeper_meta) : Keeper_types_profile_sandbox.sandbox_profile =

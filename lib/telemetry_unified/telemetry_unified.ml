@@ -11,7 +11,7 @@
     - [<masc_root>/telemetry/]               — Agent lifecycle + tool call events
     - [<masc_root>/tool_calls/]              — Full I/O for keeper tool calls
     - [<masc_root>/trajectories/<keeper>/]   — Keeper trajectory tool-call rows
-    - [<masc_root>/tool_usage/]              — System_internal surface tool calls
+    - [<masc_root>/tool_usage/]              — Non-public registered tool calls
     - [<masc_root>/oas-events/]              — Durable OAS native/custom events
     - [<masc_root>/keepers/<name>/execution-receipts/]
                                              — Keeper execution receipts

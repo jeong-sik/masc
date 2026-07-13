@@ -10,11 +10,7 @@ type 'a field = {
 }
 
 type t = {
-  bootstrap_max_active_keepers : int field;
-  reactive_max_idle_turns : int field;
-  autonomous_max_idle_turns : int field;
   turn_timeout_sec : float field;
-  admission_wait_timeout_sec : float field;
   oas_timeout_override_sec : float option field;
   stream_idle_timeout_sec : float field;
   execution_idle_timeout_sec : float option field;
@@ -41,18 +37,7 @@ let source_to_string = function
   | Default -> "default"
   | Derived -> "derived"
 
-let get_int = Env_config_core.get_int
 let get_float = Env_config_core.get_float
-
-let bootstrap_max_active_keepers_live () =
-  get_int ~default:10000 "MASC_KEEPER_BOOTSTRAP_MAX_ACTIVE_KEEPERS"
-  |> Keeper_fd_pressure.cap_active_keepers_for_nofile
-
-let reactive_max_idle_turns_live () =
-  max 2 (min 50 (get_int ~default:15 "MASC_KEEPER_MAX_IDLE_TURNS_REACTIVE"))
-
-let autonomous_max_idle_turns_live () =
-  max 2 (min 50 (get_int ~default:10 "MASC_KEEPER_MAX_IDLE_TURNS_AUTONOMOUS"))
 
 let turn_timeout_sec_live () =
   (* SSOT: must match Env_config_keeper.KeeperKeepalive.turn_timeout_sec
@@ -63,11 +48,6 @@ let turn_timeout_sec_live () =
   Float.max 60.0
     (Float.min 900.0
        (get_float ~default:600.0 "MASC_KEEPER_TURN_TIMEOUT_SEC"))
-
-let admission_wait_timeout_sec_live () =
-  Float.max 5.0
-    (Float.min 1200.0
-       (180.0))
 
 let stream_idle_timeout_sec_live () =
   Float.max 5.0
@@ -133,30 +113,10 @@ let freeze_from_current () =
       source = Option.value ~default:Default (source_of_env_name name) }
   in
   let turn_timeout_sec_value = turn_timeout_sec_live () in
-  let bootstrap_max_active_keepers =
-    source_field
-      "MASC_KEEPER_BOOTSTRAP_MAX_ACTIVE_KEEPERS"
-      (bootstrap_max_active_keepers_live ())
-  in
-  let reactive_max_idle_turns =
-    source_field
-      "MASC_KEEPER_MAX_IDLE_TURNS_REACTIVE"
-      (reactive_max_idle_turns_live ())
-  in
-  let autonomous_max_idle_turns =
-    source_field
-      "MASC_KEEPER_MAX_IDLE_TURNS_AUTONOMOUS"
-      (autonomous_max_idle_turns_live ())
-  in
   let turn_timeout_sec =
     source_field
       "MASC_KEEPER_TURN_TIMEOUT_SEC"
       turn_timeout_sec_value
-  in
-  let admission_wait_timeout_sec =
-    source_field
-      "MASC_KEEPER_ADMISSION_WAIT_TIMEOUT_SEC"
-      (admission_wait_timeout_sec_live ())
   in
   let oas_timeout_override_sec =
     {
@@ -199,11 +159,7 @@ let freeze_from_current () =
       (Env_config_core.get_float ~default:30.0 "MASC_KEEPER_OAS_TIMEOUT_PER_TURN")
   in
   {
-    bootstrap_max_active_keepers;
-    reactive_max_idle_turns;
-    autonomous_max_idle_turns;
     turn_timeout_sec;
-    admission_wait_timeout_sec;
     oas_timeout_override_sec;
     stream_idle_timeout_sec;
     execution_idle_timeout_sec;
@@ -241,11 +197,7 @@ let option_float_to_yojson = function
 let to_yojson (runtime : t) =
   `Assoc
     [
-      ("bootstrap_max_active_keepers", field_to_yojson (fun value -> `Int value) runtime.bootstrap_max_active_keepers);
-      ("reactive_max_idle_turns", field_to_yojson (fun value -> `Int value) runtime.reactive_max_idle_turns);
-      ("autonomous_max_idle_turns", field_to_yojson (fun value -> `Int value) runtime.autonomous_max_idle_turns);
       ("turn_timeout_sec", field_to_yojson (fun value -> `Float value) runtime.turn_timeout_sec);
-      ("admission_wait_timeout_sec", field_to_yojson (fun value -> `Float value) runtime.admission_wait_timeout_sec);
       ("oas_timeout_override_sec", field_to_yojson option_float_to_yojson runtime.oas_timeout_override_sec);
       ("stream_idle_timeout_sec", field_to_yojson (fun value -> `Float value) runtime.stream_idle_timeout_sec);
       ("execution_idle_timeout_sec", field_to_yojson option_float_to_yojson runtime.execution_idle_timeout_sec);
@@ -254,20 +206,8 @@ let to_yojson (runtime : t) =
       ("oas_timeout_per_turn", field_to_yojson (fun value -> `Float value) runtime.oas_timeout_per_turn);
     ]
 
-let bootstrap_max_active_keepers () =
-  (current ()).bootstrap_max_active_keepers.value
-
-let reactive_max_idle_turns () =
-  (current ()).reactive_max_idle_turns.value
-
-let autonomous_max_idle_turns () =
-  (current ()).autonomous_max_idle_turns.value
-
 let turn_timeout_sec () =
   (current ()).turn_timeout_sec.value
-
-let admission_wait_timeout_sec () =
-  (current ()).admission_wait_timeout_sec.value
 
 let stream_idle_timeout_sec () =
   (current ()).stream_idle_timeout_sec.value

@@ -3,6 +3,12 @@ type t = {
   mutable latest_hash : string option;
 }
 
+exception Corrupt_jsonl of {
+  path : string;
+  line_number : int;
+  detail : string;
+}
+
 let parse_jsonl_line line =
   try Yojson.Safe.from_string line |> Envelope.of_json with
   | Yojson.Json_error msg -> Error msg
@@ -13,13 +19,16 @@ let read_jsonl_file path =
     ~finally:(fun () -> close_in_noerr ic)
     (fun () ->
       let entries = ref [] in
+      let line_number = ref 0 in
       (try
          while true do
            let line = input_line ic in
+           incr line_number;
            if String.length line > 0 then
              match parse_jsonl_line line with
              | Ok env -> entries := env :: !entries
-             | Error _ -> ()
+             | Error detail ->
+               raise (Corrupt_jsonl { path; line_number = !line_number; detail })
          done
        with End_of_file -> ());
       List.rev !entries)

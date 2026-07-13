@@ -12,16 +12,17 @@ type lease = Keeper_event_queue_persistence.lease
 type requeue_reason = Keeper_event_queue_persistence.requeue_reason =
   | Cycle_busy
   | Turn_not_scheduled
-  | Retry_after_pacing
   | Rotate_now
   | Cancelled
   | Cycle_crashed
   | Registration_recovery
+  | Approval_grant_unconsumed
+  | Approval_grant_state_unavailable
 
 type escalation_reason = Keeper_event_queue_persistence.escalation_reason =
   | Failure_judgment_requested
   | Failure_judgment_boundary_failed of { detail : string }
-  | Failure_judgment_operator_required of
+  | Failure_judgment_external_input_requested of
       { judge_runtime_id : string
       ; rationale : string
       }
@@ -156,6 +157,120 @@ let enqueue_durable_result ~base_path name stimulus =
        | Ok pending ->
          committed_pending := Some pending;
          Ok pending)
+;;
+
+type enqueue_if_missing_durable_result =
+  | Enqueued
+  | Already_present
+  | Identity_conflict of string
+  | Storage_error of string
+
+let board_attention_event_id (stimulus : Keeper_event_queue.stimulus) =
+  match stimulus.payload with
+  | Keeper_event_queue.Board_attention attention -> Some attention.candidate_id
+  | Keeper_event_queue.Board_signal _
+  | Keeper_event_queue.Bootstrap
+  | Keeper_event_queue.Fusion_completed _
+  | Keeper_event_queue.Bg_completed _
+  | Keeper_event_queue.Schedule_due _
+  | Keeper_event_queue.Connector_attention _
+  | Keeper_event_queue.Hitl_resolved _
+  | Keeper_event_queue.Failure_judgment _
+  | Keeper_event_queue.Goal_assigned _ ->
+    None
+;;
+
+let stimulus_with_board_attention_event_id queue event_id =
+  let rec loop = function
+    | [] -> None
+    | stimulus :: rest ->
+      (match board_attention_event_id stimulus with
+       | Some candidate_id when String.equal candidate_id event_id -> Some stimulus
+       | Some _ | None -> loop rest)
+  in
+  loop (Keeper_event_queue.to_list queue)
+;;
+
+let enqueue_if_missing_durable_result ~base_path ~event_id name stimulus =
+  match board_attention_event_id stimulus with
+  | None ->
+    Identity_conflict
+      "opaque durable event identity requires a Board_attention payload"
+  | Some payload_event_id when not (String.equal payload_event_id event_id) ->
+    Identity_conflict
+      (Printf.sprintf
+         "durable event identity mismatch: argument=%S payload=%S"
+         event_id
+         payload_event_id)
+  | Some _ when String.equal event_id "" ->
+    Identity_conflict "durable event identity must not be empty"
+  | Some _ ->
+    let committed_pending = ref None in
+    let commit_result = ref Enqueued in
+    let identity_conflict = ref None in
+    (match
+       Keeper_event_queue_persistence.update_checked_result
+         ~base_path
+         ~keeper_name:name
+         ~after_commit:(fun () ->
+           match !committed_pending with
+           | None -> ()
+           | Some pending -> publish_pending ~base_path name pending)
+         (fun queue ->
+            match stimulus_with_board_attention_event_id queue event_id with
+            | None ->
+              let pending = Keeper_event_queue.enqueue queue stimulus in
+              committed_pending := Some pending;
+              commit_result := Enqueued;
+              Ok pending
+            | Some existing
+              when Keeper_event_queue.stimulus_identity_equal existing stimulus ->
+              committed_pending := Some queue;
+              commit_result := Already_present;
+              Ok queue
+            | Some _ ->
+              let detail =
+                Printf.sprintf
+                  "conflicting durable Board-attention event for event_id=%s"
+                  event_id
+              in
+              identity_conflict := Some detail;
+              Error detail)
+     with
+     | Ok () -> !commit_result
+     | Error detail ->
+       (match !identity_conflict with
+        | Some conflict -> Identity_conflict conflict
+        | None -> Storage_error detail))
+;;
+
+type enqueue_stimulus_durable_result =
+  | Stimulus_enqueued
+  | Stimulus_already_present
+  | Stimulus_storage_error of string
+
+let enqueue_stimulus_durable_result ~base_path name stimulus =
+  let committed_pending = ref None in
+  let commit_result = ref Stimulus_enqueued in
+  match
+    Keeper_event_queue_persistence.update_checked_result
+      ~base_path
+      ~keeper_name:name
+      ~after_commit:(fun () ->
+        match !committed_pending with
+        | None -> ()
+        | Some pending -> publish_pending ~base_path name pending)
+      (fun queue ->
+         let pending = enqueue_if_missing queue stimulus in
+         committed_pending := Some pending;
+         commit_result :=
+           (if queue_contains queue stimulus
+            then Stimulus_already_present
+            else Stimulus_enqueued);
+         Ok pending)
+  with
+  | Ok () -> !commit_result
+  | Error detail -> Stimulus_storage_error detail
 ;;
 
 let enqueue_hitl_resolution_durable_result

@@ -69,7 +69,7 @@ implementation_prs: []
 |-------|------|-----|
 | STALE | observer spec 가 canonical spec 의 stale snapshot - 같은 vocabulary 의도 | 1-line widen (e.g. add missing members) |
 | DELIBERATE | observer spec 가 *의도된 부분 projection* — 같은 vocabulary 의 부분 집합 | rename to `<Spec>_<SetName>` (e.g. `KMC_TurnPhaseSet`) + header §"Out-of-scope" 명시 |
-| NAME COLLISION | 다른 vocabulary 가 같은 이름 점유 — 의도 collision 아님 | rename to vocabulary-aligned name (e.g. `SmartHeartbeatDecisionSet`) |
+| NAME COLLISION | 다른 vocabulary 가 같은 이름 점유 — 의도 collision 아님 | rename to a vocabulary-aligned domain name |
 ```
 
 **Layer B — Audit 7 instance 적용**
@@ -81,7 +81,7 @@ implementation_prs: []
 | KMC.TurnPhaseSet (4) | DELIBERATE | rename `KMC_TurnPhaseSet` |
 | KMC.DecisionSet (3) | DELIBERATE | rename `KMC_DecisionSet` |
 | KMC.RuntimeSet (2) | DELIBERATE | rename `KMC_RuntimeSet` |
-| KEQ.DecisionSet (3 = emit/skip/tick) | NAME COLLISION | rename `SmartHeartbeatDecisionSet` |
+| KEQ.DecisionSet (historical emit/skip/tick layer) | REMOVED | adaptive heartbeat decision layer hard-cut on 2026-07-13 |
 | (다른 5 spec 의 `DecisionSet` 4) | canonical | unchanged |
 
 **Layer C — Scanner CI 활성화**
@@ -107,7 +107,7 @@ jobs:
 | P1 (this PR) | RFC body | Draft → main |
 | P2 | spec PR: 2 STALE sync (KRuntimeL.TurnPhaseSet + KDP.TurnPhaseSet widen to 7) | TLC re-verify PASS clean for both |
 | P3 | spec PR: 3 KMC DELIBERATE rename (TurnPhase/Decision/Runtime) — `KMC_*` prefix + header note | TLC PASS, sibling spec reference 정정 |
-| P4 | spec PR: 1 KEQ NAME COLLISION rename (`DecisionSet` → `SmartHeartbeatDecisionSet`) + KEQ header documentation | TLC PASS, downstream tooling regex 정정 |
+| P4 | ~~KEQ NAME COLLISION rename~~ | SUPERSEDED: the whole adaptive heartbeat decision layer was removed on 2026-07-13 |
 | P5 | `scripts/audit-tla-annotation-drift.sh --check-cross-spec --strict` activation. CI workflow `.github/workflows/cross-spec-divergence.yml` | 7 fix 후 0 divergence — new PR 가 0 유지 |
 | P6 | `docs/spec/cross-spec-divergence-policy.md` — 3-class framework + 새 spec 추가 정책 | 새 observer spec PR template 가 classification 강제 |
 

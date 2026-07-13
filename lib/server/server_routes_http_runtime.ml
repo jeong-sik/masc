@@ -552,6 +552,12 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
   let fd_accountant_json =
     compute_section ~name:"fd_accountant" ?section_timings_ref fd_accountant_snapshot_json
   in
+  let disk_observation_json =
+    compute_section ~name:"disk_observation" ?section_timings_ref (fun () ->
+      Keeper_disk_pressure.snapshot_json
+        ~masc_root:path_diagnostics.effective_masc_root
+        ())
+  in
   let keeper_fleet_safety =
     compute_section ~name:"keeper_fleet_safety" ?section_timings_ref
       (fun () ->
@@ -631,10 +637,11 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
     ( "operator_action_reasons",
       `List (List.map (fun reason -> `String reason) operator_action_reasons) );
     ("keeper_fibers", `Int keeper_fibers);
-    ( "keeper_fd_pressure"
+    ( "fd_observation"
     , Keeper_fd_pressure.runtime_state_json ~active_keepers:keeper_fibers
-        ~starting_keepers:0 ~requested_keepers:24 () );
+        () );
     ("fd_accountant", fd_accountant_json);
+    ("disk_observation", disk_observation_json);
     ("server_hibernation", Server_hibernation.status_json ());
     ("keeper_fleet_safety", keeper_fleet_safety);
     ("keeper_identity_drift", keeper_identity_drift_json);
@@ -643,10 +650,8 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
     ("keeper_board_event_collection", board_event_collection_json);
     ("keeper_event_queue", keeper_event_queue_json);
     (* Paused-keeper visibility: a keeper with [meta.paused = true] does not
-       run turns, and auto-paused keepers may no longer have a live registry
-       entry. The dashboard "깨우기" button now auto-resumes paused keepers,
-       but ops still need a quick count without external telemetry. List names
-       so an operator can correlate with the structured blocker cause. *)
+       run turns and may no longer have a live registry entry. Operators still
+       need a durable count and the typed pause cause. *)
     (key_paused_keepers, paused_keepers_json);
     ("keeper_config_error_count",
      `Int keeper_config_error_count);
@@ -740,8 +745,9 @@ let full_health_cached_field_names =
     "operator_action_required";
     "operator_action_reasons";
     "keeper_fibers";
-    "keeper_fd_pressure";
+    "fd_observation";
     "fd_accountant";
+    "disk_observation";
     "keeper_fleet_safety";
     "keeper_identity_drift";
     "keeper_reaction_ledger";
@@ -774,12 +780,15 @@ let full_health_placeholder_fields ?error ?(component_timed_out = false)
     ("operator_action_required", `Bool false);
     ("operator_action_reasons", `List []);
     ("keeper_fibers", `Int 0);
-    ( "keeper_fd_pressure",
+    ( "fd_observation",
       full_health_component_placeholder ?error ~component_timed_out ~status
-        "keeper_fd_pressure" );
+        "fd_observation" );
     ( "fd_accountant",
       full_health_component_placeholder ?error ~component_timed_out ~status
         "fd_accountant" );
+    ( "disk_observation",
+      full_health_component_placeholder ?error ~component_timed_out ~status
+        "disk_observation" );
     ( "keeper_fleet_safety",
       full_health_component_placeholder ?error ~component_timed_out ~status
         "keeper_fleet_safety" );
@@ -1320,10 +1329,9 @@ let board_post_detail_json ~include_moderation ~blind_votes ~config ~voter
       let contributor_quality =
         board_contributor_quality_lookup ?config () author
       in
-      let claim_evidence = board_claim_evidence_lookup () post_id in
       let post_json =
         board_post_dashboard_json ~include_moderation ~blind_votes ?current_vote
-          ?contributor_quality ?claim_evidence ~reactions ~author_karma post
+          ?contributor_quality ~reactions ~author_karma post
       in
       let comments_json =
         `List (List.map (fun (comment : Board.comment) ->

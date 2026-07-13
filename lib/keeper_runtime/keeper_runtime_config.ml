@@ -10,7 +10,6 @@ let key_to_env =
     "bootstrap.enabled",                "MASC_KEEPER_BOOTSTRAP_ENABLED";
     "bootstrap.stale_turn_sec",         "MASC_KEEPER_BOOTSTRAP_STALE_TURN_SEC";
     "bootstrap.max_scan",               "MASC_KEEPER_BOOTSTRAP_MAX_SCAN";
-    "bootstrap.max_active_keepers",     "MASC_KEEPER_BOOTSTRAP_MAX_ACTIVE_KEEPERS";
     "bootstrap.autoboot_max",           "MASC_KEEPER_AUTOBOOT_MAX";
     (* [autonomous] *)
     (* RFC-0297 P0-1: global lifecycle kill-switches. Without these mappings
@@ -18,17 +17,13 @@ let key_to_env =
        dropped (see load_and_apply — only known key_to_env keys are visited). *)
     "autonomous.enabled",               "MASC_KEEPER_AUTONOMOUS_ENABLED";
     "autonomous.fairness_cooldown_sec", "MASC_KEEPER_AUTONOMOUS_FAIRNESS_COOLDOWN_SEC";
-    "autonomous.max_idle_turns",        "MASC_KEEPER_MAX_IDLE_TURNS_AUTONOMOUS";
     (* [reactive] *)
     "reactive.enabled",                 "MASC_KEEPER_REACTIVE_ENABLED";
-    "reactive.max_idle_turns",          "MASC_KEEPER_MAX_IDLE_TURNS_REACTIVE";
     (* [heartbeat] *)
     "heartbeat.interval_sec",           "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC";
     "heartbeat.max_silence_sec",        "MASC_KEEPER_MAX_SILENCE_SEC";
     "heartbeat.snapshot_sec",           "MASC_KEEPER_SNAPSHOT_SEC";
     "heartbeat.work_as_heartbeat",      "MASC_KEEPER_WORK_AS_HEARTBEAT";
-    "heartbeat.smart_heartbeat",        "MASC_KEEPER_SMART_HEARTBEAT";
-    "heartbeat.jitter_factor",          "MASC_KEEPER_HEARTBEAT_JITTER_FACTOR";
     "heartbeat.sleep_chunk_sec",        "MASC_KEEPER_SLEEP_CHUNK_SEC";
     "heartbeat.board_wakeup_max",       "MASC_KEEPER_BOARD_WAKEUP_MAX";
     (* [health] *)
@@ -37,9 +32,6 @@ let key_to_env =
     "wire_capture.enabled",             "MASC_KEEPER_WIRE_CAPTURE";
     (* [proactive] *)
     "proactive.enabled",                "MASC_KEEPER_PROACTIVE_ENABLED";
-    "proactive.min_interval_sec",       "MASC_KEEPER_PROACTIVE_MIN_INTERVAL_SEC";
-    "proactive.noop_backoff_max_shift", "MASC_KEEPER_PROACTIVE_NOOP_BACKOFF_MAX_SHIFT";
-    "proactive.idle_decay_max_periods", "MASC_KEEPER_PROACTIVE_IDLE_DECAY_MAX_PERIODS";
     (* [turn] *)
     "turn.timeout_sec",                 "MASC_KEEPER_TURN_TIMEOUT_SEC";
     "turn.oas_timeout_sec",             "MASC_KEEPER_OAS_TIMEOUT_SEC";
@@ -47,28 +39,14 @@ let key_to_env =
     "turn.execution_idle_timeout_sec",  "MASC_KEEPER_EXECUTION_IDLE_TIMEOUT_SEC";
     "turn.cli_subprocess_idle_sec",     "MASC_KEEPER_CLI_SUBPROCESS_IDLE_SEC";
     "turn.capacity_limit",              "MASC_KEEPER_TURN_CAPACITY_LIMIT";
-    "turn.max_consecutive_hb_failures", "MASC_KEEPER_MAX_CONSECUTIVE_HB_FAILURES";
-    "turn.max_consecutive_turn_failures", "MASC_KEEPER_MAX_CONSECUTIVE_TURN_FAILURES";
-    "turn.chat_waiting_cap",          "MASC_KEEPER_TURN_CHAT_WAITING_CAP";
     "turn.batch_limit",                 "MASC_KEEPER_BATCH_LIMIT";
-    "turn.llm_rerank",                  "MASC_KEEPER_LLM_RERANK";
-    "turn.llm_rerank_runtime",          "MASC_KEEPER_LLM_RERANK_RUNTIME";
     "turn.temperature",                 "MASC_KEEPER_UNIFIED_TEMP";
     "turn.max_output_tokens",           "MASC_KEEPER_UNIFIED_MAX_TOKENS";
     "turn.enable_thinking",             "MASC_KEEPER_ENABLE_THINKING";
-    "turn.adaptive_thinking",           "MASC_KEEPER_ADAPTIVE_THINKING";
-    "turn.degraded_retry_slot_phase_budget_sec",
-                                        "MASC_KEEPER_DEGRADED_RETRY_SLOT_PHASE_BUDGET_SEC";
     (* [supervisor] *)
-    "supervisor.max_restarts",          "MASC_KEEPER_SUPERVISOR_MAX_RESTARTS";
-    "supervisor.backoff_base_sec",      "MASC_KEEPER_SUPERVISOR_BACKOFF_BASE_S";
-    "supervisor.backoff_max_sec",       "MASC_KEEPER_SUPERVISOR_BACKOFF_MAX_S";
     "supervisor.sweep_sec",             "MASC_KEEPER_SUPERVISOR_SWEEP_SEC";
     (* [lifecycle] *)
-    "lifecycle.self_preservation_ratio","MASC_KEEPER_SELF_PRESERVATION_RATIO";
-    "lifecycle.self_preservation_min",  "MASC_KEEPER_SELF_PRESERVATION_MIN_CANDIDATES";
     "lifecycle.dead_ttl_sec",           "MASC_KEEPER_DEAD_TTL_SEC";
-    "lifecycle.paused_cleanup_ttl_sec", "MASC_KEEPER_PAUSED_CLEANUP_TTL_SEC";
     (* [budget] *)
     "budget.daily_usd",                 "MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD";
     (* [metrics] *)
@@ -88,8 +66,6 @@ let key_to_env =
     "web_search.fallbacks",             "MASC_WEB_SEARCH_FALLBACKS";
     "web_search.timeout_sec",           "MASC_WEB_SEARCH_TIMEOUT_SEC";
     "web_search.cache_ttl_sec",         "MASC_WEB_SEARCH_CACHE_TTL_SEC";
-    "web_search.rate_limit_window_sec", "MASC_WEB_SEARCH_RATE_LIMIT_WINDOW_SEC";
-    "web_search.rate_limit_max_calls",  "MASC_WEB_SEARCH_RATE_LIMIT_MAX_CALLS";
     (* [debug] *)
     "debug.enabled",                    "MASC_KEEPER_DEBUG";
   ]

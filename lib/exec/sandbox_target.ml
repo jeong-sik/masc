@@ -19,16 +19,9 @@
    keeper layer constructs a [t] whose [runner] is a closure over its
    own runtime; [lib/exec] only sees the shape of the closure.
 
-   Variant design (2026-05-09)
-   ---------------------------
    [t] is a variant rather than a record so that the [Host] case needs
-   no runner closure.  This eliminates the circular dependency
-   [Sandbox_target -> Exec_gate -> Capability -> Verdict -> Shell_ir ->
-   Sandbox_target] that previously forced [host ()] to call
-   [Process_eio.run_argv_with_status_split] directly.  The dispatch
-   path in [Exec_dispatch] now routes [Host] directly to
-   [Exec_gate.run_argv_with_status_split], and [Docker] via the carried
-   [runner]. *)
+   no runner closure.  [Exec_dispatch] routes [Host] directly to
+   [Exec_gate], and [Docker] via the carried [runner]. *)
 
 type runner =
   on_stdout_chunk:(string -> unit) option ->

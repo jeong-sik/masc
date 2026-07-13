@@ -25,8 +25,6 @@
   mirage-crypto-ec
   mirage-crypto-rng
   mirage-crypto-rng.unix
-  mirage-crypto-pk
-  x509
   cstruct
   digestif
   ocaml-protoc-plugin
@@ -95,7 +93,6 @@
   masc.keeper_contract
   masc.keeper_hooks_oas_types
   masc.keeper_runtime
-  masc.keeper_failure_circuit_breaker_types
   masc.keeper_toml
   masc.keeper_tooling
   masc.keeper_metrics
@@ -104,7 +101,6 @@
   masc.keeper_types_profile_sandbox
   masc.keeper_usage_trust
   masc.keeper_event_bus
-  masc.keeper_failure_policy
   ;; Runtime_provider_labels extracted to lib/runtime_provider_labels/.
   ;; Leaf boundary over agent_sdk.llm_provider canonical provider labels.
   masc.runtime_provider_labels
@@ -136,9 +132,6 @@
   ;; (wrapped false) preserves the bare `Trajectory` identifier; only
   ;; wrapped-pattern callers (Masc.Trajectory.X in tests) drop prefix.
   masc.trajectory
-  ;; RFC-0056 Phase 1B — Keeper_skill_routing leaf utility extracted to
-  ;; lib/keeper_skill_routing/. 215 LoC, only stdlib + masc_core deps.
-  ;; First step in unblocking lib/keeper/ flat-namespace decoupling.
   ;; RFC-0056 Phase 1C — Host_config leaf module extracted to
   ;; lib/host_config/. RFC-0084 §1.5/§3.4 typed host configuration record;
   ;; deps: stdlib + masc.workspace (already sub-library).
@@ -191,32 +184,18 @@
   ;; Bounded_event_dedupe — shared stdlib-only Hashtbl + Mutex +
   ;; threshold-once state machine for keeper/task log-noise reducers.
   masc.bounded_event_dedupe
-  ;; Keeper_recording_error_state — typed dedupe state for
-  ;; Keeper_registry.record_error log noise (MASC/OAS Error-Warn
-  ;; Reduction Goal §P6). Domain adapter over Bounded_event_dedupe so
+  ;; Keeper_recording_error_state — exact-message occurrence state for
+  ;; Keeper_registry.record_error observability. Domain adapter over Bounded_event_dedupe so
   ;; the standalone test executable can link in seconds without the
   ;; main library.
-  ;; ETA-LIVELOCK (2026-05-19): typed escalation state for the
-  ;; Keeper_turn_livelock dispatch-guard log noise (~15K ERROR/day
-  ;; from 4 keepers re-blocking the same turn_id every ~30 s).
-  ;; Domain adapter over Bounded_event_dedupe so the standalone
-  ;; alcotest builds without dragging the main library.
-  ;; IOTA-RETRY (2026-05-19): typed dedupe state for the
-  ;; Keeper_tools_oas retry-loop ERROR log noise (12+ events from
-  ;; 5+ tools in a 1000-line system_log sample — tool_execute x4,
-  ;; Execute x2, retired PR-review wrapper x2,
-  ;; masc_transition x2, Bash x2). Single emit site at
-  ;; lib/keeper/keeper_tools_oas.ml:733. Domain adapter over
-  ;; Bounded_event_dedupe so the standalone alcotest builds in seconds
-  ;; without dragging the main library.
   ;; LAMBDA-HOOK-ERROR (2026-05-19): typed dedupe state for the
   ;; Keeper_hooks_oas on_tool_error hook ERROR log noise (8 events
   ;; from 4 distinct (keeper, tool) triples in a 1000-line system_log
   ;; sample — keeper:verifier × Bash, lifecycle-worker-fast-1 ×
   ;; Execute, lifecycle-reviewer-fast-1 × retired
   ;; PR-review wrapper, analyst × masc_transition). Single
-  ;; emit site at lib/keeper/keeper_hooks_oas.ml:720. Sibling of
-  ;; keeper_tool_retry_state with a (keeper, tool, signature) key.
+  ;; emit site at lib/keeper/keeper_hooks_oas.ml:720, keyed by
+  ;; (keeper, tool, signature).
   ;; Domain adapter over Bounded_event_dedupe so the standalone
   ;; alcotest builds in seconds without dragging the main library.
   ;; RFC-0086 Phase 2.B prereq — Tool_catalog_surfaces (lib/ root, 554+103 LoC)
@@ -317,8 +296,6 @@
   masc_thompson
   ;; Environment configuration (extracted sub-library)
   masc.config
-  ;; Neutral shell command descriptor projection.
-  masc.command_descriptor
   ;; Neutral agent observation bus. Keeper emits here; IDE registers sinks.
   masc.agent_observation
   masc.ide
@@ -363,8 +340,8 @@
   ;; Parse_outcome — RFC-0145 canonical helper for parse-with-failure
   ;; boundaries (replaces silent [try ... with _ -> None] pattern).
   masc.parse_outcome
-  ;; Embedded config — config/ tree embedded into the binary. Used by
-  ;; Destructive_ops_policy to read the canonical destructive_ops.toml.
+  ;; Embedded config — config/ tree embedded into the binary for prompt and
+  ;; runtime configuration consumers.
   masc.embedded_config
   ;; RFC-0252 — Fusion panel+judge deliberation pure core (types, gate, config,
   ;; judge JSON parse). lib/fusion/ (OAS-calling glue) lives in this main lib.

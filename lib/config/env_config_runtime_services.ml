@@ -1,0 +1,150 @@
+open Env_config_core
+
+(** {1 Inference Configuration} *)
+
+module Inference = struct
+  (** Timeout for model API calls (seconds) *)
+  let timeout_seconds =
+    get_float ~default:30.0 "MASC_INFERENCE_TIMEOUT_SEC"
+
+  (** Enable inference response cache (L1+L2). *)
+  let cache_enabled =
+    Feature_flag_registry.get_bool "MASC_INFERENCE_CACHE_ENABLED"
+
+  (** Default TTL for inference response cache (seconds). *)
+  let cache_ttl_seconds =
+    get_int ~default:300 "MASC_INFERENCE_CACHE_TTL_SEC"
+
+  (** Skip caching for oversized prompts (character count). *)
+  let cache_max_prompt_chars =
+    get_int ~default:48000 "MASC_INFERENCE_CACHE_MAX_PROMPT_CHARS"
+
+  (** Cache only deterministic temperatures (default exact 0.0). *)
+  let cache_max_temperature =
+    get_float ~default:0.0 "MASC_INFERENCE_CACHE_MAX_TEMP"
+
+  (** L1 in-memory entry cap.
+      BUG-015: Reduced from 2048 to 512 — unbounded growth with 2048 default
+      caused excessive memory usage in long-running servers. *)
+  let cache_l1_max_entries =
+    get_int ~default:512 "MASC_INFERENCE_CACHE_L1_MAX_ENTRIES"
+
+  (** Spawn cache policy:
+      - off
+      - safe_only (GLM direct HTTP only, no MCP-tool side effects) *)
+  let spawn_cache_policy =
+    get_string ~default:"safe_only" "MASC_SPAWN_CACHE_POLICY"
+    |> String.trim
+    |> String.lowercase_ascii
+end
+
+(** {1 Rate Limit Cleanup Configuration} *)
+
+module RateLimit = struct
+  (** Cleanup interval for stale rate limit buckets (seconds) *)
+  let cleanup_interval_seconds =
+    get_float ~default:300.0 "MASC_RATE_LIMIT_CLEANUP_INTERVAL_SEC"
+
+  (** Max age for rate limit entries before cleanup (seconds) *)
+  let entry_max_age_seconds =
+    get_float ~default:3600.0 "MASC_RATE_LIMIT_ENTRY_MAX_AGE_SEC"
+end
+
+(** {1 Agent Autonomy Configuration}
+    Primary env vars: MASC_AUTONOMY_*. *)
+
+module Autonomy = struct
+  (** Quiet hours start (0-23). Keeper suppresses actions in this window. *)
+  let quiet_start =
+    get_int ~default:3 "MASC_AUTONOMY_QUIET_START"
+
+  (** Quiet hours end (0-23). *)
+  let quiet_end =
+    get_int ~default:7 "MASC_AUTONOMY_QUIET_END"
+end
+
+(** {1 Thompson Sampling / Agent Selection Configuration}
+    Primary env vars: MASC_AUTONOMY_*. *)
+
+module AgentSelection = struct
+  let max_starvation_ticks =
+    get_int ~default:12 "MASC_AUTONOMY_MAX_STARVATION_TICKS"
+
+  let starvation_bonus_coefficient =
+    get_float ~default:0.15 "MASC_AUTONOMY_STARVATION_BONUS_COEF"
+
+  let thompson_weight =
+    get_float ~default:0.7 "MASC_AUTONOMY_THOMPSON_WEIGHT"
+
+  let vote_decay_factor =
+    get_float ~default:0.95 "MASC_AUTONOMY_VOTE_DECAY_FACTOR"
+end
+
+(** {1 Timeouts & Buffer Sizes} *)
+
+module Timeouts = struct
+  (** Neo4j / zombie-cleanup interval (seconds).
+      Controls the zero-zombie Pulse rhythm in the orchestrator.
+      Clamped to >= 1.0 to prevent tight-loop when misconfigured. *)
+  let neo4j_timeout_sec =
+    Float.max 1.0 (get_float ~default:60.0 "MASC_NEO4J_TIMEOUT_SEC")
+end
+
+(** {1 Operator Judge Configuration} *)
+
+module Operator = struct
+  (** Whether operator judge background loop is enabled. Default: true. *)
+  let judge_enabled = Feature_flag_registry.get_bool "MASC_OPERATOR_JUDGE_ENABLED"
+
+  (** Operator judge interval, clamped to >= 15s. Default: 60. *)
+  let judge_interval_sec = max 15 (get_int ~default:60 "MASC_OPERATOR_JUDGE_INTERVAL_SEC")
+
+  (** Workspace TTL for operator judge cleanup, clamped to >= 15s. Default: 60.
+      @category Timeouts
+      @ops_class operator *)
+  let workspace_ttl_sec = max 15 (get_int ~default:60 "MASC_OPERATOR_JUDGE_WORKSPACE_TTL_SEC")
+
+  (** Session TTL for operator judge cleanup, clamped to >= 30s. Default: 300. *)
+  let session_ttl_sec = max 30 (get_int ~default:300 "MASC_OPERATOR_JUDGE_SESSION_TTL_SEC")
+
+  (** Operator snapshot cache TTL (seconds). Default: 30. *)
+  let cache_ttl_sec = get_float ~default:30.0 "MASC_OPERATOR_CACHE_TTL"
+
+  (** Stale-while-revalidate grace factor. After the TTL expires, the
+      previous snapshot is still served for [ttl * factor] seconds while a
+      background fiber recomputes. Default: 3.0 (max 90 s stale at default TTL).
+      @category Timeouts
+      @ops_class operator *)
+  let cache_stale_grace_factor =
+    Float.max 0.0 (get_float ~default:3.0 "MASC_OPERATOR_CACHE_STALE_GRACE_FACTOR")
+
+  (** Enable background revalidation when serving stale snapshots.
+      Default: true. Disabling makes stale entries behave like the old
+      blocking TTL cache, which is useful for tests or strict-freshness mode. *)
+  let cache_background_revalidate =
+    Feature_flag_registry.get_bool "MASC_OPERATOR_CACHE_BACKGROUND_REVALIDATE"
+end
+
+(** {1 Dashboard Configuration} *)
+
+module Dashboard_config = struct
+  (** Whether dashboard fixtures are enabled. Default: false.
+      Re-readable within the process; this does not imply shell-level
+      hot reload as an operator contract. *)
+  let fixtures_enabled () = Feature_flag_registry.get_bool "MASC_DASHBOARD_FIXTURES_ENABLED"
+
+  (** Dashboard fixture name override. *)
+  let fixture_opt () =
+    Sys.getenv_opt "MASC_DASHBOARD_FIXTURE" |> trim_opt
+
+end
+
+(** {1 Model Routing Defaults} *)
+
+module Model_defaults = struct
+  (** Default runtime label (e.g. "glm:pro,openai:gpt-4.1"). *)
+  let default_runtime_opt () =
+    Sys.getenv_opt "MASC_DEFAULT_RUNTIME" |> trim_opt
+end
+
+(** {1 Endpoint Configuration} *)

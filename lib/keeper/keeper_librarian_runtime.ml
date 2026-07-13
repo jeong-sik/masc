@@ -652,11 +652,10 @@ let extract_and_append_with_provider_classified
     let now = episode.Keeper_memory_os_types.created_at in
     (* RFC-0243: UPSERT claims into the fact store instead of blind-appending. A claim
        re-extracted across turns is folded into the existing row
-       (Keeper_memory_os_policy.reobserve_fact: RFC-0247 refreshes
-       [last_verified_at] only) rather than accumulating as a duplicate. The same
-       call applies the RFC-0239 Q4 retention cap (ranked by the structural
-       [retention_rank]) in one atomic rewrite. Only after the facts are durable
-       do we publish the episode file and append the event row; the event row is
+       (Keeper_memory_os_policy.reobserve_fact refreshes [last_verified_at]
+       only) rather than accumulating as a duplicate. Every resulting fact is
+       preserved. Only after the facts are durable do we publish the episode file
+       and append the event row; the event row is
        the reader-visible commit marker for [read_episodes_tail].
 
        RFC-0285 §8: before folding, decide each claim's provenance. A claim
@@ -668,7 +667,6 @@ let extract_and_append_with_provider_classified
     Keeper_memory_os_io.with_episode_bundle_lock ?clock ~keeper_id (fun () ->
       match
         try
-          let window = Keeper_memory_os_io.fact_recall_window in
           let merge ~existing ~incoming =
             let provenance =
               let key = Keeper_memory_os_types.claim_identity incoming in
@@ -685,14 +683,10 @@ let extract_and_append_with_provider_classified
           in
           let (_ : Keeper_memory_os_io.fact_merge_stats) =
             File_lock_eio.with_lock ?clock (Keeper_memory_os_io.facts_path ~keeper_id) (fun () ->
-              Keeper_memory_os_io.merge_and_cap_facts
-                ~now
+              Keeper_memory_os_io.merge_facts
                 ~keeper_id
                 ~merge
-                ~incoming:episode.Keeper_memory_os_types.claims
-                ~keep:window
-                ~trigger:Keeper_memory_os_io.fact_store_max
-                ~rank:(Keeper_memory_os_policy.retention_rank ~now))
+                ~incoming:episode.Keeper_memory_os_types.claims)
           in
           Ok ()
         with
@@ -705,25 +699,6 @@ let extract_and_append_with_provider_classified
       | Ok () ->
         Keeper_memory_os_io.append_episode ~keeper_id episode;
         Keeper_memory_os_io.append_event ~keeper_id episode;
-        (* RFC-0272 (defect D): bound the append-only episode log under the same
-           bundle lock that serialized the writes above, so a re-extraction cannot
-           grow events.jsonl / episodes/ without limit. Hysteresis-gated: the trim
-           is a no-op until the high-water, so this is off the per-turn hot path. *)
-        ignore
-          (Keeper_memory_os_io.cap_events
-             ~keeper_id
-             ~keep:Keeper_memory_os_io.event_recall_window
-             ~trigger:Keeper_memory_os_io.event_store_max
-            : int);
-        ignore
-          (Keeper_memory_os_io.cap_episode_files
-             ~keeper_id
-             ~keep:Keeper_memory_os_io.episode_file_window
-             ~trigger:Keeper_memory_os_io.episode_file_store_max
-            : int);
-        (* RFC-0251: the co-occurrence edge / spreading-activation organ was removed
-           (dark-by-default, no recall consumer), so the fact upsert above is the only
-           post-merge work. *)
         Ok episode
       | Error message -> Error (Memory_fact_upsert_failed message)))
 ;;

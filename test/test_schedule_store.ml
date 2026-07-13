@@ -65,7 +65,6 @@ let updated_payload () = payload_exn (updated_payload_json ())
 
 let make_request
   ?(schedule_id = "sched-1")
-  ?(risk_class = Workspace_write)
   ?expires_at
   ?recurrence
   ()
@@ -73,16 +72,10 @@ let make_request
   match
     create_request ~schedule_id ~requested_by:(human "requester")
       ~scheduled_by:(human "scheduler") ~requested_at:100.0 ~due_at:200.0
-      ?expires_at ~payload:(payload_json ()) ~risk_class ~approval_required:false
-      ~source:Operator_request ?recurrence ()
+      ?expires_at ~payload:(payload_json ()) ~source:Operator_request ?recurrence ()
   with
   | Ok request -> request
   | Error msg -> fail msg
-;;
-
-let grant ?(approved_by = human "approver") request =
-  create_execution_grant ~grant_id:"grant-1" ~approved_by ~approved_at:150.0
-    ~decision:Approve request
 ;;
 
 let insert_ok config request =
@@ -112,7 +105,7 @@ let test_insert_persists_and_bumps_version () =
   let after = read_state config in
   check int "version bumped" (before.version + 1) after.version;
   check int "one schedule" 1 (List.length after.schedules);
-  check_status "stored pending" Pending_approval (List.hd after.schedules).status
+  check_status "stored scheduled" Scheduled (List.hd after.schedules).status
 ;;
 
 let test_duplicate_insert_rejected_without_bump () =
@@ -126,36 +119,20 @@ let test_duplicate_insert_rejected_without_bump () =
   check int "version unchanged" before.version after.version
 ;;
 
-let test_store_rejects_side_effecting_scheduled_insert () =
+let test_store_rejects_non_scheduled_initial_status () =
   with_workspace
   @@ fun config ->
-  let req = { (make_request ()) with status = Scheduled } in
+  let req = { (make_request ()) with status = Due } in
   match insert_request config req with
   | Ok _ -> fail "expected invalid initial status"
   | Error (Invalid_initial_status _) -> ()
   | Error err -> fail (store_error_to_string err)
 ;;
 
-let test_grant_records_and_schedules_request () =
-  with_workspace
-  @@ fun config ->
-  let req = make_request () in
-  ignore (insert_ok config req);
-  let grant = grant req in
-  (match record_grant config grant with
-   | Ok updated -> check_status "approved status" Scheduled updated.status
-   | Error err -> fail (store_error_to_string err));
-  let after = read_state config in
-  check int "grant recorded" 1 (List.length after.grants);
-  match get_schedule config ~schedule_id:req.schedule_id with
-  | Some stored -> check_status "stored scheduled" Scheduled stored.status
-  | None -> fail "schedule missing"
-;;
-
 let test_cancel_request_marks_cancelled () =
   with_workspace
   @@ fun config ->
-  let req = make_request ~schedule_id:"cancel-1" ~risk_class:Read_only () in
+  let req = make_request ~schedule_id:"cancel-1" () in
   ignore (insert_ok config req);
   (match cancel_request config ~schedule_id:req.schedule_id with
    | Ok updated -> check_status "cancelled status" Cancelled updated.status
@@ -165,29 +142,13 @@ let test_cancel_request_marks_cancelled () =
   | None -> fail "schedule missing"
 ;;
 
-let test_update_request_updates_pending_and_scheduled () =
+let test_update_request_updates_scheduled () =
   with_workspace
   @@ fun config ->
-  let pending = make_request ~schedule_id:"update-pending" () in
-  let scheduled =
-    make_request ~schedule_id:"update-scheduled" ~risk_class:Read_only ()
-  in
-  ignore (insert_ok config pending);
+  let scheduled = make_request ~schedule_id:"update-scheduled" () in
   ignore (insert_ok config scheduled);
   let payload_json = updated_payload_json () in
   let payload = payload_exn payload_json in
-  (match
-     update_request config ~schedule_id:pending.schedule_id ~due_at:250.0
-       ~expires_at:(Some 300.0) ~payload
-   with
-   | Ok updated ->
-     check_status "pending stays pending" Pending_approval updated.status;
-     check (float 0.001) "pending due_at" 250.0 updated.due_at;
-     check (option (float 0.001)) "pending expires_at" (Some 300.0)
-       updated.expires_at;
-     check string "pending payload" (Yojson.Safe.to_string payload_json)
-       (Yojson.Safe.to_string (payload_to_yojson updated.payload))
-   | Error err -> fail (store_error_to_string err));
   (match
      update_request config ~schedule_id:scheduled.schedule_id ~due_at:260.0
        ~expires_at:None ~payload
@@ -202,13 +163,13 @@ let test_update_request_updates_pending_and_scheduled () =
 ;;
 
 let update_not_allowed_error =
-  Invalid_status_transition "only pending or scheduled requests can be updated"
+  Invalid_status_transition "only scheduled requests can be updated"
 ;;
 
 let test_update_request_rejects_running_and_terminal () =
   with_workspace
   @@ fun config ->
-  let running = make_request ~schedule_id:"update-running" ~risk_class:Read_only () in
+  let running = make_request ~schedule_id:"update-running" () in
   ignore (insert_ok config running);
   (match refresh_due config ~now:201.0 with
    | Ok _ -> ()
@@ -222,9 +183,7 @@ let test_update_request_rejects_running_and_terminal () =
        ~expires_at:None ~payload:(updated_payload ()));
   let after_running = read_state config in
   check int "running version unchanged" before_running.version after_running.version;
-  let terminal =
-    make_request ~schedule_id:"update-terminal" ~risk_class:Read_only ()
-  in
+  let terminal = make_request ~schedule_id:"update-terminal" () in
   ignore (insert_ok config terminal);
   (match cancel_request config ~schedule_id:terminal.schedule_id with
    | Ok stored -> check_status "cancelled" Cancelled stored.status
@@ -237,61 +196,35 @@ let test_update_request_rejects_running_and_terminal () =
   check int "terminal version unchanged" before_terminal.version after_terminal.version
 ;;
 
-let test_requester_grant_rejected_without_bump () =
+let test_due_candidates_dispatch_without_scheduler_authorization_state () =
   with_workspace
   @@ fun config ->
   let req = make_request () in
   ignore (insert_ok config req);
-  let before = read_state config in
-  let grant = grant ~approved_by:req.requested_by req in
-  check_error "requester grant"
-    (Grant_validation_failed Approver_is_requester)
-    (record_grant config grant);
-  let after = read_state config in
-  check int "version unchanged" before.version after.version;
-  check int "no grant recorded" 0 (List.length after.grants)
-;;
-
-let test_due_candidates_require_approval_grant () =
-  with_workspace
-  @@ fun config ->
-  let req = make_request () in
-  ignore (insert_ok config req);
-  (match refresh_due config ~now:201.0 with
-   | Ok (_, changed) -> check int "pending not due" 0 changed
-   | Error err -> fail (store_error_to_string err));
-  check int "no candidate before grant" 0
-    (List.length (due_execution_candidates (read_state config)));
-  (match record_grant config (grant req) with
-   | Ok _ -> ()
-   | Error err -> fail (store_error_to_string err));
   (match refresh_due config ~now:201.0 with
    | Ok (_, changed) -> check int "scheduled became due" 1 changed
    | Error err -> fail (store_error_to_string err));
   let candidates = due_execution_candidates (read_state config) in
-  check int "one candidate after grant" 1 (List.length candidates)
+  check int "one due candidate" 1 (List.length candidates)
 ;;
 
-let test_read_only_due_candidate_does_not_need_grant () =
+let test_due_candidate_starts_without_authorization_state () =
   with_workspace
   @@ fun config ->
-  let req = make_request ~schedule_id:"read-1" ~risk_class:Read_only () in
+  let req = make_request ~schedule_id:"due-1" () in
   ignore (insert_ok config req);
   (match refresh_due config ~now:201.0 with
-   | Ok (_, changed) -> check int "read only due" 1 changed
+   | Ok (_, changed) -> check int "request due" 1 changed
    | Error err -> fail (store_error_to_string err));
-  check int "read-only candidate" 1
+  check int "due candidate" 1
     (List.length (due_execution_candidates (read_state config)))
 ;;
 
-let test_update_request_rejects_due_without_orphaning_grant () =
+let test_update_request_rejects_due_without_changing_candidate () =
   with_workspace
   @@ fun config ->
-  let req = make_request ~schedule_id:"update-due-granted" () in
+  let req = make_request ~schedule_id:"update-due" () in
   ignore (insert_ok config req);
-  (match record_grant config (grant req) with
-   | Ok stored -> check_status "approved status" Scheduled stored.status
-   | Error err -> fail (store_error_to_string err));
   (match refresh_due config ~now:201.0 with
    | Ok (_, changed) -> check int "became due" 1 changed
    | Error err -> fail (store_error_to_string err));
@@ -302,8 +235,6 @@ let test_update_request_rejects_due_without_orphaning_grant () =
     | None -> fail "due request missing"
   in
   check_status "stored due" Due due.status;
-  check bool "approved grant is current before update" true
-    (has_current_approved_grant before due);
   check int "candidate before update" 1
     (List.length (due_execution_candidates before));
   check_error "due update" update_not_allowed_error
@@ -320,43 +251,32 @@ let test_update_request_rejects_due_without_orphaning_grant () =
   check (float 0.001) "due_at unchanged" 200.0 stored.due_at;
   check string "payload unchanged" (Yojson.Safe.to_string (payload_json ()))
     (Yojson.Safe.to_string (payload_to_yojson stored.payload));
-  check bool "approved grant remains current" true
-    (has_current_approved_grant after stored);
   check int "candidate preserved after rejected update" 1
     (List.length (due_execution_candidates after))
 ;;
 
-let test_refresh_due_expires_pending_scheduled_and_due () =
+let test_refresh_due_expires_scheduled_and_due () =
   with_workspace
   @@ fun config ->
-  let pending =
-    make_request ~schedule_id:"expire-pending" ~risk_class:Workspace_write
-      ~expires_at:150.0 ()
-  in
   let scheduled =
-    make_request ~schedule_id:"expire-scheduled" ~risk_class:Read_only
-      ~expires_at:150.0 ()
+    make_request ~schedule_id:"expire-scheduled" ~expires_at:150.0 ()
   in
   let due =
-    make_request ~schedule_id:"expire-due" ~risk_class:Read_only
-      ~expires_at:250.0 ()
+    make_request ~schedule_id:"expire-due" ~expires_at:250.0 ()
   in
-  ignore (insert_ok config pending);
   ignore (insert_ok config scheduled);
   ignore (insert_ok config due);
   (match refresh_due config ~now:201.0 with
-   | Ok (_, changed) -> check int "pending expired, scheduled expired, due marked" 3 changed
+   | Ok (_, changed) -> check int "scheduled expired and due marked" 2 changed
    | Error err -> fail (store_error_to_string err));
   (match refresh_due config ~now:251.0 with
    | Ok (_, changed) -> check int "due expired" 1 changed
    | Error err -> fail (store_error_to_string err));
   (match
-     get_schedule config ~schedule_id:"expire-pending",
      get_schedule config ~schedule_id:"expire-scheduled",
      get_schedule config ~schedule_id:"expire-due"
    with
-   | Some pending, Some scheduled, Some due ->
-     check_status "pending expired" Expired pending.status;
+   | Some scheduled, Some due ->
      check_status "scheduled expired" Expired scheduled.status;
      check_status "due expired" Expired due.status;
      check int "expired schedules are not due candidates" 0
@@ -368,11 +288,11 @@ let test_reschedule_due_recurring_advances_only_matching_recurring_rows () =
   with_workspace
   @@ fun config ->
   let recurring =
-    make_request ~schedule_id:"loop-1" ~risk_class:Read_only
+    make_request ~schedule_id:"loop-1"
       ~recurrence:(Interval { interval_sec = 60 })
       ()
   in
-  let one_shot = make_request ~schedule_id:"once-1" ~risk_class:Read_only () in
+  let one_shot = make_request ~schedule_id:"once-1" () in
   ignore (insert_ok config recurring);
   ignore (insert_ok config one_shot);
   (match refresh_due config ~now:201.0 with
@@ -399,7 +319,7 @@ let test_reschedule_due_cron_advances_to_next_match () =
   with_workspace
   @@ fun config ->
   let cron =
-    make_request ~schedule_id:"cron-1" ~risk_class:Read_only
+    make_request ~schedule_id:"cron-1"
       ~recurrence:(Cron { expression = "0 9 * * 1-5"; timezone = "UTC" })
       ()
   in
@@ -421,7 +341,7 @@ let test_reschedule_due_cron_advances_to_next_match () =
 let test_recovers_from_last_good () =
   with_workspace
   @@ fun config ->
-  let req = make_request ~risk_class:Read_only () in
+  let req = make_request () in
   ignore (insert_ok config req);
   Workspace_core.write_text config (schedules_path config) "{not json";
   let recovered = read_state config in
@@ -449,14 +369,13 @@ let test_load_fresh_when_file_absent () =
    | Corrupt _ -> fail "absent ledger reported as Corrupt");
   let state = read_state config in
   check int "fresh store has no schedules" 0 (List.length state.schedules);
-  check int "fresh store has no grants" 0 (List.length state.grants);
   check int "fresh store has no executions" 0 (List.length state.executions)
 ;;
 
 let test_start_and_complete_persist_execution_record () =
   with_workspace
   @@ fun config ->
-  let req = make_request ~schedule_id:"exec-1" ~risk_class:Read_only () in
+  let req = make_request ~schedule_id:"exec-1" () in
   ignore (insert_ok config req);
   (match refresh_due config ~now:201.0 with
    | Ok (_, changed) -> check int "became due" 1 changed
@@ -502,7 +421,7 @@ let test_start_and_complete_persist_execution_record () =
 let test_fail_due_candidate_records_failed_execution () =
   with_workspace
   @@ fun config ->
-  let req = make_request ~schedule_id:"unsupported-1" ~risk_class:Read_only () in
+  let req = make_request ~schedule_id:"unsupported-1" () in
   ignore (insert_ok config req);
   (match refresh_due config ~now:201.0 with
    | Ok (_, changed) -> check int "became due" 1 changed
@@ -529,18 +448,15 @@ let test_fail_due_candidate_records_failed_execution () =
        execution.finished_at)
 ;;
 
-let test_recurring_grant_is_scoped_to_current_due_at () =
+let test_recurring_occurrences_remain_dispatchable () =
   with_workspace
   @@ fun config ->
   let req =
-    make_request ~schedule_id:"write-loop-1" ~risk_class:Workspace_write
+    make_request ~schedule_id:"loop-1"
       ~recurrence:(Interval { interval_sec = 60 })
       ()
   in
   ignore (insert_ok config req);
-  (match record_grant config (grant req) with
-   | Ok stored -> check_status "approved first occurrence" Scheduled stored.status
-   | Error err -> fail (store_error_to_string err));
   (match refresh_due config ~now:201.0 with
    | Ok (_, changed) -> check int "first due" 1 changed
    | Error err -> fail (store_error_to_string err));
@@ -557,30 +473,14 @@ let test_recurring_grant_is_scoped_to_current_due_at () =
   (match refresh_due config ~now:260.0 with
    | Ok (_, changed) -> check int "second due" 1 changed
    | Error err -> fail (store_error_to_string err));
-  let state = read_state config in
-  let due =
-    match get_schedule config ~schedule_id:req.schedule_id with
-    | Some due -> due
-    | None -> fail "rescheduled request missing"
-  in
-  check bool "old grant is stale" false (has_current_approved_grant state due);
-  check int "second occurrence blocked before fresh grant" 0
-    (List.length (due_execution_candidates state));
-  let fresh_grant =
-    create_execution_grant ~grant_id:"grant-2" ~approved_by:(human "approver-2")
-      ~approved_at:261.0 ~decision:Approve due
-  in
-  (match record_grant config fresh_grant with
-   | Ok stored -> check_status "fresh due grant keeps due" Due stored.status
-   | Error err -> fail (store_error_to_string err));
-  check int "second occurrence candidate after fresh grant" 1
+  check int "second occurrence candidate" 1
     (List.length (due_execution_candidates (read_state config)))
 ;;
 
 let test_load_corrupt_when_both_unparseable () =
   with_workspace
   @@ fun config ->
-  let req = make_request ~risk_class:Read_only () in
+  let req = make_request () in
   ignore (insert_ok config req);
   corrupt_both config;
   match Schedule_store.load config with
@@ -594,7 +494,7 @@ let test_load_corrupt_when_both_unparseable () =
 let test_read_state_raises_on_corrupt () =
   with_workspace
   @@ fun config ->
-  let req = make_request ~risk_class:Read_only () in
+  let req = make_request () in
   ignore (insert_ok config req);
   corrupt_both config;
   match read_state config with
@@ -608,12 +508,12 @@ let test_read_state_raises_on_corrupt () =
 let test_mutation_refused_and_preserves_corrupt_ledger () =
   with_workspace
   @@ fun config ->
-  let req = make_request ~risk_class:Read_only () in
+  let req = make_request () in
   ignore (insert_ok config req);
   corrupt_both config;
   let primary_before = Workspace_core.read_text config (schedules_path config) in
   let recovery_before = Workspace_core.read_text config (schedules_recovery_path config) in
-  (match insert_request config (make_request ~schedule_id:"sched-2" ~risk_class:Read_only ()) with
+  (match insert_request config (make_request ~schedule_id:"sched-2" ()) with
    | Ok _ -> fail "insert on corrupt ledger unexpectedly succeeded"
    | Error (Corrupt_ledger _) -> ()
    | Error err -> fail ("expected Corrupt_ledger, got: " ^ store_error_to_string err));
@@ -639,7 +539,7 @@ let test_insert_surfaces_primary_write_failure () =
     ~finally:(fun () -> Unix.chmod masc_dir 0o755)
     (fun () ->
        let request =
-         make_request ~schedule_id:"persist-fail" ~risk_class:Read_only ()
+         make_request ~schedule_id:"persist-fail" ()
        in
        match insert_request config request with
        | Error (Persistence_failed msg) ->
@@ -654,7 +554,7 @@ let test_insert_keeps_primary_commit_when_recovery_write_fails () =
   @@ fun config ->
   Unix.mkdir (schedules_recovery_path config) 0o755;
   let request =
-    make_request ~schedule_id:"recovery-mirror-fail" ~risk_class:Read_only ()
+    make_request ~schedule_id:"recovery-mirror-fail" ()
   in
   (match insert_request config request with
    | Ok stored -> check string "stored id" request.schedule_id stored.schedule_id
@@ -670,7 +570,7 @@ let test_insert_keeps_primary_commit_when_recovery_write_fails () =
 let test_cancel_refused_on_corrupt_ledger () =
   with_workspace
   @@ fun config ->
-  let req = make_request ~schedule_id:"cancel-corrupt" ~risk_class:Read_only () in
+  let req = make_request ~schedule_id:"cancel-corrupt" () in
   ignore (insert_ok config req);
   corrupt_both config;
   match cancel_request config ~schedule_id:"cancel-corrupt" with
@@ -683,7 +583,7 @@ let test_cancel_refused_on_corrupt_ledger () =
 let test_last_good_is_parseable_after_good_write () =
   with_workspace
   @@ fun config ->
-  let req = make_request ~risk_class:Read_only () in
+  let req = make_request () in
   ignore (insert_ok config req);
   let recovery_json = Workspace_core.read_json config (schedules_recovery_path config) in
   match Schedule_store.state_of_yojson recovery_json with
@@ -722,31 +622,27 @@ let () =
           test_case "last-good is parseable after good write" `Quick
             test_last_good_is_parseable_after_good_write;
         ] );
-      ( "approval",
+      ( "lifecycle",
         [
-          test_case "side-effecting scheduled insert rejected" `Quick
-            test_store_rejects_side_effecting_scheduled_insert;
-          test_case "grant records and schedules request" `Quick
-            test_grant_records_and_schedules_request;
+          test_case "non-scheduled initial status rejected" `Quick
+            test_store_rejects_non_scheduled_initial_status;
           test_case "cancel request marks cancelled" `Quick
             test_cancel_request_marks_cancelled;
-          test_case "update request updates pending and scheduled" `Quick
-            test_update_request_updates_pending_and_scheduled;
+          test_case "update request updates scheduled" `Quick
+            test_update_request_updates_scheduled;
           test_case "update request rejects running and terminal" `Quick
             test_update_request_rejects_running_and_terminal;
-          test_case "requester grant rejected without bump" `Quick
-            test_requester_grant_rejected_without_bump;
         ] );
       ( "due",
         [
-          test_case "due candidates require approval grant" `Quick
-            test_due_candidates_require_approval_grant;
-          test_case "read-only due candidate does not need grant" `Quick
-            test_read_only_due_candidate_does_not_need_grant;
-          test_case "update request rejects due without orphaning grant" `Quick
-            test_update_request_rejects_due_without_orphaning_grant;
-          test_case "refresh_due expires pending scheduled and due" `Quick
-            test_refresh_due_expires_pending_scheduled_and_due;
+          test_case "due candidates dispatch without scheduler authorization state" `Quick
+            test_due_candidates_dispatch_without_scheduler_authorization_state;
+          test_case "due candidate starts without authorization state" `Quick
+            test_due_candidate_starts_without_authorization_state;
+          test_case "due update preserves candidate" `Quick
+            test_update_request_rejects_due_without_changing_candidate;
+          test_case "refresh_due expires scheduled and due" `Quick
+            test_refresh_due_expires_scheduled_and_due;
           test_case "reschedule due recurring rows" `Quick
             test_reschedule_due_recurring_advances_only_matching_recurring_rows;
           test_case "reschedule due cron rows" `Quick
@@ -755,8 +651,8 @@ let () =
             test_start_and_complete_persist_execution_record;
           test_case "fail due candidate records failed execution" `Quick
             test_fail_due_candidate_records_failed_execution;
-          test_case "recurring grant is scoped to current due_at" `Quick
-            test_recurring_grant_is_scoped_to_current_due_at;
+          test_case "recurring occurrences remain dispatchable" `Quick
+            test_recurring_occurrences_remain_dispatchable;
         ] );
     ]
 ;;

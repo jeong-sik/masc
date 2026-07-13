@@ -15,10 +15,8 @@ module Structured_schema = Masc.Keeper_structured_output_schema
 module Domain_pool_ref = Domain_pool_ref
 module Prompt_names = Keeper_prompt_names
 module Recall = Masc.Keeper_memory_os_recall
-module Consolidator = Masc.Keeper_memory_os_consolidator
 module Metrics = Masc.Otel_metric_store
 module Runtime_manifest = Masc.Keeper_runtime_manifest
-module Keeper_user_model = Masc.Keeper_user_model
 
 let unconfigured_runtime_id = "test.unconfigured"
 
@@ -72,7 +70,6 @@ let index_of substring s =
 let fact_fixture ~now () =
   { Types.claim = "User prefers concise responses"
   ; Types.category = Types.Preference
-  ; Types.external_ref = None
   ; Types.claim_kind = None
   ; Types.source = { Types.trace_id = "trace-123"; Types.turn = 5; Types.tool_call_id = None }
   ; Types.observed_by = []
@@ -409,46 +406,24 @@ let test_json_roundtrip () =
     e2.Types.terminal_marker
 ;;
 
-(* RFC-0247 (R5 migration safety): a legacy row carrying the now-deleted score
-   keys (confidence/access_count/last_accessed/stale_factor) still decodes — the
-   dead keys are ignored and the structural fields survive. Critically, the
-   decoder no longer REQUIRES confidence, so a row missing it is no longer
-   dropped (the row-loss this purge fixes). *)
-let test_legacy_row_with_dead_score_keys_decodes () =
-  let legacy_with_dead_keys =
-    `Assoc
-      [ "claim", `String "legacy fact"
-      ; "confidence", `Float 0.9
-      ; "category", `String "fact"
-      ; "source", `Assoc [ "trace_id", `String "trace-v1"; "turn", `Int 1 ]
-      ; "access_count", `Int 7
-      ; "first_seen", `Float 10.0
-      ; "last_accessed", `Float 20.0
-      ; "stale_factor", `Float 0.5
-      ; "schema_version", `String "rfc0231-v1"
-      ]
+let test_fact_decoder_rejects_wrong_schema_version () =
+  let fact = fact_fixture ~now:1_000_000.0 () in
+  let wrong_version =
+    match Types.fact_to_json fact with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (key, value) ->
+              if String.equal key Types.wire_field_schema_version
+              then key, `String "unsupported-version"
+              else key, value)
+           fields)
+    | _ -> Alcotest.fail "fact_to_json must produce an object"
   in
-  (match Types.fact_of_json legacy_with_dead_keys with
-   | None -> Alcotest.fail "expected legacy fact (with dead keys) to parse"
-   | Some fact ->
-     Alcotest.(check string) "claim survives" "legacy fact" fact.Types.claim;
-     Alcotest.(check (float 0.001)) "first_seen survives" 10.0 fact.Types.first_seen;
-     Alcotest.(check (option (float 0.001)))
-       "absent last_verified_at stays None"
-       None
-       fact.Types.last_verified_at);
-  (* A row with NO confidence key — previously dropped — now decodes. *)
-  let confidence_less =
-    `Assoc
-      [ "claim", `String "no-confidence fact"
-      ; "category", `String "fact"
-      ; "source", `Assoc [ "trace_id", `String "trace-v2"; "turn", `Int 2 ]
-      ; "first_seen", `Float 30.0
-      ]
-  in
-  match Types.fact_of_json confidence_less with
-  | None -> Alcotest.fail "confidence-less row must no longer be dropped"
-  | Some fact -> Alcotest.(check string) "claim decoded" "no-confidence fact" fact.Types.claim
+  Alcotest.(check bool)
+    "unsupported fact schema is rejected"
+    true
+    (Option.is_none (Types.fact_of_json wrong_version))
 ;;
 
 let test_librarian_prompt_renders () =
@@ -601,6 +576,43 @@ let test_librarian_rejects_extra_confidence_field () =
   | Ok _ -> Alcotest.fail "expected deprecated confidence field to be rejected"
 ;;
 
+let test_librarian_rejects_unknown_claim_kind () =
+  let inp : Librarian.input =
+    { Librarian.trace_id = "trace-invalid-kind"
+    ; generation = 4
+    ; messages = [ text_message "typed memory" ]
+    }
+  in
+  let raw =
+    `Assoc
+      [ "episode_summary", `String "summary"
+      ; ( "claims"
+        , `List
+            [ `Assoc
+                [ "claim", `String "claim with an invalid kind"
+                ; "category", `String "fact"
+                ; "claim_kind", `String "not_a_kind"
+                ; "source_turn", `Int 0
+                ]
+            ] )
+      ]
+    |> Yojson.Safe.to_string
+  in
+  match
+    Librarian.episode_of_output_result
+      ~now:1_000_000.0
+      ~generation:inp.generation
+      inp
+      raw
+  with
+  | Error Librarian.Claim_schema_mismatch -> ()
+  | Error error ->
+    Alcotest.failf
+      "expected Claim_schema_mismatch, got %s"
+      (Librarian.parse_error_to_string error)
+  | Ok _ -> Alcotest.fail "expected unknown claim_kind to be rejected"
+;;
+
 let test_librarian_generation_override () =
   let inp : Librarian.input =
     { Librarian.trace_id = "trace-generation-override"
@@ -619,11 +631,7 @@ let test_librarian_generation_override () =
   | _ -> Alcotest.fail "expected librarian output to parse"
 ;;
 
-(* RFC-0247 §2.3 producer end-to-end: a claim the librarian labels "ephemeral" is
-   born with a finite TTL and a fast decay rate, while a durable "fact" carries
-   neither — so the forgetting machinery (GC TTL pass, per-fact truth decay) is
-   driven by the typed category at write time, not left inert. *)
-let test_librarian_ephemeral_fact_has_ttl () =
+let test_librarian_does_not_infer_validity () =
   let now = 1_000_000.0 in
   let output =
     `Assoc
@@ -658,10 +666,9 @@ let test_librarian_ephemeral_fact_has_ttl () =
     let eph = find Types.Ephemeral in
     let durable = find Types.Fact in
     Alcotest.(check (option (float 0.001)))
-      "ephemeral fact TTL matches the category producer"
-      (Types.category_valid_until ~now Types.Ephemeral)
+      "ephemeral category does not invent validity"
+      None
       eph.Types.valid_until;
-    Alcotest.(check bool) "ephemeral TTL is finite" true (Option.is_some eph.Types.valid_until);
     Alcotest.(check (option (float 0.001)))
       "durable fact never hard-expires"
       None
@@ -891,11 +898,6 @@ let test_memory_os_bool_env_accepts_enabled_disabled () =
       "enabled enables GC"
       true
       (Env_config.KeeperMemoryOs.gc_enabled ()));
-  with_memory_os_env Env_config.KeeperMemoryOs.shared_consolidator_env_key "enabled" (fun () ->
-    Alcotest.(check bool)
-      "enabled enables shared consolidator"
-      true
-      (Env_config.KeeperMemoryOs.shared_consolidator_enabled ()));
   with_memory_os_env Env_config.KeeperMemoryOs.consolidation_env_key "enabled" (fun () ->
     Alcotest.(check bool)
       "enabled enables consolidation"
@@ -933,14 +935,6 @@ let test_memory_os_env_invalid_values_fail_closed_or_default () =
         false
         (Env_config.KeeperMemoryOs.gc_enabled ()));
     check_log_contains lines Env_config.KeeperMemoryOs.gc_env_key;
-    check_log_contains lines "fail-closed false");
-  with_captured_console_lines (fun lines ->
-    with_memory_os_env Env_config.KeeperMemoryOs.shared_consolidator_env_key "maybe" (fun () ->
-      Alcotest.(check bool)
-        "invalid shared consolidator flag fail-closes"
-        false
-        (Env_config.KeeperMemoryOs.shared_consolidator_enabled ()));
-    check_log_contains lines Env_config.KeeperMemoryOs.shared_consolidator_env_key;
     check_log_contains lines "fail-closed false");
   with_captured_console_lines (fun lines ->
     with_memory_os_env Env_config.KeeperMemoryOs.consolidation_env_key "maybe" (fun () ->
@@ -1035,8 +1029,6 @@ let memory_os_knob_readers : (string * (unit -> unit)) list =
     , fun () -> ignore (Env_config.KeeperMemoryOs.librarian_global_slot () : int) )
   ; ( Env_config.KeeperMemoryOs.gc_env_key
     , fun () -> ignore (Env_config.KeeperMemoryOs.gc_enabled () : bool) )
-  ; ( Env_config.KeeperMemoryOs.shared_consolidator_env_key
-    , fun () -> ignore (Env_config.KeeperMemoryOs.shared_consolidator_enabled () : bool) )
   ; ( Env_config.KeeperMemoryOs.consolidation_env_key
     , fun () -> ignore (Env_config.KeeperMemoryOs.consolidation_enabled () : bool) )
   ; ( Env_config.KeeperMemoryOs.consolidation_runtime_id_env_key
@@ -1840,7 +1832,7 @@ let test_librarian_runtime_rejects_unparseable_output_across_empty_retries () =
             (List.length (Memory_io.read_facts_tail ~keeper_id ~n:1)))))
 ;;
 
-let test_librarian_unstructured_fallback_does_not_write_facts () =
+let test_librarian_invalid_output_does_not_write_facts () =
   with_prompt_registry (fun () ->
     with_temp_keepers_dir (fun _keepers_dir ->
       with_eio (fun ~sw ~net ~clock ->
@@ -1943,8 +1935,7 @@ let test_librarian_runtime_reports_fact_upsert_failure () =
 ;;
 
 
-(* RFC-0247 §-1 Step 1: structural retention rank (replaces score_fact on the cap). *)
-let test_retention_rank_structural () =
+let test_reference_time_is_observation_only () =
   let now = 1_000_000.0 in
   let base = fact_fixture ~now () in
   let durable =
@@ -1953,17 +1944,18 @@ let test_retention_rank_structural () =
   let ephemeral_fresh =
     { base with Types.category = Types.Ephemeral; Types.last_verified_at = Some now }
   in
-  (* Ephemeral is dropped first: durable outranks even a strictly-fresher ephemeral. *)
   Alcotest.(check bool)
-    "durable outranks a fresher ephemeral" true
-    (Policy.retention_rank ~now durable > Policy.retention_rank ~now ephemeral_fresh);
-  (* Within a tier, the more-recently-verified fact is kept. *)
+    "category does not change recorded time"
+    true
+    (Float.equal
+       (Types.reference_time ephemeral_fresh)
+       (Option.get ephemeral_fresh.Types.last_verified_at));
   let durable_old =
     { base with Types.category = Types.Fact; Types.last_verified_at = Some (now -. 1000.0) }
   in
   Alcotest.(check bool)
-    "newer durable outranks older durable" true
-    (Policy.retention_rank ~now durable > Policy.retention_rank ~now durable_old)
+    "recorded time remains observable" true
+    (Types.reference_time durable > Types.reference_time durable_old)
 ;;
 
 (* RFC-0247 (purge): the turn-seeded lexical-relevance tests
@@ -2298,12 +2290,11 @@ let test_gc_dry_run_and_rewrite () =
     let report = GC.run_gc ~keeper_id ~now () in
     Alcotest.(check int) "total input" 4 report.GC.total_input;
     Alcotest.(check int) "ttl expired" 1 report.ttl_expired;
-    Alcotest.(check int) "dedup removed" 1 report.dedup_removed;
-    Alcotest.(check int) "written" 2 report.written;
+    Alcotest.(check int) "written" 3 report.written;
     let survivors = Memory_io.read_facts_all ~keeper_id in
-    Alcotest.(check int) "survivor count" 2 (List.length survivors);
+    Alcotest.(check int) "survivor count" 3 (List.length survivors);
     Alcotest.(check bool)
-      "keeps most-recently-verified duplicate"
+      "preserves duplicate rows for Memory/LLM judgment"
       true
       (List.exists (fun f -> String.equal f.Types.claim "duplicate claim") survivors);
     Alcotest.(check bool)
@@ -2377,20 +2368,15 @@ let test_gc_waits_for_fact_writer_lock () =
     let allow_writer, resolve_allow_writer = Eio.Promise.create () in
     let writer_done, resolve_writer_done = Eio.Promise.create () in
     let gc_result = ref None in
-    let fact_store_trigger = Policy.fact_store_max in
     Eio.Fiber.fork ~sw (fun () ->
       File_lock_eio.with_lock (Memory_io.facts_path ~keeper_id) (fun () ->
         Eio.Promise.resolve resolve_writer_entered ();
         Eio.Promise.await allow_writer;
         let (_ : Memory_io.fact_merge_stats) =
-          Memory_io.merge_and_cap_facts
-            ~now
+          Memory_io.merge_facts
             ~keeper_id
             ~merge:(Policy.reobserve_fact ~now ~provenance:Policy.Independent_observation)
             ~incoming:[ fresh ]
-            ~keep:Policy.fact_recall_window
-            ~trigger:fact_store_trigger
-            ~rank:(Policy.retention_rank ~now)
         in
         Eio.Promise.resolve resolve_writer_done ()));
     Eio.Promise.await writer_entered;
@@ -2409,16 +2395,10 @@ let test_gc_waits_for_fact_writer_lock () =
       | Some report -> report
       | None -> Alcotest.fail "expected GC to finish after writer releases lock"
     in
-    (* RFC-0259 §3.6 (P5): the writer's merge_and_cap now drops the expired row
-       on the same valid_until boundary GC uses, so by the time GC runs the
-       expired fact is already reclaimed — GC reads only the fresh fact and finds
-       nothing to expire. The lock-ordering assertion above (GC waits for the
-       writer's lock) is this test's subject; GC-drops-expired on an untouched
-       store is covered by test_gc_dry_run_and_rewrite. *)
-    Alcotest.(check int) "gc sees only the writer's committed fact" 1 report.GC.total_input;
+    Alcotest.(check int) "gc sees both committed rows" 2 report.GC.total_input;
     Alcotest.(check int)
-      "writer's cap already reclaimed the expired fact"
-      0
+      "gc expires the explicit past bound"
+      1
       report.ttl_expired;
     let survivors = Memory_io.read_facts_all ~keeper_id in
     Alcotest.(check int) "fresh fact survives GC" 1 (List.length survivors);
@@ -2436,8 +2416,6 @@ let test_recall_context_empty_without_memory () =
       Recall.render_context
         ~keeper_id:"virtual-memory-keeper"
         ~now:1_000_000.0
-        ~max_facts:5
-        ~max_episodes:1
         ()
     in
     Alcotest.(check string) "empty recall context" "" ctx)
@@ -2606,7 +2584,7 @@ let test_render_if_enabled_offmain_wrap_is_transparent () =
           wrapped)))
 ;;
 
-let test_render_if_enabled_omits_diagnostic_memory () =
+let test_render_if_enabled_keeps_diagnostic_context () =
   with_recall_env "true" (fun () ->
     with_prompt_registry (fun () ->
       with_temp_keepers_dir (fun keepers_dir ->
@@ -2631,20 +2609,21 @@ let test_render_if_enabled_omits_diagnostic_memory () =
           ; Types.source_turn_range = Some (1, 2)
           ; Types.created_at = now
           ; Types.valid_until = Some (now +. 3600.0)
-          ; Types.terminal_marker = Some Types.librarian_unstructured_fallback_terminal_marker
+          ; Types.terminal_marker = Some "diagnostic"
           ; Types.schema_version = Types.schema_version
           }
         in
         Memory_io.append_episode_bundle ~keeper_id diagnostic_episode;
         match render_if_enabled_for_test ~keeper_id ~now ~masc_root:keepers_dir () with
-        | None -> ()
+        | None -> Alcotest.fail "expected diagnostic context"
         | Some block ->
-          Alcotest.failf
-            "diagnostic memory leaked into recall block: %s"
-            block)))
+          Alcotest.(check bool)
+            "diagnostic remains visible to Memory/LLM"
+            true
+            (contains diagnostic_fact.Types.claim block))))
 ;;
 
-let test_render_if_enabled_omits_empty_episode_memory () =
+let test_render_if_enabled_preserves_empty_claim_episode () =
   with_recall_env "true" (fun () ->
     with_prompt_registry (fun () ->
       with_temp_keepers_dir (fun keepers_dir ->
@@ -2667,21 +2646,16 @@ let test_render_if_enabled_omits_empty_episode_memory () =
         in
         Memory_io.append_episode_bundle ~keeper_id episode;
         match render_if_enabled_for_test ~keeper_id ~now ~masc_root:keepers_dir () with
-        | None -> ()
+        | None -> Alcotest.fail "expected persisted episode context"
         | Some block ->
-          Alcotest.failf
-            "empty episode leaked into recall block: %s"
-            block)))
+          Alcotest.(check bool)
+            "episode summary remains visible even when claims are empty"
+            true
+            (contains episode.episode_summary block))))
 ;;
 
-(* RFC-0239 Q4 window invariant: when the store sits in the
-   (fact_recall_window, fact_store_max] band, a retention cap leaves the
-   highest-ranked durable facts at the file head while newer appends land at the
-   tail. Recall must scan fact_store_max (the whole bounded store), not a
-   fact_recall_window-sized tail, or it silently drops the best facts. Drive the
-   real merge-and-cap rewrite first, append more tail rows, and assert recall
-   still surfaces the head fact a tail-window scan would start past. *)
-let test_recall_scans_whole_bounded_store () =
+(* Recall reads the complete persisted store in source order. *)
+let test_recall_reads_complete_store () =
   with_recall_env "true" (fun () ->
     with_prompt_registry (fun () ->
       with_temp_keepers_dir (fun keepers_dir ->
@@ -2693,29 +2667,28 @@ let test_recall_scans_whole_bounded_store () =
           ; Types.last_verified_at = Some now
           }
         in
-        let cap_fillers =
-          List.init Policy.fact_store_max (fun i ->
+        let seed_fillers =
+          List.init 3 (fun i ->
             { (fact_fixture ~now ()) with
               Types.claim = Printf.sprintf "pre-cap filler durable fact %d" (i + 1)
             ; Types.last_verified_at = Some (now -. days 30 -. float_of_int i)
             })
         in
-        let cap_stats =
-          Memory_io.merge_and_cap_facts
-            ~now
+        let merge_stats =
+          Memory_io.merge_facts
             ~keeper_id
             ~merge:(Policy.reobserve_fact ~now ~provenance:Policy.Independent_observation)
-            ~incoming:(head :: cap_fillers)
-            ~keep:Policy.fact_recall_window
-            ~trigger:Policy.fact_store_max
-            ~rank:(Policy.retention_rank ~now)
+            ~incoming:(head :: seed_fillers)
         in
-        Alcotest.(check bool) "cap rewrite dropped low-ranked rows" true (cap_stats.dropped > 0);
-        let capped = Memory_io.read_facts_all ~keeper_id in
         Alcotest.(check int)
-          "cap rewrites to the recall window size"
-          Policy.fact_recall_window
-          (List.length capped);
+          "every input appended"
+          4
+          merge_stats.appended;
+        let seeded = Memory_io.read_facts_all ~keeper_id in
+        Alcotest.(check int)
+          "seeded store preserves all rows"
+          4
+          (List.length seeded);
         for i = 1 to 20 do
           let tail =
             { (fact_fixture ~now ()) with
@@ -2726,10 +2699,10 @@ let test_recall_scans_whole_bounded_store () =
           Memory_io.append_fact ~keeper_id tail
         done;
         let total = List.length (Memory_io.read_facts_all ~keeper_id) in
-        Alcotest.(check bool)
-          "store sits in the (fact_recall_window, fact_store_max] band"
-          true
-          (total > Policy.fact_recall_window && total <= Policy.fact_store_max);
+        Alcotest.(check int)
+          "appends preserve every row"
+          24
+          total;
         match render_if_enabled_for_test ~keeper_id ~now ~masc_root:keepers_dir () with
         | None -> Alcotest.fail "expected Some recall block for a seeded store"
         | Some block ->
@@ -2743,7 +2716,7 @@ let test_recall_scans_whole_bounded_store () =
    names the age and asks for verification — the anti-confabulation cue. The
    prior [stale=%.2f] annotation was always 0.00 (no producer writes it), so this
    guards the truth-anchored age rendering that replaced it. *)
-let test_recall_marks_stale_fact () =
+let test_recall_does_not_synthesize_age_verdict () =
   with_recall_env "true" (fun () ->
     with_prompt_registry (fun () ->
       with_temp_keepers_dir (fun keepers_dir ->
@@ -2761,9 +2734,13 @@ let test_recall_marks_stale_fact () =
         | None -> Alcotest.fail "expected Some block for a persisted stale fact"
         | Some block ->
           Alcotest.(check bool)
-            "stale fact carries a worded staleness marker"
+            "old fact remains visible"
             true
-            (contains "[stale: unverified, seen 12d ago — verify]" block);
+            (contains "Function frobnicate lives in widget.ml" block);
+          Alcotest.(check bool)
+            "no synthesized staleness verdict"
+            false
+            (contains "[stale:" block);
           Alcotest.(check bool)
             "dead stale=0.00 float annotation is gone"
             false
@@ -2799,76 +2776,7 @@ let test_recall_omits_marker_for_fresh_fact () =
             (contains "ago — verify]" block))))
 ;;
 
-let test_recall_treats_external_ref_as_context () =
-  with_recall_env "true" (fun () ->
-    with_prompt_registry (fun () ->
-      with_temp_keepers_dir (fun keepers_dir ->
-        let keeper_id = "volatile-stale-keeper" in
-        let now = 1_000_000.0 in
-        let horizon = 43_200.0 in
-        let fact =
-          { (fact_fixture ~now ()) with
-            Types.claim = "PR #21515 is blocked and needs a fix"
-          ; Types.external_ref = Some { Types.kind = Types.Pr; id = "21515" }
-          ; Types.first_seen = now -. (horizon *. 2.0)
-          ; Types.last_verified_at = Some (now -. (horizon *. 2.0))
-          ; Types.valid_until = Some (now +. horizon)
-          }
-        in
-        Memory_io.append_fact ~keeper_id fact;
-        match render_if_enabled_for_test ~keeper_id ~now ~masc_root:keepers_dir () with
-        | None -> Alcotest.fail "expected Some block for a persisted external-ref fact"
-        | Some block ->
-          Alcotest.(check bool)
-            "external-ref fact does not get a hard machine-generated prefix"
-            false
-            (contains "[UNVERIFIED — re-check before acting]" block);
-          Alcotest.(check bool)
-            "external-ref fact is still provided as context"
-            true
-            (contains fact.Types.claim block))))
-;;
-
-let test_recall_does_not_demote_external_ref_below_durable_cap () =
-  with_prompt_registry (fun () ->
-    with_temp_keepers_dir (fun _keepers_dir ->
-      let keeper_id = "volatile-demote-cap-keeper" in
-      let now = 1_000_000.0 in
-      let horizon = 43_200.0 in
-      let volatile_recent =
-        { (fact_fixture ~now ()) with
-          Types.claim = "PR #21515 is still open"
-        ; Types.external_ref = Some { Types.kind = Types.Pr; id = "21515" }
-        ; Types.first_seen = now -. (horizon *. 2.0)
-        ; Types.last_verified_at = Some (now -. (horizon *. 2.0))
-        ; Types.valid_until = Some (now +. horizon)
-        }
-      in
-      let durable_older =
-        { (fact_fixture ~now ()) with
-          Types.claim = "The repository uses the Memory OS recall prompt"
-        ; Types.external_ref = None
-        ; Types.first_seen = now -. days 90
-        ; Types.last_verified_at = Some (now -. days 60)
-        ; Types.valid_until = None
-        }
-      in
-      Memory_io.append_fact ~keeper_id volatile_recent;
-      Memory_io.append_fact ~keeper_id durable_older;
-      let block = Recall.render_context ~keeper_id ~now ~max_facts:1 ~max_episodes:0 () in
-      Alcotest.(check bool)
-        "recent external-ref fact survives max_facts cap"
-        true
-        (contains volatile_recent.Types.claim block);
-      Alcotest.(check bool)
-        "older durable fact is dropped by normal recency ordering"
-        false
-        (contains durable_older.Types.claim block)))
-;;
-
-(* RFC-0259 §3.5: a non-volatile (no external_ref) claim never gets the hard
-   prefix, however old — durable knowledge does not decay into "re-check". *)
-let test_recall_no_prefix_for_non_volatile_fact () =
+let test_recall_no_prefix_for_plain_fact () =
   with_recall_env "true" (fun () ->
     with_prompt_registry (fun () ->
       with_temp_keepers_dir (fun keepers_dir ->
@@ -2877,7 +2785,6 @@ let test_recall_no_prefix_for_non_volatile_fact () =
         let fact =
           { (fact_fixture ~now ()) with
             Types.claim = "Deployment uses a blue-green strategy"
-          ; Types.external_ref = None
           ; Types.first_seen = now -. days 30
           ; Types.last_verified_at = None
           }
@@ -2887,41 +2794,9 @@ let test_recall_no_prefix_for_non_volatile_fact () =
         | None -> Alcotest.fail "expected Some block for a persisted durable fact"
         | Some block ->
           Alcotest.(check bool)
-            "durable fact never carries the hard external-status prefix"
+            "plain fact carries no hard machine-generated prefix"
             false
             (contains "[UNVERIFIED — re-check before acting]" block))))
-;;
-
-(* External refs are context only: they should not get a hard status prefix even
-   when old. *)
-let test_recall_no_prefix_for_external_ref_fact () =
-  with_recall_env "true" (fun () ->
-    with_prompt_registry (fun () ->
-      with_temp_keepers_dir (fun keepers_dir ->
-        let keeper_id = "volatile-fresh-keeper" in
-        let now = 1_000_000.0 in
-        let horizon = 43_200.0 in
-        let fact =
-          { (fact_fixture ~now ()) with
-            Types.claim = "PR #21515 is still open"
-          ; Types.external_ref = Some { Types.kind = Types.Pr; id = "21515" }
-          ; Types.first_seen = now -. (horizon *. 3.0)
-          ; Types.last_verified_at = Some (now -. (horizon /. 2.0))
-          ; Types.valid_until = Some (now +. horizon)
-          }
-        in
-        Memory_io.append_fact ~keeper_id fact;
-        match render_if_enabled_for_test ~keeper_id ~now ~masc_root:keepers_dir () with
-        | None -> Alcotest.fail "expected Some block for a persisted external-ref fact"
-        | Some block ->
-          Alcotest.(check bool)
-            "external-ref fact does not carry the hard prefix"
-            false
-            (contains "[UNVERIFIED — re-check before acting]" block);
-          Alcotest.(check bool)
-            "external-ref fact is still recalled"
-            true
-            (contains "PR #21515 is still open" block))))
 ;;
 
 let test_recall_filters_expired_episodes () =
@@ -2951,11 +2826,15 @@ let test_recall_filters_expired_episodes () =
       in
       Memory_io.append_episode_bundle ~keeper_id expired;
       Memory_io.append_episode_bundle ~keeper_id active;
-      let ctx = Recall.render_context ~keeper_id ~now ~max_facts:0 ~max_episodes:4 () in
+      let ctx = Recall.render_context ~keeper_id ~now () in
       Alcotest.(check bool)
-        "expired episode summary is omitted"
+        "expired episode row is omitted"
         false
-        (contains "expired episode should not render" ctx);
+        (contains "[trace-expired g0001]" ctx);
+      Alcotest.(check bool)
+        "the episode claim has its own explicit validity and remains visible"
+        true
+        (contains "expired episode should not render fact" ctx);
       Alcotest.(check bool)
         "active episode summary remains"
         true
@@ -2978,7 +2857,7 @@ let test_recall_renders_terminal_episode_marker () =
         }
       in
       Memory_io.append_episode_bundle ~keeper_id episode;
-      let ctx = Recall.render_context ~keeper_id ~now ~max_facts:0 ~max_episodes:1 () in
+      let ctx = Recall.render_context ~keeper_id ~now () in
       Alcotest.(check bool)
         "terminal marker is visible in episode line"
         true
@@ -2989,20 +2868,19 @@ let test_recall_renders_terminal_episode_marker () =
         (contains "terminal handoff summary" ctx)))
 ;;
 
-(* RFC-0239 R2: the append-only store keeps every re-confirmation of a claim as
-   a separate immortal row. Recall must collapse duplicate claims by normalized
-   fingerprint so one repeated conclusion does not crowd distinct facts out of
-   the injected top-N. *)
-let test_recall_dedups_repeated_claim () =
+(* Recall preserves every persisted row, including repeated producer identities. *)
+let test_recall_preserves_repeated_claims () =
   with_prompt_registry (fun () ->
     with_temp_keepers_dir (fun _keepers_dir ->
       let keeper_id = "virtual-memory-keeper" in
       let now = 1_000_000.0 in
       let base = fact_fixture ~now () in
       let dup ~claim turn =
-        (* Same claim across turns, varying only case — normalize_claim folds
-           these to one fingerprint. *)
-        { base with Types.claim; Types.source = { base.source with turn } }
+        { base with
+          Types.claim
+        ; Types.source = { base.source with turn }
+        ; Types.claim_id = Some "operator-turn"
+        }
       in
       let distinct =
         { base with
@@ -3031,21 +2909,18 @@ let test_recall_dedups_repeated_claim () =
         }
       in
       Memory_io.append_episode_bundle ~keeper_id episode;
-      let ctx = Recall.render_context ~keeper_id ~now ~max_facts:8 ~max_episodes:0 () in
+      let ctx = Recall.render_context ~keeper_id ~now () in
       Alcotest.(check int)
-        "repeated claim collapses to a single fact line"
-        1
+        "all repeated rows remain visible"
+        3
         (occurrences "operator's turn now" (String.lowercase_ascii ctx));
       Alcotest.(check bool)
-        "distinct fact is not crowded out"
+        "distinct fact remains visible"
         true
         (contains "a genuinely distinct fact" ctx)))
 ;;
 
-(* RFC-0239 Q4 (retention): cap_facts bounds the append-only store, keeping the
-   highest-ranked facts and dropping the rest, but only once the store exceeds
-   the trigger (hysteresis). *)
-let test_cap_facts_keeps_top_ranked () =
+let test_fact_store_preserves_all_appends () =
   with_temp_keepers_dir (fun _keepers_dir ->
     let keeper_id = "virtual-memory-keeper" in
     let now = 1_000_000.0 in
@@ -3059,28 +2934,8 @@ let test_cap_facts_keeps_top_ranked () =
       in
       Memory_io.append_fact ~keeper_id f
     done;
-    (* rank by source turn (a surviving structural field): keep the 3 highest
-       (fact-08/09/10), drop 7. *)
-    let dropped =
-      Memory_io.cap_facts ~now ~keeper_id ~keep:3 ~trigger:5 ~rank:(fun f ->
-        float_of_int f.Types.source.turn)
-    in
-    Alcotest.(check int) "dropped count" 7 dropped;
     let remaining = Memory_io.read_all_facts ~keeper_id in
-    Alcotest.(check int) "kept count" 3 (List.length remaining);
-    List.iter
-      (fun f ->
-        Alcotest.(check bool)
-          (Printf.sprintf "%s is a top-3 claim" f.Types.claim)
-          true
-          (List.mem f.Types.claim [ "fact-08"; "fact-09"; "fact-10" ]))
-      remaining;
-    (* below trigger now (3 <= 5): no-op, nothing dropped. *)
-    let dropped2 =
-      Memory_io.cap_facts ~now ~keeper_id ~keep:3 ~trigger:5 ~rank:(fun f ->
-        float_of_int f.Types.source.turn)
-    in
-    Alcotest.(check int) "no-op below trigger" 0 dropped2)
+    Alcotest.(check int) "all facts preserved" 10 (List.length remaining))
 ;;
 
 (* RFC-0259 §3.6 (P5): the cap drops valid_until-expired rows on the same typed
@@ -3103,58 +2958,52 @@ let test_partition_expired_splits_on_valid_until () =
     (List.map (fun f -> f.Types.claim) gone)
 ;;
 
-let test_gc_ttl_expired_uses_external_state_effective_horizon () =
+let test_gc_uses_only_explicit_valid_until () =
   let now = 1_000_000.0 in
   let base = fact_fixture ~now () in
-  let expired_external =
+  let old_external =
     { base with
       Types.claim = "legacy external state expired"
     ; Types.claim_kind = Some Types.External_state
-    ; Types.first_seen = now -. Types.external_state_ttl_seconds -. 1.0
+    ; Types.first_seen = now -. 1_000_000.0
     ; Types.valid_until = None
     }
   in
-  let current_external =
-    { expired_external with
-      Types.claim = "legacy external state current"
-    ; Types.first_seen = now -. Types.external_state_ttl_seconds +. 1.0
-    }
+  let explicitly_expired =
+    { old_external with Types.claim = "explicitly expired"; valid_until = Some (now -. 1.0) }
   in
   let durable =
-    { expired_external with
+    { old_external with
       Types.claim = "durable legacy row"
     ; Types.claim_kind = None
     }
   in
   Alcotest.(check bool)
-    "GC expires legacy external_state via effective horizon"
-    true
-    (GC.ttl_expired ~now expired_external);
-  Alcotest.(check bool)
-    "GC keeps current legacy external_state"
+    "GC keeps old external_state without an explicit horizon"
     false
-    (GC.ttl_expired ~now current_external);
+    (GC.ttl_expired ~now old_external);
+  Alcotest.(check bool)
+    "GC expires exact explicit horizon"
+    true
+    (GC.ttl_expired ~now explicitly_expired);
   Alcotest.(check bool)
     "GC keeps durable no-horizon fact"
     false
     (GC.ttl_expired ~now durable);
   let live, gone =
-    Types.partition_expired ~now [ expired_external; current_external; durable ]
+    Types.partition_expired ~now [ old_external; explicitly_expired; durable ]
   in
   Alcotest.(check (list string))
-    "partition_expired shares GC effective horizon"
-    [ "legacy external state expired" ]
+    "partition_expired shares exact explicit horizon"
+    [ "explicitly expired" ]
     (List.map (fun f -> f.Types.claim) gone);
   Alcotest.(check (list string))
-    "live keeps current external + durable"
-    [ "legacy external state current"; "durable legacy row" ]
+    "live keeps unbounded external + durable"
+    [ "legacy external state expired"; "durable legacy row" ]
     (List.map (fun f -> f.Types.claim) live)
 ;;
 
-(* RFC-0259 §3.6 (P5): cap_facts evicts an expired row even when the store is far
-   below [trigger] (the disk-leak the off-by-default GC sweep would otherwise
-   miss), and never evicts a durable row. Re-running is a no-op once clean. *)
-let test_cap_drops_expired_below_trigger () =
+let test_fact_store_preserves_expired_for_explicit_gc () =
   with_temp_keepers_dir (fun _ ->
     let keeper_id = "virtual-memory-keeper" in
     let now = 1_000_000.0 in
@@ -3167,37 +3016,15 @@ let test_cap_drops_expired_below_trigger () =
       { base with Types.claim = "fresh-keep"; Types.valid_until = Some (now +. days 1) }
     in
     List.iter (Memory_io.append_fact ~keeper_id) [ durable; expired; fresh ];
-    let dropped =
-      Memory_io.cap_facts
-        ~now
-        ~keeper_id
-        ~keep:Policy.fact_recall_window
-        ~trigger:Policy.fact_store_max
-        ~rank:(Policy.retention_rank ~now)
-    in
-    Alcotest.(check int) "one expired row dropped below trigger" 1 dropped;
     let remaining =
       List.map (fun f -> f.Types.claim) (Memory_io.read_all_facts ~keeper_id)
     in
     Alcotest.(check bool) "durable survives" true (List.mem "durable-keep" remaining);
     Alcotest.(check bool) "fresh survives" true (List.mem "fresh-keep" remaining);
-    Alcotest.(check bool) "expired evicted" false (List.mem "expired-drop" remaining);
-    let dropped2 =
-      Memory_io.cap_facts
-        ~now
-        ~keeper_id
-        ~keep:Policy.fact_recall_window
-        ~trigger:Policy.fact_store_max
-        ~rank:(Policy.retention_rank ~now)
-    in
-    Alcotest.(check int) "idempotent: no-op once clean" 0 dropped2)
+    Alcotest.(check bool) "expired remains for explicit GC" true (List.mem "expired-drop" remaining))
 ;;
 
-(* RFC-0259 §3.6 (P5): the production librarian write path (merge_and_cap_facts)
-   evicts expired rows even with no incoming claims and the store below trigger,
-   counting them in [dropped]. This is the load-bearing fix — an idle-ish keeper
-   that stops extracting must not keep expired volatile rows on disk. *)
-let test_merge_and_cap_drops_expired_no_incoming () =
+let test_merge_preserves_rows_without_incoming () =
   with_temp_keepers_dir (fun _ ->
     let keeper_id = "virtual-memory-keeper" in
     let now = 1_000_000.0 in
@@ -3208,59 +3035,19 @@ let test_merge_and_cap_drops_expired_no_incoming () =
     in
     List.iter (Memory_io.append_fact ~keeper_id) [ durable; expired ];
     let stats =
-      Memory_io.merge_and_cap_facts
-        ~now
+      Memory_io.merge_facts
         ~keeper_id
         ~merge:(Policy.reobserve_fact ~now ~provenance:Policy.Independent_observation)
         ~incoming:[]
-        ~keep:Policy.fact_recall_window
-        ~trigger:Policy.fact_store_max
-        ~rank:(Policy.retention_rank ~now)
     in
-    Alcotest.(check int) "expired counted in dropped" 1 stats.Memory_io.dropped;
+    Alcotest.(check int) "nothing appended" 0 stats.Memory_io.appended;
     let remaining =
       List.map (fun f -> f.Types.claim) (Memory_io.read_all_facts ~keeper_id)
     in
-    Alcotest.(check (list string)) "only durable remains" [ "durable" ] remaining)
+    Alcotest.(check (list string)) "both rows remain" [ "durable"; "expired" ] remaining)
 ;;
 
-(* RFC-0272 (defect D): the episode-log cap hysteresis is a no-op at/below the
-   trigger and trims to the low-water above it; the band is non-empty and the
-   low-water clears the recall scan window so a trim can never starve recall. *)
-let test_trim_target_hysteresis () =
-  Alcotest.(check (option int))
-    "at trigger: no-op"
-    None
-    (Memory_io.trim_target ~count:5 ~keep:3 ~trigger:5);
-  Alcotest.(check (option int))
-    "above trigger: trim to keep"
-    (Some 3)
-    (Memory_io.trim_target ~count:6 ~keep:3 ~trigger:5);
-  Alcotest.(check bool)
-    "event band non-empty"
-    true
-    (Memory_io.event_recall_window < Memory_io.event_store_max);
-  Alcotest.(check bool)
-    "episode-file band non-empty"
-    true
-    (Memory_io.episode_file_window < Memory_io.episode_file_store_max);
-  (* Coupling guard: if a future edit drops the low-water below the policy recall
-     window, recall starves — fail here instead. *)
-  Alcotest.(check bool)
-    "low-water clears the recall scan window"
-    true
-    (Memory_io.event_recall_window > Policy.recall_episode_tail_scan
-     && Memory_io.episode_file_window > Policy.recall_episode_tail_scan)
-;;
-
-(* RFC-0272 (defect D): cap_events keeps the newest [keep] raw lines once the log
-   passes [trigger], and is a no-op once back under it.
-   RFC-0302 (#22823): cap_events now offloads its blocking full read via
-   Domain_pool_ref.submit_io_or_inline, which runs INLINE with no pool installed
-   (as here) — so this case also asserts the offload is behavior-transparent (the
-   trim result is identical to the pre-offload synchronous read). Same for
-   cap_episode_files below. *)
-let test_cap_events_drops_oldest_over_trigger () =
+let test_event_log_preserves_all_entries () =
   with_temp_keepers_dir (fun _ ->
     let keeper_id = "virtual-memory-keeper" in
     let now = 1_000_000.0 in
@@ -3274,23 +3061,17 @@ let test_cap_events_drops_oldest_over_trigger () =
       in
       Memory_io.append_event ~keeper_id ep
     done;
-    let dropped = Memory_io.cap_events ~keeper_id ~keep:3 ~trigger:5 in
-    Alcotest.(check int) "over trigger: drops the three oldest" 3 dropped;
     let summaries =
       Memory_io.read_events_tail ~keeper_id ~n:10
       |> List.map (fun e -> e.Types.episode_summary)
     in
     Alcotest.(check (list string))
-      "keeps the newest three in append order"
-      [ "ev-4"; "ev-5"; "ev-6" ]
-      summaries;
-    let dropped2 = Memory_io.cap_events ~keeper_id ~keep:3 ~trigger:5 in
-    Alcotest.(check int) "idempotent: no-op below trigger" 0 dropped2)
+      "keeps every event in append order"
+      [ "ev-1"; "ev-2"; "ev-3"; "ev-4"; "ev-5"; "ev-6" ]
+      summaries)
 ;;
 
-(* RFC-0272 (defect D): cap_episode_files keeps the [keep] most-recent files by
-   recency and unlinks the rest, idempotently. *)
-let test_cap_episode_files_keeps_recent () =
+let test_episode_files_preserve_all_entries () =
   with_temp_keepers_dir (fun _ ->
     let keeper_id = "virtual-memory-keeper" in
     let now = 1_000_000.0 in
@@ -3308,17 +3089,13 @@ let test_cap_episode_files_keeps_recent () =
       "six episode files written"
       6
       (json_episode_file_count ~keeper_id);
-    let dropped = Memory_io.cap_episode_files ~keeper_id ~keep:3 ~trigger:5 in
-    Alcotest.(check int) "over trigger: unlinks the three oldest" 3 dropped;
     Alcotest.(check int)
-      "three episode files remain"
-      3
-      (json_episode_file_count ~keeper_id);
-    let dropped2 = Memory_io.cap_episode_files ~keeper_id ~keep:3 ~trigger:5 in
-    Alcotest.(check int) "idempotent: no-op below trigger" 0 dropped2)
+      "all episode files remain"
+      6
+      (json_episode_file_count ~keeper_id))
 ;;
 
-let test_memory_io_caps_run_with_installed_domain_pool () =
+let test_memory_io_preserves_entries_with_installed_domain_pool () =
   with_installed_domain_pool (fun () ->
     let main_domain = (Domain.self () :> int) in
     let worker_domain =
@@ -3350,41 +3127,30 @@ let test_memory_io_caps_run_with_installed_domain_pool () =
         Memory_io.append_event ~keeper_id episode;
         Memory_io.append_episode ~keeper_id episode
       done;
-      let dropped_facts =
-        Memory_io.cap_facts ~now ~keeper_id ~keep:3 ~trigger:5 ~rank:(fun f ->
-          float_of_int f.Types.source.turn)
-      in
-      Alcotest.(check int) "fact cap drops oldest three" 3 dropped_facts;
       let remaining_facts =
         Memory_io.read_all_facts ~keeper_id
         |> List.map (fun f -> f.Types.claim)
         |> List.sort String.compare
       in
       Alcotest.(check (list string))
-        "fact cap keeps top-ranked facts"
-        [ "fact-04"; "fact-05"; "fact-06" ]
+        "all facts remain"
+        [ "fact-01"; "fact-02"; "fact-03"; "fact-04"; "fact-05"; "fact-06" ]
         remaining_facts;
-      let dropped_events = Memory_io.cap_events ~keeper_id ~keep:3 ~trigger:5 in
-      Alcotest.(check int) "event cap drops oldest three" 3 dropped_events;
       let event_summaries =
         Memory_io.read_events_tail ~keeper_id ~n:10
         |> List.map (fun e -> e.Types.episode_summary)
       in
       Alcotest.(check (list string))
-        "event cap keeps newest events"
-        [ "ev-4"; "ev-5"; "ev-6" ]
+        "all events remain"
+        [ "ev-1"; "ev-2"; "ev-3"; "ev-4"; "ev-5"; "ev-6" ]
         event_summaries;
-      let dropped_episodes =
-        Memory_io.cap_episode_files ~keeper_id ~keep:3 ~trigger:5
-      in
-      Alcotest.(check int) "episode cap drops oldest three" 3 dropped_episodes;
       Alcotest.(check int)
-        "episode cap keeps three files"
-        3
+        "all episode files remain"
+        6
         (json_episode_file_count ~keeper_id)))
 ;;
 
-let test_recall_context_renders_sanitized_memory () =
+let test_recall_context_preserves_semantic_memory_content () =
   with_prompt_registry (fun () ->
     with_temp_keepers_dir (fun _keepers_dir ->
       let keeper_id = "virtual-memory-keeper" in
@@ -3422,7 +3188,7 @@ let test_recall_context_renders_sanitized_memory () =
         }
       in
       Memory_io.append_episode_bundle ~keeper_id episode;
-      let ctx = Recall.render_context ~keeper_id ~now ~max_facts:5 ~max_episodes:1 () in
+      let ctx = Recall.render_context ~keeper_id ~now () in
       Alcotest.(check bool)
         "contains recall header"
         true
@@ -3435,15 +3201,15 @@ let test_recall_context_renders_sanitized_memory () =
         "contains normal fact"
         true
         (contains "Recall should surface saved facts" ctx);
-      Alcotest.(check bool) "strips system role prefix" false (contains "system:" ctx);
-      Alcotest.(check bool) "strips developer role prefix" false (contains "developer:" ctx);
+      Alcotest.(check bool) "preserves system-labelled memory" true (contains "system:" ctx);
+      Alcotest.(check bool) "preserves developer-labelled memory" true (contains "developer:" ctx);
       Alcotest.(check bool)
-        "strips ignore previous instruction prefix"
-        false
+        "preserves previous-instruction text"
+        true
         (contains "ignore previous instructions" ctx);
       Alcotest.(check bool)
-        "strips ignore prior instruction prefix"
-        false
+        "preserves prior-instruction text"
+        true
         (contains "ignore prior instructions" ctx)))
 ;;
 
@@ -3502,7 +3268,7 @@ let test_recall_context_preserves_admission_memory () =
       in
       Memory_io.append_episode_bundle ~keeper_id transient_episode;
       Memory_io.append_episode_bundle ~keeper_id useful_episode;
-      let ctx = Recall.render_context ~keeper_id ~now ~max_facts:5 ~max_episodes:5 () in
+      let ctx = Recall.render_context ~keeper_id ~now () in
       Alcotest.(check bool)
         "keeps stale diagnostic fact"
         true
@@ -3547,35 +3313,34 @@ let test_reobserve_fact_refreshes_truth_anchor () =
   Alcotest.(check string) "claim identity preserved" existing.Types.claim merged.Types.claim
 ;;
 
-(* RFC-0243/0247: a re-observed claim (even reworded by case/whitespace) is folded
-   into the single existing row instead of appending a duplicate. The merged row
-   keeps the first observation's claim/provenance; its truth anchor
-   ([last_verified_at]) advances to now. *)
-let test_merge_and_cap_upserts_reobserved_claim () =
+(* A re-observed claim with the same model-produced identity is folded into the
+   existing row. No claim prose comparison participates. *)
+let test_merge_upserts_reobserved_claim () =
   with_temp_keepers_dir (fun _keepers_dir ->
     let keeper_id = "virtual-memory-keeper" in
     let now = 1_000_000.0 in
     let base = fact_fixture ~now () in
     let claim = "User deploys via blue-green" in
     let first =
-      { base with Types.claim; Types.last_verified_at = Some (now -. 86400.0) }
+      { base with
+        Types.claim
+      ; Types.claim_id = Some "blue-green-deployment"
+      ; Types.last_verified_at = Some (now -. 86400.0)
+      }
     in
     Memory_io.append_fact ~keeper_id first;
     let reobserved =
       { base with
         Types.claim = "user  deploys via BLUE-GREEN"
+      ; Types.claim_id = Some "blue-green-deployment"
       ; Types.last_verified_at = Some now
       }
     in
     let stats =
-      Memory_io.merge_and_cap_facts
-        ~now
+      Memory_io.merge_facts
         ~keeper_id
         ~merge:(Policy.reobserve_fact ~now ~provenance:Policy.Independent_observation)
         ~incoming:[ reobserved ]
-        ~keep:Policy.fact_recall_window
-        ~trigger:Policy.fact_store_max
-        ~rank:(Policy.retention_rank ~now)
     in
     Alcotest.(check int) "one claim merged" 1 stats.Memory_io.merged;
     Alcotest.(check int) "none appended" 0 stats.Memory_io.appended;
@@ -3589,10 +3354,8 @@ let test_merge_and_cap_upserts_reobserved_claim () =
     Alcotest.(check string) "first observation's claim text kept" claim row.Types.claim)
 ;;
 
-(* RFC-0243: distinct claims are appended (not merged), and the retention cap
-   still drops the lowest-ranked rows once the store exceeds the trigger, in the
-   same write. *)
-let test_merge_and_cap_appends_distinct_and_caps () =
+(* Distinct claims are appended and no fixed-size cap deletes them. *)
+let test_merge_appends_distinct_claims () =
   with_temp_keepers_dir (fun _keepers_dir ->
     let keeper_id = "virtual-memory-keeper" in
     let now = 1_000_000.0 in
@@ -3605,413 +3368,19 @@ let test_merge_and_cap_appends_distinct_and_caps () =
       }
     in
     let stats =
-      Memory_io.merge_and_cap_facts
-        ~now
+      Memory_io.merge_facts
         ~keeper_id
         ~merge:(Policy.reobserve_fact ~now ~provenance:Policy.Independent_observation)
         ~incoming:[ mk 1; mk 2; mk 3 ]
-        ~keep:2
-        ~trigger:2
-        ~rank:(fun f -> float_of_int f.Types.source.turn)
     in
     Alcotest.(check int) "three distinct appended" 3 stats.Memory_io.appended;
     Alcotest.(check int) "none merged" 0 stats.Memory_io.merged;
-    Alcotest.(check int) "one dropped by cap" 1 stats.Memory_io.dropped;
     let rows = Memory_io.read_all_facts ~keeper_id in
-    Alcotest.(check int) "kept two highest-ranked" 2 (List.length rows);
-    List.iter
-      (fun f ->
-        Alcotest.(check bool)
-          (Printf.sprintf "%s is a top-2 claim" f.Types.claim)
-          true
-          (List.mem f.Types.claim [ "distinct fact 2"; "distinct fact 3" ]))
-      rows)
+    Alcotest.(check int) "all three preserved" 3 (List.length rows))
 ;;
 
-(* ---------- RFC-0244 Tier 2 consolidator ---------- *)
+(* ---------- Context does not infer validity ---------- *)
 
-let mk_shared_fixture ~now ?(category = "fact") claim =
-  { (fact_fixture ~now ()) with
-    Types.claim
-  ; Types.category = Types.category_of_string category
-  }
-;;
-
-(* Two distinct keepers holding the same outcome-positive claim are promoted into
-   one shared fact whose observed_by is the sorted keeper set. RFC-0247:
-   corroboration is structural (distinct-keeper count); there is no confidence
-   aggregation. *)
-let test_consolidator_promotes_corroborated () =
-  let now = 1_000_000.0 in
-  let keeper_facts =
-    [ "beta", [ mk_shared_fixture ~now ~category:"validated_approach" "shared system invariant" ]
-    ; "alpha", [ mk_shared_fixture ~now ~category:"validated_approach" "shared system invariant" ]
-    ]
-  in
-  let _considered, shared = Consolidator.promote_facts ~now ~keeper_facts () in
-  Alcotest.(check int) "exactly one promoted" 1 (List.length shared);
-  match shared with
-  | [ f ] ->
-    Alcotest.(check (list string))
-      "observed_by is the sorted distinct keeper set"
-      [ "alpha"; "beta" ]
-      f.Types.observed_by;
-    Alcotest.(check (option (float 1e-9)))
-      "consolidation verifies the shared fact (last_verified_at = now)"
-      (Some now)
-      f.Types.last_verified_at;
-    Alcotest.(check string)
-      "outcome-positive category carried"
-      "validated_approach"
-      (Types.category_to_string f.Types.category)
-  | _ -> Alcotest.fail "expected one shared fact"
-;;
-
-(* RFC-0259 §3.7: a promoted shared fact carries the corroborating group's
-   [claim_id]. The group is keyed on [claim_identity], so contributors share one
-   id; the shared row must keep it so recall's private-precedence dedup matches it
-   against the same keeper's private (id-keyed) row across tiers instead of
-   injecting the conclusion twice. Guards the cross-tier dedup regression. *)
-let test_consolidator_promotes_carries_claim_id () =
-  let now = 1_000_000.0 in
-  let with_id claim =
-    { (mk_shared_fixture ~now ~category:"lesson" claim) with
-      Types.claim_id = Some "pr-321-merged"
-    }
-  in
-  let keeper_facts =
-    [ "beta", [ with_id "PR #321 merged" ]
-    ; "alpha", [ with_id "pull request #321 was merged" ]
-    ]
-  in
-  let _considered, shared = Consolidator.promote_facts ~now ~keeper_facts () in
-  match shared with
-  | [ f ] ->
-    Alcotest.(check (option string))
-      "promoted shared fact carries the group claim_id"
-      (Some "pr-321-merged")
-      f.Types.claim_id;
-    Alcotest.(check string)
-      "shared identity uses the id key, matching contributors' private rows"
-      "id:pr-321-merged"
-      (Types.claim_identity f)
-  | _ -> Alcotest.fail "expected one shared fact"
-;;
-
-let promote_one ~now keeper_facts =
-  match Consolidator.promote_facts ~now ~keeper_facts () with
-  | _, [ f ] -> f
-  | _, shared -> Alcotest.failf "expected one shared fact, got %d" (List.length shared)
-;;
-
-let test_consolidator_representative_prefers_verified () =
-  let now = 1_000_000.0 in
-  let claim_id = Some "representative-verified-priority" in
-  let unverified =
-    { (mk_shared_fixture ~now ~category:"lesson" "old unverified wording") with
-      Types.first_seen = now -. 20_000.0
-    ; Types.last_verified_at = None
-    ; Types.claim_id = claim_id
-    }
-  in
-  let verified =
-    { (mk_shared_fixture ~now ~category:"lesson" "verified wording") with
-      Types.first_seen = now -. 10.0
-    ; Types.last_verified_at = Some (now -. 100.0)
-    ; Types.claim_id = claim_id
-    }
-  in
-  let promoted =
-    promote_one ~now [ "alpha", [ unverified ]; "beta", [ verified ] ]
-  in
-  Alcotest.(check string)
-    "explicit verification beats never-verified legacy row"
-    "verified wording"
-    promoted.Types.claim
-;;
-
-let test_consolidator_representative_prefers_newest_verification () =
-  let now = 1_000_000.0 in
-  let claim_id = Some "representative-newest-verification" in
-  let old_verified =
-    { (mk_shared_fixture ~now ~category:"validated_approach" "older verified wording") with
-      Types.last_verified_at = Some (now -. 500.0)
-    ; Types.claim_id = claim_id
-    }
-  in
-  let new_verified =
-    { (mk_shared_fixture ~now ~category:"validated_approach" "newer verified wording") with
-      Types.last_verified_at = Some (now -. 5.0)
-    ; Types.claim_id = claim_id
-    }
-  in
-  let promoted =
-    promote_one ~now [ "alpha", [ old_verified ]; "beta", [ new_verified ] ]
-  in
-  Alcotest.(check string)
-    "newer last_verified_at wins among verified rows"
-    "newer verified wording"
-    promoted.Types.claim
-;;
-
-let test_consolidator_unverified_fallback_order () =
-  let now = 1_000_000.0 in
-  let claim_id = Some "representative-unverified-fallback" in
-  let unverified ?(source = "trace") ~first_seen claim =
-    { (mk_shared_fixture ~now ~category:"lesson" claim) with
-      Types.first_seen
-    ; Types.last_verified_at = None
-    ; Types.claim_id = claim_id
-    ; Types.source =
-        { Types.trace_id = source; Types.turn = 1; Types.tool_call_id = None }
-    }
-  in
-  let by_claim =
-    promote_one
-      ~now
-      [ "gamma", [ unverified ~first_seen:(now -. 1.0) "aaa later wording" ]
-      ; "beta", [ unverified ~first_seen:(now -. 10.0) "z earliest wording" ]
-      ; "alpha", [ unverified ~first_seen:(now -. 10.0) "a earliest wording" ]
-      ]
-  in
-  Alcotest.(check string)
-    "unverified fallback uses first_seen before claim text"
-    "a earliest wording"
-    by_claim.Types.claim;
-  let by_keeper =
-    promote_one
-      ~now
-      [ "beta", [ unverified ~source:"from-beta" ~first_seen:(now -. 10.0) "same wording" ]
-      ; "alpha", [ unverified ~source:"from-alpha" ~first_seen:(now -. 10.0) "same wording" ]
-      ]
-  in
-  Alcotest.(check string)
-    "unverified fallback ties finally by keeper id"
-    "from-alpha"
-    by_keeper.Types.source.Types.trace_id
-;;
-
-let test_consolidator_filters_stale_before_shared_fields () =
-  let now = 1_000_000.0 in
-  let claim_id = Some "fresh-contributors-only" in
-  let stale =
-    { (mk_shared_fixture ~now ~category:"lesson" "stale ancient wording") with
-      Types.first_seen = 1.0
-    ; Types.valid_until = Some (now -. 1.0)
-    ; Types.last_verified_at = Some (now -. 1.0)
-    ; Types.claim_id = claim_id
-    }
-  in
-  let fresh_old =
-    { (mk_shared_fixture ~now ~category:"lesson" "fresh older wording") with
-      Types.first_seen = 100.0
-    ; Types.last_verified_at = Some (now -. 100.0)
-    ; Types.claim_id = claim_id
-    }
-  in
-  let fresh_new =
-    { (mk_shared_fixture ~now ~category:"lesson" "fresh newest wording") with
-      Types.first_seen = 200.0
-    ; Types.last_verified_at = Some (now -. 5.0)
-    ; Types.claim_id = claim_id
-    }
-  in
-  let promoted =
-    promote_one
-      ~now
-      [ "stale", [ stale ]; "fresh-a", [ fresh_old ]; "fresh-b", [ fresh_new ] ]
-  in
-  Alcotest.(check string)
-    "representative comes from current contributors only"
-    "fresh newest wording"
-    promoted.Types.claim;
-  Alcotest.(check (list string))
-    "observed_by excludes stale contributors"
-    [ "fresh-a"; "fresh-b" ]
-    promoted.Types.observed_by;
-  Alcotest.(check (float 1e-9))
-    "first_seen excludes stale contributors"
-    100.0
-    promoted.Types.first_seen
-;;
-
-let test_consolidator_stale_peer_does_not_satisfy_min_keepers () =
-  let now = 1_000_000.0 in
-  let claim_id = Some "stale-peer-no-quorum" in
-  let fresh =
-    { (mk_shared_fixture ~now ~category:"validated_approach" "fresh single keeper") with
-      Types.claim_id = claim_id
-    }
-  in
-  let stale =
-    { (mk_shared_fixture ~now ~category:"validated_approach" "expired peer") with
-      Types.valid_until = Some (now -. 1.0)
-    ; Types.claim_id = claim_id
-    }
-  in
-  let _considered, shared =
-    Consolidator.promote_facts
-      ~now
-      ~keeper_facts:[ "fresh", [ fresh ]; "stale", [ stale ] ]
-      ()
-  in
-  Alcotest.(check int)
-    "one current keeper plus one stale peer is still below min_keepers"
-    0
-    (List.length shared)
-;;
-
-(* A fact with no valid_until but an old last_verified_at is stale and must be
-   excluded from the representative and observed_by set. Two fresh
-   contributors are required so the claim still meets min_keepers (=2) after
-   the stale one is filtered — with a single fresh peer nothing would be
-   promoted at all (that quorum behavior is pinned separately by
-   [test_consolidator_stale_peer_does_not_satisfy_min_keepers]). The original
-   #23748 version used one fresh peer and could never pass (main red #23901,
-   family consolidator). *)
-let test_consolidator_filters_stale_without_valid_until () =
-  let now = 1_000_000.0 in
-  let claim_id = Some "no-valid-until-stale" in
-  let stale =
-    { (mk_shared_fixture ~now ~category:"lesson" "stale no valid_until") with
-      Types.first_seen = 1.0
-    ; Types.last_verified_at = Some (now -. (Policy.max_consensus_staleness +. 1.0))
-    ; Types.claim_id = claim_id
-    }
-  in
-  let fresh_old =
-    { (mk_shared_fixture ~now ~category:"lesson" "fresh older no valid_until") with
-      Types.first_seen = 100.0
-    ; Types.last_verified_at = Some (now -. 100.0)
-    ; Types.claim_id = claim_id
-    }
-  in
-  let fresh_new =
-    { (mk_shared_fixture ~now ~category:"lesson" "fresh no valid_until") with
-      Types.first_seen = now -. 1.0
-    ; Types.last_verified_at = Some (now -. 1.0)
-    ; Types.claim_id = claim_id
-    }
-  in
-  let promoted =
-    promote_one
-      ~now
-      [ "stale", [ stale ]; "fresh-a", [ fresh_old ]; "fresh-b", [ fresh_new ] ]
-  in
-  Alcotest.(check string)
-    "representative excludes stale contributor without valid_until"
-    "fresh no valid_until"
-    promoted.Types.claim;
-  Alcotest.(check (list string))
-    "observed_by excludes stale contributor without valid_until"
-    [ "fresh-a"; "fresh-b" ]
-    promoted.Types.observed_by
-;;
-
-(* A claim held by a single keeper is never shared (below min_keepers). *)
-let test_consolidator_solo_not_promoted () =
-  let now = 1_000_000.0 in
-  let keeper_facts =
-    [ "alpha", [ mk_shared_fixture ~now ~category:"lesson" "solo only claim" ] ]
-  in
-  let _considered, shared = Consolidator.promote_facts ~now ~keeper_facts () in
-  Alcotest.(check int) "solo claim not promoted" 0 (List.length shared)
-;;
-
-(* One keeper repeating the same claim is one distinct source, not two — the
-   echo-vs-corroboration distinction RFC-0244 §2.2 is built on. *)
-let test_consolidator_same_keeper_repeat_no_inflate () =
-  let now = 1_000_000.0 in
-  let keeper_facts =
-    [ ( "alpha"
-      , [ mk_shared_fixture ~now ~category:"lesson" "repeated claim"
-        ; mk_shared_fixture ~now ~category:"lesson" "repeated claim"
-        ] )
-    ]
-  in
-  let _considered, shared = Consolidator.promote_facts ~now ~keeper_facts () in
-  Alcotest.(check int) "same-keeper repeat is one source, not promoted" 0 (List.length shared)
-;;
-
-(* Non-whitelisted categories (goal/blocker/preference/code_change) stay
-   keeper-local even when corroborated — default-deny. *)
-let test_consolidator_category_default_deny () =
-  let now = 1_000_000.0 in
-  let keeper_facts =
-    [ "alpha", [ mk_shared_fixture ~now ~category:"goal" "shared goal text" ]
-    ; "beta", [ mk_shared_fixture ~now ~category:"goal" "shared goal text" ]
-    ]
-  in
-  let _considered, shared = Consolidator.promote_facts ~now ~keeper_facts () in
-  Alcotest.(check int) "non-whitelisted category not shared" 0 (List.length shared)
-;;
-
-(* Audit 2026-06-26: `_shared` should not amplify repeated facts before outcome
-   evaluation proves they helped. Fact/Constraint remain keeper-local even when
-   structurally corroborated; outcome-derived categories are the only current
-   structural positive signal. *)
-let test_consolidator_fact_constraint_wait_for_outcome_positive () =
-  let now = 1_000_000.0 in
-  let keeper_facts =
-    [ ( "alpha"
-      , [ mk_shared_fixture ~now ~category:"fact" "plain fact repeated"
-        ; mk_shared_fixture ~now ~category:"constraint" "plain constraint repeated"
-        ] )
-    ; ( "beta"
-      , [ mk_shared_fixture ~now ~category:"fact" "plain fact repeated"
-        ; mk_shared_fixture ~now ~category:"constraint" "plain constraint repeated"
-        ] )
-    ]
-  in
-  let _considered, shared = Consolidator.promote_facts ~now ~keeper_facts () in
-  Alcotest.(check int) "fact/constraint wait for outcome-positive evidence" 0 (List.length shared)
-;;
-
-(* RFC-0247 §6: outcome-derived knowledge crosses keepers. A validated_approach
-   and a lesson each corroborated by two distinct keepers promote into the shared
-   tier — the "remember successes, record failures as lessons" payoff is shared
-   fleet-wide, not stranded per keeper. *)
-let test_consolidator_promotes_validated_approach_and_lesson () =
-  let now = 1_000_000.0 in
-  let keeper_facts =
-    [ ( "alpha"
-      , [ mk_shared_fixture ~now ~category:"validated_approach" "dune cache disabled fixes stale cmx"
-        ; mk_shared_fixture ~now ~category:"lesson" "rg -rn mangles output; use -n only"
-        ] )
-    ; ( "beta"
-      , [ mk_shared_fixture ~now ~category:"validated_approach" "dune cache disabled fixes stale cmx"
-        ; mk_shared_fixture ~now ~category:"lesson" "rg -rn mangles output; use -n only"
-        ] )
-    ]
-  in
-  let _considered, shared = Consolidator.promote_facts ~now ~keeper_facts () in
-  let categories =
-    List.map (fun f -> Types.category_to_string f.Types.category) shared |> List.sort_uniq String.compare
-  in
-  Alcotest.(check int) "both outcome-derived claims promoted" 2 (List.length shared);
-  Alcotest.(check (list string))
-    "validated_approach and lesson both crossed keepers"
-    [ "lesson"; "validated_approach" ]
-    categories
-;;
-
-(* #21241: a label outside the closed taxonomy parses to [Unknown] and is
-   default-denied even when two keepers corroborate it above threshold — so a
-   future/drifted/ephemeral label can never be silently promoted. *)
-let test_consolidator_unknown_category_default_deny () =
-  let now = 1_000_000.0 in
-  let keeper_facts =
-    [ "alpha", [ mk_shared_fixture ~now ~category:"observation" "drifted label claim" ]
-    ; "beta", [ mk_shared_fixture ~now ~category:"observation" "drifted label claim" ]
-    ]
-  in
-  let _considered, shared = Consolidator.promote_facts ~now ~keeper_facts () in
-  Alcotest.(check int) "unknown category not promoted" 0 (List.length shared)
-;;
-
-(* RFC-0247 §2.5: the category codec round-trips every known arm, and an
-   unrecognized label degrades to [Unknown raw] carrying the original string so a
-   read/write cycle is lossless (legacy free-string facts on disk survive). *)
 let test_category_codec_roundtrip () =
   let known =
     [ "fact", Types.Fact
@@ -4026,21 +3395,16 @@ let test_category_codec_roundtrip () =
     ]
   in
   List.iter
-    (fun (s, expected) ->
+    (fun (label, expected) ->
        Alcotest.(check bool)
-         (Printf.sprintf "of_string %s" s)
+         (Printf.sprintf "of_string %s" label)
          true
-         (Types.category_of_string s = expected);
+         (Types.category_of_string label = expected);
        Alcotest.(check string)
-         (Printf.sprintf "to_string round-trip %s" s)
-         s
-         (Types.category_to_string (Types.category_of_string s)))
+         (Printf.sprintf "to_string round-trip %s" label)
+         label
+         (Types.category_to_string (Types.category_of_string label)))
     known;
-  Alcotest.(check string)
-    "case-insensitive parse"
-    "fact"
-    (Types.category_to_string (Types.category_of_string "FACT"));
-  (* Unknown preserves the raw string both ways. *)
   Alcotest.(check bool)
     "unknown label parses to Unknown"
     true
@@ -4051,233 +3415,42 @@ let test_category_codec_roundtrip () =
     (Types.category_to_string (Types.category_of_string "checkpoint_saved"))
 ;;
 
-(* The durable, objective kinds promote — exhaustively, so a new arm cannot
-   silently join the shared tier. RFC-0247 §6 adds Validated_approach and Lesson
-   (outcome-derived durable knowledge) to the prior Fact/Constraint whitelist. *)
-let test_is_promotable_durable_kinds () =
-  let promotable =
-    [ Types.Fact; Types.Constraint; Types.Validated_approach; Types.Lesson ]
-  in
-  let blocked =
-    [ Types.Preference; Types.Blocker; Types.Goal; Types.Code_change
-    ; Types.Ephemeral; Types.Unknown "novel"
-    ]
-  in
+let test_all_categories_are_validity_context () =
+  let now = 1_000_000.0 in
   List.iter
-    (fun c -> Alcotest.(check bool) (Types.category_to_string c ^ " promotes") true (Types.is_promotable c))
-    promotable;
-  List.iter
-    (fun c -> Alcotest.(check bool) (Types.category_to_string c ^ " blocked") false (Types.is_promotable c))
-    blocked
-;;
-
-(* TODO(#22447): this test pins the temporary category proxy. Replace it with
-   explicit outcome-eval metadata coverage when recall outcome rows are joined
-   into fact metadata. *)
-let test_shared_promotion_outcome_positive_kinds () =
-  let outcome_positive = [ Types.Validated_approach; Types.Lesson ] in
-  let blocked =
-    [ Types.Fact; Types.Constraint; Types.Preference; Types.Blocker; Types.Goal
-    ; Types.Code_change; Types.Ephemeral; Types.Unknown "novel"
-    ]
-  in
-  List.iter
-    (fun c ->
+    (fun category ->
+       let fact = { (fact_fixture ~now ()) with Types.category; valid_until = None } in
        Alcotest.(check bool)
-         (Types.category_to_string c ^ " outcome-positive")
+         (Types.category_to_string category)
          true
-         (Types.is_outcome_positive_for_shared_promotion c))
-    outcome_positive;
+         (Types.fact_is_current ~now fact))
+    (Types.Unknown "novel" :: Types.all_categories)
+;;
+
+let test_claim_kinds_are_validity_context () =
+  let now = 1_000_000.0 in
   List.iter
-    (fun c ->
+    (fun claim_kind ->
+       let fact =
+         { (fact_fixture ~now ()) with Types.claim_kind = Some claim_kind; valid_until = None }
+       in
        Alcotest.(check bool)
-         (Types.category_to_string c ^ " not outcome-positive")
-         false
-         (Types.is_outcome_positive_for_shared_promotion c))
-    blocked
+         (Types.claim_kind_to_string claim_kind)
+         true
+         (Types.fact_is_current ~now fact))
+    Types.all_claim_kinds
 ;;
 
-(* RFC-0247 §2.3: retention is category-driven. Only Ephemeral gets a finite TTL;
-   every durable arm returns None (never hard-expires). Exhaustive so a new
-   category must be classified here. The companion lifetime-cycles (truth-decay
-   rate) was deleted with the score, so only the TTL is asserted. *)
-let test_category_retention_by_category () =
+let test_no_category_infers_validity () =
   let now = 1_000_000.0 in
-  Alcotest.(check bool)
-    "ephemeral gets a finite TTL"
-    true
-    (Option.is_some (Types.category_valid_until ~now Types.Ephemeral));
   List.iter
-    (fun c ->
+    (fun category ->
+       let fact = { (fact_fixture ~now ()) with Types.category; valid_until = None } in
        Alcotest.(check (option (float 0.001)))
-         (Types.category_to_string c ^ " never hard-expires")
+         (Types.category_to_string category ^ " does not infer validity")
          None
-         (Types.category_valid_until ~now c))
-    [ Types.Fact; Types.Constraint; Types.Preference; Types.Blocker
-    ; Types.Goal; Types.Code_change; Types.Validated_approach; Types.Lesson
-    ; Types.Unknown "novel"
-    ]
-;;
-
-(* RFC-0247 §2.5 / #21244 regression guard: an Ephemeral claim corroborated by
-   >=2 distinct keepers above threshold is NOT promoted. This is the exact failure
-   the #21244 dry-run found (coordination boilerplate mislabeled and promoted);
-   the typed non-promotable category makes it structurally impossible. *)
-let test_consolidator_ephemeral_not_promoted () =
-  let now = 1_000_000.0 in
-  let keeper_facts =
-    [ "alpha", [ mk_shared_fixture ~now ~category:"ephemeral" "checkpoint saved" ]
-    ; "beta", [ mk_shared_fixture ~now ~category:"ephemeral" "checkpoint saved" ]
-    ]
-  in
-  let _considered, shared = Consolidator.promote_facts ~now ~keeper_facts () in
-  Alcotest.(check int) "ephemeral corroborated claim not promoted" 0 (List.length shared)
-;;
-(* RFC-0247 (purge): the confidence-floor test (a contributor below threshold
-   doesn't count toward corroboration) was removed — there is no confidence floor
-   anymore. Corroboration is purely the distinct-keeper count on a promotable
-   category. *)
-
-(* Output is a deterministic function of the input: keeper input order does not
-   change the result (observed_by sorted, claim order sorted). *)
-let test_consolidator_deterministic () =
-  let now = 1_000_000.0 in
-  let forward =
-    [ ( "alpha"
-      , [ mk_shared_fixture ~now ~category:"lesson" "zulu claim"
-        ; mk_shared_fixture ~now ~category:"lesson" "alpha claim"
-        ] )
-    ; ( "beta"
-      , [ mk_shared_fixture ~now ~category:"lesson" "zulu claim"
-        ; mk_shared_fixture ~now ~category:"lesson" "alpha claim"
-        ] )
-    ]
-  in
-  let reversed = List.rev forward in
-  let _, a = Consolidator.promote_facts ~now ~keeper_facts:forward () in
-  let _, b = Consolidator.promote_facts ~now ~keeper_facts:reversed () in
-  let claims facts = List.map (fun f -> f.Types.claim) facts in
-  Alcotest.(check (list string)) "claim order sorted and stable" [ "alpha claim"; "zulu claim" ] (claims a);
-  Alcotest.(check (list string)) "input order does not change output" (claims a) (claims b)
-;;
-
-let assert_consolidator_ran label report =
-  match report.Consolidator.status with
-  | Consolidator.Consolidation_ran -> ()
-  | Consolidator.Consolidation_disabled ->
-    Alcotest.failf "%s: expected consolidator to run, got disabled" label
-;;
-
-let assert_consolidator_disabled report =
-  match report.Consolidator.status with
-  | Consolidator.Consolidation_disabled -> ()
-  | Consolidator.Consolidation_ran ->
-    Alcotest.fail "expected consolidator disabled status"
-;;
-
-let test_consolidator_default_disabled_status () =
-  with_memory_os_env "MASC_KEEPER_MEMORY_OS_CONSOLIDATE" "" (fun () ->
-    with_temp_keepers_dir (fun _keepers_dir ->
-      let now = 1_000_000.0 in
-      Memory_io.append_fact
-        ~keeper_id:"alpha"
-        (mk_shared_fixture ~now ~category:"lesson" "default-off shared claim");
-      Memory_io.append_fact
-        ~keeper_id:"beta"
-        (mk_shared_fixture ~now ~category:"lesson" "default-off shared claim");
-      let report = Consolidator.run ~keeper_ids:[ "alpha"; "beta" ] ~now () in
-      assert_consolidator_disabled report;
-      Alcotest.(check int)
-        "disabled scan does not report keepers as scanned"
-        0
-        report.Consolidator.keepers_scanned;
-      Alcotest.(check int)
-        "disabled scan considers no claims"
-        0
-        report.Consolidator.claims_considered;
-      Alcotest.(check int)
-        "disabled scan promotes no claims"
-        0
-        report.Consolidator.promoted;
-      Alcotest.(check int)
-        "disabled scan leaves shared store empty"
-        0
-        (List.length (Memory_io.read_facts_all ~keeper_id:Types.shared_store_id))))
-;;
-
-(* End-to-end: two keepers corroborate a claim on disk, the consolidator writes
-   the shared store, and a third keeper's recall surfaces it with provenance —
-   while a keeper that already holds the claim privately sees it as its own
-   (private precedence, no duplicate "shared via" line). *)
-let test_recall_surfaces_shared_after_consolidation () =
-  with_memory_os_env "MASC_KEEPER_MEMORY_OS_CONSOLIDATE" "true" (fun () ->
-    with_recall_env "true" (fun () ->
-      with_prompt_registry (fun () ->
-        with_temp_keepers_dir (fun _keepers_dir ->
-        let now = 1_000_000.0 in
-        let shared_claim = "deployment uses blue green rollout" in
-        Memory_io.append_fact
-          ~keeper_id:"alpha"
-          (mk_shared_fixture ~now ~category:"validated_approach" shared_claim);
-        Memory_io.append_fact
-          ~keeper_id:"beta"
-          (mk_shared_fixture ~now ~category:"validated_approach" shared_claim);
-        let report = Consolidator.run ~keeper_ids:[ "alpha"; "beta" ] ~now () in
-        assert_consolidator_ran "shared recall setup" report;
-        Alcotest.(check int) "one claim promoted to shared store" 1 report.Consolidator.promoted;
-        Memory_io.append_fact
-          ~keeper_id:"observer"
-          (mk_shared_fixture ~now "observer local private note");
-        let observer_block = Recall.render_context ~keeper_id:"observer" ~now () in
-        Alcotest.(check bool)
-          "shared fact surfaces in a third keeper's recall with provenance"
-          true
-          (contains "shared via" observer_block
-           && contains "deployment uses blue green" observer_block);
-        Alcotest.(check bool)
-          "observer's own private fact still present"
-          true
-          (contains "observer local private note" observer_block);
-        let alpha_block = Recall.render_context ~keeper_id:"alpha" ~now () in
-        Alcotest.(check bool)
-          "private precedence: contributor sees the claim as its own, not shared"
-          true
-          (contains "deployment uses blue green" alpha_block
-           && not (contains "shared via" alpha_block))))))
-;;
-
-let test_recall_scans_whole_shared_store () =
-  with_recall_env "true" (fun () ->
-    with_prompt_registry (fun () ->
-      with_temp_keepers_dir (fun _keepers_dir ->
-        let now = 1_000_000.0 in
-        let shared_head =
-          { (mk_shared_fixture ~now "SHARED head fact verified most recently") with
-            Types.observed_by = [ "alpha"; "beta" ]
-          ; Types.last_verified_at = Some now
-          }
-        in
-        Memory_io.append_fact ~keeper_id:Types.shared_store_id shared_head;
-        for i = 1 to Policy.fact_recall_window + 10 do
-          let filler =
-            { (mk_shared_fixture ~now (Printf.sprintf "old shared filler fact %d" i)) with
-              Types.observed_by = [ "alpha"; "beta" ]
-            ; Types.last_verified_at = Some (now -. days 30 -. float_of_int i)
-            }
-          in
-          Memory_io.append_fact ~keeper_id:Types.shared_store_id filler
-        done;
-        let total = List.length (Memory_io.read_facts_all ~keeper_id:Types.shared_store_id) in
-        Alcotest.(check bool)
-          "shared store exceeds the private recall tail window"
-          true
-          (total > Policy.fact_recall_window);
-        let observer_block = Recall.render_context ~keeper_id:"observer" ~now () in
-        Alcotest.(check bool)
-          "shared recall surfaces a head fact beyond the tail window"
-          true
-          (contains "SHARED head fact verified most recently" observer_block
-           && contains "shared via alpha,beta" observer_block))))
+         (Types.fact_effective_valid_until fact))
+    (Types.Unknown "novel" :: Types.all_categories)
 ;;
 
 let with_env name value f =
@@ -4286,104 +3459,6 @@ let with_env name value f =
   Fun.protect ~finally:(fun () -> restore_env name old) f
 ;;
 
-let test_consolidator_rejects_corrupt_source_store () =
-  with_memory_os_env "MASC_KEEPER_MEMORY_OS_CONSOLIDATE" "true" (fun () ->
-    with_temp_keepers_dir (fun _keepers_dir ->
-      let now = 1_000_000.0 in
-      Memory_io.append_fact ~keeper_id:"alpha" (mk_shared_fixture ~now "shared fact");
-      let oc =
-        open_out_gen [ Open_append; Open_text ] 0o644 (Memory_io.facts_path ~keeper_id:"alpha")
-      in
-      Fun.protect
-        ~finally:(fun () -> close_out_noerr oc)
-        (fun () -> output_string oc "{not-json}\n");
-      Memory_io.append_fact ~keeper_id:"beta" (mk_shared_fixture ~now "shared fact");
-      try
-        ignore (Consolidator.run ~keeper_ids:[ "alpha"; "beta" ] ~now ());
-        Alcotest.fail "expected corrupt source store to fail loud"
-      with
-      | Invalid_argument msg ->
-        Alcotest.(check bool)
-          "error identifies consolidation input"
-          true
-          (contains "memory os consolidation input invalid" msg);
-        Alcotest.(check bool)
-          "error includes source fact store"
-          true
-          (contains (Memory_io.facts_path ~keeper_id:"alpha") msg);
-        Alcotest.(check bool) "error includes line number" true (contains ":2:" msg)))
-;;
-
-let test_consolidator_waits_for_shared_store_lock () =
-  with_memory_os_env "MASC_KEEPER_MEMORY_OS_CONSOLIDATE" "true" (fun () ->
-    with_eio (fun ~sw ~net:_ ~clock ->
-      with_eio_guard (fun () ->
-        with_temp_keepers_dir (fun _keepers_dir ->
-        let now = 1_000_000.0 in
-        Memory_io.append_fact
-          ~keeper_id:"alpha"
-          (mk_shared_fixture ~now ~category:"lesson" "locked shared claim");
-        Memory_io.append_fact
-          ~keeper_id:"beta"
-          (mk_shared_fixture ~now ~category:"lesson" "locked shared claim");
-        let result = ref None in
-        let started, resolve_started = Eio.Promise.create () in
-        File_lock_eio.with_lock
-          (Memory_io.facts_path ~keeper_id:Types.shared_store_id)
-          (fun () ->
-             Eio.Fiber.fork ~sw (fun () ->
-               Eio.Promise.resolve resolve_started ();
-               result := Some (Consolidator.run ~keeper_ids:[ "alpha"; "beta" ] ~now ()));
-             Eio.Promise.await started;
-             Eio.Time.sleep clock 0.02;
-             Alcotest.(check bool)
-               "consolidator waits while shared store lock is held"
-               true
-               (Option.is_none !result));
-        wait_for_ref ~clock "consolidator after shared lock" result;
-        match !result with
-        | Some report ->
-          assert_consolidator_ran "lock wait" report;
-          Alcotest.(check int) "claim promoted after lock release" 1 report.Consolidator.promoted
-        | None -> Alcotest.fail "expected consolidator report"))))
-;;
-
-let test_recall_waits_for_shared_fact_lock () =
-  with_recall_env "true" (fun () ->
-    with_prompt_registry (fun () ->
-      with_eio (fun ~sw ~net:_ ~clock ->
-        with_eio_guard (fun () ->
-          with_temp_keepers_dir (fun _keepers_dir ->
-            let now = 1_000_000.0 in
-            let shared_fact =
-              { (mk_shared_fixture ~now "locked recall shared fact") with
-                Types.observed_by = [ "alpha"; "beta" ]
-              }
-            in
-            Memory_io.append_fact ~keeper_id:Types.shared_store_id shared_fact;
-            let result = ref None in
-            let started, resolve_started = Eio.Promise.create () in
-            File_lock_eio.with_lock
-              (Memory_io.facts_path ~keeper_id:Types.shared_store_id)
-              (fun () ->
-                 Eio.Fiber.fork ~sw (fun () ->
-                   Eio.Promise.resolve resolve_started ();
-                   result := Some (Recall.render_context ~keeper_id:"observer" ~now ()));
-                 Eio.Promise.await started;
-                 Eio.Time.sleep clock 0.02;
-                 Alcotest.(check bool)
-                   "recall waits while shared fact lock is held"
-                   true
-                   (Option.is_none !result));
-            wait_for_ref ~clock "recall after shared lock" result;
-            match !result with
-            | Some block ->
-              Alcotest.(check bool)
-                "shared fact rendered after lock release"
-                true
-                (contains "locked recall shared fact" block)
-            | None -> Alcotest.fail "expected recall block")))))
-;;
 let test_librarian_provider_slot_gate_caps_at_capacity () =
   with_env Env_config.KeeperMemoryOs.librarian_global_slot_env_key "1" (fun () ->
     with_eio (fun ~sw ~net:_ ~clock ->
@@ -4487,43 +3562,30 @@ let test_librarian_provider_slot_gate_is_per_keeper () =
         !first))
 ;;
 
-(* ---------- External refs are context-only ---------- *)
+(* ---------- Explicit validity only ---------- *)
 
-let test_fact_valid_until_external_ref_is_context_only () =
+let test_fact_validity_uses_only_stored_value () =
   let now = 1_000_000.0 in
-  let pr_ref = Some { Types.kind = Types.Pr; Types.id = "1" } in
+  let absent =
+    { (fact_fixture ~now ()) with
+      category = Types.Ephemeral
+    ; claim_kind = Some Types.Self_observation
+    ; valid_until = None
+    }
+  in
   Alcotest.(check (option (float 0.001)))
-    "external-ref Fact stays on the category retention path"
+    "context does not infer validity"
     None
-    (Types.fact_valid_until ~now ~external_ref:pr_ref ~claim_kind:None Types.Fact);
-  Alcotest.(check bool)
-    "durable Fact with no ref stays durable (None)"
-    true
-    (Option.is_none (Types.fact_valid_until ~now ~external_ref:None ~claim_kind:None Types.Fact));
-  Alcotest.(check bool)
-    "Ephemeral with no ref still finite"
-    true
-    (Option.is_some (Types.fact_valid_until ~now ~external_ref:None ~claim_kind:None Types.Ephemeral));
-  (* RFC-0285 §3.4: a Self_observation gets the short finite horizon regardless of
-     category — even an otherwise-durable Fact. *)
+    (Types.fact_effective_valid_until absent);
+  let explicit = { absent with Types.valid_until = Some (now +. 42.0) } in
   Alcotest.(check (option (float 0.001)))
-    "Self_observation Fact gets the short self-observation horizon"
-    (Some (now +. Types.self_observation_ttl_seconds))
-    (Types.fact_valid_until
-       ~now
-       ~external_ref:None
-       ~claim_kind:(Some Types.Self_observation)
-       Types.Fact);
-  Alcotest.(check bool)
-    "self-observation horizon is shorter than Ephemeral"
-    true
-    (match Types.fact_valid_until ~now ~external_ref:None ~claim_kind:None Types.Ephemeral with
-     | Some until -> Types.self_observation_ttl_seconds < until -. now
-     | None -> false)
+    "stored validity remains exact"
+    (Some (now +. 42.0))
+    (Types.fact_effective_valid_until explicit)
 ;;
 
-(* RFC-0285 §4: claim_kind tokens round-trip, and an unrecognized token degrades to
-   [None] (the durable pre-RFC path), never to a wrong-volatile guess. *)
+(* Claim-kind token parsing is closed. Provider output with an unknown token is
+   rejected at the librarian boundary. *)
 let test_claim_kind_round_trip () =
   List.iter
     (fun k ->
@@ -4539,48 +3601,37 @@ let test_claim_kind_round_trip () =
     ; Types.Diagnostic
     ];
   Alcotest.(check bool)
-    "unrecognized claim_kind token -> None (durable path)"
+    "unrecognized claim_kind token is not parsed"
     true
     (Option.is_none (Types.claim_kind_of_string "not_a_kind"))
 ;;
 
-(* RFC-0285 §4 (load-bearing): a self-observation gets a finite horizon even under a
-   durable category; a re-mint inherits the prior row so the horizon is NOT extended
-   past the first-mint anchor; it expires after its horizon; durable knowledge with no
-   horizon survives indefinitely. *)
-let test_self_observation_horizon_and_remint () =
+(* Claim kind never invents or changes validity; an explicit bound remains exact. *)
+let test_self_observation_uses_only_explicit_validity () =
   let now = 1_000_000.0 in
   let mk_self ?(first_seen = now) () =
     { (fact_fixture ~now ()) with
       Types.claim = "the agent is idle this turn"
-    ; Types.category = Types.Lesson (* an otherwise-durable category... *)
-    ; Types.claim_kind = Some Types.Self_observation (* ...made finite by the tag *)
+    ; Types.category = Types.Lesson
+    ; Types.claim_kind = Some Types.Self_observation
     ; Types.first_seen
-    ; Types.valid_until =
-        Types.fact_valid_until
-          ~now:first_seen
-          ~external_ref:None
-          ~claim_kind:(Some Types.Self_observation)
-          Types.Lesson
+    ; Types.valid_until = Some (now +. 3_600.0)
     ; Types.claim_id = Some "self-obs-idle"
     }
   in
   let existing = mk_self () in
   Alcotest.(check bool)
-    "self-observation is finite despite a durable Lesson category"
+    "explicit validity is preserved"
     true
     (Option.is_some existing.Types.valid_until);
-  (* re-mint property: re-observing the same self-observation later inherits the prior
-     row entirely, so the horizon is not pushed past the original anchor. *)
   let later = now +. 1_800.0 in
   let incoming = mk_self ~first_seen:later () in
   let merged = Policy.reobserve_fact ~now:later ~provenance:Policy.Independent_observation ~existing ~incoming in
   Alcotest.(check (option (float 0.001)))
-    "re-mint does not extend the self-observation horizon past the first anchor"
+    "reobservation does not alter explicit validity"
     existing.Types.valid_until
     merged.Types.valid_until;
-  (* it drops from recall once now passes its horizon. *)
-  let past = now +. Types.self_observation_ttl_seconds +. 1.0 in
+  let past = now +. 3_601.0 in
   Alcotest.(check bool)
     "self-observation drops from recall after its horizon"
     false
@@ -4599,128 +3650,28 @@ let test_self_observation_horizon_and_remint () =
     (Types.fact_is_current ~now:past durable)
 ;;
 
-(* RFC-0285 §3.5 / §4: a self-observation is never promoted to the shared tier even
-   with a promotable category and enough corroborating keepers; durable knowledge is. *)
-let test_self_observation_not_promoted () =
-  let now = 1_000_000.0 in
-  let self_obs marker =
-    { (fact_fixture ~now ()) with
-      Types.claim = "the agent is looping (" ^ marker ^ ")"
-    ; Types.category = Types.Lesson
-    ; Types.claim_kind = Some Types.Self_observation
-    ; Types.claim_id = Some "self-obs-loop"
-    }
-  in
-  let durable marker =
-    { (fact_fixture ~now ()) with
-      Types.claim = "merging requires two approvals (" ^ marker ^ ")"
-    ; Types.category = Types.Lesson
-    ; Types.claim_kind = Some Types.Durable_knowledge
-    ; Types.claim_id = Some "two-approvals-rule"
-    }
-  in
-  let denied_claim_kind claim_kind claim_id marker =
-    { (fact_fixture ~now ()) with
-      Types.claim = claim_id ^ " (" ^ marker ^ ")"
-    ; Types.category = Types.Lesson
-    ; Types.claim_kind = Some claim_kind
-    ; Types.claim_id = Some claim_id
-    }
-  in
-  let keeper_facts =
-    [ ( "k1"
-      , [ self_obs "k1"
-        ; denied_claim_kind Types.External_state "external-state-pr-status" "k1"
-        ; denied_claim_kind Types.Diagnostic "diagnostic-ratio-alert" "k1"
-        ; durable "k1"
-        ] )
-    ; ( "k2"
-      , [ self_obs "k2"
-        ; denied_claim_kind Types.External_state "external-state-pr-status" "k2"
-        ; denied_claim_kind Types.Diagnostic "diagnostic-ratio-alert" "k2"
-        ; durable "k2"
-        ] )
-    ]
-  in
-  let _considered, shared =
-    Consolidator.promote_facts ~min_keepers:2 ~now ~keeper_facts ()
-  in
-  Alcotest.(check bool)
-    "self-observation is never promoted to the shared tier"
-    false
-    (List.exists
-       (fun (f : Types.fact) -> f.Types.claim_kind = Some Types.Self_observation)
-       shared);
-  Alcotest.(check bool)
-    "external-state claim kind is never promoted to the shared tier"
-    false
-    (List.exists
-       (fun (f : Types.fact) -> f.Types.claim_id = Some "external-state-pr-status")
-       shared);
-  Alcotest.(check bool)
-    "diagnostic claim kind is never promoted to the shared tier"
-    false
-    (List.exists
-       (fun (f : Types.fact) -> f.Types.claim_id = Some "diagnostic-ratio-alert")
-       shared);
-  Alcotest.(check bool)
-    "outcome-positive durable knowledge with two keepers IS promoted"
-    true
-    (List.exists
-       (fun (f : Types.fact) -> f.Types.claim_id = Some "two-approvals-rule")
-       shared)
-;;
-
-let test_fact_of_json_does_not_infer_external_ref_from_legacy_prose () =
+let test_fact_of_json_preserves_unknown_category () =
   let first_seen = 1_000_000.0 in
-  let legacy =
+  let json =
     `Assoc
-      [ "claim", `String "PR #21363 is OPEN, MERGEABLE, and BLOCKED"
-      ; "category", `String "fact"
+      [ "claim", `String "connector state observation"
+      ; "category", `String "connector_state"
       ; "source", `Assoc [ "trace_id", `String "t"; "turn", `Int 1 ]
       ; "first_seen", `Float first_seen
-      ; "schema_version", `String "rfc0231-v2"
+      ; "schema_version", `String Types.schema_version
       ]
   in
-  match Types.fact_of_json legacy with
-  | None -> Alcotest.fail "legacy row failed to decode"
-  | Some f ->
-    Alcotest.(check bool)
-      "PR prose is not re-derived into external_ref"
-      true
-      (Option.is_none f.Types.external_ref);
-    Alcotest.(check (option (float 0.001)))
-      "no inferred volatile TTL"
-      None
-      f.Types.valid_until
-;;
-
-let test_fact_of_json_migrates_legacy_external_state_category () =
-  let first_seen = 1_000_000.0 in
-  let legacy =
-    `Assoc
-      [ "claim", `String "PR #21363 is OPEN, MERGEABLE, and BLOCKED"
-      ; "category", `String "external_state"
-      ; "source", `Assoc [ "trace_id", `String "t"; "turn", `Int 1 ]
-      ; "first_seen", `Float first_seen
-      ; "schema_version", `String "rfc0231-v2"
-      ]
-  in
-  match Types.fact_of_json legacy with
-  | None -> Alcotest.fail "legacy external_state row failed to decode"
+  match Types.fact_of_json json with
+  | None -> Alcotest.fail "current unknown-category row failed to decode"
   | Some f ->
     Alcotest.(check string)
-      "legacy external_state category migrates to fact"
-      "fact"
+      "unknown category remains exact context"
+      "connector_state"
       (Types.category_to_string f.Types.category);
     Alcotest.(check (option string))
-      "legacy external_state category becomes claim_kind"
-      (Some "external_state")
+      "unknown category does not invent claim_kind"
+      None
       (Option.map Types.claim_kind_to_string f.Types.claim_kind);
-    Alcotest.(check bool)
-      "migration does not reintroduce external_ref inference"
-      true
-      (Option.is_none f.Types.external_ref);
     let json = Types.fact_to_json f in
     let string_field key =
       match json with
@@ -4731,117 +3682,84 @@ let test_fact_of_json_migrates_legacy_external_state_category () =
       | _ -> None
     in
     Alcotest.(check (option string))
-      "rewritten row no longer persists external_state as category"
-      (Some "fact")
+      "rewritten row preserves category"
+      (Some "connector_state")
       (string_field "category");
     Alcotest.(check (option string))
-      "rewritten row persists external_state as claim_kind"
-      (Some "external_state")
+      "rewritten row does not invent claim_kind"
+      None
       (string_field "claim_kind")
 ;;
 
-let test_fact_of_json_does_not_normalize_legacy_external_state_category () =
+let test_fact_of_json_preserves_non_exact_unknown_category () =
   let first_seen = 1_000_000.0 in
-  let category = " External_State " in
-  let legacy =
+  let category = " Connector_State " in
+  let json =
     `Assoc
-      [ "claim", `String "PR #21363 is OPEN, MERGEABLE, and BLOCKED"
+      [ "claim", `String "connector state observation"
       ; "category", `String category
       ; "source", `Assoc [ "trace_id", `String "t"; "turn", `Int 1 ]
       ; "first_seen", `Float first_seen
-      ; "schema_version", `String "rfc0231-v2"
+      ; "schema_version", `String Types.schema_version
       ]
   in
-  match Types.fact_of_json legacy with
-  | None -> Alcotest.fail "legacy row with non-exact external_state category failed"
+  match Types.fact_of_json json with
+  | None -> Alcotest.fail "current row with non-exact unknown category failed"
   | Some f ->
     (match f.Types.category with
      | Types.Unknown raw ->
        Alcotest.(check string)
-         "non-exact legacy external_state stays unknown"
+         "non-exact label stays unknown"
          category
          raw
-     | _ -> Alcotest.fail "non-exact legacy external_state category migrated");
+     | _ -> Alcotest.fail "non-exact unknown category normalized");
     Alcotest.(check (option string))
-      "non-exact legacy external_state does not set claim_kind"
+      "non-exact unknown category does not set claim_kind"
       None
       (Option.map Types.claim_kind_to_string f.Types.claim_kind)
 ;;
 
-let test_fact_of_json_rejects_invalid_external_state_claim_kind () =
+let test_fact_of_json_rejects_invalid_claim_kind () =
   let first_seen = 1_000_000.0 in
-  let legacy =
+  let json =
     `Assoc
-      [ "claim", `String "PR #21363 is OPEN, MERGEABLE, and BLOCKED"
-      ; "category", `String "external_state"
+      [ "claim", `String "connector state observation"
+      ; "category", `String "fact"
       ; "claim_kind", `String "not_a_kind"
       ; "source", `Assoc [ "trace_id", `String "t"; "turn", `Int 1 ]
       ; "first_seen", `Float first_seen
-      ; "schema_version", `String "rfc0231-v2"
+      ; "schema_version", `String Types.schema_version
       ]
   in
   Alcotest.(check bool)
-    "invalid claim_kind on legacy external_state is rejected"
+    "invalid claim_kind is rejected"
     true
-    (Option.is_none (Types.fact_of_json legacy))
+    (Option.is_none (Types.fact_of_json json))
 ;;
 
-let test_fact_of_json_forces_legacy_external_state_claim_kind () =
+let test_fact_of_json_preserves_explicit_claim_kind () =
   let first_seen = 1_000_000.0 in
-  let legacy =
+  let json =
     `Assoc
-      [ "claim", `String "PR #21363 is OPEN, MERGEABLE, and BLOCKED"
-      ; "category", `String "external_state"
+      [ "claim", `String "keeper state observation"
+      ; "category", `String "fact"
       ; "claim_kind", `String "self_observation"
       ; "source", `Assoc [ "trace_id", `String "t"; "turn", `Int 1 ]
       ; "first_seen", `Float first_seen
-      ; "schema_version", `String "rfc0231-v2"
+      ; "schema_version", `String Types.schema_version
       ]
   in
-  match Types.fact_of_json legacy with
-  | None -> Alcotest.fail "legacy external_state row with conflicting claim_kind failed"
+  match Types.fact_of_json json with
+  | None -> Alcotest.fail "current row with explicit claim_kind failed"
   | Some f ->
     Alcotest.(check bool)
-      "legacy external_state category wins over inconsistent claim_kind"
+      "explicit claim_kind is preserved"
       true
-      (f.Types.claim_kind = Some Types.External_state)
+      (f.Types.claim_kind = Some Types.Self_observation)
 ;;
 
-let test_fact_to_json_drops_external_ref_surface () =
-  let now = 1_000_000.0 in
-  let f = fact_fixture ~now () in
-  let no_ref_json = Yojson.Safe.to_string (Types.fact_to_json f) in
-  Alcotest.(check bool)
-    "no external_ref key for a fact with no ref (byte-compat)"
-    false
-    (contains "external_ref" no_ref_json);
-  let with_ref =
-    { f with Types.external_ref = Some { Types.kind = Types.Pr; Types.id = "42" } }
-  in
-  let with_ref_json = Yojson.Safe.to_string (Types.fact_to_json with_ref) in
-  Alcotest.(check bool)
-    "external_ref key omitted even when Some"
-    false
-    (contains "external_ref" with_ref_json);
-  let legacy_with_ref =
-    `Assoc
-      [ "claim", `String "PR #42 is open"
-      ; "category", `String "fact"
-      ; "source", `Assoc [ "trace_id", `String "t"; "turn", `Int 1 ]
-      ; "first_seen", `Float now
-      ; "external_ref", `Assoc [ "kind", `String "pr"; "id", `String "42" ]
-      ; "schema_version", `String "rfc0231-v2"
-      ]
-  in
-  let decoded = Option.get (Types.fact_of_json legacy_with_ref) in
-  Alcotest.(check bool)
-    "legacy external_ref is ignored on decode"
-    true
-    (Option.is_none decoded.Types.external_ref)
-;;
-
-(* RFC-0259 §3.7 (P6): the [claim_id] codec — a [Some] id round-trips intact; a
-   [None] id omits the JSON key (byte-stable for legacy rows) and decodes to None. *)
+(* Producer claim ids are opaque: non-empty values round-trip byte-for-byte and
+   [None] omits the field. *)
 let test_claim_id_codec_roundtrip () =
   let now = 1_000_000.0 in
   let with_id = { (fact_fixture ~now ()) with Types.claim_id = Some "pr-123-open" } in
@@ -4852,19 +3770,11 @@ let test_claim_id_codec_roundtrip () =
     "claim_id round-trips intact"
     (Some "pr-123-open")
     decoded.Types.claim_id;
-  Alcotest.(check (option string))
-    "claim_id canonicalizes formatting variants"
-    (Some "pr-123-open")
-    (Types.normalize_claim_id " PR #123_Open ");
-  Alcotest.(check (option string))
-    "punctuation-only claim_id degrades to None"
-    None
-    (Types.normalize_claim_id " #!? ");
   let messy_id = { with_id with Types.claim_id = Some " PR #123_Open " } in
   let decoded_messy = Option.get (Types.fact_of_json (Types.fact_to_json messy_id)) in
   Alcotest.(check (option string))
-    "claim_id stores canonical slug"
-    (Some "pr-123-open")
+    "claim_id preserves producer bytes"
+    (Some " PR #123_Open ")
     decoded_messy.Types.claim_id;
   let no_id = fact_fixture ~now () in
   let no_id_json = Yojson.Safe.to_string (Types.fact_to_json no_id) in
@@ -4874,42 +3784,29 @@ let test_claim_id_codec_roundtrip () =
     "claim_id round-trips to None"
     None
     decoded_none.Types.claim_id;
-  let invalid_id = { with_id with Types.claim_id = Some " #!? " } in
-  let invalid_id_json = Yojson.Safe.to_string (Types.fact_to_json invalid_id) in
-  Alcotest.(check bool)
-    "invalid claim_id is omitted"
-    false
-    (contains "claim_id" invalid_id_json);
-  let decoded_invalid_id = Option.get (Types.fact_of_json (Types.fact_to_json invalid_id)) in
-  Alcotest.(check (option string))
-    "invalid claim_id decodes to None"
-    None
-    decoded_invalid_id.Types.claim_id
+  let blank_id = { with_id with Types.claim_id = Some "   " } in
+  Alcotest.check_raises
+    "blank claim_id is rejected, not silently omitted"
+    (Invalid_argument "memory fact claim_id must be non-empty")
+    (fun () -> ignore (Types.fact_to_json blank_id))
 ;;
 
-(* RFC-0259 §3.7 (P6/E): [claim_identity] keys on the producer-emitted [claim_id]
-   (the CONCLUSION slug), NOT the referent. Two reworded extractions carrying the
-   same [claim_id] share a key (collapsing the re-mint), so a re-stated conclusion
-   UPSERTs. Two DIFFERENT [claim_id]s are distinct keys EVEN WITH the same
-   [external_ref] — a status transition ("PR #N open" -> "PR #N merged") stays two
-   rows, the regression the rejected referent-only key over-merged. A claim with no
-   [claim_id] falls back to the exact-text [normalize_claim] key. *)
+(* [claim_identity] keys on the producer-emitted conclusion id. Two reworded
+   extractions carrying the same id share a key; different ids stay distinct.
+   Missing ids use exact source-plus-claim observation identity. *)
 let test_claim_identity_keys_on_claim_id () =
   let now = 1_000_000.0 in
   let base = fact_fixture ~now () in
-  let pr_ref = Some { Types.kind = Types.Pr; Types.id = "123" } in
   (* Same claim_id, DIFFERENT text -> same identity. *)
   let a =
     { base with
       Types.claim = "PR #123 is open"
-    ; Types.external_ref = pr_ref
     ; Types.claim_id = Some "pr-123-open"
     }
   in
   let b =
     { base with
       Types.claim = "pull request #123 remains open"
-    ; Types.external_ref = pr_ref
     ; Types.claim_id = Some "pr-123-open"
     }
   in
@@ -4919,51 +3816,40 @@ let test_claim_identity_keys_on_claim_id () =
     (Types.claim_identity b);
   Alcotest.(check string) "claim_id key uses the id: prefix" "id:pr-123-open" (Types.claim_identity a);
   let sloppy_id = { b with Types.claim_id = Some " PR #123_Open " } in
-  Alcotest.(check string)
-    "claim_id key canonicalizes harmless id formatting"
-    (Types.claim_identity a)
-    (Types.claim_identity sloppy_id);
-  (* DIFFERENT claim_id, SAME external_ref -> distinct identity (no over-merge). *)
+  Alcotest.(check bool)
+    "producer id formatting is not normalized"
+    false
+    (String.equal (Types.claim_identity a) (Types.claim_identity sloppy_id));
   let c = { a with Types.claim = "PR #123 was merged"; Types.claim_id = Some "pr-123-merged" } in
   Alcotest.(check bool)
-    "different claim_id (same external_ref) -> different key"
+    "different claim_id -> different key"
     false
     (String.equal (Types.claim_identity a) (Types.claim_identity c));
-  (* No claim_id -> normalize_claim fallback. *)
   let no_id = { base with Types.claim = "User prefers terse output"; Types.claim_id = None } in
-  Alcotest.(check string)
-    "claim_id=None falls back to claim:<normalize_claim>"
-    ("claim:" ^ Types.normalize_claim no_id.Types.claim)
-    (Types.claim_identity no_id);
-  (* An empty/blank claim_id also degrades to the text key (guard in claim_identity). *)
-  let blank_id = { no_id with Types.claim_id = Some "   " } in
-  Alcotest.(check string)
-    "blank claim_id falls back to claim:<normalize_claim>"
-    ("claim:" ^ Types.normalize_claim blank_id.Types.claim)
-    (Types.claim_identity blank_id);
-  let invalid_id = { no_id with Types.claim_id = Some " #!? " } in
-  Alcotest.(check string)
-    "invalid claim_id falls back to claim:<normalize_claim>"
-    (Types.claim_identity no_id)
-    (Types.claim_identity invalid_id)
+  Alcotest.(check bool)
+    "claim_id=None uses exact observation identity"
+    true
+    (String.starts_with ~prefix:"observation:" (Types.claim_identity no_id));
+  let differently_spaced = { no_id with Types.claim = " User prefers terse output " } in
+  Alcotest.(check bool)
+    "id-less claim prose is not normalized"
+    false
+    (String.equal (Types.claim_identity no_id) (Types.claim_identity differently_spaced))
 ;;
 
-(* RFC-0259 §3.7 (P6/E+F): the production write upsert ([merge_and_cap_facts] keyed by
+(* The production write upsert ([merge_facts] keyed by
    [claim_identity]) folds a reworded re-extraction carrying the SAME [claim_id] into
-   the single existing row instead of appending a fresh one — even though the two
-   claim texts have different [normalize_claim] keys — and the prior row's
+   the single existing row instead of appending a fresh one, and the prior row's
    [first_seen] anchor is inherited. *)
-let test_merge_and_cap_upserts_same_claim_id () =
+let test_merge_upserts_same_claim_id () =
   with_temp_keepers_dir (fun _keepers_dir ->
     let keeper_id = "virtual-memory-keeper" in
     let now = 1_000_000.0 in
     let base = fact_fixture ~now () in
-    let pr_ref = Some { Types.kind = Types.Pr; Types.id = "123" } in
     let first =
       { base with
         Types.claim = "PR #123 is open"
       ; Types.category = Types.Fact
-      ; Types.external_ref = pr_ref
       ; Types.claim_id = Some "pr-123-open"
       ; Types.first_seen = now -. 50_000.0
       }
@@ -4973,19 +3859,14 @@ let test_merge_and_cap_upserts_same_claim_id () =
       { base with
         Types.claim = "pull request #123 still open"
       ; Types.category = Types.Fact
-      ; Types.external_ref = pr_ref
       ; Types.claim_id = Some "pr-123-open"
       }
     in
     let stats =
-      Memory_io.merge_and_cap_facts
-        ~now
+      Memory_io.merge_facts
         ~keeper_id
         ~merge:(Policy.reobserve_fact ~now ~provenance:Policy.Independent_observation)
         ~incoming:[ reworded ]
-        ~keep:Policy.fact_recall_window
-        ~trigger:Policy.fact_store_max
-        ~rank:(Policy.retention_rank ~now)
     in
     Alcotest.(check int) "same-claim_id reworded merged, not appended" 1 stats.Memory_io.merged;
     Alcotest.(check int) "none appended" 0 stats.Memory_io.appended;
@@ -4999,22 +3880,16 @@ let test_merge_and_cap_upserts_same_claim_id () =
     Alcotest.(check string) "first observation's claim text kept" first.Types.claim row.Types.claim)
 ;;
 
-(* RFC-0259 §3.7 (P6 regression guard): the case the rejected (referent, category)
-   key over-merged by construction. Two DIFFERENT conclusions about the SAME
-   referent ("PR #123 is open" then "PR #123 was merged") carry DIFFERENT
-   [claim_id]s, so the upsert keeps BOTH rows — the librarian's correction is not
-   silently dropped. *)
-let test_merge_and_cap_no_over_merge_distinct_conclusions () =
+(* Different producer conclusion ids remain separate rows. *)
+let test_merge_keeps_distinct_conclusions () =
   with_temp_keepers_dir (fun _keepers_dir ->
     let keeper_id = "virtual-memory-keeper" in
     let now = 1_000_000.0 in
     let base = fact_fixture ~now () in
-    let pr_ref = Some { Types.kind = Types.Pr; Types.id = "123" } in
     let opened =
       { base with
         Types.claim = "PR #123 is open"
       ; Types.category = Types.Fact
-      ; Types.external_ref = pr_ref
       ; Types.claim_id = Some "pr-123-open"
       }
     in
@@ -5023,19 +3898,14 @@ let test_merge_and_cap_no_over_merge_distinct_conclusions () =
       { base with
         Types.claim = "PR #123 was merged"
       ; Types.category = Types.Fact
-      ; Types.external_ref = pr_ref
       ; Types.claim_id = Some "pr-123-merged"
       }
     in
     let stats =
-      Memory_io.merge_and_cap_facts
-        ~now
+      Memory_io.merge_facts
         ~keeper_id
         ~merge:(Policy.reobserve_fact ~now ~provenance:Policy.Independent_observation)
         ~incoming:[ merged ]
-        ~keep:Policy.fact_recall_window
-        ~trigger:Policy.fact_store_max
-        ~rank:(Policy.retention_rank ~now)
     in
     Alcotest.(check int) "distinct conclusion appended, not merged" 1 stats.Memory_io.appended;
     Alcotest.(check int) "none merged" 0 stats.Memory_io.merged;
@@ -5050,8 +3920,7 @@ let test_reobserve_advances_durable_anchor () =
   let now = 5_000_000.0 in
   let existing =
     { (fact_fixture ~now ()) with
-      Types.external_ref = None
-    ; Types.first_seen = now -. 86_400.0
+      Types.first_seen = now -. 86_400.0
     ; Types.last_verified_at = Some (now -. 7_200.0)
     }
   in
@@ -5065,38 +3934,33 @@ let test_reobserve_advances_durable_anchor () =
     "first_seen preserved"
     (now -. 86_400.0)
     reobserved.Types.first_seen;
-  (* exact-text identity unchanged for referent-free claims *)
+  (* Id-less observations do not normalize claim prose. *)
   let p = fact_fixture ~now () in
   let same = { p with Types.claim = "  user PREFERS concise   responses " } in
-  Alcotest.(check string)
-    "identical (case/space) non-ref claim shares a key"
-    (Types.claim_identity p)
-    (Types.claim_identity same);
+  Alcotest.(check bool)
+    "case/space variants stay distinct without producer identity"
+    false
+    (String.equal (Types.claim_identity p) (Types.claim_identity same));
   let distinct = { p with Types.claim = "user prefers verbose responses" } in
   Alcotest.(check bool)
-    "distinct non-ref claims keep different keys"
+    "distinct id-less claims keep different keys"
     false
     (String.equal (Types.claim_identity p) (Types.claim_identity distinct))
 ;;
 
-(* External refs are context, not a code-enforced grounding contract. A
-   re-observed external-ref fact refreshes like any other non-self-observation
-   fact. *)
-let test_reobserve_external_ref_refreshes_like_context () =
+let test_reobserve_preserves_explicit_validity () =
   let now = 5_000_000.0 in
   let older = now -. 100_000.0 in
   let v0 = older +. 12_345.0 in
   let existing =
     { (fact_fixture ~now:older ()) with
-      Types.claim = "PR #42 is OPEN"
-    ; Types.external_ref = Some { Types.kind = Types.Pr; Types.id = "42" }
+      Types.claim = "deployment state remains active"
     ; Types.first_seen = older
     ; Types.valid_until = Some v0
     ; Types.last_verified_at = Some (older +. 1_000.0)
     }
   in
-  (* incoming is a reworded re-extraction of the same referent claim *)
-  let incoming = { existing with Types.claim = "pull request #42 remains open" } in
+  let incoming = { existing with Types.claim = "deployment remains active" } in
   let reobserved = Policy.reobserve_fact ~now ~provenance:Policy.Independent_observation ~existing ~incoming in
   Alcotest.(check (float 0.001))
     "first_seen inherited (not advanced to now)"
@@ -5112,22 +3976,8 @@ let test_reobserve_external_ref_refreshes_like_context () =
     reobserved.Types.last_verified_at
 ;;
 
-let test_retention_rank_keeps_external_ref_with_durable () =
-  let now = 1_000_000.0 in
-  let durable = { (fact_fixture ~now ()) with Types.category = Types.Fact } in
-  let volatile =
-    { durable with Types.external_ref = Some { Types.kind = Types.Pr; Types.id = "7" } }
-  in
-  Alcotest.(check bool)
-    "external_ref does not demote a durable Fact"
-    true
-    (Float.equal (Policy.retention_rank ~now volatile) (Policy.retention_rank ~now durable))
-;;
-
-(* RFC-keeper-memory-panel-real-data §4a / §8: the dashboard fact projection serializes the real [fact]
-   structure and never the score fields RFC-0247 deleted. Drift guard sibling of
-   [test_legacy_row_with_dead_score_keys_decodes]: a future edit that re-adds
-   confidence / access_count / last_accessed / salience / uses turns this red. *)
+(* The dashboard fact projection serializes the real [fact] structure and never
+   reconstructs deleted score fields. *)
 (* Honest scope: the score keys are absent by construction today — [type fact]
    carries no such fields, so [memory_os_fact_json] structurally cannot emit
    them. This case therefore guards a *re-introduction*: it would go red only if
@@ -5138,7 +3988,6 @@ let test_dashboard_fact_json_omits_score_keys () =
   let f =
     { (fact_fixture ~now ()) with
       Types.category = Types.Validated_approach
-    ; Types.external_ref = Some { Types.kind = Types.Pr; Types.id = "42" }
     ; Types.claim_kind = Some Types.Durable_knowledge
     ; Types.valid_until = Some (now +. 3600.0)
     }
@@ -5153,8 +4002,7 @@ let test_dashboard_fact_json_omits_score_keys () =
     (fun k -> Alcotest.(check bool) (Printf.sprintf "present: %s" k) true (has k))
 	    [ "claim"; "category"; "source"; "first_seen"; "first_seen_iso"
 	    ; "reference_time"; "valid_until"; "last_verified_at"; "current"
-	    ; "prompt_recallable"; "claim_kind" ];
-  Alcotest.(check bool) "external_ref not surfaced" false (has "external_ref");
+	    ; "claim_kind" ];
   List.iter
     (fun k -> Alcotest.(check bool) (Printf.sprintf "deleted score key absent: %s" k) false (has k))
     [ "confidence"; "access_count"; "last_accessed"; "stale_factor"
@@ -5163,12 +4011,9 @@ let test_dashboard_fact_json_omits_score_keys () =
    | Some (`String s) ->
      Alcotest.(check string) "category is the typed producer string" "validated_approach" s
    | _ -> Alcotest.fail "category must be a string");
-  (match List.assoc_opt "current" fields with
+  match List.assoc_opt "current" fields with
    | Some (`Bool b) -> Alcotest.(check bool) "current when valid_until is in the future" true b
-   | _ -> Alcotest.fail "current must be a bool");
-  match List.assoc_opt "prompt_recallable" fields with
-  | Some (`Bool b) -> Alcotest.(check bool) "durable fact is prompt recallable" true b
-  | _ -> Alcotest.fail "prompt_recallable must be a bool"
+   | _ -> Alcotest.fail "current must be a bool"
 ;;
 
 (* Optional [claim_kind] is omitted when [None]; the staleness anchor
@@ -5183,65 +4028,12 @@ let test_dashboard_fact_json_omits_optional_when_none () =
     | _ -> Alcotest.fail "memory_os_fact_json must be a JSON object"
   in
   Alcotest.(check bool)
-    "external_ref omitted when None" false (List.mem_assoc "external_ref" fields);
-  Alcotest.(check bool)
     "claim_kind omitted when None" false (List.mem_assoc "claim_kind" fields);
   match List.assoc_opt "reference_time" fields with
   | Some (`Float t) ->
     Alcotest.(check (float 0.001))
       "reference_time falls back to last_verified_at" (now -. 3600.0) t
   | _ -> Alcotest.fail "reference_time must be a float"
-;;
-
-let test_dashboard_fact_json_marks_diagnostic_not_prompt_recallable () =
-  let now = 1_000_000.0 in
-  let fact =
-    { (fact_fixture ~now ()) with
-      Types.category = Types.Ephemeral
-    ; Types.claim_kind = Some Types.Diagnostic
-    ; Types.valid_until = Some (now +. 3600.0)
-    }
-  in
-  let fields =
-    match Server_dashboard_http_keeper_api.memory_os_fact_json ~now fact with
-    | `Assoc fields -> fields
-    | _ -> Alcotest.fail "memory_os_fact_json must be a JSON object"
-  in
-  match List.assoc_opt "prompt_recallable" fields with
-  | Some (`Bool b) -> Alcotest.(check bool) "diagnostic fact is not prompt recallable" false b
-  | _ -> Alcotest.fail "prompt_recallable must be a bool"
-;;
-
-let test_dashboard_fact_json_marks_diagnostic_not_prompt_recallable () =
-  let now = 1_000_000.0 in
-  let fact =
-    { (fact_fixture ~now ()) with
-      Types.claim = "Raw parse-failure fallback should not enter prompt recall"
-    ; Types.category = Types.Ephemeral
-    ; Types.claim_kind = Some Types.Diagnostic
-    ; Types.valid_until = Some (now +. 3600.0)
-    }
-  in
-  let fields =
-    match Server_dashboard_http_keeper_api.memory_os_fact_json ~now fact with
-    | `Assoc fields -> fields
-    | _ -> Alcotest.fail "memory_os_fact_json must be a JSON object"
-  in
-  (* The producer tags fallback notes as [Diagnostic] at the write boundary, so
-     recall eligibility is decided by [claim_kind] — not by string-matching
-     [claim]. Rows lacking [claim_kind] are ordinary recallable facts; their
-     [valid_until] horizon bounds any stale pre-[Diagnostic] rows on disk. *)
-  Alcotest.(check bool)
-    "diagnostic is typed via claim_kind"
-    true
-    (List.mem_assoc "claim_kind" fields);
-  match List.assoc_opt "prompt_recallable" fields with
-  | Some (`Bool b) ->
-    Alcotest.(check bool)
-      "diagnostic fact is not prompt recallable"
-      false
-      b
-  | _ -> Alcotest.fail "prompt_recallable must be a bool"
 ;;
 
 (* The [items] wiring lives in [memory_os_dashboard_json], not the pure
@@ -5292,12 +4084,6 @@ let test_dashboard_json_selection_policy_contract () =
     | Some _ -> Alcotest.failf "%s.%s must be a string" label key
     | None -> Alcotest.failf "%s.%s missing" label key
   in
-  let int_field label fields key =
-    match List.assoc_opt key fields with
-    | Some (`Int v) -> v
-    | Some _ -> Alcotest.failf "%s.%s must be an int" label key
-    | None -> Alcotest.failf "%s.%s missing" label key
-  in
   with_temp_keepers_dir (fun _dir ->
     let keeper_id = "memory-panel-test" in
     let top =
@@ -5308,41 +4094,13 @@ let test_dashboard_json_selection_policy_contract () =
     let policy = assoc_field "memory_os" top "selection_policy" in
     Alcotest.(check string) "keeper_scope" keeper_id (string_field "policy" policy "keeper_scope");
     Alcotest.(check string)
-      "shared_scope"
-      Types.shared_store_id
-      (string_field "policy" policy "shared_scope");
-    Alcotest.(check string)
-      "private facts source"
-      "Keeper_memory_os_io.read_facts_tail"
+      "facts source"
+      "Keeper_memory_os_io.read_facts_all"
       (string_field "policy" policy "facts_source");
     Alcotest.(check string)
-      "shared facts source"
-      "Keeper_memory_os_io.read_facts_all"
-      (string_field "policy" policy "shared_facts_source");
-    Alcotest.(check string)
       "episodes source"
-      "Keeper_memory_os_io.read_episodes_tail"
+      "Keeper_memory_os_io.read_episodes_all"
       (string_field "policy" policy "episodes_source");
-    Alcotest.(check int)
-      "dashboard fact bound"
-      Policy.fact_store_max
-      (int_field "policy" policy "dashboard_fact_tail_limit");
-    Alcotest.(check int)
-      "dashboard episode bound"
-      12
-      (int_field "policy" policy "dashboard_episode_tail_limit");
-    Alcotest.(check int)
-      "prompt private fact bound"
-      Policy.recall_default_max_facts
-      (int_field "policy" policy "recall_private_fact_limit");
-    Alcotest.(check int)
-      "prompt shared fact bound"
-      Policy.recall_default_max_shared_facts
-      (int_field "policy" policy "recall_shared_fact_limit");
-    Alcotest.(check int)
-      "prompt episode bound"
-      Policy.recall_default_max_episodes
-      (int_field "policy" policy "recall_episode_limit");
     Alcotest.(check string)
       "category source"
       "Keeper_memory_os_types.category_to_string"
@@ -5370,7 +4128,21 @@ let test_dashboard_json_selection_policy_contract () =
     Alcotest.(check bool)
       "old misleading episode_tail_limit key absent"
       false
-      (List.mem_assoc "episode_tail_limit" policy))
+      (List.mem_assoc "episode_tail_limit" policy);
+    List.iter
+      (fun key ->
+         Alcotest.(check bool)
+           (key ^ " absent")
+           false
+           (List.mem_assoc key policy))
+      [ "shared_scope"
+      ; "shared_facts_source"
+      ; "dashboard_fact_tail_limit"
+      ; "dashboard_episode_tail_limit"
+      ; "recall_private_fact_limit"
+      ; "recall_shared_fact_limit"
+      ; "recall_episode_limit"
+      ])
 ;;
 
 let json_assoc label = function
@@ -5751,60 +4523,36 @@ let test_compaction_snapshots_json_surfaces_manifest_read_errors () =
       (json_int_field "compaction_snapshots" top "read_error_count"))
 ;;
 
-let test_self_observation_excluded_from_recall () =
-  let now = 1_000_000.0 in
-  let self_obs =
-    { (fact_fixture ~now ()) with
-      Types.claim = "I am looping this turn"
-    ; Types.category = Types.Fact
-    ; Types.claim_kind = Some Types.Self_observation
-    ; Types.first_seen = now
-    ; Types.last_verified_at = Some now
-    }
-  in
-  let durable =
-    { (fact_fixture ~now ()) with
-      Types.claim = "The build uses dune 3.x"
-    ; Types.category = Types.Fact
-    ; Types.claim_kind = Some Types.External_state
-    ; Types.first_seen = now -. 1.0
-    ; Types.last_verified_at = Some (now -. 1.0)
-    }
-  in
-  let ranked = Recall.facts_recency_ranked ~now [ self_obs; durable ] in
-  Alcotest.(check int) "self-observation excluded from recall ranking" 1 (List.length ranked);
-  Alcotest.(check string) "only durable fact remains" "The build uses dune 3.x" (List.hd ranked).Types.claim
-;;
-
-let test_self_observation_excluded_from_user_model () =
-  let now = 1_000_000.0 in
-  with_temp_keepers_dir (fun _marker ->
-    let keeper_id = "keeper-self-obs" in
-    let self_pref =
-      { (fact_fixture ~now ()) with
-        Types.claim = "I prefer short turns"
-      ; Types.category = Types.Preference
-      ; Types.claim_kind = Some Types.Self_observation
-      ; Types.first_seen = now
-      ; Types.last_verified_at = Some now
-      }
-    in
-    let real_pref =
-      { (fact_fixture ~now ()) with
-        Types.claim = "User prefers concise responses"
-      ; Types.category = Types.Preference
-      ; Types.claim_kind = None
-      ; Types.first_seen = now -. 1.0
-      ; Types.last_verified_at = Some (now -. 1.0)
-      }
-    in
-    List.iter (Memory_io.append_fact ~keeper_id) [ self_pref; real_pref ];
-    let model = Keeper_user_model.build ~keeper_id ~now () in
-    Alcotest.(check int) "one preference remains" 1 (List.length model.Keeper_user_model.preferences);
-    Alcotest.(check string)
-      "real preference remains, self-observation excluded"
-      "User prefers concise responses"
-      (List.hd model.Keeper_user_model.preferences).Keeper_user_model.claim)
+let test_claim_kinds_remain_recall_context_in_source_order () =
+  with_prompt_registry (fun () ->
+    with_temp_keepers_dir (fun _ ->
+      let now = 1_000_000.0 in
+      let keeper_id = "claim-kind-context" in
+      let self_observation =
+        { (fact_fixture ~now ()) with
+          Types.claim = "I am looping this turn"
+        ; Types.claim_kind = Some Types.Self_observation
+        }
+      in
+      let external_state =
+        { (fact_fixture ~now ()) with
+          Types.claim = "The build uses dune 3.x"
+        ; Types.claim_kind = Some Types.External_state
+        ; Types.source = { self_observation.source with turn = 2 }
+        }
+      in
+      List.iter
+        (Memory_io.append_fact ~keeper_id)
+        [ self_observation; external_state ];
+      let context = Recall.render_context ~keeper_id ~now () in
+      Alcotest.(check bool)
+        "both typed facts remain recall context"
+        true
+        (contains self_observation.claim context && contains external_state.claim context);
+      Alcotest.(check bool)
+        "persisted source order is preserved"
+        true
+        (index_of self_observation.claim context < index_of external_state.claim context)))
 ;;
 
 let test_gc_default_on () =
@@ -5819,9 +4567,9 @@ let () =
     [ ( "json"
       , [ Alcotest.test_case "fact and episode round-trip" `Quick test_json_roundtrip
         ; Alcotest.test_case
-            "legacy row with dead score keys decodes (RFC-0247 R5)"
+            "fact decoder rejects unsupported schema version"
             `Quick
-            test_legacy_row_with_dead_score_keys_decodes
+            test_fact_decoder_rejects_wrong_schema_version
         ; Alcotest.test_case "librarian prompt renders" `Quick test_librarian_prompt_renders
         ; Alcotest.test_case
             "librarian prompt omits private blocks"
@@ -5832,13 +4580,17 @@ let () =
             `Quick
             test_librarian_rejects_extra_confidence_field
         ; Alcotest.test_case
+            "librarian rejects unknown claim_kind"
+            `Quick
+            test_librarian_rejects_unknown_claim_kind
+        ; Alcotest.test_case
             "librarian generation override"
             `Quick
             test_librarian_generation_override
         ; Alcotest.test_case
-            "librarian-born ephemeral fact has TTL (RFC-0247 §2.3)"
+            "librarian does not infer validity"
             `Quick
-            test_librarian_ephemeral_fact_has_ttl
+            test_librarian_does_not_infer_validity
         ; Alcotest.test_case
             "librarian accepts wrapped json output"
             `Quick
@@ -5940,14 +4692,6 @@ let () =
             `Quick
             test_dashboard_fact_json_omits_optional_when_none
         ; Alcotest.test_case
-            "dashboard fact json marks diagnostic rows as not prompt recallable"
-            `Quick
-            test_dashboard_fact_json_marks_diagnostic_not_prompt_recallable
-        ; Alcotest.test_case
-            "dashboard fact json marks legacy diagnostic rows as not prompt recallable"
-            `Quick
-            test_dashboard_fact_json_marks_diagnostic_not_prompt_recallable
-        ; Alcotest.test_case
             "dashboard json wires one facts.items row per persisted fact"
             `Quick
             test_dashboard_json_wires_one_fact_item_per_fact
@@ -5982,9 +4726,9 @@ let () =
         ] )
     ; ( "policy"
       , [ Alcotest.test_case
-            "retention rank is structural (Ephemeral dropped first)"
+            "retention timestamp is observation only"
             `Quick
-            test_retention_rank_structural
+            test_reference_time_is_observation_only
         ; Alcotest.test_case
             "reobserve_fact refreshes truth anchor (RFC-0247)"
             `Quick
@@ -6044,7 +4788,7 @@ let () =
         ; Alcotest.test_case
             "renders sanitized memory"
             `Quick
-            test_recall_context_renders_sanitized_memory
+            test_recall_context_preserves_semantic_memory_content
         ; Alcotest.test_case
             "preserves admission memory"
             `Quick
@@ -6070,45 +4814,33 @@ let () =
             `Quick
             test_render_if_enabled_renders_persisted_memory
         ; Alcotest.test_case
-            "render_if_enabled omits diagnostic memory"
+            "render_if_enabled keeps diagnostic context"
             `Quick
-            test_render_if_enabled_omits_diagnostic_memory
+            test_render_if_enabled_keeps_diagnostic_context
         ; Alcotest.test_case
             "render_if_enabled off-main wrap is transparent (HOL fix)"
             `Quick
             test_render_if_enabled_offmain_wrap_is_transparent
         ; Alcotest.test_case
-            "render_if_enabled omits empty episode memory"
+            "render_if_enabled preserves an episode with empty claims"
             `Quick
-            test_render_if_enabled_omits_empty_episode_memory
+            test_render_if_enabled_preserves_empty_claim_episode
         ; Alcotest.test_case
-            "recall scans the whole bounded store, not just the tail window"
+            "recall scans the whole store, not just the tail window"
             `Quick
-            test_recall_scans_whole_bounded_store
+            test_recall_reads_complete_store
         ; Alcotest.test_case
-            "stale fact gets a worded staleness marker"
+            "old fact gets no synthesized age verdict"
             `Quick
-            test_recall_marks_stale_fact
+            test_recall_does_not_synthesize_age_verdict
         ; Alcotest.test_case
             "fresh fact gets no staleness marker"
             `Quick
             test_recall_omits_marker_for_fresh_fact
         ; Alcotest.test_case
-            "external-ref fact is rendered as context"
-            `Quick
-            test_recall_treats_external_ref_as_context
-        ; Alcotest.test_case
-            "external-ref fact is not demoted below durable cap"
-            `Quick
-            test_recall_does_not_demote_external_ref_below_durable_cap
-        ; Alcotest.test_case
             "plain fact never gets the hard prefix"
             `Quick
-            test_recall_no_prefix_for_non_volatile_fact
-        ; Alcotest.test_case
-            "external-ref fact gets no hard prefix"
-            `Quick
-            test_recall_no_prefix_for_external_ref_fact
+            test_recall_no_prefix_for_plain_fact
         ; Alcotest.test_case
             "expired episodes are omitted"
             `Quick
@@ -6118,161 +4850,69 @@ let () =
             `Quick
             test_recall_renders_terminal_episode_marker
         ; Alcotest.test_case
-            "dedups repeated claim (RFC-0239 R2)"
+            "preserves repeated claim rows"
             `Quick
-            test_recall_dedups_repeated_claim
+            test_recall_preserves_repeated_claims
         ] )
     ; ( "retention"
       , [ Alcotest.test_case
-            "cap_facts keeps top-ranked (RFC-0239 Q4)"
+            "fact store preserves all appends"
             `Quick
-            test_cap_facts_keeps_top_ranked
+            test_fact_store_preserves_all_appends
         ; Alcotest.test_case
             "partition_expired splits on valid_until (RFC-0259 P5)"
             `Quick
             test_partition_expired_splits_on_valid_until
         ; Alcotest.test_case
-            "GC ttl_expired uses external_state effective horizon"
+            "GC uses only explicit valid_until"
             `Quick
-            test_gc_ttl_expired_uses_external_state_effective_horizon
+            test_gc_uses_only_explicit_valid_until
         ; Alcotest.test_case
-            "cap_facts drops expired below trigger (RFC-0259 P5)"
+            "fact store preserves expired rows for explicit GC"
             `Quick
-            test_cap_drops_expired_below_trigger
+            test_fact_store_preserves_expired_for_explicit_gc
         ; Alcotest.test_case
-            "merge_and_cap drops expired with no incoming (RFC-0259 P5)"
+            "merge preserves rows without incoming"
             `Quick
-            test_merge_and_cap_drops_expired_no_incoming
+            test_merge_preserves_rows_without_incoming
         ; Alcotest.test_case
-            "episode-log cap hysteresis + recall coupling (RFC-0272)"
+            "event log preserves all entries"
             `Quick
-            test_trim_target_hysteresis
+            test_event_log_preserves_all_entries
         ; Alcotest.test_case
-            "cap_events drops oldest over trigger (RFC-0272)"
+            "episode files preserve all entries"
             `Quick
-            test_cap_events_drops_oldest_over_trigger
+            test_episode_files_preserve_all_entries
         ; Alcotest.test_case
-            "cap_episode_files keeps recent (RFC-0272)"
+            "memory IO preserves entries with installed domain pool"
             `Quick
-            test_cap_episode_files_keeps_recent
+            test_memory_io_preserves_entries_with_installed_domain_pool
         ; Alcotest.test_case
-            "cap paths run with installed domain pool (RFC-0302)"
+            "merge upserts re-observed claim"
             `Quick
-            test_memory_io_caps_run_with_installed_domain_pool
+            test_merge_upserts_reobserved_claim
         ; Alcotest.test_case
-            "merge_and_cap upserts re-observed claim (RFC-0243)"
+            "merge appends distinct claims"
             `Quick
-            test_merge_and_cap_upserts_reobserved_claim
-        ; Alcotest.test_case
-            "merge_and_cap appends distinct and caps (RFC-0243)"
-            `Quick
-            test_merge_and_cap_appends_distinct_and_caps
+            test_merge_appends_distinct_claims
         ] )
-    ; ( "consolidator"
+    ; ( "memory context validity"
       , [ Alcotest.test_case
-            "promotes claim corroborated by >=2 keepers (RFC-0244)"
-            `Quick
-            test_consolidator_promotes_corroborated
-        ; Alcotest.test_case
-            "promoted shared fact carries the group claim_id (cross-tier dedup)"
-            `Quick
-            test_consolidator_promotes_carries_claim_id
-        ; Alcotest.test_case
-            "representative prefers verified rows"
-            `Quick
-            test_consolidator_representative_prefers_verified
-        ; Alcotest.test_case
-            "representative prefers newest verification"
-            `Quick
-            test_consolidator_representative_prefers_newest_verification
-        ; Alcotest.test_case
-            "unverified representative fallback is deterministic"
-            `Quick
-            test_consolidator_unverified_fallback_order
-        ; Alcotest.test_case
-            "stale contributors are filtered before shared fields"
-            `Quick
-            test_consolidator_filters_stale_before_shared_fields
-        ; Alcotest.test_case
-            "stale peer does not satisfy min_keepers"
-            `Quick
-            test_consolidator_stale_peer_does_not_satisfy_min_keepers
-        ; Alcotest.test_case
-            "stale fact without valid_until is filtered"
-            `Quick
-            test_consolidator_filters_stale_without_valid_until
-        ; Alcotest.test_case
-            "solo claim not promoted"
-            `Quick
-            test_consolidator_solo_not_promoted
-        ; Alcotest.test_case
-            "same-keeper repeat is not corroboration"
-            `Quick
-            test_consolidator_same_keeper_repeat_no_inflate
-        ; Alcotest.test_case
-            "non-whitelisted category default-denied"
-            `Quick
-            test_consolidator_category_default_deny
-        ; Alcotest.test_case
-            "fact/constraint wait for outcome-positive promotion evidence"
-            `Quick
-            test_consolidator_fact_constraint_wait_for_outcome_positive
-        ; Alcotest.test_case
-            "unknown category default-denied (#21241)"
-            `Quick
-            test_consolidator_unknown_category_default_deny
-        ; Alcotest.test_case
-            "validated_approach and lesson promote (RFC-0247 §6)"
-            `Quick
-            test_consolidator_promotes_validated_approach_and_lesson
-        ; Alcotest.test_case
-            "category codec round-trips (RFC-0247 §2.5)"
+            "category codec round-trips"
             `Quick
             test_category_codec_roundtrip
         ; Alcotest.test_case
-            "durable categories are promotable incl. validated_approach/lesson (RFC-0247 §6)"
+            "all categories are validity context"
             `Quick
-            test_is_promotable_durable_kinds
+            test_all_categories_are_validity_context
         ; Alcotest.test_case
-            "shared promotion outcome-positive kinds are stricter than promotable"
+            "all claim kinds are validity context"
             `Quick
-            test_shared_promotion_outcome_positive_kinds
+            test_claim_kinds_are_validity_context
         ; Alcotest.test_case
-            "retention TTL/lifetime is category-driven (RFC-0247 §2.3)"
+            "no category infers validity"
             `Quick
-            test_category_retention_by_category
-        ; Alcotest.test_case
-            "ephemeral corroborated claim not promoted (#21244)"
-            `Quick
-            test_consolidator_ephemeral_not_promoted
-        ; Alcotest.test_case
-            "deterministic regardless of input order"
-            `Quick
-            test_consolidator_deterministic
-        ; Alcotest.test_case
-            "default-off run reports disabled status"
-            `Quick
-            test_consolidator_default_disabled_status
-        ; Alcotest.test_case
-            "recall surfaces shared facts with provenance (private precedence)"
-            `Quick
-            test_recall_surfaces_shared_after_consolidation
-        ; Alcotest.test_case
-            "recall scans the whole shared fact store"
-            `Quick
-            test_recall_scans_whole_shared_store
-        ; Alcotest.test_case
-            "recall waits for shared fact lock"
-            `Quick
-            test_recall_waits_for_shared_fact_lock
-        ; Alcotest.test_case
-            "corrupt source store fails loud"
-            `Quick
-            test_consolidator_rejects_corrupt_source_store
-        ; Alcotest.test_case
-            "consolidator waits for shared store lock"
-            `Quick
-            test_consolidator_waits_for_shared_store_lock
+            test_no_category_infers_validity
         ] )
     ; ( "librarian runtime"
       , [ Alcotest.test_case
@@ -6286,7 +4926,7 @@ let () =
         ; Alcotest.test_case
             "unstructured fallback does not write facts"
             `Quick
-            test_librarian_unstructured_fallback_does_not_write_facts
+            test_librarian_invalid_output_does_not_write_facts
         ; Alcotest.test_case
             "provider slot gate caps concurrency at capacity (#21376/#21230)"
             `Quick
@@ -6302,79 +4942,59 @@ let () =
         ] )
     ; ( "rfc-0259 volatile"
       , [ Alcotest.test_case
-            "fact_valid_until: external_ref stays context-only"
+            "fact validity uses only stored value"
             `Quick
-            test_fact_valid_until_external_ref_is_context_only
+            test_fact_validity_uses_only_stored_value
         ; Alcotest.test_case
-            "claim_kind round-trips; unknown -> None (RFC-0285 §4)"
+            "claim_kind round-trips; unknown is rejected"
             `Quick
             test_claim_kind_round_trip
         ; Alcotest.test_case
-            "self-observation: finite horizon, re-mint no extend, expiry (RFC-0285 §4)"
+            "self-observation uses only explicit validity"
             `Quick
-            test_self_observation_horizon_and_remint
+            test_self_observation_uses_only_explicit_validity
         ; Alcotest.test_case
-            "self-observation never promoted; durable is (RFC-0285 §3.5)"
+            "self-observation remains recall context"
             `Quick
-            test_self_observation_not_promoted
+            test_claim_kinds_remain_recall_context_in_source_order
         ; Alcotest.test_case
-            "self-observation excluded from recall context (P0-2)"
+            "fact_of_json preserves unknown category"
             `Quick
-            test_self_observation_excluded_from_recall
+            test_fact_of_json_preserves_unknown_category
         ; Alcotest.test_case
-            "self-observation excluded from user model (P0-2)"
+            "fact_of_json preserves non-exact unknown category"
             `Quick
-            test_self_observation_excluded_from_user_model
+            test_fact_of_json_preserves_non_exact_unknown_category
         ; Alcotest.test_case
-            "fact_of_json does not infer external_ref from legacy prose"
+            "fact_of_json rejects invalid claim_kind"
             `Quick
-            test_fact_of_json_does_not_infer_external_ref_from_legacy_prose
+            test_fact_of_json_rejects_invalid_claim_kind
         ; Alcotest.test_case
-            "fact_of_json migrates legacy external_state category"
+            "fact_of_json preserves explicit claim_kind"
             `Quick
-            test_fact_of_json_migrates_legacy_external_state_category
-        ; Alcotest.test_case
-            "fact_of_json keeps non-exact external_state category unknown"
-            `Quick
-            test_fact_of_json_does_not_normalize_legacy_external_state_category
-        ; Alcotest.test_case
-            "fact_of_json rejects invalid legacy external_state claim_kind"
-            `Quick
-            test_fact_of_json_rejects_invalid_external_state_claim_kind
-        ; Alcotest.test_case
-            "fact_of_json forces legacy external_state claim_kind"
-            `Quick
-            test_fact_of_json_forces_legacy_external_state_claim_kind
-        ; Alcotest.test_case
-            "fact_to_json drops external_ref surface"
-            `Quick
-            test_fact_to_json_drops_external_ref_surface
+            test_fact_of_json_preserves_explicit_claim_kind
         ; Alcotest.test_case
             "claim_id codec round-trips Some and omits None (RFC-0259 §3.7 P6)"
             `Quick
             test_claim_id_codec_roundtrip
         ; Alcotest.test_case
-            "reobserve refreshes external-ref facts as context"
+            "reobserve preserves explicit validity"
             `Quick
-            test_reobserve_external_ref_refreshes_like_context
-        ; Alcotest.test_case
-            "retention rank keeps external-ref fact with durable"
-            `Quick
-            test_retention_rank_keeps_external_ref_with_durable
+            test_reobserve_preserves_explicit_validity
         ; Alcotest.test_case
             "claim_identity: same claim_id shares a key, distinct claim_id stays distinct (RFC-0259 §3.7 P6/E)"
             `Quick
             test_claim_identity_keys_on_claim_id
         ; Alcotest.test_case
-            "merge_and_cap upserts same-claim_id reworded claim to one row (P6/E)"
+            "merge upserts same-claim_id reworded claim to one row"
             `Quick
-            test_merge_and_cap_upserts_same_claim_id
+            test_merge_upserts_same_claim_id
         ; Alcotest.test_case
-            "merge_and_cap keeps distinct conclusions (different claim_id, same ref) as two rows (P6 regression)"
+            "merge keeps distinct conclusions as two rows"
             `Quick
-            test_merge_and_cap_no_over_merge_distinct_conclusions
+            test_merge_keeps_distinct_conclusions
         ; Alcotest.test_case
-            "reobserve still advances a durable (non-ref) claim's anchor (P6 regression)"
+            "reobserve advances an independent claim's observation timestamp"
             `Quick
             test_reobserve_advances_durable_anchor
         ] )

@@ -124,7 +124,8 @@ group_key_for() { local s="$1"; printf '%s' "${s//\//__}"; }
 
 is_tracked() {
   local f="$1"
-  git ls-files --error-unmatch -- "$f" >/dev/null 2>&1
+  git ls-files --error-unmatch -- "$f" >/dev/null 2>&1 ||
+    ! git check-ignore -q -- "$f"
 }
 
 # --- Pass 1: enumerate specs and collect per-directory data -------------------

@@ -110,8 +110,7 @@ let keeper_attention_kind reason =
 let keeper_attention_severity ~reason ~runtime_blocker_class =
   match reason, runtime_blocker_class with
   | Some "runtime_blocked", _
-  | Some "provider_timeout", _
-  | Some "continue_gate_required", _ -> Sev_bad
+  | Some "provider_timeout", _ -> Sev_bad
   | _, Some _ -> Sev_bad
   | _ -> Sev_warn
 

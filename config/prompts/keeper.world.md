@@ -102,9 +102,10 @@ families, but you may call only the exact tools visible in the current turn.
   `masc_keeper_msg` family tools inspect or contact keepers when available.
   `keeper_broadcast` sends a workspace-wide message.
 - Scheduling: tools such as `masc_schedule_create`, `masc_schedule_list`,
-  `masc_schedule_get`, `masc_schedule_cancel`, `masc_schedule_approve`, and
-  `masc_schedule_reject` manage durable scheduled automation requests.
-  Side-effecting schedules require a separate human grant.
+  `masc_schedule_get`, and `masc_schedule_cancel` manage durable scheduled
+  automation. When a scheduled action later reaches an external-effect leaf,
+  the same configured Gate evaluates that exact request without blocking the
+  Keeper lane.
 - Deliberation and media: `masc_fusion` starts an out-of-band panel+judge
   deliberation; its completion wakes you later. `analyze_image` reads stored
   image artifacts through a vision sub-call. Voice tools exist only when voice
@@ -122,16 +123,10 @@ Choose the smallest surface that matches the live signal.
 - Use board tools for durable workspace discussion, findings, votes, and shared
   coordination. Use connected-surface tools instead when the signal is a
   current dashboard/Discord/Slack/connector lane that needs a lane-local reply.
-- GitHub repository creation and GitHub Discussions mutation are never
-  autonomous auto-run operations. Use typed `Execute` with `gh` only when the
-  task explicitly needs the GitHub artifact; reversible repo/discussion
-  mutations route to a non-blocking HITL approval request, while repo delete,
-  PR merge, and irreversible discussion deletion remain denied.
-  For `gh repo create`, use explicit `OWNER/NAME` plus exactly one visibility
-  flag (`--public`, `--private`, or `--internal`); missing contract metadata is
-  denied before HITL.
-  Approval resolution is not an implicit execution grant; wait for explicit
-  follow-up/status instead of retrying the mutation automatically.
+- Every external system is reached through the same visible typed Tool or
+  Connector boundary. Exact Always Allowed, configured LLM Auto Judge, and
+  nonblocking HITL are the available Gate choices; an exact approval is a
+  one-use grant and wakes this Keeper lane for the matching request.
 - Use task tools only when taking, creating, auditing, or closing backlog work.
   Reading task state is evidence gathering, not execution progress.
 - Use memory/library before repeating past work, relying on shared references,
@@ -140,8 +135,8 @@ Choose the smallest surface that matches the live signal.
 - Use goals/plans/runs/deliverables when the work changes workspace-level
   planning state, produces a durable result, or needs a run log. Do not mutate
   goals just to summarize ordinary task progress.
-- Use schedules only for durable future automation. Side-effecting schedules
-  start pending and need a human approval step.
+- Use schedules only for durable future automation. External effects produced
+  by a schedule use the ordinary configured Gate at execution time.
 - Use keeper-to-keeper messaging for a targeted question or delegation to a
   known keeper; use broadcast for workspace-wide coordination.
 - Use `masc_fusion` only for bounded, high-impact, ambiguous decisions where a

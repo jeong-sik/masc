@@ -4,7 +4,7 @@
     - QCheck PBT (test_keeper_state_machine_pbt.ml)
     - Trace validator (keeper_trace_validate.ml)
 
-    Checks 10 safety properties matching KeeperStateMachine.tla. *)
+    Checks the safety properties mirrored by KeeperStateMachine.tla. *)
 
 type violation = {
   property : string;
@@ -18,11 +18,10 @@ type violation = {
     1.  TypeOK — phase is one of 11 valid phases
     2.  DeadIsForever — Dead in prev implies Dead in new
     3.  StoppedIsForever — Stopped in prev implies Stopped in new
-    4.  BudgetNeverRevives — restart_budget_remaining false->true forbidden
-    5.  RestartCountMonotonic — restart_count never decreases
+    4.  RestartCountMonotonic — restart_count never decreases
     6.  RunningRequiresFiber — Running implies fiber_alive
     7.  StoppedRequiresDrain — Stopped implies stop_requested AND drain_complete
-    8.  DeadRequiresNoBudget — Dead implies NOT restart_budget_remaining
+    8.  DeadRequiresTombstone — Dead implies durable tombstone latch
     9.  DerivePhaseAgreement — derive_phase conditions = new_phase
     10. TransitionMatrixAgreement — phase change implies can_transition *)
 val check_step_invariants :
@@ -42,12 +41,12 @@ val check_step_invariants :
     1. TypeOK
     6. RunningRequiresFiber
     7. StoppedRequiresDrain
-    8. DeadRequiresNoBudget
+    8. DeadRequiresTombstone
     9. DerivePhaseAgreement
 
     Suitable for periodic sweep-time scans (e.g. keeper supervisor audit).
     The history-dependent invariants (DeadIsForever, StoppedIsForever,
-    BudgetNeverRevives, RestartCountMonotonic, TransitionMatrixAgreement)
+    RestartCountMonotonic, TransitionMatrixAgreement)
     require a prev-state and are intentionally excluded — use
     [check_step_invariants] when a prev-state is available.
 

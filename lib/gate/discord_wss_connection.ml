@@ -207,6 +207,7 @@ let run_session ~sw ~setup =
       Eio.Switch.run (fun session_sw ->
         let result =
           try Ok (setup ~sw:session_sw) with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
           | e -> Error e
         in
         (* Hand the session switch back to the caller alongside the session so
@@ -214,13 +215,13 @@ let run_session ~sw ~setup =
            connection's: closing the connection cancels them. *)
         Eio.Promise.resolve setup_resolver
           (Result.map (fun (wsd, events) -> (wsd, events, session_sw)) result);
-        match result with
-        | Error _ -> () (* let session_sw exit; socket/flow get released *)
-        | Ok _ ->
-          Eio.Promise.await close_signal;
-          (* Cancel the driver + any spawned reader by failing the switch (a
-             plain return would only wait for them — see [Session_closed]). *)
-          Eio.Switch.fail session_sw Session_closed)
+        Result.iter
+          (fun _ ->
+             Eio.Promise.await close_signal;
+             (* Cancel the driver + any spawned reader by failing the switch (a
+                plain return would only wait for them — see [Session_closed]). *)
+             Eio.Switch.fail session_sw Session_closed)
+          result)
     with Session_closed -> ());
   match Eio.Promise.await setup_promise with
   | Error e -> raise e

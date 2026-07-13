@@ -546,7 +546,6 @@ let log_routine_level_env_key = "MASC_LOG_ROUTINE_LEVEL"
 let telemetry_enabled_env_key = "MASC_TELEMETRY_ENABLED"
 (* [parse_warn_env_key] is defined near the top of this module (next to the
    malformed handler that consumes it). *)
-let governance_level_env_key = "MASC_GOVERNANCE_LEVEL"
 
 (** Log level string (e.g. "debug", "info", "warn", "error"). *)
 let log_level_opt () =
@@ -560,20 +559,6 @@ let telemetry_enabled () =
     (fail-fast boot) instead of a warn + default. Controlled by
     [MASC_PARSE_WARN]. Default: false (warn + use default). *)
 let parse_warn_enabled () = parse_strict_mode ()
-
-(** Governance level. Set at runtime by server_runtime_bootstrap.
-    Valid: "production", "development", etc. Default: "production". *)
-let governance_level () =
-  get_string ~default:"production" governance_level_env_key
-  |> String.lowercase_ascii
-
-let disable_hitl_env_key = "MASC_DISABLE_HITL"
-
-(** Whether to disable HITL (human-in-the-loop) approval gates. Default: false.
-    @category Security
-    @ops_class operator *)
-let disable_hitl () =
-  get_bool ~default:false disable_hitl_env_key
 
 (** {1 Build Identity} *)
 

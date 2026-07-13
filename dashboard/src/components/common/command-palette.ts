@@ -86,15 +86,15 @@ export function CommandPalette({ openOnMount = false }: CommandPaletteProps = {}
         id: 'nav-command',
         title: '운영 화면으로 이동 (Operations)',
         section: 'Navigation',
-        keywords: 'control admin ops governance intervene',
+        keywords: 'control admin ops gate hitl intervene',
         handler: () => navigate('command')
       },
       {
-        id: 'nav-governance',
-        title: '거버넌스로 이동 (Governance)',
+        id: 'nav-gate',
+        title: 'Gate·HITL로 이동',
         section: 'Navigation',
         keywords: 'approval review hitl judge',
-        handler: () => navigate('command', { section: 'operations' })
+        handler: () => navigate('command', { section: 'operations', view: 'gate' })
       },
       {
         id: 'nav-lab',

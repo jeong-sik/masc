@@ -10,9 +10,6 @@
 type working_context = Keeper_types.working_context
 type session_context = Keeper_types.session_context
 
-(** Default cap on checkpoint messages persisted at save-time. *)
-val default_max_checkpoint_messages : int
-
 (** {1 Token counting} *)
 
 (** Token count of a single OAS message. *)
@@ -56,11 +53,9 @@ val sync_oas_context : working_context -> working_context
 (** {1 Working-context projections} *)
 
 val checkpoint_of_context : working_context -> Agent_sdk.Checkpoint.t
-val resume_checkpoint_of_context :
-  max_checkpoint_messages:int -> working_context -> Agent_sdk.Checkpoint.t
-(** Project [working_context] to the checkpoint passed to OAS resume,
-    applying the same message count, old-tool-result, per-block, and
-    total-content caps used by {!save_oas_checkpoint}. *)
+val resume_checkpoint_of_context : working_context -> Agent_sdk.Checkpoint.t
+(** Project [working_context] to the checkpoint passed to OAS resume without
+    rewriting, trimming, or stubbing message content. *)
 
 val oas_context_of_context : working_context -> Agent_sdk.Context.t
 val system_prompt_of_context : working_context -> string
@@ -157,10 +152,10 @@ val usage_of_response :
   Agent_sdk_response.api_response -> Agent_sdk.Types.api_usage
 val total_tokens : Agent_sdk.Types.api_usage -> int
 
-(** Save the current working context as a generation-tagged OAS
-    checkpoint (truncated, sanitized, repaired). *)
+(** Save the current working context as a generation-tagged OAS checkpoint.
+    Message order and typed content are preserved exactly; OAS owns any
+    call-time context reduction. *)
 val save_oas_checkpoint :
-  max_checkpoint_messages:int ->
   multimodal_policy:Keeper_types_profile.multimodal_policy ->
   keeper_name:string ->
   session:session_context ->
@@ -180,7 +175,7 @@ val checkpoint_max_tokens : Agent_sdk.Checkpoint.t -> fallback:int -> int
 (** Drop orphan [tool_result] blocks (those without a matching
     preceding [tool_use]) so a checkpoint payload satisfies the
     Anthropic API invariant that every tool_result references a known
-    tool_use. Public so [Keeper_rollover] / [Keeper_post_turn] can
+    tool_use. Public so [Keeper_post_turn] can
     reuse it before persisting a checkpoint. *)
 val repair_orphan_tool_result_messages :
   Agent_sdk.Types.message list -> Agent_sdk.Types.message list
@@ -246,11 +241,9 @@ val checkpoint_text_cap_marker : string
     Tests assert against this literal so the marker is part of the
     public contract. *)
 
-(** Project an OAS checkpoint to a working_context. Optionally
-    repair orphan tool results and cap the message tail. *)
+(** Project an OAS checkpoint to a working context without rewriting its
+    messages. *)
 val context_of_oas_checkpoint :
-  ?repair_orphans:bool ->
-  max_checkpoint_messages:int ->
   Agent_sdk.Checkpoint.t ->
   primary_model_max_tokens:int ->
   working_context
@@ -259,7 +252,6 @@ val context_of_oas_checkpoint :
     [trace_id]. Returns the session plus the recovered
     working_context (or [None] when nothing was found). *)
 val load_context_from_checkpoint :
-  max_checkpoint_messages:int ->
   trace_id:string ->
   primary_model_max_tokens:int ->
   base_dir:string ->

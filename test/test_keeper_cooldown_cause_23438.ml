@@ -52,7 +52,7 @@ let backpressure_error ?cooldown_cause () =
     { runtime_id = "runpod_rtxa6000.gemma4-coder-fable5-q4km"
     ; source = KIE.Provider_capacity
     ; detail = "provider health cooldown active before dispatch"
-    ; retry_after = KIE.Synthetic_default 29.0
+    ; retry_after = KIE.No_retry_hint
     ; cooldown_cause
     }
 

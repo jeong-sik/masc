@@ -31,19 +31,3 @@ val recent_crashes :
   name:string ->
   max_entries:int ->
   Yojson.Safe.t list
-
-(** Non-yielding: record a self-preservation suppression event. *)
-val enqueue_sp_event :
-  keepers_dir:string ->
-  ts:float ->
-  suppressed_count:int ->
-  total:int ->
-  ratio:float ->
-  dominant_cohort:string ->
-  unit
-
-(** Read recent self-preservation events from disk. *)
-val recent_sp_events :
-  keepers_dir:string ->
-  max_entries:int ->
-  Yojson.Safe.t list

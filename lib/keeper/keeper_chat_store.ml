@@ -1400,6 +1400,26 @@ let load_page ~base_dir ~keeper_name ?before () : page =
 let load ~base_dir ~keeper_name : chat_message list =
   (load_page ~base_dir ~keeper_name ()).messages
 
+let load_all ~base_dir ~keeper_name : chat_message list =
+  let path = chat_path ~base_dir ~keeper_name in
+  if not (Sys.file_exists path) then []
+  else
+    match Safe_ops.read_file_safe path with
+    | Error detail ->
+      report_persistence_read_drop
+        ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+        ~path
+        ~detail;
+      []
+    | Ok contents ->
+      let redaction = redaction_for ~base_dir ~keeper_name in
+      contents
+      |> String.split_on_char '\n'
+      |> List.filter_map (fun line ->
+        let trimmed = String.trim line in
+        if trimmed = "" then None else parse_line ~file_path:path trimmed)
+      |> List.map (redact_message redaction)
+
 (* RFC-0235 P3: the history endpoint can tell the dashboard that a clip
    has been reaped by checking the same audio directory the synthesis side
    writes to. This keeps the TTL reaper simple while avoiding a broken

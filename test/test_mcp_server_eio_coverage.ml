@@ -322,45 +322,6 @@ let test_detect_mode_partial_content () =
   check bool "partial is line delimited" true (result = Mcp_server_eio_protocol.LineDelimited)
 
 (* ============================================================
-   governance_defaults Tests
-   ============================================================ *)
-
-let test_governance_defaults_development () =
-  let g = Mcp_server_eio.governance_defaults "development" in
-  check string "level" "development" g.level;
-  check bool "audit disabled" false g.audit_enabled;
-  check bool "anomaly disabled" false g.anomaly_detection
-
-let test_governance_defaults_production () =
-  let g = Mcp_server_eio.governance_defaults "production" in
-  check string "level" "production" g.level;
-  check bool "audit enabled" true g.audit_enabled;
-  check bool "anomaly disabled" false g.anomaly_detection
-
-let test_governance_defaults_enterprise () =
-  let g = Mcp_server_eio.governance_defaults "enterprise" in
-  check string "level" "enterprise" g.level;
-  check bool "audit enabled" true g.audit_enabled;
-  check bool "anomaly enabled" true g.anomaly_detection
-
-let test_governance_defaults_paranoid () =
-  let g = Mcp_server_eio.governance_defaults "paranoid" in
-  check string "level" "paranoid" g.level;
-  check bool "audit enabled" true g.audit_enabled;
-  check bool "anomaly enabled" true g.anomaly_detection
-
-let test_governance_defaults_unknown () =
-  let g = Mcp_server_eio.governance_defaults "custom" in
-  check string "level lowercase" "custom" g.level;
-  check bool "audit disabled" false g.audit_enabled;
-  check bool "anomaly disabled" false g.anomaly_detection
-
-let test_governance_defaults_mixed_case () =
-  let g = Mcp_server_eio.governance_defaults "PRODUCTION" in
-  check string "level normalized" "production" g.level;
-  check bool "audit enabled" true g.audit_enabled
-
-(* ============================================================
    mcp_session_to_json Tests
    ============================================================ *)
 
@@ -530,14 +491,6 @@ let () =
       test_case "line delimited" `Quick test_detect_mode_line_delimited;
       test_case "empty" `Quick test_detect_mode_empty;
       test_case "partial content" `Quick test_detect_mode_partial_content;
-    ];
-    "governance_defaults", [
-      test_case "development" `Quick test_governance_defaults_development;
-      test_case "production" `Quick test_governance_defaults_production;
-      test_case "enterprise" `Quick test_governance_defaults_enterprise;
-      test_case "paranoid" `Quick test_governance_defaults_paranoid;
-      test_case "unknown" `Quick test_governance_defaults_unknown;
-      test_case "mixed case" `Quick test_governance_defaults_mixed_case;
     ];
     "mcp_session_to_json", [
       test_case "full" `Quick test_mcp_session_to_json_full;

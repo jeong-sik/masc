@@ -71,7 +71,7 @@ const FIXED_SSE_EVENT_TYPES = new Set([
   'client_input_approved',
   'client_input_rejected',
   'client_input_updated',
-  'governance_param_changed',
+  'runtime_param_changed',
   SSE_APPROVAL_PENDING_EVENT,
   SSE_APPROVAL_RESOLVED_EVENT,
   'project_snapshot',

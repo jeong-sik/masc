@@ -66,7 +66,7 @@ let is_idle (stage : compaction_stage) =
   | Compaction_compacting | Compaction_done -> false
 ;;
 
-type livelock_attempt_state =
+type turn_attempt_state =
   { turn_id : int
   ; attempts : int
   ; first_started_at : float
@@ -102,7 +102,7 @@ type registry_entry =
   ; name : string
   ; meta : keeper_meta
   ; phase : Keeper_state_machine.phase
-    (** Keeper lifecycle phase (RFC-0002 13-state machine; 11 at #5229 → 12 Overflowed (MASC-1) → 13 Zombie #14707). *)
+    (** Raw Keeper lifecycle phase. *)
   ; conditions : Keeper_state_machine.conditions
     (** Observable conditions that derive [phase]. *)
   ; fiber_stop : bool Atomic.t
@@ -120,7 +120,7 @@ type registry_entry =
   ; last_error : string option
   ; last_failure_reason : failure_reason option
   ; turn_consecutive_failures : int
-  ; livelock_state : livelock_attempt_state option Atomic.t
+  ; turn_attempt_state : turn_attempt_state option Atomic.t
   ; current_turn_switch : Eio.Switch.t option Atomic.t
   ; board_wakeups : float StringMap.t
   ; board_cursor_ts : float
@@ -129,7 +129,7 @@ type registry_entry =
   ; transition_seq : int
   ; waiting_for_inference : bool Atomic.t
     (** Ephemeral flag: true when keeper is blocked in admission queue.
-          Set/cleared around [Admission_queue.with_permit].
+          Set/cleared around the OAS inference boundary.
           Does not affect state machine phase derivation. *)
   ; last_context_actions : (float * Keeper_state_machine.context_actions) option
   ; last_event_bus_correlation : string option
@@ -233,19 +233,16 @@ let completed_turn_outcome_of_observation (obs : turn_observation)
      now read off the surviving [turn_phase] projection. Terminal
      [Turn_finalizing] (the phase the deleted [turn_phase_of_runtime_state]
      mapped [Runtime_done] onto) = substantive; every other phase = failed.
-     Exhaustive match (no wildcard) so a new turn_phase or decision_stage
-     variant fails the build rather than silently degrading to Turn_failed. *)
-  match obs.decision_stage with
-  | Packed Decision_gate_rejected -> Keeper_transition_audit.Turn_gate_rejected
-  | Packed (Decision_undecided | Decision_guard_ok | Decision_tool_policy_selected) ->
-    (match obs.turn_phase with
-     | Packed Turn_finalizing -> Keeper_transition_audit.Turn_substantive
-     | Packed Turn_idle
-     | Packed Turn_prompting
-     | Packed Turn_routing
-     | Packed Turn_executing
-     | Packed Turn_compacting
-     | Packed Turn_exhausted -> Keeper_transition_audit.Turn_failed)
+     Exhaustive match (no wildcard) so a new turn_phase variant fails the
+     build rather than silently degrading to Turn_failed. *)
+  match obs.turn_phase with
+  | Packed Turn_finalizing -> Keeper_transition_audit.Turn_substantive
+  | Packed Turn_idle
+  | Packed Turn_prompting
+  | Packed Turn_routing
+  | Packed Turn_executing
+  | Packed Turn_compacting
+  | Packed Turn_exhausted -> Keeper_transition_audit.Turn_failed
 ;;
 
 (* RFC-0002 Event Dispatch — lifecycle_event_origin type + pure helpers. *)

@@ -3,7 +3,7 @@
     This is an operator review packet, not an automatic belief invalidator. The
     code only projects typed Memory OS state: current-vs-expired facts from the
     stored [valid_until] boundary, duplicate claim identities from the Memory OS
-    SSOT, and prompt-recall eligibility from the typed fact schema. It does not
+    SSOT. It does not
     string-match claim prose or infer external truth. Obsolete/superseded
     decisions remain HITL/model-judgement work through the existing
     consolidation-plan index contract. *)
@@ -30,7 +30,6 @@ type fact_row =
   ; last_verified_at : float option
   ; reference_time : float
   ; current : bool
-  ; prompt_recallable : bool
   }
 
 type duplicate_group =
@@ -44,7 +43,6 @@ type deterministic_gc_preview =
   ; ttl_expired_ephemeral : int
   ; ttl_expired_non_ephemeral : int
   ; ttl_expired_by_category : (string * int) list
-  ; dedup_removed : int
   ; written : int
   }
 
@@ -55,7 +53,6 @@ type keeper_result =
       ; total_facts : int
       ; current_facts : int
       ; expired_facts : int
-      ; prompt_recallable_current_facts : int
       ; duplicate_groups : duplicate_group list
       ; facts : fact_row list
       ; gc_preview : deterministic_gc_preview
@@ -71,10 +68,8 @@ type t =
   ; total_facts : int
   ; current_facts : int
   ; expired_facts : int
-  ; prompt_recallable_current_facts : int
   ; duplicate_group_count : int
   ; deterministic_ttl_expired : int
-  ; deterministic_dedup_removed : int
   ; deterministic_written : int
   ; error_count : int
   }

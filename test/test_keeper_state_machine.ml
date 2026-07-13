@@ -21,7 +21,7 @@ let phase_t = testable (Fmt.of_to_string SM.phase_to_string) ( = )
 
 (** Healthy running conditions. *)
 let running_conditions : SM.conditions =
-  { SM.default_conditions with fiber_alive = true; restart_budget_remaining = true }
+  { SM.default_conditions with fiber_alive = true }
 ;;
 
 (** Apply event and extract the result, failing on error. *)
@@ -50,14 +50,13 @@ let test_derive_healthy () =
   check phase_t "healthy = Running" SM.Running (SM.derive_phase c)
 ;;
 
-let test_derive_default_dead () =
-  (* default_conditions: fiber_alive=false, restart_budget_remaining=false -> Dead *)
-  check phase_t "default = Dead" SM.Dead (SM.derive_phase SM.default_conditions)
+let test_derive_default_crashed () =
+  check phase_t "default = Crashed" SM.Crashed (SM.derive_phase SM.default_conditions)
 ;;
 
 let test_derive_offline () =
   let c =
-    { SM.default_conditions with launch_pending = true; restart_budget_remaining = true }
+    { SM.default_conditions with launch_pending = true }
   in
   check phase_t "launch pending = Offline" SM.Offline (SM.derive_phase c)
 ;;
@@ -66,8 +65,8 @@ let test_derive_dead_highest_priority () =
   let c =
     { running_conditions with
       fiber_alive = false
-    ; restart_budget_remaining = false
-    ; (* Even with another active lifecycle operation, Dead wins *)
+    ; dead_tombstone_latched = true
+    ; (* Even with another active lifecycle operation, explicit Dead wins *)
       compaction_active = true
     }
   in
@@ -78,13 +77,12 @@ let test_derive_restarting () =
   let c =
     { SM.default_conditions with
       fiber_alive = false
-    ; restart_budget_remaining = true
-    ; backoff_elapsed = true
+    ; restart_requested = true
     }
   in
   check
     phase_t
-    "fiber dead + budget + backoff = Restarting"
+    "fiber dead + backoff = Restarting"
     SM.Restarting
     (SM.derive_phase c)
 ;;
@@ -93,13 +91,12 @@ let test_derive_crashed () =
   let c =
     { SM.default_conditions with
       fiber_alive = false
-    ; restart_budget_remaining = true
-    ; backoff_elapsed = false
+    ; restart_requested = false
     }
   in
   check
     phase_t
-    "fiber dead + budget + no backoff = Crashed"
+    "fiber dead + no backoff = Crashed"
     SM.Crashed
     (SM.derive_phase c)
 ;;
@@ -176,7 +173,7 @@ let test_apply_heartbeat_fail_to_failing () =
     apply_ok
       ~current_phase:SM.Running
       ~conditions:running_conditions
-      ~event:(SM.Heartbeat_failed { consecutive = 5; max_allowed = 5 })
+      ~event:(SM.Heartbeat_failed { consecutive = 5 })
   in
   check phase_t "Running -> Failing" SM.Failing tr.new_phase;
   check bool "hb unhealthy" false tr.updated_conditions.heartbeat_healthy
@@ -289,8 +286,7 @@ let test_operator_resume_from_paused_commits_latent_blockers () =
     ; ( "restart backoff elapsed"
       , { SM.default_conditions with
           operator_paused = true
-        ; restart_budget_remaining = true
-        ; backoff_elapsed = true
+        ; restart_requested = true
         }
       , SM.Restarting )
     ; ( "launch pending"
@@ -372,7 +368,7 @@ let test_apply_partial_heartbeat_failure () =
     apply_ok
       ~current_phase:SM.Running
       ~conditions:running_conditions
-      ~event:(SM.Heartbeat_failed { consecutive = 1; max_allowed = 5 })
+      ~event:(SM.Heartbeat_failed { consecutive = 1 })
   in
   check phase_t "partial failure -> Failing" SM.Failing tr.new_phase;
   check bool "hb unhealthy on partial" false tr.updated_conditions.heartbeat_healthy
@@ -385,7 +381,7 @@ let test_apply_fiber_terminated_crash () =
       ~conditions:running_conditions
       ~event:(SM.Fiber_terminated { outcome = "exception"; provider_id = None; http_status = None })
   in
-  (* fiber_alive=false + budget_remaining=true + backoff not elapsed = Crashed *)
+  (* fiber_alive=false + backoff not elapsed = Crashed *)
   check phase_t "-> Crashed" SM.Crashed tr.new_phase;
   check bool "fiber dead" false tr.updated_conditions.fiber_alive
 ;;
@@ -395,8 +391,7 @@ let test_apply_crash_restart_lifecycle () =
   let crashed_conds =
     { SM.default_conditions with
       fiber_alive = false
-    ; restart_budget_remaining = true
-    ; backoff_elapsed = false
+    ; restart_requested = false
     }
   in
   let tr1 =
@@ -415,39 +410,15 @@ let test_apply_crash_restart_lifecycle () =
   check phase_t "-> Running" SM.Running tr2.new_phase
 ;;
 
-let test_apply_crash_to_dead () =
-  let crashed_conds =
-    { SM.default_conditions with fiber_alive = false; restart_budget_remaining = true }
-  in
-  let tr =
-    apply_ok
-      ~current_phase:SM.Crashed
-      ~conditions:crashed_conds
-      ~event:SM.Restart_budget_exhausted
-  in
-  check phase_t "-> Dead" SM.Dead tr.new_phase
-;;
-
-let test_apply_credential_archived_to_dead () =
+let test_apply_credential_archived_to_crashed () =
   let tr =
     apply_ok
       ~current_phase:SM.Running
       ~conditions:running_conditions
       ~event:SM.Credential_archived
   in
-  check phase_t "credential archived -> Dead" SM.Dead tr.new_phase;
+  check phase_t "credential archived -> Crashed" SM.Crashed tr.new_phase;
   check bool "credential archived latched" true tr.updated_conditions.credential_archived
-;;
-
-let test_apply_zombie_timeout_to_dead () =
-  let tr =
-    apply_ok
-      ~current_phase:SM.Running
-      ~conditions:running_conditions
-      ~event:SM.Zombie_timeout
-  in
-  check phase_t "zombie timeout -> Dead" SM.Dead tr.new_phase;
-  check bool "zombie timeout latched" true tr.updated_conditions.zombie_timeout_reached
 ;;
 
 (* ── Transition coverage tests (#5273) ────────────────── *)
@@ -490,8 +461,7 @@ let test_apply_restarting_to_crashed () =
   let restarting_conds =
     { SM.default_conditions with
       fiber_alive = true
-    ; restart_budget_remaining = true
-    ; backoff_elapsed = false
+    ; restart_requested = false
     }
   in
   let tr =
@@ -501,24 +471,6 @@ let test_apply_restarting_to_crashed () =
       ~event:(SM.Fiber_terminated { outcome = "restart failed"; provider_id = None; http_status = None })
   in
   check phase_t "Restarting + fiber death -> Crashed" SM.Crashed tr.new_phase
-;;
-
-let test_apply_restarting_to_dead () =
-  (* Restart budget exhausted during restart -> Dead *)
-  let restarting_conds =
-    { SM.default_conditions with
-      fiber_alive = false
-    ; restart_budget_remaining = true
-    ; backoff_elapsed = true
-    }
-  in
-  let tr =
-    apply_ok
-      ~current_phase:SM.Restarting
-      ~conditions:restarting_conds
-      ~event:SM.Restart_budget_exhausted
-  in
-  check phase_t "Restarting + budget exhausted -> Dead" SM.Dead tr.new_phase
 ;;
 
 let test_apply_paused_to_draining () =
@@ -550,7 +502,7 @@ let test_apply_paused_stop_drain_lifecycle () =
 
 let test_dead_rejects_all_events () =
   let dead_conds =
-    { SM.default_conditions with fiber_alive = false; restart_budget_remaining = false }
+    { SM.default_conditions with fiber_alive = false; dead_tombstone_latched = true }
   in
   List.iter
     (fun event ->
@@ -806,8 +758,6 @@ let base_thresholds : Meas.threshold_params =
   ; handoff_threshold = 0.85
   ; handoff_cooldown_sec = 300
   ; auto_handoff_enabled = true
-  ; max_consecutive_hb_failures = 5
-  ; max_consecutive_turn_failures = 3
   ; model_ratio_multiplier = 1.0
   ; model_handoff_multiplier = 1.0
   }
@@ -944,7 +894,7 @@ let test_guard_context_actions_are_typed () =
   | Some _ | None -> fail "missing Context_measured event"
 ;;
 
-let test_guard_hb_failure_threshold () =
+let test_guard_hb_failure_observation () =
   let snap =
     { healthy_snapshot with
       failures = { healthy_snapshot.failures with consecutive_hb_failures = 5 }
@@ -954,11 +904,11 @@ let test_guard_hb_failure_threshold () =
   let has_hb_fail =
     List.exists
       (function
-        | SM.Heartbeat_failed { consecutive = 5; max_allowed = 5 } -> true
+        | SM.Heartbeat_failed { consecutive = 5 } -> true
         | _ -> false)
       events
   in
-  check bool "heartbeat failure at threshold" true has_hb_fail
+  check bool "heartbeat failure observed" true has_hb_fail
 ;;
 
 (* ── Phase roundtrip tests ─────────────────────────────── *)
@@ -1012,7 +962,7 @@ let chain_apply ~init_phase ~init_conditions steps =
     The most common keeper lifecycle in production.
     9 transitions, 6 distinct phases visited. *)
 let test_chain_happy_path () =
-  let init_conds = { SM.default_conditions with restart_budget_remaining = true } in
+  let init_conds = SM.default_conditions in
   let final_phase, _ =
     chain_apply
       ~init_phase:SM.Offline
@@ -1039,8 +989,8 @@ let test_chain_crash_recovery () =
     chain_apply
       ~init_phase:SM.Running
       ~init_conditions:running_conditions
-      [ SM.Heartbeat_failed { consecutive = 3; max_allowed = 5 }, SM.Failing
-      ; SM.Heartbeat_failed { consecutive = 5; max_allowed = 5 }, SM.Failing
+      [ SM.Heartbeat_failed { consecutive = 3 }, SM.Failing
+      ; SM.Heartbeat_failed { consecutive = 5 }, SM.Failing
       ; SM.Fiber_terminated { outcome = "hb threshold exceeded"; provider_id = None; http_status = None }, SM.Crashed
       ; SM.Supervisor_restart_attempt { attempt = 1 }, SM.Restarting
       ; SM.Fiber_started, SM.Running
@@ -1049,27 +999,6 @@ let test_chain_crash_recovery () =
       ]
   in
   check phase_t "recovered to Running" SM.Running final_phase
-;;
-
-(** 3. Death spiral: crash -> restart -> crash again -> budget exhausted -> Dead.
-    The worst case: a fundamentally broken keeper that cannot recover. *)
-let test_chain_death_spiral () =
-  let final_phase, final_conds =
-    chain_apply
-      ~init_phase:SM.Running
-      ~init_conditions:running_conditions
-      [ SM.Fiber_terminated { outcome = "OOM"; provider_id = None; http_status = None }, SM.Crashed
-      ; SM.Supervisor_restart_attempt { attempt = 1 }, SM.Restarting
-      ; SM.Fiber_started, SM.Running
-      ; SM.Fiber_terminated { outcome = "OOM again"; provider_id = None; http_status = None }, SM.Crashed
-      ; SM.Supervisor_restart_attempt { attempt = 2 }, SM.Restarting
-      ; SM.Fiber_started, SM.Running
-      ; SM.Fiber_terminated { outcome = "OOM third time"; provider_id = None; http_status = None }, SM.Crashed
-      ; SM.Restart_budget_exhausted, SM.Dead
-      ]
-  in
-  check phase_t "ends Dead" SM.Dead final_phase;
-  check bool "no budget left" false final_conds.restart_budget_remaining
 ;;
 
 (** 4. Operator intervention: pause during work, resume, then stop.
@@ -1177,7 +1106,7 @@ let test_chain_failing_graceful_stop () =
     chain_apply
       ~init_phase:SM.Running
       ~init_conditions:running_conditions
-      [ SM.Heartbeat_failed { consecutive = 3; max_allowed = 5 }, SM.Failing
+      [ SM.Heartbeat_failed { consecutive = 3 }, SM.Failing
       ; SM.Stop_requested, SM.Draining
       ; SM.Drain_complete, SM.Stopped
       ]
@@ -1193,13 +1122,13 @@ let test_chain_heartbeat_flapping () =
     chain_apply
       ~init_phase:SM.Running
       ~init_conditions:running_conditions
-      [ SM.Heartbeat_failed { consecutive = 1; max_allowed = 5 }, SM.Failing
+      [ SM.Heartbeat_failed { consecutive = 1 }, SM.Failing
       ; SM.Heartbeat_ok, SM.Running
-      ; SM.Heartbeat_failed { consecutive = 1; max_allowed = 5 }, SM.Failing
+      ; SM.Heartbeat_failed { consecutive = 1 }, SM.Failing
       ; SM.Heartbeat_ok, SM.Running
-      ; SM.Heartbeat_failed { consecutive = 1; max_allowed = 5 }, SM.Failing
+      ; SM.Heartbeat_failed { consecutive = 1 }, SM.Failing
       ; SM.Heartbeat_ok, SM.Running
-      ; SM.Heartbeat_failed { consecutive = 1; max_allowed = 5 }, SM.Failing
+      ; SM.Heartbeat_failed { consecutive = 1 }, SM.Failing
       ; SM.Heartbeat_ok, SM.Running
       ]
   in
@@ -1318,8 +1247,8 @@ let test_chain_double_failure_recovery () =
     chain_apply
       ~init_phase:SM.Running
       ~init_conditions:running_conditions
-      [ SM.Heartbeat_failed { consecutive = 2; max_allowed = 5 }, SM.Failing
-      ; SM.Turn_failed { consecutive = 3; max_allowed = 10 }, SM.Failing
+      [ SM.Heartbeat_failed { consecutive = 2 }, SM.Failing
+      ; SM.Turn_failed { consecutive = 3 }, SM.Failing
       ; (* Heartbeat recovers but turn still unhealthy -> still Failing *)
         SM.Heartbeat_ok, SM.Failing
       ; (* Turn recovers -> both healthy -> Running *)
@@ -1351,20 +1280,15 @@ let test_chain_stop_during_handoff () =
 (** 18. The Phoenix that can't rise: complete lifecycle to Dead,
     verify nothing can revive it. Then verify Stopped is equally terminal. *)
 let test_chain_no_phoenix () =
-  let _, dead_conds =
-    chain_apply
-      ~init_phase:SM.Running
-      ~init_conditions:running_conditions
-      [ SM.Fiber_terminated { outcome = "fatal"; provider_id = None; http_status = None }, SM.Crashed
-      ; SM.Restart_budget_exhausted, SM.Dead
-      ]
+  let dead_conds =
+    { SM.default_conditions with dead_tombstone_latched = true }
   in
   (* Every conceivable event must fail on Dead *)
   let all_events =
     [ SM.Heartbeat_ok
-    ; SM.Heartbeat_failed { consecutive = 1; max_allowed = 5 }
+    ; SM.Heartbeat_failed { consecutive = 1 }
     ; SM.Turn_succeeded
-    ; SM.Turn_failed { consecutive = 1; max_allowed = 10 }
+    ; SM.Turn_failed { consecutive = 1 }
     ; SM.Context_measured
         { context_ratio = 0.5
         ; message_count = 10
@@ -1385,7 +1309,6 @@ let test_chain_no_phoenix () =
     ; SM.Fiber_started
     ; SM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }
     ; SM.Supervisor_restart_attempt { attempt = 99 }
-    ; SM.Restart_budget_exhausted
     ]
   in
   List.iter
@@ -1480,7 +1403,7 @@ let test_chain_maximum_turbulence () =
         SM.Handoff_started, SM.HandingOff
       ; SM.Handoff_completed { new_trace_id = "gen2"; generation = 2 }, SM.Running
       ; (* Failure cycle *)
-        SM.Heartbeat_failed { consecutive = 2; max_allowed = 5 }, SM.Failing
+        SM.Heartbeat_failed { consecutive = 2 }, SM.Failing
       ; SM.Heartbeat_ok, SM.Running
       ; (* Pause cycle *)
         SM.Operator_pause, SM.Paused
@@ -1498,7 +1421,7 @@ let test_chain_maximum_turbulence () =
     leaks between phases. *)
 let test_chain_condition_snapshot_audit () =
   (* Step 1: start and compact *)
-  let init_conds = { SM.default_conditions with restart_budget_remaining = true } in
+  let init_conds = SM.default_conditions in
   let tr1 =
     apply_ok ~current_phase:SM.Offline ~conditions:init_conds ~event:SM.Fiber_started
   in
@@ -1508,7 +1431,7 @@ let test_chain_condition_snapshot_audit () =
   check bool "turn healthy" true tr1.updated_conditions.turn_healthy;
   check bool "no compaction" false tr1.updated_conditions.compaction_active;
   check bool "no handoff" false tr1.updated_conditions.handoff_active;
-  check bool "backoff reset" false tr1.updated_conditions.backoff_elapsed;
+  check bool "restart request reset" false tr1.updated_conditions.restart_requested;
   (* Step 2: crash *)
   let tr2 =
     apply_ok
@@ -1518,7 +1441,6 @@ let test_chain_condition_snapshot_audit () =
   in
   check phase_t "step 2" SM.Crashed tr2.new_phase;
   check bool "fiber dead" false tr2.updated_conditions.fiber_alive;
-  check bool "budget remaining" true tr2.updated_conditions.restart_budget_remaining;
   (* Step 3: restart *)
   let tr3 =
     apply_ok
@@ -1527,7 +1449,7 @@ let test_chain_condition_snapshot_audit () =
       ~event:(SM.Supervisor_restart_attempt { attempt = 1 })
   in
   check phase_t "step 3" SM.Restarting tr3.new_phase;
-  check bool "backoff elapsed" true tr3.updated_conditions.backoff_elapsed;
+  check bool "restart requested" true tr3.updated_conditions.restart_requested;
   (* Step 4: fiber starts - verify ALL resets *)
   let tr4 =
     apply_ok
@@ -1541,10 +1463,8 @@ let test_chain_condition_snapshot_audit () =
   check bool "turn healthy (reset)" true tr4.updated_conditions.turn_healthy;
   check bool "compaction (reset)" false tr4.updated_conditions.compaction_active;
   check bool "handoff (reset)" false tr4.updated_conditions.handoff_active;
-  check bool "backoff (reset)" false tr4.updated_conditions.backoff_elapsed;
-  check bool "drain (reset)" false tr4.updated_conditions.drain_complete;
-  (* Preserved across restart: *)
-  check bool "budget preserved" true tr4.updated_conditions.restart_budget_remaining
+  check bool "restart request reset" false tr4.updated_conditions.restart_requested;
+  check bool "drain (reset)" false tr4.updated_conditions.drain_complete
 ;;
 
 (* ── Invariant & leakage tests ────────────────────────── *)
@@ -1569,7 +1489,7 @@ let test_invariant_derive_phase_idempotent () =
     ; ( "dead"
       , { SM.default_conditions with
           fiber_alive = false
-        ; restart_budget_remaining = false
+        ; dead_tombstone_latched = true
         } )
     ]
   in
@@ -1585,7 +1505,7 @@ let test_invariant_derive_phase_idempotent () =
     Once Dead or Stopped, derive_phase always returns the same terminal. *)
 let test_invariant_terminal_absorbing () =
   let dead_conds =
-    { SM.default_conditions with fiber_alive = false; restart_budget_remaining = false }
+    { SM.default_conditions with fiber_alive = false; dead_tombstone_latched = true }
   in
   let stopped_conds =
     { running_conditions with stop_requested = true; drain_complete = true }
@@ -1651,14 +1571,11 @@ let test_invariant_fiber_started_reset_exhaustive () =
     ; handoff_active = true
     ; operator_paused = true
     ; stop_requested = true
-    ; restart_budget_remaining = true
-    ; backoff_elapsed = true
+    ; dead_tombstone_latched = false
+    ; restart_requested = true
     ; drain_complete = true
     ; context_overflow = true
-    ; compact_retry_exhausted = true
-    ; terminal_failure_latched = true
     ; credential_archived = true
-    ; zombie_timeout_reached = true
     }
   in
   let updated =
@@ -1678,23 +1595,15 @@ let test_invariant_fiber_started_reset_exhaustive () =
   check bool "turn_healthy reset" true updated.turn_healthy;
   check bool "compaction_active reset" false updated.compaction_active;
   check bool "handoff_active reset" false updated.handoff_active;
-  check bool "backoff_elapsed reset" false updated.backoff_elapsed;
+  check bool "restart_requested reset" false updated.restart_requested;
   check bool "drain_complete reset" false updated.drain_complete;
-  check bool "terminal_failure_latched reset" false updated.terminal_failure_latched;
   (* TLA+ liveness fix: stop_requested is now RESET on Fiber_started.
      Restart contradicts stop. operator_paused is still preserved. *)
   check bool "stop_requested reset" false updated.stop_requested;
   (* Operator-intent conditions that ARE preserved *)
   check bool "operator_paused preserved" true updated.operator_paused;
-  check bool "restart_budget preserved" true updated.restart_budget_remaining;
-  (* Forced-terminal latch markers — PRESERVED by design.
-     credential_archived / zombie_timeout_reached drive derive_phase priority 0
-     (forced Dead). Fiber_started intentionally does NOT clear them so a
-     credential-archived or zombie-timed-out keeper cannot "resurrect" via a
-     supervisor restart. See docs/tla-audit/ksm-derive-phase-priority-2026-05-12.md
-     (F-3.1 defense-in-depth analysis) and audit/fsm-loop-iter3 PR #14702. *)
+  (* Failure markers remain observations across a fiber start. *)
   check bool "credential_archived preserved" true updated.credential_archived;
-  check bool "zombie_timeout_reached preserved" true updated.zombie_timeout_reached;
   (* Untouched conditions stay as-is *)
   check bool "context_within_budget unchanged" false updated.context_within_budget;
   check bool "context_handoff_needed unchanged" true updated.context_handoff_needed
@@ -1709,10 +1618,10 @@ let test_invariant_no_cross_life_hb_leakage () =
     chain_apply
       ~init_phase:SM.Running
       ~init_conditions:running_conditions
-      [ SM.Heartbeat_failed { consecutive = 1; max_allowed = 5 }, SM.Failing
-      ; SM.Heartbeat_failed { consecutive = 2; max_allowed = 5 }, SM.Failing
-      ; SM.Heartbeat_failed { consecutive = 3; max_allowed = 5 }, SM.Failing
-      ; SM.Heartbeat_failed { consecutive = 4; max_allowed = 5 }, SM.Failing
+      [ SM.Heartbeat_failed { consecutive = 1 }, SM.Failing
+      ; SM.Heartbeat_failed { consecutive = 2 }, SM.Failing
+      ; SM.Heartbeat_failed { consecutive = 3 }, SM.Failing
+      ; SM.Heartbeat_failed { consecutive = 4 }, SM.Failing
       ]
   in
   check bool "life1: hb unhealthy" false life1_conds.heartbeat_healthy;
@@ -1752,7 +1661,7 @@ let test_invariant_no_cross_life_hb_leakage () =
 ;;
 
 (** INV-5: No cross-life backoff leakage.
-    backoff_elapsed from restart N must not skip Crashed in life N+1.
+    restart_requested from restart N must not leak into life N+1.
     The second leakage pattern found by the original chain tests. *)
 let test_invariant_no_cross_life_backoff_leakage () =
   let _, post_restart =
@@ -1764,8 +1673,8 @@ let test_invariant_no_cross_life_backoff_leakage () =
       ; SM.Fiber_started, SM.Running
       ]
   in
-  (* After Fiber_started, backoff_elapsed MUST be false *)
-  check bool "backoff reset after restart" false post_restart.backoff_elapsed;
+  (* After Fiber_started, restart_requested MUST be false *)
+  check bool "restart request reset after restart" false post_restart.restart_requested;
   (* Second crash MUST go to Crashed (not skip to Restarting) *)
   let tr =
     apply_ok
@@ -1774,7 +1683,7 @@ let test_invariant_no_cross_life_backoff_leakage () =
       ~event:(SM.Fiber_terminated { outcome = "crash 2"; provider_id = None; http_status = None })
   in
   check phase_t "second crash -> Crashed (not Restarting)" SM.Crashed tr.new_phase;
-  check bool "backoff_elapsed still false" false tr.updated_conditions.backoff_elapsed
+  check bool "restart_requested still false" false tr.updated_conditions.restart_requested
 ;;
 
 (** INV-6: No cross-life buffer state leakage.
@@ -1804,9 +1713,9 @@ let test_invariant_stop_requested_monotonic () =
      All OTHER events must preserve it (monotonic within a fiber life). *)
   let events_that_should_not_clear_stop =
     [ SM.Heartbeat_ok
-    ; SM.Heartbeat_failed { consecutive = 1; max_allowed = 5 }
+    ; SM.Heartbeat_failed { consecutive = 1 }
     ; SM.Turn_succeeded
-    ; SM.Turn_failed { consecutive = 1; max_allowed = 10 }
+    ; SM.Turn_failed { consecutive = 1 }
     ; SM.Compaction_started
     ; SM.Compaction_completed { before_tokens = 100; after_tokens = 50 }
     ; SM.Handoff_started
@@ -1849,8 +1758,7 @@ let test_invariant_stop_requested_monotonic () =
   let restart_conds =
     { SM.default_conditions with
       fiber_alive = false
-    ; restart_budget_remaining = true
-    ; backoff_elapsed = true
+    ; restart_requested = true
     ; stop_requested = true
     }
   in
@@ -1868,55 +1776,6 @@ let test_invariant_stop_requested_monotonic () =
   check bool "Fiber_started clears stop_requested" false updated.stop_requested
 ;;
 
-(** INV-8: restart_budget_remaining monotonicity.
-    Once Restart_budget_exhausted fires, budget is permanently false.
-    No event can restore it. *)
-let test_invariant_budget_exhaustion_permanent () =
-  let conds_no_budget =
-    { SM.default_conditions with fiber_alive = false; restart_budget_remaining = false }
-  in
-  (* The keeper is Dead at this point. All events are rejected.
-     But verify the conditions themselves: no event's update_conditions
-     can set restart_budget_remaining back to true. *)
-  let all_events =
-    [ SM.Heartbeat_ok
-    ; SM.Fiber_started
-    ; SM.Supervisor_restart_attempt { attempt = 99 }
-    ; SM.Restart_budget_exhausted
-    ; SM.Operator_resume
-    ]
-  in
-  List.iter
-    (fun ev ->
-       (* Manually call update_conditions to check the pure function *)
-       let open SM in
-       let updated =
-         match ev with
-         | Heartbeat_ok -> { conds_no_budget with heartbeat_healthy = true }
-         | Fiber_started ->
-           { conds_no_budget with
-             fiber_alive = true
-           ; heartbeat_healthy = true
-           ; turn_healthy = true
-           ; compaction_active = false
-           ; handoff_active = false
-           ; backoff_elapsed = false
-           ; drain_complete = false
-           }
-         | Supervisor_restart_attempt _ -> { conds_no_budget with backoff_elapsed = true }
-         | Restart_budget_exhausted ->
-           { conds_no_budget with restart_budget_remaining = false }
-         | Operator_resume -> { conds_no_budget with operator_paused = false }
-         | _ -> conds_no_budget
-       in
-       check
-         bool
-         (Printf.sprintf "budget stays false after %s" (event_to_string ev))
-         false
-         updated.restart_budget_remaining)
-    all_events
-;;
-
 (** INV-9: derive_phase consistency with can_transition.
     For every non-terminal phase and every event, if apply_event succeeds,
     the resulting transition must be allowed by can_transition.
@@ -1924,9 +1783,9 @@ let test_invariant_budget_exhaustion_permanent () =
 let test_invariant_derive_matches_matrix () =
   let representative_events =
     [ SM.Heartbeat_ok
-    ; SM.Heartbeat_failed { consecutive = 5; max_allowed = 5 }
+    ; SM.Heartbeat_failed { consecutive = 5 }
     ; SM.Turn_succeeded
-    ; SM.Turn_failed { consecutive = 3; max_allowed = 10 }
+    ; SM.Turn_failed { consecutive = 3 }
     ; SM.Compaction_started
     ; SM.Compaction_completed { before_tokens = 100; after_tokens = 50 }
     ; SM.Compaction_failed { reason = "test" }
@@ -1941,9 +1800,7 @@ let test_invariant_derive_matches_matrix () =
     ; SM.Fiber_started
     ; SM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }
     ; SM.Supervisor_restart_attempt { attempt = 1 }
-    ; SM.Restart_budget_exhausted
     ; SM.Credential_archived
-    ; SM.Zombie_timeout
     ]
   in
   let non_terminal_phases =
@@ -1956,8 +1813,7 @@ let test_invariant_derive_matches_matrix () =
             (* Build conditions that produce this phase *)
             let conds =
               match phase with
-              | SM.Offline ->
-                { SM.default_conditions with restart_budget_remaining = true }
+              | SM.Offline -> SM.default_conditions
               | SM.Running -> running_conditions
               | SM.Failing -> { running_conditions with heartbeat_healthy = false }
               | SM.Overflowed -> { running_conditions with context_overflow = true }
@@ -1967,18 +1823,12 @@ let test_invariant_derive_matches_matrix () =
                 { running_conditions with stop_requested = true; drain_complete = false }
               | SM.Paused -> { running_conditions with operator_paused = true }
               | SM.Crashed ->
-                { SM.default_conditions with
-                  fiber_alive = false
-                ; restart_budget_remaining = true
-                }
+                { SM.default_conditions with fiber_alive = false }
               | SM.Restarting ->
                 { SM.default_conditions with
                   fiber_alive = false
-                ; restart_budget_remaining = true
-                ; backoff_elapsed = true
+                ; restart_requested = true
                 }
-              | SM.Zombie ->
-                { SM.default_conditions with terminal_failure_latched = true }
               | SM.Stopped | SM.Dead -> running_conditions (* unreachable *)
             in
             (* Verify conditions produce the expected phase *)
@@ -2022,14 +1872,11 @@ let test_invariant_priority_chain () =
     ; handoff_active = true
     ; operator_paused = true
     ; stop_requested = true
-    ; restart_budget_remaining = true
-    ; backoff_elapsed = true
+    ; dead_tombstone_latched = false
+    ; restart_requested = true
     ; drain_complete = true
     ; context_overflow = true
-    ; compact_retry_exhausted = true
-    ; terminal_failure_latched = false
     ; credential_archived = false
-    ; zombie_timeout_reached = false
     }
   in
   (* TLA+ fix: all_true has compaction+handoff active, so Stopped is blocked → Draining.
@@ -2049,15 +1896,9 @@ let test_invariant_priority_chain () =
   (* Remove stop: operator pause wins *)
   let no_stop = { no_drain with stop_requested = false } in
   check phase_t "no stop: Paused" SM.Paused (SM.derive_phase no_stop);
-  (* Remove paused trigger: must also clear the overflow-latched path
-     (context_overflow && compact_retry_exhausted) that can hold the
-     keeper in Paused independently of operator_paused. *)
+  (* Only the explicit operator pause condition can hold Paused. *)
   let no_paused =
-    { no_stop with
-      operator_paused = false
-    ; context_overflow = false
-    ; compact_retry_exhausted = false
-    }
+    { no_stop with operator_paused = false; context_overflow = false }
   in
   check phase_t "no paused: HandingOff" SM.HandingOff (SM.derive_phase no_paused);
   (* Remove handoff: compaction wins *)
@@ -2070,7 +1911,7 @@ let test_invariant_priority_chain () =
 
 (* ── Property: derive_phase x apply_event consistency ──── *)
 
-let test_all_phases_covered () = check int "13 phases" 13 (List.length SM.all_phases)
+let test_all_phases_covered () = check int "12 phases" 12 (List.length SM.all_phases)
 
 (* ── Set/Clear Coverage ────────────────────────────────── *)
 
@@ -2096,14 +1937,11 @@ let test_setclear_coverage () =
     ; ("handoff_active", fun c -> c.handoff_active)
     ; ("operator_paused", fun c -> c.operator_paused)
     ; ("stop_requested", fun c -> c.stop_requested)
-    ; ("restart_budget_remaining", fun c -> c.restart_budget_remaining)
-    ; ("backoff_elapsed", fun c -> c.backoff_elapsed)
+    ; ("dead_tombstone_latched", fun c -> c.dead_tombstone_latched)
+    ; ("restart_requested", fun c -> c.restart_requested)
     ; ("drain_complete", fun c -> c.drain_complete)
     ; ("context_overflow", fun c -> c.context_overflow)
-    ; ("compact_retry_exhausted", fun c -> c.compact_retry_exhausted)
-    ; ("terminal_failure_latched", fun c -> c.terminal_failure_latched)
     ; ("credential_archived", fun c -> c.credential_archived)
-    ; ("zombie_timeout_reached", fun c -> c.zombie_timeout_reached)
     ]
   in
   (* Conditions with all booleans false *)
@@ -2118,14 +1956,11 @@ let test_setclear_coverage () =
     ; handoff_active = false
     ; operator_paused = false
     ; stop_requested = false
-    ; restart_budget_remaining = false
-    ; backoff_elapsed = false
+    ; dead_tombstone_latched = false
+    ; restart_requested = false
     ; drain_complete = false
     ; context_overflow = false
-    ; compact_retry_exhausted = false
-    ; terminal_failure_latched = false
     ; credential_archived = false
-    ; zombie_timeout_reached = false
     }
   in
   (* Conditions with all booleans true *)
@@ -2140,14 +1975,11 @@ let test_setclear_coverage () =
     ; handoff_active = true
     ; operator_paused = true
     ; stop_requested = true
-    ; restart_budget_remaining = true
-    ; backoff_elapsed = true
+    ; dead_tombstone_latched = true
+    ; restart_requested = true
     ; drain_complete = true
     ; context_overflow = true
-    ; compact_retry_exhausted = true
-    ; terminal_failure_latched = true
     ; credential_archived = true
-    ; zombie_timeout_reached = true
     }
   in
   let context_actions_clean : SM.context_actions =
@@ -2158,9 +1990,9 @@ let test_setclear_coverage () =
      for the handoff action. *)
   let all_events : (string * SM.event) list =
     [ "Heartbeat_ok", SM.Heartbeat_ok
-    ; "Heartbeat_failed", SM.Heartbeat_failed { consecutive = 3; max_allowed = 5 }
+    ; "Heartbeat_failed", SM.Heartbeat_failed { consecutive = 3 }
     ; "Turn_succeeded", SM.Turn_succeeded
-    ; "Turn_failed", SM.Turn_failed { consecutive = 3; max_allowed = 10 }
+    ; "Turn_failed", SM.Turn_failed { consecutive = 3 }
     ; ( "Context_measured(handoff)"
       , SM.Context_measured
           { context_ratio = 0.95
@@ -2190,9 +2022,7 @@ let test_setclear_coverage () =
     ; "Fiber_started", SM.Fiber_started
     ; "Fiber_terminated", SM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }
     ; "Supervisor_restart_attempt", SM.Supervisor_restart_attempt { attempt = 1 }
-    ; "Restart_budget_exhausted", SM.Restart_budget_exhausted
     ; "Credential_archived", SM.Credential_archived
-    ; "Zombie_timeout", SM.Zombie_timeout
     ; ( "Context_overflow_detected"
       , SM.Context_overflow_detected
           { source = `Prompt_rejected
@@ -2203,7 +2033,6 @@ let test_setclear_coverage () =
     ; "Operator_compact_requested", SM.Operator_compact_requested
     ; ( "Operator_clear_requested"
       , SM.Operator_clear_requested { preserve_system = true; reason = "test" } )
-    ; "Terminal_failure_detected", SM.Terminal_failure_detected { reason = "test" }
     ]
   in
   (* Build coverage map: for each field, which events set it and clear it *)
@@ -2236,18 +2065,12 @@ let test_setclear_coverage () =
                 (ev_name :: Hashtbl.find clearers field_name))
          fields)
     all_events;
-  (* Fields exempt from the "must have clearer" requirement:
-     - context_within_budget: never modified by update_conditions (external)
-     - launch_pending: only cleared by Fiber_started, never set by events
-     - restart_budget_remaining: supervisor-managed, only cleared by
-       Restart_budget_exhausted, never set by events.
-     These fields are managed by external code, not the FSM event loop. *)
+  (* Fields managed outside the ordinary FSM event loop are exempt. *)
   let exempt_from_clearer =
     [ "context_within_budget"
     ; (* external: never touched by update_conditions *)
       "credential_archived"
-    ; (* terminal latch, cleared only by operator recreation *)
-      "zombie_timeout_reached" (* terminal latch, cleared only by operator recreation *)
+    ; "dead_tombstone_latched"
     ]
   in
   let exempt_from_setter =
@@ -2255,11 +2078,8 @@ let test_setclear_coverage () =
     ; (* external *)
       "launch_pending"
     ; (* set externally before Fiber_started *)
-      "restart_budget_remaining"
-    ; (* supervisor-managed budget *)
-      "compact_retry_exhausted"
-      (* latched by keeper_unified_turn retry loop, *)
-      (* no dedicated FSM event sets it to true. *)
+      "dead_tombstone_latched"
+      (* durable lifecycle store *)
     ]
   in
   (* Print coverage report for diagnostics *)
@@ -2335,7 +2155,7 @@ let () =
     "Keeper_state_machine (RFC-0002)"
     [ ( "derive_phase"
       , [ test_case "healthy = Running" `Quick test_derive_healthy
-        ; test_case "default = Dead" `Quick test_derive_default_dead
+        ; test_case "default = Crashed" `Quick test_derive_default_crashed
         ; test_case "Offline in all_phases" `Quick test_derive_offline
         ; test_case "Dead highest priority" `Quick test_derive_dead_highest_priority
         ; test_case "Restarting" `Quick test_derive_restarting
@@ -2398,12 +2218,10 @@ let () =
             "crash -> restart -> Running"
             `Quick
             test_apply_crash_restart_lifecycle
-        ; test_case "crash -> Dead" `Quick test_apply_crash_to_dead
         ; test_case
-            "credential archived -> Dead"
+            "credential archived -> Crashed"
             `Quick
-            test_apply_credential_archived_to_dead
-        ; test_case "zombie timeout -> Dead" `Quick test_apply_zombie_timeout_to_dead
+            test_apply_credential_archived_to_crashed
         ; test_case
             "Compacting + fiber death -> Crashed"
             `Quick
@@ -2417,10 +2235,6 @@ let () =
             "Restarting + fiber death -> Crashed"
             `Quick
             test_apply_restarting_to_crashed
-        ; test_case
-            "Restarting + budget exhausted -> Dead"
-            `Quick
-            test_apply_restarting_to_dead
         ; test_case "Paused + stop -> Draining" `Quick test_apply_paused_to_draining
         ; test_case
             "Paused -> Draining -> Stopped"
@@ -2494,11 +2308,11 @@ let () =
             test_guard_compaction_respects_cooldown
         ; test_case "handoff triggers" `Quick test_guard_handoff_triggers
         ; test_case "typed context actions" `Quick test_guard_context_actions_are_typed
-        ; test_case "hb failure at threshold" `Quick test_guard_hb_failure_threshold
+        ; test_case "hb failure observation" `Quick test_guard_hb_failure_observation
         ] )
     ; ( "roundtrip"
       , [ test_case "phase string roundtrip" `Quick test_phase_string_roundtrip
-        ; test_case "13 phases" `Quick test_all_phases_covered
+        ; test_case "12 phases" `Quick test_all_phases_covered
         ] )
     ; ( "lifecycle_chain"
       , [ test_case
@@ -2509,10 +2323,6 @@ let () =
             "crash recovery (fail->crash->restart->run)"
             `Quick
             test_chain_crash_recovery
-        ; test_case
-            "death spiral (crash->restart->crash->dead)"
-            `Quick
-            test_chain_death_spiral
         ; test_case
             "operator intervention (pause->resume->stop)"
             `Quick
@@ -2590,10 +2400,6 @@ let () =
             `Quick
             test_invariant_stop_requested_monotonic
         ; test_case
-            "INV-8: budget exhaustion permanent"
-            `Quick
-            test_invariant_budget_exhaustion_permanent
-        ; test_case
             "INV-9: derive matches matrix (180 combos)"
             `Quick
             test_invariant_derive_matches_matrix
@@ -2604,24 +2410,6 @@ let () =
             "every condition field has setter and clearer"
             `Quick
             test_setclear_coverage
-        ] )
-    ; ( "compact_retry_precondition"
-      , [ test_case
-            "rejects when context_overflow=false"
-            `Quick
-            KSP.test_precondition_compact_retry_no_overflow
-        ; test_case
-            "rejects when compaction_active=true"
-            `Quick
-            KSP.test_precondition_compact_retry_compaction_active
-        ; test_case
-            "rejects when already_latched"
-            `Quick
-            KSP.test_precondition_compact_retry_already_latched
-        ; test_case
-            "accepts when all preconditions satisfied"
-            `Quick
-            KSP.test_precondition_compact_retry_accepts_when_preconditions_satisfied
         ] )
     ; ( "attribution"
       , [ test_case "successful transition → Passed" `Quick KSP.test_attribution_ok_passed
@@ -2640,18 +2428,6 @@ let () =
         ] )
     ; ( "precondition_layer"
       , [ test_case
-            "Compact_retry_exhausted requires context_overflow"
-            `Quick
-            KSP.test_pre_compact_retry_no_overflow
-        ; test_case
-            "Compact_retry_exhausted requires ~compaction_active"
-            `Quick
-            KSP.test_pre_compact_retry_compaction_active
-        ; test_case
-            "Compact_retry_exhausted is non-idempotent (~already_exhausted)"
-            `Quick
-            KSP.test_pre_compact_retry_already_exhausted
-        ; test_case
             "Context_overflow_detected requires ~compaction_active"
             `Quick
             KSP.test_pre_overflow_during_compaction
@@ -2668,10 +2444,6 @@ let () =
             `Quick
             KSP.test_pre_auto_compact_handoff_active
         ; test_case
-            "Auto_compact_triggered requires ~compact_retry_exhausted (#8581)"
-            `Quick
-            KSP.test_pre_auto_compact_retry_exhausted
-        ; test_case
             "Operator_compact_requested requires ~compaction_active"
             `Quick
             KSP.test_pre_operator_compact_during_compaction
@@ -2683,10 +2455,6 @@ let () =
             "Operator_clear_requested is escape-hatch (no extra precondition)"
             `Quick
             KSP.test_pre_operator_clear_no_extra_precondition
-        ; test_case
-            "Restart_budget_exhausted is non-idempotent (R-A-6.b)"
-            `Quick
-            KSP.test_pre_restart_budget_already_exhausted
         ] )
     ; ( "snapshot_invariants"
       , [ test_case "Running healthy → no violations" `Quick KSP.test_snapshot_running_ok
@@ -2699,9 +2467,9 @@ let () =
             `Quick
             KSP.test_snapshot_stopped_requires_drain
         ; test_case
-            "Dead with budget=true → DeadRequiresNoBudget (R-A-6.c primary signal)"
+            "Dead without tombstone → DeadRequiresTombstone"
             `Quick
-            KSP.test_snapshot_dead_requires_no_budget
+            KSP.test_snapshot_dead_requires_tombstone
         ; test_case
             "phase ≠ derive_phase(conditions) → DerivePhaseAgreement"
             `Quick

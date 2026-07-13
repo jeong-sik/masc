@@ -76,7 +76,7 @@ let setup name =
 
 (** Drives keeper from Running → Failing → Crashed via heartbeat failure + fiber death. *)
 let crash_keeper name =
-  let tr = dispatch name (KSM.Heartbeat_failed { consecutive = 5; max_allowed = 5 }) in
+  let tr = dispatch name (KSM.Heartbeat_failed { consecutive = 5 }) in
   check phase_t "failing" KSM.Failing tr.new_phase;
   let tr = dispatch name (KSM.Fiber_terminated { outcome = "crash"; provider_id = None; http_status = None }) in
   check phase_t "crashed" KSM.Crashed tr.new_phase
@@ -90,16 +90,16 @@ let restart_keeper name ~attempt =
 let test_heartbeat_failure_runtime () =
   setup "hb-fail";
   (* In the FSM, any heartbeat failure makes the keeper unhealthy immediately.
-     max_allowed is carried for keepalive/supervisor policy and audit context. *)
+     consecutive is carried only as an observation. *)
   let tr = dispatch "hb-fail"
-    (KSM.Heartbeat_failed { consecutive = 1; max_allowed = 5 }) in
+    (KSM.Heartbeat_failed { consecutive = 1 }) in
   check phase_t "1st failure → failing" KSM.Failing tr.new_phase;
 
   let tr = dispatch "hb-fail" KSM.Heartbeat_ok in
   check phase_t "recovery → running" KSM.Running tr.new_phase;
 
   let tr = dispatch "hb-fail"
-    (KSM.Heartbeat_failed { consecutive = 1; max_allowed = 5 }) in
+    (KSM.Heartbeat_failed { consecutive = 1 }) in
   check phase_t "2nd failure → failing" KSM.Failing tr.new_phase;
 
   let tr = dispatch "hb-fail"
@@ -111,17 +111,16 @@ let test_supervisor_restart_cycle () =
   crash_keeper "sv-restart";
   restart_keeper "sv-restart" ~attempt:1
 
-let test_budget_exhaustion_to_dead () =
-  setup "budget-dead";
-  crash_keeper "budget-dead";
+let test_explicit_tombstone_to_dead () =
+  setup "tombstone-dead";
+  crash_keeper "tombstone-dead";
+  R.mark_dead ~base_path:bp "tombstone-dead" ~at:1.0;
+  check phase_t "dead" KSM.Dead (get_phase "tombstone-dead");
 
-  let tr = dispatch "budget-dead" KSM.Restart_budget_exhausted in
-  check phase_t "dead" KSM.Dead tr.new_phase;
-
-  dispatch_expect_rejected "budget-dead" KSM.Heartbeat_ok;
-  dispatch_expect_rejected "budget-dead"
+  dispatch_expect_rejected "tombstone-dead" KSM.Heartbeat_ok;
+  dispatch_expect_rejected "tombstone-dead"
     (KSM.Supervisor_restart_attempt { attempt = 99 });
-  dispatch_expect_rejected "budget-dead" KSM.Fiber_started
+  dispatch_expect_rejected "tombstone-dead" KSM.Fiber_started
 
 let test_compaction_crash_recovery () =
   setup "compact";
@@ -179,7 +178,7 @@ let test_full_chaos_sequence () =
   setup "chaos";
 
   let tr = dispatch "chaos"
-    (KSM.Heartbeat_failed { consecutive = 1; max_allowed = 5 }) in
+    (KSM.Heartbeat_failed { consecutive = 1 }) in
   check phase_t "hb fail → failing" KSM.Failing tr.new_phase;
   let tr = dispatch "chaos" KSM.Heartbeat_ok in
   check phase_t "hb ok → running" KSM.Running tr.new_phase;
@@ -238,7 +237,7 @@ let test_turn_failure_runtime () =
 
   (* Turn failures follow the same unhealthy-immediately rule as heartbeat failures. *)
   let tr = dispatch "turn-fail"
-    (KSM.Turn_failed { consecutive = 3; max_allowed = 5 }) in
+    (KSM.Turn_failed { consecutive = 3 }) in
   check phase_t "turn fail → failing" KSM.Failing tr.new_phase;
 
   let tr = dispatch "turn-fail" KSM.Turn_succeeded in
@@ -251,7 +250,7 @@ let () =
     ; ( "supervisor"
       , [ eio_test "restart cycle" test_supervisor_restart_cycle ] )
     ; ( "terminal"
-      , [ eio_test "budget exhaustion → Dead" test_budget_exhaustion_to_dead
+      , [ eio_test "explicit tombstone → Dead" test_explicit_tombstone_to_dead
         ; eio_test "graceful shutdown → Stopped" test_graceful_shutdown ] )
     ; ( "buffer_states"
       , [ eio_test "compaction crash → recovery" test_compaction_crash_recovery

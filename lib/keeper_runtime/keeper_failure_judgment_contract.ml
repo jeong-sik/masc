@@ -3,30 +3,30 @@ type verdict =
       { guidance : string
       ; rationale : string
       }
-  | Escalate_to_operator of { rationale : string }
+  | Await_external_input of { rationale : string }
 
 let wire_decision = "decision"
 let wire_guidance = "guidance"
 let wire_rationale = "rationale"
 let wire_resume_with_guidance = "resume_with_guidance"
-let wire_escalate_to_operator = "escalate_to_operator"
+let wire_await_external_input = "await_external_input"
 
-let decision_tokens = [ wire_resume_with_guidance; wire_escalate_to_operator ]
+let decision_tokens = [ wire_resume_with_guidance; wire_await_external_input ]
 
 let decision_label = function
   | Resume_with_guidance _ -> wire_resume_with_guidance
-  | Escalate_to_operator _ -> wire_escalate_to_operator
+  | Await_external_input _ -> wire_await_external_input
 ;;
 
 let rationale = function
   | Resume_with_guidance { rationale; _ }
-  | Escalate_to_operator { rationale } ->
+  | Await_external_input { rationale } ->
     rationale
 ;;
 
 let guidance = function
   | Resume_with_guidance { guidance; _ } -> Some guidance
-  | Escalate_to_operator _ -> None
+  | Await_external_input _ -> None
 ;;
 
 let ( let* ) = Result.bind
@@ -69,12 +69,12 @@ let of_yojson = function
        if String.equal guidance ""
        then Error "failure judgment resume guidance must not be empty"
        else Ok (Resume_with_guidance { guidance; rationale })
-     | decision, Some `Null when String.equal decision wire_escalate_to_operator ->
-       Ok (Escalate_to_operator { rationale })
+     | decision, Some `Null when String.equal decision wire_await_external_input ->
+       Ok (Await_external_input { rationale })
      | decision, _ when String.equal decision wire_resume_with_guidance ->
        Error "failure judgment resume guidance must be a string"
-     | decision, _ when String.equal decision wire_escalate_to_operator ->
-       Error "failure judgment operator escalation guidance must be null"
+     | decision, _ when String.equal decision wire_await_external_input ->
+       Error "failure judgment external-input guidance must be null"
      | unknown, _ ->
        Error (Printf.sprintf "unknown failure judgment decision: %s" unknown))
   | _ -> Error "failure judgment response must be an object"

@@ -1728,12 +1728,9 @@ let test_lifecycle_event_display_values () =
     [ ("started", true, "running", "idle", false);
       ("restarted", true, "running", "idle", false);
       ("reconciled", true, "running", "idle", false);
-      ("self_preservation", true, "running", "idle", false);
-      ("auto_resumed", true, "running", "idle", false);
       ("running", true, "running", "idle", false);
       ("resumed", true, "running", "idle", false);
       ("paused", true, "paused", "paused", true);
-      ("paused_pruned", false, "stopped", "offline", true);
       ("purged", false, "stopped", "offline", false);
       ("admission_denied", false, "offline", "offline", false);
       ("dead_cleaned", false, "dead", "offline", false);

@@ -13,6 +13,10 @@ const annotation: SelectedAnnotation = {
   content: '경계 조건 확인 필요',
   goal_id: null,
   task_id: null,
+  references: [
+    { relation: 'evidence', reference: 'urn:example:42' },
+    { relation: 'source', reference: 'opaque-value' },
+  ],
   file_path: 'lib/foo.ml',
   line_start: 12,
   line_end: 34,

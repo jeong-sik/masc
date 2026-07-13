@@ -60,10 +60,6 @@ let board_error_to_string = function
   | Board.Invalid_id s -> Printf.sprintf "Invalid ID: %s" s
   | Board.Post_not_found s -> Printf.sprintf "Post not found: %s" s
   | Board.Comment_not_found s -> Printf.sprintf "Comment not found: %s" s
-  | Board.Rate_limited { retry_after } ->
-    Printf.sprintf "Rate limited. Retry after %.1fs" retry_after
-  | Board.Capacity_exceeded { current; max } ->
-    Printf.sprintf "Capacity exceeded: %d/%d" current max
   | Board.Io_error s -> Printf.sprintf "I/O error: %s" s
   | Board.Validation_error s -> Printf.sprintf "Validation error: %s" s
   | Board.Already_voted s -> Printf.sprintf "Already voted: %s" s
@@ -81,8 +77,7 @@ let board_error_failure_class = function
 ;;
 
 (* RFC-0189 PR-1b.2 — typed helper. Returns [Tool_result.result] directly
-   so the [~class_] decision is committed at the catch boundary instead
-   of going through [classify_from_structured_failure_message]. Pre-RFC
+   so the [~class_] decision is committed at the catch boundary. Pre-RFC
    version returned legacy [t] with [?failure_class:option] — the new
    shape collapses two illegal states (None-on-failure, Some-on-success)
    by construction. *)
@@ -243,115 +238,6 @@ let sources_footer sources =
   match List.filter_map line_of_source sources with
   | [] -> ""
   | lines -> "\n\n---\n## Sources\n" ^ String.concat "\n" lines
-;;
-
-(** {1 Truncated-markdown detection}
-
-    Walk the string once with a small state machine aware of fenced
-    code blocks (markers inside ``` ... ``` don't count) and inline
-    code spans (so bold markers inside ` ... ` don't count). Return
-    the FIRST signal found; that name is logged so audits can see
-    WHICH pattern triggered. New signals are added conservatively
-    (#9777). Evidence: ani1999 p-c0494a2e body_len=467 trailing
-    backtick (Odd_inline_tick); automation-agent body_len=3575
-    (Odd_fence). *)
-
-type truncation_signal =
-  | Odd_fence (** odd count of triple-backtick code fences. *)
-  | Odd_inline_tick (** odd count of single backticks outside fences. *)
-  | Unfinished_link (** trailing text-open-paren with no closing paren. *)
-  | Unfinished_image (** trailing image-alt-open-paren with no closing paren. *)
-  | Odd_double_asterisk (** odd count of double-asterisks outside fences (unclosed bold). *)
-
-let truncation_signal_to_string = function
-  | Odd_fence -> "odd_fence"
-  | Odd_inline_tick -> "odd_inline_tick"
-  | Unfinished_link -> "unfinished_link"
-  | Unfinished_image -> "unfinished_image"
-  | Odd_double_asterisk -> "odd_double_asterisk"
-;;
-
-(* Underscore- and single-asterisk-based emphasis NOT counted —
-   identifiers, file paths, inline math frequently carry odd counts. *)
-let detect_truncated_markdown_with_reason (text : string) : truncation_signal option =
-  let len = String.length text in
-  let in_fence = ref false in
-  let in_inline = ref false in
-  let inline_outside = ref 0 in
-  let fences = ref 0 in
-  let double_ast_outside = ref 0 in
-  let i = ref 0 in
-  while !i < len do
-    if
-      !i + 2 < len
-      && Char.equal text.[!i] '`'
-      && Char.equal text.[!i + 1] '`'
-      && Char.equal text.[!i + 2] '`'
-    then (
-      Stdlib.incr fences;
-      in_fence := not !in_fence;
-      i := !i + 3)
-    else if
-      !i + 1 < len
-      && Char.equal text.[!i] '*'
-      && Char.equal text.[!i + 1] '*'
-      && (not !in_fence)
-      && not !in_inline
-    then (
-      Stdlib.incr double_ast_outside;
-      i := !i + 2)
-    else (
-      if Char.equal text.[!i] '`' && not !in_fence
-      then (
-        Stdlib.incr inline_outside;
-        in_inline := not !in_inline);
-      Stdlib.incr i)
-  done;
-  let odd n = Int.rem n 2 = 1 in
-  if odd !fences
-  then Some Odd_fence
-  else if odd !inline_outside
-  then Some Odd_inline_tick
-  else if odd !double_ast_outside
-  then Some Odd_double_asterisk
-  else (
-    (* Trailing fragment heuristic: link `[text](url)` with missing
-       `)` before EOF is a strong truncation signal. *)
-    let last_open_paren = ref (-1) in
-    let last_close_paren = ref (-1) in
-    for j = len - 1 downto 0 do
-      if !last_open_paren < 0 && Char.equal text.[j] '(' then last_open_paren := j;
-      if !last_close_paren < 0 && Char.equal text.[j] ')' then last_close_paren := j
-    done;
-    if !last_open_paren > !last_close_paren && !last_open_paren > 0
-    then (
-      (* `]` byte before `(` distinguishes markdown link/image from prose paren. *)
-      let bracket_pos = !last_open_paren - 1 in
-      if bracket_pos >= 0 && Char.equal text.[bracket_pos] ']'
-      then (
-        (* Image `![alt](url)` distinguished by `!` before `[`. *)
-        let is_image =
-          let scan = ref (bracket_pos - 1) in
-          let saw_image = ref false in
-          (* Find the matching `[` for this `]`; bail at newline. *)
-          while
-            !scan >= 0
-            && (not (Char.equal text.[!scan] '['))
-            && not (Char.equal text.[!scan] '\n')
-          do
-            Stdlib.decr scan
-          done;
-          if
-            !scan >= 0
-            && Char.equal text.[!scan] '['
-            && !scan > 0
-            && Char.equal text.[!scan - 1] '!'
-          then saw_image := true;
-          !saw_image
-        in
-        Some (if is_image then Unfinished_image else Unfinished_link))
-      else None)
-    else None)
 ;;
 
 (** {1 Sort order}

@@ -13,16 +13,17 @@ type lease_kind = Keeper_event_queue_state.lease_kind =
 type requeue_reason = Keeper_event_queue_state.requeue_reason =
   | Cycle_busy
   | Turn_not_scheduled
-  | Retry_after_pacing
   | Rotate_now
   | Cancelled
   | Cycle_crashed
   | Registration_recovery
+  | Approval_grant_unconsumed
+  | Approval_grant_state_unavailable
 
 type escalation_reason = Keeper_event_queue_state.escalation_reason =
   | Failure_judgment_requested
   | Failure_judgment_boundary_failed of { detail : string }
-  | Failure_judgment_operator_required of
+  | Failure_judgment_external_input_requested of
       { judge_runtime_id : string
       ; rationale : string
       }

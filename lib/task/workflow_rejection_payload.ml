@@ -26,7 +26,7 @@ let optional_string_field key value =
   | None -> []
 ;;
 
-let payload_json
+let payload
       ?rule_id
       ?tool_suggestion
       ?hint
@@ -57,7 +57,10 @@ let payload_json
   let fields =
     [ "ok", `Bool false
     ; "error", `String message
-    ; "failure_class", `String "workflow_rejection"
+    ; ( "failure_class"
+      , `String
+          (Tool_result.tool_failure_class_to_string
+             Tool_result.Workflow_rejection) )
     ; "error_class", `String "deterministic"
     ; "recoverable", `Bool recoverable
     ]
@@ -66,5 +69,27 @@ let payload_json
     @ (if diagnosis = [] then [] else [ "diagnosis", `Assoc diagnosis ])
     @ extra_fields
   in
-  Yojson.Safe.to_string (`Assoc fields)
+  `Assoc fields
+;;
+
+let payload_json
+      ?rule_id
+      ?tool_suggestion
+      ?hint
+      ?scope_policy
+      ?recoverable
+      ?alternatives
+      ?extra_fields
+      message
+  =
+  payload
+    ?rule_id
+    ?tool_suggestion
+    ?hint
+    ?scope_policy
+    ?recoverable
+    ?alternatives
+    ?extra_fields
+    message
+  |> Yojson.Safe.to_string
 ;;

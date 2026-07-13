@@ -2,7 +2,7 @@
  *
  * Scoped to .v2-monitoring-* so unmigrated surfaces keep their legacy
  * styling. Covers Runtime, Fleet, Agent roster/profile/detail, Keeper
- * runtime/reactivity, and Governance monitor lanes.
+ * runtime/reactivity, and Gate monitor lanes.
  *
  * Colors come from v2-theme.css; this file handles surface-specific
  * layout, soft brass top glow, hairlines, hover states, and consistent

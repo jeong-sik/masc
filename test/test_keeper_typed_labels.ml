@@ -11,11 +11,9 @@
     - [Keeper_turn_fsm.cancel_reason] (4 variants, Step 4a)
     - [Keeper_turn_fsm.failure_reason] (6 variants, Step 4a)
     - [Keeper_turn_fsm.turn_state]     (10 variants, Step 4a)
-    - [Keeper_contract_classifier.actionable_signal] (4 variants, Step 6a)
-    - [Keeper_contract_classifier.contract_status]   (7 variants, Step 6a)
+    - [Keeper_contract_classifier.actionable_signal] (3 variants, Step 6a)
     - [Keeper_profile_load_failure_site.t] typed metric labels
     - [Keeper_turn_fsm.pp_failure_reason] surfaces record-bearing fields
-    - [Keeper_contract_classifier.pp_contract_status] surfaces missing list
 *)
 
 open Masc
@@ -63,7 +61,6 @@ let all_failure_reasons : Keeper_turn_fsm.failure_reason list =
     Failure_runtime_unavailable { base = "x"; resolved = None };
     Failure_no_capable_provider { runtime_id = "x"; detail = "d" };
     Failure_provider_error { kind = "k"; detail = "d" };
-    Failure_completion_contract_violation { reason_code = "rc" };
     Failure_receipt_lost { primary_error = "e"; fallback_path = None };
     Failure_runtime_error "msg";
     Failure_unexpected_exception { exn = "exn"; backtrace = None };
@@ -204,40 +201,6 @@ let test_is_actionable_matches_variants () =
   Alcotest.(check bool) "No_actionable_signal is not actionable" false
     (Keeper_contract_classifier.is_actionable No_actionable_signal)
 
-(* ── Keeper_contract_classifier.contract_status ──────────────── *)
-
-let all_contract_statuses
-    : Keeper_contract_classifier.contract_status list =
-  [
-    Surface_mismatch { missing = [ "x" ] };
-    Claim_only_after_owned_task;
-    Needs_execution_progress;
-    Passive_only;
-    Satisfied_completion;
-    Satisfied_execution;
-  ]
-
-let test_contract_status_labels_unique () =
-  let labels =
-    List.map Keeper_contract_classifier.contract_status_label
-      all_contract_statuses
-  in
-  Alcotest.(check (list string))
-    "no duplicate contract_status labels" [] (duplicates labels)
-
-let test_pp_contract_status_surfaces_missing_list () =
-  let s =
-    format_to_string Keeper_contract_classifier.pp_contract_status
-      (Surface_mismatch { missing = [ "keeper_task_claim" ] })
-  in
-  Alcotest.(check bool)
-    "pp_contract_status surfaces first missing tool"
-    true
-    (try
-       ignore (Str.search_forward (Str.regexp_string "keeper_task_claim") s 0);
-       true
-     with Not_found -> false)
-
 (* ── Keeper_profile_load_failure_site.t ──────────────────────── *)
 
 let all_profile_load_failure_sites : Keeper_profile_load_failure_site.t list =
@@ -305,13 +268,6 @@ let () =
             test_classify_no_signal_returns_no_actionable;
           Alcotest.test_case "is_actionable matches all variants" `Quick
             test_is_actionable_matches_variants;
-        ] );
-      ( "contract_status",
-        [
-          Alcotest.test_case "labels unique" `Quick
-            test_contract_status_labels_unique;
-          Alcotest.test_case "pp surfaces missing list" `Quick
-            test_pp_contract_status_surfaces_missing_list;
         ] );
       ( "profile_load_failure_site",
         [

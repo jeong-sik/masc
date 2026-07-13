@@ -134,32 +134,6 @@ let registry_progress_on_event ~record_turn_progress downstream event =
   Option.iter (fun cb -> cb event) downstream
 
 
-let completion_contract_result_for_progress_evidence
-    ~(had_owned_active_task_at_turn_start : bool)
-    ~(actual_keeper_tool_names : string list) :
-    Keeper_execution_receipt.completion_contract_result =
-  let class_of name = Keeper_tool_progress.classify_tool_progress name in
-  let classes = List.map class_of actual_keeper_tool_names in
-  let has_class wanted = List.exists (( = ) wanted) classes in
-  let all_class wanted = classes <> [] && List.for_all (( = ) wanted) classes in
-  if actual_keeper_tool_names = [] then
-    Keeper_execution_receipt.Contract_satisfied_completion
-  else if
-    all_class Keeper_tool_progress.Claim_context
-    && had_owned_active_task_at_turn_start
-  then Keeper_execution_receipt.Contract_claim_only_after_owned_task
-  else if
-    has_class Keeper_tool_progress.Claim_context
-    && not had_owned_active_task_at_turn_start
-  then Keeper_execution_receipt.Contract_satisfied_execution
-  else if all_class Keeper_tool_progress.Passive_status then
-    Keeper_execution_receipt.Contract_passive_only
-  else if has_class Keeper_tool_progress.Completion then
-    Keeper_execution_receipt.Contract_satisfied_completion
-  else if has_class Keeper_tool_progress.Execution then
-    Keeper_execution_receipt.Contract_satisfied_execution
-  else Keeper_execution_receipt.Contract_needs_execution_progress
-
 let emit_turn_end_safely ~keeper_name () =
   try Masc_runtime_events.emit_turn_end () with
   | Eio.Cancel.Cancelled _ -> ()

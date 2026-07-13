@@ -3,14 +3,18 @@
 > **Status**: Draft
 > **Author**: masc design loop
 > **Date**: 2026-05-09
-> **Depends on**: RFC-0054 (shell-ir-ppx-deriving) — PPX track CLOSED-WONTFIX, codegen track ACTIVE
+> **Depends on**: no command-policy RFC; RFC-0054 is withdrawn
 > **Replaces**: progress_report.md §3.2 "PPX 개발" claim (outdated)
+> **Amended**: 2026-07-13 — command-policy generation is withdrawn;
+> only schema/dispatch descriptor generation remains eligible.
 
 ---
 
 ## §0 Abstract
 
-RFC-0054에서 Shell IR GADT의 walker를 PPX로 생성하려는 5가지 접근법이 모두 실패했습니다. 원인은 ppxlib가 GADT의 existentially-quantified parameter를 narrowing하지 못해 `[@@deriving]` 속성을 GADT constructor에 부착할 수 없는 구조적 제약입니다 (RFC-0054 §5.3.3).
+RFC-0054의 Shell IR GADT POC는 역사적 입력일 뿐이며 현재 의존성이
+아니다. 본 RFC에서 유지되는 범위는 tool schema와 dispatch descriptor를
+동일 source data에서 생성하는 부분뿐이다.
 
 이 RFC는 동일한 문제를 **빌드 타임 codegen**으로 해결하는 패턴을 공식화하고, 이를 61개 MCP 도구의 typed descriptor 자동 생성으로 확장합니다. 핵심 원칙은 **"spec-as-data → emit-to-buffer → dune rule"** 3단계 패턴입니다.
 
@@ -26,8 +30,8 @@ PR #14240, #14258을 통해 다음이 완료되었습니다:
 
 - `('i, 'o, 'r, 's) command` GADT (9 constructors + `Generic` fallback)
 - `Capability_check_typed` — GADT 기반 capability walker
-- `Risk_classifier_typed` — GADT 기반 risk classification
-- `Approval_policy_typed` — GADT → 기존 Approval_policy bridge
+- command-policy classifier와 approval bridge는 제거 대상이며 codegen
+  입력이나 출력이 아니다.
 
 ### 1.2 남은 문제
 
@@ -35,7 +39,7 @@ progress_report.md §2.1에 기록된 8개 문제 중 미해결 4개:
 
 | # | 문제 | 현상 | 본 RFC 적용 범위 |
 |---|------|------|-----------------|
-| 1 | `mode_enforcer.ml` 50+ 문자열 하드코딩 | OAS 측 tool effect 분류가 문자열 매칭 | **범위外** — OAS subsystem 별도 RFC |
+| 1 | 과거 command/effect 분류 | generic executor/OAS에 제품 의미 유입 | **폐기** — descriptor codegen과 통합하지 않음 |
 | 2 | `agent_tools` O(n) 선형 검색 | 도구 이름 문자열로 linear search | **Phase 2** — GADT dispatch로 대체 |
 | 3 | **61개 도구 수동 Yojson AST** | `{name="..."; description="..."; ...}` 하드코딩 | **핵심 범위** — codegen으로 자동화 |
 | 4 | 중복 도구 | `read_file` / `tool_read_file` 등 의미 중복 | **Phase 2** — alias/unification 계획 |
@@ -78,6 +82,9 @@ progress_report.md §2.1에 기록된 8개 문제 중 미해결 4개:
 2. **Automatic JSON Schema Generation**: record 정의로부터 OpenAI-compatible `tools` JSON array를 빌드 타임에 생성
 3. **Fail-Closed by Default**: 새 도구 추가 시 descriptor 누락 → 컴파일 에러
 4. **Zero Runtime Overhead**: 생성된 JSON은 빌드 아티팩트, 런타임에는 OCaml 문자열 리터럴로 로드
+5. **No authorization metadata**: 생성 descriptor는 schema, identity,
+   examples, transport alias, dispatch만 소유하며 effect/risk/approval rank를
+   생성하지 않음
 
 ---
 
@@ -296,7 +303,9 @@ python3 -c "import json; tools=json.load(open('tool_descriptors_golden.json')); 
 ## §10 Open Questions
 
 1. **Parameter record의 GADT화 수준**: `param`을 GADT로 만들면 type-safe tool calling이 가능하지만, 61개 도구의 parameter 정의가 복잡해집니다. Phase 0에서는 value-level record로 시작할까요, 아니면 바로 GADT로 갈까요?
-2. **`mode_enforcer.ml`과의 경계**: OAS 측 `tool_effect` 문자열 분류를 이 codegen 시스템과 통합할 때, 어느 layer에서 통합해야 할까요?
+2. **Authorization boundary (resolved 2026-07-13)**: OAS 또는 descriptor
+   codegen과 command/effect 분류를 통합하지 않는다. 실제 외부 효과는
+   MASC의 product-neutral Keeper Gate가 concrete input으로 판단한다.
 3. **Git 관리**: `tool_descriptors_gen.ml`을 `.gitignore`할지, 아니면 golden test용으로 커밋할지?
 
 ---
@@ -305,7 +314,7 @@ python3 -c "import json; tools=json.load(open('tool_descriptors_golden.json')); 
 
 | 문서 | 관계 |
 |------|------|
-| RFC-0054 | PPX track CLOSED-WONTFIX, codegen pattern POC 제공 |
+| RFC-0054 | Withdrawn; historical codegen POC only, no active dependency |
 | RFC-0049 | Telemetry foundation — Phase 4에서 참조 |
 | progress_report.md | §3.2의 PPX claim은 본 RFC로 대첵됨 |
 | PR #14240, #14258 | GADT Shell IR 구현 — 본 RFC의 Layer 1 기반 |

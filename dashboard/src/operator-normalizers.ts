@@ -11,7 +11,7 @@ import {
   normalizeRecommendedAction,
 } from './store-normalizers'
 import type {
-  AdmissionQueueSnapshot,
+  InferenceInflightSnapshot,
   Message,
   OperatorActionDescriptor,
   OperatorAttentionItem,
@@ -78,49 +78,11 @@ function normalizeOperatorJudgeRuntime(raw: unknown): OperatorJudgeRuntime | nul
   }
 }
 
-interface AdmissionQueueNormalization {
-  value: AdmissionQueueSnapshot | null
-  error: string | null
-}
-
-function normalizeAdmissionQueue(raw: unknown): AdmissionQueueNormalization {
-  if (raw === undefined || raw === null) return { value: null, error: null }
-  if (!isRecord(raw)) return { value: null, error: 'Admission projection has an invalid shape.' }
-  const throttleOwner = asString(raw.throttle_owner)
-  const maxConcurrent = asNumber(raw.max_concurrent)
+function normalizeInferenceInflight(raw: unknown): InferenceInflightSnapshot | null {
+  if (!isRecord(raw) || raw.boundary_owner !== 'oas_runtime') return null
   const active = asNumber(raw.active)
-  const available = asNumber(raw.available)
-  const queueDepth = asNumber(raw.queue_depth)
-  if (!throttleOwner?.trim()) {
-    return { value: null, error: 'Admission projection is missing throttle ownership.' }
-  }
-  if (
-    maxConcurrent === undefined
-    || active === undefined
-    || available === undefined
-    || queueDepth === undefined
-    || !Number.isSafeInteger(maxConcurrent)
-    || maxConcurrent < 1
-    || !Number.isSafeInteger(active)
-    || active < 0
-    || !Number.isSafeInteger(available)
-    || available < 0
-    || !Number.isSafeInteger(queueDepth)
-    || queueDepth < 0
-  ) return { value: null, error: 'Admission projection contains invalid counters.' }
-  if (available !== Math.max(0, maxConcurrent - active)) {
-    return { value: null, error: 'Admission projection counters are inconsistent.' }
-  }
-  return {
-    value: {
-      throttle_owner: throttleOwner.trim(),
-      max_concurrent: maxConcurrent,
-      active,
-      available,
-      queue_depth: queueDepth,
-    },
-    error: null,
-  }
+  if (active === undefined || !Number.isSafeInteger(active) || active < 0) return null
+  return { boundary_owner: 'oas_runtime', active }
 }
 
 function normalizeGuidanceSummary(raw: unknown): OperatorGuidanceSummary | null {
@@ -306,7 +268,6 @@ function normalizeKeeper(raw: unknown): OperatorKeeperSnapshot | null {
 export function normalizeOperatorSnapshot(raw: unknown): OperatorSnapshot {
   const root = isRecord(raw) ? raw : {}
   const pendingConfirmEnvelope = normalizePendingConfirmEnvelope(root.pending_confirm_envelope)
-  const admissionQueue = normalizeAdmissionQueue(root.admission_queue)
   return {
     root: normalizeNamespace(root.root),
     sessions: extractArray(root.sessions, ['items', 'sessions'])
@@ -315,8 +276,7 @@ export function normalizeOperatorSnapshot(raw: unknown): OperatorSnapshot {
     keepers: extractArray(root.keepers, ['items', 'keepers'])
       .map(normalizeKeeper)
       .filter((item): item is OperatorKeeperSnapshot => item !== null),
-    admission_queue: admissionQueue.value,
-    admission_queue_error: admissionQueue.error,
+    inference_inflight: normalizeInferenceInflight(root.inference_inflight),
     operator_judge_runtime: normalizeOperatorJudgeRuntime(root.operator_judge_runtime),
     persistent_agents: extractArray(root.persistent_agents, ['items', 'persistent_agents'])
       .map(normalizeKeeper)

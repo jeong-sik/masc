@@ -56,14 +56,7 @@ let make_test_annotation () =
   ; content = "test annotation"
   ; goal_id = Some "goal-1"
   ; task_id = Some "task-1"
-  ; board_post_id = None
-  ; comment_id = None
-  ; pr_id = None
-  ; git_ref = None
-  ; log_id = None
-  ; session_id = None
-  ; operation_id = None
-  ; worker_run_id = None
+  ; references = []
   ; created_at_ms = 1700000000000L
   ; updated_at_ms = 1700000000000L
   }
@@ -84,14 +77,7 @@ let test_annotation_to_json_has_required_fields () =
       ; "content"
       ; "goal_id"
       ; "task_id"
-      ; "board_post_id"
-      ; "comment_id"
-      ; "pr_id"
-      ; "git_ref"
-      ; "log_id"
-      ; "session_id"
-      ; "operation_id"
-      ; "worker_run_id"
+      ; "references"
       ; "created_at_ms"
       ; "updated_at_ms"
       ]
@@ -107,8 +93,7 @@ let test_annotation_to_json_optional_fields_null_when_none () =
     let find key =
       List.assoc_opt key fields |> Option.value ~default:`Null
     in
-    Alcotest.check yojson "board_post_id is Null" `Null (find "board_post_id");
-    Alcotest.check yojson "pr_id is Null" `Null (find "pr_id");
+    Alcotest.check yojson "references is an empty array" (`List []) (find "references");
     Alcotest.check yojson "goal_id is String" (`String "goal-1") (find "goal_id")
   | _ -> Alcotest.fail "annotation_to_json did not produce Assoc"
 ;;
@@ -147,6 +132,21 @@ let test_annotation_of_json_rejects_non_object () =
       msg
   | Ok _ ->
     Alcotest.fail "annotation_of_json accepted a non-object"
+;;
+
+let test_annotation_of_json_rejects_unknown_fields () =
+  let json = Ide_annotation_types.annotation_to_json (make_test_annotation ()) in
+  let with_unknown =
+    match json with
+    | `Assoc fields -> `Assoc (("external_route", `String "opaque") :: fields)
+    | _ -> Alcotest.fail "annotation_to_json did not produce object"
+  in
+  match Ide_annotation_types.annotation_of_json with_unknown with
+  | Ok _ -> Alcotest.fail "annotation_of_json silently ignored an unknown field"
+  | Error msg ->
+    Alcotest.(check string) "unknown field diagnostic"
+      "Unknown annotation field: external_route"
+      msg
 ;;
 
 let test_region_json_round_trip_tool_call () =
@@ -217,6 +217,8 @@ let () =
     ; ( "annotation_of_json"
       , [ Alcotest.test_case "rejects non-object" `Quick
             test_annotation_of_json_rejects_non_object
+        ; Alcotest.test_case "rejects unknown fields" `Quick
+            test_annotation_of_json_rejects_unknown_fields
         ] )
     ; ( "region_json"
       , [ Alcotest.test_case "tool-call round-trip" `Quick

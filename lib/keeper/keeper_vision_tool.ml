@@ -587,7 +587,48 @@ let run_vision
       ; detail = "vision sub-call raised"
       }
 
-let handle
+let execution_of_vision_outcome = function
+  | Vo_ok text -> Keeper_tool_execution.success (ok_json text)
+  | Vo_invalid_request detail ->
+    Keeper_tool_execution.failure
+      ~class_:Tool_result.Policy_rejection
+      (err_json
+         ~failure_class:Tool_result.Policy_rejection
+         ~detail
+         "invalid_request")
+  | Vo_no_runtime detail ->
+    Keeper_tool_execution.failure
+      ~class_:Tool_result.Runtime_failure
+      (err_json
+         ~failure_class:Tool_result.Runtime_failure
+         ~detail
+         "no_capable_runtime")
+  | Vo_timeout ->
+    Keeper_tool_execution.failure
+      ~class_:Tool_result.Transient_error
+      (err_json ~failure_class:Tool_result.Transient_error "timeout")
+  | Vo_invalid_structured_response detail ->
+    Keeper_tool_execution.failure
+      ~class_:Tool_result.Runtime_failure
+      (err_json
+         ~failure_class:Tool_result.Runtime_failure
+         ~detail
+         "invalid_structured_response")
+  | Vo_provider { failure_class; detail } ->
+    Keeper_tool_execution.failure
+      ~class_:failure_class
+      (err_json ~failure_class ~detail "provider_error")
+  | Vo_empty ->
+    Keeper_tool_execution.failure
+      ~class_:Tool_result.Workflow_rejection
+      (err_json ~failure_class:Tool_result.Workflow_rejection "empty_extraction")
+  | Vo_truncated ->
+    Keeper_tool_execution.failure
+      ~class_:Tool_result.Runtime_failure
+      (err_json ~failure_class:Tool_result.Runtime_failure "truncated_extraction")
+;;
+
+let handle_with_outcome
     ?(complete = default_complete)
     ?(timeout_sec = default_timeout_sec)
     ?sw
@@ -598,63 +639,77 @@ let handle
     () =
   match string_member "artifact" args, string_member "query" args with
   | None, _ | _, None ->
-    err_json
-      ~failure_class:Tool_result.Policy_rejection
-      ~detail:"requires string fields: artifact, query"
-      "invalid_args"
+    Keeper_tool_execution.failure
+      ~class_:Tool_result.Policy_rejection
+      (err_json
+         ~failure_class:Tool_result.Policy_rejection
+         ~detail:"requires string fields: artifact, query"
+         "invalid_args")
   | Some handle_str, Some query ->
     (match sw, net, clock with
      | None, _, _ | _, None, _ | _, _, None ->
-       err_json
-         ~failure_class:Tool_result.Runtime_failure
-         "eio_context_unavailable"
+       Keeper_tool_execution.failure
+         ~class_:Tool_result.Runtime_failure
+         (err_json
+            ~failure_class:Tool_result.Runtime_failure
+            "eio_context_unavailable")
      | Some sw, Some net, Some clock ->
        if not (valid_timeout_sec timeout_sec)
        then
-         err_json
-           ~failure_class:Tool_result.Runtime_failure
-           ~detail:"timeout_sec must be finite and > 0"
-           "invalid_timeout"
+         Keeper_tool_execution.failure
+           ~class_:Tool_result.Runtime_failure
+           (err_json
+              ~failure_class:Tool_result.Runtime_failure
+              ~detail:"timeout_sec must be finite and > 0"
+              "invalid_timeout")
        else
          let dir = vision_store_dir ~keeper_name:meta.name in
          (match load_artifact ~dir (Store.of_string handle_str) with
         | Error msg ->
-          err_json
-            ~failure_class:Tool_result.Runtime_failure
-            ~detail:msg
-            "artifact_load_failed"
+          Keeper_tool_execution.failure
+            ~class_:Tool_result.Runtime_failure
+            (err_json
+               ~failure_class:Tool_result.Runtime_failure
+               ~detail:msg
+               "artifact_load_failed")
         | Ok bytes ->
           (match validate_image_size bytes with
              | Error msg ->
-               err_json
-                 ~failure_class:Tool_result.Runtime_failure
-                 ~detail:msg
-                 "image_too_large"
+               Keeper_tool_execution.failure
+                 ~class_:Tool_result.Runtime_failure
+                 (err_json
+                    ~failure_class:Tool_result.Runtime_failure
+                    ~detail:msg
+                    "image_too_large")
            | Ok () ->
              (match media_type_for_request ~bytes args with
               | Error msg ->
-                err_json
-                  ~failure_class:Tool_result.Policy_rejection
-                  ~detail:msg
-                  "invalid_media_type"
-              | Ok media_type ->
-                (match
-                   Va.make_request ~query ~image_media_type:media_type
-                     ~image_bytes:bytes
-                 with
-                 | Error msg ->
-                   err_json
+                Keeper_tool_execution.failure
+                  ~class_:Tool_result.Policy_rejection
+                  (err_json
                      ~failure_class:Tool_result.Policy_rejection
                      ~detail:msg
-                     "invalid_request"
-                 | Ok req ->
-                   run_candidates
-                     ~complete
-                     ~deadline:(Eio.Time.now clock +. timeout_sec)
-                     ~sw
-                     ~clock
-                     ~net
-                     ~messages:[ message_of_request req ]
-                     ~last_error:None
-                     ~attempt_index:0
-                     (vision_runtime_candidates ()))))))
+                     "invalid_media_type")
+              | Ok media_type ->
+                run_vision
+                  ~complete
+                  ~timeout_sec
+                  ~sw
+                  ~clock
+                  ~net
+                  ~query
+                  ~media_type
+                  ~bytes
+                  ()
+                |> execution_of_vision_outcome))))
+
+let handle ?complete ?timeout_sec ?sw ?clock ?net ~meta ~args () =
+  (handle_with_outcome
+     ?complete
+     ?timeout_sec
+     ?sw
+     ?clock
+     ?net
+     ~meta
+     ~args
+     ()).raw_output

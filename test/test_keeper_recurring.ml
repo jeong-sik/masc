@@ -3,7 +3,6 @@
 open Alcotest
 module Rec = Masc.Keeper_recurring
 module Rec_tool = Masc.Keeper_recurring_tool
-module Metrics = Masc.Otel_metric_store
 module J = Yojson.Safe.Util
 
 let check = Alcotest.check
@@ -24,13 +23,6 @@ let check_tool_success label result =
 
 let check_tool_failure label result =
   check bool label false (Tool_result.is_success result)
-;;
-
-let recurring_failure_value ~task ~phase =
-  Metrics.metric_value_or_zero
-    Keeper_metrics.(to_string RecurringFailures)
-    ~labels:[("task", task); ("phase", phase)]
-    ()
 ;;
 
 let test_add_and_list () =
@@ -177,20 +169,15 @@ let test_dispatch_due () =
   check int "due again" 1 count3
 ;;
 
-let test_failure_auto_disable () =
+let test_failure_never_disables () =
   Rec.clear ();
-  let t =
+  let _t =
     Rec.add
       ~keeper_name:"k1"
       ~label:"fail"
       ~interval_sec:30
-      ~max_failures:2
       (Rec.Broadcast "oops")
   in
-  let auto_disable_before =
-    recurring_failure_value ~task:t.id ~phase:"auto_disable"
-  in
-  (* Fail twice *)
   let _ =
     Rec.dispatch_due ~keeper_name:"k1" ~now_ts:100.0 ~dispatch:(fun _task _action ->
       Error "boom")
@@ -199,13 +186,6 @@ let test_failure_auto_disable () =
   let task = List.hd tasks in
   check int "failure 1" 1 task.failure_count;
   check bool "still enabled" true task.enabled;
-  check
-    (float 0.001)
-    "auto-disable metric unchanged below threshold"
-    auto_disable_before
-    (recurring_failure_value ~task:t.id ~phase:"auto_disable");
-  (* Need to set last_run_ts back to allow re-dispatch *)
-  (* Actually, on failure we don't update last_run_ts, so it stays 0.0 *)
   let _ =
     Rec.dispatch_due ~keeper_name:"k1" ~now_ts:200.0 ~dispatch:(fun _task _action ->
       Error "boom again")
@@ -213,87 +193,12 @@ let test_failure_auto_disable () =
   let tasks2 = Rec.list ~keeper_name:"k1" in
   let task2 = List.hd tasks2 in
   check int "failure 2" 2 task2.failure_count;
-  check bool "auto-disabled" false task2.enabled;
-  check
-    (float 0.001)
-    "auto-disable metric increments"
-    (auto_disable_before +. 1.0)
-    (recurring_failure_value ~task:t.id ~phase:"auto_disable");
-  (* No more dispatches *)
+  check bool "still enabled after repeated failures" true task2.enabled;
   let count =
     Rec.dispatch_due ~keeper_name:"k1" ~now_ts:300.0 ~dispatch:(fun _task _action ->
       Ok ())
   in
-  check int "disabled no dispatch" 0 count;
-  ignore t
-;;
-
-let test_reenable_after_cooldown () =
-  Rec.clear ();
-  let _t =
-    Rec.add
-      ~keeper_name:"k1"
-      ~label:"fail"
-      ~interval_sec:10
-      ~max_failures:1
-      (Rec.Broadcast "msg")
-  in
-  (* First failure -> auto-disabled (max_failures=1).
-     last_run_ts stays 0.0 because dispatch_due does not update it on failure. *)
-  let _ =
-    Rec.dispatch_due ~keeper_name:"k1" ~now_ts:10.0 ~dispatch:(fun _t _a -> Error "boom")
-  in
-  let task = List.hd (Rec.list ~keeper_name:"k1") in
-  check bool "auto-disabled" false task.enabled;
-  check int "failure_count 1" 1 task.failure_count;
-  (* Within cooldown window (2 * interval_sec = 20.0); now=15 < 0 + 20 -> no re-enable *)
-  let n0 = Rec.reenable_due_tasks ~keeper_name:"k1" ~now_ts:15.0 in
-  check int "within cooldown 0" 0 n0;
-  let task1 = List.hd (Rec.list ~keeper_name:"k1") in
-  check bool "still disabled" false task1.enabled;
-  (* After cooldown; now=25 >= 0 + 20 -> re-enable, failure_count reset *)
-  let n1 = Rec.reenable_due_tasks ~keeper_name:"k1" ~now_ts:25.0 in
-  check int "after cooldown 1" 1 n1;
-  let task2 = List.hd (Rec.list ~keeper_name:"k1") in
-  check bool "re-enabled" true task2.enabled;
-  check int "failure_count reset" 0 task2.failure_count;
-  (* Idempotent: second call after re-enable returns 0 because task is enabled. *)
-  let n2 = Rec.reenable_due_tasks ~keeper_name:"k1" ~now_ts:25.0 in
-  check int "idempotent on enabled" 0 n2
-;;
-
-let test_reenable_filter_by_keeper () =
-  Rec.clear ();
-  let _t1 =
-    Rec.add
-      ~keeper_name:"k1"
-      ~label:"a"
-      ~interval_sec:10
-      ~max_failures:1
-      (Rec.Broadcast "a")
-  in
-  let _t2 =
-    Rec.add
-      ~keeper_name:"k2"
-      ~label:"b"
-      ~interval_sec:10
-      ~max_failures:1
-      (Rec.Broadcast "b")
-  in
-  (* Disable both *)
-  let _ =
-    Rec.dispatch_due ~keeper_name:"k1" ~now_ts:10.0 ~dispatch:(fun _ _ -> Error "x")
-  in
-  let _ =
-    Rec.dispatch_due ~keeper_name:"k2" ~now_ts:10.0 ~dispatch:(fun _ _ -> Error "x")
-  in
-  (* Re-enable only k1 *)
-  let n = Rec.reenable_due_tasks ~keeper_name:"k1" ~now_ts:30.0 in
-  check int "k1 re-enabled 1" 1 n;
-  let k1 = List.hd (Rec.list ~keeper_name:"k1") in
-  let k2 = List.hd (Rec.list ~keeper_name:"k2") in
-  check bool "k1 enabled" true k1.enabled;
-  check bool "k2 still disabled" false k2.enabled
+  check int "later dispatch still runs" 1 count
 ;;
 
 let test_failure_does_not_update_last_run_ts () =
@@ -303,7 +208,6 @@ let test_failure_does_not_update_last_run_ts () =
       ~keeper_name:"k1"
       ~label:"fail"
       ~interval_sec:10
-      ~max_failures:2
       (Rec.Broadcast "msg")
   in
   let _ =
@@ -316,14 +220,13 @@ let test_failure_does_not_update_last_run_ts () =
   check bool "still enabled" true task.enabled
 ;;
 
-let test_reenabled_multiple_tasks_preserve_partial_failure () =
+let test_multiple_tasks_preserve_partial_failure () =
   Rec.clear ();
   let _a =
     Rec.add
       ~keeper_name:"k1"
       ~label:"task-a"
       ~interval_sec:10
-      ~max_failures:2
       (Rec.Broadcast "a")
   in
   let _b =
@@ -331,21 +234,18 @@ let test_reenabled_multiple_tasks_preserve_partial_failure () =
       ~keeper_name:"k1"
       ~label:"task-b"
       ~interval_sec:10
-      ~max_failures:2
       (Rec.Broadcast "b")
   in
   let fail_all _task _action = Error "initial failure" in
   let _ = Rec.dispatch_due ~keeper_name:"k1" ~now_ts:10.0 ~dispatch:fail_all in
   let _ = Rec.dispatch_due ~keeper_name:"k1" ~now_ts:11.0 ~dispatch:fail_all in
-  let disabled = Rec.list ~keeper_name:"k1" in
-  check int "two disabled tasks" 2 (List.length disabled);
+  let failed = Rec.list ~keeper_name:"k1" in
+  check int "two failed tasks" 2 (List.length failed);
   List.iter
     (fun (task : Rec.recurring_task) ->
-       check bool (task.label ^ " disabled") false task.enabled;
+       check bool (task.label ^ " remains enabled") true task.enabled;
        check int (task.label ^ " failure_count") 2 task.failure_count)
-    disabled;
-  let n = Rec.reenable_due_tasks ~keeper_name:"k1" ~now_ts:25.0 in
-  check int "two re-enabled" 2 n;
+    failed;
   let successes =
     Rec.dispatch_due ~keeper_name:"k1" ~now_ts:25.0 ~dispatch:(fun task _action ->
       if String.equal task.label "task-a" then Error "task-a failed again" else Ok ())
@@ -354,8 +254,8 @@ let test_reenabled_multiple_tasks_preserve_partial_failure () =
   let tasks = Rec.list ~keeper_name:"k1" in
   let task_a = task_by_label "task-a" tasks in
   let task_b = task_by_label "task-b" tasks in
-  check int "task-a failure_count after partial failure" 1 task_a.failure_count;
-  check bool "task-a remains enabled below max failures" true task_a.enabled;
+  check int "task-a failure_count after partial failure" 3 task_a.failure_count;
+  check bool "task-a remains enabled" true task_a.enabled;
   check (float 0.001) "task-a last_run_ts still old" 0.0 task_a.last_run_ts;
   check int "task-b failure_count reset" 0 task_b.failure_count;
   check bool "task-b remains enabled" true task_b.enabled;
@@ -397,17 +297,15 @@ let () =
 	        ] )
     ; ( "dispatch"
       , [ test_case "due tasks" `Quick test_dispatch_due
-        ; test_case "failure auto-disable" `Quick test_failure_auto_disable
-        ; test_case "reenable after cooldown" `Quick test_reenable_after_cooldown
-        ; test_case "reenable filter by keeper" `Quick test_reenable_filter_by_keeper
+        ; test_case "failure never disables" `Quick test_failure_never_disables
         ; test_case
             "failure preserves last_run_ts"
             `Quick
             test_failure_does_not_update_last_run_ts
         ; test_case
-            "reenable multi-task partial failure"
+            "multi-task partial failure"
             `Quick
-            test_reenabled_multiple_tasks_preserve_partial_failure
+            test_multiple_tasks_preserve_partial_failure
         ] )
     ; ( "serialization"
       , [ test_case "task to json" `Quick test_task_to_json

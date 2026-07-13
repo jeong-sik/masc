@@ -1,33 +1,13 @@
 (tests
  (names
   test_exec_types
-  test_db_op
-  test_capability_check
   test_bash_parser
-  test_approval_policy
-  test_approval_config
-  test_exec_semantic
+  test_bash_history
   test_exec_buffer
-  test_exit_code
-  test_output_parse_p14
-  test_history_insight
   test_exec_cache
   test_exec_budget
-  test_exec_adaptive_timeout
   test_shell_ir_command_shape
-  test_shell_ir_diagnostics
-  test_shell_ir_typed
-  test_shell_ir_walkers_gen
-  test_shell_ir_risk
-  test_shell_ir_risk_repo_hosting_cli_stress
-  test_shell_ir_gh_capability_baseline
-  test_gh_verb
-  test_gh_capability_policy
-  test_shell_ir_typed_e2e
-  test_shell_ir_differential
   test_shell_ir_oracle
-  test_shell_ir_risk_action_flags
-  test_shell_ir_effect_projection
   test_exec_dispatch_docker_streaming
   test_exec_dispatch_stdin_streaming
   test_exec_dispatch_pipeline_streaming)

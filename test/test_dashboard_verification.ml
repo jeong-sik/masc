@@ -392,41 +392,55 @@ let int_field name j =
   | `Int n -> n
   | _ -> Alcotest.fail (Printf.sprintf "%s not int" name)
 
-let bool_field name j =
+let string_field name j =
   match member name j with
-  | `Bool value -> value
-  | _ -> Alcotest.fail (Printf.sprintf "%s not bool" name)
+  | `String value -> value
+  | _ -> Alcotest.fail (Printf.sprintf "%s not string" name)
 
-let test_requests_and_summary_degrade_under_fd_pressure () =
+let test_requests_and_summary_remain_available_after_fd_observation () =
   with_temp_base_path (fun base_path ->
     let _ =
       create_pending_request
         ~base_path
         ~task_id:"task-fd-pressure"
         ~worker:"keeper-alpha"
-        ~criteria:[ V.Custom "must not scan under FD pressure" ]
+        ~criteria:[ V.Custom "verification remains visible under FD pressure" ]
         ~evidence:[ "ref-fd" ]
     in
     FD.reset_for_tests ();
-    FD.note ~site:"test" ~detail:"Too many open files in system" ();
+    FD.note_exception
+      ~site:"test"
+      (Unix.Unix_error (Unix.EMFILE, "open", "verification fixture"));
     Fun.protect
       ~finally:FD.reset_for_tests
       (fun () ->
         let requests = D.requests_json ~base_path () in
-        Alcotest.(check int) "requests total degraded" 0 (int_field "total" requests);
+        Alcotest.(check int) "request remains visible" 1 (int_field "total" requests);
+        Alcotest.(check string)
+          "requests expose observation-only mode"
+          "observation_only"
+          (string_field "mode" requests);
+        Alcotest.(check int)
+          "requests expose exact process FD observation"
+          1
+          (int_field "process_fd_exhaustion_observations_total" requests);
         Alcotest.(check bool)
-          "requests degraded flag"
+          "requests do not synthesize degraded state"
           true
-          (bool_field "degraded" requests);
+          (member "degraded" requests = `Null);
         (match member "requests" requests with
-         | `List [] -> ()
-         | _ -> Alcotest.fail "requests should be empty during fd pressure");
+         | `List [ _ ] -> ()
+         | _ -> Alcotest.fail "request should remain visible during fd pressure");
         let summary = D.summary_json ~base_path () in
-        Alcotest.(check int) "summary total degraded" 0 (int_field "total" summary);
+        Alcotest.(check int) "summary remains complete" 1 (int_field "total" summary);
+        Alcotest.(check int)
+          "summary exposes exact process FD observation"
+          1
+          (int_field "process_fd_exhaustion_observations_total" summary);
         Alcotest.(check bool)
-          "summary degraded flag"
+          "summary does not synthesize degraded state"
           true
-          (bool_field "degraded" summary)))
+          (member "degraded" summary = `Null)))
 
 let test_summary_empty () =
   with_temp_base_path (fun base_path ->
@@ -513,8 +527,8 @@ let () =
         test_requests_json_ignores_legacy_root_entries;
       Alcotest.test_case "conflict triage fields" `Quick
         test_requests_json_surfaces_conflict_triage_fields;
-      Alcotest.test_case "fd pressure degraded projection" `Quick
-        test_requests_and_summary_degrade_under_fd_pressure;
+      Alcotest.test_case "fd pressure remains observation-only" `Quick
+        test_requests_and_summary_remain_available_after_fd_observation;
     ];
     "summary_json", [
       Alcotest.test_case "empty base_path" `Quick test_summary_empty;

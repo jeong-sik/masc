@@ -23,11 +23,6 @@ let create_accumulator_for ~keeper_name =
   ; keeper_name = Some keeper_name
   }
 
-let masc_tool_emission_enabled () =
-  match Sys.getenv_opt "MASC_TOOL_EMISSION" with
-  | Some ("1" | "true" | "TRUE") -> true
-  | _ -> false
-
 let push acc (json : Yojson.Safe.t) : unit =
   Stdlib.Mutex.lock acc.mutex;
   acc.items <- json :: acc.items;
@@ -63,51 +58,17 @@ let accumulator_size acc =
   Stdlib.Mutex.unlock acc.mutex;
   n
 
-let try_parse (s : string) : Yojson.Safe.t option =
-  try Some (Yojson.Safe.from_string s)
-  with Yojson.Json_error _ -> None
-
-let make_post_tool_use_hook (acc : accumulator) : Agent_sdk.Hooks.hook =
-  fun event ->
-    (if masc_tool_emission_enabled () then
-       match event with
-       | Agent_sdk.Hooks.PostToolUse { output; _ } -> (
-           match output with
-           | Ok { content; _ } -> (
-               match try_parse content with
-               | Some json -> push acc json
-               | None -> ())
-           | Error _ -> ())
-       | _ -> ());
-    Agent_sdk.Hooks.Continue
-
-let install_into_hooks (acc : accumulator) (hooks : Agent_sdk.Hooks.hooks)
-    : Agent_sdk.Hooks.hooks =
-  let k4_hook = make_post_tool_use_hook acc in
-  let combined : Agent_sdk.Hooks.hook =
-    match hooks.post_tool_use with
-    | None -> k4_hook
-    | Some original ->
-        fun event ->
-          (* K4 hook is observational and always returns Continue;
-             we run it for its side effect, then defer the decision
-             to the original hook. *)
-          let _ : Agent_sdk.Hooks.hook_decision = k4_hook event in
-          original event
-  in
-  { hooks with post_tool_use = Some combined }
+let capture_typed_result acc = function
+  | `Assoc _ as data -> push acc data
+  | (`List _ | `String _ | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Null) -> ()
 
 let drain_into_working_context acc ~(working_context : Yojson.Safe.t option)
     : Yojson.Safe.t option =
-  if not (masc_tool_emission_enabled ()) then
-    let _ : Yojson.Safe.t list = drain acc in
-    working_context
+  let items = drain acc in
+  if items = [] then working_context
   else
-    let items = drain acc in
-    if items = [] then working_context
-    else
-      Multimodal.Tool_emission.emit_from_tool_results
-        ~emit:Multimodal.Keeper_emitter.emit ~working_context items
+    Multimodal.Tool_emission.emit_from_tool_results
+      ~emit:Multimodal.Keeper_emitter.emit ~working_context items
 
 let global_accumulator = create_accumulator ()
 
@@ -144,6 +105,9 @@ let accumulator_for_keeper (keeper_name : string) : accumulator =
   if grew then emit_registry_size_gauge_holding_lock ();
   Stdlib.Mutex.unlock registry_mutex;
   acc
+
+let capture_typed_result_for_keeper ~keeper_name data =
+  capture_typed_result (accumulator_for_keeper keeper_name) data
 
 let registered_keeper_names () : string list =
   Stdlib.Mutex.lock registry_mutex;

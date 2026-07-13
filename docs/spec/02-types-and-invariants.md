@@ -393,10 +393,11 @@ type module_tag =
   | Mod_control | Mod_agent_timeline | Mod_misc | Mod_suspend
   | Mod_library | Mod_keeper
   | Mod_inline
-  | Mod_shard
 ```
 
-19개 variant (SSOT: `lib/tool/tool_dispatch.mli`). 도구 이름으로 O(1) tag lookup 후, tag별로 적합한 모듈 컨텍스트를 지연 생성한다. 제거된 모듈 이름은 tag 목록이나 운영 문서의 기준 목록으로 보존하지 않는다.
+Variant SSOT는 `lib/tool/tool_dispatch.mli`다. 도구 이름으로 O(1) tag
+lookup 후, tag별로 적합한 모듈 컨텍스트를 지연 생성한다. 제거된 모듈
+이름은 tag 목록이나 운영 문서의 기준 목록으로 보존하지 않는다.
 
 ### 4.4 Tool_result.result (structured)
 

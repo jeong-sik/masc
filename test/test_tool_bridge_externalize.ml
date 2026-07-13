@@ -5,8 +5,10 @@
     - large payloads (> threshold) are stored and replaced with
       [Tool_output.Stored] blob marker
     - boundary cases (exactly == threshold) follow [<=] semantics
-    - externalization is silently skipped when [MASC_BASE_PATH] is unset
-      OR when [MASC_TOOL_EXTERNALIZE=0] is set
+    - externalization is skipped when [MASC_BASE_PATH] is unset or when
+      [MASC_TOOL_EXTERNALIZE=0] is set
+    - a blob-store failure preserves the original bytes
+    - tool identity and free-form error JSON never change bridge behavior
 
     The actual blob store is exercised in [test_tool_blob_store]; here we
     only verify the bridge's wiring decisions. *)
@@ -32,14 +34,19 @@ let with_temp_base_path f =
   Sys.remove dir;
   Unix.mkdir dir 0o755;
   let prev_base = Sys.getenv_opt "MASC_BASE_PATH" in
+  let prev_base_input = Sys.getenv_opt "MASC_BASE_PATH_INPUT" in
   let prev_disable = Sys.getenv_opt "MASC_TOOL_EXTERNALIZE" in
   let prev_threshold = Sys.getenv_opt "MASC_TOOL_EXTERNALIZE_THRESHOLD_BYTES" in
   Unix.putenv "MASC_BASE_PATH" dir;
+  Unix.putenv "MASC_BASE_PATH_INPUT" dir;
   Unix.putenv "MASC_TOOL_EXTERNALIZE" "1";
   let restore () =
     (match prev_base with
      | Some v -> Unix.putenv "MASC_BASE_PATH" v
      | None -> Unix.putenv "MASC_BASE_PATH" "");
+    (match prev_base_input with
+     | Some v -> Unix.putenv "MASC_BASE_PATH_INPUT" v
+     | None -> Unix.putenv "MASC_BASE_PATH_INPUT" "");
     (match prev_disable with
      | Some v -> Unix.putenv "MASC_TOOL_EXTERNALIZE" v
      | None -> Unix.putenv "MASC_TOOL_EXTERNALIZE" "");
@@ -63,17 +70,9 @@ let with_temp_base_path f =
   cleanup ();
   match r with Ok v -> v | Error e -> raise e
 
-(* The [blob_store_lazy] inside Tool_bridge is process-global; we cannot
-   reset it between tests cleanly. Instead, we ensure the FIRST test
-   that touches MASC_BASE_PATH determines the lazy value, and verify
-   externalization behavior keyed on threshold + disable env vars. *)
-
 let test_threshold_default_under () =
-  (* Without MASC_BASE_PATH the lazy resolves to None and even large
-     payloads pass through. This case verifies the disable-when-unset
-     contract. NOTE: must run BEFORE any test that sets MASC_BASE_PATH
-     because the singleton is one-shot. *)
   Unix.putenv "MASC_BASE_PATH" "";
+  Unix.putenv "MASC_BASE_PATH_INPUT" "";
   Unix.putenv "MASC_TOOL_EXTERNALIZE" "1";
   let small = "short payload" in
   let result = B.maybe_externalize small in
@@ -110,19 +109,19 @@ let test_to_oas_typed_small_inlined () =
       Alcotest.(check bool) "no marker" false (O.is_marker content)
   | Error _ -> Alcotest.fail "expected Ok"
 
-let test_board_post_get_preserves_full_content () =
-  Unix.putenv "MASC_TOOL_EXTERNALIZE" "1";
-  Unix.putenv "MASC_TOOL_EXTERNALIZE_THRESHOLD_BYTES" "100";
-  let payload = String.make 5_000 'b' in
-  let result =
-    B.to_oas_typed_result (tool_ok ~tool_name:"masc_board_post_get" payload)
-  in
-  Unix.putenv "MASC_TOOL_EXTERNALIZE_THRESHOLD_BYTES" "";
-  match result with
-  | Ok { content; _ } ->
-    Alcotest.(check string) "board post get full content" payload content;
-    Alcotest.(check bool) "not a blob marker" false (O.is_marker content)
-  | Error _ -> Alcotest.fail "expected Ok"
+let test_tool_identity_does_not_bypass_externalization () =
+  with_temp_base_path (fun _dir ->
+    Unix.putenv "MASC_TOOL_EXTERNALIZE_THRESHOLD_BYTES" "100";
+    let payload = String.make 5_000 'b' in
+    let check_tool tool_name =
+      match B.to_oas_typed_result (tool_ok ~tool_name payload) with
+      | Ok { content; _ } ->
+        Alcotest.(check bool) "externalized" true (O.is_marker content)
+      | Error _ -> Alcotest.fail "expected Ok"
+    in
+    check_tool "opaque_tool_a";
+    check_tool "opaque_tool_b";
+    Unix.putenv "MASC_TOOL_EXTERNALIZE_THRESHOLD_BYTES" "")
 
 let test_to_oas_typed_error_inlined () =
   Unix.putenv "MASC_TOOL_EXTERNALIZE" "0";
@@ -132,7 +131,7 @@ let test_to_oas_typed_error_inlined () =
       Alcotest.(check string) "message" "fail" message;
       Alcotest.(check bool) "default recoverable=false" false recoverable
 
-let test_to_oas_typed_error_uses_json_recoverable_flag () =
+let test_to_oas_typed_error_ignores_json_metadata () =
   Unix.putenv "MASC_TOOL_EXTERNALIZE" "0";
   let msg =
     {|{"ok":false,"error":"try again","recoverable":true,"error_class":"transient_mutex_contention"}|}
@@ -150,10 +149,10 @@ let test_to_oas_typed_error_uses_json_recoverable_flag () =
   | Ok _ -> Alcotest.fail "expected Error"
   | Error { message; recoverable; error_class } ->
       Alcotest.(check string) "message" msg message;
-      Alcotest.(check bool) "recoverable from JSON" true recoverable;
+      Alcotest.(check bool) "runtime failure stays non-recoverable" false recoverable;
       (match error_class with
-       | Some Agent_sdk.Types.Transient -> ()
-       | _ -> Alcotest.fail "expected transient error_class from JSON")
+       | Some Agent_sdk.Types.Unknown -> ()
+       | _ -> Alcotest.fail "expected typed runtime failure mapping")
 
 let test_to_oas_typed_result_preserves_workflow_rejection () =
   Unix.putenv "MASC_TOOL_EXTERNALIZE" "0";
@@ -189,9 +188,6 @@ let test_to_oas_typed_result_preserves_transient_failure_class () =
      | Some Agent_sdk.Types.Transient -> ()
      | _ -> Alcotest.fail "expected transient error_class")
 
-(* --- Externalize round-trip needs an isolated test process due to the
-       lazy singleton. We exercise it via the env-aware path. --- *)
-
 let test_round_trip_through_oas () =
   Unix.putenv "MASC_TOOL_EXTERNALIZE" "0";
   let payload = String.make 5000 'p' in
@@ -207,33 +203,52 @@ let test_round_trip_through_oas () =
 (* --- Marker encoding round-trip via the bridge --- *)
 
 let test_externalize_with_temp_base_path () =
-  with_temp_base_path (fun dir ->
-      (* This test only succeeds when run BEFORE any other test that
-         resolved [blob_store_lazy] with a different base_path. The
-         lazy is one-shot per-process so we either get our path or the
-         test is skipped (None branch). Either way the assertion below
-         passes — we only assert "either externalized correctly OR
-         passed through unchanged". *)
+  with_temp_base_path (fun _dir ->
       Unix.putenv "MASC_TOOL_EXTERNALIZE" "1";
       let payload = String.make 4096 'z' in
       let result = B.maybe_externalize payload in
-      if String.length result < String.length payload then begin
-        Alcotest.(check bool)
-          "encoded as marker" true (O.is_marker result);
-        match O.decode_from_oas result with
-        | O.Stored { sha256; bytes; _ } ->
-            Alcotest.(check int) "byte count" (String.length payload) bytes;
-            Alcotest.(check int) "sha length" 64 (String.length sha256)
-        | O.Inline _ -> Alcotest.fail "expected Stored after externalize"
-      end
-      else
-        (* Lazy already resolved to None earlier in the suite; the
-           passthrough behavior is also correct. *)
-        Alcotest.(check string) "passthrough" payload result;
-      ignore dir)
+      Alcotest.(check bool) "encoded as marker" true (O.is_marker result);
+      match O.decode_from_oas result with
+      | O.Stored { sha256; bytes; _ } ->
+        Alcotest.(check int) "byte count" (String.length payload) bytes;
+        Alcotest.(check int) "sha length" 64 (String.length sha256)
+      | O.Inline _ -> Alcotest.fail "expected Stored after externalize")
+
+let test_blob_store_failure_preserves_original_bytes () =
+  let path = Filename.temp_file "masc_bridge_not_a_directory" "" in
+  let prev_base = Sys.getenv_opt "MASC_BASE_PATH" in
+  let prev_base_input = Sys.getenv_opt "MASC_BASE_PATH_INPUT" in
+  let prev_disable = Sys.getenv_opt "MASC_TOOL_EXTERNALIZE" in
+  let prev_threshold = Sys.getenv_opt "MASC_TOOL_EXTERNALIZE_THRESHOLD_BYTES" in
+  let restore () =
+    (match prev_base with
+     | Some value -> Unix.putenv "MASC_BASE_PATH" value
+     | None -> Unix.putenv "MASC_BASE_PATH" "");
+    (match prev_base_input with
+     | Some value -> Unix.putenv "MASC_BASE_PATH_INPUT" value
+     | None -> Unix.putenv "MASC_BASE_PATH_INPUT" "");
+    (match prev_disable with
+     | Some value -> Unix.putenv "MASC_TOOL_EXTERNALIZE" value
+     | None -> Unix.putenv "MASC_TOOL_EXTERNALIZE" "");
+    (match prev_threshold with
+     | Some value -> Unix.putenv "MASC_TOOL_EXTERNALIZE_THRESHOLD_BYTES" value
+     | None -> Unix.putenv "MASC_TOOL_EXTERNALIZE_THRESHOLD_BYTES" "");
+    Sys.remove path
+  in
+  Fun.protect
+    ~finally:restore
+    (fun () ->
+      Unix.putenv "MASC_BASE_PATH" path;
+      Unix.putenv "MASC_BASE_PATH_INPUT" path;
+      Unix.putenv "MASC_TOOL_EXTERNALIZE" "1";
+      Unix.putenv "MASC_TOOL_EXTERNALIZE_THRESHOLD_BYTES" "1";
+      let payload = "\000exact\nbytes\255" in
+      Alcotest.(check string)
+        "failed store returns original bytes"
+        payload
+        (B.maybe_externalize payload))
 
 let () =
-  (* Order matters because [Tool_bridge.blob_store_lazy] is one-shot. *)
   Alcotest.run "tool_bridge_externalize"
     [
       ( "passthrough modes",
@@ -248,11 +263,11 @@ let () =
       ( "to_oas_typed_result",
         [
           Alcotest.test_case "small inlined" `Quick test_to_oas_typed_small_inlined;
-          Alcotest.test_case "board post get preserves full content" `Quick
-            test_board_post_get_preserves_full_content;
+          Alcotest.test_case "tool name does not bypass externalization" `Quick
+            test_tool_identity_does_not_bypass_externalization;
           Alcotest.test_case "error inlined" `Quick test_to_oas_typed_error_inlined;
-          Alcotest.test_case "error recoverable from JSON" `Quick
-            test_to_oas_typed_error_uses_json_recoverable_flag;
+          Alcotest.test_case "error JSON cannot override typed metadata" `Quick
+            test_to_oas_typed_error_ignores_json_metadata;
           Alcotest.test_case "typed workflow rejection is deterministic" `Quick
             test_to_oas_typed_result_preserves_workflow_rejection;
           Alcotest.test_case "typed transient remains recoverable" `Quick
@@ -264,5 +279,7 @@ let () =
         [
           Alcotest.test_case "with temp base_path" `Quick
             test_externalize_with_temp_base_path;
+          Alcotest.test_case "store failure preserves original bytes" `Quick
+            test_blob_store_failure_preserves_original_bytes;
         ] );
     ]

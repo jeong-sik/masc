@@ -50,6 +50,7 @@ let make_meta name =
       ; "trace_id", `String ("trace-" ^ name)
       ; "goal", `String "write containment test"
       ; "sandbox_profile", `String "docker"
+      ; "always_allow", `Bool true
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
@@ -78,7 +79,7 @@ let setup f =
     (fun () ->
        Keeper_registry.clear ();
        let config = Workspace.default_config base in
-       let meta = make_meta "tester" in
+       let meta = { (make_meta "tester") with always_allow = Some true } in
        let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
        ensure_dir playground;
        let (_registered : Keeper_registry.registry_entry) =
@@ -93,24 +94,7 @@ let parse_ok raw =
   parse raw |> Json.member "ok" |> Json.to_bool_option |> Option.value ~default:false
 ;;
 
-let parse_error raw = parse raw |> Json.member "error" |> Json.to_string_option
-
-let contains_substring ~needle text =
-  let nlen = String.length needle in
-  let tlen = String.length text in
-  let rec loop i =
-    if nlen = 0
-    then true
-    else if i + nlen > tlen
-    then false
-    else if String.sub text i nlen = needle
-    then true
-    else loop (i + 1)
-  in
-  loop 0
-;;
-
-let test_docker_write_blocks_project_root_even_if_allowlisted () =
+let test_docker_write_allows_explicit_root () =
   setup
   @@ fun ~config ~meta ~playground:_ ->
   let meta = { meta with allowed_paths = [ config.base_path ] } in
@@ -127,16 +111,10 @@ let test_docker_write_blocks_project_root_even_if_allowlisted () =
             ; "mode", `String "overwrite"
             ; "content", `String "must not land"
             ])
+      ()
   in
-  Alcotest.(check bool) "ok=false" false (parse_ok raw);
-  (match parse_error raw with
-   | None -> Alcotest.fail "expected containment error"
-   | Some msg ->
-     Alcotest.(check bool)
-       "error mentions symmetric sandbox guard"
-       true
-       (contains_substring ~needle:"symmetric_sandbox_blocked" msg));
-  Alcotest.(check bool) "root file not created" false (Fs_compat.file_exists path)
+  if not (parse_ok raw) then Alcotest.failf "expected ok response, got: %s" raw;
+  Alcotest.(check string) "content landed" "must not land" (Fs_compat.load_file path)
 ;;
 
 let test_docker_write_allows_playground () =
@@ -155,6 +133,7 @@ let test_docker_write_allows_playground () =
             ; "mode", `String "overwrite"
             ; "content", `String "allowed"
             ])
+      ()
   in
   if not (parse_ok raw) then Alcotest.failf "expected ok response, got: %s" raw;
   Alcotest.(check string) "content landed" "allowed" (Fs_compat.load_file path)
@@ -165,9 +144,9 @@ let () =
     "Keeper_fs_edit_containment"
     [ ( "fs_edit"
       , [ Alcotest.test_case
-            "docker write blocks project root even if allowlisted"
+            "docker write allows explicit root outside playground"
             `Quick
-            test_docker_write_blocks_project_root_even_if_allowlisted
+            test_docker_write_allows_explicit_root
         ; Alcotest.test_case
             "docker write allows playground"
             `Quick

@@ -13,10 +13,7 @@ type autonomous_blocker =
     must not reclassify pause/dead states independently. *)
 type pause_kind =
   | Active
-  | Reconcile_gated
-  | Auto_recoverable
   | Operator_paused
-  | Latched_paused
   | Unclassified_paused
   | Dead_tombstone
 

@@ -3,7 +3,7 @@
 module Tool_result = Tool_result
 module Tool_dispatch = Tool_dispatch
 module Time_compat = Time_compat
-module Keeper_tools_oas_workflow = Masc.Keeper_tools_oas_workflow
+module Keeper_tool_execution = Masc.Keeper_tool_execution
 module Keeper_tools_oas = Masc.Keeper_tools_oas
 
 let tool_ok ?(tool_name = "") message =
@@ -24,22 +24,7 @@ let register_test_tool ~tool_name ~handler =
   Tool_dispatch.register_module_tag ~schemas:[ test_schema tool_name ] ~tag:Mod_misc
 ;;
 
-let str_contains haystack needle =
-  let hlen = String.length haystack in
-  let nlen = String.length needle in
-  if nlen = 0
-  then true
-  else if nlen > hlen
-  then false
-  else (
-    let rec loop i =
-      i + nlen <= hlen
-      && (String.sub haystack i nlen = needle || loop (i + 1))
-    in
-    loop 0)
-;;
-
-let test_ok_json_response () =
+let test_ok_json_looking_text_is_opaque () =
   let start = 1000.0 in
   let r =
     Tool_result.ok
@@ -49,14 +34,13 @@ let test_ok_json_response () =
   in
   Alcotest.(check bool) "success" true (Tool_result.is_success r);
   Alcotest.(check string) "tool_name" "masc_status" (Tool_result.tool_name r);
-  (* data should be parsed JSON, not a string *)
-  (match (Tool_result.data r) with
-   | `Assoc fields ->
-     Alcotest.(check bool)
-       "has status field"
-       true
-       (List.exists (fun (k, _) -> k = "status") fields)
-   | _ -> Alcotest.fail "expected Assoc");
+  (match Tool_result.data r with
+   | `String text ->
+     Alcotest.(check string)
+       "JSON-looking text preserved"
+       {|{"status":"ok","count":42}|}
+       text
+   | _ -> Alcotest.fail "expected opaque String");
   Alcotest.(check bool) "duration >= 0" true (Tool_result.duration_ms r >= 0.0)
 ;;
 
@@ -144,41 +128,112 @@ let test_exception_boundary_honors_explicit_failure_class () =
      | None -> "none")
 ;;
 
-let test_error_uses_structured_failure_class () =
+let test_error_message_cannot_override_failure_class () =
+  let message =
+    {|{"ok":false,"error":"evidence is required","failure_class":"workflow_rejection"}|}
+  in
   let r =
     Tool_result.error
       ~tool_name:"keeper_task_done"
       ~start_time:0.0
-      {|{"ok":false,"error":"evidence is required","failure_class":"workflow_rejection"}|}
+      message
   in
   Alcotest.(check bool) "failure" false (Tool_result.is_success r);
   Alcotest.(check string)
     "failure class"
-    "workflow_rejection"
+    "runtime_failure"
     (match (Tool_result.failure_class r) with
      | Some cls -> Tool_result.tool_failure_class_to_string cls
-     | None -> "none")
+     | None -> "none");
+  match Tool_result.data r with
+  | `String text -> Alcotest.(check string) "message remains opaque" message text
+  | _ -> Alcotest.fail "expected opaque String"
 ;;
 
-let test_ok_prefixed_json_response () =
+let test_ok_newline_json_suffix_is_opaque () =
   let start = 1000.0 in
+  let message =
+    "✅ Post created:\n{\"id\":\"post-1\",\"content\":\"hello\",\"ok\":true}"
+  in
   let r =
     Tool_result.ok
       ~tool_name:"masc_board_post"
       ~start_time:start
-      "✅ Post created:\n{\"id\":\"post-1\",\"content\":\"hello\",\"ok\":true}"
+      message
   in
-  match (Tool_result.data r) with
-  | `Assoc fields ->
-    Alcotest.(check string)
-      "id parsed"
-      "post-1"
-      Yojson.Safe.Util.(List.assoc "id" fields |> to_string);
-    Alcotest.(check string)
-      "content parsed"
-      "hello"
-      Yojson.Safe.Util.(List.assoc "content" fields |> to_string)
-  | _ -> Alcotest.fail "expected parsed JSON from prefixed payload"
+  match Tool_result.data r with
+  | `String text -> Alcotest.(check string) "suffix preserved" message text
+  | _ -> Alcotest.fail "expected opaque String"
+;;
+
+let test_keeper_execution_json_looking_string_is_opaque () =
+  let raw = {|{"ok":true,"result":{"secret":"not typed"}}|} in
+  let execution =
+    Tool_result.ok ~tool_name:"probe" ~start_time:0.0 raw
+    |> Keeper_tool_execution.of_tool_result
+  in
+  Alcotest.(check string) "raw text preserved" raw execution.raw_output;
+  Alcotest.(check bool)
+    "opaque string preserved as producer data"
+    true
+    (match execution.data with
+     | Some (`String actual) -> String.equal raw actual
+     | Some _ | None -> false)
+;;
+
+let test_keeper_execution_preserves_explicit_typed_data () =
+  let data = `Assoc [ "result", `Assoc [ "typed", `Bool true ] ] in
+  let execution =
+    Tool_result.make_ok ~tool_name:"probe" ~start_time:0.0 ~data ()
+    |> Keeper_tool_execution.of_tool_result
+  in
+  Alcotest.(check bool)
+    "typed data preserved"
+    true
+    (match execution.data with
+     | Some actual -> Yojson.Safe.equal data actual
+     | None -> false)
+;;
+
+let test_oas_projection_never_parses_opaque_text () =
+  let raw =
+    {|{"failure_class":"workflow_rejection","error":"fabricated"}|}
+  in
+  let projected =
+    Keeper_tools_oas.normalize_tool_result ~success:true ~data:None raw
+  in
+  Alcotest.(check bool)
+    "JSON-looking string stays result text"
+    true
+    (Yojson.Safe.equal
+       (`Assoc [ "ok", `Bool true; "result", `String raw ])
+       projected)
+;;
+
+let test_oas_projection_uses_only_explicit_typed_data () =
+  let raw = {|{"recoverable":true,"error":"fabricated"}|} in
+  let data =
+    `Assoc
+      [ "failure_class", `String "workflow_rejection"
+      ; "recoverable", `Bool false
+      ]
+  in
+  let projected =
+    Keeper_tools_oas.normalize_tool_result
+      ~success:false
+      ~data:(Some data)
+      raw
+  in
+  Alcotest.(check bool)
+    "typed detail is authoritative"
+    true
+    (Yojson.Safe.equal
+       (`Assoc
+          [ "ok", `Bool false
+          ; "error", `String raw
+          ; "detail", data
+          ])
+       projected)
 ;;
 
 let test_to_json () =
@@ -209,11 +264,10 @@ let test_message_json_roundtrip () =
   let json_str = {|{"key":"value"}|} in
   let r = Tool_result.ok ~tool_name:"test" ~start_time:start json_str in
   let message = (Tool_result.message r) in
-  (* JSON roundtrip may normalize formatting *)
-  let reparsed = Yojson.Safe.from_string message in
-  match reparsed with
-  | `Assoc [ ("key", `String "value") ] -> ()
-  | _ -> Alcotest.fail "JSON roundtrip lost data"
+  Alcotest.(check string) "JSON-looking message is unchanged" json_str message;
+  match Tool_result.data r with
+  | `String text -> Alcotest.(check string) "data remains text" json_str text
+  | _ -> Alcotest.fail "expected opaque String"
 ;;
 
 let test_dispatch_structured () =
@@ -252,7 +306,11 @@ let test_make_ok_roundtrip () =
   match r with
   | Ok s ->
     Alcotest.(check string) "tool_name preserved" "masc_test" s.tool_name;
-    Alcotest.(check bool) "duration_ms >= 0" true (s.duration_ms >= 0.0)
+    Alcotest.(check bool) "duration_ms >= 0" true (s.duration_ms >= 0.0);
+    Alcotest.(check (option string))
+      "typed Assoc remains structured"
+      (Some "v")
+      Yojson.Safe.Util.(s.data |> member "k" |> to_string_option)
   | Error _ -> Alcotest.fail "make_ok produced Error"
 ;;
 
@@ -357,230 +415,14 @@ let test_keeper_done_schema_uses_result_and_evidence_refs () =
     required
 ;;
 
-let test_workflow_marker_accepts_notes_as_evidence_message () =
-  let input =
-    `Assoc
-      [ "task_id", `String "task-001"
-      ; "notes", `String "changed files, ran tests, see receipt:turn-1"
-      ]
-  in
-  Alcotest.(check string)
-    "notes count as the evidence-bearing handoff message"
-    "has_evidence"
-    (Keeper_tools_oas_workflow.workflow_submit_evidence_marker input)
-;;
-
-let test_workflow_marker_accepts_top_level_evidence_refs () =
-  let input =
-    `Assoc
-      [ "task_id", `String "task-001"
-      ; "notes", `String "verification notes"
-      ; "evidence_refs", `List [ `String "artifact:logs/test-output.txt" ]
-      ]
-  in
-  Alcotest.(check string)
-    "top-level evidence_refs count as evidence"
-    "has_evidence"
-    (Keeper_tools_oas_workflow.workflow_submit_evidence_marker input)
-;;
-
-let test_workflow_recovery_with_tool_suggestion_routes_next_tool () =
-  let info : Keeper_tools_oas_workflow.workflow_rejection_info =
-    { task_id = Some "task-944"
-    ; rule_id = Some "task_done_requires_claimed_or_started"
-    ; tool_suggestion = Some "keeper_task_claim"
-    ; alternatives = [ "keeper_task_claim"; "keeper_tasks_list" ]
-    ; hint = Some "Claim it first"
-    ; scope_policy = Keeper_tools_oas_workflow.Observe_scope
-    }
-  in
-  let instruction =
-    Keeper_tools_oas_workflow.workflow_rejection_recovery_instruction
-      ~tool_name:"keeper_task_done"
-      ~count:1
-      info
-  in
-  Alcotest.(check bool)
-    "routes to suggested tool"
-    true
-    (str_contains instruction "Use keeper_task_claim next");
-  Alcotest.(check bool)
-    "does not invite same done retry"
-    false
-    (str_contains instruction "retry this keeper_task_done call")
-;;
-
-let test_workflow_recovery_fields_require_next_tool () =
-  let raw =
-    {|{"ok":false,"error":"[TaskError] Task task-944 is still todo. Claim/start it first, then mark it done.","failure_class":"workflow_rejection","error_class":"deterministic","recoverable":false,"hint":"Claim it first.","diagnosis":{"rule_id":"task_done_requires_claimed_or_started","tool_suggestion":"keeper_task_claim","scope_policy":"observe"}}|}
-  in
-  let fields =
-    Keeper_tools_oas_workflow.workflow_rejection_recovery_fields
-      ~tool_name:"keeper_task_done"
-      ~count:1
-      raw
-  in
-  let required_next_tool =
-    match List.assoc_opt "required_next_tool" fields with
-    | Some (`String value) -> value
-    | _ -> Alcotest.fail "missing required_next_tool"
-  in
-  let instruction =
-    match List.assoc_opt "workflow_rejection_recovery" fields with
-    | Some (`Assoc recovery) ->
-      (match List.assoc_opt "instruction" recovery with
-       | Some (`String value) -> value
-       | _ -> Alcotest.fail "missing recovery instruction")
-    | _ -> Alcotest.fail "missing workflow_rejection_recovery"
-  in
-  Alcotest.(check string)
-    "required next tool"
-    "keeper_task_claim"
-    required_next_tool;
-  Alcotest.(check bool)
-    "instruction names next tool"
-    true
-    (str_contains instruction "Use keeper_task_claim next");
-  Alcotest.(check bool)
-    "instruction avoids same-tool retry"
-    false
-    (str_contains instruction "retry this keeper_task_done call")
-  ;
-  Alcotest.(check bool)
-    "unrecoverable transition does not require same-turn self correction"
-    false
-    (match List.assoc_opt "self_correction_required" fields with
-     | Some (`Bool value) -> value
-     | _ -> true)
-  ;
-  Alcotest.(check bool)
-    "unrecoverable transition is terminal"
-    true
-    (match List.assoc_opt "workflow_rejection_terminal" fields with
-     | Some (`Bool value) -> value
-     | _ -> false)
-;;
-
-let test_workflow_recovery_terminal_without_next_tool_does_not_retry () =
-  let raw =
-    {|{"ok":false,"error":"Invalid task state: cancelled is terminal","failure_class":"workflow_rejection","error_class":"deterministic","recoverable":false,"diagnosis":{"rule_id":"task_transition_invalid_state","scope_policy":"observe"}}|}
-  in
-  let fields =
-    Keeper_tools_oas_workflow.workflow_rejection_recovery_fields
-      ~tool_name:"masc_transition"
-      ~count:1
-      raw
-  in
-  let instruction =
-    match List.assoc_opt "workflow_rejection_recovery" fields with
-    | Some (`Assoc recovery) ->
-      (match List.assoc_opt "instruction" recovery with
-       | Some (`String value) -> value
-       | _ -> Alcotest.fail "missing terminal recovery instruction")
-    | _ -> Alcotest.fail "missing terminal workflow rejection recovery"
-  in
-  Alcotest.(check bool)
-    "terminal instruction forbids same-tool retry"
-    true
-    (str_contains instruction "Do not retry this masc_transition call");
-  Alcotest.(check bool)
-    "terminal rejection does not require self correction"
-    false
-    (match List.assoc_opt "self_correction_required" fields with
-     | Some (`Bool value) -> value
-     | _ -> true)
-;;
-
-let test_nested_workflow_payload_preserves_unrecoverable_boundary () =
-  let nested =
-    `Assoc
-      [ "ok", `Bool false
-      ; "error", `String "cancelled is terminal"
-      ; "failure_class", `String "workflow_rejection"
-      ; "error_class", `String "deterministic"
-      ; "recoverable", `Bool false
-      ; "diagnosis", `Assoc [ "rule_id", `String "task_transition_invalid_state" ]
-      ]
-  in
-  let outer =
-    `Assoc
-      [ "ok", `Bool false
-      ; "error", `String (Yojson.Safe.to_string nested)
-      ; "failure_class", `String "workflow_rejection"
-      ; "error_class", `String "transient"
-      ; "recoverable", `Bool true
-      ]
-  in
-  let payload =
-    match Keeper_tools_oas_workflow.workflow_rejection_payload_of_json outer with
-    | Some payload -> payload
-    | None -> Alcotest.fail "nested workflow payload was not classified"
-  in
-  Alcotest.(check bool)
-    "nested recoverability remains terminal"
-    true
-    (Keeper_tools_oas_workflow.workflow_rejection_should_skip_retry payload);
-  let recovery_fields =
-    Keeper_tools_oas_workflow.workflow_rejection_recovery_fields
-      ~tool_name:"masc_transition"
-      ~count:1
-      (Yojson.Safe.to_string outer)
-  in
-  let normalized =
-    Keeper_tools_oas.normalize_tool_result
-      ~workflow_rejection_recovery_fields:recovery_fields
-      ~success:false
-      (Yojson.Safe.to_string outer)
-    |> Yojson.Safe.from_string
-  in
-  Alcotest.(check bool)
-    "normalizer does not request self correction for terminal rejection"
-    false
-    Yojson.Safe.Util.(member "self_correction_required" normalized |> to_bool)
-;;
-
-let test_workflow_recovery_uses_alternatives_without_tool_suggestion () =
-  let raw =
-    {|{"ok":false,"error":"task_id is required","failure_class":"workflow_rejection","alternatives":["keeper_task_claim","keeper_tasks_list"],"diagnosis":{"rule_id":"keeper_task_argument_rejected","scope_policy":"observe"}}|}
-  in
-  let fields =
-    Keeper_tools_oas_workflow.workflow_rejection_recovery_fields
-      ~tool_name:"keeper_task_done"
-      ~count:1
-      raw
-  in
-  let suggested_next_tool =
-    match List.assoc_opt "suggested_next_tool" fields with
-    | Some (`String value) -> value
-    | _ -> Alcotest.fail "missing suggested_next_tool"
-  in
-  let instruction =
-    match List.assoc_opt "workflow_rejection_recovery" fields with
-    | Some (`Assoc recovery) ->
-      (match List.assoc_opt "instruction" recovery with
-       | Some (`String value) -> value
-       | _ -> Alcotest.fail "missing recovery instruction")
-    | _ -> Alcotest.fail "missing workflow_rejection_recovery"
-  in
-  Alcotest.(check string)
-    "suggested next tool"
-    "keeper_task_claim"
-    suggested_next_tool;
-  Alcotest.(check bool)
-    "instruction names alternative tool"
-    true
-    (str_contains instruction "Use keeper_task_claim");
-  Alcotest.(check bool)
-    "instruction avoids same-tool retry"
-    false
-    (str_contains instruction "retry this keeper_task_done call")
-;;
-
 let () =
   Alcotest.run
     "Tool_result"
     [ ( "ok/error"
-      , [ Alcotest.test_case "json response" `Quick test_ok_json_response
+      , [ Alcotest.test_case
+            "JSON-looking success text stays opaque"
+            `Quick
+            test_ok_json_looking_text_is_opaque
         ; Alcotest.test_case "plain string" `Quick test_error_plain_string
         ; Alcotest.test_case
             "plain dispatch failure does not infer from message"
@@ -599,13 +441,29 @@ let () =
             `Quick
             test_exception_boundary_honors_explicit_failure_class
         ; Alcotest.test_case
-            "structured failure_class is honored"
+            "failure message cannot override class"
             `Quick
-            test_error_uses_structured_failure_class
+            test_error_message_cannot_override_failure_class
         ; Alcotest.test_case
-            "prefixed json response"
+            "newline JSON suffix stays opaque"
             `Quick
-            test_ok_prefixed_json_response
+            test_ok_newline_json_suffix_is_opaque
+        ; Alcotest.test_case
+            "keeper execution keeps JSON-looking string opaque"
+            `Quick
+            test_keeper_execution_json_looking_string_is_opaque
+        ; Alcotest.test_case
+            "keeper execution preserves typed data"
+            `Quick
+            test_keeper_execution_preserves_explicit_typed_data
+        ; Alcotest.test_case
+            "OAS projection does not parse opaque text"
+            `Quick
+            test_oas_projection_never_parses_opaque_text
+        ; Alcotest.test_case
+            "OAS projection uses explicit typed data"
+            `Quick
+            test_oas_projection_uses_only_explicit_typed_data
         ] )
     ; "to_json", [ Alcotest.test_case "fields present" `Quick test_to_json ]
     ; ( "message"
@@ -633,36 +491,6 @@ let () =
             "done schema uses result and evidence refs"
             `Quick
             test_keeper_done_schema_uses_result_and_evidence_refs
-        ; Alcotest.test_case
-            "workflow marker accepts notes"
-            `Quick
-            test_workflow_marker_accepts_notes_as_evidence_message
-        ; Alcotest.test_case
-            "workflow marker accepts top-level evidence_refs"
-            `Quick
-            test_workflow_marker_accepts_top_level_evidence_refs
-        ] )
-    ; ( "workflow rejection recovery"
-      , [ Alcotest.test_case
-            "tool suggestion routes next tool"
-            `Quick
-            test_workflow_recovery_with_tool_suggestion_routes_next_tool
-        ; Alcotest.test_case
-            "recovery fields require next tool"
-            `Quick
-            test_workflow_recovery_fields_require_next_tool
-        ; Alcotest.test_case
-            "recovery fields use alternatives"
-            `Quick
-            test_workflow_recovery_uses_alternatives_without_tool_suggestion
-        ; Alcotest.test_case
-            "terminal recovery does not retry same tool"
-            `Quick
-            test_workflow_recovery_terminal_without_next_tool_does_not_retry
-        ; Alcotest.test_case
-            "nested terminal recovery stays typed"
-            `Quick
-            test_nested_workflow_payload_preserves_unrecoverable_boundary
         ] )
     ]
 ;;

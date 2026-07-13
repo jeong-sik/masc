@@ -220,7 +220,7 @@ atd `oas_payload` variant constructor 이름 (`Agent_started` 등) 이 wire `eve
 
 ## 7. 비범위 (out of scope for A0.1)
 
-- 다른 emitter (`lib/keeper/keeper_approval_queue.ml`, `lib/governance_pipeline.ml`, `lib/server/server_dashboard_http*.ml`, `lib/workspace_goals.ml`) 의 ad-hoc Yojson — **Wave 2 이후**
+- 다른 emitter (`lib/keeper/keeper_approval_queue.ml`, `lib/keeper/keeper_gate.ml`, `lib/server/server_dashboard_http*.ml`, `lib/workspace_goals.ml`) 의 ad-hoc Yojson — **Wave 2 이후**
 - Frontend TS gen (atdts) — **A0.3**
 - `SSEMessageSchema` 교체 — **A0.4**
 - OAS event passthrough 정책 — **A0.2 또는 별 RFC**

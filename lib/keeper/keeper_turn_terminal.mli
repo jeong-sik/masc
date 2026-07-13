@@ -53,8 +53,7 @@ val of_disposition
   -> t
 
 val of_failure
-  :  ?post_commit_ambiguous:bool
-  -> ?tool_call_count:int
+  :  ?tool_call_count:int
   -> raw_error:string
   -> Agent_sdk.Error.sdk_error
   -> t

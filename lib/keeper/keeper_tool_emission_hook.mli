@@ -2,18 +2,16 @@
     multimodal pipeline (Cycle 27).
 
     Layer above K3: K3 ([Multimodal.Tool_emission]) provides the
-    deterministic detector + emitter that turns a single tagged JSON
-    result into the [working_context["multimodal_artifacts"]] bag.
-    K4 wires that detector into the live keeper turn so tool authors
-    do not need to write any keeper-side glue — they only set the
-    two reserved JSON keys (see [Multimodal.Tool_emission]) and the
-    rest happens automatically.
+    deterministic detector + emitter that turns a single producer-owned typed
+    JSON result into the [working_context["multimodal_artifacts"]] bag. K4
+    captures that typed value at the Keeper execution boundary; model-facing
+    text is never parsed or promoted into structured data.
 
     Pipeline:
 
-      keeper agent runs                  ← Agent.run
+      keeper tool executes               ← Keeper_tool_execution.data
         │
-        │ each PostToolUse event
+        │ successful typed result
         ▼
       [accumulator]                      ← K4 (this module)
         │
@@ -29,49 +27,22 @@
         ▼
       Multimodal.Workspace_holder
 
-    Feature flag: [MASC_TOOL_EMISSION] (default off). When off,
-    [make_post_tool_use_hook] still installs but is a no-op, and
-    [drain_into_working_context] returns the working_context
-    unchanged. Independent of [MASC_MULTIMODAL] (K1) — both must be
-    on for the full chain. *)
+    The typed capture and wire-in are part of the normal Keeper runtime. They
+    are not rollout-gated: providers and models remain configurable, while an
+    external effect still crosses Gate at the tool execution boundary. *)
 
-(** Per-turn mutable accumulator. Holds parsed
-    [Yojson.Safe.t] results captured during Agent.run. Thread-safe
-    via [Stdlib.Mutex] (PostToolUse hooks may fire from worker
-    fibers). *)
+(** Per-turn mutable accumulator. Holds producer-owned typed
+    [Yojson.Safe.t] results captured during Keeper tool execution. Thread-safe
+    via [Stdlib.Mutex] because Keeper tool handlers may run on worker fibers. *)
 type accumulator
 
 (** Allocate a fresh empty accumulator. *)
 val create_accumulator : unit -> accumulator
 
-(** Reads the [MASC_TOOL_EMISSION] env var. Returns [true] for
-    [1], [true], [TRUE]; [false] otherwise (including unset). *)
-val masc_tool_emission_enabled : unit -> bool
-
-(** Build a [PostToolUse] hook handler that captures tool output
-    content as JSON into the accumulator.
-
-    The handler is a no-op when [masc_tool_emission_enabled ()] is
-    [false]. Parse failures (non-JSON tool output) are silently
-    ignored — only valid JSON enters the accumulator.
-
-    All hook events return [Continue]. The hook is purely
-    observational: it never aborts a tool call, never adjusts
-    params, never elicits input. *)
-val make_post_tool_use_hook : accumulator -> Agent_sdk.Hooks.hook
-
-(** Wrap an existing [Agent_sdk.Hooks.hooks] record so that
-    [post_tool_use] also routes through the K4 accumulator hook.
-
-    If the record already has a [post_tool_use] hook, both hooks
-    fire in sequence; the original hook's decision is preserved
-    (the K4 hook's [Continue] is overridden by the original's
-    decision). If the record has no [post_tool_use] hook, only the
-    K4 hook is installed. *)
-val install_into_hooks :
-  accumulator ->
-  Agent_sdk.Hooks.hooks ->
-  Agent_sdk.Hooks.hooks
+(** Capture one producer-owned typed result. Only a JSON object can carry the
+    reserved multimodal fields; every other JSON variant, including a
+    JSON-looking [`String], is ignored without reparsing. *)
+val capture_typed_result : accumulator -> Yojson.Safe.t -> unit
 
 (** Drain the accumulator and merge any tagged tool results into
     [working_context["multimodal_artifacts"]] via
@@ -80,8 +51,7 @@ val install_into_hooks :
     After draining, the accumulator is empty (so subsequent turns
     start fresh).
 
-    When [masc_tool_emission_enabled ()] is [false] OR the
-    accumulator is empty, returns [working_context] unchanged. *)
+    When the accumulator is empty, returns [working_context] unchanged. *)
 val drain_into_working_context :
   accumulator ->
   working_context:Yojson.Safe.t option ->
@@ -108,11 +78,10 @@ val global_accumulator : accumulator
 (** Tier K4c — per-keeper accumulator registry.
 
     Look up (or lazily create) the accumulator owned by [keeper_name].
-    Both the producer side ([Keeper_run_tools.install_into_hooks]
-    pre-Agent.run) and the consumer side
-    ([Keeper_post_turn.apply_tool_emission_wirein] post-Agent.run) MUST
-    pass the same [keeper_name] so the in-flight items captured during
-    a turn drain back into the same working_context.
+    The producer execution boundary and
+    [Keeper_post_turn.apply_tool_emission_wirein] MUST pass the same
+    [keeper_name] so in-flight items captured during a turn drain back into the
+    same working_context.
 
     The keeper name is the canonical identifier (
     [Keeper_metadata.t.name] / [lifecycle.updated_meta.name]) — stable
@@ -120,6 +89,10 @@ val global_accumulator : accumulator
 
     Thread-safe; safe for concurrent calls from multiple keeper fibers. *)
 val accumulator_for_keeper : string -> accumulator
+
+(** Keeper-keyed form of {!capture_typed_result}. *)
+val capture_typed_result_for_keeper :
+  keeper_name:string -> Yojson.Safe.t -> unit
 
 (** Snapshot of keeper names with a registered accumulator, in
     ascending order. Useful for metrics/diagnostics. *)

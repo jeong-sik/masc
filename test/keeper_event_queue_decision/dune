@@ -1,3 +1,0 @@
-(test
- (name test_keeper_event_queue_decision)
- (libraries masc masc.keeper_runtime))

@@ -4,7 +4,7 @@
 import { signal } from '@preact/signals'
 import type { RouteState, TabId } from './types'
 import { VALID_TABS } from './types'
-import { normalizeRouteParams, sectionItemsForTab } from './config/navigation'
+import { normalizeRouteParams, sectionItemsForTab, SECTION_REDIRECTS } from './config/navigation'
 import { cockpitTargetForParams, normalizeCockpitMode } from './cockpit-entrypoints'
 
 const DEFAULT_ROUTE: RouteState = { tab: 'overview', params: {}, postId: null }
@@ -139,7 +139,10 @@ function parseSegments(
   if (segments[0] === 'command' && segments[1]) {
     const nextParams = { ...params }
     const second = decodeSafe(segments[1])
-    if (`command:${second}` in CROSS_SURFACE_SECTION_REDIRECTS) {
+    if (
+      `command:${second}` in CROSS_SURFACE_SECTION_REDIRECTS
+      || `command:${second}` in SECTION_REDIRECTS
+    ) {
       nextParams.section = second
     } else if (!VALID_COMMAND_SECTIONS.has(second)) {
       console.warn('[router] unknown command section, falling back to operations', second)

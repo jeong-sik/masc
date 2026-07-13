@@ -42,7 +42,6 @@ let () =
     ; "agent_error_tripwire_violation:tripwire=y"
     ; "agent_error_idle_detected:consecutive_idle_turns=3"
     ; "agent_error_exit_condition_met:turn=4"
-    ; "completion_contract_violation:completion_contract"
     ; "api_error_timeout"
     ; "provider_error"
     ; "runtime_exhausted"

@@ -46,8 +46,7 @@ let board_tools : Masc_domain.tool_schema list =
                 [ ( "content"
                   , `Assoc
                       [ "type", `String "string"
-                      ; "maxLength", `Int 4000
-                      ; "description", `String "Post body text (max 4000 chars)"
+                      ; "description", `String "Post body text"
                       ] )
                 ; ( "hearth"
                   , `Assoc
@@ -104,16 +103,6 @@ let board_tools : Masc_domain.tool_schema list =
                                         ] )
                                   ] )
                             ] )
-                      ] )
-                ; ( "quantitative_evidence"
-                  , `Assoc
-                      [ ( "type"
-                        , `List [ `String "object"; `String "string"; `String "array" ] )
-                      ; ( "description"
-                        , `String
-                            "Required for code-count or line-number claims. Include the \
-                             exact command/output or checked count that supports the \
-                             quantitative claim." )
                       ] )
                 ] )
           ; "required", `List [ `String "content" ]
@@ -222,8 +211,7 @@ let board_tools : Masc_domain.tool_schema list =
                 ; ( "content"
                   , `Assoc
                       [ "type", `String "string"
-                      ; "maxLength", `Int 4000
-                      ; "description", `String "Comment content (max 4000 chars)"
+                      ; "description", `String "Comment content"
                       ] )
                 ] )
           ; "required", `List [ `String "post_id"; `String "content" ]

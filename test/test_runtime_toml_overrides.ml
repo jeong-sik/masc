@@ -76,14 +76,13 @@ let test_applies_sleep_and_throttle_overrides () =
      sleep_chunk_sec = 1.5\n\
      board_wakeup_max = 6\n\
      [turn]\n\
-     chat_waiting_cap = 11\n\
      capacity_limit = 3\n\
      batch_limit = 9\n"
   in
   let count, overrides =
     Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
   in
-  check int "applied sleep/throttle overrides" 7 count;
+  check int "applied sleep/throttle overrides" 6 count;
   check (option string) "autoboot max canonical env"
     (Some "6")
     (List.assoc_opt "MASC_KEEPER_AUTOBOOT_MAX" overrides);
@@ -99,9 +98,6 @@ let test_applies_sleep_and_throttle_overrides () =
   check (option string) "capacity limit"
     (Some "3")
     (List.assoc_opt "MASC_KEEPER_TURN_CAPACITY_LIMIT" overrides);
-  check (option string) "chat waiting cap"
-    (Some "11")
-    (List.assoc_opt "MASC_KEEPER_TURN_CHAT_WAITING_CAP" overrides);
   check (option string) "batch limit"
     (Some "9")
     (List.assoc_opt "MASC_KEEPER_BATCH_LIMIT" overrides)
@@ -109,8 +105,6 @@ let test_applies_sleep_and_throttle_overrides () =
 let test_applies_turn_execution_overrides () =
   let doc = parse_or_fail
     "[turn]\n\
-     llm_rerank = true\n\
-     llm_rerank_runtime = \"tool_rerank_fast\"\n\
      temperature = 0.65\n\
      max_output_tokens = 8192\n\
      stream_idle_timeout_sec = 90\n\
@@ -119,13 +113,7 @@ let test_applies_turn_execution_overrides () =
   let count, overrides =
     Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
   in
-  check int "applied 6" 6 count;
-  check (option string) "llm rerank"
-    (Some "true")
-    (List.assoc_opt "MASC_KEEPER_LLM_RERANK" overrides);
-  check (option string) "llm rerank runtime"
-    (Some "tool_rerank_fast")
-    (List.assoc_opt "MASC_KEEPER_LLM_RERANK_RUNTIME" overrides);
+  check int "applied 4" 4 count;
   check (option string) "temperature"
     (Some "0.65")
     (List.assoc_opt "MASC_KEEPER_UNIFIED_TEMP" overrides);
@@ -138,28 +126,6 @@ let test_applies_turn_execution_overrides () =
   check (option string) "execution idle timeout"
     (Some "95")
     (List.assoc_opt "MASC_KEEPER_EXECUTION_IDLE_TIMEOUT_SEC" overrides)
-
-let test_applies_proactive_min_interval_override () =
-  let doc =
-    parse_or_fail
-      "[proactive]\n\
-       min_interval_sec = 1234\n\
-       noop_backoff_max_shift = 1\n\
-       idle_decay_max_periods = 2\n"
-  in
-  let count, overrides =
-    Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
-  in
-  check int "applied count" 3 count;
-  check (option string) "proactive min interval"
-    (Some "1234")
-    (List.assoc_opt "MASC_KEEPER_PROACTIVE_MIN_INTERVAL_SEC" overrides);
-  check (option string) "proactive noop backoff max shift"
-    (Some "1")
-    (List.assoc_opt "MASC_KEEPER_PROACTIVE_NOOP_BACKOFF_MAX_SHIFT" overrides);
-  check (option string) "proactive idle decay max periods"
-    (Some "2")
-    (List.assoc_opt "MASC_KEEPER_PROACTIVE_IDLE_DECAY_MAX_PERIODS" overrides)
 
 let test_applies_health_overrides () =
   let doc =
@@ -519,37 +485,12 @@ let test_resolved_turn_timeout_clamps_above_900s () =
   check (float 0.0001) "1800s env input clamps to new 900s ceiling"
     900.0 runtime.turn_timeout_sec.value
 
-(* #10388 budget invariant guard: with the lifted 900s ceiling, even
-   the maximum permitted turn timeout must still leave workspace for an
-   admission wait (default 180s) plus a minimum useful run (30s). The
-   plan-level invariant is
-     [turn_timeout - oas_guard >= admission_wait + min_useful_run]
-   with [oas_guard = 30] (#10388 origin), [admission_wait = 180] and
-   [min_useful_run = 30]. The test fails if a future change shrinks
-   the ceiling below 240s (180 + 30 + 30) or expands the admission
-   wait default past the budget. *)
-let test_budget_invariant_at_minimum_turn_timeout () =
-  with_clean_boot_overrides @@ fun () ->
-  with_env "MASC_KEEPER_TURN_TIMEOUT_SEC" (Some "240") @@ fun () ->
-  Keeper_runtime_resolved.init ();
-  let runtime = Keeper_runtime_resolved.current () in
-  let oas_guard = 30.0 in
-  let min_useful_run = 30.0 in
-  let admission_wait = runtime.admission_wait_timeout_sec.value in
-  let turn_timeout = runtime.turn_timeout_sec.value in
-  let budget_remaining =
-    turn_timeout -. oas_guard -. admission_wait -. min_useful_run
-  in
-  check bool "budget invariant holds at 240s lower bound"
-    true (budget_remaining >= 0.0)
-
 let () =
   run "runtime_toml_overrides"
     [ ( "resolve_overrides"
       , [ test_case "missing file returns 0 overrides" `Quick test_missing_file_returns_zero
         ; test_case "applies sleep/throttle overrides" `Quick test_applies_sleep_and_throttle_overrides
         ; test_case "applies turn execution overrides" `Quick test_applies_turn_execution_overrides
-        ; test_case "applies proactive min interval override" `Quick test_applies_proactive_min_interval_override
         ; test_case "applies health overrides" `Quick test_applies_health_overrides
         ; test_case "applies lifecycle enabled overrides (RFC-0297 P0-1)" `Quick test_applies_lifecycle_enabled_overrides
         ; test_case "applies memory overrides" `Quick test_applies_memory_overrides
@@ -576,6 +517,5 @@ let () =
         ; test_case "turn_timeout default stays 600s post-lift" `Quick test_resolved_turn_timeout_default_stays_600s
         ; test_case "turn_timeout accepts 900s env override" `Quick test_resolved_turn_timeout_accepts_900s_env_override
         ; test_case "turn_timeout clamps above 900s ceiling" `Quick test_resolved_turn_timeout_clamps_above_900s
-        ; test_case "#10388 budget invariant holds at 240s minimum" `Quick test_budget_invariant_at_minimum_turn_timeout
         ] )
     ]

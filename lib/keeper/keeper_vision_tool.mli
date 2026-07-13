@@ -138,6 +138,17 @@ val handle
   -> args:Yojson.Safe.t
   -> unit
   -> string
+
+val handle_with_outcome
+  :  ?complete:complete_fn
+  -> ?timeout_sec:float
+  -> ?sw:Eio.Switch.t
+  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> meta:Keeper_meta_contract.keeper_meta
+  -> args:Yojson.Safe.t
+  -> unit
+  -> Keeper_tool_execution.t
 (** Tool entry. [args] = [{ "artifact": handle; "query": string;
     "media_type"?: string }]. [media_type], when provided, must be a supported
     image MIME type; otherwise the stored bytes are sniffed fail-closed. Requires

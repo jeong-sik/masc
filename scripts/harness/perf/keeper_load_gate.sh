@@ -221,8 +221,6 @@ if [[ -d "$PERSONA_SOURCE_ROOT/config/personas/$PERSONA" ]]; then
 else
   echo "ERROR: persona dir not found: $PERSONA_SOURCE_ROOT/config/personas/$PERSONA" >&2; exit 1
 fi
-cp "$REPO_ROOT/config/tool_policy.toml" "$BASE_PATH/.masc/config/tool_policy.toml" 2>/dev/null || true
-
 MOCK_PORT="$(harness_pick_free_port)"
 cat > "$BASE_PATH/.masc/config/runtime.toml" <<EOF
 # Mock runtime: borrow a catalog-valid model id ($BORROW_MODEL is an
@@ -282,12 +280,6 @@ harness_seed_server_config "$REPO_ROOT" "$BASE_PATH" >/dev/null 2>&1 || true
   export MASC_KEEPER_BOOTSTRAP_ENABLED="true"
   export MASC_ORCHESTRATOR_ENABLED="1"
   export MASC_KEEPER_HEARTBEAT_INTERVAL_SEC="$HEARTBEAT_SEC"
-  # Sustain turns through the measurement window: disable smart gating (else
-  # should_emit Skip_idle's the keeper after a few no-work cycles) and raise the
-  # idle-turn cap so autonomous turns keep firing without real backlog.
-  export MASC_KEEPER_SMART_HEARTBEAT="false"
-  export MASC_KEEPER_MAX_IDLE_TURNS_AUTONOMOUS="50"
-  export MASC_KEEPER_MAX_IDLE_TURNS_REACTIVE="50"
   export GRAPHQL_API_KEY=""
   export GRAPHQL_URL="http://127.0.0.1:9/graphql"
   exec "$(harness_find_server_exe "$REPO_ROOT")" --port "$PORT" --base-path "$BASE_PATH"

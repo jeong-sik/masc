@@ -109,30 +109,16 @@ let supervise_keepalive
     if Keeper_registry.is_registered ~base_path:ctx.config.base_path meta.name
     then ()
     else
-      match Keeper_registry.spawn_slots_decision () with
-    | Error reason ->
-      Keeper_registry.record_spawn_slot_denied
-        ~keeper_name:meta.name
-        ~surface:"supervisor"
-        reason;
-      publish_lifecycle
-        ~event:
-          (Keeper_lifecycle_events.Custom_event
-             { verb = Keeper_lifecycle_events.Admission_denied
-             ; phase = Some Keeper_state_machine.Offline
-             })
-        meta.name
-        (Keeper_registry.spawn_slot_denial_reason_to_detail reason)
-        ()
-    | Ok () ->
-    Startup_helpers.log_persona_drift_if_missing ~base_path:ctx.config.base_path meta;
+    let () =
+      Startup_helpers.log_persona_drift_if_missing ~base_path:ctx.config.base_path meta
+    in
     (* Register in Keeper_registry — single source of truth. *)
-    (match
-       Keeper_registry.register_offline_if_admitted
-         ~base_path:ctx.config.base_path
-         meta.name
-         meta
-     with
+    match
+      Keeper_registry.register_offline_if_admitted
+        ~base_path:ctx.config.base_path
+        meta.name
+        meta
+    with
      | Error (Keeper_registry.Registration_shutdown_reserved operation_id) ->
        Log.Keeper.info
          "supervisor launch skipped %s because shutdown operation %s owns admission"
@@ -210,5 +196,5 @@ let supervise_keepalive
              })
         meta.name
         "supervised"
-        ())
+        ()
 ;;

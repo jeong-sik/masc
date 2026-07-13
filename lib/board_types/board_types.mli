@@ -7,7 +7,7 @@
     Design properties (enforced by callers, documented for readers):
     - ID validation (no path traversal; see {!Post_id} / {!Comment_id})
     - TTL optional (0 = permanent, default)
-    - Max limits enforced (no OOM; see {!Limits})
+    - Explicit persistence errors
     - Cryptographic IDs (no prediction)
     - Atomic writes (no corruption)
     - Automatic sweeper (no manual cleanup)
@@ -20,8 +20,6 @@ type board_error =
   | Invalid_id of string
   | Post_not_found of string
   | Comment_not_found of string
-  | Rate_limited of { retry_after : float }
-  | Capacity_exceeded of { current : int; max : int }
   | Io_error of string
   | Validation_error of string
   | Already_voted of string
@@ -78,18 +76,6 @@ type post_kind =
   | Automation_post
   | System_post
 [@@deriving tla]
-
-(** Legacy automation-author classification (RFC-0089 §4-3 G2). Defined
-    here so the board metric hook surface can reference it without a
-    dependency cycle through [Board_core_classify]; [Board_core_classify]
-    re-exports it via [include Board_types]. *)
-type automation_label =
-  | Auto_prefixed       (** Author starts with ["auto-"]. *)
-  | Qa_prefixed         (** Author starts with ["qa-"]. *)
-  | Researcher_named    (** Author contains ["researcher"]. *)
-  | Harness_named       (** Author contains ["harness"]. *)
-  | Smoke_named         (** Author contains ["smoke"]. *)
-  | Probe_named         (** Author contains ["probe"]. *)
 
 (** {1 Records — Mandatory TTL} *)
 
@@ -204,32 +190,17 @@ type sub_board = {
   post_count : int;
 }
 
-(** {1 Limits — Enforced, Not Optional}
-
-    All values resolved from [MASC_BOARD_*] env vars at module init,
-    falling back to the hardcoded defaults shown inline in the .ml. *)
+(** {1 Read pagination and sweeper defaults} *)
 
 module Limits : sig
-  val max_posts : int
-  val max_comments_per_post : int
-  val max_content_length : int
   val default_comment_page_limit : int
   (** Default number of comments returned by [masc_board_post_get]. *)
   val max_comment_page_limit : int
   (** Maximum comments returned by one [masc_board_post_get] page. *)
   val default_ttl_hours : int
   (** [0] — permanent (no expiry). *)
-  val automation_ttl_hours : int
-  val max_ttl_hours : int
   val sweeper_interval_sec : int
   val sweeper_batch_size : int
-  val author_post_cap : int
-  val max_sub_boards : int
-  (** Maximum number of sub-boards. Default 256. *)
-  val comment_rate_limit : int
-  (** Max comments per author within [comment_rate_window_sec]. 0 = disabled. Default 30. *)
-  val comment_rate_window_sec : int
-  (** Sliding window duration in seconds. Default 300 (5 min). *)
 end
 
 (** {1 Vote Direction} *)

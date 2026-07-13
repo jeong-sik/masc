@@ -64,43 +64,9 @@ val metric_pool_create_total : string
 
 include module type of Otel_policy_metric_names
 
-(** Total keepers auto-resumed by the self-healing circuit breaker in
-    [Keeper_supervisor.sweep_and_recover] after the per-keeper back-off
-    timer elapsed.  Labeled by [keeper].  A positive rate indicates the
-    system is self-healing from transient provider outages without operator
-    intervention.  A sustained zero rate while [auto_resume_after_sec] is
-    set in meta files indicates a sweep or meta-write regression. *)
-
-(** Total keepers whose auto-resume was blocked in
-    [Keeper_supervisor.sweep_and_recover] because the runtime health probe
-    reported unhealthy (failure ratio >= threshold).  Labeled by [keeper]
-    and [runtime].  A positive rate means the health gate is protecting
-    the fleet from resuming into a still-failing runtime. *)
-
-(** RFC-0020 Rule 2 evidence — incremented every time
-    [run_smart_heartbeat_gate] overrides a [Skip_busy] / [Skip_idle]
-    decision because the Event Layer queue
-    ([Keeper_registry_event_queue.snapshot]) was non-empty. A zero
-    rate against ongoing keeper activity means either the queue
-    write path (PR-C1 [wakeup_keeper ?stimulus]) is not firing or
-    the smart heartbeat is already returning [Emit] on its own —
-    either way operators can distinguish. Labels: [keeper]. *)
-
-(** Positive signal for the #12271 Skip_idle + Woken fix path. Increments
-    each time [run_smart_heartbeat_gate] observes an external [wakeup_keeper]
-    cut a Skip_idle backoff sleep short and the cycle was resumed
-    ([cycle_continues_after_wake] -> [true]). Operator-meaningful pair with
-    [masc_keeper_stale_termination_by_class_total] (class=idle_turn): a
-    healthy fleet should show non-zero rates here proportional to inbound
-    board signals, with the idle_turn kill rate trending toward zero. A
-    zero rate after operator-visible signals suggests either the wakeup
-    never reached the atomic, or a regression silently re-introduced
-    MissedWakeup (KeeperHeartbeat.tla bug action).
-    Labels: [keeper]. *)
-
 (** Total stimuli consumed at turn entry, classified by [stimulus_class].
     Labels: [keeper], [class]
-    (board_signal|bootstrap|no_progress_recovery|unsupported).
+    (board_signal|bootstrap|unsupported).
     Pairs with [masc_keeper_unsupported_stimulus_total] for unsupported-only
     drill-down with payload prefix. *)
 
@@ -108,25 +74,11 @@ include module type of Otel_policy_metric_names
     did not match any known stimulus class. Each increment represents a
     wake -> no_signal gap per #12684. Labels: [keeper]. *)
 
-(** Total times a keeper restart attempt landed at
-    [restart_count = max_restarts - 1], i.e. one attempt away from Dead.
-    Soft pre-warning; labeled by [keeper]. *)
-
 (** Total supervisor restart attempts for crashed keepers. Labels:
     [keeper]. *)
 
 (** Total supervisor restart outcomes. Labels:
     [keeper, outcome]. Outcome is one of [started | meta_unavailable]. *)
-
-(** PR-M (Leak 9): consecutive [provider_timeout] cycle FAILED strikes.
-    Labeled by [keeper] and [outcome]:
-    - [outcome=warn]: strike below [provider_timeout_strike_limit];
-      cycle continues, supervisor not yet involved.
-    - [outcome=promote]: strike at or above limit; [Keeper_fiber_crash]
-      raised so [Keeper_supervisor.sweep_and_recover] respawns the
-      fiber with a fresh context budget. Counter reset on any
-      successful turn. *)
-
 
 val metric_oas_bus_capacity : string
 (** Gauge: per-subscriber [Eio.Stream] capacity chosen at bus creation.
@@ -192,7 +144,7 @@ include module type of Otel_transport_metric_names
 
 (** Counter incremented when an OAS after-turn response is accepted but
     its response model field is empty. This tracks malformed or partial
-    provider response metadata, not keeper tool_access policy decisions. *)
+    provider response metadata. *)
 val metric_after_turn_response_model_empty : string
 
 val metric_after_turn_response_model_alias : string

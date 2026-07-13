@@ -9,8 +9,8 @@
     - [Keeper_memory_os_io.list_fact_store_keeper_ids] for the keeper list.
     - [Keeper_memory_os_io.read_facts_all] and file stat for facts count/bytes.
     - [Keeper_memory_os_io.events_path] + file stat for events bytes.
-    - [Keeper_memory_os_gc.run_gc ~dry_run:true] for TTL-expired and
-      near-duplicate counts without mutating the store.
+    - [Keeper_memory_os_gc.run_gc ~dry_run:true] for explicitly expired rows
+      without mutating the store.
     - [Otel_metric_store] provider-slot-busy counters for skipped librarian
       extraction attempts, grouped by keeper.
     - [Keeper_librarian_runtime.cadence_counter_entries] for the cadence table
@@ -31,7 +31,6 @@ type keeper_health =
 type alert_code =
   | Ttl_expired_on_disk
   | Near_duplicate
-  | Events_to_facts_ratio_high
   | Provider_slot_busy
 
 type alert_severity = Warn
@@ -39,7 +38,6 @@ type alert_severity = Warn
 type alert_target =
   | Ttl_expired_on_disk_target
   | Near_duplicate_target
-  | Events_to_facts_ratio_target
   | Provider_slot_busy_target
 
 type keeper_alert =
@@ -55,14 +53,6 @@ type keeper_alert =
 let ttl_expired_on_disk_threshold = 0.0
 let near_duplicate_threshold = 0.0
 
-(* Diagnostic threshold only: rows above this line are highlighted for
-   compaction attention, but no control-flow or pruning decision depends on it.
-   The backend owns the value and publishes it through [alert_summary.thresholds]
-   so the dashboard does not duplicate the literal. *)
-let events_to_facts_ratio_warn_threshold =
-  Keeper_memory_os_policy.events_to_facts_ratio_attention_threshold
-;;
-
 let provider_slot_busy_threshold = 0.0
 
 let provider_slot_busy_metric = Keeper_metrics.(to_string MemoryLaneProviderSlotBusy)
@@ -71,7 +61,6 @@ let provider_slot_busy_site = Keeper_librarian_runtime.memory_os_librarian_provi
 let alert_code_to_string = function
   | Ttl_expired_on_disk -> "ttl_expired_on_disk"
   | Near_duplicate -> "near_duplicate"
-  | Events_to_facts_ratio_high -> "events_to_facts_ratio_high"
   | Provider_slot_busy -> "provider_slot_busy"
 ;;
 
@@ -82,7 +71,6 @@ let alert_severity_to_string = function
 let alert_target_to_string = function
   | Ttl_expired_on_disk_target -> "ttl_expired_on_disk"
   | Near_duplicate_target -> "near_duplicate"
-  | Events_to_facts_ratio_target -> "events_to_facts_ratio"
   | Provider_slot_busy_target -> "provider_slot_busy"
 ;;
 
@@ -92,7 +80,6 @@ let alert_target_to_string = function
 let alert_label = function
   | Ttl_expired_on_disk -> "TTL"
   | Near_duplicate -> "중복"
-  | Events_to_facts_ratio_high -> "비율"
   | Provider_slot_busy -> "슬롯"
 ;;
 
@@ -122,17 +109,6 @@ let keeper_alerts h =
         ~message:"Near-duplicate Memory OS fact rows remain on disk; GC dry-run would deduplicate them."
         ~value:(float_of_int h.near_duplicate)
         ~threshold:near_duplicate_threshold
-      :: alerts
-    else alerts)
-  |> (fun alerts ->
-    if h.events_to_facts_ratio > events_to_facts_ratio_warn_threshold
-    then
-      alert
-        ~code:Events_to_facts_ratio_high
-        ~target:Events_to_facts_ratio_target
-        ~message:"Memory OS event bytes are high relative to fact bytes."
-        ~value:h.events_to_facts_ratio
-        ~threshold:events_to_facts_ratio_warn_threshold
       :: alerts
     else alerts)
   |> (fun alerts ->
@@ -200,6 +176,17 @@ let provider_slot_busy_for_keeper keeper_id =
   |> int_of_float
 ;;
 
+let duplicate_claim_identity_rows facts =
+  let counts = Hashtbl.create (List.length facts) in
+  List.iter
+    (fun fact ->
+       let key = Keeper_memory_os_types.claim_identity fact in
+       let count = Option.value ~default:0 (Hashtbl.find_opt counts key) in
+       Hashtbl.replace counts key (count + 1))
+    facts;
+  Hashtbl.fold (fun _ count total -> total + max 0 (count - 1)) counts 0
+;;
+
 let keeper_health ~keepers_dir ~now keeper_id =
   let facts =
     (* [read_facts_all] raises on malformed JSONL — treated as a read failure
@@ -215,8 +202,8 @@ let keeper_health ~keepers_dir ~now keeper_id =
     Keeper_memory_os_io.events_path_for_keepers_dir ~keepers_dir ~keeper_id
   in
   let events_bytes = file_size_bytes events_p in
-  (* dry_run keeps the scan read-only: it reports what TTL-expiry + dedup WOULD
-     prune without rewriting the store. *)
+  (* dry_run keeps the scan read-only: it reports only rows whose explicit
+     [valid_until] has passed, without rewriting the store. *)
   let gc_report =
     Keeper_memory_os_gc.run_gc_for_keepers_dir
       ~keepers_dir
@@ -233,7 +220,7 @@ let keeper_health ~keepers_dir ~now keeper_id =
   ; events_to_facts_ratio =
       float_of_int events_bytes /. float_of_int (max 1 facts_bytes)
   ; ttl_expired_on_disk = gc_report.ttl_expired
-  ; near_duplicate = gc_report.dedup_removed
+  ; near_duplicate = duplicate_claim_identity_rows facts
   ; provider_slot_busy = provider_slot_busy_for_keeper keeper_id
   }
 ;;
@@ -312,14 +299,11 @@ let keeper_memory_health_http_json ~base_path : Yojson.Safe.t =
                    entries) )
           ; "ttl_expired_keepers", `Int (alert_count_by_code Ttl_expired_on_disk)
           ; "near_duplicate_keepers", `Int (alert_count_by_code Near_duplicate)
-          ; ( "high_event_ratio_keepers"
-            , `Int (alert_count_by_code Events_to_facts_ratio_high) )
           ; "provider_slot_busy_keepers", `Int (alert_count_by_code Provider_slot_busy)
           ; ( "thresholds"
             , `Assoc
                 [ "ttl_expired_on_disk", `Float ttl_expired_on_disk_threshold
                 ; "near_duplicate", `Float near_duplicate_threshold
-                ; "events_to_facts_ratio", `Float events_to_facts_ratio_warn_threshold
                 ; "provider_slot_busy", `Float provider_slot_busy_threshold
                 ] )
           ] )

@@ -13,8 +13,7 @@
       dashboard/src/main.ts:21          -> import './styles/global.css'
       dashboard/src/styles/global.css:32 -> @import "./pipeline.css";
     pipeline.css therefore ships in every dashboard build despite its
-    selectors being SSR-rendered into Preact attributes — see
-    governance.html for the W01 pattern.
+    selectors being SSR-rendered into Preact attributes.
 
     Tokens SSOT:
       - dashboard/design-system/source_styles/tokens.generated.css

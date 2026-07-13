@@ -33,7 +33,6 @@ val all_turn_phases : Keeper_registry.packed_turn_phase list
 type decision_stage = Keeper_registry.decision_stage =
   | Decision_undecided
   | Decision_guard_ok
-  | Decision_gate_rejected
   | Decision_tool_policy_selected
 
 val all_decision_stages : Keeper_registry.packed_decision_stage list
@@ -58,7 +57,6 @@ type tla_action =
   | Action_select_tool_policy
   | Action_start_runtime_selection
   | Action_select_runtime
-  | Action_gate_rejected
   | Action_runtime_done
   | Action_runtime_exhausted
   | Action_finish_turn
@@ -197,14 +195,13 @@ type last_skip = {
   ls_reasons : string list;
 }
 
-(** Turn-livelock retry history, mirrored from
-    [registry_entry.livelock_state]. [Some _] while the turn-livelock guard
-    is tracking retries for the current turn; [None] when no livelock is in
-    progress. *)
-type livelock = {
-  ll_turn_id : int;
-  ll_attempts : int;
-  ll_first_started_at : float;
+(** Objective turn-attempt history mirrored from
+    [registry_entry.turn_attempt_state]. It is observability-only and never
+    controls execution. *)
+type turn_attempt = {
+  ta_turn_id : int;
+  ta_attempts : int;
+  ta_first_started_at : float;
 }
 
 (** Board consumption cursor, mirrored from
@@ -273,20 +270,15 @@ type snapshot = {
   run_id : string;
   ts : float;
   phase : Keeper_state_machine.phase;
-      (** Full 13-state keeper phase (RFC-0002, post-Zombie #14707). Previously
+      (** Raw Keeper lifecycle phase. Previously
           collapsed to a 7-state projection for dashboard brevity; now exposed
           raw so the fleet matrix renders every state with its own chip colour.
-          The 13-state alphabet matches
+          The lifecycle alphabet matches
           [specs/keeper-state-machine/KeeperStateMachine.tla] exactly. *)
   ktc_turn_phase : Keeper_registry.packed_turn_phase;
   kdp_decision : Keeper_registry.packed_decision_stage;
   kcl_runtime_state : runtime_state;
   kmc_compaction : Keeper_registry.packed_compaction_stage;
-  kcb_state : Keeper_failure_circuit_breaker.display_state;
-      (** 6th axis (LT-16-KCB). Observable circuit-breaker state —
-          never [Tripped] because the mutator resets [consecutive_count]
-          before snapshots can see it. See
-          {!Keeper_failure_circuit_breaker.display_state}. *)
   shared_measurement : Keeper_state_machine.context_actions option;
   invariants : invariants_check;
   conditions : Keeper_state_machine.conditions;
@@ -316,9 +308,8 @@ type snapshot = {
       (** Most recent deliberate skip verdict from the keepalive cycle.
           [None] until the first skip is observed. Lets operators diagnose
           {i why} a quiet keeper is idle instead of only seeing that it is. *)
-  livelock : livelock option;
-      (** Turn-livelock retry state. [None] when no livelock is in
-          progress. *)
+  turn_attempt : turn_attempt option;
+      (** Current turn-attempt observation. *)
   board_cursor : board_cursor;
       (** Board consumption cursor (ts + last consumed post id). Always
           present; [ts = 0.0] / [post_id = None] before the keeper has
@@ -348,8 +339,7 @@ type snapshot = {
           ≥2 caps the noop backoff multiplier at 4x. *)
   idle_seconds : int;
       (** Wall-clock seconds since the keeper last did something the
-          metrics layer treated as substantive. Compared against
-          [proactive.idle_sec] to gate scheduled-autonomous turns. *)
+          metrics layer treated as substantive. Observation only. *)
   last_turn_ts : float;
       (** Raw [runtime.usage.last_turn_ts] from the registry entry.
           Exposed for watchdog staleness diagnosis — the stale watchdog

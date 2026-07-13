@@ -168,7 +168,14 @@ let cleanup_zombies
         | Masc_domain.Claimed { assignee; _ }
         | Masc_domain.InProgress { assignee; _ }
           when List.exists (fun (n, _) -> n = assignee) !zombie_entries ->
-            (match (Atomic.get Workspace_hooks.force_release_task_fn) config ~agent_name:"keeper-gc" ~task_id:task.id () with
+            (match
+               (Atomic.get Workspace_hooks.reconcile_orphaned_task_fn)
+                 config
+                 ~task_id:task.id
+                 ~expected_assignee:assignee
+                 ~signal:`Inactive
+                 ()
+             with
              | Ok msg -> released_tasks := (task.id, msg) :: !released_tasks
              | Error e ->
                  if not (List.mem assignee !release_failed_agents) then
@@ -224,38 +231,16 @@ let cleanup_zombies
     end
   end
 
-(** Garbage collection - cleanup zombies, stale tasks, old messages *)
-let gc config ?(days=7) () =
-  let days = max 1 days in
+(** Explicit age-based garbage collection. The caller must choose the retention
+    horizon; this layer has no default retention policy. Agent lifecycle is not
+    part of GC and remains an explicit operator action. *)
+let gc config ~days () =
+  if days < 1 then invalid_arg "Workspace_gc.gc: days must be >= 1";
   ensure_initialized config;
 
   let results = ref [] in
 
-  (* 1. Cleanup zombies *)
-  let zombie_result = cleanup_zombies config in
-  let zombie_str =
-    match zombie_result with
-    | No_agents_dir -> "No agents directory"
-    | No_zombies -> "No zombie agents found"
-    | Cleaned { count; names; released_tasks; skipped } ->
-      let task_note =
-        if released_tasks = 0 then ""
-        else Printf.sprintf ", released %d orphan task(s)" released_tasks
-      in
-      if skipped > 0 then
-        Printf.sprintf
-          "Cleaned %d/%d zombie(s): %s%s (%d skipped due to errors)"
-          count
-          (count + skipped)
-          (String.concat ", " names)
-          task_note
-          skipped
-      else
-        Printf.sprintf "Cleaned up %d zombie agent(s): %s%s" count (String.concat ", " names) task_note
-  in
-  results := zombie_str :: !results;
-
-  (* 2. Archive terminal tasks (Done/Cancelled) older than N days, and
+  (* 1. Archive terminal tasks (Done/Cancelled) older than N days, and
         self-heal any non-terminal task a prior buggy GC pass stranded in the
         archive.
 
@@ -349,7 +334,7 @@ let gc config ?(days=7) () =
       Printf.sprintf "Restored %d non-terminal task(s) from archive" restore_count
       :: !results;
 
-  (* 3. Cleanup old messages - but preserve messages referencing open tasks *)
+  (* 2. Cleanup old messages - but preserve messages referencing open tasks *)
   let messages_path = messages_dir config in
   let old_msg_count = ref 0 in
   let preserved_count = ref 0 in
@@ -408,7 +393,7 @@ let gc config ?(days=7) () =
   end else
     results := Printf.sprintf "No old messages (threshold: %d days)" days :: !results;
 
-  (* 4. Cleanup backend pubsub - no-op for filesystem backend *)
+  (* 3. Cleanup backend pubsub - no-op for filesystem backend *)
   let pubsub_cleanup_count = ref 0 in
   (match backend_cleanup_pubsub config ~days ~max_messages:10000 with
    | Ok count when count > 0 ->
@@ -418,7 +403,7 @@ let gc config ?(days=7) () =
    | Error e ->
        results := Printf.sprintf "Backend pubsub cleanup failed: %s" (Backend_types.show_error e) :: !results);
 
-  (* 5. Cleanup orphan keeper sidecar files (.metrics.jsonl/.memory.jsonl without .json)
+  (* 4. Cleanup orphan keeper sidecar files (.metrics.jsonl/.memory.jsonl without .json)
         and orphan date-split metrics directories (<name>/metrics/ without <name>.json) *)
   let keeper_orphan_count = ref 0 in
   let pk_dir = Common.keepers_runtime_dir_of_base ~base_path:config.base_path in
@@ -484,7 +469,7 @@ let gc config ?(days=7) () =
   else
     results := "No orphan keeper files" :: !results;
 
-  (* 6. Archive completed/interrupted team sessions older than N days *)
+  (* 5. Archive completed/interrupted team sessions older than N days *)
   let session_archive_count = ref 0 in
   let ts_root = Filename.concat (Common.masc_dir_from_base_path ~base_path:config.base_path) "team-sessions" in
   if Sys.file_exists ts_root && Sys.is_directory ts_root then begin
@@ -522,7 +507,7 @@ let gc config ?(days=7) () =
   else
     results := "No team sessions to archive" :: !results;
 
-  (* 7. Hard-delete board artifacts (via hooks) *)
+  (* 6. Hard-delete board artifacts (via hooks) *)
   let board_artifact_count = (Atomic.get Workspace_hooks.cleanup_board_artifacts_fn) () in
   if board_artifact_count > 0 then
     results :=

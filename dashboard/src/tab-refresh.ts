@@ -107,8 +107,8 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
         const view = routeState.params.view
         if (view === 'tool-quality') return ['toolQuality']
         if (view === 'comparison') return ['execution', 'toolQuality']
-        // default + event-log + governance: keep the route visit light.
-        // Mounted fleet-health panels own telemetry/tool/governance polling.
+        // default + event-log + Gate: keep the route visit light.
+        // Mounted fleet-health panels own telemetry/tool/Gate polling.
         return ['namespaceTruth']
       }
       // Hidden diagnostic sections fall through here. See the

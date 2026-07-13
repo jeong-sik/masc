@@ -1,10 +1,10 @@
 (** Goals view — config-driven goal tree.
 
-    Phase 2.C 네 번째 탭. design_v2 IA의 "goals · convergence" 섹션.
+    Phase 2.C 네 번째 탭. design_v2 IA의 goals 섹션.
     Recursive tree — 각 node는 goal + 직속 task list + child goals.
 
     [`/api/v1/dashboard/goals`] 10s 폴링. Summary strip (total / active /
-    tasks done / convergence) + 접힌 tree. *)
+    tasks done) + 접힌 tree. *)
 
 open! Core
 open! Bonsai_web
@@ -42,7 +42,7 @@ stylesheet
 
   .goal_head {
     display: grid;
-    grid-template-columns: 1fr 120px;
+    grid-template-columns: 1fr;
     gap: 14px;
     align-items: baseline;
   }
@@ -70,28 +70,6 @@ stylesheet
   }
   .goal_meta_v { color: var(--text-bright); font-variant-numeric: tabular-nums; }
   .goal_meta_v_ok { color: var(--color-status-ok); font-variant-numeric: tabular-nums; }
-
-  .conv_bar_wrap {
-    text-align: right;
-    font-family: 'JetBrains Mono', ui-monospace, monospace;
-    font-size: 11px;
-    color: var(--color-fg-muted);
-    font-variant-numeric: tabular-nums;
-  }
-  .conv_bar {
-    margin-top: 4px;
-    height: 4px;
-    background: color-mix(in oklab, var(--color-status-ok) 12%, transparent);
-    position: relative;
-  }
-  .conv_bar_fill {
-    position: absolute;
-    left: 0;
-    top: 0;
-    bottom: 0;
-    background: var(--color-status-ok);
-  }
-
 
   .tasks {
     font-family: 'JetBrains Mono', ui-monospace, monospace;
@@ -146,7 +124,6 @@ stylesheet
       grid-template-columns: 1fr;
       gap: 8px;
     }
-    .conv_bar_wrap { text-align: left; }
     .goal_indent { margin-left: 12px; padding-left: 10px; }
   }
 
@@ -154,14 +131,12 @@ stylesheet
     .goal { border-width: 2px; border-color: var(--text-bright); }
     .goal_head { border-bottom-width: 2px; border-color: var(--text-bright); }
     .k { color: var(--text-bright); }
-    .conv_bar { outline: 1px solid var(--text-bright); }
     .task_dot { color: var(--text-bright); }
   }
 
   @media (forced-colors: active) {
     .task_dot_done { color: Highlight; }
     .task_dot_run { color: Mark; }
-    .conv_bar_fill { background: Highlight; }
     .goal_meta_v_ok { color: Highlight; }
   }
 |}]
@@ -211,30 +186,16 @@ let short_reason reason =
   else String.sub reason ~pos:0 ~len:96 ^ "..."
 ;;
 
-let blocker_label source =
-  match String.lowercase source with
-  | "goal_phase" -> "goal phase"
-  | "child_goal" -> "child goal"
-  | "approval" -> "approval"
-  | "keeper_runtime" -> "keeper runtime"
-  | "task_fsm" -> "task fsm"
-  | "stalled" -> "stalled"
-  | _ -> source
-;;
-
 let truth_meta_items (n : Goals_types.node) =
   List.filter_opt
     [ Option.map n.latest_keeper_ref ~f:(fun keeper -> "keeper " ^ keeper)
     ; Option.map n.latest_turn_ref ~f:(fun turn -> "turn " ^ Int.to_string turn)
-    ; Option.map n.stalled_since ~f:(fun ts -> "since " ^ ts)
+    ; Option.map n.stagnation_seconds ~f:(fun seconds ->
+        "idle " ^ Int.to_string seconds ^ "s")
     ]
 ;;
 
 let rec view_node ~(depth : int) (n : Goals_types.node) : Node.t =
-  let bar_fill_style =
-    Attr.create "style"
-      (Printf.sprintf "width:%d%%" (Int.clamp_exn n.convergence_pct ~min:0 ~max:100))
-  in
   let indent_attr =
     if depth > 0 then [ Style.goal_indent ] else []
   in
@@ -266,31 +227,8 @@ let rec view_node ~(depth : int) (n : Goals_types.node) : Node.t =
     else List.map n.children ~f:(view_node ~depth:(depth + 1))
   in
   let truth_meta = truth_meta_items n in
-  let blocker_box =
-    if String.equal n.blocking_source "none" || String.is_empty (String.strip n.blocking_reason)
-    then []
-    else
-      [ Node.div
-          ~attrs:[ Style.blocker ]
-          ([ Node.div
-              ~attrs:[ Style.blocker_k ]
-              [ Node.text (blocker_label n.blocking_source) ]
-          ; Node.div
-              ~attrs:[ Style.blocker_v ]
-              [ Node.text n.blocking_reason ]
-           ]
-           @
-           if List.is_empty truth_meta
-           then []
-           else
-             [ Node.div
-                 ~attrs:[ Style.blocker_meta ]
-                 [ Node.text (String.concat ~sep:" · " truth_meta) ]
-             ])
-      ]
-  in
   let truth_refs_box =
-    if (not (List.is_empty blocker_box)) || List.is_empty truth_meta
+    if List.is_empty truth_meta
     then []
     else
       [ Node.div
@@ -313,21 +251,7 @@ let rec view_node ~(depth : int) (n : Goals_types.node) : Node.t =
     (List.concat
        [ [ Node.div
              ~attrs:[ Style.goal_head ]
-             [ title_node
-             ; Node.div
-                 ~attrs:[ Style.conv_bar_wrap ]
-                 [ Node.text (Printf.sprintf "%d%%" n.convergence_pct)
-                 ; Node.div
-                     ~attrs:[ Style.conv_bar; Attr.role "progressbar"; Attr.create "aria-label" "Goal convergence"
-                            ; Attr.create "aria-valuenow" (Int.to_string n.convergence_pct)
-                            ; Attr.create "aria-valuemin" "0"
-                            ; Attr.create "aria-valuemax" "100" ]
-                     [ Node.div
-                         ~attrs:[ Style.conv_bar_fill; bar_fill_style ]
-                         []
-                     ]
-                 ]
-             ]
+             [ title_node ]
          ; Node.div
              ~attrs:[ Style.goal_meta ]
              [ Pill.view ~size:`Sm
@@ -367,7 +291,6 @@ let rec view_node ~(depth : int) (n : Goals_types.node) : Node.t =
              ]
          ]
        ; task_chips
-       ; blocker_box
        ; truth_refs_box
        ; children
        ])
@@ -394,8 +317,6 @@ let view_meta_strip (r : Goals_types.response) =
         ~v:(Printf.sprintf "%d" s.active_goals) ()
     ; Meta.cell ~k:"tasks"
         ~v:(Printf.sprintf "%d / %d" s.done_tasks s.total_tasks) ()
-    ; Meta.cell ~color:`Brass ~k:"convergence"
-        ~v:(Printf.sprintf "%d%%" s.overall_convergence_pct) ()
     ]
 ;;
 
@@ -431,13 +352,12 @@ let render ~(shell : Overview_types.response) (r : Goals_types.response) : Node.
     ~shell
     ~active:Goals
     [ Hero.view
-        ~eyebrow:"goals · convergence"
+        ~eyebrow:"goals"
         ~title:"goals"
         ~tail:(Printf.sprintf "· %d" r.summary.total_goals, `Brass)
         ~sub:
           "config-driven goal forest. 각 node는 goal 하나 + 직속 \
-           task들 + 하위 goals. convergence는 child goals의 평균 \
-           progress."
+           task들 + 하위 goals의 명시적 상태를 표시합니다."
         ~sub_lang:"ko"
         ()
     ; view_meta_strip r

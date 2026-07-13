@@ -66,7 +66,7 @@ type verdict_record = {
   gate : Task.Anti_rationalization.gate;  (** Typed gate — was stringly-typed *)
   evaluator_runtime : string;
   generator_runtime : string option;
-  fallback_reason : string option; (** Error message when gate=Fallback *)
+  fallback_reason : string option; (** Evaluator or verdict-format failure detail. *)
   timestamp : float;
 }
 
@@ -338,28 +338,34 @@ let record_verdict
     ~(result : Task.Anti_rationalization.review_result)
     ?(on_harness_verdict : (Agent_sdk.Harness.verdict -> unit) option)
     () : unit =
-  let hash = notes_hash ~task_title:req.task_title ~notes:req.completion_notes in
-  let record = {
-    record_type = Verdict_record;
-    notes_hash = hash;
-    task_id;
-    task_title = req.task_title;
-    agent_name = req.agent_name;
-    verdict = result.verdict;
-    gate = result.gate;
-    evaluator_runtime = result.evaluator_runtime;
-    generator_runtime = result.generator_runtime;
-    fallback_reason = result.fallback_reason;
-    timestamp = Unix.gettimeofday ();
-  } in
-  Dated_jsonl.append (get_store ()) (verdict_record_to_json record);
-  match on_harness_verdict with
-  | Some cb ->
-    (try cb (to_harness_verdict record)
-     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-       Log.Harness.warn "[eval_calibration] on_harness_verdict callback failed: %s"
-         (Printexc.to_string exn))
+  match result.verdict with
   | None -> ()
+  | Some verdict ->
+    let hash = notes_hash ~task_title:req.task_title ~notes:req.completion_notes in
+    let record =
+      { record_type = Verdict_record
+      ; notes_hash = hash
+      ; task_id
+      ; task_title = req.task_title
+      ; agent_name = req.agent_name
+      ; verdict
+      ; gate = result.gate
+      ; evaluator_runtime = result.evaluator_runtime
+      ; generator_runtime = result.generator_runtime
+      ; fallback_reason = result.fallback_reason
+      ; timestamp = Unix.gettimeofday ()
+      }
+    in
+    Dated_jsonl.append (get_store ()) (verdict_record_to_json record);
+    (match on_harness_verdict with
+     | Some cb ->
+       (try cb (to_harness_verdict record) with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
+          Log.Harness.warn
+            "[eval_calibration] on_harness_verdict callback failed: %s"
+            (Printexc.to_string exn))
+     | None -> ())
 
 let record_human_label
     ~(notes_hash : string)
@@ -487,8 +493,13 @@ let calibration_stats ?(since = "") ?(until = "") () : Yojson.Safe.t =
       let u = if until = "" then "2099-12-31" else until in
       Dated_jsonl.read_range store ~since:s ~until:u
   in
-  let max_fallback_reasons = 5 in
-  let fallback_tag = Task.Anti_rationalization.gate_to_string Fallback in
+  let max_failure_reasons = 5 in
+  let evaluator_failure_tags =
+    [ Task.Anti_rationalization.Invalid_verdict
+    ; Task.Anti_rationalization.Evaluator_unavailable
+    ]
+    |> List.map Task.Anti_rationalization.gate_to_string
+  in
   (* Single fold to accumulate all counters and maps immutably *)
   let total_verdicts, approve_count, reject_count,
       gate_counts, verdict_hashes, labeled_hashes,
@@ -520,7 +531,9 @@ let calibration_stats ?(since = "") ?(until = "") () : Yojson.Safe.t =
                   vwg, cmm
               in
               let fbr' =
-                if gate = fallback_tag && List.length fbr < max_fallback_reasons then
+                if List.mem gate evaluator_failure_tags
+                   && List.length fbr < max_failure_reasons
+                then
                   let reason = string_field json "fallback_reason" in
                   if reason <> "" then reason :: fbr else fbr
                 else
@@ -563,8 +576,11 @@ let calibration_stats ?(since = "") ?(until = "") () : Yojson.Safe.t =
   in
   let gate_json = StringMap.bindings gate_counts |> List.map (fun (k, v) -> (k, `Int v)) in
   let fallback_count =
-    Option.value ~default:0
-      (StringMap.find_opt (Task.Anti_rationalization.gate_to_string Fallback) gate_counts)
+    List.fold_left
+      (fun total gate ->
+         total + Option.value ~default:0 (StringMap.find_opt gate gate_counts))
+      0
+      evaluator_failure_tags
   in
   let cross_model_rate =
     if verdicts_with_generator = 0 then 0.0

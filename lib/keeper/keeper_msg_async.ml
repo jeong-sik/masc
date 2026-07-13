@@ -35,6 +35,7 @@ type request_status =
   | Done of
       { ok : bool
       ; body : string
+      ; data : Yojson.Safe.t option
       }
 
 type entry =
@@ -328,7 +329,8 @@ let with_keeper_submission_lock ~base_path ~keeper_name f =
 exception CancelledByOperator
 exception Worker_preempted of string
 exception Worker_already_settled of request_status
-let record_schema_version = 2
+let record_schema_version = 3
+let supported_record_schema_versions = [ 2; record_schema_version ]
 
 let server_background_switch () =
   match Eio_context.get_root_switch_opt () with
@@ -609,7 +611,10 @@ let entry_record_to_json (e : entry) : Yojson.Safe.t =
   in
   let fields =
     match e.status with
-    | Done { ok; body } -> fields @ [ "ok", `Bool ok; "body", `String body ]
+    | Done { ok; body; data } ->
+      fields
+      @ [ "ok", `Bool ok; "body", `String body ]
+      @ (match data with Some value -> [ "data", value ] | None -> [])
     | Lost { reason } -> fields @ [ "reason", `String reason ]
     | Cancelled { reason; cancelled_by } ->
       fields @ [ "reason", `String reason; "cancelled_by", `String cancelled_by ]
@@ -753,9 +758,10 @@ let decode_status ~tag json =
   | ("done" | "error") as terminal_tag ->
     let* ok = required_bool "ok" json in
     let* body = required_string "body" json in
+    let data = Json_util.assoc_member_opt "data" json in
     let* completed_at = required_completed_at json in
     if Bool.equal ok (String.equal terminal_tag "done")
-    then Ok (Done { ok; body }, completed_at)
+    then Ok (Done { ok; body; data }, completed_at)
     else
       Error
         (Printf.sprintf
@@ -773,14 +779,16 @@ let entry_of_record_json ~base_path ~request_id:expected_request_id json :
     | None -> Error "record is missing required integer field \"schema_version\""
   in
   let* () =
-    if Int.equal schema_version record_schema_version
+    if List.mem schema_version supported_record_schema_versions
     then Ok ()
     else
       Error
         (Printf.sprintf
-           "unsupported keeper_msg request schema_version=%d (expected %d)"
+           "unsupported keeper_msg request schema_version=%d (supported: %s)"
            schema_version
-           record_schema_version)
+           (supported_record_schema_versions
+            |> List.map string_of_int
+            |> String.concat ", "))
   in
   let* request_id = required_string "request_id" json in
   let* () =
@@ -818,7 +826,9 @@ let entry_of_record_json ~base_path ~request_id:expected_request_id json :
     | Lost _ -> [ "completed_at"; "reason" ]
     | Cancelled _ -> [ "completed_at"; "reason"; "cancelled_by" ]
     | Persistence_failed _ -> [ "completed_at"; "attempted_status"; "reason" ]
-    | Done _ -> [ "completed_at"; "ok"; "body" ]
+    | Done _ ->
+      [ "completed_at"; "ok"; "body" ]
+      @ if Int.equal schema_version record_schema_version then [ "data" ] else []
   in
   let* () = validate_record_fields ~status_fields json in
   Ok
@@ -2042,7 +2052,16 @@ let submit ?on_accepted ?on_worker_aborted ?on_worker_settled ~background_sw
            | `Already_settled status -> raise (Worker_already_settled status)
            | `Preempted reason -> raise (Worker_preempted reason));
           let result = f req_sw in
-          Done { ok = tool_result_success result; body = tool_result_body result })
+          let data =
+            match Tool_result.data result with
+            | `String _ -> None
+            | data -> Some data
+          in
+          Done
+            { ok = tool_result_success result
+            ; body = tool_result_body result
+            ; data
+            })
       with
       | CancelledByOperator ->
         Fun.protect
@@ -2097,6 +2116,7 @@ let submit ?on_accepted ?on_worker_aborted ?on_worker_settled ~background_sw
         Done
           { ok = false
           ; body = Printf.sprintf "keeper_msg failed: %s" (Printexc.to_string exn)
+          ; data = None
           }
       in
       set_status_protected ~preserve_terminal:true key result
@@ -2201,13 +2221,11 @@ let entry_to_json (e : entry) : Yojson.Safe.t =
   in
   let fields =
     match e.status with
-    | Done { ok; body } ->
+    | Done { ok; body; data } ->
       fields
       @ [ "ok", `Bool ok
         ; ( "result"
-          , try Yojson.Safe.from_string body with
-            | Eio.Cancel.Cancelled _ as e -> raise e
-            | Yojson.Json_error _ -> `String body )
+          , Option.value ~default:(`String body) data )
         ]
     | Lost { reason } ->
       fields
@@ -2399,7 +2417,11 @@ module For_testing = struct
   let is_safe_request_id = is_safe_request_id
   let forget ~base_path ~caller ~request_id =
     match resolve_access_identity ~base_path ~caller with
-    | Error _ -> ()
+    | Error rejection ->
+      Log.Keeper.warn
+        "keeper_msg_async: For_testing.forget rejected request_id=%s error=%s"
+        request_id
+        (Yojson.Safe.to_string (access_rejection_to_json rejection))
     | Ok (base_path, submitted_by) ->
       let key = request_key ~base_path ~submitted_by ~request_id in
       with_lock (fun () ->

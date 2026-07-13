@@ -32,14 +32,7 @@ val create
   -> content:string
   -> ?goal_id:string
   -> ?task_id:string
-  -> ?board_post_id:string
-  -> ?comment_id:string
-  -> ?pr_id:string
-  -> ?git_ref:string
-  -> ?log_id:string
-  -> ?session_id:string
-  -> ?operation_id:string
-  -> ?worker_run_id:string
+  -> ?references:annotation_reference list
   -> unit
   -> (annotation, string) result
 (** Append a new annotation to the chosen partition. Default

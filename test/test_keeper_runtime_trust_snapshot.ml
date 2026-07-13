@@ -210,7 +210,7 @@ let test_snapshot_uses_receipt_runtime_model_when_decision_absent () =
          (snapshot |> member "execution" |> member "provider_selected_model" |> to_string))
 ;;
 
-let test_budget_not_dispatched_receipt_marks_attention () =
+let test_budget_not_dispatched_receipt_remains_observational () =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -244,15 +244,15 @@ let test_budget_not_dispatched_receipt_marks_attention () =
        let open Yojson.Safe.Util in
        Alcotest.(check string)
          "display disposition"
-         "Blocked"
+         "Pass"
          (snapshot |> member "disposition" |> to_string);
        Alcotest.(check string)
          "display reason"
-         "completion_contract_result:not_dispatched"
+         "healthy"
          (snapshot |> member "disposition_reason" |> to_string);
        Alcotest.(check bool)
          "needs attention"
-         true
+         false
          (snapshot |> member "needs_attention" |> to_bool);
        Alcotest.(check string)
          "operator disposition remains receipt truth"
@@ -296,11 +296,11 @@ let test_unknown_completion_contract_result_stays_visible () =
        Alcotest.(check string)
          "unknown result is visible instead of collapsed to not observed"
          "unknown_completion_contract_result:future_state"
-         (snapshot |> member "execution" |> member "mutation_guard_summary"
+         (snapshot |> member "execution" |> member "completion_observation_summary"
          |> to_string))
 ;;
 
-let test_completion_contract_result_rejects_drifted_label_before_parser () =
+let test_completion_observation_rejects_drifted_label_before_parser () =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -323,22 +323,25 @@ let test_completion_contract_result_rejects_drifted_label_before_parser () =
              ; "operator_disposition", `String "pass"
              ; "operator_disposition_reason", `String "healthy"
              ; "terminal_reason_code", `String "success"
-             ; "completion_contract_result", `String " Passive_Only "
+             ; "completion_contract_result", `String " Future_State "
              ]);
        let snapshot = K.snapshot_json ~config ~meta in
        let open Yojson.Safe.Util in
        Alcotest.(check string)
          "raw drifted result remains visible"
-         " Passive_Only "
+         " Future_State "
          (snapshot |> member "execution" |> member "completion_contract_result"
           |> to_string);
        Alcotest.(check string)
          "does not normalize drifted label before the exact parser"
-         "unknown_completion_contract_result: Passive_Only "
-         (snapshot |> member "execution" |> member "mutation_guard_summary" |> to_string))
+         "unknown_completion_contract_result: Future_State "
+         (snapshot
+          |> member "execution"
+          |> member "completion_observation_summary"
+          |> to_string))
 ;;
 
-let test_legacy_satisfied_completion_contract_result_is_unknown () =
+let test_unknown_completion_observation_label_is_explicit () =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -361,17 +364,20 @@ let test_legacy_satisfied_completion_contract_result_is_unknown () =
              ; "operator_disposition", `String "pass"
              ; "operator_disposition_reason", `String "healthy"
              ; "terminal_reason_code", `String "success"
-             ; "completion_contract_result", `String "satisfied"
+             ; "completion_contract_result", `String "future_state_v2"
              ]);
        let snapshot = K.snapshot_json ~config ~meta in
        let open Yojson.Safe.Util in
        Alcotest.(check string)
-         "legacy non-canonical label stays unknown"
-         "unknown_completion_contract_result:satisfied"
-         (snapshot |> member "execution" |> member "mutation_guard_summary" |> to_string))
+         "unknown observation label stays explicit"
+         "unknown_completion_contract_result:future_state_v2"
+         (snapshot
+          |> member "execution"
+          |> member "completion_observation_summary"
+          |> to_string))
 ;;
 
-let test_passive_only_no_work_receipt_does_not_mark_attention () =
+let test_no_visible_output_no_work_receipt_does_not_mark_attention () =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -383,7 +389,7 @@ let test_passive_only_no_work_receipt_does_not_mark_attention () =
        @@ fun () ->
        let config = Masc.Workspace.default_config base_dir in
        init_runtime_default_for_tests ();
-       let keeper_name = "runtime-trust-passive-only-no-work" in
+       let keeper_name = "runtime-trust-no-visible-output-no-work" in
        let meta = make_meta keeper_name in
        let receipt_store =
          Masc.Keeper_types_support.keeper_execution_receipt_store config keeper_name
@@ -395,7 +401,7 @@ let test_passive_only_no_work_receipt_does_not_mark_attention () =
              ; "operator_disposition", `String "pass"
              ; "operator_disposition_reason", `String "healthy"
              ; "terminal_reason_code", `String "success"
-             ; "completion_contract_result", `String "passive_only"
+             ; "completion_contract_result", `String "no_visible_output"
              ; "current_task_id", `Null
              ; "goal_ids", `List []
              ]);
@@ -421,7 +427,7 @@ let test_passive_only_no_work_receipt_does_not_mark_attention () =
           | _ -> false))
 ;;
 
-let test_passive_only_active_receipt_does_not_mark_attention () =
+let test_no_visible_output_active_receipt_does_not_mark_attention () =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -433,7 +439,7 @@ let test_passive_only_active_receipt_does_not_mark_attention () =
        @@ fun () ->
        let config = Masc.Workspace.default_config base_dir in
        init_runtime_default_for_tests ();
-       let keeper_name = "runtime-trust-passive-only-active-task" in
+       let keeper_name = "runtime-trust-no-visible-output-active-task" in
        let meta = make_meta keeper_name in
        let receipt_store =
          Masc.Keeper_types_support.keeper_execution_receipt_store config keeper_name
@@ -443,9 +449,9 @@ let test_passive_only_active_receipt_does_not_mark_attention () =
          (`Assoc
              [ "ended_at", `String "2026-06-01T00:00:00Z"
              ; "operator_disposition", `String "pass"
-             ; "operator_disposition_reason", `String "passive_no_action"
+             ; "operator_disposition_reason", `String "healthy"
              ; "terminal_reason_code", `String "success"
-             ; "completion_contract_result", `String "passive_only"
+             ; "completion_contract_result", `String "no_visible_output"
              ; "current_task_id", `String "task-1844"
              ; "goal_ids", `List [ `String "goal-pm-flow" ]
              ]);
@@ -471,7 +477,7 @@ let test_passive_only_active_receipt_does_not_mark_attention () =
           | _ -> false))
 ;;
 
-let test_completion_blocker_supersedes_passive_only_receipt () =
+let test_runtime_blocker_supersedes_completion_observation () =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -483,14 +489,14 @@ let test_completion_blocker_supersedes_passive_only_receipt () =
        @@ fun () ->
        let config = Masc.Workspace.default_config base_dir in
        init_runtime_default_for_tests ();
-       let keeper_name = "runtime-trust-accept-empty" in
-       let blocker_detail =
-         "Provider returned an empty assistant turn for runtime runpod_fable5.gemma4-coder-fable5; no text or tool progress was produced."
+       let keeper_name = "runtime-trust-provider-exhausted" in
+       let blocker_detail = "No configured provider runtime remained available."
        in
        let blocker =
          Masc.Keeper_meta_contract.blocker_info_of_class
            ~detail:blocker_detail
-           Masc.Keeper_meta_contract.Completion_contract_violation
+           (Masc.Keeper_meta_contract.Runtime_exhausted
+              Masc.Keeper_meta_contract.No_providers_available)
        in
        let meta =
          make_meta keeper_name
@@ -507,19 +513,19 @@ let test_completion_blocker_supersedes_passive_only_receipt () =
              ; "operator_disposition", `String "pass"
              ; "operator_disposition_reason", `String "healthy"
              ; "terminal_reason_code", `String "success"
-             ; "completion_contract_result", `String "passive_only"
+             ; "completion_contract_result", `String "no_visible_output"
              ]);
        let snapshot = K.snapshot_json ~config ~meta in
        let open Yojson.Safe.Util in
        Alcotest.(check string)
          "runtime blocker class"
-         "completion_contract_violation"
+         "runtime_exhausted"
          (snapshot
           |> member "runtime_blockers"
           |> member "runtime_blocker_class"
           |> to_string);
        Alcotest.(check string)
-         "passive-only receipt does not become display reason"
+         "completion observation does not become display reason"
          "fsm_invariant"
          (snapshot |> member "disposition_reason" |> to_string);
        Alcotest.(check string)
@@ -527,7 +533,7 @@ let test_completion_blocker_supersedes_passive_only_receipt () =
          "runtime_blocked"
          (snapshot |> member "attention_reason" |> to_string);
        Alcotest.(check bool)
-         "runtime blocker summary names empty provider turn"
+         "runtime blocker summary remains typed runtime evidence"
          true
          (String.equal
             blocker_detail
@@ -574,7 +580,7 @@ let test_runtime_exhausted_blocker_uses_typed_parser () =
           |> to_string))
 ;;
 
-let test_unknown_completion_contract_result_is_explicit () =
+let test_unknown_completion_observation_is_explicit () =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -597,18 +603,21 @@ let test_unknown_completion_contract_result_is_explicit () =
              ; "operator_disposition", `String "pass"
              ; "operator_disposition_reason", `String "healthy"
              ; "terminal_reason_code", `String "success"
-             ; "completion_contract_result", `String "passive-only"
+             ; "completion_contract_result", `String "future-state"
              ]);
        let snapshot = K.snapshot_json ~config ~meta in
        let open Yojson.Safe.Util in
        Alcotest.(check string)
          "raw result remains visible"
-         "passive-only"
+         "future-state"
          (snapshot |> member "execution" |> member "completion_contract_result" |> to_string);
        Alcotest.(check string)
          "unknown result uses explicit sentinel"
-         "unknown_completion_contract_result:passive-only"
-         (snapshot |> member "execution" |> member "mutation_guard_summary" |> to_string))
+         "unknown_completion_contract_result:future-state"
+         (snapshot
+          |> member "execution"
+          |> member "completion_observation_summary"
+          |> to_string))
 ;;
 
 let test_operator_disposition_display_uses_typed_parser () =
@@ -627,11 +636,11 @@ let test_operator_disposition_display_uses_typed_parser () =
   in
   check_case ~operator_disposition:"pass_next_model" ~operator_disposition_reason:""
     ~expected_disposition:"Pass" ~expected_reason:"runtime_fallback";
-  check_case ~operator_disposition:"pause_human"
-    ~operator_disposition_reason:"manual_review" ~expected_disposition:"Blocked"
+  check_case ~operator_disposition:"fail_open_next_runtime"
+    ~operator_disposition_reason:"manual_review" ~expected_disposition:"Pass"
     ~expected_reason:"manual_review";
   check_case ~operator_disposition:"blocked_runtime" ~operator_disposition_reason:""
-    ~expected_disposition:"Blocked" ~expected_reason:"runtime_blocked";
+    ~expected_disposition:"Alert" ~expected_reason:"unmapped_operator_disposition";
   check_case ~operator_disposition:"<missing operator_disposition field>"
     ~operator_disposition_reason:"" ~expected_disposition:"Alert"
     ~expected_reason:"unmapped_operator_disposition"
@@ -809,41 +818,41 @@ let () =
             `Quick
             test_model_observability_uses_runtime_trust_selected_model
         ; Alcotest.test_case
-            "budget not-dispatched receipt marks runtime-trust attention"
+            "budget not-dispatched receipt remains observational"
             `Quick
-            test_budget_not_dispatched_receipt_marks_attention
+            test_budget_not_dispatched_receipt_remains_observational
         ; Alcotest.test_case
             "unknown completion-contract result remains visible"
             `Quick
             test_unknown_completion_contract_result_stays_visible
         ; Alcotest.test_case
-            "passive-only no-work receipt does not mark attention"
+            "no-visible-output no-work receipt does not mark attention"
             `Quick
-            test_passive_only_no_work_receipt_does_not_mark_attention
+            test_no_visible_output_no_work_receipt_does_not_mark_attention
         ; Alcotest.test_case
-            "passive-only active receipt does not mark attention"
+            "no-visible-output active receipt does not mark attention"
             `Quick
-            test_passive_only_active_receipt_does_not_mark_attention
+            test_no_visible_output_active_receipt_does_not_mark_attention
         ; Alcotest.test_case
-            "runtime blocker supersedes passive-only receipt"
+            "runtime blocker supersedes completion observation"
             `Quick
-            test_completion_blocker_supersedes_passive_only_receipt
+            test_runtime_blocker_supersedes_completion_observation
         ; Alcotest.test_case
             "runtime exhausted blocker display uses typed parser"
             `Quick
             test_runtime_exhausted_blocker_uses_typed_parser
         ; Alcotest.test_case
-            "completion-contract labels reject drift before typed parser"
+            "completion-observation labels reject drift before typed parser"
             `Quick
-            test_completion_contract_result_rejects_drifted_label_before_parser
+            test_completion_observation_rejects_drifted_label_before_parser
         ; Alcotest.test_case
-            "legacy satisfied completion-contract label is unknown"
+            "unknown completion-observation label is explicit"
             `Quick
-            test_legacy_satisfied_completion_contract_result_is_unknown
+            test_unknown_completion_observation_label_is_explicit
         ; Alcotest.test_case
             "unknown completion-contract label uses explicit sentinel"
             `Quick
-            test_unknown_completion_contract_result_is_explicit
+            test_unknown_completion_observation_is_explicit
         ; Alcotest.test_case
             "operator disposition display uses typed parser"
             `Quick

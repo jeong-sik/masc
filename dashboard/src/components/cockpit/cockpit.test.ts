@@ -1,15 +1,11 @@
 import { h } from 'preact'
 import { cleanup, fireEvent, render, screen } from '@testing-library/preact'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import '@testing-library/jest-dom'
 
 import { route } from '../../router'
 import { COCKPIT_ENTRYPOINTS } from '../../cockpit-entrypoints'
 import { Cockpit } from './cockpit'
-
-vi.mock('../world-visualizer', () => ({
-  WorldVisualizer: () => h('div', { 'data-testid': 'world-visualizer' }, 'World visualizer'),
-}))
 
 describe('Cockpit command map', () => {
   beforeEach(() => {
@@ -27,7 +23,6 @@ describe('Cockpit command map', () => {
     render(h(Cockpit, null))
 
     expect(screen.getByTestId('cockpit-command-map')).toBeInTheDocument()
-    expect(screen.getByTestId('world-visualizer')).toBeInTheDocument()
     expect(screen.getByTestId('cockpit-disclosure')).toBeInTheDocument()
     expect(document.querySelectorAll('[data-cockpit-plane]')).toHaveLength(5)
     expect(document.querySelector('[data-cockpit-plane="work"]')).toHaveTextContent('2 covered')

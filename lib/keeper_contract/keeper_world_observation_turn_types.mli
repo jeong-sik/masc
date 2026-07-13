@@ -6,7 +6,6 @@ type keeper_cycle_channel =
 
 type event_queue_trigger =
   | Bootstrap_stimulus
-  | No_progress_recovery_stimulus
   | Scheduled_automation_stimulus
   | Connector_attention_stimulus
       (** RFC-connector-ambient-attention-wake P1: ambient connector message
@@ -25,34 +24,21 @@ type turn_reason =
   | Board_event_pending
   | Scope_message_pending
   | Bootstrap_stimulus_pending
-  | No_progress_recovery_stimulus_pending
   | Connector_attention_pending
   | Hitl_resolved_pending
   | Failure_judgment_pending
   | Scheduled_autonomous_turn
   | Scheduled_automation_due
-  | Idle_cooldown_elapsed of
-      { idle_sec : int
-      ; cooldown : int
-      }
-  | Cooldown_elapsed
   | Task_backlog of
       { unclaimed : int
       ; failed : int
       }
-  | Task_reactive_cooldown_elapsed
   | Never_started
-  | Min_interval_elapsed
 
 type skip_reason =
   | Keeper_paused
-  | Approval_pending
   | Scheduled_autonomous_disabled
   | Reactive_disabled
-  | Provider_cooldown_pending of { remaining_sec : int }
-  | Idle_gate_pending of { remaining_sec : int }
-  | Cooldown_pending of { remaining_sec : int }
-  | No_signal
 
 type turn_verdict =
   | Run of { reasons : turn_reason * turn_reason list }

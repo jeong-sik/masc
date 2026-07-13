@@ -2,7 +2,7 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { KeeperConfig } from '../types'
-import type { KeeperConfigLoadStatus } from './keeper-detail-source'
+import type { KeeperConfigLoadStatus } from './keeper-config-state'
 
 // Mutable test state, hoisted so the mock factories below can close over it.
 const refs = vi.hoisted(() => ({
@@ -209,12 +209,9 @@ function makeRuntimeProvider(runtimeId: string, providerName: string, modelName:
         has_capabilities: true,
         behavior_capabilities: {
           supports_inline_tools: true,
-          requires_per_keeper_bridging_for_bound_actor_tools: true,
-          identity_runtime_mcp_header_keys: ['x-masc-keeper'],
           argv_prompt_preflight: false,
           uses_anthropic_caching: false,
           max_turns_per_attempt: null,
-          tolerates_bound_actor_fallback: false,
         },
         custom_header_count: 1,
         connect_timeout_s: 30,

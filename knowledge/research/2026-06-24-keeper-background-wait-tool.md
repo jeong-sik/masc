@@ -78,7 +78,7 @@ fusion 대비 차이: 디스크 영속 있음, child switch 격리(더 강건), 
 ### 2.3 재사용 가능 인프라
 
 - `domain_pool` (`submit_io_async`/`submit_cpu_async`, 무거운 실행 레인)
-- `admission_queue` — **주의: passthrough observability일 뿐 scheduler가 아니다**(`admission_queue.mli:9-11`). 동시성 gate로 오해 금지.
+- provider admission queue는 제거됨. 장기 작업은 명시적인 run registry와 완료 wake를 사용하고, MASC에 provider-capacity gate를 다시 만들지 않는다.
 - `server_bootstrap_loops_fiber.ml:21 fork_logged_fiber` (non-Cancelled 흡수 fault-iso 래퍼)
 - subprocess 실행: `Autonomy_exec.run ~sw ~clock ~config ~argv ~timeout_s` (Result record 반환, `cdal_runtime/autonomy_exec.ml:295`). `Eio.Time.with_timeout_exn` 기반.
 

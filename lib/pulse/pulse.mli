@@ -64,15 +64,6 @@ module type Consumer = sig
   val on_beat    : beat -> (unit, string) result
 end
 
-(** {1 Consumer Recovery} *)
-
-(** Recovery configuration for consumer failure tracking. *)
-type recovery_config = {
-  max_consecutive_failures : int;
-}
-
-val default_recovery_config : recovery_config
-
 (** {1 Engine} *)
 
 (** The Pulse engine. Opaque mutable state. *)
@@ -80,7 +71,6 @@ type t
 
 (** Create a new Pulse engine.
 
-    @param recovery Consumer failure recovery config (default: 3 consecutive failures to disable)
     @param clock Eio clock for sleeping and timestamps
     @param rhythm Adaptive rhythm configuration
     @param lifecycle Always_on or Bounded
@@ -135,14 +125,6 @@ val add_consumer : t -> (module Consumer) -> unit
 
 (** Remove a consumer by name. Returns [true] if found and removed. *)
 val remove_consumer : t -> string -> bool
-
-(** {1 Consumer Recovery} *)
-
-(** List consumers disabled due to consecutive failures. *)
-val disabled_consumers : t -> string list
-
-(** Re-enable a previously disabled consumer. Returns [true] if found. *)
-val reenable_consumer : t -> string -> bool
 
 (** {1 Defaults} *)
 

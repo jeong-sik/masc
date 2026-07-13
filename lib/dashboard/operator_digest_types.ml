@@ -84,7 +84,7 @@ let attention_item_to_yojson (item : attention_item) =
       ("authoritative", `Bool false);
     ]
 
-let recommended_confirm_required = Operator_approval.confirm_required
+let recommended_confirm_required = Operator_action_catalog.requires_confirmation
 
 let recommended_action_to_yojson ~actor (item : recommended_action) =
   let preview =

@@ -158,8 +158,6 @@ let make_config_root root =
   mkdir_p (Filename.concat config "personas");
   write_file (Filename.concat root "oas-models.toml") repo_model_catalog_toml;
   write_file (Filename.concat config "runtime.toml") repo_runtime_toml;
-  write_file (Filename.concat config "tool_policy.toml")
-    "[groups.base]\ntools = [\"keeper_time_now\"]\n";
   write_file (Filename.concat config "prompts/keeper.unified.system.md") "prompt";
   write_file (Filename.concat config "keepers/example.toml") "[keeper]\ngoal = \"example\"\n";
   write_file (Filename.concat config "personas/example.txt") "persona";
@@ -947,8 +945,6 @@ let test_bootstrap_base_path_config_root_copies_shared_seed_but_not_keepers () =
       Alcotest.(check bool) "config root created" true (Sys.is_directory config_root);
       Alcotest.(check string) "runtime copied" repo_runtime_toml
         (read_file (Filename.concat config_root "runtime.toml"));
-      Alcotest.(check bool) "tool policy not copied (deleted module)" false
-        (Sys.file_exists (Filename.concat config_root "tool_policy.toml"));
       Alcotest.(check string) "model catalog copied" repo_model_catalog_toml
         (read_file (Filename.concat config_root "oas-models.toml"));
       Alcotest.(check bool) "prompt copied" true
@@ -989,8 +985,7 @@ let test_bootstrap_base_path_config_root_backfills_missing_prompts_and_catalog (
         (read_file (Filename.concat config_root "oas-models.toml"));
       Alcotest.(check bool) "versioned persona not resurrected" false
         (Sys.file_exists (Filename.concat config_root "personas/example.txt"));
-      Alcotest.(check bool) "tool policy not backfilled" false
-        (Sys.file_exists (Filename.concat config_root "tool_policy.toml")))
+      ())
 
 let test_bootstrap_base_path_config_root_skips_explicit_config_override () =
   with_temp_dir "startup-config-explicit" (fun dir ->
@@ -1015,8 +1010,6 @@ let test_startup_config_resolution_defaults_to_bootstrapped_root () =
       mkdir_p (Filename.concat config_root "keepers");
       mkdir_p (Filename.concat config_root "personas");
       write_file (Filename.concat config_root "runtime.toml") "";
-      write_file (Filename.concat config_root "tool_policy.toml")
-        "[groups.base]\ntools = [\"keeper_time_now\"]\n";
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
       let resolution =
         Server_runtime_bootstrap.startup_config_resolution ~base_path
@@ -1095,8 +1088,6 @@ let test_bootstrap_empty_mode_creates_scaffold_without_files () =
         (Sys.is_directory (Filename.concat config_root "prompts"));
       Alcotest.(check bool) "runtime not copied" false
         (Sys.file_exists (Filename.concat config_root "runtime.toml"));
-      Alcotest.(check bool) "tool policy not copied" false
-        (Sys.file_exists (Filename.concat config_root "tool_policy.toml"));
       Alcotest.(check bool) "keeper not copied" false
         (Sys.file_exists (Filename.concat config_root "keepers/example.toml")))
 
@@ -1275,11 +1266,7 @@ let make_keeper_meta ?(paused = false) ?(name = "sangsu")
         ])
   with
   | Ok meta ->
-      {
-        meta with
-        paused;
-        auto_resume_after_sec = (if paused then Some 3600.0 else None);
-      }
+      { meta with paused }
   | Error err -> Alcotest.fail ("meta_of_json failed: " ^ err)
 
 let make_task ?(title = "Task") ?(description = "") ~id ~status () : Types.task =
@@ -1337,29 +1324,23 @@ let dispatch_keeper_event config (meta : Keeper_meta_contract.keeper_meta) event
 
 let mark_keeper_failing config (meta : Keeper_meta_contract.keeper_meta) =
   dispatch_keeper_event config meta
-    (Keeper_state_machine.Turn_failed { consecutive = 1; max_allowed = 10 })
+    (Keeper_state_machine.Turn_failed { consecutive = 1 })
 
 let mark_keeper_stopped config (meta : Keeper_meta_contract.keeper_meta) =
   dispatch_keeper_event config meta Keeper_state_machine.Stop_requested;
   dispatch_keeper_event config meta Keeper_state_machine.Drain_complete
 
 let mark_keeper_zombie config (meta : Keeper_meta_contract.keeper_meta) =
-  dispatch_keeper_event config meta
-    (Keeper_state_machine.Terminal_failure_detected
-       { reason = "terminal fixture structural failure" })
+  Keeper_registry.mark_dead
+    ~base_path:config.Workspace.base_path
+    meta.name
+    ~at:(Time_compat.now ())
 
-let exhaust_keeper_restart_budget config (meta : Keeper_meta_contract.keeper_meta) =
-  match
-    Keeper_registry.dispatch_event
-      ~base_path:config.Workspace.base_path
-      meta.name
-      Keeper_state_machine.Restart_budget_exhausted
-  with
-  | Ok _ -> ()
-  | Error err ->
-    Alcotest.fail
-      ("keeper restart-budget exhaustion failed: "
-       ^ Keeper_state_machine.transition_error_to_string err)
+let record_keeper_dead_tombstone config (meta : Keeper_meta_contract.keeper_meta) =
+  Keeper_registry.mark_dead
+    ~base_path:config.Workspace.base_path
+    meta.name
+    ~at:(Time_compat.now ())
 
 let terminate_keeper_fiber config (meta : Keeper_meta_contract.keeper_meta) =
   match
@@ -1454,8 +1435,9 @@ let test_health_json_surfaces_durable_paused_keepers () =
           let json = Server_routes_http_runtime.make_health_json request in
           let open Yojson.Safe.Util in
           let paused = json |> member "paused_keepers" in
-          let fd_pressure = json |> member "keeper_fd_pressure" in
+          let fd_observation = json |> member "fd_observation" in
           let fd_accountant = json |> member "fd_accountant" in
+          let disk_observation = json |> member "disk_observation" in
           let runtime_truth = json |> member "runtime_truth" in
           let fleet_safety = json |> member "keeper_fleet_safety" in
           let reaction_ledger = json |> member "keeper_reaction_ledger" in
@@ -1487,33 +1469,32 @@ let test_health_json_surfaces_durable_paused_keepers () =
             |> List.find (fun detail ->
                  detail |> member "name" |> to_string = "durable-paused")
           in
-          Alcotest.(check string) "pause kind" "auto_recoverable"
+          Alcotest.(check string) "pause kind" "unclassified_paused"
             (durable_paused_detail |> member "pause_kind" |> to_string);
           Alcotest.(check bool) "pause missing root cause" true
             (durable_paused_detail |> member "missing_pause_root_cause" |> to_bool);
           Alcotest.(check bool) "pause detail keeps autoboot" true
             (durable_paused_detail |> member "autoboot_enabled" |> to_bool);
-          Alcotest.(check (option (float 0.0001))) "pause detail auto resume"
-            (Some 3600.0)
-            (durable_paused_detail |> member "auto_resume_after_sec" |> to_float_option);
           Alcotest.(check bool) "union includes durable paused keeper" true
             (List.exists (( = ) "durable-paused") names);
           Alcotest.(check bool) "union excludes active durable keeper" false
             (List.exists (( = ) "durable-active") names);
           Alcotest.(check int) "durable read errors" 0
             (paused |> member "read_error_count" |> to_int);
-          Alcotest.(check int) "health exposes requested 24-keeper FD budget"
-            24
-            (fd_pressure |> member "requested_keepers" |> to_int);
-          Alcotest.(check int) "health exposes target 24-keeper FD budget" 24
-            (fd_pressure |> member "target_keeper_count" |> to_int);
-          ignore (fd_pressure |> member "status" |> to_string);
-          ignore (fd_pressure |> member "admission_blocked" |> to_bool);
-          ignore
-            (fd_pressure |> member "admission_decision" |> member "status" |> to_string);
-          ignore (fd_accountant |> member "fd_open" |> to_int);
-          ignore (fd_accountant |> member "fd_limit" |> to_int);
-          ignore (fd_accountant |> member "pressure_active" |> to_bool);
+          Alcotest.(check string) "FD surface is observation-only"
+            "observation_only"
+            (fd_observation |> member "mode" |> to_string);
+          ignore (fd_observation |> member "active_keepers" |> to_int);
+          ignore (fd_observation |> member "nofile_probe_supported" |> to_bool);
+          Alcotest.(check bool) "FD surface has no admission decision" true
+            (fd_observation |> member "admission_decision" = `Null);
+          Alcotest.(check string) "disk surface is observation-only"
+            "observation_only"
+            (disk_observation |> member "mode" |> to_string);
+          Alcotest.(check bool) "disk surface has no admission decision" true
+            (disk_observation |> member "admission" = `Null);
+          ignore (fd_accountant |> member "fd_open" |> to_int_option);
+          ignore (fd_accountant |> member "fd_limit" |> to_int_option);
           Alcotest.(check string) "runtime truth schema"
             "masc.runtime_truth.v1"
             (runtime_truth |> member "schema" |> to_string);
@@ -1530,9 +1511,8 @@ let test_health_json_surfaces_durable_paused_keepers () =
           ignore (runtime_truth |> member "executable_path" |> to_string);
           ignore (runtime_truth |> member "executable_dir" |> to_string);
           ignore (runtime_truth |> member "keeper_fibers" |> to_int);
-          ignore (runtime_truth |> member "fd_open" |> to_int);
-          ignore (runtime_truth |> member "fd_limit" |> to_int);
-          ignore (runtime_truth |> member "fd_pressure_active" |> to_bool);
+          ignore (runtime_truth |> member "fd_open" |> to_int_option);
+          ignore (runtime_truth |> member "fd_limit" |> to_int_option);
           let fd_accountant_per_kind =
             fd_accountant |> member "per_kind" |> to_list
           in
@@ -1547,10 +1527,12 @@ let test_health_json_surfaces_durable_paused_keepers () =
                 |> List.find (fun row ->
                   String.equal (row |> member "kind" |> to_string) kind_name)
               in
-              ignore (row |> member "in_flight" |> to_int);
-              ignore (row |> member "configured_concurrency" |> to_int);
-              ignore (row |> member "effective_concurrency" |> to_int))
+              ignore (row |> member "active_operations" |> to_int))
             Fd_accountant.all_kinds;
+          Alcotest.(check int) "health exposes typed FD error series"
+            (List.length Fd_accountant.all_kinds
+             * List.length Fd_accountant.all_resource_errors)
+            (fd_accountant |> member "resource_errors" |> to_list |> List.length);
           Alcotest.(check int) "health exposes bootable keeper count" 1
             (fleet_safety |> member "bootable_keeper_count" |> to_int);
           Alcotest.(check int) "health exposes autoboot keeper count" 1
@@ -1595,8 +1577,8 @@ let test_health_json_surfaces_durable_paused_keepers () =
             true
             (reaction_ledger |> member "operator_action_required" |> to_bool)))
 
-let test_health_json_surfaces_keeper_turn_admission_pressure () =
-  with_temp_dir "health-turn-admission-pressure" (fun dir ->
+let test_health_json_observes_keeper_turn_admission_work () =
+  with_temp_dir "health-turn-admission-work" (fun dir ->
     let config_root = make_config_root dir in
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
     let previous_state = !Server_auth.server_state in
@@ -1623,7 +1605,7 @@ let test_health_json_surfaces_keeper_turn_admission_pressure () =
                    Eio.Promise.resolve set_started ();
                    Eio.Promise.await release)));
           Eio.Promise.await started;
-          for _ = 1 to Keeper_turn_admission.max_waiting_chat_requests do
+          for _ = 1 to 2 do
             Eio.Fiber.fork ~sw (fun () ->
               ignore
                 (Keeper_turn_admission.run_serialized
@@ -1631,41 +1613,20 @@ let test_health_json_surfaces_keeper_turn_admission_pressure () =
                    ~keeper_name
                    (fun () -> ())))
           done;
-          (match
-             Keeper_turn_admission.run_serialized
-               ~base_path:dir
-               ~keeper_name
-               (fun () -> ())
-           with
-           | `Rejected _ -> ()
-           | `Ran () ->
-             Alcotest.fail "chat request beyond the waiting cap was not rejected");
           let request = Httpun.Request.create `GET "/health" in
           let json = Server_routes_http_runtime.make_health_json request in
           let open Yojson.Safe.Util in
           let admission = json |> member "keeper_turn_admission" in
-          Alcotest.(check string) "turn admission health degraded"
-            "degraded"
+          Alcotest.(check string) "waiting work is not health degradation"
+            "ok"
             (admission |> member "status" |> to_string);
-          Alcotest.(check int) "turn admission health full queue count"
-            1
-            (admission |> member "chat_waiting_full_keeper_count" |> to_int);
-          Alcotest.(check int) "turn admission health rejection count"
-            1
-            (admission |> member "chat_rejected_total_count" |> to_int);
-          Alcotest.(check bool) "turn admission health reason surfaced"
-            true
-            (admission |> member "status_reasons" |> to_list
-             |> List.map to_string
-             |> List.exists (String.equal "chat_waiting_queue_full"));
+          Alcotest.(check int) "turn admission exposes raw waiting count"
+            2
+            (admission |> member "chat_waiting_total_count" |> to_int);
           Alcotest.(check bool)
-            "top-level health preserves turn admission reason"
-            true
-            (json |> member "operator_action_reasons" |> to_list
-             |> List.map to_string
-             |> List.exists
-                  (String.equal
-                     "keeper_turn_admission:chat_waiting_queue_full"));
+            "waiting work does not require an operator"
+            false
+            (admission |> member "operator_action_required" |> to_bool);
           let runtime_resolution =
             `Assoc
               (Server_routes_http_runtime.keeper_fleet_runtime_resolution_fields ())
@@ -1674,14 +1635,9 @@ let test_health_json_surfaces_keeper_turn_admission_pressure () =
             runtime_resolution |> member "keeper_turn_admission"
           in
           Alcotest.(check int)
-            "runtime resolution exposes turn admission full queue count"
-            1
-            (runtime_admission |> member "chat_waiting_full_keeper_count"
-             |> to_int);
-          Alcotest.(check int)
-            "runtime resolution exposes turn admission rejection count"
-            1
-            (runtime_admission |> member "chat_rejected_total_count" |> to_int);
+            "runtime resolution exposes raw waiting count"
+            2
+            (runtime_admission |> member "chat_waiting_total_count" |> to_int);
           let light_runtime_resolution =
             `Assoc
               (Server_routes_http_runtime.keeper_fleet_runtime_resolution_light_fields ())
@@ -1690,10 +1646,9 @@ let test_health_json_surfaces_keeper_turn_admission_pressure () =
             light_runtime_resolution |> member "keeper_turn_admission"
           in
           Alcotest.(check int)
-            "light runtime resolution exposes turn admission full queue count"
-            1
-            (light_runtime_admission |> member "chat_waiting_full_keeper_count"
-             |> to_int);
+            "light runtime resolution exposes raw waiting count"
+            2
+            (light_runtime_admission |> member "chat_waiting_total_count" |> to_int);
           Eio.Promise.resolve set_release ())))
 
 let test_health_json_surfaces_board_event_collection_failure () =
@@ -1868,7 +1823,7 @@ let test_keeper_identity_drift_treats_explicit_autoboot_base_as_materializable
           (json |> member "meta_without_config_names" |> to_list
            |> List.map to_string)))
 
-let test_health_json_keeps_timeout_pause_without_policy_manual () =
+let test_health_json_reports_unclassified_timeout_pause_without_mutation () =
   with_temp_dir "health-timeout-paused-without-policy" (fun dir ->
     let config_root = make_config_root dir in
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
@@ -1889,7 +1844,6 @@ let test_health_json_keeps_timeout_pause_without_policy_manual () =
                ~paused:true
                ())
             with
-            auto_resume_after_sec = None;
             runtime =
               { (make_keeper_meta ()).runtime with
                 last_blocker =
@@ -1912,16 +1866,8 @@ let test_health_json_keeps_timeout_pause_without_policy_manual () =
           |> List.find (fun row ->
                row |> member "name" |> to_string = "timeout-without-policy")
         in
-        Alcotest.(check string) "pause kind" "auto_recoverable"
+        Alcotest.(check string) "pause kind" "unclassified_paused"
           (detail |> member "pause_kind" |> to_string);
-        Alcotest.(check bool) "effective auto resume is present" true
-          (Option.is_some
-             (detail |> member "auto_resume_after_sec" |> to_float_option));
-        Alcotest.(check (option (float 0.0001))) "persisted auto resume remains absent"
-          None
-          (detail |> member "persisted_auto_resume_after_sec" |> to_float_option);
-        Alcotest.(check string) "auto resume source" "implicit_turn_timeout"
-          (detail |> member "auto_resume_source" |> to_string);
         Alcotest.(check string) "last blocker class" "turn_timeout"
           (detail |> member "last_blocker" |> member "klass" |> to_string)))
 
@@ -2431,8 +2377,8 @@ let test_health_json_degrades_when_reaction_capacity_below_target () =
                 last_blocker =
                   Some
                     (Keeper_meta_contract.blocker_info_of_class
-                       ~detail:"no_progress loop detected"
-                       Keeper_meta_contract.No_progress_loop);
+                       ~detail:"operator pause diagnostic"
+                       Keeper_meta_contract.Turn_timeout);
               };
           }
         in
@@ -3006,7 +2952,7 @@ let test_health_json_explains_nonrecoverable_failing_keeper () =
                (Keeper_registry.Stale_turn_timeout
                   (Keeper_registry.Idle_turn { stall_seconds = 2268.0 })));
           terminate_keeper_fiber config failing;
-          exhaust_keeper_restart_budget config failing;
+          record_keeper_dead_tombstone config failing;
           let request = Httpun.Request.create `GET "/health" in
           let json = Server_routes_http_runtime.make_health_json request in
           let open Yojson.Safe.Util in
@@ -3096,7 +3042,7 @@ let test_health_json_redacts_registry_failure_reason () =
                     reason = None;
                   }));
           terminate_keeper_fiber config failing;
-          exhaust_keeper_restart_budget config failing;
+          record_keeper_dead_tombstone config failing;
           let request = Httpun.Request.create `GET "/health" in
           let json = Server_routes_http_runtime.make_health_json request in
           let open Yojson.Safe.Util in
@@ -3155,7 +3101,7 @@ let test_health_json_uses_crash_log_when_restore_clears_failure_reason () =
                   (Keeper_registry.Idle_turn { stall_seconds = 2268.0 })));
           terminate_keeper_fiber config restored;
           Keeper_registry.record_crash ~base_path restored.name 1234.0 stale_reason;
-          exhaust_keeper_restart_budget config restored;
+          record_keeper_dead_tombstone config restored;
           Keeper_registry.restore_supervisor_state
             ~base_path
             restored.name
@@ -3937,8 +3883,6 @@ let test_prompt_markdown_dir_ignores_repo_seed_prompts () =
       Fs_compat.mkdir_p repo_prompts;
       Fs_compat.mkdir_p expected;
       write_file (Filename.concat config_root "runtime.toml") "";
-      write_file (Filename.concat config_root "tool_policy.toml")
-        "[groups.base]\ntools = [\"keeper_time_now\"]\n";
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
       with_cwd dir @@ fun () ->
       Config_dir_resolver.reset ();
@@ -3960,8 +3904,6 @@ let test_prompt_markdown_dir_does_not_use_repo_seed () =
       Fs_compat.mkdir_p repo_prompts;
       Fs_compat.mkdir_p expected;
       write_file (Filename.concat config_root "runtime.toml") "";
-      write_file (Filename.concat config_root "tool_policy.toml")
-        "[groups.base]\ntools = [\"keeper_time_now\"]\n";
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
       with_cwd dir @@ fun () ->
       Config_dir_resolver.reset ();
@@ -4075,8 +4017,6 @@ let test_main_eio_fresh_bootstrap_and_mcp_handshake () =
       with_cwd (project_root ()) @@ fun () ->
       Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path:dir;
       let expected_config = Filename.concat dir ".masc/config" in
-      Alcotest.(check bool) "tool policy not bootstrapped (deleted module)" false
-        (Sys.file_exists (Filename.concat expected_config "tool_policy.toml"));
       let env =
         main_eio_env_overrides
           [
@@ -4832,7 +4772,7 @@ let () =
             `Quick test_health_json_surfaces_durable_paused_keepers;
           Alcotest.test_case
             "health json surfaces turn admission pressure"
-            `Quick test_health_json_surfaces_keeper_turn_admission_pressure;
+            `Quick test_health_json_observes_keeper_turn_admission_work;
           Alcotest.test_case
             "health json surfaces board event collection failure"
             `Quick test_health_json_surfaces_board_event_collection_failure;
@@ -4845,8 +4785,8 @@ let () =
             `Quick
             test_keeper_identity_drift_treats_explicit_autoboot_base_as_materializable;
           Alcotest.test_case
-            "health json keeps timeout pause without policy manual"
-            `Quick test_health_json_keeps_timeout_pause_without_policy_manual;
+            "health json reports unclassified persisted pause without mutation"
+            `Quick test_health_json_reports_unclassified_timeout_pause_without_mutation;
           Alcotest.test_case
             "health json reports dormant task owner as advisory"
             `Quick

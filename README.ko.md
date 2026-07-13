@@ -37,7 +37,7 @@
 - **기성 코딩 에이전트를 붙입니다.** MASC는 MCP 서버라, Claude Code·Codex 같은 MCP 클라이언트를 `/mcp`에 연결하면 같은 워크스페이스에 참여합니다 — 태스크 claim·전이, 보드, goal을 공유하고 `masc_broadcast`·@mention으로 Keeper를 깨웁니다. (외부에서 Keeper turn을 동기로 직접 호출하는 도구는 없고, 워크스페이스와 멘션으로 상호작용합니다.)
 - **같이 코드를 만질 때 뻔한 충돌을 줄입니다.** 여러 Keeper가 한 저장소를 고치면 turn·lock·작업자 소유권으로 조율을 시도하지만, concurrency safety를 보장하지는 않습니다.
 - **결정과 실패를 들여다봅니다.** 웹 대시보드로 Keeper / Goal / Task / Board를 실시간으로 보고, turn마다 receipt가 남습니다.
-- **위험한 동작은 사람 결정 대기열에 올립니다.** 자율 turn이 위험 도구를 호출하면 승인 대기로 멈춥니다 (HITL). 운영 장치이지 보안 보장은 아닙니다.
+- **외부 효과는 하나의 Gate로 보냅니다.** Always Allow·LLM Auto Judge·HITL은 비계층 명시 모드입니다. HITL은 exact request를 영속화하되 Keeper를 멈추지 않고, 결정이 오면 해당 lane을 깨웁니다.
 - **Keeper마다 모델을 다르게 설정합니다.** `runtime.toml` 한 줄로 runtime catalog에 있는 provider × model을 Keeper별로 지정합니다.
 
 ---
@@ -49,7 +49,7 @@
 | 기능 | 상태 | 한 줄 설명 | 사용자 진입점 |
 |------|:----:|-----------|--------------|
 | **Keepers** | ✅ | 페르소나·목표·지시문을 가진 상주 에이전트. 서버 기동 시 자동 부팅, 상태는 디스크에 영속 | `.masc/config/keepers/*.toml` |
-| **HITL + Automatic** | 🟡 | 위험 도구 호출 승인 대기열. 우회 가능하며 security boundary가 아님. Critical은 현재 운영자 결정까지 대기 | 대시보드 승인 큐 |
+| **Gate: Always Allow / Auto Judge / HITL** | 🟡 | exact 1회성 grant와 Keeper별 wake-up을 갖는 제품 중립 외부 효과 경계 | 대시보드 승인 큐 |
 | **Board** | ✅ | Keeper들이 글·댓글·투표로 비동기 협업, 게시가 관련 Keeper를 깨움 | `masc_board_*` 툴 / 대시보드 |
 | **Sandbox (Docker)** | 🟡 | Docker profile 셸 실행은 컨테이너를 쓰지만, local profile과 fallback 경로가 있어 security boundary가 아님 | keeper toml `sandbox_profile` |
 | **Dashboard** | ✅ | Keeper/Goal/Task/Board를 실시간으로 보고 명령을 내리는 웹 SPA | `dashboard/` (vite) |
@@ -64,9 +64,9 @@
 
 ### 현재 동작과 한계
 
-- **Keepers** — 각 Keeper는 서버가 살아 있는 동안 상주하는 장기 실행 에이전트입니다. heartbeat로 깨어나 turn을 돌고, 메모리·결정 로그는 디스크에 남아 재시작에도 복원됩니다. **한 Keeper는 한 번에 turn 하나만 돕니다**(동시에 두 일을 하지 않음) — 병렬은 여러 Keeper가 함께 도는 데서 옵니다. *한계*: `runtime.toml`의 `[autonomous] concurrency`는 코드가 읽지 않는 죽은 설정이고, fleet 크기는 `[bootstrap] autoboot_max` / `max_active_keepers`로 조절합니다.
-- **HITL** — 프롬프트 지시가 아니라 도구 디스패치 경계에서 `Eio.Promise.await`로 강제됩니다. *한계*: `MASC_DISABLE_HITL=true`(기본 false)와 keeper `always_approve` 규칙으로 우회 가능합니다. 무응답 시 비Critical 도구는 approval silence timeout 뒤 거부되지만, **Critical 위험 도구는 현재 타임아웃이 없어 운영자가 결정할 때까지 turn이 정체될 수 있습니다.** HITL은 운영 workflow일 뿐이며 autonomous execution을 안전하게 만들어주지 않습니다.
-- **Sandbox** — `docker run --rm`을 실제로 호출하고 cap-drop / no-new-privileges / read-only rootfs + 동시 실행 슬롯 제한을 적용합니다. 네트워크는 keeper의 `network_mode`로 제어합니다(기본 `inherit`, `none`으로 격리 가능). *한계*: 모든 Keeper가 docker가 아닙니다(일부는 `local`=호스트 실행). 이미지가 없고 playground 안이면 host 실행으로 강등됩니다(텔레메트리 기록). security boundary로 취급하지 마세요.
+- **Keepers** — 각 Keeper는 서버가 살아 있는 동안 상주하는 장기 실행 에이전트입니다. heartbeat로 깨어나 turn을 돌고, 메모리·결정 로그는 디스크에 남아 재시작에도 복원됩니다. **한 Keeper는 한 번에 turn 하나만 돕니다**(동시에 두 일을 하지 않음) — 병렬은 여러 Keeper가 함께 도는 데서 옵니다. `[autonomous] concurrency`는 죽은 레거시 키이며, MASC는 전역 active-Keeper 상한을 강제하지 않습니다.
+- **Gate / HITL** — 디스패치 경계는 opaque operation identity와 complete typed input을 하나의 Gate에 보냅니다. Workspace/Keeper Always Allow는 즉시 진행하고 Auto Judge는 비동기로 판단하며 Manual은 HITL request를 영속화합니다. Deferred request는 promise를 기다리지 않고 Keeper로 반환되며, 결정 후 깨어난 해당 Keeper lane에서 exact 승인 request가 한 번만 소비됩니다. Gate는 승인 workflow이며 sandbox나 credential boundary가 아닙니다.
+- **Sandbox** — `docker run --rm`을 실제로 호출하고 cap-drop / no-new-privileges / read-only rootfs를 적용합니다. MASC는 Docker 동작을 관측하지만 전역 spawn slot으로 사전 허가하지 않습니다. 네트워크는 keeper의 `network_mode`로 제어합니다(기본 `inherit`, `none`으로 격리 가능). *한계*: 모든 Keeper가 docker가 아닙니다(일부는 `local`=호스트 실행). 이미지가 없고 playground 안이면 host 실행으로 강등됩니다(텔레메트리 기록). security boundary로 취급하지 마세요.
 - **Multi-Runtime** — `runtime.toml`의 `runtime.assignments`에 `keeper = provider.model` 한 줄이면 그 Keeper의 매 turn이 해당 provider로 갑니다.
 - **Provider Failover** — provider 장애 시 순서 failover는 미구현입니다. 장애가 나면 default/assignment를 손으로 고치고 서버를 재시작해야 합니다.
 - **Fusion + JoJ** — Keeper가 `masc_fusion`을 호출하면 패널 모델들이 같은 질문에 각자 답고 심판 모델이 합의/모순/맹점을 종합합니다. *한계*: JoJ(Judge of Judges) 위상은 코드·호출 경로가 있으나, 라이브 설정에 1차 심판 목록이 없어 호출 시 **fail-closed로 에러를 반환합니다**. 결과 registry는 in-memory라 재시작 시 사라집니다.
@@ -130,11 +130,11 @@ bash /tmp/masc-install.sh --version <release-tag>
 curl -fsSL https://raw.githubusercontent.com/jeong-sik/masc/main/scripts/install.sh | bash
 ```
 
-`$HOME/.local/bin/masc`에 바이너리를 설치하고 기본 설정(`tool_policy.toml`, `runtime.toml`)을 `<base-path>/.masc/config/`에 시드합니다. 제공 바이너리: **macOS arm64**, **Linux x86_64**. 그 외 플랫폼은 소스 빌드를 사용합니다.
+`$HOME/.local/bin/masc`에 바이너리를 설치하고 `runtime.toml`을 `<base-path>/.masc/config/`에 시드합니다. 제공 바이너리: **macOS arm64**, **Linux x86_64**. 그 외 플랫폼은 소스 빌드를 사용합니다.
 
 설치 스크립트 요구 도구: `curl`과 기본 Unix 도구(`uname`, `chmod`, `mkdir`, `mktemp`)입니다. `jq`는 `--version` / `MASC_VERSION`을 생략해 GitHub latest release를 조회할 때만 필요합니다. Python/tomllib는 사용하지 않습니다. 재현 가능한 설치가 필요하면 `--version <release-tag>`로 고정하세요.
 
-릴리스 바이너리는 GitHub releases에서 내려받습니다. 선택한 릴리스가 `SHA256SUMS`를 제공하면 설치 스크립트는 다운로드한 바이너리와 seed config(`tool_policy.toml`, `runtime.toml`)를 검증합니다. 기대 항목은 모두 존재해야 하며 값도 일치해야 합니다. 일부 기존 릴리스는 `SHA256SUMS`를 제공하지 않으며, 그런 릴리스는 검증된 바이너리 설치 경로를 사용할 수 없습니다. checksum 파일을 가져오지 못하면 기본값은 실패 종료입니다. 이 경우 아래 source build 경로를 쓰거나, 버리는 로컬 환경이나 air-gapped 설치에서만 `--allow-unverified` 또는 `MASC_ALLOW_UNVERIFIED=1`로 검증을 명시적으로 우회하세요. 이 경우 스크립트가 경고를 출력한 뒤 계속합니다.
+릴리스 바이너리는 GitHub releases에서 내려받습니다. 선택한 릴리스가 `SHA256SUMS`를 제공하면 설치 스크립트는 다운로드한 바이너리와 seed config(`runtime.toml`)를 검증합니다. 기대 항목은 모두 존재해야 하며 값도 일치해야 합니다. 일부 기존 릴리스는 `SHA256SUMS`를 제공하지 않으며, 그런 릴리스는 검증된 바이너리 설치 경로를 사용할 수 없습니다. checksum 파일을 가져오지 못하면 기본값은 실패 종료입니다. 이 경우 아래 source build 경로를 쓰거나, 버리는 로컬 환경이나 air-gapped 설치에서만 `--allow-unverified` 또는 `MASC_ALLOW_UNVERIFIED=1`로 검증을 명시적으로 우회하세요. 이 경우 스크립트가 경고를 출력한 뒤 계속합니다.
 
 > `runtime.toml`이 없거나 `[runtime].default`가 비어 있으면 서버는 `refusing to boot` 로그를 남기고 status 1로 종료합니다 — 환경 기본값 폴백은 없습니다. 기동에 필요한 파일이므로 설치 스크립트가 [`config/runtime.toml`](config/runtime.toml)을 시드합니다. 직접 작성하려면 `[runtime].default = "<provider>.<model>"`와 그에 대응하는 `[provider.model]` runtime binding table을 정의하세요. `[runtime.assignments]`는 선택 사항이며 Keeper별 override에만 씁니다.
 
@@ -195,9 +195,7 @@ cd dashboard && pnpm install && pnpm dev   # vite가 로컬 서버로 프록시
 | 파일 | 역할 |
 |------|------|
 | `runtime.toml` | provider/model 카탈로그 + `[runtime].default`. 기동에 필요: 파일(또는 `[runtime].default`)이 없으면 서버는 `refusing to boot` 로그를 남기고 status 1로 종료합니다 — 환경 기본값 폴백 없음 |
-| `tool_policy.toml` | 설치 스크립트가 시드하는 config-root 마커(레거시). 현재 도구 접근은 레지스트리/디스크립터 기반이라 이 파일 내용은 런타임에 소비되지 않습니다 |
-
-⚠️ **레거시 / 미사용 키**: `tool_policy.toml`은 config-root 마커일 뿐 내용은 런타임에서 읽지 않습니다. `runtime.toml`에 `[autonomous] concurrency`가 있다면 이 역시 죽은 설정입니다 — fleet 크기는 `[bootstrap] autoboot_max` / `max_active_keepers`로 조절합니다.
+⚠️ **레거시 / 미사용 키**: `runtime.toml`에 `[autonomous] concurrency` 또는 `[bootstrap] max_active_keepers`가 있다면 제거하세요. 두 키 모두 실행을 제어하지 않습니다.
 
 **에이전트를 만들 때**
 
@@ -329,7 +327,7 @@ masc/
 
 | # | 영역 | 남은 작업 | 상태 변화 예상 |
 |---|------|----------|---------------|
-| 1 | **Keepers / Fleet** | `runtime.toml`의 `[autonomous] concurrency`를 삭제하거나, 실제 fleet 동시성 제어(`[bootstrap] autoboot_max`, `max_active_keepers`)로 대체해 문서와 코드를 맞춥니다. | 🟡→✅ |
+| 1 | **Keepers / Fleet** | 배포된 `runtime.toml`에서 죽은 `[autonomous] concurrency` 키를 제거하고, 전역 상한이 없는 런타임 계약과 fleet 문서를 맞춥니다. | 🟡→✅ |
 | 2 | **Provider Failover** | provider healthcheck 기반 **자동 순서 failover**를 구현합니다. 장애 시 다음 후보 provider로 Keeper turn을 자동 전환하고, 복구 시 로그/메트릭을 남깁니다. | ❌→✅ |
 | 3 | **Fusion + JoJ** | `runtime.toml`에 JoJ(Judge of Judges)용 1차 심판 패널(`judges`) 설정을 추가하고, fusion 결과 registry를 디스크에 영속화합니다. | 🟡→✅ |
 | 4 | **Goal + Task** | goal-loop 스케줄러가 채널 이벤트 외에도 Keeper turn을 구동할 수 있도록 합니다. 예: goal 상태 변화·마감 임박·blocked 태스크 발견 시 자동 wake. | 🟡→✅ |
@@ -337,8 +335,8 @@ masc/
 | 6 | **IDE** | 관망형 IDE를 실제로 사용 가능한 상태로 만듭니다. LSP 프록시·주석 오버레이·대시보드 IDE 셸은 있으나, 사람이 명령만 내리는 흐름이 검증되지 않아 현재는 사용할 수 없습니다. | ❌→🟡/✅ |
 | 7 | **Multi-Channel** | Slack·Telegram 등 Discord 외 채널용 **사이드카**를 추가하고, gate message 스키마를 채널별로 확장합니다. | 🟡→✅ |
 | 8 | **Sandbox** | docker 이미지 미설치·playground 내 fallback 시 host 실행 비율을 줄이고, `sandbox_profile=local` 사용처를 명시적으로 문서화합니다. | ✅ 안정화 |
-| 9 | **HITL** | Critical 위험 도구의 **타임아웃/에스컬레이션 정책**을 정의합니다. 영구 정체를 방지하면서도 중요한 결정은 사람이 내릴 수 있도록 합니다. | ✅ 안정화 |
-| 10 | **Governance** | `MASC_DISABLE_HITL=true`와 keeper `always_approve` 규칙의 사용 범위를 제한하고, 운영자 감사 로그를 강화합니다. | ✅ 안정화 |
+| 9 | **HITL** | 사람의 결정을 기다리는 동안 Keeper를 블로킹하지 않습니다. exact request를 영속화하고 다른 작업을 계속하며, 결정이 오면 해당 Keeper lane만 깨웁니다. | ✅ 안정화 |
+| 10 | **Gate** | Always Allow·LLM Auto Judge·HITL을 비계층 선택지로 유지합니다. 제품·명령·risk level을 분류하지 않고 exact 1회성 grant를 감사합니다. | ✅ 안정화 |
 | 11 | **OpenTelemetry** | Keeper turn 낮은 수준 이벤트, fusion 나이부 metric, provider별 latency breakdown 등 누락된 signal과 instrumentation을 추가합니다. | 🟡→✅ |
 
 ---

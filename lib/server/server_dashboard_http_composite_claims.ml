@@ -20,7 +20,6 @@ let compact_receipt_runtime_json = Server_dashboard_compact_receipt_json.compact
 let json_number = Server_dashboard_http_json_utils.json_number
 let json_assoc = Server_dashboard_http_json_utils.json_assoc
 let string_has_prefix = Server_dashboard_http_json_utils.string_has_prefix
-module Completion_contract_result = Keeper_completion_contract_result_label
 
 let tool_call_output_text json =
   match json_member "output" json with
@@ -224,12 +223,6 @@ let lower_string_opt =
   Option.map (fun value -> String.lowercase_ascii (String.trim value))
 ;;
 
-let completion_contract_result_of_execution execution =
-  match json_string "completion_contract_result" execution with
-  | Some raw -> Completion_contract_result.of_string raw
-  | None -> None
-;;
-
 let string_opt_is_any value candidates =
   match lower_string_opt value with
   | Some value -> List.mem value candidates
@@ -281,16 +274,10 @@ let composite_snapshot_is_idle snapshot =
   let decision = json_member "decision" snapshot in
   let runtime = json_member "runtime" snapshot in
   let compaction = json_member "compaction" snapshot in
-  let breaker_state =
-    match json_member "circuit_breaker" snapshot with
-    | `Assoc _ as breaker -> json_string "state" breaker
-    | _ -> Some "clean"
-  in
   json_string_eq "turn_phase" snapshot "idle"
   && json_string_eq "stage" decision "undecided"
   && json_string_eq "state" runtime "idle"
   && json_string_eq "stage" compaction "accumulating"
-  && Option.value ~default:"clean" breaker_state = "clean"
 ;;
 
 let composite_execution_config_blocked execution =
@@ -313,30 +300,6 @@ let composite_execution_claim_no_eligible execution =
   | _ -> false
 ;;
 
-let composite_execution_contract_blocker_reason execution =
-  let recoverable_disposition =
-    string_opt_is_any
-      (json_string "operator_disposition" execution)
-      [ "pause_human"; "pass_next_model"; "fail_open_next_runtime" ]
-  in
-  if not recoverable_disposition
-  then None
-  else
-    match completion_contract_result_of_execution execution with
-    | Some
-        ( Completion_contract_result.Surface_mismatch
-        | Completion_contract_result.No_capable_provider as result ) ->
-      Some
-        ("completion_contract_result:" ^ Completion_contract_result.to_string result)
-    | _ -> None
-;;
-
-let composite_execution_contract_blocked execution =
-  match composite_execution_contract_blocker_reason execution with
-  | Some _ -> true
-  | None -> false
-;;
-
 let composite_execution_config_drift execution =
   match json_member "config_drift" execution with
   | `Assoc _ as config_drift ->
@@ -345,49 +308,6 @@ let composite_execution_config_drift execution =
 ;;
 
 let keeper_activation_readiness_json = Server_dashboard_fleet_readiness.keeper_activation_readiness_json
-
-let composite_execution_completion_unsatisfied_reason execution =
-  match completion_contract_result_of_execution execution with
-  | Some Completion_contract_result.Passive_only ->
-    (* RFC-0303 Phase 0: a passive-only turn is activity (thinking / defer /
-       choosing to wait), NOT a dashboard block — regardless of whether the
-       keeper held a claimed task or the world offered work. "Should it have
-       acted on available work?" is a goal-layer semantic judgment, not a
-       per-turn attention flag. The prior work-scope carve-out
-       ([passive_only_without_work_scope]) is removed: passive is uniformly
-       non-blocking now. *)
-    None
-  | Some
-      ( Completion_contract_result.Violated
-      | Completion_contract_result.Claim_only_after_owned_task
-      | Completion_contract_result.Needs_execution_progress as result ) ->
-    Some ("completion_contract_result:" ^ Completion_contract_result.to_string result)
-  | Some _
-  | None -> None
-;;
-
-let composite_execution_budget_unsatisfied_reason execution =
-  match completion_contract_result_of_execution execution with
-  | Some Completion_contract_result.Passive_only ->
-    (* RFC-0303 Phase 0: passive-only under turn-budget exhaustion is not a
-       block. A budget-exhausted turn that only did passive things is still
-       activity; the exhaustion itself is surfaced via the budget disposition,
-       not by re-classifying passive as an unsatisfied contract. *)
-    None
-  | Some
-      (* TEL-OK: pure dashboard classifier; maps typed receipt labels to a
-         display reason without performing an action. *)
-      ( Completion_contract_result.Unknown
-      | Completion_contract_result.Not_dispatched (* TEL-OK: pure classifier. *)
-      | Completion_contract_result.Violated
-      | Completion_contract_result.Surface_mismatch
-      | Completion_contract_result.No_capable_provider
-      | Completion_contract_result.Claim_only_after_owned_task
-      | Completion_contract_result.Needs_execution_progress as result ) ->
-    Some ("completion_contract_result:" ^ Completion_contract_result.to_string result)
-  | Some _
-  | None -> None
-;;
 
 (* Typed budget-exhausted classification.
 
@@ -424,7 +344,6 @@ let composite_execution_turn_budget_exhausted execution =
 let composite_execution_budget_exhausted_pass execution =
   string_opt_is_any (json_string "operator_disposition" execution) [ "pass" ]
   && composite_execution_turn_budget_exhausted execution
-  && Option.is_none (composite_execution_budget_unsatisfied_reason execution)
   &&
   match execution_turn_budget_disposition_of_reason
           (lower_string_opt (json_string "operator_disposition_reason" execution)) with
@@ -437,8 +356,6 @@ let composite_execution_budget_exhausted_pass execution =
 
 let composite_execution_blocked execution =
   composite_execution_claim_no_eligible execution
-  || composite_execution_contract_blocked execution
-  || Option.is_some (composite_execution_completion_unsatisfied_reason execution)
   || string_opt_is_any (json_string "operator_disposition" execution) [ "pause_human" ]
   || (match json_string "terminal_reason_code" execution with
       | Some terminal ->
@@ -539,28 +456,17 @@ let composite_runtime_attention ~snapshot ~execution =
     then None
     else if composite_execution_claim_no_eligible execution
     then Some "claim_scope_no_eligible"
-    else match composite_execution_contract_blocker_reason execution with
-    | Some _ as reason -> reason
-    | None -> (
-      match composite_execution_completion_unsatisfied_reason execution with
-      | Some _ as reason -> reason
-      | None when not blocked -> None
-      | None ->
-        (match
-           ( composite_execution_turn_budget_exhausted execution,
-             composite_execution_budget_unsatisfied_reason execution )
-         with
-         | true, Some reason -> Some reason
-         | _ ->
-           (match json_string "operator_disposition_reason" execution with
-            | Some value -> String_util.trim_to_option value
-            | _ ->
-              (match json_string "terminal_reason_code" execution with
-               | Some value -> String_util.trim_to_option value
-               | _ when needs_attention && composite_execution_config_drift execution ->
-                 Some "keeper_runtime_override_drift"
-               | _ when blocked -> Some "runtime_blocked"
-               | _ -> None))))
+    else if not blocked
+    then None
+    else
+      (match json_string "operator_disposition_reason" execution with
+       | Some value -> String_util.trim_to_option value
+       | _ ->
+         (match json_string "terminal_reason_code" execution with
+          | Some value -> String_util.trim_to_option value
+          | _ when needs_attention && composite_execution_config_drift execution ->
+            Some "keeper_runtime_override_drift"
+          | _ -> Some "runtime_blocked"))
   in
   let reason =
     match execution_reason with

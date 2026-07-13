@@ -653,7 +653,6 @@ let initialize_owner_state_blocking
       ~domain_mgr
       ~proc_mgr
       ~fs
-      ~governance_level
       ()
   =
   Discovery_cache.set_env ~sw ~net;
@@ -700,10 +699,24 @@ let initialize_owner_state_blocking
         ~labels:[ "op", op ]
         seconds);
   Log.Server.info "Backend_mutex_metrics installed (masc_backend_mutex_* metrics)";
-  Fd_accountant.set_pressure_hooks
-    ~active:Keeper_fd_pressure.active
-    ~nofile_soft_limit:Keeper_fd_pressure.process_nofile_soft_limit;
-  Log.Server.info "Fd_accountant pressure hooks installed";
+  Fd_accountant.install_observers
+    ~nofile_soft_limit:Keeper_fd_pressure.process_nofile_soft_limit
+    ~on_resource_error:(fun ~kind error exn ->
+      let kind_name = Fd_accountant.kind_to_string kind in
+      let error_name = Fd_accountant.resource_error_to_string error in
+      let site = "fd_accountant." ^ kind_name in
+      Log.Server.error
+        "Fd_accountant observed OS resource error kind=%s error=%s exception=%s"
+        kind_name
+        error_name
+        (Printexc.to_string exn);
+      match error with
+      | Fd_accountant.Process_fd_exhausted
+      | Fd_accountant.System_fd_exhausted ->
+        Keeper_fd_pressure.note_exception ~site exn
+      | Fd_accountant.Storage_space_exhausted ->
+        Keeper_disk_pressure.note_exception ~site exn);
+  Log.Server.info "Fd_accountant OS resource observers installed";
   Agent_sdk_log_bridge.install ();
   Log.Server.info
     "Agent_sdk_log_bridge installed (agent_sdk.Log -> masc structured log)";
@@ -781,7 +794,7 @@ let initialize_owner_state_blocking
     raise
       (Owner_initialization_failed
          (Strict_path_guard_rejected path_diagnostics));
-  Governance_registry.ensure_init ();
+  Runtime_settings.ensure_init ();
   Runtime_params.restore ~base_path;
   Log.Server.info "Runtime_params restored from %s" base_path;
   Keeper_crash_persistence.start_drain_fiber ~sw ~clock;
@@ -834,8 +847,7 @@ let initialize_owner_state_blocking
      Log.Server.error
        "boot: credential token uniqueness audit failed: %s"
        (Printexc.to_string exn));
-  let t2 = Eio.Time.now clock in
-  Log.Server.info "Bootstrap completed in %.1fs" (t2 -. t1);
+  Log.Server.info "Bootstrap completed in %.1fs" (Eio.Time.now clock -. t1);
   let stale_threshold_hours = 12 in
   let build = Build_identity.current () in
   (match build.binary_commit, build.binary_commit_age_seconds with
@@ -848,8 +860,6 @@ let initialize_owner_state_blocking
        hours
        stale_threshold_hours
    | _ -> ());
-  Server_bootstrap_loops.install_tooling ~governance_level state;
-  Log.Server.info "Tooling + schemas in %.1fs" (Eio.Time.now clock -. t2);
   let domain_pool =
     Domain_pool.create
       ~sw
@@ -1052,6 +1062,54 @@ let mark_owner_state_ready state =
            ; observed_phase = observed.phase
            })
 
+let install_keeper_gate_persistence state =
+  let base_path = (Mcp_server.workspace_config state).base_path in
+  match Keeper_approval_queue.install_persistence ~base_path with
+  | Error error ->
+    (* Gate persistence is lane-local. Keep unrelated server subsystems
+       available, but surface the unavailable Gate explicitly instead of
+       treating a malformed durable queue as empty. *)
+    Log.Server.error
+      "keeper_gate: durable queue install failed base_path=%s error=%s"
+      base_path
+      (Keeper_approval_queue.install_error_to_string error)
+  | Ok report ->
+    Log.Server.info
+      "keeper_gate: installed durable queue base_path=%s pending=%d replayed=%d replay_failed=%d"
+      base_path
+      report.loaded_pending
+      report.replayed_deliveries
+      (List.length report.delivery_replay_failures);
+    List.iter
+      (fun (failure : Keeper_approval_queue.delivery_replay_failure) ->
+         Log.Server.error
+           "keeper_gate: durable delivery replay failed approval=%s error=%s"
+           failure.approval_id
+           failure.reason)
+      report.delivery_replay_failures;
+    let resume_report = Keeper_gate.resume_persisted_auto_judges ~base_path in
+    Log.Server.info
+      "keeper_gate: recovered Auto Judge work requested=%d started=%d finalized=%d skipped=%d failed=%d"
+      resume_report.requested
+      (List.length resume_report.started_ids)
+      (List.length resume_report.finalized_ids)
+      (List.length resume_report.skipped_ids)
+      (List.length resume_report.failures);
+    List.iter
+      (fun approval_id ->
+         Log.Server.warn
+           "keeper_gate: recovered Auto Judge no longer startable approval=%s"
+           approval_id)
+      resume_report.skipped_ids;
+    List.iter
+      (fun (failure : Keeper_gate.auto_judge_resume_failure) ->
+         Log.Server.error
+           "keeper_gate: recovered Auto Judge start failed approval=%s error=%s"
+           failure.approval_id
+           failure.reason)
+      resume_report.failures
+;;
+
 
 (* bootstrap_keepers removed: the keeper_autoboot subsystem in
    start_keeper_loops now handles keeper startup in a dedicated
@@ -1117,7 +1175,6 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
      exits immediately rather than leaving that partial owner alive; only an
      auxiliary failure after readiness may continue as degraded serving. *)
   Eio.Fiber.fork ~sw (fun () ->
-    let governance_level = Env_config_core.governance_level () in
     let handle_initialization_failure error =
       match
         startup_failure_disposition
@@ -1138,13 +1195,17 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       Server_startup_state.mark_blocking ~backend_mode:initial_backend_mode;
       let initialized_owner =
         initialize_owner_state_blocking ~sw ~env ~base_path ~clock ~mono_clock
-          ~net ~domain_mgr ~proc_mgr ~fs ~governance_level ()
+          ~net ~domain_mgr ~proc_mgr ~fs ()
       in
       let state = initialized_owner.state in
       let path_diagnostics = initialized_owner.path_diagnostics in
       let claimed_keeper_persistence =
         initialized_owner.claimed_keeper_persistence
       in
+      (* Publish the HTTP state before readiness, then install the independent
+         durable Gate queue before any Keeper loop can originate effects. *)
+      server_state := Some state;
+      install_keeper_gate_persistence state;
       (* Publish the complete lazy-task barrier before spawning Keeper autoboot.
          Each lazy task owns its own failure transition, so unrelated transport
          and dashboard initialization cannot strand Keeper boot behind an
@@ -1162,7 +1223,6 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       (match mark_owner_state_ready state with
        | Ok () -> ()
        | Error error -> raise (Owner_initialization_failed error));
-      server_state := Some state;
       let resolved_base, masc_dir =
         Server_bootstrap_loops.start_background_maintenance ~sw ~clock ~env state
       in

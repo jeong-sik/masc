@@ -1,59 +1,12 @@
-(** Keeper_approval_queue — Eio.Promise-based HITL approval for keeper tools.
+(** Durable, nonblocking HITL queue state and exact Always Allowed rules.
 
-    When a keeper's OAS Agent invokes a tool that requires approval,
-    the agent fiber is suspended via [Eio.Promise.await].  An operator
-    can then approve/reject via the dashboard approval HTTP handler
-    ([server_dashboard_http.ml]), which resolves the promise and
-    resumes the agent.
-
-    This replaces the manual "pending_approval" state machine with
-    actual execution-level suspension using Eio structured concurrency.
-
-    Spec navigation (OCaml -> TLA+) — plan §19 Cycle 29 anchor for
-    B3 (Approval Queue).  Authoritative spec mirror is
-    [specs/keeper-state-machine/KeeperApprovalQueue.tla] (Cycle 9 /
-    Tier B3, PR #11417).
-
-    The spec preamble cites this module by function name
-    ([submit_and_await], [submit_pending], [expire_stale]).  It used to
-    carry line numbers (751 / 772 / 941) but iter 64 N-2.a removed them
-    after the OCaml line drift reached +245..+413 — function names are
-    stable, line numbers are not.  This block is the reverse-direction
-    citation so code search for "KeeperApprovalQueue" lands here.
-
-    Action mapping (TLA+ -> OCaml):
-      Submit                 [submit_and_await] / [submit_pending]
-                             record a new pending entry. [submit_and_await]
-                             suspends the caller on [Eio.Promise.await];
-                             [submit_pending] invokes its callback later and
-                             defaults to an independent Keeper cycle unless
-                             an explicit lifecycle [Blocking] policy is used.
-      Resolve                operator approves/rejects via the HTTP
-                             handler in [server_dashboard_http.ml],
-                             which calls [resolve] on the queue and
-                             wakes the suspended fiber.
-      ExpireStale            [expire_stale] sweeps timed-out entries
-                             and forces
-                             [Eio.Promise.resolve resolver (Reject ...)]
-                             so no fiber is left blocked indefinitely.
-      ExpireStaleNoResolve   bug action — entries are removed from
-                             [pending] without resolving the promise.
-                             Spec invariants SuspensionMatchesPending
-                             and QuiescentImpliesResolved catch this;
-                             in code, the structural invariant is
-                             that every removal from [pending] is
-                             paired with an [Eio.Promise.resolve]
-                             on the same control-flow path.
-
-    @since 2.262.0 (#5907) *)
+    This module does not classify an effect, interpret an operation name, or
+    own a Keeper lane. *)
 
 (** Types, conversions, and JSON serialization extracted to
     [Keeper_approval_queue_rules_types].  State management below. *)
 
 include Keeper_approval_queue_rules_types
-
-let default_noncritical_approval_timeout_s = 600.0
-let default_critical_approval_escalation_after_s = 1800.0
 
 let record_queue_failure ~keeper_name ~site ?(id = "-") ?(event_type = "-") exn =
   Otel_metric_store.inc_counter
@@ -81,17 +34,14 @@ let rec atomic_update atomic f =
 
 let pending : pending_approval SMap.t Atomic.t = Atomic.make SMap.empty
 
+let id_rng = Random.State.make_self_init ()
+let id_rng_mu = Stdlib.Mutex.create ()
+
 let make_generated_id prefix =
-  let entropy =
-    Printf.sprintf
-      "%s|%d|%.6f|%d"
-      prefix
-      (Unix.getpid ())
-      (Unix.gettimeofday ())
-      (Random.bits ())
+  let uuid =
+    Stdlib.Mutex.protect id_rng_mu (fun () -> Uuidm.v4_gen id_rng ())
   in
-  let digest = Digestif.SHA256.(digest_string entropy |> to_hex) in
-  prefix ^ "_" ^ String.sub digest 0 12
+  prefix ^ "_" ^ Uuidm.to_string uuid
 ;;
 
 (* Stdlib.Mutex: rule reads/writes are short filesystem critical sections and
@@ -99,15 +49,10 @@ let make_generated_id prefix =
    Eio fiber context and raises Cancel.Get_context outside one. *)
 let rules_mu = Stdlib.Mutex.create ()
 
-let mutex_protect_allow_reentrant mutex f =
-  try Stdlib.Mutex.protect mutex f with
-  | Sys_error msg when String.equal msg "Mutex.lock: Resource deadlock avoided" -> f ()
-;;
-
-let with_rules_lock f = mutex_protect_allow_reentrant rules_mu f
+let with_rules_lock f = Stdlib.Mutex.protect rules_mu f
 
 let rules_path ~base_path () =
-  Filename.concat (Workspace_utils.masc_dir_from_base_path ~base_path) "approval-rules.json"
+  Keeper_gate_path.always_allowed ~base_path
 ;;
 
 let approval_rules_persistence_surface = "keeper_approval_rules"
@@ -129,55 +74,19 @@ let rule_json_preview json =
   Yojson.Safe.to_string json |> String_util.utf8_prefix ~max_bytes:240
 ;;
 
-let stable_request_key_blocklist =
-  [ "id"
-  ; "turn_id"
-  ; "timestamp"
-  ; "requested_at"
-  ; "requested_at_iso"
-  ; "ts"
-  ; "created_at"
-  ; "updated_at"
-  ; "trace_id"
-  ; "session_id"
-  ; "keeper_turn_id"
-  ; "approval_id"
-  ; "rule_id"
-  ; "nonce"
-  ]
-;;
-
-let rec normalize_request_json = function
+let rec canonical_request_json = function
   | `Assoc fields ->
     fields
-    |> List.filter (fun (key, _) -> not (List.mem key stable_request_key_blocklist))
-    |> List.map (fun (key, value) -> key, normalize_request_json value)
-    |> List.sort (fun (left, _) (right, _) -> String.compare left right)
-    |> fun normalized -> `Assoc normalized
-  | `List items -> `List (List.map normalize_request_json items)
+    |> List.map (fun (key, value) -> key, canonical_request_json value)
+    |> List.stable_sort (fun (left, _) (right, _) -> String.compare left right)
+    |> fun canonical -> `Assoc canonical
+  | `List items -> `List (List.map canonical_request_json items)
   | other -> other
 ;;
 
 let request_fingerprint (input : Yojson.Safe.t) =
-  let stable_json = normalize_request_json input |> Yojson.Safe.to_string in
-  Digestif.SHA256.(digest_string stable_json |> to_hex)
-;;
-
-let request_fingerprint_preview fingerprint =
-  String.sub
-    fingerprint
-    0
-    (min fingerprint_preview_length (String.length fingerprint))
-;;
-
-let sandbox_profile_of_runtime_contract runtime_contract =
-  Option.bind runtime_contract (fun json ->
-    Json_util.get_string_nonempty json "sandbox_profile")
-;;
-
-let backend_of_runtime_contract runtime_contract =
-  Option.bind runtime_contract (fun json ->
-    Json_util.get_string_nonempty json "backend")
+  let canonical_json = canonical_request_json input |> Yojson.Safe.to_string in
+  Digestif.SHA256.(digest_string canonical_json |> to_hex)
 ;;
 
 let nonempty_string_opt = function
@@ -185,64 +94,105 @@ let nonempty_string_opt = function
   | _ -> None
 ;;
 
-let sandbox_profile_of_runtime_context ?sandbox_profile runtime_contract =
-  match nonempty_string_opt sandbox_profile with
-  | Some _ as value -> value
-  | None -> sandbox_profile_of_runtime_contract runtime_contract
+let rule_identity_matches left right =
+  String.equal left.keeper_name right.keeper_name
+  && String.equal left.tool_name right.tool_name
+  && String.equal left.request_fingerprint right.request_fingerprint
 ;;
 
-let backend_of_runtime_context ?backend runtime_contract =
-  match nonempty_string_opt backend with
-  | Some _ as value -> value
-  | None -> backend_of_runtime_contract runtime_contract
+let validate_unique_rules rules =
+  let rec loop seen = function
+    | [] -> Ok rules
+    | (rule : approval_rule) :: rest ->
+      if List.exists (fun previous -> String.equal previous.id rule.id) seen
+      then Error (Printf.sprintf "duplicate approval rule id %s" rule.id)
+      else if List.exists (fun previous -> rule_identity_matches previous rule) seen
+      then
+        Error
+          (Printf.sprintf
+             "duplicate exact Always Allowed identity for keeper=%s operation=%s"
+             rule.keeper_name
+             rule.tool_name)
+      else loop (rule :: seen) rest
+  in
+  loop [] rules
 ;;
 
 let load_rules_unlocked ~base_path () =
   let path = rules_path ~base_path () in
   let rec parse_entries index acc = function
-    | [] -> List.rev acc
-    | entry :: rest ->
-      (match approval_rule_of_yojson_with_error entry with
-       | Ok rule -> parse_entries (index + 1) (rule :: acc) rest
+    | [] ->
+      let rules = List.rev acc in
+      (match validate_unique_rules rules with
+       | Ok _ as result -> result
        | Error reason ->
          report_rules_read_drop
            ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
            ~path
-           ~detail:
-             (Printf.sprintf
-                "approval rule entry %d rejected (%s): %s"
-                index
-                reason
-                (rule_json_preview entry));
-         parse_entries (index + 1) acc rest)
+           ~detail:reason;
+         Error { path; reason })
+    | entry :: rest ->
+      (match approval_rule_of_yojson_with_error entry with
+       | Ok rule -> parse_entries (index + 1) (rule :: acc) rest
+       | Error reason ->
+         let detail =
+           Printf.sprintf
+             "approval rule entry %d rejected (%s): %s"
+             index
+             reason
+             (rule_json_preview entry)
+         in
+         report_rules_read_drop
+           ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+           ~path
+           ~detail;
+         Error { path; reason = detail })
   in
-  if not (Sys.file_exists path)
-  then []
-  else (
-    match Safe_ops.read_json_file_safe path with
-    | Ok (`List entries) -> parse_entries 0 [] entries
-    | Ok json ->
-      report_rules_read_drop
-        ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
-        ~path
-        ~detail:
-          (Printf.sprintf
-             "approval rules file must be a JSON list, got: %s"
-             (rule_json_preview json));
-      []
-    | Error detail ->
-      report_rules_read_drop
-        ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
-        ~path
-        ~detail;
-      [])
+  try
+    if not (Sys.file_exists path)
+    then Ok []
+    else (
+      match Safe_ops.read_json_file_safe path with
+      | Ok (`List entries) -> parse_entries 0 [] entries
+      | Ok json ->
+        let reason =
+          Printf.sprintf
+            "approval rules file must be a JSON list, got: %s"
+            (rule_json_preview json)
+        in
+        report_rules_read_drop
+          ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+          ~path
+          ~detail:reason;
+        Error { path; reason }
+      | Error reason ->
+        report_rules_read_drop
+          ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+          ~path
+          ~detail:reason;
+        Error { path; reason })
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    let reason = Printexc.to_string exn in
+    report_rules_read_drop
+      ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+      ~path
+      ~detail:reason;
+    Error { path; reason }
 ;;
 
-let save_rules_unlocked ~base_path rules : (unit, string) result =
+let save_rules_unlocked ~base_path rules : (unit, rule_store_error) result =
   let path = rules_path ~base_path () in
-  Fs_compat.mkdir_p (Filename.dirname path);
-  let json = `List (List.map approval_rule_to_yojson rules) in
-  Fs_compat.save_file_atomic path (Yojson.Safe.pretty_to_string json)
+  try
+    Fs_compat.mkdir_p (Filename.dirname path);
+    let json = `List (List.map approval_rule_to_yojson rules) in
+    (match Fs_compat.save_file_atomic path (Yojson.Safe.pretty_to_string json) with
+     | Ok () -> Ok ()
+     | Error reason -> Error { path; reason })
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error { path; reason = Printexc.to_string exn }
 ;;
 
 let list_rules ~base_path () =
@@ -250,35 +200,13 @@ let list_rules ~base_path () =
 ;;
 
 let list_rules_dashboard_json ~base_path () =
-  let rules =
-    list_rules ~base_path ()
-    |> List.sort (fun left right -> Float.compare right.created_at left.created_at)
-  in
-  `List (List.map approval_rule_to_yojson rules)
-;;
-
-let policy_summary_json ~base_path ~keeper_name : Yojson.Safe.t =
-  let persisted_rules =
-    list_rules ~base_path ()
-    |> List.fold_left
-         (fun count (rule : approval_rule) ->
-            if String.equal rule.keeper_name keeper_name then count + 1 else count)
-         0
-  in
-  `Assoc
-    [ "allow_rules", `Int persisted_rules
-    ; "deny_rules", `Int 0
-    ; "persisted_rules", `Int persisted_rules
-    ]
-;;
-
-let rule_identity_matches left right =
-  String.equal left.keeper_name right.keeper_name
-  && String.equal left.tool_name right.tool_name
-  && left.sandbox_profile = right.sandbox_profile
-  && left.backend = right.backend
-  && String.equal left.request_fingerprint right.request_fingerprint
-  && left.max_risk = right.max_risk
+  Result.map
+    (fun rules ->
+       let rules =
+         List.sort (fun left right -> Float.compare right.created_at left.created_at) rules
+       in
+       `List (List.map approval_rule_to_yojson rules))
+    (list_rules ~base_path ())
 ;;
 
 let upsert_rule
@@ -286,57 +214,58 @@ let upsert_rule
       ~keeper_name
       ~tool_name
       ~input
-      ~risk_level
-      ?sandbox_profile
-      ?backend
-      ?runtime_contract
       ?created_by
       ?source_approval_id
       ()
   =
   with_rules_lock (fun () ->
-    let rules = load_rules_unlocked ~base_path () in
-    let request_fingerprint = request_fingerprint input in
-    let candidate =
-      { id = make_generated_id "rule"
-      ; keeper_name
-      ; tool_name
-      ; sandbox_profile = sandbox_profile_of_runtime_context ?sandbox_profile runtime_contract
-      ; backend = backend_of_runtime_context ?backend runtime_contract
-      ; request_fingerprint
-      ; request_fingerprint_preview = request_fingerprint_preview request_fingerprint
-      ; max_risk = risk_level
-      ; created_at = Unix.gettimeofday ()
-      ; created_by
-      ; last_matched_at = None
-      ; match_count = 0
-      ; source_approval_id
-      }
-    in
-    match List.find_opt (fun rule -> rule_identity_matches rule candidate) rules with
-    | Some existing -> existing, false
-    | None ->
-      (match save_rules_unlocked ~base_path (candidate :: rules) with
-       | Ok () -> ()
-       | Error msg ->
-         Otel_metric_store.inc_counter
-           Keeper_metrics.(to_string ApprovalQueueFailures)
-           ~labels:[ "keeper", keeper_name; "site", Keeper_approval_queue_failure_site.(to_label Upsert_rule_save) ]
-           ();
-         Log.Keeper.warn "upsert_rule: save failed: %s" msg);
-      candidate, true)
+    match load_rules_unlocked ~base_path () with
+    | Error _ as error -> error
+    | Ok rules ->
+      let request_fingerprint = request_fingerprint input in
+      let candidate =
+        { id = make_generated_id "rule"
+        ; keeper_name
+        ; tool_name
+        ; request_fingerprint
+        ; created_at = Unix.gettimeofday ()
+        ; created_by
+        ; source_approval_id
+        }
+      in
+      (match List.find_opt (fun rule -> rule_identity_matches rule candidate) rules with
+       | Some existing -> Ok (existing, false)
+       | None ->
+         (match save_rules_unlocked ~base_path (candidate :: rules) with
+          | Ok () -> Ok (candidate, true)
+          | Error error ->
+            Otel_metric_store.inc_counter
+              Keeper_metrics.(to_string ApprovalQueueFailures)
+              ~labels:
+                [ "keeper", keeper_name
+                ; "site", Keeper_approval_queue_failure_site.(to_label Upsert_rule_save)
+                ]
+              ();
+            Log.Keeper.warn "upsert_rule: save failed: %s" (rule_store_error_to_string error);
+            Error error)))
 ;;
 
 let delete_rule ~base_path ~id () =
   with_rules_lock (fun () ->
-    let rules = load_rules_unlocked ~base_path () in
-    match List.find_opt (fun rule -> String.equal rule.id id) rules with
-    | None -> Error (Printf.sprintf "approval rule %s not found" id)
-    | Some deleted ->
-      let remaining = List.filter (fun rule -> not (String.equal rule.id id)) rules in
-      (match save_rules_unlocked ~base_path remaining with
-       | Ok () -> Ok deleted
-       | Error msg -> Error msg))
+    match load_rules_unlocked ~base_path () with
+    | Error _ as error -> error
+    | Ok rules ->
+      (match List.find_opt (fun rule -> String.equal rule.id id) rules with
+       | None ->
+         Error
+           { path = rules_path ~base_path ()
+           ; reason = Printf.sprintf "approval rule %s not found" id
+           }
+       | Some deleted ->
+         let remaining = List.filter (fun rule -> not (String.equal rule.id id)) rules in
+         (match save_rules_unlocked ~base_path remaining with
+          | Ok () -> Ok deleted
+          | Error _ as error -> error)))
 ;;
 
 let find_matching_rule
@@ -344,50 +273,21 @@ let find_matching_rule
       ~keeper_name
       ~tool_name
       ~input
-      ~risk_level
-      ?sandbox_profile
-      ?backend
-      ?runtime_contract
       ()
   =
   with_rules_lock (fun () ->
-    let rules = load_rules_unlocked ~base_path () in
-    let request_fingerprint = request_fingerprint input in
-    let sandbox_profile = sandbox_profile_of_runtime_context ?sandbox_profile runtime_contract in
-    let backend = backend_of_runtime_context ?backend runtime_contract in
-    match
-      List.find_opt
-        (fun rule ->
-           String.equal rule.keeper_name keeper_name
-           && String.equal rule.tool_name tool_name
-           && rule.sandbox_profile = sandbox_profile
-           && rule.backend = backend
-           && String.equal rule.request_fingerprint request_fingerprint
-           && risk_level_to_int risk_level <= risk_level_to_int rule.max_risk)
-        rules
-    with
-    | None -> None
-    | Some rule ->
-      let now = Unix.gettimeofday () in
-      let updated_rules =
-        List.map
-          (fun current ->
-             if String.equal current.id rule.id
-             then
-               { current with
-                 last_matched_at = Some now
-               ; match_count = current.match_count + 1
-               }
-             else current)
-          rules
-      in
-      (match save_rules_unlocked ~base_path updated_rules with
-       | Ok () -> ()
-       | Error msg ->
-         Otel_metric_store.inc_counter
-           Keeper_metrics.(to_string ApprovalQueueFailures)
-           ~labels:[ "keeper", keeper_name; "site", Keeper_approval_queue_failure_site.(to_label Matching_rule_save) ]
-           ();
-         Log.Keeper.warn "find_matching_rule: save failed: %s" msg);
-      Some { rule_id = rule.id; matched_by = "always_rule" })
+    match load_rules_unlocked ~base_path () with
+    | Error _ as error -> error
+    | Ok rules ->
+      let request_fingerprint = request_fingerprint input in
+      (match
+         List.find_opt
+           (fun rule ->
+              String.equal rule.keeper_name keeper_name
+              && String.equal rule.tool_name tool_name
+              && String.equal rule.request_fingerprint request_fingerprint)
+           rules
+       with
+       | None -> Ok None
+       | Some rule -> Ok (Some { rule_id = rule.id })))
 ;;

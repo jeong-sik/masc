@@ -1204,7 +1204,7 @@ let schedule_prune_cmd_exit base_path =
 
 let schedule_prune_cmd =
   let doc =
-    "Prune completed (Succeeded/Failed/Rejected/Cancelled/Expired) schedules and associated executions/grants."
+    "Prune completed (Succeeded/Failed/Cancelled/Expired) schedules and associated executions."
   in
   let info = Cmd.info "schedule-prune" ~doc in
   Cmd.v info Term.(const schedule_prune_cmd_exit $ base_path)

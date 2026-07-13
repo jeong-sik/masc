@@ -1,5 +1,7 @@
 ---
 title: RFC-0299 — Typed-Boundary Sweep (string-classifier → closed-sum, dead SSOT reclamation)
+status: Draft
+updated: 2026-07-13
 ---
 
 # RFC-0299: Typed-Boundary Sweep
@@ -18,6 +20,16 @@ A cluster of open issues share one root: **closed-sum variants reverse-classifie
 
 This is explicitly NOT N-of-M patches. Each domain is its own PR; the RFC fixes the *abstraction boundary* so the compiler enforces parity (manifesto: "use OCaml's strengths — exhaustive match").
 
+### Scope amendment (2026-07-13)
+
+The former evidence-spec and tool-capability phases are withdrawn. A closed sum
+is appropriate for objective wire vocabulary, but typing a local semantic
+classification does not make it objective. Task completion is judged by its
+configured LLM; concrete external effects use the product-neutral Keeper Gate.
+Neither path may be authorized or rejected by evidence kind, tool name, or a
+registration-time effect class. The remaining phases are representation/codec
+SSOT work only.
+
 ## 1. Why a sweep, not per-issue fixes
 
 The 2026-06-29 audit found the pattern compounds: `string catch-all` → `silent drift` (dead arm / defeated gate) → `silent failure` (operator-invisible). Fixing one site leaves the structural hole that regrew the drift (e.g. #15257's `config_category_enum_strings` was supposedly collapsed by RFC-0057 Phase 1 but re-accumulated across 5 files by 2026-05-14). Per-site patches are exactly the workaround-rejection signature #3 ("N-of-M patch admits abstraction failure"). The sweep closes the boundary so the compiler blocks the next regression.
@@ -27,9 +39,9 @@ The 2026-06-29 audit found the pattern compounds: `string catch-all` → `silent
 | Domain | Issue | Current anti-pattern | Proposed SSOT |
 |---|---|---|---|
 | Keeper lifecycle / blocker_class / disposition / tool_failure_class | #22071 | variants reverse-classified via string match, `_ -> None/Unknown`. HIGH site `server_dashboard_http_execution_surfaces.ml:395-441`: 4 patchers silently stop on new variant | closed-sum + exhaustive `of_string` per type; one SSOT module |
-| Evidence gate | #18840 | `cdal_evidence_gate.ml:94-129` case-insensitive substring ("CI green" satisfied by literal mention); null-equivalence lists triplicated; magic 20 | `evidence_spec` closed-sum + `lib/null_equivalence.ml` SSOT |
+| Evidence gate | #18840 | Historical substring and magic-threshold defect | **Withdrawn phase** — structured evidence is LLM context, not a completion classifier |
 | Goal scope | #20674 | `claim_goal_scope.mode` is string; consumers branch on string match; dead fossilized arm `empty_goal_scope_fallback_all_tasks` | `claim_scope_mode = All_tasks \| Active_goal_ids \| Empty_goal_scope_fallback_all_tasks` |
-| Tool capability axis | #22042 | mixes typed `to_string Board_post` with raw public-alias literals `masc_broadcast`/`masc_keeper_msg`; runtime canonicalizes → `List.mem` permanently false → RFC-0239 anti-thrash silently resets | canonical-form closed-sum; no public-alias string at the classification site |
+| Tool capability axis | #22042 | Historical name-based semantic classification | **Withdrawn phase** — descriptors do not authorize, hide, or rank tools |
 | Attempt state | #22246 | `Attempt_state` (SSOT from #8930) has **0 production consumers**; sidecar reimplements `attempt_record` with `last_attempt_result:string` + ISO-string time | retire sidecar record; route through `Attempt_state` (result as closed variant, not string) |
 | Health / keeper status | #22639 | stringly-typed status + severity rank reimplemented 6 places; `health_level_of_string` doesn't recognize `'blocked'` → `HL_unknown` → rank 0 (silently down-ranks a blocked fleet) | `health_status` closed-sum + single rank function SSOT |
 | Config category enum | #15257 | `config_category_enum_strings` duplicated 5 files (regrew after RFC-0057) | `config_category` variant + single SSOT |
@@ -51,8 +63,8 @@ This makes "illegal states unrepresentable" (Parse-don't-validate) and turns new
 
 - **Phase 1 — `health_status`** (#22639): the latent fleet-down-rank landmine. Closed-sum + single rank SSOT; migrate 6 sites. Gate: dashboard rank test pins `'blocked'` → correct rank; no string match remains.
 - **Phase 2 — `claim_scope_mode`** (#20674): variant + retire dead fossilized arm. Gate: dead-arm removal verified; consumers exhaustive.
-- **Phase 3 — `evidence_spec`** (#18840): closed-sum + `lib/null_equivalence.ml` SSOT; replace substring matcher. Gate: free-text "CI green" no longer satisfies; exhaustive.
-- **Phase 4 — tool capability axis** (#22042): canonical-form closed-sum at classification site; retire public-alias literals. Gate: RFC-0239 anti-thrash resets only on real Board_activity.
+- **Phase 3 — evidence classification: Withdrawn.** Evidence may be parsed and resolved, but no local kind/count classifier decides Task completion.
+- **Phase 4 — tool capability classification: Withdrawn.** Tool schemas remain visible and actual external effects reach the ordinary Keeper Gate.
 - **Phase 5 — `Attempt_state` reclamation** (#22246): make the SSOT module load-bearing — sidecar routes through it; delete string-typed `attempt_record`. Gate: 0 string-typed result fields; `Attempt_state` has production consumers.
 - **Phase 6 — `config_category`** (#15257): variant + SSOT, collapse 5 files. Gate: 5-file dup gone; RFC-0057 drift cannot regrow.
 - **Phase 7 — masc_run_* schemas** (#22177): single schema SSOT, both consumers import. Gate: compiler enforces field parity.

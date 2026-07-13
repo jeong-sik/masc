@@ -61,7 +61,6 @@ function normalizeWorkerRunEvidence(raw: unknown): DashboardProofWorkerRunEviden
     proof_present: asBoolean(raw.proof_present),
     proof_run_id: asString(raw.proof_run_id) ?? null,
     proof_status: asString(raw.proof_status) ?? null,
-    proof_risk_class: asString(raw.proof_risk_class) ?? null,
     proof_execution_mode: asString(raw.proof_execution_mode) ?? null,
     proof_evidence_count: asNumber(raw.proof_evidence_count),
     checkpoint_ref: asString(raw.checkpoint_ref) ?? null,

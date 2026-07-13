@@ -42,29 +42,11 @@ describe('KeeperRuntimeAlertStrip', () => {
     expect(container.textContent).toContain('fallback_exhausted')
   })
 
-  it('renders trust failure without tool-contract sibling evidence', () => {
-    const { container } = render(h(KeeperRuntimeAlertStrip, {
-      keeper: keeper({
-        needs_attention: true,
-        trust: {
-          disposition: 'Alert',
-          attention_reason: 'completion_contract_violation',
-        },
-      }),
-    }))
-
-    const text = container.textContent ?? ''
-    expect(text).toContain('검증')
-    expect(text).not.toContain('completion_contract_violation')
-    expect(text).not.toContain('증명')
-  })
-
   // Trust-snapshot runtime-failure tokens (keeper_runtime_trust_snapshot.ml)
   // are not first-class status_bridge reasons; canonicalAttentionReason folds
   // the enumerated trust set to the coarse `runtime_blocked` label so the strip
   // shows a label rather than a raw token, pending the trust-vocabulary RFC.
   it.each([
-    'completion_contract_violation',
     'fsm_invariant',
   ])('folds trust runtime-failure token %s to the coarse runtime_blocked copy', (reason) => {
     const { container } = render(h(KeeperRuntimeAlertStrip, {
@@ -81,9 +63,6 @@ describe('KeeperRuntimeAlertStrip', () => {
 
   it.each([
     ['runtime_exhausted', '런타임 후보 소진'],
-    ['completion_contract_unsatisfied', '완료 계약 미충족'],
-    ['tool_route_recoverable_failure', '도구 라우팅 복구 가능 실패'],
-    ['turn_livelock_blocked', '턴 livelock 차단'],
     ['unmapped_runtime_state', '매핑되지 않은 runtime 상태'],
     ['transient_runtime_retry', '일시적 런타임 재시도'],
   ])('labels receipt-derived attention reason %s distinctly', (reason, label) => {
@@ -97,19 +76,6 @@ describe('KeeperRuntimeAlertStrip', () => {
     const text = container.textContent ?? ''
     expect(text).toContain(label)
     expect(text).not.toContain(reason)
-  })
-
-  it('labels completion-contract composite trust reasons', () => {
-    const { container } = render(h(KeeperRuntimeAlertStrip, {
-      keeper: keeper({
-        needs_attention: true,
-        attention_reason: 'passive_only',
-      }),
-    }))
-
-    const text = container.textContent ?? ''
-    expect(text).toContain('진행 작업 없는 수동 응답')
-    expect(text).not.toContain('passive_only')
   })
 
   // First-class status_bridge reasons keep their OWN labels — they are no
@@ -182,7 +148,6 @@ describe('KeeperRuntimeAlertStrip', () => {
     ['inspect_turn_finalization', '턴 정리 상태 확인'],
     ['inspect_stale_turn_root_cause', '응답 지연(stale) 원인 확인'],
     ['provide_input_or_decline', '입력 제공 또는 거절'],
-    ['reconcile_partial_commit', '부분 커밋 정합성 확인'],
   ])('labels first-class next_human_action %s distinctly', (action, label) => {
     const { container } = render(h(KeeperRuntimeAlertStrip, {
       keeper: keeper({
@@ -287,23 +252,6 @@ describe('KeeperRuntimeAlertStrip', () => {
     expect(text).toContain('재개하기')
     expect(text).not.toContain('일시정지하기')
     expect(text).not.toContain('깨우기')
-  })
-
-  it('normalizes legacy no-progress last_blocker text before rendering blocker details', () => {
-    const { container } = render(h(KeeperRuntimeAlertStrip, {
-      keeper: keeper({
-        paused: true,
-        keepalive_running: true,
-        needs_attention: true,
-        last_blocker: 'no_progress loop detected: streak=10 threshold=10; manual pause applied',
-      }),
-    }))
-
-    const text = container.textContent ?? ''
-    expect(text).toContain('progress-safety latch')
-    expect(text).toContain('Resume')
-    expect(text).not.toContain('manual pause applied')
-    expect(text).not.toContain('no_progress loop detected')
   })
 
   it('uses lifecycle action visibility SSOT to show wake for non-paused blocked keepers', () => {

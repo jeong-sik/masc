@@ -311,16 +311,16 @@ Sse.subscribe_external ~id:"ws-123"
 - `is_alive`가 `false`를 반환하면 자동 제거 (리소스 누수 방지)
 - broadcast 완료 후 동기적으로 호출됨
 
-### 5.7 Capacity & Limits
+### 5.7 Transport resource boundaries
 
-| 상수 | 값 | 근거 |
-|------|-----|------|
-| `max_clients` | 200 | Agent-LLM-A.ai MCP 클라이언트 재연결 대응. 초과 시 oldest eviction |
-| `stream_capacity` | 1024 | 0이면 동기 rendez-vous가 됨. 1024 미만이면 broadcast 블로킹 위험 |
-| `push_timeout_s` | 5.0 | 로컬 TCP write에 5초. 초과 시 client drop |
-| `max_buffer_size` | 100 | event replay buffer 크기 |
-| `buffer_ttl_seconds` | 300.0 | 5분 이상 된 이벤트 자동 삭제 |
-| `cleanup_stale max_age_s` | 1800.0 | 30분 이상 idle client 자동 evict |
+Each client owns its stream buffer and request-scoped cancellation. A slow or
+closed client may end only that transport connection; it cannot block the
+broadcast producer, another client, or a Keeper lane. Replay/pagination uses a
+durable cursor rather than age/count-based deletion of canonical events.
+
+Transport buffer sizes and request timeouts, when required by the HTTP stack,
+are explicit deployment inputs and observations. They are not hardcoded Keeper
+admission or lifecycle policy.
 
 ---
 
@@ -860,7 +860,7 @@ sequenceDiagram
 | `mcp_server_eio_call_tool.ml` | 361 | 도구 호출 래퍼 |
 | `mcp_server_eio_tool_profile.ml` | 508 | Profile별 도구 필터링 |
 | `mcp_server_eio_resource.ml` | 335 | MCP Resource/Prompt 핸들러 |
-| `mcp_server_eio_governance.ml` | 110 | Governance 설정 |
+| `server_routes_http_routes_dashboard.ml` | - | Keeper Gate dashboard routes |
 | `sse.ml` | 474 | SSE event registry + broadcast |
 | `sse_workspace_filter.ml` | 63 | Workspace별 SSE 필터링 |
 | `oas_event_bridge.ml` | 56 | OAS -> SSE 이벤트 브릿지 |

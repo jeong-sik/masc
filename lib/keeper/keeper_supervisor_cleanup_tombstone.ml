@@ -112,44 +112,6 @@ let handle_completion config operation = function
          operation.keeper_name
        operation_id;
        Ok ())
-  | Keeper_shutdown_types.Paused_meta_pruned ->
-    (match lifecycle_event_bus_ready (), operation.cleanup_intent.reason with
-     | Error _ as error, _ -> error
-     | Ok (), Stale_paused_prune context ->
-       let operation_id =
-         Keeper_shutdown_types.Operation_id.to_string operation.operation_id
-       in
-       let latched_reason_detail =
-         match context.latched_reason with
-         | Some reason ->
-           Printf.sprintf
-             " latched_reason=%s"
-             (Keeper_latched_reason.to_wire reason)
-         | None -> ""
-       in
-       Keeper_supervisor_publish_lifecycle.publish_lifecycle
-         ~event:
-           (Keeper_lifecycle_events.Custom_event
-              { verb = Keeper_lifecycle_events.Paused_pruned; phase = None })
-         operation.keeper_name
-         (Printf.sprintf
-            "meta_version=%d last_updated=%s%s shutdown_operation=%s"
-            context.meta_version
-            context.last_updated
-            latched_reason_detail
-            operation_id)
-         ();
-       Log.Keeper.info
-         "%s: stale paused meta prune delivered operation=%s"
-         operation.keeper_name
-         operation_id;
-       Ok ()
-     | Ok (),
-       ( Operator_stop_retain_meta
-       | Operator_stop_remove_meta
-       | Dead_tombstone_cleanup
-       | Dashboard_keeper_purge _ ) ->
-       Error "paused-meta completion does not belong to a stale-prune operation")
   | Keeper_shutdown_types.Dashboard_keeper_purged ->
     Error "dashboard Keeper purge completion requires the server artifact boundary"
 ;;

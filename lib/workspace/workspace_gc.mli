@@ -38,11 +38,13 @@ val cleanup_zombies :
   ?agent_threshold_sec:float ->
   Workspace_utils_backend_setup.config -> cleanup_zombie_result
 
-(** Run the full workspace garbage-collection pass:
+(** Run the explicit workspace garbage-collection pass. [days] has no default:
+    the caller owns the retention decision rather than inheriting a fixed
+    runtime heuristic.
+
     {ol
-    {- {!cleanup_zombies} (default thresholds)}
     {- archive backlog tasks in a terminal state ([Done]/[Cancelled]) older
-       than [days] days (default [days = 7], clamped to at least 1).
+       than [days] days.
        Non-terminal tasks — including [AwaitingVerification] obligations — are
        never archived (RFC-0220: an obligation must stay claimable by a
        verifier)}
@@ -55,4 +57,4 @@ val cleanup_zombies :
     with [version + 1] when anything changes.  Returns a multi-line summary
     string. *)
 val gc :
-  Workspace_utils_backend_setup.config -> ?days:int -> unit -> string
+  Workspace_utils_backend_setup.config -> days:int -> unit -> string

@@ -39,6 +39,14 @@ let audit_path ~base_dir ~ts =
   let dd = Printf.sprintf "%02d" tm.Unix.tm_mday in
   Filename.concat (Filename.concat base_dir yyyy_mm) (dd ^ ".jsonl")
 
+let expect_corrupt_jsonl ~path f =
+  match f () with
+  | exception Store.Corrupt_jsonl { path = actual_path; line_number; detail } ->
+    check string "corrupt audit path" path actual_path;
+    check int "corrupt audit line" 2 line_number;
+    check bool "corrupt audit detail is explicit" true (String.trim detail <> "")
+  | _ -> fail "expected Store.Corrupt_jsonl"
+
 (* ──────────────────────────────────────────────────────────── *)
 (* Envelope                                                      *)
 (* ──────────────────────────────────────────────────────────── *)
@@ -205,7 +213,7 @@ let test_store_resume_continues_chain () =
       "resumed chain: e2.prev_hash = hash of e1"
       (Some (Env.hash_for_chain e1)) e2.prev_hash)
 
-let test_store_skips_malformed_jsonl_lines () =
+let test_store_rejects_malformed_jsonl_lines () =
   let dir = unique_temp_dir "audit_malformed" in
   Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
     let store = Store.create ~base_dir:dir in
@@ -214,13 +222,9 @@ let test_store_skips_malformed_jsonl_lines () =
     let oc = open_out_gen [ Open_append; Open_wronly ] 0o644 path in
     output_string oc "{not json\n";
     close_out oc;
-    let entries = Store.recent store ~n:10 in
-    check int "malformed line skipped" 1 (List.length entries);
-    match entries with
-    | [ entry ] -> check string "valid entry preserved" valid.id entry.id
-    | _ -> fail "expected exactly one valid audit entry")
+    expect_corrupt_jsonl ~path (fun () -> ignore (Store.recent store ~n:10)))
 
-let test_store_skips_invalid_envelope_jsonl_lines () =
+let test_store_rejects_invalid_envelope_jsonl_lines () =
   let dir = unique_temp_dir "audit_invalid_envelope" in
   Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
     let store = Store.create ~base_dir:dir in
@@ -231,13 +235,9 @@ let test_store_skips_invalid_envelope_jsonl_lines () =
       {|{"id":"bad-envelope","ts":1.0,"payload":{"kind":"missing-category"}}|};
     output_char oc '\n';
     close_out oc;
-    let entries = Store.recent store ~n:10 in
-    check int "invalid envelope line skipped" 1 (List.length entries);
-    match entries with
-    | [ entry ] -> check string "valid entry preserved" valid.id entry.id
-    | _ -> fail "expected exactly one valid audit entry")
+    expect_corrupt_jsonl ~path (fun () -> ignore (Store.recent store ~n:10)))
 
-let test_store_resume_skips_malformed_jsonl_lines () =
+let test_store_resume_rejects_malformed_jsonl_lines () =
   let dir = unique_temp_dir "audit_malformed_resume" in
   Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
     let store = Store.create ~base_dir:dir in
@@ -246,11 +246,7 @@ let test_store_resume_skips_malformed_jsonl_lines () =
     let oc = open_out_gen [ Open_append; Open_wronly ] 0o644 path in
     output_string oc "{not json\n";
     close_out oc;
-    let resumed = Store.create ~base_dir:dir in
-    let next = Store.append resumed ~category:"X" ~payload:(`Int 2) in
-    check (option string)
-      "resume links to last valid entry after malformed line"
-      (Some (Env.hash_for_chain valid)) next.prev_hash)
+    expect_corrupt_jsonl ~path (fun () -> ignore (Store.create ~base_dir:dir)))
 
 let test_store_base_dir_inspector () =
   let dir = unique_temp_dir "audit_inspector" in
@@ -281,9 +277,9 @@ let () =
       test_case "verify_chain intact" `Quick test_store_verify_chain_intact;
       test_case "verify_chain detects tampering" `Quick test_store_verify_chain_detects_tampering;
       test_case "resume continues chain" `Quick test_store_resume_continues_chain;
-      test_case "skips malformed JSONL lines" `Quick test_store_skips_malformed_jsonl_lines;
-      test_case "skips invalid envelope JSONL lines" `Quick test_store_skips_invalid_envelope_jsonl_lines;
-      test_case "resume skips malformed JSONL lines" `Quick test_store_resume_skips_malformed_jsonl_lines;
+      test_case "rejects malformed JSONL lines" `Quick test_store_rejects_malformed_jsonl_lines;
+      test_case "rejects invalid envelope JSONL lines" `Quick test_store_rejects_invalid_envelope_jsonl_lines;
+      test_case "resume rejects malformed JSONL lines" `Quick test_store_resume_rejects_malformed_jsonl_lines;
       test_case "base_dir inspector" `Quick test_store_base_dir_inspector;
     ];
   ]

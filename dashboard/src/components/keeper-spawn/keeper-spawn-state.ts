@@ -106,7 +106,7 @@ export async function spawnKeeperFromPersona(personaName: string, opts?: { dryRu
 //
 // masc_persona_create / masc_persona_update accept (see keeper_schema.ml):
 // persona_name, display_name, role, trait, goal, instructions,
-// mention_targets, tool_denylist, proactive_enabled, auto_handoff.
+// mention_targets, proactive_enabled, auto_handoff.
 // persona-form.ts additionally collects `mode` and `description`, which are
 // NOT part of the persona schema; they are accepted here only for type
 // compatibility with the form and are deliberately not forwarded. Aligning

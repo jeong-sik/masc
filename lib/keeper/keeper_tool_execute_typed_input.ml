@@ -14,6 +14,7 @@ type execute_input =
       argv : string list;
       cwd : string option;
       env : (string * string) list;
+      timeout_sec : float option;
       stdin : redirect_target;
       stdout : redirect_target;
       stderr : redirect_target;
@@ -22,25 +23,12 @@ type execute_input =
       stages : exec_stage list;
       cwd : string option;
       env : (string * string) list;
+      timeout_sec : float option;
     }
 
 type validation_error =
   | Empty_executable of { argv : string list }
-  | Executable_repeated_in_argv0 of {
-      executable : string;
-      argv : string list;
-    }
-  | Argv_contains_shell_metachar of {
-      executable : string;
-      index : int;
-      token : string;
-    }
-  | Argv_contains_shell_pipeline_operator of {
-      executable : string;
-      index : int;
-      token : string;
-    }
-  | Argv_contains_shell_redirection of {
+  | Argv_contains_nul of {
       executable : string;
       index : int;
       token : string;
@@ -107,6 +95,28 @@ let optional_string ~path fields key =
   | Some value ->
     result_errorf
       "%s.%s must be string, got %s"
+      path
+      key
+      (json_type_name value)
+;;
+
+let optional_positive_float ~path fields key =
+  let validate value =
+    if Float.is_finite value && Float.compare value 0.0 > 0
+    then Ok (Some value)
+    else result_errorf "%s.%s must be finite and greater than zero" path key
+  in
+  match member fields key with
+  | None | Some `Null -> Ok None
+  | Some (`Float value) -> validate value
+  | Some (`Int value) -> validate (Float.of_int value)
+  | Some (`Intlit value) ->
+    (match Float.of_string_opt value with
+     | Some value -> validate value
+     | None -> result_errorf "%s.%s must be a valid number" path key)
+  | Some value ->
+    result_errorf
+      "%s.%s must be number, got %s"
       path
       key
       (json_type_name value)
@@ -254,6 +264,7 @@ let of_json (json : Yojson.Safe.t) =
   in
   let* cwd = optional_string ~path:"$" fields "cwd" in
   let* env = optional_env ~path:"$" fields in
+  let* timeout_sec = optional_positive_float ~path:"$" fields "timeout_sec" in
   match executable_present, pipeline_value with
   | true, Some _ ->
     Error
@@ -268,7 +279,7 @@ let of_json (json : Yojson.Safe.t) =
     let* stdin = optional_redirect_target ~path:"$" fields "stdin" in
     let* stdout = optional_redirect_target ~path:"$" fields "stdout" in
     let* stderr = optional_redirect_target ~path:"$" fields "stderr" in
-    Ok (Exec { executable; argv; cwd; env; stdin; stdout; stderr })
+    Ok (Exec { executable; argv; cwd; env; timeout_sec; stdin; stdout; stderr })
   | false, Some (path, value) ->
     (* RFC-0198 Phase B 한계: typed redirect triple(stdin/stdout/stderr)은 [Exec]
        variant에만 존재하고 [Pipeline]에는 없다. 그런데 이 세 키는
@@ -294,94 +305,15 @@ let of_json (json : Yojson.Safe.t) =
          {executable, argv} form with the typed redirect fields."
     else
       let* stages = parse_pipeline ~path value in
-      Ok (Pipeline { stages; cwd; env })
+      Ok (Pipeline { stages; cwd; env; timeout_sec })
   | false, None -> Error "$.executable or $.pipeline is required"
-;;
-
-(* Execve-style: argv tokens pass verbatim to the child process, so shell
-   metacharacters ([;|&><`$*?]) and line breaks inside a payload token are
-   literal data, not operators.  NUL is the only byte that cannot be
-   represented inside an argv string.  See .mli "Design constraints" for the
-   rationale. *)
-let shell_metachar_in_token token =
-  String.exists
-    (function
-      | '\000' -> true
-      | _ -> false)
-    token
-;;
-
-(* A standalone pipe token is almost always a caller attempting shell syntax
-   inside direct Exec.argv.  Unlike payload tokens such as [foo|bar], ["|"]
-   cannot create a pipe in execve argv and commonly becomes a bogus filename
-   ([tail: |: No such file or directory]).  Keep this narrow: [;] is a valid
-   argv sentinel for find -exec, and [&] can be payload data. *)
-let looks_like_shell_pipeline_operator = function
-  | "|" | "|&" -> true
-  | _ -> false
-;;
-
-(* RFC-0198 Phase A.  Detects argv tokens whose entire shape matches a
-   shell redirection operator.  These cannot do anything useful inside
-   execve argv — the child sees them as literal text, which most
-   programs ([find], [grep], [test]) misparse and fail at runtime
-   ([find: 2>/dev/null: unknown primary]).  Rejecting at validation
-   surfaces the contract violation as a typed alternative pointing at
-   RFC-0198 Phase B typed redirect fields or Pipeline mode.
-
-   Conservative recognizer: only matches tokens that are *exclusively*
-   a redirection operator (with optional leading fd digit and attached
-   path).  Tokens that merely *contain* [>] or [<] as part of payload
-   data ([find -name '*>foo'], [grep '<<<']) pass through unchanged. *)
-let is_digit c = c >= '0' && c <= '9'
-let is_path_start c = c = '/' || c = '.' || c = '~'
-
-let looks_like_shell_redirection token =
-  let len = String.length token in
-  if len = 0
-  then false
-  else
-    let op_start =
-      (* Skip optional leading fd digit like [2>] or [0<]. *)
-      if is_digit token.[0] then 1 else 0
-    in
-    if op_start >= len
-    then false
-    else
-      let c = token.[op_start] in
-      if c = '>' || c = '<'
-      then
-        let rest = op_start + 1 in
-        if rest >= len
-        then true (* [>], [<], [2>], [0<] *)
-        else
-          let nxt = token.[rest] in
-          if c = '>' && nxt = '>'
-          then
-            if rest + 1 >= len
-            then true (* [>>] alone *)
-            else
-              let nxt2 = token.[rest + 1] in
-              nxt2 = '&' || is_path_start nxt2 (* [>>&N], [>>/...], [>>./...] *)
-          else
-            (* [>X] / [<X] where X = &digit, /, ., ~ *)
-            (nxt = '&' && rest + 1 < len && is_digit token.[rest + 1])
-            || is_path_start nxt
-      else if op_start = 0 && c = '&' && len >= 2 && is_digit token.[1]
-      then true (* [&1], [&2] — fd reference standalone *)
-      else false
 ;;
 
 let check_argv ~executable argv =
   let rec loop i = function
     | [] -> Ok ()
-    | token :: _ when shell_metachar_in_token token ->
-      Error (Argv_contains_shell_metachar { executable; index = i; token })
-    | token :: _ when looks_like_shell_pipeline_operator token ->
-      Error
-        (Argv_contains_shell_pipeline_operator { executable; index = i; token })
-    | token :: _ when looks_like_shell_redirection token ->
-      Error (Argv_contains_shell_redirection { executable; index = i; token })
+    | token :: _ when String.contains token '\000' ->
+      Error (Argv_contains_nul { executable; index = i; token })
     | _ :: rest -> loop (i + 1) rest
   in
   loop 0 argv
@@ -437,13 +369,13 @@ let check_redirects ~stdin ~stdout ~stderr =
 ;;
 
 let validate = function
-  | Exec { executable; argv; cwd; env; stdin; stdout; stderr } ->
+  | Exec { executable; argv; cwd; env; timeout_sec = _; stdin; stdout; stderr } ->
     let ( let* ) = Result.bind in
     let* () = check_exec ~executable ~argv ~cwd ~env in
     check_redirects ~stdin ~stdout ~stderr
   | Pipeline { stages = []; _ } -> Error Pipeline_empty
   | Pipeline { stages = [ _ ]; _ } -> Error Pipeline_too_short
-  | Pipeline { stages; cwd; env } ->
+  | Pipeline { stages; cwd; env; timeout_sec = _ } ->
     let ( let* ) = Result.bind in
     let* () = check_cwd cwd in
     let* () = check_env env in
@@ -517,11 +449,11 @@ let redirects_of ~cwd ~stdin ~stdout ~stderr =
 let to_shell_ir_unvalidated ?(sandbox = Masc_exec.Sandbox_target.host ()) input =
   let ( let* ) = Result.bind in
   match input with
-  | Exec { executable; argv; cwd; env; stdin; stdout; stderr } ->
+  | Exec { executable; argv; cwd; env; timeout_sec = _; stdin; stdout; stderr } ->
     let stage = { executable; argv } in
     let redirects = redirects_of ~cwd ~stdin ~stdout ~stderr in
     shell_simple ~sandbox ?cwd ~env ~redirects stage
-  | Pipeline { stages; cwd; env } ->
+  | Pipeline { stages; cwd; env; timeout_sec = _ } ->
     let* simples =
       let rec loop acc = function
         | [] -> Ok (List.rev acc)
@@ -554,47 +486,11 @@ let pp_validation_error ppf = function
     Format.pp_print_string ppf
       "executable is empty — provide a non-empty executable name, \
        e.g. executable=\"cat\" argv=[\"file.txt\"]"
-  | Executable_repeated_in_argv0 { executable; argv = _ :: rest } ->
-    Format.fprintf
-      ppf
-      "executable %S is repeated as argv[0]; typed Execute argv contains \
-       only arguments after the executable. Rewrite as executable=%S argv=%s."
-      executable
-      executable
-      (Yojson.Safe.to_string (`List (List.map (fun arg -> `String arg) rest)))
-  | Executable_repeated_in_argv0 { executable; argv = [] } ->
-    Format.fprintf
-      ppf
-      "executable %S was reported as duplicated in argv[0], but argv is empty"
-      executable
-  | Argv_contains_shell_metachar { executable; index; token } ->
+  | Argv_contains_nul { executable; index; token } ->
     Format.fprintf
       ppf
       "executable %S argv[%d]=%S contains NUL; typed Execute argv strings \
        cannot contain NUL bytes"
-      executable
-      index
-      token
-  | Argv_contains_shell_pipeline_operator { executable; index; token } ->
-    Format.fprintf
-      ppf
-      "executable %S argv[%d]=%S is a shell pipeline operator; argv tokens \
-       are passed verbatim to execve and never create pipelines. Retry \
-       Execute with the top-level pipeline field, e.g. \
-       pipeline=[{executable;argv},...]. Do not wrap this in sh/bash and do \
-       not put %S in argv."
-      executable
-      index
-      token
-      token
-  | Argv_contains_shell_redirection { executable; index; token } ->
-    Format.fprintf
-      ppf
-      "executable %S argv[%d]=%S is a shell redirection operator; argv \
-       tokens are passed verbatim to execve and never interpreted as \
-       redirection. Use the typed redirect fields (RFC-0198 Phase B: \
-       stderr={discard:true}, stdout={discard:true}, or \
-       {file:\"/abs/path\"}) or use Execute.pipeline."
       executable
       index
       token
@@ -619,12 +515,4 @@ let pp_validation_error ppf = function
     Format.pp_print_string ppf "pipeline requires at least two stages"
   | Env_key_invalid k ->
     Format.fprintf ppf "env key %S is not [A-Za-z0-9_]+" k
-;;
-
-let validation_error_alternatives : validation_error -> string list = function
-  | Argv_contains_shell_metachar _ -> []
-  | Argv_contains_shell_pipeline_operator _ -> [ "Execute.pipeline" ]
-  | Argv_contains_shell_redirection _ ->
-    [ "stderr:{discard:true}"; "stdout:{discard:true}"; "Execute.pipeline" ]
-  | _ -> []
 ;;

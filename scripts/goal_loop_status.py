@@ -523,9 +523,10 @@ def system_health_signals(observe: dict[str, Any] | None) -> dict[str, Any]:
             "utf8_repair": pattern_count(observe, "utf8_repair"),
             "cas_retry": pattern_count(observe, "cas_retry"),
         },
-        "governance_patterns": {
-            "governance_unparseable": pattern_count(observe, "governance_unparseable"),
-            "lenient_json_fallback": pattern_count(observe, "lenient_json_fallback"),
+        "judge_patterns": {
+            "structured_judge_unparseable": pattern_count(
+                observe, "structured_judge_unparseable"
+            ),
         },
     }
     return signals

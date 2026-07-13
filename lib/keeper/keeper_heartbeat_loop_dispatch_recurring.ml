@@ -3,12 +3,7 @@
 
     Per heartbeat cycle, attempts to:
 
-    1. Re-enable transiently-broadcast-failed recurring tasks that
-       were previously auto-disabled by [Keeper_recurring.dispatch_due]'s
-       [max_failures] guard (without this re-enable step the keeper
-       falls silent for the lifetime of the process and triggers
-       stale-kill runtimes).
-    2. Dispatch all due tasks via [Keeper_recurring.dispatch_due],
+    1. Dispatch all due tasks via [Keeper_recurring.dispatch_due],
        broadcasting each via [Workspace.broadcast] tagged
        [\[loop:<label>\] <msg>]. Per-task broadcast failures tick
        [metric_keeper_recurring_failures] with [phase="task_execution"]
@@ -29,14 +24,6 @@ let dispatch_recurring_keepalive
       ~(now_ts : float)
   : int
   =
-  (* Recover from transient broadcast failures that previously
-     auto-disabled tasks via [dispatch_due]'s [max_failures] guard.
-     Without this call the keeper's heartbeat broadcasts stay silent
-     for the lifetime of the process, eventually triggering stale-kill
-     runtimes.  See lib/keeper/keeper_recurring.ml for the cooldown rule. *)
-  let _reenabled =
-    Keeper_recurring.reenable_due_tasks ~keeper_name:meta_after_proactive.name ~now_ts
-  in
   try
     Keeper_recurring.dispatch_due
       ~keeper_name:meta_after_proactive.name

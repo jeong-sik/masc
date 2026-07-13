@@ -16,11 +16,6 @@ val tail_order_enum_strings : string list
 val string_array_schema : Yojson.Safe.t
 (** JSON schema fragment for a free-form [string list] field. *)
 
-val tool_access_schema : string -> Yojson.Safe.t
-(** Schema fragment for [meta.tool_access] (string-array tool candidate profile list);
-    parameterised on the property description so create vs update tools
-    can vary the surface without duplicating the body. *)
-
 val keeper_schemas : Masc_domain.tool_schema list
 (** Per-tool schemas for the keeper authoring surface. *)
 

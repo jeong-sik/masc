@@ -13,11 +13,8 @@
       Exception] + raises [Keeper_registry.Keeper_fiber_crash] for
       the supervisor to handle.
 
-    - Provider-timeout errors → provider-timeout strike-counter bump (seeded from
-      [prior_provider_timeout_strikes]) + persistent failure
-      reason + observation recording + [Keeper_failure_policy.decide]
-      kill/keep decision + [metric_keeper_provider_timeout_strike]
-      tick with policy-derived outcome label.
+    - Provider-timeout errors → typed provider observation + WARN log. The
+      original turn failure is preserved and no lifecycle state is inferred.
 
     - Any other [Error err] → DEBUG log + re-read meta (with
       [metric_keeper_meta_read_failures] on read failure +
@@ -28,8 +25,7 @@
 
     Pure helper move — no callback injection, all references reach
     external modules (Keeper_unified_turn, Agent_sdk, Log, Otel_metric_store,
-    Keeper_metrics, Keeper_registry, Keeper_turn_holders,
-    Keeper_failure_policy) or other siblings
+    Keeper_metrics, Keeper_registry) or other siblings
     ([Keeper_heartbeat_loop_in_turn_pulse], [Observations]). *)
 
 open Keeper_types
@@ -58,7 +54,7 @@ type cycle_outcome =
 
 and failure_judgment_terminal =
   | Judgment_boundary_failed of { detail : string }
-  | Judgment_operator_required of
+  | Judgment_external_input_requested of
       { judge_runtime_id : string
       ; rationale : string
       }
@@ -118,9 +114,6 @@ let prepare_failure_judgment_turn
      | Keeper_failure_judge.Escalate_judge_failure ->
        `Settle (Judgment_boundary_failed { detail }))
   | Ok { runtime_id = judge_runtime_id; verdict } ->
-    Keeper_pacing_shadow.observe_success
-      ~keeper_name
-      ~runtime_id:judge_runtime_id;
     (match verdict with
      | Keeper_failure_judgment_contract.Resume_with_guidance
          { guidance; rationale } ->
@@ -159,14 +152,14 @@ let prepare_failure_judgment_turn
             (Keeper_runtime_failure_route.judgment_provenance_label
                request.fj_provenance);
           `Run { obs with pending_board_events })
-     | Keeper_failure_judgment_contract.Escalate_to_operator { rationale } ->
+     | Keeper_failure_judgment_contract.Await_external_input { rationale } ->
        let rationale = Keeper_internal_error.cap_blocker_detail rationale in
        record_failure_judgment_outcome
          ~keeper_name
          request
          (Keeper_failure_judgment_contract.decision_label verdict);
        Log.Keeper.warn
-         "%s: independent failure judgment requires operator \
+         "%s: independent failure judgment awaits external input \
           judge_runtime=%s class=%s provenance=%s rationale=%s"
          keeper_name
          judge_runtime_id
@@ -174,7 +167,7 @@ let prepare_failure_judgment_turn
          (Keeper_runtime_failure_route.judgment_provenance_label
             request.fj_provenance)
          rationale;
-       `Settle (Judgment_operator_required { judge_runtime_id; rationale }))
+       `Settle (Judgment_external_input_requested { judge_runtime_id; rationale }))
 ;;
 
 (* Body of [run_keeper_cycle], runnable only while holding the keeper's
@@ -254,13 +247,10 @@ let run_keeper_cycle_admitted
            (Keeper_registry.Exception (Printf.sprintf "fatal environment error: %s" e_str)));
       raise Keeper_registry.Keeper_fiber_crash);
     if Observations.is_provider_timeout_error err
-    then (
-      let keeper_name = meta_after_triage.name in
-      Keeper_turn_holders.reset_budget_exhaustion ~keeper_name;
+    then
       Log.Keeper.warn
-        "%s: provider_timeout observed; preserving original turn \
-         failure without Provider_timeout_loop latch"
-        keeper_name);
+        "%s: provider_timeout observed; preserving original turn failure"
+        meta_after_triage.name;
     let meta =
       match read_effective_meta ctx.config meta_after_triage.name with
       | Ok (Some latest) -> latest
@@ -287,12 +277,7 @@ let run_keeper_cycle_admitted
         meta_after_triage
     in
     Failed { meta; failure }
-  | `Turn (Ok (Keeper_unified_turn.Turn_completed updated)) ->
-    Keeper_turn_holders.reset_budget_exhaustion ~keeper_name:meta_after_triage.name;
-    Observations.clear_provider_timeout_failure_reason
-      ~base_path:ctx.config.base_path
-      ~keeper_name:meta_after_triage.name;
-    Completed updated
+  | `Turn (Ok (Keeper_unified_turn.Turn_completed updated)) -> Completed updated
   | `Turn (Ok (Keeper_unified_turn.Turn_cancelled meta)) -> Cancelled meta
   | `Turn (Ok (Keeper_unified_turn.Turn_skipped meta)) -> Skipped meta
 ;;

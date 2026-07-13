@@ -87,7 +87,6 @@ function renderRuntimeAttemptObservation(observation: RuntimeAttemptObservation)
 export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   const runtimeBlockerClass = keeper.runtime_blocker_class
   const runtimeBlocker = keeperRuntimeBlockerHint(keeper)
-  const continueGate = keeper.runtime_blocker_continue_gate === true
   const attentionReason = canonicalAttentionReason(keeper.attention_reason?.trim() || null)
   const nextHumanAction = canonicalNextHumanAction(keeper.next_human_action?.trim() || null)
   // RFC-0135 PR-13: canonical paused predicate. SSOT also covers
@@ -111,7 +110,6 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
     && isAttentionPairDuplicate(attentionReason, action)
   const suppressDuplicateNextAction = duplicatesAttentionReason(nextHumanAction)
   const sandboxTarget = keeper.sandbox_target?.trim() || keeper.sandbox_profile?.trim() || null
-  const persistedPolicyCount = keeper.approval_policy_effective?.persisted_rules
   const goalLinkedTasks = keeper.goal_progress?.linked_task_count
   const goalConvergence = keeper.goal_progress?.convergence
   const blocker = normalizeKeeperBlockerText(keeper.last_blocker)
@@ -125,7 +123,6 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   const trustSummary =
     canonicalAttentionReason(keeper.trust?.attention_reason?.trim() || null)
     || keeper.trust?.disposition_reason?.trim()
-    || keeper.trust?.execution_summary?.mutation_guard_summary?.trim()
     || null
   const stopCause = keeper.stop_cause ?? null
   const stopCauseCodeRaw = stopCause?.code?.trim() || null
@@ -316,23 +313,14 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
                   title="깨우기: idle 또는 stuck 상태에서 다음 turn 을 즉시 시도합니다. 실행 중이어도 노출되는 이유는 runtime/oas/turn timeout 같은 stuck signal 이 backend 보다 먼저 frontend 에 보이는 케이스를 다루기 위함입니다."
                 >깨우기<//>`
               : null}`}
-        ${isPaused && keeper.keepalive_running && continueGate
-          ? html`<span>하트비트는 유지되지만 승인 전까지 자동 재개하지 않습니다.</span>`
-          : isPaused && keeper.keepalive_running
-            ? html`<span>하트비트는 유지되지만 자율 행동은 멈춰 있습니다.</span>`
+        ${isPaused && keeper.keepalive_running
+          ? html`<span>하트비트는 유지되지만 자율 행동은 멈춰 있습니다.</span>`
           : null}
         ${hbStale
           ? html`<${RuntimeBadge} tone="bad">하트비트 끊김</${RuntimeBadge}>
             <span>마지막 하트비트: <${TimeAgo} timestamp=${keeper.last_heartbeat} /></span>`
           : null}
-        ${continueGate
-          ? html`
-              <${RuntimeBadge} tone="warn">
-                계속 진행 승인 대기
-              </${RuntimeBadge}>
-              ${hasActivitySignal ? html`<span class="text-[var(--color-fg-muted)]">${renderActivitySignal()}</span>` : null}
-            `
-          : runtimeBlockerClass
+        ${runtimeBlockerClass
           ? html`
               <${RuntimeBadge} tone=${pausedRuntimeBlocker ? 'warn' : 'bad'}>
                 ${pausedRuntimeBlocker
@@ -408,9 +396,6 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
           : null}
         ${sandboxTarget
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">샌드박스</strong> · ${sandboxTarget}</span>`
-          : null}
-        ${typeof persistedPolicyCount === 'number'
-          ? html`<span><strong class="text-[var(--color-fg-secondary)]">상시 규칙</strong> · ${persistedPolicyCount}건</span>`
           : null}
         ${typeof goalLinkedTasks === 'number'
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">목표 작업</strong> · ${goalLinkedTasks}</span>`

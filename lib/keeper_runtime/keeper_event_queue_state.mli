@@ -13,24 +13,25 @@ type lease_kind =
 type requeue_reason =
   | Cycle_busy
   | Turn_not_scheduled
-  | Retry_after_pacing
   | Rotate_now
   | Cancelled
   | Cycle_crashed
   | Registration_recovery
+  | Approval_grant_unconsumed
+  | Approval_grant_state_unavailable
 
 type escalation_reason =
   | Failure_judgment_requested
   | Failure_judgment_boundary_failed of { detail : string }
-  | Failure_judgment_operator_required of
+  | Failure_judgment_external_input_requested of
       { judge_runtime_id : string
       ; rationale : string
       }
 
-val escalation_reason_requires_operator_attention : escalation_reason -> bool
-(** Closed policy for terminal escalation visibility.  Requesting an
-    independent failure judgment is a normal queue transition; a boundary
-    failure or explicit operator verdict requires operator attention. *)
+val escalation_reason_requests_external_input : escalation_reason -> bool
+(** [true] only when the LLM judgment explicitly reports that the Keeper must
+    await unavailable external input. A judgment-boundary failure remains a
+    separate observed error. *)
 
 type settlement =
   | Ack

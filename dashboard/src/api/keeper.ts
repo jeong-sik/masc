@@ -47,7 +47,7 @@ export type {
   KeeperLastOutcome,
   KeeperLiveTurn,
   KeeperLastSkip,
-  KeeperLivelock,
+  KeeperTurnAttempt,
   KeeperBoardCursor,
   KeeperCompositeExecution,
   KeeperRuntimeAttention,
@@ -284,7 +284,7 @@ export function isTerminalQueuedKeeperMessage(result: QueuedKeeperMessageResult)
 }
 
 // Server no longer enforces an external timeout for keeper_msg.
-// Keeper internal limits (max_turns, max_cost_usd, max_tokens) control duration.
+// Keeper turn/token/cost fields are observability data; lifecycle control is explicit.
 // Client-side abort via AbortSignal is the recommended cancellation path.
 
 export interface KeeperChatStreamEvent {
@@ -933,14 +933,10 @@ export interface KeeperStateDiagramResponse {
   keeper: string
   current_phase: string
   mermaid: string
-  decision_pipeline_mermaid?: string
   runtime_fsm_mermaid?: string
   compaction_submachine_mermaid?: string | null
   // Structured data for Cytoscape FSM rendering
-  thompson_alpha?: number
-  thompson_beta?: number
   tool_count?: number
-  recovery_floor_count?: number
   runtime_models?: string[]
   last_provider_result?: string | null
   runtime_models_source?: string

@@ -29,18 +29,9 @@ let receipt_duration_ms receipt =
   | _ -> 0.0
 ;;
 
-let string_contains_ci = String_util.contains_substring_ci
-
 (* Cycle 51 observability: alert when [operator_disposition] cannot
    classify a receipt and falls through to the catch-all
    [(Disp_unknown, Reason_unmapped_runtime_state)].
-
-   PR #11651 fixed the historical "blocked" -> "unknown" silent path
-   (livelock turns emitted [outcome="blocked"] which was not in
-   [outcome_kind] and therefore mapped to the unknown bucket; the fix
-   was to map livelock terminations to [outcome="error"] with
-   [terminal_reason_code] carrying the specific reason).  After that
-   fix the unmapped fall-through SHOULD be unreachable in production.
 
    This counter alerts operators if a future refactor reintroduces a
    silent path — a non-zero rate is a regression signal.  Companion
@@ -64,8 +55,6 @@ let () =
 
 type operator_disposition_kind =
   | Disp_pass
-  | Disp_pause_human
-  | Disp_alert_exhausted
   | Disp_fail_open_next_runtime
   | Disp_pass_next_model
   | Disp_user_cancelled
@@ -74,8 +63,6 @@ type operator_disposition_kind =
 
 let operator_disposition_kind_to_string = function
   | Disp_pass -> "pass"
-  | Disp_pause_human -> "pause_human"
-  | Disp_alert_exhausted -> "alert_exhausted"
   | Disp_fail_open_next_runtime -> "fail_open_next_runtime"
   | Disp_pass_next_model -> "pass_next_model"
   | Disp_user_cancelled -> "user_cancelled"
@@ -85,8 +72,6 @@ let operator_disposition_kind_to_string = function
 
 let operator_disposition_kind_of_string = function
   | "pass" -> Some Disp_pass
-  | "pause_human" -> Some Disp_pause_human
-  | "alert_exhausted" -> Some Disp_alert_exhausted
   | "fail_open_next_runtime" -> Some Disp_fail_open_next_runtime
   | "pass_next_model" -> Some Disp_pass_next_model
   | "user_cancelled" -> Some Disp_user_cancelled
@@ -105,19 +90,8 @@ type operator_disposition_reason =
   | Reason_capacity_backpressure
   | Reason_provider_runtime_error
   | Reason_internal_error
-  | Reason_tool_route_recoverable_failure
-  | Reason_completion_contract_unsatisfied
   | Reason_input_required
-  | Reason_passive_no_action
-      (* RFC-0303 Phase 0: a passive-only turn is activity (thinking / deciding
-         to defer / choosing to wait), not an operator-pageable failure. It maps
-         to [Disp_pass] with this reason so the dashboard keeps the "was passive"
-         telemetry WITHOUT raising needs_attention. Distinct from
-         [Reason_completion_contract_unsatisfied], which stays a pause for the
-         genuinely-unsatisfied contract variants (violated / claim-only /
-         needs-execution-progress). *)
   | Reason_turn_budget_exhausted
-  | Reason_turn_livelock_blocked
   | Reason_cancelled
   | Reason_phase_skipped
   | Reason_unmapped_runtime_state
@@ -132,12 +106,8 @@ let operator_disposition_reason_to_string = function
   | Reason_capacity_backpressure -> Keeper_internal_error.capacity_backpressure_kind
   | Reason_provider_runtime_error -> "provider_runtime_error"
   | Reason_internal_error -> "internal_error"
-  | Reason_tool_route_recoverable_failure -> "tool_route_recoverable_failure"
-  | Reason_completion_contract_unsatisfied -> "completion_contract_unsatisfied"
   | Reason_input_required -> "input_required"
-  | Reason_passive_no_action -> "passive_no_action"
   | Reason_turn_budget_exhausted -> "turn_budget_exhausted"
-  | Reason_turn_livelock_blocked -> "turn_livelock_blocked"
   | Reason_cancelled -> "cancelled"
   | Reason_phase_skipped -> "phase_skipped"
   | Reason_unmapped_runtime_state -> "unmapped_runtime_state"
@@ -151,8 +121,8 @@ let operator_disposition_reason_to_string = function
    A turn cut off by the per-call turn cap ([MaxTurnsExceeded]), the
    wall-clock ceiling ([AgentExecutionTimeout]), or the progress-aware idle
    watchdog ([AgentExecutionIdleTimeout]) did NOT violate the tool
-   contract — it never reached a verdict. The keeper checkpoints and the
-   supervisor auto-resumes. Scope is deliberately narrow: token/cost
+   contract — it never reached a verdict. The checkpoint remains available
+   to a later turn. Scope is deliberately narrow: token/cost
    budget, guardrail, and tripwire terminals stay out, since those are
    genuine ceilings an operator should see, not transient turn cut-offs. *)
 let terminal_prefix_max_turns_exceeded =
@@ -167,54 +137,6 @@ let terminal_prefix_idle_timeout = Keeper_terminal_reason.terminal_prefix_idle_t
 
 let is_auto_recoverable_turn_budget_terminal =
   Keeper_terminal_reason.is_auto_recoverable_turn_budget_terminal
-;;
-
-let completion_contract_satisfied = function
-  | Contract_satisfied_completion | Contract_satisfied_execution -> true
-  | Contract_unknown
-  | Contract_not_dispatched
-  | Contract_violated
-  | Contract_surface_mismatch
-  | Contract_no_capable_provider
-  | Contract_claim_only_after_owned_task
-  | Contract_needs_execution_progress
-  | Contract_passive_only -> false
-;;
-
-let completion_contract_unsatisfied = function
-  | Contract_violated
-  | Contract_claim_only_after_owned_task
-  | Contract_needs_execution_progress -> true
-  | Contract_unknown
-  | Contract_not_dispatched
-  | Contract_surface_mismatch
-  | Contract_no_capable_provider
-  | Contract_passive_only
-  | Contract_satisfied_completion
-  | Contract_satisfied_execution -> false
-;;
-
-let passive_only_without_work_scope receipt =
-  (* Root B (#22710): a passive-only turn is healthy iff the keeper held no
-     claimed task AND the world genuinely offered nothing actionable. The old
-     [goal_ids = []] proxy conflated "has no goals" with "has nothing to do":
-     a coordination keeper always carries goals, so it could never pass this
-     carve-out and re-emitted [operator_broadcast_required] every idle turn.
-     [actionable_signal] is the real per-turn signal (no unclaimed tasks, no
-     board activity). [None] (no world observation threaded) is treated as not
-     healthy-passive, preserving the prior broadcast-required behavior. *)
-  receipt.completion_contract_result = Contract_passive_only
-  && Option.is_none receipt.current_task_id
-  && (match receipt.actionable_signal with
-      | Some Keeper_contract_classifier.No_actionable_signal -> true
-      | Some Keeper_contract_classifier.Has_unclaimed_tasks
-      | Some Keeper_contract_classifier.Has_board_activity
-      | None -> false)
-;;
-
-let terminal_reason_is_success receipt =
-  Keeper_turn_disposition.is_success
-    (Keeper_turn_disposition.of_wire receipt.terminal_reason_code)
 ;;
 
 let operator_disposition (receipt : t)
@@ -236,35 +158,19 @@ let operator_disposition (receipt : t)
     | External_cancel
     | Turn_wall_clock_timeout
     | Runtime_attempts_exhausted
-    | Completion_contract_unsatisfied
-    | Completion_contract_no_progress
-    | Post_commit_ambiguous
     | Turn_budget_exhausted _
     | Provider_error _
     | Unknown _ -> false
   in
-  let error_kind =
-    Option.map
-      (fun kind -> String.lowercase_ascii (error_kind_to_string kind))
-      receipt.error_kind
-  in
   let provider_runtime_failure =
-    (match terminal_reason with
-     | Keeper_terminal_reason.Provider_runtime_failure _ -> true
-     | _ -> false)
-    ||
-    match error_kind with
-    | Some ("api" | "mcp" | "io" | "orchestration" | "serialization") -> true
-    | Some _ | None -> false
+    match terminal_reason with
+    | Keeper_terminal_reason.Provider_runtime_failure _ -> true
+    | _ -> false
   in
   let preflight_config_failure =
-    (match terminal_reason with
-     | Keeper_terminal_reason.Config_or_auth _ -> true
-     | _ -> false)
-    ||
-    match error_kind with
-    | Some kind -> string_contains_ci kind "config" || string_contains_ci kind "auth"
-    | None -> false
+    match terminal_reason with
+    | Keeper_terminal_reason.Config_or_auth _ -> true
+    | _ -> false
   in
   (* Pre-typing, this branch also matched runtime_outcome="runtime_exhausted"
      and "exhausted" — neither is in the producer's closed [runtime_outcome]
@@ -275,16 +181,16 @@ let operator_disposition (receipt : t)
   match terminal_reason with
   | _ when input_required -> Disp_pass, Reason_input_required
   | Keeper_terminal_reason.Runtime_exhausted _ ->
-    Disp_alert_exhausted, Reason_runtime_exhausted
+    Disp_fail_open_next_runtime, Reason_runtime_exhausted
   | Keeper_terminal_reason.Capacity_backpressure _ ->
-    (* The typed runtime route treats provider-capacity cooldown as pacing and
+    (* The typed runtime route treats provider-capacity failure as retryable and
        continues with another eligible runtime.  This receipt is written for
        the failed pre-dispatch attempt before that rotation is reflected in
        [runtime_fallback_applied], so it must neither claim a completed
        fallback nor page a human. *)
     Disp_fail_open_next_runtime, Reason_capacity_backpressure
   | _ when preflight_config_failure ->
-    Disp_pause_human, Reason_preflight_config_error
+    Disp_fail_open_next_runtime, Reason_preflight_config_error
   | _
     when provider_runtime_failure
          && (receipt.degraded_retry_applied
@@ -299,20 +205,7 @@ let operator_disposition (receipt : t)
     when provider_runtime_failure
          && Keeper_terminal_reason.is_transient_provider_runtime_failure
               terminal_reason ->
-    (* Retry-recoverable transient (idle-chunk liveness kill wrapped as
-       [Api.Timeout], or a transient [Api.NetworkError]) that the keeper's
-       in-turn retry self-heals. Before this arm it fell through to the
-       [Disp_pause_human] branch below and broadcast an operator page
-       ([needs_operator_broadcast Disp_pause_human = true]) for a transient
-       that already recovered — fleet log [reason=provider_runtime_error] +
-       liveness guard [retry=1/2] then success (deepseek 17/19). Routing to
-       [Disp_fail_open_next_runtime] advances the FSM (RFC-0022 attempt
-       liveness intent) and, since [needs_operator_broadcast] is [false] for
-       that disposition, emits NO page. The structural OAS budget timeout
-       carries a distinct wire code and is NOT transient, so it still pauses
-       via the fall-through below.
-
-       The reason is [Reason_transient_runtime_retry], NOT
+    (* The reason is [Reason_transient_runtime_retry], not
        [Reason_runtime_fallback]: this arm is reached only AFTER the
        runtime-fallback arm above excluded [runtime_fallback_applied] /
        [Runtime_passed_to_next_model], so by construction no cross-runtime
@@ -323,53 +216,24 @@ let operator_disposition (receipt : t)
        genuine fallback. *)
     Disp_fail_open_next_runtime, Reason_transient_runtime_retry
   | _ when provider_runtime_failure ->
-    Disp_pause_human, Reason_provider_runtime_error
-  | Keeper_terminal_reason.Completion_contract_violation _ ->
-    Disp_pause_human, Reason_unmapped_runtime_state
-  | Keeper_terminal_reason.Turn_livelock _ ->
-    Disp_pause_human, Reason_turn_livelock_blocked
-  | _
-    when (match error_kind with
-          | Some "turn_livelock_blocked" -> true
-          | Some _ | None -> false) ->
-    Disp_pause_human, Reason_turn_livelock_blocked
+    Disp_fail_open_next_runtime, Reason_provider_runtime_error
   | Keeper_terminal_reason.Internal_error _ ->
-    Disp_pause_human, Reason_internal_error
-  | _
-    when (match error_kind with
-          | Some "internal" -> true
-          | Some _ | None -> false) ->
-    Disp_pause_human, Reason_internal_error
+    Disp_fail_open_next_runtime, Reason_internal_error
   | Keeper_terminal_reason.Auto_recoverable_budget _ ->
     Disp_pass, Reason_turn_budget_exhausted
   | Config_or_auth _
   | Provider_runtime_failure _
   | Turn_budget_exhausted _
   | Pre_dispatch_success _
-  | Other _ ->
+  | Unknown _ ->
     (* Generic fall-through. [Config_or_auth] and
        [Provider_runtime_failure] are caught by the guarded branches above
        (their constructors force [preflight_config_failure] /
        [provider_runtime_failure] true), so only [Turn_budget_exhausted],
-       [Pre_dispatch_success], and [Other] reach here in practice;
+       [Pre_dispatch_success], and [Unknown] reach here in practice;
        [Config_or_auth] and [Provider_runtime_failure] are listed to keep the
        match exhaustive without a wildcard. *)
-    let tool_route_failure =
-      List.mem
-        receipt.completion_contract_result
-        [ Contract_surface_mismatch; Contract_no_capable_provider ]
-    in
-    if tool_route_failure
-    then
-      if receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_runtime
-      then Disp_fail_open_next_runtime, Reason_tool_route_recoverable_failure
-      else if
-        receipt.runtime_fallback_applied
-        || receipt.runtime_outcome = Runtime_passed_to_next_model
-      then Disp_pass_next_model, Reason_tool_route_recoverable_failure
-      else Disp_pause_human, Reason_tool_route_recoverable_failure
-    else if
-      receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_runtime
+    if receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_runtime
     then Disp_fail_open_next_runtime, Reason_degraded_retry
     else if
       receipt.runtime_fallback_applied
@@ -382,49 +246,15 @@ let operator_disposition (receipt : t)
       | Capacity_backpressure _
       | Config_or_auth _
       | Provider_runtime_failure _
-      | Completion_contract_violation _
-      | Turn_livelock _
       | Internal_error _
       | Auto_recoverable_budget _
       | Pre_dispatch_success _
-      | Other _ -> false
+      | Unknown _ -> false
     then
-      (* RFC-0303 Phase 0: a passive-only turn is not an operator page even
-         when it also exhausted its turn budget. Without this, the
-         [Contract_passive_only] carve-out below is unreachable for any
-         turn_budget_exhausted terminal_reason, since this branch already
-         returns first -- exactly the gap review-flagged for this PR.
-         [passive_only_without_work_scope] implies [Contract_passive_only],
-         so checking the result variant directly subsumes it here (the
-         work-scope/outcome refinement only matters for the [Reason_healthy]
-         branch below, which this arm never reaches). *)
-      if receipt.completion_contract_result = Contract_passive_only
-      then Disp_pass, Reason_passive_no_action
-      else if completion_contract_satisfied receipt.completion_contract_result
-      then Disp_pass, Reason_turn_budget_exhausted
-      else Disp_alert_exhausted, Reason_turn_budget_exhausted
-    else if passive_only_without_work_scope receipt
-            && receipt.outcome = `Ok
-            && receipt.runtime_outcome = Runtime_completed
-            && terminal_reason_is_success receipt
-    then Disp_pass, Reason_healthy
-    else if receipt.completion_contract_result = Contract_passive_only
-    then
-      (* RFC-0303 Phase 0: passive-only is NOT an operator page. The turn still
-         produced activity (thinking / defer / choosing to wait); "should it have
-         acted on available work?" is a goal-layer semantic judgment, not a
-         per-turn pause. This carve-out precedes [completion_contract_unsatisfied]
-         so the genuinely-unsatisfied variants (violated / claim-only /
-         needs-execution-progress) still page via the branch below. The prior
-         [passive_only_without_work_scope] arm above already passed the no-work
-         case; this extends Disp_pass to passive-WITH-work-scope turns too. *)
-      Disp_pass, Reason_passive_no_action
-    else if completion_contract_unsatisfied receipt.completion_contract_result
-    then Disp_pause_human, Reason_completion_contract_unsatisfied
+      Disp_pass, Reason_turn_budget_exhausted
     else if
       receipt.outcome = `Ok
       && receipt.runtime_outcome = Runtime_not_dispatched
-      && receipt.completion_contract_result = Contract_not_dispatched
       &&
       (match terminal_reason with
        | Keeper_terminal_reason.Pre_dispatch_success _ -> true
@@ -432,12 +262,10 @@ let operator_disposition (receipt : t)
        | Capacity_backpressure _
        | Config_or_auth _
        | Provider_runtime_failure _
-       | Completion_contract_violation _
-       | Turn_livelock _
        | Internal_error _
        | Turn_budget_exhausted _
        | Auto_recoverable_budget _
-       | Other _ -> false)
+       | Unknown _ -> false)
     then Disp_pass, Reason_healthy
     (* "healthy" requires an explicit success signal: turn completed without
        error AND runtime reached the configured terminal. Any other fallthrough
@@ -490,7 +318,7 @@ let to_json_with_operator_disposition
       ~disposition
       ~disposition_reason
   =
-  let terminal_reason_code = enrich_contract_violation_reason receipt in
+  let terminal_reason_code = receipt.terminal_reason_code in
   let operator_disposition = operator_disposition_kind_to_string disposition in
   let operator_disposition_reason =
     operator_disposition_reason_to_string disposition_reason
@@ -654,22 +482,14 @@ let to_json receipt =
      dropped MUST violate it.
 
    OCaml mapping:
-     PauseHuman / StaleRunning  -> [needs_operator_broadcast]
-                                  returns [true] for "pause_human",
-                                  "alert_exhausted", "unknown".
+     Unknown runtime state      -> [needs_operator_broadcast]
+                                  returns [true] for "unknown".
      OperatorBroadcast event    -> [append] emits
                                   "keeper.operator_broadcast_required.v1"
-                                  with structured payload. Repeated
-                                  turn-livelock receipts for the same
-                                  keeper/turn/reason are coalesced after
-                                  the first event; the receipt itself is
-                                  still persisted.
+                                  with structured payload.
      Eventually-emit liveness   -> [append] calls the emit when
                                   [needs_operator_broadcast] is true and
-                                  the receipt is not a duplicate livelock
-                                  notification, inside a [try] so a single
-                                  failure does not runtime — the spec's
-                                  clean model.
+                                  records any failure explicitly.
 
    Bug model (would be violated if a future refactor dropped the first
    emit for a broadcast-worthy state, or skipped without the suppression
@@ -679,7 +499,7 @@ let to_json receipt =
    (StaleRunning watchdog + emit_stale_keeper_broadcast) is deferred to
    a separate cycle. *)
 let needs_operator_broadcast = function
-  | Disp_pause_human | Disp_alert_exhausted | Disp_unknown -> true
+  | Disp_unknown -> true
   | Disp_pass
   | Disp_fail_open_next_runtime
   | Disp_pass_next_model
@@ -689,8 +509,6 @@ let needs_operator_broadcast = function
 
 let reaction_kind_of_operator_disposition = function
   | Disp_pass | Disp_skipped -> Keeper_reaction_ledger.Execution_receipt
-  | Disp_pause_human
-  | Disp_alert_exhausted
   | Disp_fail_open_next_runtime
   | Disp_pass_next_model
   | Disp_user_cancelled
@@ -801,77 +619,8 @@ module Broadcast_dedupe = struct
   ;;
 end
 
-type operator_broadcast_dedupe_key =
-  { operator_keeper_name : string
-  ; operator_agent_name : string
-  ; operator_trace_id : string
-  ; operator_generation : int
-  ; operator_turn_count : int option
-  ; operator_current_task_id : string option
-  ; operator_disposition : operator_disposition_kind
-  ; operator_reason : operator_disposition_reason
-  ; operator_terminal_reason_code : string
-  }
-
-let operator_broadcast_turn_key = function
-  | Some value -> string_of_int value
-  | None -> "-"
-;;
-
-let operator_broadcast_dedupe_key_of_fields
-      ~keeper_name
-      ~agent_name
-      ~trace_id
-      ~generation
-      ~turn_count
-      ~current_task_id
-      ~disposition
-      ~reason
-      ~terminal_reason_code
-  =
-  { operator_keeper_name = keeper_name
-  ; operator_agent_name = agent_name
-  ; operator_trace_id = trace_id
-  ; operator_generation = generation
-  ; operator_turn_count = turn_count
-  ; operator_current_task_id = current_task_id
-  ; operator_disposition = disposition
-  ; operator_reason = reason
-  ; operator_terminal_reason_code = terminal_reason_code
-  }
-;;
-
-let operator_broadcast_dedupe_key receipt ~disposition ~reason =
-  operator_broadcast_dedupe_key_of_fields
-    ~keeper_name:receipt.keeper_name
-    ~agent_name:receipt.agent_name
-    ~trace_id:receipt.trace_id
-    ~generation:receipt.generation
-    ~turn_count:receipt.turn_count
-    ~current_task_id:receipt.current_task_id
-    ~disposition
-    ~reason
-    ~terminal_reason_code:receipt.terminal_reason_code
-;;
-
-let equal_operator_broadcast_dedupe_key a b =
-  String.equal a.operator_keeper_name b.operator_keeper_name
-  && String.equal a.operator_agent_name b.operator_agent_name
-  && String.equal a.operator_trace_id b.operator_trace_id
-  && Int.equal a.operator_generation b.operator_generation
-  && Option.equal Int.equal a.operator_turn_count b.operator_turn_count
-  && Option.equal String.equal a.operator_current_task_id b.operator_current_task_id
-  && a.operator_disposition = b.operator_disposition
-  && a.operator_reason = b.operator_reason
-  && String.equal a.operator_terminal_reason_code b.operator_terminal_reason_code
-;;
-
-let operator_broadcast_dedupe =
-  Broadcast_dedupe.create ~equal:equal_operator_broadcast_dedupe_key ()
-;;
-
 let operator_broadcast_payload (receipt : t) ~disposition ~reason =
-  let terminal_reason_code = enrich_contract_violation_reason receipt in
+  let terminal_reason_code = receipt.terminal_reason_code in
   let disposition_s = operator_disposition_kind_to_string disposition in
   let reason_s = operator_disposition_reason_to_string reason in
   `Assoc
@@ -896,15 +645,6 @@ let operator_broadcast_payload (receipt : t) ~disposition ~reason =
       , match receipt.actionable_signal with
         | Some signal -> `String (Keeper_contract_classifier.actionable_signal_label signal)
         | None -> `Null )
-    ; ( "contract_violation_detail"
-      , match decode_contract_violation_reason terminal_reason_code with
-        | None -> `Null
-        | Some (contract_id, called, satisfying) ->
-          `Assoc
-            [ "contract_id", `String contract_id
-            ; "called_tools", list_json called
-            ; "satisfying_tools", list_json satisfying
-            ] )
     ; ( "sandbox"
       , `Assoc
           [ "kind", `String (Keeper_types_profile_sandbox.sandbox_profile_to_string receipt.sandbox_kind)
@@ -946,17 +686,7 @@ let emit_operator_broadcast_event config (receipt : t) ~disposition ~reason =
 ;;
 
 let emit_operator_broadcast config (receipt : t) ~disposition ~reason =
-  match reason with
-  | Reason_turn_livelock_blocked ->
-    let key = operator_broadcast_dedupe_key receipt ~disposition ~reason in
-    Broadcast_dedupe.emit_once
-      operator_broadcast_dedupe
-      ~keeper_name:receipt.keeper_name
-      ~key
-      ~emit:(fun () -> emit_operator_broadcast_event config receipt ~disposition ~reason)
-  | _ ->
-    Broadcast_dedupe.Emitted
-      (emit_operator_broadcast_event config receipt ~disposition ~reason)
+  emit_operator_broadcast_event config receipt ~disposition ~reason
 ;;
 
 let append (config : Workspace.config) (receipt : t) =
@@ -995,23 +725,10 @@ let append (config : Workspace.config) (receipt : t) =
        (Printexc.to_string exn));
   if needs_operator_broadcast disposition
   then (
-    let disposition_s = operator_disposition_kind_to_string disposition in
-    let reason_s = operator_disposition_reason_to_string reason in
+    let disposition_label = operator_disposition_kind_to_string disposition in
+    let reason_label = operator_disposition_reason_to_string reason in
     (try
-       match emit_operator_broadcast config receipt ~disposition ~reason with
-       | Broadcast_dedupe.Emitted _ -> ()
-       | Broadcast_dedupe.Duplicate ->
-         Otel_metric_store.inc_counter
-           Keeper_metrics.(to_string OperatorBroadcastSuppressed)
-           ~labels:[ "keeper", receipt.keeper_name; "reason", reason_s ]
-           ();
-         Log.Keeper.info
-           ~keeper_name:receipt.keeper_name
-           "%s: operator_broadcast_required suppressed duplicate disposition=%s reason=%s turn=%s"
-           receipt.keeper_name
-           disposition_s
-           reason_s
-           (operator_broadcast_turn_key receipt.turn_count)
+       emit_operator_broadcast config receipt ~disposition ~reason
      with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
@@ -1026,8 +743,8 @@ let append (config : Workspace.config) (receipt : t) =
           ~keeper_name:receipt.keeper_name
           "%s: operator_broadcast_required EMIT FAILED disposition=%s reason=%s exn=%s"
           receipt.keeper_name
-          disposition_s
-          reason_s
+          disposition_label
+          reason_label
           (Printexc.to_string exn)))
 ;;
 
@@ -1042,22 +759,14 @@ let stale_kill_class_label = function
   | Keeper_registry.Noop_failure_loop _ -> "noop_failure_loop"
 ;;
 
-let stale_terminal_reason_code_typed reason =
-  match reason with
-  | Some (Keeper_registry.Provider_timeout_loop _) ->
-    Keeper_turn_terminal_code.Provider_runtime_error "provider_timeout_loop"
-  | _ -> Keeper_turn_terminal_code.of_failure_reason_option reason
-;;
+let stale_terminal_reason_code_typed = Keeper_turn_terminal_code.of_failure_reason_option
 
 let stale_broadcast_failure_cohort = function
-  | Some (Keeper_registry.Provider_timeout_loop _) -> "provider_timeout_loop"
   | Some _ as reason -> Keeper_registry.failure_reason_cohort_key reason
   | None -> "stale_turn_timeout"
 ;;
 
 let stale_broadcast_failure_reason_text = function
-  | Some (Keeper_registry.Provider_timeout_loop { count }) ->
-    Some (Printf.sprintf "provider_timeout_loop(count=%d)" count)
   | Some reason -> Some (Keeper_registry.failure_reason_to_string reason)
   | None -> None
 ;;
@@ -1281,40 +990,6 @@ let latest_json_by_keeper (config : Workspace.config) keeper_names =
 module For_testing = struct
   let stale_broadcast_dedupe_key = stale_broadcast_dedupe_key
   let stale_turn_bucket = stale_turn_bucket
-
-  let emit_operator_broadcast_dedupe_for_testing
-        ?turn_count
-        ?current_task_id
-        ~keeper_name
-        ~agent_name
-        ~trace_id
-        ~generation
-        ~disposition
-        ~reason
-        ~terminal_reason_code
-        ~emit
-        ()
-    =
-    let key =
-      operator_broadcast_dedupe_key_of_fields
-        ~keeper_name
-        ~agent_name
-        ~trace_id
-        ~generation
-        ~turn_count
-        ~current_task_id
-        ~disposition
-        ~reason
-        ~terminal_reason_code
-    in
-    match Broadcast_dedupe.emit_once operator_broadcast_dedupe ~keeper_name ~key ~emit with
-    | Broadcast_dedupe.Emitted () -> true
-    | Broadcast_dedupe.Duplicate -> false
-  ;;
-
-  let reset_operator_broadcast_dedupe () =
-    Broadcast_dedupe.reset operator_broadcast_dedupe
-  ;;
 
   let emit_stale_keeper_broadcast_dedupe_for_testing
         ~keeper_name

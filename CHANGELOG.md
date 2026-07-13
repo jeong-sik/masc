@@ -3,9 +3,14 @@
 ## Unreleased
 
 ### Removed
+- Removed the generic Governance pipeline, risk taxonomy, unconditional deny/operator floors, command/tool-name authorization heuristics, global resource admission blockers, and failure-derived Keeper pauses. External effects now converge on exact Always Allowed, configured LLM Auto Judge, or nonblocking HITL; objective typed input/path/sandbox invariants remain at execution boundaries.
+- Removed product-specific credential/JWT wiring and direct continuation-delivery bypasses from the Keeper runtime. Connectors and credentials remain outside the product-neutral Gate boundary.
+- Removed the no-op Keeper cost guard and arbitrary per-Keeper waiting cap. Cost, token, turn, FD, disk, provider health, and queue depth remain observable without becoming authorization or fleet-wide stop conditions.
 - Removed the unused permissive `Activity_feed` JSON decoder surface; the live activity API remains encode-only and its filesystem aggregation, ordering, limit, and agent-filter contracts now have dedicated regression coverage (#23960).
 
 ### Fixed
+- Auto Judge requests now persist the exact outer-turn causal context without interpreting it, and durable retryable judgments resume on an accepted provider attempt rather than waiting for a server restart.
+- Keeper Gate state now has a BasePath-derived `.masc/gate/` owner. A corrupt optional Always Allowed rule store degrades only exact-rule lookup, while Chat persistence/read failures remain local to Chat and no longer close unrelated Keeper lanes.
 - Prompt overrides now persist in a schema-versioned envelope bound to the SHA256 revision of each prompt body and template-variable contract. Legacy or malformed files and contract-drifted entries fail closed with observable fallback, writes use atomic replacement, and dashboard set/clear mutations commit to memory only after persistence succeeds.
 
 ## [0.20.1] - 2026-07-10
@@ -79,9 +84,6 @@
   release line.
 - Align version truth across `dune-project`, `ROADMAP.md`,
   `docs/PRODUCT-OPERATING-PLAN.md`, and `docs/spec/SPEC-INDEX.md`.
-- HITL governance: enforce hard-forbidden tool gate unconditionally before
-  `disable_hitl`, rejecting Critical/blocker tools in development mode and
-  queueing hard-forbidden approvals for human review.
 - Bump OAS agent_sdk pin to v0.208.12 (`2f3d6846`), carrying the
   default-unbounded agent turn budget release so MASC keeper/OAS runs no longer
   inherit the older finite default turn cap.
@@ -93,13 +95,6 @@
   stale inline-test fix from OAS #2265.
 
 ### Fixed
-- Close unerasable optional arguments in `Governance_pipeline` public API
-  (`decide`, `make_pre_hook`, `install`) to restore call-site compatibility.
-- Export `Keeper_meta_contract` alias and use Masc-qualified keeper profile
-  types in governance pipeline tests.
-- Align development-mode governance tests with the hard-forbidden
-  critical-tool behavior and exhaustively handle `Tool_dispatch.Proceed` in
-  hook assertions.
 - Resolve runtime capability validation and default preserve-thinking decisions
   through OAS provider-qualified provider/model capabilities instead of bare
   model ids, so overlapping ids such as Ollama Cloud Kimi do not need
@@ -226,16 +221,6 @@
 ## [0.19.45] - 2026-06-17
 
 ### Changed
-- `shell-ir`: graduated the capability-based Shell IR approval gate to
-  default-on (RFC-0254). `MASC_SHELL_IR_APPROVAL_GATE_ENABLED` now defaults to
-  `true` (was `false`) and is `Active` (was `Experimental`); the env var is kept
-  as a kill-switch (set `=false` to disable without a rebuild). The autonomous
-  keeper lane allows the toolchain with telemetry and denies a trust-independent
-  catastrophic floor (destructive git, redirect write-escape, `mkfs`). Gate
-  decisions are observable in `.masc/logs/system_log_*.jsonl`
-  (`shell_ir policy_denied` / `shell_ir dispatch`).
-
-
 ## [0.19.44] - 2026-06-14
 
 ### Changed

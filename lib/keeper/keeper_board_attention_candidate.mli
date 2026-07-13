@@ -1,62 +1,123 @@
-(** Durable evidence for board signals that reached the reactive pipeline but
-    had no deterministic keeper wake reason.
+(** Durable Board-attention judgment boundary.
 
-    This ledger is intentionally not a wake queue. A recorded candidate means
-    "this board signal requires an LLM/Judge attention boundary before it can
-    become control flow"; it does not wake a keeper and does not authorize
-    substring/keyword matching as a fallback. *)
+    A candidate is persisted before any asynchronous model call. Its only
+    lifecycle is [Pending -> Judged -> Consumed]. Relevant judgments become
+    normal Keeper-lane events only after an exact candidate-id durable queue
+    commit; failures retain the latest retryable evidence and never consume the
+    candidate. *)
 
-type signal_kind =
-  | Post_created
-  | Comment_added
-  | Reaction_changed
+type retryable_failure_kind =
+  | Runtime_configuration_unavailable
+  | Prompt_contract_unavailable
+  | Provider_unavailable
+  | Response_contract_unavailable
+  | Durable_delivery_unavailable
+  | Worker_unavailable
 
-type attention_authority =
-  | Llm_judge_required
+type retryable_failure =
+  { kind : retryable_failure_kind
+  ; detail : string
+  ; failed_at : float
+  }
 
-type wake_authority =
-  | No_direct_wake
+type judgment =
+  { verdict : Keeper_board_attention_judgment.t
+  ; runtime_id : string
+  ; judged_at : float
+  }
 
-type candidate = {
-  candidate_id : string;
-  dedupe_key : string;
-  keeper_name : string;
-  post_id : string;
-  signal_kind : signal_kind;
-  author : string;
-  title : string;
-  content_preview : string;
-  hearth : string option;
-  updated_at : float option;
-  recorded_at : float;
-  attention_authority : attention_authority;
-  wake_authority : wake_authority;
-}
+type delivery =
+  | Enqueued_to_keeper_lane
+  | Not_relevant
+
+type pending_state = { last_failure : retryable_failure option }
+
+type judged_state =
+  { judgment : judgment
+  ; last_failure : retryable_failure option
+  }
+
+type consumed_state =
+  { judgment : judgment
+  ; delivery : delivery
+  ; consumed_at : float
+  }
+
+type status =
+  | Pending of pending_state
+  | Judged of judged_state
+  | Consumed of consumed_state
+
+type candidate =
+  { candidate_id : string
+  ; keeper_name : string
+  ; signal : Board_dispatch.board_signal
+  ; judgment_request : Yojson.Safe.t
+  ; recorded_at : float
+  ; status : status
+  }
 
 type record_result =
-  [ `Recorded
-  | `Duplicate of candidate
-  | `Error of string
-  ]
+  | Recorded of candidate
+  | Duplicate of candidate
+  | Record_error of string
 
-val signal_kind_to_string : signal_kind -> string
-val signal_kind_of_string : string -> signal_kind option
-val attention_authority_to_string : attention_authority -> string
-val attention_authority_of_string : string -> attention_authority option
-val wake_authority_to_string : wake_authority -> string
-val wake_authority_of_string : string -> wake_authority option
+exception Candidate_unavailable of string
 
-val candidate_id_of_dedupe_key : string -> string
+val prompt_name : string
+val retryable_failure_kind_to_string : retryable_failure_kind -> string
+val retryable_failure_kind_of_string : string -> retryable_failure_kind option
+val delivery_to_string : delivery -> string
+val delivery_of_string : string -> delivery option
+val signal_to_yojson : Board_dispatch.board_signal -> Yojson.Safe.t
+
+val of_board_evidence :
+  meta:Keeper_meta_contract.keeper_meta ->
+  recorded_at:float ->
+  signal:Board_dispatch.board_signal ->
+  post:Board.post ->
+  comments:Board.comment list ->
+  (candidate, string) result
 
 val of_board_signal :
-  keeper_name:string ->
+  meta:Keeper_meta_contract.keeper_meta ->
   recorded_at:float ->
   Board_dispatch.board_signal ->
-  candidate
+  candidate Keeper_world_observation_board_signal.board_read
+(** Reads the complete persisted post and comment set. Board failures remain
+    typed [Unavailable] and no partial candidate is synthesized. *)
 
 val candidate_to_json : candidate -> Yojson.Safe.t
 val candidate_of_json : Yojson.Safe.t -> (candidate, string) result
 
+val load_candidates :
+  base_path:string -> keeper_name:string -> (candidate list, string) result
+
 val record : base_path:string -> candidate -> record_result
 
-val load_candidates : base_path:string -> keeper_name:string -> candidate list
+val record_retryable_failure :
+  base_path:string ->
+  candidate ->
+  retryable_failure ->
+  (candidate, string) result
+
+val record_judgment :
+  base_path:string -> candidate -> judgment -> (candidate, string) result
+
+val process_with_judge :
+  base_path:string ->
+  judge:(candidate -> (judgment, retryable_failure) result) ->
+  candidate ->
+  (candidate, string) result
+(** Testable state-machine boundary. Production uses the configured structured
+    judge through {!record_and_start} and {!resume_pending}. *)
+
+val record_and_start :
+  base_path:string -> candidate -> (candidate, string) result
+(** Returns after the Pending row is durably committed. Worker availability or
+    provider failure does not invalidate that acceptance. *)
+
+val resume_pending :
+  base_path:string -> keeper_name:string -> (int, string) result
+(** Asynchronously retries every non-consumed candidate in this Keeper lane.
+    The returned count is observability only and never limits retries. *)

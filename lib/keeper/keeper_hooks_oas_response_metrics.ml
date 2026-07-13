@@ -9,7 +9,7 @@ module Response_shape = Agent_sdk.Response_shape
    Replaces an earlier low-signal metric emit that produced
    degenerate 1-bit records (51 identical rows in 48h of production,
    [threshold=0.0, raw=1.0, triggered=true]).  Per keeper + per tool
-   labels let dashboards and #9880 governance judgments distinguish
+   labels let dashboards and #9880 structured judgments distinguish
    which keeper-tool pairs are actually failing instead of reading a
    single undifferentiated marker. *)
 let tool_use_failure_metric = Keeper_metrics.(to_string ToolUseFailure)
@@ -129,25 +129,17 @@ let record_keeper_tool_duration_bucket ~labels duration_seconds =
     tool_call_duration_bucket_bounds;
   emit_bucket "+Inf" ~increment:true
 
-(* default_context_max + context_max_of_telemetry moved to
-   Keeper_hooks_oas_types (intra-library file split, 2026-05-16). *)
-
-let classify_usage_trust ?usage ~telemetry () =
+let classify_usage_trust ?usage () =
   let usage_reported, usage =
     match usage with
     | Some usage -> true, usage
     | None -> false, zero_usage
   in
-  Keeper_usage_trust.classify
-    ~usage_reported ~usage ~context_max:(context_max_of_telemetry telemetry)
+  Keeper_usage_trust.classify ~usage_reported ~usage
 
 let record_usage_anomaly_metrics ~keeper_name usage_trust =
-  if not (Keeper_usage_trust.is_trusted usage_trust) then
-    let reasons =
-      match Keeper_usage_trust.reasons usage_trust with
-      | [] -> [Keeper_usage_trust.to_string usage_trust]
-      | reasons -> reasons
-    in
+  match usage_trust with
+  | Keeper_usage_trust.Usage_untrusted reasons ->
     List.iter
       (fun reason ->
          Otel_metric_store.inc_counter
@@ -160,6 +152,7 @@ let record_usage_anomaly_metrics ~keeper_name usage_trust =
 	             ]
            ())
       reasons
+  | Keeper_usage_trust.Usage_missing | Keeper_usage_trust.Usage_trusted -> ()
 
 let record_keeper_tool_duration_metric
     ~(keeper_name : string)

@@ -3,10 +3,6 @@
     Extracted from Server_runtime_bootstrap to isolate the large
     subsystem-spawning functions into a focused module. *)
 
-let install_tooling ~governance_level (state : Mcp_server.server_state) =
-  Governance_pipeline.install ~config:(Mcp_server.workspace_config state) ~governance_level ()
-;;
-
 (* Stable djb2-style hash for the autoboot warmup jitter.
 
    Post-#13119 follow-up: the previous implementation used native
@@ -53,8 +49,7 @@ let keeper_agent_status_of_phase = function
   | Keeper_state_machine.Offline
   | Keeper_state_machine.Stopped
   | Keeper_state_machine.Crashed
-  | Keeper_state_machine.Dead
-  | Keeper_state_machine.Zombie -> Masc_domain.Inactive
+  | Keeper_state_machine.Dead -> Masc_domain.Inactive
 ;;
 
 let keeper_registry_agent ~now (entry : Keeper_registry.registry_entry) : Masc_domain.agent =
@@ -1099,7 +1094,7 @@ let start_keeper_loops
     | "masc_board_list" ->
       Board_tool.handle_tool name args
     | _ ->
-      (* RFC-0189: judge dispatch caller (governance / operator
+      (* RFC-0189: operator judge dispatch caller
          judge runner) requested a tool outside the allow-list.
          Caller-misuse = [Workflow_rejection]. *)
       Tool_result.error
@@ -1108,7 +1103,7 @@ let start_keeper_loops
         ~start_time
         (Printf.sprintf "judge: tool '%s' not allowed" name)
   in
-  (* governance_judge subsystem removed (2026-06-09): its only factual input
+  (* Legacy dashboard judge subsystem removed (2026-06-09): its only factual input
      was [Workspace.get_agents_status], which read the disk-backed
      [.masc/agents/] registry whose producer ([Workspace_eio.register_agent])
      had zero call sites. items/activity were already hardcoded []. So the
@@ -1129,7 +1124,6 @@ let start_keeper_loops
     Dashboard_operator_judge.start
       ~sw
       ~clock
-      ~net
       ~config:(Mcp_server.workspace_config state)
       ~masc_tools:judge_masc_tools
       ~dispatch:operator_judge_dispatch
@@ -1141,74 +1135,15 @@ let start_keeper_loops
           ~include_keepers:true
           operator_judge_ctx)
       ());
-  fork_subsystem "interaction_judge" (fun () ->
-    let interaction_judge_ctx : _ Operator_control.context =
-      { config = (Mcp_server.workspace_config state)
-      ; agent_name = "interaction-judge"
-      ; sw
-      ; clock
-      ; proc_mgr = Some proc_mgr
-      ; net = state.net
-      ; mcp_session_id = None
-      }
-    in
-    Dashboard_interaction_judge.start
-      ~sw
-      ~clock
-      ~base_path:(Mcp_server.workspace_config state).workspace_path
-      ~build_facts:(fun () ->
-        Operator_control.snapshot_json
-          ~actor:"interaction-judge"
-          ~view:"summary"
-          ~include_messages:false
-          ~include_keepers:true
-          interaction_judge_ctx));
   fork_subsystem "session_cleanup" (fun () ->
     Session.start_mcp_session_cleanup_loop ~sw ~clock ());
   (* No verification_timeout fork: RFC-0220 §11 PR-3 deleted the sweep —
      the wall-clock deadline rescue was removed in §5 and the fork had been
      spinning on a no-op since PR-1. *)
-  (* HITL approval queue death-spiral fix.
-     [Keeper_approval_queue.expire_stale] has been a complete
-     implementation (queue removal, audit event, promise [Reject]
-     resolution, on_resolution callback) with a unit test since
-     introduction, but was never invoked by any production caller.
-     Result: a blocking HITL approval enqueued by a keeper turn would block
-     [keeper_cycle_decision] forever via the
-     [has_blocking_pending_for_keeper → Skip Approval_pending] branch in
-     [keeper_world_observation.ml:928].  At the 300s stale-watchdog
-     threshold the supervisor would respawn the fiber, the same
-     approval entry would still be in the queue, and the cycle
-     would repeat indefinitely.  Pair with #10962
-     ([last_skip_observation] surface) so operators can see
-     [last_skip=[approval_pending]] alongside the kill warn line.
-     [max_wait_s] is a code constant (policy, not calibration);
-     [interval_seconds] remains an ops knob for cadence tuning. *)
-  fork_subsystem "approval_janitor" (fun () ->
-    if not (Env_config_runtime.Approval_janitor.enabled ())
-    then
-      Log.Server.info "approval_janitor: disabled via MASC_APPROVAL_JANITOR_ENABLED=false"
-    else (
-      let interval = Env_config_runtime.Approval_janitor.interval_seconds in
-      (* 30 minutes — long enough that humans actually have time to
-         respond on dashboard / Slack / etc., short enough that the
-         keeper isn't trapped on the death-spiral kill loop after the
-         operator forgets a request.  Code constant: changes need code
-         review (policy), not a runtime knob. *)
-      let max_wait_s = 1800.0 in
-      let rec loop () =
-        Eio.Time.sleep clock interval;
-        (try Keeper_approval_queue.expire_stale ~max_wait_s with
-         | Eio.Cancel.Cancelled _ as e -> raise e
-         | exn ->
-           Log.Server.warn "approval_janitor: sweep failed: %s" (Printexc.to_string exn));
-        loop ()
-      in
-      loop ()));
   (* Auto-boot keepers from keeper meta and start keepalive loops.
-     Retries unbooted keepers up to [max_retries] times so transient
-     failures (model resolution, discovery timing) don't permanently
-     block keeper startup.  See #5717. *)
+     Each unbooted keeper retries in its own fiber until it registers, so
+     transient model/discovery failures neither abandon that lane nor block
+     supervisor startup or sibling lanes. See #5717. *)
   fork_subsystem "keeper_autoboot" (fun () ->
     if not Env_config.KeeperBootstrap.enabled
     then Log.Keeper.info "autoboot: disabled via MASC_KEEPER_BOOTSTRAP_ENABLED=false"
@@ -1364,49 +1299,38 @@ let start_keeper_loops
       (* Retry loop for keepers that failed initial boot *)
       if booted_count < total
       then (
-        let max_retries = Keeper_config.keeper_bootstrap_retry_max () in
         let retry_interval_s =
           Float.of_int (Keeper_config.keeper_bootstrap_retry_interval_sec ())
         in
-        let rec retry_loop round =
-          if round > max_retries
-          then
-            Log.Keeper.warn
-              "autoboot: gave up after %d retries; %d/%d keepers remain unbooted"
-              max_retries
-              (total
-               - List_util.count_if
-                   (fun name ->
-                      Keeper_registry.is_running ~base_path:config.base_path name)
-                   names)
-              total
-          else (
-            Eio.Time.sleep clock retry_interval_s;
-            let unbooted =
-              List.filter
-                (fun name ->
-                   not (Keeper_registry.is_running ~base_path:config.base_path name))
-                names
-            in
-            if unbooted = []
-            then
-              Log.Keeper.info
-                "autoboot: all %d keepers running after %d retry round(s)"
-                total
-                round
-            else (
-              Log.Keeper.info
-                "autoboot: retry round %d/%d — %d unbooted: [%s]"
-                round
-                max_retries
-                (List.length unbooted)
-                (String.concat ", " unbooted);
-              iteri_with_fair_yield
-                (fun idx name -> ignore (try_boot_one idx name))
-                unbooted;
-              retry_loop (round + 1)))
+        let unbooted =
+          List.filter (fun name -> not (List.mem name booted)) names
         in
-        retry_loop 1);
+        List.iteri
+          (fun idx name ->
+             Eio.Fiber.fork ~sw (fun () ->
+               let rec retry_loop round =
+                 if Keeper_registry.is_registered ~base_path:config.base_path name
+                 then
+                   Log.Keeper.info
+                     "autoboot: %s registered after %d retry round(s)"
+                     name
+                     (round - 1)
+                 else (
+                   Eio.Time.sleep clock retry_interval_s;
+                   Log.Keeper.info
+                     "autoboot: retry round %d for unbooted keeper %s"
+                     round
+                     name;
+                   if try_boot_one ~log_prefix:"autoboot-retry" idx name
+                   then
+                     Log.Keeper.info
+                       "autoboot: %s registered on retry round %d"
+                       name
+                       round
+                   else retry_loop (round + 1))
+               in
+               retry_loop 1))
+          unbooted);
       (* #10125: start the supervisor sweep here, after autoboot
          completes.  Without this call the sweep would only fire
          on the first [masc_keeper_msg] tool dispatch (the single

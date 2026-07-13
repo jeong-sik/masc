@@ -7,10 +7,7 @@ type t =
   | Reconciled
   | Restarted
   | Dead_cleaned
-  | Self_preservation
-  | Paused_pruned
   | Purged
-  | Auto_resumed
   | Admission_denied
 
 val to_string : t -> string

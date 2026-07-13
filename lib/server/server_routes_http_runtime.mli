@@ -143,7 +143,7 @@ val make_health_json :
     [sse_clients] / [startup] / [subsystems] / [feature_flags] / [gc] /
     [overall_status] / [operator_action_required] /
     [operator_action_reasons] /
-    [keeper_fibers] / [keeper_fd_pressure] / [fd_accountant] /
+    [keeper_fibers] / [fd_observation] / [fd_accountant] / [disk_observation] /
     [keeper_fleet_safety] / [keeper_reaction_ledger] / [paused_keepers] /
     [keeper_config_error_count] / [keeper_config_errors] /
     [keeper_config_unknown_key_count] / [keeper_config_unknown_keys] /
@@ -163,29 +163,28 @@ val make_health_json :
     [paused_keepers.count] and [paused_keepers.names] are the union of
     registry-visible paused keepers and durable [.masc/keepers/*.json]
     metas with [paused = true].  The nested [registry_paused_*] and
-    [durable_*] fields keep the two sources inspectable so a keeper
-    that has been auto-paused and removed from the live keepalive set
-    does not disappear from [/health].  [running_*] remains as a legacy
+    [durable_*] fields keep the two sources inspectable so a paused keeper
+    removed from the live keepalive set does not disappear from [/health].
+    [running_*] remains as a legacy
     alias for [registry_paused_*]; it does not mean FSM phase [Running].
-    [autoboot_enabled_*] and [details] distinguish auto-recoverable,
-    operator-paused, and reconcile-gated durable pauses without auto-unpausing
-    them.  [missing_pause_root_cause] is true when a keeper is auto-recoverable
-    but its persisted runtime has no typed [last_blocker].  [read_error_count]
+    [autoboot_enabled_*] and [details] expose durable pause state without
+    changing it. [missing_pause_root_cause] is true when neither a typed latch
+    nor a runtime blocker explains the pause. [read_error_count]
     surfaces corrupt durable meta instead of silently reporting a clean zero.
 
-    {2 keeper_fd_pressure and keeper_fleet_safety contract}
+    {2 fd_observation and keeper_fleet_safety contract}
 
-    [keeper_fd_pressure] exposes the effective process [nofile] soft
-    limit, currently open FD count when available, the host kernel file-table
-    snapshot when available, projected 24-Keeper budget, and the admission
-    decision used by the FD guard.  This lets operators distinguish "shell
-    says the host limit is high" from the actual runtime inherited by the
-    server process, and distinguish process-local EMFILE from host-wide ENFILE.
+    [fd_observation] exposes the effective process [nofile] soft limit,
+    currently open FD count when available, the host kernel file-table snapshot
+    when available, and typed [EMFILE]/[ENFILE] observations. It never contains
+    a projected fleet cost or admission decision.
 
-    [fd_accountant] exposes the live resource accountant snapshot used by the
-    shared spawn/HTTP/log backpressure layer: process FD open/limit readings,
-    whether FD pressure is active, and each resource kind's in-flight,
-    configured-concurrency, and effective-concurrency counts.
+    [fd_accountant] exposes observation scopes around spawn/HTTP/log activity:
+    process FD open/limit readings, per-kind active operations, and typed OS
+    resource-error counters. It never serializes or pre-admits those operations.
+
+    [disk_observation] exposes the raw filesystem-space probe and typed [ENOSPC]
+    count. It contains no free-space floor, cooldown, or admission decision.
 
     [keeper_fleet_safety] compares configured, unpaused autoboot-enabled
     keepers with the live healthy-running keeper fiber count while separately
@@ -195,7 +194,7 @@ val make_health_json :
     [failing_keeper_fiber_count] and [executable_keeper_fiber_count] because
     the FSM intentionally allows [Failing] keepers to finish or attempt turns.
     [effective_reaction_capacity_count] is the sum of healthy [Running] lanes
-    and unpaused, executable [Failing] lanes whose restart budget remains. It
+    and unpaused, executable [Failing] lanes. It
     reports [blocked] when autoboot-enabled keepers exist but no executable
     fiber remains, and [degraded] when executable fibers remain but healthy
     running capacity is zero or below the safety margin, or effective reaction

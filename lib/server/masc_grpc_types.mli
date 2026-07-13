@@ -46,8 +46,13 @@ module HeartbeatAck : sig
     { timestamp_ms : int64
     ; active_agent_count : int
     ; pending_task_count : int
-    ; directives : string list
+    ; directives : Keeper_directive.t list
     }
+
+  (** Exact codec for the legacy protobuf [string] field.  This is the only
+      boundary where Keeper directives are represented as strings. *)
+  val directive_of_wire : string -> (Keeper_directive.t, string) result
+  val directive_to_wire : Keeper_directive.t -> string
 
   val of_bytes : string -> t
   val to_bytes : t -> string

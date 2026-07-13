@@ -219,7 +219,7 @@ module Feed : LOGGER
 module Telemetry : LOGGER
 module Noosphere : LOGGER
 module CmdPlane : LOGGER
-module Governance : LOGGER
+module Gate : LOGGER
 module Social : LOGGER
 module Transport : LOGGER
 module Gc : LOGGER

@@ -174,7 +174,7 @@ let test_keeper_msg_async_roundtrip () =
     "request completed"
     true
     (match entry.Keeper_msg_async.status with
-     | Done { ok = true; body } -> String.length body > 0
+     | Done { ok = true; body; _ } -> String.length body > 0
      | _ -> false);
   Alcotest.(check int)
     "terminal entry leaves active memory index"
@@ -249,6 +249,7 @@ let test_keeper_msg_async_recovers_done_from_disk () =
   @@ fun sw ->
   let clock = Eio.Stdenv.clock env in
   let base_path = temp_dir "keeper-msg-async-done-" in
+  let expected_data = `Assoc [ "kind", `String "done" ] in
   let request_id =
     Keeper_msg_async.submit
       ~background_sw:sw
@@ -257,7 +258,11 @@ let test_keeper_msg_async_recovers_done_from_disk () =
       ~keeper_name:"beta"
       ~f:(fun _request_sw ->
         Eio.Fiber.yield ();
-        tr_ok (Yojson.Safe.to_string (`Assoc [ "kind", `String "done" ])))
+        Tool_result.make_ok
+          ~tool_name:"keeper-test"
+          ~start_time:0.0
+          ~data:expected_data
+          ())
       ()
     |> accepted_request_id
   in
@@ -273,8 +278,16 @@ let test_keeper_msg_async_recovers_done_from_disk () =
       : Keeper_msg_async.entry);
   Keeper_msg_async.For_testing.forget ~base_path ~caller ~request_id;
   match Keeper_msg_async.poll ~base_path ~caller request_id with
-  | Keeper_msg_async.Found { Keeper_msg_async.status = Done { ok = true; body }; _ } ->
-    Alcotest.(check bool) "body persisted" true (String.length body > 0)
+  | Keeper_msg_async.Found
+      { Keeper_msg_async.status = Done { ok = true; body; data = Some data }; _ } ->
+    Alcotest.(check bool) "body persisted" true (String.length body > 0);
+    Alcotest.(check bool)
+      "typed data persisted"
+      true
+      (Yojson.Safe.equal expected_data data)
+  | Keeper_msg_async.Found
+      { Keeper_msg_async.status = Done { ok = true; data = None; _ }; _ } ->
+    Alcotest.fail "expected persisted typed data"
   | Keeper_msg_async.Found entry ->
     Alcotest.failf
       "expected recovered done, got %s"
@@ -397,7 +410,6 @@ let test_keeper_msg_async_request_id_collision_uses_reservation_index () =
   Fun.protect
     ~finally:(fun () ->
       Keeper_msg_async.For_testing.clear ();
-      Keeper_persistence_admission.For_testing.clear ();
       rm_rf base_path)
     (fun () ->
        let generated = Atomic.make 0 in
@@ -491,7 +503,6 @@ let test_keeper_msg_async_initial_post_publish_failure_rolls_back () =
   Fun.protect
     ~finally:(fun () ->
       Keeper_msg_async.For_testing.clear ();
-      Keeper_persistence_admission.For_testing.clear ();
       rm_rf base_path)
     (fun () ->
        let worker_ran = Atomic.make false in
@@ -532,7 +543,6 @@ let test_keeper_msg_async_initial_rollback_failure_preserves_request_id () =
   Fun.protect
     ~finally:(fun () ->
       Keeper_msg_async.For_testing.clear ();
-      Keeper_persistence_admission.For_testing.clear ();
       rm_rf base_path)
     (fun () ->
        let worker_ran = Atomic.make false in
@@ -576,130 +586,6 @@ let test_keeper_msg_async_initial_rollback_failure_preserves_request_id () =
          (Keeper_msg_async.submit_error_to_json error |> Yojson.Safe.to_string))
 ;;
 
-let test_keeper_msg_async_reconciliation_fences_only_ambiguous_lane () =
-  with_eio_env
-  @@ fun env ->
-  Eio.Switch.run
-  @@ fun background_sw ->
-  let base_path = temp_dir "keeper-msg-reconciliation-fence-" in
-  Fun.protect
-    ~finally:(fun () ->
-      Keeper_msg_async.For_testing.clear ();
-      Keeper_persistence_admission.For_testing.clear ();
-      rm_rf base_path)
-    (fun () ->
-       let generated = Atomic.make 0 in
-       Keeper_msg_async.For_testing.set_request_id_hook
-         (Some
-            (fun () ->
-               Printf.sprintf
-                 "kmsg-reconciliation-%d"
-                 (Atomic.fetch_and_add generated 1)));
-       let first_at_fsync, resolve_first_at_fsync = Eio.Promise.create () in
-       let release_first, resolve_release_first = Eio.Promise.create () in
-       let fail_first = Atomic.make true in
-       Keeper_msg_async.For_testing.set_durable_write_hook
-         (Some
-            (fun stage ->
-               if
-                 stage = Keeper_fs.Parent_directory_fsync_after_rename
-                 && Atomic.compare_and_set fail_first true false
-               then (
-                 Eio.Promise.resolve resolve_first_at_fsync ();
-                 Eio.Promise.await release_first;
-                 failwith "synthetic ambiguous initial commit")));
-       Keeper_msg_async.For_testing.set_durable_remove_hook
-         (Some (fail_once_on_remove_stage Keeper_fs.Unlink));
-       let results :
-           ( Keeper_msg_async.submit_outcome
-           , Keeper_msg_async.submit_error )
-           result
-           Eio.Stream.t =
-         Eio.Stream.create 5
-       in
-       let submit_same_lane () =
-         Keeper_msg_async.submit
-           ~background_sw
-           ~base_path
-           ~caller
-           ~keeper_name:"ambiguous-lane"
-           ~f:(fun _ -> tr_ok "{}")
-           ()
-         |> Eio.Stream.add results
-       in
-       Eio.Fiber.fork ~sw:background_sw submit_same_lane;
-       Eio.Promise.await first_at_fsync;
-       for _ = 1 to 4 do
-         Eio.Fiber.fork ~sw:background_sw submit_same_lane
-       done;
-       for _ = 1 to 10 do
-         Eio.Fiber.yield ()
-       done;
-       Alcotest.(check int) "concurrent waiters allocate no extra ids" 1
-         (Atomic.get generated);
-       Alcotest.(check int) "only first in-flight id is reserved" 1
-         (Keeper_msg_async.For_testing.reserved_request_id_count ());
-       Eio.Promise.resolve resolve_release_first ();
-       let outcomes = List.init 5 (fun _ -> Eio.Stream.take results) in
-       let reconciliations, blocked, first_request_id =
-         List.fold_left
-           (fun (reconciliations, blocked, first_request_id) -> function
-              | Ok
-                  { Keeper_msg_async.acceptance =
-                      Keeper_msg_async.Reconciliation_required _
-                  ; request_id
-                  } ->
-                reconciliations + 1, blocked, Some request_id
-              | Error
-                  (Keeper_msg_async.Submit_admission_blocked
-                     { reason = Keeper_persistence_admission.Reconciliation_required
-                     ; _
-                     }) ->
-                reconciliations, blocked + 1, first_request_id
-              | Ok outcome ->
-                Alcotest.failf
-                  "concurrent ambiguity was reported durable: %s"
-                  (Keeper_msg_async.submit_outcome_to_json outcome
-                   |> Yojson.Safe.to_string)
-              | Error error ->
-                Alcotest.failf
-                  "concurrent ambiguity returned wrong error: %s"
-                  (Keeper_msg_async.submit_error_to_json error
-                   |> Yojson.Safe.to_string))
-           (0, 0, None)
-           outcomes
-       in
-       Alcotest.(check int) "exactly one ambiguity owns reconciliation" 1
-         reconciliations;
-       Alcotest.(check int) "all same-lane waiters fail closed" 4 blocked;
-       let first_request_id =
-         match first_request_id with
-         | Some request_id -> request_id
-         | None -> Alcotest.fail "reconciliation request id was lost"
-       in
-       Alcotest.(check int) "concurrent fence keeps reservation bounded" 1
-         (Keeper_msg_async.For_testing.reserved_request_id_count ());
-       let healthy_request_id =
-         Keeper_msg_async.submit
-           ~background_sw
-           ~base_path
-           ~caller
-           ~keeper_name:"healthy-lane"
-           ~f:(fun _ -> tr_ok "{}")
-           ()
-         |> accepted_request_id
-       in
-       ignore
-         (wait_for_done_with_clock
-            (Eio.Stdenv.clock env)
-            ~base_path
-            healthy_request_id
-           : Keeper_msg_async.entry);
-       Alcotest.(check bool) "ambiguous request id remains distinct" true
-         (not (String.equal first_request_id healthy_request_id));
-       Alcotest.(check int) "healthy lane releases its reservation" 1
-         (Keeper_msg_async.For_testing.reserved_request_id_count ()))
-;;
 
 let test_keeper_msg_async_running_double_write_failure_is_terminal_in_memory () =
   with_eio_env
@@ -1647,146 +1533,6 @@ let test_keeper_msg_async_integrity_ambiguity_projects_exact_poll_error () =
          Alcotest.fail "callback and poll did not share integrity evidence")
 ;;
 
-let test_keeper_msg_async_absent_integrity_keeps_request_id_reserved () =
-  with_eio_env
-  @@ fun env ->
-  Eio.Switch.run
-  @@ fun sw ->
-  let base_path = temp_dir "keeper-msg-integrity-absent-reservation-" in
-  let release, resolve_release = Eio.Promise.create () in
-  Fun.protect
-    ~finally:(fun () ->
-      Keeper_msg_async.For_testing.clear ();
-      Keeper_persistence_admission.For_testing.clear ();
-      rm_rf base_path)
-    (fun () ->
-       let generated = Atomic.make 0 in
-       Keeper_msg_async.For_testing.set_request_id_hook
-         (Some
-            (fun () ->
-               match Atomic.fetch_and_add generated 1 with
-               | 0 | 1 -> "kmsg-integrity-absent"
-               | ordinal -> Printf.sprintf "kmsg-integrity-next-%d" ordinal));
-       let settlements = ref [] in
-       let first_request_id =
-         Keeper_msg_async.submit
-           ~on_worker_settled:(fun settlement ->
-             settlements := settlement :: !settlements)
-           ~background_sw:sw
-           ~base_path
-           ~caller
-           ~keeper_name:"integrity-absent"
-           ~f:(fun _ ->
-             Eio.Promise.await release;
-             tr_ok "{}")
-           ()
-         |> accepted_request_id
-       in
-       let running = wait_for_running ~base_path first_request_id in
-       write_request_record
-         ~location:Terminal_record
-         ~keeper_name:running.keeper_name
-         ~submitted_at:running.submitted_at
-         ~base_path
-         ~request_id:first_request_id
-         ~status:"done"
-         ~status_fields:
-           [ "completed_at", `Float 42.0
-           ; "ok", `Bool true
-           ; "body", `String "conflicting"
-           ]
-         ();
-       let active_path =
-         require_record_path
-           ~location:Active_record
-           ~base_path
-           ~request_id:first_request_id
-       in
-       let terminal_path =
-         require_record_path
-           ~location:Terminal_record
-           ~base_path
-           ~request_id:first_request_id
-       in
-       let remove_evidence = Atomic.make true in
-       Keeper_msg_async.For_testing.set_integrity_projection_hook
-         (Some
-            (fun () ->
-               if Atomic.compare_and_set remove_evidence true false
-               then (
-                 if Sys.file_exists active_path then Sys.remove active_path;
-                 if Sys.file_exists terminal_path then Sys.remove terminal_path)));
-       Eio.Promise.resolve resolve_release ();
-       let rec await_projection remaining =
-         match !settlements with
-         | _ :: _ -> ()
-         | [] when remaining > 0 ->
-           Eio.Time.sleep (Eio.Stdenv.clock env) 0.01;
-           await_projection (remaining - 1)
-         | [] -> Alcotest.fail "absent integrity projection was not delivered"
-       in
-       await_projection 100;
-       (match !settlements with
-        | [ Keeper_msg_async.Settlement_projection_error
-              { poll_result = Keeper_msg_async.Absent }
-          ] ->
-          ()
-        | _ -> Alcotest.fail "integrity evidence loss was not projected as Absent");
-       Alcotest.(check int) "absent accepted id keeps one tombstone" 1
-         (Keeper_msg_async.For_testing.reserved_request_id_count ());
-       Keeper_msg_async.For_testing.set_integrity_projection_hook None;
-       let generated_before_fenced_submit = Atomic.get generated in
-       (match
-          Keeper_msg_async.submit
-            ~background_sw:sw
-            ~base_path
-            ~caller
-            ~keeper_name:"integrity-absent"
-            ~f:(fun _ -> tr_ok "{}")
-            ()
-        with
-        | Error
-            (Keeper_msg_async.Submit_admission_blocked
-               { reason = Keeper_persistence_admission.Reconciliation_required
-               ; _
-               }) ->
-          ()
-        | Error error ->
-          Alcotest.failf
-            "absent integrity returned wrong lane fence: %s"
-            (Keeper_msg_async.submit_error_to_json error |> Yojson.Safe.to_string)
-        | Ok outcome ->
-          Alcotest.failf
-            "absent integrity allowed another same-lane reservation: %s"
-            (Keeper_msg_async.submit_outcome_to_json outcome
-             |> Yojson.Safe.to_string));
-       Alcotest.(check int) "same-lane fence runs before id generation"
-         generated_before_fenced_submit (Atomic.get generated);
-       Alcotest.(check int) "same-lane fence keeps reservation bounded" 1
-         (Keeper_msg_async.For_testing.reserved_request_id_count ());
-       let second_request_id =
-         Keeper_msg_async.submit
-           ~background_sw:sw
-           ~base_path
-           ~caller
-           ~keeper_name:"integrity-next"
-           ~f:(fun _ -> tr_ok "{}")
-           ()
-         |> accepted_request_id
-       in
-       ignore
-         (wait_for_done_with_clock
-            (Eio.Stdenv.clock env)
-            ~base_path
-            second_request_id
-           : Keeper_msg_async.entry);
-       Alcotest.(check bool) "same id was not reused" true
-         (not (String.equal first_request_id second_request_id));
-       Alcotest.(check int) "collision retried deterministic generator" 3
-         (Atomic.get generated);
-       Alcotest.(check int) "second request released, tombstone remains" 1
-         (Keeper_msg_async.For_testing.reserved_request_id_count ()))
-;;
 
 let test_keeper_msg_async_preserves_mismatched_nonterminal_source_identity () =
   with_eio_env
@@ -2036,7 +1782,6 @@ let test_keeper_persistence_preparation_configures_queue_before_request_recovery
   Fun.protect
     ~finally:(fun () ->
       Keeper_chat_queue.For_testing.reset ();
-      Keeper_persistence_admission.For_testing.clear ();
       rm_rf base_path)
     (fun () ->
        Keeper_chat_queue.For_testing.reset ();
@@ -2078,7 +1823,6 @@ let test_keeper_persistence_preparation_rejects_structural_request_store () =
   Fun.protect
     ~finally:(fun () ->
       Keeper_chat_queue.For_testing.reset ();
-      Keeper_persistence_admission.For_testing.clear ();
       rm_rf base_path)
     (fun () ->
        let request_id = "kmsg_structural_store_0_0" in
@@ -2116,7 +1860,6 @@ let test_keeper_persistence_preparation_preserves_unattributed_request_record ()
   Fun.protect
     ~finally:(fun () ->
       Keeper_chat_queue.For_testing.reset ();
-      Keeper_persistence_admission.For_testing.clear ();
       rm_rf base_path)
     (fun () ->
        let request_id = "kmsg_unattributed_record_0_0" in
@@ -2149,163 +1892,6 @@ let test_keeper_persistence_preparation_preserves_unattributed_request_record ()
        | _ -> Alcotest.fail "unattributed corrupt record evidence was lost")
 ;;
 
-let test_keeper_persistence_preparation_defers_only_failed_lane () =
-  with_eio_env
-  @@ fun env ->
-  let base_path = temp_dir "keeper-persistence-lane-fence-" in
-  Fun.protect
-    ~finally:(fun () ->
-      Keeper_chat_queue.For_testing.reset ();
-      Keeper_persistence_admission.For_testing.clear ();
-      rm_rf base_path)
-    (fun () ->
-       Keeper_chat_queue.For_testing.reset ();
-       ignore (Keeper_chat_queue.configure_persistence ~base_path);
-       let message : Keeper_chat_queue.queued_message =
-         { content = "lane-a"
-         ; user_blocks = []
-         ; attachments = []
-         ; timestamp = 1.0
-         ; source = Dashboard
-         }
-       in
-       (match Keeper_chat_queue.enqueue ~keeper_name:"lane-a" message with
-        | Ok _ -> ()
-        | Error error ->
-          Alcotest.failf
-            "failed to seed queue snapshot: %s"
-            (Keeper_chat_queue.mutation_error_to_string error));
-       let queue_path =
-         match
-           Keeper_chat_queue.For_testing.snapshot_path
-             ~base_path
-             ~keeper_name:"lane-a"
-         with
-         | Ok path -> path
-         | Error reason -> Alcotest.fail reason
-       in
-       Fs_compat.save_file queue_path "{corrupt";
-       Keeper_chat_queue.For_testing.reset ();
-       let lane_a_request = "kmsg_lane_a_0_0" in
-       let lane_b_request = "kmsg_lane_b_0_0" in
-       write_request_record
-         ~location:Active_record
-         ~keeper_name:"lane-a"
-         ~base_path
-         ~request_id:lane_a_request
-         ~status:"running"
-         ~status_fields:[]
-         ();
-       write_request_record
-         ~location:Active_record
-         ~keeper_name:"lane-b"
-         ~base_path
-         ~request_id:lane_b_request
-         ~status:"running"
-         ~status_fields:[]
-         ();
-       let prepared =
-         match
-           Server_bootstrap_loops.prepare_keeper_persistence
-             ~config:(Workspace.default_config base_path)
-         with
-         | Ok prepared -> prepared
-         | Error error ->
-           Alcotest.failf
-             "lane-local queue failure blocked every keeper: %s"
-             (Server_bootstrap_loops.keeper_persistence_prepare_error_to_string
-                error)
-       in
-       let report =
-         Server_bootstrap_loops.keeper_persistence_report prepared
-       in
-       Alcotest.(check (list string))
-         "only the corrupt keeper is fenced"
-         [ "lane-a" ]
-         report.blocked_keeper_names;
-       Alcotest.(check int) "failed lane request deferred" 1
-         report.requests.deferred;
-       Alcotest.(check int) "healthy lane request recovered" 1
-         report.requests.lost;
-       (match
-          Server_bootstrap_loops.claim_prepared_keeper_persistence
-            ~config:(Workspace.default_config base_path)
-            prepared
-        with
-        | Ok _ -> ()
-        | Error _ -> Alcotest.fail "lane recovery snapshot could not be claimed");
-       Alcotest.(check bool) "failed lane admission is fenced" true
-         (Keeper_persistence_admission.is_blocked
-            ~base_path
-            ~keeper_name:"lane-a");
-       Alcotest.(check bool) "healthy lane admission remains open" false
-         (Keeper_persistence_admission.is_blocked
-            ~base_path
-            ~keeper_name:"lane-b");
-       Eio.Switch.run (fun sw ->
-         let config = Workspace.default_config base_path in
-         let ctx : _ Keeper_types_profile.context =
-           { config
-           ; agent_name = caller
-           ; sw
-           ; clock = Eio.Stdenv.clock env
-           ; proc_mgr = None
-           ; net = None
-           }
-         in
-         let args =
-           `Assoc
-             [ "name", `String "lane-a"
-             ; "message", `String "must remain fenced"
-             ]
-         in
-         Alcotest.(check bool) "serialized turn entry is fenced" false
-           (Tool_result.is_success (Keeper_turn.handle_keeper_msg ctx args));
-         (match Keeper_turn.handle_keeper_msg_if_free ctx args with
-          | `Ran result ->
-            Alcotest.(check bool) "if-free turn entry is fenced" false
-              (Tool_result.is_success result)
-          | `Busy _ -> Alcotest.fail "persistence fence was misreported as busy");
-         let worker_ran = Atomic.make false in
-         (match
-            Keeper_msg_async.submit
-              ~background_sw:sw
-              ~base_path
-              ~caller
-              ~keeper_name:"lane-a"
-              ~f:(fun _request_sw ->
-                Atomic.set worker_ran true;
-                tr_ok "{}")
-              ()
-          with
-          | Error (Keeper_msg_async.Submit_admission_blocked _) -> ()
-          | Error error ->
-            Alcotest.failf
-              "async fence returned the wrong error: %s"
-              (Keeper_msg_async.submit_error_to_json error
-               |> Yojson.Safe.to_string)
-          | Ok outcome ->
-            Alcotest.failf
-              "async submission bypassed the persistence fence: %s"
-              (Keeper_msg_async.submit_outcome_to_json outcome
-               |> Yojson.Safe.to_string));
-         Alcotest.(check bool) "fenced async worker was not started" false
-           (Atomic.get worker_ran));
-       (match
-          Keeper_msg_async.For_testing.load_record
-            ~base_path
-            ~request_id:lane_a_request
-        with
-        | Keeper_msg_async.Found { status = Running; _ } -> ()
-        | _ -> Alcotest.fail "failed lane request did not remain active");
-       match
-         Keeper_msg_async.For_testing.load_record
-           ~base_path
-           ~request_id:lane_b_request
-       with
-       | Keeper_msg_async.Found { status = Lost _; _ } -> ()
-       | _ -> Alcotest.fail "healthy lane request did not recover to Lost")
-;;
 
 let test_keeper_persistence_claim_is_latest_and_one_shot () =
   with_eio_env
@@ -2315,7 +1901,6 @@ let test_keeper_persistence_claim_is_latest_and_one_shot () =
   Fun.protect
     ~finally:(fun () ->
       Keeper_chat_queue.For_testing.reset ();
-      Keeper_persistence_admission.For_testing.clear ();
       rm_rf base_a;
       rm_rf base_b)
     (fun () ->
@@ -2360,6 +1945,49 @@ let test_keeper_persistence_claim_is_latest_and_one_shot () =
        with
        | Error Server_bootstrap_loops.Claim_superseded -> ()
        | _ -> Alcotest.fail "superseded preparation became claimable again")
+;;
+
+let test_keeper_msg_async_loads_v2_done_without_typed_data () =
+  with_eio_env
+  @@ fun _env ->
+  let base_path = temp_dir "keeper-msg-load-v2-" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+       let request_id = "kmsg_v2_done_0_0" in
+       let body = {|{"legacy":"opaque"}|} in
+       write_disk_record
+         ~base_path
+         ~request_id
+         (Yojson.Safe.to_string
+            (`Assoc
+                [ "schema_version", `Int 2
+                ; "request_id", `String request_id
+                ; "keeper_name", `String "alpha"
+                ; "base_path", `String (Fs_compat.realpath base_path)
+                ; "submitted_by", `String caller
+                ; "status", `String "done"
+                ; "submitted_at", `Float 1.0
+                ; "completed_at", `Float 2.0
+                ; "ok", `Bool true
+                ; "body", `String body
+                ]));
+       match Keeper_msg_async.poll ~base_path ~caller request_id with
+       | Keeper_msg_async.Found
+           ({ status = Done { ok = true; body = loaded; data = None }; _ } as entry) ->
+         Alcotest.(check string) "v2 body stays opaque" body loaded;
+         Alcotest.(check string)
+           "v2 poll projection stays a string"
+           body
+           Yojson.Safe.Util.(Keeper_msg_async.entry_to_json entry |> member "result" |> to_string)
+       | Keeper_msg_async.Found entry ->
+         Alcotest.failf
+           "expected recovered v2 done, got %s"
+           (Keeper_msg_async.status_to_string entry.status)
+       | Keeper_msg_async.Unreadable reason ->
+         Alcotest.failf "expected v2 compatibility, got unreadable: %s" reason
+       | Keeper_msg_async.Absent -> Alcotest.fail "expected v2 record"
+       | Keeper_msg_async.Rejected _ -> Alcotest.fail "expected v2 owner access")
 ;;
 
 let test_keeper_msg_async_load_record_absent_id () =
@@ -2639,10 +2267,6 @@ let () =
             `Quick
             test_keeper_msg_async_initial_rollback_failure_preserves_request_id
         ; test_case
-            "reconciliation fences only ambiguous lane"
-            `Quick
-            test_keeper_msg_async_reconciliation_fences_only_ambiguous_lane
-        ; test_case
             "running double write failure remains terminal in memory"
             `Quick
             test_keeper_msg_async_running_double_write_failure_is_terminal_in_memory
@@ -2711,10 +2335,6 @@ let () =
             `Quick
             test_keeper_msg_async_integrity_ambiguity_projects_exact_poll_error
         ; test_case
-            "absent integrity fences lane and keeps request id reserved"
-            `Quick
-            test_keeper_msg_async_absent_integrity_keeps_request_id_reserved
-        ; test_case
             "active legacy ambiguity is rejected before mutation"
             `Quick
             test_keeper_msg_async_rejects_active_legacy_ambiguity_before_mutation
@@ -2747,10 +2367,6 @@ let () =
             `Quick
             test_keeper_persistence_preparation_preserves_unattributed_request_record
         ; test_case
-            "persistence preparation defers only failed lane"
-            `Quick
-            test_keeper_persistence_preparation_defers_only_failed_lane
-        ; test_case
             "persistence claim is latest and one-shot"
             `Quick
             test_keeper_persistence_claim_is_latest_and_one_shot
@@ -2762,6 +2378,10 @@ let () =
             "load_record absent id is Absent"
             `Quick
             test_keeper_msg_async_load_record_absent_id
+        ; test_case
+            "v2 terminal record preserves opaque body"
+            `Quick
+            test_keeper_msg_async_loads_v2_done_without_typed_data
         ; test_case
             "load_record corrupt JSON is Unreadable"
             `Quick

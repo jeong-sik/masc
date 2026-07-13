@@ -1,21 +1,9 @@
-// MASC Dashboard — Misc projections: excuse patterns / memory subsystems /
+// MASC Dashboard — Misc projections: memory subsystems /
 // keeper memory health / verification requests / TLA specs+TLC results / audit.
 // Extracted from dashboard.ts (domain split). Public symbols re-exported
 // from dashboard.ts so existing consumers (`from './api/dashboard'`) are unchanged.
 
 import { get, post, type AbortableRequestOptions } from './core'
-
-// --- Excuse Patterns ---
-
-export type ExcusePattern = [string, string]
-
-export function fetchExcusePatterns(): Promise<ExcusePattern[]> {
-  return get<ExcusePattern[]>('/api/v1/dashboard/config/excuse-patterns')
-}
-
-export function updateExcusePatterns(patterns: ExcusePattern[]): Promise<{ ok: boolean }> {
-  return post<{ ok: boolean }>('/api/v1/dashboard/config/excuse-patterns', patterns)
-}
 
 // --- Memory Subsystems ---
 
@@ -60,44 +48,6 @@ export interface MemorySubsystemsMemoryEntryError {
   error_class: string
 }
 
-export interface MemorySubsystemsUserModelItem {
-  keeper: string
-  kind: 'preference' | 'constraint' | string
-  claim: string
-  source_ref: string
-  source_trace_id: string
-  source_turn: number
-  first_seen: number
-  last_verified_at: number | null
-  observed_by: string[]
-}
-
-export interface MemorySubsystemsUserModelError {
-  keeper: string
-  error: string
-}
-
-export interface MemorySubsystemsUserModelPrompt {
-  enabled: boolean
-  block_id: string
-  injection: string
-  runtime_hook: string
-  producer?: string
-}
-
-export interface MemorySubsystemsDraftSkillCandidate {
-  id: string
-  agent_name: string
-  source_kind: string
-  source_ref: string
-  promotion_state: string
-  dir: string
-  json_path: string
-  toml_path: string
-  skill_md_path: string
-  created_at: number | null
-}
-
 export interface MemorySubsystemsDelegationRequest {
   id: string
   requester: string
@@ -134,25 +84,6 @@ export interface MemorySubsystemsResponse {
      *  the corresponding rows are absent from `items`; the rest of
      *  `items` is still trustworthy. */
     errors?: MemorySubsystemsMemoryEntryError[]
-  }
-  user_model?: {
-    schema: string
-    source: string
-    prompt?: MemorySubsystemsUserModelPrompt
-    total: number
-    filtered: number
-    shown: number
-    limit: number
-    items: MemorySubsystemsUserModelItem[]
-    errors?: MemorySubsystemsUserModelError[]
-  }
-  draft_skill_candidates?: {
-    total: number
-    shown: number
-    limit: number
-    index_path: string
-    items: MemorySubsystemsDraftSkillCandidate[]
-    error?: string | null
   }
   delegation_requests?: {
     total: number
@@ -199,7 +130,6 @@ export function fetchMemorySubsystems(
 export type KeeperMemoryHealthAlertCode =
   | 'ttl_expired_on_disk'
   | 'near_duplicate'
-  | 'events_to_facts_ratio_high'
   | 'provider_slot_busy'
 
 export type KeeperMemoryHealthAlertSeverity = 'warn'
@@ -207,7 +137,6 @@ export type KeeperMemoryHealthAlertSeverity = 'warn'
 export type KeeperMemoryHealthAlertTarget =
   | 'ttl_expired_on_disk'
   | 'near_duplicate'
-  | 'events_to_facts_ratio'
   | 'provider_slot_busy'
 
 export interface KeeperMemoryHealthAlert {
@@ -251,12 +180,10 @@ export interface KeeperMemoryHealthResponse {
     keepers_with_alerts: number
     ttl_expired_keepers: number
     near_duplicate_keepers: number
-    high_event_ratio_keepers: number
     provider_slot_busy_keepers: number
     thresholds: {
       ttl_expired_on_disk: number
       near_duplicate: number
-      events_to_facts_ratio: number
       provider_slot_busy: number
     }
   }

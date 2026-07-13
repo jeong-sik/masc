@@ -256,16 +256,6 @@ let cleanup_reason_to_json = function
     `Assoc [ "kind", `String "operator_stop_remove_meta" ]
   | Dead_tombstone_cleanup ->
     `Assoc [ "kind", `String "dead_tombstone_cleanup" ]
-  | Stale_paused_prune context ->
-    `Assoc
-      [ "kind", `String "stale_paused_prune"
-      ; "meta_version", `Int context.meta_version
-      ; "last_updated", `String context.last_updated
-      ; ( "latched_reason"
-        , match context.latched_reason with
-          | None -> `Null
-          | Some reason -> Keeper_latched_reason.Stable.to_yojson reason )
-      ]
   | Dashboard_keeper_purge context ->
     `Assoc
       [ "kind", `String "dashboard_keeper_purge"
@@ -539,13 +529,12 @@ let wire_schema_of_version = function
 
 let completion_action_supported_by_wire_schema wire_schema action =
   match wire_schema, action with
-  | Current_schema,
-    (Dead_tombstone_reaped | Paused_meta_pruned | Dashboard_keeper_purged) ->
+  | Current_schema, (Dead_tombstone_reaped | Dashboard_keeper_purged) ->
     true
-  | Lifecycle_schema_v4, (Dead_tombstone_reaped | Paused_meta_pruned) -> true
+  | Lifecycle_schema_v4, Dead_tombstone_reaped -> true
   | Shutdown_schema_v3, Dead_tombstone_reaped -> true
   | Lifecycle_schema_v4, Dashboard_keeper_purged
-  | Shutdown_schema_v3, (Paused_meta_pruned | Dashboard_keeper_purged) -> false
+  | Shutdown_schema_v3, Dashboard_keeper_purged -> false
 ;;
 
 let validate_completion_receipt_wire_schema wire_schema = function
@@ -681,19 +670,6 @@ let cleanup_reason_of_json json =
   | "operator_stop_retain_meta" -> Ok Operator_stop_retain_meta
   | "operator_stop_remove_meta" -> Ok Operator_stop_remove_meta
   | "dead_tombstone_cleanup" -> Ok Dead_tombstone_cleanup
-  | "stale_paused_prune" ->
-    let* meta_version = int "meta_version" json in
-    let* last_updated = string "last_updated" json in
-    let* latched_reason =
-      match assoc "latched_reason" json with
-      | Ok `Null -> Ok None
-      | Ok reason_json ->
-        Keeper_latched_reason.Stable.of_yojson reason_json
-        |> Result.map Option.some
-        |> Result.map_error (fun detail -> Decode_error detail)
-      | Error _ as error -> error
-    in
-    Ok (Stale_paused_prune { meta_version; last_updated; latched_reason })
   | "dashboard_keeper_purge" ->
     let* requested_name = string "requested_name" json in
     let* agent_name = string "agent_name" json in
@@ -728,8 +704,7 @@ let cleanup_reason_of_versioned_json ~wire_schema cleanup_json =
     (match reason with
      | Operator_stop_retain_meta
      | Operator_stop_remove_meta
-     | Dead_tombstone_cleanup
-     | Stale_paused_prune _ -> Ok reason
+     | Dead_tombstone_cleanup -> Ok reason
      | Dashboard_keeper_purge _ ->
        Error
          (Decode_error

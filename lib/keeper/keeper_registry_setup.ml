@@ -12,7 +12,6 @@ include Keeper_registry_types
 let registry : registry_entry StringMap.t Atomic.t = Atomic.make StringMap.empty
 let running_count_atomic = Atomic.make 0
 module Orphan_drops = Keeper_registry_orphan_drops
-module Spawn_slots = Keeper_registry_spawn_slots
 module Error_tracking = Keeper_registry_error_tracking
 
 let registry_entry_validation_error_label = function
@@ -50,11 +49,11 @@ let registry_entry_validation_error_to_string = function
 let registry_key_parts = Keeper_registry_types.registry_key_parts
 let canonical_base_path_exn = Keeper_registry_types.canonical_base_path_exn
 
-let has_blank_tool_name names =
+let has_blank_string names =
   List.exists (fun name -> String.equal (String.trim name) "") names
 ;;
 
-let has_duplicate_tool_name names =
+let has_duplicate_string names =
   let rec loop seen = function
     | [] -> false
     | name :: rest ->
@@ -68,10 +67,10 @@ let has_duplicate_tool_name names =
   loop Set_util.StringSet.empty names
 ;;
 
-let validate_tool_name_list field names =
-  if has_blank_tool_name names
+let validate_string_list field names =
+  if has_blank_string names
   then Error (Meta_validation_failed { reason = field ^ " contains blank entries" })
-  else if has_duplicate_tool_name names
+  else if has_duplicate_string names
   then Error (Meta_validation_failed { reason = field ^ " contains duplicate entries" })
   else Ok ()
 ;;
@@ -85,7 +84,7 @@ let validate_runtime_fields (runtime : agent_runtime_state) =
   then Error (Required_field_missing { field = "usage.total_turns" })
   else if runtime.usage.total_tokens < 0
   then Error (Required_field_missing { field = "usage.total_tokens" })
-  else validate_tool_name_list "trace_history" runtime.trace_history
+  else validate_string_list "trace_history" runtime.trace_history
 ;;
 
 let validate_registry_entry ~base_path name (entry : registry_entry) =
@@ -100,12 +99,7 @@ let validate_registry_entry ~base_path name (entry : registry_entry) =
   else if String.equal (String.trim entry.meta.agent_name) ""
   then Error (Meta_validation_failed { reason = "meta.agent_name is empty" })
   else
-    match validate_runtime_fields entry.meta.runtime with
-    | Error _ as err -> err
-    | Ok () ->
-      (match validate_tool_name_list "tool_access" entry.meta.tool_access with
-       | Error _ as err -> err
-       | Ok () -> validate_tool_name_list "tool_denylist" entry.meta.tool_denylist)
+    validate_runtime_fields entry.meta.runtime
 ;;
 
 let validate_registry_meta ~base_path:_ name (meta : keeper_meta) =
@@ -491,7 +485,7 @@ let register_with_state_result
     ; last_error = None
     ; last_failure_reason = None
     ; turn_consecutive_failures = 0
-    ; livelock_state = Atomic.make None
+    ; turn_attempt_state = Atomic.make None
     ; current_turn_switch = Atomic.make None
     ; board_wakeups = StringMap.empty
     ; board_cursor_ts = 0.0
@@ -587,7 +581,6 @@ let register ~base_path name meta =
   let conditions =
     { Keeper_state_machine.default_conditions with
       fiber_alive = true
-    ; restart_budget_remaining = true
     }
   in
   let phase = Keeper_state_machine.derive_phase conditions in
@@ -598,7 +591,6 @@ let register_offline ~base_path name meta =
   let conditions =
     { Keeper_state_machine.default_conditions with
       launch_pending = true
-    ; restart_budget_remaining = true
     }
   in
   let phase = Keeper_state_machine.derive_phase conditions in
@@ -609,7 +601,6 @@ let register_offline_if_admitted ~base_path name meta =
   let conditions =
     { Keeper_state_machine.default_conditions with
       launch_pending = true
-    ; restart_budget_remaining = true
     }
   in
   let phase = Keeper_state_machine.derive_phase conditions in
@@ -626,7 +617,6 @@ let register_offline_if_admitted_for_lifecycle token ~base_path name meta =
   let conditions =
     { Keeper_state_machine.default_conditions with
       launch_pending = true
-    ; restart_budget_remaining = true
     }
   in
   let phase = Keeper_state_machine.derive_phase conditions in
@@ -640,9 +630,7 @@ let register_offline_if_admitted_for_lifecycle token ~base_path name meta =
     ~conditions
 ;;
 
-(** R-A-6.a — refuse to revive a keeper whose restart_budget was previously exhausted.  Pairs with TLA+ §S3 BudgetNeverRevives:  []( ~restart_budget_remaining => []( ~restart_budget_remaining ))  Witho... *)
 type register_restarting_error =
-  | Budget_already_exhausted of { name : string }
   | Restart_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
   | Restart_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
   | Restart_event_queue_unavailable of
@@ -665,8 +653,7 @@ let register_restarting ~base_path name meta
   | Ok () ->
   let conditions =
     { Keeper_state_machine.default_conditions with
-      restart_budget_remaining = true
-    ; backoff_elapsed = true
+      restart_requested = true
     }
   in
   let phase = Keeper_state_machine.derive_phase conditions in
@@ -705,7 +692,7 @@ let register_restarting ~base_path name meta
     ; last_error = None
     ; last_failure_reason = None
     ; turn_consecutive_failures = 0
-    ; livelock_state = Atomic.make None
+    ; turn_attempt_state = Atomic.make None
     ; current_turn_switch = Atomic.make None
     ; board_wakeups = StringMap.empty
     ; board_cursor_ts = 0.0
@@ -722,17 +709,12 @@ let register_restarting ~base_path name meta
     ; compaction_stage = Packed Compaction_accumulating
     }
   in
-(* Guard + write in a single CAS loop so a concurrent budget-exhaust update between our read and write cannot be overwritten back to [restart_budget_remaining = true].  Without this loop, two threads ... *)
   let rec loop () =
     let current = Atomic.get registry in
-    match StringMap.find_opt key current with
-    | Some prior when not prior.conditions.restart_budget_remaining ->
-      Error (Budget_already_exhausted { name })
-    | _ ->
-      let updated = StringMap.add key new_entry current in
-      if Atomic.compare_and_set registry current updated
-      then Ok new_entry
-      else loop ()
+    let updated = StringMap.add key new_entry current in
+    if Atomic.compare_and_set registry current updated
+    then Ok new_entry
+    else loop ()
   in
   let guarded_loop () =
     Keeper_lifecycle_reservation.with_key_lock ~base_path ~keeper_name:name (fun () ->
@@ -1022,58 +1004,6 @@ let mark_dead ~base_path name ~at =
     ~update_entry:update_entry_unit
 ;;
 
-let mark_dead_exact (expected : registry_entry) ~at =
-  let base_path = expected.base_path in
-  let name = expected.name in
-  let key = registry_key ~base_path name in
-  let expected_lane = Keeper_lane.id expected.lane in
-  let rec loop () =
-    let current = Atomic.get registry in
-    match StringMap.find_opt key current with
-    | None -> Exact_update_missing
-    | Some entry
-      when not (Keeper_lane.Id.equal expected_lane (Keeper_lane.id entry.lane)) ->
-      Exact_update_replaced
-    | Some entry ->
-      let replacement =
-        if entry.phase = Dead
-        then entry
-        else
-          let conditions =
-            { Keeper_state_machine.default_conditions with
-              launch_pending = false
-            ; fiber_alive = false
-            ; restart_budget_remaining = false
-            }
-          in
-          { entry with
-            dead_since_ts = Some at
-          ; phase = Keeper_state_machine.derive_phase conditions
-          ; conditions
-          }
-      in
-      (match validate_registry_entry ~base_path name replacement with
-       | Error error -> Exact_update_invalid error
-       | Ok () ->
-         let updated = StringMap.add key replacement current in
-         if Atomic.compare_and_set registry current updated
-         then (
-           if entry.phase = Running then decr_running_count_clamped ();
-           Otel_metric_store.inc_counter
-             Keeper_metrics.(to_string LifecycleTransitions)
-             ~labels:
-               [ "keeper", name
-               ; "from_phase", Keeper_state_machine.phase_to_string entry.phase
-               ; "to_phase", Keeper_state_machine.phase_to_string replacement.phase
-               ]
-             ();
-           Log.Keeper.error "registry: marked exact keeper lane dead name=%s at=%.0f" name at;
-           Exact_updated)
-         else loop ())
-  in
-  loop ()
-;;
-
 let record_restart ~base_path name =
   Error_tracking.record_restart ~base_path name ~update_entry:update_entry_unit
 ;;
@@ -1151,13 +1081,8 @@ let record_turn_progress ~base_path name ~event_kind =
   ()
 ;;
 
-(* RFC-0197 (P1-4a): write-through mirror of the turn event bus
-   [pending_tool_count] into the live [turn_observation]. The supervisor sweep
-   only reads [current_turn_observation] (the event bus is a per-turn call-stack
-   value, not globally reachable), so the tool-in-flight count is surfaced here
-   for [Keeper_supervisor.assess_in_turn_progress] to exclude active tool work
-   from the no-progress window. Does not touch [last_progress_at]: a tool
-   running silently is "active tool execution", not progress. A [None]
+(* Write-through observation of the turn event bus [pending_tool_count] in the
+   live [turn_observation]. It has no timeout or lifecycle authority. A [None]
    [current_turn_observation] (turn already ended) is a no-op, so a late
    background-drain callback after [mark_turn_finished] cannot leak. *)
 let record_turn_tool_inflight ~base_path name ~count =

@@ -5,15 +5,13 @@ module UM = Masc.Keeper_unified_metrics
 
 let base_observation : WO.world_observation =
   {
-    pending_mentions = [];
+    pending_messages = [];
     pending_board_events = [];
-    pending_scope_messages = [];
     idle_seconds = 0;
     active_goals = [];
     context_ratio = lazy 0.0;
     unclaimed_task_count = 0;
     claimable_task_count = 0;
-    provider_capacity_blocked_task_count = 0;
     failed_task_count = 0;
     pending_verification_count = 0;
     scheduled_automation = WO.empty_scheduled_automation_observation;
@@ -38,13 +36,11 @@ let sample_board_event : WO.pending_board_event =
     new_external_since = 0;
     latest_external_author = None;
     latest_external_preview = None;
-    provenance = WO.Human_direct;
   }
 
 let scheduled_automation_observation : WO.scheduled_automation_observation =
-  { active_count = 2
+  { active_count = 1
   ; due_ready_count = 1
-  ; blocked_approval_count = 1
   ; next_due_at = Some 200.0
   ; items =
       [ { schedule_id = "sched-ready"
@@ -52,22 +48,10 @@ let scheduled_automation_observation : WO.scheduled_automation_observation =
         ; status = "due"
         ; payload_kind = Some "masc.board_post"
         ; recurrence_summary = "daily 09:00:00 Asia/Seoul"
-        ; risk_class = "read_only"
         ; due_at = 200.0
         ; keeper_next_tool = Some "masc_schedule_get"
         ; keeper_next_action =
             "Inspect the schedule if needed and monitor dispatch; do not create a duplicate schedule."
-        }
-      ; { schedule_id = "sched-blocked"
-        ; action = "approve_or_reject"
-        ; status = "pending_approval"
-        ; payload_kind = Some "masc.board_post"
-        ; recurrence_summary = "one_shot"
-        ; risk_class = "workspace_write"
-        ; due_at = 180.0
-        ; keeper_next_tool = Some "masc_schedule_get"
-        ; keeper_next_action =
-            "Inspect details, then wait for the dashboard operator approval or rejection action to resolve this schedule."
         }
       ]
   }
@@ -141,38 +125,19 @@ let test_task_verify_affordance_without_meta () =
   check bool "task_verify present without meta" true
     (List.mem "task_verify" affordances)
 
-let test_board_curation_affordance_requires_multi_event_window () =
-  let second_board_event =
-    {
-      sample_board_event with
-      post_id = "board-post-2";
-      title = "Follow-up";
-      preview = "Another board item needs routing.";
-    }
-  in
+let test_board_activity_exposes_curation_affordance_without_threshold () =
   let obs =
-    {
-      base_observation with
-      pending_board_events = [ sample_board_event; second_board_event ];
-    }
+    { base_observation with pending_board_events = [ sample_board_event ] }
   in
   let affordances = UM.observed_affordances_of_observation obs in
   check bool "board_curation present" true
     (List.mem "board_curation" affordances)
 
-let test_single_board_event_skips_curation_gate () =
-  let obs =
-    { base_observation with pending_board_events = [ sample_board_event ] }
-  in
-  let affordances = UM.observed_affordances_of_observation obs in
-  check bool "board_curation absent" false
+let test_no_board_activity_has_no_curation_affordance () =
+  let affordances = UM.observed_affordances_of_observation base_observation in
+  check bool "board_curation absent without Board activity" false
     (List.mem "board_curation" affordances)
 
-(* RFC-0248 PR-2 behavioral proof: the trust boundary reaches the assembled
-   prompt. A fleet-authored board event (peer/self/automation) renders ONLY
-   inside the observational-data envelope; a human-authored event renders as
-   trusted instruction without it. This closes the test gap left since PR-1,
-   whose provenance tests covered classification only, not prompt rendering. *)
 let contains_sub sub s =
   let sub_len = String.length sub in
   let s_len = String.length s in
@@ -184,7 +149,7 @@ let contains_sub sub s =
   if sub_len = 0 then true else aux 0
 ;;
 
-let test_quarantined_board_event_wraps_in_envelope () =
+let test_board_authors_share_one_neutral_observation_boundary () =
   Masc_test_deps.init_keeper_tool_registry ();
   let peer_event =
     {
@@ -192,12 +157,12 @@ let test_quarantined_board_event_wraps_in_envelope () =
       post_id = "peer-post-1";
       author = "keeper-ramarama-agent";
       preview = "I assert the build is green.";
-      provenance = WO.Peer_keeper;
+      post_kind = Masc.Board.Automation_post;
+      explicit_mention = true;
+      matched_targets = [ "test-keeper" ];
     }
   in
-  let human_event =
-    { sample_board_event with post_id = "human-1"; provenance = WO.Human_direct }
-  in
+  let human_event = { sample_board_event with post_id = "human-1" } in
   let obs_peer = { base_observation with pending_board_events = [ peer_event ] } in
   let obs_human = { base_observation with pending_board_events = [ human_event ] } in
   let _, peer_msg =
@@ -208,10 +173,26 @@ let test_quarantined_board_event_wraps_in_envelope () =
     Masc.Keeper_unified_prompt.build_prompt ~meta:minimal_meta ~base_path:"/tmp"
       ~observation:obs_human ()
   in
-  check bool "peer (fleet) event wrapped in observational-data envelope" true
-    (contains_sub "observational-data" peer_msg);
-  check bool "human event NOT wrapped in envelope (trusted instruction)" false
-    (contains_sub "observational-data" human_msg)
+  let neutral_boundary = "Rows below are Board context." in
+  check bool "automation event uses neutral boundary" true
+    (contains_sub neutral_boundary peer_msg);
+  check bool "human event uses the same neutral boundary" true
+    (contains_sub neutral_boundary human_msg);
+  check bool "metadata does not create a local authority ranking" true
+    (contains_sub "not a local authority ranking" peer_msg
+     && contains_sub "not a local authority ranking" human_msg);
+  check bool "configured model judges content and context" true
+    (contains_sub "Judge relevance and response from the content" peer_msg
+     && contains_sub "Judge relevance and response from the content" human_msg);
+  check bool "external effects stay behind the Gate" true
+    (contains_sub "external effects cross the Gate" peer_msg
+     && contains_sub "external effects cross the Gate" human_msg);
+  check bool "automation post kind remains context" true
+    (contains_sub "post_kind=automation" peer_msg);
+  check bool "human post kind remains context" true
+    (contains_sub "post_kind=direct" human_msg);
+  check bool "exact mention remains context" true
+    (contains_sub "[mentions test-keeper]" peer_msg)
 ;;
 
 let test_board_reaction_event_renders_reaction_context () =
@@ -288,21 +269,6 @@ let test_task_claim_present_for_claimable_backlog () =
   check bool "task_claim present for matched backlog" true
     (List.mem "task_claim" affordances)
 
-let test_task_claim_suppressed_for_provider_blocked_backlog () =
-  let obs =
-    {
-      base_observation with
-      unclaimed_task_count = 3;
-      claimable_task_count = 1;
-      provider_capacity_blocked_task_count = 1;
-    }
-  in
-  let affordances = UM.observed_affordances_of_observation obs in
-  check bool "task_claim absent while provider capacity blocks work" false
-    (List.mem "task_claim" affordances);
-  check bool "provider capacity affordance present" true
-    (List.mem "provider_capacity_blocked" affordances)
-
 let test_backlog_trigger_split () =
   let obs =
     { base_observation with unclaimed_task_count = 3; claimable_task_count = 1 }
@@ -322,23 +288,6 @@ let test_unclaimable_backlog_is_not_a_claim_trigger () =
     (List.mem "new_unclaimed_task" triggers);
   check bool "unclaimable backlog is not a claimable task trigger" false
     (List.mem "claimable_task" triggers)
-
-let test_provider_capacity_blocked_trigger () =
-  let obs =
-    {
-      base_observation with
-      unclaimed_task_count = 3;
-      claimable_task_count = 1;
-      provider_capacity_blocked_task_count = 1;
-    }
-  in
-  let triggers = UM.observed_triggers_of_observation obs in
-  check bool "provider-blocked backlog is not a new task trigger" false
-    (List.mem "new_unclaimed_task" triggers);
-  check bool "provider-blocked backlog is not a claimable task trigger" false
-    (List.mem "claimable_task" triggers);
-  check bool "provider capacity trigger is explicit" true
-    (List.mem "provider_capacity_blocked_backlog" triggers)
 
 let test_pending_verification_trigger_for_keeper () =
   let meta = { minimal_meta with mention_targets = [ "scholar" ] } in
@@ -361,13 +310,9 @@ let test_scheduled_automation_triggers_and_affordances () =
   let triggers = UM.observed_triggers_of_observation obs in
   check bool "due-ready schedule trigger present" true
     (List.mem "scheduled_automation_due_ready" triggers);
-  check bool "blocked schedule trigger present" true
-    (List.mem "scheduled_automation_blocked_approval" triggers);
   let affordances = UM.observed_affordances_of_observation obs in
   check bool "dispatch monitor affordance present" true
-    (List.mem "schedule_dispatch_monitor" affordances);
-  check bool "grant followup affordance present" true
-    (List.mem "schedule_grant_followup" affordances)
+    (List.mem "schedule_dispatch_monitor" affordances)
 
 let test_scheduled_automation_prompt_section () =
   Masc_test_deps.init_keeper_tool_registry ();
@@ -383,14 +328,10 @@ let test_scheduled_automation_prompt_section () =
     (contains_sub "### Scheduled Automation" user_msg);
   check bool "prompt includes ready schedule id" true
     (contains_sub "schedule_id=sched-ready" user_msg);
-  check bool "prompt includes blocked action" true
-    (contains_sub "action=approve_or_reject" user_msg);
   check bool "prompt points to schedule detail tool" true
     (contains_sub "masc_schedule_get" user_msg);
   check bool "prompt includes ready next action" true
-    (contains_sub "do not create a duplicate schedule" user_msg);
-  check bool "prompt includes approval next action" true
-    (contains_sub "dashboard operator approval or rejection" user_msg)
+    (contains_sub "do not create a duplicate schedule" user_msg)
 
 let () =
   run "keeper_unified_verification_surface"
@@ -403,13 +344,13 @@ let () =
             `Quick test_task_verify_affordance_for_verifier_tag;
           test_case "affordance: no meta keeps legacy surface-to-all" `Quick
             test_task_verify_affordance_without_meta;
-          test_case "affordance: board curation requires multi-event window"
-            `Quick test_board_curation_affordance_requires_multi_event_window;
-          test_case "affordance: single board event skips curation gate" `Quick
-            test_single_board_event_skips_curation_gate;
+          test_case "affordance: Board activity exposes curation without threshold"
+            `Quick test_board_activity_exposes_curation_affordance_without_threshold;
+          test_case "affordance: no Board activity has no curation affordance" `Quick
+            test_no_board_activity_has_no_curation_affordance;
           test_case
-            "trust: quarantined board event wraps in envelope (RFC-0248 PR-2)"
-            `Quick test_quarantined_board_event_wraps_in_envelope;
+            "prompt: all Board authors share one neutral observation boundary"
+            `Quick test_board_authors_share_one_neutral_observation_boundary;
           test_case
             "prompt: board reaction event renders reaction context"
             `Quick test_board_reaction_event_renders_reaction_context;
@@ -420,15 +361,10 @@ let () =
             test_task_claim_requires_matched_backlog;
           test_case "affordance: task claim present for claimable backlog" `Quick
             test_task_claim_present_for_claimable_backlog;
-          test_case
-            "affordance: provider block suppresses task claim"
-            `Quick test_task_claim_suppressed_for_provider_blocked_backlog;
           test_case "trigger: absolute and matched backlog split" `Quick
             test_backlog_trigger_split;
           test_case "trigger: unclaimable backlog is not claimable work" `Quick
             test_unclaimable_backlog_is_not_a_claim_trigger;
-          test_case "trigger: provider capacity blocked backlog" `Quick
-            test_provider_capacity_blocked_trigger;
           test_case "trigger: keeper sees pending_verification" `Quick
             test_pending_verification_trigger_for_keeper;
           test_case

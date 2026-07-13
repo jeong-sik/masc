@@ -19,17 +19,6 @@ include Keeper_turn_driver_helpers
 include Keeper_turn_driver_provider_attempt
 include Keeper_turn_driver_backpressure
 
-(* Composition root for the inverted runtime -> keeper-name-translation edge.
-   This facade already bridges keeper and runtime ([include Runtime_oas_runner]
-   above), and is in the startup link closure, so its top-level effect runs once
-   before any runtime tool dispatch. Register the two pure Keeper_identity
-   translators here; the runtime accessor stays fail-fast if this never ran. *)
-let () =
-  Runtime_oas_runner.set_keeper_name_xlat
-    { Runtime_oas_runner.keeper_agent_name = Keeper_identity.keeper_agent_name
-    ; keeper_name_from_agent_name = Keeper_identity.keeper_name_from_agent_name
-    }
-
 let release_client_capacity_quietly =
   Keeper_turn_driver_admission.release_client_capacity_quietly
 
@@ -157,31 +146,23 @@ let runtime_failed_decision ~idx ~runtime_id error =
       ("error_kind", `String (Oas_compat.error_kind error));
     ]
 
-let lane_retry_checkpoint
+let lane_should_retry
     ~is_last
+    ~allow_retry
     ~allow_accept_no_progress_retry
-    ~resume_checkpoint
-    ~checkpoint_after
     error =
-  if is_last then
-    None
+  if is_last || not allow_retry then
+    false
   else if Keeper_turn_driver_try_runtime.accept_no_progress_should_try_next error
   then
-    if allow_accept_no_progress_retry
-    then
-      Some
-        (Keeper_turn_driver_try_runtime.checkpoint_for_accept_rejected_retry
-           ~resume_checkpoint
-           ~checkpoint_after
-           error)
-    else None
+    allow_accept_no_progress_retry
   else
     match Keeper_turn_driver_try_runtime.sdk_error_to_http_error error with
-    | Some http_err when Runtime_attempt_fsm.should_try_next http_err ->
-      Some checkpoint_after
-    | _ -> None
+    | Some http_err -> Runtime_attempt_fsm.should_try_next http_err
+    | None -> false
 
 let attempt_runtime_candidates
+    ?(allow_retry = fun ~runtime_id:_ ~attempt:_ _error -> true)
     ?(allow_accept_no_progress_retry = fun ~runtime_id:_ ~attempt:_ _error ->
       true)
     ~runtime_id ~runtime_id_of
@@ -190,7 +171,7 @@ let attempt_runtime_candidates
        ?decision:Yojson.Safe.t ->
        Keeper_runtime_manifest.event_kind ->
        unit) ~run_attempt candidates =
-  let rec loop idx resume_checkpoint = function
+  let rec loop idx = function
     | [] ->
       Error
         (Agent_sdk.Error.Internal
@@ -203,7 +184,7 @@ let attempt_runtime_candidates
         ~decision:(runtime_attempt_decision ~idx ~runtime_id:attempt_runtime_id)
         Keeper_runtime_manifest.Runtime_routed;
       (match
-         run_attempt ?resume_checkpoint ~idx ~runtime_id:attempt_runtime_id candidate
+         run_attempt ~idx ~runtime_id:attempt_runtime_id candidate
        with
        | Ok value, _checkpoint_after ->
          emit_runtime_manifest
@@ -211,12 +192,18 @@ let attempt_runtime_candidates
            ~decision:(runtime_attempt_decision ~idx ~runtime_id:attempt_runtime_id)
            Keeper_runtime_manifest.Runtime_completed;
          Ok value
-       | Error error, checkpoint_after ->
+       | Error error, _checkpoint_after ->
          emit_runtime_manifest
            ~status:"failed"
            ~decision:(runtime_failed_decision ~idx ~runtime_id:attempt_runtime_id error)
            Keeper_runtime_manifest.Runtime_failed;
-         (match
+         if
+            let allow_retry =
+              allow_retry
+                ~runtime_id:attempt_runtime_id
+                ~attempt:idx
+                error
+            in
             let allow_accept_no_progress_retry =
               if
                 Keeper_turn_driver_try_runtime.accept_no_progress_should_try_next
@@ -228,50 +215,15 @@ let attempt_runtime_candidates
                   error
               else true
             in
-            lane_retry_checkpoint
+            lane_should_retry
               ~is_last
+              ~allow_retry
               ~allow_accept_no_progress_retry
-              ~resume_checkpoint
-              ~checkpoint_after
               error
-          with
-          | Some retry_checkpoint -> loop (idx + 1) retry_checkpoint rest
-          | None -> Error error))
+         then loop (idx + 1) rest
+         else Error error)
   in
-  loop 0 None candidates
-
-let elapsed_seconds_since started_at =
-  let ns =
-    Mtime.Span.to_uint64_ns (Mtime.span started_at (Mtime_clock.now ()))
-  in
-  Int64.to_float ns /. 1_000_000_000.
-
-let lane_accept_no_progress_retry_slot_available ~turn_start =
-  let elapsed_s = Float.max 0.0 (elapsed_seconds_since turn_start) in
-  let budget_s =
-    Env_config_keeper.KeeperRetryBackoff.degraded_retry_slot_phase_budget_sec
-  in
-  elapsed_s < budget_s
-
-let log_lane_accept_no_progress_retry_suppressed
-    ~keeper_name
-    ~runtime_id
-    ~attempt
-    ~turn_start
-    error =
-  let elapsed_s = Float.max 0.0 (elapsed_seconds_since turn_start) in
-  let budget_s =
-    Env_config_keeper.KeeperRetryBackoff.degraded_retry_slot_phase_budget_sec
-  in
-  Log.Keeper.warn
-    "%s: suppressing lane no-progress retry for runtime=%s attempt=%d \
-     elapsed=%.3fs budget=%.3fs error=%s"
-    keeper_name
-    runtime_id
-    attempt
-    elapsed_s
-    budget_s
-    (Agent_sdk.Error.to_string error)
+  loop 0 candidates
 
 let runtime_candidate_missing_error id =
   Agent_sdk.Error.Internal
@@ -384,7 +336,6 @@ let run_named
        fallback. *)
     ?max_tokens
     ?(accept = fun (_ : Agent_sdk_response.api_response) -> true)
-    ?guardrails
     ?hooks
     ?context_reducer
     ?raw_trace
@@ -402,6 +353,7 @@ let run_named
     ?context_window_tokens
     ?(oas_auto_context_overflow_retry = true)
     ?checkpoint_dir
+    ?checkpoint_sink
     ?context_injector
     ?context
     ?enable_thinking
@@ -427,11 +379,11 @@ let run_named
 	  (* Lane-aware dispatch: resolve a runtime id or ordered failover lane, then
 	     attempt candidates sequentially with manifest evidence per attempt. *)
 	  let runtime_id = String.trim runtime_id in
-	  let runtime_mcp_policy = runtime_mcp_policy_for_tools ~base_path ~keeper_name tools in
 	  (* Audit F8: removed dead routing knobs from the signature so callers cannot
 	     pass values that would be silently ignored. *)
   let turn_start = Mtime_clock.now () in
   let seq_ref = ref 0 in
+  let checkpoint_stage_observed = Atomic.make false in
   let emit_runtime_manifest ?status ?decision event =
     match runtime_manifest_context, runtime_manifest_append with
     | Some manifest_ctx, Some append ->
@@ -648,27 +600,26 @@ let run_named
   (* Sequential candidate attempt loop. On failure we record a manifest row and
      move to the next candidate; on success we record completion and return. *)
   attempt_runtime_candidates
+    ~allow_retry:(fun ~runtime_id:attempt_runtime_id ~attempt error ->
+      let allowed =
+        Keeper_turn_driver_try_provider.same_run_retry_allowed
+          checkpoint_stage_observed
+      in
+      if not allowed
+      then
+        Log.Keeper.info
+          "%s: runtime lane retry deferred after typed OAS checkpoint stage \
+           (runtime_id=%s attempt=%d error_kind=%s); the next keeper cycle \
+           remains eligible"
+          keeper_name
+          attempt_runtime_id
+          attempt
+          (Oas_compat.error_kind error);
+      allowed)
     ~runtime_id
     ~runtime_id_of:(fun (runtime : Runtime.t) -> runtime.Runtime.id)
     ~emit_runtime_manifest
-    ~allow_accept_no_progress_retry:
-      (fun ~runtime_id:attempt_runtime_id ~attempt error ->
-         if
-           not
-             (Keeper_turn_driver_try_runtime.accept_no_progress_should_try_next
-                error)
-         then true
-         else if lane_accept_no_progress_retry_slot_available ~turn_start then
-           true
-         else (
-           log_lane_accept_no_progress_retry_suppressed
-             ~keeper_name
-             ~runtime_id:attempt_runtime_id
-             ~attempt
-             ~turn_start
-             error;
-           false))
-    ~run_attempt:(fun ?resume_checkpoint ~idx:_ ~runtime_id:attempt_runtime_id runtime ->
+    ~run_attempt:(fun ~idx:_ ~runtime_id:attempt_runtime_id runtime ->
       let error_runtime_id = attempt_runtime_id in
       let inference_policy =
         attempt_inference_policy
@@ -702,19 +653,10 @@ let run_named
             ~max_concurrent:runtime.Runtime.binding.max_concurrent
             provider_config
         in
-        match provider_cooldown_block ~keeper_name candidate with
-        | Some block ->
-          emit_runtime_manifest
-            ~status:"provider_cooldown"
-            ~decision:(provider_cooldown_block_decision block)
-            Keeper_runtime_manifest.Provider_attempt_finished;
-          ( Error
-              (provider_cooldown_block_error
-                 ~runtime_id:attempt_runtime_id
-                 block)
-          , None )
-        | None ->
-          let name = Printf.sprintf "oas-%s" attempt_runtime_id in
+        (* Cached provider health is observation only. Every eligible runtime
+           reaches the real provider boundary; only the resulting typed error
+           may drive fallback. *)
+        let name = Printf.sprintf "oas-%s" attempt_runtime_id in
           let try_provider_ctx : Keeper_turn_driver_try_provider.try_provider_ctx =
             { runtime_id = attempt_runtime_id
             ; error_runtime_id
@@ -736,12 +678,10 @@ let run_named
             ; temperature = inference_policy.attempt_temperature
             ; max_tokens = inference_policy.attempt_max_tokens
             ; accept
-            ; guardrails
             ; hooks
             ; context_reducer
             ; raw_trace
             ; transport_resolved
-            ; runtime_mcp_policy
             ; allowed_paths
             ; checkpoint_sidecar
             ; cache_system_prompt
@@ -751,6 +691,8 @@ let run_named
             ; context_window_tokens
             ; oas_auto_context_overflow_retry
             ; checkpoint_dir
+            ; checkpoint_sink
+            ; checkpoint_stage_observed
             ; context_injector
             ; context
             ; enable_thinking = inference_policy.attempt_enable_thinking
@@ -775,39 +717,15 @@ let run_named
             ; seq_ref
             }
           in
-          let provider_attempt_started_at = Mtime_clock.now () in
           let provider_result, checkpoint_after, _success_sample =
             Keeper_turn_driver_try_provider.run_try_provider
-              try_provider_ctx ?resume_checkpoint ?per_provider_timeout_s candidate
+              try_provider_ctx ?per_provider_timeout_s candidate
           in
           let outcomes =
             project_provider_attempt_result
               ~replay_prefix_projection
               provider_result
           in
-          let latency_ms =
-            let ns =
-              Mtime.Span.to_uint64_ns
-                (Mtime.span provider_attempt_started_at (Mtime_clock.now ()))
-            in
-            Int64.to_float ns /. 1_000_000.
-          in
-          (* Binding health describes the provider attempt, not MASC-local
-             checkpoint projection.  A fail-closed replay-prefix error must
-             fail the turn without falsely degrading a provider that returned
-             successfully. *)
-          (match outcomes.provider_result with
-           | Ok _ ->
-             record_candidate_health_success
-               ~keeper_name
-               candidate
-               ~latency_ms
-           | Error err ->
-             (match classify_masc_internal_error err with
-              | Some (Accept_rejected { reason; _ }) ->
-                record_candidate_health_rejected ~keeper_name candidate ~reason
-              | Some _ | None ->
-                record_candidate_health_error ~keeper_name candidate err));
           outcomes.turn_result, checkpoint_after))
     attempt_runtimes
 
@@ -820,21 +738,9 @@ module For_testing = struct
   let turn_result outcomes = outcomes.turn_result
   let checkpoint_after_attempt = checkpoint_after_attempt
   let success_selected_model_raw = success_selected_model_raw
-  let record_candidate_health_error = record_candidate_health_error
-  let provider_cooldown_block = provider_cooldown_block
-
-  let aggregate_cooldown_cause =
-    Keeper_turn_driver_provider_attempt.aggregate_cooldown_cause
-
-  let provider_cooldown_block_error = provider_cooldown_block_error
   let apply_accept = Keeper_turn_driver_try_provider.For_testing.apply_accept
   let max_execution_time_for_attempt =
     Keeper_turn_driver_try_provider.For_testing.max_execution_time_for_attempt
-
-  let last_tool_progress_context_string_of_messages messages =
-    messages
-    |> Keeper_turn_driver_try_provider.For_testing.last_tool_progress_context_of_messages
-    |> Keeper_turn_driver_try_provider.For_testing.format_last_tool_progress_context
 
   let sdk_error_of_nonretryable_attempt_error =
     Keeper_turn_driver_try_runtime.sdk_error_of_nonretryable_attempt_error
@@ -846,17 +752,19 @@ module For_testing = struct
   let dedupe_runtimes_preserve_order = dedupe_runtimes_preserve_order
 	  let media_degrade_manifest_decision = media_degrade_manifest_decision
 	  let attempt_inference_policy = attempt_inference_policy
-	  let attempt_runtime_candidates = attempt_runtime_candidates
+  let attempt_runtime_candidates = attempt_runtime_candidates
+
+  let observe_checkpoint_stage =
+    Keeper_turn_driver_try_provider.observe_checkpoint_stage
+
+  let same_run_retry_allowed =
+    Keeper_turn_driver_try_provider.same_run_retry_allowed
 
   let resolve_context_window_tokens_after_runtime_selection =
     resolve_context_window_tokens_after_runtime_selection
 
   let accept_no_progress_should_try_next =
     Keeper_turn_driver_try_runtime.For_testing.accept_no_progress_should_try_next
-
-  let accept_no_progress_read_only_should_try_next =
-    Keeper_turn_driver_try_runtime.For_testing
-    .accept_no_progress_read_only_should_try_next
 
   let accept_rejected_result_should_try_next =
     Keeper_turn_driver_try_runtime.For_testing

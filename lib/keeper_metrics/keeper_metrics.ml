@@ -19,25 +19,17 @@ type t =
   | TotalCostUsd
   | TurnScheduled
   | TurnCompleted
-  | PacingShadowEvents
-  | PacingShadowNextDueSec
   | FailureRoute
   | FailureJudgmentOutcome
-  | FailureDrivenPause
   | IdleSeconds
-  | ContractViolations
   | StreamProjectionEventCutoff
   | MetricEmitDropped
   | ContextMaxObserved
   | TurnStarts
   | TurnReattempts
   | TurnRegressions
-  | TurnLivelockBlocks
-  | TurnLivelockBlocksRepeated
-  | TurnLivelockBlocksThresholdPark
   | TurnLatencyBucket
   | TurnLatencyByModelBucket
-  | ProviderCooldownSkip
   | ProviderCooldownRemainingSec
   | ProviderBlockDurationSec
   | TurnQueueDepth
@@ -73,7 +65,6 @@ type t =
   | MetaReadFailures
   | ApprovalQueueFailures
   | ApprovalResolutionSignal
-  | GuardsFailures
   | ProfileLoadFailures
   | CompactAuditFailures
   | CompactAuditRetentionParse
@@ -85,15 +76,12 @@ type t =
   | CrashPersistenceFailures
   | GenerationLineageFailures
   | KeepaliveSignalFailures
-  | BoardSignalWakeupCappedTotal
   | BoardSignalNoWakeTotal
   | BoardSignalAttentionCandidateTotal
   | MetaJsonFailures
   | ToolsOasFailures
-  | ToolsOasDeterministicFailures
   | TurnUpUpdateFailures
   | AgentToolDispatchRuntimeFailures
-  | CircuitBreakerTrips
   | PromptFailures
   | RunContextFailures
   | SearchFilesFailures
@@ -126,9 +114,7 @@ type t =
   | PersonaDriftMissing
   | WorkspaceInitFailures
   | PresenceSyncFailures
-  | SelfPreservationUniversal
   | StaleStormPaused
-  | ProviderTimeoutLoopPaused
   | TurnFailureStreakPaused
   | CycleExceptions
   | SnapshotReadFailures
@@ -153,12 +139,9 @@ type t =
   | ThinkingPersistFailures
   | CheckpointFailures
   | DecisionAuditRingOverflows
-  | ReplySkillRouteStrips
-  | ReplySkillRouteLinesRemoved
   | MemoryLlmSummaryOutcomes
   | MemoryLlmSummaryChainExhausted
   | HitlSummaryOutcomes
-  | UserVisibleReplySource
   | OasEnvKeyRejections
   | MemoryWriteFailures
   | MemoryLaneUnitFailures
@@ -189,41 +172,23 @@ type t =
   | CompactionCallbackRecoveries
   | EventBusDrain
   | SupervisorCleanupFailures
-  | SpawnSlotDenied
   | RegistryUpdateDropped
   | RegistryOrphanThresholdBreached
   | RegistryInvalidEntry
-  | DeadTotal
-  | AutoResumedTotal
-  | AutoResumeBlockedTotal
-  | SkipIdleWakeResumed
-  | EventQueueOverride
   | StimulusConsumed
   | UnsupportedStimulus
-  | NearExhaustionTotal
   | RestartAttempts
   | RestartOutcomes
-  | LastProductiveTs
-  | ProviderTimeoutStrike
-  | StaleTerminationTotal
-  | StaleTerminationByClass
-  | ProviderTimeoutWatchdogTermination
-  | StaleTerminationThresholdBreached
-  | StaleTerminationBatch
-  | StaleBroadcastEmitFailures
   | OasRunTimeout
-  | RuntimeSaturationSignal
   | RuntimeSelected
   | RuntimeRotation
   | ToolUseFailure
   | ToolNotAllowed
-  | TurnGateRejectedTerminal
   | ReceiptUnmappedDisposition
   | ExecuteNetworkUpgrade
   | ExecuteLocalExecution
   | DockerRuntimeDiscarded
   | ProactiveSkip
-  | NoProgressLoopDetected
   | NoProgressStreak
   | UsageTrust
   | UsageAnomalyReason
@@ -245,22 +210,11 @@ type t =
   | ToolCallParamCompleteness   (* counter: tool calls with all required params vs missing *)
   | KeeperTurnInstructionHash   (* gauge: hash of system+user prompt for change detection *)
   | KeeperToolCallRetryLoop     (* counter: consecutive identical tool calls with errors *)
-  | AttemptWatchdogFired        (* counter: 1800s safety-cap watchdog killed a stuck attempt *)
   | ShellIrEffectTotal          (* counter: fine-grained Shell IR effect decomposition *)
-  | ToolExecutePrActionTotal    (* counter: raw tool_execute gh PR actions *)
-  | GhClassificationTotal       (* counter: gh verb/risk/typed-hit classification coverage *)
-  | GatedGhLifecycleTotal       (* counter: non-blocking gated gh approval lifecycle events *)
-  | GatedGhBlockTimeSeconds     (* histogram: gated gh approval path turn-block time *)
-  | KeeperRepoMappingDefaultScopeAllowed (* counter: missing mapping default-scope access allowed *)
-  | KeeperRepoMappingDeniedUnregistered (* counter: repository policy denied an unregistered repo id *)
-  | KeeperRepoMappingLoadError          (* counter: keeper repo mapping load/parse failure *)
-  | KeeperRepoMappingRepositoryIdentityMismatch (* counter: repo identity mismatch in policy projection *)
-  | KeeperRepoMappingRepositoryStoreError       (* counter: repo catalog load failure in policy projection *)
   | RawTraceSinkDegraded        (* counter: raw-trace sink create failed; turn dispatched untraced *)
   | WireCaptureResponseSuppressed (* counter: keeper-visible response suppressed before wire capture *)
   | WireCaptureWriteFailures    (* counter: wire-capture write raised an exception *)
   | WireCaptureRecordSkipped    (* counter: wire-capture record dropped by current-file byte cap *)
-  | ContinuationDeliveryOutcome
       (* counter: RFC-0320 W3c continuation delivery outcome; label=outcome_tag
          (Delivered/Skipped_unrouted/Skipped_already_replied/Skipped_empty/Failed).
          G5 observability — a dropped/unrouted continuation must never be silent. *)
@@ -282,13 +236,9 @@ let to_string = function
   | TotalCostUsd -> "masc_keeper_total_cost_usd"
   | TurnScheduled -> "masc_keeper_turn_scheduled_total"
   | TurnCompleted -> "masc_keeper_turn_completed_total"
-  | PacingShadowEvents -> "masc_keeper_pacing_shadow_events_total"
-  | PacingShadowNextDueSec -> "masc_keeper_pacing_shadow_next_due_sec"
   | FailureRoute -> "masc_keeper_failure_route_total"
   | FailureJudgmentOutcome -> "masc_keeper_failure_judgment_outcome_total"
-  | FailureDrivenPause -> "masc_keeper_failure_driven_pause_total"
   | IdleSeconds -> "masc_keeper_idle_seconds"
-  | ContractViolations -> "masc_keeper_contract_violations_total"
   | StreamProjectionEventCutoff ->
     "masc_keeper_stream_projection_event_cutoff_total"
   | MetricEmitDropped -> "masc_keeper_metric_emit_dropped_total"
@@ -296,13 +246,8 @@ let to_string = function
   | TurnStarts -> "masc_keeper_turn_starts_total"
   | TurnReattempts -> "masc_keeper_turn_reattempts_total"
   | TurnRegressions -> "masc_keeper_turn_regressions_total"
-  | TurnLivelockBlocks -> "masc_keeper_turn_livelock_blocks_total"
-  | TurnLivelockBlocksRepeated -> "masc_keeper_turn_livelock_blocks_repeated_total"
-  | TurnLivelockBlocksThresholdPark ->
-    "masc_keeper_turn_livelock_blocks_threshold_park_total"
   | TurnLatencyBucket -> "masc_keeper_turn_latency_bucket_total"
   | TurnLatencyByModelBucket -> "masc_keeper_turn_latency_by_model_bucket_total"
-  | ProviderCooldownSkip -> "masc_keeper_provider_cooldown_skip_total"
   | ProviderCooldownRemainingSec -> "masc_keeper_provider_cooldown_remaining_sec"
   | ProviderBlockDurationSec -> "masc_keeper_provider_block_duration_sec"
   | TurnQueueDepth -> "masc_keeper_turn_queue_depth"
@@ -340,7 +285,6 @@ let to_string = function
   | MetaReadFailures -> "masc_keeper_meta_read_failures_total"
   | ApprovalQueueFailures -> "masc_keeper_approval_queue_failures_total"
   | ApprovalResolutionSignal -> "masc_keeper_approval_resolution_signal_total"
-  | GuardsFailures -> "masc_keeper_guards_failures_total"
   | ProfileLoadFailures -> "masc_keeper_profile_load_failures_total"
   | CompactAuditFailures -> "masc_keeper_compact_audit_failures_total"
   | CompactAuditRetentionParse -> "masc_keeper_compact_audit_retention_parse_total"
@@ -355,17 +299,13 @@ let to_string = function
   | CrashPersistenceFailures -> "masc_keeper_crash_persistence_failures_total"
   | GenerationLineageFailures -> "masc_keeper_generation_lineage_failures_total"
   | KeepaliveSignalFailures -> "masc_keeper_keepalive_signal_failures_total"
-  | BoardSignalWakeupCappedTotal -> "masc_keeper_board_signal_wakeup_capped_total"
   | BoardSignalNoWakeTotal -> "masc_keeper_board_signal_no_wake_total"
   | BoardSignalAttentionCandidateTotal ->
     "masc_keeper_board_signal_attention_candidate_total"
   | MetaJsonFailures -> "masc_keeper_meta_json_failures_total"
   | ToolsOasFailures -> "masc_keeper_tools_oas_failures_total"
-  | ToolsOasDeterministicFailures ->
-    "masc_keeper_tools_oas_deterministic_failures_total"
   | TurnUpUpdateFailures -> "masc_keeper_turn_up_update_failures_total"
   | AgentToolDispatchRuntimeFailures -> "masc_keeper_tool_dispatch_runtime_failures_total"
-  | CircuitBreakerTrips -> "masc_keeper_circuit_breaker_trips_total"
   | PromptFailures -> "masc_keeper_prompt_failures_total"
   | RunContextFailures -> "masc_keeper_run_context_failures_total"
   | SearchFilesFailures -> "masc_keeper_search_files_failures_total"
@@ -399,9 +339,7 @@ let to_string = function
   | PersonaDriftMissing -> "masc_keeper_persona_drift_missing_total"
   | WorkspaceInitFailures -> "masc_keeper_workspace_init_failures_total"
   | PresenceSyncFailures -> "masc_keeper_presence_sync_failures_total"
-  | SelfPreservationUniversal -> "masc_keeper_self_preservation_universal_total"
   | StaleStormPaused -> "masc_keeper_stale_storm_paused_total"
-  | ProviderTimeoutLoopPaused -> "masc_keeper_provider_timeout_loop_paused_total"
   | TurnFailureStreakPaused -> "masc_keeper_turn_failure_streak_paused_total"
   | CycleExceptions -> "masc_keeper_cycle_exceptions_total"
   | SnapshotReadFailures -> "masc_keeper_snapshot_read_failures_total"
@@ -428,14 +366,10 @@ let to_string = function
   | ThinkingPersistFailures -> "masc_keeper_thinking_persist_failures_total"
   | CheckpointFailures -> "masc_keeper_checkpoint_failures_total"
   | DecisionAuditRingOverflows -> "masc_keeper_decision_audit_ring_overflows_total"
-  | ReplySkillRouteStrips -> "masc_keeper_reply_skill_route_strips_total"
-  | ReplySkillRouteLinesRemoved ->
-    "masc_keeper_reply_skill_route_lines_removed_total"
   | MemoryLlmSummaryOutcomes -> "masc_keeper_memory_llm_summary_outcomes_total"
   | MemoryLlmSummaryChainExhausted ->
     "masc_keeper_memory_llm_summary_chain_exhausted_total"
   | HitlSummaryOutcomes -> "masc_keeper_hitl_summary_outcomes_total"
-  | UserVisibleReplySource -> "masc_keeper_user_visible_reply_source_total"
   | OasEnvKeyRejections -> "masc_keeper_oas_env_key_rejections_total"
   | MemoryWriteFailures -> "masc_keeper_memory_write_failures_total"
   | MemoryLaneUnitFailures -> "masc_keeper_memory_lane_unit_failures_total"
@@ -467,44 +401,24 @@ let to_string = function
     "masc_keeper_compaction_callback_recoveries_total"
   | EventBusDrain -> "masc_keeper_event_bus_drain_total"
   | SupervisorCleanupFailures -> "masc_keeper_supervisor_cleanup_failures_total"
-  | SpawnSlotDenied -> "masc_keeper_spawn_slot_denied_total"
   | RegistryUpdateDropped -> "masc_keeper_registry_update_dropped_total"
   | RegistryOrphanThresholdBreached ->
     "masc_keeper_registry_orphan_threshold_breached_total"
   | RegistryInvalidEntry -> "masc_keeper_registry_invalid_entry_total"
-  | DeadTotal -> "masc_keeper_dead_total"
-  | AutoResumedTotal -> "masc_keeper_auto_resumed_total"
-  | AutoResumeBlockedTotal -> "masc_keeper_auto_resume_blocked_total"
-  | SkipIdleWakeResumed -> "masc_keeper_skip_idle_wake_resumed_total"
-  | EventQueueOverride -> "masc_keeper_event_queue_override_total"
   | StimulusConsumed -> "masc_keeper_stimulus_consumed_total"
   | UnsupportedStimulus -> "masc_keeper_unsupported_stimulus_total"
-  | NearExhaustionTotal -> "masc_keeper_near_exhaustion_total"
   | RestartAttempts -> "masc_keeper_restart_attempts_total"
   | RestartOutcomes -> "masc_keeper_restart_outcomes_total"
-  | LastProductiveTs -> "masc_keeper_last_productive_ts"
-  | ProviderTimeoutStrike -> "masc_keeper_provider_timeout_strike_total"
-  | StaleTerminationTotal -> "masc_keeper_stale_termination_total"
-  | StaleTerminationByClass -> "masc_keeper_stale_termination_by_class_total"
-  | ProviderTimeoutWatchdogTermination ->
-    "masc_keeper_provider_timeout_watchdog_termination_total"
-  | StaleTerminationThresholdBreached ->
-    "masc_keeper_stale_termination_threshold_breached_total"
-  | StaleTerminationBatch -> "masc_keeper_stale_termination_batch_total"
-  | StaleBroadcastEmitFailures -> "masc_keeper_stale_broadcast_emit_failures"
   | OasRunTimeout -> "masc_keeper_oas_run_timeout_total"
-  | RuntimeSaturationSignal -> "masc_keeper_runtime_saturation_signal_total"
   | RuntimeSelected -> "masc_keeper_runtime_selected_total"
   | RuntimeRotation -> "masc_keeper_runtime_rotation_total"
   | ToolUseFailure -> "masc_keeper_tool_use_failure_total"
   | ToolNotAllowed -> "masc_keeper_tool_not_allowed_total"
-  | TurnGateRejectedTerminal -> "masc_keeper_turn_gate_rejected_terminal_total"
   | ReceiptUnmappedDisposition -> "masc_keeper_receipt_unmapped_disposition_total"
   | ExecuteNetworkUpgrade -> "masc_keeper_execute_network_upgrade_total"
   | ExecuteLocalExecution -> "masc_keeper_execute_local_execution_total"
   | DockerRuntimeDiscarded -> "masc_keeper_docker_runtime_discarded_total"
   | ProactiveSkip -> "masc_keeper_proactive_skip_total"
-  | NoProgressLoopDetected -> "masc_keeper_no_progress_loop_detected_total"
   | NoProgressStreak -> "masc_keeper_no_progress_streak"
   | UsageTrust -> "masc_keeper_usage_trust_total"
   | UsageAnomalyReason -> "masc_keeper_usage_anomaly_reason_total"
@@ -530,27 +444,12 @@ let to_string = function
   | ToolCallParamCompleteness -> "masc_keeper_tool_call_param_completeness_total"
   | KeeperTurnInstructionHash -> "masc_keeper_turn_instruction_hash"
   | KeeperToolCallRetryLoop -> "masc_keeper_tool_call_retry_loop_total"
-  | AttemptWatchdogFired -> "masc_keeper_attempt_watchdog_fired_total"
   | ShellIrEffectTotal -> "masc_keeper_shell_ir_effect_total"
-  | ToolExecutePrActionTotal -> "masc_keeper_tool_execute_pr_action_total"
-  | GhClassificationTotal -> "masc_keeper_gh_classification_total"
-  | GatedGhLifecycleTotal -> "masc_keeper_gated_gh_lifecycle_total"
-  | GatedGhBlockTimeSeconds -> "masc_keeper_gated_gh_block_time_seconds"
-  | KeeperRepoMappingDefaultScopeAllowed ->
-    "masc_keeper_repo_mapping_default_scope_allowed_total"
-  | KeeperRepoMappingDeniedUnregistered ->
-    "masc_keeper_repo_mapping_denied_unregistered_total"
-  | KeeperRepoMappingLoadError -> "masc_keeper_repo_mapping_load_error_total"
-  | KeeperRepoMappingRepositoryIdentityMismatch ->
-    "masc_keeper_repo_mapping_repository_identity_mismatch_total"
-  | KeeperRepoMappingRepositoryStoreError ->
-    "masc_keeper_repo_mapping_repository_store_error_total"
   | RawTraceSinkDegraded -> "masc_keeper_raw_trace_sink_degraded_total"
   | WireCaptureResponseSuppressed ->
     "masc_keeper_wire_capture_response_suppressed_total"
   | WireCaptureWriteFailures -> "masc_keeper_wire_capture_write_failures_total"
   | WireCaptureRecordSkipped -> "masc_keeper_wire_capture_record_skipped_total"
-  | ContinuationDeliveryOutcome -> "masc_keeper_continuation_delivery_outcome_total"
 ;;
 
 let emit_runtime_selected ~keeper_name ~runtime_id ~fallback_reason =

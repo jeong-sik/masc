@@ -68,17 +68,7 @@ goal = "test keeper"
        name
        autoboot_line)
 
-let iso_of_unix ts =
-  let t = Unix.gmtime ts in
-  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-    (t.tm_year + 1900)
-    (t.tm_mon + 1)
-    t.tm_mday
-    t.tm_hour
-    t.tm_min
-    t.tm_sec
-
-let make_meta ?(paused = false) ?auto_resume_after_sec ?updated_at name =
+let make_meta ?(paused = false) name =
   let json =
     `Assoc
       [ ("name", `String name)
@@ -87,17 +77,11 @@ let make_meta ?(paused = false) ?auto_resume_after_sec ?updated_at name =
       ; ("goal", `String "test")
       ; ("sandbox_profile", `String "local")
       ; ("network_mode", `String "inherit")
-      ; ("tool_access", `List [])
       ]
   in
   match Keeper_meta_json_parse.meta_of_json json with
   | Error err -> fail ("meta_of_json failed: " ^ err)
-  | Ok meta ->
-    { meta with
-      paused
-    ; auto_resume_after_sec
-    ; updated_at = Option.value ~default:meta.updated_at updated_at
-    }
+  | Ok meta -> { meta with paused }
 
 let write_meta_exn config meta =
   match Keeper_meta_store.write_meta config meta with
@@ -214,72 +198,15 @@ let test_predicate_total_on_defaulted_stats () =
     let _ : bool = KR.should_start_supervisor_sweep ~config ~stats in
     ())
 
-let test_due_auto_recoverable_paused_keeper_starts_sweep () =
-  with_temp_masc_dir ~keeper_names:[ "auto-due" ] (fun config ->
-    let now = Unix.time () in
-    write_meta_exn config
-      (make_meta
-         ~paused:true
-         ~auto_resume_after_sec:60.0
-         ~updated_at:(iso_of_unix (now -. 120.0))
-         "auto-due");
-    let stats =
-      KR.{ scanned = 0; started = 0; stale = 0; recovering = 0 }
-    in
-    check bool "paused keeper is not bootable yet" false
-      (List.mem "auto-due" (KR.bootable_keeper_names config));
-    check (list string) "paused keeper is auto-recoverable"
-      [ "auto-due" ]
-      (KR.auto_recoverable_paused_keeper_names ~now config);
-    check bool "due auto-recoverable pause starts supervisor sweep" true
-      (KR.should_start_supervisor_sweep ~config ~stats))
-
 let test_operator_paused_only_does_not_start_sweep () =
   with_temp_masc_dir ~keeper_names:[ "manual-only" ] (fun config ->
-    let now = Unix.time () in
-    write_meta_exn config
-      (make_meta
-         ~paused:true
-         ~updated_at:(iso_of_unix (now -. 7200.0))
-         "manual-only");
+    write_meta_exn config (make_meta ~paused:true "manual-only");
     let stats =
       KR.{ scanned = 0; started = 0; stale = 0; recovering = 0 }
     in
     check bool "operator-paused keeper is not bootable" false
       (List.mem "manual-only" (KR.bootable_keeper_names config));
-    check (list string) "operator pause is not auto-recoverable" []
-      (KR.auto_recoverable_paused_keeper_names ~now config);
     check bool "operator pause alone does not start sweep" false
-      (KR.should_start_supervisor_sweep ~config ~stats))
-
-let test_turn_timeout_pause_without_explicit_policy_starts_sweep () =
-  with_temp_masc_dir ~keeper_names:[ "timeout-due" ] (fun config ->
-    let now = Unix.time () in
-    let timeout_blocker =
-      Keeper_meta_contract.blocker_info_of_class ~detail:"turn_timeout" Keeper_meta_contract.Turn_timeout
-    in
-    let meta =
-      { (make_meta
-           ~paused:true
-           ~updated_at:(iso_of_unix (now -. 7200.0))
-           "timeout-due")
-        with
-        runtime =
-          { (make_meta "timeout-due").runtime with
-            last_blocker = Some timeout_blocker;
-          };
-      }
-    in
-    write_meta_exn config meta;
-    let stats =
-      KR.{ scanned = 0; started = 0; stale = 0; recovering = 0 }
-    in
-    check bool "timeout-paused keeper is not bootable yet" false
-      (List.mem "timeout-due" (KR.bootable_keeper_names config));
-    check (list string) "legacy timeout pause is auto-recoverable"
-      [ "timeout-due" ]
-      (KR.auto_recoverable_paused_keeper_names ~now config);
-    check bool "legacy timeout pause starts supervisor sweep" true
       (KR.should_start_supervisor_sweep ~config ~stats))
 
 let () =
@@ -293,11 +220,7 @@ let () =
         test_started_gt_zero_starts_sweep_without_enabled;
       test_case "predicate is total on defaulted stats (no raise)" `Quick
         test_predicate_total_on_defaulted_stats;
-      test_case "due auto-recoverable paused keeper starts sweep" `Quick
-        test_due_auto_recoverable_paused_keeper_starts_sweep;
       test_case "operator-paused keeper alone does not start sweep" `Quick
         test_operator_paused_only_does_not_start_sweep;
-      test_case "timeout pause without explicit policy starts sweep" `Quick
-        test_turn_timeout_pause_without_explicit_policy_starts_sweep;
     ];
   ]

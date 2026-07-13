@@ -1,57 +1,28 @@
-(** RFC-0262 §9 completion-trust dispatch oracle (E1: scripted backbone).
+(** Task-completion dispatch oracle.
 
-    A deterministic regression oracle for the completion-trust invariants:
-    replay known-bad [keeper_task_done] attempts through the *full* keeper
-    tool-dispatch path ([Keeper_tool_dispatch_runtime.execute_keeper_tool_call_with_outcome])
-    and assert that each deterministic gate rejects them — with no LLM and no
-    network. The point is not to measure a behavior change (RFC-0262 Phase 1 is a
-    behavior-preserving refactor); it is to *catch* a future regression where a
-    Done becomes reachable through an illegitimate path.
-
-    Three deterministic reject gates are on the Done_action path (see
-    [Tool_task.handle_transition] gate ordering):
-
-    1. [completion_state_error] (tool_task_contract_gate.ml) — the tool-layer
-       ownership/lifecycle precondition, fires first:
-         - foreign-owned task + non-owner caller -> [AlreadyClaimed],
-           rule_id "task_done_requires_current_owner" (this is the dispatch-level
-           enforcement of RFC-0262 axis-2 ownership; [owner_authorized] in
-           workspace_task_lifecycle is the deeper redundant defense).
-         - Todo (unclaimed) task -> [NotClaimed],
-           rule_id "task_done_requires_claimed_or_started".
-    2. anti-rationalization Gate 1 (anti_rationalization.ml:644) — completion
-       notes below the substance floor ([min_notes_length] = 10) are rejected
-       before Gate 3 ever calls an LLM. Reachable only when the caller owns the
-       task (otherwise gate 1 above intercepts first).
-    3. [Task_completion_gate] — done attempts with substantive notes but no
-       trusted, reviewer-inspectable [handoff_context.evidence_refs] are
-       rejected, and a later retry with a trusted ref can still complete the
-       same task.
-
-    Each reject asserts a gate-SPECIFIC signal (distinct rule_id / substring /
-    failure_class), not merely outcome=failure — a tool-not-allowed or unknown-tool
-    reject would also be a failure but carries failure_class "policy_rejection",
-    so the gate-specific assertion is what proves the *intended* gate fired. Each
-    reject also asserts the task FSM was NOT mutated (anti-vacuity).
-
-    Completion success is covered with a locally resolvable trace artifact, so
-    the deterministic evidence gate validates the ref without a network/forge
-    lookup. Evidence-gate rejection and recovery are covered by replaying a fake
-    prose ref followed by a locally resolvable trace ref, proving the gate is
-    selective rather than reject-everything. The evaluator's
-    Indeterminate-dominates determinism remains covered by
-    test_keeper_deterministic_evidence_probe.ml.
-
-    The fixture helpers below are intentionally a local copy of the minimal subset
-    used by test_keeper_tool_dispatch_runtime.ml (Eio workspace + a registered
-    keeper). Kept self-contained so this oracle is decoupled from that 1.4k-line
-    test's churn rather than coupling them through a shared module. *)
+    Lifecycle ownership remains deterministic. Once an owned task reaches the
+    completion-quality boundary, only the configured LLM verdict decides:
+    short notes and missing/untrusted evidence are prompt facts, evaluator
+    rejection leaves the task active, and a later LLM approval completes it. *)
 
 open Alcotest
 
 module KET = Masc.Keeper_tool_dispatch_runtime
 module Workspace = Masc.Workspace
-module Task_completion_gate = Masc.Task_completion_gate
+module AR = Masc.Task.Anti_rationalization
+
+type reviewer_response =
+  | Reviewer_verdict of AR.verdict
+  | Reviewer_unavailable
+
+let reviewer_response = ref (Reviewer_verdict AR.Approve)
+
+let reviewer ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () =
+  match !reviewer_response with
+  | Reviewer_verdict verdict -> Ok (Some verdict)
+  | Reviewer_unavailable ->
+    Error (Agent_sdk.Error.Internal "test evaluator unavailable")
+;;
 
 let temp_dir prefix =
   let dir = Filename.temp_file prefix "" in
@@ -95,8 +66,6 @@ let make_meta ?(name = "keeper-completion-trust") () =
         ; ("agent_name", `String name)
         ; ("trace_id", `String "completion-trust-harness-trace")
         ; ("allowed_paths", `List [ `String "*" ])
-        ; ("policy_voice_enabled", `Bool false)
-        ; ("tool_access", `List [])
         ])
   with
   | Ok meta -> meta
@@ -121,15 +90,9 @@ let with_ws name fn =
           Masc.Keeper_registry.unregister ~base_path:config.base_path meta.name)
         (fun () -> fn ~config ~meta ~ctx_work:(make_ctx ())))
 
-let payload_kind = function
-  | KET.Structured_success -> "structured_success"
-  | KET.Structured_error -> "structured_error"
-  | KET.Plain_text -> "plain_text"
-  | KET.Malformed_structured _ -> "malformed_structured"
-
 let outcome_label = function
   | `Success -> "success"
-  | `Failure -> "failure"
+  | `Failure _ -> "failure"
 
 let parse_json raw =
   try Yojson.Safe.from_string raw with
@@ -233,8 +196,6 @@ let test_completion_denied_for_non_owner () =
         ()
     in
     check string "non-owner completion outcome" "failure" (outcome_label result.KET.outcome);
-    check string "non-owner completion payload shape" "structured_error"
-      (payload_kind result.KET.payload_shape);
     let json = parse_json result.KET.raw_output in
     check bool "rejection is ok=false" false Yojson.Safe.Util.(member "ok" json |> to_bool);
     check string "ownership reject is a deterministic workflow rejection" "workflow_rejection"
@@ -262,8 +223,6 @@ let test_completion_denied_when_unclaimed () =
         ()
     in
     check string "unclaimed completion outcome" "failure" (outcome_label result.KET.outcome);
-    check string "unclaimed completion payload shape" "structured_error"
-      (payload_kind result.KET.payload_shape);
     let json = parse_json result.KET.raw_output in
     check string "unclaimed reject is a workflow rejection" "workflow_rejection"
       Yojson.Safe.Util.(member "failure_class" json |> to_string);
@@ -278,37 +237,44 @@ let test_completion_denied_when_unclaimed () =
     | Some { task_status = Masc_domain.Todo; _ } -> ()
     | _ -> fail "task-001 must remain Todo after the rejected completion")
 
-(* Test C — completion of one's OWN task with sub-floor notes is denied by the
-   deterministic anti-rationalization length gate. *)
-let test_completion_denied_for_thin_notes () =
-  with_ws "completion_trust_thin_notes" (fun ~config ~meta ~ctx_work ->
+(* Local note length and evidence shape never decide completion. *)
+let test_short_notes_without_evidence_follow_llm_approval () =
+  with_ws "completion_llm_short_notes" (fun ~config ~meta ~ctx_work ->
+    reviewer_response := Reviewer_verdict AR.Approve;
     ignore (Workspace.init config ~agent_name:(Some meta.agent_name));
     ignore
       (Workspace.add_task config ~title:"caller's own task" ~priority:1
-         ~description:"claimed by the caller, then completed with no substance");
-    (* precondition: caller legitimately claims its own task (must own it to reach
-       the review gate; otherwise completion_state_error intercepts first). *)
+         ~description:"the LLM reviews even a short completion claim");
     let claim = claim_via_dispatch ~config ~meta ~ctx_work ~task_id:"task-001" in
-    check string "self-claim precondition succeeds" "success" (outcome_label claim.KET.outcome);
-    (* attack: complete own task with notes below the substance floor (<10 chars). *)
+    check string "self-claim succeeds" "success" (outcome_label claim.KET.outcome);
     let result =
-      attempt_done ~config ~meta ~ctx_work ~task_id:"task-001" ~result:"done" ()
+      attempt_done
+        ~config
+        ~meta
+        ~ctx_work
+        ~task_id:"task-001"
+        ~result:"done"
+        ~evidence_refs:[]
+        ()
     in
-    check string "thin-notes completion outcome" "failure" (outcome_label result.KET.outcome);
-    check string "thin-notes completion payload shape" "structured_error"
-      (payload_kind result.KET.payload_shape);
-    let json = parse_json result.KET.raw_output in
-    check string "thin-notes reject is a workflow rejection" "workflow_rejection"
-      Yojson.Safe.Util.(member "failure_class" json |> to_string);
-    check bool "thin-notes reject names the anti-rationalization length floor" true
-      (contains_substring result.KET.raw_output "completion notes too short");
-    (* anti-vacuity: caller still owns the task; it was NOT marked Done. *)
-    match assignee_of config "task-001" with
-    | Some assignee -> check string "task still owned by caller, not Done" meta.agent_name assignee
-    | None -> fail "task-001 must remain Claimed/InProgress after the rejected completion")
+    check string "LLM approval controls outcome" "success"
+      (outcome_label result.KET.outcome);
+    match
+      List.find_opt
+        (fun (task : Masc_domain.task) -> String.equal task.id "task-001")
+        (Workspace.get_tasks_raw config)
+    with
+    | Some { task_status = Masc_domain.Done _; _ } -> ()
+    | Some task ->
+      fail
+        ("expected Done after LLM approval, got "
+         ^ Masc_domain.task_status_to_string task.task_status)
+    | None -> fail "task-001 missing after completion")
+
 
 let test_completion_with_evidence_refs_succeeds () =
   with_ws "completion_trust_evidence_refs" (fun ~config ~meta ~ctx_work ->
+    reviewer_response := Reviewer_verdict AR.Approve;
     ignore (Workspace.init config ~agent_name:(Some meta.agent_name));
     ignore
       (Workspace.add_task config ~title:"complete with evidence refs" ~priority:1
@@ -327,8 +293,6 @@ let test_completion_with_evidence_refs_succeeds () =
         ()
     in
     check string "completion outcome" "success" (outcome_label result.KET.outcome);
-    check string "completion payload shape" "structured_success"
-      (payload_kind result.KET.payload_shape);
     match
       List.find_opt
         (fun (t : Masc_domain.task) -> String.equal t.id "task-001")
@@ -347,94 +311,92 @@ let test_completion_with_evidence_refs_succeeds () =
          ^ Masc_domain.task_status_to_string task.task_status)
     | None -> fail "task-001 missing after completion")
 
-(* Test E — the evidence gate BLOCKS an untrusted (fake) reference on the *done*
-   path, and the block is RECOVERABLE. This closes the reject-path proof gap the
-   old harness docstring left open ("asserting a done-evidence reject here would
-   assert a gate that does not exist"): the deterministic evidence gate DOES run
-   on Done_action (tool_task.ml: needs_gate = Done_action -> true), so a done
-   attempt whose evidence_refs hold no trusted Evidence_ref shape is rejected here.
-
-   Two properties in one flow, mirroring test_completion_with_evidence_refs so the
-   ONLY changed variable is trusted-vs-untrusted evidence:
-   1. block:    substantive result (clears the anti-rationalization length floor)
-                + a prose "reference" a keeper might paste to fake completion
-                -> workflow rejection, FSM unchanged (anti-vacuity).
-   2. recover:  the SAME work re-submitted with locally resolvable trace evidence
-                completes. The keeper is not frozen — this is the property the
-                CDAL redesign had to preserve: block fake-done without stalling. *)
-let test_untrusted_evidence_denied_then_recovers () =
-  with_ws "completion_trust_untrusted_then_recover" (fun ~config ~meta ~ctx_work ->
+(* An LLM rejection leaves only this task active; a later approval can
+   complete it without changing evidence shape. *)
+let test_llm_rejection_keeps_task_active_then_approval_completes () =
+  with_ws "completion_llm_reject_then_approve" (fun ~config ~meta ~ctx_work ->
     ignore (Workspace.init config ~agent_name:(Some meta.agent_name));
     ignore
-      (Workspace.add_task config ~title:"complete with a fake reference" ~priority:1
-         ~description:"claimed by the caller, first faked then legitimately proven");
+      (Workspace.add_task config ~title:"LLM reviewed completion" ~priority:1
+         ~description:"completion follows the evaluator verdict");
     let claim = claim_via_dispatch ~config ~meta ~ctx_work ~task_id:"task-001" in
-    check string "self-claim precondition succeeds" "success" (outcome_label claim.KET.outcome);
-    (* block: notes are substantive but the reference is untrusted prose. *)
-    let faked =
+    check string "self-claim succeeds" "success" (outcome_label claim.KET.outcome);
+    reviewer_response := Reviewer_verdict (AR.Reject "deliverable is not complete");
+    let rejected =
       attempt_done
         ~config
         ~meta
         ~ctx_work
         ~task_id:"task-001"
-        ~result:"Completed the deliverable and verified it end to end."
-        ~evidence_refs:[ "trust me, it is done" ]
+        ~result:"Completed the deliverable."
+        ~evidence_refs:[ "arbitrary-unresolved-reference" ]
         ()
     in
-    check string "faked completion outcome" "failure" (outcome_label faked.KET.outcome);
-    check string "faked completion payload shape" "structured_error"
-      (payload_kind faked.KET.payload_shape);
-    let faked_json = parse_json faked.KET.raw_output in
-    check string "evidence reject is a workflow rejection" "workflow_rejection"
-      Yojson.Safe.Util.(member "failure_class" faked_json |> to_string);
-    check bool "reject names the trusted-evidence requirement (gate-specific signal)" true
-      (contains_substring faked.KET.raw_output
-         "no trusted, reviewer-inspectable evidence reference");
-    (* anti-vacuity: the faked attempt did NOT advance the FSM. *)
+    check string "LLM reject controls outcome" "failure"
+      (outcome_label rejected.KET.outcome);
+    check bool "LLM reason is returned" true
+      (contains_substring rejected.KET.raw_output "deliverable is not complete");
     (match assignee_of config "task-001" with
      | Some assignee ->
-       check string "task still owned by caller after the faked completion"
+       check string "task remains active for the same keeper"
          meta.agent_name assignee
-     | None ->
-       fail "task-001 must remain Claimed/InProgress after the rejected fake completion");
-    seed_trace_evidence ~config "completion-trust-recovery";
-    (* recover: same work, now with locally resolvable trace evidence, completes. *)
-    let recovered =
+     | None -> fail "rejected task must remain Claimed/InProgress");
+    reviewer_response := Reviewer_verdict AR.Approve;
+    let approved =
       attempt_done
         ~config
         ~meta
         ~ctx_work
         ~task_id:"task-001"
-        ~result:
-          "Completed the deliverable and saved trace:completion-trust-recovery evidence."
-        ~evidence_refs:[ "trace:completion-trust-recovery" ]
+        ~result:"Completed the deliverable."
+        ~evidence_refs:[ "arbitrary-unresolved-reference" ]
         ()
     in
-    check string "recovery completion outcome" "success" (outcome_label recovered.KET.outcome);
-    check string "recovery payload shape" "structured_success"
-      (payload_kind recovered.KET.payload_shape);
+    check string "later LLM approval completes" "success"
+      (outcome_label approved.KET.outcome);
     match
       List.find_opt
-        (fun (t : Masc_domain.task) -> String.equal t.id "task-001")
+        (fun (task : Masc_domain.task) -> String.equal task.id "task-001")
         (Workspace.get_tasks_raw config)
     with
-    | Some
-        { task_status = Masc_domain.Done { assignee; _ }
-        ; handoff_context = Some handoff
-        ; _
-        } ->
-      check string "recovered done assignee" meta.agent_name assignee;
-      check (list string) "recovered handoff evidence_refs"
-        [ "trace:completion-trust-recovery" ]
-        handoff.evidence_refs
+    | Some { task_status = Masc_domain.Done _; _ } -> ()
     | Some task ->
       fail
-        ("expected task-001 Done after recovery, got "
+        ("expected Done after LLM approval, got "
          ^ Masc_domain.task_status_to_string task.task_status)
-    | None -> fail "task-001 missing after recovery completion")
+    | None -> fail "task-001 missing after approved retry")
 
-(* Test D — positive control: the gates are SELECTIVE, not reject-everything.
-   A keeper claiming its own backlog task is accepted on the same dispatch path. *)
+let test_unavailable_evaluator_keeps_task_active () =
+  with_ws "completion_llm_unavailable" (fun ~config ~meta ~ctx_work ->
+    ignore (Workspace.init config ~agent_name:(Some meta.agent_name));
+    ignore
+      (Workspace.add_task config ~title:"unavailable evaluator" ~priority:1
+         ~description:"must stay active without an LLM verdict");
+    let claim = claim_via_dispatch ~config ~meta ~ctx_work ~task_id:"task-001" in
+    check string "self-claim succeeds" "success" (outcome_label claim.KET.outcome);
+    reviewer_response := Reviewer_unavailable;
+    let result =
+      attempt_done
+        ~config
+        ~meta
+        ~ctx_work
+        ~task_id:"task-001"
+        ~result:"Completed the deliverable."
+        ~evidence_refs:[]
+        ()
+    in
+    check string "unavailable evaluator rejects" "failure"
+      (outcome_label result.KET.outcome);
+    check bool "typed evaluator failure is visible" true
+      (contains_substring result.KET.raw_output "evaluator unavailable");
+    match assignee_of config "task-001" with
+    | Some assignee ->
+      check string "only task remains active" meta.agent_name assignee
+    | None -> fail "task must remain Claimed/InProgress")
+
+
+(* Positive lifecycle control: a keeper claiming its own backlog task is
+   accepted on the same dispatch path. *)
 let test_legitimate_claim_succeeds () =
   with_ws "completion_trust_positive_claim" (fun ~config ~meta ~ctx_work ->
     ignore (Workspace.init config ~agent_name:(Some meta.agent_name));
@@ -443,50 +405,28 @@ let test_legitimate_claim_succeeds () =
          ~description:"unowned backlog work");
     let result = claim_via_dispatch ~config ~meta ~ctx_work ~task_id:"task-001" in
     check string "legitimate claim outcome" "success" (outcome_label result.KET.outcome);
-    check string "legitimate claim payload shape" "structured_success"
-      (payload_kind result.KET.payload_shape);
     match assignee_of config "task-001" with
     | Some assignee -> check string "claimed task is owned by the caller" meta.agent_name assignee
     | None -> fail "task-001 must be Claimed/InProgress after a legitimate claim")
 
 let () =
   Masc_test_deps.init_keeper_tool_registry ();
-  (* The anti-rationalization review resolves an evaluator-runtime id before its
-     gates run (default-arg of [Anti_rationalization.review]); that resolution
-     reads [Workspace_hooks.get_default_runtime_id_fn], which the real server
-     wires at boot (mcp_server.ml) and which raises if left unconnected. Wire a
-     fixed dummy id so Test C reaches Gate 1. The length verdict stays
-     deterministic: notes below [min_notes_length] short-circuit before the
-     Gate-3 LLM call, so no model runtime is ever invoked. *)
   Atomic.set Workspace_hooks.get_default_runtime_id_fn (fun () -> "test-evaluator-runtime");
-  (* Wire the REAL evidence gate into the completion hook. The hook defaults to a
-     permissive stub (workspace_hooks.ml: always Pass); the running server swaps
-     in the deterministic gate at boot via Workspace_metric_hooks. Left unwired,
-     every done attempt passes the gate vacuously — a completion-with-evidence
-     test would go green without the gate ever running, and a fake-evidence
-     reject could never be observed. This replicates the boot adapter so the
-     reject/recover oracle (and the evidence_refs-success test) exercise the
-     gate itself rather than the stub. *)
-  Atomic.set Workspace_hooks.task_completion_gate_decide_fn
-    (fun ~base_path ~task_id ~task_opt ~notes ~handoff () ->
-      match
-        Task_completion_gate.decide ~base_path ~task_id ~task_opt ~notes ~handoff_context:handoff ()
-      with
-      | Task_completion_gate.Pass -> Workspace_hooks.Pass
-      | Task_completion_gate.Reject { reason; rule_id; hint; payload_json } ->
-        Workspace_hooks.Reject { reason; rule_id; hint; payload_json });
+  Atomic.set AR.run_llm_reviewer_fn reviewer;
   run "Completion_trust_harness"
     [ ( "completion_trust_dispatch_oracle"
       , [ test_case "non-owner completion is denied (ownership gate)" `Quick
             test_completion_denied_for_non_owner
         ; test_case "completion of an unclaimed task is denied" `Quick
             test_completion_denied_when_unclaimed
-        ; test_case "completion with sub-floor notes is denied (anti-rationalization length gate)"
-            `Quick test_completion_denied_for_thin_notes
+        ; test_case "short notes without evidence follow LLM approval"
+            `Quick test_short_notes_without_evidence_follow_llm_approval
         ; test_case "completion with evidence_refs succeeds"
             `Quick test_completion_with_evidence_refs_succeeds
-        ; test_case "untrusted evidence is denied then a trusted retry recovers"
-            `Quick test_untrusted_evidence_denied_then_recovers
+        ; test_case "LLM reject keeps task active; approval completes"
+            `Quick test_llm_rejection_keeps_task_active_then_approval_completes
+        ; test_case "unavailable evaluator keeps task active"
+            `Quick test_unavailable_evaluator_keeps_task_active
         ; test_case "legitimate self-claim is accepted (selectivity control)" `Quick
             test_legitimate_claim_succeeds
         ] )

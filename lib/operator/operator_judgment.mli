@@ -98,7 +98,7 @@ val judgments_path : Workspace.config -> string
 val load_all : Workspace.config -> record list
 (** Reads every JSONL entry from the judgments file, parses,
     and returns the records.  Parse failures are logged at
-    [Log.Governance.warn] and skipped — operator alerts on
+    [Log.Gate.warn] and skipped — operator alerts on
     "operator judgment parse:" prefix.  Returns the empty list
     when the file does not exist. *)
 

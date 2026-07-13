@@ -16,7 +16,6 @@ val build_agent :
   hooks:Agent_sdk.Hooks.hooks ->
   raw_trace:Agent_sdk.Raw_trace.t ->
   heartbeat_callbacks:Agent_sdk.Agent.periodic_callback list ->
-  ?gate_config:Eval_gate.gate_config ->
   ?context_injector:Agent_sdk.Hooks.context_injector ->
   ?context:Agent_sdk.Context.t ->
   ?approval:Agent_sdk.Hooks.approval_callback ->
@@ -27,16 +26,9 @@ val build_agent :
 (** {1 Tool Tracking} *)
 
 val make_tool_tracking_hooks :
-  ?gate_config:Eval_gate.gate_config ->
-  ?destructive_ops_policy:Destructive_ops_policy.t ->
   ?context:Agent_sdk.Context.t ->
   unit ->
   string list ref * Agent_sdk.Hooks.hooks
-
-(** {1 Gate Configuration} *)
-
-val default_gate_config :
-  unit -> Eval_gate.gate_config
 
 (** {1 Worker Execution} *)
 
@@ -51,7 +43,6 @@ val run_worker_via_oas :
   prompt:string ->
   tools:Agent_sdk.Tool.t list ->
   raw_trace:Agent_sdk.Raw_trace.t ->
-  ?gate_config:Eval_gate.gate_config ->
   ?worker_run_id:string ->
   unit ->
   (Worker_container_types.run_result, string) result

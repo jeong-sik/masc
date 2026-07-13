@@ -43,16 +43,6 @@ let test_make_reads_tool_metadata () =
   Alcotest.(check (list string)) "Grep has no writer lock by default" [] grep_job.resource_keys
 ;;
 
-let test_policy_verdict_roundtrip () =
-  let cases = [ Approved; Pending "awaiting approval"; Denied "catastrophic floor" ] in
-  List.iter
-    (fun v ->
-      let json = Tool_job.to_yojson { (make ~job_id:"j" ~batch_id:"b" ~tool_name:"masc_status" ~input_json:(`Assoc []) ()) with approval = v } in
-      let job = Tool_job.of_yojson json |> Result.get_ok in
-      Alcotest.(check bool) "policy verdict roundtrip" true (job.approval = v))
-    cases
-;;
-
 let test_job_roundtrip () =
   init ();
   let job =
@@ -64,7 +54,6 @@ let test_job_roundtrip () =
       ~batch_id:"batch_1"
       ~tool_name:"masc_goal_list"
       ~input_json:(`Assoc [ "limit", `Int 10 ])
-      ~approval:(Pending "operator")
       ~attempt:2
       ()
   in
@@ -83,7 +72,6 @@ let test_job_roundtrip_accepts_missing_option_fields () =
       ; "input_json", `Assoc []
       ; "read_only", `Bool false
       ; "resource_keys", `List [ `String "write:any" ]
-      ; "approval", Tool_job.policy_verdict_to_yojson Approved
       ; "attempt", `Int 1
       ]
   in
@@ -123,11 +111,10 @@ let test_resource_key_inference () =
 let job_ids jobs = List.map (fun (job : Tool_job.t) -> job.job_id) jobs
 
 let synthetic_job ?(batch_id = "batch_1") ?(read_only = true)
-      ?(resource_keys = []) ?(approval = Approved) job_id =
+      ?(resource_keys = []) job_id =
   { (make ~job_id ~batch_id ~tool_name:"__synthetic_tool__" ~input_json:(`Assoc []) ())
     with read_only = read_only
        ; resource_keys = resource_keys
-       ; approval = approval
   }
 ;;
 
@@ -168,26 +155,6 @@ let test_tool_batch_serializes_writes_and_resumes_reads () =
     "write flushes parallel batch"
     [ "parallel_read"; "sequential_workspace"; "parallel_read" ]
     batches
-;;
-
-let test_tool_batch_blocks_policy_verdicts () =
-  let batches =
-    Tool_batch.plan
-      [ synthetic_job "read_1"
-      ; synthetic_job ~approval:(Pending "operator") "pending_1"
-      ; synthetic_job "read_2"
-      ; synthetic_job ~approval:(Denied "policy") "denied_1"
-      ]
-  in
-  check_batch_kinds
-    "blocked jobs are singleton boundaries"
-    [ "parallel_read"; "blocked"; "parallel_read"; "blocked" ]
-    batches;
-  match batches with
-  | _ :: pending :: _ :: denied :: [] ->
-    Alcotest.(check (list string)) "pending singleton" [ "pending_1" ] (job_ids pending.jobs);
-    Alcotest.(check (list string)) "denied singleton" [ "denied_1" ] (job_ids denied.jobs)
-  | _ -> Alcotest.fail "expected four batches"
 ;;
 
 let test_tool_batch_does_not_cross_batch_id_boundary () =
@@ -260,8 +227,7 @@ let () =
     ; ( "make"
       , [ Alcotest.test_case "reads catalog metadata" `Quick test_make_reads_tool_metadata ] )
     ; ( "roundtrip"
-      , [ Alcotest.test_case "policy verdict" `Quick test_policy_verdict_roundtrip
-        ; Alcotest.test_case "job envelope" `Quick test_job_roundtrip
+      , [ Alcotest.test_case "job envelope" `Quick test_job_roundtrip
         ; Alcotest.test_case
             "job accepts missing option fields"
             `Quick
@@ -280,10 +246,6 @@ let () =
             "serializes writes and resumes reads"
             `Quick
             test_tool_batch_serializes_writes_and_resumes_reads
-        ; Alcotest.test_case
-            "blocks policy verdicts"
-            `Quick
-            test_tool_batch_blocks_policy_verdicts
         ; Alcotest.test_case
             "does not cross batch_id boundary"
             `Quick

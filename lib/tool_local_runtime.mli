@@ -118,7 +118,7 @@ val kv_cache_assessment_json : Yojson.Safe.t list -> Yojson.Safe.t
 (** {1 MCP dispatch contract} *)
 
 val dispatch :
-  'ctx ->
+  Tool_local_runtime_core.context ->
   name:string ->
   args:Yojson.Safe.t ->
   Tool_local_runtime_core.tool_result option

@@ -701,8 +701,6 @@ let estimate_cost_usd ~(model_id : string)
   Some (Llm_provider.Pricing.estimate_cost ~pricing
     ~input_tokens:usage.input_tokens ~output_tokens:usage.output_tokens ())
 
-let local_worker_max_tokens () = Env_config.Worker.local_worker_max_tokens
-
 let local_worker_heartbeat_interval_sec () = Env_config.Worker.local_worker_heartbeat_sec
 
 let default_system_prompt ~worker_name ~model_id ?role

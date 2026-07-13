@@ -275,7 +275,11 @@ let send_audio_block ?clock ~token ~channel_id ~base_url ~audio_token ~message_t
   (* Rich audio is a side message, not the primary terminal delivery receipt.
      [send_message] already logs the concrete transport error. *)
   match send_message ?clock ~token ~channel_id ~content () with
-  | Ok () | Error _ -> ()
+  | Ok () -> ()
+  | Error err ->
+      Log.Keeper.debug
+        "keeper_chat_discord: audio block delivery returned observed error: %s"
+        (Format.asprintf "%a" Discord_rest_client.pp_error err)
 
 let truncate_embed_desc s =
   let max_len = 3900 in

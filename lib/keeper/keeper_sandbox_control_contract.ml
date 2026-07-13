@@ -1,23 +1,5 @@
 (** Typed input contract shared by keeper sandbox schemas and handlers. *)
 
-type bounded_float =
-  { minimum : float
-  ; maximum : float
-  ; default : float
-  }
-
-let managed_ttl_sec =
-  { minimum = 1.0; maximum = 86_400.0; default = 1_800.0 }
-;;
-
-let operation_timeout_sec =
-  { minimum = 1.0; maximum = 30.0; default = 10.0 }
-;;
-
-let clamp bounds value =
-  Stdlib.Float.min bounds.maximum (Stdlib.Float.max bounds.minimum value)
-;;
-
 type stop_scope =
   | Stop_managed
   | Stop_turn

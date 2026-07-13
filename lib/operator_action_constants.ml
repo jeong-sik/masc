@@ -1,5 +1,3 @@
-let goal_completion_decision = "goal_completion_decision"
-
 type target_type =
   | Workspace
   | Keeper
@@ -29,8 +27,4 @@ let invalid_target_type_message =
   "target_type must be one of: " ^ String.concat ", " valid_target_type_strings
 ;;
 
-let goal_transition_tool = "masc_goal_transition"
-let goal_approval_token_prefix = "goal-approval:"
-let goal_decision_approve = "approve"
-let goal_decision_reject = "reject"
 let keeper_recover = "keeper_recover"

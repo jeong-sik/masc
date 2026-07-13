@@ -4,7 +4,6 @@
 
 type signal_kind =
   | Due_candidate
-  | Due_blocked_approval
 
 type wake_signal =
   { signal_id : string
@@ -12,7 +11,6 @@ type wake_signal =
   ; schedule_id : string
   ; emitted_at : float
   ; due_at : float
-  ; risk_class : Schedule_domain.risk_class
   ; payload_digest : string
   ; payload : Yojson.Safe.t
   }
@@ -59,12 +57,10 @@ let runner_error_to_string = function
 
 let signal_kind_to_string = function
   | Due_candidate -> "schedule.due_candidate"
-  | Due_blocked_approval -> "schedule.due_blocked_approval"
 ;;
 
 let signal_kind_of_string = function
   | "schedule.due_candidate" -> Ok Due_candidate
-  | "schedule.due_blocked_approval" -> Ok Due_blocked_approval
   | other -> Error ("unknown schedule signal kind: " ^ other)
 ;;
 
@@ -115,7 +111,6 @@ let wake_signal_to_yojson signal =
     ; "schedule_id", `String signal.schedule_id
     ; "emitted_at", `Float signal.emitted_at
     ; "due_at", `Float signal.due_at
-    ; "risk_class", `String (Schedule_domain.risk_class_to_string signal.risk_class)
     ; "payload_digest", `String signal.payload_digest
     ; "payload", signal.payload
     ]
@@ -129,11 +124,9 @@ let wake_signal_of_yojson = function
     let* schedule_id = string_field "schedule_id" fields in
     let* emitted_at = float_field "emitted_at" fields in
     let* due_at = float_field "due_at" fields in
-    let* risk_name = string_field "risk_class" fields in
-    let* risk_class = Schedule_domain.risk_class_of_string risk_name in
     let* payload_digest = string_field "payload_digest" fields in
     let* payload = assoc_field "payload" fields in
-    Ok { signal_id; kind; schedule_id; emitted_at; due_at; risk_class; payload_digest; payload }
+    Ok { signal_id; kind; schedule_id; emitted_at; due_at; payload_digest; payload }
   | _ -> Error "expected schedule wake_signal object"
 ;;
 
@@ -162,7 +155,6 @@ let make_signal ~now kind (request : Schedule_domain.schedule_request) =
   ; schedule_id = request.schedule_id
   ; emitted_at = now
   ; due_at = request.due_at
-  ; risk_class = request.risk_class
   ; payload_digest
   ; payload = Schedule_domain.payload_to_yojson request.payload
   }
@@ -237,19 +229,6 @@ let candidate_signals ~now state =
   |> List.map (make_signal ~now Due_candidate)
 ;;
 
-let blocked_approval_signals ~now (state : Schedule_store.state) =
-  state.schedules
-  |> List.filter (fun (request : Schedule_domain.schedule_request) ->
-    request.due_at <= now
-    && Schedule_domain.requires_separate_human_grant request
-    &&
-    match request.status with
-    | Pending_approval -> true
-    | Due -> not (Schedule_store.has_current_approved_grant state request)
-    | Scheduled | Running | Succeeded | Failed | Rejected | Cancelled | Expired -> false)
-  |> List.map (make_signal ~now Due_blocked_approval)
-;;
-
 let dispatch_result ?detail ?error schedule_id status =
   { schedule_id; status; detail; error }
 ;;
@@ -309,11 +288,15 @@ let dispatch_candidates config ~now consumer state =
 ;;
 
 let read_recent_signals config n =
-  Dated_jsonl.read_recent (signal_store config) n
-  |> List.filter_map (fun json ->
-    match wake_signal_of_yojson json with
-    | Ok signal -> Some signal
-    | Error _ -> None)
+  let rec decode ordinal acc = function
+    | [] -> Ok (List.rev acc)
+    | json :: rest ->
+      (match wake_signal_of_yojson json with
+       | Ok signal -> decode (ordinal + 1) (signal :: acc) rest
+       | Error error ->
+         Error (Printf.sprintf "schedule signal row %d: %s" ordinal error))
+  in
+  Dated_jsonl.read_recent (signal_store config) n |> decode 0 []
 ;;
 
 let tick ?consumer config ~now =
@@ -321,8 +304,7 @@ let tick ?consumer config ~now =
   | Error err -> Error (Service_error (Schedule_service.Store_error err))
   | Ok (state, due_changed) ->
     let candidate_signals = candidate_signals ~now state in
-    let signals = candidate_signals @ blocked_approval_signals ~now state in
-    let* emitted = append_new_signals config signals in
+    let* emitted = append_new_signals config candidate_signals in
     (match consumer with
      | Some consumer ->
        let dispatches = dispatch_candidates config ~now consumer state in

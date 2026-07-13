@@ -68,11 +68,8 @@ let with_registry_ro f = Eio_guard.with_mutex_ro registry_mu f
 
 module StringSet = Set_util.StringSet
 
-(** Use catalog-owned metadata instead of actor-facing surfaces. Tool_registry
-    sits below keeper/OAS dispatch; depending on Config or tool_schemas creates
-    cycles. Explicit metadata is the local catalog truth for hidden callable
-    tools and descriptor-owned internal backend names that are not on a public
-    actor surface. *)
+(** Tool_registry sits below keeper/OAS dispatch; depending on Config or tool
+    schemas creates cycles. Explicit metadata is its local catalog truth. *)
 let stats_catalog_tool_names : StringSet.t Eio.Lazy.t =
   Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
     let explicit_metadata_names =
@@ -81,7 +78,7 @@ let stats_catalog_tool_names : StringSet.t Eio.Lazy.t =
     List.fold_left
       (fun set name -> StringSet.add name set)
       StringSet.empty
-      (Tool_catalog_surfaces.system_internal_hidden @ explicit_metadata_names))
+      explicit_metadata_names)
 ;;
 
 let is_keeper_internal_tool_name tool_name =

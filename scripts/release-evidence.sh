@@ -34,7 +34,6 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 [[ -x "$BINARY" ]] || { echo "release-evidence: binary not executable: $BINARY" >&2; exit 1; }
-[[ -f config/tool_policy.toml ]] || { echo "release-evidence: config/tool_policy.toml missing" >&2; exit 1; }
 [[ -f oas-models.toml ]] || { echo "release-evidence: oas-models.toml missing" >&2; exit 1; }
 
 mkdir -p "$(dirname "$OUTFILE")"
@@ -224,7 +223,6 @@ copy_install_smoke() {
   mkdir -p "$prefix_dir" "$base_path/.masc/config"
   cp "$BINARY" "$installed_bin"
   chmod +x "$installed_bin"
-  cp config/tool_policy.toml "$base_path/.masc/config/tool_policy.toml"
   cat >"$base_path/.masc/config/runtime.toml" <<'EOF'
 [runtime]
 # The smoke runtime's model id must be known to the OAS capability catalog, or

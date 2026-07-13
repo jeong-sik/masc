@@ -16,6 +16,8 @@ let tool_preferred_empty = "keeper.tool_preferred_empty"
 let tool_unknown_guard = "keeper.tool_unknown_guard"
 let recovery_block = "keeper.recovery_block"
 let failure_judgment = "keeper.failure_judgment"
+let board_attention_judgment = "keeper.board_attention_judgment"
+let gate_judgment = "keeper.gate_judgment"
 let turn_intent = "keeper.turn_intent"
 let librarian_system = "keeper.librarian.system"
 let librarian_episode_extraction = "keeper.librarian.episode_extraction"
@@ -37,8 +39,6 @@ let turn_intent_board_post_guidance = "keeper.turn_intent.board_post_guidance"
 let turn_intent_board_curation_guidance = "keeper.turn_intent.board_curation_guidance"
 let turn_intent_broadcast_guidance = "keeper.turn_intent.broadcast_guidance"
 let turn_intent_task_create_guidance = "keeper.turn_intent.task_create_guidance"
-let turn_intent_pr_duplicate_search_guidance =
-  "keeper.turn_intent.pr_duplicate_search_guidance"
 
 (** User-prompt "Claimable Work" section body, emitted when a claimable backlog
     is visible and the keeper holds no task. *)

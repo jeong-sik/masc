@@ -1,4 +1,4 @@
-(** Runtime schema, admission queue, agent-health, and GC sampler
+(** Runtime schema, inference observation, agent-health, and GC sampler
     metric-name constants.
 
     Included by {!Otel_metric_store} so existing callers keep using
@@ -6,11 +6,9 @@
 
 let metric_mcp_tool_schema_count = "masc_tool_schema_count"
 let metric_mcp_tool_schema_tokens_approx = "masc_tool_schema_tokens_approx"
-let metric_inference_queue_inflight = "masc_inference_queue_inflight"
-let metric_inference_queue_acquired = Otel_metric_store_core.declare_counter "masc_inference_queue_acquired_total"
-let metric_inference_queue_wait = "masc_inference_queue_wait_seconds"
-let metric_inference_queue_rejected = Otel_metric_store_core.declare_counter "masc_inference_queue_rejected_total"
-let metric_inference_queue_max_concurrent = "masc_inference_queue_max_concurrent"
+let metric_inference_inflight = "masc_inference_inflight"
+let metric_inference_started =
+  Otel_metric_store_core.declare_counter "masc_inference_started_total"
 let metric_agent_heartbeat_age_seconds = "masc_agent_heartbeat_age_seconds"
 let metric_agent_stale_total = Otel_metric_store_core.declare_counter "masc_agent_stale_total"
 

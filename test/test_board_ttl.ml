@@ -242,12 +242,7 @@ let test_post_kind_direct_default () =
   | Ok post ->
       let json = post_to_yojson post in
       let kind = Yojson.Safe.Util.(json |> member "post_kind" |> to_string) in
-      let reason =
-        Yojson.Safe.Util.(json |> member "classification_reason" |> to_string)
-      in
-      Alcotest.(check string) "kind is direct" "direct" kind;
-      Alcotest.(check string) "reason"
-        "Direct board post without automation provenance." reason
+      Alcotest.(check string) "kind is direct" "direct" kind
   | Error e -> Alcotest.fail (show_board_error e)
 
 let test_post_kind_automation_contract () =
@@ -273,59 +268,6 @@ let test_post_kind_system_contract () =
       let json = post_to_yojson post in
       let kind = Yojson.Safe.Util.(json |> member "post_kind" |> to_string) in
       Alcotest.(check string) "kind is system" "system" kind
-  | Error e -> Alcotest.fail (show_board_error e)
-
-let test_post_kind_prefers_explicit_judgment () =
-  let store = create_store () in
-  let summary =
-    "LLM judged this as automation because it summarizes a completed keeper \
-     background run."
-  in
-  let meta =
-    `Assoc
-      [
-        ("source", `String "keeper_board_post");
-        ( "judgment",
-          `Assoc
-            [
-              ("summary", `String summary);
-              ("confidence", `Float 0.82);
-            ] );
-      ]
-  in
-  match
-    create_post store ~author:"dm-keeper" ~content:"Keeper board post"
-      ~post_kind:Automation_post ~meta_json:meta ()
-  with
-  | Ok post ->
-      let json = post_to_yojson post in
-      let reason =
-        Yojson.Safe.Util.(json |> member "classification_reason" |> to_string)
-      in
-      Alcotest.(check string) "judgment summary overrides fallback" summary
-        reason
-  | Error e -> Alcotest.fail (show_board_error e)
-
-let test_post_kind_keeper_provenance_upgrade () =
-  let store = create_store () in
-  let meta = `Assoc [ ("source", `String "keeper_board_post") ] in
-  match
-    create_post store ~author:"dm-keeper" ~content:"Keeper board post"
-      ~post_kind:Automation_post ~meta_json:meta ()
-  with
-  | Ok post ->
-      Alcotest.(check bool) "classified as automation" true
-        (classify_post_kind post = Automation_post);
-      let json = post_to_yojson post in
-      let kind = Yojson.Safe.Util.(json |> member "post_kind" |> to_string) in
-      let reason =
-        Yojson.Safe.Util.(json |> member "classification_reason" |> to_string)
-      in
-      Alcotest.(check string) "kind is automation" "automation" kind;
-      Alcotest.(check string) "provenance reason"
-        "Automation classification based on source=keeper_board_post, \
-         author=dm-keeper, and the automation post_kind contract."
-        reason
   | Error e -> Alcotest.fail (show_board_error e)
 
 let () =
@@ -372,9 +314,5 @@ let () =
             (with_eio test_post_kind_automation_contract);
           Alcotest.test_case "system contract" `Quick
             (with_eio test_post_kind_system_contract);
-          Alcotest.test_case "prefers explicit judgment" `Quick
-            (with_eio test_post_kind_prefers_explicit_judgment);
-          Alcotest.test_case "keeper provenance upgrade" `Quick
-            (with_eio test_post_kind_keeper_provenance_upgrade);
         ] );
     ]

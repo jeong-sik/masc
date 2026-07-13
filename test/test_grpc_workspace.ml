@@ -7,6 +7,13 @@
     serialization/deserialization via of_bytes/to_bytes. *)
 
 module T = Masc_grpc_types
+module Keeper_directive = Masc.Keeper_directive
+
+let task_id value =
+  match Keeper_id.Task_id.of_string value with
+  | Ok task_id -> task_id
+  | Error error -> Alcotest.failf "invalid test task id %S: %s" value error
+;;
 
 let malformed_protobuf = "\x0a\x05ab"
 
@@ -141,7 +148,10 @@ let test_heartbeat_ack_roundtrip () =
       { timestamp_ms = 1700000000001L
       ; active_agent_count = 5
       ; pending_task_count = 3
-      ; directives = [ "rebalance" ]
+      ; directives =
+          [ Keeper_directive.Wakeup
+          ; Keeper_directive.Assign_task (task_id "task-42")
+          ]
       }
   in
   let bytes = T.HeartbeatAck.to_bytes ack in
@@ -149,7 +159,10 @@ let test_heartbeat_ack_roundtrip () =
   Alcotest.(check int64) "timestamp_ms" 1700000000001L decoded.timestamp_ms;
   Alcotest.(check int) "active_agent_count" 5 decoded.active_agent_count;
   Alcotest.(check int) "pending_task_count" 3 decoded.pending_task_count;
-  Alcotest.(check (list string)) "directives" [ "rebalance" ] decoded.directives
+  Alcotest.(check (list string))
+    "directives"
+    [ "wakeup"; "claim:task-42" ]
+    (List.map T.HeartbeatAck.directive_to_wire decoded.directives)
 ;;
 
 let test_subscribe_request_roundtrip () =

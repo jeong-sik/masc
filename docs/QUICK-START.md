@@ -110,18 +110,14 @@ flowchart TD
     C -- Yes --> Z["종료"]
     C -- No --> D["Fiber.yield"]
     D --> E["최신 keeper meta 읽기"]
-    E --> F["smart heartbeat gate"]
-    F --> G{"이번 cycle 실행?"}
-    G -- No --> H["interruptible sleep"]
-    H --> C
-    G -- Yes --> I["presence sync"]
+    E --> I["presence sync"]
     I --> J["heartbeat snapshot 기록"]
     J --> K["board events 수집"]
     K --> L["unified proactive turn"]
     L --> M["Workspace heartbeat 갱신"]
     M --> N["recurring dispatch"]
     N --> O["improve loop tick"]
-    O --> P["jitter 포함 sleep"]
+    O --> P["설정된 정확한 interval로 interruptible sleep"]
     P --> C
 ```
 
@@ -225,9 +221,6 @@ retired orchestration surfaces are historical only. 새 사용자는 repo worksp
 ```bash
 # Add specific tools to the public surface
 MASC_PUBLIC_TOOLS_EXTRA=masc_board_search,masc_pause
-
-# Restore the full inventory (debugging)
-MASC_FULL_SURFACE=1
 
 # Web search provider control
 MASC_WEB_SEARCH_PROVIDER=brave

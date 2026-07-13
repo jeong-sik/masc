@@ -322,14 +322,55 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
       fd_accountant: {
         fd_open: 42,
         fd_limit: 1024,
-        pressure_active: false,
+        per_kind: [{ kind: 'provider_http', active_operations: 3 }],
+        resource_errors: [{ kind: 'provider_http', error: 'process_fd_exhausted', count: 2 }],
       },
     }))
 
     expect(result?.fd_accountant).toEqual({
       fd_open: 42,
       fd_limit: 1024,
-      pressure_active: false,
+      per_kind: [{ kind: 'provider_http', active_operations: 3 }],
+      resource_errors: [{ kind: 'provider_http', error: 'process_fd_exhausted', count: 2 }],
+    })
+  })
+
+  it('parses observation-only disk facts without deriving a gate', () => {
+    const result = normalizeDashboardRuntimeResolution(runtimeResolutionRaw({
+      disk_observation: {
+        mode: 'observation_only',
+        masc_root: '/tmp/workspace/.masc',
+        storage_space_exhaustion_observations_total: 2,
+        last_storage_space_exhaustion_ts: 1234.5,
+        filesystem: {
+          path: '/tmp/workspace/.masc',
+          filesystem: '/dev/disk3s1',
+          mounted_on: '/System/Volumes/Data',
+          total_bytes: 1000,
+          used_bytes: 400,
+          available_bytes: 600,
+          capacity_percent: 40,
+          available_percent: 60,
+        },
+      },
+    }))
+
+    expect(result?.disk_observation).toEqual({
+      mode: 'observation_only',
+      masc_root: '/tmp/workspace/.masc',
+      storage_space_exhaustion_observations_total: 2,
+      last_storage_space_exhaustion_ts: 1234.5,
+      filesystem: {
+        path: '/tmp/workspace/.masc',
+        filesystem: '/dev/disk3s1',
+        mounted_on: '/System/Volumes/Data',
+        total_bytes: 1000,
+        used_bytes: 400,
+        available_bytes: 600,
+        capacity_percent: 40,
+        available_percent: 60,
+        error: null,
+      },
     })
   })
 
@@ -349,12 +390,8 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
         details: [{
           name: 'analyst',
           autoboot_enabled: true,
-          pause_kind: 'auto_recoverable',
-          auto_resume_after_sec: 60,
-          persisted_auto_resume_after_sec: 60,
-          auto_resume_source: 'explicit',
+          pause_kind: 'operator_paused',
           paused_elapsed_sec: 12,
-          auto_resume_remaining_sec: 48,
           last_blocker: {
             klass: 'turn_timeout',
             detail: 'turn exceeded budget',
@@ -365,12 +402,6 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
         read_errors: [],
       },
       keeper_fleet_no_fibers: false,
-      keeper_fd_pressure: {
-        status: 'blocked',
-        reason: 'fd_pressure',
-        admission_blocked: true,
-        admission_blocked_keepers: 24,
-      },
       keeper_fleet_safety: {
         status: 'blocked',
         blocker: 'no_running_fibers',
@@ -421,18 +452,11 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
         names: ['analyst', 'base', 'sangsu'],
         details: [{
           name: 'analyst',
-          pause_kind: 'auto_recoverable',
-          auto_resume_source: 'explicit',
+          pause_kind: 'operator_paused',
           last_blocker: {
             klass: 'turn_timeout',
           },
         }],
-      },
-      keeper_fd_pressure: {
-        status: 'blocked',
-        reason: 'fd_pressure',
-        admission_blocked: true,
-        admission_blocked_keepers: 24,
       },
       keeper_fleet_safety: {
         status: 'blocked',

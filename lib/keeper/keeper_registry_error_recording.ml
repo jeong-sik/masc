@@ -8,26 +8,14 @@
     to know about the central Atomic. *)
 
 let record_common ~base_path ?details name err persist =
-  let details =
-    match details with
-    | Some _ as details -> details
-    | None ->
-      Keeper_sandbox_runtime.docker_mount_failure_details
-        ~base_path_hash:(Keeper_sandbox_runtime.base_path_hash base_path)
-        ~keeper_name:name
-        ~output:err
-        ()
-  in
+  ignore base_path;
   (* MASC/OAS Error-Warn Reduction Goal §P6: same (keeper, error) was
      emitting at ERROR up to 96× in 30-min slices on production
      (system_log_2026-05-16 sample, 299 events/day; verifier
      sandbox_docker ~48%). First occurrence keeps ERROR — operators
      must still see *new* failure modes. Repeated occurrences log at
      ERROR again (symptom suppression removed). *)
-  let kind, outcome =
-    Keeper_recording_error_state.classify_outcome ~keeper:name ~error:err
-  in
-  let kind_label = Keeper_recording_error_state.error_kind_to_string kind in
+  let outcome = Keeper_recording_error_state.record ~keeper:name ~error:err in
   (match details with
    | Some details ->
      Log.Keeper.emit
@@ -39,9 +27,8 @@ let record_common ~base_path ?details name err persist =
   if outcome <> `First then
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string RecordingErrorDedup)
-      ~labels:[ "keeper", name; "error_kind", kind_label ]
+      ~labels:[ "keeper", name ]
       ();
-  Keeper_fd_pressure.note_if_fd_exhaustion ~site:"keeper_registry.record_error" err;
   persist ()
 ;;
 

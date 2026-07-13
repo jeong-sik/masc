@@ -11,8 +11,6 @@ open Keeper_agent_result
 open Keeper_agent_error
 open Keeper_agent_prompt_metrics
 
-module Tool_search = Keeper_run_tools_search
-
 (** Mutable accumulator for OAS hook callbacks.
 
     OAS hooks (before_turn, on_tool_executed) cannot return values, so
@@ -22,8 +20,6 @@ type hook_accumulator = Keeper_run_tools_hook_accumulator.hook_accumulator =
   { mutable meta : Keeper_meta_contract.keeper_meta
   ; mutable tool_calls : tool_call_detail list
   ; mutable current_turn : int
-  ; mutable discovered : Keeper_discovered_tools.t
-  ; mutable tool_overlay : Agent_sdk.Tool_op.t
   ; mutable tool_surface : tool_surface_metrics
   ; mutable requested_tool_names : string list
   ; mutable receipt_completion_contract_result :
@@ -38,8 +34,6 @@ type hook_accumulator = Keeper_run_tools_hook_accumulator.hook_accumulator =
 type hook_outputs = Keeper_run_tools_hook_accumulator.hook_outputs =
   { out_meta : Keeper_meta_contract.keeper_meta
   ; out_tool_calls : tool_call_detail list
-  ; out_discovered : Keeper_discovered_tools.t
-  ; out_tool_overlay : Agent_sdk.Tool_op.t
   ; out_tool_surface : tool_surface_metrics
   ; out_requested_tool_names : string list
   ; out_receipt_completion_contract_result :
@@ -53,16 +47,7 @@ let record_requested_tool_names = Keeper_run_tools_hook_accumulator.record_reque
 
 let task_scope_tool_names = Keeper_run_tools_task_scope.task_scope_tool_names
 let task_id_scope_of_tool_input = Keeper_run_tools_task_scope.task_id_scope_of_tool_input
-let task_id_scope_of_claim_output = Keeper_run_tools_task_scope.task_id_scope_of_claim_output
 let task_id_scope_of_tool_call = Keeper_run_tools_task_scope.task_id_scope_of_tool_call
-
-type tool_search_hit_partition = Tool_search.tool_search_hit_partition =
-  { visible_core_hits : (string * float) list
-  ; discoverable_hits : (string * float) list
-  ; filtered_by_policy : int
-  }
-
-let partition_tool_search_hits = Tool_search.partition_tool_search_hits
 
 (** Agent setup produced by Step 7.
 

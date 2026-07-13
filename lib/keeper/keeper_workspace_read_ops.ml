@@ -39,9 +39,8 @@ let validate_rg_inputs ~pattern:_ ~file_type =
 type read_target_result =
   | Read_target of string
   | Read_target_error of string
-  | Read_target_policy_response of string
 
-let try_handle
+let try_handle_with_outcome
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
@@ -49,31 +48,14 @@ let try_handle
       ~op
       ~raw_path
   =
-  let root = Keeper_alerting_path.project_root_of_config config in
   let containment_check target =
     Keeper_sandbox_containment.check_read_target ~config ~meta ~target
   in
-  let path_error ?deterministic_reason e =
-    actionable_path_error ~deterministic_reason ~op ~config ~meta ~raw_path
-      ~error:e
-  in
-  let repo_check target =
-    match
-      Keeper_repo_claim_hitl.request_path_access
-        ~keeper_id:meta.name
-        ~base_path:root
-        ~path:target
-    with
-    | Keeper_repo_claim_hitl.Access_allowed -> Read_target target
-    | Keeper_repo_claim_hitl.Access_denied detail ->
-      Read_target_policy_response
-        (path_error
-           ~deterministic_reason:Keeper_tool_deterministic_error.Policy_blocked
-           detail)
-    | access_result ->
-      Read_target_policy_response
-        (Yojson.Safe.to_string
-           (Keeper_repo_claim_hitl.tool_response_json ~path:target access_result))
+  let path_error e =
+    Keeper_tool_execution.failure
+      (error_json
+         ~fields:[ "ok", `Bool false; "op", `String op; "path", `String raw_path ]
+         e)
   in
   let read_target () =
     match Keeper_tool_execute_path.resolve_tool_read_path ~config ~meta ~args with
@@ -81,13 +63,14 @@ let try_handle
     | Ok target ->
       (match containment_check target with
        | Error msg -> Read_target_error msg
-       | Ok () -> repo_check target)
+       | Ok () -> Read_target target)
   in
   (* TEL-OK: read-op adapter delegates to Keeper_tool_execute_shell_ir/Exec_dispatch or the
      sandbox read runner; execution telemetry stays with those runtime paths. *)
   let dispatch_host_shell_ir ~workdir ir =
-    Keeper_tool_execute_shell_ir.dispatch ~keeper_id:meta.name
-      ~base_path:root ~workdir ~sandbox:(Masc_exec.Sandbox_target.host ())
+    Keeper_tool_execute_shell_ir.dispatch
+      ~workdir
+      ~sandbox:(Masc_exec.Sandbox_target.host ())
       ir
   in
   let run_host_shell_ir
@@ -105,12 +88,15 @@ let try_handle
         | Some path -> [ "path", `String path ]
     in
     match dispatch_host_shell_ir ~workdir ir with
-    | Error (Gate_reject diagnostic) -> error_json ~fields diagnostic
-    | Error Cannot_parse -> error_json ~fields "Cannot parse command"
-    | Error Too_complex -> error_json ~fields "Command too complex"
-    | Error (Path_reject e) -> error_json ~fields:[ "blocked_cmd", `String cmd ] e
-    | Error (Approval_required { summary; _ }) -> error_json ~fields summary
-    | Error (Policy_denied { reason }) -> error_json ~fields reason
+    | Error (Gate_reject diagnostic) ->
+      Keeper_tool_execution.failure (error_json ~fields diagnostic)
+    | Error Cannot_parse ->
+      Keeper_tool_execution.failure (error_json ~fields "Cannot parse command")
+    | Error Too_complex ->
+      Keeper_tool_execution.failure (error_json ~fields "Command too complex")
+    | Error (Path_reject e) ->
+      Keeper_tool_execution.failure
+        (error_json ~fields:[ "blocked_cmd", `String cmd ] e)
     | Ok result -> on_ok result
   in
   let sandbox_read_error ~target msg =
@@ -130,8 +116,6 @@ let try_handle
                see your actual checkouts before searching)"
               target))
     else
-    let max_eintr_retries = 8 in
-    let rec loop attempts_left =
       match
         Keeper_sandbox_read_runner.container_path_of_host ~config ~meta ~host_path:target
       with
@@ -143,15 +127,8 @@ let try_handle
               ~ok_exit_codes ~config ~meta ~command_argv:(command_argv cpath)
               ~max_bytes ~timeout_sec ()
           with
-          | Error msg
-            when attempts_left > 0
-                 && String_util.contains_substring_ci msg
-                      "interrupted system call" ->
-              loop (attempts_left - 1)
           | Error msg -> Error (sandbox_read_error ~target msg)
           | Ok payload -> Ok payload)
-    in
-    loop max_eintr_retries
   in
   let host_search_workdir target =
     if safe_is_dir target then target else Filename.dirname target
@@ -162,14 +139,21 @@ let try_handle
       (let pattern = Safe_ops.json_string ~default:"" "pattern" args |> String.trim in
        let file_type = Safe_ops.json_string ~default:"" "type" args |> String.trim in
        if pattern = ""
-       then error_json ~fields:[ "op", `String op ] "pattern is required for rg. Good: pattern='handle_request'. Bad: pattern=''."
+       then
+         Keeper_tool_execution.failure
+           ~class_:Tool_result.Policy_rejection
+           (error_json
+              ~fields:[ "op", `String op ]
+              "pattern is required for rg. Good: pattern='handle_request'. Bad: pattern=''.")
        else (
          match validate_rg_inputs ~pattern ~file_type with
-         | Error msg -> error_json ~fields:[ "op", `String op ] msg
+         | Error msg ->
+           Keeper_tool_execution.failure
+             ~class_:Tool_result.Policy_rejection
+             (error_json ~fields:[ "op", `String op ] msg)
          | Ok () -> (
            match read_target () with
            | Read_target_error e -> path_error e
-           | Read_target_policy_response response -> response
            | Read_target target ->
              let limit = shell_readonly_limit args in
              let glob = Safe_ops.json_string ~default:"" "glob" args |> String.trim in
@@ -190,18 +174,19 @@ let try_handle
                     ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ())
                     ()
                 with
-                | Error response -> response
+                | Error response -> Keeper_tool_execution.failure response
                 | Ok (st, out) ->
-                  Yojson.Safe.to_string
-                    (`Assoc
-                        [ "ok", `Bool true
-                        ; "op", `String op
-                        ; "path", `String target
-                        ; "pattern", `String pattern
-                        ; "via", `String Keeper_sandbox_read_runner.backend_via
-                        ; "status", Keeper_alerting_path.process_status_to_json st
-                        ; "matches", lines_to_json ~limit out
-                        ]))
+                  Keeper_tool_execution.success
+                    (Yojson.Safe.to_string
+                       (`Assoc
+                           [ "ok", `Bool true
+                           ; "op", `String op
+                           ; "path", `String target
+                           ; "pattern", `String pattern
+                           ; "via", `String Keeper_sandbox_read_runner.backend_via
+                           ; "status", Keeper_alerting_path.process_status_to_json st
+                           ; "matches", lines_to_json ~limit out
+                           ])))
            else
              let rg_available = Keeper_tool_execute_path.shell_command_available "rg" in
              if not rg_available then
@@ -218,13 +203,17 @@ let try_handle
                  (* [-e]: same leading-dash guard as the sandbox lane. *)
                  @ [ "-e"; pattern; target ]
                in
-               let ir = Keeper_tool_execute_shell_ir.simple Masc_exec.Exec_program.Rg argv in
-               run_host_shell_ir
-                 ~workdir:(host_search_workdir target)
-                 ~cmd:op
-                 ~path:target
-                 ir
-                 ~on_ok:(fun result ->
+               (match Masc_exec.Exec_program.of_string "rg" with
+                | Error (`Unknown executable) ->
+                  path_error (Printf.sprintf "invalid executable: %S" executable)
+                | Ok bin ->
+                  let ir = Keeper_tool_execute_shell_ir.simple_bin bin argv in
+                  run_host_shell_ir
+                    ~workdir:(host_search_workdir target)
+                    ~cmd:op
+                    ~path:target
+                    ir
+                    ~on_ok:(fun result ->
                    let is_ok =
                      match result.status with
                      | Unix.WEXITED 0 | Unix.WEXITED 1 -> true
@@ -246,16 +235,33 @@ let try_handle
                      then []
                      else [ "error_detail", `String trimmed_stderr ]
                    in
-                   Yojson.Safe.to_string
-                     (`Assoc
-                         ([ "ok", `Bool is_ok
-                          ; "op", `String op
-                          ; "path", `String target
-                          ; "pattern", `String pattern
-                          ; "via", `String "host"
-                          ; "status", Keeper_alerting_path.process_status_to_json result.status
-                          ; "matches", lines_to_json ~limit result.stdout
-                          ]
-                         @ error_detail))))))
+                   let payload =
+                     Yojson.Safe.to_string
+                       (`Assoc
+                          ([ "ok", `Bool is_ok
+                           ; "op", `String op
+                           ; "path", `String target
+                           ; "pattern", `String pattern
+                           ; "via", `String "host"
+                           ; "status", Keeper_alerting_path.process_status_to_json result.status
+                           ; "matches", lines_to_json ~limit result.stdout
+                           ]
+                           @ error_detail))
+                   in
+                   if is_ok
+                   then Keeper_tool_execution.success payload
+                   else Keeper_tool_execution.failure payload)))))
   | _ -> None
+;;
+
+let try_handle ~turn_sandbox_factory ~config ~meta ~args ~op ~raw_path =
+  Option.map
+    (fun (result : Keeper_tool_execution.t) -> result.raw_output)
+    (try_handle_with_outcome
+       ~turn_sandbox_factory
+       ~config
+       ~meta
+       ~args
+       ~op
+       ~raw_path)
 ;;

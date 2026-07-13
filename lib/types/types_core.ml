@@ -235,29 +235,19 @@ type task_action =
   | Reject_verification
 [@@deriving show]
 
-(** RFC-0262: who authorizes a transition that would otherwise require the
-    task's assignee. Replaces the anonymous [~force:bool] that voided ownership
-    and every completion gate (RFC-0262 §1.2). Resolved once at the tool
-    boundary (Parse, don't validate); never threaded as a bare bool any layer
-    can flip to [true]. The closed sum is extensible by RFC: a new authority
-    forces the compiler to enumerate every guarded [decide] arm. *)
-type completion_authority =
-  | Assignee  (** the task's current claimant acting on its own claim *)
-  | Operator  (** operator control plane / explicit admin override *)
-  | System
-      (** code-path satisfier (RFC-0199 deterministic evidence probe, GC zombie
-          cleanup); never minted by an LLM/keeper turn *)
-[@@deriving show]
+type configured_llm_completion_decision =
+  | Completion_pass
+  | Completion_reject of string
+  | Completion_verdict_unavailable of string
+[@@deriving show, yojson]
 
-(* Stable wire label for transition-log serialization. Deliberately not
-   [show_completion_authority] — [@@deriving show] emits the constructor name and
-   its formatting is an implementation detail; the log schema (and the §9 auditor
-   that reads it) must pin a fixed lowercase token. *)
-let completion_authority_to_string = function
-  | Assignee -> "assignee"
-  | Operator -> "operator"
-  | System -> "system"
-;;
+type configured_llm_completion_verdict =
+  { decision : configured_llm_completion_decision
+  ; runtime_id : string
+  ; rationale : string option
+  ; evaluated_at : string
+  }
+[@@deriving show, yojson]
 
 let task_action_of_string s =
   match String.lowercase_ascii s with
@@ -514,22 +504,11 @@ type task_execution_links = {
   session_id : string option; [@default None]
 } [@@deriving show, yojson { strict = false }]
 
-(** Task contract - persisted deterministic gate inputs.
+(** Task contract - persisted facts for the LLM completion reviewer.
 
-    [required_evidence : string list] is the live source of truth: the contract
-    evidence gate ([Task_completion_gate]) substring-matches each entry against
-    task-completion notes / handoff refs to decide whether a contracted task
-    may complete.
-
-    RFC-0199 Phase A added a parallel [required_evidence_typed :
-    Evidence_claim.t list] meant for a future [Deterministic_evidence_evaluator]
-    (Phase B). That field was removed (2026-06-03): fan-in was 0 — no producer
-    ever populated it (every site wrote [[]]), no consumer ever read it, and the
-    Phase B evaluator was never implemented. The [Evidence_claim] schema module
-    is retained for when Phase B is built; see RFC-0199 for the deferral note.
-    A future Phase B should re-introduce a typed field with a migration that
-    parses legacy [required_evidence] strings (RFC-0199 open question), not a
-    silently-empty parallel field.
+    [completion_contract], [required_evidence], and [verify_gate_evidence] are
+    supplied to the configured reviewer as task facts. The workspace FSM never
+    interprets their prose, counts entries, or derives a completion verdict.
 
     A [required_tools : string list] field was also removed (2026-06-03,
     same fan-in-0 pattern): it was deprecated and ignored by task claim

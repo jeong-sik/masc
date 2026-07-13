@@ -840,23 +840,14 @@ let test_toml_catalog_resolves_lifecycle_keys () =
   let doc =
     parse_or_fail
       "[lifecycle]\n\
-       self_preservation_ratio = 0.4\n\
-       self_preservation_min = 2\n\
-       dead_ttl_sec = 86400\n\
-       paused_cleanup_ttl_sec = 604800\n"
+       dead_ttl_sec = 86400\n"
   in
   let count, overrides =
     Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
   in
-  check int "applied lifecycle overrides" 4 count;
-  check (option string) "self preservation ratio" (Some "0.4")
-    (List.assoc_opt "MASC_KEEPER_SELF_PRESERVATION_RATIO" overrides);
-  check (option string) "self preservation min" (Some "2")
-    (List.assoc_opt "MASC_KEEPER_SELF_PRESERVATION_MIN_CANDIDATES" overrides);
+  check int "applied lifecycle overrides" 1 count;
   check (option string) "dead ttl" (Some "86400")
-    (List.assoc_opt "MASC_KEEPER_DEAD_TTL_SEC" overrides);
-  check (option string) "paused cleanup ttl" (Some "604800")
-    (List.assoc_opt "MASC_KEEPER_PAUSED_CLEANUP_TTL_SEC" overrides)
+    (List.assoc_opt "MASC_KEEPER_DEAD_TTL_SEC" overrides)
 
 let test_toml_catalog_resolves_web_search_keys () =
   let doc =
@@ -867,14 +858,12 @@ let test_toml_catalog_resolves_web_search_keys () =
        provider_order = \"searxng,brave,duckduckgo\"\n\
        fallbacks = \"duckduckgo,bing_rss\"\n\
        timeout_sec = 12\n\
-       cache_ttl_sec = 45.5\n\
-       rate_limit_window_sec = 20.0\n\
-       rate_limit_max_calls = 9\n"
+       cache_ttl_sec = 45.5\n"
   in
   let count, overrides =
     Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
   in
-  check int "applied web search overrides" 8 count;
+  check int "applied web search overrides" 6 count;
   check (option string) "searxng url" (Some "http://localhost:8888")
     (List.assoc_opt "MASC_SEARXNG_URL" overrides);
   check (option string) "provider" (Some "auto")
@@ -887,10 +876,6 @@ let test_toml_catalog_resolves_web_search_keys () =
     (List.assoc_opt "MASC_WEB_SEARCH_TIMEOUT_SEC" overrides);
   check (option string) "cache ttl" (Some "45.5")
     (List.assoc_opt "MASC_WEB_SEARCH_CACHE_TTL_SEC" overrides);
-  check (option string) "rate window" (Some "20")
-    (List.assoc_opt "MASC_WEB_SEARCH_RATE_LIMIT_WINDOW_SEC" overrides);
-  check (option string) "rate max" (Some "9")
-    (List.assoc_opt "MASC_WEB_SEARCH_RATE_LIMIT_MAX_CALLS" overrides);
   let preempt_searxng name =
     if String.equal name "MASC_SEARXNG_URL"
     then Some "http://operator.example"
@@ -899,7 +884,7 @@ let test_toml_catalog_resolves_web_search_keys () =
   let count, overrides =
     Keeper_runtime_config.resolve_overrides ~env_lookup:preempt_searxng doc
   in
-  check int "env preempts only searxng url" 7 count;
+  check int "env preempts only searxng url" 5 count;
   check (option string) "preempted searxng absent" None
     (List.assoc_opt "MASC_SEARXNG_URL" overrides)
 

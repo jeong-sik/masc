@@ -29,14 +29,12 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 [ -x "$BINARY" ] || { echo "smoke: binary not executable: $BINARY" >&2; exit "$EXIT_SETUP"; }
-[ -f config/tool_policy.toml ] || { echo "smoke: config/tool_policy.toml missing" >&2; exit "$EXIT_SETUP"; }
 [ -f config/runtime.toml ] || { echo "smoke: config/runtime.toml missing" >&2; exit "$EXIT_SETUP"; }
 
 tmp=$(mktemp -d -t masc-smoke.XXXXXX)
 trap 'rm -rf "$tmp"; [ -n "${PID:-}" ] && kill "$PID" 2>/dev/null || true' EXIT
 
 mkdir -p "$tmp/.masc/config"
-cp config/tool_policy.toml "$tmp/.masc/config/tool_policy.toml"
 cp config/runtime.toml "$tmp/.masc/config/runtime.toml"
 
 log="$tmp/boot.log"

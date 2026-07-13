@@ -19,7 +19,6 @@ let status_json () =
     ; ( "supported_controls"
       , `List
           [ `String "operator_pause_resume"
-          ; `String "keeper_auto_pause_auto_resume"
           ; `String "graceful_shutdown"
           ] )
     ; ( "unsupported_controls"

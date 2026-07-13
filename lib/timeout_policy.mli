@@ -13,7 +13,7 @@
     inflating wall time.
 
     Related issues: #9639 (meta), #9662 (keeper_llm_bridge ~24s overshoot),
-    #9629 (governance OAS 60s), #9637 (keeper turn 1200s). *)
+    #9629 (dashboard judge OAS 60s), #9637 (keeper turn 1200s). *)
 
 module Layer : sig
   (** Nested timeout layers, innermost-first.

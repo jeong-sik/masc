@@ -144,21 +144,16 @@ function goalStatusLabel(status: string): string {
   return GOAL_STATUS_LABEL[status] ?? status
 }
 
-// Goal status → semantic css class for .wk-gstatus variants.
-// Prototype data.jsx:355 maps active→ok, at_risk→warn, blocked→bad, verifying→volt
-// (default cls 'ok'). Repo statuses (active/completed/paused/cancelled) folded in.
-const GOAL_STATUS_CLASS: Record<string, 'ok' | 'warn' | 'bad' | 'volt'> = {
-  active: 'ok',
+// Goal status is rendered directly; phase remains a separate badge.
+const GOAL_STATUS_CLASS: Record<string, 'neutral' | 'ok' | 'warn' | 'bad'> = {
+  active: 'neutral',
   completed: 'ok',
-  at_risk: 'warn',
   paused: 'warn',
-  blocked: 'bad',
   cancelled: 'bad',
-  verifying: 'volt',
 }
 
-function goalStatusClass(status: string): 'ok' | 'warn' | 'bad' | 'volt' {
-  return GOAL_STATUS_CLASS[status] ?? 'ok'
+function goalStatusClass(status: string): 'neutral' | 'ok' | 'warn' | 'bad' {
+  return GOAL_STATUS_CLASS[status] ?? 'neutral'
 }
 
 // Gate evidence outcome → Korean outcome word for the right-aligned
@@ -321,13 +316,8 @@ function goalFromGoalTreeNode(node: GoalTreeNode): Goal {
     priority: node.priority,
     status: node.status,
     phase: node.phase,
-    require_completion_approval: node.require_completion_approval,
-    active_verification_request_id:
-      node.active_verification_request?.id
-      ?? node.verification_summary.open_request?.id
-      ?? null,
     parent_goal_id: node.parent_goal_id,
-    last_review_note: node.status_reason || null,
+    last_review_note: null,
     created_at: node.created_at,
     updated_at: node.updated_at,
   }
@@ -482,32 +472,10 @@ function TaskEvidenceLedger({ rows }: { rows: readonly TaskEvidenceLedgerRow[] }
   `
 }
 
-function verificationSourceForGoal(node: GoalTreeNode): 'open_request' | 'latest_request' | 'policy' | 'none' {
-  if (node.active_verification_request || node.verification_summary.open_request) return 'open_request'
-  if (node.verification_summary.latest_request) return 'latest_request'
-  if (node.effective_verifier_policy || node.verification_summary.effective_policy) return 'policy'
-  return 'none'
-}
-
-function hasGoalBlockingEvidence(node: GoalTreeNode): boolean {
-  return node.blocking_source !== 'none'
-    || node.blocking_reason.trim().length > 0
-    || (node.stalled_since ?? '').trim().length > 0
-}
-
 function GoalProjectionDossier({ node }: { node: GoalTreeNode | null | undefined }) {
   if (!node) return null
 
-  const verification = node.verification_summary
-  const verificationSource = verificationSourceForGoal(node)
-  const verificationRequest =
-    node.active_verification_request
-    ?? verification.open_request
-    ?? verification.latest_request
-    ?? null
-  const verifierPolicy = node.effective_verifier_policy ?? verification.effective_policy ?? null
   const completion = node.completion_summary ?? null
-  const showBlocking = hasGoalBlockingEvidence(node)
 
   return html`
     <div
@@ -515,8 +483,6 @@ function GoalProjectionDossier({ node }: { node: GoalTreeNode | null | undefined
       data-testid="goal-dossier"
       data-goal-dossier=${node.id}
       data-goal-dossier-fsm-state=${node.goal_fsm.state}
-      data-goal-dossier-verification=${verificationSource}
-      data-goal-dossier-blocking-source=${node.blocking_source}
       data-goal-dossier-timeline-count=${node.timeline_events.length}
     >
       <div class="wk-dossier-row">
@@ -524,7 +490,6 @@ function GoalProjectionDossier({ node }: { node: GoalTreeNode | null | undefined
         <span class="wk-dossier-chip mono">state ${node.goal_fsm.state}</span>
         <span class="wk-dossier-chip mono">source ${node.goal_fsm.source}</span>
         <span class="wk-dossier-chip mono">activity ${node.goal_fsm.activity_observation}</span>
-        <span class="wk-dossier-chip mono">stagnation ${node.goal_fsm.stagnation_status}</span>
       </div>
 
       ${node.goal_fsm.next_actions.length > 0 ? html`
@@ -536,37 +501,14 @@ function GoalProjectionDossier({ node }: { node: GoalTreeNode | null | undefined
         </div>
       ` : null}
 
-      <div class="wk-dossier-row">
-        <span class="wk-dossier-k">verification</span>
-        ${verificationRequest ? html`
-          <span class="wk-dossier-chip mono">${verificationSource} ${verificationRequest.id}</span>
-          <span class="wk-dossier-chip mono">status ${verificationRequest.status}</span>
-          <span class="wk-dossier-chip mono">target ${verificationRequest.target_phase}</span>
-        ` : verifierPolicy ? html`
-          <span class="wk-dossier-chip mono">policy ${verifierPolicy.required_verdicts}/${verifierPolicy.principals.length}</span>
-        ` : html`
-          <span class="wk-dossier-chip mono">none</span>
-        `}
-        <span class="wk-dossier-chip mono">approve ${verification.approve_count}</span>
-        <span class="wk-dossier-chip mono">reject ${verification.reject_count}</span>
-        <span class="wk-dossier-chip mono">remaining ${verification.remaining_possible}</span>
-        ${node.pending_verification_count > 0 ? html`
-          <span class="wk-dossier-chip warn mono">pending ${node.pending_verification_count}</span>
-        ` : null}
-      </div>
-
       ${completion ? html`
         <div class="wk-dossier-row">
           <span class="wk-dossier-k">completion</span>
           <span class="wk-dossier-chip mono">state ${completion.state}</span>
-          <span class="wk-dossier-chip mono">gate ${completion.gate}</span>
           <span class="wk-dossier-chip mono">tasks ${completion.task_done}/${completion.task_total}</span>
           <span class="wk-dossier-chip mono">pct ${completion.pct == null ? 'unmeasured' : `${completion.pct}%`}</span>
           ${completion.ready_to_request_completion ? html`
             <span class="wk-dossier-chip ok mono">ready to request</span>
-          ` : null}
-          ${completion.active_verification_request ? html`
-            <span class="wk-dossier-chip warn mono">active verification</span>
           ` : null}
         </div>
       ` : null}
@@ -579,7 +521,7 @@ function GoalProjectionDossier({ node }: { node: GoalTreeNode | null | undefined
           <span class="wk-dossier-chip mono">last unavailable</span>
         `}
         <span class="wk-dossier-chip mono">events ${node.timeline_events.length}</span>
-        <span class="wk-dossier-chip mono">stagnation ${node.stagnation_seconds}s</span>
+        <span class="wk-dossier-chip mono">stagnation ${node.stagnation_seconds == null ? 'unavailable' : `${node.stagnation_seconds}s`}</span>
         ${node.latest_keeper_ref ? html`<span class="wk-dossier-chip mono">keeper ${node.latest_keeper_ref}</span>` : null}
         ${node.latest_turn_ref != null ? html`<span class="wk-dossier-chip mono">turn ${node.latest_turn_ref}</span>` : null}
         ${node.linked_keeper_names.map((name) => html`
@@ -588,19 +530,7 @@ function GoalProjectionDossier({ node }: { node: GoalTreeNode | null | undefined
         ${node.pending_approval_count > 0 ? html`
           <span class="wk-dossier-chip warn mono">approvals ${node.pending_approval_count}</span>
         ` : null}
-        ${node.infra_risk_count > 0 ? html`
-          <span class="wk-dossier-chip bad mono">infra risk ${node.infra_risk_count}</span>
-        ` : null}
       </div>
-
-      ${showBlocking ? html`
-        <div class="wk-dossier-row">
-          <span class="wk-dossier-k">blocking</span>
-          <span class="wk-dossier-chip bad mono">source ${node.blocking_source}</span>
-          ${node.blocking_reason ? html`<span class="wk-dossier-text">${node.blocking_reason}</span>` : null}
-          ${node.stalled_since ? html`<span class="wk-dossier-chip warn mono">stalled ${node.stalled_since}</span>` : null}
-        </div>
-      ` : null}
     </div>
   `
 }
@@ -699,9 +629,6 @@ function GoalCard({
   const progress = goalProgressCounts(goalTasks)
   const leadName = leadNameForGoal(goal)
 
-  // Border tint by goal status (prototype .wk-goal.st-warn/.st-bad/.st-volt,
-  // v2.css:812-814): at_risk→amber, blocked→bad, verifying→volt. `st-ok`
-  // has no rule (neutral border) which matches the prototype default.
   return html`
     <div class=${`wk-goal ${open ? 'open' : ''} st-${goalStatusClass(goal.status)}`} data-testid="goal-card" data-goal-id=${goal.id}>
       <button type="button" class="wk-goal-h" onClick=${onToggle} aria-expanded=${open}>
@@ -714,9 +641,6 @@ function GoalCard({
              the card's goal-status pill is dropped here to avoid duplication
              until a backend namespace field exists. Audit workspace.md #3. -->
         <span class="wk-spacer"></span>
-        ${goal.require_completion_approval || goal.active_verification_request_id
-          ? html`<span class="wk-approval" title="완료 승인 필요">✓ 완료 승인</span>`
-          : null}
         ${goal.due_date ? html`<span class="wk-due mono">${goal.due_date}</span>` : null}
         ${leadName ? html`
           <span class=${`wk-lead${keeperByName(leadName) ? '' : ' offline'}`} title=${`리드 · ${leadName}${keeperByName(leadName) ? '' : ' (Offline)'}`}>
@@ -736,12 +660,6 @@ function GoalCard({
         <div class="wk-jobs">
           ${goal.last_review_note ? html`<div class="wk-note">${goal.last_review_note}</div>` : null}
           <${GoalProjectionDossier} node=${goalNode} />
-          ${goal.require_completion_approval && goal.verifier_policy?.principals.length ? html`
-            <div class="wk-verifier">
-              완료 승인 정책 · 검증자
-              ${goal.verifier_policy.principals.map(v => html`<span key=${v.id} class="wk-vchip mono">${v.id}</span>`)}
-            </div>
-          ` : null}
           ${goalTasks.map(t => html`<${TaskRow} key=${t.id} task=${t} onClaim=${onClaim} />`)}
         </div>
       ` : null}
@@ -757,12 +675,9 @@ function GoalCard({
 //   `phase` enum — never by substring.
 //
 //   • "flagged" (지금 상황):  phases that need operator attention:
-//       awaiting_verification | awaiting_approval | blocked | paused
+//       blocked | paused
 //     `executing` = normal active flow — not flagged.
 //     `completed` | `dropped` = terminal — excluded (already closed out).
-//
-//   • "approvals" (완료 승인): goals with require_completion_approval=true
-//     AND phase=awaiting_approval (final sign-off pending).
 //
 //   • "verifyTasks" (게이트): tasks with status=awaiting_verification.
 //     open-gate count from taskGateRows().
@@ -784,8 +699,6 @@ type WkaFlagCls = 'ok' | 'warn' | 'bad' | 'volt'
 
 const GOAL_PHASE_FLAG_CLS: Record<string, WkaFlagCls> = {
   executing: 'ok',
-  awaiting_verification: 'volt',
-  awaiting_approval: 'volt',
   blocked: 'bad',
   paused: 'warn',
   completed: 'ok',
@@ -794,8 +707,6 @@ const GOAL_PHASE_FLAG_CLS: Record<string, WkaFlagCls> = {
 
 const GOAL_PHASE_FLAG_LBL: Record<string, string> = {
   executing: '진행 중',
-  awaiting_verification: '검증 대기',
-  awaiting_approval: '승인 대기',
   blocked: '차단',
   paused: '일시정지',
   completed: '완료',
@@ -817,8 +728,6 @@ function goalPhaseFlagLbl(phase: string): string {
 // substring match. (Adding a new Goal phase requires deciding here whether it
 // needs triage.)
 const GOAL_ATTENTION_PHASES: ReadonlySet<string> = new Set([
-  'awaiting_verification',
-  'awaiting_approval',
   'blocked',
   'paused',
 ])
@@ -834,12 +743,6 @@ interface WkaFlaggedGoal {
   readonly lbl: string
   readonly title: string
   readonly reason: string | null | undefined
-}
-
-interface WkaApprovalGoal {
-  readonly id: string
-  readonly title: string
-  readonly verifiers: ReadonlyArray<string>
 }
 
 interface WkaVerifyTask {
@@ -879,7 +782,6 @@ interface WkaCounts {
 
 interface WorkAsideProps {
   flagged: ReadonlyArray<WkaFlaggedGoal>
-  approvals: ReadonlyArray<WkaApprovalGoal>
   verifyTasks: ReadonlyArray<WkaVerifyTask>
   blockers: ReadonlyArray<WkaBlockerTask>
   backlog: ReadonlyArray<WkaBacklogTask>
@@ -1072,9 +974,9 @@ function KanbanView({
 }
 
 function WorkAside({
-  flagged, approvals, verifyTasks, blockers, backlog, recent, counts, onJump,
+  flagged, verifyTasks, blockers, backlog, recent, counts, onJump,
 }: WorkAsideProps) {
-  const needTotal = approvals.length + verifyTasks.length + blockers.length + backlog.length
+  const needTotal = verifyTasks.length + blockers.length + backlog.length
 
   const [collapsed, setCollapsed] = useState<boolean>(readStoredAsideCollapsed)
   const [w, setW] = useState<number>(readStoredAsideW)
@@ -1241,21 +1143,6 @@ function WorkAside({
             ${needTotal > 0 ? html`<span class="wka-h-n">${needTotal}</span>` : null}
           </div>
           <div class="wka-list" data-testid="wka-todo-list">
-            ${approvals.map(g => html`
-              <button
-                key=${g.id}
-                type="button"
-                class="wka-todo approve"
-                onClick=${() => onJump(g.id)}
-                data-testid="wka-approval-item"
-              >
-                <span class="wka-todo-k">완료 승인</span>
-                <span class="wka-todo-t">${g.title}</span>
-                ${g.verifiers.length > 0
-                  ? html`<span class="wka-todo-m mono">${g.verifiers.join(' · ')}</span>`
-                  : null}
-              </button>
-            `)}
             ${verifyTasks.map(t => html`
               <button
                 key=${t.id}
@@ -1373,12 +1260,7 @@ function WorkSurfaceV2() {
       const next = new Set(prev)
       for (const g of displayGoals) {
         const progress = goalProgressCounts(allTasks.filter(t => t.goal_id === g.id))
-        // Prototype auto-expands attention goals (priority >= 7 || at_risk ||
-        // verifying, work.jsx:138). The live priority scale (1=top vs 9=top)
-        // is not confirmed against the backend, so the priority trigger is
-        // left as-is and only the unambiguous status triggers are aligned:
-        // at_risk / verifying / any blocked task. Audit workspace.md #7.
-        if (g.priority === 1 || g.status === 'at_risk' || g.status === 'verifying' || progress.blocked > 0) next.add(g.id)
+        if (g.priority === 1 || progress.blocked > 0) next.add(g.id)
       }
       return next
     })
@@ -1504,16 +1386,6 @@ function WorkSurfaceV2() {
         lbl: goalPhaseFlagLbl(g.phase),
         title: g.title,
         reason: g.last_review_note,
-      })),
-  [goalList])
-
-  const wkaApprovals = useMemo((): ReadonlyArray<WkaApprovalGoal> =>
-    goalList
-      .filter(g => g.require_completion_approval === true && g.phase === 'awaiting_approval')
-      .map(g => ({
-        id: g.id,
-        title: g.title,
-        verifiers: g.verifier_policy?.principals.map(p => p.id) ?? [],
       })),
   [goalList])
 
@@ -1743,7 +1615,6 @@ function WorkSurfaceV2() {
       ${goalCreateOpen ? html`<${GoalCreateForm} />` : html`
         <${WorkAside}
           flagged=${wkaFlagged}
-          approvals=${wkaApprovals}
           verifyTasks=${wkaVerifyTasks}
           blockers=${wkaBlockers}
           backlog=${wkaBacklog}

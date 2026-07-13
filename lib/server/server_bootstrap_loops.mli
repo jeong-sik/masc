@@ -7,14 +7,6 @@
     caller's [Switch].  Public surface is intentionally tiny — most of
     the work lives in private helpers in the [.ml]. *)
 
-val install_tooling :
-  governance_level:string ->
-  Mcp_server.server_state ->
-  unit
-(** Register the keeper / governance / cost tools with [server_state]
-    according to [governance_level] (e.g. ["restricted"], ["full"]).
-    Idempotent; safe to call once per server instance. *)
-
 type keeper_persistence_report =
   { shutdown : Keeper_shutdown_runtime.restored_inventory
   ; delivery : Keeper_chat_delivery_journal.recovery_report

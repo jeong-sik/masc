@@ -15,7 +15,6 @@ describe('toKeeperPhase — backend lowercase to PascalCase normalization', () =
     expect(toKeeperPhase('crashed')).toBe('Crashed')
     expect(toKeeperPhase('restarting')).toBe('Restarting')
     expect(toKeeperPhase('dead')).toBe('Dead')
-    expect(toKeeperPhase('zombie')).toBe('Zombie')
   })
 
   it('accepts PascalCase input for forward compatibility', () => {
@@ -23,7 +22,6 @@ describe('toKeeperPhase — backend lowercase to PascalCase normalization', () =
     expect(toKeeperPhase('Running')).toBe('Running')
     expect(toKeeperPhase('Overflowed')).toBe('Overflowed')
     expect(toKeeperPhase('HandingOff')).toBe('HandingOff')
-    expect(toKeeperPhase('Zombie')).toBe('Zombie')
   })
 
   it('trims surrounding whitespace before matching', () => {
@@ -139,7 +137,6 @@ describe('normalizeKeepers lifecycle metrics', () => {
           kind: 'approval_required',
           source: 'audit_approvals',
           tool: 'Write',
-          risk: 'high',
           turn_id: 178,
           at: '2026-06-06T02:49:01Z',
         },
@@ -157,7 +154,6 @@ describe('normalizeKeepers lifecycle metrics', () => {
       kind: 'approval_required',
       source: 'audit_approvals',
       tool: 'Write',
-      risk: 'high',
       turn_id: 178,
     })
   })
@@ -362,11 +358,6 @@ describe('normalizeKeepers lifecycle metrics', () => {
           blocked_task_count: 2,
           convergence: 0.25,
         },
-        approval_policy_effective: {
-          allow_rules: 1,
-          deny_rules: 0,
-          persisted_rules: 1,
-        },
       },
     ])
 
@@ -380,10 +371,6 @@ describe('normalizeKeepers lifecycle metrics', () => {
         linked_task_count: 4,
         blocked_task_count: 2,
         convergence: 0.25,
-      },
-      approval_policy_effective: {
-        allow_rules: 1,
-        persisted_rules: 1,
       },
     })
   })
@@ -407,7 +394,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
           },
           execution_summary: {
             sandbox_summary: 'docker / none',
-            mutation_guard_summary: 'mutation_contract_not_observed',
+            completion_observation_summary: 'not_observed',
             latest_receipt_at: '2026-04-23T00:10:00Z',
           },
           latest_causal_event: {
@@ -441,7 +428,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
       },
       execution_summary: {
         sandbox_summary: 'docker / none',
-        mutation_guard_summary: 'mutation_contract_not_observed',
+        completion_observation_summary: 'not_observed',
       },
       latest_causal_event: {
         kind: 'approval_pending',
@@ -798,11 +785,9 @@ describe('normalizeKeepers lifecycle metrics', () => {
         paused: true,
         keepalive_running: true,
         pause_state: 'paused',
-        runtime_blocker_state: 'continue_gate',
-        runtime_blocker_class: 'ambiguous_post_commit_timeout',
-        runtime_blocker_summary:
-          'Mutating tools [keeper_fs_edit] committed before the turn timed out.',
-        runtime_blocker_continue_gate: true,
+        runtime_blocker_state: 'blocked',
+        runtime_blocker_class: 'turn_timeout',
+        runtime_blocker_summary: 'Provider turn timed out.',
         last_blocker: 'missing social headers',
         last_autonomous_action_at: '2026-04-04T14:08:35Z',
         created_at: '2026-04-03T14:59:29Z',
@@ -815,11 +800,9 @@ describe('normalizeKeepers lifecycle metrics', () => {
       paused: true,
       keepalive_running: true,
       pause_state: 'paused',
-      runtime_blocker_state: 'continue_gate',
-      runtime_blocker_class: 'ambiguous_post_commit_timeout',
-      runtime_blocker_summary:
-        'Mutating tools [keeper_fs_edit] committed before the turn timed out.',
-      runtime_blocker_continue_gate: true,
+      runtime_blocker_state: 'blocked',
+      runtime_blocker_class: 'turn_timeout',
+      runtime_blocker_summary: 'Provider turn timed out.',
       last_blocker: 'missing social headers',
       last_autonomous_action_at: '2026-04-04T14:08:35Z',
       created_at: '2026-04-03T14:59:29Z',

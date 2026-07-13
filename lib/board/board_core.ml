@@ -127,120 +127,6 @@ let get_post_and_comments store ~post_id ?comment_offset ?comment_limit () : (po
         Ok (post, sliced))
 ;;
 
-let reclassify_posts store ?(limit = 5200) ?(dry_run = true) () =
-  maybe_sweep store;
-  let scan_limit = max 0 (min limit 5200) in
-  let json_string name json =
-    match Json_util.assoc_member_opt name json with
-    | Some (`String value) when not (String.equal (String.trim value) "") -> Some value
-    | _ -> None
-  in
-  let json_float name json =
-    match Json_util.assoc_member_opt name json with
-    | Some (`Float value) -> Some value
-    | Some (`Int value) -> Some (Stdlib.Float.of_int value)
-    | _ -> None
-  in
-  let persisted_candidates =
-    let now = Time_compat.now () in
-    let path = persist_path () in
-    if Fs_compat.file_exists path
-    then
-      Fs_compat.load_jsonl path
-      |> List.filter_map (fun json ->
-        match json_string "id" json, json_string "author" json with
-        | Some id, Some author ->
-          (match Option.bind (json_string "visibility" json) visibility_of_string with
-           | Some visibility ->
-             let expires_at = json_float "expires_at" json |> Option.value ~default:0.0 in
-             if
-               Stdlib.Float.compare expires_at 0.0 > 0
-               && Stdlib.Float.compare expires_at now <= 0
-             then None
-             else (
-               let stored_kind =
-                 Option.bind (json_string "post_kind" json) post_kind_of_string
-               in
-               let hearth = json_string "hearth" json in
-               let meta_json =
-                 match Json_util.assoc_member_opt "meta" json with
-                 | Some (`Assoc _ as meta) -> Some meta
-                 | _ -> None
-               in
-               let created_at =
-                 json_float "created_at" json |> Option.value ~default:0.0
-               in
-               let canonical_kind =
-                 legacy_migrate_post_kind
-                   ~author
-                   ~meta_json
-                   ~visibility
-                   ~expires_at
-                   ~hearth
-               in
-               Some (id, created_at, stored_kind, canonical_kind))
-           | None -> None)
-        | _ -> None)
-    else []
-  in
-  let total = List.length persisted_candidates in
-  let selected_candidates =
-    persisted_candidates
-    |> List.sort (fun (_, created_a, _, _) (_, created_b, _, _) ->
-      Stdlib.Float.compare created_b created_a)
-    |> List.filteri (fun idx _ -> idx < scan_limit)
-  in
-  let report, post_snapshot =
-    with_lock store (fun () ->
-      let scanned = ref 0 in
-      let changed = ref 0 in
-      let unchanged = ref 0 in
-      let changed_post_ids = ref [] in
-      let record_changed_id id =
-        if List.length !changed_post_ids < 20
-        then changed_post_ids := id :: !changed_post_ids
-      in
-      selected_candidates
-      |> List.iter (fun (post_id, _, stored_kind, canonical_kind) ->
-        Stdlib.incr scanned;
-        if Option.equal ( = ) stored_kind (Some canonical_kind)
-        then Stdlib.incr unchanged
-        else (
-          Stdlib.incr changed;
-          record_changed_id post_id;
-          if not dry_run
-          then (
-            match Hashtbl.find_opt store.posts post_id with
-            | Some post ->
-              Hashtbl.replace store.posts post_id { post with post_kind = canonical_kind }
-            | None -> ())));
-      let post_snapshot =
-        if (not dry_run) && !changed > 0
-        then (
-          invalidate_post_caches store;
-          store.dirty_posts <- false;
-          Hashtbl.clear store.dirty_post_ids;
-          store.last_flush <- Time_compat.now ();
-          Some (posts_jsonl_unlocked store))
-        else None
-      in
-      ( { backend = "jsonl"
-        ; dry_run
-        ; scanned = !scanned
-        ; changed = !changed
-        ; unchanged = !unchanged
-        ; skipped = max 0 (total - !scanned)
-        ; apply_failures = 0
-        ; changed_post_ids = List.rev !changed_post_ids
-        }
-      , post_snapshot ))
-  in
-  (match post_snapshot with
-   | Some content -> with_persist_lock store (fun () -> save_posts_jsonl content)
-   | None -> ());
-  report
-;;
-
 let list_posts store ?(visibility_filter = None) ?hearth ?(limit = 50) () : post list =
   maybe_sweep store;
   with_lock store (fun () ->
@@ -271,13 +157,7 @@ let list_posts store ?(visibility_filter = None) ?hearth ?(limit = 50) () : post
           (fun (p : post) -> Option.equal String.equal p.hearth (Some h_norm))
           filtered
     in
-    (* Cap at Limits.max_posts (default 10_000) as an OOM guard. The
-       previous inner cap of 100 was a duplicate of Board_dispatch.list_posts's
-       fetch_limit guard (`max limit 500`) and broke offset-based pagination:
-       when the dashboard requested offset=100 limit=100, Board_dispatch
-       passed probe_fetch=201 here but we returned only 100, so fetched_len
-       never exceeded window_end and has_more went stale at ~100-200 posts. *)
-    take (min limit Limits.max_posts) filtered)
+    take limit filtered)
 ;;
 
 (** Full-scan search over all posts (no limit on scan, only on results).
@@ -302,7 +182,7 @@ let search_posts store ~predicate ~limit : post list =
 
 (** {1 Comment Operations} *)
 
-let add_comment_with_status
+let add_comment
       store
       ~post_id
       ~author
@@ -310,7 +190,7 @@ let add_comment_with_status
       ?parent_id
       ?(ttl_hours = Limits.default_ttl_hours)
       ()
-  : (comment * [ `Fresh | `Dedup ], board_error) Result.t
+  : (comment, board_error) Result.t
   =
   maybe_sweep store;
   (* Validate all IDs first *)
@@ -332,8 +212,8 @@ let add_comment_with_status
         | Error e -> Error e
         | Ok parent_cid ->
           (* Validate content *)
-          if String.length content > Limits.max_content_length
-          then Error (Validation_error "Content too long")
+          if ttl_hours < 0
+          then Error (Validation_error "ttl_hours must be non-negative")
           else if String.length content = 0
           then Error (Validation_error "Content cannot be empty")
           else (
@@ -343,79 +223,15 @@ let add_comment_with_status
                 match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
                 | None -> Error (Post_not_found post_id)
                 | Some post ->
-                  let post_key = Post_id.to_string pid in
-                  let comment_ids =
-                    Hashtbl.find_opt store.comments_by_post post_key
-                    |> Option.value ~default:[]
-                  in
-                  let author_str = Agent_id.to_string author_id in
-                  let parent_key = Option.map Comment_id.to_string parent_cid in
-                  let dedup_match =
-                    comment_ids
-                    |> List.filter_map (fun cid -> Hashtbl.find_opt store.comments cid)
-                    |> List.find_opt (fun (c : comment) ->
-                      String.equal (Agent_id.to_string c.author) author_str
-                      && Option.equal
-                           String.equal
-                           (Option.map Comment_id.to_string c.parent_id)
-                           parent_key
-                      && String.equal c.content content)
-                  in
-                  (match dedup_match with
-                   | Some existing ->
-                     Log.BoardLog.info
-                       "dedup: skipping duplicate comment author=%s post_id=%s \
-                        content_len=%d existing_id=%s"
-                       author_str
-                       post_key
-                       (String.length content)
-                       (Comment_id.to_string existing.id);
-                     Ok (`Dedup_hit existing)
-                   | None ->
-                     (* PR #13490 enforced sub-board post policy for
-                        [create_post] but left [add_comment] unguarded —
-                        non-members could comment on [Members_only] /
-                        [Owner_only] sub-boards through any parent post in
-                        that sub-board. The author allowed predicate is
-                        the same one [create_post] uses, applied to the
-                        target post's [hearth].  We run this after the
-                        dedup check (mirroring [create_post]) so an
-                        author whose earlier comment is already on the
-                        post stays idempotent — only fresh attempts hit
-                        the policy gate. *)
-                     (match
-                        validate_sub_board_post_policy_unlocked
-                          store
-                          ~author_id
-                          ~hearth:post.hearth
-                      with
+                  match
+                    validate_sub_board_post_policy_unlocked
+                      store
+                      ~author_id
+                      ~hearth:post.hearth
+                  with
                       | Error e -> Error e
                       | Ok () ->
-                     (* Check comment count using index after duplicate
-                        detection so a retry of an existing comment remains
-                        idempotent even on a full thread. *)
-                     let post_comment_count = List.length comment_ids in
-                     if post_comment_count >= Limits.max_comments_per_post
-                     then
-                       Error
-                         (Capacity_exceeded
-                            { current = post_comment_count
-                            ; max = Limits.max_comments_per_post
-                            })
-                     else (
                     let now = Time_compat.now () in
-                    match check_comment_rate_limit ~author:author_str ~now with
-                    | Some retry_after ->
-                      Error (Rate_limited { retry_after })
-                    | None ->
-                    let ttl =
-                      match post.post_kind with
-                      | Automation_post | System_post ->
-                        let forced = Limits.automation_ttl_hours in
-                        if ttl_hours = 0 then forced else min ttl_hours forced
-                      | Human_post ->
-                        if ttl_hours = 0 then 0 else min ttl_hours Limits.max_ttl_hours
-                    in
                     let comment =
                       { id = Comment_id.generate ()
                       ; post_id = pid
@@ -424,9 +240,12 @@ let add_comment_with_status
                       ; content
                       ; created_at = now
                       ; expires_at =
-                          (if ttl = 0
+                          (if ttl_hours = 0
                            then 0.0
-                           else now +. (Stdlib.Float.of_int ttl *. Masc_time_constants.hour))
+                           else
+                             now
+                             +. (Stdlib.Float.of_int ttl_hours
+                                 *. Masc_time_constants.hour))
                       ; votes_up = 0
                       ; votes_down = 0
                       }
@@ -451,10 +270,10 @@ let add_comment_with_status
                     mark_dirty_comment store (Comment_id.to_string comment.id);
                     invalidate_post_caches store;
                     invalidate_comment_caches store;
-                    Ok (`Fresh (comment, post, posts_jsonl_unlocked store))))))
+                    Ok (comment, post, posts_jsonl_unlocked store))
             in
             match board_result with
-            | Ok (`Fresh (comment, previous_post, posts_jsonl)) ->
+            | Ok (comment, previous_post, posts_jsonl) ->
               (match
                  with_persist_lock store (fun () ->
                    match append_comment comment with
@@ -464,27 +283,14 @@ let add_comment_with_status
                      Ok ())
                with
                | Ok () ->
-                 record_comment_timestamp
-                   ~author:(Agent_id.to_string comment.author)
-                   ~now:comment.created_at;
                  with_lock store (fun () ->
                    mark_dirty_post store (Post_id.to_string comment.post_id);
                    mark_dirty_comment store (Comment_id.to_string comment.id));
-                 Ok (comment, `Fresh)
+                 Ok comment
                | Error e ->
                  rollback_fresh_comment store ~comment ~previous_post;
                  Error e)
-            | Ok (`Dedup_hit existing) -> Ok (existing, `Dedup)
             | Error _ as e -> e)))
-;;
-
-let add_comment store ~post_id ~author ~content ?parent_id ?ttl_hours () :
-  (comment, board_error) Result.t =
-  match add_comment_with_status store ~post_id ~author ~content ?parent_id
-          ?ttl_hours ()
-  with
-  | Ok (comment, _) -> Ok comment
-  | Error _ as e -> e
 ;;
 
 let get_comments store ~post_id : (comment list, board_error) Result.t =
@@ -707,9 +513,7 @@ let toggle_reaction store ~target_type ~target_id ~user_id ~emoji
           in
           Ok { target_type; target_id; user_id = user_id_string; emoji; reacted; summary })
     in
-    (match result with
-     | Ok _ -> rewrite_reactions store
-     | Error _ -> ());
+    Result.iter (fun _ -> rewrite_reactions store) result;
     result
 ;;
 
@@ -794,10 +598,6 @@ let create_sub_board
                Error
                  (Already_exists (Printf.sprintf "Sub-board slug %S already exists" slug))
              else (
-               let current = Hashtbl.length store.sub_boards in
-               if current >= Limits.max_sub_boards
-               then Error (Capacity_exceeded { current; max = Limits.max_sub_boards })
-               else (
                  let id = Sub_board_id.generate () in
                  let sb =
                    { id
@@ -813,7 +613,7 @@ let create_sub_board
                  in
                  Hashtbl.replace store.sub_boards (Sub_board_id.to_string id) sb;
                  Hashtbl.replace store.sub_boards_by_slug slug (Sub_board_id.to_string id);
-                 Ok sb)))
+                 Ok sb))
          in
          (match result with
           | Ok sb ->
@@ -866,9 +666,7 @@ let update_sub_board
         Hashtbl.replace store.sub_boards (Sub_board_id.to_string sb.id) updated;
         Ok updated)
   in
-  (match result with
-   | Ok _ -> rewrite_sub_boards store
-   | Error _ -> ());
+  Result.iter (fun _ -> rewrite_sub_boards store) result;
   result
 ;;
 

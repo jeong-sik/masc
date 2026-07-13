@@ -337,7 +337,7 @@ describe('KeeperDetailPage', () => {
       },
       trust: {
         disposition: 'Blocked',
-        disposition_reason: 'tool_route_recoverable_failure',
+        disposition_reason: 'provider_runtime_error',
         needs_attention: true,
       },
     } as unknown as Keeper

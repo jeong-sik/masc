@@ -3,7 +3,6 @@
     Working context types live in {!Keeper_types}.
     Pure context operations are in {!Keeper_context_core}.
     Compaction policy is in {!Keeper_compact_policy}.
-    Handoff rollover is in {!Keeper_rollover}.
     Post-turn lifecycle is in {!Keeper_post_turn}.
 
     This module preserves the original public API so that callers
@@ -60,30 +59,6 @@ let checkpoint_max_tokens = Keeper_context_core.checkpoint_max_tokens
 let context_of_oas_checkpoint = Keeper_context_core.context_of_oas_checkpoint
 let save_oas_checkpoint = Keeper_context_core.save_oas_checkpoint
 let load_context_from_checkpoint = Keeper_context_core.load_context_from_checkpoint
-
-(* ================================================================ *)
-(* Re-export from Keeper_rollover                                    *)
-(* ================================================================ *)
-
-type handoff_rollover = Keeper_rollover.handoff_rollover = {
-  updated_meta : keeper_meta;
-  handoff_json : Yojson.Safe.t option;
-  attempted : bool;
-  failure_reason : string option;
-  context_ratio : float;
-  context_tokens : int;
-  context_max : int;
-  message_count : int;
-}
-
-let maybe_rollover_oas_handoff = Keeper_rollover.maybe_rollover_oas_handoff
-
-type rollover_gate_decision = Keeper_rollover.rollover_gate_decision =
-  | Skip of string
-  | Go of string
-
-let blocker_class_indicates_overflow = Keeper_rollover.blocker_class_indicates_overflow
-let classify_rollover_gate = Keeper_rollover.classify_rollover_gate
 
 (* ================================================================ *)
 (* Re-export from Keeper_compact_policy                              *)
@@ -378,13 +353,6 @@ let canonical_tool_name name = Keeper_tool_resolution.canonical_tool_name name
 
 let keeper_tool_name_matches tool name =
   String.equal (canonical_tool_name name) tool
-
-let keeper_write_done tool_names =
-  List.exists
-    (fun name ->
-       List.exists (fun tool -> keeper_tool_name_matches tool name)
-         keeper_board_write_tool_names)
-    tool_names
 
 let keeper_action_kind_of_tool_names tool_names =
   [ "keeper_board_post", "post"

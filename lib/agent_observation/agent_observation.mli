@@ -19,7 +19,7 @@ type codebase_partition =
           is the live instance. *)
   | Legacy_default
       (** No [canonical_url]/[repo_id] supplied, or record has no [partition]
-          field (tool/turn/pr_event). Structural ceiling, NOT a soft fallback.
+          field (tool/turn). Structural ceiling, NOT a soft fallback.
           v2 §7 "(3) default 미갱신". *)
 
 type tool_event =
@@ -33,16 +33,6 @@ type tool_event =
   ; duration_ms : float
   ; output_text : string
   ; input : Yojson.Safe.t
-  }
-
-type pr_event =
-  { base_path : string
-  ; partition : codebase_partition
-  ; keeper_id : string
-  ; turn_id : string
-  ; output_text : string
-  ; tool_name : string
-  ; success : bool
   }
 
 type turn_event =
@@ -80,6 +70,21 @@ type annotation_kind =
 val annotation_kind_to_string : annotation_kind -> string
 val annotation_kind_of_string : string -> annotation_kind option
 
+type annotation_reference =
+  { relation : string
+  ; reference : string
+  }
+(** Product-neutral link carried by an annotation.  Both fields are opaque to
+    the observation bus: producers choose the relation label and reference
+    value, while consumers may render but must not interpret them. *)
+
+val annotation_references_to_json : annotation_reference list -> Yojson.Safe.t
+
+val annotation_references_of_json :
+  Yojson.Safe.t -> (annotation_reference list, string) result
+(** Decode a [references] array.  [`Null] means no references.  Malformed or
+    blank entries are rejected explicitly instead of being dropped. *)
+
 type annotation_request =
   { base_path : string
   ; partition : codebase_partition
@@ -91,14 +96,7 @@ type annotation_request =
   ; content : string
   ; goal_id : string option
   ; task_id : string option
-  ; board_post_id : string option
-  ; comment_id : string option
-  ; pr_id : string option
-  ; git_ref : string option
-  ; log_id : string option
-  ; session_id : string option
-  ; operation_id : string option
-  ; worker_run_id : string option
+  ; references : annotation_reference list
   }
 
 type annotation_result =
@@ -109,7 +107,6 @@ type annotation_result =
   }
 
 type tool_event_sink = tool_event -> unit
-type pr_event_sink = pr_event -> unit
 type turn_event_sink = turn_event -> unit
 type write_region_error =
   | Write_region_sink_not_installed
@@ -121,13 +118,11 @@ type write_region_sink = write_region_event -> (unit, write_region_error) result
 type annotation_sink = annotation_request -> (annotation_result, string) result
 
 val register_tool_event_sink : tool_event_sink -> unit
-val register_pr_event_sink : pr_event_sink -> unit
 val register_turn_event_sink : turn_event_sink -> unit
 val register_write_region_sink : write_region_sink -> unit
 val register_annotation_sink : annotation_sink -> unit
 
 val emit_tool_event : tool_event -> unit
-val emit_pr_event : pr_event -> unit
 val emit_turn_event : turn_event -> unit
 val emit_write_region_event : write_region_event -> (unit, write_region_error) result
 val emit_annotation_request : annotation_request -> (annotation_result, string) result

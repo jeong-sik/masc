@@ -337,17 +337,14 @@ let test_schema_union_type_does_not_raise () =
         ( "properties",
           `Assoc
             [
-              ( "quantitative_evidence",
+              ( "payload",
                 `Assoc
                   [
                     ( "type",
                       `List
                         [ `String "object"; `String "string"; `String "array" ]
                     );
-                    ( "description",
-                      `String
-                        "Required for code-count or line-number claims."
-                    );
+                    ("description", `String "A generic union-typed payload.");
                   ] );
             ] );
       ]
@@ -356,7 +353,7 @@ let test_schema_union_type_does_not_raise () =
   | [ (param : Agent_sdk.Types.tool_param) ] ->
       Alcotest.(check string)
         "name"
-        "quantitative_evidence"
+        "payload"
         param.name;
       Alcotest.(check bool) "optional" false param.required;
       (match param.param_type with
@@ -1589,7 +1586,7 @@ let assert_validation_rejects ~label ~schema ~tool_name ~args ~snippets =
       label
       (Yojson.Safe.to_string forwarded)
 
-let test_high_risk_tool_contract_rejection_corpus () =
+let test_typed_tool_contract_rejection_corpus () =
   List.iter
     (fun (label, tool_name, schema, args, snippets) ->
        assert_validation_rejects ~label ~tool_name ~schema ~args ~snippets)
@@ -1741,7 +1738,7 @@ let test_task_lifecycle_guidance_is_externalized () =
   assert_contains
     "external rule pins the verification completion path (RFC-0323 G-4)"
     rule
-    "a verifier (not the assignee) then approves it to done";
+    "Every completion request is judged by the configured LLM";
   assert_contains
     "external workflow includes start transition"
     workflow
@@ -2091,100 +2088,6 @@ let test_oneof_null_const_matches_non_null_branch () =
 ;;
 
 (* ================================================================ *)
-(* Production schema regression: Keeper_schema.tool_access_schema   *)
-(* ================================================================ *)
-
-let keeper_tool_access_parent_schema () =
-  `Assoc
-    [
-      ("type", `String "object");
-      ( "properties",
-        `Assoc [ ("tool_access", Keeper_schema.tool_access_schema "test") ] );
-      ("required", `List [ `String "tool_access" ]);
-    ]
-;;
-
-let test_keeper_schema_tool_access_array () =
-  let schema = keeper_tool_access_parent_schema () in
-  let args =
-    `Assoc
-      [ ("tool_access", `List [`String "masc_status"; `String "tool_execute"]) ]
-  in
-  match Tool_input_validation.validate_args ~schema ~name:"test" ~args () with
-  | Ok _ -> ()
-  | Error result ->
-    Alcotest.failf
-      "expected tool_access array to pass: %s"
-      (Yojson.Safe.to_string (Tool_result.data result))
-;;
-
-let test_keeper_schema_tool_access_rejects_object () =
-  let schema = keeper_tool_access_parent_schema () in
-  let args =
-    `Assoc [ ("tool_access", `Assoc [("tools", `List [`String "rg"])]) ]
-  in
-  match Tool_input_validation.validate_args ~schema ~name:"test" ~args () with
-  | Ok _ -> Alcotest.fail "expected object form to fail"
-  | Error _ -> ()
-;;
-
-let test_keeper_schema_tool_access_rejects_string_value () =
-  let schema = keeper_tool_access_parent_schema () in
-  let args = `Assoc [ ("tool_access", `String "masc_status") ] in
-  match Tool_input_validation.validate_args ~schema ~name:"test" ~args () with
-  | Ok _ -> Alcotest.fail "expected string value to fail"
-  | Error _ -> ()
-;;
-
-let get_schema_property_description schema name =
-  match schema with
-  | `Assoc fields ->
-    (match List.assoc_opt "properties" fields with
-     | Some (`Assoc props) ->
-       (match List.assoc_opt name props with
-        | Some (`Assoc prop_fields) ->
-          (match List.assoc_opt "description" prop_fields with
-           | Some (`String desc) -> Some desc
-           | _ -> None)
-        | _ -> None)
-     | _ -> None)
-  | _ -> None
-;;
-
-let test_keeper_schema_tool_access_description_no_allowlist () =
-  let schemas = Keeper_schema.keeper_schemas in
-  let check_schema tool_name =
-    match List.find_opt (fun s -> s.Masc_domain.name = tool_name) schemas with
-    | None -> Alcotest.failf "%s schema not found" tool_name
-    | Some schema ->
-      (match get_schema_property_description schema.Masc_domain.input_schema "tool_access" with
-       | None -> Alcotest.failf "%s: tool_access description missing" tool_name
-       | Some desc ->
-         if String_util.contains_substring desc "allowlist"
-         then Alcotest.failf "%s: tool_access description contains 'allowlist': %s" tool_name desc;
-         if not (String_util.contains_substring desc "candidate profiles for discovery")
-         then Alcotest.failf "%s: tool_access description missing expected text: %s" tool_name desc)
-  in
-  check_schema "masc_keeper_create_from_persona";
-  check_schema "masc_keeper_up"
-;;
-
-let test_keeper_schema_tool_denylist_description () =
-  let schemas = Keeper_schema.keeper_schemas in
-  let check_schema tool_name =
-    match List.find_opt (fun s -> s.Masc_domain.name = tool_name) schemas with
-    | None -> Alcotest.failf "%s schema not found" tool_name
-    | Some schema ->
-      (match get_schema_property_description schema.Masc_domain.input_schema "tool_denylist" with
-       | None -> Alcotest.failf "%s: tool_denylist description missing" tool_name
-       | Some desc ->
-         if not (String_util.contains_substring desc "Execution removal layer")
-         then Alcotest.failf "%s: tool_denylist description missing expected text: %s" tool_name desc)
-  in
-  check_schema "masc_keeper_up"
-;;
-
-(* ================================================================ *)
 (* Runner                                                            *)
 (* ================================================================ *)
 
@@ -2320,9 +2223,9 @@ let () =
       Alcotest.test_case "required enum blanks are not stripped" `Quick
         test_registered_hook_required_enum_blank_is_not_stripped;
     ]);
-    ("high_risk_contract_harness", [
-      Alcotest.test_case "rejects live high-risk invalid call corpus" `Quick
-        test_high_risk_tool_contract_rejection_corpus;
+    ("typed_tool_contract_harness", [
+      Alcotest.test_case "rejects invalid typed call corpus" `Quick
+        test_typed_tool_contract_rejection_corpus;
       Alcotest.test_case "keeper prompt hints match schema-required fields" `Quick
         test_keeper_tool_hint_contracts_match_required_fields;
       Alcotest.test_case "orchestrator prompt includes start transition" `Quick
@@ -2347,17 +2250,5 @@ let () =
         test_oneof_null_const_matches_null_branch;
       Alcotest.test_case "null const: non-null branch matches" `Quick
         test_oneof_null_const_matches_non_null_branch;
-    ]);
-    ("keeper_schema_tool_access", [
-      Alcotest.test_case "array passes" `Quick
-        test_keeper_schema_tool_access_array;
-      Alcotest.test_case "object rejected" `Quick
-        test_keeper_schema_tool_access_rejects_object;
-      Alcotest.test_case "string value rejected" `Quick
-        test_keeper_schema_tool_access_rejects_string_value;
-      Alcotest.test_case "description does not contain allowlist" `Quick
-        test_keeper_schema_tool_access_description_no_allowlist;
-      Alcotest.test_case "denylist description is execution removal layer" `Quick
-        test_keeper_schema_tool_denylist_description;
     ]);
   ]

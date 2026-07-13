@@ -71,66 +71,73 @@ let save_raw_token dir ~agent_name ~raw_token =
   Auth.save_private_text_file (Filename.concat auth_dir (agent_name ^ ".token")) raw_token
 ;;
 
-let test_public_policy_absent_without_required_bearer () =
+let test_policy_absent_without_required_bearer () =
   with_workspace (fun dir ->
     save_auth_config dir ~enabled:true ~require_token:true;
     with_env "MASC_TOKEN" None (fun () ->
       with_env "MASC_INTERNAL_MCP_TOKEN" (Some "internal-token") (fun () ->
         check
           bool
-	          "required bearer missing returns no public runtime-MCP policy"
-	          true
-	          (Option.is_none
-	             (Policy.public_mcp_runtime_policy_of_tool_names
-	                ~base_path:dir
-	                [ "masc_tasks" ])))))
+          "required bearer missing returns no runtime-MCP policy"
+          true
+          (Option.is_none
+             (Policy.runtime_mcp_policy_of_tool_names
+                ~base_path:dir
+                [ "masc_tasks" ])))))
 ;;
 
-let test_public_policy_allowed_when_bearer_not_required () =
+let test_headerless_policy_when_bearer_not_required () =
   with_workspace (fun dir ->
     save_auth_config dir ~enabled:true ~require_token:false;
     with_env "MASC_TOKEN" None (fun () ->
-	      match
-	        Policy.public_mcp_runtime_policy_of_tool_names
-	          ~base_path:dir
-	          [ "masc_tasks" ]
-	      with
+      match
+        Policy.runtime_mcp_policy_of_tool_names
+          ~base_path:dir
+          [ "masc_tasks" ]
+      with
       | None -> fail "auth-optional workspace should allow headerless runtime-MCP policy"
       | Some policy ->
         check (list (pair string string)) "no auth headers" [] (masc_headers policy)))
 ;;
 
-let test_keeper_policy_uses_internal_token_without_public_bearer () =
+let test_keeper_policy_uses_per_keeper_token_independent_of_tool_name () =
   with_workspace (fun dir ->
     save_auth_config dir ~enabled:true ~require_token:true;
-    let internal_token = "deterministic-internal-token" in
-    Auth.save_internal_keeper_token_hash dir ~raw_token:internal_token;
+    let keeper_token = "deterministic-keeper-token" in
+    save_raw_token
+      dir
+      ~agent_name:"keeper-rondo-agent"
+      ~raw_token:keeper_token;
     with_env "MASC_TOKEN" None (fun () ->
-      with_env "MASC_INTERNAL_MCP_TOKEN" (Some internal_token) (fun () ->
-        match
-	          Policy.runtime_mcp_policy_of_tool_names
-	            ~base_path:dir
-	            ~agent_name:"keeper-rondo-agent"
-	            [ "masc_tasks" ]
-        with
-        | None -> fail "keeper runtime-MCP policy should use internal token"
-        | Some policy ->
-          let headers = masc_headers policy in
-          check
-            (option string)
-            "internal token header"
-            (Some internal_token)
-            (find_header "x-masc-internal-token" headers);
-          check
-            (option string)
-            "keeper identity header"
-            (Some "rondo")
-            (find_header "x-masc-keeper-name" headers);
-          check
-            (option string)
-            "agent identity header"
-            (Some "keeper-rondo-agent")
-	            (find_header "x-masc-agent-name" headers))))
+      match
+        Policy.runtime_mcp_policy_of_tool_names
+          ~base_path:dir
+          ~agent_name:"keeper-rondo-agent"
+          [ "masc_future_tool_not_in_catalog" ]
+      with
+      | None -> fail "keeper runtime-MCP policy should use its persisted token"
+      | Some policy ->
+        let headers = masc_headers policy in
+        check
+          (option string)
+          "per-Keeper bearer"
+          (Some ("Bearer " ^ keeper_token))
+          (find_header "Authorization" headers);
+        check
+          (option string)
+          "exact agent identity header"
+          (Some "keeper-rondo-agent")
+          (find_header "x-masc-agent-name" headers);
+        check
+          (option string)
+          "no role inferred from agent-name spelling"
+          None
+          (find_header "x-masc-keeper-name" headers);
+        check
+          (list string)
+          "caller schema name is preserved without catalog filtering"
+          [ "masc_future_tool_not_in_catalog" ]
+          policy.allowed_tool_names))
 ;;
 
 let test_policy_uses_explicit_base_path_not_ambient_env () =
@@ -172,21 +179,21 @@ let () =
     "runtime_mcp_policy_auth"
     [ ( "auth"
       , [ test_case
-            "public policy absent when required bearer is missing"
+            "policy absent when required bearer is missing"
             `Quick
-            test_public_policy_absent_without_required_bearer
+            test_policy_absent_without_required_bearer
         ; test_case
-            "public policy allowed when bearer is optional"
+            "policy allowed when bearer is optional"
             `Quick
-            test_public_policy_allowed_when_bearer_not_required
-	        ; test_case
-	            "keeper policy uses internal token without public bearer"
-	            `Quick
-	            test_keeper_policy_uses_internal_token_without_public_bearer
-	        ; test_case
-	            "policy uses explicit base path instead of ambient env"
-	            `Quick
-	            test_policy_uses_explicit_base_path_not_ambient_env
-	        ] )
+            test_headerless_policy_when_bearer_not_required
+        ; test_case
+            "keeper policy uses per-Keeper token for any supplied schema"
+            `Quick
+            test_keeper_policy_uses_per_keeper_token_independent_of_tool_name
+        ; test_case
+            "policy uses explicit base path instead of ambient env"
+            `Quick
+            test_policy_uses_explicit_base_path_not_ambient_env
+        ] )
     ]
 ;;

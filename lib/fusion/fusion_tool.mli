@@ -31,6 +31,19 @@ val handle
   -> unit
   -> string
 
+val handle_result
+  :  sw:Eio.Switch.t
+  -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> base_dir:string
+  -> keeper:string
+  -> now_unix:float
+  -> run_id:string
+  -> policy:Fusion_policy.t
+  -> ?continuation_channel:Keeper_continuation_channel.t
+  -> args:Yojson.Safe.t
+  -> unit
+  -> Tool_result.result
+
 module For_test : sig
   (** [handle]이 background fiber에서 실행하는 orchestrator contract.
 

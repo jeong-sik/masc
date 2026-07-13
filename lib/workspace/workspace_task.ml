@@ -22,225 +22,139 @@ let release_task_r config ~agent_name ~task_id ?expected_version ?handoff_contex
     ()
 ;;
 
-(** Force-release a task regardless of assignee. Keeper privilege. *)
-let force_release_task_r config ~agent_name ~task_id ?handoff_context ()
-  : string Masc_domain.masc_result
-  =
-  transition_task_r
-    config
-    ~agent_name
-    ~task_id
-    ~action:Masc_domain.Release
-    ?handoff_context
-    ~authority:Masc_domain.System
-    ()
+type task_reconciliation_signal =
+  | Assignee_absent
+  | Assignee_inactive
+
+let reconciliation_signal_to_string = function
+  | Assignee_absent -> "assignee_absent"
+  | Assignee_inactive -> "assignee_inactive"
 ;;
 
-(** Force-done a task regardless of assignee. Keeper privilege. *)
-let force_done_task_r config ~agent_name ~task_id ~notes ()
-  : string Masc_domain.masc_result
-  =
-  transition_task_r
-    config
-    ~agent_name
-    ~task_id
-    ~action:Masc_domain.Done_action
-    ~notes
-    ~authority:Masc_domain.System
-    ()
+let reconciliation_signal_holds config ~expected_assignee = function
+  | Assignee_absent ->
+    let all = Workspace_query.get_all_agents config in
+    let active = Workspace_query.get_active_agents config in
+    not
+      (List.exists
+         (fun (agent : Masc_domain.agent) ->
+            same_task_actor config agent.name expected_assignee)
+         (all @ active))
+  | Assignee_inactive ->
+    Workspace_query.get_all_agents config
+    |> List.exists (fun (agent : Masc_domain.agent) ->
+         same_task_actor config agent.name expected_assignee
+         && agent.status = Masc_domain.Inactive)
 ;;
 
-type machine_verify_failure =
-  | Machine_verify_invalid_verifier of string
-  | Machine_verify_verifier_not_distinct of
-      { agent_name : string
-      ; verifier_name : string
-      }
-  | Machine_verify_submit_failed of Masc_domain.masc_error
-  | Machine_verify_approve_failed_compensated of Masc_domain.masc_error
-  | Machine_verify_approve_failed_stranded of
-      { approve_error : Masc_domain.masc_error
-      ; reject_error : Masc_domain.masc_error
-      }
-
-let machine_verify_compensation_reason =
-  "machine verification approve failed; compensating reject"
-;;
-
-(** RFC-0323 G-2: machine-verified completion through the verification lane.
-
-    Submits as [agent_name] (must be the assignee; the FSM submit arm enforces
-    it), then approves as [verifier_name] — a distinct machine identity, since
-    the FSM self-approval check compares identity keys and never authority.
-    Both preconditions (verifier name shape, verifier distinct from submitter)
-    are checked before any state mutation.
-
-    Verification-store lifecycle mirrors the tool layer (RFC-0221): the
-    request record is created before the submit commit and deleted if that
-    commit fails; a successful approve (or compensating reject) records the
-    machine verdict, resolving the record. Board/SSE notify hooks are
-    deliberately not invoked — machine completions do not announce; the store
-    record is the audit trail. Hook defaults are no-ops, so contexts without
-    the verification store stay store-free.
-
-    If the approve fails after a successful submit, one compensating reject
-    (as [verifier_name]) returns the task to [InProgress { assignee }]. If
-    that also fails, the task stays [AwaitingVerification] and the Pending
-    store record is deliberately left in place: the task remains inside the
-    pending-verification wake signal and the dashboard verification panel, so
-    any other identity can approve/reject it through the normal lane. *)
-let submit_and_approve_task_r
+(** Reconcile one orphaned task without impersonating an actor. The service
+    validates both the exact expected owner and an objective absent/inactive
+    observation while holding the backlog lock. *)
+let reconcile_orphaned_task_r
       config
-      ~agent_name
-      ~verifier_name
       ~task_id
-      ~notes
-      ~approve_notes
-      ~evidence_refs
+      ~expected_assignee
+      ~signal
       ()
-  : (string, machine_verify_failure) result
+  : string Masc_domain.masc_result
   =
-  match Validation.Agent_id.validate verifier_name with
-  | Error msg -> Error (Machine_verify_invalid_verifier msg)
-  | Ok _ ->
-    if Workspace_task_classify.same_task_actor config verifier_name agent_name
-    then Error (Machine_verify_verifier_not_distinct { agent_name; verifier_name })
-    else (
-      (* The machine-verified evidence rides the same typed handoff channel as
-         operator submissions: the submit persists it onto the task (so the
-         strict-contract approve gate reads it) and the approve re-supplies it
-         (the executor persists the incoming argument on every action, so an
-         approve without it would wipe the Done record's evidence). *)
-      let machine_handoff : Masc_domain.task_handoff_context =
-        { summary = notes
-        ; reason = None
-        ; next_step = None
-        ; failure_mode = None
-        ; reclaim_policy = None
-        ; evidence_refs
-        ; updated_at = None
-        ; updated_by = None
-        }
-      in
-      let prepare_verification_request ~task ~assignee ~verification_id ~evidence_refs =
-        (Atomic.get Workspace_hooks.verification_submit_request_fn)
-          config
-          ~task
-          ~assignee
-          ~verification_id
-          ~evidence_refs
-      in
-      let compensate_verification_request ~verification_id =
-        match
-          (Atomic.get Workspace_hooks.verification_delete_request_fn)
-            config
-            ~verification_id
-        with
-        | Ok () -> ()
-        | Error e ->
-          Log.Workspace.warn
-            "machine-verify submit compensation failed (task=%s vrf=%s): %s"
-            task_id
-            verification_id
-            e
-      in
-      match
-        transition_task_r
-          config
-          ~agent_name
-          ~task_id
-          ~action:Masc_domain.Submit_for_verification
-          ~notes
-          ~handoff_context:machine_handoff
-          ~prepare_verification_request
-          ~compensate_verification_request
-          ()
-      with
-      | Error e -> Error (Machine_verify_submit_failed e)
-      | Ok _submitted ->
-        let verification_id =
-          match read_backlog_r config with
-          | Error _ -> None
-          | Ok backlog ->
-            (match
-               List.find_opt
-                 (fun (t : Masc_domain.task) -> String.equal t.id task_id)
-                 backlog.tasks
-             with
-             | None -> None
-             | Some t ->
-               (match t.task_status with
-                | Masc_domain.AwaitingVerification { verification_id; _ } ->
-                  Some verification_id
-                | Masc_domain.Todo
-                | Masc_domain.Claimed _
-                | Masc_domain.InProgress _
-                | Masc_domain.Done _
-                | Masc_domain.Cancelled _ -> None))
-        in
-        let record_verdict decision =
-          match verification_id with
-          | None ->
-            Log.Workspace.warn
-              "machine-verify: verification id unreadable after submit \
-               (task=%s); a store record may remain pending"
-              task_id
-          | Some verification_id ->
-            (match
-               (Atomic.get Workspace_hooks.verification_record_verdict_fn)
-                 config
-                 ~task_id
-                 ~verifier:verifier_name
-                 ~verification_id
-                 ~decision
-             with
-             | Ok () -> ()
-             | Error e ->
-               Log.Workspace.warn
-                 "machine-verify verdict record failed (task=%s vrf=%s): %s"
-                 task_id
-                 verification_id
-                 e)
-        in
-        (match
-           transition_task_r
-             config
-             ~agent_name:verifier_name
-             ~task_id
-             ~action:Masc_domain.Approve_verification
-             ~notes:approve_notes
-             ~handoff_context:machine_handoff
-             ()
-         with
-         | Ok message ->
-           record_verdict (`Approve approve_notes);
-           Ok message
-         | Error approve_error ->
-           (match
-              transition_task_r
-                config
-                ~agent_name:verifier_name
-                ~task_id
-                ~action:Masc_domain.Reject_verification
-                ~reason:machine_verify_compensation_reason
-                ~handoff_context:machine_handoff
-                ()
-            with
-            | Ok _ ->
-              record_verdict (`Reject machine_verify_compensation_reason);
-              Error (Machine_verify_approve_failed_compensated approve_error)
-            | Error reject_error ->
-              (* Deliberately no record cleanup: the Pending record keeps the
-                 stranded task actionable for the pending-verification wake
-                 signal and the dashboard verification panel. *)
-              Error
-                (Machine_verify_approve_failed_stranded { approve_error; reject_error }))))
+  let open Result.Syntax in
+  let* _task_id = validate_task_id_r task_id in
+  let* _expected_assignee = validate_agent_name_r expected_assignee in
+  let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
+  with_file_lock_r config backlog_path (fun () ->
+    let* backlog =
+      read_backlog_r config
+      |> Result.map_error (fun message ->
+        Masc_domain.System (Masc_domain.System_error.IoError message))
+    in
+    let* task =
+      match List.find_opt (fun (task : task) -> String.equal task.id task_id) backlog.tasks with
+      | Some task -> Ok task
+      | None -> Error (Masc_domain.Task (Masc_domain.Task_error.NotFound task_id))
+    in
+    let* actual_assignee =
+      match task_assignee_of_status task.task_status with
+      | Some assignee -> Ok assignee
+      | None ->
+        Error
+          (Masc_domain.Task
+             (Masc_domain.Task_error.InvalidState
+                (Printf.sprintf "Task %s has no reconcilable assignee" task_id)))
+    in
+    let* () =
+      if String.equal actual_assignee expected_assignee
+      then Ok ()
+      else
+        Error
+          (Masc_domain.Task
+             (Masc_domain.Task_error.InvalidState
+                (Printf.sprintf
+                   "Task %s assignee changed (expected %s, found %s)"
+                   task_id
+                   expected_assignee
+                   actual_assignee)))
+    in
+    let* () =
+      match task.task_status with
+      | Masc_domain.Claimed _ | Masc_domain.InProgress _ -> Ok ()
+      | Masc_domain.Todo
+      | Masc_domain.AwaitingVerification _
+      | Masc_domain.Done _
+      | Masc_domain.Cancelled _ ->
+        Error
+          (Masc_domain.Task
+             (Masc_domain.Task_error.InvalidState
+                (Printf.sprintf
+                   "Task %s status %s is not orphan-reconcilable"
+                   task_id
+                   (task_status_to_string task.task_status))))
+    in
+    let* () =
+      if reconciliation_signal_holds config ~expected_assignee signal
+      then Ok ()
+      else
+        Error
+          (Masc_domain.Task
+             (Masc_domain.Task_error.InvalidState
+                (Printf.sprintf
+                   "Task %s reconciliation signal %s is not true for %s"
+                   task_id
+                   (reconciliation_signal_to_string signal)
+                   expected_assignee)))
+    in
+    let updated_tasks =
+      List.map
+        (fun (candidate : task) ->
+           if String.equal candidate.id task_id
+           then { candidate with task_status = Masc_domain.Todo }
+           else candidate)
+        backlog.tasks
+    in
+    write_backlog
+      config
+      { tasks = updated_tasks
+      ; last_updated = now_iso ()
+      ; version = backlog.version + 1
+      };
+    Task_cache_invariant.clear_stale_agent_task
+      config
+      ~agent_name:expected_assignee
+      ~task_id
+      ~status:Masc_domain.Todo
+      ~module_name:"reconcile_orphaned_task_r";
+    log_event
+      config
+      (`Assoc
+          [ "type", `String "task_orphan_reconciled"
+          ; "task", `String task_id
+          ; "expected_assignee", `String expected_assignee
+          ; "signal", `String (reconciliation_signal_to_string signal)
+          ; "ts", `String (now_iso ())
+          ]);
+    Ok (Printf.sprintf "Task %s reconciled to todo" task_id))
+  |> Workspace_task_verification.flatten_lock_result
 ;;
-
-(* force_cancel_task_r was deleted by RFC-0220 §11 PR-3: its only advertised
-   consumer was the retired [Verification_protocol.check_timeouts] deadline
-   sweep, and a caller-less System-privilege cancel invites misuse. System
-   cancels go through [transition_task_r ~authority:System] explicitly. *)
 
 let cancel_task_r config ~agent_name ~task_id ~reason : string Masc_domain.masc_result =
   if not (is_initialized config)

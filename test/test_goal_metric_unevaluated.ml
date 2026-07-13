@@ -1,6 +1,6 @@
 (** task-1743 — typed "metric unevaluated" state for the goal panel.
 
-    A goal's [metric] is stored but never evaluated: task convergence may be
+    A goal's [metric] is stored but never evaluated: linked Task completion may be
     checked, but no metric measurement source turns the declared metric into an
     observed value. The dashboard attainment projection derives its percentages
     from linked task completion, not from the metric, yet labels them
@@ -25,9 +25,6 @@ let make_goal ?metric ?target_value id title =
     priority = 3;
     status = Active;
     phase = Goal_phase.Executing;
-    verifier_policy = None;
-    require_completion_approval = false;
-    active_verification_request_id = None;
     parent_goal_id = None;
     last_review_note = None;
     last_review_at = None;
@@ -37,6 +34,7 @@ let make_goal ?metric ?target_value id title =
 
 module A = Dashboard_goals_types_attainment
 module Acc = Dashboard_goals_types_accessor
+module B = Dashboard_goals_types_builder
 module Timeline = Dashboard_goals_types_timeline
 module MD = Masc_domain
 
@@ -68,24 +66,14 @@ let make_node ?(tasks = []) goal : Acc.tree_node =
     goal;
     children = [];
     tasks = List.map (fun task -> (task, "explicit")) tasks;
-    convergence = 0.0;
-    health = "ok";
-    badges = [];
     last_activity_at = iso_now ();
-    stagnation_seconds = 0;
+    stagnation_seconds = Some 0;
     linked_keeper_names = [];
     pending_approval_count = 0;
-    infra_risk_count = 0;
     linkage_source = "explicit";
-    linkage_warning_count = 0;
-    status_reason = "";
-    blocking_source = "none";
-    blocking_reason = "";
     latest_keeper_ref = None;
     latest_turn_ref = None;
-    stalled_since = None;
     activity_observation = "none";
-    stagnation_status = "fresh";
   }
 
 let make_keeper_meta name =
@@ -100,6 +88,44 @@ let make_keeper_meta name =
   with
   | Ok meta -> meta
   | Error err -> fail ("make_keeper_meta: " ^ err)
+
+let empty_build_context ?(pending_approvals = []) now_ts : B.build_context =
+  {
+    now_ts;
+    all_tasks = [];
+    pending_approvals;
+    keeper_metas = [];
+    latest_receipts = [];
+    latest_runtime_trusts = [];
+    goal_task_index = Hashtbl.create 0;
+  }
+
+let test_goal_projection_does_not_promote_child_approvals () =
+  let parent = make_goal "parent" "Parent" in
+  let child =
+    { (make_goal "child" "Child") with parent_goal_id = Some parent.id }
+  in
+  let approval =
+    `Assoc [ ("goal_id", `String child.id); ("requested_at", `Float 1.0) ]
+  in
+  let context = empty_build_context ~pending_approvals:[ approval ] 2.0 in
+  let node = B.build_tree context [ parent; child ] parent in
+  check int "parent only reports direct approvals" 0 node.pending_approval_count;
+  match node.children with
+  | [ child_node ] ->
+      check int "child reports its direct approval" 1
+        child_node.pending_approval_count
+  | _ -> fail "expected one child Goal"
+
+let test_goal_projection_surfaces_invalid_activity_time () =
+  let goal =
+    { (make_goal "invalid-time" "Invalid time") with updated_at = "invalid" }
+  in
+  let node = B.build_tree (empty_build_context 2.0) [ goal ] goal in
+  check (option int) "invalid time has no fabricated idle duration" None
+    node.stagnation_seconds;
+  check string "invalid time is explicit" "unavailable"
+    node.activity_observation
 
 (* (a) A goal that declares a metric is exposed as typed "unevaluated". *)
 let test_declared_metric_is_unevaluated () =
@@ -157,7 +183,7 @@ let test_absent_metric_in_json () =
   check string "no metric declared -> absent" "absent"
     (json_str json "metric_evaluation")
 
-let test_unevaluated_metric_does_not_enable_completion_ready () =
+let test_unevaluated_metric_is_display_only_for_completion () =
   let g = make_goal ~metric:"coverage %" ~target_value:"80%" "g6" "cov" in
   let attainment =
     A.build_attainment_json ~state:"attained" ~basis:"metric_target_percent"
@@ -172,14 +198,14 @@ let test_unevaluated_metric_does_not_enable_completion_ready () =
       g
   in
   let json =
-    A.goal_completion_to_json ~effective_policy:None ~open_request:None g node
+    A.goal_completion_to_json g node
       ~attainment
   in
   check string "metric stays unevaluated" "unevaluated"
     (json_str json "metric_evaluation");
-  check bool "unevaluated metric cannot request completion" false
+  check bool "unevaluated metric does not gate completion" true
     (json_bool json "ready_to_request_completion");
-  check string "task-derived attainment is not completion-ready" "in_progress"
+  check string "executing goal is completion-ready" "ready_for_completion"
     (json_str json "state")
 
 let test_keeper_receipt_timeline_missing_runtime_stays_missing () =
@@ -222,9 +248,13 @@ let () =
           test_case "zero progress still unevaluated" `Quick
             test_zero_progress_metric_unevaluated;
           test_case "absent metric in json" `Quick test_absent_metric_in_json;
-          test_case "unevaluated metric does not enable completion ready" `Quick
-            test_unevaluated_metric_does_not_enable_completion_ready;
+          test_case "unevaluated metric is display-only for completion" `Quick
+            test_unevaluated_metric_is_display_only_for_completion;
           test_case "receipt timeline does not fabricate runtime" `Quick
             test_keeper_receipt_timeline_missing_runtime_stays_missing;
+          test_case "child approvals stay on the child Goal" `Quick
+            test_goal_projection_does_not_promote_child_approvals;
+          test_case "invalid activity time stays unavailable" `Quick
+            test_goal_projection_surfaces_invalid_activity_time;
         ] );
     ]

@@ -10,25 +10,17 @@ open Masc_domain
 module StringSet = Set_util.StringSet
 module StringMap = Set_util.StringMap
 
-type risk_class =
-  | Safe
-  | Audited
-  | Privileged
-
 type audience =
   | External_mcp_client
   | Spawned_managed_agent
   | Local_worker_agent
   | Keeper_agent
-  | Privileged_executor
 
 type surface =
   | Public_mcp
   | Spawned_agent_mcp
   | Local_worker
-  | Keeper_standard
-  | Keeper_privileged
-  | Privileged_executor_surface
+  | Keeper
 
 type projection = {
   surface : surface;
@@ -40,7 +32,6 @@ type projection = {
 
 type capability_def = {
   capability_id : string;
-  risk_class : risk_class;
   audiences : audience list;
   supports_audit_evidence : bool;
   supports_direct_user_discovery : bool;
@@ -49,21 +40,11 @@ type capability_def = {
 
 type capability_seed = {
   capability_id : string;
-  risk_class : risk_class;
   audiences : audience list;
   supports_audit_evidence : bool;
   supports_direct_user_discovery : bool;
   projection : projection;
 }
-
-let risk_rank = function
-  | Safe -> 0
-  | Audited -> 1
-  | Privileged -> 2
-
-let max_risk left right =
-  if risk_rank left >= risk_rank right then left else right
-
 
 let dedupe_schemas (schemas : Masc_domain.tool_schema list) =
   let _, results =
@@ -85,9 +66,7 @@ let dedupe_projections projections =
             | Public_mcp -> "public_mcp"
             | Spawned_agent_mcp -> "spawned_agent_mcp"
             | Local_worker -> "local_worker"
-            | Keeper_standard -> "keeper_standard"
-            | Keeper_privileged -> "keeper_privileged"
-            | Privileged_executor_surface -> "privileged_executor")
+            | Keeper -> "keeper")
             projection.tool_name
         in
         if StringSet.mem key seen then (seen, acc)
@@ -109,21 +88,13 @@ let surface_to_string = function
   | Public_mcp -> "public_mcp"
   | Spawned_agent_mcp -> "spawned_agent_mcp"
   | Local_worker -> "local_worker"
-  | Keeper_standard -> "keeper_standard"
-  | Keeper_privileged -> "keeper_privileged"
-  | Privileged_executor_surface -> "privileged_executor"
-
-let risk_class_to_string = function
-  | Safe -> "safe"
-  | Audited -> "audited"
-  | Privileged -> "privileged"
+  | Keeper -> "keeper"
 
 let audience_to_string = function
   | External_mcp_client -> "external_mcp_client"
   | Spawned_managed_agent -> "spawned_managed_agent"
   | Local_worker_agent -> "local_worker_agent"
   | Keeper_agent -> "keeper_agent"
-  | Privileged_executor -> "privileged_executor"
 
 let projection_to_schema (projection : projection) : Masc_domain.tool_schema =
   {
@@ -132,7 +103,7 @@ let projection_to_schema (projection : projection) : Masc_domain.tool_schema =
     input_schema = projection.input_schema;
   }
 
-let make_seed ?capability_id ?(risk_class = Safe)
+let make_seed ?capability_id
     ?(audiences = [ External_mcp_client ]) ?(supports_audit_evidence = false)
     ?(supports_direct_user_discovery = true) ~surface ?backend_tool_name
     (schema : Masc_domain.tool_schema) : capability_seed =
@@ -141,7 +112,6 @@ let make_seed ?capability_id ?(risk_class = Safe)
     capability_id =
       Option.value ~default:(canonical_capability_id backend_tool_name)
         capability_id;
-    risk_class;
     audiences;
     supports_audit_evidence;
     supports_direct_user_discovery;
@@ -166,14 +136,6 @@ let local_worker_public_tool_names : string list =
 
 let local_worker_internal_schemas : Masc_domain.tool_schema list =
   Keeper_tool_surfaces.local_worker_internal_schemas
-
-(* RFC-0182: masc_spawn removed (dead). privileged_public_tool_names is
-   currently empty — no remaining public tool requires Privileged
-   risk_class. Kept as extension point. *)
-let privileged_public_tool_names : string list = []
-
-let privileged_keeper_tool_names : string list =
-  [ "tool_execute"; "tool_edit_file"; "tool_write_file" ]
 
 let keeper_backend_tool_name name = name
 
@@ -200,16 +162,6 @@ let public_projection_seeds_from (public_tool_source_schemas : Masc_domain.tool_
   in
   let make_public_seed schema =
     let name = schema.Masc_domain.name in
-    let risk_class =
-      if List.mem name privileged_public_tool_names then
-        Privileged
-      else if
-        List.mem name spawned_agent_public_tool_names
-      then
-        Audited
-      else
-        Safe
-    in
     let audiences =
       Json_util.dedupe_keep_order
         (External_mcp_client
@@ -221,7 +173,7 @@ let public_projection_seeds_from (public_tool_source_schemas : Masc_domain.tool_
     in
     let base =
       [
-        make_seed ~risk_class ~audiences ~supports_audit_evidence
+        make_seed ~audiences ~supports_audit_evidence
           ~supports_direct_user_discovery:true ~surface:Public_mcp schema;
       ]
     in
@@ -229,7 +181,7 @@ let public_projection_seeds_from (public_tool_source_schemas : Masc_domain.tool_
       if List.mem name spawned_agent_public_tool_names then
         base
         @ [
-            make_seed ~risk_class ~audiences ~supports_audit_evidence
+            make_seed ~audiences ~supports_audit_evidence
               ~supports_direct_user_discovery:false
               ~surface:Spawned_agent_mcp schema;
           ]
@@ -240,7 +192,7 @@ let public_projection_seeds_from (public_tool_source_schemas : Masc_domain.tool_
       if List.mem name local_worker_public_tool_names then
         with_spawned
         @ [
-            make_seed ~risk_class ~audiences ~supports_audit_evidence
+            make_seed ~audiences ~supports_audit_evidence
               ~supports_direct_user_discovery:false ~surface:Local_worker schema;
           ]
       else
@@ -260,11 +212,11 @@ let public_projection_seeds_from (public_tool_source_schemas : Masc_domain.tool_
         in
         with_local_worker
         @ [
-            make_seed ~capability_id:name ~risk_class:Audited
+            make_seed ~capability_id:name
               ~audiences:[ Keeper_agent ]
               ~supports_audit_evidence:true
               ~supports_direct_user_discovery:false
-              ~surface:Keeper_standard ~backend_tool_name:alias_name alias_schema;
+              ~surface:Keeper ~backend_tool_name:alias_name alias_schema;
           ]
       else
         with_local_worker
@@ -272,9 +224,9 @@ let public_projection_seeds_from (public_tool_source_schemas : Masc_domain.tool_
     if List.mem name Tool_catalog_surfaces.keeper_schedule_surface_tools then
       with_keeper_wrapper
       @ [
-          make_seed ~risk_class ~audiences:[ Keeper_agent ]
+          make_seed ~audiences:[ Keeper_agent ]
             ~supports_audit_evidence
-            ~supports_direct_user_discovery:false ~surface:Keeper_standard
+            ~supports_direct_user_discovery:false ~surface:Keeper
             schema;
         ]
     else
@@ -286,7 +238,7 @@ let local_worker_internal_seeds : capability_seed list =
   let base =
     local_worker_internal_schemas
     |> List.map (fun schema ->
-           make_seed ~risk_class:Audited
+           make_seed
              ~audiences:[ Local_worker_agent ]
              ~supports_audit_evidence:true
              ~supports_direct_user_discovery:false ~surface:Local_worker
@@ -296,37 +248,14 @@ let local_worker_internal_seeds : capability_seed list =
 
 let keeper_projection_seeds : capability_seed list =
   Tool_shard.keeper_model_tools
-  |> List.concat_map (fun (tool : Masc_domain.tool_schema) ->
+  |> List.map (fun (tool : Masc_domain.tool_schema) ->
          let schema = tool in
          let backend_tool_name = keeper_backend_tool_name tool.name in
-         let privileged = List.mem tool.name privileged_keeper_tool_names in
-         let primary_surface =
-           if privileged then Keeper_privileged else Keeper_standard
-         in
-         let primary_seed =
-           make_seed
-             ~risk_class:(if privileged then Privileged else Audited)
-             ~audiences:
-               (if privileged then
-                  [ Keeper_agent; Privileged_executor ]
-                else
-                  [ Keeper_agent ])
-             ~supports_audit_evidence:true
-             ~supports_direct_user_discovery:false ~surface:primary_surface
-             ~backend_tool_name schema
-         in
-         if privileged then
-           [
-             primary_seed;
-             make_seed ~capability_id:primary_seed.capability_id
-               ~risk_class:Privileged
-               ~audiences:[ Privileged_executor ]
-               ~supports_audit_evidence:true
-               ~supports_direct_user_discovery:false
-               ~surface:Privileged_executor_surface ~backend_tool_name schema;
-           ]
-         else
-           [ primary_seed ])
+         make_seed
+           ~audiences:[ Keeper_agent ]
+           ~supports_audit_evidence:true
+           ~supports_direct_user_discovery:false ~surface:Keeper
+           ~backend_tool_name schema)
 
 let all_projection_seeds_from (public_tool_source_schemas : Masc_domain.tool_schema list) :
     capability_seed list =
@@ -344,7 +273,6 @@ let all_capabilities_from (public_tool_source_schemas : Masc_domain.tool_schema 
             let def =
               {
                 capability_id = seed.capability_id;
-                risk_class = seed.risk_class;
                 audiences = Json_util.dedupe_keep_order seed.audiences;
                 supports_audit_evidence = seed.supports_audit_evidence;
                 supports_direct_user_discovery = seed.supports_direct_user_discovery;
@@ -357,7 +285,6 @@ let all_capabilities_from (public_tool_source_schemas : Masc_domain.tool_schema 
             let def =
               {
                 capability_id = existing.capability_id;
-                risk_class = max_risk existing.risk_class seed.risk_class;
                 audiences =
                   Json_util.dedupe_keep_order (existing.audiences @ seed.audiences);
                 supports_audit_evidence =
@@ -407,7 +334,7 @@ let public_raw_tool_schemas_from (public_tool_source_schemas : Masc_domain.tool_
    [Tool_dispatch.guarded_dispatch] which wraps [dispatch_structured]
    (pre-hook + handler + observer) with [Tool_telemetry.with_span].
    The keeper turn loop in [keeper_tool_registered_runtime.ml:164,218] routes through
-   the guarded entry so pre-hook chain ([governance_pipeline:203],
+   the guarded entry so the pre-hook chain ([external_effect_gate:203],
    [tool_input_validation:217]) covers keeper-originated calls.
    PR-8 wires the MCP server; PR-9 wires tag-dispatch fallback.
    PR-11 removes the legacy [dispatch] and [dispatch_structured] entries
@@ -433,15 +360,6 @@ let keeper_all_tool_names : string list =
   |> List.map (fun tool -> tool.Masc_domain.name)
   |> Json_util.dedupe_keep_order
 
-let keeper_safe_tool_names : string list =
-  Tool_shard.keeper_model_tools
-  |> List.map (fun tool -> tool.Masc_domain.name)
-  |> List.filter (fun name -> not (List.mem name privileged_keeper_tool_names))
-  |> Json_util.dedupe_keep_order
-
-let keeper_privileged_tool_names : string list =
-  privileged_keeper_tool_names
-
 let keeper_wrapped_internal_tools : string list =
   keeper_all_tool_names
 
@@ -460,9 +378,7 @@ let surface_snapshot_json
       ("public_mcp", surface_json Public_mcp);
       ("spawned_agent_mcp", surface_json Spawned_agent_mcp);
       ("local_worker", surface_json Local_worker);
-      ("keeper_standard", surface_json Keeper_standard);
-      ("keeper_privileged", surface_json Keeper_privileged);
-      ("privileged_executor", surface_json Privileged_executor_surface);
+      ("keeper", surface_json Keeper);
       ("keeper_wrapped_server_tools",
         `List (List.map (fun name -> `String name) keeper_wrapped_server_tools));
     ]
@@ -471,7 +387,6 @@ let capability_to_json (capability : capability_def) =
   `Assoc
     [
       ("capability_id", `String capability.capability_id);
-      ("risk_class", `String (risk_class_to_string capability.risk_class));
       ( "audiences",
         `List
           (List.map

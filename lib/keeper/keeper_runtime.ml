@@ -205,40 +205,6 @@ let autoboot_excluded_keeper_reasons config =
        | Some reason -> Some { keeper_name = name; reason }
        | None -> None)
 
-let auto_recoverable_paused_keeper_names ?now config =
-  let now =
-    match now with
-    | Some value -> value
-    | None ->
-      (* NDT-OK: cold-start supervisor admission uses wall-clock pause age to decide whether the recovery sweep must run. *)
-      Unix.gettimeofday ()
-  in
-  configured_keeper_names config
-  |> List.filter_map (fun name ->
-       match read_meta_file_path (keeper_meta_path config name) with
-       | Ok (Some meta)
-         when meta.paused
-              &&
-              (match profile_defaults_result_for_config config name with
-               | Error _ -> false
-               | Ok defaults ->
-                 (match defaults.autoboot_enabled with
-                  | Some value -> value
-                  | None -> meta.autoboot_enabled))
-              && Keeper_supervisor_types.paused_meta_auto_resume_due ~now meta ->
-         Some meta.name
-       | Ok (Some _) | Ok None -> None
-       | Error msg ->
-         Otel_metric_store.inc_counter
-           Keeper_metrics.(to_string MetaReadFailures)
-           ~labels:[ ("keeper", name); ("site", "auto_recoverable_paused_read") ]
-           ();
-         Log.Keeper.warn
-           "auto_recoverable_paused_keeper_names: meta read failed for %s: %s"
-           name
-           msg;
-         None)
-
 (* PR-3b1: convert a credential lookup name to its canonical
    keeper-<n>-agent form when it refers to a bootable keeper.
    Non-keeper names (dashboard, admin, external MCP clients, ...) are
@@ -313,13 +279,6 @@ let effective_declarative_runtime_id
      runtime selection. *)
   runtime_id_of_meta meta
 
-let resynced_tool_access
-    (defaults : Keeper_types_profile.keeper_profile_defaults)
-    (meta : keeper_meta) =
-  match defaults.tool_access with
-  | Some tools -> normalize_tool_names tools
-  | None -> meta.tool_access
-
 let drift_if label changed =
   if changed then Some label else None
 
@@ -335,7 +294,6 @@ let keeper_meta_persistent_drift_categories
   List.filter_map Fun.id
     [
       drift_if "persona" (current.persona <> target.persona);
-      drift_if "tool_access" (current.tool_access <> target.tool_access);
       drift_if "instructions"
         (not (personality_text_equal current.instructions target.instructions));
       drift_if "oas_env" (current.oas_env <> target.oas_env);
@@ -348,7 +306,6 @@ let keeper_meta_overlay_drift_categories
   List.filter_map Fun.id
     [
       drift_if "proactive" (current.proactive <> target.proactive);
-      drift_if "tool_denylist" (current.tool_denylist <> target.tool_denylist);
       drift_if "active_goal_ids"
         (Option.is_some defaults.active_goal_ids
          && current.active_goal_ids <> target.active_goal_ids);
@@ -369,8 +326,8 @@ let keeper_meta_overlay_drift_categories
       drift_if "telemetry_feedback_window_hours"
         (current.telemetry_feedback_window_hours
          <> target.telemetry_feedback_window_hours);
-      drift_if "always_approve"
-        (current.always_approve <> target.always_approve);
+      drift_if "always_allow"
+        (current.always_allow <> target.always_allow);
     ]
 
 let emit_keeper_meta_overlay_drift ~keeper_name categories =
@@ -410,12 +367,6 @@ let ensure_keeper_meta_with_cause config name =
     (* --- Proactive --- *)
     let target_proactive =
       apply_default defaults.proactive_enabled Keeper_config.default_proactive_enabled in
-    let target_idle_sec =
-      apply_default defaults.proactive_idle_sec Keeper_config.default_proactive_idle_sec in
-    let target_cooldown_sec =
-      apply_default defaults.proactive_cooldown_sec Keeper_config.default_proactive_cooldown_sec in
-    let target_tool_access = resynced_tool_access defaults meta in
-    let target_denylist = apply_default defaults.tool_denylist meta.tool_denylist in
     (* --- Personality --- *)
     let target_goal =
       match defaults.goal with
@@ -479,8 +430,8 @@ let ensure_keeper_meta_with_cause config name =
       apply_default_opt defaults.telemetry_feedback_window_hours meta.telemetry_feedback_window_hours in
 
     (* --- Always Approve --- *)
-    let target_always_approve =
-      apply_default_opt defaults.always_approve meta.always_approve
+    let target_always_allow =
+      apply_default_opt defaults.always_allow meta.always_allow
     in
     (* --- OAS Env --- *)
     let target_oas_env =
@@ -493,29 +444,25 @@ let ensure_keeper_meta_with_cause config name =
         persona = target_persona;
         proactive = {
           enabled = target_proactive;
-          idle_sec = target_idle_sec;
-          cooldown_sec = target_cooldown_sec;
         };
-        tool_denylist = target_denylist;
         goal = target_goal;
         instructions = target_instructions;
         autoboot_enabled = target_autoboot_enabled;
         mention_targets = target_mention_targets;
         active_goal_ids = target_active_goal_ids;
-        tool_access = target_tool_access;
         sandbox_profile = target_sandbox_profile;
         sandbox_image = target_sandbox_image;
         network_mode = target_network_mode;
         allowed_paths = target_allowed_paths;
         telemetry_feedback_enabled = target_tf_enabled;
         telemetry_feedback_window_hours = target_tf_window;
-        always_approve = target_always_approve;
+        always_allow = target_always_allow;
         oas_env = target_oas_env;
       }
     in
     (* Keep the runtime snapshot honest as well as the live overlay for fields
        that are actually emitted by [meta_to_json].  TOML-only config fields
-       (goal, sandbox policy, denylist, cadence, etc.) remain overlay-only; if
+       (goal, sandbox policy, cadence, etc.) remain overlay-only; if
        they triggered writes here, [meta_to_json]/scrub would drop them from disk
        and the next reconcile tick would see the same drift again. *)
     let overlay_cats =
@@ -529,8 +476,8 @@ let ensure_keeper_meta_with_cause config name =
        previous overlay-only path made operators see stale JSON forever
        (for example persona=analyst while TOML declared masc-improver),
        which hid prompt/tool/autonomy drift from health and bootstrap
-       checks.  TOML-only policy lists such as [tool_denylist] and
-       [active_goal_ids] are overlaid in the returned meta but do not trigger
+       checks. TOML-only [active_goal_ids] is overlaid in the returned meta but
+       does not trigger
        a runtime JSON rewrite by themselves. *)
     let cats =
       keeper_meta_persistent_drift_categories
@@ -691,14 +638,6 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
     let max_scan =
       max 0 Env_config.KeeperBootstrap.max_scan
     in
-    let max_keepers = Keeper_runtime_resolved.bootstrap_max_active_keepers () in
-    let remaining_slots =
-      ref
-        (if max_keepers > 0 then
-           max 0 (max_keepers - Keeper_registry.count_running ())
-         else
-           max_int)
-    in
     let entries = bootstrap_candidate_keeper_names ctx.config |> take max_scan in
     let (scanned, started, stale, recovering) =
       List.fold_left
@@ -721,25 +660,14 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
               in
               let started_here =
                 if materialized then
-                  let started_now =
-                    Keeper_registry.is_running
-                      ~base_path:ctx.config.base_path m.name
-                  in
-                  if started_now && max_keepers > 0 then
-                    remaining_slots := max 0 (!remaining_slots - 1);
-                  started_now
+                  Keeper_registry.is_running
+                    ~base_path:ctx.config.base_path m.name
                 else if already_running then false
-                else if max_keepers > 0 && !remaining_slots <= 0 then false
                 else (
                   Keeper_supervisor.supervise_keepalive
                     ~proactive_warmup_sec ctx m;
-                  let started_now =
-                    Keeper_registry.is_running
-                      ~base_path:ctx.config.base_path m.name
-                  in
-                  if started_now && max_keepers > 0 then
-                    remaining_slots := !remaining_slots - 1;
-                  started_now
+                  Keeper_registry.is_running
+                    ~base_path:ctx.config.base_path m.name
                 )
               in
               ( scanned_acc + 1,
@@ -803,12 +731,8 @@ let start_supervisor_sweep ctx =
         let should_act _beat = true
         let on_beat _beat =
           (try
-             (* RFC-0313 W3: pacing mode is read once per sweep at this
-                boundary and injected, so policy arms inside the sweep stay
-                free of hidden config reads. *)
              Keeper_supervisor.sweep_and_recover
                ~load_or_materialize_keeper_meta
-               ~pacing_enforced:(Keeper_pacing_shadow.pacing_enforced ())
                ctx
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              Otel_metric_store.inc_counter
@@ -826,7 +750,7 @@ let start_supervisor_sweep ctx =
               (* Enumerate every phase so the compiler flags any new
                  variant added to [Keeper_state_machine.phase]. TOML
                  hot-reload only reconciles Running keepers; the other
-                 12 phases must skip (a Stopped/Crashed/Dead/Zombie
+                 other phases skip (a Stopped/Crashed/Dead
                  keeper has no in-memory meta to update; a Compacting
                  or HandingOff keeper is mid-transition and reconcile
                  would race; Offline / Paused / Failing / Overflowed /
@@ -929,8 +853,7 @@ let start_supervisor_sweep ctx =
               | Keeper_state_machine.Stopped
               | Keeper_state_machine.Crashed
               | Keeper_state_machine.Restarting
-              | Keeper_state_machine.Dead
-              | Keeper_state_machine.Zombie -> ())
+              | Keeper_state_machine.Dead -> ())
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              Otel_metric_store.inc_counter
                Keeper_metrics.(to_string TomlReconcileSweepFailures)
@@ -948,7 +871,7 @@ let start_supervisor_sweep ctx =
           Ok ()
       end)
     in
-    let sweep_sec = Runtime_params.get Governance_registry.keeper_supervisor_sweep_sec in
+    let sweep_sec = Runtime_params.get Runtime_settings.keeper_supervisor_sweep_sec in
     let p = Pulse.create
       ~clock:ctx.clock
       ~rhythm:{ Pulse.base_s = sweep_sec;
@@ -1004,7 +927,6 @@ let existing_keepalive_bootstrap_done : (string, unit) Hashtbl.t =
 
 let has_boot_entries config =
   bootstrap_candidate_keeper_names config <> []
-  || auto_recoverable_paused_keeper_names config <> []
 
 (* #10125: extracted predicate so it can be unit-tested without
    spinning up an Eio + Pulse runtime.  See [maybe_start_supervisor_sweep]

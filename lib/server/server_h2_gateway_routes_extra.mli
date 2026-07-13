@@ -1,4 +1,4 @@
-(** Server_h2_gateway_routes_extra — board / governance / voice /
+(** Server_h2_gateway_routes_extra — board / Gate / voice /
     karma / static-asset routes for the HTTP/2 gateway.
 
     Single dispatch entry point that the parent gateway tries

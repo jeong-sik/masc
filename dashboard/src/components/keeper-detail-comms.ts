@@ -39,20 +39,24 @@ export function KeeperCommsPanel({ keeper }: { keeper: Keeper }) {
 
 interface PlaygroundRepo {
   name: string
-  branch: string
-  latest_commit: string
-  shallow: boolean
-  last_action: string
-  updated_at: string
+  path?: string
+  source?: string
+  branch?: string
+  latest_commit?: string
+  shallow?: boolean
+  last_action?: string
 }
 
 function isPlaygroundRepo(r: unknown): r is PlaygroundRepo {
   if (!isRecord(r)) return false
+  const optionalString = (key: string) => r[key] === undefined || typeof r[key] === 'string'
   return typeof r.name === 'string'
-    && typeof r.branch === 'string'
-    && typeof r.latest_commit === 'string'
-    && typeof r.shallow === 'boolean'
-    && typeof r.last_action === 'string'
+    && optionalString('path')
+    && optionalString('source')
+    && optionalString('branch')
+    && optionalString('latest_commit')
+    && (r.shallow === undefined || typeof r.shallow === 'boolean')
+    && optionalString('last_action')
 }
 
 interface PlaygroundPR {
@@ -106,12 +110,13 @@ export function PlaygroundReposPanel({ keeperName }: { keeperName: string }) {
                   <div class="flex-1 min-w-0">
                     <div class="flex items-center gap-2">
                       <span class="text-xs font-medium text-[var(--color-fg-secondary)] truncate">${r.name}</span>
-                      <${MonoBadge}>${r.branch}</${MonoBadge}>
-                      ${r.shallow ? html`<span class="text-3xs px-1 py-0.5 rounded-[var(--r-1)] bg-[var(--warn-10)] text-[var(--color-status-warn)] border border-[var(--warn-20)]">shallow</span>` : null}
+                      <${MonoBadge}>${r.branch?.trim() || 'branch unavailable'}</${MonoBadge}>
+                      ${r.shallow === true ? html`<span class="text-3xs px-1 py-0.5 rounded-[var(--r-1)] bg-[var(--warn-10)] text-[var(--color-status-warn)] border border-[var(--warn-20)]">shallow</span>` : null}
                     </div>
-                    <div class="text-3xs text-[var(--color-fg-muted)] font-mono mt-0.5 truncate">${r.latest_commit}</div>
+                    <div class="text-3xs text-[var(--color-fg-muted)] font-mono mt-0.5 truncate">${r.latest_commit?.trim() || 'Git metadata unavailable'}</div>
+                    ${r.path ? html`<div class="text-3xs text-[var(--color-fg-disabled)] font-mono mt-0.5 truncate">${r.path}</div>` : null}
                   </div>
-                  <span class="text-3xs text-[var(--color-fg-disabled)] flex-shrink-0">${r.last_action}</span>
+                  <span class="text-3xs text-[var(--color-fg-disabled)] flex-shrink-0">${r.last_action?.trim() || r.source?.trim() || 'observed'}</span>
                 </div>
               `)}
             </div>

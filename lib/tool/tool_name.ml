@@ -148,20 +148,17 @@ module Goal_name = struct
     | Goal_list
     | Goal_transition
     | Goal_upsert
-    | Goal_verify
 
   let to_string = function
     | Goal_list -> "masc_goal_list"
     | Goal_transition -> "masc_goal_transition"
     | Goal_upsert -> "masc_goal_upsert"
-    | Goal_verify -> "masc_goal_verify"
   ;;
 
   let of_string = function
     | "masc_goal_list" -> Some Goal_list
     | "masc_goal_transition" -> Some Goal_transition
     | "masc_goal_upsert" -> Some Goal_upsert
-    | "masc_goal_verify" -> Some Goal_verify
     | _ -> None
   ;;
 
@@ -228,9 +225,9 @@ end
 (** Domain_tool — the single domain-owned grouping of Task/Board/Goal/Operator
     tool names.
 
-    This module owns only name construction and string round-tripping. Dispatch,
-    effect, risk, and resource policy live in their own registries instead of
-    being inferred from this typed name carrier. *)
+    This module owns only name construction and string round-tripping. Dispatch
+    and execution decisions are supplied by their explicit boundaries instead
+    of being inferred from this typed name carrier. *)
 module Domain_tool = struct
   type t =
     | Task of Task_name.t

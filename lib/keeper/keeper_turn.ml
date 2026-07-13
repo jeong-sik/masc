@@ -39,32 +39,17 @@ let restart_keepalive_after_message_turn ctx meta =
 
 let turn_cost_for_result (result : Keeper_agent_run.run_result) : float =
   (* cost_usd is accounted independently of token-count trust (token⊥cost). The
-     provider's authoritative cost field is used directly; missing/non-positive
-     cost remains 0.0. *)
+     provider's authoritative cost field is used verbatim; only missing cost
+     uses the aggregate identity 0.0. *)
   Keeper_unified_metrics.estimate_usage_cost_usd result.usage
 
 let update_direct_turn_meta (meta : keeper_meta) ~(latency_ms : int)
     (result : Keeper_agent_run.run_result) : keeper_meta =
   let now_ts = Time_compat.now () in
   let turn_cost = turn_cost_for_result result in
-  let usage_trust =
-    Keeper_unified_metrics.classify_usage_trust
-      ~usage_reported:result.usage_reported
-      ~usage:result.usage
-      ~context_max:0
-  in
-  let usage_trusted =
-    Keeper_unified_metrics.usage_trust_is_trusted usage_trust
-  in
-  let trusted_input_tokens =
-    if usage_trusted then result.usage.input_tokens else 0
-  in
-  let trusted_output_tokens =
-    if usage_trusted then result.usage.output_tokens else 0
-  in
-  let trusted_total_tokens =
-    if usage_trusted then Keeper_context_runtime.total_tokens result.usage else 0
-  in
+  let observed_input_tokens = result.usage.input_tokens in
+  let observed_output_tokens = result.usage.output_tokens in
+  let observed_total_tokens = Keeper_context_runtime.total_tokens result.usage in
   let updated_meta = {
     meta with
     updated_at = now_iso ();
@@ -75,16 +60,16 @@ let update_direct_turn_meta (meta : keeper_meta) ~(latency_ms : int)
           {
             total_turns = meta.runtime.usage.total_turns + 1;
             total_input_tokens =
-              meta.runtime.usage.total_input_tokens + trusted_input_tokens;
+              meta.runtime.usage.total_input_tokens + observed_input_tokens;
             total_output_tokens =
-              meta.runtime.usage.total_output_tokens + trusted_output_tokens;
+              meta.runtime.usage.total_output_tokens + observed_output_tokens;
             total_tokens =
-              meta.runtime.usage.total_tokens + trusted_total_tokens;
+              meta.runtime.usage.total_tokens + observed_total_tokens;
             total_cost_usd = meta.runtime.usage.total_cost_usd +. turn_cost;
             last_turn_ts = now_ts;
-            last_input_tokens = trusted_input_tokens;
-            last_output_tokens = trusted_output_tokens;
-            last_total_tokens = trusted_total_tokens;
+            last_input_tokens = observed_input_tokens;
+            last_output_tokens = observed_output_tokens;
+            last_total_tokens = observed_total_tokens;
             last_latency_ms = latency_ms;
           };
       };
@@ -93,197 +78,6 @@ let update_direct_turn_meta (meta : keeper_meta) ~(latency_ms : int)
     ~keeper_name:updated_meta.name
     ~total_cost_usd:updated_meta.runtime.usage.total_cost_usd;
   updated_meta
-
-let has_no_progress_loop_blocker (meta : keeper_meta) =
-  match meta.runtime.last_blocker with
-  | Some { klass = No_progress_loop; _ } -> true
-  | Some
-      { klass =
-          ( Runtime_exhausted _
-          | Capacity_backpressure
-          | Ambiguous_post_commit_timeout
-          | Ambiguous_post_commit_failure
-          | Admission_queue_wait_timeout
-          | Turn_timeout_after_queue_wait
-          | Turn_timeout
-          | Turn_livelock_blocked
-          | Completion_contract_violation
-          | Fiber_unresolved
-          | Stale_turn_timeout
-          | Stale_fleet_batch
-          | Oas_agent_execution_timeout
-          | Sdk_max_turns_exceeded
-          | Sdk_token_budget_exceeded
-          | Sdk_cost_budget_exceeded
-          | Sdk_unrecognized_stop_reason
-          | Sdk_idle_detected
-          | Sdk_guardrail_violation
-          | Sdk_tripwire_violation
-          | Sdk_exit_condition_met
-          | Sdk_input_required
-          | Sdk_tool_failure_recovery_failed )
-      ; _
-      } ->
-    false
-  | None -> false
-
-let is_no_progress_failure_reason = function
-  | Some (Keeper_registry.Provider_runtime_error { code; _ }) ->
-    String.equal code Keeper_unified_turn_no_progress.failure_reason_code
-  | Some
-      ( Keeper_registry.Heartbeat_consecutive_failures _
-      | Keeper_registry.Turn_consecutive_failures _
-      | Keeper_registry.Stale_turn_timeout _
-      | Keeper_registry.Stale_termination_storm _
-      | Keeper_registry.Stale_fleet_batch _
-      | Keeper_registry.Provider_timeout_loop _
-      | Keeper_registry.Completion_contract_violation _
-      | Keeper_registry.Ambiguous_partial_commit _
-      | Keeper_registry.Fiber_unresolved _
-      | Keeper_registry.Exception _
-      | Keeper_registry.Turn_overflow_pause
-      | Keeper_registry.Turn_livelock_pause
-      | Keeper_registry.Operator_interrupt ) ->
-    false
-  | None -> false
-
-let has_no_progress_failure_reason ~base_path keeper_name =
-  match Keeper_registry.get ~base_path keeper_name with
-  | Some { Keeper_registry.last_failure_reason; _ } ->
-    is_no_progress_failure_reason last_failure_reason
-  | None -> false
-
-let has_direct_success_no_progress_pause ~(config : Workspace.config)
-    (meta : keeper_meta) =
-  (* RFC-0303 Phase 3: the no-progress loop detector is retired; a residual
-     no-progress pause is now recognised only from persisted meta blocker or
-     registry failure_reason (no live detector latch). *)
-  meta.paused
-  && (has_no_progress_loop_blocker meta
-      || has_no_progress_failure_reason ~base_path:config.base_path meta.name)
-
-let clear_no_progress_meta_blocker (meta : keeper_meta) =
-  match meta.runtime.last_blocker with
-  | Some { Keeper_meta_contract.klass = Keeper_meta_contract.No_progress_loop; _ } ->
-    Keeper_meta_contract.map_runtime (fun rt -> { rt with last_blocker = None }) meta
-  | _ -> meta
-
-let persist_direct_success_no_progress_resume ~base_path (resumed_meta : keeper_meta) =
-  match
-    Keeper_registry.update_entry
-      ~base_path
-      resumed_meta.name
-      (fun entry ->
-        let last_failure_reason =
-          if is_no_progress_failure_reason entry.last_failure_reason
-          then None
-          else entry.last_failure_reason
-        in
-        { entry with
-          meta = resumed_meta
-        ; last_failure_reason
-        ; turn_consecutive_failures = 0
-        })
-  with
-  | Ok () -> Ok ()
-  | Error err ->
-    Log.Keeper.warn
-      "%s: direct keeper_msg success could not persist no_progress resume state: %s"
-      resumed_meta.name
-      (Keeper_registry.registry_entry_validation_error_to_string err);
-    Error err
-
-let direct_success_disposition_allows_no_progress_resume
-      (result : Keeper_agent_run.run_result)
-  : bool
-  =
-  match result.operator_disposition with
-  | Some
-      { disposition = Keeper_execution_receipt.Disp_pass
-      ; reason = Keeper_execution_receipt.Reason_healthy
-      } -> true
-  | Some _ | None -> false
-
-let direct_success_tool_call_has_progress
-      (detail : Keeper_agent_run.tool_call_detail)
-  : bool
-  =
-  match detail.typed_outcome with
-  | Some Keeper_tool_outcome.Progress -> (
-    match Keeper_tool_progress.classify_tool_progress detail.tool_name with
-    | Keeper_tool_progress.Passive_status -> false
-    | Keeper_tool_progress.Claim_context
-    | Keeper_tool_progress.Execution
-    | Keeper_tool_progress.Completion -> true)
-  | Some (Keeper_tool_outcome.No_progress _ | Keeper_tool_outcome.Error _)
-  | None -> false
-
-let direct_success_has_progress_evidence (result : Keeper_agent_run.run_result) :
-    bool
-  =
-  List.exists direct_success_tool_call_has_progress result.tool_calls
-  || Option.is_some (Keeper_unified_metrics_support.visible_run_validation result)
-
-let direct_success_may_clear_no_progress_pause
-      (result : Keeper_agent_run.run_result)
-  : bool
-  =
-  direct_success_disposition_allows_no_progress_resume result
-  && direct_success_has_progress_evidence result
-
-let clear_direct_success_no_progress_pause
-      ~(config : Workspace.config)
-      ~(pre_turn_meta : keeper_meta)
-      ~(result : Keeper_agent_run.run_result)
-      (meta : keeper_meta)
-  : keeper_meta
-  =
-  if not (has_direct_success_no_progress_pause ~config pre_turn_meta)
-  then meta
-  else if not (direct_success_may_clear_no_progress_pause result)
-  then (
-    Log.Keeper.info
-      "%s: direct keeper_msg success kept no_progress pause/blocker because \
-       result lacked healthy operator disposition or typed resume evidence"
-      meta.name;
-    meta)
-  else
-    let cleared_meta = clear_no_progress_meta_blocker meta in
-    let resumed_meta =
-      { cleared_meta with
-        paused = false
-      ; auto_resume_after_sec = None
-      ; latched_reason = None
-      ; updated_at = now_iso ()
-      }
-    in
-    match
-      persist_direct_success_no_progress_resume
-        ~base_path:config.base_path
-        resumed_meta
-    with
-    | Error _ -> meta
-    | Ok () ->
-      (match
-         Keeper_registry.dispatch_event_and_log
-           ~base_path:config.base_path
-           meta.name
-           Keeper_state_machine.Operator_resume
-       with
-       | Error err ->
-         Log.Keeper.warn
-           "%s: direct keeper_msg success could not dispatch Operator_resume after persisted no_progress recovery: %s"
-           meta.name
-           (Keeper_state_machine.transition_error_to_string err)
-       | Ok _ -> ());
-      Keeper_turn_livelock.reset_keeper_livelock
-        ~base_path:config.base_path
-        ~keeper:resumed_meta.name;
-      Keeper_livelock_state.reset_for_keeper ~keeper:resumed_meta.name;
-      Log.Keeper.info
-        "%s: direct keeper_msg success cleared no_progress pause/blocker"
-        resumed_meta.name;
-      resumed_meta
 
 let direct_turn_observation ~(config : Workspace.config) (meta : keeper_meta) :
     Keeper_world_observation.world_observation =
@@ -399,10 +193,6 @@ let surface_context_to_instructions (ctx : Yojson.Safe.t) : string option =
 module For_testing = struct
   let direct_owner_conversation_context = direct_owner_conversation_context
   let surface_context_to_instructions = surface_context_to_instructions
-  let direct_success_may_clear_no_progress_pause =
-    direct_success_may_clear_no_progress_pause
-  let clear_direct_success_no_progress_pause =
-    clear_direct_success_no_progress_pause
   let direct_no_progress_retry_reason =
     Keeper_turn_runtime_budget.direct_no_progress_retry_reason
   let direct_no_progress_retry_decision =
@@ -641,7 +431,6 @@ let run_keeper_msg_turn_admitted
               | None -> None)
           | _ -> None)
     in
-    let no_skill_route = get_bool args "no_skill_route" false in
     let direct_reply = get_bool args "direct_reply" false in
     let channel_session_key = get_string_opt args "channel_session_key" in
     let channel = get_string args "channel" "" in
@@ -761,10 +550,6 @@ let run_keeper_msg_turn_admitted
                 d
               | _ -> root
             in
-            let effective_no_skill_route = no_skill_route || direct_reply in
-            let fallback_skill_route =
-              route_keeper_skill  ~message
-            in
             let live_worktree_change = None in
             let build_turn_prompt ~base_system_prompt ~messages:_
                 : Keeper_agent_run.turn_prompt =
@@ -791,18 +576,10 @@ let run_keeper_msg_turn_admitted
                   | Ok [] -> ""
                   | Ok items ->
                       let safe_items =
-                        List.filter_map
+                        List.map
                           (fun s ->
-                             match
-                               Keeper_run_prompt.safe_memory_fragment
-                                 (String.trim s)
-                             with
-                             | Some frag -> Some frag
-                             | None ->
-                                 Log.Keeper.warn
-                                   "dropped long-term memory fragment containing \
-                                    prompt-injection pattern";
-                                 None)
+                             Keeper_run_prompt.normalize_memory_fragment
+                               (String.trim s))
                           items
                       in
                       if safe_items = []
@@ -819,21 +596,13 @@ let run_keeper_msg_turn_admitted
                   ~config:ctx.config ~meta ~direct_reply ~channel_session_key
                   ~channel
               in
-              (* 2. Skill route *)
-              let skill_route_text =
-                if effective_no_skill_route then ""
-                else
-                  skill_route_context_text
-                    ~fallback_route:fallback_skill_route
-                    
-              in
-              (* 3. Worktree changes *)
+              (* 2. Worktree changes *)
               let worktree_text =
                 match live_worktree_change with
                 | Some summary when String.trim summary <> "" -> summary
                 | _ -> ""
               in
-              (* 4. Turn instructions *)
+              (* 3. Turn instructions *)
               let turn_instructions_text =
                 match turn_instructions with
                 | None -> ""
@@ -872,7 +641,6 @@ let run_keeper_msg_turn_admitted
                 (fun s -> String.trim s <> "")
                 [ durable_memory_text;
                   recent_direct_conversation_text;
-                  skill_route_text;
                   worktree_text;
                   telemetry_feedback_text;
                   turn_instructions_text ]
@@ -887,17 +655,8 @@ let run_keeper_msg_turn_admitted
                 else
                   base_system_prompt
               in
-              (* 2. Policy guards + tool-use guidance *)
+              (* 2. Tool-use guidance *)
               let prompt =
-                let policy_guards = [
-                  (effective_no_skill_route,
-                   "Output guard: NEVER output lines starting with SKILL: or SKILL_REASON:.");
-                ] in
-                let policy_lines =
-                  List.filter_map
-                    (fun (active, line) -> if active then Some line else None)
-                    policy_guards
-                in
                 let tool_use_lines = [
                   "Tool-use guidance:";
                   "- If the user asks you to speak, use voice, make sound, or output TTS, prefer keeper_voice_session_start and keeper_voice_speak.";
@@ -905,93 +664,31 @@ let run_keeper_msg_turn_admitted
                   "- Do not simulate spoken audio with plain text roleplay when a voice tool can handle the request.";
                   "- If voice execution fails, say that voice output is unavailable and continue in text.";
                 ] in
-                match policy_lines @ tool_use_lines with
+                match tool_use_lines with
                 | [] -> prompt
                 | _ ->
                     Printf.sprintf "%s\n\n%s"
                       prompt
-                      (String.concat "\n" (policy_lines @ tool_use_lines))
+                      (String.concat "\n" tool_use_lines)
               in
               { system_prompt = prompt; dynamic_context }
             in
             Progress.Tracker.step turn_tracker
               ~message:(Printf.sprintf "Executing Agent.run for %s" name) ();
             let world_observation = direct_turn_observation ~config:ctx.config meta in
-            let turn_affordances =
-              Keeper_unified_metrics.observed_affordances_of_observation
-                ~meta
-                world_observation
-            in
             (* RFC-0225 §3.3: per-run carrier for the chat lane. *)
 	            let turn_ctx_cell = Keeper_tool_call_log.create_turn_ctx_cell () in
-	            let direct_history_messages =
-	              let (_session, ctx_opt) =
-	                Keeper_context_runtime.load_context_from_checkpoint
-	                  ~max_checkpoint_messages:
-	                    meta.compaction.max_checkpoint_messages
-	                  ~trace_id:
-	                    (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-	                  ~primary_model_max_tokens:max_runtime_context
-	                  ~base_dir
-	              in
-	              match ctx_opt with
-	              | None -> []
-	              | Some ctx ->
-	                Keeper_context_runtime.messages_of_context ctx
-	                |> Keeper_context_core.repair_broken_tool_call_pairs
-	            in
-	            let direct_base_system_prompt =
-	              Keeper_run_context.build_base_system_prompt
-	                ~config:ctx.config
-	                ~profile_defaults
-	                ~meta
-	            in
-	            let direct_prompt_for_estimate =
-	              build_turn_prompt
-	                ~base_system_prompt:direct_base_system_prompt
-	                ~messages:direct_history_messages
-	            in
-	            let direct_dynamic_context =
-	              Keeper_run_prompt.dynamic_context_with_recent_failures
-	                ~keeper_name:meta.name
-	                direct_prompt_for_estimate.dynamic_context
-	            in
-	            let direct_user_message_for_estimate =
-	              Keeper_run_prompt.sanitize_user_message message
-	            in
-	            let direct_prompt_metrics =
-	              Keeper_agent_run.build_prompt_metrics
-	                ~system_prompt:direct_prompt_for_estimate.system_prompt
-	                ~dynamic_context:direct_dynamic_context
-	                ~user_message:direct_user_message_for_estimate
-	            in
-	            let direct_prompt_estimated_input_tokens =
-	              Keeper_run_prompt.estimate_input_tokens
-	                ~prompt_metrics:direct_prompt_metrics
-	                ~system_prompt:direct_prompt_for_estimate.system_prompt
-	                ~dynamic_context:direct_dynamic_context
-	                ~memory_context:""
-	                ~temporal_context:""
-	                ~user_message:direct_user_message_for_estimate
-	                ~history_messages:direct_history_messages
-	            in
 	            let run_result, latency_ms =
 	              Keeper_context_runtime.timed (fun () ->
 	                  match Eio_context.get_clock () with
 	                  | Error msg -> Error (Agent_sdk.Error.Internal msg)
 	                  | Ok clock ->
-	                  let { Keeper_unified_turn_retry_setup.timeout_sec
-	                      ; remaining_turn_budget_s
-	                      ; current_turn_phase_elapsed_ms
-	                      ; max_idle_turns
+	                  let { Keeper_unified_turn_retry_setup.current_turn_phase_elapsed_ms
 	                      ; _
 	                      }
 	                    =
 	                    Keeper_unified_turn_retry_setup.build
 	                      ~now:(fun () -> Eio.Time.now clock)
-	                      ~keeper_name:meta.name
-	                      ~channel:Keeper_world_observation.Reactive
-	                      ~turn_affordances
 	                  in
 	                  let publish_direct_cascade_resolution
 	                      ~runtime_id
@@ -1023,14 +720,10 @@ let run_keeper_msg_turn_admitted
 		                    (fun () ->
 		                       Keeper_turn_runtime_budget.run_direct_no_progress_retry_loop
 		                         ~keeper_name:meta.name
-		                         ~base_runtime:turn_runtime_id
-		                         ~initial_runtime:turn_runtime_id
-		                         ~initial_max_context:max_runtime_context
-		                         ~estimated_input_tokens:
-		                           direct_prompt_estimated_input_tokens
-		                         ~timeout_sec
-		                         ~remaining_turn_budget_s
-		                         ~current_turn_phase_elapsed_ms
+	                         ~base_runtime:turn_runtime_id
+	                         ~initial_runtime:turn_runtime_id
+	                         ~initial_max_context:max_runtime_context
+	                         ~current_turn_phase_elapsed_ms
 		                         ~now_s:(fun () -> Eio.Time.now clock)
 		                         ~setup_retry_runtime:setup_direct_retry_runtime
 		                         ~publish_cascade_resolution:
@@ -1114,14 +807,9 @@ let run_keeper_msg_turn_admitted
 		                                ~max_context
 		                                ~build_turn_prompt
 		                                ~user_message:message
-		                                ?user_blocks
-		                                ~runtime_id
-		                                ~world_observation
-		                                ~turn_affordances
-			                                (* A kmsg turn is user-triggered, so it
-			                                   uses the reactive OAS loop-guard
-			                                   setting resolved by the caller. *)
-		                                ~max_idle_turns
+			                                ?user_blocks
+			                                ~runtime_id
+			                                ~world_observation
 		                                ~generation:meta.runtime.generation
 		                                ?on_event
 		                                ~trajectory_acc
@@ -1188,15 +876,8 @@ let run_keeper_msg_turn_admitted
                 ~config:ctx.config
                 ~keeper_name:meta.name
                 lifecycle;
-              let lifecycle_updated_meta =
-                clear_direct_success_no_progress_pause
-                  ~config:ctx.config
-                  ~pre_turn_meta:meta
-                  ~result
-                  lifecycle.updated_meta
-              in
               let updated_meta =
-                update_direct_turn_meta lifecycle_updated_meta ~latency_ms result
+                update_direct_turn_meta lifecycle.updated_meta ~latency_ms result
               in
               (* #9733: keeper_msg turn-completion is the same race shape
                  as the unified-turn failure path — heartbeat updates
@@ -1330,7 +1011,7 @@ let run_keeper_msg_turn_admitted
                     Ids.Turn_ref.to_yojson turn_ref );
                 ]
               in
-              tool_result_ok (Yojson.Safe.to_string reply_json)
+              tool_result_ok_data reply_json
 
 ))))))))
 

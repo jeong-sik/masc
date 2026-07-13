@@ -19,10 +19,6 @@
 type stop_reason =
   | Completed
   | TurnBudgetExhausted of { turns_used : int; limit : int }
-  | MutationBoundaryReached of {
-      turns_used : int;
-      tool_name : string option;
-    }
   | Yielded_to_chat_waiting of { turns_used : int }
   | Yielded_to_durable_stimulus of { turns_used : int }
   | InputRequired of {

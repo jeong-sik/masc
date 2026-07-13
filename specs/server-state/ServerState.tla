@@ -20,7 +20,7 @@
 \*
 \* Mirrors: lib/server_state_product.ml
 \*
-\* Two-config pattern (KeeperOASAdvanced / StateProduct precedent):
+\* Two-config pattern (clean model plus an explicit buggy model):
 \*   ServerState.cfg      — clean spec, all invariants must hold
 \*   ServerState-buggy.cfg — buggy spec, InvariantViolated MUST be violated
 

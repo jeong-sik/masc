@@ -1,30 +1,30 @@
 (** Observability_redact — redact sensitive data for observability fields.
 
-    Truncation + pattern stripping + tool-level deny list.
+    Truncation plus structural secret redaction. Every tool call remains
+    observable; tool names never decide whether evidence exists.
     Uses [Re] (thread-safe) instead of [Str]. *)
 
 let default_max_len = 200
 
-(** Tools whose input/output must never be previewed.
-
-    This uses substring (infix) matching, not [Tool_access_policy] exact-name
-    matching, because redaction must catch tool name variants and prefixed
-    aliases (e.g. [mcp__foo_auth_bar]) without enumerating every name. *)
-let denied_tool_infixes =
-  ["_auth"; "_encryption"; "_credential"; "_secret"]
-
-
-let sensitive_key_markers =
-  [ "token"; "secret"; "password"; "passwd"; "api_key"; "apikey"; "key" ]
+let sensitive_keys =
+  [ "access_token"
+  ; "api_key"
+  ; "apikey"
+  ; "authorization"
+  ; "client_secret"
+  ; "credential"
+  ; "credentials"
+  ; "password"
+  ; "passwd"
+  ; "private_key"
+  ; "refresh_token"
+  ; "secret"
+  ; "token"
+  ]
 
 let is_sensitive_key key =
   let lower = String.lowercase_ascii key in
-  List.exists (fun marker -> String_util.contains_substring lower marker)
-    sensitive_key_markers
-
-let is_denied_tool ~tool_name =
-  let lower = String.lowercase_ascii tool_name in
-  List.exists (fun infix -> String_util.contains_substring lower infix) denied_tool_infixes
+  List.exists (String.equal lower) sensitive_keys
 
 (** URL credential pattern — ://user:pass@ *)
 let url_credential_re =
@@ -48,17 +48,6 @@ let url_credential_re =
     safe — [url_credential_re] already does this. *)
 let bearer_re =
   Re.compile (Re.seq [Re.str "Bearer "; Re.rep1 (Re.compl [Re.set " \t\r\n"])])
-
-let ghp_re = Re.compile (Re.seq [Re.bow; Re.str "ghp_"; Re.rep1 Re.alnum])
-
-let ghs_re = Re.compile (Re.seq [Re.bow; Re.str "ghs_"; Re.rep1 Re.alnum])
-
-let gho_re = Re.compile (Re.seq [Re.bow; Re.str "gho_"; Re.rep1 Re.alnum])
-
-let ghu_re = Re.compile (Re.seq [Re.bow; Re.str "ghu_"; Re.rep1 Re.alnum])
-
-let github_pat_re =
-  Re.compile (Re.seq [Re.bow; Re.str "github_pat_"; Re.rep1 (Re.alt [Re.alnum; Re.char '_'])])
 
 let sk_re =
   Re.compile (Re.seq [Re.bow; Re.str "sk-"; Re.rep1 (Re.alt [Re.alnum; Re.char '-'])])
@@ -132,11 +121,6 @@ let redact_pem_blocks s =
 let secret_res () =
   [ url_credential_re
   ; bearer_re
-  ; ghp_re
-  ; ghs_re
-  ; gho_re
-  ; ghu_re
-  ; github_pat_re
   ; sk_re
   ; awsakia_re
   ]
@@ -209,27 +193,22 @@ let rec redact_json_value = function
 let preview_of_json ?(max_len = default_max_len) (json : Yojson.Safe.t) =
   Yojson.Safe.to_string (redact_json_value json) |> redact_preview ~max_len
 
-let redact_tool_input ~tool_name (input : Yojson.Safe.t) : string option =
-  if is_denied_tool ~tool_name then None
-  else Some (preview_of_json input)
+let redact_tool_input ~tool_name:_ (input : Yojson.Safe.t) : string option =
+  Some (preview_of_json input)
 
-let redact_tool_output ~tool_name (output : string) : string option =
-  if is_denied_tool ~tool_name then None
-  else Some (redact_preview output)
+let redact_tool_output ~tool_name:_ (output : string) : string option =
+  Some (redact_preview output)
 
-let redacted_tool_input_json ~tool_name input =
-  if is_denied_tool ~tool_name then None
-  else Some (input |> redact_json_value |> preview_json_strings)
+let redacted_tool_input_json ~tool_name:_ input =
+  Some (input |> redact_json_value |> preview_json_strings)
 
-let redacted_tool_output_json ~tool_name output =
-  if is_denied_tool ~tool_name then None
-  else
-    let redacted =
-      try Yojson.Safe.from_string output |> redact_json_value |> preview_json_strings
-      with
-      | Yojson.Json_error _ -> `String (redact_preview output)
-    in
-    Some redacted
+let redacted_tool_output_json ~tool_name:_ output =
+  let redacted =
+    try Yojson.Safe.from_string output |> redact_json_value |> preview_json_strings
+    with
+    | Yojson.Json_error _ -> `String (redact_preview output)
+  in
+  Some redacted
 
 let build_tool_call_trace_json ?tool_use_id ~tool_name ~input
     ~(output : string option) ~(is_error : bool option) () : Yojson.Safe.t =

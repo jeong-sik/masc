@@ -1936,8 +1936,6 @@ describe('sendKeeperThreadMessage stream outcome', () => {
         latencyMs: null,
         costUsd: null,
         usage: null,
-        skillPrimary: null,
-        skillReason: null,
         replyText: null,
         turnOutcome: 'no_visible_reply',
         rawPayload: {

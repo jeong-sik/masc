@@ -25,16 +25,8 @@ let init_keeper_tool_registry () =
     (Masc.Unified_tool_registry.register_all ();
      Masc.Unified_tool_registry.enforce_visible_tag_coverage ())
 
-(** Test fixture parser for [keeper_meta] JSON.
-
-    The production parser at [Masc.Keeper_meta_json_parse.meta_of_json] requires
-    explicit [tool_access]. Test fixtures historically built minimal [`Assoc]
-    payloads that omitted it. Rather than thread the field through every
-    fixture, this helper auto-fills a conservative test default when absent,
-    then delegates to the strict production parser.
-
-    Production code MUST NOT use this helper — the strict parser exists to
-    catch missing fields at the boundary. *)
+(** Test fixture parser for [keeper_meta] JSON. It supplies only a trace id
+    when a focused fixture omits one, then delegates to the production parser. *)
 let meta_of_json_fixture (json : Yojson.Safe.t) =
   let augment fields =
     let has key = List.exists (fun (k, _) -> String.equal k key) fields in
@@ -64,10 +56,7 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
       if String.length candidate <= 64 then candidate
       else String.sub candidate 0 64
     in
-    fields
-    |> add_if_missing "trace_id" (`String trace_id)
-    |> add_if_missing "tool_access"
-         (Json_util.json_string_list [])
+    fields |> add_if_missing "trace_id" (`String trace_id)
   in
   let json' =
     match json with
@@ -76,12 +65,12 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
   in
   Masc.Keeper_meta_json_parse.meta_of_json json'
 
-(** Walk up the directory tree from [Sys.getcwd()] until
-    [config/tool_policy.toml] is found, then return that directory.
+(** Walk up the directory tree from [Sys.getcwd()] until [dune-project] is
+    found, then return that directory.
     Raises [Failure] with a descriptive message if the marker file
     cannot be found by the time the filesystem root is reached. *)
 let find_project_root () =
-  let marker = "config/tool_policy.toml" in
+  let marker = "dune-project" in
   let start_dir = Sys.getcwd () in
   match Sys.getenv_opt "DUNE_SOURCEROOT" with
   | Some root when Sys.file_exists (Filename.concat root marker) -> root

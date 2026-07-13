@@ -32,12 +32,9 @@ type credential =
     transport/tool lane must be driven for a provider, independent of model. *)
 type capabilities =
   { supports_inline_tools : bool
-  ; requires_per_keeper_bridging_for_bound_actor_tools : bool
-  ; identity_runtime_mcp_header_keys : string list
   ; argv_prompt_preflight : bool
   ; uses_anthropic_caching : bool
   ; max_turns_per_attempt : int option
-  ; tolerates_bound_actor_fallback : bool
   }
 [@@deriving show, eq]
 
@@ -211,66 +208,6 @@ type binding =
   }
 [@@deriving show, eq]
 
-(** {1 Pause threshold knobs}
-
-    Typed record mirroring the [\[pause\]] runtime.toml section.  All fields
-    are [int] or [float] — primitive thresholds, not reason classifiers, so
-    polymorphic variants / closed-sum types are not warranted here. *)
-type pause_threshold =
-  { turn_fail_streak_threshold : int
-  ; recent_restart_window_sec : float
-  ; recent_restart_count_threshold : int
-  ; tool_failure_count_threshold : int
-  ; tool_failure_ratio_threshold : float
-  }
-[@@deriving show, eq]
-
-(** [Pause_threshold.default] mirrors the legacy hardcoded values in
-    [Keeper_behavioral_regime.ml:46-50]. Field names must match — they are
-    the runtime.toml SSOT keys. *)
-let pause_threshold_default =
-  { turn_fail_streak_threshold = 3
-  ; recent_restart_window_sec = 300.0
-  ; recent_restart_count_threshold = 2
-  ; tool_failure_count_threshold = 3
-  ; tool_failure_ratio_threshold = 0.7
-  }
-;;
-
-(** {1 Pacing (RFC-0313 W3)}
-
-    Typed record mirroring the [\[pacing\]] runtime.toml section. Failure
-    outcomes modulate per-runtime revisit pacing instead of keeper existence
-    (pause / crash / dead); this record carries the pacing policy knobs and
-    the W3 behavior switch. *)
-
-type pacing_mode =
-  | Pacing_shadow
-    (** Pacing is computed and logged but the legacy failure-driven pause
-        paths and the cycle-cap matrix stay live. Kill-switch position for
-        one release (RFC-0313 W3); the switch is removed in W4. *)
-  | Pacing_enforce
-    (** Failure-driven pause paths are skipped and the scheduler delays the
-        keeper's next turn until the earliest per-runtime revisit becomes
-        eligible. *)
-[@@deriving show, eq]
-
-type pacing =
-  { pacing_mode : pacing_mode
-  ; pacing_base_sec : float
-  ; pacing_multiplier : float
-  ; pacing_cap_sec : float
-  }
-[@@deriving show, eq]
-
-let pacing_default =
-  { pacing_mode = Pacing_enforce
-  ; pacing_base_sec = 30.0
-  ; pacing_multiplier = 2.0
-  ; pacing_cap_sec = 3600.0
-  }
-;;
-
 (** {1 Lanes}
 
     Lanes are ordered failover candidate lists declared in [runtime.lanes.<id>].
@@ -307,7 +244,7 @@ type config =
         [MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID] env var overrides this. *)
   ; structured_judge_runtime_id : string option
     (** [\[runtime\].structured_judge] — runtime id for provider-native
-        structured-output judge calls such as dashboard operator/governance
+        structured-output judge calls such as dashboard operator
         judges. When set, it must resolve to a model declaring
         [supports-structured-output]. [None] lets callers use their documented
         migration fallback, but no caller may silently discard a schema request. *)
@@ -338,22 +275,6 @@ type config =
         admits it. [[]] = derive capable runtimes from declared
         [\[models.*.capabilities\]] in declaration order. Each id must resolve to
         a configured runtime (rejected at load like [\[runtime\].default]). *)
-  ; pause_threshold : pause_threshold
-    (** [\[pause\]] — typed SSOT for keeper pause / regime threshold knobs
-        previously hardcoded in [Keeper_behavioral_regime]. Mirrors the same
-        field names + types (int / float) so callers can compare against the
-        loaded record without an extra decoder. Missing from runtime.toml →
-        [Pause_threshold.default]. Wrong-type value → load-time warn + fallback
-        to default (fail-soft: wrong value is not catastrophic at boot).
-        Operational callers read this through [Runtime.pause_threshold]. *)
-  ; pacing : pacing
-    (** [\[pacing\]] (RFC-0313 W3) — per-runtime failure revisit pacing policy
-        plus the shadow/enforce behavior switch. Missing section →
-        [pacing_default]. Numeric knobs fail soft like [\[pause\]]; [mode]
-        fails closed at load (an unknown value aborts config parse) because a
-        typo silently reverting the behavior flip is the permissive-default
-        failure the flip removes. Operational callers read this through
-        [Runtime.pacing]. *)
   ; lane_decls : lane_decl list
     (** [\[runtime.lanes.<id>\]] — ordered failover candidate lists.
         Declarations are resolved against materialized runtimes at load time;

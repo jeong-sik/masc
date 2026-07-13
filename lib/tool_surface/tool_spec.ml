@@ -34,7 +34,6 @@ type t = {
   handler_binding : handler_binding;
   is_read_only : bool;
   mcp_context_required : bool;
-  is_destructive : bool;
   is_idempotent : bool;
   visibility : Tool_catalog.visibility;
   implementation_status : Tool_catalog.implementation_status;
@@ -43,8 +42,6 @@ type t = {
   reason : string option;
   allow_direct_call_when_hidden : bool;
   title : string option;
-  effect_domain : Tool_catalog.effect_domain option;
-  requires_actor_binding : bool option;
 }
 
 (* ================================================================ *)
@@ -59,7 +56,6 @@ let create
     ~handler_binding
     ?(is_read_only = false)
     ?(mcp_context_required = false)
-    ?(is_destructive = false)
     ?(is_idempotent = false)
     ?(visibility = Tool_catalog.Default)
     ?(implementation_status = Tool_catalog.Real)
@@ -68,15 +64,12 @@ let create
     ?reason
     ?(allow_direct_call_when_hidden = false)
     ?title
-    ?effect_domain
-    ?requires_actor_binding
     () =
   { name; description; module_tag; input_schema; handler_binding;
-    is_read_only; mcp_context_required; is_destructive; is_idempotent;
+    is_read_only; mcp_context_required; is_idempotent;
     visibility; implementation_status;
     canonical_name; replacement; reason;
-    allow_direct_call_when_hidden; title; effect_domain;
-    requires_actor_binding }
+    allow_direct_call_when_hidden; title }
 
 (* ================================================================ *)
 (* Conversion                                                       *)
@@ -106,40 +99,19 @@ let register (spec : t) =
   (* 1. Tag + schema registry *)
   Tool_dispatch.register_module_tag
     ~schemas:[ to_tool_schema spec ] ~tag:spec.module_tag;
-  (* 2. Catalog metadata — enforce Hidden for system-internal tools *)
-  let is_system_internal =
-    Tool_catalog_surfaces.is_system_internal_hidden spec.name
-  in
-  let effective_visibility =
-    Tool_catalog.effective_registered_visibility
-      ~name:spec.name
-      ~declared:spec.visibility
-  in
-  let effective_allow_direct =
-    spec.allow_direct_call_when_hidden || is_system_internal
-  in
-  let existing = Tool_catalog.registered_metadata spec.name in
-  let requires_actor_binding =
-    match spec.requires_actor_binding with
-    | Some _ as value -> value
-    | None ->
-        Option.bind existing (fun (meta : Tool_catalog.metadata) ->
-          meta.requires_actor_binding)
-  in
+  (* 2. Catalog metadata. Registration preserves the typed declaration;
+     product-name membership must not override visibility. *)
   Tool_catalog.register_metadata spec.name
-    { Tool_catalog.visibility = effective_visibility;
+    { Tool_catalog.visibility = spec.visibility;
       lifecycle = Tool_catalog.Active;
       implementation_status = spec.implementation_status;
       canonical_name = spec.canonical_name;
       replacement = spec.replacement;
       reason = spec.reason;
-      allow_direct_call_when_hidden = effective_allow_direct;
+      allow_direct_call_when_hidden = spec.allow_direct_call_when_hidden;
       readonly = Some spec.is_read_only;
       mcp_context_required = Some spec.mcp_context_required;
-      destructive = Some spec.is_destructive;
-      idempotent = Some spec.is_idempotent;
-      effect_domain = spec.effect_domain;
-      requires_actor_binding };
+      idempotent = Some spec.is_idempotent };
   (* 3. Handler binding — auto-register Direct/Shared into Tool_dispatch *)
   (match spec.handler_binding with
    | Direct h | Shared h ->

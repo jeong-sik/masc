@@ -8,23 +8,19 @@ type gc_report =
   ; ttl_expired_ephemeral : int
   ; ttl_expired_non_ephemeral : int
   ; ttl_expired_by_category : (string * int) list
-  ; dedup_removed : int
   ; written : int
   ; dry_run : bool
   }
 
 exception Fact_store_corrupt of string
 
-(** [ttl_expired ~now fact] is [not (fact_is_current ~now fact)]: expiry runs
-    on the same effective horizon ([fact_effective_valid_until] — explicit
-    [valid_until], or the RFC-0259 P7 legacy [External_state] horizon) that the
-    writer cap ([partition_expired]) and recall use, so cap, recall, and GC
-    cannot disagree on what is expired. *)
+(** [ttl_expired ~now fact] is [not (fact_is_current ~now fact)]: expiry uses
+    only the exact producer-supplied [valid_until]. *)
 val ttl_expired : now:float -> fact -> bool
 
-(** Run the deterministic forgetting sweep for one keeper: hard-expire facts past
-    their effective horizon, then dedup duplicate claims keeping the
-    most-recently-verified, and (unless [dry_run]) rewrite the store atomically.
+(** Run the deterministic explicit-expiry sweep for one keeper. It does not
+    deduplicate, rank, or otherwise decide semantic forgetting. Unless [dry_run],
+    it rewrites the store after removing facts past their exact [valid_until].
 
     The whole read-modify-rewrite runs under [File_lock_eio.with_lock] on the
     keeper's [facts_path] — the same lock the librarian write path and the

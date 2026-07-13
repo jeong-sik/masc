@@ -407,6 +407,54 @@ let handle_keeper_create_from_persona ctx args : tool_result =
         |> Result.map_error (fun e -> "" ^ e)
       in
       let dry_run = get_bool args "dry_run" false in
+      (* D-10a: an explicit [initial_goal] mints a Goal entity and is the
+         goal source for the new keeper. Passing both [goal] and
+         [initial_goal] is an explicit conflict — rejected instead of
+         silently picking a winner. *)
+      let explicit_goal_arg =
+        match get_string_opt args "goal" with
+        | Some g when String.trim g <> "" -> true
+        | _ -> false
+      in
+      let initial_goal_opt =
+        match get_string_opt args "initial_goal" with
+        | Some t when String.trim t <> "" -> Some (String.trim t)
+        | _ -> None
+      in
+      let* () =
+        if explicit_goal_arg && initial_goal_opt <> None then
+          Error
+            "pass either goal or initial_goal, not both: initial_goal mints \
+             a Goal entity (D-10a) and also fills the legacy goal string \
+             during the transition"
+        else Ok ()
+      in
+      let* resolved_args, initial_goal_id =
+        match initial_goal_opt with
+        | None -> Ok (resolved_args, None)
+        | Some title ->
+            if dry_run then
+              (* dry_run stays effect-free: preview the exact injection
+                 without minting the Goal entity. *)
+              Ok
+                ( Keeper_tool_persona_runtime.resolved_args_with_initial_goal
+                    ~goal_text:title resolved_args,
+                  None )
+            else (
+              match Goal_store.upsert_goal ctx.config ~title () with
+              | Error e -> Error ("initial_goal: goal creation failed: " ^ e)
+              | Ok (g, _created) ->
+                  Ok
+                    ( Keeper_tool_persona_runtime
+                      .resolved_args_with_initial_goal ~goal_text:title
+                        ~goal_id:g.Goal_store.id resolved_args,
+                      Some g.Goal_store.id ))
+      in
+      let initial_goal_field =
+        match initial_goal_id with
+        | Some gid -> [ ("initial_goal_id", `String gid) ]
+        | None -> []
+      in
       (* Validate on both branches: dry_run reports [ready]/[errors] as a
          preview, and a real create rejects with the same structured payload
          before any boot side effect — the boot path's own goal gate stays as
@@ -459,15 +507,17 @@ let handle_keeper_create_from_persona ctx args : tool_result =
           let created_json = Tool_result.data result in
           let json =
             `Assoc
-              [
-                ( "persona",
-                  Keeper_tool_persona_runtime.persona_summary_to_json persona );
-                ("created", `Bool true);
-                ("durable_config", durable_config);
-                ( "result",
-                  annotate_keeper_json ~runtime_class:"keeper" created_json );
-                ("resolved_args", resolved_args);
-              ]
+              ([
+                 ( "persona",
+                   Keeper_tool_persona_runtime.persona_summary_to_json persona
+                 );
+                 ("created", `Bool true);
+                 ("durable_config", durable_config);
+                 ( "result",
+                   annotate_keeper_json ~runtime_class:"keeper" created_json );
+                 ("resolved_args", resolved_args);
+               ]
+              @ initial_goal_field)
           in
           invalidate_keeper_list_cache ();
           invalidate_status_cache (get_string resolved_args "name" "");

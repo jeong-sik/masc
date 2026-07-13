@@ -133,7 +133,14 @@ let keeper_schemas : tool_schema list = [
           ("type", `String "boolean");
           ("description", `String "If true, return the resolved keeper args and validation errors without creating the keeper.");
         ]);
-        ("goal", `Assoc [("type", `String "string")]);
+        ("goal", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Legacy goal string. Mutually exclusive with initial_goal.");
+        ]);
+        ("initial_goal", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Title of the first Goal entity to mint for this keeper (D-10a). Creates the goal, links it into active_goal_ids, and fills the legacy goal string during the transition. Mutually exclusive with goal.");
+        ]);
         ("instructions", `Assoc [("type", `String "string")]);
         ("mention_targets", `Assoc [
           ("type", `String "array");

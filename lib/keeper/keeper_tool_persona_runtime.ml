@@ -86,6 +86,37 @@ let validate_resolved_keeper_create_json (json : Yojson.Safe.t) : string list =
     errors := "mention_targets is required" :: !errors;
   List.rev !errors
 
+(* D-10a transition: an explicit [initial_goal] fills the legacy goal string
+   (the boot gate and the system prompt still read it until the A2 field
+   dissolution) and, when the Goal entity has been minted, links its id into
+   [active_goal_ids]. Pure JSON rewrite — the Goal_store effect stays at the
+   handler boundary, so dry_run can preview the exact same injection without
+   minting anything. Non-object input passes through unchanged: resolved args
+   are produced as an object by [resolved_keeper_args_from_persona], and any
+   degenerate shape is rejected loudly by the downstream validate gate. *)
+let resolved_args_with_initial_goal ~goal_text ?goal_id (json : Yojson.Safe.t)
+    : Yojson.Safe.t =
+  match json with
+  | `Assoc fields ->
+      let ids = Safe_ops.json_string_list "active_goal_ids" json in
+      let ids =
+        match goal_id with
+        | Some gid when not (List.mem gid ids) -> ids @ [ gid ]
+        | _ -> ids
+      in
+      let fields =
+        fields
+        |> List.remove_assoc "goal"
+        |> List.remove_assoc "active_goal_ids"
+      in
+      let ids_field =
+        match ids with
+        | [] -> []
+        | xs -> [ ("active_goal_ids", Json_util.json_string_list xs) ]
+      in
+      `Assoc (fields @ [ ("goal", `String goal_text) ] @ ids_field)
+  | other -> other
+
 let toml_escape_string value =
   let buf = Buffer.create (String.length value + 8) in
   String.iter

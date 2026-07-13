@@ -49,6 +49,54 @@ let test_invalid_name_rejected () =
     "name error present" true
     (List.exists (contains ~affix:"invalid keeper name") errors)
 
+let string_list_field fields key =
+  match List.assoc_opt key fields with
+  | Some (`List xs) ->
+      List.filter_map (function `String s -> Some s | _ -> None) xs
+  | _ -> []
+
+let test_initial_goal_injection () =
+  (* D-10a transition: injection fills the legacy goal string, links the
+     minted goal id (dedup), and the result passes the validate gate. *)
+  let base =
+    `Assoc
+      [
+        ("name", `String "valid-name");
+        ("goal", `String "");
+        ("mention_targets", `List [ `String "valid-name" ]);
+        ("active_goal_ids", `List [ `String "goal-existing" ]);
+      ]
+  in
+  let injected =
+    Keeper_tool_persona_runtime.resolved_args_with_initial_goal
+      ~goal_text:"첫 목표" ~goal_id:"goal-new" base
+  in
+  (match injected with
+   | `Assoc fields ->
+       (match List.assoc_opt "goal" fields with
+        | Some (`String g) ->
+            Alcotest.(check string) "goal filled from initial_goal" "첫 목표" g
+        | _ -> Alcotest.fail "goal must be a string");
+       Alcotest.(check (list string))
+         "goal id linked after existing ids"
+         [ "goal-existing"; "goal-new" ]
+         (string_list_field fields "active_goal_ids")
+   | _ -> Alcotest.fail "injection must return an object");
+  Alcotest.(check (list string))
+    "injected args pass the gate" [] (validate injected);
+  (* Re-injecting the same id must not duplicate it. *)
+  let twice =
+    Keeper_tool_persona_runtime.resolved_args_with_initial_goal
+      ~goal_text:"첫 목표" ~goal_id:"goal-new" injected
+  in
+  match twice with
+  | `Assoc fields ->
+      Alcotest.(check (list string))
+        "goal id dedup on re-injection"
+        [ "goal-existing"; "goal-new" ]
+        (string_list_field fields "active_goal_ids")
+  | _ -> Alcotest.fail "injection must return an object"
+
 let () =
   Alcotest.run "keeper_create_validate"
     [
@@ -60,5 +108,11 @@ let () =
             test_complete_args_pass;
           Alcotest.test_case "invalid keeper name is rejected" `Quick
             test_invalid_name_rejected;
+        ] );
+      ( "initial_goal",
+        [
+          Alcotest.test_case
+            "injection fills goal, links id with dedup, passes gate" `Quick
+            test_initial_goal_injection;
         ] );
     ]

@@ -15,19 +15,24 @@ open Keeper_execution
 
 include Keeper_supervisor_launch
 
-(** RFC-0250: pure stale-run assessment for the no-turn-produced case.
+(** RFC-0250 + task-2285: pure stale-run assessment for the no-turn-produced case.
 
-    Returns [Some (Stale_turn_timeout (Idle_turn { stall_seconds }))] — giving
-    the previously-producerless [Idle_turn] variant its first real producer —
-    when the keeper is [Running], is not in a turn ([in_turn = None], the
-    exact [Idle_turn] doc contract), has completed at least one turn
-    ([last_turn_ts > 0], so a fresh-start keeper is not mis-stamped), and
-    [now] exceeds both the last completed turn and the current supervised
-    lifetime by more than [threshold]. The lifetime gate prevents a restarted
-    fiber from immediately inheriting an old completed-turn timestamp and
-    burning its restart budget before it has had one stale window to make
-    progress. Returns [None] otherwise (alive, in-turn, fresh-start, or
-    recently restarted).
+    Returns [Some (Stale_turn_timeout (Alive_idle { ... }))] when the keeper
+    is [Running], not in a turn, has completed at least one turn, and
+    [now] exceeds the idle anchor by more than [threshold], BUT the keeper's
+    heartbeat is still arriving (last_heartbeat_ts is recent). This means the
+    keeper is alive but not producing turns — a distinct state from frozen.
+
+    Returns [Some (Stale_turn_timeout (Idle_turn { stall_seconds }))] when
+    the keeper is [Running], not in a turn, has completed at least one turn,
+    and [now] exceeds both the last completed turn and the current supervised
+    lifetime by more than [threshold], AND the heartbeat has also stopped
+    (last_heartbeat_ts is also stale). This means the keeper is truly frozen.
+
+    The lifetime gate prevents a restarted fiber from immediately inheriting
+    an old completed-turn timestamp and burning its restart budget before it
+    has had one stale window to make progress. Returns [None] otherwise
+    (alive, in-turn, fresh-start, or recently restarted).
 
     Pure: the caller stamps the reason via [Keeper_registry.set_failure_reason]
     and invokes [Keeper_execution_receipt.emit_stale_keeper_broadcast]. Keys on
@@ -39,6 +44,7 @@ let assess_stale_run
     ~(phase : Keeper_state_machine.phase)
     ~(in_turn : 'a option)
     ~(last_turn_ts : float)
+    ~(last_heartbeat_ts : float)
     ~(started_at : float)
     ~(now : float)
     ~(threshold : float)
@@ -51,9 +57,18 @@ let assess_stale_run
             && now -. idle_anchor_ts > threshold )
   then
     let stall = now -. last_turn_ts in
-    Some
-      (Keeper_registry.Stale_turn_timeout
-         (Keeper_registry_types.Idle_turn { stall_seconds = stall }))
+    let since_hb = now -. last_heartbeat_ts in
+    (* If the heartbeat is still recent (< 2x threshold), the keeper is alive
+       but idle — distinguish from truly frozen. *)
+    if last_heartbeat_ts > 0.0 && since_hb < threshold *. 2.0 then
+      Some
+        (Keeper_registry.Stale_turn_timeout
+           (Keeper_registry_types.Alive_idle
+              { stall_seconds = stall; since_heartbeat_seconds = since_hb }))
+    else
+      Some
+        (Keeper_registry.Stale_turn_timeout
+           (Keeper_registry_types.Idle_turn { stall_seconds = stall }))
   else None
 ;;
 

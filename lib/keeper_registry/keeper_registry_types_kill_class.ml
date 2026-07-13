@@ -27,8 +27,16 @@ type ambiguous_partial_commit =
   }
 
 (** Phase B PR-6 (2026-04-28): typed sub-class of stale-watchdog kills.
-    See keeper_registry.mli for rationale. *)
+    See keeper_registry.mli for rationale.
+
+    task-2285 (2026-07-13): added [Alive_idle] variant to distinguish
+    a keeper that is alive (heartbeats arriving) but not producing turns
+    from a truly frozen keeper that has stopped heartbeating entirely. *)
 type stale_kill_class =
+  | Alive_idle of
+      { stall_seconds : float
+      ; since_heartbeat_seconds : float
+      }
   | Idle_turn of { stall_seconds : float }
   | Mid_turn_no_progress of
       { active_seconds : float
@@ -44,6 +52,8 @@ let progress_kind_label = function
 ;;
 
 let stale_kill_class_to_string = function
+  | Alive_idle { stall_seconds; since_heartbeat_seconds } ->
+    Printf.sprintf "alive_idle(stall=%.0fs hb=%.0fs)" stall_seconds since_heartbeat_seconds
   | Idle_turn { stall_seconds } -> Printf.sprintf "idle_turn(%.0fs)" stall_seconds
   | Mid_turn_no_progress
       { active_seconds

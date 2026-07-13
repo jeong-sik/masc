@@ -560,6 +560,8 @@ let cleanup_atomic_orphans ~ownership_root ~(base_path : string) ~scope () =
       with
       | exn -> record_exn report ~operation:Delete_empty_orphan ~path exn
   in
+  (* TEL-OK: this leaf returns every cleanup decision/failure in the typed
+     [report]; the schema owner records that report to its metric namespace. *)
   let handle_orphan report ~base_stat ~source ~dir ~dir_stat name =
     let path = Filename.concat dir name in
     match lstat report ~operation:Inspect_orphan path with

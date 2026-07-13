@@ -143,7 +143,8 @@ let mark_current key =
   | Error _ as error -> error
   | Ok token ->
     with_prepare_lock (fun () ->
-      ignore (mark_current_with_token key token : cache_token));
+      let (_ : cache_token) = mark_current_with_token key token in
+      ());
     Ok ()
 ;;
 

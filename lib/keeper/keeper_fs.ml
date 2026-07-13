@@ -381,7 +381,7 @@ let save_json_durable_atomic_with
             ~before_stage
             Parent_directory_fsync_after_rename
             (fun () ->
-               ignore (Unix.lstat path : Unix.stats);
+               let (_ : Unix.stats) = Unix.lstat path in
                Keeper_fs_durable_directory.fsync_directory dir));
         confirm_directory_lease lease)
     in

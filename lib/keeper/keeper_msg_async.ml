@@ -382,6 +382,8 @@ let with_lane_gate ~on_wait mutex f =
      its transaction and lock release finish. Deliberately do not re-check the
      parent cancellation here: the caller must first settle the committed
      receipt/status, matching [Keeper_event_queue_owner_lock.with_durable_lock]. *)
+  (* fun-protect-finally-ok: [Eio.Mutex.unlock] is non-suspending and releases
+     only the lane gate acquired immediately above. *)
   Fun.protect
     ~finally:(fun () -> Eio.Mutex.unlock mutex)
     (fun () -> Eio.Cancel.protect f)
@@ -406,14 +408,16 @@ let with_keeper_lane_lock observation table ~base_path ~keeper_name f =
     | Unobserved_lane -> ()
     | Persistence_lane ->
       pending_observed := true;
-      ignore (Atomic.fetch_and_add persistence_lane_waits 1 : int);
-      ignore (Atomic.fetch_and_add persistence_lane_pending 1 : int)
+      let (_ : int) = Atomic.fetch_and_add persistence_lane_waits 1 in
+      let (_ : int) = Atomic.fetch_and_add persistence_lane_pending 1 in
+      ()
   in
   let leave_pending () =
     if !pending_observed
     then (
       pending_observed := false;
-      ignore (Atomic.fetch_and_add persistence_lane_pending (-1) : int))
+      let (_ : int) = Atomic.fetch_and_add persistence_lane_pending (-1) in
+      ())
   in
   let run () =
     match
@@ -423,7 +427,7 @@ let with_keeper_lane_lock observation table ~base_path ~keeper_name f =
         | Unobserved_lane -> `Unobserved (f ())
         | Persistence_lane ->
           let started = Mtime_clock.now () in
-          ignore (Atomic.fetch_and_add persistence_lane_in_flight 1 : int);
+          let (_ : int) = Atomic.fetch_and_add persistence_lane_in_flight 1 in
           let outcome =
             match f () with
             | value -> Lane_lock_returned value
@@ -438,9 +442,9 @@ let with_keeper_lane_lock observation table ~base_path ~keeper_name f =
          gate. The transaction outcome and elapsed time were captured while
          holding the gate, and [with_lane_gate] has released it before this
          point. Do not re-check parent cancellation here: a committed result
-         must reach its caller before cancellation propagates. *)
+      must reach its caller before cancellation propagates. *)
       Eio.Cancel.protect (fun () ->
-        ignore (Atomic.fetch_and_add persistence_lane_in_flight (-1) : int);
+        let (_ : int) = Atomic.fetch_and_add persistence_lane_in_flight (-1) in
         Otel_metric_store.observe_histogram persistence_lane_duration_metric elapsed);
       (match outcome with
        | Lane_lock_returned value -> value

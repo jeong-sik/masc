@@ -103,7 +103,13 @@ let has_git_marker path =
 let git_root ~base_path =
   match run_argv_line ["git"; "-C"; base_path; "rev-parse"; "--show-toplevel"] with
   | Some root -> Some root
-  | None -> find_git_root base_path
+  | None ->
+    match find_git_root base_path with
+    | Some root -> Some root
+    | None ->
+      (* Sandbox fallback: when base_path is outside the repo (e.g. sandbox
+         root), walk from cwd which is typically the repo checkout. *)
+      find_git_root (Sys.getcwd ())
 
 (** Check if directory is a git repository *)
 let is_git_repo ~base_path =

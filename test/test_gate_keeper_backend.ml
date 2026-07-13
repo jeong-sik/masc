@@ -30,6 +30,13 @@ let string_contains haystack needle =
     in
     loop 0
 
+let json_string_field key = function
+  | Some (`Assoc fields) ->
+    (match List.assoc_opt key fields with
+     | Some (`String value) -> value
+     | _ -> "")
+  | Some _ | None -> ""
+
 let read_file path =
   In_channel.with_open_bin path In_channel.input_all
 
@@ -2146,13 +2153,6 @@ let test_direct_reply_terminal_error_allows_checkpoint () =
       (Some payload_json) ""
   in
   check bool "checkpoint can stay user-only" true (Option.is_none err)
-
-let json_string_field key = function
-  | Some (`Assoc fields) -> (
-      match List.assoc_opt key fields with
-      | Some (`String value) -> value
-      | _ -> "")
-  | Some _ | None -> ""
 
 let test_keeper_tool_failure_log_details_include_preview_and_class () =
   let error_body = String.make 260 'x' in

@@ -250,7 +250,7 @@ let test_queued_delivery_requires_exact_turn_ref () =
   | Stream.Failed _ | Stream.Deferred _ ->
     fail "valid turn_ref must produce Delivered"
 
-let body fields = Yojson.Safe.to_string (`Assoc fields)
+let body fields = `Assoc fields
 
 let test_direct_reply_visible_text () =
   check (option string) "declared checkpoint -> None" None

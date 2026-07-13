@@ -25,7 +25,7 @@ Scope:
 | --- | --- | --- |
 | `execution-dispatch` | Keeper-side command, board, status, task, persona, memory, and receipt execution dispatch. | Tool name policy, sandbox runtime mechanics, GitHub transport details. |
 | `hook-observation` | OAS hook event parsing, metrics, and observational adapters. | OAS tool handler execution or keeper runtime dispatch. |
-| `oas-tool-bridge` | Keeper tool bridge for OAS bundle, handler, telemetry, JSON, markers, workflow, and deterministic errors. | Generic tool policy or non-OAS hook observation. |
+| `oas-tool-bridge` | Keeper tool bridge for OAS bundle, handler, telemetry, and deterministic errors. | Generic tool policy or non-OAS hook observation. |
 | `sandbox-runtime` | Sandbox containment, Docker runtime, read/session runners, executor, and shell IR target plumbing. | Tool naming policy or GitHub runtime. |
 | `shell-surface` | Shell command parsing, typed Execute input, shell ops, path, runtime paths, and timeout semantics. | Sandbox runtime or keeper tool registry/policy. |
 | `tool-surface-policy` | Keeper tool aliasing, boundary, disclosure, diversity, emission, registry, policy, resolution, and tool-specific policy records. | OAS bridge implementation, shell parsing, sandbox execution. |
@@ -72,6 +72,8 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_execution_receipt.mli` - execution-dispatch
 - `lib/keeper/keeper_execution.ml` - execution-dispatch
 - `lib/keeper/keeper_execution.mli` - execution-dispatch
+- `lib/keeper/keeper_tool_execution.ml` - execution-dispatch
+- `lib/keeper/keeper_tool_execution.mli` - execution-dispatch
 - `lib/keeper/keeper_execution_join.ml` - execution-dispatch
 - `lib/keeper/keeper_execution_join.mli` - execution-dispatch
 - `lib/keeper/keeper_hooks_oas_cost_events.ml` - hook-observation
@@ -181,13 +183,7 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tools_oas_handler_telemetry.mli` - oas-tool-bridge
 - `lib/keeper/keeper_tools_oas_handler.ml` - oas-tool-bridge
 - `lib/keeper/keeper_tools_oas_handler.mli` - oas-tool-bridge
-- `lib/keeper/keeper_tools_oas_json.ml` - oas-tool-bridge
-- `lib/keeper/keeper_tools_oas_json.mli` - oas-tool-bridge
-- `lib/keeper/keeper_tools_oas_markers.ml` - oas-tool-bridge
-- `lib/keeper/keeper_tools_oas_markers.mli` - oas-tool-bridge
 - `lib/keeper/keeper_tool_failure_recovery_judge.ml` - oas-tool-bridge
 - `lib/keeper/keeper_tool_failure_recovery_judge.mli` - oas-tool-bridge
-- `lib/keeper/keeper_tools_oas_workflow.ml` - oas-tool-bridge
-- `lib/keeper/keeper_tools_oas_workflow.mli` - oas-tool-bridge
 - `lib/keeper/keeper_tools_oas.ml` - oas-tool-bridge
 - `lib/keeper/keeper_tools_oas.mli` - oas-tool-bridge

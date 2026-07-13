@@ -88,23 +88,40 @@ let has_git_marker path =
     [base_path] is the sandbox root but the actual git checkout lives
     under a child directory (e.g. [repos/<name>]). *)
 let git_root ~base_path =
+  (* WORKAROUND-v2: scan up to depth 3 for nested repos (sandbox layout) *)
   if has_git_marker base_path then
     git_first_line ~repo_path:base_path [ "rev-parse"; "--show-toplevel" ]
   else
-    (* Fallback: search one level of children for a .git marker *)
+    (* Fallback: search up to depth 3 for nested repos (sandbox layout) *)
     (try
-       let entries = Sys.readdir base_path |> Array.to_list in
-       let rec find_git = function
-         | [] -> None
-         | entry :: rest ->
-           let child = Filename.concat base_path entry in
-           (try
-              if Sys.is_directory child && has_git_marker child then
-                git_first_line ~repo_path:child [ "rev-parse"; "--show-toplevel" ]
-              else find_git rest
-            with Sys_error _ -> find_git rest)
+       let max_depth = 3 in
+       let rec bfs dirs depth =
+         if depth > max_depth then None
+         else
+           let next_dirs = ref [] in
+           let found = ref None in
+           List.iter (fun dir ->
+             if !found = None then
+               try
+                 let entries = Sys.readdir dir |> Array.to_list in
+                 List.iter (fun entry ->
+                   if !found = None then
+                     let child = Filename.concat dir entry in
+                     try
+                       if Sys.is_directory child then
+                         if has_git_marker child then
+                           found := git_first_line ~repo_path:child ["rev-parse"; "--show-toplevel"]
+                         else
+                           next_dirs := child :: !next_dirs
+                     with Sys_error _ -> ())
+                   entries
+               with Sys_error _ -> ()
+           ) dirs;
+           match !found with
+           | Some _ -> !found
+           | None -> bfs !next_dirs (depth + 1)
        in
-       find_git entries
+       bfs [base_path] 1
      with Sys_error _ -> None)
 
 (** Check if directory is a git repository *)

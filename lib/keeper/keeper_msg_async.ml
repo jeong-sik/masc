@@ -973,9 +973,7 @@ let persist_terminal_from_source ~(entry : entry) ~source_path =
       | Found terminal_entry ->
         if entry_record_to_json terminal_entry = entry_record_to_json entry
         then (
-          (* See the lossless namespace protocol below: the durable terminal
-             destination is authoritative; cleanup failure is observed by
-             [remove_duplicate_source] and recovery retries the source. *)
+          (* See lossless namespace protocol: observed cleanup failure is retried. *)
           ignore (remove_duplicate_source ~entry source_path : bool);
           Ok ())
         else
@@ -995,8 +993,7 @@ let persist_terminal_from_source ~(entry : entry) ~source_path =
          terminal precedence. Never rename the sole source across directories:
          partial parent-directory fsync can otherwise lose both names. *)
       let* () = save_entry_durable terminal_path entry in
-      (* See the lossless namespace protocol above: terminal publication is
-         committed even when observed source cleanup must be retried. *)
+      (* See lossless namespace protocol: observed cleanup failure is retried. *)
       ignore (remove_duplicate_source ~entry source_path : bool);
       Ok ())
 ;;

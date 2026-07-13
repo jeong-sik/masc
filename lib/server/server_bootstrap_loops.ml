@@ -480,9 +480,14 @@ let prepare_keeper_persistence ~config =
     ~failures:(List.length queue_recovery.load_errors);
   List.iter
     (fun (keeper_name, (error : Keeper_chat_queue.snapshot_load_error)) ->
+       let keeper_label =
+         match keeper_name with
+         | Some keeper_name -> keeper_name
+         | None -> "<registry>"
+       in
        Log.Keeper.error
          "keeper_chat_queue: snapshot unavailable keeper=%s kind=%s error=%s"
-         (Option.value keeper_name ~default:"<registry>")
+         keeper_label
          (Keeper_chat_queue.snapshot_load_error_kind_to_string error.kind)
          error.message)
     queue_recovery.load_errors;

@@ -1003,10 +1003,15 @@ let persist_entry ?source_path (entry : entry) =
   | None -> Error (Integrity_failed Unsafe_request_id)
   | Some active_path ->
     if is_terminal_status entry.status
-    then
+    then (
+      let source_path =
+        match source_path with
+        | Some source_path -> source_path
+        | None -> active_path
+      in
       persist_terminal_from_source
         ~entry
-        ~source_path:(Option.value source_path ~default:active_path)
+        ~source_path)
     else save_entry_durable active_path entry
 ;;
 
@@ -1309,13 +1314,18 @@ let recovery_record_error_kind_to_string = function
 ;;
 
 let record_error ~store ~path ~request_id ?keeper_name kind report =
+  let keeper_label =
+    match keeper_name with
+    | Some keeper_name -> keeper_name
+    | None -> "<unattributed>"
+  in
   Log.Keeper.error
     "keeper_msg_async: recovery record failed store=%s request_id=%s keeper=%s path=%s error=%s"
     (match store with
      | Active_store -> "active"
-     | Legacy_store -> "legacy")
+    | Legacy_store -> "legacy")
     request_id
-    (Option.value keeper_name ~default:"<unattributed>")
+    keeper_label
     path
     (recovery_record_error_kind_to_string kind);
   { report with

@@ -338,7 +338,9 @@ let acquire_base_path_lock ?lock_path base_path =
   let path = canonical_lock_path requested_path in
   Mutex.protect base_path_lease_mu (fun () ->
     match Hashtbl.find_opt base_path_leases path with
-    | Some _ -> Base_path_already_owned { pid = Some (Unix.getpid ()) }
+    | Some _ ->
+      (* NDT-OK: the OS process id is the observed owner identity, not a branch heuristic. *)
+      Base_path_already_owned { pid = Some (Unix.getpid ()) }
     | None ->
       let fd =
         Unix.openfile
@@ -348,6 +350,7 @@ let acquire_base_path_lock ?lock_path base_path =
       in
       (try
          Unix.lockf fd Unix.F_TLOCK 0;
+         (* NDT-OK: persist the OS lease holder identity for operator observation. *)
          let pid = Unix.getpid () in
          let payload = Printf.sprintf "%d\n" pid in
          Unix.ftruncate fd 0;

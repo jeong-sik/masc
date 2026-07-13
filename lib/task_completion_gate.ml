@@ -85,8 +85,9 @@ let git_commit_exists ~base_path commit =
      with Eio.Cancel.Cancelled _ as e -> raise e | _ -> false)
   | None ->
     (* Sandbox base_path may not be a git root itself.
-       Search repos/ subdirectories for a repo containing the commit. *)
-    let repos_dir = Filename.concat base_path "repos" in
+       Use Config_dir_resolver.repos_dir (SSOT) to find repos/,
+       then search each repo subdirectory for the commit. *)
+    let repos_dir = Config_dir_resolver.repos_dir ~base_path in
     (try
        directory_entries repos_dir
        |> List.filter_map (fun name ->
@@ -99,7 +100,9 @@ let git_commit_exists ~base_path commit =
             with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None)
          | None -> None)
        |> List.exists (fun x -> x)
-     with _ -> false)
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | _ -> false)
 
 let trajectory_paths_for_trace ~base_path trace_id =
   if not (is_safe_ref_segment trace_id)

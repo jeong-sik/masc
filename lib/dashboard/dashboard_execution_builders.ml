@@ -199,12 +199,6 @@ let worker_state_of_agent
 let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
     continuity_context =
   let name = string_field "name" keeper in
-  let agent_name =
-    match String_util.trim_to_option (string_field "agent_name" keeper) with
-    | Some value -> value
-    | None -> name
-  in
-  let audit = tool_audit_snapshot agent_name in
   let agent = member_assoc "agent" keeper in
   let status = string_field "status" keeper in
   let context_ratio =
@@ -222,7 +216,6 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
         String_util.trim_to_option (string_field "updated_at" keeper);
         String_util.trim_to_option (string_field "last_seen" agent);
         String_util.trim_to_option (string_field "tool_audit_at" keeper);
-        audit.tool_audit_at;
       ]
   in
   let last_signal_at = latest_iso_timestamp [ last_action_at; last_heartbeat_at ] in
@@ -289,20 +282,14 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
     |> option_or_else (fun () -> String_util.trim_to_option (string_field "last_proactive_preview" keeper))
   in
   let recent_tool_names =
-    let keeper_tools = string_list_of_field "recent_tool_names" keeper in
-    (if keeper_tools <> [] then keeper_tools else audit.latest_tool_names)
-    |> cap_string_list
+    string_list_of_field "recent_tool_names" keeper |> cap_string_list
   in
   let latest_tool_names =
-    let keeper_tools = string_list_of_field "latest_tool_names" keeper in
-    (if keeper_tools <> [] then keeper_tools else audit.latest_tool_names)
-    |> cap_string_list
+    string_list_of_field "latest_tool_names" keeper |> cap_string_list
   in
   let latest_action_source =
     String_util.trim_to_option (string_field "latest_action_source" keeper)
-    |> option_or_else (fun () -> audit.latest_action_source)
   in
-  let skill_route_summary = skill_route_summary_of_keeper keeper in
   let profile = get_agent_profile name in
   {
     tone_rank = Dashboard_utils.tone_rank tone;
@@ -331,24 +318,20 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
            ("recent_output_preview", Json_util.string_opt_to_json recent_output_preview);
            ("recent_tool_names", Json_util.json_string_list recent_tool_names);
            ("latest_tool_names", Json_util.json_string_list latest_tool_names);
-            ("latest_tool_call_count", Json_util.option_to_yojson (fun value -> `Int value) audit.latest_tool_call_count);
+            ("latest_tool_call_count", member_assoc "latest_tool_call_count" keeper);
             ("latest_action_source", Json_util.string_opt_to_json latest_action_source);
-            ("tool_audit_source", Json_util.string_opt_to_json audit.tool_audit_source);
-            ("tool_audit_at", Json_util.string_opt_to_json audit.tool_audit_at);
+            ("tool_audit_source", member_assoc "tool_audit_source" keeper);
+            ("tool_audit_at", member_assoc "tool_audit_at" keeper);
             ("autonomous_action_count", `Int autonomous_action_count);
             ("autonomous_turn_count", `Int autonomous_turn_count);
             ("noop_turn_count", `Int noop_turn_count);
             ("last_heartbeat_at", Json_util.string_opt_to_json last_heartbeat_at);
             ("proactive_enabled", member_assoc "proactive_enabled" keeper);
-            ("proactive_idle_sec", member_assoc "proactive_idle_sec" keeper);
-            ("proactive_cooldown_sec", member_assoc "proactive_cooldown_sec" keeper);
             ("last_proactive_preview", member_assoc "last_proactive_preview" keeper);
-            ("skill_route_summary", Json_util.string_opt_to_json skill_route_summary);
             ( "model",
               Json_util.string_opt_to_json (String_util.trim_to_option (string_field "active_model" keeper)) );
             ("emoji", `String profile.emoji);
             ("koreanName", `String profile.korean_name);
-            ("skill_reason", Json_util.string_opt_to_json (String_util.trim_to_option (string_field "goal" keeper)));
           ]);
   }
 

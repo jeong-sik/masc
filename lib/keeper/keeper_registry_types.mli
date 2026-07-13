@@ -83,7 +83,6 @@ type failure_reason =
           fleet-batch detection is observation-only and must not create this
           failure reason; if old runtime state still contains it, the
           supervisor treats it like a restartable watchdog crash. *)
-  | Provider_timeout_loop of { count : int }
       (** Legacy persisted timeout-loop value. New operator/cohort surfaces
           normalize it to provider-timeout ownership instead of presenting
           timeout-budget as a distinct root cause. *)
@@ -99,16 +98,12 @@ type failure_reason =
           adapter, or runtime fails before useful keeper progress. A later
           idle watchdog should preserve this root cause instead of recasting
           the keeper as generically stale. *)
-  | Completion_contract_violation of { detail : string }
   | Ambiguous_partial_commit of ambiguous_partial_commit
   | Fiber_unresolved of fiber_drop_cause
   | Exception of string
-  | Turn_overflow_pause
-      (** Keeper paused after context-overflow compact-retry exhaustion.
-          Triggers supervisor auto-resume sweep (RFC-0152 Phase B). *)
-  | Turn_livelock_pause
-      (** Keeper paused by turn-livelock guard. Triggers supervisor
-          auto-resume sweep (RFC-0152 Phase B). *)
+  | Turn_overflow_failure
+      (** Context-overflow compact-retry exhaustion observed for the current
+          turn. It does not change Keeper lifecycle state. *)
   | Operator_interrupt
       (** The current turn was cancelled by an explicit operator request,
           typically from the dashboard "stop current turn" action. *)
@@ -283,7 +278,6 @@ val raise_turn_phase_transition_violation
 type decision_stage =
   | Decision_undecided [@tla.idle]
   | Decision_guard_ok [@tla.active]
-  | Decision_gate_rejected [@tla.terminal]
   | Decision_tool_policy_selected [@tla.active]
 [@@deriving tla]
 
@@ -291,13 +285,11 @@ type decision_stage =
 
 type decision_undecided
 type decision_guard_ok
-type decision_gate_rejected
 type decision_tool_policy_selected
 
 type 'a decision_stage_witness =
   | Decision_undecided : decision_undecided decision_stage_witness
   | Decision_guard_ok : decision_guard_ok decision_stage_witness
-  | Decision_gate_rejected : decision_gate_rejected decision_stage_witness
   | Decision_tool_policy_selected : decision_tool_policy_selected decision_stage_witness
 
 type packed_decision_stage = Packed : 'a decision_stage_witness -> packed_decision_stage
@@ -307,12 +299,11 @@ val stage_to_witness : decision_stage -> packed_decision_stage
 
 (** Decision stages valid as ADVANCE targets within a turn.  Excludes
     [Decision_undecided] (the initial state set only by [mark_turn_started]
-    / [mark_sdk_turn_started]).  The 3 spec-forbidden [<active>_to_undecided]
+    / [mark_sdk_turn_started]).  The 2 spec-forbidden [<active>_to_undecided]
     transitions are unrepresentable through this type, replacing the prior
     runtime [invalid_arg] inside [set_turn_decision_stage]. *)
 type decision_stage_active =
   | Decision_active_guard_ok
-  | Decision_active_gate_rejected
   | Decision_active_tool_policy_selected
 
 val decision_stage_active_to_packed
@@ -338,14 +329,9 @@ val validate_decision_transition
 module Decision_transition : sig
   type ('from, 'to_) t =
     | Undecided_to_guard_ok : (decision_undecided, decision_guard_ok) t
-    | Undecided_to_gate_rejected : (decision_undecided, decision_gate_rejected) t
     | Undecided_to_tool_policy_selected : (decision_undecided, decision_tool_policy_selected) t
-    | Guard_ok_to_gate_rejected : (decision_guard_ok, decision_gate_rejected) t
     | Guard_ok_to_tool_policy_selected : (decision_guard_ok, decision_tool_policy_selected) t
-    | Gate_rejected_to_guard_ok : (decision_gate_rejected, decision_guard_ok) t
-    | Gate_rejected_to_tool_policy_selected : (decision_gate_rejected, decision_tool_policy_selected) t
     | Tool_policy_selected_to_guard_ok : (decision_tool_policy_selected, decision_guard_ok) t
-    | Tool_policy_selected_to_gate_rejected : (decision_tool_policy_selected, decision_gate_rejected) t
 
   val to_tag : ('from, 'to_) t -> string
 end
@@ -410,7 +396,7 @@ val raise_compaction_transition_violation
   -> violation:compaction_transition_spec_violation
   -> 'a
 
-type livelock_attempt_state = {
+type turn_attempt_state = {
   turn_id : int;
   attempts : int;
   first_started_at : float;
@@ -453,8 +439,7 @@ type registry_entry = {
   name : string;
   meta : keeper_meta;
   phase : Keeper_state_machine.phase;
-      (** Keeper lifecycle phase (RFC-0002 13-state machine; 11 at #5229
-          → 12 with Overflowed (MASC-1) → 13 with Zombie #14707). *)
+      (** Raw Keeper lifecycle phase. *)
   conditions : Keeper_state_machine.conditions;
       (** Observable conditions that derive [phase]. *)
   fiber_stop : bool Atomic.t;
@@ -482,9 +467,9 @@ type registry_entry = {
   last_error : string option;
   last_failure_reason : failure_reason option;
   turn_consecutive_failures : int;
-  livelock_state : livelock_attempt_state option Atomic.t;
-      (** Per-keeper turn-livelock retry history, updated via CAS on this
-          per-entry atomic so it is part of the keeper SSOT. *)
+  turn_attempt_state : turn_attempt_state option Atomic.t;
+      (** Objective per-Keeper turn-attempt history, updated via CAS on this
+          per-entry atomic. This observation never controls dispatch. *)
   current_turn_switch : Eio.Switch.t option Atomic.t;
       (** Live turn-scoped switch exposed for operator interrupt.
           [Some sw] while a turn is running; [None] otherwise. *)

@@ -397,14 +397,14 @@ let bool_field name j =
   | `Bool value -> value
   | _ -> Alcotest.fail (Printf.sprintf "%s not bool" name)
 
-let test_requests_and_summary_degrade_under_fd_pressure () =
+let test_requests_and_summary_remain_available_under_fd_pressure () =
   with_temp_base_path (fun base_path ->
     let _ =
       create_pending_request
         ~base_path
         ~task_id:"task-fd-pressure"
         ~worker:"keeper-alpha"
-        ~criteria:[ V.Custom "must not scan under FD pressure" ]
+        ~criteria:[ V.Custom "verification remains visible under FD pressure" ]
         ~evidence:[ "ref-fd" ]
     in
     FD.reset_for_tests ();
@@ -413,16 +413,16 @@ let test_requests_and_summary_degrade_under_fd_pressure () =
       ~finally:FD.reset_for_tests
       (fun () ->
         let requests = D.requests_json ~base_path () in
-        Alcotest.(check int) "requests total degraded" 0 (int_field "total" requests);
+        Alcotest.(check int) "request remains visible" 1 (int_field "total" requests);
         Alcotest.(check bool)
           "requests degraded flag"
           true
           (bool_field "degraded" requests);
         (match member "requests" requests with
-         | `List [] -> ()
-         | _ -> Alcotest.fail "requests should be empty during fd pressure");
+         | `List [ _ ] -> ()
+         | _ -> Alcotest.fail "request should remain visible during fd pressure");
         let summary = D.summary_json ~base_path () in
-        Alcotest.(check int) "summary total degraded" 0 (int_field "total" summary);
+        Alcotest.(check int) "summary remains complete" 1 (int_field "total" summary);
         Alcotest.(check bool)
           "summary degraded flag"
           true
@@ -513,8 +513,8 @@ let () =
         test_requests_json_ignores_legacy_root_entries;
       Alcotest.test_case "conflict triage fields" `Quick
         test_requests_json_surfaces_conflict_triage_fields;
-      Alcotest.test_case "fd pressure degraded projection" `Quick
-        test_requests_and_summary_degrade_under_fd_pressure;
+      Alcotest.test_case "fd pressure remains observation-only" `Quick
+        test_requests_and_summary_remain_available_under_fd_pressure;
     ];
     "summary_json", [
       Alcotest.test_case "empty base_path" `Quick test_summary_empty;

@@ -101,31 +101,6 @@ let prepare_turn_retry_after_compaction ~base_path name =
       })
 ;;
 
-let mark_turn_gate_rejected_by_name name =
-  (* Name-only gate-rejection lookup (legacy server surface does not carry
-     base_path).  The phase transition itself is routed through
-     [set_turn_phase_with] so it shares the resolver / guard / broadcast
-     pathway with [set_turn_phase]. *)
-  let target =
-    StringMap.fold
-      (fun _k v acc ->
-         match acc with
-         | Some _ -> acc
-         | None -> if String.equal v.name name then Some v else None)
-      (Atomic.get registry)
-      None
-  in
-  match target with
-  | None -> ()
-  | Some entry ->
-    set_turn_phase_with
-      ~base_path:entry.base_path
-      name
-      ~event_kind:"gate_rejected"
-      ~target:(Packed Turn_finalizing)
-      ~update_obs:(fun obs -> { obs with decision_stage = Packed Decision_gate_rejected })
-;;
-
 let mark_turn_finished ~base_path name =
   (* Terminal turn lifecycle step: freeze [current_turn_observation] into
      [last_completed_turn] and clear the live observation.  This is
@@ -272,7 +247,7 @@ let is_running ~base_path name =
      answers the operator-facing question "is this keeper currently
      running?" and treats only [Running] as such. The 12 other phases
      (Offline, Failing, Overflowed, Compacting, HandingOff, Draining,
-     Paused, Stopped, Crashed, Restarting, Dead, Zombie) yield [false]
+     Paused, Stopped, Crashed, Restarting, Dead) yield [false]
      here. A future phase variant (e.g. a hypothetical [Migrating] or
      [Healing]) would silently inherit [false] under the previous
      [Some _ -> false] catch-all without a review point on whether
@@ -295,8 +270,7 @@ let is_running ~base_path name =
           | Stopped
           | Crashed
           | Restarting
-          | Dead
-          | Zombie )
+          | Dead )
       ; _
       } -> false
   | None -> false
@@ -394,46 +368,9 @@ let set_started_at_for_test ~base_path name started_at =
       (registry_entry_validation_error_to_string err)
 ;;
 
-type spawn_slot_denial_reason = Spawn_slots.denial_reason =
-  | Fd_pressure_active
-  | Fd_admission_blocked
-  | Max_active_keepers of { running_count : int; max_keepers : int }
-
-let spawn_slot_denial_reason_to_label = Spawn_slots.to_label
-let spawn_slot_denial_reason_to_detail = Spawn_slots.to_detail
-
-let spawn_slots_decision_internal ?fd_admitted () =
-  Spawn_slots.decision
-    ?fd_admitted
-    ~running_count:(Atomic.get running_count_atomic)
-    ()
-;;
-
-let spawn_slots_decision () = spawn_slots_decision_internal ()
-
-let spawn_slots_available () =
-  match spawn_slots_decision () with
-  | Ok () -> true
-  | Error _ -> false
-;;
-
 module For_testing = struct
   let unsafe_put_entry = unsafe_put_entry
-
-  let spawn_slots_decision ?fd_admitted () =
-    spawn_slots_decision_internal ?fd_admitted ()
-  ;;
-
-  let spawn_slots_available ?fd_admitted () =
-    match spawn_slots_decision ?fd_admitted () with
-    | Ok () -> true
-    | Error _ -> false
-  ;;
 end
-
-let record_spawn_slot_denied ~keeper_name ~surface reason =
-  Spawn_slots.record_denied ~keeper_name ~surface reason
-;;
 
 type wakeup_intent =
   | Reactive_signal
@@ -529,12 +466,8 @@ let fiber_health_of ~base_path name =
   | None -> Fiber_unknown
   | Some entry ->
     (match entry.phase with
-     | Dead | Zombie -> Fiber_dead
-     | Crashed | Restarting ->
-       let max_restarts =
-         Runtime_params.get Governance_registry.keeper_supervisor_max_restarts
-       in
-       if entry.restart_count >= max_restarts then Fiber_dead else Fiber_zombie
+     | Dead -> Fiber_dead
+     | Crashed | Restarting -> Fiber_zombie
      | Stopped ->
        if lane_has_exited entry then Fiber_unknown else Fiber_alive
      | Offline -> Fiber_unknown
@@ -544,13 +477,7 @@ let fiber_health_of ~base_path name =
         | Some `Stopped ->
           if lane_has_exited entry then Fiber_unknown else Fiber_alive
         | Some (`Crashed _) ->
-          if not (lane_has_exited entry)
-          then Fiber_alive
-          else
-            let max_restarts =
-              Runtime_params.get Governance_registry.keeper_supervisor_max_restarts
-            in
-            if entry.restart_count >= max_restarts then Fiber_dead else Fiber_zombie))
+          if not (lane_has_exited entry) then Fiber_alive else Fiber_zombie))
 ;;
 
 let crash_log_of ~base_path name =

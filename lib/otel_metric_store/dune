@@ -11,7 +11,6 @@
   otel_metric_hotpath
   otel_metric_key
   otel_metric_names
-  otel_metric_process
   otel_metric_store_core
   otel_oas_metric_names
   otel_policy_metric_names

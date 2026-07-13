@@ -7,7 +7,7 @@
      EmitMatchesEvidence        -> test_dequeue_only_consumes_enqueued
 
    Wire-up tests (heartbeat loop integration) live in a follow-up
-   patch alongside [Keeper_heartbeat_smart] / [Keeper_keepalive] changes. *)
+   patch alongside [Keeper_keepalive] changes. *)
 
 open Keeper_event_queue
 
@@ -115,8 +115,6 @@ let test_dequeue_only_consumes_enqueued () =
 (* Typed payload (RFC-0020): the kind is carried as a closed variant,
    not classified from a JSON-prefixed string. *)
 let test_typed_payload_surface () =
-  let stay = make_stim ~payload:No_progress_recovery "no-progress-loop:k" in
-  assert (String.equal (payload_kind_label stay.payload) "no_progress_recovery");
   assert (not (is_board_signal stay.payload));
   let board =
     make_stim

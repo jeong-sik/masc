@@ -858,11 +858,10 @@ fi
 # --- 4. seed minimum config ---------------------------------------------------
 if [ "$SEED_CONFIG" -eq 1 ]; then
   CONFIG_DIR="$BASE_PATH/.masc/config"
-  CONFIG_FILE="$CONFIG_DIR/tool_policy.toml"
   RUNTIME_FILE="$CONFIG_DIR/runtime.toml"
   MODEL_CATALOG_FILE="$CONFIG_DIR/oas-models.toml"
 
-  if [ -e "$CONFIG_FILE" ] && [ -e "$RUNTIME_FILE" ] && [ -e "$MODEL_CATALOG_FILE" ] && [ "$FORCE" -eq 0 ]; then
+  if [ -e "$RUNTIME_FILE" ] && [ -e "$MODEL_CATALOG_FILE" ] && [ "$FORCE" -eq 0 ]; then
     log "config already present at $CONFIG_DIR, skipping seed"
   elif [ "$DRY_RUN" -eq 1 ]; then
     log "[dry-run] would seed configs and model catalog to $CONFIG_DIR from release"
@@ -900,7 +899,6 @@ if [ "$SEED_CONFIG" -eq 1 ]; then
       seed_raw_if_missing "config/$name" "$name" "$dest"
     }
 
-    seed_config_if_missing "tool_policy.toml" "$CONFIG_FILE"
     seed_config_if_missing "runtime.toml" "$RUNTIME_FILE"
     seed_raw_if_missing "oas-models.toml" "oas-models.toml" "$MODEL_CATALOG_FILE"
   fi

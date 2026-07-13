@@ -272,7 +272,6 @@ let execution_smoke_fixture_json () =
                 ("tool_audit_source", `String "heartbeat_result");
                 ("tool_audit_at", `String generated_at);
                 ("last_proactive_preview", `String "Summarized the next scene handoff");
-                ("skill_route_summary", `String "scene-director · +1 · judgment");
               ];
           ] );
       ( "offline_worker_briefs",

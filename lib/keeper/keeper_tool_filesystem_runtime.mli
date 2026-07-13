@@ -52,5 +52,9 @@ val handle_file_write :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->
   config:Workspace.config ->
   keeper_name:string ->
+  ?continuation_channel:Keeper_continuation_channel.t ->
+  ?gate_context:(unit -> Keeper_gate.causal_context) ->
+  ?gate_grant:Keeper_gate.cycle_grant ->
   args:Yojson.Safe.t ->
+  unit ->
   string

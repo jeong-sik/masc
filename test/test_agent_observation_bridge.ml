@@ -89,26 +89,6 @@ let test_turn_observation_reaches_ide_storage () =
     | _ -> fail "expected one turn event")
 ;;
 
-let test_pr_observation_reaches_ide_storage () =
-  with_temp_dir (fun base_dir ->
-    install_fresh_ide_sink ();
-    Agent_observation.emit_pr_event
-      { base_path = base_dir
-      ; partition = Agent_observation.Legacy_default
-      ; keeper_id = "keeper-gamma"
-      ; turn_id = "turn-11"
-      ; output_text =
-          {|{"command_descriptor":{"kind":"gh_pr_create","title":"feat: test","base":"main","draft":true}}|}
-      ; tool_name = "execute"
-      ; success = true
-      };
-    match Ide_bridge.list_events ~base_path:base_dir ~kind:Ide_bridge.Pr ~limit:1 () with
-    | [ event ] ->
-      check int "pr_number fallback" 0 (json_int "pr_number" event);
-      check string "title" "feat: test" (json_string "pr_title" event)
-    | _ -> fail "expected one pr event")
-;;
-
 let test_write_region_observation_reaches_ide_storage () =
   with_temp_dir (fun base_dir ->
     install_fresh_ide_sink ();
@@ -302,7 +282,6 @@ let () =
             `Quick
             test_tool_observation_reaches_ide_storage_and_cursor
         ; test_case "turn observation reaches IDE storage" `Quick test_turn_observation_reaches_ide_storage
-        ; test_case "pr observation reaches IDE storage" `Quick test_pr_observation_reaches_ide_storage
         ; test_case
             "write-region observation reaches IDE storage"
             `Quick

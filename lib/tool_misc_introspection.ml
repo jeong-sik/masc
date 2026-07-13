@@ -48,7 +48,7 @@ let text_ok ~tool_name ~start_time body : Tool_result.result =
 let tool_inventory_json _ctx ~include_hidden =
   (* Returns all tool schemas from catalog with metadata.
      enabled_in_current_mode=false because this is dashboard context (no keeper).
-     Keeper-specific tool availability is determined by keeper_allowed_tool_names. *)
+     Keeper model visibility is the complete descriptor-declared surface. *)
   let surface_map : (string, string list) Hashtbl.t = Hashtbl.create 256 in
   let add_surface name s =
     let prev =

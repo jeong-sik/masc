@@ -17,8 +17,6 @@ type error_code =
   | Invalid_id
   | Post_not_found
   | Comment_not_found
-  | Rate_limited
-  | Capacity_exceeded
   | Io_error
   | Validation_error
   | Already_voted
@@ -48,8 +46,6 @@ let error_code_to_string = function
   | Invalid_id -> "invalid_id"
   | Post_not_found -> "post_not_found"
   | Comment_not_found -> "comment_not_found"
-  | Rate_limited -> "rate_limited"
-  | Capacity_exceeded -> "capacity_exceeded"
   | Io_error -> "io_error"
   | Validation_error -> "validation_error"
   | Already_voted -> "already_voted"
@@ -124,7 +120,6 @@ let status_of_board_error = function
   | Board.Validation_error _ -> `Bad_request
   | Board.Already_voted _ | Board.Already_exists _ -> `Conflict
   | Board.Post_not_found _ | Board.Comment_not_found _ -> `Not_found
-  | Board.Rate_limited _ | Board.Capacity_exceeded _ -> `Too_many_requests
   | Board.Unauthorized _ -> `Forbidden
   | Board.Io_error _ -> `Internal_server_error
 ;;
@@ -133,10 +128,6 @@ let code_and_details_of_board_error = function
   | Board.Invalid_id _ -> Invalid_id, []
   | Board.Post_not_found _ -> Post_not_found, []
   | Board.Comment_not_found _ -> Comment_not_found, []
-  | Board.Rate_limited { retry_after } ->
-    Rate_limited, [ "retry_after_seconds", `Float retry_after ]
-  | Board.Capacity_exceeded { current; max } ->
-    Capacity_exceeded, [ "current", `Int current; "max", `Int max ]
   | Board.Io_error _ -> Io_error, []
   | Board.Validation_error _ -> Validation_error, []
   | Board.Already_voted _ -> Already_voted, []

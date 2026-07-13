@@ -103,87 +103,25 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           p.name err;
         tool_result_error err
     | Ok () ->
-        match
-          Keeper_sandbox_runtime.ensure_keeper_startup_preflight
-            ~timeout_sec:(Env_config_sandbox.Preflight.max_timeout_sec ())
-            ~sandbox_profile
-        with
-        | Error err ->
-            Otel_metric_store.inc_counter
-              Keeper_metrics.(to_string LifecycleDispatchRejections)
-              ~labels:[("keeper", p.name); ("event", "create_sandbox_preflight")]
-              ();
-            Log.Keeper.warn "create_keeper failed sandbox preflight for %s: %s"
-              p.name err;
-            tool_result_error err
-        | Ok () ->
-            let max_active_keepers =
-              Keeper_runtime_resolved.bootstrap_max_active_keepers ()
-            in
-            let active_keepers = Keeper_registry.count_running () in
-            if max_active_keepers > 0 && active_keepers >= max_active_keepers then begin
-              Otel_metric_store.inc_counter
-                Keeper_metrics.(to_string LifecycleDispatchRejections)
-                ~labels:[("keeper", p.name); ("event", "create_max_active_reached")]
-                ();
-              Log.Keeper.warn
-                "create_keeper failed: max active keepers reached (%d/%d) for name=%s"
-                active_keepers max_active_keepers p.name;
-              tool_result_error
-                (Printf.sprintf
-                   "keeper max active reached (%d/%d). Stop/remove a keeper or set MASC_KEEPER_MAX_ACTIVE_KEEPERS."
-                   active_keepers
-                   max_active_keepers)
-            end
-            else
-              let proactive_enabled =
+            let proactive_enabled =
                 Option.value
                   ~default:
                     (Option.value ~default:default_proactive_enabled
                        p.profile_defaults.proactive_enabled)
                   p.proactive_enabled_opt
-              in
-              let proactive_idle_sec =
-                Option.value
-                  ~default:
-                    (Option.value ~default:default_proactive_idle_sec
-                       p.profile_defaults.proactive_idle_sec)
-                  p.proactive_idle_sec_opt
-                |> normalize_proactive_idle_sec
-              in
-              let proactive_cooldown_sec =
-                Option.value
-                  ~default:
-                    (Option.value ~default:default_proactive_cooldown_sec
-                       p.profile_defaults.proactive_cooldown_sec)
-                  p.proactive_cooldown_sec_opt
-                |> normalize_proactive_cooldown_sec
-              in
+            in
               let auto_handoff = Option.value ~default:true p.auto_handoff_opt in
               let handoff_threshold =
                 match p.handoff_threshold_opt with
                 | Some threshold -> threshold
                 | None ->
-                    Runtime_params.get Governance_registry.keeper_handoff_threshold
+                    Runtime_params.get Runtime_settings.keeper_handoff_threshold
               in
               let handoff_cooldown_sec =
                 match p.handoff_cooldown_sec_opt with
                 | Some cooldown_sec -> cooldown_sec
                 | None ->
-                    Runtime_params.get Governance_registry.keeper_handoff_cooldown_sec
-              in
-              let tool_access =
-                match p.tool_access_opt with
-                | Some access -> access
-                | None ->
-                    (match p.profile_defaults.tool_access with
-                     | Some tools -> normalize_tool_names tools
-                     | None -> [])
-              in
-              let tool_denylist =
-                resolve_tool_name_list
-                  ~preferred:p.tool_denylist_opt
-                  ~fallback:p.profile_defaults.tool_denylist
+                    Runtime_params.get Runtime_settings.keeper_handoff_cooldown_sec
               in
               let instructions = Option.value ~default:"" p.instructions_opt in
               let (env_ratio_gate, env_message_gate, env_token_gate) =
@@ -325,13 +263,9 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         network_mode;
         multimodal_policy;
         allowed_paths;
-        tool_access;
-        tool_denylist;
         mention_targets;
         proactive = {
           enabled = proactive_enabled;
-          idle_sec = proactive_idle_sec;
-          cooldown_sec = proactive_cooldown_sec;
         };
         compaction = {
           profile = compaction_profile;
@@ -340,15 +274,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           message_gate = compaction_message_gate;
           token_gate = compaction_token_gate;
           cooldown_sec = compaction_cooldown_sec;
-          (* Honour [Keeper_context_core.default_max_checkpoint_messages]
-             instead of the 80 literal that used to ship here.  The
-             literal shadowed the declared default (120) for 13/15
-             keepers.  Per-keeper overrides set by the operator via the
-             keeper JSON still win.  See #7859. *)
-          max_checkpoint_messages =
-            Keeper_context_core.default_max_checkpoint_messages;
-          keep_recent_tool_results =
-            Keeper_config.default_keep_recent_tool_results;
         };
         auto_handoff;
         handoff_threshold;
@@ -360,12 +285,11 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           active_goal_ids;
         paused = false;
         latched_reason = None;
-        auto_resume_after_sec = None;
         autoboot_enabled;
         current_task_id = None;
         telemetry_feedback_enabled = p.profile_defaults.telemetry_feedback_enabled;
         telemetry_feedback_window_hours = p.profile_defaults.telemetry_feedback_window_hours;
-        always_approve = p.profile_defaults.always_approve;
+        always_allow = p.profile_defaults.always_allow;
         runtime = {
           usage = {
             total_turns = 0;
@@ -409,7 +333,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           board_reactive_turn_count = 0;
           mention_reactive_turn_count = 0;
           noop_turn_count = 0;
-          last_seen_message_seq = 0;
+          message_scope_ack_id = None;
 	          last_blocker = None;
 	          last_runtime_attempt = None;
 	          last_turn_tool_calls = [];
@@ -422,7 +346,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       let init_save_result =
         try
           Keeper_context_runtime.save_oas_checkpoint
-            ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages
             ~multimodal_policy:meta.multimodal_policy
             ~keeper_name:meta.name
             ~session
@@ -501,12 +424,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           ("generation", `Int meta.runtime.generation);
           ("goal", `String meta.goal);
           ("instructions", `String meta.instructions);
-          ("tool_access", Json_util.json_string_list meta.tool_access);
-          ("tool_denylist",
-            `List (List.map (fun value -> `String value) meta.tool_denylist));
           ("proactive_enabled", `Bool meta.proactive.enabled);
-          ("proactive_idle_sec", `Int meta.proactive.idle_sec);
-          ("proactive_cooldown_sec", `Int meta.proactive.cooldown_sec);
           ("compaction_profile", `String meta.compaction.profile);
           ("compaction_mode",
             `String (Keeper_config.compaction_mode_to_string meta.compaction.mode));
@@ -519,10 +437,9 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           ("oas_env", `Assoc (List.map (fun (k, v) -> (k, `String v)) meta.oas_env));
         ] in
         tool_result_ok (Yojson.Safe.to_string json)
-         | ( Keepalive_already_registered _
+           | ( Keepalive_already_registered _
            | Keepalive_lifecycle_denied _
            | Keepalive_identity_unrepairable
-           | Keepalive_spawn_slot_denied _
            | Keepalive_registration_rejected _
            | Keepalive_fiber_start_rejected _
            | Keepalive_lane_ownership_lost

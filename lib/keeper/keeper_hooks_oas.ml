@@ -1,30 +1,17 @@
 (** Keeper_hooks_oas — OAS hooks adapter for Keeper Agent.run().
 
-    Maps keeper-specific behaviors (checkpoint, metrics, social events,
-    safety gates) to OAS hook events.
+    Maps keeper-specific behaviors (checkpoint, metrics, social events, and
+    passive tool timing) to OAS hook events. Cost is telemetry-only and must
+    not reject tool calls. External-effect authorization is owned by the
+    normalized execution boundary, not this generic hook adapter.
 
-    Safety checks in [pre_tool_use]:
-    - Destructive patterns: reject bash/edit tools with dangerous commands
-      (rm -rf, drop table, force push, etc.)
-
-    Cost is telemetry-only and must not reject tool calls.
-
-    These checks were previously in [Eval_gate.guarded_execute] and are
-    now natively integrated into the Agent.run() hook lifecycle.
-
-    @since Phase 4 — Keeper → Agent.run() migration
-    @since Phase 7 — Eval_gate → OAS hooks migration *)
+    @since Phase 4 — Keeper → Agent.run() migration *)
 
 
 (** Shared type/helper module (intra-library file split, 2026-05-16).
     Hoisted to the top so the rest of this module can refer to its
-    bindings — see classify_usage_trust which calls
-    [context_max_of_telemetry]. *)
+    shared bindings. *)
 include Keeper_hooks_oas_types
-
-(** Keeper deny list. The legacy must-deny surface is gone; keep the hook
-    argument explicit so callers still receive a stable field. *)
-let keeper_denied_tools = []
 
 (* label_* string constants moved to Keeper_hooks_oas_types
    (intra-library file split, 2026-05-16). *)
@@ -34,12 +21,6 @@ let keeper_denied_tools = []
    step 5; this duplicate block was left behind by accident and is now
    cleaned up. *)
 
-
-(* [escape_field], [render_inline_skip_reason], [broadcast_tool_skipped],
-   and [extract_command_from_input] now live in [Keeper_guards]. They
-   are used only by the decomposed pre_tool_use guard chain, so keeping
-   them there avoids a circular dependency and concentrates the
-   guard concerns in one module. *)
 
 (** Keeper-facing telemetry uses a neutral runtime lane.  Concrete
     provider/model identity belongs to OAS and lower-level runtime adapters.
@@ -56,7 +37,7 @@ let trajectory_duration_ms duration_ms =
 (* Inference telemetry redaction moved to Keeper_hooks_oas_types
    (intra-library file split, 2026-05-16). *)
 
-(* usage_has_tokens / is_keeper_board_write_tool_name / current_keeper_model
+(* usage_has_tokens / current_keeper_model
    / stop_reason_label_* / stop_reason_to_label moved to
    Keeper_hooks_oas_types (intra-library file split, 2026-05-16;
    stop_reason_to_label unified with keeper_hooks_oas_response_metrics
@@ -158,65 +139,39 @@ include Keeper_hooks_oas_response_metrics
 (** #10318: classify why [cost_usd] ended up as it did so the
     ledger entry is self-describing.  Pre-fix [costs.jsonl] showed
     100% [cost_usd=0] across 1697 entries with no way to tell
-    "untrusted usage zeroed it" apart from "pricing catalog miss"
-    apart from "free local provider".  Each silent path collapsed
+    "usage was missing" apart from "pricing catalog miss" or a
+    structurally free runtime. Each silent path collapsed
     to the same [0.0] field and the operator could only see
     "tracking is broken" without the next concrete action.
 
     Bounded source values:
-    - [computed]              — cost > 0 reported by OAS.
+    - [computed]              — a non-zero cost was reported by OAS.
     - [missing_usage]         — no usage payload from the provider.
-    - [untrusted_usage]       — usage_trust gate suppressed the value.
     - [unmetered_provider]    — OAS/runtime explicitly marks the call free.
-    - [oas_cost_unreported]   — OAS returned tokens but no positive cost.
-    - [zero_token_call]       — trusted but tokens=0
-                                (tool-only call or empty completion). *)
+    - [oas_cost_unreported]   — OAS returned usage but no cost. *)
 include Keeper_hooks_oas_cost_events
 
 (** Build OAS hooks for a keeper agent.
 
     All keepers receive the full tool set unconditionally.
-    Safety is enforced through eval_gate deny lists and these hooks:
-    1. Destructive pattern detection — reject dangerous bash/edit commands
-    2. Cost event emission — auto-emit per-turn cost to .masc/costs.jsonl
-    3. Advisory cost threshold reporting — never rejects tool calls
+    Cost events are emitted per turn to [.masc/costs.jsonl]. Cost is an
+    observation and is not part of the pre-tool decision surface.
 
     @param meta_ref Mutable ref to keeper metadata
     @param generation Current generation counter
-    @param max_cost_usd Optional advisory cost threshold; never rejects tool calls
-    @param destructive_ops_policy Destructive operations policy used for
-           pattern detection. Defaults to {!Destructive_ops_policy.default}.
-    @param pre_tool_use_guard Optional callback that can short-circuit a tool
-           before execution by returning an inline override response.
     @param on_tool_executed Optional callback after each tool execution
     @param trajectory_acc Optional trajectory accumulator for cost attribution
 
     Issue #8597 #3-5: dropped [~config], [~session], [~ctx_snapshot]. The
     closure body never read them; the docstring even admitted [ctx_snapshot]
     was "reserved, unused". State now flows through [meta_ref] (mutable) and
-    the explicit callbacks (pre_tool_use_guard / on_tool_executed). *)
-
-(* Passive observations are receipt evidence, not semantic watchdog progress.
-   Active tool execution is tracked separately by the in-flight tool state. *)
-let tool_completion_records_watchdog_progress tool_name =
-  match Keeper_tool_progress.classify_tool_progress tool_name with
-  | Keeper_tool_progress.Passive_status -> false
-  | Keeper_tool_progress.Claim_context
-  | Keeper_tool_progress.Execution
-  | Keeper_tool_progress.Completion ->
-    true
+    the explicit [on_tool_executed] callback. *)
 
 let make_hooks
     ~(config : Workspace.config)
     ~(meta_ref : Keeper_meta_contract.keeper_meta ref)
     ~(turn_ctx_cell : Keeper_tool_call_log.turn_ctx_cell)
     ~(generation : int)
-    ?(max_cost_usd : float option)
-    ?(destructive_ops_policy : Destructive_ops_policy.t =
-        Destructive_ops_policy.default)
-    ?(pre_tool_use_guard :
-        tool_name:string -> input:Yojson.Safe.t -> string option =
-        fun ~tool_name:_ ~input:_ -> None)
     ?(on_tool_executed :
         tool_name:string -> input:Yojson.Safe.t -> output_text:string ->
         success:bool -> duration_ms:float -> provider:string ->
@@ -236,36 +191,16 @@ let make_hooks
       (!meta_ref).name
       ~event_kind
   in
-  (* Streak gate state: tracks consecutive calls to the same tool
-     name (regardless of args). Lives across invocations via the
-     [make_hooks] closure — one state per keeper. *)
-  let streak_state = Keeper_guards.make_streak_state () in
-  let readonly_observation_state =
-    Keeper_guards.make_readonly_observation_state ()
-  in
-  let streak_threshold = 5 in
   ignore trajectory_acc;
-  let record_gate_decision = Keeper_guards.ignore_gate_decision in
-  (* Build the pre_tool_use guard chain via Hooks.compose. Each guard
-     lives in Keeper_guards and emits its own masc:keeper_gate event
-     on override/approval decisions. The observer persists the same
-     attempted action into tool-call and trajectory lanes so blocked
-     pre-tool attempts are not invisible to tool-stats. *)
-  let guard_chain =
-    Keeper_guards.build_chain
-      ~meta_ref
-      ~tool_start_time
-      ~streak_state
-      ~readonly_observation_state
-      ~streak_threshold
-      ~denied:keeper_denied_tools
-      ~max_cost_usd
-      ~destructive_ops_policy
-      ~on_gate_decision:record_gate_decision
-      ~pre_tool_use_guard
-  in
-  let non_gate_hooks =
+  let hooks =
     { Agent_sdk.Hooks.empty with
+    pre_tool_use = Some (fun event ->
+      match event with
+      | Agent_sdk.Hooks.PreToolUse _ ->
+        tool_start_time := Time_compat.now ();
+        Agent_sdk.Hooks.Continue
+      | _event -> Agent_sdk.Hooks.Continue);
+
     before_turn = Some (fun event ->
       match event with
       | Agent_sdk.Hooks.BeforeTurn _ ->
@@ -280,9 +215,8 @@ let make_hooks
         let meta = !meta_ref in
         let model = resolve_after_turn_model ~keeper_name:meta.name ~response in
         let usage_trust =
-          classify_usage_trust ?usage:response.usage ~telemetry:response.telemetry ()
+          classify_usage_trust ?usage:response.usage ()
         in
-        let usage_trusted = Keeper_usage_trust.is_trusted usage_trust in
         record_usage_anomaly_metrics ~keeper_name:meta.name usage_trust;
         let raw_input_tok, raw_output_tok =
           match response.usage with
@@ -296,28 +230,17 @@ let make_hooks
         in
         let input_tok, output_tok, turn_cost_usd, usage_missing =
           match response.usage with
-          | Some u when usage_trusted ->
+          | Some u ->
               ( u.input_tokens,
                 u.output_tokens,
                 oas_reported_cost u,
                 false )
-          | Some _ -> (0, 0, 0.0, false)
           | None -> (0, 0, 0.0, true)
         in
-        let cost_usd_for_event =
-          if usage_trusted then turn_cost_usd
-          else
-            match response.usage with
-            | Some { cost_usd = Some cost; _ } when cost > 0.0 -> cost
-            | Some _ | None -> 0.0
-        in
+        let cost_usd_for_event = turn_cost_usd in
         let total_tok = input_tok + output_tok in
-        if (not usage_missing) && not usage_trusted then (
-          let reasons =
-            match Keeper_usage_trust.reasons usage_trust with
-            | [] -> [Keeper_usage_trust.to_string usage_trust]
-            | reasons -> reasons
-          in
+        (match usage_trust with
+         | Keeper_usage_trust.Usage_untrusted reasons when not usage_missing ->
           if Keeper_usage_trust.warns_operator usage_trust then
             Log.Keeper.warn ~keeper_name:meta.name
               "after_turn usage telemetry untrusted runtime_lane=%s reasons=%s input=%d output=%d context_max=%d"
@@ -331,7 +254,10 @@ let make_hooks
               runtime_lane_label
               (String.concat "," reasons)
               raw_input_tok raw_output_tok
-              (context_max_of_telemetry response.telemetry));
+              (context_max_of_telemetry response.telemetry)
+         | Keeper_usage_trust.Usage_missing
+         | Keeper_usage_trust.Usage_trusted
+         | Keeper_usage_trust.Usage_untrusted _ -> ());
         (* Provider label for per-provider/model counters.
            Resolved once from telemetry; falls back to the
            redacted runtime_lane_label when unavailable. *)
@@ -343,13 +269,13 @@ let make_hooks
         in
         let cache_creation_input_tokens, cache_read_input_tokens =
           match response.usage with
-          | Some u when usage_trusted ->
+          | Some u ->
               u.cache_creation_input_tokens, u.cache_read_input_tokens
-          | Some _ | None -> 0, 0
+          | None -> 0, 0
         in
         let reasoning_output_tokens =
           match response.telemetry with
-          | Some { reasoning_tokens = Some rt; _ } when usage_trusted && rt > 0 -> rt
+          | Some { reasoning_tokens = Some rt; _ } when rt > 0 -> rt
           | _ -> 0
         in
         let request_stream =
@@ -423,10 +349,8 @@ let make_hooks
           | None -> 0
         in
         let wall_tok_s_opt =
-          if usage_trusted then
-            wall_tokens_per_second ~usage_missing ~output_tokens:output_tok
-              ~telemetry:response.telemetry
-          else None
+          wall_tokens_per_second ~usage_missing ~output_tokens:output_tok
+            ~telemetry:response.telemetry
         in
         record_llm_tok_s_metrics ~telemetry:response.telemetry;
         let wall_tok_s = fmt_tok_s wall_tok_s_opt in
@@ -498,12 +422,6 @@ let make_hooks
              Log.Keeper.warn ~keeper_name:meta.name
                "turn=%d sse_turn_complete broadcast failed: %s"
                turn (Printexc.to_string exn));
-        (* Reset same-name streak at turn boundary so it doesn't
-           carry across turns (e.g., 4 calls in turn N + 1 in turn N+1
-           should not hit threshold 5). *)
-        streak_state.Keeper_guards.entry <- ("", 0);
-        Keeper_guards.reset_readonly_observation_state
-          readonly_observation_state;
         tool_call_count_ref := 0;
         Agent_sdk.Hooks.Continue
       | _event -> Agent_sdk.Hooks.Continue);
@@ -512,8 +430,7 @@ let make_hooks
       match event with
       | Agent_sdk.Hooks.PostToolUse
           { tool_name; input; output; duration_ms = hook_duration_ms; tool_use_id; _ } ->
-        if tool_completion_records_watchdog_progress tool_name then
-          record_progress ("tool_completed:" ^ tool_name);
+        record_progress ("tool_completed:" ^ tool_name);
         incr tool_call_count_ref;
         (* Extract typed_outcome from structured tool output JSON and strip it
            from the LLM-facing output so the internal metadata does not leak
@@ -548,20 +465,7 @@ let make_hooks
           match output with
           | Ok _ -> "-"
           | Error _ ->
-            (* Strip command_descriptor from error preview to reduce log noise.
-               The descriptor is only meaningful on success; errors carry
-               sufficient diagnostic info via exit code and stderr. *)
-            let stripped =
-              try
-                let json = Yojson.Safe.from_string output_text in
-                match json with
-                | `Assoc fields ->
-                  let fields' = List.filter (fun (k, _) -> k <> "command_descriptor") fields in
-                  Yojson.Safe.to_string (`Assoc fields')
-                | _ -> output_text
-              with _ -> output_text
-            in
-            stripped
+            output_text
             |> Observability_redact.redact_preview ~max_len:240
             |> one_line_preview_for_log
         in
@@ -637,7 +541,6 @@ let make_hooks
              ?sandbox_root:tctx.sandbox_root
              ?allowed_paths:tctx.allowed_paths
              ?network_mode:tctx.network_mode
-             ?approval_mode:tctx.approval_mode
              ?runtime_profile:tctx.runtime_profile
              ~result_bytes ?truncated_to ()
          with
@@ -738,16 +641,8 @@ let make_hooks
                 ();
               Log.Keeper.error ~keeper_name:(!meta_ref).name "on_tool_executed callback failed for %s: %s"
                 tool_name (Printexc.to_string exn));
-        if is_keeper_board_write_tool_name tool_name then
-          Log.Keeper.debug ~keeper_name:(!meta_ref).name "social_event tool=%s"
-            tool_name;
         Agent_sdk.Hooks.Continue
       | _event -> Agent_sdk.Hooks.Continue);
-
-    (* pre_tool_use is provided by [guard_chain] below via Hooks.compose.
-       The guard chain (timing + custom + streak + deny + cost +
-       destructive + governance_approval) is composed with these
-       non-gate hooks at the end of [make_hooks]. *)
 
     on_stop = Some (fun event ->
       match event with
@@ -847,27 +742,12 @@ let make_hooks
       | _event -> Agent_sdk.Hooks.Continue);
   }
   in
-  (* Guards fire first (outer). If all return Continue, non_gate_hooks
-     fire for the remaining slots (inner). pre_tool_use lives in
-     guard_chain only; non_gate_hooks has it None, so Hooks.compose
-     keeps guard_chain's pre_tool_use verbatim. *)
-  Agent_sdk.Hooks.compose ~outer:guard_chain ~inner:non_gate_hooks
+  hooks
 
-let hook_introspection_json
-    ?(max_cost_usd : float option)
-    ?(destructive_ops_policy : Destructive_ops_policy.t =
-        Destructive_ops_policy.default)
-    ()
-  : Yojson.Safe.t =
-  Keeper_hooks_oas_introspection.hook_introspection_json
-    ~denied_tools:keeper_denied_tools
-    ?max_cost_usd
-    ~destructive_ops_policy
-    ()
+let hook_introspection_json () : Yojson.Safe.t =
+  Keeper_hooks_oas_introspection.hook_introspection_json ()
 
 module For_testing = struct
   let tool_input_shape_for_log = tool_input_shape_for_log
   let tool_input_keys_for_log = tool_input_keys_for_log
-  let tool_completion_records_watchdog_progress =
-    tool_completion_records_watchdog_progress
 end

@@ -8,7 +8,7 @@
    1. the closed-sum helpers must classify the new [Fusion_completed] variant
       (label / is_board_signal / reaction-ledger kind); and
    2. a completed fusion must become a NON-EMPTY [pending_board_event] carrying
-      the resolved answer — returning [] (like the Bootstrap/No_progress_recovery
+      the resolved answer — returning [] (like the Bootstrap
       arms) would compile but silently drop the result, defeating the RFC. *)
 
 open Alcotest
@@ -294,7 +294,7 @@ let test_fusion_completion_is_actionable () =
     (match ev.provenance with
      | Keeper_world_observation.Self_narrative -> true
      | _ -> false);
-  (* the stimulus path yields Some (not None like Bootstrap/No_progress_recovery) *)
+  (* the stimulus path yields Some (not None like Bootstrap) *)
   match
     Keeper_world_observation.pending_board_event_of_stimulus
       ~meta

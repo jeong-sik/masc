@@ -104,17 +104,13 @@ let handle_dashboard ~tool_name ~start_time ctx args =
   !dashboard_handler ~tool_name ~start_time ctx args
 
 let handle_gc ~tool_name ~start_time ctx args : Tool_result.result =
-  let days_raw = get_int args "days" 7 in
-  let days = max 1 days_raw in
-  if days_raw < 1 then
-    Log.Misc.warn "masc_gc days=%d clamped to 1 (minimum guardrail)" days_raw;
-  let gc_result = Workspace.gc ctx.config ~days () in
-  let expired = 0 in
-  let decision_note =
-    if expired > 0 then Printf.sprintf "\nExpired %d pending decision(s) past TTL" expired
-    else ""
-  in
-  text_ok ~tool_name ~start_time (gc_result ^ decision_note)
+  match get_int_opt args "days" with
+  | None -> workflow_err ~tool_name ~start_time "days is required"
+  | Some days when days < 1 ->
+    workflow_err ~tool_name ~start_time "days must be >= 1"
+  | Some days ->
+    let gc_result = Workspace.gc ctx.config ~days () in
+    text_ok ~tool_name ~start_time gc_result
 
 let handle_cleanup_zombies ~tool_name ~start_time ctx _args : Tool_result.result =
   let result = Workspace.cleanup_zombies ctx.config in

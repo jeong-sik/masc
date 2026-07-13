@@ -1,12 +1,8 @@
 (** Observability_redact — redact sensitive data for observability fields.
 
     All tool input/output previews pass through this before storage.
-    Sensitive patterns (API keys, URL credentials) are replaced with
-    [\[REDACTED\]], and certain tool categories return [None] entirely. *)
-
-val is_denied_tool : tool_name:string -> bool
-(** Returns [true] if the tool is on the deny list (auth, encryption, etc.)
-    and its I/O must not be logged or previewed. *)
+    Sensitive structures are replaced with [\[REDACTED\]] without hiding
+    the existence of any tool call. *)
 
 val redact_json_value : Yojson.Safe.t -> Yojson.Safe.t
 (** Recursively redact sensitive fields (tokens, secrets, passwords, etc.)
@@ -38,20 +34,17 @@ val preview_json_strings : ?max_len:int -> Yojson.Safe.t -> Yojson.Safe.t
     strands the marker. *)
 
 val redact_tool_input : tool_name:string -> Yojson.Safe.t -> string option
-(** Produce a redacted preview of tool input JSON.
-    Returns [None] for tools on the deny list (auth, encryption, etc.). *)
+(** Produce a redacted preview of tool input JSON. *)
 
 val redact_tool_output : tool_name:string -> string -> string option
-(** Produce a redacted preview of tool output text.
-    Returns [None] for tools on the deny list. *)
+(** Produce a redacted preview of tool output text. *)
 
 val redacted_tool_input_json : tool_name:string -> Yojson.Safe.t -> Yojson.Safe.t option
-(** Produce a redacted structured copy of tool input JSON.
-    Returns [None] for tools on the deny list. *)
+(** Produce a redacted structured copy of tool input JSON. *)
 
 val redacted_tool_output_json : tool_name:string -> string -> Yojson.Safe.t option
 (** Produce a redacted structured copy of tool output when it is JSON,
-    otherwise a redacted string. Returns [None] for tools on the deny list. *)
+    otherwise a redacted string. *)
 
 val build_tool_call_trace_json :
   ?tool_use_id:string ->

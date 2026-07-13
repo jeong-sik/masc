@@ -19,8 +19,28 @@ val handle_time_now : args:Yojson.Safe.t -> string
 val handle_tools_list : meta:keeper_meta -> args:Yojson.Safe.t -> string
 
 val handle_tool_search
-  :  search_fn:(query:string -> max_results:int -> Yojson.Safe.t)
+  :  search_fn:(unit -> Yojson.Safe.t)
   -> args:Yojson.Safe.t
+  -> string
+
+val handle_web_search
+  :  config:Workspace.config
+  -> meta:keeper_meta
+  -> ?continuation_channel:Keeper_continuation_channel.t
+  -> ?gate_context:(unit -> Keeper_gate.causal_context)
+  -> ?gate_grant:Keeper_gate.cycle_grant
+  -> args:Yojson.Safe.t
+  -> unit
+  -> string
+
+val handle_web_fetch
+  :  config:Workspace.config
+  -> meta:keeper_meta
+  -> ?continuation_channel:Keeper_continuation_channel.t
+  -> ?gate_context:(unit -> Keeper_gate.causal_context)
+  -> ?gate_grant:Keeper_gate.cycle_grant
+  -> args:Yojson.Safe.t
+  -> unit
   -> string
 
 val handle_context_status
@@ -55,7 +75,11 @@ val handle_surface_read
 val handle_surface_post
   :  config:Workspace.config
   -> meta:keeper_meta
+  -> ?continuation_channel:Keeper_continuation_channel.t
+  -> ?gate_context:(unit -> Keeper_gate.causal_context)
+  -> ?gate_grant:Keeper_gate.cycle_grant
   -> args:Yojson.Safe.t
+  -> unit
   -> string
 
 val handle_person_note_set
@@ -270,8 +294,26 @@ val handle_masc_keeper
   -> ?proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t
   -> ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> ?mcp_session_id:string
+  -> ?continuation_channel:Keeper_continuation_channel.t
+  -> ?gate_context:(unit -> Keeper_gate.causal_context)
+  -> ?gate_grant:Keeper_gate.cycle_grant
   -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
+  -> name:string
+  -> args:Yojson.Safe.t
+  -> unit
+  -> string
+
+(** Dispatch the local-runtime descriptor cluster. The arbitrary-network
+    Ollama probe crosses the neutral external-effect Gate with the exact
+    operation identity and complete input; other registered local-runtime
+    operations retain their existing dispatch behavior. *)
+val handle_masc_local_runtime
+  :  config:Workspace.config
+  -> meta:Keeper_meta_contract.keeper_meta
+  -> ?continuation_channel:Keeper_continuation_channel.t
+  -> ?gate_context:(unit -> Keeper_gate.causal_context)
+  -> ?gate_grant:Keeper_gate.cycle_grant
   -> name:string
   -> args:Yojson.Safe.t
   -> unit

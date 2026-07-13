@@ -121,8 +121,6 @@ let default_target_type_for action_type =
   match action_type with
   | "broadcast" | "namespace_pause" | "namespace_resume" | "task_inject" | "social_sweep"
     -> Operator_action_constants.workspace_target_type
-  | action when String.equal action Operator_action_constants.goal_completion_decision ->
-    Operator_action_constants.goal_target_type
   | "keeper_message" | "keeper_probe" -> Operator_action_constants.keeper_target_type
   | action when String.equal action Operator_action_constants.keeper_recover ->
       Operator_action_constants.keeper_target_type
@@ -200,7 +198,7 @@ let delegated_tool_for action_type =
   | Some action -> action.tool_name
   | None -> "unknown"
 
-let confirm_required = Operator_approval.confirm_required
+let confirm_required = Operator_action_catalog.requires_confirmation
 
 let preview_of_action (request : action_request) =
   let base =

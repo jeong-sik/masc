@@ -122,7 +122,7 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
                         '{"status":"skipped","error":"runtime provider health is advisory; bootstrap skips live probe"}',
                         "[WARN] [Auth] archived credential sangsu.json (reason: bare-form keeper credential is dead after PR-3b1 starvation)",
                         "pricing_catalog_miss model=glm-4.7",
-                        "[WARN] [Governance] Governance judge returned unparseable structured response (parse failure; 3809 chars)",
+                        "[WARN] [Gate] Auto judge returned unparseable structured response (parse failure; 3809 chars)",
                         "[WARN] [Keeper] keeper TOML jobsian_purist.toml has unknown keys: keeper.base",
                         "[INFO] verifier: warmup=255s",
                         "[WARN] tool_policy unknown tools: foo, bar, baz",
@@ -140,8 +140,7 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         self.assertEqual(report.patterns["pricing_catalog_miss"].count, 1)
         self.assertEqual(report.patterns["provider_health_skipped"].count, 1)
         self.assertEqual(report.patterns["credential_archived_starvation"].count, 1)
-        self.assertEqual(report.patterns["governance_unparseable"].count, 1)
-        self.assertEqual(report.patterns["lenient_json_fallback"].count, 1)
+        self.assertEqual(report.patterns["structured_judge_unparseable"].count, 1)
         self.assertEqual(report.patterns["config_unknown_key"].count, 1)
         self.assertEqual(report.patterns["autoboot_warmup"].count, 1)
         self.assertEqual(report.patterns["tool_policy_unknown_tools"].count, 1)

@@ -107,7 +107,7 @@ describe('mission keeper runtime helpers', () => {
     )
   })
 
-  it('renders continue-gate hints when approval is required', () => {
+  it('renders the exact runtime blocker without an approval hierarchy', () => {
     const keeper = {
       name: 'uranium666',
       status: 'idle',
@@ -116,11 +116,10 @@ describe('mission keeper runtime helpers', () => {
       runtime_blocker_class: 'ambiguous_post_commit_timeout',
       runtime_blocker_summary:
         'Mutating tools [keeper_fs_edit] committed before the turn timed out.',
-      runtime_blocker_continue_gate: true,
     } as Keeper
 
     expect(keeperRuntimeHint(keeper)).toBe(
-      '일시정지 원인 · 계속 진행 승인 대기 · Mutating tools [keeper_fs_edit] committed before the turn timed out.',
+      '일시정지 원인 · Mutating tools [keeper_fs_edit] committed before the turn timed out.',
     )
   })
 

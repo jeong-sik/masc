@@ -8,67 +8,30 @@ val handle_tool_execute :
   exec_cache:Masc_exec.Exec_cache.t option ->
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
+  ?continuation_channel:Keeper_continuation_channel.t ->
+  ?gate_context:(unit -> Keeper_gate.causal_context) ->
+  ?gate_grant:Keeper_gate.cycle_grant ->
   args:Yojson.Safe.t ->
   unit ->
   string
 
 module For_testing : sig
   val elapsed_duration_ms : start_time:float -> end_time:float -> int
-  val path_probe_json : cwd:string -> string -> Yojson.Safe.t
-  val repo_root_public_prefix_from_cwd : string -> string option
-  val repo_cwd_relative_rewrite : cwd:string -> string -> string option
   val typed_execute_response_cwd_json :
     turn_sandbox_factory:Keeper_sandbox_factory.t option ->
     cwd:string ->
     sandbox_extra_fields:(string * Yojson.Safe.t) list ->
     Yojson.Safe.t
-  val record_pr_action_metric :
-    keeper_name:string ->
-    risk_class:Masc_exec.Shell_ir_risk.risk_class ->
-    status:Unix.process_status ->
-    Masc_exec.Shell_ir.t ->
-    unit
-  val record_gh_classification_metric :
-    keeper_name:string ->
-    risk_class:Masc_exec.Shell_ir_risk.risk_class ->
-    typed_hit:bool ->
-    Masc_exec.Shell_ir.t ->
-    unit
-  val shell_ir_approval_overlay : unit -> Masc_exec.Approval_config.agent_overlay
-  val shell_ir_approval_input :
-    cmd:string ->
+  val execute_gate_input :
+    input:Yojson.Safe.t ->
     cwd:string ->
-    bin:string ->
-    summary:string ->
     sandbox_profile:string ->
     sandbox_target:string ->
-    risk_class:Masc_exec.Shell_ir_risk.risk_class ->
-    typed_hit:bool ->
-    ?repo_create_contract:Yojson.Safe.t ->
-    unit ->
     Yojson.Safe.t
-  val submit_shell_ir_approval_pending :
-    base_path:string ->
-    keeper_name:string ->
-    ?task_id:string ->
-    ?goal_ids:string list ->
-    cmd:string ->
-    cwd:string ->
-    bin:string ->
-    summary:string ->
-    sandbox_profile:string ->
-    sandbox_target:string ->
-    risk_class:Masc_exec.Shell_ir_risk.risk_class ->
-    typed_hit:bool ->
-    ?repo_create_contract:Yojson.Safe.t ->
-    unit ->
-    string
   val redact_execute_output :
     base_path:string ->
     keeper_name:string ->
     stdout:string ->
     stderr:string ->
     string * string * string
-  val dispatch_error_deterministic_retry_fields :
-    Keeper_tool_execute_shell_ir.dispatch_error -> (string * Yojson.Safe.t) list
 end

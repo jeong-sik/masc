@@ -1,7 +1,4 @@
-(** Tests for Keeper_sandbox_containment.
-
-    RFC-0006 Phase B-1: pin the host-FS read guard for hardened keepers.
-    The containment is no-op for local keepers. *)
+(** Tests for objective allowed-root containment. *)
 
 open Masc
 
@@ -42,7 +39,7 @@ let with_tmp_base f =
       rmrf dir)
     (fun () -> f dir)
 
-let make_meta ~name ~sandbox =
+let make_meta ?(allowed_paths = []) ~name ~sandbox () =
   let json =
     `Assoc
       [
@@ -50,11 +47,9 @@ let make_meta ~name ~sandbox =
         ("agent_name", `String name);
         ("trace_id", `String "test-trace-containment");
         ("policy_voice_enabled", `Bool false);
-        ( "tool_access",
-          Json_util.json_string_list
-            ([]) );
         ("sandbox_profile",
          `String (Keeper_types_profile_sandbox.sandbox_profile_to_string sandbox));
+        ("allowed_paths", `List (List.map (fun path -> `String path) allowed_paths));
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
@@ -63,22 +58,41 @@ let make_meta ~name ~sandbox =
 
 (* ── Tests ───────────────────────────────────────────────────────── *)
 
-let test_legacy_keeper_always_allowed () =
+let test_local_profile_uses_same_containment () =
   with_tmp_base @@ fun base ->
   let config = Workspace.default_config base in
-  let meta = make_meta ~name:"alice" ~sandbox:Keeper_types_profile_sandbox.Local in
+  let meta = make_meta ~name:"alice" ~sandbox:Keeper_types_profile_sandbox.Local () in
   let outside = "/etc/passwd" in
   Alcotest.(check bool)
-    "Local keeper bypasses containment"
+    "Local keeper uses allowed roots"
+    true
+    (Result.is_error
+       (Keeper_sandbox_containment.check_read_target
+          ~config ~meta ~target:outside))
+
+let test_explicit_external_root_is_allowed () =
+  with_tmp_base @@ fun base ->
+  let config = Workspace.default_config base in
+  let meta =
+    make_meta
+      ~allowed_paths:[ "/etc" ]
+      ~name:"alice"
+      ~sandbox:Keeper_types_profile_sandbox.Local
+      ()
+  in
+  Alcotest.(check bool)
+    "explicit external root"
     true
     (Result.is_ok
        (Keeper_sandbox_containment.check_read_target
-          ~config ~meta ~target:outside))
+          ~config
+          ~meta
+          ~target:"/etc/passwd"))
 
 let test_docker_keeper_blocks_outside () =
   with_tmp_base @@ fun base ->
   let config = Workspace.default_config base in
-  let meta = make_meta ~name:"minjae" ~sandbox:Keeper_types_profile_sandbox.Docker in
+  let meta = make_meta ~name:"minjae" ~sandbox:Keeper_types_profile_sandbox.Docker () in
   let outside = "/etc/passwd" in
   match
     Keeper_sandbox_containment.check_read_target ~config ~meta ~target:outside
@@ -86,9 +100,9 @@ let test_docker_keeper_blocks_outside () =
   | Ok () ->
       Alcotest.fail "expected containment to block /etc/passwd for minjae"
   | Error msg ->
-      Alcotest.(check bool) "error mentions symmetric_sandbox_blocked"
+      Alcotest.(check bool) "error is objective containment rejection"
         true
-        (let needle = "symmetric_sandbox_blocked" in
+        (let needle = "path_outside_sandbox:" in
          let len = String.length needle in
          String.length msg >= len
          && String.sub msg 0 len = needle)
@@ -96,7 +110,7 @@ let test_docker_keeper_blocks_outside () =
 let test_docker_keeper_allows_inside_playground () =
   with_tmp_base @@ fun base ->
   let config = Workspace.default_config base in
-  let meta = make_meta ~name:"minjae" ~sandbox:Keeper_types_profile_sandbox.Docker in
+  let meta = make_meta ~name:"minjae" ~sandbox:Keeper_types_profile_sandbox.Docker () in
   let bundle = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   let inside = Filename.concat bundle "mind/scratch.md" in
   Alcotest.(check bool) "playground-internal path is allowed"
@@ -108,7 +122,7 @@ let test_docker_keeper_allows_inside_playground () =
 let test_docker_second_keeper_contained () =
   with_tmp_base @@ fun base ->
   let config = Workspace.default_config base in
-  let meta = make_meta ~name:"poe" ~sandbox:Keeper_types_profile_sandbox.Docker in
+  let meta = make_meta ~name:"poe" ~sandbox:Keeper_types_profile_sandbox.Docker () in
   let outside = "/etc/passwd" in
   Alcotest.(check bool) "Docker is also subject to containment"
     true
@@ -119,7 +133,7 @@ let test_docker_second_keeper_contained () =
 let test_path_just_outside_playground_blocked () =
   with_tmp_base @@ fun base ->
   let config = Workspace.default_config base in
-  let meta = make_meta ~name:"minjae" ~sandbox:Keeper_types_profile_sandbox.Docker in
+  let meta = make_meta ~name:"minjae" ~sandbox:Keeper_types_profile_sandbox.Docker () in
   (* Sibling directory with a name that LOOKS like a prefix of the playground
      path; must still be blocked (prevents the classic prefix-without-slash
      containment bypass). *)
@@ -140,8 +154,10 @@ let () =
     [
       ( "containment",
         [
-          Alcotest.test_case "legacy keeper always allowed" `Quick
-            test_legacy_keeper_always_allowed;
+          Alcotest.test_case "local profile uses same containment" `Quick
+            test_local_profile_uses_same_containment;
+          Alcotest.test_case "explicit root outside base is allowed" `Quick
+            test_explicit_external_root_is_allowed;
           Alcotest.test_case "docker keeper blocks /etc/passwd" `Quick
             test_docker_keeper_blocks_outside;
           Alcotest.test_case "docker keeper allows inside playground"

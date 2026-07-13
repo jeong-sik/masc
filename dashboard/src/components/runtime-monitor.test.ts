@@ -189,12 +189,9 @@ describe('RuntimeMonitor', () => {
               has_capabilities: true,
               behavior_capabilities: {
                 supports_inline_tools: true,
-                requires_per_keeper_bridging_for_bound_actor_tools: true,
-                identity_runtime_mcp_header_keys: ['x-masc-keeper'],
                 argv_prompt_preflight: true,
                 uses_anthropic_caching: true,
                 max_turns_per_attempt: 3,
-                tolerates_bound_actor_fallback: true,
               },
               custom_header_count: 2,
               connect_timeout_s: 120,
@@ -393,7 +390,7 @@ describe('RuntimeMonitor', () => {
       'controls:tool-choice,required,named,parallel,extended-thinking,native-stream,system-prompt,cache,prompt-cache@1024,seed+images,usage,computer-use,code-exec',
     )
     expect(container.textContent).toContain('note:verified by runtime discovery')
-    expect(container.textContent).toContain('behavior:inline-tools,keeper-bridge,argv-preflight,anthropic-cache')
+    expect(container.textContent).toContain('behavior:inline-tools,argv-preflight,anthropic-cache')
     expect(container.textContent).toContain(
       'controls:tool-choice,required,named,parallel,extended-thinking,reasoning-budget,native-stream,system-prompt,cache,prompt-cache@1024,seed+images,usage,computer-use,code-exec',
     )

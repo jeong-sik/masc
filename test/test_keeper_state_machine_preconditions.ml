@@ -12,7 +12,7 @@ module A = Attribution
 
 (** Healthy running conditions. *)
 let running_conditions : SM.conditions =
-  { SM.default_conditions with fiber_alive = true; restart_budget_remaining = true }
+  { SM.default_conditions with fiber_alive = true }
 ;;
 
 (** Apply event and extract the result, failing on error. *)
@@ -50,65 +50,6 @@ let expect_precondition_reason ~current_phase ~conditions ~event ~expected_reaso
     fail
       ("expected Precondition_violation, got " ^ SM.transition_error_to_string e)
   | Ok _ -> fail "expected Precondition_violation, got Ok"
-;;
-
-let test_precondition_compact_retry_no_overflow () =
-  (* TLA+ §CompactRetryExhausted requires context_overflow=true.
-     Without it the dispatch must reject with the
-     [context_overflow=false] tag. *)
-  let c = { running_conditions with context_overflow = false } in
-  expect_precondition_reason
-    ~current_phase:SM.Running
-    ~conditions:c
-    ~event:SM.Compact_retry_exhausted
-    ~expected_reason:"context_overflow=false"
-;;
-
-let test_precondition_compact_retry_compaction_active () =
-  (* In-flight compaction (compaction_active=true) must reject. *)
-  let c =
-    { running_conditions with context_overflow = true; compaction_active = true }
-  in
-  expect_precondition_reason
-    ~current_phase:SM.Compacting
-    ~conditions:c
-    ~event:SM.Compact_retry_exhausted
-    ~expected_reason:"compaction_active=true"
-;;
-
-let test_precondition_compact_retry_already_latched () =
-  (* Retry latch is idempotent — re-latching must reject as duplicate
-     dispatch from the caller. *)
-  let c =
-    { running_conditions with
-      context_overflow = true
-    ; compaction_active = false
-    ; compact_retry_exhausted = true
-    }
-  in
-  expect_precondition_reason
-    ~current_phase:SM.Paused
-    ~conditions:c
-    ~event:SM.Compact_retry_exhausted
-    ~expected_reason:"already_latched"
-;;
-
-let test_precondition_compact_retry_accepts_when_preconditions_satisfied () =
-  (* Sanity: when all three preconditions hold, dispatch succeeds. *)
-  let c =
-    { running_conditions with
-      context_overflow = true
-    ; compaction_active = false
-    ; compact_retry_exhausted = false
-    }
-  in
-  let tr =
-    apply_ok
-      ~current_phase:SM.Overflowed
-      ~conditions:c
-      ~event:SM.Compact_retry_exhausted
-  in
-  check bool "compact_retry_exhausted latched" true tr.updated_conditions.compact_retry_exhausted
 ;;
 
 let test_attribution_ok_passed () =
@@ -157,7 +98,6 @@ let test_attribution_terminal_policy_failed () =
     { SM.default_conditions with
       stop_requested = true
     ; fiber_alive = false
-    ; restart_budget_remaining = false
     }
   in
   let result =
@@ -233,32 +173,6 @@ let assert_precondition_violation ~event_name err =
       ("expected Precondition_violation, got " ^ SM.transition_error_to_string other)
 ;;
 
-let test_pre_compact_retry_no_overflow () =
-  let err =
-    apply_err
-      ~current_phase:SM.Running
-      ~conditions:running_conditions
-      ~event:SM.Compact_retry_exhausted
-  in
-  assert_precondition_violation ~event_name:"compact_retry_exhausted" err
-;;
-
-let test_pre_compact_retry_compaction_active () =
-  let c = { overflowed_conditions with compaction_active = true } in
-  let err =
-    apply_err ~current_phase:SM.Compacting ~conditions:c ~event:SM.Compact_retry_exhausted
-  in
-  assert_precondition_violation ~event_name:"compact_retry_exhausted" err
-;;
-
-let test_pre_compact_retry_already_exhausted () =
-  let c = { overflowed_conditions with compact_retry_exhausted = true } in
-  let err =
-    apply_err ~current_phase:SM.Paused ~conditions:c ~event:SM.Compact_retry_exhausted
-  in
-  assert_precondition_violation ~event_name:"compact_retry_exhausted" err
-;;
-
 let overflow_event =
   SM.Context_overflow_detected
     { source = `Prompt_rejected; token_count = 100_000; limit_tokens = Some 200_000 }
@@ -296,14 +210,6 @@ let test_pre_auto_compact_handoff_active () =
   assert_precondition_violation ~event_name:"auto_compact_triggered" err
 ;;
 
-let test_pre_auto_compact_retry_exhausted () =
-  let c = { overflowed_conditions with compact_retry_exhausted = true } in
-  let err =
-    apply_err ~current_phase:SM.Paused ~conditions:c ~event:SM.Auto_compact_triggered
-  in
-  assert_precondition_violation ~event_name:"auto_compact_triggered" err
-;;
-
 let test_pre_operator_compact_during_compaction () =
   let c = { running_conditions with compaction_active = true } in
   let err =
@@ -327,12 +233,7 @@ let test_pre_operator_compact_during_handoff () =
 ;;
 
 let test_pre_operator_clear_no_extra_precondition () =
-  let c =
-    { running_conditions with
-      context_overflow = true
-    ; compact_retry_exhausted = true
-    }
-  in
+  let c = { running_conditions with context_overflow = true } in
   let clear_event =
     SM.Operator_clear_requested
       { preserve_system = false; reason = "operator escape-hatch" }
@@ -348,21 +249,6 @@ let test_pre_operator_clear_no_extra_precondition () =
   | Error _ ->
     (* Matrix or terminal errors are out of scope for this test. *)
     ()
-;;
-
-let test_pre_restart_budget_already_exhausted () =
-  (* Pairs with §S3 BudgetNeverRevives: re-exhausting an already-cleared
-     budget is masked as a no-op by [update_conditions] (the unconditional
-     [false] write), but signals a duplicate dispatch from the supervisor
-     or operator path. *)
-  let c = { running_conditions with restart_budget_remaining = false } in
-  let err =
-    apply_err
-      ~current_phase:SM.Crashed
-      ~conditions:c
-      ~event:SM.Restart_budget_exhausted
-  in
-  assert_precondition_violation ~event_name:"restart_budget_exhausted" err
 ;;
 
 let assert_snapshot_clean phase conditions =
@@ -400,23 +286,13 @@ let test_snapshot_stopped_requires_drain () =
   assert_snapshot_fails ~property:"StoppedRequiresDrain" SM.Stopped c
 ;;
 
-let test_snapshot_dead_requires_no_budget () =
-  (* The canonical R-A-6.c case: Dead phase observed with budget=true.
-     This is the direct signature of a [register_restarting] revival
-     of an already-dead entry, the third vector documented in iter 14
-     audit memo. *)
-  let c = { running_conditions with fiber_alive = false; restart_budget_remaining = true } in
-  (* derive_phase from these conditions produces Crashed (since
-     backoff_elapsed is false by default, the Restarting branch is
-     skipped and the fallback [not fiber_alive && restart_budget_remaining]
-     wins), not Dead — so we manually pass Dead as the recorded phase
-     to simulate a corrupted entry. *)
-  assert_snapshot_fails ~property:"DeadRequiresNoBudget" SM.Dead c
+let test_snapshot_dead_requires_tombstone () =
+  let c = { running_conditions with fiber_alive = false } in
+  assert_snapshot_fails ~property:"DeadRequiresTombstone" SM.Dead c
 ;;
 
 let test_snapshot_derive_disagreement () =
   let c = SM.default_conditions in
-  (* derive_phase = Dead *)
-  (* Manually claim phase is Running while conditions imply Dead. *)
+  (* derive_phase = Crashed; manually claim Running. *)
   assert_snapshot_fails ~property:"DerivePhaseAgreement" SM.Running c
 ;;

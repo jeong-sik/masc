@@ -1,17 +1,5 @@
 (** Keeper-owned task owner hooks behind the tool/task boundary. *)
 
-let resolve_agent_name config agent_name ~log_context =
-  try Workspace.resolve_agent_name config agent_name with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-    Log.Task.warn
-      "resolve_agent_name failed for %s %s: %s"
-      log_context
-      agent_name
-      (Stdlib.Printexc.to_string exn);
-    agent_name
-;;
-
 let is_registered_agent_alias config agent_name =
   let agent_name = String.trim agent_name in
   let keeper_name_variants keeper_name =
@@ -56,26 +44,6 @@ let sync_current_task_binding config ~agent_name =
     ~agent_name
 ;;
 
-let meta_for_agent config ~agent_name =
-  let resolved = resolve_agent_name config agent_name ~log_context:"owner policy" in
-  [ agent_name; resolved ]
-  |> List.filter_map Keeper_identity.canonical_keeper_name
-  |> Json_util.dedupe_keep_order
-  |> List.find_map (fun keeper_name ->
-    match Keeper_registry.get ~base_path:config.base_path keeper_name with
-    | Some entry -> Some entry.meta
-    | None ->
-      (match Keeper_meta_store.read_meta config keeper_name with
-       | Ok (Some meta) -> Some meta
-       | Ok None | Error _ -> None))
-;;
-
-let transition_action_denylist config ~agent_name =
-  match meta_for_agent config ~agent_name with
-  | Some meta -> meta.tool_denylist
-  | None -> []
-;;
-
 let active_goal_phases_for_agent config ~agent_name =
   match Keeper_meta_store.read_meta_resolved config agent_name with
   | Ok (Some (_, meta)) ->
@@ -90,7 +58,6 @@ let active_goal_phases_for_agent config ~agent_name =
 let install_hooks () =
   let is_registered_agent_alias_fn = is_registered_agent_alias in
   let sync_current_task_binding_fn = sync_current_task_binding in
-  let transition_action_denylist_fn = transition_action_denylist in
   let active_goal_phases_for_agent_fn = active_goal_phases_for_agent in
   Task.Handlers.set_task_owner_hooks
     Task.Handlers.
@@ -98,8 +65,6 @@ let install_hooks () =
           (fun config agent_name -> is_registered_agent_alias_fn config agent_name)
       ; sync_current_task_binding =
           (fun config ~agent_name -> sync_current_task_binding_fn config ~agent_name)
-      ; transition_action_denylist =
-          (fun config ~agent_name -> transition_action_denylist_fn config ~agent_name)
       ; active_goal_phases_for_agent =
           (fun config ~agent_name -> active_goal_phases_for_agent_fn config ~agent_name)
       }

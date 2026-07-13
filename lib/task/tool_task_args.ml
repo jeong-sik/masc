@@ -76,24 +76,23 @@ let synthesize_summary_from_siblings args =
    entirely (the 2026-05-17 nick0cave production case).
 
    Exit-class actions:
-     Done_action / Cancel / Release / Submit_for_verification /
+     Cancel / Release / Submit_for_verification /
      Approve_verification / Reject_verification
-   Entry-class actions (no summary required):
-     Claim / Start
+   Actions whose content is judged directly by the configured LLM or has no
+   handoff meaning do not require a local summary: Done_action / Claim / Start.
 
    This split is exhaustive over [Masc_domain.task_action]; adding a
    new variant forces a compile-time decision here, not a runtime
    permissive default. *)
 let transition_action_requires_summary : Masc_domain.task_action -> bool =
   function
-  | Masc_domain.Done_action
   | Masc_domain.Cancel
   | Masc_domain.Release
   | Masc_domain.Submit_for_verification
   | Masc_domain.Approve_verification
   | Masc_domain.Reject_verification ->
     true
-  | Masc_domain.Claim | Masc_domain.Start ->
+  | Masc_domain.Done_action | Masc_domain.Claim | Masc_domain.Start ->
     false
 
 let parse_handoff_context ~(agent_name : string)
@@ -180,7 +179,6 @@ let transition_known_args =
     "reason";
     "expected_version";
     "agent_name";
-    "force";
     "completion_contract";
     "evaluator_runtime";
     "handoff_context";

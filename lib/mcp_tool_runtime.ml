@@ -47,12 +47,9 @@ type context = Mcp_tool_runtime_types.context = {
     agent_name:string ->
     timeout:float ->
     Yojson.Safe.t option;
-  governance_defaults : string -> Mcp_server_eio_governance.governance_config;
-  save_governance :
-    Workspace.config -> Mcp_server_eio_governance.governance_config -> unit;
-  load_mcp_sessions : Workspace.config -> Mcp_server_eio_governance.mcp_session_record list;
+  load_mcp_sessions : Workspace.config -> Mcp_session_store.mcp_session_record list;
   save_mcp_sessions :
-    Workspace.config -> Mcp_server_eio_governance.mcp_session_record list -> unit;
+    Workspace.config -> Mcp_session_store.mcp_session_record list -> unit;
 }
 
 (* RFC-0189 PR-2: MCP runtime helpers return [Tool_result.result] directly.
@@ -151,32 +148,32 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.result option =
         | Mcp_session.Create ->
             let agent_name = arg_get_string_opt "agent_name" in
             let id = Mcp_session.generate () in
-            let record : Mcp_server_eio_governance.mcp_session_record =
+            let record : Mcp_session_store.mcp_session_record =
               { id; agent_name; created_at = now; last_seen = now } in
             save (record :: sessions);
             Ok (`Assoc [
               ("status", `String "created");
-              ("session", Mcp_server_eio_governance.mcp_session_to_json record);
+              ("session", Mcp_session_store.mcp_session_to_json record);
             ])
         | Mcp_session.Get ->
             let session_id = arg_get_string "session_id" "" in
-            (match List.find_opt (fun (s : Mcp_server_eio_governance.mcp_session_record) -> String.equal s.id session_id) sessions with
+            (match List.find_opt (fun (s : Mcp_session_store.mcp_session_record) -> String.equal s.id session_id) sessions with
              | None -> Error (Printf.sprintf "MCP session '%s' not found" session_id)
              | Some s ->
                  let updated = { s with last_seen = now } in
-                 let others = List.filter (fun (x : Mcp_server_eio_governance.mcp_session_record) -> not (String.equal x.id session_id)) sessions in
+                 let others = List.filter (fun (x : Mcp_session_store.mcp_session_record) -> not (String.equal x.id session_id)) sessions in
                  save (updated :: others);
                  Ok (Tool_args.ok_assoc [
-                   ("session", Mcp_server_eio_governance.mcp_session_to_json updated);
+                   ("session", Mcp_session_store.mcp_session_to_json updated);
                  ]))
         | Mcp_session.List ->
             Ok (`Assoc [
               ("count", `Int (List.length sessions));
-              ("sessions", `List (List.map Mcp_server_eio_governance.mcp_session_to_json sessions));
+              ("sessions", `List (List.map Mcp_session_store.mcp_session_to_json sessions));
             ])
         | Mcp_session.Cleanup ->
             let cutoff = now -. Masc_time_constants.days_to_seconds 7 in
-            let remaining = List.filter (fun (s : Mcp_server_eio_governance.mcp_session_record) -> Stdlib.Float.compare s.last_seen cutoff >= 0) sessions in
+            let remaining = List.filter (fun (s : Mcp_session_store.mcp_session_record) -> Stdlib.Float.compare s.last_seen cutoff >= 0) sessions in
             let removed = List.length sessions - List.length remaining in
             save remaining;
             Ok (`Assoc [
@@ -186,7 +183,7 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.result option =
             ])
         | Mcp_session.Remove ->
             let session_id = arg_get_string "session_id" "" in
-            let remaining = List.filter (fun (s : Mcp_server_eio_governance.mcp_session_record) -> not (String.equal s.id session_id)) sessions in
+            let remaining = List.filter (fun (s : Mcp_session_store.mcp_session_record) -> not (String.equal s.id session_id)) sessions in
             if List.length remaining = List.length sessions then
               Error (Printf.sprintf "MCP session '%s' not found" session_id)
             else begin
@@ -229,14 +226,8 @@ let runtime_register_targets =
 let runtime_tool_read_only =
   [ "masc_messages" ]
 
-let runtime_tool_requires_actor_binding = []
-
 let runtime_tool_mcp_context_required =
   [ "masc_broadcast"; "masc_messages" ]
-
-let runtime_tool_effect_domain name : Tool_catalog.effect_domain =
-  if List.mem name runtime_tool_read_only then Tool_catalog.Read_only
-  else Tool_catalog.Masc_workspace
 
 let () =
   runtime_register_targets
@@ -259,6 +250,4 @@ let () =
            ~is_read_only
            ~is_idempotent:is_read_only
            ~mcp_context_required:(List.mem name runtime_tool_mcp_context_required)
-           ~requires_actor_binding:(List.mem name runtime_tool_requires_actor_binding)
-           ~effect_domain:(runtime_tool_effect_domain name)
            ()))

@@ -52,12 +52,10 @@ let required_internal_descriptor name =
   | [] -> Alcotest.failf "missing internal descriptor: %s" name
 ;;
 
-(* RFC-0190 — Descriptor as Visibility/Metadata SSOT.
+(* Descriptor coverage of the separate external MCP discovery surface.
 
    [Tool_catalog_surfaces.public_mcp_surface_tools] is the operator-facing
-   MCP surface set. Its end-state under RFC-0190 P4 is to be computed as
-   [filter (visibility = Public_mcp) all_descriptors], deleting the hand
-   list entirely.
+   MCP discovery contract. It is not Keeper authorization or model visibility.
 
    Some surface entries intentionally have no descriptor at all because their
    handlers live outside the keeper descriptor spine. These entries are
@@ -172,9 +170,9 @@ let test_keeper_model_projection_is_single_and_unique () =
            (descriptor.id ^ " internal model projection")
            [ descriptor.internal_name ]
            projected
-       | Descriptor.Dispatch_only ->
+       | Descriptor.Transport_alias _ ->
          Alcotest.(check (list string))
-           (descriptor.id ^ " has no model projection")
+           (descriptor.id ^ " transport alias has no duplicate model projection")
            []
            projected;
          Alcotest.(check (list string))
@@ -182,6 +180,23 @@ let test_keeper_model_projection_is_single_and_unique () =
            []
            candidates)
     (all_descriptors ())
+;;
+
+let test_transport_aliases_name_exact_visible_projection () =
+  all_descriptors ()
+  |> List.iter (fun (descriptor : Descriptor.t) ->
+    match descriptor.keeper_model_projection with
+    | Descriptor.Preferred_public_name | Descriptor.Internal_name -> ()
+    | Descriptor.Transport_alias { projected_by } ->
+      let owners =
+        all_descriptors ()
+        |> List.filter (fun candidate ->
+          List.mem projected_by (Descriptor.keeper_model_names candidate))
+      in
+      Alcotest.(check int)
+        (descriptor.id ^ " transport alias has one visible projection owner")
+        1
+        (List.length owners))
 ;;
 
 let test_semantic_capability_has_at_most_one_keeper_model_projection () =
@@ -211,6 +226,13 @@ let test_semantic_capability_has_at_most_one_keeper_model_projection () =
 let test_model_visible_descriptors_have_canonical_input_schemas () =
   Descriptor.model_visible_descriptors ()
   |> List.iter (fun (descriptor : Descriptor.t) ->
+    (match Descriptor.model_schema_errors descriptor with
+     | [] -> ()
+     | errors ->
+       Alcotest.failf
+         "model-visible descriptor %S has invalid schema: %s"
+         descriptor.id
+         (String.concat "; " errors));
     match descriptor.input_schema_source with
     | Descriptor.Descriptor_owned | Descriptor.Canonical_registry -> ()
     | Descriptor.Missing_canonical_registry ->
@@ -229,6 +251,19 @@ let test_cluster_descriptors_have_no_missing_canonical_schemas () =
         "descriptor %S (%s) is missing its canonical input schema"
         descriptor.id
         descriptor.internal_name)
+;;
+
+let test_all_resolved_descriptor_schemas_are_structurally_valid () =
+  all_descriptors ()
+  |> List.iter (fun (descriptor : Descriptor.t) ->
+    match Descriptor.model_schema_errors descriptor with
+    | [] -> ()
+    | errors ->
+      Alcotest.failf
+        "descriptor %S (%s) has invalid model schema: %s"
+        descriptor.id
+        descriptor.internal_name
+        (String.concat "; " errors))
 ;;
 
 let test_missing_canonical_schema_is_fail_closed () =
@@ -253,6 +288,25 @@ let test_missing_canonical_schema_is_fail_closed () =
     (Policy.missing_canonical_schema_names [ missing ])
 ;;
 
+let test_structurally_invalid_schema_is_excluded () =
+  let base = required_internal_descriptor "masc_transition" in
+  let malformed =
+    { base with input_schema = `Assoc [ "properties", `List [] ] }
+  in
+  Alcotest.(check bool)
+    "malformed schema reports objective errors"
+    true
+    (Descriptor.model_schema_errors malformed <> []);
+  Alcotest.(check (list string))
+    "malformed schema has no model names"
+    []
+    (Descriptor.keeper_model_names malformed);
+  Alcotest.(check (list string))
+    "malformed schema has no execution candidates"
+    []
+    (Descriptor.keeper_candidate_names malformed)
+;;
+
 let test_registered_cluster_model_projections_are_explicit () =
   let check_projection internal_name expected =
     let descriptor = required_internal_descriptor internal_name in
@@ -268,32 +322,27 @@ let test_registered_cluster_model_projections_are_explicit () =
     ; "masc_recurring_remove"
     ; "masc_runtime_verify"
     ; "masc_runtime_ollama_probe"
-    ; "masc_goal_hygiene_review"
-    ];
-  List.iter
-    (fun name -> check_projection name Descriptor.Dispatch_only)
-    [ "masc_library_add"
-    ; "masc_library_list"
-    ; "masc_library_promote"
-    ; "masc_library_read"
-    ; "masc_library_search"
-    ; "masc_pause"
-    ; "masc_resume"
     ];
   List.iter
     (fun name -> check_projection name Descriptor.Internal_name)
-    [ "keeper_library_read"; "keeper_library_search" ]
-;;
-
-let test_system_internal_descriptors_are_dispatch_only () =
-  all_descriptors ()
-  |> List.iter (fun (descriptor : Descriptor.t) ->
-    if Tool_catalog_surfaces.is_system_internal_hidden descriptor.internal_name
-    then
-      Alcotest.(check bool)
-        (descriptor.internal_name ^ " stays outside the Keeper model surface")
-        true
-        (descriptor.keeper_model_projection = Descriptor.Dispatch_only))
+    [ "keeper_library_read"
+    ; "keeper_library_search"
+    ; "masc_library_add"
+    ; "masc_library_list"
+    ; "masc_library_promote"
+    ; "masc_pause"
+    ; "masc_resume"
+    ; "masc_heartbeat"
+    ; "masc_gc"
+    ; "masc_get_metrics"
+    ];
+  List.iter
+    (fun (name, projected_by) ->
+       check_projection name (Descriptor.Transport_alias { projected_by }))
+    [ "masc_library_read", "keeper_library_read"
+    ; "masc_library_search", "keeper_library_search"
+    ; "masc_tasks", "keeper_tasks_list"
+    ]
 ;;
 
 let test_dynamic_model_description_projection_is_explicit () =
@@ -323,9 +372,9 @@ let test_all_keeper_shard_schemas_are_descriptor_backed () =
         (List.length descriptors))
 ;;
 
-let test_supported_masc_schemas_are_descriptor_backed () =
+let test_registered_handler_schemas_are_descriptor_backed () =
   Masc_test_deps.init_keeper_tool_registry ();
-  Policy.keeper_supported_masc_schemas Masc.Config.raw_all_tool_schemas
+  Policy.registered_handler_schemas Masc.Config.raw_all_tool_schemas
   |> List.iter (fun (schema : Masc_domain.tool_schema) ->
     match Descriptor.descriptors_for_internal schema.name with
     | [ _ ] -> ()
@@ -338,19 +387,6 @@ let test_supported_masc_schemas_are_descriptor_backed () =
         "supported MASC schema %S has %d descriptors"
         schema.name
         (List.length descriptors))
-;;
-
-let test_maintenance_descriptors_are_dispatch_only () =
-  all_descriptors ()
-  |> List.iter (fun (descriptor : Descriptor.t) ->
-    if descriptor.policy.maintenance_only
-    then
-      match descriptor.keeper_model_projection with
-      | Descriptor.Dispatch_only -> ()
-      | Descriptor.Preferred_public_name | Descriptor.Internal_name ->
-        Alcotest.failf
-          "maintenance descriptor %S is model-visible"
-          descriptor.internal_name)
 ;;
 
 let is_blank s = String.trim s = ""
@@ -582,33 +618,33 @@ let test_sandbox_control_descriptors_use_exact_canonical_schemas () =
     check_descriptor
       "masc_keeper_sandbox_start"
       [ "name"; "network_mode"; "ttl_sec"; "timeout_sec" ]
-      [ "name" ]
+      [ "name"; "timeout_sec" ]
   in
   Alcotest.(check (list string))
     "sandbox start network modes match the owning keeper contract"
     Masc.Keeper_schema.network_mode_enum_strings
     (schema_property_enum_strings start_schema "network_mode");
   check_json
-    "sandbox start ttl default"
-    (`Float Masc.Keeper_sandbox_control_contract.managed_ttl_sec.default)
+    "sandbox start ttl has no default"
+    `Null
     (schema_property_field start_schema "ttl_sec" "default");
   check_json
     "sandbox start ttl minimum"
-    (`Float Masc.Keeper_sandbox_control_contract.managed_ttl_sec.minimum)
+    (`Float 0.0)
     (schema_property_field start_schema "ttl_sec" "minimum");
   check_json
-    "sandbox start ttl maximum"
-    (`Float Masc.Keeper_sandbox_control_contract.managed_ttl_sec.maximum)
+    "sandbox start ttl has no maximum"
+    `Null
     (schema_property_field start_schema "ttl_sec" "maximum");
   check_json
-    "sandbox start timeout default"
-    (`Float Masc.Keeper_sandbox_control_contract.operation_timeout_sec.default)
-    (schema_property_field start_schema "timeout_sec" "default");
+    "sandbox start timeout is positive"
+    (`Float 0.0)
+    (schema_property_field start_schema "timeout_sec" "exclusiveMinimum");
   let stop_schema =
     check_descriptor
       "masc_keeper_sandbox_stop"
       [ "container_kind"; "name"; "prune_stale"; "timeout_sec" ]
-      []
+      [ "timeout_sec" ]
   in
   let runtime_stop_scopes =
     Masc.Keeper_sandbox_control_contract.stop_scope_strings
@@ -628,9 +664,9 @@ let test_sandbox_control_descriptors_use_exact_canonical_schemas () =
     (`Bool false)
     (schema_property_field stop_schema "prune_stale" "default");
   check_json
-    "sandbox stop timeout default"
-    (`Float Masc.Keeper_sandbox_control_contract.operation_timeout_sec.default)
-    (schema_property_field stop_schema "timeout_sec" "default")
+    "sandbox stop timeout is positive"
+    (`Float 0.0)
+    (schema_property_field stop_schema "timeout_sec" "exclusiveMinimum")
 ;;
 
 let required_board_schema name =
@@ -756,28 +792,28 @@ let test_execute_descriptor_spells_out_argv_and_filesystem_basis () =
     |> Option.value ~default:""
   in
   check_contains
-    "Execute description says filesystem access is policy-scoped"
-    ~sub:"sandbox/policy-scoped filesystem access"
+    "Execute description names objective execution invariants"
+    ~sub:"path jail, sandbox target, and external-effect Gate"
     descriptor.description;
   check_contains
-    "Execute description says argv follows executable"
-    ~sub:"argv arguments after the executable"
+    "Execute description treats invocation as opaque"
+    ~sub:"never interprets executable or subcommand meaning"
     descriptor.description;
   check_contains
     "Execute description forbids duplicate argv0"
-    ~sub:"Do not repeat executable as argv[0]"
+    ~sub:"do not repeat executable as argv[0]"
     descriptor.description;
-  check_contains
-    "Execute description includes git example"
-    ~sub:"executable='git' argv=['status', '--short']"
-    descriptor.description;
+  Alcotest.(check bool)
+    "Execute description has no forge-specific product knowledge"
+    false
+    (string_contains ~sub:"git" (String.lowercase_ascii descriptor.description));
   check_contains
     "Execute argv schema repeats argv0 warning"
     ~sub:"Do not repeat executable as argv[0]"
     argv_description;
   check_contains
-    "Execute argv schema includes grep example"
-    ~sub:"executable='grep', argv=['-rn', 'pattern', 'lib']"
+    "Execute argv schema preserves opaque arguments"
+    ~sub:"passed verbatim"
     argv_description
 ;;
 
@@ -808,28 +844,6 @@ let test_edit_descriptor_requires_read_first () =
     "Edit description directs re-Read on a missed match"
     ~sub:"re-Read the file"
     descriptor.description
-;;
-
-let test_board_descriptors_steer_concise_content () =
-  (* board_post/comment content-length rejects (53/day): keepers pasted full
-     logs/analyses (up to 8186 chars) past the max_content_length limit. The
-     descriptors now steer concise summaries + links. No hardcoded number —
-     the limit is env-configurable (Board_types.Limits.max_content_length),
-     and the rejection error already reports the actual count. *)
-  let post = required_internal_descriptor "keeper_board_post" in
-  let comment = required_internal_descriptor "keeper_board_comment" in
-  check_contains
-    "board_post description names the length limit"
-    ~sub:"maximum length"
-    post.description;
-  check_contains
-    "board_post description steers summary + link"
-    ~sub:"reference a file path, PR, or issue link"
-    post.description;
-  check_contains
-    "board_comment description names the length limit"
-    ~sub:"maximum length"
-    comment.description
 ;;
 
 let test_board_descriptions_disambiguate_post_id_flow () =
@@ -1043,20 +1057,6 @@ let test_masc_board_registry_has_descriptor_projection () =
              (schema.name ^ " hides runtime-owned " ^ identity_field)
              false
              (List.mem identity_field descriptor_properties));
-         let expected_visibility =
-           match Keeper_tool_name.board_projection_of_masc_board_name board_name with
-           | Keeper_tool_name.Direct_masc ->
-             let operation_policy = Board_tool_registry.operation_policy board_name in
-             Tool_catalog.effective_registered_visibility
-               ~name:schema.name
-               ~declared:operation_policy.visibility
-           | Keeper_tool_name.Keeper_wrapper _ | Keeper_tool_name.External_only ->
-             Tool_catalog.Hidden
-         in
-         Alcotest.(check bool)
-           (schema.name ^ " descriptor visibility follows typed projection")
-           true
-           (descriptor.policy.visibility = expected_visibility);
          let expected_readonly =
            not (List.mem board_name expected_resource_writes)
          in
@@ -1068,19 +1068,13 @@ let test_masc_board_registry_has_descriptor_projection () =
            (schema.name ^ " descriptor readonly follows typed resource projection")
            (Some expected_readonly)
            descriptor.policy.readonly_hint;
-         let expected_effect_domain =
-           if expected_readonly
-           then Some Tool_catalog.Read_only
-           else Some Tool_catalog.Masc_workspace
-         in
-         Alcotest.(check bool)
-           (schema.name ^ " descriptor effect domain follows typed resource projection")
-           true
-           (descriptor.policy.effect_domain = expected_effect_domain);
          let expected_model_projection =
-           match expected_visibility with
-           | Tool_catalog.Default -> Descriptor.Internal_name
-           | Tool_catalog.Hidden -> Descriptor.Dispatch_only
+           match Keeper_tool_name.board_projection_of_masc_board_name board_name with
+           | Keeper_tool_name.Keeper_wrapper keeper_tool ->
+             Descriptor.Transport_alias
+               { projected_by = Keeper_tool_name.to_string keeper_tool }
+           | Keeper_tool_name.Direct_masc | Keeper_tool_name.External_only ->
+             Descriptor.Internal_name
          in
          Alcotest.(check bool)
            (schema.name ^ " descriptor model projection follows typed projection")
@@ -1242,15 +1236,11 @@ let test_strict_readonly_policy_excludes_workspace_mutations () =
        ~tool_name:"masc_transition"
        ~input:(`Assoc [ "task_id", `String "t1"; "status", `String "done" ]))
 
-let test_mcp_context_policy_uses_descriptor_resolution () =
+let test_inline_policy_uses_descriptor_resolution () =
   Alcotest.(check (list string))
     "safe inline tools project from descriptors"
     []
     (Descriptor.keeper_safe_inline_names ());
-  Alcotest.(check (list string))
-    "maintenance-only tools project from descriptors"
-    [ "masc_heartbeat" ]
-    (Descriptor.keeper_maintenance_only_names ());
   ()
 ;;
 
@@ -1319,18 +1309,7 @@ let test_mutation_boundary_delegates_to_descriptor_policy () =
     (Exec.has_mutating_side_effect_with_input
        ~tool_name:"Write"
        ~input:(`Assoc [ "file_path", `String "x"; "content", `String "y" ]));
-  Alcotest.(check bool)
-    "Write public alias follows descriptor checkpoint policy"
-    true
-    (Registry.is_main_worktree_boundary_exempt_with_input
-       ~tool_name:"Write"
-       ~input:(`Assoc [ "file_path", `String "x"; "content", `String "y" ]));
-  Alcotest.(check bool)
-    "Execute public alias follows descriptor checkpoint policy"
-    true
-    (Registry.is_main_worktree_boundary_exempt_with_input
-       ~tool_name:"Execute"
-       ~input:(`Assoc [ "executable", `String "git"; "argv", `List [ `String "status" ] ]))
+  ()
 
 (* RFC-0182 §3.1 — verify keeper / surface_audit descriptors project from name
    → descriptor
@@ -1514,93 +1493,6 @@ let test_rfc_0190_allowlist_has_no_descriptor () =
       (String.concat ", " stale)
 ;;
 
-(* ── effective_core_tools universe-aware behaviour ─────────────── *)
-
-let with_masc_schemas schemas f =
-  let prior = Registry.masc_schemas_snapshot () in
-  Fun.protect
-    ~finally:(fun () -> Registry.set_masc_schemas prior)
-    (fun () ->
-       Registry.set_masc_schemas schemas;
-       f ())
-;;
-
-let test_effective_core_tools_is_subset_of_discovery () =
-  let effective = Registry.effective_core_tools () in
-  let discovery = Registry.core_discovery_tools in
-  List.iter
-    (fun name ->
-       if not (List.mem name discovery)
-       then
-         Alcotest.failf
-           "effective_core_tools contains %S not in core_discovery_tools"
-           name)
-    effective
-;;
-
-let test_effective_core_tools_without_universe_keeps_only_native_executor_publics () =
-  (* With an empty masc universe, effective_core_tools must still expose the
-     native-executor code tools (Execute/Grep/Read/Edit/Write): they run through
-     the in-process execution gates and do not depend on masc schema injection.
-     Regression guard for #23440 (the shadowed universe-only definition
-     structurally excluded them from the per-turn core surface). In_process
-     descriptors (WebSearch/WebFetch) are masc-backed and must be pruned when
-     their backend schema is not injected, preserving #20455 universe-awareness.
-
-     Partition by the typed [executor] variant so the assertion mirrors the
-     production discriminator rather than a hardcoded name list.
-
-     Mcp_server_eio's module-load bootstrap can inject the full schema universe
-     when linked into this executable, and earlier tests may mutate it, so
-     bracket the assertion with a save/reset to keep following tests isolated. *)
-  with_masc_schemas [] (fun () ->
-    let effective = Registry.effective_core_tools () in
-    List.iter
-      (fun (d : Descriptor.t) ->
-         let model_names = Descriptor.keeper_model_names d in
-         match d.Descriptor.executor with
-         | Descriptor.Shell_ir | Descriptor.Filesystem ->
-           List.iter
-             (fun name ->
-                if not (List.mem name effective)
-                then
-                  Alcotest.failf
-                    "native-executor public %S missing from effective_core_tools \
-                     with empty universe"
-                    name)
-             model_names
-         | Descriptor.In_process ->
-           List.iter
-             (fun name ->
-                if List.mem name effective
-                then
-                  Alcotest.failf
-                    "in-process (masc-backed) public %S present in \
-                     effective_core_tools when universe is empty"
-                    name)
-             model_names)
-      Descriptor.public_descriptors)
-;;
-
-let test_effective_core_tools_with_full_universe_matches_discovery () =
-  let all_schemas =
-    List.map
-      (fun d ->
-         { Masc_domain.name = d.Descriptor.internal_name
-         ; description = d.Descriptor.description
-         ; input_schema = d.Descriptor.input_schema
-         })
-      (all_descriptors ())
-  in
-  with_masc_schemas all_schemas (fun () ->
-    let effective = Registry.effective_core_tools () in
-    let discovery = Registry.core_discovery_tools in
-    Alcotest.(check (list string))
-      "effective_core_tools with full universe matches core_discovery_tools"
-      (List.sort String.compare discovery)
-      (List.sort String.compare effective))
-;;
-
 let () =
   Alcotest.run
     "keeper_tool_descriptor_registry_integrity"
@@ -1612,6 +1504,10 @@ let () =
             "Keeper model projection is single and unique"
             `Quick
             test_keeper_model_projection_is_single_and_unique
+        ; test_case
+            "transport aliases name one visible projection owner"
+            `Quick
+            test_transport_aliases_name_exact_visible_projection
         ; test_case
             "semantic capability has at most one Keeper model projection"
             `Quick
@@ -1625,6 +1521,10 @@ let () =
             `Quick
             test_cluster_descriptors_have_no_missing_canonical_schemas
         ; test_case
+            "resolved descriptor schemas are structurally valid"
+            `Quick
+            test_all_resolved_descriptor_schemas_are_structurally_valid
+        ; test_case
             "sandbox control descriptors use exact canonical schemas"
             `Quick
             test_sandbox_control_descriptors_use_exact_canonical_schemas
@@ -1633,13 +1533,13 @@ let () =
             `Quick
             test_missing_canonical_schema_is_fail_closed
         ; test_case
+            "structurally invalid schema is excluded"
+            `Quick
+            test_structurally_invalid_schema_is_excluded
+        ; test_case
             "registered cluster model projections are explicit"
             `Quick
             test_registered_cluster_model_projections_are_explicit
-        ; test_case
-            "system-internal descriptors are dispatch-only"
-            `Quick
-            test_system_internal_descriptors_are_dispatch_only
         ; test_case
             "dynamic model description projection is explicit"
             `Quick
@@ -1651,11 +1551,7 @@ let () =
         ; test_case
             "supported MASC schemas are descriptor-backed"
             `Quick
-            test_supported_masc_schemas_are_descriptor_backed
-        ; test_case
-            "maintenance descriptors are dispatch-only"
-            `Quick
-            test_maintenance_descriptors_are_dispatch_only
+            test_registered_handler_schemas_are_descriptor_backed
         ] )
     ; ( "format"
       , [ test_case "no blank name fields" `Quick test_no_blank_names
@@ -1695,10 +1591,6 @@ let () =
             "Edit requires Read-first and byte-exact old_string"
             `Quick
             test_edit_descriptor_requires_read_first
-        ; test_case
-            "Board post/comment steer concise content"
-            `Quick
-            test_board_descriptors_steer_concise_content
         ; test_case
             "Board get/list descriptions disambiguate post_id flow"
             `Quick
@@ -1764,7 +1656,7 @@ let () =
         ; test_case
             "MCP context policy uses descriptor resolution"
             `Quick
-            test_mcp_context_policy_uses_descriptor_resolution
+            test_inline_policy_uses_descriptor_resolution
         ; test_case
             "public names project through descriptor resolution"
             `Quick
@@ -1777,19 +1669,5 @@ let () =
             "mutation boundary delegates to descriptor policy"
             `Quick
             test_mutation_boundary_delegates_to_descriptor_policy
-        ] )
-    ; ( "universe-aware-effective-core"
-      , [ test_case
-            "effective_core_tools is subset of core_discovery_tools"
-            `Quick
-            test_effective_core_tools_is_subset_of_discovery
-        ; test_case
-            "effective_core_tools without universe keeps only native-executor publics"
-            `Quick
-            test_effective_core_tools_without_universe_keeps_only_native_executor_publics
-        ; test_case
-            "effective_core_tools with full universe matches discovery"
-            `Quick
-            test_effective_core_tools_with_full_universe_matches_discovery
         ] )
     ]

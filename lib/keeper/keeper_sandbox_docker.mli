@@ -1,9 +1,9 @@
 (** Docker / sandbox shell execution infrastructure.
 
     Extracted from keeper_tool_command_runtime.ml — Docker container
-    lifecycle, sandbox profile resolution, and container
-    invocation. Pure infrastructure; generic command-shape policy lives
-    in [Keeper_tool_execute_command_semantics].
+    lifecycle, sandbox profile resolution, and container invocation. Command
+    syntax belongs to the invoked CLI; this layer enforces sandbox and path
+    containment.
 
     Sandbox backend failure-message and failure-recording surfaces live
     in [Keeper_sandbox_exec_failure]. Call those qualified rather than
@@ -40,17 +40,6 @@ val effective_sandbox_profile :
   meta:Keeper_meta_contract.keeper_meta ->
   Keeper_types_profile_sandbox.sandbox_profile * Keeper_types_profile_sandbox.network_mode
 
-(** Tokens flagged as nested container-runtime invocations. *)
-val nested_container_runtime_tokens : string list
-
-(** Filesystem markers indicating host container-socket access
-    (docker.sock, podman.sock, containerd.sock, ...). *)
-val sandbox_socket_markers : string list
-
-(** [true] iff [cmd] mentions a nested container runtime token or
-    references a host container socket. *)
-val command_uses_nested_container_runtime : string -> bool
-
 (** Re-export of [Keeper_sandbox_runtime.ensure_keeper_sandbox_runtime]. *)
 val ensure_keeper_sandbox_runtime :
   timeout_sec:float -> (string list, string) result
@@ -71,20 +60,10 @@ type docker_shell_result =
   ; image : string
   ; network_label : string
   ; cwd : string
-  ; semantic_status : Exec_core.semantic_status option
-  ; semantic_ok : bool
   }
 
-(** Cold-start floor (seconds) for [docker run --rm].  The wall-clock
-    budget covers slot_wait + spawn + container cold start + actual
-    cmd + drain; the default ([20.0]) is the sandbox's own internal
-    budget — the caller does not observe this.  Operators can override
-    via [MASC_KEEPER_DOCKER_RUN_MIN_TIMEOUT_SEC] (read once at module
-    load, clamped to [20.0]). *)
-val docker_run_min_timeout_sec : float
-
-(** Run [cmd] inside the keeper Docker sandbox; clamps
-    [timeout_sec] to [docker_run_min_timeout_sec], honours
+(** Run [cmd] inside the keeper Docker sandbox with the caller's exact explicit
+    [timeout_sec], honours
     [network_mode], records errors via [Keeper_registry]. *)
 val run_docker_shell_command_with_status :
   config:Workspace.config ->

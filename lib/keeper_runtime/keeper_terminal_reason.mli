@@ -8,8 +8,7 @@
     - [Keeper_turn_terminal_code] (RFC-0042 PR-1/PR-2.5) is the
       {e producer-side} bridge from [Keeper_registry.failure_reason] /
       [Agent_sdk.Error.sdk_error]. Its [of_wire] returns [None] for the
-      SDK-error codes ([api_error_*], [completion_contract_violation:*],
-      [turn_livelock:*], the budget prefixes, [internal_error]) because
+      SDK-error codes ([api_error_*], the budget prefixes, [internal_error]) because
       they are all collapsed into its [Sdk_error of string] blob — the
       sub-sum RFC-0042 §5.2 explicitly defers. Matching on [Sdk_error s]
       would force the substring re-parse back into the open, so it cannot
@@ -58,7 +57,7 @@ type t =
   | Capacity_backpressure of string
   (** Exact canonical wire kind
           {!Keeper_internal_error.capacity_backpressure_kind}.  This is a
-          typed provider/infrastructure pacing condition, not an opaque
+          typed provider/infrastructure retry observation, not an opaque
           internal failure.  Payload preserves the original bytes. *)
   | Config_or_auth of string
   (** Wire string contains ["config"] or ["auth"] (case-insensitive).
@@ -73,13 +72,6 @@ type t =
           [String.starts_with ~prefix:"provider_error_"]. Config/auth-like
           provider codes still land in [Config_or_auth] because that bucket
           is ranked earlier. Payload is the original string. *)
-  | Completion_contract_violation of string
-  (** Wire [String.starts_with ~prefix:"completion_contract_violation:"],
-          including the extended [:called[..]:satisfying[..]] form. Payload
-          is the original string. *)
-  | Turn_livelock of string
-  (** Wire [String.starts_with ~prefix:"turn_livelock:"]. Payload is the
-          original string. *)
   | Internal_error of string
   (** Exact wire ["internal_error"] (modulo case). Payload is the original
           string, carried only for [to_wire] round-trip fidelity. *)

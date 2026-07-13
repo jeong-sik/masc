@@ -1,5 +1,131 @@
-(** Provider/runtime failure boundary for SDK errors crossing from OAS into
-    keeper policy. *)
+(** Typed provider/runtime observations for SDK errors crossing from OAS into
+    MASC. This boundary classifies transport facts only; it never decides a
+    Keeper lifecycle transition. *)
+
+type stream_idle_state =
+  | Awaiting_first_event
+  | Awaiting_first_delta
+  | Streaming_answer
+  | Streaming_thinking
+  | Streaming_tool_call
+  | Streaming_heartbeat
+  | Streaming_substrate
+  | Streaming_done
+  | Streaming_unknown
+
+let stream_idle_state_to_label = function
+  | Awaiting_first_event -> "awaiting_first_event"
+  | Awaiting_first_delta -> "awaiting_first_delta"
+  | Streaming_answer -> "streaming_answer"
+  | Streaming_thinking -> "streaming_thinking"
+  | Streaming_tool_call -> "streaming_tool_call"
+  | Streaming_heartbeat -> "streaming_heartbeat"
+  | Streaming_substrate -> "streaming_substrate"
+  | Streaming_done -> "streaming_done"
+  | Streaming_unknown -> "streaming_unknown"
+;;
+
+let stream_idle_state_of_label = function
+  | "awaiting_first_event" -> Some Awaiting_first_event
+  | "awaiting_first_delta" -> Some Awaiting_first_delta
+  | "streaming_answer" -> Some Streaming_answer
+  | "streaming_thinking" -> Some Streaming_thinking
+  | "streaming_tool_call" -> Some Streaming_tool_call
+  | "streaming_heartbeat" -> Some Streaming_heartbeat
+  | "streaming_substrate" -> Some Streaming_substrate
+  | "streaming_done" -> Some Streaming_done
+  | "streaming_unknown" -> Some Streaming_unknown
+  | _ -> None
+;;
+
+let stream_idle_state_is_activity = function
+  | Streaming_answer
+  | Streaming_thinking
+  | Streaming_tool_call
+  | Streaming_heartbeat
+  | Streaming_substrate -> true
+  | Awaiting_first_event
+  | Awaiting_first_delta
+  | Streaming_done
+  | Streaming_unknown -> false
+;;
+
+type timeout_phase =
+  | First_token
+  | Http_operation
+  | Non_streaming_body
+  | Stream_body
+  | Stream_idle of stream_idle_state
+  | Provider_step
+  | Cli_stdout_idle
+  | Caller_budget
+  | Wall_clock
+  | Capacity_backpressure
+  | Unknown_timeout
+
+let timeout_phase_to_label = function
+  | First_token -> "first_token"
+  | Http_operation -> "http_operation"
+  | Non_streaming_body -> "non_streaming_body"
+  | Stream_body -> "stream_body"
+  | Stream_idle state -> "stream_idle:" ^ stream_idle_state_to_label state
+  | Provider_step -> "provider_step"
+  | Cli_stdout_idle -> "cli_stdout_idle"
+  | Caller_budget -> "caller_budget"
+  | Wall_clock -> "wall_clock"
+  | Capacity_backpressure -> "capacity_backpressure"
+  | Unknown_timeout -> "unknown_timeout"
+;;
+
+let timeout_phase_of_label label =
+  let normalize label =
+    label
+    |> String.trim
+    |> String.lowercase_ascii
+    |> String.map (function
+      | '-' | ' ' -> '_'
+      | ch -> ch)
+  in
+  let label = normalize label in
+  let stream_idle_prefix = "stream_idle:" in
+  if String.starts_with ~prefix:stream_idle_prefix label
+  then (
+    let prefix_len = String.length stream_idle_prefix in
+    String.sub label prefix_len (String.length label - prefix_len)
+    |> stream_idle_state_of_label
+    |> Option.map (fun state -> Stream_idle state))
+  else
+    match label with
+    | "first_token" | "no_first_token" | "time_to_first_token" | "ttft" ->
+      Some First_token
+    | "http_operation" -> Some Http_operation
+    | "non_streaming_body" -> Some Non_streaming_body
+    | "stream_body" -> Some Stream_body
+    | "stream_idle" -> Some (Stream_idle Streaming_unknown)
+    | "provider_step" -> Some Provider_step
+    | "cli_stdout_idle" -> Some Cli_stdout_idle
+    | "caller_budget" -> Some Caller_budget
+    | "wall_clock" | "wall_clock_timeout" | "wall_exceeded" | "max_execution_time" ->
+      Some Wall_clock
+    | "capacity_backpressure" | "client_capacity" | "client_capacity_full" ->
+      Some Capacity_backpressure
+    | "unknown_timeout" -> Some Unknown_timeout
+    | _ -> None
+;;
+
+let timeout_phase_is_streaming_activity = function
+  | Stream_idle state -> stream_idle_state_is_activity state
+  | First_token
+  | Http_operation
+  | Non_streaming_body
+  | Stream_body
+  | Provider_step
+  | Cli_stdout_idle
+  | Caller_budget
+  | Wall_clock
+  | Capacity_backpressure
+  | Unknown_timeout -> false
+;;
 
 type timeout_source =
   | Oas_api
@@ -7,17 +133,13 @@ type timeout_source =
   | Masc_internal
 
 type provider_timeout =
-  { phase : Keeper_failure_policy.timeout_phase option
+  { phase : timeout_phase option
   ; source : timeout_source
   }
 
 type t =
   | Provider_timeout of provider_timeout
   | Not_provider_runtime_failure
-
-let timeout_phase_of_label label =
-  Keeper_failure_policy.timeout_phase_of_label label
-;;
 
 let timeout_phase_of_oas_phase phase =
   Llm_provider.Http_client.timeout_phase_to_label phase
@@ -98,8 +220,6 @@ let classify_masc_internal_error = function
       | Keeper_internal_error.Capacity_backpressure _
       | Keeper_internal_error.Resumable_cli_session _
       | Keeper_internal_error.Accept_rejected _
-      | Keeper_internal_error.Admission_queue_timeout _
-      | Keeper_internal_error.Admission_queue_rejected _
       | Keeper_internal_error.Turn_timeout _
       | Keeper_internal_error.Ambiguous_post_commit _
       | Keeper_internal_error.Internal_unhandled_exception _
@@ -165,18 +285,4 @@ let is_provider_timeout = function
 
 let is_provider_timeout_error err =
   classify_sdk_error err |> is_provider_timeout
-;;
-
-let provider_timeout_failure ~strikes ~liveness (timeout : provider_timeout) =
-  Keeper_failure_policy.Provider_timeout
-    { phase = timeout.phase; strikes; liveness }
-;;
-
-let provider_timeout_policy_decision ~strikes ~liveness err =
-  match classify_sdk_error err with
-  | Provider_timeout timeout ->
-    Some
-      (Keeper_failure_policy.decide
-         (provider_timeout_failure ~strikes:(Some strikes) ~liveness timeout))
-  | Not_provider_runtime_failure -> None
 ;;

@@ -1,7 +1,6 @@
 module Format = Stdlib.Format
 module Map = Stdlib.Map
 module Set = Stdlib.Set
-module Queue = Stdlib.Queue
 module Hashtbl = Stdlib.Hashtbl
 module Mutex = Stdlib.Mutex
 module Option = Stdlib.Option
@@ -131,65 +130,13 @@ let valid_url url =
     | Some "http" | Some "https" -> true
     | _ -> false
 
-let ends_with ~suffix s =
-  let len_s = String.length s in
-  let len_suffix = String.length suffix in
-  len_suffix <= len_s
-  && String.equal (String.sub s (len_s - len_suffix) len_suffix) suffix
-
-let ipv4_private_reason host =
-  match String.split_on_char '.' host |> List.map Stdlib.int_of_string_opt with
-  | [ Some a; Some b; Some _; Some _ ]
-    when a = 0
-         || a = 10
-         || a = 127
-         || a >= 224
-         || (a = 169 && b = 254)
-         || (a = 172 && b >= 16 && b <= 31)
-         || (a = 192 && b = 168)
-         || (a = 100 && b >= 64 && b <= 127)
-         || (a = 198 && (b = 18 || b = 19)) ->
-      Some "private/internal/special-use IPv4 address"
-  | [ Some 192; Some 0; Some 2; Some _ ]
-  | [ Some 198; Some 51; Some 100; Some _ ]
-  | [ Some 203; Some 0; Some 113; Some _ ] ->
-      Some "documentation-only IPv4 address"
-  | [ Some _; Some _; Some _; Some _ ] -> None
-  | _ -> None
-
-let ipv6_private_reason host =
-  let lower = String.lowercase_ascii host in
-  if String.equal lower "::1"
-     || String.equal lower "0:0:0:0:0:0:0:1"
-     || String.equal lower "::"
-  then Some "private/internal/special-use IPv6 address"
-  else if String.starts_with ~prefix:"fc" lower
-          || String.starts_with ~prefix:"fd" lower
-          || String.starts_with ~prefix:"fe8" lower
-          || String.starts_with ~prefix:"fe9" lower
-          || String.starts_with ~prefix:"fea" lower
-          || String.starts_with ~prefix:"feb" lower
-  then Some "private/internal/special-use IPv6 address"
-  else None
-
-let blocked_host_reason url =
-  let uri = Uri.of_string (String.trim url) in
-  match Uri.host uri with
-  | None -> Some "url must include a host"
-  | Some raw_host ->
-      let host = String.lowercase_ascii (String.trim raw_host) in
-      if String.equal host "" then Some "url must include a host"
-      else if String.equal host "localhost" || ends_with ~suffix:".localhost" host
-      then Some "localhost is not allowed"
-      else if String.equal host "metadata.google.internal"
-              || String.equal host "169.254.169.254"
-      then Some "cloud metadata endpoints are not allowed"
-      else if not (String.contains host '.') && not (String.contains host ':')
-      then Some "single-label internal hostnames are not allowed"
-      else
-        match ipv4_private_reason host with
-        | Some _ as reason -> reason
-        | None -> if String.contains host ':' then ipv6_private_reason host else None
+let ends_with ~suffix value =
+  let value_length = String.length value in
+  let suffix_length = String.length suffix in
+  suffix_length <= value_length
+  && String.equal
+       (String.sub value (value_length - suffix_length) suffix_length)
+       suffix
 
 let html_block_re tag =
   Re.Pcre.re
@@ -414,7 +361,8 @@ let truncate_text ~max_chars text =
   if String.length text <= max_chars then text, false
   else String.sub text 0 max_chars ^ "\n[TRUNCATED]", true
 
-(** Cache + rate limit — same pattern as web_search but separate state *)
+(** Response cache. Authorization and admission belong to the Keeper Gate; this
+    leaf does not maintain a second, process-local request limiter. *)
 type cache_entry = {
   response : string;
   expires_at : float;
@@ -424,9 +372,6 @@ let initial_cache_capacity = 32
 let cache_entries : (string, cache_entry) Hashtbl.t =
   Hashtbl.create initial_cache_capacity
 let cache_mutex = Eio.Mutex.create ()
-let request_times : float Queue.t = Queue.create ()
-let rate_limit_mutex = Eio.Mutex.create ()
-
 let cache_ttl_sec () = Env_config.Tools.web_search_cache_ttl_sec ()
 
 let cache_lookup key now =
@@ -450,23 +395,6 @@ let cache_store key response now =
     Eio.Mutex.use_rw ~protect:true cache_mutex (fun () ->
         Hashtbl.replace cache_entries key { response; expires_at = now +. ttl })
 
-let enforce_rate_limit now =
-  let window = Env_config.Tools.web_search_rate_limit_window_sec () in
-  let max_calls = Env_config.Tools.web_search_rate_limit_max_calls () in
-  Eio.Mutex.use_rw ~protect:true rate_limit_mutex (fun () ->
-      while
-        Queue.length request_times > 0
-        && Stdlib.( > ) (Stdlib.Float.sub now (Queue.peek request_times)) window
-      do
-        let (_ : float) = Queue.pop request_times in
-        ()
-      done;
-      if Queue.length request_times >= max_calls then
-        Error "web fetch rate limit exceeded; retry shortly"
-      else (
-        Queue.push now request_times;
-        Ok ()))
-
 (** Redact transport error detail before the " for " suffix *)
 let redact_transport_error_detail message =
   match String.index_opt message ' ' with
@@ -483,7 +411,7 @@ type fetch_failure =
   | Transport_error of string   (* raw transport-layer detail, already redacted *)
   | Http_status of int          (* upstream returned a non-2xx HTTP status *)
   | No_http_status              (* protocol level: status line missing *)
-  | Redirect_blocked of string  (* redirect target failed URL/host policy *)
+  | Invalid_redirect of string  (* redirect target is not a typed HTTP(S) URL *)
   | Redirect_limit_exceeded
   | Unsupported_content_type of string
 
@@ -491,7 +419,7 @@ let fetch_failure_to_string = function
   | Transport_error detail -> Printf.sprintf "fetch failed: %s" detail
   | Http_status status -> Printf.sprintf "HTTP %d" status
   | No_http_status -> "no HTTP status received"
-  | Redirect_blocked reason -> "redirect blocked: " ^ reason
+  | Invalid_redirect reason -> "invalid redirect: " ^ reason
   | Redirect_limit_exceeded ->
       Printf.sprintf "redirect limit exceeded (max %d)" max_redirects
   | Unsupported_content_type content_type ->
@@ -502,7 +430,7 @@ let fetch_failure_class : fetch_failure -> Tool_result.tool_failure_class =
   | Transport_error _ -> Tool_result.Transient_error
   | Http_status _ -> Tool_result.Runtime_failure
   | No_http_status -> Tool_result.Runtime_failure
-  | Redirect_blocked _ -> Tool_result.Workflow_rejection
+  | Invalid_redirect _ -> Tool_result.Workflow_rejection
   | Redirect_limit_exceeded -> Tool_result.Runtime_failure
   | Unsupported_content_type _ -> Tool_result.Runtime_failure
 
@@ -544,10 +472,7 @@ let fetch_response_of_http_response ~request_url ~redirect_count
 let validate_redirect_target target =
   if not (valid_url target) then
     Error "redirect target must be a valid http or https URL"
-  else
-    match blocked_host_reason target with
-    | Some reason -> Error ("target host is blocked: " ^ reason)
-    | None -> Ok ()
+  else Ok ()
 
 let default_http_fetch ~timeout_sec ~headers ~max_response_bytes url =
   let rec loop ~redirect_count request_url =
@@ -573,7 +498,7 @@ let default_http_fetch ~timeout_sec ~headers ~max_response_bytes url =
                 resolve_redirect_url ~base_url:request_url redirect_url
               in
               match validate_redirect_target next_url with
-              | Error reason -> Error (Redirect_blocked reason)
+              | Error reason -> Error (Invalid_redirect reason)
               | Ok () -> loop ~redirect_count:(redirect_count + 1) next_url)
     | Ok response ->
         Ok (fetch_response_of_http_response ~request_url ~redirect_count response)
@@ -697,11 +622,8 @@ let handle ~tool_name ~start_time args : Tool_result.result =
   else
     match extract_mode_of_string extract_mode_raw with
     | None -> make_workflow_err "extractMode must be one of: markdown, text"
-    | Some extract_mode -> (
-        match blocked_host_reason url with
-        | Some reason -> make_workflow_err ("url host is blocked: " ^ reason)
-        | None ->
-            let extract_mode_label = extract_mode_to_string extract_mode in
+    | Some extract_mode ->
+      let extract_mode_label = extract_mode_to_string extract_mode in
             (* RFC-0189 follow-up — store the parsed JSON envelope in
                [~data] instead of wrapping as [`Assoc [ "text", `String body ]].
                The wrapped form corrupted [result.message] for callers (and
@@ -711,32 +633,24 @@ let handle ~tool_name ~start_time args : Tool_result.result =
                so both go through
                [structured_payload_of_message]; plain-text fallback retained
                only for defence in depth. *)
-            let ok_from_envelope body =
-              let data =
-                match Tool_result.structured_payload_of_message body with
-                | Some json -> json
-                | None -> `String body
-              in
-              Tool_result.make_ok ~tool_name ~start_time ~data ()
-            in
-            let now = Unix.gettimeofday () in
-            let key =
-              String.concat
-                "|"
-                [ url; Int.to_string timeout; extract_mode_label; Int.to_string max_chars ]
-            in
-            match cache_lookup key now with
-            | Some cached -> ok_from_envelope cached
-            | None -> (
-                match enforce_rate_limit now with
-                | Error message ->
-                    Tool_result.make_err
-                      ~tool_name
-                      ~class_:Tool_result.Transient_error
-                      ~start_time
-                      message
-                | Ok () -> (
-                    match fetch_impl ~url ~timeout_sec:timeout ~extract_mode ~max_chars with
+      let ok_from_envelope body =
+        let data =
+          match Tool_result.structured_payload_of_message body with
+          | Some json -> json
+          | None -> `String body
+        in
+        Tool_result.make_ok ~tool_name ~start_time ~data ()
+      in
+      let now = Unix.gettimeofday () in
+      let key =
+        String.concat
+          "|"
+          [ url; Int.to_string timeout; extract_mode_label; Int.to_string max_chars ]
+      in
+      match cache_lookup key now with
+      | Some cached -> ok_from_envelope cached
+      | None ->
+        (match fetch_impl ~url ~timeout_sec:timeout ~extract_mode ~max_chars with
                     | Ok
                         ( response
                         , http_status
@@ -780,9 +694,9 @@ let handle ~tool_name ~start_time args : Tool_result.result =
                         let json = Tool_args.ok_response fields in
                         cache_store key json now;
                         ok_from_envelope json
-                    | Error failure ->
-                        Tool_result.make_err
-                          ~tool_name
-                          ~class_:(fetch_failure_class failure)
-                          ~start_time
-                          (fetch_failure_to_string failure))))
+         | Error failure ->
+           Tool_result.make_err
+             ~tool_name
+             ~class_:(fetch_failure_class failure)
+             ~start_time
+             (fetch_failure_to_string failure))

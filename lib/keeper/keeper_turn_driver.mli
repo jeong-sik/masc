@@ -36,11 +36,6 @@ include
 
 (** {1 Provider error helpers} *)
 
-val message_looks_like_cli_wrapped_hard_quota : string -> bool
-
-val sdk_error_is_terminal_provider_runtime_failure :
-  Agent_sdk.Error.sdk_error -> bool
-
 val sdk_error_is_hard_quota : Agent_sdk.Error.sdk_error -> bool
 
 val sdk_error_soft_rate_limited :
@@ -118,7 +113,6 @@ val run_named :
   ?temperature:float ->
   ?max_tokens:int ->
   ?accept:(Agent_sdk_response.api_response -> bool) ->
-  ?guardrails:Agent_sdk.Guardrails.t ->
   ?hooks:Agent_sdk.Hooks.hooks ->
   ?context_reducer:Agent_sdk.Context_reducer.t ->
   ?raw_trace:Agent_sdk.Raw_trace.t ->
@@ -193,25 +187,6 @@ module For_testing : sig
     Agent_sdk.Checkpoint.t option
 
   val success_selected_model_raw : Runtime_candidate.t -> string option
-
-  val record_candidate_health_error :
-    keeper_name:string -> Runtime_candidate.t -> Agent_sdk.Error.sdk_error -> unit
-
-  val provider_cooldown_block :
-    keeper_name:string ->
-    Runtime_candidate.t ->
-    Keeper_turn_driver_provider_attempt.provider_cooldown_block option
-
-  (** #23456 P1 regression surface: mixed unknown+deterministic blocker
-      lists must aggregate to [None] (auto-recoverable). *)
-  val aggregate_cooldown_cause :
-    (string * Keeper_binding_health.provider_info) list ->
-    Keeper_internal_error.provider_cooldown_cause option
-
-  val provider_cooldown_block_error :
-    runtime_id:string ->
-    Keeper_turn_driver_provider_attempt.provider_cooldown_block ->
-    Agent_sdk.Error.sdk_error
 
   val apply_accept :
     ?initial_messages:Agent_sdk.Types.message list ->

@@ -34,8 +34,6 @@ type tool_event =
       agent_id : string;
       profile : string;
       tool_list : string list;
-      allow_set : string list;
-      deny_set : string list;
       config_hash : string;
       reason : string;
       timestamp : float;
@@ -60,16 +58,14 @@ type tool_event =
 
 let event_to_json = function
   | Assigned
-      { assignment_id; agent_id; profile; tool_list; allow_set; deny_set;
-        config_hash; reason; timestamp } ->
+      { assignment_id; agent_id; profile; tool_list; config_hash; reason;
+        timestamp } ->
       `Assoc
         [ ("event_type", `String "Assigned")
         ; ("assignment_id", `String assignment_id)
         ; ("agent_id", `String agent_id)
         ; ("profile", `String profile)
         ; ("tool_list", `List (List.map (fun s -> `String s) tool_list))
-        ; ("allow_set", `List (List.map (fun s -> `String s) allow_set))
-        ; ("deny_set", `List (List.map (fun s -> `String s) deny_set))
         ; ("config_hash", `String config_hash)
         ; ("reason", `String reason)
         ; ("timestamp", `Float timestamp)
@@ -115,8 +111,6 @@ let event_of_json json : (tool_event, string) Result.t =
              ; agent_id = Json_util.get_string_with_default json ~key:"agent_id" ~default:""
              ; profile = Json_util.get_string_with_default json ~key:"profile" ~default:""
              ; tool_list = string_list "tool_list"
-             ; allow_set = string_list "allow_set"
-             ; deny_set = string_list "deny_set"
              ; config_hash = Json_util.get_string_with_default json ~key:"config_hash" ~default:""
              ; reason = Json_util.get_string_with_default json ~key:"reason" ~default:""
              ; timestamp = Json_util.get_float json "timestamp" |> Option.value ~default:0.0
@@ -214,8 +208,8 @@ let get_or_create_store () : Dated_jsonl.t =
 
 (* ── Default config hash ──────────────────────────────── *)
 
-let default_config_hash ~profile ~tool_list ~allow_set ~deny_set =
-  let input = String.concat "|" (profile :: tool_list @ allow_set @ deny_set) in
+let default_config_hash ~profile ~tool_list =
+  let input = String.concat "|" (profile :: tool_list) in
   Digestif.SHA256.(digest_string input |> to_hex)
 
 (* ── Public API ───────────────────────────────────────── *)
@@ -224,8 +218,6 @@ let emit_assigned
     ~agent_id
     ~profile
     ~tool_list
-    ?(allow_set = [])
-    ?(deny_set = [])
     ?config_hash
     ?(reason = "")
     () : assignment_id =
@@ -235,7 +227,7 @@ let emit_assigned
   let config_hash =
     match config_hash with
     | Some h -> h
-    | None -> default_config_hash ~profile ~tool_list ~allow_set ~deny_set
+    | None -> default_config_hash ~profile ~tool_list
   in
   let event =
     Assigned
@@ -243,8 +235,6 @@ let emit_assigned
       ; agent_id
       ; profile
       ; tool_list
-      ; allow_set
-      ; deny_set
       ; config_hash
       ; reason
       ; timestamp = Time_compat.now ()

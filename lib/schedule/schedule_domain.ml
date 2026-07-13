@@ -9,33 +9,21 @@ type actor =
   ; display_name : string option
   }
 
-type risk_class =
-  | Reminder_only
-  | Read_only
-  | Workspace_write
-  | External_write
-  | Destructive
-  | Cost_bearing
-
 type schedule_status =
-  | Pending_approval
   | Scheduled
   | Due
   | Running
   | Succeeded
   | Failed
-  | Rejected
   | Cancelled
   | Expired
 
 let all_schedule_statuses =
-  [ Pending_approval
-  ; Scheduled
+  [ Scheduled
   ; Due
   ; Running
   ; Succeeded
   ; Failed
-  ; Rejected
   ; Cancelled
   ; Expired
   ]
@@ -74,31 +62,9 @@ type schedule_request =
   ; due_at : float
   ; expires_at : float option
   ; payload : payload
-  ; risk_class : risk_class
-  ; approval_required : bool
   ; status : schedule_status
   ; source : schedule_source
   ; recurrence : recurrence
-  }
-
-type execution_decision =
-  | Approve
-  | Reject of string
-
-type execution_evidence =
-  { schedule_id : string
-  ; payload_digest : string
-  ; due_at : float
-  ; risk_class : risk_class
-  }
-
-type execution_grant =
-  { grant_id : string
-  ; schedule_id : string
-  ; approved_by : actor
-  ; approved_at : float
-  ; decision : execution_decision
-  ; evidence : execution_evidence
   }
 
 type execution_status =
@@ -117,18 +83,6 @@ type execution_record =
   ; detail : Yojson.Safe.t option
   ; error : string option
   }
-
-type grant_error =
-  | Grant_schedule_id_mismatch
-  | Approver_not_human
-  | Approver_is_requester
-  | Approver_is_scheduler
-  | Schedule_terminal
-  | Schedule_not_pending_approval
-  | Evidence_schedule_id_mismatch
-  | Evidence_payload_digest_mismatch
-  | Evidence_due_at_mismatch
-  | Evidence_risk_class_mismatch
 
 let ( let* ) = Result.bind
 
@@ -149,45 +103,22 @@ let actor_kind_of_string = function
   | other -> Error ("unknown actor_kind: " ^ other)
 ;;
 
-let risk_class_to_string = function
-  | Reminder_only -> "reminder_only"
-  | Read_only -> "read_only"
-  | Workspace_write -> "workspace_write"
-  | External_write -> "external_write"
-  | Destructive -> "destructive"
-  | Cost_bearing -> "cost_bearing"
-;;
-
-let risk_class_of_string = function
-  | "reminder_only" -> Ok Reminder_only
-  | "read_only" -> Ok Read_only
-  | "workspace_write" -> Ok Workspace_write
-  | "external_write" -> Ok External_write
-  | "destructive" -> Ok Destructive
-  | "cost_bearing" -> Ok Cost_bearing
-  | other -> Error ("unknown risk_class: " ^ other)
-;;
-
 let schedule_status_to_string = function
-  | Pending_approval -> "pending_approval"
   | Scheduled -> "scheduled"
   | Due -> "due"
   | Running -> "running"
   | Succeeded -> "succeeded"
   | Failed -> "failed"
-  | Rejected -> "rejected"
   | Cancelled -> "cancelled"
   | Expired -> "expired"
 ;;
 
 let schedule_status_of_string = function
-  | "pending_approval" -> Ok Pending_approval
   | "scheduled" -> Ok Scheduled
   | "due" -> Ok Due
   | "running" -> Ok Running
   | "succeeded" -> Ok Succeeded
   | "failed" -> Ok Failed
-  | "rejected" -> Ok Rejected
   | "cancelled" -> Ok Cancelled
   | "expired" -> Ok Expired
   | other -> Error ("unknown schedule_status: " ^ other)
@@ -234,31 +165,9 @@ let execution_status_of_string = function
   | other -> Error ("unknown execution_status: " ^ other)
 ;;
 
-let grant_error_to_string = function
-  | Grant_schedule_id_mismatch -> "grant schedule_id does not match request"
-  | Approver_not_human -> "approver must be a human operator"
-  | Approver_is_requester -> "requester cannot approve execution"
-  | Approver_is_scheduler -> "scheduler cannot approve execution"
-  | Schedule_terminal -> "schedule is already terminal"
-  | Schedule_not_pending_approval -> "schedule is not pending approval or due"
-  | Evidence_schedule_id_mismatch -> "grant evidence schedule_id mismatch"
-  | Evidence_payload_digest_mismatch -> "grant evidence payload_digest mismatch"
-  | Evidence_due_at_mismatch -> "grant evidence due_at mismatch"
-  | Evidence_risk_class_mismatch -> "grant evidence risk_class mismatch"
-;;
-
 let is_terminal = function
-  | Succeeded | Failed | Rejected | Cancelled | Expired -> true
-  | Pending_approval | Scheduled | Due | Running -> false
-;;
-
-let is_side_effecting = function
-  | Reminder_only | Read_only -> false
-  | Workspace_write | External_write | Destructive | Cost_bearing -> true
-;;
-
-let requires_separate_human_grant request =
-  request.approval_required || is_side_effecting request.risk_class
+  | Succeeded | Failed | Cancelled | Expired -> true
+  | Scheduled | Due | Running -> false
 ;;
 
 let is_recurring = function
@@ -305,11 +214,6 @@ let int_of_yojson = function
   | _ -> Error "expected int"
 ;;
 
-let bool_of_yojson = function
-  | `Bool value -> Ok value
-  | _ -> Error "expected bool"
-;;
-
 let assoc_field name fields =
   match List.assoc_opt name fields with
   | Some value -> Ok value
@@ -333,13 +237,6 @@ let float_field name fields =
 let int_field name fields =
   let* value = assoc_field name fields in
   match int_of_yojson value with
-  | Ok value -> Ok value
-  | Error err -> Error (name ^ ": " ^ err)
-;;
-
-let bool_field name fields =
-  let* value = assoc_field name fields in
-  match bool_of_yojson value with
   | Ok value -> Ok value
   | Error err -> Error (name ^ ": " ^ err)
 ;;
@@ -651,14 +548,6 @@ let payload_of_yojson = function
 
 let payload_digest payload = payload |> payload_to_yojson |> sha256_json
 
-let evidence_of_request (request : schedule_request) =
-  { schedule_id = request.schedule_id
-  ; payload_digest = payload_digest request.payload
-  ; due_at = request.due_at
-  ; risk_class = request.risk_class
-  }
-;;
-
 let seconds_per_day = 86400.0
 
 let next_periodic_due_after ~period ~now ~anchor =
@@ -751,72 +640,8 @@ let reschedule_after_due_signal ~now (request : schedule_request) =
     (match next_due_after ~now request with
      | None -> None
      | Some due_at -> Some { request with status = Scheduled; due_at })
-  | Pending_approval | Scheduled | Running | Succeeded | Failed | Rejected | Cancelled
-  | Expired ->
+  | Scheduled | Running | Succeeded | Failed | Cancelled | Expired ->
     None
-;;
-
-let execution_decision_to_yojson = function
-  | Approve -> `Assoc [ "kind", `String "approve" ]
-  | Reject reason -> `Assoc [ "kind", `String "reject"; "reason", `String reason ]
-;;
-
-let execution_decision_of_yojson = function
-  | `Assoc fields ->
-    let* kind = string_field "kind" fields in
-    (match kind with
-     | "approve" -> Ok Approve
-     | "reject" ->
-       let* reason = string_field "reason" fields in
-       Ok (Reject reason)
-     | other -> Error ("unknown execution_decision: " ^ other))
-  | _ -> Error "expected execution_decision object"
-;;
-
-let execution_evidence_to_yojson (evidence : execution_evidence) =
-  `Assoc
-    [ "schedule_id", `String evidence.schedule_id
-    ; "payload_digest", `String evidence.payload_digest
-    ; "due_at", float_to_yojson evidence.due_at
-    ; "risk_class", `String (risk_class_to_string evidence.risk_class)
-    ]
-;;
-
-let execution_evidence_of_yojson = function
-  | `Assoc fields ->
-    let* schedule_id = string_field "schedule_id" fields in
-    let* payload_digest = string_field "payload_digest" fields in
-    let* due_at = float_field "due_at" fields in
-    let* risk_name = string_field "risk_class" fields in
-    let* risk_class = risk_class_of_string risk_name in
-    Ok { schedule_id; payload_digest; due_at; risk_class }
-  | _ -> Error "expected execution_evidence object"
-;;
-
-let execution_grant_to_yojson (grant : execution_grant) =
-  `Assoc
-    [ "grant_id", `String grant.grant_id
-    ; "schedule_id", `String grant.schedule_id
-    ; "approved_by", actor_to_yojson grant.approved_by
-    ; "approved_at", float_to_yojson grant.approved_at
-    ; "decision", execution_decision_to_yojson grant.decision
-    ; "evidence", execution_evidence_to_yojson grant.evidence
-    ]
-;;
-
-let execution_grant_of_yojson = function
-  | `Assoc fields ->
-    let* grant_id = string_field "grant_id" fields in
-    let* schedule_id = string_field "schedule_id" fields in
-    let* approved_by_json = assoc_field "approved_by" fields in
-    let* approved_by = actor_of_yojson approved_by_json in
-    let* approved_at = float_field "approved_at" fields in
-    let* decision_json = assoc_field "decision" fields in
-    let* decision = execution_decision_of_yojson decision_json in
-    let* evidence_json = assoc_field "evidence" fields in
-    let* evidence = execution_evidence_of_yojson evidence_json in
-    Ok { grant_id; schedule_id; approved_by; approved_at; decision; evidence }
-  | _ -> Error "expected execution_grant object"
 ;;
 
 let execution_record_to_yojson (execution : execution_record) =
@@ -882,8 +707,6 @@ let schedule_request_to_yojson (request : schedule_request) =
     ; "due_at", float_to_yojson request.due_at
     ; "expires_at", option_to_yojson float_to_yojson request.expires_at
     ; "payload", payload_to_yojson request.payload
-    ; "risk_class", `String (risk_class_to_string request.risk_class)
-    ; "approval_required", `Bool request.approval_required
     ; "status", `String (schedule_status_to_string request.status)
     ; "source", `String (schedule_source_to_string request.source)
     ; "recurrence", recurrence_to_yojson request.recurrence
@@ -908,9 +731,6 @@ let schedule_request_of_yojson = function
     in
     let* payload_json = assoc_field "payload" fields in
     let* payload = payload_of_yojson payload_json in
-    let* risk_name = string_field "risk_class" fields in
-    let* risk_class = risk_class_of_string risk_name in
-    let* approval_required = bool_field "approval_required" fields in
     let* status_name = string_field "status" fields in
     let* status = schedule_status_of_string status_name in
     let* source_name = string_field "source" fields in
@@ -928,8 +748,6 @@ let schedule_request_of_yojson = function
       ; due_at
       ; expires_at
       ; payload
-      ; risk_class
-      ; approval_required
       ; status
       ; source
       ; recurrence
@@ -945,8 +763,6 @@ let create_request
   ~due_at
   ?expires_at
   ~payload
-  ~risk_class
-  ~approval_required
   ~source
   ?(recurrence = One_shot)
   ()
@@ -956,8 +772,6 @@ let create_request
   let* _ = nonempty "scheduled_by.id" scheduled_by.id in
   let* payload = payload_of_yojson payload in
   let* recurrence = validate_recurrence recurrence in
-  let approval_required = approval_required || is_side_effecting risk_class in
-  let status = if approval_required then Pending_approval else Scheduled in
   Ok
     { schedule_id
     ; requested_by
@@ -966,28 +780,10 @@ let create_request
     ; due_at
     ; expires_at
     ; payload
-    ; risk_class
-    ; approval_required
-    ; status
+    ; status = Scheduled
     ; source
     ; recurrence
     }
-;;
-
-let create_execution_grant
-  ~grant_id
-  ~approved_by
-  ~approved_at
-  ~decision
-  (request : schedule_request)
-  =
-  { grant_id
-  ; schedule_id = request.schedule_id
-  ; approved_by
-  ; approved_at
-  ; decision
-  ; evidence = evidence_of_request request
-  }
 ;;
 
 let expired_at ~now (request : schedule_request) =
@@ -996,57 +792,9 @@ let expired_at ~now (request : schedule_request) =
   | None | Some _ -> false
 ;;
 
-let validate_execution_grant (request : schedule_request) (grant : execution_grant) =
-  if grant.schedule_id <> request.schedule_id then Error Grant_schedule_id_mismatch
-  else if is_terminal request.status then Error Schedule_terminal
-  else if expired_at ~now:grant.approved_at request then Error Schedule_terminal
-  else if request.status <> Pending_approval && request.status <> Due then
-    Error Schedule_not_pending_approval
-  else if requires_separate_human_grant request && grant.approved_by.kind <> Human_operator
-  then Error Approver_not_human
-  else if requires_separate_human_grant request
-          && String.equal grant.approved_by.id request.requested_by.id
-  then Error Approver_is_requester
-  else if requires_separate_human_grant request
-          && String.equal grant.approved_by.id request.scheduled_by.id
-  then Error Approver_is_scheduler
-  else (
-    let expected = evidence_of_request request in
-    if grant.evidence.schedule_id <> expected.schedule_id then
-      Error Evidence_schedule_id_mismatch
-    else if grant.evidence.payload_digest <> expected.payload_digest then
-      Error Evidence_payload_digest_mismatch
-    else if grant.evidence.due_at <> expected.due_at then Error Evidence_due_at_mismatch
-    else if grant.evidence.risk_class <> expected.risk_class then
-      Error Evidence_risk_class_mismatch
-    else
-      Ok ())
-;;
-
-let apply_execution_grant (request : schedule_request) (grant : execution_grant) =
-  let* () = validate_execution_grant request grant in
-  match grant.decision with
-  | Approve ->
-    let status =
-      match request.status with
-      | Pending_approval -> Scheduled
-      | Due -> Due
-      | Scheduled
-      | Running
-      | Succeeded
-      | Failed
-      | Rejected
-      | Cancelled
-      | Expired ->
-        request.status
-    in
-    Ok { request with status }
-  | Reject _ -> Ok { request with status = Rejected }
-;;
-
 let mark_due ~now (request : schedule_request) =
   match request.status with
-  | Pending_approval | Scheduled | Due when expired_at ~now request ->
+  | Scheduled | Due when expired_at ~now request ->
     { request with status = Expired }
   | Scheduled when request.due_at <= now -> { request with status = Due }
   | _ -> request

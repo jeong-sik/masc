@@ -72,7 +72,7 @@ let provider_cooldown_backpressure_error runtime_id =
        { runtime_id
        ; source = Driver.Provider_capacity
        ; detail = "provider health cooldown active before dispatch"
-       ; retry_after = Driver.Synthetic_default 30.0
+       ; retry_after = Driver.No_retry_hint
        ; cooldown_cause = None
        })
 

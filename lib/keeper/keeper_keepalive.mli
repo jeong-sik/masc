@@ -12,9 +12,8 @@ val get_bus : unit -> Agent_sdk.Event_bus.t option
 
 val register_grpc_heartbeat_starter : Keeper_keepalive_signal.grpc_heartbeat_starter_fn -> unit
 
-(** Process a single directive string from a gRPC HeartbeatAck.
-    Supported: "pause", "resume", "wakeup", "claim:<task_id>". *)
-val process_directive : agent_name:string -> string -> unit
+(** Apply one typed control-plane directive to a Keeper lane. *)
+val process_directive : agent_name:string -> Keeper_directive.t -> unit
 
 (** Test-visible helper for the [current_task_id] sent in gRPC heartbeats.
     This may reconcile registry state against the task backlog before reading
@@ -34,33 +33,6 @@ val wakeup_keeper :
 (** Wake up all running keepers. Used for @@all broadcast mentions
     or system-wide events. *)
 val wakeup_all_keepers : ?base_path:string -> unit -> unit
-
-(** Pure: whether a [Keeper_heartbeat_smart] decision should allow the
-    keepalive cycle (presence/snapshot/board/turn/recurring) to run.
-
-    Contract: [Skip_busy] -> [true] (cycle continues; broadcast may be
-    debounced elsewhere). [Skip_idle] -> [false] (keeper idle, back
-    off). [Emit] -> [true]. Regression guard for the claim-holding
-    keeper starvation bug where [Skip_busy] was mis-used as a
-    cycle-skip signal, blocking any keeper with a claimed task from
-    ever running a turn. *)
-val smart_heartbeat_cycle_continues : Keeper_heartbeat_smart.decision -> bool
-
-(** Pure: post-sleep refinement. Promotes [Skip_idle] to [true] iff the
-    sleep ended with [Woken]. Closes the [MissedWakeup] gap in
-    KeeperHeartbeat.tla left open by sibling fix #10078. *)
-val cycle_continues_after_wake :
-  Keeper_heartbeat_smart.decision -> Keeper_keepalive_signal.sleep_outcome -> bool
-
-val visible_consumer_count : unit -> int
-
-val visibility_gate_decision :
-  visible_consumers:int ->
-  has_pending_signal:bool ->
-  now:float ->
-  last_heartbeat_cycle_ts:float ->
-  Keeper_heartbeat_smart.decision ->
-  Keeper_heartbeat_smart.decision
 
 val not_in_registry_warn_cooldown_s : float
 val not_in_registry_warn_max_entries : int
@@ -120,7 +92,6 @@ type start_keepalive_outcome =
   | Keepalive_already_registered of Keeper_registry.registry_entry
   | Keepalive_lifecycle_denied of Keeper_lifecycle_admission.autonomous_denial
   | Keepalive_identity_unrepairable
-  | Keepalive_spawn_slot_denied of Keeper_registry.spawn_slot_denial_reason
   | Keepalive_registration_rejected of Keeper_registry.registration_error
   | Keepalive_fiber_start_rejected of Keeper_state_machine.transition_error
   | Keepalive_lane_ownership_lost

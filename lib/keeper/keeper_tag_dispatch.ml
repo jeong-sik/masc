@@ -110,7 +110,11 @@ let dispatch
     | Mod_plan -> Tool_plan.dispatch { config } ~name ~args
     | Mod_local_runtime ->
       Tool_local_runtime.dispatch
-        ({ Tool_local_runtime_core.config; agent_name } : Tool_local_runtime_core.context)
+        ({ Tool_local_runtime_core.config
+         ; agent_name
+         ; authorize_external_effect = None
+         }
+         : Tool_local_runtime_core.context)
         ~name
         ~args
     | Mod_run ->
@@ -122,15 +126,7 @@ let dispatch
         ~name
         ~args
     | Mod_control ->
-      if name = "masc_pause_status"
-      then Tool_control.dispatch { Tool_control.config; agent_name } ~name ~args
-      else
-        Some
-          (err
-             (Printf.sprintf
-                "tool '%s' is blocked in keeper context (lifecycle-mutating Mod_control \
-                 tools are operator-only)"
-                name))
+      Tool_control.dispatch { Tool_control.config; agent_name } ~name ~args
     | Mod_agent_timeline ->
       Tool_agent_timeline.dispatch
         ~load_chat:(fun ~agent_name:requested_agent_name ->

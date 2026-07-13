@@ -32,22 +32,15 @@ let schedule_id = function
   | None -> mint_id "sched"
 ;;
 
-let grant_id = function
-  | Some id -> id
-  | None -> mint_id "grant"
-;;
-
 let create
   config
   ?schedule_id:provided_schedule_id
   ?requested_at
   ?expires_at
-  ?(approval_required = false)
   ~requested_by
   ~scheduled_by
   ~due_at
   ~payload
-  ~risk_class
   ~source
   ?recurrence
   ()
@@ -57,8 +50,7 @@ let create
   let schedule_id = schedule_id provided_schedule_id in
   let* request =
     Schedule_domain.create_request ~schedule_id ~requested_by ~scheduled_by
-      ~requested_at ~due_at ?expires_at ~payload ~risk_class
-      ~approval_required ~source ?recurrence ()
+      ~requested_at ~due_at ?expires_at ~payload ~source ?recurrence ()
     |> function
     | Ok request -> Ok request
     | Error msg -> Error (Invalid_request msg)
@@ -78,37 +70,6 @@ let list config ?status () =
 ;;
 
 let get config ~schedule_id = Schedule_store.get_schedule config ~schedule_id
-
-let decision_grant
-  config
-  ?grant_id:provided_grant_id
-  ?approved_at
-  ~schedule_id
-  ~approved_by
-  ~decision
-  ()
-  =
-  match Schedule_store.get_schedule config ~schedule_id with
-  | None -> Error (Store_error Schedule_store.Schedule_not_found)
-  | Some request -> (* NDT-OK: API boundary default; explicit approved_at is supported. *)
-    let approved_at = Option.value approved_at ~default:(now ()) in
-    let grant_id = grant_id provided_grant_id in
-    let grant =
-      Schedule_domain.create_execution_grant ~grant_id ~approved_by
-        ~approved_at ~decision request
-    in
-    Schedule_store.record_grant config grant |> map_store
-;;
-
-let approve config ?grant_id ?approved_at ~schedule_id ~approved_by () =
-  decision_grant config ?grant_id ?approved_at ~schedule_id ~approved_by
-    ~decision:Schedule_domain.Approve ()
-;;
-
-let reject config ?grant_id ?approved_at ~schedule_id ~approved_by ~reason () =
-  decision_grant config ?grant_id ?approved_at ~schedule_id ~approved_by
-    ~decision:(Schedule_domain.Reject reason) ()
-;;
 
 let cancel config ~schedule_id =
   Schedule_store.cancel_request config ~schedule_id |> map_store

@@ -47,17 +47,7 @@ let read_file_default_max_bytes = Tool_shard_limits.read_file_default_max_bytes
 let read_file_min_max_bytes = 512
 let read_file_max_max_bytes = 200_000
 
-type read_file_resolution_error =
-  | Missing_file of
-      { target : string
-      ; error : string
-      }
-  | Read_path_error of string
-
-type read_file_resolver_input =
-  { resolver_path : string
-  ; projected_from_visible_cwd : bool
-  }
+type read_file_resolution_error = Read_path_error of string
 
 let string_opt_nonempty name json =
   match Safe_ops.json_string_opt name json with
@@ -65,26 +55,6 @@ let string_opt_nonempty name json =
   | Some raw ->
     let trimmed = String.trim raw in
     if trimmed = "" then None else Some trimmed
-;;
-
-let repo_access_tool_response ~keeper_id ~base_path ~path =
-  match Keeper_repo_claim_hitl.request_path_access ~keeper_id ~base_path ~path with
-  | Keeper_repo_claim_hitl.Access_allowed -> None
-  | access_result ->
-    Some
-      (Yojson.Safe.to_string
-         (Keeper_repo_claim_hitl.tool_response_json ~path access_result))
-;;
-
-let relative_path_has_segment_prefix prefix raw =
-  String.equal raw prefix || String.starts_with ~prefix:(prefix ^ "/") raw
-;;
-
-let sandbox_rooted_relative_path raw =
-  Filename.is_relative raw
-  && List.exists
-       (fun prefix -> relative_path_has_segment_prefix prefix raw)
-       [ "repos"; "mind"; Common.masc_dirname; "playground" ]
 ;;
 
 let resolve_read_file_cwd ~(config : Workspace.config) ~(meta : keeper_meta) ~cwd =
@@ -101,19 +71,6 @@ let resolve_read_file_cwd ~(config : Workspace.config) ~(meta : keeper_meta) ~cw
         (Printf.sprintf
            "cwd_not_directory: %s (directory does not exist; Read will not create cwd)"
            cwd)
-;;
-
-let read_file_resolver_input ~cwd ~(raw_path : string) =
-  let raw_path = String.trim raw_path in
-  if
-    raw_path = ""
-    || (not (Filename.is_relative raw_path))
-    || sandbox_rooted_relative_path raw_path
-  then { resolver_path = raw_path; projected_from_visible_cwd = false }
-  else
-    { resolver_path = Filename.concat cwd raw_path
-    ; projected_from_visible_cwd = true
-    }
 ;;
 
 let resolve_read_file_target
@@ -134,72 +91,15 @@ let resolve_read_file_target
       resolve_read_file_cwd ~config ~meta ~cwd
       |> Result.map_error (fun e -> Read_path_error e)
     in
-    let resolver_input = read_file_resolver_input ~cwd:cwd_abs ~raw_path in
-    let resolve_once candidate =
-      let resolve_alerting normalized =
-        Keeper_alerting_path.resolve_keeper_read_path
-          ~config
-          ~allowed_paths:(keeper_effective_allowed_paths ~meta)
-          ~raw_path:normalized
-        |> Result.map_error (function
-          | Keeper_alerting_path.Not_found_relative { raw } ->
-            let root = Keeper_alerting_path.project_root_of_config config in
-            let target =
-              if Filename.is_relative normalized
-              then Filename.concat root normalized
-              else normalized
-            in
-            Missing_file
-              { target
-              ; error =
-                  Keeper_alerting_path.rejection_to_user_message
-                    (Not_found_relative { raw })
-              }
-          | rej -> Read_path_error (Keeper_alerting_path.rejection_to_user_message rej))
-      in
-      let resolve_shared candidate =
-        Result.map_error
-          (fun e ->
-             if String.starts_with ~prefix:"path_not_found_under_allowed_roots:" e
-             then Missing_file { target = candidate; error = e }
-             else Read_path_error e)
-          (resolve_keeper_read_path ~config ~meta ~raw_path:candidate)
-      in
-      let resolve_projected candidate =
-        Result.map_error
-          (fun e ->
-             if String.starts_with ~prefix:"path_not_found_under_allowed_roots:" e
-             then Missing_file { target = candidate; error = e }
-             else Read_path_error e)
-          (resolve_projected_keeper_read_path
-             ~config
-             ~meta
-             ~raw_for_error:raw_path
-             ~projected_path:candidate)
-      in
-      if resolver_input.projected_from_visible_cwd
-         || sandbox_rooted_relative_path candidate
-         || not (Filename.is_relative candidate)
-      then
-        if resolver_input.projected_from_visible_cwd
-        then resolve_projected candidate
-        else resolve_shared candidate
-      else
-        let* normalized =
-          playground_relative_unless_allowed_root ~config ~meta candidate
-          |> Result.map_error (fun e -> Read_path_error e)
-        in
-        resolve_alerting normalized
+    let candidate =
+      if Filename.is_relative raw_path then Filename.concat cwd_abs raw_path else raw_path
     in
-    (match resolve_once resolver_input.resolver_path with
-     | Ok _ as ok -> ok
-     | Error original ->
-       (match Keeper_tool_execute_path.auto_correct_path ~meta resolver_input.resolver_path with
-        | Some corrected ->
-          (match resolve_once corrected with
-           | Ok _ as ok -> ok
-           | Error _ -> Error original)
-        | None -> Error original))
+    resolve_projected_keeper_read_path
+      ~config
+      ~meta
+      ~raw_for_error:raw_path
+      ~projected_path:candidate
+    |> Result.map_error (fun error -> Read_path_error error)
 ;;
 
 let handle_read_file
@@ -215,35 +115,11 @@ let handle_read_file
     Safe_ops.json_int ~default:read_file_default_max_bytes "max_bytes" args
     |> fun n -> max read_file_min_max_bytes (min read_file_max_max_bytes n)
   in
-  let fallback_dir = keeper_default_read_root ~config ~meta in
   let cwd = string_opt_nonempty "cwd" args in
   match resolve_read_file_target ~config ~meta ~args ~raw_path:path with
   | Error (Read_path_error e) -> error_json e
-  | Error (Missing_file { target; error }) ->
-    missing_file_error_json
-      ~cwd
-      ~raw_path:(Some path)
-      ~config
-      ~meta
-      ~target
-      ~fallback_dir
-      ~error
   | Ok target ->
-    (* Multi-repository Phase 2: repository-level access restriction.
-       If the resolved path is under a registered repository, enforce
-       keeper-to-repo mapping.  Paths outside all registered repos are
-       allowed (playground general files).  Denials are surfaced as a
-       deterministic policy block so the supervisor does not retry the
-       same failing path. *)
-    (match
-       repo_access_tool_response
-         ~keeper_id:meta.name
-         ~base_path:(Keeper_alerting_path.project_root_of_config config)
-         ~path:target
-     with
-     | Some response -> response
-     | None ->
-       let run_read () =
+    let run_read () =
          (* RFC-0006 Phase B-1: Docker keepers are always contained to their
             playground bundle on the host before any read-side I/O proceeds.
             The resolver-level allowed_paths check is augmented by this
@@ -287,10 +163,7 @@ let handle_read_file
                (missing_file_error_json
                   ~cwd
                   ~raw_path:(Some path)
-                  ~config
-                  ~meta
                   ~target
-                  ~fallback_dir
                   ~error:e)
            | Error e -> Error e
            | Ok content ->
@@ -308,10 +181,10 @@ let handle_read_file
                        ; "truncated", `Bool truncated
                        ; "content", `String body
                        ])))
-       in
-       match run_read () with
-       | Ok json -> json
-       | Error msg -> error_json ~fields:[ "path", `String target ] msg)
+    in
+    (match run_read () with
+     | Ok json -> json
+     | Error msg -> error_json ~fields:[ "path", `String target ] msg)
 ;;
 
 (* RFC-0006 Phase A.4: replace [old] with [new] in [text]. When
@@ -365,12 +238,6 @@ let apply_patch ~old_string ~new_string ~replace_all text =
       in
       loop 0;
       Ok (Buffer.contents buf, occurrences)))
-;;
-
-exception Fs_edit_error of string
-
-let raise_fs_edit_error ?fields message =
-  raise (Fs_edit_error (error_json ?fields message))
 ;;
 
 (* RFC-0128 §4.5 — resolve an absolute or base-relative file_path to
@@ -549,11 +416,78 @@ let check_invariant_sandbox_isolation
          ~sandbox_paths:[ target ])
 ;;
 
+let file_write_gate_input
+      ~target
+      ~mode
+      ~content
+      ?old_string
+      ?new_string
+      ?replace_all
+      ()
+  =
+  let optional_string name = function
+    | None -> []
+    | Some value -> [ name, `String value ]
+  in
+  let optional_bool name = function
+    | None -> []
+    | Some value -> [ name, `Bool value ]
+  in
+  `Assoc
+    ([ "target", `String target
+     ; "mode", `String mode
+     ; "content", `String content
+     ]
+     @ optional_string "old_string" old_string
+     @ optional_string "new_string" new_string
+     @ optional_bool "replace_all" replace_all)
+;;
+
+let decide_file_write
+      ~config
+      ~(meta : keeper_meta)
+      ?continuation_channel
+      ?gate_context
+      ?gate_grant
+      ~input
+      ()
+  =
+  Keeper_gate.decide
+    ?cycle_grant:gate_grant
+    ~keeper_always_allow:(Option.value ~default:false meta.always_allow)
+    { keeper_name = meta.name
+    ; operation = "filesystem_write"
+    ; input
+    ; base_path = config.Workspace.base_path
+    ; causal_context = Option.map (fun current -> current ()) gate_context
+    ; task_id = Option.map Keeper_id.Task_id.to_string meta.current_task_id
+    ; goal_ids = meta.active_goal_ids
+    ; continuation_channel
+    }
+;;
+
+let file_write_deferred_json ~target ~approval_id ~reason =
+  error_json
+    ~fields:
+      [ "path", `String target
+      ; "error", `String "gate_deferred"
+      ; "gate_request_id", `String approval_id
+      ; "gate_status", `String "pending"
+      ; "gate_nonblocking", `Bool true
+      ; "gate_reason", `String (Keeper_gate.deferred_reason_to_string reason)
+      ]
+    "External effect deferred without blocking this Keeper. Continue other work; the originating Keeper lane will wake after resolution."
+;;
+
 let handle_file_write
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~(config : Workspace.config)
       ~(keeper_name : string)
+      ?continuation_channel
+      ?gate_context
+      ?gate_grant
       ~(args : Yojson.Safe.t)
+      ()
   =
   with_registry_meta ~keeper_name ~source_layer:"fs_resolver"
   @@ fun meta ->
@@ -571,7 +505,47 @@ let handle_file_write
   let content = Safe_ops.json_string ~default:"" "content" args in
   let mode_raw = Safe_ops.json_string ~default:"overwrite" "mode" args in
   let mode_opt = fs_write_mode_of_string_opt mode_raw in
-  (* Early validation: path is required for every mode. *)
+  let after_gate ~target ~input continue =
+    match
+      decide_file_write
+        ~config
+        ~meta
+        ?continuation_channel
+        ?gate_context
+        ?gate_grant
+        ~input
+        ()
+    with
+    | Keeper_gate.Deferred { approval_id; reason } ->
+      Ok (file_write_deferred_json ~target ~approval_id ~reason)
+    | Keeper_gate.Unavailable reason ->
+      Ok
+        (error_json
+           ~fields:
+             [ "path", `String target
+             ; "error", `String "gate_unavailable"
+             ; "gate_reason"
+             , `String (Keeper_gate.unavailable_reason_to_string reason)
+             ]
+           "External effect was not executed because the Gate could not durably record its decision state. This Keeper remains active and may continue other work.")
+    | Keeper_gate.Allow authorization ->
+      Log.Keeper.info
+        ~keeper_name:meta.name
+        "external effect authorized operation=filesystem_write source=%s"
+        (Keeper_gate.authorization_source_to_string authorization.source);
+      continue ()
+  in
+  let protect_write ~target f =
+    try f () with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | Invalid_argument e | Sys_error e ->
+      Ok (error_json ~fields:[ "path", `String target ] e)
+    | Unix.Unix_error (err, _, _) ->
+      Ok
+        (error_json
+           ~fields:[ "path", `String target ]
+           (Unix.error_message err))
+  in
   if String.trim path = ""
   then error_json "path is required. Good: path='lib/foo.ml'. Bad: path=''."
   else (
@@ -599,182 +573,153 @@ let handle_file_write
             | Ok () ->
               let run () =
                 let* () = check_invariant_sandbox_isolation ~turn_sandbox_factory ~target in
-                match
-                  repo_access_tool_response
-                    ~keeper_id:meta.name
-                    ~base_path:(Keeper_alerting_path.project_root_of_config config)
-                    ~path:target
-                with
-                | Some response -> Ok response
-                | None -> (
-                  try
-                    let current =
-                      try Fs_compat.load_file target with
-                      | Eio.Cancel.Cancelled _ as e -> raise e
-                      | _ -> ""
-                    in
-                    if current = ""
-                    then
-                      Ok
-                        (error_json
-                           ~fields:[ "path", `String target ]
-                           "patch target file does not exist or is empty. Use \
-                            mode=overwrite to create.")
-                    else
-                      let* updated, occurrences =
-                        apply_patch ~old_string ~new_string ~replace_all current
-                      in
-                      let* () =
-                        match
-                          Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd:target
-                        with
-                        | Runtime runtime ->
-                          Keeper_turn_sandbox_runtime.overwrite_file
-                            runtime
-                            ~host_path:target
-                            ~content:updated
-                            ~timeout_sec:
-                              (Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Io ())
-                            ()
-                        | No_factory | Local_profile -> Keeper_fs.save_atomic target updated
-                      in
-                      Log.Keeper.info
-                        "WRITE_AUDIT: keeper=%s fs_edit path=%s mode=patch \
-                         replace_all=%b occurrences=%d bytes=%d"
-                        meta.name
-                        target
-                        replace_all
-                        occurrences
-                        (String.length updated);
-                      (* IDE: record code region after successful patch write *)
-                      let ide_observation_error =
-                        track_write_region
-                          ~config
-                          ~keeper_name:meta.name
-                          ~file_path:target
-                          ~content:updated
-                          ~mode_raw:"patch"
-                          ~old_string
-                          ~new_string
-                          ()
-                      in
-                      Ok
-                        (Yojson.Safe.to_string
-                           (`Assoc
-                               ([ "ok", `Bool true
-                                ; "path", `String target
-                                ; "mode", `String "patch"
-                                ; "replace_all", `Bool replace_all
-                                ; "occurrences", `Int occurrences
-                                ; "bytes_written", `Int (String.length updated)
-                                ]
-                                @ ide_observation_failure_fields ide_observation_error
-                                @ via_field)))
-                  with
-                  | Fs_edit_error json -> Ok json
-                  | Invalid_argument e ->
-                    Ok (error_json ~fields:[ "path", `String target ] e)
-                  | Sys_error e -> Ok (error_json ~fields:[ "path", `String target ] e)
-                  | Unix.Unix_error (err, _, _) ->
-                    Ok (error_json ~fields:[ "path", `String target ] (Unix.error_message err)))
+                if not (safe_file_exists target)
+                then
+                  Ok
+                    (error_json
+                       ~fields:[ "path", `String target ]
+                       "patch target file does not exist. Use mode=overwrite to create it.")
+                else
+                  let* current = Safe_ops.read_file_safe target in
+                  let* updated, occurrences =
+                    apply_patch ~old_string ~new_string ~replace_all current
+                  in
+                  let input =
+                    file_write_gate_input
+                      ~target
+                      ~mode:"patch"
+                      ~content:updated
+                      ~old_string
+                      ~new_string
+                      ~replace_all
+                      ()
+                  in
+                  after_gate ~target ~input
+                  @@ fun () ->
+                  protect_write ~target
+                  @@ fun () ->
+                  let* () =
+                    match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd:target with
+                    | Runtime runtime ->
+                      Keeper_turn_sandbox_runtime.overwrite_file
+                        runtime
+                        ~host_path:target
+                        ~content:updated
+                        ~timeout_sec:
+                          (Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Io ())
+                        ()
+                    | No_factory | Local_profile -> Keeper_fs.save_atomic target updated
+                  in
+                  Log.Keeper.info
+                    "WRITE_AUDIT: keeper=%s fs_edit path=%s mode=patch replace_all=%b \
+                     occurrences=%d bytes=%d"
+                    meta.name
+                    target
+                    replace_all
+                    occurrences
+                    (String.length updated);
+                  let ide_observation_error =
+                    track_write_region
+                      ~config
+                      ~keeper_name:meta.name
+                      ~file_path:target
+                      ~content:updated
+                      ~mode_raw:"patch"
+                      ~old_string
+                      ~new_string
+                      ()
+                  in
+                  Ok
+                    (Yojson.Safe.to_string
+                       (`Assoc
+                           ([ "ok", `Bool true
+                            ; "path", `String target
+                            ; "mode", `String "patch"
+                            ; "replace_all", `Bool replace_all
+                            ; "occurrences", `Int occurrences
+                            ; "bytes_written", `Int (String.length updated)
+                            ]
+                            @ ide_observation_failure_fields ide_observation_error
+                            @ via_field)))
               in
               (match run () with
                | Ok json -> json
                | Error msg -> error_json ~fields:[ "path", `String target ] msg)))
     | Some ((Overwrite | Append) as mode) ->
       let mode_label = fs_write_mode_to_string mode in
-      if String.trim content = ""
-      then
-        error_json
-          "content is required (non-empty). Writing 0 bytes is usually unintended."
-      else
-        (match resolve_keeper_path ~config ~meta ~raw_path:path with
+      (match resolve_keeper_path ~config ~meta ~raw_path:path with
          | Error e -> error_json e
          | Ok target ->
            (match validate_write_target ~config ~meta ~target with
             | Error json -> json
             | Ok () ->
               let run () =
-             let* () = check_invariant_sandbox_isolation ~turn_sandbox_factory ~target in
-             match
-               repo_access_tool_response
-                 ~keeper_id:meta.name
-                 ~base_path:(Keeper_alerting_path.project_root_of_config config)
-                 ~path:target
-             with
-             | Some response -> Ok response
-             | None -> (
-             try
-               let* () =
-                 match
-                   Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd:target
-                 with
-                 | Runtime runtime ->
-                   (match mode with
-                    | Append ->
-                      Keeper_turn_sandbox_runtime.append_file
-                        runtime
-                        ~host_path:target
-                        ~content
-                        ~timeout_sec:
-                          (Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Io ())
-                        ()
-                    | Overwrite ->
-                      Keeper_turn_sandbox_runtime.overwrite_file
-                        runtime
-                        ~host_path:target
-                        ~content
-                        ~timeout_sec:
-                          (Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Io ())
-                        ()
-                    | Patch -> Ok ())
-                 | No_factory | Local_profile ->
-                   (match mode with
-                    | Append ->
-                      let parent = Filename.dirname target in
-                      Fs_compat.mkdir_p parent;
-                      Fs_compat.append_file target content;
-                      Ok ()
-                    | Overwrite -> Keeper_fs.save_atomic target content
-                    | Patch -> Ok ())
-               in
-               Log.Keeper.info
-                 "WRITE_AUDIT: keeper=%s fs_edit path=%s mode=%s bytes=%d"
-                 meta.name
-                 target
-                 mode_label
-                 (String.length content);
-               (* IDE: record code region after successful overwrite/append write *)
-               let ide_observation_error =
-                 track_write_region
-                   ~config
-                   ~keeper_name:meta.name
-                   ~file_path:target
-                   ~content
-                   ~mode_raw:(fs_write_mode_to_string mode)
-                   ~old_string:""
-                   ~new_string:""
-                   ()
-               in
-               Ok
-                 (Yojson.Safe.to_string
-                    (`Assoc
-                        ([ "ok", `Bool true
-                         ; "path", `String target
-                         ; "mode", `String mode_label
-                         ; "bytes_written", `Int (String.length content)
-                         ]
-                         @ ide_observation_failure_fields ide_observation_error
-                         @ via_field)))
-             with
-             | Fs_edit_error json -> Ok json
-             | Invalid_argument e ->
-               Ok (error_json ~fields:[ "path", `String target ] e)
-             | Sys_error e -> Ok (error_json ~fields:[ "path", `String target ] e)
-             | Unix.Unix_error (err, _, _) ->
-               Ok (error_json ~fields:[ "path", `String target ] (Unix.error_message err)))
-           in
-           (match run () with
-            | Ok json -> json
-            | Error msg -> error_json ~fields:[ "path", `String target ] msg))))
+                let* () = check_invariant_sandbox_isolation ~turn_sandbox_factory ~target in
+                let input = file_write_gate_input ~target ~mode:mode_label ~content () in
+                after_gate ~target ~input
+                @@ fun () ->
+                protect_write ~target
+                @@ fun () ->
+                let* () =
+                  match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd:target with
+                  | Runtime runtime ->
+                    (match mode with
+                     | Append ->
+                       Keeper_turn_sandbox_runtime.append_file
+                         runtime
+                         ~host_path:target
+                         ~content
+                         ~timeout_sec:
+                           (Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Io ())
+                         ()
+                     | Overwrite ->
+                       Keeper_turn_sandbox_runtime.overwrite_file
+                         runtime
+                         ~host_path:target
+                         ~content
+                         ~timeout_sec:
+                           (Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Io ())
+                         ()
+                     | Patch -> Ok ())
+                  | No_factory | Local_profile ->
+                    (match mode with
+                     | Append ->
+                       let parent = Filename.dirname target in
+                       Fs_compat.mkdir_p parent;
+                       Fs_compat.append_file target content;
+                       Ok ()
+                     | Overwrite -> Keeper_fs.save_atomic target content
+                     | Patch -> Ok ())
+                in
+                Log.Keeper.info
+                  "WRITE_AUDIT: keeper=%s fs_edit path=%s mode=%s bytes=%d"
+                  meta.name
+                  target
+                  mode_label
+                  (String.length content);
+                let ide_observation_error =
+                  track_write_region
+                    ~config
+                    ~keeper_name:meta.name
+                    ~file_path:target
+                    ~content
+                    ~mode_raw:mode_label
+                    ~old_string:""
+                    ~new_string:""
+                    ()
+                in
+                Ok
+                  (Yojson.Safe.to_string
+                     (`Assoc
+                         ([ "ok", `Bool true
+                          ; "path", `String target
+                          ; "mode", `String mode_label
+                          ; "bytes_written", `Int (String.length content)
+                          ]
+                          @ ide_observation_failure_fields ide_observation_error
+                          @ via_field)))
+              in
+              (match run () with
+               | Ok json -> json
+               | Error msg -> error_json ~fields:[ "path", `String target ] msg))))
 ;;

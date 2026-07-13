@@ -10,6 +10,7 @@ val resolve_arg : Shell_ir.arg -> string
 
 val dispatch_simple :
   ?base_host_env:string array ->
+  ?timeout_sec:float ->
   ?stdin_content:string ->
   ?on_output_chunk:([ `Stdout of string | `Stderr of string ] -> unit) ->
   Shell_ir.simple ->
@@ -24,24 +25,18 @@ val dispatch_simple :
 
 val dispatch :
   ?base_host_env:string array ->
+  ?timeout_sec:float ->
   ?on_output_chunk:([ `Stdout of string | `Stderr of string ] -> unit) ->
   Shell_ir.t ->
   dispatch_result
 (** General dispatch over any [Shell_ir.t] variant.  [Simple] routes
     to [dispatch_simple]; [Pipeline] routes to internal pipeline
-    logic.  Prefer [dispatch_decided] for production keeper paths.
-    Exposed for tests and legacy call sites. *)
-
-val dispatch_decided :
-  ?base_host_env:string array ->
-  ?on_output_chunk:([ `Stdout of string | `Stderr of string ] -> unit) ->
-  Shell_ir_risk.decided Shell_ir_risk.decided_ir ->
-  dispatch_result
-(** RFC-0160 S3: dispatch a risk-classified IR.  The phantom type
-    ensures the IR has passed through [Shell_ir_risk.classify]. *)
+    logic.  Callers are responsible for structural and path validation at
+    their boundary; this module only executes the supplied typed IR. *)
 
 val dispatch_pipeline :
   ?base_host_env:string array ->
+  ?timeout_sec:float ->
   ?stdin_content:string ->
   ?on_output_chunk:([ `Stdout of string | `Stderr of string ] -> unit) ->
   Shell_ir.t list ->

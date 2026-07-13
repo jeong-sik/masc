@@ -425,27 +425,39 @@ let test_reset_for_testing_clears_runtime () =
   check bool "proc_mgr unavailable after reset" true
     (match Process_eio.get_proc_mgr () with Ok _ -> false | Error _ -> true)
 
-(** Verify that invalid timeout values are clamped to the default before the
-    Eio path is entered, so a fast command still succeeds rather than timing
-    out immediately. *)
-let test_run_argv_with_status_clamps_invalid_timeout () =
+(** Invalid explicit timeouts are objective input errors, never rewritten to
+    an implicit process budget. Omitting the timeout remains valid and
+    unbounded. *)
+let test_run_argv_with_status_rejects_invalid_timeout () =
   Eio_main.run @@ fun env ->
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
   let cwd_default = Eio.Stdenv.fs env in
   Process_eio.init ~cwd_default ~proc_mgr ~clock;
-  let check_clamped label timeout_sec =
-    let status, _output =
-      Process_eio.run_argv_with_status ~timeout_sec [ "/bin/sleep"; "0.05" ]
+  let check_rejected label timeout_sec =
+    let rejected =
+      try
+        ignore
+          (Process_eio.run_argv_with_status
+             ~timeout_sec
+             [ "/bin/sleep"; "0.05" ]);
+        false
+      with Invalid_argument _ -> true
     in
-    let code = match status with Unix.WEXITED c -> c | _ -> -1 in
-    check int (Printf.sprintf "%s timeout clamped to default" label) 0 code
+    check bool (Printf.sprintf "%s timeout rejected" label) true rejected
   in
-  check_clamped "zero" 0.0;
-  check_clamped "negative" (-1.0);
-  check_clamped "nan" Float.nan;
-  check_clamped "neg_infinity" Float.neg_infinity;
-  check_clamped "infinity" Float.infinity
+  check_rejected "zero" 0.0;
+  check_rejected "negative" (-1.0);
+  check_rejected "nan" Float.nan;
+  check_rejected "neg_infinity" Float.neg_infinity;
+  check_rejected "infinity" Float.infinity;
+  let status, _output =
+    Process_eio.run_argv_with_status [ "/bin/sleep"; "0.05" ]
+  in
+  check int
+    "absent timeout is accepted"
+    0
+    (match status with Unix.WEXITED code -> code | _ -> -1)
 
 (** Verify that a pipeline timeout reaps every stage and still captures
     whatever stdout/stderr was produced before the timeout fired. *)
@@ -537,8 +549,8 @@ let () =
              test_run_argv_with_status_split_streaming_callback_cancelled_propagates;
            test_case "run_argv_with_status_split_streaming-multiple-chunks" `Quick
              test_run_argv_with_status_split_streaming_multiple_chunks;
-           test_case "run_argv_with_status-clamps-invalid-timeout" `Quick
-             test_run_argv_with_status_clamps_invalid_timeout;
+           test_case "run_argv_with_status-rejects-invalid-timeout" `Quick
+             test_run_argv_with_status_rejects_invalid_timeout;
            test_case "run_argv_pipeline-timeout-reaps-all-stages" `Quick
              test_run_argv_pipeline_timeout_reaps_all_stages;
            test_case "reset_for_testing-clears-runtime" `Quick

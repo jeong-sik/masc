@@ -6,21 +6,16 @@ type cursor =
 type stimulus_kind =
   | Board_signal
   | Bootstrap
-  | No_progress_recovery
   | Fusion_completed  (* RFC-0266: async masc_fusion completion wake *)
   | Bg_completed  (* RFC-0290: generic background job completion wake *)
   | Schedule_due  (* Scheduled automation due wake for a specific keeper *)
   | Connector_attention
       (* RFC-connector-ambient-attention-wake: ambient connector message wake *)
-  | Hitl_resolved  (* HITL approval resolution wake — unblocks Skip Approval_pending *)
-  | Goal_verification_failed
-      (* Goal verification rejection wake — resumes assigned goal work. *)
+  | Hitl_resolved  (* HITL resolution delivered as an ordinary Keeper wake *)
   | Failure_judgment
       (* RFC-0313 W2: deterministic turn-failure escalated for LLM judgment. *)
   | Goal_assigned
       (* RFC-0315 P3 W0: goal entered active_goal_ids — assignment edge wake. *)
-  | Goal_stagnation
-      (* RFC-0310 §3.3: a live goal went stale — stagnation edge wake. *)
 
 type reaction_kind =
   | Turn_started
@@ -41,16 +36,13 @@ let schema = "keeper.reaction_ledger.v1"
 let stimulus_kind_to_string = function
   | Board_signal -> "board_signal"
   | Bootstrap -> "bootstrap"
-  | No_progress_recovery -> "no_progress_recovery"
   | Fusion_completed -> "fusion_completed"
   | Bg_completed -> "bg_completed"
   | Schedule_due -> "schedule_due"
   | Connector_attention -> "connector_attention"
   | Hitl_resolved -> "hitl_resolved"
-  | Goal_verification_failed -> "goal_verification_failed"
   | Failure_judgment -> "failure_judgment"
   | Goal_assigned -> "goal_assigned"
-  | Goal_stagnation -> "goal_stagnation"
 ;;
 
 (* stimulus_kind_to_string의 역. 닫힌 합에 없는 문자열(스키마 드리프트/손상 row)은
@@ -60,16 +52,13 @@ let stimulus_kind_to_string = function
 let stimulus_kind_of_string = function
   | "board_signal" -> Some Board_signal
   | "bootstrap" -> Some Bootstrap
-  | "no_progress_recovery" -> Some No_progress_recovery
   | "fusion_completed" -> Some Fusion_completed
   | "bg_completed" -> Some Bg_completed
   | "schedule_due" -> Some Schedule_due
   | "connector_attention" -> Some Connector_attention
   | "hitl_resolved" -> Some Hitl_resolved
-  | "goal_verification_failed" -> Some Goal_verification_failed
   | "failure_judgment" -> Some Failure_judgment
   | "goal_assigned" -> Some Goal_assigned
-  | "goal_stagnation" -> Some Goal_stagnation
   | _ -> None
 ;;
 
@@ -117,16 +106,13 @@ let stimulus_kind_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
   match stimulus.payload with
   | Keeper_event_queue.Board_signal _ -> Board_signal
   | Keeper_event_queue.Bootstrap -> Bootstrap
-  | Keeper_event_queue.No_progress_recovery -> No_progress_recovery
   | Keeper_event_queue.Fusion_completed _ -> Fusion_completed
   | Keeper_event_queue.Bg_completed _ -> Bg_completed
   | Keeper_event_queue.Schedule_due _ -> Schedule_due
   | Keeper_event_queue.Connector_attention _ -> Connector_attention
   | Keeper_event_queue.Hitl_resolved _ -> Hitl_resolved
-  | Keeper_event_queue.Goal_verification_failed _ -> Goal_verification_failed
   | Keeper_event_queue.Failure_judgment _ -> Failure_judgment
   | Keeper_event_queue.Goal_assigned _ -> Goal_assigned
-  | Keeper_event_queue.Goal_stagnation _ -> Goal_stagnation
 ;;
 
 let stimulus_id_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
@@ -203,7 +189,6 @@ let stimulus_payload_preview (payload : Keeper_event_queue.stimulus_payload) =
       bs.author
       title
   | Keeper_event_queue.Bootstrap -> "bootstrap"
-  | Keeper_event_queue.No_progress_recovery -> "no_progress_recovery"
   | Keeper_event_queue.Fusion_completed fc ->
     Printf.sprintf "fusion_completed run_id=%s ok=%b" fc.run_id fc.ok
   | Keeper_event_queue.Bg_completed c ->
@@ -220,12 +205,6 @@ let stimulus_payload_preview (payload : Keeper_event_queue.stimulus_payload) =
       "hitl_resolved approval=%s decision=%s"
       r.approval_id
       (Keeper_event_queue.hitl_resolution_decision_to_string r.decision)
-  | Keeper_event_queue.Goal_verification_failed failure ->
-    Printf.sprintf
-      "goal_verification_failed goal_id=%s request_id=%s rejected_by=%s"
-      failure.goal_id
-      failure.request_id
-      failure.rejected_by
   | Keeper_event_queue.Failure_judgment fj ->
     Printf.sprintf
       "failure_judgment runtime=%s class=%s provenance=%s"
@@ -237,11 +216,6 @@ let stimulus_payload_preview (payload : Keeper_event_queue.stimulus_payload) =
       "goal_assigned goal_id=%s assigned_by=%s"
       ga.ga_goal_id
       ga.ga_assigned_by
-  | Keeper_event_queue.Goal_stagnation gs ->
-    Printf.sprintf
-      "goal_stagnation goal_id=%s stale_since=%s"
-      gs.gs_goal_id
-      gs.gs_stale_since
 ;;
 
 let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
@@ -252,16 +226,13 @@ let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
     match stimulus.payload with
     | Keeper_event_queue.Board_signal bs -> bs.updated_at
     | Keeper_event_queue.Bootstrap
-    | Keeper_event_queue.No_progress_recovery
     | Keeper_event_queue.Fusion_completed _
     | Keeper_event_queue.Bg_completed _
     | Keeper_event_queue.Schedule_due _
     | Keeper_event_queue.Connector_attention _
     | Keeper_event_queue.Hitl_resolved _
-    | Keeper_event_queue.Goal_verification_failed _
     | Keeper_event_queue.Failure_judgment _
-    | Keeper_event_queue.Goal_assigned _
-    | Keeper_event_queue.Goal_stagnation _ -> None
+    | Keeper_event_queue.Goal_assigned _ -> None
   in
   `Assoc
     (base_fields
@@ -652,20 +623,6 @@ let unknown_receipt_contract_result_label raw =
   if raw = "" then "<empty>" else raw
 ;;
 
-type contract_result_attention =
-  | Contract_attention of
-      { result : Receipt_result.t
-      ; label : string
-      }
-  | Contract_no_attention
-
-let contract_result_attention_of_typed result =
-  if Receipt_result.requires_attention result
-  then Contract_attention { result; label = Receipt_result.to_string result }
-  else
-    Contract_no_attention
-;;
-
 let increment_count tbl key =
   let current =
     match Hashtbl.find_opt tbl key with
@@ -869,28 +826,22 @@ let summarize_rows ~keeper_name ~limit rows =
   let event_queue_ack_count = ref 0 in
   let event_queue_requeue_count = ref 0 in
   let event_queue_escalation_count = ref 0 in
-  let event_queue_operator_attention_count = ref 0 in
+  let event_queue_external_input_count = ref 0 in
   let event_queue_transition_parse_error_count = ref 0 in
   let cursor_ack_count = ref 0 in
   let execution_receipt_count = ref 0 in
   let terminal_reason_count = ref 0 in
   let operator_escalation_count = ref 0 in
   let supervisor_recovery_requested_count = ref 0 in
-  let completion_contract_attention_count = ref 0 in
-  let completion_contract_passive_only_count = ref 0 in
   let completion_contract_unknown_result_count = ref 0 in
   let unsupported_stimulus_count = ref 0 in
   let payload_parse_error_count = ref 0 in
   let unknown_reaction_count = ref 0 in
   let latest_recorded_at = ref None in
   let latest_stimulus_id = ref None in
-  let latest_completion_contract_attention = ref None in
   let completion_contract_result_counts = Hashtbl.create 8 in
   let completion_contract_unknown_result_counts = Hashtbl.create 8 in
   let stimulus_seen = Hashtbl.create 16 in
-  let stimulus_kind_by_id = Hashtbl.create 16 in
-  let stimulus_recorded_at_by_id = Hashtbl.create 16 in
-  let reaction_recorded_at_by_id = Hashtbl.create 16 in
   let board_stimulus_tokens = Hashtbl.create 16 in
   let stimulus_order = ref [] in
   let latest_board_cursor = ref None in
@@ -933,13 +884,6 @@ let summarize_rows ~keeper_name ~limit rows =
      | _ -> latest_board_cursor := Some cursor_token);
     mark_board_cursor_swept cursor_token
   in
-  let note_reaction_time stimulus_id = function
-    | None -> ()
-    | Some value ->
-      (match Hashtbl.find_opt reaction_recorded_at_by_id stimulus_id with
-       | Some latest when latest >= value -> ()
-       | _ -> Hashtbl.replace reaction_recorded_at_by_id stimulus_id value)
-  in
   let remember_board_stimulus row stimulus_id =
     match board_stimulus_token row with
     | Some (stimulus_token, legacy_token) ->
@@ -975,8 +919,8 @@ let summarize_rows ~keeper_name ~limit rows =
               { settlement = Keeper_event_queue_state.Escalate { reason; _ }
               ; _
               } ->
-            if Keeper_event_queue_state.escalation_reason_requires_operator_attention reason
-            then incr event_queue_operator_attention_count))
+            if Keeper_event_queue_state.escalation_reason_requests_external_input reason
+            then incr event_queue_external_input_count))
     | None -> incr event_queue_transition_parse_error_count
   in
   let note_reaction_kind row =
@@ -997,22 +941,7 @@ let summarize_rows ~keeper_name ~limit rows =
        | Supervisor_recovery_requested -> incr supervisor_recovery_requested_count
        | Unknown_reaction _ -> incr unknown_reaction_count)
   in
-  let note_contract_attention_label ~result ~label =
-    incr completion_contract_attention_count;
-    latest_completion_contract_attention := Some label
-  in
-  let note_contract_result_label ~result ~label =
-    (match result with
-     | Receipt_result.Passive_only -> incr completion_contract_passive_only_count
-     | Receipt_result.Violated
-     | Receipt_result.Surface_mismatch
-     | Receipt_result.No_capable_provider
-     | Receipt_result.Claim_only_after_owned_task
-     | Receipt_result.Needs_execution_progress
-     | Receipt_result.Unknown
-     | Receipt_result.Not_dispatched
-     | Receipt_result.Satisfied_completion
-     | Receipt_result.Satisfied_execution -> ());
+  let note_contract_result_label ~label =
     increment_count completion_contract_result_counts label;
   in
   let note_completion_contract_result row =
@@ -1021,11 +950,7 @@ let summarize_rows ~keeper_name ~limit rows =
       (match Receipt_result.of_string result with
        | Some typed ->
          let label = Receipt_result.to_string typed in
-         note_contract_result_label ~result:typed ~label;
-         (match contract_result_attention_of_typed typed with
-          | Contract_attention { result; label } ->
-            note_contract_attention_label ~result ~label
-          | Contract_no_attention -> ())
+         note_contract_result_label ~label
        | None ->
          let label = unknown_receipt_contract_result_label result in
          incr completion_contract_unknown_result_count;
@@ -1041,10 +966,9 @@ let summarize_rows ~keeper_name ~limit rows =
           추가 시 이 or-pattern이 non-exhaustive가 되어 컴파일 에러 → 분류 갱신을
           강제한다 (catch-all 금지). *)
        | Some
-           ( Board_signal | Bootstrap | No_progress_recovery | Fusion_completed
+           ( Board_signal | Bootstrap | Fusion_completed
            | Bg_completed | Schedule_due | Connector_attention | Hitl_resolved
-           | Goal_verification_failed | Failure_judgment | Goal_assigned
-           | Goal_stagnation )
+           | Failure_judgment | Goal_assigned )
          -> ())
   in
   let note_payload_parse_error row =
@@ -1068,18 +992,10 @@ let summarize_rows ~keeper_name ~limit rows =
         let stimulus_kind = nested_string_field "stimulus" "kind" row in
         note_stimulus_kind stimulus_kind;
         note_payload_parse_error row;
-        (match float_field "recorded_at_unix" row with
-         | Some recorded_at ->
-           Hashtbl.replace stimulus_recorded_at_by_id id recorded_at
-         | None -> ());
-        (match stimulus_kind with
-         | Some kind -> Hashtbl.replace stimulus_kind_by_id id kind
-         | None -> ());
         remember_stimulus id;
         remember_board_stimulus row id
       | Some "reaction", Some id ->
         incr reaction_count;
-        note_reaction_time id (float_field "recorded_at_unix" row);
         note_reaction_kind row;
         note_completion_contract_result row;
         mark_reacted id
@@ -1109,19 +1025,6 @@ let summarize_rows ~keeper_name ~limit rows =
          | None -> ())
       | _ -> ())
     rows;
-  Hashtbl.iter
-    (fun id raw_kind ->
-       match
-         stimulus_kind_of_string raw_kind,
-         Hashtbl.find_opt stimulus_seen id,
-         Hashtbl.find_opt stimulus_recorded_at_by_id id,
-         Hashtbl.find_opt reaction_recorded_at_by_id id
-       with
-       | Some No_progress_recovery, Some false, Some stimulus_ts, Some reaction_ts
-         when reaction_ts >= stimulus_ts ->
-         Hashtbl.replace stimulus_seen id true
-       | _ -> ())
-    stimulus_kind_by_id;
   let pending_stimulus_ids =
     !stimulus_order
     |> List.rev
@@ -1131,31 +1034,12 @@ let summarize_rows ~keeper_name ~limit rows =
       | Some true | None -> false)
   in
   let pending_stimulus_count = List.length pending_stimulus_ids in
-  let pending_no_progress_recovery_ids =
-    List.filter
-      (fun id ->
-        match Option.bind (Hashtbl.find_opt stimulus_kind_by_id id) stimulus_kind_of_string with
-        | Some No_progress_recovery -> true
-        | Some
-            ( Board_signal | Bootstrap | Fusion_completed | Bg_completed
-            | Schedule_due | Connector_attention | Hitl_resolved
-            | Goal_verification_failed | Failure_judgment | Goal_assigned
-            | Goal_stagnation )
-        | None ->
-          false)
-      pending_stimulus_ids
-  in
-  let pending_no_progress_recovery_count =
-    List.length pending_no_progress_recovery_ids
-  in
   let degraded_signal_count =
     pending_stimulus_count
-    + !event_queue_operator_attention_count
     + !event_queue_transition_parse_error_count
     + !unsupported_stimulus_count
     + !payload_parse_error_count
     + !unknown_reaction_count
-    + !completion_contract_unknown_result_count
   in
   let status =
     if row_count = 0 then "empty"
@@ -1175,8 +1059,7 @@ let summarize_rows ~keeper_name ~limit rows =
     ; "event_queue_ack_count", `Int !event_queue_ack_count
     ; "event_queue_requeue_count", `Int !event_queue_requeue_count
     ; "event_queue_escalation_count", `Int !event_queue_escalation_count
-    ; ( "event_queue_operator_attention_count"
-      , `Int !event_queue_operator_attention_count )
+    ; "event_queue_external_input_count", `Int !event_queue_external_input_count
     ; ( "event_queue_transition_parse_error_count"
       , `Int !event_queue_transition_parse_error_count )
     ; "cursor_ack_count", `Int !cursor_ack_count
@@ -1184,32 +1067,22 @@ let summarize_rows ~keeper_name ~limit rows =
     ; "terminal_reason_count", `Int !terminal_reason_count
     ; "operator_escalation_count", `Int !operator_escalation_count
     ; "supervisor_recovery_requested_count", `Int !supervisor_recovery_requested_count
-    ; "completion_contract_attention_count", `Int !completion_contract_attention_count
-    ; "completion_contract_passive_only_count", `Int !completion_contract_passive_only_count
     ; "completion_contract_result_counts", count_table_json completion_contract_result_counts
     ; ( "completion_contract_unknown_result_count"
       , `Int !completion_contract_unknown_result_count )
     ; ( "completion_contract_unknown_result_counts"
       , count_table_json completion_contract_unknown_result_counts )
-    ; ( "latest_completion_contract_attention"
-      , Json_util.string_opt_to_json !latest_completion_contract_attention )
     ; "unsupported_stimulus_count", `Int !unsupported_stimulus_count
     ; "payload_parse_error_count", `Int !payload_parse_error_count
     ; "unknown_reaction_count", `Int !unknown_reaction_count
     ; "cursor_swept_stimulus_count", `Int !cursor_swept_stimulus_count
     ; "legacy_cursor_swept_stimulus_count", `Int !legacy_cursor_swept_stimulus_count
     ; "pending_stimulus_count", `Int pending_stimulus_count
-    ; "pending_no_progress_recovery_count", `Int pending_no_progress_recovery_count
     ; ( "pending_stimulus_ids"
       , `List
           (List.map
              (fun value -> `String value)
              (cap_list 8 pending_stimulus_ids)) )
-    ; ( "pending_no_progress_recovery_ids"
-      , `List
-          (List.map
-             (fun value -> `String value)
-             (cap_list 8 pending_no_progress_recovery_ids)) )
     ; "latest_recorded_at_unix", Json_util.float_opt_to_json !latest_recorded_at
     ; "latest_stimulus_id", Json_util.string_opt_to_json !latest_stimulus_id
     ; "read_error", `Null
@@ -1231,24 +1104,19 @@ let error_summary ~keeper_name ~limit error =
     ; "execution_receipt_count", `Int 0
     ; "terminal_reason_count", `Int 0
     ; "operator_escalation_count", `Int 0
-    ; "event_queue_operator_attention_count", `Int 0
+    ; "event_queue_external_input_count", `Int 0
     ; "event_queue_transition_parse_error_count", `Int 0
     ; "supervisor_recovery_requested_count", `Int 0
-    ; "completion_contract_attention_count", `Int 0
-    ; "completion_contract_passive_only_count", `Int 0
     ; "completion_contract_result_counts", `List []
     ; "completion_contract_unknown_result_count", `Int 0
     ; "completion_contract_unknown_result_counts", `List []
-    ; "latest_completion_contract_attention", `Null
     ; "unsupported_stimulus_count", `Int 0
     ; "payload_parse_error_count", `Int 0
     ; "unknown_reaction_count", `Int 0
     ; "cursor_swept_stimulus_count", `Int 0
     ; "legacy_cursor_swept_stimulus_count", `Int 0
     ; "pending_stimulus_count", `Int 0
-    ; "pending_no_progress_recovery_count", `Int 0
     ; "pending_stimulus_ids", `List []
-    ; "pending_no_progress_recovery_ids", `List []
     ; "latest_recorded_at_unix", `Null
     ; "latest_stimulus_id", `Null
     ; "read_error", `String error
@@ -1402,31 +1270,6 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
                ]))
       summaries
   in
-  let completion_contract_attention_by_keeper =
-    List.filter_map
-      (fun summary ->
-        let attention_count = int_field "completion_contract_attention_count" summary in
-        if attention_count = 0
-        then None
-        else
-          Some
-            (`Assoc
-               [ "keeper_name"
-               , (match string_field "keeper_name" summary with
-                  | Some value -> `String value
-                  | None -> `String "unknown")
-               ; "completion_contract_attention_count", `Int attention_count
-               ; ( "completion_contract_passive_only_count"
-                 , `Int (int_field "completion_contract_passive_only_count" summary) )
-               ; ( "latest_completion_contract_attention"
-                 , match assoc_field "latest_completion_contract_attention" summary with
-                   | Some value -> value
-                   | None -> `Null )
-               ; ( "completion_contract_result_counts"
-                 , `List (list_field "completion_contract_result_counts" summary) )
-               ]))
-      summaries
-  in
   let completion_contract_unknown_results_by_keeper =
     List.filter_map
       (fun summary ->
@@ -1447,27 +1290,6 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
                ]))
       summaries
   in
-  let pending_no_progress_recovery_by_keeper =
-    List.filter_map
-      (fun summary ->
-        let pending_count = int_field "pending_no_progress_recovery_count" summary in
-        if pending_count = 0
-        then None
-        else
-          Some
-            (`Assoc
-               [ "keeper_name"
-               , (match string_field "keeper_name" summary with
-                  | Some value -> `String value
-                  | None -> `String "unknown")
-               ; "pending_no_progress_recovery_count", `Int pending_count
-               ; ( "pending_no_progress_recovery_ids"
-                 , match assoc_field "pending_no_progress_recovery_ids" summary with
-                   | Some value -> value
-                   | None -> `List [] )
-               ]))
-      summaries
-  in
   let read_error_count =
     List.fold_left
       (fun acc summary -> acc + summary_read_error_count summary)
@@ -1475,11 +1297,8 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
       summaries
   in
   let pending_count = total_int "pending_stimulus_count" in
-  let pending_no_progress_recovery_count =
-    total_int "pending_no_progress_recovery_count"
-  in
-  let event_queue_operator_attention_count =
-    total_int "event_queue_operator_attention_count"
+  let event_queue_external_input_count =
+    total_int "event_queue_external_input_count"
   in
   let event_queue_transition_parse_error_count =
     total_int "event_queue_transition_parse_error_count"
@@ -1510,10 +1329,6 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
     |> (fun reasons ->
       if pending_count > 0 then "reaction_ledger_pending_stimulus" :: reasons else reasons)
     |> (fun reasons ->
-      if event_queue_operator_attention_count > 0
-      then "event_queue_operator_attention" :: reasons
-      else reasons)
-    |> (fun reasons ->
       if event_queue_transition_parse_error_count > 0
       then "event_queue_transition_parse_error" :: reasons
       else reasons)
@@ -1523,10 +1338,6 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
       else reasons)
     |> (fun reasons ->
       if unknown_reaction_count > 0 then "unknown_reaction" :: reasons else reasons)
-    |> (fun reasons ->
-      if completion_contract_unknown_result_count > 0
-      then "completion_contract_unknown_result" :: reasons
-      else reasons)
     |> (fun reasons ->
       if unsupported_stimulus_count > 0 then "unsupported_stimulus" :: reasons else reasons)
     |> (fun reasons ->
@@ -1541,11 +1352,9 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
     then "unknown"
     else if
       pending_count > 0
-      || event_queue_operator_attention_count > 0
       || event_queue_transition_parse_error_count > 0
       || durable_event_queue_stale_count > 0
       || unknown_reaction_count > 0
-      || completion_contract_unknown_result_count > 0
       || unsupported_stimulus_count > 0
       || payload_parse_error_count > 0
     then "degraded"
@@ -1572,8 +1381,7 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
     ; "event_queue_requeue_count", `Int (total_int "event_queue_requeue_count")
     ; ( "event_queue_escalation_count"
       , `Int (total_int "event_queue_escalation_count") )
-    ; ( "event_queue_operator_attention_count"
-      , `Int event_queue_operator_attention_count )
+    ; "event_queue_external_input_count", `Int event_queue_external_input_count
     ; ( "event_queue_transition_parse_error_count"
       , `Int event_queue_transition_parse_error_count )
     ; "cursor_ack_count", `Int (total_int "cursor_ack_count")
@@ -1581,11 +1389,6 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
     ; "terminal_reason_count", `Int (total_int "terminal_reason_count")
     ; "operator_escalation_count", `Int (total_int "operator_escalation_count")
     ; "supervisor_recovery_requested_count", `Int (total_int "supervisor_recovery_requested_count")
-    ; "completion_contract_attention_count", `Int (total_int "completion_contract_attention_count")
-    ; ( "completion_contract_passive_only_count"
-      , `Int (total_int "completion_contract_passive_only_count") )
-    ; ( "completion_contract_attention_by_keeper"
-      , `List completion_contract_attention_by_keeper )
     ; ( "completion_contract_unknown_result_count"
       , `Int completion_contract_unknown_result_count )
     ; ( "completion_contract_unknown_results_by_keeper"
@@ -1623,10 +1426,7 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
     ; "durable_event_queue_by_keeper", `List durable_event_queue_by_keeper
     ; "durable_event_queue_stale_by_keeper", `List durable_event_queue_stale_by_keeper
     ; "durable_event_queue_payload_counts", durable_event_queue_payload_counts
-    ; "pending_no_progress_recovery_count", `Int pending_no_progress_recovery_count
     ; "pending_by_keeper", `List pending_by_keeper
-    ; ( "pending_no_progress_recovery_by_keeper"
-      , `List pending_no_progress_recovery_by_keeper )
     ; "read_error_count", `Int read_error_count
     ; "keepers", `List summaries
     ]

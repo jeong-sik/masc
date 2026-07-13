@@ -238,11 +238,8 @@ let interruptible_sleep ~clock ~stop ~wakeup duration : sleep_outcome =
     if Atomic.get stop
     then Stopped
     else if (* Spec: KeeperHeartbeat.tla HeartbeatTick action — wakeup is
-              consumed (TRUE -> FALSE) and the caller proceeds to dispatch.
-              Returning [Woken] lets [run_smart_heartbeat_gate] honour
-              the spec's [turn_state' = "running"] postcondition; without
-              the discriminator the [Skip_idle] branch would consume the
-              CAS and then skip the cycle (the [MissedWakeup] bug-action). *)
+              consumed (TRUE -> FALSE) and the caller's next loop iteration
+              dispatches the exact Keeper lane. *)
             Atomic.compare_and_set wakeup true false
     then (
       (* Cycle 43: post-action guard mirrors the spec's [wakeup_signaled =
@@ -590,63 +587,6 @@ let record_board_attention_candidate
       err
 ;;
 
-let paused_meta_allows_board_auto_resume (meta : keeper_meta) =
-  meta.paused
-  && Option.is_some
-       (Keeper_supervisor_types.paused_meta_effective_auto_resume_after_sec meta)
-;;
-
-let board_signal_wake_paused_keeper
-      ~(config : Workspace.config)
-      ~(stimulus : Keeper_event_queue.stimulus)
-      (meta : keeper_meta)
-  =
-  let resumed_meta =
-    { meta with paused = false; latched_reason = None; updated_at = now_iso () }
-  in
-  match
-    write_meta_with_merge
-      ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
-      config
-      resumed_meta
-  with
-  | Ok () ->
-    Keeper_registry.update_meta ~base_path:config.base_path meta.name resumed_meta;
-    Keeper_registry.dispatch_event_unit
-      ~base_path:config.base_path
-      resumed_meta.name
-      Keeper_state_machine.Operator_resume;
-    Keeper_registry_event_queue.enqueue
-      ~base_path:config.base_path
-      resumed_meta.name
-      stimulus;
-    (match
-       Keeper_registry.wakeup
-         ~intent:Keeper_registry.Supervisor_resume
-         ~base_path:config.base_path
-         resumed_meta.name
-     with
-     | Keeper_registry.Signaled -> ()
-     | Keeper_registry.Deferred_unregistered ->
-       Log.Keeper.info ~keeper_name:resumed_meta.name
-         "board signal resume committed but wake deferred: keeper unregistered"
-     | Keeper_registry.Deferred_not_running phase ->
-       Log.Keeper.info ~keeper_name:resumed_meta.name
-         "board signal resume committed but wake deferred: phase=%s"
-         (Keeper_state_machine.phase_to_string phase)
-     | Keeper_registry.Deferred_lifecycle denial ->
-       Log.Keeper.info ~keeper_name:resumed_meta.name
-         "board signal resume committed but wake deferred by lifecycle: reason=%s"
-         (Keeper_lifecycle_admission.autonomous_denial_to_wire denial));
-    Ok ()
-  | Error err ->
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string WriteMetaFailures)
-      ~labels:[ ("keeper", meta.name); ("phase", "board_signal_resume_sync") ]
-      ();
-    Error (Printf.sprintf "failed to write resumed meta: %s" err)
-;;
-
 let board_signal_wake_keeper
       ~(config : Workspace.config)
       ~(reason : Board_wake.wake_reason)
@@ -655,10 +595,7 @@ let board_signal_wake_keeper
   =
   let stimulus = board_signal_stimulus ~reason signal in
   if meta.paused
-  then
-    if paused_meta_allows_board_auto_resume meta
-    then board_signal_wake_paused_keeper ~config ~stimulus meta
-    else Ok ()
+  then Ok ()
   else (
     wakeup_keeper ~base_path:config.base_path ~stimulus meta.name;
     Ok ())
@@ -711,9 +648,6 @@ let wakeup_relevant_keeper_for_board_signal
              record_board_attention_candidate ~config ~signal_kind_label ~meta signal
            | None, _ | Some _, _ -> ());
           (match entry.phase, wake_reason with
-           | Keeper_state_machine.Paused, Some Board_wake.Explicit_mention
-             when paused_meta_allows_board_auto_resume meta ->
-             Some (meta, wake_reason)
            | Keeper_state_machine.Paused, _ -> None
            | Keeper_state_machine.Running, _ -> Some (meta, wake_reason)
            | _ -> None)
@@ -732,11 +666,10 @@ let wakeup_relevant_keeper_for_board_signal
       match board_signal_wake_keeper ~config ~reason ~signal meta with
       | Ok () ->
         Log.Keeper.info
-          "board signal wakeup: keeper=%s reason=%s post=%s paused_auto_resume=%b"
+          "board signal wakeup: keeper=%s reason=%s post=%s"
           meta.name
           (Board_wake.wake_reason_label reason)
           signal.post_id
-          meta.paused
       | Error err ->
         Log.Keeper.warn
           "board signal wakeup failed: keeper=%s reason=%s post=%s error=%s"
@@ -798,7 +731,7 @@ type stage_timing =
   }
 
 let stage_timing_ring_size () =
-  Runtime_params.get Governance_registry.keeper_stage_timing_ring_size
+  Runtime_params.get Runtime_settings.keeper_stage_timing_ring_size
 ;;
 
 let percentile arr p =

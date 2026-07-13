@@ -127,12 +127,97 @@ check "V6-oas-orchestration" 0 \
   'Oas_worker\.run_named' \
   "lib/keeper/keeper_agent_run.ml"
 
-# V7: MASC-specific safety gates in OAS hook layer
-# Eval_gate destructive detection and keeper deny list should be
-# injected via OAS hook config, not hardcoded in hook callbacks.
-check "V7-masc-hook-gates" 3 \
-  'Eval_gate\.detect_destructive\|[^[]keeper_denied_tools' \
-  "lib/keeper/keeper_hooks_oas.ml"
+# V7: retired command-semantics authorization must not return.
+check_forbidden_active "V7-retired-command-semantics-gates" \
+  'Eval_gate|Destructive_ops_policy|Shell_safety_types|keeper_denied_tools' \
+  "lib/" \
+  "bin/" \
+  "config/"
+
+# V7b: retired authorization hierarchy and its derived floors must stay gone.
+check_forbidden_active "V7b-retired-authorization-hierarchy" \
+  'hard_forbidden|auto_approval_hard_forbidden|R0_Read|R1_Reversible|R2_Irreversible|Destructive_protected|requires_operator_authorization|requires_separate_human_grant|risk_floor|max_risk|privileged_floor|destructive_floor|catastrophic_floor|operator_only_floor|automatic_eligibility' \
+  "lib/" \
+  "bin/" \
+  "test/" \
+  "config/" \
+  "dashboard/src/" \
+  "dashboard_bonsai/src/" \
+  "sidecars/" \
+  "viewer/src/"
+
+# V7c: Task completion is a full-input LLM judgment, not a local substring
+# advisory or arbitrary byte-window judgment.
+check_forbidden_active "V7c-task-completion-semantic-heuristics" \
+  'excuse_pattern|excuse-pattern|gate2_advisory|Advisory_to_llm|utf8_safe.*(303|503)' \
+  "lib/task/" \
+  "test/" \
+  "config/prompts/" \
+  "dashboard/src/"
+
+# V7d: observed reputation data must not be converted into an authorization
+# rank or a read-vs-mutate verifier shortcut.
+check_forbidden_active "V7d-retired-derived-autonomy-and-effect-classes" \
+  'Reputation_autonomy|autonomy_level|Effect_class|effect_class_for_tool_name' \
+  "lib/" \
+  "bin/" \
+  "test/" \
+  "config/" \
+  "dashboard/src/"
+
+# V7e: pre-tool hooks observe timing only. Tool-name aliases and caller
+# callbacks must not form a second authorization boundary ahead of Gate.
+check_forbidden_active "V7e-retired-pre-tool-alias-blocker" \
+  'Keeper_guards|pre_tool_use_guard|public_alias_pre_tool_use_guard|public_alias_guidance_for_internal_call|custom_guard|reject_by_default|mark_turn_gate_rejected_by_name|Decision_gate_rejected|Action_gate_rejected|Turn_gate_rejected|GuardsFailures|TurnGateRejectedTerminal' \
+  "lib/" \
+  "bin/" \
+  "test/" \
+  "config/" \
+  "dashboard/src/"
+
+# V7f: rendered subprocess output is evidence, never a retry classifier.
+# Typed Unix.EINTR handling remains in the process I/O layer and is not matched
+# by this ratchet.
+check_forbidden_active "V7f-retired-subprocess-text-retry" \
+  'max_eintr_retries|retry_eintr|filter_environment_c_messages|interrupted system call' \
+  "lib/" \
+  "bin/" \
+  "test/" \
+  "config/"
+
+check_forbidden_active "V7g-retired-subprocess-message-locale-pin" \
+  'LC_MESSAGES=C' \
+  "lib/" \
+  "bin/" \
+  "config/"
+
+# V7h: tool failures remain exact producer outcomes. No local failure-class
+# streak, cooling window, prompt injection, or display-state hierarchy.
+check_forbidden_active "V7h-retired-keeper-failure-circuit-breaker" \
+  'Keeper_failure_circuit_breaker|keeper_failure_circuit_breaker|KeeperCircuitBreaker|CircuitBreakerTrips' \
+  "lib/" \
+  "bin/" \
+  "test/" \
+  "config/" \
+  "dashboard/src/" \
+  "specs/"
+
+# V7i: dispatch never invents tool-search rankings or typo suggestions. Tool
+# search is provided by an injected session index or reports unavailable.
+check_forbidden_active "V7i-retired-dispatch-tool-search-heuristics" \
+  'score_tool_schema|static_schema_fallback|default_tool_search_fn|tutor_alias_of_requested_name|tool_tutor_for_unknown_name|did_you_mean' \
+  "lib/keeper/"
+
+# V7j: one failed call cannot create state that blocks, suppresses, or rewrites
+# a later tool call. Exact results remain independent observations.
+check_forbidden_active "V7j-retired-consecutive-tool-failure-guard" \
+  'Keeper_tool_retry_state|keeper_tool_retry_state|MASC_KEEPER_MAX_CONSECUTIVE_TOOL_FAILURES|max_consecutive_tool_failures|workflow_rejection_recovery_fields|workflow_rejection_recovery_instruction|self_correction_required|retry_skipped|ToolsOasDeterministicFailures|transient_mutex_contention_error_class' \
+  "lib/" \
+  "bin/" \
+  "test/" \
+  "config/" \
+  "dashboard/src/" \
+  "specs/"
 
 # V8: Direct OAS Agent.state mutation from keeper code
 # Baseline 0: legacy keeper_extend_turns.ml was removed.

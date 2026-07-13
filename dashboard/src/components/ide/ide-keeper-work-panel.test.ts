@@ -35,8 +35,8 @@ describe('IdeKeeperWorkPanel', () => {
     expect(container.textContent).toContain('KEEPER WORK')
     expect(container.textContent).toContain('task-151')
     expect(container.textContent).toContain('Fix codex runtime config')
-    expect(container.textContent).toContain('tool_route_recoverable_failure')
-    expect(container.textContent).toContain('inspect_provider_tool_contract')
+    expect(container.textContent).toContain('provider_runtime_error')
+    expect(container.textContent).toContain('inspect_provider_runtime_cause')
     expect(container.textContent).toContain('masc_claim_next')
   })
 
@@ -54,7 +54,7 @@ describe('IdeKeeperWorkPanel', () => {
           active_tool_count: 3,
         },
         last_skip: { ts: 9, reasons: ['idle_budget'] },
-        livelock: { turn_id: 7, attempts: 2, first_started_at: 1 },
+        turn_attempt: { turn_id: 7, attempts: 2, first_started_at: 1 },
         board_cursor: { ts: 5, post_id: 'post-42' },
       }),
     ])
@@ -90,21 +90,6 @@ describe('IdeKeeperWorkPanel', () => {
     expect(summary.currentTask?.title).toBe('Fix codex runtime config')
     expect(summary.activeTasks).toHaveLength(1)
     expect(summary.activeTaskCount).toBe(1)
-  })
-
-  it('normalizes legacy no-progress blocker text in keeper work summaries', () => {
-    const summary = keeperWorkSummary(
-      'rondo',
-      [{
-        name: 'rondo',
-        status: 'paused',
-        last_blocker: 'no_progress loop detected: streak=10 threshold=10; manual pause applied',
-      } as Keeper],
-      [],
-    )
-
-    expect(summary.runtimeBlocker).toContain('progress-safety latch')
-    expect(summary.runtimeBlocker).not.toContain('manual pause applied')
   })
 
   it('keeps runtime current_task visible when the task row is absent', () => {
@@ -291,12 +276,12 @@ function keeperFixture(): Keeper {
     trust: {
       needs_attention: true,
       latest_terminal_reason: {
-        code: 'tool_route_recoverable_failure',
-        summary: 'actionable keeper signal was present, but no keeper tools were called',
-        next_action: 'inspect_provider_tool_contract',
+        code: 'provider_runtime_error',
+        summary: 'provider runtime failed before the turn completed',
+        next_action: 'inspect_provider_runtime_cause',
       },
     },
-    recent_output_preview: 'tool route recoverable failure',
+    recent_output_preview: 'provider runtime failure',
     recent_tool_names: ['masc_claim_next', 'masc_board_list'],
   } as Keeper
 }

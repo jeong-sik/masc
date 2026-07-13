@@ -49,8 +49,8 @@ function inventoryFixture(): DashboardKeeperWaitingInventory {
           {
             keeper_name: 'sangsu',
             source: 'event_queue_inflight',
-            waiting_on: 'no_progress_recovery',
-            wake_producer: 'keeper_no_progress_recovery',
+            waiting_on: 'bootstrap',
+            wake_producer: 'keeper_supervisor',
             since_iso: '2026-07-04T00:01:00Z',
             next_action: 'recover_inflight_turn',
           },
@@ -165,8 +165,7 @@ describe('KeeperWaitingInventoryPanel', () => {
     expect(shutdownChip?.getAttribute('data-status-chip-tone')).toBe('info')
     expect(container.textContent).toContain('event queue pending')
     expect(container.textContent).toContain('producer keeper supervisor')
-    expect(container.textContent).toContain('producer keeper no progress recovery')
-    expect(container.textContent).toContain('no_progress_recovery')
+    expect(container.textContent).toContain('producer keeper supervisor')
     expect(container.textContent).toContain('chatq_00000000-0000-4000-8000-000000000001')
     expect(container.textContent).toContain('lease_00000000-0000-4000-8000-000000000002')
     expect(container.textContent).toContain('state inflight')

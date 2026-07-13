@@ -7,9 +7,7 @@
     - {b Type / classification} re-exported via
       [include Board_core_classify] (which itself does
       [include Board_types]) — every {!Board_types} surface
-      entry, every visibility / post-kind variant, and the
-      [reclassify_report] record reach callers via this
-      facade.
+      entry and every visibility / post-kind variant reach callers via this facade.
     - {b Payload normalisation} re-exported via
       [include Board_core_payload] — metadata validation, post-title
       derivation, and the canonical [normalize_post_payload].
@@ -17,7 +15,7 @@
       pinned surface) — sweeper / lock / cache /
       JSONL-rotate / append helpers.
     - {b Public board operations} — create / get / list /
-      search / reclassify post + comment APIs.
+      search post + comment APIs.
 
     Runtime-include preserves type identity end-to-end with
     [include module type of struct include M end] (cycle
@@ -68,19 +66,6 @@ val flush_interval_sec : float
     fresh [Eio.Mutex], cold caches, and an [Eio.Stream]
     [flusher_inbox] capped by the persistence-layer flusher inbox capacity. *)
 val create_store : unit -> store
-
-(** Reset the per-author comment rate-limit tracker.  Test-only. *)
-val reset_comment_rate_tracker : unit -> unit
-
-(** Check whether [author] is currently rate-limited at time [now].
-    Returns [Some retry_after] if the author has reached the limit,
-    [None] otherwise. *)
-val check_comment_rate_limit : author:string -> now:float -> float option
-
-(** Record a comment timestamp for [author] at time [now].
-    Used internally by [add_comment_with_status]; exposed for test
-    manipulation of the sliding window. *)
-val record_comment_timestamp : author:string -> now:float -> unit
 
 (** {1 Locking + cache invalidation} *)
 
@@ -213,42 +198,6 @@ val reaction_key
 
 (** {1 Post operations} *)
 
-(** Result of a create-post attempt before the legacy API folds it
-    back to just the persisted/found post.  Dispatch layers use this
-    to avoid re-emitting post-created fanout for receive-side dedup
-    hits. *)
-type create_post_outcome =
-  | Fresh_post of post
-  | Dedup_hit of post
-  | Rolled_up_post of post
-
-(** Extract the post carried by {!create_post_outcome}. *)
-val post_of_create_post_outcome : create_post_outcome -> post
-
-(** Creates a post and preserves whether the operation was fresh, a receive-side
-    dedup hit, or a status-only automation rollup.  Same validation and
-    persistence semantics as {!create_post}; fresh posts append JSONL + earn
-    credits, while dedup/rollup hits return the existing post without those
-    create-side effects.  [after_rollup_persist] runs after a rollup snapshot is
-    saved and before the caller observes success; if it fails, the previous post
-    snapshot is restored and the failure is returned explicitly. *)
-val create_post_with_outcome
-  :  ?after_rollup_persist:(post -> (unit, string) Result.t)
-  -> store
-  -> author:string
-  -> content:string
-  -> ?title:string
-  -> ?body:string
-  -> post_kind:post_kind
-  -> ?meta_json:Yojson.Safe.t
-  -> ?visibility:visibility
-  -> ?ttl_hours:int
-  -> ?hearth:string
-  -> ?thread_id:string
-  -> ?origin:post_origin
-  -> unit
-  -> (create_post_outcome, board_error) Result.t
-
 (** Owner-gated in-place edit of an existing post's title/body.  Validates
     [editor] via {!Agent_id.of_string}, folds the canonical [title / body] via
     {!normalize_post_payload} (seeded with the existing [meta_json] so metadata
@@ -274,11 +223,9 @@ val update_post_with_outcome
     {!Agent_id.of_string}, normalises [hearth] (lowercased +
     trimmed), folds the canonical [title / body / kind /
     meta] via {!normalize_post_payload}, then writes under
-    {!with_lock}.  [ttl_hours = 0] persists indefinitely
-    (clamped to 0 for human posts; automation / system
-    posts are forced to {!Limits.automation_ttl_hours}).
-    Errors on validation failure, capacity exhaustion
-    ([Capacity_exceeded]), or content length overflow.  The
+    {!with_lock}.  [ttl_hours = 0] persists indefinitely;
+    positive values are preserved exactly and negative values are rejected.
+    Errors on validation or persistence failure.  The
     JSONL append and side-effect hooks are intentionally
     performed {b outside} the state lock to avoid blocking concurrent
     readers on filesystem writes. *)
@@ -326,20 +273,8 @@ val get_post_and_comments
   -> unit
   -> (post * comment list, board_error) Result.t
 
-(** Re-runs {!legacy_migrate_post_kind} against persisted
-    posts to detect classification drift.  [limit]
-    (default 5200) is clamped to [0..5200].  [dry_run]
-    (default [true]) reports drift without mutating the
-    store; setting it to [false] applies the new kind +
-    rewrites the JSONL.  The returned
-    {!reclassify_report.changed_post_ids} list caps at 20
-    entries for log-friendly summarisation. *)
-val reclassify_posts : store -> ?limit:int -> ?dry_run:bool -> unit -> reclassify_report
-
 (** Returns posts sorted by [(score desc, created_at desc)]
-    with optional visibility / hearth filters and a hard
-    cap of {!Limits.max_posts} (10000) regardless of the
-    requested [limit].  Uses [store.sorted_posts_cache] when
+    with optional visibility / hearth filters. Uses [store.sorted_posts_cache] when
     warm to skip the sort. *)
 val list_posts
   :  store
@@ -355,25 +290,6 @@ val list_posts
 val search_posts : store -> predicate:(post -> bool) -> limit:int -> post list
 
 (** {1 Comment operations} *)
-
-(** Validates [post_id] / [author] / optional [parent_id]
-    via {!Post_id.of_string} / {!Agent_id.of_string} /
-    {!Comment_id.of_string} before taking the lock.
-    Exact duplicate [(post_id, parent_id, author, content)] writes
-    return the existing comment without appending JSONL, incrementing
-    [reply_count], or consuming thread capacity.
-    Capacity guarded against {!Limits.max_comments_per_post}
-    and the global [Limits.max_comments] ceiling.  Post-lock side effects
-    follow the same rationale as {!create_post}. *)
-val add_comment_with_status
-  :  store
-  -> post_id:string
-  -> author:string
-  -> content:string
-  -> ?parent_id:string
-  -> ?ttl_hours:int
-  -> unit
-  -> (comment * [ `Fresh | `Dedup ], board_error) Result.t
 
 val add_comment
   :  store
@@ -442,8 +358,7 @@ val rewrite_sub_boards : store -> unit
 
 (** Creates a new sub-board with the given slug (unique, lowercase).
     [members] are canonicalised agent ids; the owner is always included.
-    Returns [Validation_error] when the slug is invalid or already taken,
-    [Capacity_exceeded] when the sub-board limit is reached. JSONL append
+    Returns [Validation_error] when the slug is invalid or already taken. JSONL append
     persistence is performed outside the state lock. *)
 val create_sub_board
   :  store

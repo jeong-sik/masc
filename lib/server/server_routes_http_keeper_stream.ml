@@ -698,9 +698,7 @@ let parse_keeper_chat_stream_request body_str =
     Error ("invalid json: " ^ e)
 
 let strip_keeper_visible_reply (reply : string) =
-  reply
-  |> Keeper_skill_routing.strip_skill_route_lines
-  |> String.trim
+  String.trim reply
 
 let split_keeper_reply_chunks (text : string) : string list =
   let len = String.length text in

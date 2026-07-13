@@ -26,7 +26,6 @@ let config_for_label
     ~(temperature : float)
     ?(max_idle_turns = 3)
     ?stream_idle_timeout_s
-    ?guardrails
     ?hooks
     ?context_reducer
     ?enable_thinking
@@ -53,7 +52,7 @@ let config_for_label
       temperature;
       max_idle_turns;
       stream_idle_timeout_s;
-      guardrails;
+      guardrails = Some Agent_sdk.Guardrails.permissive;
       hooks;
       context_reducer;
       enable_thinking;
@@ -77,9 +76,7 @@ let run_model_by_label
     ?stream_idle_timeout_s
     ?(temperature = Runtime_provider_defaults.agent_default_temperature)
     ?max_tokens
-    ?wait_timeout_sec
     ?(accept = fun (_ : Agent_sdk_response.api_response) -> true)
-    ?guardrails
     ?hooks
     ?context_reducer
     ?enable_thinking
@@ -95,7 +92,7 @@ let run_model_by_label
   let* config =
     config_for_label ~name:"oas-label-model" ~model_label ~system_prompt
       ~tools ~max_tokens ~temperature
-      ~max_idle_turns ?stream_idle_timeout_s ?guardrails ?hooks ?context_reducer
+      ~max_idle_turns ?stream_idle_timeout_s ?hooks ?context_reducer
       ?enable_thinking
       ?compact_ratio
       ?provider_config_transform
@@ -110,14 +107,9 @@ let run_model_by_label
         | None -> Masc_grpc_transport.from_env ()
       in
       let config = { config with transport = transport_resolved } in
-      match
-        let admission_runtime_id =
-          model_label
-        in
-        Admission_queue.with_permit ?wait_timeout_sec
-          ~priority:Llm_provider.Request_priority.Proactive
+      Inference_inflight_observation.with_observation
           ~keeper_name:"oas-label-model"
-          ~runtime_id:admission_runtime_id
+          ~runtime_id:model_label
           (fun () ->
             with_cli_preflight
               ~scope:(Printf.sprintf "model_label:%s" model_label)
@@ -164,12 +156,6 @@ let run_model_by_label
                               reason = rejection.reason;
                             }))
                 | Error e -> Error e))
-      with
-      | Ok result -> result
-      | Error (`Host_resource_saturated reason) ->
-          Error
-            (sdk_error_of_masc_internal_error
-               (Admission_queue_rejected { keeper_name = "oas-label-model"; reason }))
 
 let run_named_with_masc_tools
     ~runtime_id
@@ -184,7 +170,6 @@ let run_named_with_masc_tools
     ?(temperature = Runtime_provider_defaults.agent_default_temperature)
     ?max_tokens
     ?(accept = fun (_ : Agent_sdk_response.api_response) -> true)
-    ?guardrails
     ?hooks
     ?raw_trace
     ?on_event
@@ -211,7 +196,7 @@ let run_named_with_masc_tools
     ?max_turns
     ~max_idle_turns
     ~temperature ?max_tokens
-    ?stream_idle_timeout_s ?guardrails ?hooks
+    ?stream_idle_timeout_s ?hooks
     ~accept
     ?compact_ratio
     ?approval
@@ -228,8 +213,6 @@ let run_model_with_masc_tools
     ?stream_idle_timeout_s
     ?(temperature = Runtime_provider_defaults.agent_default_temperature)
     ?max_tokens
-    ?wait_timeout_sec
-    ?guardrails
     ?hooks
     ?enable_thinking
     ?compact_ratio
@@ -245,7 +228,7 @@ let run_model_with_masc_tools
   let* config =
     config_for_label ~name:"oas-explicit-model" ~model_label ~system_prompt
       ~tools:[] ~max_tokens ~temperature
-      ?stream_idle_timeout_s ?guardrails ?hooks ?enable_thinking
+      ?stream_idle_timeout_s ?hooks ?enable_thinking
       ?compact_ratio
       ?provider_config_transform
       ~description:(Some (Printf.sprintf "model_label:%s" model_label))
@@ -259,14 +242,9 @@ let run_model_with_masc_tools
         | None -> Masc_grpc_transport.from_env ()
       in
       let config = { config with raw_trace; transport = transport_resolved } in
-      match
-        let admission_runtime_id =
-          model_label
-        in
-        Admission_queue.with_permit ?wait_timeout_sec
-          ~priority:Llm_provider.Request_priority.Proactive
+      Inference_inflight_observation.with_observation
           ~keeper_name:"oas-explicit-model"
-          ~runtime_id:admission_runtime_id
+          ~runtime_id:model_label
           (fun () ->
             with_cli_preflight
               ~scope:(Printf.sprintf "explicit_model:%s" model_label)
@@ -274,9 +252,3 @@ let run_model_with_masc_tools
               (fun () ->
                 Runtime_agent.run_with_masc_tools ~sw ~net ~base_path ~config ~masc_tools ~dispatch  ?on_event
 	                  goal))
-      with
-      | Ok result -> result
-      | Error (`Host_resource_saturated reason) ->
-          Error
-            (sdk_error_of_masc_internal_error
-               (Admission_queue_rejected { keeper_name = "oas-explicit-model"; reason }))

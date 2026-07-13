@@ -11,9 +11,6 @@ open Alcotest
 module BE = Masc.Keeper_heartbeat_loop_board_events
 
 let gate
-      ?(approval_pending = false)
-      ?(keeper_backpressured = false)
-      ?(provider_cooldown_pending = false)
       ~warm
       ~paused
       ()
@@ -21,9 +18,6 @@ let gate
   BE.should_collect_board_events
     ~proactive_warmup_elapsed:warm
     ~paused
-    ~approval_pending
-    ~keeper_backpressured
-    ~provider_cooldown_pending
 
 let test_warm_unpaused_collects () =
   check bool "warmed + unpaused keeper collects board events" true
@@ -42,24 +36,6 @@ let test_cold_unpaused_skips () =
 let test_cold_paused_skips () =
   check bool "not-yet-warmed + paused keeper does not collect" false
     (gate ~warm:false ~paused:true ())
-
-let test_warm_approval_pending_skips () =
-  check bool
-    "warmed + approval-pending keeper must not collect (cursor stays put)"
-    false
-    (gate ~warm:true ~paused:false ~approval_pending:true ())
-
-let test_warm_keeper_backpressured_skips () =
-  check bool
-    "warmed + keeper-health-backpressured keeper must not collect"
-    false
-    (gate ~warm:true ~paused:false ~keeper_backpressured:true ())
-
-let test_warm_provider_cooldown_skips () =
-  check bool
-    "warmed + provider-cooldown keeper must not collect"
-    false
-    (gate ~warm:true ~paused:false ~provider_cooldown_pending:true ())
 
 let test_collection_failure_health_degrades_and_clears () =
   let base_path = "/tmp/masc-board-collection-health-test" in
@@ -111,12 +87,6 @@ let () =
           test_case "warm + paused -> skip" `Quick test_warm_paused_skips;
           test_case "cold + unpaused -> skip" `Quick test_cold_unpaused_skips;
           test_case "cold + paused -> skip" `Quick test_cold_paused_skips;
-          test_case "warm + approval pending -> skip" `Quick
-            test_warm_approval_pending_skips;
-          test_case "warm + keeper backpressure -> skip" `Quick
-            test_warm_keeper_backpressured_skips;
-          test_case "warm + provider cooldown -> skip" `Quick
-            test_warm_provider_cooldown_skips;
           test_case "collection failure health degrades and clears" `Quick
             test_collection_failure_health_degrades_and_clears;
         ] );

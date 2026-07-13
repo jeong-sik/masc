@@ -10,14 +10,14 @@
      [specs/keeper-state-machine/KeeperStateMachine.tla §TypeOK] has a
      corresponding OCaml [Keeper_state_machine.phase] constructor.  The
      OCaml side is allowed to have MORE constructors than the spec
-     enumerates (none today — they match 13↔13).
+     enumerates.
    - The "allowed transitions" exercise [apply_event] end-to-end
      (update_conditions + derive_phase + can_transition), so any silent
      drift between the spec's [Next] action and the OCaml runtime
      pipeline is caught at the result level.
    - The "forbidden transition" picks a Dead source phase: every TLA+
      [Next]-action conjunct includes [NotTerminal], so any event from
-     [Dead]/[Stopped]/[Zombie] is *not* in the relation.  The OCaml
+     [Dead]/[Stopped] is *not* in the relation.  The OCaml
      [apply_event] mirror is the explicit [Terminal_state] reject at the
      top of [lib/keeper_state/keeper_state_machine.ml §apply_event].
    - Hand-curated mapping: see [tla_phase_names] below.  Line refs into
@@ -44,7 +44,6 @@ let tla_phase_names =
   ; "Crashed"
   ; "Restarting"
   ; "Dead"
-  ; "Zombie"
   ]
 ;;
 
@@ -64,7 +63,6 @@ let phase_to_tla_name : SM.phase -> string = function
   | Crashed -> "Crashed"
   | Restarting -> "Restarting"
   | Dead -> "Dead"
-  | Zombie -> "Zombie"
 ;;
 
 (* ── Smoke test 1: State set parity ──────────────────────────── *)
@@ -110,7 +108,7 @@ let running_conditions : SM.conditions =
   ; heartbeat_healthy = true
   ; turn_healthy = true
   ; context_within_budget = true
-  ; restart_budget_remaining = true
+  ; dead_tombstone_latched = false
   }
 ;;
 
@@ -141,7 +139,7 @@ let test_running_to_failing_via_heartbeat_failed () =
   check_transition
     ~label:"Running --Heartbeat_failed--> Failing"
     ~from_phase:Running
-    ~event:(SM.Heartbeat_failed { consecutive = 3; max_allowed = 3 })
+    ~event:(SM.Heartbeat_failed { consecutive = 3 })
     ~expected:Failing
 ;;
 
@@ -180,7 +178,7 @@ let test_running_to_compacting_via_compaction_started () =
 (* A baseline "Dead" condition set: fiber dead AND budget exhausted.
    Mirrors DerivePhase priority 3 (Dead branch). *)
 let dead_conditions : SM.conditions =
-  { SM.default_conditions with fiber_alive = false; restart_budget_remaining = false }
+  { SM.default_conditions with fiber_alive = false; dead_tombstone_latched = true }
 ;;
 
 let test_forbidden_dead_rejects_heartbeat_ok () =

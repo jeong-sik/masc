@@ -403,11 +403,7 @@ const KEEPER_RUNTIME_ROWS: Array<{
   label: string
   fmt: 'int' | 'float' | 'duration'
 }> = [
-  { key: 'bootstrap_max_active_keepers', label: 'bootstrap max active keepers', fmt: 'int' },
-  { key: 'reactive_max_idle_turns', label: 'reactive max idle turns', fmt: 'int' },
-  { key: 'autonomous_max_idle_turns', label: 'autonomous max idle turns', fmt: 'int' },
   { key: 'turn_timeout_sec', label: 'turn timeout', fmt: 'duration' },
-  { key: 'admission_wait_timeout_sec', label: 'admission wait timeout', fmt: 'duration' },
   { key: 'oas_timeout_override_sec', label: 'OAS timeout override', fmt: 'duration' },
   { key: 'oas_timeout_per_1k', label: 'OAS timeout per 1k est input', fmt: 'float' },
   { key: 'oas_timeout_per_turn', label: 'OAS timeout per turn', fmt: 'duration' },
@@ -439,7 +435,7 @@ function KeeperRuntimePanel({ runtime }: { runtime: KeeperRuntimeResolved | null
   return html`
     <${ConfigCard} class="mt-4 px-4 py-4">
       <div class="mb-3 flex flex-wrap items-center gap-2">
-        <div class="text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">keeper runtime limits</div>
+        <div class="text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">keeper runtime configuration</div>
         ${tomlCount > 0 ? html`
           <${StatusChip} tone=${sourceTone('toml')}>${tomlCount} TOML<//>
         ` : null}
@@ -448,7 +444,7 @@ function KeeperRuntimePanel({ runtime }: { runtime: KeeperRuntimeResolved | null
         ` : null}
       </div>
       <div class="mb-3 text-xs text-[var(--color-fg-muted)]">
-        Per-keeper runtime caps and timeouts. These values are not the live keeper count.
+        Per-keeper runtime behavior and timeout settings. These values are not the live keeper count.
       </div>
       <div class="grid gap-2 md:grid-cols-2">
         ${KEEPER_RUNTIME_ROWS.map(row => {
@@ -469,41 +465,38 @@ function KeeperRuntimePanel({ runtime }: { runtime: KeeperRuntimeResolved | null
   `
 }
 
-function formatShellIrApproval(
-  approval: DashboardRuntimeResolution['shell_ir_approval'],
-): string {
-  if (!approval) return MISSING_DATA_DASH
-  const trust = approval.trust === null
-    ? 'unknown'
-    : `${approval.trust.safe}/${approval.trust.audited}/${approval.trust.privileged}`
-  return `${approval.enabled ? 'enabled' : 'disabled'} (trust: ${trust})`
-}
-
 function RuntimeTruthPanel({ runtimeResolution }: { runtimeResolution: DashboardRuntimeResolution }) {
   const fd = runtimeResolution.fd_accountant
+  const disk = runtimeResolution.disk_observation
   const fleet = runtimeResolution.fleet_safety
-  const shellIr = runtimeResolution.shell_ir_approval
   const fdValue = fd
     ? `${fd.fd_open ?? MISSING_DATA_DASH} / ${fd.fd_limit ?? MISSING_DATA_DASH}`
     : MISSING_DATA_DASH
-  const fdTone = fd?.pressure_active ? 'bad' : 'neutral'
+  const activeOperations = fd?.per_kind.reduce((sum, row) => sum + row.active_operations, 0)
+  const resourceErrors = fd?.resource_errors.reduce((sum, row) => sum + row.count, 0)
+  const diskAvailable = disk?.filesystem?.available_bytes
+  const diskTotal = disk?.filesystem?.total_bytes
+  const diskValue = diskAvailable != null && diskTotal != null
+    ? `${formatNumber(diskAvailable / 1_073_741_824, 1)} / ${formatNumber(diskTotal / 1_073_741_824, 1)} GiB`
+    : disk?.filesystem?.error ? `probe error: ${disk.filesystem.error}` : MISSING_DATA_DASH
 
   return html`
     <${ConfigCard} class="mb-4 px-4 py-4">
       <div class="mb-3 flex flex-wrap items-center gap-2">
         <div class="text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">live runtime truth</div>
         <${StatusChip} tone=${toneClass(runtimeResolution.status)}>${runtimeResolution.status}<//>
-        <${StatusChip} tone=${fdTone} uppercase=${false}>fd ${fdValue}<//>
+        <${StatusChip} tone="neutral" uppercase=${false}>fd ${fdValue}<//>
+        <${StatusChip} tone="neutral" uppercase=${false}>disk ${diskValue}<//>
       </div>
       <div class="grid gap-3 md:grid-cols-2">
         <${RuntimeMetaRow} label="effective base" value=${runtimeResolution.resolved_base_path.path ?? MISSING_DATA_DASH} />
         <${RuntimeMetaRow} label="effective .masc" value=${runtimeResolution.data_root.path ?? MISSING_DATA_DASH} />
         <${RuntimeMetaRow} label="server repo" value=${runtimeResolution.server_repo_path?.path ?? MISSING_DATA_DASH} />
         <${RuntimeMetaRow} label="executable commit" value=${runtimeResolution.build.commit ?? MISSING_DATA_DASH} />
-        <${RuntimeMetaRow} label="shell IR approval" value=${formatShellIrApproval(shellIr)} />
-        <${RuntimeMetaRow} label="shell IR raw" value=${shellIr?.raw_overlay ?? MISSING_DATA_DASH} />
         <${RuntimeMetaRow} label="keeper fibers" value=${String(fleet?.keeper_fibers ?? MISSING_DATA_DASH)} />
-        <${RuntimeMetaRow} label="fd pressure" value=${fd?.pressure_active == null ? MISSING_DATA_DASH : fd.pressure_active ? 'active' : 'clear'} />
+        <${RuntimeMetaRow} label="fd active operations" value=${activeOperations == null ? MISSING_DATA_DASH : String(activeOperations)} />
+        <${RuntimeMetaRow} label="fd resource errors (total)" value=${resourceErrors == null ? MISSING_DATA_DASH : String(resourceErrors)} />
+        <${RuntimeMetaRow} label="typed ENOSPC observations (total)" value=${disk?.storage_space_exhaustion_observations_total == null ? MISSING_DATA_DASH : String(disk.storage_space_exhaustion_observations_total)} />
       </div>
     <//>
   `

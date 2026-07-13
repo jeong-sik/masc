@@ -32,15 +32,6 @@ let resolve_active_goal_ids config p old_ids =
           (Printf.sprintf "unknown active_goal_ids: %s"
              (String.concat ", " missing))
 
-let blocker_requires_continue_gate (old : keeper_meta) =
-  match old.runtime.last_blocker with
-  | Some info -> blocker_class_continue_gate info.klass
-  | None -> false
-
-let paused_state_requires_approval (old : keeper_meta) =
-  Keeper_approval_queue.has_blocking_pending_for_keeper ~keeper_name:old.name
-  || blocker_requires_continue_gate old
-
 let update_keeper ?(preserve_prompt_defaults = false)
     (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool_result
     =
@@ -113,43 +104,13 @@ let update_keeper ?(preserve_prompt_defaults = false)
       ~fallback_message:old.compaction.message_gate
       ~fallback_token:old.compaction.token_gate
   in
-  let tool_access =
-    match p.tool_access_opt with
-    | Some access -> access
-    | None ->
-        (match p.profile_defaults.tool_access with
-         | Some tools -> normalize_tool_names tools
-         | None -> old.tool_access)
-  in
-  let tool_denylist =
-    let profile_or_old =
-      match p.profile_defaults.tool_denylist with
-      | Some _ as toml -> toml
-      | None ->
-        if old.tool_denylist <> [] then Some old.tool_denylist
-        else None
-    in
-    resolve_tool_name_list
-      ~preferred:p.tool_denylist_opt
-      ~fallback:profile_or_old
-  in
-  let resume_paused_keeper =
-    old.paused && not (paused_state_requires_approval old)
-  in
+  let resume_paused_keeper = old.paused in
   let dead_revival_requested =
     resume_paused_keeper
     &&
     match old.latched_reason with
     | Some Keeper_latched_reason.Dead_tombstone -> true
-    | Some
-        ( Keeper_latched_reason.Operator_paused _
-        | Keeper_latched_reason.Stale_storm
-        | Keeper_latched_reason.No_progress_loop _
-        | Keeper_latched_reason.Completion_contract_violation _
-        | Keeper_latched_reason.Idle_detected _
-        | Keeper_latched_reason.Runtime_exhausted _
-        | Keeper_latched_reason.Turn_budget_exhausted _
-        | Keeper_latched_reason.Provider_timeout_loop _ )
+    | Some (Keeper_latched_reason.Operator_paused _)
     | None -> false
   in
   if resume_paused_keeper then (
@@ -158,56 +119,11 @@ let update_keeper ?(preserve_prompt_defaults = false)
       | Some info -> blocker_class_to_string info.klass, info.detail
       | None -> "none", ""
     in
-    let auto_resume_after_sec =
-      old.auto_resume_after_sec
-      |> Option.map (Printf.sprintf "%.0f")
-      |> Option.value ~default:"none"
-    in
     Log.Keeper.warn
       "update_keeper resumed paused keeper %s; clearing \
-       auto_resume_after_sec=%s last_blocker.klass=%s last_blocker.detail=%S"
-      old.name auto_resume_after_sec blocker_class blocker_detail);
-  (* Clear any persisted livelock attempt counter on every update_keeper run,
-     not only the resume-paused branch.  Older turn-livelock guards only
-     recorded a `pause_human` receipt, while current guards may persist
-     [meta.paused = true].  A follow-up `masc_keeper_up` should clear the
-     stale in-memory counter in both cases. *)
-  Keeper_turn_livelock.reset_keeper_livelock
-    ~base_path:ctx.config.base_path
-    ~keeper:old.name;
-  (* ETA-LIVELOCK: align typed-escalation classifier with the
-     livelock counter reset so an operator-triggered keeper_up
-     restores the next block to ERROR (not silent DEBUG demotion
-     from a previous threshold_park). *)
-  Keeper_livelock_state.reset_for_keeper ~keeper:old.name;
-  if old.paused && not resume_paused_keeper then
-    Log.Keeper.warn
-      "update_keeper kept %s paused because an approval/reconcile gate is pending"
-      old.name;
-  let source_meta_result =
-    if resume_paused_keeper then
-      Keeper_unified_turn_no_progress.clear_for_operator_resume
-        ~base_path:ctx.config.base_path
-        old
-    else Ok old
-  in
-  match source_meta_result with
-  | Error err ->
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string TurnUpUpdateFailures)
-      ~labels:
-        [ ( "keeper", p.name )
-        ; ( "site"
-          , Keeper_turn_up_update_failure_site.(to_label No_progress_resume_clear)
-          )
-        ]
-      ();
-    Log.Keeper.warn
-      "update_keeper failed no_progress resume clear for %s: %s"
-      p.name
-      err;
-    tool_result_error err
-  | Ok source_meta ->
+       last_blocker.klass=%s last_blocker.detail=%S"
+      old.name blocker_class blocker_detail);
+  let source_meta = old in
   let updated = { source_meta with
     goal;
     instructions =
@@ -224,21 +140,16 @@ let update_keeper ?(preserve_prompt_defaults = false)
     allowed_paths;
     sandbox_profile;
     network_mode;
-    tool_access;
-    tool_denylist;
     autoboot_enabled;
     active_goal_ids;
     paused = if resume_paused_keeper then false else old.paused;
     (* Operator-sanctioned resume clears the terminal latch (Dead_tombstone
        included) so a sanctioned keeper_up revives a latched keeper.  Without
        this [latched_reason] survives a paused-clearing resume and every
-       latch-keyed gate (auto-resume / stale-paused prune / lifecycle
-       admission) keeps denying revival forever even after [paused] is
-       cleared. *)
+       latch-keyed lifecycle admission keeps denying revival forever even after
+       [paused] is cleared. *)
     latched_reason =
       if resume_paused_keeper then None else source_meta.latched_reason;
-    auto_resume_after_sec =
-      if resume_paused_keeper then None else old.auto_resume_after_sec;
     runtime =
       (if resume_paused_keeper then
          {
@@ -253,8 +164,8 @@ let update_keeper ?(preserve_prompt_defaults = false)
     telemetry_feedback_window_hours =
       Dashboard_utils.first_some p.profile_defaults.telemetry_feedback_window_hours
         old.telemetry_feedback_window_hours;
-    always_approve =
-      Dashboard_utils.first_some p.profile_defaults.always_approve old.always_approve;
+    always_allow =
+      Dashboard_utils.first_some p.profile_defaults.always_allow old.always_allow;
     proactive = {
       enabled =
         (match p.proactive_enabled_opt with
@@ -263,22 +174,6 @@ let update_keeper ?(preserve_prompt_defaults = false)
              (match p.profile_defaults.proactive_enabled with
               | Some v -> v
               | None -> old.proactive.enabled));
-      idle_sec =
-        (match p.proactive_idle_sec_opt with
-         | Some v -> v
-         | None ->
-             (match p.profile_defaults.proactive_idle_sec with
-              | Some v -> v
-              | None -> old.proactive.idle_sec))
-        |> normalize_proactive_idle_sec;
-      cooldown_sec =
-        (match p.proactive_cooldown_sec_opt with
-         | Some v -> v
-         | None ->
-             (match p.profile_defaults.proactive_cooldown_sec with
-              | Some v -> v
-              | None -> old.proactive.cooldown_sec))
-        |> normalize_proactive_cooldown_sec;
     };
     compaction = {
       profile = compaction_profile;
@@ -291,8 +186,6 @@ let update_keeper ?(preserve_prompt_defaults = false)
           ~default:old.compaction.cooldown_sec
           p.compaction_cooldown_sec_opt
         |> normalize_compaction_cooldown_sec;
-      max_checkpoint_messages = old.compaction.max_checkpoint_messages;
-      keep_recent_tool_results = old.compaction.keep_recent_tool_results;
     };
     auto_handoff = Option.value ~default:old.auto_handoff p.auto_handoff_opt;
     handoff_threshold = Option.value ~default:old.handoff_threshold p.handoff_threshold_opt;
@@ -314,20 +207,6 @@ let update_keeper ?(preserve_prompt_defaults = false)
         p.name err;
       tool_result_error err
   | Ok () ->
-      (match
-         Keeper_sandbox_runtime.ensure_keeper_startup_preflight
-           ~timeout_sec:(Env_config_sandbox.Preflight.max_timeout_sec ())
-           ~sandbox_profile
-       with
-       | Error err ->
-           Otel_metric_store.inc_counter
-             Keeper_metrics.(to_string TurnUpUpdateFailures)
-             ~labels:[("keeper", p.name); ("site", Keeper_turn_up_update_failure_site.(to_label Sandbox_preflight))]
-             ();
-           Log.Keeper.warn "update_keeper failed sandbox preflight for %s: %s"
-             p.name err;
-           tool_result_error err
-       | Ok () ->
          let runtime_assignment_result =
            match p.runtime_id_opt with
            | None -> Ok ()
@@ -391,12 +270,12 @@ let update_keeper ?(preserve_prompt_defaults = false)
                builds [updated] from a meta snapshot ([old]), so a concurrent
                keeper turn that bumped cumulative usage counters between the
                read and this write would otherwise be silently rewound
-               (total_turns 385->370, 2026-06-10). [heartbeat_fields_from_disk]
-               keeps the caller's edited fields but takes the monotonic
-               counters as [max latest caller]. *)
+               (total_turns 385->370, 2026-06-10). This is an explicit operator
+               lifecycle action, so it owns pause/resume fields while taking
+               cumulative counters as [max latest caller]. *)
             (match
                write_meta_with_merge
-                 ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
+                 ~merge:Keeper_meta_merge.monotonic_usage_counters
                  ctx.config
                  updated
              with
@@ -436,7 +315,6 @@ let update_keeper ?(preserve_prompt_defaults = false)
                           (Keepalive_already_registered entry)))
                 | ( Keepalive_lifecycle_denied _
                   | Keepalive_identity_unrepairable
-                  | Keepalive_spawn_slot_denied _
                   | Keepalive_registration_rejected _
                   | Keepalive_fiber_start_rejected _
                   | Keepalive_lane_ownership_lost
@@ -444,4 +322,4 @@ let update_keeper ?(preserve_prompt_defaults = false)
                   tool_result_error
                     (Printf.sprintf
                        "keeper metadata was updated but lane restart failed: %s"
-                       (start_keepalive_outcome_to_string rejected))))))
+                       (start_keepalive_outcome_to_string rejected)))))

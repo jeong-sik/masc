@@ -87,8 +87,6 @@ let of_failure ?(post_commit_ambiguous = false) ?(tool_call_count = 0) ~raw_erro
     | Some
         ( Keeper_turn_driver.Resumable_cli_session _
         | Keeper_turn_driver.Accept_rejected _
-        | Keeper_turn_driver.Admission_queue_timeout _
-        | Keeper_turn_driver.Admission_queue_rejected _
         | Keeper_turn_driver.Ambiguous_post_commit _
         | Keeper_turn_driver.Internal_unhandled_exception _
         | Keeper_turn_driver.Internal_bridge_exception _

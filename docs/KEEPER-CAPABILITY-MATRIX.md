@@ -42,8 +42,8 @@ Current exact tool names must come from the active schema. Use
 | **voice** | voice output/input/session tools | Conditional on voice policy/config; absent by default for many keepers. |
 
 Notes:
-- The old governance petition/case tools were retired from the callable tool surface. Governance-style participation now uses board discussion/vote paths plus dashboard governance/audit read models.
-- Write-capable tools such as `tool_edit_file` and `tool_write_file` are present in the keeper surface. `tool_access` is a configured candidate profile list; actual execution is constrained by descriptor/registry availability, denylist filtering, per-turn OAS allowlists, and eval gates.
+- The old governance petition/case subsystem is retired. Collaboration uses Board/Goal/Task, while external effects use the product-neutral Gate and its approval audit.
+- Write-capable tools such as `tool_edit_file` and `tool_write_file` are present in the keeper surface. `tool_access` is an explicit profile selection; descriptor/registry availability determines which typed tools exist, and external effects converge on the Gate.
 - Typed command execution is model-facing as `Execute`, backed by the `tool_execute` descriptor route.
 
 ## Tool Surface
@@ -69,7 +69,7 @@ Important families:
 - memory/library: `keeper_memory_search`, `keeper_memory_write`,
   `keeper_library_search`, `keeper_library_read`
 - goals/plans/runs: `masc_goal_list`, `masc_goal_upsert`,
-  `masc_goal_transition`, `masc_goal_verify`, `masc_plan_get`,
+  `masc_goal_transition`, `masc_plan_get`,
   `masc_plan_update`, `masc_run_list`, `masc_note_add`, `masc_deliver`
 - scheduled automation: `masc_schedule_create`, `masc_schedule_list`,
   `masc_schedule_get`, `masc_schedule_cancel`, `masc_schedule_approve`,
@@ -152,8 +152,8 @@ BoardActivity, IdleTimeout, MetricsAnomaly, StrategicReview.
 | 최신 정보 / 외부 자료 확인 | `WebSearch { "query": "...", "includeContent": true }` for current results plus keeper-readable `content_text` and raw `page_content`; `WebFetch { "url": "..." }` for one selected URL when deeper reading or a citation is needed. See `config/prompts/keeper.unified.system.md` for exact input/output shape. |
 | 찬성 / 반대 신호 | `keeper_board_vote` |
 | 커넥터/현재 대화 lane 확인 및 답장 | `keeper_surface_read`, `keeper_surface_post`, `keeper_person_note_set` |
-| 거버넌스 의견 제출 | retired as keeper tools; use board discussion/vote paths and governance dashboard read models |
-| 목표 / 계획 lifecycle | `masc_goal_list`, `masc_goal_upsert`, `masc_goal_transition`, `masc_goal_verify` |
+| 외부 효과 승인/판단 | exact Always Allow, configured LLM Auto Judge, or nonblocking HITL Gate |
+| 목표 / 계획 lifecycle | `masc_goal_list`, `masc_goal_upsert`, `masc_goal_transition` |
 | 계획/런/산출물 기록 | `masc_plan_get`, `masc_plan_init`, `masc_plan_update`, `masc_plan_set_task`, `masc_plan_get_task`, `masc_plan_clear_task`, `masc_run_init`, `masc_run_list`, `masc_run_get`, `masc_run_plan`, `masc_note_add`, `masc_deliver` |
 | 예약 자동화 | `masc_schedule_create`, `masc_schedule_list`, `masc_schedule_get`, `masc_schedule_cancel`, `masc_schedule_approve`, `masc_schedule_reject` |
 | 다른 keeper 상태/메시지 | `masc_keeper_list`, `masc_keeper_status`, `masc_keeper_msg`, `masc_keeper_msg_result`, `masc_keeper_msg_queue`, `masc_keeper_msg_cancel` |

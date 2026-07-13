@@ -64,11 +64,6 @@ let all_flags : flag list = [
   (* RFC-0084 host-config-cleanup-J — MASC_DISPATCH_V2 entry removed.
      The Hashtbl dispatch path is the only path. *)
 
-  { env_name = "MASC_FULL_SURFACE";
-    description = "Include hidden/developer tools in tool list";
-    default = false; category = "tool";
-    lifecycle = Active; since = "2.90.0" };
-
   { env_name = Env_config_core.parse_warn_env_key;
     description = "Escalate malformed env parses to Config_error";
     default = false; category = "tool";
@@ -110,16 +105,6 @@ let all_flags : flag list = [
     default = true; category = "keeper";
     lifecycle = Active; since = "2.162.0" };
 
-  { env_name = "MASC_KEEPER_SMART_HEARTBEAT";
-    description = "Skip heartbeat cycles when busy (task proves liveness) or extend interval when idle";
-    default = true; category = "keeper";
-    lifecycle = Active; since = "2.163.0" };
-
-  { env_name = "MASC_KEEPER_VISIBILITY_GATE";
-    description = "Delay proactive idle turns when no SSE consumer is observing and no pending signal exists";
-    default = true; category = "keeper";
-    lifecycle = Active; since = "2.250.0" };
-
   { env_name = "MASC_KEEPER_WIRE_CAPTURE";
     description = "Default-off diagnostic MASC-to-OAS request/response wire capture";
     default = false; category = "keeper";
@@ -140,20 +125,10 @@ let all_flags : flag list = [
     default = false; category = "keeper";
     lifecycle = Active; since = "2.233.0" };
 
-  (* ── Dashboard & Governance ───────────────────────────────── *)
-  { env_name = "MASC_DISABLE_HITL";
-    description = "Disable Human-in-the-loop (HITL) approval gates globally";
-    default = false; category = "dashboard";
-    lifecycle = Active; since = "2.250.0" };
-
+  (* ── Dashboard ────────────────────────────────────────────── *)
   { env_name = "MASC_DASHBOARD_FIXTURES_ENABLED";
     description = "Load dashboard fixture data for testing";
     default = false; category = "dashboard";
-    lifecycle = Active; since = "2.140.0" };
-
-  { env_name = "MASC_DASHBOARD_GOVERNANCE_JUDGE_ENABLED";
-    description = "Governance judgment background loop";
-    default = true; category = "dashboard";
     lifecycle = Active; since = "2.140.0" };
 
   { env_name = "MASC_OPERATOR_JUDGE_ENABLED";
@@ -183,27 +158,7 @@ let all_flags : flag list = [
     default = false; category = "runtime";
     lifecycle = Active; since = "2.200.0" };
 
-  { env_name = "MASC_SHELL_IR_APPROVAL_GATE_ENABLED";
-    description = "Route Execute tool calls through the capability-based Shell IR approval policy gate";
-    default = true; category = "runtime";
-    lifecycle = Active; since = "2.234.0" };
   (* ── Contract verification ───────────────────────────────── *)
-  { env_name = "MASC_VERIFICATION_FSM_ENABLED";
-    description = "Task verification FSM: AwaitingVerification state and cross-agent approval";
-    default = true; category = "runtime";
-    lifecycle = Active; since = "0.9.3" };
-
-  (* RFC-0323 G-5 Phase B: route all task completion through submit→approve
-     (verification-required) regardless of contract.strict. Default off —
-     flip only when the readiness gate §5 holds (≥2 distinct verifier
-     identities per submitting room, else solo-room starvation with no timer
-     backstop, RFC-0220 §5/§11). Only the done guard flips; the evidence
-     gate stays on contract.strict (Phase A scope). *)
-  { env_name = "MASC_VERIFICATION_DEFAULT_ON";
-    description = "RFC-0323 G-5 Phase B: verification-required by default (submit→approve)";
-    default = false; category = "runtime";
-    lifecycle = Active; since = "0.20.0" };
-
 ]
 
 (** Lookup a flag by env var name. O(n) — acceptable for ~30 flags. *)

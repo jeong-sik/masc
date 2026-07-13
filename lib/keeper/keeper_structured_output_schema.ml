@@ -49,7 +49,7 @@ let generic_object_schema =
   `Assoc [ "type", `String "object"; "additionalProperties", `Bool true ]
 ;;
 
-let operator_action_tokens = Operator_approval.allowed_actions
+let operator_action_tokens = Operator_action_catalog.strings
 
 let operator_severity_tokens = [ "warn"; "bad" ]
 
@@ -95,56 +95,6 @@ let operator_judge_output_schema =
     ; ( "sessions"
       , `Assoc
           [ "type", `String "array"; "items", operator_session_judgment_schema ] )
-    ]
-  in
-  object_schema ~required:(List.map fst fields) fields
-;;
-
-let governance_kind_tokens = [ "case"; "agent_health"; "workspace_state" ]
-
-let governance_resolved_tool_tokens = Tool_name.Operator_remote_name.all_strings
-
-let governance_recommended_action_schema =
-  let fields =
-    [ "action_kind", string_schema
-    ; "resolved_tool", nullable_enum_schema governance_resolved_tool_tokens
-    ; "target_type", string_schema
-    ; "target_id", nullable_string_schema
-    ; "reason", string_schema
-    ; "payload_preview", generic_object_schema
-    ]
-  in
-  nullable_object_schema ~required:(List.map fst fields) fields
-;;
-
-let governance_guardrail_state_schema =
-  let fields =
-    [ "requires_human_gate", boolean_schema
-    ; "pending_confirm_token", nullable_string_schema
-    ; "ready_to_execute", boolean_schema
-    ]
-  in
-  object_schema ~required:(List.map fst fields) fields
-;;
-
-let governance_item_schema =
-  let fields =
-    [ "kind", enum_schema governance_kind_tokens
-    ; "id", string_schema
-    ; "summary", string_schema
-    ; "confidence", number_schema
-    ; "evidence_refs", string_array_schema
-    ; "recommended_action", governance_recommended_action_schema
-    ; "guardrail_state", governance_guardrail_state_schema
-    ]
-  in
-  object_schema ~required:(List.map fst fields) fields
-;;
-
-let governance_judge_output_schema =
-  let fields =
-    [ ( "items"
-      , `Assoc [ "type", `String "array"; "items", governance_item_schema ] )
     ]
   in
   object_schema ~required:(List.map fst fields) fields
@@ -283,22 +233,12 @@ let anti_rationalization_verdict_output_schema =
 ;;
 
 let hitl_context_summary_schema =
-  let suggested_option_fields =
-    [ "label", string_schema
-    ; "rationale", string_schema
-    ; ( "estimated_risk_delta"
-      , nullable_enum_schema Keeper_approval_queue_rules_types.allowed_risk_level_values )
-    ]
-  in
-  let suggested_option_schema =
-    object_schema ~required:(List.map fst suggested_option_fields) suggested_option_fields
-  in
   let fields =
     [ "context_summary", string_schema
     ; "key_questions", string_array_schema
-    ; "suggested_options", array_schema suggested_option_schema
-    ; "risk_rationale", nullable_string_schema
-    ; "uncertainty", number_schema
+    ; ( "judgment"
+      , enum_schema Keeper_approval_queue_rules_types.advisory_judgment_values )
+    ; "rationale", string_schema
     ]
   in
   object_schema ~required:(List.map fst fields) fields

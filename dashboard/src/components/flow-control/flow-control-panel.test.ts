@@ -3,14 +3,10 @@ import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 type MockOperatorSnapshot = {
-  admission_queue?: {
-    throttle_owner: string
-    max_concurrent: number
+  inference_inflight?: {
+    boundary_owner: 'oas_runtime'
     active: number
-    available: number
-    queue_depth: number
   } | null
-  admission_queue_error?: string | null
 } | null
 
 const {
@@ -106,38 +102,21 @@ describe('FlowControlPanel', () => {
     expect(container.textContent).not.toContain('Refresh')
   })
 
-  it('shows admission observation and throttle owner when present', async () => {
+  it('shows the exact OAS inference observation when present', async () => {
     operatorSnapshot.value = {
-      admission_queue: {
-        throttle_owner: 'oas_runtime',
-        max_concurrent: 3,
+      inference_inflight: {
+        boundary_owner: 'oas_runtime',
         active: 1,
-        available: 2,
-        queue_depth: 0,
       },
     }
 
     render(html`<${FlowControlPanel} />`, container)
     await flushUi()
 
-    const status = container.querySelector('[data-testid="flow-admission-observation"]')
+    const status = container.querySelector('[data-testid="flow-inference-inflight"]')
     expect(status).not.toBeNull()
     expect(status!.textContent).toContain('oas_runtime')
-    expect(status!.textContent).toContain('1/3')
-  })
-
-  it('shows an explicit admission diagnostic when the projection is invalid', async () => {
-    operatorSnapshot.value = {
-      admission_queue: null,
-      admission_queue_error: 'Admission projection counters are inconsistent.',
-    }
-
-    render(html`<${FlowControlPanel} />`, container)
-    await flushUi()
-
-    expect(container.querySelector('[data-testid="flow-admission-observation"]')).toBeNull()
-    expect(container.querySelector('[data-testid="flow-admission-error"]')?.textContent)
-      .toContain('counters are inconsistent')
+    expect(status!.textContent).toContain('1 active inference')
   })
 
 })

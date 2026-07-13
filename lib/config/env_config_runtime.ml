@@ -297,20 +297,6 @@ module Transport = struct
 end
 
 module Verification = struct
-  (** Enable AwaitingVerification state and cross-agent approval. Default: true (SSOT: [Feature_flag_registry.all_flags]). *)
-  let fsm_enabled () =
-    Feature_flag_registry.get_bool "MASC_VERIFICATION_FSM_ENABLED"
-
-  (** RFC-0323 G-5 Phase B default-on flip. Default: false (SSOT:
-      [Feature_flag_registry.all_flags]). When true, the done guard treats
-      every task as verification-required (completion routes through
-      submit→approve). The evidence gate is unaffected — it reads
-      [Masc_domain.task_requires_verification] (= contract.strict) directly,
-      so only the done guard flips. Flip only when readiness gate §5 holds:
-      solo-room flip-on starves (no timer backstop, RFC-0220 §5/§11). *)
-  let default_on () =
-    Feature_flag_registry.get_bool "MASC_VERIFICATION_DEFAULT_ON"
-
   (** Maximum time a task may remain AwaitingVerification before surfacing an
       operator-visible timeout. Default: 24h. *)
   let timeout_deadline_seconds () =
@@ -320,81 +306,6 @@ module Verification = struct
      PR-3 together with the [verification_timeout] server fork it paced and
      the [Verification_protocol.check_timeouts] no-op it invoked. The knob
      row was removed from docs/runtime-tunables.md in the same change. *)
-end
-
-(** {1 Approval Janitor}
-
-    HITL approval queue dead-end fix.  [Keeper_approval_queue.expire_stale]
-    has full implementation (queue removal, audit event, promise reject,
-    on_resolution callback) and a unit test, but was never invoked
-    anywhere in production code.  Result: any HITL approval enqueued
-    by a keeper turn would block [keeper_cycle_decision] forever via
-    [has_blocking_pending_for_keeper → Skip Approval_pending].  Once the 300s
-    stale watchdog fired, the supervisor would respawn the fiber, the
-    same approval would still be in the queue, and the cycle would
-    repeat indefinitely.  This fork makes the existing timeout policy
-    actually fire.  See #10765 for the death-spiral observability that
-    surfaced this and #10962 for the [last_skip_observation]
-    instrumentation that distinguishes deliberate-skip from stuck. *)
-module Approval_janitor = struct
-  (** Enable the periodic approval_janitor sweep fiber.  Default: true.
-      Set MASC_APPROVAL_JANITOR_ENABLED=false to disable when
-      debugging — pre-fix behaviour leaves the queue entries immortal
-      until manual resolution or server restart. *)
-  let enabled () =
-    get_bool ~default:true "MASC_APPROVAL_JANITOR_ENABLED"
-
-  (** Sweep interval in seconds.  Default: 60s (every minute).
-      Operators tolerate up to a minute of "approval still pending"
-      after the policy timeout has elapsed; a tighter cadence buys
-      nothing but log churn.  The interval is operational cadence,
-      not policy. *)
-  let interval_seconds =
-    get_float ~default:60.0 "MASC_APPROVAL_JANITOR_INTERVAL_SEC"
-end
-
-(** {1 Keeper Stale-Run Window (RFC-0250)}
-
-    Default-on wall-clock window for the no-turn-produced case. It keys on
-    [last_turn_ts] while [current_turn_observation = None] — exactly the
-    [Idle_turn] variant's doc contract — so it does not re-introduce the
-    per-turn wall-clock timeout that was deliberately removed
-    ([keeper_unified_turn_attempt_watchdog]).
-
-    Default 1800s: a [Running] keeper that has not completed a turn in 30 min
-    is presumed wedged. Set [MASC_KEEPER_STALE_RUN_SEC=0] to disable. *)
-module Keeper_stale_run = struct
-  let threshold_sec_opt () =
-    let v = get_float ~default:1800.0 "MASC_KEEPER_STALE_RUN_SEC" in
-    if v > 0.0 then Some v else None
-end
-
-(** {1 Keeper mid-turn progress watchdog (RFC-0012)}
-
-    Opt-in progress-silence window for the in-turn case. Distinct from
-    [Keeper_stale_run] (no turn produced at all, produces [Idle_turn]): this
-    keys on [current_turn_observation.last_progress_at] while a turn IS
-    running,
-    producing [Mid_turn_no_progress] when no forward-progress event
-    (tool_completed / sdk-turn boundary) has been recorded for longer than the
-    threshold.
-
-    Opt-in ([None] when unset) — NOT default-on — because progress is currently
-    stamped only on tool/sdk-boundary events
-    ([Keeper_registry.record_turn_progress] call sites in [keeper_hooks_oas.ml]),
-    not on thinking/text deltas. A default-on window would false-fire on a
-    legitimately long single-attempt thinking turn on a slow local model.
-    Operators enable per runtime; RFC-0012 recommends [300.0] when enabling. *)
-module Keeper_mid_turn_progress = struct
-  (** In-turn progress-silence threshold in seconds; produces
-      [Mid_turn_no_progress] when a running turn records no progress event for
-      this long. [None] / 0 disables (opt-in). RFC-0012 recommends 300 when
-      enabling. @category Timeouts @ops_class operator *)
-  let timeout_sec_opt () =
-    let v =
-      get_float ~default:0.0 "MASC_KEEPER_MID_TURN_PROGRESS_TIMEOUT_SEC"
-    in
-    if v > 0.0 then Some v else None
 end
 
 (** {1 Board Configuration} *)
@@ -436,35 +347,12 @@ module Board = struct
     |> Option.map backend_of_string
 end
 
-(** {1 Procedural Memory Configuration} *)
-
-module ProcMemory = struct
-  (** Minimum evidence count for crystallization. Default: 3. *)
-  let min_evidence = max 1 (get_int ~default:3 "MASC_PROC_MIN_EVIDENCE")
-
-  (** Minimum confidence for crystallization, clamped to [0, 1]. Default: 0.7. *)
-  let min_confidence =
-    Float.max 0.0 (Float.min 1.0 (get_float ~default:0.7 "MASC_PROC_MIN_CONFIDENCE"))
-end
-
-(** {1 Pulse Configuration} *)
-
-module Pulse_config = struct
-  (** Max consecutive consumer failures before recovery. Default: 3. *)
-  let max_consumer_failures = max 1 (get_int ~default:3 "MASC_PULSE_MAX_CONSUMER_FAILURES")
-end
-
 (** {1 Tool Surface Configuration} *)
 
 module Tools = struct
   (* RFC-0084 host-config-cleanup-J — [dispatch_v2_enabled] removed.
      The [MASC_DISPATCH_V2] feature flag and the legacy match chain
      it gated are gone; the Hashtbl dispatch path is the only path. *)
-
-  (** Full tool surface override. Default: false.
-      Re-readable within the process; callers should still document the
-      effective reload contract at the subsystem boundary. *)
-  let full_surface_enabled () = Feature_flag_registry.get_bool "MASC_FULL_SURFACE"
 
   (** Tool list page size, clamped to [10, 1024]. Default: 512.
       Re-readable within the process; not a guarantee of shell-level hot reload. *)
@@ -496,13 +384,6 @@ module Tools = struct
     let v = get_float ~default:30.0 "MASC_WEB_SEARCH_CACHE_TTL_SEC" in
     if v < 0.0 then 0.0 else v
 
-  let web_search_rate_limit_window_sec () =
-    let v = get_float ~default:30.0 "MASC_WEB_SEARCH_RATE_LIMIT_WINDOW_SEC" in
-    if v < 1.0 then 1.0 else v
-
-  let web_search_rate_limit_max_calls () =
-    let v = get_int ~default:30 "MASC_WEB_SEARCH_RATE_LIMIT_MAX_CALLS" in
-    max 1 v
 end
 
 (** {1 Rate Limit Bucket Configuration} *)
@@ -532,9 +413,6 @@ module Worker = struct
   let local_runtime_cooldown_sec_opt () =
     Sys.getenv_opt "MASC_LOCAL_RUNTIME_COOLDOWN_SEC" |> trim_opt
 
-  (** Local worker max tokens per request. Default: 1024. *)
-  let local_worker_max_tokens = max 1 (get_int ~default:1024 "MASC_LOCAL_WORKER_MAX_TOKENS")
-
   (** Local worker heartbeat interval (seconds). Default: 60. *)
   let local_worker_heartbeat_sec = max 1 (get_int ~default:60 "MASC_LOCAL_WORKER_HEARTBEAT_SEC")
 end
@@ -546,25 +424,6 @@ module Oas_sse = struct
   let drain_interval_sec =
     let v = get_float ~default:2.0 "MASC_OAS_SSE_DRAIN_INTERVAL_SEC" in
     if v < 0.1 then 2.0 else v
-end
-
-(** {1 Smart Heartbeat Tuning} *)
-
-module SmartHeartbeatTuning = struct
-  (** Base heartbeat interval (seconds), clamped [5, 300]. Default: 30. *)
-  let base_interval_s =
-    let v = get_float ~default:30.0 "MASC_SMART_HB_BASE_INTERVAL_SEC" in
-    Float.max 5.0 (Float.min 300.0 v)
-
-  (** Idle multiplier for interval, clamped [1, 10]. Default: 3. *)
-  let idle_multiplier =
-    let v = get_float ~default:3.0 "MASC_SMART_HB_IDLE_MULTIPLIER" in
-    Float.max 1.0 (Float.min 10.0 v)
-
-  (** Idle threshold (seconds) before multiplier kicks in, clamped [60, 3600]. Default: 300. *)
-  let idle_threshold_s =
-    let v = get_float ~default:300.0 "MASC_SMART_HB_IDLE_THRESHOLD_SEC" in
-    Float.max 60.0 (Float.min 3600.0 v)
 end
 
 (** {1 Dashboard Signal Thresholds} *)
@@ -867,37 +726,6 @@ module Workspace_file = struct
       @ops_class operator *)
   let max_read_bytes =
     max 1 (get_int_nonneg ~default:1_048_576 "MASC_WORKSPACE_FILE_MAX_READ_BYTES")
-end
-
-(** {1 Shell IR Approval Gate (RFC v5)}
-
-    Capability-based approval policy gate for Execute tool calls.
-    When enabled, the keeper runtime routes Shell IR dispatches through
-    [Keeper_tool_execute_shell_ir.dispatch_classified_with_approval]
-    so risk-class trust levels can auto-allow safe commands while
-    requiring explicit approval for audited/privileged operations. *)
-module Shell_ir_approval_gate = struct
-  (** Enable the Shell IR approval policy gate. Default: true (RFC-0254 — the
-      autonomous policy is a strict safety improvement over the no-gate path).
-      Re-readable within the process; set MASC_SHELL_IR_APPROVAL_GATE_ENABLED=false
-      to disable the gate (kill-switch) without recompilation. *)
-  let enabled () =
-    Feature_flag_registry.get_bool "MASC_SHELL_IR_APPROVAL_GATE_ENABLED"
-end
-
-(** {1 Shell IR approval policy config (RFC-0254)} *)
-
-module Shell_ir_approval = struct
-  (** Single env spec that controls the approval overlay for keeper lanes.
-      Examples:
-
-      - [autonomous]
-      - [permissive]
-      - [safe=observe,audited=enforced,privileged=auto_safe]
-      - [profile=autonomous,safe=observe]
-
-      The parser is implemented in {!Masc_exec.Approval_config}. *)
-  let raw_overlay () = Sys.getenv_opt "MASC_SHELL_IR_APPROVAL" |> trim_opt
 end
 
 (** {1 Internal Safety Configuration} *)

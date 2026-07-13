@@ -60,7 +60,7 @@ type fetch_failure =
   | Transport_error of string
   | Http_status of int
   | No_http_status
-  | Redirect_blocked of string
+  | Invalid_redirect of string
   | Redirect_limit_exceeded
   | Unsupported_content_type of string
 

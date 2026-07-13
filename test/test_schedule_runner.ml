@@ -48,16 +48,14 @@ let payload_json text =
 
 let create_ok
   ?(schedule_id = "sched-1")
-  ?(risk_class = Read_only)
-  ?approval_required
   ?recurrence
   config
   =
   match
-    create config ~schedule_id ?approval_required ~requested_at:100.0
+    create config ~schedule_id ~requested_at:100.0
       ~requested_by:(human "requester") ~scheduled_by:(human "scheduler")
-      ~due_at:200.0 ~payload:(payload_json "wake me") ~risk_class
-      ~source:Operator_request ?recurrence ()
+      ~due_at:200.0 ~payload:(payload_json "wake me") ~source:Operator_request
+      ?recurrence ()
   with
   | Ok request -> request
   | Error err -> fail (service_error_to_string err)
@@ -75,6 +73,12 @@ let check_kind label expected actual =
 
 let check_dispatch_status label expected actual =
   check string label (dispatch_status_to_string expected) (dispatch_status_to_string actual)
+;;
+
+let read_recent_signals_exn config n =
+  match read_recent_signals config n with
+  | Ok signals -> signals
+  | Error error -> fail error
 ;;
 
 let json_field key = function
@@ -136,7 +140,8 @@ let test_tick_emits_due_candidate_once () =
     signal.payload_digest;
   let repeated = tick_ok config ~now:202.0 in
   check int "dedupe repeated tick" 0 (List.length repeated.emitted);
-  check int "durable signal count" 1 (List.length (read_recent_signals config 10))
+  check int "durable signal count" 1
+    (List.length (read_recent_signals_exn config 10))
 ;;
 
 let test_tick_dispatches_due_candidate_to_success () =
@@ -207,28 +212,6 @@ let test_tick_marks_unsupported_candidate_failed () =
     (List.length repeated.dispatches)
 ;;
 
-let test_tick_emits_approval_blocker_then_candidate_after_grant () =
-  with_workspace
-  @@ fun config ->
-  let request =
-    create_ok ~schedule_id:"write-1" ~risk_class:Workspace_write config
-  in
-  let blocked = tick_ok config ~now:201.0 in
-  check int "blocked signal" 1 (List.length blocked.emitted);
-  let blocked_signal = List.hd blocked.emitted in
-  check_kind "blocked kind" Due_blocked_approval blocked_signal.kind;
-  check string "blocked id" request.schedule_id blocked_signal.schedule_id;
-  let blocked_again = tick_ok config ~now:202.0 in
-  check int "blocked dedupe" 0 (List.length blocked_again.emitted);
-  (match approve config ~schedule_id:request.schedule_id ~approved_by:(human "approver") () with
-   | Ok _ -> ()
-   | Error err -> fail (service_error_to_string err));
-  let due = tick_ok config ~now:203.0 in
-  check int "candidate after approval" 1 (List.length due.emitted);
-  check_kind "candidate kind" Due_candidate (List.hd due.emitted).kind;
-  check int "two durable signals" 2 (List.length (read_recent_signals config 10))
-;;
-
 let test_tick_reschedules_recurring_candidate_after_signal () =
   with_workspace
   @@ fun config ->
@@ -252,7 +235,8 @@ let test_tick_reschedules_recurring_candidate_after_signal () =
   let second_due = tick_ok config ~now:260.0 in
   check int "second signal" 1 (List.length second_due.emitted);
   check int "second reschedule" 1 second_due.rescheduled;
-  check int "two durable signals" 2 (List.length (read_recent_signals config 10))
+  check int "two durable signals" 2
+    (List.length (read_recent_signals_exn config 10))
 ;;
 
 let test_tick_dispatches_recurring_candidate_to_next_due () =
@@ -287,21 +271,15 @@ let test_tick_dispatches_recurring_candidate_to_next_due () =
      check (float 0.001) "recurring execution due" 200.0 execution.due_at)
 ;;
 
-let test_tick_blocks_recurring_side_effect_until_fresh_grant () =
+let test_tick_dispatches_every_recurring_occurrence () =
   with_workspace
   @@ fun config ->
   let calls = ref [] in
   let request =
-    create_ok ~schedule_id:"write-loop-dispatch-1" ~risk_class:Workspace_write
+    create_ok ~schedule_id:"loop-dispatch-every-occurrence"
       ~recurrence:(Interval { interval_sec = 60 })
       config
   in
-  (match
-     approve config ~grant_id:"grant-loop-1" ~approved_at:150.0
-       ~schedule_id:request.schedule_id ~approved_by:(human "approver-1") ()
-   with
-   | Ok _ -> ()
-   | Error err -> fail (service_error_to_string err));
   let first =
     tick_ok config ~now:201.0 ~consumer:(accepting_consumer calls)
   in
@@ -313,21 +291,8 @@ let test_tick_blocks_recurring_side_effect_until_fresh_grant () =
      check string "stored scheduled after first dispatch" "scheduled"
        (schedule_status_to_string stored.status);
      check (float 0.001) "second due_at" 260.0 stored.due_at);
-  let blocked =
-    tick_ok config ~now:260.0 ~consumer:(accepting_consumer calls)
-  in
-  check int "blocked signal" 1 (List.length blocked.emitted);
-  check_kind "blocked kind" Due_blocked_approval (List.hd blocked.emitted).kind;
-  check int "no stale-grant dispatch" 0 (List.length blocked.dispatches);
-  check Alcotest.(list string) "no second consumer call yet" [ request.schedule_id ] !calls;
-  (match
-     approve config ~grant_id:"grant-loop-2" ~approved_at:260.5
-       ~schedule_id:request.schedule_id ~approved_by:(human "approver-2") ()
-   with
-   | Ok stored -> check string "fresh grant keeps due" "due" (schedule_status_to_string stored.status)
-   | Error err -> fail (service_error_to_string err));
   let second =
-    tick_ok config ~now:261.0 ~consumer:(accepting_consumer calls)
+    tick_ok config ~now:260.0 ~consumer:(accepting_consumer calls)
   in
   check int "second dispatch" 1 (List.length second.dispatches);
   check Alcotest.(list string) "second consumer call"
@@ -360,6 +325,22 @@ let test_tick_marks_dispatch_failure_failed () =
        (Schedule_domain.execution_status_to_string execution.status);
      check (option string) "failed execution error" (Some "boom")
        execution.error)
+;;
+
+let test_recent_signal_decode_error_is_explicit () =
+  with_workspace
+  @@ fun config ->
+  Dated_jsonl.append
+    (Dated_jsonl.create ~base_dir:(signals_dir config) ())
+    (`Assoc
+      [ "event_type", `String "schedule.due_candidate"
+      ; "signal_id", `String "malformed"
+      ]);
+  match read_recent_signals config 10 with
+  | Ok _ -> fail "malformed durable signal was silently ignored"
+  | Error error ->
+    check bool "decode error identifies row" true
+      (String_util.contains_substring error "schedule signal row 0")
 ;;
 
 let test_runner_status_snapshot_tracks_liveness () =
@@ -496,16 +477,16 @@ let () =
             test_tick_dispatches_due_candidate_to_success
         ; test_case "marks unsupported candidate failed" `Quick
             test_tick_marks_unsupported_candidate_failed
-        ; test_case "emits approval blocker then candidate after grant" `Quick
-            test_tick_emits_approval_blocker_then_candidate_after_grant
         ; test_case "reschedules recurring candidate after signal" `Quick
             test_tick_reschedules_recurring_candidate_after_signal
         ; test_case "dispatches recurring candidate to next due" `Quick
             test_tick_dispatches_recurring_candidate_to_next_due
-        ; test_case "blocks recurring side-effect until fresh grant" `Quick
-            test_tick_blocks_recurring_side_effect_until_fresh_grant
+        ; test_case "dispatches every recurring occurrence" `Quick
+            test_tick_dispatches_every_recurring_occurrence
         ; test_case "marks dispatch failure failed" `Quick
             test_tick_marks_dispatch_failure_failed
+        ; test_case "recent signal decode error is explicit" `Quick
+            test_recent_signal_decode_error_is_explicit
         ] )
     ; ( "status",
         [ test_case "tracks liveness snapshot" `Quick

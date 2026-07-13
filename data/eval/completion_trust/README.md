@@ -6,9 +6,8 @@ not own, or for which it lacks adequate evidence.
 
 It is the behavioural (LLM) track of the completion-trust harness. It is
 non-deterministic, token-heavy, and run manually — it is **not** a CI gate. The
-deterministic regression oracle for the same invariants lives in
-`test/test_completion_trust_harness.ml` (dispatch-path gates) and
-`test/test_completion_trust_audit.ml` (live-log fold).
+deterministic regression oracle for the ownership invariant lives in
+`test/test_completion_trust_harness.ml` (dispatch-path gate).
 
 ## What it measures vs. what it does not
 

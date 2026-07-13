@@ -37,8 +37,7 @@
 ;; RFC-0057 Phase 0 — capture bin/gen_tool_descriptors.exe stdout into
 ;; tool_descriptors_gen.ml. %{exe:...} gives dune the build-graph dep
 ;; so any change to gen_tool_descriptors.ml triggers a rerun. Same
-;; shape as RFC-0054 PR-3 in lib/exec/dune for
-;; shell_ir_typed_walkers_gen.ml.
+;; The generated module is part of this library's explicit module set.
 
 (rule
  (target tool_descriptors_gen.ml)

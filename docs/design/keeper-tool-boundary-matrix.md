@@ -27,7 +27,7 @@ Scope:
 | `hook-observation` | OAS hook event parsing, metrics, and observational adapters. | OAS tool handler execution or keeper runtime dispatch. |
 | `oas-tool-bridge` | Keeper tool bridge for OAS bundle, handler, telemetry, JSON, markers, workflow, and deterministic errors. | Generic tool policy or non-OAS hook observation. |
 | `sandbox-runtime` | Sandbox containment, Docker runtime, read/session runners, executor, and shell IR target plumbing. | Tool naming policy or GitHub runtime. |
-| `shell-surface` | Shell command parsing, typed Execute input, shell ops, path, readonly policy, runtime paths, and timeout semantics. | Sandbox runtime or keeper tool registry/policy. |
+| `shell-surface` | Shell command parsing, typed Execute input, shell ops, path, runtime paths, and timeout semantics. | Sandbox runtime or keeper tool registry/policy. |
 | `tool-surface-policy` | Keeper tool aliasing, boundary, disclosure, diversity, emission, registry, policy, resolution, and tool-specific policy records. | OAS bridge implementation, shell parsing, sandbox execution. |
 
 ## Coverage Manifest
@@ -128,13 +128,10 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tool_execute_input.mli` - shell-surface
 - `lib/keeper/keeper_tool_execute_runtime.ml` - shell-surface
 - `lib/keeper/keeper_tool_execute_runtime.mli` - shell-surface
-- `lib/keeper/keeper_tool_execute_command_semantics.ml` - shell-surface
-- `lib/keeper/keeper_tool_execute_command_semantics.mli` - shell-surface
 - `lib/keeper_tool_execute_shell_ir/keeper_tool_execute_shell_ir.ml` - shell-surface
 - `lib/keeper_tool_execute_shell_ir/keeper_tool_execute_shell_ir.mli` - shell-surface
 - `lib/keeper/keeper_tool_execute_path.ml` - shell-surface
 - `lib/keeper/keeper_tool_execute_path.mli` - shell-surface
-- `lib/keeper/keeper_tool_execute_readonly_policy.ml` - shell-surface
 - `lib/keeper/keeper_tool_execute_runtime_paths.ml` - shell-surface
 - `lib/keeper/keeper_tool_execute_runtime_paths.mli` - shell-surface
 - `lib/keeper_tool_execute_timeout/keeper_tool_execute_timeout.ml` - shell-surface
@@ -190,10 +187,6 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tool_visibility_projection.mli` - tool-surface-policy
 - `lib/keeper/keeper_tools_oas_bundle.ml` - oas-tool-bridge
 - `lib/keeper/keeper_tools_oas_bundle.mli` - oas-tool-bridge
-- `lib/keeper/keeper_tools_oas_deterministic_error.ml` - oas-tool-bridge
-- `lib/keeper/keeper_tools_oas_deterministic_error.mli` - oas-tool-bridge
-- `lib/keeper/keeper_tools_oas_failure_boundary.ml` - oas-tool-bridge
-- `lib/keeper/keeper_tools_oas_failure_boundary.mli` - oas-tool-bridge
 - `lib/keeper/keeper_tools_oas_handler_exec.ml` - oas-tool-bridge
 - `lib/keeper/keeper_tools_oas_handler_exec.mli` - oas-tool-bridge
 - `lib/keeper/keeper_tools_oas_handler_telemetry.ml` - oas-tool-bridge

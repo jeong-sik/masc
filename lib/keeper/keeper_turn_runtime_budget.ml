@@ -1,6 +1,6 @@
 (* Keeper_turn_runtime_budget — runtime execution types, fail-open rotation,
-   provider timeout resolution, context overflow observation, keeper pause/resume
-   sync, partial-commit continue gate, and context budget resolution.
+   provider timeout resolution, context overflow observation, Keeper lifecycle
+   sync, and context budget resolution.
 
    Extracted from keeper_unified_turn.ml (L501-1079) during the god-file split. *)
 
@@ -26,67 +26,8 @@ let next_fail_open_runtime_for_turn =
 let sdk_error_kind = Keeper_turn_runtime_budget_routing.sdk_error_kind
 include Keeper_turn_runtime_budget_provider_timeout
 
-(* PR #13120 review: declared in [Env_config_keeper.KeeperRetryBackoff]
-   so the env knob catalog generator at [bin/env_knob_catalog.ml]
-   picks it up — that generator only scans [lib/config/env_config_*.ml],
-   so a knob declared here would silently drift from
-   [docs/runtime-tunables.md] and from [env_config_snapshot]. *)
-let degraded_retry_slot_phase_budget_sec =
-  Env_config_keeper.KeeperRetryBackoff.degraded_retry_slot_phase_budget_sec
-;;
-
-let degraded_retry_slot_phase_available ~(time_spent_in_turn_s : float) : bool =
-  Float.max 0.0 time_spent_in_turn_s < degraded_retry_slot_phase_budget_sec
-
-let runtime_reason_is_structural_attempt_timeout
-    (reason : Keeper_turn_driver.runtime_exhaustion_reason) : bool =
-  (* Typed match only. Producers must construct [Structural_attempt_timeout]
-     explicitly; free-form OAS-ceiling-looking text remains [Other_detail].
-     Enumerate every constructor so a new reason variant fails to compile here
-     rather than silently falling through to [false]. *)
-  match reason with
-  | Keeper_turn_driver.Structural_attempt_timeout _ -> true
-  | Keeper_turn_driver.Connection_refused
-  | Keeper_turn_driver.Dns_failure
-  | Keeper_turn_driver.No_providers_available
-  | Keeper_turn_driver.All_providers_failed
-  | Keeper_turn_driver.Candidates_filtered_after_cycles
-  | Keeper_turn_driver.Max_turns_exceeded
-  | Keeper_turn_driver.Session_conflict
-  | Keeper_turn_driver.Capacity_exhausted
-  | Keeper_turn_driver.Other_detail _ -> false
-
-let degraded_retry_bypasses_slot_phase_guard
-    (err : Agent_sdk.Error.sdk_error) : bool =
-  (* Enumerate every [masc_internal_error] variant plus [None] so the
-     compiler flags any new constructor here. The old [_ -> false] silently
-     extended the "not a budget exhaustion" set whenever a new error class
-     was added to Runtime_error_classify, which is exactly the wrong default
-     for a guard that decides whether to bypass slot-phase admission. *)
-  match Keeper_turn_driver.classify_masc_internal_error err with
-  | Some (Keeper_turn_driver.Provider_timeout _) -> true
-  | Some (Keeper_turn_driver.Runtime_exhausted { reason = Keeper_turn_driver.Structural_attempt_timeout _; _ }) ->
-      true
-  | Some
-      ( Keeper_turn_driver.Runtime_exhausted _
-      | Keeper_turn_driver.Capacity_backpressure _
-      | Keeper_turn_driver.Resumable_cli_session _
-
-      | Keeper_turn_driver.Accept_rejected _
-      | Keeper_turn_driver.Admission_queue_timeout _
-      | Keeper_turn_driver.Admission_queue_rejected _
-      | Keeper_turn_driver.Turn_timeout _
-      | Keeper_turn_driver.Ambiguous_post_commit _
-      (* RFC-0159 Phase A: Internal_* variants are not OAS-budget timeouts. *)
-      | Keeper_turn_driver.Internal_unhandled_exception _
-      | Keeper_turn_driver.Internal_bridge_exception _
-      | Keeper_turn_driver.Internal_contract_rejected _ )
-  | None ->
-    false
-
-type degraded_retry_budget_decision =
+type degraded_retry_decision =
   | No_degraded_retry
-  | Degraded_retry_slot_phase_exhausted of EC.degraded_retry
   | Degraded_retry_allowed of EC.degraded_retry
 
 type 'a degraded_retry_prepare_result =
@@ -103,10 +44,6 @@ type 'a degraded_retry_prepare_result =
 
 type 'a degraded_retry_step =
   | Degraded_retry_step_not_allowed
-  | Degraded_retry_step_slot_phase_exhausted of {
-      retry : EC.degraded_retry;
-      reason : string;
-    }
   | Degraded_retry_step_setup_failed of {
       retry : EC.degraded_retry;
       reason : string;
@@ -166,42 +103,23 @@ let prepare_degraded_retry_allowed
      | Error fail_open_err ->
        Degraded_retry_setup_failed { retry; reason; fail_open_err })
 
-let next_fail_open_runtime_for_turn_with_budget
+let decide_degraded_retry
     ~(base_runtime : string)
     ~(effective_runtime : string)
     ~(attempted_runtimes : string list)
-    ~(estimated_input_tokens : int)
-    ?time_spent_in_turn_s
-    ~(remaining_turn_budget_s : float)
-    (err : Agent_sdk.Error.sdk_error) : degraded_retry_budget_decision =
+    (err : Agent_sdk.Error.sdk_error) : degraded_retry_decision =
   match
     next_fail_open_runtime_for_turn
       ~base_runtime ~effective_runtime
       ~attempted_runtimes err
   with
   | None -> No_degraded_retry
-  | Some retry ->
-      let first_contract_rotation = false in
-      if
-        match time_spent_in_turn_s with
-        | Some time_spent_in_turn_s ->
-            (not (degraded_retry_slot_phase_available ~time_spent_in_turn_s))
-            && not (degraded_retry_bypasses_slot_phase_guard err)
-            && not first_contract_rotation
-        | None -> false
-      then Degraded_retry_slot_phase_exhausted retry
-      else (
-        let _ = estimated_input_tokens in
-        let _ = remaining_turn_budget_s in
-        Degraded_retry_allowed retry)
+  | Some retry -> Degraded_retry_allowed retry
 
 let plan_degraded_retry_step
       ~base_runtime
       ~current_runtime_id
       ~attempted_runtimes
-      ~estimated_input_tokens
-      ~time_spent_in_turn_s
-      ~remaining_turn_budget_s
       ~attempt
       ~err
       ~allow_retry
@@ -211,13 +129,10 @@ let plan_degraded_retry_step
       ~setup_runtime
   =
   match
-    next_fail_open_runtime_for_turn_with_budget
+    decide_degraded_retry
       ~base_runtime
       ~effective_runtime:current_runtime_id
       ~attempted_runtimes
-      ~estimated_input_tokens
-      ?time_spent_in_turn_s
-      ~remaining_turn_budget_s
       err
   with
   | No_degraded_retry -> Degraded_retry_step_not_allowed
@@ -238,17 +153,6 @@ let plan_degraded_retry_step
      | Degraded_retry_setup_failed { retry; reason; fail_open_err } ->
        Degraded_retry_step_setup_failed { retry; reason; fail_open_err })
   | Degraded_retry_allowed _ -> Degraded_retry_step_not_allowed
-  | Degraded_retry_slot_phase_exhausted retry when allow_retry retry ->
-    let reason = EC.degraded_retry_reason_to_string retry.fallback_reason in
-    publish_cascade_resolution
-      ~runtime_id:current_runtime_id
-      ~decision:Keeper_unified_turn_cascade_resolution.Degraded_retry_slot_phase_exhausted
-      ~reason
-      ~next_runtime:(Some retry.next_runtime)
-      ~attempt
-      err;
-    Degraded_retry_step_slot_phase_exhausted { retry; reason }
-  | Degraded_retry_slot_phase_exhausted _ -> Degraded_retry_step_not_allowed
 
 let yield_before_direct_no_progress_retry () = Eio.Fiber.yield ()
 
@@ -270,28 +174,19 @@ let direct_no_progress_retry_decision
     ~base_runtime
     ~effective_runtime
     ~attempted_runtimes
-    ~estimated_input_tokens
-    ?time_spent_in_turn_s
-    ~remaining_turn_budget_s
     err =
   match direct_no_progress_retry_reason err with
   | None -> No_degraded_retry
   | Some (EC.Empty_no_progress | EC.Thinking_only_no_progress) ->
     (match
-       next_fail_open_runtime_for_turn_with_budget
+       decide_degraded_retry
          ~base_runtime
          ~effective_runtime
          ~attempted_runtimes
-         ~estimated_input_tokens
-         ?time_spent_in_turn_s
-         ~remaining_turn_budget_s
          err
      with
      | Degraded_retry_allowed retry when retry_reason_is_direct_no_progress retry
        -> Degraded_retry_allowed retry
-     | Degraded_retry_slot_phase_exhausted retry
-       when retry_reason_is_direct_no_progress retry ->
-       Degraded_retry_slot_phase_exhausted retry
      | _ -> No_degraded_retry)
   | Some _ -> No_degraded_retry
 
@@ -300,9 +195,6 @@ let run_direct_no_progress_retry_loop
       ~base_runtime
       ~initial_runtime
       ~initial_max_context
-      ~estimated_input_tokens
-      ~timeout_sec
-      ~remaining_turn_budget_s
       ~current_turn_phase_elapsed_ms
       ~now_s
       ~(setup_retry_runtime :
@@ -355,10 +247,6 @@ let run_direct_no_progress_retry_loop
            ~base_runtime
            ~current_runtime_id:runtime_id
            ~attempted_runtimes
-           ~estimated_input_tokens
-           ~time_spent_in_turn_s:
-             (Some (timeout_sec -. remaining_turn_budget_s ()))
-           ~remaining_turn_budget_s:(remaining_turn_budget_s ())
            ~attempt
            ~err
            ~allow_retry:retry_reason_is_direct_no_progress
@@ -383,18 +271,6 @@ let run_direct_no_progress_retry_loop
            ~next_runtime:None
            ~attempt
            err;
-         error
-       | Degraded_retry_step_slot_phase_exhausted { retry; reason } ->
-         Log.Keeper.warn
-           "%s: direct keeper_msg no-progress response from runtime=%s suggested \
-            retry to %s (reason=%s), but productive slot phase budget %.1fs \
-            is exhausted after %.1fs"
-           keeper_name
-           runtime_id
-           retry.next_runtime
-           reason
-           degraded_retry_slot_phase_budget_sec
-           (timeout_sec -. remaining_turn_budget_s ());
          error
        | Degraded_retry_step_setup_failed { retry; fail_open_err; _ } ->
          let productive_phase_elapsed_ms, retry_phase_elapsed_ms =
@@ -636,212 +512,18 @@ let context_overflow_event_of_error
               limit_tokens = None;
             }
 
-let pause_resume_policy_of_circuit_effect = function
-  | Keeper_failure_policy.Operator_breaker ->
-    Keeper_supervisor_pause_policy.Manual_resume_required
-  | Keeper_failure_policy.Skip_circuit
-  | Keeper_failure_policy.Count_for_circuit
-  | Keeper_failure_policy.Provider_cooldown ->
-    Keeper_supervisor_pause_policy.Auto_resume_with_backoff
-;;
-
-let overflow_pause_resume_policy () =
-  (Keeper_failure_policy.decide Keeper_failure_policy.Turn_overflow_pause)
-    .circuit_effect
-  |> pause_resume_policy_of_circuit_effect
-;;
-
-let pause_keeper_for_overflow
+let record_overflow_failure
     ~(config : Workspace.config)
     ~(meta : keeper_meta)
-    ~(reason : string) : keeper_meta =
-  if Keeper_pacing_shadow.pacing_enforced ()
-  then (
-    (* RFC-0313 W3: unresolved context overflow no longer pauses. The caller
-       fails the turn with the ContextOverflow error, so the routing site in
-       [Keeper_unified_turn] records pacing and enqueues a [Context_overflow]
-       judgment stimulus. Only the failure reason is latched here as
-       evidence. *)
-    Keeper_registry.set_failure_reason
-      ~base_path:config.base_path
-      meta.name
-      (Some Keeper_registry.Turn_overflow_pause);
-    Log.Keeper.warn
-      "%s: unresolved context overflow (%s) recorded without pause \
-       (RFC-0313 W3); judgment stimulus follows from turn failure routing"
-      meta.name
-      reason;
-    meta)
-  else (
-  let resume_policy = overflow_pause_resume_policy () in
-  match
-    Keeper_supervisor_pause_policy.handle_auto_pause_from_meta
-      ~config
-      ~meta
-      ~reason_tag:"overflow"
-      ~lifecycle_detail:(Printf.sprintf "context_overflow %s" reason)
-      ~log_message:(Printf.sprintf "keeper paused after unresolved context overflow (%s)" reason)
-      ~blocker_class:(Some Sdk_token_budget_exceeded)
-      ~resume_policy
-      ()
-  with
-  | Ok paused_meta ->
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string FailureDrivenPause)
-      ~labels:[ "keeper", meta.name; "site", "turn_overflow" ]
-      ();
-    (* Issue #8581: latch the retry-exhausted condition BEFORE the
-       Operator_pause that drives the Paused phase.  The SSOT
-       function already dispatched [Operator_pause]; we only need
-       the extra [Compact_retry_exhausted] signal here. *)
-    dispatch_keeper_phase_event
-      ~config
-      ~keeper_name:meta.name
-      Keeper_state_machine.Compact_retry_exhausted;
-    Keeper_registry.set_failure_reason
-      ~base_path:config.base_path
-      meta.name
-      (Some Keeper_registry.Turn_overflow_pause);
-    paused_meta
-  | Error _err ->
-    (* Fallback: write failed but we must not leave the caller with
-       an unpaused keeper.  Replicate the old in-memory pause path
-       (registry update + events) so the scheduling loop skips this
-       keeper on the next tick.  The write failure is already logged
-       and counted by [handle_auto_pause_from_meta]. *)
-    let paused_meta =
-      { meta with
-        paused = true;
-        auto_resume_after_sec =
-          Keeper_supervisor_pause_policy.auto_resume_after_sec_for_policy
-            meta
-            resume_policy;
-        updated_at = now_iso ();
-      }
-    in
-    Keeper_registry.update_meta ~base_path:config.base_path meta.name paused_meta;
-    Keeper_registry.set_failure_reason
-      ~base_path:config.base_path
-      meta.name
-      (Some Keeper_registry.Turn_overflow_pause);
-    dispatch_keeper_phase_event
-      ~config
-      ~keeper_name:meta.name
-      Keeper_state_machine.Compact_retry_exhausted;
-    dispatch_keeper_phase_event
-      ~config
-      ~keeper_name:meta.name
-      Keeper_state_machine.Operator_pause;
-    paused_meta)
-
-let sync_keeper_paused_state_impl
-    ~(resume_policy : Keeper_supervisor_pause_policy.crash_pause_resume_policy option)
-    ~(config : Workspace.config)
-    ~(meta : keeper_meta)
-    ~(paused : bool) : (keeper_meta, string) result =
-  let auto_resume_after_sec =
-    match paused, resume_policy with
-    | true, Some policy ->
-      Keeper_supervisor_pause_policy.auto_resume_after_sec_for_policy meta policy
-    | _ -> meta.auto_resume_after_sec
-  in
-  let synced_meta =
-    {
-      meta with
-      paused;
-      auto_resume_after_sec;
-      updated_at = now_iso ();
-    }
-  in
-  (* #9733: pause/resume sync is operator-driven; the [paused]
-     field is cycle-owned at this site, so use the same merged-CAS
-     write as overflow pause + unified-turn failure paths.  Without
-     this, an operator pause/resume that races a heartbeat tick
-     can land partially (paused field correct on disk, but write
-     reports failure) which leaves the registry update unsync'd
-     with disk. *)
-  match
-    write_meta_with_merge
-      ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
-      config synced_meta
-  with
-  | Error err ->
-      Otel_metric_store.inc_counter
-        Keeper_metrics.(to_string WriteMetaFailures)
-        ~labels:[("keeper", meta.name);
-                 ("phase",
-                  if paused then "pause_sync" else "resume_sync")]
-        ();
-      Keeper_turn_helpers.report_keeper_cycle_side_effect_issue
-        ~config
-        ~keeper_name:meta.name
-        ~side_effect:(Printf.sprintf "%s sync write_meta"
-                        (if paused then "pause" else "resume"))
-        ~severity:`Error
-        err;
-      Error (Printf.sprintf "failed to write meta: %s" err)
-  | Ok () ->
-      Keeper_registry.update_meta ~base_path:config.base_path meta.name synced_meta;
-      Keeper_turn_helpers.dispatch_keeper_phase_event_checked
-        ~config
-        ~keeper_name:meta.name
-        ~side_effect:(Printf.sprintf "%s sync phase update"
-                        (if paused then "pause" else "resume"))
-        (if paused
-         then Keeper_state_machine.Operator_pause
-         else Keeper_state_machine.Operator_resume);
-      let synced_meta =
-        if paused
-        then
-          match
-            Keeper_supervisor_pause_policy.release_owned_active_tasks_after_typed_pause
-              ~config
-              ~meta:synced_meta
-              ~reason_tag:"pause_sync"
-          with
-          | Ok released_meta -> released_meta
-          | Error err ->
-            Otel_metric_store.inc_counter
-              Keeper_metrics.(to_string RuntimeSyncFailures)
-              ~labels:[("keeper", meta.name); ("site", "pause_sync_task_release")]
-              ();
-            Keeper_turn_helpers.report_keeper_cycle_side_effect_issue
-              ~config
-              ~keeper_name:meta.name
-              ~side_effect:"pause sync task release"
-              ~severity:`Error
-              err;
-            synced_meta
-        else synced_meta
-      in
-      (if not paused then
-         match Keeper_registry.get ~base_path:config.base_path meta.name with
-         (* tla-lint: allow-mutation: fiber signal — wake on resume from runtime budget gate *)
-         | Some entry -> Atomic.set entry.fiber_wakeup true
-         | None ->
-             Keeper_turn_helpers.report_keeper_cycle_side_effect_issue
-               ~config
-               ~keeper_name:meta.name
-               ~side_effect:"resume sync fiber wakeup"
-               "registry entry missing after metadata update");
-      Ok synced_meta
-
-let sync_keeper_paused_state ~(config : Workspace.config) ~(meta : keeper_meta) ~paused
-  =
-  sync_keeper_paused_state_impl ~resume_policy:None ~config ~meta ~paused
-
-let sync_keeper_paused_state_with_resume_policy
-    ~(config : Workspace.config)
-    ~(meta : keeper_meta)
-    ~(paused : bool)
-    ~(resume_policy : Keeper_supervisor_pause_policy.crash_pause_resume_policy)
-  : (keeper_meta, string) result
-  =
-  sync_keeper_paused_state_impl
-    ~resume_policy:(Some resume_policy)
-    ~config
-    ~meta
-    ~paused
+    ~(reason : string) : unit =
+  Keeper_registry.set_failure_reason
+    ~base_path:config.base_path
+    meta.name
+    (Some Keeper_registry.Turn_overflow_failure);
+  Log.Keeper.warn
+    "%s: unresolved context overflow observed (%s); Keeper lifecycle remains active"
+    meta.name
+    reason
 
 let current_keeper_meta ~(config : Workspace.config) ~(fallback_meta : keeper_meta) =
   match Keeper_registry.get ~base_path:config.base_path fallback_meta.name with
@@ -888,11 +570,9 @@ let resilience_execution_event_to_string = function
 let make_post_turn_resilience_executor
     ~(config : Workspace.config)
     ~(meta : keeper_meta)
-    ~(on_paused : keeper_meta -> unit)
   : Resilience.Recovery.strategy_executor =
-  let pause_for_operator ~code ~detail =
+  let record_recovery_failure ~code ~detail =
     let detail = short_resilience_detail detail in
-    let latest_meta = current_keeper_meta ~config ~fallback_meta:meta in
     Keeper_registry.set_failure_reason ~base_path:config.base_path meta.name
       (Some
          (Keeper_registry.Provider_runtime_error
@@ -900,38 +580,15 @@ let make_post_turn_resilience_executor
             ; runtime_id = None
             ; reason = None
             }));
-    if Keeper_pacing_shadow.pacing_enforced ()
-    then (
-      (* RFC-0313 W3: post-turn resilience strategies latch the failure
-         reason as evidence but no longer pause. The failed turn already
-         went through failure routing (pacing + judgment stimulus). *)
-      Log.Keeper.warn ~keeper_name:meta.name
-        "%s: post-turn resilience strategy (code=%s) recorded without pause \
-         (RFC-0313 W3): %s"
-        meta.name code detail;
-      Ok ())
-    else
-      match
-        sync_keeper_paused_state_with_resume_policy
-          ~config
-          ~meta:latest_meta
-          ~paused:true
-          ~resume_policy:Keeper_supervisor_pause_policy.Auto_resume_with_backoff
-      with
-      | Ok paused_meta ->
-          Otel_metric_store.inc_counter
-            Keeper_metrics.(to_string FailureDrivenPause)
-            ~labels:[ "keeper", meta.name; "site", "post_turn_resilience" ]
-            ();
-          on_paused paused_meta;
-          Ok ()
-      | Error err -> Error err
+    Log.Keeper.warn ~keeper_name:meta.name
+      "%s: post-turn resilience strategy failure (code=%s) observed; Keeper \
+       lifecycle remains active: %s"
+      meta.name code detail
   in
-  let fail_and_pause ~code ~detail =
+  let fail_with_observation ~code ~detail =
     let detail = short_resilience_detail detail in
-    match pause_for_operator ~code ~detail with
-    | Ok () -> detail
-    | Error err -> Printf.sprintf "%s (pause failed: %s)" detail err
+    record_recovery_failure ~code ~detail;
+    detail
   in
   {
     Resilience.Recovery.run_retry_attempt =
@@ -939,11 +596,11 @@ let make_post_turn_resilience_executor
         let detail =
           Printf.sprintf
             "post-turn resilience retry attempt %d has no operation-specific \
-             retry callback; paused for operator recovery"
+             retry callback"
             attempt
         in
         Resilience.Recovery.Fatal_failure
-          (fail_and_pause ~code:"resilience_retry_unbound" ~detail));
+          (fail_with_observation ~code:"resilience_retry_unbound" ~detail));
     sleep =
       (fun delay_s ->
         if delay_s > 0.0 then
@@ -959,11 +616,11 @@ let make_post_turn_resilience_executor
         let detail =
           Printf.sprintf
             "post-turn resilience fallback has no typed target \
-             (value=%s confidence_delta=%.3f); paused for operator recovery"
+             (value=%s confidence_delta=%.3f)"
             (short_resilience_detail value) confidence_delta
         in
         Error
-          (fail_and_pause ~code:"resilience_fallback_unbound" ~detail));
+          (fail_with_observation ~code:"resilience_fallback_unbound" ~detail));
     request_handoff =
       (fun ~message ~preserve_state ->
         let detail =
@@ -971,7 +628,8 @@ let make_post_turn_resilience_executor
             "post-turn resilience handoff requested preserve_state=%b: %s"
             preserve_state message
         in
-        pause_for_operator ~code:"resilience_handoff" ~detail);
+        record_recovery_failure ~code:"resilience_handoff" ~detail;
+        Ok ());
     abort =
       (fun ~reason ->
         let detail =
@@ -979,26 +637,14 @@ let make_post_turn_resilience_executor
             "post-turn resilience abort requested: %s"
             reason
         in
-        pause_for_operator ~code:"resilience_abort" ~detail);
+        record_recovery_failure ~code:"resilience_abort" ~detail;
+        Ok ());
   }
 
 let post_turn_resilience_handles
     ~(config : Workspace.config)
     ~(meta : keeper_meta) : post_turn_resilience_handles =
-  let paused_meta = Atomic.make None in
-  let sync_lifecycle_meta lifecycle =
-    match Atomic.get paused_meta with
-    | None -> lifecycle
-    | Some paused ->
-        { lifecycle with
-          updated_meta =
-            { lifecycle.updated_meta with
-              paused = paused.paused;
-              updated_at = paused.updated_at;
-              auto_resume_after_sec = paused.auto_resume_after_sec;
-            };
-        }
-  in
+  let sync_lifecycle_meta lifecycle = lifecycle in
   if not (Resilience.Keeper_bridge.masc_resilience_enabled ()) then
     {
       resilience_audit_store = None;
@@ -1028,77 +674,12 @@ let post_turn_resilience_handles
           sync_lifecycle_meta;
         }
     | Ok audit_store ->
-        let executor =
-          make_post_turn_resilience_executor ~config ~meta
-            ~on_paused:(fun meta -> Atomic.set paused_meta (Some meta))
-        in
+        let executor = make_post_turn_resilience_executor ~config ~meta in
         {
           resilience_audit_store = Some audit_store;
           resilience_strategy_executor = Some executor;
           sync_lifecycle_meta;
         }
-
-let enqueue_partial_commit_continue_gate
-    ~(config : Workspace.config)
-    ~(meta : keeper_meta)
-    ~(failure_reason : Keeper_registry.failure_reason)
-    ~(committed_tools : string list)
-    ~(error_detail : string) : string =
-  let reason_text = Keeper_registry.failure_reason_to_string failure_reason in
-  let input =
-    `Assoc [
-      ("kind", `String "continue_gate_required");
-      ("keeper_name", `String meta.name);
-      ("failure_reason", `String reason_text);
-      ("error_detail", `String error_detail);
-      ("committed_tools", `List (List.map (fun tool -> `String tool) committed_tools));
-    ]
-  in
-  Keeper_approval_queue.submit_pending
-    ~keeper_name:meta.name
-    ~tool_name:"keeper_continue_after_partial_commit"
-    ~input
-    ~risk_level:Keeper_approval_queue.Critical
-    ~base_path:config.base_path
-    ~lane_policy:Keeper_approval_queue.Blocking
-    ~on_resolution:(fun decision ->
-      let latest_meta = current_keeper_meta ~config ~fallback_meta:meta in
-      match decision with
-      | Agent_sdk.Hooks.Approve
-      | Agent_sdk.Hooks.Edit _ ->
-        (match sync_keeper_paused_state ~config ~meta:latest_meta ~paused:false with
-         | Ok resumed_meta ->
-             Keeper_registry.set_failure_reason ~base_path:config.base_path meta.name None;
-             Keeper_registry.reset_turn_failures ~base_path:config.base_path meta.name;
-             Log.Keeper.info
-               "%s: partial-commit continue gate approved; auto-resumed keeper"
-               resumed_meta.name
-         | Error err ->
-             Log.Keeper.error
-               "%s: partial-commit continue gate approved but keeper resume sync failed: %s"
-               meta.name err);
-             Otel_metric_store.inc_counter
-               Keeper_metrics.(to_string RuntimeSyncFailures)
-               ~labels:[("keeper", meta.name); ("site", "resume_sync")]
-               ()
-      | Agent_sdk.Hooks.Reject reason ->
-        (match sync_keeper_paused_state ~config ~meta:latest_meta ~paused:true with
-         | Ok paused_meta ->
-             Keeper_registry.set_failure_reason
-               ~base_path:config.base_path meta.name
-               (Some failure_reason);
-             Log.Keeper.warn
-               "%s: partial-commit continue gate rejected; keeper remains paused (%s)"
-               paused_meta.name reason
-         | Error err ->
-             Log.Keeper.error
-               "%s: partial-commit continue gate rejected but keeper pause sync failed: %s (reason=%s)"
-               meta.name err reason);
-             Otel_metric_store.inc_counter
-               Keeper_metrics.(to_string RuntimeSyncFailures)
-               ~labels:[("keeper", meta.name); ("site", "pause_sync")]
-               ())
-    ()
 
 (* Dedupe "mixed runtime context budget" log: the values are constant
    per (keeper_name, primary_budget, runtime_budget) because runtime config

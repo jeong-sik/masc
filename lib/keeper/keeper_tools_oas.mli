@@ -33,79 +33,12 @@ val record_keeper_internal_tool_call
   -> duration_ms:int
   -> unit
 
-(** Repeated-failure guardrail threshold sourced from
-    [Env_config.KeeperToolExec.max_consecutive_tool_failures].
-    A tool is blocked after this many consecutive failures with the
-    same (tool_name, args_hash) key; resets on success. *)
-val max_consecutive_failures : int
-
-(** Thread-safe per-tool consecutive-failure counters shared by the
-    handler closures in one tool bundle. *)
-type workflow_rejection_info = Keeper_tools_oas_workflow.workflow_rejection_info
-
-type failure_counts
-
-val create_failure_counts : unit -> failure_counts
-
-val failure_count_get : failure_counts -> string -> int
-
-val failure_count_record_failure : failure_counts -> string -> int
-
-val failure_count_reset : failure_counts -> string -> unit
-
-val failure_count_jump_to : failure_counts -> string -> target:int -> int
-
-val workflow_rejection_count_record : failure_counts -> string -> int
-
-val workflow_rejection_count_reset : failure_counts -> unit
-
-(** Test-only: inject a failure counter with [blocked_at] set to
-    [failure_count_ttl_seconds + 60] seconds in the past.
-    The next [failure_count_get] call for [key] will treat it as
-    expired and return 0. *)
-val inject_stale_failure_count_for_test : failure_counts -> string -> int -> unit
-
-(** Reset process-global retry-log dedupe state. Test-only entry point
-    for suites that assert the first occurrence of a tool failure emits
-    at ERROR. *)
-val reset_tool_retry_dedupe_for_testing : unit -> unit
-
 (** Normalize a raw tool result string into the canonical JSON
     envelope. Success → [{"ok":true,"result":...}]; failure →
     [{"ok":false,"error":...,"detail":...}], preserving structured
     [failure_class]/[recoverable]/[error_class] fields when present.
     Plain text is wrapped as a string under [result] / [error]. *)
-val normalize_tool_result
-  :  ?workflow_rejection_recovery_fields:(string * Yojson.Safe.t) list
-  -> success:bool
-  -> string
-  -> string
-
-(** Build top-level recovery hints for workflow rejections.
-    These fields are intentionally outside [detail] so the LLM sees the
-    required self-correction without parsing nested tool-specific payloads. *)
-
-(** Promote a tool-specific [recovery_plan] out of a deterministic
-    failure payload so the next call can route without scraping nested
-    detail text. *)
-
-(** Error-class string for transient mutex contention failures. *)
-val transient_mutex_contention_error_class : string
-
-(** Record a deterministic tool failure metric with telemetry labels. *)
-val record_deterministic_tool_failure_metric
-  :  tool_name:string
-  -> Keeper_tool_deterministic_error.deterministic_reason
-  -> unit
-
-(** Build the structured, recoverable envelope used when a keeper tool
-    raises mutex EDEADLK / "Resource deadlock avoided". *)
-val transient_mutex_contention_tool_error
-  :  tool_name:string
-  -> error_text:string
-  -> ?backtrace:string
-  -> unit
-  -> string
+val normalize_tool_result : success:bool -> string -> string
 
 (* Handlers moved to [Keeper_tools_oas_handler] — see
    keeper_tools_oas_handler.mli for [make_keeper_tool_handler],

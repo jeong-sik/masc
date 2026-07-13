@@ -1,25 +1,22 @@
 (** Durable store for scheduled internal automation requests.
 
-    This layer records intent and execution grants. It deliberately does not
-    execute work. Runner/tool wiring must consume due candidates later. *)
+    This layer records schedule intent and generic execution attempts. It
+    deliberately does not authorize or execute payload effects. *)
 
 type state =
   { version : int
   ; updated_at : float
   ; schedules : Schedule_domain.schedule_request list
-  ; grants : Schedule_domain.execution_grant list
   ; executions : Schedule_domain.execution_record list
   }
 
 type store_error =
   | Schedule_already_exists
   | Schedule_not_found
-  | Grant_already_recorded
   | Invalid_initial_status of string
   | Invalid_status_transition of string
   | Schedule_not_due_candidate
   | Schedule_not_running
-  | Grant_validation_failed of Schedule_domain.grant_error
   | Persistence_failed of string
   | Corrupt_ledger of
       { primary_err : string
@@ -92,11 +89,6 @@ val insert_request :
   Schedule_domain.schedule_request ->
   (Schedule_domain.schedule_request, store_error) result
 
-val record_grant :
-  Workspace_utils.config ->
-  Schedule_domain.execution_grant ->
-  (Schedule_domain.schedule_request, store_error) result
-
 val cancel_request :
   Workspace_utils.config ->
   schedule_id:string ->
@@ -109,8 +101,8 @@ val update_request :
   expires_at:float option ->
   payload:Schedule_domain.payload ->
   (Schedule_domain.schedule_request, store_error) result
-(** Replaces [due_at], [expires_at], and [payload] of a pending or scheduled
-    request. Returns [Invalid_status_transition] for due, terminal, or [Running]
+(** Replaces [due_at], [expires_at], and [payload] of a scheduled request.
+    Returns [Invalid_status_transition] for due, terminal, or [Running]
     requests. *)
 
 val refresh_due :
@@ -134,7 +126,7 @@ val start_due_candidate :
   now:float ->
   schedule_id:string ->
   (Schedule_domain.schedule_request, store_error) result
-(** Atomically transitions an approved due candidate to [Running] and records a
+(** Atomically transitions a due candidate to [Running] and records a
     generic execution attempt. *)
 
 val complete_running :
@@ -162,23 +154,17 @@ val fail_due_candidate :
   schedule_id:string ->
   error:string ->
   (Schedule_domain.schedule_request, store_error) result
-(** Atomically marks an approved [Due] request [Failed] and records the failed
+(** Atomically marks a [Due] request [Failed] and records the failed
     execution attempt. This is used when a runner-side consumer rejects the
     payload before work starts, so the schedule does not remain due forever. *)
 
 val due_execution_candidates :
   state -> Schedule_domain.schedule_request list
-(** Returns only due requests that are no longer pending approval. *)
-
-val has_current_approved_grant :
-  state -> Schedule_domain.schedule_request -> bool
-(** Whether [state] contains an approved grant whose evidence matches the
-    request's current [schedule_id], payload digest, [risk_class], and [due_at].
-    Recurring requests therefore need fresh approval for each new occurrence
-    when they require a separate human grant. *)
+(** Returns all due requests. Authorization of dispatched effects belongs to
+    the payload consumer. *)
 
 val prune_completed :
   Workspace_utils.config ->
   (state * int, store_error) result
-(** Deletes all terminal (succeeded, failed, rejected, cancelled, expired) schedule requests
-    and their associated execution records and grants. *)
+(** Deletes all terminal (succeeded, failed, cancelled, expired) schedule
+    requests and their associated execution records. *)

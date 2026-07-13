@@ -16,6 +16,7 @@ val tool_preferred_empty : string
 val tool_unknown_guard : string
 val recovery_block : string
 val failure_judgment : string
+val gate_judgment : string
 val turn_intent : string
 val librarian_system : string
 val librarian_episode_extraction : string
@@ -33,7 +34,6 @@ val turn_intent_board_post_guidance : string
 val turn_intent_board_curation_guidance : string
 val turn_intent_broadcast_guidance : string
 val turn_intent_task_create_guidance : string
-val turn_intent_pr_duplicate_search_guidance : string
 
 (** User-prompt "Claimable Work" section template key. *)
 val immediate_task_move : string

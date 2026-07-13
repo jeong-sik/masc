@@ -22,19 +22,15 @@ type sandbox =
   | Docker_profile
   | Backend_selected
 
-type approval =
-  | No_approval
-  | Policy_selected
-  | Human_required
-
 (** One explicit Keeper-model exposure choice per descriptor. Compatibility
     aliases remain routable at transport boundaries but never become a second
-    model-facing name. [Dispatch_only] keeps an internal runtime route out of
-    the Keeper model surface. *)
+    model-facing name. [Transport_alias] identifies a descriptor whose exact
+    capability is already projected by another descriptor; it is not a
+    subjective visibility policy. *)
 type keeper_model_projection =
   | Preferred_public_name
   | Internal_name
-  | Dispatch_only
+  | Transport_alias of { projected_by : string }
 
 (** Descriptor-owned model description enrichment. The dynamic task-state
     context is explicit metadata rather than an internal-name comparison in
@@ -57,8 +53,8 @@ type keeper_tool_group =
   | Core_group
 
 (** Provenance of the descriptor input schema. A missing canonical cluster
-    schema makes that descriptor dispatch-only and is reported by the schema
-    injection boundary. *)
+    schema excludes that descriptor from model projection and is reported by
+    the schema injection boundary. *)
 type input_schema_source =
   | Descriptor_owned
   | Canonical_registry
@@ -94,6 +90,8 @@ type runtime_handler =
   | Tool_masc_agent_dispatch
   | Tool_masc_workspace_dispatch
   | Tool_masc_misc_dispatch
+  | Tool_web_search
+  | Tool_web_fetch
   | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_schedule_dispatch
@@ -107,15 +105,11 @@ type runtime_handler =
   | Tool_analyze_image
 
 type policy =
-  { visibility : Tool_catalog.visibility
-  ; readonly_of_input : readonly_of_input
+  { readonly_of_input : readonly_of_input
   ; readonly_hint : bool option
-  ; effect_domain : Tool_catalog.effect_domain option
-  ; approval : approval
   ; retryable : bool
   ; cwd_scope : string option
   ; inline_safe : bool
-  ; maintenance_only : bool
   ; polling_read : bool
   }
 
@@ -153,7 +147,6 @@ type t =
 val executor_to_string : executor -> string
 val backend_to_string : backend -> string
 val sandbox_to_string : sandbox -> string
-val approval_to_string : approval -> string
 val keeper_model_projection_to_string : keeper_model_projection -> string
 val model_description_projection_to_string : model_description_projection -> string
 val keeper_tool_group_to_string : keeper_tool_group -> string
@@ -176,11 +169,18 @@ val internal_descriptors : t list
     descriptor-backed tool, regardless of LLM-native vs workspace origin. *)
 val all_descriptors : unit -> t list
 
+(** Objective schema-shape errors that prevent model projection. Empty means
+    the descriptor has a resolved object schema whose structural fields are
+    well-formed. *)
+val model_schema_errors : t -> string list
+
 (** Descriptors with one explicit model-facing projection and a resolved input
-    schema. Missing canonical schemas are fail-closed. *)
+    schema. Only exact transport aliases and missing/structurally invalid schemas
+    are excluded. *)
 val model_visible_descriptors : unit -> t list
 
-(** The sole active Keeper model name. Empty only for [Dispatch_only]. *)
+(** The sole active Keeper model name. Empty only for an exact
+    [Transport_alias] or a descriptor without a resolved schema. *)
 val keeper_model_names : t -> string list
 
 (** Names admitted by the Keeper execution/candidate boundary. A preferred
@@ -189,7 +189,7 @@ val keeper_model_names : t -> string list
     the model schema, so these aliases cannot become duplicate model tools. *)
 val keeper_candidate_names : t -> string list
 
-(** Every name owned by a descriptor, including dispatch-only names. This is
+(** Every name owned by a descriptor, including transport-alias names. This is
     for name-integrity checks, never Keeper execution admission. *)
 val registered_names : t -> string list
 
@@ -216,10 +216,6 @@ val readonly_internal_names : unit -> string list
     MASC tools safe for keeper use without an MCP session context. *)
 val keeper_safe_inline_names : unit -> string list
 
-(** Descriptor-owned maintenance-only projection. The returned names are
-    internal MASC tools excluded from ordinary keeper candidate sets. *)
-val keeper_maintenance_only_names : unit -> string list
-
 (** Descriptor-owned projection for read-only tools whose legitimate progress
     is polling a prior async request rather than taking a new snapshot. *)
 val polling_read_internal_names : unit -> string list
@@ -231,9 +227,7 @@ val route_evidence_json : t -> Yojson.Safe.t
 
 (** Read-only discovery projection for capability introspection surfaces.
     Keeps executor, policy, schema-shape, and curated typed examples attached
-    to the descriptor that owns the runtime route. The policy [effect_domain] is
-    [null] when a descriptor has no static effect domain; no fallback sentinel
-    string is emitted. *)
+    to the descriptor that owns the runtime route. *)
 val discovery_fields : t -> (string * Yojson.Safe.t) list
 
 (** Object wrapper for {!discovery_fields}. *)

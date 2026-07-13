@@ -490,8 +490,6 @@ goal = "analyze logs"
 instructions = "You are a log analyzer."
 mention_targets = ["sherlock", "log-analyzer"]
 proactive_enabled = true
-proactive_idle_sec = 300
-proactive_cooldown_sec = 60
 autoboot_enabled = false
 active_goal_ids = ["goal-runtime", "goal-masc"]
 |} in
@@ -543,22 +541,6 @@ multimodal_policy = "silent_default"
          (contains_substring msg "invalid multimodal_policy");
        check bool "mentions allowed values" true
          (contains_substring msg "delegate"))
-
-let test_profile_rejects_partial_proactive_interval_pair () =
-  let input = {|
-[keeper]
-goal = "test"
-proactive_enabled = true
-proactive_idle_sec = 120
-|} in
-  match TL.parse_toml input with
-  | Error e -> fail e
-  | Ok doc ->
-      (match KTP.profile_defaults_of_toml doc with
-       | Ok _ -> fail "expected partial proactive interval error"
-       | Error msg ->
-           check bool "mentions missing cooldown" true
-             (contains_substring msg "proactive_cooldown_sec is missing"))
 
 let test_profile_rejects_removed_model_keys () =
   let input = {|
@@ -1189,31 +1171,6 @@ model = "oas-coding_first"
      | Ok _ -> fail "expected error: keeper.model is removed"
      | Error _ -> ())
 
-let test_persona_resolver_omits_unspecified_tool_access () =
-  with_personas_dir @@ fun personas_dir ->
-  let persona_dir = Filename.concat personas_dir "probe" in
-  mkdir_p persona_dir;
-  write_file
-    (Filename.concat persona_dir "profile.json")
-    {|
-{
-  "name": "Probe",
-  "keeper": {
-    "goal": "test persona keeper"
-  }
-}
-|};
-  match
-    KEP.resolved_keeper_args_from_persona
-      (`Assoc [ ("persona_name", `String "probe") ])
-  with
-  | Error e -> fail ("resolver failed: " ^ e)
-  | Ok (_, resolved) ->
-      let tool_access = Yojson.Safe.Util.member "tool_access" resolved in
-      (match tool_access with
-       | `Null -> ()
-       | _ -> fail "unspecified tool_access should be omitted")
-
 let test_persona_defaults_load_prompt_fields () =
   with_personas_dir @@ fun personas_dir ->
   let persona_dir = Filename.concat personas_dir "probe" in
@@ -1334,7 +1291,7 @@ let test_persona_resolver_rejects_placeholder_in_resolved_payload () =
     {|
 [keeper]
 persona_name = "probe"
-tool_denylist = ["OPERATOR_TODO: remove before spawn"]
+instructions = "OPERATOR_TODO: remove before spawn"
 |};
   match
     KEP.resolved_keeper_args_from_persona
@@ -1347,7 +1304,7 @@ tool_denylist = ["OPERATOR_TODO: remove before spawn"]
       check bool "reports manifest path" true
         (contains_substring e keeper_path);
       check bool "reports resolved payload field" true
-        (contains_substring e "$.tool_denylist[0]")
+        (contains_substring e "$.instructions")
 
 let test_persona_resolver_preserves_autoboot_enabled_arg () =
   with_personas_dir @@ fun personas_dir ->
@@ -1378,7 +1335,7 @@ let test_persona_resolver_preserves_autoboot_enabled_arg () =
          | `Bool value -> Some value
          | _ -> None)
 
-let test_persona_resolver_preserves_canonical_tool_access_and_allowed_paths () =
+let test_persona_resolver_preserves_allowed_paths () =
   with_personas_dir @@ fun personas_dir ->
   let persona_dir = Filename.concat personas_dir "probe" in
   mkdir_p persona_dir;
@@ -1392,25 +1349,16 @@ let test_persona_resolver_preserves_canonical_tool_access_and_allowed_paths () =
   }
 }
 |};
-  let expected_tool_access =
-    Json_util.json_string_list
-      ([ "masc_status" ])
-  in
   match
     KEP.resolved_keeper_args_from_persona
       (`Assoc
         [
           ("persona_name", `String "probe");
           ("allowed_paths", `List [ `String "/tmp/demo" ]);
-          ( "tool_access",
-            `List [ `String "masc_status" ] );
         ])
   with
   | Error e -> fail ("resolver failed: " ^ e)
   | Ok (_, resolved) ->
-      check string "tool_access preserved"
-        (Yojson.Safe.to_string expected_tool_access)
-        (Yojson.Safe.to_string (Yojson.Safe.Util.member "tool_access" resolved));
       check (list string) "allowed_paths preserved" [ "/tmp/demo" ]
         (match Yojson.Safe.Util.member "allowed_paths" resolved with
          | `List items ->
@@ -1430,12 +1378,7 @@ let test_persona_resolver_renders_durable_keeper_toml () =
         ("autoboot_enabled", `Bool false);
         ("mention_targets", `List [ `String "probe"; `String "@probe" ]);
         ("proactive_enabled", `Bool true);
-        ("proactive_idle_sec", `Int 300);
-        ("proactive_cooldown_sec", `Int 60);
         ("allowed_paths", `List [ `String "/tmp/probe" ]);
-        ( "tool_access",
-          `List [ `String "masc_status" ] );
-        ("tool_denylist", `List [ `String "masc_keeper_reset" ]);
       ]
   in
   match KEP.render_keeper_toml_from_resolved_args resolved with
@@ -1460,29 +1403,7 @@ let test_persona_resolver_renders_durable_keeper_toml () =
               check (list string) "mention targets"
                 [ "probe"; "@probe" ] defaults.mention_targets;
               check (option (list string)) "allowed_paths"
-                (Some [ "/tmp/probe" ]) defaults.allowed_paths;
-              check (option (list string)) "tool_access"
-                (Some [ "masc_status" ]) defaults.tool_access;
-              check (option (list string)) "tool_denylist"
-                (Some [ "masc_keeper_reset" ]) defaults.tool_denylist))
-
-let test_persona_resolver_renders_tool_access_array_durable_toml () =
-  let resolved =
-    `Assoc
-      [
-        ("name", `String "probe-keeper");
-        ("persona_name", `String "probe");
-        ("goal", `String "test");
-        ("mention_targets", `List [ `String "probe" ]);
-        ( "tool_access",
-          `List [ `String "masc_status" ] );
-      ]
-  in
-  match KEP.render_keeper_toml_from_resolved_args resolved with
-  | Error e -> fail ("render failed: " ^ e)
-  | Ok toml ->
-      check bool "renders tool_access array" true
-        (contains_substring toml "tool_access = [\"masc_status\"]")
+                (Some [ "/tmp/probe" ]) defaults.allowed_paths))
 
 (* ================================================================ *)
 (* Unknown-key detection                                             *)
@@ -1517,17 +1438,23 @@ mention_targets = ["a"]
     check (list string) "surfaces dead config"
       ["keeper.legacy_scope"; "keeper.scope_kind"] unknown
 
-let test_detect_unknown_keys_accepts_tool_access_array () =
+let test_removed_tool_policy_keys_rejected () =
   let input = {|
 [keeper]
 goal = "g"
 tool_access = ["masc_status"]
+tool_denylist = ["Execute"]
 |} in
   match TL.parse_toml input with
   | Error e -> fail e
   | Ok doc ->
-    let unknown = KTP.detect_unknown_keeper_toml_keys doc in
-    check (list string) "tool_access TOML array is canonical" [] unknown
+    (match KTP.profile_defaults_of_toml doc with
+     | Ok _ -> fail "removed tool policy keys must be rejected"
+     | Error detail ->
+       check bool "error names tool_access" true
+         (contains_substring detail "keeper.tool_access");
+       check bool "error names tool_denylist" true
+         (contains_substring detail "keeper.tool_denylist"))
 
 let test_detect_unknown_keys_accepts_loader_base () =
   let input = {|
@@ -1629,11 +1556,10 @@ let test_oas_env_rejects_invalid_unified_max_tokens () =
              (contains_substring detail "positive integer")))
     [ "\"not-an-int\""; "\"8192\""; "true"; "1.5"; "0"; "-1" ]
 
-let test_oas_env_max_tokens_validation_preserves_tool_access () =
+let test_oas_env_max_tokens_validation_preserves_value () =
   let input = {|
 [keeper]
 persona_name = "analyst"
-tool_access = ["masc_status", "masc_tasks"]
 [keeper.oas_env]
 MASC_KEEPER_OAS_UNIFIED_MAX_TOKENS = 8192
 |} in
@@ -1643,10 +1569,6 @@ MASC_KEEPER_OAS_UNIFIED_MAX_TOKENS = 8192
     (match KTP.profile_defaults_of_toml doc with
      | Error e -> fail e
      | Ok defaults ->
-       check (option (list string))
-         "max_tokens validation preserves the successful tool_access payload"
-         (Some [ "masc_status"; "masc_tasks" ])
-         defaults.tool_access;
        check (option int)
          "valid unified max_tokens remains available after validation"
          (Some 8192)
@@ -2042,8 +1964,6 @@ let () =
             test_profile_parses_multimodal_policy;
           test_case "rejects invalid multimodal_policy" `Quick
             test_profile_rejects_invalid_multimodal_policy;
-          test_case "rejects partial proactive interval pair" `Quick
-            test_profile_rejects_partial_proactive_interval_pair;
           test_case "rejects removed model keys" `Quick
             test_profile_rejects_removed_model_keys;
           test_case "rejects removed initiative keys" `Quick
@@ -2061,8 +1981,8 @@ let () =
             test_detect_unknown_keys_empty_when_all_canonical;
           test_case "flags legacy dead config" `Quick
             test_detect_unknown_keys_flags_legacy_dead_config;
-          test_case "accepts tool_access array" `Quick
-            test_detect_unknown_keys_accepts_tool_access_array;
+          test_case "rejects removed tool policy keys" `Quick
+            test_removed_tool_policy_keys_rejected;
           test_case "accepts loader base include" `Quick
             test_detect_unknown_keys_accepts_loader_base;
           test_case "flags provider_health table as unknown" `Quick
@@ -2094,8 +2014,8 @@ let () =
             test_oas_env_rejects_legacy_unified_max_tokens_alias;
           test_case "rejects invalid unified max tokens" `Quick
             test_oas_env_rejects_invalid_unified_max_tokens;
-          test_case "max tokens validation preserves tool_access" `Quick
-            test_oas_env_max_tokens_validation_preserves_tool_access;
+          test_case "max tokens validation preserves value" `Quick
+            test_oas_env_max_tokens_validation_preserves_value;
           test_case "drops non-OAS_* keys (ambient injection guard)" `Quick
             test_oas_env_drops_non_oas_prefix;
           test_case "empty when table absent" `Quick
@@ -2146,8 +2066,6 @@ let () =
             test_bundled_keeper_profiles_resolve_prompt_defaults;
           test_case "bundled issue_king uses local sandbox" `Quick
             test_bundled_issue_king_uses_local_sandbox;
-          test_case "persona resolver omits unspecified tool_access" `Quick
-            test_persona_resolver_omits_unspecified_tool_access;
           test_case "persona defaults load prompt fields" `Quick
             test_persona_defaults_load_prompt_fields;
           test_case "persona resolver rejects OPERATOR_TODO profile" `Quick
@@ -2158,11 +2076,9 @@ let () =
             test_persona_resolver_rejects_placeholder_in_resolved_payload;
           test_case "persona resolver preserves autoboot_enabled arg" `Quick
             test_persona_resolver_preserves_autoboot_enabled_arg;
-          test_case "persona resolver preserves canonical tool_access and allowed_paths" `Quick
-            test_persona_resolver_preserves_canonical_tool_access_and_allowed_paths;
+          test_case "persona resolver preserves allowed_paths" `Quick
+            test_persona_resolver_preserves_allowed_paths;
           test_case "persona resolver renders durable keeper TOML" `Quick
             test_persona_resolver_renders_durable_keeper_toml;
-          test_case "persona resolver renders tool_access durable TOML" `Quick
-            test_persona_resolver_renders_tool_access_array_durable_toml;
         ] );
     ]

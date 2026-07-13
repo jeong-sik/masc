@@ -1,4 +1,4 @@
-(** Tests for Runtime_params — typed parameter store with governance override. *)
+(** Tests for Runtime_params — typed runtime parameter store. *)
 
 open Masc
 
@@ -175,7 +175,7 @@ let () =
     (try Sys.mkdir masc_dir 0o755 with Sys_error _ -> ());
     Runtime_params.record_audit ~base_path:tmp_dir
       ~key:"test.key" ~old_value:(`Int 1) ~new_value:(`Int 2)
-      ~case_id:"case-001" ~actor:"system" ();
+      ~correlation_id:"change-001" ~actor:"system" ();
     Runtime_params.record_audit ~base_path:tmp_dir
       ~key:"test.key2" ~old_value:(`String "a") ~new_value:(`String "b")
       ~actor:"human" ();
@@ -275,8 +275,8 @@ let () =
      with Sys_error _ -> ())
   in
 
-  let test_governance_registry () =
-    (* Verify that governance_registry registered params *)
+  let test_runtime_settings () =
+    (* Verify that runtime_settings registered params *)
     let entries = Runtime_params.registry () in
     let has key =
       List.exists (fun (k, _, _, _, _) -> k = key) entries
@@ -284,24 +284,24 @@ let () =
     Alcotest.(check bool) "inference.default_model registered"
       true (has "inference.default_model");
     (* Validate surfaces *)
-    let surfaces = Governance_registry.surfaces in
+    let surfaces = Runtime_settings.surfaces in
     Alcotest.(check bool) "has surfaces" true (List.length surfaces > 0);
     let surface_ids =
-      List.map (fun (s : Governance_registry.surface) -> s.id) surfaces
+      List.map (fun (s : Runtime_settings.surface) -> s.id) surfaces
     in
     Alcotest.(check bool) "inference_config surface"
       true (List.mem "inference_config" surface_ids)
   in
 
-  let test_governance_registry_validation () =
+  let test_runtime_settings_validation () =
     (* Default inference model should reject empty string *)
-    (match Runtime_params.set Governance_registry.inference_default_model "" with
+    (match Runtime_params.set Runtime_settings.inference_default_model "" with
      | Error _ -> ()
      | Ok () -> Alcotest.fail "should reject empty model name")
   in
 
   let test_dashboard_params_registered () =
-    Governance_registry.ensure_init ();
+    Runtime_settings.ensure_init ();
     let entries = Runtime_params.registry () in
     let has key = List.exists (fun (k, _, _, _, _) -> k = key) entries in
     Alcotest.(check bool) "dashboard.agent_quiet_threshold_sec"
@@ -311,16 +311,15 @@ let () =
   in
 
   let test_dashboard_surface () =
-    let surfaces = Governance_registry.surfaces in
+    let surfaces = Runtime_settings.surfaces in
     let dashboard_surface =
       List.find_opt
-        (fun (s : Governance_registry.surface) -> s.id = "dashboard")
+        (fun (s : Runtime_settings.surface) -> s.id = "dashboard")
         surfaces
     in
     match dashboard_surface with
     | None -> Alcotest.fail "dashboard surface not found"
     | Some s ->
-        Alcotest.(check string) "risk" "low" s.risk;
         Alcotest.(check int) "param count" 7 (List.length s.param_keys);
         Alcotest.(check bool) "has quiet threshold"
           true (List.mem "dashboard.agent_quiet_threshold_sec" s.param_keys);
@@ -370,15 +369,9 @@ let () =
   (* ── keeper lifecycle params ─────────────────────────────── *)
 
   let test_keeper_params_registered () =
-    Governance_registry.ensure_init ();
+    Runtime_settings.ensure_init ();
     let entries = Runtime_params.registry () in
     let has key = List.exists (fun (k, _, _, _, _) -> k = key) entries in
-    Alcotest.(check bool) "keeper.max_consecutive_hb_failures"
-      true (has "keeper.max_consecutive_hb_failures");
-    Alcotest.(check bool) "keeper.max_consecutive_turn_failures"
-      true (has "keeper.max_consecutive_turn_failures");
-    Alcotest.(check bool) "keeper.supervisor_max_restarts"
-      true (has "keeper.supervisor_max_restarts");
     Alcotest.(check bool) "keeper.keepalive_interval_sec"
       true (has "keeper.keepalive_interval_sec");
     Alcotest.(check bool) "keeper.dead_ttl_sec"
@@ -386,59 +379,51 @@ let () =
   in
 
   let test_keeper_lifecycle_surface () =
-    let surfaces = Governance_registry.surfaces in
+    let surfaces = Runtime_settings.surfaces in
     let keeper_surface =
       List.find_opt
-        (fun (s : Governance_registry.surface) -> s.id = "keeper_lifecycle")
+        (fun (s : Runtime_settings.surface) -> s.id = "keeper_lifecycle")
         surfaces
     in
     match keeper_surface with
     | None -> Alcotest.fail "keeper_lifecycle surface not found"
     | Some s ->
-        Alcotest.(check string) "risk" "medium" s.risk;
-        Alcotest.(check int) "param count" 6 (List.length s.param_keys);
-        Alcotest.(check bool) "has hb_failures"
-          true (List.mem "keeper.max_consecutive_hb_failures" s.param_keys);
-        Alcotest.(check bool) "has supervisor_max_restarts"
-          true (List.mem "keeper.supervisor_max_restarts" s.param_keys);
+        Alcotest.(check int) "param count" 3 (List.length s.param_keys);
         Alcotest.(check bool) "has supervisor_sweep_sec"
           true (List.mem "keeper.supervisor_sweep_sec" s.param_keys)
   in
 
   let test_keeper_diagnostics_surface () =
-    Governance_registry.ensure_init ();
-    let surfaces = Governance_registry.surfaces in
+    Runtime_settings.ensure_init ();
+    let surfaces = Runtime_settings.surfaces in
     let diag_surface =
       List.find_opt
-        (fun (s : Governance_registry.surface) -> s.id = "keeper_diagnostics")
+        (fun (s : Runtime_settings.surface) -> s.id = "keeper_diagnostics")
         surfaces
     in
     match diag_surface with
     | None -> Alcotest.fail "keeper_diagnostics surface not found"
     | Some s ->
-        Alcotest.(check string) "risk" "medium" s.risk;
-        Alcotest.(check int) "param count" 5 (List.length s.param_keys);
+        Alcotest.(check int) "param count" 4 (List.length s.param_keys);
         Alcotest.(check bool) "has snapshot_sec"
           true (List.mem "keeper.snapshot_sec" s.param_keys);
         Alcotest.(check bool) "has work_as_hb_enabled"
           true (List.mem "keeper.work_as_hb_enabled" s.param_keys);
         Alcotest.(check bool) "has work_as_hb_max_silence_sec"
           true (List.mem "keeper.work_as_hb_max_silence_sec" s.param_keys);
-        Alcotest.(check bool) "has smart_hb_enabled"
-          true (List.mem "keeper.smart_hb_enabled" s.param_keys);
         Alcotest.(check bool) "has stage_timing_ring_size"
           true (List.mem "keeper.stage_timing_ring_size" s.param_keys)
   in
 
   let test_keeper_params_meta_shape () =
-    Governance_registry.ensure_init ();
+    Runtime_settings.ensure_init ();
     let entries = Runtime_params.registry () in
-    let hb_entry =
+    let keepalive_entry =
       List.find_opt
-        (fun (k, _, _, _, _) -> k = "keeper.max_consecutive_hb_failures")
+        (fun (k, _, _, _, _) -> k = "keeper.keepalive_interval_sec")
         entries
     in
-    match hb_entry with
+    match keepalive_entry with
     | Some (_, _, _, _, Some meta) ->
         Alcotest.(check bool) "has description"
           true (String.length meta.Runtime_params.description > 0);
@@ -446,38 +431,35 @@ let () =
         Alcotest.(check bool) "has min_value" true (meta.min_value <> None);
         Alcotest.(check bool) "has max_value" true (meta.max_value <> None)
     | Some (_, _, _, _, None) -> Alcotest.fail "meta is None"
-    | None -> Alcotest.fail "keeper hb param not found"
+    | None -> Alcotest.fail "keeper keepalive param not found"
   in
 
   let test_keeper_param_override_persist_restore () =
     let tmp_dir = Filename.temp_dir "masc_keeper_restore_" "" in
     let masc_dir = Filename.concat tmp_dir Common.masc_dirname in
     (try Sys.mkdir masc_dir 0o755 with Sys_error _ -> ());
-    (* Override a keeper param *)
-    (match Runtime_params.set Governance_registry.keeper_max_hb_failures 7 with
+    (* Override a keeper timing param. *)
+    (match Runtime_params.set Runtime_settings.keeper_keepalive_interval_sec 31 with
      | Ok () -> ()
      | Error msg -> Alcotest.fail msg);
-    Alcotest.(check int) "overridden" 7
-      (Runtime_params.get Governance_registry.keeper_max_hb_failures);
+    Alcotest.(check int) "overridden" 31
+      (Runtime_params.get Runtime_settings.keeper_keepalive_interval_sec);
     (* Persist, clear, restore *)
     Runtime_params.persist ~base_path:tmp_dir;
-    Runtime_params.clear Governance_registry.keeper_max_hb_failures;
+    Runtime_params.clear Runtime_settings.keeper_keepalive_interval_sec;
     Alcotest.(check bool) "cleared to default" true
-      (Runtime_params.get Governance_registry.keeper_max_hb_failures <> 7);
+      (Runtime_params.get Runtime_settings.keeper_keepalive_interval_sec <> 31);
     Runtime_params.restore ~base_path:tmp_dir;
-    Alcotest.(check int) "restored from disk" 7
-      (Runtime_params.get Governance_registry.keeper_max_hb_failures);
+    Alcotest.(check int) "restored from disk" 31
+      (Runtime_params.get Runtime_settings.keeper_keepalive_interval_sec);
     (* Restore default for other tests *)
-    Runtime_params.clear Governance_registry.keeper_max_hb_failures;
+    Runtime_params.clear Runtime_settings.keeper_keepalive_interval_sec;
     (try
        Sys.remove (Filename.concat masc_dir "runtime_params.json");
        Sys.rmdir masc_dir;
        Sys.rmdir tmp_dir
      with Sys_error _ -> ())
   in
-
-  (* Governance tool retirement — handle_set_param/clear_param/prompt_override
-     tests are no longer applicable *)
 
   (* ── crash persistence ───────────────────────────────────── *)
 
@@ -532,10 +514,10 @@ let () =
           Alcotest.test_case "set_by_key_logs_audit" `Quick
             test_set_by_key_logs_audit;
         ] );
-      ( "governance_registry",
+      ( "runtime_settings",
         [
-          Alcotest.test_case "registration" `Quick test_governance_registry;
-          Alcotest.test_case "validation" `Quick test_governance_registry_validation;
+          Alcotest.test_case "registration" `Quick test_runtime_settings;
+          Alcotest.test_case "validation" `Quick test_runtime_settings_validation;
           Alcotest.test_case "dashboard params registered" `Quick
             test_dashboard_params_registered;
           Alcotest.test_case "dashboard surface" `Quick test_dashboard_surface;

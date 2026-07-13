@@ -217,7 +217,7 @@ val hitl_summary_runtime_id : unit -> string option
     runtime. *)
 
 val runtime_id_for_structured_judge : unit -> string
-(** Resolved runtime id for dashboard/operator/governance structured-output judge
+(** Resolved runtime id for dashboard/operator structured-output judge
     calls. Uses [\[runtime\].structured_judge] first, then the existing
     [\[runtime\].librarian] migration lane, then [\[runtime\].default]. The final
     default path still fails loudly at each caller's schema validation if the
@@ -247,18 +247,6 @@ val resolve_assignment :
 (** Resolve a keeper assignment id to either a lane or a single runtime. Lanes
     shadow runtimes. [Missing] means the id does not name a known lane or
     runtime. *)
-
-val pause_threshold : unit -> pause_threshold
-(** [\[pause\]] threshold knobs from runtime.toml, or
-    {!Runtime_schema.pause_threshold_default} when runtime.toml is unavailable or
-    invalid. Operational pause decision paths use this accessor instead of the
-    legacy top-level fallback constants. *)
-
-val pacing : unit -> pacing
-(** [\[pacing\]] policy from runtime.toml (RFC-0313 W3), or
-    {!Runtime_schema.pacing_default} when runtime.toml is unavailable.
-    An unknown [pacing.mode] value fails config parse at load (fail-closed)
-    rather than defaulting. *)
 
 val get_runtime_by_id : string -> t option
 (** [get_runtime_by_id id] is the materialized runtime whose binding-key id

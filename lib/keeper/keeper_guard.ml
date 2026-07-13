@@ -30,12 +30,8 @@ let event_priority = function
   | Fiber_started -> 10
   | Fiber_terminated _ -> 10
   | Supervisor_restart_attempt _ -> 10
-  | Restart_budget_exhausted -> 10
   | Credential_archived -> 10
-  | Zombie_timeout -> 10
-  | Terminal_failure_detected _ -> 10
   | Auto_compact_triggered -> 10
-  | Compact_retry_exhausted -> 10
   | Operator_compact_requested -> 10
   | Operator_clear_requested _ -> 10
   | Context_overflow_detected _ -> 10
@@ -75,17 +71,11 @@ let evaluate (s : measurement_snapshot) : event list =
   let events = ref [] in
   let add ev = events := ev :: !events in
 
-  if s.failures.consecutive_hb_failures >= t.max_consecutive_hb_failures then
-    add (Heartbeat_failed {
-      consecutive = s.failures.consecutive_hb_failures;
-      max_allowed = t.max_consecutive_hb_failures;
-    });
+  if s.failures.consecutive_hb_failures > 0 then
+    add (Heartbeat_failed { consecutive = s.failures.consecutive_hb_failures });
 
-  if s.failures.consecutive_turn_failures >= t.max_consecutive_turn_failures then
-    add (Turn_failed {
-      consecutive = s.failures.consecutive_turn_failures;
-      max_allowed = t.max_consecutive_turn_failures;
-    });
+  if s.failures.consecutive_turn_failures > 0 then
+    add (Turn_failed { consecutive = s.failures.consecutive_turn_failures });
 
   if actions.compact then add Compaction_started;
 
@@ -93,14 +83,6 @@ let evaluate (s : measurement_snapshot) : event list =
     s.timing.since_last_handoff_sec >= float_of_int t.handoff_cooldown_sec
   in
   if actions.handoff && handoff_cooldown_ok then add Handoff_started;
-
-  (* 6. Heartbeat health: if below threshold, report ok *)
-  if s.failures.consecutive_hb_failures > 0
-     && s.failures.consecutive_hb_failures < t.max_consecutive_hb_failures then
-    add (Heartbeat_failed {
-      consecutive = s.failures.consecutive_hb_failures;
-      max_allowed = t.max_consecutive_hb_failures;
-    });
 
   (* 7. Context measurement (always emitted for audit trail) *)
   add (Context_measured {

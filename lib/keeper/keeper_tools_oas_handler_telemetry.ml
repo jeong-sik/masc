@@ -53,10 +53,7 @@ let tool_io_preview_fields ~tool_name ~input ?output () =
     | Some output -> Observability_redact.redacted_tool_output_json ~tool_name output
     | None -> None
   in
-  (if Observability_redact.is_denied_tool ~tool_name
-   then [ "tool_io_redacted", `Bool true ]
-   else [])
-  @ json_field "tool_args" input_json
+  json_field "tool_args" input_json
   @ json_field "tool_result" output_json
   @ string_preview_field "tool_args_preview" input_preview
   @ string_preview_field "tool_output_preview" output_preview

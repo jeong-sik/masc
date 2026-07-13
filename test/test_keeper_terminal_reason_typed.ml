@@ -63,10 +63,10 @@ let read_meta_exn config keeper_name =
 ;;
 
 (* ------------------------------------------------------------------ *)
-(* 1. Wire round-trip corpus: built from the PRODUCER sites, not from   *)
-(*    the classifier prefixes. Includes the enriched contract-violation *)
-(*    form, both api_error/provider_error families, the budget strings, *)
-(*    direct producer strings, and one mixed-case adversarial input.    *)
+(* 1. Wire round-trip corpus: built from the PRODUCER sites, not from  *)
+(*    the classifier prefixes. Includes both api_error/provider_error  *)
+(*    families, budget strings, direct producer strings, and one       *)
+(*    mixed-case adversarial input.                                    *)
 (* ------------------------------------------------------------------ *)
 
 let roundtrip_corpus =
@@ -93,11 +93,6 @@ let roundtrip_corpus =
   ; "provider_error_server:500"
   ; "provider_error_missing_api_key"
   ; "provider_error_hard_quota:openai"
-    (* completion-contract-violation (legacy + enriched forms) *)
-  ; "completion_contract_violation:completion_contract"
-  ; "completion_contract_violation:completion_contract:called[a,b]:satisfying[c]"
-    (* turn-livelock *)
-  ; "turn_livelock:stuck_age_exceeded"
     (* budget cut-offs *)
   ; "agent_error_max_turns_exceeded:turns=8,limit=8"
   ; "agent_error_execution_timeout:elapsed_sec=120.0,timeout_sec=120.0,turn_count=7,max_turns=8"
@@ -132,44 +127,6 @@ let () =
 ;;
 
 (* ------------------------------------------------------------------ *)
-(* 1b. is_completion_contract_violation: OAS no longer emits completion
-   contract SDK errors, so structured SDK errors all return false. #19930 *)
-(* ------------------------------------------------------------------ *)
-
-module EC = Masc.Keeper_error_classify
-
-let () =
-  check "non-contract: provider timeout"
-    (not (EC.is_completion_contract_violation
-            (Agent_sdk.Error.Api
-               (Llm_provider.Retry.Timeout
-                  { message = "timeout"; phase = None }))));
-  check "non-contract: rate limited"
-    (not (EC.is_completion_contract_violation
-            (Agent_sdk.Error.Api
-               (Llm_provider.Retry.RateLimited
-                  { message = "rate limited"; retry_after = None }))));
-  check "non-contract: server error"
-    (not (EC.is_completion_contract_violation
-            (Agent_sdk.Error.Api
-               (Llm_provider.Retry.ServerError
-                  { message = "server error"; status = 500 }))));
-  check "non-contract: overloaded"
-    (not (EC.is_completion_contract_violation
-            (Agent_sdk.Error.Api
-               (Llm_provider.Retry.Overloaded
-                  { message = "overloaded" }))));
-  check "non-contract: MaxTurnsExceeded"
-    (not (EC.is_completion_contract_violation
-            (Agent_sdk.Error.Agent
-               (Agent_sdk.Error.MaxTurnsExceeded
-                  { turns = 8; limit = 8 }))));
-  check "non-contract: Internal"
-    (not (EC.is_completion_contract_violation
-            (Agent_sdk.Error.Internal "internal error")));
-;;
-
-(* ------------------------------------------------------------------ *)
 (* 2. (disposition, reason) equivalence vs a frozen copy of the OLD    *)
 (*    substring classifier.                                            *)
 (* ------------------------------------------------------------------ *)
@@ -194,31 +151,6 @@ let frozen_is_turn_budget_exhausted_terminal terminal_reason =
   String.starts_with ~prefix:frozen_terminal_prefix_turn_budget_exhausted terminal_reason
 ;;
 
-let frozen_completion_contract_satisfied = function
-  | R.Contract_satisfied_completion | R.Contract_satisfied_execution -> true
-  | R.Contract_unknown
-  | R.Contract_not_dispatched
-  | R.Contract_violated
-  | R.Contract_surface_mismatch
-  | R.Contract_no_capable_provider
-  | R.Contract_claim_only_after_owned_task
-  | R.Contract_needs_execution_progress
-  | R.Contract_passive_only -> false
-;;
-
-let frozen_completion_contract_unsatisfied = function
-  | R.Contract_violated
-  | R.Contract_claim_only_after_owned_task
-  | R.Contract_needs_execution_progress
-  | R.Contract_passive_only -> true
-  | R.Contract_unknown
-  | R.Contract_not_dispatched
-  | R.Contract_surface_mismatch
-  | R.Contract_no_capable_provider
-  | R.Contract_satisfied_completion
-  | R.Contract_satisfied_execution -> false
-;;
-
 let frozen_is_transient_provider_runtime_failure terminal_reason =
   String.equal terminal_reason "api_error_timeout"
   || String.equal terminal_reason "api_error_network"
@@ -228,38 +160,22 @@ let frozen_operator_disposition (receipt : R.t)
   : R.operator_disposition_kind * R.operator_disposition_reason
   =
   let terminal_reason = String.lowercase_ascii receipt.terminal_reason_code in
-  let error_kind =
-    Option.map
-      (fun kind -> String.lowercase_ascii (R.error_kind_to_string kind))
-      receipt.error_kind
-  in
   let provider_runtime_failure =
     String.starts_with ~prefix:"api_error_" terminal_reason
     || String.equal terminal_reason "provider_error"
     || String.starts_with ~prefix:"provider_error_" terminal_reason
-    ||
-    match error_kind with
-    | Some ("api" | "mcp" | "io" | "orchestration" | "serialization") -> true
-    | Some _ | None -> false
   in
   let preflight_config_failure =
-    match error_kind with
-    | Some kind ->
-      string_contains_ci kind "config"
-      || string_contains_ci kind "auth"
-      || string_contains_ci terminal_reason "config"
-      || string_contains_ci terminal_reason "auth"
-    | None ->
-      string_contains_ci terminal_reason "config"
-      || string_contains_ci terminal_reason "auth"
+    string_contains_ci terminal_reason "config"
+    || string_contains_ci terminal_reason "auth"
   in
   if String.equal terminal_reason "runtime_exhausted"
-  then R.Disp_alert_exhausted, R.Reason_runtime_exhausted
+  then R.Disp_fail_open_next_runtime, R.Reason_runtime_exhausted
   else if
     String.equal terminal_reason Keeper_internal_error.capacity_backpressure_kind
   then R.Disp_fail_open_next_runtime, R.Reason_capacity_backpressure
   else if preflight_config_failure
-  then R.Disp_pause_human, R.Reason_preflight_config_error
+  then R.Disp_fail_open_next_runtime, R.Reason_preflight_config_error
   else if
     provider_runtime_failure
     && (receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_runtime)
@@ -274,69 +190,33 @@ let frozen_operator_disposition (receipt : R.t)
     && frozen_is_transient_provider_runtime_failure terminal_reason
   then R.Disp_fail_open_next_runtime, R.Reason_transient_runtime_retry
   else if provider_runtime_failure
-  then R.Disp_pause_human, R.Reason_provider_runtime_error
-  else if String.starts_with ~prefix:"completion_contract_violation:" terminal_reason
-  then R.Disp_pause_human, R.Reason_unmapped_runtime_state
-  else if
-    String.starts_with ~prefix:"turn_livelock:" terminal_reason
-    ||
-    match error_kind with
-    | Some "turn_livelock_blocked" -> true
-    | Some _ | None -> false
-  then R.Disp_pause_human, R.Reason_turn_livelock_blocked
-  else if
-    String.equal terminal_reason "internal_error"
-    ||
-    match error_kind with
-    | Some "internal" -> true
-    | Some _ | None -> false
-  then R.Disp_pause_human, R.Reason_internal_error
+  then R.Disp_fail_open_next_runtime, R.Reason_provider_runtime_error
+  else if String.equal terminal_reason "internal_error"
+  then R.Disp_fail_open_next_runtime, R.Reason_internal_error
   else if frozen_is_auto_recoverable_turn_budget_terminal terminal_reason
   then R.Disp_pass, R.Reason_turn_budget_exhausted
+  else if receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_runtime
+  then R.Disp_fail_open_next_runtime, R.Reason_degraded_retry
+  else if
+    receipt.runtime_fallback_applied
+    || receipt.runtime_outcome = R.Runtime_passed_to_next_model
+  then R.Disp_pass_next_model, R.Reason_runtime_fallback
+  else if frozen_is_turn_budget_exhausted_terminal terminal_reason
+  then R.Disp_pass, R.Reason_turn_budget_exhausted
+  else if
+    receipt.outcome = `Ok
+    && receipt.runtime_outcome = R.Runtime_not_dispatched
+    && String.equal terminal_reason "pre_dispatch_success"
+  then R.Disp_pass, R.Reason_healthy
   else (
-    let tool_route_failure =
-      List.mem
-        receipt.completion_contract_result
-        [ R.Contract_surface_mismatch; R.Contract_no_capable_provider ]
-    in
-    if tool_route_failure
-    then
-      if receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_runtime
-      then R.Disp_fail_open_next_runtime, R.Reason_tool_route_recoverable_failure
-      else if
-        receipt.runtime_fallback_applied
-        || receipt.runtime_outcome = R.Runtime_passed_to_next_model
-      then R.Disp_pass_next_model, R.Reason_tool_route_recoverable_failure
-      else R.Disp_pause_human, R.Reason_tool_route_recoverable_failure
-    else if
-      receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_runtime
-    then R.Disp_fail_open_next_runtime, R.Reason_degraded_retry
-    else if
-      receipt.runtime_fallback_applied
-      || receipt.runtime_outcome = R.Runtime_passed_to_next_model
-    then R.Disp_pass_next_model, R.Reason_runtime_fallback
-    else if frozen_is_turn_budget_exhausted_terminal terminal_reason
-    then
-      if frozen_completion_contract_satisfied receipt.completion_contract_result
-      then R.Disp_pass, R.Reason_turn_budget_exhausted
-      else R.Disp_alert_exhausted, R.Reason_turn_budget_exhausted
-    else if frozen_completion_contract_unsatisfied receipt.completion_contract_result
-    then R.Disp_pause_human, R.Reason_completion_contract_unsatisfied
-    else if
-      receipt.outcome = `Ok
-      && receipt.runtime_outcome = R.Runtime_not_dispatched
-      && receipt.completion_contract_result = R.Contract_not_dispatched
-      && String.equal terminal_reason "pre_dispatch_success"
-    then R.Disp_pass, R.Reason_healthy
-    else (
-      match receipt.outcome with
-      | `Cancelled -> R.Disp_user_cancelled, R.Reason_cancelled
-      | `Skipped -> R.Disp_skipped, R.Reason_phase_skipped
-      | `Ok when receipt.runtime_outcome = R.Runtime_completed ->
-        R.Disp_pass, R.Reason_healthy
-      | `Ok when receipt.runtime_outcome = R.Runtime_not_dispatched ->
-        R.Disp_pass, R.Reason_healthy
-      | _ -> R.Disp_unknown, R.Reason_unmapped_runtime_state))
+    match receipt.outcome with
+    | `Cancelled -> R.Disp_user_cancelled, R.Reason_cancelled
+    | `Skipped -> R.Disp_skipped, R.Reason_phase_skipped
+    | `Ok when receipt.runtime_outcome = R.Runtime_completed ->
+      R.Disp_pass, R.Reason_healthy
+    | `Ok when receipt.runtime_outcome = R.Runtime_not_dispatched ->
+      R.Disp_pass, R.Reason_healthy
+    | _ -> R.Disp_unknown, R.Reason_unmapped_runtime_state)
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -362,11 +242,8 @@ let base_receipt : R.t =
   ; terminal_reason_code = ""
   ; response_text_present = false
   ; model_used = None
-  ; completion_contract_result = R.Contract_unknown
+  ; completion_contract_result = R.Completion_observation_unknown
   ; actionable_signal = Some C.No_actionable_signal
-    (* Root B (#22710): the base receipt represents an idle keeper with nothing
-       actionable, the same "no-work" baseline the prior [goal_ids = []] default
-       expressed. The passive-only carve-out now reads this signal. *)
   ; tool_surface = base_tool_surface
   ; sandbox_kind = Keeper_types_profile_sandbox.Local
   ; sandbox_root = None
@@ -403,7 +280,7 @@ let () =
       outcome = `Ok
     ; terminal_reason_code =
         R.receipt_terminal_reason_code_of_stop_reason completed_stop
-    ; completion_contract_result = R.Contract_satisfied_execution
+    ; completion_contract_result = R.Completion_tool_execution_observed
     ; runtime_outcome = R.Runtime_completed
     ; stop_reason = Some completed_stop
     }
@@ -415,17 +292,17 @@ let () =
   check
     "the same receipt preserves runtime stop completed"
     (Json_util.get_string json "stop_reason" = Some "completed");
-  let violated =
-    { receipt with completion_contract_result = R.Contract_violated }
+  let no_visible_output =
+    { receipt with completion_contract_result = R.Completion_no_visible_output }
   in
-  let disposition = fst (R.operator_disposition violated) in
+  let disposition = fst (R.operator_disposition no_visible_output) in
   check
-    "runtime completion plus violated contract is not final success"
-    (disposition = R.Disp_pause_human);
+    "runtime completion ignores missing visible-output observation"
+    (disposition = R.Disp_pass);
   check
-    "violated completed turn records a terminal reaction"
+    "completed turn with missing visible output records an execution receipt"
     (R.reaction_kind_of_operator_disposition disposition
-     = Masc.Keeper_reaction_ledger.Terminal_reason)
+     = Masc.Keeper_reaction_ledger.Execution_receipt)
 ;;
 
 let () =
@@ -435,7 +312,7 @@ let () =
     ; terminal_reason_code =
         Masc.Keeper_turn_disposition.to_wire
           Masc.Keeper_turn_disposition.Input_required
-    ; completion_contract_result = R.Contract_passive_only
+    ; completion_contract_result = R.Completion_observation_unknown
     ; runtime_outcome = R.Runtime_completed
     }
   in
@@ -456,7 +333,6 @@ let error_kinds =
   ; Some (R.error_kind_of_string "api")
   ; Some (R.error_kind_of_string "mcp")
   ; Some (R.error_kind_of_string "internal")
-  ; Some (R.error_kind_of_string "turn_livelock_blocked")
   ; Some (R.error_kind_of_string "provider")
   ; Some (R.error_kind_of_string "io")
   ]
@@ -473,14 +349,11 @@ let runtime_outcomes =
   ]
 
 let completion_contract_results =
-  [ R.Contract_unknown
-  ; R.Contract_not_dispatched
-  ; R.Contract_no_capable_provider
-  ; R.Contract_surface_mismatch
-  ; R.Contract_needs_execution_progress
-  ; R.Contract_passive_only
-  ; R.Contract_satisfied_completion
-  ; R.Contract_satisfied_execution
+  [ R.Completion_observation_unknown
+  ; R.Completion_not_dispatched
+  ; R.Completion_no_visible_output
+  ; R.Completion_response_observed
+  ; R.Completion_tool_execution_observed
   ]
 
 let outcomes = [ `Ok; `Error; `Cancelled; `Skipped ]
@@ -494,8 +367,6 @@ let disp_pair_to_string (d, r) =
 
 let operator_disposition_kinds =
   [ R.Disp_pass
-  ; R.Disp_pause_human
-  ; R.Disp_alert_exhausted
   ; R.Disp_fail_open_next_runtime
   ; R.Disp_pass_next_model
   ; R.Disp_user_cancelled
@@ -515,8 +386,6 @@ let () =
         (actual = expected))
     [ R.Disp_pass, Masc.Keeper_reaction_ledger.Execution_receipt
     ; R.Disp_skipped, Masc.Keeper_reaction_ledger.Execution_receipt
-    ; R.Disp_pause_human, Masc.Keeper_reaction_ledger.Terminal_reason
-    ; R.Disp_alert_exhausted, Masc.Keeper_reaction_ledger.Terminal_reason
     ; R.Disp_fail_open_next_runtime, Masc.Keeper_reaction_ledger.Terminal_reason
     ; R.Disp_pass_next_model, Masc.Keeper_reaction_ledger.Terminal_reason
     ; R.Disp_user_cancelled, Masc.Keeper_reaction_ledger.Terminal_reason
@@ -541,38 +410,6 @@ let () =
   check
     "operator_disposition_kind_of_string rejects legacy blocked_runtime"
     (R.operator_disposition_kind_of_string "blocked_runtime" = None)
-;;
-
-let intentional_passive_only_policy_change (receipt : R.t) got =
-  if receipt.completion_contract_result <> R.Contract_passive_only
-  then false
-  else
-    match got with
-    (* RFC-0303 Phase 0: passive-only is activity, not a page. Wherever the
-       frozen oracle routed a passive turn to the contract-unsatisfied pause
-       ([Disp_pause_human]/[completion_contract_unsatisfied]), the live function
-       now returns a non-paging [Disp_pass]/[passive_no_action] — regardless of
-       work scope. This is the intended reversal of the albini "85 pages/day"
-       classification. *)
-    | R.Disp_pass, R.Reason_passive_no_action -> true
-    (* Pre-existing no-work carve-outs (frozen oracle predates them): a passive
-       turn with no claimed task and no actionable signal already passed. *)
-    | R.Disp_pass, R.Reason_turn_budget_exhausted
-      when Option.is_none receipt.current_task_id
-           && receipt.actionable_signal = Some C.No_actionable_signal
-           && receipt.outcome = `Ok
-           && String.starts_with
-                ~prefix:"turn_budget_exhausted"
-                (String.lowercase_ascii receipt.terminal_reason_code) ->
-      true
-    | R.Disp_pass, R.Reason_healthy
-      when Option.is_none receipt.current_task_id
-           && receipt.actionable_signal = Some C.No_actionable_signal
-           && receipt.outcome = `Ok
-           && receipt.runtime_outcome = R.Runtime_completed
-           && String.equal receipt.terminal_reason_code "success" ->
-      true
-    | _ -> false
 ;;
 
 (* To keep the product bounded we vary the most behaviour-determining axes
@@ -614,10 +451,6 @@ let () =
                                        R.operator_disposition receipt
                                      in
                                      if want <> got
-                                        && not
-                                             (intentional_passive_only_policy_change
-                                                receipt
-                                                got)
                                      then (
                                        incr mismatches;
                                        if !mismatches <= 20
@@ -691,13 +524,13 @@ let () =
        (disp_pair_to_string got))
     (got = want);
   check
-    "capacity pacing does not emit operator broadcast"
+    "capacity observation does not emit operator broadcast"
     (not (R.needs_operator_broadcast (fst got)));
   let opaque_internal =
     { receipt with terminal_reason_code = code ^ "_unexpected" }
   in
   let got = R.operator_disposition opaque_internal in
-  let want = R.Disp_pause_human, R.Reason_internal_error in
+  let want = R.Disp_unknown, R.Reason_unmapped_runtime_state in
   check
     (Printf.sprintf
        "capacity lookalike remains opaque internal want=%s got=%s"
@@ -705,13 +538,13 @@ let () =
        (disp_pair_to_string got))
     (got = want);
   check
-    "opaque internal lookalike still emits operator broadcast"
+    "opaque capacity lookalike is surfaced as unknown"
     (R.needs_operator_broadcast (fst got));
   let noncanonical_case =
     { receipt with terminal_reason_code = String.uppercase_ascii code }
   in
   let got = R.operator_disposition noncanonical_case in
-  let want = R.Disp_pause_human, R.Reason_internal_error in
+  let want = R.Disp_unknown, R.Reason_unmapped_runtime_state in
   check
     (Printf.sprintf
        "noncanonical capacity casing stays opaque want=%s got=%s"
@@ -719,7 +552,7 @@ let () =
        (disp_pair_to_string got))
     (got = want);
   check
-    "noncanonical capacity casing still emits operator broadcast"
+    "noncanonical capacity casing is surfaced as unknown"
     (R.needs_operator_broadcast (fst got))
 ;;
 
@@ -765,7 +598,7 @@ let () =
     }
   in
   let got = R.operator_disposition receipt in
-  let want = R.Disp_pause_human, R.Reason_provider_runtime_error in
+  let want = R.Disp_fail_open_next_runtime, R.Reason_provider_runtime_error in
   check
     (Printf.sprintf
        "provider parse marker disposition want=%s got=%s"
@@ -776,110 +609,93 @@ let () =
 
 let () =
   let code = "turn_budget_exhausted:12704/12704" in
-  let passive_receipt =
+  let no_visible_output_receipt =
     { base_receipt with
       terminal_reason_code = code
     ; outcome = `Ok
     ; runtime_outcome = R.Runtime_completed
-    ; completion_contract_result = R.Contract_passive_only
+    ; completion_contract_result = R.Completion_no_visible_output
     }
   in
-  let got = R.operator_disposition passive_receipt in
-  (* RFC-0303 Phase 0: passive-only is not an operator page even when the
-     turn also exhausted its budget (review-flagged gap on this PR: the
-     turn_budget_exhausted branch used to return before ever reaching the
-     Contract_passive_only carve-out, so its Disp_pass carried the
-     misleading [Reason_turn_budget_exhausted] instead of
-     [Reason_passive_no_action]). *)
-  let want = R.Disp_pass, R.Reason_passive_no_action in
+  let got = R.operator_disposition no_visible_output_receipt in
+  let want = R.Disp_pass, R.Reason_turn_budget_exhausted in
   check
     (Printf.sprintf
-       "no-work passive turn budget exhaustion want=%s got=%s"
+       "turn-budget disposition ignores visible-output observation want=%s got=%s"
        (disp_pair_to_string want)
        (disp_pair_to_string got))
     (got = want);
-  let active_passive_receipt =
-    { passive_receipt with current_task_id = Some "TASK-1" }
+  let active_receipt =
+    { no_visible_output_receipt with current_task_id = Some "TASK-1" }
   in
-  let got = R.operator_disposition active_passive_receipt in
-  (* Same carve-out extends to passive-WITH-work-scope turns (current_task_id
-     set): before this fix this case fell through to
-     [Disp_alert_exhausted, Reason_turn_budget_exhausted], paging an operator
-     for activity RFC-0303 says should never page. *)
-  let want = R.Disp_pass, R.Reason_passive_no_action in
+  let got = R.operator_disposition active_receipt in
+  let want = R.Disp_pass, R.Reason_turn_budget_exhausted in
   check
     (Printf.sprintf
-       "active passive turn budget exhaustion want=%s got=%s"
+       "active-task turn-budget disposition ignores completion observation want=%s got=%s"
        (disp_pair_to_string want)
        (disp_pair_to_string got))
     (got = want);
   let executed_receipt =
-    { passive_receipt with
-      completion_contract_result = R.Contract_satisfied_execution
+    { no_visible_output_receipt with
+      completion_contract_result = R.Completion_tool_execution_observed
     }
   in
   let got = R.operator_disposition executed_receipt in
   let want = R.Disp_pass, R.Reason_turn_budget_exhausted in
   check
     (Printf.sprintf
-       "satisfied turn budget exhaustion want=%s got=%s"
+       "tool-execution observation leaves turn-budget disposition unchanged want=%s got=%s"
        (disp_pair_to_string want)
        (disp_pair_to_string got))
     (got = want)
 ;;
 
 let () =
-  let receipt =
+  let completed_receipt =
     { base_receipt with
       terminal_reason_code = "success"
     ; outcome = `Ok
     ; runtime_outcome = R.Runtime_completed
-    ; completion_contract_result = R.Contract_passive_only
+    ; completion_contract_result = R.Completion_no_visible_output
     }
   in
-  let got = R.operator_disposition receipt in
+  let got = R.operator_disposition completed_receipt in
   let want = R.Disp_pass, R.Reason_healthy in
   check
     (Printf.sprintf
-       "completed no-work passive-only receipt want=%s got=%s"
+       "completed receipt ignores missing visible-output observation want=%s got=%s"
        (disp_pair_to_string want)
        (disp_pair_to_string got))
     (got = want);
-  (* RFC-0303 Phase 0: a passive-only turn is activity, not a page — even when
-     the keeper holds a claimed task. It maps to [Disp_pass]/[passive_no_action],
-     NOT [Disp_pause_human]. "Should it have worked the claimed task?" is a
-     goal-layer judgment, not a per-turn contract failure. *)
-  let active_receipt = { receipt with current_task_id = Some "TASK-1" } in
+  let active_receipt = { completed_receipt with current_task_id = Some "TASK-1" } in
   let got = R.operator_disposition active_receipt in
-  let want = R.Disp_pass, R.Reason_passive_no_action in
+  let want = R.Disp_pass, R.Reason_healthy in
   check
     (Printf.sprintf
-       "completed active passive-only receipt is pass (not a page) want=%s got=%s"
+       "active-task completion observation does not alter disposition want=%s got=%s"
        (disp_pair_to_string want)
        (disp_pair_to_string got))
     (got = want);
   check
-    "active passive-only turn does NOT need an operator broadcast"
+    "completion observation does not request an operator broadcast"
     (not (R.needs_operator_broadcast (fst got)))
 ;;
 
-(* Root B (#22710) regression: a coordination keeper always carries goals
-   (goal_ids <> []), yet may have nothing actionable in a given turn. The
-   passive-only carve-out must key on the world-observation [actionable_signal],
-   not on goal presence; otherwise such a keeper fails the healthy carve-out and
-   re-emits [operator_broadcast_required] every idle turn (albini, 85/day). *)
+(* Completion evidence is an observation axis only. Varying work scope and
+   world-observation context must not change the terminal disposition. *)
 let () =
-  let coordination_passive ?(actionable_signal = Some C.No_actionable_signal) () =
+  let coordination_receipt ?(actionable_signal = Some C.No_actionable_signal) () =
     { base_receipt with
       terminal_reason_code = "success"
     ; outcome = `Ok
     ; runtime_outcome = R.Runtime_completed
-    ; completion_contract_result = R.Contract_passive_only
+    ; completion_contract_result = R.Completion_no_visible_output
     ; goal_ids = [ "GOAL-1" ]
     ; actionable_signal
     }
   in
-  let got = R.operator_disposition (coordination_passive ()) in
+  let got = R.operator_disposition (coordination_receipt ()) in
   let want = R.Disp_pass, R.Reason_healthy in
   check
     (Printf.sprintf
@@ -892,58 +708,45 @@ let () =
     (not (R.needs_operator_broadcast (fst got)));
   let got =
     R.operator_disposition
-      (coordination_passive ~actionable_signal:(Some C.Has_unclaimed_tasks) ())
+      (coordination_receipt ~actionable_signal:(Some C.Has_unclaimed_tasks) ())
   in
-  (* RFC-0303 Phase 0: the albini "85 pages/day" root. A coordination keeper
-     that saw unclaimed tasks but chose not to claim one this turn is NOT a
-     page — choosing not to act on available work is a decision, not a contract
-     failure. Passive-only is uniformly [Disp_pass]/[passive_no_action]. *)
-  let want = R.Disp_pass, R.Reason_passive_no_action in
+  let want = R.Disp_pass, R.Reason_healthy in
   check
     (Printf.sprintf
-       "coordination keeper with unclaimed tasks does NOT page (passive is a \
-        decision, not a failure) want=%s got=%s"
+       "completion observation with unclaimed tasks is still healthy want=%s got=%s"
        (disp_pair_to_string want)
        (disp_pair_to_string got))
     (got = want);
   check
-    "unclaimed-task passive turn does NOT need an operator broadcast"
+    "unclaimed-task completion observation does not request an operator broadcast"
     (not (R.needs_operator_broadcast (fst got)));
-  (* RFC-0303 Phase 0: with no world observation threaded, a passive-only turn
-     is still not a page. Observability loss is a runtime concern (surfaced on
-     the runtime error path), not a manufactured passive-turn operator page. *)
-  let got = R.operator_disposition (coordination_passive ~actionable_signal:None ()) in
-  let want = R.Disp_pass, R.Reason_passive_no_action in
+  let got = R.operator_disposition (coordination_receipt ~actionable_signal:None ()) in
+  let want = R.Disp_pass, R.Reason_healthy in
   check
     (Printf.sprintf
-       "coordination keeper with no observation is pass (passive is not a page) \
-        want=%s got=%s"
+       "completion evidence and world-observation absence remain independent want=%s got=%s"
        (disp_pair_to_string want)
        (disp_pair_to_string got))
     (got = want)
 ;;
 
 let () =
-  let completion_contract_failure =
-    UTS.Terminal_failed_completion_contract
-      { reason_code = "needs_execution_progress" }
-  in
   check
-    "completion-contract terminal failure is not a completed activity turn"
-    (not (UTS.terminal_outcome_is_completed_turn completion_contract_failure))
+    "runtime checkpoint remains a completed Keeper activity turn"
+    (UTS.terminal_outcome_is_completed_turn UTS.Terminal_checkpoint)
 ;;
 
 let () =
-  with_temp_dir "keeper-contract-failed-turn-persist" @@ fun workspace_dir ->
-  let keeper_name = "contract-failed-turn-persist" in
+  with_temp_dir "keeper-checkpoint-turn-persist" @@ fun workspace_dir ->
+  let keeper_name = "checkpoint-turn-persist" in
   let config = Masc.Workspace.default_config workspace_dir in
   let meta : KMC.keeper_meta =
     meta_fixture_exn
       (`Assoc
         [ "name", `String keeper_name
         ; "agent_name", `String keeper_name
-        ; "trace_id", `String "trace-contract-failed-turn-persist"
-        ; "goal", `String "Persist contract-failed turn usage"
+        ; "trace_id", `String "trace-checkpoint-turn-persist"
+        ; "goal", `String "Persist checkpoint turn usage"
         ])
   in
   write_meta_exn config meta;
@@ -951,8 +754,7 @@ let () =
   let usage = original_meta.runtime.usage in
   let updated_meta =
     { original_meta with
-      auto_resume_after_sec = Some 30.0
-    ; runtime =
+      runtime =
         { original_meta.runtime with
           usage =
             { usage with
@@ -962,10 +764,7 @@ let () =
         }
     }
   in
-  let terminal_outcome =
-    UTS.Terminal_failed_completion_contract
-      { reason_code = "needs_execution_progress" }
-  in
+  let terminal_outcome = UTS.Terminal_checkpoint in
   let returned =
     UTS.persist_terminal_turn_meta_for_outcome
       ~config
@@ -974,15 +773,11 @@ let () =
       ~terminal_outcome
   in
   let persisted = read_meta_exn config keeper_name in
+  check "checkpoint returns advanced turn usage"
+    (returned.runtime.usage.total_turns = updated_meta.runtime.usage.total_turns);
   check
-    "completion-contract terminal failure keeps auto-resume on returned meta"
-    (returned.auto_resume_after_sec = Some 30.0);
-  check
-    "completion-contract terminal failure persists advanced turn usage"
-    (persisted.runtime.usage.total_turns = updated_meta.runtime.usage.total_turns);
-  check
-    "completion-contract terminal failure does not clear durable auto-resume"
-    (persisted.auto_resume_after_sec = Some 30.0)
+    "checkpoint persists advanced turn usage"
+    (persisted.runtime.usage.total_turns = updated_meta.runtime.usage.total_turns)
 ;;
 
 let () =
@@ -1029,7 +824,7 @@ let () =
     ; usage = Masc.Inference_utils.zero_usage
     ; usage_reported = true
     ; tool_calls = []
-    ; completion_contract_result = R.Contract_satisfied_execution
+    ; completion_contract_result = R.Completion_tool_execution_observed
     ; operator_disposition = None
     ; checkpoint = None
     ; trace_ref = None
@@ -1094,11 +889,11 @@ let () =
             ());
        let entry_after_budget = registered_entry () in
        check
-         "budget-exhausted terminal turn preserves provider failure reason"
-         (entry_after_budget.last_failure_reason = Some stale_provider_failure);
+         "budget checkpoint clears stale provider failure reason"
+         (entry_after_budget.last_failure_reason = None);
        check
-         "budget-exhausted terminal turn preserves turn consecutive failures"
-         (entry_after_budget.turn_consecutive_failures = 1))
+         "budget checkpoint clears turn consecutive failures"
+         (entry_after_budget.turn_consecutive_failures = 0))
 ;;
 
 let () =

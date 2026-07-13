@@ -263,9 +263,9 @@
     },
     {
       "finding_id": "NF-4",
-      "title": "governance_judge_unparseable_fallback",
+      "title": "structured_judge_unparseable_fallback",
       "severity": "warning",
-      "patterns": ["governance_unparseable", "lenient_json_fallback"],
+      "patterns": ["structured_judge_unparseable"],
       "actionability": "actionable",
       "decision_id": null,
       "source": {"path": "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md", "line_refs": [355]}

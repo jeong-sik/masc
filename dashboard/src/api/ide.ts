@@ -29,7 +29,7 @@ export type IdeScope =
 
 export type IdeScopeOptions = Pick<IdeApiOptions, 'scope' | 'repoId' | 'canonicalUrl'>
 
-export type IdeEventKind = 'tool' | 'turn' | 'pr'
+export type IdeEventKind = 'tool' | 'turn'
 
 export interface IdeEventsOptions extends IdeApiOptions {
   readonly kind?: IdeEventKind | 'all'
@@ -82,7 +82,6 @@ export interface IdeToolEvent extends IdeBridgeEventBase {
   readonly latency_ms: number
   readonly summary: string
   readonly file_path: string | null
-  readonly command_descriptor: unknown
 }
 
 export interface IdeTurnEvent extends IdeBridgeEventBase {
@@ -94,18 +93,7 @@ export interface IdeTurnEvent extends IdeBridgeEventBase {
   readonly duration_ms: number | null
 }
 
-export interface IdePrEvent extends IdeBridgeEventBase {
-  readonly type: 'pr'
-  readonly pr_number: number
-  readonly pull_request_url: string
-  readonly pr_title: string
-  readonly pr_state: string
-  readonly repo: string
-  readonly comment_count: number
-  readonly review_status: string | null
-}
-
-export type IdeBridgeEvent = IdeToolEvent | IdeTurnEvent | IdePrEvent
+export type IdeBridgeEvent = IdeToolEvent | IdeTurnEvent
 
 export interface IdeAnnotationFilter {
   readonly file_path?: string
@@ -544,45 +532,21 @@ function parseIdeBridgeEvent(raw: unknown): IdeBridgeEvent | null {
       latency_ms: latencyMs,
       summary,
       file_path: stringField(raw, 'file_path'),
-      command_descriptor: raw.command_descriptor ?? null,
     }
   }
 
-  if (type === 'turn') {
-    const phase = stringField(raw, 'phase')
-    if (!phase) return null
-    return {
-      type,
-      keeper_id: keeperId,
-      turn_id: turnId,
-      timestamp_ms: timestampMs,
-      phase,
-      model_used: stringField(raw, 'model_used'),
-      tools_used: stringArrayField(raw, 'tools_used'),
-      stop_reason: stringField(raw, 'stop_reason'),
-      duration_ms: numberField(raw, 'duration_ms'),
-    }
-  }
-
-  const prNumber = numberField(raw, 'pr_number')
-  const pullRequestUrl = stringField(raw, 'pull_request_url') ?? ''
-  const prTitle = stringField(raw, 'pr_title') ?? ''
-  const prState = stringField(raw, 'pr_state') ?? ''
-  const repo = stringField(raw, 'repo') ?? ''
-  const commentCount = numberField(raw, 'comment_count')
-  if (prNumber === null || commentCount === null) return null
+  const phase = stringField(raw, 'phase')
+  if (!phase) return null
   return {
     type,
     keeper_id: keeperId,
     turn_id: turnId,
     timestamp_ms: timestampMs,
-    pr_number: prNumber,
-    pull_request_url: pullRequestUrl,
-    pr_title: prTitle,
-    pr_state: prState,
-    repo,
-    comment_count: commentCount,
-    review_status: stringField(raw, 'review_status'),
+    phase,
+    model_used: stringField(raw, 'model_used'),
+    tools_used: stringArrayField(raw, 'tools_used'),
+    stop_reason: stringField(raw, 'stop_reason'),
+    duration_ms: numberField(raw, 'duration_ms'),
   }
 }
 
@@ -591,7 +555,7 @@ function isIdeBridgeEvent(value: IdeBridgeEvent | null): value is IdeBridgeEvent
 }
 
 function isIdeEventKind(value: string | null): value is IdeEventKind {
-  return value === 'tool' || value === 'turn' || value === 'pr'
+  return value === 'tool' || value === 'turn'
 }
 
 function stringField(record: Record<string, unknown>, key: string): string | null {

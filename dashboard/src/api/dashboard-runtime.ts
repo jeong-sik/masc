@@ -73,12 +73,9 @@ export interface DashboardRuntimeRequestConfig {
 
 export interface DashboardRuntimeProviderBehaviorCapabilities {
   supports_inline_tools?: boolean
-  requires_per_keeper_bridging_for_bound_actor_tools?: boolean
-  identity_runtime_mcp_header_keys: string[]
   argv_prompt_preflight?: boolean
   uses_anthropic_caching?: boolean
   max_turns_per_attempt?: number | null
-  tolerates_bound_actor_fallback?: boolean
 }
 
 export interface DashboardRuntimeDeclaredProviderSpec {
@@ -281,7 +278,7 @@ export interface DashboardRuntimeAssignment {
   matches_default?: boolean
 }
 
-export interface DashboardRuntimeAssignmentGovernance {
+export interface DashboardRuntimeAssignmentStatus {
   schema?: string | null
   source?: string | null
   status?: string | null
@@ -352,7 +349,7 @@ export interface DashboardRuntimeProvidersResponse {
     default_runtime_id?: string | null
   } | null
   providers: DashboardRuntimeProviderSnapshot[]
-  assignment_governance?: DashboardRuntimeAssignmentGovernance | null
+  assignment_status?: DashboardRuntimeAssignmentStatus | null
   startup_degradation?: DashboardRuntimeStartupDegradation | null
   // Resolved filesystem path of the runtime.toml the server actually loaded
   // (Runtime.config_path); answers "which config is live" in the monitor.
@@ -535,13 +532,9 @@ function decodeRuntimeProviderBehaviorCapabilities(
   if (!isRecord(raw)) return null
   return {
     supports_inline_tools: asBoolean(raw.supports_inline_tools),
-    requires_per_keeper_bridging_for_bound_actor_tools:
-      asBoolean(raw.requires_per_keeper_bridging_for_bound_actor_tools),
-    identity_runtime_mcp_header_keys: asStringArray(raw.identity_runtime_mcp_header_keys),
     argv_prompt_preflight: asBoolean(raw.argv_prompt_preflight),
     uses_anthropic_caching: asBoolean(raw.uses_anthropic_caching),
     max_turns_per_attempt: asNumber(raw.max_turns_per_attempt) ?? null,
-    tolerates_bound_actor_fallback: asBoolean(raw.tolerates_bound_actor_fallback),
   }
 }
 
@@ -797,7 +790,7 @@ function decodeRuntimeAssignment(raw: unknown): DashboardRuntimeAssignment | nul
   }
 }
 
-function decodeRuntimeAssignmentGovernance(raw: unknown): DashboardRuntimeAssignmentGovernance | null {
+function decodeRuntimeAssignmentStatus(raw: unknown): DashboardRuntimeAssignmentStatus | null {
   if (!isRecord(raw)) return null
   return {
     schema: asNullableString(raw.schema),
@@ -915,7 +908,7 @@ function decodeRuntimeProvidersResponse(raw: unknown): DashboardRuntimeProviders
     providers: asRecordArray(raw.providers)
       .map(decodeRuntimeProviderSnapshot)
       .filter((provider): provider is DashboardRuntimeProviderSnapshot => provider !== null),
-    assignment_governance: decodeRuntimeAssignmentGovernance(raw.assignment_governance),
+    assignment_status: decodeRuntimeAssignmentStatus(raw.assignment_status),
     startup_degradation: decodeRuntimeStartupDegradation(raw.startup_degradation),
     config_path: asNullableString(raw.config_path),
   }

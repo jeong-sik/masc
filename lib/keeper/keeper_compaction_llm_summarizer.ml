@@ -242,7 +242,7 @@ let with_timeout ?clock ~timeout_sec f =
 let run_plan
     ?(complete : complete_fn = default_complete)
     ?clock
-    ?(timeout_sec = Env_config_governance.Inference.timeout_seconds)
+    ?(timeout_sec = Env_config_runtime_services.Inference.timeout_seconds)
     ~(keeper_name : string)
     ~(runtime_id : string)
     ~sw

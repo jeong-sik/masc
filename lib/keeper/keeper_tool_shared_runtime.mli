@@ -18,27 +18,6 @@ val tool_result_error_json : Tool_result.result -> string
     in [error_json] on failure. *)
 val tool_result_or_error : Tool_result.result -> string
 
-(** Phase B PR-5 precursor: typed dispatch from the path error
-    class to a concrete remediation hint. *)
-val actionable_path_action_for_class
-  :  playground:string
-  -> raw_path:string
-  -> Keeper_failure_circuit_breaker.error_class
-  -> string
-
-(** Render the canonical path-rejection JSON envelope: classifies
-    [error] via [Keeper_failure_circuit_breaker.classify_error]
-    and routes to [actionable_path_action_for_class]. *)
-val actionable_path_error
-  :  deterministic_reason:
-       Keeper_tool_deterministic_error.deterministic_reason option
-  -> op:string
-  -> config:Workspace.config
-  -> meta:Keeper_meta_contract.keeper_meta
-  -> raw_path:string
-  -> error:string
-  -> string
-
 val file_not_found_prefix : string
 
 (** Render a missing-file JSON envelope with the error, path, and
@@ -48,10 +27,7 @@ val file_not_found_prefix : string
 val missing_file_error_json
   :  raw_path:string option
   -> cwd:string option
-  -> config:Workspace.config
-  -> meta:Keeper_meta_contract.keeper_meta
   -> target:string
-  -> fallback_dir:string
   -> error:string
   -> string
 
@@ -101,59 +77,18 @@ val keeper_observation_host_path_of_visible_path
   -> string
   -> string
 
-val project_relative_host_path : config:Workspace.config -> string -> string option
-
 val safe_file_exists : string -> bool
 val safe_is_dir : string -> bool
 
-(** Names of git-clone subdirectories under the keeper sandbox
-    [repos/] lane. *)
-val keeper_sandbox_repo_names
-  :  config:Workspace.config
-  -> meta:Keeper_meta_contract.keeper_meta
-  -> string list
-
-(** [true] iff [raw] is a relative path that lies under one of the
-    keeper's relative allowed_paths roots. *)
-val relative_path_targets_allowed_root : meta:Keeper_meta_contract.keeper_meta -> string -> bool
-
-(** [true] iff [raw] starts with [mind] or [repos] (the canonical
-    sandbox lanes for keeper-relative paths). *)
-val is_playground_lane_relative_path : string -> bool
-
-(** [true] iff [raw] is a relative path whose first segment looks
-    like a repo name (not a sandbox lane / project root marker). *)
-val repo_relative_path_candidate : meta:Keeper_meta_contract.keeper_meta -> string -> bool
-
-(** Rewrite a repo-relative path to its sandbox-clone absolute
-    form. Returns [Ok None] when no rewrite applies, [Ok (Some _)]
-    on a successful rewrite, [Error _] on ambiguity. *)
-val rewrite_single_repo_relative_path
-  :  config:Workspace.config
-  -> meta:Keeper_meta_contract.keeper_meta
-  -> string
-  -> (string option, string) result
-
-(** Default-route a relative path under the keeper's playground
-    unless it already targets an explicit allowed_paths root.
-    Applies single-repo rewrite, then resolves. *)
-val playground_relative_unless_allowed_root
-  :  config:Workspace.config
-  -> meta:Keeper_meta_contract.keeper_meta
-  -> string
-  -> (string, string) result
-
-(** Resolve a write target path: playground default + sandbox
-    boundary check via [Keeper_alerting_path.resolve_keeper_target_path]. *)
+(** Resolve a write target without path rewriting, using objective allowed-root
+    containment via [Keeper_alerting_path.resolve_keeper_target_path]. *)
 val resolve_keeper_path
   :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> raw_path:string
   -> (string, string) result
 
-(** Resolve a read target path: playground default + sandbox
-    boundary check via [Keeper_alerting_path.resolve_keeper_read_path]
-    (with missing-leaf fallback search). *)
+(** Resolve a read target without path rewriting or existence inference. *)
 val resolve_keeper_read_path
   :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta

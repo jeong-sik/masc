@@ -29,7 +29,6 @@ export interface KeeperCursorOverlay {
   collisions: Array<{
     line: number
     keeper_ids: string[]
-    risk_level: 'low' | 'medium' | 'high'
   }>
   active_file: string | null
   stream?: KeeperCursorStreamState
@@ -103,7 +102,6 @@ export function getKeeperColor(keeperId: string, index?: number): KeeperCursorCo
 export function detectCollisions(cursors: Iterable<KeeperCursor>): Array<{
   line: number
   keeper_ids: string[]
-  risk_level: 'low' | 'medium' | 'high'
 }> {
   const lineToKeepers = new Map<number, string[]>()
   
@@ -121,21 +119,15 @@ export function detectCollisions(cursors: Iterable<KeeperCursor>): Array<{
     }
   }
   
-  const collisions: Array<{ line: number; keeper_ids: string[]; risk_level: 'low' | 'medium' | 'high' }> = []
+  const collisions: Array<{ line: number; keeper_ids: string[] }> = []
   
   lineToKeepers.forEach((keepers, line) => {
     if (keepers.length > 1) {
-      const risk: 'low' | 'medium' | 'high' =
-        keepers.length >= 3 ? 'high' : keepers.length === 2 ? 'medium' : 'low'
-      collisions.push({ line, keeper_ids: keepers, risk_level: risk })
+      collisions.push({ line, keeper_ids: keepers })
     }
   })
   
-  return collisions.sort((a, b) => {
-    if (b.risk_level === 'high' && a.risk_level !== 'high') return 1
-    if (a.risk_level === 'high' && b.risk_level !== 'high') return -1
-    return b.keeper_ids.length - a.keeper_ids.length
-  })
+  return collisions.sort((a, b) => b.keeper_ids.length - a.keeper_ids.length)
 }
 
 function range(start: number, end: number): number[] {
@@ -231,14 +223,11 @@ export function KeeperCursorWidget({ cursor, color, onJump }: KeeperCursorWidget
 }
 
 interface CollisionWarningProps {
-  collisions: Array<{ line: number; keeper_ids: string[]; risk_level: 'low' | 'medium' | 'high' }>
+  collisions: Array<{ line: number; keeper_ids: string[] }>
 }
 
 export function CollisionWarning({ collisions }: CollisionWarningProps) {
   if (collisions.length === 0) return null
-  
-  const highRisk = collisions.filter(c => c.risk_level === 'high')
-  const mediumRisk = collisions.filter(c => c.risk_level === 'medium')
   
   return html`
     <div class="collision-warnings v2-ide-panel" style=${{
@@ -247,18 +236,11 @@ export function CollisionWarning({ collisions }: CollisionWarningProps) {
       borderBottom: '1px solid var(--color-border-warning)',
     }}>
       <div style=${{ fontWeight: '600', marginBottom: '4px' }}>
-        ⚠️ Multi-Keeper Collision Detection
+        Multi-Keeper cursor overlap
       </div>
-      ${highRisk.length > 0 && html`
-        <div style=${{ color: 'var(--color-fg-danger)', fontSize: '12px' }}>
-          High Risk (${highRisk.length} lines): ${highRisk.map(c => `L${c.line}`).join(', ')}
-        </div>
-      `}
-      ${mediumRisk.length > 0 && html`
-        <div style=${{ color: 'var(--color-fg-warning)', fontSize: '12px' }}>
-          Medium Risk (${mediumRisk.length} lines): ${mediumRisk.map(c => `L${c.line}`).join(', ')}
-        </div>
-      `}
+      <div style=${{ color: 'var(--color-fg-warning)', fontSize: '12px' }}>
+        ${collisions.map(c => `L${c.line}: ${c.keeper_ids.length} keepers`).join(' · ')}
+      </div>
     </div>
   `
 }

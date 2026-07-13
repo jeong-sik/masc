@@ -4,7 +4,6 @@ module Tool_result = Tool_result
 module Tool_dispatch = Tool_dispatch
 module Time_compat = Time_compat
 module Keeper_tools_oas_workflow = Masc.Keeper_tools_oas_workflow
-module Keeper_tools_oas = Masc.Keeper_tools_oas
 
 let tool_ok ?(tool_name = "") message =
   Tool_result.make_ok ~tool_name ~start_time:0.0 ~data:(`String message) ()
@@ -22,21 +21,6 @@ let test_schema tool =
 let register_test_tool ~tool_name ~handler =
   Tool_dispatch.register ~tool_name ~handler;
   Tool_dispatch.register_module_tag ~schemas:[ test_schema tool_name ] ~tag:Mod_misc
-;;
-
-let str_contains haystack needle =
-  let hlen = String.length haystack in
-  let nlen = String.length needle in
-  if nlen = 0
-  then true
-  else if nlen > hlen
-  then false
-  else (
-    let rec loop i =
-      i + nlen <= hlen
-      && (String.sub haystack i nlen = needle || loop (i + 1))
-    in
-    loop 0)
 ;;
 
 let test_ok_json_response () =
@@ -384,113 +368,6 @@ let test_workflow_marker_accepts_top_level_evidence_refs () =
     (Keeper_tools_oas_workflow.workflow_submit_evidence_marker input)
 ;;
 
-let test_workflow_recovery_with_tool_suggestion_routes_next_tool () =
-  let info : Keeper_tools_oas_workflow.workflow_rejection_info =
-    { task_id = Some "task-944"
-    ; rule_id = Some "task_done_requires_claimed_or_started"
-    ; tool_suggestion = Some "keeper_task_claim"
-    ; alternatives = [ "keeper_task_claim"; "keeper_tasks_list" ]
-    ; hint = Some "Claim it first"
-    ; scope_policy = Keeper_tools_oas_workflow.Observe_scope
-    }
-  in
-  let instruction =
-    Keeper_tools_oas_workflow.workflow_rejection_recovery_instruction
-      ~tool_name:"keeper_task_done"
-      ~count:1
-      info
-  in
-  Alcotest.(check bool)
-    "routes to suggested tool"
-    true
-    (str_contains instruction "Use keeper_task_claim next");
-  Alcotest.(check bool)
-    "does not invite same done retry"
-    false
-    (str_contains instruction "retry this keeper_task_done call")
-;;
-
-let test_workflow_recovery_fields_require_next_tool () =
-  let raw =
-    {|{"ok":false,"error":"[TaskError] Task task-944 is still todo. Claim/start it first, then mark it done.","failure_class":"workflow_rejection","error_class":"deterministic","recoverable":false,"hint":"Claim it first.","diagnosis":{"rule_id":"task_done_requires_claimed_or_started","tool_suggestion":"keeper_task_claim","scope_policy":"observe"}}|}
-  in
-  let fields =
-    Keeper_tools_oas_workflow.workflow_rejection_recovery_fields
-      ~tool_name:"keeper_task_done"
-      ~count:1
-      raw
-  in
-  let required_next_tool =
-    match List.assoc_opt "required_next_tool" fields with
-    | Some (`String value) -> value
-    | _ -> Alcotest.fail "missing required_next_tool"
-  in
-  let instruction =
-    match List.assoc_opt "workflow_rejection_recovery" fields with
-    | Some (`Assoc recovery) ->
-      (match List.assoc_opt "instruction" recovery with
-       | Some (`String value) -> value
-       | _ -> Alcotest.fail "missing recovery instruction")
-    | _ -> Alcotest.fail "missing workflow_rejection_recovery"
-  in
-  Alcotest.(check string)
-    "required next tool"
-    "keeper_task_claim"
-    required_next_tool;
-  Alcotest.(check bool)
-    "instruction names next tool"
-    true
-    (str_contains instruction "Use keeper_task_claim next");
-  Alcotest.(check bool)
-    "instruction avoids same-tool retry"
-    false
-    (str_contains instruction "retry this keeper_task_done call")
-  ;
-  Alcotest.(check bool)
-    "unrecoverable transition does not require same-turn self correction"
-    false
-    (match List.assoc_opt "self_correction_required" fields with
-     | Some (`Bool value) -> value
-     | _ -> true)
-  ;
-  Alcotest.(check bool)
-    "unrecoverable transition is terminal"
-    true
-    (match List.assoc_opt "workflow_rejection_terminal" fields with
-     | Some (`Bool value) -> value
-     | _ -> false)
-;;
-
-let test_workflow_recovery_terminal_without_next_tool_does_not_retry () =
-  let raw =
-    {|{"ok":false,"error":"Invalid task state: cancelled is terminal","failure_class":"workflow_rejection","error_class":"deterministic","recoverable":false,"diagnosis":{"rule_id":"task_transition_invalid_state","scope_policy":"observe"}}|}
-  in
-  let fields =
-    Keeper_tools_oas_workflow.workflow_rejection_recovery_fields
-      ~tool_name:"masc_transition"
-      ~count:1
-      raw
-  in
-  let instruction =
-    match List.assoc_opt "workflow_rejection_recovery" fields with
-    | Some (`Assoc recovery) ->
-      (match List.assoc_opt "instruction" recovery with
-       | Some (`String value) -> value
-       | _ -> Alcotest.fail "missing terminal recovery instruction")
-    | _ -> Alcotest.fail "missing terminal workflow rejection recovery"
-  in
-  Alcotest.(check bool)
-    "terminal instruction forbids same-tool retry"
-    true
-    (str_contains instruction "Do not retry this masc_transition call");
-  Alcotest.(check bool)
-    "terminal rejection does not require self correction"
-    false
-    (match List.assoc_opt "self_correction_required" fields with
-     | Some (`Bool value) -> value
-     | _ -> true)
-;;
-
 let test_nested_workflow_payload_preserves_unrecoverable_boundary () =
   let nested =
     `Assoc
@@ -519,61 +396,7 @@ let test_nested_workflow_payload_preserves_unrecoverable_boundary () =
   Alcotest.(check bool)
     "nested recoverability remains terminal"
     true
-    (Keeper_tools_oas_workflow.workflow_rejection_should_skip_retry payload);
-  let recovery_fields =
-    Keeper_tools_oas_workflow.workflow_rejection_recovery_fields
-      ~tool_name:"masc_transition"
-      ~count:1
-      (Yojson.Safe.to_string outer)
-  in
-  let normalized =
-    Keeper_tools_oas.normalize_tool_result
-      ~workflow_rejection_recovery_fields:recovery_fields
-      ~success:false
-      (Yojson.Safe.to_string outer)
-    |> Yojson.Safe.from_string
-  in
-  Alcotest.(check bool)
-    "normalizer does not request self correction for terminal rejection"
-    false
-    Yojson.Safe.Util.(member "self_correction_required" normalized |> to_bool)
-;;
-
-let test_workflow_recovery_uses_alternatives_without_tool_suggestion () =
-  let raw =
-    {|{"ok":false,"error":"task_id is required","failure_class":"workflow_rejection","alternatives":["keeper_task_claim","keeper_tasks_list"],"diagnosis":{"rule_id":"keeper_task_argument_rejected","scope_policy":"observe"}}|}
-  in
-  let fields =
-    Keeper_tools_oas_workflow.workflow_rejection_recovery_fields
-      ~tool_name:"keeper_task_done"
-      ~count:1
-      raw
-  in
-  let suggested_next_tool =
-    match List.assoc_opt "suggested_next_tool" fields with
-    | Some (`String value) -> value
-    | _ -> Alcotest.fail "missing suggested_next_tool"
-  in
-  let instruction =
-    match List.assoc_opt "workflow_rejection_recovery" fields with
-    | Some (`Assoc recovery) ->
-      (match List.assoc_opt "instruction" recovery with
-       | Some (`String value) -> value
-       | _ -> Alcotest.fail "missing recovery instruction")
-    | _ -> Alcotest.fail "missing workflow_rejection_recovery"
-  in
-  Alcotest.(check string)
-    "suggested next tool"
-    "keeper_task_claim"
-    suggested_next_tool;
-  Alcotest.(check bool)
-    "instruction names alternative tool"
-    true
-    (str_contains instruction "Use keeper_task_claim");
-  Alcotest.(check bool)
-    "instruction avoids same-tool retry"
-    false
-    (str_contains instruction "retry this keeper_task_done call")
+    (Keeper_tools_oas_workflow.workflow_rejection_should_skip_retry payload)
 ;;
 
 let () =
@@ -642,24 +465,8 @@ let () =
             `Quick
             test_workflow_marker_accepts_top_level_evidence_refs
         ] )
-    ; ( "workflow rejection recovery"
+    ; ( "workflow rejection payload"
       , [ Alcotest.test_case
-            "tool suggestion routes next tool"
-            `Quick
-            test_workflow_recovery_with_tool_suggestion_routes_next_tool
-        ; Alcotest.test_case
-            "recovery fields require next tool"
-            `Quick
-            test_workflow_recovery_fields_require_next_tool
-        ; Alcotest.test_case
-            "recovery fields use alternatives"
-            `Quick
-            test_workflow_recovery_uses_alternatives_without_tool_suggestion
-        ; Alcotest.test_case
-            "terminal recovery does not retry same tool"
-            `Quick
-            test_workflow_recovery_terminal_without_next_tool_does_not_retry
-        ; Alcotest.test_case
             "nested terminal recovery stays typed"
             `Quick
             test_nested_workflow_payload_preserves_unrecoverable_boundary

@@ -24,7 +24,6 @@
   masc.runtime_provider_labels
   masc.runtime_model
   masc.tool_types
-  masc.tool_catalog_surfaces
   masc.masc_tool_dispatch
   masc.config
   masc.config_dir_resolver

@@ -60,7 +60,7 @@ val compare_recommendation : recommended_action -> recommended_action -> int
 val attention_item_to_yojson : attention_item -> Yojson.Safe.t
 
 (** [true] if [action_type] requires operator confirmation —
-    delegated to {!Operator_approval.confirm_required}. *)
+    delegated to {!Operator_action_catalog.requires_confirmation}. *)
 val recommended_confirm_required : string -> bool
 
 (** Emit with preview envelope, [provenance = "fallback"],

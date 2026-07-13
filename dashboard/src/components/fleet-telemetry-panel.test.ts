@@ -139,7 +139,7 @@ const namespaceTruthResponse: DashboardNamespaceTruthResponse = {
         status: 'warn',
         score: 0.5,
         summary: 'One keeper is asking for intervention.',
-        blocking_reasons: ['1 keeper requires a continue gate decision.'],
+        blocking_reasons: ['1 keeper has a pending Gate request.'],
         metrics: { decision_required: 1 },
       },
     ],
@@ -147,8 +147,8 @@ const namespaceTruthResponse: DashboardNamespaceTruthResponse = {
   attention_events: [
     {
       severity: 'warn',
-      kind: 'continue_gate',
-      summary: 'keeper-alpha is blocked on a continue decision.',
+      kind: 'hitl_pending',
+      summary: 'keeper-alpha has a pending Gate request.',
       requires_decision: true,
       keeper_name: 'keeper-alpha',
       target_type: 'keeper',
@@ -325,7 +325,6 @@ describe('FleetTelemetryPanel', () => {
           goal: 'Ship safer keeper ops',
           sandbox_profile: 'docker',
           sandbox_last_error: 'bind EPERM at /var/folders/tmp',
-          runtime_blocker_continue_gate: true,
         },
       ],
     } satisfies DashboardExecutionResponse)
@@ -344,12 +343,11 @@ describe('FleetTelemetryPanel', () => {
     await flushUi()
 
     expect(container.textContent).toContain('준비 상태')
-    expect(container.textContent).toContain('승인 대기')
+    expect(container.textContent).toContain('Gate 대기')
     expect(container.textContent).toContain('주의 대기열')
-    expect(container.textContent).toContain('keeper-alpha is blocked on a continue decision.')
+    expect(container.textContent).toContain('keeper-alpha has a pending Gate request.')
     expect(container.textContent).toContain('goal linked')
     expect(container.textContent).toContain('sandbox docker')
-    expect(container.textContent).toContain('decision')
     expect(container.textContent).toContain('Ship safer keeper ops')
     expect(container.textContent).toContain('bind EPERM at /var/folders/tmp')
   }, 60_000)
@@ -367,8 +365,8 @@ describe('FleetTelemetryPanel', () => {
           last_latency_ms: 45_000,
           last_activity_ago_s: 20,
           last_model_used: 'gpt-5.4',
-          runtime_blocker_class: 'admission_queue_wait_timeout',
-          runtime_blocker_summary: 'Admission queue wait timeout after 45.0s.',
+          runtime_blocker_class: 'provider_runtime_error',
+          runtime_blocker_summary: 'Provider runtime request timed out after 45.0s.',
           recent_tool_names: [],
         },
       ],
@@ -396,8 +394,8 @@ describe('FleetTelemetryPanel', () => {
     await flushUi()
 
     expect(container.textContent).toContain('부분 텔레메트리')
-    expect(container.textContent).toContain('keepers are blocked in the keeper admission FIFO')
-    expect(container.textContent).toContain('Admission queue wait timeout after 45.0s.')
+    expect(container.textContent).toContain('keepers have runtime blockers')
+    expect(container.textContent).toContain('Provider runtime request timed out after 45.0s.')
   }, 30_000)
 
   it('surfaces snapshot diagnostic summaries for inactive keepers', async () => {

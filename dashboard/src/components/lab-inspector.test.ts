@@ -15,9 +15,6 @@ async function loadInspector() {
   vi.doMock('./server-config', () => ({
     ServerConfig: () => html`<div data-testid="server-config">ServerConfig</div>`,
   }))
-  vi.doMock('./excuse-patterns', () => ({
-    ExcusePatterns: () => html`<div data-testid="excuse-patterns">ExcusePatterns</div>`,
-  }))
   return import('./lab-inspector')
 }
 
@@ -36,7 +33,6 @@ describe('LabInspector', () => {
     vi.resetModules()
     vi.doUnmock('./feature-health')
     vi.doUnmock('./server-config')
-    vi.doUnmock('./excuse-patterns')
   })
 
   it('wraps the inspector in the v2 command surface class', async () => {

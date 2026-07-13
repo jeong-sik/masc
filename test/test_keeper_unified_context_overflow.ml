@@ -104,51 +104,32 @@ let test_is_context_overflow_only_for_overflow_errors () =
     (EC.is_context_overflow (Agent_sdk.Error.Internal "some error"))
 ;;
 
-(* Regression: ContextOverflow used to fall through to the generic
-   turn_consecutive_failures counter (no auto-recovery, escalates to a hard
-   Keeper_fiber_crash after keeper_max_turn_failures). Now that the retry
-   loop (keeper_unified_turn_execution.ml) drives
-   Keeper_turn_runtime_budget.pause_keeper_for_overflow at the point of
-   detection — the Overflowed/Compacting FSM's retry-exhausted path — this
-   error must be classified as
-   auto-recoverable so [record_failure_and_maybe_escalate] does not also
-   count it toward that same crash threshold. *)
+(* ContextOverflow is routed as an explicit recoverable turn failure after OAS
+   has exhausted its own compaction retry. It must not rewrite Keeper lifecycle. *)
 let test_context_overflow_is_auto_recoverable () =
   check
     bool
-    "ContextOverflow is auto-recoverable at turn level (handled by \
-     pause_keeper_for_overflow, not the generic crash counter)"
+    "ContextOverflow is auto-recoverable at turn level"
     true
     (EC.is_auto_recoverable_turn_error
        (Agent_sdk.Error.Api (ContextOverflow { message = "exceeded"; limit = Some 32768 })))
 ;;
 
-let test_overflow_pause_contract_uses_policy_breaker () =
+let test_overflow_failure_contract_keeps_lifecycle_active () =
   let budget_src = read_file "lib/keeper/keeper_turn_runtime_budget.ml" in
-  check bool "overflow pause reads the failure-policy decision" true
+  check bool "overflow failure latches typed evidence" true
     (contains_substring
-       ~needle:
-         "Keeper_failure_policy.decide Keeper_failure_policy.Turn_overflow_pause"
+       ~needle:"Some Keeper_registry.Turn_overflow_failure"
        budget_src);
-  check bool "operator-breaker overflow pause requires manual resume" true
-    (contains_substring
-       ~needle:"Keeper_supervisor_pause_policy.Manual_resume_required"
-       budget_src);
-  check bool "overflow pause records typed token-budget blocker" true
-    (contains_substring
-       ~needle:"~blocker_class:(Some Sdk_token_budget_exceeded)"
-       budget_src);
-  check bool "overflow pause latches overflow failure reason" true
-    (contains_substring
-       ~needle:"Some Keeper_registry.Turn_overflow_pause"
-       budget_src);
+  check bool "overflow failure explicitly keeps lifecycle active" true
+    (contains_substring ~needle:"Keeper lifecycle remains active" budget_src);
   let execution_src = read_file "lib/keeper/keeper_unified_turn_execution.ml" in
   check bool "post-OAS retry overflow has dedicated phase label" true
     (contains_substring ~needle:"Context_overflow_after_oas_retry" execution_src);
-  check bool "post-OAS retry overflow calls overflow pause helper" true
-    (contains_substring ~needle:"pause_keeper_for_overflow" execution_src);
-  check bool "paused meta is carried through turn state" true
-    (contains_substring ~needle:"paused_meta_override = Some paused_meta" execution_src)
+  check bool "post-OAS retry overflow records failure" true
+    (contains_substring ~needle:"record_overflow_failure" execution_src);
+  check bool "overflow path has no paused-meta override" false
+    (contains_substring ~needle:"paused_meta_override" execution_src)
 ;;
 
 let test_preflight_overflow_does_not_bypass_driver_retry () =
@@ -183,13 +164,8 @@ let test_preflight_overflow_does_not_bypass_driver_retry () =
        ~needle:"Keeper_meta_contract.blocker_info_of_class"
        execution_src
      && contains_substring ~needle:"Sdk_token_budget_exceeded" execution_src);
-  check bool "overflow branch pauses with fallback helper" true
-    (contains_substring ~needle:"pause_keeper_for_overflow" execution_src);
-  let rollover_src = read_file "lib/keeper/keeper_rollover.ml" in
-  check bool "rollover gate reads current-turn blocker" true
-    (contains_substring ~needle:"current_turn_signal" rollover_src);
-  check bool "rollover gate uses typed overflow predicate" true
-    (contains_substring ~needle:"blocker_class_indicates_overflow klass" rollover_src)
+  check bool "overflow branch records failure without pause" true
+    (contains_substring ~needle:"record_overflow_failure" execution_src)
 ;;
 
 let test_summarize_turn_event_bus_extracts_overflow_signal () =
@@ -379,14 +355,13 @@ let () =
             `Quick
             test_is_context_overflow_only_for_overflow_errors
         ; test_case
-            "context overflow is auto-recoverable (handled by \
-             pause_keeper_for_overflow)"
+            "context overflow is auto-recoverable"
             `Quick
             test_context_overflow_is_auto_recoverable
         ; test_case
-            "overflow pause uses policy breaker"
+            "overflow failure keeps lifecycle active"
             `Quick
-            test_overflow_pause_contract_uses_policy_breaker
+            test_overflow_failure_contract_keeps_lifecycle_active
         ; test_case
             "preflight overflow does not bypass driver retry"
             `Quick

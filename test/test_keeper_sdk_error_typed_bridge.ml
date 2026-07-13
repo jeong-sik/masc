@@ -15,7 +15,6 @@
       Serialization / Io / Orchestration / Internal) *)
 
 module AE = Masc.Keeper_agent_error
-module BH = Masc.Keeper_binding_health
 module Code = Masc.Keeper_turn_terminal_code
 module EC = Masc.Keeper_error_classify
 module KTD = Masc.Keeper_turn_driver
@@ -298,23 +297,23 @@ let test_user_message_of_masc_accept_rejected () =
     (String_util.contains_substring_ci message "[masc_oas_error]")
 ;;
 
-let test_ollama_session_limit_is_hard_quota () =
+let test_quota_prose_does_not_override_typed_rate_limit () =
   let message =
     "you (yousleepwhen) have reached your session usage limit, add extra usage: \
      https://ollama.com/settings"
   in
   let err = SdkE.Api (Retry.RateLimited { retry_after = None; message }) in
   Alcotest.(check bool)
-    "session usage limit is hard quota"
-    true
+    "provider prose does not invent hard quota"
+    false
     (KTD.sdk_error_is_hard_quota err);
   match EC.recoverable_runtime_failure_reason err with
-  | Some EC.Hard_quota -> ()
+  | Some EC.Rate_limit -> ()
   | Some reason ->
     Alcotest.failf
-      "expected hard_quota, got %s"
+      "expected typed rate_limit, got %s"
       (EC.degraded_retry_reason_to_string reason)
-  | None -> Alcotest.fail "expected hard_quota recoverable reason"
+  | None -> Alcotest.fail "expected rate_limit recoverable reason"
 ;;
 
 let test_payment_required_is_hard_quota () =
@@ -353,17 +352,6 @@ let test_overloaded_with_quota_prose_is_not_hard_quota () =
    real signal is carried by the month-agnostic "you've hit your limit" /
    "monthly usage limit" indicators. This also fixes the 11-months-of-the-year
    false negative the April literal caused. *)
-let test_hit_your_limit_is_month_agnostic_hard_quota () =
-  List.iter
-    (fun month_variant ->
-       Alcotest.(check bool)
-         (Printf.sprintf "%s is hard quota (month-agnostic)" month_variant)
-         true
-         (KTD.message_looks_like_cli_wrapped_hard_quota
-            (Printf.sprintf "You've hit your limit \194\183 %s" month_variant)))
-    [ "resets Apr 24 at 4am"; "resets May 3 at 4am"; "resets Dec 31 at 4am" ]
-;;
-
 let test_soft_rate_limit_classifies_as_rate_limit () =
   let api_err =
     SdkE.Api
@@ -629,13 +617,11 @@ let soft_rate_limit_err =
 ;;
 
 let hard_quota_err =
-  SdkE.Api
-    (Retry.RateLimited
-       {
-         retry_after = None;
-         message =
-           "you (yousleepwhen) have reached your session usage limit, add extra \
-            usage: https://ollama.com/settings";
+  SdkE.Provider
+    (Llm_provider.Error.HardQuota
+       { provider = "typed-provider"
+       ; retry_after = None
+       ; detail = "typed quota exhaustion"
        })
 ;;
 
@@ -684,12 +670,8 @@ let generic_accept_rejected_err ~scope =
        })
 ;;
 
-let test_generic_accept_rejected_is_completion_contract_violation () =
+let test_generic_accept_rejected_is_not_locally_recoverable () =
   let err = generic_accept_rejected_err ~scope:"same.a" in
-  Alcotest.(check bool)
-    "generic accept rejection is a contract violation"
-    true
-    (EC.is_completion_contract_violation err);
   match EC.recoverable_runtime_failure_reason err with
   | None -> ()
   | Some reason ->
@@ -700,10 +682,6 @@ let test_generic_accept_rejected_is_completion_contract_violation () =
 
 let test_read_only_no_progress_remains_recoverable_not_contract () =
   let err = read_only_no_progress_err ~scope:"same.a" in
-  Alcotest.(check bool)
-    "read-only no-progress keeps recovery path"
-    false
-    (EC.is_completion_contract_violation err);
   match EC.recoverable_runtime_failure_reason err with
   | Some EC.Read_only_no_progress -> ()
   | Some reason ->
@@ -717,7 +695,6 @@ let test_soft_rate_limit_skips_same_credential_pool () =
   init_rate_limit_pool_runtime ();
   let retry =
     EC.degraded_rotation_after_recoverable_error
-      ~pacing_enforced:false
       ~credential_pool_of_runtime_id:rate_limit_pool_of_runtime_id
       ~fallback_hint:"same.b"
       ~base_runtime:"same.a"
@@ -735,7 +712,6 @@ let test_soft_rate_limit_preserves_independent_pool_failover () =
   init_rate_limit_pool_runtime ();
   match
     EC.degraded_rotation_after_recoverable_error
-      ~pacing_enforced:false
       ~credential_pool_of_runtime_id:rate_limit_pool_of_runtime_id
       ~fallback_hint:"other.c"
       ~base_runtime:"same.a"
@@ -760,7 +736,6 @@ let test_hard_quota_skips_same_credential_pool () =
   init_rate_limit_pool_runtime ();
   let retry =
     EC.degraded_rotation_after_recoverable_error
-      ~pacing_enforced:false
       ~credential_pool_of_runtime_id:rate_limit_pool_of_runtime_id
       ~fallback_hint:"same.b"
       ~base_runtime:"same.a"
@@ -778,7 +753,6 @@ let test_hard_quota_preserves_independent_pool_failover () =
   init_rate_limit_pool_runtime ();
   match
     EC.degraded_rotation_after_recoverable_error
-      ~pacing_enforced:false
       ~credential_pool_of_runtime_id:rate_limit_pool_of_runtime_id
       ~fallback_hint:"other.c"
       ~base_runtime:"same.a"
@@ -813,278 +787,6 @@ let test_server_error_classifies_as_runtime_recoverable () =
   | None -> Alcotest.fail "expected server_error recoverable reason"
 ;;
 
-let test_server_error_records_immediate_provider_cooldown () =
-  let candidate =
-    Llm_provider.Provider_config.make
-      ~kind:Llm_provider.Provider_config.OpenAI_compat
-      ~model_id:"server-error-test"
-      ~base_url:"https://server-error.example/v1"
-      ()
-    |> RC.of_provider_config ~max_concurrent:None
-  in
-  let keeper_name = "server-error-cooldown-test" in
-  let provider_key =
-    match RC.health_keys candidate with
-    | [ key ] -> keeper_name ^ "@" ^ key
-    | keys ->
-      Alcotest.failf
-        "expected one health key, got [%s]"
-        (String.concat "; " keys)
-  in
-  KTD.For_testing.record_candidate_health_error ~keeper_name candidate server_error_500;
-  let info =
-    match BH.provider_info BH.global ~provider_key with
-    | Some info -> info
-    | None -> Alcotest.failf "expected provider info for %s" provider_key
-  in
-  Alcotest.(check bool) "server error opens cooldown" true info.in_cooldown;
-  Alcotest.(check int) "server error increments once" 1 info.consecutive_failures;
-  Alcotest.(check int)
-    "server error outcome counted"
-    1
-    (BH.recent_outcome_count
-       BH.global
-       ~provider_key
-       ~outcome:BH.Outcome_server_error
-       ~window_s:BH.window_sec)
-;;
-
-let test_provider_unavailable_records_server_error_cooldown () =
-  let candidate =
-    Llm_provider.Provider_config.make
-      ~kind:Llm_provider.Provider_config.OpenAI_compat
-      ~model_id:"provider-unavailable-test"
-      ~base_url:"https://provider-unavailable.example/v1"
-      ()
-    |> RC.of_provider_config ~max_concurrent:None
-  in
-  let keeper_name = "provider-unavailable-cooldown-test" in
-  let provider_key =
-    match RC.health_keys candidate with
-    | [ key ] -> keeper_name ^ "@" ^ key
-    | keys ->
-      Alcotest.failf
-        "expected one health key, got [%s]"
-        (String.concat "; " keys)
-  in
-  (match EC.recoverable_runtime_failure_reason provider_unavailable with
-   | Some EC.Server_error -> ()
-   | Some reason ->
-     Alcotest.failf
-       "expected server_error, got %s"
-       (EC.degraded_retry_reason_to_string reason)
-   | None -> Alcotest.fail "expected server_error recoverable reason");
-  KTD.For_testing.record_candidate_health_error ~keeper_name candidate provider_unavailable;
-  let info =
-    match BH.provider_info BH.global ~provider_key with
-    | Some info -> info
-    | None -> Alcotest.failf "expected provider info for %s" provider_key
-  in
-  Alcotest.(check bool) "provider unavailable opens cooldown" true info.in_cooldown;
-  Alcotest.(check int)
-    "provider unavailable outcome counted"
-    1
-    (BH.recent_outcome_count
-       BH.global
-       ~provider_key
-       ~outcome:BH.Outcome_server_error
-       ~window_s:BH.window_sec)
-;;
-
-let test_soft_rate_limit_cooldown_blocks_candidate_before_dispatch () =
-  let candidate =
-    Llm_provider.Provider_config.make
-      ~kind:Llm_provider.Provider_config.OpenAI_compat
-      ~model_id:"pre-dispatch-rate-limit-test"
-      ~base_url:"https://pre-dispatch-rate-limit.example/v1"
-      ()
-    |> RC.of_provider_config ~max_concurrent:None
-  in
-  let keeper_name = "pre-dispatch-rate-limit-cooldown-test" in
-  let raw_provider_key =
-    match RC.health_keys candidate with
-    | [ key ] -> key
-    | keys ->
-      Alcotest.failf
-        "expected one health key, got [%s]"
-        (String.concat "; " keys)
-  in
-  let provider_key = keeper_name ^ "@" ^ raw_provider_key in
-  let err =
-    SdkE.Api
-      (Retry.RateLimited
-         { retry_after = Some 45.0; message = "transient rate limit" })
-  in
-  KTD.For_testing.record_candidate_health_error ~keeper_name candidate err;
-  let info =
-    match BH.provider_info BH.global ~provider_key with
-    | Some info -> info
-    | None -> Alcotest.failf "expected provider info for %s" provider_key
-  in
-  Alcotest.(check bool) "soft rate limit opens cooldown" true info.in_cooldown;
-  let block =
-    match KTD.For_testing.provider_cooldown_block ~keeper_name candidate with
-    | Some block -> block
-    | None -> Alcotest.fail "expected provider cooldown block"
-  in
-  Alcotest.(check (list string))
-    "blocked provider key"
-    [ provider_key ]
-    block.blocked_provider_keys;
-  Alcotest.(check bool)
-    "remaining cooldown is positive"
-    true
-    (block.cooldown_remaining_sec > 0);
-  let other_keeper_block =
-    match
-      KTD.For_testing.provider_cooldown_block
-        ~keeper_name:"pre-dispatch-rate-limit-other-keeper"
-        candidate
-    with
-    | Some block -> block
-    | None -> Alcotest.fail "expected credential-pool cooldown block"
-  in
-  Alcotest.(check (list string))
-    "credential-pool key blocks other keeper"
-    [ raw_provider_key ]
-    other_keeper_block.blocked_provider_keys;
-  let mapped =
-    KTD.For_testing.provider_cooldown_block_error
-      ~runtime_id:"runtime.pre-dispatch-rate-limit"
-      block
-  in
-  match KTD.classify_masc_internal_error mapped with
-  | Some
-      (KTD.Capacity_backpressure
-         { source = KTD.Provider_capacity
-         ; retry_after = KTD.Synthetic_default retry_after
-         ; detail
-         ; cooldown_cause
-         ; _
-         }) ->
-    Alcotest.(check string)
-      "detail names the true cooldown cause"
-      "provider health cooldown active before dispatch (cause=soft_rate_limited)"
-      detail;
-    Alcotest.(check bool)
-      "synthetic retry-after preserves cooldown"
-      true
-      (retry_after > 0.0);
-    (* Soft rate limit is transient — the cooldown block must carry the cause
-       and stay auto-recoverable so today's behavior is preserved. *)
-    Alcotest.(check bool)
-      "soft rate limit cooldown carries transient cause"
-      true
-      (match cooldown_cause with
-       | Some KTD.Cooldown_soft_rate_limited -> true
-       | _ -> false);
-    Alcotest.(check bool)
-      "transient cooldown block stays auto-recoverable"
-      true
-      (EC.is_auto_recoverable_turn_error mapped)
-  | Some other ->
-    Alcotest.failf
-      "expected capacity_backpressure, got %s"
-      (KTD.kind_of_masc_internal_error other)
-  | None ->
-    Alcotest.failf "expected typed keeper error, got %s"
-      (Agent_sdk.Error.to_string mapped)
-;;
-
-(* #23456 P1 regression: a cooldown restored from persistence carries no
-   arming cause (provider_info.cooldown_cause = None). The aggregate must
-   treat that unknown as possibly-transient: mixed unknown+deterministic
-   blocker lists stay auto-recoverable instead of falsely escalating, while
-   deterministic-only lists still escalate. *)
-let test_mixed_unknown_and_deterministic_cooldown_stays_recoverable () =
-  let keeper_name = "mixed-cooldown-keeper" in
-  let candidate =
-    Llm_provider.Provider_config.make
-      ~kind:Llm_provider.Provider_config.OpenAI_compat
-      ~model_id:"mixed-cooldown-test"
-      ~base_url:"https://mixed-cooldown.example/v1"
-      ()
-    |> RC.of_provider_config ~max_concurrent:None
-  in
-  let raw_key =
-    match RC.health_keys candidate with
-    | [ key ] -> key
-    | keys ->
-      Alcotest.failf
-        "expected one health key, got [%s]"
-        (String.concat "; " keys)
-  in
-  let scoped_key = keeper_name ^ "@" ^ raw_key in
-  (* Deterministic blocker: hard quota on the credential-pool key. *)
-  BH.record_hard_quota BH.global ~provider_key:raw_key ();
-  (* Restored/unknown blocker: an active cooldown loaded from persistence
-     reports no arming cause until re-armed. *)
-  let restored_count =
-    BH.restore_providers
-      BH.global
-      [ { BH.restore_provider_key = scoped_key
-        ; restore_consecutive_failures = 3
-        ; restore_cooldown_until = Some (Unix.gettimeofday () +. 120.0)
-        ; restore_last_failure_at = Some (Unix.gettimeofday ())
-        ; restore_top_fingerprints = []
-        ; restore_latency_ms = None
-        ; restore_confidence = None
-        ; restore_cost_usd = None
-        }
-      ]
-  in
-  Alcotest.(check int) "restored one provider" 1 restored_count;
-  let info key =
-    match BH.provider_info BH.global ~provider_key:key with
-    | Some info -> info
-    | None -> Alcotest.failf "expected provider info for %s" key
-  in
-  let unknown_info = info scoped_key in
-  let det_info = info raw_key in
-  Alcotest.(check bool)
-    "restored cooldown is active"
-    true
-    unknown_info.in_cooldown;
-  Alcotest.(check bool)
-    "restored cooldown has no arming cause"
-    true
-    (unknown_info.cooldown_cause = None);
-  Alcotest.(check bool) "hard quota cooldown is active" true det_info.in_cooldown;
-  Alcotest.(check bool)
-    "mixed unknown+deterministic aggregates to None"
-    true
-    (KTD.For_testing.aggregate_cooldown_cause
-       [ scoped_key, unknown_info; raw_key, det_info ]
-     = None);
-  (match KTD.For_testing.aggregate_cooldown_cause [ raw_key, det_info ] with
-   | Some cause ->
-     Alcotest.(check bool)
-       "deterministic-only aggregate still escalates"
-       true
-       (KTD.provider_cooldown_cause_is_deterministic cause)
-   | None -> Alcotest.fail "deterministic-only aggregate lost its cause");
-  (* Block path: the scoped restored/unknown info wins candidate resolution,
-     so the block reports no cause and the mapped error stays auto-recoverable. *)
-  let block =
-    match KTD.For_testing.provider_cooldown_block ~keeper_name candidate with
-    | Some block -> block
-    | None -> Alcotest.fail "expected provider cooldown block"
-  in
-  Alcotest.(check bool)
-    "restored/unknown block carries no cause"
-    true
-    (block.cooldown_cause = None);
-  let mapped =
-    KTD.For_testing.provider_cooldown_block_error
-      ~runtime_id:"runtime.mixed-cooldown"
-      block
-  in
-  Alcotest.(check bool)
-    "mixed/unknown cooldown block stays auto-recoverable"
-    true
-    (EC.is_auto_recoverable_turn_error mapped)
-;;
-
 let test_read_only_no_progress_rotates_to_default_runtime () =
   init_rate_limit_pool_runtime ();
   let err = read_only_no_progress_err ~scope:"same.b" in
@@ -1097,7 +799,6 @@ let test_read_only_no_progress_rotates_to_default_runtime () =
    | None -> Alcotest.fail "expected read_only_no_progress recoverable reason");
   match
     EC.degraded_rotation_after_recoverable_error
-      ~pacing_enforced:false
       ~base_runtime:"same.b"
       ~effective_runtime:"same.b"
       ~attempted_runtimes:[ "same.b" ]
@@ -1118,7 +819,6 @@ let test_read_only_no_progress_default_runtime_uses_tool_capable_candidate () =
   let err = read_only_no_progress_err ~scope:"same.a" in
   match
     EC.degraded_rotation_after_recoverable_error
-      ~pacing_enforced:false
       ~base_runtime:"same.a"
       ~effective_runtime:"same.a"
       ~attempted_runtimes:[ "same.a" ]
@@ -1135,66 +835,23 @@ let test_read_only_no_progress_default_runtime_uses_tool_capable_candidate () =
     Alcotest.fail "expected read-only no-progress to rotate to a tool-capable runtime"
 ;;
 
-let test_capacity_backpressure_does_not_cycle_candidates () =
-  (* Regression: in shadow mode capacity_backpressure must cap rotation
-     rather than cycle. When this reason allowed candidate cycling, two
-     runtimes that were both in capacity cooldown looped forever
-     (2026-05-21, 2026-07-06, #23373). RFC-0313 W3: enforced pacing
-     bypasses this matrix (spacing replaces the cap); the matrix and this
-     pin go away with the kill-switch in W4. *)
-  Alcotest.(check bool)
-    "capacity_backpressure does not allow candidate cycle"
-    false
-    (EC.degraded_reason_allows_candidate_cycle EC.Capacity_backpressure)
-;;
-
-let test_rate_limit_exhaustion_cycles_under_enforced_pacing () =
-  (* RFC-0313 W3: same exhausted-candidate input, both switch positions.
-     Shadow keeps the legacy cap (rotation gives up -> the failure walked
-     the pause ladder); enforce re-cycles the pool-filtered candidates
-     because cross-turn retries are now spaced by revisit pacing. *)
+let test_rate_limit_exhaustion_stops_after_candidate_pass () =
   init_rate_limit_pool_runtime ();
   let attempted = [ "same.a"; "same.b"; "other.c" ] in
-  (match
-     EC.degraded_rotation_after_recoverable_error
-       ~credential_pool_of_runtime_id:rate_limit_pool_of_runtime_id
-       ~fallback_hint:"other.c"
-       ~pacing_enforced:false
-       ~base_runtime:"same.a"
-       ~effective_runtime:"same.a"
-       ~attempted_runtimes:attempted
-       soft_rate_limit_err
-   with
-   | None -> ()
-   | Some { EC.next_runtime; _ } ->
-     Alcotest.failf
-       "shadow mode must cap exhausted rate_limit rotation, got %s"
-       next_runtime);
   match
     EC.degraded_rotation_after_recoverable_error
       ~credential_pool_of_runtime_id:rate_limit_pool_of_runtime_id
       ~fallback_hint:"other.c"
-      ~pacing_enforced:true
       ~base_runtime:"same.a"
       ~effective_runtime:"same.a"
       ~attempted_runtimes:attempted
       soft_rate_limit_err
   with
-  | Some { EC.fallback_reason = EC.Rate_limit; next_runtime } ->
-    Alcotest.(check bool)
-      (Printf.sprintf
-         "enforced pacing recycles a pool-filtered candidate (got %s)"
-         next_runtime)
-      true
-      (not (String.equal next_runtime ""))
-  | Some { fallback_reason; next_runtime } ->
+  | None -> ()
+  | Some { EC.next_runtime; _ } ->
     Alcotest.failf
-      "expected rate_limit cycle under enforced pacing, got %s -> %s"
-      (EC.degraded_retry_reason_to_string fallback_reason)
+      "an exhausted candidate pass must not invent another cycle, got %s"
       next_runtime
-  | None ->
-    Alcotest.fail
-      "enforced pacing must re-cycle candidates instead of capping"
 ;;
 
 let () =
@@ -1234,9 +891,9 @@ let () =
         ] )
     ; ( "runtime quota guard"
       , [ Alcotest.test_case
-            "ollama cloud session usage limit is classified as hard quota"
+            "quota prose does not override typed rate limit"
             `Quick
-            test_ollama_session_limit_is_hard_quota
+            test_quota_prose_does_not_override_typed_rate_limit
         ; Alcotest.test_case
             "soft rate limits remain rate_limit reasons"
             `Quick
@@ -1253,10 +910,6 @@ let () =
             "transient overload with quota prose is not hard quota"
             `Quick
             test_overloaded_with_quota_prose_is_not_hard_quota
-        ; Alcotest.test_case
-            "hit-your-limit hard quota is month-agnostic"
-            `Quick
-            test_hit_your_limit_is_month_agnostic_hard_quota
         ; Alcotest.test_case
             "soft rate limits skip same credential-pool candidates"
             `Quick
@@ -1278,25 +931,9 @@ let () =
             `Quick
             test_server_error_classifies_as_runtime_recoverable
         ; Alcotest.test_case
-            "500 records immediate provider cooldown"
+            "generic accept rejection is not locally recoverable"
             `Quick
-            test_server_error_records_immediate_provider_cooldown
-        ; Alcotest.test_case
-            "provider unavailable records server_error cooldown"
-            `Quick
-            test_provider_unavailable_records_server_error_cooldown
-        ; Alcotest.test_case
-            "soft rate limit blocks candidate before dispatch"
-            `Quick
-            test_soft_rate_limit_cooldown_blocks_candidate_before_dispatch
-        ; Alcotest.test_case
-            "mixed unknown+deterministic cooldown stays recoverable"
-            `Quick
-            test_mixed_unknown_and_deterministic_cooldown_stays_recoverable
-        ; Alcotest.test_case
-            "generic accept rejection is completion contract violation"
-            `Quick
-            test_generic_accept_rejected_is_completion_contract_violation
+            test_generic_accept_rejected_is_not_locally_recoverable
         ; Alcotest.test_case
             "read-only no-progress remains recoverable"
             `Quick
@@ -1310,13 +947,9 @@ let () =
             `Quick
             test_read_only_no_progress_default_runtime_uses_tool_capable_candidate
         ; Alcotest.test_case
-            "capacity_backpressure does not cycle candidates"
+            "rate-limit exhaustion stops after one candidate pass"
             `Quick
-            test_capacity_backpressure_does_not_cycle_candidates
-        ; Alcotest.test_case
-            "rate_limit exhaustion cycles under enforced pacing (RFC-0313 W3)"
-            `Quick
-            test_rate_limit_exhaustion_cycles_under_enforced_pacing
+            test_rate_limit_exhaustion_stops_after_candidate_pass
         ] )
     ]
 ;;

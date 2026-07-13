@@ -21,15 +21,14 @@ default = "ollama_cloud.deepseek-v4-flash"
 librarian = "ollama_cloud_native.minimax-m3-native-structured"
 # Provider-native structured-output judges must not inherit the fleet chat
 # default when that default lacks schema support. Keep this lane explicit so
-# dashboard operator/governance judges fail at config load on typo/unsupported
+# structured judgment lanes fail at config load on typo/unsupported
 # routing instead of discovering the mismatch in the daemon loop.
 structured_judge = "ollama_cloud_native.minimax-m3-native-structured"
-# HITL approval context summary (advisory operator display). Unset previously,
+# Gate Auto Judge and human-review briefing runtime. Unset previously,
 # so it inherited [runtime].structured_judge = minimax-m3, a *reasoning* model:
 # extended thinking consumed the whole keeper.hitl_summary.max_tokens=512 budget,
-# leaving an empty answer that failed structured parse and always fell back to the
-# deterministic summary. Pin a *non-reasoning* structured runtime so the full token
-# budget produces the answer. devstral-2-123b (thinking-support=false,
+# leaving an empty answer that failed structured parse. Pin a *non-reasoning*
+# structured runtime so the full token budget produces the answer. devstral-2-123b (thinking-support=false,
 # supports-structured-output=true) is the same runtime the Fusion judge uses.
 hitl_summary = "ollama_cloud.ollama-cloud-devstral-2-123b"
 # Anti-rationalization/cross-verifier work asks for JSON and higher judgment.
@@ -1006,45 +1005,6 @@ nick0cave = "ollama.gemma4-26b-a4b-qat"
 # Env var MASC_DISCORD_TRIGGER_POLICY overrides this value.
 [discord]
 trigger_policy = "mention_or_thread"
-
-# ── Keeper pause / resume threshold knobs (Plan §runtime.toml [pause] SSOT) ──
-# lib/keeper/keeper_behavioral_regime.ml 의 hardcoded threshold 들을 외부 설정으로
-# 옮기기 위한 SSOT. Runtime.pause_threshold() 를 통해 auto-pause decision path가
-# 이 값을 읽고, 누락/잘못된 타입은 default fallback 으로 동작한다.
-#
-# 변경 의미:
-# - turn_fail_streak_threshold: 동일 keeper 가 연속 turn_failure 를 N 회
-#   겪으면 no_progress_loop regime 으로 분류. RFC-0225 §3.2 의 monotonic
-#   counter 보호와 직접 연결.
-# - recent_restart_window_sec / recent_restart_count_threshold: 짧은 시간 안에
-#   N 회 restart 가 발생하면 recent_restart_streak regime 으로 분류. 자체-preservation
-#   loop 보호.
-# - tool_failure_count_threshold / tool_failure_ratio_threshold: 도구 호출의
-#   연속 실패 횟수 + 비율이 임계치를 넘으면 unhealthy_tool_chain regime.
-#
-# 누락 시 default 값 사용 (현재 default 와 동일). 잘못된 type (예: string) 은
-# load 단계에서 warn + ignore.
-[pause]
-turn_fail_streak_threshold = 3
-recent_restart_window_sec = 300.0
-recent_restart_count_threshold = 2
-tool_failure_count_threshold = 3
-tool_failure_ratio_threshold = 0.7
-
-# ── Pacing (RFC-0313 W3) ────────────────────────────────────────────
-# 실패는 존재(pause/crash/dead)가 아니라 per-runtime revisit 간격만 바꾼다.
-# - mode: "enforce"(기본) = failure-driven pause 경로 생략 + 스케줄러가
-#   revisit due를 소비. "shadow" = W3 이전 레거시 동작으로 되돌리는
-#   kill-switch (1 릴리즈 한정, W4에서 스위치 자체 제거).
-#   알 수 없는 값은 load 단계에서 config parse 실패 (fail-closed).
-# - base_sec / multiplier / cap_sec: 실패 시 revisit 지연 =
-#   min(cap_sec, base_sec * multiplier^(연속실패-1)); provider retry_after
-#   힌트가 있으면 그 값이 우선. 숫자 knob 누락/오타입은 warn + default.
-[pacing]
-mode = "enforce"
-base_sec = 30.0
-multiplier = 2.0
-cap_sec = 3600.0
 
 # ── Fusion 패널+심판 심의 (RFC-0252) ─────────────────────────────────
 # masc_fusion 도구의 out-of-band 심의 루프 설정. 개인 dev 카나리로 기본 ON.

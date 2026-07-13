@@ -23,14 +23,9 @@ val capacity_backpressure_source_of_string :
 
 type capacity_retry_after =
   | Explicit of float
-  | Synthetic_default of float
   | No_retry_hint
 
-(** The failure that armed a provider-health cooldown blocking a turn before
-    dispatch.  Mirrors {!Keeper_binding_health.outcome_kind} across the module
-    boundary; carried on {!Capacity_backpressure} so the pre-dispatch cooldown
-    gate reports the true cause instead of unconditionally claiming provider
-    capacity.  #23438. *)
+(** Legacy cause carried by persisted [Capacity_backpressure] envelopes. *)
 type provider_cooldown_cause =
   | Cooldown_provider_capacity
   | Cooldown_soft_rate_limited
@@ -131,15 +126,6 @@ type masc_internal_error =
       last_tool_effect : tool_progress_effect option;
       any_mutating_tool : bool option;
       tool_effects_seen : tool_progress_effect list;
-      reason : string;
-    }
-  | Admission_queue_timeout of {
-      keeper_name : string;
-      runtime_id : string;
-      wait_sec : float;
-    }
-  | Admission_queue_rejected of {
-      keeper_name : string;
       reason : string;
     }
   | Turn_timeout of { elapsed_sec : float }

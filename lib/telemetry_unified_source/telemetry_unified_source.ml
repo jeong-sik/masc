@@ -16,7 +16,7 @@ type source =
   | Agent_event    (** Agent lifecycle, task, handoff events *)
   | Tool_call_io   (** Keeper tool calls with full input/output *)
   | Trajectory_tool_call  (** Keeper trajectory-backed tool call rows *)
-  | Tool_usage     (** System_internal surface tool invocations *)
+  | Tool_usage     (** Non-public registered tool invocations *)
   | Oas_event      (** Durable OAS native/custom event bus relays *)
   | Execution_receipt  (** Keeper execution receipt rows *)
   | Goal_event     (** Goal FSM lifecycle and verification events *)

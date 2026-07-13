@@ -34,11 +34,20 @@ type operator_pending_confirm_request =
 (* Callback refs (migrated from workspace_gc.ml)     *)
 (* ============================================ *)
 
-(** Force-release a task — avoids Workspace_gc → Workspace_task circular dep. *)
-let force_release_task_fn
-  : (Workspace_utils_backend_setup.config -> agent_name:string -> task_id:string -> unit -> string masc_result) Atomic.t
-  = Atomic.make (fun _config ~agent_name:_ ~task_id:_ () ->
-      Error (Masc_domain.Task (Masc_domain.Task_error.InvalidState "Workspace_hooks: force_release_task_fn not connected")))
+(** Reconcile an objectively orphaned task — avoids Workspace_gc →
+    Workspace_task circular dependency without minting a privileged actor. *)
+let reconcile_orphaned_task_fn
+  : (Workspace_utils_backend_setup.config ->
+     task_id:string ->
+     expected_assignee:string ->
+     signal:[ `Absent | `Inactive ] ->
+     unit ->
+     string masc_result) Atomic.t
+  = Atomic.make (fun _config ~task_id:_ ~expected_assignee:_ ~signal:_ () ->
+      Error
+        (Masc_domain.Task
+           (Masc_domain.Task_error.InvalidState
+              "Workspace_hooks: reconcile_orphaned_task_fn not connected")))
 
 (* ============================================ *)
 (* New callback refs (Phase 4A)                 *)
@@ -190,16 +199,6 @@ let subscribe_messages_fn
   : (subscriber:string -> unit) Atomic.t
   = Atomic.make (fun ~subscriber:_ -> ())
 
-(** #9795: FSM drift observability.  [Workspace_task.transition]
-    signals TLA+ KeeperTaskInterlock violations (currently the
-    [Claimed_to_done_skip] branch) through this hook; [lib/workspace.ml]
-    wires it to a Otel_metric_store counter emit at startup.  Keeping the
-    hook here avoids a [masc_workspace → masc.Otel_metric_store]
-    dependency cycle. *)
-let fsm_drift_observer_fn
-  : (variant:string -> force:bool -> agent_name:string -> unit) Atomic.t
-  = Atomic.make (fun ~variant:_ ~force:_ ~agent_name:_ -> ())
-
 (** #9645: distributed lock acquire failure observability.
 
     [Workspace_utils_ops.with_distributed_lock] / [..._r] raise
@@ -225,13 +224,11 @@ let tool_assigned_fn
   : (agent_id:string ->
      profile:string ->
      tool_list:string list ->
-     ?allow_set:string list ->
-     ?deny_set:string list ->
      ?config_hash:string ->
      ?reason:string ->
      unit ->
      string) Atomic.t
-  = Atomic.make (fun ~agent_id:_ ~profile:_ ~tool_list:_ ?allow_set:_ ?deny_set:_ ?config_hash:_ ?reason:_ () -> "")
+  = Atomic.make (fun ~agent_id:_ ~profile:_ ~tool_list:_ ?config_hash:_ ?reason:_ () -> "")
 
 (** #10449: Task completion path observability.
 
@@ -252,8 +249,7 @@ let tool_assigned_fn
     This hook fires once per successful transition into [Done] and
     classifies the path along two axes:
 
-    - [path]: ["claimed_to_done_skip"] / ["in_progress_to_done"] /
-      ["via_verification"] / ["forced_done"]
+    - [path]: ["direct_llm_verdict"] / ["via_verification"]
     - [contract_state]: ["no_contract"] / ["empty_contract"] /
       ["with_contract"]
 
@@ -419,26 +415,3 @@ let verification_notify_verdict_fn
 let is_admin_agent_fn
   : (base_path:string -> agent_name:string -> bool) Atomic.t
   = Atomic.make (fun ~base_path:_ ~agent_name:_ -> false)
-
-type evidence_gate_verdict =
-  | Pass
-  | Reject of { reason : string; rule_id : string; hint : string; payload_json : Yojson.Safe.t }
-
-let task_completion_gate_decide_fn
-  : (base_path:string ->
-     task_id:string ->
-     task_opt:Masc_domain.task option ->
-     notes:string ->
-     handoff:Masc_domain.task_handoff_context option ->
-     unit ->
-     evidence_gate_verdict)
-    Atomic.t
-  = (Atomic.make (fun ~base_path:_ ~task_id:_ ~task_opt:_ ~notes:_ ~handoff:_ () -> Pass)
-     : (base_path:string ->
-        task_id:string ->
-        task_opt:Masc_domain.task option ->
-        notes:string ->
-        handoff:Masc_domain.task_handoff_context option ->
-        unit ->
-        evidence_gate_verdict)
-       Atomic.t)

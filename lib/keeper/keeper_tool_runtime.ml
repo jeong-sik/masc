@@ -16,7 +16,7 @@ type context =
   ; ctx_work : Keeper_types.working_context
   ; turn_sandbox_factory : Keeper_sandbox_factory.t option
   ; exec_cache : Masc_exec.Exec_cache.t option
-  ; search_fn : query:string -> max_results:int -> Yojson.Safe.t
+  ; search_fn : unit -> Yojson.Safe.t
   ; sw : Eio.Switch.t option
   ; clock : float Eio.Time.clock_ty Eio.Resource.t option
   ; proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option
@@ -27,6 +27,12 @@ type context =
        so async tools (masc_fusion) can route their completion wake back to
        the originating channel. [None] on non-connector turns and on callers
        without turn context (OAS handler defaults, tests). *)
+  ; gate_context : (unit -> Keeper_gate.causal_context) option
+    (* Exact outer-turn evidence for contextual Gate judgment. Runtime handlers
+       pass it through without inspecting the snapshot. *)
+  ; gate_grant : Keeper_gate.cycle_grant option
+    (* Exact human decision delivered to this Keeper lane. External-effect
+       handlers may consume it only after matching their normalized request. *)
   }
 
 let descriptor_for_internal internal_name =
@@ -50,7 +56,11 @@ let handle_filesystem ctx descriptor args =
          ~turn_sandbox_factory:ctx.turn_sandbox_factory
          ~config:ctx.config
          ~keeper_name:ctx.meta.name
-         ~args)
+         ?continuation_channel:ctx.continuation_channel
+         ?gate_context:ctx.gate_context
+         ?gate_grant:ctx.gate_grant
+         ~args
+         ())
   | Tool_execute
   | Tool_search_files
   | Tool_time_now
@@ -75,6 +85,8 @@ let handle_filesystem ctx descriptor args =
   | Tool_masc_agent_dispatch
   | Tool_masc_workspace_dispatch
   | Tool_masc_misc_dispatch
+  | Tool_web_search
+  | Tool_web_fetch
   | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_schedule_dispatch
@@ -100,6 +112,9 @@ let handle_shell_ir ctx descriptor args =
            ~exec_cache:ctx.exec_cache
          ~config:ctx.config
          ~meta:ctx.meta
+         ?continuation_channel:ctx.continuation_channel
+         ?gate_context:ctx.gate_context
+         ?gate_grant:ctx.gate_grant
          ~args
          ())
   | Tool_search_files ->
@@ -135,6 +150,8 @@ let handle_shell_ir ctx descriptor args =
   | Tool_masc_agent_dispatch
   | Tool_masc_workspace_dispatch
   | Tool_masc_misc_dispatch
+  | Tool_web_search
+  | Tool_web_fetch
   | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_schedule_dispatch
@@ -197,7 +214,11 @@ let handle_in_process ctx descriptor args =
       (Keeper_tool_in_process_runtime.handle_surface_post
          ~config:ctx.config
          ~meta:ctx.meta
-         ~args)
+         ?continuation_channel:ctx.continuation_channel
+         ?gate_context:ctx.gate_context
+         ?gate_grant:ctx.gate_grant
+         ~args
+         ())
   | Tool_person_note_set ->
     Some
       (Keeper_tool_in_process_runtime.handle_person_note_set
@@ -275,6 +296,26 @@ let handle_in_process ctx descriptor args =
          ~meta:ctx.meta
          ~name
          ~args)
+  | Tool_web_search ->
+    Some
+      (Keeper_tool_in_process_runtime.handle_web_search
+         ~config:ctx.config
+         ~meta:ctx.meta
+         ?continuation_channel:ctx.continuation_channel
+         ?gate_context:ctx.gate_context
+         ?gate_grant:ctx.gate_grant
+         ~args
+         ())
+  | Tool_web_fetch ->
+    Some
+      (Keeper_tool_in_process_runtime.handle_web_fetch
+         ~config:ctx.config
+         ~meta:ctx.meta
+         ?continuation_channel:ctx.continuation_channel
+         ?gate_context:ctx.gate_context
+         ?gate_grant:ctx.gate_grant
+         ~args
+         ())
   | Tool_masc_control_dispatch ->
     Some
       (Keeper_tool_in_process_runtime.handle_masc_control
@@ -304,6 +345,9 @@ let handle_in_process ctx descriptor args =
          ?proc_mgr:ctx.proc_mgr
          ?net:ctx.net
          ?mcp_session_id:ctx.mcp_session_id
+         ?continuation_channel:ctx.continuation_channel
+         ?gate_context:ctx.gate_context
+         ?gate_grant:ctx.gate_grant
          ~config:ctx.config
          ~meta:ctx.meta
          ~name
@@ -329,13 +373,23 @@ let handle_in_process ctx descriptor args =
          ~args
          ())
   | Tool_masc_library_dispatch
-  | Tool_masc_recurring_dispatch
-  | Tool_masc_local_runtime_dispatch ->
+  | Tool_masc_recurring_dispatch ->
     Keeper_tool_registered_runtime.handle_registered_tool
       ~config:ctx.config
       ~keeper_name:ctx.meta.name
       ~name
       ~args
+  | Tool_masc_local_runtime_dispatch ->
+    Some
+      (Keeper_tool_in_process_runtime.handle_masc_local_runtime
+         ~config:ctx.config
+         ~meta:ctx.meta
+         ?continuation_channel:ctx.continuation_channel
+         ?gate_context:ctx.gate_context
+         ?gate_grant:ctx.gate_grant
+         ~name
+         ~args
+         ())
   | Tool_analyze_image ->
     (* read-only vision sub-call; needs [net] (like masc_fusion), threaded from
        the turn-scoped dispatch context. *)

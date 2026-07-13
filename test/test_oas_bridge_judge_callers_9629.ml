@@ -1,21 +1,11 @@
 (* test/test_oas_bridge_judge_callers_9629.ml
 
-   #9629: Governance compute_judgments and Operator compute_judgments
-   were calling [Masc_oas_bridge.run_safe] directly with a timeout
-   resolved from the legacy [Env_config.Inference.{operator,
-   dashboard_governance}_judge_timeout_seconds] readers.  Operator_judge
-   in particular fell back to the 30s global inference timeout — far
-   below the observed p50 of LLM-via-OAS-worker calls — and produced
-   the "Execution timed out after 60.0s" warnings reported in the
-   issue.  Governance_judge had a 300s default but lived outside the
-   per-caller Otel_metric_store counter.
+   #9629: Operator compute_judgments calls [Masc_oas_bridge.run_safe]
+   with a typed per-caller timeout instead of the global inference timeout.
 
    #13113 follow-up: live /Users/dancer/me evidence showed the opposite
-   failure mode once both judges shared the 300s worker default: a dashboard
-   governance judge can pin a CLI-backed child for minutes and make operator
-   surfaces / health checks stale.  Dashboard judges are advisory, so their
-   checked-in default is bounded separately while env overrides stay
-   available.
+   failure mode when an advisory dashboard judge inherited the 300s worker
+   default: a CLI-backed child could pin operator surfaces and health checks.
 
    2026-07-01 follow-up: the no-wrapper default is retired. Dashboard
    judges are still advisory, but they must use a finite bridge budget so
@@ -23,11 +13,9 @@
 
    This test pins:
 
-     1. Both judges resolve to [dashboard_judge_default_sec] by default,
-        preserving one shared advisory default.
+     1. Operator judge resolves to [dashboard_judge_default_sec] by default.
      2. The canonical per-caller env var
-        ([MASC_OAS_BRIDGE_TIMEOUT_GOVERNANCE_JUDGE_SEC] etc.) is the
-        only per-judge override surface. *)
+        is the only per-judge override surface. *)
 
 let () =
   let dir =
@@ -67,10 +55,6 @@ let test_dashboard_judge_default_is_finite () =
 let test_judge_defaults_preserve_bounded_timeout () =
   clear_all_envs ();
   check_timeout_equal
-    "Governance_judge default equals dashboard_judge_default_sec"
-    Cfg.dashboard_judge_default_sec
-    (Cfg.timeout_sec ~caller:Cfg.Governance_judge ());
-  check_timeout_equal
     "Operator_judge default equals dashboard_judge_default_sec"
     Cfg.dashboard_judge_default_sec
     (Cfg.timeout_sec ~caller:Cfg.Operator_judge ())
@@ -90,10 +74,6 @@ let test_judges_listed_in_known_callers () =
   let keys =
     List.map Cfg.caller_key (Cfg.known_callers ())
   in
-  Alcotest.(check bool)
-    "Governance_judge appears in known_callers"
-    true
-    (List.mem "governance_judge" keys);
   Alcotest.(check bool)
     "Operator_judge appears in known_callers"
     true

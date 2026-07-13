@@ -31,18 +31,15 @@ type failure_reason =
   | Stale_turn_timeout of stale_kill_class
   | Stale_termination_storm of { count : int; }
   | Stale_fleet_batch of { distinct_count : int; }
-  | Provider_timeout_loop of { count : int; }
   | Provider_runtime_error of { code : string; detail : string;
       provider_id : string option; http_status : int option;
       runtime_id : string option;
       reason : Keeper_meta_contract.runtime_exhaustion_reason option;
     }
-  | Completion_contract_violation of { detail : string; }
   | Ambiguous_partial_commit of ambiguous_partial_commit
   | Fiber_unresolved of fiber_drop_cause
   | Exception of string
-  | Turn_overflow_pause
-  | Turn_livelock_pause
+  | Turn_overflow_failure
   | Operator_interrupt
 val ambiguous_partial_commit_kind_to_string :
   Keeper_registry_types_kill_class.ambiguous_partial_commit_kind ->

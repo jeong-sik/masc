@@ -2,8 +2,7 @@
 
     Enqueues a [Keeper_event_queue.Goal_assigned] stimulus for each goal that
     newly entered a keeper's [active_goal_ids], and wakes the keeper fiber
-    when it is running. Mirrors
-    [Workspace_goals.enqueue_goal_verification_failed_wake].
+    when it is running.
 
     Edge semantics: callers pass the pre-change and post-change id lists;
     only ids present in [new_ids] and absent from [old_ids] enqueue.

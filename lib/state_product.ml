@@ -122,7 +122,7 @@ let check_invariants (state : product) : (unit, string) result =
 
   (* Keeper terminal -> turn must be idle *)
   (match state.keeper with
-   | Keeper.Stopped | Keeper.Dead | Keeper.Zombie ->
+   | Keeper.Stopped | Keeper.Dead ->
      if state.turn <> Agent_turn.Idle then
        add (Printf.sprintf "keeper=%s but turn=%s (expected Idle)"
               (Keeper.phase_to_string state.keeper)
@@ -140,7 +140,7 @@ let check_invariants (state : product) : (unit, string) result =
        add "keeper=Draining but turn=Prompting (no new LLM calls during drain)"
    | Keeper.Offline | Keeper.Running | Keeper.Failing | Keeper.Overflowed
    | Keeper.Compacting | Keeper.HandingOff | Keeper.Paused | Keeper.Stopped
-   | Keeper.Crashed | Keeper.Restarting | Keeper.Dead | Keeper.Zombie -> ());
+   | Keeper.Crashed | Keeper.Restarting | Keeper.Dead -> ());
 
   (* NonDet retrying -> turn must be dispatching *)
   (match state.validation with
@@ -163,7 +163,7 @@ let check_invariants (state : product) : (unit, string) result =
       | Agent_turn.Collecting | Agent_turn.Finalizing -> ())
    | Keeper.Offline | Keeper.Running | Keeper.Failing | Keeper.Overflowed
    | Keeper.HandingOff | Keeper.Draining | Keeper.Paused | Keeper.Stopped
-   | Keeper.Crashed | Keeper.Restarting | Keeper.Dead | Keeper.Zombie -> ());
+   | Keeper.Crashed | Keeper.Restarting | Keeper.Dead -> ());
 
   match List.rev !violations with
   | [] -> Ok ()

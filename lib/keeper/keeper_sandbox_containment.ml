@@ -1,39 +1,24 @@
 (** Keeper_sandbox_containment — see .mli for contract. *)
 
-let normalize p =
-  Keeper_alerting_path.normalize_path_for_check_stripped p
-
-(** Build the absolute, normalized playground bundle root for [meta]
-    under [config.base_path]. *)
-let playground_root_abs ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_meta) =
-  Keeper_sandbox.host_root_abs_of_meta ~config meta |> normalize
-
-let target_is_inside_playground ~playground ~target =
-  let playground = playground in
-  target = playground || String.starts_with ~prefix:(playground ^ "/") target
-
-let is_hardened_profile = function
-  | Keeper_types_profile_sandbox.Docker -> true
-  | Keeper_types_profile_sandbox.Local -> false
-
-let check_target ~operation ~config ~meta ~target =
-  if not (is_hardened_profile meta.Keeper_meta_contract.sandbox_profile) then
-    Ok ()
-  else
-    let playground = playground_root_abs ~config ~meta in
-    let target_norm = normalize target in
-    if target_is_inside_playground ~playground ~target:target_norm then Ok ()
-    else
-      Error
-        (Printf.sprintf
-           "symmetric_sandbox_blocked: target %s is outside keeper playground \
-            %s. Keepers with sandbox_profile=docker may only %s inside \
-            their playground. Clone the source into %s/repos/ with Execute \
-            and typed git argv, or operate inside an existing repo there."
-           target_norm playground operation playground)
+let check_target ~config ~allowed_paths ~target =
+  match
+    Keeper_alerting_path.resolve_keeper_target_path
+      ~config
+      ~allowed_paths
+      ~raw_path:target
+  with
+  | Ok _ -> Ok ()
+  | Error rejection ->
+    Error (Keeper_alerting_path.rejection_to_user_message rejection)
 
 let check_read_target ~config ~meta ~target =
-  check_target ~operation:"read" ~config ~meta ~target
+  check_target
+    ~config
+    ~allowed_paths:(Keeper_alerting_path.effective_allowed_paths ~meta)
+    ~target
 
 let check_write_target ~config ~meta ~target =
-  check_target ~operation:"write" ~config ~meta ~target
+  check_target
+    ~config
+    ~allowed_paths:(Keeper_alerting_path.effective_write_allowed_paths ~meta)
+    ~target

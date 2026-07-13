@@ -218,20 +218,11 @@ function entryScopeLabel(entry: ToolCallEntry): string {
   return parts.length > 0 ? parts.join(' · ') : 'scope unavailable'
 }
 
-// Whether the call succeeded at the *semantic* layer. A tool can report
-// transport success=true while its parsed output signals failure
-// (semantic_success=false, e.g. blocked/timeout); fall back to transport
-// success when the semantic flag is absent (pre-field rows).
 function toolCallSucceeded(entry: ToolCallEntry): boolean {
-  return entry.semantic_success ?? entry.success
+  return entry.success
 }
 
 function toolCallStatusLabel(entry: ToolCallEntry): string {
-  // Show the precise failure mode (blocked/timeout/partial/runtime_error/...)
-  // when the parsed output named one; fall back to ok/failed otherwise.
-  if (entry.semantic_outcome && entry.semantic_outcome !== 'success') {
-    return entry.semantic_outcome
-  }
   return toolCallSucceeded(entry) ? 'ok' : 'failed'
 }
 
@@ -501,7 +492,7 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
         </span>
         <span
           class=${`flex-shrink-0 w-5 text-center ${toolCallSucceeded(entry) ? 'text-[var(--color-status-ok)]' : 'text-[var(--color-status-err)]'}`}
-          title=${entry.semantic_outcome ?? (entry.success ? 'ok' : 'failed')}
+          title=${entry.success ? 'ok' : 'failed'}
         >
           ${toolCallSucceeded(entry) ? 'O' : 'X'}
         </span>

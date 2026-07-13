@@ -55,14 +55,10 @@ active provider-stream progress must not become
 wall time crossed 600 s. The runtime-trust snapshot mirrors the latest action,
 and the runtime surface marks the keeper as needing attention with
 `next_human_action = "inspect_runtime_blocker"` when the keeper is not paused.
-Paused provider-timeout cases keep the paused workflow
-(`attention_reason = "paused"`,
-`next_human_action = "inspect_blocker_before_resume"`) while still exposing
-`runtime_blocker_class = "turn_timeout"` or provider-runtime timeout detail.
-Repeated consecutive provider-timeout strikes are promoted by the keepalive
-loop to `Provider_timeout_loop`, which the supervisor auto-pauses instead of
-restart-looping. Legacy `oas_timeout_budget` wire labels are decode-only
-compatibility and must be canonicalized before deriving operator state.
+Provider timeouts remain typed failure observations with provider/runtime
+detail. They may cause lane-local retry or restart after backoff, but no
+consecutive strike count promotes them into pause, Dead, or a fleet-wide gate.
+Retired timeout-budget wire labels are not emitted into operator state.
 
 For parallel OAS work, distinguish all-settled fanout from fail-fast race:
 `Async_agent.all` contains per-agent timeout/error results while siblings
@@ -96,7 +92,6 @@ logs. Candidates:
 |------|-------------|--------------|
 | MCP `tools/call` default | 60 s via `MASC_TOOL_TIMEOUT_DEFAULT_SEC`; board write tools use 90 s via `MASC_TOOL_TIMEOUT_BOARD_SEC` | #10569 |
 | `keeper_llm_bridge` | 300 s default inside 600 s keeper turn | #9639, #9662 |
-| Governance `compute_judgments` | 60 s | #9629 |
 | `Process_eio` `git status --porcelain` | 15 s | #9632 |
 | `Process_eio` `git rev-parse` | 5 s | #9765, #9775 |
 | Docker sandbox `git fetch origin` | 30 s | #9587 |

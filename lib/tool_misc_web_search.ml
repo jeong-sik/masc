@@ -1,7 +1,6 @@
 module Format = Stdlib.Format
 module Map = Stdlib.Map
 module Set = Stdlib.Set
-module Queue = Stdlib.Queue
 module Hashtbl = Stdlib.Hashtbl
 module Mutex = Stdlib.Mutex
 module Option = Stdlib.Option
@@ -46,8 +45,6 @@ type simulated_provider_outcome =
   | `Empty
   | `Hits of (string * string * string) list
   ]
-
-let max_web_search_query_length = 500
 
 let whitespace_re = Re.Pcre.re "[ \t\r\n]+" |> Re.compile
 let html_tag_re = Re.Pcre.re "<[^>]+>" |> Re.compile
@@ -322,70 +319,10 @@ let provider_order () =
 let provider_plan () =
   provider_order () |> List.map provider_to_string
 
-let is_secret_token_char = function
-  | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '-' -> true
-  | _ -> false
-
-let contains_secret_token_prefix ~prefix ~min_suffix_len query =
-  let lowered = String.lowercase_ascii query in
-  let prefix_len = String.length prefix in
-  let query_len = String.length lowered in
-  let rec count_suffix_chars idx count =
-    if idx + count >= query_len then
-      count
-    else if is_secret_token_char lowered.[idx + count] then
-      count_suffix_chars idx (count + 1)
-    else
-      count
-  in
-  let rec loop idx =
-    if idx + prefix_len > query_len then
-      false
-    else if String.equal (Stdlib.String.sub lowered idx prefix_len) prefix then
-      let boundary_ok = idx = 0 || not (is_secret_token_char lowered.[idx - 1]) in
-      let suffix_len = count_suffix_chars (idx + prefix_len) 0 in
-      if boundary_ok && suffix_len >= min_suffix_len then true else loop (idx + 1)
-    else
-      loop (idx + 1)
-  in
-  loop 0
-
-let query_contains_secret_like_content query =
-  let lowered = String.lowercase_ascii query in
-  let markers =
-    [
-      "-----begin ";
-      "authorization:";
-      "bearer ";
-      "x-api-key:";
-      "api_key=";
-      "token=";
-    ]
-  in
-  let secret_prefixes =
-    [
-      ("ghp_", 8);
-      ("github_pat_", 8);
-      ("sk-", 10);
-    ]
-  in
-  List.exists (fun marker -> String_util.contains_substring lowered marker) markers
-  || List.exists
-       (fun (prefix, min_suffix_len) ->
-         contains_secret_token_prefix ~prefix ~min_suffix_len query)
-       secret_prefixes
-
 let validate_query query =
   let normalized = normalize_spaces query in
   if String.equal normalized "" then
     Error "query is required"
-  else if String.length normalized > max_web_search_query_length then
-    Error
-      (Printf.sprintf
-         "query must be at most %d characters"
-         max_web_search_query_length)
-  else if query_contains_secret_like_content normalized then
-    Error "query looks like it may contain secrets; refine it before using web search"
   else
     Ok normalized
 
@@ -727,8 +664,6 @@ type cache_entry = {
 let initial_cache_capacity = 32
 let cache_entries : (string, cache_entry) Hashtbl.t = Hashtbl.create initial_cache_capacity
 let cache_mutex = Eio.Mutex.create ()
-let request_times : float Queue.t = Queue.create ()
-let rate_limit_mutex = Eio.Mutex.create ()
 
 let cache_lookup key now =
   let ttl = Env_config.Tools.web_search_cache_ttl_sec () in
@@ -748,23 +683,6 @@ let cache_store key response now =
   if Stdlib.Float.compare ttl 0.0 > 0 then
     Eio.Mutex.use_rw ~protect:true cache_mutex (fun () ->
         Hashtbl.replace cache_entries key { response; expires_at = now +. ttl })
-
-let enforce_rate_limit now =
-  let window = Env_config.Tools.web_search_rate_limit_window_sec () in
-  let max_calls = Env_config.Tools.web_search_rate_limit_max_calls () in
-  Eio.Mutex.use_rw ~protect:true rate_limit_mutex (fun () ->
-      (* Keep NaN windows fail-closed: [>] is false for NaN, so old timestamps
-         are retained and the limiter stays conservative. *)
-      while Queue.length request_times > 0
-            && Stdlib.( > ) (Stdlib.Float.sub now (Queue.peek request_times)) window
-      do
-        let (_ : float) = Queue.pop request_times in ()
-      done;
-      if Queue.length request_times >= max_calls then
-        Error "web search rate limit exceeded; retry shortly"
-      else (
-        Queue.push now request_times;
-        Ok ()))
 
 let search_impl ~query ~limit =
   let rec loop errors = function
@@ -832,11 +750,7 @@ let with_simulated_search_for_test ~outcomes f =
    handle boundary (source-typed at each construction site; no
    substring matching):
 
-   - [Workflow_rejection]: [validate_query] rejection — caller
-     violated query rules (empty, > 500 chars, secret-like
-     pattern). Caller controls the input.
-   - [Transient_error]:    rate-limit hit ("retry shortly"
-     semantics). Retry after window unlocks.
+   - [Workflow_rejection]: empty query input.
    - [Runtime_failure]:    [search_impl] aggregate ("all web
      search providers failed: ..."). The 7-provider fallback
      chain exhausted; per-provider transport vs server
@@ -868,13 +782,6 @@ let workflow_err ~tool_name ~start_time msg : Tool_result.result =
     ~start_time
     msg
 
-let transient_err ~tool_name ~start_time msg : Tool_result.result =
-  Tool_result.make_err
-    ~tool_name
-    ~class_:Tool_result.Transient_error
-    ~start_time
-    msg
-
 let runtime_err ~tool_name ~start_time msg : Tool_result.result =
   Tool_result.make_err
     ~tool_name
@@ -892,19 +799,16 @@ let handle ~tool_name ~start_time args : Tool_result.result =
       let key = cache_key ~query ~limit in
       match cache_lookup key now with
       | Some cached -> text_ok ~tool_name ~start_time cached
-      | None -> (
-          match enforce_rate_limit now with
-          | Error message -> transient_err ~tool_name ~start_time message
-          | Ok () -> (
-              match (current_search_impl ()) ~query ~limit with
-              | Ok response ->
-                  let json =
-                    result_json ~query ~search_url:response.search_url
-                      ~engine:response.engine response.hits
-                  in
-                  cache_store key json now;
-                  text_ok ~tool_name ~start_time json
-              | Error message -> runtime_err ~tool_name ~start_time message))
+      | None ->
+        (match (current_search_impl ()) ~query ~limit with
+         | Ok response ->
+           let json =
+             result_json ~query ~search_url:response.search_url
+               ~engine:response.engine response.hits
+           in
+           cache_store key json now;
+           text_ok ~tool_name ~start_time json
+         | Error message -> runtime_err ~tool_name ~start_time message)
 
 let simulate_for_test ~query ~limit outcomes : Tool_result.result =
   match simulated_search_impl ~outcomes ~query ~limit with

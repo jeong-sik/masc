@@ -70,14 +70,9 @@ val resolve_overrides :
       sleep_chunk_sec             = 1.5
       board_wakeup_max            = 4
 
-      [proactive]
-      min_interval_sec            = 900
-
       [turn]
       stream_idle_timeout_sec   = 120
       execution_idle_timeout_sec = 300
-      llm_rerank                  = true
-
       [web_search]
       searxng_url                 = "http://localhost:8888"
       provider                    = "auto"

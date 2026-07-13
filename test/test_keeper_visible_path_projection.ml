@@ -167,28 +167,6 @@ let test_playground_internal_path_now_allowed () =
    | Error e -> Alcotest.fail ("playground-internal path should resolve: " ^ e))
 ;;
 
-let test_masc_internal_state_read_stays_blocked () =
-  (* The narrowing is load-bearing: workspace-level internal state
-     (.masc/backlog.json, .masc/tasks/) must stay blocked — keepers reach it
-     via keeper_tasks_list / keeper_context_status, not by probing the files.
-     This is the #23807 traversal/symlink write-bypass defence that #23843
-     dropped. *)
-  setup
-  @@ fun ~config ~meta ~playground:_ ->
-  (match
-     Keeper_tool_shared_runtime.resolve_keeper_read_path
-       ~config
-       ~meta
-       ~raw_path:".masc/backlog.json"
-   with
-   | Ok path -> Alcotest.fail (".masc internal state should be blocked: " ^ path)
-   | Error e ->
-     Alcotest.(check bool)
-       "masc internal state blocked"
-       true
-       (String.starts_with ~prefix:"task_state_file_path_blocked:" e))
-;;
-
 let test_read_with_visible_repo_cwd_and_relative_file_path () =
   setup
   @@ fun ~config ~meta ~playground ->
@@ -238,16 +216,9 @@ let test_repository_backlog_file_is_readable () =
     (parse_string "content" raw)
 ;;
 
-(* Regression: a repo-prefixed read of a path that does not exist (e.g.
-   the masc-mcp->masc rename-drift case, or a hallucinated file) routes
-   through resolve_shared. Before the fix, resolve_shared wrapped every
-   error as Read_path_error -> bare {error}, so the keeper-facing result
-   omitted your_playground / available_repos even though the message text
-   says "check your_playground for available files". The fix mirrors
-   resolve_projected: a path_not_found_under_allowed_roots rejection
-   becomes Missing_file -> rich missing_file_error_json. Assert the rich
-   hint reaches the keeper-facing result. *)
-let test_repo_prefixed_missing_read_surfaces_playground_hint () =
+(* A repo-prefixed missing read preserves producer facts without inventing
+   repository or retry advice at the dispatch boundary. *)
+let test_repo_prefixed_missing_read_preserves_exact_input () =
   setup
   @@ fun ~config ~meta ~playground:_ ->
   allow_repo ~config ~meta "masc";
@@ -263,17 +234,13 @@ let test_repo_prefixed_missing_read_surfaces_playground_hint () =
             ])
   in
   if parse_ok raw then Alcotest.failf "expected Read to fail, got ok: %s" raw;
-  (* missing_file_error_json carries your_playground + available_repos;
-     Read_path_error (the old behaviour) carries neither. *)
-  let has_hint =
-    let json = parse raw in
-    (match Json.member "your_playground" json with `Null -> false | _ -> true)
-    || (match Json.member "available_repos" json with `Null -> false | _ -> true)
-  in
-  Alcotest.(check bool)
-    "repo-prefixed not-found surfaces your_playground/available_repos hint"
-    true
-    has_hint
+  let json = parse raw in
+  Alcotest.(check (option string))
+    "repo-prefixed input path preserved"
+    (Some "repos/masc/lib/keeper/does_not_exist_xyz.ml")
+    (Json.member "input_file_path" json |> Json.to_string_option);
+  Alcotest.(check bool) "no inferred repository list" true
+    (Json.member "available_repos" json = `Null)
 ;;
 
 let test_write_visible_mind_path () =
@@ -310,10 +277,6 @@ let () =
             "direct private storage read is allowed"
             `Quick
             test_playground_internal_path_now_allowed
-        ; Alcotest.test_case
-            "internal masc state read stays blocked"
-            `Quick
-            test_masc_internal_state_read_stays_blocked
         ] )
     ; ( "file_tools"
       , [ Alcotest.test_case
@@ -331,7 +294,7 @@ let () =
         ; Alcotest.test_case
             "repo-prefixed missing read surfaces playground hint"
             `Quick
-            test_repo_prefixed_missing_read_surfaces_playground_hint
+            test_repo_prefixed_missing_read_preserves_exact_input
         ] )
     ]
 ;;

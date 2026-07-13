@@ -195,12 +195,10 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     ~on_error:(log_server_fiber_crash "ide_ingest_writer")
     (fun () -> Ide_ingest_queue.run_writer ());
   Shutdown.register ~name:"ide_ingest_drain" ~priority:26 Ide_ingest_queue.drain_pending;
-  (* RFC-0137 PR-2: host FD pressure poller. Watches sysmon's configured
-     pressure state file every 1s; bridges WARN/CRIT into
-     [Keeper_fd_pressure.engage_external] so the keeper scheduling gates pause
-     before kern.maxfiles exhaustion can panic the kernel. Disable via
-     [MASC_HOST_FD_PRESSURE_POLLER_DISABLED=1]. Sunsets when RFC-0097
-     (sandbox container reuse) reaches steady state — see RFC-0137 §9. *)
+  (* Host FD observation poller. It records sysmon WARN/CRIT signals through
+     [Keeper_fd_pressure.engage_external] for health telemetry and never changes
+     Keeper scheduling. Disable the observer via
+     [MASC_HOST_FD_PRESSURE_POLLER_DISABLED=1]. *)
   let poller_disabled = Env_config_core.host_fd_pressure_poller_disabled () in
   if not poller_disabled then
     Host_fd_pressure_poller.start
@@ -278,57 +276,9 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
         loop ()
       in
       loop ());
-  (* RFC-0244 Tier 2 cross-keeper consolidation. The loop is off the keeper hot
-     path and the consolidator itself is gated by
-     [MASC_KEEPER_MEMORY_OS_CONSOLIDATE] (default false), separate from the
-     per-keeper LLM consolidation gate [MASC_KEEPER_MEMORY_OS_CONSOLIDATION].
-     When enabled, the typed [Ephemeral] category + [is_promotable] gate
-     (#21241), the stricter [is_outcome_positive_for_shared_promotion]
-     shared-tier proxy, and the durability-gate librarian prompt (#21257) keep
-     non-promotable and not-yet-outcome-positive facts out of the shared tier.
-     Each enabled sweep reads each keeper's Tier-1 store and rewrites the shared
-     semantic store (keepers/_shared.facts.jsonl) atomically, never touching a keeper's own
-     store, so it cannot race keeper writes. Per-tick failures are caught so a
-     corrupt store cannot cancel sibling fibers. Each sweep logs [promoted]: a
-     rising count is the regression signal to watch if producer labelling
-     drifts. *)
-  fork_logged_fiber
-    ~sw
-    ~on_error:(log_server_fiber_crash "memory_os_consolidation")
-    (fun () ->
-      (* Coarse cadence: consolidation is advisory and off the hot path, so a
-         full fleet rescan every 5 minutes is ample. *)
-      let interval = 300.0 in
-      let rec loop () =
-        (try
-           let report =
-             Keeper_memory_os_consolidator.run
-               ~keeper_ids:(Keeper_memory_os_io.list_fact_store_keeper_ids ())
-               ~now:(Time_compat.now ())
-               ()
-           in
-           if report.Keeper_memory_os_consolidator.promoted > 0
-           then
-             Log.Server.info "memory_os_consolidation: keepers=%d promoted=%d"
-               report.Keeper_memory_os_consolidator.keepers_scanned
-               report.Keeper_memory_os_consolidator.promoted
-         with
-         | Eio.Cancel.Cancelled _ as e -> raise e
-         | exn ->
-           Log.Server.warn "memory_os_consolidation: tick crashed: %s"
-             (Printexc.to_string exn));
-        Eio.Time.sleep clock interval;
-        loop ()
-      in
-      loop ());
-  (* RFC-0247 §2.3: memory-os forgetting sweep. Off the keeper hot path — every
-     [interval]s it runs the deterministic per-keeper GC ([run_gc]: hard-expire
-     facts whose [valid_until] has passed, drop fully-decayed facts by retention
-     verdict, dedup by the [claim_identity] SSOT) and rewrites each keeper's
-     Tier-1 store atomically. This is [run_gc]'s first production caller; without
-     it the TTL/lifetime machinery (now produced per-category at librarian write
-     time) is unreachable. The shared store is skipped — the consolidator
-     reconstructs it wholesale each sweep, so GC-ing it would just be undone.
+  (* RFC-0247 §2.3: memory-os expiry sweep. Off the keeper hot path — every
+     [interval]s it runs the deterministic per-keeper GC: facts whose explicit
+     [valid_until] has passed are removed and every other row is preserved.
      Default ON; env var [MASC_KEEPER_MEMORY_OS_GC] is the kill switch. Per-keeper
      fibers run in parallel with a bounded timeout so one slow/corrupt store
      cannot starve the fleet. *)
@@ -345,15 +295,12 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
           let report =
             Keeper_memory_os_gc.run_gc ~keeper_id ~now:(Time_compat.now ()) ()
           in
-          if
-            report.Keeper_memory_os_gc.ttl_expired > 0
-            || report.dedup_removed > 0
+          if report.Keeper_memory_os_gc.ttl_expired > 0
           then
             Log.Server.info
-              "memory_os_gc: keeper=%s ttl_expired=%d dedup=%d written=%d"
+              "memory_os_gc: keeper=%s ttl_expired=%d written=%d"
               keeper_id
               report.ttl_expired
-              report.dedup_removed
               report.written
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
@@ -418,7 +365,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
           loop ()
         in
         loop ());
-  (* System_internal tool usage log: durable JSONL for pruning evidence (#5120) *)
+  (* Non-public registered tool usage log: durable JSONL observability. *)
   Tool_usage_log.init
     ~base_path:(Mcp_server.workspace_config state).base_path
     ~cluster_name:(Mcp_server.workspace_config state).backend_config.Backend_types.cluster_name
@@ -567,9 +514,9 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
          let ar_reaped = Client_registry_eio.cleanup_stale_sessions () in
          if ar_reaped > 0
          then Log.Server.info "Reaped %d stale agent registry sessions" ar_reaped;
-         (* Keeper sandbox: remove stale Docker containers when owner_pid is
-             dead, container age exceeds MASC_KEEPER_SANDBOX_CLEANUP_STALE_AFTER_SEC
-             (default 6h), or container is stopped. Internally throttled by
+         (* Keeper sandbox: remove Docker containers when owner_pid is dead,
+             the container is stopped, or its explicit ttl_sec has elapsed.
+             Containers without an explicit TTL do not expire by age. Throttled by
              MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC (default 5min); janitor
              ticks faster but the helper short-circuits when called too soon. *)
          (match
@@ -623,8 +570,6 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
              let total =
                prune_dir (Filename.concat masc "audit")
                + prune_dir (Filename.concat masc "telemetry")
-               + prune_dir
-                   (Filename.concat (Filename.concat masc "governance") "judgments")
                + prune_dir (Filename.concat masc "messages")
                + prune_dir (Filename.concat masc "events")
                + prune_dir (Filename.concat masc "activity-events")
@@ -642,8 +587,8 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                  "periodic JSONL prune: pruned %d day-files (retention=%dd)"
                  total
                  days;
-             (* Schedule terminal-row GC on the same 24h cadence: terminal
-                rows (Succeeded/Failed/Rejected/Cancelled/Expired) otherwise
+               (* Schedule terminal-row GC on the same 24h cadence: terminal
+                  rows (Succeeded/Failed/Cancelled/Expired) otherwise
                 accumulate unbounded — the only pruner was the manual
                 dashboard action (Server_dashboard_http_schedule_actions).
                 Same operation as that button, so operator semantics are

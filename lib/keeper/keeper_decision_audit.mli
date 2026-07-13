@@ -4,18 +4,7 @@
     Abstract type: external modules cannot access fields directly,
     preventing trust calculations from consuming forensics data (E5).
 
-    Gated by MASC_DECISION_LAYER_LEVEL >= 1.
-
-    @since Decision Layer v2 — Phase A2 (#6232) *)
-
-(** Current decision layer level (MASC_DECISION_LAYER_LEVEL, 0-4).
-    Cached on first call — no per-call env lookup after initialization.
-    Level 0: off, 1: audit, 2: +guard bridge, 3: +trust, 4: +claim. *)
-val decision_layer_level : unit -> int
-
-(** Whether audit is enabled (MASC_DECISION_LAYER_LEVEL >= 1).
-    Cached on first call (delegates to [decision_layer_level]). *)
-val audit_enabled : unit -> bool
+    @since Decision Audit Phase A2 (#6232) *)
 
 (** Abstract decision record. Field access restricted to this module. *)
 type decision_record
@@ -26,15 +15,13 @@ val make :
   keeper_name:string ->
   generation:int ->
   ?snapshot:Keeper_measurement.measurement_snapshot ->
-  heartbeat_verdict:Keeper_heartbeat_smart.decision ->
   turn_verdict:Keeper_world_observation.turn_verdict ->
   wall_clock:float ->
   ?tool_diversity_entropy:float ->
   unit ->
   decision_record
 
-(** Append a decision record to the in-memory ring buffer.
-    If MASC_DECISION_LAYER_LEVEL < 1, this is a no-op. *)
+(** Append a decision record to the in-memory ring buffer. *)
 val append : keeper_name:string -> decision_record -> unit
 
 (** Read recent decision records for forensics.

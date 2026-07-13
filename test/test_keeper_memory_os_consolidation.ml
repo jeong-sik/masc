@@ -2,7 +2,6 @@
 
 module Types = Masc.Keeper_memory_os_types
 module Consolidation = Masc.Keeper_memory_os_consolidation
-module Consolidator = Masc.Keeper_memory_os_consolidator
 
 let now = 1_000_000.0
 
@@ -23,7 +22,6 @@ let fact
   in
   { Types.claim
   ; category
-  ; external_ref = None
   ; claim_kind
   ; source = { Types.trace_id = "t"; turn = 1; tool_call_id = None }
   ; observed_by
@@ -159,7 +157,7 @@ let test_apply_first_group_wins_contested () =
     (claims (Consolidation.apply_plan ~now ~facts plan))
 ;;
 
-let test_apply_rejects_category_downgrade () =
+let test_apply_accepts_model_category_change () =
   let facts =
     [ fact ~category:Types.Lesson "Timeout failures need bounded retries"
     ; fact ~category:Types.Fact "The retry loop timed out under load"
@@ -176,12 +174,12 @@ let test_apply_rejects_category_downgrade () =
     }
   in
   Alcotest.(check (list string))
-    "downgraded group is skipped"
-    [ "The retry loop timed out under load"; "Timeout failures need bounded retries" ]
+    "model-selected category is applied"
+    [ "Retry loops can time out under load" ]
     (claims (Consolidation.apply_plan ~now ~facts plan))
 ;;
 
-let test_apply_rejects_category_upgrade () =
+let test_apply_accepts_model_category_selection () =
   let facts =
     [ fact ~category:Types.Fact "The retry loop timed out under load"
     ; fact ~category:Types.Fact "Retry loops can time out under load"
@@ -198,8 +196,8 @@ let test_apply_rejects_category_upgrade () =
     }
   in
   Alcotest.(check (list string))
-    "upgraded group is skipped"
-    [ "Retry loops can time out under load"; "The retry loop timed out under load" ]
+    "model-selected category is applied"
+    [ "Retry timeout failures imply a durable lesson" ]
     (claims (Consolidation.apply_plan ~now ~facts plan))
 ;;
 
@@ -241,11 +239,7 @@ let test_apply_rejects_mixed_claim_kind () =
     (claims (Consolidation.apply_plan ~now ~facts plan))
 ;;
 
-(* RFC-0285 §3.3/§4 re-mint at the consolidation boundary: a homogeneous
-   Self_observation group DOES merge, the consolidated fact stays [Self_observation],
-   and its horizon is the member-min — a reworded re-mint never extends the horizon
-   past the earliest member's anchor. *)
-let test_apply_self_observation_group_inherits_min_horizon () =
+let test_apply_rejects_different_explicit_validity () =
   let facts =
     [ fact
         ~first_seen:100.0
@@ -271,25 +265,16 @@ let test_apply_self_observation_group_inherits_min_horizon () =
     ; drop_indices = []
     }
   in
-  match Consolidation.apply_plan ~now ~facts plan with
-  | [ merged ] ->
-    Alcotest.(check bool)
-      "consolidated fact stays a self-observation"
-      true
-      (merged.Types.claim_kind = Some Types.Self_observation);
-    Alcotest.(check (option (float 1e-9)))
-      "horizon is the member-min anchor, not extended"
-      (Some 1_700_000.0)
-      merged.Types.valid_until
-  | other -> Alcotest.failf "expected 1 merged fact, got %d" (List.length other)
+  Alcotest.(check (list string))
+    "different explicit bounds preserve both rows"
+    [ "the agent is looping"; "the agent remains in a loop" ]
+    (claims (Consolidation.apply_plan ~now ~facts plan))
 ;;
 
-let test_apply_external_state_group_inherits_effective_horizon () =
-  let first_seen = now -. 1000.0 in
+let test_apply_rejects_absent_vs_explicit_validity () =
   let stored_horizon = now +. 2_000.0 in
   let facts =
     [ fact
-        ~first_seen
         ~category:Types.Blocker
         ~claim_kind:(Some Types.External_state)
         "task-1578 is blocked by missing mapping"
@@ -301,12 +286,6 @@ let test_apply_external_state_group_inherits_effective_horizon () =
         "task-1578 still has missing mapping"
     ]
   in
-  let expected =
-    let compatibility_horizon =
-      Types.external_state_valid_until_from_first_seen ~first_seen
-    in
-    Some (Float.min compatibility_horizon stored_horizon)
-  in
   let plan =
     { Consolidation.groups =
         [ { Consolidation.member_indices = [ 0; 1 ]
@@ -317,20 +296,13 @@ let test_apply_external_state_group_inherits_effective_horizon () =
     ; drop_indices = []
     }
   in
-  match Consolidation.apply_plan ~now ~facts plan with
-  | [ merged ] ->
-    Alcotest.(check bool)
-      "consolidated fact stays External_state"
-      true
-      (merged.Types.claim_kind = Some Types.External_state);
-    Alcotest.(check (option (float 1e-9)))
-      "External_state consolidated horizon uses member-min effective horizon"
-      expected
-      merged.Types.valid_until
-  | other -> Alcotest.failf "expected 1 merged fact, got %d" (List.length other)
+  Alcotest.(check (list string))
+    "absent and explicit bounds preserve both rows"
+    [ "task-1578 is blocked by missing mapping"; "task-1578 still has missing mapping" ]
+    (claims (Consolidation.apply_plan ~now ~facts plan))
 ;;
 
-let test_apply_preserves_ephemeral_expiry_and_verification_age () =
+let test_apply_preserves_rows_with_different_validity () =
   let facts =
     [ fact
         ~category:Types.Ephemeral
@@ -354,22 +326,15 @@ let test_apply_preserves_ephemeral_expiry_and_verification_age () =
     ; drop_indices = []
     }
   in
-  match Consolidation.apply_plan ~now ~facts plan with
-  | [ merged ] ->
-    Alcotest.(check (option (float 1e-9)))
-      "earliest ephemeral expiry preserved"
-      (Some 1_100.0)
-      merged.Types.valid_until;
-    Alcotest.(check (option (float 1e-9)))
-      "newest verification preserved"
-      (Some 950.0)
-      merged.Types.last_verified_at
-  | other -> Alcotest.failf "expected 1 merged fact, got %d" (List.length other)
+  Alcotest.(check (list string))
+    "different bounds preserve both rows"
+    [ "checkpoint saved"; "continuation checkpoint saved" ]
+    (claims (Consolidation.apply_plan ~now ~facts plan))
 ;;
 
 let test_apply_preserves_shared_claim_id () =
   let facts =
-    [ fact ~claim_id:"PR #123 Open" "PR #123 is open"
+    [ fact ~claim_id:"pr-123-open" "PR #123 is open"
     ; fact ~claim_id:"pr-123-open" "pull request 123 remains open"
     ]
   in
@@ -386,7 +351,7 @@ let test_apply_preserves_shared_claim_id () =
   match Consolidation.apply_plan ~now ~facts plan with
   | [ merged ] ->
     Alcotest.(check (option string))
-      "shared claim_id preserved canonically"
+      "shared claim_id preserved exactly"
       (Some "pr-123-open")
       merged.Types.claim_id;
     Alcotest.(check string)
@@ -521,21 +486,21 @@ let () =
         ; Alcotest.test_case "skips bad indices" `Quick test_apply_skips_bad_indices
         ; Alcotest.test_case "drops listed indices" `Quick test_apply_drops_listed
 	        ; Alcotest.test_case "first group wins contested fact" `Quick test_apply_first_group_wins_contested
-	        ; Alcotest.test_case "rejects category downgrade" `Quick test_apply_rejects_category_downgrade
-        ; Alcotest.test_case "rejects category upgrade" `Quick test_apply_rejects_category_upgrade
+	        ; Alcotest.test_case "accepts model category change" `Quick test_apply_accepts_model_category_change
+	        ; Alcotest.test_case "accepts model category selection" `Quick test_apply_accepts_model_category_selection
         ; Alcotest.test_case "rejects mixed claim_kind" `Quick test_apply_rejects_mixed_claim_kind
         ; Alcotest.test_case
-            "self-observation group inherits min horizon"
+            "different explicit validity preserves both rows"
             `Quick
-            test_apply_self_observation_group_inherits_min_horizon
+            test_apply_rejects_different_explicit_validity
         ; Alcotest.test_case
-            "external-state group inherits effective horizon"
+            "absent vs explicit validity preserves both rows"
             `Quick
-            test_apply_external_state_group_inherits_effective_horizon
+            test_apply_rejects_absent_vs_explicit_validity
         ; Alcotest.test_case
-            "preserves ephemeral expiry and verification age"
+            "different validity values preserve both rows"
             `Quick
-            test_apply_preserves_ephemeral_expiry_and_verification_age
+            test_apply_preserves_rows_with_different_validity
         ; Alcotest.test_case
             "preserves a shared claim_id"
             `Quick
@@ -562,59 +527,22 @@ let () =
             `Quick
             test_render_numbered_facts_keeps_one_fact_per_line
         ] )
-    ; ( "staleness_gate"
-      , [ Alcotest.test_case "fresh verified fact passes not_stale" `Quick
-            (fun () ->
-               let fresh = fact ~last_verified_at:(now -. 3600.) "fresh" in
-               Alcotest.(check bool) "fresh" true (Consolidator.not_stale ~now fresh))
-        ; Alcotest.test_case "stale verified fact fails not_stale" `Quick
-            (fun () ->
-               let stale = fact ~last_verified_at:(now -. 90000.) "stale" in
-               Alcotest.(check bool) "stale" false (Consolidator.not_stale ~now stale))
-        ; Alcotest.test_case "unverified fact falls back to first_seen" `Quick
+    ; ( "explicit_validity"
+      , [ Alcotest.test_case "old unbounded fact remains eligible" `Quick
             (fun () ->
                let old =
-                 { (fact ~first_seen:(now -. 90000.) "old") with Types.last_verified_at = None }
+                 { (fact ~first_seen:(now -. 1_000_000.0) "old") with
+                   Types.last_verified_at = None
+                 }
                in
-               Alcotest.(check bool) "old unverified" false (Consolidator.not_stale ~now old);
-               let young =
-                 { (fact ~first_seen:(now -. 100.0) "young") with Types.last_verified_at = None }
-               in
-               Alcotest.(check bool) "young unverified" true (Consolidator.not_stale ~now young))
-        ; Alcotest.test_case "eligible ~now filters stale Durable_knowledge" `Quick
+               Alcotest.(check bool) "current" true (Types.fact_is_current ~now old))
+        ; Alcotest.test_case "explicitly expired fact is ineligible" `Quick
             (fun () ->
-               (* [eligible] also gates on category
-                  ([is_outcome_positive_for_shared_promotion]): the fixture
-                  default [Fact] is rejected there, which would mask the
-                  staleness axis this case isolates. Pin an outcome-positive
-                  category so only [not_stale] varies between the two facts. *)
-               let stale_dk = fact ~category:Types.Validated_approach
-                 ~last_verified_at:(now -. 90000.)
-                 ~claim_kind:(Some Types.Durable_knowledge) "stale_dk" in
-               Alcotest.(check bool) "stale dk" false (Consolidator.eligible ~now stale_dk);
-               let fresh_dk = fact ~category:Types.Validated_approach
-                 ~last_verified_at:(now -. 10.0)
-                 ~claim_kind:(Some Types.Durable_knowledge) "fresh_dk" in
-               Alcotest.(check bool) "fresh dk" true (Consolidator.eligible ~now fresh_dk))
-        ; Alcotest.test_case "not_stale delegates to fact_effective_valid_until first" `Quick
-            (fun () ->
-               (* P1 regression: fact with valid_until in the future passes
-                  even when last_verified_at is old. *)
-               let old_but_valid =
-                 fact ~last_verified_at:(now -. 50. *. 86400.)
-                   ~valid_until:(now +. 365. *. 86400.)
-                   ~claim_kind:(Some Types.External_state) "external"
-               in
-               Alcotest.(check bool) "valid_until overrides staleness"
-                 true (Consolidator.not_stale ~now old_but_valid);
-               (* Expired valid_until blocks even if recently verified. *)
-               let fresh_but_expired =
-                 fact ~last_verified_at:(now -. 1.0)
-                   ~valid_until:(now -. 100.0)
-                   ~claim_kind:(Some Types.External_state) "expired"
-               in
-               Alcotest.(check bool) "expired valid_until blocks"
-                 false (Consolidator.not_stale ~now fresh_but_expired))
+               let expired = fact ~valid_until:(now -. 1.0) "expired" in
+               Alcotest.(check bool)
+                 "expired"
+                 false
+                 (Types.fact_is_current ~now expired))
         ] )
 	    ]
 ;;

@@ -1,9 +1,9 @@
 
-(** Tool_usage_log -- Durable call logging for System_internal surface tools.
+(** Tool_usage_log -- Durable call logging for non-public registered tools.
 
     Persists tool invocations to [.masc/tool_usage/YYYY-MM/DD.jsonl] via
-    {!Dated_jsonl}. Only tools on the {!Tool_catalog_surfaces.System_internal}
-    surface are logged, providing evidence for safe pruning decisions.
+    {!Dated_jsonl}. External discovery membership is not reused as Keeper
+    visibility or authorization policy.
 
     @since 2.190.0 -- Issue #5120 *)
 
@@ -15,8 +15,9 @@ val init : ?cluster_name:string -> base_path:string -> unit -> unit
 
 val install : on_io_failure:(site:string -> exn -> unit) -> unit
 (** [install ~on_io_failure] registers a {!Tool_dispatch} observer that logs
-    System_internal tool calls to the JSONL store. Calls to non-System_internal
-    tools are ignored. [on_io_failure ~site exn] is invoked when a JSONL append
+    non-public registered tool calls to the JSONL store. Public tools are
+    already covered by their external call telemetry. [on_io_failure ~site exn]
+    is invoked when a JSONL append
     raises; the installer supplies keeper FD/disk pressure handling so this
     module does not reference the keeper subsystem (Tool->Keeper dependency
     direction). *)
@@ -38,10 +39,6 @@ val source_metadata_json : masc_root:string -> Yojson.Safe.t
 val attach_source_metadata : masc_root:string -> Yojson.Safe.t -> Yojson.Safe.t
 (** [attach_source_metadata ~masc_root json] overlays {!source_metadata_json}
     fields onto an existing tool usage summary object. *)
-
-val is_system_internal : string -> bool
-(** [is_system_internal name] returns true if [name] is on the
-    System_internal surface. O(1) hashtable lookup. *)
 
 val read_recent : ?n:int -> unit -> Yojson.Safe.t list
 (** [read_recent ~n ()] reads the most recent [n] entries (default 10000)

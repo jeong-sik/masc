@@ -10,7 +10,7 @@
 // to the raw token rather than slipping through unnoticed.
 //
 // The union mirrors the keeper_status_bridge needs_attention vocabulary (plus
-// keeper_turn_disposition / fd_pressure / dashboard_goals) arm-for-arm: every
+// keeper_turn_disposition / dashboard_goals) arm-for-arm: every
 // distinct reason/action those closed, non-composite emit sites produce has its
 // own Korean label, with no lossy fold — a keeper blocked on
 // `runtime_attempts_exhausted` and one blocked on `fiber_unresolved` get
@@ -20,11 +20,6 @@
 // list cannot silently drift behind the backend the way it did before
 // (`stale_turn_timeout` was emitted for a release with no label).
 //
-// The richer trust-snapshot attention vocabulary (keeper_runtime_trust_snapshot)
-// has its own typed sub-vocabularies below, starting with the
-// completion_contract_result:* composite reasons emitted by
-// receipt_contract_attention_reason.
-
 // One-time warn per (kind, token) so dev consoles surface backend tokens that
 // have no Korean label, without spamming on every render.
 const warnedAttentionTokens = new Set<string>()
@@ -39,16 +34,14 @@ function warnUnknownAttentionToken(kind: 'attention_reason' | 'next_human_action
 
 // Backend emit sites for `attention_reason` (the drift guard reads these):
 //   - lib/keeper/keeper_status_bridge.ml needs_attention block
-//     (approval_pending, continue_gate_required, paused,
+//     (approval_pending, paused,
 //      runtime_attempts_exhausted, provider_runtime_error, stale_turn_timeout,
 //      fiber_unresolved, runtime_blocked)
-//   - lib/keeper_runtime/keeper_fd_pressure.ml ('fd_pressure')
 //   - lib/dashboard/dashboard_goals.ml ('runtime_trust_snapshot_unavailable')
 //   - lib/keeper/keeper_execution_receipt.ml operator disposition reasons that
 //     can become trust attention_reason via keeper_runtime_trust_snapshot.ml
 export const ATTENTION_REASONS = [
   'approval_pending',
-  'continue_gate_required',
   'paused',
   'runtime_attempts_exhausted',
   'provider_runtime_error',
@@ -56,16 +49,12 @@ export const ATTENTION_REASONS = [
   'fiber_unresolved',
   'runtime_blocked',
   'runtime_trust_snapshot_unavailable',
-  'fd_pressure',
   'runtime_exhausted',
   'preflight_config_error',
   'degraded_retry',
   'transient_runtime_retry',
   'internal_error',
-  'tool_route_recoverable_failure',
-  'completion_contract_unsatisfied',
   'turn_budget_exhausted',
-  'turn_livelock_blocked',
   'cancelled',
   'unmapped_runtime_state',
 ] as const
@@ -73,7 +62,6 @@ export type AttentionReason = typeof ATTENTION_REASONS[number]
 
 const ATTENTION_REASON_LABELS: Record<AttentionReason, string> = {
   approval_pending: '승인 대기',
-  continue_gate_required: '계속 진행 승인 필요',
   paused: '일시정지',
   runtime_attempts_exhausted: '런타임 재시도 소진',
   provider_runtime_error: '런타임 호출 오류',
@@ -81,79 +69,28 @@ const ATTENTION_REASON_LABELS: Record<AttentionReason, string> = {
   fiber_unresolved: '미완료 작업(fiber) 정리 필요',
   runtime_blocked: '런타임 근거 확인 필요',
   runtime_trust_snapshot_unavailable: '런타임 신뢰 스냅샷 없음',
-  fd_pressure: 'FD 임계치 초과',
   runtime_exhausted: '런타임 후보 소진',
   preflight_config_error: '실행 전 설정 오류',
   degraded_retry: '저하 상태 재시도',
   transient_runtime_retry: '일시적 런타임 재시도',
   internal_error: '내부 오류',
-  tool_route_recoverable_failure: '도구 라우팅 복구 가능 실패',
-  completion_contract_unsatisfied: '완료 계약 미충족',
   turn_budget_exhausted: '턴 예산 소진',
-  turn_livelock_blocked: '턴 livelock 차단',
   cancelled: '취소됨',
   unmapped_runtime_state: '매핑되지 않은 runtime 상태',
 }
 
 // keeper_runtime_trust_snapshot.ml emits a SEPARATE, larger attention_reason
-// vocabulary on the trust path (fsm_invariant, sandbox_violation,
-// completion_contract_violation, the composite
-// `completion_contract_result:<reason>`, …) than the keeper_status_bridge
+// vocabulary on the trust path (fsm_invariant, sandbox_violation, …) than the keeper_status_bridge
 // needs_attention set this union started from. The known non-receipt trust
 // runtime-failure tokens fold to the coarse `runtime_blocked` bucket so the
 // detail strip shows a label instead of a raw token. This fold is deliberately
 // scoped to that enumerated trust set — the first-class status_bridge reasons
 // and receipt-derived reasons above keep their own labels.
 const TRUST_RUNTIME_FAILURE_ALIASES: ReadonlySet<string> = new Set([
-  'completion_contract_violation',
   'fsm_invariant',
   'sandbox_violation',
   'critical_block',
 ])
-
-// Mirrors the completion_contract_result arms that
-// keeper_runtime_trust_snapshot.ml can promote into an attention_reason, either
-// as bare tokens or via the legacy `completion_contract_result:<reason>`
-// composite form. The satisfied_* receipt results are intentionally absent
-// because they are not attention reasons.
-export const ATTENTION_COMPLETION_CONTRACT_RESULTS = [
-  'violated',
-  'claim_only_after_owned_task',
-  'needs_execution_progress',
-  'passive_only',
-  'unknown',
-  'not_dispatched',
-  'surface_mismatch',
-  'no_capable_provider',
-] as const
-export type AttentionCompletionContractResult = typeof ATTENTION_COMPLETION_CONTRACT_RESULTS[number]
-
-const ATTENTION_COMPLETION_CONTRACT_RESULT_SET: ReadonlySet<string> =
-  new Set(ATTENTION_COMPLETION_CONTRACT_RESULTS)
-
-const COMPLETION_CONTRACT_ATTENTION_REASON_LABELS: Record<AttentionCompletionContractResult, string> = {
-  violated: '완료 계약 위반',
-  claim_only_after_owned_task: '작업 소유 없는 claim',
-  needs_execution_progress: '실행 진행 증거 부족',
-  passive_only: '진행 작업 없는 수동 응답',
-  unknown: '완료 계약 결과 불명',
-  not_dispatched: '도구 미실행',
-  surface_mismatch: '실행 표면 불일치',
-  no_capable_provider: '사용 가능한 provider 없음',
-}
-
-export function isAttentionCompletionContractResult(
-  s: string,
-): s is AttentionCompletionContractResult {
-  return ATTENTION_COMPLETION_CONTRACT_RESULT_SET.has(s)
-}
-
-export function completionContractAttentionReasonLabel(reason: string): string | null {
-  const prefix = 'completion_contract_result:'
-  const result = reason.startsWith(prefix) ? reason.slice(prefix.length) : reason
-  if (!isAttentionCompletionContractResult(result)) return null
-  return COMPLETION_CONTRACT_ATTENTION_REASON_LABELS[result]
-}
 
 export function canonicalAttentionReason(reason: string | null): string | null {
   if (reason !== null && TRUST_RUNTIME_FAILURE_ALIASES.has(reason)) return 'runtime_blocked'
@@ -169,8 +106,6 @@ export function attentionReasonLabel(reason: string | null, paused: boolean): st
   if (!canonicalReason) return null
   if (canonicalReason === 'paused' && paused) return null
   if (isAttentionReason(canonicalReason)) return ATTENTION_REASON_LABELS[canonicalReason]
-  const completionContractLabel = completionContractAttentionReasonLabel(canonicalReason)
-  if (completionContractLabel) return completionContractLabel
   warnUnknownAttentionToken('attention_reason', canonicalReason)
   return canonicalReason
 }
@@ -180,16 +115,13 @@ export function attentionReasonLabel(reason: string | null, paused: boolean): st
 //     the corresponding attention_reason)
 //   - lib/keeper/keeper_turn_disposition.ml next_action
 //     (provide_input_or_decline, rerun_if_still_relevant, inspect_turn_timeout,
-//      inspect_runtime_attempts, inspect_completion_contract,
-//      resume_or_inspect_completion_contract, reconcile_partial_commit,
+//      inspect_runtime_attempts, reconcile_partial_commit,
 //      inspect_turn_budget, inspect_latest_error)
-//   - lib/keeper_runtime/keeper_fd_pressure.ml ('restore_fd_headroom')
 //   - lib/dashboard/dashboard_goals.ml ('inspect_keeper_runtime_trust')
 //   - lib/keeper/keeper_status_bridge.ml runtime_trust fallback
 //     ('inspect_keeper_runtime_trust')
 export const NEXT_HUMAN_ACTIONS = [
   'resolve_approval',
-  'approve_or_reject_continue',
   'inspect_blocker_before_resume',
   'inspect_runtime_attempts',
   'inspect_provider_runtime_cause',
@@ -200,19 +132,15 @@ export const NEXT_HUMAN_ACTIONS = [
   'provide_input_or_decline',
   'rerun_if_still_relevant',
   'inspect_turn_timeout',
-  'inspect_completion_contract',
-  'resume_or_inspect_completion_contract',
   'inspect_turn_budget',
   'reconcile_partial_commit',
   'inspect_latest_error',
-  'restore_fd_headroom',
   'inspect_keeper_runtime_trust',
 ] as const
 export type NextHumanAction = typeof NEXT_HUMAN_ACTIONS[number]
 
 const NEXT_HUMAN_ACTION_LABELS: Record<NextHumanAction, string> = {
   resolve_approval: '승인 요청 처리',
-  approve_or_reject_continue: '계속 진행 승인 또는 거절',
   inspect_blocker_before_resume: '원인 확인 후 재개',
   inspect_runtime_attempts: '재시도별 원인 확인',
   inspect_provider_runtime_cause: 'Provider 런타임 원인 확인',
@@ -223,12 +151,9 @@ const NEXT_HUMAN_ACTION_LABELS: Record<NextHumanAction, string> = {
   provide_input_or_decline: '입력 제공 또는 거절',
   rerun_if_still_relevant: '필요 시 재실행',
   inspect_turn_timeout: '턴 타임아웃 원인 확인',
-  inspect_completion_contract: '완료 계약 상태 확인',
-  resume_or_inspect_completion_contract: '재개 또는 완료 계약 확인',
   inspect_turn_budget: '턴 예산 소진 원인 확인',
   reconcile_partial_commit: '부분 커밋 정합성 확인',
   inspect_latest_error: '최근 오류 확인',
-  restore_fd_headroom: 'FD 여유 확보',
   inspect_keeper_runtime_trust: '런타임 신뢰 스냅샷 확인',
 }
 

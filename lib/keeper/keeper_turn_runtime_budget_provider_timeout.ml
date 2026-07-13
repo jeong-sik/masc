@@ -47,14 +47,12 @@ let provider_timeout_budget_to_yojson
       ("source", `String budget.source);
     ]
 
-let resolve_bounded_provider_timeout_budget_with_turn_budget
-    ~(allow_wall_clock_retry_budget : bool)
+let resolve_provider_timeout_budget
     ~(is_retry : bool)
     ~(estimated_input_tokens : int)
     ~(remaining_turn_budget_s : float) : provider_timeout_budget =
   let runtime = Keeper_runtime_resolved.current () in
   let adaptive_timeout_sec = Keeper_runtime_resolved.oas_call_timeout_sec () in
-  let _ = allow_wall_clock_retry_budget in
   {
     effective_timeout_sec = adaptive_timeout_sec;
     adaptive_timeout_sec;
@@ -66,13 +64,3 @@ let resolve_bounded_provider_timeout_budget_with_turn_budget
        then "retry_adaptive_timeout"
        else "first_attempt_adaptive_timeout");
   }
-
-let allow_wall_clock_retry_budget_for_attempt
-    ~(is_retry : bool)
-    ~(degraded_rotation_first_attempt : bool)
-    ~(attempt : int)
-    ~(attempted_runtimes : string list) : bool =
-  is_retry
-  && degraded_rotation_first_attempt
-  && attempt = 1
-  && List.length attempted_runtimes > 1

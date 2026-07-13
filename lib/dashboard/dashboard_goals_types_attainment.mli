@@ -53,8 +53,6 @@ val goal_attainment_to_json :
   Goal_store.goal -> tree_node -> Yojson.Safe.t
 
 val goal_completion_to_json :
-  effective_policy:'a option ->
-  open_request:'b option ->
   Goal_store.goal ->
   tree_node ->
   attainment:Yojson.Safe.t ->

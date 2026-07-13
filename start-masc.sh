@@ -660,13 +660,6 @@ if [ -z "${MASC_SYNC_MCP_CONFIG+x}" ]; then
     export MASC_SYNC_MCP_CONFIG=1
 fi
 
-# macOS Docker Desktop hotspot detection is visibility-first by default.
-# Export the safe default from the launcher too, so a stale OCaml executable
-# compiled with an older nonzero default cannot re-enable false blocking.
-if [ -z "${MASC_KEEPER_HOST_FD_HOTSPOT_HEADROOM+x}" ]; then
-    export MASC_KEEPER_HOST_FD_HOTSPOT_HEADROOM=0
-fi
-
 # Default arguments
 PORT="${MASC_PORT:-8935}"
 PORT_EXPLICIT=0

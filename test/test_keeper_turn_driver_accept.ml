@@ -152,14 +152,11 @@ let with_direct_retry_runtime f =
        | Ok () -> f ()
        | Error e -> Alcotest.failf "Runtime.init_default failed: %s" e)
 
-let direct_no_progress_retry_decision ?time_spent_in_turn_s err =
+let direct_no_progress_retry_decision err =
   Masc.Keeper_turn_runtime_budget.direct_no_progress_retry_decision
     ~base_runtime:"test_provider.test_model"
     ~effective_runtime:"runtime.direct-empty"
     ~attempted_runtimes:[ "runtime.direct-empty" ]
-    ~estimated_input_tokens:1
-    ?time_spent_in_turn_s
-    ~remaining_turn_budget_s:60.0
     err
 
 type direct_retry_observed_attempt =
@@ -1054,7 +1051,7 @@ let test_read_only_retry_uses_typed_context_not_reason_tokens () =
 	       (Masc.Keeper_error_classify.recoverable_runtime_failure_reason
 	          string_only_err))
 
-let test_direct_no_progress_retry_uses_shared_budget_decision () =
+let test_direct_no_progress_retry_uses_runtime_decision () =
   with_direct_retry_runtime (fun () ->
     let empty_err =
       accept_rejected_sdk_error
@@ -1070,29 +1067,8 @@ let test_direct_no_progress_retry_uses_shared_budget_decision () =
          "empty_no_progress"
          (Masc.Keeper_error_classify.degraded_retry_reason_to_string
             retry.fallback_reason)
-     | Masc.Keeper_turn_runtime_budget.Degraded_retry_slot_phase_exhausted _ ->
-       Alcotest.fail "fresh direct empty retry should not exhaust slot phase"
      | Masc.Keeper_turn_runtime_budget.No_degraded_retry ->
        Alcotest.fail "fresh direct empty retry should rotate");
-    let exhausted_after =
-      Masc.Keeper_turn_runtime_budget.degraded_retry_slot_phase_budget_sec +. 1.0
-    in
-    (match
-       direct_no_progress_retry_decision
-         ~time_spent_in_turn_s:exhausted_after
-         empty_err
-     with
-     | Masc.Keeper_turn_runtime_budget.Degraded_retry_slot_phase_exhausted retry
-       ->
-       Alcotest.(check string)
-         "slot-exhausted reason"
-         "empty_no_progress"
-         (Masc.Keeper_error_classify.degraded_retry_reason_to_string
-            retry.fallback_reason)
-     | Masc.Keeper_turn_runtime_budget.Degraded_retry_allowed _ ->
-       Alcotest.fail "exhausted direct empty retry should not rotate"
-     | Masc.Keeper_turn_runtime_budget.No_degraded_retry ->
-       Alcotest.fail "exhausted direct empty retry should report slot exhaustion");
     let thinking_only_err =
       accept_rejected_sdk_error
         ~response_shape:(Some Keeper_internal_error.Accept_response_thinking_only)
@@ -1107,9 +1083,6 @@ let test_direct_no_progress_retry_uses_shared_budget_decision () =
          "thinking_only_no_progress"
          (Masc.Keeper_error_classify.degraded_retry_reason_to_string
             retry.fallback_reason)
-     | Masc.Keeper_turn_runtime_budget.Degraded_retry_slot_phase_exhausted _ ->
-       Alcotest.fail
-         "fresh direct thinking-only retry should not exhaust slot phase"
      | Masc.Keeper_turn_runtime_budget.No_degraded_retry ->
        Alcotest.fail "fresh direct thinking-only retry should rotate");
     let read_only_err =
@@ -1126,17 +1099,13 @@ let test_direct_no_progress_retry_uses_shared_budget_decision () =
       true
       (match direct_no_progress_retry_decision read_only_err with
        | Masc.Keeper_turn_runtime_budget.No_degraded_retry -> true
-	       | Masc.Keeper_turn_runtime_budget.Degraded_retry_allowed _
-	       | Masc.Keeper_turn_runtime_budget.Degraded_retry_slot_phase_exhausted _ ->
-	         false))
+       | Masc.Keeper_turn_runtime_budget.Degraded_retry_allowed _ -> false))
 
 let cascade_decision_to_string
     (decision : Masc.Keeper_unified_turn_cascade_resolution.cascade_decision_kind) =
   match decision with
   | Degraded_retry_allowed -> "degraded_retry_allowed"
-  | Degraded_retry_slot_phase_exhausted -> "degraded_retry_slot_phase_exhausted"
   | No_degraded_retry -> "no_degraded_retry"
-  | Transient_network_retry -> "transient_network_retry"
 
 let prepare_retry_observers () =
   let published = ref [] in
@@ -1299,14 +1268,10 @@ let test_plan_degraded_retry_step_covers_direct_outcomes () =
       match direct_no_progress_retry_decision empty_err with
       | Masc.Keeper_turn_runtime_budget.Degraded_retry_allowed retry ->
         retry.next_runtime
-      | Masc.Keeper_turn_runtime_budget.Degraded_retry_slot_phase_exhausted _ ->
-        Alcotest.fail
-          "fresh direct empty retry should not exhaust slot phase before planning"
       | Masc.Keeper_turn_runtime_budget.No_degraded_retry ->
         Alcotest.fail "fresh direct empty retry should select a fallback runtime"
     in
     let plan
-        ?time_spent_in_turn_s
         ?(allow_retry = fun _ -> true)
         ?(setup_runtime = fun runtime_id -> Ok ("prepared:" ^ runtime_id))
         err =
@@ -1318,9 +1283,6 @@ let test_plan_degraded_retry_step_covers_direct_outcomes () =
           ~base_runtime:"test_provider.test_model"
           ~current_runtime_id:"runtime.direct-empty"
           ~attempted_runtimes:[ "runtime.direct-empty" ]
-          ~estimated_input_tokens:1
-          ~time_spent_in_turn_s
-          ~remaining_turn_budget_s:60.0
           ~attempt:1
           ~err
           ~allow_retry
@@ -1419,52 +1381,7 @@ let test_plan_degraded_retry_step_covers_direct_outcomes () =
     Alcotest.(check int)
       "setup failure still publishes allowed cascade"
       1
-      (List.length !published);
-    let exhausted_after =
-      Masc.Keeper_turn_runtime_budget.degraded_retry_slot_phase_budget_sec +. 1.0
-    in
-    let step, published, selected, rotated =
-      plan ~time_spent_in_turn_s:exhausted_after empty_err
-    in
-    (match step with
-     | Masc.Keeper_turn_runtime_budget.Degraded_retry_step_slot_phase_exhausted
-         { retry; reason } ->
-       Alcotest.(check string)
-         "slot exhausted runtime"
-         expected_retry_runtime
-         retry.next_runtime;
-       Alcotest.(check string) "slot exhausted reason" "empty_no_progress" reason
-     | _ -> Alcotest.fail "expired slot phase should produce exhausted step");
-    Alcotest.(check (list (pair string string)))
-      "slot exhaustion emits no selected metric"
-      []
-      (List.rev !selected);
-    Alcotest.(check (list (triple string string string)))
-      "slot exhaustion emits no rotation metric"
-      []
-      (List.rev !rotated);
-    (match List.rev !published with
-     | [ (runtime_id, decision, reason, next_runtime, attempt) ] ->
-       Alcotest.(check string)
-         "slot exhausted cascade runtime"
-         "runtime.direct-empty"
-         runtime_id;
-       Alcotest.(check string)
-         "slot exhausted cascade decision"
-         "degraded_retry_slot_phase_exhausted"
-         decision;
-       Alcotest.(check string)
-         "slot exhausted cascade reason"
-         "empty_no_progress"
-         reason;
-       Alcotest.(check (option string))
-         "slot exhausted cascade target"
-         (Some expected_retry_runtime)
-         next_runtime;
-       Alcotest.(check int) "slot exhausted cascade attempt" 1 attempt
-     | rows ->
-       Alcotest.failf "expected one slot-exhausted cascade event, got %d"
-         (List.length rows)))
+      (List.length !published))
 
 let test_direct_no_progress_retry_loop_runs_fallback_attempt () =
   with_direct_retry_runtime (fun () ->
@@ -1479,9 +1396,6 @@ let test_direct_no_progress_retry_loop_runs_fallback_attempt () =
       match direct_no_progress_retry_decision empty_err with
       | Masc.Keeper_turn_runtime_budget.Degraded_retry_allowed retry ->
         retry.next_runtime
-      | Masc.Keeper_turn_runtime_budget.Degraded_retry_slot_phase_exhausted _ ->
-        Alcotest.fail
-          "fresh direct empty retry should not exhaust slot phase before loop"
       | Masc.Keeper_turn_runtime_budget.No_degraded_retry ->
         Alcotest.fail "fresh direct empty retry should select a fallback runtime"
     in
@@ -1515,9 +1429,6 @@ let test_direct_no_progress_retry_loop_runs_fallback_attempt () =
         ~base_runtime:"test_provider.test_model"
         ~initial_runtime:"runtime.direct-empty"
         ~initial_max_context:1024
-        ~estimated_input_tokens:1
-        ~timeout_sec:60.0
-        ~remaining_turn_budget_s:(fun () -> 60.0)
         ~current_turn_phase_elapsed_ms:(function
           | None -> 7, None
           | Some _ -> 7, Some 0)
@@ -1660,9 +1571,6 @@ let test_direct_retry_loop_publishes_non_retry_terminal_cascade () =
       ~base_runtime:"runtime.initial"
       ~initial_runtime:"runtime.initial"
       ~initial_max_context:2048
-      ~estimated_input_tokens:1
-      ~timeout_sec:60.0
-      ~remaining_turn_budget_s:(fun () -> 60.0)
       ~current_turn_phase_elapsed_ms:(fun _ -> 3, None)
       ~now_s:(fun () -> 10.0)
       ~setup_retry_runtime:(fun _ ->
@@ -2028,12 +1936,11 @@ let test_empty_non_end_turn_response_is_rejected () =
              (Masc.Keeper_turn_driver.summary_of_masc_internal_error internal_error)))
    | None -> Alcotest.fail "expected typed accept rejection");
   (match Masc.Keeper_status_bridge.blocker_class_of_sdk_error err with
-   | Some Masc.Keeper_meta_contract.Completion_contract_violation -> ()
+   | None -> ()
    | Some other ->
      Alcotest.failf
-       "expected completion_contract_violation blocker, got %s"
-       (Masc.Keeper_meta_contract.blocker_class_to_string other)
-   | None -> Alcotest.fail "expected accept rejection blocker class");
+       "accept rejection must not become a runtime blocker, got %s"
+       (Masc.Keeper_meta_contract.blocker_class_to_string other));
   Alcotest.(check (option string))
     "direct keeper_msg rotates empty no-progress"
     (Some "empty_no_progress")
@@ -2295,7 +2202,7 @@ let test_registry_progress_on_event_records_only_watchdog_progress () =
     recorded;
   Alcotest.(check int) "downstream still sees every event" 6 downstream_count
 
-let test_carrier_only_stream_does_not_suppress_mid_turn_no_progress () =
+let test_carrier_only_stream_remains_observable_without_lifecycle_gate () =
   let open Agent_sdk.Types in
   let recorded, downstream_count =
     registry_recorded_progress
@@ -2307,56 +2214,10 @@ let test_carrier_only_stream_does_not_suppress_mid_turn_no_progress () =
       ]
   in
   Alcotest.(check (list string))
-    "carrier-only stream does not record watchdog progress"
+    "carrier-only stream does not invent progress"
     []
     recorded;
-  Alcotest.(check int) "diagnostic downstream receives carrier stream" 5 downstream_count;
-  let turn_observation =
-    let open Masc.Keeper_registry_types in
-    ({ turn_id = 1
-     ; started_at = 0.0
-     ; last_progress_at = 0.0
-     ; last_progress_kind = Some "turn_started"
-     ; active_tool_count = 0
-     ; turn_phase = Packed Turn_prompting
-     ; decision_stage = Packed Decision_undecided
-     ; measurement = None
-     ; measurement_bind_count = 0
-     ; selected_model = None
-     ; wake = Proactive_tick
-     }
-      : Masc.Keeper_registry_types.turn_observation)
-  in
-  match
-    Masc.Keeper_supervisor.assess_in_turn_progress
-      ~phase:Keeper_state_machine.Running
-      ~in_turn:(Some turn_observation)
-      ~now:45.0
-      ~progress_timeout:30.0
-  with
-  | Some
-      (Masc.Keeper_registry.Stale_turn_timeout
-         (Masc.Keeper_registry.Mid_turn_no_progress
-            { since_progress_seconds
-            ; progress_timeout_threshold
-            ; last_progress_kind
-            ; _
-            })) ->
-    Alcotest.(check int)
-      "carrier-only stream stays stale"
-      45
-      (int_of_float since_progress_seconds);
-    Alcotest.(check int)
-      "progress timeout threshold preserved"
-      30
-      (int_of_float progress_timeout_threshold);
-    Alcotest.(check (option string))
-      "last watchdog progress remains turn start"
-      (Some "turn_started")
-      last_progress_kind
-  | _ ->
-    Alcotest.fail
-      "carrier-only stream must not suppress Mid_turn_no_progress"
+  Alcotest.(check int) "diagnostic downstream receives carrier stream" 5 downstream_count
 
 let test_per_provider_timeout_not_forwarded_to_oas_hard_deadline () =
   (* RFC-0129 (§62, 2026-05-17 fleet incident): per_provider_timeout_s must NOT
@@ -2374,12 +2235,9 @@ let test_per_provider_timeout_not_forwarded_to_oas_hard_deadline () =
     None
     (Masc.Keeper_turn_driver.For_testing.max_execution_time_for_attempt ())
 
-(* KLV-DNS (RFC-keeper-liveness-ssot §6): before this fix, candidate
-   exhaustion always produced a plain [Agent_sdk.Error.Internal <free-text>],
-   so [Keeper_error_classify.is_runtime_exhausted_error] never fired for
-   DNS/network failures and the already-built Turn_consecutive_failures /
-   Auto_resume_with_backoff auto-pause path was unreachable — every DNS
-   outage fell back to the generic crash-restart-then-Dead path instead. *)
+(* Candidate exhaustion must retain its typed runtime-exhausted identity so a
+   DNS/network failure remains observable without relying on free-text error
+   matching. *)
 let test_dns_failure_exhaustion_classifies_as_runtime_exhausted () =
   let dns_err =
     Llm_provider.Http_client.NetworkError
@@ -2396,7 +2254,7 @@ let test_dns_failure_exhaustion_classifies_as_runtime_exhausted () =
     (Masc.Keeper_error_classify.is_runtime_exhausted_error mapped);
   Alcotest.(check bool)
     "DNS exhaustion is not auto-recoverable (counts toward crash threshold, \
-     per record_failure_and_maybe_escalate's counts_toward_crash)"
+     per record_failure_observation's counts_toward_crash)"
     false
     (Masc.Keeper_error_classify.is_auto_recoverable_turn_error mapped);
   match Keeper_internal_error.classify_masc_internal_error mapped with
@@ -2613,9 +2471,9 @@ let () =
             `Quick
             test_read_only_retry_uses_typed_context_not_reason_tokens;
 	          Alcotest.test_case
-	            "direct no-progress retry uses shared budget decision"
+	            "direct no-progress retry uses runtime decision"
 	            `Quick
-	            test_direct_no_progress_retry_uses_shared_budget_decision;
+	            test_direct_no_progress_retry_uses_runtime_decision;
           Alcotest.test_case
             "degraded retry rejects empty runtime target"
             `Quick
@@ -2683,9 +2541,9 @@ let () =
             `Quick
             test_registry_progress_on_event_records_only_watchdog_progress;
           Alcotest.test_case
-            "carrier-only stream still trips mid-turn no-progress"
+            "carrier-only stream remains observable without lifecycle gate"
             `Quick
-            test_carrier_only_stream_does_not_suppress_mid_turn_no_progress;
+            test_carrier_only_stream_remains_observable_without_lifecycle_gate;
           Alcotest.test_case
             "keeper timeout is not forwarded to OAS hard deadline (RFC-0129)"
             `Quick

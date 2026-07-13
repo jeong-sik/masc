@@ -72,9 +72,9 @@ into the execution / observability mesh:
 ```
 Admission_queue Agent_sdk_metrics_bridge Agent_sdk_response Approval_callbacks
 Audit_log Auth Board Board_core_classify Board_dispatch Config
-Context_compact_oas Context_overflow_action_tracker Docker_spawn_throttle
+Context_compact_oas Context_overflow_action_tracker Inference_inflight_observation
 Drift_guard Eval_gate Eval_harness Exec_core Failure_envelope
-Governance_pipeline Governance_registry Inference_utils Llm_metric_bridge
+Inference_utils Llm_metric_bridge
 Lockfree_atomic Masc_context_injector Masc_eio_env Masc_event_bus
 Masc_oas_bridge Memory_hooks Memory_oas_bridge Observability_redact
 Persona_dispatch_ref Progress Otel_metric_store Otel_metric_hotpath
@@ -88,6 +88,11 @@ Tool_plan Tool_resource_gate Tool_run Tool_shard Tool_telemetry
 Tool_workspace Transport_metrics Turn_mode_codec Verification Workspace
 Workspace_dispatch_ref
 ```
+
+This block is a historical dependency census, not a module creation list. The
+removed Governance/effect-policy modules are intentionally absent and must not
+be recreated by the extraction campaign. Keeper Gate remains a product-neutral
+outer boundary rather than a flat-namespace policy dependency.
 
 These fall into three families: cross-cutting infra (`legacy metrics backend`,
 `Governance_registry`, `Runtime_params`, `Shutdown`, `Sse`,

@@ -71,8 +71,7 @@ val start :
     [sw] closes.  Without this, each connection's FD lingers in
     the kernel [CLOSED] state until shutdown — a 1Hz dashboard
     reconnect (claude-in-chrome's playwright Chrome polls
-    [ws://127.0.0.1:8937/]) accumulates ~3,600 FDs/h, tripping
-    [admission_queue_rejected: fd count >= 90%] and starving
+    [ws://127.0.0.1:8937/]) accumulates ~3,600 FDs/h and can starve
     every keeper subprocess.  The pattern matches
     [http_server_h2.ml]'s accept loop.
 

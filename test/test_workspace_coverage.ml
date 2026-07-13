@@ -445,7 +445,7 @@ let test_claim_next_reconciles_stale_agent_current_task () =
 ;;
 
 let test_status_hides_stale_agent_current_task_without_writing () =
-  with_env "MASC_VERIFICATION_FSM_ENABLED" "true" (fun () ->
+  (
     with_test_env (fun config ->
       let agent_name =
         match Workspace.get_agents_raw config with
@@ -1273,7 +1273,7 @@ let test_transition_invalid () =
 ;;
 
 let test_transition_submit_for_verification_requires_notes () =
-  with_env "MASC_VERIFICATION_FSM_ENABLED" "true" (fun () ->
+  (
     with_test_env (fun config ->
       let _ = Workspace.add_task config ~title:"Test" ~priority:1 ~description:"" in
       let _ = Workspace.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
@@ -2492,18 +2492,19 @@ let test_predecessor_terminal_accepted_and_persisted () =
      | Ok _ -> ()
      | Error e ->
        Alcotest.fail ("start failed: " ^ Masc_domain.masc_error_to_string e));
-    let forced =
-      Workspace.force_done_task_r
+    let completed =
+      Workspace.transition_task_r
         config
         ~agent_name:claude
         ~task_id:"task-001"
+        ~action:Masc_domain.Done_action
         ~notes:"done"
         ()
     in
     Alcotest.(check bool)
       "predecessor completed"
       true
-      (match forced with Ok _ -> true | Error _ -> false);
+      (match completed with Ok _ -> true | Error _ -> false);
     match
       Workspace.add_task_with_result
         config

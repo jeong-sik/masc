@@ -5,7 +5,6 @@
 
     - [Keeper_tool_name] (keeper-owned typed vocabulary)
     - [Config.raw_all_tool_schemas] (authoritative LLM schema inventory)
-    - [Keeper_tool_registry.core_always_tools] (mandatory survival tools)
     - [Keeper_tool_task_runtime] task-operation handlers
 
     The flow registers a dispatch tag (+ schema) for every name that does not
@@ -133,17 +132,7 @@ let register_visible_raw_schemas () =
          | Some tag -> register_name_if_missing schema.name tag
          | None -> register_name_if_missing schema.name TD.Mod_external)
 
-(** 2. Register the mandatory core-always tools. Most already have schemas
-    in [raw_all_tool_schemas]; any missing core-always name gets a placeholder
-    schema so the tag/schema registries stay in lockstep. *)
-let register_core_always_tools () =
-  Keeper_tool_registry.core_always_tools
-  |> List.iter (fun name ->
-       match tag_of_name name with
-       | Some tag -> register_name_if_missing name tag
-       | None -> register_name_if_missing name TD.Mod_external)
-
-(** 3. Register every name in [Keeper_tool_name.all] that is missing from
+(** 2. Register every name in [Keeper_tool_name.all] that is missing from
     the registry. This covers keeper-internal tools and ratchets the task
     cluster to [Mod_keeper_task]. *)
 let register_keeper_tool_names () =
@@ -158,7 +147,6 @@ let register_keeper_tool_names () =
     (subsequent calls are no-ops for already-registered names). *)
 let register_all () =
   register_visible_raw_schemas ();
-  register_core_always_tools ();
   register_keeper_tool_names ()
 
 (** Names of LLM-visible schemas that still lack a dispatch tag. Empty when

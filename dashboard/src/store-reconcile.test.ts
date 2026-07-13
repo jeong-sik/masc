@@ -169,10 +169,10 @@ describe('reconcileKeepers', () => {
     expect(result[0]).toBe(updated)
   })
 
-  it('keeps row references for nested cooldown countdown drift within the same display bucket', () => {
+  it('keeps row references for nested diagnostic countdown drift within the same display bucket', () => {
     const keeper = makeKeeper({
       diagnostic: {
-        summary: 'Keeper is inside its proactive cooldown window.',
+        summary: 'Keeper is waiting for a scheduled wake.',
         health_state: 'healthy',
         quiet_reason: 'min_gap',
         next_action_path: 'direct_message',
@@ -182,7 +182,7 @@ describe('reconcileKeepers', () => {
     })
     const next = makeKeeper({
       diagnostic: {
-        summary: 'Keeper is inside its proactive cooldown window.',
+        summary: 'Keeper is waiting for a scheduled wake.',
         health_state: 'healthy',
         quiet_reason: 'min_gap',
         next_action_path: 'direct_message',

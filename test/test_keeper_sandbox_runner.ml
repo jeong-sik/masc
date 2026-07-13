@@ -55,9 +55,6 @@ module Fake_backend = struct
   let ensure_runtime ~timeout_sec:_ =
     Ok [ "--fake-seccomp" ]
 
-  let command_uses_nested_runtime cmd =
-    String.equal cmd "nested"
-
   let private_workspace_cwd ~config:_ ~meta:_ cwd =
     "/fake/container" ^ cwd
 
@@ -68,8 +65,6 @@ module Fake_backend = struct
     ; image = "fake-image"
     ; network_label = Keeper_types_profile_sandbox.network_mode_to_string network_mode
     ; cwd
-    ; semantic_status = None
-    ; semantic_ok = status = 0
     }
 
   let run_shell_command_with_status ~config:_ ~meta:_ ~cwd ~timeout_sec:_ ~cmd
@@ -197,7 +192,7 @@ let test_local_route_does_not_force_backend_cwd () =
          Keeper_sandbox_runner.run_command_with_status
            ~config ~meta ~timeout_sec:5.0
            ~host:
-             { actor = `Tool_execute
+             { actor = Masc_exec.Agent_id.of_string "tool/execute"
              ; raw_source = "true"
              ; summary = "runner lazy cwd host smoke"
              ; env = None

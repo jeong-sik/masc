@@ -62,6 +62,7 @@ val plan_of_string : string -> consolidation_plan option
     >= 2 in-range, not-yet-consumed members collapses into one consolidated fact
     (claim/category from the plan; provenance — earliest source/first_seen, union
     of [observed_by], [last_verified_at] = [now] — reconstructed from the
-    members). Explicitly dropped indices are removed; every other fact survives
-    unchanged. Deterministic order. *)
+    members). A merge whose members disagree on [claim_kind] or exact
+    [valid_until] is rejected so metadata is not collapsed by a heuristic.
+    Explicitly dropped indices are removed; every other fact survives unchanged. *)
 val apply_plan : now:float -> facts:fact list -> consolidation_plan -> fact list

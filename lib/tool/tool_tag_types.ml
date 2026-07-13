@@ -1,15 +1,8 @@
-(** Tool_tag_types — neutral classification variants for the Tool substrate.
+(** Tool_tag_types — neutral dispatch tags for the Tool substrate.
 
-    Zero-dependency leaf module. Holds the two pure nullary sums that the
-    substrate re-exports:
-
-    - [module_tag]: dispatch routing tag.
-    - [effect_domain]: inferred effect classification.
-
-    [Tool_dispatch] and [Tool_catalog_inference] re-export them by
-    type-equality, keeping their public contracts and all
-    [Tool_dispatch.Mod_*] / [Tool_catalog.<effect_domain>] call sites
-    byte-identical. *)
+    This zero-dependency leaf owns only [module_tag]. Tool effects and product
+    semantics belong to their concrete execution boundary, not the generic
+    dispatch substrate. *)
 
 type module_tag =
   | Mod_plan
@@ -30,9 +23,3 @@ type module_tag =
   | Mod_inline
   | Mod_shard
   | Mod_keeper_task
-
-type effect_domain =
-  | Read_only
-  | Masc_workspace
-  | Playground_write
-  | Host_repo_write

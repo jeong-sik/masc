@@ -45,10 +45,6 @@ let resolve_tool_lane_for_oas_tools ~base_path ?agent_name ~tools (t : t) =
     ~tools
     ()
 
-let runtime_mcp_policy_for_agent ~base_path ~agent_name (t : t) runtime_mcp_policy =
-  Runtime_agent.runtime_mcp_policy_for_provider ~base_path ~provider_cfg:t.config ~agent_name
-    runtime_mcp_policy
-
 let default_config ~name ~system_prompt ~tools (t : t) =
   Runtime_agent.default_config ~name ~provider_cfg:t.config ~system_prompt ~tools
 

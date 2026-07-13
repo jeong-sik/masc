@@ -34,8 +34,8 @@ val format_elapsed : float -> string -> string -> string
 (** {1 Agent status}
 
     Thresholds come from {!Runtime_params} /
-    {!Governance_registry.dashboard_agent_quiet_threshold_sec} and
-    {!Governance_registry.dashboard_agent_stuck_threshold_sec}. *)
+    {!Runtime_settings.dashboard_agent_quiet_threshold_sec} and
+    {!Runtime_settings.dashboard_agent_stuck_threshold_sec}. *)
 
 (** Translate agent status + [last_seen_iso] into operator-readable text
     like ["working"], ["quiet (Nm)"], ["STUCK (Nm, needs check)"], etc. *)

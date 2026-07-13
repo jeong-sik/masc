@@ -205,7 +205,6 @@ type keeper_runtime_mcp_log_context = {
   sandbox_root : string option;
   allowed_paths : string list option;
   network_mode : string option;
-  approval_mode : string option;
   runtime_profile : string option;
 }
 
@@ -255,7 +254,6 @@ let runtime_mcp_keeper_log_context_of_entry
       Some (Keeper_alerting_path.effective_allowed_paths ~meta:entry.meta);
     network_mode =
       Some (Keeper_types_profile_sandbox.network_mode_to_string entry.meta.network_mode);
-    approval_mode = None;
     runtime_profile =
       (try Some (Keeper_meta_contract.runtime_id_of_meta entry.meta)
        with Failure _ -> None);
@@ -366,7 +364,6 @@ let record_runtime_mcp_keeper_trajectory
       ?sandbox_root:ctx.sandbox_root
       ?allowed_paths:ctx.allowed_paths
       ?network_mode:ctx.network_mode
-      ?approval_mode:ctx.approval_mode
       ?runtime_profile:ctx.runtime_profile
       ()
   in
@@ -453,10 +450,9 @@ let record_runtime_mcp_keeper_tool_trace
     ?goal_ids:ctx.goal_ids
     ?sandbox_profile:ctx.sandbox_profile
     ?sandbox_root:ctx.sandbox_root
-    ?allowed_paths:ctx.allowed_paths
-    ?network_mode:ctx.network_mode
-    ?approval_mode:ctx.approval_mode
-    ?runtime_profile:ctx.runtime_profile
+      ?allowed_paths:ctx.allowed_paths
+      ?network_mode:ctx.network_mode
+      ?runtime_profile:ctx.runtime_profile
     ~result_bytes:(String.length message)
     ();
   record_runtime_mcp_keeper_trajectory
@@ -544,23 +540,16 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
   let start_time = Eio.Time.now clock in
   let execute () =
     try
-      Tool_resource_gate.with_permit
+      execute_tool_eio
+        ~sw
         ~clock
-        ~tool_name:name
+        ?profile:(Some profile)
+        ?mcp_session_id
+        ?auth_token
+        ?internal_keeper_runtime:(Some internal_keeper_runtime)
+        state
+        ~name
         ~arguments
-        ~is_read_only
-        ~start_time
-        (fun () ->
-          execute_tool_eio
-            ~sw
-            ~clock
-            ?profile:(Some profile)
-            ?mcp_session_id
-            ?auth_token
-            ?internal_keeper_runtime:(Some internal_keeper_runtime)
-            state
-            ~name
-            ~arguments)
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | Workspace.Not_initialized ->

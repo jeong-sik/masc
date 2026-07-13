@@ -23,15 +23,13 @@ type parsed_keeper_policy =
   ; pp_sandbox_image : string option
   ; pp_network_mode : network_mode
   ; pp_allowed_paths : string list
-  ; pp_tool_access : string list
-  ; pp_tool_denylist : string list
   ; pp_mention_targets : string list
   ; pp_proactive : proactive_policy
   ; pp_compaction : compaction_policy
   ; pp_auto_handoff : bool
   ; pp_handoff_threshold : float
   ; pp_handoff_cooldown_sec : int
-  ; pp_always_approve : bool option
+  ; pp_always_allow : bool option
   }
 
 type parsed_keeper_state =
@@ -40,7 +38,6 @@ type parsed_keeper_state =
   ; ps_active_goal_ids : string list
   ; ps_paused : bool
   ; ps_latched_reason : Keeper_latched_reason.t option
-  ; ps_auto_resume_after_sec : float option
   ; ps_autoboot_enabled : bool
   ; ps_current_task_id : Keeper_id.Task_id.t option
   ; ps_max_context_override : int option
@@ -125,30 +122,15 @@ let parse_sandbox_policy_fields (json : Yojson.Safe.t)
 let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
   : (parsed_keeper_policy, string) result
   =
-  match tool_access_of_meta_json json with
+  match parse_sandbox_policy_fields json with
   | Error msg -> Error ("meta parse error: " ^ msg)
-  | Ok pp_tool_access ->
-    (match parse_sandbox_policy_fields json with
-     | Error msg -> Error ("meta parse error: " ^ msg)
-     | Ok (pp_sandbox_profile, pp_sandbox_image, pp_network_mode) ->
+  | Ok (pp_sandbox_profile, pp_sandbox_image, pp_network_mode) ->
     let pp_allowed_paths = Safe_ops.json_string_list "allowed_paths" json in
-    let pp_tool_denylist = Safe_ops.json_string_list "tool_denylist" json in
     let pp_mention_targets =
       Safe_ops.json_string_list "mention_targets" json |> dedupe_keep_order
     in
     let proactive_enabled =
       Safe_ops.json_bool ~default:default_proactive_enabled "proactive_enabled" json
-    in
-    let proactive_idle_sec =
-      Safe_ops.json_int ~default:default_proactive_idle_sec "proactive_idle_sec" json
-      |> normalize_proactive_idle_sec
-    in
-    let proactive_cooldown_sec =
-      Safe_ops.json_int
-        ~default:default_proactive_cooldown_sec
-        "proactive_cooldown_sec"
-        json
-      |> normalize_proactive_cooldown_sec
     in
     let env_ratio_gate, env_message_gate, env_token_gate =
       keeper_compaction_policy_from_env ()
@@ -198,20 +180,14 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
     let pp_handoff_cooldown_sec =
       Safe_ops.json_int ~default:300 "handoff_cooldown_sec" json
     in
-    let pp_always_approve = Safe_ops.json_bool_opt "always_approve" json in
+    let pp_always_allow = Safe_ops.json_bool_opt "always_allow" json in
     Ok
       { pp_sandbox_profile
       ; pp_sandbox_image
       ; pp_network_mode
       ; pp_allowed_paths
-      ; pp_tool_access
-      ; pp_tool_denylist
       ; pp_mention_targets
-      ; pp_proactive =
-          { enabled = proactive_enabled
-          ; idle_sec = proactive_idle_sec
-          ; cooldown_sec = proactive_cooldown_sec
-          }
+      ; pp_proactive = { enabled = proactive_enabled }
       ; pp_compaction =
           { profile = compaction_profile
           ; mode = compaction_mode
@@ -219,21 +195,12 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
           ; message_gate = compaction_message_gate
           ; token_gate = compaction_token_gate
           ; cooldown_sec = compaction_cooldown_sec
-          ; max_checkpoint_messages =
-              Safe_ops.json_int ~default:120 "max_checkpoint_messages" json
-          ; keep_recent_tool_results =
-              Keeper_config.normalize_keep_recent_tool_results
-                ~keeper_name
-                (Safe_ops.json_int
-                   ~default:Keeper_config.default_keep_recent_tool_results
-                   "keep_recent_tool_results"
-                   json)
           }
       ; pp_auto_handoff
       ; pp_handoff_threshold
       ; pp_handoff_cooldown_sec
-      ; pp_always_approve
-      })
+      ; pp_always_allow
+      }
 ;;
 
 let parse_usage_metrics (json : Yojson.Safe.t) : usage_metrics =
@@ -287,6 +254,21 @@ let parse_keeper_state
       ~(keeper_name : string)
   : parsed_keeper_state
   =
+  (match Json_util.assoc_member_opt "auto_resume_after_sec" json with
+   | None -> ()
+   | Some _ ->
+     Log.Keeper.warn
+       "%s: retired auto_resume_after_sec persisted field requires canonical \
+        metadata migration; paused state is preserved and only an explicit \
+        operator resume may clear it"
+       keeper_name;
+     Otel_metric_store.inc_counter
+       Keeper_metrics.(to_string MetaReadFailures)
+       ~labels:
+         [ "keeper", keeper_name
+         ; "site", "retired_auto_resume_field_migration_needed"
+         ]
+       ());
   let generation = Safe_ops.json_int ~default:0 "generation" json in
   let last_handoff_ts = Safe_ops.json_float ~default:0.0 "last_handoff_ts" json in
   let ps_created_at_raw = Safe_ops.json_string ~default:"" "created_at" json in
@@ -312,7 +294,7 @@ let parse_keeper_state
     Safe_ops.json_int ~default:0 "mention_reactive_turn_count" json
   in
   let noop_turn_count = Safe_ops.json_int ~default:0 "noop_turn_count" json in
-  let last_seen_message_seq = Safe_ops.json_int ~default:0 "last_seen_message_seq" json in
+  let message_scope_ack_id = Safe_ops.json_string_opt "message_scope_ack_id" json in
   (* Canonical format: last_blocker is a structured object
      (blocker_info_to_json output) or `Null. *)
   let last_blocker =
@@ -368,7 +350,6 @@ let parse_keeper_state
            ();
          None)
   in
-  let ps_auto_resume_after_sec = Safe_ops.json_float_opt "auto_resume_after_sec" json in
   let ps_autoboot_enabled = Safe_ops.json_bool ~default:true "autoboot_enabled" json in
   let ps_current_task_id =
     match Safe_ops.json_string_opt "current_task_id" json with
@@ -384,7 +365,6 @@ let parse_keeper_state
   ; ps_active_goal_ids
   ; ps_paused
   ; ps_latched_reason
-  ; ps_auto_resume_after_sec
   ; ps_autoboot_enabled
   ; ps_current_task_id
   ; ps_max_context_override
@@ -404,7 +384,7 @@ let parse_keeper_state
       ; board_reactive_turn_count
       ; mention_reactive_turn_count
       ; noop_turn_count
-      ; last_seen_message_seq
+      ; message_scope_ack_id
 	      ; last_blocker
 	      ; last_runtime_attempt
 	      ; last_turn_tool_calls
@@ -415,11 +395,15 @@ let parse_keeper_state
 type removed_keeper_meta_field =
   | Initiative_enabled
   | Persona_profile_path
+  | Tool_access
+  | Tool_denylist
   | Last_blocker
 
 let removed_keeper_meta_field_of_key = function
   | "initiative_enabled" -> Some Initiative_enabled
   | "persona_profile_path" -> Some Persona_profile_path
+  | "tool_access" -> Some Tool_access
+  | "tool_denylist" -> Some Tool_denylist
   | "last_blocker" -> Some Last_blocker
   | _ -> None
 ;;
@@ -427,6 +411,8 @@ let removed_keeper_meta_field_of_key = function
 let removed_keeper_meta_field_to_wire = function
   | Initiative_enabled -> "initiative_enabled"
   | Persona_profile_path -> "persona_profile_path"
+  | Tool_access -> "tool_access"
+  | Tool_denylist -> "tool_denylist"
   | Last_blocker -> "last_blocker"
 ;;
 
@@ -440,7 +426,10 @@ let reject_removed_keeper_meta_shapes (json : Yojson.Safe.t) =
     | [] -> Ok ()
     | (key, value) :: rest ->
       (match removed_keeper_meta_field_of_key key with
-       | Some (Initiative_enabled as field) | Some (Persona_profile_path as field) ->
+       | Some (Initiative_enabled as field)
+       | Some (Persona_profile_path as field)
+       | Some (Tool_access as field)
+       | Some (Tool_denylist as field) ->
          Error
            ( "removed keeper meta field is no longer supported: "
              ^ removed_keeper_meta_field_to_wire field )
@@ -499,8 +488,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                    ; sandbox_image = policy.pp_sandbox_image
                    ; network_mode = policy.pp_network_mode
                    ; allowed_paths = policy.pp_allowed_paths
-                   ; tool_access = policy.pp_tool_access
-                   ; tool_denylist = policy.pp_tool_denylist
                    ; mention_targets = policy.pp_mention_targets
                    ; proactive = policy.pp_proactive
                    ; compaction = policy.pp_compaction
@@ -519,7 +506,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                    ; auto_handoff = policy.pp_auto_handoff
                    ; handoff_threshold = policy.pp_handoff_threshold
                    ; handoff_cooldown_sec = policy.pp_handoff_cooldown_sec
-                   ; always_approve = policy.pp_always_approve
+                   ; always_allow = policy.pp_always_allow
                    ; created_at =
                        (if state.ps_created_at_raw = ""
                         then now_iso ()
@@ -531,7 +518,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                    ; active_goal_ids = state.ps_active_goal_ids
                    ; paused = state.ps_paused
                    ; latched_reason = state.ps_latched_reason
-                   ; auto_resume_after_sec = state.ps_auto_resume_after_sec
                    ; autoboot_enabled = state.ps_autoboot_enabled
                    ; current_task_id = state.ps_current_task_id
                    ; max_context_override = state.ps_max_context_override

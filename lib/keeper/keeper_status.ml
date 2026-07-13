@@ -85,19 +85,6 @@ let handle_keeper_list ctx args : tool_result =
           let metrics_overview =
             summarize_metrics_lines metrics_window_lines ~default_generation:m.runtime.generation
           in
-          let last_skill_metrics =
-            let rec find_latest = function
-              | [] -> None
-              | line :: tl ->
-                  (try
-                     let j = Yojson.Safe.from_string line in
-                     match Safe_ops.json_string_opt "skill_primary" j with
-                     | Some primary when String.trim primary <> "" -> Some j
-                     | _ -> find_latest tl
-                   with Yojson.Json_error _ -> find_latest tl)
-            in
-            find_latest (List.rev metrics_window_lines)
-          in
           (* RFC-0149 §3.1 — single typed read drives both the structured
              [memory_bank_summary] (consumed by [memory_bank] / counts
              elsewhere in this object) and the operator-visible
@@ -159,37 +146,6 @@ let handle_keeper_list ctx args : tool_result =
                 ("message_count", `Int (Safe_ops.json_int "message_count" metrics));
               ]
           in
-          let skill_route_json =
-            let fallback_selection_mode_string = "agent" in
-            let fallback_selection_provenance = "fallback" in
-            match last_skill_metrics with
-            | None -> `Null
-            | Some metrics ->
-                let primary = Safe_ops.json_string_opt "skill_primary" metrics in
-                let secondary =
-                  match Json_util.assoc_member_opt "skill_secondary" metrics with
-                  | Some (`List xs) ->
-                      xs
-                      |> List.filter_map (fun v ->
-                           match v with `String s when String.trim s <> "" -> Some s | _ -> None)
-                  | None | Some _ -> []
-                in
-                let reason = Safe_ops.json_string_opt "skill_reason" metrics in
-                `Assoc [
-                  ("primary", Json_util.string_opt_to_json primary);
-                  ("secondary", `List (List.map (fun s -> `String s) secondary));
-                  ("reason", Json_util.string_opt_to_json reason);
-                  ( "selection_mode",
-                    `String
-                      (Safe_ops.json_string_opt "skill_selection_mode" metrics
-                       |> Option.value ~default:fallback_selection_mode_string) );
-                  ( "provenance",
-                    `String
-                      (Safe_ops.json_string_opt "skill_provenance" metrics
-                       |> Option.value ~default:fallback_selection_provenance) );
-                  ("authoritative", `Bool false);
-                ]
-          in
           let runtime_blocker_fields =
             runtime_blocker_fields_json ctx.config m
           in
@@ -238,8 +194,6 @@ let handle_keeper_list ctx args : tool_result =
               ("compaction_token_gate", `Int compact_token_gate);
               ("autoboot_enabled", `Bool m.autoboot_enabled);
               ("proactive_enabled", `Bool m.proactive.enabled);
-              ("proactive_idle_sec", `Int m.proactive.idle_sec);
-              ("proactive_cooldown_sec", `Int m.proactive.cooldown_sec);
               ("proactive_count_total", `Int m.runtime.proactive_rt.count_total);
               ("proactive_visible_count_total", `Int m.runtime.proactive_rt.visible_count_total);
               ("last_compaction_check_ts", `Float m.runtime.compaction_rt.last_check_ts);
@@ -282,7 +236,6 @@ let handle_keeper_list ctx args : tool_result =
               ("memory_recent_note",
                 Json_util.string_opt_to_json memory_recent_note);
               ("context", context_json);
-              ("skill_route", skill_route_json);
               ("metrics_overview", metrics_summary_to_json metrics_overview);
               ("memory_bank", memory_summary_to_json memory_bank_summary);
               ("storage_paths", `Assoc [

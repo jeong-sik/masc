@@ -77,12 +77,6 @@ def write_ready_keeper(root: Path, name: str) -> None:
                 "[keeper]",
                 'sandbox_profile = "docker"',
                 'network_mode = "inherit"',
-                "tool_access = [",
-                '  "tool_execute",',
-                '  "tool_edit_file",',
-                '  "tool_write_file",',
-                '  "keeper_board_post"',
-                "]",
                 "",
             ]
         ),
@@ -93,12 +87,6 @@ def write_ready_keeper(root: Path, name: str) -> None:
             {
                 "sandbox_profile": "docker",
                 "network_mode": "inherit",
-                "tool_access": [
-                    "tool_execute",
-                    "tool_edit_file",
-                    "tool_write_file",
-                    "keeper_board_post",
-                ],
                 "last_turn_ts": time.time(),
             }
         ),
@@ -515,46 +503,6 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         self.assertEqual(
             report["fleet_failures"], ["minimum_2_configured_keepers_got_1"]
         )
-
-    def test_explicit_tool_access_shape_does_not_gate_readiness(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            write_ready_keeper(root, "alpha")
-            runtime_path = root / ".masc" / "keepers" / "alpha.json"
-            runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
-            runtime["tool_access"] = ["keeper_board_post"]
-            runtime_path.write_text(json.dumps(runtime), encoding="utf-8")
-
-            report = audit.build_report(audit_args(root, expected_keepers=1))
-
-        self.assertTrue(report["ok"])
-
-    def test_missing_tool_access_does_not_gate_readiness(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            write_ready_keeper(root, "alpha")
-            runtime_path = root / ".masc" / "keepers" / "alpha.json"
-            runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
-            runtime.pop("tool_access")
-            runtime_path.write_text(json.dumps(runtime), encoding="utf-8")
-            config_path = root / ".masc" / "config" / "keepers" / "alpha.toml"
-            config_path.write_text(
-                "\n".join(
-                    [
-                        "[keeper]",
-                        'sandbox_profile = "docker"',
-                        'network_mode = "inherit"',
-                        "",
-                    ]
-                ),
-                encoding="utf-8",
-            )
-
-            report = audit.build_report(audit_args(root, expected_keepers=1))
-
-        self.assertTrue(report["ok"])
-        keeper = report["keepers"][0]
-        self.assertIsNone(keeper["tool_access"])
 
     def test_require_persistent_work_evidence_fails_without_runtime_artifacts(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -23,6 +23,15 @@
     [unit] argument is required so the OCaml compiler can determine
     when the optional defaults apply. *)
 
+type external_effect_authorizer =
+  operation:string ->
+  input:Yojson.Safe.t ->
+  continue:(unit -> Tool_result.result option) ->
+  Tool_result.result option
+(** Caller-owned boundary injected into concrete effect handlers. A handler
+    that performs an external effect invokes this callback with its exact
+    operation and complete input; read-only handlers do not invoke it. *)
+
 val dispatch
   : (config:Workspace.config
      -> agent_name:string
@@ -31,6 +40,7 @@ val dispatch
      -> ?proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t
      -> ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
      -> ?mcp_session_id:string
+     -> ?authorize_external_effect:external_effect_authorizer
      -> name:string
      -> args:Yojson.Safe.t
      -> unit

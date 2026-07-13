@@ -4,7 +4,7 @@ import type { GoalAttainmentProjection } from '../../types'
 
 import { attainmentValueLabel } from './goal-tree'
 
-// task-1743: a goal.metric is stored but never evaluated (the convergence
+// task-1743: a goal.metric is stored but never evaluated (the Task completion
 // evaluator has no caller), so the attainment percentage is derived from
 // linked task completion. The goal panel must not present that as a metric
 // result. These tests pin the honest label the render helper produces.

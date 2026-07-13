@@ -53,15 +53,6 @@ let is_public_mcp_surface_name tool_name =
   | None -> false
 ;;
 
-let effect_domain_for_tool_name tool_name =
-  match descriptor_for_tool_name tool_name with
-  | Some descriptor -> descriptor.Keeper_tool_descriptor.policy.effect_domain
-  | None ->
-    (match canonical_internal_name_for_tool_name tool_name with
-     | Some internal_name -> Tool_catalog.effect_domain internal_name
-     | None -> Tool_catalog.effect_domain tool_name)
-;;
-
 let capability_has kind tool_name =
   let descriptor = descriptor_for_tool_name tool_name in
   let descriptor_readonly_hint =
@@ -82,17 +73,6 @@ let capability_has kind tool_name =
        | Some internal_name when not (String.equal internal_name tool_name) ->
          Tool_capability.has kind internal_name
        | _ -> false)
-;;
-
-(* RFC-0331 — resolve a tool's typed effect class from its declared
-   registration (descriptor [readonly_hint] / [Tool_catalog] metadata via
-   [capability_has]). A tool is [Read_only] only if it declares itself so;
-   every unknown / undeclared tool is [Mutating] (fail-closed). This is the
-   SSOT the verifier consumes instead of substring-matching free text. *)
-let effect_class_for_tool_name tool_name : Effect_class.t =
-  if capability_has Tool_capability.Read_only tool_name
-  then Effect_class.Read_only
-  else Effect_class.Mutating
 ;;
 
 let descriptor_and_input_for_tool_call ~tool_name ~input =

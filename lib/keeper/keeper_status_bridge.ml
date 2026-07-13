@@ -44,8 +44,6 @@ type override_field_detail =
 let override_field = Keeper_status_bridge_override.override_field
 let maybe_string_override = Keeper_status_bridge_override.maybe_string_override
 let maybe_bool_override = Keeper_status_bridge_override.maybe_bool_override
-let maybe_string_list_override =
-  Keeper_status_bridge_override.maybe_string_list_override
 let nonempty_string_list_override =
   Keeper_status_bridge_override.nonempty_string_list_override
 let maybe_string_option_override =
@@ -58,11 +56,6 @@ let live_override_details (meta : keeper_meta) (defaults : keeper_profile_defaul
     match default with
     | Some value when String.trim live = "" -> value
     | _ -> live
-  in
-  let default_string_list default live =
-    match default, live with
-    | Some values, [] -> values
-    | _, values -> values
   in
   let default_nonempty_string_list default live =
     match default, live with
@@ -84,10 +77,6 @@ let live_override_details (meta : keeper_meta) (defaults : keeper_profile_defaul
        "workspace.mention_targets"
        defaults.mention_targets
        (default_nonempty_string_list defaults.mention_targets meta.mention_targets)
-  |> maybe_string_list_override
-       "tools.tool_denylist"
-       defaults.tool_denylist
-       (default_string_list defaults.tool_denylist meta.tool_denylist)
   |> (fun acc ->
   let runtime_id = runtime_id_of_meta meta in
   if effective_runtime_id <> runtime_id
@@ -125,7 +114,7 @@ let runtime_keepalive_started_at (config : Workspace_utils.config) (meta : keepe
 
 (* ── Structured blocker classification ──────────────────────── *)
 (* Types blocker_class, runtime_exhaustion_reason, blocker_class_to_string,
-   runtime_exhaustion_summary, blocker_class_continue_gate
+   and runtime_exhaustion_summary
    are defined in Keeper_types (keeper_types.ml). *)
 
 
@@ -166,37 +155,12 @@ let last_runtime_attempt_json (meta : keeper_meta) =
   | Some attempt -> runtime_attempt_record_json attempt
 ;;
 
-let no_progress_blocker_facts meta =
-  match meta.runtime.last_blocker with
-  | Some
-      { klass = No_progress_loop
-      ; facts = Some (No_progress_loop_facts facts)
-      ; _
-      } -> Some facts
-  | Some _ | None -> None
-;;
-
-let no_progress_runtime_blocker_fact_fields meta =
-  match no_progress_blocker_facts meta with
-  | None -> []
-  | Some facts ->
-    [ "no_progress_reason", `String facts.no_progress_reason
-    ; "no_progress_reason_source", `String "blocker_facts"
-    ; ( "no_progress_threshold"
-      , `Int facts.no_progress_threshold )
-    ; ( "no_progress_streak"
-      , `Int facts.no_progress_streak )
-    ; "no_progress_latched", `Bool facts.no_progress_latched
-    ]
-;;
-
 let runtime_blocker_facts_json (meta : keeper_meta) =
   `Assoc
-    ([ "source", `String "keeper_runtime.last_runtime_attempt"
-     ; "runtime_id", `String (runtime_id_of_meta meta)
-     ; "last_runtime_attempt", last_runtime_attempt_json meta
-     ]
-     @ no_progress_runtime_blocker_fact_fields meta)
+    [ "source", `String "keeper_runtime.last_runtime_attempt"
+    ; "runtime_id", `String (runtime_id_of_meta meta)
+    ; "last_runtime_attempt", last_runtime_attempt_json meta
+    ]
 ;;
 
 let runtime_blocker_fields_json (config : Workspace_utils.config) (meta : keeper_meta) =
@@ -204,13 +168,11 @@ let runtime_blocker_fields_json (config : Workspace_utils.config) (meta : keeper
   | Some blocker ->
     [ "runtime_blocker_class", `String blocker.blocker_class
     ; "runtime_blocker_summary", `String blocker.summary
-    ; "runtime_blocker_continue_gate", `Bool blocker.continue_gate
     ; "runtime_blocker_facts", runtime_blocker_facts_json meta
     ]
   | None ->
     [ "runtime_blocker_class", `Null
     ; "runtime_blocker_summary", `Null
-    ; "runtime_blocker_continue_gate", `Bool false
     ; "runtime_blocker_facts", `Null
     ]
 ;;
@@ -220,7 +182,6 @@ let runtime_state_fields_json (config : Workspace_utils.config) (meta : keeper_m
   let pause_state = if meta.paused then "paused" else "active" in
   let blocker_state =
     match runtime_blocker with
-    | Some blocker when blocker.continue_gate -> "continue_gate"
     | Some _ -> "blocked"
     | None -> "clear"
   in
@@ -237,8 +198,6 @@ let attention_fields_json (config : Workspace_utils.config) (meta : keeper_meta)
     then true, Some "approval_pending", Some "resolve_approval"
     else (
       match runtime_blocker with
-      | Some blocker when blocker.continue_gate ->
-        true, Some "continue_gate_required", Some "approve_or_reject_continue"
       | Some _ when meta.paused ->
         true, Some "paused", Some "inspect_blocker_before_resume"
       | Some blocker when is_runtime_exhausted_blocker_class blocker.blocker_class ->

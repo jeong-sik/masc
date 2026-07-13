@@ -5,10 +5,10 @@
 // strip (keeper-phase-strip.ts):
 //   • Phase strip   — records FSM transitions (prev_phase → new_phase)
 //   • Lifecycle     — records higher-level supervisor events
-//     (Started, Reconciled, Restarted, Dead_cleaned, Paused_pruned, etc.)
+//     (Started, Reconciled, Restarted, Dead_cleaned, etc.)
 //
 // Both are useful together: the lifecycle timeline shows *why* a phase
-// sequence happened (operator pause, auto-resume, restart burst) while
+// sequence happened (operator action, restart burst) while
 // the phase strip shows *what* happened state-by-state.
 
 import { html } from 'htm/preact'
@@ -36,11 +36,10 @@ type EventTone = 'ok' | 'warn' | 'bad' | 'info'
 /** Map well-known lifecycle event strings to a semantic tone. */
 export function lifecycleEventTone(event: string): EventTone {
   const e = event.trim().toLowerCase()
-  if (e === 'started' || e === 'reconciled' || e === 'auto_resumed') return 'ok'
+  if (e === 'started' || e === 'reconciled') return 'ok'
   if (e === 'restarted') return 'warn'
   if (e === 'dead_cleaned') return 'bad'
   if (e === 'purged') return 'info'
-  if (e === 'paused_pruned' || e === 'self_preservation') return 'warn'
   return 'info'
 }
 
@@ -61,10 +60,7 @@ export function lifecycleEventLabel(event: string): string {
     case 'reconciled':        return '재조정됨'
     case 'restarted':         return '재시작됨'
     case 'dead_cleaned':      return '종료 정리됨'
-    case 'self_preservation': return '자기보존'
-    case 'paused_pruned':     return '일시정지 정리됨'
     case 'purged':            return '완전 삭제됨'
-    case 'auto_resumed':      return '자동 재개됨'
     default:                  return event.replace(/_/g, ' ')
   }
 }

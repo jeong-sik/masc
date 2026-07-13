@@ -41,7 +41,17 @@ The RFC deferred W3 sizing to a census; here is its resolution. The original "ad
 
 **Provenance is the gate.** `Keeper_registry` `entry.meta` today has *mixed* provenance: the write-sync hook (`sync_meta_if_registered`) installs RAW persisted meta, while `reload_meta_from_disk` and the heartbeat loop install EFFECTIVE (TOML/persona-overlay-applied) meta. The fan-out reads RAW today (via disk `read_meta`). Switching it to `entry.meta` naively would read whichever provenance last won — nondeterministic. So provenance must be unified first (W3b).
 
-**Direction: unify to effective, not raw.** The overlaid-field set (`effective_meta_of_profile_defaults`, `keeper_meta_contract.ml:705-783`) is: `persona`, `proactive.*`, `tool_denylist`, `goal`, `instructions`, `autoboot_enabled`, `mention_targets` (when TOML defaults non-empty), `active_goal_ids`, `tool_access`, `sandbox_profile`, `sandbox_image`, `network_mode`, `multimodal_policy`, `allowed_paths`, `telemetry_feedback_*`, `always_approve`, `oas_env`. Of these the board fan-out consumes exactly one — `mention_targets` (`keeper_world_observation_board_signal.ml:103`); every other field it reads (`name`, `agent_name`, `paused`, `auto_resume_after_sec`, `runtime.last_blocker`) is raw-safe. Meanwhile `keeper_status_detail.ml:209` is literally named `effective_meta_overlay_hash` and fingerprints the *effective* overlay to invalidate its status cache — it *requires* effective. Unifying to raw would break that by design; unifying to effective is what the majority consumer already wants and what the heartbeat loop already installs most of the time.
+**Direction: unify to effective, not raw.** The current overlaid-field set
+(`effective_meta_of_profile_defaults`) is: `persona`, `proactive.*`, `goal`,
+`instructions`, `autoboot_enabled`, `mention_targets`, `active_goal_ids`,
+`sandbox_profile`, `sandbox_image`, `network_mode`, `multimodal_policy`,
+`allowed_paths`, `telemetry_feedback_*`, `always_allow`, and `oas_env`. Of
+these the board fan-out consumes exactly one — `mention_targets`; identity and
+explicit operator-pause state are carried directly. Removed tool-policy fields
+are deliberately not part of this projection and must not be recreated by the
+mailbox work. Meanwhile `effective_meta_overlay_hash` fingerprints the
+effective overlay to invalidate its status cache, so unifying to raw would
+break that consumer by design.
 
 **Consequence to sanction (W3c exit behavior).** Once the fan-out reads effective `entry.meta`, a keeper whose `mention_targets` come from its TOML profile (not the `masc_keeper_up`/`update` MCP path) will begin matching `@alias` board mentions. Today it does not, because the fan-out reads raw disk meta which lacks the overlay. This aligns board wake with operator configuration intent — a latent-bug fix — but it is a **wake-semantic change** and is the explicit, RFC-sanctioned exit behavior of W3c, not an incidental side effect.
 
@@ -59,7 +69,7 @@ An inverted needle→keeper index (the original framing, O(addressees) instead o
 - RFC-0020 deterministic addressing (explicit mention short-circuit, typed wake reasons) — unchanged.
 - `Keeper_event_queue` identity/dedup semantics and durable persistence — reused, not redesigned.
 - Paused/latched keeper suppression (`board_wakeup_allowed`, tombstones) — a suppressed keeper still doesn't wake; whether its mailbox receives ambient signals while latched follows the existing tombstone rules.
-- Non-board stimuli (bootstrap, fusion_completed, no_progress_recovery) — out of scope.
+- Non-board stimuli (bootstrap, fusion_completed) — out of scope.
 
 ## Evidence record
 

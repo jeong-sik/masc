@@ -71,9 +71,9 @@ Two losses follow from "log window = identity memory":
 {"speaker_id": "98791450001", "note": "스토어 배포 담당", "ts": 1781400000.0}
 ```
 
-- `append_person_note ~base_dir ~keeper_name ~speaker_id ~note ()` —
-  same failure policy as `Keeper_chat_store.append_turn` (log + count,
-  never raise past `Eio.Cancel.Cancelled`).
+- `append_person_note ~base_dir ~keeper_name ~speaker_id ~note ()` returns a
+  typed result. Write and decode failures remain observable to the calling
+  Keeper turn; cancellation is re-raised unchanged.
 - Empty `note` row = tombstone: fold yields "no note" (deletion
   without a delete operation).
 - Read: latest-wins fold; file is keeper-scoped and grows with
@@ -83,8 +83,8 @@ Two losses follow from "log window = identity memory":
 ### 3.2 Tools
 
 - `keeper_person_note_set { speaker_id, note }` — write/overwrite
-  (blank note clears). Risk class: same as `keeper_surface_post`
-  (state modification, in-process).
+  (blank note clears). This is an ordinary Keeper-owned state mutation; this
+  module assigns no risk class and owns no authorization policy.
 - Read has **no new tool**: `keeper_surface_read` roster entries gain
   an optional `note` field, and participants with a note are included
   in the roster even when their chat rows aged out (union of

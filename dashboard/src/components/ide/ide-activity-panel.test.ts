@@ -422,9 +422,8 @@ describe('IdeActivityPanel', () => {
               outcome: 'success',
               typed_outcome: 'progress',
               latency_ms: 50,
-              summary: 'opened PR',
+              summary: 'updated runtime',
               file_path: 'lib/runtime.ml',
-              command_descriptor: { kind: 'gh_pr_comment', pr_number: 20402 },
               timestamp_ms: 500,
             }],
           },
@@ -443,9 +442,8 @@ describe('IdeActivityPanel', () => {
 
     await waitFor(() => {
       expect(container.textContent).toContain('tool:execute')
-      expect(container.textContent).toContain('progress: opened PR')
+      expect(container.textContent).toContain('progress: updated runtime')
       expect(container.textContent).toContain('1/1 linked')
-      expect(container.textContent).toContain('PR 20402')
     })
 
     const jump = container.querySelector<HTMLButtonElement>('.ide-activity-context-jump')
@@ -453,7 +451,7 @@ describe('IdeActivityPanel', () => {
     fireEvent.click(jump!)
     expect(ideContextFocus.value).toMatchObject({
       file_path: 'lib/runtime.ml',
-      surface: 'PR',
+      surface: 'Log',
       keeper_id: 'sangsu',
       source_id: 'ide-tool-turn-bridge-500-0',
     })

@@ -70,22 +70,6 @@ let test_schema_set_equals_tag_registry_set () =
     ~actual:schemas
 ;;
 
-let test_mandatory_tools_are_registered () =
-  init ();
-  let mandatory = Keeper_tool_registry.core_always_tools in
-  List.iter
-    (fun name ->
-      Alcotest.(check bool)
-        (Printf.sprintf "mandatory tool %s has tag" name)
-        true
-        (Option.is_some (Tool_dispatch.lookup_tag name));
-      Alcotest.(check bool)
-        (Printf.sprintf "mandatory tool %s has schema" name)
-        true
-        (Option.is_some (Tool_dispatch.lookup_schema name)))
-    mandatory
-;;
-
 let test_workspace_schemas_route_to_state () =
   init ();
   Tool_schemas_workspace.schemas
@@ -247,10 +231,6 @@ let () =
     [ ( "registry_sets"
       , [ test_case "schema set equals tag_registry set" `Quick
             test_schema_set_equals_tag_registry_set
-        ] )
-    ; ( "mandatory_tools"
-      , [ test_case "mandatory tools are registered" `Quick
-            test_mandatory_tools_are_registered
         ] )
     ; ( "workspace_tools"
       , [ test_case "workspace schemas route to Mod_state" `Quick

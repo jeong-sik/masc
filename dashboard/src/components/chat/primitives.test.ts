@@ -2760,7 +2760,7 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
 
   it('surfaces real failure status and result inside the card when expanded', async () => {
     recordToolCallOutputs([
-      toolCallOutput({ tool_use_id: 't1', success: false, semantic_success: false, output: 'BOOM' }),
+      toolCallOutput({ tool_use_id: 't1', success: false, output: 'BOOM' }),
     ])
     render(
       html`<${ChatTranscript}

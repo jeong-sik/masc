@@ -83,28 +83,25 @@ let reset_for_testing () =
 
 let default_buffer_size = 1024
 
-(** Default subprocess wall-clock budget (seconds).
+exception Explicit_process_timeout of float
 
-    Eleven public APIs (run_argv*, run_unix_argv*_fallback,
-    with_unix_capture) shared the same hardcoded literal [60.0] as their
-    [?timeout_sec] default — a magic-number anti-pattern that made
-    tuning impossible without rebuilding. Callers that care about
-    timeout still pass [~timeout_sec:N] explicitly (and most do); the
-    handful of sites that rely on the default now go through one knob
-    that operators can override on slow-disk fleets via
-    [MASC_PROCESS_DEFAULT_TIMEOUT_SEC].
+let validate_timeout_sec = function
+  | None -> None
+  | Some timeout_sec
+    when Float.is_finite timeout_sec && Float.compare timeout_sec 0.0 > 0 ->
+    Some timeout_sec
+  | Some timeout_sec ->
+    invalid_arg
+      (Printf.sprintf
+         "Process_eio: explicit timeout_sec must be finite and greater than zero (got %g)"
+         timeout_sec)
 
-    Floor 1s — anything smaller than a second cannot capture even a
-    trivial subprocess startup and is almost certainly an operator
-    misconfiguration. Read once at module load (mirrors the pattern in
-    [Env_config_runtime]); operator overrides take effect on next
-    process restart, not mid-run. *)
-let default_timeout_sec =
-  let raw =
-    try float_of_string (Sys.getenv "MASC_PROCESS_DEFAULT_TIMEOUT_SEC")
-    with Not_found | Failure _ -> 60.0
-  in
-  Float.max 1.0 raw
+let with_explicit_timeout_exn clock timeout_sec f =
+  match timeout_sec with
+  | None -> f ()
+  | Some timeout_sec ->
+    (try Eio.Time.with_timeout_exn clock timeout_sec f with
+     | Eio.Time.Timeout -> raise (Explicit_process_timeout timeout_sec))
 
 let get_proc_mgr () =
   match Atomic.get runtime_state with
@@ -179,10 +176,12 @@ let read_stderr_capture = Process_eio_stderr.read_stderr_capture
 let captured_stderr_or_empty = Process_eio_stderr.captured_stderr_or_empty
 
 let with_unix_capture ?env ?cwd ?stdin_content ?(capture_stderr = false)
-    ?(timeout_sec = default_timeout_sec)
+    ?timeout_sec
     (argv : string list)
     ~(on_error : string -> string -> 'a)
     ~(on_success : Unix.process_status -> string -> string -> 'a) : 'a =
+  let timeout_sec = validate_timeout_sec timeout_sec in
+  let started_at = Unix.gettimeofday () in
   match argv with
   | [] -> on_error "empty argv" ""
   | prog :: _ ->
@@ -251,23 +250,6 @@ let with_unix_capture ?env ?cwd ?stdin_content ?(capture_stderr = false)
           needs its copy once the process exits. *)
        Option.iter close_quietly !stderr_fd_ref;
        stderr_fd_ref := None;
-       (match (stdin_content, !stdin_w_ref) with
-        | Some content, Some stdin_w ->
-            Fun.protect
-              ~finally:(fun () ->
-                close_quietly stdin_w;
-                stdin_w_ref := None)
-              (fun () ->
-                let rec write_all off =
-                  if off < String.length content then
-                    let n =
-                      Unix.write_substring stdin_w content off
-                        (String.length content - off)
-                    in
-                    write_all (off + n)
-                in
-                write_all 0)
-        | (None, _) | (Some _, None) -> ());
        (match !stdout_r_ref with
         | None ->
             (* stdout pipe already consumed — treat as error *)
@@ -322,46 +304,95 @@ let with_unix_capture ?env ?cwd ?stdin_content ?(capture_stderr = false)
               in
               loop ()
             in
-            let timeout_sec = max 0.001 timeout_sec in
-            let deadline = Unix.gettimeofday () +. timeout_sec in
+            let deadline =
+              Option.map (fun seconds -> started_at +. seconds) timeout_sec
+            in
+            let deadline_reached () =
+              match deadline with
+              | None -> false
+              | Some deadline -> Unix.gettimeofday () >= deadline
+            in
+            let select_wait () =
+              match deadline with
+              | None -> 0.05
+              | Some deadline ->
+                min 0.05 (max 0.0 (deadline -. Unix.gettimeofday ()))
+            in
             let timed_out = ref false in
             let status_ref = ref None in
             let stdout_eof = ref false in
+            let stdin_offset = ref 0 in
+            let stdin_closed = ref (Option.is_none !stdin_w_ref) in
+            let close_stdin () =
+              Option.iter close_quietly !stdin_w_ref;
+              stdin_w_ref := None;
+              stdin_closed := true
+            in
+            let write_stdin_available stdin_w content =
+              try
+                let remaining = String.length content - !stdin_offset in
+                if remaining = 0
+                then close_stdin ()
+                else (
+                  let written =
+                    Unix.write_substring stdin_w content !stdin_offset remaining
+                  in
+                  stdin_offset := !stdin_offset + written;
+                  if !stdin_offset = String.length content then close_stdin ())
+              with
+              | Unix.Unix_error
+                  ((Unix.EAGAIN | Unix.EWOULDBLOCK | Unix.EINTR), _, _) ->
+                ()
+              | Unix.Unix_error ((Unix.EPIPE | Unix.ECONNRESET), _, _) ->
+                close_stdin ()
+            in
             Unix.set_nonblock stdout_r;
-            while (not !stdout_eof) && not !timed_out do
-              if Unix.gettimeofday () >= deadline then begin
+            Option.iter Unix.set_nonblock !stdin_w_ref;
+            (match stdin_content, !stdin_w_ref with
+             | Some "", Some _ -> close_stdin ()
+             | Some _, Some _ | None, None -> ()
+             | None, Some _ | Some _, None -> close_stdin ());
+            while (not (!stdout_eof && !stdin_closed)) && not !timed_out do
+              if deadline_reached () then begin
                 timed_out := true;
+                close_stdin ();
                 kill_and_wait status_ref;
                 ignore (read_available () : [ `Eof | `Would_block ])
               end else begin
-                let remaining = max 0.0 (deadline -. Unix.gettimeofday ()) in
-                let readable =
-                  try
-                    let ready, _, _ =
-                      Unix.select [ stdout_r ] [] [] (min 0.05 remaining)
-                    in
-                    ready <> []
-                  with Unix.Unix_error (Unix.EINTR, _, _) -> false
+                let read_fds = if !stdout_eof then [] else [ stdout_r ] in
+                let write_fds =
+                  match !stdin_w_ref with
+                  | Some stdin_w -> [ stdin_w ]
+                  | None -> []
                 in
-                if readable then
+                let readable, writable =
+                  try
+                    let ready_read, ready_write, _ =
+                      Unix.select read_fds write_fds [] (select_wait ())
+                    in
+                    ready_read <> [], ready_write
+                  with Unix.Unix_error (Unix.EINTR, _, _) -> false, []
+                in
+                if readable then (
                   match read_available () with
                   | `Eof -> stdout_eof := true
-                  | `Would_block -> ()
+                  | `Would_block -> ());
+                (match stdin_content, writable with
+                 | Some content, stdin_w :: _ ->
+                   write_stdin_available stdin_w content
+                 | Some _, [] | None, _ -> ())
               end
             done;
             while (not !timed_out) && Option.is_none !status_ref do
               match waitpid_nohang () with
               | Some status -> status_ref := Some status
               | None ->
-                  if Unix.gettimeofday () >= deadline then begin
+                  if deadline_reached () then begin
                     timed_out := true;
                     kill_and_wait status_ref
                   end else
                     (try
-                       ignore
-                         (Unix.select [] [] []
-                            (min 0.05
-                               (max 0.0 (deadline -. Unix.gettimeofday ()))))
+                       ignore (Unix.select [] [] [] (select_wait ()))
                      with Unix.Unix_error (Unix.EINTR, _, _) -> ())
             done;
             close_quietly stdout_r;
@@ -377,22 +408,28 @@ let with_unix_capture ?env ?cwd ?stdin_content ?(capture_stderr = false)
             in
             let stdout = Buffer.contents stdout_buf in
             let stderr = captured_stderr_or_empty !stderr_path_ref in
+            let timeout_event =
+              if !timed_out then timeout_sec else None
+            in
             let stderr =
-              if !timed_out && String.trim stdout = ""
-                 && String.trim stderr = ""
-              then
+              match timeout_event with
+              | Some timeout_sec
+                when String.trim stdout = "" && String.trim stderr = "" ->
                 process_error_output
                   ~label:(String.concat " " (List.map Filename.quote argv))
                   ~reason:(Printf.sprintf "timeout after %.0fs" timeout_sec)
                   ()
-              else stderr
+              | Some _ | None -> stderr
             in
-            if !timed_out then
-              (* Unix fallback starts the timeout clock after
-                 [create_process_env] returns (see line above where
-                 [deadline] is computed), so any timeout here is always
-                 attributable to the running child. *)
-              observe_process_timeout argv ~timeout_sec ~origin:Timeout_origin.Command;
+            (match timeout_event with
+             | Some timeout_sec ->
+               (* Unix fallback starts the timeout clock after
+                  [create_process_env] returns, so this timeout is always
+                  attributable to the running child. *)
+               observe_process_timeout argv
+                 ~timeout_sec
+                 ~origin:Timeout_origin.Command
+             | None -> ());
             cleanup ();
             on_success status stdout stderr)
      with
@@ -404,29 +441,29 @@ let with_unix_capture ?env ?cwd ?stdin_content ?(capture_stderr = false)
          cleanup ();
          on_error (reason_of_exn_for_output exn) stderr)
 
-let run_unix_argv_fallback ?(timeout_sec = default_timeout_sec) ?env (argv : string list) : string =
+let run_unix_argv_fallback ?timeout_sec ?env (argv : string list) : string =
   let label = String.concat " " (List.map Filename.quote argv) in
-  with_unix_capture ?env ~timeout_sec argv
+  with_unix_capture ?env ?timeout_sec argv
     ~on_error:(fun reason stderr ->
       Log.Misc.error "[Process_eio] Unix fallback error: %s — %s" label reason;
       process_error_output ~label ~reason ~stderr ())
     ~on_success:(fun status stdout stderr ->
       output_for_status ~status ~stdout ~stderr)
 
-let run_unix_argv_with_status_split_fallback ?(timeout_sec = default_timeout_sec) ?env ?cwd (argv : string list) :
+let run_unix_argv_with_status_split_fallback ?timeout_sec ?env ?cwd (argv : string list) :
     Unix.process_status * string * string =
   let label = String.concat " " (List.map Filename.quote argv) in
-  with_unix_capture ?env ?cwd ~timeout_sec ~capture_stderr:true argv
+  with_unix_capture ?env ?cwd ?timeout_sec ~capture_stderr:true argv
     ~on_error:(fun reason stderr ->
       Log.Misc.error "[Process_eio] Unix fallback error: %s — %s" label reason;
       (Unix.WEXITED 127, "", process_error_output ~label ~reason ~stderr ()))
     ~on_success:(fun status stdout stderr ->
       (status, stdout, stderr))
 
-let run_unix_argv_with_stdin_fallback ?(timeout_sec = default_timeout_sec) ?env ~(stdin_content : string)
+let run_unix_argv_with_stdin_fallback ?timeout_sec ?env ~(stdin_content : string)
     (argv : string list) : string =
   let label = String.concat " " (List.map Filename.quote argv) in
-  with_unix_capture ?env ~timeout_sec ~stdin_content argv
+  with_unix_capture ?env ?timeout_sec ~stdin_content argv
     ~on_error:(fun reason stderr ->
       Log.Misc.error "[Process_eio] Unix fallback error: %s — %s" label reason;
       process_error_output ~label ~reason ~stderr ())
@@ -434,13 +471,13 @@ let run_unix_argv_with_stdin_fallback ?(timeout_sec = default_timeout_sec) ?env 
       output_for_status ~status ~stdout ~stderr)
 
 let run_unix_argv_with_stdin_and_status_split_fallback
-    ?(timeout_sec = default_timeout_sec)
+    ?timeout_sec
     ?env
     ?cwd
     ~(stdin_content : string)
     (argv : string list) : Unix.process_status * string * string =
   let label = String.concat " " (List.map Filename.quote argv) in
-  with_unix_capture ?env ?cwd ~timeout_sec ~stdin_content ~capture_stderr:true argv
+  with_unix_capture ?env ?cwd ?timeout_sec ~stdin_content ~capture_stderr:true argv
     ~on_error:(fun reason stderr ->
       Log.Misc.error "[Process_eio] Unix fallback error: %s — %s" label reason;
       (Unix.WEXITED 127, "", process_error_output ~label ~reason ~stderr ()))
@@ -474,11 +511,6 @@ let reap_proc_with_clock clock proc =
          Eio.Process.await proc |> ignore)
      with Eio.Time.Timeout -> signal_and_await Sys.sigkill)
   with _ -> signal_and_await Sys.sigkill
-
-let clamp_timeout_sec timeout_sec =
-  if Float.is_nan timeout_sec || Float.is_infinite timeout_sec || timeout_sec <= 0.0
-  then default_timeout_sec
-  else timeout_sec
 
 (** Spawn a process with explicit pipes and drain stdout/stderr into buffers
     before returning.  This avoids a race where [Eio.Process.await] returns
@@ -645,27 +677,27 @@ let pipeline_status statuses =
     (Unix.WEXITED 0)
     statuses
 
-let run_argv ?(timeout_sec = default_timeout_sec) ?env (argv : string list) : string =
-  let timeout_sec = clamp_timeout_sec timeout_sec in
+let run_argv ?timeout_sec ?env (argv : string list) : string =
+  let timeout_sec = validate_timeout_sec timeout_sec in
   Exec_tap.record ~kind:Exec_tap.Process_eio_run_argv ~argv ?env ();
   with_spawn_guard (fun () ->
       if not (is_initialized ()) then
-        run_unix_argv_fallback ~timeout_sec ?env argv
+        run_unix_argv_fallback ?timeout_sec ?env argv
       else
         match get_proc_mgr (), get_clock (), get_cwd_default () with
         | Error _, _, _ | _, Error _, _ | _, _, Error _ ->
-            run_unix_argv_fallback ~timeout_sec ?env argv
+            run_unix_argv_fallback ?timeout_sec ?env argv
         | Ok pm, Ok clk, Ok cwd ->
             let buf = Buffer.create default_buffer_size in
             let label = String.concat " " (List.map Filename.quote argv) in
             let phase_ref = ref Timeout_origin.Spawn in
             try
-              Eio.Time.with_timeout_exn clk timeout_sec (fun () ->
+              with_explicit_timeout_exn clk timeout_sec (fun () ->
                   Eio.Switch.run (fun sw ->
                       let status = spawn_and_drain_stdout ~phase_ref ~sw pm ~cwd ?env ~clock:clk argv buf in
                       output_for_status ~status ~stdout:(Buffer.contents buf) ~stderr:""))
             with
-            | Eio.Time.Timeout ->
+            | Explicit_process_timeout timeout_sec ->
                 Log.Misc.warn "[Process_eio] Timeout after %.0fs (%s): %s"
                   timeout_sec (Timeout_origin.to_label !phase_ref) label;
                 observe_process_timeout argv ~timeout_sec ~origin:!phase_ref;
@@ -677,7 +709,7 @@ let run_argv ?(timeout_sec = default_timeout_sec) ?env (argv : string list) : st
                   Log.Misc.warn
                     "[Process_eio] argv bind error, retrying via Unix fallback: %s — %s"
                     label (Printexc.to_string exn);
-                  run_unix_argv_fallback ~timeout_sec ?env argv
+                  run_unix_argv_fallback ?timeout_sec ?env argv
                 ) else if is_downstream_pipe_closed exn then (
                   (* Downstream reader closed the pipe (head/tail/grep -m
                      finished reading and exited).  Kernel returns EPIPE on
@@ -695,30 +727,30 @@ let run_argv ?(timeout_sec = default_timeout_sec) ?env (argv : string list) : st
                     (Printexc.to_string exn);
                   process_error_output ~label ~reason:(reason_of_exn_for_output exn) ()))
 
-let run_argv_with_stdin ?(timeout_sec = default_timeout_sec) ?env ~(stdin_content : string) (argv : string list) : string =
-  let timeout_sec = clamp_timeout_sec timeout_sec in
+let run_argv_with_stdin ?timeout_sec ?env ~(stdin_content : string) (argv : string list) : string =
+  let timeout_sec = validate_timeout_sec timeout_sec in
   Exec_tap.record ~kind:Exec_tap.Process_eio_run_argv_with_stdin ~argv ?env ();
   with_spawn_guard (fun () ->
       if not (is_initialized ()) then
-        run_unix_argv_with_stdin_fallback ~timeout_sec ?env ~stdin_content argv
+        run_unix_argv_with_stdin_fallback ?timeout_sec ?env ~stdin_content argv
       else
         match get_proc_mgr (), get_clock (), get_cwd_default () with
         | Error _, _, _ | _, Error _, _ | _, _, Error _ ->
-            run_unix_argv_with_stdin_fallback ~timeout_sec ?env ~stdin_content argv
+            run_unix_argv_with_stdin_fallback ?timeout_sec ?env ~stdin_content argv
         | Ok pm, Ok clk, Ok cwd ->
             let buf = Buffer.create default_buffer_size in
             let label = String.concat " " (List.map Filename.quote argv) in
             let stdin_source = Eio.Flow.string_source stdin_content in
             let phase_ref = ref Timeout_origin.Spawn in
             try
-              Eio.Time.with_timeout_exn clk timeout_sec (fun () ->
+              with_explicit_timeout_exn clk timeout_sec (fun () ->
                   Eio.Switch.run (fun sw ->
                       let status =
                         spawn_and_drain_stdout ~phase_ref ~sw pm ~cwd ?env ~stdin_source ~clock:clk argv buf
                       in
                       output_for_status ~status ~stdout:(Buffer.contents buf) ~stderr:""))
             with
-            | Eio.Time.Timeout ->
+            | Explicit_process_timeout timeout_sec ->
                 Log.Misc.warn "[Process_eio] Timeout after %.0fs (%s): %s"
                   timeout_sec (Timeout_origin.to_label !phase_ref) label;
                 observe_process_timeout argv ~timeout_sec ~origin:!phase_ref;
@@ -730,7 +762,7 @@ let run_argv_with_stdin ?(timeout_sec = default_timeout_sec) ?env ~(stdin_conten
                   Log.Misc.warn
                     "[Process_eio] argv bind error, retrying via Unix fallback: %s — %s"
                     label (Printexc.to_string exn);
-                  run_unix_argv_with_stdin_fallback ~timeout_sec ?env ~stdin_content argv
+                  run_unix_argv_with_stdin_fallback ?timeout_sec ?env ~stdin_content argv
                 ) else if is_downstream_pipe_closed exn then (
                   (* Downstream reader closed the pipe (head/tail/grep -m
                      finished reading and exited).  Kernel returns EPIPE on
@@ -749,18 +781,18 @@ let run_argv_with_stdin ?(timeout_sec = default_timeout_sec) ?env ~(stdin_conten
                   process_error_output ~label ~reason:(reason_of_exn_for_output exn) ()))
 
 let run_argv_with_stdin_and_status_split
-    ?(timeout_sec = default_timeout_sec)
+    ?timeout_sec
     ?env
     ?cwd
     ?on_stdout_chunk
     ?on_stderr_chunk
     ~(stdin_content : string)
     (argv : string list) : Unix.process_status * string * string =
-  let timeout_sec = clamp_timeout_sec timeout_sec in
+  let timeout_sec = validate_timeout_sec timeout_sec in
   Exec_tap.record ~kind:Exec_tap.Process_eio_run_argv_with_stdin_and_status ~argv ?env ();
   let fallback_with_callbacks () =
     let status, stdout, stderr =
-      run_unix_argv_with_stdin_and_status_split_fallback ~timeout_sec ?env
+      run_unix_argv_with_stdin_and_status_split_fallback ?timeout_sec ?env
         ?cwd ~stdin_content argv
     in
     Option.iter
@@ -790,7 +822,7 @@ let run_argv_with_stdin_and_status_split
             let stdin_source = Eio.Flow.string_source stdin_content in
             let phase_ref = ref Timeout_origin.Spawn in
             try
-              Eio.Time.with_timeout_exn clk timeout_sec (fun () ->
+              with_explicit_timeout_exn clk timeout_sec (fun () ->
                   let unix_status =
                     Eio.Switch.run (fun sw ->
                         match on_stdout_chunk, on_stderr_chunk with
@@ -827,7 +859,7 @@ let run_argv_with_stdin_and_status_split
                     Buffer.contents stdout_buf,
                     Buffer.contents stderr_buf ))
             with
-            | Eio.Time.Timeout ->
+            | Explicit_process_timeout timeout_sec ->
                 Log.Misc.warn "[Process_eio] Timeout after %.0fs (%s): %s"
                   timeout_sec (Timeout_origin.to_label !phase_ref) label;
                 observe_process_timeout argv ~timeout_sec ~origin:!phase_ref;
@@ -874,28 +906,28 @@ let run_argv_with_stdin_and_status_split
                       ~reason:(reason_of_exn_for_output exn) () )))
 
 let run_argv_with_stdin_and_status
-    ?(timeout_sec = default_timeout_sec)
+    ?timeout_sec
     ?env
     ?cwd
     ~(stdin_content : string)
     (argv : string list) : Unix.process_status * string =
   let status, stdout, stderr =
-    run_argv_with_stdin_and_status_split ~timeout_sec ?env ?cwd ~stdin_content
+    run_argv_with_stdin_and_status_split ?timeout_sec ?env ?cwd ~stdin_content
       argv
   in
   (status, output_for_status ~status ~stdout ~stderr)
 
-let run_argv_with_status_split ?(timeout_sec = default_timeout_sec) ?env ?cwd
+let run_argv_with_status_split ?timeout_sec ?env ?cwd
     (argv : string list) : Unix.process_status * string * string =
-  let timeout_sec = clamp_timeout_sec timeout_sec in
+  let timeout_sec = validate_timeout_sec timeout_sec in
   Exec_tap.record ~kind:Exec_tap.Process_eio_run_argv_with_status ~argv ?env ?cwd ();
   with_spawn_guard (fun () ->
       if not (is_initialized ()) then
-        run_unix_argv_with_status_split_fallback ~timeout_sec ?env ?cwd argv
+        run_unix_argv_with_status_split_fallback ?timeout_sec ?env ?cwd argv
       else
         match get_proc_mgr (), get_clock (), get_cwd_default () with
         | Error _, _, _ | _, Error _, _ | _, _, Error _ ->
-            run_unix_argv_with_status_split_fallback ~timeout_sec ?env ?cwd
+            run_unix_argv_with_status_split_fallback ?timeout_sec ?env ?cwd
               argv
         | Ok pm, Ok clk, Ok default_cwd ->
             let effective_cwd =
@@ -908,7 +940,7 @@ let run_argv_with_status_split ?(timeout_sec = default_timeout_sec) ?env ?cwd
             let label = String.concat " " (List.map Filename.quote argv) in
             let phase_ref = ref Timeout_origin.Spawn in
             try
-              Eio.Time.with_timeout_exn clk timeout_sec (fun () ->
+              with_explicit_timeout_exn clk timeout_sec (fun () ->
                   let unix_status =
                     Eio.Switch.run (fun sw ->
                         spawn_and_drain_both ~phase_ref ~sw pm ~cwd:effective_cwd ?env
@@ -918,7 +950,7 @@ let run_argv_with_status_split ?(timeout_sec = default_timeout_sec) ?env ?cwd
                     Buffer.contents stdout_buf,
                     Buffer.contents stderr_buf ))
             with
-            | Eio.Time.Timeout ->
+            | Explicit_process_timeout timeout_sec ->
                 Log.Misc.warn "[Process_eio] Timeout after %.0fs (%s): %s"
                   timeout_sec (Timeout_origin.to_label !phase_ref) label;
                 observe_process_timeout argv ~timeout_sec ~origin:!phase_ref;
@@ -938,7 +970,7 @@ let run_argv_with_status_split ?(timeout_sec = default_timeout_sec) ?env ?cwd
                   Log.Misc.warn
                     "[Process_eio] argv bind error, retrying via Unix fallback: %s — %s"
                     label (Printexc.to_string exn);
-                  run_unix_argv_with_status_split_fallback ~timeout_sec ?env
+                  run_unix_argv_with_status_split_fallback ?timeout_sec ?env
                     ?cwd argv
                 ) else if is_downstream_pipe_closed exn then (
                   (* Downstream reader closed the pipe (head/tail/grep -m
@@ -966,7 +998,7 @@ let run_argv_with_status_split ?(timeout_sec = default_timeout_sec) ?env ?cwd
                       ~reason:(reason_of_exn_for_output exn) () )))
 
 let run_argv_with_status_split_streaming
-    ?(timeout_sec = default_timeout_sec)
+    ?timeout_sec
     ?env
     ?cwd
     ~on_stdout_chunk
@@ -974,11 +1006,11 @@ let run_argv_with_status_split_streaming
     (argv : string list)
     : Unix.process_status * string * string
   =
-  let timeout_sec = clamp_timeout_sec timeout_sec in
+  let timeout_sec = validate_timeout_sec timeout_sec in
   Exec_tap.record ~kind:Exec_tap.Process_eio_run_argv_with_status ~argv ?env ?cwd ();
   let fallback_with_callbacks () =
     let status, stdout, stderr =
-      run_unix_argv_with_status_split_fallback ~timeout_sec ?env ?cwd argv
+      run_unix_argv_with_status_split_fallback ?timeout_sec ?env ?cwd argv
     in
     if not (String.equal stdout "")
     then invoke_output_chunk_callback on_stdout_chunk stdout;
@@ -1004,7 +1036,7 @@ let run_argv_with_status_split_streaming
           let label = String.concat " " (List.map Filename.quote argv) in
           let phase_ref = ref Timeout_origin.Spawn in
           try
-            Eio.Time.with_timeout_exn clk timeout_sec (fun () ->
+            with_explicit_timeout_exn clk timeout_sec (fun () ->
                 let unix_status =
                   Eio.Switch.run (fun sw ->
                       spawn_and_drain_both_streaming
@@ -1022,7 +1054,7 @@ let run_argv_with_status_split_streaming
                 in
                 unix_status, Buffer.contents stdout_buf, Buffer.contents stderr_buf)
           with
-          | Eio.Time.Timeout ->
+          | Explicit_process_timeout timeout_sec ->
             Log.Misc.warn "[Process_eio] Timeout after %.0fs (%s): %s"
               timeout_sec (Timeout_origin.to_label !phase_ref) label;
             observe_process_timeout argv ~timeout_sec ~origin:!phase_ref;
@@ -1059,19 +1091,19 @@ let run_argv_with_status_split_streaming
                 "",
                 process_error_output ~label ~reason:(reason_of_exn_for_output exn) () ))))
 
-let run_argv_pipeline_with_status_split ?(timeout_sec = default_timeout_sec)
+let run_argv_pipeline_with_status_split ?timeout_sec
     ?on_stdout_chunk ?on_stderr_chunk
     (stages : pipeline_stage list) : Unix.process_status * string * string =
-  let timeout_sec = clamp_timeout_sec timeout_sec in
+  let timeout_sec = validate_timeout_sec timeout_sec in
   let fallback_buffered () =
     let rec chain prev_stdout = function
       | [] -> (Unix.WEXITED 0, prev_stdout, "")
       | [ { argv; env; cwd } ] ->
-          run_unix_argv_with_stdin_and_status_split_fallback ~timeout_sec ?env
+          run_unix_argv_with_stdin_and_status_split_fallback ?timeout_sec ?env
             ?cwd ~stdin_content:prev_stdout argv
       | { argv; env; cwd } :: rest ->
           let status, stdout, stderr =
-            run_unix_argv_with_stdin_and_status_split_fallback ~timeout_sec
+            run_unix_argv_with_stdin_and_status_split_fallback ?timeout_sec
               ?env ?cwd ~stdin_content:prev_stdout argv
           in
           let result_status, result_stdout, result_stderr = chain stdout rest in
@@ -1082,10 +1114,10 @@ let run_argv_pipeline_with_status_split ?(timeout_sec = default_timeout_sec)
       match stages with
       | [] -> (Unix.WEXITED 0, "", "")
       | [ { argv; env; cwd } ] ->
-          run_unix_argv_with_status_split_fallback ~timeout_sec ?env ?cwd argv
+          run_unix_argv_with_status_split_fallback ?timeout_sec ?env ?cwd argv
       | { argv; env; cwd } :: rest ->
           let status, stdout, stderr =
-            run_unix_argv_with_status_split_fallback ~timeout_sec ?env ?cwd argv
+            run_unix_argv_with_status_split_fallback ?timeout_sec ?env ?cwd argv
           in
           let result_status, result_stdout, result_stderr = chain stdout rest in
           let final_status = pipeline_status [ status; result_status ] in
@@ -1220,15 +1252,15 @@ let run_argv_pipeline_with_status_split ?(timeout_sec = default_timeout_sec)
                              stderr_pairs)
                    in
                    try
-                     Eio.Time.with_timeout_exn clk timeout_sec (fun () ->
+                     with_explicit_timeout_exn clk timeout_sec (fun () ->
                        let statuses, () = Eio.Fiber.pair await_all drain_all in
                        let stderr = stderr_contents () in
                        (pipeline_status statuses, Buffer.contents stdout_buf, stderr))
-                   with Eio.Time.Timeout ->
+                   with Explicit_process_timeout timeout_sec ->
                      List.iter (reap_proc_with_clock clk) procs;
-                     raise Eio.Time.Timeout)
+                     raise (Explicit_process_timeout timeout_sec))
              with
-             | Eio.Time.Timeout ->
+             | Explicit_process_timeout timeout_sec ->
                  Log.Misc.warn "[Process_eio] Timeout after %.0fs (%s): %s"
                    timeout_sec (Timeout_origin.to_label !phase_ref) label;
                  observe_process_timeout
@@ -1258,10 +1290,10 @@ let run_argv_pipeline_with_status_split ?(timeout_sec = default_timeout_sec)
                      process_error_output ~label
                        ~reason:(reason_of_exn_for_output exn) () ))))
 
-let run_argv_with_status ?(timeout_sec = default_timeout_sec) ?env ?cwd
+let run_argv_with_status ?timeout_sec ?env ?cwd
     (argv : string list) : Unix.process_status * string =
   let status, stdout, stderr =
-    run_argv_with_status_split ~timeout_sec ?env ?cwd argv
+    run_argv_with_status_split ?timeout_sec ?env ?cwd argv
   in
   (status, output_for_status ~status ~stdout ~stderr)
 

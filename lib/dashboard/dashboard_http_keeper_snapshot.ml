@@ -233,8 +233,6 @@ let keeper_config_json (config : Workspace.config) (name : string)
       let proactive =
         `Assoc [
           ("enabled", `Bool m.proactive.enabled);
-          ("idle_sec", `Int m.proactive.idle_sec);
-          ("cooldown_sec", `Int m.proactive.cooldown_sec);
         ]
       in
       let drift =
@@ -306,12 +304,6 @@ let keeper_config_json (config : Workspace.config) (name : string)
           ~thompson_beta:stats.beta
           ()
       in
-      let tools_access =
-        `Assoc [
-          ("tool_access", Json_util.json_string_list m.tool_access);
-          ("tool_denylist", `List (List.map (fun s -> `String s) m.tool_denylist));
-        ]
-      in
       let sandbox_last_error =
         match Keeper_registry.get ~base_path:config.base_path m.name with
         | Some entry -> entry.last_error
@@ -354,7 +346,6 @@ let keeper_config_json (config : Workspace.config) (name : string)
          ("drift", drift);
          ("auto_execution_session", auto_execution_session_surface_json ());
          ("handoff", handoff);
-         ("tools", tools_access);
          ("hooks", Keeper_hooks_oas.hook_introspection_json ());
          ("runtime", runtime_surface_json config m);
          ("runtime_trust", runtime_trust);

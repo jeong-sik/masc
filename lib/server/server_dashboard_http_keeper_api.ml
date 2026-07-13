@@ -171,14 +171,14 @@ let keeper_chat_allowed_trace_ids (m : Keeper_meta_contract.keeper_meta) =
   |> Json_util.dedupe_keep_order
 ;;
 
-let memory_os_read_episodes ~keeper_id ~n =
-  try Keeper_memory_os_io.read_episodes_tail ~keeper_id ~n, None with
+let memory_os_read_episodes ~keeper_id =
+  try Keeper_memory_os_io.read_episodes_all ~keeper_id, None with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> [], Some (Printexc.to_string exn)
 ;;
 
-let memory_os_read_facts ~keeper_id ~n =
-  try Keeper_memory_os_io.read_facts_tail ~keeper_id ~n, None with
+let memory_os_read_facts ~keeper_id =
+  try Keeper_memory_os_io.read_facts_all ~keeper_id, None with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> [], Some (Printexc.to_string exn)
 ;;
@@ -209,11 +209,9 @@ let memory_os_episode_json ~now (episode : Keeper_memory_os_types.episode) =
    RFC-0247): they are absent from the [fact] record, so the type system makes
    re-emitting them unrepresentable. [reference_time] is the shared staleness
    anchor (last_verified_at else first_seen), reused rather than re-inlined.
-   [prompt_recallable] is projected from [fact_prompt_recallable], the same typed
-   SSOT recall uses, so the UI does not infer prompt eligibility from labels.
    [claim_kind] is omitted when [None] so a claim without optional metadata stays a
-   minimal row. [external_ref] is intentionally not surfaced; PR/issue text remains
-   claim context rather than a machine status field. *)
+   minimal row. Product-specific references remain connector/tool context rather
+   than Memory schema fields. *)
 let memory_os_fact_json ~now (fact : Keeper_memory_os_types.fact) =
   `Assoc
     ([ "claim", `String fact.claim
@@ -226,7 +224,6 @@ let memory_os_fact_json ~now (fact : Keeper_memory_os_types.fact) =
 	     ; "valid_until_iso", json_time_iso_opt fact.valid_until
 	     ; "last_verified_at", json_float_opt fact.last_verified_at
 	     ; "current", `Bool (memory_os_fact_is_current ~now fact)
-	     ; "prompt_recallable", `Bool (Keeper_memory_os_types.fact_prompt_recallable fact)
 	     ]
      @ (match fact.claim_kind with
         | Some k -> [ "claim_kind", `String (Keeper_memory_os_types.claim_kind_to_string k) ]
@@ -235,15 +232,8 @@ let memory_os_fact_json ~now (fact : Keeper_memory_os_types.fact) =
 
 type memory_os_selection_policy =
   { keeper_scope : string
-  ; shared_scope : string option
   ; facts_source : string
-  ; shared_facts_source : string option
   ; episodes_source : string
-  ; dashboard_fact_tail_limit : int
-  ; dashboard_episode_tail_limit : int
-  ; recall_private_fact_limit : int
-  ; recall_shared_fact_limit : int
-  ; recall_episode_limit : int
   ; category_source : string
   ; claim_kind_source : string
   ; recall_block : string
@@ -253,15 +243,8 @@ type memory_os_selection_policy =
 let memory_os_selection_policy_json (policy : memory_os_selection_policy) =
   `Assoc
     [ "keeper_scope", `String policy.keeper_scope
-    ; "shared_scope", json_string_opt policy.shared_scope
     ; "facts_source", `String policy.facts_source
-    ; "shared_facts_source", json_string_opt policy.shared_facts_source
     ; "episodes_source", `String policy.episodes_source
-    ; "dashboard_fact_tail_limit", `Int policy.dashboard_fact_tail_limit
-    ; "dashboard_episode_tail_limit", `Int policy.dashboard_episode_tail_limit
-    ; "recall_private_fact_limit", `Int policy.recall_private_fact_limit
-    ; "recall_shared_fact_limit", `Int policy.recall_shared_fact_limit
-    ; "recall_episode_limit", `Int policy.recall_episode_limit
     ; "category_source", `String policy.category_source
     ; "claim_kind_source", `String policy.claim_kind_source
     ; "recall_block", `String policy.recall_block
@@ -269,23 +252,10 @@ let memory_os_selection_policy_json (policy : memory_os_selection_policy) =
     ]
 ;;
 
-let memory_os_selection_policy ~keeper_id ~fact_tail_limit ~recent_episode_limit =
-  let has_shared_tier =
-    not (String.equal keeper_id Keeper_memory_os_types.shared_store_id)
-  in
+let memory_os_selection_policy ~keeper_id =
   { keeper_scope = keeper_id
-  ; shared_scope =
-      (if has_shared_tier then Some Keeper_memory_os_types.shared_store_id else None)
-  ; facts_source = "Keeper_memory_os_io.read_facts_tail"
-  ; shared_facts_source =
-      (if has_shared_tier then Some "Keeper_memory_os_io.read_facts_all" else None)
-  ; episodes_source = "Keeper_memory_os_io.read_episodes_tail"
-  ; dashboard_fact_tail_limit = fact_tail_limit
-  ; dashboard_episode_tail_limit = recent_episode_limit
-  ; recall_private_fact_limit = Keeper_memory_os_policy.recall_default_max_facts
-  ; recall_shared_fact_limit =
-      (if has_shared_tier then Keeper_memory_os_policy.recall_default_max_shared_facts else 0)
-  ; recall_episode_limit = Keeper_memory_os_policy.recall_default_max_episodes
+  ; facts_source = "Keeper_memory_os_io.read_facts_all"
+  ; episodes_source = "Keeper_memory_os_io.read_episodes_all"
   ; category_source = "Keeper_memory_os_types.category_to_string"
   ; claim_kind_source = "Keeper_memory_os_types.claim_kind_to_string"
   ; recall_block = "Keeper_memory_os_recall.render_if_enabled"
@@ -295,12 +265,8 @@ let memory_os_selection_policy ~keeper_id ~fact_tail_limit ~recent_episode_limit
 
 let memory_os_dashboard_json ~keeper_id =
   let now = Time_compat.now () in
-  let recent_episode_limit = 12 in
-  let fact_tail_limit = Keeper_memory_os_policy.fact_store_max in
-  let episodes, episode_error =
-    memory_os_read_episodes ~keeper_id ~n:recent_episode_limit
-  in
-  let facts, fact_error = memory_os_read_facts ~keeper_id ~n:fact_tail_limit in
+  let episodes, episode_error = memory_os_read_episodes ~keeper_id in
+  let facts, fact_error = memory_os_read_facts ~keeper_id in
   let facts_path = Keeper_memory_os_io.facts_path ~keeper_id in
   let keepers_dir = Filename.dirname facts_path in
   let episodes_store = Filename.concat (Filename.concat keepers_dir keeper_id) "episodes" in
@@ -318,11 +284,7 @@ let memory_os_dashboard_json ~keeper_id =
     ; "source", `String "memory_os_files"
     ; "producer", `String "keeper_librarian|keeper_memory_os_recall"
     ; ( "selection_policy"
-      , memory_os_selection_policy
-          ~keeper_id
-          ~fact_tail_limit
-          ~recent_episode_limit
-        |> memory_os_selection_policy_json )
+      , memory_os_selection_policy ~keeper_id |> memory_os_selection_policy_json )
     ; "facts_store", `String facts_path
     ; "episodes_store", `String episodes_store
     ; "recall_enabled", `Bool (Keeper_memory_os_recall.enabled ())
@@ -336,8 +298,7 @@ let memory_os_dashboard_json ~keeper_id =
              [ "episodes", episode_error; "facts", fact_error ]) )
     ; ( "episodes"
       , `Assoc
-          [ "tail_limit", `Int recent_episode_limit
-          ; "shown", `Int (List.length episodes)
+          [ "shown", `Int (List.length episodes)
           ; "current", `Int current_episodes
           ; "expired", `Int (List.length episodes - current_episodes)
           ; "terminal_markers", `Int terminal_marker_count
@@ -345,13 +306,10 @@ let memory_os_dashboard_json ~keeper_id =
           ] )
     ; ( "facts"
       , `Assoc
-          [ "tail_limit", `Int fact_tail_limit
-          ; "shown", `Int (List.length facts)
+          [ "shown", `Int (List.length facts)
           ; "current", `Int current_facts
           ; "expired", `Int (List.length facts - current_facts)
-            (* RFC-keeper-memory-panel-real-data §4a: the individual fact rows (previously counts-only).
-               Bounded by [fact_tail_limit]; [shown] documents the bound so a
-               truncated tail is visible, not silent. *)
+            (* RFC-keeper-memory-panel-real-data §4a: every individual fact row. *)
           ; "items", `List (List.map (memory_os_fact_json ~now) facts)
           ] )
     ]
@@ -1041,77 +999,6 @@ let cached_keeper_composite_json config name =
   | other -> `OK, other
 ;;
 
-let user_model_item_source_json = function
-  | Keeper_user_model.Keeper_private -> "keeper", []
-  | Keeper_user_model.Shared keepers -> "shared", keepers
-;;
-
-let user_model_item_json (item : Keeper_user_model.item) =
-  let source, observed_by = user_model_item_source_json item.source in
-  `Assoc
-    [ "claim", `String item.claim
-    ; "category", `String (Keeper_memory_os_types.category_to_string item.category)
-    ; "source", `String source
-    ; "observed_by", `List (List.map (fun name -> `String name) observed_by)
-    ; "turn", `Int item.turn
-    ; "first_seen", `Float item.first_seen
-    ; "first_seen_iso", `String (Masc_domain.iso8601_of_unix_seconds item.first_seen)
-    ; "last_verified_at", json_float_opt item.last_verified_at
-    ; "last_verified_at_iso", json_time_iso_opt item.last_verified_at
-    ]
-;;
-
-let user_model_dashboard_json ~keeper_id =
-  let now = Time_compat.now () in
-  let facts_store = Keeper_memory_os_io.facts_path ~keeper_id in
-  let shared_facts_store =
-    Keeper_memory_os_io.facts_path ~keeper_id:Keeper_memory_os_types.shared_store_id
-  in
-  try
-    let model = Keeper_user_model.build ~keeper_id ~now () in
-    `Assoc
-      [ "schema", `String "keeper.user_model.dashboard.v1"
-      ; "keeper", `String keeper_id
-      ; "source", `String "memory_os_facts"
-      ; "producer", `String "keeper_user_model"
-      ; "facts_store", `String facts_store
-      ; "shared_facts_store", `String shared_facts_store
-      ; "enabled", `Bool (Keeper_user_model.enabled ())
-      ; "now", `Float now
-      ; "now_iso", `String (Masc_domain.iso8601_of_unix_seconds now)
-      ; "read_errors", `List []
-      ; "source_fact_count", `Int model.source_fact_count
-      ; "shared_fact_count", `Int model.shared_fact_count
-      ; "preferences", `List (List.map user_model_item_json model.preferences)
-      ; "constraints", `List (List.map user_model_item_json model.constraints)
-      ]
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn ->
-    `Assoc
-      [ "schema", `String "keeper.user_model.dashboard.v1"
-      ; "keeper", `String keeper_id
-      ; "source", `String "memory_os_facts"
-      ; "producer", `String "keeper_user_model"
-      ; "facts_store", `String facts_store
-      ; "shared_facts_store", `String shared_facts_store
-      ; "enabled", `Bool (Keeper_user_model.enabled ())
-      ; "now", `Float now
-      ; "now_iso", `String (Masc_domain.iso8601_of_unix_seconds now)
-      ; ( "read_errors"
-        , `List
-            [ `Assoc
-                [ "scope", `String "user_model"
-                ; "error", `String (Printexc.to_string exn)
-                ]
-            ] )
-      ; "source_fact_count", `Int 0
-      ; "shared_fact_count", `Int 0
-      ; "preferences", `List []
-      ; "constraints", `List []
-      ]
-;;
-
 let keeper_chat_receipt_state_json = function
   | Keeper_chat_queue.Pending ->
     `Assoc [ "kind", `String "pending" ]
@@ -1671,7 +1558,6 @@ let handle_keeper_get_subroutes state req request reqd =
         ( "stale_reason",
           if stale_reason = "" then `Null else `String stale_reason );
         ("memory_os", memory_os_dashboard_json ~keeper_id:name);
-        ("user_model", user_model_dashboard_json ~keeper_id:name);
         ("entries", `List entries);
       ] in
       Http.Response.json_value ~compress:true ~request:req json reqd
@@ -2069,44 +1955,5 @@ let handle_keeper_get_subroutes state req request reqd =
         | `Internal_server_error -> `Internal_server_error
       in
       Http.Response.json_value ~status ~compress:true ~request:req json reqd
-  else if req_path = prefix ^ "regime" then
-    (* 7th FSM axis MVP: fleet-wide behavioral-regime snapshot. Same
-       purity contract as the composite route above, uses the
-       [Keeper_behavioral_regime_observer] pure projection. *)
-    let base_path = (Mcp_server.workspace_config state).base_path in
-    let snapshots =
-      Keeper_behavioral_regime_observer.all_snapshots ~base_path ()
-    in
-    let json =
-      `Assoc [
-        "generated_at", `String (Masc_domain.now_iso ());
-        "count", `Int (List.length snapshots);
-        "snapshots",
-          `List
-            (List.map
-               Keeper_behavioral_regime_observer.snapshot_to_json
-               snapshots);
-      ]
-    in
-    Http.Response.json_value ~compress:true ~request:req json reqd
-  else if ends_with "/regime" then
-    (* Per-keeper behavioral-regime snapshot. *)
-    let name = extract_name "/regime" in
-    if String.length name = 0 then
-      respond_error reqd "keeper name is required"
-    else
-      let base_path = (Mcp_server.workspace_config state).base_path in
-      (match Keeper_registry.get ~base_path name with
-       | None ->
-         respond_error ~status:`Not_found reqd
-           (Printf.sprintf "keeper %S not registered" name)
-       | Some entry ->
-         let snapshot =
-           Keeper_behavioral_regime_observer.observe entry
-         in
-         let json =
-           Keeper_behavioral_regime_observer.snapshot_to_json snapshot
-         in
-         Http.Response.json_value ~compress:true ~request:req json reqd)
   else
     respond_error ~status:`Not_found reqd "not found"

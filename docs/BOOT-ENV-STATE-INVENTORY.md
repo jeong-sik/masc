@@ -23,7 +23,7 @@ Scope:
 
 - Canonical behavior in this document is derived from code.
 - "Current host audit" is a dated snapshot of the machine inspected on 2026-04-09.
-- Primary runtime domains are `tasks`, `board`, `goals`, `governance`, and `keepers`.
+- Primary runtime domains are `tasks`, `board`, `goals`, `keepers`, and the external-effect Gate.
 - `team-sessions`, `local-workers`, `oas-runtime`, and `command-plane` are documented only as compatibility, historical, or execution-artifact lanes, not as the primary product concept.
 
 ## 1. Boot Inputs and Precedence
@@ -82,11 +82,9 @@ The checked-in versioned seed config tree currently contains:
 | Path | Purpose |
 | --- | --- |
 | `config/runtime.toml` | Provider/model runtime and routing defaults. |
-| `config/tool_policy.toml` | Tool group policy and allow/deny rules. |
 | `config/keepers/*.toml` | Keeper defaults and policy-overridable profiles. |
 | `config/personas/*` | Persona definitions and persona-specific profile data. |
-| `config/prompts/*.md` | Versioned system prompt fragments and governance/keeper prompt templates. |
-| `config/excuse_patterns.json` | Auxiliary config used by selected flows. |
+| `config/prompts/*.md` | Versioned system prompt fragments and analysis/keeper prompt templates. |
 
 `runtime.toml` is checked into the repo seed tree as a local-first example and
 bootstrap default. Live authoring still happens in the active-root file at
@@ -120,20 +118,20 @@ Legacy compatibility names are not TOML preemption keys. For example,
 only the canonical `MASC_KEEPER_AUTOBOOT_MAX` boot override unless that exact
 canonical process env var is already set.
 
-**Sections** (85 knobs total):
+**Sections** (80 knobs total):
 
 | Section | Count | Key examples |
 | --- | --- | --- |
-| `[bootstrap]` | 5 | `enabled`, `max_active_keepers`, `autoboot_max` |
-| `[autonomous]` | 3 | `enabled`, `fairness_cooldown_sec`, `max_idle_turns` |
-| `[reactive]` | 2 | `enabled`, `max_idle_turns` |
-| `[heartbeat]` | 8 | `interval_sec`, `max_silence_sec`, `smart_heartbeat`, `board_wakeup_max` |
+| `[bootstrap]` | 4 | `enabled`, `max_scan`, `autoboot_max` |
+| `[autonomous]` | 2 | `enabled`, `fairness_cooldown_sec` |
+| `[reactive]` | 1 | `enabled` |
+| `[heartbeat]` | 6 | `interval_sec`, `max_silence_sec`, `sleep_chunk_sec`, `board_wakeup_max` |
 | `[health]` | 1 | `durable_queue_stale_sec` |
 | `[wire_capture]` | 1 | `enabled` |
 | `[proactive]` | 4 | `enabled`, `min_interval_sec`, `noop_backoff_max_shift`, `idle_decay_max_periods` |
-| `[turn]` | 18 | `timeout_sec`, `stream_idle_timeout_sec`, `execution_idle_timeout_sec`, `chat_waiting_cap`, `temperature` |
-| `[supervisor]` | 4 | `max_restarts`, `backoff_base_sec`, `backoff_max_sec` |
-| `[lifecycle]` | 4 | `self_preservation_ratio`, `dead_ttl_sec` |
+| `[turn]` | 16 | `timeout_sec`, `stream_idle_timeout_sec`, `execution_idle_timeout_sec`, `chat_waiting_cap`, `temperature` |
+| `[supervisor]` | 3 | `backoff_base_sec`, `backoff_max_sec`, `sweep_sec` |
+| `[lifecycle]` | 1 | `dead_ttl_sec` |
 | `[budget]` | 1 | `daily_usd` |
 | `[metrics]` | 2 | `max_bytes`, `max_rotated` |
 | `[memory]` | 6 | `max_notes`, `compact_trigger_bytes`, `consensus_pattern` |
@@ -153,9 +151,6 @@ board_wakeup_max = 4 # caps total non-explicit board wakeups after reason priori
 
 [health]
 durable_queue_stale_sec = 0.0 # default: any durable backlog degrades full health; raise to tolerate fresh handoff
-
-[bootstrap]
-max_active_keepers = 12
 
 [turn]
 stream_idle_timeout_sec = 120
@@ -209,7 +204,7 @@ without mutating the parent environment.
 | Runs | `<runtime_root>/runs/<task_id>/` |
 | Board | `<runtime_root>/board_posts.jsonl`, `board_comments.jsonl`, `board_votes.jsonl` |
 | Goals | `<runtime_root>/goals.json`, `goals_snapshots/`, `goals_scheduler_state.json` |
-| Governance | `<runtime_root>/governance.json`, `governance_v2/...` |
+| Keeper Gate state | `<runtime_root>/gate/mode.json`, `gate/pending.json`, `gate/always-allowed.json` |
 | Control plane | `<runtime_root>/control-plane/` |
 | Operator lane | `<runtime_root>/operator/` |
 | Logs | `<runtime_root>/logs/` |
@@ -263,19 +258,15 @@ Notes:
 
 Goal dispatch and long/mid/short-horizon behavior also depend on model-routing config and goal-related environment settings.
 
-### 3.4 Governance
+### 3.4 Gate and HITL
 
-- `<runtime_root>/governance.json`
-- `<runtime_root>/mcp-sessions.json`
-- `<runtime_root>/governance_v2/cases/`
-- `<runtime_root>/governance_v2/execution_orders/`
-- `<runtime_root>/governance_v2/rulings/`
+- `<runtime_root>/gate/mode.json`
+- `<runtime_root>/gate/pending.json`
+- `<runtime_root>/gate/always-allowed.json`
 - `<runtime_root>/audit-approvals/YYYY-MM/DD.jsonl`
 
-Compatibility note:
-
-- `governance_v2/petitions/` may still exist on disk, but petition-first governance is no longer the primary operating concept.
-- Some older governance reads still inspect `<runtime_root>/governance/judgments/`.
+The retired `governance*` trees are not active runtime inputs. Their presence on
+disk is historical residue and must not recreate a runtime authority.
 
 ### 3.5 Keepers
 
@@ -419,7 +410,7 @@ Current host definitely has live filesystem data for:
 - tasks and backlog
 - board
 - goals
-- governance
+- Gate approvals and rules
 - keepers
 - command-plane and operator
 - auth
@@ -453,7 +444,6 @@ Current log sink observed today:
    - `<runtime_root>/playground/<keeper>/repos/`
    - `<runtime_root>/keepers/<name>/`
    - `<runtime_root>/traces/`
-   - `<active config root>/tool_policy.toml`
    - `<active config root>/runtime.toml`
 
 ## Appendix A. Centralized Environment Inventory
@@ -517,7 +507,6 @@ MASC_DASHBOARD_SIGNAL_QUIET_SEC
 MASC_DASHBOARD_SIGNAL_STALE_SEC
 MASC_DECISION_TTL_SEC
 MASC_DISPATCH_V2
-MASC_FULL_SURFACE
 MASC_GRPC_ENABLED
 MASC_GRPC_PORT
 MASC_GRPC_TARGET
@@ -531,7 +520,6 @@ MASC_LOCAL_MAX_TOKENS
 MASC_LOCAL_RUNTIME_COOLDOWN_SEC
 MASC_LOCAL_RUNTIME_DEBUG
 MASC_LOCAL_WORKER_HEARTBEAT_SEC
-MASC_LOCAL_WORKER_MAX_TOKENS
 MASC_LOCK_EXPIRY_WARNING_SEC
 MASC_LOCK_TIMEOUT_SEC
 MASC_URL
@@ -543,19 +531,13 @@ MASC_ORCHESTRATOR_ENABLED
 MASC_ORCHESTRATOR_INTERVAL
 MASC_ORCHESTRATOR_MIN_PRIORITY
 MASC_ORCHESTRATOR_TIMEOUT
-MASC_PROC_MIN_CONFIDENCE
-MASC_PROC_MIN_EVIDENCE
 MASC_PROVIDER_RUN_TTL_SEC
 MASC_PUBLIC_TOOLS_EXTRA
-MASC_PULSE_MAX_CONSUMER_FAILURES
 MASC_RATE_BURST
 MASC_RATE_LIMIT
 MASC_SESSION_LIVE_TURN_WINDOW_SEC
 MASC_SESSION_MAX_AGE_SEC
 MASC_SESSION_RATE_LIMIT_WINDOW_SEC
-MASC_SMART_HB_BASE_INTERVAL_SEC
-MASC_SMART_HB_IDLE_MULTIPLIER
-MASC_SMART_HB_IDLE_THRESHOLD_SEC
 MASC_SPAWN_CODING_TIMEOUT_SEC
 MASC_SPAWN_GRACE_PERIOD_SEC
 MASC_SPAWN_TIMEOUT_SEC
@@ -593,101 +575,11 @@ OLLAMA_SERVER_URL
 ZAI_BASE_URL
 ```
 
-### A.3 `env_config_governance`
+### A.3 `env_config_keeper`
 
-Used for inference cache, autonomy, operator judge, dashboard governance judge, and default routing/model selection.
-
-```text
-MASC_AUTONOMY_MAX_STARVATION_TICKS
-MASC_AUTONOMY_QUIET_END
-MASC_AUTONOMY_QUIET_START
-MASC_AUTONOMY_STARVATION_BONUS_COEF
-MASC_AUTONOMY_THOMPSON_WEIGHT
-MASC_AUTONOMY_VOTE_DECAY_FACTOR
-MASC_DASHBOARD_FIXTURE
-MASC_DASHBOARD_FIXTURES_ENABLED
-MASC_DASHBOARD_GOVERNANCE_JUDGE_ENABLED
-MASC_DASHBOARD_GOVERNANCE_JUDGE_INTERVAL_SEC
-MASC_DEFAULT_RUNTIME
-MASC_DEFAULT_MODEL
-MASC_DEFAULT_PROVIDER
-MASC_EVENT_BUFFER_SIZE
-MASC_GOAL_DISPATCH_RUNTIME
-MASC_GOAL_MODELS
-MASC_INFERENCE_CACHE_ENABLED
-MASC_INFERENCE_CACHE_L1_MAX_ENTRIES
-MASC_INFERENCE_CACHE_MAX_PROMPT_CHARS
-MASC_INFERENCE_CACHE_MAX_TEMP
-MASC_INFERENCE_CACHE_TTL_SEC
-MASC_INFERENCE_TIMEOUT_SEC
-MASC_NEO4J_TIMEOUT_SEC
-MASC_OPERATOR_CACHE_TTL
-MASC_OPERATOR_JUDGE_ENABLED
-MASC_OPERATOR_JUDGE_INTERVAL_SEC
-MASC_OPERATOR_JUDGE_WORKSPACE_TTL_SEC
-MASC_OPERATOR_JUDGE_SESSION_TTL_SEC
-MASC_RATE_LIMIT_CLEANUP_INTERVAL_SEC
-MASC_RATE_LIMIT_ENTRY_MAX_AGE_SEC
-MASC_ROUTING_RUNTIME
-MASC_SPAWN_CACHE_POLICY
-MASC_SSE_KEEPALIVE_SEC
-```
-
-### A.4 `env_config_keeper`
-
-Used for keeper bootstrap, supervisor policy, keepalive cadence, tool retry behavior, OAS turn limits, and the context ratio hard cap.
-
-```text
-MASC_CONTEXT_RATIO_HARD_CAP
-MASC_DASHBOARD_HEALTH_CTX_CRITICAL
-MASC_DASHBOARD_HEALTH_CTX_WARN
-MASC_DASHBOARD_HEALTH_PENALTY_CRITICAL
-MASC_DASHBOARD_HEALTH_PENALTY_WARN
-MASC_DASHBOARD_RUNTIME_WARNING_CTX_RATIO
-MASC_KEEPER_BOARD_DEBOUNCE_SEC
-MASC_KEEPER_BOOTSTRAP_ENABLED
-MASC_KEEPER_BOOTSTRAP_MAX_ACTIVE_KEEPERS
-MASC_KEEPER_BOOTSTRAP_MAX_SCAN
-MASC_KEEPER_BOOTSTRAP_STALE_TURN_SEC
-MASC_KEEPER_DEAD_TTL_SEC
-MASC_KEEPER_DEBUG
-MASC_KEEPER_DEGRADED_RETRY_SLOT_PHASE_BUDGET_SEC
-MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD
-MASC_KEEPER_DURABLE_QUEUE_STALE_SEC
-MASC_KEEPER_GRPC_MAX_RECONNECT
-MASC_KEEPER_GRPC_RECONNECT_BACKOFF_SEC
-MASC_KEEPER_HEARTBEAT_INTERVAL_SEC
-MASC_KEEPER_HEARTBEAT_JITTER_FACTOR
-MASC_KEEPER_MAX_CONSECUTIVE_HB_FAILURES
-MASC_KEEPER_MAX_CONSECUTIVE_TOOL_FAILURES
-MASC_KEEPER_MAX_CONSECUTIVE_TURN_FAILURES
-MASC_KEEPER_MAX_IDLE_TURNS_AUTONOMOUS
-MASC_KEEPER_MAX_IDLE_TURNS_REACTIVE
-MASC_KEEPER_MAX_SILENCE_SEC
-MASC_KEEPER_METRICS_MAX_BYTES
-MASC_KEEPER_METRICS_MAX_ROTATED
-MASC_KEEPER_OAS_MAX_TURNS_PER_CALL
-MASC_KEEPER_OAS_TIMEOUT_SEC
-MASC_KEEPER_PAUSED_CLEANUP_TTL_SEC
-MASC_KEEPER_PROACTIVE_IDLE_DECAY_MAX_PERIODS
-MASC_KEEPER_PROACTIVE_MAX_ATTEMPTS
-MASC_KEEPER_PROACTIVE_NOOP_BACKOFF_MAX_SHIFT
-MASC_KEEPER_REDUCER_CAP_TOKENS
-MASC_KEEPER_REDUCER_KEEP_RECENT
-MASC_KEEPER_SELF_PRESERVATION_MIN_CANDIDATES
-MASC_KEEPER_SELF_PRESERVATION_RATIO
-MASC_KEEPER_SLEEP_CHUNK_SEC
-MASC_KEEPER_SMART_HEARTBEAT
-MASC_KEEPER_SNAPSHOT_SEC
-MASC_KEEPER_STAGE_TIMING_RING_SIZE
-MASC_KEEPER_SUPERVISOR_BACKOFF_BASE_S
-MASC_KEEPER_SUPERVISOR_BACKOFF_MAX_S
-MASC_KEEPER_SUPERVISOR_MAX_RESTARTS
-MASC_KEEPER_SUPERVISOR_SWEEP_SEC
-MASC_KEEPER_TURN_CHAT_WAITING_CAP
-MASC_KEEPER_TURN_TIMEOUT_SEC
-MASC_KEEPER_WORK_AS_HEARTBEAT
-```
+Used for explicit Keeper runtime configuration and observation cadence. The
+generated [runtime tunables catalog](./runtime-tunables.md) is the field-level
+SSOT; this inventory intentionally does not duplicate a hand-maintained list.
 
 ## Appendix B. Non-centralized Environment Reads
 
@@ -705,7 +597,7 @@ Important operator-facing families still outside the centralized inventory:
 To regenerate the inventories:
 
 ```bash
-rg -oN '"MASC_[A-Z0-9_]+"' lib/config/env_config_core.ml lib/config/env_config_runtime.ml lib/config/env_config_governance.ml lib/config/env_config_keeper.ml | tr -d '"' | sort -u
+rg -oN '"MASC_[A-Z0-9_]+"' lib/config/env_config_core.ml lib/config/env_config_runtime.ml lib/config/env_config_keeper.ml | tr -d '"' | sort -u
 rg -oN '"MASC_[A-Z0-9_]+"' lib bin | tr -d '"' | sort -u
 rg -oN '"(LLAMA_[A-Z0-9_]+|OLLAMA_[A-Z0-9_]+|HOME|DUNE_SOURCEROOT)"' lib bin | tr -d '"' | sort -u
 ```

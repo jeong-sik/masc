@@ -19,14 +19,14 @@ type outcome =
   | Failure of string [@tla.symbol "failure"]
 [@@deriving tla]
 
-type governance_audit_decision =
-  | Governance_allow [@tla.symbol "governance_allow"]
-  | Governance_require_confirm [@tla.symbol "governance_require_confirm"]
-  | Governance_deny [@tla.symbol "governance_deny"]
-  | Governance_confirm [@tla.symbol "governance_confirm"]
-  | Governance_expired [@tla.symbol "governance_expired"]
-  | Governance_unauthorized [@tla.symbol "governance_unauthorized"]
-  | Governance_other of string [@tla.symbol "governance_other"]
+type gate_audit_decision =
+  | Gate_allow [@tla.symbol "gate_allow"]
+  | Gate_require_confirmation [@tla.symbol "gate_require_confirmation"]
+  | Gate_deny [@tla.symbol "gate_deny"]
+  | Gate_confirm [@tla.symbol "gate_confirm"]
+  | Gate_expired [@tla.symbol "gate_expired"]
+  | Gate_unauthorized [@tla.symbol "gate_unauthorized"]
+  | Gate_other of string [@tla.symbol "gate_other"]
 [@@deriving tla]
 
 type action =
@@ -43,7 +43,7 @@ type action =
   | CircuitOpen [@tla.symbol "circuit_open"]
   | CircuitClose [@tla.symbol "circuit_close"]
   | SearchRefinement [@tla.symbol "search_refinement"]
-  | GovernanceDecision of governance_audit_decision [@tla.symbol "governance_decision"]
+  | GateDecision of gate_audit_decision [@tla.symbol "gate_decision"]
   | RuntimeConfigWrite [@tla.symbol "runtime_config_write"]
   | Custom of string [@tla.symbol "custom"]
   | Unknown of string [@tla.symbol "unknown"]
@@ -70,23 +70,23 @@ let preview ?(max_len = 200) (value : string) =
 
 (** {1 Serialization} *)
 
-let governance_audit_decision_to_string = function
-  | Governance_allow -> "allow"
-  | Governance_require_confirm -> "require_confirm"
-  | Governance_deny -> "deny"
-  | Governance_confirm -> "confirm"
-  | Governance_expired -> "expired"
-  | Governance_unauthorized -> "unauthorized"
-  | Governance_other value -> value
+let gate_audit_decision_to_string = function
+  | Gate_allow -> "allow"
+  | Gate_require_confirmation -> "require_confirmation"
+  | Gate_deny -> "deny"
+  | Gate_confirm -> "confirm"
+  | Gate_expired -> "expired"
+  | Gate_unauthorized -> "unauthorized"
+  | Gate_other value -> value
 
-let governance_audit_decision_of_string = function
-  | "allow" -> Governance_allow
-  | "require_confirm" -> Governance_require_confirm
-  | "deny" -> Governance_deny
-  | "confirm" -> Governance_confirm
-  | "expired" -> Governance_expired
-  | "unauthorized" -> Governance_unauthorized
-  | value -> Governance_other value
+let gate_audit_decision_of_string = function
+  | "allow" -> Gate_allow
+  | "require_confirmation" -> Gate_require_confirmation
+  | "deny" -> Gate_deny
+  | "confirm" -> Gate_confirm
+  | "expired" -> Gate_expired
+  | "unauthorized" -> Gate_unauthorized
+  | value -> Gate_other value
 
 let action_to_string = function
   | ClaimTask -> "claim_task"
@@ -102,8 +102,7 @@ let action_to_string = function
   | CircuitOpen -> "circuit_open"
   | CircuitClose -> "circuit_close"
   | SearchRefinement -> "search_refinement"
-  | GovernanceDecision decision ->
-      "governance_decision:" ^ governance_audit_decision_to_string decision
+  | GateDecision decision -> "gate_decision:" ^ gate_audit_decision_to_string decision
   | RuntimeConfigWrite -> "runtime_config_write"
   | Custom name -> "custom:" ^ name
   | Unknown raw -> raw
@@ -126,8 +125,7 @@ let string_to_action s =
     let payload = String.sub s (colon_pos + 1) (String.length s - colon_pos - 1) in
     (match tag with
      | "tool_call" -> ToolCall payload
-     | "governance_decision" ->
-         GovernanceDecision (governance_audit_decision_of_string payload)
+     | "gate_decision" -> GateDecision (gate_audit_decision_of_string payload)
      | "custom" -> Custom payload
      | _ -> unknown_action s)
   | None ->
@@ -319,8 +317,8 @@ let audit_severity ~action ~outcome =
     | _ -> "warn")
   | Success -> (match action with
     | AuthSuccess -> "info"
-    | GovernanceDecision d -> (match d with
-      | Governance_deny | Governance_unauthorized -> "warn"
+    | GateDecision d -> (match d with
+      | Gate_deny | Gate_unauthorized -> "warn"
       | _ -> "info")
     | CircuitClose -> "warn"
     (* A successful runtime.toml write rewrites global keeper routing
@@ -368,11 +366,11 @@ let audit_summary ~action ~details =
     (match extract_str "error_msg" with
      | Some msg -> Printf.sprintf "tool_call:%s failed: %s" name msg
      | None -> Printf.sprintf "tool_call:%s" name)
-  | GovernanceDecision d ->
-    let decision = governance_audit_decision_to_string d in
+  | GateDecision d ->
+    let decision = gate_audit_decision_to_string d in
     (match extract_str "action_type" with
-     | Some at -> Printf.sprintf "governance %s: %s" decision at
-     | None -> Printf.sprintf "governance %s" decision)
+     | Some at -> Printf.sprintf "gate %s: %s" decision at
+     | None -> Printf.sprintf "gate %s" decision)
   | Broadcast ->
     (match extract_str "preview" with
      | Some p -> Printf.sprintf "broadcast: %s" p
@@ -440,7 +438,7 @@ let audit_target ~action ~details =
   in
   match action with
   | ToolCall name -> Some name
-  | GovernanceDecision _ -> extract_str "action_type"
+  | GateDecision _ -> extract_str "action_type"
   | ClaimTask | StartTask | DoneTask | CancelTask | ReleaseTask ->
     extract_str "task_id"
   | Suspend -> extract_str "target_agent"
@@ -597,7 +595,7 @@ let log_tool_call config ~agent_id ~tool_name ~success ~error_msg ?cost_estimate
 let remove_assoc_keys keys fields =
   List.filter (fun (key, _) -> not (List.mem key keys)) fields
 
-let log_system_internal_tool_call config ~agent_id ~tool_name ~success ~error_msg
+let log_non_public_tool_call config ~agent_id ~tool_name ~success ~error_msg
     ?(details : Yojson.Safe.t = `Null) ?cost_estimate ?token_count ?trace_id () =
   let outcome =
     if success then Success else Failure (Option.value error_msg ~default:"unknown")
@@ -607,18 +605,18 @@ let log_system_internal_tool_call config ~agent_id ~tool_name ~success ~error_ms
     | `Assoc fields ->
         let caller_fields = remove_assoc_keys [ "surface"; "tool_name" ] fields in
         `Assoc
-          (("surface", `String "system_internal")
+          (("surface", `String "non_public")
           :: ("tool_name", `String tool_name)
           :: caller_fields)
     | other ->
         `Assoc
           [
-            ("surface", `String "system_internal");
+            ("surface", `String "non_public");
             ("tool_name", `String tool_name);
             ("context", other);
           ]
   in
-  log_action config ~agent_id ~action:(Custom "system_internal_tool_call")
+  log_action config ~agent_id ~action:(Custom "non_public_tool_call")
     ~details ?cost_estimate ?token_count ?trace_id ~outcome ()
 
 let log_client_tool_host_failure config ~agent_id ~client_name ~tool_name
@@ -653,9 +651,9 @@ let log_circuit_breaker config ~agent_id ~opened ~reason ?cost_estimate ?token_c
     ~details:(`Assoc [("reason", `String reason)])
     ?cost_estimate ?token_count ~outcome:Success ()
 
-let log_governance_decision config ~agent_id ~trace_id ~decision ~action_type ~confirmation_state () =
+let log_gate_decision config ~agent_id ~trace_id ~decision ~action_type ~confirmation_state () =
   log_action config ~agent_id
-    ~action:(GovernanceDecision decision)
+    ~action:(GateDecision decision)
     ~trace_id
     ~details:(`Assoc [
       ("action_type", `String action_type);

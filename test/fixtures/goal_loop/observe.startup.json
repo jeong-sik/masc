@@ -24,22 +24,12 @@
       ],
       "severity": "critical"
     },
-    "governance_unparseable": {
+    "structured_judge_unparseable": {
       "count": 1,
       "samples": [
         {
-          "line": "[WARN] [Governance] Governance judge returned unparseable response",
+          "line": "[WARN] [Gate] Auto judge returned structurally invalid response",
           "line_no": 49
-        }
-      ],
-      "severity": "warning"
-    },
-    "lenient_json_fallback": {
-      "count": 1,
-      "samples": [
-        {
-          "line": "[WARN] [Governance] Governance judge returned unparseable structured response (parse failure; 3809 chars)",
-          "line_no": 50
         }
       ],
       "severity": "warning"

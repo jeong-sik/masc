@@ -18,11 +18,7 @@ let reconcile_keepalive_keepers
   (ctx : _ context)
   =
   let base_path = ctx.config.base_path in
-  let names =
-    Keeper_meta_store.keepalive_keeper_names ctx.config
-    @ Keeper_meta_store.paused_reconcile_keeper_names ctx.config
-    |> List.sort_uniq String.compare
-  in
+  let names = Keeper_meta_store.keepalive_keeper_names ctx.config in
   Log.Keeper.debug
     "reconcile_keepalive_keepers: started (candidates=%d)"
     (List.length names);
@@ -49,8 +45,7 @@ let reconcile_keepalive_keepers
          | Keeper_state_machine.Running
          | Keeper_state_machine.Paused -> true
          | Keeper_state_machine.Crashed
-         | Keeper_state_machine.Dead
-         | Keeper_state_machine.Zombie -> true
+         | Keeper_state_machine.Dead -> true
          | Keeper_state_machine.Failing
          | Keeper_state_machine.Overflowed
          | Keeper_state_machine.Compacting
@@ -86,27 +81,12 @@ let reconcile_keepalive_keepers
           ();
         Log.Keeper.info "%s: reconciled durable keeper" meta.name))
   in
-  let reconcile_paused_meta meta =
-    match
-      Keeper_supervisor_pause_policy.reconcile_persisted_auto_pause_task_release
-        ~config:ctx.config
-        ~meta
-    with
-    | Ok _meta -> ()
-    | Error err ->
-      inc_reconcile_failure ~name:meta.name ~operation:"paused_task_release";
-      Log.Keeper.warn
-        "reconcile: paused keeper %s task release repair failed: %s"
-        meta.name
-        err
-  in
   let reconcile_one name =
     try
       match read_effective_meta ctx.config name with
       | Ok (Some meta) when not meta.paused ->
         reconcile_meta meta
-      | Ok (Some meta) ->
-        reconcile_paused_meta meta
+      | Ok (Some _) -> ()
       | Ok None ->
         (match load_or_materialize_keeper_meta ctx name with
          | Ok (Some meta) when not meta.paused ->
@@ -116,8 +96,7 @@ let reconcile_keepalive_keepers
                "%s: materialized durable keeper during reconcile"
              meta.name
            else reconcile_meta meta
-         | Ok (Some meta) ->
-           reconcile_paused_meta meta
+         | Ok (Some _) -> ()
          | Ok None ->
            Log.Keeper.debug
              "reconcile: configured keeper %s has no materialized meta"

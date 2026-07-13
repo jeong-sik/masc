@@ -6,7 +6,6 @@ module Report = Masc.Keeper_memory_os_gc_dry_run_report
 let fact_fixture ~now ~claim =
   { Types.claim
   ; category = Types.Fact
-  ; external_ref = None
   ; claim_kind = None
   ; source = { Types.trace_id = "trace-gc-dry-run"; turn = 1; tool_call_id = None }
   ; observed_by = []
@@ -137,7 +136,6 @@ let fake_gc_report ?(total_input = 1) ?(ttl_expired = 0) ?(written = 1) () =
   ; ttl_expired_ephemeral = 0
   ; ttl_expired_non_ephemeral = ttl_expired
   ; ttl_expired_by_category = (if ttl_expired > 0 then [ "fact", ttl_expired ] else [])
-  ; dedup_removed = 0
   ; written
   ; dry_run = true
   }
@@ -227,8 +225,7 @@ let test_mixed_results_keep_ok_totals_and_errors () =
 (* The two expiry corners the External_state coverage in test_keeper_memory_os
    does not pin: the boundary equality ([ts >= now] is current, so [now > ts] is
    expired — explicit [valid_until] behavior is unchanged by the SSOT switch in
-   #23426), and explicit [valid_until] taking precedence over the legacy
-   [External_state] first_seen horizon in [fact_effective_valid_until]. *)
+   #23426), and claim kind/first_seen never creating an implicit horizon. *)
 let test_ttl_expired_matches_explicit_horizon_boundary () =
   let now = 1_000_000.0 in
   let base = fact_fixture ~now ~claim:"horizon boundary fixture" in
@@ -241,14 +238,13 @@ let test_ttl_expired_matches_explicit_horizon_boundary () =
     false
     (GC.ttl_expired ~now { base with Types.valid_until = Some now });
   Alcotest.(check bool)
-    "explicit valid_until overrides the legacy External_state horizon"
+    "explicit valid_until is the only horizon"
     false
     (GC.ttl_expired
        ~now
-       { base with
-         Types.claim_kind = Some Types.External_state
-       ; Types.first_seen = now -. Types.external_state_ttl_seconds -. 1.0
-       ; Types.valid_until = Some (now +. 60.0)
+       { base with Types.claim_kind = Some Types.External_state
+       ; first_seen = now -. 1_000_000.0
+       ; valid_until = Some (now +. 60.0)
        })
 ;;
 

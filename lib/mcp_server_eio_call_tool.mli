@@ -103,7 +103,6 @@ type keeper_runtime_mcp_log_context = {
   sandbox_root : string option;
   allowed_paths : string list option;
   network_mode : string option;
-  approval_mode : string option;
   runtime_profile : string option;
 }
 (** Snapshot of the keeper-bound runtime-MCP context

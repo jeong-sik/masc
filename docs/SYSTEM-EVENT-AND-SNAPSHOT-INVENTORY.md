@@ -86,15 +86,17 @@ By contrast, the nearby `dispatch_keeper_phase_event` calls in the overflow-retr
 ### Base timing
 
 - Keepalive loop base interval: `30s`
-- Keepalive jitter: `base * 20%`
+- Keepalive sleep: exact resolved `keeper.keepalive_interval_sec`
 - Snapshot write interval: runtime param `keeper.snapshot_sec`
 - Current default `keeper.snapshot_sec`: `300s`
 
 ### Actual behavior
 
-- The keepalive loop wakes roughly every `30s + jitter`.
+- After each cycle the keepalive loop sleeps for the exact resolved interval;
+  a directed Keeper wake or explicit stop can interrupt that sleep.
 - Snapshot write is gated by `now_ts - last_snapshot_ts >= snapshot_interval_sec`.
-- Smart heartbeat may skip busy or idle cycles, so wall-clock distance between snapshots can exceed the base keepalive interval.
+- Busy/idle/activity/observer state never skips a cycle. Snapshot distance can
+  still exceed the interval while the preceding cycle itself is running.
 - When a snapshot is written, three things happen together:
   - JSONL metrics append
   - `keeper_heartbeat` SSE broadcast
@@ -106,7 +108,7 @@ If you are watching dashboard freshness:
 
 - `keeper_heartbeat` is a snapshot cadence signal, not a raw “loop tick” signal.
 - absence of `keeper_heartbeat` for under `300s` is not automatically suspicious
-- absence beyond the expected snapshot interval should be interpreted together with smart-heartbeat gating and lifecycle events
+- absence beyond the expected snapshot interval should be interpreted together with cycle duration and explicit lifecycle events
 
 ## `operator_digest`
 
@@ -173,7 +175,7 @@ Source of accepted event names on the dashboard side: `dashboard/src/types/sse.t
 | Workspace / workspace | `agent_bound`, `agent_unbound`, `broadcast`, `task_update` |
 | Board and notification compatibility | `board_post`, `masc/board_post`, `board_comment`, `masc/board_comment`, `board_delete`, `masc/board_delete`, `post_created`, `comment_added`, `post_voted`, `comment_voted` |
 | Keeper direct SSE | `keeper_heartbeat`, `keeper_handoff`, `masc/keeper_handoff`, `keeper_compaction`, `masc/keeper_compaction`, `keeper_guardrail`, `masc/keeper_guardrail`, `keeper_phase_changed`, `keeper_composite_changed`, `keeper_tool_call`, `masc/keeper_tool_call`, `keeper_tool_skipped`, `keeper_turn_complete`, `masc/keeper_turn_complete` |
-| Approval / governance | `client_input_approved`, `client_input_rejected`, `client_input_updated`, `governance_param_changed`, `approval:pending`, `approval:resolved` |
+| Gate / HITL | `client_input_approved`, `client_input_rejected`, `client_input_updated`, `approval:pending`, `approval:resolved` |
 | OAS bridge | `oas:masc:keeper:snapshot`, `oas:masc:keeper:lifecycle`, `oas:agent_started`, `oas:agent_completed`, `oas:tool_called`, `oas:tool_completed`, `oas:turn_started`, `oas:turn_completed`, `oas:context_compacted`, `oas:task_state_changed`, `oas:masc:harness:verdict_recorded`, `oas:masc:harness:pre_compact`, `oas:masc:harness:handoff` |
 | Server-push snapshots | `namespace_truth_snapshot`, `execution_snapshot`, `operator_snapshot`, `operator_digest`, `transport_health_snapshot` |
 

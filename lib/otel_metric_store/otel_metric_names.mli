@@ -30,11 +30,10 @@
     context_max_bucket].  Bucket vocabulary:
     [64k | 128k | 200k | 256k | 1m | other | zero]. *)
 
-(** #10121: keeper turn livelock observer counters.  Labels:
+(** Objective Keeper turn-attempt observer counters. Labels:
     [keeper].  Re-attempt = same turn id started again before
     the counter advanced; regression = turn id moved strictly
-    backwards (write_meta race symptom — #9733); livelock blocks
-    are labeled by [keeper, reason]. *)
+    backwards (write_meta race symptom — #9733). *)
 
 (** #9943: per-keeper turn latency distribution.  Labels:
     [keeper, bucket].  Bucket vocabulary:
@@ -124,15 +123,8 @@ val metric_keeper_waiting_age_seconds : string
 (** Gauge of keepers by inventory state. Labels: [state]. *)
 val metric_keeper_waiting_keeper_count : string
 
-(** Gauge of due scheduled automation requests blocked on human approval. *)
-val metric_schedule_approval_blocked_count : string
-
-(** Gauge of the oldest due scheduled automation approval wait in seconds. *)
-val metric_schedule_approval_wait_seconds : string
-
-(** Schedule unsupported payload counter. Labels: [phase] in
-    {[creation | dispatch]} and [risk_class] in
-    [Schedule_domain.risk_class_to_string] labels. Raw payload kinds are not
+(** Schedule unsupported payload counter. Label: [phase] in
+    {[creation | dispatch]}. Raw payload kinds are not
     labels; they remain in typed errors/projections to avoid unbounded metric
     cardinality. *)
 val metric_schedule_payload_unsupported_total : string
@@ -209,8 +201,8 @@ val metric_timeout_policy_overshoot : string
     allowed roots ([(roots=[<list>])] and
     [(sandbox roots: [<list>])]) which became a side-channel
     oracle for sibling sandboxes when keeper identity drifted
-    across contract/gate/FS-resolver layers.  Labels:
-    [kind="out_of_roots"|"not_found_relative"]. *)
+    across contract/gate/FS-resolver layers. Label [kind="out_of_roots"]
+    records objective allowed-root containment failures. *)
 
 val metric_write_meta_cas_retry_total : string
 
@@ -224,7 +216,7 @@ val metric_write_meta_cas_retry_total : string
 
 val metric_cache_desync_cleared : string
 
-(** Runtime state synchronization failures: pause/resume/auto-pause paths
+(** Runtime state synchronization failures: explicit pause/resume paths
     only. Local discovery refresh failures use
     [metric_keeper_local_discovery_failures] so dashboards can attribute
     distinct failure classes. *)

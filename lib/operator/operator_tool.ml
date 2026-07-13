@@ -346,13 +346,12 @@ let tool_spec_read_only =
 
 (* Tools with explicit catalog metadata that must be preserved. *)
 let tool_spec_hidden = [ "masc_operator_judgment_write"; surface_audit_tool_name ]
-let tool_spec_hidden_destructive = [ operator_tool_name Operator_name.Operator_action ]
+let tool_spec_hidden_actions = [ operator_tool_name Operator_name.Operator_action ]
 
 let () =
   List.iter
     (fun (s : tool_schema) ->
-      let is_destructive = List.mem s.name tool_spec_hidden_destructive in
-      let is_hidden = List.mem s.name tool_spec_hidden || is_destructive in
+      let is_hidden = List.mem s.name tool_spec_hidden || List.mem s.name tool_spec_hidden_actions in
       let existing = Tool_catalog.metadata s.name in
       Tool_spec.register
         (Tool_spec.create
@@ -364,7 +363,6 @@ let () =
            ~is_read_only:(List.mem s.name tool_spec_read_only)
            ~is_idempotent:(List.mem s.name tool_spec_read_only)
            ~visibility:(if is_hidden then Tool_catalog.Hidden else Tool_catalog.Default)
-           ~is_destructive
            ~allow_direct_call_when_hidden:is_hidden
            ?reason:existing.reason
            ()))

@@ -281,8 +281,6 @@ let keeper_list_error_row_json ~runtime_class config name err =
           ("updated_at", `String meta.updated_at);
           ("autoboot_enabled", `Bool meta.autoboot_enabled);
           ("proactive_enabled", `Bool meta.proactive.enabled);
-          ("proactive_idle_sec", `Int meta.proactive.idle_sec);
-          ("proactive_cooldown_sec", `Int meta.proactive.cooldown_sec);
         ]
     | None ->
         [
@@ -301,50 +299,6 @@ let keeper_list_error_row_json ~runtime_class config name err =
      ]
      @ persisted_fields)
 
-let keeper_list_skill_route_json config (meta : keeper_meta) =
-  let metrics_store = Keeper_types_support.keeper_metrics_store config meta.name in
-  let metrics_path = Keeper_types_support.keeper_metrics_path config meta.name in
-  let lines =
-    let dated = Dated_jsonl.read_recent_lines metrics_store 50 in
-    if Stdlib.List.length dated > 0 then dated
-    else
-      match
-        Keeper_memory.read_file_tail_lines_result metrics_path
-          ~max_bytes:16_000 ~max_lines:50
-      with
-      | Ok lines -> lines
-      | Error exn_class ->
-          Keeper_memory.record_memory_recall_read_error
-            ~site:"keeper_tool_surface_ops_skill_route_metrics" metrics_path exn_class;
-          []
-  in
-  let rec find_latest = function
-    | [] -> `Null
-    | line :: tl -> (
-        try
-          let json = Yojson.Safe.from_string line in
-          match Safe_ops.json_string_opt "skill_primary" json with
-          | Some primary when not (String.equal (String.trim primary) "") ->
-              let secondary =
-                match Json_util.get_array json "skill_secondary" with
-                | Some (`List xs) ->
-                    xs
-                    |> List.filter_map (function
-                         | `String s when not (String.equal (String.trim s) "") -> Some (`String s)
-                         | _ -> None)
-                | _ -> []
-              in
-              `Assoc
-                [
-                  ("primary", `String primary);
-                  ("secondary", `List secondary);
-                  ( "reason",
-                    Json_util.string_opt_to_json (Safe_ops.json_string_opt "skill_reason" json) );
-                ]
-          | _ -> find_latest tl
-        with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> find_latest tl)
-  in
-  find_latest (List.rev lines)
 let keeper_list_row_json ~runtime_class config name =
   match read_effective_meta config name with
   | Error err -> Some (keeper_list_error_row_json ~runtime_class config name err)
@@ -376,9 +330,6 @@ let keeper_list_row_json ~runtime_class config name =
             ("meta", keeper_brief_meta_json meta); ("agent_name", `String meta.agent_name);
             ("status", `String status); ("keepalive_running", `Bool keepalive_running);
             ("autoboot_enabled", `Bool meta.autoboot_enabled); ("proactive_enabled", `Bool meta.proactive.enabled);
-            ("proactive_idle_sec", `Int meta.proactive.idle_sec);
-            ("proactive_cooldown_sec", `Int meta.proactive.cooldown_sec);
-            ("skill_route", keeper_list_skill_route_json config meta);
             ("runtime_id", `String (Keeper_meta_contract.runtime_id_of_meta meta));
             ("runtime_id", `String (Keeper_meta_contract.runtime_id_of_meta meta));
             ("created_at", `String meta.created_at); ("updated_at", `String meta.updated_at);
@@ -570,11 +521,7 @@ let direct_reply_visible_text body =
         match Json_util.get_string json "reply" with
         | None -> None
         | Some reply ->
-            let visible =
-              reply
-              |> Keeper_skill_routing.strip_skill_route_lines
-              |> String.trim
-            in
+            let visible = String.trim reply in
             if visible = "" then None else Some visible)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -968,7 +915,7 @@ let adversarial_review_body ~(config : Workspace.config) ~(agent_name : string) 
               | Design_doc -> "design_doc"
               | State_history -> "state_history"
               | Task_history -> "task_history"
-              | Governance_history -> "governance_history"
+              | Session_history -> "session_history"
             in
             Printf.sprintf {|{"error":"banned input: %s (%s)"}|} path kind_str)
       in

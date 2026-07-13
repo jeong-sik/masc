@@ -31,23 +31,23 @@ module Float = Stdlib.Float
 *)
 
 (* ===== Runtime-tunable parameters =====
-   Values come from Runtime_params via Governance_registry. Call these
-   as thunks to pick up governance overrides without restart. *)
+   Values come from Runtime_params via Runtime_settings. Call these
+   as thunks to pick up runtime updates without restart. *)
 
 (** Maximum path length before truncation. *)
-let max_path_length () = Runtime_params.get Governance_registry.dashboard_max_path_length
+let max_path_length () = Runtime_params.get Runtime_settings.dashboard_max_path_length
 
 (** Maximum message content length before truncation. *)
-let max_message_length () = Runtime_params.get Governance_registry.dashboard_max_message_length
+let max_message_length () = Runtime_params.get Runtime_settings.dashboard_max_message_length
 
 (** Maximum pending tasks to show. *)
-let max_pending_tasks () = Runtime_params.get Governance_registry.dashboard_max_pending_tasks
+let max_pending_tasks () = Runtime_params.get Runtime_settings.dashboard_max_pending_tasks
 
 (** Maximum recent messages to show. *)
-let max_recent_messages () = Runtime_params.get Governance_registry.dashboard_max_recent_messages
+let max_recent_messages () = Runtime_params.get Runtime_settings.dashboard_max_recent_messages
 
 (** Minimum section border length. *)
-let min_border_length () = Runtime_params.get Governance_registry.dashboard_min_border_length
+let min_border_length () = Runtime_params.get Runtime_settings.dashboard_min_border_length
 
 (* ===== Masc_domain ===== *)
 
@@ -545,7 +545,6 @@ let generate_compact ?(scope = All) (config : Workspace_utils.config) : string =
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string PersonaDriftMissing) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string WorkspaceInitFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string PresenceSyncFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string SelfPreservationUniversal) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string CycleExceptions) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string SnapshotWriteFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string SseBroadcastFailures) |> int_of_float)
@@ -557,7 +556,6 @@ let generate_compact ?(scope = All) (config : Workspace_utils.config) : string =
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string SupervisorSweepFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string TomlReconcileSweepFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string ToolUsageFlushFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string TurnLivelockBlocks) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string TurnTimeoutCommitted) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string TurnErrorAfterTools) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string TurnCleanupFailures) |> int_of_float)
@@ -574,17 +572,12 @@ let generate_compact ?(scope = All) (config : Workspace_utils.config) : string =
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string SessionCleanupFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string ChatStoreFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string ObservationQueryFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string StaleTerminationThresholdBreached) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string StaleTerminationBatch) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string StaleBroadcastEmitFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string ToolUseFailure) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string ConfigEnvParseFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string TurnGateRejectedTerminal) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string ReceiptUnmappedDisposition) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string PostTurnWireinFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string MetaReadFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string ApprovalQueueFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string GuardsFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string ProfileLoadFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string CompactAuditFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string FsFailures) |> int_of_float)

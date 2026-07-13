@@ -263,7 +263,6 @@ describe('ide API', () => {
           latency_ms: 50,
           summary: 'ran command',
           file_path: 'lib/a.ml',
-          command_descriptor: null,
           timestamp_ms: '1717400000000',
         }],
       },

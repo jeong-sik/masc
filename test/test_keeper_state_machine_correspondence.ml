@@ -38,17 +38,14 @@
     TLA+ side: read [specs/keeper-state-machine/KeeperStateMachine.tla],
     slice out the Events section (between the "Events" header and the
     "Next State" header), parse each [Name == ... /\ var' = ... ]
-    action, and collect primed-variable names. Restricting the slice
-    keeps property definitions like [restart_count' >= restart_count]
-    out of the parser.
+    action, and collect primed-variable names. Restricting the slice keeps
+    temporal property expressions out of the action parser.
 
     Modeling-boundary filter
     ------------------------
-    A few TLA+ variables exist purely for spec liveness/monotonicity
-    properties and are not part of the OCaml [conditions] record (the
-    supervisor owns them, not the FSM). Comparing those would produce
-    false-positives, so the harness compares only the intersection of
-    each side's variable set with the OCaml [conditions] field names.
+    The TLA+ model intentionally projects only the conditions relevant to
+    its lifecycle properties. The harness therefore compares the
+    intersection with the OCaml [conditions] field names.
     The set of OCaml [conditions] fields is itself derived from
     [conditions_to_json], so adding a new field automatically extends
     the comparison without touching this test. *)
@@ -72,14 +69,11 @@ let all_set b : SM.conditions =
     handoff_active = b;
     operator_paused = b;
     stop_requested = b;
-    restart_budget_remaining = b;
-    backoff_elapsed = b;
+    dead_tombstone_latched = b;
+    restart_requested = b;
     drain_complete = b;
     context_overflow = b;
-    compact_retry_exhausted = b;
-    terminal_failure_latched = b;
     credential_archived = b;
-    zombie_timeout_reached = b;
   }
 
 let json_field_diff (a : Yojson.Safe.t) (b : Yojson.Safe.t) : string list =
@@ -150,8 +144,7 @@ let index_of hay needle pos =
   loop pos
 
 (** Slice the spec to the Events section: between the Events header
-    and the Next State header. Properties and DerivePhase are excluded
-    so we never parse [restart_count' >= restart_count] etc. *)
+    and the Next State header. Properties and DerivePhase are excluded. *)
 let events_section content =
   let start_marker = "\\* \xe2\x94\x80\xe2\x94\x80 Events" in
   let end_marker = "\\* \xe2\x94\x80\xe2\x94\x80 Next State" in
@@ -234,9 +227,7 @@ let load_spec_actions () =
   |> List.map (fun (name, body) -> (name, primed_vars_in_body body))
 
 (** OCaml [conditions] field names, derived from the default record's
-    JSON projection. The harness compares only this field set, so
-    TLA+-only variables (e.g. [restart_count], owned by the supervisor
-    layer rather than the FSM) are filtered out as out-of-scope. *)
+    JSON projection. The harness compares only this shared field set. *)
 let conditions_field_names () : string list =
   match SM_json.conditions_to_json SM.default_conditions with
   | `Assoc fs -> List.map fst fs |> List.sort String.compare
@@ -254,9 +245,9 @@ let conditions_field_names () : string list =
 let canonical_events : (string * SM.event) list =
   [
     ("HeartbeatOk", SM.Heartbeat_ok);
-    ("HeartbeatFailed", SM.Heartbeat_failed { consecutive = 1; max_allowed = 3 });
+    ("HeartbeatFailed", SM.Heartbeat_failed { consecutive = 1 });
     ("TurnSucceeded", SM.Turn_succeeded);
-    ("TurnFailed", SM.Turn_failed { consecutive = 1; max_allowed = 3 });
+    ("TurnFailed", SM.Turn_failed { consecutive = 1 });
     ( "ContextMeasured",
       SM.Context_measured
         {
@@ -287,13 +278,10 @@ let canonical_events : (string * SM.event) list =
     ("FiberStarted", SM.Fiber_started);
     ("FiberTerminated", SM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None });
     ("SupervisorRestartAttempt", SM.Supervisor_restart_attempt { attempt = 1 });
-    ("RestartBudgetExhausted", SM.Restart_budget_exhausted);
-    ("TerminalFailureDetected", SM.Terminal_failure_detected { reason = "test" });
     ( "ContextOverflowDetected",
       SM.Context_overflow_detected
         { source = `Oas_signal; token_count = 200_000; limit_tokens = Some 200_000 } );
     ("AutoCompactTriggered", SM.Auto_compact_triggered);
-    ("CompactRetryExhausted", SM.Compact_retry_exhausted);
     ("OperatorCompactRequested", SM.Operator_compact_requested);
     ( "OperatorClearRequested",
       SM.Operator_clear_requested

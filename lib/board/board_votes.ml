@@ -358,77 +358,12 @@ let recalculate_reply_counts store =
   let total = Hashtbl.fold (fun _ (p : post) acc -> acc + p.reply_count) store.posts 0 in
   Log.BoardLog.debug "recalculated reply_counts: %d total comments across posts" total
 
-(** #9921 / #9903: fixture-pattern detection for persisted votes.
-
-    Rationale: test fixture patterns should never appear in the
-    production vote ledger. If they do, the ledger was corrupted at
-    some earlier point (e.g. a pre-2026-04-18 test run that
-    inherited the operator's MASC_BASE_PATH before the
-    [(MASC_BASE_PATH "")] dune env-vars block landed in #8274).
-    The detector surfaces the contamination at load time so
-    operators see the problem immediately instead of the silent-
-    persist failure mode that caused #9903.
-
-    Pattern set is deliberately narrow and is applied only to the
-    voter segment of the persisted target. Known production patterns
-    are automation-agent IDs — none of
-    which collide with the fixture patterns below.
-
-    Env var: [MASC_BOARD_VOTE_QUARANTINE=1] promotes detection from
-    warn-and-load to skip-fixture-rows. Defaults to warn-only to
-    avoid surprising live operators.
-
-    RFC-0089 §4-3 G2: voter classification is now typed via
-    {!voter_kind}.  The boundary parser {!classify_voter_target}
-    extracts the voter segment from the persisted target key and
-    derives the variant once; downstream call sites pattern-match
-    instead of re-running [String.starts_with]. *)
-
-type fixture_voter_kind =
-  | Hot_voter           (* "hot-voter-" prefix *)
-  | Synthetic_voter     (* "synthetic-voter-" prefix *)
-  | Test_voter          (* "test-voter-" prefix *)
-
-type voter_kind =
-  | Production_voter
-  | Fixture_voter of fixture_voter_kind
-
-let extract_voter_segment target =
-  match String.rindex_opt target ':' with
-  | Some idx when idx + 1 < String.length target ->
-      String.sub target (idx + 1) (String.length target - idx - 1)
-  | _ -> target
-
-let classify_voter_target (target : string) : voter_kind =
-  let voter = extract_voter_segment target in
-  if String.starts_with ~prefix:"hot-voter-" voter then Fixture_voter Hot_voter
-  else if String.starts_with ~prefix:"synthetic-voter-" voter then
-    Fixture_voter Synthetic_voter
-  else if String.starts_with ~prefix:"test-voter-" voter then
-    Fixture_voter Test_voter
-  else Production_voter
-
-let quarantine_enabled () =
-  (* #9886: production ledger observed 112/112 (100%) fixture-pattern
-     votes orphaning downstream ranking/scoring. Fixture voters
-     ([hot-voter-*], [synthetic-voter-*], [test-voter-*]) never appear
-     in legitimate production traffic, so default the quarantine ON.
-     Operators who intentionally want fixture votes loaded (e.g. a
-     benchmark replay against a live ledger) can set the env to [0],
-     [false], [off], or an empty string.  #9921 still tracks the
-     root-cause write path; this change keeps downstream stats honest
-     in the meantime. *)
-  Safe_ops.get_env_bool_logged "MASC_BOARD_VOTE_QUARANTINE" ~default:true
-
 let load_persisted_votes store =
   let path = vote_log_path () in
   if not (Fs_compat.file_exists path) then Ok 0
   else begin
     try
       let loaded = ref 0 in
-      let quarantined = ref 0 in
-      let fixture_detected = ref 0 in
-      let quarantine = quarantine_enabled () in
       let lines = Fs_compat.load_jsonl path in
       List.iter (fun json ->
         match Safe_ops.json_string_opt "target" json,
@@ -449,30 +384,10 @@ let load_persisted_votes store =
                | Some t -> t
                | None -> 0.0
              in
-             (match classify_voter_target target with
-              | Fixture_voter _ ->
-                  Stdlib.incr fixture_detected;
-                  if quarantine then Stdlib.incr quarantined
-                  else begin
-                    Hashtbl.replace store.vote_log target (direction, ts);
-                    Stdlib.incr loaded
-                  end
-              | Production_voter ->
-                  Hashtbl.replace store.vote_log target (direction, ts);
-                  Stdlib.incr loaded))
+             Hashtbl.replace store.vote_log target (direction, ts);
+             Stdlib.incr loaded)
         | _ -> ()
       ) lines;
-      if !fixture_detected > 0 then begin
-        Board_metrics_hooks.inc_vote_fixture_detected
-          ~count:!fixture_detected;
-        Log.BoardLog.warn
-          "#9921 fixture contamination: %d vote rows match fixture patterns \
-           (hot-voter-*, synthetic-voter-*, :test-voter-*) in %s. Live \
-           ledger was written by a test fixture at some point. Loaded=%d \
-           quarantined=%d (MASC_BOARD_VOTE_QUARANTINE=%b). Truncation \
-           is an operator decision; see #9921."
-          !fixture_detected path !loaded !quarantined quarantine
-      end;
       if !loaded > 0 then
         Log.BoardLog.info "loaded %d vote entries from %s" !loaded path
       else
@@ -758,7 +673,6 @@ let global () = Eio.Lazy.force !global_lazy
 (** Reset global store for test isolation. Next [global ()] call creates fresh store.
     Safe: only called from test setup before concurrent fibers exist. *)
 let reset_global_for_test () =
-  reset_comment_rate_tracker ();
   global_lazy := Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
     let store = create_store () in
     load_all_persisted store;
@@ -1010,7 +924,6 @@ let post_to_yojson_with_karma (p : post) ~author_karma : Yojson.Safe.t =
     ("title", `String p.title);
     ("body", `String p.body);
     ("post_kind", `String (post_kind_to_string p.post_kind));
-    ("classification_reason", `String (post_classification_reason p));
     ("content", `String p.body);
     ("flair", flair_json);
     ("visibility", `String (visibility_to_string p.visibility));
@@ -1030,4 +943,7 @@ let post_to_yojson_with_karma (p : post) ~author_karma : Yojson.Safe.t =
        dashboard-facing post in one place (no per-route N-of-M). Same encoder as
        [post_to_yojson] so the wire shape is identical. *)
     @ (match p.origin with Some o -> [("origin", post_origin_to_yojson o)] | None -> [])
+    @ (match post_classification_reason p with
+       | Some reason -> [("classification_reason", `String reason)]
+       | None -> [])
     @ (match p.meta_json with Some meta -> [("meta", meta)] | None -> []))

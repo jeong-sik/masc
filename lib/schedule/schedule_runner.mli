@@ -7,7 +7,6 @@
 
 type signal_kind =
   | Due_candidate
-  | Due_blocked_approval
 
 type wake_signal =
   { signal_id : string
@@ -15,7 +14,6 @@ type wake_signal =
   ; schedule_id : string
   ; emitted_at : float
   ; due_at : float
-  ; risk_class : Schedule_domain.risk_class
   ; payload_digest : string
   ; payload : Yojson.Safe.t
   }
@@ -66,8 +64,9 @@ val wake_signal_to_yojson : wake_signal -> Yojson.Safe.t
 val wake_signal_of_yojson : Yojson.Safe.t -> (wake_signal, string) result
 
 val read_recent_signals :
-  Workspace_utils.config -> int -> wake_signal list
-(** Read at most [n] recent durable wake signals in chronological order. *)
+  Workspace_utils.config -> int -> (wake_signal list, string) result
+(** Read at most [n] recent durable wake signals in chronological order.
+    Malformed persisted rows are returned as an explicit decode error. *)
 
 val tick :
   ?consumer:consumer ->
@@ -75,7 +74,7 @@ val tick :
   now:float ->
   (tick_result, runner_error) result
 (** Refresh due state and append at-most-once generic wake signals for newly
-    observable due work or due approval blockers. Recurring due work is advanced
+    observable due work. Recurring due work is advanced
     after the generic due signal path succeeds when no consumer is installed; a
     consumer dispatch can instead complete/fail the request. Consumer payload
     rejection is recorded as a failed execution instead of leaving the request

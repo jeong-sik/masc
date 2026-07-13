@@ -18,6 +18,7 @@ let mk_exec executable argv =
     ; argv
     ; cwd = None
     ; env = []
+    ; timeout_sec = None
     ; stdin = Execute_input.Inherit
     ; stdout = Execute_input.Inherit
     ; stderr = Execute_input.Inherit
@@ -86,8 +87,8 @@ let cases : case list =
     ; typed = mk_exec "unknown_cmd" [ "foo" ]
     ; expect_typed = true
     ; rationale =
-        "structural validation allows any executable string; admission is \
-         enforced by Shell IR risk classification at runtime"
+        "structural validation allows any executable string; external-effect \
+         authorization belongs to the non-hierarchical Gate"
     }
   ; { name = "find_glob_pattern"
     ; sample_cmd = "find . -name *.ml"
@@ -115,7 +116,7 @@ let cases : case list =
     ; expect_typed = false
     ; rationale =
         "NUL in argv token cannot survive process-boundary \
-         serialization; typed schema rejects via shell_metachar_in_token"
+         serialization; typed schema rejects it as an objective boundary error"
     }
   ; { name = "argv_with_newlines"
     ; sample_cmd = "gh pr create --body '<multiline markdown>'"
@@ -155,7 +156,8 @@ let test_case case () =
 
 let test_pipeline_empty () =
   let input =
-    Execute_input.Pipeline { stages = []; cwd = None; env = [] }
+    Execute_input.Pipeline
+      { stages = []; cwd = None; env = []; timeout_sec = None }
   in
   Alcotest.(check bool)
     "pipeline with empty stages is rejected"
@@ -169,6 +171,7 @@ let test_pipeline_single_stage_rejected () =
       { stages = [ { executable = "rg"; argv = [ "pattern" ] } ]
       ; cwd = None
       ; env = []
+      ; timeout_sec = None
       }
   in
   Alcotest.(check bool)
@@ -186,6 +189,7 @@ let test_pipeline_stage_executable_check () =
           ]
       ; cwd = None
       ; env = []
+      ; timeout_sec = None
       }
   in
   Alcotest.(check bool)
@@ -224,17 +228,16 @@ let test_empty_executable_with_argv_hints_rewrite () =
    the command name" hint is reachable. Before the fix shell_bin
    fabricated [argv = []], which collapsed the diagnostic into the
    generic catch-all and kept the LLM in a self-correction deadlock.
-   Live reproducer: keeper-qa-king sent
-     Exec { executable=""; argv=["gh";"pr";"list";...] }
-   from resolve_typed_git_cwd, hit shell_bin, and got the wrong
-   message in 2026-05-26 logs. *)
+   The regression was originally observed on a typed input inspected before
+   lowering. Product-specific pre-dispatch inspection has since been removed;
+   this test keeps the structural argv-preservation contract only. *)
 let test_unvalidated_path_preserves_argv_in_error () =
-  let input = mk_exec "" [ "gh"; "pr"; "list"; "--state"; "open" ] in
+  let input = mk_exec "" [ "opaque-cli"; "subcommand"; "--state"; "open" ] in
   match Execute_input.to_shell_ir_unvalidated  input with
   | Error (Execute_input.Empty_executable { argv }) ->
     Alcotest.(check (list string))
       "argv preserved through shell_simple/shell_bin"
-      [ "gh"; "pr"; "list"; "--state"; "open" ]
+      [ "opaque-cli"; "subcommand"; "--state"; "open" ]
       argv;
     let msg =
       Format.asprintf
@@ -245,7 +248,7 @@ let test_unvalidated_path_preserves_argv_in_error () =
     Alcotest.(check bool)
       "rewrite hint points at argv[0]"
       true
-      (String_util.contains_substring_ci msg "argv[0]=\"gh\"")
+      (String_util.contains_substring_ci msg "argv[0]=\"opaque-cli\"")
   | Error error ->
     Alcotest.failf
       "expected Empty_executable with preserved argv, got %a"
@@ -275,6 +278,51 @@ let test_of_json_exec () =
     Alcotest.(check (option string)) "cwd" (Some "/tmp") cwd;
     Alcotest.(check (list (pair string string))) "env" [ "LC_ALL", "C" ] env
   | Execute_input.Pipeline _ -> Alcotest.fail "expected Exec"
+;;
+
+let test_of_json_timeout_is_optional_and_preserved () =
+  let without_timeout =
+    parse_json_exn (`Assoc [ "executable", `String "sleep" ])
+  in
+  let with_timeout =
+    parse_json_exn
+      (`Assoc
+        [ "executable", `String "sleep"
+        ; "timeout_sec", `Float 12.5
+        ])
+  in
+  let timeout = function
+    | Execute_input.Exec { timeout_sec; _ }
+    | Execute_input.Pipeline { timeout_sec; _ } ->
+      timeout_sec
+  in
+  Alcotest.(check (option (float 0.0)))
+    "absence remains unbounded"
+    None
+    (timeout without_timeout);
+  Alcotest.(check (option (float 0.0)))
+    "explicit timeout is preserved"
+    (Some 12.5)
+    (timeout with_timeout)
+;;
+
+let test_of_json_rejects_invalid_explicit_timeout () =
+  List.iter
+    (fun timeout ->
+      let message =
+        parse_json_error
+          (`Assoc
+            [ "executable", `String "sleep"
+            ; "timeout_sec", timeout
+            ])
+      in
+      Alcotest.(check bool)
+        "invalid timeout is rejected explicitly"
+        true
+        (String_util.contains_substring_ci
+           message
+           "finite and greater than zero"))
+    [ `Float 0.0; `Float (-1.0) ]
 ;;
 
 let test_of_json_rejects_argv_without_executable () =
@@ -375,7 +423,7 @@ let test_of_json_pipeline () =
           ])
   in
   match input with
-  | Execute_input.Pipeline { stages; cwd; env } ->
+  | Execute_input.Pipeline { stages; cwd; env; timeout_sec = _ } ->
     Alcotest.(check int) "stage count" 2 (List.length stages);
     Alcotest.(check (option string)) "cwd" (Some "/tmp") cwd;
     Alcotest.(check (list (pair string string))) "env" [] env;
@@ -439,7 +487,7 @@ let test_of_json_keeps_empty_pipeline_stage_for_validation () =
           ])
   in
   match input with
-  | Execute_input.Pipeline { stages; cwd; env } ->
+  | Execute_input.Pipeline { stages; cwd; env; timeout_sec = _ } ->
     Alcotest.(check (option string)) "cwd" (Some "/tmp") cwd;
     Alcotest.(check (list (pair string string))) "env" [] env;
     (match stages with
@@ -618,6 +666,7 @@ let test_exec_lowering_preserves_duplicate_executable_argv () =
       ; argv = [ "git"; "status" ]
       ; cwd = None
       ; env = []
+      ; timeout_sec = None
       ; stdin = Execute_input.Inherit
       ; stdout = Execute_input.Inherit
       ; stderr = Execute_input.Inherit
@@ -645,6 +694,7 @@ let test_exec_lowering_preserves_single_argv_equal_to_executable () =
       ; argv = [ "echo" ]
       ; cwd = None
       ; env = []
+      ; timeout_sec = None
       ; stdin = Execute_input.Inherit
       ; stdout = Execute_input.Inherit
       ; stderr = Execute_input.Inherit
@@ -674,6 +724,7 @@ let test_pipeline_lowering_preserves_single_stage_argv_equal_to_executable () =
           ]
       ; cwd = None
       ; env = []
+      ; timeout_sec = None
       }
   in
   match Execute_input.to_shell_ir input with
@@ -706,6 +757,7 @@ let test_pipeline_lowering_preserves_duplicate_stage_argv () =
           ]
       ; cwd = None
       ; env = []
+      ; timeout_sec = None
       }
   in
   match Execute_input.to_shell_ir input with
@@ -752,6 +804,7 @@ let test_pipeline_lowers_with_injected_docker_sandbox () =
           ]
       ; cwd = Some "/tmp"
       ; env = []
+      ; timeout_sec = None
       }
   in
   match
@@ -780,6 +833,7 @@ let test_pipe_character_in_exec_argv_is_literal () =
       ; argv = [ "foo|bar" ]
       ; cwd = None
       ; env = []
+      ; timeout_sec = None
       ; stdin = Execute_input.Inherit
       ; stdout = Execute_input.Inherit
       ; stderr = Execute_input.Inherit
@@ -795,52 +849,40 @@ let test_pipe_character_in_exec_argv_is_literal () =
     Alcotest.fail "literal pipe argv token must not create Shell_ir.Pipeline"
 ;;
 
-let test_standalone_pipe_operator_in_exec_argv_rejected () =
-  let check_case ~name ~token ~index argv =
+let test_standalone_pipe_operator_in_exec_argv_is_literal () =
+  let check_case ~name argv =
     let input =
       Execute_input.Exec
         { executable = "tail"
         ; argv
         ; cwd = None
         ; env = []
+        ; timeout_sec = None
         ; stdin = Execute_input.Inherit
         ; stdout = Execute_input.Inherit
         ; stderr = Execute_input.Inherit
         }
     in
-    match Execute_input.validate input with
-    | Error
-        (Execute_input.Argv_contains_shell_pipeline_operator
-          { executable; index = actual_index; token = actual_token } as err) ->
-      Alcotest.(check string) (name ^ " executable") "tail" executable;
-      Alcotest.(check int) (name ^ " index") index actual_index;
-      Alcotest.(check string) (name ^ " token") token actual_token;
-      let msg = Format.asprintf "%a" Execute_input.pp_validation_error err in
-      Alcotest.(check bool)
-        (name ^ " message points to Execute pipeline field")
-        true
-        (String_util.contains_substring_ci msg "top-level pipeline field");
-      Alcotest.(check bool)
-        (name ^ " message forbids sh/bash wrapper")
-        true
-        (String_util.contains_substring_ci msg "do not wrap this in sh/bash")
+    match Execute_input.to_shell_ir input with
+    | Ok (Masc_exec.Shell_ir.Simple simple) ->
+      Alcotest.(check (pair string (list string)))
+        name
+        ("tail", argv)
+        (shell_simple_tuple simple)
+    | Ok (Masc_exec.Shell_ir.Pipeline _) ->
+      Alcotest.failf "%s: literal argv must not create a pipeline" name
     | Error other ->
       Alcotest.failf
-        "%s: expected Argv_contains_shell_pipeline_operator, got %a"
+        "%s: literal argv was rejected: %a"
         name
         Execute_input.pp_validation_error
         other
-    | Ok () -> Alcotest.failf "%s: expected standalone %S to be rejected" name token
   in
   check_case
     ~name:"tail_pipe_head_log_shape"
-    ~token:"|"
-    ~index:3
     [ "-n"; "200"; "/tmp/keeper.log"; "|"; "head"; "-80" ];
   check_case
     ~name:"stderr_pipe_operator"
-    ~token:"|&"
-    ~index:2
     [ "-f"; "/tmp/keeper.log"; "|&"; "head"; "-80" ]
 ;;
 
@@ -857,6 +899,7 @@ let test_gh_multiline_body_lowers_to_literal_argv () =
       ; argv = [ "pr"; "create"; "--body"; body ]
       ; cwd = None
       ; env = []
+      ; timeout_sec = None
       ; stdin = Execute_input.Inherit
       ; stdout = Execute_input.Inherit
       ; stderr = Execute_input.Inherit
@@ -886,6 +929,7 @@ let test_cwd_not_absolute () =
       ; argv = []
       ; cwd = Some "relative/path"
       ; env = []
+      ; timeout_sec = None
       ; stdin = Execute_input.Inherit
       ; stdout = Execute_input.Inherit
       ; stderr = Execute_input.Inherit
@@ -904,6 +948,7 @@ let test_env_key_invalid () =
       ; argv = []
       ; cwd = None
       ; env = [ "FOO BAR", "value" ]
+      ; timeout_sec = None
       ; stdin = Execute_input.Inherit
       ; stdout = Execute_input.Inherit
       ; stderr = Execute_input.Inherit
@@ -915,28 +960,7 @@ let test_env_key_invalid () =
     (typed_ok input)
 ;;
 
-(* RFC-0198 Phase A: redirection-shape argv tokens.  Validation must
-   reject these with the typed [Argv_contains_shell_redirection] error
-   so the caller (LLM) receives a typed alternative instead of the
-   runtime "unknown primary" failure observed in fleet (2026-05-27
-   18:56 KST find: 2>/dev/null primary error). *)
-let expect_redirection_rejected ~token input =
-  match Execute_input.validate  input with
-  | Error (Execute_input.Argv_contains_shell_redirection { token = t; _ }) ->
-    Alcotest.(check string) "rejected token text" token t
-  | Error other ->
-    Alcotest.failf
-      "expected Argv_contains_shell_redirection for %S, got %a"
-      token
-      Execute_input.pp_validation_error
-      other
-  | Ok () -> Alcotest.failf "expected %S to be rejected" token
-;;
-
-let test_shell_redirection_token_rejected () =
-  (* Each fixture sends [find] (allowlisted, evidence shape from
-     fleet log) with a redirection-shape token at argv[N].  Every
-     shape must surface as a typed-rejection. *)
+let test_shell_redirection_looking_tokens_are_literal () =
   List.iter
     (fun (token, argv) ->
       let input =
@@ -945,12 +969,26 @@ let test_shell_redirection_token_rejected () =
           ; argv
           ; cwd = None
           ; env = []
+          ; timeout_sec = None
           ; stdin = Execute_input.Inherit
           ; stdout = Execute_input.Inherit
           ; stderr = Execute_input.Inherit
           }
       in
-      expect_redirection_rejected ~token input)
+      match Execute_input.to_shell_ir input with
+      | Ok (Masc_exec.Shell_ir.Simple simple) ->
+        Alcotest.(check (pair string (list string)))
+          ("literal token " ^ token)
+          ("find", argv)
+          (shell_simple_tuple simple)
+      | Ok (Masc_exec.Shell_ir.Pipeline _) ->
+        Alcotest.fail "literal argv must not create a pipeline"
+      | Error error ->
+        Alcotest.failf
+          "literal token %S was rejected: %a"
+          token
+          Execute_input.pp_validation_error
+          error)
     [ "2>/dev/null", [ "."; "-name"; "*.ml"; "2>/dev/null" ]
     ; ">", [ "."; "-name"; "*.ml"; ">" ]
     ; ">>", [ "."; "-name"; "*.ml"; ">>" ]
@@ -966,10 +1004,8 @@ let test_shell_redirection_token_rejected () =
     ]
 ;;
 
-(* Regression guard: tokens that *contain* shell metacharacters as
-   payload data must remain allowed.  RFC-0091 PR-1's design constraint
-   (.mli §"Design constraints") explicitly accepts these as literal
-   execve arguments. *)
+(* Every non-NUL token is literal execve data, regardless of whether it
+   resembles shell syntax. *)
 let test_legitimate_metachar_still_allowed () =
   List.iter
     (fun (rationale, argv) ->
@@ -979,6 +1015,7 @@ let test_legitimate_metachar_still_allowed () =
           ; argv
           ; cwd = None
           ; env = []
+          ; timeout_sec = None
           ; stdin = Execute_input.Inherit
           ; stdout = Execute_input.Inherit
           ; stderr = Execute_input.Inherit
@@ -1005,88 +1042,6 @@ let test_legitimate_metachar_still_allowed () =
     ; "newline is execve-literal payload", [ "."; "-name"; "foo\nbar" ]
     ; "carriage return is execve-literal payload", [ "."; "-name"; "foo\rbar" ]
     ]
-;;
-
-let contains_substring haystack needle =
-  let hlen = String.length haystack in
-  let nlen = String.length needle in
-  if nlen = 0
-  then true
-  else if nlen > hlen
-  then false
-  else
-    let rec scan i =
-      if i + nlen > hlen
-      then false
-      else if String.sub haystack i nlen = needle
-      then true
-      else scan (i + 1)
-    in
-    scan 0
-;;
-
-let test_redirection_rejected_emits_typed_alternative () =
-  (* The error message must steer the caller toward typed alternatives
-     (Phase B redirect fields or the public Execute.pipeline shape), not toward
-     stale internal constructor names. *)
-  let input =
-    Execute_input.Exec
-      { executable = "find"
-      ; argv = [ "."; "-name"; "*.ml"; "2>/dev/null" ]
-      ; cwd = None
-      ; env = []
-      ; stdin = Execute_input.Inherit
-      ; stdout = Execute_input.Inherit
-      ; stderr = Execute_input.Inherit
-      }
-  in
-  match Execute_input.validate  input with
-  | Error (Execute_input.Argv_contains_shell_redirection _ as err) ->
-    let msg = Format.asprintf "%a" Execute_input.pp_validation_error err in
-    Alcotest.(check bool)
-      "error mentions stderr discard shape"
-      true
-      (contains_substring msg "stderr={discard:true}");
-    Alcotest.(check bool)
-      "error mentions Phase B RFC marker"
-      true
-      (contains_substring msg "RFC-0198")
-  | _ -> Alcotest.fail "expected Argv_contains_shell_redirection"
-;;
-
-let test_validation_error_alternatives () =
-  let check_alts ~name err expected =
-    let actual = Execute_input.validation_error_alternatives err in
-    Alcotest.(check (list string)) name expected actual
-  in
-  check_alts
-    ~name:"Argv_contains_shell_redirection alternatives"
-    (Execute_input.Argv_contains_shell_redirection
-       { executable = "find"; index = 3; token = "2>/dev/null" })
-    [ "stderr:{discard:true}"; "stdout:{discard:true}"; "Execute.pipeline" ];
-  check_alts
-    ~name:"Argv_contains_shell_metachar alternatives"
-    (Execute_input.Argv_contains_shell_metachar
-       { executable = "find"; index = 3; token = "foo\nbar" })
-    [];
-  check_alts
-    ~name:"Argv_contains_shell_pipeline_operator alternatives"
-    (Execute_input.Argv_contains_shell_pipeline_operator
-       { executable = "tail"; index = 3; token = "|" })
-    [ "Execute.pipeline" ];
-  check_alts
-    ~name:"Empty_executable has no alternatives"
-    (Execute_input.Empty_executable { argv = [ "ls" ] })
-    [];
-  check_alts
-    ~name:"Executable_repeated_in_argv0 has no alternatives"
-    (Execute_input.Executable_repeated_in_argv0
-       { executable = "cat"; argv = [ "cat"; "file" ] })
-    [];
-  check_alts
-    ~name:"Cwd_not_absolute has no alternatives"
-    (Execute_input.Cwd_not_absolute "relative")
-    []
 ;;
 
 (* RFC-0198 Phase B: typed [stdin]/[stdout]/[stderr] redirect fields. *)
@@ -1276,6 +1231,14 @@ let suite =
           test_unvalidated_path_preserves_argv_in_error
       ; Alcotest.test_case "of_json_exec" `Quick test_of_json_exec
       ; Alcotest.test_case
+          "of_json_timeout_is_optional_and_preserved"
+          `Quick
+          test_of_json_timeout_is_optional_and_preserved
+      ; Alcotest.test_case
+          "of_json_rejects_invalid_explicit_timeout"
+          `Quick
+          test_of_json_rejects_invalid_explicit_timeout
+      ; Alcotest.test_case
           "of_json_rejects_argv_without_executable"
           `Quick
           test_of_json_rejects_argv_without_executable
@@ -1357,9 +1320,9 @@ let suite =
           `Quick
           test_pipe_character_in_exec_argv_is_literal
       ; Alcotest.test_case
-          "standalone_pipe_operator_in_exec_argv_rejected"
+          "standalone_pipe_operator_in_exec_argv_is_literal"
           `Quick
-          test_standalone_pipe_operator_in_exec_argv_rejected
+          test_standalone_pipe_operator_in_exec_argv_is_literal
       ; Alcotest.test_case
           "gh_multiline_body_lowers_to_literal_argv"
           `Quick
@@ -1367,21 +1330,13 @@ let suite =
       ; Alcotest.test_case "cwd_not_absolute" `Quick test_cwd_not_absolute
       ; Alcotest.test_case "env_key_invalid" `Quick test_env_key_invalid
       ; Alcotest.test_case
-          "rfc_0198_shell_redirection_token_rejected"
+          "shell_redirection_looking_tokens_are_literal"
           `Quick
-          test_shell_redirection_token_rejected
+          test_shell_redirection_looking_tokens_are_literal
       ; Alcotest.test_case
           "rfc_0198_legitimate_metachar_still_allowed"
           `Quick
           test_legitimate_metachar_still_allowed
-      ; Alcotest.test_case
-          "rfc_0198_redirection_rejected_emits_typed_alternative"
-          `Quick
-          test_redirection_rejected_emits_typed_alternative
-      ; Alcotest.test_case
-          "rfc_0198_validation_error_alternatives_ssot"
-          `Quick
-          test_validation_error_alternatives
       ; Alcotest.test_case
           "rfc_0198_phaseb_defaults_inherit_emits_no_ir_entries"
           `Quick

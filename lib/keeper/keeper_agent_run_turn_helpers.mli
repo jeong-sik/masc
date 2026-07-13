@@ -22,11 +22,6 @@ val registry_progress_on_event :
   Agent_sdk.Types.sse_event ->
   unit
 
-val completion_contract_result_for_progress_evidence :
-  had_owned_active_task_at_turn_start:bool ->
-  actual_keeper_tool_names:string list ->
-  Keeper_execution_receipt.completion_contract_result
-
 val emit_turn_end_safely : keeper_name:string -> unit -> unit
 val digest_text : string -> string
 val digest_message_texts_as_joined : Agent_sdk.Types.message list -> string

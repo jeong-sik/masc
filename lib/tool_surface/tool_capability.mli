@@ -5,15 +5,12 @@
     mutable capability sets have been removed; dispatch owns routing,
     not capability authority.
 
-    The module is named [Tool_capability] (not [Capability]) because
-    [lib/exec/capability.ml] already owns the [Capability] name for the
-    shell-command capability domain (Read_path / Write_path / Exec_program /
-    Git / Env_set / Pipeline_fold), an orthogonal concern. *)
+    The module is named [Tool_capability] to make its narrow tool-registration
+    scope explicit. *)
 
 type kind =
   | Read_only
   | Mcp_context_required
-  | Destructive
   | Idempotent
 
 val to_string : kind -> string

@@ -34,8 +34,9 @@ end
 
 (** Read [keeper_id]'s facts, ask the model for a consolidation plan, apply it,
     and (unless [dry_run]) rewrite the store atomically only if the fact snapshot
-    still matches the model's input. Below a minimum fact count it skips the LLM
-    call. Returns the outcome without raising for the expected failure modes so a
+    still matches the model's input. Only an empty store skips the LLM call; a
+    numeric fact-count threshold never suppresses model judgment. Returns the
+    outcome without raising for the expected failure modes so a
     caller fiber stays alive. If [timeout_sec] is configured but no [clock] is
     available, the provider call is refused as [Transport_failed _] rather than
     running without a deadline. [runtime_id] remains paired with [provider_cfg]

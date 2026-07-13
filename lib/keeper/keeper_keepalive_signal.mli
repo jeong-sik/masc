@@ -99,13 +99,8 @@ val post_submit_task : meta:keeper_meta -> task_id:Keeper_id.Task_id.t -> unit
 val post_heartbeat_tick : wakeup:bool Atomic.t -> unit
 
 (** Outcome of an [interruptible_sleep] call. Mirrors the three terminal
-    branches of the polling loop, so callers can react to "woken by an
-    external signal" distinctly from "slept the full duration".
-
-    Closing the [Skip_idle] half of the [MissedWakeup] gap (see
-    [specs/keeper-state-machine/KeeperHeartbeat.tla]) requires
-    discriminating [`Woken`] from [`Timeout`] at the call site — sibling
-    fix #10078 covered [Skip_busy] without exposing this distinction. *)
+    branches of the polling loop, so callers can distinguish an exact Keeper
+    wake from the configured heartbeat cadence. *)
 type sleep_outcome =
   | Stopped   (** [stop] atomic was observed [true] before the duration
                   elapsed. *)
@@ -170,11 +165,6 @@ val board_reactive_wakeup_allowed :
   -> keeper_name:string
   -> signal:Board_dispatch.board_signal
   -> bool
-
-(** True when a paused keeper may be resumed by board-reactive wakeup.
-    Operator-owned pauses have [auto_resume_after_sec = None] and are not
-    resumed implicitly by board posts or comments. *)
-val paused_meta_allows_board_auto_resume : keeper_meta -> bool
 
 (** Select which keepers wake for a board signal (RFC-0020). Explicit
     mentions short-circuit and wake unconditionally; thread-reply/reaction

@@ -3,14 +3,6 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_tool_shared_runtime
 
-(* RFC-0323 G-2: distinct machine identity under which the RFC-0199
-   deterministic probe approves its own submission. The FSM self-approval
-   check compares identity keys (never authority), so the probe cannot
-   approve under the keeper identity it submits with. Single-colon
-   namespacing per [Validation.Agent_id]; follows the [operator:<actor>]
-   precedent of the dashboard verdict route. *)
-let deterministic_probe_verifier = "probe:deterministic"
-
 let keeper_task_result_json ?(typed_outcome = (None : Keeper_tool_outcome.t option)) result =
   match result with
   | Ok msg ->
@@ -100,15 +92,9 @@ let keeper_tool_result_json ?(typed_outcome = (None : Keeper_tool_outcome.t opti
           @ typed_outcome_fields))
 ;;
 
-(* Caller-input validation errors carry [Tool_result.Policy_rejection]. Per
-   RFC-0062 §3.2 that variant is "permission, guardrail, validation reject", so
-   validation belongs there by original design — and the schema-layer producer
-   [Tool_input_validation] already emits Policy_rejection for invalid args.
-   Tagging makes the keeper *health* circuit breaker (Gate #1,
-   [Keeper_tool_dispatch_runtime.should_apply_circuit_breaker_to_failure_payload])
-   exempt these: an LLM that sends malformed/missing args is making an input
-   mistake, not exhibiting a keeper-health fault. The per-(tool,args) breaker
-   (Gate #2) still counts them, so retrying the SAME bad args stays blocked. *)
+(* Caller-input validation errors carry [Tool_result.Policy_rejection], matching
+   the schema-layer [Tool_input_validation] producer. The typed failure class is
+   observational metadata; dispatch returns the producer payload unchanged. *)
 let validation_error_json message =
   keeper_tool_result_json
     ~failure_class:(Some Tool_result.Policy_rejection)
@@ -257,22 +243,6 @@ let no_eligible_blocker_summary
     blocked_count
 ;;
 
-
-let stale_claim_release_fields releases =
-  match releases with
-  | [] -> []
-  | releases ->
-    [ ( "stale_claim_releases"
-      , `List
-          (List.map
-             (fun (task_id, assignee) ->
-                `Assoc
-                  [ "task_id", `String task_id
-                  ; "assignee", `String assignee
-                  ])
-             releases) )
-    ]
-;;
 
 let find_task_goal_id config task_id =
   let index = Workspace_goal_index.build_task_goal_index_for_config config in
@@ -464,8 +434,8 @@ let handle_keeper_task_tool
              masc_task_create facade. The previous local copy
              [parse_task_contract_arg] had regressed — it rejected an OMITTED
              optional [contract] via a catch-all that conflated None(omitted)
-             with a wrong-typed value, which falsely failed keeper_task_create
-             and tripped the keeper failure circuit breaker. Same lib, no
+             with a wrong-typed value, which falsely failed keeper_task_create.
+             Same lib, no
              dependency wall; the canonical parser handles [None | Some `Null]. *)
           (match Task.Args.parse_task_contract args with
            | Error message -> validation_error_json message
@@ -503,15 +473,6 @@ let handle_keeper_task_tool
     let claim_goal_scope =
       Keeper_runtime_contract.resolve_claim_goal_scope ~config ~meta ()
     in
-    let stale_claim_releases =
-      match
-        Workspace.release_stale_claims config
-          ~ttl_seconds:Env_config_runtime.Claim.ttl_seconds
-      with
-      | releases -> Ok releases
-      | exception (Eio.Cancel.Cancelled _ as e) -> raise e
-      | exception exn -> Error (Printexc.to_string exn)
-    in
     let requested_task_id =
       Safe_ops.json_string ~default:"" "task_id" args |> String.trim
     in
@@ -546,7 +507,7 @@ let handle_keeper_task_tool
           (Printf.sprintf "unknown task_id: %s" requested_task_id)
       | Some task -> claim_specific task
       in
-      let claim_after_stale_release () =
+      let claim_requested_task () =
         if requested_task_id <> "" then
           explicit_claim_result ()
         else
@@ -555,22 +516,8 @@ let handle_keeper_task_tool
             ~allow_scope_fallback:true
             ()
       in
-      let result =
-        match stale_claim_releases with
-        | Error err ->
-          Workspace.Claim_next_error
-            (Printf.sprintf
-               "stale-claim release failed before claim: %s"
-               err)
-        | Ok _ -> claim_after_stale_release ()
-      in
-    let stale_claim_releases =
-      match stale_claim_releases with
-      | Ok releases -> releases
-      | Error _ -> []
-    in
+      let result = claim_requested_task () in
     let auto_started_ok = ref false in
-    let harness_completed = ref false in
     (match result with
      | Workspace.Claim_next_claimed { task_id; scope_widened; _ } ->
        sync_keeper_meta_current_task ~config ~meta ~task_id;
@@ -609,110 +556,14 @@ let handle_keeper_task_tool
          auto_started_ok := Tool_result.is_success start_result
        end else
          auto_started_ok := true;
-       (* RFC-0199 Phase B / RFC-0323 G-2: deterministic evidence harness.
-          When the claimed task declares typed [evidence_claims] and all are
-          satisfied by a file probe, complete it without an LLM turn — through
-          the verification lane: submit as the keeper (assignee), approve
-          under the distinct machine identity [deterministic_probe_verifier].
-          Replaces the former [force_done_task_r] bypass so Done stays
-          reachable only via approve; the typed evidence_claims probe remains
-          the real evidence. Guarded to Claimed/InProgress so it never hits
-          the AwaitingVerification Invalid_transition; idempotent if another
-          agent reached Done first. Failures are logged per branch, never
-          swallowed. *)
-       (match
-          Workspace.get_tasks_raw config
-          |> List.find_opt (fun (t : Masc_domain.task) ->
-                 String.equal t.id task_id)
-        with
-        | Some
-            { contract = Some { evidence_claims = _ :: _ as claims; _ }
-            ; task_status = (Masc_domain.Claimed _ | Masc_domain.InProgress _)
-            ; _
-            }
-          when Keeper_deterministic_evidence_probe.all_satisfied ~config ~meta
-                 claims ->
-          let summary =
-            claims
-            |> List.map Evidence_claim.to_human_string
-            |> String.concat "; "
-          in
-          let notes =
-            Printf.sprintf
-              "RFC-0199 deterministic harness: %d evidence claim(s) satisfied \
-               [%s]"
-              (List.length claims) summary
-          in
-          let approve_notes =
-            Printf.sprintf
-              "RFC-0199 deterministic probe: %d typed evidence claim(s) \
-               machine-verified"
-              (List.length claims)
-          in
-          (match
-             Workspace.submit_and_approve_task_r config
-               ~agent_name:(keeper_agent_sender ~meta)
-               ~verifier_name:deterministic_probe_verifier ~task_id ~notes
-               ~approve_notes
-               ~evidence_refs:(List.map Evidence_claim.to_human_string claims)
-               ()
-           with
-           | Ok _ -> harness_completed := true
-           | Error (Workspace.Machine_verify_invalid_verifier msg) ->
-             Log.Keeper.error ~keeper_name:meta.name
-               "deterministic probe verifier identity rejected for %s: %s"
-               task_id msg
-           | Error (Workspace.Machine_verify_verifier_not_distinct _) ->
-             Log.Keeper.error ~keeper_name:meta.name
-               "deterministic probe verifier collides with keeper identity \
-                for %s; probe completion skipped"
-               task_id
-           | Error (Workspace.Machine_verify_submit_failed e) ->
-             Log.Keeper.warn ~keeper_name:meta.name
-               "deterministic probe submit failed for %s (falling back to \
-                LLM turn): %s"
-               task_id
-               (Masc_domain.masc_error_to_string e)
-           | Error (Workspace.Machine_verify_approve_failed_compensated e) ->
-             Log.Keeper.warn ~keeper_name:meta.name
-               "deterministic probe approve failed for %s; compensating \
-                reject returned it to in_progress: %s"
-               task_id
-               (Masc_domain.masc_error_to_string e)
-           | Error
-               (Workspace.Machine_verify_approve_failed_stranded
-                  { approve_error; reject_error }) ->
-             Log.Keeper.error ~keeper_name:meta.name
-               "deterministic probe stranded %s in awaiting_verification \
-                (approve: %s; compensating reject: %s); its pending \
-                verification record keeps it inside the verifier wake signal \
-                and the dashboard panel — any other identity can \
-                approve/reject"
-               task_id
-               (Masc_domain.masc_error_to_string approve_error)
-               (Masc_domain.masc_error_to_string reject_error))
-        | _ -> ())
+       ()
      | Workspace.Claim_next_no_unclaimed
      | Workspace.Claim_next_no_eligible _
      | Workspace.Claim_next_error _ -> ());
-    let accountability_warning =
-      if
-        Keeper_accountability.accountability_risk_is_high config
-          ~keeper_name:meta.name ~agent_name:meta.agent_name
-      then
-        Some
-          "Accountability risk is high for this keeper. Prefer manual review or lower-risk routing when equivalent."
-      else
-        None
-    in
     let message =
       match result with
       | Workspace.Claim_next_claimed { message; _ } ->
-          if !harness_completed then
-            message
-            ^ " Task completed immediately — all declared evidence claims were \
-               already satisfied (no work needed)."
-          else if !auto_started_ok then
+          if !auto_started_ok then
             message ^ " Task auto-started — begin work now."
           else message
       | Workspace.Claim_next_no_unclaimed -> "No unclaimed tasks. ACTION: Stop task-checking — nothing to claim."
@@ -837,12 +688,7 @@ let handle_keeper_task_tool
            @ (match typed_outcome_field with
               | Some field -> [ field ]
               | None -> [])
-           @ claimed_task_fields
-         @ stale_claim_release_fields stale_claim_releases
-           @
-         match accountability_warning with
-         | Some warning -> [ ("routing_warning", `String warning) ]
-         | None -> []))
+         @ claimed_task_fields))
     | Task_done ->
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
     let result_text = Safe_ops.json_string ~default:"" "result" args |> String.trim in

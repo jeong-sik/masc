@@ -41,7 +41,6 @@ const SURFACES: readonly NavEntry[] = [
 
 export interface NavBadges {
   readonly approvals?: number
-  readonly schedule?: number
 }
 
 const SURFACE_LABEL: Readonly<Record<string, string>> = Object.fromEntries(
@@ -63,7 +62,6 @@ export function NavRailV2({ badges, mobile = false }: { badges?: NavBadges; mobi
   const active = route.value.tab
   const badgeFor = (tab: TabId): number | undefined => {
     if (tab === 'approvals') return badges?.approvals || undefined
-    if (tab === 'schedule') return badges?.schedule || undefined
     return undefined
   }
 

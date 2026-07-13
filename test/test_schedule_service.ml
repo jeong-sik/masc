@@ -69,15 +69,12 @@ let has_prefix prefix value =
 
 let create_ok
   ?schedule_id
-  ?(risk_class = Workspace_write)
-  ?approval_required
   config
   =
   match
-    create config ?schedule_id ?approval_required ~requested_at:100.0
+    create config ?schedule_id ~requested_at:100.0
       ~requested_by:(human "requester") ~scheduled_by:(human "scheduler")
-      ~due_at:200.0 ~payload:(payload_json ()) ~risk_class
-      ~source:Operator_request ()
+      ~due_at:200.0 ~payload:(payload_json ()) ~source:Operator_request ()
   with
   | Ok request -> request
   | Error err -> fail (service_error_to_string err)
@@ -98,68 +95,33 @@ let test_create_mints_schedule_id () =
   @@ fun config ->
   let request = create_ok config in
   check bool "schedule id prefix" true (has_prefix "sched-" request.schedule_id);
-  check_status "side-effecting starts pending" Pending_approval request.status
+  check_status "starts scheduled" Scheduled request.status
 ;;
 
 let test_list_and_get_by_status () =
   with_workspace
   @@ fun config ->
-  let pending = create_ok ~schedule_id:"pending-1" config in
-  let scheduled =
-    create_ok ~schedule_id:"scheduled-1" ~risk_class:Read_only config
-  in
+  let cancelled = create_ok ~schedule_id:"cancelled-1" config in
+  let scheduled = create_ok ~schedule_id:"scheduled-1" config in
+  (match cancel config ~schedule_id:cancelled.schedule_id with
+   | Ok _ -> ()
+   | Error err -> fail (service_error_to_string err));
   check int "all schedules" 2 (List.length (list config ()));
-  check int "pending only" 1 (List.length (list config ~status:Pending_approval ()));
   check int "scheduled only" 1 (List.length (list config ~status:Scheduled ()));
-  (match get config ~schedule_id:pending.schedule_id with
-   | Some stored -> check string "pending id" pending.schedule_id stored.schedule_id
-   | None -> fail "pending missing");
+  check int "cancelled only" 1 (List.length (list config ~status:Cancelled ()));
+  (match get config ~schedule_id:cancelled.schedule_id with
+   | Some stored -> check string "cancelled id" cancelled.schedule_id stored.schedule_id
+   | None -> fail "cancelled missing");
   (match get config ~schedule_id:scheduled.schedule_id with
    | Some stored -> check string "scheduled id" scheduled.schedule_id stored.schedule_id
    | None -> fail "scheduled missing")
-;;
-
-let test_approve_separate_human () =
-  with_workspace
-  @@ fun config ->
-  let request = create_ok ~schedule_id:"approve-1" config in
-  match
-    approve config ~grant_id:"grant-approve-1" ~approved_at:150.0
-      ~schedule_id:request.schedule_id ~approved_by:(human "approver") ()
-  with
-  | Ok updated -> check_status "approved" Scheduled updated.status
-  | Error err -> fail (service_error_to_string err)
-;;
-
-let test_requester_cannot_approve () =
-  with_workspace
-  @@ fun config ->
-  let request = create_ok ~schedule_id:"self-approve-1" config in
-  check_service_error "requester self approve"
-    (Store_error
-       (Schedule_store.Grant_validation_failed Approver_is_requester))
-    (approve config ~grant_id:"grant-self-1" ~approved_at:150.0
-       ~schedule_id:request.schedule_id ~approved_by:request.requested_by ())
-;;
-
-let test_reject_marks_rejected () =
-  with_workspace
-  @@ fun config ->
-  let request = create_ok ~schedule_id:"reject-1" config in
-  match
-    reject config ~grant_id:"grant-reject-1" ~approved_at:150.0
-      ~schedule_id:request.schedule_id ~approved_by:(human "approver")
-      ~reason:"not today" ()
-  with
-  | Ok updated -> check_status "rejected" Rejected updated.status
-  | Error err -> fail (service_error_to_string err)
 ;;
 
 let test_update_scheduled_request () =
   with_workspace
   @@ fun config ->
   let request =
-    create_ok ~schedule_id:"service-update-1" ~risk_class:Read_only config
+    create_ok ~schedule_id:"service-update-1" config
   in
   let payload_json = updated_payload_json () in
   let payload = payload_exn payload_json in
@@ -180,7 +142,7 @@ let test_update_due_request_reports_store_error () =
   with_workspace
   @@ fun config ->
   let request =
-    create_ok ~schedule_id:"service-update-due" ~risk_class:Read_only config
+    create_ok ~schedule_id:"service-update-due" config
   in
   (match due_candidates config ~now:201.0 with
    | Ok [ candidate ] -> check_status "candidate due" Due candidate.status
@@ -190,24 +152,15 @@ let test_update_due_request_reports_store_error () =
   check_service_error "due update"
     (Store_error
        (Schedule_store.Invalid_status_transition
-          "only pending or scheduled requests can be updated"))
+          "only scheduled requests can be updated"))
     (update config ~schedule_id:request.schedule_id ~due_at:260.0
        ~expires_at:None ~payload:(updated_payload ()))
 ;;
 
-let test_due_candidates_do_not_execute_and_require_approval () =
+let test_due_candidates_do_not_execute () =
   with_workspace
   @@ fun config ->
   let request = create_ok ~schedule_id:"due-1" config in
-  (match due_candidates config ~now:201.0 with
-   | Ok candidates -> check int "no candidate before approval" 0 (List.length candidates)
-   | Error err -> fail (service_error_to_string err));
-  (match
-     approve config ~grant_id:"grant-due-1" ~approved_at:150.0
-       ~schedule_id:request.schedule_id ~approved_by:(human "approver") ()
-   with
-   | Ok _ -> ()
-   | Error err -> fail (service_error_to_string err));
   match due_candidates config ~now:201.0 with
   | Ok [ candidate ] ->
     check string "candidate id" request.schedule_id candidate.schedule_id;
@@ -215,15 +168,6 @@ let test_due_candidates_do_not_execute_and_require_approval () =
   | Ok candidates ->
     fail (Printf.sprintf "expected one candidate, got %d" (List.length candidates))
   | Error err -> fail (service_error_to_string err)
-;;
-
-let test_missing_schedule_approval_reports_store_error () =
-  with_workspace
-  @@ fun config ->
-  check_service_error "missing schedule"
-    (Store_error Schedule_store.Schedule_not_found)
-    (approve config ~grant_id:"grant-missing" ~approved_at:150.0
-       ~schedule_id:"missing" ~approved_by:(human "approver") ())
 ;;
 
 let () =
@@ -234,14 +178,6 @@ let () =
           test_case "create mints schedule id" `Quick test_create_mints_schedule_id;
           test_case "list and get by status" `Quick test_list_and_get_by_status;
         ] );
-      ( "approval",
-        [
-          test_case "approve by separate human" `Quick test_approve_separate_human;
-          test_case "requester cannot approve" `Quick test_requester_cannot_approve;
-          test_case "reject marks rejected" `Quick test_reject_marks_rejected;
-          test_case "missing schedule reports store error" `Quick
-            test_missing_schedule_approval_reports_store_error;
-        ] );
       ( "update",
         [
           test_case "updates scheduled request" `Quick test_update_scheduled_request;
@@ -250,8 +186,8 @@ let () =
         ] );
       ( "due",
         [
-          test_case "due candidates require approval and do not execute" `Quick
-            test_due_candidates_do_not_execute_and_require_approval;
+          test_case "due candidates do not execute" `Quick
+            test_due_candidates_do_not_execute;
         ] );
     ]
 ;;

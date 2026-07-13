@@ -6,20 +6,17 @@ type ('input, 'output) t = {
   oas_tool : ('input, 'output) Agent_sdk.Typed_tool.t;
   module_tag : Tool_dispatch.module_tag;
   is_read_only : bool;
-  is_destructive : bool;
   is_idempotent : bool;
   visibility : Tool_catalog.visibility;
-  effect_domain : Tool_catalog.effect_domain option;
 }
 
 let create ~name ~description ~module_tag ~params ~parse ~handler ~encode
-    ?(is_read_only = false) ?(is_destructive = false) ?(is_idempotent = false)
+    ?(is_read_only = false) ?(is_idempotent = false)
     ?(visibility = Tool_catalog.Default)
-    ?effect_domain () =
+    () =
   let oas_tool = Agent_sdk.Typed_tool.create
     ~name ~description ~params ~parse ~handler ~encode () in
-  { oas_tool; module_tag; is_read_only; is_destructive;
-    is_idempotent; visibility; effect_domain }
+  { oas_tool; module_tag; is_read_only; is_idempotent; visibility }
 
 (** Build a dispatch handler for the typed tool.
     The handler is registered via [Tool_spec.Direct] for a specific tool name,
@@ -73,10 +70,8 @@ let to_spec tool =
     ~input_schema
     ~handler_binding:(Tool_spec.Direct (make_dispatch_handler tool))
     ~is_read_only:tool.is_read_only
-    ~is_destructive:tool.is_destructive
     ~is_idempotent:tool.is_idempotent
     ~visibility:tool.visibility
-    ?effect_domain:tool.effect_domain
     ()
 
 let register tool =

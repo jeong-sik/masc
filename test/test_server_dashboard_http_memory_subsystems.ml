@@ -3,10 +3,7 @@ open Alcotest
 module Json = Yojson.Safe.Util
 module Memory_subsystems = Server_dashboard_http_memory_subsystems
 module Memory_io = Masc.Keeper_memory_os_io
-module P = Masc.Procedural_memory
-module Projection = Masc.Skill_candidate_projection
 module Recall_ledger = Masc.Keeper_recall_injection_ledger
-module Store = Masc.Skill_candidate_store
 module Delegation_request = Masc.Keeper_delegation_request
 module Delegation_store = Masc.Keeper_delegation_request_store
 module Types = Masc.Keeper_memory_os_types
@@ -87,13 +84,12 @@ let test_http_json_explicitly_disabled_entries_surface () =
         Json.(memory_entries |> member "items" |> to_list |> List.length))
 ;;
 
-let fact ?(category = Types.Preference) ?(trace_id = "trace-user-model")
+let fact ?(category = Types.Preference) ?(trace_id = "trace-memory")
       ?(turn = 3) ?(first_seen = 10.0) ?last_verified_at claim
   : Types.fact
   =
   { claim
   ; category
-  ; external_ref = None
   ; claim_kind = None
   ; source = { trace_id; turn; tool_call_id = None }
   ; observed_by = []
@@ -103,142 +99,6 @@ let fact ?(category = Types.Preference) ?(trace_id = "trace-user-model")
   ; schema_version = Types.schema_version
   ; claim_id = None
   }
-;;
-
-let test_http_json_surfaces_user_model_projection () =
-  let dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () -> rm_rf dir)
-    (fun () ->
-      let config = Workspace_utils.default_config dir in
-      let keepers_dir =
-        Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
-      in
-      Memory_io.For_testing.with_keepers_dir keepers_dir (fun () ->
-        Memory_io.append_fact
-          ~keeper_id:"sangsu"
-          (fact ~category:Types.Preference ~last_verified_at:20.0
-             "User prefers terse operational summaries");
-        Memory_io.append_fact
-          ~keeper_id:"sangsu"
-          (fact ~category:Types.Constraint ~trace_id:"trace-constraint" ~turn:4
-             "User requires worktree-first changes");
-        Memory_io.append_fact
-          ~keeper_id:"sangsu"
-          (fact ~category:Types.Fact "The repo uses OCaml");
-        let json =
-          Memory_subsystems.dashboard_memory_subsystems_http_json
-            ~config
-            ~include_memory_entries:false
-            (request "/dashboard/memory-subsystems?limit=100")
-        in
-        let user_model = Json.(json |> member "user_model") in
-        check string "schema" "masc.user_model.memory_projection.v1"
-          Json.(user_model |> member "schema" |> to_string);
-        let prompt = Json.(user_model |> member "prompt") in
-        check string "prompt block id" "user_model"
-          Json.(prompt |> member "block_id" |> to_string);
-        check string "prompt injection" "extra_system_context"
-          Json.(prompt |> member "injection" |> to_string);
-        check string "prompt hook" "keeper_run_tools_hooks.before_turn_params"
-          Json.(prompt |> member "runtime_hook" |> to_string);
-        check int "total" 2 Json.(user_model |> member "total" |> to_int);
-        check int "shown" 2 Json.(user_model |> member "shown" |> to_int);
-        let items = Json.(user_model |> member "items" |> to_list) in
-        let claims =
-          items |> List.map (fun item -> Json.(item |> member "claim" |> to_string))
-        in
-        check
-          (list string)
-          "preference and constraint only"
-          [ "User prefers terse operational summaries"
-          ; "User requires worktree-first changes"
-          ]
-          claims))
-;;
-
-let test_http_json_user_model_uses_config_base_path () =
-  let dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () -> rm_rf dir)
-    (fun () ->
-      let config = Workspace_utils.default_config dir in
-      let base_keepers_dir =
-        Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
-      in
-      Memory_io.For_testing.with_keepers_dir base_keepers_dir (fun () ->
-        Memory_io.append_fact
-          ~keeper_id:"target"
-          (fact ~category:Types.Preference "Target workspace preference"));
-      let ambient_keepers_dir = Filename.concat dir "ambient-keepers" in
-      Memory_io.For_testing.with_keepers_dir ambient_keepers_dir (fun () ->
-        Memory_io.append_fact
-          ~keeper_id:"ambient"
-          (fact ~category:Types.Preference "Ambient workspace preference");
-        let json =
-          Memory_subsystems.dashboard_memory_subsystems_http_json
-            ~config
-            ~include_memory_entries:false
-            (request "/dashboard/memory-subsystems?limit=100")
-        in
-        let user_model = Json.(json |> member "user_model") in
-        let items = Json.(user_model |> member "items" |> to_list) in
-        let claims =
-          items |> List.map (fun item -> Json.(item |> member "claim" |> to_string))
-        in
-        check (list string) "scoped claims" [ "Target workspace preference" ] claims))
-;;
-
-let skill_candidate () =
-  let procedure : P.procedure =
-    { id = "dashboard-visible-skill"
-    ; agent_name = "keeper"
-    ; pattern = "When the same repair loop succeeds repeatedly, draft a skill"
-    ; evidence = [ "proof-store://abc"; "proof-store://def"; "proof-store://ghi" ]
-    ; success_count = 3
-    ; failure_count = 0
-    ; confidence = 1.0
-    ; created_at = 0.0
-    ; last_applied = 0.0
-    }
-  in
-  match Projection.candidate_of_procedure procedure with
-  | Some candidate -> candidate
-  | None -> fail "expected dashboard skill candidate"
-;;
-
-let test_http_json_surfaces_draft_skill_candidates () =
-  let dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () -> rm_rf dir)
-    (fun () ->
-      let config = Workspace_utils.default_config dir in
-      let candidate = skill_candidate () in
-      (match Store.write_candidate ~base_path:dir candidate with
-       | Ok _ -> ()
-       | Error msg -> fail msg);
-      let json =
-        Memory_subsystems.dashboard_memory_subsystems_http_json
-          ~config
-          ~include_memory_entries:false
-          (request "/dashboard/memory-subsystems?limit=100")
-      in
-      let drafts = Json.(json |> member "draft_skill_candidates") in
-      check int "draft total" 1 Json.(drafts |> member "total" |> to_int);
-      check int "draft shown" 1 Json.(drafts |> member "shown" |> to_int);
-      check string "draft index path"
-        (Store.index_path ~base_path:dir)
-        Json.(drafts |> member "index_path" |> to_string);
-      let item =
-        match Json.(drafts |> member "items" |> to_list) with
-        | [ item ] -> item
-        | _ -> fail "expected one draft skill candidate"
-      in
-      check string "candidate id" candidate.id Json.(item |> member "id" |> to_string);
-      check string "candidate state" "candidate"
-        Json.(item |> member "promotion_state" |> to_string);
-       check string "skill path suffix" "SKILL.md"
-         (Filename.basename Json.(item |> member "skill_md_path" |> to_string)))
 ;;
 
 let test_http_json_surfaces_delegation_requests () =
@@ -285,7 +145,6 @@ let test_http_json_surfaces_delegation_requests () =
 let shared_fact ?(observed_by = []) ?(last_verified_at = 10.0) claim : Types.fact =
   { claim
   ; category = Types.Fact
-  ; external_ref = None
   ; claim_kind = None
   ; source = { trace_id = "shared"; turn = 1; tool_call_id = None }
   ; observed_by
@@ -343,24 +202,19 @@ let append_malformed_recall_record ~(config : Workspace_utils.config) =
       ])
 ;;
 
-let legacy_unstructured_fallback_fact_key () =
-  Types.claim_identity
-    (fact (Types.librarian_unstructured_fallback_claim_prefix ^ " (provider): raw"))
-;;
-
 let test_http_json_surfaces_memory_quality_summary () =
   let dir = temp_dir () in
   Fun.protect
     ~finally:(fun () -> rm_rf dir)
     (fun () ->
        let config = Workspace_utils.default_config dir in
-       let fallback_key = legacy_unstructured_fallback_fact_key () in
+       let observation_key = Types.claim_identity (fact "provider diagnostic") in
        append_recall_record
          ~config
          ~keeper_id:"keeper-a"
          ~trace_id:"trace-1"
          ~turn:1
-         ~injected_fact_keys:[ "id:stable"; fallback_key ]
+         ~injected_fact_keys:[ "id:stable"; observation_key ]
          ~injected_episode_keys:[]
          ~n_facts_in_store:10
          ();
@@ -586,14 +440,6 @@ let () =
             `Quick
             test_http_json_explicitly_disabled_entries_surface
         ; test_case
-            "surfaces user model projection"
-            `Quick
-            test_http_json_surfaces_user_model_projection
-        ; test_case
-            "user model projection reads config base path"
-            `Quick
-            test_http_json_user_model_uses_config_base_path
-        ; test_case
             "hebbian derives from shared facts"
             `Quick
             test_http_json_hebbian_derives_from_shared_facts
@@ -613,10 +459,6 @@ let () =
             "hebbian dedupes duplicate observers"
             `Quick
             test_http_json_hebbian_dedupes_duplicate_observers
-        ; test_case
-            "surfaces draft skill candidates"
-            `Quick
-            test_http_json_surfaces_draft_skill_candidates
         ; test_case
             "surfaces delegation requests"
             `Quick

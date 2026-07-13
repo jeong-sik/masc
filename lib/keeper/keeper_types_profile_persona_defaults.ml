@@ -29,6 +29,17 @@ let load_from_path ~name path : (keeper_profile_defaults, load_error) result =
           | Some v -> v
           | None -> `Null
         in
+        let removed_fields =
+          [ "tool_access"; "tool_denylist" ]
+          |> List.filter (fun key ->
+            Option.is_some (Json_util.assoc_member_opt key keeper_json))
+        in
+        if removed_fields <> [] then
+          error Persona_parse_error
+            (Printf.sprintf
+               "removed persona keeper fields are no longer supported: %s"
+               (String.concat ", " removed_fields))
+        else
         let per_provider_timeout_state, per_provider_timeout =
           Normalizers.per_provider_timeout_of_json_field
             ~source:(Printf.sprintf "persona profile %s" path)
@@ -57,8 +68,6 @@ let load_from_path ~name path : (keeper_profile_defaults, load_error) result =
               autoboot_enabled = None;
               mention_targets = Safe_ops.json_string_list "mention_targets" keeper_json;
               proactive_enabled = Safe_ops.json_bool_opt "proactive_enabled" keeper_json;
-              proactive_idle_sec = Safe_ops.json_int_opt "proactive_idle_sec" keeper_json;
-              proactive_cooldown_sec = Safe_ops.json_int_opt "proactive_cooldown_sec" keeper_json;
               shards =
                 (match Safe_ops.json_string_list "shards" keeper_json with
                  | [] -> None
@@ -68,10 +77,6 @@ let load_from_path ~name path : (keeper_profile_defaults, load_error) result =
               sandbox_image = None;
               network_mode = None;
               multimodal_policy = None;
-              tool_access = None;
-              tool_denylist =
-                Normalizers.normalize_name_list_opt
-                  (Safe_ops.json_string_list "tool_denylist" keeper_json);
               active_goal_ids = None;
               telemetry_feedback_enabled =
                 Safe_ops.json_bool_opt "telemetry_feedback_enabled" keeper_json;
@@ -79,7 +84,7 @@ let load_from_path ~name path : (keeper_profile_defaults, load_error) result =
                 Safe_ops.json_int_opt "telemetry_feedback_window_hours" keeper_json;
               per_provider_timeout_state;
               per_provider_timeout;
-              always_approve = Safe_ops.json_bool_opt "always_approve" keeper_json;
+              always_allow = Safe_ops.json_bool_opt "always_allow" keeper_json;
               oas_env = [];
               unknown_toml_keys = [];
               }

@@ -1,10 +1,9 @@
-// Goal Manager — goal-first planning surface with health, detail, and evidence.
+// Goal Manager — goal-first planning surface with explicit phase, detail, and evidence.
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useCallback, useEffect, useMemo, useState } from 'preact/hooks'
 import { SECONDS_PER_HOUR } from '../../lib/format-time'
-import { clampPct } from '../../lib/format-number'
 import { fetchDashboardGoalDetail, fetchDashboardGoalsTree } from '../../api/dashboard'
 import { currentDashboardActor } from '../../api/core'
 import { callMcpTool } from '../../api/mcp'
@@ -27,8 +26,6 @@ import { ringFocusClasses } from '../common/ring'
 import { trustDispositionLabel } from '../fsm-hub-types'
 import { TimeAgo } from '../common/time-ago'
 import { TaskCreateForm } from '../task-manage/task-create-form'
-import { GoalDossier } from '../memory/goal-dossier'
-import type { GoalDossierProps, GoalDossierRelatedItem } from '../memory/goal-dossier'
 import type {
   DashboardGoalDetailResponse,
   DashboardWorkspaceFsmViolation,
@@ -39,14 +36,11 @@ import type {
   GoalTreeNode,
   GoalTreeTask,
   GoalTreeSummary,
-  GoalVerificationRequest,
-  GoalVerificationSummary,
 } from '../../types'
 import {
   priorityStars,
   countAwaitingVerificationTasks,
   countAwaitingVerificationInTree,
-  countGoalVerificationInTree,
   type GoalPhaseFilter,
   goalPhaseLabel,
   goalPhaseStatus,
@@ -61,66 +55,20 @@ import {
   goalTaskSummaryForNode,
 } from './goal-task-summary'
 import {
-  goalCompletionGateLabel,
   goalCompletionLabel,
   goalCompletionSummaryForNode,
   goalCompletionTone,
 } from './goal-completion-summary'
-import { DECK_CHIP, DECK_LABEL, DECK_META } from './deck-classes'
+import { DECK_CHIP, DECK_LABEL } from './deck-classes'
 import { errorToString } from '../../lib/format-string'
 
 type GoalDetailTab = 'summary' | 'tasks' | 'evidence'
-type GoalTransitionAction = 'request_complete' | 'approve_completion' | 'reject_completion'
+type GoalTransitionAction = 'request_complete'
 
 const CARD_BOX = 'rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3'
 const GOAL_PANEL = 'rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-5'
 const TREE_NODE_CARD_BASE = 'group flex items-start gap-3 rounded-[var(--r-1)] border p-3 transition-colors w-full text-left'
 const TREE_NODE_CARD_ACTIVE = `${TREE_NODE_CARD_BASE} border-[var(--color-state-active-border)] bg-[var(--color-state-active-bg)] shadow-[0_0_0_1px_var(--color-brass-border)]`
-
-const DOSSIER_NODE_TYPES: GoalDossierProps['nodeTypes'] = {
-  task: { kr: '태스크', g: '▣', c: 'var(--status-ok)' },
-  issue: { kr: '이슈', g: '⚠', c: 'var(--status-bad)' },
-  memory: { kr: '기억', g: '◆', c: 'var(--volt)' },
-  snapshot: { kr: '스냅샷', g: '◷', c: 'var(--accent-ice)' },
-}
-
-function taskStateForDossier(status: string, isTerminal: boolean): GoalDossierRelatedItem['state'] {
-  if (status === 'done' || isTerminal) return 'done'
-  if (status === 'blocked' || status === 'block') return 'block'
-  return 'open'
-}
-
-function buildGoalDossierProps(node: GoalTreeNode): GoalDossierProps {
-  return {
-    goal: {
-      title: node.title,
-      kp: node.linked_keeper_names[0] ?? '',
-      ns: 'goal',
-      pct: node.convergence_pct,
-      deadline: node.due_date ? `마감 ${node.due_date}` : undefined,
-    },
-    nodeTypes: DOSSIER_NODE_TYPES,
-    snaps: [
-      { t: 'now', pct: node.convergence_pct, note: 'current', now: true },
-    ],
-    related: {
-      task: node.tasks.map((task) => ({
-        title: task.title,
-        kp: task.assignee ?? 'unassigned',
-        meta: task.status,
-        state: taskStateForDossier(task.status, task.is_terminal),
-      })),
-    },
-    ledger: [
-      ['작업', `${node.task_done_count}/${node.task_count}`],
-      ['연결 키퍼', String(node.linked_keeper_names.length)],
-      ['승인 대기', String(node.pending_approval_count)],
-      ['검증 대기', String(node.pending_verification_count)],
-      ['인프라 위험', String(node.infra_risk_count)],
-      ['목표 달성', attainmentValueLabel(node.attainment)],
-    ],
-  }
-}
 
 /**
  * Pure hierarchy filter for goal tree nodes.
@@ -215,110 +163,13 @@ function flattenGoalTree(nodes: readonly GoalTreeNode[]): GoalTreeNode[] {
   return acc
 }
 
-function badgeLabel(badge: string): string {
-  switch (badge) {
-    case 'awaiting_approval': return '승인 대기'
-    case 'sandbox': return '샌드박스'
-    case 'runtime': return 'Runtime'
-    case 'task_verification_pending': return 'Task 검증 대기'
-    case 'stalled': return '정체'
-    case 'activity_unobserved': return '활동 관측 부족'
-    case 'linkage_warning': return '연결 경고'
-    default: return badge
-  }
-}
-
-function badgeClass(badge: string): string {
-  switch (badge) {
-    case 'awaiting_approval':
-    case 'runtime':
-    case 'task_verification_pending':
-    case 'stalled':
-      return 'border-warn/30 bg-warn/10 text-warn'
-    case 'activity_unobserved':
-      return 'border-card-border/60 bg-[var(--color-bg-elevated)] text-text-muted'
-    case 'sandbox':
-      return 'border-[var(--accent-30)] bg-[var(--accent-10)] text-accent-fg'
-    case 'linkage_warning':
-      return 'border-bad/30 bg-bad/10 text-bad'
-    default:
-      return 'border-card-border/60 bg-[var(--color-bg-elevated)] text-text-body'
-  }
-}
-
-function healthLabel(health: GoalTreeNode['health']): string {
-  switch (health) {
-    case 'done': return '완료'
-    case 'paused': return '일시정지'
-    case 'blocked': return '차단'
-    case 'at_risk': return '위험'
-    case 'on_track': return '정상'
-    default: return health
-  }
-}
-
 // `trustDispositionLabel` moved to `../fsm-hub-types` to deduplicate the
 // 4-entry inline label literal that also lived in
 // `keeper-detail-alert-strip.ts:201-205`. Same map, single SSOT.
 
-function healthClass(health: GoalTreeNode['health']): string {
-  switch (health) {
-    case 'done': return 'border-[var(--color-ok-border)] bg-[var(--color-ok-soft)] text-[var(--color-ok-fg)]'
-    case 'paused': return 'border-warn/30 bg-warn/10 text-warn'
-    case 'blocked': return 'border-bad/35 bg-bad/10 text-bad'
-    case 'at_risk': return 'border-warn/30 bg-warn/10 text-warn'
-    case 'on_track': return 'border-ok/30 bg-ok/10 text-ok'
-    default: return 'border-card-border/60 bg-[var(--color-bg-elevated)] text-text-body'
-  }
-}
-
-function blockerSourceLabel(source: GoalTreeNode['blocking_source']): string {
-  switch (source) {
-    case 'goal_phase': return 'Goal 단계'
-    case 'child_goal': return '하위 Goal'
-    case 'approval': return '승인'
-    case 'keeper_runtime': return '키퍼 런타임'
-    case 'task_fsm': return 'Task FSM'
-    case 'goal_linkage': return 'Goal 연결'
-    case 'stalled': return '정체'
-    default: return source
-  }
-}
-
-function humanizeBlockingReason(reason: string): string {
-  switch (reason) {
-    case 'tool_route_recoverable_failure': return '도구 라우팅 복구 필요'
-    case 'degraded_retry': return '재시도 중 (성능 저하)'
-    case 'reaction_chain_break': return '반응 체인 단절'
-    case 'awaiting_verification': return '검증 대기'
-    case 'awaiting_approval': return '승인 대기'
-    case 'stagnant': return '정체'
-    case 'no_recent_activity': return '최근 활동 없음'
-    default: return reason
-  }
-}
-
-function blockerSourceClass(source: GoalTreeNode['blocking_source']): string {
-  switch (source) {
-    case 'goal_phase':
-    case 'keeper_runtime':
-      return 'border-bad/25 bg-bad/10 text-bad'
-    case 'child_goal':
-    case 'approval':
-    case 'task_fsm':
-    case 'goal_linkage':
-    case 'stalled':
-      return 'border-warn/25 bg-warn/10 text-warn'
-    default:
-      return 'border-card-border/60 bg-[var(--color-bg-elevated)] text-text-body'
-  }
-}
-
 function goalFsmStateLabel(state: GoalFsmProjection['state']): string {
   switch (state) {
     case 'executing': return '실행'
-    case 'verification_gate': return '검증 게이트'
-    case 'approval_gate': return '승인 게이트'
     case 'blocked': return '차단'
     case 'paused': return '일시정지'
     case 'completed': return '완료'
@@ -334,36 +185,20 @@ function goalFsmObservationLabel(
     case 'runtime': return 'runtime evidence'
     case 'approval': return 'approval event'
     case 'task': return 'task update'
-    case 'child': return 'child goal'
     case 'goal_metadata': return 'goal metadata only'
     default: return observation
   }
 }
 
-function goalFsmStagnationLabel(
-  status: GoalFsmProjection['stagnation_status'],
-): string {
-  switch (status) {
-    case 'recent': return 'recent'
-    case 'stalled': return 'stalled'
-    case 'unobserved': return 'unobserved'
-    default: return status
-  }
-}
-
 function GoalFsmBadge({ fsm }: { fsm: GoalFsmProjection }) {
   const toneClass =
-    fsm.stagnation_status === 'stalled'
-      ? 'border-warn/30 bg-warn/10 text-warn'
-      : fsm.state === 'blocked'
-        ? 'border-bad/35 bg-bad/10 text-bad'
-        : fsm.state === 'verification_gate' || fsm.state === 'approval_gate'
-          ? 'border-[var(--color-warn-border)] bg-[var(--color-warn-soft)] text-[var(--color-warn-fg)]'
-          : 'border-card-border/60 bg-[var(--color-bg-elevated)] text-text-body'
+    fsm.state === 'blocked'
+      ? 'border-bad/35 bg-bad/10 text-bad'
+      : 'border-card-border/60 bg-[var(--color-bg-elevated)] text-text-body'
   return html`
     <span
       class="inline-flex items-center rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-semibold uppercase ${toneClass}"
-      title=${`source=${fsm.source}; activity=${goalFsmObservationLabel(fsm.activity_observation)}; stagnation=${goalFsmStagnationLabel(fsm.stagnation_status)}`}
+      title=${`source=${fsm.source}; activity=${goalFsmObservationLabel(fsm.activity_observation)}`}
     >
       Goal FSM · ${goalFsmStateLabel(fsm.state)}
     </span>
@@ -399,132 +234,6 @@ const detailLoading = signal(false)
 const detailError = signal<string | null>(null)
 const detailTab = signal<GoalDetailTab>('summary')
 let detailRequestSeq = 0
-
-const EMPTY_GOAL_VERIFICATION_SUMMARY: GoalVerificationSummary = {
-  effective_policy: null,
-  open_request: null,
-  latest_request: null,
-  approve_count: 0,
-  reject_count: 0,
-  remaining_possible: 0,
-}
-
-function verificationPrincipalLabel(principal: GoalVerificationRequest['requested_by']) {
-  return principal.display_name ?? principal.id
-}
-
-function verificationStatusLabel(
-  request: GoalVerificationRequest | null,
-  isOpen: boolean,
-) {
-  if (!request) return '정책 설정됨'
-  if (isOpen) return '확인 대기'
-  switch (request.status) {
-    case 'approved': return '확인됨'
-    case 'rejected': return '반려됨'
-    case 'cancelled': return '취소됨'
-    default: return request.status
-  }
-}
-
-function verificationStatusClass(
-  request: GoalVerificationRequest | null,
-  isOpen: boolean,
-) {
-  if (!request) return 'border-card-border/60 bg-[var(--color-bg-elevated)] text-text-muted'
-  if (isOpen) return 'border-[var(--color-warn-border)] bg-[var(--color-warn-soft)] text-[var(--color-warn-fg)]'
-  switch (request.status) {
-    case 'approved': return 'border-ok/25 bg-ok/10 text-ok'
-    case 'rejected': return 'border-bad/25 bg-bad/10 text-bad'
-    case 'cancelled': return 'border-warn/25 bg-warn/10 text-warn'
-    default: return 'border-card-border/60 bg-[var(--color-bg-elevated)] text-text-body'
-  }
-}
-
-function GoalVerificationEvidencePanel({
-  summary,
-  compact = false,
-}: {
-  summary: GoalVerificationSummary
-  compact?: boolean
-}) {
-  const request = summary.open_request ?? summary.latest_request ?? null
-  const isOpen = Boolean(summary.open_request)
-  const policy = request?.policy_snapshot ?? summary.effective_policy ?? null
-  if (!policy && !request) return null
-
-  const requiredVerdicts = policy?.required_verdicts ?? 0
-  const statusClass = verificationStatusClass(request, isOpen)
-  const votes = request?.votes ?? []
-  const panelClass = compact
-    ? 'ml-6 rounded-[var(--r-0)] border border-[var(--color-warn-border)] bg-[var(--color-warn-soft)] p-2 text-xs text-[var(--color-warn-fg)]'
-    : CARD_BOX
-
-  return html`
-    <div class=${panelClass}>
-      <div class="flex flex-wrap items-center justify-between gap-2">
-        <div class="${DECK_LABEL}">AI 확인</div>
-        <span class="rounded-[var(--r-0)] border px-1.5 py-0.5 font-mono text-3xs font-semibold ${statusClass}">
-          ${verificationStatusLabel(request, isOpen)}
-        </span>
-      </div>
-      <div class="mt-2 flex flex-wrap items-center gap-1.5 font-mono text-3xs text-[var(--color-fg-secondary)]">
-        <span class="rounded-[var(--r-0)] border border-[var(--color-warn-border)] bg-[var(--color-warn-soft)] px-1.5 py-0.5 text-[var(--color-warn-fg)]">
-          quorum ${summary.approve_count}/${requiredVerdicts}
-        </span>
-        <span>reject ${summary.reject_count}</span>
-        <span>remaining ${summary.remaining_possible}</span>
-      </div>
-      ${request ? html`
-        <div class="mt-2 flex flex-wrap gap-2 font-mono text-3xs text-[var(--color-fg-muted)]">
-          <span>request ${request.id}</span>
-          <span>target ${request.target_phase}</span>
-          <span>opened <${TimeAgo} timestamp=${request.created_at} /></span>
-          ${request.resolved_at ? html`
-            <span>resolved <${TimeAgo} timestamp=${request.resolved_at} /></span>
-          ` : null}
-        </div>
-      ` : null}
-      ${policy && policy.eligible_principals.length > 0 ? html`
-        <div class="mt-3 flex flex-wrap gap-1.5">
-          ${policy.eligible_principals.map(principal => html`
-            <span key=${principal.id} class="${DECK_CHIP} font-medium text-[var(--color-fg-secondary)]">
-              ${verificationPrincipalLabel(principal)}
-            </span>
-          `)}
-        </div>
-      ` : null}
-      ${votes.length > 0 ? html`
-        <div class="mt-3 flex flex-col gap-2">
-          ${votes.map(vote => {
-            const evidenceRefs = vote.evidence_refs ?? []
-            return html`
-              <div key=${`${vote.principal.id}:${vote.submitted_at}`} class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] p-2 text-xs text-[var(--color-fg-secondary)]">
-                <div class="flex flex-wrap items-center gap-2">
-                  <span class="font-semibold text-[var(--color-fg-primary)]">${verificationPrincipalLabel(vote.principal)}</span>
-                  <span class="${DECK_CHIP} uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">${vote.decision}</span>
-                  <span class="${DECK_META}"><${TimeAgo} timestamp=${vote.submitted_at} /></span>
-                </div>
-                ${vote.note ? html`
-                  <div class="mt-1 leading-relaxed text-[var(--color-fg-muted)]">${vote.note}</div>
-                ` : null}
-                ${evidenceRefs.length > 0 ? html`
-                  <div class="mt-2 flex flex-wrap gap-1">
-                    ${evidenceRefs.map(ref => html`
-                      <code key=${ref} class="${DECK_CHIP} text-[var(--color-fg-secondary)]">${ref}</code>
-                    `)}
-                  </div>
-                ` : null}
-              </div>
-            `
-          })}
-        </div>
-      ` : request ? html`
-        <div class="mt-3 text-xs text-text-muted">verifier vote 없음</div>
-      ` : null}
-    </div>
-  `
-}
 
 function toggleNode(id: string) {
   const next = new Set(expandedNodes.value)
@@ -598,25 +307,6 @@ async function refreshGoalDetail(goalId: string) {
   }
 }
 
-function ConvergenceBar({ pct, size = 'md' }: { pct: number; size?: 'sm' | 'md' }) {
-  const clamped = clampPct(pct)
-  const barColor =
-    clamped >= 80 ? 'var(--color-status-ok)'
-    : clamped >= 50 ? 'var(--color-amber-bright)'
-    : clamped >= 20 ? 'var(--color-orange-400)'
-    : 'var(--color-status-err)'
-
-  const h = size === 'sm' ? 'h-1.5' : 'h-2.5'
-  return html`
-    <div class="flex items-center gap-2">
-      <div class="flex-1 ${h} rounded-[var(--r-0)] bg-[var(--color-bg-elevated)] overflow-hidden">
-        <div class="${h} rounded-[var(--r-0)] transition-[width] duration-[var(--t-xslow)]" style="width:${clamped}%;background:${barColor}"></div>
-      </div>
-      <span class="${DECK_META} w-9 text-right font-semibold tabular-nums">${clamped}%</span>
-    </div>
-  `
-}
-
 // Task-derived attainment_pct must not read as a metric result when the goal
 // declares a metric that no evaluator measures (task-1743): show "미평가"
 // rather than a percentage. Distinct from "미측정" (no task data at all).
@@ -672,11 +362,9 @@ function completionToneClass(tone: 'default' | 'ok' | 'warn' | 'bad'): string {
 function TreeSummary({
   summary,
   awaitingVerificationCount,
-  goalVerificationCount,
 }: {
   summary: GoalTreeSummary
   awaitingVerificationCount: number
-  goalVerificationCount: number
 }) {
   return html`
     <div class="grid grid-cols-[repeat(auto-fit,minmax(112px,1fr))] gap-2">
@@ -684,62 +372,28 @@ function TreeSummary({
         <div class="font-mono text-xl font-semibold text-[var(--color-fg-primary)] tabular-nums">${summary.total_goals}</div>
         <div class="mt-1 ${DECK_LABEL}">전체 목표</div>
       </div>
-      <div class="rounded-[var(--r-0)] border border-ok/25 bg-ok/10 p-3 text-center" title="위험·차단·일시정지가 아닌 진행 중 목표">
-        <div class="font-mono text-xl font-semibold text-ok tabular-nums">${summary.on_track_goals}</div>
-        <div class="mt-1 font-mono text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-ok/80">정상</div>
+      <div class="${CARD_BOX} text-center">
+        <div class="font-mono text-xl font-semibold text-[var(--color-fg-primary)] tabular-nums">${summary.phase_counts.executing ?? 0}</div>
+        <div class="mt-1 ${DECK_LABEL}">실행</div>
       </div>
-      <div class="rounded-[var(--r-0)] border border-warn/25 bg-warn/10 p-3 text-center">
-        <div class="font-mono text-xl font-semibold text-warn tabular-nums">${summary.at_risk_goals}</div>
-        <div class="mt-1 font-mono text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-warn/80">위험</div>
+      <div class="${CARD_BOX} text-center">
+        <div class="font-mono text-xl font-semibold text-[var(--color-fg-primary)] tabular-nums">${summary.phase_counts.completed ?? 0}</div>
+        <div class="mt-1 ${DECK_LABEL}">완료</div>
       </div>
-      <div class="rounded-[var(--r-0)] border border-bad/25 bg-bad/10 p-3 text-center">
-        <div class="font-mono text-xl font-semibold text-bad tabular-nums">${summary.blocked_goals}</div>
-        <div class="mt-1 font-mono text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-bad/80">차단</div>
+      <div class="${CARD_BOX} text-center">
+        <div class="font-mono text-xl font-semibold text-[var(--color-fg-primary)] tabular-nums">${summary.phase_counts.blocked ?? 0}</div>
+        <div class="mt-1 ${DECK_LABEL}">Blocked phase</div>
       </div>
       <div class="${CARD_BOX} text-center">
         <div class="font-mono text-xl font-semibold text-[var(--color-fg-primary)] tabular-nums">${summary.pending_approvals}</div>
         <div class="mt-1 ${DECK_LABEL}">승인 대기</div>
       </div>
-      ${goalVerificationCount > 0 ? html`
-        <div class="rounded-[var(--r-0)] border border-[var(--color-warn-border)] bg-[var(--color-warn-soft)] p-3 text-center">
-          <div class="font-mono text-xl font-semibold text-[var(--color-warn-fg)] tabular-nums">${goalVerificationCount}</div>
-          <div class="mt-1 font-mono text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-warn-fg)]">Goal 검증 대기</div>
-        </div>
-      ` : null}
       ${awaitingVerificationCount > 0 ? html`
         <div class="rounded-[var(--r-0)] border border-[var(--color-brass-border)] bg-[var(--color-brass-soft)] p-3 text-center">
           <div class="font-mono text-xl font-semibold text-[var(--color-accent-fg)] tabular-nums">${awaitingVerificationCount}</div>
           <div class="mt-1 font-mono text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-accent-fg)]/80">Task 검증 대기</div>
         </div>
       ` : null}
-      <div class="${CARD_BOX}">
-        <div class="mb-2 ${DECK_LABEL}">전체 수렴도</div>
-        <${ConvergenceBar} pct=${summary.overall_convergence_pct} />
-      </div>
-    </div>
-  `
-}
-
-function HealthBadge({ health }: { health: GoalTreeNode['health'] }) {
-  return html`
-    <span class="inline-flex items-center rounded-[var(--r-0)] border px-1.5 py-0.5 font-mono text-3xs font-semibold uppercase tracking-[var(--track-caps)] ${healthClass(health)}">
-      ${healthLabel(health)}
-    </span>
-  `
-}
-
-function GoalBadges({ badges }: { badges: string[] }) {
-  if (badges.length === 0) return null
-  return html`
-    <div class="flex flex-wrap gap-1">
-      ${badges.map(badge => html`
-        <span
-          key=${badge}
-          class="inline-flex items-center rounded-[var(--r-0)] border px-1.5 py-0.5 font-mono text-3xs font-semibold uppercase tracking-[var(--track-caps)] ${badgeClass(badge)}"
-        >
-          ${badgeLabel(badge)}
-        </span>
-      `)}
     </div>
   `
 }
@@ -774,7 +428,6 @@ function goalCompletionPctLabel(summary: GoalCompletionSummary): string {
 function goalCompletionTruthTitle(
   summary: GoalCompletionSummary,
   label: string,
-  gateLabel: string,
 ): string {
   const pct = summary.pct == null ? 'pct=unmeasured' : `pct=${summary.pct}%`
   const metric = `metric_evaluation=${summary.metric_evaluation}`
@@ -783,7 +436,7 @@ function goalCompletionTruthTitle(
     summary.metric_evaluation === 'unevaluated'
       ? '; pct is task-derived/proxy data, not an evaluated goal metric'
       : ''
-  return `Completion: ${label}; ${pct}; ${source}; ${metric}; ${gateLabel}${unevaluated}`
+  return `Completion: ${label}; ${pct}; ${source}; ${metric}${unevaluated}`
 }
 
 function GoalCompletionStrip({
@@ -797,8 +450,7 @@ function GoalCompletionStrip({
   const tone = goalCompletionTone(summary)
   const label = goalCompletionLabel(summary)
   const pctLabel = goalCompletionPctLabel(summary)
-  const gateLabel = goalCompletionGateLabel(summary)
-  const title = goalCompletionTruthTitle(summary, label, gateLabel)
+  const title = goalCompletionTruthTitle(summary, label)
 
   if (compact) {
     return html`
@@ -820,9 +472,7 @@ function GoalCompletionStrip({
           <div class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-text-muted">완료 판정</div>
           <div class="mt-1 text-sm text-text-body">${label} · ${pctLabel}</div>
         </div>
-        <span class="rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-semibold ${completionToneClass(tone)}">
-          ${gateLabel}
-        </span>
+        <span class="rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-semibold ${completionToneClass(tone)}">${label}</span>
       </div>
       <div class="grid grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-2 text-xs">
         <div class="rounded-[var(--r-1)] border border-card-border/50 bg-[var(--color-bg-surface)] p-2">
@@ -839,14 +489,6 @@ function GoalCompletionStrip({
         <div class="rounded-[var(--r-1)] border border-card-border/50 bg-[var(--color-bg-surface)] p-2">
           <div class="text-3xs uppercase text-text-muted">task open</div>
           <div class="mt-1 font-semibold text-text-strong">${summary.task_open}</div>
-        </div>
-        <div class="rounded-[var(--r-1)] border border-card-border/50 bg-[var(--color-bg-surface)] p-2">
-          <div class="text-3xs uppercase text-text-muted">verifier</div>
-          <div class="mt-1 font-semibold text-text-strong">${summary.requires_verifier ? 'required' : 'none'}</div>
-        </div>
-        <div class="rounded-[var(--r-1)] border border-card-border/50 bg-[var(--color-bg-surface)] p-2">
-          <div class="text-3xs uppercase text-text-muted">blocker</div>
-          <div class="mt-1 font-semibold text-text-strong">${summary.blocking_source}</div>
         </div>
       </div>
     </div>
@@ -909,16 +551,12 @@ function GoalTaskRelationStrip({
 function goalTransitionLabel(action: GoalTransitionAction): string {
   switch (action) {
     case 'request_complete': return 'Request completion'
-    case 'approve_completion': return 'Approve completion'
-    case 'reject_completion': return 'Reject completion'
   }
 }
 
 function goalTransitionStatusLabel(action: GoalTransitionAction): string {
   switch (action) {
     case 'request_complete': return 'requested completion'
-    case 'approve_completion': return 'approved completion'
-    case 'reject_completion': return 'rejected completion'
   }
 }
 
@@ -934,10 +572,6 @@ function lifecycleActionsForGoal(node: GoalTreeNode): Array<{
 
   if (summary.ready_to_request_completion) {
     actions.push({ action: 'request_complete', variant: 'primary' })
-  }
-  if (node.phase === 'awaiting_approval') {
-    actions.push({ action: 'approve_completion', variant: 'ok' })
-    actions.push({ action: 'reject_completion', variant: 'danger' })
   }
   return actions
 }
@@ -1031,7 +665,6 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
   const isExpanded = expandedNodes.value.has(node.id)
   const hasContent = node.children.length > 0 || node.tasks.length > 0
   const isSelected = selectedGoalId.value === node.id
-  const verificationSummary = node.verification_summary ?? EMPTY_GOAL_VERIFICATION_SUMMARY
   const workspaceViolations = workspaceViolationsForGoal(node.id)
   const workspaceHasError = workspaceViolations.some(v => v.severity === 'error')
   const indent = depth * 20
@@ -1065,7 +698,6 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
           </div>
 
           <div class="flex flex-wrap items-center gap-2.5 text-2xs text-text-muted">
-            <${HealthBadge} health=${node.health} />
             <${StatusBadge} status=${node.status} />
             ${node.task_count > 0 ? html`<div class="w-32"><${TaskProgressBar} done=${node.task_done_count} total=${node.task_count} size="sm" /></div>` : null}
             <${GoalCompletionStrip} node=${node} compact />
@@ -1087,20 +719,7 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
                 </span>
               ` : null
             })()}
-            ${node.pending_verification_count > 0 ? html`
-              <span class="rounded-[var(--r-1)] border border-[var(--color-warn-border)] bg-[var(--color-warn-soft)] px-2 py-0.5 text-3xs font-medium text-[var(--color-warn-fg)]">
-                Goal 검증 대기 ${node.pending_verification_count}
-              </span>
-            ` : null}
-            ${node.phase === 'awaiting_approval' ? html`
-              <span class="rounded-[var(--r-1)] border border-rose-400/30 bg-rose-400/10 px-2 py-0.5 text-3xs font-medium text-rose-200">
-                승인 대기
-              </span>
-            ` : null}
             ${node.child_count > 0 ? html`<span>${node.child_count} 하위 목표</span>` : null}
-            ${verificationSummary.effective_policy ? html`
-              <span>quorum ${verificationSummary.approve_count}/${verificationSummary.effective_policy.required_verdicts}</span>
-            ` : null}
             ${node.pending_approval_count > 0 ? html`
               <span class="rounded-[var(--r-1)] border border-warn/30 bg-warn/10 px-2 py-0.5 text-3xs font-medium text-warn">
                 approval ${node.pending_approval_count}
@@ -1114,19 +733,6 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
                 FSM ${workspaceViolations.length}
               </span>
             ` : null}
-            ${node.blocking_source !== 'none' ? html`
-              <span
-                class="rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-medium ${blockerSourceClass(node.blocking_source)}"
-                title=${node.blocking_reason}
-              >
-                ${blockerSourceLabel(node.blocking_source)}
-              </span>
-            ` : null}
-            ${node.infra_risk_count > 0 ? html`
-              <span class="rounded-[var(--r-1)] border border-bad/25 bg-bad/10 px-2 py-0.5 text-3xs font-medium text-bad">
-                infra ${node.infra_risk_count}
-              </span>
-            ` : null}
             ${node.latest_keeper_ref ? html`
               <span class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--color-bg-elevated)] px-2 py-0.5 text-3xs font-medium text-text-body">
                 ${node.latest_keeper_ref}${node.latest_turn_ref != null ? ` · turn ${node.latest_turn_ref}` : ''}
@@ -1134,21 +740,6 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
             ` : null}
           </div>
 
-          <div class="mt-2 max-w-110">
-            <${ConvergenceBar} pct=${node.convergence_pct} size="sm" />
-          </div>
-
-          ${node.blocking_source !== 'none' && node.blocking_reason ? html`
-            <div class="mt-2 text-xs leading-relaxed text-text-muted">
-              ${humanizeBlockingReason(node.blocking_reason)}
-            </div>
-          ` : null}
-
-          ${node.badges.length > 0 ? html`
-            <div class="mt-2">
-              <${GoalBadges} badges=${node.badges} />
-            </div>
-          ` : null}
         </div>
 
         <div class="flex shrink-0 flex-col items-end gap-1">
@@ -1163,7 +754,6 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
 
       ${isExpanded ? html`
         <div class="mt-1.5 flex flex-col gap-1.5">
-          <${GoalVerificationEvidencePanel} summary=${verificationSummary} compact />
           ${node.tasks.length > 0 ? html`
             <div class="ml-6 flex flex-col gap-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-2">
               <div class="mb-1 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-text-dim">연결된 태스크</div>
@@ -1229,9 +819,9 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
   const execution = trust?.execution_summary ?? null
   const latestEvent = keeper.latest_causal_event ?? trust?.latest_causal_event ?? null
   const trustSummary =
-    trust?.attention_reason?.trim()
+    trust?.snapshot_error?.trim()
+    || trust?.attention_reason?.trim()
     || trust?.disposition_reason?.trim()
-    || execution?.mutation_guard_summary?.trim()
     || execution?.sandbox_summary?.trim()
     || null
   const runtimeAttemptCount = execution?.provider_attempt_count
@@ -1252,6 +842,7 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
     operatorDispositionReason !== null && operatorDispositionReason !== trustSummary
   const shouldShowTrustSummary =
     Boolean(trustSummary)
+    || Boolean(trust?.snapshot_status)
     || Boolean(trust?.approval_state?.state)
     || Boolean(trust?.next_human_action)
     || Boolean(latestTerminalCode)
@@ -1303,6 +894,9 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
             <div class="mt-2 text-xs leading-relaxed text-text-body">종료: ${latestTerminalCode}${latestTerminalSummary ? html` · ${latestTerminalSummary}` : null}</div>
           ` : null}
           <div class="mt-2 flex flex-wrap gap-2 text-3xs text-text-muted">
+            ${trust?.snapshot_status ? html`
+              <span>snapshot ${trust.snapshot_status}</span>
+            ` : null}
             ${trust?.approval_state?.state ? html`
               <span>승인 상태 ${trust.approval_state.state}${trust.approval_state.latest_event_at ? html` · <${TimeAgo} timestamp=${trust.approval_state.latest_event_at} />` : null}</span>
             ` : null}
@@ -1419,8 +1013,6 @@ function GoalDetailPanel({
   }
 
   const detail = data?.goal.id === selectedNode.id ? data : null
-  const verificationSummary = selectedNode.verification_summary ?? EMPTY_GOAL_VERIFICATION_SUMMARY
-
   return html`
     <section
       class=${`${GOAL_PANEL} flex flex-col gap-4`}
@@ -1433,7 +1025,6 @@ function GoalDetailPanel({
           <div class="text-2xs font-semibold uppercase tracking-[var(--track-label)] text-text-muted">목표 상세</div>
           <h3 class="mt-1 text-xl font-semibold tracking-[-0.02em] text-text-strong">${selectedNode.title}</h3>
           <div class="mt-2 flex flex-wrap items-center gap-2">
-            <${HealthBadge} health=${selectedNode.health} />
             <${StatusBadge} status=${selectedNode.status} />
             <${StatusBadge} status=${goalPhaseStatus(selectedNode.phase)} label=${goalPhaseLabel(selectedNode.phase)} />
             <${GoalFsmBadge} fsm=${selectedNode.goal_fsm} />
@@ -1464,26 +1055,9 @@ function GoalDetailPanel({
         </div>
       </div>
 
-      <div class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2 text-sm text-text-body">
-        ${selectedNode.status_reason}
-      </div>
-
       <${GoalCompletionStrip} node=${selectedNode} />
       <${GoalTaskRelationStrip} node=${selectedNode} />
       <${GoalLifecycleActionPanel} node=${selectedNode} />
-      ${(() => {
-        const dossierProps = buildGoalDossierProps(selectedNode)
-        return html`
-          <${GoalDossier}
-            goal=${dossierProps.goal}
-            nodeTypes=${dossierProps.nodeTypes}
-            snaps=${dossierProps.snaps}
-            related=${dossierProps.related}
-            ledger=${dossierProps.ledger}
-            testId="goal-dossier-card"
-          />
-        `
-      })()}
 
       <${DetailTabs} active=${activeTab} />
 
@@ -1507,10 +1081,6 @@ function GoalDetailPanel({
               <div class="text-3xs uppercase text-text-muted">activity</div>
               <div class="mt-1 font-semibold text-text-strong">${goalFsmObservationLabel(selectedNode.goal_fsm.activity_observation)}</div>
             </div>
-            <div class="rounded-[var(--r-1)] border border-card-border/50 bg-[var(--color-bg-surface)] p-2">
-              <div class="text-3xs uppercase text-text-muted">stagnation</div>
-              <div class="mt-1 font-semibold text-text-strong">${goalFsmStagnationLabel(selectedNode.goal_fsm.stagnation_status)}</div>
-            </div>
           </div>
           ${selectedNode.goal_fsm.next_actions.length > 0 ? html`
             <div class="mt-3 flex flex-wrap gap-1.5">
@@ -1521,48 +1091,21 @@ function GoalDetailPanel({
           ` : null}
         </div>
 
-        ${selectedNode.blocking_source !== 'none' ? html`
-          <div class=${CARD_BOX}>
-            <div class="mb-2 flex flex-wrap items-center gap-2">
-              <span class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-text-muted">차단 맥락</span>
-              <span class="rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-semibold ${blockerSourceClass(selectedNode.blocking_source)}">
-                ${blockerSourceLabel(selectedNode.blocking_source)}
-              </span>
-            </div>
-            <div class="text-sm leading-relaxed text-text-body">${selectedNode.blocking_reason ? humanizeBlockingReason(selectedNode.blocking_reason) : selectedNode.status_reason}</div>
-            <div class="mt-3 flex flex-wrap gap-2 text-3xs text-text-muted">
-              ${selectedNode.latest_keeper_ref ? html`
-                <span>keeper ${selectedNode.latest_keeper_ref}</span>
-              ` : null}
-              ${selectedNode.latest_turn_ref != null ? html`
-                <span>turn ${selectedNode.latest_turn_ref}</span>
-              ` : null}
-              ${selectedNode.stalled_since ? html`
-                <span>since <${TimeAgo} timestamp=${selectedNode.stalled_since} /></span>
-              ` : null}
-            </div>
-          </div>
-        ` : null}
-
         <div class="grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-3">
           <${DetailMetric} label="목표 달성" value=${attainmentValueLabel(selectedNode.attainment)} tone=${attainmentTone(selectedNode.attainment)} />
           <${DetailMetric} label="작업" value=${`${selectedNode.task_done_count}/${selectedNode.task_count}`} tone=${selectedNode.task_done_count === selectedNode.task_count && selectedNode.task_count > 0 ? 'ok' : 'default'} />
           <${DetailMetric} label="연결된 키퍼" value=${selectedNode.linked_keeper_names.length} />
           <${DetailMetric} label="승인 대기" value=${selectedNode.pending_approval_count} tone=${selectedNode.pending_approval_count > 0 ? 'warn' : 'default'} />
-          <${DetailMetric} label="목표 검증" value=${selectedNode.pending_verification_count} tone=${selectedNode.pending_verification_count > 0 ? 'warn' : 'default'} />
-          <${DetailMetric} label="인프라 위험" value=${selectedNode.infra_risk_count} tone=${selectedNode.infra_risk_count > 0 ? 'bad' : 'default'} />
-          <${DetailMetric} label="연결 출처" value=${selectedNode.linkage_source} tone=${selectedNode.linkage_warning_count > 0 ? 'warn' : 'default'} />
-          <${DetailMetric} label="최근 활동" value=${selectedNode.stagnation_seconds > 0 ? `${Math.floor(selectedNode.stagnation_seconds / SECONDS_PER_HOUR)}h idle` : 'now'} tone=${selectedNode.badges.includes('stalled') ? 'warn' : 'default'} />
+          <${DetailMetric} label="연결 출처" value=${selectedNode.linkage_source} />
+          <${DetailMetric}
+            label="최근 활동"
+            value=${selectedNode.stagnation_seconds == null
+              ? 'unavailable'
+              : selectedNode.stagnation_seconds > 0
+                ? `${Math.floor(selectedNode.stagnation_seconds / SECONDS_PER_HOUR)}h idle`
+                : 'now'}
+          />
         </div>
-
-        <${GoalVerificationEvidencePanel} summary=${verificationSummary} />
-
-        ${selectedNode.badges.length > 0 ? html`
-          <div class=${CARD_BOX}>
-            <div class="mb-2 text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-text-muted">배지</div>
-            <${GoalBadges} badges=${selectedNode.badges} />
-          </div>
-        ` : null}
 
         <div class=${CARD_BOX}>
           <div class="mb-3 flex items-center justify-between gap-3">
@@ -1590,8 +1133,6 @@ function GoalDetailPanel({
       ${activeTab === 'evidence' ? html`
         <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
           <div class="flex flex-col gap-4">
-            <${GoalVerificationEvidencePanel} summary=${verificationSummary} />
-
             <div class=${CARD_BOX}>
               <div class="mb-3 text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-text-muted">키퍼 준비 상태</div>
               ${detail ? (
@@ -1615,7 +1156,7 @@ function GoalDetailPanel({
                         <div key=${String(approval.id ?? index)} class="rounded-[var(--r-1)] border border-warn/20 bg-warn/6 p-3 text-xs">
                           <div class="flex flex-wrap items-center justify-between gap-2">
                             <strong class="text-text-strong">${String(approval.tool_name ?? '(unknown tool)')}</strong>
-                            <span class="text-text-dim">${String(approval.risk_level ?? '(unknown risk_level)')}</span>
+                            <span class="text-text-dim">Human HITL · nonblocking</span>
                           </div>
                           <div class="mt-2 text-text-muted">${String(approval.input_preview ?? 'pending operator decision')}</div>
                         </div>
@@ -1712,8 +1253,6 @@ export function GoalTree() {
     const counts: Record<GoalPhaseFilter, number> = {
       all: allNodes.length,
       executing: 0,
-      awaiting_verification: 0,
-      awaiting_approval: 0,
       blocked: 0,
       paused: 0,
       completed: 0,
@@ -1772,8 +1311,6 @@ export function GoalTree() {
               chips=${([
                 'all',
                 'executing',
-                'awaiting_verification',
-                'awaiting_approval',
                 'blocked',
                 'paused',
                 'completed',
@@ -1800,7 +1337,6 @@ export function GoalTree() {
           <${TreeSummary}
             summary=${data.summary}
             awaitingVerificationCount=${countAwaitingVerificationInTree(data.tree)}
-            goalVerificationCount=${countGoalVerificationInTree(data.tree)}
           />
         ` : null}
       </section>

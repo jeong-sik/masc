@@ -28,7 +28,6 @@ let contains substring s =
 let fact claim =
   { Types.claim
   ; category = Types.Fact
-  ; external_ref = None
   ; claim_kind = None
   ; source = { Types.trace_id = "t"; turn = 1; tool_call_id = None }
   ; observed_by = []
@@ -148,8 +147,7 @@ let test_consolidate_applies_plan () =
           claims))))
 ;;
 
-(* Below the minimum fact count, the pass skips the LLM and leaves the store. *)
-let test_consolidate_skips_too_few () =
+let test_consolidate_judges_single_fact () =
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
       with_prompts (fun () ->
@@ -169,8 +167,10 @@ let test_consolidate_skips_too_few () =
             ()
         in
         match outcome with
-        | Runtime.Skipped_too_few n -> Alcotest.(check int) "reported count" 1 n
-        | _ -> Alcotest.fail "expected Skipped_too_few"))))
+        | Runtime.Consolidated { before; after } ->
+          Alcotest.(check int) "before" 1 before;
+          Alcotest.(check int) "after" 1 after
+        | _ -> Alcotest.fail "expected Consolidated"))))
 ;;
 
 (* dry_run computes the plan but does not rewrite the store. *)
@@ -486,7 +486,7 @@ let () =
     "keeper_memory_os_consolidation_runtime"
     [ ( "loop"
       , [ Alcotest.test_case "applies the model's plan" `Quick test_consolidate_applies_plan
-        ; Alcotest.test_case "skips when too few facts" `Quick test_consolidate_skips_too_few
+        ; Alcotest.test_case "judges a single fact" `Quick test_consolidate_judges_single_fact
 	        ; Alcotest.test_case "dry-run preserves the store" `Quick test_consolidate_dry_run_preserves_store
         ; Alcotest.test_case "rejects stale snapshots" `Quick test_consolidate_rejects_stale_snapshot
         ; Alcotest.test_case "rejects malformed fact store" `Quick test_consolidate_rejects_malformed_fact_store

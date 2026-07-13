@@ -4,7 +4,6 @@
     See server_dashboard_http_keeper_api_types.mli for rationale. *)
 
 let keeper_api_prefix = "/api/v1/keepers/"
-let keeper_suffix_tools = "/tools"
 let keeper_suffix_config = "/config"
 let keeper_suffix_secrets = "/secrets"
 let keeper_suffix_boot = "/boot"
@@ -57,7 +56,6 @@ let keeper_runtime_trace_cache_key (config : Workspace.config) name ?trace_id
 ;;
 
 type keeper_post_route_kind =
-  | Keeper_post_tools
   | Keeper_post_config
   | Keeper_post_secrets
   | Keeper_post_boot
@@ -79,8 +77,7 @@ let classify_keeper_post_route req_path =
       tlen > plen + String.length suffix
       && String.ends_with ~suffix req_path
     in
-    if ends_with keeper_suffix_tools then Keeper_post_tools
-    else if ends_with keeper_suffix_config then Keeper_post_config
+    if ends_with keeper_suffix_config then Keeper_post_config
     else if ends_with keeper_suffix_secrets then Keeper_post_secrets
     else if ends_with keeper_suffix_boot then Keeper_post_boot
     else if ends_with keeper_suffix_shutdown then Keeper_post_shutdown

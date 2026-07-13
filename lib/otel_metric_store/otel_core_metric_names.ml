@@ -6,7 +6,6 @@
 
 let metric_fd_open = "masc_fd_open"
 let metric_fd_limit = "masc_fd_limit"
-let metric_fd_pressure_active = "masc_fd_pressure_active"
 let metric_mcp_requests = Otel_metric_store_core.declare_counter "masc_requests_total"
 let metric_llm_inference_duration = "masc_llm_inference_duration_seconds"
 let metric_llm_prompt_tok_per_sec = "masc_llm_prompt_tok_per_sec"

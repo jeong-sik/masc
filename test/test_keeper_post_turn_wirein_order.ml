@@ -1,18 +1,14 @@
 (* OCaml-side regression guard for RFC-0065 §3.2.3
  * WireinOrderPinned invariant (PR #14632).
  *
- * The TLA+ spec KeeperPostTurnOrchestration.tla asserts that the
- * post-turn wirein sequence must be exactly <A5, A6, K4b, K1>, which
- * maps to the OCaml call order:
+ * The post-turn wirein sequence is an implementation ordering contract:
  *
  *   apply_autonomous_wirein     (A5)
  *   apply_resilience_wirein     (A6)
  *   apply_tool_emission_wirein  (K4b)
  *   apply_multimodal_wirein     (K1)
  *
- * The TLC layer (clean + buggy cfg) regression-guards this at the
- * model level. This test is the OCaml-side analogue: a structural
- * scan over [lib/keeper/keeper_post_turn.ml] that confirms the four
+ * This test scans [lib/keeper/keeper_post_turn.ml] and confirms the four
  * wirein calls appear in the correct order inside the body of
  * [apply_post_turn_lifecycle_with_resilience_handles]. An accidental
  * reorder would otherwise compile cleanly and silently violate the

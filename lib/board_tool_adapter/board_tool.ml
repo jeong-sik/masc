@@ -7,7 +7,6 @@
     Primary (per plan §Stage 10):
     - {!Board_tool_format}    — formatters, arg coercion helpers,
                                 sort-order parser,
-                                truncated-markdown detector,
                                 Board_error renderer, Yojson boundary.
     - {!Board_tool_cache}     — TTL cache for [masc_board_list]
                                 payloads and its invalidator.
@@ -27,9 +26,8 @@
     - {!Board_tool_curation}  — curation_read / curation_submit
                                 handlers.
 
-    The .mli contract is unchanged. The includes below preserve every
-    pinned value identity, including [sort_order] and
-    [truncation_signal] constructor re-exports. *)
+    The includes below preserve the public value identities, including
+    [sort_order]. *)
 
 include Board_tool_format
 include Board_tool_cache

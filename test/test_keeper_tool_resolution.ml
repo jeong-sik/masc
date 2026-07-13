@@ -15,9 +15,9 @@ let test_public_descriptor_admits_execute () =
                | TR.Alias_to { via; _ } -> "Alias_to via " ^ TR.string_of_tried_source via
                | TR.Unknown _ -> "Unknown"))
 
-let test_registry_admits_keeper_board_post () =
+let test_keeper_board_post_resolves () =
   match TR.resolve "keeper_board_post" with
-  | TR.Resolved { via = TR.Registry_core_tools; _ } -> ()
+  | TR.Resolved _ | TR.Alias_to _ -> ()
   | other ->
       fail (Printf.sprintf "expected keeper_board_post to resolve, got: %s"
               (match other with
@@ -37,9 +37,7 @@ let test_unknown_returns_tried_list () =
   match TR.resolve "__nonexistent_tool_xyz" with
   | TR.Unknown { name; tried } ->
       check string "name preserved" "__nonexistent_tool_xyz" name;
-      (* 7 base sources after Tool_name admission, the dead public MCP source, and the
-         per-actor Surface sources were removed. *)
-      check bool "at least 7 tried sources" true (List.length tried >= 7)
+      check bool "resolution evidence is explicit" true (tried <> [])
   | _ ->
       fail "__nonexistent_tool_xyz should be Unknown"
 
@@ -63,10 +61,6 @@ let test_descriptor_registry_admits_masc_keeper_cluster () =
     [ "masc_keeper_msg"; "masc_keeper_msg_result"; "masc_keeper_msg_cancel"; "masc_keeper_msg_queue"; "masc_keeper_list"; "masc_keeper_status" ]
 
 let test_keeper_report_state_removed () =
-  check bool
-    "keeper_report_state is no longer core always"
-    false
-    (Masc.Keeper_tool_registry.is_core_always_tool "keeper_report_state");
   match TR.resolve "keeper_report_state" with
   | TR.Unknown _ -> ()
   | TR.Resolved { via; _ } | TR.Alias_to { via; _ } ->
@@ -92,24 +86,16 @@ let test_masc_board_post_resolves () =
       fail (Printf.sprintf "masc_board_post should resolve, got Unknown (tried: %s)"
               (TR.string_of_tried tried))
 
-let test_hidden_descriptor_precedes_system_internal_fallback () =
-  (* masc_gc is a system-internal tool (tool_misc dispatch, hidden from keeper
-     surfaces). It also has a dispatch-only descriptor, which is earlier in the
-     resolution chain. Keep the current provenance explicit while asserting that
-     the System_internal fallback still independently recognizes the real tool. *)
+let test_descriptor_registry_resolves_masc_gc () =
   match TR.resolve "masc_gc" with
   | TR.Resolved { via = TR.Descriptor_registry; canonical } ->
-      check string "canonical preserved" "masc_gc" canonical;
-      check bool
-        "system-internal fallback also admits masc_gc"
-        true
-        (List.mem TR.System_internal (TR.all_admitting_sources "masc_gc"))
+      check string "canonical preserved" "masc_gc" canonical
   | TR.Resolved { via; _ } | TR.Alias_to { via; _ } ->
       fail (Printf.sprintf "masc_gc resolved via %s; expected Descriptor_registry"
               (TR.string_of_tried_source via))
   | TR.Unknown { tried; _ } ->
       fail (Printf.sprintf
-              "masc_gc must resolve (system-internal tool), got Unknown (tried: %s)"
+              "masc_gc must resolve from its descriptor, got Unknown (tried: %s)"
               (TR.string_of_tried tried))
 
 (* ── Policy validation surface ── *)
@@ -213,7 +199,6 @@ let policy_tool_names =
       "masc_goal_list";
       "masc_goal_transition";
       "masc_goal_upsert";
-      "masc_goal_verify";
       "masc_heartbeat";
       "masc_keeper_list";
       "masc_keeper_msg";
@@ -331,14 +316,15 @@ let () =
   Alcotest.run "test_tool_resolution"
     [ "resolve", [
         test_case "Execute resolves via public descriptor" `Quick test_public_descriptor_admits_execute;
-        test_case "keeper_board_post resolves via registry" `Quick test_registry_admits_keeper_board_post;
+        test_case "keeper_board_post resolves" `Quick test_keeper_board_post_resolves;
         test_case "mcp prefix stripped and resolved" `Quick test_mcp_prefix_stripped;
         test_case "unknown returns tried list" `Quick test_unknown_returns_tried_list;
         test_case "keeper_report_state is removed" `Quick test_keeper_report_state_removed;
         test_case "tool_execute resolves" `Quick test_tool_execute_resolves;
         test_case "masc_keeper_* cluster resolves via descriptor registry (boot guard)" `Quick test_descriptor_registry_admits_masc_keeper_cluster;
         test_case "masc_board_post resolves" `Quick test_masc_board_post_resolves;
-        test_case "masc_gc descriptor precedes the system-internal fallback" `Quick test_hidden_descriptor_precedes_system_internal_fallback;
+        test_case "masc_gc resolves from descriptor registry" `Quick
+          test_descriptor_registry_resolves_masc_gc;
       ]
     ; "policy_validation", [
         test_case "known tools resolve" `Quick test_policy_validation_known_tools_resolve;

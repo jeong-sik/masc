@@ -14,7 +14,7 @@
 type fiber_health =
   | Fiber_alive (** Fiber running, promise unresolved *)
   | Fiber_zombie (** Registry entry exists but fiber terminated *)
-  | Fiber_dead (** Restart budget exhausted, manual recovery needed *)
+  | Fiber_dead (** Fiber resolved; lane restart is required *)
   | Fiber_unknown (** Not in supervised registry *)
 
 (** Keeper-level health state — derived from agent status, keepalive
@@ -28,7 +28,7 @@ type keeper_health =
   | KH_stale (** Last seen too long ago or zombie flag from agent *)
   | KH_degraded (** graphql_error or model_error quiet_reason *)
   | KH_zombie (** Fiber terminated but registry entry exists *)
-  | KH_dead (** Restart budget exhausted *)
+  | KH_dead (** Explicit durable Dead tombstone *)
 
 (** Keeper continuity state — derived from health + keepalive status. *)
 type keeper_continuity =

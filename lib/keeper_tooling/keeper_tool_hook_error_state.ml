@@ -6,13 +6,9 @@
    it can be linked into both the main library and a standalone Alcotest
    executable without dragging Eio in.
 
-   Sibling of [Keeper_tool_retry_state] (lib/keeper_tool_retry_state/).
-   Same state-machine shape, different fingerprint dimension: the retry
-   module keys on [(tool, signature)] because the retry loop iterates
-   within a single keeper context, while this module keys on [(keeper,
-   tool, signature)] because the hook fires per-keeper and two different
-   keepers seeing the same tool error are legitimately distinct ERROR
-   events.
+   The key includes [(keeper, tool, signature)] because the hook fires
+   per-keeper and two different keepers seeing the same tool error are
+   legitimately distinct events.
 
    Threading: [Bounded_event_dedupe] guards the in-memory table with a
    single [Mutex.t]. All public entry points perform only key creation

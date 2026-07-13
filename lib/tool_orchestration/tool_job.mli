@@ -5,14 +5,6 @@
     run in parallel, which resource it touches, whether it is idempotent, and
     how its result maps back to a turn/goal/keeper. *)
 
-(** {1 Policy verdict} *)
-
-type policy_verdict =
-  | Approved
-  | Pending of string
-  | Denied of string
-[@@deriving yojson, show, eq]
-
 (** {1 Job envelope} *)
 
 type t = {
@@ -29,7 +21,6 @@ type t = {
   resource_keys : string list;
   idempotency_key : string option [@default None];
   deadline_ms : int option [@default None];
-  approval : policy_verdict;
   attempt : int;
 }
 [@@deriving yojson, show]
@@ -44,7 +35,6 @@ val make :
   ?tool_version:string ->
   ?idempotency_key:string ->
   ?deadline_ms:int ->
-  ?approval:policy_verdict ->
   ?attempt:int ->
   ?resource_keys:string list ->
   batch_id:string ->
@@ -85,5 +75,4 @@ val default_resource_keys_of_tool :
 
 (** {1 Field updates} *)
 
-val with_approval : t -> policy_verdict -> t
 val with_attempt : t -> int -> t

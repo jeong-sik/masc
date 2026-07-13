@@ -65,7 +65,7 @@ No blocking-wait tool in v1 (see §3).
 ### 5.1 Phasing
 
 - **Phase 1 (this RFC's PR): wake path only.** Add the `Bg_completed` stimulus variant (§4.1) and fill every exhaustive consumer. No registry, no fork, no subprocess. The value is that the compiler now proves the completion type is handled everywhere a stimulus is matched, before any executor exists.
-- **Phase 2: generic run registry + concurrency cap.** A `Bg_run_registry` modeled on `fusion_run_registry` (Atomic + CAS, server-lifetime) plus an admission semaphore (§5.3). `admission_queue` is not used as the gate — it is passthrough observability, not a scheduler (`admission_queue.mli:9-11`).
+- **Phase 2: generic run registry.** A `Bg_run_registry` modeled on `fusion_run_registry` (Atomic + CAS, server-lifetime). The removed provider-admission mechanism must not be reused as a scheduler or capacity gate.
 - **Phase 3: spawn tool + subprocess executor with FD isolation.** Wires `masc_bg_spawn` to `Autonomy_exec.run` with the real signature and the inner-switch FD fix (§5.2).
 
 ### 5.2 Switch selection and FD isolation (fixes §7 P0①)

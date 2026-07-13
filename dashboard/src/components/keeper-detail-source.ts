@@ -2,10 +2,7 @@ import { missionKeeperBriefs } from '../mission-signals'
 import type {
   DashboardMissionKeeperBrief,
   Keeper,
-  KeeperConfig,
 } from '../types'
-
-export type KeeperConfigLoadStatus = 'idle' | 'loading' | 'loaded' | 'error' | 'other'
 
 export function resolveKeeperMissionBrief(
   keeper: Pick<Keeper, 'name' | 'agent_name'>,
@@ -14,43 +11,6 @@ export function resolveKeeperMissionBrief(
     brief.name === keeper.name
       || (brief.agent_name && keeper.agent_name && brief.agent_name === keeper.agent_name))
     ?? null
-}
-
-interface KeeperToolPolicySnapshot {
-  source: 'keeper_config' | 'loading' | 'error' | 'none'
-  resolvedAllowlist: string[]
-}
-
-export function resolveKeeperToolPolicy(
-  keeperConfig: Pick<KeeperConfig, 'tools'> | null,
-  loadStatus: KeeperConfigLoadStatus,
-): KeeperToolPolicySnapshot {
-  const tools = keeperConfig?.tools
-  if (tools) {
-    return {
-      source: 'keeper_config',
-      resolvedAllowlist: tools.resolved_allowlist ?? [],
-    }
-  }
-
-  if (loadStatus === 'idle' || loadStatus === 'loading') {
-    return {
-      source: 'loading',
-      resolvedAllowlist: [],
-    }
-  }
-
-  if (loadStatus === 'error') {
-    return {
-      source: 'error',
-      resolvedAllowlist: [],
-    }
-  }
-
-  return {
-    source: 'none',
-    resolvedAllowlist: [],
-  }
 }
 
 interface KeeperObservedToolAuditSnapshot {

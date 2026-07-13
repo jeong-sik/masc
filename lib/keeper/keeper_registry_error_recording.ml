@@ -41,7 +41,6 @@ let record_common ~base_path ?details name err persist =
       Keeper_metrics.(to_string RecordingErrorDedup)
       ~labels:[ "keeper", name; "error_kind", kind_label ]
       ();
-  Keeper_fd_pressure.note_if_fd_exhaustion ~site:"keeper_registry.record_error" err;
   persist ()
 ;;
 

@@ -1,14 +1,12 @@
 (** Keeper_tools_oas_handler — Tool handler factory for Agent.run().
 
-    Skeleton module: validation, repeated-failure circuit-breaking,
-    and resource-gate wrapping.  The heavy execution body lives
+    Skeleton module: validation and dispatch. The heavy execution body lives
     in [Keeper_tools_oas_handler_exec]; telemetry helpers live in
     [Keeper_tools_oas_handler_telemetry].
 
     @since P1 extraction *)
 
 open Keeper_tools_oas
-open Keeper_tools_oas_deterministic_error
 open Keeper_tools_oas_handler_telemetry
 
 let make_keeper_tool_handler
@@ -20,19 +18,22 @@ let make_keeper_tool_handler
       ?turn_sandbox_factory
       ~(exec_cache : Masc_exec.Exec_cache.t option)
       ?search_fn
-      ?on_tool_called
       ?clock
       ?continuation_channel
+      ?gate_context
+      ?gate_grant
+      ?record_gate_result
       ?(pre_validate_input = fun input -> Ok input)
       ?(translate_input = fun j -> j)
       ?(validate_translated_input = true)
-      ~(failure_counts : failure_counts)
       ()
   : Yojson.Safe.t -> Tool_result.result
   =
-  let args_key input =
-    let h = Hashtbl.hash (Yojson.Safe.to_string input) in
-    Printf.sprintf "%s:%d" name h
+  let record_result ~input result =
+    Option.iter
+      (fun record -> record ~operation:name ~input result)
+      record_gate_result;
+    result
   in
   fun raw_input ->
     let t0 = Time_compat.now () in
@@ -92,6 +93,7 @@ let make_keeper_tool_handler
         ~tool_name:name
         ~start_time:t0
         output_text
+      |> record_result ~input
     in
     match pre_validate_input raw_input with
     | Error validation_result ->
@@ -105,32 +107,7 @@ let make_keeper_tool_handler
        with
        | Error validation_result -> handle_validation_error ~input validation_result
        | Ok input ->
-         let key = args_key input in
-         let prior_fails = failure_count_get failure_counts key in
-         if prior_fails >= max_consecutive_failures
-         then (
-           Otel_metric_store.inc_counter
-             Keeper_metrics.(to_string ToolsOasFailures)
-             ~labels:[ "tool", name; "site", "blocked" ]
-             ();
-           Log.Keeper.warn
-             "tool %s blocked after %d consecutive failures (same args)"
-             name
-             prior_fails;
-           let msg =
-             Printf.sprintf
-               "This tool has failed %d times in a row with the same arguments. Try a \
-                different approach or different arguments."
-               prior_fails
-           in
-           let output_text = normalize_tool_result ~success:false msg in
-           Tool_result.error
-             ~failure_class:(Some Tool_result.Runtime_failure)
-             ~tool_name:name
-             ~start_time:t0
-             output_text)
-         else (
-          let gate_clock =
+          let current_clock =
             match clock with
             | Some clock -> Some clock
             | None -> Eio_context.get_clock_opt ()
@@ -151,65 +128,16 @@ let make_keeper_tool_handler
               ?turn_sandbox_factory
               ~exec_cache
               ?search_fn
-              ?on_tool_called
               ?sw
               ?clock
               ?proc_mgr
               ?net
               ?continuation_channel
-              ~failure_counts
-              ~key
+              ?gate_context
+              ?gate_grant
               ~input
               ()
+            |> record_result ~input
           in
-          match gate_clock with
-          | None -> run_with_current_eio_context ()
-          | Some clock ->
-            let start_time = Time_compat.now () in
-            let is_read_only =
-              not
-                (Keeper_tool_dispatch_runtime.has_mutating_side_effect_with_input
-                   ~tool_name:name
-                   ~input)
-            in
-            Tool_resource_gate.with_permit_raw
-              ~clock
-              ~tool_name:name
-              ~arguments:input
-              ~is_read_only
-              ~on_reject:(fun message ->
-                let payload =
-                  Yojson.Safe.to_string
-                    (`Assoc
-                       [ "ok", `Bool false
-                       ; "error", `String "tool_resource_gate_saturated"
-                       ; "message", `String message
-                       ; "recoverable", `Bool true
-                       ; "error_class", `String "transient"
-                       ; "failure_class", `String "transient_error"
-                       ])
-                in
-                Tool_result.error
-                  ~failure_class:(Some Tool_result.Transient_error)
-                  ~tool_name:name
-                  ~start_time
-                  payload)
-              ~on_execution_timeout:(fun message ->
-                let payload =
-                  Yojson.Safe.to_string
-                    (`Assoc
-                       [ "ok", `Bool false
-                       ; "error", `String "tool_resource_gate_execution_timeout"
-                       ; "message", `String message
-                       ; "recoverable", `Bool true
-                       ; "error_class", `String "transient"
-                       ; "failure_class", `String "transient_error"
-                       ])
-                in
-                Tool_result.error
-                  ~failure_class:(Some Tool_result.Transient_error)
-                  ~tool_name:name
-                  ~start_time
-                  payload)
-              (fun () -> run_with_current_eio_context ~clock ())))
+          run_with_current_eio_context ?clock:current_clock ())
 ;;

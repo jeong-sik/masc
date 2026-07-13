@@ -16,11 +16,6 @@
     ([invalid_runtime_config],
     [provider_supports_inline_tools],
     [provider_supports_runtime_mcp_lane],
-    [dedupe_preserve_order],
-    [public_mcp_tool_names_of_oas_tools],
-    [public_mcp_tool_requires_bound_actor],
-    [public_mcp_tools_of_oas_tools],
-    [tool_names_are_public_mcp],
     [persist_checkpoint], [build_checkpoint],
     [partial_response_of_stop]). *)
 
@@ -177,36 +172,6 @@ val provider_caps_of_config :
   Llm_provider.Provider_config.t ->
   Llm_provider.Capabilities.capabilities
 val provider_label : Llm_provider.Provider_config.t -> string
-(** {1 Runtime-MCP policy} *)
-
-val runtime_mcp_tool_requires_bound_actor : string -> bool
-val runtime_mcp_policy_with_masc_agent_name :
-  ?include_internal_token:bool ->
-  agent_name:string ->
-  Llm_provider.Llm_transport.runtime_mcp_policy ->
-  Llm_provider.Llm_transport.runtime_mcp_policy
-val codex_cli_can_auth_keeper_bound_runtime_mcp :
-  base_path:string ->
-  agent_name:string ->
-  Llm_provider.Llm_transport.runtime_mcp_policy ->
-  bool
-val runtime_mcp_policy_for_provider :
-  base_path:string ->
-  provider_cfg:Llm_provider.Provider_config.t ->
-  agent_name:string ->
-  Llm_provider.Llm_transport.runtime_mcp_policy option ->
-  Llm_provider.Llm_transport.runtime_mcp_policy option
-val public_mcp_runtime_policy_of_tool_names :
-  base_path:string ->
-  ?agent_name:string ->
-  string list ->
-  Llm_provider.Llm_transport.runtime_mcp_policy option
-val runtime_mcp_policy_of_tool_names :
-  base_path:string ->
-  ?agent_name:string ->
-  ?allow_agent_internal:bool ->
-  string list ->
-  Llm_provider.Llm_transport.runtime_mcp_policy option
 val resolve_tool_lane_for_oas_tools :
   base_path:string ->
   ?agent_name:string ->
@@ -330,7 +295,7 @@ module For_testing : sig
     Llm_provider.Provider_config.t ->
     Llm_provider.Provider_config.t
 
-  val provider_http_slot_transport :
+  val provider_http_observation_transport :
     Llm_provider.Llm_transport.t -> Llm_provider.Llm_transport.t
 
   val runtime_id_of_config : config -> string

@@ -4,8 +4,7 @@
     - [shard] record (the unit granted/revoked at runtime)
     - [StringMap] alias used by the registry
     - Schema lookup helpers ([select_named_schemas], [default_shard_names])
-    - MCP surface metadata ([tool_spec_read_only], [tool_spec_destructive],
-      [tool_effect_domain]) *)
+    - MCP surface read-only metadata ([tool_spec_read_only]) *)
 
 type shard =
   { name : string
@@ -33,6 +32,3 @@ let default_shard_names : string list =
 ;;
 
 let tool_spec_read_only = []
-let tool_spec_destructive = []
-
-let tool_effect_domain _name = None

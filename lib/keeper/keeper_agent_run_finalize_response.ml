@@ -9,30 +9,11 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_agent_result
 
-let completion_contract_drops_current_turn_replay
-    (completion_contract_result :
-       Keeper_execution_receipt.completion_contract_result)
-  =
-  Keeper_execution_receipt.completion_contract_result_requires_attention
-    completion_contract_result
-;;
-
 type replay_suffix_prune_reason =
-  | Completion_contract_requires_attention
   | Canonical_success_replay
 
 let replay_suffix_prune_reason_to_string = function
-  | Completion_contract_requires_attention ->
-    "completion_contract_requires_attention"
   | Canonical_success_replay -> "canonical_success_replay"
-;;
-
-let replay_suffix_prune_reason
-      ~completion_contract_result
-  =
-  if completion_contract_drops_current_turn_replay completion_contract_result
-  then Some Completion_contract_requires_attention
-  else None
 ;;
 
 let replay_response_text_for_capture ~suppress_visible_response ~response_text =
@@ -41,75 +22,15 @@ let replay_response_text_for_capture ~suppress_visible_response ~response_text =
   else Some response_text
 ;;
 
-type reply_delivery_tool = Surface_post
-
-type reply_delivery_effect =
-  | Reply_delivered
-  | No_reply_delivery
-
-let reply_delivery_tool_of_name tool_name =
-  (* Parse exact wire names once into a closed delivery-effect vocabulary. *)
-  let canonical_name = Keeper_tool_resolution.canonical_tool_name tool_name in
-  match Keeper_tool_name.of_string canonical_name with
-  | Some Keeper_tool_name.Surface_post -> Some Surface_post
-  | Some _ | None -> None
-;;
-
-let reply_delivery_effect_of_tool_call
-      (detail : Keeper_agent_result.tool_call_detail)
-  =
-  match
-    reply_delivery_tool_of_name detail.tool_name,
-    detail.execution_outcome,
-    detail.typed_outcome
-  with
-  | Some _, Tool_result.Ok, (None | Some Keeper_tool_outcome.Progress) ->
-    Reply_delivered
-  | ( Some _
-    , Tool_result.Ok
-    , Some (Keeper_tool_outcome.No_progress _ | Keeper_tool_outcome.Error _) )
-  | Some _, (Tool_result.Error | Tool_result.Unknown), _
-  | None, _, _ ->
-    No_reply_delivery
-;;
-
-let has_reply_delivery_effect tool_calls =
-  List.exists
-    (fun detail ->
-       match reply_delivery_effect_of_tool_call detail with
-       | Reply_delivered -> true
-       | No_reply_delivery -> false)
-    tool_calls
-;;
-
-let continuation_delivery_gate ~channel ~tool_calls ~content =
-  Keeper_continuation_delivery.gate_decision
-    ~channel
-    ~already_replied:(has_reply_delivery_effect tool_calls)
-    ~content
-;;
-
 type wire_capture_response_suppression_reason =
-  | Budget_exhausted
   | Control_checkpoint
-  | Completion_contract
 
-let wire_capture_response_suppression_reasons
-      ~budget_exhausted
-      ~control_checkpoint
-      ~contract_suppresses_visible_response
-  =
-  let reasons =
-    if contract_suppresses_visible_response then [ Completion_contract ] else []
-  in
-  let reasons = if control_checkpoint then Control_checkpoint :: reasons else reasons in
-  if budget_exhausted then Budget_exhausted :: reasons else reasons
+let wire_capture_response_suppression_reasons ~control_checkpoint =
+  if control_checkpoint then [ Control_checkpoint ] else []
 ;;
 
 let wire_capture_response_suppression_reason_label = function
-  | Budget_exhausted -> "budget_exhausted"
   | Control_checkpoint -> "control_checkpoint"
-  | Completion_contract -> "completion_contract"
 ;;
 
 let emit_wire_capture_response_suppressed_metric ~keeper_name reason =
@@ -126,28 +47,6 @@ let emit_wire_capture_response_suppressed_metrics ~keeper_name reasons =
   List.iter
     (emit_wire_capture_response_suppressed_metric ~keeper_name)
     reasons
-;;
-
-let prune_current_turn_replay
-      ~(history_messages : Agent_sdk.Types.message list)
-      ~(pre_turn_working_context : Yojson.Safe.t option)
-      (checkpoint : Agent_sdk.Checkpoint.t)
-  =
-  match
-    Keeper_replay_prefix.split
-      ~prefix:history_messages
-      checkpoint.Agent_sdk.Checkpoint.messages
-  with
-  | Ok (_current_turn_message :: _) ->
-    let messages =
-      Keeper_context_core.repair_broken_tool_call_pairs history_messages
-    in
-    Some
-      { checkpoint with
-        Agent_sdk.Checkpoint.messages
-      ; working_context = pre_turn_working_context
-      }
-  | Ok [] | Error _ -> None
 ;;
 
 let canonical_success_replay_checkpoint
@@ -208,9 +107,8 @@ let canonical_success_replay_checkpoint
 
 let checkpoint_for_replay_persistence
       ~(history_messages : Agent_sdk.Types.message list)
-      ~(pre_turn_working_context : Yojson.Safe.t option)
-      ~(completion_contract_result :
-         Keeper_execution_receipt.completion_contract_result)
+      ~pre_turn_working_context:_
+      ~completion_contract_result:_
       ~(session_id : string)
       ~(response_text : string)
       ?(stop_reason = Runtime_agent.Completed)
@@ -247,37 +145,14 @@ let checkpoint_for_replay_persistence
     | Runtime_agent.MutationBoundaryReached _
     | Runtime_agent.Yielded_to_chat_waiting _
     | Runtime_agent.Yielded_to_durable_stimulus _ ) ->
-    (match replay_suffix_prune_reason ~completion_contract_result with
-     | Some reason ->
-       let pruned =
-         prune_current_turn_replay
-           ~history_messages
-           ~pre_turn_working_context
-           checkpoint
-       in
-       (match pruned with
-        | Some checkpoint -> Ok (checkpoint, Some reason)
-        | None ->
-          Error
-            (Printf.sprintf
-               "refusing to save checkpoint: replay suffix prune reason=%s but \
-                checkpoint messages do not match pre-turn history prefix"
-               (replay_suffix_prune_reason_to_string reason)))
-     | None ->
-       canonical_success_replay_checkpoint
-         ~history_messages
-         ~session_id
-         ~response_text
-         checkpoint)
+    canonical_success_replay_checkpoint
+      ~history_messages
+      ~session_id
+      ~response_text
+      checkpoint
 ;;
 
 module For_testing = struct
-  let completion_contract_drops_current_turn_replay =
-    completion_contract_drops_current_turn_replay
-
-  let completion_contract_suppresses_visible_response =
-    Keeper_agent_run_response_text.completion_contract_suppresses_visible_response
-
   let replay_suffix_prune_reason_to_string =
     replay_suffix_prune_reason_to_string
 
@@ -293,9 +168,6 @@ module For_testing = struct
   let emit_wire_capture_response_suppressed_metrics =
     emit_wire_capture_response_suppressed_metrics
 
-  let reply_delivery_effect_of_tool_call = reply_delivery_effect_of_tool_call
-  let has_reply_delivery_effect = has_reply_delivery_effect
-  let continuation_delivery_gate = continuation_delivery_gate
 end
 
 let finalize
@@ -325,40 +197,20 @@ let finalize
     ~pre_dispatch_compaction_after_tokens
     ~raw_response_text
     ~capture_replay_response
-    ?continuation_delivery_channel
+    ?continuation_delivery_channel:_
     () =
-  let budget_exhausted =
-    Keeper_agent_run_response_text.stop_reason_is_turn_budget_exhausted
-      result.stop_reason
-  in
   let completion_contract_result = acc.receipt_completion_contract_result in
-  let contract_suppresses_visible_response =
-    Keeper_agent_run_response_text
-    .completion_contract_suppresses_visible_response_for_stop_reason
-      ~history_assistant_source
-      ~stop_reason:result.stop_reason
-      completion_contract_result
-  in
   let control_checkpoint =
     Keeper_agent_run_response_text.stop_reason_suppresses_visible_response
       result.stop_reason
   in
   let suppression_reasons =
-    wire_capture_response_suppression_reasons
-      ~budget_exhausted
-      ~control_checkpoint
-      ~contract_suppresses_visible_response
+    wire_capture_response_suppression_reasons ~control_checkpoint
   in
   let suppress_visible_response = suppression_reasons <> [] in
   let raw_response_text_present =
-    (not budget_exhausted) && String.trim raw_response_text <> ""
+    String.trim raw_response_text <> ""
   in
-  if contract_suppresses_visible_response && raw_response_text_present
-  then
-    Log.Keeper.info ~keeper_name:meta.name
-      "suppressing keeper-visible response for completion_contract_result=%s"
-      (Keeper_execution_receipt.completion_contract_result_to_string
-         completion_contract_result);
   emit_wire_capture_response_suppressed_metrics
     ~keeper_name:meta.name
     suppression_reasons;
@@ -390,27 +242,6 @@ let finalize
        assistant_msg;
      capture_replay_response ~response_text
    | _ -> ());
-  (* Deterministic continuation delivery for a turn opened by a typed wake
-     carrying an originating channel. If the keeper did not itself post a
-     reply, deliver the visible response to that exact channel. Routing never
-     infers a destination; [Keeper_continuation_delivery] fails closed on
-     [Unrouted]. *)
-  (match continuation_delivery_channel, replay_response_text with
-   | Some channel, Some content ->
-     let already_replied = has_reply_delivery_effect acc.tool_calls in
-     let outcome =
-       Keeper_continuation_delivery.maybe_deliver ~config
-         ~keeper_name:meta.name ~channel ~already_replied ~content
-     in
-     Otel_metric_store.inc_counter
-       Keeper_metrics.(to_string ContinuationDeliveryOutcome)
-       ~labels:
-         [ "outcome", Keeper_continuation_delivery.outcome_metric_label outcome ]
-       ();
-     Log.Keeper.info ~keeper_name:meta.name
-       "RFC-0320 W3c continuation delivery: %s"
-       (Keeper_continuation_delivery.describe_outcome outcome)
-   | (None, _) | (_, None) -> ());
   let saved_checkpoint_result =
     match result.checkpoint with
     | Some checkpoint ->
@@ -506,9 +337,8 @@ let finalize
   match saved_checkpoint_result with
   | Error e -> Error e
   | Ok saved_checkpoint ->
-    (* Contract-verification proof evaluation / verdict-ledger persistence removed: task/goal
-       completion is verified by [Task_completion_gate] (evidence-substantiveness),
-       not by an internal proof/verdict pipeline. *)
+    (* Retired proof-ledger evaluation is absent. Task completion judgment is
+       owned by the configured LLM reviewer at the Task boundary. *)
     let librarian_messages =
       match saved_checkpoint with
       | Some checkpoint -> checkpoint.Agent_sdk.Checkpoint.messages

@@ -29,19 +29,6 @@
     subsequent occurrences confirm "still happening" but add no new
     signal at ERROR level.
 
-    Relationship to [Keeper_tool_retry_state]
-    ─────────────────────────────────────────
-    Sibling module, deliberately separate at the domain boundary. The
-    retry-state module keys on [(tool_name, error_signature)] because
-    its caller is the supervisor's retry loop where the *same* keeper
-    retries the *same* tool 1→2→3 times within one cycle. This module
-    keys on [(keeper_name, tool_name, error_signature)] because its
-    caller is the OAS hook chain installed per-keeper — two different
-    keepers hitting the "same" tool error from independent code paths
-    are legitimately distinct ERROR events and must not collapse. The
-    fingerprint shapes differ, while the generic count/threshold state
-    machine is shared through [Bounded_event_dedupe].
-
     Workaround posture
     ──────────────────
     [WORKAROUND-CARRYOVER]: this module is a noise-dedupe layer, not

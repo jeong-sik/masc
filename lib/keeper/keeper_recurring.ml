@@ -18,7 +18,6 @@ type recurring_task = {
   mutable last_run_ts : float;
   mutable run_count : int;
   mutable failure_count : int;
-  max_failures : int;
   mutable enabled : bool;
 }
 
@@ -60,12 +59,12 @@ let generate_id () =
 (* CRUD                                                              *)
 (* ================================================================ *)
 
-let add ~keeper_name ~label ~interval_sec ?(max_failures = 5) action =
+let add ~keeper_name ~label ~interval_sec action =
   let id = generate_id () in
   let task = {
     id; keeper_name; label; interval_sec; action;
     last_run_ts = 0.0; run_count = 0; failure_count = 0;
-    max_failures; enabled = true;
+    enabled = true;
   } in
   with_tasks_rw (fun () -> Hashtbl.replace tasks id task);
   task
@@ -85,12 +84,6 @@ let list ~keeper_name =
 let list_all () =
   with_tasks_ro (fun () ->
     Hashtbl.fold (fun _id task acc -> task :: acc) tasks [])
-
-let record_failure ~task ~phase =
-  Otel_metric_store.inc_counter
-    Keeper_metrics.(to_string RecurringFailures)
-    ~labels:[("task", task.id); ("phase", phase)]
-    ()
 
 (* ================================================================ *)
 (* Dispatch                                                          *)
@@ -120,40 +113,8 @@ let dispatch_due ~keeper_name ~now_ts ~dispatch =
       task.failure_count <- 0;
       incr count
     | Error _msg ->
-      task.failure_count <- task.failure_count + 1;
-      if task.max_failures > 0
-         && task.failure_count >= task.max_failures
-      then begin
-        task.enabled <- false;
-        record_failure ~task ~phase:"auto_disable"
-      end
+      task.failure_count <- task.failure_count + 1
   ) due_tasks;
-  !count
-
-(* ================================================================ *)
-(* Re-enable                                                         *)
-(* ================================================================ *)
-
-(* Re-enable disabled recurring tasks for [keeper_name] whose
-   [last_run_ts] is older than [2 * interval_sec].  Without this,
-   tasks auto-disabled by [dispatch_due]'s [max_failures] guard
-   never return to [enabled = true] within the process lifetime,
-   permanently silencing the keeper's heartbeat broadcasts and
-   eventually triggering stale-kill runtimes across dependent
-   keepers. *)
-let reenable_due_tasks ~keeper_name ~now_ts =
-  let count = ref 0 in
-  with_tasks_rw (fun () ->
-    Hashtbl.iter (fun _id task ->
-      if task.keeper_name = keeper_name && not task.enabled then begin
-        let cooldown = float_of_int task.interval_sec *. 2.0 in
-        if now_ts -. task.last_run_ts >= cooldown then begin
-          task.enabled <- true;
-          task.failure_count <- 0;
-          incr count
-        end
-      end
-    ) tasks);
   !count
 
 (* ================================================================ *)
@@ -173,7 +134,6 @@ let task_to_json (t : recurring_task) : Yojson.Safe.t =
     ("last_run_ts", `Float t.last_run_ts);
     ("run_count", `Int t.run_count);
     ("failure_count", `Int t.failure_count);
-    ("max_failures", `Int t.max_failures);
     ("enabled", `Bool t.enabled);
   ]
 

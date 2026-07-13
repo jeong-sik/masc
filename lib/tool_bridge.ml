@@ -231,48 +231,18 @@ let params_of_json_schema schema =
 
 let oas_permission_of_masc_tool name =
   let meta = Tool_catalog.metadata name in
-  match meta.destructive, meta.readonly with
-  | Some true, _ -> Some Agent_sdk.Tool.Destructive
-  | _, Some true -> Some Agent_sdk.Tool.ReadOnly
-  | _, Some false -> Some Agent_sdk.Tool.Write
-  | _ when Tool_capability.has Tool_capability.Destructive name ->
-    Some Agent_sdk.Tool.Destructive
+  match meta.readonly with
+  | Some true -> Some Agent_sdk.Tool.ReadOnly
+  | Some false -> Some Agent_sdk.Tool.Write
   | _ when Tool_capability.has Tool_capability.Read_only name ->
     Some Agent_sdk.Tool.ReadOnly
   | _ -> None
 
-(** Tools that perform real external network I/O (not local file reads) should
-    never be marked [Parallel_read], even when read-only. Running multiple web
-    searches or fetches concurrently would violate provider rate limits and
-    abuse external services. Keep this list in sync with
-    [Keeper_tool_descriptor.public_descriptors] web aliases and their internal
-    names. *)
-let is_external_network_tool name =
-  List.mem name [ "masc_web_search"; "masc_web_fetch"; "WebSearch"; "WebFetch" ]
-;;
-
 let oas_descriptor_of_masc_tool name =
-  let permission =
-    match oas_permission_of_masc_tool name with
-    | Some _ as p -> p
-    | None ->
-      (* Public aliases such as WebSearch/WebFetch do not appear in
-         [Tool_catalog] metadata, but they still need a descriptor so the
-         OAS runtime does not default them to Sequential_workspace and so
-         they are never classified as Parallel_read. *)
-      if is_external_network_tool name
-      then Some Agent_sdk.Tool.ReadOnly
-      else None
-  in
+  let permission = oas_permission_of_masc_tool name in
   let descriptor_of_permission perm =
     let mutation_class, concurrency_class =
       match perm with
-      | Agent_sdk.Tool.ReadOnly when is_external_network_tool name ->
-        (* External read-only tools are not workspace-parallel: they hit
-           rate-limited remote APIs. Use [Exclusive_external] so the OAS
-           runtime runs them in isolation and flushes any parallel-read batch
-           before and after. *)
-        Some Agent_sdk.Tool.External_effect, Some Agent_sdk.Tool.Exclusive_external
       | Agent_sdk.Tool.ReadOnly ->
         Some Agent_sdk.Tool.Read_only, Some Agent_sdk.Tool.Parallel_read
       | Agent_sdk.Tool.Write ->

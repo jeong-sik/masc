@@ -342,28 +342,8 @@ let test_keeper_board_post_schema_supports_judgment () =
             (List.mem_assoc "judgment" props);
           Alcotest.(check bool) "has sources" true
             (List.mem_assoc "sources" props);
-          let quantitative_evidence_schema =
-            match List.assoc_opt "quantitative_evidence" props with
-            | Some schema -> schema
-            | None -> Alcotest.fail "quantitative_evidence missing"
-          in
-          (match quantitative_evidence_schema with
-           | `Assoc fields ->
-             let type_values =
-               match List.assoc_opt "type" fields with
-               | Some (`List values) ->
-                 List.filter_map
-                   (function
-                     | `String value -> Some value
-                     | _ -> None)
-                   values
-               | _ -> []
-             in
-             Alcotest.(check (list string))
-               "quantitative_evidence schema types"
-               [ "object"; "string"; "array" ]
-               type_values
-           | _ -> Alcotest.fail "quantitative_evidence schema not object")
+          Alcotest.(check bool) "no claim-specific evidence gate" false
+            (List.mem_assoc "quantitative_evidence" props)
       | None -> Alcotest.fail "keeper_board_post missing properties"
 
 (* ============================================================
@@ -386,10 +366,7 @@ let test_keeper_model_excludes_voice_tools () =
   let names = List.map (fun (t : Masc_domain.tool_schema) -> t.name)
     Tool_shard.keeper_model_tools in
   Alcotest.(check bool) "keeper_model no voice_speak" false
-    (List.mem "keeper_voice_speak" names);
-  (* Governance tools are no longer in keeper_model_tools *)
-  Alcotest.(check bool) "keeper_model no governance_status" false
-    (List.mem "masc_governance_status" names)
+    (List.mem "keeper_voice_speak" names)
 
 (* ============================================================
    Shard revoke voice (#6: revoke removes all 5 voice tools)

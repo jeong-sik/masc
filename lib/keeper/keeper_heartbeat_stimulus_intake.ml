@@ -59,10 +59,6 @@ let record_event_queue_stimulus_turn_started ~ctx ~keeper_name stimulus =
     stimulus
 ;;
 
-let record_recovery_stimulus_turn_started ~ctx ~keeper_name stimulus =
-  record_event_queue_stimulus_turn_started ~ctx ~keeper_name stimulus
-;;
-
 type heartbeat_event_intake = {
   pending_board_events : Keeper_world_observation.pending_board_event list;
   consumed_stimulus_count : int;
@@ -71,10 +67,6 @@ type heartbeat_event_intake = {
   event_queue_claim_error : string option;
   event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
 }
-
-type single_claim_admission =
-  | Admit_ready_single
-  | Defer_failure_judgment
 
 let recorded_attention_item_by_event_id ~base_path ~keeper_name ~event_id =
   Keeper_external_attention.load_events ~base_path ~keeper_name
@@ -92,8 +84,6 @@ let recorded_attention_item_by_event_id ~base_path ~keeper_name ~event_id =
 let event_queue_trigger_of_stimulus (stim : Keeper_event_queue.stimulus) =
   match stim.payload with
   | Keeper_event_queue.Bootstrap -> Some Keeper_world_observation.Bootstrap_stimulus
-  | Keeper_event_queue.No_progress_recovery ->
-    Some Keeper_world_observation.No_progress_recovery_stimulus
   | Keeper_event_queue.Schedule_due _ ->
     Some Keeper_world_observation.Scheduled_automation_stimulus
   | Keeper_event_queue.Connector_attention _ ->
@@ -101,18 +91,15 @@ let event_queue_trigger_of_stimulus (stim : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Hitl_resolved _ ->
     (* RFC-0320 W3b: give the HITL-resolution wake a dedicated turn_reason so
        the prompt can steer the keeper back to the originating conversation
-       instead of silently proceeding on its own state. The [Approval_pending]
-       skip is already gone (the approval left the queue); this changes only
-       how the resumed turn is described, not whether it runs. *)
+       instead of silently proceeding on its own state. This changes only how
+       the turn is described, not whether it runs. *)
     Some Keeper_world_observation.Hitl_resolved_stimulus
   | Keeper_event_queue.Failure_judgment _ ->
     Some Keeper_world_observation.Failure_judgment_stimulus
   | Keeper_event_queue.Board_signal _
   | Keeper_event_queue.Fusion_completed _
   | Keeper_event_queue.Bg_completed _
-  | Keeper_event_queue.Goal_verification_failed _
-  | Keeper_event_queue.Goal_assigned _
-  | Keeper_event_queue.Goal_stagnation _ ->
+  | Keeper_event_queue.Goal_assigned _ ->
     (* No dedicated turn_reason: like the other async-completion wakes, the
        stimulus itself forces the keeper to re-run its cycle and proceed on its
        own state. *)
@@ -141,7 +128,7 @@ let consume_single_heartbeat_stimulus
   | Keeper_event_queue.Fusion_completed c ->
     (* RFC-0266: an async fusion deliberation finished and woke this keeper.
        Surface the resolved answer as a pending_board_event so this turn acts
-       on it (a non-empty list, unlike Bootstrap/No_progress_recovery which
+       on it (a non-empty list, unlike Bootstrap which
        inject nothing — returning [] here would silently drop the result). *)
     Log.Keeper.info
       "turn entry: fusion result delivered run_id=%s ok=%b (keeper=%s)"
@@ -169,17 +156,6 @@ let consume_single_heartbeat_stimulus
       sw.due_at
       meta_after_triage.name;
     pending_board_event_of_stimulus ~meta_after_triage stim |> Option.to_list
-  | Keeper_event_queue.Goal_verification_failed failure ->
-    (* A rejected completion claim is actionable work for the assigned keeper.
-       Promote it to a pending observation so the cycle does not wake empty. *)
-    Log.Keeper.info
-      "turn entry: goal verification failure delivered goal_id=%s request_id=%s \
-       rejected_by=%s (keeper=%s)"
-      failure.goal_id
-      failure.request_id
-      failure.rejected_by
-      meta_after_triage.name;
-    pending_board_event_of_stimulus ~meta_after_triage stim |> Option.to_list
   | Keeper_event_queue.Goal_assigned ga ->
     (* RFC-0315 P3 W0: a newly assigned standing objective is actionable
        work. Promote it to a pending observation so the assignment turn does
@@ -189,30 +165,6 @@ let consume_single_heartbeat_stimulus
       ga.ga_goal_id
       ga.ga_assigned_by
       meta_after_triage.name;
-    pending_board_event_of_stimulus ~meta_after_triage stim |> Option.to_list
-  | Keeper_event_queue.Goal_stagnation gs ->
-    (* RFC-0310 §3.3: a live goal went stale. Promote it to a pending
-       observation so the stagnation turn does not wake empty — returning []
-       would silently drop the edge. *)
-    Log.Keeper.info
-      "turn entry: goal stagnation delivered goal_id=%s stale_since=%s (keeper=%s)"
-      gs.gs_goal_id
-      gs.gs_stale_since
-      meta_after_triage.name;
-    (* Arm [Keeper_goal_stagnation_wake]'s fire-once-per-episode gate. The
-       producer skips re-enqueue only when [turn_started_seen] is true for the
-       episode stimulus id; that flag is set solely from a [Turn_started]
-       reaction row. Without recording it here the gate stays inert, so once
-       [ack_consumed] drops the stimulus the next scan re-detects the same
-       stale episode ((goal_id, updated_at) unchanged) and re-wakes every tick
-       — the blind cadence RFC-0303 forbids and RFC-0310 §3.3 exists to avoid.
-       [stim] carries the episode-pinned [arrived_at], so this row stamps the
-       exact stimulus id the producer recomputes next scan. Mirrors the
-       No_progress_recovery arm below. *)
-    record_event_queue_stimulus_turn_started
-      ~ctx
-      ~keeper_name:meta_after_triage.name
-      stim;
     pending_board_event_of_stimulus ~meta_after_triage stim |> Option.to_list
   | Keeper_event_queue.Failure_judgment fj ->
     (* RFC-0313 W2: a deterministic turn failure awaits an LLM-boundary
@@ -230,17 +182,6 @@ let consume_single_heartbeat_stimulus
     Log.Keeper.info
       "turn entry: bootstrap stimulus consumed (keeper=%s)"
       meta_after_triage.name;
-    []
-  | Keeper_event_queue.No_progress_recovery ->
-    Log.Keeper.info
-      "turn entry: no-progress recovery stimulus consumed post_id=%s \
-       (keeper=%s)"
-      stim.post_id
-      meta_after_triage.name;
-    record_recovery_stimulus_turn_started
-      ~ctx
-      ~keeper_name:meta_after_triage.name
-      stim;
     []
   | Keeper_event_queue.Connector_attention ca ->
     (* RFC-connector-ambient-attention-wake: the stimulus woke this keeper.
@@ -289,7 +230,7 @@ let consume_single_heartbeat_stimulus
   | Keeper_event_queue.Hitl_resolved r ->
     (* The approval has left the queue, so this cycle no longer skips. There is
        no observation to fabricate: the typed resolution itself is threaded as
-       cycle context. An approved exact-action grant is consumed at governance;
+       cycle context. An approved exact-action grant is consumed at the Gate;
        reject/edit wakes carry no grant. *)
     Log.Keeper.info
       "turn entry: hitl resolution delivered approval=%s decision=%s (keeper=%s)"
@@ -329,20 +270,16 @@ let stimulus_ready_for_intake (stimulus : Keeper_event_queue.stimulus) =
       (Keeper_approval_queue.get_pending_entry ~id:resolution.approval_id)
   | Keeper_event_queue.Board_signal _
   | Keeper_event_queue.Bootstrap
-  | Keeper_event_queue.No_progress_recovery
   | Keeper_event_queue.Fusion_completed _
   | Keeper_event_queue.Bg_completed _
   | Keeper_event_queue.Schedule_due _
   | Keeper_event_queue.Connector_attention _
-  | Keeper_event_queue.Goal_verification_failed _
   | Keeper_event_queue.Failure_judgment _
-  | Keeper_event_queue.Goal_assigned _
-  | Keeper_event_queue.Goal_stagnation _ ->
+  | Keeper_event_queue.Goal_assigned _ ->
     true
 ;;
 
 let heartbeat_event_intake
-      ~single_claim_admission
       ~ctx
       ~meta_after_triage
       ~pending_board_events
@@ -368,25 +305,7 @@ let heartbeat_event_intake
         ~base_path
         keeper_name
         ~claimed_at:(Time_compat.now ())
-        ~ready:(fun stimulus ->
-          stimulus_ready_for_intake stimulus
-          &&
-          match single_claim_admission, stimulus.Keeper_event_queue.payload with
-          | Admit_ready_single, _ -> true
-          | Defer_failure_judgment, Keeper_event_queue.Failure_judgment _ -> false
-          | ( Defer_failure_judgment
-            , ( Keeper_event_queue.Board_signal _
-              | Keeper_event_queue.Fusion_completed _
-              | Keeper_event_queue.Bg_completed _
-              | Keeper_event_queue.Schedule_due _
-              | Keeper_event_queue.Bootstrap
-              | Keeper_event_queue.No_progress_recovery
-              | Keeper_event_queue.Connector_attention _
-              | Keeper_event_queue.Hitl_resolved _
-              | Keeper_event_queue.Goal_verification_failed _
-              | Keeper_event_queue.Goal_assigned _
-              | Keeper_event_queue.Goal_stagnation _ ) ) ->
-            true)
+        ~ready:stimulus_ready_for_intake
   in
   let claimed_lease =
     match Keeper_registry_event_queue.active_lease_result ~base_path keeper_name with

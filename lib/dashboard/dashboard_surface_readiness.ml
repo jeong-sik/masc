@@ -169,7 +169,7 @@ let all_entries =
       ~exposure_status:"main"
       ~hidden_from_nav:false
       ~meets_main_gate:true
-      ~rationale:"System-level telemetry for tools, governance, and fleet health."
+      ~rationale:"System-level telemetry for tools, Gate activity, and fleet health."
       ~route_hash:"#monitoring?section=fleet-health"
       ~live_spotcheck:"/api/v1/dashboard/telemetry/summary"
       ~tool_name:"masc_operator_snapshot"
@@ -281,7 +281,7 @@ let all_entries =
       ~meets_main_gate:true
       ~rationale:"Keeper HITL approval queue for pending operator decisions."
       ~route_hash:"#approvals"
-      ~live_spotcheck:"/api/v1/dashboard/governance"
+      ~live_spotcheck:"/api/v1/dashboard/gate"
       ()
   ; entry
       ~id:"fusion"
@@ -299,7 +299,7 @@ let all_entries =
       ~exposure_status:"main"
       ~hidden_from_nav:false
       ~meets_main_gate:true
-      ~rationale:"Canonical command surface for operator actions and governance controls."
+      ~rationale:"Canonical command surface for operator actions and Gate controls."
       ~route_hash:"#command?section=operations"
       ~fixture_harness:"./scripts/harness_dashboard_execution_smoke.sh"
       ~live_spotcheck:"./scripts/harness_dashboard_execution_smoke.sh"

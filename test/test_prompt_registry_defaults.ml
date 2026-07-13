@@ -34,7 +34,7 @@ let prompt_metadata key =
       ("test prompt for " ^ key,
        [ "keeper_name"; "soul_profile"; "goal"; "triggers"; "world_state" ])
   | "dashboard.operator_judge"
-  | "dashboard.governance_judge"
+  | "dashboard.gate_judge"
   | "dashboard_interaction_judge" ->
       ("test prompt for " ^ key, [ "facts_json" ])
   | _ -> ("test prompt for " ^ key, [])
@@ -66,10 +66,10 @@ let fixtures =
     ("keeper.capabilities", "Capabilities from markdown");
     ("keeper.unified.system", "{{identity_header}}\n{{instructions_block}}{{goal_lines}}");
     ("keeper.deliberation", "Keeper {{keeper_name}} {{soul_profile}} {{goal}} {{triggers}} {{world_state}}");
-    ("governance.deliberation", "governance deliberation prompt");
-    ("governance.dry_run", "DRY RUN governance prompt");
+    ("deliberation.decision", "structured deliberation prompt");
+    ("analysis.dry_run", "DRY RUN analysis prompt");
     ("dashboard.operator_judge", "operator facts {{facts_json}}");
-    ("dashboard.governance_judge", "governance facts {{facts_json}}");
+    ("dashboard.gate_judge", "Gate facts {{facts_json}}");
     ("dashboard_interaction_judge", "interaction facts {{facts_json}}");
     ("test.unlisted.vars", "template body still has {{missing_var}}");
   ]
@@ -147,9 +147,9 @@ let () =
               check string "keeper.constitution"
                 (fixture "keeper.constitution")
                 (Prompt_registry.get_prompt "keeper.constitution");
-              check string "governance.dry_run"
-                (fixture "governance.dry_run")
-                (Prompt_registry.get_prompt "governance.dry_run"));
+              check string "analysis.dry_run"
+                (fixture "analysis.dry_run")
+                (Prompt_registry.get_prompt "analysis.dry_run"));
           test_case "prompt_source reports file" `Quick (fun () ->
               with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
               check string "file source" "file"
@@ -157,11 +157,10 @@ let () =
           test_case "validate_required_prompt_files detects missing file" `Quick
             (fun () ->
               with_registry @@ fun ~dir:_ ~prompts_dir ->
-              Sys.remove
-                (Filename.concat prompts_dir "dashboard.governance_judge.md");
+              Sys.remove (Filename.concat prompts_dir "dashboard.gate_judge.md");
               let missing = Prompt_registry.validate_required_prompt_files () in
               check bool "missing file found" true
-                (List.mem_assoc "dashboard.governance_judge" missing));
+                (List.mem_assoc "dashboard.gate_judge" missing));
         ] );
       ( "rendering",
         [

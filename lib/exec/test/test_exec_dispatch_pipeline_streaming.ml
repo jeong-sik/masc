@@ -18,9 +18,6 @@ let simple executable args =
     ; sandbox = Masc_exec.Sandbox_target.host ()
     }
 
-let classify ir =
-  Masc_exec.Shell_ir_risk.(classify (undecided ir))
-
 let test_host_pipeline_callback_is_live () =
   Eio_main.run @@ fun env ->
   Process_eio.init
@@ -47,7 +44,7 @@ let test_host_pipeline_callback_is_live () =
       ]
   in
   let result =
-    Masc_exec.Exec_dispatch.dispatch_decided ~on_output_chunk (classify ir)
+    Masc_exec.Exec_dispatch.dispatch ~on_output_chunk ir
   in
   (* NDT-OK: compare process completion time to first callback arrival. *)
   let elapsed = Unix.gettimeofday () -. start in

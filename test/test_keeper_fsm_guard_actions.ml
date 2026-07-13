@@ -1,6 +1,5 @@
 (** test_keeper_fsm_guard_actions — verify the runtime safety wrapper
-    [Keeper_fsm_guard_runtime.wrap_unit] used by KeeperHeartbeat /
-    KeeperTaskAcquisition spec-action guards.
+    [Keeper_fsm_guard_runtime.wrap_unit] used by Keeper heartbeat actions.
 
     The PPX [@@fsm_guard] itself is exercised by the smoke test at
     [keeper_turn_fsm.ml:118] (Cycle 12 / Tier I3); this file pins the

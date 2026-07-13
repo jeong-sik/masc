@@ -4,8 +4,6 @@ type command_result =
   ; image : string
   ; network_label : string
   ; cwd : string
-  ; semantic_status : Exec_core.semantic_status option
-  ; semantic_ok : bool
   }
 
 type command_trust =
@@ -48,8 +46,6 @@ module type Backend = sig
   val ensure_runtime :
     timeout_sec:float -> (string list, string) result
 
-  val command_uses_nested_runtime : string -> bool
-
   val private_workspace_cwd :
     config:Workspace.config ->
     meta:Keeper_meta_contract.keeper_meta ->
@@ -88,7 +84,6 @@ end
 module Make (Backend : Backend) = struct
   let effective_sandbox_profile = Backend.effective_sandbox_profile
   let ensure_runtime = Backend.ensure_runtime
-  let command_uses_nested_runtime = Backend.command_uses_nested_runtime
   let private_workspace_cwd = Backend.private_workspace_cwd
   let run_shell_command_with_status = Backend.run_shell_command_with_status
   let run_trusted_shell_command_with_status =
@@ -104,15 +99,11 @@ let of_docker_result
   ; image = result.image
   ; network_label = result.network_label
   ; cwd = result.cwd
-  ; semantic_status = result.semantic_status
-  ; semantic_ok = result.semantic_ok
   }
 
 module Docker_backend = struct
   let effective_sandbox_profile = Keeper_sandbox_docker.effective_sandbox_profile
   let ensure_runtime = Keeper_sandbox_docker.ensure_keeper_sandbox_runtime
-  let command_uses_nested_runtime =
-    Keeper_sandbox_docker.command_uses_nested_container_runtime
   let private_workspace_cwd = Keeper_sandbox_docker.docker_private_workspace_cwd
 
   let run_shell_command_with_status ~config ~meta ~cwd ~timeout_sec ~cmd

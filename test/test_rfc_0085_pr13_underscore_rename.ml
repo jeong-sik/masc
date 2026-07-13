@@ -2,14 +2,10 @@ open Alcotest
 
 (** RFC-0085 PR-13 — Underscore-prefix bindings audited file-by-file.
 
-    1 truly dead: governance_pipeline_risk._tool_names_of_input
-       (definition only, 0 callers) -> deleted.
-
-    5 active (PR-12 pattern: misleading _ prefix on used bindings):
+    4 active (PR-12 pattern: misleading _ prefix on used bindings):
        - config_dir_resolver._cached_resolution
        - keeper_tool_surface_ops._keeper_list_cache
        - board_tool_cache._board_list_cache
-       - governance_pipeline_risk._destructive_pattern_strings
        - tool_workspace._status_cache
     All renamed (drop _ prefix), callers in same file updated.
 
@@ -19,28 +15,12 @@ open Alcotest
     This revision uses [count_value_bindings ~name], which inspects
     [Ppat_var] nodes (actual identifier bindings). *)
 
-let dead_identifiers =
-  [ "lib/governance_pipeline_risk.ml", "_tool_names_of_input" ]
-;;
-
 let renamed_identifiers =
   [ "lib/config_dir_resolver/config_dir_resolver.ml", "_cached_resolution", "cached_resolution"
   ; "lib/keeper/keeper_tool_surface_ops.ml", "_keeper_list_cache", "keeper_list_cache"
   ; "lib/board_tool_adapter/board_tool_cache.ml", "_board_list_cache", "board_list_cache"
-  ; ( "lib/governance_pipeline_risk.ml"
-    , "_destructive_pattern_strings"
-    , "destructive_pattern_strings" )
   ; "lib/tool_workspace.ml", "_status_cache", "status_cache"
   ]
-;;
-
-let test_dead_identifiers_gone () =
-  List.iter
-    (fun (path, name) ->
-      let n = Ast_grep.count_value_bindings ~module_path:path ~name in
-      let msg = Printf.sprintf "%s should be deleted in %s" name path in
-      check int msg 0 n)
-    dead_identifiers
 ;;
 
 let test_renamed_old_names_gone () =
@@ -68,10 +48,7 @@ let test_renamed_new_names_present () =
 let () =
   run
     "rfc-0085-pr-13-underscore-rename"
-    [ ( "dead removal"
-      , [ test_case "dead _tool_names_of_input gone" `Quick test_dead_identifiers_gone
-        ] )
-    ; ( "active rename"
+    [ ( "active rename"
       , [ test_case "old underscore names gone" `Quick test_renamed_old_names_gone
         ; test_case "new names present" `Quick test_renamed_new_names_present
         ] )

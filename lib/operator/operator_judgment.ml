@@ -164,7 +164,7 @@ let load_all config =
         | Ok value -> value :: acc
         | Error _ -> acc
       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-        Log.Governance.warn "operator judgment parse: %s" (Printexc.to_string exn);
+        Log.Gate.warn "operator judgment parse: %s" (Printexc.to_string exn);
         acc)
     path
   |> List.rev

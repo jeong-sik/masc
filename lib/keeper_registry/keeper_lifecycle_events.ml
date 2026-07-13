@@ -7,8 +7,7 @@
     of them, so operators reading the doc subscribed to the
     phase-derived events ([started] / [stopped] / [crashed] /
     [restarted] / [dead]) and silently missed the cleanup /
-    self-healing events ([reconciled] / [dead_cleaned] /
-    [self_preservation] / [paused_pruned] / [auto_resumed] /
+    recovery events ([reconciled] / [dead_cleaned] /
     [admission_denied]) — exactly
     the events that signal supervisor recovery actions where
     observability matters most.
@@ -32,22 +31,16 @@
 
     - [Started]            : keeper began executing (Running phase as side-effect)
     - [Reconciled]         : durable keeper re-picked up after restart
-    - [Restarted]          : supervisor relaunched after crash within budget
-    - [Dead_cleaned]       : tombstone cleanup after restart budget exhaustion
-    - [Self_preservation]  : supervisor refused a runtime-wide action to protect itself
-    - [Paused_pruned]      : paused keeper removed from registry after timeout
+    - [Restarted]          : supervisor relaunched a crashed lane
+    - [Dead_cleaned]       : explicit durable tombstone cleanup
     - [Purged]             : dashboard purge completed all durable artifacts
-    - [Auto_resumed]       : supervisor auto-resumed a keeper after circuit-breaker back-off
     - [Admission_denied]   : spawn/admission guard refused to launch a keeper *)
 type t =
   | Started
   | Reconciled
   | Restarted
   | Dead_cleaned
-  | Self_preservation
-  | Paused_pruned
   | Purged
-  | Auto_resumed
   | Admission_denied
 
 let to_string = function
@@ -55,10 +48,7 @@ let to_string = function
   | Reconciled -> "reconciled"
   | Restarted -> "restarted"
   | Dead_cleaned -> "dead_cleaned"
-  | Self_preservation -> "self_preservation"
-  | Paused_pruned -> "paused_pruned"
   | Purged -> "purged"
-  | Auto_resumed -> "auto_resumed"
   | Admission_denied -> "admission_denied"
 
 (* Inverse of [to_string] over the closed custom-event sum. Strings outside the
@@ -71,16 +61,12 @@ let event_of_string = function
   | "reconciled" -> Some Reconciled
   | "restarted" -> Some Restarted
   | "dead_cleaned" -> Some Dead_cleaned
-  | "self_preservation" -> Some Self_preservation
-  | "paused_pruned" -> Some Paused_pruned
   | "purged" -> Some Purged
-  | "auto_resumed" -> Some Auto_resumed
   | "admission_denied" -> Some Admission_denied
   | _ -> None
 
 let all_custom_events : t list =
-  [ Started; Reconciled; Restarted; Dead_cleaned;
-    Self_preservation; Paused_pruned; Purged; Auto_resumed; Admission_denied ]
+  [ Started; Reconciled; Restarted; Dead_cleaned; Purged; Admission_denied ]
 
 let valid_custom_event_strings : string list =
   List.map to_string all_custom_events

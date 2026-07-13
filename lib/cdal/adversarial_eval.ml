@@ -13,7 +13,7 @@ type banned_input_kind =
   | Design_doc
   | State_history
   | Task_history
-  | Governance_history
+  | Session_history
 
 type advisory_finding = {
   finding_id : string;
@@ -130,17 +130,15 @@ let classify_path path =
          [ "task_history"; "task-history"; "taskhistory"; "state/task_history";
            "state/task-history" ]
   in
-  let has_governance_history =
-    (List.mem "governance" basename_tokens
-     && has_data_artifact_extension lower)
-    || (has_history_artifact_extension lower
-        && List.exists (String_util.contains_substring normalized) [ "session_log"; "session-log" ])
+  let has_session_history =
+    (has_history_artifact_extension lower
+     && List.exists (String_util.contains_substring normalized) [ "session_log"; "session-log" ])
     || (List.mem "retrospective" basename_tokens && has_history_artifact_extension lower)
   in
   if check_patterns banned_readme_patterns then Some Readme
   else if has_state_history then Some State_history
   else if has_task_history then Some Task_history
-  else if has_governance_history then Some Governance_history
+  else if has_session_history then Some Session_history
   else if has_doc_extension lower && (has_doc_dir || has_doc_token) then Some Design_doc
   else None
 

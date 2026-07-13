@@ -25,15 +25,13 @@ type parsed_keeper_policy =
   ; pp_sandbox_image : string option
   ; pp_network_mode : network_mode
   ; pp_allowed_paths : string list
-  ; pp_tool_access : string list
-  ; pp_tool_denylist : string list
   ; pp_mention_targets : string list
   ; pp_proactive : proactive_policy
   ; pp_compaction : compaction_policy
   ; pp_auto_handoff : bool
   ; pp_handoff_threshold : float
   ; pp_handoff_cooldown_sec : int
-  ; pp_always_approve : bool option
+  ; pp_always_allow : bool option
   }
 
 (** Parsed runtime/state slice. The [ps_runtime] field threads the
@@ -44,7 +42,6 @@ type parsed_keeper_state =
   ; ps_active_goal_ids : string list
   ; ps_paused : bool
   ; ps_latched_reason : Keeper_latched_reason.t option
-  ; ps_auto_resume_after_sec : float option
   ; ps_autoboot_enabled : bool
   ; ps_current_task_id : Keeper_id.Task_id.t option
   ; ps_max_context_override : int option

@@ -8,18 +8,6 @@
 include module type of Workspace_utils
 include module type of Workspace_state
 
-(** {1 Task FSM drift observability (#9795)} *)
-
-(** Canonical label string for each [Workspace_task_lifecycle.drift]
-    variant.  Exhaustive — adding a new drift case forces reviewers
-    to update both the match and dashboards that consume the
-    [variant] label.  The emit runs through
-    {!Workspace_hooks.fsm_drift_observer_fn}, wired to
-    {!Workspace.record_fsm_drift} by [lib/workspace.ml].  [masc_workspace]
-    cannot call Otel_metric_store directly — it sits below that module
-    in the library dep graph. *)
-val drift_variant_label : Workspace_task_lifecycle.drift -> string
-
 (** {1 Task completion path observability (#10449)} *)
 
 (** Three-way classification of a task's contract surface:
@@ -34,22 +22,15 @@ val drift_variant_label : Workspace_task_lifecycle.drift -> string
 val classify_contract_state : Masc_domain.task_contract option -> string
 
 (** Classify the FSM path that produced a [Done] new_status:
-    - ["via_verification"] — explicit [Approve_verification] action
-    - ["forced_done"] — [force=true] override regardless of drift
-    - ["claimed_to_done_skip"] — drift signal from
-      {!Workspace_task_lifecycle.Claimed_to_done_skip} without force
-    - ["in_progress_to_done"] — normal [InProgress → Done] transition
+    - ["via_verification"] — explicit submitted-verification path
+    - ["direct_llm_verdict"] — inline completion-review path
 
     Used as the [path] label of
     [masc_task_completion_path_total].  Together with
     {!classify_contract_state} this lets operators split the
     bypass-rate documented in issue #10449 by creation-side
     (missing contracts) vs. gate-side (redirect mis-firing). *)
-val classify_completion_path
-  :  action:Masc_domain.task_action
-  -> drift:Workspace_task_lifecycle.drift option
-  -> force:bool
-  -> string
+val classify_completion_path : action:Masc_domain.task_action -> string
 
 (** {1 Task activity helpers} *)
 
@@ -160,7 +141,7 @@ val task_transition_details
   -> ?notes:string
   -> ?reason:string
   -> ?duration_ms:int
-  -> ?forced:bool
+  -> ?configured_llm_verdict:Masc_domain.configured_llm_completion_verdict
   -> unit
   -> Yojson.Safe.t
 
@@ -191,8 +172,7 @@ val transition_log_event
   -> ?reason:string
   -> ?duration_ms:int
   -> ?handoff_context:Masc_domain.task_handoff_context
-  -> ?forced:bool
-  -> ?authority:Masc_domain.completion_authority
+  -> ?configured_llm_verdict:Masc_domain.configured_llm_completion_verdict
   -> ?assignee:string
   -> ?now:string
   -> unit

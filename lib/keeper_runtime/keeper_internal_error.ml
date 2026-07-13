@@ -45,21 +45,12 @@ let capacity_backpressure_source_of_string = function
   | "runtime_slot" -> Some Runtime_slot
   | _ -> None
 
-(** Provenance-preserving retry-after hint for capacity backpressure.
-    [Synthetic_default] is kept distinct from [Explicit] at the type level so a
-    fabricated default can never be laundered into the explicit path (audit
-    2026-05-29, PR #19329). *)
+(** Provider-supplied retry-after hint for capacity backpressure. *)
 type capacity_retry_after =
   | Explicit of float
-  | Synthetic_default of float
   | No_retry_hint
 
-(** The failure that armed the provider-health cooldown blocking a turn before
-    dispatch.  Mirrors {!Keeper_binding_health.outcome_kind} across the
-    keeper_runtime -> keeper module boundary (keeper_runtime cannot depend on
-    keeper_binding_health).  Carried on {!Capacity_backpressure} so the
-    pre-dispatch cooldown gate reports WHY the provider is cooling instead of
-    unconditionally claiming provider capacity.  #23438. *)
+(** Legacy cause carried by persisted [Capacity_backpressure] envelopes. *)
 type provider_cooldown_cause =
   | Cooldown_provider_capacity
   | Cooldown_soft_rate_limited
@@ -302,15 +293,6 @@ type masc_internal_error =
       tool_effects_seen : tool_progress_effect list;
       reason : string;
     }
-  | Admission_queue_timeout of {
-      keeper_name : string;
-      runtime_id : string;
-      wait_sec : float;
-    }
-  | Admission_queue_rejected of {
-      keeper_name : string;
-      reason : string;
-    }
   | Turn_timeout of {
       elapsed_sec : float;
     }
@@ -483,10 +465,7 @@ let masc_internal_error_to_json = function
     let runtime_id = runtime_id_to_string runtime_id in
     let retry_after_fields =
       match retry_after with
-      | Explicit s ->
-        [ ("retry_after_sec", `Float s); ("retry_after_synthetic", `Bool false) ]
-      | Synthetic_default s ->
-        [ ("retry_after_sec", `Float s); ("retry_after_synthetic", `Bool true) ]
+      | Explicit s -> [ "retry_after_sec", `Float s ]
       | No_retry_hint -> [ ("retry_after_sec", `Null) ]
     in
     let cooldown_cause_fields =
@@ -547,22 +526,6 @@ let masc_internal_error_to_json = function
            | Some value -> `Bool value
            | None -> `Null) );
         ("tool_effects_seen", tool_progress_effects_to_json tool_effects_seen);
-        ("reason", `String reason);
-      ]
-  | Admission_queue_timeout { keeper_name; runtime_id; wait_sec } ->
-    let runtime_id = runtime_id_to_string runtime_id in
-    `Assoc
-      [
-        ("kind", `String "admission_queue_timeout");
-        ("keeper_name", `String keeper_name);
-        ("runtime_id", `String runtime_id);
-        ("wait_sec", `Float wait_sec);
-      ]
-  | Admission_queue_rejected { keeper_name; reason } ->
-    `Assoc
-      [
-        ("kind", `String "admission_queue_rejected");
-        ("keeper_name", `String keeper_name);
         ("reason", `String reason);
       ]
   | Turn_timeout { elapsed_sec } ->
@@ -691,8 +654,6 @@ let summary_of_masc_internal_error = function
       let retry_after_suffix =
         match retry_after with
         | Explicit value -> Printf.sprintf "; retry_after=%.1fs" value
-        | Synthetic_default value ->
-          Printf.sprintf "; retry_after=%.1fs (synthetic)" value
         | No_retry_hint -> ""
       in
       let cooldown_cause_suffix =
@@ -822,8 +783,6 @@ let summary_of_masc_internal_error = function
          (nonempty_or_unknown runtime_id)
          (runtime_exhaustion_reason_to_label reason))
   | Resumable_cli_session _
-  | Admission_queue_timeout _
-  | Admission_queue_rejected _
   | Turn_timeout _
   | Ambiguous_post_commit _
   | Internal_unhandled_exception _
@@ -835,8 +794,6 @@ let kind_of_masc_internal_error = function
   | Capacity_backpressure _ -> capacity_backpressure_kind
   | Resumable_cli_session _ -> "resumable_cli_session"
   | Accept_rejected _ -> "accept_rejected"
-  | Admission_queue_timeout _ -> "admission_queue_timeout"
-  | Admission_queue_rejected _ -> "admission_queue_rejected"
   | Turn_timeout _ -> "turn_timeout"
   | Provider_timeout _ -> "provider_timeout"
   | Ambiguous_post_commit _ -> "ambiguous_post_commit"
@@ -847,14 +804,12 @@ let kind_of_masc_internal_error = function
 let runtime_id_of_masc_internal_error = function
   | Runtime_exhausted { runtime_id; _ }
   | Capacity_backpressure { runtime_id; _ }
-  | Resumable_cli_session { runtime_id; _ }
-  | Admission_queue_timeout { runtime_id; _ } ->
+  | Resumable_cli_session { runtime_id; _ } ->
       let runtime_id = runtime_id_to_string runtime_id in
       if String.equal (String.trim runtime_id) "" then "unknown"
       else runtime_id
   | Accept_rejected { scope; _ } ->
       nonempty_or_unknown scope
-  | Admission_queue_rejected _
   | Turn_timeout _
   | Provider_timeout _
   | Ambiguous_post_commit _
@@ -915,8 +870,6 @@ let accept_no_progress_retry_kind = function
   | Runtime_exhausted _
   | Capacity_backpressure _
   | Resumable_cli_session _
-  | Admission_queue_timeout _
-  | Admission_queue_rejected _
   | Turn_timeout _
   | Provider_timeout _
   | Ambiguous_post_commit _
@@ -951,6 +904,10 @@ let sdk_error_of_masc_internal_error err =
 
 let parse_masc_internal_error_json (json : Yojson.Safe.t) :
     masc_internal_error option =
+  let exact_fields expected fields =
+    let sort = List.sort String.compare in
+    sort expected = sort (List.map fst fields)
+  in
   let int_opt_of_assoc key = function
     | `Assoc fields -> (
         match List.assoc_opt key fields with
@@ -995,19 +952,27 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
           with
           | Some runtime_id, Some source, Some detail ->
             (match capacity_backpressure_source_of_string source with
-             | Some source ->
-               let retry_after_synthetic =
-                 match json with
-                 | `Assoc fields -> (
-                     match List.assoc_opt "retry_after_synthetic" fields with
-                     | Some (`Bool b) -> b
-                     | _ -> false)
-                 | _ -> false
-               in
+             | Some source
+               when exact_fields
+                      [ "kind"
+                      ; "runtime_id"
+                      ; "source"
+                      ; "detail"
+                      ; "retry_after_sec"
+                      ]
+                      fields
+                    || exact_fields
+                         [ "kind"
+                         ; "runtime_id"
+                         ; "source"
+                         ; "detail"
+                         ; "retry_after_sec"
+                         ; "cooldown_cause"
+                         ]
+                         fields ->
                let retry_after =
                  match float_opt_of_assoc "retry_after_sec" json with
                  | None -> No_retry_hint
-                 | Some s when retry_after_synthetic -> Synthetic_default s
                  | Some s -> Explicit s
                in
                let cooldown_cause =
@@ -1018,7 +983,7 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                Some
                  (Capacity_backpressure
                     { runtime_id; source; detail; retry_after; cooldown_cause })
-             | None -> None)
+             | Some _ | None -> None)
           | _ -> None)
       | Some (`String "resumable_cli_session") -> (
           match string_opt_of_assoc "runtime_id" json, string_opt_of_assoc "detail" json with
@@ -1060,29 +1025,6 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                      tool_progress_effects_of_assoc "tool_effects_seen" json;
                    reason;
                  })
-          | _ -> None)
-      | Some (`String "admission_queue_timeout") -> (
-          match string_opt_of_assoc "keeper_name" json,
-                string_opt_of_assoc "runtime_id" json
-          with
-          | Some keeper_name, Some runtime_id ->
-            let wait_sec =
-              match json with
-              | `Assoc fields -> (
-                  match List.assoc_opt "wait_sec" fields with
-                  | Some (`Float v) -> v
-                  | _ -> 0.0)
-              | _ -> 0.0
-            in
-            Some
-              (Admission_queue_timeout { keeper_name; runtime_id; wait_sec })
-          | _ -> None)
-      | Some (`String "admission_queue_rejected") -> (
-          match string_opt_of_assoc "keeper_name" json,
-                string_opt_of_assoc "reason" json
-          with
-          | Some keeper_name, Some reason ->
-            Some (Admission_queue_rejected { keeper_name; reason })
           | _ -> None)
       | Some (`String "turn_timeout") -> (
           match json with

@@ -15,18 +15,12 @@ val pause_elapsed_sec :
   Keeper_meta_contract.keeper_meta -> float option
 type pause_kind = Keeper_activation_readiness.pause_kind =
   | Active
-  | Reconcile_gated
-  | Auto_recoverable
   | Operator_paused
-  | Latched_paused
   | Unclassified_paused
   | Dead_tombstone
 
 val pause_kind : Keeper_meta_contract.keeper_meta -> pause_kind
 val pause_kind_to_wire : pause_kind -> string
-val pause_auto_resume_source :
-  Keeper_meta_contract.keeper_meta ->
-  string option
 val paused_keeper_detail_json :
   now:float ->
   name:string ->

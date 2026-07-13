@@ -46,7 +46,6 @@ vi.mock('../../api/dashboard', async (importOriginal) => {
       stale_reason: null,
       coverage_gaps: [],
       memory_os: null,
-      user_model: null,
       entries: [
         {
           record: {
@@ -401,12 +400,9 @@ describe('KeeperWorkspaceRail', () => {
               has_capabilities: true,
               behavior_capabilities: {
                 supports_inline_tools: true,
-                requires_per_keeper_bridging_for_bound_actor_tools: true,
-                identity_runtime_mcp_header_keys: ['x-masc-keeper'],
                 argv_prompt_preflight: true,
                 uses_anthropic_caching: true,
                 max_turns_per_attempt: 3,
-                tolerates_bound_actor_fallback: true,
               },
               custom_header_count: 1,
               connect_timeout_s: 120,
@@ -525,7 +521,7 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).toContain('temp:0.65')
     expect(container.textContent).toContain('sampling-config:top_p:0.91,top_k:42,min_p:0.07')
     expect(container.textContent).toContain('budget:32768')
-    expect(container.textContent).toContain('behavior:inline-tools,keeper-bridge')
+    expect(container.textContent).toContain('behavior:inline-tools,argv-preflight,anthropic-cache')
     expect(container.textContent).toContain(
       'controls:tool-choice,required,named,parallel,extended-thinking,reasoning-budget,native-stream,system-prompt,cache,prompt-cache@1024,seed+images,usage,code-exec',
     )

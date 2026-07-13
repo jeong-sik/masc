@@ -57,8 +57,6 @@ let is_transient_internal_runner_error (err : Agent_sdk.Error.sdk_error) : bool 
       | Keeper_turn_driver.Capacity_backpressure _
       | Keeper_turn_driver.Resumable_cli_session _
       | Keeper_turn_driver.Accept_rejected _
-      | Keeper_turn_driver.Admission_queue_timeout _
-      | Keeper_turn_driver.Admission_queue_rejected _
       | Keeper_turn_driver.Provider_timeout _
       | Keeper_turn_driver.Turn_timeout _
       | Keeper_turn_driver.Ambiguous_post_commit _
@@ -179,10 +177,10 @@ let is_transient_network_error (err : Agent_sdk.Error.sdk_error) : bool =
     processed the request, so committed tool results are not at risk of
     duplication.
 
-    These errors may recur with the same payload, so they are NOT
-    eligible for same-turn retry.  They ARE eligible for auto-recovery
-    when all committed tools are reconcile-safe (idempotent/board-like):
-    the keeper's next heartbeat cycle will build a fresh prompt.
+    These errors may recur with the same payload, so they are not eligible
+    for same-turn retry. The keeper's next cycle remains available, but a
+    committed mutation is never exempted from explicit partial-commit
+    handling based on the tool's product identity.
 
     Deliberately do not infer this from [InvalidRequest] message text: provider
     bodies are free-form and have produced false positives for non-JSON parse
@@ -284,8 +282,6 @@ let is_auto_recoverable_runtime_exhausted_error (err : Agent_sdk.Error.sdk_error
       false
   | Some (Keeper_turn_driver.Accept_rejected _)
   | Some (Keeper_turn_driver.Resumable_cli_session _)
-  | Some (Keeper_turn_driver.Admission_queue_rejected _)
-  | Some (Keeper_turn_driver.Admission_queue_timeout _)
   | Some (Keeper_turn_driver.Turn_timeout _)
   | Some (Keeper_turn_driver.Provider_timeout _)
   | Some (Keeper_turn_driver.Ambiguous_post_commit _)
@@ -302,8 +298,6 @@ let is_resumable_cli_session_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Keeper_turn_driver.Runtime_exhausted _)
   | Some (Keeper_turn_driver.Capacity_backpressure _)
   | Some (Keeper_turn_driver.Accept_rejected _)
-  | Some (Keeper_turn_driver.Admission_queue_timeout _)
-  | Some (Keeper_turn_driver.Admission_queue_rejected _)
   | Some (Keeper_turn_driver.Turn_timeout _)
   | Some (Keeper_turn_driver.Provider_timeout _)
   | Some (Keeper_turn_driver.Ambiguous_post_commit _)
@@ -332,8 +326,6 @@ let is_accept_no_usable_progress_error (err : Agent_sdk.Error.sdk_error) : bool 
       ( Keeper_turn_driver.Runtime_exhausted _
       | Keeper_turn_driver.Capacity_backpressure _
       | Keeper_turn_driver.Resumable_cli_session _
-      | Keeper_turn_driver.Admission_queue_rejected _
-      | Keeper_turn_driver.Admission_queue_timeout _
       | Keeper_turn_driver.Turn_timeout _
       | Keeper_turn_driver.Provider_timeout _
       | Keeper_turn_driver.Ambiguous_post_commit _
@@ -351,7 +343,6 @@ let is_accept_no_usable_progress_error (err : Agent_sdk.Error.sdk_error) : bool 
 type degraded_retry_reason =
   | Hard_quota
   | Resumable_cli_session
-  | Admission_queue_timeout
   | Provider_timeout
   | Turn_timeout
   | Runtime_candidates_filtered
@@ -367,7 +358,6 @@ type degraded_retry_reason =
 let degraded_retry_reason_to_string = function
   | Hard_quota -> "hard_quota"
   | Resumable_cli_session -> "resumable_cli_session"
-  | Admission_queue_timeout -> "admission_queue_timeout"
   | Provider_timeout -> "provider_timeout"
   | Turn_timeout -> "turn_timeout"
   | Runtime_candidates_filtered -> "runtime_candidates_filtered"
@@ -463,8 +453,6 @@ let degraded_retry_after_recoverable_error
     match Keeper_turn_driver.classify_masc_internal_error err with
     | Some (Keeper_turn_driver.Resumable_cli_session _) ->
         phase_recovery_retry Resumable_cli_session
-    | Some (Keeper_turn_driver.Admission_queue_timeout _) ->
-        phase_recovery_retry Admission_queue_timeout
     | Some (Keeper_turn_driver.Provider_timeout _) ->
         phase_recovery_retry Provider_timeout
     | Some (Keeper_turn_driver.Turn_timeout _) ->
@@ -485,7 +473,6 @@ let degraded_retry_after_recoverable_error
          | None -> None)
     | Some
         (Keeper_turn_driver.Runtime_exhausted _)
-    | Some (Keeper_turn_driver.Admission_queue_rejected _)
     | Some (Keeper_turn_driver.Ambiguous_post_commit _)
     (* RFC-0159 Phase A: opaque internal failures have no
        local-recovery retry mapping. *)
@@ -502,8 +489,6 @@ let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
     match Keeper_turn_driver.classify_masc_internal_error err with
     | Some (Keeper_turn_driver.Resumable_cli_session _) ->
         Some Resumable_cli_session
-    | Some (Keeper_turn_driver.Admission_queue_timeout _) ->
-        Some Admission_queue_timeout
     | Some (Keeper_turn_driver.Provider_timeout _) ->
         Some Provider_timeout
     | Some (Keeper_turn_driver.Turn_timeout _) ->
@@ -530,7 +515,6 @@ let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
         Some Runtime_exhausted
     | Some (Keeper_turn_driver.Accept_rejected _) ->
         accept_rejection_degraded_retry_reason err
-    | Some (Keeper_turn_driver.Admission_queue_rejected _)
     | Some (Keeper_turn_driver.Ambiguous_post_commit _)
     (* RFC-0159 Phase A: typed [Internal_*] variants are not runtime-rotation
        reasons; they expose previously-opaque raw exception payloads.  *)
@@ -681,8 +665,7 @@ let default_degraded_rotation_candidates
       | Runtime_exhausted
       | Runtime_candidates_filtered
       | Turn_timeout
-      | Resumable_cli_session
-      | Admission_queue_timeout ) ->
+      | Resumable_cli_session ) ->
     (* Phase B-1: include the full runtime catalog so transient infrastructure
        failures (notably capacity_backpressure) can fail over to a healthy
        runtime outside the narrow [base; default; phase_recovery] set.
@@ -750,55 +733,9 @@ let filter_quota_pool_rotation_candidates
          | Some candidate_pool -> not (String.equal candidate_pool effective_pool))
       candidates
 
-(** [true] when the error is a completion contract violation.
-    Contract violations should cap rotation because retrying the same
-    or different runtime will not satisfy the contract. Non-contract
-    errors (provider timeout, rate limit, server error) are transient
-    and should allow cycling through candidates again. *)
-let is_completion_contract_violation (err : Agent_sdk.Error.sdk_error) : bool =
-  match Keeper_turn_driver.classify_masc_internal_error err with
-  | Some (Keeper_turn_driver.Accept_rejected _) ->
-    not (is_recoverable_no_progress_accept_rejection err)
-  | Some
-      ( Keeper_turn_driver.Runtime_exhausted _
-      | Keeper_turn_driver.Capacity_backpressure _
-      | Keeper_turn_driver.Resumable_cli_session _
-      | Keeper_turn_driver.Admission_queue_timeout _
-      | Keeper_turn_driver.Admission_queue_rejected _
-      | Keeper_turn_driver.Turn_timeout _
-      | Keeper_turn_driver.Provider_timeout _
-      | Keeper_turn_driver.Ambiguous_post_commit _
-      | Keeper_turn_driver.Internal_unhandled_exception _
-      | Keeper_turn_driver.Internal_bridge_exception _
-      | Keeper_turn_driver.Internal_contract_rejected _ )
-  | None ->
-    false
-
-let degraded_reason_allows_candidate_cycle = function
-  | Hard_quota
-  | Rate_limit
-  (* Capacity_backpressure: provider retry_after is minutes-long, so cycling
-     the same candidate pool at the turn retry cadence just hammers the
-     provider and loops forever (incidents 2026-05-21, 2026-07-06, #23373).
-     Cap rotation here; the keeper pauses after candidates are exhausted and
-     retries on a later turn once the provider actually recovers. *)
-  | Capacity_backpressure
-  | Read_only_no_progress
-  | Empty_no_progress
-  | Thinking_only_no_progress -> false
-  | Resumable_cli_session
-  | Admission_queue_timeout
-  | Provider_timeout
-  | Turn_timeout
-  | Runtime_candidates_filtered
-  | Runtime_exhausted
-  | Server_error
-  | Auth_error -> true
-
 let degraded_rotation_after_recoverable_error
       ?(credential_pool_of_runtime_id = fun _ -> None)
       ?fallback_hint
-      ~(pacing_enforced : bool)
       ~(base_runtime : string)
       ~(effective_runtime : string)
     ~(attempted_runtimes : string list)
@@ -834,7 +771,6 @@ let degraded_rotation_after_recoverable_error
         | Empty_no_progress
         | Thinking_only_no_progress
         | Resumable_cli_session
-        | Admission_queue_timeout
         | Provider_timeout
         | Turn_timeout
         | Runtime_candidates_filtered
@@ -852,27 +788,9 @@ let degraded_rotation_after_recoverable_error
       (match untried with
        | Some next_runtime ->
          Some { next_runtime; fallback_reason }
-       | None
-         when (not (is_completion_contract_violation err))
-              && (pacing_enforced
-                  || degraded_reason_allows_candidate_cycle fallback_reason) ->
-         (* Non-contract transient infrastructure errors (provider timeout,
-            server error, capacity backpressure) may succeed on a later
-            candidate pass. Quota/rate-limit classes cap after all candidates:
-            retrying the same credential pool just amplifies an account-scoped
-            limit. #19930
-
-            RFC-0313 W3: under enforced pacing the class cap is bypassed —
-            in-turn cycling stays bounded by the turn cycle budget
-            (Candidates_filtered_after_cycles) and cross-turn retries are
-            spaced by revisit pacing, which is what the cap approximated. *)
-         (match candidates with
-          | [] -> None
-          | first_candidate :: _ ->
-            Some { next_runtime = first_candidate; fallback_reason })
        | None ->
-         (* Contract violation, or (shadow mode) quota/rate-limit exhaustion:
-            cap rotation. *)
+         (* One typed candidate pass is complete. A later Keeper turn may make
+            a fresh attempt; this boundary never invents a timed retry cycle. *)
          None)
 
 (** [true] when a structured error indicates context overflow. *)
@@ -916,11 +834,9 @@ let is_auto_recoverable_turn_error (err : Agent_sdk.Error.sdk_error) : bool =
   || is_server_rejected_parse_error err
   || is_auto_recoverable_runtime_exhausted_error err
   (* Context overflow is handled explicitly by
-     [Keeper_turn_runtime_budget.pause_keeper_for_overflow] at the point of
-     detection (Overflowed/Compacting FSM retry-exhausted path, auto-resume
-     with backoff) rather than by accumulating turn_consecutive_failures
-     toward a hard crash — counting it here too would double-penalize an
-     event that already has its own graceful pause. *)
+     [Keeper_turn_runtime_budget.record_overflow_failure] at the point of
+     detection rather than being duplicated in the ordinary turn-failure
+     observation stream. *)
   || is_context_overflow err
 
 let should_warn_keeper_cycle_failed (err : Agent_sdk.Error.sdk_error) : bool =
@@ -932,8 +848,6 @@ let should_warn_keeper_cycle_failed (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Keeper_turn_driver.Runtime_exhausted _)
   | Some (Keeper_turn_driver.Resumable_cli_session _)
   | Some (Keeper_turn_driver.Accept_rejected _)
-  | Some (Keeper_turn_driver.Admission_queue_timeout _)
-  | Some (Keeper_turn_driver.Admission_queue_rejected _)
   | Some (Keeper_turn_driver.Provider_timeout _)
   | Some (Keeper_turn_driver.Turn_timeout _)
   | Some (Keeper_turn_driver.Ambiguous_post_commit _)
@@ -948,20 +862,6 @@ let should_warn_keeper_cycle_failed (err : Agent_sdk.Error.sdk_error) : bool =
 
 
 include Keeper_error_classify_post_commit
-
-(** Max transient retries (excluding the initial attempt).  Total attempts
-    = 1 initial + max_transient_retries.  OAS internal retry is 3 per
-    provider; this outer retry covers cases where all providers fail
-    transiently (e.g. TCP keepalive expiry across all backends).
-
-    Runtime-configurable via [Env_config_keeper.KeeperRetryBackoff]. *)
-let max_transient_retries () =
-  Env_config_keeper.KeeperRetryBackoff.max_transient_retries ()
-
-(** Exponential backoff delay for transient retry [attempt] (1-indexed).
-    Delegates to [Env_config_keeper.KeeperRetryBackoff]. *)
-let transient_backoff_sec (attempt : int) : float =
-  Env_config_keeper.KeeperRetryBackoff.transient_backoff_sec attempt
 
 (* [is_context_overflow] now lives earlier in this file, above
    [is_auto_recoverable_turn_error], since that predicate depends on it. *)
@@ -1011,8 +911,6 @@ let is_runtime_exhausted_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Keeper_turn_driver.Resumable_cli_session _) -> true
   | Some (Keeper_turn_driver.Capacity_backpressure _)
   | Some (Keeper_turn_driver.Accept_rejected _)
-  | Some (Keeper_turn_driver.Admission_queue_timeout _)
-  | Some (Keeper_turn_driver.Admission_queue_rejected _)
   | Some (Keeper_turn_driver.Provider_timeout _)
   | Some (Keeper_turn_driver.Turn_timeout _)
   | Some (Keeper_turn_driver.Ambiguous_post_commit _)

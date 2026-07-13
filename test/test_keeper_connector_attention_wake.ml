@@ -112,15 +112,13 @@ let external_attention_item ?(urgency = A.Ambient) ?(preview = "ambient TOKEN-12
 (* Quiet observation: no mention / board / scope trigger and no task backlog, so
    the ONLY reactive trigger is the injected event-queue one. *)
 let quiet_obs : WO.world_observation =
-  { pending_mentions = []
+  { pending_messages = []
   ; pending_board_events = []
-  ; pending_scope_messages = []
   ; idle_seconds = 0
   ; active_goals = []
   ; context_ratio = lazy 0.0
   ; unclaimed_task_count = 0
   ; claimable_task_count = 0
-  ; provider_capacity_blocked_task_count = 0
   ; failed_task_count = 0
   ; pending_verification_count = 0
   ; scheduled_automation = WO.empty_scheduled_automation_observation
@@ -129,15 +127,12 @@ let quiet_obs : WO.world_observation =
   ; connected_surfaces = []
   }
 
-let no_provider_cooldown ~keeper_name:_ ~runtime_id:_ = None
-
 let reasons_of_verdict = function
   | WO.Run { reasons = first, rest } -> first :: rest
   | WO.Skip _ -> []
 
 let decide ?(event_queue_triggers = []) () =
   WO.keeper_cycle_decision
-    ~provider_cooldown_remaining_sec:no_provider_cooldown
     ~event_queue_triggers
     ~meta:(make_meta "conn-keeper")
     quiet_obs

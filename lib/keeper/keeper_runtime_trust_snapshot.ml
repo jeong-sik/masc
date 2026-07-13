@@ -75,59 +75,9 @@ let terminal_reason_from_decision json =
         (json_string_opt_member "terminal_reason_code" json)
 
 let terminal_reason_from_receipt receipt =
-  let terminal_reason_code = json_string_opt_member "terminal_reason_code" receipt in
-  let operator_disposition_reason =
-    json_string_opt_member "operator_disposition_reason" receipt
-    |> Option.map String.lowercase_ascii
-  in
-  let completion_contract_result = completion_contract_result_from_receipt receipt in
-  let receipt_requires_tool_attention =
-    match operator_disposition_reason, completion_contract_result with
-    | Some "tool_route_recoverable_failure", _ -> true
-    | _, Some result -> Completion_contract_result.requires_attention result
-    | _ -> false
-  in
-  match terminal_reason_code with
-  | Some code when receipt_requires_tool_attention
-                   && Keeper_turn_disposition.is_success
-                        (Keeper_turn_disposition.of_wire code) ->
-      Some
-        (Keeper_turn_terminal.of_disposition
-           ~source:"execution_receipt"
-           Keeper_turn_disposition.Completion_contract_unsatisfied)
-  | Some code ->
-      Some (Keeper_turn_terminal.of_code ~source:"execution_receipt" code)
-  | None when receipt_requires_tool_attention ->
-      Some
-        (Keeper_turn_terminal.of_disposition
-           ~source:"execution_receipt"
-           Keeper_turn_disposition.Completion_contract_unsatisfied)
-  | None -> None
-
-let receipt_contract_attention_reason receipt =
-  let completion_contract_result = completion_contract_result_from_receipt receipt in
-  let turn_budget_exhausted =
-    match json_string_opt_member "terminal_reason_code" receipt with
-    | Some value -> Keeper_turn_disposition.is_turn_budget_exhausted_wire value
-    | None -> false
-  in
-  let attention_reason result =
-    "completion_contract_result:" ^ Completion_contract_result.to_string result
-  in
-  match completion_contract_result with
-  | Some
-      ( Completion_contract_result.Violated
-      | Completion_contract_result.Claim_only_after_owned_task
-      | Completion_contract_result.Needs_execution_progress as result ) ->
-      Some (attention_reason result)
-  | Some
-      ( Completion_contract_result.Unknown
-      | Completion_contract_result.Not_dispatched
-      | Completion_contract_result.Surface_mismatch
-      | Completion_contract_result.No_capable_provider as result )
-    when turn_budget_exhausted ->
-      Some (attention_reason result)
-  | Some _ | None -> None
+  Option.map
+    (Keeper_turn_terminal.of_code ~source:"execution_receipt")
+    (json_string_opt_member "terminal_reason_code" receipt)
 
 (* JSON-deserialization boundary: maps a runtime_blocker_class wire
    string into a typed [Keeper_turn_disposition.t]. The previous
@@ -143,11 +93,7 @@ let disposition_of_typed_runtime_blocker_class blocker_class =
     Keeper_meta_contract.blocker_class_to_string blocker_class
   in
   match blocker_class with
-  | Keeper_meta_contract.Completion_contract_violation ->
-      Keeper_turn_disposition.Provider_error
-        (Keeper_turn_terminal_code.Provider_runtime_error raw_blocker_class)
   | Keeper_meta_contract.Turn_timeout
-  | Keeper_meta_contract.Turn_timeout_after_queue_wait
   | Keeper_meta_contract.Stale_turn_timeout ->
       Keeper_turn_disposition.Turn_wall_clock_timeout
   | Keeper_meta_contract.Ambiguous_post_commit_timeout
@@ -159,9 +105,6 @@ let disposition_of_typed_runtime_blocker_class blocker_class =
       Keeper_turn_disposition.Provider_error
         (Keeper_turn_terminal_code.Provider_runtime_error raw_blocker_class)
   | Keeper_meta_contract.Capacity_backpressure
-  | Keeper_meta_contract.Admission_queue_wait_timeout
-  | Keeper_meta_contract.Turn_livelock_blocked
-  | Keeper_meta_contract.No_progress_loop
   | Keeper_meta_contract.Fiber_unresolved
   | Keeper_meta_contract.Stale_fleet_batch
   | Keeper_meta_contract.Oas_agent_execution_timeout
@@ -221,19 +164,15 @@ let runtime_blocker_supersedes_receipt ~meta ~runtime_blocker_fields
     latest_receipt =
   match assoc_string_opt "runtime_blocker_class" runtime_blocker_fields with
   | None -> false
-  | Some raw_blocker_class -> (
-    match Keeper_meta_contract.blocker_class_of_serialized_string raw_blocker_class with
-    | Some Keeper_meta_contract.Completion_contract_violation ->
-        true
-    | _ -> (
-      match latest_receipt with
-      | None -> true
-      | Some receipt -> (
-          match receipt_ended_at_unix receipt with
-          | Some receipt_ts ->
-            meta.runtime.usage.last_turn_ts
-            > receipt_ts +. runtime_blocker_receipt_timestamp_epsilon_sec
-          | None -> meta.runtime.usage.last_turn_ts > 0.0)))
+  | Some _ -> (
+    match latest_receipt with
+    | None -> true
+    | Some receipt -> (
+        match receipt_ended_at_unix receipt with
+        | Some receipt_ts ->
+          meta.runtime.usage.last_turn_ts
+          > receipt_ts +. runtime_blocker_receipt_timestamp_epsilon_sec
+        | None -> meta.runtime.usage.last_turn_ts > 0.0))
 
 let current_receipt_for_runtime_state ~meta ~runtime_blocker_fields
     latest_receipt =
@@ -311,10 +250,6 @@ let terminal_reason_timeline_event ~latest_decision ~latest_receipt =
   | _ -> None
 
 let disposition_of_snapshot ~pending_approval_count ~runtime_blocker_fields =
-  let continue_gate =
-    assoc_bool_default "runtime_blocker_continue_gate" ~default:false
-      runtime_blocker_fields
-  in
   let blocker_class = assoc_string_opt "runtime_blocker_class" runtime_blocker_fields in
   let blocker_summary =
     assoc_string_opt "runtime_blocker_summary" runtime_blocker_fields
@@ -325,8 +260,7 @@ let disposition_of_snapshot ~pending_approval_count ~runtime_blocker_fields =
         Some ("Alert", "sandbox_violation")
     | _ -> None
   in
-  if pending_approval_count > 0 then ("Blocked", "waiting_approval")
-  else if continue_gate then ("Blocked", "waiting_human_decision")
+  if pending_approval_count > 0 then ("Alert", "pending_operator_decision")
   else
     match blocker_class with
     | Some raw_blocker_class -> (
@@ -335,8 +269,6 @@ let disposition_of_snapshot ~pending_approval_count ~runtime_blocker_fields =
       with
       | Some (Keeper_meta_contract.Runtime_exhausted _) ->
           ("Alert", "runtime_exhausted")
-      | Some Keeper_meta_contract.Completion_contract_violation ->
-          ("Alert", "fsm_invariant")
       | Some _ | None -> (
         match sandbox_summary with
         | Some disposition -> disposition
@@ -349,10 +281,8 @@ let disposition_of_snapshot ~pending_approval_count ~runtime_blocker_fields =
 let operator_disposition_of_display ~disposition ~disposition_reason =
   match disposition with
   | "Pass" -> ("pass", disposition_reason)
-  | "Blocked" -> ("pause_human", disposition_reason)
-  | "Pause" -> ("pause_human", disposition_reason)
-  | "Alert" -> ("alert_exhausted", disposition_reason)
-  | _ -> ("pause_human", disposition_reason)
+  | "Blocked" | "Pause" -> ("fail_open_next_runtime", disposition_reason)
+  | "Alert" | _ -> ("unknown", disposition_reason)
 
 let display_disposition_of_operator ~operator_disposition
     ~operator_disposition_reason =
@@ -374,24 +304,8 @@ let receipt_operator_disposition receipt =
 
 let effective_disposition_fields ~fallback_disposition ~fallback_reason
     latest_receipt =
-  let contract_attention_reason =
-    Option.bind latest_receipt receipt_contract_attention_reason
-  in
-  match
-    ( contract_attention_reason,
-      Option.bind latest_receipt receipt_operator_disposition )
-  with
-  | Some disposition_reason, Some (operator_disposition, operator_disposition_reason) ->
-      ( "Blocked",
-        disposition_reason,
-        operator_disposition,
-        operator_disposition_reason )
-  | Some disposition_reason, None ->
-      ( "Blocked",
-        disposition_reason,
-        "pause_human",
-        "completion_contract_unsatisfied" )
-  | None, Some (operator_disposition, operator_disposition_reason) ->
+  match Option.bind latest_receipt receipt_operator_disposition with
+  | Some (operator_disposition, operator_disposition_reason) ->
       let disposition, disposition_reason =
         display_disposition_of_operator ~operator_disposition
           ~operator_disposition_reason
@@ -400,7 +314,7 @@ let effective_disposition_fields ~fallback_disposition ~fallback_reason
         disposition_reason,
         operator_disposition,
         operator_disposition_reason )
-  | None, None ->
+  | None ->
       let operator_disposition, operator_disposition_reason =
         operator_disposition_of_display ~disposition:fallback_disposition
           ~disposition_reason:fallback_reason
@@ -546,8 +460,8 @@ let pending_first_json pending_approvals =
         ]
   | _ -> `Null
 
-let approval_state_json ~pending_approval_count ~pending_approvals ~latest_tool_call
-    ~latest_approval_audit ~latest_receipt =
+let approval_state_json ~pending_approval_count ~pending_approvals
+    ~latest_approval_audit =
   let latest_rule_match =
     Option.bind latest_approval_audit (fun json ->
         match json_member "rule_match" json with
@@ -557,22 +471,15 @@ let approval_state_json ~pending_approval_count ~pending_approvals ~latest_tool_
   let latest_event_kind =
     Option.bind latest_approval_audit (json_string_opt_member "event")
   in
-  let resolution_mode =
-    Option.bind latest_tool_call (json_string_opt_member "approval_mode")
+  let decision_source =
+    Option.bind latest_approval_audit (json_string_opt_member "decision_source")
   in
-  ignore latest_receipt;
   let state =
     if pending_approval_count > 0 then "pending"
     else
       match latest_event_kind with
-      | Some "auto_approved_always" -> "always_flag"
-      | Some "auto_approved_rule_match" -> "always_rule"
-      | Some event
-        when String.equal event Keeper_approval_queue.approval_audit_hard_forbidden_event ->
-        "hard_forbidden"
       | Some "resolved" -> "resolved"
-      | Some "expired" | Some "approval_timeout" -> "expired"
-      | Some "cancelled" -> "cancelled"
+      | Some "gate_allowed" -> "allowed"
       | Some _ -> "observed"
       | None -> "idle"
   in
@@ -580,25 +487,15 @@ let approval_state_json ~pending_approval_count ~pending_approvals ~latest_tool_
     [
       ("state", `String state);
       ("pending_count", `Int pending_approval_count);
-      ("resolution_mode", Json_util.string_opt_to_json resolution_mode);
+      ("decision_source", Json_util.string_opt_to_json decision_source);
       ("latest_event_kind", Json_util.string_opt_to_json latest_event_kind);
       ( "latest_event_at",
         match Option.bind latest_approval_audit (json_float_opt_member "ts") with
         | Some ts -> `String (Masc_domain.iso8601_of_unix_seconds ts)
         | None -> `Null );
-      ( "matched_by",
-        match latest_rule_match with
-        | Some json -> json |> json_string_opt_member "matched_by" |> Json_util.string_opt_to_json
-        | None -> `Null );
       ( "rule_id",
         match latest_rule_match with
         | Some json -> json |> json_string_opt_member "rule_id" |> Json_util.string_opt_to_json
-        | None -> `Null );
-      ( "auto_approved",
-        match latest_approval_audit with
-        | Some json ->
-            json_bool_opt_member "auto_approved" json
-            |> Json_util.bool_opt_to_json
         | None -> `Null );
       ("pending_first", pending_first_json pending_approvals);
     ]
@@ -661,18 +558,13 @@ let execution_summary_json ~(meta : Keeper_meta_contract.keeper_meta) ~latest_re
     | `Null -> None
     | json -> json_string_opt_member "selected_model" json
   in
-  let mutation_guard_summary =
+  let completion_observation_summary =
     match typed_completion_contract_result with
-    | Some Completion_contract_result.Violated -> "mutation_contract_violated"
-    | Some
-        ( Completion_contract_result.Satisfied_execution
-        | Completion_contract_result.Satisfied_completion ) ->
-        "mutation_contract_satisfied"
     | Some result -> Completion_contract_result.to_string result
     | None ->
         (match completion_contract_result_raw with
          | Some raw -> "unknown_completion_contract_result:" ^ raw
-         | None -> "mutation_contract_not_observed")
+         | None -> "not_observed")
   in
   `Assoc
     [
@@ -696,7 +588,7 @@ let execution_summary_json ~(meta : Keeper_meta_contract.keeper_meta) ~latest_re
         | None, Some mode -> `String mode
         | None, None -> `Null );
       ("sandbox_root", Json_util.string_opt_to_json sandbox_root);
-      ("mutation_guard_summary", `String mutation_guard_summary);
+      ("completion_observation_summary", `String completion_observation_summary);
       ( "latest_receipt_at",
         Json_util.string_opt_to_json (Option.bind latest_receipt (json_string_opt_member "ended_at")) );
     ]
@@ -793,7 +685,7 @@ let summary_json ~(config : Workspace.config) ~(meta : keeper_meta) =
   in
   let approval_state =
     approval_state_json ~pending_approval_count ~pending_approvals:`Null
-      ~latest_tool_call ~latest_approval_audit ~latest_receipt
+      ~latest_approval_audit
   in
   let latest_causal_event =
     latest_causal_event_summary ~meta ~latest_decision ~latest_receipt
@@ -982,7 +874,7 @@ let snapshot_json_inner ~(config : Workspace.config) ~(meta : keeper_meta) =
   in
   let approval_state =
     approval_state_json ~pending_approval_count ~pending_approvals
-      ~latest_tool_call ~latest_approval_audit ~latest_receipt
+      ~latest_approval_audit
   in
   let execution_summary =
     execution_summary_json ~meta ~latest_receipt

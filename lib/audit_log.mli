@@ -31,14 +31,14 @@ type outcome =
   | Failure of string
 [@@deriving tla]
 
-type governance_audit_decision =
-  | Governance_allow
-  | Governance_require_confirm
-  | Governance_deny
-  | Governance_confirm
-  | Governance_expired
-  | Governance_unauthorized
-  | Governance_other of string
+type gate_audit_decision =
+  | Gate_allow
+  | Gate_require_confirmation
+  | Gate_deny
+  | Gate_confirm
+  | Gate_expired
+  | Gate_unauthorized
+  | Gate_other of string
 [@@deriving tla]
 
 type action =
@@ -55,7 +55,7 @@ type action =
   | CircuitOpen
   | CircuitClose
   | SearchRefinement
-  | GovernanceDecision of governance_audit_decision
+  | GateDecision of gate_audit_decision
   | RuntimeConfigWrite
   | Custom of string
   | Unknown of string
@@ -77,7 +77,7 @@ type audit_entry = {
 
 val action_to_string : action -> string
 (** Stable serialisation; round-tripped by {!string_to_action}. The
-    parametric variants ([ToolCall] / [GovernanceDecision] /
+    parametric variants ([ToolCall] / [GateDecision] /
     [Custom]) are encoded as ["<tag>:<arg>"]. Unknown wire strings
     round-trip through [Unknown] without being coerced to [Custom]. *)
 
@@ -86,11 +86,9 @@ val string_to_action : string -> action
     [Unknown] so callers can distinguish future action variants from
     explicit [Custom] events. *)
 
-val governance_audit_decision_to_string :
-  governance_audit_decision -> string
+val gate_audit_decision_to_string : gate_audit_decision -> string
 
-val governance_audit_decision_of_string :
-  string -> governance_audit_decision
+val gate_audit_decision_of_string : string -> gate_audit_decision
 
 val entry_to_json : audit_entry -> Yojson.Safe.t
 
@@ -206,7 +204,7 @@ val log_tool_call :
   ?trace_id:string ->
   unit -> unit
 
-val log_system_internal_tool_call :
+val log_non_public_tool_call :
   config ->
   agent_id:string ->
   tool_name:string ->
@@ -217,9 +215,9 @@ val log_system_internal_tool_call :
   ?token_count:int ->
   ?trace_id:string ->
   unit -> unit
-(** Records under action [Custom "system_internal_tool_call"] with a
-    [surface=system_internal] details envelope so dashboards can
-    distinguish internal MCP traffic from agent-initiated calls. *)
+(** Records under action [Custom "non_public_tool_call"] with a
+    [surface=non_public] details envelope so dashboards can distinguish
+    explicitly discovered MCP traffic from other registered calls. *)
 
 val log_client_tool_host_failure :
   config ->
@@ -253,11 +251,11 @@ val log_circuit_breaker :
   ?token_count:int ->
   unit -> unit
 
-val log_governance_decision :
+val log_gate_decision :
   config ->
   agent_id:string ->
   trace_id:string ->
-  decision:governance_audit_decision ->
+  decision:gate_audit_decision ->
   action_type:string ->
   confirmation_state:string ->
   unit -> unit

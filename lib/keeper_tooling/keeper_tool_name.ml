@@ -276,26 +276,8 @@ let masc_board_name_of_keeper_name name =
   | None -> None
 ;;
 
-let is_board_surface_name name =
-  match of_string name with
-  | Some tool -> is_keeper_board_tool tool
-  | None -> Option.is_some (Tool_name.Board_name.of_string name)
-;;
-
 let strip_mcp_masc_prefix name =
   if String.starts_with ~prefix:"mcp__masc__" name
   then String.sub name 11 (String.length name - 11)
   else name
-;;
-
-let is_board_write_name = Tool_name.Board_name.is_resource_write
-
-let is_board_write_surface_name name =
-  let name = strip_mcp_masc_prefix name in
-  match masc_board_name_of_keeper_name name with
-  | Some board_name -> is_board_write_name board_name
-  | None ->
-    (match Tool_name.Board_name.of_string name with
-     | Some board_name -> is_board_write_name board_name
-     | None -> false)
 ;;

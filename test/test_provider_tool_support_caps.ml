@@ -27,6 +27,31 @@ let test_no_silent_runtime_mcp_lane_for_cloud_provider () =
     (Provider_tool_support.provider_supports_runtime_mcp_lane provider_cfg)
 ;;
 
+let test_keeper_tool_lane_preserves_exact_inline_tools () =
+  let tool =
+    Agent_sdk.Tool.create
+      ~name:"keeper_probe"
+      ~description:"Keeper tool visibility probe"
+      ~parameters:[]
+      (fun _ -> Ok { Agent_sdk.Types.content = "ok"; _meta = None })
+  in
+  match
+    Runtime_transport.resolve_tool_lane_for_oas_tools
+      ~base_path:"/unused"
+      ~agent_name:"keeper-probe"
+      ~provider_cfg:(cloud_openai_compat_provider_cfg ())
+      ~tools:[ tool ]
+      ()
+  with
+  | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
+  | Ok (_, Some _) -> Alcotest.fail "Keeper tool lane must not become runtime MCP"
+  | Ok (resolved, None) ->
+    Alcotest.(check (list string))
+      "provider and credential state cannot remove Keeper Tool.t values"
+      [ "keeper_probe" ]
+      (List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name) resolved)
+;;
+
 let () =
   Alcotest.run
     "provider_tool_support_caps"
@@ -35,6 +60,10 @@ let () =
             "no silent runtime-mcp lane for cloud OpenAI_compat (#22771)"
             `Quick
             test_no_silent_runtime_mcp_lane_for_cloud_provider
+        ; Alcotest.test_case
+            "Keeper tools remain exact inline Tool.t values"
+            `Quick
+            test_keeper_tool_lane_preserves_exact_inline_tools
         ] )
     ]
 ;;

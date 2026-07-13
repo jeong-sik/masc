@@ -5,7 +5,6 @@ code_refs:
   - lib/keeper_tooling/keeper_tool_execute_shell_ir.ml
   - lib/keeper/keeper_tool_execute_runtime.ml
   - lib/exec_policy/exec_policy.ml
-  - lib/exec_policy/exec_policy_path_arg_descriptor.ml
   - lib/config/env_config_core.ml
   - lib/config/env_config_runtime.ml
   - lib/config/feature_flag_registry.ml
@@ -27,7 +26,8 @@ code_refs:
 > Date: 2026-06-21
 > Scope: MASC path/env/reimplementation/concurrency/fleet-isolation risks.
 > Method: read-only code scan + local guard execution + OCaml 5.x/Eio ecosystem check.
-> Status: blockers documented; remediation should be split into follow-up PRs.
+> Status: historical reference. Findings 1 and 7 were superseded on 2026-07-13
+> by the RFC-0255 withdrawal of inferred argv path policy.
 
 This audit treats the following as productization blockers:
 
@@ -48,7 +48,8 @@ This audit treats the following as productization blockers:
 
 No runtime `let default_base = "/Users/dancer/me"` style default was found in `bin/` or `lib/`. The serious risk is broader:
 
-1. **P0 conditional**: Shell IR path-jail can still be disabled by env and that disables the only Host-profile positional write-escape guard.
+1. **Resolved / superseded**: positional argv path inference and its kill-switch
+   model were removed; only explicit cwd/redirect validation remains.
 2. **P1**: env/config control plane is too wide for a product surface, and its CI guard currently produces false confidence.
 3. **P1**: Eio server/keeper paths still perform blocking stdlib directory scans in maintenance and request paths.
 4. **P1**: path SSOT guards are ratchets, not strict product gates; at least one split `.masc/config` concat is not caught.
@@ -57,29 +58,18 @@ No runtime `let default_base = "/Users/dancer/me"` style default was found in `b
 
 ## Findings
 
-### 1. Shell IR path-jail kill-switch could remove a product safety boundary
+### 1. Positional argv path jail — superseded decision
 
-**Severity**: Historical P0 when `MASC_SHELL_IR_PATH_JAIL_ENABLED=false`; resolved once the P5 sunset removes the kill-switch and makes the path jail unconditional.
+**Status**: Resolved by removal, not by making the jail unconditional.
 
-**Pre-sunset evidence**:
+The former path jail guessed which argv values were paths and rejected them
+before execution. RFC-0255 now records the replacement contract: positional
+argv is opaque, while explicit typed `cwd` and redirect targets remain
+validated. Process access is bounded by the selected runtime sandbox.
 
-- `lib/keeper_tooling/keeper_tool_execute_shell_ir.ml:76-84` skipped `Exec_policy.validate_shell_ir_paths` entirely when `Env_config_runtime.Shell_ir_path_jail.enabled ()` was false.
-- `lib/config/env_config_runtime.ml:957-968` documented that disabling the flag removed "the only positional write-escape guard on the Host profile".
-- `lib/keeper/keeper_tool_execute_runtime.ml:571-583` logged and counted `path_jail_disabled`, but still proceeded.
-- `lib/exec_policy/exec_policy.ml:631-742` contains the actual path/cwd/redirect validation that gets bypassed.
-
-**Impact**:
-
-For a multi-agent system, this was not just a debug knob. A single process-level env value could move Host-profile Execute from path-validated to path-unvalidated. If a keeper could issue Shell IR on Host while the flag was off, product safety depended on operational discipline instead of an enforceable boundary.
-
-**Fix direction**:
-
-- Resolved by removing the public steady-state kill-switch and making Shell IR
-  path validation unconditional in product runtime.
-- Add or keep CI/product gates proving the retired env knob cannot re-enter the
-  runtime tunables catalog or feature-flag registry.
-- Treat old `path_jail_disabled` telemetry references as historical evidence
-  only; telemetry is not a substitute for an enforced control.
+If stronger containment is required, it must be provided by a real sandbox or
+capability-owned tool. An environment kill-switch or a renamed argv classifier
+must not reintroduce this policy layer.
 
 ### 2. Env/config control plane is too wide, and the guard has false negatives
 
@@ -190,24 +180,14 @@ The first pass did not find an active "one keeper dies, all keepers stop" implem
 - For shared queues, require per-keeper isolation or bounded async offload with explicit backpressure.
 - Use `Switch.on_release` for cleanup tied to a fiber's lifetime; do not rely on catch-all exception blocks for cancellation semantics.
 
-### 7. Shell path descriptor corpus is manually maintained
+### 7. Shell path descriptor corpus — removed
 
-**Severity**: P2 now; P1 if the allowlist expands faster than tests.
+**Status**: Resolved.
 
-**Evidence**:
-
-- `lib/exec_policy/exec_policy_path_arg_descriptor.ml:56-70` is a hand-maintained closed set of commands whose positional args are paths.
-- `lib/exec_policy/exec_policy.ml:599-628` and `656-693` combine descriptors with heuristics.
-
-**Impact**:
-
-The descriptor approach is much better than raw shell string heuristics, but it is still a local reimplementation of path semantics for command families. Without strong corpus tests, adding one common command can silently under-protect or over-reject.
-
-**Fix direction**:
-
-- Keep the descriptor module, but add generated/corpus-based tests for every supported command shape.
-- Prefer typed Shell IR path scopes for tool-produced paths over guessing from argv text.
-- Keep `git`/`gh` exceptions explicit and covered by tests because revision/issue tokens are not paths.
+The descriptor, command corpus, flag parser, and per-command exemptions were
+deleted. Wrapping guessed argv semantics in a closed type did not make the
+classification objective and would have kept MASC coupled to every external
+CLI's argument grammar.
 
 ## Non-findings from this pass
 

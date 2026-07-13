@@ -12,7 +12,6 @@ type phase =
   | Crashed
   | Restarting
   | Dead
-  | Zombie
 val phase_to_string : Keeper_state_machine_phase.phase -> string
 val phase_of_string :
   string -> Keeper_state_machine_phase.phase option
@@ -28,14 +27,11 @@ type conditions = {
   handoff_active : bool;
   operator_paused : bool;
   stop_requested : bool;
-  restart_budget_remaining : bool;
-  backoff_elapsed : bool;
+  dead_tombstone_latched : bool;
+  restart_requested : bool;
   drain_complete : bool;
   context_overflow : bool;
-  compact_retry_exhausted : bool;
-  terminal_failure_latched : bool;
   credential_archived : bool;
-  zombie_timeout_reached : bool;
 }
 val default_conditions : conditions
 type context_actions = {
@@ -44,9 +40,9 @@ type context_actions = {
 }
 type event =
     Heartbeat_ok
-  | Heartbeat_failed of { consecutive : int; max_allowed : int; }
+  | Heartbeat_failed of { consecutive : int; }
   | Turn_succeeded
-  | Turn_failed of { consecutive : int; max_allowed : int; }
+  | Turn_failed of { consecutive : int; }
   | Context_measured of { context_ratio : float; message_count : int;
       token_count : int; context_actions : context_actions;
     }
@@ -66,16 +62,12 @@ type event =
       http_status : int option;
     }
   | Supervisor_restart_attempt of { attempt : int; }
-  | Restart_budget_exhausted
   | Credential_archived
-  | Zombie_timeout
-  | Terminal_failure_detected of { reason : string; }
   | Context_overflow_detected of {
       source : [ `Oas_signal | `Prompt_rejected ]; token_count : int;
       limit_tokens : int option;
     }
   | Auto_compact_triggered
-  | Compact_retry_exhausted
   | Operator_compact_requested
   | Operator_clear_requested of { preserve_system : bool; reason : string; }
 val event_to_string : event -> string
@@ -86,7 +78,6 @@ type entry_action =
   | Schedule_restart of { delay_sec : float; }
   | Publish_lifecycle of { event_name : string; detail : string; }
   | Mark_dead_tombstone
-  | Mark_zombie_tombstone
   | Cleanup_and_unregister
   | Trigger_immediate_cleanup
   | Cancel_pending_oas

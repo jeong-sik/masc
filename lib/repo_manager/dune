@@ -23,9 +23,6 @@
   masc.masc_exec
   masc.masc_log
   masc.masc_process
-  masc.keeper_metrics
-  masc.otel_metric_store
-  digestif
   yojson
   otoml
   unix)

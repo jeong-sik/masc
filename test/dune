@@ -36,30 +36,23 @@
   test_connector_reactive_wake_throttle
   test_keeper_bank_longterm_inject_flag
   test_keeper_memory_lane
-  test_keeper_reactive_wake_backlog_gate
   test_keeper_verification_audit
   test_keeper_connector_attention_wake
-  test_keeper_no_signal_silence
-  test_keeper_failed_task_not_proactive_driver
-  test_advisory_only_affordance_never_drives_wake
-  test_keeper_failed_task_orphan_does_not_livelock
+  test_keeper_raw_task_signal_wake
   test_broadcast_wakeup_policy
-  test_policy_source_of_status
   test_keeper_mention_scope
   test_keeper_lane_mentions
   test_keeper_chat_delivery_identity
   test_keeper_chat_delivery_journal
   test_keeper_librarian_retry
   test_surface_ref
-  test_admission_fd_gate
-  test_keeper_pressure_admission
+  test_inference_inflight_observation
   test_audit_projection
   test_keeper_turn_outcome
   test_keeper_cycle_channel
   test_board_collect_pause_gate
   test_keeper_identity_id
   test_tool_agent_timeline_name_match
-  test_keeper_idle_observation_liveness
   test_provider_tool_support_caps
   test_runtime_request_config_merge
   test_keeper_context_layers
@@ -89,7 +82,7 @@
   test_error_body_wire_shape
   test_session_lifecycle_event
   test_fd_accountant
-  test_fd_accountant_state
+  test_keeper_disk_pressure
   test_host_fd_pressure_poller
   test_operator_control_actions
   test_operator_control_snapshot_state
@@ -100,7 +93,6 @@
   test_dashboard_dev_token_host_gate
   test_audit_log
   test_console_sink
-  test_governance_anomaly
   test_http_negotiation
   test_mcp_h1_h2_admission_parity
   test_streamable_http_upgrade
@@ -119,7 +111,6 @@
   test_keeper_memory_os
   test_keeper_memory_os_gc_dry_run_report
   test_keeper_memory_os_sanity_sweep
-  test_keeper_user_model
   test_keeper_recall_outcome_eval
   test_keeper_memory_os_consolidation
   test_keeper_memory_os_consolidation_runtime
@@ -186,7 +177,6 @@
   test_keeper_proactive_skip_counter
   test_oas_empty_response_diagnostic
   test_board_author_identity_10297
-  test_fsm_drift_counter
   test_gc_sampler
   test_process_timeout_counter
   test_timeout_origin
@@ -206,14 +196,12 @@
   test_keeper_external_attention
   test_keeper_waiting_inventory
   test_keeper_board_attention_candidate
-  test_keeper_repo_claim_hitl
   test_keeper_runtime_trust_snapshot
   test_keeper_tool_audit_snapshot
   test_lsp_process_manager
   test_ide_annotations
   test_agent_observation_bridge
   test_ide_bridge
-  test_command_descriptor
   test_server_ide_lsp_proxy
   test_server_ide_http
   test_server_activity_http
@@ -228,27 +216,20 @@
   test_reputation_multi_dim
   test_reputation_identity_undercount
   test_accountability_emit_skip_10314
-  test_keeper_adaptive_thinking
   test_keeper_lifecycle_registry_dispatch
   test_keeper_lifecycle_chaos
-  test_keeper_rollover_gate
   test_keeper_generation_lineage
   test_keeper_deliberation
   test_keeper_registry_provenance
   test_keeper_registry_hardening
   test_keeper_fd_pressure_fleet
-  test_docker_spawn_throttle
   test_keeper_supervisor
-  test_keeper_alerting_path
   test_workspace_eio_pure
   test_workspace_telemetry_drop_non_eio
   test_keeper_contract_classifier_pure
   test_keeper_compact_policy_pure
   test_compaction_llm_summarizer
-  test_keeper_pacing
-  test_keeper_pacing_replay
   test_keeper_runtime_failure_route
-  test_heartbeat_smart
   test_keeper_allowed_paths
   test_playground_repo_readiness
   test_playground_paths
@@ -260,8 +241,6 @@
   test_autonomy_liberation
   test_keeper_unified_claim_progress
   test_keeper_unified_context_overflow
-  test_keeper_unified_idle_cooldown
-  test_keeper_unified_inline_skip
   test_keeper_surface_post
   test_keeper_person_notes
   test_keeper_person_note_set_handler
@@ -274,7 +253,6 @@
   test_keeper_observation_provenance
   test_keeper_fsm_guard_actions
   test_keeper_callback_hardening
-  test_keeper_behavioral_regime
   test_keeper_secret_projection
   test_keeper_secret_redaction
   test_keeper_toml
@@ -284,7 +262,6 @@
   test_dashboard_runtime_probe_nonblocking
   test_keeper_tool_policy_masc_surface
   test_keeper_tool_visibility_projection
-  test_keeper_tool_capability_axis
   test_keeper_tool_resolution
   test_tool_resolution_runtime_projection
   test_keeper_id
@@ -298,13 +275,7 @@
   test_repo_e2e
   test_exec_core
   test_exec_dispatch
-  test_shell_ir_risk
-  test_exec_effect
-  test_checked_shell_ir
   test_keeper_tool_execute_typed_input
-  test_hitl_approval
-  test_keeper_discovered_tools
-  test_keeper_tool_affinity
   test_keeper_sandbox_containment
   test_keeper_sandbox_runner
   test_keeper_sandbox_read_runner
@@ -312,7 +283,6 @@
   test_keeper_tool_search_files_containment
   test_keeper_sandbox_docker_route
   test_keeper_tool_search_files_via_field
-  test_env_git_noninteractive
   test_orphan_surfacer
   test_cap_blocker_structured_error
   test_context_overflow_action_tracker
@@ -320,7 +290,6 @@
   test_keeper_sandbox_read_backend
   test_keeper_path_ssot
   test_tool_input_validation
-  test_task_completion_gate
   test_task_completion_claim
   test_ocaml_north_star_task_lifecycle
   test_tool_blob_store
@@ -335,7 +304,6 @@
   test_keeper_reaction_ledger
   test_cache_metrics_wiring
   test_keeper_tool_execute_descriptor_variant
-  test_keeper_retrieval_quality
   test_observability_redact
   test_keeper_tool_call_sse_io_preview
   test_keeper_stream_text_accum
@@ -344,7 +312,6 @@
   test_disk_hygiene_script
   test_run_local_script
   test_start_masc_mcp_script
-  test_tool_prefilter
   test_keeper_state_machine
   test_keeper_state_machine_mermaid
   test_keeper_state_machine_correspondence
@@ -355,25 +322,20 @@
   test_telemetry_unified
   test_telemetry_unified_source
   test_telemetry_error_occurred_wire_10358
-  test_keeper_topk_llm
   test_warn_root_causes
   test_institution_of_string_fail_closed
   test_mid_turn_resume
   test_telemetry_observe
   test_keeper_typed_labels
-  test_shell_ir_typed_review_followup
   test_exec_shell_command_gate
-  test_auth_resolve_labels
   test_runtime_mcp_policy_auth
   test_keeper_classifier_helper
-  test_persona_tool_reachability
   test_turn_id_propagation
   test_auth_strict_mode
   test_keeper_turn_fsm_emit
   test_keeper_event_queue
   test_keeper_event_queue_owner_lock
   test_keeper_event_queue_persist_poison
-  test_keeper_goal_stagnation_wake
   test_workspace_routes_keeper
   test_workspace_tree_exclusions
   test_workspace_file_confidentiality
@@ -402,30 +364,23 @@
   test_keeper_bank_longterm_inject_flag
   test_keeper_memory_lane
   test_env_keeper_scrub
-  test_keeper_reactive_wake_backlog_gate
   test_keeper_verification_audit
   test_keeper_connector_attention_wake
-  test_keeper_no_signal_silence
-  test_keeper_failed_task_not_proactive_driver
-  test_advisory_only_affordance_never_drives_wake
-  test_keeper_failed_task_orphan_does_not_livelock
+  test_keeper_raw_task_signal_wake
   test_broadcast_wakeup_policy
-  test_policy_source_of_status
   test_keeper_mention_scope
   test_keeper_lane_mentions
   test_keeper_chat_delivery_identity
   test_keeper_chat_delivery_journal
   test_keeper_librarian_retry
   test_surface_ref
-  test_admission_fd_gate
-  test_keeper_pressure_admission
+  test_inference_inflight_observation
   test_audit_projection
   test_keeper_turn_outcome
   test_keeper_cycle_channel
   test_board_collect_pause_gate
   test_keeper_identity_id
   test_tool_agent_timeline_name_match
-  test_keeper_idle_observation_liveness
   test_provider_tool_support_caps
   test_runtime_request_config_merge
   test_keeper_context_layers
@@ -455,7 +410,7 @@
   test_error_body_wire_shape
   test_session_lifecycle_event
   test_fd_accountant
-  test_fd_accountant_state
+  test_keeper_disk_pressure
   test_host_fd_pressure_poller
   test_operator_control_actions
   test_operator_control_confirm
@@ -468,7 +423,6 @@
   test_dashboard_dev_token_host_gate
   test_audit_log
   test_console_sink
-  test_governance_anomaly
   test_http_negotiation
   test_mcp_h1_h2_admission_parity
   test_streamable_http_upgrade
@@ -487,7 +441,6 @@
   test_keeper_memory_os
   test_keeper_memory_os_gc_dry_run_report
   test_keeper_memory_os_sanity_sweep
-  test_keeper_user_model
   test_keeper_recall_outcome_eval
   test_keeper_memory_os_consolidation
   test_keeper_memory_os_consolidation_runtime
@@ -554,7 +507,6 @@
   test_keeper_proactive_skip_counter
   test_oas_empty_response_diagnostic
   test_board_author_identity_10297
-  test_fsm_drift_counter
   test_gc_sampler
   test_process_timeout_counter
   test_timeout_origin
@@ -574,14 +526,12 @@
   test_keeper_external_attention
   test_keeper_waiting_inventory
   test_keeper_board_attention_candidate
-  test_keeper_repo_claim_hitl
   test_keeper_runtime_trust_snapshot
   test_keeper_tool_audit_snapshot
   test_lsp_process_manager
   test_ide_annotations
   test_agent_observation_bridge
   test_ide_bridge
-  test_command_descriptor
   test_server_ide_lsp_proxy
   test_server_ide_http
   test_server_activity_http
@@ -596,27 +546,20 @@
   test_reputation_multi_dim
   test_reputation_identity_undercount
   test_accountability_emit_skip_10314
-  test_keeper_adaptive_thinking
   test_keeper_lifecycle_registry_dispatch
   test_keeper_lifecycle_chaos
-  test_keeper_rollover_gate
   test_keeper_generation_lineage
   test_keeper_deliberation
   test_keeper_registry_provenance
   test_keeper_registry_hardening
   test_keeper_fd_pressure_fleet
-  test_docker_spawn_throttle
   test_keeper_supervisor
-  test_keeper_alerting_path
   test_workspace_eio_pure
   test_workspace_telemetry_drop_non_eio
   test_keeper_contract_classifier_pure
   test_keeper_compact_policy_pure
   test_compaction_llm_summarizer
-  test_keeper_pacing
-  test_keeper_pacing_replay
   test_keeper_runtime_failure_route
-  test_heartbeat_smart
   test_keeper_allowed_paths
   test_playground_repo_readiness
   test_playground_paths
@@ -628,8 +571,6 @@
   test_autonomy_liberation
   test_keeper_unified_claim_progress
   test_keeper_unified_context_overflow
-  test_keeper_unified_idle_cooldown
-  test_keeper_unified_inline_skip
   test_keeper_surface_post
   test_keeper_person_notes
   test_keeper_person_note_set_handler
@@ -642,7 +583,6 @@
   test_keeper_observation_provenance
   test_keeper_fsm_guard_actions
   test_keeper_callback_hardening
-  test_keeper_behavioral_regime
   test_keeper_secret_projection
   test_keeper_secret_redaction
   test_keeper_toml
@@ -652,7 +592,6 @@
   test_dashboard_runtime_probe_nonblocking
   test_keeper_tool_policy_masc_surface
   test_keeper_tool_visibility_projection
-  test_keeper_tool_capability_axis
   test_keeper_tool_resolution
   test_tool_resolution_runtime_projection
   test_keeper_id
@@ -666,13 +605,7 @@
   test_repo_e2e
   test_exec_core
   test_exec_dispatch
-  test_shell_ir_risk
-  test_exec_effect
-  test_checked_shell_ir
   test_keeper_tool_execute_typed_input
-  test_hitl_approval
-  test_keeper_discovered_tools
-  test_keeper_tool_affinity
   test_keeper_sandbox_containment
   test_keeper_sandbox_runner
   test_keeper_sandbox_read_runner
@@ -680,7 +613,6 @@
   test_keeper_tool_search_files_containment
   test_keeper_sandbox_docker_route
   test_keeper_tool_search_files_via_field
-  test_env_git_noninteractive
   test_orphan_surfacer
   test_cap_blocker_structured_error
   test_context_overflow_action_tracker
@@ -690,7 +622,6 @@
   test_tool_input_validation
   ; test_contract_risk removed (team session cleanup)
   ; test_contract_composer removed (team session cleanup)
-  test_task_completion_gate
   test_task_completion_claim
   test_ocaml_north_star_task_lifecycle
   ; test_risk_digest removed (team session cleanup)
@@ -706,7 +637,6 @@
   test_keeper_reaction_ledger
   test_cache_metrics_wiring
   test_keeper_tool_execute_descriptor_variant
-  test_keeper_retrieval_quality
   test_observability_redact
   test_keeper_tool_call_sse_io_preview
   test_keeper_stream_text_accum
@@ -715,7 +645,6 @@
   test_disk_hygiene_script
   test_run_local_script
   test_start_masc_mcp_script
-  test_tool_prefilter
   test_keeper_state_machine
   test_keeper_state_machine_mermaid
   test_keeper_state_machine_preconditions
@@ -727,26 +656,20 @@
   test_telemetry_unified
   test_telemetry_unified_source
   test_telemetry_error_occurred_wire_10358
-  test_keeper_topk_llm
   test_warn_root_causes
   test_institution_of_string_fail_closed
   test_mid_turn_resume
   test_telemetry_observe
   test_keeper_typed_labels
-  test_shell_ir_typed_review_followup
   test_exec_shell_command_gate
-  test_auth_resolve_labels
   test_runtime_mcp_policy_auth
   test_keeper_classifier_helper
-  test_persona_tool_reachability
   test_turn_id_propagation
   test_auth_strict_mode
   test_keeper_turn_fsm_emit
   test_keeper_event_queue
   test_keeper_event_queue_owner_lock
   test_keeper_event_queue_persist_poison
-  test_keeper_goal_stagnation_wake
-  test_actionable_path_action
   test_workspace_routes_keeper
   test_workspace_tree_exclusions
   test_workspace_file_confidentiality
@@ -812,13 +735,6 @@
  (name test_keeper_structured_output_schema)
  (modules test_keeper_structured_output_schema)
  (libraries alcotest masc_test_deps masc.fusion_core))
-
-; Destructive-ops policy TOML loader + typed default catalogue.
-
-(test
- (name test_destructive_ops_policy)
- (modules test_destructive_ops_policy)
- (libraries masc_test_deps))
 
 ; Dashboard /runtime-defaults JSON builder — resolved defaults + model routing
 ; projection, plus the no-fabrication (null/empty) contract.
@@ -899,25 +815,11 @@
  (modules test_runtime_per_keeper_routing)
  (libraries masc_test_deps unix))
 
-; RFC-0236 §10: GitHub App installation token — JWT RS256 signing (keeper credential source).
+; Product-neutral private-key material redaction.
 
 (test
- (name test_keeper_github_app_jwt)
- (modules test_keeper_github_app_jwt)
- (libraries masc_test_deps mirage-crypto-pk x509 base64))
-
-; RFC-0236 §10: GitHub App projection fail-closed contract.
-
-(test
- (name test_keeper_secret_projection_github_app)
- (modules test_keeper_secret_projection_github_app)
- (libraries masc_test_deps))
-
-; RFC-0236 §10: GitHub token prefix redaction (installation ghs_ + classic/oauth/user).
-
-(test
- (name test_observability_redact_github_tokens)
- (modules test_observability_redact_github_tokens)
+ (name test_observability_redact_private_material)
+ (modules test_observability_redact_private_material)
  (libraries masc_test_deps))
 
 ; RFC-0265: capability-driven proactive runtime reroute (modality-gated decision).
@@ -994,7 +896,6 @@
   test_keeper_busy_dashboard_deferred
   test_keeper_turn_interrupt
   test_keeper_chat_consumer_delivery
-  test_keeper_continuation_delivery
   test_keeper_chat_consumer_dispatch
   test_runtime_params
   test_config_dir_resolver
@@ -1011,7 +912,6 @@
   test_dashboard_verification
   test_tool_quality_classify
   test_tui_decode
-  test_dashboard_governance
   test_dashboard_labels
   test_dashboard_surface_readiness
   test_activity_graph
@@ -1028,7 +928,6 @@
   test_keeper_meta_cas_retry
   test_keeper_write_meta_cycle_failures_counter
   test_judge_diagnostics
-  test_board_vote_quarantine
   test_keeper_identity_parse
   test_keeper_identity_normalize
   test_workspace_bind_fail_closed
@@ -1043,9 +942,8 @@
   test_tool_misc_web_fetch
   test_tool_local_runtime_probe
   test_board_ttl
+  test_board_explicit_writes
   test_keeper_path_check_error
-  test_destructive_class
-  test_board_content_dedup
   test_verifier_oas_bridge
   test_oas_adapters
   test_cache_eio
@@ -1065,8 +963,6 @@
   test_workspace_messages_raw
   ; test_cp_cleanup, test_cp_search_fabric, test_cp_section_cache, test_cp_jsonl_tail removed (CP purge)
   test_local_runtime_pool
-  test_keeper_tool_execute_retry_deterministic_close
-  test_keeper_runtime_denylist
   test_dashboard_render_timing_9766
   test_dashboard_keeper_cost_aggregates
   test_keeper_turn_timeout_default_10456
@@ -1097,7 +993,6 @@
   test_eio_guard_yield_meter
   test_board_dispatch
   test_board_sort
-  test_board_fixture_detector
   test_vote_ts_preservation_10086
   test_board_karma_ledger
   test_task_dispatch
@@ -1124,11 +1019,8 @@
   test_keeper_telemetry_consumer
   test_oas_bus_instrument
   test_trajectory
-  test_eval_gate
   test_eval_harness
   test_tool_board_coverage
-  test_anti_rationalization_fail_mode
-  test_board_truncation_detection
   test_yojson_type_error_board
   ; test_proof_criteria removed (team session cleanup)
   ; test_tree_index removed (CP purge)
@@ -1137,13 +1029,10 @@
   test_tool_dispatch
   test_tool_spec
   test_tool_job
-  test_tool_catalog_system_internal_hidden
   test_typed_tool_masc
   test_state_product
   test_tool_result
   test_tool_hooks
-  test_governance_pipeline
-  test_keeper_agent_isolation
   test_keeper_prompt_token_integrity
   test_sse_external_sub
   test_ws_transport
@@ -1160,25 +1049,18 @@
   test_grpc_workspace
   test_grpc_client
   test_http_protocol_detect
-  test_keeper_guards
-  test_keeper_stale_claim_release
-  test_eval_gate_evasion
   test_prompt_registry_defaults
   test_prompt_no_silent_reply_contract
   test_keeper_prompt_external
   test_keeper_recurring
   test_evidence_claim_schema
   test_deterministic_evidence_evaluator
-  test_keeper_deterministic_evidence_probe
-  test_verification_fsm
-  test_governance_yojson_roundtrip
+  test_mcp_session_store_roundtrip
   test_eval_calibration
   test_goal_tools
   test_goal_upsert_fsm_bypass_10247
   test_goal_store
   test_goal_metric_unevaluated
-  test_goal_awaiting_read_model
-  test_goal_verification
   test_string_util
   test_prompt_asset_sync
   test_system_error_class
@@ -1191,7 +1073,6 @@
   test_keeper_busy_dashboard_deferred
   test_keeper_turn_interrupt
   test_keeper_chat_consumer_delivery
-  test_keeper_continuation_delivery
   test_keeper_chat_consumer_dispatch
   test_runtime_params
   test_config_dir_resolver
@@ -1208,7 +1089,6 @@
   test_dashboard_verification
   test_tool_quality_classify
   test_tui_decode
-  test_dashboard_governance
   test_dashboard_labels
   test_dashboard_surface_readiness
   test_activity_graph
@@ -1225,7 +1105,6 @@
   test_keeper_meta_cas_retry
   test_keeper_write_meta_cycle_failures_counter
   test_judge_diagnostics
-  test_board_vote_quarantine
   test_keeper_identity_parse
   test_keeper_identity_normalize
   test_workspace_bind_fail_closed
@@ -1240,9 +1119,8 @@
   test_tool_misc_web_fetch
   test_tool_local_runtime_probe
   test_board_ttl
+  test_board_explicit_writes
   test_keeper_path_check_error
-  test_destructive_class
-  test_board_content_dedup
   test_verifier_oas_bridge
   test_oas_adapters
   test_cache_eio
@@ -1262,8 +1140,6 @@
   test_workspace_messages_raw
   ; test_cp_cleanup, test_cp_search_fabric, test_cp_section_cache, test_cp_jsonl_tail removed (CP purge)
   test_local_runtime_pool
-  test_keeper_tool_execute_retry_deterministic_close
-  test_keeper_runtime_denylist
   test_dashboard_render_timing_9766
   test_dashboard_keeper_cost_aggregates
   test_keeper_turn_timeout_default_10456
@@ -1294,7 +1170,6 @@
   test_eio_guard_yield_meter
   test_board_dispatch
   test_board_sort
-  test_board_fixture_detector
   test_vote_ts_preservation_10086
   test_board_karma_ledger
   test_task_dispatch
@@ -1321,11 +1196,8 @@
   test_keeper_telemetry_consumer
   test_oas_bus_instrument
   test_trajectory
-  test_eval_gate
   test_eval_harness
   test_tool_board_coverage
-  test_anti_rationalization_fail_mode
-  test_board_truncation_detection
   test_yojson_type_error_board
   ; test_tree_index removed (CP purge)
   test_tool_registry
@@ -1333,13 +1205,10 @@
   test_tool_dispatch
   test_tool_spec
   test_tool_job
-  test_tool_catalog_system_internal_hidden
   test_typed_tool_masc
   test_state_product
   test_tool_result
   test_tool_hooks
-  test_governance_pipeline
-  test_keeper_agent_isolation
   test_keeper_prompt_token_integrity
   test_sse_external_sub
   test_ws_transport
@@ -1356,25 +1225,18 @@
   test_grpc_workspace
   test_grpc_client
   test_http_protocol_detect
-  test_keeper_guards
-  test_keeper_stale_claim_release
-  test_eval_gate_evasion
   test_prompt_registry_defaults
   test_prompt_no_silent_reply_contract
   test_keeper_prompt_external
   test_keeper_recurring
   test_evidence_claim_schema
   test_deterministic_evidence_evaluator
-  test_keeper_deterministic_evidence_probe
-  test_verification_fsm
-  test_governance_yojson_roundtrip
+  test_mcp_session_store_roundtrip
   test_eval_calibration
   test_goal_tools
   test_goal_upsert_fsm_bypass_10247
   test_goal_store
   test_goal_metric_unevaluated
-  test_goal_awaiting_read_model
-  test_goal_verification
   test_string_util
   test_prompt_asset_sync
   test_system_error_class
@@ -1450,24 +1312,7 @@
  (modules test_dashboard_operator_nudges)
  (libraries masc_test_deps))
 
-; Keeper composite attention preserves recoverable tool-route contract blockers.
-
-(test
- (name test_server_dashboard_composite_attention)
- (modules test_server_dashboard_composite_attention)
- (libraries masc_test_deps))
-
 ; Typed JSON field extraction helper (RFC-0142 Phase 1).
-
-; Memory-OS "brain" end-to-end organ-composition harness. Runs the real
-; production functions in composition with falsification/teeth checks (not unit
-; isolation). Runnable standalone for read-only dry-run against a live store:
-;   dune exec test/memory_os_brain_harness.exe -- --keepers-dir <path>
-
-(test
- (name memory_os_brain_harness)
- (modules memory_os_brain_harness)
- (libraries masc_test_deps))
 
 ; Memory-quality eval harness (Harness-First). Offline, deterministic, read-only.
 ; No args  -> runs synthetic self-tests (pass/fail), CI-safe.
@@ -1498,13 +1343,6 @@
  (name test_lockfree_atomic)
  (modules test_lockfree_atomic)
  (libraries alcotest masc.lockfree_atomic))
-
-; RFC-0262 §9 completion-trust audit (foreign-completion regression oracle).
-
-(test
- (name test_completion_trust_audit)
- (modules test_completion_trust_audit)
- (libraries alcotest yojson masc.completion_trust_audit))
 
 ; RFC-0262 §9 completion-trust dispatch oracle (E1: scripted backbone).
 ; Deterministic reject gates on the full keeper_task_done dispatch path, no LLM.
@@ -1598,11 +1436,11 @@
  (modules test_sse_pumps)
  (libraries masc_test_deps masc_server))
 
-; HITL governance runtime-info projection (doc-03 P0#1 acceptance).
+; Non-hierarchical Gate HITL runtime-info projection.
 
 (test
- (name test_governance_hitl_runtime_info)
- (modules test_governance_hitl_runtime_info)
+ (name test_gate_hitl_runtime_info)
+ (modules test_gate_hitl_runtime_info)
  (libraries masc_test_deps masc_server unix))
 
 ; Typed catalog query bridge (RFC-0143 Phase 1).
@@ -1654,10 +1492,8 @@
   test_ag_ui_coverage
   test_tool_library_coverage
   test_tool_shard_coverage
-  test_context_compact_oas_coverage
   test_field_validation
-  test_tool_args_envelope
-  test_circuit_breaker)
+  test_tool_args_envelope)
  (modules
   test_backend_coverage
   test_tools_coverage
@@ -1702,10 +1538,8 @@
   test_ag_ui_coverage
   test_tool_library_coverage
   test_tool_shard_coverage
-  test_context_compact_oas_coverage
   test_field_validation
-  test_tool_args_envelope
-  test_circuit_breaker)
+  test_tool_args_envelope)
  (libraries masc_test_deps))
 
 ; PR-MASC-3: SSE registration token+session validation.
@@ -1795,11 +1629,6 @@
  (libraries masc_test_deps))
 
 (executable
- (name test_procedural_memory)
- (modules test_procedural_memory)
- (libraries masc_test_deps))
-
-(executable
  (name tool_matrix_manifest)
  (modules tool_matrix_manifest)
  (libraries masc_test_deps keeper_tool_matrix_cases_lib))
@@ -1825,12 +1654,6 @@
 (include stanzas/test_anti_rationalization_empty_reject.inc)
 
 (include stanzas/test_exec_policy_cwd_hint.inc)
-
-(include stanzas/test_anti_rationalization_gate2_advisory_10113.inc)
-
-(include stanzas/test_anti_rationalization_korean_10385.inc)
-
-(include stanzas/test_anti_rationalization_excuse_patterns_writeback.inc)
 
 (include stanzas/test_auth_bearer_mismatch_9786.inc)
 
@@ -1901,8 +1724,6 @@
 
 (include stanzas/test_context_max_observed_9953.inc)
 
-(include stanzas/test_destructive_floor_differential.inc)
-
 (include stanzas/test_otel_runtime_observables.inc)
 
 (include stanzas/test_otel_port_ssot.inc)
@@ -1921,7 +1742,7 @@
 
 (include stanzas/test_dashboard_feature_health.inc)
 
-(include stanzas/test_dashboard_governance_metrics.inc)
+(include stanzas/test_dashboard_gate_metrics.inc)
 
 (include stanzas/test_dashboard_keeper_metrics_10286.inc)
 
@@ -1967,10 +1788,6 @@
 
 (include stanzas/test_event_kind.inc)
 
-(include stanzas/test_exec_policy_path_arg_descriptor.inc)
-
-(include stanzas/test_exec_policy_gh_endpoint_jail.inc)
-
 (include stanzas/test_export_symbol_graph.inc)
 
 (include stanzas/test_feature_flag_registry.inc)
@@ -1987,19 +1804,14 @@
 
 (include stanzas/test_fs_compat_fd_cache.inc)
 
-(include stanzas/test_fsm_drift_per_agent_counter.inc)
-
 (include stanzas/test_gate_protocol.inc)
 
 (include stanzas/test_git_fetch_retry_script.inc)
 
 (include stanzas/test_goal_phase_all.inc)
 
-(include stanzas/test_goal_phase_awaiting_verification_10411.inc)
 
-(include stanzas/test_governance_cases_snapshot.inc)
 
-(include stanzas/test_governance_response_model_empty_9880.inc)
 
 (include stanzas/test_heartbeat_integration.inc)
 
@@ -2015,11 +1827,9 @@
 
 (include stanzas/test_k3_tool_pipeline_e2e.inc)
 
-(include stanzas/test_keeper_alerting_path_norms.inc)
 
 (include stanzas/test_keepers_runtime_dir_ssot.inc)
 
-(include stanzas/test_keeper_auto_pause_blocker_persist_12683.inc)
 
 (include stanzas/test_keeper_latched_reason_wiring.inc)
 
@@ -2049,11 +1859,8 @@
 
 (include stanzas/test_keeper_tool_name.inc)
 
-(include stanzas/test_keeper_failure_policy.inc)
-
 (include stanzas/test_keeper_tool_command_runtime_cwd_response.inc)
 
-(include stanzas/test_keeper_tool_execute_path_rewrite.inc)
 
 (include stanzas/test_keeper_tool_dispatch_runtime.inc)
 
@@ -2101,15 +1908,12 @@
 
 (include stanzas/test_keeper_mutex_coverage.inc)
 
-(include stanzas/test_keeper_path_roots_leak_10349.inc)
 
 (include stanzas/test_keeper_pause_silent_failure_source.inc)
 
 (include stanzas/test_keeper_personality_round_trip.inc)
 
 (include stanzas/test_keeper_post_turn_wirein_order.inc)
-
-(include stanzas/test_keeper_readonly_hints.inc)
 
 (include stanzas/test_keeper_receipt_authoritative.inc)
 
@@ -2131,8 +1935,6 @@
 
 (include stanzas/test_keeper_surface_status.inc)
 
-(include stanzas/test_failing_minimum_essential.inc)
-
 (include stanzas/test_keeper_memory_write.inc)
 
 (include stanzas/test_keeper_memory_row_source.inc)
@@ -2143,7 +1945,6 @@
 
 (include stanzas/test_keeper_tool_matrix.inc)
 
-(include stanzas/test_keeper_tool_policy_paths.inc)
 
 (include stanzas/test_keeper_turn_fsm_wired_sites.inc)
 
@@ -2151,11 +1952,9 @@
 
 (include stanzas/test_keeper_unified_tool_event_order_source.inc)
 
-(include stanzas/test_keeper_unified_turn_completion_contract.inc)
 
-(include stanzas/test_keeper_validation_breaker_exempt.inc)
+(include stanzas/test_keeper_task_outcomes.inc)
 
-(include stanzas/test_keeper_turn_livelock_10121.inc)
 
 (include stanzas/test_keeper_unified_turn_attempt_watchdog.inc)
 
@@ -2164,8 +1963,7 @@
 (include stanzas/test_keeper_transition_audit_types.inc)
 
 (include stanzas/test_keeper_path_rejection.inc)
-
-(include stanzas/test_keeper_failure_circuit_breaker_types.inc)
+(include stanzas/test_keeper_path_containment_objective.inc)
 
 (include stanzas/test_keeper_approval_queue_rules_types.inc)
 
@@ -2189,9 +1987,6 @@
 
 (include stanzas/test_runtime_oas_eio_context_classify.inc)
 
-(include stanzas/test_runtime_pause_threshold_toml.inc)
-
-(include stanzas/test_runtime_pacing_toml.inc)
 
 (include stanzas/test_runtime_model_temperature_toml.inc)
 
@@ -2236,8 +2031,6 @@
 
 (include stanzas/test_personality_text_equal.inc)
 
-(include stanzas/test_phase2_self_preservation.inc)
-
 (include stanzas/test_shutdown_flag.inc)
 
 (include stanzas/test_log_file_sink_self_heal.inc)
@@ -2250,7 +2043,6 @@
 
 (include stanzas/test_pr_open_script.inc)
 
-(include stanzas/test_process_eio_default_timeout.inc)
 
 (include stanzas/test_release_train_guard_script.inc)
 
@@ -2261,7 +2053,7 @@
 
 (include stanzas/test_server_slack_trigger_policy.inc)
 
-(include stanzas/test_smart_heartbeat_keepalive.inc)
+(include stanzas/test_keeper_keepalive_helpers.inc)
 
 (include stanzas/test_sse_retry_ssot.inc)
 
@@ -2291,15 +2083,11 @@
 
 (include stanzas/test_tool_task_args.inc)
 
-(include stanzas/test_tool_task_completion_example.inc)
-
 (include stanzas/test_trajectory_atomicity.inc)
 
 (include stanzas/test_transport_bridge_seal.inc)
 
 (include stanzas/test_work_as_heartbeat.inc)
-
-(include stanzas/test_worker_safety_gates.inc)
 
 (include stanzas/test_hitl_summary_worker.inc)
 
@@ -2347,11 +2135,6 @@
 (test
  (name test_dispatch_telemetry_gap)
  (modules test_dispatch_telemetry_gap)
- (libraries alcotest))
-
-(test
- (name test_keeper_prehook_gap)
- (modules test_keeper_prehook_gap)
  (libraries alcotest))
 
 ; RFC-0083 PR-2 — Tool_name.t exhaustive closure test. Round-trips all
@@ -2643,15 +2426,13 @@
   ../lib/tool/tool_dispatch.ml
   ../lib/keeper/keeper_tool_registered_runtime.ml))
 
-; RFC-0085 PR-13 — Underscore-prefix audit: 1 truly-dead deletion +
-; 8 active rename across 7 modules.
+; RFC-0085 PR-13 — Underscore-prefix audit for the remaining active bindings.
 
 (test
  (name test_rfc_0085_pr13_underscore_rename)
  (modules test_rfc_0085_pr13_underscore_rename)
  (libraries alcotest ast_grep)
  (deps
-  ../lib/governance_pipeline_risk.ml
   ../lib/config_dir_resolver/config_dir_resolver.ml
   ../lib/keeper/keeper_tool_surface_ops.ml
   ../lib/board_tool_adapter/board_tool_cache.ml
@@ -2714,7 +2495,6 @@
    (run %{test})))
  (libraries masc_test_deps))
 
-(include stanzas/test_tool_resource_gate.inc)
 
 (include stanzas/test_keeper_wire_capture_suppression.inc)
 
@@ -2734,20 +2514,6 @@
  (name test_config_runtime_split)
  (modules test_config_runtime_split)
  (libraries masc_test_deps))
-
-(test
- (name test_ppx_safe_shell)
- (modules test_ppx_safe_shell)
- (preprocess
-  (pps ppx_safe_shell))
- (libraries alcotest masc.masc_exec masc.exec_policy))
-
-; Coverage regression tests for keeper/runtime immutable-state refactor (P9-P12).
-
-(test
- (name test_keeper_immutable_state_refactor)
- (modules test_keeper_immutable_state_refactor)
- (libraries masc_test_deps masc.runtime))
 
 ; Event-bus concurrency regression tests (S1–S3).
 
@@ -2777,14 +2543,6 @@
  (modules test_keeper_adversarial_review)
  (libraries masc_test_deps))
 
-; RFC-0273 §3.1 — set_policy tool_access delta validation (reject newly-added
-; unknown tool names; grandfather pre-existing names).
-
-(test
- (name test_keeper_tool_access_validation)
- (modules test_keeper_tool_access_validation)
- (libraries masc_test_deps))
-
 ; RFC-keeper-vision-delegation-tool §2.6 — analyze_image pure core
 
 (test
@@ -2810,3 +2568,6 @@
  (deps
   (source_tree ../lib)
   (source_tree ../bin)))
+(include stanzas/test_keeper_turn_attempt_observer.inc)
+(include stanzas/test_keeper_gate_effect_coverage.inc)
+(include stanzas/test_keeper_hitl_resolution_prompt.inc)

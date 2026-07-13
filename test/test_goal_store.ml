@@ -46,8 +46,7 @@ let make_goal id title =
     Goal_store.id; title;
     metric = None; target_value = None; due_date = None;
     priority = 3; status = Active; phase = Goal_phase.Executing;
-    verifier_policy = None; require_completion_approval = false;
-    active_verification_request_id = None; parent_goal_id = None;
+    parent_goal_id = None;
     last_review_note = None; last_review_at = None;
     created_at = ts; updated_at = ts;
   }
@@ -165,7 +164,6 @@ let test_legacy_status_defaults_phase () =
     `Assoc
       [
         ("id", `String id);
-        ("horizon", `String "short");
         ("title", `String title);
         ("metric", `Null);
         ("target_value", `Null);
@@ -239,15 +237,15 @@ let test_list_goals_filters_by_phase () =
     | Error msg -> fail msg
   in
   make "Executing goal" Goal_phase.Executing;
-  make "Approval goal" Goal_phase.Awaiting_approval;
+  make "Completed goal" Goal_phase.Completed;
   make "Blocked goal" Goal_phase.Blocked;
   let goals =
-    Goal_store.list_goals config ~phase:Goal_phase.Awaiting_approval ()
+    Goal_store.list_goals config ~phase:Goal_phase.Completed ()
   in
-  check int "one goal in awaiting approval" 1 (List.length goals);
+  check int "one completed goal" 1 (List.length goals);
   match goals with
   | [ goal ] ->
-      check string "filtered phase preserved" "awaiting_approval"
+      check string "filtered phase preserved" "completed"
         (Goal_phase.to_string goal.phase)
   | _ -> fail "expected one filtered goal"
 

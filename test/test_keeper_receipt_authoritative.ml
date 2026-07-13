@@ -155,31 +155,6 @@ let should_emit_stale
     ~emit:(fun () -> ())
     ()
 
-let emit_operator_for_testing
-      ?(keeper_name = "keeper-a")
-      ?(trace_id = "trace-a")
-      ?(generation = 1)
-      ?turn_count
-      ?current_task_id
-      ~emit
-      ()
-  =
-  R.For_testing.emit_operator_broadcast_dedupe_for_testing
-    ?turn_count
-    ?current_task_id
-    ~keeper_name
-    ~agent_name:"keeper-a-agent"
-    ~trace_id
-    ~generation
-    ~disposition:R.Disp_pause_human
-    ~reason:R.Reason_turn_livelock_blocked
-    ~terminal_reason_code:"turn_livelock_blocked"
-    ~emit
-    ()
-
-let should_emit_operator ?trace_id () =
-  emit_operator_for_testing ?trace_id ~emit:(fun () -> ()) ()
-
 let test_stale_watchdog_broadcast_dedupe () =
   Eio_main.run @@ fun _env ->
   R.For_testing.reset_stale_broadcast_dedupe ();
@@ -258,89 +233,6 @@ let test_stale_watchdog_emit_regression () =
        ~emit:(fun () -> failwith "duplicate should not call emit")
        ())
 
-let test_operator_broadcast_dedupe () =
-  Eio_main.run @@ fun _env ->
-  R.For_testing.reset_operator_broadcast_dedupe ();
-  check_bool "first operator livelock alert emits" true (should_emit_operator ());
-  check_bool
-    "same operator livelock alert suppresses"
-    false
-    (should_emit_operator ());
-  check_bool
-    "new operator trace emits"
-    true
-    (should_emit_operator ~trace_id:"trace-b" ());
-  check_bool
-    "same new operator trace suppresses"
-    false
-    (should_emit_operator ~trace_id:"trace-b" ());
-  R.For_testing.reset_operator_broadcast_dedupe ();
-  check_bool
-    "operator dedupe reset allows same key"
-    true
-    (should_emit_operator ~trace_id:"trace-b" ())
-
-let test_operator_broadcast_emit_regression () =
-  Eio_main.run @@ fun _env ->
-  R.For_testing.reset_operator_broadcast_dedupe ();
-  let exception Emit_failed in
-  let attempts = ref 0 in
-  (try
-     ignore
-       (emit_operator_for_testing
-          ~emit:(fun () ->
-            incr attempts;
-            raise Emit_failed)
-          ());
-     failwith "expected operator broadcast emit failure"
-   with
-   | Emit_failed -> ());
-  check_bool "failed operator emit was attempted" true (!attempts = 1);
-  check_bool
-    "same operator key retries after failed emit"
-    true
-    (emit_operator_for_testing
-       ~emit:(fun () ->
-         incr attempts)
-       ());
-  check_bool "successful operator retry was attempted" true (!attempts = 2);
-  check_bool
-    "same operator key suppresses after successful emit"
-    false
-    (emit_operator_for_testing
-       ~emit:(fun () -> failwith "operator duplicate should not call emit")
-       ())
-
-let test_operator_broadcast_cancel_regression () =
-  Eio_main.run @@ fun _env ->
-  R.For_testing.reset_operator_broadcast_dedupe ();
-  let attempts = ref 0 in
-  (try
-     ignore
-       (emit_operator_for_testing
-          ~emit:(fun () ->
-            incr attempts;
-            raise (Eio.Cancel.Cancelled (Failure "synthetic cancel")))
-          ());
-     failwith "expected operator broadcast cancellation"
-   with
-   | Eio.Cancel.Cancelled _ -> ());
-  check_bool "cancelled operator emit was attempted" true (!attempts = 1);
-  check_bool
-    "same operator key retries after cancelled emit"
-    true
-    (emit_operator_for_testing
-       ~emit:(fun () ->
-         incr attempts)
-       ());
-  check_bool "successful operator retry after cancel was attempted" true (!attempts = 2);
-  check_bool
-    "same operator key suppresses after cancel retry succeeds"
-    false
-    (emit_operator_for_testing
-       ~emit:(fun () -> failwith "operator duplicate should not call emit")
-       ())
-
 let () =
   test_ok_done ();
   test_skipped_done ();
@@ -355,7 +247,4 @@ let () =
   test_cancelled_done_passes ();
   test_stale_watchdog_broadcast_dedupe ();
   test_stale_watchdog_emit_regression ();
-  test_operator_broadcast_dedupe ();
-  test_operator_broadcast_emit_regression ();
-  test_operator_broadcast_cancel_regression ();
   print_endline "test_keeper_receipt_authoritative: OK"

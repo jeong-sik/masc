@@ -165,12 +165,11 @@ let read_all_entries ~base_path ~since_unix =
 (* ── Coverage helpers (used by aggregate stage) ───────────── *)
 
 let usage_signal_present (entry : raw_entry) : bool =
-  (not (usage_trust_untrusted entry.usage_trust))
-  && (entry.input_tokens <> None
-      || entry.output_tokens <> None
-      || entry.cache_read_tokens <> None
-      || entry.reasoning_tokens <> None
-      || entry.cost_usd <> None)
+  entry.input_tokens <> None
+  || entry.output_tokens <> None
+  || entry.cache_read_tokens <> None
+  || entry.reasoning_tokens <> None
+  || entry.cost_usd <> None
 ;;
 
 let telemetry_signal_present (entry : raw_entry) : bool =
@@ -182,12 +181,9 @@ let telemetry_signal_present (entry : raw_entry) : bool =
 ;;
 
 let usage_reported_effective (entry : raw_entry) : bool =
-  if usage_trust_untrusted entry.usage_trust
-  then false
-  else (
-    match entry.usage_reported with
-    | Some reported -> reported
-    | None -> usage_signal_present entry)
+  match entry.usage_reported with
+  | Some reported -> reported
+  | None -> usage_signal_present entry
 ;;
 
 let telemetry_reported_effective (entry : raw_entry) : bool =
@@ -199,8 +195,6 @@ let telemetry_reported_effective (entry : raw_entry) : bool =
 let coverage_reason_of_entry (entry : raw_entry) : string option =
   if entry.is_error
   then Some "error_turn"
-  else if usage_trust_untrusted entry.usage_trust
-  then Some "untrusted_usage"
   else (
     match entry.coverage_reason with
     | Some _ as reason -> reason

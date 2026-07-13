@@ -164,7 +164,7 @@ let handle_runtime_bench _ctx args : Core.tool_result =
         ~class_:Tool_result.Runtime_failure
         err
 
-let handle_runtime_ollama_probe _ctx args : Core.tool_result =
+let run_runtime_ollama_probe args : Core.tool_result =
   let tool_name = "masc_runtime_ollama_probe" in
   let start_time = Time_compat.now () in
   let server_url = Json_util.get_string args "server_url" in
@@ -239,6 +239,17 @@ let handle_runtime_ollama_probe _ctx args : Core.tool_result =
               ~probe_runs ~max_tokens ~think_mode ~timeout_sec
               ~generate_when_unloaded ~run_generate () );
         ]
+
+let handle_runtime_ollama_probe (ctx : Core.context) args : Core.tool_result =
+  let continue () = run_runtime_ollama_probe args in
+  match ctx.authorize_external_effect with
+  | None -> continue ()
+  | Some authorize ->
+    authorize
+      ~operation:"masc_runtime_ollama_probe"
+      ~input:args
+      ~continue
+;;
 
 let dispatch ctx ~name ~args : Core.tool_result option =
   match name with

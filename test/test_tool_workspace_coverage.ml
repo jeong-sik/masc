@@ -342,7 +342,7 @@ let () =
 
 let () =
   test "dispatch_status_surfaces_awaiting_verification_assignment" (fun () ->
-    with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
+    (
       let ctx = make_test_ctx () in
       let _ = Workspace.init ctx.config ~agent_name:(Some "test-agent") in
       let actual_name = Workspace.resolve_agent_name ctx.config "test-agent" in

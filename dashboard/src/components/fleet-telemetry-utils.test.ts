@@ -65,7 +65,6 @@ function makeRow(overrides: Partial<FleetRow> = {}): FleetRow {
     active_goal_count: 0,
     sandbox_profile: null,
     sandbox_last_error: null,
-    decision_required: false,
     budget_source: null,
     provider_health_status: null,
     provider_health_label: null,
@@ -262,22 +261,6 @@ describe('buildFleetRows runtime labels', () => {
     })
   })
 
-  it('normalizes legacy no-progress blocker text before building fleet rows', () => {
-    const [row] = buildFleetRows([
-      {
-        name: 'latched-keeper',
-        status: 'paused',
-        keepalive_running: true,
-        runtime_blocker_class: 'no_progress_loop',
-        last_blocker: 'no_progress loop detected: streak=10 threshold=10; manual pause applied',
-      },
-    ], EMPTY_TOOL_QUALITY)
-
-    expect(row?.runtime_blocker_summary).toContain('progress-safety latch')
-    expect(row?.runtime_blocker_summary).not.toContain('manual pause applied')
-    expect(row?.stop_cause?.summary).toContain('progress-safety latch')
-    expect(row?.stop_cause?.summary).not.toContain('manual pause applied')
-  })
 })
 
 describe('uniqueStrings', () => {
@@ -325,7 +308,7 @@ describe('fleetBand', () => {
 
   // Lock the remaining offline-trigger status strings in fleetBand's
   // production code. `'offline'` has an active producer
-  // (dashboard_governance_judge.ml:164, dashboard_mission_agents.ml:206,
+  // (historical dashboard monitor producer, dashboard_mission_agents.ml:206,
   // keeper_status_runtime.ml:276/353); `'unbooted'` is defensive (no
   // current OCaml producer, but the production check is load-bearing
   // for non-OCaml producers or future runtime states). Per
@@ -351,7 +334,7 @@ describe('fleetBand', () => {
   })
 
   it('classifies attention for runtime blocker', () => {
-    expect(fleetBand(makeRow({ runtime_blocker_class: 'admission_queue_wait_timeout' }))).toBe('attention')
+    expect(fleetBand(makeRow({ runtime_blocker_class: 'provider_runtime_error' }))).toBe('attention')
   })
 
   it('classifies attention for high context ratio', () => {
@@ -373,7 +356,7 @@ describe('fleetBand', () => {
 
 describe('fleetBandScore', () => {
   it('orders attention > active > paused > offline', () => {
-    const attention = makeRow({ runtime_blocker_class: 'admission_queue_wait_timeout' })
+    const attention = makeRow({ runtime_blocker_class: 'provider_runtime_error' })
     const active = makeRow()
     const paused = makeRow({ status: 'paused' })
     const offline = makeRow({ keepalive_running: false })
@@ -658,18 +641,11 @@ describe('buildFleetRows', () => {
 })
 
 describe('buildRuntimeWarnings', () => {
-  it('warns about admission queue blockage', () => {
-    const rows = [makeRow({ runtime_blocker_class: 'admission_queue_wait_timeout' })]
+  it('warns about runtime blockers', () => {
+    const rows = [makeRow({ runtime_blocker_class: 'turn_timeout' })]
     const warnings = buildRuntimeWarnings(rows)
     expect(warnings.length).toBe(1)
-    expect(warnings[0]).toContain('keeper admission FIFO')
-  })
-
-  it('warns about other blockers', () => {
-    const rows = [makeRow({ runtime_blocker_class: 'turn_timeout_after_queue_wait' })]
-    const warnings = buildRuntimeWarnings(rows)
-    expect(warnings.length).toBe(1)
-    expect(warnings[0]).toContain('other runtime blockers')
+    expect(warnings[0]).toContain('runtime blockers')
   })
 
   it('returns empty for healthy rows', () => {

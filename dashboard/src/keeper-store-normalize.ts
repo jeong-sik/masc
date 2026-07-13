@@ -102,7 +102,6 @@ function normalizeKeeperCurrentGate(raw: unknown): Keeper['current_gate'] {
     source: asString(raw.source) ?? null,
     id: asString(raw.id) ?? null,
     tool: asString(raw.tool) ?? null,
-    risk: asString(raw.risk) ?? null,
     turn_id: asNumber(raw.turn_id) ?? null,
     at: toIsoTimestamp(raw.at) ?? asString(raw.at) ?? null,
     age_s: asNumber(raw.age_s) ?? null,
@@ -157,7 +156,6 @@ const BACKEND_PHASE_LOWERCASE_MAP = {
   crashed: 'Crashed',
   restarting: 'Restarting',
   dead: 'Dead',
-  zombie: 'Zombie',
 } as const satisfies Record<string, KeeperPhase>
 
 /** Forward-compat PascalCase passthrough — accepts already-typed values from
@@ -176,7 +174,6 @@ const BACKEND_PHASE_PASCAL_PASSTHROUGH = {
   Crashed: 'Crashed',
   Restarting: 'Restarting',
   Dead: 'Dead',
-  Zombie: 'Zombie',
 } as const satisfies Record<KeeperPhase, KeeperPhase>
 
 // Compile-time coverage check: every KeeperPhase variant must appear as a
@@ -255,7 +252,7 @@ function normalizeKeeperAgentStatus(value: unknown): Keeper['status'] {
 const KEEPER_LIFECYCLE_STATES: ReadonlySet<KeeperLifecycleState> = new Set<KeeperLifecycleState>([
   'active', 'compacting', 'preparing', 'handoff-imminent',
   'idle', 'offline', 'unbooted', 'stopped',
-  'paused', 'crashed', 'dead', 'zombie', 'unknown',
+  'paused', 'crashed', 'dead', 'unknown',
 ])
 
 // Typed parse: replaces the `as KeeperLifecycleState` cast that
@@ -274,7 +271,7 @@ export function toKeeperLifecycleState(raw: string | null | undefined): KeeperLi
 export function deriveLifecycleState(keeper: Keeper): KeeperLifecycleState {
   // RFC-0139 PR-2: strict-superset migration off `isOfflineStatus`
   // (status-only). `isKeeperOffline` adds the terminal-FSM-phase axis
-  // (Offline/Stopped/Dead/Crashed/Zombie) so a keeper crashed mid-tick
+  // (Offline/Stopped/Dead/Crashed) so a keeper crashed mid-tick
   // is caught even when its wire-format status hasn't transitioned yet.
   if (isKeeperOffline(keeper)) {
     // Keep offline-detail labels on a typed display axis. Unknown future
@@ -426,8 +423,8 @@ export function normalizeKeeperTrust(raw: unknown): Keeper['trust'] {
           runtime_outcome: asString(executionRaw.runtime_outcome) ?? null,
           sandbox_summary: asString(executionRaw.sandbox_summary) ?? null,
           sandbox_root: asString(executionRaw.sandbox_root) ?? null,
-          mutation_guard_summary:
-            asString(executionRaw.mutation_guard_summary) ?? null,
+          completion_observation_summary:
+            asString(executionRaw.completion_observation_summary) ?? null,
           latest_receipt_at: asString(executionRaw.latest_receipt_at) ?? null,
         }
       : null,
@@ -653,7 +650,6 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
       const contextRatio = asNumber(row.context_ratio) ?? asNumber(contextRaw?.context_ratio)
       const statusRaw = asString(row.status) ?? asString(agentRaw?.status) ?? 'offline'
       const model = undefined
-      const skillSecondary = asStringArray(row.skill_secondary)
       const metricsSeries = normalizeMetricsSeries(row.metrics_series)
 
       const normalizedContext =
@@ -743,16 +739,10 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
           typeof row.keepalive_running === 'boolean' ? row.keepalive_running : undefined,
         proactive_enabled:
           typeof row.proactive_enabled === 'boolean' ? row.proactive_enabled : undefined,
-        proactive_idle_sec: asNumber(row.proactive_idle_sec),
-        proactive_cooldown_sec: asNumber(row.proactive_cooldown_sec),
         pause_state: asKeeperPauseState(row.pause_state),
         runtime_blocker_state: asKeeperRuntimeBlockerState(row.runtime_blocker_state),
         runtime_blocker_class: runtimeBlockerClass,
         runtime_blocker_summary: runtimeBlockerSummary,
-        runtime_blocker_continue_gate:
-          typeof row.runtime_blocker_continue_gate === 'boolean'
-            ? row.runtime_blocker_continue_gate
-            : null,
         stop_cause: stopCause,
         needs_attention:
           typeof row.needs_attention === 'boolean' ? row.needs_attention : null,
@@ -774,13 +764,6 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
               open_task_count: asNumber(row.goal_progress.open_task_count) ?? undefined,
               blocked_task_count: asNumber(row.goal_progress.blocked_task_count) ?? undefined,
               convergence: asNumber(row.goal_progress.convergence) ?? null,
-            }
-          : null,
-        approval_policy_effective: isRecord(row.approval_policy_effective)
-          ? {
-              allow_rules: asNumber(row.approval_policy_effective.allow_rules) ?? undefined,
-              deny_rules: asNumber(row.approval_policy_effective.deny_rules) ?? undefined,
-              persisted_rules: asNumber(row.approval_policy_effective.persisted_rules) ?? undefined,
             }
           : null,
         created_at: toIsoTimestamp(row.created_at) ?? asString(row.created_at),
@@ -841,9 +824,6 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         handoff_count_total: asNumber(row.handoff_count_total) ?? asNumber(row.trace_history_count),
         compaction_count: asNumber(row.compaction_count),
         last_compaction_saved_tokens: asNumber(row.last_compaction_saved_tokens),
-        skill_primary: asString(row.skill_primary) ?? null,
-        skill_secondary: skillSecondary,
-        skill_reason: asString(row.skill_reason) ?? null,
         metrics_series: metricsSeries.length > 0 ? metricsSeries : undefined,
         metrics_window: metricsWindow,
         agent: normalizedAgent,

@@ -119,9 +119,8 @@ let run_worker_oas ~sw ?net ~workspace_config:_
             ?role:spec.role
             ?selection_note:spec.selection_note ()
         in
-        let gate_config = Worker_oas.default_gate_config () in
         Worker_oas.run_worker_via_oas ~sw ~net ~base_path ~auth_token
           ~meta:{ meta with effective_model = model_id }
           ~provider ~system_prompt ~prompt:spec.prompt ~tools
-          ~raw_trace ~gate_config
+          ~raw_trace
           ?worker_run_id:spec.worker_run_id ()

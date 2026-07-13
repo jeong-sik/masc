@@ -65,107 +65,6 @@ let recent_tools_for_keeper ?(limit = 5) keeper_name : string list =
    @param meta Keeper metadata (determines which tools are allowed)
    @param ctx_snapshot Immutable snapshot of current working context *)
 
-(** Repeated-failure guardrail: blocks a tool after [max_consecutive]
-    consecutive failures with the same (tool_name, args_hash) key.
-    Resets on success. Prevents infinite retry loops (e.g. keeper
-    reading a non-existent file 400+ times). *)
-let max_consecutive_failures = Env_config.KeeperToolExec.max_consecutive_tool_failures
-
-type workflow_rejection_info = Keeper_tools_oas_workflow.workflow_rejection_info
-
-(* TTL for per-(tool, args_hash) failure counters (#18501).
-   After this many seconds since the last failure, the counter
-   resets — transient errors no longer cause a permanent ban. *)
-let failure_count_ttl_seconds = 1800.
-
-type failure_counts =
-  { table : (string, int) Hashtbl.t
-  ; failure_timestamps : (string, float) Hashtbl.t
-  ; workflow_table : (string, int) Hashtbl.t
-  ; mutex : Mutex.t
-  }
-
-let create_failure_counts () =
-  { table = Hashtbl.create 16
-  ; failure_timestamps = Hashtbl.create 16
-  ; workflow_table = Hashtbl.create 16
-  ; mutex = Mutex.create ()
-  }
-;;
-
-let reset_tool_retry_dedupe_for_testing = Keeper_tool_retry_state.reset_for_test
-
-let failure_count_get counts key =
-  Mutex.protect counts.mutex (fun () ->
-    match Hashtbl.find_opt counts.table key with
-    | None -> 0
-    | Some count ->
-      let now = Time_compat.now () in
-      match Hashtbl.find_opt counts.failure_timestamps key with
-      | Some ts when now -. ts <= failure_count_ttl_seconds -> count
-      | _ ->
-        Hashtbl.remove counts.table key;
-        Hashtbl.remove counts.failure_timestamps key;
-        0)
-;;
-
-let failure_count_record_failure counts key =
-  Mutex.protect counts.mutex (fun () ->
-    let next =
-      match Hashtbl.find_opt counts.table key with
-      | Some n -> n + 1
-      | None -> 1
-    in
-    Hashtbl.replace counts.table key next;
-    Hashtbl.replace counts.failure_timestamps key (Time_compat.now ());
-    next)
-;;
-
-let failure_count_reset counts key =
-  Mutex.protect counts.mutex (fun () ->
-    Hashtbl.remove counts.table key;
-    Hashtbl.remove counts.failure_timestamps key)
-;;
-
-(* MASC/OAS Error-Warn Reduction Goal 2026-05-18, P2 reducer:
-   force the per-(tool,args) counter up to [target] on the first
-   deterministic policy/shape block. Returns the new value so the
-   caller can use it in log lines (always [target]). Idempotent for
-   subsequent matching calls — [Hashtbl.replace] does not stack. *)
-let failure_count_jump_to counts key ~target =
-  Mutex.protect counts.mutex (fun () ->
-    Hashtbl.replace counts.table key target;
-    Hashtbl.replace counts.failure_timestamps key (Time_compat.now ());
-    target)
-;;
-
-let workflow_rejection_count_record counts key =
-  Mutex.protect counts.mutex (fun () ->
-    let next =
-      match Hashtbl.find_opt counts.workflow_table key with
-      | Some n -> n + 1
-      | None -> 1
-    in
-    Hashtbl.replace counts.workflow_table key next;
-    next)
-;;
-
-let workflow_rejection_count_reset counts =
-  Mutex.protect counts.mutex (fun () -> Hashtbl.clear counts.workflow_table)
-;;
-
-(* Test-only: inject a failure counter with a stale timestamp so the
-   TTL expiry path in [failure_count_get] can be exercised. *)
-let inject_stale_failure_count_for_test counts key count =
-  Mutex.protect counts.mutex (fun () ->
-    Hashtbl.replace counts.table key count;
-    Hashtbl.replace counts.failure_timestamps key
-      (Time_compat.now () -. (failure_count_ttl_seconds +. 60.)))
-;;
-
-open Keeper_tools_oas_workflow
-open Keeper_tools_oas_deterministic_error
-
 (** Normalize a raw tool result string into a consistent JSON envelope.
 
     The LLM sees this output directly. Without normalization, tool results
@@ -179,10 +78,7 @@ open Keeper_tools_oas_deterministic_error
 
     The [success] flag comes from the typed outcome returned by
     [Keeper_tool_dispatch_runtime.execute_keeper_tool_call_with_outcome]. *)
-let normalize_tool_result
-      ?(workflow_rejection_recovery_fields = [])
-      ~(success : bool)
-      (raw : string)
+let normalize_tool_result ~(success : bool) (raw : string)
   : string
   =
   let metadata_from_assoc fields =
@@ -207,24 +103,6 @@ let normalize_tool_result
     @ List.filter
         (fun (key, _) -> not (List.mem key primary_keys))
         secondary
-  in
-  let ensure_workflow_self_correction fields =
-    match List.assoc_opt "failure_class" fields with
-    | Some (`String "workflow_rejection")
-      when not (List.mem_assoc "self_correction_required" fields)
-           && not
-                (List.mem_assoc
-                   "self_correction_required"
-                   workflow_rejection_recovery_fields) ->
-      let self_correction_required =
-        match List.assoc_opt "recoverable" fields with
-        | Some (`Bool false) -> false
-        | Some (`Bool true)
-        | None
-        | Some _ -> true
-      in
-      fields @ [ "self_correction_required", `Bool self_correction_required ]
-    | _ -> fields
   in
   try
     let json = Yojson.Safe.from_string raw in
@@ -267,13 +145,11 @@ let normalize_tool_result
         (match json with
          | `Assoc fields -> merge_metadata (metadata_from_assoc fields) nested_fields
          | _ -> nested_fields)
-        |> ensure_workflow_self_correction
       in
       Yojson.Safe.to_string
         (`Assoc
           ([ "ok", `Bool false; "error", `String error_msg; "detail", json ]
-           @ preserved_fields
-           @ workflow_rejection_recovery_fields)))
+           @ preserved_fields)))
   with
   | Yojson.Json_error _ ->
     (* Raw is not JSON (e.g. plain text from keeper_tasks_list).
@@ -285,56 +161,11 @@ let normalize_tool_result
         (`Assoc [ "ok", `Bool false; "error", `String raw; "detail", `Null ])
 ;;
 
-let record_deterministic_tool_failure_metric ~tool_name reason =
-  Otel_metric_store.inc_counter
-    Keeper_metrics.(to_string ToolsOasDeterministicFailures)
-    ~labels:
-      [ "tool", tool_name
-      ; "reason", Keeper_tool_deterministic_error.to_telemetry_key reason
-      ]
-    ()
-;;
-
-let transient_mutex_contention_error_class = "transient_mutex_contention"
-
-let transient_mutex_contention_tool_error
-      ~(tool_name : string)
-      ~(error_text : string)
-      ?backtrace
-      ()
-  : string
-  =
-  let message =
-    Printf.sprintf
-      "tool %s hit transient mutex contention (EDEADLK); not counted toward \
-       consecutive-failure budget. Retry the same call or wait for the contending \
-       operation to finish."
-      tool_name
-  in
-  Yojson.Safe.to_string
-    (`Assoc
-        [ "ok", `Bool false
-        ; "error", `String message
-        ; "error_class", `String transient_mutex_contention_error_class
-        ; "failure_class", `String "transient_error"
-        ; "recoverable", `Bool true
-        ; "transient", `Bool true
-        ; "retry_recommended", `Bool true
-        ; ( "detail"
-          , `Assoc
-              [ "tool_name", `String tool_name
-              ; "exception", `String error_text
-              ; "operator_action", `String "retry_same_call_or_wait"
-              ; "backtrace_available", `Bool (Option.is_some backtrace)
-              ] )
-        ])
-;;
-
 (** RFC-0006 Phase A.2: build the per-tool handler closure.
 
     Extracted from the original anonymous closure inside [make_tools] so
     that alias [Tool.t] entries (e.g. [Execute]) can reuse
-    the exact same telemetry/circuit-breaker/decision-log pipeline by
+    the exact same telemetry/decision-log pipeline by
     instantiating this helper with the INTERNAL name as [~name].
 
     Telemetry SSOT contract: [~name] flows into every observability

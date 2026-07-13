@@ -3,12 +3,6 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_supervisor_types
 
-let backoff_delay attempt =
-  let base = Env_config.KeeperSupervisor.backoff_base_s in
-  let max_delay = Env_config.KeeperSupervisor.backoff_max_s in
-  Float.min max_delay (base *. Float.of_int (1 lsl min attempt 20))
-;;
-
 let keep_last_n n item lst =
   let full = item :: lst in
   if List.length full <= n then full else List.filteri (fun i _ -> i < n) full

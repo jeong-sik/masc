@@ -1,4 +1,4 @@
-(** Typed classifier for keeper turn completion contract. *)
+(** Typed projection of actionable world-observation signals. *)
 
 type actionable_signal =
   | Has_unclaimed_tasks
@@ -7,17 +7,7 @@ type actionable_signal =
       (** Caller observed neither tasks nor board activity in the structured
           world snapshot. *)
 
-type contract_status =
-  | Surface_mismatch of { missing : string list }
-  | Claim_only_after_owned_task
-  | Needs_execution_progress
-  | Passive_only
-  | Satisfied_completion
-  | Satisfied_execution
-
 val actionable_signal_label : actionable_signal -> string
-val contract_status_label : contract_status -> string
-val pp_contract_status : Format.formatter -> contract_status -> unit
 
 (** Structured per-turn world snapshot consumed by
     [classify_actionable_signal]. This is intentionally smaller than

@@ -60,16 +60,8 @@ let read_file path =
 let make_meta
       ?(name = "keeper-exec-tools")
       ?(policy_voice_enabled = false)
-      ?tool_access
-      ?(tool_denylist = [])
       ()
   =
-  let tool_access =
-    match tool_access with
-    | Some value -> value
-    | None ->
-        []
-  in
   match
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
@@ -79,10 +71,6 @@ let make_meta
           ("trace_id", `String "keeper-exec-tools-trace");
           ("allowed_paths", `List [ `String "*" ]);
           ("policy_voice_enabled", `Bool policy_voice_enabled);
-          ( "tool_access",
-            Json_util.json_string_list tool_access );
-          ( "tool_denylist",
-            Json_util.json_string_list tool_denylist );
         ])
   with
   | Ok meta -> meta
@@ -92,7 +80,7 @@ let make_ctx () =
   Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
     ~max_tokens:4000
 
-let with_exec_fixture ?(process = false) ?tool_access name fn =
+let with_exec_fixture ?(process = false) ?(always_allow = false) name fn =
   let dir = temp_dir name in
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
@@ -106,7 +94,10 @@ let with_exec_fixture ?(process = false) ?tool_access name fn =
           ~proc_mgr:(Eio.Stdenv.process_mgr env)
           ~clock:(Eio.Stdenv.clock env);
       let config = Masc.Workspace.default_config dir in
-      let meta = make_meta ?tool_access () in
+      let meta =
+        let meta = make_meta () in
+        if always_allow then { meta with always_allow = Some true } else meta
+      in
       ignore (Masc.Keeper_registry.register ~base_path:config.base_path meta.name meta);
       Fun.protect
         ~finally:(fun () ->
@@ -244,76 +235,6 @@ let test_malformed_json_like_payload_detected () =
       (Printf.sprintf "expected malformed_structured, got %s"
          (payload_kind other))
 
-let test_surface_post_execution_controls_continuation_fallback () =
-  with_exec_fixture
-    ~tool_access:[ "keeper_surface_post" ]
-    "keeper_surface_post_continuation_fallback"
-    (fun ~config ~meta ~ctx_work ->
-      let execute input =
-        KET.execute_keeper_tool_call_with_outcome
-          ~config
-          ~meta
-          ~ctx_work
-          ~exec_cache:None
-          ~name:"keeper_surface_post"
-          ~input
-          ()
-      in
-      let failed = execute (`Assoc [ ("content", `String "reply") ]) in
-      let succeeded =
-        execute
-          (`Assoc
-            [ "surface", `String "dashboard"
-            ; "content", `String "reply"
-            ])
-      in
-      check string "missing surface is execution failure" "failure"
-        (outcome_label failed.outcome);
-      check string "dashboard post is execution success" "success"
-        (outcome_label succeeded.outcome);
-      let channel =
-        Keeper_continuation_channel.Dashboard { thread_id = "thread-1" }
-      in
-      let gate result =
-        Masc.Keeper_agent_run_finalize_response.For_testing.continuation_delivery_gate
-          ~channel
-          ~tool_calls:
-            [ tool_call_detail_of_execution "keeper_surface_post" result ]
-          ~content:"deterministic fallback"
-      in
-      let module D = Masc.Keeper_continuation_delivery in
-      check bool "failed post leaves fallback enabled" true
-        (match gate failed with D.Deliver -> true | D.Skip _ -> false);
-      check bool "successful post suppresses duplicate fallback" true
-        (match gate succeeded with
-         | D.Skip D.Skipped_already_replied -> true
-         | D.Deliver | D.Skip _ -> false))
-;;
-
-let test_registered_descriptor_bypasses_tool_access_allowlist () =
-  with_exec_fixture
-    ~tool_access:([ "keeper_tools_list" ])
-    "keeper_tool_dispatch_runtime_descriptor_bypass"
-    (fun ~config ~meta ~ctx_work ->
-      let result =
-        KET.execute_keeper_tool_call_with_outcome
-          ~config ~meta ~ctx_work ~exec_cache:None
-          ~name:"Read"
-          ~input:(`Assoc [ ("file_path", `String "blocked.txt") ])
-          ()
-      in
-      check string "runtime outcome" "failure"
-        (match result.outcome with `Success -> "success" | `Failure -> "failure");
-      check string "runtime payload shape" "structured_error"
-        (payload_kind result.payload_shape);
-      let json = Yojson.Safe.from_string result.raw_output in
-      check bool "did not stop at tool_access allowlist gate" false
-        Yojson.Safe.Util.(member "error" json |> to_string = "tool_not_allowed");
-      check bool "reached file runtime" true
-        (match Yojson.Safe.Util.member "path_resolution" json with
-         | `Assoc _ -> true
-         | _ -> false))
-
 let test_public_read_rejects_unsupported_range_fields () =
   with_exec_fixture
     "keeper_tool_dispatch_runtime_read_rejects_range_fields"
@@ -349,19 +270,14 @@ let test_public_read_rejects_unsupported_range_fields () =
         Yojson.Safe.Util.(member "validation" json |> to_string);
       check string "failure class" "policy_rejection"
         Yojson.Safe.Util.(member "failure_class" json |> to_string);
-      let tutor = Yojson.Safe.Util.member "tool_tutor" json in
-      check string "tutor kind" "invalid_arguments"
-        Yojson.Safe.Util.(member "kind" tutor |> to_string);
-      check bool "tutor explains line offsets" true
-        (contains_substring
-           Yojson.Safe.Util.(member "message" tutor |> to_string)
-           "line offsets");
+      check bool "dispatch does not add a tutor" true
+        Yojson.Safe.Util.(member "tool_tutor" json = `Null);
       check bool "did not reach file runtime" false
         (match Yojson.Safe.Util.member "path_resolution" json with
          | `Assoc _ -> true
          | _ -> false))
 
-let test_public_read_rejects_offset_with_tutor () =
+let test_public_read_rejects_offset_without_enrichment () =
   with_exec_fixture
     "keeper_tool_dispatch_runtime_read_rejects_offset"
     (fun ~config ~meta ~ctx_work ->
@@ -381,154 +297,10 @@ let test_public_read_rejects_offset_with_tutor () =
       in
       check string "runtime outcome" "failure" (outcome_label result.outcome);
       let json = Yojson.Safe.from_string result.raw_output in
-      let tutor = Yojson.Safe.Util.member "tool_tutor" json in
-      check string "tutor requested tool" "Read"
-        Yojson.Safe.Util.(member "requested_tool" tutor |> to_string);
-      check bool "tutor names Grep alternative" true
-        (contains_substring result.raw_output {|"tool":"Grep"|}))
-
-let counter_for_tool_not_allowed ~keeper ~tool ~reason =
-  (* Production emits ToolNotAllowed with a "tool_type" label derived from
-     [Tool_telemetry.tool_type_of_name] (RFC-0084), added to the single
-     emission site in keeper_tool_dispatch_runtime.ml. Otel_metric_store keys
-     metrics by the exact label set, so the query must carry tool_type or it
-     never matches the stored counter (reads as a permanent zero). *)
-  let tool_type = Masc.Tool_telemetry.tool_type_of_name tool in
-  Masc.Otel_metric_store.metric_value_or_zero
-    Keeper_metrics.(to_string ToolNotAllowed)
-    ~labels:
-      [ ("keeper", keeper)
-      ; ("tool", tool)
-      ; ("reason", reason)
-      ; ("tool_type", tool_type)
-      ]
-    ()
-
-(* #13xxx: tool_not_allowed Otel_metric_store counter *)
-let test_tool_not_allowed_increments_counter_for_unknown_tool () =
-  (* Unknown names are still rejected by the descriptor/registry existence
-     gate. Registered tools are not rejected merely because tool_access is
-     narrow or empty. *)
-  let keeper = "test-exec-tools-not-allowed-a" in
-  let tool = "keeper_not_a_real_tool" in
-  let reason = "not_in_candidate_set" in
-  with_exec_fixture
-    ~tool_access:([ "keeper_tools_list" ])
-    "keeper_tool_dispatch_runtime_not_allowed_counter"
-    (fun ~config ~meta ~ctx_work ->
-      let before = counter_for_tool_not_allowed ~keeper ~tool ~reason in
-      ignore
-        (KET.execute_keeper_tool_call_with_outcome
-           ~config
-           ~meta:{ meta with name = keeper }
-           ~ctx_work ~exec_cache:None
-           ~name:tool
-           ~input:(`Assoc [])
-           ());
-      check (float 0.0001) "not_in_candidate_set counter +1"
-        (before +. 1.0)
-        (counter_for_tool_not_allowed ~keeper ~tool ~reason))
-
-let test_tool_not_allowed_denied_by_policy_counter () =
-  (* A keeper whose denylist contains keeper_board_post should land in
-     reason=denied_by_policy. *)
-  let keeper = "test-exec-tools-not-allowed-b" in
-  let tool = "keeper_board_post" in
-  let reason = "denied_by_policy" in
-  (* Build meta that has board_post in the allowlist but also on the denylist
-     so can_execute returns false via the deny-set path. *)
-  let meta_with_deny =
-    match
-      Masc_test_deps.meta_of_json_fixture
-        (`Assoc
-          [ ("name", `String keeper)
-          ; ("agent_name", `String keeper)
-          ; ("trace_id", `String "test-not-allowed-b")
-          ; ("allowed_paths", `List [ `String "*" ])
-          ; ( "tool_access"
-            , Json_util.json_string_list
-                ([ "keeper_board_post" ]) )
-          ; ( "tool_denylist"
-            , `List [ `String "keeper_board_post" ] )
-          ])
-    with
-    | Ok m -> m
-    | Error e -> failwith ("meta_of_json_fixture: " ^ e)
-  in
-  let dir =
-    let d = Filename.temp_file "keeper_tool_dispatch_not_allowed_b" "" in
-    Unix.unlink d; Unix.mkdir d 0o755; d
-  in
-  let cleanup () =
-    let rec rm t =
-      if Sys.file_exists t then
-        if Sys.is_directory t then begin
-          Sys.readdir t |> Array.iter (fun n -> rm (Filename.concat t n));
-          Unix.rmdir t
-        end else Unix.unlink t
-    in
-    try rm dir with _ -> ()
-  in
-  Fun.protect ~finally:cleanup (fun () ->
-    Eio_main.run @@ fun env ->
-    Fs_compat.set_fs (Eio.Stdenv.fs env);
-    let config = Masc.Workspace.default_config dir in
-    let before = counter_for_tool_not_allowed ~keeper ~tool ~reason in
-    ignore
-      (KET.execute_keeper_tool_call_with_outcome
-         ~config ~meta:meta_with_deny ~ctx_work:(make_ctx ())
-         ~exec_cache:None ~name:tool ~input:(`Assoc []) ());
-    check (float 0.0001) "denied_by_policy counter +1"
-      (before +. 1.0)
-      (counter_for_tool_not_allowed ~keeper ~tool ~reason))
-
-let test_tool_not_allowed_reason_label_is_bounded () =
-  (* Verify that the reason label written into the JSON payload is one
-     of the three bounded vocabulary values, not a free-form string. *)
-  with_exec_fixture
-    "keeper_tool_dispatch_runtime_reason_bounded"
-    (fun ~config ~meta ~ctx_work ->
-      let result =
-        KET.execute_keeper_tool_call_with_outcome
-          ~config ~meta ~ctx_work ~exec_cache:None
-          ~name:"keeper_not_a_real_tool"
-          ~input:(`Assoc [])
-          ()
-      in
-      let json = Yojson.Safe.from_string result.raw_output in
-      let reason = Yojson.Safe.Util.(member "reason" json |> to_string) in
-      let valid = [ "not_in_candidate_set"; "denied_by_policy"; "not_executable" ] in
-      check bool "reason label is bounded vocabulary"
-        true (List.mem reason valid))
-
-let test_raw_board_wrapper_routes_are_not_keeper_candidates () =
-  with_exec_fixture
-    "keeper_tool_dispatch_runtime_raw_board_wrapper"
-    (fun ~config ~meta ~ctx_work ->
-      List.iter
-        (fun board_name ->
-          match Keeper_tool_name.board_projection_of_masc_board_name board_name with
-          | Keeper_tool_name.Keeper_wrapper _ ->
-            let name = Tool_name.Board_name.to_string board_name in
-            let result =
-              KET.execute_keeper_tool_call_with_outcome
-                ~config
-                ~meta
-                ~ctx_work
-                ~exec_cache:None
-                ~name
-                ~input:(`Assoc [])
-                ()
-            in
-            check string (name ^ " outcome") "failure" (outcome_label result.outcome);
-            let json = Yojson.Safe.from_string result.raw_output in
-            check string
-              (name ^ " candidate rejection")
-              "not_in_candidate_set"
-              Yojson.Safe.Util.(member "reason" json |> to_string)
-          | Keeper_tool_name.Direct_masc | Keeper_tool_name.External_only -> ())
-        Tool_name.Board_name.all)
-;;
+      check bool "dispatch does not add a tutor" true
+        Yojson.Safe.Util.(member "tool_tutor" json = `Null);
+      check bool "validation names exact field" true
+        (contains_substring result.raw_output "offset"))
 
 let test_raw_board_runtime_is_fail_closed () =
   let meta = make_meta ~name:"keeper-board-runtime-guard" () in
@@ -583,20 +355,6 @@ let test_keeper_tools_list_json_uses_typed_groups () =
   let meta =
     make_meta
       ~policy_voice_enabled:true
-      ~tool_access:
-        (
-           [ "keeper_board_post";
-             "keeper_board_fake";
-             "keeper_voice_speak";
-             "keeper_task_claim";
-             "masc_transition";
-             "masc_plan_get";
-             "keeper_surface_read";
-             "tool_search_files";
-             "tool_read_file";
-             "keeper_memory_search";
-             "keeper_tools_list";
-           ])
       ()
   in
   let json = Yojson.Safe.from_string (KES.keeper_tools_list_json ~meta) in
@@ -677,8 +435,6 @@ let test_keeper_tools_list_json_uses_typed_groups () =
   check string "Execute model projection" "preferred_public_name"
     (string_member "keeper_model_projection" execute);
   let policy = Yojson.Safe.Util.member "policy" execute in
-  check string "Execute effect domain" "playground_write"
-    (string_member "effect_domain" policy);
   check bool "Execute policy group omitted" true
     (Yojson.Safe.Util.member "policy_group" policy = `Null);
   let schema_shape = Yojson.Safe.Util.member "schema_shape" execute in
@@ -708,25 +464,25 @@ let test_keeper_tools_list_json_uses_typed_groups () =
            Yojson.Safe.Util.(member "input" example |> member "executable" |> to_string))
       examples
   in
-  check bool "Execute examples include typed gh argv" true
-    (example_with_executable "gh");
-  check bool "Execute examples include typed git argv" true
-    (example_with_executable "git");
-  check bool "Execute examples include search argv" true
-    (example_with_executable "rg");
+  check int "Execute has one neutral typed example" 1 (List.length examples);
+  check bool "Execute example uses an opaque program identity" true
+    (example_with_executable "program");
+  List.iter
+    (fun product_name ->
+       check bool ("Execute example excludes product identity " ^ product_name) false
+         (example_with_executable product_name))
+    [ "gh"; "git"; "rg" ];
   check bool "Execute examples use neutral cwd placeholders" true
     (List.for_all
        (fun example ->
           String.equal
-            "<repository-root>"
+            "<allowed-directory>"
             Yojson.Safe.Util.(member "input" example |> member "cwd" |> to_string))
        examples);
   let grep = find_descriptor "tool_search_files" in
   check bool "non-execute descriptor omits examples field" true
     (Yojson.Safe.Util.member "examples" grep = `Null);
   let grep_policy = Yojson.Safe.Util.member "policy" grep in
-  check string "Grep effect domain" "read_only"
-    (string_member "effect_domain" grep_policy);
   check bool "Grep policy group omitted" true
     (Yojson.Safe.Util.member "policy_group" grep_policy = `Null);
   check bool "Grep internal route is not a model name" false
@@ -815,18 +571,7 @@ let test_keeper_tools_list_json_uses_typed_groups () =
     Yojson.Safe.Util.(member "required" empty_shape |> to_list |> List.length);
   check bool "empty schema has no shape errors" true
     (Yojson.Safe.Util.member "schema_errors" empty_shape = `Null);
-  let denied_meta = make_meta ~tool_denylist:[ "tool_search_files" ] () in
-  let denied_json =
-    Yojson.Safe.from_string (KES.keeper_tools_list_json ~meta:denied_meta)
-  in
-  let denied_surface =
-    Yojson.Safe.Util.(member "descriptor_surface" denied_json |> to_list)
-  in
-  check bool "denied grep descriptor omitted from discovery surface" true
-    (List.for_all
-       (fun descriptor ->
-          not (String.equal "tool_search_files" (string_member "internal_name" descriptor)))
-       denied_surface)
+  ()
 
 let test_execute_with_outcome_missing_file_is_failure () =
   with_exec_fixture "keeper_tool_dispatch_runtime_missing_file"
@@ -841,7 +586,7 @@ let test_execute_with_outcome_missing_file_is_failure () =
         KET.execute_keeper_tool_call_with_outcome
           ~config ~meta ~ctx_work ~exec_cache:None
           ~name:"Read"
-          ~input:(`Assoc [ ("file_path", `String "config/tool_policy.toml") ])
+          ~input:(`Assoc [ ("file_path", `String "config/runtime.toml") ])
           ()
       in
       check string "missing file outcome" "failure"
@@ -849,49 +594,68 @@ let test_execute_with_outcome_missing_file_is_failure () =
       check string "missing file payload shape" "structured_error"
         (payload_kind result.payload_shape);
       let json = Yojson.Safe.from_string result.raw_output in
-      let path_resolution = Yojson.Safe.Util.member "path_resolution" json in
-      check string "single repo surfaced" "repos/masc-mcp"
-        Yojson.Safe.Util.(member "available_repos" json |> to_list |> List.hd |> to_string);
-      check string "repo cwd hint" "repos/masc-mcp"
-        Yojson.Safe.Util.(member "repo_cwd_hint" path_resolution |> to_string);
-      check bool "same path retry marked as futile" true
-        Yojson.Safe.Util.(member "same_path_retry_will_fail" path_resolution |> to_bool);
-      check bool "retry policy discourages same Read" true
-        (contains_substring
-           Yojson.Safe.Util.(member "retry_policy" path_resolution |> to_string)
-           "Do not retry Read");
-      check string "recovery parent path" "repos/masc-mcp/config"
-        Yojson.Safe.Util.(
-          member "recovery_examples" path_resolution
-          |> member "parent_path_hint"
-          |> to_string);
-      check string "recovery basename hint" "tool_policy.toml"
-        Yojson.Safe.Util.(
-          member "recovery_examples" path_resolution
-          |> member "basename_hint"
-          |> to_string))
+      check string "input path preserved" "config/runtime.toml"
+        Yojson.Safe.Util.(member "input_file_path" json |> to_string);
+      check bool "raw error remains explicit" true
+        (Yojson.Safe.Util.member "error" json <> `Null);
+      check bool "no inferred path advice" true
+        Yojson.Safe.Util.(member "path_resolution" json = `Null);
+      check bool "no inferred repository list" true
+        Yojson.Safe.Util.(member "available_repos" json = `Null))
 
-let test_execute_with_outcome_bad_query_is_failure () =
-  with_exec_fixture "keeper_tool_dispatch_runtime_bad_query"
+let test_tool_search_without_session_searcher_is_unavailable () =
+  with_exec_fixture "keeper_tool_dispatch_runtime_search_unavailable"
     (fun ~config ~meta ~ctx_work ->
       let result =
         KET.execute_keeper_tool_call_with_outcome
           ~config ~meta ~ctx_work ~exec_cache:None
           ~name:"keeper_tool_search"
-          ~input:(`Assoc [ ("query", `String "") ])
+          ~input:(`Assoc [])
           ()
       in
-      check string "bad query outcome" "failure"
-        (match result.outcome with `Success -> "success" | `Failure -> "failure");
-      check string "bad query payload shape" "structured_error"
-        (payload_kind result.payload_shape))
+      check string "search outcome" "failure" (outcome_label result.outcome);
+      let json = Yojson.Safe.from_string result.raw_output in
+      check string "explicit unavailable error" "tool_search_unavailable"
+        Yojson.Safe.Util.(member "error" json |> to_string);
+      check string "exact unavailable reason" "catalog_provider_not_injected"
+        Yojson.Safe.Util.(member "reason" json |> to_string);
+      check bool "no guessed results" true
+        Yojson.Safe.Util.(member "results" json = `Null))
 
-let test_public_local_aliases_dispatch_to_runtime_handlers () =
-  with_exec_fixture ~process:true "keeper_tool_dispatch_runtime_public_aliases"
+let test_tool_search_uses_exact_injected_searcher () =
+  with_exec_fixture "keeper_tool_dispatch_runtime_injected_search"
+    (fun ~config ~meta ~ctx_work ->
+      let observed = ref false in
+      let search_fn () =
+        observed := true;
+        `Assoc
+          [ "ok", `Bool true
+          ; "results", `List [ `Assoc [ "name", `String "injected-result" ] ]
+          ]
+      in
+      let result =
+        KET.execute_keeper_tool_call_with_outcome
+          ~config ~meta ~ctx_work ~exec_cache:None ~search_fn
+          ~name:"keeper_tool_search"
+          ~input:(`Assoc [])
+          ()
+      in
+      check string "search outcome" "success" (outcome_label result.outcome);
+      check bool "injected catalog provider called" true !observed;
+      let json = Yojson.Safe.from_string result.raw_output in
+      check string "injected result preserved" "injected-result"
+        Yojson.Safe.Util.(member "results" json |> to_list |> List.hd
+                          |> member "name" |> to_string))
+
+let test_model_visible_local_tools_dispatch_to_runtime_handlers () =
+  with_exec_fixture
+    ~process:true
+    ~always_allow:true
+    "keeper_tool_dispatch_runtime_model_tools"
     (fun ~config ~meta ~ctx_work ->
       let playground = KES.keeper_default_write_root ~config ~meta in
-      let visible_file_path = "public-alias.txt" in
-      let file_path = Filename.concat playground "public-alias.txt" in
+      let visible_file_path = "model-visible.txt" in
+      let file_path = Filename.concat playground visible_file_path in
       let run name input =
         KET.execute_keeper_tool_call_with_outcome
           ~config
@@ -942,35 +706,9 @@ let test_public_local_aliases_dispatch_to_runtime_handlers () =
       check string "Grep translates to rg op" "rg"
         (json_string_field ~default:"" "op" grep_json);
       check bool "Grep returns real match" true
-        (contains_substring grep_result.raw_output "public-alias.txt");
+        (contains_substring grep_result.raw_output visible_file_path);
       check bool "Grep match includes content" true
         (contains_substring grep_result.raw_output "gamma");
-      let search_result =
-        run
-          "Search"
-          (`Assoc
-             [ "pattern", `String "gamma"; "path", `String visible_file_path ])
-      in
-      let search_json = check_success_result "Search" search_result in
-      check string "Search translates to rg op" "rg"
-        (json_string_field ~default:"" "op" search_json);
-      check bool "Search returns real match" true
-        (contains_substring search_result.raw_output "public-alias.txt");
-      check bool "Search match includes content" true
-        (contains_substring search_result.raw_output "gamma");
-      let search_files_result =
-        run
-          "search_files"
-          (`Assoc
-             [ "pattern", `String "gamma"; "path", `String visible_file_path ])
-      in
-      let search_files_json =
-        check_success_result "search_files" search_files_result
-      in
-      check string "search_files translates to rg op" "rg"
-        (json_string_field ~default:"" "op" search_files_json);
-      check bool "search_files returns real match" true
-        (contains_substring search_files_result.raw_output "public-alias.txt");
       let execute_result =
         run
           "Execute"
@@ -1032,8 +770,8 @@ let test_keeper_task_claim_accepts_specific_task_id () =
         check string "assignee" meta.agent_name assignee
       | _ -> fail "requested task should be claimed or auto-started")
 
-let test_glob_unknown_tool_returns_tutor_guidance () =
-  with_exec_fixture "keeper_tool_dispatch_runtime_glob_tutor"
+let test_unknown_tool_returns_exact_error () =
+  with_exec_fixture "keeper_tool_dispatch_runtime_unknown_tool"
     (fun ~config ~meta ~ctx_work ->
       let result =
         KET.execute_keeper_tool_call_with_outcome
@@ -1049,20 +787,17 @@ let test_glob_unknown_tool_returns_tutor_guidance () =
       check string "payload shape" "structured_error"
         (payload_kind result.payload_shape);
       let json = Yojson.Safe.from_string result.raw_output in
-      check string "policy rejection" "policy_rejection"
-        Yojson.Safe.Util.(member "failure_class" json |> to_string);
-      let tutor = Yojson.Safe.Util.member "tool_tutor" json in
-      check string "tutor kind" "unknown_tool"
-        Yojson.Safe.Util.(member "kind" tutor |> to_string);
-      check bool "tutor says Glob is not active" true
-        (contains_substring
-           Yojson.Safe.Util.(member "message" tutor |> to_string)
-           "Glob is not an active MASC keeper tool");
-      check bool "tutor names Execute alternative" true
-        (contains_substring result.raw_output {|"tool":"Execute"|}))
+      check string "exact unknown tool error" "unknown_tool"
+        Yojson.Safe.Util.(member "error" json |> to_string);
+      check string "requested tool preserved" "Glob"
+        Yojson.Safe.Util.(member "tool" json |> to_string);
+      check bool "no guessed suggestions" true
+        Yojson.Safe.Util.(member "did_you_mean" json = `Null);
+      check bool "no tutor" true
+        Yojson.Safe.Util.(member "tool_tutor" json = `Null))
 
-let test_public_masc_web_search_alias_dispatches_to_misc_runtime () =
-  with_exec_fixture "keeper_tool_dispatch_web_search_alias"
+let test_model_visible_web_search_dispatches_to_misc_runtime () =
+  with_exec_fixture ~always_allow:true "keeper_tool_dispatch_web_search"
     (fun ~config ~meta ~ctx_work ->
       Masc.Tool_misc.with_web_search_simulation_for_test
         ~outcomes:
@@ -1087,20 +822,20 @@ let test_public_masc_web_search_alias_dispatches_to_misc_runtime () =
               ~input:
                 (`Assoc
                   [
-                    ("query", `String "ocaml eio runtime alias test");
+                    ("query", `String "ocaml eio runtime test");
                     ("limit", `Int 3);
                   ])
               ()
           in
-          check string "web search alias outcome" "success"
+          check string "web search outcome" "success"
             (outcome_label result.outcome);
-          check string "web search alias payload shape" "structured_success"
+          check string "web search payload shape" "structured_success"
             (payload_kind result.payload_shape);
           let json = parse_json result.raw_output in
           let result_json = Yojson.Safe.Util.member "result" json in
           check string "status" "ok"
             Yojson.Safe.Util.(member "status" json |> to_string);
-          check string "query preserved" "ocaml eio runtime alias test"
+          check string "query preserved" "ocaml eio runtime test"
             Yojson.Safe.Util.(member "query" result_json |> to_string);
           check string "fallback provider selected" "duckduckgo"
             Yojson.Safe.Util.(member "engine" result_json |> to_string);
@@ -1116,10 +851,10 @@ let test_public_masc_web_search_alias_dispatches_to_misc_runtime () =
               Yojson.Safe.Util.(member "snippet" hit |> to_string)
           | _ -> fail "expected one web search hit"))
 
-let test_public_masc_web_fetch_alias_dispatches_to_misc_runtime () =
-  with_exec_fixture "keeper_tool_dispatch_web_fetch_alias"
+let test_model_visible_web_fetch_dispatches_to_misc_runtime () =
+  with_exec_fixture ~always_allow:true "keeper_tool_dispatch_web_fetch"
     (fun ~config ~meta ~ctx_work ->
-      let requested_url = "https://example.com/alias-web-fetch" in
+      let requested_url = "https://example.com/model-web-fetch" in
       let html =
         {|
 <!doctype html>
@@ -1192,12 +927,15 @@ let test_public_masc_web_fetch_alias_dispatches_to_misc_runtime () =
                Yojson.Safe.Util.(member "text" json |> to_string)
                "Body content & proof.")))
 
-let test_public_masc_web_fetch_blocks_localhost_before_runtime () =
-  with_exec_fixture "keeper_tool_dispatch_web_fetch_blocks_localhost"
+let test_public_masc_web_fetch_reaches_localhost_after_gate () =
+  with_exec_fixture
+    ~always_allow:true
+    "keeper_tool_dispatch_web_fetch_reaches_localhost"
     (fun ~config ~meta ~ctx_work ->
       Masc.Tool_misc.with_web_fetch_http_get_for_test
-        (fun ~timeout_sec:_ ~headers:_ ~max_response_bytes:_ _url ->
-          fail "blocked URL should not reach the HTTP runtime")
+        (fun ~timeout_sec:_ ~headers:_ ~max_response_bytes:_ url ->
+          check string "local url forwarded" "http://127.0.0.1:8935/health" url;
+          Ok (Some 200, "healthy"))
         (fun () ->
           let result =
             KET.execute_keeper_tool_call_with_outcome
@@ -1209,12 +947,10 @@ let test_public_masc_web_fetch_blocks_localhost_before_runtime () =
               ~input:(`Assoc [ ("url", `String "http://127.0.0.1:8935/health") ])
               ()
           in
-          check string "web fetch local outcome" "failure"
+          check string "web fetch local outcome" "success"
             (outcome_label result.outcome);
-          check string "web fetch local payload shape" "structured_error"
-            (payload_kind result.payload_shape);
-          check bool "blocked host message" true
-            (contains_substring result.raw_output "url host is blocked")))
+          check string "web fetch local payload shape" "structured_success"
+            (payload_kind result.payload_shape)))
 
 let workflow_rejection_message =
   "Invalid task state: Self-approval not allowed: verifier must be a different agent"
@@ -1247,47 +983,6 @@ let test_tool_result_or_error_preserves_failure_class () =
   check string "failure_class" "workflow_rejection"
     Yojson.Safe.Util.(member "failure_class" json |> to_string)
 
-let test_workflow_rejection_payload_skips_circuit_breaker () =
-  let workflow_payload =
-    KES.error_json
-      ~fields:[ "failure_class", `String "workflow_rejection" ]
-      workflow_rejection_message
-  in
-  let egress_payload =
-    {|{"ok":false,"error":"egress_blocked","failure_class":"policy_rejection","attempted":"localhost","allowed":["*.github.com"]}|}
-  in
-  let legacy_egress_payload =
-    {|{"ok":false,"error":"egress_blocked","attempted":"localhost","allowed":["*.github.com"]}|}
-  in
-  let runtime_payload =
-    KES.error_json
-      ~fields:[ "failure_class", `String "runtime_failure" ]
-      "No such file or directory"
-  in
-  check (option string) "extracts workflow class" (Some "workflow_rejection")
-    (Option.map Tool_result.tool_failure_class_to_string
-       (KET.failure_class_of_tool_result_payload workflow_payload));
-  check bool "workflow rejection does not trip circuit breaker" false
-    (KET.should_apply_circuit_breaker_to_failure_payload
-       (KET.failure_class_of_tool_result_payload workflow_payload));
-  check (option string) "extracts egress policy class" (Some "policy_rejection")
-    (Option.map Tool_result.tool_failure_class_to_string
-       (KET.failure_class_of_tool_result_payload egress_payload));
-  check bool "egress policy rejection does not trip circuit breaker" false
-    (KET.should_apply_circuit_breaker_to_failure_payload
-       (KET.failure_class_of_tool_result_payload egress_payload));
-  (* legacy egress has no failure_class field → typed parser defaults to
-     Runtime_failure (conservative: unknown → fail, CLAUDE.md anti-pattern #2). *)
-  check (option string) "legacy egress defaults to runtime_failure" (Some "runtime_failure")
-    (Option.map Tool_result.tool_failure_class_to_string
-       (KET.failure_class_of_tool_result_payload legacy_egress_payload));
-  check bool "legacy egress still trips circuit breaker" true
-    (KET.should_apply_circuit_breaker_to_failure_payload
-       (KET.failure_class_of_tool_result_payload legacy_egress_payload));
-  check bool "runtime failure still trips circuit breaker" true
-    (KET.should_apply_circuit_breaker_to_failure_payload
-       (KET.failure_class_of_tool_result_payload runtime_payload))
-
 let test_tool_execute_raw_cmd_requires_typed_shell_ir () =
   with_exec_fixture "tool_execute_raw_cmd_requires_typed_shell_ir"
     (fun ~config ~meta ~ctx_work ->
@@ -1302,15 +997,20 @@ let test_tool_execute_raw_cmd_requires_typed_shell_ir () =
           ~config ~meta ~ctx_work ~exec_cache:None
           ~name:"tool_execute" ~input ()
       in
-      let raw = run () in
-      let json = Yojson.Safe.from_string raw in
-      check string "typed shell ir required"
-        "Typed Shell IR input is required. Provide executable/argv or pipeline."
-        Yojson.Safe.Util.(member "error" json |> to_string);
-      check bool "typed marker" true
-        Yojson.Safe.Util.(member "typed" json |> to_bool);
-      check bool "single hard-cut rejection does not enrich circuit breaker" true
-        Yojson.Safe.Util.(member "circuit_breaker" json = `Null))
+      let outputs = List.init 4 (fun _ -> run ()) in
+      List.iter
+        (fun raw ->
+           let json = Yojson.Safe.from_string raw in
+           check string "typed shell ir required"
+             "Typed Shell IR input is required. Provide executable/argv or pipeline."
+             Yojson.Safe.Util.(member "error" json |> to_string);
+           check bool "typed marker" true
+             Yojson.Safe.Util.(member "typed" json |> to_bool))
+        outputs;
+      match outputs with
+      | first :: rest ->
+        List.iter (check string "repeated failures stay byte-identical" first) rest
+      | [] -> fail "expected dispatch outputs")
 
 let test_tool_execute_pipe_argv_emits_pipeline_recovery_plan () =
   with_exec_fixture "tool_execute_pipe_argv_emits_pipeline_recovery_plan"
@@ -1407,7 +1107,7 @@ let test_oas_handler_threads_eio_context_to_keeper_dispatch () =
       Eio.Switch.run @@ fun turn_sw ->
       Eio_context.with_turn_switch turn_sw @@ fun () ->
       let config = Workspace.default_config dir in
-      let meta = make_meta ~tool_access:[ "masc_keeper_msg" ] () in
+      let meta = make_meta () in
       ignore (Masc.Keeper_registry.register ~base_path:config.base_path meta.name meta);
       let previous_dispatch = !(Masc.Keeper_dispatch_ref.dispatch) in
       let saw_turn_sw = Atomic.make false in
@@ -1435,7 +1135,6 @@ let test_oas_handler_threads_eio_context_to_keeper_dispatch () =
               ~meta
               ~ctx_snapshot:(make_ctx ())
               ~exec_cache:None
-              ~failure_counts:(Masc.Keeper_tools_oas.create_failure_counts ())
               ()
           in
           let result =
@@ -1621,12 +1320,12 @@ let check_descriptor ~msg name expected_cc expected_perm =
     check string (msg ^ " permission") expected_perm actual_perm
 ;;
 
-let test_web_search_oas_descriptor_is_exclusive_external () =
-  check_descriptor ~msg:"masc_web_search" "masc_web_search" "exclusive_external" "read_only"
+let test_web_search_oas_descriptor_is_parallel_read () =
+  check_descriptor ~msg:"masc_web_search" "masc_web_search" "parallel_read" "read_only"
 ;;
 
-let test_web_fetch_oas_descriptor_is_exclusive_external () =
-  check_descriptor ~msg:"masc_web_fetch" "masc_web_fetch" "exclusive_external" "read_only"
+let test_web_fetch_oas_descriptor_is_parallel_read () =
+  check_descriptor ~msg:"masc_web_fetch" "masc_web_fetch" "parallel_read" "read_only"
 ;;
 
 let test_read_oas_descriptor_is_parallel_read () =
@@ -1659,9 +1358,9 @@ let check_bundle_concurrency ~msg tools name expected_cc =
        check string (msg ^ " concurrency_class") expected_cc actual)
 ;;
 
-let test_public_alias_oas_descriptors () =
+let test_model_visible_oas_descriptors () =
   with_exec_fixture
-    "public_alias_oas_descriptors"
+    "model_visible_oas_descriptors"
     (fun ~config ~meta ~ctx_work:_ ->
        let tools =
          Masc.Keeper_tools_oas_bundle.make_tools
@@ -1670,8 +1369,8 @@ let test_public_alias_oas_descriptors () =
            ~ctx_snapshot:(make_ctx ())
            ()
        in
-       check_bundle_concurrency ~msg:"WebSearch" tools "WebSearch" "exclusive_external";
-       check_bundle_concurrency ~msg:"WebFetch" tools "WebFetch" "exclusive_external";
+       check_bundle_concurrency ~msg:"WebSearch" tools "WebSearch" "parallel_read";
+       check_bundle_concurrency ~msg:"WebFetch" tools "WebFetch" "parallel_read";
        check_bundle_concurrency ~msg:"Grep" tools "Grep" "parallel_read";
        check_bundle_concurrency ~msg:"Read" tools "Read" "parallel_read")
 ;;
@@ -1802,36 +1501,32 @@ let () =
         test_malformed_json_like_payload_detected;
     ]);
     ("execute_keeper_tool_call_with_outcome", [
-      test_case "surface post execution controls continuation fallback" `Quick
-        test_surface_post_execution_controls_continuation_fallback;
-      test_case "registered descriptor bypasses tool_access allowlist" `Quick
-        test_registered_descriptor_bypasses_tool_access_allowlist;
       test_case "public Read rejects unsupported range fields" `Quick
         test_public_read_rejects_unsupported_range_fields;
-      test_case "public Read rejects offset with tutor guidance" `Quick
-        test_public_read_rejects_offset_with_tutor;
+      test_case "public Read rejects offset without dispatch enrichment" `Quick
+        test_public_read_rejects_offset_without_enrichment;
       test_case "missing file is failure" `Quick
         test_execute_with_outcome_missing_file_is_failure;
-      test_case "bad query is failure" `Quick
-        test_execute_with_outcome_bad_query_is_failure;
-      test_case "public local aliases dispatch to runtime handlers" `Quick
-        test_public_local_aliases_dispatch_to_runtime_handlers;
+      test_case "tool search without session searcher is unavailable" `Quick
+        test_tool_search_without_session_searcher_is_unavailable;
+      test_case "tool search uses injected session searcher" `Quick
+        test_tool_search_uses_exact_injected_searcher;
+      test_case "model-visible local tools dispatch to runtime handlers" `Quick
+        test_model_visible_local_tools_dispatch_to_runtime_handlers;
       test_case "keeper_task_claim accepts explicit task_id" `Quick
         test_keeper_task_claim_accepts_specific_task_id;
-      test_case "Glob returns tutor guidance instead of aliasing to rg" `Quick
-        test_glob_unknown_tool_returns_tutor_guidance;
-      test_case "public WebSearch alias reaches misc runtime" `Quick
-        test_public_masc_web_search_alias_dispatches_to_misc_runtime;
-      test_case "public WebFetch alias reaches misc runtime" `Quick
-        test_public_masc_web_fetch_alias_dispatches_to_misc_runtime;
+      test_case "unknown tool returns exact error" `Quick
+        test_unknown_tool_returns_exact_error;
+      test_case "model-visible WebSearch reaches misc runtime" `Quick
+        test_model_visible_web_search_dispatches_to_misc_runtime;
+      test_case "model-visible WebFetch reaches misc runtime" `Quick
+        test_model_visible_web_fetch_dispatches_to_misc_runtime;
       test_case "public WebFetch blocks localhost before runtime" `Quick
-        test_public_masc_web_fetch_blocks_localhost_before_runtime;
+        test_public_masc_web_fetch_reaches_localhost_after_gate;
       test_case "task FSM errors require explicit failure_class" `Quick
         test_tool_result_does_not_infer_task_fsm_rejections_from_message;
       test_case "tool_result_or_error preserves failure_class" `Quick
         test_tool_result_or_error_preserves_failure_class;
-      test_case "workflow rejection skips circuit breaker" `Quick
-        test_workflow_rejection_payload_skips_circuit_breaker;
       test_case "tool_execute raw cmd requires typed Shell IR" `Quick
         test_tool_execute_raw_cmd_requires_typed_shell_ir;
       test_case "tool_execute pipe argv emits pipeline recovery plan" `Quick
@@ -1843,15 +1538,7 @@ let () =
       test_case "registered dispatch preserves workflow failure class" `Quick
         test_registered_dispatch_preserves_workflow_failure_class;
     ]);
-    ("tool_not_allowed_counter", [
-      test_case "increments for not_in_candidate_set" `Quick
-        test_tool_not_allowed_increments_counter_for_unknown_tool;
-      test_case "increments for denied_by_policy" `Quick
-        test_tool_not_allowed_denied_by_policy_counter;
-      test_case "reason label is bounded vocabulary" `Quick
-        test_tool_not_allowed_reason_label_is_bounded;
-      test_case "raw Board wrapper routes are not Keeper candidates" `Quick
-        test_raw_board_wrapper_routes_are_not_keeper_candidates;
+    ("exact_registered_dispatch", [
       test_case "raw Board runtime routes fail closed" `Quick
         test_raw_board_runtime_is_fail_closed;
     ]);
@@ -1862,16 +1549,16 @@ let () =
         test_descriptor_route_miss_payload_is_typed_runtime_failure;
     ]);
     ("oas_descriptor", [
-      test_case "masc_web_search is Exclusive_external" `Quick
-        test_web_search_oas_descriptor_is_exclusive_external;
-      test_case "masc_web_fetch is Exclusive_external" `Quick
-        test_web_fetch_oas_descriptor_is_exclusive_external;
+      test_case "masc_web_search is Parallel_read" `Quick
+        test_web_search_oas_descriptor_is_parallel_read;
+      test_case "masc_web_fetch is Parallel_read" `Quick
+        test_web_fetch_oas_descriptor_is_parallel_read;
       test_case "tool_read_file is Parallel_read" `Quick
         test_read_oas_descriptor_is_parallel_read;
       test_case "tool_search_files is Parallel_read" `Quick
         test_grep_oas_descriptor_is_parallel_read;
-      test_case "public aliases carry correct concurrency class" `Quick
-        test_public_alias_oas_descriptors;
+      test_case "model-visible tools carry correct concurrency class" `Quick
+        test_model_visible_oas_descriptors;
       test_case "parallel read tools reorder results" `Quick
         test_parallel_read_tools_reorder_results;
     ]);

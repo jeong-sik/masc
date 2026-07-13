@@ -2,277 +2,121 @@ open Alcotest
 
 module Q = Keeper_approval_queue_rules_types
 
-let test_risk_level_conversions () =
-  check string "critical string" "critical" (Q.risk_level_to_string Q.Critical);
-  check int "medium int" 2 (Q.risk_level_to_int Q.Medium);
-  check bool "parse high"
-    true
-    (match Q.risk_level_of_string "high" with
-     | Some Q.High -> true
-     | _ -> false)
-;;
+let yojson = testable Yojson.Safe.pretty_print Yojson.Safe.equal
 
 let sample_rule =
   { Q.id = "rule-1"
   ; keeper_name = "keeper"
-  ; tool_name = "tool_execute"
-  ; sandbox_profile = Some "local"
-  ; backend = Some "sandbox"
+  ; tool_name = "external-effect"
   ; request_fingerprint = "abcdef1234567890"
-  ; request_fingerprint_preview = "abcdef123456"
-  ; max_risk = Q.High
   ; created_at = 1780587600.0
   ; created_by = Some "operator"
-  ; last_matched_at = Some 1780587700.0
-  ; match_count = 3
   ; source_approval_id = Some "approval-1"
   }
 ;;
 
+let test_advisory_judgment_round_trip () =
+  List.iter
+    (fun judgment ->
+       let wire = Q.advisory_judgment_to_string judgment in
+       check bool wire true (Q.advisory_judgment_of_string wire = Some judgment))
+    [ Q.Approve; Q.Deny; Q.Require_human ];
+  check (option reject) "unknown" None (Q.advisory_judgment_of_string "unknown")
+;;
+
+let test_summary_json_is_nonhierarchical () =
+  let summary : Q.hitl_context_summary =
+    { summary_version = 2
+    ; generated_at = 1780587600.0
+    ; model_run_id = "run-1"
+    ; context_summary = "The exact action matches the active task."
+    ; key_questions = [ "Is the target current?" ]
+    ; judgment = Q.Approve
+    ; rationale = "The visible evidence supports this exact request."
+    }
+  in
+  let json = Q.hitl_context_summary_to_yojson summary in
+  let member name = Yojson.Safe.Util.member name json in
+  check yojson "judgment" (`String "approve") (member "judgment");
+  check yojson "rationale" (`String summary.rationale) (member "rationale");
+  check yojson "no numeric score" `Null (member "score");
+  check yojson "no hierarchy" `Null (member "level");
+  match
+    Q.summary_status_of_yojson_with_error
+      (Q.summary_status_to_yojson (Q.Summary_available summary))
+  with
+  | Error reason -> fail reason
+  | Ok (Q.Summary_available parsed) ->
+    check bool "judgment persisted" true (parsed.judgment = Q.Approve)
+  | Ok (Q.Summary_not_requested | Q.Summary_pending | Q.Summary_failed _) ->
+    fail "available summary did not round trip"
+;;
+
 let test_approval_rule_json_round_trip () =
   match Q.approval_rule_of_yojson (Q.approval_rule_to_yojson sample_rule) with
-  | None -> fail "expected approval rule to parse"
+  | None -> fail "expected exact approval rule to parse"
   | Some parsed ->
     check string "id" sample_rule.id parsed.id;
-    check string "fingerprint" sample_rule.request_fingerprint parsed.request_fingerprint;
-    check int "match count" sample_rule.match_count parsed.match_count;
-    check bool "risk" true (parsed.max_risk = Q.High)
+    check string "fingerprint" sample_rule.request_fingerprint parsed.request_fingerprint
 ;;
 
-let test_approval_rule_rejects_non_object_json () =
-  check
-    (option reject)
-    "list input"
-    None
-    (Q.approval_rule_of_yojson (`List []));
-  check
-    (option reject)
-    "string input"
-    None
-    (Q.approval_rule_of_yojson (`String "not-a-rule"))
-;;
-
-let test_approval_rule_rejects_malformed_object_json () =
-  let without field =
-    match Q.approval_rule_to_yojson sample_rule with
-    | `Assoc fields -> `Assoc (List.remove_assoc field fields)
-    | json -> json
-  in
-  check
-    (option reject)
-    "missing id"
-    None
-    (Q.approval_rule_of_yojson (without "id"));
-  check
-    (option reject)
-    "blank keeper name"
-    None
-    (Q.approval_rule_of_yojson
-       (`Assoc
-           [ "id", `String "rule-1"
-           ; "keeper_name", `String " "
-           ; "tool_name", `String "tool_execute"
-           ; "request_fingerprint", `String "abcdef"
-           ; "max_risk", `String "high"
-           ; "created_at", `Float 1780587600.0
-           ; "match_count", `Int 0
-           ]));
-  check
-    (option reject)
-    "invalid max risk"
-    None
-    (Q.approval_rule_of_yojson
-       (`Assoc
-           [ "id", `String "rule-1"
-           ; "keeper_name", `String "keeper"
-           ; "tool_name", `String "tool_execute"
-           ; "request_fingerprint", `String "abcdef"
-           ; "max_risk", `String "god-mode"
-           ; "created_at", `Float 1780587600.0
-           ; "match_count", `Int 0
-           ]));
-  check
-    (option reject)
-    "missing max risk"
-    None
-    (Q.approval_rule_of_yojson (without "max_risk"));
-  check
-    (option reject)
-    "invalid match count"
-    None
-    (Q.approval_rule_of_yojson
-       (`Assoc
-           [ "id", `String "rule-1"
-           ; "keeper_name", `String "keeper"
-           ; "tool_name", `String "tool_execute"
-           ; "request_fingerprint", `String "abcdef"
-           ; "max_risk", `String "high"
-           ; "created_at", `Float 1780587600.0
-           ; "match_count", `String "0"
-           ]));
-  check
-    (option reject)
-    "negative match count"
-    None
-    (Q.approval_rule_of_yojson
-       (`Assoc
-           [ "id", `String "rule-1"
-           ; "keeper_name", `String "keeper"
-           ; "tool_name", `String "tool_execute"
-           ; "request_fingerprint", `String "abcdef"
-           ; "max_risk", `String "high"
-           ; "created_at", `Float 1780587600.0
-           ; "match_count", `Int (-1)
-           ]));
-  check
-    (option reject)
-    "blank tool name"
-    None
-    (Q.approval_rule_of_yojson
-       (`Assoc
-           [ "id", `String "rule-1"
-           ; "keeper_name", `String "keeper"
-           ; "tool_name", `String " "
-           ; "request_fingerprint", `String "abcdef"
-           ; "max_risk", `String "high"
-           ; "created_at", `Float 1780587600.0
-           ; "match_count", `Int 0
-           ]));
-  check
-    (option reject)
-    "blank request fingerprint"
-    None
-    (Q.approval_rule_of_yojson
-       (`Assoc
-           [ "id", `String "rule-1"
-           ; "keeper_name", `String "keeper"
-           ; "tool_name", `String "tool_execute"
-           ; "request_fingerprint", `String "  "
-           ; "max_risk", `String "high"
-           ; "created_at", `Float 1780587600.0
-           ; "match_count", `Int 0
-           ]));
-  check
-    (option reject)
-    "missing created_at"
-    None
-    (Q.approval_rule_of_yojson
-       (`Assoc
-           [ "id", `String "rule-1"
-           ; "keeper_name", `String "keeper"
-           ; "tool_name", `String "tool_execute"
-           ; "request_fingerprint", `String "abcdef"
-           ; "max_risk", `String "high"
-           ; "match_count", `Int 0
-           ]));
-  check
-    (option reject)
-    "missing match_count"
-    None
-    (Q.approval_rule_of_yojson
-       (`Assoc
-           [ "id", `String "rule-1"
-           ; "keeper_name", `String "keeper"
-           ; "tool_name", `String "tool_execute"
-           ; "request_fingerprint", `String "abcdef"
-           ; "max_risk", `String "high"
-           ; "created_at", `Float 1780587600.0
-           ]))
-;;
-
-let valid_rule_json ?(max_risk = `String "high") ?(created_at = `Float 1780587600.0)
-    ?(match_count = `Int 0) ?request_fingerprint_preview () =
-  let fields =
-    [ "id", `String "rule-1"
-    ; "keeper_name", `String "keeper"
-    ; "tool_name", `String "tool_execute"
-    ; "request_fingerprint", `String "abcdef1234567890"
-    ; "max_risk", max_risk
-    ; "created_at", created_at
-    ; "match_count", match_count
-    ]
-  in
-  let fields =
-    match request_fingerprint_preview with
-    | None -> fields
-    | Some value -> ("request_fingerprint_preview", value) :: fields
-  in
-  `Assoc fields
-;;
-
-let without_field field json =
-  match json with
+let without_field field = function
   | `Assoc fields -> `Assoc (List.remove_assoc field fields)
   | json -> json
 ;;
 
-let check_parse_error name expected json =
-  match Q.approval_rule_of_yojson_with_error json with
-  | Ok _ -> fail (name ^ ": expected parse error")
-  | Error actual -> check string name expected actual
-;;
-
-let test_approval_rule_error_reasons () =
-  check_parse_error
-    "max_risk reason"
-    (Printf.sprintf "max_risk %S is not %s" "god-mode" Q.allowed_risk_level_values_label)
-    (valid_rule_json ~max_risk:(`String "god-mode") ());
-  check_parse_error
-    "created_at reason"
-    "created_at must be a number"
-    (without_field "created_at" (valid_rule_json ()));
-  check_parse_error
-    "match_count reason"
-    "match_count must be a non-negative integer"
-    (valid_rule_json ~match_count:(`Int (-1)) ());
-  check_parse_error
-    "blank id reason"
-    "id must be a non-blank string"
-    (valid_rule_json () |> without_field "id")
-;;
-
-let test_request_fingerprint_preview_fallback () =
-  match
-    Q.approval_rule_of_yojson_with_error
-      (valid_rule_json ~request_fingerprint_preview:(`String " ") ())
-  with
-  | Error reason -> fail ("expected approval rule to parse: " ^ reason)
-  | Ok parsed ->
+let test_rule_parser_is_closed_and_explicit () =
+  let valid = Q.approval_rule_to_yojson sample_rule in
+  check
+    (option reject)
+    "missing identity"
+    None
+    (Q.approval_rule_of_yojson (without_field "keeper_name" valid));
+  let extended =
+    match valid with
+    | `Assoc fields -> `Assoc (("classification", `String "legacy") :: fields)
+    | json -> json
+  in
+  match Q.approval_rule_of_yojson_with_error extended with
+  | Ok _ -> fail "unsupported persisted fields must require explicit re-approval"
+  | Error reason ->
     check
       string
-      "preview fallback"
-      "abcdef123456"
-      parsed.Q.request_fingerprint_preview
+      "failure names unsupported field"
+      "approval rule contains unsupported field classification; explicit re-approval is required"
+      reason
 ;;
 
-let test_blank_string_json_is_none () =
-  check (option string) "blank" None (Q.string_opt_of_json (`String "  "))
+let test_rule_parser_rejects_duplicate_fields () =
+  let duplicated =
+    match Q.approval_rule_to_yojson sample_rule with
+    | `Assoc fields -> `Assoc (("keeper_name", `String "other") :: fields)
+    | json -> json
+  in
+  match Q.approval_rule_of_yojson_with_error duplicated with
+  | Ok _ -> fail "duplicate persisted fields must require explicit re-approval"
+  | Error reason ->
+    check
+      string
+      "failure names duplicate field"
+      "approval rule contains duplicate field keeper_name; explicit re-approval is required"
+      reason
 ;;
 
 let () =
   run
     "Keeper_approval_queue_rules_types"
-    [ ( "risk"
-      , [ test_case "risk conversions" `Quick test_risk_level_conversions ] )
-    ; ( "json"
-      , [ test_case "approval rule round trip" `Quick test_approval_rule_json_round_trip
+    [ ( "judgment"
+      , [ test_case "typed judgment round trip" `Quick test_advisory_judgment_round_trip
+        ; test_case "summary has no hierarchy" `Quick test_summary_json_is_nonhierarchical
+        ] )
+    ; ( "exact rule"
+      , [ test_case "JSON round trip" `Quick test_approval_rule_json_round_trip
+        ; test_case "closed explicit parser" `Quick test_rule_parser_is_closed_and_explicit
         ; test_case
-            "approval rule rejects non-object json"
+            "duplicate fields rejected"
             `Quick
-            test_approval_rule_rejects_non_object_json
-        ; test_case
-            "approval rule rejects malformed object json"
-            `Quick
-            test_approval_rule_rejects_malformed_object_json
-        ; test_case
-            "approval rule error reasons"
-            `Quick
-            test_approval_rule_error_reasons
-        ; test_case
-            "request fingerprint preview fallback"
-            `Quick
-            test_request_fingerprint_preview_fallback
-        ; test_case "blank string is none" `Quick test_blank_string_json_is_none
+            test_rule_parser_rejects_duplicate_fields
         ] )
     ]
 ;;

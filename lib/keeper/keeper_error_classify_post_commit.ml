@@ -43,8 +43,6 @@ let is_ambiguous_side_effect_error (err : Agent_sdk.Error.sdk_error) : bool =
 
   | Some (Keeper_turn_driver.Accept_rejected _)
   | Some (Keeper_turn_driver.Resumable_cli_session _)
-  | Some (Keeper_turn_driver.Admission_queue_rejected _)
-  | Some (Keeper_turn_driver.Admission_queue_timeout _)
   | Some (Keeper_turn_driver.Turn_timeout _)
   | Some (Keeper_turn_driver.Provider_timeout _)
   (* RFC-0159 Phase A: opaque internal failures are unambiguous failures. *)
@@ -62,8 +60,6 @@ let ambiguous_side_effect_error_tools (err : Agent_sdk.Error.sdk_error) =
       | Keeper_turn_driver.Capacity_backpressure _
       | Keeper_turn_driver.Accept_rejected _
       | Keeper_turn_driver.Resumable_cli_session _
-      | Keeper_turn_driver.Admission_queue_rejected _
-      | Keeper_turn_driver.Admission_queue_timeout _
       | Keeper_turn_driver.Turn_timeout _
       | Keeper_turn_driver.Provider_timeout _
       | Keeper_turn_driver.Internal_unhandled_exception _

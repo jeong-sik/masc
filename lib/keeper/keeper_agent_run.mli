@@ -8,7 +8,6 @@ include module type of Keeper_agent_prompt_metrics
 include module type of Keeper_agent_tool_surface
 include module type of Keeper_agent_result
 include module type of Keeper_agent_error
-include module type of Keeper_agent_checkpoint_hygiene
 
 module Contract_helpers = Keeper_agent_run_contract_helpers
 module Turn_helpers = Keeper_agent_run_turn_helpers
@@ -41,11 +40,6 @@ type autonomous_yield_request = {
   boundary : autonomous_yield_boundary;
 }
 
-val completion_contract_result_for_progress_evidence
-  :  had_owned_active_task_at_turn_start:bool
-  -> actual_keeper_tool_names:string list
-  -> Keeper_execution_receipt.completion_contract_result
-
 module For_testing : sig
   val sse_event_progress_kind : Agent_sdk.Types.sse_event -> string option
   val sse_event_watchdog_progress_kind :
@@ -59,11 +53,6 @@ module For_testing : sig
     :  actual_keeper_tool_names:string list
     -> tool_calls:tool_call_detail list
     -> string list
-
-  val keeper_oas_visibility_neutral_guardrails
-    :  ?guardrails:Agent_sdk.Guardrails.t
-    -> unit
-    -> Agent_sdk.Guardrails.t
 
   val normalize_response_text_for_finalization
     :  runtime_id:string
@@ -131,10 +120,8 @@ val per_provider_timeout_for_turn
             advisory execution-progress checks. When omitted, the progress check
             does not infer world state from prompt text.
     @param generation Current generation counter
-    @param max_idle_turns Maximum consecutive idle turns before stop
     @param history_user_source Source label for user messages in history
     @param history_assistant_source Source label for assistant messages in history
-    @param guardrails Optional OAS guardrails for tool safety gates
     @param temperature Subsystem temperature fallback; a selected runtime model
            declaration takes precedence
     @param max_tokens Explicit caller output-token override. When omitted, the
@@ -143,7 +130,6 @@ val per_provider_timeout_for_turn
            never synthesizes a model-derived value (masc#24067 / oas#2517)
     @param on_event Optional event callback
     @param trajectory_acc Optional trajectory accumulator for recording
-    @param tool_overlay Optional mutable tool overlay for dynamic tools
     @param priority Optional priority for scheduling
     @param is_retry When [true], replays current user message without persisting
     @param shared_context Optional shared OAS context for cross-turn state
@@ -161,21 +147,15 @@ val run_turn
   -> ?user_blocks:Agent_sdk.Types.content_block list
   -> runtime_id:string
   -> ?world_observation:Keeper_world_observation.world_observation
-  -> ?turn_affordances:string list
   -> generation:int
-  -> max_idle_turns:int
-       (* Required, no default: forwarded to the OAS loop guard from the
-          caller's channel-specific runtime setting. *)
   -> ?history_user_source:string
   -> ?history_assistant_source:string
-  -> ?guardrails:Agent_sdk.Guardrails.t
   -> ?temperature:float
   -> ?max_tokens:int
   -> ?oas_timeout_s:float
   -> ?oas_timeout_is_explicit:bool
   -> ?on_event:(Agent_sdk.Types.sse_event -> unit)
   -> ?trajectory_acc:Trajectory.accumulator
-  -> ?tool_overlay:Agent_sdk.Tool_op.t ref
   -> ?priority:Llm_provider.Request_priority.t
   -> ?degraded_retry_applied:bool
   -> ?degraded_retry_runtime:string
@@ -187,14 +167,13 @@ val run_turn
   -> ?trace_link:string * string
   -> ?continuation_channel:Keeper_continuation_channel.t
   -> ?continuation_delivery_channel:Keeper_continuation_channel.t
-  -> ?hitl_approval_grant:Governance_pipeline.hitl_approval_grant
+  -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
   -> ?autonomous_yield_requested:(unit -> autonomous_yield_request option)
        (* Autonomous-lane hook: evaluated at each OAS agent-loop turn boundary
-          (the same guard point as [max_idle_turns], before the next model
-          dispatch — never mid tool execution). A typed request stops the run
-          gracefully at the boundary allowed by [autonomous_yield_reason],
-          releasing the lane for queued chat or durable stimulus work. Only the
-          heartbeat-scheduled path passes it; a chat turn never receives this
-          hook. *)
+          before the next model dispatch — never mid tool execution. A typed
+          request stops the run gracefully at the boundary allowed by
+          [autonomous_yield_reason], releasing the lane for queued chat or
+          durable stimulus work. Only the heartbeat-scheduled path passes it; a
+          chat turn never receives this hook. *)
   -> unit
   -> (run_result, Agent_sdk.Error.sdk_error) result

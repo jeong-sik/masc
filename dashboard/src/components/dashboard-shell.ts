@@ -44,7 +44,7 @@ import { ErrorPanel } from './common/error-panel'
 import { Bell } from 'lucide-preact'
 import { ringFocusClasses } from './common/ring'
 import { SurfaceIcon } from './surface-icon'
-import { governanceData } from './governance-signals'
+import { gateData } from './gate-signals'
 import { Breadcrumb, type BreadcrumbItem } from './common/breadcrumb'
 import { RouteLink } from './common/route-link'
 import {
@@ -251,15 +251,6 @@ interface DashboardHealthInput {
 // per `KeeperPhase`) instead of the previous lowercased comparison —
 // this matches the wire type and the three other former chains.
 
-function fdPressureBlockedKeepers(fleetSafety: DashboardFleetSafetyHealth): number {
-  const candidates = [
-    fleetSafety.keeper_fd_pressure?.admission_blocked_keepers,
-    fleetSafety.keeper_fd_pressure?.blocked_keepers,
-    fleetSafety.keeper_fd_pressure?.blocked_count,
-  ].filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
-  return candidates.length > 0 ? Math.max(...candidates) : 0
-}
-
 function fleetSafetyHealthChip(fleetSafety: DashboardFleetSafetyHealth | null): DashboardHealthChip | null {
   if (!fleetSafety) return null
   const fibers = fleetSafety.keeper_fibers
@@ -283,7 +274,6 @@ function fleetSafetyHealthChip(fleetSafety: DashboardFleetSafetyHealth | null): 
   const capacityShortfall = fleet?.reaction_capacity_shortfall_count ?? (
     targetCapacity != null && runningFibers != null ? Math.max(0, targetCapacity - runningFibers) : null
   )
-  const fdPressureBlocked = fdPressureBlockedKeepers(fleetSafety)
   const pausedOnlyNoExecutable =
     executableFibers === 0
     && pausedAutobootKeepers != null
@@ -322,14 +312,6 @@ function fleetSafetyHealthChip(fleetSafety: DashboardFleetSafetyHealth | null): 
       key: 'fleet-liveness-risk',
       label: 'P0 fleet blocked',
       detail: `${capacityDetail}; resume selected paused keepers or confirm an intentional operator pause policy.`,
-      tone: 'bad',
-    }
-  }
-  if (fdPressureBlocked >= 24) {
-    return {
-      key: 'fleet-liveness-risk',
-      label: 'Fleet liveness risk',
-      detail: `FD pressure admission is blocking ${fdPressureBlocked} keepers; keeper turns may not start.`,
       tone: 'bad',
     }
   }
@@ -1128,7 +1110,7 @@ export function SideRail({
   const currentSection = currentSectionForRoute(route.value)
   // Open keeper-approval count for the Approvals nav badge. Same signal the
   // Approvals/Command surfaces read, so the badge tracks resolutions live.
-  const openApprovals = governanceData.value?.approval_queue?.length ?? 0
+  const openApprovals = gateData.value?.approval_queue?.length ?? 0
   const settingsSurface = DASHBOARD_SURFACES.find(surface => surface.id === 'settings')
   const visibleSurfaces = primaryOnly
     ? PRIMARY_DASHBOARD_SURFACES.filter(surface => surface.id !== 'settings')

@@ -562,62 +562,13 @@ let sanitize_oas_checkpoint
   in
   ({ cp with messages }, stats)
 
-let capped_checkpoint_messages_of_context_with_stats
-      ~(max_checkpoint_messages : int)
-      (ctx : working_context)
-  : Agent_sdk.Types.message list * checkpoint_sanitize_stats
-  =
-  (* Shared by checkpoint persistence and pre-dispatch resume: both paths
-     must honor the load-time message cap plus content-size guards. *)
-  let original_messages = messages_of_context ctx in
-  let capped_messages =
-    trim_messages_preserving_pairs original_messages
-      ~max_count:max_checkpoint_messages
-  in
-  let capped_messages_were_truncated =
-    List.length capped_messages < List.length original_messages
-  in
-  let capped_stats =
-    if capped_messages_were_truncated then
-      { empty_checkpoint_sanitize_stats with
-        dropped_messages = List.length original_messages - List.length capped_messages
-      }
-    else empty_checkpoint_sanitize_stats
-  in
-  let capped_messages =
-    Agent_sdk.Context_reducer.reduce
-      (Agent_sdk.Context_reducer.stub_tool_results ~keep_recent:1)
-      capped_messages
-  in
-  let capped_messages, sanitize_stats =
-    sanitize_checkpoint_messages capped_messages
-  in
-  let stats = add_checkpoint_sanitize_stats capped_stats sanitize_stats in
-  if capped_messages_were_truncated || checkpoint_sanitize_changed sanitize_stats
-  then (
-    let capped_messages, repair_stats =
-      repair_broken_tool_call_pairs_with_stats capped_messages
-    in
-    capped_messages, add_checkpoint_sanitize_stats stats
-      (checkpoint_stats_of_tool_pair_repair repair_stats))
-  else capped_messages, stats
-
-let capped_checkpoint_messages_of_context
-    ~(max_checkpoint_messages : int)
-    (ctx : working_context)
-  : Agent_sdk.Types.message list =
-  fst (capped_checkpoint_messages_of_context_with_stats ~max_checkpoint_messages ctx)
-
-let resume_checkpoint_of_context
-      ~(max_checkpoint_messages : int)
-      (ctx : working_context) : Agent_sdk.Checkpoint.t
-  =
+let resume_checkpoint_of_context (ctx : working_context) : Agent_sdk.Checkpoint.t =
   let checkpoint_context = Agent_sdk.Context.copy ~eio:true (oas_context_of_context ctx) in
   {
     ctx.checkpoint with
     version = Agent_sdk.Checkpoint.checkpoint_version;
     system_prompt = Some (system_prompt_of_context ctx);
-    messages = capped_checkpoint_messages_of_context ~max_checkpoint_messages ctx;
+    messages = messages_of_context ctx;
     context = checkpoint_context;
   }
 
@@ -628,23 +579,13 @@ let checkpoint_max_tokens (_cp : Agent_sdk.Checkpoint.t) ~(fallback : int) : int
   fallback
 
 let context_of_oas_checkpoint
-    ?(repair_orphans = true)
-    ~(max_checkpoint_messages : int)
     (cp : Agent_sdk.Checkpoint.t)
     ~(primary_model_max_tokens : int) : working_context =
-  let cp, _ = sanitize_oas_checkpoint ~repair_orphans cp in
   let system_prompt = Option.value ~default:"" cp.system_prompt in
   let max_tokens =
     checkpoint_max_tokens cp ~fallback:primary_model_max_tokens
   in
-  let messages =
-    let messages =
-      trim_messages_preserving_pairs cp.messages
-        ~max_count:max_checkpoint_messages
-    in
-    if repair_orphans then repair_broken_tool_call_pairs messages
-    else messages
-  in
+  let messages = cp.messages in
   let context = Agent_sdk.Context.copy ~eio:true cp.context in
   let checkpoint =
     { cp with system_prompt = Some system_prompt; messages; context }
@@ -653,7 +594,6 @@ let context_of_oas_checkpoint
     { checkpoint; max_tokens }
 
 let save_oas_checkpoint
-    ~(max_checkpoint_messages : int)
     ~(multimodal_policy : Keeper_types_profile.multimodal_policy)
     ~(keeper_name : string)
     ~(session : session_context)
@@ -664,9 +604,7 @@ let save_oas_checkpoint
   let checkpoint_context = Agent_sdk.Context.copy ~eio:true (oas_context_of_context ctx) in
   Agent_sdk.Context.set_scoped checkpoint_context Agent_sdk.Context.Session
     checkpoint_generation_key (`Int generation);
-  let checkpoint_messages, checkpoint_stats =
-    capped_checkpoint_messages_of_context_with_stats ~max_checkpoint_messages ctx
-  in
+  let checkpoint_messages = messages_of_context ctx in
   (* RFC vision-delegation §2.3 site 2 (checkpoint write boundary). For a
      Delegate keeper, evict any inline image to a handle-only placeholder BEFORE
      it is persisted, so a reloaded checkpoint can never re-materialise an
@@ -697,20 +635,6 @@ let save_oas_checkpoint
       context = checkpoint_context;
     }
   in
-  if checkpoint_sanitize_changed checkpoint_stats then (
-    let pair_repair_json =
-      Yojson.Safe.to_string
-        (tool_pair_repair_stats_to_json checkpoint_stats.tool_pair_repair)
-    in
-    Log.Keeper.info
-      "keeper:%s OAS checkpoint save sanitized messages: dropped_blocks=%d dropped_messages=%d dropped_chars=%d truncated_blocks=%d truncated_chars=%d tool_pair_repair=%s"
-      session.session_id
-      checkpoint_stats.dropped_blocks
-      checkpoint_stats.dropped_messages
-      checkpoint_stats.dropped_chars
-      checkpoint_stats.truncated_blocks
-      checkpoint_stats.truncated_chars
-      pair_repair_json);
   match Keeper_checkpoint_store.save_oas ~session_dir:session.session_dir checkpoint with
   | Ok () -> Ok checkpoint
   | Error e -> Error e
@@ -728,7 +652,7 @@ let checkpoint_generation (cp : Agent_sdk.Checkpoint.t) ~(fallback : int) : int 
 (* Checkpoint Loading                                                *)
 (* ================================================================ *)
 
-let load_context_from_checkpoint ~max_checkpoint_messages ~trace_id ~primary_model_max_tokens ~base_dir =
+let load_context_from_checkpoint ~trace_id ~primary_model_max_tokens ~base_dir =
   let session = create_session ~session_id:trace_id ~base_dir in
   let oas_result =
     Keeper_checkpoint_store.load_oas ~session_dir:session.session_dir
@@ -767,40 +691,15 @@ let load_context_from_checkpoint ~max_checkpoint_messages ~trace_id ~primary_mod
      | Ok v -> Some v
      | Error Not_found -> None
      | Error _ ->
-       Log.Keeper.warn "keeper:%s OAS checkpoint error discarded at sanitize to_option" trace_id;
+       Log.Keeper.warn
+         "keeper:%s OAS checkpoint unavailable after explicit load diagnostics"
+         trace_id;
        None)
-    |> Option.map (fun checkpoint ->
-      let sanitized, stats = sanitize_oas_checkpoint checkpoint in
-      if checkpoint_sanitize_changed stats then begin
-        let pair_repair_json =
-          Yojson.Safe.to_string (tool_pair_repair_stats_to_json stats.tool_pair_repair)
-        in
-        Log.Keeper.info
-          "keeper:%s OAS checkpoint sanitized messages: dropped_blocks=%d dropped_messages=%d dropped_chars=%d truncated_blocks=%d truncated_chars=%d tool_pair_repair=%s"
-          trace_id
-          stats.dropped_blocks
-          stats.dropped_messages
-          stats.dropped_chars
-          stats.truncated_blocks
-          stats.truncated_chars
-          pair_repair_json;
-        (match Keeper_checkpoint_store.save_oas ~session_dir:session.session_dir sanitized with
-         | Ok () -> ()
-         | Error detail ->
-             Otel_metric_store.inc_counter
-               Keeper_metrics.(to_string CheckpointFailures)
-               ~labels:[("operation", Keeper_checkpoint_failure_operation.(to_label Oas_sanitize_save))]
-               ();
-             Log.Keeper.error
-               "keeper:%s OAS checkpoint sanitize save failed: %s"
-               trace_id detail)
-      end;
-      sanitized)
   in
   match oas_checkpoint with
   | Some checkpoint ->
       let ctx =
-        context_of_oas_checkpoint ~max_checkpoint_messages checkpoint ~primary_model_max_tokens
+        context_of_oas_checkpoint checkpoint ~primary_model_max_tokens
       in
       let ctx =
         if primary_model_max_tokens <= 0 then ctx
@@ -848,7 +747,6 @@ let patch_checkpoint_last_assistant
   let messages =
     patch_last_assistant [] (List.rev cp.messages)
   in
-  let sanitized_messages, _ = sanitize_checkpoint_messages messages in
   { cp with Agent_sdk.Checkpoint.session_id;
-            messages = sanitized_messages;
+            messages;
             working_context = None }

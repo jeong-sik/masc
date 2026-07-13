@@ -24,7 +24,6 @@ let fact ?(claim = "keeper must do zero tool calls and emit one short line")
     ?(last_verified_at = Some (now -. 3_600.0)) () : Types.fact =
   { Types.claim
   ; Types.category
-  ; Types.external_ref = None
   ; Types.claim_kind
   ; Types.source = { Types.trace_id = "trace-echo"; Types.turn = 58; Types.tool_call_id = None }
   ; Types.observed_by = []
@@ -136,7 +135,7 @@ let test_window_empty_noop_and_same_turn_replace () =
 (* 6. The write-boundary composition the librarian uses: joining the incoming
    claim's identity against the window yields Recalled_echo exactly for
    injected identities, and the [claim_identity] key matches whether the
-   identity comes from a producer claim_id or the normalized claim text. *)
+   identity comes from a producer claim_id or an exact observation. *)
 let test_write_boundary_join () =
   let keeper_id = "echo-test-join" in
   let with_id = fact ~claim_id:(Some "self-obs-idle-loop") () in
@@ -152,7 +151,7 @@ let test_write_boundary_join () =
   in
   let is_echo p = match p with Policy.Recalled_echo -> true | _ -> false in
   check bool "claim_id-keyed identity joins as echo" true (is_echo (provenance_of with_id));
-  check bool "text-keyed identity joins as echo" true (is_echo (provenance_of by_text));
+  check bool "observation-keyed identity joins as echo" true (is_echo (provenance_of by_text));
   let fresh = fact ~claim:"dune build failed on missing module alias" () in
   check bool "un-injected claim stays independent" false (is_echo (provenance_of fresh))
 ;;

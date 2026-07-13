@@ -69,11 +69,11 @@ let default_threshold () = Level2_config.Drift_guard.default_threshold ()
     governable via Runtime_params so operators can tune without a
     rebuild. *)
 let factual_coverage_floor () =
-  Runtime_params.get Governance_registry.drift_factual_coverage_floor
+  Runtime_params.get Runtime_settings.drift_factual_coverage_floor
 let factual_size_ratio_floor () =
-  Runtime_params.get Governance_registry.drift_factual_size_ratio_floor
+  Runtime_params.get Runtime_settings.drift_factual_size_ratio_floor
 let structural_divergence_threshold () =
-  Runtime_params.get Governance_registry.drift_structural_divergence_threshold
+  Runtime_params.get Runtime_settings.drift_structural_divergence_threshold
 
 (* Whitespace splitter for [tokenize] — pattern is a static character
    class, hoist out of the per-call hot path. *)

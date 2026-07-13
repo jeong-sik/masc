@@ -5,15 +5,13 @@ module UM = Masc.Keeper_unified_metrics
 
 let base_observation : WO.world_observation =
   {
-    pending_mentions = [];
+    pending_messages = [];
     pending_board_events = [];
-    pending_scope_messages = [];
     idle_seconds = 0;
     active_goals = [];
     context_ratio = lazy 0.0;
     unclaimed_task_count = 0;
     claimable_task_count = 0;
-    provider_capacity_blocked_task_count = 0;
     failed_task_count = 0;
     pending_verification_count = 0;
     scheduled_automation = WO.empty_scheduled_automation_observation;
@@ -42,9 +40,8 @@ let sample_board_event : WO.pending_board_event =
   }
 
 let scheduled_automation_observation : WO.scheduled_automation_observation =
-  { active_count = 2
+  { active_count = 1
   ; due_ready_count = 1
-  ; blocked_approval_count = 1
   ; next_due_at = Some 200.0
   ; items =
       [ { schedule_id = "sched-ready"
@@ -52,22 +49,10 @@ let scheduled_automation_observation : WO.scheduled_automation_observation =
         ; status = "due"
         ; payload_kind = Some "masc.board_post"
         ; recurrence_summary = "daily 09:00:00 Asia/Seoul"
-        ; risk_class = "read_only"
         ; due_at = 200.0
         ; keeper_next_tool = Some "masc_schedule_get"
         ; keeper_next_action =
             "Inspect the schedule if needed and monitor dispatch; do not create a duplicate schedule."
-        }
-      ; { schedule_id = "sched-blocked"
-        ; action = "approve_or_reject"
-        ; status = "pending_approval"
-        ; payload_kind = Some "masc.board_post"
-        ; recurrence_summary = "one_shot"
-        ; risk_class = "workspace_write"
-        ; due_at = 180.0
-        ; keeper_next_tool = Some "masc_schedule_get"
-        ; keeper_next_action =
-            "Inspect details, then wait for the dashboard operator approval or rejection action to resolve this schedule."
         }
       ]
   }
@@ -288,21 +273,6 @@ let test_task_claim_present_for_claimable_backlog () =
   check bool "task_claim present for matched backlog" true
     (List.mem "task_claim" affordances)
 
-let test_task_claim_suppressed_for_provider_blocked_backlog () =
-  let obs =
-    {
-      base_observation with
-      unclaimed_task_count = 3;
-      claimable_task_count = 1;
-      provider_capacity_blocked_task_count = 1;
-    }
-  in
-  let affordances = UM.observed_affordances_of_observation obs in
-  check bool "task_claim absent while provider capacity blocks work" false
-    (List.mem "task_claim" affordances);
-  check bool "provider capacity affordance present" true
-    (List.mem "provider_capacity_blocked" affordances)
-
 let test_backlog_trigger_split () =
   let obs =
     { base_observation with unclaimed_task_count = 3; claimable_task_count = 1 }
@@ -322,23 +292,6 @@ let test_unclaimable_backlog_is_not_a_claim_trigger () =
     (List.mem "new_unclaimed_task" triggers);
   check bool "unclaimable backlog is not a claimable task trigger" false
     (List.mem "claimable_task" triggers)
-
-let test_provider_capacity_blocked_trigger () =
-  let obs =
-    {
-      base_observation with
-      unclaimed_task_count = 3;
-      claimable_task_count = 1;
-      provider_capacity_blocked_task_count = 1;
-    }
-  in
-  let triggers = UM.observed_triggers_of_observation obs in
-  check bool "provider-blocked backlog is not a new task trigger" false
-    (List.mem "new_unclaimed_task" triggers);
-  check bool "provider-blocked backlog is not a claimable task trigger" false
-    (List.mem "claimable_task" triggers);
-  check bool "provider capacity trigger is explicit" true
-    (List.mem "provider_capacity_blocked_backlog" triggers)
 
 let test_pending_verification_trigger_for_keeper () =
   let meta = { minimal_meta with mention_targets = [ "scholar" ] } in
@@ -361,13 +314,9 @@ let test_scheduled_automation_triggers_and_affordances () =
   let triggers = UM.observed_triggers_of_observation obs in
   check bool "due-ready schedule trigger present" true
     (List.mem "scheduled_automation_due_ready" triggers);
-  check bool "blocked schedule trigger present" true
-    (List.mem "scheduled_automation_blocked_approval" triggers);
   let affordances = UM.observed_affordances_of_observation obs in
   check bool "dispatch monitor affordance present" true
-    (List.mem "schedule_dispatch_monitor" affordances);
-  check bool "grant followup affordance present" true
-    (List.mem "schedule_grant_followup" affordances)
+    (List.mem "schedule_dispatch_monitor" affordances)
 
 let test_scheduled_automation_prompt_section () =
   Masc_test_deps.init_keeper_tool_registry ();
@@ -383,14 +332,10 @@ let test_scheduled_automation_prompt_section () =
     (contains_sub "### Scheduled Automation" user_msg);
   check bool "prompt includes ready schedule id" true
     (contains_sub "schedule_id=sched-ready" user_msg);
-  check bool "prompt includes blocked action" true
-    (contains_sub "action=approve_or_reject" user_msg);
   check bool "prompt points to schedule detail tool" true
     (contains_sub "masc_schedule_get" user_msg);
   check bool "prompt includes ready next action" true
-    (contains_sub "do not create a duplicate schedule" user_msg);
-  check bool "prompt includes approval next action" true
-    (contains_sub "dashboard operator approval or rejection" user_msg)
+    (contains_sub "do not create a duplicate schedule" user_msg)
 
 let () =
   run "keeper_unified_verification_surface"
@@ -420,15 +365,10 @@ let () =
             test_task_claim_requires_matched_backlog;
           test_case "affordance: task claim present for claimable backlog" `Quick
             test_task_claim_present_for_claimable_backlog;
-          test_case
-            "affordance: provider block suppresses task claim"
-            `Quick test_task_claim_suppressed_for_provider_blocked_backlog;
           test_case "trigger: absolute and matched backlog split" `Quick
             test_backlog_trigger_split;
           test_case "trigger: unclaimable backlog is not claimable work" `Quick
             test_unclaimable_backlog_is_not_a_claim_trigger;
-          test_case "trigger: provider capacity blocked backlog" `Quick
-            test_provider_capacity_blocked_trigger;
           test_case "trigger: keeper sees pending_verification" `Quick
             test_pending_verification_trigger_for_keeper;
           test_case

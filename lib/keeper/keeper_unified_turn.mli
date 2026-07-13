@@ -17,38 +17,23 @@ type provider_timeout_budget =
   ; source : string
   }
 
-val resolve_bounded_provider_timeout_budget_with_turn_budget
-  :  allow_wall_clock_retry_budget:bool
-  -> is_retry:bool
+val resolve_provider_timeout_budget
+  :  is_retry:bool
   -> estimated_input_tokens:int
   -> remaining_turn_budget_s:float
   -> provider_timeout_budget
 (** See [Keeper_turn_runtime_budget] for provider timeout planning semantics. *)
 
-val allow_wall_clock_retry_budget_for_attempt
-  :  is_retry:bool
-  -> degraded_rotation_first_attempt:bool
-  -> attempt:int
-  -> attempted_runtimes:string list
-  -> bool
-
-val degraded_retry_slot_phase_budget_sec : float
-val degraded_retry_slot_phase_available : time_spent_in_turn_s:float -> bool
-
-type degraded_retry_budget_decision =
+type degraded_retry_decision =
   | No_degraded_retry
-  | Degraded_retry_slot_phase_exhausted of Keeper_error_classify.degraded_retry
   | Degraded_retry_allowed of Keeper_error_classify.degraded_retry
 
-val next_fail_open_runtime_for_turn_with_budget
+val decide_degraded_retry
   :  base_runtime:string
   -> effective_runtime:string
   -> attempted_runtimes:string list
-  -> estimated_input_tokens:int
-  -> ?time_spent_in_turn_s:float
-  -> remaining_turn_budget_s:float
   -> Agent_sdk.Error.sdk_error
-  -> degraded_retry_budget_decision
+  -> degraded_retry_decision
 
 (** Turn-local overflow hint published by the OAS event bus before a
     proactive compaction attempt. Exposed for regression tests. *)
@@ -63,6 +48,15 @@ type turn_event_bus_compaction =
   ; tokens_freed : int
   ; phase_hint : string
   }
+
+val user_message_with_hitl_resolution :
+  base_path:string ->
+  user_message:string ->
+  Keeper_event_queue.hitl_resolution option ->
+  string
+(** Add the durable HITL resolution output to the model-facing turn input.
+    Reject rationale and edited JSON are always explicit and never imply a
+    one-shot grant; only an approved journal can render exact authorization. *)
 
 (** Summary of event-bus signals observed during a single keeper turn.
     Exposed for regression tests. *)
@@ -119,20 +113,6 @@ val context_overflow_event_of_error
     the first request. Exposed for regression tests. *)
 val resolved_max_context_for_turn : meta:Keeper_meta_contract.keeper_meta -> int
 
-(** Persist paused/resumed state before mutating the live registry/phase.
-    Returns [Error] when disk sync fails so callers can surface the failure
-    instead of silently diverging runtime vs persisted state. *)
-val sync_keeper_paused_state
-  :  config:Workspace.config
-  -> meta:Keeper_meta_contract.keeper_meta
-  -> paused:bool
-  -> (Keeper_meta_contract.keeper_meta, string) result
-
-(** Completion-contract failures are persistent keeper/provider contract
-    failures, not transient provider blips. Repeated occurrences should pause
-    the keeper before the generic supervisor crash/restart loop re-enters the
-    same prompt and model family. Exposed for regression tests. *)
-
 (** Ensure local-provider discovery is refreshed before a turn when the
     selected labels depend on runtime discovery. Exposed for targeted tests. *)
 val ensure_local_discovery_ready
@@ -141,7 +121,7 @@ val ensure_local_discovery_ready
   -> (unit, string) result
 
 (* runtime→Runtime 숙청: phase-buffer liveness probe 기계 재export 제거
-   (Keeper_turn_liveness 에서 적출됨 — 단일 runtime 에서 죽은 코드). *)
+   (단일 runtime 에서 죽은 코드였으므로 제거됨). *)
 
 (** Typed phase-gate output for the first turn pipeline boundary.
     [run_keeper_cycle] converts this record into the manifest

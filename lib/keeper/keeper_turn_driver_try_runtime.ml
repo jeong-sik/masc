@@ -36,7 +36,6 @@ type try_runtime_ctx =
   ; record_provider_health_result :
       Runtime_candidate.t -> success:bool -> http_status:int option -> unit
   ; filter_provider_health_fail_open : Runtime_candidate.t list -> Runtime_candidate.t list
-  ; wait_timeout_sec : float option
   ; turn_deadline : Runtime_deadline.t option
   }
 
@@ -54,8 +53,6 @@ let is_accept_rejected_sdk_error err =
       ( Keeper_internal_error.Runtime_exhausted _
       | Keeper_internal_error.Capacity_backpressure _
       | Keeper_internal_error.Resumable_cli_session _
-      | Keeper_internal_error.Admission_queue_timeout _
-      | Keeper_internal_error.Admission_queue_rejected _
       | Keeper_internal_error.Turn_timeout _
       | Keeper_internal_error.Provider_timeout _
       | Keeper_internal_error.Ambiguous_post_commit _
@@ -120,16 +117,9 @@ let http_status_of_http_error = function
    always produced a plain [Agent_sdk.Error.Internal <free-text message>]
    (see [Runtime_attempt_fsm.to_user_message]), so
    [Keeper_error_classify.is_runtime_exhausted_error] — the sole gate for
-   [record_failure_and_maybe_escalate]'s Turn_consecutive_failures
-   accounting and its [Auto_resume_with_backoff] auto-pause branch — never
-   fired for DNS/network exhaustion. Every keeper whose runtime candidates
-   were exhausted by a DNS failure fell back to the generic crash-restart
-   path (eventually [max_restarts] -> permanent Dead) instead of the
-   already-built typed retryable-reason auto-pause. This function is the
-   only producer that needs to change; the consuming policy
-   ([Keeper_supervisor_pause_policy], [Keeper_failure_policy],
-   [Keeper_error_classify.is_auto_recoverable_runtime_exhausted_error]) was
-   already correct and simply unreachable.
+   [record_failure_observation]'s typed Turn_consecutive_failures accounting
+   could not distinguish DNS/network exhaustion. The classification remains
+   evidence for fallback and diagnostics; it never rewrites Keeper lifecycle.
 
    Capacity-shaped failures are intentionally split by source here:
    [ProviderFailure { kind = Capacity_exhausted; _ }] maps to the typed,
@@ -290,18 +280,13 @@ let run
     , ctx.session_id
     , ctx.error_runtime_id_for_backpressure
     , ctx.filter_provider_health_fail_open
-    , ctx.wait_timeout_sec
     , ctx.turn_deadline )
   in
   let rec loop resume_checkpoint last_err recovered_no_thinking = function
     | [] -> Error (sdk_error_of_exhausted ~runtime_id:ctx.error_runtime_id last_err)
     | candidate :: rest ->
       let is_last = rest = [] in
-      let record_attempt_success ~latency_ms run_result =
-        Keeper_turn_driver_provider_attempt.record_candidate_health_success
-          ~keeper_name:ctx.keeper_name
-          candidate
-          ~latency_ms;
+      let record_attempt_success run_result =
         ctx.record_provider_health_result candidate ~success:true ~http_status:None;
         on_success ~provider_key:(Runtime_candidate.health_key candidate);
         Ok run_result
@@ -316,12 +301,10 @@ let run
           ?per_provider_timeout_s
           candidate
       in
-      let latency_ms =
-        emit_attempt_finished ctx candidate ~started_at result checkpoint_after
-      in
+      ignore (emit_attempt_finished ctx candidate ~started_at result checkpoint_after);
       (match result with
        | Ok run_result when ctx.accept run_result.Runtime_agent.response ->
-         record_attempt_success ~latency_ms run_result
+         record_attempt_success run_result
        | Ok run_result ->
          let last_tool_context =
            Keeper_turn_driver_try_provider.accept_rejection_context_of_run_result
@@ -334,15 +317,6 @@ let run
              ~runtime_id:ctx.error_runtime_id
              ~response:run_result.Runtime_agent.response
          in
-         let reason =
-           match Keeper_internal_error.classify_masc_internal_error err with
-           | Some (Keeper_internal_error.Accept_rejected { reason; _ }) -> reason
-           | _ -> Agent_sdk.Error.to_string err
-         in
-         Keeper_turn_driver_provider_attempt.record_candidate_health_rejected
-           ~keeper_name:ctx.keeper_name
-           candidate
-           ~reason;
          let try_next_or_error err ~recovered =
            if accept_rejected_result_should_try_next ~is_last err
            then
@@ -391,25 +365,20 @@ let run
                ?per_provider_timeout_s
                candidate
            in
-           let retry_latency =
-             emit_attempt_finished
-               ctx
-               candidate
-               ~started_at:retry_started_at
-               retry_result
-               retry_checkpoint_after
-           in
+           ignore
+             (emit_attempt_finished
+                ctx
+                candidate
+                ~started_at:retry_started_at
+                retry_result
+                retry_checkpoint_after);
            (match retry_result with
             | Ok retry_run when ctx.accept retry_run.Runtime_agent.response ->
-              record_attempt_success ~latency_ms:retry_latency retry_run
+              record_attempt_success retry_run
             | Ok _ | Error _ -> try_next_or_error err ~recovered:true)
          end
          else try_next_or_error err ~recovered:recovered_no_thinking
        | Error err ->
-         Keeper_turn_driver_provider_attempt.record_candidate_health_error
-           ~keeper_name:ctx.keeper_name
-           candidate
-           err;
          let original_error = err in
          let http_err = sdk_error_to_http_error err in
          ctx.record_provider_health_result

@@ -49,7 +49,6 @@ let test_meta_to_json_redacts_last_model_used () =
       [ "name", `String "meta-redaction"
       ; "agent_name", `String "meta-redaction"
       ; "trace_id", `String "trace-meta-redaction"
-      ; "tool_access", `List []
       ; "last_model_used", `String "openai:gpt-5.4"
       ]
   in

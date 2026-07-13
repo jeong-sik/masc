@@ -155,13 +155,13 @@ let test_env_and_files_project_to_docker_args () =
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   with_env "MASC_SECRET_DIR" "" @@ fun () ->
   let root = secret_root_default ~base ~keeper_name:"MinJae" in
-  let token_path = Filename.concat (Filename.concat root "env") "GH_TOKEN" in
+  let token_path = Filename.concat (Filename.concat root "env") "SERVICE_TOKEN" in
   let ssh_path =
     Filename.concat
       (Filename.concat root "files")
       "home/keeper/.ssh/id_ed25519"
   in
-  write_file token_path "ghs_projected_secret\n";
+  write_file token_path "projected_secret\n";
   write_file ssh_path "PRIVATE KEY";
   match
     Keeper_secret_projection.docker_args_for_keeper
@@ -174,7 +174,7 @@ let test_env_and_files_project_to_docker_args () =
   | Ok projection ->
     let args = String.concat " " projection.docker_args in
     Alcotest.(check bool) "raw secret not in argv" false
-      (contains_substring args "ghs_projected_secret");
+      (contains_substring args "projected_secret");
     Alcotest.(check bool) "ssh file mounted read-only" true
       (contains_substring
          args
@@ -186,8 +186,8 @@ let test_env_and_files_project_to_docker_args () =
        Alcotest.(check bool)
          "env file content"
          true
-         (contains_substring env "GH_TOKEN=ghs_projected_secret\n");
-       Alcotest.(check bool) "git config env added" true
+         (contains_substring env "SERVICE_TOKEN=projected_secret\n");
+       Alcotest.(check bool) "no product-specific env synthesized" false
          (contains_substring env "GIT_CONFIG_GLOBAL=");
        projection.cleanup ();
        Alcotest.(check bool) "env file cleaned up" false (Sys.file_exists env_file))
@@ -205,7 +205,7 @@ let test_secret_dir_override_uses_keeper_subdir () =
        let keeper_root =
          Filename.concat override_root (Workspace_utils.safe_filename "MinJae")
        in
-       write_file (Filename.concat (Filename.concat keeper_root "env") "GH_TOKEN") "override";
+       write_file (Filename.concat (Filename.concat keeper_root "env") "SERVICE_TOKEN") "override";
        match
          Keeper_secret_projection.docker_args_for_keeper
            ~base_path:base
@@ -219,7 +219,7 @@ let test_secret_dir_override_uses_keeper_subdir () =
           | None -> Alcotest.fail "missing --env-file"
           | Some env_file ->
             Alcotest.(check bool) "override env content" true
-              (contains_substring (read_file env_file) "GH_TOKEN=override\n");
+              (contains_substring (read_file env_file) "SERVICE_TOKEN=override\n");
             projection.cleanup ()))
 ;;
 
@@ -228,7 +228,7 @@ let test_base_secret_env_and_files_project_to_keeper_docker_args () =
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   with_env "MASC_SECRET_DIR" "" @@ fun () ->
   let root = base_secret_root_default ~base in
-  let token_path = Filename.concat (Filename.concat root "env") "GH_TOKEN" in
+  let token_path = Filename.concat (Filename.concat root "env") "SERVICE_TOKEN" in
   let ssh_path =
     Filename.concat
       (Filename.concat root "files")
@@ -249,14 +249,14 @@ let test_base_secret_env_and_files_project_to_keeper_docker_args () =
      | None -> Alcotest.fail "missing --env-file"
      | Some env_file ->
        let env = read_file env_file in
-       Alcotest.(check bool) "base gh token projected" true
-         (contains_substring env "GH_TOKEN=base-token\n");
-       Alcotest.(check bool) "git config env projected" true
+       Alcotest.(check bool) "base token projected" true
+         (contains_substring env "SERVICE_TOKEN=base-token\n");
+       Alcotest.(check bool) "no product-specific env projected" false
          (contains_substring env "GIT_CONFIG_GLOBAL="));
     let args = String.concat " " projection.docker_args in
     Alcotest.(check bool) "base ssh file mounted" true
       (contains_substring args (ssh_path ^ ":/home/keeper/.ssh/id_ed25519:ro"));
-    Alcotest.(check bool) "generated gitconfig mounted" true
+    Alcotest.(check bool) "no generated product config mounted" false
       (contains_substring args ":/tmp/masc-runtime/.masc/gitconfig:ro");
     projection.cleanup ()
 ;;
@@ -277,8 +277,8 @@ let test_keeper_secret_overrides_base_secret_entries () =
       (Filename.concat keeper_root "files")
       "home/keeper/.ssh/id_ed25519"
   in
-  write_file (Filename.concat (Filename.concat base_root "env") "GH_TOKEN") "base-token";
-  write_file (Filename.concat (Filename.concat keeper_root "env") "GH_TOKEN") "keeper-token";
+  write_file (Filename.concat (Filename.concat base_root "env") "SERVICE_TOKEN") "base-token";
+  write_file (Filename.concat (Filename.concat keeper_root "env") "SERVICE_TOKEN") "keeper-token";
   write_file base_ssh "BASE PRIVATE KEY";
   write_file keeper_ssh "KEEPER PRIVATE KEY";
   match
@@ -295,9 +295,9 @@ let test_keeper_secret_overrides_base_secret_entries () =
      | Some env_file ->
        let env = read_file env_file in
        Alcotest.(check bool) "keeper token wins" true
-         (contains_substring env "GH_TOKEN=keeper-token\n");
+         (contains_substring env "SERVICE_TOKEN=keeper-token\n");
        Alcotest.(check bool) "base token omitted" false
-         (contains_substring env "GH_TOKEN=base-token\n"));
+         (contains_substring env "SERVICE_TOKEN=base-token\n"));
     let args = String.concat " " projection.docker_args in
     Alcotest.(check bool) "keeper ssh mount wins" true
       (contains_substring args (keeper_ssh ^ ":/home/keeper/.ssh/id_ed25519:ro"));
@@ -312,11 +312,11 @@ let test_local_env_missing_secret_dir_is_scrubbed () =
   with_env "MASC_SECRET_DIR" "" @@ fun () ->
   let host_env =
     [| "PATH=/usr/bin"
-     ; "GH_TOKEN=ambient-gh"
-     ; "GITHUB_TOKEN=ambient-github"
-     ; "GH_CONFIG_DIR=/home/operator/.config/gh"
+     ; "SERVICE_TOKEN=ambient-gh"
+     ; "SECOND_SERVICE_TOKEN=ambient-secondary"
+     ; "SERVICE_CONFIG_DIR=/home/operator/.config/gh"
      ; "SSH_AUTH_SOCK=/tmp/operator-agent.sock"
-     ; "GIT_TERMINAL_PROMPT=1"
+     ; "PROMPT_MODE=1"
     |]
   in
   match
@@ -329,22 +329,16 @@ let test_local_env_missing_secret_dir_is_scrubbed () =
   | Error err -> Alcotest.fail err
   | Ok None -> Alcotest.fail "expected scrubbed local env for missing secret root"
   | Ok (Some env) ->
-    Alcotest.(check (option string)) "ambient gh token stripped" None
-      (env_value "GH_TOKEN" env);
-    Alcotest.(check (option string)) "ambient github token stripped" None
-      (env_value "GITHUB_TOKEN" env);
-    Alcotest.(check bool) "ambient gh config not inherited" true
-      (env_value "GH_CONFIG_DIR" env <> Some "/home/operator/.config/gh");
-    if Sys.file_exists "/var/empty" && Sys.is_directory "/var/empty"
-    then
-      Alcotest.(check (option string))
-        "empty gh config fallback"
-        (Some "/var/empty")
-        (env_value "GH_CONFIG_DIR" env);
+    Alcotest.(check (option string)) "ambient service token stripped" None
+      (env_value "SERVICE_TOKEN" env);
+    Alcotest.(check (option string)) "second ambient token stripped" None
+      (env_value "SECOND_SERVICE_TOKEN" env);
+    Alcotest.(check (option string)) "ambient service config stripped" None
+      (env_value "SERVICE_CONFIG_DIR" env);
     Alcotest.(check (option string)) "ambient ssh agent stripped" None
       (env_value "SSH_AUTH_SOCK" env);
-    Alcotest.(check (option string)) "noninteractive git prompt injected" (Some "0")
-      (env_value "GIT_TERMINAL_PROMPT" env);
+    Alcotest.(check (option string)) "ambient prompt mode stripped" None
+      (env_value "PROMPT_MODE" env);
     Alcotest.(check (option string)) "safe PATH preserved" (Some "/usr/bin")
       (env_value "PATH" env)
 ;;
@@ -356,20 +350,20 @@ let test_local_env_uses_keeper_secret_env_without_ambient_credentials () =
   let root = secret_root_default ~base ~keeper_name:"MinJae" in
   let env_root = Filename.concat root "env" in
   let files_root = Filename.concat root "files" in
-  write_file (Filename.concat env_root "GH_TOKEN") "keeper-token\n";
+  write_file (Filename.concat env_root "SERVICE_TOKEN") "keeper-token\n";
   write_file
-    (Filename.concat env_root "GIT_SSH_COMMAND")
+    (Filename.concat env_root "TOOL_SSH_COMMAND")
     ("ssh -i " ^ Filename.concat files_root "ssh/id_ed25519");
   write_file (Filename.concat files_root "ssh/id_ed25519") "PRIVATE KEY";
   let host_env =
     [| "PATH=/usr/bin"
      ; "HOME=/home/operator"
      ; "FOO=bar"
-     ; "GH_TOKEN=ambient-gh"
-     ; "GITHUB_TOKEN=ambient-github"
-     ; "GH_CONFIG_DIR=/home/operator/.config/gh"
+     ; "SERVICE_TOKEN=ambient-gh"
+     ; "SECOND_SERVICE_TOKEN=ambient-secondary"
+     ; "SERVICE_CONFIG_DIR=/home/operator/.config/gh"
      ; "SSH_AUTH_SOCK=/tmp/operator-agent.sock"
-     ; "GIT_TERMINAL_PROMPT=1"
+     ; "PROMPT_MODE=1"
     |]
   in
   match
@@ -385,33 +379,27 @@ let test_local_env_uses_keeper_secret_env_without_ambient_credentials () =
     Alcotest.(check (option string))
       "keeper token wins"
       (Some "keeper-token")
-      (env_value "GH_TOKEN" env);
+      (env_value "SERVICE_TOKEN" env);
     Alcotest.(check (option string))
-      "ambient github token stripped"
+      "second ambient token stripped"
       None
-      (env_value "GITHUB_TOKEN" env);
+      (env_value "SECOND_SERVICE_TOKEN" env);
     Alcotest.(check bool)
-      "ambient gh config not inherited"
-      true
-      (env_value "GH_CONFIG_DIR" env <> Some "/home/operator/.config/gh");
-    if Sys.file_exists "/var/empty" && Sys.is_directory "/var/empty"
-    then
-      Alcotest.(check (option string))
-        "empty gh config fallback"
-        (Some "/var/empty")
-        (env_value "GH_CONFIG_DIR" env);
+      "ambient service config stripped"
+      None
+      (env_value "SERVICE_CONFIG_DIR" env);
     Alcotest.(check (option string))
       "ambient ssh agent stripped"
       None
       (env_value "SSH_AUTH_SOCK" env);
     Alcotest.(check (option string))
-      "noninteractive git prompt injected"
-      (Some "0")
-      (env_value "GIT_TERMINAL_PROMPT" env);
+      "ambient prompt mode stripped"
+      None
+      (env_value "PROMPT_MODE" env);
     Alcotest.(check (option string))
       "keeper ssh command projected"
       (Some ("ssh -i " ^ Filename.concat files_root "ssh/id_ed25519"))
-      (env_value "GIT_SSH_COMMAND" env);
+      (env_value "TOOL_SSH_COMMAND" env);
     Alcotest.(check (option string))
       "unsafe ambient variable stripped"
       None
@@ -422,12 +410,12 @@ let test_local_env_uses_keeper_secret_env_without_ambient_credentials () =
       (env_value "PATH" env)
 ;;
 
-let test_local_env_inherits_base_secret_and_sets_git_config_global () =
+let test_local_env_inherits_base_secret_without_product_rewrite () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   with_env "MASC_SECRET_DIR" "" @@ fun () ->
   let root = base_secret_root_default ~base in
-  write_file (Filename.concat (Filename.concat root "env") "GH_TOKEN") "base-token\n";
+  write_file (Filename.concat (Filename.concat root "env") "SERVICE_TOKEN") "base-token\n";
   let host_env = [| "PATH=/usr/bin"; "HOME=/home/operator" |] in
   match
     Keeper_secret_projection.local_env_for_keeper
@@ -442,16 +430,11 @@ let test_local_env_inherits_base_secret_and_sets_git_config_global () =
     Alcotest.(check (option string))
       "base token projected"
       (Some "base-token")
-      (env_value "GH_TOKEN" env);
-    (match env_value "GIT_CONFIG_GLOBAL" env with
-     | None -> Alcotest.fail "missing GIT_CONFIG_GLOBAL"
-     | Some git_config ->
-       Alcotest.(check bool) "git config under keeper playground" true
-         (contains_substring git_config ".masc/playground/idealist/.gitconfig");
-       Alcotest.(check bool) "git config file exists" true
-         (Sys.file_exists git_config);
-       Alcotest.(check bool) "git helper configured" true
-         (contains_substring (read_file git_config) "gh auth git-credential"))
+      (env_value "SERVICE_TOKEN" env);
+    Alcotest.(check (option string))
+      "no product-specific config synthesized"
+      None
+      (env_value "GIT_CONFIG_GLOBAL" env)
 ;;
 
 let test_invalid_env_name_rejects () =
@@ -507,7 +490,7 @@ let test_symlink_env_dir_rejects () =
       cleanup_dir outside)
     (fun () ->
        with_env "MASC_SECRET_DIR" "" @@ fun () ->
-       write_file (Filename.concat outside "GH_TOKEN") "x";
+       write_file (Filename.concat outside "SERVICE_TOKEN") "x";
        let root = secret_root_default ~base ~keeper_name:"minjae" in
        let env_root = Filename.concat root "env" in
        ensure_dir root;
@@ -562,8 +545,8 @@ let test_dashboard_status_redacts_values () =
   with_env "MASC_SECRET_DIR" "" @@ fun () ->
   let base_root = base_secret_root_default ~base in
   let root = secret_root_default ~base ~keeper_name:"minjae" in
-  let shared_token_path = Filename.concat (Filename.concat base_root "env") "GITHUB_TOKEN" in
-  let token_path = Filename.concat (Filename.concat root "env") "GH_TOKEN" in
+  let shared_token_path = Filename.concat (Filename.concat base_root "env") "SECOND_SERVICE_TOKEN" in
+  let token_path = Filename.concat (Filename.concat root "env") "SERVICE_TOKEN" in
   let ssh_path =
     Filename.concat
       (Filename.concat root "files")
@@ -581,7 +564,7 @@ let test_dashboard_status_redacts_values () =
   Alcotest.(check string) "status" "ready" (json_string "status" json);
   Alcotest.(check int) "env count" 2 (json_int "env_count" json);
   Alcotest.(check int) "file count" 1 (json_int "file_count" json);
-  Alcotest.(check (list string)) "env names" [ "GITHUB_TOKEN"; "GH_TOKEN" ]
+  Alcotest.(check (list string)) "env names" [ "SECOND_SERVICE_TOKEN"; "SERVICE_TOKEN" ]
     (json_string_list "env_names" json);
   Alcotest.(check bool) "raw env value redacted" false
     (contains_substring raw "ghs_dashboard_secret");
@@ -624,14 +607,14 @@ let test_set_and_delete_env_entry_updates_projection () =
   with_env "MASC_SECRET_DIR" "" @@ fun () ->
   let base_root = base_secret_root_default ~base in
   let keeper_root = secret_root_default ~base ~keeper_name:"minjae" in
-  let shared_path = Filename.concat (Filename.concat base_root "env") "GH_TOKEN" in
-  let keeper_path = Filename.concat (Filename.concat keeper_root "env") "GH_TOKEN" in
+  let shared_path = Filename.concat (Filename.concat base_root "env") "SERVICE_TOKEN" in
+  let keeper_path = Filename.concat (Filename.concat keeper_root "env") "SERVICE_TOKEN" in
   (match
      Keeper_secret_projection.set_env_entry
        ~base_path:base
        ~keeper_name:"minjae"
        ~scope:Keeper_secret_projection.Shared_secret
-       ~name:"GH_TOKEN"
+       ~name:"SERVICE_TOKEN"
        ~value:"ghs_shared_from_ui\n"
    with
    | Ok () -> ()
@@ -641,7 +624,7 @@ let test_set_and_delete_env_entry_updates_projection () =
        ~base_path:base
        ~keeper_name:"minjae"
        ~scope:Keeper_secret_projection.Keeper_secret
-       ~name:"GH_TOKEN"
+       ~name:"SERVICE_TOKEN"
        ~value:"ghs_keeper_from_ui"
    with
    | Ok () -> ()
@@ -666,7 +649,7 @@ let test_set_and_delete_env_entry_updates_projection () =
        ~base_path:base
        ~keeper_name:"minjae"
        ~scope:Keeper_secret_projection.Keeper_secret
-       ~name:"GH_TOKEN"
+       ~name:"SERVICE_TOKEN"
    with
    | Ok () -> ()
    | Error msg -> Alcotest.fail msg);
@@ -682,7 +665,7 @@ let test_set_and_delete_env_entry_updates_projection () =
        ~base_path:base
        ~keeper_name:"minjae"
        ~scope:Keeper_secret_projection.Shared_secret
-       ~name:"GH_TOKEN"
+       ~name:"SERVICE_TOKEN"
    with
    | Ok () -> ()
    | Error msg -> Alcotest.fail msg);
@@ -710,7 +693,7 @@ let test_set_env_entry_rejects_invalid_inputs () =
        ~base_path:base
        ~keeper_name:"minjae"
        ~scope:Keeper_secret_projection.Keeper_secret
-       ~name:"GH_TOKEN"
+       ~name:"SERVICE_TOKEN"
        ~value:"line1\nline2"
    with
    | Ok () -> Alcotest.fail "expected multiline value rejection"
@@ -873,7 +856,7 @@ let test_env_value_leading_hash_rejects () =
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   with_env "MASC_SECRET_DIR" "" @@ fun () ->
   let root = secret_root_default ~base ~keeper_name:"minjae" in
-  write_file (Filename.concat (Filename.concat root "env") "GH_TOKEN") "#starts_with_hash";
+  write_file (Filename.concat (Filename.concat root "env") "SERVICE_TOKEN") "#starts_with_hash";
   match
     Keeper_secret_projection.docker_args_for_keeper
       ~base_path:base
@@ -896,7 +879,7 @@ let test_base_keeper_scope_mutation_rejected () =
        ~base_path:base
        ~keeper_name:"base"
        ~scope:Keeper_secret_projection.Keeper_secret
-       ~name:"GH_TOKEN"
+       ~name:"SERVICE_TOKEN"
        ~value:"secret"
    with
    | Ok () -> Alcotest.fail "expected keeper-scope set_env_entry mutation on base to be rejected"
@@ -911,7 +894,7 @@ let test_base_keeper_scope_mutation_rejected () =
        ~base_path:base
        ~keeper_name:"base"
        ~scope:Keeper_secret_projection.Keeper_secret
-       ~name:"GH_TOKEN"
+       ~name:"SERVICE_TOKEN"
    with
    | Ok () -> Alcotest.fail "expected keeper-scope delete_env_entry mutation on base to be rejected"
    | Error msg ->
@@ -954,7 +937,7 @@ let test_base_keeper_scope_mutation_rejected () =
        ~base_path:base
        ~keeper_name:"base"
        ~scope:Keeper_secret_projection.Shared_secret
-       ~name:"GH_TOKEN"
+       ~name:"SERVICE_TOKEN"
        ~value:"secret"
    with
    | Ok () -> ()
@@ -979,8 +962,8 @@ let () =
             test_local_env_missing_secret_dir_is_scrubbed
         ; Alcotest.test_case "local env uses keeper env without ambient creds" `Quick
             test_local_env_uses_keeper_secret_env_without_ambient_credentials
-        ; Alcotest.test_case "local env inherits base secret and sets git config" `Quick
-            test_local_env_inherits_base_secret_and_sets_git_config_global
+        ; Alcotest.test_case "local env inherits base secret without product rewrite" `Quick
+            test_local_env_inherits_base_secret_without_product_rewrite
         ; Alcotest.test_case "invalid env name rejects" `Quick
             test_invalid_env_name_rejects
         ; Alcotest.test_case "symlink file rejects" `Quick test_symlink_file_rejects

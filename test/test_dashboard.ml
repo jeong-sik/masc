@@ -151,7 +151,6 @@ let make_test_meta name =
           ("name", `String name);
           ("agent_name", `String name);
           ("trace_id", `String ("trace-" ^ name));
-          ("tool_access", Json_util.json_string_list []);
         ])
   with
   | Ok meta -> meta

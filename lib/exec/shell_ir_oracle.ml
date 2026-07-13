@@ -210,7 +210,7 @@ let feature_names t =
   |> fun known -> known @ List.map (fun name -> "unknown:" ^ name) f.unknown_enabled
 ;;
 
-let syntax_blockers t =
+let structural_feature_blockers t =
   let f = t.features in
   [ "redirect", f.redirect
   ; "heredoc", f.heredoc
@@ -223,29 +223,19 @@ let syntax_blockers t =
   |> fun known -> known @ List.map (fun name -> "unknown:" ^ name) f.unknown_enabled
 ;;
 
-let descriptor_parity_blockers t =
+let structural_blockers t =
   match t.parse_status with
-  | Parsed_ok -> syntax_blockers t
+  | Parsed_ok -> structural_feature_blockers t
   | (Parse_error | Incomplete | Timeout | Unavailable) as status ->
     [ "parse_status=" ^ string_of_parse_status status ]
 ;;
 
-let read_only_descriptor_compatible t =
-  match descriptor_parity_blockers t with
+let structurally_compatible t =
+  match structural_blockers t with
   | [] -> Ok ()
   | blockers ->
     Error
       (Printf.sprintf
-         "read-only descriptor incompatible with oracle facts: %s"
+         "structured command incompatible with parser facts: %s"
          (String.concat "," blockers))
-;;
-
-let syntax_floor t =
-  match t.parse_status with
-  | Parsed_ok ->
-    if syntax_blockers t = []
-    then Shell_ir_risk.R0_Read
-    else Shell_ir_risk.R1_Reversible_mutation
-  | Parse_error | Incomplete | Timeout | Unavailable ->
-    Shell_ir_risk.Destructive_protected
 ;;

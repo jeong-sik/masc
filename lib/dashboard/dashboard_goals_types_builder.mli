@@ -2,26 +2,6 @@
 
 open Dashboard_goals_types_accessor
 
-val compute_convergence :
-  Goal_store.goal ->
-  (Masc_domain.task * string) list ->
-  tree_node list ->
-  float
-
-val goal_policy_nodes :
-  Goal_store.goal list -> Goal_verification.goal_policy_node list
-
-val runtime_blocker_event_from_meta :
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  Yojson.Safe.t option
-
-val runtime_trust_from_receipt_fallback :
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  Yojson.Safe.t ->
-  Yojson.Safe.t
-
 type build_context = {
   now_ts : float;
   all_tasks : Masc_domain.task list;

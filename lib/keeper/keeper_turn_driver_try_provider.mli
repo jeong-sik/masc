@@ -21,13 +21,11 @@ type try_provider_ctx =
   ; temperature : float
   ; max_tokens : int option
   ; accept : Agent_sdk_response.api_response -> bool
-  ; guardrails : Agent_sdk.Guardrails.t option
   ; hooks : Agent_sdk.Hooks.hooks option
   ; context_reducer : Agent_sdk.Context_reducer.t option
   ; raw_trace : Agent_sdk.Raw_trace.t option
   ; trace_link : (string * string) option
   ; transport_resolved : Masc_grpc_transport.t
-  ; runtime_mcp_policy : Llm_provider.Llm_transport.runtime_mcp_policy option
   ; allowed_paths : string list
   ; checkpoint_sidecar : Yojson.Safe.t option
   ; cache_system_prompt : bool
@@ -95,11 +93,6 @@ module For_testing : sig
 
   val stream_idle_timeout_for_attempt :
     configured:float option -> float option
-
-  val sanitize_runtime_mcp_external_tool_choice :
-    runtime_mcp_external_tools:bool ->
-    Agent_sdk.Hooks.turn_params ->
-    Agent_sdk.Hooks.turn_params
 
   val apply_accept :
     ?initial_messages:Agent_sdk.Types.message list ->

@@ -1,5 +1,5 @@
 // Tool Monitor Panel — consolidated monitor section for tool quality,
-// tool event evidence, governance, and keeper/tool comparison.
+// tool event evidence, Gate metrics, and keeper/tool comparison.
 // Deep-link view param (?view=comparison) selects a single sub-view.
 
 import { html } from 'htm/preact'
@@ -24,7 +24,7 @@ import { StatusChip } from './common/status-chip'
 import { TelemetryUnified } from './telemetry-unified'
 import { FleetTelemetryPanel } from './fleet-telemetry-panel'
 import { ToolQualityPanel } from './tool-quality-panel'
-import { GovernanceMonitor } from './governance-monitor'
+import { GateMonitor } from './gate-monitor'
 import { AttributionPanel } from './attribution-panel'
 import { KeeperReactivityMonitor } from './keeper-reactivity-monitor'
 import {
@@ -37,12 +37,10 @@ import {
 import { coverageGapDisplay, freshnessText, sourceHealthClass } from './common/source-health'
 import { CoverageGapBlock } from './common/coverage-gap-block'
 
-type FleetHealthView = 'default' | 'event-log' | 'comparison' | 'tool-quality' | 'governance' | 'attribution' | 'keeper-health'
+type FleetHealthView = 'default' | 'event-log' | 'comparison' | 'tool-quality' | 'gate' | 'attribution' | 'keeper-health'
 
-const FLEET_VIEWS: FleetHealthView[] = ['default', 'event-log', 'comparison', 'tool-quality', 'governance', 'attribution', 'keeper-health']
+const FLEET_VIEWS: FleetHealthView[] = ['default', 'event-log', 'comparison', 'tool-quality', 'gate', 'attribution', 'keeper-health']
 const TOOL_MONITOR_WINDOW_HOURS = 24
-const TOOL_ATTENTION_SUCCESS_PCT = 90
-const TOOL_ATTENTION_LIMIT = 6
 
 function isFleetView(v: string | undefined): v is FleetHealthView {
   return !!v && (FLEET_VIEWS as string[]).includes(v)
@@ -59,7 +57,7 @@ const activeView = computed<FleetHealthView>(() => {
 const VIEW_CHIPS: Array<{ key: FleetHealthView; label: string }> = [
   { key: 'default',        label: 'Operations' },
   { key: 'tool-quality',   label: 'Tool Quality' },
-  { key: 'governance',     label: 'Governance' },
+  { key: 'gate',           label: 'Gate' },
   { key: 'event-log',      label: 'Evidence Log' },
   { key: 'comparison',     label: 'Keeper 비교' },
   { key: 'attribution',    label: 'Attribution' },
@@ -84,16 +82,11 @@ interface ToolMonitorTool {
   avg_output_chars?: number
 }
 
-interface ToolAttentionRow extends ToolMonitorTool {
-  riskScore: number
-}
-
 export interface ToolMonitorSummary {
   total: number
   successRate: number
   failure: number
-  attentionToolCount: number
-  attentionRows: ToolAttentionRow[]
+  rows: ToolMonitorTool[]
 }
 
 function normalizedToolName(name: string): string {
@@ -103,40 +96,11 @@ function normalizedToolName(name: string): string {
 export function summarizeToolMonitorQuality(
   quality: ToolQualityResponse | null,
 ): ToolMonitorSummary {
-  const tools = quality?.by_tool ?? []
-  const attentionRows = tools
-    .map((tool): ToolAttentionRow => {
-      const truncated = tool.output_truncated_count ?? 0
-      const failures = Math.max(0, Math.round(tool.calls * (100 - tool.success_pct) / 100))
-      const riskScore = failures * 10
-        + (tool.success_pct < TOOL_ATTENTION_SUCCESS_PCT ? TOOL_ATTENTION_SUCCESS_PCT - tool.success_pct : 0)
-        + truncated * 2
-      return {
-        name: tool.name,
-        calls: tool.calls,
-        success_pct: tool.success_pct,
-        avg_ms: tool.avg_ms,
-        output_truncated_count: truncated,
-        avg_output_chars: tool.avg_output_chars ?? 0,
-        riskScore,
-      }
-    })
-    .filter(tool =>
-      tool.calls > 0
-      && (
-        tool.success_pct < TOOL_ATTENTION_SUCCESS_PCT
-        || (tool.output_truncated_count ?? 0) > 0
-        || tool.riskScore > 0
-      ),
-    )
-    .sort((a, b) => b.riskScore - a.riskScore || b.calls - a.calls || a.name.localeCompare(b.name))
-
   return {
     total: quality?.total ?? 0,
     successRate: quality?.success_rate ?? 0,
     failure: quality?.failure ?? 0,
-    attentionToolCount: attentionRows.length,
-    attentionRows: attentionRows.slice(0, TOOL_ATTENTION_LIMIT),
+    rows: quality?.by_tool ?? [],
   }
 }
 
@@ -170,24 +134,18 @@ function ToolMonitorLaneLink({
   `
 }
 
-function ToolAttentionTable({ rows }: { rows: ToolAttentionRow[] }) {
+function ToolObservationTable({ rows }: { rows: ToolMonitorTool[] }) {
   if (rows.length === 0) {
     return html`
       <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-8 text-center text-2xs text-[var(--color-fg-muted)]">
-        No tool attention rows.
+        No tool observations.
       </div>
     `
   }
 
   return html`
     <div class="grid gap-2 sm:hidden">
-      ${rows.map(row => {
-        const successTone = row.success_pct >= 95
-          ? 'text-[var(--color-status-ok)]'
-          : row.success_pct >= TOOL_ATTENTION_SUCCESS_PCT
-            ? 'text-[var(--color-status-warn)]'
-            : 'text-[var(--bad-light)]'
-        return html`
+      ${rows.map(row => html`
           <${RouteLink}
             tab="monitoring"
             params=${{ section: 'fleet-health', view: 'tool-quality', tool: row.name }}
@@ -201,7 +159,7 @@ function ToolAttentionTable({ rows }: { rows: ToolAttentionRow[] }) {
               </div>
               <div>
                 <div class="uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Success</div>
-                <div class="font-mono ${successTone}">${row.success_pct.toFixed(1)}%</div>
+                <div class="font-mono text-[var(--color-fg-secondary)]">${row.success_pct.toFixed(1)}%</div>
               </div>
               <div>
                 <div class="uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Latency</div>
@@ -209,7 +167,7 @@ function ToolAttentionTable({ rows }: { rows: ToolAttentionRow[] }) {
               </div>
               <div>
                 <div class="uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Output</div>
-                <div class="font-mono ${row.output_truncated_count ? 'text-[var(--color-status-warn)]' : 'text-[var(--color-fg-secondary)]'}">
+                <div class="font-mono text-[var(--color-fg-secondary)]">
                   ${row.output_truncated_count
                     ? `${formatNumber(row.output_truncated_count)} clipped`
                     : `${((row.avg_output_chars ?? 0) / 1000).toFixed(1)}k`}
@@ -217,11 +175,10 @@ function ToolAttentionTable({ rows }: { rows: ToolAttentionRow[] }) {
               </div>
             </div>
           <//>
-        `
-      })}
+      `)}
     </div>
     <div class="v2-monitoring-card hidden overflow-x-auto rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] sm:block">
-      <table class="v2-monitoring-table w-full text-2xs" aria-label="Tool attention rows">
+      <table class="v2-monitoring-table w-full text-2xs" aria-label="Tool observations">
         <thead>
           <tr class="border-b border-[var(--color-border-default)] text-[var(--color-fg-muted)]">
             <th scope="col" class="px-3 py-2 text-left font-medium">Tool</th>
@@ -232,13 +189,7 @@ function ToolAttentionTable({ rows }: { rows: ToolAttentionRow[] }) {
           </tr>
         </thead>
         <tbody>
-          ${rows.map(row => {
-            const successTone = row.success_pct >= 95
-              ? 'text-[var(--color-status-ok)]'
-              : row.success_pct >= TOOL_ATTENTION_SUCCESS_PCT
-                ? 'text-[var(--color-status-warn)]'
-                : 'text-[var(--bad-light)]'
-            return html`
+          ${rows.map(row => html`
               <tr class="v2-monitoring-row border-b border-[var(--color-border-default)]/30 last:border-b-0">
                 <td class="max-w-[18rem] truncate px-3 py-2 font-mono text-[var(--color-fg-primary)]" title=${row.name}>
                   <${RouteLink}
@@ -248,16 +199,15 @@ function ToolAttentionTable({ rows }: { rows: ToolAttentionRow[] }) {
                   >${normalizedToolName(row.name)}<//>
                 </td>
                 <td class="px-3 py-2 text-right font-mono text-[var(--color-fg-secondary)]">${formatNumber(row.calls)}</td>
-                <td class="px-3 py-2 text-right font-mono ${successTone}">${row.success_pct.toFixed(1)}%</td>
+                <td class="px-3 py-2 text-right font-mono text-[var(--color-fg-secondary)]">${row.success_pct.toFixed(1)}%</td>
                 <td class="px-3 py-2 text-right font-mono text-[var(--color-fg-muted)]">${formatMsCompact(row.avg_ms, MISSING_DATA_DASH)}</td>
-                <td class="px-3 py-2 text-right font-mono ${row.output_truncated_count ? 'text-[var(--color-status-warn)]' : 'text-[var(--color-fg-muted)]'}">
+                <td class="px-3 py-2 text-right font-mono text-[var(--color-fg-muted)]">
                   ${row.output_truncated_count
                     ? `${formatNumber(row.output_truncated_count)} clipped`
                     : `${((row.avg_output_chars ?? 0) / 1000).toFixed(1)}k`}
                 </td>
               </tr>
-            `
-          })}
+          `)}
         </tbody>
       </table>
     </div>
@@ -359,17 +309,11 @@ function blockerClassText(row: DashboardPausedKeeperDetail): string | null {
   return klass?.name ?? null
 }
 
-const NO_PROGRESS_LOOP_DISPLAY =
-  'progress-safety latch · repeated no-evidence turns; resume clears the latch'
-
 function blockerClassDisplayText(row: DashboardPausedKeeperDetail): string | null {
-  const blockerClass = blockerClassText(row)
-  if (blockerClass === 'no_progress_loop') return 'no-progress safety pause'
-  return blockerClass
+  return blockerClassText(row)
 }
 
 function blockerDetailText(row: DashboardPausedKeeperDetail): string | null {
-  if (blockerClassText(row) === 'no_progress_loop') return NO_PROGRESS_LOOP_DISPLAY
   return row.last_blocker?.detail ?? null
 }
 
@@ -378,7 +322,6 @@ function pausedKindText(row: DashboardPausedKeeperDetail): string {
   const parts = [
     row.pause_kind ?? 'unknown',
     blockerClass ? `blocker=${blockerClass}` : null,
-    row.auto_resume_source ? `resume=${row.auto_resume_source}` : null,
   ].filter((part): part is string => part != null)
   return parts.join(' · ')
 }
@@ -401,7 +344,6 @@ function RuntimePausedKeeperTable({ fleetSafety }: { fleetSafety: DashboardFleet
             <th scope="col" class="px-3 py-2 text-left font-medium">Keeper</th>
             <th scope="col" class="px-3 py-2 text-left font-medium">Pause</th>
             <th scope="col" class="px-3 py-2 text-right font-medium">Elapsed</th>
-            <th scope="col" class="px-3 py-2 text-right font-medium">Resume</th>
           </tr>
         </thead>
         <tbody>
@@ -410,13 +352,12 @@ function RuntimePausedKeeperTable({ fleetSafety }: { fleetSafety: DashboardFleet
               <td class="px-3 py-2 font-mono text-[var(--color-fg-primary)]">${row.name}</td>
               <td class="px-3 py-2 text-[var(--color-fg-secondary)]" title=${blockerDetailText(row) ?? undefined}>${pausedKindText(row)}</td>
               <td class="px-3 py-2 text-right font-mono text-[var(--color-fg-muted)]">${secondsText(row.paused_elapsed_sec)}</td>
-              <td class="px-3 py-2 text-right font-mono text-[var(--color-fg-muted)]">${secondsText(row.auto_resume_remaining_sec)}</td>
             </tr>
           `)}
           ${readErrors.map(row => html`
             <tr class="v2-monitoring-row border-b border-[var(--color-border-default)]/30 last:border-b-0">
               <td class="px-3 py-2 font-mono text-[var(--bad-light)]">${row.keeper}</td>
-              <td class="px-3 py-2 text-[var(--bad-light)]" colspan="3">${row.error}</td>
+              <td class="px-3 py-2 text-[var(--bad-light)]" colspan="2">${row.error}</td>
             </tr>
           `)}
         </tbody>
@@ -561,9 +502,6 @@ function ToolMonitorDefaultBoard() {
   const loading = sharedToolQualityLoading.value
   const error = sharedToolQualityError.value
 
-  const successStatus = summary.successRate >= 95 ? 'ok' : summary.successRate >= TOOL_ATTENTION_SUCCESS_PCT ? 'warn' : 'crit'
-  const attentionStatus = summary.attentionToolCount === 0 ? 'ok' : summary.attentionToolCount > 3 ? 'warn' : 'brass'
-
   return html`
     <section class="grid gap-4" data-testid="tool-monitor-default">
       <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4">
@@ -602,11 +540,10 @@ function ToolMonitorDefaultBoard() {
         ` : null}
       </div>
 
-      <div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <${StatTile}
           label="Success"
           value=${`${summary.successRate.toFixed(1)}%`}
-          status=${successStatus}
         />
         <${StatTile}
           label="Calls"
@@ -615,19 +552,7 @@ function ToolMonitorDefaultBoard() {
         <${StatTile}
           label="Failures"
           value=${formatNumber(summary.failure)}
-          status=${summary.failure > 0 ? 'warn' : 'ok'}
         />
-        <div class="flex items-center gap-2">
-          <${StatTile}
-            label="Attention"
-            value=${formatNumber(summary.attentionToolCount)}
-            status=${attentionStatus}
-          />
-          <${StatusChip}
-            label=${summary.attentionToolCount === 0 ? 'clean' : 'inspect'}
-            tone=${summary.attentionToolCount === 0 ? 'ok' : 'warn'}
-          />
-        </div>
       </div>
 
       <${RuntimeBlockerBoard} />
@@ -635,14 +560,14 @@ function ToolMonitorDefaultBoard() {
       <div class="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(18rem,0.8fr)]">
         <div class="min-w-0">
           <div class="mb-2 flex items-center justify-between gap-3">
-            <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Attention tools</div>
+            <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Tool observations</div>
             <${RouteLink}
               tab="monitoring"
               params=${{ section: 'fleet-health', view: 'tool-quality' }}
               class="inline-flex items-center text-3xs text-[var(--color-fg-muted)] hover:text-[var(--color-fg-primary)]"
             >Full quality table<//>
           </div>
-          <${ToolAttentionTable} rows=${summary.attentionRows} />
+          <${ToolObservationTable} rows=${summary.rows} />
         </div>
 
         <div class="grid content-start gap-4">
@@ -655,9 +580,9 @@ function ToolMonitorDefaultBoard() {
                 meta="success, latency, output truncation"
               />
               <${ToolMonitorLaneLink}
-                view="governance"
-                title="Governance"
-                meta="approvals and tool rejection reasons"
+                view="gate"
+                title="Gate"
+                meta="HITL queue and tool rejection observations"
               />
               <${ToolMonitorLaneLink}
                 view="event-log"
@@ -705,8 +630,8 @@ export function FleetHealthPanel() {
           ? html`<${FleetTelemetryPanel} />`
         : view === 'tool-quality'
           ? html`<${ToolQualityPanel} />`
-        : view === 'governance'
-          ? html`<${GovernanceMonitor} />`
+        : view === 'gate'
+          ? html`<${GateMonitor} />`
         : view === 'keeper-health'
           ? html`<${KeeperReactivityMonitor} />`
         : html`<${AttributionPanel} />`}

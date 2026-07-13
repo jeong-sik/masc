@@ -176,25 +176,7 @@ and handle_transition
         ~failure_class:(Some Tool_result.Workflow_rejection)
         ~tool_name ~start_time msg
   | Ok action ->
-  let requested_action = action in
   let action_s = Masc_domain.task_action_to_string action in
-  let transition_action_denylist = owner_transition_action_denylist ctx in
-  if
-    transition_action_denied_by_denylist
-      ~tool_denylist:transition_action_denylist
-      ~action:action_s
-  then
-    Tool_result.error
-      ~failure_class:(Some Tool_result.Workflow_rejection)
-      ~tool_name
-      ~start_time
-      (transition_action_policy_rejection
-         ~agent_name:ctx.agent_name
-         ~action:action_s
-         ~allowed_actions:
-           (transition_action_allowed_actions
-              ~tool_denylist:transition_action_denylist))
-  else
   let notes = get_string args "notes" "" in
   let reason = get_string args "reason" "" in
   let completion_contract =
@@ -207,18 +189,6 @@ and handle_transition
     parse_handoff_context ~agent_name:ctx.agent_name ~action args
   in
   let expected_version = get_int_opt args "expected_version" in
-  let force_raw = get_bool args "force" false in
-  (* force=true requires admin privilege: initial_admin or Admin role *)
-  let force =
-    if force_raw then
-      if (Atomic.get Workspace_hooks.is_admin_agent_fn) ~base_path:ctx.config.base_path ~agent_name:ctx.agent_name then true
-      else (
-        task_log_warn ~task_id "[anti-rationalization] force=true rejected: agent=%s lacks admin privilege"
-          ctx.agent_name;
-        false
-      )
-    else false
-  in
   let tasks = Workspace.get_tasks_raw ctx.config in
   let task_opt = List.find_opt (fun (t : Masc_domain.task) -> String.equal t.id task_id) tasks in
   match task_opt with
@@ -236,8 +206,7 @@ and handle_transition
     | Masc_domain.Release, Some task ->
       (match Workspace.task_assignee_of_status task.task_status with
        | Some assignee
-         when (not force)
-              && not (Workspace.same_task_actor ctx.config assignee ctx.agent_name) ->
+         when not (Workspace.same_task_actor ctx.config assignee ctx.agent_name) ->
          let status = Masc_domain.task_status_to_string task.task_status in
          let message =
            Printf.sprintf
@@ -285,8 +254,7 @@ and handle_transition
   | Some result -> result
   | None ->
   let terminal_verdict_noop =
-    if transition_action_policy_applies transition_action_denylist
-       && is_verdict_transition_action action
+    if is_verdict_transition_action action
     then
       match task_opt with
       | Some task when Masc_domain.task_status_is_terminal task.task_status ->
@@ -303,7 +271,7 @@ and handle_transition
   | Some message -> Tool_result.ok ~tool_name ~start_time message
   | None ->
   let completion_state_error =
-    if (=) action Masc_domain.Done_action && not force then
+    if (=) action Masc_domain.Done_action then
       completion_state_error ~task_id ~agent_name:ctx.agent_name ~task_opt
     else
       None
@@ -319,8 +287,8 @@ and handle_transition
         , Some "masc_transition"
         , Some
             "The task is still todo. Use masc_transition with action=claim for \
-             this task_id, then action=start, and call keeper_task_done only \
-             after the deliverable is complete."
+             this task_id, then call keeper_task_done after the deliverable is \
+             complete."
         , [ "masc_transition"; "keeper_task_claim"; task_list_name ] )
       | Masc_domain.Task (Masc_domain.Task_error.AlreadyClaimed _) ->
         ( Some "task_done_requires_current_owner"
@@ -402,121 +370,52 @@ and handle_transition
       ~tool_name ~start_time
       "Strict task release requires handoff_context.summary"
   else
-  let completion_owned_by_caller =
-    force || can_review_completion ~task_opt ~agent_name:ctx.agent_name
+  let evidence_refs =
+    match handoff_context with
+    | Some handoff -> handoff.evidence_refs
+    | None -> []
   in
-  let persisted_gate_rejection =
-    if (=) action Masc_domain.Done_action && not force then
-      if not completion_owned_by_caller then
-        None
-      else if task_has_persisted_contract task_opt then
-        persisted_contract_rejection ~ctx ~task_opt ~notes
-      else
-        None
+  let configured_llm_verdict =
+    if
+      (=) action Masc_domain.Done_action
+      || (=) action Masc_domain.Approve_verification
+      || (=) action Masc_domain.Reject_verification
+    then
+      review_completion_notes
+        ~completion_contract:
+          (match persisted_completion_contract ~task_opt with
+           | Some persisted -> Some persisted
+           | None -> completion_contract)
+        ~evaluator_runtime
+        ~ctx
+        ~task_opt
+        ~task_id
+        ~notes
+        ~evidence_refs
     else
       None
   in
-  match persisted_gate_rejection with
-  | Some reason ->
-    (* RFC-0189: persisted-contract gate rejected the completion
-       attempt — operator-supplied notes don't satisfy the
-       contract. [Workflow_rejection]. *)
-    Tool_result.error
-      ~failure_class:(Some Tool_result.Workflow_rejection)
-      ~tool_name ~start_time reason
-  | None ->
-let evidence_refs =
-        match handoff_context with
-        | Some h -> h.evidence_refs
-        | None -> []
-      in
-      let review_gate_rejection =
-    if (=) action Masc_domain.Done_action && not force then
-      if not completion_owned_by_caller then
-        None
-      else if can_review_completion ~task_opt ~agent_name:ctx.agent_name then
-        review_completion_notes
-          ~completion_contract:
-            (match persisted_completion_contract ~task_opt with
-             | Some persisted -> Some persisted
-             | None -> completion_contract)
-          ~evaluator_runtime
-          ~operator_override:force
-          ~ctx
-          ~task_opt
-          ~task_id
-          ~notes
-          ~evidence_refs
-      else
-        None
-    else
-      None
-  in
-  match review_gate_rejection with
-  | Some reason ->
-    (* RFC-0189: review gate rejected the completion attempt — the
-       Cdal evaluator runtime returned an actionable verdict the
-       caller can address. [Workflow_rejection]. *)
-    Tool_result.error
-      ~failure_class:(Some Tool_result.Workflow_rejection)
-      ~tool_name ~start_time
-      (completion_rejection_message ~allow_force:true reason)
-  | None ->
-  (* Contracted Done actions are reviewed above by the LLM completion
-     reviewer with the persisted completion contract in prompt context.
-     Keep AwaitingVerification for explicit submit_for_verification only; a
-     normal done action must not depend on the verifier agent being alive. *)
-  (* RFC-0109 Phase D hard cut, scope per RFC-0337 (tiered evidence):
-     [Task_completion_gate.decide] requires one trusted evidence ref for
-     EVERY completion — advisory tasks included; there is no analysis-only
-     bypass here. The L2 LLM review applies only to strict contracts.
-     The previous comment claimed a no-contract bypass that decide never
-     implemented (#23901 family A / RFC-0337 migration 3). *)
-  (* Evidence gate is NOT bypassed by force=true. This is intentional:
-     force bypasses business-logic guards, but the evidence gate is a safety
-     invariant that prevents silent task_done without a substantiveness check.
-     Even operator-forced completions should produce auditable evidence. *)
-  let evidence_decision =
-    let needs_gate =
-      match requested_action with
-      | Masc_domain.Submit_for_verification
-      | Masc_domain.Done_action -> true
-      | Masc_domain.Claim
+  let action =
+    match action, configured_llm_verdict with
+    | (Masc_domain.Approve_verification | Masc_domain.Reject_verification),
+      Some { Masc_domain.decision = Masc_domain.Completion_pass; _ } ->
+      Masc_domain.Approve_verification
+    | (Masc_domain.Approve_verification | Masc_domain.Reject_verification),
+      Some { decision = Masc_domain.Completion_reject _; _ } ->
+      Masc_domain.Reject_verification
+    | action,
+      ( None
+      | Some { decision = Masc_domain.Completion_verdict_unavailable _; _ } ) ->
+      action
+    | ( Masc_domain.Claim
       | Masc_domain.Start
+      | Masc_domain.Done_action
       | Masc_domain.Cancel
       | Masc_domain.Release
-      | Masc_domain.Approve_verification
-      | Masc_domain.Reject_verification ->
-        false
-    in
-    if not needs_gate then Workspace_hooks.Pass
-    else
-      (Atomic.get Workspace_hooks.task_completion_gate_decide_fn)
-        ~base_path:ctx.config.base_path
-        ~task_id
-        ~task_opt
-        ~notes
-        ~handoff:handoff_context
-        ()
+      | Masc_domain.Submit_for_verification ),
+      Some { decision = (Masc_domain.Completion_pass | Masc_domain.Completion_reject _); _ } ->
+      action
   in
-  match evidence_decision with
-  | Workspace_hooks.Reject { reason; rule_id; hint; payload_json } ->
-    let extra_fields =
-      match payload_json with
-      | `Null -> []
-      | other -> [ "cdal_verdict_payload", other ]
-    in
-    Tool_result.error
-      ~failure_class:(Some Tool_result.Workflow_rejection)
-      ~tool_name
-      ~start_time
-      (workflow_rejection_payload_json
-         ~rule_id
-         ~hint
-         ~scope_policy:"observe"
-         ~extra_fields
-         reason)
-  | Workspace_hooks.Pass ->
   let action_s = Masc_domain.task_action_to_string action in
   let default_time = Time_compat.now () -. 60.0 in
   let (started_at_actual, collaborators_from_task) = match task_opt with
@@ -628,30 +527,10 @@ let evidence_refs =
     | Masc_domain.Submit_for_verification ->
       None
   in
-  let verifier_approve_gate_rejection =
-    if (=) action Masc_domain.Approve_verification
-       && task_has_strict_persisted_contract task_opt
-    then
-      persisted_contract_rejection ~ctx ~task_opt ~notes
-    else
-      None
-  in
-  match verifier_approve_gate_rejection with
-  | Some reason ->
-    (* RFC-0189: verifier-approval gate rejected the transition —
-       caller (verifier) tried to approve without satisfying the
-       persisted contract. [Workflow_rejection]. *)
-    Tool_result.error
-      ~failure_class:(Some Tool_result.Workflow_rejection)
-      ~tool_name ~start_time reason
-  | None ->
   let rec try_transition attempt =
       let r = Workspace.transition_task_r ctx.config ~agent_name:ctx.agent_name
                 ~task_id ~action ?expected_version ~notes ~reason
-                (* RFC-0262: the admin-gated [force] bool (l.164, already
-                   verified against initial_admin) maps to Operator authority;
-                   a non-admin or no-force caller acts as Assignee. *)
-                ~authority:(if force then Masc_domain.Operator else Masc_domain.Assignee)
+                ?configured_llm_verdict
                 ?handoff_context ?prepare_verification_request
                 ?compensate_verification_request
                 ?prepare_verification_verdict () in

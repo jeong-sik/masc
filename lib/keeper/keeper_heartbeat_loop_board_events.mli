@@ -3,23 +3,16 @@
 val should_collect_board_events :
   proactive_warmup_elapsed:bool ->
   paused:bool ->
-  approval_pending:bool ->
-  keeper_backpressured:bool ->
-  provider_cooldown_pending:bool ->
   bool
 (** Pure gate deciding whether this cycle may collect board events (which
-    advances the per-keeper cursor as a side effect). True only when the keeper
-    has warmed up and no known later turn-admission gate would prevent action.
-    A blocked keeper must not advance its cursor past posts it cannot act on
-    this cycle. *)
+    advances the per-keeper cursor as a side effect). Runtime/provider state is
+    deliberately absent: only warmup and explicit lifecycle pause can withhold
+    collection. *)
 
 val collect_keepalive_board_events :
   ctx:'a Keeper_types_profile.context ->
   meta_current:Keeper_meta_contract.keeper_meta ->
   proactive_warmup_elapsed:bool ->
-  approval_pending:bool ->
-  keeper_backpressured:bool ->
-  provider_cooldown_pending:bool ->
   Keeper_world_observation.pending_board_event list * Keeper_meta_contract.keeper_meta
 (** Collect pending board events after proactive warmup has elapsed. *)
 

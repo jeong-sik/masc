@@ -1,5 +1,5 @@
-(** Dashboard Goals — goal tree with explicit task linkage, health badges,
-    and goal-first detail evidence. *)
+(** Dashboard Goals — goal tree with explicit task linkage and direct
+    goal-first observations. *)
 
 
 
@@ -7,7 +7,7 @@
 (* Types + task helpers moved to Dashboard_goals_types. *)
 include Dashboard_goals_types
 
-(* receipt_* / trust_* / iso_max / stagnation_threshold helpers moved to Dashboard_goals_types. *)
+(* receipt_* / trust_* / iso_max helpers moved to Dashboard_goals_types. *)
 
 
 
@@ -32,11 +32,7 @@ let keeper_runtime_trust_snapshot_json ~config ~(meta : Keeper_meta_contract.kee
       let error = Printexc.to_string exn in
       `Assoc
         [
-          ("disposition", `String "Blocked");
-          ("disposition_reason", `String "runtime_trust_snapshot_unavailable");
-          ("needs_attention", `Bool true);
-          ("attention_reason", `String "runtime_trust_snapshot_unavailable");
-          ("next_human_action", `String "inspect_keeper_runtime_trust");
+          ("snapshot_status", `String "unavailable");
           ("snapshot_error", `String error);
           ("latest_causal_event", `Null);
           ("causal_timeline", `List []);
@@ -92,47 +88,17 @@ let build_forest ~(config : Workspace.config) ~goals ~tasks =
 
 
 
-let build_goal_verification_projection ~(config : Workspace.config) goals =
-  let requests =
-    Goal_verification.read_state config |> fun (state : Goal_verification.state) ->
-    state.requests
-  in
-  let effective_policy_table = Hashtbl.create (max 16 (List.length goals)) in
-  let request_table = Hashtbl.create (max 16 (List.length requests)) in
-  let latest_request_table :
-      (string, Goal_verification.goal_verification_request) Hashtbl.t =
-    Hashtbl.create (max 16 (List.length requests))
-  in
+let build_goal_events_projection ~(config : Workspace.config) goals =
   let goal_events =
-    let path = Goal_verification.events_path config in
+    let path =
+      Filename.concat (Workspace_utils.masc_dir config) "goal_events.jsonl"
+    in
     if Workspace.path_exists config path then
       Fs_compat.load_jsonl path
     else
       []
   in
   let events_table = Hashtbl.create (max 16 (List.length goals)) in
-  let policy_nodes = goal_policy_nodes goals in
-  List.iter
-    (fun (goal : Goal_store.goal) ->
-      match
-        Goal_verification.effective_policy_for_nodes ~goals:policy_nodes
-          ~goal_id:goal.id
-      with
-      | Ok policy -> Hashtbl.replace effective_policy_table goal.id policy
-      | Error _ -> Hashtbl.replace effective_policy_table goal.id None)
-    goals;
-  List.iter
-    (fun (request : Goal_verification.goal_verification_request) ->
-      let should_replace_latest =
-        match Hashtbl.find_opt latest_request_table request.goal_id with
-        | None -> true
-        | Some existing -> String.compare request.created_at existing.created_at >= 0
-      in
-      if should_replace_latest then
-        Hashtbl.replace latest_request_table request.goal_id request;
-      if request.status = Goal_verification.Open then
-        Hashtbl.replace request_table request.goal_id request)
-    requests;
   List.iter
     (fun json ->
       match Json_util.get_string json "goal_id" with
@@ -143,23 +109,12 @@ let build_goal_verification_projection ~(config : Workspace.config) goals =
           Hashtbl.replace events_table goal_id (existing @ [ json ])
       | None -> ())
     goal_events;
-  ( (fun goal_id ->
-      Option.value (Hashtbl.find_opt effective_policy_table goal_id)
-        ~default:None),
-    (fun goal_id -> Hashtbl.find_opt request_table goal_id),
-    (fun goal_id -> Hashtbl.find_opt latest_request_table goal_id),
-    (fun goal_id ->
-      Option.value (Hashtbl.find_opt events_table goal_id) ~default:[]) )
+  fun goal_id ->
+    Option.value (Hashtbl.find_opt events_table goal_id) ~default:[]
 
 let emit_all_goal_attainment_metrics ~(config : Workspace.config) =
   let goals = Goal_store.list_goals config () in
   let tasks = Workspace.get_tasks_safe config in
-  let ( _effective_policy_for_goal,
-        _open_request_for_goal,
-        _latest_request_for_goal,
-        _events_for_goal ) =
-    build_goal_verification_projection ~config goals
-  in
   let forest = build_forest ~config ~goals ~tasks in
   let all_nodes = flatten_tree [] forest in
   List.iter
@@ -169,33 +124,11 @@ let emit_all_goal_attainment_metrics ~(config : Workspace.config) =
       observe_goal_attainment_metrics goal attainment)
     all_nodes
 
-let rec tree_node_to_json ?(effective_policy_for_goal = fun _ -> None)
-    ?(open_request_for_goal = fun _ -> None)
-    ?(latest_request_for_goal = fun _ -> None) ?(events_for_goal = fun _ -> [])
-    node =
+let rec tree_node_to_json ?(events_for_goal = fun _ -> []) node =
   let goal = node.goal in
-  let effective_policy = effective_policy_for_goal goal.id in
-  let open_request = open_request_for_goal goal.id in
-  let latest_request = latest_request_for_goal goal.id in
-  let summary_request =
-    match open_request with
-    | Some request -> Some request
-    | None -> latest_request
-  in
-  let approve_count, reject_count, remaining_possible =
-    match summary_request with
-    | None -> (0, 0, 0)
-    | Some request ->
-        ( Goal_verification.count_votes ~decision:Goal_verification.Approve request,
-          Goal_verification.count_votes ~decision:Goal_verification.Reject request,
-          Goal_verification.remaining_possible_votes request )
-  in
   let attainment = goal_attainment_to_json goal node in
   let task_summary = task_summary_to_json node.tasks in
-  let completion_summary =
-    goal_completion_to_json ~effective_policy ~open_request goal node
-      ~attainment
-  in
+  let completion_summary = goal_completion_to_json goal node ~attainment in
   observe_goal_attainment_metrics goal attainment;
   `Assoc
     [
@@ -205,20 +138,12 @@ let rec tree_node_to_json ?(effective_policy_for_goal = fun _ -> None)
       ("status_color", `String (goal_status_color goal.status));
       ("phase", Goal_phase.to_yojson goal.phase);
       ("phase_color", `String (goal_phase_color goal.phase));
-      ("goal_fsm", goal_fsm_to_json ~effective_policy goal node);
-      ("health", `String node.health);
-      ("health_color", `String (goal_health_color node.health));
-      ("badges", `List (List.map (fun badge -> `String badge) node.badges));
-      ("status_reason", `String node.status_reason);
+      ("goal_fsm", goal_fsm_to_json goal node);
       ("priority", `Int goal.priority);
       ("metric", Json_util.string_opt_to_json goal.metric);
       ("target_value", Json_util.string_opt_to_json goal.target_value);
-      ( "require_completion_approval",
-        `Bool goal.Goal_store.require_completion_approval );
       ("due_date", Json_util.string_opt_to_json goal.due_date);
       ("parent_goal_id", Json_util.string_opt_to_json goal.parent_goal_id);
-      ("convergence", `Float node.convergence);
-      ("convergence_pct", `Int (int_of_float (node.convergence *. 100.0)));
       ("attainment", attainment);
       ("tasks", `List (List.map task_to_tree_json node.tasks));
       ("task_count", `Int (List.length node.tasks));
@@ -230,61 +155,24 @@ let rec tree_node_to_json ?(effective_policy_for_goal = fun _ -> None)
                node.tasks)));
       ("task_summary", task_summary);
       ("completion_summary", completion_summary);
-      ( "verification_summary",
-        `Assoc
-          [
-            ( "effective_policy",
-              match effective_policy with
-              | Some policy -> Goal_verification.policy_snapshot_to_yojson policy
-              | None -> `Null );
-            ( "open_request",
-              match open_request with
-              | Some request ->
-                  Goal_verification.goal_verification_request_to_yojson request
-              | None -> `Null );
-            ( "latest_request",
-              match latest_request with
-              | Some request ->
-                  Goal_verification.goal_verification_request_to_yojson request
-              | None -> `Null );
-            ("approve_count", `Int approve_count);
-            ("reject_count", `Int reject_count);
-            ("remaining_possible", `Int remaining_possible);
-          ] );
-      ( "effective_verifier_policy",
-        match effective_policy with
-        | Some policy -> Goal_verification.policy_snapshot_to_yojson policy
-        | None -> `Null );
-      ( "active_verification_request",
-        match open_request with
-        | Some request -> Goal_verification.goal_verification_request_to_yojson request
-        | None -> `Null );
-      ("pending_verification_count", `Int (if open_request = None then 0 else 1));
       ("timeline_events", `List (events_for_goal goal.id));
       ( "children",
         `List
           (List.map
-             (tree_node_to_json ~effective_policy_for_goal ~open_request_for_goal
-                ~latest_request_for_goal ~events_for_goal)
+             (tree_node_to_json ~events_for_goal)
              node.children) );
       ("child_count", `Int (List.length node.children));
       ("last_activity_at", `String node.last_activity_at);
-      ("stagnation_seconds", `Int node.stagnation_seconds);
+      ("stagnation_seconds", Json_util.int_opt_to_json node.stagnation_seconds);
       ("activity_observation", `String node.activity_observation);
-      ("stagnation_status", `String node.stagnation_status);
       ( "linked_keeper_names",
         `List
           (List.map (fun keeper_name -> `String keeper_name) node.linked_keeper_names)
       );
       ("pending_approval_count", `Int node.pending_approval_count);
-      ("infra_risk_count", `Int node.infra_risk_count);
       ("linkage_source", `String node.linkage_source);
-      ("linkage_warning_count", `Int node.linkage_warning_count);
-      ("blocking_source", `String node.blocking_source);
-      ("blocking_reason", `String node.blocking_reason);
       ("latest_keeper_ref", Json_util.string_opt_to_json node.latest_keeper_ref);
       ("latest_turn_ref", Json_util.int_opt_to_json node.latest_turn_ref);
-      ("stalled_since", Json_util.string_opt_to_json node.stalled_since);
       ("created_at", `String goal.created_at);
       ("updated_at", `String goal.updated_at);
     ]
@@ -295,12 +183,7 @@ let goal_detail_json ~(config : Workspace.config) ~goal_id :
     (Yojson.Safe.t, string) result =
   let goals = Goal_store.list_goals config () in
   let tasks = Workspace.get_tasks_safe config in
-  let ( effective_policy_for_goal,
-        open_request_for_goal,
-        latest_request_for_goal,
-        events_for_goal ) =
-    build_goal_verification_projection ~config goals
-  in
+  let events_for_goal = build_goal_events_projection ~config goals in
   let forest = build_forest ~config ~goals ~tasks in
   let all_nodes = flatten_tree [] forest in
   match List.find_opt (fun (node : tree_node) -> String.equal node.goal.id goal_id) all_nodes with
@@ -317,16 +200,7 @@ let goal_detail_json ~(config : Workspace.config) ~goal_id :
                           config node.linked_keeper_names)
                    in
                    let runtime_trust =
-                     let snapshot =
-                       keeper_runtime_trust_snapshot_json ~config ~meta
-                     in
-                     if trust_snapshot_unavailable snapshot then
-                       match latest_receipt with
-                       | Some receipt ->
-                           runtime_trust_from_receipt_fallback ~config ~meta receipt
-                       | None -> snapshot
-                     else
-                       snapshot
+                     keeper_runtime_trust_snapshot_json ~config ~meta
                    in
                    Some
                      {
@@ -352,9 +226,7 @@ let goal_detail_json ~(config : Workspace.config) ~goal_id :
         (`Assoc
           [
             ("generated_at", `String (Masc_domain.now_iso ()));
-            ( "goal",
-              tree_node_to_json ~effective_policy_for_goal ~open_request_for_goal
-                ~latest_request_for_goal ~events_for_goal node );
+            ("goal", tree_node_to_json ~events_for_goal node);
             ("linked_tasks", `List (List.map task_to_tree_json node.tasks));
             ("linked_keepers", `List (List.map goal_detail_keeper_json keeper_details));
             ("approvals", `List approvals);
@@ -367,12 +239,7 @@ let goal_detail_json ~(config : Workspace.config) ~goal_id :
 let dashboard_goals_tree_json ~(config : Workspace.config) : Yojson.Safe.t =
   let goals = Goal_store.list_goals config () in
   let tasks = Workspace.get_tasks_safe config in
-  let ( effective_policy_for_goal,
-        open_request_for_goal,
-        latest_request_for_goal,
-        events_for_goal ) =
-    build_goal_verification_projection ~config goals
-  in
+  let events_for_goal = build_goal_events_projection ~config goals in
   let forest = build_forest ~config ~goals ~tasks in
   let all_nodes = flatten_tree [] forest in
   let total_goals = List.length goals in
@@ -391,19 +258,10 @@ let dashboard_goals_tree_json ~(config : Workspace.config) : Yojson.Safe.t =
                node.tasks))
       0 all_nodes
   in
-  let overall_convergence =
-    match forest with
-    | [] -> 0.0
-    | roots ->
-        let sum =
-          List.fold_left (fun acc (node : tree_node) -> acc +. node.convergence)
-            0.0 roots
-        in
-        sum /. float_of_int (List.length roots)
-  in
-  let count_health health =
-    List.length
-      (List.filter (fun (node : tree_node) -> String.equal node.health health) all_nodes)
+  let count_phase phase =
+    goals
+    |> List.filter (fun (goal : Goal_store.goal) -> goal.phase = phase)
+    |> List.length
   in
   let active_goal_count =
     goals
@@ -421,29 +279,24 @@ let dashboard_goals_tree_json ~(config : Workspace.config) : Yojson.Safe.t =
       ( "tree",
         `List
           (List.map
-             (tree_node_to_json ~effective_policy_for_goal ~open_request_for_goal
-                ~latest_request_for_goal ~events_for_goal)
+             (tree_node_to_json ~events_for_goal)
              forest) );
       ( "summary",
         `Assoc
           [
             ("total_goals", `Int total_goals);
             ("active_goals", `Int active_goal_count);
-            ("on_track_goals", `Int (count_health "on_track"));
-            ("done_goals", `Int (count_health "done"));
-            ("paused_goals", `Int (count_health "paused"));
-            ("at_risk_goals", `Int (count_health "at_risk"));
-            ("blocked_goals", `Int (count_health "blocked"));
+            ( "phase_counts",
+              `Assoc
+                [
+                  ("executing", `Int (count_phase Goal_phase.Executing));
+                  ("blocked", `Int (count_phase Goal_phase.Blocked));
+                  ("paused", `Int (count_phase Goal_phase.Paused));
+                  ("completed", `Int (count_phase Goal_phase.Completed));
+                  ("dropped", `Int (count_phase Goal_phase.Dropped));
+                ] );
             ("total_tasks", `Int total_tasks);
             ("done_tasks", `Int done_tasks);
             ("pending_approvals", `Int pending_approval_total);
-            ( "infra_risk_count",
-              `Int
-                (List.fold_left
-                   (fun acc (node : tree_node) -> acc + node.infra_risk_count)
-                   0 forest) );
-            ("overall_convergence", `Float overall_convergence);
-            ( "overall_convergence_pct",
-              `Int (int_of_float (overall_convergence *. 100.0)) );
           ] );
     ]

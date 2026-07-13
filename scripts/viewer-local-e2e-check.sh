@@ -324,14 +324,6 @@ step_game_view_contract() {
     return 1
   fi
 
-  local gov_raw gov_json
-  gov_raw="$(viewer_call_tool 2104 "masc_governance_status" "{}")"
-  gov_json="$(printf '%s' "$gov_raw" | viewer_extract_text | jq -c 'try fromjson catch {}')"
-  if ! printf '%s' "$gov_json" | jq -e '.total_cases >= 0 and .execution_orders >= 0' >/dev/null; then
-    echo "masc_governance_status returned unexpected payload"
-    printf '%s\n' "$gov_json"
-    return 1
-  fi
 }
 
 while [ $# -gt 0 ]; do

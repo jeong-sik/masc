@@ -39,16 +39,12 @@ let sandbox_env_names =
   ; "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS"
   ; "MASC_KEEPER_SANDBOX_REQUIRE_USERNS"
   ; "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED"
-  ; "MASC_KEEPER_SANDBOX_CLEANUP_STALE_AFTER_SEC"
   ; "MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC"
   ; "MASC_KEEPER_SANDBOX_DOCKER_IMAGE"
-  ; "MASC_KEEPER_SANDBOX_GIT_DISPATCH"
   ; "MASC_KEEPER_DOCKER_PLAYGROUND"
   ; "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED"
   ; "MASC_KEEPER_SHELL_TIMEOUT_IO_SEC"
   ; "MASC_KEEPER_SHELL_TIMEOUT_READ_SEC"
-  ; "MASC_KEEPER_SHELL_TIMEOUT_GIT_META_SEC"
-  ; "MASC_KEEPER_SHELL_TIMEOUT_GH_MIN_SEC"
   ; "MASC_KEEPER_SHELL_TIMEOUT_USER_MAX_SEC"
   ; "MASC_KEEPER_SHELL_TIMEOUT_CLEANUP_RM_SEC"
   ; "MASC_KEEPER_SHELL_TIMEOUT_DEFAULT_SEC"
@@ -113,8 +109,6 @@ let test_defaults_pinned () =
     (S.Hardening.require_userns ());
   (* Cleanup *)
   check bool "Cleanup.enabled default" true (S.Cleanup.enabled ());
-  check approx "Cleanup.stale_after_sec default" 21_600.0
-    (S.Cleanup.stale_after_sec ());
   check approx "Cleanup.interval_sec default" 300.0
     (S.Cleanup.interval_sec ());
   check int "Cleanup.managed_sleep_sec default" 3600
@@ -122,19 +116,10 @@ let test_defaults_pinned () =
   (* Runtime *)
   check string "Runtime.docker_image default" "masc-keeper-sandbox:local"
     (S.Runtime.docker_image ());
-  check bool "Runtime.git_dispatch default" true (S.Runtime.git_dispatch ());
   check bool "Runtime.docker_playground_enabled default" false
     (S.Runtime.docker_playground_enabled ());
   (* Preflight *)
   check bool "Preflight.enabled default" true (S.Preflight.enabled ());
-  check approx "Preflight.min_timeout_sec default" 5.0
-    (S.Preflight.min_timeout_sec ());
-  check approx "Preflight.max_timeout_sec default" 20.0
-    (S.Preflight.max_timeout_sec ());
-  check int "Preflight.required_commands count" 19
-    (List.length (S.Preflight.required_commands ()));
-  check (option string) "Preflight.required_commands has 'gh'" (Some "gh")
-    (List.find_opt (String.equal "gh") (S.Preflight.required_commands ()));
   (* Shell_timeout buckets *)
   let pin bucket expected =
     check approx
@@ -144,8 +129,6 @@ let test_defaults_pinned () =
   in
   pin S.Shell_timeout.Io 30.0;
   pin S.Shell_timeout.Read 15.0;
-  pin S.Shell_timeout.Git_meta 5.0;
-  pin S.Shell_timeout.Gh_min 15.0;
   pin S.Shell_timeout.User_max 180.0;
   (* 10.0 since #23722 (rm -v can outlive 5s on loaded runners); that PR
      changed the lib default without this pin (main red #23901 residual). *)
@@ -216,15 +199,6 @@ let test_unknown_bucket_uses_global_env () =
       30.0
       (S.Shell_timeout.timeout_sec ~bucket:S.Shell_timeout.Io ()))
 
-let test_gh_min_floor_ignores_env () =
-  (* Even with a per-bucket env override, Gh_min stays 15.0 — read-only
-     load-bearing floor (#8688). *)
-  with_clean_sandbox_env @@ fun () ->
-  with_env "MASC_KEEPER_SHELL_TIMEOUT_GH_MIN_SEC" (Some "1.0") (fun () ->
-    check approx "Gh_min ignores env override"
-      15.0
-      (S.Shell_timeout.timeout_sec ~bucket:S.Shell_timeout.Gh_min ()))
-
 (* ---------------------------------------------------------------- *)
 (* 4. Filesystem derivation                                         *)
 (* ---------------------------------------------------------------- *)
@@ -283,7 +257,12 @@ let test_json_shape_has_top_level_keys () =
     match pids_limit_entry with `Assoc xs -> List.map fst xs | _ -> []
   in
   check (slist string compare) "raw entry has value/source/env_var keys"
-    [ "env_var"; "source"; "value" ] entry_keys
+    [ "env_var"; "source"; "value" ] entry_keys;
+  let preflight = List.assoc "preflight" raw_assoc in
+  check bool
+    "preflight has no product command inventory"
+    true
+    Yojson.Safe.Util.(member "required_commands" preflight = `Null)
 
 (* ---------------------------------------------------------------- *)
 (* Test runner                                                      *)
@@ -307,8 +286,6 @@ let () =
             test_per_bucket_env_override
         ; test_case "Unknown bucket -> global env" `Quick
             test_unknown_bucket_uses_global_env
-        ; test_case "Gh_min floor ignores env" `Quick
-            test_gh_min_floor_ignores_env
         ] )
     ; ( "filesystem",
         [ test_case "relax_fs propagates to derived" `Quick

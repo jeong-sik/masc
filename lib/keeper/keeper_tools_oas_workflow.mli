@@ -89,29 +89,6 @@ val workflow_rejection_payload_json
     omits the field entirely; existing callers that omit this argument
     are unaffected. *)
 
-(** Extract [workflow_rejection_info] from a raw JSON string. *)
-val workflow_rejection_info_of_raw : string -> workflow_rejection_info option
-
-(** Build a stable family key for deduplication. *)
-val workflow_rejection_family_key
-  :  tool_name:string
-  -> workflow_rejection_info
-  -> string
-
-(** Human-readable recovery instruction. *)
-val workflow_rejection_recovery_instruction
-  :  tool_name:string
-  -> count:int
-  -> workflow_rejection_info
-  -> string
-
-(** Build recovery fields for insertion into the tool-result JSON. *)
-val workflow_rejection_recovery_fields
-  :  tool_name:string
-  -> count:int
-  -> string
-  -> (string * Yojson.Safe.t) list
-
 (** Extract a non-empty string value from JSON. *)
 val json_nonempty_string_opt : string -> Yojson.Safe.t -> string option
 

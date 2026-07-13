@@ -195,14 +195,9 @@ export function runtimeCatalogDeclaredSpec(item: DashboardRuntimeProviderSnapsho
   const behaviorParts = behavior
     ? nonEmptyParts([
         behavior.supports_inline_tools ? 'inline-tools' : null,
-        behavior.requires_per_keeper_bridging_for_bound_actor_tools ? 'keeper-bridge' : null,
         behavior.argv_prompt_preflight ? 'argv-preflight' : null,
         behavior.uses_anthropic_caching ? 'anthropic-cache' : null,
         typeof behavior.max_turns_per_attempt === 'number' ? `max-turns:${behavior.max_turns_per_attempt}` : null,
-        behavior.tolerates_bound_actor_fallback ? 'bound-fallback' : null,
-        behavior.identity_runtime_mcp_header_keys.length > 0
-          ? `mcp-headers:${behavior.identity_runtime_mcp_header_keys.join(',')}`
-          : null,
       ])
     : []
   const controls = nonEmptyParts([

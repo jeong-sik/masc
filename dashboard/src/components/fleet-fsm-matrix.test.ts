@@ -127,9 +127,6 @@ describe('chipClassFor', () => {
     expect(chipClassFor('Failing')).toContain('var(--bad-light')
     expect(chipClassFor('Compacting')).toContain('var(--warn')
     expect(chipClassFor('exhausted')).toContain('var(--bad-light')
-    // KCB (LT-16-KCB Phase 3)
-    expect(chipClassFor('warning')).toContain('var(--warn')
-    expect(chipClassFor('cooling')).toContain('var(--accent')
   })
 
   it('falls back to the default chip for unknown states', () => {
@@ -206,7 +203,7 @@ describe('runtimeAttentionForSnapshot', () => {
         outcome: 'receipt_failed',
         terminal_reason_code: 'api_error',
         operator_disposition: 'pause_human',
-        operator_disposition_reason: 'tool_route_recoverable_failure',
+        operator_disposition_reason: 'provider_runtime_error',
         error: {
           kind: 'api',
           message_preview: 'Timeout after 1170s',
@@ -220,7 +217,7 @@ describe('runtimeAttentionForSnapshot', () => {
     expect(attention.label).toBe('정체')
     expect(attention.reason).toContain('is_live=false')
     expect(attention.reason).toContain('operator=pause_human')
-    expect(attention.reason).toContain('reason=tool_route_recoverable_failure')
+    expect(attention.reason).toContain('reason=provider_runtime_error')
     expect(attention.title).toContain('latest activity 10m ago')
   })
 
@@ -238,7 +235,7 @@ describe('runtimeAttentionForSnapshot', () => {
         needs_attention: true,
         blocked: true,
         fiber_stop_requested: false,
-        reason: 'passive_only',
+        reason: 'provider_runtime_error',
         raw_phase: 'Running',
         is_live: false,
         source: 'execution_receipt',
@@ -248,7 +245,7 @@ describe('runtimeAttentionForSnapshot', () => {
     const attention = runtimeAttentionForSnapshot(snap, generatedAt)
     expect(attention.level).toBe('blocked')
     expect(attention.cause).toContain('execution_receipt')
-    expect(attention.cause).toContain('passive_only')
+    expect(attention.cause).toContain('provider_runtime_error')
     expect(attention.reason).toContain('backend runtime_attention')
   })
 
@@ -454,7 +451,7 @@ describe('runtimeAttentionForSnapshot', () => {
         outcome: 'receipt_failed',
         terminal_reason_code: 'api_error_timeout',
         operator_disposition: 'pause_human',
-        operator_disposition_reason: 'tool_route_recoverable_failure',
+        operator_disposition_reason: 'provider_runtime_error',
         error: {
           kind: 'api',
           message_preview: 'Timeout after 1785s',
@@ -480,7 +477,7 @@ describe('fleetCellPresentation', () => {
         outcome: 'receipt_failed',
         terminal_reason_code: 'api_error',
         operator_disposition: 'pause_human',
-        operator_disposition_reason: 'tool_route_recoverable_failure',
+        operator_disposition_reason: 'provider_runtime_error',
       }),
     })
     const attention = runtimeAttentionForSnapshot(snap, generatedAt)
@@ -492,7 +489,7 @@ describe('fleetCellPresentation', () => {
     expect(cell.className).toContain('var(--bad-light)')
     expect(cell.title).toContain('KSM Running')
     expect(cell.title).toContain('runtime 정체')
-    expect(cell.title).toContain('blocked: tool_route_recoverable_failure')
+    expect(cell.title).toContain('blocked: provider_runtime_error')
   })
 
   it('keeps non-KSM lanes tied to their raw FSM state', () => {
@@ -521,7 +518,7 @@ describe('buildRuntimeAssistPrompt', () => {
         outcome: 'receipt_failed',
         terminal_reason_code: 'api_error',
         operator_disposition: 'pause_human',
-        operator_disposition_reason: 'tool_route_recoverable_failure',
+        operator_disposition_reason: 'provider_runtime_error',
       }),
     })
     const attention = runtimeAttentionForSnapshot(snap, generatedAt)
@@ -529,7 +526,7 @@ describe('buildRuntimeAssistPrompt', () => {
 
     expect(prompt).toContain('감독형 런타임 진단 요청: blocked')
     expect(prompt).toContain('cause=')
-    expect(prompt).toContain('blocked: tool_route_recoverable_failure')
+    expect(prompt).toContain('blocked: provider_runtime_error')
     expect(prompt).toContain('evidence=')
     expect(prompt).toContain('"terminal_reason_code":"api_error"')
     expect(prompt).toContain('"operator_disposition":"pause_human"')
@@ -596,21 +593,6 @@ describe('pushObservation', () => {
     expect(next).not.toBe(prior)
   })
 
-  it('includes the KCB breaker axis in a fresh seed (default=clean)', () => {
-    const next = pushObservation({}, [snapshot({ name: 'alpha' })])
-    // The snapshot helper omits `circuit_breaker`, mirroring a pinned
-    // backend that has not yet shipped LT-16-KCB Phase 2. The matrix
-    // must still seed a value instead of leaving the axis undefined.
-    expect(next.alpha!.breaker).toEqual(['clean'])
-  })
-
-  it('tracks KCB warning→cooling over successive polls', () => {
-    const warn = snapshot({ name: 'beta', circuit_breaker: { state: 'warning' } })
-    const cool = snapshot({ name: 'beta', circuit_breaker: { state: 'cooling' } })
-    const t1 = pushObservation({}, [warn])
-    const t2 = pushObservation(t1, [cool])
-    expect(t2.beta!.breaker).toEqual(['warning', 'cooling'])
-  })
 })
 
 describe('filterKeeperSnapshots', () => {
@@ -766,7 +748,7 @@ describe('FleetFsmMatrix streaming fallback', () => {
             outcome: 'receipt_failed',
             terminal_reason_code: 'api_error',
             operator_disposition: 'pause_human',
-            operator_disposition_reason: 'tool_route_recoverable_failure',
+            operator_disposition_reason: 'provider_runtime_error',
           }),
         }),
       ]),
@@ -790,7 +772,7 @@ describe('FleetFsmMatrix streaming fallback', () => {
         keeperName: 'blocked',
         attention: expect.objectContaining({
           level: 'blocked',
-          cause: expect.stringContaining('tool_route_recoverable_failure'),
+          cause: expect.stringContaining('provider_runtime_error'),
         }),
         message: expect.stringContaining('resolve 후보'),
       }),
@@ -812,7 +794,7 @@ describe('FleetFsmMatrix streaming fallback', () => {
             outcome: 'receipt_failed',
             terminal_reason_code: 'api_error',
             operator_disposition: 'pause_human',
-            operator_disposition_reason: 'tool_route_recoverable_failure',
+            operator_disposition_reason: 'provider_runtime_error',
           }),
           recommended_actions: [
             {
@@ -820,7 +802,7 @@ describe('FleetFsmMatrix streaming fallback', () => {
               target_type: 'keeper',
               target_id: 'blocked',
               severity: 'warn',
-              reason: 'Inspect tool-contract blocker: tool_route_recoverable_failure',
+              reason: 'Inspect provider runtime failure: provider_runtime_error',
               confirm_required: false,
               suggested_payload: {
                 source: 'fleet_fsm',
@@ -834,7 +816,7 @@ describe('FleetFsmMatrix streaming fallback', () => {
 
     render(html`<${FleetFsmMatrix} pollIntervalMs=${1000} />`)
 
-    const button = await screen.findByRole('button', { name: 'Inspect tool-contract blocker: tool_route_recoverable_failure' })
+    const button = await screen.findByRole('button', { name: 'Inspect provider runtime failure: provider_runtime_error' })
     await act(async () => {
       fireEvent.click(button)
     })

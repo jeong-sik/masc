@@ -9,7 +9,6 @@
 type execution_kind =
   | Parallel_read
   | Sequential_workspace
-  | Blocked
 
 type t = {
   batch_id : string;
@@ -20,10 +19,6 @@ type t = {
 val execution_kind_to_string : execution_kind -> string
 
 val plan : Tool_job.t list -> t list
-(** Plan jobs in input order.
-
-    Approved read-only jobs with no resource keys are grouped into contiguous
-    [Parallel_read] batches when they share the same [batch_id]. Approved jobs
-    that are mutating or require resource locks become singleton
-    [Sequential_workspace] batches. Pending or denied jobs become singleton
-    [Blocked] batches so policy evidence stays attached to the original job. *)
+(** Plan jobs in input order. Read-only jobs with no resource keys are grouped
+    into contiguous [Parallel_read] batches when they share the same
+    [batch_id]. Other jobs become singleton [Sequential_workspace] batches. *)

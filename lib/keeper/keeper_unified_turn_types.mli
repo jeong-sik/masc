@@ -12,7 +12,6 @@ type turn_state =
   { cycle_completed : bool
   ; manifest_seq : int
   ; post_commit_failure_reason : Keeper_registry.failure_reason option
-  ; paused_meta_override : Keeper_meta_contract.keeper_meta option
   ; current_turn_blocker_info : Keeper_meta_contract.blocker_info option
   ; last_execution : Keeper_turn_runtime_budget.runtime_execution option
   ; last_provider_timeout_budget : Keeper_turn_runtime_budget.provider_timeout_budget option

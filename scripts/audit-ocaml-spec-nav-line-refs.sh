@@ -13,8 +13,8 @@
 #     ExpireStale  [expire_stale] (~line 941) sweeps timed-out entries
 #
 # and the OCaml line drifts away from 941 as the file grows.  iter 70/71
-# (#14939 keeper_failure_circuit_breaker, #14943 keeper_approval_queue)
-# found four such sites with drift +29 .. +424; iter 71's survey memo is
+# (#14943 keeper_approval_queue) found sites with drift +29 .. +424;
+# iter 71's survey memo is
 # docs/tla-audit/ocaml-docstring-lineref-drift-class-2026-05-12.md.
 #
 # Rule:

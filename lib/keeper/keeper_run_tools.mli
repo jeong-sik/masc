@@ -20,8 +20,6 @@ type hook_accumulator =
   { mutable meta : Keeper_meta_contract.keeper_meta
   ; mutable tool_calls : tool_call_detail list
   ; mutable current_turn : int
-  ; mutable discovered : Keeper_discovered_tools.t
-  ; mutable tool_overlay : Agent_sdk.Tool_op.t
   ; mutable tool_surface : tool_surface_metrics
   ; mutable requested_tool_names : string list
   ; mutable receipt_completion_contract_result :
@@ -37,8 +35,6 @@ type hook_accumulator =
 type hook_outputs =
   { out_meta : Keeper_meta_contract.keeper_meta
   ; out_tool_calls : tool_call_detail list
-  ; out_discovered : Keeper_discovered_tools.t
-  ; out_tool_overlay : Agent_sdk.Tool_op.t
   ; out_tool_surface : tool_surface_metrics
   ; out_requested_tool_names : string list
   ; out_receipt_completion_contract_result :
@@ -48,21 +44,6 @@ type hook_outputs =
   }
 
 val freeze : hook_accumulator -> hook_outputs
-
-type tool_search_hit_partition =
-  { visible_core_hits : (string * float) list
-  ; discoverable_hits : (string * float) list
-  ; filtered_by_policy : int
-  }
-
-val partition_tool_search_hits
-  :  core:string list
-  -> core_always:string list
-  -> allowed:string list
-  -> retrieved:(string * float) list
-  -> max_results:int
-  -> tool_search_hit_partition
-
 
 (** Agent setup produced by Step 7.
 
@@ -104,14 +85,12 @@ val prepare_agent_setup
   -> generation:int
   -> runtime_id:string
   -> is_retry:bool
-  -> turn_affordances:string list
   -> config_root:string
   -> runtime_config_path:string option
-  -> ?max_cost_usd:float
   -> trajectory_acc:Trajectory.accumulator option
-  -> tool_overlay:Agent_sdk.Tool_op.t ref option
   -> ?runtime_manifest_context:Keeper_runtime_manifest.turn_context
   -> ?runtime_manifest_append:(Keeper_runtime_manifest.t -> unit)
   -> ?continuation_channel:Keeper_continuation_channel.t
+  -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
   -> unit
   -> (agent_setup, Agent_sdk.Error.sdk_error) result

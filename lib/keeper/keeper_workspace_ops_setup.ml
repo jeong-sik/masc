@@ -58,8 +58,6 @@ let observe_history_append ~root ~keeper_name entry =
 let render_completed_process_result
       ~root ~keeper_name ~op
       ?cwd ~cmd ?(extra = []) st out =
-  let success = st = Unix.WEXITED 0 in
-  let cmd_prefix = Keeper_tool_command_words.cmd_prefix cmd in
   let elapsed_ms =
     List.find_map (fun (k, v) ->
       if k = "execution_time_ms" then
@@ -69,38 +67,22 @@ let render_completed_process_result
   in
   let entry = Masc_exec.Bash_history.{
     ts = Unix.time ();
-    cmd_hash = Masc_exec.Bash_history.cmd_hash cmd;
-    cmd_prefix;
-    semantic_kind = op;
+    command = cmd;
     duration_ms = elapsed_ms;
-    success;
+    status = Masc_exec.Bash_history.process_status_of_unix st;
   } in
   observe_history_append ~root ~keeper_name entry;
-  let insight_extra =
-    let patterns = Masc_exec.Bash_history.failure_insight
-      ~base_path:root ~keeper_name
-    in
-    if patterns = [] then []
-    else [
-      "failure_insight", `List (
-        List.map Masc_exec.Bash_history.failure_pattern_to_json patterns)
-    ]
-  in
   let extra_with_via =
     if List.exists (fun (k, _) -> k = "via") extra then extra
     else ("via", `String "host") :: extra
   in
   Yojson.Safe.to_string
     (Exec_core.process_result_json
-       ~artifact_policy:Exec_core.Inline_only
-       ~base_path:root
-       ~keeper_name
-       ~cmd
        ~extra:([
            "op", `String op;
            "cmd", `String cmd;
            ( "cwd", Json_util.string_opt_to_json cwd );
-         ] @ extra_with_via @ insight_extra)
+         ] @ extra_with_via)
        ~status:st
        ~output:out
        ())

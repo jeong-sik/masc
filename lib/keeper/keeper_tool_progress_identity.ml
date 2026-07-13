@@ -66,10 +66,8 @@ let redacted_input input =
   |> Observability_redact.redact_json_strings
 ;;
 
-let digest_tool_input ~tool_name input =
-  if Observability_redact.is_denied_tool ~tool_name
-  then None
-  else Some (digest_json (redacted_input input))
+let digest_tool_input ~tool_name:_ input =
+  Some (digest_json (redacted_input input))
 ;;
 
 let stored_output_identity_json ~sha256 ~bytes ~mime =
@@ -99,10 +97,8 @@ let output_fingerprint output_text =
   | Tool_output.Inline value -> inline_output_fingerprint value
 ;;
 
-let digest_tool_output ~tool_name output_text =
-  if Observability_redact.is_denied_tool ~tool_name
-  then None
-  else output_fingerprint output_text
+let digest_tool_output ~tool_name:_ output_text =
+  output_fingerprint output_text
 ;;
 
 let digest_tool_io ~tool_name ~input ~output_text =

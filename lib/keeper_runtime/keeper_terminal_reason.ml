@@ -53,8 +53,6 @@ type t =
   | Capacity_backpressure of string
   | Config_or_auth of string
   | Provider_runtime_failure of string
-  | Completion_contract_violation of string
-  | Turn_livelock of string
   | Internal_error of string
   | Turn_budget_exhausted of string
   | Auto_recoverable_budget of string
@@ -90,10 +88,6 @@ let of_wire wire =
     || String.equal lowered "provider_error"
     || String.starts_with ~prefix:"provider_error_" lowered
   then Provider_runtime_failure wire
-  else if String.starts_with ~prefix:"completion_contract_violation:" lowered
-  then Completion_contract_violation wire
-  else if String.starts_with ~prefix:"turn_livelock:" lowered
-  then Turn_livelock wire
   else if String.equal lowered "internal_error"
   then Internal_error wire
   else if String.starts_with ~prefix:terminal_prefix_turn_budget_exhausted lowered
@@ -114,8 +108,6 @@ let to_wire = function
   | Capacity_backpressure wire -> wire
   | Config_or_auth wire -> wire
   | Provider_runtime_failure wire -> wire
-  | Completion_contract_violation wire -> wire
-  | Turn_livelock wire -> wire
   | Internal_error wire -> wire
   | Turn_budget_exhausted wire -> wire
   | Auto_recoverable_budget wire -> wire
@@ -149,8 +141,6 @@ let is_transient_provider_runtime_failure = function
   | Runtime_exhausted _
   | Capacity_backpressure _
   | Config_or_auth _
-  | Completion_contract_violation _
-  | Turn_livelock _
   | Internal_error _
   | Turn_budget_exhausted _
   | Auto_recoverable_budget _

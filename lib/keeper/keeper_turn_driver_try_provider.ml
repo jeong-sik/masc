@@ -38,14 +38,12 @@ type try_provider_ctx =
   ; temperature : float
   ; max_tokens : int option
   ; accept : Agent_sdk_response.api_response -> bool
-  ; guardrails : Agent_sdk.Guardrails.t option
   ; hooks : Agent_sdk.Hooks.hooks option
   ; context_reducer : Agent_sdk.Context_reducer.t option
   ; raw_trace : Agent_sdk.Raw_trace.t option
   ; trace_link : (string * string) option
   ; (* Transport *)
     transport_resolved : Masc_grpc_transport.t
-  ; runtime_mcp_policy : Llm_provider.Llm_transport.runtime_mcp_policy option
   ; (* Session / checkpoint *)
     allowed_paths : string list
   ; checkpoint_sidecar : Yojson.Safe.t option
@@ -125,46 +123,6 @@ let emit_runtime_manifest
       ?status ?decision ()
     |> append
   | _ -> ()
-
-let sanitize_runtime_mcp_external_tool_choice
-      ~runtime_mcp_external_tools
-      (params : Agent_sdk.Hooks.turn_params)
-  =
-  if not runtime_mcp_external_tools then params
-  else
-    match params.tool_choice with
-    | Some (Agent_sdk.Types.Any | Agent_sdk.Types.Tool _) ->
-      { params with tool_choice = Some Agent_sdk.Types.Auto }
-    | Some (Agent_sdk.Types.Auto | Agent_sdk.Types.None_) | None -> params
-
-let sanitize_runtime_mcp_external_tool_decision
-      ~runtime_mcp_external_tools
-      (decision : Agent_sdk.Hooks.hook_decision)
-  =
-  match decision with
-  | Agent_sdk.Hooks.AdjustParams params ->
-    Agent_sdk.Hooks.AdjustParams
-      (sanitize_runtime_mcp_external_tool_choice
-         ~runtime_mcp_external_tools
-         params)
-  | _ -> decision
-
-let wrap_runtime_mcp_external_tool_hooks
-      ~runtime_mcp_external_tools
-      (hooks : Agent_sdk.Hooks.hooks option)
-  =
-  match hooks, runtime_mcp_external_tools with
-  | None, _ | Some _, false -> hooks
-  | Some hooks, true ->
-    let before_turn_params =
-      Option.map
-        (fun hook event ->
-           hook event
-           |> sanitize_runtime_mcp_external_tool_decision
-                ~runtime_mcp_external_tools:true)
-        hooks.before_turn_params
-    in
-    Some { hooks with before_turn_params }
 
 let max_execution_time_for_attempt ?per_provider_timeout_s () =
   (* Never forward per-provider timeouts to OAS [max_execution_time_s].
@@ -412,52 +370,22 @@ let run_try_provider
      different thinking policy without mutating [ctx]. RFC-0271 §4.1 uses it for the
      [Retry_no_thinking] recovery arm: a [Thinking_only_no_progress] rejection is
      retried once with thinking forced off before rerouting to the next candidate. *)
+  let resolved_lane =
+    match ctx.tools with
+    | [] -> "none"
+    | _ :: _ -> "inline"
+  in
+  emit_runtime_manifest ctx
+    ~status:"resolved"
+    ~decision:(`Assoc [ "resolved_lane", `String resolved_lane ])
+    Keeper_runtime_manifest.Provider_lane_resolved;
   let config_result =
-    match
-      Runtime_candidate.resolve_tool_lane_for_oas_tools
-        ~base_path:ctx.base_path
-        ?agent_name:(Runtime_oas_runner.keeper_agent_name_opt ctx.keeper_name)
-        ~tools:ctx.tools
-        candidate
-    with
-    | Error _ as err -> err
-    | Ok (effective_tools, runtime_mcp_policy) ->
-      let runtime_mcp_policy =
-        match runtime_mcp_policy, String.trim ctx.keeper_name with
-        | Some policy, keeper_name when keeper_name <> "" ->
-          Runtime_candidate.runtime_mcp_policy_for_agent
-            ~base_path:ctx.base_path
-            ~agent_name:(Keeper_identity.keeper_agent_name ctx.keeper_name)
-            candidate
-            (Some policy)
-        | _ -> runtime_mcp_policy
-      in
-      let resolved_lane =
-        Keeper_turn_driver_helpers.resolved_tool_lane_label ~effective_tools
-          ~runtime_mcp_policy
-      in
-      let runtime_mcp_external_tools =
-        effective_tools = [] && Option.is_some runtime_mcp_policy
-      in
-      let hooks =
-        wrap_runtime_mcp_external_tool_hooks
-          ~runtime_mcp_external_tools
-          ctx.hooks
-      in
-      emit_runtime_manifest ctx
-        ~status:"resolved"
-        ~decision:
-          (`Assoc
-            [
-              ("resolved_lane", `String resolved_lane);
-            ])
-        Keeper_runtime_manifest.Provider_lane_resolved;
-      Ok
-        { (Runtime_candidate.default_config
-             ~name:ctx.name
-             ~system_prompt:ctx.system_prompt
-             ~tools:effective_tools
-             candidate)
+    Ok
+      { (Runtime_candidate.default_config
+           ~name:ctx.name
+           ~system_prompt:ctx.system_prompt
+           ~tools:ctx.tools
+           candidate)
             with
             priority = ctx.priority
           ; max_tokens = ctx.max_tokens
@@ -475,8 +403,8 @@ let run_try_provider
           ; temperature = ctx.temperature
           ; max_turns = ctx.max_turns
           ; max_idle_turns = ctx.max_idle_turns
-          ; guardrails = ctx.guardrails
-          ; hooks
+          ; guardrails = Some Agent_sdk.Guardrails.permissive
+          ; hooks = ctx.hooks
           ; context_reducer = ctx.context_reducer
           ; description =
               Some (Printf.sprintf "runtime:%s/runtime" ctx.runtime_id)
@@ -506,7 +434,7 @@ let run_try_provider
           ; trace_link = ctx.trace_link
           ; yield_on_tool = ctx.yield_on_tool
           ; tool_failure_judge = ctx.tool_failure_judge
-          ; runtime_mcp_policy
+          ; runtime_mcp_policy = None
           }
   in
   let local_agent_ref : Agent_sdk.Agent.t option ref = ref None in
@@ -566,17 +494,6 @@ let run_try_provider
         run_fn ())
     in
     let result =
-      (* Restore typed provider-context enrichment (auth-env / not-found hints).
-         [Runtime_candidate] lives below [lib/keeper] and cannot reach this
-         keeper-level helper, so the enrichment is applied here at the consumer
-         with the candidate's provider config. *)
-      Result.map_error
-        (Keeper_runtime_attempt.enrich_sdk_error
-           ~runtime_id:ctx.error_runtime_id
-           ~provider_cfg:(Runtime_candidate.provider_cfg candidate))
-        result
-    in
-    let result =
       match result with
       | Ok run_result ->
         apply_accept
@@ -613,8 +530,6 @@ let run_try_provider
 module For_testing = struct
   let max_execution_time_for_attempt = max_execution_time_for_attempt
   let stream_idle_timeout_for_attempt = stream_idle_timeout_for_attempt
-  let sanitize_runtime_mcp_external_tool_choice =
-    sanitize_runtime_mcp_external_tool_choice
   let apply_accept = apply_accept
   let last_tool_progress_context_of_messages = last_tool_progress_context_of_messages
   let format_last_tool_progress_context = format_last_tool_progress_context

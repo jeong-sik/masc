@@ -10,14 +10,9 @@
     for this cycle.
 
     Cursor-advance gating: [collect_board_events] advances and acks the
-    per-keeper board cursor as a side effect, so it must only run when the
-    keeper can actually act on the events this cycle. If a later admission gate
-    will prevent a turn, collecting here would advance the cursor past posts the
-    keeper never processed — dropping them with no requeue and no log at the
-    keeper level. We therefore skip collection (returning no events and leaving
-    the cursor untouched) until the keeper is warmed up, unpaused, free of
-    pending HITL approval, healthy enough to run, and not in provider cooldown,
-    so the posts re-surface once the blocker clears. *)
+    per-keeper board cursor as a side effect, so it runs only after warmup and
+    while the explicit Keeper lifecycle is active. Runtime health and provider
+    cooldown are observations, not reasons to suppress or drop board work. *)
 
 open Keeper_types
 open Keeper_meta_contract
@@ -125,39 +120,22 @@ let fleet_health_json ~base_path ~keeper_names =
     ]
 ;;
 
-(* Pure gate: a keeper may consume board events — and thereby advance the
-   per-keeper cursor past them — only once no known turn-admission blocker is
-   present. [collect_board_events] advances + acks the cursor as a side effect,
-   so collecting for a keeper that cannot act this cycle would step the cursor
-   over posts it never processed, dropping them with no requeue. *)
-let should_collect_board_events
-      ~proactive_warmup_elapsed
-      ~paused
-      ~approval_pending
-      ~keeper_backpressured
-      ~provider_cooldown_pending
-  =
+(* Pure lifecycle gate: a keeper may consume board events — and thereby
+   advance its cursor — after warmup while it is explicitly active. Provider
+   availability is handled at the call boundary and cannot withhold intake. *)
+let should_collect_board_events ~proactive_warmup_elapsed ~paused =
   proactive_warmup_elapsed && not paused
-  && not approval_pending
-  && not keeper_backpressured
-  && not provider_cooldown_pending
 ;;
 
 let collect_keepalive_board_events
       ~(ctx : _ context)
       ~(meta_current : keeper_meta)
       ~(proactive_warmup_elapsed : bool)
-      ~(approval_pending : bool)
-      ~(keeper_backpressured : bool)
-      ~(provider_cooldown_pending : bool)
   =
   if not
        (should_collect_board_events
           ~proactive_warmup_elapsed
-          ~paused:meta_current.paused
-          ~approval_pending
-          ~keeper_backpressured
-          ~provider_cooldown_pending)
+          ~paused:meta_current.paused)
   then [], meta_current
   else (
     let pending_board_events =

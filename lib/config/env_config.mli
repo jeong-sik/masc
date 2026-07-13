@@ -4,7 +4,7 @@
     App principles. All env vars use the [MASC_*] prefix.
 
     Re-exports the public surface of {!Env_config_core},
-    {!Env_config_runtime}, {!Env_config_governance}, and
+    {!Env_config_runtime}, {!Env_config_runtime_services}, and
     {!Env_config_keeper} so callers can [Env_config.<symbol>] without
     knowing which sub-module owns each knob. The interface uses
     [include module type of] so the facade auto-tracks the underlying
@@ -17,6 +17,6 @@
 
 include module type of Env_config_core
 include module type of Env_config_runtime
-include module type of Env_config_governance
+include module type of Env_config_runtime_services
 include module type of Env_config_keeper
 

@@ -72,7 +72,6 @@ export function lifecycleStateFromKeeperPhase(phase: string | null | undefined):
     case 'stopped':
     case 'crashed':
     case 'dead':
-    case 'zombie':
     case 'terminated':
       return 'terminated'
     case 'idle':
@@ -93,7 +92,6 @@ export function persistenceStateFromKeeperPhase(
     case 'failing':
     case 'overflowed':
     case 'crashed':
-    case 'zombie':
       return 'conflict'
     case 'compacting':
     case 'handoffing':
@@ -507,4 +505,3 @@ function PersistenceRouteLinks({
     </div>
   `
 }
-

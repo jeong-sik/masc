@@ -207,29 +207,20 @@ let image_preflight_start_error (failure : Keeper_sandbox_runtime.classified_err
     failure
 ;;
 
-let max_eintr_retries = 8
+let sandbox_environment () =
+  Env_keeper_scrub.filter_environment (Unix.environment ())
+;;
 
-let run_argv_with_status_retry_eintr ?timeout_sec argv =
-  Docker_spawn_throttle.with_slot (fun () ->
-    let rec loop attempts_left =
-      let st, out =
-        Masc_exec.Exec_gate.run_argv_with_status
-          ?timeout_sec
-          ~actor:`System_sandbox
-          ~raw_source:(String.concat " " argv)
-          ~summary:"keeper turn sandbox command"
-          ~env:(Env_keeper_scrub.filter_environment_c_messages (Unix.environment ()))
-          ~cwd:(Config_dir_resolver.current_working_dir ())
-          argv
-      in
-      match st with
-      | Unix.WEXITED 127
-        when attempts_left > 0
-             && String_util.contains_substring_ci out "interrupted system call" ->
-        loop (attempts_left - 1)
-      | _ -> st, out
-    in
-    loop max_eintr_retries)
+let run_argv_with_status ?timeout_sec argv =
+  Fd_accountant.observe ~kind:Fd_accountant.Docker_spawn (fun () ->
+    Masc_exec.Exec_gate.run_argv_with_status
+      ?timeout_sec
+      ~actor:(Masc_exec.Agent_id.of_string "system/sandbox")
+      ~raw_source:(String.concat " " argv)
+      ~summary:"keeper turn sandbox command"
+      ~env:(sandbox_environment ())
+      ~cwd:(Config_dir_resolver.current_working_dir ())
+      argv)
 ;;
 
 let output_for_status ~(stdout : string) ~(stderr : string) =
@@ -239,448 +230,117 @@ let output_for_status ~(stdout : string) ~(stderr : string) =
   | out, err -> out ^ "\n" ^ err
 ;;
 
-let retryable_eintr_status ~attempts_left st ~stdout ~stderr =
-  match st with
-  | Unix.WEXITED 127
-    when attempts_left > 0
-         && String_util.contains_substring_ci
-              (output_for_status ~stdout ~stderr)
-              "interrupted system call" ->
-    true
-  | _ -> false
-;;
-
-type chunk = [ `Stdout of string | `Stderr of string ]
-
-type guard_state = {
-  held_chunks : chunk list;
-  saw_retry_marker : bool;
-  pass_through : bool;
-  visible_flushed : bool;
-  marker_scan_tail : string;
-  release_scheduled : bool;
-  prefix_release_deferrals : int;
-  closed : bool;
-}
-
-type action =
-  | Emit of chunk
-  | Schedule_release
-
-type retry_stream_guard = {
-  on_stdout_chunk : (string -> unit) option;
-  on_stderr_chunk : (string -> unit) option;
-  state : guard_state Atomic.t;
-}
-
-let retry_eintr_marker = "interrupted system call"
-let retry_stream_guard_release_delay_sec = 0.2
-let retry_stream_guard_prefix_deferral_limit = 1
-let retry_eintr_marker_lower = String.lowercase_ascii retry_eintr_marker
-
-let initial_guard_state = {
-  held_chunks = [];
-  saw_retry_marker = false;
-  pass_through = false;
-  visible_flushed = false;
-  marker_scan_tail = "";
-  release_scheduled = false;
-  prefix_release_deferrals = 0;
-  closed = false;
-}
-
-let retry_marker_tail text =
-  let max_len = max 0 (String.length retry_eintr_marker - 1) in
-  let len = String.length text in
-  if len <= max_len then text else String.sub text (len - max_len) max_len
-;;
-
-let retry_marker_prefix_pending tail =
-  let tail = String.lowercase_ascii tail in
-  let marker_len = String.length retry_eintr_marker_lower in
-  let min_prefix_len = min 4 (marker_len - 1) in
-  let max_len = min (String.length tail) (marker_len - 1) in
-  let rec loop len =
-    if len < min_prefix_len
-    then false
-    else
-      let suffix = String.sub tail (String.length tail - len) len in
-      let prefix = String.sub retry_eintr_marker_lower 0 len in
-      String.equal suffix prefix || loop (len - 1)
-  in
-  loop max_len
-;;
-
-let update_retry_marker_scan state chunk =
-  let scan_text = state.marker_scan_tail ^ chunk in
-  let saw_marker = String_util.contains_substring_ci scan_text retry_eintr_marker in
-  { state with
-    saw_retry_marker = state.saw_retry_marker || saw_marker;
-    marker_scan_tail = retry_marker_tail scan_text
-  }
-;;
-
-let invoke_guard_output_callback f chunk =
-  try
-    f chunk;
-    ()
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn ->
-    Log.Misc.warn
-      "[Keeper_turn_sandbox_runtime] output chunk callback error, continuing: %s"
-      (Printexc.to_string exn)
-;;
-
-let chunk_has_visible_callback ~on_stdout_chunk ~on_stderr_chunk = function
-  | `Stdout _ -> Option.is_some on_stdout_chunk
-  | `Stderr _ -> Option.is_some on_stderr_chunk
-;;
-
-let emit_guard_chunk guard = function
-  | `Stdout chunk ->
-    (match guard.on_stdout_chunk with
-     | None -> ()
-     | Some f -> invoke_guard_output_callback f chunk)
-  | `Stderr chunk ->
-    (match guard.on_stderr_chunk with
-     | None -> ()
-     | Some f -> invoke_guard_output_callback f chunk)
-;;
-
-let perform_action guard = function
-  | Emit chunk -> emit_guard_chunk guard chunk
-  | Schedule_release -> ()
-;;
-
-let transition ~on_stdout_chunk ~on_stderr_chunk state chunk =
-  let text =
-    match chunk with
-    | `Stdout s -> s
-    | `Stderr s -> s
-  in
-  let state = update_retry_marker_scan state text in
-  if
-    state.pass_through
-    && not state.saw_retry_marker
-    && not (retry_marker_prefix_pending state.marker_scan_tail)
-  then
-    let visible_flushed =
-      state.visible_flushed
-      || chunk_has_visible_callback ~on_stdout_chunk ~on_stderr_chunk chunk
-    in
-    { state with visible_flushed }, [ Emit chunk ]
-  else
-    let held_chunks = chunk :: state.held_chunks in
-    let should_schedule =
-      (not state.release_scheduled)
-      && not state.closed
-      && not state.saw_retry_marker
-    in
-    let state =
-      { state with
-        held_chunks;
-        release_scheduled = state.release_scheduled || should_schedule
-      }
-    in
-    let actions = if should_schedule then [ Schedule_release ] else [] in
-    state, actions
-;;
-
-let release_transition ~on_stdout_chunk ~on_stderr_chunk state =
-  if state.closed || state.saw_retry_marker
-  then { state with release_scheduled = false }, []
-  else if
-    retry_marker_prefix_pending state.marker_scan_tail
-    && state.prefix_release_deferrals < retry_stream_guard_prefix_deferral_limit
-  then
-    ( { state with
-        prefix_release_deferrals = state.prefix_release_deferrals + 1;
-        release_scheduled = true }
-    , [] )
-  else
-    let chunks = List.rev state.held_chunks in
-    let visible_flushed =
-      state.visible_flushed
-      || List.exists (chunk_has_visible_callback ~on_stdout_chunk ~on_stderr_chunk) chunks
-    in
-    let state =
-      { state with
-        pass_through = true;
-        prefix_release_deferrals = 0;
-        held_chunks = [];
-        visible_flushed;
-        release_scheduled = false
-      }
-    in
-    let actions = List.map (fun chunk -> Emit chunk) chunks in
-    state, actions
-;;
-
-let close_transition ~on_stdout_chunk ~on_stderr_chunk ~retryable state =
-  let state = { state with closed = true; release_scheduled = false } in
-  if retryable
-  then { state with held_chunks = [] }, []
-  else
-    let chunks = List.rev state.held_chunks in
-    let visible_flushed =
-      state.visible_flushed
-      || List.exists (chunk_has_visible_callback ~on_stdout_chunk ~on_stderr_chunk) chunks
-    in
-    { state with held_chunks = []; visible_flushed }, List.map (fun chunk -> Emit chunk) chunks
-;;
-
-(* Docker EINTR retry output arrives as a short burst. Release ordinary held
-   prefixes after a small Eio sleep so sparse successful commands still stream
-   without invoking user callbacks from an unmanaged systhread. *)
-let rec schedule_guard_release guard =
-  match Eio_context.get_switch_opt (), Eio_context.get_clock_opt () with
-  | Some sw, Some clock ->
-    Eio.Fiber.fork ~sw (fun () ->
-      Eio.Time.sleep clock retry_stream_guard_release_delay_sec;
-      let rec apply () =
-        let old_state = Atomic.get guard.state in
-        let new_state, actions =
-          release_transition
-            ~on_stdout_chunk:guard.on_stdout_chunk
-            ~on_stderr_chunk:guard.on_stderr_chunk
-            old_state
-        in
-        if Atomic.compare_and_set guard.state old_state new_state
-        then actions
-        else apply ()
-      in
-      let actions = apply () in
-      List.iter (perform_action guard) actions;
-      if List.memq Schedule_release actions then schedule_guard_release guard)
-  | _ ->
-    (* Without Eio context there is no safe live timer surface for user
-       callbacks. Held chunks are emitted when the attempt completes. *)
-    ()
-;;
-
-let guard_attempt_callback guard chunk =
-  let rec apply () =
-    let old_state = Atomic.get guard.state in
-    let new_state, actions =
-      transition
-        ~on_stdout_chunk:guard.on_stdout_chunk
-        ~on_stderr_chunk:guard.on_stderr_chunk
-        old_state
-        chunk
-    in
-    if Atomic.compare_and_set guard.state old_state new_state
-    then actions
-    else apply ()
-  in
-  let actions = apply () in
-  List.iter (perform_action guard) actions;
-  if List.memq Schedule_release actions then schedule_guard_release guard
-;;
-
-let run_split_retry_eintr_with_live_callbacks
-      ?on_stdout_chunk
-      ?on_stderr_chunk
-      ~run_attempt
-      ()
-  =
-  let rec loop attempts_left =
-    let guard =
-      { on_stdout_chunk
-      ; on_stderr_chunk
-      ; state = Atomic.make initial_guard_state
-      }
-    in
-    let has_output_callback =
-      Option.is_some on_stdout_chunk || Option.is_some on_stderr_chunk
-    in
-    let attempt_on_stdout_chunk =
-      if has_output_callback
-      then Some (fun chunk -> guard_attempt_callback guard (`Stdout chunk))
-      else None
-    in
-    let attempt_on_stderr_chunk =
-      if has_output_callback
-      then Some (fun chunk -> guard_attempt_callback guard (`Stderr chunk))
-      else None
-    in
-    let st, stdout, stderr =
-      run_attempt
-        ?on_stdout_chunk:attempt_on_stdout_chunk
-        ?on_stderr_chunk:attempt_on_stderr_chunk
-        ()
-    in
-    let retryable = retryable_eintr_status ~attempts_left st ~stdout ~stderr in
-    let actions =
-      let rec apply () =
-        let old_state = Atomic.get guard.state in
-        let new_state, actions =
-          close_transition
-            ~on_stdout_chunk:guard.on_stdout_chunk
-            ~on_stderr_chunk:guard.on_stderr_chunk
-            ~retryable
-            old_state
-        in
-        if Atomic.compare_and_set guard.state old_state new_state
-        then actions
-        else apply ()
-      in
-      apply ()
-    in
-    if retryable
-    then loop (attempts_left - 1)
-    else (
-      List.iter (perform_action guard) actions;
-      st, stdout, stderr)
-  in
-  loop max_eintr_retries
-;;
-
-let run_argv_with_status_split_retry_eintr
+let run_argv_with_status_split
       ?timeout_sec
       ?on_stdout_chunk
       ?on_stderr_chunk
       argv
   =
-  Docker_spawn_throttle.with_slot (fun () ->
-    run_split_retry_eintr_with_live_callbacks
-      ?on_stdout_chunk
-      ?on_stderr_chunk
-      ~run_attempt:(fun ?on_stdout_chunk ?on_stderr_chunk () ->
-        let raw_source = String.concat " " argv in
-        let env = Env_keeper_scrub.filter_environment_c_messages (Unix.environment ()) in
-        let cwd = Config_dir_resolver.current_working_dir () in
-        match on_stdout_chunk, on_stderr_chunk with
-        | None, None ->
-          Masc_exec.Exec_gate.run_argv_with_status_split
-            ?timeout_sec
-            ~actor:`System_sandbox
-            ~raw_source
-            ~summary:"keeper turn sandbox command"
-            ~env
-            ~cwd
-            argv
-        | _ ->
-          (* DET-OK: absent stream callbacks mean the caller requested capture only. *)
-          let on_stdout_chunk =
-            Option.value on_stdout_chunk ~default:(fun _ -> ())
-          in
-          (* DET-OK: stderr callback absence has the same capture-only meaning. *)
-          let on_stderr_chunk =
-            Option.value on_stderr_chunk ~default:(fun _ -> ())
-          in
-          Masc_exec.Exec_gate.run_argv_with_status_split_streaming
-            ?timeout_sec
-            ~actor:`System_sandbox
-            ~raw_source
-            ~summary:"keeper turn sandbox command streaming"
-            ~env
-            ~cwd
-            ~on_stdout_chunk
-            ~on_stderr_chunk
-            argv)
-      ())
+  Fd_accountant.observe ~kind:Fd_accountant.Docker_spawn (fun () ->
+    let raw_source = String.concat " " argv in
+    let env = sandbox_environment () in
+    let cwd = Config_dir_resolver.current_working_dir () in
+    match on_stdout_chunk, on_stderr_chunk with
+    | None, None ->
+      Masc_exec.Exec_gate.run_argv_with_status_split
+        ?timeout_sec
+        ~actor:(Masc_exec.Agent_id.of_string "system/sandbox")
+        ~raw_source
+        ~summary:"keeper turn sandbox command"
+        ~env
+        ~cwd
+        argv
+    | _ ->
+      (* DET-OK: absent stream callbacks mean the caller requested capture only. *)
+      let on_stdout_chunk = Option.value on_stdout_chunk ~default:(fun _ -> ()) in
+      (* DET-OK: stderr callback absence has the same capture-only meaning. *)
+      let on_stderr_chunk = Option.value on_stderr_chunk ~default:(fun _ -> ()) in
+      Masc_exec.Exec_gate.run_argv_with_status_split_streaming
+        ?timeout_sec
+        ~actor:(Masc_exec.Agent_id.of_string "system/sandbox")
+        ~raw_source
+        ~summary:"keeper turn sandbox command streaming"
+        ~env
+        ~cwd
+        ~on_stdout_chunk
+        ~on_stderr_chunk
+        argv)
 ;;
 
-let run_argv_with_stdin_and_status_retry_eintr ?timeout_sec ~stdin_content argv =
-  Docker_spawn_throttle.with_slot (fun () ->
-    let rec loop attempts_left =
-      let st, out =
-        Masc_exec.Exec_gate.run_argv_with_stdin_and_status
-          ?timeout_sec
-          ~actor:`System_sandbox
-          ~raw_source:(String.concat " " argv)
-          ~summary:"keeper turn sandbox stdin command"
-          ~env:(Env_keeper_scrub.filter_environment_c_messages (Unix.environment ()))
-          ~cwd:(Config_dir_resolver.current_working_dir ())
-          ~stdin_content
-          argv
-      in
-      match st with
-      | Unix.WEXITED 127
-        when attempts_left > 0
-             && String_util.contains_substring_ci out "interrupted system call" ->
-        loop (attempts_left - 1)
-      | _ -> st, out
-    in
-    loop max_eintr_retries)
+let run_argv_with_stdin_and_status ?timeout_sec ~stdin_content argv =
+  Fd_accountant.observe ~kind:Fd_accountant.Docker_spawn (fun () ->
+    Masc_exec.Exec_gate.run_argv_with_stdin_and_status
+      ?timeout_sec
+      ~actor:(Masc_exec.Agent_id.of_string "system/sandbox")
+      ~raw_source:(String.concat " " argv)
+      ~summary:"keeper turn sandbox stdin command"
+      ~env:(sandbox_environment ())
+      ~cwd:(Config_dir_resolver.current_working_dir ())
+      ~stdin_content
+      argv)
 ;;
 
-let run_argv_with_stdin_and_status_split_retry_eintr
+let run_argv_with_stdin_and_status_split
       ?timeout_sec
       ?on_stdout_chunk
       ?on_stderr_chunk
       ~stdin_content
       argv
   =
-  Docker_spawn_throttle.with_slot (fun () ->
-    run_split_retry_eintr_with_live_callbacks
+  Fd_accountant.observe ~kind:Fd_accountant.Docker_spawn (fun () ->
+    Masc_exec.Exec_gate.run_argv_with_stdin_and_status_split
+      ?timeout_sec
+      ~actor:(Masc_exec.Agent_id.of_string "system/sandbox")
+      ~raw_source:(String.concat " " argv)
+      ~summary:"keeper turn sandbox stdin command"
+      ~env:(sandbox_environment ())
+      ~cwd:(Config_dir_resolver.current_working_dir ())
       ?on_stdout_chunk
       ?on_stderr_chunk
-      ~run_attempt:(fun ?on_stdout_chunk ?on_stderr_chunk () ->
-        let raw_source = String.concat " " argv in
-        let env = Env_keeper_scrub.filter_environment_c_messages (Unix.environment ()) in
-        let cwd = Config_dir_resolver.current_working_dir () in
-        Masc_exec.Exec_gate.run_argv_with_stdin_and_status_split
-          ?timeout_sec
-          ~actor:`System_sandbox
-          ~raw_source
-          ~summary:"keeper turn sandbox stdin command"
-          ~env
-          ~cwd
-          ?on_stdout_chunk
-          ?on_stderr_chunk
-          ~stdin_content
-          argv)
-      ())
+      ~stdin_content
+      argv)
 ;;
 
-let run_argv_pipeline_with_status_split_retry_eintr
+let run_argv_pipeline_with_status_split
       ?timeout_sec
       ?on_stdout_chunk
       ?on_stderr_chunk
       stages
   =
-  Docker_spawn_throttle.with_slot (fun () ->
-    run_split_retry_eintr_with_live_callbacks
+  Fd_accountant.observe ~kind:Fd_accountant.Docker_spawn (fun () ->
+    let raw_source =
+      stages
+      |> List.map (fun stage -> String.concat " " stage.Process_eio.argv)
+      |> String.concat " | "
+    in
+    Masc_exec.Exec_gate.run_argv_pipeline_with_status_split
+      ?timeout_sec
+      ~actor:(Masc_exec.Agent_id.of_string "system/sandbox")
+      ~raw_source
+      ~summary:"keeper turn sandbox pipeline command"
       ?on_stdout_chunk
       ?on_stderr_chunk
-      ~run_attempt:(fun ?on_stdout_chunk ?on_stderr_chunk () ->
-        let raw_source =
-          stages
-          |> List.map (fun stage -> String.concat " " stage.Process_eio.argv)
-          |> String.concat " | "
-        in
-        Masc_exec.Exec_gate.run_argv_pipeline_with_status_split
-          ?timeout_sec
-          ~actor:`System_sandbox
-          ~raw_source
-          ~summary:"keeper turn sandbox pipeline command"
-          ?on_stdout_chunk
-          ?on_stderr_chunk
-          stages)
-      ())
+      stages)
 ;;
 
-let container_inspect_timeout_sec () =
-  Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Cleanup_rm ()
-;;
-
-let inspect_container_exists ~timeout_sec container_name =
+let inspect_container_exists ?timeout_sec container_name =
   let inspect_argv =
     Keeper_sandbox_runtime.docker_command_argv ()
     @ [ "inspect"; "--format"; "{{.Id}}"; container_name ]
   in
   let inspect_st, inspect_out =
-    run_argv_with_status_retry_eintr ~timeout_sec inspect_argv
+    run_argv_with_status ?timeout_sec inspect_argv
   in
   match inspect_st with
   | Unix.WEXITED 0 -> Ok ()
   | _ -> Error inspect_out
 ;;
 
-let inspect_container_running ~timeout_sec container_name =
-  match Keeper_sandbox_runtime.probe_container_state ~container_name ~timeout_sec with
+let inspect_container_running ?timeout_sec container_name =
+  match
+    Keeper_sandbox_runtime.probe_container_state_optional
+      ~container_name ?timeout_sec ()
+  with
   | Ok Keeper_sandbox_runtime.Docker_container_running -> Ok ()
   | Ok Keeper_sandbox_runtime.Docker_container_stopped ->
     Error (Printf.sprintf "docker container %s is stopped" container_name)
@@ -694,14 +354,15 @@ type failed_exec_recovery =
   | Restart_failed_exec
   | Failed_exec_state_probe_error of string
 
-let failed_exec_recovery (t : t) =
+let failed_exec_recovery ?timeout_sec (t : t) =
   match get_state t with
   | Not_started -> Restart_failed_exec
   | Running { container_name } ->
     (match
-       Keeper_sandbox_runtime.probe_container_state
+       Keeper_sandbox_runtime.probe_container_state_optional
          ~container_name
-         ~timeout_sec:(container_inspect_timeout_sec ())
+         ?timeout_sec
+         ()
      with
      | Ok Keeper_sandbox_runtime.Docker_container_running -> Preserve_failed_exec
      | Ok Keeper_sandbox_runtime.Docker_container_stopped
@@ -717,7 +378,7 @@ let failed_exec_state_probe_error ~status ~output detail =
     detail
 ;;
 
-let start_container (t : t) ~timeout_sec =
+let start_container ?timeout_sec (t : t) =
   let image =
     match t.meta.sandbox_image with
     | Some img when String.trim img <> "" -> img
@@ -727,19 +388,17 @@ let start_container (t : t) ~timeout_sec =
   then Error "keeper sandbox docker image is not configured"
   else (
     match
-      Keeper_sandbox_runtime.ensure_keeper_sandbox_image_present_with_class
+      Keeper_sandbox_runtime.ensure_keeper_sandbox_image_present_with_class_optional
         ~image
-        ~timeout_sec
+        ?timeout_sec
+        ()
     with
     | Error failure -> Error (image_preflight_start_error failure)
     | Ok () ->
-      let _cleanup =
-        Keeper_sandbox_runtime.maybe_cleanup_stale_containers
-          ~base_path:t.config.base_path
-
-          ()
-      in
-      match Keeper_sandbox_runtime.ensure_keeper_sandbox_runtime ~timeout_sec with
+      match
+        Keeper_sandbox_runtime.ensure_keeper_sandbox_runtime_optional
+          ?timeout_sec ()
+      with
       | Error _ as err -> err
       | Ok seccomp_args ->
       let container_name = container_name_of t in
@@ -810,13 +469,13 @@ let start_container (t : t) ~timeout_sec =
          let st, out =
            Eio_guard.protect
              ~finally:secret_projection.cleanup
-             (fun () -> run_argv_with_status_retry_eintr argv)
+             (fun () -> run_argv_with_status ?timeout_sec argv)
          in
          (match st with
          | Unix.WEXITED 0 ->
             (match
                inspect_container_exists
-                 ~timeout_sec:(container_inspect_timeout_sec ())
+                 ?timeout_sec
                  container_name
              with
              | Ok () ->
@@ -832,9 +491,7 @@ let start_container (t : t) ~timeout_sec =
                  @ [ "rm"; "-f"; container_name ]
                in
                let _rm_st, _rm_out =
-                 run_argv_with_status_retry_eintr
-                   ~timeout_sec:(container_inspect_timeout_sec ())
-                   rm_argv
+                 run_argv_with_status ?timeout_sec rm_argv
                in
                Error
                  (Printf.sprintf
@@ -868,22 +525,20 @@ let start_container (t : t) ~timeout_sec =
                  mount_context)))))
 ;;
 
-let ensure_started ?(validate_running = false) (t : t) ~timeout_sec =
+let ensure_started ?(validate_running = false) ?timeout_sec (t : t) =
   match get_state t with
   | Running { container_name } ->
     if not validate_running
     then Ok container_name
     else (
       match
-        inspect_container_running
-          ~timeout_sec:(container_inspect_timeout_sec ())
-          container_name
+        inspect_container_running ?timeout_sec container_name
       with
       | Ok () -> Ok container_name
       | Error _ ->
         set_state t Not_started;
-        start_container t ~timeout_sec)
-  | Not_started -> start_container t ~timeout_sec
+        start_container ?timeout_sec t)
+  | Not_started -> start_container ?timeout_sec t
 ;;
 
 let run_exec_with_status_split_once
@@ -891,12 +546,12 @@ let run_exec_with_status_split_once
       ?(stdin_content : string option)
       ?on_stdout_chunk
       ?on_stderr_chunk
+      ?timeout_sec
       (t : t)
-      ~timeout_sec
       ~(cwd : string)
       ~(command_argv : string list)
   =
-  match ensure_started ~validate_running:validate_cached_container t ~timeout_sec with
+  match ensure_started ~validate_running:validate_cached_container ?timeout_sec t with
   | Error _ as err -> err
   | Ok container_name ->
     let container_cwd = container_cwd_of_host t ~host_cwd:cwd in
@@ -935,21 +590,21 @@ let run_exec_with_status_split_once
     let st, stdout, stderr =
       match stdin_content, has_output_callback with
       | Some content, false ->
-        run_argv_with_stdin_and_status_split_retry_eintr
-          ~timeout_sec
+        run_argv_with_stdin_and_status_split
+          ?timeout_sec
           ~stdin_content:content
           argv
-      | None, false -> run_argv_with_status_split_retry_eintr ~timeout_sec argv
+      | None, false -> run_argv_with_status_split ?timeout_sec argv
       | Some content, true ->
-        run_argv_with_stdin_and_status_split_retry_eintr
-          ~timeout_sec
+        run_argv_with_stdin_and_status_split
+          ?timeout_sec
           ?on_stdout_chunk
           ?on_stderr_chunk
           ~stdin_content:content
           argv
       | None, true ->
-        run_argv_with_status_split_retry_eintr
-          ~timeout_sec
+        run_argv_with_status_split
+          ?timeout_sec
           ?on_stdout_chunk
           ?on_stderr_chunk
           argv
@@ -961,7 +616,7 @@ let run_exec_with_status_split
       ?stdin_content
       ?on_stdout_chunk
       ?on_stderr_chunk
-      ~timeout_sec
+      ?timeout_sec
       (t : t)
       ~(cwd : string)
       ~(command_argv : string list)
@@ -975,14 +630,14 @@ let run_exec_with_status_split
       ?stdin_content
       ?on_stdout_chunk
       ?on_stderr_chunk
+      ?timeout_sec
       t
-      ~timeout_sec
       ~cwd
       ~command_argv
   with
   | Error _ as err -> err
   | Ok (((Unix.WEXITED 126 | Unix.WEXITED 127) as status), stdout, stderr) as failed ->
-    (match failed_exec_recovery t with
+    (match failed_exec_recovery ?timeout_sec t with
      | Preserve_failed_exec -> failed
      | Restart_failed_exec ->
        set_state t Not_started;
@@ -991,8 +646,8 @@ let run_exec_with_status_split
             ?stdin_content
             ?on_stdout_chunk
             ?on_stderr_chunk
+            ?timeout_sec
             t
-            ~timeout_sec
             ~cwd
             ~command_argv
         with
@@ -1011,7 +666,7 @@ let run_exec_with_status
       ?stdin_content
       ?on_stdout_chunk
       ?on_stderr_chunk
-      ~timeout_sec
+      ?timeout_sec
       (t : t)
       ~(cwd : string)
       ~(command_argv : string list)
@@ -1021,7 +676,7 @@ let run_exec_with_status
       ?stdin_content
       ?on_stdout_chunk
       ?on_stderr_chunk
-      ~timeout_sec
+      ?timeout_sec
       t
       ~cwd
       ~command_argv
@@ -1068,12 +723,12 @@ let run_exec_pipeline_with_status_once
       ?(validate_cached_container = false)
       ?on_stdout_chunk
       ?on_stderr_chunk
+      ?timeout_sec
       (t : t)
-      ~timeout_sec
       ~(cwd : string)
       ~(stages : exec_pipeline_stage list)
   =
-  match ensure_started ~validate_running:validate_cached_container t ~timeout_sec with
+  match ensure_started ~validate_running:validate_cached_container ?timeout_sec t with
   | Error _ as err -> err
   | Ok container_name ->
     let process_stages =
@@ -1083,28 +738,29 @@ let run_exec_pipeline_with_status_once
           let container_cwd = container_cwd_of_host t ~host_cwd:cwd in
           let argv = docker_exec_pipeline_argv t ~container_name ~container_cwd command_argv in
           { Process_eio.argv
-          ; env = Some (Env_keeper_scrub.filter_environment_c_messages (Unix.environment ()))
+          ; env = Some (sandbox_environment ())
           ; cwd = Some (Config_dir_resolver.current_working_dir ())
           })
         stages
     in
     Ok
-      (run_argv_pipeline_with_status_split_retry_eintr
-         ~timeout_sec
+      (run_argv_pipeline_with_status_split
+         ?timeout_sec
          ?on_stdout_chunk
          ?on_stderr_chunk
          process_stages)
 ;;
 
-let run_exec_pipeline_with_status ?on_stdout_chunk ?on_stderr_chunk ~timeout_sec t ~cwd ~stages =
+let run_exec_pipeline_with_status ?on_stdout_chunk ?on_stderr_chunk ?timeout_sec
+    t ~cwd ~stages =
   let has_output_callback =
     Option.is_some on_stdout_chunk || Option.is_some on_stderr_chunk
   in
   match
     run_exec_pipeline_with_status_once
       ~validate_cached_container:has_output_callback
+      ?timeout_sec
       t
-      ~timeout_sec
       ?on_stdout_chunk
       ?on_stderr_chunk
       ~cwd
@@ -1112,14 +768,14 @@ let run_exec_pipeline_with_status ?on_stdout_chunk ?on_stderr_chunk ~timeout_sec
   with
   | Error _ as err -> err
   | Ok (((Unix.WEXITED 126 | Unix.WEXITED 127) as status), stdout, stderr) as failed ->
-    (match failed_exec_recovery t with
+    (match failed_exec_recovery ?timeout_sec t with
      | Preserve_failed_exec -> failed
      | Restart_failed_exec ->
        set_state t Not_started;
        (match
           run_exec_pipeline_with_status_once
+            ?timeout_sec
             t
-            ~timeout_sec
             ?on_stdout_chunk
             ?on_stderr_chunk
             ~cwd
@@ -1198,7 +854,7 @@ let run_bash_with_status ~timeout_sec (t : t) ~(cwd : string) ~(cmd : string) ()
   | Ok container_name ->
     let argv = docker_exec_argv ~container_name in
     let st, out =
-      run_argv_with_stdin_and_status_retry_eintr
+      run_argv_with_stdin_and_status
         ~stdin_content:cmd
         argv
     in
@@ -1213,7 +869,7 @@ let run_bash_with_status ~timeout_sec (t : t) ~(cwd : string) ~(cmd : string) ()
          | Ok container_name ->
            let argv = docker_exec_argv ~container_name in
            Ok
-             (run_argv_with_stdin_and_status_retry_eintr
+             (run_argv_with_stdin_and_status
                 ~stdin_content:cmd
                 argv))
         | Failed_exec_state_probe_error detail ->
@@ -1291,7 +947,7 @@ let cleanup (t : t) =
         @ [ "ps"; "-a"; "-q"; "--filter"; "name=" ^ container_name ]
       in
       let check_st, check_out =
-        run_argv_with_status_retry_eintr ~timeout_sec:rm_timeout check_argv
+        run_argv_with_status ~timeout_sec:rm_timeout check_argv
       in
       match check_st with
       | Unix.WEXITED 0 -> String.trim check_out <> ""
@@ -1306,7 +962,7 @@ let cleanup (t : t) =
         false
     in
     let st, out =
-      run_argv_with_status_retry_eintr ~timeout_sec:rm_timeout rm_argv
+      run_argv_with_status ~timeout_sec:rm_timeout rm_argv
     in
     (* First attempt succeeded and container is gone — done. *)
     (match st with
@@ -1329,7 +985,7 @@ let cleanup (t : t) =
              t.meta.name
              container_name
              (status_label st);
-           run_argv_with_status_retry_eintr ~timeout_sec:rm_timeout rm_argv
+           run_argv_with_status ~timeout_sec:rm_timeout rm_argv
        in
        let exists_after_final = still_exists () in
        (match final_st with

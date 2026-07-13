@@ -1,0 +1,172 @@
+// MASC Dashboard — Gate / HITL transport and normalization boundary.
+// Public symbols are re-exported from dashboard.ts.
+
+import { get, post, withRetries } from './core'
+import { isRecord, asBoolean, asInt, asNullableString, asString } from '../components/common/normalize'
+import { asNullableIsoTimestamp, normalizeKeeperApprovalQueueItem } from './board'
+import { normalizeKeeperResolvedApprovalDecision } from '../lib/keeper-approval-decision'
+import type {
+  KeeperApprovalRule,
+  DashboardGateResponse,
+  KeeperApprovalQueueItem,
+  KeeperResolvedApprovalItem,
+  GateDecisionSource,
+  GateMode,
+  GateModeStatus,
+} from '../types'
+import type { AbortableRequestOptions } from './core'
+
+export interface FetchDashboardGateOptions extends AbortableRequestOptions {
+  force?: boolean
+}
+
+function normalizeKeeperApprovalRule(raw: unknown): KeeperApprovalRule | null {
+  if (!isRecord(raw)) return null
+  const id = asString(raw.id, '').trim()
+  const keeperName = asString(raw.keeper_name, '').trim()
+  const toolName = asString(raw.tool_name, '').trim()
+  if (!id || !keeperName || !toolName) return null
+  return {
+    id,
+    keeper_name: keeperName,
+    tool_name: toolName,
+    request_fingerprint: asNullableString(raw.request_fingerprint) ?? undefined,
+    created_at: asNullableIsoTimestamp(raw.created_at),
+    created_by: asNullableString(raw.created_by),
+    source_approval_id: asNullableString(raw.source_approval_id),
+  }
+}
+
+function normalizeGateModeValue(raw: unknown): GateMode | null {
+  return raw === 'manual' || raw === 'auto_judge' || raw === 'always_allow' ? raw : null
+}
+
+function normalizeGateMode(raw: unknown): GateModeStatus | undefined {
+  if (!isRecord(raw)) return undefined
+  const mode = normalizeGateModeValue(raw.mode)
+  if (!mode) {
+    return {
+      mode: 'manual',
+      state: 'invalid',
+      read_error: `unsupported Gate mode: ${String(raw.mode)}`,
+    }
+  }
+  return {
+    mode,
+    configured: asBoolean(raw.configured) ?? undefined,
+    state: asNullableString(raw.state) ?? undefined,
+    read_error: asNullableString(raw.read_error) ?? undefined,
+  }
+}
+
+function normalizeHitlStatus(raw: unknown): DashboardGateResponse['hitl'] | undefined {
+  if (!isRecord(raw)) return undefined
+  return {
+    gate_mode: normalizeGateMode(raw.gate_mode),
+  }
+}
+
+function normalizeGateDecisionSource(raw: unknown): GateDecisionSource | null {
+  return raw === 'always_allowed' || raw === 'auto_judge' || raw === 'human_operator'
+    ? raw
+    : null
+}
+
+function normalizeKeeperResolvedApprovalItem(raw: unknown): KeeperResolvedApprovalItem | null {
+  if (!isRecord(raw)) return null
+  const id = asString(raw.id, '').trim()
+  const keeperName = asString(raw.keeper_name, '').trim()
+  const toolName = asString(raw.tool_name, '').trim()
+  if (!id || !keeperName || !toolName) return null
+  const ruleMatch = isRecord(raw.rule_match)
+    ? {
+        rule_id: asNullableString(raw.rule_match.rule_id),
+      }
+    : null
+  const decisionRaw = asNullableString(raw.decision)
+  const decisionKind = asNullableString(raw.decision_kind)
+  const decisionReason = asNullableString(raw.decision_reason)
+  return {
+    id,
+    keeper_name: keeperName,
+    tool_name: toolName,
+    decision: normalizeKeeperResolvedApprovalDecision(decisionKind),
+    decision_raw: decisionRaw,
+    decision_reason: decisionReason,
+    resolved_at: asNullableIsoTimestamp(raw.resolved_at),
+    turn_id: asInt(raw.turn_id),
+    task_id: asNullableString(raw.task_id),
+    goal_id: asNullableString(raw.goal_id),
+    goal_ids: Array.isArray(raw.goal_ids)
+      ? raw.goal_ids.filter((value): value is string => typeof value === 'string')
+      : [],
+    decision_source: normalizeGateDecisionSource(raw.decision_source),
+    rule_match: ruleMatch,
+  }
+}
+
+export function fetchDashboardGate(
+  opts?: FetchDashboardGateOptions,
+): Promise<DashboardGateResponse> {
+  return withRetries('fetchDashboardGate', async () => {
+    const query = opts?.force ? '?force=1' : ''
+    const raw = await get<Record<string, unknown>>(`/api/v1/dashboard/gate${query}`, {
+      signal: opts?.signal,
+    })
+    const approvalQueue = Array.isArray(raw.approval_queue)
+      ? raw.approval_queue
+          .map(item => normalizeKeeperApprovalQueueItem(item))
+          .filter((item): item is KeeperApprovalQueueItem => item !== null)
+      : []
+    const recentResolved = Array.isArray(raw.recent_resolved)
+      ? raw.recent_resolved
+          .map(item => normalizeKeeperResolvedApprovalItem(item))
+          .filter((item): item is KeeperResolvedApprovalItem => item !== null)
+      : []
+    const approvalRules = Array.isArray(raw.approval_rules)
+      ? raw.approval_rules
+          .map(item => normalizeKeeperApprovalRule(item))
+          .filter((item): item is KeeperApprovalRule => item !== null)
+      : []
+    return {
+      generated_at: asNullableIsoTimestamp(raw.generated_at) ?? undefined,
+      note: typeof raw.note === 'string' && raw.note.trim() !== '' ? raw.note.trim() : undefined,
+      approval_queue: approvalQueue,
+      recent_resolved: recentResolved,
+      approval_rules: approvalRules,
+      hitl: normalizeHitlStatus(raw.hitl),
+    }
+  })
+}
+
+export function resolveGateApproval(
+  id: string,
+  decision: 'approve' | 'reject',
+  rememberRule?: boolean,
+  reason?: string,
+): Promise<{ ok: boolean; id: string; decision: 'approve' | 'reject'; rule_id?: string | null }> {
+  return post('/api/v1/dashboard/gate/resolve', {
+    id,
+    decision,
+    remember_rule: rememberRule,
+    reason,
+  })
+}
+
+export function deleteGateApprovalRule(
+  id: string,
+): Promise<{ ok: boolean; id: string }> {
+  return post('/api/v1/dashboard/gate/rules/delete', { id })
+}
+
+export interface SetGateModeResponse {
+  ok: boolean
+  mode: GateMode
+  previous_mode: GateMode | null
+  actor: string
+  changed_at: string
+}
+
+export function setGateMode(mode: GateMode): Promise<SetGateModeResponse> {
+  return post('/api/v1/dashboard/gate/mode', { mode })
+}

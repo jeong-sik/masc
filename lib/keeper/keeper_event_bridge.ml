@@ -41,27 +41,8 @@ let payload_agent_name payload =
      | None -> Json_util.get_string payload "keeper_name")
 ;;
 
-let tool_failure_attempt_observation
-      (attempt : Agent_sdk.Tool_failure_episode.failed_attempt)
-  =
-  `Assoc
-    [ "tool_use_id", `String attempt.tool_use_id
-    ; "tool_name", `String attempt.tool_name
-    ; "failure_kind", Agent_sdk.Types.tool_failure_kind_to_yojson attempt.failure_kind
-    ; ( "error_class"
-      , match attempt.error_class with
-        | Some error_class -> Agent_sdk.Types.tool_error_class_to_yojson error_class
-        | None -> `Null )
-    ]
-;;
-
-let tool_failure_episode_observation
-      (episode : Agent_sdk.Tool_failure_episode.t)
-  =
-  `Assoc
-    [ "previous", tool_failure_attempt_observation episode.previous
-    ; "current", tool_failure_attempt_observation episode.current
-    ]
+let tool_failure_episode_observation =
+  Agent_sdk.Tool_failure_episode.observation_to_yojson
 ;;
 
 let sha256_hex value = Digestif.SHA256.(digest_string value |> to_hex)
@@ -808,31 +789,9 @@ let rec process_pending ?store_ref acc = function
      | Delivered -> process_pending ?store_ref acc rest
      | Retryable_failure (pending, stage, exn) ->
        let attempt = pending.attempts + 1 in
-       let fd_pressure =
-         Keeper_fd_pressure.active () || Keeper_fd_pressure.is_fd_exhaustion_exn exn
-       in
-       let disk_pressure =
-         Keeper_disk_pressure.active ()
-         || Keeper_disk_pressure.is_disk_exhaustion_exn exn
-       in
-       if disk_pressure
-       then Keeper_disk_pressure.note_exception ~site:"oas_event_bridge.relay" exn;
-       if fd_pressure || disk_pressure
-       then (
-         if fd_pressure
-         then Keeper_fd_pressure.note_exception ~site:"oas_event_bridge.relay" exn;
-         Otel_metric_store.inc_counter
-           Otel_metric_store.metric_oas_sse_relay_drops
-           ~labels:[ "stage", relay_stage_to_string stage ]
-           ();
-         let stage_label =
-           relay_stage_to_string stage
-           ^ (if fd_pressure then ":fd_pressure" else ":disk_pressure")
-         in
-         emit_relay_drop_log ~pending ~stage_label ~attempts:attempt;
-         broadcast_drop_marker ~pending ~stage_label ~attempts:attempt;
-         process_pending ?store_ref acc rest)
-       else if attempt >= relay_max_attempts
+       Keeper_fd_pressure.note_exception ~site:"oas_event_bridge.relay" exn;
+       Keeper_disk_pressure.note_exception ~site:"oas_event_bridge.relay" exn;
+       if attempt >= relay_max_attempts
        then (
          Otel_metric_store.inc_counter
            Otel_metric_store.metric_oas_sse_relay_drops

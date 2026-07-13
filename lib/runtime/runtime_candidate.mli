@@ -66,13 +66,6 @@ val resolve_tool_lane_for_oas_tools :
     Agent_sdk.Error.sdk_error )
   result
 
-val runtime_mcp_policy_for_agent :
-  base_path:string ->
-  agent_name:string ->
-  t ->
-  Llm_provider.Llm_transport.runtime_mcp_policy option ->
-  Llm_provider.Llm_transport.runtime_mcp_policy option
-
 val capacity_key : t -> string
 val capacity_keys : t list -> string list
 val declared_client_capacity : t -> int option

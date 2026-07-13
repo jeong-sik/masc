@@ -27,27 +27,20 @@ let monotonic_usage_counters ~(latest : Keeper_meta_contract.keeper_meta) ~(call
   ; runtime = { caller.runtime with usage }
   }
 
-let has_latched_pause_reason (meta : Keeper_meta_contract.keeper_meta) =
-  match meta.latched_reason with
-  | Some _ -> true
-  | None -> false
-
 let preserve_latched_pause_from_disk
       ~(latest : Keeper_meta_contract.keeper_meta)
       ~(caller : Keeper_meta_contract.keeper_meta)
   =
   let merged = monotonic_usage_counters ~latest ~caller in
-  if latest.paused && has_latched_pause_reason latest
+  if latest.paused
   then
     {
       merged with
       paused = true;
-      (* [latched_reason] is the typed companion to [paused]; preserve it
-         from disk for the same reason [paused = true] is preserved. A
-         heartbeat writer that raced in with a stale [latched_reason = None]
-         must not erase a terminal or operator pause reason recorded on disk. *)
+      (* Background writers never own lifecycle state. Preserve both typed
+         pauses and unclassified legacy pauses; only an explicit operator
+         action may clear either one. *)
       latched_reason = latest.latched_reason;
-      auto_resume_after_sec = None;
       runtime = { merged.runtime with last_blocker = None };
     }
   else merged

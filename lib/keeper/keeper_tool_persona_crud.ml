@@ -4,15 +4,27 @@ open Tool_args
 open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
+(* Write/read personas at the same location the loaders read from. The list
+   loader (Keeper_types_profile_persona) resolves persona roots exclusively
+   through Config_dir_resolver.personas_dirs (MASC_PERSONAS_DIR, else the
+   resolved CONFIG_ROOT/personas); its own comment warns that MASC_BASE/cwd
+   fallbacks "make the dashboard lie about the actual source of truth". Using
+   the resolver's primary root keeps create/update/delete consistent with what
+   masc_persona_list shows. The legacy fallback only runs when the resolver
+   disowns every root (no MASC_PERSONAS_DIR and a Missing/Invalid config root),
+   so a first create still lands somewhere writable. *)
 let personas_dir () =
-  match Sys.getenv_opt "MASC_PERSONAS_DIR" with
-  | Some d -> d
-  | None ->
-      let base = match Sys.getenv_opt "MASC_BASE" with
-        | Some b -> b
-        | None -> Config_dir_resolver.base_path_or_cwd ()
-      in
-      Filename.concat base "personas"
+  match Config_dir_resolver.personas_dirs () with
+  | dir :: _ -> dir
+  | [] ->
+      (match Sys.getenv_opt "MASC_PERSONAS_DIR" with
+       | Some d -> d
+       | None ->
+           let base = match Sys.getenv_opt "MASC_BASE" with
+             | Some b -> b
+             | None -> Config_dir_resolver.base_path_or_cwd ()
+           in
+           Filename.concat base "personas")
 
 (** Reject any [persona_name] that is not a single, self-contained path
     component. [Filename.basename ".." = ".."] and [Filename.basename "." =

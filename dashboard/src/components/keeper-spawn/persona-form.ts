@@ -52,6 +52,11 @@ const submitting = signal(false)
 const nameError = signal<string | null>(null)
 const displayNameError = signal<string | null>(null)
 
+// Identifies which persona (or the create form) the fields were last seeded
+// for, so re-opening re-seeds. Reset to null on close so re-opening the SAME
+// persona after a cancel/submit re-seeds instead of showing the emptied form.
+let lastEditKey: string | null = null
+
 function resetForm(): void {
   formFields.value = emptyForm()
   nameError.value = null
@@ -135,17 +140,18 @@ async function handleSubmit(e: Event): Promise<void> {
   }
 
   submitting.value = false
-  if (ok) {
-    resetForm()
-    showCreateForm.value = false
-    editingPersona.value = null
-  }
+  if (ok) closeForm()
+}
+
+function closeForm(): void {
+  resetForm()
+  lastEditKey = null
+  showCreateForm.value = false
+  editingPersona.value = null
 }
 
 function handleCancel(): void {
-  resetForm()
-  showCreateForm.value = false
-  editingPersona.value = null
+  closeForm()
 }
 
 function setField<K extends keyof FormFields>(key: K, value: FormFields[K]): void {
@@ -159,8 +165,6 @@ function setField<K extends keyof FormFields>(key: K, value: FormFields[K]): voi
     displayNameError.value = null
   }
 }
-
-let lastEditKey: string | null = null
 
 export function PersonaForm(): any {
   const editing = editingPersona.value

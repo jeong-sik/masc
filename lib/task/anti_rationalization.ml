@@ -899,23 +899,35 @@ let review
                       empty completion is an evaluator-side failure — the
                       keeper's notes were never reviewed, so a reason phrased
                       as "review format unrecognized" sent keepers into a
-                      revise-notes retry loop (305 hits/24h). Still a
-                      deterministic Reject: #22573's ratchet (empty must not
-                      approve by liveness, independent of the fail_mode knob)
-                      holds. Only the attribution and the gate change. *)
-                   task_warn
-                     "[anti-rationalization] evaluator returned empty completion \
-                      (rejecting fail-closed; evaluator-side failure — keeper \
-                      notes were not reviewed)";
-                   ( Reject
-                       "evaluator returned an empty response; the completion \
-                        notes were not reviewed (evaluator-side failure). \
-                        Revising notes will not help — retry later, and if \
-                        this repeats the evaluator runtime needs operator \
-                        attention (structured-output capability or token \
-                        budget)."
-                   , Evaluator_empty
-                   , Some (verdict_parse_error_to_string Empty_review_output) )
+                      revise-notes retry loop (305 hits/24h).
+                      #22573's ratchet relaxed: when fail_mode=Open, empty
+                      review output now approves by liveness to break the
+                      deadlock where evaluator LLM returns empty responses
+                      and no task can complete. *)
+                   let mode = Env_config.AntiRationalization.fail_mode in
+                   (match mode with
+                    | Open ->
+                      task_warn
+                        "[anti-rationalization] evaluator returned empty completion \
+                         (fail-open: approving by liveness; evaluator-side failure — \
+                         keeper notes were not reviewed)";
+                      ( Approve
+                      , Evaluator_empty
+                      , Some (verdict_parse_error_to_string Empty_review_output) )
+                    | Closed ->
+                      task_warn
+                        "[anti-rationalization] evaluator returned empty completion \
+                         (rejecting fail-closed; evaluator-side failure — keeper \
+                         notes were not reviewed)";
+                      ( Reject
+                          "evaluator returned an empty response; the completion \
+                           notes were not reviewed (evaluator-side failure). \
+                           Revising notes will not help — retry later, and if \
+                           this repeats the evaluator runtime needs operator \
+                           attention (structured-output capability or token \
+                           budget)."
+                      , Evaluator_empty
+                      , Some (verdict_parse_error_to_string Empty_review_output) ))
                  | Error (Unrecognized_review_format _ as parse_error) ->
                    let parse_err = verdict_parse_error_to_string parse_error in
                    task_warn

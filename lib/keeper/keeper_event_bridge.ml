@@ -58,15 +58,9 @@ let tool_failure_attempt_observation
 let tool_failure_episode_observation
       (episode : Agent_sdk.Tool_failure_episode.t)
   =
-  (* Destructure with a qualified field pattern: [previous]/[current] are also
-     field labels on other records in scope, so a bare [episode.previous]
-     relies on type-directed disambiguation and fails under [-warn-error +a]
-     (same class as #24318). [previous] is a [failed_attempt list]; [current]
-     is a single [failed_attempt]. *)
-  let { Agent_sdk.Tool_failure_episode.previous; current } = episode in
   `Assoc
-    [ "previous", `List (List.map tool_failure_attempt_observation previous)
-    ; "current", tool_failure_attempt_observation current
+    [ "previous", tool_failure_attempt_observation episode.previous
+    ; "current", tool_failure_attempt_observation episode.current
     ]
 ;;
 

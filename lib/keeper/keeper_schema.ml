@@ -133,6 +133,10 @@ let keeper_schemas : tool_schema list = [
           ("type", `String "boolean");
           ("description", `String "If true, return the resolved keeper args and validation errors without creating the keeper.");
         ]);
+        ("no_boot", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "If true, create configured-only: write the durable keeper TOML and list-visible meta without booting (no session, checkpoint, registry, or keepalive). autoboot_enabled is pinned false; passing autoboot_enabled=true alongside is rejected. Boot later with masc_keeper_up.");
+        ]);
         ("goal", `Assoc [
           ("type", `String "string");
           ("description", `String "Legacy goal string. Mutually exclusive with initial_goal.");

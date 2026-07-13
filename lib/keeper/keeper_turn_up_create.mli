@@ -21,3 +21,17 @@ val create_keeper :
   _ Keeper_types_profile.context ->
   Keeper_turn_up_args.parsed_args ->
   tool_result
+
+(** Configured-only create (create-without-boot). Materializes the
+    list-visible keeper meta from the same derivation the boot path
+    uses, with NO boot side effect: no session, no checkpoint, no
+    registry/keepalive, no runtime assignment. [autoboot_enabled] is
+    pinned false in the written meta; the caller owns the durable TOML
+    write (also pinned false) so reconcile classifies the keeper
+    [Declarative_autoboot_disabled] until an explicit masc_keeper_up.
+    Gates (empty goal, unknown active_goal_ids, sandbox settings)
+    mirror [create_keeper] with the same error strings. *)
+val create_keeper_configured_only :
+  Workspace.config ->
+  Keeper_turn_up_args.parsed_args ->
+  (keeper_meta, string) result

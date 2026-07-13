@@ -407,6 +407,7 @@ let handle_keeper_create_from_persona ctx args : tool_result =
         |> Result.map_error (fun e -> "" ^ e)
       in
       let dry_run = get_bool args "dry_run" false in
+      let no_boot = get_bool args "no_boot" false in
       (* D-10a: an explicit [initial_goal] mints a Goal entity and is the
          goal source for the new keeper. Passing both [goal] and
          [initial_goal] is an explicit conflict — rejected instead of
@@ -427,6 +428,18 @@ let handle_keeper_create_from_persona ctx args : tool_result =
             "pass either goal or initial_goal, not both: initial_goal mints \
              a Goal entity (D-10a) and also fills the legacy goal string \
              during the transition"
+        else Ok ()
+      in
+      (* no_boot pins autoboot_enabled=false in the durable config; an
+         explicit true is a conflict, rejected here before any effect
+         (Goal mint, TOML write). The persist layer re-checks the same
+         predicate as defense in depth. *)
+      let* () =
+        if no_boot && get_bool resolved_args "autoboot_enabled" false then
+          Error
+            "no_boot conflicts with autoboot_enabled=true: a configured-only \
+             keeper is written with autoboot_enabled=false; drop one of the \
+             two, then boot explicitly with masc_keeper_up"
         else Ok ()
       in
       (* Inject first, validate, mint last (adversarial re-review P1-1 of
@@ -459,6 +472,7 @@ let handle_keeper_create_from_persona ctx args : tool_result =
                   ( "persona",
                     Keeper_tool_persona_runtime.persona_summary_to_json persona );
                   ("created", `Bool false);
+                  ("no_boot", `Bool no_boot);
                   ("ready", `Bool (errors = []));
                   ("errors", Json_util.json_string_list errors);
                   ("resolved_args", resolved_args);
@@ -475,6 +489,9 @@ let handle_keeper_create_from_persona ctx args : tool_result =
                   ("resolved_args", resolved_args);
                 ]))
       else
+        (* Validation passed — mint the Goal entity now, at the single point
+           shared by the configured-only (no_boot) and boot paths: both
+           persist the minted goal id into the keeper TOML/meta. *)
         let* resolved_args, initial_goal_id =
           match initial_goal_opt with
           | None -> Ok (resolved_args, None)
@@ -493,7 +510,7 @@ let handle_keeper_create_from_persona ctx args : tool_result =
           | Some gid -> [ ("initial_goal_id", `String gid) ]
           | None -> []
         in
-        (* Failure between the mint and the point where the booted keeper's
+        (* Failure between the mint and the point where the created keeper's
            persisted meta references the goal would strand the Goal entity —
            release it. A failed release logs instead of masking the original
            error (best-effort compensation, not a new failure path). *)
@@ -510,41 +527,76 @@ let handle_keeper_create_from_persona ctx args : tool_result =
                     stage gid
                     (Goal_store.delete_goal_error_to_string e))
         in
-        let* _rendered_toml =
-          Keeper_tool_persona_runtime.render_keeper_toml_from_resolved_args
-            resolved_args
-          |> Result.map_error (fun e ->
-              (* Render happens before any boot side effect, so nothing can
-                 reference the goal yet — release unconditionally. *)
-              release_minted_goal ~stage:"toml render";
-              "" ^ e)
+        (* A failed create may still have persisted keeper meta whose
+           [active_goal_ids] references the goal; deleting it then would
+           dangle that reference. Release only when no meta persisted.
+           Residual: a pre-existing meta under the same name
+           (duplicate-name create) keeps the fresh goal alive — the WARN
+           carries the goal id for manual cleanup. *)
+        let release_unless_meta_persisted ~stage =
+          match initial_goal_id with
+          | None -> ()
+          | Some gid ->
+              let keeper_name = get_string resolved_args "name" "" in
+              let meta_persisted =
+                List.mem keeper_name
+                  (Keeper_meta_store.persisted_keeper_names ctx.config)
+              in
+              if meta_persisted then
+                Log.Keeper.warn
+                  "create_from_persona: %s failed after goal mint; keeping \
+                   goal %s because keeper %s meta persists"
+                  stage gid keeper_name
+              else release_minted_goal ~stage
         in
-        let result =
-          with_keeper_startup_gate (fun () -> execute_keeper_up ctx resolved_args)
-        in
-        if not (tool_result_success result) then (
-          (match initial_goal_id with
-           | None -> ()
-           | Some gid ->
-               (* A failed boot may still have persisted keeper meta whose
-                  [active_goal_ids] references the goal; deleting it then
-                  would dangle that reference. Release only when no meta
-                  persisted. Residual: a pre-existing meta under the same
-                  name (duplicate-name create) keeps the fresh goal alive —
-                  the WARN below carries the goal id for manual cleanup. *)
-               let keeper_name = get_string resolved_args "name" "" in
-               let meta_persisted =
-                 List.mem keeper_name
-                   (Keeper_meta_store.persisted_keeper_names ctx.config)
-               in
-               if meta_persisted then
-                 Log.Keeper.warn
-                   "create_from_persona: boot failed after goal mint; \
-                    keeping goal %s because keeper %s meta persists"
-                   gid keeper_name
-               else release_minted_goal ~stage:"boot");
-          Ok result)
+        if no_boot then (
+          (* Configured, not running: durable TOML + list-visible meta, no
+             boot side effect. Boot later with masc_keeper_up. *)
+          match
+            Keeper_tool_persona_runtime.create_configured_only ctx
+              resolved_args
+          with
+          | Error e ->
+              (* create_configured_only removes its own orphan TOML; the
+                 minted goal follows the same meta-aware rule as the boot
+                 path. *)
+              release_unless_meta_persisted ~stage:"configured-only create";
+              Error e
+          | Ok configured ->
+              let json =
+                `Assoc
+                  ([
+                     ( "persona",
+                       Keeper_tool_persona_runtime.persona_summary_to_json
+                         persona );
+                     ("created", `Bool true);
+                     ("booted", `Bool false);
+                     ("result", configured);
+                     ("resolved_args", resolved_args);
+                   ]
+                  @ initial_goal_field)
+              in
+              invalidate_keeper_list_cache ();
+              invalidate_status_cache (get_string resolved_args "name" "");
+              Ok (tool_result_ok_data json))
         else
+          let* _rendered_toml =
+            Keeper_tool_persona_runtime.render_keeper_toml_from_resolved_args
+              resolved_args
+            |> Result.map_error (fun e ->
+                (* Render happens before any boot side effect, so nothing can
+                   reference the goal yet — release unconditionally. *)
+                release_minted_goal ~stage:"toml render";
+                "" ^ e)
+          in
+          let result =
+            with_keeper_startup_gate (fun () ->
+                execute_keeper_up ctx resolved_args)
+          in
+          if not (tool_result_success result) then (
+            release_unless_meta_persisted ~stage:"boot";
+            Ok result)
+          else
           let* durable_config =
             Keeper_tool_persona_runtime.persist_keeper_toml_from_resolved_args
               resolved_args

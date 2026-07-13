@@ -312,6 +312,19 @@ type keeper_meta = {
   meta_version : int;
 }
 
+(** Sanctioned unpause transform: sets [paused = false] while clearing the
+    typed latch ([Dead_tombstone] included) and [runtime.last_blocker], so a
+    resumed keeper can never retain a terminal latch. Callers set [updated_at]
+    themselves. Dead-tombstone revival still runs the crash-recoverable
+    transaction at its call site; this only normalizes the meta fields. *)
+val mark_resumed : keeper_meta -> keeper_meta
+
+(** [dead_tombstone_pause_violation m] is [Some detail] when [m] has
+    [paused = false] together with a [Dead_tombstone] latch — the
+    un-recoverable, out-of-invariant state. Used by the meta store to reject
+    such writes at the boundary. [None] when the meta is consistent. *)
+val dead_tombstone_pause_violation : keeper_meta -> string option
+
 (** Overlay TOML/persona defaults onto persisted runtime meta for
     status-facing reads. Persisted runtime JSON intentionally omits
     TOML-owned fields such as [sandbox_profile] and [network_mode]. *)

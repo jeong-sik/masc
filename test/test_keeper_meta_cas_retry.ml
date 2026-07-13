@@ -316,9 +316,108 @@ let test_is_version_conflict_error_classifies () =
   check bool "rejects unrelated error" false
     (Keeper_meta_store.is_version_conflict_error other_msg)
 
+(* Fix: [paused=false] + [Dead_tombstone] is un-recoverable — lifecycle
+   admission denies by the latch regardless of [paused], but every sanctioned
+   clear runs through [mark_resumed] / dead revival which nulls the latch. The
+   store rejects the split fail-closed so it is unrepresentable on disk. *)
+let is_dead_tombstone (m : Keeper_meta_contract.keeper_meta) =
+  match m.latched_reason with
+  | Some Keeper_latched_reason.Dead_tombstone -> true
+  | Some _ | None -> false
+
+let test_store_rejects_unpaused_dead_tombstone () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let base_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_dir) (fun () ->
+    let config = Workspace.default_config base_dir in
+    ignore (Workspace.init config ~agent_name:(Some "operator"));
+    (* The canonical pairing (paused=true + Dead_tombstone) writes fine. *)
+    let seed =
+      { (make_meta ~name:"dead-invariant") with
+        paused = true;
+        latched_reason = Some Keeper_latched_reason.Dead_tombstone;
+      }
+    in
+    (match Keeper_meta_store.write_meta config seed with
+     | Ok () -> ()
+     | Error e -> fail ("canonical paused+dead write should succeed: " ^ e));
+    let disk = match Keeper_meta_store.read_meta config "dead-invariant" with
+      | Ok (Some m) -> m | _ -> fail "seed read failed" in
+    (* The illegal split — clear paused, keep the latch — is rejected. *)
+    let split = { disk with paused = false } in
+    (match Keeper_meta_store.write_meta config split with
+     | Ok () ->
+       fail "store accepted paused=false + Dead_tombstone (invariant not enforced)"
+     | Error _ -> ());
+    let after = match Keeper_meta_store.read_meta config "dead-invariant" with
+      | Ok (Some m) -> m | _ -> fail "read after rejected write failed" in
+    check bool "rejected write left paused=true on disk" true after.paused;
+    check bool "rejected write left the Dead_tombstone latch" true
+      (is_dead_tombstone after))
+
+let test_mark_resumed_clears_dead_tombstone_and_persists () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let base_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_dir) (fun () ->
+    let config = Workspace.default_config base_dir in
+    ignore (Workspace.init config ~agent_name:(Some "operator"));
+    let seed =
+      { (make_meta ~name:"resume-dead") with
+        paused = true;
+        latched_reason = Some Keeper_latched_reason.Dead_tombstone;
+      }
+    in
+    (match Keeper_meta_store.write_meta config seed with
+     | Ok () -> () | Error e -> fail ("seed write failed: " ^ e));
+    let disk = match Keeper_meta_store.read_meta config "resume-dead" with
+      | Ok (Some m) -> m | _ -> fail "seed read failed" in
+    let resumed =
+      { (Keeper_meta_contract.mark_resumed disk) with
+        updated_at = Keeper_meta_contract.now_iso () }
+    in
+    check (option string) "mark_resumed leaves no invariant violation"
+      None (Keeper_meta_contract.dead_tombstone_pause_violation resumed);
+    (match Keeper_meta_store.write_meta config resumed with
+     | Ok () -> () | Error e -> fail ("resumed write should succeed: " ^ e));
+    let after = match Keeper_meta_store.read_meta config "resume-dead" with
+      | Ok (Some m) -> m | _ -> fail "read after resume failed" in
+    check bool "resumed keeper is unpaused" false after.paused;
+    check (option string) "resumed keeper has no latch" None
+      (match after.latched_reason with
+       | Some r -> Some (Keeper_latched_reason.to_wire r) | None -> None))
+
+let test_dead_tombstone_pause_violation_classifies () =
+  let base = make_meta ~name:"classify" in
+  let paused_dead =
+    { base with paused = true;
+      latched_reason = Some Keeper_latched_reason.Dead_tombstone } in
+  let unpaused_dead =
+    { base with paused = false;
+      latched_reason = Some Keeper_latched_reason.Dead_tombstone } in
+  let unpaused_none = { base with paused = false; latched_reason = None } in
+  check bool "paused+dead is valid (no violation)" true
+    (Option.is_none (Keeper_meta_contract.dead_tombstone_pause_violation paused_dead));
+  check bool "unpaused+dead is a violation" true
+    (Option.is_some (Keeper_meta_contract.dead_tombstone_pause_violation unpaused_dead));
+  check bool "unpaused+no-latch is valid" true
+    (Option.is_none (Keeper_meta_contract.dead_tombstone_pause_violation unpaused_none))
+
 let () =
   run "Keeper_types CAS retry (#9764/#9733/#9769)"
     [
+      ( "dead-tombstone pause invariant",
+        [
+          test_case "store rejects paused=false + Dead_tombstone split" `Quick
+            test_store_rejects_unpaused_dead_tombstone;
+          test_case "mark_resumed clears the latch and persists" `Quick
+            test_mark_resumed_clears_dead_tombstone_and_persists;
+          test_case "dead_tombstone_pause_violation classifies states" `Quick
+            test_dead_tombstone_pause_violation_classifies;
+        ] );
       ( "write_meta_with_merge caller_wins",
         [
           test_case "writes on first attempt when no conflict" `Quick

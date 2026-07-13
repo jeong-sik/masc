@@ -829,12 +829,21 @@ let keeper_ctx_of_dashboard_state ~sw ~clock state agent_name :
 let meta_with_directive_paused_state
     (meta : Keeper_meta_contract.keeper_meta)
     paused =
-  {
-    meta with
-    paused;
-    runtime = { meta.runtime with last_blocker = None };
-    updated_at = Keeper_meta_contract.now_iso ();
-  }
+  let base =
+    if paused
+    then
+      (* Pause: set the bit and drop the stale blocker; any existing latch
+         stays paired with [paused = true]. *)
+      { meta with paused = true; runtime = { meta.runtime with last_blocker = None } }
+    else
+      (* Resume: [mark_resumed] couples clearing [paused] with clearing the
+         typed latch (Dead_tombstone included). Previously this path set
+         [paused = false] while leaving [latched_reason], stranding the keeper
+         in the un-recoverable paused=false + Dead_tombstone split that
+         lifecycle admission denies forever. *)
+      Keeper_meta_contract.mark_resumed meta
+  in
+  { base with updated_at = Keeper_meta_contract.now_iso () }
 
 let should_persist_directive_paused_state directive (meta : Keeper_meta_contract.keeper_meta) paused =
   match directive with

@@ -311,6 +311,10 @@ type write_meta_error =
   | Lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
   | Read_failed of string
   | Persist_failed of string
+  | Invariant_violation of
+      { keeper_name : string
+      ; detail : string
+      }
 
 let write_meta_error_to_string = function
   | Version_conflict { keeper_name; expected; actual } ->
@@ -319,6 +323,8 @@ let write_meta_error_to_string = function
       keeper_name
       expected
       actual
+  | Invariant_violation { keeper_name; detail } ->
+    Printf.sprintf "meta invariant violation for %s: %s" keeper_name detail
   | Lifecycle_reserved owner ->
     Printf.sprintf
       "keeper lifecycle transaction reserved metadata mutation: %s"
@@ -332,6 +338,15 @@ let write_meta_error_to_string = function
    never overwrite the disk snapshot. *)
 let write_meta_typed ?lifecycle_token config (m : Keeper_meta_contract.keeper_meta) =
   let path = keeper_meta_path config m.name in
+  (* Write-boundary invariant (fail-closed): never persist [paused=false] with
+     a terminal [Dead_tombstone] latch. That split is un-recoverable (lifecycle
+     admission denies by the latch alone) and is only produced by a writer that
+     cleared [paused] without clearing the latch. Rejecting here — rather than
+     silently repairing — forces resume writers through [mark_resumed] / dead
+     revival, keeping the illegal state unrepresentable on disk. *)
+  match Keeper_meta_contract.dead_tombstone_pause_violation m with
+  | Some detail -> Error (Invariant_violation { keeper_name = m.name; detail })
+  | None ->
   Keeper_lifecycle_reservation.with_key_lock
     ~base_path:config.Workspace.base_path
     ~keeper_name:m.name
@@ -482,7 +497,7 @@ let write_meta_with_merge_internal
     match write_meta_typed ?lifecycle_token config caller with
     | Ok () -> Ok ()
     | Error error when n >= max_retries -> Error (write_meta_error_to_string error)
-    | Error ((Lifecycle_reserved _ | Read_failed _ | Persist_failed _) as error) ->
+    | Error ((Lifecycle_reserved _ | Read_failed _ | Persist_failed _ | Invariant_violation _) as error) ->
       Error (write_meta_error_to_string error)
     | Error (Version_conflict _) ->
       (match read_meta_file_path path with

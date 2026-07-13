@@ -106,14 +106,20 @@ let update_keeper ?(preserve_prompt_defaults = false)
   in
   let resume_paused_keeper = old.paused in
   let dead_revival_requested =
-    resume_paused_keeper
-    &&
     match old.latched_reason with
     | Some Keeper_latched_reason.Dead_tombstone -> true
     | Some (Keeper_latched_reason.Operator_paused _)
     | None -> false
   in
-  if resume_paused_keeper then (
+  (* An explicit operator keeper_up revives a Dead_tombstone keeper even when
+     [old.paused = false]. The canonical setter pairs Dead_tombstone with
+     [paused = true], but a resume writer that cleared [paused] without clearing
+     the latch can strand a keeper in paused=false + Dead_tombstone; lifecycle
+     admission denies it by the latch regardless of [paused], so revival must
+     not require [paused = true]. update_keeper has no automated callers, so
+     this does not open an autonomous-revival hole. *)
+  let clear_pause_state = resume_paused_keeper || dead_revival_requested in
+  if clear_pause_state then (
     let blocker_class, blocker_detail =
       match old.runtime.last_blocker with
       | Some info -> blocker_class_to_string info.klass, info.detail
@@ -142,16 +148,16 @@ let update_keeper ?(preserve_prompt_defaults = false)
     network_mode;
     autoboot_enabled;
     active_goal_ids;
-    paused = if resume_paused_keeper then false else old.paused;
+    paused = if clear_pause_state then false else old.paused;
     (* Operator-sanctioned resume clears the terminal latch (Dead_tombstone
        included) so a sanctioned keeper_up revives a latched keeper.  Without
        this [latched_reason] survives a paused-clearing resume and every
        latch-keyed lifecycle admission keeps denying revival forever even after
        [paused] is cleared. *)
     latched_reason =
-      if resume_paused_keeper then None else source_meta.latched_reason;
+      if clear_pause_state then None else source_meta.latched_reason;
     runtime =
-      (if resume_paused_keeper then
+      (if clear_pause_state then
          {
            source_meta.runtime with
            last_blocker = None;

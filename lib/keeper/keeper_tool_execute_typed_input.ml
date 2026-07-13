@@ -656,9 +656,18 @@ let pp_validation_error ppf = function
 ;;
 
 let validation_error_alternatives : validation_error -> string list = function
+  | Empty_executable _ -> []
+  | Executable_repeated_in_argv0 _ -> []
   | Argv_contains_shell_metachar _ -> []
   | Argv_contains_shell_pipeline_operator _ -> [ "Execute.pipeline" ]
   | Argv_contains_shell_redirection _ ->
     [ "stderr:{discard:true}"; "stdout:{discard:true}"; "Execute.pipeline" ]
-  | _ -> []
+  | Redirect_path_not_absolute _ -> []
+  | Cwd_not_absolute _ -> []
+  | Pipeline_empty -> []
+  | Pipeline_too_short -> []
+  | Env_key_invalid _ -> []
+  (* No alternative field exists: the fix is a valid value in the same
+     [timeout_sec] field, already stated by [pp_validation_error]. *)
+  | Timeout_sec_not_positive _ -> []
 ;;

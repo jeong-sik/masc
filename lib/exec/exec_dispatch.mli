@@ -63,8 +63,18 @@ val dispatch_pipeline :
     same callback contract. Decomposed fallback pipeline paths stream each
     stage's stderr and the final stage's stdout through the same callback
     contract while preserving intermediate stdout as stdin for the next
-    stage.  [?timeout_sec] applies uniformly to every stage on the host
-    native-pipeline and decomposed-fallback paths (one deadline per spawn,
-    mirroring [Exec_gate.run_argv_pipeline_with_status_split]); the Docker
-    [pipeline_runner] path ignores it — [Sandbox_target.pipeline_runner] has
-    no timeout parameter yet. *)
+    stage.
+
+    [?timeout_sec] semantics are path-dependent, not uniform:
+    - Host native pipeline (every stage [Host] sandbox with no redirects,
+      per [host_pipeline_specs]): forwarded to
+      [Exec_gate.run_argv_pipeline_with_status_split], which wraps the
+      *entire* pipeline await in a single
+      [Eio.Time.with_timeout_exn] — one deadline for the whole pipeline,
+      not per stage (see [Process_eio.run_argv_pipeline_with_status_split]).
+    - Decomposed fallback (mixed sandboxes, any stage with redirects, or no
+      matching Docker [pipeline_runner]): each stage is dispatched in turn
+      via [dispatch_simple ?timeout_sec], so the deadline resets per stage;
+      worst-case total wall time is [List.length stages * timeout_sec].
+    - Docker [pipeline_runner] path: ignores [?timeout_sec] entirely —
+      [Sandbox_target.pipeline_runner] has no timeout parameter yet. *)

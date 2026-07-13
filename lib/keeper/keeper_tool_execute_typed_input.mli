@@ -82,9 +82,19 @@ type execute_input =
       (** Per-stage redirects are intentionally not exposed here — pipe
           construction owns the inter-stage fd plumbing.  Out-of-stage
           redirects on the pipeline's endpoints are a deferred extension.
-          [timeout_sec] applies uniformly to every stage, mirroring how
-          {!Masc_exec.Exec_gate.run_argv_pipeline_with_status_split} applies
-          one deadline per spawned stage. *)
+
+          [timeout_sec]'s effective semantics depend on which dispatch path
+          {!Masc_exec.Exec_dispatch.dispatch_pipeline} selects for the
+          lowered stages.  A typed [Pipeline]'s stages always lower with no
+          redirects and share one [sandbox] value per call (defaulting to
+          {!Masc_exec.Sandbox_target.host}), so with the default sandbox
+          every stage takes the host native-pipeline path: there,
+          {!Masc_exec.Exec_gate.run_argv_pipeline_with_status_split} wraps
+          the *whole* pipeline await in a single deadline — one deadline
+          for the entire pipeline, not one per stage. If a caller resolves
+          a non-host (Docker) sandbox instead, stages fall to the Docker
+          [pipeline_runner] path, which ignores [timeout_sec] entirely (no
+          timeout parameter exists there yet). *)
 
 type validation_error =
   | Empty_executable of { argv : string list }

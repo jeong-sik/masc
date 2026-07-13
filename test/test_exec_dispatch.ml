@@ -1351,5 +1351,53 @@ let () =
   assert (result.status = Unix.WEXITED 124);
   assert (elapsed < 8.0)
 
+(* --- dispatch_pipeline: decomposed fallback path applies ?timeout_sec
+   per stage, not once for the whole pipeline ---
+
+   [host_pipeline_specs] requires every stage to be [Host] sandbox with no
+   redirects; a [Fd_to_fd] redirect on the first stage makes it (and
+   [docker_pipeline_specs], which requires a Docker sandbox) return [None],
+   so [dispatch_pipeline] falls to the sequential per-stage [chain] instead
+   of the single-deadline native pipeline exercised above.  The first stage
+   exits immediately and should not consume any of the second stage's
+   [timeout_sec] budget; only the sleeping second stage should hit the
+   0.5s deadline.  8.0s stays generous for one [reap_proc_with_clock]
+   escalation, matching the bound used by the native-pipeline test. *)
+
+let () =
+  with_eio @@ fun () ->
+  let open Masc_exec.Shell_ir in
+  let host_sandbox = Masc_exec.Sandbox_target.host () in
+  let sh_bin = Masc_exec.Exec_program.of_string "sh" |> Result.get_ok in
+  let fast_stage =
+    Simple
+      { bin = sh_bin
+      ; args = [ Lit ("-c", default_meta); Lit ("exit 0", default_meta) ]
+      ; env = []
+      ; cwd = None
+      ; redirects = [ Masc_exec.Redirect_scope.Fd_to_fd { src = 2; dst = 1 } ]
+      ; sandbox = host_sandbox
+      }
+  in
+  let slow_stage =
+    Simple
+      { bin = sh_bin
+      ; args = [ Lit ("-c", default_meta); Lit ("sleep 30", default_meta) ]
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = host_sandbox
+      }
+  in
+  let t0 = Unix.gettimeofday () in
+  let result =
+    Masc_exec.Exec_dispatch.dispatch_pipeline
+      ~timeout_sec:0.5
+      [ fast_stage; slow_stage ]
+  in
+  let elapsed = Unix.gettimeofday () -. t0 in
+  assert (result.status = Unix.WEXITED 124);
+  assert (elapsed < 8.0)
+
 let () =
   Printf.printf "p7_exec_dispatch: all tests passed.\n"

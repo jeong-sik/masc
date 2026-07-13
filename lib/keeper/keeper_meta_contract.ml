@@ -459,6 +459,11 @@ let mark_resumed (m : keeper_meta) : keeper_meta =
    persist an unrepresentable state. Non-terminal latches with [paused = false]
    are left alone (admission treats them as [Active], so they are recoverable). *)
 let dead_tombstone_pause_violation (m : keeper_meta) : string option =
+  (* Exhaustive on [latched_reason] for the [paused = false] rows (no [_]
+     catch-all): a future terminal latch variant must force a decision here
+     rather than silently escaping the write-boundary guard. A non-terminal
+     latch with [paused = false] is admission-[Active] (recoverable), so it is
+     not a violation. [paused = true] is always consistent with any latch. *)
   match m.paused, m.latched_reason with
   | false, Some Keeper_latched_reason.Dead_tombstone ->
     Some
@@ -466,7 +471,8 @@ let dead_tombstone_pause_violation (m : keeper_meta) : string option =
          "keeper %s: paused=false with Dead_tombstone latch (resume must clear \
           the latch via mark_resumed / dead revival)"
          m.name)
-  | _ -> None
+  | false, (Some (Keeper_latched_reason.Operator_paused _) | None) -> None
+  | true, _ -> None
 ;;
 
 let apply_profile_default opt current =

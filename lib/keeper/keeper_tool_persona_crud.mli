@@ -1,5 +1,12 @@
 (** Keeper_tool_persona_crud — masc_persona_create and masc_persona_update handlers. *)
 
+(** Pick the write root from the resolver's persona roots. [Error] when the
+    list is empty: writing to an invented fallback location would produce a
+    profile the loaders never read (the original #24340 bug shape), so the
+    tools refuse loudly instead. Pure — exposed so tests can pin the empty-root
+    contract without manipulating process environment. *)
+val personas_dir_of_roots : string list -> (string, string) result
+
 (** Build the persona [profile.json] payload from create args, in the shape the
     profile loaders read: identity ([name], [role], [trait]) at the top level
     and keeper-template defaults ([goal], [instructions], [mention_targets],
@@ -38,6 +45,15 @@ val handle_persona_delete :
   -> Keeper_types_profile.tool_result
 
 (** [masc_persona_delete] body operating on raw JSON args, resolving the persona
-    location from MASC_PERSONAS_DIR. Returns a JSON object carrying an ["error"]
-    field on failure. Exposed for round-trip tests. *)
-val handle_persona_delete_json : Yojson.Safe.t -> Yojson.Safe.t
+    root via [Config_dir_resolver.personas_dirs] (fail-loud when the resolver
+    disowns every root). Outcome is carried by [Result]; the [Error] payload is
+    the error object presented to the caller. Exposed for round-trip tests. *)
+val handle_persona_delete_json :
+  Yojson.Safe.t -> (Yojson.Safe.t, Yojson.Safe.t) result
+
+(** [masc_persona_create] body operating on raw JSON args. [Error] carries the
+    validation/persistence error payload (removed keys such as [tool_denylist]
+    are rejected loudly, never silently dropped). Exposed for round-trip
+    tests. *)
+val handle_persona_create_json :
+  Yojson.Safe.t -> (Yojson.Safe.t, Yojson.Safe.t) result

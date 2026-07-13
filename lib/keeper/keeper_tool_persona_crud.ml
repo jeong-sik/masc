@@ -8,23 +8,22 @@ open Keeper_types_profile
    loader (Keeper_types_profile_persona) resolves persona roots exclusively
    through Config_dir_resolver.personas_dirs (MASC_PERSONAS_DIR, else the
    resolved CONFIG_ROOT/personas); its own comment warns that MASC_BASE/cwd
-   fallbacks "make the dashboard lie about the actual source of truth". Using
-   the resolver's primary root keeps create/update/delete consistent with what
-   masc_persona_list shows. The legacy fallback only runs when the resolver
-   disowns every root (no MASC_PERSONAS_DIR and a Missing/Invalid config root),
-   so a first create still lands somewhere writable. *)
-let personas_dir () =
-  match Config_dir_resolver.personas_dirs () with
-  | dir :: _ -> dir
+   fallbacks "make the dashboard lie about the actual source of truth". When
+   the resolver disowns every root this returns [Error] instead of inventing
+   a writable fallback: a profile written to a root the loaders never read is
+   permanently invisible (the original #24340 bug shape), so refusing loudly
+   is strictly better than succeeding silently. *)
+let personas_dir_of_roots (roots : string list) : (string, string) result =
+  match roots with
+  | dir :: _ -> Ok dir
   | [] ->
-      (match Sys.getenv_opt "MASC_PERSONAS_DIR" with
-       | Some d -> d
-       | None ->
-           let base = match Sys.getenv_opt "MASC_BASE" with
-             | Some b -> b
-             | None -> Config_dir_resolver.base_path_or_cwd ()
-           in
-           Filename.concat base "personas")
+      Error
+        "persona root unresolved: Config_dir_resolver.personas_dirs returned \
+         no roots (set MASC_PERSONAS_DIR or repair the config root); refusing \
+         to write to a fallback location the persona loaders never read"
+
+let personas_dir () : (string, string) result =
+  personas_dir_of_roots (Config_dir_resolver.personas_dirs ())
 
 (** Reject any [persona_name] that is not a single, self-contained path
     component. [Filename.basename ".." = ".."] and [Filename.basename "." =
@@ -43,14 +42,14 @@ let validate_persona_name persona_name : (unit, string) result =
     Error "persona_name must not contain path separators"
   else Ok ()
 
-let profile_path persona_name =
-  Filename.concat (personas_dir ()) (Filename.concat persona_name "profile.json")
+let profile_path ~dir persona_name =
+  Filename.concat dir (Filename.concat persona_name "profile.json")
 
-let persona_exists persona_name =
-  Fs_compat.file_exists (profile_path persona_name)
+let persona_exists ~dir persona_name =
+  Fs_compat.file_exists (profile_path ~dir persona_name)
 
-let read_profile persona_name =
-  let path = profile_path persona_name in
+let read_profile ~dir persona_name =
+  let path = profile_path ~dir persona_name in
   if not (Fs_compat.file_exists path) then
     Error ("Persona '" ^ persona_name ^ "' not found at " ^ path)
   else
@@ -61,18 +60,18 @@ let read_profile persona_name =
            Error ("Invalid JSON in " ^ path ^ ": " ^ msg))
     | None -> Error ("Failed to read " ^ path)
 
-let write_profile persona_name json =
-  let dir = Filename.concat (personas_dir ()) persona_name in
-  let path = Filename.concat dir "profile.json" in
+let write_profile ~dir persona_name json =
+  let persona_dir = Filename.concat dir persona_name in
+  let path = Filename.concat persona_dir "profile.json" in
   match
     try
-      Fs_compat.mkdir_p dir;
+      Fs_compat.mkdir_p persona_dir;
       Ok ()
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | exn -> Error (Printexc.to_string exn)
   with
-  | Error detail -> Error ("Failed to create " ^ dir ^ ": " ^ detail)
+  | Error detail -> Error ("Failed to create " ^ persona_dir ^ ": " ^ detail)
   | Ok () ->
     let tmp = path ^ ".tmp" in
     let content = Yojson.Safe.to_string ~std:true json in
@@ -240,16 +239,19 @@ let handle_persona_create_json args =
   if errors <> [] then
     Error (error_assoc [("errors", `List (List.map (fun e -> `String e) errors))])
   else
-    let persona_name = get_string args "persona_name" "" in
-    if persona_exists persona_name then
-      Error
-        (error_assoc
-           [("error", `String ("Persona '" ^ persona_name ^ "' already exists. Use masc_persona_update to modify it."))])
-    else
-      let profile = profile_from_create_args args in
-      match write_profile persona_name profile with
-      | Ok result -> Ok result
-      | Error msg -> Error (error_assoc [("error", `String msg)])
+    match personas_dir () with
+    | Error msg -> Error (error_assoc [("error", `String msg)])
+    | Ok dir ->
+      let persona_name = get_string args "persona_name" "" in
+      if persona_exists ~dir persona_name then
+        Error
+          (error_assoc
+             [("error", `String ("Persona '" ^ persona_name ^ "' already exists. Use masc_persona_update to modify it."))])
+      else
+        let profile = profile_from_create_args args in
+        match write_profile ~dir persona_name profile with
+        | Ok result -> Ok result
+        | Error msg -> Error (error_assoc [("error", `String msg)])
 
 let handle_persona_update_json args =
   let persona_name = get_string_opt args "persona_name" in
@@ -261,18 +263,21 @@ let handle_persona_update_json args =
       match validate_persona_name pn with
       | Error msg -> Error (error_assoc [("error", `String msg)])
       | Ok () ->
-          if not (persona_exists pn) then
+          match personas_dir () with
+          | Error msg -> Error (error_assoc [("error", `String msg)])
+          | Ok dir ->
+          if not (persona_exists ~dir pn) then
             Error
               (error_assoc
                  [("error", `String ("Persona '" ^ pn ^ "' does not exist. Use masc_persona_create first."))])
           else
-            match read_profile pn with
+            match read_profile ~dir pn with
             | Error msg -> Error (error_assoc [("error", `String msg)])
             | Ok existing_json ->
                 match merge_update_args_into_profile existing_json args with
                 | Error msg -> Error (error_assoc [("error", `String msg)])
                 | Ok updated ->
-                    match write_profile pn updated with
+                    match write_profile ~dir pn updated with
                     | Ok result -> Ok result
                     | Error msg -> Error (error_assoc [("error", `String msg)])
 
@@ -287,34 +292,37 @@ let handle_persona_update _ctx args : tool_result =
    ignores missing paths and does not follow symlinks; the [validate_persona_name]
    guard keeps [persona_name] a single path component under [personas_dir ()],
    so the removal target cannot escape that directory. *)
-let delete_persona_dir persona_name : (Yojson.Safe.t, string) result =
-  let dir = Filename.concat (personas_dir ()) persona_name in
+let delete_persona_dir ~dir persona_name : (Yojson.Safe.t, string) result =
+  let target = Filename.concat dir persona_name in
   try
-    Fs_compat.remove_tree dir;
+    Fs_compat.remove_tree target;
     (* Audit trail for a destructive operator action. *)
-    Log.Keeper.info "masc_persona_delete: removed persona %s (%s)" persona_name dir;
+    Log.Keeper.info "masc_persona_delete: removed persona %s (%s)" persona_name target;
     Ok
       (ok_assoc
          [ ("persona_name", `String persona_name)
          ; ("deleted", `Bool true)
-         ; ("path", `String dir)
+         ; ("path", `String target)
          ])
   with exn ->
-    Error ("Failed to delete persona directory " ^ dir ^ ": " ^ Printexc.to_string exn)
+    Error ("Failed to delete persona directory " ^ target ^ ": " ^ Printexc.to_string exn)
 
-let handle_persona_delete_json args =
+let handle_persona_delete_json args : (Yojson.Safe.t, Yojson.Safe.t) result =
   match get_string_opt args "persona_name" with
-  | None -> error_assoc [("error", `String "Missing required field: persona_name")]
+  | None -> Error (error_assoc [("error", `String "Missing required field: persona_name")])
   | Some pn ->
       (match validate_persona_name pn with
-       | Error msg -> error_assoc [("error", `String msg)]
+       | Error msg -> Error (error_assoc [("error", `String msg)])
        | Ok () ->
-           if not (persona_exists pn) then
-             error_assoc [("error", `String ("Persona '" ^ pn ^ "' does not exist."))]
+           match personas_dir () with
+           | Error msg -> Error (error_assoc [("error", `String msg)])
+           | Ok dir ->
+           if not (persona_exists ~dir pn) then
+             Error (error_assoc [("error", `String ("Persona '" ^ pn ^ "' does not exist."))])
            else
-             (match delete_persona_dir pn with
-              | Ok result -> result
-              | Error msg -> error_assoc [("error", `String msg)]))
+             (match delete_persona_dir ~dir pn with
+              | Ok result -> Ok result
+              | Error msg -> Error (error_assoc [("error", `String msg)])))
 
 let handle_persona_delete _ctx args : tool_result =
   tool_result_of_json_result (handle_persona_delete_json args)

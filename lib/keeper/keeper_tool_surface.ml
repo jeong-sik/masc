@@ -682,6 +682,7 @@ let dispatch ?continuation_channel ctx ~name ~args : tool_result option =
   | "masc_persona_list" -> Some (tool_result_with_tool_name ~tool_name:name (Persona.handle_persona_list ctx args))
   | "masc_persona_create" -> Some (tool_result_with_tool_name ~tool_name:name (Keeper_tool_persona_crud.handle_persona_create ctx args))
   | "masc_persona_update" -> Some (tool_result_with_tool_name ~tool_name:name (Keeper_tool_persona_crud.handle_persona_update ctx args))
+  | "masc_persona_delete" -> Some (tool_result_with_tool_name ~tool_name:name (Keeper_tool_persona_crud.handle_persona_delete ctx args))
   | "masc_keeper_create_from_persona" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_create_from_persona ctx args))
   | "masc_keeper_up" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_up ctx args))
   | "masc_keeper_status" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_status ctx args))

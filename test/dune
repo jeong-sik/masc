@@ -367,6 +367,7 @@
   test_runtime_mcp_policy_auth
   test_keeper_classifier_helper
   test_persona_tool_reachability
+  test_persona_crud_profile_shape
   test_turn_id_propagation
   test_auth_strict_mode
   test_keeper_turn_fsm_emit
@@ -739,6 +740,7 @@
   test_runtime_mcp_policy_auth
   test_keeper_classifier_helper
   test_persona_tool_reachability
+  test_persona_crud_profile_shape
   test_turn_id_propagation
   test_auth_strict_mode
   test_keeper_turn_fsm_emit

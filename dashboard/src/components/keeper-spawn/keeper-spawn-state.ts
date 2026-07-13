@@ -95,45 +95,63 @@ export async function spawnKeeperFromPersona(personaName: string, opts?: { dryRu
 }
 
 // ---------------------------------------------------------------------------
-// Persona create/edit state.
+// Persona create/edit/delete state.
 //
-// Completes the persona create/edit UI surface introduced in #23703
-// (persona-form.ts, persona-browser.ts import these). The exports were
-// omitted from that change, leaving the dashboard TypeScript typecheck
-// broken on every branch that runs the Dashboard job. The job does not run
-// on pushes to main, so main itself stays latently green and every PR
-// sitting on top inherits the failure.
-//
-// masc_persona_create / masc_persona_update accept (see keeper_schema.ml):
-// persona_name, display_name, role, trait, goal, instructions,
-// mention_targets, tool_denylist, proactive_enabled, auto_handoff.
-// persona-form.ts additionally collects `mode` and `description`, which are
-// NOT part of the persona schema; they are accepted here only for type
-// compatibility with the form and are deliberately not forwarded. Aligning
-// the form to the real persona field model is tracked separately.
+// A persona profile.json has two layers the backend loaders read from
+// distinct locations:
+//   - identity (top level): display_name -> "name", role, trait;
+//   - keeper-template defaults (nested "keeper" object): goal, instructions,
+//     mention_targets, proactive_enabled — the defaults a keeper spawned from
+//     this persona inherits.
+// masc_persona_create / masc_persona_update take these fields (see
+// keeper_schema.ml) and write them to the correct layer. We forward exactly
+// those fields; a persona needs at least `goal` + `mention_targets` to be
+// spawnable (masc_keeper_create_from_persona requires them). The old
+// `mode`/`description` form fields did not exist in the schema and were
+// silently dropped upstream; they are gone.
 // ---------------------------------------------------------------------------
+
+export interface PersonaFields {
+  persona_name: string
+  display_name?: string
+  role?: string
+  trait?: string
+  goal?: string
+  instructions?: string
+  mention_targets?: string[]
+  proactive_enabled?: boolean
+}
+
+// Shared field projection. A field is forwarded only when the caller set it,
+// so update keeps partial-merge semantics (unset field -> unchanged on disk).
+function personaArgs(fields: Omit<PersonaFields, 'persona_name'>): Record<string, unknown> {
+  const args: Record<string, unknown> = {}
+  if (fields.display_name !== undefined) args.display_name = fields.display_name
+  if (fields.role !== undefined) args.role = fields.role
+  if (fields.trait !== undefined) args.trait = fields.trait
+  if (fields.goal !== undefined) args.goal = fields.goal
+  if (fields.instructions !== undefined) args.instructions = fields.instructions
+  if (fields.mention_targets !== undefined && fields.mention_targets.length > 0) {
+    args.mention_targets = fields.mention_targets
+  }
+  if (fields.proactive_enabled !== undefined) args.proactive_enabled = fields.proactive_enabled
+  return args
+}
 
 export const showCreateForm = signal(false)
 export const editingPersona = signal<PersonaSummary | null>(null)
 
-export async function createPersona(fields: {
-  persona_name: string
-  display_name?: string
-  role?: string
-  mode?: string
-  description?: string
-}): Promise<boolean> {
+export async function createPersona(fields: PersonaFields): Promise<boolean> {
   const access = dashboardAuthAccess(shellAuthSummary.value, 'worker')
   if (!access.allowed) {
     showToast(access.reason ?? '페르소나 생성 권한이 없습니다.', 'error')
     return false
   }
-  const args: Record<string, unknown> = { persona_name: fields.persona_name }
-  if (fields.display_name !== undefined) args.display_name = fields.display_name
-  if (fields.role !== undefined) args.role = fields.role
+  const { persona_name, ...rest } = fields
+  const args: Record<string, unknown> = { persona_name, ...personaArgs(rest) }
   try {
     await callMcpTool('masc_persona_create', args)
-    showToast(`${fields.persona_name} 페르소나 생성 완료`, 'success')
+    showToast(`${persona_name} 페르소나 생성 완료`, 'success')
     void loadPersonas()
     return true
   } catch (err) {
@@ -144,21 +162,14 @@ export async function createPersona(fields: {
 
 export async function updatePersona(
   name: string,
-  patch: {
-    display_name?: string
-    role?: string
-    mode?: string
-    description?: string
-  },
+  patch: Omit<PersonaFields, 'persona_name'>,
 ): Promise<boolean> {
   const access = dashboardAuthAccess(shellAuthSummary.value, 'worker')
   if (!access.allowed) {
     showToast(access.reason ?? '페르소나 수정 권한이 없습니다.', 'error')
     return false
   }
-  const args: Record<string, unknown> = { persona_name: name }
-  if (patch.display_name !== undefined) args.display_name = patch.display_name
-  if (patch.role !== undefined) args.role = patch.role
+  const args: Record<string, unknown> = { persona_name: name, ...personaArgs(patch) }
   try {
     await callMcpTool('masc_persona_update', args)
     showToast(`${name} 페르소나 수정 완료`, 'success')
@@ -166,6 +177,23 @@ export async function updatePersona(
     return true
   } catch (err) {
     showToast(`페르소나 수정 실패: ${errorToString(err)}`, 'error')
+    return false
+  }
+}
+
+export async function deletePersona(name: string): Promise<boolean> {
+  const access = dashboardAuthAccess(shellAuthSummary.value, 'worker')
+  if (!access.allowed) {
+    showToast(access.reason ?? '페르소나 삭제 권한이 없습니다.', 'error')
+    return false
+  }
+  try {
+    await callMcpTool('masc_persona_delete', { persona_name: name })
+    showToast(`${name} 페르소나 삭제 완료`, 'success')
+    void loadPersonas()
+    return true
+  } catch (err) {
+    showToast(`페르소나 삭제 실패: ${errorToString(err)}`, 'error')
     return false
   }
 }

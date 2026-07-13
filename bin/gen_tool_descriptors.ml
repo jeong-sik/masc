@@ -1,7 +1,7 @@
 (* RFC-0057 Phase 2 — tool descriptor codegen.
 
-   Mirrors bin/gen_shell_ir_walkers.ml: spec-as-OCaml-value -> Buffer.emit
-   -> stdout. The dune rule in lib/tool_schemas/ captures stdout into
+   Emits a spec-as-OCaml-value through [Buffer] to stdout. The dune rule in
+   lib/tool_schemas/ captures stdout into
    tool_descriptors_gen.ml inside the masc_tool_schemas library, so the
    generated schemas live alongside the hand-written ones in the same
    module namespace.
@@ -38,7 +38,7 @@ let config_category_enum_strings =
   ; "level2"
   ; "dashboard"
   ; "economy"
-  ; "governance"
+  ; "operations"
   ; "channel"
   ; "process"
   ; "worker"
@@ -117,13 +117,12 @@ let masc_keeper_waiting_inventory_spec : tool_spec =
 let masc_gc_spec : tool_spec =
   { name = "masc_gc"
   ; description =
-      "Run garbage collection: remove zombie agents, archive stale tasks, delete old \
-       messages (default: 7-day threshold)."
+      "Run explicit age-based garbage collection. Agent lifecycle is not modified."
   ; parameters =
       [ { p_name = "days"
-        ; p_type = T_int { min = None; max = None; default = Some 7 }
-        ; p_description = "Age threshold in days (default: 7)"
-        ; p_required = false
+        ; p_type = T_int { min = Some 1; max = None; default = None }
+        ; p_description = "Operator-selected retention horizon in days"
+        ; p_required = true
         }
       ]
   ; additional_properties = false
@@ -316,7 +315,7 @@ let masc_deliver_spec : tool_spec =
       "Attach final output/result to a task for handoff or review. Use for: code diffs, \
        PR URLs, analysis reports, generated files. Deliverables persist with task and \
        are visible to other agents. Call before masc_transition(action='done'). Example: \
-       masc_deliver({task_id: 'task-001', content: 'PR: github.com/org/repo/pull/123'})"
+       masc_deliver({task_id: 'task-001', content: 'artifact:review-123'})"
   ; parameters =
       [ { p_name = "task_id"
         ; p_type = T_string { enum = None; default = None }

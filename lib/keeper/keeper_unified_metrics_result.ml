@@ -16,7 +16,6 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
     ~(observation : Keeper_world_observation.world_observation)
     ?(is_autonomous_turn = true)
     ?(update_proactive_rt = true)
-    ?(context_max = 0)
     (result : Keeper_agent_run.run_result) : keeper_meta =
   let now_ts = Time_compat.now () in
   let tool_names = Keeper_agent_result.tool_names result in
@@ -24,7 +23,6 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
     classify_usage_trust
       ~usage_reported:result.usage_reported
       ~usage:result.usage
-      ~context_max
   in
   (* #9959: surface classification into Otel_metric_store exactly once per
      turn. Other [classify_usage_trust] call sites serialize the
@@ -33,24 +31,14 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
   record_keeper_idle_seconds
     ~keeper_name:meta.name
     ~idle_seconds:observation.idle_seconds;
-  let usage_trusted = usage_trust_is_trusted usage_trust in
-  let trusted_input_tokens =
-    if usage_trusted then result.usage.input_tokens else 0
-  in
-  let trusted_output_tokens =
-    if usage_trusted then result.usage.output_tokens else 0
-  in
-  let trusted_total_tokens =
-    if usage_trusted then Keeper_context_runtime.total_tokens result.usage else 0
-  in
-  (* Token counts above are zeroed when usage is untrusted; cost is accounted
-     independently of token-trust (token⊥cost). *)
+  (* [usage_trust] is anomaly provenance only. Provider-reported counters are
+     retained verbatim in the runtime aggregate; a stale or invalidity label
+     must never rewrite an observation to zero. *)
+  let observed_input_tokens = result.usage.input_tokens in
+  let observed_output_tokens = result.usage.output_tokens in
+  let observed_total_tokens = Keeper_context_runtime.total_tokens result.usage in
   let turn_cost = estimate_usage_cost_usd result.usage in
-  let substantive_tool_call_count =
-    tool_names
-    |> List.filter (fun name -> not (is_observation_only_tool_name name))
-    |> List.length
-  in
+  let substantive_tool_call_count = List.length tool_names in
   let has_substantive_tools = has_substantive_tool_calls tool_names in
   let has_text = String.trim result.response_text <> "" in
   (* RFC-0232: a budget-exhausted turn substitutes a synthetic continuation
@@ -76,7 +64,10 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
     is_scheduled_autonomous_cycle_of_observation observation
   in
   let is_board_reactive = observation.pending_board_events <> [] in
-  let is_mention_reactive = observation.pending_mentions <> [] in
+  let is_mention_reactive =
+    Keeper_world_observation_message_scope.has_kind
+      Keeper_world_observation_message_scope.Mention observation.pending_messages
+  in
   let has_meaningful_work =
     has_text || has_substantive_tools || has_validated_evidence
   in
@@ -99,16 +90,16 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
     runtime = { rt with
       usage = {
         total_turns = rt.usage.total_turns + 1;
-        total_input_tokens = rt.usage.total_input_tokens + trusted_input_tokens;
+        total_input_tokens = rt.usage.total_input_tokens + observed_input_tokens;
         total_output_tokens =
-          rt.usage.total_output_tokens + trusted_output_tokens;
+          rt.usage.total_output_tokens + observed_output_tokens;
         total_tokens =
-          rt.usage.total_tokens + trusted_total_tokens;
+          rt.usage.total_tokens + observed_total_tokens;
         total_cost_usd = rt.usage.total_cost_usd +. turn_cost;
         last_turn_ts = now_ts;
-        last_input_tokens = trusted_input_tokens;
-        last_output_tokens = trusted_output_tokens;
-        last_total_tokens = trusted_total_tokens;
+        last_input_tokens = observed_input_tokens;
+        last_output_tokens = observed_output_tokens;
+        last_total_tokens = observed_total_tokens;
         last_latency_ms = latency_ms;
       };
       (* Deterministic scheduled autonomous cycle accounting is separated from

@@ -35,8 +35,7 @@ import { navigate } from '../router'
 import type { Message } from '../types'
 import { findKeeper } from './keeper-utils'
 import { openKeeperDetail } from '../components/keeper-detail'
-import { clampPct } from './format-number'
-import type { BoardActorIdentity, BoardClaimEvidenceProjection, BoardContributorQuality, BoardPost } from '../types'
+import type { BoardActorIdentity, BoardPost } from '../types'
 
 /** Strip inline markdown formatting from title text (bold, italic, code). */
 export function stripInlineMarkdown(text: string): string {
@@ -168,125 +167,6 @@ export function boardActorTitle(
   const runtime = boardActorRuntimeName(authorName, identity)
   const display = boardActorDisplayName(authorName, identity)
   return runtime && runtime !== display ? `런타임 ${runtime}` : undefined
-}
-
-export function contributorQualityPercent(quality?: BoardContributorQuality | null): number | null {
-  if (!contributorQualityHasEvidence(quality)) return null
-  const score = contributorQualityDisplayScore(quality)
-  return score === null ? null : clampPct(Math.round(score * 100))
-}
-
-export function contributorQualityBandLabel(quality?: BoardContributorQuality | null): string {
-  switch (contributorQualityDisplayBand(quality)) {
-    case 'excellent':
-      return '우수'
-    case 'strong':
-      return '강함'
-    case 'watch':
-      return '관찰'
-    case 'low':
-      return '낮음'
-    default:
-      return '품질'
-  }
-}
-
-export function contributorQualityBadgeClass(quality?: BoardContributorQuality | null): string {
-  switch (contributorQualityDisplayBand(quality)) {
-    case 'excellent':
-    case 'strong':
-      return 'bg-[var(--ok-10)] text-[var(--ok-fg)] border-[var(--ok-20)]'
-    case 'watch':
-      return 'bg-[var(--warn-10)] text-[var(--warn-bright)] border-[var(--warn-20)]'
-    case 'low':
-      return 'bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-20)]'
-    default:
-      return 'bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)] border-[var(--color-border-divider)]'
-  }
-}
-
-export function boardClaimEvidenceLabel(evidence?: BoardClaimEvidenceProjection | null): string | null {
-  if (!evidence) return null
-  if (evidence.label?.trim()) return evidence.label.trim()
-  switch (evidence.state) {
-    case 'artifact_missing':
-      return 'Artifact missing'
-    case 'source_snapshot_stale':
-      return 'Source snapshot stale'
-    case 'needs_evidence':
-      return 'Needs evidence'
-    case 'verified':
-      return 'Verified'
-    default:
-      return null
-  }
-}
-
-export function boardClaimEvidenceBadgeClass(evidence?: BoardClaimEvidenceProjection | null): string {
-  switch (evidence?.state) {
-    case 'verified':
-      return 'bg-[var(--ok-10)] text-[var(--ok-fg)] border-[var(--ok-20)]'
-    case 'source_snapshot_stale':
-      return 'bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-20)]'
-    case 'artifact_missing':
-    case 'needs_evidence':
-      return 'bg-[var(--warn-10)] text-[var(--warn-bright)] border-[var(--warn-20)]'
-    default:
-      return 'bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)] border-[var(--color-border-divider)]'
-  }
-}
-
-export function boardClaimEvidenceTitle(evidence?: BoardClaimEvidenceProjection | null): string {
-  const label = boardClaimEvidenceLabel(evidence) ?? 'Claim evidence'
-  if (!evidence) return label
-  return [
-    label,
-    `records ${evidence.total_count}`,
-    `rejects ${evidence.rejected_count}`,
-    `artifact_missing ${evidence.artifact_missing_count}`,
-    `artifact_unknown ${evidence.artifact_unknown_count}`,
-  ].join(' · ')
-}
-
-function contributorQualityDisplayScore(
-  quality?: BoardContributorQuality | null,
-): number | null {
-  if (!quality) return null
-  const legacyScore = quality.score
-  if (legacyScore !== undefined && Number.isFinite(legacyScore)) return legacyScore
-  const accountabilityScore = quality.accountability_score
-  if (accountabilityScore !== undefined && Number.isFinite(accountabilityScore)) {
-    return accountabilityScore
-  }
-  return null
-}
-
-function contributorQualityDisplayBand(
-  quality?: BoardContributorQuality | null,
-): BoardContributorQuality['band'] | null {
-  if (quality?.band) return quality.band
-  return null
-}
-
-function contributorQualityHasEvidence(quality?: BoardContributorQuality | null): boolean {
-  if (!quality) return false
-  if (quality.evidence_state !== undefined) {
-    return quality.evidence_state === 'measured'
-  }
-  if (quality.band) return true
-  if (quality.score !== undefined && Number.isFinite(quality.score)) return true
-  if ((quality.board_posts ?? 0) > 0) return true
-  if ((quality.board_comments ?? 0) > 0) return true
-  if ((quality.completion_rate ?? 0) > 0) return true
-  if ((quality.response_rate ?? 0) > 0) return true
-
-  const DEFAULT_ACCOUNTABILITY_SCORE = 1.0
-  const DEFAULT_THOMPSON_CONFIDENCE = 0.5
-  const DEFAULT_AUTONOMY_LEVEL = 'standard'
-
-  if (quality.accountability_score !== undefined && quality.accountability_score < DEFAULT_ACCOUNTABILITY_SCORE) return true
-  if (quality.thompson_confidence !== undefined && quality.thompson_confidence !== DEFAULT_THOMPSON_CONFIDENCE) return true
-  return quality.autonomy_level !== undefined && quality.autonomy_level !== DEFAULT_AUTONOMY_LEVEL
 }
 
 /** Navigate to keeper detail if author is a keeper, otherwise agent profile. */

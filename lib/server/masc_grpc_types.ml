@@ -146,15 +146,60 @@ module HeartbeatAck = struct
     { timestamp_ms : int64
     ; active_agent_count : int
     ; pending_task_count : int
-    ; directives : string list
+    ; directives : Keeper_directive.t list
     }
+
+  let directive_of_wire raw =
+    match raw with
+    | "pause" -> Ok Keeper_directive.Pause
+    | "resume" -> Ok Keeper_directive.Resume
+    | "wakeup" -> Ok Keeper_directive.Wakeup
+    | _ ->
+      (match String.index_opt raw ':' with
+       | Some separator ->
+         let tag = String.sub raw 0 separator in
+         let payload =
+           String.sub raw (separator + 1) (String.length raw - separator - 1)
+         in
+         if String.equal tag "claim"
+         then (
+           match Keeper_id.Task_id.of_string payload with
+           | Ok task_id -> Ok (Keeper_directive.Assign_task task_id)
+           | Error error ->
+             Error
+               (Printf.sprintf
+                  "invalid HeartbeatAck task assignment %S: %s"
+                  raw
+                  error))
+         else Error (Printf.sprintf "unknown HeartbeatAck directive tag %S" tag)
+       | None -> Error (Printf.sprintf "unknown HeartbeatAck directive %S" raw))
+  ;;
+
+  let directive_to_wire = function
+    | Keeper_directive.Pause -> "pause"
+    | Keeper_directive.Resume -> "resume"
+    | Keeper_directive.Wakeup -> "wakeup"
+    | Keeper_directive.Assign_task task_id ->
+      "claim:" ^ Keeper_id.Task_id.to_string task_id
+  ;;
+
+  let decode_directives directives =
+    let rec loop decoded = function
+      | [] -> List.rev decoded
+      | raw :: rest ->
+        (match directive_of_wire raw with
+         | Ok directive -> loop (directive :: decoded) rest
+         | Error error -> invalid_arg error)
+    in
+    loop [] directives
+  ;;
 
   let of_bytes bytes =
     let p = decode ~type_name:"HeartbeatAck" P.HeartbeatAck.from_proto bytes in
     { timestamp_ms = p.timestamp_ms
     ; active_agent_count = p.active_agent_count
     ; pending_task_count = p.pending_task_count
-    ; directives = p.directives
+    ; directives = decode_directives p.directives
     }
   ;;
 
@@ -164,7 +209,7 @@ module HeartbeatAck = struct
       { timestamp_ms = t.timestamp_ms
       ; active_agent_count = t.active_agent_count
       ; pending_task_count = t.pending_task_count
-      ; directives = t.directives
+      ; directives = List.map directive_to_wire t.directives
       }
   ;;
 end

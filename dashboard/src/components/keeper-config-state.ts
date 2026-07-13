@@ -2,7 +2,8 @@ import { signal } from '@preact/signals'
 import { fetchKeeperConfig } from '../api/dashboard'
 import type { KeeperConfig } from '../types'
 import { createAsyncResource, loaded } from '../lib/async-state'
-import type { KeeperConfigLoadStatus } from './keeper-detail-source'
+
+export type KeeperConfigLoadStatus = 'idle' | 'loading' | 'loaded' | 'error' | 'other'
 
 const configResource = createAsyncResource<KeeperConfig>()
 export const configState = configResource.state

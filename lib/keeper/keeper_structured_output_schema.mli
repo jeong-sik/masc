@@ -32,9 +32,6 @@ val vision_analyze_output_schema : Yojson.Safe.t
 val operator_judge_output_schema : Yojson.Safe.t
 (** JSON object the dashboard operator judge provider must return. *)
 
-val governance_judge_output_schema : Yojson.Safe.t
-(** JSON object the dashboard governance judge provider must return. *)
-
 val fusion_judge_output_schema : Yojson.Safe.t
 (** JSON object the Fusion judge/refine/meta-judge provider must return. *)
 
@@ -45,15 +42,15 @@ val failure_judgment_output_schema : Yojson.Safe.t
 (** Strict independent Keeper failure-judgment verdict. Decision tokens are
     owned by {!Keeper_failure_judgment_contract}. *)
 
+val board_attention_judgment_output_schema : Yojson.Safe.t
+(** Strict relevance verdict for one durable Board-attention candidate. Decision
+    tokens are owned by {!Keeper_board_attention_judgment}. *)
+
 val anti_rationalization_verdict_output_schema : Yojson.Safe.t
 (** JSON object the task anti-rationalization reviewer provider must return. *)
 
 val hitl_context_summary_schema : Yojson.Safe.t
 (** JSON object the HITL context-summary worker provider must return. *)
-
-val governance_resolved_tool_tokens : string list
-(** Resolved tool names accepted by the dashboard governance judge. The
-    provider schema and runtime parser both consume this list. *)
 
 val apply_to_provider_config
   :  Yojson.Safe.t

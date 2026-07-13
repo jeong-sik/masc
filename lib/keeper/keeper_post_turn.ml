@@ -1,8 +1,6 @@
-(** Keeper_post_turn — post-turn lifecycle: compaction, handoff rollover,
-    and overflow retry recovery.
+(** Keeper_post_turn — post-turn lifecycle: compaction and overflow retry recovery.
 
-    Orchestrates the end-of-turn pipeline that decides whether to compact
-    the context and roll over to a new generation.
+    Orchestrates the end-of-turn checkpoint pipeline.
 
     This module owns only the checkpoint/lineage tail of a keeper turn.
     Memory bank append, episode flush, and Hebbian learning are recorded
@@ -13,14 +11,12 @@
     Extracted from Keeper_context_runtime as part of #4955 god-file split.
 
     Spec navigation (OCaml -> TLA+) — plan §19 anchor pattern.  Sibling
-    to #11612 (Cycle 31, [keeper_rollover.ml]).  Authoritative spec
+    Authoritative spec
     mirror is [specs/keeper-state-machine/KeeperGenerationLineage.tla].
 
     Spec lines 10-13 already cite this module as one of three modeled
     OCaml sources:
       - lib/keeper/keeper_post_turn.ml   (this file — post-turn pipeline)
-      - lib/keeper/keeper_rollover.ml    (rollover semantics — anchored
-                                          in #11612)
       - lib/keeper_types/keeper_types.mli (type lineage — anchor deferred)
 
     This block is the reverse-direction citation so code search for
@@ -29,10 +25,6 @@
     Post-turn -> spec mapping:
       Compaction phase    feeds into [keeper_phase] = "running" while
                           the in-flight turn is still resolving.
-      Handoff rollover    delegates to [Keeper_rollover.attempt] and
-                          increments [meta.generation] — spec's
-                          generation variable.  The new trace_id and
-                          trace_history append happen there.
       Checkpoint commit    preserves the spec's checkpoint-valid /
                           checkpoint-generation parity invariant.
 
@@ -262,50 +254,40 @@ let apply_resilience_wirein
           lifecycle)
 
 (* ── Tier K1: multimodal post-turn wire-in (Cycle 27) ─────────────
-   Feature-flag-gated wire-in that runs after the A5/A6 pair. Reads
+   Wire-in that runs after the A5/A6 pair. Reads
    raw multimodal artifacts the keeper agent dropped into
    [working_context["multimodal_artifacts"]], hydrates them via
    [Multimodal_keeper_bridge.hydrate_one], and accumulates them into
    the process-wide [Multimodal.Workspace_holder].
 
-   When [MASC_MULTIMODAL] is off (default), the wire-in is a pure
-   pass-through. When on, it consumes the artifact bag and replaces
-   it with a [workspace_meta] summary so the next turn does not
-   re-process the same entries.
+   It consumes the artifact bag and replaces it with a [workspace_meta]
+   summary so the next turn does not re-process the same entries.
 
    Failures inside the wire-in do not propagate — they are logged
    and the unmodified lifecycle result is returned, preserving the
    keeper's primary turn outcome. *)
 
 (* ── Tier K4b: tool-emission drain (Cycle 27) ──────────────────────
-   Drains the K4 hook accumulator (parsed JSONs captured by
-   [Keeper_tool_emission_hook.make_post_tool_use_hook] during
-   Agent.run) into [working_context["multimodal_artifacts"]] so the
+   Drains producer-owned typed JSON captured at the Keeper tool execution
+   boundary into [working_context["multimodal_artifacts"]] so the
    K1 wirein below picks them up.
 
    Strict ordering: this MUST run BEFORE [apply_multimodal_wirein].
    K4b emit + K1 hydrate is a producer/consumer pair on the same
    working_context bag.
 
-   Feature flag: [MASC_TOOL_EMISSION] (default off). When off, the
-   drain is a no-op (the hook itself is also a no-op when the flag
-   is off, so the accumulator is empty). *)
+   Typed tool emission is a normal Keeper capability, not a rollout gate. *)
 let apply_tool_emission_wirein
     ~(now : float)
     (lifecycle : post_turn_lifecycle) : post_turn_lifecycle =
   let _ = now in
-  if not (Keeper_tool_emission_hook.masc_tool_emission_enabled ()) then
-    lifecycle
-  else
-    match lifecycle.checkpoint with
-    | None -> lifecycle
-    | Some cp -> (
+  match lifecycle.checkpoint with
+  | None -> lifecycle
+  | Some cp -> (
         try
           let acc =
-            (* Tier K4c — pull THIS keeper's accumulator. Producer
-               side ([Keeper_run_tools]) registered it under the
-               same name pre-Agent.run, so the items captured during
-               this turn drain into this turn's working_context. *)
+            (* Tier K4c — pull THIS keeper's accumulator. The typed execution
+               boundary records items under the same stable keeper name. *)
             Keeper_tool_emission_hook.accumulator_for_keeper
               lifecycle.updated_meta.name
           in
@@ -334,17 +316,25 @@ let apply_tool_emission_wirein
 let apply_multimodal_wirein
     ~(now : float)
     (lifecycle : post_turn_lifecycle) : post_turn_lifecycle =
-  if not (Multimodal.Wirein_helpers.masc_multimodal_enabled ()) then
-    lifecycle
-  else
-    match lifecycle.checkpoint with
-    | None -> lifecycle
-    | Some cp -> (
-        try
-          let raws, wc_rest =
-            Multimodal.Wirein_helpers.extract_raw_artifacts
-              cp.Agent_sdk.Checkpoint.working_context
-          in
+  match lifecycle.checkpoint with
+  | None -> lifecycle
+  | Some cp ->
+    (match
+       Multimodal.Wirein_helpers.extract_raw_artifacts
+         cp.Agent_sdk.Checkpoint.working_context
+     with
+     | Error detail ->
+       Log.Keeper.warn
+         "keeper:%s multimodal wire-in contract unavailable: %s"
+         lifecycle.updated_meta.name
+         detail;
+       Otel_metric_store.inc_counter
+         Keeper_metrics.(to_string PostTurnWireinFailures)
+         ~labels:[ ("keeper", lifecycle.updated_meta.name); ("phase", "multimodal_contract") ]
+         ();
+       lifecycle
+     | Ok (raws, wc_rest) ->
+       (try
           let added_count = ref 0 in
           let last_id = ref None in
           Multimodal.Workspace_holder.update (fun ws ->
@@ -395,7 +385,7 @@ let apply_multimodal_wirein
             Keeper_metrics.(to_string PostTurnWireinFailures)
             ~labels:[("keeper", lifecycle.updated_meta.name); ("phase", "multimodal")]
             ();
-          lifecycle)
+          lifecycle))
 
 let apply_post_turn_lifecycle_with_resilience_handles
     ~(resilience_audit_store : Shared_audit.Store.t option)
@@ -470,7 +460,6 @@ let apply_post_turn_lifecycle_with_resilience_handles
   | Some cp ->
       let ctx =
         context_of_oas_checkpoint
-          ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages
           cp
           ~primary_model_max_tokens
       in
@@ -549,7 +538,6 @@ let apply_post_turn_lifecycle_with_resilience_handles
             }
           in
           (match save_oas_checkpoint
-               ~max_checkpoint_messages:base_meta.compaction.max_checkpoint_messages
                ~multimodal_policy:base_meta.multimodal_policy
                ~keeper_name:base_meta.name
                ~session
@@ -598,22 +586,13 @@ let apply_post_turn_lifecycle_with_resilience_handles
             })
           base_meta
       in
-      let rollover =
-        Keeper_rollover.maybe_rollover_oas_handoff
-          ~on_started:on_handoff_started
-          ~base_dir
-          ~meta:meta_after_compaction
-          ~model
-          ~primary_model_max_tokens
-          ~current_turn_blocker_info
-          ~checkpoint
-      in
+      let _ = on_handoff_started, current_turn_blocker_info in
       {
-        updated_meta = rollover.updated_meta;
+        updated_meta = meta_after_compaction;
         checkpoint;
-        handoff_json = rollover.handoff_json;
-        handoff_attempted = rollover.attempted;
-        handoff_failure_reason = rollover.failure_reason;
+        handoff_json = None;
+        handoff_attempted = false;
+        handoff_failure_reason = None;
         compaction =
           {
             attempted = compaction_decided;
@@ -627,10 +606,10 @@ let apply_post_turn_lifecycle_with_resilience_handles
             saved_tokens;
           };
         turn_generation = current_generation;
-        context_ratio = rollover.context_ratio;
-        context_tokens = rollover.context_tokens;
-        context_max = rollover.context_max;
-        message_count = rollover.message_count;
+        context_ratio = context_ratio effective_ctx;
+        context_tokens = token_count effective_ctx;
+        context_max = max_tokens_of_context effective_ctx;
+        message_count = message_count effective_ctx;
       }
   in
   (* Strict ordering: autonomous tick → resilience classification
@@ -707,43 +686,13 @@ let recover_latest_checkpoint_for_overflow_retry
          (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
    | Ok _ -> ());
   let oas_checkpoint =
-    (match oas_result with
-     | Ok v -> Some v
-     | Error Not_found -> None
-     | Error _ ->
-       Log.Keeper.warn "keeper:%s overflow-retry OAS checkpoint error discarded at to_option"
-         (Keeper_id.Trace_id.to_string meta.runtime.trace_id);
-       None)
-    |> Option.map (fun checkpoint ->
-      let sanitized, stats =
-        sanitize_oas_checkpoint ~repair_orphans:false checkpoint
-      in
-      if checkpoint_sanitize_changed stats then begin
-        Otel_metric_store.inc_counter
-          Keeper_metrics.(to_string CheckpointFailures)
-          ~labels:[("keeper", meta.name); ("site", "overflow_retry_sanitize")]
-          ();
-        Log.Keeper.warn
-          "keeper:%s overflow-retry OAS checkpoint sanitized messages: dropped_blocks=%d dropped_messages=%d dropped_chars=%d truncated_blocks=%d truncated_chars=%d"
-          (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-          stats.dropped_blocks
-          stats.dropped_messages
-          stats.dropped_chars
-          stats.truncated_blocks
-          stats.truncated_chars;
-        (match Keeper_checkpoint_store.save_oas ~session_dir:session.session_dir sanitized with
-         | Ok () -> ()
-         | Error detail ->
-             Log.Keeper.error
-               "keeper:%s overflow-retry OAS checkpoint sanitize save failed: %s"
-               (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-               detail;
-             Otel_metric_store.inc_counter
-               Keeper_metrics.(to_string CheckpointFailures)
-               ~labels:[("keeper", meta.name); ("phase", "overflow_sanitize_save")]
-               ())
-      end;
-      sanitized)
+    match oas_result with
+    | Ok v -> Some v
+    | Error Not_found -> None
+    | Error _ ->
+      Log.Keeper.warn "keeper:%s overflow-retry OAS checkpoint load failed; recovery cannot resume it"
+        (Keeper_id.Trace_id.to_string meta.runtime.trace_id);
+      None
   in
   let selected =
     match oas_checkpoint with
@@ -753,8 +702,6 @@ let recover_latest_checkpoint_for_overflow_retry
         in
         Some
           ( context_of_oas_checkpoint
-              ~repair_orphans:false
-              ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages
               checkpoint
               ~primary_model_max_tokens,
             turn_generation )
@@ -818,7 +765,6 @@ let recover_latest_checkpoint_for_overflow_retry
         in
         try
           (match save_oas_checkpoint
-              ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages
               ~multimodal_policy:meta.multimodal_policy
               ~keeper_name:meta.name
               ~session

@@ -28,7 +28,6 @@ function composite(overrides: Partial<KeeperCompositeSnapshot> = {}): KeeperComp
     decision: { stage: 'idle' },
     runtime: { state: 'idle' },
     compaction: { stage: 'idle' },
-    circuit_breaker: { state: 'closed' },
     measurement: { captured: true },
     invariants: {
       phase_turn_alignment: true,
@@ -54,12 +53,9 @@ function composite(overrides: Partial<KeeperCompositeSnapshot> = {}): KeeperComp
         handoff_active: false,
         operator_paused: false,
         stop_requested: false,
-        restart_budget_remaining: true,
-        backoff_elapsed: true,
+        dead_tombstone_latched: false,
         drain_complete: false,
         context_overflow: false,
-        compact_retry_exhausted: false,
-        terminal_failure_latched: false,
       },
       determining_condition: 'running_fiber_alive',
       rows: [],
@@ -144,7 +140,6 @@ describe('deriveKeeperRuntimeProjection', () => {
         decision: { stage: 'tool_optional' },
         runtime: { state: 'degraded_retry' },
         compaction: { stage: 'idle' },
-        circuit_breaker: { state: 'closed' },
       }),
       runtimeTrace: runtimeTrace(),
       runtimeResolution: {
@@ -158,7 +153,7 @@ describe('deriveKeeperRuntimeProjection', () => {
     expect(projection.heartbeat.stale).toBe(true)
     expect(projection.context.breach).toBe(true)
     expect(projection.fiberAlive.alive).toBe(true)
-    expect(projection.fsmLanes.map(lane => lane.axis)).toEqual(['KSM', 'KTC', 'KDP', 'KCL', 'KMC', 'KCB'])
+    expect(projection.fsmLanes.map(lane => lane.axis)).toEqual(['KSM', 'KTC', 'KDP', 'KCL', 'KMC'])
     expect(projection.signals.map(signal => signal.kind)).toEqual([
       'operational_state',
       'ksm_phase',

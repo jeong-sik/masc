@@ -13,21 +13,16 @@ type cursor =
 type stimulus_kind =
   | Board_signal
   | Bootstrap
-  | No_progress_recovery
   | Fusion_completed  (** RFC-0266: async masc_fusion completion wake *)
   | Bg_completed  (** RFC-0290: generic background job completion wake *)
   | Schedule_due  (** Scheduled automation due wake for a specific keeper *)
   | Connector_attention
       (** RFC-connector-ambient-attention-wake: ambient connector message wake *)
-  | Hitl_resolved  (** HITL approval resolution wake — unblocks [Skip Approval_pending] *)
-  | Goal_verification_failed
-      (** Goal verification rejection wake — resumes assigned goal work. *)
+  | Hitl_resolved  (** HITL resolution delivered as an ordinary Keeper wake. *)
   | Failure_judgment
       (** RFC-0313 W2: deterministic turn-failure escalated for LLM judgment. *)
   | Goal_assigned
       (** RFC-0315 P3 W0: goal entered active_goal_ids — assignment edge wake. *)
-  | Goal_stagnation
-      (** RFC-0310 §3.3: a live goal went stale — stagnation edge wake. *)
 
 type reaction_kind =
   | Turn_started

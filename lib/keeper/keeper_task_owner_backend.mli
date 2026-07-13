@@ -2,6 +2,5 @@
 
 val is_registered_agent_alias : Workspace.config -> string -> bool
 val sync_current_task_binding : Workspace.config -> agent_name:string -> unit
-val transition_action_denylist : Workspace.config -> agent_name:string -> string list
 val active_goal_phases_for_agent : Workspace.config -> agent_name:string -> string list
 val install_hooks : unit -> unit

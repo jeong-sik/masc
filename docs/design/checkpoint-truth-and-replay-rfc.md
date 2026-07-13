@@ -144,7 +144,7 @@ replay target은 "typed after-step facts"다.
 - checkpoint load success/failure
 - selected tool name
 - tool input/output envelope shape
-- mutation boundary reached 여부
+- typed checkpoint boundary reached 여부
 - compaction decision
 - handoff decision
 - verifier verdict input/output envelope
@@ -267,7 +267,7 @@ Secondary design touchpoints:
 
 ### Phase 3
 
-- tighten side-effect classes and mutation boundary evidence
+- tighten typed checkpoint and replay evidence
 - make verifier/proof bundle consume the same replay vocabulary
 
 ### Phase 4
@@ -278,7 +278,7 @@ Secondary design touchpoints:
 
 1. should replayable mutation evidence live with checkpoint metadata, proof bundle, or both?
 2. which current continuity fields should be explicitly marked "derived, not canonical" on keeper status surfaces?
-3. do we need a dedicated typed event for mutation boundary crossing, separate from raw trace/tool call logs?
+3. do we need a dedicated typed event for checkpoint crossing, separate from raw trace/tool call logs?
 
 ## Evidence
 

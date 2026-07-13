@@ -562,38 +562,34 @@ function surfaceCount(
   }
   if (id === 'board') {
     return state.threads.length
-      + state.annotations.filter(annotation => annotation.board_post_id).length
       + state.events.filter(event => event.context?.board_post_id).length
   }
   if (id === 'git') {
     return state.changedLineCount
-      + state.annotations.filter(annotation => annotation.git_ref).length
       + state.events.filter(event => event.context?.git_ref).length
   }
   if (id === 'pr') {
-    return state.annotations.filter(annotation => annotation.pr_id).length
-      + state.events.filter(event => event.context?.pr_id).length
+    return state.events.filter(event => event.context?.pr_id).length
   }
   if (id === 'comment') {
     return state.annotations.filter(annotation =>
-      annotation.kind === 'Comment' || annotation.kind === 'Question' || annotation.comment_id,
+      annotation.kind === 'Comment' || annotation.kind === 'Question',
     ).length
       + state.threads.length
       + state.events.filter(event => event.context?.comment_id).length
   }
   if (id === 'log') {
-    return state.events.length + state.annotations.filter(annotation => annotation.log_id).length
+    return state.events.length
   }
   if (id === 'runtime') {
-    return state.annotations.filter(annotationHasRuntimeScope).length
-      + state.events.filter(event =>
-        event.context?.session_id
-        || event.context?.operation_id
-        || event.context?.worker_run_id,
-      ).length
+    return state.events.filter(event =>
+      event.context?.session_id
+      || event.context?.operation_id
+      || event.context?.worker_run_id,
+    ).length
   }
   if (id === 'telemetry') {
-    return state.events.length + state.annotations.filter(annotationHasTelemetry).length
+    return state.events.length
   }
   return 0
 }
@@ -688,16 +684,6 @@ function buildAnchors(
         sourceId,
         goalId: annotation.goal_id ?? undefined,
         taskId: annotation.task_id ?? undefined,
-        boardPostId: annotation.board_post_id ?? undefined,
-        commentId: annotation.comment_id ?? undefined,
-        prId: annotation.pr_id ?? undefined,
-        gitRef: annotation.git_ref ?? undefined,
-        logId: annotation.log_id ?? undefined,
-        sessionId: annotation.session_id ?? undefined,
-        operationId: annotation.operation_id ?? undefined,
-        workerRunId: annotation.worker_run_id ?? undefined,
-        telemetryQuery: annotation.log_id ?? undefined,
-        telemetry: annotationHasTelemetry(annotation),
         keeperId: annotation.keeper_id,
       }),
     })
@@ -964,35 +950,11 @@ function eventContextMeta(event: RunActivityEvent, refs: IdeContextTextRouteRefs
   ])
 }
 
-function annotationHasTelemetry(annotation: IdeAnnotation): boolean {
-  return Boolean(
-    annotation.log_id
-    || annotation.session_id
-    || annotation.operation_id
-    || annotation.worker_run_id,
-  )
-}
-
-function annotationHasRuntimeScope(annotation: IdeAnnotation): boolean {
-  return Boolean(
-    annotation.session_id
-    || annotation.operation_id
-    || annotation.worker_run_id,
-  )
-}
-
 function annotationContextMeta(annotation: IdeAnnotation): string {
   return compactMeta([
     annotation.goal_id ? `goal ${annotation.goal_id}` : null,
     annotation.task_id ? `task ${annotation.task_id}` : null,
-    annotation.pr_id ? `PR ${annotation.pr_id}` : null,
-    annotation.board_post_id ? `board ${annotation.board_post_id}` : null,
-    annotation.comment_id ? `comment ${annotation.comment_id}` : null,
-    annotation.git_ref ? `git ${annotation.git_ref}` : null,
-    annotation.log_id ? `log ${annotation.log_id}` : null,
-    annotation.session_id ? `session ${annotation.session_id}` : null,
-    annotation.operation_id ? `operation ${annotation.operation_id}` : null,
-    annotation.worker_run_id ? `worker ${annotation.worker_run_id}` : null,
+    ...annotation.references.map(reference => `${reference.relation} ${reference.reference}`),
     `keeper ${annotation.keeper_id}`,
   ])
 }

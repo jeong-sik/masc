@@ -383,15 +383,16 @@ let () = test "nudge_coalescing" (fun () ->
     failwith (Printf.sprintf "expected >=2 beats, got %d" s.total_beats)
 )
 
-(* ── Test: consumer recovery — disabled after consecutive failures ── *)
+(* ── Test: consumer failure is observational, never an execution gate ── *)
 
-let () = test "consumer disabled after 3 consecutive failures" (fun () ->
+let () = test "failing consumer remains active" (fun () ->
   Eio_main.run @@ fun env ->
   let clock = Eio.Stdenv.clock env in
+  let fail_count = ref 0 in
   let fail_consumer = (module struct
     let name = "always_fail"
     let should_act _b = true
-    let on_beat _b = Error "intentional"
+    let on_beat _b = incr fail_count; Error "intentional"
   end : Pulse.Consumer) in
   let ok_count = ref 0 in
   let ok_consumer = (module struct
@@ -408,46 +409,8 @@ let () = test "consumer disabled after 3 consecutive failures" (fun () ->
   Eio.Switch.run @@ fun sw ->
   Pulse.run ~sw t;
   Eio.Time.sleep clock 1.0;
-  (* fail_consumer should be disabled after 3 failures *)
-  let disabled = Pulse.disabled_consumers t in
-  assert (List.mem "always_fail" disabled);
-  (* ok_consumer should NOT be disabled *)
-  assert (not (List.mem "always_ok" disabled));
-  (* ok_consumer should have been called for all beats *)
+  assert (!fail_count >= 5);
   assert (!ok_count >= 5)
-)
-
-(* ── Test: reenable disabled consumer ──────────────────────── *)
-
-let () = test "reenable previously disabled consumer" (fun () ->
-  Eio_main.run @@ fun env ->
-  let clock = Eio.Stdenv.clock env in
-  let fail_count = ref 0 in
-  let consumer = (module struct
-    let name = "flaky"
-    let should_act _b = true
-    let on_beat _b =
-      incr fail_count;
-      if !fail_count <= 3 then Error "flaky"
-      else Ok ()
-  end : Pulse.Consumer) in
-  let t = Pulse.create
-    ~clock
-    ~rhythm:{ Pulse.base_s = 0.05; min_s = 0.01; max_s = 1.0; quiet = (1, 6) }
-    ~lifecycle:Pulse.Always_on
-    ~consumers:[consumer]
-  in
-  Eio.Switch.run @@ fun sw ->
-  Pulse.run ~sw t;
-  Eio.Time.sleep clock 0.5;
-  (* Should be disabled after 3 failures *)
-  assert (List.mem "flaky" (Pulse.disabled_consumers t));
-  (* Re-enable *)
-  let restored = Pulse.reenable_consumer t "flaky" in
-  assert restored;
-  assert (not (List.mem "flaky" (Pulse.disabled_consumers t)));
-  Pulse.shutdown t;
-  Eio.Time.sleep clock 0.1
 )
 
 (* ── Test: circuit_breaker wrap ────────────────────────────── *)

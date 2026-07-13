@@ -91,6 +91,8 @@ let is_masc_mcp_descriptor (d : Keeper_tool_descriptor.t) =
      via descriptors, not this alias path. *)
   | Tool_masc_fusion_dispatch
   | Tool_masc_fusion_status
+  | Tool_web_search
+  | Tool_web_fetch
   | Tool_analyze_image -> false
 ;;
 

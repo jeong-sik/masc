@@ -45,13 +45,12 @@ let mark_dead ~base_path name ~at ~decr_running_count_clamped ~update_entry =
        | Stopped
        | Crashed
        | Restarting
-       | Dead
-       | Zombie -> ());
+       | Dead -> ());
       let conditions =
         { Keeper_state_machine.default_conditions with
           launch_pending = false
         ; fiber_alive = false
-        ; restart_budget_remaining = false
+        ; dead_tombstone_latched = true
         }
       in
       let phase = Keeper_state_machine.derive_phase conditions in

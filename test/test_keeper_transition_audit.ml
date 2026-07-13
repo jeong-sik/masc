@@ -168,7 +168,7 @@ let test_ring_capacity_limit () =
         Audit.turn_id = i;
         started_at = float_of_int i;
         ended_at = float_of_int (i + 1);
-        outcome = Audit.Turn_gate_rejected;
+        outcome = Audit.Turn_failed;
       }
   done;
   let turns = Audit.recent_completed_turns ~keeper_name ~limit:100 in
@@ -205,38 +205,19 @@ let test_limit_respected () =
   check int "limit respected" 3 (List.length turns);
   check int "newest within limit" 10 (List.hd turns).Audit.turn_id
 
-let test_operator_pause_signal_requires_decision () =
+let test_transition_json_preserves_observation_only () =
   let json = Audit.to_json (transition ()) in
   let open Yojson.Safe.Util in
   check string "event type" "operator_pause"
     (json |> member "event_type" |> to_string);
-  let signal = json |> member "operator_signal" in
-  check string "class" "operator_gate" (signal |> member "class" |> to_string);
-  check string "severity" "warn" (signal |> member "severity" |> to_string);
-  check bool "requires decision" true
-    (signal |> member "requires_operator_decision" |> to_bool);
-  check string "next action" "resume_or_update_policy"
-    (signal |> member "next_human_action" |> to_string)
+  check string "previous phase" "Running" (json |> member "prev_phase" |> to_string);
+  check string "new phase" "Paused" (json |> member "new_phase" |> to_string);
+  check string "outcome" "applied"
+    (json |> member "transition_outcome" |> to_string);
+  check int "transition JSON has only observed fields" 8
+    (match json with `Assoc fields -> List.length fields | _ -> 0)
 
-let test_compact_retry_exhausted_signal_is_alerting () =
-  let json =
-    Audit.to_json
-      (transition ~new_phase:KSM.Paused
-         ~selected_event:KSM.Compact_retry_exhausted ())
-  in
-  let open Yojson.Safe.Util in
-  let signal = json |> member "operator_signal" in
-  check string "event type" "compact_retry_exhausted"
-    (json |> member "event_type" |> to_string);
-  check string "class" "context_management"
-    (signal |> member "class" |> to_string);
-  check string "severity" "bad" (signal |> member "severity" |> to_string);
-  check bool "requires decision" true
-    (signal |> member "requires_operator_decision" |> to_bool);
-  check string "next action" "approve_handoff_or_reduce_context"
-    (signal |> member "next_human_action" |> to_string)
-
-let test_runtime_trust_timeline_carries_transition_operator_signal () =
+let test_runtime_trust_timeline_carries_transition_observation () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Audit.For_testing.reset_state ();
@@ -248,7 +229,7 @@ let test_runtime_trust_timeline_carries_transition_operator_signal () =
     (fun () ->
       let sink = Filename.concat base_dir "transition-audit.jsonl" in
       with_env "MASC_KEEPER_TRANSITION_LOG" sink (fun () ->
-          let keeper_name = "runtime-trust-transition-signal" in
+          let keeper_name = "runtime-trust-transition-observation" in
           let config = Masc.Workspace.default_config base_dir in
           let meta = keeper_meta keeper_name in
           Audit.record_transition ~keeper_name (transition ());
@@ -259,10 +240,14 @@ let test_runtime_trust_timeline_carries_transition_operator_signal () =
           let event = snapshot |> member "latest_causal_event" in
           check string "latest event kind" "transition"
             (event |> member "kind" |> to_string);
-          check string "transition next action" "resume_or_update_policy"
-            (event |> member "next_human_action" |> to_string);
-          check string "transition severity" "warn"
-            (event |> member "severity" |> to_string)))
+          check bool "transition next action absent" true
+            (event |> member "next_human_action" = `Null);
+          check string "transition severity is informational" "info"
+            (event |> member "severity" |> to_string);
+          check bool "transition summary preserves outcome" true
+            (String_util.contains_substring_ci
+               (event |> member "summary" |> to_string)
+               "outcome=applied")))
 
 let test_turn_fsm_emit_transition_appends_wal_row () =
   Audit.For_testing.reset_state ();
@@ -495,14 +480,12 @@ let () =
           test_case "ring ordering newest first" `Quick test_ring_ordering_is_newest_first;
           test_case "limit respected" `Quick test_limit_respected;
         ] );
-      ( "transition_operator_signal",
+      ( "transition_observation",
         [
-          test_case "operator pause requires decision" `Quick
-            test_operator_pause_signal_requires_decision;
-          test_case "compact retry exhausted is alerting" `Quick
-            test_compact_retry_exhausted_signal_is_alerting;
-          test_case "runtime trust timeline carries signal" `Quick
-            test_runtime_trust_timeline_carries_transition_operator_signal;
+          test_case "operator pause remains an exact observation" `Quick
+            test_transition_json_preserves_observation_only;
+          test_case "runtime trust timeline carries observation" `Quick
+            test_runtime_trust_timeline_carries_transition_observation;
           test_case "turn FSM emit appends WAL row" `Quick
             test_turn_fsm_emit_transition_appends_wal_row;
         ] );

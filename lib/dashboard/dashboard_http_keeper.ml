@@ -10,7 +10,7 @@ open Keeper_status_bridge
 
 include Dashboard_http_keeper_detail
 
-(** Health constants + compute_health_score + live runtime-id resolver moved
+(** Runtime display constants and live runtime-id resolver moved
     to Dashboard_http_keeper_types (intra-library file split, 2026-05-16). *)
 include Dashboard_http_keeper_types
 module Outcomes = Dashboard_http_keeper_outcomes
@@ -18,10 +18,7 @@ module Trust = Dashboard_http_keeper_trust
 
 let compute_outcomes_rollup = Outcomes.compute_outcomes_rollup
 
-(** Estimate seconds until Dead based on current restart_count and
-    exponential backoff schedule. Returns None if already dead or
-    restart_count >= max_restarts. *)
-(* estimate_dead_eta_sec / prompt_block_json / tokens_per_sec_json /
+(* prompt_block_json / tokens_per_sec_json /
    last_latency_ms_json moved to Dashboard_http_keeper_types
    (intra-library file split, 2026-05-16). *)
 
@@ -67,7 +64,7 @@ let degraded_keeper_dashboard_row
       ; ("next_human_action", `String "inspect_keeper_dashboard_worker")
       ]
   in
-  let fd_pressure = Keeper_fd_pressure.degraded_projection_json () in
+  let fd_observation = `Assoc (Keeper_fd_pressure.projection_fields ()) in
   let runtime_id =
     Keeper_meta_contract.runtime_id_of_meta m |> non_empty_trimmed_string_opt
   in
@@ -77,7 +74,7 @@ let degraded_keeper_dashboard_row
       ([ ("status", `String "degraded")
        ; ("reason", `String site)
        ; ("error", Json_util.string_opt_to_json error)
-       ; ("fd_pressure", fd_pressure)
+       ; ("fd_observation", fd_observation)
        ])
   in
   `Assoc
@@ -314,7 +311,6 @@ let pending_approval_gate_json ~now_ts row =
     ("source", `String "audit_approvals");
     ("id", Json_util.string_opt_to_json (nonempty_json_string_opt "id" row));
     ("tool", Json_util.string_opt_to_json (activity_source_tool_opt (Approval_pending row)));
-    ("risk", Json_util.string_opt_to_json (nonempty_json_string_opt "risk" row));
     ("turn_id", Json_util.int_opt_to_json (Safe_ops.json_int_opt "turn_id" row));
     ("at", activity_at_json ts);
     ("age_s", activity_age_json ~now_ts ts);
@@ -329,9 +325,7 @@ let pending_approval_summary row =
     | Some tool -> tool
     | None -> "tool"
   in
-  match nonempty_json_string_opt "risk" row with
-  | Some risk -> Printf.sprintf "승인 대기 · %s (%s)" tool risk
-  | None -> Printf.sprintf "승인 대기 · %s" tool
+  Printf.sprintf "승인 대기 · %s" tool
 
 let running_keeper_count (config : Workspace.config) : int =
   keeper_names config
@@ -353,26 +347,8 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
     |> List.sort_uniq String.compare
   in
   let now_ts = Time_compat.now () in
-  let max_restarts =
-    Runtime_params.get Governance_registry.keeper_supervisor_max_restarts
-  in
-  let keepers_dir =
-    Workspace.keepers_runtime_dir config
-  in
-  let shared_sp_events =
-    try
-      Keeper_crash_persistence.recent_sp_events
-        ~keepers_dir ~max_entries:20
-    with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn ->
-        Log.Dashboard.warn
-          "keeper dashboard recent_sp_events failed: %s"
-          (Printexc.to_string exn);
-        []
-  in
   let accountability_summary =
-    if compact || Keeper_decision_audit.decision_layer_level () < 3 then
+    if compact then
       (fun ~keeper_name ~agent_name ->
         Keeper_status_metrics.accountability_summary_json config
           ~keeper_name ~agent_name)
@@ -513,30 +489,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
             List.find_opt metrics_row_has_context_snapshot
               (List.rev parsed_metrics)
           in
-	          let (last_skill_primary, last_skill_secondary, last_skill_reason) =
-	            let rec find_latest = function
-	              | [] -> (None, [], None)
-	              | j :: tl ->
-	                  (match Safe_ops.json_string_opt "skill_primary" j with
-	                   | Some primary when String.trim primary <> "" ->
-	                       let secondary =
-	                         match Json_util.assoc_member_opt "skill_secondary" j |> Option.value ~default:`Null with
-	                         | `List xs ->
-	                             xs
-	                             |> List.filter_map (fun v ->
-	                                    match v with
-	                                    | `String s when String.trim s <> "" -> Some s
-	                                    | _ -> None)
-	                         | _ -> []
-	                       in
-	                       let reason = Safe_ops.json_string_opt "skill_reason" j in
-	                       (Some primary, secondary, reason)
-	                   | _ -> find_latest tl)
-	            in
-	            find_latest (List.rev parsed_metrics)
-	          in
-
-
           let (metrics_series_items, metrics_window_summary, last_handoff_event, last_compaction_event) =
             compute_metrics_window
               ~parsed_metrics ~generation:m.runtime.generation ~compact ~series_points
@@ -672,9 +624,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
           let blocked_task_count =
             Safe_ops.json_int "blocked_task_count" ~default:0 runtime_contract
           in
-          let approval_policy_effective =
-            Option.value ~default:`Null (Json_util.assoc_member_opt "approval_policy_effective" runtime_contract)
-          in
           let sandbox_target =
             Safe_ops.json_string "sandbox_target" ~default:"unknown"
               runtime_contract
@@ -689,7 +638,8 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                 let disk_crashes =
                   (try
                      Keeper_crash_persistence.recent_crashes
-                       ~keepers_dir ~name:m.name ~max_entries:20
+                       ~keepers_dir:(Workspace.keepers_runtime_dir config)
+                       ~name:m.name ~max_entries:20
                    with
                    | Eio.Cancel.Cancelled _ as exn -> raise exn
                    | exn ->
@@ -700,42 +650,21 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                 let combined_log = match disk_crashes with
                   | [] -> crash_log
                   | _ -> disk_crashes in
-                let ctx_ratio =
-                  match last_metrics with
-                  | Some m -> Safe_ops.json_float "context_ratio" m
-                  | None -> 0.0 in
-                let health_score = compute_health_score
-                  ~restart_count:entry.restart_count
-                  ~max_restarts
-                  ~recent_crash_count:(List.length combined_log)
-                  ~is_dead:(Option.is_some entry.dead_since_ts)
-                  ~context_ratio:ctx_ratio in
                 (`Assoc [
                   ("restart_count", `Int entry.restart_count);
-                  ("max_restarts", `Int max_restarts);
                   ("crash_log", `List combined_log);
                   ("last_failure_reason",
                     match entry.last_failure_reason with
                     | Some r -> `String (Keeper_registry.failure_reason_to_string r)
                     | None -> `Null);
                   ("dead_since", Json_util.float_opt_to_json entry.dead_since_ts);
-                  ("sp_events", `List shared_sp_events);
-                  ("health_score", `Int health_score);
-                  ("dead_eta_sec",
-                    Json_util.float_opt_to_json
-                      (estimate_dead_eta_sec
-                        ~restart_count:entry.restart_count ~max_restarts));
                 ], List.length combined_log)
             | None ->
                 (`Assoc [
                   ("restart_count", `Int 0);
-                  ("max_restarts", `Int max_restarts);
                   ("crash_log", `List []);
                   ("last_failure_reason", `Null);
                   ("dead_since", `Null);
-                  ("sp_events", `List []);
-                  ("health_score", `Int 100);
-                  ("dead_eta_sec", `Null);
                 ], 0)
           in
           let outcomes_json =
@@ -782,7 +711,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                 (let base_dir = Keeper_types_profile.session_base_dir config in
                      let (_session, ctx_opt) =
                        Keeper_execution.load_context_from_checkpoint
-                         ~max_checkpoint_messages:m.compaction.max_checkpoint_messages
                          ~trace_id:(Keeper_id.Trace_id.to_string m.runtime.trace_id)
                          ~primary_model_max_tokens:primary_max_context
                          ~base_dir
@@ -841,12 +769,10 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
 	                     ~keepalive_started_at:(runtime_keepalive_started_at config m)
                      ~now_ts
               in
-              (* C0: Trust Observatory — raw signals side-by-side, no synthesis.
-                 Reputation (accountability + v2 dimensions), Thompson (alpha/beta).
-                 Gated by MASC_DECISION_LAYER_LEVEL >= 3. *)
+              (* Trust Observatory — raw signals side-by-side, no synthesis.
+                 Reputation (accountability + v2 dimensions), Thompson (alpha/beta). *)
               let trust_observatory =
                 if compact
-                   || Keeper_decision_audit.decision_layer_level () < 3
                 then `Null
                 else
                   let reputation =
@@ -990,7 +916,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               ("runtime_contract", runtime_contract);
               ("goal_progress", goal_progress);
               ("blocked_task_count", `Int blocked_task_count);
-              ("approval_policy_effective", approval_policy_effective);
               ("runtime_trust", runtime_trust);
               ("paused", `Bool m.paused);
               ("keepalive_running", `Bool keepalive_running);
@@ -1031,8 +956,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               ("compaction_token_gate", `Int compact_token_gate);
               ("autoboot_enabled", `Bool m.autoboot_enabled);
               ("proactive_enabled", `Bool m.proactive.enabled);
-              ("proactive_idle_sec", `Int m.proactive.idle_sec);
-              ("proactive_cooldown_sec", `Int m.proactive.cooldown_sec);
               ("proactive_count_total", `Int m.runtime.proactive_rt.count_total);
               ("proactive_visible_count_total", `Int m.runtime.proactive_rt.visible_count_total);
               ("autonomous_turn_count", `Int m.runtime.autonomous_turn_count);
@@ -1063,10 +986,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
             ]
             @ live_activity_fields
             @ [
-	              ("skill_primary", Json_util.string_opt_to_json last_skill_primary);
-	              ("skill_secondary",
-	                `List (List.map (fun s -> `String s) last_skill_secondary));
-	              ("skill_reason", Json_util.string_opt_to_json last_skill_reason);
               ("metrics_window", metrics_window_summary);
               ("metrics_24h_summary", metrics_24h_summary);
               ("memory_note_count",

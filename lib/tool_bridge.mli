@@ -28,15 +28,16 @@ val externalize_threshold_bytes : unit -> int
 
 val maybe_externalize : ?mime:string -> string -> string
 (** Externalize when over threshold and a blob store is available;
-    pass through otherwise. Best-effort — storage failures fall back to
-    the original [msg]. *)
+    pass through otherwise. Storage failures are logged and fall back to the
+    original [msg], preserving every output byte. *)
 
 (** {1 Result Conversion} *)
 
 val to_oas_typed_result : Tool_result.result -> Agent_sdk.Types.tool_result
 (** Convert a {!Tool_result.result} to OAS [tool_result].
-    Preserves the structured payload, maps [failure_class] to OAS
-    [recoverable]/[error_class], and applies externalization. *)
+    Maps the producer's typed [failure_class] directly to OAS
+    [recoverable]/[error_class] and applies externalization. Message payloads
+    never alter the typed failure metadata. *)
 
 (** {1 Schema Conversion} *)
 
@@ -49,14 +50,6 @@ val params_of_json_schema : Yojson.Safe.t -> Agent_sdk.Types.tool_param list
     Reads ["properties"] and ["required"] fields. *)
 
 (** {1 OAS Tool.t Creation} *)
-
-val oas_descriptor_of_masc_tool : string -> Agent_sdk.Tool.descriptor option
-(** Derive an OAS [Tool.descriptor] from MASC [Tool_catalog] metadata.
-
-    Read-only tools that perform external network I/O (e.g. [masc_web_search],
-    [masc_web_fetch] and their public aliases) are mapped to
-    [Exclusive_external] rather than [Parallel_read] so the OAS runtime does
-    not fire concurrent requests against rate-limited remote APIs. *)
 
 val oas_tool_of_masc :
   ?descriptor:Agent_sdk.Tool.descriptor ->
@@ -71,8 +64,7 @@ val oas_tool_of_masc :
     The handler receives raw JSON args and returns a {!Tool_result.result}.
     Conversion to OAS [tool_result] is applied automatically.
 
-    Pass an explicit [descriptor] to override the default derived from
-    [Tool_catalog] metadata. This is needed for public aliases whose
-    LLM-visible name (e.g. ["WebSearch"]) is not present in the metadata
-    table; the caller can compute the descriptor from the internal name
-    and supply it here. *)
+    An owning adapter may pass an explicit [descriptor]. The generic bridge
+    never infers mutation, permission, or concurrency semantics from a tool
+    name or catalog read-only flag. Without a descriptor OAS uses its ordinary
+    sequential default. *)

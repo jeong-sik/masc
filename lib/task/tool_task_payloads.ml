@@ -8,34 +8,6 @@
 
     @since God file decomposition — extracted from tool_task.ml *)
 
-let transition_action_denylist_prefix = "masc_transition:"
-
-let normalize_transition_action raw =
-  String.trim raw |> String.lowercase_ascii
-
-let transition_action_denylist_entry action =
-  transition_action_denylist_prefix ^ normalize_transition_action action
-
-let is_transition_action_denylist_entry raw =
-  let normalized = normalize_transition_action raw in
-  String.length normalized > String.length transition_action_denylist_prefix
-  && String.sub normalized 0 (String.length transition_action_denylist_prefix)
-     = transition_action_denylist_prefix
-
-let transition_action_denied_by_denylist ~tool_denylist ~action =
-  let expected = transition_action_denylist_entry action in
-  List.exists
-    (fun entry -> String.equal (normalize_transition_action entry) expected)
-    tool_denylist
-
-let transition_action_policy_applies tool_denylist =
-  List.exists is_transition_action_denylist_entry tool_denylist
-
-let transition_action_allowed_actions ~tool_denylist =
-  Masc_domain.valid_task_action_strings
-  |> List.filter (fun action ->
-    not (transition_action_denied_by_denylist ~tool_denylist ~action))
-
 let is_verdict_transition_action = function
   | Masc_domain.Approve_verification
   | Masc_domain.Reject_verification ->
@@ -48,20 +20,30 @@ let is_verdict_transition_action = function
   | Masc_domain.Submit_for_verification ->
     false
 
-let transition_action_policy_rejection ~agent_name ~action ~allowed_actions =
-  let allowed =
-    match allowed_actions with
-    | [] -> "(none)"
-    | xs -> String.concat "|" xs
-  in
-  Printf.sprintf
-    "Transition action policy guard: agent '%s' may only call masc_transition(action=%s). Got action=%s. Inspect task history/status before claiming, starting, releasing, submitting, cancelling, marking tasks done, or making a verification verdict."
-    agent_name allowed action
-
 let terminal_verdict_noop_message ~task_id ~action ~status =
   Printf.sprintf
     "Stale verification verdict ignored: task %s is already %s, so masc_transition(action=%s) was treated as a no-op. Do not retry this verdict; inspect task history or list awaiting_verification tasks instead."
     task_id status action
+
+let workflow_rejection_payload
+      ?rule_id
+      ?tool_suggestion
+      ?hint
+      ?scope_policy
+      ?recoverable
+      ?(alternatives = [])
+      ?extra_fields
+      message
+  =
+  Workflow_rejection_payload.payload
+    ?rule_id
+    ?tool_suggestion
+    ?hint
+    ?scope_policy
+    ?recoverable
+    ~alternatives
+    ?extra_fields
+    message
 
 let workflow_rejection_payload_json
       ?rule_id
@@ -73,7 +55,7 @@ let workflow_rejection_payload_json
       ?extra_fields
       message
   =
-  Workflow_rejection_payload.payload_json
+  workflow_rejection_payload
     ?rule_id
     ?tool_suggestion
     ?hint
@@ -82,6 +64,7 @@ let workflow_rejection_payload_json
     ~alternatives
     ?extra_fields
     message
+  |> Yojson.Safe.to_string
 
 let build_claim_observation_payload ~(now : float) ~(agent_name : string)
     ~(task_id : string) ~(scope_widened : bool) : Yojson.Safe.t =
@@ -122,8 +105,9 @@ let append_claim_observation message ~now ~agent_name ~task_id ~scope_widened =
 
 let verdict_to_string (result : Anti_rationalization.review_result) =
   match result.verdict with
-  | Anti_rationalization.Approve -> "approve"
-  | Anti_rationalization.Reject reason -> "reject:" ^ reason
+  | Some Anti_rationalization.Approve -> "approve"
+  | Some (Anti_rationalization.Reject reason) -> "reject:" ^ reason
+  | None -> Anti_rationalization.gate_to_string result.gate
 
 (** True when both runtimes are non-empty AND distinct.
 

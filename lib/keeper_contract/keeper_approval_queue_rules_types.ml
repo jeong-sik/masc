@@ -1,21 +1,11 @@
-(** Keeper_approval_queue_rules_types — types, conversions, and JSON
-    serialization extracted from [Keeper_approval_queue_rules] (510 LoC).
-    State management (SMap, atomic_update, CRUD) remains in the parent.
-    @since Keeper 500-line decomposition *)
+(** Non-hierarchical HITL queue types and JSON serialization. *)
 
 (* tla-lint: file-scope: approval queue types and conversions. *)
 
-type risk_level =
-  | Low
-  | Medium
-  | High
-  | Critical
-
-type suggested_option =
-  { label : string
-  ; rationale : string
-  ; estimated_risk_delta : risk_level option
-  }
+type advisory_judgment =
+  | Approve
+  | Deny
+  | Require_human
 
 type hitl_context_summary =
   { summary_version : int
@@ -23,9 +13,8 @@ type hitl_context_summary =
   ; model_run_id : string
   ; context_summary : string
   ; key_questions : string list
-  ; suggested_options : suggested_option list
-  ; risk_rationale : string option
-  ; uncertainty : float
+  ; judgment : advisory_judgment
+  ; rationale : string
   }
 
 and summary_status =
@@ -34,118 +23,63 @@ and summary_status =
   | Summary_available of hitl_context_summary
   | Summary_failed of { reason : string; retryable : bool }
 
-type pending_phase =
-  | Awaiting_operator
-  | Escalated
-
-type lane_policy =
-  | Nonblocking
-  | Blocking
-
 type pending_approval =
   { id : string
   ; keeper_name : string
   ; tool_name : string
-  ; action_key : string
   ; input_hash : string
-  ; sandbox_target : string
-  ; sandbox_profile : string option
-  ; backend : string option
   ; input : Yojson.Safe.t
-  ; risk_level : risk_level
   ; requested_at : float
   ; turn_id : int option
+  ; request_context : Yojson.Safe.t option
   ; task_id : string option
   ; goal_id : string option
   ; goal_ids : string list
-  ; runtime_contract : Yojson.Safe.t option
-  ; selected_model : string option
-  ; disposition : string option
-  ; disposition_reason : string option
-  ; phase : pending_phase
-  ; lane_policy : lane_policy
   ; continuation_channel : Keeper_continuation_channel.t
   ; audit_base_path : string
-  ; resolver : Agent_sdk.Hooks.approval_decision Eio.Promise.u option
-  ; on_resolution : (Agent_sdk.Hooks.approval_decision -> unit) option
-  ; context_summary : hitl_context_summary option
   ; summary_status : summary_status
-  ; channel : Keeper_continuation_channel.t option
   }
 
 type decision = Agent_sdk.Hooks.approval_decision
 
-type approval_audit_decision =
-  | Approval_resolved of decision
-  | Approval_expired of string
-
-type approval_audit_disposition =
-  | Approval_escalated of string
+type decision_source =
+  | Always_allowed
+  | Auto_judge
+  | Human_operator
 
 type approval_rule =
   { id : string
   ; keeper_name : string
   ; tool_name : string
-  ; sandbox_profile : string option
-  ; backend : string option
   ; request_fingerprint : string
-  ; request_fingerprint_preview : string
-  ; max_risk : risk_level
   ; created_at : float
   ; created_by : string option
-  ; last_matched_at : float option
-  ; match_count : int
   ; source_approval_id : string option
   }
 
-type rule_match =
-  { rule_id : string
-  ; matched_by : string
+type rule_match = { rule_id : string }
+
+type rule_store_error =
+  { path : string
+  ; reason : string
   }
 
 type resolution_result = { remembered_rule : approval_rule option }
 
-let risk_level_to_string = function
-  | Low -> "low"
-  | Medium -> "medium"
-  | High -> "high"
-  | Critical -> "critical"
+let advisory_judgment_to_string = function
+  | Approve -> "approve"
+  | Deny -> "deny"
+  | Require_human -> "require_human"
 ;;
 
-let allowed_risk_levels = [ Low; Medium; High; Critical ]
-
-let allowed_risk_level_values = List.map risk_level_to_string allowed_risk_levels
-
-let allowed_risk_level_values_label = String.concat "/" allowed_risk_level_values
-
-let risk_level_to_int = function
-  | Low -> 1
-  | Medium -> 2
-  | High -> 3
-  | Critical -> 4
+let advisory_judgment_values =
+  List.map advisory_judgment_to_string [ Approve; Deny; Require_human ]
 ;;
 
-let risk_level_of_string = function
-  | "low" -> Some Low
-  | "medium" -> Some Medium
-  | "high" -> Some High
-  | "critical" -> Some Critical
-  | _ -> None
-;;
-
-let pending_phase_to_string = function
-  | Awaiting_operator -> "awaiting_operator"
-  | Escalated -> "escalated"
-;;
-
-let lane_policy_to_string = function
-  | Nonblocking -> "nonblocking"
-  | Blocking -> "blocking"
-;;
-
-let pending_phase_of_string = function
-  | "awaiting_operator" -> Some Awaiting_operator
-  | "escalated" -> Some Escalated
+let advisory_judgment_of_string = function
+  | "approve" -> Some Approve
+  | "deny" -> Some Deny
+  | "require_human" -> Some Require_human
   | _ -> None
 ;;
 
@@ -155,18 +89,23 @@ let approval_decision_to_string = function
   | Agent_sdk.Hooks.Edit _ -> "edit"
 ;;
 
-let approval_audit_decision_to_string = function
-  | Approval_resolved decision -> approval_decision_to_string decision
-  | Approval_expired reason -> "reject:" ^ reason
+let decision_source_to_string = function
+  | Always_allowed -> "always_allowed"
+  | Auto_judge -> "auto_judge"
+  | Human_operator -> "human_operator"
 ;;
 
-let fingerprint_preview_length = 12
+let decision_source_of_string = function
+  | "always_allowed" -> Some Always_allowed
+  | "auto_judge" -> Some Auto_judge
+  | "human_operator" -> Some Human_operator
+  | _ -> None
 ;;
 
 let string_opt_of_json = function
   | `String value ->
     let trimmed = String.trim value in
-    if trimmed = "" then None else Some trimmed
+    if String.equal trimmed "" then None else Some trimmed
   | _ -> None
 ;;
 
@@ -176,14 +115,12 @@ let bool_member key json ~default =
   | _ -> default
 ;;
 
-let non_negative_int_member key json =
-  match Json_util.get_int json key with
-  | Some value when value >= 0 -> Some value
-  | _ -> None
+let rule_match_to_yojson (matched : rule_match) =
+  `Assoc [ "rule_id", `String matched.rule_id ]
 ;;
 
-let rule_match_to_yojson (matched : rule_match) =
-  `Assoc [ "rule_id", `String matched.rule_id; "matched_by", `String matched.matched_by ]
+let rule_store_error_to_string error =
+  Printf.sprintf "%s: %s" error.path error.reason
 ;;
 
 let approval_rule_to_yojson (rule : approval_rule) =
@@ -191,50 +128,26 @@ let approval_rule_to_yojson (rule : approval_rule) =
     [ "id", `String rule.id
     ; "keeper_name", `String rule.keeper_name
     ; "tool_name", `String rule.tool_name
-    ; "sandbox_profile", Json_util.string_opt_to_json rule.sandbox_profile
-    ; "backend", Json_util.string_opt_to_json rule.backend
     ; "request_fingerprint", `String rule.request_fingerprint
-    ; "request_fingerprint_preview", `String rule.request_fingerprint_preview
-    ; "max_risk", `String (risk_level_to_string rule.max_risk)
     ; "created_at", `Float rule.created_at
-    ; "created_at_iso", `String (Masc_domain.iso8601_of_unix_seconds rule.created_at)
     ; "created_by", Json_util.string_opt_to_json rule.created_by
-    ; "last_matched_at", Json_util.float_opt_to_json rule.last_matched_at
-    ; ( "last_matched_at_iso"
-      , match rule.last_matched_at with
-        | Some ts -> `String (Masc_domain.iso8601_of_unix_seconds ts)
-        | None -> `Null )
-    ; "match_count", `Int rule.match_count
     ; "source_approval_id", Json_util.string_opt_to_json rule.source_approval_id
     ]
 ;;
 
-let rec suggested_option_to_yojson (option : suggested_option) =
-  `Assoc
-    [ "label", `String option.label
-    ; "rationale", `String option.rationale
-    ; ( "estimated_risk_delta"
-      , Json_util.option_to_yojson
-          (fun risk -> `String (risk_level_to_string risk))
-          option.estimated_risk_delta )
-    ]
-
-and hitl_context_summary_to_yojson (summary : hitl_context_summary) =
+let hitl_context_summary_to_yojson (summary : hitl_context_summary) =
   `Assoc
     [ "summary_version", `Int summary.summary_version
     ; "generated_at", `Float summary.generated_at
-    ; ( "generated_at_iso"
-      , `String (Masc_domain.iso8601_of_unix_seconds summary.generated_at) )
     ; "model_run_id", `String summary.model_run_id
     ; "context_summary", `String summary.context_summary
     ; "key_questions", Json_util.json_string_list summary.key_questions
-    ; ( "suggested_options"
-      , `List (List.map suggested_option_to_yojson summary.suggested_options) )
-    ; "risk_rationale", Json_util.string_opt_to_json summary.risk_rationale
-    ; "uncertainty", `Float summary.uncertainty
+    ; "judgment", `String (advisory_judgment_to_string summary.judgment)
+    ; "rationale", `String summary.rationale
     ]
+;;
 
-and summary_status_to_yojson = function
+let summary_status_to_yojson = function
   | Summary_not_requested -> `String "not_requested"
   | Summary_pending -> `String "pending"
   | Summary_available summary ->
@@ -250,67 +163,190 @@ and summary_status_to_yojson = function
       ]
 ;;
 
+let reject_unknown_fields ~surface ~allowed fields =
+  let rec duplicate seen = function
+    | [] -> None
+    | (key, _) :: rest ->
+      if List.mem key seen then Some key else duplicate (key :: seen) rest
+  in
+  match duplicate [] fields with
+  | Some field -> Error (Printf.sprintf "%s contains duplicate field %s" surface field)
+  | None ->
+    (match List.find_opt (fun (key, _) -> not (List.mem key allowed)) fields with
+     | None -> Ok ()
+     | Some (field, _) ->
+       Error (Printf.sprintf "%s contains unsupported field %s" surface field))
+;;
+
+let required_string ~surface field fields =
+  match List.assoc_opt field fields with
+  | Some (`String value) when String.trim value <> "" -> Ok value
+  | Some (`String _) ->
+    Error (Printf.sprintf "%s.%s must be non-blank" surface field)
+  | Some _ -> Error (Printf.sprintf "%s.%s must be a string" surface field)
+  | None -> Error (Printf.sprintf "%s.%s is required" surface field)
+;;
+
+let required_float ~surface field fields =
+  match List.assoc_opt field fields with
+  | Some (`Float value) -> Ok value
+  | Some (`Int value) -> Ok (Float.of_int value)
+  | Some _ -> Error (Printf.sprintf "%s.%s must be a number" surface field)
+  | None -> Error (Printf.sprintf "%s.%s is required" surface field)
+;;
+
+let required_positive_int ~surface field fields =
+  match List.assoc_opt field fields with
+  | Some (`Int value) when value > 0 -> Ok value
+  | Some _ -> Error (Printf.sprintf "%s.%s must be a positive integer" surface field)
+  | None -> Error (Printf.sprintf "%s.%s is required" surface field)
+;;
+
+let required_string_list ~surface field fields =
+  match List.assoc_opt field fields with
+  | Some (`List values) ->
+    let rec parse index acc = function
+      | [] -> Ok (List.rev acc)
+      | `String value :: rest -> parse (index + 1) (value :: acc) rest
+      | _ :: _ ->
+        Error
+          (Printf.sprintf "%s.%s[%d] must be a string" surface field index)
+    in
+    parse 0 [] values
+  | Some _ -> Error (Printf.sprintf "%s.%s must be an array" surface field)
+  | None -> Error (Printf.sprintf "%s.%s is required" surface field)
+;;
+
+let hitl_context_summary_of_yojson_with_error json =
+  match json with
+  | `Assoc fields ->
+    let ( let* ) = Result.bind in
+    let surface = "hitl_context_summary" in
+    let* () =
+      reject_unknown_fields
+        ~surface
+        ~allowed:
+          [ "summary_version"
+          ; "generated_at"
+          ; "model_run_id"
+          ; "context_summary"
+          ; "key_questions"
+          ; "judgment"
+          ; "rationale"
+          ]
+        fields
+    in
+    let* summary_version = required_positive_int ~surface "summary_version" fields in
+    let* generated_at = required_float ~surface "generated_at" fields in
+    let* model_run_id = required_string ~surface "model_run_id" fields in
+    let* context_summary = required_string ~surface "context_summary" fields in
+    let* key_questions = required_string_list ~surface "key_questions" fields in
+    let* judgment_raw = required_string ~surface "judgment" fields in
+    let* judgment =
+      match advisory_judgment_of_string judgment_raw with
+      | Some judgment -> Ok judgment
+      | None ->
+        Error
+          (Printf.sprintf
+             "%s.judgment %S is not %s"
+             surface
+             judgment_raw
+             (String.concat "/" advisory_judgment_values))
+    in
+    let* rationale = required_string ~surface "rationale" fields in
+    Ok
+      { summary_version
+      ; generated_at
+      ; model_run_id
+      ; context_summary
+      ; key_questions
+      ; judgment
+      ; rationale
+      }
+  | _ -> Error "hitl_context_summary must be a JSON object"
+;;
+
+let summary_status_of_yojson_with_error json =
+  let ( let* ) = Result.bind in
+  match json with
+  | `String "not_requested" -> Ok Summary_not_requested
+  | `String "pending" -> Ok Summary_pending
+  | `Assoc fields ->
+    let* status = required_string ~surface:"summary_status" "status" fields in
+    (match status with
+     | "available" ->
+       let* () =
+         reject_unknown_fields
+           ~surface:"summary_status"
+           ~allowed:[ "status"; "summary" ]
+           fields
+       in
+       (match List.assoc_opt "summary" fields with
+        | None -> Error "summary_status.summary is required"
+        | Some json ->
+          let* summary = hitl_context_summary_of_yojson_with_error json in
+          Ok (Summary_available summary))
+     | "failed" ->
+       let* () =
+         reject_unknown_fields
+           ~surface:"summary_status"
+           ~allowed:[ "status"; "reason"; "retryable" ]
+           fields
+       in
+       let* reason = required_string ~surface:"summary_status" "reason" fields in
+       (match List.assoc_opt "retryable" fields with
+        | Some (`Bool retryable) -> Ok (Summary_failed { reason; retryable })
+        | Some _ -> Error "summary_status.retryable must be a boolean"
+        | None -> Error "summary_status.retryable is required")
+     | other -> Error (Printf.sprintf "summary_status.status %S is unknown" other))
+  | _ -> Error "summary_status must be a known string or JSON object"
+;;
+
 let approval_rule_of_yojson_with_error json =
   match json with
-  | `Assoc _ ->
+  | `Assoc fields ->
     let ( let* ) = Result.bind in
-    let require field json =
+    let* () =
+      match
+        reject_unknown_fields
+          ~surface:"approval rule"
+          ~allowed:
+            [ "id"
+            ; "keeper_name"
+            ; "tool_name"
+            ; "request_fingerprint"
+            ; "created_at"
+            ; "created_by"
+            ; "source_approval_id"
+            ]
+          fields
+      with
+      | Ok () -> Ok ()
+      | Error reason -> Error (reason ^ "; explicit re-approval is required")
+    in
+    let require field =
       match Json_util.get_string_nonempty json field with
       | Some value -> Ok value
       | None -> Error (Printf.sprintf "%s must be a non-blank string" field)
     in
-    let* id = require "id" json in
-    let* keeper_name = require "keeper_name" json in
-    let* tool_name = require "tool_name" json in
-    let sandbox_profile = Json_util.get_string json "sandbox_profile" in
-    let backend = Json_util.get_string json "backend" in
-    let* request_fingerprint = require "request_fingerprint" json in
-    let request_fingerprint_preview =
-      Json_util.get_string_nonempty json "request_fingerprint_preview"
-      |> Option.value
-           ~default:
-             (String.sub
-                request_fingerprint
-                0
-                (min fingerprint_preview_length (String.length request_fingerprint)))
-    in
-    let* max_risk_raw = require "max_risk" json in
-    let* max_risk =
-      match risk_level_of_string max_risk_raw with
-      | Some level -> Ok level
-      | None ->
-        Error
-          (Printf.sprintf
-             "max_risk %S is not %s"
-             max_risk_raw
-             allowed_risk_level_values_label)
-    in
+    let* id = require "id" in
+    let* keeper_name = require "keeper_name" in
+    let* tool_name = require "tool_name" in
+    let* request_fingerprint = require "request_fingerprint" in
     let* created_at =
       match Json_util.get_float json "created_at" with
       | Some value -> Ok value
       | None -> Error "created_at must be a number"
     in
     let created_by = Json_util.get_string json "created_by" in
-    let last_matched_at = Json_util.get_float json "last_matched_at" in
-    let* match_count =
-      match non_negative_int_member "match_count" json with
-      | Some value -> Ok value
-      | None -> Error "match_count must be a non-negative integer"
-    in
     let source_approval_id = Json_util.get_string json "source_approval_id" in
     Ok
       { id
       ; keeper_name
       ; tool_name
-      ; sandbox_profile
-      ; backend
       ; request_fingerprint
-      ; request_fingerprint_preview
-      ; max_risk
       ; created_at
       ; created_by
-      ; last_matched_at
-      ; match_count
       ; source_approval_id
       }
   | _ -> Error "approval rule must be a JSON object"

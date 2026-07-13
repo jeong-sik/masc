@@ -15,8 +15,8 @@
       registry as the cost / receipt appenders. Append never performs retention
       on the hot path; startup/periodic JSONL maintenance prunes this store via
       [MASC_JSONL_RETENTION_DAYS] by calling [prune_older_than].
-    - Deterministic: keys are [claim_identity] outputs (the identity SSOT — the
-      producer [claim_id] when present, else [normalize_claim]) and [trace_id:gN]
+    - Deterministic: keys are [claim_identity] outputs (producer [claim_id] when
+      present, else exact source event plus claim payload) and [trace_id:gN]
       episode keys, so the same trace renders a byte-identical record.
     - Failure-visible: when recall returns an unavailable advisory, the optional
       [failure_reason] records the bounded reason label instead of making the

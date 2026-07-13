@@ -201,14 +201,14 @@ let drain ?(site = "unspecified") t =
   update ()
 ;;
 
-let committed_mutating_tools t =
-  (Atomic.get t.state).tracker
-  |> Keeper_unified_turn_types.committed_mutating_tools_from_events
-;;
-
 let integrity_error t =
   (Atomic.get t.state).tracker
   |> Keeper_unified_turn_types.turn_tool_event_integrity_error
+;;
+
+let tool_completed_count t =
+  (Atomic.get t.state).tracker
+  |> Keeper_unified_turn_types.turn_tool_completed_count
 ;;
 
 let start_background_drain ~clock t =

@@ -299,7 +299,6 @@ let write_rich_fixture base =
            [ "name", `String keeper
            ; "agent_name", `String keeper
            ; "trace_id", `String "digest-test"
-           ; "tool_access", `List []
            ; "paused", `Bool true
            ]))
 ;;

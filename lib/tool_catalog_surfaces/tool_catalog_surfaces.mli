@@ -17,10 +17,6 @@ val public_mcp_surface_tools : string list
 val schedule_request_surface_tools : string list
 (** Schedule request tools that read/create/cancel durable schedule rows. *)
 
-val schedule_operator_decision_tools : string list
-(** Human decision tools for approve/reject. These are not public MCP or
-    keeper-standard tools; dashboard/operator endpoints own those actions. *)
-
 val public_schedule_surface_tools : string list
 (** Schedule tools visible to external MCP clients. *)
 
@@ -49,15 +45,3 @@ val session_min_surface_tools : string list
 
 val workspace_role_tools : string list
 val execution_role_tools : string list
-
-(** {1 System-internal visibility list} *)
-
-val system_internal_hidden : string list
-(** Tools hidden from the public Full profile but callable directly and
-    scoped for tool-usage logging.  A flat visibility list, not an actor
-    surface; consumers project it via {!is_system_internal_hidden}.
-    Formerly the [System_internal] surface variant. *)
-
-val is_system_internal_hidden : string -> bool
-(** [is_system_internal_hidden name] is O(1) membership against
-    {!system_internal_hidden}. *)

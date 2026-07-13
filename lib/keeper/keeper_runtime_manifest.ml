@@ -737,25 +737,8 @@ let append_best_effort ?(site = "runtime_manifest") config manifest =
   match append config manifest with
   | Ok () -> ()
   | Error msg ->
-      Keeper_fd_pressure.note_if_fd_exhaustion
-        ~site:"keeper_runtime_manifest.append_best_effort"
-        msg;
-      Keeper_disk_pressure.note_if_disk_exhaustion
-        ~site:"keeper_runtime_manifest.append_best_effort"
-        msg;
       let masc_root = Workspace.masc_root_dir config in
-      let fd_pressure =
-        Keeper_fd_pressure.active () || Keeper_fd_pressure.is_fd_exhaustion_text msg
-      in
-      (if fd_pressure then
-         Log.Keeper.warn ~keeper_name:manifest.keeper_name
-           "runtime_manifest coverage-gap append skipped during FD pressure \
-            site=%s trace_id=%s event=%s: %s"
-           site manifest.trace_id
-           (event_kind_to_string manifest.event)
-           msg
-       else
-       try
+      (try
          Telemetry_coverage_gap.record
            ~masc_root
            ~source:"runtime_manifest"

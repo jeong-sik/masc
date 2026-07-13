@@ -99,8 +99,6 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
         | Some
             (Keeper_turn_driver.Provider_timeout _
             | Keeper_turn_driver.Turn_timeout _
-            | Keeper_turn_driver.Admission_queue_timeout _
-            | Keeper_turn_driver.Admission_queue_rejected _
             | Keeper_turn_driver.Resumable_cli_session _
             | Keeper_turn_driver.Capacity_backpressure _) ->
             true

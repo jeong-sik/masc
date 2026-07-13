@@ -49,9 +49,6 @@ type slot_snapshot =
   ; snapshot_in_flight : in_flight_info option
   ; snapshot_waiting : int
   ; snapshot_waiting_since : float option
-  ; snapshot_waiting_cap : int
-  ; snapshot_waiting_full : bool
-  ; snapshot_rejected_chat_count : int
   ; snapshot_shutdown_operation_id : Keeper_shutdown_types.Operation_id.t option
   }
 
@@ -59,8 +56,6 @@ type fleet_snapshot =
   { fleet_keeper_count : int
   ; fleet_waiting_keeper_count : int
   ; fleet_waiting_total : int
-  ; fleet_waiting_full_keeper_count : int
-  ; fleet_rejected_chat_total : int
   ; fleet_in_flight_keeper_count : int
   ; fleet_shutdown_keeper_count : int
   ; fleet_slots : slot_snapshot list
@@ -69,13 +64,6 @@ type fleet_snapshot =
 let lane_to_string = function
   | Autonomous -> "autonomous"
   | Chat -> "chat"
-;;
-
-(* Bound sourced from the keeper runtime policy surface so the admission
-   constraint is operator-visible instead of an inline heuristic. Rejected
-   callers still get a typed error and can retry. *)
-let max_waiting_chat_requests =
-  Env_config_keeper.KeeperTurnAdmission.max_waiting_chat_requests
 ;;
 
 type slot =
@@ -93,7 +81,6 @@ type slot =
   ; mutable waiting : int
   ; mutable waiting_entries : (int * float) list
   ; mutable next_waiter_id : int
-  ; mutable rejected_chat_count : int
   ; mutable shutdown_operation_id : Keeper_shutdown_types.Operation_id.t option
   }
 
@@ -120,7 +107,6 @@ let slot_for ~base_path ~keeper_name =
         ; waiting = 0
         ; waiting_entries = []
         ; next_waiter_id = 0
-        ; rejected_chat_count = 0
         ; shutdown_operation_id = None
         }
       in
@@ -174,15 +160,6 @@ let oldest_waiting_since entries =
     entries
 ;;
 
-let rejected_snapshot slot =
-  Stdlib.Mutex.protect slot.state_mu (fun () ->
-    slot.rejected_chat_count <- slot.rejected_chat_count + 1;
-    { waiting = slot.waiting
-    ; in_flight = slot.info
-    ; shutdown_operation_id = slot.shutdown_operation_id
-    })
-;;
-
 let rejection_snapshot slot =
   Stdlib.Mutex.protect slot.state_mu (fun () ->
     { waiting = slot.waiting
@@ -223,14 +200,12 @@ let run_if_free ~base_path ~keeper_name f =
   match peek_shutdown slot with
   | Some operation_id -> `Busy (Shutdown_requested operation_id)
   | None when waiting_count slot > 0 -> `Busy (Turn_busy (peek_info slot))
-  | None when not (Keeper_chat_queue.persistence_configured ()) ->
-    `Busy (Turn_busy (peek_info slot))
   | None ->
     let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
-    if
-      snapshot.load_errors <> []
-      || snapshot.pending <> []
-      || snapshot.inflight <> []
+    (* Queue persistence/read failures remain typed Chat-boundary failures.
+       They are not evidence of queued work and therefore cannot close an
+       otherwise independent autonomous lane. *)
+    if snapshot.pending <> [] || snapshot.inflight <> []
     then `Busy (Turn_busy (peek_info slot))
     else if Eio.Mutex.try_lock slot.turn_mu
     then
@@ -246,7 +221,6 @@ let run_serialized ~base_path ~keeper_name f =
     Stdlib.Mutex.protect slot.state_mu (fun () ->
       match slot.shutdown_operation_id with
       | Some operation_id -> `Shutdown_requested operation_id
-      | None when slot.waiting >= max_waiting_chat_requests -> `Rejected
       | None ->
         let waiter_id = slot.next_waiter_id in
         slot.next_waiter_id <- slot.next_waiter_id + 1;
@@ -258,7 +232,6 @@ let run_serialized ~base_path ~keeper_name f =
   match waiter_id with
   | `Shutdown_requested operation_id ->
     `Rejected (shutdown_rejection_snapshot slot operation_id)
-  | `Rejected -> `Rejected (rejected_snapshot slot)
   | `Waiting waiter_id ->
     (* [Fun.protect] rather than [Switch.on_release]: there is no ambient
        switch here, the finally never raises and never yields, and the only
@@ -396,9 +369,6 @@ let zero_snapshot ~keeper_name =
   ; snapshot_in_flight = None
   ; snapshot_waiting = 0
   ; snapshot_waiting_since = None
-  ; snapshot_waiting_cap = max_waiting_chat_requests
-  ; snapshot_waiting_full = false
-  ; snapshot_rejected_chat_count = 0
   ; snapshot_shutdown_operation_id = None
   }
 ;;
@@ -410,9 +380,6 @@ let snapshot_of_slot slot =
     ; snapshot_in_flight = slot.info
     ; snapshot_waiting = slot.waiting
     ; snapshot_waiting_since = oldest_waiting_since slot.waiting_entries
-    ; snapshot_waiting_cap = max_waiting_chat_requests
-    ; snapshot_waiting_full = slot.waiting >= max_waiting_chat_requests
-    ; snapshot_rejected_chat_count = slot.rejected_chat_count
     ; snapshot_shutdown_operation_id = slot.shutdown_operation_id
     })
 ;;
@@ -453,18 +420,6 @@ let fleet_snapshot ~base_path ~keeper_names =
       0
       fleet_slots
   in
-  let fleet_waiting_full_keeper_count =
-    List.fold_left
-      (fun acc slot -> if slot.snapshot_waiting_full then acc + 1 else acc)
-      0
-      fleet_slots
-  in
-  let fleet_rejected_chat_total =
-    List.fold_left
-      (fun acc slot -> acc + slot.snapshot_rejected_chat_count)
-      0
-      fleet_slots
-  in
   let fleet_in_flight_keeper_count =
     List.fold_left
       (fun acc slot ->
@@ -486,8 +441,6 @@ let fleet_snapshot ~base_path ~keeper_names =
   { fleet_keeper_count = List.length keeper_names
   ; fleet_waiting_keeper_count
   ; fleet_waiting_total
-  ; fleet_waiting_full_keeper_count
-  ; fleet_rejected_chat_total
   ; fleet_in_flight_keeper_count
   ; fleet_shutdown_keeper_count
   ; fleet_slots
@@ -509,9 +462,6 @@ let slot_snapshot_to_yojson slot =
     ; "slot_created", `Bool slot.snapshot_slot_created
     ; "in_flight", in_flight_to_yojson slot.snapshot_in_flight
     ; "chat_waiting_count", `Int slot.snapshot_waiting
-    ; "chat_waiting_cap", `Int slot.snapshot_waiting_cap
-    ; "chat_waiting_full", `Bool slot.snapshot_waiting_full
-    ; "chat_rejected_count", `Int slot.snapshot_rejected_chat_count
     ; ( "shutdown_operation_id"
       , match slot.snapshot_shutdown_operation_id with
         | None -> `Null
@@ -522,28 +472,19 @@ let slot_snapshot_to_yojson slot =
 
 let fleet_health_json ~base_path ~keeper_names =
   let snapshot = fleet_snapshot ~base_path ~keeper_names in
-  let status_reasons =
-    if snapshot.fleet_waiting_full_keeper_count > 0
-    then [ "chat_waiting_queue_full" ]
-    else []
-  in
-  let operator_action_required = status_reasons <> [] in
   `Assoc
     [ "schema", `String "masc.keeper_turn_admission.v1"
-    ; "status", `String (if operator_action_required then "degraded" else "ok")
-    ; "operator_action_required", `Bool operator_action_required
-    ; "status_reasons", `List (List.map (fun value -> `String value) status_reasons)
+    ; "status", `String "ok"
+    ; "operator_action_required", `Bool false
+    ; "status_reasons", `List []
     ; "keeper_count", `Int snapshot.fleet_keeper_count
     ; ( "keeper_names"
       , `List
           (List.map
              (fun slot -> `String slot.snapshot_keeper_name)
              snapshot.fleet_slots) )
-    ; "max_waiting_chat_requests", `Int max_waiting_chat_requests
     ; "chat_waiting_keeper_count", `Int snapshot.fleet_waiting_keeper_count
     ; "chat_waiting_total_count", `Int snapshot.fleet_waiting_total
-    ; "chat_waiting_full_keeper_count", `Int snapshot.fleet_waiting_full_keeper_count
-    ; "chat_rejected_total_count", `Int snapshot.fleet_rejected_chat_total
     ; "in_flight_keeper_count", `Int snapshot.fleet_in_flight_keeper_count
     ; "shutdown_keeper_count", `Int snapshot.fleet_shutdown_keeper_count
     ; "keepers", `List (List.map slot_snapshot_to_yojson snapshot.fleet_slots)

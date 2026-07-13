@@ -1,4 +1,4 @@
-(** #9774: shared formatters for governance / operator judge diagnostics. *)
+(** #9774: shared formatters for structured judge diagnostics. *)
 
 val truncate_with_marker : ?max_bytes:int -> string -> string
 (** Trim [s] to [max_bytes] bytes (default 500), appending an ellipsis

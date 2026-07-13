@@ -52,13 +52,13 @@ type SurfaceSectionId =
   | 'observatory'
   | 'agents'
   | 'runtime'
-  | 'fleet-health'   // Phase 1: absorbs telemetry + fleet + tool-quality + monitoring governance
+  | 'fleet-health'   // Phase 1: absorbs telemetry + fleet + tool-quality + Gate monitoring
   | 'transport-health' // Hidden support route for transport diagnostics; linked from Runtime.
   | 'feature-health' // Hidden support route for feature flag diagnostics; linked from Runtime.
   | 'journey' // Hidden execution-flow drill-down.
   | 'cognition' // Hidden keeper cognition drill-down.
   // command
-  | 'operations'     // Phase 1+6: absorbs intervene + governance + inspector (Phase 7: connectors split out)
+  | 'operations'     // Phase 1+6: absorbs intervene + Gate + inspector (Phase 7: connectors split out)
   // connectors (Phase 7: top-level surface — sidecar-driven channel bridges)
   // Per-connector sub-tabs (discord/imessage/slack/telegram) were merged into
   // connector-status on 2026-04-30; selection happens inside the page via
@@ -205,9 +205,9 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
   },
   {
     id: 'approvals',
-    label: 'Approvals',
+    label: 'Gate',
     icon: 'approvals',
-    description: 'Keeper HITL approval queue — pending tool-call gates',
+    description: 'Nonblocking Keeper HITL queue and exact Always rules',
     defaultTab: 'approvals',
     tabs: ['approvals'],
   },
@@ -223,7 +223,7 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
     id: 'command',
     label: 'Command',
     icon: 'command',
-    description: 'Intervention, governance decisions, and approvals',
+    description: 'Intervention, Gate decisions, and HITL',
     defaultTab: 'command',
     defaultParams: { section: 'operations' },
     tabs: ['command'],
@@ -322,7 +322,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'fleet-health',
       label: 'Tool Monitor',
-      description: 'Tool quality and governance signals.',
+      description: 'Tool quality and Gate signals.',
       params: { section: 'fleet-health' },
     },
     {
@@ -373,7 +373,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'operations',
       label: 'Actions',
-      description: 'Broadcasts, keeper messages, autonomy approvals, safety, and inspector controls.',
+      description: 'Broadcasts, keeper messages, Gate/HITL, and inspector controls.',
       params: { section: 'operations' },
     },
   ],
@@ -528,7 +528,7 @@ export const SECTION_REDIRECTS: Record<TabSectionKey, SectionRedirect> = {
   'monitoring:telemetry':    { section: 'fleet-health', view: 'event-log' },
   'monitoring:fleet':        { section: 'fleet-health', view: 'comparison' },
   'monitoring:tool-quality': { section: 'fleet-health', view: 'tool-quality' },
-  'monitoring:governance':   { section: 'fleet-health', view: 'governance' },
+  'monitoring:gate':          { section: 'fleet-health', view: 'gate' },
   'monitoring:attribution':   { section: 'fleet-health', view: 'attribution' },
   'monitoring:fsm-hub':      { section: 'agents', view: 'fsm' },
   'monitoring:metrics':      { section: 'runtime' },
@@ -536,7 +536,7 @@ export const SECTION_REDIRECTS: Record<TabSectionKey, SectionRedirect> = {
 
   // Dashboard consolidation Phase 1+6: command surface
   'command:intervene':    { section: 'operations' },
-  'command:governance':   { section: 'operations' },
+  'command:gate':         { section: 'operations', view: 'gate' },
   'command:inspector':    { section: 'operations', view: 'inspector' },
 
   // Dashboard consolidation Phase 1: workspace surface

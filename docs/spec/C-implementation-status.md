@@ -1,6 +1,6 @@
 ---
 status: reference
-last_verified: 2026-04-17
+last_verified: 2026-07-12
 code_refs:
   - lib/
   - dune-project
@@ -33,7 +33,7 @@ code_refs:
 | Keeper Agent | 05 | 25 | 0 | 0 | 0 | 100% | MASC-owned memory facade + JSONL memory bank |
 | Command Plane | 06 | 40 | 0 | 0 | 0 | 100% | Intent 도구 4종 MCP 등록 완료 |
 | Team Session | 07 | 31 | 2 | 0 | 0 | 94% | Auto 모드는 OAS 위임, projection 해소 |
-| Governance | 08 | 28 | 0 | 0 | 0 | 100% | 거버넌스 pipeline + dashboard surface 유지 |
+| Gate | 08 | 28 | 0 | 0 | 0 | 100% | 비계층 effect Gate + dashboard surface |
 | Server/Transport | 09 | 19 | 4 | 0 | 0 | 83% | SSE rate limit 활성화, HTTP/2 h2c는 opt-in CODE |
 | Dashboard | 10 | 15 | 0 | 0 | 0 | 100% | MDAL 개념 제거 (REMOVED) |
 | Board | 11 | 16 | 0 | 0 | 0 | 100% | Board Listener REMOVED (PG relay, filesystem-first에서 불필요) |
@@ -74,7 +74,7 @@ code_refs:
 | Section | Feature | Status | Evidence |
 |---------|---------|--------|----------|
 | State Machines | Task FSM (Pending→Claimed→InProgress→Done) | IMPL | workspace_task.ml + telemetry |
-| Heartbeat | Smart heartbeat (Emit/Skip_busy/Skip_idle) | IMPL | heartbeat_smart.ml + telemetry 1K+ |
+| Heartbeat | Exact configured cadence + directed interruptible wake | IMPL | keeper_heartbeat_loop.ml + keeper_keepalive_signal.ml |
 | Zombie Detection | 300s general, 3600s keeper threshold | IMPL | resilience.ml + GC 증거 |
 | GC Pipeline | 5-phase (detect→transition→release→delete→update) | IMPL | workspace_gc.ml 491 LOC |
 | WALPH | Retired — loop, state, tools all removed | REMOVED | — |
@@ -92,12 +92,12 @@ code_refs:
 |---------|---------|--------|----------|
 | Unified Turn | Observe→BuildPrompt→AgentRun→ToolExec→Checkpoint | IMPL | keeper_unified_turn.ml, 31 calls |
 | Supervisor | Init→Alive→Zombie→Dead with backoff | IMPL | keeper_supervisor.ml |
-| Deliberation | 9 triage triggers, budget check, execute | IMPL | keeper_deliberation.ml 589 LOC |
-| Verifier | cost_guard + risk_guard + Verifier_oas | IMPL | keeper_verifier.ml 589 LOC |
+| Deliberation | LLM judgment + observable execution | IMPL | keeper deliberation runtime |
+| Verifier | Task completion LLM verification | IMPL | verifier_oas.ml, workspace_task_verification.ml |
 | Eval Harness | Scenario→graders→score | IMPL | eval_harness.ml |
 | Anti-Fake | Test quality scoring | IMPL | anti_fake.ml |
-| Hooks | Autonomy level gating (l3/l4/l5) | IMPL | keeper_hooks_oas.ml |
-| Proactive | Quality gate + similarity + 3-retry fallback | IMPL | keeper_prompt.ml |
+| Hooks | Tool observation + explicit caller guidance | IMPL | keeper_hooks_oas.ml |
+| Proactive | LLM-authored proactive action | IMPL | keeper prompt/runtime modules |
 | TOML Config | config/keepers/*.toml | IMPL | keeper_toml_loader.ml |
 | External memory projection | Removed; memory is MASC-owned | IMPL | projection/hooks/JSONL backend retired |
 
@@ -109,15 +109,15 @@ code_refs:
 
 전체 `team_session_*` 모듈과 OAS Swarm bridge는 retired surface이며 runtime에서 제거됐다. 역사적 맥락은 `docs/spec/00-glossary.md`의 "Team Session (retired)" 항목과 `docs/OAS-MASC-BOUNDARY.md`의 "Team-session swarm | Removed" 항목을 참고한다.
 
-### 08-Governance (100% IMPL)
+### 08-Gate (IMPL)
 
 | Section | Feature | Status | Evidence |
 |---------|---------|--------|----------|
-| Governance Surface | Empty compatibility payloads, no case tracking | IMPL | dashboard/dashboard_governance.ml |
-| Governance Pipeline | 4 risk levels, pre-hook | IMPL | governance_pipeline.ml |
-| Governance Registry | Runtime level resolution and policy mapping | IMPL | governance_registry.ml |
+| Gate modes | Exact Always Allowed / LLM Auto Judge / nonblocking HITL | IMPL | keeper/keeper_gate.ml, keeper/keeper_gate_mode.ml |
+| Durable Gate queue | Per-Keeper pending work, one-shot grant, wake-up | IMPL | keeper/keeper_approval_queue.ml |
+| Structural execution boundary | Typed command shape, cwd/redirect path jail, sandbox target | IMPL | exec_policy/, keeper_tool_execute_shell_ir.ml |
+| Gate dashboard | Mode, pending requests, exact rules, resolution | IMPL | dashboard/dashboard_gate.ml |
 | Operator Control | Snapshot, digest, action, judgment | IMPL | operator_control.ml 26K |
-| Governance Judge | Dashboard judgment loop | IMPL | dashboard/dashboard_governance_judge.ml |
 
 ### 09-Server/Transport (83% IMPL)
 
@@ -136,7 +136,7 @@ code_refs:
 
 ### 10-Dashboard (100% IMPL)
 
-핵심 기능 전부 IMPL: Cache SWR(Eio.Mutex), 23 HTTP endpoints, Governance/Execution/Mission/Proof surfaces, Keeper metrics, Preact SPA.
+핵심 기능 전부 IMPL: Cache SWR(Eio.Mutex), Gate/Execution/Mission/Proof surfaces, Keeper metrics, Preact SPA.
 MDAL 개념 폐기 (REMOVED).
 
 ### 11-Board (100% IMPL)
@@ -160,16 +160,17 @@ Oas_worker, Runtime config, Verifier, Event bus(13 types), Context compaction(4 
 
 ### 15-Testing (100% IMPL)
 
-313 hermetic tests + 6 bench + 100 coverage supplements.
-3-tier verification(hermetic/env-gated/manual), eval_gate(Swiss Cheese 4-layer), eval_harness, anti_fake, trajectory 전부 운용.
-env-gated 6종은 CI에서 MASC_E2E_TESTS=true로 실행 확인.
+Hermetic, env-gated, manual experiment 검증군과 eval_harness, anti_fake,
+trajectory를 운용한다. 외부 효과 검증은 비계층 Gate의 exact rule,
+Auto Judge, durable nonblocking HITL, one-shot provenance와 독립 Keeper wake를
+직접 고정한다. 정확한 테스트 목록은 `test/dune`이 SSOT다.
 
 ---
 
 ## 4. Key Findings
 
 ### 건강한 서브시스템 (100% IMPL)
-- Workspace, Memory, OAS, Config, Governance — 코드+테스트+실사용 모두 확인
+- Workspace, Memory, OAS, Config, Gate — 코드+테스트+실사용 모두 확인
 
 ### CODE 잔여 (1개, 740 LOC)
 1. **HTTP/2 h2c** (740 LOC) → opt-in 경로, HTTP/1.1이 canonical. 벤치마크 후 전환 판단 필요

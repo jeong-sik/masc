@@ -72,15 +72,15 @@ function defaultPromptItems(): DashboardPromptItem[] {
       template_variables: ['keeper'],
     }),
     makePrompt({
-      key: 'governance.dry_run',
-      category: 'governance',
+      key: 'analysis.dry_run',
+      category: 'analysis',
       description: 'dry run block',
       current: 'dry run prompt',
       default: 'dry run prompt',
       effective: 'dry run prompt',
       file_value: 'dry run prompt',
       override_value: null,
-      file_path: 'fixture/config/prompts/governance.dry_run.md',
+      file_path: 'fixture/config/prompts/analysis.dry_run.md',
       source: 'file',
       has_override: false,
       char_count: 14,
@@ -156,10 +156,10 @@ describe('PromptRegistryPanel', () => {
     allPreset?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await flush()
 
-    const governanceButton = Array.from(container.querySelectorAll('button')).find(button =>
-      button.textContent?.includes('governance.dry_run'),
+    const analysisButton = Array.from(container.querySelectorAll('button')).find(button =>
+      button.textContent?.includes('analysis.dry_run'),
     )
-    governanceButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    analysisButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await flush()
 
     expect((container.querySelector('textarea') as HTMLTextAreaElement).value).toBe('dry run prompt')
@@ -182,8 +182,8 @@ describe('PromptRegistryPanel', () => {
     await waitFor(() => {
       expect(textarea().value).toBe('dry run prompt')
     })
-    expect(container.textContent).toContain('governance.dry_run')
-    expect(container.textContent).toContain('fixture/config/prompts/governance.dry_run.md')
+    expect(container.textContent).toContain('analysis.dry_run')
+    expect(container.textContent).toContain('fixture/config/prompts/analysis.dry_run.md')
   })
 
   it('keeps dirty draft text across filters and confirms before discarding on row selection', async () => {
@@ -194,13 +194,13 @@ describe('PromptRegistryPanel', () => {
     const textarea = () => container.querySelector('textarea') as HTMLTextAreaElement
     const searchInput = () =>
       container.querySelector('input[aria-label="프롬프트 검색"]') as HTMLInputElement
-    const governanceButton = () =>
+    const analysisButton = () =>
       Array.from(container.querySelectorAll('button')).find(button =>
-        button.textContent?.includes('governance.dry_run'),
+        button.textContent?.includes('analysis.dry_run'),
       ) as HTMLButtonElement | undefined
 
     await fireEvent.input(textarea(), { target: { value: 'edited unsaved draft' } })
-    await fireEvent.input(searchInput(), { target: { value: 'governance' } })
+    await fireEvent.input(searchInput(), { target: { value: 'analysis' } })
     await flush()
 
     expect(textarea().value).toBe('edited unsaved draft')
@@ -209,14 +209,14 @@ describe('PromptRegistryPanel', () => {
     const confirmSpy = vi.fn(() => false)
     window.confirm = confirmSpy
     try {
-      await fireEvent.click(governanceButton()!)
+      await fireEvent.click(analysisButton()!)
       await flush()
 
       expect(confirmSpy).toHaveBeenCalledTimes(1)
       expect(textarea().value).toBe('edited unsaved draft')
 
       confirmSpy.mockReturnValue(true)
-      await fireEvent.click(governanceButton()!)
+      await fireEvent.click(analysisButton()!)
       await flush()
 
       expect(textarea().value).toBe('dry run prompt')
@@ -254,7 +254,7 @@ describe('PromptRegistryPanel', () => {
     await fireEvent.click(applyButton)
 
     await waitFor(() => {
-      expect(mocks.savePromptOverride).toHaveBeenCalledWith('governance.dry_run', 'dry run prompt')
+      expect(mocks.savePromptOverride).toHaveBeenCalledWith('analysis.dry_run', 'dry run prompt')
     })
   })
 

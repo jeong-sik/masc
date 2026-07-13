@@ -61,20 +61,13 @@ let checkpoint_with_session_id session_id : Agent_sdk.Checkpoint.t =
   ; working_context = None
   }
 
+let message ?(role = Agent_sdk.Types.Assistant) content : Agent_sdk.Types.message =
+  { role; content; name = None; tool_call_id = None; metadata = [] }
+
 let retryable_network_error message =
   Agent_sdk.Error.Api
     (Agent_sdk.Retry.NetworkError
        { message; kind = Llm_provider.Http_client.Unknown })
-
-let provider_cooldown_backpressure_error runtime_id =
-  Driver.sdk_error_of_masc_internal_error
-    (Driver.Capacity_backpressure
-       { runtime_id
-       ; source = Driver.Provider_capacity
-       ; detail = "provider health cooldown active before dispatch"
-       ; retry_after = Driver.Synthetic_default 30.0
-       ; cooldown_cause = None
-       })
 
 let accept_empty_no_progress_error scope =
   Driver.sdk_error_of_masc_internal_error
@@ -84,9 +77,6 @@ let accept_empty_no_progress_error scope =
        ; reason_kind = Some Driver.Accept_no_usable_progress
        ; response_shape = Some Driver.Accept_response_empty
        ; stop_reason = None
-       ; last_tool_effect = None
-       ; any_mutating_tool = None
-       ; tool_effects_seen = []
        ; reason = "empty assistant response"
        })
 
@@ -501,6 +491,75 @@ let decision_runtime_id = function
   | event, _, None ->
     Alcotest.failf "missing decision for event %s" (event_name event)
 
+let test_prior_checkpoint_appends_current_goal_once () =
+  with_runtime_config runtime_toml_with_lane (fun () ->
+    Eio_main.run
+    @@ fun env ->
+    Eio.Switch.run
+    @@ fun sw ->
+    Masc_test_deps.init_eio_clock ~sw env;
+    let prior_checkpoint =
+      { (checkpoint_with_session_id "prior-session") with
+        messages =
+          [ message ~role:Agent_sdk.Types.User [ Agent_sdk.Types.Text "prior goal" ] ]
+      }
+    in
+    let agent_ref = ref None in
+    let current_goal = "current goal" in
+    (match
+       Driver.run_named
+         ~runtime_id:"primary.test_model"
+         ~keeper_name:"prior-checkpoint-current-goal"
+         ~base_path:(Filename.get_temp_dir_name ())
+         ~goal:current_goal
+         ~session_id:prior_checkpoint.session_id
+         ~max_turns:0
+         ~max_idle_turns:0
+         ~oas_checkpoint:prior_checkpoint
+         ~exit_condition:(fun _turn -> true)
+         ~exit_condition_result:
+           (fun _turn -> Runtime_agent.Completed, Some "exit proof")
+         ~agent_ref
+         ~sw
+         ~net:env#net
+         ()
+     with
+     | Ok _ -> ()
+     | Error err ->
+       Alcotest.failf
+         "prior-checkpoint start should complete before provider dispatch: %s"
+         (Agent_sdk.Error.to_string err));
+    let messages =
+      match !agent_ref with
+      | Some agent -> (Agent_sdk.Agent.state agent).messages
+      | None -> Alcotest.fail "expected resumed OAS agent"
+    in
+    let user_messages =
+      List.filter
+        (fun (entry : Agent_sdk.Types.message) ->
+           entry.role = Agent_sdk.Types.User)
+        messages
+    in
+    let current_goal_count =
+      List.fold_left
+        (fun count (entry : Agent_sdk.Types.message) ->
+           match entry.role, entry.content with
+           | Agent_sdk.Types.User, [ Agent_sdk.Types.Text text ]
+             when String.equal text current_goal ->
+             count + 1
+           | _ -> count)
+        0
+        messages
+    in
+    Alcotest.(check int)
+      "prior user plus one current user"
+      2
+      (List.length user_messages);
+    Alcotest.(check int)
+      "current goal appended exactly once"
+      1
+      current_goal_count)
+
 let test_lane_media_degrade_uses_first_candidate_runtime_id () =
   with_runtime_config runtime_toml_with_lane (fun () ->
     match Runtime.resolve_assignment "resilient" with
@@ -627,11 +686,7 @@ let test_attempt_loop_stops_on_nonretryable_failure () =
       ~runtime_id:"resilient"
       ~runtime_id_of:(fun runtime_id -> runtime_id)
       ~emit_runtime_manifest:(emit_manifest_collector events)
-      ~run_attempt:(fun ?resume_checkpoint ~idx:_ ~runtime_id candidate ->
-        Alcotest.(check bool)
-          "nonretryable attempt does not receive resume checkpoint"
-          false
-          (Option.is_some resume_checkpoint);
+      ~run_attempt:(fun ~idx:_ ~runtime_id candidate ->
         attempts := !attempts @ [ runtime_id ];
         match candidate with
         | "primary.test_model" ->
@@ -664,31 +719,23 @@ let test_attempt_loop_stops_on_nonretryable_failure () =
     [ "primary.test_model"; "primary.test_model" ]
     (List.map decision_runtime_id events)
 
-let test_attempt_loop_retries_network_error_with_checkpoint () =
+let test_attempt_loop_retries_transport_failure_before_checkpoint () =
   let attempts = ref [] in
-  let fallback_resume_session = ref None in
   let events = ref [] in
-  let checkpoint_after_primary = checkpoint_with_session_id "after-primary" in
+  let checkpoint_stage_observed = Atomic.make false in
   let result =
     Driver.For_testing.attempt_runtime_candidates
       ~runtime_id:"resilient"
       ~runtime_id_of:(fun runtime_id -> runtime_id)
       ~emit_runtime_manifest:(emit_manifest_collector events)
-      ~run_attempt:(fun ?resume_checkpoint ~idx:_ ~runtime_id candidate ->
+      ~allow_retry:(fun ~runtime_id:_ ~attempt:_ _error ->
+        Driver.For_testing.same_run_retry_allowed checkpoint_stage_observed)
+      ~run_attempt:(fun ~idx:_ ~runtime_id candidate ->
         attempts := !attempts @ [ runtime_id ];
         match candidate with
         | "primary.test_model" ->
-          Alcotest.(check bool)
-            "primary starts from initial checkpoint"
-            false
-            (Option.is_some resume_checkpoint);
-          Error (retryable_network_error "primary network failed"), Some checkpoint_after_primary
-        | "fallback.test_model" ->
-          fallback_resume_session :=
-            Option.map
-              (fun (checkpoint : Agent_sdk.Checkpoint.t) -> checkpoint.session_id)
-              resume_checkpoint;
-          Ok runtime_id, None
+          Error (retryable_network_error "primary network failed"), None
+        | "fallback.test_model" -> Ok runtime_id, None
         | other -> Alcotest.failf "unexpected candidate %s" other)
       [ "primary.test_model"; "fallback.test_model" ]
   in
@@ -703,10 +750,10 @@ let test_attempt_loop_retries_network_error_with_checkpoint () =
     "attempted candidates"
     [ "primary.test_model"; "fallback.test_model" ]
     !attempts;
-  Alcotest.(check (option string))
-    "fallback receives post-attempt checkpoint"
-    (Some "after-primary")
-    !fallback_resume_session;
+  Alcotest.(check bool)
+    "transport failed before any checkpoint stage"
+    true
+    (Driver.For_testing.same_run_retry_allowed checkpoint_stage_observed);
   let events = List.rev !events in
   Alcotest.(check (list string))
     "manifest events"
@@ -737,14 +784,10 @@ let test_attempt_loop_blocks_no_progress_when_gate_denies () =
              Driver.For_testing.accept_no_progress_should_try_next error )
            :: !gate_calls;
         false)
-      ~run_attempt:(fun ?resume_checkpoint ~idx:_ ~runtime_id candidate ->
+      ~run_attempt:(fun ~idx:_ ~runtime_id candidate ->
         attempts := !attempts @ [ runtime_id ];
         match candidate with
         | "primary.test_model" ->
-          Alcotest.(check bool)
-            "primary starts from initial checkpoint"
-            false
-            (Option.is_some resume_checkpoint);
           Error primary_error, Some checkpoint_after_primary
         | "fallback.test_model" ->
           Alcotest.fail "no-progress retry gate should block fallback candidate"
@@ -788,7 +831,6 @@ let test_attempt_loop_does_not_gate_network_retry () =
   let attempts = ref [] in
   let gate_called = ref false in
   let events = ref [] in
-  let checkpoint_after_primary = checkpoint_with_session_id "after-primary" in
   let result =
     Driver.For_testing.attempt_runtime_candidates
       ~runtime_id:"resilient"
@@ -797,15 +839,11 @@ let test_attempt_loop_does_not_gate_network_retry () =
       ~allow_accept_no_progress_retry:(fun ~runtime_id:_ ~attempt:_ _ ->
         gate_called := true;
         false)
-      ~run_attempt:(fun ?resume_checkpoint ~idx:_ ~runtime_id candidate ->
+      ~run_attempt:(fun ~idx:_ ~runtime_id candidate ->
         attempts := !attempts @ [ runtime_id ];
         match candidate with
         | "primary.test_model" ->
-          Alcotest.(check bool)
-            "primary starts from initial checkpoint"
-            false
-            (Option.is_some resume_checkpoint);
-          Error (retryable_network_error "primary network failed"), Some checkpoint_after_primary
+          Error (retryable_network_error "primary network failed"), None
         | "fallback.test_model" -> Ok runtime_id, None
         | other -> Alcotest.failf "unexpected candidate %s" other)
       [ "primary.test_model"; "fallback.test_model" ]
@@ -830,58 +868,53 @@ let test_attempt_loop_does_not_gate_network_retry () =
     4
     (List.length !events)
 
-let test_attempt_loop_retries_provider_cooldown_with_checkpoint () =
-  let attempts = ref [] in
-  let events = ref [] in
-  let checkpoint_after_primary = checkpoint_with_session_id "after-primary" in
-  let result =
-    Driver.For_testing.attempt_runtime_candidates
-      ~runtime_id:"resilient"
-      ~runtime_id_of:(fun runtime_id -> runtime_id)
-      ~emit_runtime_manifest:(emit_manifest_collector events)
-      ~run_attempt:(fun ?resume_checkpoint ~idx:_ ~runtime_id candidate ->
-        attempts := !attempts @ [ runtime_id ];
-        match candidate with
-        | "primary.test_model" ->
-          Alcotest.(check bool)
-            "primary starts from initial checkpoint"
-            false
-            (Option.is_some resume_checkpoint);
-          ( Error (provider_cooldown_backpressure_error runtime_id)
-          , Some checkpoint_after_primary )
-        | "fallback.test_model" ->
-          Alcotest.(check (option string))
-            "fallback receives post-cooldown checkpoint"
-            (Some "after-primary")
-            (Option.map
-               (fun (cp : Agent_sdk.Checkpoint.t) -> cp.session_id)
-               resume_checkpoint);
-          Ok runtime_id, None
-        | other -> Alcotest.failf "unexpected candidate %s" other)
-      [ "primary.test_model"; "fallback.test_model" ]
+let test_attempt_loop_blocks_retry_after_any_checkpoint_stage () =
+  let stages =
+    [ Agent_sdk.Agent.After_assistant_collected
+    ; Agent_sdk.Agent.After_tool_results_appended
+    ; Agent_sdk.Agent.After_retry_feedback_appended
+    ]
   in
-  (match result with
-   | Ok runtime_id ->
-     Alcotest.(check string) "fallback selected" "fallback.test_model" runtime_id
-   | Error e ->
-     Alcotest.failf
-       "expected fallback success, got %s"
-       (Agent_sdk.Error.to_string e));
-  Alcotest.(check (list string))
-    "attempted candidates"
-    [ "primary.test_model"; "fallback.test_model" ]
-    !attempts;
-  let events = List.rev !events in
-  Alcotest.(check (list string))
-    "manifest events"
-    (List.map event_name
-       [
-         Runtime_manifest.Runtime_routed;
-         Runtime_manifest.Runtime_failed;
-         Runtime_manifest.Runtime_routed;
-         Runtime_manifest.Runtime_completed;
-       ])
-    (List.map (fun (event, _, _) -> event_name event) events)
+  List.iter
+    (fun stage ->
+       let attempts = ref [] in
+       let events = ref [] in
+       let checkpoint_stage_observed = Atomic.make false in
+       Driver.For_testing.observe_checkpoint_stage checkpoint_stage_observed stage;
+       let primary_error = retryable_network_error "response-stage failure" in
+       let result =
+         Driver.For_testing.attempt_runtime_candidates
+           ~runtime_id:"resilient"
+           ~runtime_id_of:(fun runtime_id -> runtime_id)
+           ~emit_runtime_manifest:(emit_manifest_collector events)
+           ~allow_retry:(fun ~runtime_id:_ ~attempt:_ _error ->
+             Driver.For_testing.same_run_retry_allowed checkpoint_stage_observed)
+           ~run_attempt:(fun ~idx:_ ~runtime_id candidate ->
+             attempts := !attempts @ [ runtime_id ];
+             match candidate with
+             | "primary.test_model" -> Error primary_error, None
+             | "fallback.test_model" ->
+               Alcotest.fail "checkpoint stage must block same-run fallback"
+             | other -> Alcotest.failf "unexpected candidate %s" other)
+           [ "primary.test_model"; "fallback.test_model" ]
+       in
+       (match result with
+        | Error err ->
+          Alcotest.(check string)
+            "primary error preserved"
+            (Agent_sdk.Error.to_string primary_error)
+            (Agent_sdk.Error.to_string err)
+        | Ok runtime_id ->
+          Alcotest.failf "unexpected fallback success: %s" runtime_id);
+       Alcotest.(check (list string))
+         "only primary attempted after checkpoint stage"
+         [ "primary.test_model" ]
+         !attempts;
+       Alcotest.(check int)
+         "only routed and failed manifests emitted"
+         2
+         (List.length !events))
+    stages
 
 let test_attempt_loop_preserves_last_sdk_error () =
   let events = ref [] in
@@ -890,7 +923,7 @@ let test_attempt_loop_preserves_last_sdk_error () =
       ~runtime_id:"resilient"
       ~runtime_id_of:(fun runtime_id -> runtime_id)
       ~emit_runtime_manifest:(emit_manifest_collector events)
-      ~run_attempt:(fun ?resume_checkpoint:_ ~idx:_ ~runtime_id _candidate ->
+      ~run_attempt:(fun ~idx:_ ~runtime_id _candidate ->
         Error (retryable_network_error (runtime_id ^ " failed")), None)
       [ "primary.test_model"; "fallback.test_model" ]
   in
@@ -967,13 +1000,17 @@ let () =
             `Quick
             test_turn_max_tokens_snapshot_is_stable_across_candidates;
           Alcotest.test_case
+            "prior checkpoint appends current goal once"
+            `Quick
+            test_prior_checkpoint_appends_current_goal_once;
+          Alcotest.test_case
             "attempt loop stops on nonretryable failure"
             `Quick
             test_attempt_loop_stops_on_nonretryable_failure;
           Alcotest.test_case
-            "attempt loop retries network error with checkpoint"
+            "transport failure before checkpoint safely falls back"
             `Quick
-            test_attempt_loop_retries_network_error_with_checkpoint;
+            test_attempt_loop_retries_transport_failure_before_checkpoint;
           Alcotest.test_case
             "attempt loop blocks no-progress when gate denies"
             `Quick
@@ -983,9 +1020,9 @@ let () =
             `Quick
             test_attempt_loop_does_not_gate_network_retry;
           Alcotest.test_case
-            "attempt loop retries provider cooldown with checkpoint"
+            "any checkpoint stage blocks same-run retry"
             `Quick
-            test_attempt_loop_retries_provider_cooldown_with_checkpoint;
+            test_attempt_loop_blocks_retry_after_any_checkpoint_stage;
           Alcotest.test_case
             "attempt loop preserves last SDK error"
             `Quick

@@ -24,14 +24,6 @@ let metric_keeper_waiting_keeper_count =
   Otel_metric_names.metric_keeper_waiting_keeper_count
 ;;
 
-let metric_schedule_approval_blocked_count =
-  Otel_metric_names.metric_schedule_approval_blocked_count
-;;
-
-let metric_schedule_approval_wait_seconds =
-  Otel_metric_names.metric_schedule_approval_wait_seconds
-;;
-
 let metric_schedule_payload_unsupported_total =
   Otel_metric_names.metric_schedule_payload_unsupported_total
 ;;
@@ -121,8 +113,6 @@ let init () =
     [ 0.001; 0.005; 0.01; 0.05; 0.1; 0.5; 1.0; 5.0; 10.0 ];
   reg "masc_cache_stuck_elapsed_seconds"
     [ 0.1; 0.5; 1.0; 5.0; 10.0; 30.0; 60.0; 300.0; 600.0 ];
-  reg "masc_governance_judge_compute_duration_seconds"
-    [ 0.01; 0.05; 0.1; 0.5; 1.0; 5.0; 10.0; 30.0; 60.0 ];
   reg "gen_ai.client.token.usage"
     [ 1.0; 10.0; 100.0; 1000.0; 10000.0; 100000.0; 1000000.0 ];
   reg "mcp.client.operation.duration"
@@ -143,8 +133,6 @@ let init () =
     [ 0.1; 0.25; 0.5; 1.0; 2.5; 5.0; 10.0; 30.0; 60.0 ];
   reg "masc_llm_provider_streaming_first_chunk_seconds"
     [ 0.01; 0.05; 0.1; 0.25; 0.5; 1.0; 2.5; 5.0; 10.0 ];
-  reg "masc_inference_queue_wait_seconds"
-    [ 0.1; 0.25; 0.5; 1.0; 2.5; 5.0; 10.0; 30.0; 60.0 ];
   reg "masc_sse_broadcast_duration_seconds"
     [ 0.001; 0.005; 0.01; 0.05; 0.1; 0.5; 1.0; 5.0; 10.0 ]
 ;;

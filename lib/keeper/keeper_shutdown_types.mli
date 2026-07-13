@@ -16,12 +16,6 @@ type meta_disposition =
   | Retain_dead_tombstone
   | Remove_meta
 
-type stale_paused_context =
-  { meta_version : int
-  ; last_updated : string
-  ; latched_reason : Keeper_latched_reason.t option
-  }
-
 type dashboard_purge_context =
   { requested_name : string
   ; agent_name : string
@@ -32,12 +26,10 @@ type cleanup_reason =
   | Operator_stop_retain_meta
   | Operator_stop_remove_meta
   | Dead_tombstone_cleanup
-  | Stale_paused_prune of stale_paused_context
   | Dashboard_keeper_purge of dashboard_purge_context
 
 type completion_action =
   | Dead_tombstone_reaped
-  | Paused_meta_pruned
   | Dashboard_keeper_purged
 
 type dashboard_purge_artifact =

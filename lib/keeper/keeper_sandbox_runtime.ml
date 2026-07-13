@@ -193,7 +193,7 @@ let pid_alive pid =
     | Unix.Unix_error _ -> false)
 ;;
 
-let should_remove_container ~now ~max_age_sec (inspected : inspected_container) =
+let should_remove_container ~now (inspected : inspected_container) =
   let stopped =
     match inspected.running with
     | Some false -> true
@@ -204,15 +204,10 @@ let should_remove_container ~now ~max_age_sec (inspected : inspected_container) 
     | Some pid -> not (pid_alive pid)
     | None -> false
   in
-  let age_limit =
-    match inspected.ttl_sec with
-    | Some ttl when ttl > 0.0 -> min max_age_sec ttl
-    | _ -> max_age_sec
-  in
   let expired =
-    match inspected.started_at with
-    | Some started_at -> now -. started_at > age_limit
-    | None -> false
+    match inspected.started_at, inspected.ttl_sec with
+    | Some started_at, Some ttl when ttl > 0.0 -> now -. started_at > ttl
+    | (None | Some _), (None | Some _) -> false
   in
   stopped || owner_dead || expired
 ;;
@@ -258,7 +253,7 @@ let parse_json_container_name line =
          detail)
 ;;
 
-let probe_container_name_presence ~container_name ~timeout_sec =
+let probe_container_name_presence ~container_name ?timeout_sec () =
   let argv =
     docker_command_argv ()
     @ [ "ps"
@@ -273,7 +268,7 @@ let probe_container_name_presence ~container_name ~timeout_sec =
   let st, out =
     run_docker_argv_with_status
       ~summary:"keeper sandbox docker container-name presence probe"
-      ~timeout_sec
+      ?timeout_sec
       argv
   in
   if st <> Unix.WEXITED 0
@@ -295,7 +290,7 @@ let probe_container_name_presence ~container_name ~timeout_sec =
     parse_names (nonempty_lines out)
 ;;
 
-let probe_container_state ~container_name ~timeout_sec =
+let probe_container_state_optional ~container_name ?timeout_sec () =
   let argv =
     docker_command_argv ()
     @ [ "inspect"; "--format"; "{{json .State.Running}}"; container_name ]
@@ -303,7 +298,7 @@ let probe_container_state ~container_name ~timeout_sec =
   let st, out =
     run_docker_argv_with_status
       ~summary:"keeper sandbox docker container state probe"
-      ~timeout_sec
+      ?timeout_sec
       argv
   in
   if st = Unix.WEXITED 0
@@ -338,11 +333,15 @@ let probe_container_state ~container_name ~timeout_sec =
         container_name
         (Exec_policy.truncate_for_log out)
     in
-    match probe_container_name_presence ~container_name ~timeout_sec with
+    match probe_container_name_presence ~container_name ?timeout_sec () with
     | Ok false -> Ok Docker_container_absent
     | Ok true -> Error inspect_failure
     | Error inventory_failure ->
       Error (inspect_failure ^ "; " ^ inventory_failure)
+;;
+
+let probe_container_state ~container_name ~timeout_sec =
+  probe_container_state_optional ~container_name ~timeout_sec ()
 ;;
 
 let cleanup_failure_or_absent
@@ -425,7 +424,6 @@ let remove_cleanup_container ~container_id ~timeout_sec =
 
 let cleanup_stale_containers
       ?(now = Unix.gettimeofday ())
-      ?(max_age_sec = Env_config_sandbox.Cleanup.stale_after_sec ())
       ~base_path
       ~timeout_sec
       ()
@@ -470,7 +468,7 @@ let cleanup_stale_containers
              | Ok Cleanup_inspect_already_absent ->
                removed, already_absent + 1, errors
              | Ok (Cleanup_inspected inspected) ->
-               if should_remove_container ~now ~max_age_sec inspected
+               if should_remove_container ~now inspected
                then (
                  match remove_cleanup_container ~container_id ~timeout_sec with
                  | Ok Cleanup_removed -> removed + 1, already_absent, errors
@@ -650,43 +648,29 @@ let stop_containers ?keeper_name ?container_kind ~base_path ~timeout_sec () =
    was [ref 0.0] with non-atomic check-then-write: under 64 concurrent turn
    starts, multiple fibers passed the [now -. !last_cleanup_at < interval]
    gate before any of them advanced the timestamp, fanning out N parallel
-   [docker ps + inspect × N + rm × M] sweeps. Each sweep itself spawns docker
-   subprocesses outside [Docker_spawn_throttle], so the duplication is what
-   ENFILE storm scenarios amplify the hardest.
+   [docker ps + inspect × N + rm × M] sweeps. The atomic timestamp prevents
+   duplicate cleanup work while Docker spawn accounting remains observation-only.
    [Atomic.t float] + [Atomic.compare_and_set] means exactly one fiber wins
    the gate per [interval] window; losers see [None] and skip silently. *)
 let last_cleanup_at : float Atomic.t = Atomic.make 0.0
-let cleanup_failure_backoff_until : float Atomic.t = Atomic.make 0.0
-let cleanup_failure_backoff_sec = 1800.0
-
 let reset_last_cleanup_for_tests () =
-  Atomic.set last_cleanup_at 0.0;
-  Atomic.set cleanup_failure_backoff_until 0.0
+  Atomic.set last_cleanup_at 0.0
 
 let maybe_cleanup_stale_containers ?(now = Unix.gettimeofday ()) ~base_path
     ~timeout_sec () =
   if not (Env_config_sandbox.Cleanup.enabled ())
   then None
   else (
-    let backoff_until = Atomic.get cleanup_failure_backoff_until in
-    if now < backoff_until
-    then None
-    else
     let interval = Env_config_sandbox.Cleanup.interval_sec () in
     let prev = Atomic.get last_cleanup_at in
     if now -. prev < interval
     then None
     else if Atomic.compare_and_set last_cleanup_at prev now
-    then (
-      let result = cleanup_stale_containers ~now ~base_path ~timeout_sec () in
-      if result.errors <> [] then
-        Atomic.set cleanup_failure_backoff_until
-          (now +. cleanup_failure_backoff_sec);
-      Some result)
+    then Some (cleanup_stale_containers ~now ~base_path ~timeout_sec ())
     else None)
 ;;
 
-let docker_image_present_with_class ~image ~timeout_sec =
+let docker_image_present_with_class_optional ~image ?timeout_sec () =
   if String.trim image = ""
   then
     Error
@@ -698,7 +682,7 @@ let docker_image_present_with_class ~image ~timeout_sec =
     let st, out =
       run_docker_argv_with_status
         ~summary:"keeper sandbox docker image inspect"
-        ~timeout_sec
+        ?timeout_sec
         argv
     in
     if st = Unix.WEXITED 0
@@ -710,18 +694,30 @@ let docker_image_present_with_class ~image ~timeout_sec =
               "keeper sandbox image %s is not available locally: %s"
               image
               (Exec_policy.truncate_for_log out)
-        ; failure_class = classify_image_inspect_failure ~status:st ~output:out
+        ; failure_class = classify_image_inspect_failure ~status:st
         })
 ;;
 
-let docker_image_present ~image ~timeout_sec =
-  match docker_image_present_with_class ~image ~timeout_sec with
+let docker_image_present_with_class ~image ~timeout_sec =
+  docker_image_present_with_class_optional ~image ~timeout_sec ()
+;;
+
+let docker_image_present_optional ~image ?timeout_sec () =
+  match docker_image_present_with_class_optional ~image ?timeout_sec () with
   | Ok () -> Ok ()
   | Error classified -> Error classified.message
 ;;
 
-let ensure_keeper_sandbox_image_present_with_class ~image ~timeout_sec =
-  match docker_image_present_with_class ~image ~timeout_sec with
+let docker_image_present ~image ~timeout_sec =
+  docker_image_present_optional ~image ~timeout_sec ()
+;;
+
+let ensure_keeper_sandbox_image_present_with_class_optional
+      ~image
+      ?timeout_sec
+      ()
+  =
+  match docker_image_present_with_class_optional ~image ?timeout_sec () with
   | Ok () -> Ok ()
   | Error classified ->
     Error
@@ -730,20 +726,30 @@ let ensure_keeper_sandbox_image_present_with_class ~image ~timeout_sec =
           Printf.sprintf
             "%s. Next: %s"
             classified.message
-            docker_image_missing_next_action
+            docker_image_inspect_next_action
       }
 ;;
 
-let ensure_keeper_sandbox_image_present ~image ~timeout_sec =
-  match ensure_keeper_sandbox_image_present_with_class ~image ~timeout_sec with
+let ensure_keeper_sandbox_image_present_with_class ~image ~timeout_sec =
+  ensure_keeper_sandbox_image_present_with_class_optional
+    ~image ~timeout_sec ()
+;;
+
+let ensure_keeper_sandbox_image_present_optional ~image ?timeout_sec () =
+  match
+    ensure_keeper_sandbox_image_present_with_class_optional
+      ~image ?timeout_sec ()
+  with
   | Ok () -> Ok ()
   | Error classified -> Error classified.message
 ;;
 
+let ensure_keeper_sandbox_image_present ~image ~timeout_sec =
+  ensure_keeper_sandbox_image_present_optional ~image ~timeout_sec ()
+;;
+
 let docker_image_preflight_error_code (failure : classified_error) =
-  match failure.failure_class with
-  | Image_missing -> "image_not_found"
-  | failure_class -> Keeper_sandbox_runtime_classify.docker_failure_class_to_string failure_class
+  Keeper_sandbox_runtime_classify.docker_failure_class_to_string failure.failure_class
 ;;
 
 let docker_image_preflight_failure_message ~prefix failure =
@@ -752,51 +758,6 @@ let docker_image_preflight_failure_message ~prefix failure =
     prefix
     (docker_image_preflight_error_code failure)
     failure.message
-;;
-
-let docker_image_required_commands_with_class ~image ~timeout_sec =
-  let script =
-    let quoted = List.map Filename.quote required_commands |> String.concat " " in
-    Printf.sprintf
-      "missing=''; for cmd in %s; do if ! command -v \"$cmd\" >/dev/null 2>&1; then \
-       missing=\"$missing$cmd\\n\"; fi; done; printf '%%s' \"$missing\""
-      quoted
-  in
-  let argv =
-    docker_command_argv ()
-    @ [ "run"; "--rm" ]
-    @ docker_run_pull_never_args ()
-    @ [ "--network"; "none"; "--entrypoint"; "sh"; image; "-lc"; script ]
-  in
-  let st, out =
-    run_docker_argv_with_status
-      ~summary:"keeper sandbox docker run required commands"
-      ~timeout_sec
-      argv
-  in
-  if st = Unix.WEXITED 0
-  then (
-    let missing =
-      out
-      |> String.split_on_char '\n'
-      |> List.map String.trim
-      |> List.filter (fun item -> item <> "")
-    in
-    Ok missing)
-  else
-    Error
-      { message =
-          Printf.sprintf
-            "failed to inspect keeper sandbox image commands: %s"
-            (Exec_policy.truncate_for_log out)
-      ; failure_class = classify_image_inventory_failure ~status:st ~output:out
-      }
-;;
-
-let docker_image_required_commands ~image ~timeout_sec =
-  match docker_image_required_commands_with_class ~image ~timeout_sec with
-  | Ok missing_commands -> Ok missing_commands
-  | Error classified -> Error classified.message
 ;;
 
 let docker_preflight_to_yojson (preflight : docker_preflight) =
@@ -816,15 +777,6 @@ let docker_preflight_to_yojson (preflight : docker_preflight) =
           (List.map
              (fun failure_class -> `String failure_class)
              preflight.failure_classes) )
-    ; ( "required_commands"
-      , `List
-          (List.map
-             (fun item ->
-                `Assoc
-                  [ "command", `String item.command; "available", `Bool item.available ])
-             preflight.required_commands) )
-    ; ( "missing_commands"
-      , `List (List.map (fun command -> `String command) preflight.missing_commands) )
     ; ( "next_actions"
       , `List (List.map (fun action -> `String action) preflight.next_actions) )
     ]
@@ -835,13 +787,6 @@ let docker_preflight_failure_message (preflight : docker_preflight) =
     [ preflight.docker_runtime_error
     ; preflight.hardening_error
     ; preflight.image_error
-    ; (if preflight.missing_commands = []
-       then None
-       else
-         Some
-           (Printf.sprintf
-              "keeper sandbox image is missing required commands: %s"
-              (String.concat ", " preflight.missing_commands)))
     ]
     |> List.filter_map (fun item -> item)
     |> List.filter (fun s -> s <> "")
@@ -858,7 +803,7 @@ let docker_preflight_failure_message (preflight : docker_preflight) =
     next_actions
 ;;
 
-let ensure_keeper_sandbox_runtime ~timeout_sec =
+let ensure_keeper_sandbox_runtime_optional ?timeout_sec () =
   let seccomp_profile =
     String.trim (Env_config_sandbox.Hardening.seccomp_profile ())
   in
@@ -878,7 +823,7 @@ let ensure_keeper_sandbox_runtime ~timeout_sec =
     then Ok seccomp_args
     else (
       match
-        docker_info_security_options ~timeout_sec:(docker_preflight_timeout ~timeout_sec)
+        docker_info_security_options_optional ?timeout_sec ()
       with
       | Error _ as err -> err
       | Ok security_options ->
@@ -900,11 +845,14 @@ let ensure_keeper_sandbox_runtime ~timeout_sec =
         else Ok seccomp_args)
 ;;
 
+let ensure_keeper_sandbox_runtime ~timeout_sec =
+  ensure_keeper_sandbox_runtime_optional ~timeout_sec ()
+;;
+
 let docker_preflight ~timeout_sec () =
   if not (Env_config_sandbox.Preflight.enabled ())
   then None
   else (
-    let timeout_sec = docker_preflight_timeout ~timeout_sec in
     let image = Env_config_sandbox.Runtime.docker_image () in
     let docker_runtime_ok, docker_runtime_error, docker_runtime_failure_class =
       match docker_info_security_options_with_class ~timeout_sec with
@@ -923,27 +871,13 @@ let docker_preflight ~timeout_sec () =
       | Error classified ->
         false, Some classified.message, Some classified.failure_class
     in
-    let missing_commands, command_error, command_failure_class =
-      if not image_present
-      then [], None, None
-      else (
-        match docker_image_required_commands_with_class ~image ~timeout_sec with
-        | Ok missing -> missing, None, None
-        | Error classified ->
-          [], Some classified.message, Some classified.failure_class)
-    in
-    let required_commands =
-      List.map
-        (fun command -> { command; available = not (List.mem command missing_commands) })
-        required_commands
-    in
     let next_actions =
       [ (if not docker_runtime_ok
          then
            Some "Ensure Docker is installed and the daemon is reachable from this shell."
          else None)
-      ; (if (not image_present) || missing_commands <> []
-         then Some docker_image_missing_next_action
+      ; (if not image_present
+         then Some docker_image_inspect_next_action
          else None)
       ; (if not hardening_ok
          then
@@ -956,19 +890,10 @@ let docker_preflight ~timeout_sec () =
       |> List.filter (fun s -> s <> "")
       |> Json_util.dedupe_keep_order
     in
-    let image_error =
-      match image_error, command_error with
-      | Some message, None -> Some message
-      | None, Some message -> Some message
-      | Some message, Some _ -> Some message
-      | None, None -> None
-    in
     let failure_classes =
       [ docker_runtime_failure_class
       ; image_failure_class
-      ; command_failure_class
       ; (if hardening_ok then None else Some Docker_hardening_error)
-      ; (if missing_commands = [] then None else Some Image_required_command_missing)
       ]
       |> List.filter_map (fun item -> item)
       |> List.map Keeper_sandbox_runtime_classify.docker_failure_class_to_string
@@ -980,8 +905,6 @@ let docker_preflight ~timeout_sec () =
           docker_runtime_ok
           && hardening_ok
           && image_present
-          && command_error = None
-          && missing_commands = []
       ; image
       ; docker_runtime_ok
       ; docker_runtime_error
@@ -990,66 +913,8 @@ let docker_preflight ~timeout_sec () =
       ; image_present
       ; image_error
       ; failure_classes
-      ; required_commands
-      ; missing_commands
       ; next_actions
       })
-;;
-
-(* Preflight result cache. POST /api/v1/keepers/<name>/boot was hitting
-   the 12s HTTP timeout because every boot re-ran [ensure_keeper_sandbox_runtime]
-   plus [ensure_keeper_sandbox_image_present] inline — docker daemon ping
-   + image presence probe. Docker daemon state and the resolved image
-   presence change on minute scale, so caching the Ok result for 10s
-   collapses bursts (cluster start, dashboard "boot" button retries) into
-   one probe.
-
-   Errors are NOT cached: surface immediately and re-probe on the next
-   call so an operator fixing docker between boot attempts sees the new
-   state without waiting for cache expiry. *)
-let preflight_cache_ttl = 10.0
-
-let preflight_cache_result : (float * (unit, string) result) Atomic.t =
-  Atomic.make (0.0, Ok ())
-
-let preflight_cache_lookup ~now =
-  let ts, result = Atomic.get preflight_cache_result in
-  if ts > 0.0 && now -. ts < preflight_cache_ttl
-  then Some result
-  else None
-;;
-
-let ensure_keeper_startup_preflight ~timeout_sec ~sandbox_profile =
-  match sandbox_profile with
-  | Keeper_types_profile_sandbox.Local -> Ok ()
-  | Keeper_types_profile_sandbox.Docker ->
-    if not (Env_config_sandbox.Preflight.enabled ())
-    then Ok ()
-    else (
-      let now = Unix.gettimeofday () in
-      match preflight_cache_lookup ~now with
-      | Some cached -> cached
-      | None ->
-        let timeout_sec = docker_preflight_timeout ~timeout_sec in
-        let image = Env_config_sandbox.Runtime.docker_image () in
-        let result =
-          match ensure_keeper_sandbox_runtime ~timeout_sec with
-          | Error message ->
-            Error
-              (Printf.sprintf "Docker sandbox startup preflight failed: %s" message)
-          | Ok _ ->
-            (match ensure_keeper_sandbox_image_present ~image ~timeout_sec with
-             | Ok () -> Ok ()
-             | Error message ->
-               Error
-                 (Printf.sprintf
-                    "Docker sandbox startup preflight failed: %s"
-                    message))
-        in
-        (match result with
-         | Ok () -> Atomic.set preflight_cache_result (now, result)
-         | Error _ -> ());
-        result)
 ;;
 
 module For_testing = struct

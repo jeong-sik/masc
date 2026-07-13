@@ -330,7 +330,6 @@ write_benchmark_persona_profile() {
         long_goal: $long_goal,
         instructions: $instructions,
         mention_targets: [$mention],
-        tool_access: ["masc_status", "masc_tasks", "masc_claim_next", "masc_transition", "masc_board_post"],
         proactive_enabled: false,
         telemetry_feedback_enabled: false,
         runtime_id: "keeper_unified",

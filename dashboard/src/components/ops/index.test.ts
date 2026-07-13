@@ -125,7 +125,7 @@ describe('Ops surface', () => {
     expect(container.textContent).toContain('FlowControlPanel')
 
     // Placeholder-heavy review queue surface is gone — Live Judge + Keeper HITL
-    // handling lives on the Governance page.
+    // handling lives on the Gate page.
     expect(container.textContent).not.toContain('review_item')
     expect(container.textContent).not.toContain('큐에서 항목을 고르세요')
     expect(container.textContent).not.toContain('현재 이 항목에 연결된 operator guidance가 없습니다')
@@ -332,7 +332,7 @@ describe('Ops surface', () => {
 
     // The placeholder-heavy review queue panel no longer exists, and the
     // review_queue/deferred_queue/review_summary fields were dropped from
-    // OperatorDigest. review items surface via Governance / Live Judge.
+    // OperatorDigest. review items surface via Gate / Live Judge.
     expect(container.textContent).not.toContain('방 제어 상태를 재확인하세요')
     expect(container.textContent).not.toContain('마찰 요인')
     expect(container.textContent).not.toContain('운영 판단')

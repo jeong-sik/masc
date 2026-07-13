@@ -3,7 +3,7 @@
     Zero-tolerance implementation:
     - ID validation (no path traversal)
     - TTL optional (0 = permanent, default)
-    - Max limits enforced (no OOM)
+    - Explicit persistence errors
     - Cryptographic IDs (no prediction)
     - Atomic writes (no corruption)
     - Automatic sweeper (no manual cleanup)
@@ -21,8 +21,6 @@ type board_error =
   | Invalid_id of string
   | Post_not_found of string
   | Comment_not_found of string
-  | Rate_limited of { retry_after: float }
-  | Capacity_exceeded of { current: int; max: int }
   | Io_error of string
   | Validation_error of string
   | Already_voted of string
@@ -133,19 +131,6 @@ type post_kind =
   | Automation_post [@tla.symbol "automation_post"]
   | System_post [@tla.symbol "system_post"]
 [@@deriving tla]
-
-(* Closed sum for the legacy automation-author classification. Relocated
-   here from board_core_classify so the board metric hook surface
-   (board_metrics_hooks.ml / board_metric_hooks_adapter.ml) can reference it
-   without a board_core_classify -> board_metrics_hooks -> board_core_classify
-   cycle. board_core_classify re-exports it via [include Board_types]. *)
-type automation_label =
-  | Auto_prefixed       (* "auto-" prefix *)
-  | Qa_prefixed         (* "qa-" prefix *)
-  | Researcher_named    (* contains "researcher" *)
-  | Harness_named       (* contains "harness" *)
-  | Smoke_named         (* contains "smoke" *)
-  | Probe_named         (* contains "probe" *)
 
 (* RFC-0233 §7: typed provenance of a board post — which keeper turn produced
    it and through which channel. Replaces the fusion [meta_json] [run_id]
@@ -277,32 +262,23 @@ type sub_board = {
   post_count: int;
 }
 
-(** {1 Limits - Enforced, Not Optional} *)
+(** {1 Read pagination and sweeper defaults} *)
 
 module Limits = struct
   let env_int name default = Env_config_core.get_int ~default name
 
-  let max_posts = env_int "MASC_BOARD_MAX_POSTS" 10_000
-  let max_comments_per_post = env_int "MASC_BOARD_MAX_COMMENTS_PER_POST" 1_000
-  let max_content_length = env_int "MASC_BOARD_MAX_CONTENT_LENGTH" 4_000
   let default_comment_page_limit = 50
   let max_comment_page_limit = 100
   let default_ttl_hours = 0    (* 0 = permanent (no expiry) *)
-  let automation_ttl_hours = env_int "MASC_BOARD_AUTOMATION_TTL_HOURS" 168
-  let max_ttl_hours = env_int "MASC_BOARD_MAX_TTL_HOURS" 720
   let sweeper_interval_sec = env_int "MASC_BOARD_SWEEPER_INTERVAL_SEC" 10
   let sweeper_batch_size = env_int "MASC_BOARD_SWEEPER_BATCH_SIZE" 100
-  let author_post_cap = env_int "MASC_BOARD_AUTHOR_POST_CAP" 100
-  let max_sub_boards = env_int "MASC_BOARD_MAX_SUB_BOARDS" 256
-  let comment_rate_limit = env_int "MASC_BOARD_COMMENT_RATE_LIMIT" 30
-  let comment_rate_window_sec = env_int "MASC_BOARD_COMMENT_RATE_WINDOW_SEC" 300
 end
 
 (** {1 Vote Direction} *)
 
 type vote_direction = Up | Down
 
-(** {1 In-Memory Store with Enforced Limits} *)
+(** {1 In-Memory Store} *)
 
 type flusher_msg =
   | Flush

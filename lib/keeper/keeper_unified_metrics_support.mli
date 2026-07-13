@@ -24,14 +24,13 @@ val observed_affordances_of_observation :
 val classify_usage_trust :
   usage_reported:bool ->
   usage:Agent_sdk.Types.api_usage ->
-  context_max:int ->
   usage_trust
-
-val usage_trust_is_trusted : usage_trust -> bool
 
 val estimate_usage_cost_usd :
   Agent_sdk.Types.api_usage ->
   float
+(** Return the provider-reported value verbatim. Missing cost uses the numeric
+    aggregate identity [0.0]; anomaly provenance is emitted separately. *)
 
 val usage_trust_to_string : usage_trust -> string
 val usage_trust_reasons : usage_trust -> string list
@@ -64,7 +63,6 @@ val record_turn_latency_by_model_bucket :
   latency_ms:int ->
   unit
 
-val is_observation_only_tool_name : string -> bool
 val has_substantive_tool_calls : string list -> bool
 val is_noop_cycle : has_text:bool -> tools_used:string list -> bool
 

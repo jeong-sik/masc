@@ -75,12 +75,9 @@ function runtimeProvidersPayload() {
             has_capabilities: true,
             behavior_capabilities: {
               supports_inline_tools: true,
-              requires_per_keeper_bridging_for_bound_actor_tools: true,
-              identity_runtime_mcp_header_keys: ['x-masc-keeper'],
               argv_prompt_preflight: false,
               uses_anthropic_caching: false,
               max_turns_per_attempt: null,
-              tolerates_bound_actor_fallback: false,
             },
             custom_header_count: 1,
             connect_timeout_s: 120,
@@ -239,19 +236,6 @@ function runtimeResolutionPayload() {
     source_mismatch: false,
     server_workspace_mismatch: false,
     diagnostics: [],
-    shell_ir_approval: {
-      schema: 'masc.shell_ir_approval.v1',
-      enabled: true,
-      env_key: 'MASC_SHELL_IR_APPROVAL',
-      raw_overlay: null,
-      trust: {
-        safe: 'safe',
-        audited: 'audited',
-        privileged: 'privileged',
-      },
-      source: 'default_autonomous',
-      reason: 'using fallback overlay: Masc_exec.Approval_config.autonomous',
-    },
     build: {
       release_version: 'dev',
       commit: 'deadbee',
@@ -337,19 +321,6 @@ describe('ConfigResolutionPanel', () => {
               message: 'Received SIGTERM, shutting down server.',
             },
           ],
-          shell_ir_approval: {
-            schema: 'masc.shell_ir_approval.v1',
-            enabled: false,
-            env_key: 'MASC_SHELL_IR_APPROVAL',
-            raw_overlay: null,
-            trust: {
-              safe: 'safe',
-              audited: 'audited',
-              privileged: 'privileged',
-            },
-            source: 'runtime projection',
-            reason: 'using fallback overlay: Masc_exec.Approval_config.autonomous',
-          },
           build: {
             release_version: 'dev',
             commit: 'deadbee',
@@ -357,11 +328,7 @@ describe('ConfigResolutionPanel', () => {
             uptime_seconds: 42,
           },
           keeper_runtime: {
-            bootstrap_max_active_keepers: { value: 9, source: 'toml' },
-            reactive_max_idle_turns: { value: 15, source: 'toml' },
-            autonomous_max_idle_turns: { value: 3, source: 'derived' },
             turn_timeout_sec: { value: 90, source: 'toml' },
-            admission_wait_timeout_sec: { value: 45, source: 'derived' },
             oas_timeout_override_sec: { value: 120, source: 'env' },
             oas_timeout_per_1k: { value: 7.5, source: 'derived' },
             oas_timeout_per_turn: { value: 30, source: 'derived' },
@@ -388,9 +355,6 @@ describe('ConfigResolutionPanel', () => {
     expect(container.textContent).toContain('/tmp/masc')
     expect(container.textContent).toContain('server repo head')
     expect(container.textContent).toContain('feedbee')
-    expect(container.textContent).toContain('shell IR approval')
-    expect(container.textContent).toContain('disabled')
-    expect(container.textContent).toContain('safe/audited/privileged')
     expect(container.textContent).toContain('source mismatch')
     expect(container.textContent).toContain('server/workspace mismatch')
     expect(container.textContent).toContain('SIGTERM')
@@ -402,9 +366,9 @@ describe('ConfigResolutionPanel', () => {
     expect(container.textContent).toContain('ollama warm / kv probe')
     expect(container.textContent).toContain('kv likely reused')
     expect(container.textContent).toContain('qwen3.5:35b-a3b-coding-nvfp4')
-    expect(container.textContent).toContain('keeper runtime limits')
-    expect(container.textContent).toContain('Per-keeper runtime caps and timeouts. These values are not the live keeper count.')
-    expect(container.textContent).toContain('bootstrap max active keepers')
+    expect(container.textContent).toContain('keeper runtime configuration')
+    expect(container.textContent).toContain('Per-keeper runtime behavior and timeout settings. These values are not the live keeper count.')
+    expect(container.textContent).not.toContain('bootstrap max active keepers')
     expect(container.textContent).toContain('default')
     expect(container.textContent).not.toContain('derived')
   })

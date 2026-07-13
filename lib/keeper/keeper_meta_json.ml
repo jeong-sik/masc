@@ -23,7 +23,6 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
         | None -> `Null )
     ; "instructions", `String m.instructions
     ; "trace_id", `String (Keeper_id.Trace_id.to_string rt.trace_id)
-    ; "tool_access", Json_util.json_string_list m.tool_access
     ; "multimodal_policy", `String (multimodal_policy_to_string m.multimodal_policy)
     ; "trace_history", `List (List.map (fun s -> `String s) rt.trace_history)
     ; "generation", `Int rt.generation
@@ -66,7 +65,10 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "board_reactive_turn_count", `Int rt.board_reactive_turn_count
     ; "mention_reactive_turn_count", `Int rt.mention_reactive_turn_count
     ; "noop_turn_count", `Int rt.noop_turn_count
-    ; "last_seen_message_seq", `Int rt.last_seen_message_seq
+    ; ( "message_scope_ack_id"
+      , match rt.message_scope_ack_id with
+        | Some id -> `String id
+        | None -> `Null )
     ; ( "last_blocker"
       , match rt.last_blocker with
         | Some info -> blocker_info_to_json info
@@ -86,7 +88,6 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       , match m.latched_reason with
         | Some reason -> Keeper_latched_reason.Stable.to_yojson reason
         | None -> `Null )
-    ; "auto_resume_after_sec", Json_util.float_opt_to_json m.auto_resume_after_sec
     ; ( "current_task_id"
       , Json_util.string_opt_to_json
           (Option.map Keeper_id.Task_id.to_string m.current_task_id) )
@@ -109,7 +110,6 @@ let fallback_canonical_keeper_meta_key_names =
   ; "persona"
   ; "instructions"
   ; "trace_id"
-  ; "tool_access"
   ; "multimodal_policy"
   ; "trace_history"
   ; "generation"
@@ -150,12 +150,12 @@ let fallback_canonical_keeper_meta_key_names =
   ; "mention_reactive_turn_count"
   ; "noop_turn_count"
   ; "last_seen_message_seq"
+  ; "message_scope_ack_id"
   ; "last_blocker"
   ; "last_runtime_attempt"
   ; "last_turn_tool_calls"
   ; "paused"
   ; "latched_reason"
-  ; "auto_resume_after_sec"
   ; "current_task_id"
   ; "keeper_id"
   ; "oas_env"
@@ -172,7 +172,6 @@ let canonical_keeper_meta_key_names =
       ; "agent_name", `String "__keeper-meta-key-seed__"
       ; "persona", `String "__keeper-meta-key-seed__"
       ; "trace_id", `String "__keeper-meta-key-seed__"
-      ; "tool_access", `List []
       ]
   in
   match meta_of_json seed_json with

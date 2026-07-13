@@ -10,15 +10,9 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_tool_shared_runtime
 
-(* Inlined from keeper_sandbox_docker_semantic (P1: 1 consumer via include). *)
-
-let docker_command_semantic_status ~cmd ~status ~output =
-  Exec_core.semantic_status_of_process ~cmd ~output status
-
-let semantic_ok_of_status = function
-  | Exec_core.Ok | Exec_core.No_match -> true
-  | Exec_core.Partial | Exec_core.Blocked | Exec_core.Timeout | Exec_core.Runtime_error ->
-    false
+let process_status_is_success = function
+  | Unix.WEXITED 0 -> true
+  | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> false
 
 let path_exists path =
   try Sys.file_exists path with
@@ -121,9 +115,6 @@ let effective_sandbox_profile ~(meta : keeper_meta) =
   | Local -> Local, meta.network_mode
 ;;
 
-(* ── Nested runtime detection ──────────────────────────── *)
-include Keeper_sandbox_docker_nested_runtime
-
 (* ── Sandbox runtime preflight ─────────────────────────── *)
 
 let ensure_keeper_sandbox_runtime ~timeout_sec =
@@ -138,8 +129,6 @@ type docker_shell_result =
   ; image : string
   ; network_label : string
   ; cwd : string
-  ; semantic_status : Exec_core.semantic_status option
-  ; semantic_ok : bool
   }
 
 (** Normalize a Docker invocation result into the common [(status, output)]
@@ -150,28 +139,17 @@ let docker_result_pair = function
   | Error msg -> Unix.WEXITED 127, msg
 ;;
 
-(* docker run --rm wall-clock covers slot_wait + spawn + container
+(* docker run --rm wall-clock covers spawn + container
    cold start + actual cmd + drain. The floor is hardcoded at 20s because
    the hang modes (docker daemon stall, container start stall, command
    stall) are the same domain — the sandbox's own.  Caller does not
-   observe this: tool dispatch path owns its hang protection via
-   git --no-optional-locks / ollama OLLAMA_LOAD_TIMEOUT, not via a
-   caller-side timeout knob. *)
+   observe this: the sandbox backend owns its hang protection rather than a
+   caller-side product-specific timeout. *)
 
 let resolve_sandbox_image (meta : keeper_meta) =
   match meta.sandbox_image with
   | Some img when String.trim img <> "" -> img
   | _ -> Env_config_sandbox.Runtime.docker_image ()
-;;
-
-let docker_run_min_timeout_sec =
-  let floor = 20.0 in
-  let raw =
-    match Sys.getenv_opt "MASC_KEEPER_DOCKER_RUN_MIN_TIMEOUT_SEC" with
-    | Some s -> (match float_of_string_opt s with Some f -> f | None -> floor)
-    | None -> floor
-  in
-  max floor raw
 ;;
 
 let docker_cleanup_rm_timeout_sec () =
@@ -204,9 +182,9 @@ let cleanup_target_state ~container_name =
 let cleanup_oneshot_container ~container_name =
   let argv = Keeper_sandbox_runtime.docker_command_argv () @ [ "rm"; "-f"; container_name ] in
   let run_rm () =
-    Docker_spawn_throttle.with_slot (fun () ->
+    Fd_accountant.observe ~kind:Fd_accountant.Docker_spawn (fun () ->
       Masc_exec.Exec_gate.run_argv_with_status
-        ~actor:`System_sandbox
+        ~actor:(Masc_exec.Agent_id.of_string "system/sandbox")
         ~raw_source:(String.concat " " argv)
         ~summary:"keeper docker oneshot cleanup"
         ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
@@ -260,22 +238,6 @@ let cleanup_oneshot_container ~container_name =
      | Cleanup_target_present -> retry_after_failure ()
      | Cleanup_target_state_unknown probe_error ->
        retry_after_failure ~probe_error ())
-;;
-
-let fd_admission_error ~(config : Workspace.config) =
-  let active_keepers = Keeper_registry.count_running ~base_path:config.base_path () in
-  match
-    Keeper_fd_pressure.admission_decision
-      ~active_keepers
-      ~starting_keepers:0
-      ()
-  with
-  | Keeper_fd_pressure.Admit -> None
-  | Keeper_fd_pressure.Block block ->
-    Some
-      (Printf.sprintf
-         "docker_shell_failed: fd_pressure: %s"
-         (Keeper_fd_pressure.admission_block_kind block))
 ;;
 
 let ensure_docker_shell_image_available ~image ~timeout_sec =
@@ -384,10 +346,6 @@ let optional_ro_mount ~host ~container =
   else [ "-v"; host ^ ":" ^ container ^ ":ro" ]
 ;;
 
-let nested_runtime_blocker =
-  "sandbox_profile=docker blocks nested container runtimes and host socket references"
-;;
-
 let sandbox_error_json ~(config : Workspace.config) ~(meta : keeper_meta) message =
   Keeper_registry_error_recording.record ~base_path:config.base_path meta.name message;
   error_json message
@@ -399,8 +357,8 @@ let sandbox_error ~(config : Workspace.config) ~(meta : keeper_meta) ?details me
 ;;
 
 (** Shared by [run_docker_bash] and [run_docker_shell_command_with_status_internal]:
-    parse cmd → resolve cwd → validate paths.  Returns [Ok (cwd, cmd_ir)]
-    when every gate passes.
+    parse cmd and validate its paths. Returns [Ok cwd] when every objective
+    containment check passes.
 
     [validate_command_paths] toggles the host-side path validation gate
     (default [true]).  Callers that already validated paths (e.g. trusted
@@ -421,14 +379,7 @@ let validate_docker_dispatch_context
           [blocked_cmd=%s]"
          (Exec_policy.block_reason_to_string reason)
          cmd)
-  | Ok cmd_ir ->
-  let cwd, sandbox_root_git_blocker =
-    Keeper_tool_execute_command_semantics.resolve_sandbox_root_git_cwd
-      ~config ~meta ~cwd ~cmd cmd_ir
-  in
-  (match sandbox_root_git_blocker with
-  | Some message -> Error message
-  | None ->
+  | Ok _cmd_ir ->
     let path_validation =
       if validate_command_paths
       then (
@@ -438,8 +389,6 @@ let validate_docker_dispatch_context
         match Exec_policy.parse_string_to_ir ~mode:Tool_execute validation_cmd with
         | Ok validation_ir ->
           Keeper_tool_execute_shell_ir.validate_paths
-            ~keeper_id:meta.name
-            ~base_path:(Keeper_alerting_path.project_root_of_config config)
             ~workdir:cwd
             validation_ir
         | Error reason ->
@@ -452,7 +401,7 @@ let validate_docker_dispatch_context
     in
     match path_validation with
     | Error err -> Error (Printf.sprintf "%s [blocked_cmd=%s]" err cmd)
-    | Ok () -> Ok (cwd, Some cmd_ir))
+    | Ok () -> Ok cwd
 ;;
 
 let run_docker_shell_command_with_status_internal
@@ -464,17 +413,13 @@ let run_docker_shell_command_with_status_internal
       ~(cmd : string)
       ~(network_mode : network_mode)
   =
-  let timeout_sec = max timeout_sec docker_run_min_timeout_sec in
   let image = resolve_sandbox_image meta in
   let sandbox_error = sandbox_error ~config ~meta in
   if String.trim image = ""
   then sandbox_error "keeper sandbox docker image is not configured"
   else (
     let cmd = rewrite_docker_command_paths ~config ~meta cmd in
-    if command_uses_nested_container_runtime cmd
-    then sandbox_error nested_runtime_blocker
-    else
-      match
+    match
         validate_docker_dispatch_context
           ~validate_command_paths
           ~config
@@ -484,29 +429,13 @@ let run_docker_shell_command_with_status_internal
           ()
       with
       | Error msg -> sandbox_error msg
-      | Ok (cwd, cmd_ir) ->
-      (match fd_admission_error ~config with
-       | Some err -> sandbox_error err
-       | None ->
+      | Ok cwd ->
         let host_root =
           Keeper_sandbox.host_root_abs_of_meta ~config meta
           |> Keeper_alerting_path.normalize_path_for_check
           |> Keeper_alerting_path.strip_trailing_slashes
         in
-        (* #10424: keeper LLM이 sandbox root에서 cd 없이 git/gh 호출 시
-         "fatal: not a git repository" 발생. mount point는 git repo 아니고
-         repos/<repo>/ 안에만 git checkout 존재. filesystem ground truth
-         (repos/ enumeration)로 결정론적 분기:
-         - single-repo → 자동 chdir (silent)
-         - multi-repo → explicit error로 LLM이 정확한 경로 학습
-         - 0 repo → explicit error로 clone/cwd 복구 액션 학습 *)
-        (* #10855: surface gh syntax misuse before docker exec so the LLM
-         sees a corrected-form hint in the same turn rather than gh's raw
-         "unknown flag: --repo" error after the round-trip. *)
-           (match Option.bind cmd_ir Keeper_tool_execute_command_semantics.misuse_error with
-            | Some msg -> sandbox_error msg
-            | None ->
-              let container_name = keeper_sandbox_container_name meta in
+        let container_name = keeper_sandbox_container_name meta in
               let container_root = keeper_private_container_root meta in
               let container_cwd = docker_private_workspace_cwd ~config ~meta cwd in
               let network_args, network_label =
@@ -618,7 +547,7 @@ let run_docker_shell_command_with_status_internal
                           in
                           (try
                              let run_once () =
-                               Keeper_turn_sandbox_runtime.run_argv_with_stdin_and_status_retry_eintr
+                               Keeper_turn_sandbox_runtime.run_argv_with_stdin_and_status_split
                                  ~timeout_sec
                                  ~stdin_content:cmd
                                  argv
@@ -626,58 +555,40 @@ let run_docker_shell_command_with_status_internal
                              Eio_guard.protect
                                ~finally:(fun () -> secret_projection.cleanup ())
                                (fun () ->
-                                  let rec attempt ~retries_left =
-                                    let status, output =
-                                      Eio_guard.protect
-                                        ~finally:(fun () ->
-                                          cleanup_oneshot_container ~container_name)
-                                        (fun () -> run_once ())
-                                    in
-                                    let semantic_status =
-                                      docker_command_semantic_status ~cmd ~status ~output
-                                    in
-                                    let semantic_ok =
-                                      semantic_ok_of_status semantic_status
-                                    in
-                                    if (not semantic_ok)
-                                       && retries_left > 0
-                                       && Keeper_sandbox_runtime.docker_run_looks_daemon_pressure
-                                            ~status
-                                            ~output
-                                    then (
-                                      Log.Keeper.info
-                                        "keeper docker command for %s hit daemon pressure \
-                                         (%s), retrying once"
-                                        meta.name
-                                        (Exec_core.string_of_semantic_status semantic_status);
-                                      Eio_guard.yield_if_ready ();
-                                      attempt ~retries_left:(retries_left - 1))
-                                    else (
-                                      if not semantic_ok
-                                      then
-                                        Keeper_sandbox_exec_failure.record_docker_failure
-                                          ~config
-                                          ~meta
-                                          ~image
-                                          ~container_kind:"oneshot"
-                                          ~network_label
-                                          ~status
-                                          ~output
-                                      else
-                                        Keeper_registry.clear_error
-                                          ~base_path:config.base_path
-                                          meta.name;
-                                      Ok
-                                        { status
-                                        ; output
-                                        ; image
-                                        ; network_label
-                                        ; cwd
-                                        ; semantic_status = Some semantic_status
-                                        ; semantic_ok
-                                        })
+                                  let status, stdout, stderr =
+                                    Eio_guard.protect
+                                      ~finally:(fun () ->
+                                        cleanup_oneshot_container ~container_name)
+                                      (fun () -> run_once ())
                                   in
-                                  attempt ~retries_left:1)
+                                  let output =
+                                    match stdout, stderr with
+                                    | "", err -> err
+                                    | out, "" -> out
+                                    | out, err -> out ^ "\n" ^ err
+                                  in
+                                  let ok = process_status_is_success status in
+                                  if not ok
+                                  then
+                                    Keeper_sandbox_exec_failure.record_docker_failure
+                                      ~config
+                                      ~meta
+                                      ~image
+                                      ~container_kind:"oneshot"
+                                      ~network_label
+                                      ~status
+                                      ~output
+                                  else
+                                    Keeper_registry.clear_error
+                                      ~base_path:config.base_path
+                                      meta.name;
+                                  Ok
+                                    { status
+                                    ; output
+                                    ; image
+                                    ; network_label
+                                    ; cwd
+                                    })
                            with
                            | Eio.Cancel.Cancelled _ as exn -> raise exn
                            | Failure err -> sandbox_error err
@@ -690,7 +601,7 @@ let run_docker_shell_command_with_status_internal
                                   "docker_shell_failed: unix_error: %s: %s(%s)"
                                   (Unix.error_message code)
                                   fn
-                                  arg)))))))))
+                                  arg)))))))
 ;;
 
 let run_docker_shell_command_with_status =
@@ -701,20 +612,18 @@ let run_trusted_docker_shell_command_with_status =
   run_docker_shell_command_with_status_internal ~validate_command_paths:false
 ;;
 
-(** Preflight checks shared by [run_docker_bash]: image configured, nested runtime blocked.
-    Returns [Some error_json] on failure, [None] when every gate passes. *)
-let docker_bash_preflight ~config ~meta ~cmd =
+(** Preflight shared by [run_docker_bash]. Command meaning is deliberately
+    opaque here; socket, mount, network, and path containment are enforced by
+    the sandbox itself. *)
+let docker_bash_preflight ~config ~meta ~cmd:_ =
   let image = resolve_sandbox_image meta in
   let sandbox_error_json = sandbox_error_json ~config ~meta in
   if String.trim image = ""
   then Some (sandbox_error_json "keeper sandbox docker image is not configured")
-  else if command_uses_nested_container_runtime cmd
-  then Some (sandbox_error_json nested_runtime_blocker)
   else None
 ;;
 
-let docker_bash_response ~ok ~network_label ~status ~output
-    ~cwd_response ~semantic_status
+let docker_bash_response ~ok ~network_label ~status ~output ~cwd_response
   =
   Yojson.Safe.to_string
     (`Assoc
@@ -725,9 +634,6 @@ let docker_bash_response ~ok ~network_label ~status ~output
 	         ; "network_mode", `String network_label
 	         ; "status", Keeper_alerting_path.process_status_to_json status
 	         ]
-         @ (match semantic_status with
-            | None -> []
-            | Some s -> [ "semantic_status", `String (Exec_core.string_of_semantic_status s) ])
          @ [ "output", `String output ]))
 
 (** Convert a [docker_shell_result] into the JSON response string
@@ -741,12 +647,11 @@ let docker_result_to_bash_response ~config ~meta result =
         (docker_private_workspace_cwd ~config ~meta result.cwd)
   in
   docker_bash_response
-    ~ok:result.semantic_ok
+    ~ok:(process_status_is_success result.status)
     ~network_label:result.network_label
     ~status:result.status
     ~output:result.output
     ~cwd_response
-    ~semantic_status:result.semantic_status
 ;;
 
 (** Shared container-backed bash execution:
@@ -787,7 +692,7 @@ let run_docker_bash
     | Some runtime, Network_none ->
       (match validate_docker_dispatch_context ~config ~meta ~cwd ~cmd () with
        | Error message -> sandbox_error_json message
-       | Ok (cwd, _cmd_ir) ->
+       | Ok cwd ->
          (match
             Keeper_turn_sandbox_runtime.run_bash_with_status
               runtime
@@ -798,11 +703,8 @@ let run_docker_bash
           with
           | Error message -> sandbox_error_json message
           | Ok (st, out) ->
-            let semantic_status =
-              docker_command_semantic_status ~cmd ~status:st ~output:out
-            in
-            let semantic_ok = semantic_ok_of_status semantic_status in
-            if not semantic_ok
+            let ok = process_status_is_success st in
+            if not ok
             then
               Keeper_sandbox_exec_failure.record_docker_failure
                 ~config
@@ -823,12 +725,11 @@ let run_docker_bash
                      ~host_cwd:cwd)
             in
 	     docker_bash_response
-	       ~ok:semantic_ok
+		       ~ok
 	      ~network_label:(network_mode_to_string network_mode)
-	      ~status:st
+              ~status:st
               ~output:out
               ~cwd_response
-              ~semantic_status:(Some semantic_status)
               ))
     | _ ->
       (match turn_sandbox_runtime with

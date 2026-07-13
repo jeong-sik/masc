@@ -44,7 +44,6 @@ let recurring_task_json (task : Keeper_recurring.recurring_task) =
     ; "enabled", `Bool task.enabled
     ; "run_count", `Int task.run_count
     ; "failure_count", `Int task.failure_count
-    ; "max_failures", `Int task.max_failures
     ; "last_run_at", float_opt_json last_run
     ; "last_run_at_iso", iso_of_ts_opt last_run
     ; "next_run_at", float_opt_json next_run

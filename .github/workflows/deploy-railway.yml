@@ -59,7 +59,7 @@ jobs:
           mkdir -p config
           cat > config/llm_runtime.json << 'LLM_RUNTIME_JSON'
           {
-            "governance_judge_models": ["glm:glm-4.7-flash"],
+            "structured_judge_models": ["glm:glm-4.7-flash"],
             "operator_judge_models": ["glm:glm-4.7-flash"],
             "heartbeat_action_models": ["glm:glm-4.7-flash"],
             "heartbeat_wake_models": ["glm:glm-4.7-flash"],

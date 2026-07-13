@@ -330,7 +330,7 @@ let search_history
 
 (* --- Unified keeper_memory_search dispatch --- *)
 
-let keeper_memory_search_json
+let keeper_memory_search_with_outcome
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(ctx_work : working_context)
@@ -350,26 +350,30 @@ let keeper_memory_search_json
   in
   match memory_search_source_of_string_opt source_raw, kind_filter with
   | None, _ ->
-    error_json
-      ~fields:
-        [ "error_kind", `String "invalid_memory_search_source"
-        ; "provided_source", `String source_raw
-        ; ( "supported_sources"
-          , `List (List.map (fun s -> `String s) valid_memory_search_source_strings) )
-        ]
-      "invalid keeper_memory_search source"
+    Keeper_tool_execution.failure
+      ~class_:Tool_result.Policy_rejection
+      (error_json
+         ~fields:
+           [ "error_kind", `String "invalid_memory_search_source"
+           ; "provided_source", `String source_raw
+           ; ( "supported_sources"
+             , `List (List.map (fun s -> `String s) valid_memory_search_source_strings) )
+           ]
+         "invalid keeper_memory_search source")
   | Some _, Error provided_kind ->
-    error_json
-      ~fields:
-        [ "error_kind", `String "invalid_memory_kind"
-        ; "provided_kind", `String provided_kind
-        ; ( "supported_kinds"
-          , `List
-              (List.map
-                 (fun kind -> `String kind)
-                 Keeper_memory_policy.valid_memory_kind_strings) )
-        ]
-      "invalid keeper_memory_search kind"
+    Keeper_tool_execution.failure
+      ~class_:Tool_result.Policy_rejection
+      (error_json
+         ~fields:
+           [ "error_kind", `String "invalid_memory_kind"
+           ; "provided_kind", `String provided_kind
+           ; ( "supported_kinds"
+             , `List
+                 (List.map
+                    (fun kind -> `String kind)
+                    Keeper_memory_policy.valid_memory_kind_strings) )
+           ]
+         "invalid keeper_memory_search kind")
   | Some source, Ok kind_filter ->
     let source_label = memory_search_source_to_string source in
     let kind_filter_wire =
@@ -491,7 +495,11 @@ let keeper_memory_search_json
      Log.Keeper.warn ~keeper_name:meta.name
        "memory_search decision-log append failed: %s"
        (Printexc.to_string exn));
-  Yojson.Safe.to_string result
+  Keeper_tool_execution.success (Yojson.Safe.to_string result)
+;;
+
+let keeper_memory_search_json ~config ~meta ~ctx_work ~args =
+  (keeper_memory_search_with_outcome ~config ~meta ~ctx_work ~args).raw_output
 ;;
 
 let keeper_context_status_json
@@ -640,16 +648,21 @@ let validate_memory_write_args (args : Yojson.Safe.t) : memory_write_validation 
       else Memory_write_invalid { error_kind = Content_rejected; extras = [] }
 ;;
 
-let keeper_memory_write_json
+let keeper_memory_write_with_outcome
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
-  : string
+  : Keeper_tool_execution.t
   =
   let respond ~ok ~error_kind extras =
     let error_kind = memory_write_error_kind_to_string error_kind in
-    Yojson.Safe.to_string
-      (`Assoc ([ "ok", `Bool ok; "error_kind", `String error_kind ] @ extras))
+    let payload =
+      Yojson.Safe.to_string
+        (`Assoc ([ "ok", `Bool ok; "error_kind", `String error_kind ] @ extras))
+    in
+    if ok
+    then Keeper_tool_execution.success payload
+    else Keeper_tool_execution.failure ~class_:Tool_result.Workflow_rejection payload
   in
   match validate_memory_write_args args with
   | Memory_write_invalid { error_kind; extras } ->
@@ -685,4 +698,8 @@ let keeper_memory_write_json
         ; "kinds_written", `List [ `String kind_wire ]
         ; "kind", `String kind_wire
         ])
+;;
+
+let keeper_memory_write_json ~config ~meta ~args =
+  (keeper_memory_write_with_outcome ~config ~meta ~args).raw_output
 ;;

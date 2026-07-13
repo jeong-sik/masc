@@ -130,7 +130,6 @@ let register () =
       ~handler_binding:(Shared handler)
       ~is_read_only:policy.readonly
       ~is_idempotent:policy.idempotent
-      ~is_destructive:policy.destructive
       ~visibility:policy.visibility
       ()
   in

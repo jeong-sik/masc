@@ -219,7 +219,6 @@ let test_operator_pause_survives_stale_heartbeat_retry () =
           Some
             (Keeper_latched_reason.Operator_paused
                { operator_actor = Keeper_latched_reason.operator_actor_grpc_directive });
-        auto_resume_after_sec = None;
         runtime = { stale_turn_view.runtime with last_blocker = None };
         updated_at = Keeper_meta_contract.now_iso ();
       }
@@ -251,8 +250,6 @@ let test_operator_pause_survives_stale_heartbeat_retry () =
       | _ -> fail "final read failed"
     in
     check bool "operator pause survives stale retry" true final.paused;
-    check bool "auto resume stays disabled" true
-      (Option.is_none final.auto_resume_after_sec);
     check bool "stale blocker stays cleared" true
       (Option.is_none final.runtime.last_blocker))
 

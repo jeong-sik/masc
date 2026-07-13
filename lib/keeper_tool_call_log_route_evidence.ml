@@ -79,19 +79,11 @@ let assoc_string_list_opt name json =
   | Some _ -> None
 ;;
 
-let redact_git_push_argv executable argv =
-  match executable, argv with
-  | "git", "push" :: "-u" :: "origin" :: _ref :: rest ->
-      "push" :: "-u" :: "origin" :: "[REDACTED]" :: rest
-  | _, _ -> argv
-;;
-
 let typed_exec_command input =
   match Json_util.assoc_string_opt "executable" input with
   | Some executable ->
       (match assoc_string_list_opt "argv" input with
        | Some argv ->
-           let argv = redact_git_push_argv executable argv in
            Some (String.concat " " (executable :: argv))
        | None -> None)
   | None -> None

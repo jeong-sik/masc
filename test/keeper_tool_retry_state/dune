@@ -1,7 +1,0 @@
-; Standalone alcotest for Keeper_tool_retry_state. The unit module
-; itself is stdlib-only, so this test executable links in seconds
-; without dragging the main masc library.
-
-(tests
- (names test_keeper_tool_retry_state)
- (libraries alcotest masc.keeper_tooling))

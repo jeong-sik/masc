@@ -80,7 +80,7 @@ export function IdeKeeperWorkPanel({ keeperName }: IdeKeeperWorkPanelProps) {
   const cursor = resolveKeeperCursor(keeperName, overlay.cursors)
 
   // task-1740 C3: the live-turn fields (model / in-flight tools / last
-  // skip / livelock / board cursor) are read from the composite snapshot
+  // skip / turn attempts / board cursor) are read from the composite snapshot
   // SSOT (`/api/v1/keepers/:name/composite` via `fleetCompositeSnapshot`),
   // not re-derived from the global keepers/tasks store. `.value` access
   // auto-subscribes this component to composite freshness, mirroring the
@@ -323,7 +323,7 @@ function LiveTurnStrip(composite: KeeperCompositeSnapshot | null) {
   if (!composite) return null
   const liveTurn = composite.live_turn ?? null
   const lastSkip = composite.last_skip ?? null
-  const livelock = composite.livelock ?? null
+  const turnAttempt = composite.turn_attempt ?? null
   const boardCursor = composite.board_cursor ?? null
   const toolCount = liveTurn?.active_tool_count
   const firstSkipReason = lastSkip?.reasons[0] ?? null
@@ -332,7 +332,7 @@ function LiveTurnStrip(composite: KeeperCompositeSnapshot | null) {
       ${WorkMetric('model', liveTurn?.selected_model ?? '—')}
       ${WorkMetric('tools', toolCount != null ? String(toolCount) : '—')}
       ${WorkMetric('skip', firstSkipReason ?? 'none')}
-      ${WorkMetric('livelock', livelock ? String(livelock.attempts) : 'none')}
+      ${WorkMetric('attempts', turnAttempt ? String(turnAttempt.attempts) : 'none')}
       ${WorkMetric('board', boardCursor?.post_id ?? 'none')}
     </div>
   `

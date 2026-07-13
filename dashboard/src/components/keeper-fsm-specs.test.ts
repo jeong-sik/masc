@@ -17,10 +17,10 @@ import {
 const KSM_STATES = [
   'offline', 'running', 'failing', 'overflowed', 'compacting',
   'handing_off', 'draining', 'paused', 'stopped', 'crashed',
-  'restarting', 'dead', 'zombie',
+  'restarting', 'dead',
 ]
 const KTC_STATES = ['idle', 'prompting', 'routing', 'executing', 'compacting', 'finalizing', 'exhausted']
-const KDP_STATES = ['undecided', 'guard_ok', 'gate_rejected', 'tool_policy_selected']
+const KDP_STATES = ['undecided', 'guard_ok', 'tool_policy_selected']
 const KCL_STATES = ['idle', 'selecting', 'trying', 'done', 'exhausted']
 const KMC_STATES = ['accumulating', 'compacting', 'done']
 
@@ -69,11 +69,11 @@ describe('buildCompositeFsmSpec', () => {
     expect(ids).toEqual(KMC_STATES)
   })
 
-  it('total node count = 5 parents + 32 children = 37', () => {
+  it('total node count = 5 parents + 30 children = 35', () => {
     const spec = buildCompositeFsmSpec(defaultParams)
     const childCount = KSM_STATES.length + KTC_STATES.length + KDP_STATES.length
       + KCL_STATES.length + KMC_STATES.length
-    expect(childCount).toBe(32)
+    expect(childCount).toBe(30)
     expect(spec.nodes).toHaveLength(5 + childCount)
   })
 
@@ -94,7 +94,7 @@ describe('buildCompositeFsmSpec', () => {
   })
 
   it('marks the active KSM child as err for failure-class phases', () => {
-    for (const phase of ['failing', 'stopped', 'crashed', 'dead', 'zombie']) {
+    for (const phase of ['failing', 'stopped', 'crashed', 'dead']) {
       const spec = buildCompositeFsmSpec({ ...defaultParams, phase })
       expect(spec.nodes.find(n => n.id === `KSM:${phase}`)!.type).toBe('err')
     }
@@ -110,11 +110,6 @@ describe('buildCompositeFsmSpec', () => {
   it('marks inactive KSM children as dim', () => {
     const spec = buildCompositeFsmSpec(defaultParams)
     expect(spec.nodes.find(n => n.id === 'KSM:dead')!.type).toBe('dim')
-  })
-
-  it('marks a gate_rejected decision as err', () => {
-    const spec = buildCompositeFsmSpec({ ...defaultParams, decisionStage: 'gate_rejected' })
-    expect(spec.nodes.find(n => n.id === 'KDP:gate_rejected')!.type).toBe('err')
   })
 
   it('marks an exhausted runtime as err', () => {

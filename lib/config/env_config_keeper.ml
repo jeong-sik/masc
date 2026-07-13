@@ -27,11 +27,6 @@ module KeeperBootstrap = struct
   (** Max keeper meta files to scan during bootstrap *)
   let max_scan = get_int_nonneg ~default:10000 "MASC_KEEPER_BOOTSTRAP_MAX_SCAN"
 
-  (** Maximum concurrently active keepers. Guards keeper creation and bootstrap. *)
-  let max_active_keepers =
-    get_int_nonneg ~default:10000 "MASC_KEEPER_BOOTSTRAP_MAX_ACTIVE_KEEPERS"
-  ;;
-
   (** Polling interval (seconds) for the lazy-startup wait loop in
       [server_bootstrap_loops.ml]. The autoboot fiber wakes up every
       [lazy_startup_poll_interval_sec] to re-check whether all
@@ -186,7 +181,6 @@ module KeeperMemoryOs = struct
   let librarian_runtime_id_default = None
   let librarian_global_slot_default = 1
   let gc_enabled_default = true
-  let shared_consolidator_enabled_default = false
   let consolidation_enabled_default = false
   let consolidation_runtime_id_default = None
 
@@ -203,7 +197,6 @@ module KeeperMemoryOs = struct
   let librarian_runtime_id_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID"
   let librarian_global_slot_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT"
   let gc_env_key = "MASC_KEEPER_MEMORY_OS_GC"
-  let shared_consolidator_env_key = "MASC_KEEPER_MEMORY_OS_CONSOLIDATE"
   let consolidation_env_key = "MASC_KEEPER_MEMORY_OS_CONSOLIDATION"
   let consolidation_runtime_id_env_key = "MASC_KEEPER_MEMORY_OS_CONSOLIDATION_RUNTIME_ID"
 
@@ -326,18 +319,6 @@ module KeeperMemoryOs = struct
       ~invalid:Env_config_memory.Fail_closed
       gc_env_key
       ~default:gc_enabled_default
-  ;;
-
-  (** Tier-2 shared Memory OS consolidator kill switch. Default: false; invalid
-      values fail closed to false. This gates the deterministic cross-keeper
-      shared-store sweep, separate from the per-keeper LLM consolidation pass.
-      @category Policies
-      @ops_class operator *)
-  let shared_consolidator_enabled () =
-    get_bool_logged
-      ~invalid:Env_config_memory.Fail_closed
-      shared_consolidator_env_key
-      ~default:shared_consolidator_enabled_default
   ;;
 
   (** Per-keeper Memory OS consolidation maintenance fiber kill switch.
@@ -512,33 +493,6 @@ module KeeperGeneratedMedia = struct
   ;;
 end
 
-(** {1 Keeper Context Reducer Configuration}
-
-    Controls for the {!Agent_sdk.Context_reducer} stages applied to the
-    keeper message history before each turn.  Extracted from a hardcoded
-    literal (masc PR #xxxx) so the reducer cap can be tuned per
-    deployment without a rebuild.  Default preserves the prior value. *)
-
-module KeeperReducer = struct
-  (** Max message tokens retained by
-      {!Agent_sdk.Context_reducer.cap_message_tokens} in the keeper run
-      reducer pipeline.  Default: 32000.  Minimum: 1024.
-
-      Env: [MASC_KEEPER_REDUCER_CAP_TOKENS]. *)
-  let cap_message_tokens =
-    max 1024 (get_int ~default:32000 "MASC_KEEPER_REDUCER_CAP_TOKENS")
-  ;;
-
-  (** Recent messages kept verbatim by
-      {!Agent_sdk.Context_reducer.cap_message_tokens}.  Default: 3.
-      Range: [1, 20].
-
-      Env: [MASC_KEEPER_REDUCER_KEEP_RECENT]. *)
-  let cap_message_keep_recent =
-    max 1 (min 20 (get_int ~default:3 "MASC_KEEPER_REDUCER_KEEP_RECENT"))
-  ;;
-end
-
 (** Shared: keepalive interval, read early so WorkAsHeartbeat can reference it. *)
 let keepalive_interval_sec_ =
   max 5 (min 300 (get_int ~default:30 "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC"))
@@ -560,38 +514,6 @@ module WorkAsHeartbeat = struct
   ;;
 end
 
-(** {1 Smart Heartbeat Configuration (Phase 2)} *)
-
-module SmartHeartbeat = struct
-  (** Master switch for adaptive heartbeat scheduling in the keepalive loop.
-      When true, Keeper_heartbeat_smart.should_emit gates presence/snapshot/board/turn
-      blocks, skipping cycles when the keeper is busy or deeply idle. *)
-  let enabled = Feature_flag_registry.get_bool "MASC_KEEPER_SMART_HEARTBEAT"
-end
-
-module KeeperVisibilityGate = struct
-  (** Consumer-driven idle backoff: when true, keepers with no dashboard/SSE
-      observer and no pending signal delay proactive idle turns by
-      [unobserved_visibility_idle_window_s] to reduce token waste. *)
-  let enabled = Feature_flag_registry.get_bool "MASC_KEEPER_VISIBILITY_GATE"
-end
-
-(** {1 Keeper turn admission policy} *)
-
-module KeeperTurnAdmission = struct
-  (** Maximum chat requests allowed to park behind one keeper's admitted turn.
-      Default preserves the previous per-keeper cap. Runtime operators may raise
-      it for high-fan-in dashboard/connector deployments through
-      [turn.chat_waiting_cap] in runtime.toml or the env var below. Floored at
-      1 because [run_serialized] counts the caller before acquiring the slot.
-
-      Env: [MASC_KEEPER_TURN_CHAT_WAITING_CAP].
-      @category Concurrency @ops_class operator *)
-  let max_waiting_chat_requests =
-    max 1 (get_int ~default:8 "MASC_KEEPER_TURN_CHAT_WAITING_CAP")
-  ;;
-end
-
 (** {1 Keeper health policy} *)
 
 module KeeperHealth = struct
@@ -610,33 +532,6 @@ module KeeperHealth = struct
   ;;
 end
 
-(** {1 Keeper proactive scheduler policy} *)
-
-module KeeperProactivePolicy = struct
-  (** Maximum exponent used by no-op cooldown backoff:
-      [base_cooldown * (1 lsl min consecutive_noop_count value)].
-      Default [2] preserves the previous maximum 4x cooldown. Range [0, 8]
-      keeps the policy bounded while allowing operators to disable or relax
-      no-op backoff.
-
-      Env: [MASC_KEEPER_PROACTIVE_NOOP_BACKOFF_MAX_SHIFT].
-      @category Timeouts @ops_class operator *)
-  let noop_backoff_max_shift =
-    min 8 (get_int_nonneg ~default:2 "MASC_KEEPER_PROACTIVE_NOOP_BACKOFF_MAX_SHIFT")
-  ;;
-
-  (** Maximum idle-decay periods applied after a keeper has been idle longer
-      than its effective proactive base cooldown. Default [4] preserves the
-      previous floor-reaching behavior. Range [0, 16] prevents an accidental
-      hot loop while still making the policy explicit.
-
-      Env: [MASC_KEEPER_PROACTIVE_IDLE_DECAY_MAX_PERIODS].
-      @category Timeouts @ops_class operator *)
-  let idle_decay_max_periods =
-    min 16 (get_int_nonneg ~default:4 "MASC_KEEPER_PROACTIVE_IDLE_DECAY_MAX_PERIODS")
-  ;;
-end
-
 (** {1 Keeper Keepalive Loop Constants} *)
 
 module KeeperKeepalive = struct
@@ -645,20 +540,6 @@ module KeeperKeepalive = struct
       keeper cycle (presence, snapshot, board scan, turn, recurring) runs
       at this cadence. *)
   let interval_sec = keepalive_interval_sec_
-
-  (** Maximum consecutive heartbeat failures before raising
-      Keeper_fiber_crash (structured crash via dispatch_event). Default: 5.
-      Range: [2, 50]. *)
-  let max_consecutive_failures =
-    max 2 (min 50 (get_int ~default:5 "MASC_KEEPER_MAX_CONSECUTIVE_HB_FAILURES"))
-  ;;
-
-  (** Maximum consecutive unified turn failures before marking keeper as
-      crashed. Covers LLM timeout, rate limit, and other turn errors.
-      Default: 10. Range: [3, 100]. *)
-  let max_consecutive_turn_failures =
-    max 3 (min 100 (get_int ~default:10 "MASC_KEEPER_MAX_CONSECUTIVE_TURN_FAILURES"))
-  ;;
 
   (** Board-reactive wakeup debounce in seconds. Prevents rapid repeated
       wakeups from the same board post. Default: 60.0.
@@ -669,36 +550,6 @@ module KeeperKeepalive = struct
       Range: [0.1, 10.0]. *)
   let sleep_chunk_sec =
     Float.max 0.1 (Float.min 10.0 (get_float ~default:2.0 "MASC_KEEPER_SLEEP_CHUNK_SEC"))
-  ;;
-
-  (** Jitter factor applied to heartbeat interval (fraction of base).
-      Default: 0.2 (20%). Range: [0.0, 0.5]. *)
-  let jitter_factor =
-    Float.max
-      0.0
-      (Float.min 0.5 (get_float ~default:0.2 "MASC_KEEPER_HEARTBEAT_JITTER_FACTOR"))
-  ;;
-
-  (** {2 Idle Turn Constants}
-
-      Keepers may call tools or finish with text. Idle detection only
-      fires when the same tool+args pattern repeats. Higher thresholds
-      allow legitimate multi-step exploration (e.g., calling
-      keeper_tool_search with different queries). *)
-
-  (** Max idle turns for scheduled autonomous keeper turns.
-      Keepers have workspace to explore multi-step tool sequences.
-      10 idle turns × ~5K tokens = ~50K budget.
-      Env: [MASC_KEEPER_MAX_IDLE_TURNS_AUTONOMOUS]. Default: 10. *)
-  let max_idle_turns_autonomous =
-    max 2 (min 50 (get_int ~default:10 "MASC_KEEPER_MAX_IDLE_TURNS_AUTONOMOUS"))
-  ;;
-
-  (** Max idle turns for reactive (board/mention triggered) keeper turns.
-      Reactive turns have an explicit trigger — more patience warranted.
-      Env: [MASC_KEEPER_MAX_IDLE_TURNS_REACTIVE]. Default: 15. *)
-  let max_idle_turns_reactive =
-    max 2 (min 50 (get_int ~default:15 "MASC_KEEPER_MAX_IDLE_TURNS_REACTIVE"))
   ;;
 
   (** Hard ceiling for all keeper timeout constants (seconds).
@@ -863,12 +714,6 @@ end
 (** {1 gRPC Heartbeat Reconnect} *)
 
 module KeeperGrpc = struct
-  (** Maximum gRPC reconnect attempts before stopping the heartbeat fiber.
-      Default: 5. Range: [1, 20]. *)
-  let max_reconnect_attempts =
-    max 1 (min 20 (get_int ~default:5 "MASC_KEEPER_GRPC_MAX_RECONNECT"))
-  ;;
-
   (** Backoff delay between gRPC reconnect attempts in seconds.
       Default: 5.0. Range: [1.0, 60.0]. *)
   let reconnect_backoff_sec =
@@ -894,17 +739,6 @@ module KeeperProactive = struct
   ;;
 end
 
-(** {1 Tool Execution} *)
-
-module KeeperToolExec = struct
-  (** Maximum consecutive failures for the same (tool_name, args_hash)
-      before blocking further attempts. Prevents infinite retry loops.
-      Default: 3. Range: [2, 20]. *)
-  let max_consecutive_tool_failures =
-    max 2 (min 20 (get_int ~default:3 "MASC_KEEPER_MAX_CONSECUTIVE_TOOL_FAILURES"))
-  ;;
-end
-
 (** {1 Context Ratio Hard Cap}
 
     Absolute ceiling for compaction ratio_gate and handoff threshold after
@@ -914,32 +748,6 @@ end
 let context_ratio_hard_cap =
   Float.max 0.80 (Float.min 0.99 (get_float ~default:0.95 "MASC_CONTEXT_RATIO_HARD_CAP"))
 ;;
-
-(** {1 Context Compaction (OAS)} *)
-
-module ContextCompact = struct
-  (** Algorithm calibration constants for the MASC-side compaction scorer and
-      dynamic strategy selector.  These are intentionally not runtime env
-      knobs: changing them alters reducer semantics and should go through code
-      review with coverage instead of per-host tuning. *)
-  let w_recency = 0.50
-  let w_role = 0.35
-  let w_tool = 0.15
-  let role_system = 1.0
-  let role_tool = 0.7
-  let role_user = 0.6
-  let role_assistant = 0.4
-  let tool_present = 0.8
-  let tool_absent = 0.5
-  let anchor_boost = 0.95
-  let drop_importance_threshold = 0.3
-  let summarize_keep_recent = 5
-  let tool_output_prune_limit = 1500
-  let dynamic_multi_agent_ratio = 0.80
-  let dynamic_focused_ratio = 0.70
-  let small_local_floor = 64_000
-  let large_cloud_floor = 500_000
-end
 
 (** {1 Dashboard Health Thresholds}
 
@@ -974,34 +782,11 @@ module KeeperTelemetry = struct
   let payload_telemetry_enabled () = get_bool ~default:false "MASC_PAYLOAD_TELEMETRY"
 end
 
-(** {1 Runtime Saturation Signal (RFC-0153 Phase A.2)}
-
-    Feature flag for typed [Runtime_saturation_signal.t] emission from
-    structured runtime/provider errors. The signal is consumed by Phase C
-    (adaptive throttling).
-
-    Default off. Phase A.2 emit is purely additive — it increments a new
-    Otel_metric_store counter ([masc_keeper_runtime_saturation_signal_total])
-    with a typed [kind] label sourced from {!Runtime_saturation_signal.kind}. *)
-module RuntimeSaturationSignal = struct
-  let enabled () =
-    get_bool ~default:false "MASC_RUNTIME_SATURATION_SIGNAL_ENABLED"
-end
-
 (* MASC_KEEPER_RUNTIME_PROVIDER_ALLOWLIST (KeeperRuntimeProviderFilter) was
    deleted (audit F8): its value was threaded as [?provider_filter] into
    [Keeper_turn_driver.run_named] and [Keeper_memory_llm_summary.make], both of
    which silently ignored it after the RFC-0206 single-runtime purge. The knob
    was dead while its docs were live; deletion documents reality. Provider
    selection is runtime.toml SSOT ([runtime].default / [[runtime.assignments]]). *)
-
-(** {1 Transient Retry Backoff}
-
-    Outer-loop retry parameters for transient network errors and
-    recoverable runtime failures.  These govern the keeper's exponential
-    backoff between re-attempts when all OAS providers fail transiently
-    (e.g. TCP keepalive expiry).  They do NOT affect OAS internal
-    per-provider retry (3 attempts with its own backoff). *)
-module KeeperRetryBackoff = Env_config_keeper_retry_backoff
 
 (** Print configuration summary for debugging *)

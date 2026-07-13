@@ -2,8 +2,7 @@
 
     Records every decision point for observability and replay.
 
-    All type definitions ([transition_record], [operator_signal],
-    [completed_turn_outcome], [completed_turn_record],
+    All type definitions ([transition_record], [completed_turn_outcome], [completed_turn_record],
     [turn_fsm_transition_record]) and their pure converters live in
     {!Keeper_transition_audit_types}.  Re-exported here so callers can
     continue using [Keeper_transition_audit.transition_record] etc.

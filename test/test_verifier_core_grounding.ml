@@ -1,8 +1,8 @@
 (** test_verifier_core_grounding — RFC-0258 P1 additive grounding.
 
     These tests pin the narrow contract: the public [verdict] variant stays
-    unchanged, legacy JSON verdict parsing stays compatible, and the opt-in
-    grounded parser refuses ungrounded blocking verdicts. *)
+    unchanged, verdict-only JSON parsing accepts the structured payload, and
+    the grounded parser refuses ungrounded blocking verdicts. *)
 
 module VC = Masc.Verifier_core
 
@@ -55,7 +55,7 @@ let test_grounded_of_fail_accepts_valid_evidence () =
     Alcotest.(check (option int)) "line preserved" (Some 7) first.line
   | Error msg -> Alcotest.fail msg
 
-let test_legacy_parser_accepts_optional_evidence () =
+let test_verdict_parser_accepts_optional_evidence () =
   let payload =
     json ~reason:"bad" ~evidence_items:[ evidence_json ~line:3 () ] "FAIL"
   in
@@ -149,8 +149,8 @@ let () =
         ] );
       ( "json",
         [
-          Alcotest.test_case "legacy parser accepts evidence" `Quick
-            test_legacy_parser_accepts_optional_evidence;
+          Alcotest.test_case "verdict parser accepts evidence" `Quick
+            test_verdict_parser_accepts_optional_evidence;
           Alcotest.test_case "grounded parser round trips evidence" `Quick
             test_grounded_parser_round_trips_evidence;
           Alcotest.test_case "grounded parser ignores Pass evidence" `Quick

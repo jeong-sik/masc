@@ -92,25 +92,19 @@ let test_agent_identity ~uuid ~session_key : Masc.Client_identity.t =
     metadata = [];
   }
 
-let make_keeper_meta ?agent_name ?tool_access name =
+let make_keeper_meta ?agent_name name =
   let agent_name =
     Option.value agent_name
       ~default:(Keeper_identity.keeper_agent_name name)
   in
-  let tool_access_fields =
-    match tool_access with
-    | Some access -> [ ("tool_access", access) ]
-    | None -> []
-  in
   let json =
     `Assoc
-      ([
+      [
          ("name", `String name);
          ("agent_name", `String agent_name);
          ("trace_id", `String ("trace-test-" ^ name));
          ("goal", `String "test goal");
        ]
-       @ tool_access_fields)
   in
   match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta -> meta
@@ -837,17 +831,14 @@ let test_handle_request_tools_list_operator_profile () =
                    (action_tool |> Yojson.Safe.Util.member "annotations"
                     |> Yojson.Safe.Util.member "readOnlyHint"
                     |> Yojson.Safe.Util.to_bool);
-                 (* #7480 Step 1: read-only tools advertise
-                    openWorldHint=false so MCP clients know they do not
-                    reach outside MASC's own state. *)
-                 Alcotest.(check bool) "snapshot openWorld=false" false
+                 (* Subjective open-world/destructive hints are omitted; the
+                    profile exposes only objective typed metadata. *)
+                 Alcotest.(check bool) "snapshot omits openWorld hint" true
                    (snapshot_tool |> Yojson.Safe.Util.member "annotations"
-                    |> Yojson.Safe.Util.member "openWorldHint"
-                    |> Yojson.Safe.Util.to_bool);
-                 Alcotest.(check bool) "digest openWorld=false" false
+                    |> Yojson.Safe.Util.member "openWorldHint" = `Null);
+                 Alcotest.(check bool) "digest omits openWorld hint" true
                    (digest_tool |> Yojson.Safe.Util.member "annotations"
-                    |> Yojson.Safe.Util.member "openWorldHint"
-                    |> Yojson.Safe.Util.to_bool)
+                    |> Yojson.Safe.Util.member "openWorldHint" = `Null)
              | _ -> Alcotest.fail "tools not a list")
         | _ -> Alcotest.fail "result not an object")
    | _ -> Alcotest.fail "response not an object");
@@ -1184,7 +1175,7 @@ let test_handle_request_tools_call_transition_claim_guidance () =
     (List.mem "masc_plan_set_task" steps);
   cleanup_dir base_path
 
-let test_handle_request_tools_call_transition_done_guidance () =
+let test_handle_request_tools_call_transition_done_requires_llm_verdict () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Mcp_eio.set_net (Eio.Stdenv.net env);
@@ -1249,30 +1240,25 @@ let test_handle_request_tools_call_transition_done_guidance () =
     Mcp_eio.handle_request ~clock ~sw ~mcp_session_id:sid state request
   in
   let envelope = result_envelope_exn response in
-  Alcotest.(check string) "done result status" "ok"
+  Alcotest.(check string) "done result status" "error"
     (match List.assoc_opt "status" envelope with
      | Some (`String status) -> status
      | _ -> Alcotest.fail "status missing");
-  Alcotest.(check bool) "done result summary" true
-    (match List.assoc_opt "summary" envelope with
-     | Some (`String summary) ->
-       contains_substring summary "claimed" && contains_substring summary "done"
-     | _ -> false);
-  let steps = workflow_next_step_names response in
+  Alcotest.(check bool) "done rejection is an MCP tool error" true
+    (match List.assoc_opt "isError" (result_fields_exn response) with
+     | Some (`Bool value) -> value
+     | _ -> Alcotest.fail "missing isError");
   let task =
     Masc.Workspace.get_tasks_raw (Mcp_server.workspace_config state)
     |> List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id "task-001")
   in
   (match task with
-   | Some { task_status = Masc_domain.Done _; _ } -> ()
-   | Some { task_status; _ } ->
-       Alcotest.failf "task-001 should be done, got %s"
-         (Masc_domain.task_status_to_string task_status)
+   | Some { task_status = Masc_domain.Claimed _; _ } -> ()
+   | Some _ -> Alcotest.fail "task-001 must remain claimed without an LLM verdict"
    | None -> Alcotest.fail "task-001 missing");
-  Alcotest.(check (option string)) "done clears current_task" None
+  Alcotest.(check (option string)) "rejected done keeps current_task"
+    (Some "task-001")
     (Masc.Task.Planning_eio.get_current_task (Mcp_server.workspace_config state));
-  Alcotest.(check bool) "done guidance omits plan_set_task" false
-    (List.mem "masc_plan_set_task" steps);
   cleanup_dir base_path
 
 let test_handle_request_tools_call_transition_claim_requires_action () =
@@ -1496,8 +1482,6 @@ let test_handle_request_tools_list_include_usage_metadata () =
     (List.mem_assoc "usageLastUsedAt"
        (match first_tool with `Assoc fields -> fields | _ -> []));
   cleanup_dir base_path
-
-(* Governance status tool is no longer dispatched *)
 
 let test_execute_tool_explicit_agent_name_not_overridden () =
   let base_path = temp_dir () in
@@ -1923,8 +1907,6 @@ let test_execute_tool_without_mcp_session_uses_generated_identity () =
 
   cleanup_dir base_path
 
-(* Legacy governance convo tools are stubs; workspace-scoped test removed *)
-
 let test_handle_request_invalid_json () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -2180,14 +2162,14 @@ let test_handle_request_tools_list_internal_keeper_runtime_hides_keeper_internal
          tools/list: the Agent_internal surface was removed and
          include_agent_internal adds no schema (see
          mcp_server_eio_tool_profile.ml), so the Full-profile is_public_mcp
-         filter still drops them. Pin that tool_execute and masc_session stay
-         hidden even when the flag is set. A prior half-finished refactor left a
+         filter still drops them. Pin that tool_execute and masc_session remain
+         outside external MCP discovery even when the flag is set. A prior half-finished refactor left a
          contradictory "tool_execute listed = true" assertion here against the
          identical [List.mem] expression; it could never co-pass with the
          hidden check below and is removed. *)
-      Alcotest.(check bool) "retired tool_execute hidden" false
+      Alcotest.(check bool) "retired tool_execute not externally discovered" false
         (List.mem "tool_execute" names);
-      Alcotest.(check bool) "system internal still hidden" false
+      Alcotest.(check bool) "masc_session not externally discovered" false
         (List.mem "masc_session" names))
 
 let test_handle_request_tools_call_internal_keeper_runtime_rejects_retired_execute
@@ -2205,13 +2187,9 @@ let test_handle_request_tools_call_internal_keeper_runtime_rejects_retired_execu
       Keeper_registry.clear ();
       let keeper_name = "sangsu" in
       let keeper_agent_name = Keeper_identity.keeper_agent_name keeper_name in
-      let tool_access =
-        `List [ `String "tool_execute"; `String "keeper_time_now" ]
-      in
       ignore
         (Keeper_registry.register ~base_path keeper_name
-           (make_keeper_meta ~agent_name:keeper_agent_name ~tool_access
-              keeper_name));
+           (make_keeper_meta ~agent_name:keeper_agent_name keeper_name));
       let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
       let token = Masc.Auth.ensure_internal_keeper_token base_path in
       let request = Yojson.Safe.to_string (`Assoc [
@@ -3034,8 +3012,8 @@ let eio_tests = [
     test_handle_request_tools_call_managed_translation_error_records_duration;
   "handle tools/call transition claim guidance", `Quick,
     test_handle_request_tools_call_transition_claim_guidance;
-  "handle tools/call transition done guidance", `Quick,
-    test_handle_request_tools_call_transition_done_guidance;
+  "handle tools/call transition done requires LLM verdict", `Quick,
+    test_handle_request_tools_call_transition_done_requires_llm_verdict;
   "handle tools/call transition claim requires action", `Quick,
     test_handle_request_tools_call_transition_claim_requires_action;
   (* cache get structured content test removed: cache tools retired (#3640) *)
@@ -3056,7 +3034,6 @@ let eio_tests = [
   "handle invalid json", `Quick, test_handle_request_invalid_json;
   "handle method not found", `Quick, test_handle_request_method_not_found;
   (* TRPG tool tests removed — modules archived *)
-  (* Governance status tool test removed *)
   (* execution_session_step direct call test removed — team session cleanup *)
   "explicit agent_name not overridden", `Quick, test_execute_tool_explicit_agent_name_not_overridden;
   "tool-domain agent_name does not reuse bound nickname", `Quick,
@@ -3083,7 +3060,6 @@ let eio_tests = [
     test_execute_tool_legacy_argument_token_ignored_without_http_auth;
   "without mcp session uses generated identity", `Quick,
     test_execute_tool_without_mcp_session_uses_generated_identity;
-  (* Legacy governance convo workspace test removed *)
 ]
 
 let () =

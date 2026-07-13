@@ -329,10 +329,6 @@ let derive_readiness_and_attention ~execution_json ~execution_summary
     count_where live_keepers (fun keeper ->
       Option.is_none (json_string_field_opt "sandbox_profile" keeper))
   in
-  let continue_gate_count =
-    count_where live_keepers (fun keeper ->
-      json_bool_field "runtime_blocker_continue_gate" keeper ~default:false)
-  in
   let runtime_blocker_count =
     count_where live_keepers (fun keeper ->
       Option.is_some (json_string_field_opt "runtime_blocker_class" keeper))
@@ -396,9 +392,6 @@ let derive_readiness_and_attention ~execution_json ~execution_summary
   let autonomy_reliability_reasons =
     List.filter_map Fun.id
       [
-        (if continue_gate_count > 0 then
-           Some (Printf.sprintf "%d keepers are waiting at a continue gate" continue_gate_count)
-         else None);
         (if runtime_blocker_count > 0 then
            Some (Printf.sprintf "%d live keepers have runtime blockers" runtime_blocker_count)
          else None);
@@ -411,7 +404,7 @@ let derive_readiness_and_attention ~execution_json ~execution_summary
       ]
   in
   let autonomy_reliability_status =
-    if continue_gate_count > 0 || runtime_blocker_count > 0 then "bad"
+    if runtime_blocker_count > 0 then "bad"
     else if continuity_alerts > 0 || worker_alerts > 0 then "warn"
     else "ok"
   in
@@ -477,12 +470,11 @@ let derive_readiness_and_attention ~execution_json ~execution_summary
         ~key:"autonomy_reliability"
         ~label:"Autonomy Reliability"
         ~status:autonomy_reliability_status
-        ~ok_message:"No live keepers are blocked by runtime or operator gates."
+        ~ok_message:"No live keepers expose runtime blockers."
         ~reasons:autonomy_reliability_reasons
         ~metrics:
           [
             ("runtime_blockers", runtime_blocker_count);
-            ("continue_gates", continue_gate_count);
             ("continuity_alerts", continuity_alerts);
             ("worker_alerts", worker_alerts);
           ];
@@ -549,21 +541,11 @@ let derive_readiness_and_attention ~execution_json ~execution_summary
            Option.value ~default:"keeper"
              (json_string_field_opt "name" keeper)
          in
-         if json_bool_field "runtime_blocker_continue_gate" keeper ~default:false then
-           Some
-             (attention_event_json ~severity:"bad" ~kind:"continue_gate"
-                ~summary:
-                  (Printf.sprintf "%s is waiting for operator approval to continue"
-                     keeper_name)
-                ~keeper_name ~target_type:"keeper" ~target_id:keeper_name
-                ~recommended_action:"Inspect the keeper and confirm or resume it"
-                ~requires_decision:true ~provenance:"execution" ())
-         else
-           match json_string_field_opt "runtime_blocker_class" keeper with
+         match json_string_field_opt "runtime_blocker_class" keeper with
            | Some blocker ->
                let severity =
                  match blocker with
-                 | "runtime_exhausted" | "completion_contract_violation" -> "bad"
+                 | "runtime_exhausted" -> "bad"
                  | _ -> "warn"
                in
                Some
@@ -596,7 +578,7 @@ let derive_readiness_and_attention ~execution_json ~execution_summary
       [
         ("status", `String overall_status);
         ("score", `Int overall_score);
-        ("decision_required_count", `Int (pending_visible + continue_gate_count));
+        ("decision_required_count", `Int pending_visible);
         ("blocking_count", `Int blocking_count);
         ("pillars", `List pillars);
       ],

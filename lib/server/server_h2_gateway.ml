@@ -657,52 +657,6 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
             let json = Env_config_introspect.to_json () in
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
-      | `GET, "/api/v1/dashboard/config/excuse-patterns" ->
-          with_h2_public_read h2_reqd (fun _state ->
-            let patterns = Task.Anti_rationalization.load_excuse_patterns () in
-            let json_items = List.map (fun (pat, reason) -> `List [`String pat; `String reason]) patterns in
-            let json = `List json_items in
-            h2_respond_json_value h2_reqd json ~extra_headers:cors)
-
-      | `POST, "/api/v1/dashboard/config/excuse-patterns" ->
-          with_h2_token_permission_auth h2_reqd ~permission:Masc_domain.CanAdmin
-            (fun _state _agent_name ->
-              h2_read_body h2_reqd (fun body_str ->
-                try
-                  let json = Yojson.Safe.from_string body_str in
-                  match Task.Anti_rationalization.parse_excuse_patterns_json json with
-                  | Error msg ->
-                      h2_respond_json_value
-                        h2_reqd
-                        (`Assoc [ ("ok", `Bool false); ("error", `String msg) ])
-                        ~status:`Bad_request
-                        ~extra_headers:cors
-                  | Ok patterns ->
-                      (match Task.Anti_rationalization.save_excuse_patterns patterns with
-                       | Ok () ->
-                           h2_respond_json_value h2_reqd
-                             (`Assoc [ ("ok", `Bool true) ])
-                             ~extra_headers:cors
-                       | Error msg ->
-                           h2_respond_json_value
-                             h2_reqd
-                             (`Assoc
-                                [ ("ok", `Bool false); ("error", `String msg) ])
-                             ~status:`Internal_server_error
-                             ~extra_headers:cors)
-                with
-                | Eio.Cancel.Cancelled _ as exn -> raise exn
-                | _exn ->
-                    h2_respond_json_value
-                      h2_reqd
-                      (`Assoc
-                         [
-                           ("ok", `Bool false);
-                           ("error", `String "Invalid JSON body");
-                         ])
-                      ~status:`Bad_request
-                      ~extra_headers:cors))
-
       | `GET, "/api/v1/dashboard/project-snapshot"
       | `GET, "/api/v1/dashboard/namespace-truth" ->
           with_h2_public_read h2_reqd (fun state ->
@@ -739,10 +693,10 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
             let json = dashboard_memory_http_json httpun_request in
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
-      | `GET, "/api/v1/dashboard/governance" ->
+      | `GET, "/api/v1/dashboard/gate" ->
           with_h2_public_read h2_reqd (fun state ->
             let json =
-              dashboard_governance_http_json httpun_request
+              dashboard_gate_http_json httpun_request
                 ~base_path:(Mcp_server.workspace_config state).base_path
             in
             h2_respond_json_value h2_reqd json ~extra_headers:cors)

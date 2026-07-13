@@ -9,8 +9,6 @@ type context =
 type task_owner_hooks =
   { is_registered_agent_alias : Workspace_core.config -> string -> bool
   ; sync_current_task_binding : Workspace_core.config -> agent_name:string -> unit
-  ; transition_action_denylist :
-      Workspace_core.config -> agent_name:string -> string list
   ; active_goal_phases_for_agent :
       Workspace_core.config -> agent_name:string -> string list
   }
@@ -34,9 +32,6 @@ include module type of Tool_task_payloads
 include module type of Tool_task_args
 include module type of Tool_task_completion_review
 
-val task_has_persisted_contract : Masc_domain.task option -> bool
-val task_has_strict_persisted_contract : Masc_domain.task option -> bool
-val task_requires_verification : Masc_domain.task option -> bool
 val strict_release_requires_handoff : Masc_domain.task option -> bool
 
 val completion_state_error :
@@ -62,24 +57,15 @@ val client_side_transition_gate_error :
 
 val sync_planning_current_task_with_owned_task : context -> unit
 val sync_owner_current_task_binding : context -> unit
-val owner_transition_action_denylist : context -> string list
-
 val review_completion_notes :
   completion_contract:string list option ->
   evaluator_runtime:string option ->
-  operator_override:bool ->
   ctx:context ->
   task_opt:Masc_domain.task option ->
   task_id:string ->
   notes:string ->
   evidence_refs:string list ->
-  string option
-
-val persisted_contract_rejection :
-  ctx:context ->
-  task_opt:Masc_domain.task option ->
-  notes:string ->
-  string option
+  Masc_domain.configured_llm_completion_verdict option
 
 val handle_add_task :
   tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result

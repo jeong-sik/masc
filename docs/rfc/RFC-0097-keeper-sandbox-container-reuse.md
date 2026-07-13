@@ -165,17 +165,13 @@ The lazy-recreate path uses the same `ensure_sandbox_container`
 helper, so recovery is the steady-state path under failure rather than
 a separate code branch.
 
-### Backpressure interaction
+### Spawn observation interaction
 
-The Layer A throttle (`Docker_spawn_throttle`) shipped in PR #15722
-caps the spawn rate. Under this RFC the spawn count drops by 10×–100×
-(one `docker run` per keeper lifetime instead of per call), so the
-semaphore effectively becomes a no-op. We keep it as a guardrail for
-container-creation bursts (24 keepers starting simultaneously after a
-server restart).
+Container reuse reduces the structural spawn count by 10×–100× (one
+`docker run` per keeper lifetime instead of per call). Docker spawn/run
+dynamic extents are observed but are not capped or serialized by MASC.
 
-`docker exec` is *not* wrapped by the throttle. Per-keeper-serialization
-of `exec` is enforced naturally because each keeper turn is single-threaded
+Per-keeper serialization of `docker exec` is enforced naturally because each keeper turn is single-threaded
 inside `Keeper_unified_turn`; multiple `exec` calls to the same
 container do not race.
 
@@ -315,7 +311,7 @@ the trade-off does not invert in our favor.
 - Incident: `<base-path>/.masc/logs/system_log_2026-05-16.jsonl` 18:08-18:15Z
   (53 ENFILE entries, 12+ affected keepers).
 - Detection module: `lib/keeper_fd_pressure.ml:36-46 is_fd_exhaustion_text`.
-- Throttle (Layer A/B): `lib/docker_spawn_throttle.ml` (PR #15722).
+- Docker lifetime observation: `lib/fd_accountant/fd_accountant.ml`.
 - Spawn sites today: `lib/worker_runtime_docker.ml:394 run_worker_spec`,
   plus the sandbox Execute runner's `docker run --rm` path.
 

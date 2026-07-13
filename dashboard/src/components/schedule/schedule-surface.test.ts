@@ -31,7 +31,7 @@ vi.mock('../tools/tool-state', () => ({
   toolsLoading: mocks.toolsLoading,
 }))
 
-vi.mock('../../api/dashboard-governance', () => ({
+vi.mock('../../api/dashboard-schedule', () => ({
   pruneSchedules: mocks.pruneSchedules,
 }))
 
@@ -45,15 +45,9 @@ function sampleAutomation(): DashboardScheduledAutomation {
     request_count: 1,
     request_limit: 20,
     truncated: false,
-    counts: { pending_approval: 1, scheduled: 3, running: 1 },
-    derived_counts: {
-      due_effective: 2,
-      blocked_approval: 1,
-      due_execution_ready: 1,
-      expired_effective: 0,
-    },
+    counts: { scheduled: 3, due: 1, running: 1 },
     fsm: {
-      state: 'blocked_approval',
+      state: 'due',
       active_count: 1,
       terminal_count: 0,
       next_due_at: '2026-06-21T01:00:00Z',
@@ -66,20 +60,12 @@ function sampleAutomation(): DashboardScheduledAutomation {
         event_type: 'schedule.due_candidate',
         schedule_id: 'sched-1',
         emitted_at_iso: '2026-06-21T00:30:00Z',
-        risk_class: 'workspace_write',
       },
     ],
     requests: [
       {
         schedule_id: 'sched-1',
-        status: 'pending_approval',
-        effective_status: 'blocked_approval',
-        execution_readiness: 'blocked_approval',
-        operator_action: 'approve_or_reject',
-        keeper_next_tool: 'masc_schedule_get',
-        keeper_next_action: 'Inspect details and wait for explicit approval.',
-        risk_class: 'workspace_write',
-        approval_required: true,
+        status: 'due',
         source: 'operator_request',
         requested_by: { id: 'operator', kind: 'human_operator', display_name: null },
         scheduled_by: { id: 'scheduler-agent', kind: 'automated_actor', display_name: null },
@@ -104,21 +90,20 @@ function sampleWaitingInventory(): DashboardKeeperWaitingInventory {
     global_pending_confirm_count: 0,
     source_counts: {
       schedule_waiting: 1,
-      hitl_pending: 1,
     },
     keepers: [
       {
         keeper_name: 'sangsu',
         state: 'waiting',
         waiting_count: 1,
-        sources: { hitl_pending: 1 },
+        sources: { schedule_waiting: 1 },
         waiting_on: [
           {
             keeper_name: 'sangsu',
-            source: 'hitl_pending',
-            waiting_on: 'schedule approval',
+            source: 'schedule_waiting',
+            waiting_on: 'masc.board_post',
             since_iso: '2026-07-04T00:00:00Z',
-            next_action: 'operator_resolve_hitl',
+            next_action: 'schedule_runner_dispatch',
           },
         ],
       },
@@ -155,7 +140,6 @@ function sampleKeeperBackground(): DashboardKeeperBackground {
             enabled: true,
             run_count: 3,
             failure_count: 0,
-            max_failures: 3,
             last_run_at_iso: '2026-07-08T00:01:00Z',
             next_run_at_iso: '2026-07-08T00:01:30Z',
           },
@@ -222,21 +206,20 @@ describe('ScheduleSurface', () => {
 
     expect(mocks.loadTools).not.toHaveBeenCalled()
     // v2 reskin: the KPI summary strip is now `.ov-kpis` (aria-label '예약 요약')
-    // with Korean labels; pending/scheduled stay distinct and due+running fold
-    // into the single 'due · 실행' KPI (counts unchanged).
+    // with Korean labels; due and running fold into one lifecycle KPI.
     const summary = container.querySelector('[aria-label="예약 요약"]')
-    expect(summary?.textContent).toContain('승인 대기')
     expect(summary?.textContent).toContain('due · 실행')
     expect(summary?.textContent).toContain('예약됨')
     expect(summary?.textContent).toContain('총 예약')
     // The folded summary still must not leak the diagnostics-only derived/FSM
-    // vocabulary (활성/유효 도래/승인 차단) as separate KPIs.
+    // vocabulary (활성/유효 도래) as separate KPIs.
     expect(summary?.textContent).not.toContain('활성')
     expect(summary?.textContent).not.toContain('유효 도래')
-    expect(summary?.textContent).not.toContain('승인 차단')
     // The diagnostic wake-signal feed lives in the 목록 (list) view; the surface
     // now defaults to the 캘린더 view, so toggle before asserting the feed.
     container.querySelector<HTMLButtonElement>('[data-testid="schedule-view-list"]')?.click()
+    await flush()
+    container.querySelector<HTMLButtonElement>('[data-schedule-filter="due"]')?.click()
     await flush()
     expect(container.textContent).toContain('wake signal 피드 · schedule_runner.tick')
     // The keeper-lane / background diagnostics are collapsed AND lazy-mounted by
@@ -259,9 +242,6 @@ describe('ScheduleSurface', () => {
     // REMOVED: '출처 <signal_source>' feed attribution line is not rendered on
     // the v2 surface (it is diagnostics-only); no equivalent element exists to
     // retarget, so this coverage is dropped rather than weakened.
-    // REMOVED: keeper_next_tool ('masc_schedule_get') is not rendered anywhere
-    // on the v2 surface — neither the card nor the SchDetail overlay use
-    // KeeperActionCell — so this coverage is dropped (genuinely gone from v2).
     expect(container.querySelector('[data-schedule-id="sched-1"]')).not.toBeNull()
     expect(container.querySelectorAll('[data-schedule-mutation]')).toHaveLength(0)
   })
@@ -286,20 +266,18 @@ describe('ScheduleSurface', () => {
     expect(container.querySelectorAll('[data-schedule-mutation]')).toHaveLength(0)
   })
 
-  it('merges sparse backend counts with materialized request statuses', async () => {
+  it('merges sparse backend counts with materialized scheduled statuses', async () => {
     const automation = sampleAutomation()
-    automation.counts = { pending: 1, scheduled: 3, running: 1 }
+    automation.counts = { scheduled: 1 }
     automation.requests = [
       {
         ...automation.requests[0]!,
-        effective_status: undefined,
-        status: 'pending_approval',
+        status: 'scheduled',
       },
       {
         ...automation.requests[0]!,
-        schedule_id: 'sched-awaiting',
-        effective_status: undefined,
-        status: 'awaiting_approval',
+        schedule_id: 'sched-later',
+        status: 'scheduled',
       },
     ]
     mocks.toolsData.value = {
@@ -312,12 +290,9 @@ describe('ScheduleSurface', () => {
     render(html`<${ScheduleSurface} />`, container)
     await flush()
 
-    // v2 reskin: the pending KPI label is Korean ('승인 대기'). The sparse-count
-    // merge still resolves to 2 (counts.pending=1 vs 2 materialized pending-family
-    // requests → max), so the assertion intent is unchanged.
-    const pendingKpi = Array.from(container.querySelectorAll('.ov-kpi'))
-      .find(element => element.textContent?.includes('승인 대기'))
-    expect(pendingKpi?.textContent).toContain('2')
+    const scheduledKpi = Array.from(container.querySelectorAll('.ov-kpi'))
+      .find(element => element.textContent?.includes('예약됨'))
+    expect(scheduledKpi?.textContent).toContain('2')
   })
 
   it('counts genuine queue-drain misses in the KPI (not_found queue AND not_found reaction)', async () => {
@@ -458,6 +433,8 @@ describe('ScheduleSurface', () => {
     await flush()
 
     container.querySelector<HTMLButtonElement>('[data-testid="schedule-view-list"]')?.click()
+    await flush()
+    container.querySelector<HTMLButtonElement>('[data-schedule-filter="due"]')?.click()
     await flush()
     container.querySelector<HTMLButtonElement>('[data-testid="sch-cadsum-interval"]')?.click()
     await flush()

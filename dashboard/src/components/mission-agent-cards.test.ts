@@ -96,31 +96,28 @@ describe('mission keeper runtime helpers', () => {
       status: 'idle',
       paused: true,
       keepalive_running: true,
-      runtime_blocker_class: 'ambiguous_post_commit_timeout',
-      runtime_blocker_summary:
-        'Mutating tools [keeper_fs_edit] committed before the turn timed out.',
+      runtime_blocker_class: 'turn_timeout',
+      runtime_blocker_summary: 'Provider turn timed out.',
       last_blocker: 'missing social headers',
     } as Keeper
 
     expect(keeperRuntimeHint(keeper)).toBe(
-      '일시정지 원인 · Mutating tools [keeper_fs_edit] committed before the turn timed out.',
+      '자동 재시도 대기 · Provider turn timed out.',
     )
   })
 
-  it('renders continue-gate hints when approval is required', () => {
+  it('renders the exact runtime blocker without an approval hierarchy', () => {
     const keeper = {
       name: 'uranium666',
       status: 'idle',
       paused: true,
       keepalive_running: true,
-      runtime_blocker_class: 'ambiguous_post_commit_timeout',
-      runtime_blocker_summary:
-        'Mutating tools [keeper_fs_edit] committed before the turn timed out.',
-      runtime_blocker_continue_gate: true,
+      runtime_blocker_class: 'turn_timeout',
+      runtime_blocker_summary: 'Provider turn timed out.',
     } as Keeper
 
     expect(keeperRuntimeHint(keeper)).toBe(
-      '일시정지 원인 · 계속 진행 승인 대기 · Mutating tools [keeper_fs_edit] committed before the turn timed out.',
+      '자동 재시도 대기 · Provider turn timed out.',
     )
   })
 

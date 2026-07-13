@@ -13,8 +13,12 @@ val docker_target
   :  turn_sandbox_factory:Keeper_sandbox_factory.t option
   -> meta:Keeper_meta_contract.keeper_meta
   -> cwd:string
+  -> ?timeout_sec:float
+  -> unit
   -> (Masc_exec.Sandbox_target.t, target_error) result
 
 val docker_local_fallback_target
   :  meta:Keeper_meta_contract.keeper_meta
+  -> ?timeout_sec:float
+  -> unit
   -> (Masc_exec.Sandbox_target.t * (string * Yojson.Safe.t) list) option

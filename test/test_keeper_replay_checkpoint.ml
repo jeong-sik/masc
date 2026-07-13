@@ -112,7 +112,7 @@ let test_patch_last_assistant_preserves_typed_reasoning () =
     (has_content (function Thinking _ -> true | _ -> false) patched.messages)
 ;;
 
-let test_attention_prunes_current_turn_suffix () =
+let test_contract_observation_preserves_current_turn_suffix () =
   let open Agent_sdk.Types in
   let history =
     [ message User [ Text "old user" ]; message Assistant [ Text "old answer" ] ]
@@ -133,27 +133,29 @@ let test_attention_prunes_current_turn_suffix () =
     ; message Assistant [ Text "" ]
     ]
   in
-  let pre_turn_working_context = Some (`Assoc [ "pre_turn", `Bool true ]) in
   let patched, reason =
     Finalize.checkpoint_for_replay_persistence
       ~history_messages:history
-      ~pre_turn_working_context
-      ~completion_contract_result:Receipt.Contract_violated
+      ~pre_turn_working_context:(Some (`Assoc [ "pre_turn", `Bool true ]))
+      ~completion_contract_result:Receipt.Completion_no_visible_output
       ~session_id:"new-session"
-      ~response_text:"suppressed"
+      ~response_text:"visible result"
       (checkpoint (history @ current_turn))
     |> expect_ok
   in
-  Alcotest.(check int) "only prior history remains" 2
+  Alcotest.(check int) "current typed replay remains" 6
     (List.length patched.messages);
-  Alcotest.(check bool) "pre-turn working context restored" true
-    (patched.working_context = pre_turn_working_context);
-  Alcotest.(check (option string)) "typed prune reason"
-    (Some "completion_contract_requires_attention")
+  Alcotest.(check (option string)) "visible assistant text retained"
+    (Some "visible result")
+    (text_of_last_assistant patched.messages);
+  Alcotest.(check bool) "canonical replay clears working context" true
+    (patched.working_context = None);
+  Alcotest.(check (option string)) "canonical replay reason"
+    (Some "canonical_success_replay")
     (prune_reason_to_string reason)
 ;;
 
-let test_attention_rejects_mismatched_history_prefix () =
+let test_contract_observation_rejects_mismatched_history_prefix () =
   let open Agent_sdk.Types in
   let expected_history =
     [ message User [ Text "expected" ]; message Assistant [ Text "old answer" ] ]
@@ -165,7 +167,7 @@ let test_attention_rejects_mismatched_history_prefix () =
     Finalize.checkpoint_for_replay_persistence
       ~history_messages:expected_history
       ~pre_turn_working_context:None
-      ~completion_contract_result:Receipt.Contract_violated
+      ~completion_contract_result:Receipt.Completion_no_visible_output
       ~session_id:"new-session"
       ~response_text:"suppressed"
       (checkpoint (actual_history @ [ message Assistant [ Text "" ] ]))
@@ -206,7 +208,7 @@ let test_success_preserves_typed_replay_suffix () =
     Finalize.checkpoint_for_replay_persistence
       ~history_messages:history
       ~pre_turn_working_context:None
-      ~completion_contract_result:Receipt.Contract_satisfied_execution
+      ~completion_contract_result:Receipt.Completion_tool_execution_observed
       ~session_id:"new-session"
       ~response_text:"visible answer"
       (checkpoint (history @ current_turn))
@@ -238,7 +240,7 @@ let test_success_appends_missing_final_assistant () =
     Finalize.checkpoint_for_replay_persistence
       ~history_messages:history
       ~pre_turn_working_context:None
-      ~completion_contract_result:Receipt.Contract_satisfied_execution
+      ~completion_contract_result:Receipt.Completion_tool_execution_observed
       ~session_id:"new-session"
       ~response_text:"visible answer"
       (checkpoint (history @ [ message User [ Text "current user" ] ]))
@@ -259,7 +261,7 @@ let test_empty_success_drops_current_turn_replay () =
     Finalize.checkpoint_for_replay_persistence
       ~history_messages:history
       ~pre_turn_working_context:(Some (`Assoc [ "pre_turn", `Bool true ]))
-      ~completion_contract_result:Receipt.Contract_satisfied_execution
+      ~completion_contract_result:Receipt.Completion_tool_execution_observed
       ~session_id:"new-session"
       ~response_text:""
       (checkpoint (history @ [ message User [ Text "current user" ] ]))
@@ -315,7 +317,7 @@ let test_recovery_defer_preserves_typed_receipt_suffix () =
     Finalize.checkpoint_for_replay_persistence
       ~history_messages:history
       ~pre_turn_working_context:None
-      ~completion_contract_result:Receipt.Contract_passive_only
+      ~completion_contract_result:Receipt.Completion_observation_unknown
       ~session_id:"new-session"
       ~response_text:""
       ~stop_reason:
@@ -384,7 +386,7 @@ let test_recovery_ask_user_preserves_exact_typed_receipt_suffix () =
     Finalize.checkpoint_for_replay_persistence
       ~history_messages:history
       ~pre_turn_working_context:None
-      ~completion_contract_result:Receipt.Contract_passive_only
+      ~completion_contract_result:Receipt.Completion_observation_unknown
       ~session_id:"new-session"
       ~response_text:request.question
       ~stop_reason:(Runtime_agent.InputRequired { turns_used = 2; request })
@@ -429,7 +431,7 @@ let test_media_degraded_projection_persists_canonical_checkpoint () =
     Finalize.checkpoint_for_replay_persistence
       ~history_messages:canonical_history
       ~pre_turn_working_context:None
-      ~completion_contract_result:Receipt.Contract_satisfied_execution
+      ~completion_contract_result:Receipt.Completion_tool_execution_observed
       ~session_id:"media-projection-session"
       ~response_text:"completed"
       restored_checkpoint
@@ -468,13 +470,13 @@ let () =
             `Quick
             test_patch_last_assistant_preserves_typed_reasoning
         ; Alcotest.test_case
-            "attention prunes current turn"
+            "contract observation preserves current turn"
             `Quick
-            test_attention_prunes_current_turn_suffix
+            test_contract_observation_preserves_current_turn_suffix
         ; Alcotest.test_case
-            "attention rejects prefix mismatch"
+            "contract observation rejects prefix mismatch"
             `Quick
-            test_attention_rejects_mismatched_history_prefix
+            test_contract_observation_rejects_mismatched_history_prefix
         ; Alcotest.test_case
             "success preserves typed replay"
             `Quick

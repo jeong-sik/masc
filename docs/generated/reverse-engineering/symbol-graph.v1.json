@@ -82,7 +82,7 @@
         "lib/goal/goal_verification.ml"
       ],
       "guard_tests": [
-        "test/test_verification_fsm.ml",
+        "test/test_workspace_task_lifecycle.ml",
         "test/test_goal_tools.ml",
         "test/test_keeper_task_dispatch.ml"
       ]
@@ -324,11 +324,11 @@
           "kind": "flow",
           "display_range": {"start_line": 1020, "end_line": 1332},
           "wbs": {"issue": 16078, "task": "task-375"},
-          "tests": ["test/test_verification_fsm.ml", "test/test_keeper_task_dispatch.ml"]
+          "tests": ["test/test_tool_task_coverage.ml", "test/test_keeper_task_dispatch.ml"]
         }
       ],
       "test_owners": [
-        {"test_path": "test/test_verification_fsm.ml", "contract": "task verification transition legality"},
+        {"test_path": "test/test_tool_task_coverage.ml", "contract": "task completion tool transition legality"},
         {"test_path": "test/test_keeper_task_dispatch.ml", "contract": "keeper task dispatch tool path"}
       ]
     },
@@ -342,7 +342,7 @@
           "kind": "function",
           "display_range": {"start_line": 49, "end_line": 245},
           "wbs": {"issue": 16078, "task": "task-375"},
-          "tests": ["test/test_verification_fsm.ml"]
+          "tests": ["test/test_workspace_task_lifecycle.ml"]
         },
         {
           "id": "sym:workspace_task:verification_side_effects",
@@ -350,11 +350,11 @@
           "kind": "flow",
           "display_range": {"start_line": 279, "end_line": 411},
           "wbs": {"issue": 16078, "task": "task-374"},
-          "tests": ["test/test_verification_fsm.ml"]
+          "tests": ["test/test_workspace_task_lifecycle.ml"]
         }
       ],
       "test_owners": [
-        {"test_path": "test/test_verification_fsm.ml", "contract": "task verification state machine"}
+        {"test_path": "test/test_workspace_task_lifecycle.ml", "contract": "typed task lifecycle and configured LLM verdict"}
       ]
     },
     {

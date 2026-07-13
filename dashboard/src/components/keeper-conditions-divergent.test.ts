@@ -15,11 +15,9 @@ const allHealthy: KeeperConditions = {
   handoff_active: false,
   operator_paused: false,
   stop_requested: false,
-  restart_budget_remaining: true,
-  backoff_elapsed: true,
+  dead_tombstone_latched: false,
   drain_complete: false,
   context_overflow: false,
-  compact_retry_exhausted: false,
 }
 
 describe("isOperating", () => {
@@ -42,7 +40,7 @@ describe("isTerminated", () => {
   it.each([
     ["Stopped", true],
     ["Dead", true],
-    ["Crashed", true],
+    ["Crashed", false],
     ["Running", false],
     ["Failing", false],
     ["Paused", false],
@@ -74,16 +72,6 @@ describe("computeDivergences", () => {
   it("ignores context_overflow when phase is Overflowed", () => {
     const divs = computeDivergences({ ...allHealthy, context_overflow: true }, "Overflowed")
     expect(divs.some(d => d.field === "context_overflow")).toBe(false)
-  })
-
-  it("detects compact_retry_exhausted when not Failing", () => {
-    const divs = computeDivergences({ ...allHealthy, compact_retry_exhausted: true }, "Running")
-    expect(divs.some(d => d.field === "compact_retry_exhausted")).toBe(true)
-  })
-
-  it("ignores compact_retry_exhausted when phase is Failing", () => {
-    const divs = computeDivergences({ ...allHealthy, compact_retry_exhausted: true }, "Failing")
-    expect(divs.some(d => d.field === "compact_retry_exhausted")).toBe(false)
   })
 
   it("detects stop_requested when not Draining", () => {
@@ -136,9 +124,9 @@ describe("computeDivergences", () => {
     expect(divs.some(d => d.field === "fiber_alive")).toBe(false)
   })
 
-  it("detects restart_budget_remaining=false", () => {
-    const divs = computeDivergences({ ...allHealthy, restart_budget_remaining: false }, "Running")
-    expect(divs.some(d => d.field === "restart_budget_remaining")).toBe(true)
+  it("detects a durable Dead tombstone outside Dead phase", () => {
+    const divs = computeDivergences({ ...allHealthy, dead_tombstone_latched: true }, "Running")
+    expect(divs.some(d => d.field === "dead_tombstone_latched")).toBe(true)
   })
 
   it("ignores most conditions in terminated phase", () => {
@@ -150,7 +138,7 @@ describe("computeDivergences", () => {
       turn_healthy: false,
       heartbeat_healthy: false,
       fiber_alive: false,
-      restart_budget_remaining: false,
+      dead_tombstone_latched: false,
     }, "Dead")
     // operator_paused is the only rule that does NOT check isTerminated
     expect(divs.map(d => d.field)).toEqual([])

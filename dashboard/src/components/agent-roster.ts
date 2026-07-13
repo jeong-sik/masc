@@ -160,14 +160,12 @@ export function rosterStateNote(
   const gate = keeper.current_gate
   if (gate?.kind === 'approval_required') {
     const tool = gate.tool?.trim()
-    const risk = gate.risk?.trim()
     const reason = gate.disposition_reason?.trim()
     const text = [
-      tool ? `도구 ${tool}` : '도구 승인 필요',
-      risk ? `위험도 ${risk}` : null,
+      tool ? `작업 ${tool}` : 'Gate Human 판단 필요',
       reason ? `사유 ${reason}` : null,
     ].filter((part): part is string => part !== null).join(' · ')
-    return { label: '승인 대기', text }
+    return { label: 'HITL 대기', text }
   }
 
   const state = deriveKeeperOperationalState({ keeper, composite })
@@ -881,8 +879,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
   const expectedScopedCount = expectedCountForKeeperFilter(keeperFilter, runtimeCounts)
   const namespaceStatus = namespaceTruth.value?.root.status ?? serverStatus.value
   const namespaceName = namespaceStatus?.project ?? 'default'
-  const admission = operatorSnapshot.value?.admission_queue ?? null
-  const admissionError = operatorSnapshot.value?.admission_queue_error ?? null
+  const inferenceInflight = operatorSnapshot.value?.inference_inflight ?? null
 
   const scopedAgents = useMemo(
     () => scopeAgentsByKeeperFilter(rosterAgents, runtimeKeeperList, keeperFilter, keeperRuntimeLookup),
@@ -1285,34 +1282,21 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
           `
         : null}
 
-      ${admission ? html`
-        <section class="fl-capacity" aria-label="Runtime admission capacity" data-testid="fleet-admission-capacity">
+      ${inferenceInflight ? html`
+        <section class="fl-capacity" aria-label="Runtime inference observation" data-testid="fleet-inference-inflight">
           <div class="fl-capacity-lead">
-            <span class="ov-eyebrow">Admission</span>
+            <span class="ov-eyebrow">Inference</span>
             <strong>관측값</strong>
           </div>
           <div class="fl-capacity-cell">
-            <span>활성 / 상한</span>
-            <strong>${admission.active} / ${admission.max_concurrent}</strong>
-          </div>
-          <div class="fl-capacity-cell ${admission.queue_depth > 0 ? 'warn' : ''}">
-            <span>대기열</span>
-            <strong>${admission.queue_depth}</strong>
-          </div>
-          <div class="fl-capacity-cell">
-            <span>가용 슬롯</span>
-            <strong>${admission.available}</strong>
+            <span>활성 추론</span>
+            <strong>${inferenceInflight.active}</strong>
           </div>
           <div class="fl-capacity-cell owner">
-            <span>제어 주체</span>
-            <strong>${admission.throttle_owner}</strong>
+            <span>경계 소유자</span>
+            <strong>${inferenceInflight.boundary_owner}</strong>
           </div>
         </section>
-      ` : admissionError ? html`
-        <div class="fl-fallback error" role="status" data-testid="fleet-admission-error">
-          <strong>Admission 관측 불가</strong>
-          <span>${admissionError}</span>
-        </div>
       ` : null}
 
       <div class="fl-body">

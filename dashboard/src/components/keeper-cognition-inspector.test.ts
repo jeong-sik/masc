@@ -50,18 +50,16 @@ describe('KeeperCognitionInspector', () => {
       runtime_id: 'primary',
       sandbox_profile: 'docker',
       proactive_enabled: false,
-      proactive_idle_sec: 120,
       mention_reactive_turn_count: 4,
       recent_tool_names: ['Execute', 'SearchWeb'],
-      approval_policy_effective: { allow_rules: 3, deny_rules: 1, persisted_rules: 2 },
     }))
 
     expect(rows.map(row => row.label)).toContain('runtime')
     expect(rows.find(row => row.label === 'runtime')?.value).toBe('primary')
     expect(rows.find(row => row.label === 'sandbox')?.value).toBe('docker')
-    expect(rows.find(row => row.label === 'proactive idle')?.value).toContain('off')
+    expect(rows.find(row => row.label === 'proactive')?.value).toBe('off')
     expect(rows.find(row => row.label === 'observed tools')?.value).toContain('Execute')
-    expect(rows.find(row => row.label === 'approval policy')?.value).toBe('3 allow · 1 deny · 2 persisted')
+    expect(rows.map(row => row.label)).not.toContain('approval policy')
   })
 
   it('renders the tool access focus surface from the cognition keeper route', () => {

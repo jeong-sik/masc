@@ -45,11 +45,8 @@ type snapshot = {
       (** True once the process has exited. No further bytes will
           arrive after a [closed = true] snapshot. *)
   status : Unix.process_status option;
-      (** Raw process status. Use
-          {!Exec_semantic.interpret} in [masc_exec] to turn this into
-          a typed classification; bg_task itself stays
-          semantics-agnostic to avoid a circular sub-library
-          dependency. *)
+      (** Raw process status. Callers observe it without executable-specific
+          interpretation. *)
   bytes_dropped_stdout : int;
   bytes_dropped_stderr : int;
       (** Head-drop counters for the ring buffers; non-zero means the

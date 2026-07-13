@@ -1096,29 +1096,6 @@ let test_oas_interleaving_matches_masc_receipt_and_progress_facts () =
               |> member "kind"
               |> to_string)
            receipt_details);
-      check bool "read-only receipt alone is not substantive progress" false
-        (Keeper_unified_turn_success.For_testing
-         .has_substantive_tool_calls_with_outcome
-           [ first.name, Some Keeper_tool_outcome.Progress ]);
-      check bool "completion receipt is substantive progress" true
-        (Keeper_unified_turn_success.For_testing
-         .has_substantive_tool_calls_with_outcome
-           [ second.name, Some Keeper_tool_outcome.Progress ]);
-      let delivery =
-        Keeper_unified_turn_success.For_testing.classify_delivery
-          ~is_autonomous:true
-          ~reply_delivery:Keeper_unified_turn_success.For_testing.Internal_only
-          ~tools:(Keeper_agent_result.tool_names_of_calls receipt_details)
-          ~has_visible_text:false
-      in
-      (match delivery with
-       | Keeper_unified_turn_success.For_testing.Peer_only -> ()
-       | Keeper_unified_turn_success.For_testing.User_facing
-       | Keeper_unified_turn_success.For_testing.Internal_prose
-       | Keeper_unified_turn_success.For_testing.Task_claim ->
-           fail "silent autonomous receipt should require evidence");
-      check bool "silent autonomous receipt still requires evidence" true
-        (Keeper_unified_turn_success.For_testing.delivery_requires_evidence delivery);
       let base_dir = temp_base_path "gate-keeper-oas-masc-interleaving" in
       Fun.protect
         ~finally:(fun () -> try remove_tree base_dir with _ -> ())

@@ -1,8 +1,4 @@
-(** Keeper_text_processing — text processing functions shared by
-    [Keeper_context_runtime] and [Keeper_prompt].
-
-    Handles reply markup stripping, proactive text normalisation,
-    quality checks, and fragment detection. *)
+(** Keeper text normalization and legacy fragment diagnostics. *)
 
 (* Pre-compiled regex patterns — compiled once at module init. *)
 let re_whitespace = Re.Pcre.re "[ \t\r\n]+" |> Re.compile
@@ -36,88 +32,8 @@ let truncate_utf8_prefix ~max_bytes s =
     in
     String.sub s 0 (loop 0), true
 
-(* Observability for SKILL: / SKILL_REASON: line scrubbing.  The
-   skill-route markers are the resonance-loop input for the
-   *skill* marker — assistant replies that still carry them indicate
-   the agent is echoing routing metadata back into reply prose.
-   Closes the silent gap noted in
-   .tmp/memory-compacting-analysis.html (reply skill-route scrub
-   visibility). *)
-let () =
-  Otel_metric_store.register_counter
-    ~name:Keeper_metrics.(to_string ReplySkillRouteStrips)
-    ~help:
-      "Total [Keeper_text_processing.strip_internal_reply_markup] \
-       invocations that stripped one or more SKILL: / \
-       SKILL_REASON: lines.  Rising rate is the resonance-loop \
-       input indicator for the *skill* marker."
-    ();
-  Otel_metric_store.register_counter
-    ~name:Keeper_metrics.(to_string ReplySkillRouteLinesRemoved)
-    ~help:
-      "Total SKILL: / SKILL_REASON: lines stripped from raw replies. \
-       Divide by [_reply_skill_route_strips] for lines-per-invocation."
-    ()
-;;
-
-(* Observability for the explicit reply-source chain. *)
-let () =
-  Otel_metric_store.register_counter
-    ~name:Keeper_metrics.(to_string UserVisibleReplySource)
-    ~help:
-      "Total [user_visible_reply_text] returns, classified by label \
-       [source] (governed by Keeper_user_visible_reply_source).  \
-       Rising [hardcoded_default] rate is the operational signal \
-       that the LLM produced no usable reply at all."
-    ()
-;;
-
-let record_user_visible_reply_source
-    ~(source : Keeper_user_visible_reply_source.t) =
-  Otel_metric_store.inc_counter
-    Keeper_metrics.(to_string UserVisibleReplySource)
-    ~labels:
-      [ ("source", Keeper_user_visible_reply_source.to_label source) ]
-    ()
-
-let strip_internal_reply_markup (raw : string) : string =
-  let skill_lines = Keeper_skill_routing.count_skill_route_lines raw in
-  if skill_lines > 0 then begin
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string ReplySkillRouteStrips)
-      ();
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string ReplySkillRouteLinesRemoved)
-      ~delta:(float_of_int skill_lines)
-      ()
-  end;
-  raw
-  |> Keeper_skill_routing.strip_skill_route_lines
-  |> String.trim
-
-let user_visible_reply_text ?fallback (raw : string) : string =
-  match String_util.trim_to_option (strip_internal_reply_markup raw) with
-  | Some text ->
-    record_user_visible_reply_source
-      ~source:Keeper_user_visible_reply_source.Stripped_raw;
-    text
-  | None -> (
-      match Option.bind fallback String_util.trim_to_option with
-      | Some text ->
-        record_user_visible_reply_source
-          ~source:Keeper_user_visible_reply_source.Fallback_param;
-        text
-      | None ->
-        record_user_visible_reply_source
-          ~source:Keeper_user_visible_reply_source.Hardcoded_default;
-        Log.Keeper.warn
-          "user_visible_reply_text: no visible reply was produced (raw_len=%d)"
-          (String.length raw);
-        "No visible reply was produced.")
-
 let normalize_proactive_text (raw : string) : string =
   raw
-  |> strip_internal_reply_markup
   |> Re.replace_string re_whitespace ~by:" "
   |> String.trim
 

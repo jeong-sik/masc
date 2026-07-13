@@ -19,10 +19,8 @@ let docker_image (meta : keeper_meta) =
 
 let tool_failure_class_of_image_preflight_failure failure_class =
   match failure_class with
-  | Keeper_sandbox_runtime_classify.Image_config_missing
-  | Image_missing ->
+  | Keeper_sandbox_runtime_classify.Image_config_missing ->
     "policy_rejection"
-  | Docker_daemon_unavailable
   | Image_inspect_timeout ->
     "transient_error"
   | _ -> "runtime_failure"
@@ -47,21 +45,12 @@ let image_preflight_target_error (failure : Keeper_sandbox_runtime.classified_er
        failure)
 ;;
 
-(* Per PR cleanup spirit (caller does not observe the tool's hang
-   protection): the docker target hardcodes its own internal timeout.
-   The image-presence check, [docker exec] of a single command, and the
-   pipeline dispatch all share the same internal budget because the
-   hang modes (docker daemon stall, container start stall, command
-   stall) are the same domain — the sandbox's own. *)
-let internal_sandbox_timeout_sec = 30.0
-
-let docker_target ~turn_sandbox_factory ~meta ~cwd =
+let docker_target ~turn_sandbox_factory ~meta ~cwd ?timeout_sec () =
   let default_cwd = cwd in
   let stage_cwd_or_default = function
     | Some stage_cwd -> stage_cwd
     | None -> default_cwd
   in
-  let timeout_sec = internal_sandbox_timeout_sec in
   match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd with
   | No_factory ->
     Error
@@ -74,9 +63,10 @@ let docker_target ~turn_sandbox_factory ~meta ~cwd =
   | Runtime runtime ->
     let image = docker_image meta in
     (match
-       Keeper_sandbox_runtime.ensure_keeper_sandbox_image_present_with_class
+       Keeper_sandbox_runtime.ensure_keeper_sandbox_image_present_with_class_optional
          ~image
-         ~timeout_sec
+         ?timeout_sec
+         ()
      with
      | Error failure -> Error (image_preflight_target_error failure)
      | Ok () ->
@@ -90,7 +80,7 @@ let docker_target ~turn_sandbox_factory ~meta ~cwd =
               ?stdin_content
               ?on_stdout_chunk
               ?on_stderr_chunk
-              ~timeout_sec
+              ?timeout_sec
               runtime
               ~cwd
               ~command_argv:argv
@@ -120,7 +110,7 @@ let docker_target ~turn_sandbox_factory ~meta ~cwd =
             Keeper_turn_sandbox_runtime.run_exec_pipeline_with_status
               ?on_stdout_chunk
               ?on_stderr_chunk
-              ~timeout_sec
+              ?timeout_sec
               runtime
               ~cwd
               ~stages
@@ -131,12 +121,13 @@ let docker_target ~turn_sandbox_factory ~meta ~cwd =
        Ok (Masc_exec.Sandbox_target.docker ~image ~runner ~pipeline_runner ()))
 ;;
 
-let docker_local_fallback_target ~meta =
+let docker_local_fallback_target ~meta ?timeout_sec () =
   let image = docker_image meta in
   match
-    Keeper_sandbox_runtime.docker_image_present
+    Keeper_sandbox_runtime.docker_image_present_optional
       ~image
-      ~timeout_sec:internal_sandbox_timeout_sec
+      ?timeout_sec
+      ()
   with
   | Ok () -> None
   | Error message ->

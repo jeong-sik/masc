@@ -1,33 +1,10 @@
-(** Keeper HTTP API POST handlers — tool policy, config update, lifecycle. *)
+(** Keeper HTTP API POST handlers — config update and lifecycle. *)
 
 module Http = Http_server_eio
 module Checkpoints = Server_dashboard_http_keeper_api_checkpoints
 module Trace = Server_dashboard_http_keeper_api_trace
 
 include Server_dashboard_http_keeper_api_types
-
-let dedupe_tool_names names =
-  Json_util.dedupe_keep_order
-    (names |> List.map String.trim |> List.filter (fun name -> name <> ""))
-
-(* RFC-0273 §3.1 — names newly added to a keeper's tool_access (not already
-   present) that are not known candidate tools.
-
-   Returned names are the ones a write should reject instead of persisting
-   silently: the runtime drops unknown tool_access entries at
-   [Keeper_tool_policy.tool_access_lookup_of_meta], so without this check an
-   operator typo is accepted then silently ignored (AI anti-pattern §2). The
-   check is delta-only — names already on the keeper are grandfathered so a
-   legacy keeper carrying a stale/renamed name can still be edited. Membership
-   is raw against [candidate_names] (no alias expansion), matching the runtime
-   keep-rule exactly; [candidate_names] already includes core tools via
-   effective_core_tools, so no separate core bypass is needed. tool_denylist is
-   intentionally not validated here: denying an unknown name is a harmless no-op
-   and the denylist is alias-expanded, so a strict check would false-reject. *)
-let unknown_added_tool_names ~candidate_names ~existing ~requested =
-  requested
-  |> List.filter (fun name -> not (List.mem name existing))
-  |> List.filter (fun name -> not (List.mem name candidate_names))
 
 let json_list_length = function
   | `List l -> List.length l
@@ -39,19 +16,6 @@ let dedupe_thinking_lines = Trace.dedupe_thinking_lines
 
 let read_internal_history_lines = Trace.read_internal_history_lines
 let merge_keeper_trace_lines = Trace.merge_keeper_trace_lines
-
-let keeper_tools_response_json (meta : Keeper_meta_contract.keeper_meta) =
-  let allowed = Keeper_tool_dispatch_runtime.keeper_allowed_tool_names meta in
-  let masc_count = List.length (Keeper_tool_dispatch_runtime.keeper_masc_tool_names meta) in
-  `Assoc
-    [
-      ("ok", `Bool true);
-      ("tool_access", Json_util.json_string_list meta.tool_access);
-      ("resolved_allowlist", `List (List.map (fun s -> `String s) allowed));
-      ("tool_denylist", `List (List.map (fun s -> `String s) meta.tool_denylist));
-      ("active_masc_tool_count", `Int masc_count);
-      ("total_active", `Int (List.length allowed));
-    ]
 
 let error_json ?ok message =
   let fields = [ ("error", `String message) ] in
@@ -181,89 +145,6 @@ let handle_keeper_catchup_judge_post state req reqd body_str =
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | exn -> respond_error reqd (Printexc.to_string exn)
 ;;
-
-(** Handle POST /api/v1/keepers/:name/tools.
-    Extracted so it can be called from any prefix_post handler that
-    catches POST /api/v1/keepers/* requests. *)
-let handle_keeper_tools_post state req reqd =
-  Http.Request.read_body_async reqd (fun body_str ->
-    let req_path = Http.Request.path req in
-    let prefix = keeper_api_prefix in
-    let suffix = keeper_suffix_tools in
-    let plen = String.length prefix in
-    let slen = String.length suffix in
-    let tlen = String.length req_path in
-    let name = String.trim (String.sub req_path plen (tlen - plen - slen)) in
-    if String.length name = 0 then
-      respond_error reqd "keeper name required"
-    else
-      let config = (Mcp_server.workspace_config state) in
-      match Keeper_meta_store.read_meta config name with
-      | Error msg -> respond_error ~status:`Not_found reqd msg
-      | Ok None -> respond_error ~status:`Not_found reqd (Printf.sprintf "keeper %S not found" name)
-      | Ok (Some meta) ->
-          (try
-             let args = Yojson.Safe.from_string body_str in
-             let action = Safe_ops.json_string ~default:"" "action" args in
-             let updated_meta =
-               match action with
-               | "set_policy" ->
-                   let deny =
-                     Safe_ops.json_string_list "deny" args |> dedupe_tool_names
-                   in
-                   let tool_access_result =
-                     match Json_util.assoc_member_opt "tool_access" args with
-                     | Some (`List _ as access_json) ->
-                         Keeper_meta_contract.tool_access_of_meta_json
-                           (`Assoc [ ("tool_access", access_json) ])
-                     | Some `Null -> Error "tool_access required"
-                     | None | Some _ -> Error "tool_access must be an array of strings"
-                   in
-                   Result.bind tool_access_result (fun tool_access ->
-                     let lookup = Keeper_tool_policy.tool_access_lookup_of_meta meta in
-                     match
-                       unknown_added_tool_names
-                         ~candidate_names:lookup.Keeper_tool_policy.candidate_names
-                         ~existing:meta.tool_access ~requested:tool_access
-                     with
-                     | [] ->
-                         Ok
-                           {
-                             meta with
-                             tool_access;
-                             tool_denylist = deny;
-                             updated_at = Keeper_meta_contract.now_iso ();
-                           }
-                     | unknown ->
-                         Error
-                           (Printf.sprintf "unknown tool name(s) in tool_access: %s"
-                              (String.concat ", " unknown)))
-               | "" -> Error "action required (set_policy)"
-               | other -> Error (Printf.sprintf "unknown action: %s" other)
-             in
-             (match updated_meta with
-             | Error msg ->
-                 respond_error reqd msg
-             | Ok meta' ->
-                 (* User-initiated tool config wins for its edited fields, but
-                    persist via CAS merge so a concurrent keeper turn's
-                    cumulative usage counters are not rewound by this
-                    snapshot-derived write. *)
-                 (match
-                    Keeper_meta_store.write_meta_with_merge
-                      ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
-                      config meta'
-                  with
-                  | Ok () ->
-                      Dashboard_cache.invalidate
-                        (keeper_config_cache_key config name);
-                      Http.Response.json_value ~compress:true ~request:req
-                        (keeper_tools_response_json meta') reqd
-                  | Error e ->
-                      respond_error ~status:`Internal_server_error reqd
-                        (Printf.sprintf "write failed: %s" e)))
-           with Yojson.Json_error e ->
-             respond_error reqd (Printf.sprintf "invalid json: %s" e)))
 
 (* Trajectory preview helpers moved to Server_dashboard_http_keeper_api_types. *)
 
@@ -522,8 +403,6 @@ let dashboard_config_bool_fields =
 
 let dashboard_config_int_fields =
   [
-    "proactive_idle_sec";
-    "proactive_cooldown_sec";
     "compaction_message_gate";
     "compaction_token_gate";
     "compaction_cooldown_sec";
@@ -541,8 +420,6 @@ let dashboard_config_string_list_fields =
     "active_goal_ids";
     "mention_targets";
     "allowed_paths";
-    "tool_access";
-    "tool_denylist";
   ]
 
 let dashboard_config_patch_allowed_fields =
@@ -642,12 +519,6 @@ let validate_dashboard_config_field key value =
     match value with
     | `Int value ->
         (match key with
-         | "proactive_idle_sec" ->
-             validate_dashboard_normalized_int key
-               Keeper_config.normalize_proactive_idle_sec value
-         | "proactive_cooldown_sec" ->
-             validate_dashboard_normalized_int key
-               Keeper_config.normalize_proactive_cooldown_sec value
          | "compaction_message_gate" ->
              validate_dashboard_normalized_int key
                Keeper_config.normalize_compaction_message_gate value
@@ -683,30 +554,7 @@ let validate_dashboard_config_field key value =
     validate_dashboard_string_list_field key value
   else Ok ()
 
-let validate_dashboard_tool_access_update ~meta fields =
-  match List.assoc_opt "tool_access" fields with
-  | None -> Ok ()
-  | Some access_json ->
-      (match
-         Keeper_meta_contract.tool_access_of_meta_json
-           (`Assoc [ ("tool_access", access_json) ])
-       with
-       | Error msg -> Error msg
-       | Ok requested ->
-           let lookup = Keeper_tool_policy.tool_access_lookup_of_meta meta in
-           (match
-              unknown_added_tool_names
-                ~candidate_names:lookup.Keeper_tool_policy.candidate_names
-                ~existing:meta.tool_access
-                ~requested
-            with
-            | [] -> Ok ()
-            | unknown ->
-                Error
-                  (Printf.sprintf "unknown tool name(s) in tool_access: %s"
-                     (String.concat ", " unknown))))
-
-let validate_dashboard_config_patch ~meta fields =
+let validate_dashboard_config_patch ~meta:_ fields =
   match duplicate_assoc_keys fields with
   | _ :: _ as duplicates ->
       Error
@@ -734,7 +582,7 @@ let validate_dashboard_config_patch ~meta fields =
         in
         (match validate_types fields with
          | Error msg -> Error msg
-         | Ok () -> validate_dashboard_tool_access_update ~meta fields)
+         | Ok () -> Ok ())
 
 let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
   let req_path = Http.Request.path req in
@@ -962,9 +810,10 @@ let handle_keeper_lifecycle_post =
   Server_dashboard_http_keeper_api_lifecycle_post.handle_keeper_lifecycle_post
 
 let directive_action_to_string = function
-  | `Pause -> "pause"
-  | `Resume -> "resume"
-  | `Wakeup -> "wakeup"
+  | Keeper_directive.Pause -> "pause"
+  | Keeper_directive.Resume -> "resume"
+  | Keeper_directive.Wakeup -> "wakeup"
+  | Keeper_directive.Assign_task _ -> "assign_task"
 
 let keeper_ctx_of_dashboard_state ~sw ~clock state agent_name :
     _ Keeper_tool_surface.context =
@@ -977,76 +826,48 @@ let keeper_ctx_of_dashboard_state ~sw ~clock state agent_name :
     net = state.Mcp_server.net;
   }
 
-let meta_with_directive_paused_state ~(config : Workspace.config) directive meta paused =
-  let paused_meta (source_meta : Keeper_meta_contract.keeper_meta) =
-    {
-      source_meta with
-      paused;
-      auto_resume_after_sec = None;
-      runtime = { source_meta.runtime with last_blocker = None };
-      updated_at = Keeper_meta_contract.now_iso ();
-    }
-  in
-  match directive with
-  | `Resume ->
-    (match
-       Keeper_unified_turn_no_progress.clear_for_operator_resume
-         ~base_path:config.base_path
-         meta
-     with
-     | Ok source_meta -> Ok (paused_meta source_meta)
-     | Error _ as err -> err)
-  | `Pause | `Wakeup -> Ok (paused_meta meta)
+let meta_with_directive_paused_state
+    (meta : Keeper_meta_contract.keeper_meta)
+    paused =
+  {
+    meta with
+    paused;
+    runtime = { meta.runtime with last_blocker = None };
+    updated_at = Keeper_meta_contract.now_iso ();
+  }
 
 let should_persist_directive_paused_state directive (meta : Keeper_meta_contract.keeper_meta) paused =
   match directive with
-  | `Resume -> true
-  | `Pause | `Wakeup -> not (Bool.equal meta.paused paused)
+  | Keeper_directive.Resume -> true
+  | Keeper_directive.Pause | Keeper_directive.Wakeup
+  | Keeper_directive.Assign_task _ -> not (Bool.equal meta.paused paused)
 
 let persist_directive_paused_state ~config ~name ~action_str directive meta paused =
-  match meta_with_directive_paused_state ~config directive meta paused with
-  | Error err ->
-      Log.Keeper.warn
-        "directive %s: no_progress resume clear failed for %s: %s"
-        action_str
-        name
-        err;
-      Otel_metric_store.inc_counter
-        Keeper_metrics.(to_string PausedStatePersistErrors)
-        ~labels:
-          [
-            ( "phase",
-              Keeper_paused_state_persist_phase.(to_label Directive) );
-            ("reason", "no_progress_clear_error");
-          ]
-        ();
-      Error err
-  | Ok updated_meta ->
+  let updated_meta = meta_with_directive_paused_state meta paused in
     (* Pause/resume toggle via CAS merge: do not rewind a concurrent
        turn's cumulative usage counters. *)
-    (match
+  match
        Keeper_meta_store.write_meta_with_merge
-         ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
+         ~merge:Keeper_meta_merge.monotonic_usage_counters
          config
          updated_meta
-     with
-     | Ok () -> Ok ()
-     | Error err ->
-       Log.Keeper.warn
-         "directive %s: write_meta failed for %s: %s"
-         action_str
-         name
-         err;
-       Otel_metric_store.inc_counter
-         Keeper_metrics.(to_string PausedStatePersistErrors)
-         ~labels:
-           [
-             ( "phase",
-               Keeper_paused_state_persist_phase.(to_label Directive) );
-             ("reason", "write_meta_error");
-           ]
-         ();
-       Error err)
+  with
+  | Ok () -> Ok ()
+  | Error err ->
+    Log.Keeper.warn
+      "directive %s: write_meta failed for %s: %s"
+      action_str
+      name
+      err;
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string PausedStatePersistErrors)
+      ~labels:
+        [ ( "phase"
+          , Keeper_paused_state_persist_phase.(to_label Directive) )
+        ; "reason", "write_meta_error"
+        ]
+      ();
+    Error err
 
 let ensure_registered_for_resume ~sw ~clock state agent_name name =
   let config = Mcp_server.workspace_config state in
@@ -1077,9 +898,9 @@ let handle_keeper_directive_post ~sw ~clock state agent_name req reqd body_str =
       try
         let json = Yojson.Safe.from_string body_str in
         match Safe_ops.json_string_opt "action" json with
-        | Some "pause" -> Ok `Pause
-        | Some "resume" -> Ok `Resume
-        | Some "wakeup" -> Ok `Wakeup
+        | Some "pause" -> Ok Keeper_directive.Pause
+        | Some "resume" -> Ok Keeper_directive.Resume
+        | Some "wakeup" -> Ok Keeper_directive.Wakeup
         | Some a ->
             Error
               (Printf.sprintf
@@ -1124,8 +945,10 @@ let handle_keeper_directive_post ~sw ~clock state agent_name req reqd body_str =
         let proceed () =
           let ensure_result =
             match directive with
-            | `Resume -> ensure_registered_for_resume ~sw ~clock state agent_name name
-            | `Pause | `Wakeup -> Ok `Already_registered
+            | Keeper_directive.Resume ->
+              ensure_registered_for_resume ~sw ~clock state agent_name name
+            | Keeper_directive.Pause | Keeper_directive.Wakeup
+            | Keeper_directive.Assign_task _ -> Ok `Already_registered
           in
           match ensure_result with
           | Error err ->
@@ -1146,10 +969,12 @@ let handle_keeper_directive_post ~sw ~clock state agent_name req reqd body_str =
           | Ok registration_state ->
               let persist_result =
                 match directive, registration_state with
-                | `Pause, _ -> persist_paused_state true
-                | `Resume, `Already_registered -> persist_paused_state false
-                | `Resume, `Booted_missing_registry -> Ok ()
-                | `Wakeup, _ -> Ok ()
+                | Keeper_directive.Pause, _ -> persist_paused_state true
+                | Keeper_directive.Resume, `Already_registered ->
+                  persist_paused_state false
+                | Keeper_directive.Resume, `Booted_missing_registry -> Ok ()
+                | Keeper_directive.Wakeup, _
+                | Keeper_directive.Assign_task _, _ -> Ok ()
               in
               (match persist_result with
               | Error err ->
@@ -1179,12 +1004,15 @@ let handle_keeper_directive_post ~sw ~clock state agent_name req reqd body_str =
                         | None -> Keeper_identity.keeper_agent_name name)
                   in
                   Keeper_keepalive.process_directive
-                    ~agent_name:resolved_agent_name action_str;
+                    ~agent_name:resolved_agent_name directive;
                   (match directive with
-                   | `Pause -> refresh_keeper_execution_surfaces ~config ~name "paused"
-                   | `Resume ->
+                   | Keeper_directive.Pause ->
+                     refresh_keeper_execution_surfaces ~config ~name "paused"
+                   | Keeper_directive.Resume ->
                        refresh_keeper_execution_surfaces ~config ~name "resumed"
-                   | `Wakeup -> invalidate_keeper_execution_surfaces ~config ());
+                   | Keeper_directive.Wakeup
+                   | Keeper_directive.Assign_task _ ->
+                     invalidate_keeper_execution_surfaces ~config ());
                   Http.Response.json_value ~compress:true ~request:req
                     (`Assoc
                        [
@@ -1196,8 +1024,8 @@ let handle_keeper_directive_post ~sw ~clock state agent_name req reqd body_str =
         in
         let needs_meta_for_state_transition =
           match directive with
-          | `Pause | `Resume -> true
-          | `Wakeup -> false
+          | Keeper_directive.Pause | Keeper_directive.Resume -> true
+          | Keeper_directive.Wakeup | Keeper_directive.Assign_task _ -> false
         in
         (match read_result, needs_meta_for_state_transition with
          | Error err, true ->
@@ -1275,9 +1103,9 @@ let handle_keeper_bulk_directive_post ~sw ~clock state agent_name req reqd body_
       in
       let action_result =
         match Safe_ops.json_string_opt "action" json with
-        | Some "pause" -> Ok `Pause
-        | Some "resume" -> Ok `Resume
-        | Some "wakeup" -> Ok `Wakeup
+        | Some "pause" -> Ok Keeper_directive.Pause
+        | Some "resume" -> Ok Keeper_directive.Resume
+        | Some "wakeup" -> Ok Keeper_directive.Wakeup
         | Some a ->
             Error
               (Printf.sprintf
@@ -1301,7 +1129,9 @@ let handle_keeper_bulk_directive_post ~sw ~clock state agent_name req reqd body_
       let config = (Mcp_server.workspace_config state) in
       let action_str = directive_action_to_string directive in
       let needs_meta =
-        match directive with `Pause | `Resume -> true | `Wakeup -> false
+        match directive with
+        | Keeper_directive.Pause | Keeper_directive.Resume -> true
+        | Keeper_directive.Wakeup | Keeper_directive.Assign_task _ -> false
       in
       let process_one name =
         let read_result = Keeper_meta_store.read_meta config name in
@@ -1329,14 +1159,16 @@ let handle_keeper_bulk_directive_post ~sw ~clock state agent_name req reqd body_
         | Error _, false | Ok None, false | Ok (Some _), _ ->
             let target_paused =
               match directive with
-              | `Pause -> Some true
-              | `Resume -> Some false
-              | `Wakeup -> None
+              | Keeper_directive.Pause -> Some true
+              | Keeper_directive.Resume -> Some false
+              | Keeper_directive.Wakeup | Keeper_directive.Assign_task _ -> None
             in
             (match
                match directive with
-               | `Resume -> ensure_registered_for_resume ~sw ~clock state agent_name name
-               | `Pause | `Wakeup -> Ok `Already_registered
+               | Keeper_directive.Resume ->
+                 ensure_registered_for_resume ~sw ~clock state agent_name name
+               | Keeper_directive.Pause | Keeper_directive.Wakeup
+               | Keeper_directive.Assign_task _ -> Ok `Already_registered
              with
              | Error err ->
                  `Assoc
@@ -1344,7 +1176,7 @@ let handle_keeper_bulk_directive_post ~sw ~clock state agent_name req reqd body_
              | Ok registration_state ->
                  let persist_result =
                    match directive, registration_state, target_paused, meta_opt with
-                   | `Resume, `Booted_missing_registry, _, _ -> Ok ()
+                   | Keeper_directive.Resume, `Booted_missing_registry, _, _ -> Ok ()
                    | _, _, Some target, Some meta
                      when should_persist_directive_paused_state directive meta target
                      ->
@@ -1375,7 +1207,7 @@ let handle_keeper_bulk_directive_post ~sw ~clock state agent_name req reqd body_
                             | None -> Keeper_identity.keeper_agent_name name)
                       in
                       Keeper_keepalive.process_directive
-                        ~agent_name:resolved_agent_name action_str;
+                        ~agent_name:resolved_agent_name directive;
                       `Assoc [ ("name", `String name); ("ok", `Bool true) ]))
       in
       let results = List.map process_one names in

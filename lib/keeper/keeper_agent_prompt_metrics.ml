@@ -1,28 +1,6 @@
-(** Prompt metrics and adaptive inference helpers for keeper Agent.run turns. *)
+(** Prompt metrics for keeper Agent.run turns. *)
 
 module Canonical_tool = Agent_sdk.Canonical_tool
-
-let adaptive_thinking_budget
-      ~enabled
-      ~is_retry
-      ~last_tool_results
-      ~current_budget
-  =
-  if not enabled
-  then current_budget
-  else (
-    let had_error =
-      List.exists
-        (fun (r : Agent_sdk.Types.tool_result) ->
-           match r with
-           | Error _ -> true
-           | Ok _ -> false)
-        last_tool_results
-    in
-    if is_retry || had_error
-    then Some 1500
-    else current_budget)
-;;
 
 (** Structured prompt result from [build_turn_prompt] callback.
     [system_prompt] contains hard constraints (identity, policy guards,

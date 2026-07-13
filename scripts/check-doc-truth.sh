@@ -125,8 +125,8 @@ require_contains docs/spec/SPEC-INDEX.md 'Retired orchestration surfaces and int
 require_contains docs/spec/SPEC-INDEX.md '`06-command-plane.md` | Command Plane v2 | Internal command-plane reference and migration context | Historical |'
 require_not_contains docs/spec/SPEC-INDEX.md 'Keeper 자율 에이전트, Command Plane 오케스트레이션을 제공하며'
 
-require_contains docs/spec/06-command-plane.md '| Status | Retired Historical Reference |'
-require_contains docs/spec/06-command-plane.md '삭제된 subsystem의 historical reference'
+require_contains docs/spec/06-command-plane.md '| Status | Retired tombstone |'
+require_contains docs/spec/06-command-plane.md 'The former Command Plane subsystem is not part of the current MASC'
 
 require_contains docs/spec/01-system-overview.md 'MASC의 현재 canonical front door는 3가지다.'
 require_contains docs/spec/01-system-overview.md '### 7.3 Dashboard and Operator Read Visibility'
@@ -140,19 +140,11 @@ require_not_contains docs/spec/09-server-transport.md 'GET /api/v1/activity/feed
 require_not_contains docs/spec/09-server-transport.md '| Workspace | `/api/v1/workspace/*`'
 require_not_contains docs/spec/09-server-transport.md '| Command Plane (R) |'
 
-require_contains docs/spec/10-dashboard.md '| `/api/v1/keepers/:name/config` | POST | Keeper config 수정 (PATCH semantic) |'
-require_contains docs/spec/10-dashboard.md 'command-plane.ts         -- Retired command-plane type snapshots'
-require_contains docs/spec/10-dashboard.md '#monitoring?section=journey'
-require_contains docs/spec/10-dashboard.md '#command?section=operations'
-require_contains docs/spec/10-dashboard.md '#connectors?section=connector-status'
-require_contains docs/spec/10-dashboard.md '#workspace?section=verification'
-require_contains docs/spec/10-dashboard.md '| `/api/v1/verification/requests` | GET | Workspace > 검증 read model |'
-require_contains docs/spec/10-dashboard.md '| `/api/v1/gate/connectors` | GET | Connectors surface descriptor + live status |'
-require_not_contains docs/spec/10-dashboard.md '| `/api/v1/keepers/:name/config` | PATCH |'
+require_contains docs/spec/10-dashboard.md 'The dashboard is an observable projection and interaction surface for MASC.'
+require_contains docs/spec/10-dashboard.md 'The dashboard does not calculate risk tiers, recognize product/tool names, or'
+require_contains docs/spec/10-dashboard.md 'Pending HITL does not render the Keeper or Workspace as paused.'
+require_contains docs/spec/10-dashboard.md '`INV-DASH-004`: connection failure is client-local.'
 require_not_contains docs/spec/10-dashboard.md '| `/api/v1/command-plane` | GET |'
-require_not_contains docs/spec/10-dashboard.md 'command-plane.ts         -- Command plane types'
-require_not_contains docs/spec/10-dashboard.md '#monitoring?section=sessions'
-require_not_contains docs/spec/10-dashboard.md '#command?section=intervene'
 
 # Regression locks for retired surfaces (team_session / chain purge).
 # Each lock pins an already-merged PR claim so future doc edits

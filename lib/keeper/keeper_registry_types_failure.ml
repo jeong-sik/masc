@@ -3,19 +3,6 @@
    Contains kill-class type re-exports, failure_reason ADT, cohort key,
    and stale watchdog failure classification. *)
 
-(** Structured failure reason for cohort detection in self-preservation.
-    ADT matching replaces string prefix matching for crash_msg grouping. *)
-type ambiguous_partial_commit_kind =
-  Keeper_registry_types_kill_class.ambiguous_partial_commit_kind =
-  | Post_commit_timeout
-  | Post_commit_failure
-
-type ambiguous_partial_commit =
-  Keeper_registry_types_kill_class.ambiguous_partial_commit =
-  { kind : ambiguous_partial_commit_kind
-  ; detail : string
-  }
-
 type stale_kill_class = Keeper_registry_types_kill_class.stale_kill_class =
   | Idle_turn of { stall_seconds : float }
   | Mid_turn_no_progress of
@@ -40,15 +27,14 @@ type fiber_drop_cause =
   | Graceful_shutdown
   (** Supervisor saw shutdown in progress (flag, cancel context, or
             explicit shutdown reason). Emitted at INFO severity, does not
-            count toward restart budget or trigger runtime enrichment. *)
+            authorize a lifecycle transition or trigger runtime enrichment. *)
   | Cancelled_by_parent
   (** Fiber observed [Eio.Cancel.Cancelled] from a parent switch
             (supervisor restart, sibling failure propagating cancel)
             while shutdown was not in progress. Operationally a transient
-            cancel that the supervisor itself triggered — restart budget
-            should not count it the same as a genuine missed-resolution
-            bug. Emitted at WARN severity, separate cohort from
-            [Unexpected]. *)
+            cancel that the supervisor itself triggered. Emitted at WARN
+            severity as a separate cohort from [Unexpected], the genuine
+            missed-resolution bug. *)
   | Unexpected
   (** Fiber finally ran with [resolved=false] outside any shutdown
             context and without a parent cancellation signal. Genuine
@@ -61,21 +47,13 @@ type failure_reason =
   | Stale_turn_timeout of stale_kill_class
   | Stale_termination_storm of { count : int }
   (** #10765 Phase 2: latched when [record_stale_termination] returns a
-          window count >= [escalation_threshold]. The supervisor's
-          [`Crashed] branch checks this variant and skips [to_restart],
-          persisting [meta.paused = true] instead so an operator must
-          investigate the underlying runtime/provider/fd issue before
-          resuming the keeper. *)
+          window count >= [escalation_threshold]. This remains a typed
+          observation; the supervisor restarts only the affected Keeper. *)
   | Stale_fleet_batch of { distinct_count : int }
   (** Legacy wire value for stale watchdog fleet-batch state. Current
           fleet-batch detection is observation-only and must not create this
           failure reason; if old runtime state still contains it, the
           supervisor treats it like a restartable watchdog crash. *)
-  | Provider_timeout_loop of { count : int }
-  (** Latched when the same keeper exhausts the OAS turn budget on
-          consecutive cycles. This is a provider/runtime/runtime throughput
-          failure, so the supervisor pauses instead of restarting into the
-          same slow model and burning another multi-minute budget. *)
   | Provider_runtime_error of
       { code : string
       ; detail : string
@@ -91,24 +69,18 @@ type failure_reason =
               instead of reparsing [code]. [None] for non-exhaustion
               provider/runtime errors. *)
       }
-  | Completion_contract_violation of { detail : string }
-  | Ambiguous_partial_commit of ambiguous_partial_commit
   | Fiber_unresolved of fiber_drop_cause
   (** Fiber exited without resolving [done_r].
           Issue #18901: cause payload distinguishes graceful shutdown
           artifacts (SIGTERM/SIGINT during turn — INFO severity, no
           runtime) from genuine missed-resolution bugs (ERROR severity,
-          runtime attempt enrichment + supervisor pause). Compile-time
+          runtime attempt enrichment + per-Keeper restart). Compile-time
           exhaustive match forces the emit site to commit to a cause
           rather than letting a race between [Shutdown.is_shutting_down_global]
           flag and fiber finally collapse both into the same telemetry. *)
   | Exception of string
-  | Turn_overflow_pause
-  | Turn_livelock_pause
+  | Turn_overflow_failure
   | Operator_interrupt
-
-let ambiguous_partial_commit_kind_to_string =
-  Keeper_registry_types_kill_class.ambiguous_partial_commit_kind_to_string
 
 let failure_reason_to_string = function
   | Heartbeat_consecutive_failures n ->
@@ -120,8 +92,6 @@ let failure_reason_to_string = function
     Printf.sprintf "stale_termination_storm(count=%d)" count
   | Stale_fleet_batch { distinct_count } ->
     Printf.sprintf "stale_fleet_batch(distinct_count=%d)" distinct_count
-  | Provider_timeout_loop { count } ->
-    Printf.sprintf "provider_timeout_loop(count=%d)" count
   | Provider_runtime_error { code; detail; provider_id; http_status; runtime_id = _ } ->
     let prov =
       Option.fold provider_id ~none:""
@@ -132,13 +102,6 @@ let failure_reason_to_string = function
         ~some:(Printf.sprintf " http=%d")
     in
     Printf.sprintf "provider_runtime_error(%s:%s%s%s)" code detail prov http
-  | Completion_contract_violation { detail } ->
-    Printf.sprintf "completion_contract_violation(%s)" detail
-  | Ambiguous_partial_commit { kind; detail } ->
-    Printf.sprintf
-      "ambiguous_partial_commit(%s:%s)"
-      (ambiguous_partial_commit_kind_to_string kind)
-      detail
   | Fiber_unresolved Graceful_shutdown -> "fiber_unresolved(graceful_shutdown)"
   | Fiber_unresolved Cancelled_by_parent -> "fiber_unresolved(cancelled_by_parent)"
   | Fiber_unresolved Unexpected -> "fiber_unresolved"
@@ -150,8 +113,7 @@ let failure_reason_to_string = function
      supervisor restart/back-off can treat parent-cancel differently
      from genuine missed-resolution. *)
   | Exception s -> Printf.sprintf "exception(%s)" s
-  | Turn_overflow_pause -> "turn_overflow_pause"
-  | Turn_livelock_pause -> "turn_livelock_pause"
+  | Turn_overflow_failure -> "turn_overflow_failure"
   | Operator_interrupt -> "operator_interrupt"
 ;;
 
@@ -170,22 +132,14 @@ let failure_reason_cohort_key = function
   | Some (Stale_turn_timeout _) -> "stale_turn_timeout"
   | Some (Stale_termination_storm _) -> "stale_termination_storm"
   | Some (Stale_fleet_batch _) -> "stale_fleet_batch"
-  | Some (Provider_timeout_loop _) -> "provider_timeout_loop"
   | Some (Provider_runtime_error _) -> "provider_runtime_error"
-  | Some (Completion_contract_violation _) -> "completion_contract_violation"
-  | Some (Ambiguous_partial_commit _) -> "ambiguous_partial_commit"
   | Some (Fiber_unresolved Graceful_shutdown) -> "fiber_unresolved_graceful"
   | Some (Fiber_unresolved Cancelled_by_parent) -> "fiber_unresolved_cancelled"
   | Some (Fiber_unresolved Unexpected) -> "fiber_unresolved"
-  (* Cohort split: graceful shutdown and parent-cancelled each get
-     their own cohort so the supervisor self-preservation pause
-     policy [keeper_supervisor_pause_policy.ml] no longer treats
-     SIGTERM races *or* parent-cancel restarts as a fiber-drop
-     epidemic. The legacy "fiber_unresolved" key stays bound to
-     [Unexpected] for dashboard / metrics backward-compat. *)
+  (* Graceful shutdown and parent cancellation stay distinct from an unexpected
+     unresolved fiber for dashboard and metric observation. *)
   | Some (Exception _) -> "exception"
-  | Some Turn_overflow_pause -> "turn_overflow_pause"
-  | Some Turn_livelock_pause -> "turn_livelock_pause"
+  | Some Turn_overflow_failure -> "turn_overflow_failure"
   | Some Operator_interrupt -> "operator_interrupt"
   | None -> "unknown"
 ;;
@@ -193,13 +147,9 @@ let failure_reason_cohort_key = function
 let stale_kill_failure_reason ~prior ~kill_class =
   match prior with
   | Some
-      ( Provider_timeout_loop _
-      | Provider_runtime_error _
-      | Completion_contract_violation _
-      | Ambiguous_partial_commit _
+      ( Provider_runtime_error _
       | Turn_consecutive_failures _
-      | Turn_overflow_pause
-      | Turn_livelock_pause
+      | Turn_overflow_failure
       | Heartbeat_consecutive_failures _
       | Exception _
       | Operator_interrupt ) -> prior

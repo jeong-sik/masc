@@ -38,7 +38,6 @@ let canonical_app_codes : (string * D.t) list =
   [ "success", D.Success
   ; "external_cancel", D.External_cancel
   ; "turn_wall_clock_timeout", D.Turn_wall_clock_timeout
-  ; "post_commit_ambiguous", D.Post_commit_ambiguous
   ; "provider_error", D.Provider_error (Code.Provider_runtime_error "provider_error")
   ; "unknown_error", D.Unknown { raw_error = "" }
   ]
@@ -144,9 +143,6 @@ let round_trippable : (string * D.t) list =
   [ "Success", D.Success
   ; "External_cancel", D.External_cancel
   ; "Turn_wall_clock_timeout", D.Turn_wall_clock_timeout
-  ; "Post_commit_ambiguous", D.Post_commit_ambiguous
-  ; "Completion_contract_unsatisfied", D.Completion_contract_unsatisfied
-  ; "Completion_contract_no_progress", D.Completion_contract_no_progress
   ; ( "Turn_budget_exhausted/Turns/Oas"
     , D.Turn_budget_exhausted
         { detail = Some { dimension = `Turns; source = `Oas_sdk }; used = 10; limit = 10 } )
@@ -178,8 +174,7 @@ let round_trippable : (string * D.t) list =
   ; "Provider_error/Turn_failures", D.Provider_error Code.Turn_failures
   ; "Provider_error/Storm", D.Provider_error Code.Stale_termination_storm
   ; "Provider_error/FleetBatch", D.Provider_error Code.Stale_fleet_batch
-  ; "Provider_error/TurnOverflow", D.Provider_error Code.Turn_overflow_pause
-  ; "Provider_error/TurnLivelock", D.Provider_error Code.Turn_livelock_pause
+  ; "Provider_error/TurnOverflow", D.Provider_error Code.Turn_overflow_failure
   ; "Provider_error/Fiber", D.Provider_error Code.Fiber_unresolved
   ]
 ;;
@@ -269,17 +264,6 @@ let test_is_turn_budget_exhausted_wire_strict () =
     (D.is_turn_budget_exhausted_wire "success")
 ;;
 
-let test_completion_contract_severity_is_bad () =
-  Alcotest.(check string)
-    "Completion_contract_unsatisfied severity"
-    "bad"
-    (typed_severity_str (D.severity D.Completion_contract_unsatisfied));
-  Alcotest.(check string)
-    "Completion_contract_no_progress severity"
-    "bad"
-    (typed_severity_str (D.severity D.Completion_contract_no_progress))
-;;
-
 let test_turn_budget_exhausted_severity_is_bad () =
   Alcotest.(check string)
     "Turn_budget_exhausted severity"
@@ -291,17 +275,6 @@ let test_turn_budget_exhausted_severity_is_bad () =
              ; used = 10
              ; limit = 10
              })))
-;;
-
-let test_completion_contract_next_action () =
-  Alcotest.(check (option string))
-    "Completion_contract_unsatisfied next_action"
-    (Some "inspect_completion_contract")
-    (D.next_action D.Completion_contract_unsatisfied);
-  Alcotest.(check (option string))
-    "Completion_contract_no_progress next_action"
-    (Some "resume_or_inspect_completion_contract")
-    (D.next_action D.Completion_contract_no_progress)
 ;;
 
 let test_round_trip_recognised () =
@@ -355,18 +328,11 @@ let runtime_codes_to_projection : (string * Code.t * D.t) list =
     , Code.Stale_turn_timeout_no_progress
     , D.Turn_wall_clock_timeout )
   ; "Stale_turn_timeout/noop", Code.Stale_turn_timeout_noop, D.Turn_wall_clock_timeout
-  ; ( "Ambiguous/timeout"
-    , Code.Ambiguous_partial_commit_post_commit_timeout
-    , D.Post_commit_ambiguous )
-  ; ( "Ambiguous/failure"
-    , Code.Ambiguous_partial_commit_post_commit_failure
-    , D.Post_commit_ambiguous )
   ; "Heartbeat", Code.Heartbeat_failures, D.Provider_error Code.Heartbeat_failures
   ; "Turn_failures", Code.Turn_failures, D.Provider_error Code.Turn_failures
   ; "Storm", Code.Stale_termination_storm, D.Provider_error Code.Stale_termination_storm
   ; "FleetBatch", Code.Stale_fleet_batch, D.Provider_error Code.Stale_fleet_batch
-  ; "TurnOverflow", Code.Turn_overflow_pause, D.Provider_error Code.Turn_overflow_pause
-  ; "TurnLivelock", Code.Turn_livelock_pause, D.Provider_error Code.Turn_livelock_pause
+  ; "TurnOverflow", Code.Turn_overflow_failure, D.Provider_error Code.Turn_overflow_failure
   ; ( "Provider_runtime"
     , Code.Provider_runtime_error "p"
     , D.Provider_error (Code.Provider_runtime_error "p") )
@@ -443,24 +409,9 @@ let test_registry_failure_reason_preserves_no_provider_runtime_reason () =
     "runtime_exhausted_no_providers_available"
 ;;
 
-let test_registry_failure_reason_completion_contract_is_typed () =
-  let raw_error = "provider returned empty assistant turn" in
-  let terminal = Legacy.of_disposition D.Completion_contract_no_progress in
-  match Unified_types.registry_failure_reason_of_terminal_reason terminal ~raw_error with
-  | Some (Registry.Completion_contract_violation { detail }) ->
-    Alcotest.(check string) "typed completion-contract detail" raw_error detail
-  | Some other ->
-    Alcotest.failf
-      "expected Completion_contract_violation, got %s"
-      (Registry.failure_reason_to_string other)
-  | None -> Alcotest.fail "expected typed completion-contract failure reason"
-;;
-
 let empty_turn_state : Unified_types.turn_state =
   { cycle_completed = false
   ; manifest_seq = 0
-  ; post_commit_failure_reason = None
-  ; paused_meta_override = None
   ; current_turn_blocker_info = None
   ; last_execution = None
   ; last_provider_timeout_budget = None
@@ -534,16 +485,6 @@ let () =
             `Quick
             test_is_turn_budget_exhausted_wire_strict
         ] )
-    ; ( "completion-contract typed accessors (RFC-0047 PR-2)"
-      , [ Alcotest.test_case
-            "severity is bad"
-            `Quick
-            test_completion_contract_severity_is_bad
-        ; Alcotest.test_case
-            "next_action dispatches to resume/inspect"
-            `Quick
-            test_completion_contract_next_action
-        ] )
     ; ( "Turn_budget_exhausted typed accessors"
       , [ Alcotest.test_case
             "severity is bad"
@@ -565,10 +506,6 @@ let () =
             "structured runtime no-provider reason is preserved"
             `Quick
             test_registry_failure_reason_preserves_no_provider_runtime_reason
-        ; Alcotest.test_case
-            "completion contract disposition creates typed failure reason"
-            `Quick
-            test_registry_failure_reason_completion_contract_is_typed
         ] )
     ; ( "turn finalization"
       , [ Alcotest.test_case

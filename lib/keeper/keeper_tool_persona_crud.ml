@@ -64,28 +64,43 @@ let read_profile persona_name =
 let write_profile persona_name json =
   let dir = Filename.concat (personas_dir ()) persona_name in
   let path = Filename.concat dir "profile.json" in
-  (try Fs_compat.mkdir_p dir with _ -> ());
-  let tmp = path ^ ".tmp" in
-  let content = Yojson.Safe.to_string ~std:true json in
-  match Fs_compat.save_file_atomic tmp content with
-  | Error msg -> Error ("Failed to write " ^ path ^ ": " ^ msg)
+  match
+    try
+      Fs_compat.mkdir_p dir;
+      Ok ()
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> Error (Printexc.to_string exn)
+  with
+  | Error detail -> Error ("Failed to create " ^ dir ^ ": " ^ detail)
   | Ok () ->
-      (try
-         Fs_compat.rename tmp path;
-         Ok (ok_assoc [("persona_name", `String persona_name); ("path", `String path)])
-       with exn ->
-         Error ("Failed to rename tmp file: " ^ Printexc.to_string exn))
+    let tmp = path ^ ".tmp" in
+    let content = Yojson.Safe.to_string ~std:true json in
+    (match Fs_compat.save_file_atomic tmp content with
+     | Error msg -> Error ("Failed to write " ^ path ^ ": " ^ msg)
+     | Ok () ->
+       (try
+          Fs_compat.rename tmp path;
+          Ok (ok_assoc [("persona_name", `String persona_name); ("path", `String path)])
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn ->
+          Error ("Failed to rename tmp file: " ^ Printexc.to_string exn)))
 
 let validate_create_args args =
-  let persona_name = get_string_opt args "persona_name" in
-  let display_name = get_string_opt args "display_name" in
-  match persona_name, display_name with
-  | None, _ -> ["Missing required field: persona_name"]
-  | _, None -> ["Missing required field: display_name"]
-  | Some pn, Some dn ->
-      (match validate_persona_name pn with
-       | Error msg -> [msg]
-       | Ok () -> if String.trim dn = "" then ["display_name must not be empty"] else [])
+  match reject_removed_keeper_input_keys ~tool_name:"masc_persona_create" args with
+  | Error detail -> [ detail ]
+  | Ok () ->
+    let persona_name = get_string_opt args "persona_name" in
+    let display_name = get_string_opt args "display_name" in
+    (match persona_name, display_name with
+     | None, _ -> [ "Missing required field: persona_name" ]
+     | _, None -> [ "Missing required field: display_name" ]
+     | Some pn, Some dn ->
+       (match validate_persona_name pn with
+        | Error msg -> [ msg ]
+        | Ok () ->
+          if String.trim dn = "" then [ "display_name must not be empty" ] else []))
 
 (* A persona profile.json is read by two loaders that pull from two distinct
    locations, verified against config/personas/*/profile.json:
@@ -94,10 +109,10 @@ let validate_create_args args =
        ["trait"] — read by
        [Keeper_types_profile_persona.persona_summary_of_profile_json];
      - keeper template defaults, nested under ["keeper"]: ["goal"],
-       ["instructions"], ["mention_targets"], ["proactive_enabled"],
-       ["tool_denylist"] — read by
+       ["instructions"], ["mention_targets"], ["proactive_enabled"] — read by
        [Keeper_types_profile_persona_defaults.load_from_path], which only ever
-       inspects the ["keeper"] member.
+       inspects the ["keeper"] member and rejects removed fields
+       (tool_access/tool_denylist) fail-closed.
 
    Earlier this tool wrote every field at the top level under different keys
    (["display_name"] instead of ["name"]; the keeper-template fields at the
@@ -113,12 +128,10 @@ let keeper_defaults_fields args : (string * Yojson.Safe.t) list =
   let goal = get_string_opt args "goal" in
   let instructions = get_string_opt args "instructions" in
   let mention_targets = get_string_list args "mention_targets" in
-  let tool_denylist = get_string_list args "tool_denylist" in
   let proactive_enabled = get_bool_opt args "proactive_enabled" in
   (match goal with Some v -> [("goal", `String v)] | None -> [])
   @ (match instructions with Some v -> [("instructions", `String v)] | None -> [])
   @ (if mention_targets = [] then [] else [("mention_targets", `List (List.map (fun s -> `String s) mention_targets))])
-  @ (if tool_denylist = [] then [] else [("tool_denylist", `List (List.map (fun s -> `String s) tool_denylist))])
   @ (match proactive_enabled with Some v -> [("proactive_enabled", `Bool v)] | None -> [])
 
 let profile_from_create_args args =
@@ -157,11 +170,24 @@ let merge_assoc base updates =
     Updates are routed to the same two layers the loaders read: identity
     fields ([display_name] -> top-level ["name"], [role], [trait]) stay at
     the top level, and keeper-template fields ([goal], [instructions],
-    [mention_targets], [tool_denylist], [proactive_enabled]) merge into the
+    [mention_targets], [proactive_enabled]) merge into the
     nested ["keeper"] object. Only fields present in [args] change. *)
 let merge_update_args_into_profile existing_json args : (Yojson.Safe.t, string) result =
+  match reject_removed_keeper_input_keys ~tool_name:"masc_persona_update" args with
+  | Error _ as error -> error
+  | Ok () ->
   match existing_json with
   | `Assoc existing ->
+      let removed_fields =
+        [ "tool_access"; "tool_denylist" ]
+        |> List.filter (fun key -> List.mem_assoc key existing)
+      in
+      if removed_fields <> [] then
+        Error
+          (Printf.sprintf
+             "removed persona profile fields are no longer supported: %s"
+             (String.concat ", " removed_fields))
+      else
       let str_update key =
         match get_string_opt args key with Some v -> Some (`String v) | None -> None
       in
@@ -184,7 +210,6 @@ let merge_update_args_into_profile existing_json args : (Yojson.Safe.t, string) 
         field "goal" (str_update "goal")
         @ field "instructions" (str_update "instructions")
         @ field "mention_targets" (list_update "mention_targets")
-        @ field "tool_denylist" (list_update "tool_denylist")
         @ field "proactive_enabled" (bool_update "proactive_enabled")
       in
       let existing_keeper =
@@ -204,62 +229,58 @@ let merge_update_args_into_profile existing_json args : (Yojson.Safe.t, string) 
         (Printf.sprintf "Corrupt persona profile: expected a JSON object, got %s"
            (Json_util.kind_name other))
 
-(* The [*_json] handlers build a Yojson result; [tool_result_of_json] projects
-   it into the keeper [tool_result] the tool surface expects. A result carrying
-   an ["error"]/["errors"] field is an error verdict, otherwise success —
-   mirroring the ok_assoc/error_assoc shapes these handlers emit. *)
-let tool_result_of_json (json : Yojson.Safe.t) : tool_result =
-  let is_error =
-    match json with
-    | `Assoc fields ->
-        List.exists (fun (k, _) -> k = "error" || k = "errors") fields
-    | _ -> false
-  in
-  let body = Yojson.Safe.to_string ~std:true json in
-  if is_error then tool_result_error body else tool_result_ok body
+(* Outcome is carried by [Result], while the payload remains first-class JSON.
+   Error-object keys are presentation data and never determine control flow. *)
+let tool_result_of_json_result = function
+  | Ok data -> tool_result_ok_data data
+  | Error data -> tool_result_error_data data
 
 let handle_persona_create_json args =
   let errors = validate_create_args args in
   if errors <> [] then
-    error_assoc [("errors", `List (List.map (fun e -> `String e) errors))]
+    Error (error_assoc [("errors", `List (List.map (fun e -> `String e) errors))])
   else
     let persona_name = get_string args "persona_name" "" in
     if persona_exists persona_name then
-      error_assoc
-        [("error", `String ("Persona '" ^ persona_name ^ "' already exists. Use masc_persona_update to modify it."))]
+      Error
+        (error_assoc
+           [("error", `String ("Persona '" ^ persona_name ^ "' already exists. Use masc_persona_update to modify it."))])
     else
       let profile = profile_from_create_args args in
       match write_profile persona_name profile with
-      | Ok result -> result
-      | Error msg -> error_assoc [("error", `String msg)]
+      | Ok result -> Ok result
+      | Error msg -> Error (error_assoc [("error", `String msg)])
 
 let handle_persona_update_json args =
   let persona_name = get_string_opt args "persona_name" in
   match persona_name with
-  | None -> error_assoc [("error", `String "Missing required field: persona_name")]
+  | None ->
+      Error
+        (error_assoc [("error", `String "Missing required field: persona_name")])
   | Some pn ->
-      (match validate_persona_name pn with
-       | Error msg -> error_assoc [("error", `String msg)]
-       | Ok () ->
-           if not (persona_exists pn) then
-             error_assoc
-               [("error", `String ("Persona '" ^ pn ^ "' does not exist. Use masc_persona_create first."))]
-           else
-             (match read_profile pn with
-              | Error msg -> error_assoc [("error", `String msg)]
-              | Ok existing_json ->
-                  (match merge_update_args_into_profile existing_json args with
-                   | Error msg -> error_assoc [("error", `String msg)]
-                   | Ok updated ->
-                       (match write_profile pn updated with
-                        | Ok result -> result
-                        | Error msg -> error_assoc [("error", `String msg)]))))
+      match validate_persona_name pn with
+      | Error msg -> Error (error_assoc [("error", `String msg)])
+      | Ok () ->
+          if not (persona_exists pn) then
+            Error
+              (error_assoc
+                 [("error", `String ("Persona '" ^ pn ^ "' does not exist. Use masc_persona_create first."))])
+          else
+            match read_profile pn with
+            | Error msg -> Error (error_assoc [("error", `String msg)])
+            | Ok existing_json ->
+                match merge_update_args_into_profile existing_json args with
+                | Error msg -> Error (error_assoc [("error", `String msg)])
+                | Ok updated ->
+                    match write_profile pn updated with
+                    | Ok result -> Ok result
+                    | Error msg -> Error (error_assoc [("error", `String msg)])
 
 let handle_persona_create _ctx args : tool_result =
-  tool_result_of_json (handle_persona_create_json args)
+  tool_result_of_json_result (handle_persona_create_json args)
 
 let handle_persona_update _ctx args : tool_result =
-  tool_result_of_json (handle_persona_update_json args)
+  tool_result_of_json_result (handle_persona_update_json args)
 
 (* Remove the whole persona directory (profile.json plus any AGENT.md /
    metrics siblings) so no orphaned files survive the delete. [remove_tree]
@@ -296,4 +317,4 @@ let handle_persona_delete_json args =
               | Error msg -> error_assoc [("error", `String msg)]))
 
 let handle_persona_delete _ctx args : tool_result =
-  tool_result_of_json (handle_persona_delete_json args)
+  tool_result_of_json_result (handle_persona_delete_json args)

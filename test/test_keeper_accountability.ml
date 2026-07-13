@@ -1,5 +1,3 @@
-module Types = Masc_domain
-
 open Alcotest
 open Masc
 
@@ -29,26 +27,6 @@ let iso_of_unix ts =
     (tm.Unix.tm_year + 1900)
     (tm.Unix.tm_mon + 1)
     tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
-
-let make_test_meta ?(name = "keeper-sangsu") ?(agent_name = "keeper-sangsu-agent") ()
-    : Keeper_meta_contract.keeper_meta =
-  match Masc_test_deps.meta_of_json_fixture
-          (`Assoc
-             [
-               ("name", `String name);
-               ("agent_name", `String agent_name);
-               ("trace_id", `String "test-trace-accountability");
-               ( "tool_access",
-                 Json_util.json_string_list
-                   ([]) );
-             ])
-  with
-  | Ok meta -> meta
-  | Error e -> failwith (Printf.sprintf "make_test_meta failed: %s" e)
-
-let make_ctx_work () =
-  Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
-    ~max_tokens:4000
 
 let with_workspace ?(agent_name = "keeper-sangsu-agent") f =
   Eio_main.run @@ fun env ->
@@ -146,9 +124,6 @@ let test_same_turn_evidence_marks_claim_supported () =
         Keeper_accountability.accountability_summary_json config
           ~keeper_name:"keeper-sangsu" ~agent_name:"keeper-sangsu-agent"
       in
-      check string "risk band" "low" (string_member "risk_band" summary);
-      check string "routing hint" "normal_routing"
-        (string_member "routing_hint" summary);
       check int "recent supported claims" 1
         (int_member "recent_supported_claims" summary);
       check (float 0.0001) "evidence coverage" 1.0
@@ -165,7 +140,7 @@ let test_same_turn_evidence_marks_claim_supported () =
       check bool "contains turn reference" true
         (List.mem "turn:trace-1:7" supporting_refs))
 
-let test_stale_completion_claim_sets_high_risk () =
+let test_stale_completion_claim_is_observed_as_unsupported () =
   with_workspace (fun config ->
       let created_at =
         iso_of_unix (Unix.gettimeofday () -. (25.0 *. 3600.0))
@@ -189,20 +164,14 @@ let test_stale_completion_claim_sets_high_risk () =
         Keeper_accountability.accountability_summary_json config
           ~keeper_name:"keeper-sangsu" ~agent_name:"keeper-sangsu-agent"
       in
-      check string "risk band" "high" (string_member "risk_band" summary);
-      check string "routing hint" "manual_review_recommended"
-        (string_member "routing_hint" summary);
       check (float 0.0001) "unsupported completion rate" 1.0
         (float_member "unsupported_completion_rate" summary);
-      check bool "risk helper" true
-        (Keeper_accountability.accountability_risk_is_high config
-           ~keeper_name:"keeper-sangsu" ~agent_name:"keeper-sangsu-agent");
       let history = Yojson.Safe.Util.(summary |> member "history" |> to_list) in
       check int "history count" 1 (List.length history);
       let first = List.hd history in
       check string "history status" "unsupported" (string_member "status" first))
 
-let test_agent_reputation_penalizes_unsupported_claims () =
+let test_agent_reputation_observes_unsupported_claims () =
   with_workspace ~agent_name:"keeper-rep-agent" (fun config ->
       ignore
         (Workspace.add_task config ~title:"Reputation task" ~priority:1
@@ -241,14 +210,10 @@ let test_agent_reputation_penalizes_unsupported_claims () =
       in
       check int "tasks completed" 1 rep.tasks_completed;
       check int "tasks claimed" 1 rep.tasks_claimed;
-      check string "accountability risk band" "high"
-        rep.accountability_risk_band;
       check (float 0.0001) "unsupported completion rate" 1.0
-        rep.accountability_unsupported_completion_rate;
-      check (float 0.0001) "accountability score clamps to zero" 0.0
-        rep.accountability_score)
+        rep.accountability_unsupported_completion_rate)
 
-let test_generated_alias_inherits_accountability_penalty () =
+let test_generated_alias_inherits_accountability_observations () =
   with_workspace ~agent_name:"adversary-eager-viper" (fun config ->
       let created_at =
         iso_of_unix (Unix.gettimeofday () -. (25.0 *. 3600.0))
@@ -271,8 +236,6 @@ let test_generated_alias_inherits_accountability_penalty () =
         Keeper_accountability.accountability_summary_json config
           ~keeper_name:"adversary" ~agent_name:"adversary-eager-viper"
       in
-      check string "alias summary inherits canonical keeper risk" "high"
-        (string_member "risk_band" summary);
       check string "alias summary source" "canonical_keeper_fallback"
         (string_member "source" summary);
       check string "alias summary source label"
@@ -284,12 +247,8 @@ let test_generated_alias_inherits_accountability_penalty () =
         Reputation.compute_reputation config
           ~agent_name:"adversary-eager-viper"
       in
-      check string "generated alias risk band" "high"
-        rep.accountability_risk_band;
       check (float 0.0001) "generated alias unsupported rate" 1.0
         rep.accountability_unsupported_completion_rate;
-      check (float 0.0001) "generated alias accountability score" 0.0
-        rep.accountability_score;
       check string "generated alias keeper provenance" "adversary"
         rep.accountability_keeper_name;
       check string "generated alias reputation source"
@@ -437,8 +396,6 @@ let test_recent_decision_without_claim_exposes_coverage_gap () =
       check string "coverage reason"
         "recent_decisions_without_accountability_claims"
         (string_member "coverage_gap_reason" summary);
-      check string "routing hint" "accountability_coverage_gap_review"
-        (string_member "routing_hint" summary);
       check string "source label mentions decision activity"
         "No accountability history; recent decision activity exists"
         (string_member "source_label" summary);
@@ -462,8 +419,6 @@ let test_unmapped_alias_exposes_no_history_source () =
         (string_member "coverage_health" summary);
       check bool "unmapped alias coverage gap" false
         (bool_member "coverage_gap" summary);
-      check string "unmapped alias risk remains low" "low"
-        (string_member "risk_band" summary);
       let rep =
         Reputation.compute_reputation config
           ~agent_name:"orphan-eager-viper"
@@ -476,41 +431,10 @@ let test_unmapped_alias_exposes_no_history_source () =
         "No accountability history"
         rep.accountability_source_label)
 
-let test_claim_tool_exposes_routing_warning_for_high_risk_keeper () =
-  with_workspace (fun config ->
-      let meta = make_test_meta () in
-      let created_at =
-        iso_of_unix (Unix.gettimeofday () -. (25.0 *. 3600.0))
-      in
-      append_accountability_event config.base_path ~created_at
-        (`Assoc
-           [
-             ("event_type", `String "claim_created");
-             ("claim_id", `String "acct-high-risk");
-             ("agent_name", `String "keeper-sangsu-agent");
-             ("keeper_name", `String "keeper-sangsu");
-             ("kind", `String "completion_claim");
-             ("subject", `String "Prior claim");
-             ("surface", `String "keeper_turn");
-             ("created_at", `String created_at);
-             ("evidence_refs", `List []);
-             ("synthetic", `Bool false);
-           ]);
-      ignore (Workspace.add_task config ~title:"Task to claim" ~priority:1 ~description:"desc");
-      let result =
-        Keeper_tool_dispatch_runtime.execute_keeper_tool_call
-          ~config ~meta ~ctx_work:(make_ctx_work ()) ~exec_cache:None
-          ~name:"keeper_task_claim" ~input:(`Assoc []) ()
-        |> Yojson.Safe.from_string
-      in
-      check string "warning present"
-        "Accountability risk is high for this keeper. Prefer manual review or lower-risk routing when equivalent."
-        (string_member "routing_warning" result))
-
 let test_synthetic_claims_do_not_dilute_unsupported_rate () =
   (* Regression: synthetic completion claims (created by task_transition "done")
      must NOT be counted in total_completion_claims, otherwise they dilute the
-     unsupported_completion_rate and mask genuine risk. *)
+     unsupported_completion_rate and mask the raw observation. *)
   with_workspace (fun config ->
       let created_at =
         iso_of_unix (Unix.gettimeofday () -. (25.0 *. 3600.0))
@@ -567,9 +491,7 @@ let test_synthetic_claims_do_not_dilute_unsupported_rate () =
       in
       (* Without the fix: 0/11 = 0.0 unsupported rate. With fix: 1/1 = 1.0 *)
       check (float 0.0001) "unsupported rate should be 1.0 not diluted" 1.0
-        (float_member "unsupported_completion_rate" summary);
-      check string "risk band should be high" "high"
-        (string_member "risk_band" summary))
+        (float_member "unsupported_completion_rate" summary))
 
 let test_summary_lookup_reads_window_once_for_multiple_agents () =
   with_workspace (fun config ->
@@ -604,16 +526,10 @@ let test_summary_lookup_reads_window_once_for_multiple_agents () =
             let lookup =
               Keeper_accountability.accountability_summary_lookup config
             in
-            let summary_a =
-              lookup ~keeper_name:"keeper-a" ~agent_name:"keeper-a-agent"
-            in
-            let summary_b =
-              lookup ~keeper_name:"keeper-b" ~agent_name:"keeper-b-agent"
-            in
-            check string "agent a risk" "high"
-              (string_member "risk_band" summary_a);
-            check string "agent b risk" "high"
-              (string_member "risk_band" summary_b);
+            ignore
+              (lookup ~keeper_name:"keeper-a" ~agent_name:"keeper-a-agent");
+            ignore
+              (lookup ~keeper_name:"keeper-b" ~agent_name:"keeper-b-agent");
             Keeper_accountability.window_read_count_for_testing ())
       in
       check int "window read count" 1 read_count)
@@ -792,12 +708,12 @@ let () =
         [
           test_case "same turn evidence marks claim supported" `Quick
             test_same_turn_evidence_marks_claim_supported;
-          test_case "stale completion claim sets high risk" `Quick
-            test_stale_completion_claim_sets_high_risk;
-          test_case "agent reputation penalizes unsupported claims" `Quick
-            test_agent_reputation_penalizes_unsupported_claims;
-          test_case "generated alias inherits accountability penalty" `Quick
-            test_generated_alias_inherits_accountability_penalty;
+          test_case "stale completion claim remains observable" `Quick
+            test_stale_completion_claim_is_observed_as_unsupported;
+          test_case "agent reputation observes unsupported claims" `Quick
+            test_agent_reputation_observes_unsupported_claims;
+          test_case "generated alias inherits accountability observations" `Quick
+            test_generated_alias_inherits_accountability_observations;
           test_case "generated alias inherits legacy keeper history" `Quick
             test_generated_alias_inherits_legacy_keeper_history;
           test_case "direct agent history exposes direct source" `Quick
@@ -810,8 +726,6 @@ let () =
             `Quick test_recent_decision_without_claim_exposes_coverage_gap;
           test_case "unmapped alias exposes no-history source" `Quick
             test_unmapped_alias_exposes_no_history_source;
-          test_case "claim tool exposes routing warning for high risk keeper"
-            `Quick test_claim_tool_exposes_routing_warning_for_high_risk_keeper;
           test_case "synthetic claims do not dilute unsupported rate" `Quick
             test_synthetic_claims_do_not_dilute_unsupported_rate;
           test_case "summary lookup reads window once" `Quick

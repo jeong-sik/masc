@@ -16,8 +16,6 @@ type error =
       ; actual : int
       }
   | Meta_snapshot_read_failed of string
-  | Stale_prune_meta_changed
-  | Stale_prune_lane_not_paused of Keeper_state_machine.phase
   | Task_discovery_failed of string
   | Prepare_persist_failed of Keeper_shutdown_store.error
   | Cancellation_failed of Keeper_shutdown_types.t
@@ -42,12 +40,6 @@ let error_to_string = function
       actual
   | Meta_snapshot_read_failed detail ->
     Printf.sprintf "Keeper shutdown metadata read failed: %s" detail
-  | Stale_prune_meta_changed ->
-    "stale paused Keeper metadata changed before durable prune prepare"
-  | Stale_prune_lane_not_paused phase ->
-    Printf.sprintf
-      "stale paused Keeper lane changed phase before durable prune prepare: expected paused, actual %s"
-      (Keeper_state_machine.phase_to_string phase)
   | Task_discovery_failed detail ->
     Printf.sprintf "Keeper shutdown task discovery failed: %s" detail
   | Prepare_persist_failed error -> Keeper_shutdown_store.error_to_string error
@@ -127,21 +119,6 @@ let validate_cleanup_reason reason (meta : Keeper_meta_contract.keeper_meta) =
   | Operator_stop_retain_meta
   | Operator_stop_remove_meta
   | Dead_tombstone_cleanup -> Ok ()
-  | Stale_paused_prune context ->
-    if not (Int.equal meta.meta_version context.meta_version)
-    then
-      Error
-        (Meta_snapshot_version_changed
-           { expected = context.meta_version; actual = meta.meta_version })
-    else if
-      meta.paused
-      && String.equal meta.updated_at context.last_updated
-      && Option.equal
-           Keeper_latched_reason.equal
-           meta.latched_reason
-           context.latched_reason
-    then Ok ()
-    else Error Stale_prune_meta_changed
   | Dashboard_keeper_purge context ->
     if Int.equal meta.meta_version context.meta_version
     then Ok ()
@@ -230,74 +207,60 @@ let prepare ~config ~(entry : Keeper_registry.registry_entry) ~request =
         if not (Atomic.get durable_prepare_committed)
         then rollback_reservation ~config ~keeper_name:entry.name operation_id)
       (fun () ->
-    (match current_entry ~config entry with
-     | Error error -> Error error
-     | Ok current ->
-       let stale_prune_phase_error =
-         match request.cleanup_intent.reason, current.phase with
-         | Stale_paused_prune _, Keeper_state_machine.Paused -> None
-         | Stale_paused_prune _, phase -> Some (Stale_prune_lane_not_paused phase)
-         | ( Operator_stop_retain_meta
-           | Operator_stop_remove_meta
-           | Dead_tombstone_cleanup
-           | Dashboard_keeper_purge _ )
-           , _ -> None
-       in
-       (match stale_prune_phase_error with
-        | Some error -> Error error
-        | None ->
-       (match
-          read_guarded_meta
-            ~config
-            ~observed:current.meta
-            ~cleanup_reason:request.cleanup_intent.reason
-        with
-        | Error _ as error -> error
-        | Ok durable_meta ->
-          (match
-             Keeper_current_task_reconcile.owned_active_tasks_snapshot_for_meta_strict
-               ~config
-               ~meta:durable_meta
-           with
-           | Error detail -> Error (Task_discovery_failed detail)
-           | Ok owned_snapshot ->
-          let owned_tasks = owned_snapshot.tasks in
-          let now = Masc_domain.now_iso () in
-          let turn_disposition = active_turn_of_snapshots reservation current in
-          let operation =
-            { schema_version
-            ; revision = 0
-            ; operation_id
-            ; keeper_name = current.name
-            ; lane_ownership = Registered_lane (Keeper_lane.id current.lane)
-            ; trace_id = durable_meta.runtime.trace_id
-            ; generation = durable_meta.runtime.generation
-            ; actor = request.actor
-            ; cleanup_intent = request.cleanup_intent
-            ; turn_disposition
-            ; expected_backlog_version = owned_snapshot.backlog_version
-            ; owned_task_ids =
-                List.map
-                  (fun task -> task.Keeper_current_task_reconcile.task_id)
-                  owned_tasks
-            ; join_evidence = None
-            ; phase = Prepared
-            ; created_at = now
-            ; updated_at = now
-            }
-          in
-          let persist_result =
-            Eio.Cancel.protect (fun () ->
-              match Keeper_shutdown_store.persist_new ~config operation with
-              | Ok () as committed ->
-                Atomic.set durable_prepare_committed true;
-                committed
-              | Error _ as error -> error)
-          in
-          (match persist_result with
-           | Error store_error ->
-             Error (Prepare_persist_failed store_error)
-           | Ok () -> Ok operation))))))
+         match current_entry ~config entry with
+         | Error error -> Error error
+         | Ok current ->
+           (match
+              read_guarded_meta
+                ~config
+                ~observed:current.meta
+                ~cleanup_reason:request.cleanup_intent.reason
+            with
+            | Error _ as error -> error
+            | Ok durable_meta ->
+              (match
+                 Keeper_current_task_reconcile.owned_active_tasks_snapshot_for_meta_strict
+                   ~config
+                   ~meta:durable_meta
+               with
+               | Error detail -> Error (Task_discovery_failed detail)
+               | Ok owned_snapshot ->
+                 let owned_tasks = owned_snapshot.tasks in
+                 let now = Masc_domain.now_iso () in
+                 let turn_disposition = active_turn_of_snapshots reservation current in
+                 let operation =
+                   { schema_version
+                   ; revision = 0
+                   ; operation_id
+                   ; keeper_name = current.name
+                   ; lane_ownership = Registered_lane (Keeper_lane.id current.lane)
+                   ; trace_id = durable_meta.runtime.trace_id
+                   ; generation = durable_meta.runtime.generation
+                   ; actor = request.actor
+                   ; cleanup_intent = request.cleanup_intent
+                   ; turn_disposition
+                   ; expected_backlog_version = owned_snapshot.backlog_version
+                   ; owned_task_ids =
+                       List.map
+                         (fun task -> task.Keeper_current_task_reconcile.task_id)
+                         owned_tasks
+                   ; join_evidence = None
+                   ; phase = Prepared
+                   ; created_at = now
+                   ; updated_at = now
+                   }
+                 in
+                 let persist_result =
+                   Eio.Cancel.protect (fun () ->
+                     match Keeper_shutdown_store.persist_new ~config operation with
+                     | Ok () as committed ->
+                       Atomic.set durable_prepare_committed true;
+                       committed
+                     | Error _ as error -> error)
+                 in
+                 (match persist_result with
+                  | Error store_error -> Error (Prepare_persist_failed store_error)
+                  | Ok () -> Ok operation))))
 ;;
 
 let prepare_dormant

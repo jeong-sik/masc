@@ -131,7 +131,7 @@ Monitoring, Command/Operations, Workspace 세부 화면, Lab, Logs는 이 문서
 | # | 기능 | 근거 |
 |---|---|---|
 | 6 | **Monitoring > Runtime** | runtime lane health, transport health |
-| 7 | **Monitoring > Fleet Health (tool monitor)** | tool call health, governance signals |
+| 7 | **Monitoring > Fleet Health (tool monitor)** | tool call health, Gate decision signals |
 | 8 | **Keeper Detail 강화** | 24h bucket, tool stats, composite phase |
 | 9 | **System Logs** | `logs` surface parity |
 | 10 | **Connector Status** | sidecar 상태 모니터링 |

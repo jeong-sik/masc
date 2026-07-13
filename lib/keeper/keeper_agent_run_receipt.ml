@@ -72,9 +72,6 @@ let finalize
    | Error err ->
      let status, exception_kind =
        match err with
-       | Agent_sdk.Error.Api (Llm_provider.Retry.Timeout { message })
-         when Keeper_error_classify.is_structural_oas_timeout_message message ->
-         "timeout", Some "oas_agent_execution_timeout"
        | Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionTimeout _) ->
          "timeout", Some "oas_agent_execution_timeout"
        | Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionIdleTimeout _) ->
@@ -285,8 +282,9 @@ let finalize
     | Ok _, Ok () -> turn_result_with_operator_disposition
     | Ok _, Error err_msg ->
       Error
-        (Agent_sdk.Error.Internal
-           (Printf.sprintf "execution_receipt_append_failed: %s" err_msg))
+        (Keeper_internal_error.sdk_error_of_masc_internal_error
+           (Keeper_internal_error.Receipt_persistence_failed
+              { detail = err_msg }))
   in
   let final_status =
     match final_result with

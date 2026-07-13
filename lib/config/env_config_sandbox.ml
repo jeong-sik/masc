@@ -4,9 +4,8 @@
     rationale.  Notes:
 
     - Fresh read per call.
-    - The four currently-hardcoded values
-      ([Cleanup.managed_sleep_sec], [Preflight.min_timeout_sec],
-      [Preflight.max_timeout_sec], [Shell_timeout.Cleanup_rm]) are
+    - The currently-hardcoded values
+      ([Cleanup.managed_sleep_sec], [Shell_timeout.Cleanup_rm]) are
       exposed as getters that return the historical literal —
       enabling future env-override without behavior change. *)
 
@@ -58,11 +57,6 @@ module Cleanup = struct
   let enabled () =
     get_bool ~default:true "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED"
 
-  let stale_after_sec () =
-    float_of_int
-      (max 60
-         (get_int ~default:21_600 "MASC_KEEPER_SANDBOX_CLEANUP_STALE_AFTER_SEC"))
-
   let interval_sec () =
     float_of_int
       (max 10
@@ -80,9 +74,6 @@ module Runtime = struct
   let docker_image () =
     get_string ~default:"masc-keeper-sandbox:local"
       "MASC_KEEPER_SANDBOX_DOCKER_IMAGE"
-
-  let git_dispatch () =
-    get_bool ~default:true "MASC_KEEPER_SANDBOX_GIT_DISPATCH"
 
   let docker_playground_enabled () =
     get_bool ~default:false "MASC_KEEPER_DOCKER_PLAYGROUND"
@@ -107,17 +98,6 @@ module Preflight = struct
   let enabled () =
     get_bool ~default:true "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED"
 
-  (* P2c will optionally env-wire these; today they are literal-pinned
-     so callers in keeper_sandbox_runtime stay unchanged in P2a. *)
-  let min_timeout_sec () = 5.0
-  let max_timeout_sec () = 20.0
-
-  (* Read-only canonical list — see .mli for the why-not-env note. *)
-  let required_commands () =
-    [ "sh"; "bash"; "cat"; "find"; "head"; "tail"; "wc"
-    ; "git"; "gh"; "rg"; "tree"; "jq"
-    ; "python3"; "node"; "npm"; "make"; "opam"; "dune"; "ssh"
-    ]
 end
 
 (* --------------------------------------------------------------- *)
@@ -128,8 +108,6 @@ module Shell_timeout = struct
   type bucket =
     | Io
     | Read
-    | Git_meta
-    | Gh_min
     | User_max
     | Cleanup_rm
     | Unknown of string
@@ -139,38 +117,16 @@ module Shell_timeout = struct
   let bucket_key = function
     | Io -> "io"
     | Read -> "read"
-    | Git_meta -> "git_meta"
-    | Gh_min -> "gh_min"
     | User_max -> "user_max"
     | Cleanup_rm -> "cleanup_rm"
     | Unknown s -> s
 
   let known_buckets () =
-    [ Io; Read; Git_meta; Gh_min; User_max; Cleanup_rm ]
-
-  (* [Gh_min] is the only read-only floor bucket — see .mli: operators
-     MUST NOT lower it via env (doing so runtimes 401 retries, #8688).
-     Exhaustive match (warning 4) so a new bucket forces a deliberate
-     floor/non-floor classification here, once, rather than at every
-     call site that branches on it. *)
-  type timeout_floor =
-    | Tool_dispatch_floor
-
-  let timeout_floor : bucket -> timeout_floor option = function
-    | Gh_min -> Some Tool_dispatch_floor
-    | Io | Read | Git_meta | User_max | Cleanup_rm | Unknown _ -> None
-
-  let timeout_floor_default_sec = function
-    | Tool_dispatch_floor -> 15.0
-
-  let is_floor_bucket bucket =
-    Option.is_some (timeout_floor bucket)
+    [ Io; Read; User_max; Cleanup_rm ]
 
   let known_default_sec = function
     | Io -> Some 30.0
     | Read -> Some 15.0
-    | Git_meta -> Some 5.0
-    | Gh_min -> Some (timeout_floor_default_sec Tool_dispatch_floor)
     | User_max -> Some 180.0
     | Cleanup_rm -> Some 10.0
     | Unknown _ -> None
@@ -199,26 +155,20 @@ module Shell_timeout = struct
     | None -> None
 
   let timeout_sec ~bucket () =
-    match timeout_floor bucket with
-    | Some floor ->
-      (* Read-only floor — see .mli.  Operators MUST NOT lower this
-         via env; doing so runtimes 401 retries (#8688). *)
-      timeout_floor_default_sec floor
+    let per_bucket_env = per_bucket_env_var ~bucket in
+    match trimmed_value_opt per_bucket_env with
+    | Some v ->
+      Safe_ops.float_of_string_with_default
+        ~default:global_default_sec v
     | None ->
-      let per_bucket_env = per_bucket_env_var ~bucket in
-      match trimmed_value_opt per_bucket_env with
-      | Some v ->
-        Safe_ops.float_of_string_with_default
-          ~default:global_default_sec v
-      | None ->
-        match known_default_sec bucket with
-        | Some d -> d
-        | None ->
-          match trimmed_value_opt global_env_var with
-          | Some v ->
-            Safe_ops.float_of_string_with_default
-              ~default:global_default_sec v
-          | None -> global_default_sec
+      (match known_default_sec bucket with
+       | Some d -> d
+       | None ->
+         match trimmed_value_opt global_env_var with
+         | Some v ->
+           Safe_ops.float_of_string_with_default
+             ~default:global_default_sec v
+         | None -> global_default_sec)
 end
 
 (* --------------------------------------------------------------- *)
@@ -238,13 +188,6 @@ let entry_env_overridable ~env_var (value : Yojson.Safe.t) : Yojson.Safe.t =
     [ "value", value
     ; "source", `String source
     ; "env_var", `String env_var
-    ]
-
-let entry_floor (value : Yojson.Safe.t) : Yojson.Safe.t =
-  `Assoc
-    [ "value", value
-    ; "source", `String "load_bearing_floor"
-    ; "env_var", `Null
     ]
 
 let entry_hardcoded (value : Yojson.Safe.t) : Yojson.Safe.t =
@@ -292,10 +235,6 @@ let raw_cleanup () : Yojson.Safe.t =
     [ "enabled",
       entry_env_overridable ~env_var:"MASC_KEEPER_SANDBOX_CLEANUP_ENABLED"
         (bool_v (Cleanup.enabled ()))
-    ; "stale_after_sec",
-      entry_env_overridable
-        ~env_var:"MASC_KEEPER_SANDBOX_CLEANUP_STALE_AFTER_SEC"
-        (float_v (Cleanup.stale_after_sec ()))
     ; "interval_sec",
       entry_env_overridable
         ~env_var:"MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC"
@@ -309,9 +248,6 @@ let raw_runtime () : Yojson.Safe.t =
     [ "docker_image",
       entry_env_overridable ~env_var:"MASC_KEEPER_SANDBOX_DOCKER_IMAGE"
         (string_v (Runtime.docker_image ()))
-    ; "git_dispatch",
-      entry_env_overridable ~env_var:"MASC_KEEPER_SANDBOX_GIT_DISPATCH"
-        (bool_v (Runtime.git_dispatch ()))
     ; "docker_playground_enabled",
       entry_env_overridable ~env_var:"MASC_KEEPER_DOCKER_PLAYGROUND"
         (bool_v (Runtime.docker_playground_enabled ()))
@@ -330,14 +266,6 @@ let raw_preflight () : Yojson.Safe.t =
       entry_env_overridable
         ~env_var:"MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED"
         (bool_v (Preflight.enabled ()))
-    ; "min_timeout_sec",
-      entry_hardcoded (float_v (Preflight.min_timeout_sec ()))
-    ; "max_timeout_sec",
-      entry_hardcoded (float_v (Preflight.max_timeout_sec ()))
-    ; "required_commands",
-      entry_floor
-        (`List (List.map (fun s -> `String s)
-                  (Preflight.required_commands ())))
     ]
 
 let raw_shell_timeout () : Yojson.Safe.t =
@@ -345,11 +273,9 @@ let raw_shell_timeout () : Yojson.Safe.t =
     let key = Shell_timeout.bucket_key b in
     let value = float_v (Shell_timeout.timeout_sec ~bucket:b ()) in
     let entry =
-      if Shell_timeout.is_floor_bucket b then entry_floor value
-      else
-        entry_env_overridable
-          ~env_var:(Shell_timeout.per_bucket_env_var ~bucket:b)
-          value
+      entry_env_overridable
+        ~env_var:(Shell_timeout.per_bucket_env_var ~bucket:b)
+        value
     in
     key, entry
   in

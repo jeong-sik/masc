@@ -20,7 +20,7 @@ mkdir -p "$CONFIG_DIR"
 
 # 1. Catalogs first (runtime.toml must exist before the team is seeded, and the
 #    server only backfills a config root it did not create).
-for f in runtime.toml tool_policy.toml oas-models.toml; do
+for f in runtime.toml oas-models.toml; do
   if [ -f "$SEED_DIR/$f" ] && [ ! -e "$CONFIG_DIR/$f" ]; then
     cp "$SEED_DIR/$f" "$CONFIG_DIR/$f"; log "seeded $f"
   fi

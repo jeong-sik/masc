@@ -18,7 +18,6 @@ type keeper_result =
       ; ttl_expired_ephemeral : int
       ; ttl_expired_non_ephemeral : int
       ; ttl_expired_by_category : (string * int) list
-      ; dedup_removed : int
       ; written : int
       }
   | Keeper_error of
@@ -34,7 +33,6 @@ type t =
   ; ttl_expired_ephemeral : int
   ; ttl_expired_non_ephemeral : int
   ; ttl_expired_by_category : (string * int) list
-  ; dedup_removed : int
   ; written : int
   ; error_count : int
   }

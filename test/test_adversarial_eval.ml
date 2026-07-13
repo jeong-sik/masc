@@ -33,8 +33,8 @@ let test_classify_design_doc () =
        (Adversarial_eval.classify_path "notes/system-architecture.md"))
 
 let test_classify_history () =
-  Alcotest.(check bool) "governance_v2.json is banned" true
-    (Option.is_some (Adversarial_eval.classify_path "governance_v2.json"));
+  Alcotest.(check bool) "session_log.json is banned" true
+    (Option.is_some (Adversarial_eval.classify_path "session_log.json"));
   Alcotest.(check bool) "session_log.jsonl is banned" true
     (Option.is_some (Adversarial_eval.classify_path "session_log.jsonl"));
   Alcotest.(check bool) "retrospective.json is banned" true
@@ -52,8 +52,8 @@ let test_classify_allowed () =
     (Option.is_none (Adversarial_eval.classify_path "test_foo.ml"));
   Alcotest.(check bool) "spec_decoder.ml is allowed" true
     (Option.is_none (Adversarial_eval.classify_path "lib/spec_decoder.ml"));
-  Alcotest.(check bool) "governance source file is allowed" true
-    (Option.is_none (Adversarial_eval.classify_path "lib/governance_pipeline.ml"));
+  Alcotest.(check bool) "ordinary source file is allowed" true
+    (Option.is_none (Adversarial_eval.classify_path "lib/gate_pipeline.ml"));
   Alcotest.(check bool) "state history source file is allowed" true
     (Option.is_none (Adversarial_eval.classify_path "lib/state_history_parser.ml"))
 

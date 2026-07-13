@@ -16,12 +16,6 @@ type implementation_status =
   | Simulation
   | Placeholder
 
-type effect_domain =
-  | Read_only
-  | Masc_workspace
-  | Playground_write
-  | Host_repo_write
-
 type metadata = {
   visibility : visibility;
   lifecycle : lifecycle;
@@ -32,22 +26,17 @@ type metadata = {
   allow_direct_call_when_hidden : bool;
   readonly : bool option;
   mcp_context_required : bool option;
-  destructive : bool option;
   idempotent : bool option;
-  effect_domain : effect_domain option;
-  requires_actor_binding : bool option;
 }
 
 type execution_policy_axis =
   | Read_only_axis
   | Idempotent_axis
-  | Destructive_axis
   | Mcp_context_required_axis
 
 type execution_policy = {
   is_read_only : bool;
   is_idempotent : bool;
-  is_destructive : bool;
   mcp_context_required : bool;
 }
 
@@ -77,15 +66,6 @@ val public_mcp_tools : string list
 val is_public_mcp : string -> bool
 (** O(1) membership check against the public surface. *)
 
-val effective_registered_visibility :
-  name:string -> declared:visibility -> visibility
-(** Apply the immutable system-internal surface override used by
-    {!Tool_spec.register}. Definition builders can use this before runtime
-    registration without depending on mutable catalog initialization order. *)
-
-val full_surface_override : unit -> bool
-(** [true] when MASC_FULL_SURFACE=1 is set. *)
-
 (** {1 Metadata lookup} *)
 
 val metadata : string -> metadata
@@ -93,8 +73,6 @@ val execution_policy_of_metadata :
   tool_name:string -> metadata -> (execution_policy, execution_policy_error) result
 val execution_policy_error_to_string : execution_policy_error -> string
 val implementation_status : string -> implementation_status
-val effect_domain : string -> effect_domain option
-val requires_actor_binding : string -> bool
 val canonical_tool_name : string -> string
 val is_placeholder : string -> bool
 val is_visible : ?include_hidden:bool -> string -> bool
@@ -105,7 +83,6 @@ val allow_direct_call : string -> bool
 val visibility_to_string : visibility -> string
 val lifecycle_to_string : lifecycle -> string
 val implementation_status_to_string : implementation_status -> string
-val effect_domain_to_string : effect_domain -> string
 
 (** {1 JSON metadata} *)
 

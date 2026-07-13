@@ -34,7 +34,6 @@ let startup_prune_jsonl (state : Mcp_server.server_state) =
      let total =
        prune_dir (Filename.concat masc "audit")
        + prune_dir (Filename.concat masc "telemetry")
-       + prune_dir (Filename.concat (Filename.concat masc "governance") "judgments")
        + prune_dir tool_metrics_dir
        + prune_dir (Filename.concat masc "messages")
        + prune_dir (Filename.concat masc "events")

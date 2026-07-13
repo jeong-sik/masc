@@ -12,7 +12,6 @@
   keeper_timing
   keeper_memory_llm_summary_outcome
   keeper_memory_recall_exn_class
-  keeper_user_visible_reply_source
   keeper_chat_store_operation
   keeper_compact_audit_retention_outcome
   keeper_execution_receipt_outcome_kind

@@ -165,7 +165,7 @@ let blueprint_of_route : Route.t -> blueprint = function
       vow =
         "Operator action should carry intent, target, and evidence before it \
          touches a live keeper.";
-      measure = "Pending approvals, active holds, and restart budget.";
+      measure = "Pending approvals, active holds, and lane restart observations.";
       next_step = "Wire guarded actions after the audit trail is visible.";
       endpoint = "/api/v1/operator/*";
     }

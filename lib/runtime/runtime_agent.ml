@@ -63,7 +63,6 @@ type stop_reason =
   Runtime_agent_context.stop_reason =
   | Completed
   | TurnBudgetExhausted of { turns_used : int; limit : int }
-  | MutationBoundaryReached of { turns_used : int; tool_name : string option }
   | Yielded_to_chat_waiting of { turns_used : int }
   | Yielded_to_durable_stimulus of { turns_used : int }
   | InputRequired of {
@@ -205,36 +204,6 @@ let provider_supports_inline_tools =
 let provider_supports_runtime_mcp_lane =
   Runtime_transport.provider_supports_runtime_mcp_lane
 
-let dedupe_preserve_order =
-  Runtime_transport.dedupe_preserve_order
-
-let public_mcp_tool_names_of_oas_tools =
-  Runtime_transport.public_mcp_tool_names_of_oas_tools
-
-let public_mcp_tool_requires_bound_actor =
-  Runtime_transport.public_mcp_tool_requires_bound_actor
-
-let runtime_mcp_tool_requires_bound_actor =
-  Runtime_transport.runtime_mcp_tool_requires_bound_actor
-
-let runtime_mcp_policy_with_masc_agent_name =
-  Runtime_transport.runtime_mcp_policy_with_masc_agent_name
-
-let codex_cli_can_auth_keeper_bound_runtime_mcp =
-  Runtime_transport.codex_cli_can_auth_keeper_bound_runtime_mcp
-
-let runtime_mcp_policy_for_provider =
-  Runtime_transport.runtime_mcp_policy_for_provider
-
-let public_mcp_tools_of_oas_tools =
-  Runtime_transport.public_mcp_tools_of_oas_tools
-
-let tool_names_are_public_mcp =
-  Runtime_transport.tool_names_are_public_mcp
-
-let public_mcp_runtime_policy_of_tool_names =
-  Runtime_transport.public_mcp_runtime_policy_of_tool_names
-
 let runtime_mcp_policy_of_tool_names =
   Runtime_transport.runtime_mcp_policy_of_tool_names
 
@@ -299,22 +268,22 @@ let request_runtime_fields_on_base_config
     seed = req_config.seed;
   }
 
-let provider_resource_slot_transport
+let provider_resource_observation_transport
     ~(kind : Fd_accountant.kind)
     (transport : Llm_provider.Llm_transport.t)
   : Llm_provider.Llm_transport.t =
   { complete_sync =
       (fun req ->
-        Fd_accountant.with_slot ~kind (fun () ->
+        Fd_accountant.observe ~kind (fun () ->
           transport.complete_sync req));
     complete_stream =
       (fun ?on_telemetry ~on_event req ->
-        Fd_accountant.with_slot ~kind (fun () ->
+        Fd_accountant.observe ~kind (fun () ->
           transport.complete_stream ?on_telemetry ~on_event req));
   }
 
-let provider_http_slot_transport transport =
-  provider_resource_slot_transport ~kind:Provider_http transport
+let provider_http_observation_transport transport =
+  provider_resource_observation_transport ~kind:Provider_http transport
 
 let provider_config_preserving_http_transport
     ~sw
@@ -340,7 +309,7 @@ let provider_config_preserving_http_transport
         request_runtime_fields_on_base_config ~base:provider_cfg req.config;
     }
   in
-  provider_http_slot_transport
+  provider_http_observation_transport
     { complete_sync =
       (fun req ->
         (* RFC-0095 Phase 0 diagnostic trace — verify which transport path is invoked
@@ -881,7 +850,7 @@ module For_testing = struct
   let request_runtime_fields_on_base_config =
     request_runtime_fields_on_base_config
 
-  let provider_http_slot_transport = provider_http_slot_transport
+  let provider_http_observation_transport = provider_http_observation_transport
   let runtime_id_of_config = runtime_id_of_config
   let runtime_observation_for_completed_config =
     runtime_observation_for_completed_config
@@ -1011,8 +980,6 @@ let run_duration_ms_since started_at =
 let dashboard_status_of_stop_reason = function
   | Completed -> Dashboard_oas_bridge.Success
   | TurnBudgetExhausted _ -> Dashboard_oas_bridge.Error { transient = false }
-  | MutationBoundaryReached _ ->
-      Dashboard_oas_bridge.Cancelled { reason = "mutation_boundary_reached" }
   | Yielded_to_chat_waiting _ ->
       Dashboard_oas_bridge.Cancelled { reason = "yielded_to_chat_waiting" }
   | Yielded_to_durable_stimulus _ ->
@@ -1102,6 +1069,7 @@ let resume_from_checkpoint
         (Agent_sdk.Agent.resume ~net ~checkpoint:prepared_resume.patched_checkpoint
            ~tools:config.tools ?context:config.context
            ~options ~config:prepared_resume.agent_config
+           ?checkpoint_sink:config.checkpoint_sink
            ?tool_failure_judge:config.tool_failure_judge
            ~auto_context_overflow_retry:config.oas_auto_context_overflow_retry
            ()))
@@ -1557,15 +1525,16 @@ let run_with_masc_tools
     ?on_yield
     ?on_resume
     (goal : string)
-	  : (run_result, Agent_sdk.Error.sdk_error) result =
+  : (run_result, Agent_sdk.Error.sdk_error) result =
   match
-    public_mcp_runtime_policy_of_tool_names
+    runtime_mcp_policy_of_tool_names
       ~base_path
+      ~agent_name:config.name
       (List.map (fun (td : Masc_domain.tool_schema) -> td.name) masc_tools)
   with
   | Some runtime_mcp_policy
-    when Provider_tool_support.provider_supports_runtime_mcp_policy
-           config.provider_cfg runtime_mcp_policy ->
+    when Provider_tool_support.provider_supports_runtime_mcp_lane
+           config.provider_cfg ->
       let config = { config with runtime_mcp_policy = Some runtime_mcp_policy } in
       run ~sw ~net ~config ?on_event ?on_yield ?on_resume goal
   | _ when masc_tools = [] ->

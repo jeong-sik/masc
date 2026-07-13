@@ -12,15 +12,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
   let int_ key = Keeper_toml_loader.toml_int_opt doc (k key) in
   let strs key = Keeper_toml_loader.toml_string_list doc (k key) in
   let has key = List.mem_assoc (k key) doc in
-  let has_raw key = List.mem_assoc key doc in
   let oas_env = extract_oas_env_from_doc doc in
-  let tool_access_defaults_result =
-    let key = k "tool_access" in
-    if has_raw key then
-      let tools = Keeper_toml_loader.toml_string_list doc key in
-      Ok (Some (normalize_name_list tools))
-    else Ok None
-  in
   let per_provider_timeout_state, per_provider_timeout =
     per_provider_timeout_of_toml
       ~source:"keeper TOML"
@@ -113,19 +105,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
     | false, false -> Ok ()
   in
   let result =
-    Result.bind result (fun () ->
-        let has_proactive_idle = has "proactive_idle_sec" in
-        let has_proactive_cooldown = has "proactive_cooldown_sec" in
-        match (has_proactive_idle, has_proactive_cooldown) with
-        | false, true ->
-            Error
-              "proactive_cooldown_sec is set but proactive_idle_sec is missing"
-        | true, false ->
-            Error
-              "proactive_idle_sec is set but proactive_cooldown_sec is missing"
-        | _ -> Ok ())
-  in
-  let result =
     Result.bind result (fun () -> runtime_assignment_result)
   in
   let result =
@@ -137,13 +116,8 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         (fun _ -> ())
         (parse_unified_max_tokens_override_of_oas_env oas_env))
   in
-  (* [tool_access_defaults_result] must remain the final bind: its successful
-     payload is consumed by the record-building [Result.map] below. *)
-  let result =
-    Result.bind result (fun () -> tool_access_defaults_result)
-  in
   Result.map
-    (fun tool_access ->
+    (fun () ->
       {
         id = None;
         manifest_path = None;
@@ -153,12 +127,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         autoboot_enabled = bool_ "autoboot_enabled";
         mention_targets = strs "mention_targets";
         proactive_enabled = bool_ "proactive_enabled";
-        proactive_idle_sec = int_ "proactive_idle_sec";
-        proactive_cooldown_sec = int_ "proactive_cooldown_sec";
-        shards =
-          (match strs "shards" with
-           | [] -> None
-           | xs -> Some xs);
         allowed_paths =
           if has "allowed_paths" then Some (strs "allowed_paths")
           else None;
@@ -169,8 +137,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
           Option.bind (str "network_mode") network_mode_of_string;
         multimodal_policy =
           Option.bind (str "multimodal_policy") multimodal_policy_of_string;
-        tool_access;
-        tool_denylist = normalize_name_list_opt (strs "tool_denylist");
         active_goal_ids =
           if has "active_goal_ids" then
             Some (normalize_name_list (strs "active_goal_ids"))
@@ -179,7 +145,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         telemetry_feedback_window_hours = int_ "telemetry_feedback_window_hours";
         per_provider_timeout_state;
         per_provider_timeout;
-        always_approve = bool_ "always_approve";
+        always_allow = bool_ "always_allow";
         oas_env;
         unknown_toml_keys = [];
       })
@@ -196,21 +162,16 @@ let parsed_field_key_names =
   ; "autoboot_enabled"
   ; "mention_targets"
   ; "proactive_enabled"
-  ; "proactive_idle_sec"
-  ; "proactive_cooldown_sec"
-  ; "shards"
   ; "allowed_paths"
   ; "sandbox_profile"
   ; "sandbox_image"
   ; "network_mode"
   ; "multimodal_policy"
-  ; "tool_access"
-  ; "tool_denylist"
   ; "active_goal_ids"
   ; "telemetry_feedback_enabled"
   ; "telemetry_feedback_window_hours"
   ; "per_provider_timeout"
-  ; "always_approve"
+  ; "always_allow"
   ]
 
 (** Canonical TOML key names used by [detect_unknown_keeper_toml_keys].
@@ -230,21 +191,16 @@ let canonical_keeper_toml_key_names =
   ; "autoboot_enabled"
   ; "mention_targets"
   ; "proactive_enabled"
-  ; "proactive_idle_sec"
-  ; "proactive_cooldown_sec"
-  ; "shards"
   ; "allowed_paths"
   ; "sandbox_profile"
   ; "sandbox_image"
   ; "network_mode"
   ; "multimodal_policy"
-  ; "tool_access"
-  ; "tool_denylist"
   ; "active_goal_ids"
   ; "telemetry_feedback_enabled"
   ; "telemetry_feedback_window_hours"
   ; "per_provider_timeout"
-  ; "always_approve"
+  ; "always_allow"
   ]
 
 let loader_level_keeper_toml_key_names = [ "base" ]
@@ -361,17 +317,11 @@ let merge_keeper_profile_defaults
     mention_targets =
       merge_string_list ~base:base.mention_targets overlay.mention_targets;
     proactive_enabled = prefer overlay.proactive_enabled base.proactive_enabled;
-    proactive_idle_sec = prefer overlay.proactive_idle_sec base.proactive_idle_sec;
-    proactive_cooldown_sec =
-      prefer overlay.proactive_cooldown_sec base.proactive_cooldown_sec;
-    shards = prefer overlay.shards base.shards;
     allowed_paths = prefer overlay.allowed_paths base.allowed_paths;
     sandbox_profile = prefer overlay.sandbox_profile base.sandbox_profile;
     sandbox_image = prefer overlay.sandbox_image base.sandbox_image;
     network_mode = prefer overlay.network_mode base.network_mode;
     multimodal_policy = prefer overlay.multimodal_policy base.multimodal_policy;
-    tool_access = prefer overlay.tool_access base.tool_access;
-    tool_denylist = prefer overlay.tool_denylist base.tool_denylist;
     active_goal_ids = prefer overlay.active_goal_ids base.active_goal_ids;
     telemetry_feedback_enabled =
       prefer overlay.telemetry_feedback_enabled base.telemetry_feedback_enabled;
@@ -380,7 +330,7 @@ let merge_keeper_profile_defaults
         base.telemetry_feedback_window_hours;
     per_provider_timeout_state;
     per_provider_timeout;
-    always_approve = prefer overlay.always_approve base.always_approve;
+    always_allow = prefer overlay.always_allow base.always_allow;
     oas_env =
       (let overlay_keys = List.map fst overlay.oas_env in
        let surviving_base =

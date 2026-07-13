@@ -15,7 +15,6 @@ import {
 describe('swimlaneSegmentColor', () => {
   it('returns alarm color for alarm values', () => {
     expect(swimlaneSegmentColor('failing')).toBe('bg-[var(--bad-50)]')
-    expect(swimlaneSegmentColor('gate_rejected')).toBe('bg-[var(--bad-50)]')
     expect(swimlaneSegmentColor('exhausted')).toBe('bg-[var(--bad-50)]')
   })
 
@@ -83,7 +82,7 @@ describe('filterTransitionHistory', () => {
     { ts: 1200, field: 'KTC', from: 'Idle', to: 'Running' },
     { ts: 1300, field: 'KSM', from: 'Stable', to: 'Compacting' },
     { ts: 1400, field: 'KMC', from: 'accumulating', to: 'Overflowed' },
-    { ts: 1500, field: 'KDP', from: 'undecided', to: 'gate_rejected' },
+    { ts: 1500, field: 'KDP', from: 'guard_ok', to: 'tool_policy_selected' },
   ]
 
   it('returns input reference unchanged for empty query', () => {

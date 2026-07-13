@@ -2,7 +2,6 @@
 
     Extracted from [Keeper_agent_run.run_turn] Step 8 body (RFC-0147 PR-4). *)
 
-let default_post_turn_procedure_candidate_limit = 8
 
 let run
   ~config
@@ -24,13 +23,9 @@ let run
      Reading the live accumulator from a detached fiber could fold a later
      turn's emissions into this turn's notes. *)
   let tool_results_snapshot =
-    if Keeper_tool_emission_hook.masc_tool_emission_enabled ()
-    then
-      Some
-        (Keeper_tool_emission_hook.snapshot
-           (Keeper_tool_emission_hook.accumulator_for_keeper
-              meta.Keeper_meta_contract.name))
-    else None
+    Keeper_tool_emission_hook.snapshot
+      (Keeper_tool_emission_hook.accumulator_for_keeper
+         meta.Keeper_meta_contract.name)
   in
   (* (1) deterministic write, (2) librarian extraction, (3) compaction run on
      this keeper's memory lane (RFC-0257), detached from the turn lane. All
@@ -41,10 +36,11 @@ let run
   let memory_series () =
   (try
      let notes_written =
-       match tool_results_snapshot with
-       | Some tool_results ->
-         Memory.append_from_tool_results config meta ~turn ~results:tool_results
-       | None -> 0
+       Memory.append_from_tool_results
+         config
+         meta
+         ~turn
+         ~results:tool_results_snapshot
      in
      let kinds_written =
        if notes_written > 0 then [ "long_term" ] else []
@@ -115,42 +111,6 @@ let run
        ();
      Log.Keeper.warn ~keeper_name:meta.name
        "delegation_requests failed: %s"
-       (Printexc.to_string exn));
-
-  (* Memory OS -> draft skill loop: after librarian facts are durable, project
-     validated approaches / lessons into reviewable draft skill artifacts. This
-     stays advisory and never mutates the keeper tool surface. *)
-  (try
-     match
-       Skill_candidate_store.write_post_turn_candidates
-         ~base_path:config.base_path
-         ~keeper_id:meta.name
-         ~fact_tail_limit:Keeper_memory_os_io.fact_store_max
-         ~procedure_limit:default_post_turn_procedure_candidate_limit
-     with
-     | Ok [] -> ()
-     | Ok stored ->
-       Log.Keeper.info ~keeper_name:meta.name
-         "draft_skill_candidates wrote=%d dir=%s"
-         (List.length stored)
-         (Skill_candidate_store.drafts_dir ~base_path:config.base_path)
-     | Error msg ->
-       Otel_metric_store.inc_counter
-         Keeper_metrics.(to_string DispatchEventFailures)
-         ~labels:[ "keeper", meta.name; "site", "draft_skill_candidates" ]
-         ();
-       Log.Keeper.warn ~keeper_name:meta.name
-         "draft_skill_candidates failed: %s"
-         msg
-   with
-   | Eio.Cancel.Cancelled _ as e -> raise e
-   | exn ->
-     Otel_metric_store.inc_counter
-       Keeper_metrics.(to_string DispatchEventFailures)
-       ~labels:[ "keeper", meta.name; "site", "draft_skill_candidates" ]
-       ();
-     Log.Keeper.warn ~keeper_name:meta.name
-       "draft_skill_candidates failed: %s"
        (Printexc.to_string exn));
 
   (* Memory bank compaction: dedup + consolidate if over threshold. *)

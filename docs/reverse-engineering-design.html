@@ -547,7 +547,7 @@
         <h2>Keeper Turn 순서도</h2>
         <p class="section-intro">Keeper는 현재 가장 큰 리팩토링 축입니다. heartbeat loop, registry FSM, OAS turn driver, receipt/audit, task acquisition guard가 한 턴 안에서 만납니다.</p>
         <div class="flow row">
-          <div class="node keeper"><h4>Heartbeat loop</h4><p>presence, smart heartbeat, approval expiry, snapshots.</p></div>
+          <div class="node keeper"><h4>Heartbeat loop</h4><p>exact cadence, directed wake, presence, snapshots.</p></div>
           <div class="node keeper"><h4>Board/event triage</h4><p>mentions, board events, scope messages.</p></div>
           <div class="node keeper"><h4>Unified turn</h4><p>phase gate, prompt, tool surface, budget, retry.</p></div>
           <div class="node common"><h4>OAS Agent.run</h4><p>provider stream, tools, checkpoint, raw trace.</p></div>
@@ -555,7 +555,7 @@
         </div>
         <div class="sequence">
           <div class="step"><div><strong>Keepalive fiber reads current keeper meta and syncs registry.</strong><span>Disk meta mtime gate avoids reparse storms; registry remains dashboard live source.</span><span class="ref">lib/keeper/keeper_heartbeat_loop.ml:1706-1748</span></div></div>
-          <div class="step"><div><strong>Heartbeat freshness and failure thresholds are checked.</strong><span>Consecutive heartbeat failures set structured failure reason and crash the fiber for supervisor restart.</span><span class="ref">lib/keeper/keeper_heartbeat_loop.ml:1761-1781</span></div></div>
+          <div class="step"><div><strong>Every live lane evaluates the cycle.</strong><span>Busy, idle, observer count, and prior activity remain observations and never suppress the cycle.</span><span class="ref">lib/keeper/keeper_heartbeat_loop.ml</span></div></div>
           <div class="step"><div><strong>Board events are collected before dispatch.</strong><span>Warmup controls whether keeper can act on events; pending events feed the unified turn.</span><span class="ref">lib/keeper/keeper_heartbeat_loop.ml:1801-1810</span></div></div>
           <div class="step"><div><strong><code>run_keeper_cycle</code> brackets the turn.</strong><span>Phase/runtime gates, event-bus tracking, OAS timeout/retry, post-turn lifecycle, and task acquisition live here.</span><span class="ref">lib/keeper/keeper_unified_turn.ml:122, :198, :611, :893, :2360, :2464</span></div></div>
           <div class="step"><div><strong><code>Keeper_turn_driver.run_named</code> enters the OAS runtime loop.</strong><span>Resolves providers, enforces tool support and admission queue, then calls OAS Agent.run.</span><span class="ref">lib/keeper/keeper_turn_driver.mli:145-210</span></div></div>
@@ -965,7 +965,7 @@
               </li>
               <li>
                 <strong>Heartbeat loop initializes per-keeper runtime state</strong>
-                <span>It creates timing rings, work-as-heartbeat refs, smart heartbeat config, shared OAS context, and meta mtime cache.</span>
+                <span>It creates timing rings, work-as-heartbeat refs, shared OAS context, wake-source state, and meta mtime cache.</span>
                 <code>lib/keeper/keeper_heartbeat_loop.ml:1648-1705</code>
               </li>
               <li>
@@ -974,9 +974,9 @@
                 <code>lib/keeper/keeper_heartbeat_loop.ml:1706-1748</code>
               </li>
               <li>
-                <strong>Smart heartbeat and presence sync decide whether work proceeds</strong>
-                <span>Presence is synced only after smart heartbeat gate allows the cycle; repeated heartbeat failures can crash the keeper fiber.</span>
-                <code>lib/keeper/keeper_heartbeat_loop.ml:1749-1781</code>
+                <strong>Every live lane reaches presence and scheduling evaluation</strong>
+                <span>Only explicit lifecycle pause/stop prevents dispatch; heartbeat failures remain observed without becoming a fleet-wide or lane-stopping threshold.</span>
+                <code>lib/keeper/keeper_heartbeat_loop.ml</code>
               </li>
               <li>
                 <strong>Wake flag is only a hint; event queue carries payload</strong>
@@ -1126,11 +1126,11 @@
               </div>
               <div>
                 <h4>보존해야 할 동작</h4>
-                <p>expected_version CAS, joined-agent claim gate, Done-to-verification redirect, pre-mutation verification callback failure behavior, self-approval rejection, legacy goal title marker read-compat.</p>
+                <p>expected_version CAS, exact assignee transition preconditions, nonterminal unavailable-verdict behavior, and legacy goal title marker read-compat.</p>
               </div>
               <div>
                 <h4>검증</h4>
-                <p><code>TaskLifecycle.tla</code>, <code>test_verification_fsm.ml</code>, <code>test_keeper_task_dispatch.ml</code>, <code>test_goal_tools.ml</code>, goal verification quorum tests.</p>
+                <p><code>TaskLifecycle.tla</code>, <code>test_workspace_task_lifecycle.ml</code>, <code>test_tool_task_coverage.ml</code>, <code>test_goal_tools.ml</code>, goal verification quorum tests.</p>
               </div>
             </div>
           </article>
@@ -1276,10 +1276,10 @@
           <div class="evidence-box">
             <h4>4. Task and Goal pure reducers</h4>
             <ul>
-              <li>Task reducer: status/action/actor/version/verification flag -> decision</li>
+              <li>Task reducer: status/action/actor/version/configured LLM verdict -> decision</li>
               <li>Goal reducer: phase/action/actor/policy/approval flag -> decision</li>
               <li>목표: tool handler와 persistence를 얇게 만들고 상태 전이를 한 곳에서 검증.</li>
-              <li>보호 테스트: TaskLifecycle TLA, goal quorum, self-approval, Done-to-verification redirect, verification callback success then backlog write failure recovery.</li>
+              <li>보호 테스트: TaskLifecycle TLA, goal quorum, exact assignee preconditions, LLM verdict unavailable/reject/pass, and backlog write failure recovery.</li>
             </ul>
           </div>
           <div class="evidence-box">
@@ -1532,9 +1532,9 @@
             </tr>
             <tr>
               <td><code>task-373</code></td>
-              <td>task transition과 Done-to-verification behavior를 고정한다.</td>
-              <td>claimed/done redirect, verification request creation, self-approval rejection, expected-version failure를 test로 잠근다.</td>
-              <td>verification FSM tests and transition snapshots.</td>
+              <td>task transition과 configured LLM completion verdict behavior를 고정한다.</td>
+              <td>InProgress completion, pass/reject/unavailable verdict, exact assignee, expected-version failure를 test로 잠근다.</td>
+              <td>typed lifecycle tests and transition snapshots.</td>
             </tr>
             <tr>
               <td><code>task-374</code></td>

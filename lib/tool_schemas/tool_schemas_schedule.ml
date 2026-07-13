@@ -35,17 +35,6 @@ let integer_prop ?description name =
   name, `Assoc fields
 ;;
 
-let bool_prop ?description name =
-  let fields =
-    [ "type", `String "boolean" ]
-    @
-    match description with
-    | None -> []
-    | Some value -> [ "description", `String value ]
-  in
-  name, `Assoc fields
-;;
-
 let object_prop ?description ?(additional_properties = true) name =
   let fields =
     [ "type", `String "object"; "additionalProperties", `Bool additional_properties ]
@@ -66,24 +55,12 @@ let object_schema ?(required = []) properties =
     ]
 ;;
 
-let risk_classes =
-  [ "reminder_only"
-  ; "read_only"
-  ; "workspace_write"
-  ; "external_write"
-  ; "destructive"
-  ; "cost_bearing"
-  ]
-;;
-
 let statuses =
-  [ "pending_approval"
-  ; "scheduled"
+  [ "scheduled"
   ; "due"
   ; "running"
   ; "succeeded"
   ; "failed"
-  ; "rejected"
   ; "cancelled"
   ; "expired"
   ]
@@ -96,7 +73,6 @@ let recurrence_kinds = [ "one_shot"; "interval"; "daily"; "cron" ]
 
 let create_schema =
   object_schema
-    ~required:[ "risk_class" ]
     [ number_prop
         ~description:
           "Unix timestamp in seconds. Provide this, due_at_iso, or a calendar recurrence (daily/cron) that can derive the first due time."
@@ -122,7 +98,7 @@ let create_schema =
         "payload_body"
     ; string_prop
         ~description:
-          "Convenience for scheduling a board post. When payload/payload_body are omitted, this builds payload kind masc.board_post with schema_version=1. Use risk_class=workspace_write."
+          "Convenience for scheduling a board post. When payload/payload_body are omitted, this builds payload kind masc.board_post with schema_version=1."
         "board_content"
     ; string_prop ~description:"Optional board-post title." "board_title"
     ; string_prop
@@ -132,18 +108,6 @@ let create_schema =
     ; string_prop ~description:"Optional board thread id." "board_thread_id"
     ; integer_prop ~description:"Optional board post TTL in hours." "board_ttl_hours"
     ; object_prop ~description:"Optional board post metadata object." "board_meta"
-    ; string_prop
-        ~description:
-          "Risk class of the scheduled action. masc.keeper_wake is always \
-           reminder_only (an internal self-wake; it auto-schedules and needs no \
-           approval — any higher value is clamped down). masc.board_post writes \
-           to the board and requires workspace_write. Side-effecting classes \
-           start pending_approval and need a separate human grant."
-        ~enum:risk_classes "risk_class"
-    ; bool_prop
-        ~description:
-          "Force a separate human grant even for reminder_only or read_only requests."
-        "approval_required"
     ; string_prop ~description:"Optional stable schedule id." "schedule_id"
     ; number_prop ~description:"Optional request timestamp for replay/tests." "requested_at_unix"
     ; number_prop ~description:"Optional expiry timestamp." "expires_at_unix"
@@ -202,34 +166,11 @@ let cancel_schema =
     ]
 ;;
 
-let approve_schema =
-  object_schema ~required:[ "schedule_id"; "approved_by_id" ]
-    [ string_prop ~description:"Pending or due schedule id to approve." "schedule_id"
-    ; string_prop ~description:"Human approver id; cannot equal requester or scheduler." "approved_by_id"
-    ; string_prop ~description:"Approver display name." "approved_by_display_name"
-    ; string_prop ~description:"Optional stable grant id." "grant_id"
-    ; number_prop ~description:"Optional approval timestamp for replay/tests." "approved_at_unix"
-    ]
-;;
-
-let reject_schema =
-  object_schema ~required:[ "schedule_id"; "approved_by_id"; "reason" ]
-    [ string_prop ~description:"Pending or due schedule id to reject." "schedule_id"
-    ; string_prop ~description:"Human approver id; cannot equal requester or scheduler." "approved_by_id"
-    ; string_prop ~description:"Approver display name." "approved_by_display_name"
-    ; string_prop ~description:"Optional stable grant id." "grant_id"
-    ; number_prop ~description:"Optional decision timestamp for replay/tests." "approved_at_unix"
-    ; string_prop ~description:"Human-readable rejection reason." "reason"
-    ]
-;;
-
 type action =
   | Create_request
   | List_requests
   | Get_request
   | Cancel_request
-  | Approve_request
-  | Reject_request
 
 type definition =
   { action : action
@@ -245,7 +186,7 @@ let definition ~action ~id ~name ~description ~input_schema ~read_only =
 let definitions : definition list =
   [ definition ~action:Create_request ~id:"create" ~name:"masc_schedule_create"
       ~description:
-        "Create a durable scheduled internal automation request. For 'every day at 09:00 KST', use recurrence_kind=daily, recurrence_hour=9, recurrence_minute=0, recurrence_timezone=Asia/Seoul. For 'post this to board ops every morning', use board_content plus optional board_title/board_hearth with risk_class=workspace_write. For compact calendar rules, use recurrence_kind=cron with a 5-field recurrence_cron such as '0 9 * * 1-5'. Side-effecting requests start pending approval and require a later separate human grant."
+        "Create a durable scheduled internal automation request. For 'every day at 09:00 KST', use recurrence_kind=daily, recurrence_hour=9, recurrence_minute=0, recurrence_timezone=Asia/Seoul. For 'post this to board ops every morning', use board_content plus optional board_title/board_hearth. For compact calendar rules, use recurrence_kind=cron with a 5-field recurrence_cron such as '0 9 * * 1-5'. Payload effects are authorized by their leaf tool at dispatch time."
       ~input_schema:create_schema ~read_only:false
   ; definition ~action:List_requests ~id:"list" ~name:"masc_schedule_list"
       ~description:"List durable scheduled internal automation requests."
@@ -255,23 +196,10 @@ let definitions : definition list =
       ~input_schema:get_schema ~read_only:true
   ; definition ~action:Cancel_request ~id:"cancel" ~name:"masc_schedule_cancel"
       ~description:
-        "Cancel a pending, scheduled, or due scheduled request before execution."
+        "Cancel a scheduled or due request before execution."
       ~input_schema:cancel_schema ~read_only:false
   ]
 ;;
-
-let operator_decision_definitions : definition list =
-  [ definition ~action:Approve_request ~id:"approve" ~name:"masc_schedule_approve"
-      ~description:
-        "Record a separate human execution grant for a pending or due scheduled request. Recurring side-effecting requests need a fresh grant for each due occurrence."
-      ~input_schema:approve_schema ~read_only:false
-  ; definition ~action:Reject_request ~id:"reject" ~name:"masc_schedule_reject"
-      ~description:"Reject a pending or due scheduled request with a human decision."
-      ~input_schema:reject_schema ~read_only:false
-  ]
-;;
-
-let all_definitions = definitions @ operator_decision_definitions
 
 let schemas : Masc_domain.tool_schema list =
   List.map (fun definition -> definition.schema) definitions

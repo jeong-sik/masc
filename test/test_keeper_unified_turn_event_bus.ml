@@ -242,7 +242,7 @@ let wait_for_done ~clock ~base_path request_id =
     match Kmsg.poll ~base_path ~caller:keeper_msg_caller request_id with
     | Kmsg.Found { Kmsg.status = Kmsg.Done { ok = true; _ }; _ } ->
       ()
-    | Kmsg.Found { Kmsg.status = Kmsg.Done { ok = false; body }; _ } ->
+    | Kmsg.Found { Kmsg.status = Kmsg.Done { ok = false; body; _ }; _ } ->
       Alcotest.failf "keeper_msg request failed: %s" body
     | _ when remaining <= 0 ->
       Alcotest.failf "keeper_msg request %s did not complete" request_id

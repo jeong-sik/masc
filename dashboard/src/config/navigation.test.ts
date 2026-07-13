@@ -80,7 +80,7 @@ describe('dashboard surface navigation', () => {
       'Keepers',
       'Monitor',
       'Work',
-      'Approvals',
+      'Gate',
       'Schedule',
       'Board',
       'Fusion',
@@ -272,7 +272,7 @@ describe('monitoring navigation labels', () => {
 
     expect(descriptions).toMatchObject({
       agents: 'Live and configured keeper roster.',
-      'fleet-health': 'Tool quality and governance signals.',
+      'fleet-health': 'Tool quality and Gate signals.',
       runtime: 'Runtime lane health.',
       observatory: 'Activity and runtime evidence.',
     })
@@ -321,7 +321,7 @@ describe('monitoring navigation labels', () => {
     expect(ids).not.toContain('fleet')
     expect(ids).not.toContain('telemetry')
     expect(ids).not.toContain('metrics')
-    expect(ids).not.toContain('governance')
+    expect(ids).not.toContain('gate')
   })
 
   it('puts keeper fleet first before tool, runtime, and evidence lanes', () => {

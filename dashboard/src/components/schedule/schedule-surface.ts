@@ -24,7 +24,6 @@ import {
   ScheduledAutomationPanel,
   SchDetail,
   normalizedScheduleStatus,
-  scheduledPendingApprovalCount,
 } from '../tools/scheduled-automation-panel'
 import type { Cadence } from '../v2/schedule-constants'
 import { CadenceSummary, ScheduleCalendar, cadenceCounts, cadenceOfRequest } from './schedule-agenda'
@@ -35,7 +34,7 @@ import {
   toolsError,
   toolsLoading,
 } from '../tools/tool-state'
-import { pruneSchedules } from '../../api/dashboard-governance'
+import { pruneSchedules } from '../../api/dashboard-schedule'
 
 type ScheduleView = 'calendar' | 'list'
 
@@ -65,7 +64,7 @@ function countByStatus(
   const normalizedStatuses = statuses.map(normalizedScheduleStatus)
   const fromCounts = normalizedStatuses.reduce((sum, status) => sum + (automation.counts?.[status] ?? 0), 0)
   const fromRequests = (automation.requests ?? [])
-    .filter(request => normalizedStatuses.includes(normalizedScheduleStatus(request.effective_status ?? request.status)))
+    .filter(request => normalizedStatuses.includes(normalizedScheduleStatus(request.status)))
     .length
   return Math.max(fromCounts, fromRequests)
 }
@@ -77,12 +76,10 @@ export function ScheduleSurface() {
   const keeperBackground = data?.keeper_background ?? null
   const loading = toolsLoading.value
   const error = toolsError.value
-  const dueEffective = automation?.derived_counts?.due_effective ?? 0
-  // Shared with the nav badge + topbar chip so '승인 대기' has one derivation.
-  const pendingCount = scheduledPendingApprovalCount(automation)
   const scheduledCount = countByStatus(automation, ['scheduled'])
+  const dueCount = countByStatus(automation, ['due'])
   const runningCount = countByStatus(automation, ['running'])
-  const dueRunning = dueEffective + runningCount
+  const dueRunning = dueCount + runningCount
   const requests = automation?.requests ?? []
   const totalCount = requests.length
   const cadCounts = cadenceCounts(requests)
@@ -119,7 +116,7 @@ export function ScheduleSurface() {
   async function handlePrune() {
     if (
       !window.confirm(
-        '완료되었거나 취소/만료/반려된 예약을 정리하시겠습니까?\n연관된 실행 기록 및 권한 승인도 함께 삭제됩니다.',
+        '완료되었거나 취소/만료된 예약을 정리하시겠습니까?\n연관된 실행 기록도 함께 삭제됩니다.',
       )
     ) {
       return
@@ -152,7 +149,7 @@ export function ScheduleSurface() {
             <span class="ov-eyebrow">Schedule</span>
             <h1>예약 · 자동화 큐</h1>
             <p class="ov-sub">
-              keeper가 예약한 미래 작업 · operator가 due 전 승인 · <span class="mono">lib/schedule</span>
+              keeper가 예약한 미래 작업 · <span class="mono">lib/schedule</span>
             </p>
             <div
               class="mt-2 flex flex-wrap items-center gap-2 text-2xs text-[var(--color-fg-muted)]"
@@ -167,11 +164,7 @@ export function ScheduleSurface() {
 
         ${error ? html`<${ErrorState} message=${error} class="mb-4" />` : null}
 
-        <section class="ov-kpis" style=${{ gridTemplateColumns: 'repeat(5, 1fr)' }} aria-label="예약 요약">
-          <div class="ov-kpi">
-            <div class="ov-kpi-k">승인 대기</div>
-            <div class=${`ov-kpi-v ${pendingCount > 0 ? 'warn' : 'ok'}`}>${countLabel(pendingCount)}</div>
-          </div>
+        <section class="ov-kpis" style=${{ gridTemplateColumns: 'repeat(4, 1fr)' }} aria-label="예약 요약">
           <div class="ov-kpi">
             <div class="ov-kpi-k">예약됨</div>
             <div class=${`ov-kpi-v ${scheduledCount > 0 ? 'info' : ''}`}>${countLabel(scheduledCount)}</div>
@@ -227,7 +220,6 @@ export function ScheduleSurface() {
             : html`<${ScheduledAutomationPanel}
                 automation=${automation ? filterAutomationByCadence(automation, cadenceFilter) : automation}
                 variant="v2"
-                onResolved=${refresh}
                 selectedScheduleId=${selectedScheduleId}
                 onSelectSchedule=${setSelectedScheduleId}
               />`}
@@ -276,7 +268,7 @@ export function ScheduleSurface() {
       ${automation
         ? html`<${ScheduleAside}
             requests=${automation.requests ?? []}
-            sum=${{ scheduled: scheduledCount, dueRunning, pending: pendingCount, total: totalCount }}
+            sum=${{ scheduled: scheduledCount, dueRunning, total: totalCount }}
             onOpen=${setSelectedScheduleId}
           />`
         : null}
@@ -284,7 +276,6 @@ export function ScheduleSurface() {
         ? html`<${SchDetail}
             request=${selectedRequest}
             onClose=${() => setSelectedScheduleId(null)}
-            onResolved=${refresh}
           />`
         : null}
     </main>

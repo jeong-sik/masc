@@ -9,13 +9,11 @@
 
     Adding a kind here makes it (a) declared as dispatchable by the consumer and
     (b) listed in {!unsupported_error}'s allow-list. It does NOT by itself make
-    the kind accepted at creation: each side-effecting kind carries its own
-    payload + risk-class contract, enforced by a per-kind branch in
+    the kind accepted at creation: each kind carries its own objective payload
+    schema contract, enforced by a per-kind branch in
     [Tool_schedule.validate_known_payload_request]. A kind listed here but
     without a validator branch stays rejected at creation as an unsupported
-    side-effecting kind — closing the silent accept-then-die gap, just in the
-    safe (reject) direction. So a new side-effecting kind needs BOTH the list
-    entry and a validator branch. *)
+    kind. So a new kind needs both the list entry and a validator branch. *)
 
 let board_post = "masc.board_post"
 let keeper_wake = "masc.keeper_wake"

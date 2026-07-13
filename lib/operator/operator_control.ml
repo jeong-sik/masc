@@ -135,74 +135,6 @@ let execute_workspace_action (ctx : 'a context) (request : action_request) =
       workspace_action_result request (`String result)
   | _ -> Error (Printf.sprintf "not a namespace action: %s" request.action_type)
 
-(* Issue #8394: removed [execute_team_action] — team session execution
-   surface was retired but the dispatch arm + this stub remained,
-   silently turning any team_* operator action into a misleading
-   "team session actions removed: ..." error instead of the cleaner
-   "unsupported action_type" path. *)
-
-type goal_completion_decision =
-  | Goal_completion_approve
-  | Goal_completion_reject
-
-let parse_goal_completion_decision payload =
-  match payload with
-  | `Assoc _ ->
-    (match get_string_opt payload "decision" with
-     | None -> Error "payload.decision is required"
-     | Some raw ->
-       (match String.trim raw |> String.lowercase_ascii with
-        | "approve" | "confirm" -> Ok Goal_completion_approve
-        | "reject" | "deny" -> Ok Goal_completion_reject
-        | "" -> Error "payload.decision is required"
-        | other -> Error (Printf.sprintf "unsupported goal decision: %s" other)))
-  | _ -> Error "goal decision payload must be an object"
-;;
-
-let goal_completion_transition_action = function
-  | Goal_completion_approve -> "approve_completion"
-  | Goal_completion_reject -> "reject_completion"
-;;
-
-let goal_decision_payload decision payload =
-  match payload with
-  | `Assoc fields ->
-    Ok (`Assoc (("decision", `String decision) :: List.remove_assoc "decision" fields))
-  | _ -> Error "goal decision payload must be an object"
-;;
-
-let execute_goal_action (ctx : 'a context) (request : action_request) =
-  match request.action_type with
-  | action when String.equal action Operator_action_constants.goal_completion_decision ->
-    let* () = validate_target_type Operator_action_constants.Goal request in
-    let* goal_id = require_target_id request in
-    let* decision = parse_goal_completion_decision request.payload in
-    let action = goal_completion_transition_action decision in
-    let note_fields =
-      match get_string_opt request.payload "note" with
-      | Some note when String.trim note <> "" -> [ "note", `String note ]
-      | _ -> []
-    in
-    let goal_ctx : Workspace_types.context =
-      { config = ctx.config; agent_name = request.actor }
-    in
-    let result =
-      Workspace_goals.handle_goal_transition
-        ~tool_name:Operator_action_constants.goal_transition_tool
-        ~start_time:(Eio.Time.now ctx.clock)
-        goal_ctx
-        (`Assoc
-            ([ "goal_id", `String goal_id
-             ; "action", `String action
-             ; "actor", `Assoc [ "id", `String request.actor ]
-             ]
-             @ note_fields))
-    in
-    if Tool_result.is_success result
-    then workspace_action_result request (json_of_dispatch_output (Tool_result.message result))
-    else Error (Tool_result.message result)
-  | _ -> Error (Printf.sprintf "not a goal action: %s" request.action_type)
-
 let execute_keeper_action (ctx : 'a context) (request : action_request) =
   match request.action_type with
   | "keeper_probe" ->
@@ -348,8 +280,6 @@ let execute_action (ctx : 'a context) (request : action_request) :
   | "broadcast" | "namespace_pause" | "namespace_resume" | "social_sweep"
   | "task_inject" ->
       execute_workspace_action ctx request
-  | action when String.equal action Operator_action_constants.goal_completion_decision ->
-    execute_goal_action ctx request
   | "keeper_probe" | "keeper_recover" | "keeper_message" ->
       execute_keeper_action ctx request
   | "" -> Error "action_type is required"
@@ -489,9 +419,9 @@ let confirm_json ?actor_hint (ctx : _ context) args :
               latency_ms = 0;
               created_at = Masc_domain.now_iso ();
             };
-          Audit_log.log_governance_decision ctx.config
+          Audit_log.log_gate_decision ctx.config
             ~agent_id:actor ~trace_id:entry.trace_id
-            ~decision:Audit_log.Governance_expired ~action_type:entry.action_type
+            ~decision:Audit_log.Gate_expired ~action_type:entry.action_type
             ~confirmation_state:(confirmation_state_to_string Expired) ();
           Error "pending confirmation expired"
       | Some entry when not (String.equal actor entry.actor) ->
@@ -510,41 +440,14 @@ let confirm_json ?actor_hint (ctx : _ context) args :
               latency_ms = 0;
               created_at = Masc_domain.now_iso ();
             };
-          Audit_log.log_governance_decision ctx.config
+          Audit_log.log_gate_decision ctx.config
             ~agent_id:actor ~trace_id:entry.trace_id
-            ~decision:Audit_log.Governance_unauthorized ~action_type:entry.action_type
+            ~decision:Audit_log.Gate_unauthorized ~action_type:entry.action_type
             ~confirmation_state:(confirmation_state_to_string Denied) ();
           Error "actor is not allowed to confirm this action"
       | Some entry ->
           if String.equal decision "deny" then (
-            let goal_denial_request =
-              if
-                String.equal
-                  entry.action_type
-                  Operator_action_constants.goal_completion_decision
-              then
-                let* payload =
-                  goal_decision_payload
-                    Operator_action_constants.goal_decision_reject
-                    entry.payload
-                in
-                Ok
-                  (Some
-                     { actor = entry.actor
-                     ; action_type = entry.action_type
-                     ; target_type = entry.target_type
-                     ; target_id = entry.target_id
-                     ; payload
-                     })
-              else Ok None
-            in
-            let* goal_denial_request = goal_denial_request in
             let* () = remove_pending_confirm ctx.config confirm_token in
-            let goal_denial_result =
-              match goal_denial_request with
-              | Some request -> execute_action ctx request |> Result.map Option.some
-              | None -> Ok None
-            in
             append_action_log ctx.config
               {
                 trace_id = entry.trace_id;
@@ -556,30 +459,22 @@ let confirm_json ?actor_hint (ctx : _ context) args :
                 target_id = entry.target_id;
                 delegated_tool = entry.delegated_tool;
                 confirmation_state = Denied;
-                result_status =
-                  (match goal_denial_result with Ok _ -> ActionOk | Error _ -> ActionError);
+                result_status = ActionOk;
                 latency_ms = 0;
                 created_at = Masc_domain.now_iso ();
               };
-            Audit_log.log_governance_decision ctx.config
+            Audit_log.log_gate_decision ctx.config
               ~agent_id:actor ~trace_id:entry.trace_id
-              ~decision:Audit_log.Governance_deny ~action_type:entry.action_type
+              ~decision:Audit_log.Gate_deny ~action_type:entry.action_type
               ~confirmation_state:(confirmation_state_to_string Denied) ();
-            let* goal_denial_result = goal_denial_result in
-            let result_fields =
-              [ "trace_id", `String entry.trace_id
-              ; "decision", `String "deny"
-              ; "tool_name", `String entry.delegated_tool
-              ; "executed_action", pending_confirm_to_yojson entry
-              ]
-            in
-            let result_fields =
-              match goal_denial_result with
-              | Some result -> ("result", result) :: result_fields
-              | None -> ("result_status", `String "not_applicable") :: result_fields
-            in
             Ok
-              (Tool_args.ok_assoc result_fields))
+              (Tool_args.ok_assoc
+                 [ "trace_id", `String entry.trace_id
+                 ; "decision", `String "deny"
+                 ; "tool_name", `String entry.delegated_tool
+                 ; "result_status", `String "not_executed"
+                 ; "executed_action", pending_confirm_to_yojson entry
+                 ]))
           else
             let started_at = Unix.gettimeofday () in
             let request =
@@ -609,9 +504,9 @@ let confirm_json ?actor_hint (ctx : _ context) args :
                 latency_ms;
                 created_at = Masc_domain.now_iso ();
               };
-            Audit_log.log_governance_decision ctx.config
+            Audit_log.log_gate_decision ctx.config
               ~agent_id:entry.actor ~trace_id:entry.trace_id
-              ~decision:Audit_log.Governance_confirm ~action_type:entry.action_type
+              ~decision:Audit_log.Gate_confirm ~action_type:entry.action_type
               ~confirmation_state:(confirmation_state_to_string Confirmed) ();
             Ok
               (Tool_args.ok_assoc

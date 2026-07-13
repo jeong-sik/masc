@@ -86,17 +86,19 @@ describe('navigate', () => {
     expect(route.value.params.surface).toBeUndefined()
   })
 
-  it('redirects governance to operations on the command surface (Phase 1)', () => {
-    navigate('command', { section: 'governance' })
+  it('redirects the Gate section to the Gate operations view', () => {
+    navigate('command', { section: 'gate' })
     expect(route.value.tab).toBe('command')
     expect(route.value.params.section).toBe('operations')
+    expect(route.value.params.view).toBe('gate')
   })
 
-  it('redirects governance deep links to operations on the command surface', () => {
-    window.location.hash = '#command/governance'
+  it('redirects Gate deep links to the Gate operations view', () => {
+    window.location.hash = '#command/gate'
     window.dispatchEvent(new HashChangeEvent('hashchange'))
     expect(route.value.tab).toBe('command')
     expect(route.value.params.section).toBe('operations')
+    expect(route.value.params.view).toBe('gate')
   })
 
   it('falls back invalid activity section to default agents section', () => {

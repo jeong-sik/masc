@@ -8,7 +8,6 @@ include Operator_control_context_snapshot
    [Operator_control_snapshot_identity_fields] (godfile decomp). *)
 let non_empty_trimmed_string_opt = Operator_control_snapshot_identity_fields.non_empty_trimmed_string_opt
 let keeper_runtime_identity_fields = Operator_control_snapshot_identity_fields.keeper_runtime_identity_fields
-let degraded_keeper_runtime_identity_fields = Operator_control_snapshot_identity_fields.degraded_keeper_runtime_identity_fields
 (* action_result_status + confirmation_state + action_log_entry types,
    stringifiers, and persistence helpers extracted to
    [Operator_control_snapshot_action_log] (godfile decomp). The
@@ -117,7 +116,6 @@ let with_keeper_slot ~sem ~name f =
 ;;
 
 let compact_keeper_runtime_trust_json = Operator_control_snapshot_trust.compact_keeper_runtime_trust_json
-let degraded_keeper_snapshot_row = Operator_control_snapshot_trust.degraded_keeper_snapshot_row
 let keepers_json
       ?keeper_names
       ?(include_recent_activity = false)
@@ -135,8 +133,6 @@ let keepers_json
      construction can cause memory spikes during dashboard refresh. *)
   let n = List.length names in
   let results = Array.make n None in
-  let fd_degraded = Keeper_fd_pressure.active () in
-  let keeper_sem = if fd_degraded then Eio.Semaphore.make 1 else _keeper_sem in
   Eio.Fiber.all
     (List.mapi
        (fun idx name () ->
@@ -158,7 +154,7 @@ let keepers_json
             We log only when either half exceeds 500ms so healthy
             snapshots stay quiet.  The log is part of the *success path*
             inside [with_keeper_slot]; Cancelled propagation skips it. *)
-          with_keeper_slot ~sem:keeper_sem ~name (fun () ->
+          with_keeper_slot ~sem:_keeper_sem ~name (fun () ->
             let t_work_start = Time_compat.now () in
             (* Per-sub-op timing for #8822: attribute ~3100ms snapshot cost.
               Threshold 300ms — lower than outer 500ms for more data. *)
@@ -195,11 +191,7 @@ let keepers_json
                 | Error _ | Ok None -> None
                 | Ok (Some meta) ->
                   dt_meta := Time_compat.now () -. t0;
-                  if fd_degraded
-                  then (
-                    emit_timing_log (Time_compat.now () -. t_work_start);
-                    Some (degraded_keeper_snapshot_row meta))
-                  else if lightweight && meta.paused
+                  if lightweight && meta.paused
                   then (
                     let t_ph = Time_compat.now () in
                     let phase_str =
@@ -468,8 +460,6 @@ let keepers_json
                            ; "tool_audit_source", Json_util.string_opt_to_json tool_audit_source
                            ; "tool_audit_at", Json_util.string_opt_to_json tool_audit_at
                            ; "proactive_enabled", `Bool meta.proactive.enabled
-                           ; "proactive_idle_sec", `Int meta.proactive.idle_sec
-                           ; "proactive_cooldown_sec", `Int meta.proactive.cooldown_sec
                            ; ( "turn_budget"
                              , `String "disabled — governed by timeout_sec" )
                            ; ( "last_proactive_reason"
@@ -681,7 +671,7 @@ let snapshot_json
          ; "operator_judge_runtime", operator_judge_runtime_json config
          ; "judgment_owner", `String "fallback_read_model"
          ; "authoritative_judgment_available", `Bool false
-         ; "admission_queue", Admission_queue.snapshot_json ()
+         ; "inference_inflight", Inference_inflight_observation.snapshot_json ()
          ; "workspace", workspace_json config
          ]
          @ ((* Parallelize independent I/O: sessions, keepers, and persistent_agents. *)
@@ -771,6 +761,6 @@ let snapshot_json
         (List.rev !timing_records));
     result
   in
-  let ttl = Env_config_governance.Operator.cache_ttl_sec in
+  let ttl = Env_config_runtime_services.Operator.cache_ttl_sec in
   get_or_compute cache_key ~ttl compute_snapshot
 ;;

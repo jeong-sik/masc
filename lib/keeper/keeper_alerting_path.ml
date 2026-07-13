@@ -9,13 +9,9 @@ let rejection_to_telemetry (r : keeper_path_rejection) : unit =
   let kind =
     match r with
     | Path_required -> "path_required"
-    | Absolute_path_rejected _ -> "absolute_path_rejected"
-    | Outside_project_root _ -> "outside_project_root"
+    | Invalid_lexical_endpoint -> "invalid_lexical_endpoint"
     | Allowed_paths_normalized_empty _ -> "allowed_paths_normalized_empty"
     | Outside_sandbox _ -> "out_of_roots"
-    | Not_found_relative _ -> "not_found_relative"
-    | Ambiguous_relative_read_path _ -> "ambiguous_relative_read_path"
-    | Task_state_file_path_blocked _ -> "task_state_file_path_blocked"
   in
   Otel_metric_store.inc_counter
     Keeper_metrics.(to_string PathRejection)
@@ -60,125 +56,24 @@ let normalize_path_for_check_stripped path =
   normalize_path_for_check path |> strip_trailing_slashes
 ;;
 
-let normalize_allowed_path_for_check ~(root : string) (path : string) : string option =
+let allowed_path_projection ~(root : string) (path : string) =
   let raw = String.trim path in
   if raw = ""
   then None
   else (
     let candidate = if Filename.is_relative raw then Filename.concat root raw else raw in
+    let candidate = strip_trailing_slashes candidate in
     let normalized = normalize_path_for_check candidate |> strip_trailing_slashes in
-    if normalized = "" then None else Some normalized)
+    if normalized = "" then None else Some (candidate, normalized))
 ;;
 
-let split_relative_components (raw : string) : string list =
-  raw |> String.split_on_char '/' |> List.filter (fun part -> part <> "" && part <> ".")
-;;
-
-let has_parent_component (parts : string list) : bool =
-  List.exists (fun part -> part = "..") parts
-;;
-
-let join_path_components = function
-  | [] -> "."
-  | hd :: tl -> List.fold_left Filename.concat hd tl
-;;
-
-let path_exists (path : string) : bool = Fs_compat.file_exists path
-
-let parent_exists (path : string) : bool =
-  let parent = Filename.dirname path in
-  parent <> path && path_exists parent
+let normalize_allowed_path_for_check ~root path =
+  allowed_path_projection ~root path |> Option.map snd
 ;;
 
 let is_within_root_norm ~(root_norm : string) (path : string) : bool =
   let normalized = normalize_path_for_check path |> strip_trailing_slashes in
   normalized = root_norm || String.starts_with ~prefix:(root_norm ^ "/") normalized
-;;
-
-let find_suffix_matches_under_root
-      ~root
-      ~anchor
-      ~suffix_rel
-      ?(max_dirs = 2000)
-      ?(max_matches = 8)
-      ()
-  : string list
-  =
-  let root_norm = normalize_path_for_check root |> strip_trailing_slashes in
-  let module StringSet = Set_util.StringSet in
-  let rec walk visited ~dirs_seen acc dir =
-    if dirs_seen >= max_dirs || List.length acc >= max_matches
-    then visited, dirs_seen, acc
-    else (
-      let dir_norm = normalize_path_for_check dir |> strip_trailing_slashes in
-      if (not (is_within_root_norm ~root_norm dir)) || StringSet.mem dir_norm visited
-      then visited, dirs_seen, acc
-      else (
-        let visited = StringSet.add dir_norm visited in
-        let entries =
-          try Sys.readdir dir |> Array.to_list |> List.sort String.compare with
-          | Sys_error _ -> []
-        in
-        List.fold_left
-          (fun (visited, dirs_seen, acc) entry ->
-             if dirs_seen >= max_dirs || List.length acc >= max_matches
-             then visited, dirs_seen, acc
-             else (
-               let path = Filename.concat dir entry in
-               match
-                 try Some (Sys.is_directory path) with
-                 | Sys_error _ -> None
-               with
-               | None -> visited, dirs_seen, acc
-               | Some is_dir ->
-                 let acc =
-                   if entry = anchor
-                   then (
-                     let candidate = Filename.concat path suffix_rel in
-                     if path_exists candidate && is_within_root_norm ~root_norm candidate
-                     then candidate :: acc
-                     else acc)
-                   else acc
-                 in
-                 if is_dir && is_within_root_norm ~root_norm path
-                 then walk visited ~dirs_seen:(dirs_seen + 1) acc path
-                 else visited, dirs_seen, acc))
-          (visited, dirs_seen, acc)
-          entries))
-  in
-  walk StringSet.empty ~dirs_seen:0 [] root |> fun (_, _, matches) -> List.rev matches
-;;
-
-let maybe_resolve_missing_relative_read_path ~(roots : string list) ~(raw_path : string)
-  : (string option, keeper_path_rejection) result
-  =
-  let parts = split_relative_components raw_path in
-  match parts with
-  | [] | [ _ ] -> Ok None
-  | _ when has_parent_component parts -> Ok None
-  | anchor :: rest ->
-    let suffix_rel = join_path_components rest in
-    let matches =
-      roots
-      |> List.concat_map (fun root ->
-        find_suffix_matches_under_root ~root ~anchor ~suffix_rel ())
-      |> List.sort_uniq String.compare
-    in
-    (match matches with
-     | [] -> Ok None
-     | [ match_path ] -> Ok (Some match_path)
-     | many ->
-       (* Tier A3 / Cycle 6: do not echo the resolved match paths
-              into the error string — that leaks the host filesystem
-              layout to the caller (LLM) and dashboards. The match
-              count alone is enough for the caller to course-correct. *)
-       Error (Ambiguous_relative_read_path { raw = raw_path; candidate_count = List.length many }))
-;;
-
-let allows_missing_leaf_read ~(raw : string) ~(candidate : string) : bool =
-  let parts = split_relative_components raw in
-  let trailing_slash = String.ends_with ~suffix:"/" raw in
-  parent_exists candidate && List.length parts > 1 && not trailing_slash
 ;;
 
 let is_within_allowed_norms ~(target_norm : string) (allowed_norms : string list) : bool =
@@ -213,6 +108,357 @@ let absolute_allowed_paths_result ~(config : Workspace.config) ~(allowed_paths :
   else Ok normalized
 ;;
 
+type confined_path =
+  { root : string
+  ; root_identity : resource_identity option
+  ; anchor_root : string
+  ; root_relative_path : string
+  ; relative_path : string
+  ; host_path : string
+  ; containment_path : string
+  ; endpoint_relative_path : string
+  }
+
+and resource_identity =
+  { device : Int64.t
+  ; inode : Int64.t
+  }
+
+type path_effect_operation =
+  | Atomic_replace_entry
+  | Patch_then_atomic_replace_entry
+  | Append_pinned_resource
+  | Create_entry_exclusive
+
+type path_effect_parent_scope =
+  { relative_path : string
+  ; resource : resource_identity
+  ; create_missing_parents : string list
+  ; created_directory_permissions : int
+  }
+
+type path_effect_locator =
+  { root : string
+  ; root_resource : resource_identity
+  ; relative_path : string
+  ; endpoint_relative_path : string
+  ; leaf : string
+  ; parent : path_effect_parent_scope option
+  ; target_resource : resource_identity option
+  ; source : path_effect_source option
+  }
+
+and path_effect_source =
+  { relative_path : string
+  ; resource : resource_identity
+  }
+
+type path_effect =
+  { operation : path_effect_operation
+  ; locator : path_effect_locator
+  ; result_file_permissions : int option
+  }
+
+type confined_path_endpoint =
+  | Lexical_entry
+  | Follow_referent
+
+let confined_root (target : confined_path) = target.root
+let confined_anchor_root (target : confined_path) = target.anchor_root
+let confined_root_relative_path (target : confined_path) = target.root_relative_path
+let confined_relative_path (target : confined_path) = target.relative_path
+let confined_host_path (target : confined_path) = target.host_path
+let confined_containment_path (target : confined_path) = target.containment_path
+let confined_endpoint_relative_path (target : confined_path) = target.endpoint_relative_path
+
+let resource_identity_of_unix_path path =
+  try
+    let stat = Unix.stat path in
+    Some
+      { device = Int64.of_int stat.Unix.st_dev
+      ; inode = Int64.of_int stat.Unix.st_ino
+      }
+  with
+  | Unix.Unix_error _ -> None
+;;
+
+let resource_identity_of_eio_stat (stat : Eio.File.Stat.t) =
+  { device = stat.dev; inode = stat.ino }
+;;
+
+let equal_resource_identity left right =
+  Int64.equal left.device right.device && Int64.equal left.inode right.inode
+;;
+
+let verify_confined_root_capability target root_dir =
+  match target.root_identity with
+  | None ->
+    Error
+      (Printf.sprintf
+         "filesystem allowed root identity unavailable during resolution: %s"
+         target.root)
+  | Some expected ->
+    (try
+       let stat = Eio.Path.stat ~follow:true root_dir in
+       let actual = resource_identity_of_eio_stat stat in
+       if stat.kind <> `Directory
+       then
+         Error
+           (Printf.sprintf
+              "filesystem allowed root is not a directory: %s"
+              target.root)
+       else if equal_resource_identity expected actual
+       then Ok ()
+       else
+         Error
+           (Printf.sprintf
+              "filesystem allowed root changed between resolution and capability acquisition: %s"
+              target.root)
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | Eio.Io _ as exn -> Error (Printexc.to_string exn))
+;;
+
+let valid_relative_parent_path path =
+  Filename.is_relative path && not (String.equal path "")
+;;
+
+let valid_child_name name =
+  (not (String.equal name ""))
+  && not (String.equal name ".")
+  && not (String.equal name "..")
+  && Filename.is_relative name
+  && String.equal (Filename.basename name) name
+;;
+
+let path_effect_parent_scope
+      ~relative_path
+      ~(resource : Eio.File.Stat.t)
+      ~create_missing_parents
+      ~created_directory_permissions
+  =
+  if not (valid_relative_parent_path relative_path)
+  then Error "filesystem effect parent path must be non-empty and relative"
+  else
+    match List.find_opt (fun name -> not (valid_child_name name)) create_missing_parents with
+    | Some invalid ->
+      Error
+        (Printf.sprintf
+           "filesystem effect missing-parent component is invalid: %S"
+           invalid)
+    | None ->
+      Ok
+        { relative_path
+        ; resource = resource_identity_of_eio_stat resource
+        ; create_missing_parents
+        ; created_directory_permissions
+        }
+;;
+
+let append_child parent child =
+  if String.equal parent "." then child else Filename.concat parent child
+;;
+
+let parent_scope_covers_target
+      (parent : path_effect_parent_scope)
+      (target : confined_path)
+  =
+  let covered_parent =
+    List.fold_left append_child parent.relative_path parent.create_missing_parents
+  in
+  String.equal covered_parent (Filename.dirname target.relative_path)
+;;
+
+let path_effect
+      ~operation
+      ?parent
+      ?target_resource
+      ?source
+      ~result_file_permissions
+      target
+  =
+  match target.root_identity with
+  | None ->
+    Error
+      (Printf.sprintf
+         "filesystem allowed root identity unavailable for Gate effect: %s"
+         target.root)
+  | Some root_resource ->
+    (match parent with
+     | Some scope when not (parent_scope_covers_target scope target) ->
+       Error
+         (Printf.sprintf
+            "filesystem effect parent scope does not cover target: parent=%s target=%s"
+            scope.relative_path
+            target.relative_path)
+     | _ ->
+       Ok
+         { operation
+         ; locator =
+             { root = target.root
+             ; root_resource
+             ; relative_path = target.relative_path
+             ; endpoint_relative_path = target.endpoint_relative_path
+             ; leaf = Filename.basename target.relative_path
+             ; parent
+             ; target_resource
+             ; source
+             }
+         ; result_file_permissions
+         })
+;;
+
+let atomic_replace_effect ~parent ~result_file_permissions target =
+  path_effect
+    ~operation:Atomic_replace_entry
+    ~parent
+    ~result_file_permissions:(Some result_file_permissions)
+    target
+;;
+
+let patch_then_atomic_replace_effect
+      ~parent
+      ~source_relative_path
+      ~(source_resource : Eio.File.Stat.t)
+      ~result_file_permissions
+      target
+  =
+  if String.equal source_relative_path "" || not (Filename.is_relative source_relative_path)
+  then Error "filesystem patch source path must be non-empty and relative"
+  else
+    path_effect
+      ~operation:Patch_then_atomic_replace_entry
+      ~parent
+      ~source:
+        { relative_path = source_relative_path
+        ; resource = resource_identity_of_eio_stat source_resource
+        }
+      ~result_file_permissions:(Some result_file_permissions)
+      target
+;;
+
+let create_entry_exclusive_effect ~parent ~result_file_permissions target =
+  path_effect
+    ~operation:Create_entry_exclusive
+    ~parent
+    ~result_file_permissions:(Some result_file_permissions)
+    target
+;;
+
+let append_pinned_resource_effect target stat =
+  path_effect
+    ~operation:Append_pinned_resource
+    ~target_resource:(resource_identity_of_eio_stat stat)
+    ~result_file_permissions:None
+    target
+;;
+
+let path_effect_operation_to_string = function
+  | Atomic_replace_entry -> "atomic_replace_entry"
+  | Patch_then_atomic_replace_entry -> "patch_then_atomic_replace_entry"
+  | Append_pinned_resource -> "append_pinned_resource"
+  | Create_entry_exclusive -> "create_entry_exclusive"
+;;
+
+let resource_identity_to_yojson identity =
+  `Assoc
+    [ "device", `Intlit (Int64.to_string identity.device)
+    ; "inode", `Intlit (Int64.to_string identity.inode)
+    ]
+;;
+
+let path_effect_to_yojson gate_effect =
+  let parent =
+    match gate_effect.locator.parent with
+    | None -> []
+    | Some parent ->
+      [ ( "parent"
+        , `Assoc
+            [ "relative_path", `String parent.relative_path
+            ; "resource", resource_identity_to_yojson parent.resource
+            ; ( "create_missing_parents"
+              , `List
+                  (List.map
+                     (fun name ->
+                        `Assoc
+                          [ "name", `String name
+                          ; ( "permissions"
+                            , `Int parent.created_directory_permissions )
+                          ])
+                     parent.create_missing_parents) )
+            ] )
+      ]
+  in
+  let target_resource =
+    match gate_effect.locator.target_resource with
+    | None -> []
+    | Some identity ->
+      [ "target_resource", resource_identity_to_yojson identity ]
+  in
+  let source =
+    match gate_effect.locator.source with
+    | None -> []
+    | Some source ->
+      [ ( "source"
+        , `Assoc
+            [ "relative_path", `String source.relative_path
+            ; "resource", resource_identity_to_yojson source.resource
+            ] )
+      ]
+  in
+  let result =
+    match gate_effect.result_file_permissions with
+    | None -> []
+    | Some permissions ->
+      [ ( "result"
+        , `Assoc
+            [ "kind", `String "regular_file"
+            ; "permissions", `Int permissions
+            ] )
+      ]
+  in
+  `Assoc
+    ([ "operation", `String (path_effect_operation_to_string gate_effect.operation)
+     ; ( "locator"
+       , `Assoc
+           ([ "kind", `String "confined_path"
+            ; "root", `String gate_effect.locator.root
+            ; "root_resource", resource_identity_to_yojson gate_effect.locator.root_resource
+            ; "relative_path", `String gate_effect.locator.relative_path
+            ; ( "endpoint_relative_path"
+              , `String gate_effect.locator.endpoint_relative_path )
+            ; "leaf", `String gate_effect.locator.leaf
+            ]
+            @ parent
+            @ target_resource
+            @ source) )
+     ]
+     @ result)
+;;
+
+let relative_path_within_root ~(root_norm : string) ~(target_norm : string) =
+  if String.equal root_norm target_norm
+  then "."
+  else
+    String.sub
+      target_norm
+      (String.length root_norm + 1)
+      (String.length target_norm - String.length root_norm - 1)
+;;
+
+let normalize_confined_endpoint endpoint candidate =
+  match endpoint with
+  | Follow_referent -> Ok (normalize_path_for_check_stripped candidate)
+  | Lexical_entry ->
+    let candidate = strip_trailing_slashes candidate in
+    let leaf = Filename.basename candidate in
+    if not (valid_child_name leaf)
+    then Error Invalid_lexical_endpoint
+    else
+      let parent = Filename.dirname candidate |> normalize_path_for_check_stripped in
+      Ok (Filename.concat parent leaf |> strip_trailing_slashes)
+;;
+
 (* Build a sandbox boundary error message that teaches the LLM
    *why* the path was rejected — not just *that* it was. Bare "X not allowed"
    triggers retry loops; including the resolved candidate plus the
@@ -220,123 +466,108 @@ let absolute_allowed_paths_result ~(config : Workspace.config) ~(allowed_paths :
    re-trying the same broken interpretation. See
    [memory/feedback_tool-error-messages-teach-llm.md]. *)
 
-(** Look for a playground-root allowed path (contains ".masc/playground/")
-    and return the first match. Used to suggest a concrete rewrite when the
-    raw path looks like a playground-subdir pattern that was not prepended. *)
-let playground_root_of_allowed (allowed_norms : string list) : string option =
-  List.find_opt
-    (fun p ->
-       let marker = "/" ^ Common.masc_dirname ^ "/playground/" in
-       let mlen = String.length marker in
-       let slen = String.length p in
-       let rec find i =
-         if i + mlen > slen
-         then false
-         else if String.sub p i mlen = marker
-         then true
-         else find (i + 1)
-       in
-       find 0)
-    allowed_norms
-;;
-
-let raw_looks_like_playground_subdir (raw : string) : bool =
-  String.starts_with ~prefix:"repos/" raw
-  || String.starts_with ~prefix:"mind/" raw
-  || raw = "repos"
-  || raw = "mind"
-;;
-
-(** Detect paths that reference .masc/ internal state files (workspace-level
-    state a keeper must reach via [keeper_tasks_list] / [keeper_context_status],
-    not by probing the files: backlog.json, tasks/, etc.). This preserves the
-    #23807 traversal/symlink write-bypass defence.
-
-    The keeper's own working area — [Playground_paths] [.masc/playground/<keeper>/{mind,repos}]
-    — is EXEMPT: it is where keepers clone repos and write drafts, so blocking
-    it (as the pre-#23843 raw match did, catching every [.masc/] prefix) breaks
-    keeper work. [#23843] removed the whole arm to unblock the playground, but
-    that also dropped the internal-state defence. The fix is to keep the arm
-    and narrow the match so only workspace-level state is blocked. *)
-let is_masc_internal_state_path (raw : string) : bool =
-  match split_relative_components raw with
-  | masc_dir :: "playground" :: _ when String.equal masc_dir Common.masc_dirname ->
-    false
-  | masc_dir :: _ when String.equal masc_dir Common.masc_dirname -> true
-  | _ -> false
-;;
-
-let is_masc_internal_state_norm ~(root_norm : string) ~(target_norm : string) : bool =
-  let root_norm = strip_trailing_slashes root_norm in
-  let target_norm = strip_trailing_slashes target_norm in
-  let masc_root = Filename.concat root_norm Common.masc_dirname in
-  let playground_root = Filename.concat masc_root "playground" in
-  let under_masc =
-    target_norm = masc_root
-    || String.starts_with ~prefix:(masc_root ^ "/") target_norm
-  in
-  let under_playground =
-    target_norm = playground_root
-    || String.starts_with ~prefix:(playground_root ^ "/") target_norm
-  in
-  (* Exempt the keeper playground (Playground_paths SSOT); keep the internal-
-     state traversal/symlink defence for everything else under .masc/. *)
-  under_masc && not under_playground
-;;
-
-let resolve_keeper_target_path
+let resolve_keeper_confined_path
       ~(config : Workspace.config)
       ~(allowed_paths : string list)
+      ~(endpoint : confined_path_endpoint)
       ~(raw_path : string)
-  : (string, keeper_path_rejection) result
+  : (confined_path, keeper_path_rejection) result
   =
   let raw = String.trim raw_path in
   if raw = ""
   then Error Path_required
-  else if is_masc_internal_state_path raw
-  then (
-    let rej = Task_state_file_path_blocked { raw } in
-    rejection_to_telemetry rej;
-    Error rej)
   else (
     let root = project_root_of_config config in
     let candidate = if Filename.is_relative raw then Filename.concat root raw else raw in
-    let root_norm = normalize_path_for_check root in
-    let target_norm = normalize_path_for_check candidate in
-    let within_root =
-      target_norm = root_norm || String.starts_with ~prefix:(root_norm ^ "/") target_norm
-    in
-    if not within_root
-    then
-      (* Tier A3 / Cycle 6: do not echo the resolved [target_norm] or
-         [root_norm] absolute paths — both reveal the host sandbox
-         layout to the caller (LLM). Echo only the caller's [raw]
-         input. The "outside_project_root" label is enough for the
-         caller to course-correct without enumerating the host. *)
-      Error (Outside_project_root { raw })
-    else if is_masc_internal_state_norm ~root_norm ~target_norm
-    then (
-      let rej = Task_state_file_path_blocked { raw } in
-      rejection_to_telemetry rej;
-      Error rej)
-    else if allowed_paths = []
-    then Ok candidate
-    else (
-      let allowed_norms =
-        allowed_paths
-        |> List.filter_map (normalize_allowed_path_for_check ~root:root_norm)
+    match normalize_confined_endpoint endpoint candidate with
+    | Error rejection -> Error rejection
+    | Ok target_norm ->
+      let project_root_path = strip_trailing_slashes root in
+      let project_root_norm = normalize_path_for_check_stripped root in
+      let allowed_roots =
+        if allowed_paths = []
+        then [ strip_trailing_slashes root, project_root_norm ]
+        else
+          List.filter_map
+            (allowed_path_projection ~root)
+            allowed_paths
       in
-      let matches_any =
-        List.exists
-          (fun allowed_norm ->
-             target_norm = allowed_norm
-             || String.starts_with ~prefix:(allowed_norm ^ "/") target_norm)
-          allowed_norms
-      in
-      if matches_any
-      then Ok candidate
-      else Error (Outside_sandbox { raw })))
+      (match allowed_roots with
+       | [] ->
+         Error (Allowed_paths_normalized_empty { count = List.length allowed_paths })
+       | _ ->
+         (match
+         List.find_opt
+           (fun (_allowed_path, allowed_norm) ->
+              target_norm = allowed_norm
+              || String.starts_with ~prefix:(allowed_norm ^ "/") target_norm)
+           allowed_roots
+       with
+       | None -> Error (Outside_sandbox { raw })
+       | Some (allowed_path, root_norm) ->
+         let candidate_path = strip_trailing_slashes candidate in
+         let endpoint_relative_path =
+           relative_path_within_root ~root_norm ~target_norm
+         in
+         if endpoint = Lexical_entry && String.equal endpoint_relative_path "."
+         then Error Invalid_lexical_endpoint
+         else
+         let relative_path =
+           if candidate_path = allowed_path
+              || String.starts_with ~prefix:(allowed_path ^ "/") candidate_path
+           then
+             relative_path_within_root
+               ~root_norm:allowed_path
+               ~target_norm:candidate_path
+           else relative_path_within_root ~root_norm ~target_norm
+         in
+         let anchor_root, root_relative_path =
+           if allowed_path = project_root_path
+              || String.starts_with ~prefix:(project_root_path ^ "/") allowed_path
+           then
+             ( project_root_norm
+             , relative_path_within_root
+                 ~root_norm:project_root_path
+                 ~target_norm:allowed_path )
+           else if root_norm = project_root_norm
+              || String.starts_with ~prefix:(project_root_norm ^ "/") root_norm
+           then
+             ( project_root_norm
+             , relative_path_within_root
+                 ~root_norm:project_root_norm
+                 ~target_norm:root_norm )
+           else (
+             let parent = Filename.dirname root_norm in
+             if String.equal parent root_norm
+             then root_norm, "."
+             else
+               ( parent
+               , relative_path_within_root
+                   ~root_norm:parent
+                   ~target_norm:root_norm ))
+         in
+         Ok
+           { root = root_norm
+           ; root_identity = resource_identity_of_unix_path root_norm
+           ; anchor_root
+           ; root_relative_path
+           ; relative_path
+           ; host_path = candidate
+           ; containment_path = target_norm
+           ; endpoint_relative_path
+           })))
 ;;
+
+let resolve_keeper_path_within_allowed_roots ~config ~allowed_paths ~raw_path =
+  resolve_keeper_confined_path
+    ~config
+    ~allowed_paths
+    ~endpoint:Follow_referent
+    ~raw_path
+  |> Result.map confined_host_path
+;;
+
+let resolve_keeper_target_path = resolve_keeper_path_within_allowed_roots
 
 (* Playground path SSOT lives in [Playground_paths] (masc_config). These
    names preserve the historical keeper-facing API. Do not re-implement
@@ -415,121 +646,11 @@ let resolve_keeper_read_path
       ~(raw_path : string)
   : (string, keeper_path_rejection) result
   =
-  let raw = String.trim raw_path in
-  if raw = ""
-  then Error Path_required
-  else if not (Filename.is_relative raw)
-  then (
-    (* #10349 follow-up: absolute paths bypass the sandbox-relative
-       contract and let the LLM observe host filesystem layout.
-       Reject at the gate; the keeper should use sandbox-relative
-       paths such as 'repos/X/lib/foo.ml'. *)
-    let rej = Absolute_path_rejected { raw } in
-    rejection_to_telemetry rej;
-    Error rej)
-  else if is_masc_internal_state_path raw
-  then (
-    (* Block direct access to .masc/ internal state files.
-       Keepers should use keeper_tasks_list / keeper_context_status
-       instead of probing .masc/backlog.json, .masc/tasks/, etc. *)
-    let rej = Task_state_file_path_blocked { raw } in
-    rejection_to_telemetry rej;
-    Error rej)
-  else (
-    let root = project_root_of_config config in
-    let candidate = Filename.concat root raw in
-    let root_norm = normalize_path_for_check root in
-    let target_norm = normalize_path_for_check candidate in
-    let within_root =
-      target_norm = root_norm || String.starts_with ~prefix:(root_norm ^ "/") target_norm
-    in
-    if not within_root
-    then
-      (* Tier A3 / Cycle 6: do not echo the resolved [target_norm] or
-         [root_norm] absolute paths — both reveal the host sandbox
-         layout to the caller (LLM). Echo only the caller's [raw]
-         input. The "outside_project_root" label is enough for the
-         caller to course-correct without enumerating the host. *)
-      Error (Outside_project_root { raw })
-    else if is_masc_internal_state_norm ~root_norm ~target_norm
-    then (
-      let rej = Task_state_file_path_blocked { raw } in
-      rejection_to_telemetry rej;
-      Error rej)
-    else (
-      let allowed_norms =
-        if allowed_paths = []
-        then []
-        else
-          allowed_paths
-          |> List.filter_map (normalize_allowed_path_for_check ~root:root_norm)
-      in
-      if allowed_paths <> [] && allowed_norms = []
-      then
-        (* Tier A3 / Cycle 6: redact the raw [allowed_paths] list. *)
-        Error (Allowed_paths_normalized_empty { count = List.length allowed_paths })
-      else (
-        let within_allowed =
-          allowed_norms = [] || is_within_allowed_norms ~target_norm allowed_norms
-        in
-        let search_roots = if allowed_norms = [] then [ root_norm ] else allowed_norms in
-        let reject_outside_sandbox () =
-          let rej = Outside_sandbox { raw } in
-          rejection_to_telemetry rej;
-          Error rej
-        in
-        if not within_allowed
-        then
-          if Filename.is_relative raw
-          then (
-            match
-              maybe_resolve_missing_relative_read_path ~roots:search_roots ~raw_path:raw
-            with
-            | Ok (Some resolved) -> Ok resolved
-            | Ok None -> reject_outside_sandbox ()
-            | Error e -> Error e)
-          else reject_outside_sandbox ()
-        else if path_exists candidate || allows_missing_leaf_read ~raw ~candidate
-        then Ok candidate
-        else if Filename.is_relative raw
-        then (
-          match
-            maybe_resolve_missing_relative_read_path ~roots:search_roots ~raw_path:raw
-          with
-          | Ok (Some resolved) -> Ok resolved
-          | Ok None ->
-            (* #10349: keep the rejection signal in the
-                Otel_metric_store counter; do NOT echo the resolved
-                roots back to the LLM.  When keeper identity
-                drifts (turn 433 evidence), the roots can
-                belong to a sibling sandbox, leaking its
-                directory layout to the wrong keeper. *)
-            let rej = Not_found_relative { raw } in
-            rejection_to_telemetry rej;
-            Error rej
-          | Error e -> Error e)
-        else (
-          let rej = Outside_sandbox { raw } in
-          rejection_to_telemetry rej;
-          Error rej))))
+  resolve_keeper_path_within_allowed_roots ~config ~allowed_paths ~raw_path
 ;;
 
 let process_status_to_json (st : Unix.process_status) : Yojson.Safe.t =
-  let sem = Masc_exec.Exit_code.of_process_status st in
-  let base =
-    match st with
-    | Unix.WEXITED 124 ->
-      (* Process_eio returns exit code 124 on Eio.Time.Timeout *)
-      [ "kind", `String "timeout" ]
-    | Unix.WEXITED _code -> [ "kind", `String "exit"; "code", `Int sem.code ]
-    | Unix.WSIGNALED sig_num when sig_num = Sys.sigterm -> [ "kind", `String "timeout" ]
-    | Unix.WSIGNALED sig_num -> [ "kind", `String "signaled"; "signal", `Int sig_num ]
-    | Unix.WSTOPPED sig_num -> [ "kind", `String "stopped"; "signal", `Int sig_num ]
-  in
-  let with_label = ("label", `String sem.label) :: base in
-  if sem.hint = ""
-  then `Assoc with_label
-  else `Assoc (("hint", `String sem.hint) :: with_label)
+  Exec_core.process_status_to_json st
 ;;
 
 let extract_user_messages (ctx_work : Keeper_types.working_context) : string list =

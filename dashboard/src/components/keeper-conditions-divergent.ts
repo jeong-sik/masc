@@ -1,8 +1,8 @@
 // Divergent conditions — active observables that are inconsistent with
 // the current FSM phase, surfaced as amber chips in the Agent Modal.
 //
-// Why this matters: [Keeper_state_machine.conditions] holds 16 booleans
-// (RFC-0002 §4) that together drive the phase transition function. When
+// Why this matters: Keeper state-machine conditions drive the phase
+// transition function. When
 // the keeper is healthy, conditions are consistent with the phase —
 // e.g. [phase=Running ∧ heartbeat_healthy=true]. A *divergence* is a
 // condition observed in a state the phase hasn't yet acknowledged,
@@ -27,7 +27,7 @@ export const isOperating = (p: KeeperPhase | null | undefined): boolean =>
   p === 'Running' || p === 'Failing' || p === 'Overflowed'
 
 export const isTerminated = (p: KeeperPhase | null | undefined): boolean =>
-  p === 'Stopped' || p === 'Dead' || p === 'Crashed'
+  p === 'Stopped' || p === 'Dead'
 
 /** Rule table — each entry returns a ko-language reason when divergent,
  *  null when the condition is consistent with (or expected by) the phase. */
@@ -40,11 +40,6 @@ const DIVERGENCE_RULES: Partial<Record<keyof KeeperConditions, DivergenceFn>> = 
   context_overflow: (v, p) =>
     v && p !== 'Overflowed' && !isTerminated(p)
       ? '컨텍스트 overflow 감지됨 (phase 미반영)'
-      : null,
-
-  compact_retry_exhausted: (v, p) =>
-    v && p !== 'Failing' && !isTerminated(p)
-      ? '압축 재시도 소진 — Failing phase로 전환 필요'
       : null,
 
   stop_requested: (v, p) =>
@@ -72,9 +67,9 @@ const DIVERGENCE_RULES: Partial<Record<keyof KeeperConditions, DivergenceFn>> = 
       ? '파이버 죽음 (Offline도 종료도 아님)'
       : null,
 
-  restart_budget_remaining: (v, p) =>
-    !v && !isTerminated(p)
-      ? '재시작 예산 소진 (Dead phase 기대)'
+  dead_tombstone_latched: (v, p) =>
+    v && p !== 'Dead'
+      ? 'Dead tombstone이 기록됐지만 Dead phase 미반영'
       : null,
 }
 

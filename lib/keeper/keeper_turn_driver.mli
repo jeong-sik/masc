@@ -28,18 +28,11 @@ include
       Keeper_internal_error.accept_rejection_kind
      and type accept_response_shape =
       Keeper_internal_error.accept_response_shape
-     and type tool_progress_effect =
-      Keeper_internal_error.tool_progress_effect
      and type provider_cooldown_cause =
       Keeper_internal_error.provider_cooldown_cause
      and type masc_internal_error = Keeper_internal_error.masc_internal_error
 
 (** {1 Provider error helpers} *)
-
-val message_looks_like_cli_wrapped_hard_quota : string -> bool
-
-val sdk_error_is_terminal_provider_runtime_failure :
-  Agent_sdk.Error.sdk_error -> bool
 
 val sdk_error_is_hard_quota : Agent_sdk.Error.sdk_error -> bool
 
@@ -118,7 +111,6 @@ val run_named :
   ?temperature:float ->
   ?max_tokens:int ->
   ?accept:(Agent_sdk_response.api_response -> bool) ->
-  ?guardrails:Agent_sdk.Guardrails.t ->
   ?hooks:Agent_sdk.Hooks.hooks ->
   ?context_reducer:Agent_sdk.Context_reducer.t ->
   ?raw_trace:Agent_sdk.Raw_trace.t ->
@@ -136,6 +128,7 @@ val run_named :
   ?context_window_tokens:int ->
   ?oas_auto_context_overflow_retry:bool ->
   ?checkpoint_dir:string ->
+  ?checkpoint_sink:Agent_sdk.Agent.checkpoint_sink ->
   ?context_injector:Agent_sdk.Hooks.context_injector ->
   ?context:Agent_sdk.Context.t ->
   ?enable_thinking:bool ->
@@ -194,27 +187,7 @@ module For_testing : sig
 
   val success_selected_model_raw : Runtime_candidate.t -> string option
 
-  val record_candidate_health_error :
-    keeper_name:string -> Runtime_candidate.t -> Agent_sdk.Error.sdk_error -> unit
-
-  val provider_cooldown_block :
-    keeper_name:string ->
-    Runtime_candidate.t ->
-    Keeper_turn_driver_provider_attempt.provider_cooldown_block option
-
-  (** #23456 P1 regression surface: mixed unknown+deterministic blocker
-      lists must aggregate to [None] (auto-recoverable). *)
-  val aggregate_cooldown_cause :
-    (string * Keeper_binding_health.provider_info) list ->
-    Keeper_internal_error.provider_cooldown_cause option
-
-  val provider_cooldown_block_error :
-    runtime_id:string ->
-    Keeper_turn_driver_provider_attempt.provider_cooldown_block ->
-    Agent_sdk.Error.sdk_error
-
   val apply_accept :
-    ?initial_messages:Agent_sdk.Types.message list ->
     runtime_id:string ->
     accept:(Agent_sdk_response.api_response -> bool) ->
     Runtime_agent.run_result ->
@@ -222,9 +195,6 @@ module For_testing : sig
 
   val max_execution_time_for_attempt :
     ?per_provider_timeout_s:float -> unit -> float option
-
-  val last_tool_progress_context_string_of_messages :
-    Agent_sdk.Types.message list -> string option
 
   val sdk_error_of_nonretryable_attempt_error :
     runtime_id:string ->
@@ -267,6 +237,8 @@ module For_testing : sig
     attempt_inference_policy
 
   val attempt_runtime_candidates :
+    ?allow_retry:
+      (runtime_id:string -> attempt:int -> Agent_sdk.Error.sdk_error -> bool) ->
     ?allow_accept_no_progress_retry:
       (runtime_id:string -> attempt:int -> Agent_sdk.Error.sdk_error -> bool) ->
     runtime_id:string ->
@@ -277,18 +249,19 @@ module For_testing : sig
       Keeper_runtime_manifest.event_kind ->
       unit) ->
     run_attempt:
-      (?resume_checkpoint:Agent_sdk.Checkpoint.t ->
-      idx:int ->
+      (idx:int ->
       runtime_id:string ->
       'candidate ->
       ('result, Agent_sdk.Error.sdk_error) result * Agent_sdk.Checkpoint.t option) ->
     'candidate list ->
     ('result, Agent_sdk.Error.sdk_error) result
 
-  val accept_no_progress_should_try_next : Agent_sdk.Error.sdk_error -> bool
+  val observe_checkpoint_stage :
+    bool Atomic.t -> Agent_sdk.Agent.checkpoint_stage -> unit
 
-  val accept_no_progress_read_only_should_try_next :
-    Agent_sdk.Error.sdk_error -> bool
+  val same_run_retry_allowed : bool Atomic.t -> bool
+
+  val accept_no_progress_should_try_next : Agent_sdk.Error.sdk_error -> bool
 
   val accept_rejected_result_should_try_next :
     is_last:bool -> Agent_sdk.Error.sdk_error -> bool

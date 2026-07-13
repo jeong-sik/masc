@@ -6,9 +6,9 @@
    [verification_submission_evidence_refs]. Analysis-only tasks (no
    contract, no handoff_context, plain prose notes) had no way to pass.
 
-   Phase E retired the substring filter — only placeholder filtering
-   remains. These tests pin that behavior so a future refactor doesn't
-   silently re-introduce a Counter-as-Fix style substring gate. *)
+   Phase E retired the substring filter. The Task LLM boundary now receives
+   every non-empty source value and decides whether prose is meaningful;
+   local placeholder vocabulary is not execution authority. *)
 
 module V = Workspace_task_verification
 
@@ -31,7 +31,7 @@ let dummy_task ?contract ?handoff_context () : Masc_domain.task =
 
 let test_analysis_only_with_plain_notes_keeps_notes () =
   (* Pre Phase-E: empty result because notes had no substring tokens.
-     Phase E: notes survive when non-empty / non-placeholder. *)
+     Current: all non-empty notes reach the configured LLM. *)
   let task = dummy_task () in
   let refs =
     V.verification_submission_evidence_refs task ~notes:"investigated 24h log audit" None
@@ -46,12 +46,12 @@ let test_analysis_only_with_empty_notes_returns_empty () =
   let refs = V.verification_submission_evidence_refs task ~notes:"" None in
   Alcotest.(check (list string)) "empty notes -> empty refs" [] refs
 
-let test_placeholder_notes_filtered () =
+let test_placeholder_like_notes_reach_llm_evidence () =
   let task = dummy_task () in
   let refs = V.verification_submission_evidence_refs task ~notes:"tbd" None in
-  Alcotest.(check (list string)) "placeholder notes filtered" [] refs;
+  Alcotest.(check (list string)) "tbd is preserved for LLM judgment" [ "tbd" ] refs;
   let refs2 = V.verification_submission_evidence_refs task ~notes:"  DRAFT  " None in
-  Alcotest.(check (list string)) "case/whitespace placeholders filtered" [] refs2
+  Alcotest.(check (list string)) "source whitespace is normalized only" [ "DRAFT" ] refs2
 
 let test_contracted_task_includes_contract_refs () =
   let contract : Masc_domain.task_contract =
@@ -77,9 +77,8 @@ let test_contracted_task_includes_contract_refs () =
     (List.mem "test_keeper_lifecycle PASS" refs)
 
 let test_handoff_context_evidence_refs_survive_plain_string () =
-  (* Pre Phase-E: handoff_context.evidence_refs were substring-filtered
-     and a plain string like "see retro" would be dropped. Phase E: as
-     long as it is not placeholder/empty, it survives. *)
+  (* Every non-empty source value is preserved; the configured LLM judges its
+     evidentiary value. *)
   let handoff_context : Masc_domain.task_handoff_context =
     { summary = "investigated repeat failure"
     ; reason = None
@@ -97,10 +96,10 @@ let test_handoff_context_evidence_refs_survive_plain_string () =
     "plain handoff evidence_ref survives" true
     (List.mem "see retro" refs);
   Alcotest.(check bool)
-    "n/a placeholder filtered" false
+    "n/a preserved for LLM judgment" true
     (List.mem "n/a" refs);
   Alcotest.(check bool)
-    "summary survives non-empty / non-placeholder" true
+    "non-empty summary survives" true
     (List.mem "investigated repeat failure" refs)
 
 let () =
@@ -111,8 +110,8 @@ let () =
             test_analysis_only_with_plain_notes_keeps_notes
         ; Alcotest.test_case "empty notes" `Quick
             test_analysis_only_with_empty_notes_returns_empty
-        ; Alcotest.test_case "placeholder filtering" `Quick
-            test_placeholder_notes_filtered
+        ; Alcotest.test_case "placeholder-like values reach LLM" `Quick
+            test_placeholder_like_notes_reach_llm_evidence
         ; Alcotest.test_case "contract refs included" `Quick
             test_contracted_task_includes_contract_refs
         ; Alcotest.test_case "handoff plain string survives" `Quick

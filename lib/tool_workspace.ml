@@ -717,9 +717,7 @@ let dispatch_bindings : (string * dispatch_handler) list =
   [ "masc_heartbeat", handle_heartbeat
   ; "masc_goal_list", Workspace_goals.handle_goal_list
   ; "masc_goal_upsert", Workspace_goals.handle_goal_upsert
-  ; "masc_goal_hygiene_review", Workspace_goals.handle_goal_hygiene_review
   ; "masc_goal_transition", Workspace_goals.handle_goal_transition
-  ; "masc_goal_verify", Workspace_goals.handle_goal_verify
   ; "masc_reset", handle_reset
   ; "masc_check", handle_check
   ]
@@ -768,12 +766,9 @@ let schemas = Tool_schemas_workspace.schemas
 
 let tool_spec_read_only = [ "masc_status"; "masc_check"; "masc_goal_list" ];;
 
-let tool_spec_system_internal = [ "masc_reset" ]
-
 let () =
   List.iter
     (fun (s : Masc_domain.tool_schema) ->
-       let is_system = List.mem s.name tool_spec_system_internal in
        Tool_spec.register
          (Tool_spec.create
             ~name:s.name
@@ -782,9 +777,6 @@ let () =
             ~input_schema:s.input_schema
             ~handler_binding:Tag_dispatch
             ~is_read_only:(List.mem s.name tool_spec_read_only)
-            ~is_idempotent:(List.mem s.name tool_spec_read_only)
-            ~visibility:(if is_system then Tool_catalog.Hidden else Tool_catalog.Default)
-            ~allow_direct_call_when_hidden:is_system
             ()))
     schemas
 ;;

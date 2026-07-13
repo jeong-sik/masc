@@ -155,10 +155,7 @@ m_tool_call_success_pct() {
     | ($rows | length) as $total
     | if $total == 0 then empty
       else
-        ([ $rows[]
-           | select(.success == true
-                    and ((if has("semantic_success") then .semantic_success else true end) != false))
-         ] | length) as $ok
+        ([ $rows[] | select(.success == true) ] | length) as $ok
         | (($ok * 10000 / $total | floor) / 100)
       end
   ' "${files[@]}" 2>/dev/null || echo "null"
@@ -177,8 +174,6 @@ m_execute_failure_pct() {
       if (.ts | type) == "number" then .ts
       elif (.ts | type) == "string" then (.ts | fromdateiso8601? // 0)
       else 0 end;
-    def semantic_failed:
-      has("semantic_success") and .semantic_success == false;
     [ .[]
       | select(ts_epoch >= $cutoff)
       | select(.tool == "Execute" or .tool == "tool_execute")
@@ -186,7 +181,7 @@ m_execute_failure_pct() {
     | ($rows | length) as $total
     | if $total == 0 then empty
       else
-        ([ $rows[] | select(.success == false or semantic_failed) ] | length) as $fail
+        ([ $rows[] | select(.success == false) ] | length) as $fail
         | (($fail * 10000 / $total | floor) / 100)
       end
   ' "${files[@]}" 2>/dev/null || echo "null"

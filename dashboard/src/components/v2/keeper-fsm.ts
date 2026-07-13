@@ -2,13 +2,13 @@
 //
 // The prototype's 12-state FSM drives every keeper's status dot tone, the
 // breathing pulse, the hover gloss, and the operator action set. The live
-// dashboard's `KeeperPhase` (types/core.ts) is the same 12 states plus
-// `Zombie`, so these tables map directly onto live keeper data. Unknown /
+// dashboard's `KeeperPhase` (types/core.ts) uses the same 12 states, so
+// these tables map directly onto live keeper data. Unknown /
 // null phases fall back to the idle/off bucket (a total display default —
 // the prototype used the same `?? 'idle'` pattern), never throwing.
 //
 // All four lookup tables (PHASE_TONE / PHASE_PULSE / PHASE_INFO / FSM_ACTIONS)
-// key on `KeeperPhase` (PascalCase, 13 entries from types/core.ts:1090). The
+// key on `KeeperPhase` (PascalCase). The
 // closed-sum shape means: a future `KeeperPhase` variant added in core.ts
 // fails TypeScript compilation here until this surface catches up — which
 // is the whole point of the SSOT lift in iter-4. Public function signatures
@@ -35,8 +35,7 @@ export interface FsmAction {
   readonly danger?: boolean
 }
 
-// The 12 canonical FSM phases (prototype FSM_STATES). `Zombie` is a live-only
-// extra handled by the fallbacks below.
+// The 12 canonical FSM phases (prototype FSM_STATES).
 export const FSM_STATES = [
   'Offline',
   'Restarting',
@@ -64,13 +63,12 @@ const PHASE_TONE: Readonly<Record<KeeperPhase, KeeperTone>> = {
   Overflowed: 'bad',
   Crashed: 'bad',
   Dead: 'bad',
-  Zombie: 'bad',
   Stopped: 'idle',
   Offline: 'idle',
 }
 
 // phase → whether the dot breathes (active/transient phases only).
-// Verbatim from prototype data.jsx:43-45 — 5 of 13 phases pulse.
+// Verbatim from prototype data.jsx:43-45.
 const PHASE_PULSE: Readonly<Record<KeeperPhase, boolean>> = {
   Running: true,
   Compacting: true,
@@ -84,11 +82,9 @@ const PHASE_PULSE: Readonly<Record<KeeperPhase, boolean>> = {
   Dead: false,
   Stopped: false,
   Offline: false,
-  Zombie: false,
 }
 
-// phase → KR hover gloss. 12 entries verbatim from prototype data.jsx:19-32
-// plus `Zombie` (live-wire-only; classified as bad by PHASE_TONE above).
+// phase → KR hover gloss. 12 entries verbatim from prototype data.jsx:19-32.
 const PHASE_INFO: Readonly<Record<KeeperPhase, string>> = {
   Offline: '오프라인 — 실행 중이 아님',
   Restarting: '재시작 중',
@@ -102,14 +98,13 @@ const PHASE_INFO: Readonly<Record<KeeperPhase, string>> = {
   Stopped: '중지됨',
   Crashed: '비정상 종료',
   Dead: '복구 불가 — 종료됨',
-  Zombie: '좀비 — 등록됐으나 응답 없음',
 }
 
 // Reusable action literals (shared across phases keeps the table honest).
 const A_STOP: FsmAction = { id: 'stop', label: '중지', glyph: '⏹', via: 'Draining', to: 'Stopped', ms: 1500, danger: true, hint: '작업을 비우고 종료 (Drain → Stopped)' }
 
 // phase → ordered operator actions. Phases absent here (Compacting,
-// HandingOff, Draining, Restarting, Dead, Zombie) expose no action — they are
+// HandingOff, Draining, Restarting, Dead) expose no action — they are
 // transient or terminal.
 const FSM_ACTIONS: Readonly<Partial<Record<KeeperPhase, readonly FsmAction[]>>> = {
   Running: [
@@ -174,7 +169,7 @@ export function fsmActions(phase: string | null | undefined): readonly FsmAction
 }
 
 // Closed-sum guard. `phase` arrives from the live wire as `string | null`; we
-// accept only the canonical 13 PascalCase tokens of `KeeperPhase`. Unknown /
+// accept only the canonical PascalCase tokens of `KeeperPhase`. Unknown /
 // null falls through to the function-level fallback. Own-property check via
 // a null-prototype registry keeps the closed-sum boundary honest (rejects
 // 'constructor', '__proto__', etc. that would otherwise pass `in KeeperPhase`).
@@ -195,6 +190,5 @@ const KEEPER_PHASE_REGISTRY: Readonly<Record<string, true>> = Object.freeze(
     Stopped: true,
     Crashed: true,
     Dead: true,
-    Zombie: true,
   } as Record<string, true>),
 )

@@ -34,7 +34,6 @@ const deletingTaskId = signal<string | null>(null)
 const doneVisibleCount = signal(20)
 const searchDoneVisibleCount = signal(20)
 const DONE_PAGE_SIZE = 20
-const REPO_ISSUES_BASE = 'https://github.com/jeong-sik/masc/issues'
 const DECK_HEAD = 'border-b border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2'
 const META_CHIP = 'rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-1.5 py-0.5 font-mono text-3xs'
 const BACKLOG_PRESSURE_PRIORITIES = [1, 2, 3, 4] as const
@@ -142,23 +141,7 @@ function taskScope(task: Task): string | null {
   const match = task.title.match(/^\[([^\]]+)\]/)
   if (!match) return null
   const scope = match[1] ?? ''
-  return /^\#\d+$/.test(scope) ? null : scope || null
-}
-
-function taskLink(task: Task): { href: string; label: string } {
-  const issueMatch = task.title.match(/\[#(\d+)\]/)
-  if (issueMatch) {
-    return {
-      href: `${REPO_ISSUES_BASE}/${issueMatch[1]}`,
-      label: `GitHub #${issueMatch[1]}`,
-    }
-  }
-
-  const query = encodeURIComponent(task.title.replace(/^\[[^\]]+\]\s*/, '').trim())
-  return {
-    href: `${REPO_ISSUES_BASE}?q=${query}`,
-    label: '관련 이슈 검색',
-  }
+  return scope || null
 }
 
 function KanbanCard({ task }: { task: Task }) {
@@ -169,7 +152,6 @@ function KanbanCard({ task }: { task: Task }) {
   const description = task.description ?? ''
   const canExpand = description.length > 160
   const scope = taskScope(task)
-  const link = taskLink(task)
 
   async function handleDelete(e: Event) {
     e.stopPropagation()
@@ -247,15 +229,6 @@ function KanbanCard({ task }: { task: Task }) {
                 ? html`<span class="${META_CHIP}"><${TimeAgo} timestamp=${task.created_at} /></span>`
                 : null}
         ${task.assignee ? html`<span class="rounded-[var(--r-0)] border border-[var(--color-brass-border)] bg-[var(--color-brass-soft)] px-1.5 py-0.5 text-[var(--color-accent-fg)]">@${task.assignee}</span>` : null}
-        <a
-          href=${link.href}
-          target="_blank"
-          rel="noreferrer"
-          class="v2-workspace-action v2-mobile-operator-target inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-1.5 py-0.5 text-[var(--color-fg-secondary)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
-        >
-          ${link.label}
-          <span aria-hidden="true">\u2197</span>
-        </a>
       </div>
     </article>
   `

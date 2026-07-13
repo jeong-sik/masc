@@ -40,7 +40,7 @@ include Workspace_status
 (* Task lifecycle: add, claim, transition, complete, cancel *)
 include Workspace_task
 
-(* Task scheduling: claim_next, release_stale_claims *)
+(* Task scheduling: claim_next *)
 include Workspace_task_schedule
 
 (* Task/agent/message query and listing *)
@@ -126,10 +126,18 @@ end
    classifier produced. (#8605 family -- exhaustive-match template) *)
 
 
-(* force_release_task — zombie cleanup needs task management logic *)
+(* Orphan reconciliation — zombie cleanup needs Task storage mutation without
+   a privileged synthetic actor. *)
 let () =
-  Atomic.set Workspace_hooks.force_release_task_fn (fun config ~agent_name ~task_id () ->
-    force_release_task_r config ~agent_name ~task_id ())
+  Atomic.set
+    Workspace_hooks.reconcile_orphaned_task_fn
+    (fun config ~task_id ~expected_assignee ~signal () ->
+       let signal =
+         match signal with
+         | `Absent -> Workspace_task.Assignee_absent
+         | `Inactive -> Workspace_task.Assignee_inactive
+       in
+       reconcile_orphaned_task_r config ~task_id ~expected_assignee ~signal ())
 ;;
 
 

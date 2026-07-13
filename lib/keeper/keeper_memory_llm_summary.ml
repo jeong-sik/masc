@@ -196,7 +196,7 @@ let record_summary_outcome
 let summarize_with_provider
     ?(complete : complete_fn = default_complete)
     ?clock
-    ?(timeout_sec = Env_config_governance.Inference.timeout_seconds)
+    ?(timeout_sec = Env_config_runtime_services.Inference.timeout_seconds)
     ~runtime_id
     ~sw
     ~net

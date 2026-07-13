@@ -28,14 +28,7 @@ let all_variants : blocker_class list =
   ; Runtime_exhausted (Structural_attempt_timeout { detail = "30" })
   ; Runtime_exhausted Capacity_exhausted
   ; Capacity_backpressure
-  ; Ambiguous_post_commit_timeout
-  ; Ambiguous_post_commit_failure
-  ; Admission_queue_wait_timeout
-  ; Turn_timeout_after_queue_wait
   ; Turn_timeout
-  ; Turn_livelock_blocked
-  ; Completion_contract_violation
-  ; No_progress_loop
   ; Fiber_unresolved
   ; Stale_turn_timeout
   ; Stale_fleet_batch
@@ -107,56 +100,11 @@ let test_unknown_string () =
 (** Pin the variant count so additions are visible in diffs.  When adding a
     new [blocker_class] variant, bump this number and add the variant to
     [all_variants]. *)
-let expected_variant_count = 33
+let expected_variant_count = 28
 
 let test_variant_count () =
   let count = List.length all_variants in
   check int "blocker_class variant count" expected_variant_count count
-;;
-
-(* ── Auto-approval blocking classification ─────────────────────── *)
-
-let test_auto_approval_blocked_is_exhaustive () =
-  (* Every variant must be classified without raising.  The function is
-     exhaustive, so a new variant is a compile error until this test and
-     the classifier are updated. *)
-  List.iter
-    (fun variant ->
-       let _blocked = blocker_class_auto_approval_blocked variant in
-       ())
-    all_variants
-;;
-
-let test_auto_approval_blocked_known_cases () =
-  let blocks klass =
-    check bool
-      (Printf.sprintf "%s blocks auto-approval" (blocker_class_to_string klass))
-      true
-      (blocker_class_auto_approval_blocked klass)
-  in
-  let allows klass =
-    check bool
-      (Printf.sprintf "%s allows auto-approval" (blocker_class_to_string klass))
-      false
-      (blocker_class_auto_approval_blocked klass)
-  in
-  (* Safety / uncertainty blockers *)
-  blocks Completion_contract_violation;
-  blocks (Runtime_exhausted No_providers_available);
-  blocks Fiber_unresolved;
-  blocks Stale_turn_timeout;
-  blocks Turn_livelock_blocked;
-  blocks No_progress_loop;
-  blocks Sdk_guardrail_violation;
-  blocks Sdk_tripwire_violation;
-  blocks Sdk_tool_failure_recovery_failed;
-  (* Transient liveness / budget / input signals do not block *)
-  allows Turn_timeout;
-  allows Capacity_backpressure;
-  allows Admission_queue_wait_timeout;
-  allows Sdk_idle_detected;
-  allows Sdk_input_required;
-  allows Sdk_max_turns_exceeded
 ;;
 
 (* ── SDK error → blocker_class mapping exhaustiveness ────────────── *)
@@ -257,23 +205,40 @@ let test_agent_variant_count_pin () =
     expected_agent_variant_count count
 ;;
 
-let test_structural_timeout_maps_to_oas_timeout () =
+let test_typed_agent_timeout_maps_to_oas_timeout () =
   let structural =
-    SdkE.Api
-      (SdkRetry.Timeout
-         { message =
-             "Turn wall-clock budget exhausted during runtime attempt \
-              (budget=554.9s)"
-         ; phase = None
+    SdkE.Agent
+      (SdkE.AgentExecutionTimeout
+         { elapsed_sec = 554.9
+         ; timeout_sec = 554.9
+         ; turn_count = 4
+         ; max_turns = 10
          })
   in
   match KSB.blocker_class_of_sdk_error structural with
   | Some klass ->
     check string
-      "structural timeout maps to oas_agent_execution_timeout"
+      "typed agent timeout maps to oas_agent_execution_timeout"
       "oas_agent_execution_timeout"
       (blocker_class_to_string klass)
-  | None -> fail "structural timeout should map to Some blocker_class"
+  | None -> fail "typed agent timeout should map to Some blocker_class"
+;;
+
+let test_api_timeout_prose_does_not_map_to_agent_timeout () =
+  let api_timeout =
+    SdkE.Api
+      (SdkRetry.Timeout
+         { message =
+             "Turn wall-clock budget exhausted during runtime attempt \
+              (budget=554.9s)"
+         ; phase = Some Llm_provider.Http_client.Http_operation
+         })
+  in
+  check (option string)
+    "API timeout prose does not synthesize an agent blocker"
+    None
+    (KSB.blocker_class_of_sdk_error api_timeout
+     |> Option.map blocker_class_to_string)
 ;;
 
 let test_provider_timeout_is_not_runtime_blocker () =
@@ -358,8 +323,7 @@ let test_provider_timeout_catch_all_maps_to_turn_timeout () =
   check string
     "provider timeout catch-all -> turn_timeout"
     "turn_timeout"
-    surface.KSB.blocker_class;
-  check bool "no continue gate" false surface.KSB.continue_gate
+    surface.KSB.blocker_class
 ;;
 
 let test_provider_timeout_detail_without_code_does_not_map_to_turn_timeout () =
@@ -375,31 +339,7 @@ let test_provider_timeout_detail_without_code_does_not_map_to_turn_timeout () =
     string
     "detail-only timeout text is not trusted"
     "provider_runtime_error"
-    surface.KSB.blocker_class;
-  check bool "no continue gate" false surface.KSB.continue_gate
-;;
-
-let completion_contract_surface_exn ?(detail = "completion contract violated") () =
-  match
-    KSB.runtime_blocker_surface_of_failure_reason
-      (Reg.Completion_contract_violation { detail })
-  with
-  | Some surface -> surface
-  | None ->
-    fail "runtime_blocker_surface_of_failure_reason returned None for Completion_contract_violation"
-;;
-
-let test_typed_completion_contract_maps_to_completion_contract () =
-  let surface = completion_contract_surface_exn () in
-  check string
-    "typed completion contract -> completion contract"
-    "completion_contract_violation"
-    surface.KSB.blocker_class;
-  check bool
-    "summary preserves typed detail"
-    true
-    (String.starts_with ~prefix:"completion contract violated" surface.KSB.summary);
-  check bool "no continue gate" false surface.KSB.continue_gate
+    surface.KSB.blocker_class
 ;;
 
 let test_masc_accept_rejected_provider_record_does_not_reparse_detail () =
@@ -411,9 +351,6 @@ let test_masc_accept_rejected_provider_record_does_not_reparse_detail () =
          ; reason_kind = Some KTD.Accept_no_usable_progress
          ; response_shape = Some KTD.Accept_response_empty
          ; stop_reason = None
-         ; last_tool_effect = None
-         ; any_mutating_tool = None
-         ; tool_effects_seen = []
          ; reason = "shape=empty; stop_reason=end_turn"
          })
   in
@@ -427,8 +364,7 @@ let test_masc_accept_rejected_provider_record_does_not_reparse_detail () =
   check string
     "provider runtime detail is not reparsed"
     "provider_runtime_error"
-    surface.KSB.blocker_class;
-  check bool "no continue gate" false surface.KSB.continue_gate
+    surface.KSB.blocker_class
 ;;
 
 (* ── Runner ────────────────────────────────────────────────────── *)
@@ -442,17 +378,14 @@ let () =
         ; test_case "unknown string returns None" `Quick test_unknown_string
         ; test_case "variant count pin" `Quick test_variant_count
         ] )
-    ; ( "auto_approval_classification"
-      , [ test_case "exhaustive over all variants" `Quick
-            test_auto_approval_blocked_is_exhaustive
-        ; test_case "known cases" `Quick test_auto_approval_blocked_known_cases
-        ] )
     ; ( "sdk_error_mapping"
       , [ test_case "all Agent variants are intentionally classified" `Quick
             test_all_agent_variants_classified_intentionally
         ; test_case "Agent variant count pin" `Quick test_agent_variant_count_pin
-        ; test_case "structural timeout → oas_agent_execution_timeout" `Quick
-            test_structural_timeout_maps_to_oas_timeout
+        ; test_case "typed agent timeout → oas_agent_execution_timeout" `Quick
+            test_typed_agent_timeout_maps_to_oas_timeout
+        ; test_case "API timeout prose does not synthesize agent timeout" `Quick
+            test_api_timeout_prose_does_not_map_to_agent_timeout
         ; test_case "provider timeout is not a runtime blocker" `Quick
             test_provider_timeout_is_not_runtime_blocker
         ] )
@@ -467,8 +400,6 @@ let () =
             "provider timeout detail without code stays provider runtime"
             `Quick
             test_provider_timeout_detail_without_code_does_not_map_to_turn_timeout
-        ; test_case "typed completion contract maps to completion contract" `Quick
-            test_typed_completion_contract_maps_to_completion_contract
         ; test_case "provider runtime detail is not reparsed" `Quick
             test_masc_accept_rejected_provider_record_does_not_reparse_detail
         ] )

@@ -6,7 +6,6 @@
 
 open Alcotest
 module CT = Masc.Workspace
-module L = Workspace_task_lifecycle
 module T = Masc_domain
 
 let empty_links : T.task_execution_links = {
@@ -44,43 +43,13 @@ let test_contract_state () =
     (CT.classify_contract_state (Some with_evidence))
 
 let test_path_via_verification () =
-  (* Verifier-redirect path: Approve_verification trumps drift+force. *)
-  check string "approve→done is via_verification regardless of drift"
+  check string "submitted verification path"
     "via_verification"
-    (CT.classify_completion_path
-       ~action:T.Approve_verification ~drift:None ~force:false);
-  check string "approve→done with force still via_verification"
-    "via_verification"
-    (CT.classify_completion_path
-       ~action:T.Approve_verification ~drift:None ~force:true)
+    (CT.classify_completion_path ~action:T.Approve_verification)
 
-let test_path_forced () =
-  (* force=true short-circuits same-agent guard; record as forced_done
-     so dashboards can isolate admin-override traffic. *)
-  check string "force=true with no drift labels forced_done"
-    "forced_done"
-    (CT.classify_completion_path
-       ~action:T.Done_action ~drift:None ~force:true);
-  check string "force=true with claimed_to_done_skip drift still forced_done"
-    "forced_done"
-    (CT.classify_completion_path
-       ~action:T.Done_action
-       ~drift:(Some L.Claimed_to_done_skip)
-       ~force:true)
-
-let test_path_drift () =
-  check string "claimed_to_done_skip without force"
-    "claimed_to_done_skip"
-    (CT.classify_completion_path
-       ~action:T.Done_action
-       ~drift:(Some L.Claimed_to_done_skip)
-       ~force:false)
-
-let test_path_normal () =
-  check string "in_progress→done is the canonical path"
-    "in_progress_to_done"
-    (CT.classify_completion_path
-       ~action:T.Done_action ~drift:None ~force:false)
+let test_path_direct () =
+  check string "direct done still uses LLM verdict" "direct_llm_verdict"
+    (CT.classify_completion_path ~action:T.Done_action)
 
 let () =
   run "task_completion_path_10449" [
@@ -90,8 +59,6 @@ let () =
       ]);
     ("path", [
         test_case "verifier redirect path" `Quick test_path_via_verification;
-        test_case "force override path" `Quick test_path_forced;
-        test_case "claimed→done drift path" `Quick test_path_drift;
-        test_case "normal in_progress→done path" `Quick test_path_normal;
+        test_case "direct configured-LLM path" `Quick test_path_direct;
       ]);
   ]

@@ -61,7 +61,7 @@
 \*     should never fire in practice.
 \*
 \* Out of scope here (sibling specs):
-\*   - phase _selection_ logic (KeeperConditionsGovernPhase, KeeperStateMachine)
+\*   - phase selection logic (KeeperStateMachine)
 \*   - per-turn time accounting (KeeperTurnCycle)
 
 EXTENDS Integers, TLC
@@ -75,13 +75,9 @@ VARIABLES
 
 vars == << phase, entered_at, now >>
 
-\* RFC-0002 13-phase FSM (keeper_state_machine.ml: type phase, 13 constructors;
-\* Zombie added iter 4 #14707, terminal-terminal).  The set below is the full
-\* 13 — iter 77 R-4 added the missing "Zombie" (the comment had claimed it was
-\* present but the literal set listed only 12); the dwell invariant is phase-
-\* agnostic so adding it is structurally transparent, but keeping the set in
-\* sync with [type phase] prevents the spec from silently under-modelling a
-\* terminal phase.
+\* Exact lifecycle values from keeper_state_machine_phase.ml. Dwell is an
+\* observation only: membership in this set grants no execution authority and
+\* no phase transition is inferred from elapsed time.
 PhaseSet == {
     "Offline",
     "Running",
@@ -94,8 +90,7 @@ PhaseSet == {
     "Stopped",
     "Crashed",
     "Restarting",
-    "Dead",
-    "Zombie"
+    "Dead"
 }
 
 TypeOK ==

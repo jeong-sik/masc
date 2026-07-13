@@ -7,7 +7,6 @@ import { FilterChips } from './common/filter-chips'
 import { PanelCard } from './common/panel-card'
 import { KeeperBadge } from './keeper-badge'
 import { KeeperMemoryPanel } from './memory-subsystems'
-import { formatDuration } from '../lib/format-time'
 
 type KeeperInspectorFocus = 'tool-access' | 'memory'
 
@@ -47,18 +46,12 @@ function displayValue(value: string | number | boolean | null | undefined): stri
   return String(value)
 }
 
-function secondsLabel(seconds: number | null | undefined): string {
-  if (seconds === null || seconds === undefined || !Number.isFinite(seconds)) return '-'
-  return formatDuration(seconds)
-}
-
 function listLabel(values: readonly string[] | null | undefined): string {
   const clean = (values ?? []).map(value => value.trim()).filter(Boolean)
   return clean.length === 0 ? '-' : clean.join(' · ')
 }
 
 export function toolAccessRowsForKeeper(keeper: Keeper): ToolAccessRow[] {
-  const policy = keeper.approval_policy_effective
   const recentTools = keeper.recent_tool_names?.length
     ? keeper.recent_tool_names
     : keeper.latest_tool_names
@@ -72,10 +65,8 @@ export function toolAccessRowsForKeeper(keeper: Keeper): ToolAccessRow[] {
       value: displayValue(keeper.sandbox_target ?? keeper.sandbox_profile),
     },
     {
-      label: 'proactive idle',
-      value: keeper.proactive_enabled === false
-        ? `off · ${secondsLabel(keeper.proactive_idle_sec)}`
-        : secondsLabel(keeper.proactive_idle_sec),
+      label: 'proactive',
+      value: keeper.proactive_enabled === false ? 'off' : 'on',
     },
     {
       label: 'mention turns',
@@ -84,12 +75,6 @@ export function toolAccessRowsForKeeper(keeper: Keeper): ToolAccessRow[] {
     {
       label: 'observed tools',
       value: listLabel(recentTools),
-    },
-    {
-      label: 'approval policy',
-      value: policy
-        ? `${policy.allow_rules ?? 0} allow · ${policy.deny_rules ?? 0} deny · ${policy.persisted_rules ?? 0} persisted`
-        : '-',
     },
   ]
 }

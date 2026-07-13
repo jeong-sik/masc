@@ -43,19 +43,11 @@ type t =
   | Provider_runtime_error of string
   (** [Keeper_registry.Provider_runtime_error]: payload is the
           original [code] field. *)
-  | Ambiguous_partial_commit_post_commit_timeout
-  (** [Keeper_registry.Ambiguous_partial_commit] with
-          [kind = Post_commit_timeout]. *)
-  | Ambiguous_partial_commit_post_commit_failure
-  (** [Keeper_registry.Ambiguous_partial_commit] with
-          [kind = Post_commit_failure]. *)
   | Fiber_unresolved (** [Keeper_registry.Fiber_unresolved]. *)
-  | Turn_overflow_pause
-  (** [Keeper_registry.Turn_overflow_pause]: context overflow with
-          compact retry exhausted; keeper auto-paused. *)
-  | Turn_livelock_pause
-  (** [Keeper_registry.Turn_livelock_pause]: turn livelock guard
-          blocked dispatch; keeper auto-paused. *)
+  | Turn_overflow_failure
+  (** [Keeper_registry.Turn_overflow_failure]: context overflow with
+          compact retry exhausted; the failure is observed without changing
+          Keeper pause state. *)
   | Operator_interrupt
   (** [Keeper_registry.Operator_interrupt]: the current turn was cancelled
           by an explicit operator request, typically from the dashboard
@@ -69,7 +61,6 @@ type t =
           internal). The payload is the existing parametrised wire
           format produced by [Keeper_agent_error.terminal_reason_code_of_sdk_error]
           (e.g. ["agent_error_max_turns_exceeded:turns=10,limit=10"],
-          ["completion_contract_violation:completion_contract"],
           ["api_error_server:502"]). PR-2.5 wraps the existing typed
           accessors in this variant so the typed bridge becomes a
           single source of truth for [Keeper_turn_terminal.t.code]
@@ -82,11 +73,9 @@ type t =
     compatible with the receipt JSON consumed by dashboards,
     [bin/masc-trace], and external consumers.
 
-    The [Stale_turn_timeout_*] variants and the two
-    [Ambiguous_partial_commit_*] variants intentionally collapse to a
-    single wire string each ([stale_turn_timeout],
-    [ambiguous_partial_commit]) to preserve the existing cohort keys;
-    the typed sub-class is still available to OCaml callers. *)
+    The [Stale_turn_timeout_*] variants intentionally collapse to the
+    [stale_turn_timeout] wire string; the typed sub-class is still available
+    to OCaml callers. *)
 val to_wire : t -> string
 
 (** Best-effort reverse of [to_wire]. Returned [None] for unknown wire

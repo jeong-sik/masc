@@ -19,10 +19,6 @@ import {
   asNullableIsoTimestamp,
   normalizePendingConfirmation,
   normalizeKeeperApprovalQueueItem,
-  normalizeGovernanceJudgment,
-  normalizeGovernanceDecisionItem,
-  normalizeGovernanceTimelineEvent,
-  normalizeGovernanceJudgeSummary,
   normalizeSubBoard,
 } from './board'
 import { boardLatencyMetrics, resetBoardLatencyMetrics } from '../board-metrics'
@@ -211,19 +207,15 @@ describe('normalizeKeeperApprovalQueueItem', () => {
   })
 
   it('returns null when id is missing', () => {
-    expect(normalizeKeeperApprovalQueueItem({ keeper_name: 'k', tool_name: 't', risk_level: 'low' })).toBeNull()
+    expect(normalizeKeeperApprovalQueueItem({ keeper_name: 'k', tool_name: 't' })).toBeNull()
   })
 
   it('returns null when keeper_name is missing', () => {
-    expect(normalizeKeeperApprovalQueueItem({ id: '1', tool_name: 't', risk_level: 'low' })).toBeNull()
+    expect(normalizeKeeperApprovalQueueItem({ id: '1', tool_name: 't' })).toBeNull()
   })
 
   it('returns null when tool_name is missing', () => {
-    expect(normalizeKeeperApprovalQueueItem({ id: '1', keeper_name: 'k', risk_level: 'low' })).toBeNull()
-  })
-
-  it('returns null when risk_level is missing', () => {
-    expect(normalizeKeeperApprovalQueueItem({ id: '1', keeper_name: 'k', tool_name: 't' })).toBeNull()
+    expect(normalizeKeeperApprovalQueueItem({ id: '1', keeper_name: 'k' })).toBeNull()
   })
 
   it('extracts all fields', () => {
@@ -231,10 +223,7 @@ describe('normalizeKeeperApprovalQueueItem', () => {
       id: 'q-1',
       keeper_name: 'janitor',
       tool_name: 'shell_exec',
-      action_key: 'op:gh',
-      sandbox_target: 'docker',
-      risk_level: 'high',
-      requested_at_iso: '2026-04-17T12:00:00Z',
+      requested_at: 1_776_427_200,
       waiting_s: 30,
       input: { cmd: 'ls' },
       input_preview: 'ls -la',
@@ -242,9 +231,6 @@ describe('normalizeKeeperApprovalQueueItem', () => {
     expect(result!.id).toBe('q-1')
     expect(result!.keeper_name).toBe('janitor')
     expect(result!.tool_name).toBe('shell_exec')
-    expect(result!.action_key).toBe('op:gh')
-    expect(result!.sandbox_target).toBe('docker')
-    expect(result!.risk_level).toBe('high')
     expect(result!.waiting_s).toBe(30)
     expect(result!.input_preview).toBe('ls -la')
   })
@@ -253,7 +239,6 @@ describe('normalizeKeeperApprovalQueueItem', () => {
     id: 'q-summary',
     keeper_name: 'janitor',
     tool_name: 'shell_exec',
-    risk_level: 'high' as const,
   }
 
   it('parses an available summary into the typed union', () => {
@@ -263,15 +248,12 @@ describe('normalizeKeeperApprovalQueueItem', () => {
         status: 'available',
         summary: {
           summary_version: 2,
-          generated_at_iso: '2026-07-04T00:00:00Z',
+          generated_at: 1_783_123_200,
           model_run_id: 'run-9',
-          context_summary: 'This deletes the production config.',
+          context_summary: 'This changes the requested target.',
           key_questions: ['Is there a backup?'],
-          suggested_options: [
-            { label: 'Reject', rationale: 'irreversible', estimated_risk_delta: 'critical' },
-          ],
-          risk_rationale: 'writes outside sandbox',
-          uncertainty: 0.4,
+          judgment: 'require_human',
+          rationale: 'The requested target needs Human context.',
         },
       },
     })
@@ -279,15 +261,12 @@ describe('normalizeKeeperApprovalQueueItem', () => {
       status: 'available',
       summary: {
         summary_version: 2,
-        generated_at_iso: '2026-07-04T00:00:00Z',
+        generated_at: '2026-07-04T00:00:00.000Z',
         model_run_id: 'run-9',
-        context_summary: 'This deletes the production config.',
+        context_summary: 'This changes the requested target.',
         key_questions: ['Is there a backup?'],
-        suggested_options: [
-          { label: 'Reject', rationale: 'irreversible', estimated_risk_delta: 'critical' },
-        ],
-        risk_rationale: 'writes outside sandbox',
-        uncertainty: 0.4,
+        judgment: 'require_human',
+        rationale: 'The requested target needs Human context.',
       },
     })
   })
@@ -331,195 +310,6 @@ describe('normalizeKeeperApprovalQueueItem', () => {
 })
 
 // ================================================================
-// normalizeGovernanceJudgment
-// ================================================================
-
-describe('normalizeGovernanceJudgment', () => {
-  it('returns null for null', () => {
-    expect(normalizeGovernanceJudgment(null)).toBeNull()
-  })
-
-  it('returns null when no summary or target_id', () => {
-    expect(normalizeGovernanceJudgment({})).toBeNull()
-  })
-
-  it('extracts judgment with summary', () => {
-    const result = normalizeGovernanceJudgment({
-      summary: 'All systems healthy',
-      confidence: 0.92,
-    })
-    expect(result!.summary).toBe('All systems healthy')
-    expect(result!.confidence).toBe(0.92)
-  })
-
-  it('extracts judgment with target_id only', () => {
-    const result = normalizeGovernanceJudgment({ target_id: 'keeper:janitor' })
-    expect(result!.target_id).toBe('keeper:janitor')
-  })
-
-  it('extracts all optional fields', () => {
-    const result = normalizeGovernanceJudgment({
-      summary: 'Test',
-      judgment_id: 'j-1',
-      target_kind: 'keeper',
-      target_id: 'janitor',
-      status: 'complete',
-      model_used: 'gpt-4',
-      keeper_name: 'janitor',
-      evidence_refs: ['e1', 'e2'],
-    })
-    expect(result!.judgment_id).toBe('j-1')
-    expect(result!.model_used).toBeNull()
-    expect(result!.evidence_refs).toEqual(['e1', 'e2'])
-  })
-
-  it('returns null confidence for non-number', () => {
-    const result = normalizeGovernanceJudgment({ summary: 's', confidence: 'high' })
-    expect(result!.confidence).toBeNull()
-  })
-})
-
-// ================================================================
-// normalizeGovernanceDecisionItem
-// ================================================================
-
-describe('normalizeGovernanceDecisionItem', () => {
-  it('returns null for null', () => {
-    expect(normalizeGovernanceDecisionItem(null)).toBeNull()
-  })
-
-  it('returns null when id is missing', () => {
-    expect(normalizeGovernanceDecisionItem({ topic: 'test' })).toBeNull()
-  })
-
-  it('returns null when topic and title are missing', () => {
-    expect(normalizeGovernanceDecisionItem({ id: '1' })).toBeNull()
-  })
-
-  it('extracts required fields', () => {
-    const result = normalizeGovernanceDecisionItem({
-      id: 'case-1',
-      topic: 'High CPU alert',
-    })
-    expect(result!.id).toBe('case-1')
-    expect(result!.topic).toBe('High CPU alert')
-    expect(result!.kind).toBe('case')
-    expect(result!.status).toBe('open')
-    expect(result!.related_agents).toEqual([])
-    expect(result!.evidence_refs).toEqual([])
-  })
-
-  it('falls back to title for topic', () => {
-    const result = normalizeGovernanceDecisionItem({
-      id: '1',
-      title: 'Fallback title',
-    })
-    expect(result!.topic).toBe('Fallback title')
-  })
-
-  it('falls back to state for status', () => {
-    const result = normalizeGovernanceDecisionItem({
-      id: '1',
-      topic: 't',
-      state: 'pending_ruling',
-    })
-    expect(result!.status).toBe('pending_ruling')
-  })
-
-  it('extracts context links', () => {
-    const result = normalizeGovernanceDecisionItem({
-      id: '1',
-      topic: 't',
-      context: {
-        board_post_id: 'bp-1',
-        task_id: 't-1',
-        operation_id: 'op-1',
-      },
-      linked_session_id: 'sess-1',
-    })
-    expect(result!.linked_board_post_id).toBe('bp-1')
-    expect(result!.linked_task_id).toBe('t-1')
-    expect(result!.linked_operation_id).toBe('op-1')
-    expect(result!.linked_session_id).toBe('sess-1')
-  })
-})
-
-// ================================================================
-// normalizeGovernanceTimelineEvent
-// ================================================================
-
-describe('normalizeGovernanceTimelineEvent', () => {
-  it('returns null for null', () => {
-    expect(normalizeGovernanceTimelineEvent(null)).toBeNull()
-  })
-
-  it('returns null when kind is missing', () => {
-    expect(normalizeGovernanceTimelineEvent({})).toBeNull()
-  })
-
-  it('returns null when kind is empty', () => {
-    expect(normalizeGovernanceTimelineEvent({ kind: '  ' })).toBeNull()
-  })
-
-  it('extracts kind and optional fields', () => {
-    const result = normalizeGovernanceTimelineEvent({
-      kind: 'ruling_issued',
-      item_kind: 'case',
-      item_id: 'case-1',
-      topic: 'High CPU',
-      summary: 'Ruling: auto-execute',
-      actor: 'judge',
-      index: 5,
-      decision: 'approve',
-    })
-    expect(result!.kind).toBe('ruling_issued')
-    expect(result!.item_kind).toBe('case')
-    expect(result!.summary).toBe('Ruling: auto-execute')
-    expect(result!.index).toBe(5)
-  })
-})
-
-// ================================================================
-// normalizeGovernanceJudgeSummary
-// ================================================================
-
-describe('normalizeGovernanceJudgeSummary', () => {
-  it('returns undefined for null', () => {
-    expect(normalizeGovernanceJudgeSummary(null)).toBeUndefined()
-  })
-
-  it('returns undefined for non-record', () => {
-    expect(normalizeGovernanceJudgeSummary('invalid')).toBeUndefined()
-  })
-
-  it('extracts all fields', () => {
-    const result = normalizeGovernanceJudgeSummary({
-      judge_online: true,
-      refreshing: false,
-      status: 'stale_visible',
-      degraded_reason: 'timeout',
-      cached_judgments_visible: true,
-      model_used: 'gpt-4',
-      keeper_name: 'janitor',
-      last_error: null,
-    })
-    expect(result!.judge_online).toBe(true)
-    expect(result!.refreshing).toBe(false)
-    expect(result!.status).toBe('stale_visible')
-    expect(result!.degraded_reason).toBe('timeout')
-    expect(result!.cached_judgments_visible).toBe(true)
-    expect(result!.model_used).toBeNull()
-    expect(result!.keeper_name).toBe('janitor')
-    expect(result!.last_error).toBeNull()
-  })
-
-  it('returns undefined for non-boolean judge_online', () => {
-    const result = normalizeGovernanceJudgeSummary({ judge_online: 'yes' })
-    expect(result!.judge_online).toBeUndefined()
-  })
-})
-
-// ================================================================
 // fetchBoard
 // ================================================================
 
@@ -544,8 +334,6 @@ describe('fetchBoard', () => {
             response_rate: 0.6,
             board_posts: 3,
             board_comments: 5,
-            accountability_score: 0.9,
-            autonomy_level: 'elevated',
             thompson_confidence: 0.7,
           },
           reactions: [
@@ -557,22 +345,6 @@ describe('fetchBoard', () => {
             },
           ],
           supported_reaction_emojis: ['🔥', '👍'],
-          claim_evidence: {
-            source: 'board_claim_evidence.jsonl',
-            target_post_id: 'post-1',
-            state: 'artifact_missing',
-            label: 'Artifact missing',
-            total_count: 2,
-            allowed_count: 1,
-            rejected_count: 1,
-            artifact_missing_count: 1,
-            artifact_unknown_count: 0,
-            missing_source_snapshot_count: 0,
-            stale_source_snapshot_count: 0,
-            artifact_not_verified_count: 1,
-            latest_decision: 'allow',
-            latest_recorded_at: 1_713_000_010,
-          },
           author_identity: {
             kind: 'keeper',
             id: 'analyst',
@@ -606,17 +378,7 @@ describe('fetchBoard', () => {
         response_rate: 0.6,
         board_posts: 3,
         board_comments: 5,
-        accountability_score: 0.9,
-        autonomy_level: 'elevated',
         thompson_confidence: 0.7,
-      },
-      claim_evidence: {
-        state: 'artifact_missing',
-        label: 'Artifact missing',
-        total_count: 2,
-        rejected_count: 1,
-        artifact_missing_count: 1,
-        artifact_not_verified_count: 1,
       },
       reactions: [
         {
@@ -754,37 +516,6 @@ describe('fetchBoard', () => {
     expect(result.posts[0]?.origin).toBeNull()
   })
 
-  it('keeps contributor_quality when only band and autonomy_level are present', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({
-        posts: [
-          {
-            id: 'post-band-only',
-            author: 'analyst',
-            title: 'Band only',
-            body: 'contributor_quality has no numeric fields',
-            created_at: 1_713_000_000,
-            updated_at: 1_713_000_000,
-            contributor_quality: {
-              band: 'strong',
-              autonomy_level: 'elevated',
-            },
-          },
-        ],
-      }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    )
-    vi.stubGlobal('fetch', fetchMock)
-
-    const result = await fetchBoard()
-
-    expect(result.posts[0]?.contributor_quality).toEqual({
-      band: 'strong',
-      autonomy_level: 'elevated',
-    })
-  })
 })
 
 describe('fetchBoardHearths', () => {

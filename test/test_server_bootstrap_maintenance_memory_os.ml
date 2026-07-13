@@ -24,7 +24,6 @@ let unconfigured_runtime_id = "test.unconfigured"
 let fact claim =
   { Types.claim
   ; category = Types.Fact
-  ; external_ref = None
   ; claim_kind = None
   ; source = { Types.trace_id = "t"; turn = 1; tool_call_id = None }
   ; observed_by = []
@@ -126,8 +125,6 @@ let test_accumulate_consolidate_recall () =
             Recall.render_context
               ~keeper_id
               ~now
-              ~max_facts:8
-              ~max_episodes:2
               ()
           in
           Alcotest.(check int) "recall sees consolidated store" 4 (List.length (Io.read_facts_all ~keeper_id));

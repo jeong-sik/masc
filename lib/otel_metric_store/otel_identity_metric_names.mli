@@ -1,4 +1,4 @@
-(** Auth, identity, config, and governance metric-name constants.
+(** Auth, identity, config, and structured-judge metric-name constants.
 
     Included by {!Otel_metric_store} so existing callers keep using
     [Otel_metric_store.metric_*] bindings unchanged. *)
@@ -15,6 +15,6 @@ val metric_silent_auth_token_resolve_error : string
 val metric_silent_dashboard_actor_fallback : string
 val metric_auth_strict_would_reject : string
 val metric_config_unknown_keys_ignored : string
-val metric_governance_judge_unparseable : string
-val metric_governance_lenient_json_fallback_hit : string
+val metric_structured_judge_unparseable : string
+val metric_structured_judge_lenient_json_fallback_hit : string
 val metric_startup_internal_keeper_token_sync : string

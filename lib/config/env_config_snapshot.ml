@@ -30,8 +30,6 @@ let auth_entries =
       "Allow anonymous mutations (local dev only)";
     entry ~default:"false" "MASC_HTTP_AUTH_STRICT"
       "Require auth for HTTP endpoints";
-    entry ~default:"production" Env_config_core.governance_level_env_key
-      "Governance level (production|development)";
   ]
 
 let runtime_entries =
@@ -42,8 +40,6 @@ let runtime_entries =
       "Routine telemetry log level override (debug|info|warn|error|off)";
     entry ~default:"false" Env_config_core.parse_warn_env_key
       "Escalate malformed env parses to Config_error";
-    entry ~default:"production" Env_config_core.governance_level_env_key
-      "Governance enforcement level";
     entry ~default:"true" Env_config_core.telemetry_enabled_env_key
       "Enable telemetry collection";
     entry ~default:"30" "MASC_TELEMETRY_RETENTION_DAYS"
@@ -141,18 +137,6 @@ let keeper_entries =
     entry ~default:"false" "MASC_KEEPER_DEBUG" "Enable keeper debug logging";
     entry ~default:"0.10" "MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD"
       "Daily deliberation budget (USD)";
-    entry ~default:"5" "MASC_KEEPER_SUPERVISOR_MAX_RESTARTS"
-      "Supervisor max restart attempts";
-    entry ~default:"10.0" "MASC_KEEPER_SUPERVISOR_BACKOFF_BASE_S"
-      "Supervisor backoff base delay (seconds)";
-    entry ~default:"300.0" "MASC_KEEPER_SUPERVISOR_BACKOFF_MAX_S"
-      "Supervisor backoff max delay (seconds)";
-    entry ~default:"0.3" "MASC_KEEPER_SELF_PRESERVATION_RATIO"
-      "Self-preservation eviction ratio";
-    entry ~default:"5" "MASC_KEEPER_MAX_CONSECUTIVE_HB_FAILURES"
-      "Max heartbeat failures before crash";
-    entry ~default:"10" "MASC_KEEPER_MAX_CONSECUTIVE_TURN_FAILURES"
-      "Max turn failures before crash";
     entry ~default:"(none)" "MASC_TLA_TRACE"
       "Enable TLA+ trace emission";
   ]
@@ -221,10 +205,6 @@ let dashboard_entries =
       "Dashboard fixture name override";
     entry ~default:"false" "MASC_DASHBOARD_FIXTURES_ENABLED"
       "Enable dashboard test fixtures";
-    entry ~default:"(none)" "MASC_DASHBOARD_GOVERNANCE_JUDGE_ENABLED"
-      "Governance judge background loop (feature flag)";
-    entry ~default:"60" "MASC_DASHBOARD_GOVERNANCE_JUDGE_INTERVAL_SEC"
-      "Dashboard governance judge interval (clamped >=15 seconds)";
     entry ~default:"0.9" "MASC_DASHBOARD_HEALTH_CTX_CRITICAL"
       "Health scoring: context ratio critical threshold";
     entry ~default:"0.8" "MASC_DASHBOARD_HEALTH_CTX_WARN"
@@ -311,8 +291,6 @@ let decision_entries =
   [
     entry ~default:"50" "MASC_DECISION_AUDIT_RING_CAPACITY"
       "Decision audit ring buffer capacity";
-    entry ~default:"0" "MASC_DECISION_LAYER_LEVEL"
-      "Decision layer level (0=off, 1=audit, 2+=extended)";
   ]
 
 let docker_playground_entries =
@@ -344,12 +322,8 @@ let keeper_sandbox_entries =
       "Fail closed unless Docker reports rootless mode";
     entry ~default:"false" "MASC_KEEPER_SANDBOX_REQUIRE_USERNS"
       "Fail closed unless Docker reports userns support";
-    entry ~default:"true" "MASC_KEEPER_SANDBOX_GIT_DISPATCH"
-      "Enable legacy Docker git/gh bridge dispatch when hard mode is off";
     entry ~default:"true" "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED"
       "Best-effort cleanup for stale MASC keeper sandbox containers";
-    entry ~default:"21600" "MASC_KEEPER_SANDBOX_CLEANUP_STALE_AFTER_SEC"
-      "Age threshold for stale keeper sandbox container cleanup";
     entry ~default:"300" "MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC"
       "Minimum seconds between automatic keeper sandbox cleanup sweeps";
   ]
@@ -394,8 +368,6 @@ let internal_timer_entries =
 
 let keeper_bootstrap_entries =
   [
-    entry ~default:"10000" "MASC_KEEPER_BOOTSTRAP_MAX_ACTIVE_KEEPERS"
-      "Maximum concurrently active keepers";
     entry ~default:"10000" "MASC_KEEPER_BOOTSTRAP_MAX_SCAN"
       "Max keeper meta files to scan during bootstrap";
     entry ~default:"3600.0" "MASC_KEEPER_BOOTSTRAP_STALE_TURN_SEC"
@@ -411,8 +383,6 @@ let keeper_runtime_entries =
 
 let keeper_grpc_entries =
   [
-    entry ~default:"5" "MASC_KEEPER_GRPC_MAX_RECONNECT"
-      "Max gRPC reconnect attempts (clamped 1-20)";
     entry ~default:"5.0" "MASC_KEEPER_GRPC_RECONNECT_BACKOFF_SEC"
       "Backoff delay between gRPC reconnect attempts (clamped 1-60 seconds)";
   ]
@@ -421,26 +391,12 @@ let keeper_keepalive_entries =
   [
     entry ~default:"30" "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC"
       "Heartbeat cycle interval (clamped 5-300 seconds)";
-    entry ~default:"0.2" "MASC_KEEPER_HEARTBEAT_JITTER_FACTOR"
-      "Jitter factor applied to heartbeat interval (clamped 0-0.5)";
-    entry ~default:"10" "MASC_KEEPER_MAX_IDLE_TURNS_AUTONOMOUS"
-      "Max idle turns for scheduled autonomous turns (clamped 2-50)";
-    entry ~default:"15" "MASC_KEEPER_MAX_IDLE_TURNS_REACTIVE"
-      "Max idle turns for reactive (board/mention) turns (clamped 2-50)";
     entry ~default:"120.0" "MASC_KEEPER_MAX_SILENCE_SEC"
       "Max seconds since last heartbeat before presence sync required";
     entry ~default:"(none)" "MASC_KEEPER_OAS_TIMEOUT_SEC"
       "Legacy optional override for OAS call timeout. When set, clamped to [30, turn_timeout_sec].";
     entry ~default:"2.0" "MASC_KEEPER_SLEEP_CHUNK_SEC"
       "Interruptible sleep chunk size (seconds, clamped 0.1-10)";
-    entry ~default:"(none)" "MASC_KEEPER_SMART_HEARTBEAT"
-      "Adaptive heartbeat scheduling in keepalive loop (feature flag)";
-    entry ~default:"3" "MASC_KEEPER_TURN_LIVELOCK_MAX_ATTEMPTS"
-      "Max dispatch attempts for the same keeper turn id before livelock guard blocks";
-    entry ~default:"1800.0" "MASC_KEEPER_TURN_LIVELOCK_STUCK_AFTER_SEC"
-      "Max seconds a keeper turn id may stay active before livelock guard blocks";
-    entry ~default:"8" "MASC_KEEPER_TURN_CHAT_WAITING_CAP"
-      "Max chat requests parked behind one keeper turn admission slot (floored at 1)";
     entry ~default:"600.0" "MASC_KEEPER_TURN_TIMEOUT_SEC"
       "Wall-clock timeout for a single unified turn (clamped 60-900 seconds)";
     entry ~default:"1800.0" "MASC_KEEPER_ATTEMPT_WATCHDOG_SAFETY_CAP_SEC"
@@ -469,10 +425,6 @@ let keeper_proactive_entries =
   [
     entry ~default:"3" "MASC_KEEPER_PROACTIVE_MAX_ATTEMPTS"
       "Max proactive generation attempts (clamped 1-10)";
-    entry ~default:"2" "MASC_KEEPER_PROACTIVE_NOOP_BACKOFF_MAX_SHIFT"
-      "Max exponent for no-op proactive cooldown backoff (clamped 0-8)";
-    entry ~default:"4" "MASC_KEEPER_PROACTIVE_IDLE_DECAY_MAX_PERIODS"
-      "Max idle-decay periods for proactive cooldown decay (clamped 0-16)";
     entry ~default:"100" "MASC_KEEPER_STAGE_TIMING_RING_SIZE"
       "Stage timing ring buffer size for profiling (clamped 10-1000)";
   ]
@@ -481,10 +433,6 @@ let keeper_supervisor_entries =
   [
     entry ~default:"3600.0" "MASC_KEEPER_DEAD_TTL_SEC"
       "Dead tombstone TTL before cleanup (seconds, floor 60)";
-    entry ~default:"(none)" "MASC_KEEPER_PAUSED_CLEANUP_TTL_SEC"
-      "Paused keeper meta file TTL (seconds, 24 hours, floor 300)";
-    entry ~default:"2" "MASC_KEEPER_SELF_PRESERVATION_MIN_CANDIDATES"
-      "Self-preservation minimum crashed candidates to trigger";
     entry ~default:"30.0" "MASC_KEEPER_SUPERVISOR_SWEEP_SEC"
       "Supervisor sweep interval (seconds)";
   ]
@@ -493,14 +441,6 @@ let keeper_tool_entries =
   [
     entry ~default:"(none)" "MASC_KEEPER_LLM_RERANK_RUNTIME"
       "Named runtime profile for LLM reranker";
-    entry ~default:"3" "MASC_KEEPER_MAX_CONSECUTIVE_TOOL_FAILURES"
-      "Max consecutive failures for same tool+args before blocking (clamped 2-20)";
-    entry ~default:"(none)" "MASC_KEEPER_TOOL_AFFINITY_K"
-      "Max pre-populated tools from affinity (clamped 0-20)";
-    entry ~default:"(none)" "MASC_KEEPER_TOOL_AFFINITY_LOOKBACK_DAYS"
-      "Lookback window for tool affinity (clamped 1-30 days)";
-    entry ~default:"(none)" "MASC_KEEPER_TOOL_DECAY_TURNS"
-      "Tool decay turns for discovered tool pruning";
   ]
 
 let local_runtime_entries =
@@ -567,10 +507,6 @@ let memory_entries =
       ~default:(string_of_bool Memory_os_defaults.gc_enabled_default)
       Memory_os_defaults.gc_env_key
       "Per-keeper Memory OS GC maintenance fiber kill switch; invalid values fail closed";
-    entry
-      ~default:(string_of_bool Memory_os_defaults.shared_consolidator_enabled_default)
-      Memory_os_defaults.shared_consolidator_env_key
-      "Tier-2 shared Memory OS consolidator kill switch; invalid values fail closed";
     entry
       ~default:(string_of_bool Memory_os_defaults.consolidation_enabled_default)
       Memory_os_defaults.consolidation_env_key
@@ -655,20 +591,6 @@ let path_entries =
       "Personas directory override; None when unset";
   ]
 
-let procedural_memory_entries =
-  [
-    entry ~default:"0.7" "MASC_PROC_MIN_CONFIDENCE"
-      "Minimum confidence for crystallization (clamped 0-1)";
-    entry ~default:"3" "MASC_PROC_MIN_EVIDENCE"
-      "Minimum evidence count for crystallization (clamped >=1)";
-  ]
-
-let pulse_entries =
-  [
-    entry ~default:"3" "MASC_PULSE_MAX_CONSUMER_FAILURES"
-      "Max consecutive consumer failures before recovery (clamped >=1)";
-  ]
-
 let session_entries =
   [
     entry ~default:"3600.0" "MASC_SESSION_MAX_AGE_SEC"
@@ -689,16 +611,6 @@ let shutdown_entries =
       "Force exit timeout during shutdown (seconds)";
     entry ~default:"(none)" "MASC_SHUTDOWN_NOTIFY_DELAY"
       "Notify delay before shutdown drain (seconds)";
-  ]
-
-let smart_heartbeat_entries =
-  [
-    entry ~default:"30.0" "MASC_SMART_HB_BASE_INTERVAL_SEC"
-      "Base heartbeat interval (seconds, clamped 5-300)";
-    entry ~default:"3.0" "MASC_SMART_HB_IDLE_MULTIPLIER"
-      "Idle multiplier for interval (clamped 1-10)";
-    entry ~default:"300.0" "MASC_SMART_HB_IDLE_THRESHOLD_SEC"
-      "Idle threshold before multiplier kicks in (seconds, clamped 60-3600)";
   ]
 
 let sse_entries =
@@ -755,16 +667,12 @@ let timeout_entries =
 
 let tool_entries =
   [
-    entry ~default:"(none)" "MASC_FULL_SURFACE"
-      "Include hidden/developer tools in tool list (feature flag)";
     entry ~default:"512" "MASC_LIST_PAGE_SIZE"
       "Tool list page size (clamped 10-1024)";
     entry ~default:"(none)" "MASC_PLACEHOLDER_TOOLS_ENABLED"
       "Enable placeholder tool exposure";
     entry ~default:"(none)" "MASC_PUBLIC_TOOLS_EXTRA"
       "Extra public tools (comma-separated names); None when unset";
-    entry ~default:"2" "MASC_TOOL_READONLY_RETRY_LIMIT"
-      "Read-only tool retry limit";
   ]
 
 let web_search_entries =
@@ -779,10 +687,6 @@ let web_search_entries =
       "Web search provider override; None when unset";
     entry ~default:"(none)" "MASC_WEB_SEARCH_PROVIDER_ORDER"
       "Web search provider fallback order; None when unset";
-    entry ~default:"30" "MASC_WEB_SEARCH_RATE_LIMIT_MAX_CALLS"
-      "Web search rate limit max calls per window (floor 1)";
-    entry ~default:"30.0" "MASC_WEB_SEARCH_RATE_LIMIT_WINDOW_SEC"
-      "Web search rate limit window (seconds, floor 1)";
     entry ~default:"15" "MASC_WEB_SEARCH_TIMEOUT_SEC"
       "Web search timeout (clamped 1-60 seconds)";
   ]
@@ -795,8 +699,6 @@ let worker_entries =
       "Local runtime debug logging (feature flag)";
     entry ~default:"60" "MASC_LOCAL_WORKER_HEARTBEAT_SEC"
       "Local worker heartbeat interval (seconds, clamped >=1)";
-    entry ~default:"1024" "MASC_LOCAL_WORKER_MAX_TOKENS"
-      "Local worker max tokens per request (clamped >=1)";
   ]
 
 let worker_runtime_entries =
@@ -829,7 +731,7 @@ let all_categories () =
     category "storage" (storage_entries @ cache_entries @ memory_entries @ board_entries);
     category "runtime"
       (runtime_entries @ task_entries
-       @ message_gc_entries @ pulse_entries @ internal_timer_entries
+       @ message_gc_entries @ internal_timer_entries
        @ timeout_entries @ sse_entries @ telemetry_entries
        @ tool_entries);
     category "rate_limiting" rate_limiting_entries;
@@ -850,13 +752,13 @@ let all_categories () =
     category "level2" level2_entries;
     category "dashboard" dashboard_entries;
     category "economy" economy_entries;
-    category "governance"
-      (operator_entries @ orchestrator_entries @ smart_heartbeat_entries);
+    category "operations"
+      (operator_entries @ orchestrator_entries);
     category "channel" channel_gate_entries;
     category "process"
       (shutdown_entries
        @ cancellation_entries @ zombie_cleanup_entries @ lock_entries
-       @ procedural_memory_entries);
+       );
     category "worker" (worker_entries @ worker_runtime_entries);
     category "web_search" web_search_entries;
     category "session" (session_entries @ tempo_entries);

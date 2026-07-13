@@ -8,7 +8,7 @@
     [Eio.Cancel.Cancelled] is always re-raised to preserve structured concurrency.
 
     [caller] (#10094) is a free-form identifier
-    ("anti_rationalization", "governance_judge", ...) that flows into
+    ("anti_rationalization", "operator_judge", ...) that flows into
     the timeout label so operators can distinguish which trusted OAS
     caller timed out at which configured budget.  Callers must pass
     [~caller] explicitly or use {!run_with_caller}, which accepts a

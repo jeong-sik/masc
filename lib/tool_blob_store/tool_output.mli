@@ -18,8 +18,7 @@ type t =
 
 val marker_prefix : string
 (** ["[masc:blob "] — the 11-byte discriminator at offset 0 of an encoded
-    [Stored] value. Distinct from the existing [tool:] mask prefix used by
-    [Context_compact_oas]; real tool outputs do not start with this prefix. *)
+    [Stored] value. Real tool outputs do not start with this prefix. *)
 
 val is_marker : string -> bool
 (** True iff [s] starts with [marker_prefix]. *)

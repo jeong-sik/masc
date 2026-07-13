@@ -4,7 +4,6 @@ open Dashboard_goals_types_accessor
 
 val goal_status_color : Goal_store.goal_status -> string
 val goal_phase_color : Goal_phase.t -> string
-val goal_health_color : string -> string
 val task_status_color : string -> string
 
 val task_to_tree_json : Masc_domain.task * string -> Yojson.Safe.t

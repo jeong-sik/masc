@@ -399,7 +399,6 @@ let test_keeper_up_clears_dead_tombstone_resume_state () =
         meta with
         paused = true;
         latched_reason = Some Keeper_latched_reason.Dead_tombstone;
-        auto_resume_after_sec = Some 60.0;
         runtime =
           {
             meta.runtime with
@@ -418,8 +417,6 @@ let test_keeper_up_clears_dead_tombstone_resume_state () =
   Alcotest.(check bool) "seed is paused" true persisted_seed.paused;
   Alcotest.(check bool) "seed has terminal latch" true
     (Option.is_some persisted_seed.latched_reason);
-  Alcotest.(check bool) "seed has auto-resume delay" true
-    (Option.is_some persisted_seed.auto_resume_after_sec);
   Alcotest.(check bool) "seed has runtime blocker" true
     (Option.is_some persisted_seed.runtime.last_blocker);
   let dead_entry =
@@ -487,8 +484,6 @@ let test_keeper_up_clears_dead_tombstone_resume_state () =
   Alcotest.(check bool) "operator resume clears paused" false resumed.paused;
   Alcotest.(check bool) "operator resume clears terminal latch" true
     (Option.is_none resumed.latched_reason);
-  Alcotest.(check bool) "operator resume clears auto-resume delay" true
-    (Option.is_none resumed.auto_resume_after_sec);
   Alcotest.(check bool) "operator resume clears runtime blocker" true
     (Option.is_none resumed.runtime.last_blocker)
 
@@ -857,8 +852,9 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
                   Some
                     (Keeper_meta_contract.blocker_info_of_class
                       ~detail:
-                         "Completion contract [tool_contract] violated: no ToolUse block"
-                       Keeper_meta_contract.Completion_contract_violation);
+                         "No configured provider runtime remained available"
+                       (Keeper_meta_contract.Runtime_exhausted
+                          Keeper_meta_contract.No_providers_available));
               };
           }
         | Error err -> Alcotest.fail ("keeper meta fixture failed: " ^ err)
@@ -876,11 +872,10 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
             ("trace_id", `String "trace-paused-runtime-trust");
             ("turn_count", `Int 12);
             ("outcome", `String "error");
-            ( "terminal_reason_code",
-              `String "completion_contract_violation:tool_contract" );
-            ("operator_disposition", `String "pause_human");
+            ("terminal_reason_code", `String "runtime_exhausted");
+            ("operator_disposition", `String "fail_open_next_runtime");
             ( "operator_disposition_reason",
-              `String "unmapped_runtime_state" );
+              `String "runtime_exhausted" );
             ("tools_used", `List []);
             ( "tool_surface",
               `Assoc
@@ -901,7 +896,7 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
                   ("selected_model", `String "kimi-for-coding");
                   ("outcome", `String "completed");
                 ] );
-            ("error", `Assoc [ ("kind", `String "contract") ]);
+            ("error", `Assoc [ ("kind", `String "runtime") ]);
             ("ended_at", `String (Masc_domain.now_iso ()));
           ]);
       Operator_control.invalidate_snapshot_cache ();
@@ -919,7 +914,7 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
       in
       Alcotest.(check bool) "keeper present" true (keeper <> `Null);
       Alcotest.(check string) "runtime blocker class surfaced"
-        "completion_contract_violation"
+        "runtime_exhausted"
         (keeper |> member "runtime_blocker_class" |> to_string);
       Alcotest.(check bool) "attention surfaced" true
         (keeper |> member "needs_attention" |> to_bool);
@@ -927,10 +922,10 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
       Alcotest.(check string) "trust disposition blocks" "Blocked"
         (trust |> member "disposition" |> to_string);
       Alcotest.(check string) "operator reason preserved"
-        "unmapped_runtime_state"
+        "runtime_exhausted"
         (trust |> member "operator_disposition_reason" |> to_string);
       Alcotest.(check string) "terminal code preserved"
-        "completion_contract_violation:tool_contract"
+        "runtime_exhausted"
         (trust |> member "latest_terminal_reason" |> member "code"
        |> to_string);
       Operator_control.invalidate_snapshot_cache ();
@@ -1009,8 +1004,9 @@ let test_digest_workspace_includes_keeper_runtime_attention () =
               last_blocker =
                 Some
                   (Keeper_meta_contract.blocker_info_of_class
-                     ~detail:"Completion contract requires a keeper tool call"
-                     Keeper_meta_contract.Completion_contract_violation);
+                     ~detail:"No configured provider runtime remained available"
+                     (Keeper_meta_contract.Runtime_exhausted
+                        Keeper_meta_contract.No_providers_available));
             };
         }
       in
@@ -1045,7 +1041,7 @@ let test_digest_workspace_includes_keeper_runtime_attention () =
       Alcotest.(check string) "keeper attention severity" "bad"
         (keeper_attention |> member "severity" |> to_string);
       Alcotest.(check string) "keeper attention blocker class"
-        "completion_contract_violation"
+        "runtime_exhausted"
         (keeper_attention |> member "evidence" |> member "runtime_blocker"
          |> member "runtime_blocker_class" |> to_string);
       let keeper_probe =
@@ -1192,15 +1188,15 @@ let test_snapshot_has_expected_sections () =
         Yojson.Safe.Util.(json |> member "judgment_owner" |> to_string);
       Alcotest.(check bool) "no authoritative judgment" false
         Yojson.Safe.Util.(json |> member "authoritative_judgment_available" |> to_bool);
-      let admission = Yojson.Safe.Util.member "admission_queue" json in
-      Alcotest.(check bool) "admission queue present" true
-        (admission <> `Null);
-      Alcotest.(check bool) "admission throttle is not reported as mode field" true
-        (match Yojson.Safe.Util.member "mode" admission with
-         | `Null -> true
-         | _ -> false);
-      Alcotest.(check string) "admission throttle owner" "oas_runtime"
-        Yojson.Safe.Util.(admission |> member "throttle_owner" |> to_string);
+      let inference = Yojson.Safe.Util.member "inference_inflight" json in
+      Alcotest.(check bool) "inference observation present" true
+        (inference <> `Null);
+      Alcotest.(check string) "inference boundary owner" "oas_runtime"
+        Yojson.Safe.Util.(inference |> member "boundary_owner" |> to_string);
+      Alcotest.(check int) "no inference active" 0
+        Yojson.Safe.Util.(inference |> member "active" |> to_int);
+      Alcotest.(check bool) "no MASC-owned inference capacity" true
+        (Yojson.Safe.Util.member "max_concurrent" inference = `Null);
       Alcotest.(check bool) "recent_actions list present" true
         (match Yojson.Safe.Util.member "recent_actions" json with
         | `List _ -> true

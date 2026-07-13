@@ -3,7 +3,7 @@
 (** Build the persona [profile.json] payload from create args, in the shape the
     profile loaders read: identity ([name], [role], [trait]) at the top level
     and keeper-template defaults ([goal], [instructions], [mention_targets],
-    [tool_denylist], [proactive_enabled]) nested under ["keeper"]. Exposed for
+    [proactive_enabled]) nested under ["keeper"]. Exposed for
     round-trip tests that assert the written shape against the loaders. *)
 val profile_from_create_args : Yojson.Safe.t -> Yojson.Safe.t
 

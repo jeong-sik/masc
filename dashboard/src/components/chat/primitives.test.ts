@@ -149,7 +149,7 @@ describe('ChatTranscript', () => {
   })
 
   it('renders failure rows as a typed card with collapsed diagnostic detail', async () => {
-    const text = 'Keeper request failed: Internal error: [masc_oas_error] {"kind":"accept_rejected","scope":"ollama_cloud.deepseek-v4-flash","reason_kind":"no_usable_progress","last_tool_effect":"mutating"}'
+    const text = 'Keeper request failed: Internal error: [masc_oas_error] {"kind":"accept_rejected","scope":"ollama_cloud.deepseek-v4-flash","reason_kind":"no_usable_progress"}'
     render(
       html`<${ChatTranscript}
         entries=${[
@@ -2760,7 +2760,7 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
 
   it('surfaces real failure status and result inside the card when expanded', async () => {
     recordToolCallOutputs([
-      toolCallOutput({ tool_use_id: 't1', success: false, semantic_success: false, output: 'BOOM' }),
+      toolCallOutput({ tool_use_id: 't1', success: false, output: 'BOOM' }),
     ])
     render(
       html`<${ChatTranscript}

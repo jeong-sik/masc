@@ -20,8 +20,8 @@
 module Gate = Masc_exec_command_gate.Shell_command_gate
 module Policy = Exec_policy
 
-let gate_from_raw ~raw ~syntax_policy ~path_policy ~sandbox () =
-  Gate.gate_raw ~text:raw ~syntax_policy ~path_policy ~sandbox ()
+let gate_from_raw ~raw ~syntax_policy ~sandbox () =
+  Gate.gate_raw ~text:raw ~syntax_policy ~sandbox ()
 let syntax_policy : Gate.syntax_policy =
   { redirect_allowed = false; allow_pipes = true }
 ;;
@@ -72,7 +72,7 @@ let parse_fixture_line line =
   let json = Yojson.Safe.from_string line in
   { raw_cmd = assoc_string "raw_cmd" json
   ; category = assoc_string "category" json
-  ; expected_policy_verdict = assoc_string "expected_worker_verdict" json
+  ; expected_policy_verdict = assoc_string "expected_policy_verdict" json
   ; expected_ir_verdict = assoc_string "expected_ir_verdict" json
   ; ir_detail = assoc_string_opt "ir_detail" json
   ; note = assoc_string "note" json
@@ -107,7 +107,6 @@ let policy_tag (result : (unit, Policy.block_reason) result) : string =
   | Error Policy.Process_substitution -> "process_substitution"
   | Error Policy.Unsafe_redirect -> "unsafe_redirect"
   | Error Policy.Pipes_not_allowed -> "pipes_not_allowed"
-  | Error Policy.Direct_dune_invocation -> "direct_dune_invocation"
 ;;
 
 let validate_policy_execute_raw raw =
@@ -141,7 +140,6 @@ let run_corpus_row fixture =
     gate_from_raw
       ~raw:fixture.raw_cmd
       ~syntax_policy
-      ~path_policy:Gate.allow_all_paths
       ~sandbox:Gate.host_sandbox
       ()
   in
@@ -202,7 +200,6 @@ let test_quoted_pipe_single_stage_shape () =
     gate_from_raw
       ~raw:"rg 'foo|bar' lib"
       ~syntax_policy
-      ~path_policy:Gate.allow_all_paths
       ~sandbox:Gate.host_sandbox
       ()
   with
@@ -226,7 +223,6 @@ let test_real_three_stage_pipeline_ordering () =
     gate_from_raw
       ~raw:"rg foo lib | sort | head -20"
       ~syntax_policy
-      ~path_policy:Gate.allow_all_paths
       ~sandbox:Gate.host_sandbox
       ()
   with
@@ -263,7 +259,6 @@ let test_pipeline_preserves_all_stage_bins () =
     gate_from_raw
       ~raw:"rg foo | sed s/a/b/ | head -20"
       ~syntax_policy
-      ~path_policy:Gate.allow_all_paths
       ~sandbox:Gate.host_sandbox
       ()
   with
@@ -286,7 +281,6 @@ let test_pipes_disabled () =
     gate_from_raw
       ~raw:"rg foo | head -20"
       ~syntax_policy:policy
-      ~path_policy:Gate.allow_all_paths
       ~sandbox:Gate.host_sandbox
       ()
   with
@@ -357,7 +351,6 @@ let test_lower_typed_three_stage_matches_raw () =
     gate_from_raw
       ~raw:"rg foo lib | sort | head -20"
       ~syntax_policy
-      ~path_policy:Gate.allow_all_paths
       ~sandbox:Gate.host_sandbox
       ()
   in
@@ -389,122 +382,6 @@ let test_lower_typed_empty_is_cannot_parse () =
       (Gate.verdict_tag other)
 ;;
 
-let test_path_policy_rejects () =
-  (* Path policy classifier is invoked on every literal arg. *)
-  let classify ~raw_path =
-    if raw_path = "/etc/shadow" then `Deny "shadow not allowed"
-    else `Allow
-  in
-  let policy = { Gate.classify = Some classify } in
-  match
-    gate_from_raw
-      ~raw:"cat /etc/shadow"
-      ~syntax_policy
-      ~path_policy:policy
-      ~sandbox:Gate.host_sandbox
-      ()
-  with
-  | Gate.Reject { reason = Gate.Path_outside_policy { stage = 1; raw_path = "/etc/shadow"; _ }; _ } -> ()
-  | other ->
-    Alcotest.failf
-      "expected Path_outside_policy reject, got %s"
-      (Gate.verdict_tag other)
-;;
-
-let test_path_policy_rejects_redirect_target () =
-  (* File redirect targets are structural Shell IR surfaces. A caller
-     path policy must see the target before the generic caller-level
-     redirect deny collapses it to Redirect_disallowed_in_caller. *)
-  let classify ~raw_path =
-    if raw_path = "/tmp/out" then `Deny "redirect target not allowed"
-    else `Allow
-  in
-  let policy = { Gate.classify = Some classify } in
-  match
-    gate_from_raw
-      ~raw:"ls > /tmp/out"
-      ~syntax_policy
-      ~path_policy:policy
-      ~sandbox:Gate.host_sandbox
-      ()
-  with
-  | Gate.Reject
-      { reason =
-          Gate.Path_outside_policy
-            { stage = 1; raw_path = "/tmp/out"; diagnostic = "redirect target not allowed" }
-      ; _
-      } -> ()
-  | other ->
-    Alcotest.failf
-      "expected redirect target Path_outside_policy reject, got %s"
-      (Gate.verdict_tag other)
-;;
-
-let test_masc_internal_state_policy_blocks_backlog () =
-  match
-    gate_from_raw
-      ~raw:"cat .masc/backlog.json"
-      ~syntax_policy
-      ~path_policy:Gate.forbid_masc_internal_state_paths
-      ~sandbox:Gate.host_sandbox
-      ()
-  with
-  | Gate.Reject
-      { reason =
-          Gate.Path_outside_policy
-            { stage = 1; raw_path = ".masc/backlog.json"; _ }
-      ; diagnostic
-      ; _
-      } ->
-    if not (String.starts_with ~prefix:"task_state_file_probe_blocked" diagnostic)
-    then
-      Alcotest.failf
-        "diagnostic must contain task_state_file_probe_blocked, got %s"
-        diagnostic
-  | other ->
-    Alcotest.failf
-      "expected Path_outside_policy for .masc/backlog.json, got %s"
-      (Gate.verdict_tag other)
-;;
-
-let test_masc_internal_state_policy_blocks_nested () =
-  let policy = Gate.forbid_masc_internal_state_paths in
-  let check_path path expected =
-    match (Option.get policy.classify) ~raw_path:path with
-    | `Deny _ when not expected ->
-      Alcotest.failf "expected Allow for %s, got Deny" path
-    | `Allow when expected ->
-      Alcotest.failf "expected Deny for %s, got Allow" path
-    | _ -> ()
-  in
-  check_path ".masc/backlog.json" true;
-  check_path "./.masc/backlog.json" true;
-  check_path ".masc/goal-loop/foo" true;
-  check_path ".masc/traces/abc" true;
-  check_path ".masc" true;
-  check_path "./.masc" true;
-  check_path "foo.ml" false;
-  check_path "lib/bar.ml" false;
-  check_path "cat" false;
-  check_path ".masc-not-backlog/foo" false
-;;
-
-let test_masc_internal_state_policy_allows_normal_commands () =
-  match
-    gate_from_raw
-      ~raw:"cat README.md"
-      ~syntax_policy
-      ~path_policy:Gate.forbid_masc_internal_state_paths
-      ~sandbox:Gate.host_sandbox
-      ()
-  with
-  | Gate.Allow _ -> ()
-  | other ->
-    Alcotest.failf
-      "expected Allow for cat README.md, got %s"
-      (Gate.verdict_tag other)
-;;
-
 let test_sandbox_target_propagates_to_every_stage () =
   (* Plan: sandbox context is echoed through the IR so downstream
      dispatch does not re-parse. Verify every stage carries the
@@ -514,7 +391,6 @@ let test_sandbox_target_propagates_to_every_stage () =
     gate_from_raw
       ~raw:"rg foo lib | sort | head -20"
       ~syntax_policy
-      ~path_policy:Gate.allow_all_paths
       ~sandbox
       ()
   with
@@ -566,7 +442,6 @@ let test_backslash_pipe_in_double_quotes_allows () =
     gate_from_raw
       ~raw:"rg \"a\\|b\""
       ~syntax_policy
-      ~path_policy:Gate.allow_all_paths
       ~sandbox:Gate.host_sandbox
       ()
   with
@@ -588,7 +463,6 @@ let test_brace_expansion_is_too_complex_glob_brace () =
     gate_from_raw
       ~raw:"ls {a,b}.txt"
       ~syntax_policy
-      ~path_policy:Gate.allow_all_paths
       ~sandbox:Gate.host_sandbox
       ()
   with
@@ -600,19 +474,13 @@ let test_brace_expansion_is_too_complex_glob_brace () =
 ;;
 
 let test_absolute_path_traversal_phase1_allows () =
-  (* Corpus fixture: cat /etc/passwd
-     Worker gate: ok (no metachar trigger).
-     IR (Phase 1, allow_all_paths default): Allow with single Simple
-       stage [cat /etc/passwd]. Phase 5 will install a path policy
-       that flips this row to Reject Path_outside_policy — this
-       fixture exists so the flip is a visible, intentional corpus
-       diff and not a silent behavior change.
-     Phase 0 PR-A2: first absolute-path-outside-repo fixture. *)
+  (* Positional argv is opaque application data at the typed gate boundary.
+     Filesystem containment is enforced by explicit cwd/redirect validation
+     and the selected runtime sandbox, not by token-shape inference. *)
   match
     gate_from_raw
       ~raw:"cat /etc/passwd"
       ~syntax_policy
-      ~path_policy:Gate.allow_all_paths
       ~sandbox:Gate.host_sandbox
       ()
   with
@@ -671,31 +539,11 @@ let () =
             `Quick
             test_lower_typed_empty_is_cannot_parse
         ] )
-    ; ( "phase_1_policy"
+    ; ( "phase_1_dispatch_context"
       , [ Alcotest.test_case
-            "path policy reject carries stage + raw path"
-            `Quick
-            test_path_policy_rejects
-        ; Alcotest.test_case
             "sandbox target propagates to every stage"
             `Quick
             test_sandbox_target_propagates_to_every_stage
-        ; Alcotest.test_case
-            "path policy sees file redirect target"
-            `Quick
-            test_path_policy_rejects_redirect_target
-        ; Alcotest.test_case
-            "masc internal state policy blocks .masc/backlog.json"
-            `Quick
-            test_masc_internal_state_policy_blocks_backlog
-        ; Alcotest.test_case
-            "masc internal state policy classifies paths correctly"
-            `Quick
-            test_masc_internal_state_policy_blocks_nested
-        ; Alcotest.test_case
-            "masc internal state policy allows normal commands"
-            `Quick
-            test_masc_internal_state_policy_allows_normal_commands
         ] )
     ; ( "phase_1_telemetry"
       , [ Alcotest.test_case

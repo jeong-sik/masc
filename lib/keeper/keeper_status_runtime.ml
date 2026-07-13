@@ -341,34 +341,7 @@ let classify_keeper_quiet_reason ~meta ~keepalive_running ~agent_status ~now_ts 
     | Some reason when looks_error_like reason ->
         Some "model_error"
     | Some _ -> Some "unknown"
-    | None ->
-        let last_turn_ago_s =
-          if meta.runtime.usage.last_turn_ts <= 0.0 then None
-          else Some (max 0.0 (now_ts -. meta.runtime.usage.last_turn_ts))
-        in
-        let last_proactive_ago_s =
-          if meta.runtime.proactive_rt.last_ts <= 0.0 then None
-          else Some (max 0.0 (now_ts -. meta.runtime.proactive_rt.last_ts))
-        in
-        let effective_activity_ago_s =
-          match last_turn_ago_s with
-          | Some age when agent_runtime_has_live_work agent_status ->
-              Some (min age (agent_last_seen_ago_s agent_status))
-          | Some _ as age -> age
-          | None when agent_runtime_has_live_work agent_status ->
-              Some (agent_last_seen_ago_s agent_status)
-          | None -> None
-        in
-        if meta.proactive.enabled then
-          match last_proactive_ago_s with
-          | Some age when age < float_of_int meta.proactive.cooldown_sec ->
-              Some "min_gap"
-          | _ -> (
-              match effective_activity_ago_s with
-              | Some age when age < float_of_int meta.proactive.idle_sec ->
-                  Some "no_recent_activity"
-              | _ -> None)
-        else None
+    | None -> None
 
 let keeper_health_state ?(fiber_health = Fiber_unknown)
     ?(keepalive_interval_s = 300.0)
@@ -385,16 +358,7 @@ let keeper_health_state ?(fiber_health = Fiber_unknown)
   in
   let is_zombie = json_bool "is_zombie" agent_status false in
   let stale_threshold_s = agent_staleness_threshold_s in
-  let last_turn_ago_s =
-    if meta.runtime.usage.last_turn_ts <= 0.0 then max_float
-    else max 0.0 (now_ts -. meta.runtime.usage.last_turn_ts)
-  in
-  let effective_activity_ago_s =
-    if agent_runtime_has_live_work agent_status then
-      min last_turn_ago_s last_seen_ago_s
-    else
-      last_turn_ago_s
-  in
+  let _ = now_ts in
   if
     (not keepalive_running)
     && (not agent_exists || agent_runtime_status = Some Masc_domain.Inactive)
@@ -408,8 +372,6 @@ let keeper_health_state ?(fiber_health = Fiber_unknown)
     | Some "graphql_error" | Some "model_error" -> KH_degraded
     | _ ->
         if meta.runtime.usage.total_turns = 0 && meta.runtime.proactive_rt.count_total = 0 then KH_idle
-        else if effective_activity_ago_s > float_of_int (max meta.proactive.idle_sec 900)
-        then KH_idle
         else KH_healthy)
   else if last_seen_ago_s > stale_threshold_s then KH_stale
   else KH_offline
@@ -428,21 +390,14 @@ let keeper_next_action_path ~(health_state : keeper_health) ~quiet_reason =
       | Some "disabled" -> "recover"
       | _ -> "direct_message")
 
-let keeper_next_eligible_at_s ~meta ~quiet_reason ~now_ts =
-  match quiet_reason with
-  | Some "min_gap" when meta.runtime.proactive_rt.last_ts > 0.0 ->
-      let remaining =
-        float_of_int meta.proactive.cooldown_sec -. (now_ts -. meta.runtime.proactive_rt.last_ts)
-      in
-      if remaining > 0.0 then `Float remaining else `Null
-  | _ -> `Null
+let keeper_next_eligible_at_s ~meta:_ ~quiet_reason:_ ~now_ts:_ = `Null
 
 let keeper_diagnostic_summary ~meta ~(health_state : keeper_health) ~quiet_reason =
   match health_state with
   | KH_zombie ->
       "Keeper fiber has terminated but registry entry persists. Supervisor will auto-restart."
   | KH_dead ->
-      "Keeper restart budget exhausted. Manual restart via masc_keeper_up required."
+      "Keeper has an explicit durable Dead tombstone. Operator lifecycle action is required."
   | KH_offline | KH_stale | KH_degraded ->
       "Keeper is not in a healthy reply state. Probe or recover before relying on automation."
   | KH_healthy | KH_idle -> (
@@ -455,11 +410,6 @@ let keeper_diagnostic_summary ~meta ~(health_state : keeper_health) ~quiet_reaso
           "Keeper keepalive is running, but the live agent record is missing or offline."
       | Some "quiet_hours" ->
           "Quiet hours are active. Direct messages still work, but scheduled social ticks may look asleep."
-      | Some "min_gap" ->
-          if meta.runtime.proactive_rt.last_outcome = Proactive_silent then
-            "Latest autonomous proactive cycle completed silently. The next deterministic cycle will open after cooldown."
-          else
-            "Keeper is inside its proactive cooldown window. Direct messages work now; autonomous check-ins will wait."
       | Some "never_started" ->
           "Keeper metadata exists but no reply turn has been recorded yet."
       | _ -> "Keeper is reachable. Send a direct message for an immediate response.")
@@ -628,8 +578,7 @@ let keeper_diagnostic_json
       ("next_eligible_at_s", keeper_next_eligible_at_s ~meta ~quiet_reason ~now_ts);
     ]
 
-(** Derive pipeline stage directly from the 13-state phase (RFC-0002,
-    post-Zombie #14707). Deterministic mapping — no 30s recency heuristic. *)
+(** Derive pipeline stage directly from the Keeper lifecycle phase. *)
 let pipeline_stage_of_phase (phase : Keeper_state_machine.phase) : string =
   match phase with
   | Keeper_state_machine.Offline -> "offline"
@@ -643,7 +592,7 @@ let pipeline_stage_of_phase (phase : Keeper_state_machine.phase) : string =
   | Keeper_state_machine.Stopped -> "offline"
   | Keeper_state_machine.Crashed -> "crashed"
   | Keeper_state_machine.Restarting -> "restarting"
-  | Keeper_state_machine.Dead | Keeper_state_machine.Zombie -> "offline"
+  | Keeper_state_machine.Dead -> "offline"
 
 (** Explain the lossy [pipeline_stage] label without changing its wire value.
     Consumers that need exact lifecycle authority should read [lifecycle_phase];
@@ -657,9 +606,8 @@ let pipeline_stage_detail_of_phase (phase : Keeper_state_machine.phase) : string
   | Keeper_state_machine.Compacting -> "context_compaction_in_progress"
   | Keeper_state_machine.HandingOff -> "generation_handoff_in_progress"
   | Keeper_state_machine.Draining -> "graceful_shutdown_draining"
-  | Keeper_state_machine.Paused -> "operator_or_policy_paused"
+  | Keeper_state_machine.Paused -> "operator_paused"
   | Keeper_state_machine.Stopped -> "clean_stop_terminal"
   | Keeper_state_machine.Crashed -> "crashed_restart_candidate"
-  | Keeper_state_machine.Restarting -> "supervisor_restart_backoff_elapsed"
-  | Keeper_state_machine.Dead -> "restart_budget_exhausted_terminal"
-  | Keeper_state_machine.Zombie -> "structural_failure_terminal"
+  | Keeper_state_machine.Restarting -> "supervisor_restart_requested"
+  | Keeper_state_machine.Dead -> "dead_tombstone_terminal"

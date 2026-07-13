@@ -60,7 +60,7 @@ code_refs:
   - `#monitoring?section=cognition` (hidden deep link; keeper detail cognition path)
 - `command`
   - `#command?section=operations`
-  - sub-view는 `view=ops|governance|surfaces|inspector` 로 분기한다.
+  - sub-view는 `view=ops|gate|surfaces|inspector` 로 분기한다.
   - legacy `#command?section=connectors` / `#command/connectors` 는 `#connectors?section=connector-status` 로 canonical redirect 된다.
 - `connectors`
   - `#connectors?section=connector-status`
@@ -85,7 +85,7 @@ code_refs:
 - `monitoring:telemetry -> monitoring:fleet-health&view=event-log`
 - `monitoring:fleet -> monitoring:fleet-health&view=comparison`
 - `monitoring:tool-quality -> monitoring:fleet-health&view=tool-quality`
-- `monitoring:governance -> monitoring:fleet-health&view=governance`
+- `monitoring:governance -> monitoring:fleet-health&view=gate`
 - `monitoring:attribution -> monitoring:fleet-health&view=attribution`
 - `monitoring:fsm-hub -> monitoring:agents&view=fsm`
 - `monitoring:metrics -> monitoring:runtime`
@@ -108,7 +108,7 @@ code_refs:
 - Monitor default는 `#monitoring?section=agents` 이다.
 - visible Monitor sidebar는 네 개의 primary lane만 가진다.
   - Keeper Operations: attention-first keeper/agent list and selected detail.
-  - Tool Monitor: compact tool operations board plus tool-quality, governance, attribution, and event-log lenses.
+  - Tool Monitor: compact tool operations board plus tool-quality, Gate, attribution, and event-log lenses.
   - Runtime & Runtime: provider/runtime health and advanced runtime sub-views.
   - Evidence Timeline: default evidence track timeline with explicit Activity Graph and Live lenses.
 - `runtime-config`, `diagnostics`, `transport-health`, `feature-health`, `journey`, `cognition`은 routeable compatibility/diagnostic/deep-link surface로 남지만 primary sidebar에는 노출하지 않는다.
@@ -189,14 +189,14 @@ code_refs:
 - `GET /api/v1/dashboard/briefing`
 - `GET /api/v1/dashboard/briefing/sections`
 - `GET /api/v1/dashboard/execution`
-- `GET /api/v1/dashboard/governance`
+- `GET /api/v1/dashboard/gate`
 - `GET /api/v1/dashboard/proof`
   - compatibility proof index over verification requests, TLA result refs, keeper feature proof, execution trust, and surface readiness routes
 - `GET /api/v1/dashboard/goals`
 - `GET /api/v1/dashboard/config`
 - `GET /api/v1/dashboard/feature-health`
 
-이 endpoint들은 여전히 남아 있을 수 있지만 current v1 shell의 top-level navigation contract는 아니다.
+이 endpoint들은 current v1 shell의 top-level navigation contract가 아니라 supporting read model이다.
 
 ## SSE Expectations
 - SSE는 freshness transport다. canonical hydration source는 REST projection이다.

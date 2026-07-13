@@ -7,8 +7,6 @@ val max_history_read_lines : int
 (** Usage payload for heartbeat/status metrics rows. *)
 val status_tick_usage_json : unit -> Yojson.Safe.t
 
-val max_consecutive_heartbeat_failures : unit -> int
-val max_consecutive_turn_failures : unit -> int
 
 val write_heartbeat_snapshot :
   ctx:'a Keeper_types_profile.context ->

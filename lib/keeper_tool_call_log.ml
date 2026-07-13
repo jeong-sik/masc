@@ -48,8 +48,6 @@ let action_radius_json_for_call =
   Keeper_tool_call_log_context.action_radius_json_for_call
 ;;
 
-let parse_tool_output_json_sanitized =
-  Keeper_tool_call_log_route_evidence.parse_tool_output_json_sanitized
 ;;
 
 let route_evidence_json_of_tool_io ~tool_name ~input ~output_text =
@@ -355,40 +353,6 @@ let blob_aware_output_json (output : string) : Yojson.Safe.t =
   | Tool_output.Inline _ -> `String output
 ;;
 
-let semantic_outcome_of_output ~success output =
-  let semantic_status_outcome = function
-    | "ok" -> Some (true, "success")
-    | "no_match" -> Some (true, "no_match")
-    | "partial" -> Some (false, "partial")
-    | "blocked" -> Some (false, "blocked")
-    | "timeout" -> Some (false, "timeout")
-    | "runtime_error" -> Some (false, "runtime_error")
-    | _ -> None
-  in
-  match parse_tool_output_json_sanitized output with
-  | Ok json ->
-    let ok_field = Safe_ops.json_bool_opt "ok" json in
-    let error_field = Safe_ops.json_string_opt "error" json |> Option.map String.trim in
-    let semantic_status =
-      Safe_ops.json_string_opt "semantic_status" json
-      |> Option.map String.trim
-    in
-    (match error_field with
-     | Some "tool_not_allowed" -> false, "policy_denied"
-     | _ ->
-       (match Option.bind semantic_status semantic_status_outcome with
-        | Some outcome -> outcome
-        | None ->
-          (match error_field with
-           | Some error when error <> "" -> false, "structured_error"
-           | _ ->
-             (match ok_field with
-              | Some false -> false, "structured_error"
-              | Some true -> true, "success"
-              | None -> if success then true, "success" else false, "tool_failure"))))
-  | Error _ -> if success then true, "success" else false, "tool_failure"
-;;
-
 let input_to_json (input : Yojson.Safe.t) : Yojson.Safe.t =
   (* Per-leaf marker-aware truncation. Previously
      [String.sub (Yojson.Safe.to_string input) 0 (max - suffix)] chopped
@@ -429,16 +393,12 @@ let log_call
       ?sandbox_root
       ?allowed_paths
       ?network_mode
-      ?approval_mode
       ?runtime_profile
       ?result_bytes
       ?truncated_to
       ()
   =
-  if Observability_redact.is_denied_tool ~tool_name
-  then ()
-  else (
-    match !store_ref with
+  match !store_ref with
     | None -> record_unavailable_coverage_gap ~keeper_name ~tool_name ?trace_id ()
     | Some store ->
       (* RFC-0225 §3.3: no ambient turn-context fallback. Both production
@@ -552,19 +512,11 @@ let log_call
         | Some value -> [ "network_mode", `String value ]
         | None -> []
       in
-      let approval_mode_field =
-        match approval_mode with
-        | Some value -> [ "approval_mode", `String value ]
-        | None -> []
-      in
       let safe_input = input_to_json (Observability_redact.redact_json_value input) in
       let safe_output =
         Observability_redact.redact_preview ~max_len:max_output_len output_text
       in
       let output_json = blob_aware_output_json safe_output in
-      let semantic_success, semantic_outcome =
-        semantic_outcome_of_output ~success safe_output
-      in
       let runtime_contract =
         Keeper_runtime_contract.runtime_observability_contract_json_from_fields
           ~keeper_name
@@ -579,7 +531,6 @@ let log_call
           ?sandbox_root
           ?allowed_paths
           ?network_mode
-          ?approval_mode
           ?runtime_profile
           ()
       in
@@ -609,8 +560,6 @@ let log_call
            ; "input", safe_input
            ; "output", output_json
            ; "success", `Bool success
-           ; "semantic_success", `Bool semantic_success
-           ; "semantic_outcome", `String semantic_outcome
            ; "duration_ms", `Float duration_ms
            ; "runtime_contract", runtime_contract
            ; "action_radius", action_radius
@@ -634,7 +583,6 @@ let log_call
            @ goal_ids_field
            @ sandbox_profile_field
            @ network_mode_field
-           @ approval_mode_field
            @ result_bytes_field
            @ truncated_to_field)
       in
@@ -643,7 +591,7 @@ let log_call
          captures) that would corrupt the JSONL file and cause downstream
          readers — including the dashboard — to silently skip entire rows. *)
       let safe_json = Inference_utils.sanitize_json_utf8 json in
-      append_or_enqueue { store; keeper_name; tool_name; trace_id; json = safe_json })
+      append_or_enqueue { store; keeper_name; tool_name; trace_id; json = safe_json }
 ;;
 
 let read_recent ?keeper_name ?(n = 100) () : Yojson.Safe.t list =

@@ -30,7 +30,7 @@ let tool_post_create : Masc_domain.tool_schema =
                 , `Assoc
                     [ "type", `String "string"
                     ; ( "description"
-                      , `String "Post body text (alternative to `body`, max 4000 chars)" )
+                      , `String "Post body text (alternative to `body`)" )
                     ] )
               ; ( "author"
                 , `Assoc
@@ -70,33 +70,6 @@ let tool_post_create : Masc_domain.tool_schema =
                                       ] )
                                 ] )
                           ] )
-                    ] )
-              ; ( "claims"
-                , `Assoc
-                    [ "type", `String "array"
-                    ; ( "description"
-                      , `String
-                          "Optional typed high-risk claim kinds. Positive artifact \
-                           claims require artifact_refs/evidence_refs and are rejected \
-                           if the artifacts are missing or unknown." )
-                    ; "items", `Assoc [ "type", `String "string" ]
-                    ] )
-              ; ( "artifact_refs"
-                , `Assoc
-                    [ "type", `String "array"
-                    ; ( "description"
-                      , `String
-                          "Optional concrete artifact refs supporting typed claims. \
-                           File paths are resolved relative to the MASC base path." )
-                    ; "items", `Assoc [ "type", `String "string" ]
-                    ] )
-              ; ( "evidence_refs"
-                , `Assoc
-                    [ "type", `String "array"
-                    ; ( "description"
-                      , `String
-                          "Alias for artifact_refs during the evidence-gate migration." )
-                    ; "items", `Assoc [ "type", `String "string" ]
                     ] )
               ; ( "classification_reason"
                 , `Assoc
@@ -191,10 +164,9 @@ let tool_post_edit : Masc_domain.tool_schema =
               ; ( "content"
                 , `Assoc
                     [ "type", `String "string"
-                    ; "maxLength", `Int 4000
                     ; ( "description"
                       , `String
-                          "New post body text (alternative to `body`, max 4000 chars)" )
+                          "New post body text (alternative to `body`)" )
                     ] )
               ; ( "title"
                 , `Assoc
@@ -428,7 +400,6 @@ let tool_comment_add : Masc_domain.tool_schema =
               ; ( "content"
                 , `Assoc
                     [ "type", `String "string"
-                    ; "maxLength", `Int 4000
                     ; "description", `String "Comment content"
                     ] )
               ; ( "author"
@@ -443,55 +414,6 @@ let tool_comment_add : Masc_domain.tool_schema =
                 , `Assoc
                     [ "type", `String "integer"
                     ; "description", `String "Time-to-live in hours"
-                    ] )
-              ; ( "claims"
-                , `Assoc
-                    [ "type", `String "array"
-                    ; ( "description"
-                      , `String
-                          "Optional typed high-risk claim kinds. Supported examples: \
-                           artifact_exists, artifact_missing, artifact_created, \
-                           artifact_endorsed, verification_endorsement, \
-                           task_completion, pr_state, retraction_ack, \
-                           opinion_or_routing." )
-                    ; "items", `Assoc [ "type", `String "string" ]
-                    ] )
-              ; ( "artifact_refs"
-                , `Assoc
-                    [ "type", `String "array"
-                    ; ( "description"
-                      , `String
-                          "Optional concrete artifact refs supporting the claim. \
-                           File paths are resolved relative to the MASC base path; \
-                           missing or unknown refs fail closed for positive artifact \
-                           endorsements." )
-                    ; "items", `Assoc [ "type", `String "string" ]
-                    ] )
-              ; ( "evidence_refs"
-                , `Assoc
-                    [ "type", `String "array"
-                    ; ( "description"
-                      , `String
-                          "Alias for artifact_refs during the evidence-gate migration." )
-                    ; "items", `Assoc [ "type", `String "string" ]
-                    ] )
-              ; ( "source_post_snapshot"
-                , `Assoc
-                    [ "type", `String "object"
-                    ; ( "description"
-                      , `String
-                          "Fresh source snapshot returned by masc_board_post_get. \
-                           High-risk replies use it to prove the source body was read \
-                           and did not change before commenting." )
-                    ; ( "properties"
-                      , `Assoc
-                          [ "post_id", `Assoc [ "type", `String "string" ]
-                          ; "post_updated_at", `Assoc [ "type", `String "number" ]
-                          ; "body_sha256", `Assoc [ "type", `String "string" ]
-                          ; "body_excerpt", `Assoc [ "type", `String "string" ]
-                          ; "read_at", `Assoc [ "type", `String "number" ]
-                          ; "read_tool_call_id", `Assoc [ "type", `String "string" ]
-                          ] )
                     ] )
               ] )
         ; "required", `List [ `String "post_id"; `String "content"; `String "author" ]

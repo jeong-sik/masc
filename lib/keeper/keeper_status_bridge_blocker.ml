@@ -39,15 +39,9 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
   | Some (Keeper_turn_driver.Runtime_exhausted { reason; _ }) ->
     Some (Runtime_exhausted (blocker_reason_of_turn_driver_reason reason))
   | Some (Keeper_turn_driver.Resumable_cli_session _) -> None
-  | Some (Keeper_turn_driver.Accept_rejected _) -> Some Completion_contract_violation
-  | Some (Keeper_turn_driver.Admission_queue_timeout _) ->
-    Some Admission_queue_wait_timeout
-  | Some (Keeper_turn_driver.Admission_queue_rejected _) -> None
+  | Some (Keeper_turn_driver.Accept_rejected _) -> None
   | Some (Keeper_turn_driver.Provider_timeout _) -> None
   | Some (Keeper_turn_driver.Turn_timeout _) -> Some Turn_timeout
-  | Some (Keeper_turn_driver.Ambiguous_post_commit { is_timeout; _ }) ->
-    Some
-      (if is_timeout then Ambiguous_post_commit_timeout else Ambiguous_post_commit_failure)
   (* RFC-0159 Phase A: typed [Internal_*] variants carry an opaque exception
      repr.  They are not yet mapped to a dedicated [blocker_class]; returning
      [None] keeps Phase A scope to typed substrate only.  A follow-up RFC may
@@ -55,12 +49,10 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
   | Some (Keeper_turn_driver.Internal_unhandled_exception _) -> None
   | Some (Keeper_turn_driver.Internal_bridge_exception _) -> None
   | Some (Keeper_turn_driver.Internal_contract_rejected _) -> None
+  | Some (Keeper_turn_driver.Receipt_persistence_failed _) -> None
   | None ->
     (match err with
      | Agent_sdk.Error.Internal _ -> None
-     | Agent_sdk.Error.Api (Agent_sdk.Retry.Timeout { message })
-       when Keeper_error_classify.is_structural_oas_timeout_message message ->
-       Some Oas_agent_execution_timeout
      | Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionTimeout _)
      | Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionIdleTimeout _) ->
        Some Oas_agent_execution_timeout
@@ -95,7 +87,6 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
 type runtime_blocker_surface =
   { blocker_class : string
   ; summary : string
-  ; continue_gate : bool
   }
 
 let runtime_blocker_surface_class cls = cls
@@ -122,43 +113,23 @@ let is_fiber_unresolved_blocker_class blocker_class =
   String.equal blocker_class (blocker_class_to_string Fiber_unresolved)
 ;;
 
-let no_progress_loop_summary =
-  "Keeper auto-paused after repeated no-evidence turns; this is a progress-safety latch, not a provider failure. Operator resume clears the latch."
-;;
-
 let runtime_blocker_surface_of_masc_internal_error = function
-  | Keeper_turn_driver.Accept_rejected _ as err ->
-    let summary =
-      Option.value
-        ~default:"Provider response violated the completion contract after dispatch."
-        (Keeper_turn_driver.summary_of_masc_internal_error err)
-    in
-    Some
-      { blocker_class =
-          runtime_blocker_class_label Completion_contract_violation
-      ; summary
-      ; continue_gate =
-          blocker_class_continue_gate Completion_contract_violation
-      }
+  | Keeper_turn_driver.Accept_rejected _
   | Keeper_turn_driver.Runtime_exhausted _
   | Keeper_turn_driver.Capacity_backpressure _
   | Keeper_turn_driver.Resumable_cli_session _
-  | Keeper_turn_driver.Admission_queue_timeout _
-  | Keeper_turn_driver.Admission_queue_rejected _
   | Keeper_turn_driver.Turn_timeout _
   | Keeper_turn_driver.Provider_timeout _
-  | Keeper_turn_driver.Ambiguous_post_commit _
   | Keeper_turn_driver.Internal_unhandled_exception _
   | Keeper_turn_driver.Internal_bridge_exception _
-  | Keeper_turn_driver.Internal_contract_rejected _ ->
+  | Keeper_turn_driver.Internal_contract_rejected _
+  | Keeper_turn_driver.Receipt_persistence_failed _ ->
     None
 
 let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
   : runtime_blocker_surface
   =
-  let surface_cls = runtime_blocker_surface_class cls in
   let str = runtime_blocker_class_label ~summary cls in
-  let continue_gate = blocker_class_continue_gate surface_cls in
   let summary =
     match cls with
     | Capacity_backpressure ->
@@ -167,10 +138,6 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
       else summary
     | Runtime_exhausted reason ->
       if summary = "" then runtime_exhaustion_summary reason else summary
-    | Turn_livelock_blocked ->
-      if summary = ""
-      then "Keeper turn livelock guard blocked repeated dispatch of the same turn."
-      else summary
     | Fiber_unresolved ->
       if summary = ""
       then
@@ -186,19 +153,8 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
       then
         "OAS Agent.run reported an execution timeout; inspect whether progress accounting excluded active tool execution."
       else summary
-    | Completion_contract_violation ->
-      (* TEL-OK: string literal in blocker classification summary, not an action handler *)
-      if summary = ""
-      then
-        "Provider response violated the completion contract after dispatch."
-      else summary
-    | No_progress_loop -> no_progress_loop_summary
     (* All remaining blocker_class variants carry no class-specific summary
        transformation — fall back to the live summary or the typed name. *)
-    | Ambiguous_post_commit_timeout
-    | Ambiguous_post_commit_failure
-    | Admission_queue_wait_timeout
-    | Turn_timeout_after_queue_wait
     | Turn_timeout
     | Stale_fleet_batch
     | Sdk_max_turns_exceeded
@@ -212,7 +168,7 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
     | Sdk_input_required
     | Sdk_tool_failure_recovery_failed -> if summary = "" then str else summary
   in
-  { blocker_class = str; summary; continue_gate }
+  { blocker_class = str; summary }
 ;;
 
 let stale_kill_class_summary (kill_class : Keeper_registry.stale_kill_class) =
@@ -251,7 +207,6 @@ let runtime_blocker_surface_of_failure_reason (reason : Keeper_registry.failure_
           Printf.sprintf
             "Heartbeat failed %d consecutive cycle(s); supervisor recovery is required."
             count
-      ; continue_gate = false
       }
   | Keeper_registry.Turn_consecutive_failures count ->
     Some
@@ -261,7 +216,6 @@ let runtime_blocker_surface_of_failure_reason (reason : Keeper_registry.failure_
             "Keeper turn failed %d consecutive cycle(s); inspect the last runtime error \
              before retry."
             count
-      ; continue_gate = false
       }
   | Keeper_registry.Stale_turn_timeout kill_class ->
     Some
@@ -276,34 +230,16 @@ let runtime_blocker_surface_of_failure_reason (reason : Keeper_registry.failure_
             "Stale watchdog terminated %d keeper cycle(s) in the storm window; operator \
              investigation is required before restart."
             count
-      ; continue_gate = false
       }
-  | Keeper_registry.Provider_timeout_loop { count } ->
-    Some
-      (runtime_blocker_surface_of_typed_class
-         ~summary:
-           (Printf.sprintf
-              "Provider timeout repeated %d consecutive cycle(s); keeper was \
-               auto-paused before restart loop."
-              count)
-         Turn_timeout)
   | Keeper_registry.Stale_fleet_batch { distinct_count } ->
     Some
       (runtime_blocker_surface_of_typed_class
          ~summary:
            (Printf.sprintf
               "Stale watchdog terminated %d distinct keeper(s) inside the fleet batch \
-               window; keeper was auto-paused before restart loop."
+               window; each affected Keeper is recovered independently."
               distinct_count)
          Stale_fleet_batch)
-  | Keeper_registry.Completion_contract_violation { detail } ->
-    Some
-      (runtime_blocker_surface_of_typed_class
-         ~summary:
-           (if String.trim detail = ""
-            then "Provider response violated the completion contract after dispatch."
-            else detail)
-         Completion_contract_violation)
   | Keeper_registry.Provider_runtime_error { code; detail; _ } ->
     (match
        Keeper_provider_runtime_boundary.classify_provider_runtime_error_record
@@ -327,15 +263,7 @@ let runtime_blocker_surface_of_failure_reason (reason : Keeper_registry.failure_
                "Provider runtime catch-all (%s): %s; inspect typed provider/auth/DNS/timeout/capacity cause."
                code
                detail
-         ; continue_gate = false
          })
-  | Keeper_registry.Ambiguous_partial_commit { kind; detail } ->
-    let blocker_class =
-      match kind with
-      | Keeper_registry.Post_commit_timeout -> "ambiguous_post_commit_timeout"
-      | Keeper_registry.Post_commit_failure -> "ambiguous_post_commit_failure"
-    in
-    Some { blocker_class; summary = detail; continue_gate = true }
   | Keeper_registry.Fiber_unresolved _ ->
     Some
       (runtime_blocker_surface_of_typed_class
@@ -343,28 +271,19 @@ let runtime_blocker_surface_of_failure_reason (reason : Keeper_registry.failure_
            "Keeper fiber did not resolve a terminal outcome; supervisor cleanup is \
             required."
          Fiber_unresolved)
-  | Keeper_registry.Turn_overflow_pause ->
+  | Keeper_registry.Turn_overflow_failure ->
     Some
-      { blocker_class = "turn_overflow_pause"
-      ; summary = "Context overflow with compact retry exhausted; keeper was auto-paused."
-      ; continue_gate = false
-      }
-  | Keeper_registry.Turn_livelock_pause ->
-    Some
-      { blocker_class = "turn_livelock_pause"
-      ; summary = "Turn livelock guard blocked dispatch; keeper was auto-paused."
-      ; continue_gate = false
+      { blocker_class = "turn_overflow_failure"
+      ; summary = "Context overflow with compact retry exhausted; the failure was recorded and the Keeper remains active."
       }
   | Keeper_registry.Exception detail ->
     Some
       { blocker_class = "exception"
       ; summary = Printf.sprintf "Keeper runtime exception: %s" detail
-      ; continue_gate = false
       }
   | Keeper_registry.Operator_interrupt ->
     Some
       { blocker_class = "operator_interrupt"
       ; summary = "Current turn was cancelled by explicit operator request."
-      ; continue_gate = true
       }
 ;;

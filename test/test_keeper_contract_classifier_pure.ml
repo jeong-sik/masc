@@ -1,6 +1,6 @@
 (** Pure-function unit tests for [Keeper_contract_classifier].
 
-    Covers ADT label mappers, the [is_actionable] boolean projection,
+    Covers the actionable-signal label mapper, the [is_actionable] projection,
     and [classify_actionable_signal] precedence (unclaimed_tasks >
     board_activity). *)
 
@@ -41,35 +41,6 @@ let test_signal_label_board () =
 let test_signal_label_none () =
   check_string "No_actionable_signal" "no_actionable_signal"
     (KCC.actionable_signal_label KCC.No_actionable_signal)
-
-(* ── contract_status_label ───────────────────────────────────────────── *)
-
-let test_status_label_surface_mismatch () =
-  let rendered =
-    Format.asprintf "%a" KCC.pp_contract_status
-      (KCC.Surface_mismatch { missing = [ "keeper_task_claim"; "masc_broadcast" ] })
-  in
-  (* The stable label is intentionally low-cardinality; the pretty printer
-     carries missing tool names for grep/debug output. *)
-  check_bool "rendered status mentions missing keeper_task_claim" true
-    (Astring.String.is_infix ~affix:"keeper_task_claim" rendered);
-  check_bool "rendered status mentions missing masc_broadcast" true
-    (Astring.String.is_infix ~affix:"masc_broadcast" rendered)
-
-let test_status_label_satisfied_completion () =
-  check_string "Satisfied_completion is a stable token"
-    "satisfied_completion"
-    (KCC.contract_status_label KCC.Satisfied_completion)
-
-let test_status_label_satisfied_execution () =
-  check_string "Satisfied_execution is a stable token"
-    "satisfied_execution"
-    (KCC.contract_status_label KCC.Satisfied_execution)
-
-let test_status_label_passive_only () =
-  check_string "Passive_only is a stable token"
-    "passive_only"
-    (KCC.contract_status_label KCC.Passive_only)
 
 (* ── is_actionable ────────────────────────────────────────────────────── *)
 
@@ -112,17 +83,6 @@ let () =
           Alcotest.test_case "Has_unclaimed_tasks" `Quick test_signal_label_unclaimed;
           Alcotest.test_case "Has_board_activity" `Quick test_signal_label_board;
           Alcotest.test_case "No_actionable_signal" `Quick test_signal_label_none;
-        ] );
-      ( "contract_status_label",
-        [
-          Alcotest.test_case "Surface_mismatch carries missing names"
-            `Quick test_status_label_surface_mismatch;
-          Alcotest.test_case "Satisfied_completion stable token" `Quick
-            test_status_label_satisfied_completion;
-          Alcotest.test_case "Satisfied_execution stable token" `Quick
-            test_status_label_satisfied_execution;
-          Alcotest.test_case "Passive_only stable token" `Quick
-            test_status_label_passive_only;
         ] );
       ( "is_actionable",
         [

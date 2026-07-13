@@ -744,20 +744,14 @@ jobs:
         run: |
           opam exec -- dune build --root . @test/runtest-test_runtime_config_validity
 
-      - name: Shell IR differential-safety harness gate
-        # RFC-0208: the differential harness asserts the monotone-safety
-        # invariant (the composed verdict is never below the word-list
-        # floor, so the typed path can only escalate) and pins the
-        # structurally-typed ratchet (git checkout -> R1, reset -> R2).
-        # Hard-fail (no continue-on-error) so a typed arm weakened below
-        # the floor blocks merge. The quick suite runs it too via
-        # `dune test`, but that step is continue-on-error (non-gating) and
-        # is also superseded under main churn — which let the P4 gh-parser
-        # commit drop silently from #19762. This focused gate is the fix.
-        # See: lib/exec/test/test_shell_ir_differential.ml.
-        run: |
-          opam exec -- dune build --root . @lib/exec/test/runtest-test_shell_ir_differential
-
+      # NOTE: the "Shell IR differential-safety harness gate" step was removed
+      # here. #24332 (nonhierarchical Gate refactor) retired the entire
+      # shell_ir risk/typed subsystem (Shell_ir_risk, Shell_ir_typed,
+      # checked_shell_ir — now zero consumers; exec risk moved to the Gate),
+      # including lib/exec/test/test_shell_ir_differential.ml. The orphaned
+      # gate built @lib/exec/test/runtest-test_shell_ir_differential, an empty
+      # alias, hard-failing main (issue #24352). Restoring is infeasible (the
+      # tested subsystem is gone); removing the dead gate completes #24332.
       - name: Env knob catalog drift gate
         # Detects when lib/config/env_config_*.ml has been edited
         # (new MASC_* env var added, doc reworded, knob removed) but

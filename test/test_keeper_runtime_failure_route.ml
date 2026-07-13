@@ -1,4 +1,4 @@
-(** Mapping tests for [Keeper_runtime_failure_route] (RFC-0313 W2).
+(** Mapping tests for [Keeper_runtime_failure_route].
 
     Totality over [Agent_sdk.Error.sdk_error] is compiler-enforced (the
     route function has no catch-all); these tests pin the mapping opinion
@@ -23,8 +23,8 @@ let internal_err masc_internal =
 
 let test_api_rate_limited_threads_hint () =
   check_route
-    "soft 429 paces with hint"
-    (KFR.Retry_after_pacing { pacing = KFR.Rate_limited; retry_after = Some 30.0 })
+    "soft 429 preserves provider retry-after"
+    (KFR.Retry_after_observed { retry_class = KFR.Rate_limited; retry_after = Some 30.0 })
     (Agent_sdk.Error.Api
        (Llm_provider.Retry.RateLimited
           { retry_after = Some 30.0; message = "slow down" }))
@@ -40,32 +40,32 @@ let test_api_hard_quota_message_wins () =
          { retry_after = None; message = "You have exceeded your current quota." })
   in
   match route_of_oas_error err with
-  | KFR.Retry_after_pacing { pacing = KFR.Hard_quota; _ } -> ()
-  | (KFR.Retry_after_pacing _ | KFR.Rotate_now _ | KFR.Escalate_judgment _) as other ->
+  | KFR.Retry_after_observed { retry_class = KFR.Hard_quota; _ } -> ()
+  | (KFR.Retry_after_observed _ | KFR.Rotate_now _ | KFR.Escalate_judgment _) as other ->
     (* Guards against OAS predicate drift: [Retry.is_hard_quota] owns the
-       message classification; the route must stay a hard-quota pace. *)
+       message classification; the route must stay a hard-quota observation. *)
     Alcotest.failf
-      "hard-quota message must pace as hard quota, got %s:%s"
+      "hard-quota message must remain typed, got %s:%s"
       (KFR.route_kind_label other)
       (KFR.route_class_label other)
 
 let test_api_overloaded_is_backpressure () =
   check_route
     "typed Overloaded stays transient backpressure (#23483)"
-    (KFR.Retry_after_pacing
-       { pacing = KFR.Capacity_backpressure; retry_after = None })
+    (KFR.Retry_after_observed
+       { retry_class = KFR.Capacity_backpressure; retry_after = None })
     (Agent_sdk.Error.Api (Llm_provider.Retry.Overloaded { message = "overloaded" }))
 
 let test_api_server_error_status_split () =
   check_route
     "524 is gateway backpressure"
-    (KFR.Retry_after_pacing
-       { pacing = KFR.Capacity_backpressure; retry_after = None })
+    (KFR.Retry_after_observed
+       { retry_class = KFR.Capacity_backpressure; retry_after = None })
     (Agent_sdk.Error.Api
        (Llm_provider.Retry.ServerError { status = 524; message = "timeout" }));
   check_route
     "503 is transient server error"
-    (KFR.Retry_after_pacing { pacing = KFR.Server_error; retry_after = None })
+    (KFR.Retry_after_observed { retry_class = KFR.Server_error; retry_after = None })
     (Agent_sdk.Error.Api
        (Llm_provider.Retry.ServerError { status = 503; message = "unavailable" }));
   match
@@ -109,15 +109,15 @@ let test_api_auth_rotates_invalid_request_judges () =
 
 let test_provider_quota_family_threads_hint () =
   check_route
-    "provider HardQuota paces with hint"
-    (KFR.Retry_after_pacing { pacing = KFR.Hard_quota; retry_after = Some 3600.0 })
+    "provider HardQuota preserves retry-after"
+    (KFR.Retry_after_observed { retry_class = KFR.Hard_quota; retry_after = Some 3600.0 })
     (Agent_sdk.Error.Provider
        (Llm_provider.Error.HardQuota
           { provider = "glm"; retry_after = Some 3600.0; detail = "balance 0" }));
   check_route
-    "provider CapacityExhausted paces"
-    (KFR.Retry_after_pacing
-       { pacing = KFR.Capacity_backpressure; retry_after = None })
+    "provider CapacityExhausted stays typed"
+    (KFR.Retry_after_observed
+       { retry_class = KFR.Capacity_backpressure; retry_after = None })
     (Agent_sdk.Error.Provider
        (Llm_provider.Error.CapacityExhausted
           { scope = Llm_provider.Error.CapacityUnknown
@@ -150,8 +150,8 @@ let test_masc_internal_backpressure_hint () =
   in
   check_masc_route
     "masc backpressure carries typed Explicit hint"
-    (KFR.Retry_after_pacing
-       { pacing = KFR.Capacity_backpressure; retry_after = Some 45.0 })
+    (KFR.Retry_after_observed
+       { retry_class = KFR.Capacity_backpressure; retry_after = Some 45.0 })
     err;
   Alcotest.(check (option (float 1e-6)))
     "retry_after_of_route extracts the hint"
@@ -159,16 +159,6 @@ let test_masc_internal_backpressure_hint () =
     (KFR.retry_after_of_route (route_of_masc_error err))
 
 let test_masc_internal_judgment_classes () =
-  (match
-     route_of_masc_error
-       (internal_err
-          (Keeper_internal_error.Ambiguous_post_commit
-             { is_timeout = false; tools = [ "masc_done" ]; original_error = "eio" }))
-   with
-   | KFR.Escalate_judgment { judgment = KFR.Mutating_ambiguity; _ } -> ()
-   | other ->
-     Alcotest.failf "ambiguous post-commit should judge, got %s"
-       (KFR.route_kind_label other));
   (match
      route_of_masc_error
        (internal_err
@@ -184,21 +174,14 @@ let test_masc_internal_judgment_classes () =
      Alcotest.failf "contract rejection should judge, got %s"
        (KFR.route_kind_label other));
   check_masc_route
-    "admission rejection paces (lane backpressure)"
-    (KFR.Retry_after_pacing
-       { pacing = KFR.Admission_backpressure; retry_after = None })
-    (internal_err
-       (Keeper_internal_error.Admission_queue_rejected
-          { keeper_name = "k"; reason = "lane full" }));
-  check_masc_route
-    "capacity-exhausted runtime paces"
-    (KFR.Retry_after_pacing
-       { pacing = KFR.Capacity_backpressure; retry_after = None })
+    "capacity-exhausted runtime stays typed"
+    (KFR.Retry_after_observed
+       { retry_class = KFR.Capacity_backpressure; retry_after = None })
     (internal_err
        (Keeper_internal_error.Runtime_exhausted
           { runtime_id = "r"; reason = Keeper_internal_error.Capacity_exhausted }));
   check_masc_route
-    "session conflict rotates without retry pacing"
+    "session conflict rotates"
     (KFR.Rotate_now { rotate = KFR.Runtime_exhausted })
     (internal_err
        (Keeper_internal_error.Runtime_exhausted
@@ -220,9 +203,8 @@ let test_non_provider_families_judge () =
      Alcotest.failf
        "MASC-produced raw Internal must preserve its actual boundary, got %s"
        (KFR.route_kind_label other));
-  (* RFC-0313 W3: an idle loop is a behavioral contract judgment, not an
-     opaque internal error (it was the legacy ladder's manual-resume pause
-     class). *)
+  (* An idle loop is a behavioral contract judgment, not an opaque internal
+     error or lifecycle transition. *)
   (match
      route_of_oas_error
        (Agent_sdk.Error.Agent
@@ -256,7 +238,6 @@ let test_judgment_label_roundtrip () =
     [ KFR.Deterministic_request
     ; KFR.Context_overflow
     ; KFR.Contract_violation
-    ; KFR.Mutating_ambiguity
     ; KFR.Protocol_error
     ; KFR.Config_mismatch
     ; KFR.Provider_integration

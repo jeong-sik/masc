@@ -86,7 +86,9 @@ let test_emit_strips_reserved_keys_from_payload () =
   let wc =
     T.emit_from_tool_result ~emit ~working_context:None ~result
   in
-  let raws, _ = Multimodal.Wirein_helpers.extract_raw_artifacts wc in
+  let raws, _ =
+    Result.get_ok (Multimodal.Wirein_helpers.extract_raw_artifacts wc)
+  in
   assert (List.length raws = 1);
   let raw = List.hd raws in
   assert (raw.Multimodal.Multimodal_keeper_bridge.kind_hint = "code");
@@ -117,7 +119,9 @@ let test_emit_metadata_default_when_absent () =
   let wc =
     T.emit_from_tool_result ~emit ~working_context:None ~result
   in
-  let raws, _ = Multimodal.Wirein_helpers.extract_raw_artifacts wc in
+  let raws, _ =
+    Result.get_ok (Multimodal.Wirein_helpers.extract_raw_artifacts wc)
+  in
   let raw = List.hd raws in
   assert (raw.metadata = `Assoc []);
   print_endline "  emit_metadata_defaults_to_empty_assoc: OK"
@@ -149,7 +153,9 @@ let test_emit_from_tool_results_bulk () =
   let wc =
     T.emit_from_tool_results ~emit ~working_context:None [ r1; r2; r3; r4 ]
   in
-  let raws, _ = Multimodal.Wirein_helpers.extract_raw_artifacts wc in
+  let raws, _ =
+    Result.get_ok (Multimodal.Wirein_helpers.extract_raw_artifacts wc)
+  in
   assert (List.length raws = 3);
   print_endline "  emit_bulk_skips_untagged: OK"
 

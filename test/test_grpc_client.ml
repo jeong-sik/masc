@@ -4,6 +4,13 @@
     selection logic without requiring a running gRPC server. *)
 
 module T = Masc_grpc_types
+module Keeper_directive = Masc.Keeper_directive
+
+let task_id value =
+  match Keeper_id.Task_id.of_string value with
+  | Ok task_id -> task_id
+  | Error error -> Alcotest.failf "invalid test task id %S: %s" value error
+;;
 
 (* ====== Client-side type round-trip tests ====== *)
 
@@ -64,14 +71,15 @@ let test_heartbeat_ack_roundtrip () =
     timestamp_ms = 1700000001000L;
     active_agent_count = 5;
     pending_task_count = 3;
-    directives = ["compact"; "reflect"];
+    directives = [Keeper_directive.Pause; Keeper_directive.Wakeup];
   } in
   let bytes = T.HeartbeatAck.to_bytes ack in
   let decoded = T.HeartbeatAck.of_bytes bytes in
   Alcotest.(check int64) "timestamp_ms" ack.timestamp_ms decoded.timestamp_ms;
   Alcotest.(check int) "agent_count" 5 decoded.active_agent_count;
   Alcotest.(check int) "task_count" 3 decoded.pending_task_count;
-  Alcotest.(check (list string)) "directives" ["compact"; "reflect"] decoded.directives
+  Alcotest.(check (list string)) "directives" ["pause"; "wakeup"]
+    (List.map T.HeartbeatAck.directive_to_wire decoded.directives)
 
 let test_tool_call_response_roundtrip () =
   let resp = T.ToolCallResponse.{
@@ -198,12 +206,29 @@ let test_heartbeat_ack_directive_types () =
     timestamp_ms = 1700000002000L;
     active_agent_count = 2;
     pending_task_count = 1;
-    directives = ["pause"; "claim:T-42"; "wakeup"; "resume"];
+    directives =
+      [ Keeper_directive.Pause
+      ; Keeper_directive.Assign_task (task_id "T-42")
+      ; Keeper_directive.Wakeup
+      ; Keeper_directive.Resume
+      ];
   } in
   let bytes = T.HeartbeatAck.to_bytes ack in
   let decoded = T.HeartbeatAck.of_bytes bytes in
   Alcotest.(check (list string)) "P3 directives roundtrip"
-    ["pause"; "claim:T-42"; "wakeup"; "resume"] decoded.directives
+    ["pause"; "claim:T-42"; "wakeup"; "resume"]
+    (List.map T.HeartbeatAck.directive_to_wire decoded.directives);
+  let rejects raw =
+    match T.HeartbeatAck.directive_of_wire raw with
+    | Ok _ -> false
+    | Error _ -> true
+  in
+  Alcotest.(check bool) "unknown directive rejected" true (rejects "compact");
+  Alcotest.(check bool) "empty task assignment rejected" true (rejects "claim:");
+  Alcotest.(check bool)
+    "near-prefix tag rejected"
+    true
+    (rejects "claim-next:T-42")
 
 let test_heartbeat_ack_empty_directives () =
   let ack = T.HeartbeatAck.{
@@ -214,7 +239,7 @@ let test_heartbeat_ack_empty_directives () =
   } in
   let bytes = T.HeartbeatAck.to_bytes ack in
   let decoded = T.HeartbeatAck.of_bytes bytes in
-  Alcotest.(check (list string)) "empty directives" [] decoded.directives
+  Alcotest.(check int) "empty directives" 0 (List.length decoded.directives)
 
 (* ====== Test runner ====== *)
 

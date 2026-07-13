@@ -11,9 +11,8 @@
       scoped to this keeper by [agent_name].
 
     Conservation law (spec {!KeeperOutcomesConservation.tla}):
-      successes.substantive_turns + failures.turn_failed + failures.gate_rejected
-        = observed_turns
-    holds by construction because all three turn buckets now come from the
+      successes.substantive_turns + failures.turn_failed = observed_turns
+    holds by construction because both turn buckets come from the
     same completed-turn ring. *)
 let compute_outcomes_rollup
     ~keeper_name
@@ -24,7 +23,6 @@ let compute_outcomes_rollup
   let succ_compactions = ref 0 in
   let succ_handoffs = ref 0 in
   let fail_turn = ref 0 in
-  let fail_gate_rejected = ref 0 in
   let fail_compaction = ref 0 in
   let fail_handoff = ref 0 in
   let completed_turns =
@@ -34,8 +32,7 @@ let compute_outcomes_rollup
     (fun (turn : Keeper_transition_audit.completed_turn_record) ->
       match turn.outcome with
       | Keeper_transition_audit.Turn_substantive -> incr succ_turns
-      | Keeper_transition_audit.Turn_failed -> incr fail_turn
-      | Keeper_transition_audit.Turn_gate_rejected -> incr fail_gate_rejected)
+      | Keeper_transition_audit.Turn_failed -> incr fail_turn)
     completed_turns;
   let transitions =
     Keeper_transition_audit.recent_transitions ~keeper_name ~limit:50
@@ -114,7 +111,6 @@ let compute_outcomes_rollup
         `Assoc
           [
             ("turn_failed", `Int !fail_turn);
-            ("gate_rejected", `Int !fail_gate_rejected);
             ("compaction_failed", `Int !fail_compaction);
             ("handoff_failed", `Int !fail_handoff);
             ("crashes", `Int recent_crash_count);

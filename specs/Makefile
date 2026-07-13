@@ -29,25 +29,7 @@ endif
 
 # Specs with known failures (parsing/evaluation errors under CI tla2tools).
 # Remove from this list as specs are fixed. Each entry is a basename (no .cfg).
-#
-# KeeperStateMachine was previously skipped here. The stale note blamed
-# CompactionClearsOverflow / #8710, but that property had already been narrowed
-# to the *WithSavings arm and the clean spec did not contradict CompactionFailed.
-# The real reasons the spec did not pass clean were two logical defects, both now
-# fixed in KeeperStateMachine.tla:
-#   1. SupervisorRestartAttempt omitted terminal_failure_latched from its
-#      UNCHANGED set, leaving the variable null. TLC errored (rc=75) before
-#      evaluating any invariant/property, so neither the clean spec nor the
-#      overflow Bug Model ever ran.
-#   2. StablePhases omitted the Zombie terminal phase (while including the other
-#      two terminal phases Stopped/Dead), so the six resolve-liveness properties
-#      false-violated when TerminalFailureDetected settled a transient phase into
-#      the absorbing Zombie state.
-# With both fixed: clean cfg = rc 0 (119k states, no error); both buggy cfgs
-# (KeeperStateMachine-buggy.cfg, KeeperStateMachine-overflow-buggy.cfg) = rc 13
-# (BuggyCompactionClearsOverflow action property violated). KeeperStateMachine is
-# therefore removed from the skip list and runs in check-clean + check-buggy.
-KNOWN_FAILURES ?= KeeperTraceSpec
+KNOWN_FAILURES ?=
 
 # Buggy specs whose current invariant/model is documented as non-violating.
 # Remove from this list once the buggy cfg asserts a stronger property.
@@ -146,9 +128,8 @@ check-keeper: CLEAN_CFGS := $(call clean_cfgs_in,keeper-state-machine/)
 check-keeper: BUGGY_CFGS := $(call buggy_cfgs_in,keeper-state-machine/)
 check-keeper: check-all
 
-check-ecosystem: CLEAN_CFGS := $(call clean_cfgs_in,masc-ecosystem/)
-check-ecosystem: BUGGY_CFGS :=
-check-ecosystem: check-all
+check-ecosystem:
+	@echo "No ecosystem policy model; concrete boundary specs run in their owning shards."
 
 check-boundary: CLEAN_CFGS := $(call clean_cfgs_in,boundary/)
 check-boundary: BUGGY_CFGS := $(call buggy_cfgs_in,boundary/)
@@ -158,21 +139,20 @@ check-boundary: check-all
 # spec set that `check-all` walks; verified by the `check-matrix-coverage`
 # target which fails if anything drifts out of sync.  Tuning:
 #
-#   keeper-state-machine   ~4 min   (34 cfgs, dominated by KSM specs)
-#   masc-ecosystem         ~6 min   (MASCEcosystem 352s)
-#   social-and-state-prod  ~3 min   (StateProduct)
-#   others (15 dirs)       ~7 min   (incl. KeeperStaleKilled 182s + MemoryCompaction 181s)
+#   keeper-state-machine   lifecycle and lane-local models
+#   social-and-state-prod  reserved empty shard after state-product retirement
+#   others                 runtime depends on the remaining model set
 #
 # Wall-clock fan-out reduces TLA+ Main from ~22 min monolithic to ~7-8 min.
 
-SOCIAL_DIRS := state-product
+SOCIAL_DIRS :=
 check-social: CLEAN_CFGS := $(foreach d,$(SOCIAL_DIRS),$(call clean_cfgs_in,$(d)/))
 check-social: BUGGY_CFGS := $(foreach d,$(SOCIAL_DIRS),$(call buggy_cfgs_in,$(d)/))
 check-social: check-all
 
-OTHER_DIRS := admission-queue auth autonomous boundary bug-models \
-              checkpoint-trim goal-loop keeper-switch-hierarchy keeper-turn-fsm \
-              multimodal resilience server-state shared shell-ir-first-class \
+OTHER_DIRS := auth autonomous boundary bug-models \
+              checkpoint-trim keeper-switch-hierarchy keeper-turn-fsm \
+              multimodal server-state shared shell-ir-first-class \
               task-lifecycle
 check-others: CLEAN_CFGS := $(foreach d,$(OTHER_DIRS),$(call clean_cfgs_in,$(d)/))
 check-others: BUGGY_CFGS := $(foreach d,$(OTHER_DIRS),$(call buggy_cfgs_in,$(d)/))
@@ -180,7 +160,7 @@ check-others: check-all
 
 # Coverage check: every spec directory must appear in exactly one shard.
 # Run in CI before sharded jobs to catch silent drops when new dirs land.
-SHARD_DIRS_ALL := keeper-state-machine masc-ecosystem $(SOCIAL_DIRS) $(OTHER_DIRS)
+SHARD_DIRS_ALL := keeper-state-machine $(SOCIAL_DIRS) $(OTHER_DIRS)
 check-matrix-coverage: SHELL := /bin/bash
 check-matrix-coverage:
 	@set -euo pipefail; \

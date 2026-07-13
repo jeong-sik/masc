@@ -303,9 +303,8 @@ let claim_task config ~agent_name ~task_id =
   | Error e -> Masc_domain.to_string e
 ;;
 
-(** Unified task transition (single entrypoint).
-    When [~force:true], release/cancel/done bypass the assignee guard.
-    Used by keeper for orphan task cleanup. *)
+(** Collect typed release handoff text. Task ownership and orphan
+    reconciliation are enforced by their respective transition services. *)
 let release_handoff_texts (handoff_context : Masc_domain.task_handoff_context option) =
   let fields =
     match handoff_context with

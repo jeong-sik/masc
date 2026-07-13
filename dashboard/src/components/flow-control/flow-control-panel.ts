@@ -34,8 +34,7 @@ export function FlowControlPanel() {
   const isRunning = state === 'running'
   const isInitializing = state === 'initializing'
   const mutationAccess = dashboardAuthAccess(shellAuthSummary.value, 'worker')
-  const admission = operatorSnapshot.value?.admission_queue ?? null
-  const admissionError = operatorSnapshot.value?.admission_queue_error ?? null
+  const inferenceInflight = operatorSnapshot.value?.inference_inflight ?? null
   return html`
     <div class="v2-command-surface flex flex-col gap-4">
       <${SurfaceCard} variant="compact" class="v2-command-panel mb-4">
@@ -43,15 +42,11 @@ export function FlowControlPanel() {
         <h3 class="text-sm text-[var(--color-fg-secondary)] font-medium">Flow Control</h3>
         <${CountBadge} tone=${stateTone(state)}>${stateLabel(state)}<//>
       </div>
-      ${admission ? html`
-        <div class="mb-3 flex flex-wrap items-center gap-2 text-2xs text-[var(--color-fg-muted)]" data-testid="flow-admission-observation">
-          <span>Throttle owner: ${admission.throttle_owner}</span>
-          <span>${admission.active}/${admission.max_concurrent} observed inflight</span>
+      ${inferenceInflight ? html`
+        <div class="mb-3 flex flex-wrap items-center gap-2 text-2xs text-[var(--color-fg-muted)]" data-testid="flow-inference-inflight">
+          <span>Boundary owner: ${inferenceInflight.boundary_owner}</span>
+          <span>${inferenceInflight.active} active inference</span>
         </div>
-      ` : admissionError ? html`
-        <p class="mb-3 text-2xs text-[var(--color-status-warn)]" role="status" data-testid="flow-admission-error">
-          Admission observation unavailable: ${admissionError}
-        </p>
       ` : null}
       ${mutationAccess.allowed ? null : html`
         <p class="mb-3 text-2xs text-[var(--color-status-warn)]">

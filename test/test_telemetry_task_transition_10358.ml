@@ -37,9 +37,9 @@ let make_ctx base_path =
   ignore (Workspace.init config ~agent_name:(Some agent_name));
   { Task.Tool.config; agent_name; sw = None }
 
-(* [evidence_refs]: completions require evidence since #23738 (Gate 0 /
-   Task_completion_gate); this test covers the telemetry lifecycle, not the
-   evidence gate, so the done transition carries a real ref. *)
+(* [evidence_refs] are transported to the LLM completion reviewer. This test
+   covers the telemetry lifecycle, so it supplies representative reviewer
+   context without asserting a local evidence-classification rule. *)
 let run_transition ctx ~task_id ~action ?(notes = "") ?(evidence_refs = []) () =
   let base_args =
     [

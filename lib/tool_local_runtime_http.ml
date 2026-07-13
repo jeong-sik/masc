@@ -170,7 +170,7 @@ let http_get_text_response_with_headers ?(timeout_sec = default_timeout_sec)
       ~compressed ?max_response_bytes url
   in
   let status, body =
-    Fd_accountant.with_slot ~kind:Sandbox_exec (fun () ->
+    Fd_accountant.observe ~kind:Sandbox_exec (fun () ->
       Masc_exec.Exec_gate.run_argv_with_status
         ~actor:(Masc_exec.Agent_id.of_string "tool/local_runtime")
         ~raw_source:(String.concat " " (List.map Filename.quote argv))
@@ -213,7 +213,7 @@ let http_post_json_text_with_status_with_headers ~timeout_sec ?(headers = []) ~u
   let timeout_sec = max 1 timeout_sec in
   let argv = curl_post_json_argv ~timeout_sec ~headers ~url ~body_json () in
   let status, body =
-    Fd_accountant.with_slot ~kind:Sandbox_exec (fun () ->
+    Fd_accountant.observe ~kind:Sandbox_exec (fun () ->
       Masc_exec.Exec_gate.run_argv_with_status
         ~actor:(Masc_exec.Agent_id.of_string "tool/local_runtime")
         ~raw_source:(String.concat " " (List.map Filename.quote argv))

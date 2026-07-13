@@ -28,9 +28,6 @@ val persist_error_count : unit -> int
 val record_persist_error : where:string -> string -> unit
 
 val create_store : unit -> store
-val reset_comment_rate_tracker : unit -> unit
-val check_comment_rate_limit : author:string -> now:float -> float option
-val record_comment_timestamp : author:string -> now:float -> unit
 
 val invalidate_post_caches : store -> unit
 val invalidate_comment_caches : store -> unit
@@ -79,31 +76,7 @@ val sub_board_author_allowed : sub_board -> author_id:Agent_id.t -> bool
 val validate_sub_board_post_policy_unlocked :
   store -> author_id:Agent_id.t -> hearth:string option -> (unit, board_error) result
 
-type create_post_outcome =
-  | Fresh_post of post
-  | Dedup_hit of post
-  | Rolled_up_post of post
-
-val post_of_create_post_outcome : create_post_outcome -> post
-val status_rollup_task_id :
-  title:string -> body:string -> meta_json:Yojson.Safe.t option -> string option
-val is_status_rollup_candidate :
-  post_kind:post_kind ->
-  title:string ->
-  body:string ->
-  meta_json:Yojson.Safe.t option ->
-  bool
-val find_status_rollup_target_unlocked :
-  store ->
-  author_id:Agent_id.t ->
-  hearth:string option ->
-  visibility:visibility ->
-  task_id:string ->
-  now:float ->
-  post option
-
-val create_post_with_outcome :
-  ?after_rollup_persist:(post -> (unit, string) result) ->
+val create_post :
   store ->
   author:string ->
   content:string ->
@@ -117,7 +90,7 @@ val create_post_with_outcome :
   ?thread_id:string ->
   ?origin:post_origin ->
   unit ->
-  (create_post_outcome, board_error) result
+  (post, board_error) result
 
 (** Owner-gated in-place edit of an existing post's title/body.  Returns
     [Unauthorized] when [editor] does not own the post, [Post_not_found] for a
@@ -135,22 +108,6 @@ val update_post_with_outcome :
   ?title:string ->
   ?body:string ->
   ?new_author:string ->
-  unit ->
-  (post, board_error) result
-
-val create_post :
-  store ->
-  author:string ->
-  content:string ->
-  ?title:string ->
-  ?body:string ->
-  post_kind:post_kind ->
-  ?meta_json:Yojson.Safe.t ->
-  ?visibility:visibility ->
-  ?ttl_hours:int ->
-  ?hearth:string ->
-  ?thread_id:string ->
-  ?origin:post_origin ->
   unit ->
   (post, board_error) result
 

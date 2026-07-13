@@ -21,7 +21,7 @@
 
 - **Single-turn latency**: MASC adds pre-dispatch gates (phase, livelock, runtime build) that a direct SDK runner skips. The tradeoff is determinism over speed.
 - **Agent autonomy**: Keepers run supervised cycles, not self-driven loops. The tradeoff is operator visibility over agent initiative.
-- **Minimal setup**: MASC requires runtime.toml, keeper personas, and a running agent stream. The tradeoff is multi-tenant governance over single-user convenience.
+- **Minimal setup**: MASC requires runtime.toml, keeper personas, and a running agent stream. The tradeoff is durable multi-Keeper coordination and an explicit external-effect Gate over single-user convenience.
 
 ### What MASC optimizes for
 

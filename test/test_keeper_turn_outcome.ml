@@ -53,10 +53,6 @@ let test_of_stop_reason () =
   check outcome "budget exhausted -> checkpoint" TO.Continuation_checkpoint
     (TO.of_stop_reason
        (Runtime_agent.TurnBudgetExhausted { turns_used = 3; limit = 3 }));
-  check outcome "mutation boundary -> checkpoint" TO.Continuation_checkpoint
-    (TO.of_stop_reason
-       (Runtime_agent.MutationBoundaryReached
-          { turns_used = 2; tool_name = Some "masc_add_task" }));
   check outcome "chat yield -> checkpoint" TO.Continuation_checkpoint
     (TO.of_stop_reason
        (Runtime_agent.Yielded_to_chat_waiting { turns_used = 2 }));
@@ -129,7 +125,6 @@ let test_autonomous_yield_boundary_contract () =
       turns_used
   | Runtime_agent.Completed
   | Runtime_agent.TurnBudgetExhausted _
-  | Runtime_agent.MutationBoundaryReached _
   | Runtime_agent.Yielded_to_chat_waiting _
   | Runtime_agent.InputRequired _
   | Runtime_agent.ToolFailureRecoveryDeferred _ ->
@@ -255,7 +250,7 @@ let test_queued_delivery_requires_exact_turn_ref () =
   | Stream.Failed _ | Stream.Deferred _ ->
     fail "valid turn_ref must produce Delivered"
 
-let body fields = Yojson.Safe.to_string (`Assoc fields)
+let body fields = `Assoc fields
 
 let test_direct_reply_visible_text () =
   check (option string) "declared checkpoint -> None" None

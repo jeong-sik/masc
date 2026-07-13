@@ -17,9 +17,9 @@
     Property 4 (Structural absence):
       keeper_agent_run source does NOT contain ~max_input_tokens.
 
-    Property 5 (Reducer integration):
-      keeper_run_tools_hooks source contains cap_message_tokens in the
-      keeper reducer chain, ordered before the local pair repair.
+    Property 5 (No local budget authority):
+      keeper_run_tools_hooks does not cap messages by an estimated token
+      budget before dispatching to OAS.
 
     Property 6 (Reducer hardening):
       keeper_run_tools_hooks source uses the keeper-local repair path and does
@@ -104,16 +104,6 @@ let test_structural_absence () =
   end
 
 let test_cap_message_tokens_integration () =
-  let find_substring ?(start = 0) haystack needle =
-    let hlen = String.length haystack in
-    let nlen = String.length needle in
-    let rec loop i =
-      if i + nlen > hlen then None
-      else if String.sub haystack i nlen = needle then Some i
-      else loop (i + 1)
-    in
-    if nlen = 0 then Some start else loop start
-  in
   let has_prompt_root path =
     Sys.file_exists (Filename.concat path "config/prompts/keeper.unified.system.md")
   in
@@ -142,21 +132,12 @@ let test_cap_message_tokens_integration () =
         really_input ic buf 0 len;
         Bytes.to_string buf)
     in
-    let cap_pos =
-      find_substring content "Agent_sdk.Context_reducer.cap_message_tokens"
-    in
-    let repair_pos =
-      match cap_pos with
-      | Some cap_pos ->
-          find_substring ~start:cap_pos content "repair_broken_tool_call_pairs_observed"
-      | None -> None
-    in
     Alcotest.(check bool)
-      "keeper_run_tools_hooks.ml must integrate cap_message_tokens before local pair repair"
-      true
-      (match cap_pos, repair_pos with
-       | Some cap_pos, Some repair_pos -> cap_pos < repair_pos
-       | _ -> false)
+      "keeper_run_tools_hooks.ml must not impose a local message-token cap"
+      false
+      (Re.execp
+         Re.(compile (str "Agent_sdk.Context_reducer.cap_message_tokens"))
+         content)
   end
 
 let test_pair_repair_integration () =
@@ -924,7 +905,7 @@ let () =
     ("structural", [
       Alcotest.test_case "absence of max_input_tokens" `Quick
         test_structural_absence;
-      Alcotest.test_case "cap_message_tokens integrated in reducer chain" `Quick
+      Alcotest.test_case "local message-token cap absent" `Quick
         test_cap_message_tokens_integration;
       Alcotest.test_case "local pair repair integrated in reducer chain" `Quick
         test_pair_repair_integration;

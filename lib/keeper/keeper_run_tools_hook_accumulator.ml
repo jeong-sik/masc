@@ -16,8 +16,6 @@ type hook_accumulator =
   { mutable meta : Keeper_meta_contract.keeper_meta
   ; mutable tool_calls : tool_call_detail list
   ; mutable current_turn : int
-  ; mutable discovered : Keeper_discovered_tools.t
-  ; mutable tool_overlay : Agent_sdk.Tool_op.t
   ; mutable tool_surface : tool_surface_metrics
   ; mutable requested_tool_names : string list
   ; mutable receipt_completion_contract_result :
@@ -40,8 +38,6 @@ type hook_accumulator =
 type hook_outputs =
   { out_meta : Keeper_meta_contract.keeper_meta
   ; out_tool_calls : tool_call_detail list
-  ; out_discovered : Keeper_discovered_tools.t
-  ; out_tool_overlay : Agent_sdk.Tool_op.t
   ; out_tool_surface : tool_surface_metrics
   ; out_requested_tool_names : string list
   ; out_receipt_completion_contract_result :
@@ -53,8 +49,6 @@ type hook_outputs =
 let freeze (acc : hook_accumulator) : hook_outputs =
   { out_meta = acc.meta
   ; out_tool_calls = acc.tool_calls
-  ; out_discovered = acc.discovered
-  ; out_tool_overlay = acc.tool_overlay
   ; out_tool_surface = acc.tool_surface
   ; out_requested_tool_names = acc.requested_tool_names
   ; out_receipt_completion_contract_result = acc.receipt_completion_contract_result

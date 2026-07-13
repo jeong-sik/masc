@@ -15,8 +15,7 @@ let minimal_keeper_json ~trace_id =
     ]
 
 let strict_meta_of_fields fields =
-  Masc.Keeper_meta_json_parse.meta_of_json
-    (`Assoc (fields @ [ ("tool_access", Json_util.json_string_list []) ]))
+  Masc.Keeper_meta_json_parse.meta_of_json (`Assoc fields)
 
 let test_valid_trace_id () =
   match Masc_test_deps.meta_of_json_fixture (minimal_keeper_json ~trace_id:"alice-001") with
@@ -127,6 +126,23 @@ let test_invalid_trace_id () =
              with Not_found -> false))
   | Ok _ -> fail "expected Error for invalid trace_id '..'"
 
+let test_removed_voice_policy_meta_rejected () =
+  match
+    strict_meta_of_fields
+      [ ("name", `String "alice")
+      ; ("agent_name", `String "keeper-alice-agent")
+      ; ("trace_id", `String "alice-001")
+      ; ("goal", `String "test")
+      ; ("policy_voice_enabled", `Bool true)
+      ]
+  with
+  | Ok _ -> fail "removed policy_voice_enabled meta must be rejected"
+  | Error msg ->
+    check bool
+      "error names removed policy_voice_enabled"
+      true
+      (Astring.String.is_infix ~affix:"policy_voice_enabled" msg)
+
 let () =
   run "keeper_identity_parse"
     [ ( "parse_keeper_identity"
@@ -140,5 +156,7 @@ let () =
         ; test_case "missing trace_id field" `Quick test_missing_trace_id
         ; test_case "empty trace_id" `Quick test_empty_trace_id
         ; test_case "invalid trace_id (..)" `Quick test_invalid_trace_id
+        ; test_case "removed voice policy meta" `Quick
+            test_removed_voice_policy_meta_rejected
         ] )
     ]

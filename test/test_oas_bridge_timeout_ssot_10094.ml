@@ -39,7 +39,6 @@ let test_remaining_defaults () =
   clear_envs ();
   let cases =
     [ Cfg.Anti_rationalization, 180.0
-    ; Cfg.Governance_judge, Cfg.dashboard_judge_default_sec
     ; Cfg.Operator_judge, Cfg.dashboard_judge_default_sec
     ]
   in
@@ -62,9 +61,9 @@ let test_per_caller_env_override () =
     45.5
     (Cfg.timeout_sec ~caller:Cfg.Anti_rationalization ());
   check_timeout_equal
-    "governance_judge unaffected by anti_rationalization env"
+    "operator_judge unaffected by anti_rationalization env"
     Cfg.dashboard_judge_default_sec
-    (Cfg.timeout_sec ~caller:Cfg.Governance_judge ());
+    (Cfg.timeout_sec ~caller:Cfg.Operator_judge ());
   clear_envs ()
 ;;
 
@@ -125,9 +124,9 @@ let test_env_var_name_convention () =
     "MASC_OAS_BRIDGE_TIMEOUT_ANTI_RATIONALIZATION_SEC"
     (Cfg.per_caller_env_var ~caller:Cfg.Anti_rationalization);
   Alcotest.(check string)
-    "governance_judge env var"
-    "MASC_OAS_BRIDGE_TIMEOUT_GOVERNANCE_JUDGE_SEC"
-    (Cfg.per_caller_env_var ~caller:Cfg.Governance_judge);
+    "operator_judge env var"
+    "MASC_OAS_BRIDGE_TIMEOUT_OPERATOR_JUDGE_SEC"
+    (Cfg.per_caller_env_var ~caller:Cfg.Operator_judge);
   Alcotest.(check string)
     "global env var"
     "MASC_OAS_BRIDGE_TIMEOUT_DEFAULT_SEC"

@@ -2,7 +2,6 @@ open Alcotest
 open Schedule_domain
 
 let human ?display_name id = { id; kind = Human_operator; display_name }
-let automated ?display_name id = { id; kind = Automated_actor; display_name }
 
 let payload_json ?(kind = "consumer.note") ?(schema_version = 1) ?body () =
   let body =
@@ -17,8 +16,6 @@ let payload_json ?(kind = "consumer.note") ?(schema_version = 1) ?body () =
 ;;
 
 let request
-  ?(risk_class = Workspace_write)
-  ?(approval_required = false)
   ?(requested_by = human "requester")
   ?(scheduled_by = human "scheduler")
   ?expires_at
@@ -28,40 +25,18 @@ let request
   match
     create_request ~schedule_id:"sched-1" ~requested_by ~scheduled_by
       ~requested_at:100.0 ~due_at:200.0
-      ?expires_at ~payload:(payload_json ()) ~risk_class ~approval_required
-      ~source:Operator_request ?recurrence ()
+      ?expires_at ~payload:(payload_json ()) ~source:Operator_request ?recurrence ()
   with
   | Ok request -> request
   | Error msg -> fail msg
-;;
-
-let grant ?decision ?approved_by request =
-  let decision = Option.value ~default:Approve decision in
-  let approved_by = Option.value ~default:(human "approver") approved_by in
-  create_execution_grant ~grant_id:"grant-1" ~approved_by ~approved_at:150.0
-    ~decision request
 ;;
 
 let check_status label expected actual =
   check string label (schedule_status_to_string expected) (schedule_status_to_string actual)
 ;;
 
-let check_error label expected result =
-  match result with
-  | Ok _ -> fail (label ^ ": expected error")
-  | Error actual ->
-    check string label (grant_error_to_string expected) (grant_error_to_string actual)
-;;
-
-let test_side_effecting_starts_pending () =
-  let req = request ~risk_class:Workspace_write () in
-  check bool "approval forced" true req.approval_required;
-  check_status "status" Pending_approval req.status
-;;
-
-let test_read_only_can_start_scheduled () =
-  let req = request ~risk_class:Read_only () in
-  check bool "approval not required" false req.approval_required;
+let test_request_starts_scheduled () =
+  let req = request () in
   check_status "status" Scheduled req.status
 ;;
 
@@ -69,8 +44,7 @@ let test_payload_requires_object_envelope () =
   match
     create_request ~schedule_id:"sched-1" ~requested_by:(human "requester")
       ~scheduled_by:(human "scheduler") ~requested_at:100.0 ~due_at:200.0
-      ~payload:(`String "do later") ~risk_class:Read_only
-      ~approval_required:false ~source:Operator_request ()
+      ~payload:(`String "do later") ~source:Operator_request ()
   with
   | Ok _ -> fail "expected invalid payload"
   | Error msg -> check string "payload error" "payload must be a JSON object" msg
@@ -80,8 +54,7 @@ let test_payload_requires_known_envelope_fields () =
   match
     create_request ~schedule_id:"sched-1" ~requested_by:(human "requester")
       ~scheduled_by:(human "scheduler") ~requested_at:100.0 ~due_at:200.0
-      ~payload:(`Assoc [ "body", `Assoc [] ]) ~risk_class:Read_only
-      ~approval_required:false ~source:Operator_request ()
+      ~payload:(`Assoc [ "body", `Assoc [] ]) ~source:Operator_request ()
   with
   | Ok _ -> fail "expected invalid payload"
   | Error msg -> check string "payload error" "missing field: kind" msg
@@ -91,8 +64,7 @@ let test_invalid_recurrence_rejected () =
   match
     create_request ~schedule_id:"sched-1" ~requested_by:(human "requester")
       ~scheduled_by:(human "scheduler") ~requested_at:100.0 ~due_at:200.0
-      ~payload:(payload_json ()) ~risk_class:Read_only
-      ~approval_required:false ~source:Operator_request
+      ~payload:(payload_json ()) ~source:Operator_request
       ~recurrence:(Interval { interval_sec = 0 })
       ()
   with
@@ -101,88 +73,18 @@ let test_invalid_recurrence_rejected () =
     check string "recurrence error" "recurrence.interval_sec must be positive" msg
 ;;
 
-let test_separate_human_approval_accepts () =
-  let req = request () in
-  let grant = grant req in
-  match apply_execution_grant req grant with
-  | Error err -> fail (grant_error_to_string err)
-  | Ok updated -> check_status "approved schedule status" Scheduled updated.status
-;;
-
-let test_reject_grant_marks_rejected () =
-  let req = request () in
-  let grant = grant ~decision:(Reject "not safe enough") req in
-  match apply_execution_grant req grant with
-  | Error err -> fail (grant_error_to_string err)
-  | Ok updated -> check_status "rejected schedule status" Rejected updated.status
-;;
-
-let test_due_grant_keeps_request_due () =
-  let due = { (request ()) with status = Due } in
-  let grant = grant due in
-  match apply_execution_grant due grant with
-  | Error err -> fail (grant_error_to_string err)
-  | Ok updated -> check_status "due approval stays due" Due updated.status
-;;
-
-let test_expired_schedule_blocks_grant () =
-  let req = request ~expires_at:149.0 () in
-  let grant = grant req in
-  check_error "expired approval" Schedule_terminal
-    (validate_execution_grant req grant)
-;;
-
-let test_requester_cannot_approve () =
-  let requested_by = human "same-human" in
-  let req = request ~requested_by () in
-  let grant = grant ~approved_by:requested_by req in
-  check_error "requester approval" Approver_is_requester
-    (validate_execution_grant req grant)
-;;
-
-let test_scheduler_cannot_approve () =
-  let scheduled_by = human "same-human" in
-  let req = request ~scheduled_by () in
-  let grant = grant ~approved_by:scheduled_by req in
-  check_error "scheduler approval" Approver_is_scheduler
-    (validate_execution_grant req grant)
-;;
-
-let test_automated_actor_cannot_approve_side_effecting () =
-  let req = request () in
-  let grant = grant ~approved_by:(automated "automation-a") req in
-  check_error "automated approval" Approver_not_human
-    (validate_execution_grant req grant)
-;;
-
-let test_evidence_mismatch_rejected () =
-  let req = request () in
-  let valid_grant = grant req in
-  let bad_evidence = { valid_grant.evidence with due_at = 201.0 } in
-  let bad_grant = { valid_grant with evidence = bad_evidence } in
-  check_error "evidence due_at" Evidence_due_at_mismatch
-    (validate_execution_grant req bad_grant)
-;;
-
-let test_terminal_schedule_blocks_grant () =
-  let req = { (request ()) with status = Cancelled } in
-  let grant = grant req in
-  check_error "terminal schedule" Schedule_terminal
-    (validate_execution_grant req grant)
-;;
-
 let test_mark_due_only_scheduled () =
-  let scheduled = request ~risk_class:Read_only () in
+  let scheduled = request () in
   let due = mark_due ~now:201.0 scheduled in
   check_status "scheduled becomes due" Due due.status;
-  let pending = request () in
-  let unchanged = mark_due ~now:201.0 pending in
-  check_status "pending unchanged" Pending_approval unchanged.status
+  let running = { scheduled with status = Running } in
+  let unchanged = mark_due ~now:201.0 running in
+  check_status "running unchanged" Running unchanged.status
 ;;
 
 let test_interval_recurrence_next_due () =
   let req =
-    request ~risk_class:Read_only
+    request
       ~recurrence:(Interval { interval_sec = 60 })
       ()
   in
@@ -194,7 +96,7 @@ let test_interval_recurrence_next_due () =
 
 let test_daily_recurrence_next_due_uses_fixed_offset_alias () =
   let req =
-    request ~risk_class:Read_only
+    request
       ~recurrence:
         (Daily { hour = 9; minute = 0; second = 0; timezone = "Asia/Seoul" })
       ()
@@ -206,7 +108,7 @@ let test_daily_recurrence_next_due_uses_fixed_offset_alias () =
 
 let test_daily_recurrence_next_due_accepts_explicit_fixed_offset () =
   let req =
-    request ~risk_class:Read_only
+    request
       ~recurrence:
         (Daily { hour = 9; minute = 0; second = 0; timezone = "+09:00" })
       ()
@@ -220,8 +122,7 @@ let test_daily_recurrence_rejects_dst_iana_timezone () =
   match
     create_request ~schedule_id:"sched-1" ~requested_by:(human "requester")
       ~scheduled_by:(human "scheduler") ~requested_at:100.0 ~due_at:200.0
-      ~payload:(payload_json ()) ~risk_class:Read_only
-      ~approval_required:false ~source:Operator_request
+      ~payload:(payload_json ()) ~source:Operator_request
       ~recurrence:
         (Daily { hour = 9; minute = 0; second = 0; timezone = "America/New_York" })
       ()
@@ -235,7 +136,7 @@ let test_daily_recurrence_rejects_dst_iana_timezone () =
 
 let test_cron_recurrence_next_due_weekdays () =
   let req =
-    request ~risk_class:Read_only
+    request
       ~recurrence:(Cron { expression = "0 9 * * 1-5"; timezone = "UTC" })
       ()
   in
@@ -247,7 +148,7 @@ let test_cron_recurrence_next_due_weekdays () =
 
 let test_cron_recurrence_supports_steps_ranges_and_sunday_alias () =
   let req =
-    request ~risk_class:Read_only
+    request
       ~recurrence:(Cron { expression = "*/30 9-10 * * 7"; timezone = "UTC" })
       ()
   in
@@ -260,8 +161,7 @@ let test_cron_recurrence_rejects_invalid_expression () =
   match
     create_request ~schedule_id:"sched-1" ~requested_by:(human "requester")
       ~scheduled_by:(human "scheduler") ~requested_at:100.0 ~due_at:200.0
-      ~payload:(payload_json ()) ~risk_class:Read_only
-      ~approval_required:false ~source:Operator_request
+      ~payload:(payload_json ()) ~source:Operator_request
       ~recurrence:(Cron { expression = "*/0 9 * * 1-5"; timezone = "UTC" })
       ()
   with
@@ -272,7 +172,7 @@ let test_cron_recurrence_rejects_invalid_expression () =
 
 let test_schedule_roundtrip () =
   let req =
-    request ~risk_class:Cost_bearing ~approval_required:true
+    request
       ~recurrence:(Interval { interval_sec = 300 })
       ()
   in
@@ -289,7 +189,7 @@ let test_schedule_roundtrip () =
 
 let test_cron_schedule_roundtrip () =
   let req =
-    request ~risk_class:Read_only
+    request
       ~recurrence:(Cron { expression = "0 9 * * 1-5"; timezone = "Asia/Seoul" })
       ()
   in
@@ -317,7 +217,7 @@ let test_recurrence_summary () =
 ;;
 
 let test_missing_recurrence_defaults_one_shot () =
-  let req = request ~risk_class:Read_only () in
+  let req = request () in
   let json =
     match schedule_request_to_yojson req with
     | `Assoc fields -> `Assoc (List.remove_assoc "recurrence" fields)
@@ -330,20 +230,8 @@ let test_missing_recurrence_defaults_one_shot () =
       (recurrence_kind_to_string decoded.recurrence)
 ;;
 
-let test_grant_roundtrip () =
-  let req = request () in
-  let grant = grant req in
-  match execution_grant_to_yojson grant |> execution_grant_of_yojson with
-  | Error msg -> fail msg
-  | Ok decoded ->
-    check string "grant_id" grant.grant_id decoded.grant_id;
-    check string "schedule_id" grant.schedule_id decoded.schedule_id;
-    check string "payload digest" grant.evidence.payload_digest
-      decoded.evidence.payload_digest
-;;
-
 let test_execution_record_roundtrip () =
-  let req = request ~risk_class:Read_only () in
+  let req = request () in
   let execution =
     { execution_id = "exec-1"
     ; schedule_id = req.schedule_id
@@ -373,10 +261,8 @@ let () =
     [
       ( "request",
         [
-          test_case "side-effecting starts pending" `Quick
-            test_side_effecting_starts_pending;
-          test_case "read-only can start scheduled" `Quick
-            test_read_only_can_start_scheduled;
+          test_case "request starts scheduled" `Quick
+            test_request_starts_scheduled;
           test_case "payload requires object envelope" `Quick
             test_payload_requires_object_envelope;
           test_case "payload requires envelope fields" `Quick
@@ -400,23 +286,6 @@ let () =
           test_case "cron recurrence rejects invalid expression" `Quick
             test_cron_recurrence_rejects_invalid_expression;
         ] );
-      ( "grant",
-        [
-          test_case "separate human approval accepts" `Quick
-            test_separate_human_approval_accepts;
-          test_case "reject grant marks rejected" `Quick test_reject_grant_marks_rejected;
-          test_case "due grant keeps request due" `Quick
-            test_due_grant_keeps_request_due;
-          test_case "expired schedule blocks grant" `Quick
-            test_expired_schedule_blocks_grant;
-          test_case "requester cannot approve" `Quick test_requester_cannot_approve;
-          test_case "scheduler cannot approve" `Quick test_scheduler_cannot_approve;
-          test_case "automated actor cannot approve side-effecting" `Quick
-            test_automated_actor_cannot_approve_side_effecting;
-          test_case "evidence mismatch rejected" `Quick test_evidence_mismatch_rejected;
-          test_case "terminal schedule blocks grant" `Quick
-            test_terminal_schedule_blocks_grant;
-        ] );
       ( "codec",
         [
           test_case "schedule roundtrip" `Quick test_schedule_roundtrip;
@@ -424,7 +293,6 @@ let () =
           test_case "recurrence summary" `Quick test_recurrence_summary;
           test_case "missing recurrence defaults one-shot" `Quick
             test_missing_recurrence_defaults_one_shot;
-          test_case "grant roundtrip" `Quick test_grant_roundtrip;
           test_case "execution record roundtrip" `Quick
             test_execution_record_roundtrip;
         ] );

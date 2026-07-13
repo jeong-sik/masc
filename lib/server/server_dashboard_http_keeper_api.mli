@@ -14,7 +14,6 @@ module Http = Http_server_eio
 val keeper_api_prefix : string
 (** [/api/v1/keepers/] common prefix for every route below. *)
 
-val keeper_suffix_tools : string
 val keeper_suffix_config : string
 val keeper_suffix_secrets : string
 val keeper_suffix_boot : string
@@ -30,9 +29,6 @@ val keeper_suffix_directive : string
     The dashboard merges the on-disk turn trajectory with internal-history
     lines (per-turn snapshots from the keeper subprocess) so the operator
     sees both LLM messages and structural events in one feed. *)
-
-val dedupe_tool_names : string list -> string list
-(** Stable dedup preserving first occurrence. *)
 
 val trajectory_line_ts : Trajectory.trajectory_line -> float
 (** Extract the timestamp used as the merge key. *)
@@ -59,17 +55,6 @@ val merge_keeper_trace_lines :
   Trajectory.trajectory_line list
 (** Merge [trajectory_lines] with the internal-history file in
     timestamp order, applying [dedupe_thinking_lines]. *)
-
-(** {1 Tools route} *)
-
-val keeper_tools_response_json :
-  Keeper_meta_contract.keeper_meta -> Yojson.Safe.t
-(** JSON shape returned by [GET /tools]. *)
-
-val handle_keeper_tools_post :
-  Mcp_server.server_state ->
-  Httpun.Request.t -> Httpun.Reqd.t -> unit
-(** Handle [POST /tools] (tool-grant edits). *)
 
 val handle_keeper_catchup_judge_post :
   Mcp_server.server_state ->

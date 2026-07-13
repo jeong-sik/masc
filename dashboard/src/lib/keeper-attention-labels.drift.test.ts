@@ -21,8 +21,6 @@ import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { describe, it, expect } from 'vitest'
 import {
-  ATTENTION_COMPLETION_CONTRACT_RESULTS,
-  isAttentionCompletionContractResult,
   isAttentionReason,
   isNextHumanAction,
 } from './keeper-attention-labels'
@@ -97,26 +95,10 @@ function executionReceiptAttentionReasons(): string[] {
 // out of the attention label union unless the backend changes that contract.
 const EXECUTION_RECEIPT_PASS_ONLY_REASONS: ReadonlySet<string> = new Set([
   'healthy',
-  'passive_no_action',
   'runtime_fallback',
   'phase_skipped',
-  'passive_no_action',
   'input_required',
 ])
-
-function completionContractAttentionLabels(): string[] {
-  const src = read('lib/keeper/keeper_completion_contract_result_label.ml')
-  const start = src.indexOf('type t =')
-  expect(start, 'completion contract label type present').toBeGreaterThan(-1)
-  const body = src.slice(start, src.indexOf('let to_string', start))
-  return [...body.matchAll(/\|\s+([A-Z][A-Za-z_]*)/g)]
-    .map((m) => m[1])
-    .filter((arm): arm is string => arm !== undefined)
-    .map((arm) =>
-      arm.replace(/[A-Z]/g, (c, offset) => `${offset === 0 ? '' : '_'}${c.toLowerCase()}`),
-    )
-    .filter((label) => label !== 'satisfied_completion' && label !== 'satisfied_execution')
-}
 
 describe('keeper attention vocabulary drift guard', () => {
   it('extracts a non-empty backend vocabulary (guard self-check)', () => {
@@ -170,14 +152,4 @@ describe('keeper attention vocabulary drift guard', () => {
     ).toEqual([])
   })
 
-  it('completion_contract_result attention labels mirror the OCaml typed label SSOT', () => {
-    const backend = [...new Set(completionContractAttentionLabels())].sort()
-    const frontend = [...ATTENTION_COMPLETION_CONTRACT_RESULTS].sort()
-    const missing = backend.filter((label) => !isAttentionCompletionContractResult(label))
-    expect(
-      missing,
-      `completion_contract_result labels emitted by backend with no union arm: ${missing.join(', ')}`,
-    ).toEqual([])
-    expect(frontend).toEqual(backend)
-  })
 })

@@ -10,10 +10,8 @@
       a JSON-RPC client that lets a local worker call MASC
       tools without going through the HTTP server's auth
       machinery.
-    - Usage / cost helpers ({!merge_usage}) plus the env-var
-      reader convenience wrappers
-      ({!local_worker_max_tokens},
-      {!local_worker_heartbeat_interval_sec}).
+    - Usage / cost helpers ({!merge_usage}) plus the heartbeat
+      interval reader {!local_worker_heartbeat_interval_sec}.
 
     The .ml has ~38 toplevels but external callers reach only
     the 15 entries below.  Internal helpers
@@ -108,11 +106,6 @@ val worker_container_version : int
     before deserializing a checkpoint. *)
 
 (** {1 Local-worker env-var convenience} *)
-
-val local_worker_max_tokens : unit -> int
-(** Cached read of [Env_config.Worker.local_worker_max_tokens].
-    Convenience wrapper so call sites do not need to import
-    [Env_config.Worker] just for this value. *)
 
 val local_worker_heartbeat_interval_sec : unit -> int
 (** Cached read of [Env_config.Worker.local_worker_heartbeat_sec].

@@ -10,9 +10,6 @@ export type CompositeObservation = {
   decision: KeeperCompositeSnapshot['decision']['stage']
   runtime: KeeperCompositeSnapshot['runtime']['state']
   compaction: KeeperCompositeSnapshot['compaction']['stage']
-  // 6th axis (LT-16-KCB Phase 3). Unknown backend-ahead values are kept
-  // as raw strings; only a missing rollout-era key falls back to `clean`.
-  breaker: string
 }
 
 export type LaneKey = keyof Omit<CompositeObservation, 'ts'>
@@ -27,7 +24,6 @@ export function extractLaneValue(
     case 'decision': return snapshot.decision.stage
     case 'runtime': return snapshot.runtime.state
     case 'compaction': return snapshot.compaction.stage
-    case 'breaker': return snapshot.circuit_breaker?.state ?? 'clean'
   }
 }
 
@@ -141,7 +137,6 @@ export const TRANSITION_FIELDS: Array<{ field: string; key: LaneKey }> = [
   { field: 'KDP', key: 'decision' },
   { field: 'KCL', key: 'runtime' },
   { field: 'KMC', key: 'compaction' },
-  { field: 'KCB', key: 'breaker' },
 ]
 
 export const INVARIANT_LABELS: Record<keyof KeeperCompositeInvariants, string> = {
@@ -158,7 +153,6 @@ export const LANE_LABELS: Record<LaneKey, string> = {
   decision: '의사결정',
   runtime: '런타임',
   compaction: '컨텍스트 압축',
-  breaker: '서킷 브레이커',
 }
 
 /** Korean display names for raw FSM state values.
@@ -172,7 +166,6 @@ export const STATE_DISPLAY_NAMES: Record<string, string> = {
   // KDP
   undecided: '대기',
   guard_ok: '가드 통과',
-  gate_rejected: '게이트 거부',
   tool_policy_selected: '도구 목록 적용',
   // KCL + shared keys (idle, exhausted, compacting, done)
   idle: '대기',
@@ -183,17 +176,6 @@ export const STATE_DISPLAY_NAMES: Record<string, string> = {
   compacting: '압축 중',
   // KMC
   accumulating: '수집 중',
-  // KCB (LT-16-KCB Phase 3) — circuit breaker display states emitted by
-  // `Keeper_failure_circuit_breaker.display_state_to_string`
-  // (lib/keeper/keeper_failure_circuit_breaker.ml:438):
-  // clean | warning | cooling. The lane is consumed via
-  // `extractLaneValue` (line 30) and the per-keeper KCB badge added in
-  // #16365. Without these entries the Korean facade falls through to
-  // raw English so operators see `KCB clean` while every other axis
-  // renders Korean.
-  clean: '정상',
-  warning: '경고',
-  cooling: '냉각 중',
   // KSM
   running: '가동 중',
   failing: '오류 발생',
@@ -206,7 +188,6 @@ export const STATE_DISPLAY_NAMES: Record<string, string> = {
   crashed: '비정상 종료',
   restarting: '재시작 중',
   dead: '종료됨',
-  zombie: '좀비',
   Running: '가동 중',
   Overflowed: '컨텍스트 초과',
   Compacting: '압축 중',
@@ -219,7 +200,6 @@ export const STATE_DISPLAY_NAMES: Record<string, string> = {
   Draining: '종료 준비',
   Restarting: '재시작 중',
   Dead: '종료됨',
-  Zombie: '좀비',
 }
 
 /** Resolve display name: Korean label for UI, raw value preserved in tooltips. */
@@ -247,8 +227,6 @@ const FAILURE_REASON_BASE_LABELS = {
   stale_termination_storm: 'Stale 종료 폭주',
   stale_fleet_batch: 'Fleet stale 배치',
   provider_runtime_error: '런타임 호출 오류',
-  tool_route_recoverable_failure: '도구 라우팅 복구 가능 실패',
-  ambiguous_partial_commit: '부분 commit 모호',
   fiber_unresolved: 'Fiber 미해결',
   exception: '런타임 예외',
 } as const
@@ -412,12 +390,8 @@ const OPERATOR_DISPOSITION_REASON_LABELS: Record<string, string> = {
   transient_runtime_retry: '일시적 런타임 재시도',
   provider_runtime_error: '런타임 호출 오류',
   internal_error: '내부 오류',
-  tool_route_recoverable_failure: '도구 라우팅 복구 가능 실패',
-  completion_contract_unsatisfied: '완료 계약 미충족',
   input_required: '사용자 입력 대기',
-  passive_no_action: '수동 대기',
   turn_budget_exhausted: '턴 예산 소진',
-  turn_livelock_blocked: '턴 livelock 차단',
   cancelled: '취소됨',
   phase_skipped: 'phase 건너뜀',
   unmapped_runtime_state: '매핑되지 않은 runtime 상태',
@@ -460,8 +434,6 @@ export function runtimeOutcomeLabel(value: string | null | undefined): string | 
  *    maps Agent SDK Retry variants to `api_error_*` codes
  *    (`api_error_server:<http_status>` is parameterized).
  *  - `Keeper_agent_run` emits `"completed"` on Runtime_runner.Completed.
- *  - `keeper_execution_receipt.ml:492` recognises the
- *    `completion_contract_violation:<detail>` prefix.
  *  Kept separate from `STATE_DISPLAY_NAMES` because generic tokens like
  *  `completed` / `healthy` are also emitted by other axes (same isolation
  *  pattern as TOOL_CONTRACT_LABELS in #16374). Parameterized codes fall
@@ -474,7 +446,6 @@ const TERMINAL_REASON_CODE_LABELS: Record<string, string> = {
   stale_fleet_batch: 'Fleet stale 배치',
   heartbeat_failures: '하트비트 실패',
   turn_failures: '턴 실패 반복',
-  ambiguous_partial_commit: '부분 commit 모호',
   fiber_unresolved: 'Fiber 미해결',
   exception: '런타임 예외',
   // Keeper_agent_run completion
@@ -500,7 +471,6 @@ const TERMINAL_REASON_PREFIX_LABELS: ReadonlyArray<{
   readonly label: string
 }> = [
   { prefix: 'api_error_server:', label: 'API 서버 오류' },
-  { prefix: 'completion_contract_violation:', label: '완료 계약 위반' },
 ]
 
 export function terminalReasonCodeLabel(value: string | null | undefined): string | null {

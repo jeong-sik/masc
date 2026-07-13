@@ -2,8 +2,7 @@
 
     Append-only dated JSONL under [.masc/accountability]. This is separate from
     popularity signals such as board karma: it records keeper commitments and
-    explicit completion claims, then derives trust/risk summaries from
-    deterministic evidence. *)
+    explicit completion claims for observation. *)
 
 (* Types, codecs, and store access extracted to
    [Keeper_accountability_types_codec] (godfile decomp). *)
@@ -499,24 +498,6 @@ let record_completion_claim
                (supporting_refs_for_turn ~trace_id ~turn_number strong_evidence_refs))))
 ;;
 
-let risk_band_of_metrics
-      ~evidence_coverage
-      ~unsupported_completion_rate
-      ~open_overdue_commitments
-  =
-  if
-    evidence_coverage >= 0.80
-    && unsupported_completion_rate < 0.10
-    && open_overdue_commitments = 0
-  then "low"
-  else if
-    evidence_coverage >= 0.60
-    && unsupported_completion_rate < 0.25
-    && open_overdue_commitments <= 2
-  then "medium"
-  else "high"
-;;
-
 let summary_cutoff now = now -. (float_of_int summary_window_days *. Masc_time_constants.day)
 
 let summary_json_of_snapshots ~keeper_name ~agent_name ~now snapshots =
@@ -583,12 +564,6 @@ let summary_json_of_snapshots ~keeper_name ~agent_name ~now snapshots =
     else
       float_of_int !unsupported_completion_claims /. float_of_int !total_completion_claims
   in
-  let risk_band =
-    risk_band_of_metrics
-      ~evidence_coverage
-      ~unsupported_completion_rate
-      ~open_overdue_commitments:!open_overdue_commitments
-  in
   let history =
     snapshots
     |> List.sort (fun a b -> compare (created_at_unix b.claim) (created_at_unix a.claim))
@@ -620,12 +595,6 @@ let summary_json_of_snapshots ~keeper_name ~agent_name ~now snapshots =
            @ option_string_field "reason" resolution.reason
          | None -> []))
   in
-  let routing_hint =
-    match risk_band with
-    | "high" -> "manual_review_recommended"
-    | "medium" -> "prefer_low_risk_when_equivalent"
-    | _ -> "normal_routing"
-  in
   `Assoc
     [ "keeper_name", `String keeper_name
     ; "agent_name", `String agent_name
@@ -638,8 +607,6 @@ let summary_json_of_snapshots ~keeper_name ~agent_name ~now snapshots =
     ; "accountability_claim_count", `Int (List.length snapshots)
     ; "task_commitment_count", `Int !task_commitment_count
     ; "completion_claim_count", `Int !completion_claim_count
-    ; "risk_band", `String risk_band
-    ; "routing_hint", `String routing_hint
     ; "history", `List history
     ]
 ;;
@@ -664,21 +631,6 @@ let with_accountability_source ~source ~keeper_name ~coverage_gap json =
   | other -> other
 ;;
 
-let assoc_replace key value fields =
-  let replaced = ref false in
-  let mapped =
-    List.map
-      (fun (field_key, field_value) ->
-         if String.equal field_key key
-         then (
-           replaced := true;
-           field_key, value)
-         else field_key, field_value)
-      fields
-  in
-  if !replaced then mapped else mapped @ [ key, value ]
-;;
-
 let with_accountability_coverage ~coverage_gap ~decision_activity json =
   let coverage_health =
     if coverage_gap
@@ -686,9 +638,6 @@ let with_accountability_coverage ~coverage_gap ~decision_activity json =
     else if decision_activity.decision_signal_count = 0
     then "no_recent_activity"
     else "ok"
-  in
-  let coverage_routing_hint =
-    if coverage_gap then "accountability_coverage_gap_review" else "normal"
   in
   let coverage_fields =
     [ "coverage_health", `String coverage_health
@@ -700,18 +649,10 @@ let with_accountability_coverage ~coverage_gap ~decision_activity json =
     ; "decision_signal_count", `Int decision_activity.decision_signal_count
     ; ( "latest_decision_at", Json_util.string_opt_to_json decision_activity.latest_decision_at )
     ; ( "latest_decision_age_s", Json_util.float_opt_to_json decision_activity.latest_decision_age_s )
-    ; "coverage_routing_hint", `String coverage_routing_hint
     ]
   in
   match json with
-  | `Assoc fields ->
-    let fields =
-      if coverage_gap
-      then
-        assoc_replace "routing_hint" (`String "accountability_coverage_gap_review") fields
-      else fields
-    in
-    `Assoc (fields @ coverage_fields)
+  | `Assoc fields -> `Assoc (fields @ coverage_fields)
   | other -> other
 ;;
 
@@ -733,7 +674,7 @@ let accountability_snapshot_cache_mu = Eio.Mutex.create ()
    O(authors x window). The aggregation is a pure function of the window files,
    so memoizing it per base path collapses a render's per-author calls (and
    back-to-back renders) to a single build, at the cost of <= TTL staleness in
-   the accountability bands. The per-keeper decision activity below stays per
+   the accountability observations. The per-keeper decision activity below stays per
    call; it is per-keeper and cheap relative to the window scan. *)
 let accountability_snapshot_ttl_s = 3.0
 
@@ -822,15 +763,6 @@ let window_read_count_for_testing () =
   match !window_read_count_for_testing_ref with
   | Some count -> count
   | None -> 0
-;;
-
-let accountability_risk_is_high config ~keeper_name ~agent_name =
-  match accountability_summary_json config ~keeper_name ~agent_name with
-  | `Assoc fields ->
-    (match List.assoc_opt "risk_band" fields with
-     | Some (`String "high") -> true
-     | _ -> false)
-  | _ -> false
 ;;
 
 (* --- Attribution envelope conversion (Layer 1) ---

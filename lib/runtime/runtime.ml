@@ -1310,51 +1310,6 @@ let config_path () : string option =
   | Invalid_env | Missing -> None
 ;;
 
-let pause_threshold () =
-  let runtime_config_path =
-    match (runtime_state ()).config_path with
-    | Some path -> Some path
-    | None -> config_path ()
-  in
-  match runtime_config_path with
-  | None -> Runtime_schema.pause_threshold_default
-  | Some config_path ->
-    (match Runtime_toml.parse_file config_path with
-     | Ok cfg -> cfg.pause_threshold
-     | Error errs ->
-       Log.Runtime.warn
-         "runtime: failed to parse [pause] thresholds from %s (%d error(s)); \
-          using defaults"
-         config_path
-         (List.length errs);
-       Runtime_schema.pause_threshold_default)
-;;
-
-(* RFC-0313 W3. Same lookup shape as [pause_threshold] above. A config file
-   that fails to parse falls back to [pacing_default] (mode = enforce); the
-   fail-closed [pacing.mode] parse already rejected the file at boot via
-   [Runtime_toml.parse_file], so this fallback only covers a file that is
-   unreadable wholesale. *)
-let pacing () =
-  let runtime_config_path =
-    match (runtime_state ()).config_path with
-    | Some path -> Some path
-    | None -> config_path ()
-  in
-  match runtime_config_path with
-  | None -> Runtime_schema.pacing_default
-  | Some config_path ->
-    (match Runtime_toml.parse_file config_path with
-     | Ok cfg -> cfg.pacing
-     | Error errs ->
-       Log.Runtime.warn
-         "runtime: failed to parse [pacing] from %s (%d error(s)); using \
-          defaults"
-         config_path
-         (List.length errs);
-       Runtime_schema.pacing_default)
-;;
-
 let runtime_config_path_result ?runtime_config_path () =
   match runtime_config_path with
   | Some path -> Ok path

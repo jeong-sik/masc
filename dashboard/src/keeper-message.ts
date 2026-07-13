@@ -79,8 +79,6 @@ export function normalizeKeeperConversationDetails(raw: unknown): KeeperConversa
     latencyMs: asNumber(payload.latency_ms) ?? null,
     costUsd: asNumber(payload.cost_usd) ?? usage?.costUsd ?? null,
     usage,
-    skillPrimary: asString(payload.skill_primary) ?? null,
-    skillReason: asString(payload.skill_reason) ?? null,
     replyText: reply || null,
     turnOutcome: normalizeKeeperTurnOutcome(payload.turn_outcome),
     rawPayload: payload,

@@ -38,8 +38,8 @@ type board_stimulus = {
 
 type stimulus_payload =
   | Board_signal of board_stimulus
+  | Board_attention of board_attention
   | Bootstrap
-  | No_progress_recovery
   | Fusion_completed of fusion_completion
       (* RFC-0266: an async [masc_fusion] deliberation finished. Wakes the
          calling keeper so the resolved answer arrives as actionable turn
@@ -67,17 +67,12 @@ type stimulus_payload =
          resolver directly and do not emit this duplicate wake. Mirrors
          [Fusion_completed]/[Bg_completed]: a HITL decision is an async
          completion the waiting keeper must be notified of. *)
-  | Goal_verification_failed of goal_verification_failure
-      (* A goal completion verification was rejected for a goal assigned to this
-         keeper. Wakes the keeper lane so it resumes the goal after the phase
-         returns to [executing], instead of discovering the rejection only via
-         unrelated board/task activity. *)
   | Failure_judgment of failure_judgment
       (* RFC-0313 W2: a turn failure routed [Escalate_judgment] — a
          deterministic failure class where mechanical retry/rotation cannot
          change the outcome. Surfaces on the keeper's next turn as prompt
          input for an LLM-boundary verdict. Follows the
-         [Fusion_completed]/[Goal_verification_failed] precedent: no
+         [Fusion_completed] precedent: no
          dedicated turn_reason, so scheduling cooldowns are unchanged and
          the stable per-(runtime, class) post_id lets queue identity dedup
          collapse repeats. *)
@@ -87,19 +82,13 @@ type stimulus_payload =
          the assignment edge so the new standing objective arrives as
          actionable turn input — before this, an assigned goal was
          discovered only if some unrelated stimulus happened to fire.
-         Follows the [Goal_verification_failed] precedent: no dedicated
+         Uses the same no-dedicated-reason pattern as async completions:
          turn_reason; the injected pending observation drives the turn. *)
-  | Goal_stagnation of goal_stagnation
-      (* RFC-0310 §3.3: a live (non-terminal) goal has not been touched for
-         longer than the stagnation threshold. Wakes the responsible keeper
-         ONCE per stale episode so it can resume the goal or hand off a
-         progress note. This is an EDGE, not a blind clock: the episode key
-         is (goal_id, stale_since=goal.updated_at), so a goal that is
-         advanced (updated_at bumps) starts a fresh episode, and one that
-         stays stale never re-wakes within the same episode (the producer
-         gates on the reaction ledger having already delivered it). Follows
-         the [Goal_assigned] precedent: no dedicated turn_reason; the
-         injected pending observation drives the turn. *)
+
+and board_attention = {
+  candidate_id : string;
+  signal : board_stimulus;
+}
 
 and fusion_completion = {
   run_id : string;
@@ -127,16 +116,10 @@ and bg_job_kind = Subprocess
       (* RFC-0290: closed sum of background job kinds (v1 = [Subprocess]); a new
          kind forces every match to add an arm rather than defaulting. *)
 
-and hitl_approved_action = {
-  keeper_name : string;
-  tool_name : string;
-  input_hash : string;
-}
-
 and hitl_resolution_decision =
-  | Hitl_approved of hitl_approved_action
-  | Hitl_rejected
-  | Hitl_edited
+  | Hitl_approved
+  | Hitl_rejected of string
+  | Hitl_edited of Yojson.Safe.t
 
 and hitl_resolution = {
   approval_id : string;
@@ -171,18 +154,6 @@ and scheduled_wake = {
   message : string;
 }
 
-and goal_verification_failure = {
-  goal_id : string;
-  request_id : string;
-  goal_title : string;
-  phase : string;
-  metric : string option;
-  target_value : string option;
-  rejected_by : string;
-  note : string option;
-  evidence_refs : string list;
-}
-
 and failure_judgment = {
   fj_runtime_id : string;
   fj_judgment : Keeper_runtime_failure_route.judgment_class;
@@ -203,18 +174,6 @@ and goal_assignment = {
      repeat assignments of the same goal dedup regardless of actor. *)
 }
 
-and goal_stagnation = {
-  gs_goal_id : string;
-  gs_stale_since : string;
-  (* goal.updated_at at detection: the episode key. Part of queue identity
-     so each stale episode is distinct — advancing the goal bumps updated_at
-     and starts a new episode; a goal that stays stale keeps the same key so
-     the identity dedup and the reaction-ledger gate fire it only once. *)
-  gs_goal_title : string;
-  (* display-only title resolved from Goal_store at detection time. Stripped
-     from queue identity so the label does not affect episode dedup. *)
-}
-
 let fusion_completion_post_id (fc : fusion_completion) =
   if String.equal fc.board_post_id "" then "fusion-run:" ^ fc.run_id
   else fc.board_post_id
@@ -226,9 +185,6 @@ let bg_job_completion_post_id (c : bg_job_completion) =
 let schedule_due_post_id (sw : scheduled_wake) = "schedule-due:" ^ sw.schedule_id
 
 let hitl_resolution_post_id (r : hitl_resolution) = "hitl-approval:" ^ r.approval_id
-
-let goal_verification_failure_post_id (failure : goal_verification_failure) =
-  "goal-verification-failed:" ^ failure.goal_id ^ ":" ^ failure.request_id
 
 let failure_judgment_post_id (fj : failure_judgment) =
   (* Stable per (runtime, class, typed boundary) so repeats from the same
@@ -244,21 +200,10 @@ let goal_assignment_post_id (ga : goal_assignment) =
      the first wake collapses under queue identity dedup. *)
   "goal-assigned:" ^ ga.ga_goal_id
 
-let goal_stagnation_post_id (gs : goal_stagnation) =
-  (* Stable per (goal, stale episode): repeated scans of the same untouched
-     goal collapse under queue identity dedup; a goal advanced then gone
-     stale again carries a new [gs_stale_since] and so a new post_id. *)
-  "goal-stagnation:" ^ gs.gs_goal_id ^ ":" ^ gs.gs_stale_since
-
 let hitl_resolution_decision_to_string = function
-  | Hitl_approved _ -> "approve"
-  | Hitl_rejected -> "reject"
-  | Hitl_edited -> "edit"
-
-let hitl_nonapproved_resolution_decision_of_string = function
-  | "reject" -> Ok Hitl_rejected
-  | "edit" -> Ok Hitl_edited
-  | other -> Error (Printf.sprintf "unknown hitl_resolution decision: %s" other)
+  | Hitl_approved -> "approve"
+  | Hitl_rejected _ -> "reject"
+  | Hitl_edited _ -> "edit"
 
 let bg_job_kind_to_string = function
   | Subprocess -> "subprocess"
@@ -299,10 +244,9 @@ let identity_payload = function
   | Failure_judgment fj -> Failure_judgment { fj with fj_detail = "" }
   | Goal_assigned ga ->
     Goal_assigned { ga with ga_goal_title = ""; ga_assigned_by = "" }
-  | Goal_stagnation gs -> Goal_stagnation { gs with gs_goal_title = "" }
-  | ( Board_signal _ | Bootstrap | No_progress_recovery | Fusion_completed _
+  | ( Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
     | Bg_completed _ | Schedule_due _ | Connector_attention _ | Hitl_resolved _
-    | Goal_verification_failed _ ) as payload ->
+    ) as payload ->
     payload
 
 let failure_judgment_identity_equal left right =
@@ -396,24 +340,21 @@ let sort_by_urgency (queue : t) : t =
 
 let payload_kind_label = function
   | Board_signal _ -> "board_signal"
+  | Board_attention _ -> "board_attention"
   | Bootstrap -> "bootstrap"
-  | No_progress_recovery -> "no_progress_recovery"
   | Fusion_completed _ -> "fusion_completed"
   | Bg_completed _ -> "bg_completed"
   | Schedule_due _ -> "schedule_due"
   | Connector_attention _ -> "connector_attention"
   | Hitl_resolved _ -> "hitl_resolved"
-  | Goal_verification_failed _ -> "goal_verification_failed"
   | Failure_judgment _ -> "failure_judgment"
   | Goal_assigned _ -> "goal_assigned"
-  | Goal_stagnation _ -> "goal_stagnation"
 
 let is_board_signal = function
-  | Board_signal _ -> true
-  | Bootstrap | No_progress_recovery | Fusion_completed _ | Bg_completed _
+  | Board_signal _ | Board_attention _ -> true
+  | Bootstrap | Fusion_completed _ | Bg_completed _
   | Schedule_due _ | Connector_attention _ | Hitl_resolved _
-  | Goal_verification_failed _ | Failure_judgment _ | Goal_assigned _
-  | Goal_stagnation _ ->
+  | Failure_judgment _ | Goal_assigned _ ->
     false
 
 let drain_board_all (queue : t) : stimulus list * t =
@@ -472,6 +413,19 @@ let board_reaction_change_fields (reaction : board_reaction_change) =
   ; "reaction_emoji", `String reaction.emoji
   ; "reaction_active", `Bool reaction.reacted
   ]
+
+let board_stimulus_fields board =
+  [ "board_kind", `String (board_stimulus_kind_to_string board.kind)
+  ; "author", `String board.author
+  ; "title", `String board.title
+  ; "content", `String board.content
+  ; "hearth", option_json (fun value -> `String value) board.hearth
+  ; "updated_at_unix", option_json (fun value -> `Float value) board.updated_at
+  ]
+  @
+  match board.kind with
+  | Post_created | Comment_added -> []
+  | Reaction_changed reaction -> board_reaction_change_fields reaction
 
 let assoc_fields ~context = function
   | `Assoc fields -> Ok fields
@@ -542,20 +496,14 @@ let float_field ~context name fields =
 let payload_to_yojson = function
   | Board_signal board ->
     `Assoc
-      ([ "kind", `String "board_signal"
-       ; "board_kind", `String (board_stimulus_kind_to_string board.kind)
-       ; "author", `String board.author
-       ; "title", `String board.title
-       ; "content", `String board.content
-       ; "hearth", option_json (fun value -> `String value) board.hearth
-       ; "updated_at_unix", option_json (fun value -> `Float value) board.updated_at
+      ([ "kind", `String "board_signal" ] @ board_stimulus_fields board)
+  | Board_attention attention ->
+    `Assoc
+      ([ "kind", `String "board_attention"
+       ; "candidate_id", `String attention.candidate_id
        ]
-       @
-       (match board.kind with
-       | Post_created | Comment_added -> []
-       | Reaction_changed reaction -> board_reaction_change_fields reaction))
+       @ board_stimulus_fields attention.signal)
   | Bootstrap -> `Assoc [ "kind", `String "bootstrap" ]
-  | No_progress_recovery -> `Assoc [ "kind", `String "no_progress_recovery" ]
   | Fusion_completed fusion ->
     `Assoc
       [ "kind", `String "fusion_completed"
@@ -593,36 +541,17 @@ let payload_to_yojson = function
       ; "channel", Keeper_continuation_channel.to_yojson ca.channel
       ]
   | Hitl_resolved r ->
-    let approved_action =
-      match r.decision with
-      | Hitl_approved action ->
-        `Assoc
-          [ "keeper_name", `String action.keeper_name
-          ; "tool_name", `String action.tool_name
-          ; "input_hash", `String action.input_hash
-          ]
-      | Hitl_rejected | Hitl_edited -> `Null
-    in
     `Assoc
-      [ "kind", `String "hitl_resolved"
-      ; "approval_id", `String r.approval_id
-      ; "decision", `String (hitl_resolution_decision_to_string r.decision)
-      ; "approved_action", approved_action
-      ; "channel", Keeper_continuation_channel.to_yojson r.channel
-      ]
-  | Goal_verification_failed failure ->
-    `Assoc
-      [ "kind", `String "goal_verification_failed"
-      ; "goal_id", `String failure.goal_id
-      ; "request_id", `String failure.request_id
-      ; "goal_title", `String failure.goal_title
-      ; "phase", `String failure.phase
-      ; "metric", option_json (fun value -> `String value) failure.metric
-      ; "target_value", option_json (fun value -> `String value) failure.target_value
-      ; "rejected_by", `String failure.rejected_by
-      ; "note", option_json (fun value -> `String value) failure.note
-      ; "evidence_refs", `List (List.map (fun value -> `String value) failure.evidence_refs)
-      ]
+      ([ "kind", `String "hitl_resolved"
+       ; "approval_id", `String r.approval_id
+       ; "decision", `String (hitl_resolution_decision_to_string r.decision)
+       ; "channel", Keeper_continuation_channel.to_yojson r.channel
+       ]
+       @
+       match r.decision with
+       | Hitl_approved -> []
+       | Hitl_rejected rationale -> [ "rationale", `String rationale ]
+       | Hitl_edited input -> [ "edited_input", input ])
   | Failure_judgment fj ->
     `Assoc
       [ "kind", `String "failure_judgment"
@@ -640,13 +569,6 @@ let payload_to_yojson = function
       ; "goal_title", `String ga.ga_goal_title
       ; "assigned_by", `String ga.ga_assigned_by
       ]
-  | Goal_stagnation gs ->
-    `Assoc
-      [ "kind", `String "goal_stagnation"
-      ; "goal_id", `String gs.gs_goal_id
-      ; "stale_since", `String gs.gs_stale_since
-      ; "goal_title", `String gs.gs_goal_title
-      ]
 
 let continuation_channel_field fields =
   match List.assoc_opt "channel" fields with
@@ -660,8 +582,7 @@ let payload_of_yojson json =
   let context = "stimulus.payload" in
   let* fields = assoc_fields ~context json in
   let* kind = string_field ~context "kind" fields in
-  match kind with
-  | "board_signal" ->
+  let parse_board_stimulus () =
     let* board_kind = string_field ~context "board_kind" fields in
     let* kind =
       match board_kind with
@@ -680,9 +601,20 @@ let payload_of_yojson json =
     let* content = string_field ~context "content" fields in
     let* hearth = optional_string_field ~context "hearth" fields in
     let* updated_at = optional_float_field ~context "updated_at_unix" fields in
-    Ok (Board_signal { kind; author; title; content; hearth; updated_at })
+    Ok { kind; author; title; content; hearth; updated_at }
+  in
+  match kind with
+  | "board_signal" ->
+    let* signal = parse_board_stimulus () in
+    Ok (Board_signal signal)
+  | "board_attention" ->
+    let* candidate_id = string_field ~context "candidate_id" fields in
+    if String.equal candidate_id ""
+    then Error "stimulus.payload.candidate_id must not be empty"
+    else
+      let* signal = parse_board_stimulus () in
+      Ok (Board_attention { candidate_id; signal })
   | "bootstrap" -> Ok Bootstrap
-  | "no_progress_recovery" -> Ok No_progress_recovery
   | "fusion_completed" ->
     let* run_id = string_field ~context "run_id" fields in
     let* ok = bool_field ~context "ok" fields in
@@ -722,45 +654,17 @@ let payload_of_yojson json =
     let* decision_s = string_field ~context "decision" fields in
     let* decision =
       match decision_s with
-      | "approve" ->
-        let* action_json = required_field ~context "approved_action" fields in
-        let* action_fields = assoc_fields ~context:(context ^ ".approved_action") action_json in
-        let* keeper_name =
-          string_field ~context:(context ^ ".approved_action") "keeper_name" action_fields
-        in
-        let* tool_name =
-          string_field ~context:(context ^ ".approved_action") "tool_name" action_fields
-        in
-        let* input_hash =
-          string_field ~context:(context ^ ".approved_action") "input_hash" action_fields
-        in
-        Ok (Hitl_approved { keeper_name; tool_name; input_hash })
-      | other -> hitl_nonapproved_resolution_decision_of_string other
+      | "approve" -> Ok Hitl_approved
+      | "reject" ->
+        let* rationale = string_field ~context "rationale" fields in
+        Ok (Hitl_rejected rationale)
+      | "edit" ->
+        let* input = required_field ~context "edited_input" fields in
+        Ok (Hitl_edited input)
+      | other -> Error (Printf.sprintf "unknown hitl_resolution decision: %s" other)
     in
     let* channel = continuation_channel_field fields in
     Ok (Hitl_resolved { approval_id; decision; channel })
-  | "goal_verification_failed" ->
-    let* goal_id = string_field ~context "goal_id" fields in
-    let* request_id = string_field ~context "request_id" fields in
-    let* goal_title = string_field ~context "goal_title" fields in
-    let* phase = string_field ~context "phase" fields in
-    let* metric = optional_string_field ~context "metric" fields in
-    let* target_value = optional_string_field ~context "target_value" fields in
-    let* rejected_by = string_field ~context "rejected_by" fields in
-    let* note = optional_string_field ~context "note" fields in
-    let* evidence_refs = string_list_field ~context "evidence_refs" fields in
-    Ok
-      (Goal_verification_failed
-         { goal_id
-         ; request_id
-         ; goal_title
-         ; phase
-         ; metric
-         ; target_value
-         ; rejected_by
-         ; note
-         ; evidence_refs
-         })
   | "failure_judgment" ->
     let* runtime_id = string_field ~context "runtime_id" fields in
     let* judgment_label = string_field ~context "judgment_class" fields in
@@ -796,16 +700,6 @@ let payload_of_yojson json =
          { ga_goal_id = goal_id
          ; ga_goal_title = goal_title
          ; ga_assigned_by = assigned_by
-         })
-  | "goal_stagnation" ->
-    let* goal_id = string_field ~context "goal_id" fields in
-    let* stale_since = string_field ~context "stale_since" fields in
-    let* goal_title = string_field ~context "goal_title" fields in
-    Ok
-      (Goal_stagnation
-         { gs_goal_id = goal_id
-         ; gs_stale_since = stale_since
-         ; gs_goal_title = goal_title
          })
   | value -> Error (Printf.sprintf "unknown stimulus payload kind: %s" value)
 

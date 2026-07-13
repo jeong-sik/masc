@@ -28,14 +28,14 @@ let test_custom_max_bytes_respected () =
 
 let test_format_parse_failure_includes_label () =
   let raw = "garbage that is not json" in
-  let out = Judge_diagnostics.format_lenient_fallback ~judge_label:"Governance" raw in
+  let out = Judge_diagnostics.format_lenient_fallback ~judge_label:"Gate" raw in
   let contains needle =
     try
       let re = Re.Pcre.re (Re.Pcre.quote needle) |> Re.compile in
       ignore (Re.exec re out); true
     with Not_found -> false
   in
-  check bool "names judge label" true (contains "Governance judge");
+  check bool "names judge label" true (contains "Gate judge");
   check bool "names byte size" true (contains "24 chars");
   check bool "embeds raw preview" true (contains raw);
   check bool "names parse failure class" true (contains "parse failure")
@@ -54,7 +54,7 @@ let test_format_lenient_fallback_truncates_huge_raw () =
 let test_format_unparseable_response_includes_reason () =
   let raw = "{\"items\":[{\"guardrail_state\":null}]}" in
   let out =
-    Judge_diagnostics.format_unparseable_response ~judge_label:"Governance"
+    Judge_diagnostics.format_unparseable_response ~judge_label:"Gate"
       ~reason:"item agent_health:k1 missing guardrail_state"
       raw
   in
@@ -73,60 +73,60 @@ let test_format_unparseable_response_includes_reason () =
 
 let test_record_lenient_fallback_increments_metrics () =
   let raw = "not-json" in
-  let labels = [("judge", "governance")] in
+  let labels = [("judge", "gate")] in
   let unparseable_before =
     Otel_metric_store.metric_value_or_zero
-      Otel_metric_store.metric_governance_judge_unparseable
+      Otel_metric_store.metric_structured_judge_unparseable
       ~labels
       ()
   in
   let fallback_before =
     Otel_metric_store.metric_value_or_zero
-      Otel_metric_store.metric_governance_lenient_json_fallback_hit
+      Otel_metric_store.metric_structured_judge_lenient_json_fallback_hit
       ~labels
       ()
   in
   let out =
     Judge_diagnostics.record_lenient_fallback
-      ~judge_label:"Governance"
+      ~judge_label:"Gate"
       raw
   in
   check bool "returns formatted diagnostic" true
     (try
-       let re = Re.Pcre.re "Governance judge returned unparseable" |> Re.compile in
+       let re = Re.Pcre.re "Gate judge returned unparseable" |> Re.compile in
        ignore (Re.exec re out); true
      with Not_found -> false);
   check (float 0.0001) "unparseable counter increments"
     (unparseable_before +. 1.0)
     (Otel_metric_store.metric_value_or_zero
-       Otel_metric_store.metric_governance_judge_unparseable
+       Otel_metric_store.metric_structured_judge_unparseable
        ~labels
        ());
   check (float 0.0001) "fallback counter increments"
     (fallback_before +. 1.0)
     (Otel_metric_store.metric_value_or_zero
-       Otel_metric_store.metric_governance_lenient_json_fallback_hit
+       Otel_metric_store.metric_structured_judge_lenient_json_fallback_hit
        ~labels
        ())
 
 let test_record_unparseable_response_increments_unparseable_only () =
   let raw = "{\"items\":[{\"guardrail_state\":null}]}" in
-  let labels = [("judge", "governance")] in
+  let labels = [("judge", "gate")] in
   let unparseable_before =
     Otel_metric_store.metric_value_or_zero
-      Otel_metric_store.metric_governance_judge_unparseable
+      Otel_metric_store.metric_structured_judge_unparseable
       ~labels
       ()
   in
   let fallback_before =
     Otel_metric_store.metric_value_or_zero
-      Otel_metric_store.metric_governance_lenient_json_fallback_hit
+      Otel_metric_store.metric_structured_judge_lenient_json_fallback_hit
       ~labels
       ()
   in
   let out =
     Judge_diagnostics.record_unparseable_response
-      ~judge_label:"Governance"
+      ~judge_label:"Gate"
       ~reason:"item agent_health:k1 missing guardrail_state"
       raw
   in
@@ -138,50 +138,50 @@ let test_record_unparseable_response_increments_unparseable_only () =
   check (float 0.0001) "unparseable counter increments"
     (unparseable_before +. 1.0)
     (Otel_metric_store.metric_value_or_zero
-       Otel_metric_store.metric_governance_judge_unparseable
+       Otel_metric_store.metric_structured_judge_unparseable
        ~labels
        ());
   check (float 0.0001) "lenient fallback counter unchanged"
     fallback_before
     (Otel_metric_store.metric_value_or_zero
-       Otel_metric_store.metric_governance_lenient_json_fallback_hit
+       Otel_metric_store.metric_structured_judge_lenient_json_fallback_hit
        ~labels
        ())
 
 let test_lenient_fallback_metrics_json_reads_counters () =
   let raw = "still-not-json" in
-  let labels = [("judge", "governance")] in
+  let labels = [("judge", "gate")] in
   let before_unparseable =
     int_of_float
       (Otel_metric_store.metric_value_or_zero
-         Otel_metric_store.metric_governance_judge_unparseable
+         Otel_metric_store.metric_structured_judge_unparseable
          ~labels
          ())
   in
   let before_fallback =
     int_of_float
       (Otel_metric_store.metric_value_or_zero
-         Otel_metric_store.metric_governance_lenient_json_fallback_hit
+         Otel_metric_store.metric_structured_judge_lenient_json_fallback_hit
          ~labels
          ())
   in
   ignore
     (Judge_diagnostics.record_lenient_fallback
-       ~judge_label:"Governance"
+       ~judge_label:"Gate"
        raw);
   let json =
     Judge_diagnostics.lenient_fallback_metrics_json
-      ~judge_label:"Governance"
+      ~judge_label:"Gate"
   in
   let open Yojson.Safe.Util in
-  check string "judge label" "governance"
+  check string "judge label" "gate"
     (json |> member "judge" |> to_string);
   check int "unparseable total"
     (before_unparseable + 1)
-    (json |> member "governance_judge_unparseable_total" |> to_int);
+    (json |> member "structured_judge_unparseable_total" |> to_int);
   check int "fallback total"
     (before_fallback + 1)
-    (json |> member "governance_lenient_json_fallback_hit_total" |> to_int)
+    (json |> member "structured_judge_lenient_json_fallback_hit_total" |> to_int)
 
 let () =
   run "judge_diagnostics (#9774)"

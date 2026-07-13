@@ -1,15 +1,12 @@
-// Supervisor diagnostics panel — health score, restart budget,
-// crash cohort bar, self-protection events.
+// Supervisor diagnostics panel — raw restart and crash observations.
 // Extracted from keeper-detail.ts to reduce file size.
 
 import { html } from 'htm/preact'
 import { formatPct, formatPct1 } from '../lib/format-number'
 import { signal } from '@preact/signals'
-import { formatTimeAgo, SECONDS_PER_MINUTE, SECONDS_PER_HOUR } from '../lib/format-time'
-import { MISSING_DATA_DASH } from '../lib/format-string'
+import { formatTimeAgo } from '../lib/format-time'
 import { FilterChips } from './common/filter-chips'
 import { PanelCard } from './common/panel-card'
-import { ProgressBar } from './common/progress-bar'
 import { failureReasonLabel } from './fsm-hub-types'
 import {
   groupCrashCohorts,
@@ -81,31 +78,6 @@ function CrashCohortBar({ crash_log }: { crash_log: KeeperSupervisorCrashLogEntr
   `
 }
 
-interface SpEventLike {
-  ts?: number
-  suppressed_count?: number
-  total?: number
-  dominant_cohort?: string
-}
-
-function SpEventsPanel({ sp_events }: { sp_events?: unknown[] }) {
-  if (!sp_events || sp_events.length === 0) return null
-  const entries = sp_events.slice(0, 10) as SpEventLike[]
-  return html`
-    <div class="v2-monitoring-panel">
-      <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)] mb-2">자기 보호 발동 이력</div>
-      <div class="space-y-1 max-h-28 overflow-y-auto v2-monitoring-row">
-        ${entries.map((e) => html`
-          <div class="flex items-center justify-between py-1 px-2 rounded-[var(--r-1)] text-2xs bg-[var(--purple-12)] v2-monitoring-row">
-            <span class="font-mono text-[var(--color-fg-muted)]">${formatTimeAgo(e.ts ?? 0)}</span>
-            <span class="text-[var(--stalled-fg)]">${e.suppressed_count ?? 0}/${e.total ?? 0} 억제 (${e.dominant_cohort ?? MISSING_DATA_DASH})</span>
-          </div>
-        `)}
-      </div>
-    </div>
-  `
-}
-
 // ── Main Panel ──────────────────────────────────────────
 
 export function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
@@ -113,42 +85,21 @@ export function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
   if (!diag) return null
   const {
     restart_count = 0,
-    max_restarts = 0,
     crash_log,
     last_failure_reason,
     dead_since,
-    sp_events,
-    health_score,
-    dead_eta_sec,
   } = diag
-  const budgetPct = max_restarts > 0 ? Math.min(100, (restart_count / max_restarts) * 100) : 0
-  const budgetFillClass = budgetPct >= 80 ? 'bg-[var(--color-status-err)]' : budgetPct >= 50 ? 'bg-[var(--amber-bright)]' : 'bg-[var(--color-status-ok)]'
-  const hs = typeof health_score === 'number' ? health_score : 100
-  const hsColor = hs >= 80 ? 'var(--color-status-ok)' : hs >= 50 ? 'var(--amber-bright)' : 'var(--color-status-err)'
   return html`
     <${PanelCard} title="감독 진단">
       <div class="space-y-3 v2-monitoring-panel">
         <div class="flex items-center justify-between v2-monitoring-row">
-          <${MutedLabel}>건강도</${MutedLabel}>
-          <span class="text-sm font-bold font-mono" style="color: ${hsColor}">${hs}</span>
-        </div>
-        <div class="flex items-center justify-between v2-monitoring-row">
           <${MutedLabel}>실행 상태</${MutedLabel}>
           ${registryStateBadge(keeper.registry_state ?? null)}
         </div>
-        <div class="v2-monitoring-row">
-          <div class="flex items-center justify-between mb-1">
-            <${MutedLabel}>재시작 예산</${MutedLabel}>
-            <span class="text-xs font-mono text-[var(--color-fg-primary)]">${restart_count}/${max_restarts}</span>
-          </div>
-          <${ProgressBar} pct=${budgetPct} size="sm" class=${budgetFillClass} />
+        <div class="flex items-center justify-between v2-monitoring-row">
+          <${MutedLabel}>재시작 관측</${MutedLabel}>
+          <span class="text-xs font-mono text-[var(--color-fg-primary)]">${restart_count}</span>
         </div>
-        ${typeof dead_eta_sec === 'number' && dead_eta_sec > 0 && dead_since == null ? html`
-          <div class="flex items-center justify-between v2-monitoring-row">
-            <${MutedLabel}>종료 예상</${MutedLabel}>
-            <span class="text-2xs font-mono" style="color: ${budgetPct >= 50 ? 'var(--amber-bright)' : 'var(--color-fg-primary)'}">${dead_eta_sec >= SECONDS_PER_HOUR ? (dead_eta_sec / SECONDS_PER_HOUR).toFixed(1) + 'h' : (dead_eta_sec / SECONDS_PER_MINUTE).toFixed(0) + 'm'} 후</span>
-          </div>
-        ` : null}
         ${last_failure_reason ? html`
           <div class="flex items-center justify-between v2-monitoring-row">
             <${MutedLabel}>마지막 실패 원인</${MutedLabel}>
@@ -157,7 +108,7 @@ export function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
         ` : null}
         ${dead_since ? html`
           <div class="py-2 px-3 rounded-[var(--r-1)] bg-[var(--bad-6)] border border-[var(--bad-soft)] text-xs text-[var(--rose-light)] v2-monitoring-panel">
-            ${formatTimeAgo(dead_since)} 이후 중단됨. 재기동 필요.
+            ${formatTimeAgo(dead_since)} 이후 Dead tombstone 유지 중.
           </div>
         ` : null}
         <div class="v2-monitoring-row"><${CrashCohortBar} crash_log=${crash_log} /></div>
@@ -206,7 +157,6 @@ export function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
             </div>
           `
         })() : null}
-        <${SpEventsPanel} sp_events=${sp_events} />
       </div>
     <//>
   `

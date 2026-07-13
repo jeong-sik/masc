@@ -31,7 +31,6 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
     classify_usage_trust
       ~usage_reported:result.usage_reported
       ~usage:result.usage
-      ~context_max
   in
   (* #9953: record context_max_bucket on the neutral runtime lane so
      dashboards can directly count drift without preserving provider/model
@@ -69,9 +68,7 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
         @ usage_trust_json_fields usage_trust)
   in
   let cost_json =
-    if result.usage_reported && usage_trust_is_trusted usage_trust then
-      `Float turn_cost
-    else `Null
+    if result.usage_reported then `Float turn_cost else `Null
   in
   (* #9943: per-keeper turn-latency bucket counter + WARN if the
      turn crossed the long-turn threshold (default 600s, env-

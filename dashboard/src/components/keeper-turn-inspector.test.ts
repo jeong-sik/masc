@@ -68,8 +68,6 @@ function toolCallsForTurn(): ToolCallsResponse {
         input: { post_id: 'p-1' },
         output: 'ok',
         success: true,
-        semantic_success: true,
-        semantic_outcome: 'success',
         duration_ms: 54,
         trace_id: 'trace-active',
         session_id: 'trace-active',
@@ -102,7 +100,6 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
       now_iso: '2026-06-16T02:00:00Z',
       read_errors: [],
       episodes: {
-        tail_limit: 12,
         shown: 2,
         current: 1,
         expired: 1,
@@ -137,52 +134,11 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
         ],
       },
       facts: {
-        tail_limit: 256,
         shown: 9,
         current: 8,
         expired: 1,
         items: [],
       },
-    },
-    user_model: {
-      schema: 'keeper.user_model.dashboard.v1',
-      keeper: 'albini',
-      source: 'memory_os_facts',
-      producer: 'keeper_user_model',
-      facts_store: '.masc/config/keepers/albini.facts.jsonl',
-      shared_facts_store: '.masc/config/keepers/_shared.facts.jsonl',
-      enabled: true,
-      now: 1_781_587_600,
-      now_iso: '2026-06-16T02:00:00Z',
-      read_errors: [],
-      source_fact_count: 6,
-      shared_fact_count: 2,
-      preferences: [
-        {
-          claim: 'User prefers concise answers',
-          category: 'preference',
-          source: 'keeper',
-          observed_by: [],
-          turn: 10,
-          first_seen: 1_781_580_000,
-          first_seen_iso: '2026-06-15T23:53:20Z',
-          last_verified_at: 1_781_587_000,
-          last_verified_at_iso: '2026-06-16T01:50:00Z',
-        },
-      ],
-      constraints: [
-        {
-          claim: 'Let CI be the authority for full builds',
-          category: 'constraint',
-          source: 'shared',
-          observed_by: ['qa-king', 'verifier'],
-          turn: 14,
-          first_seen: 1_781_581_000,
-          first_seen_iso: '2026-06-16T00:10:00Z',
-          last_verified_at: 1_781_587_100,
-          last_verified_at_iso: '2026-06-16T01:51:40Z',
-        },
-      ],
     },
     entries: [
       {
@@ -215,14 +171,12 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
           ttfrc_ms: 567.8,
           blocks: [
             { block: 'system', bytes: 1200, digest: '1111222233334444' },
-            { block: 'user_model', bytes: 728, digest: '99887766554433221100' },
             { block: 'memory_os_recall', bytes: 3392, digest: 'aabbccddeeff00112233' },
           ],
           execution_ids: ['exec-42'],
         },
         diff_vs_prev: {
           added: [
-            { block: 'user_model', bytes: 728, digest: '99887766554433221100' },
             { block: 'memory_os_recall', bytes: 3392, digest: 'aabbccddeeff00112233' },
           ],
           removed: [],
@@ -283,30 +237,6 @@ describe('KeeperMemoryOsRecallPanel', () => {
     expect(text).toContain('episodes: .masc/config/keepers/albini/episodes')
   })
 
-  it('surfaces user-model preferences and constraints from turn records', async () => {
-    fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
-
-    const { container } = render(html`<${KeeperTurnInspector} keeperName="albini" />`)
-
-    await waitFor(() => {
-      expect(container.querySelector('[data-testid="user-model-source"]')).toBeTruthy()
-    })
-
-    const text = container.textContent ?? ''
-    expect(text).toContain('User model')
-    expect(text).toContain('enabled')
-    expect(text).toContain('latest block')
-    expect(text).toContain('728B')
-    expect(text).toContain('pref 1')
-    expect(text).toContain('constraints 1')
-    expect(text).toContain('facts 6')
-    expect(text).toContain('shared 2')
-    expect(text).toContain('User prefers concise answers')
-    expect(text).toContain('Let CI be the authority for full builds')
-    expect(text).toContain('shared via qa-king,verifier')
-    expect(text).toContain('shared: .masc/config/keepers/_shared.facts.jsonl')
-  })
-
   it('shows a source-missing state when the API has no Memory OS snapshot', async () => {
     fetchKeeperTurnRecordsMock.mockResolvedValue({
       source: 'turn_record',
@@ -315,7 +245,6 @@ describe('KeeperMemoryOsRecallPanel', () => {
       count: 0,
       skipped_rows: 0,
       memory_os: null,
-      user_model: null,
       entries: [],
     })
 

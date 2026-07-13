@@ -66,7 +66,8 @@ Second withdrawal batch. 4 RFCs archived after body-level inspection identified
 explicit `superseded_by` relationships. The original 8-candidate pool was
 narrowed to 4 because body inspection revealed:
 
-- RFC-0005 has open Phase 2-4 (still partial active)
+- RFC-0005 still had open Phase 2-4 at that time; those policy phases were
+  withdrawn on 2026-07-13 while the objective typed-IR work remained usable.
 - RFC-0008 has merged PR-1 (#10660) and RFC-0019 reconciliation (partial impl)
 - RFC-0019 is currently active (credential SSOT work in agent_delegation scope)
 
@@ -96,3 +97,33 @@ at some past point. File renamed via git mv to withdrawn/ preserves blame.
 
 Future batches will continue. The active RFC count continues to shrink
 as ghost specs are honestly retired.
+
+## Architecture withdrawal — 2026-07-13
+
+The Keeper boundary hard cut withdrew a connected family of RFCs without the
+180-day aging requirement. These documents were actively dangerous because
+they still instructed implementers to recreate policy removed from runtime.
+Their original filenames remain as short tombstones so existing links resolve;
+git history retains the full proposals.
+
+| RFC | Retired direction |
+|---|---|
+| 0005, 0054 | executable-name and command-class authorization substrate and its generator |
+| 0194 | typed tool semantics used as an authorization SSOT |
+| 0199, 0222, 0224 | deterministic evidence/checklist-owned Task completion |
+| 0234 | Scheduler-owned effect classes and separate-principal approval |
+| 0239 | no-progress streak pause and semantic wake suppression |
+| 0262 | hierarchical Task-completion authority |
+| 0273 | policy tiers and hidden tool access in dashboard configuration |
+| 0284 | deleted command-semantics and parallel guidance-visibility guard |
+| 0293 | execution-backend properties converted into policy ranks |
+| 0304 | Critical-class and timer-derived HITL escalation |
+| 0308, 0311, 0323, 0337 | verifier/evidence floors above LLM Task judgment |
+| 0322 | repository catalog membership used as read authorization |
+| 0331 | tool-registration effect class used as authorization |
+| typed-egress-resource-capability | vendor host/method/path classification in generic egress |
+
+The replacement boundary is exact Always Allowed, configured LLM Auto Judge,
+or non-blocking HITL at the product-neutral Keeper Gate. Typed input, path jail,
+sandbox containment, and explicit execution failures remain objective
+invariants rather than authorization ranks.

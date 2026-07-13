@@ -18,16 +18,10 @@
       [test/test_dashboard_goals].
 
     Internal helpers stay private at this boundary
-    (~50 internal lets — [goal_status_color],
-    [goal_health_string],
-    [build_goal_verification_projection],
-    [goal_policy_nodes],
-    [flatten_tree], [convergence_of_node],
-    [stagnation_seconds_of_node],
+    ([goal_status_color], [build_goal_events_projection],
+    [flatten_tree], [stagnation_seconds_of_node],
     [keeper_metas_for_goal],
-    [linkage_diagnostics_of_node],
     [pending_approval_count_of_goal],
-    [infra_risk_count_of_node],
     [keeper_detail_json] +
     [goal_detail_keeper] type, every per-section
     sub-renderer consumed only inside the surface
@@ -39,25 +33,14 @@ type tree_node = {
   goal : Goal_store.goal;
   children : tree_node list;
   tasks : (Masc_domain.task * string) list;
-  convergence : float;
-      (** 0.0 .. 1.0 completion ratio. *)
-  health : string;
-  badges : string list;
   last_activity_at : string;
-  stagnation_seconds : int;
+  stagnation_seconds : int option;
   linked_keeper_names : string list;
   pending_approval_count : int;
-  infra_risk_count : int;
   linkage_source : string;
-  linkage_warning_count : int;
-  status_reason : string;
-  blocking_source : string;
-  blocking_reason : string;
   latest_keeper_ref : string option;
   latest_turn_ref : int option;
-  stalled_since : string option;
   activity_observation : string;
-  stagnation_status : string;
 }
 (** Per-goal projection node returned by
     {!build_forest}.  Concrete record because
@@ -74,35 +57,25 @@ val build_forest :
   tree_node list
 (** Assembles the goal forest from [goals] / [tasks].
     Every root goal (no parent or parent outside [goals])
-    becomes a top-level entry; convergence + health +
-    badges + linkage + blocking summaries are folded in
-    from the keeper / receipt / pending-approval state
-    accessible via [config]. *)
+    becomes a top-level entry. Each node keeps only its direct linkage,
+    approval, receipt/runtime, and activity observations; child evidence
+    remains on child nodes instead of being promoted into parent status. *)
 
 (** {1 Per-node JSON renderer} *)
 
 val tree_node_to_json :
-  ?effective_policy_for_goal:
-    (string -> Goal_verification.policy_snapshot option) ->
-  ?open_request_for_goal:
-    (string -> Goal_verification.goal_verification_request option) ->
-  ?latest_request_for_goal:
-    (string -> Goal_verification.goal_verification_request option) ->
   ?events_for_goal:(string -> Yojson.Safe.t list) ->
   tree_node ->
   Yojson.Safe.t
-(** Renders a single {!tree_node} as JSON.  Optional
-    callbacks supply per-goal verification policy /
-    open-request / latest-request / event-timeline projections; defaults
-    return [None] / [\[\]] so callers that don't need
-    verification context can pass the bare node. *)
+(** Renders a single {!tree_node} as JSON. The optional callback supplies
+    per-goal lifecycle events and defaults to an empty timeline. *)
 
 (** {1 Dashboard envelope} *)
 
 val dashboard_goals_tree_json :
   config:Workspace.config -> Yojson.Safe.t
 (** Returns the full goals dashboard envelope: forest +
-    rolled-up summary + verification projection.  Used
+    rolled-up summary + lifecycle event projection. Used
     by the [/api/dashboard/goals/tree] route and the
     regression test. *)
 

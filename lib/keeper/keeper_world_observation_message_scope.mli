@@ -20,6 +20,22 @@ val is_self_author
 
 val is_keeper_authored_message : string -> bool
 
+type pending_kind =
+  | Mention
+  | Scope
+
+type pending_message = {
+  message_id : string;
+  speaker : string;
+  content : string;
+  kind : pending_kind;
+}
+(** One unacknowledged lane row. Stable [message_id] is the exact durable
+    acknowledgement cursor; list order is persisted source order. *)
+
+val pairs_of_kind : pending_kind -> pending_message list -> (string * string) list
+val has_kind : pending_kind -> pending_message list -> bool
+
 type direct_line_role =
   | User
   | Assistant
@@ -60,13 +76,18 @@ val render_recent_direct_conversation_context
   :  recent_direct_line list
   -> string
 
-(** [pending_mentions_of_messages ~targets messages] returns the [(speaker,
-    content)] of every user line whose persisted [mentions] (RFC-0232
-    §3.3: parsed once at append) hit a target and that arrives after the
-    keeper's own last line. Pure (no I/O) so the watermark logic is testable
-    directly; this is the core of {!collect_message_scope}. *)
+(** Pure source-ordered classification after the optional durable ack row.
+    Paired direct turns are acknowledged only by an assistant utterance with
+    the same typed [turn_ref]; an unrelated assistant row never clears input. *)
+val pending_messages_of_messages
+  :  ?ack_id:string
+  -> targets:string list
+  -> Keeper_chat_store.chat_message list
+  -> pending_message list
+
 val pending_mentions_of_messages
-  :  targets:string list
+  :  ?ack_id:string
+  -> targets:string list
   -> Keeper_chat_store.chat_message list
   -> (string * string) list
 
@@ -77,11 +98,12 @@ val pending_mentions_of_messages
     this signal stays disjoint from mentions and does not flood on busy
     channels. Same watermark as {!pending_mentions_of_messages}; pure. *)
 val pending_scope_of_messages
-  :  targets:string list
+  :  ?ack_id:string
+  -> targets:string list
   -> Keeper_chat_store.chat_message list
   -> (string * string) list
 
 val collect_message_scope
   :  config:Workspace.config
   -> meta:keeper_meta
-  -> (string * string) list * (string * string) list
+  -> pending_message list

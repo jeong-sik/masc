@@ -15,17 +15,6 @@ open Keeper_types_profile
 module Message_json = Keeper_context_core_message_json
 module Canonical_tool = Agent_sdk.Canonical_tool
 
-(* ================================================================ *)
-(* Constants                                                         *)
-(* ================================================================ *)
-
-(** Default maximum messages to retain in checkpoints (load and save).
-    Caps both load-time deserialization and save-time persistence to prevent
-    unbounded memory growth.  The context_reducer (keep_last 30) trims
-    further during Agent.run, so 120 gives the reducer workspace to operate.
-    Per-keeper override via [compaction_policy.max_checkpoint_messages]. *)
-let default_max_checkpoint_messages = 120
-
 (** Hard caps for checkpoint payload hygiene.
     Message-count capping alone is insufficient when a single message
     accumulates hundreds of text blocks or multi-MB synthetic context. *)

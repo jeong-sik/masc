@@ -113,13 +113,6 @@ val autoboot_exclusion_reason : Workspace.config -> string -> autoboot_exclusion
 val autoboot_excluded_keeper_reasons : Workspace.config -> autoboot_exclusion list
 (** Configured keepers skipped by autoboot with operator-facing reason labels. *)
 
-val auto_recoverable_paused_keeper_names : ?now:float -> Workspace.config -> string list
-(** Configured, autoboot-enabled keepers that are currently paused but whose
-    supervisor-owned auto-resume timer has elapsed.  These keepers remain
-    excluded from {!bootable_keeper_names} until the supervisor clears
-    [paused=false], but they are enough reason to start the supervisor sweep on
-    cold boot. *)
-
 val canonicalize_if_keeper : Workspace.config -> string -> string
 (** [canonicalize_if_keeper config name] returns [keeper-<n>-agent]
     when [name] (bare or already canonical) refers to a configured
@@ -143,12 +136,6 @@ val effective_declarative_runtime_id :
   Keeper_meta_contract.keeper_meta -> string
 (** Resolve the runtime id for a keeper meta given its profile
     defaults; falls back to the profile default when the meta omits one. *)
-
-val resynced_tool_access :
-  Keeper_types_profile.keeper_profile_defaults ->
-  Keeper_meta_contract.keeper_meta -> string list
-(** Re-derive the tool-access record after merging profile defaults so
-    the meta-level [tool_access] and per-tool overrides stay consistent. *)
 
 val ensure_keeper_meta :
   Workspace.config ->

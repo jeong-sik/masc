@@ -62,12 +62,6 @@ module Cleanup : sig
   val enabled : unit -> bool
   (** Env: [MASC_KEEPER_SANDBOX_CLEANUP_ENABLED].  Default: [true]. *)
 
-  val stale_after_sec : unit -> float
-  (** Threshold age before a running container becomes eligible for
-      cleanup.  Floored at 60 seconds.
-      Env: [MASC_KEEPER_SANDBOX_CLEANUP_STALE_AFTER_SEC].  Default:
-      21600 (6h). *)
-
   val interval_sec : unit -> float
   (** Throttle interval between automatic cleanup sweeps in one
       server process.  Floored at 10 seconds.
@@ -88,12 +82,6 @@ module Runtime : sig
   val docker_image : unit -> string
   (** Env: [MASC_KEEPER_SANDBOX_DOCKER_IMAGE].  Default:
       ["masc-keeper-sandbox:local"]. *)
-
-  val git_dispatch : unit -> bool
-  (** When true, Execute commands beginning with ["git "] or
-      ["gh "] run in a dedicated container with network egress and
-      read-only mounts from the selected credential bundle.
-      Env: [MASC_KEEPER_SANDBOX_GIT_DISPATCH].  Default: [true]. *)
 
   val docker_playground_enabled : unit -> bool
   (** Route Execute through a Docker container instead of local
@@ -119,27 +107,6 @@ module Preflight : sig
   (** Master switch for keeper_up / diagnostics preflight.
       Env: [MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED].  Default: [true]. *)
 
-  val min_timeout_sec : unit -> float
-  (** Lower bound applied via [max] on the caller-supplied timeout
-      when running preflight commands.  Currently hardcoded 5.0 in
-      {!Keeper_sandbox_runtime}; this getter exposes it for future
-      env-override (P2c).
-      Env: not yet read.  Default: 5.0. *)
-
-  val max_timeout_sec : unit -> float
-  (** Upper bound applied via [min] on the caller-supplied timeout.
-      Currently hardcoded 20.0.
-      Env: not yet read.  Default: 20.0. *)
-
-  val required_commands : unit -> string list
-  (** The 18 CLI tools the keeper image contract guarantees
-      ([sh; bash; cat; find; head; tail; wc; git; gh; rg; tree; jq;
-      python3; node; npm; make; opam; dune; ssh]).
-
-      INTENTIONALLY NOT env-overridable: an operator who removes
-      [gh] from the list would make diagnostics falsely report green
-      while runtime fails opaquely.  Exposed read-only so diagnostics
-      and tests can iterate the canonical list. *)
 end
 
 (** {1 Shell_timeout — typed-bucket per-command timeout SSOT}
@@ -149,17 +116,9 @@ end
 module Shell_timeout : sig
   type bucket =
     | Io
-        (** I/O-bound commands (bash, git status, etc.).  30s. *)
+        (** I/O-bound commands. 30s. *)
     | Read
-        (** Read-only commands (cat, rg, head, tail, find,
-            git_log, tree).  15s. *)
-    | Git_meta
-        (** Lightweight git metadata (rev-parse, log --oneline).
-            5s. *)
-    | Gh_min
-        (** Floor for gh CLI ops.  Read-only invariant — operators
-            cannot lower this floor; sub-network-latency timeouts
-            cause cascading 401 retries (see #8688).  15s. *)
+        (** Read-only commands. 15s. *)
     | User_max
         (** Upper bound for user-provided [timeout_sec] in
             Execute.  180s. *)
@@ -176,15 +135,10 @@ module Shell_timeout : sig
   (** Typed table for default-pinning tests. *)
 
   val known_default_sec : bucket -> float option
-  (** Hardcoded default seconds for [bucket].  [None] for [Unknown _]
-      and [Gh_min] is returned as [Some 15.0] but the [timeout_sec]
-      lookup ignores env overrides for that bucket (read-only
-      floor). *)
+  (** Hardcoded default seconds for [bucket]. [None] for [Unknown _]. *)
 
   val per_bucket_env_var : bucket:bucket -> string
-  (** [MASC_KEEPER_SHELL_TIMEOUT_<BUCKET>_SEC].  For [Gh_min] the
-      function still returns the conventional name, but
-      {!timeout_sec} ignores it. *)
+  (** [MASC_KEEPER_SHELL_TIMEOUT_<BUCKET>_SEC]. *)
 
   val global_env_var : string
   (** [MASC_KEEPER_SHELL_TIMEOUT_DEFAULT_SEC] — only consulted for
@@ -196,13 +150,11 @@ module Shell_timeout : sig
   val timeout_sec : bucket:bucket -> unit -> float
   (** Resolves the timeout for [bucket].  Lookup order:
 
-      1. [Gh_min] is resolved exclusively from {!known_default_sec}.
-         The env override is ignored (read-only floor).
-      2. Per-bucket env [MASC_KEEPER_SHELL_TIMEOUT_<BUCKET>_SEC].
-      3. {!known_default_sec}.
-      4. Global env [MASC_KEEPER_SHELL_TIMEOUT_DEFAULT_SEC] — only
+      1. Per-bucket env [MASC_KEEPER_SHELL_TIMEOUT_<BUCKET>_SEC].
+      2. {!known_default_sec}.
+      3. Global env [MASC_KEEPER_SHELL_TIMEOUT_DEFAULT_SEC] — only
          for [Unknown _].
-      5. {!global_default_sec}. *)
+      4. {!global_default_sec}. *)
 end
 
 (** {1 Diagnostics / observability surface} *)
@@ -212,8 +164,7 @@ val effective_config_json : unit -> Yojson.Safe.t
     keys:
 
     - [raw.<section>.<key>] = [\{ value, source, env_var | null \}]
-      where [source] is one of ["env"], ["default"], or
-      ["load_bearing_floor"] (for [Gh_min] / [required_commands])
+      where [source] is one of ["env"], ["default"], or ["hardcoded"]
       and [env_var] is [null] for non-overridable values.
     - [derived.<key>] = effective values after cross-cutting rules.
 

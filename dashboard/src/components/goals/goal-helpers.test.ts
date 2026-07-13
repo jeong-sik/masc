@@ -87,14 +87,6 @@ describe('phaseFilterLabel', () => {
     expect(phaseFilterLabel('executing')).toBe('실행 중')
   })
 
-  it('returns Goal 검증 대기 for awaiting_verification', () => {
-    expect(phaseFilterLabel('awaiting_verification')).toBe('Goal 검증 대기')
-  })
-
-  it('returns 승인 대기 for awaiting_approval', () => {
-    expect(phaseFilterLabel('awaiting_approval')).toBe('승인 대기')
-  })
-
   it('returns 차단됨 for blocked', () => {
     expect(phaseFilterLabel('blocked')).toBe('차단됨')
   })
@@ -127,8 +119,8 @@ describe('matchesGoalPhaseFilter', () => {
   })
 
   it('matches only the requested phase', () => {
-    expect(matchesGoalPhaseFilter('awaiting_approval', 'awaiting_approval')).toBe(true)
-    expect(matchesGoalPhaseFilter('executing', 'awaiting_approval')).toBe(false)
+    expect(matchesGoalPhaseFilter('blocked', 'blocked')).toBe(true)
+    expect(matchesGoalPhaseFilter('executing', 'blocked')).toBe(false)
   })
 })
 

@@ -1,4 +1,4 @@
-// Keeper phase indicator — shows the 13-state lifecycle phase
+// Keeper phase indicator — shows the lifecycle phase
 // as a color-coded badge with Korean label.
 // Phase = lifecycle health (생명주기), complementary to pipeline_stage (활동).
 //
@@ -38,7 +38,7 @@ interface PhaseStyle {
 //   working compacting · handing_off · draining · restarting → --accent (slate)
 //   warn    failing · overflowed                             → --warn
 //   paused  paused                                           → --paused
-//   inactive offline · stopped · dead · zombie               → --text-muted / --bad-light
+//   inactive offline · stopped · dead                        → --text-muted / --bad-light
 //
 // Restarting sits with "working" — operators read a restart as
 // recovery-in-progress, not a fresh failure. Dead keeps the bad-light
@@ -60,7 +60,6 @@ export const PHASE_STYLES: Record<KeeperPhase, PhaseStyle> = {
   Crashed:    { label: '비정상종료',   color: 'var(--bad-light)',  bg: 'var(--bad-10)',    border: 'var(--bad-20)',     glow: STRONG_GLOW,   icon: '✕' },
   Restarting: { label: '재시작중',     color: 'var(--color-accent-fg)',     bg: 'var(--accent-10)', border: 'var(--accent-20)',  glow: SOFT_GLOW,     icon: '↺' },
   Dead:       { label: '종료',         color: 'var(--bad-light)',  bg: 'var(--bad-10)',    border: 'var(--bad-20)',     glow: 'none',        icon: '✦' },
-  Zombie:     { label: '좀비',         color: 'var(--bad-light)',  bg: 'var(--bad-10)',    border: 'var(--bad-20)',     glow: STRONG_GLOW,   icon: '☠' },
 }
 
 const PIPELINE_STAGE_DETAIL_LABELS: Record<string, string> = {
@@ -75,8 +74,7 @@ const PIPELINE_STAGE_DETAIL_LABELS: Record<string, string> = {
   operator_or_policy_paused: '일시정지',
   clean_stop_terminal: '정상 정지',
   crashed_restart_candidate: '재시작 후보',
-  supervisor_restart_backoff_elapsed: '재시작 대기',
-  restart_budget_exhausted_terminal: '재시작 한도 소진',
+  dead_tombstone_terminal: 'Dead tombstone',
   structural_failure_terminal: '구조 실패',
 }
 

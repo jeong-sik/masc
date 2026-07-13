@@ -132,20 +132,17 @@ let turn_intent_bullet_keys =
     Keeper_prompt_names.turn_intent_board_curation_guidance;
     Keeper_prompt_names.turn_intent_broadcast_guidance;
     Keeper_prompt_names.turn_intent_task_create_guidance;
-    Keeper_prompt_names.turn_intent_pr_duplicate_search_guidance;
   ]
 
 let task_create_observation : WO.world_observation =
   {
-    pending_mentions = [];
+    pending_messages = [];
     pending_board_events = [];
-    pending_scope_messages = [];
     idle_seconds = 1;
     active_goals = [ "goal-test-task-create" ];
     context_ratio = lazy 0.0;
     unclaimed_task_count = 0;
     claimable_task_count = 0;
-    provider_capacity_blocked_task_count = 0;
     failed_task_count = 0;
     pending_verification_count = 0;
     scheduled_automation = WO.empty_scheduled_automation_observation;
@@ -238,7 +235,7 @@ let test_loads_continuity_contract () =
   test_loads_block "continuity_contract" "Continuity"
 
 let test_loads_connected_surface_discretion () =
-  test_loads_block "connected_surface_discretion" "unread connector lane"
+  test_loads_block "connected_surface_discretion" "lane-local contexts"
 
 let test_system_prompt_includes_continuity_contract () =
   with_repo_root_cwd (fun () ->
@@ -289,7 +286,7 @@ let test_missing_turn_intent_bullet_renders_config_drift_marker () =
       Alcotest.(check bool)
         "task create tool available through policy" true
         (List.mem "keeper_task_create"
-           (Lib.Keeper_tool_policy.keeper_allowed_tool_names meta));
+           (Lib.Keeper_tool_policy.keeper_model_tool_names ()));
       with_task_create_prompt_missing (fun () ->
           let system_prompt, _user_msg =
             Lib.Keeper_unified_prompt.build_prompt

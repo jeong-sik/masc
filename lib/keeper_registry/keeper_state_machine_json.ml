@@ -25,14 +25,11 @@ let conditions_to_json (c : conditions) =
     ; "handoff_active", `Bool c.handoff_active
     ; "operator_paused", `Bool c.operator_paused
     ; "stop_requested", `Bool c.stop_requested
-    ; "restart_budget_remaining", `Bool c.restart_budget_remaining
-    ; "backoff_elapsed", `Bool c.backoff_elapsed
+    ; "dead_tombstone_latched", `Bool c.dead_tombstone_latched
+    ; "restart_requested", `Bool c.restart_requested
     ; "drain_complete", `Bool c.drain_complete
     ; "context_overflow", `Bool c.context_overflow
-    ; "compact_retry_exhausted", `Bool c.compact_retry_exhausted
-    ; "terminal_failure_latched", `Bool c.terminal_failure_latched
     ; "credential_archived", `Bool c.credential_archived
-    ; "zombie_timeout_reached", `Bool c.zombie_timeout_reached
     ]
 ;;
 
@@ -41,14 +38,10 @@ let event_to_json (ev : event) : Yojson.Safe.t =
   match ev with
   | Heartbeat_ok -> obj "heartbeat_ok" []
   | Heartbeat_failed r ->
-    obj
-      "heartbeat_failed"
-      [ "consecutive", `Int r.consecutive; "max_allowed", `Int r.max_allowed ]
+    obj "heartbeat_failed" [ "consecutive", `Int r.consecutive ]
   | Turn_succeeded -> obj "turn_succeeded" []
   | Turn_failed r ->
-    obj
-      "turn_failed"
-      [ "consecutive", `Int r.consecutive; "max_allowed", `Int r.max_allowed ]
+    obj "turn_failed" [ "consecutive", `Int r.consecutive ]
   | Context_measured r ->
     obj
       "context_measured"
@@ -94,11 +87,7 @@ let event_to_json (ev : event) : Yojson.Safe.t =
     obj "fiber_terminated" with_http
   | Supervisor_restart_attempt r ->
     obj "supervisor_restart_attempt" [ "attempt", `Int r.attempt ]
-  | Restart_budget_exhausted -> obj "restart_budget_exhausted" []
   | Credential_archived -> obj "credential_archived" []
-  | Zombie_timeout -> obj "zombie_timeout" []
-  | Terminal_failure_detected r ->
-    obj "terminal_failure_detected" [ "reason", `String r.reason ]
   | Context_overflow_detected r ->
     let source =
       match r.source with
@@ -117,7 +106,6 @@ let event_to_json (ev : event) : Yojson.Safe.t =
       ; "limit_tokens", limit_tokens
       ]
   | Auto_compact_triggered -> obj "auto_compact_triggered" []
-  | Compact_retry_exhausted -> obj "compact_retry_exhausted" []
   | Operator_compact_requested -> obj "operator_compact_requested" []
   | Operator_clear_requested r ->
     obj

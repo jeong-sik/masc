@@ -1,20 +1,14 @@
 import { currentDashboardActor, get, post, del, put, withRetries, defaultBoardVoter } from './core'
 import { isRecord, asNullableString, asString, asNumber, asInt, asStringList, asBoolean } from '../components/common/normalize'
-import { asKeeperApprovalRiskLevel } from '../lib/governance-risk-level'
 import { normalizePendingConfirmation } from '../pending-confirm'
 import { timeBoardRequest } from '../board-metrics'
 import type {
   BoardActorIdentity, BoardPost, BoardPostOrigin, BoardComment, BoardReactionSummary,
   BoardReactionState, BoardReactionTargetType, BoardReactionToggleResult, BoardSortMode,
   BoardVoteDirection, BoardModerationStatus, BoardContributorQuality,
-  BoardClaimEvidenceProjection, BoardClaimEvidenceState,
   BoardCurationSnapshot, BoardKarmaLedger, BoardKarmaLedgerEvent, BoardKarmaTotal,
-  GovernanceContextRef,
-  GovernanceDecisionItem, GovernanceExecutedRoute,
-  GovernanceGuardrailState, GovernanceJudgeSummary, GovernanceJudgment,
   KeeperApprovalQueueItem,
-  HitlContextSummary, HitlSuggestedOption, HitlSummaryStatus,
-  GovernanceResolvedAction, GovernanceTimelineEvent,
+  GateJudgment, HitlContextSummary, HitlSummaryStatus,
   SubBoard, SubBoardAccess,
 } from '../types'
 
@@ -60,36 +54,6 @@ export function asNullableIsoTimestamp(value: unknown): string | null {
   return null
 }
 
-function normalizeGovernanceDecisionKind(raw: unknown): GovernanceDecisionItem['kind'] {
-  return asString(raw, '').trim().toLowerCase() === 'petition' ? 'petition' : 'case'
-}
-
-function normalizeGovernanceJudgeStatus(raw: unknown): GovernanceJudgeSummary['status'] {
-  const status = asNullableString(raw)?.trim().toLowerCase()
-  switch (status) {
-    case 'online':
-    case 'refreshing':
-    case 'stale_visible':
-    case 'offline':
-    case 'backoff':
-      return status
-    default:
-      return undefined
-  }
-}
-
-function normalizeGovernanceJudgeDegradedReason(raw: unknown): GovernanceJudgeSummary['degraded_reason'] {
-  const reason = asNullableString(raw)?.trim().toLowerCase()
-  switch (reason) {
-    case 'timeout':
-    case 'error':
-    case 'backoff':
-      return reason
-    default:
-      return reason == null ? null : undefined
-  }
-}
-
 function normalizeBoardActorSource(raw: unknown): BoardActorIdentity['source'] {
   const source = asString(raw, '').trim()
   switch (source) {
@@ -103,19 +67,6 @@ function normalizeBoardActorSource(raw: unknown): BoardActorIdentity['source'] {
   }
 }
 
-function normalizeBoardContributorBand(raw: unknown): BoardContributorQuality['band'] {
-  const band = asString(raw, '').trim().toLowerCase()
-  switch (band) {
-    case 'low':
-    case 'watch':
-    case 'strong':
-    case 'excellent':
-      return band
-    default:
-      return undefined
-  }
-}
-
 function normalizeBoardKarmaTargetKind(raw: unknown): BoardKarmaLedgerEvent['target_kind'] | null {
   const kind = asString(raw, '').trim().toLowerCase()
   return kind === 'post' || kind === 'comment' ? kind : null
@@ -124,15 +75,8 @@ function normalizeBoardKarmaTargetKind(raw: unknown): BoardKarmaLedgerEvent['tar
 // normalizePendingConfirmation re-exported from pending-confirm.ts (SSOT)
 export { normalizePendingConfirmation }
 
-function normalizeHitlSuggestedOption(raw: unknown): HitlSuggestedOption | null {
-  if (!isRecord(raw)) return null
-  const label = asString(raw.label, '').trim()
-  if (!label) return null
-  return {
-    label,
-    rationale: asString(raw.rationale, '').trim(),
-    estimated_risk_delta: asKeeperApprovalRiskLevel(raw.estimated_risk_delta) ?? null,
-  }
+function normalizeGateJudgment(raw: unknown): GateJudgment | null {
+  return raw === 'approve' || raw === 'deny' || raw === 'require_human' ? raw : null
 }
 
 function normalizeHitlContextSummary(raw: unknown): HitlContextSummary | null {
@@ -141,19 +85,16 @@ function normalizeHitlContextSummary(raw: unknown): HitlContextSummary | null {
   // A summary with no body carries no operator value; treat it as absent rather
   // than rendering an empty briefing card.
   if (!summaryText) return null
+  const judgment = normalizeGateJudgment(raw.judgment)
+  if (!judgment) return null
   return {
     summary_version: asInt(raw.summary_version) ?? 0,
-    generated_at_iso: asNullableString(raw.generated_at_iso),
+    generated_at: asNullableIsoTimestamp(raw.generated_at),
     model_run_id: asNullableString(raw.model_run_id),
     context_summary: summaryText,
     key_questions: asStringList(raw.key_questions),
-    suggested_options: Array.isArray(raw.suggested_options)
-      ? raw.suggested_options
-          .map(normalizeHitlSuggestedOption)
-          .filter((o): o is HitlSuggestedOption => o !== null)
-      : [],
-    risk_rationale: asNullableString(raw.risk_rationale),
-    uncertainty: asNumber(raw.uncertainty) ?? null,
+    judgment,
+    rationale: asString(raw.rationale, '').trim(),
   }
 }
 
@@ -185,197 +126,20 @@ export function normalizeKeeperApprovalQueueItem(raw: unknown): KeeperApprovalQu
   const id = asString(raw.id, '').trim()
   const keeperName = asString(raw.keeper_name, '').trim()
   const toolName = asString(raw.tool_name, '').trim()
-  const riskLevel = asKeeperApprovalRiskLevel(raw.risk_level)
-  if (!id || !keeperName || !toolName || !riskLevel) return null
-  const runtimeContract = isRecord(raw.runtime_contract)
-    ? {
-        sandbox_profile: asNullableString(raw.runtime_contract.sandbox_profile),
-        network_mode: asNullableString(raw.runtime_contract.network_mode),
-        backend: asNullableString(raw.runtime_contract.backend),
-        task_id: asNullableString(raw.runtime_contract.task_id),
-        goal_id: asNullableString(raw.runtime_contract.goal_id),
-        goal_ids: asStringList(raw.runtime_contract.goal_ids),
-      }
-    : null
-  const ruleMatch = isRecord(raw.rule_match)
-    ? {
-        rule_id: asNullableString(raw.rule_match.rule_id),
-        matched_by: asNullableString(raw.rule_match.matched_by),
-      }
-    : null
+  if (!id || !keeperName || !toolName) return null
   return {
     id,
     keeper_name: keeperName,
     tool_name: toolName,
-    action_key: asNullableString(raw.action_key),
-    sandbox_target: asNullableString(raw.sandbox_target),
-    risk_level: riskLevel,
-    requested_at: asNullableIsoTimestamp(raw.requested_at_iso ?? raw.requested_at),
+    requested_at: asNullableIsoTimestamp(raw.requested_at),
     waiting_s: asNumber(raw.waiting_s),
     turn_id: asInt(raw.turn_id),
     task_id: asNullableString(raw.task_id),
     goal_id: asNullableString(raw.goal_id),
     goal_ids: asStringList(raw.goal_ids),
-    runtime_contract: runtimeContract,
-    selected_model: null,
-    disposition: asNullableString(raw.disposition),
-    disposition_reason: asNullableString(raw.disposition_reason),
-    decision: asNullableString(raw.decision),
-    rule_match: ruleMatch,
     input: raw.input,
     input_preview: asNullableString(raw.input_preview),
     summary_status: normalizeHitlSummaryStatus(raw.summary_status),
-  }
-}
-
-function normalizeGovernanceContextRef(raw: unknown): GovernanceContextRef {
-  if (!isRecord(raw)) return {}
-  return {
-    board_post_id: asNullableString(raw.board_post_id),
-    task_id: asNullableString(raw.task_id),
-    operation_id: asNullableString(raw.operation_id),
-  }
-}
-
-function normalizeGovernanceResolvedAction(raw: unknown): GovernanceResolvedAction | null {
-  if (!isRecord(raw)) return null
-  const actionKind = asNullableString(raw.action_kind)
-  const resolvedTool = asNullableString(raw.resolved_tool)
-  const targetType = asNullableString(raw.target_type)
-  const targetId = asNullableString(raw.target_id)
-  const reason = asNullableString(raw.reason)
-  if (!actionKind && !resolvedTool && !targetType && !reason) return null
-  return {
-    action_kind: actionKind ?? undefined,
-    resolved_tool: resolvedTool,
-    target_type: targetType,
-    target_id: targetId,
-    reason: reason ?? undefined,
-    payload_preview: raw.payload_preview,
-  }
-}
-
-function normalizeGovernanceExecutedRoute(raw: unknown): GovernanceExecutedRoute | null {
-  if (!isRecord(raw)) return null
-  const actionType = asNullableString(raw.action_type)
-  const toolName = asNullableString(raw.tool_name) ?? asNullableString(raw.delegated_tool)
-  const confirmationState = asNullableString(raw.confirmation_state)
-  const createdAt = asNullableIsoTimestamp(raw.created_at)
-  if (!actionType && !toolName && !confirmationState && !createdAt) return null
-  return {
-    action_type: actionType ?? undefined,
-    tool_name: toolName,
-    confirmation_state: confirmationState ?? undefined,
-    created_at: createdAt,
-  }
-}
-
-function normalizeGovernanceGuardrailState(raw: unknown): GovernanceGuardrailState | null {
-  if (!isRecord(raw)) return null
-  const pendingConfirm = normalizePendingConfirmation(raw.pending_confirm)
-  const pendingConfirmToken =
-    asNullableString(raw.pending_confirm_token) ?? pendingConfirm?.confirm_token ?? null
-  return {
-    requires_human_gate:
-      typeof raw.requires_human_gate === 'boolean' ? raw.requires_human_gate : undefined,
-    pending_confirm: pendingConfirm,
-    pending_confirm_token: pendingConfirmToken,
-    ready_to_execute:
-      typeof raw.ready_to_execute === 'boolean' ? raw.ready_to_execute : undefined,
-  }
-}
-
-export function normalizeGovernanceJudgment(raw: unknown): GovernanceJudgment | null {
-  if (!isRecord(raw)) return null
-  const summary = asNullableString(raw.summary)
-  const targetId = asNullableString(raw.target_id)
-  if (!summary && !targetId) return null
-  return {
-    judgment_id: asNullableString(raw.judgment_id) ?? undefined,
-    target_kind: asNullableString(raw.target_kind) ?? undefined,
-    target_id: targetId ?? undefined,
-    status: asNullableString(raw.status) ?? undefined,
-    summary: summary ?? undefined,
-    confidence: typeof raw.confidence === 'number' ? raw.confidence : null,
-    generated_at: asNullableIsoTimestamp(raw.generated_at),
-    expires_at: asNullableIsoTimestamp(raw.expires_at),
-    model_used: null,
-    keeper_name: asNullableString(raw.keeper_name),
-    evidence_refs: asStringList(raw.evidence_refs),
-    recommended_action: normalizeGovernanceResolvedAction(raw.recommended_action),
-    guardrail_state: normalizeGovernanceGuardrailState(raw.guardrail_state),
-    executed_route: normalizeGovernanceExecutedRoute(raw.executed_route),
-  }
-}
-
-export function normalizeGovernanceDecisionItem(raw: unknown): GovernanceDecisionItem | null {
-  if (!isRecord(raw)) return null
-  const id = asString(raw.id, '').trim()
-  const topic = asString(raw.topic ?? raw.title, '').trim()
-  if (!id || !topic) return null
-  const context = normalizeGovernanceContextRef(raw.context)
-  return {
-    kind: normalizeGovernanceDecisionKind(raw.kind),
-    id,
-    topic,
-    status: asString(raw.status ?? raw.state, 'open'),
-    origin: asNullableString(raw.origin),
-    subject_type: asNullableString(raw.subject_type),
-    risk_class: asNullableString(raw.risk_class),
-    provenance: asNullableString(raw.provenance),
-    auto_execution_state: asNullableString(raw.auto_execution_state),
-    petition_count: asInt(raw.petition_count),
-    brief_count: asInt(raw.brief_count),
-    last_activity_at: asNullableIsoTimestamp(raw.last_activity_at),
-    truth_summary: asNullableString(raw.truth_summary) ?? undefined,
-    judgment_summary: asNullableString(raw.judgment_summary),
-    confidence: typeof raw.confidence === 'number' ? raw.confidence : null,
-    related_agents: asStringList(raw.related_agents),
-    context,
-    linked_board_post_id: asNullableString(raw.linked_board_post_id) ?? context.board_post_id ?? null,
-    linked_task_id: asNullableString(raw.linked_task_id) ?? context.task_id ?? null,
-    linked_operation_id: asNullableString(raw.linked_operation_id) ?? context.operation_id ?? null,
-    linked_session_id: asNullableString(raw.linked_session_id) ?? null,
-    recommended_action: normalizeGovernanceResolvedAction(raw.recommended_action),
-    executed_route: normalizeGovernanceExecutedRoute(raw.executed_route),
-    guardrail_state: normalizeGovernanceGuardrailState(raw.guardrail_state),
-    evidence_refs: asStringList(raw.evidence_refs),
-  }
-}
-
-export function normalizeGovernanceTimelineEvent(raw: unknown): GovernanceTimelineEvent | null {
-  if (!isRecord(raw)) return null
-  const kind = asString(raw.kind, '').trim()
-  if (!kind) return null
-  return {
-    kind,
-    item_kind: asNullableString(raw.item_kind) ?? undefined,
-    item_id: asNullableString(raw.item_id) ?? undefined,
-    topic: asNullableString(raw.topic) ?? undefined,
-    created_at: asNullableIsoTimestamp(raw.created_at),
-    summary: asNullableString(raw.summary) ?? undefined,
-    actor: asNullableString(raw.actor),
-    index: asInt(raw.index),
-    decision: asNullableString(raw.decision),
-  }
-}
-
-
-export function normalizeGovernanceJudgeSummary(raw: unknown): GovernanceJudgeSummary | undefined {
-  if (!isRecord(raw)) return undefined
-  return {
-    judge_online: typeof raw.judge_online === 'boolean' ? raw.judge_online : undefined,
-    refreshing: typeof raw.refreshing === 'boolean' ? raw.refreshing : undefined,
-    status: normalizeGovernanceJudgeStatus(raw.status),
-    degraded_reason: normalizeGovernanceJudgeDegradedReason(raw.degraded_reason),
-    cached_judgments_visible: typeof raw.cached_judgments_visible === 'boolean'
-      ? raw.cached_judgments_visible
-      : undefined,
-    generated_at: asNullableIsoTimestamp(raw.generated_at),
-    expires_at: asNullableIsoTimestamp(raw.expires_at),
-    model_used: null,
-    keeper_name: asNullableString(raw.keeper_name),
-    last_error: asNullableString(raw.last_error),
   }
 }
 
@@ -480,44 +244,32 @@ function normalizeBoardModerationStatus(raw: unknown): BoardModerationStatus {
 
 function normalizeBoardContributorQuality(raw: unknown): BoardContributorQuality | null {
   if (!isRecord(raw)) return null
-  const score = asNumber(raw.score)
   const completionRate = asNumber(raw.completion_rate)
   const responseRate = asNumber(raw.response_rate)
   const boardPosts = asNumber(raw.board_posts)
   const boardComments = asNumber(raw.board_comments)
-  const accountabilityScore = asNumber(raw.accountability_score)
   const thompsonConfidence = asNumber(raw.thompson_confidence)
   const source = asString(raw.source, '').trim() || undefined
-  const band = normalizeBoardContributorBand(raw.band)
-  const autonomyLevel = asString(raw.autonomy_level, '').trim() || undefined
   const rawEvidenceState = asString(raw.evidence_state, '').trim()
   const evidenceState = rawEvidenceState === 'measured' || rawEvidenceState === 'default'
     ? rawEvidenceState
     : undefined
 
   if (
-    score === undefined
-    && completionRate === undefined
+    completionRate === undefined
     && responseRate === undefined
     && boardPosts === undefined
     && boardComments === undefined
-    && accountabilityScore === undefined
     && thompsonConfidence === undefined
     && source === undefined
-    && band === undefined
-    && autonomyLevel === undefined
     && evidenceState === undefined
   ) return null
   return {
-    score,
-    band,
     source,
     completion_rate: completionRate,
     response_rate: responseRate,
     board_posts: boardPosts,
     board_comments: boardComments,
-    accountability_score: accountabilityScore,
-    autonomy_level: autonomyLevel,
     thompson_confidence: thompsonConfidence,
     evidence_state: evidenceState,
   }
@@ -621,46 +373,11 @@ function normalizeBoardPost(raw: unknown): BoardPost | null {
     report_count: Math.max(0, Math.trunc(asNumber(raw.report_count, 0))),
     moderation_status: normalizeBoardModerationStatus(raw.moderation_status),
     contributor_quality: normalizeBoardContributorQuality(raw.contributor_quality),
-    claim_evidence: normalizeBoardClaimEvidence(raw.claim_evidence),
     ...(reactions !== undefined ? { reactions } : {}),
     ...(supportedReactionEmojis !== undefined
       ? { supported_reaction_emojis: supportedReactionEmojis }
       : {}),
     origin: normalizeBoardPostOrigin(raw.origin),
-  }
-}
-
-function normalizeBoardClaimEvidenceState(raw: unknown): BoardClaimEvidenceState | null {
-  switch (asString(raw, '').trim()) {
-    case 'needs_evidence':
-    case 'source_snapshot_stale':
-    case 'artifact_missing':
-    case 'verified':
-      return asString(raw, '').trim() as BoardClaimEvidenceState
-    default:
-      return null
-  }
-}
-
-function normalizeBoardClaimEvidence(raw: unknown): BoardClaimEvidenceProjection | null {
-  if (!isRecord(raw)) return null
-  const state = normalizeBoardClaimEvidenceState(raw.state)
-  if (!state) return null
-  return {
-    source: asString(raw.source, '').trim() || undefined,
-    target_post_id: asString(raw.target_post_id, '').trim() || undefined,
-    state,
-    label: asString(raw.label, '').trim() || state,
-    total_count: Math.max(0, Math.trunc(asNumber(raw.total_count, 0))),
-    allowed_count: Math.max(0, Math.trunc(asNumber(raw.allowed_count, 0))),
-    rejected_count: Math.max(0, Math.trunc(asNumber(raw.rejected_count, 0))),
-    artifact_missing_count: Math.max(0, Math.trunc(asNumber(raw.artifact_missing_count, 0))),
-    artifact_unknown_count: Math.max(0, Math.trunc(asNumber(raw.artifact_unknown_count, 0))),
-    missing_source_snapshot_count: Math.max(0, Math.trunc(asNumber(raw.missing_source_snapshot_count, 0))),
-    stale_source_snapshot_count: Math.max(0, Math.trunc(asNumber(raw.stale_source_snapshot_count, 0))),
-    artifact_not_verified_count: Math.max(0, Math.trunc(asNumber(raw.artifact_not_verified_count, 0))),
-    latest_decision: asString(raw.latest_decision, '').trim() || undefined,
-    latest_recorded_at: asNumber(raw.latest_recorded_at),
   }
 }
 

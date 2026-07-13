@@ -103,7 +103,7 @@ let init_keeper_bridge =
       Masc_test_deps.init_keeper_tool_registry ();
       ignore (Masc.Mcp_server_eio.get_clock_opt ());
       (* Use find_project_root — the test cwd is _build/default/test/ which
-         does not contain config/tool_policy.toml, so Sys.getcwd fails the
+         does not contain dune-project, so Sys.getcwd fails the
          direct shortcut and falls into the exe-relative walk that picks up
          the partial _build/default/config/runtime.json. *)
       let base_path = Masc_test_deps.find_project_root () in
@@ -133,7 +133,6 @@ let make_meta ?(name = "keeper-tool-matrix") () =
           ("agent_name", `String name);
           ("trace_id", `String "keeper-tool-matrix-trace");
           ("allowed_paths", `List [ `String "*" ]);
-          ("tool_access", Json_util.json_string_list []);
         ])
   with
   | Ok meta -> meta
@@ -141,9 +140,7 @@ let make_meta ?(name = "keeper-tool-matrix") () =
 
 let all_keeper_tool_schemas_raw () =
   init_keeper_bridge ();
-  (* keeper_allowed_model_tools removed (dead per-keeper allowlist concept);
-     keeper_universe_model_tools is the live universe-filtered equivalent. *)
-  KET.keeper_universe_model_tools (make_meta ())
+  KET.keeper_model_tool_schemas ()
   |> List.sort (fun (left : Masc_domain.tool_schema) right ->
          String.compare left.name right.name)
 
@@ -473,10 +470,10 @@ let keeper_expectation_for_name name =
          the sample file is written at base_path. File-not-found in
          tests without a playground file is an acceptable outcome. *)
       Expect_success_or_guard
-        [ "file not found"; "keeper not found in registry"; "path_not_found_under_allowed_roots" ]
+        [ "file not found"; "keeper not found in registry"; "path_outside_sandbox" ]
   | "tool_edit_file" | "tool_search_files" | "tool_write_file" ->
       Expect_success_or_guard
-        [ "keeper not found in registry"; "tool call failed"; "path_not_found_under_allowed_roots" ]
+        [ "keeper not found in registry"; "tool call failed"; "path_outside_sandbox" ]
   | _ -> Expect_success
 
 let extra_guard_fragments_for_name = function

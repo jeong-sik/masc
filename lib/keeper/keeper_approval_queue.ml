@@ -1,14 +1,563 @@
-(** Keeper_approval_queue — Eio.Promise-based HITL approval for keeper tools.
-
-    When a keeper's OAS Agent invokes a tool that requires approval,
-    the agent fiber is suspended via [Eio.Promise.await].  An operator
-    can then approve/reject via the dashboard approval HTTP handler
-    or the CLI.
-
-    Types, rules, fingerprint — extracted to [Keeper_approval_queue_rules]. *)
+(** Durable, nonblocking HITL requests for Keeper external effects. *)
 
 include Keeper_approval_queue_rules
 
+type storage_error =
+  { path : string
+  ; reason : string
+  }
+
+type approved_resolution_request =
+  { keeper_name : string
+  ; tool_name : string
+  ; input : Yojson.Safe.t
+  }
+
+type grant_error =
+  | Grant_store_unavailable of storage_error
+  | Grant_workspace_mismatch of
+      { approval_id : string
+      ; requested_base_path : string
+      ; stored_base_path : string
+      }
+  | Grant_still_pending of string
+  | Grant_resolution_not_approved of string
+  | Grant_resolution_missing of string
+
+type approved_resolution_state =
+  | Resolution_unconsumed
+  | Resolution_consumed
+
+type grant_consumption =
+  | Consumption_committed
+  | Consumption_already_committed
+  | Consumption_not_matching
+
+type delivery_replay_failure =
+  { approval_id : string
+  ; reason : string
+  }
+
+type install_report =
+  { loaded_pending : int
+  ; replayed_deliveries : int
+  ; delivery_replay_failures : delivery_replay_failure list
+  }
+
+type install_error = Install_storage_failed of storage_error
+
+type persisted_delivery =
+  { entry : pending_approval
+  ; decision : decision
+  ; source : decision_source
+  ; remember_rule : bool
+  ; created_by : string option
+  ; grant_consumed : bool
+  }
+
+let storage_error_to_string error =
+  Printf.sprintf "%s: %s" error.path error.reason
+;;
+
+let grant_error_to_string = function
+  | Grant_store_unavailable error -> storage_error_to_string error
+  | Grant_workspace_mismatch
+      { approval_id; requested_base_path; stored_base_path } ->
+    Printf.sprintf
+      "approval %s belongs to workspace %s, not %s"
+      approval_id
+      stored_base_path
+      requested_base_path
+  | Grant_still_pending approval_id ->
+    Printf.sprintf "approval %s has not been resolved" approval_id
+  | Grant_resolution_not_approved approval_id ->
+    Printf.sprintf "approval %s was not approved" approval_id
+  | Grant_resolution_missing approval_id ->
+    Printf.sprintf "approval %s has no durable resolution journal" approval_id
+;;
+
+let install_error_to_string = function
+  | Install_storage_failed error -> storage_error_to_string error
+;;
+
+let pending_store_version = 2
+let pending_store_surface = "keeper_gate_pending"
+let pending_store_mu = Stdlib.Mutex.create ()
+let deliveries : persisted_delivery SMap.t Atomic.t = Atomic.make SMap.empty
+let unavailable_stores : storage_error SMap.t Atomic.t = Atomic.make SMap.empty
+
+let mark_store_unavailable_unlocked ~base_path error =
+  Atomic.set
+    unavailable_stores
+    (SMap.add base_path error (Atomic.get unavailable_stores))
+;;
+
+let clear_store_unavailable_unlocked ~base_path =
+  Atomic.set
+    unavailable_stores
+    (SMap.remove base_path (Atomic.get unavailable_stores))
+;;
+
+let pending_store_path ~base_path =
+  Keeper_gate_path.pending ~base_path
+;;
+
+let report_pending_read_drop ~reason ~path ~detail =
+  Safe_ops.report_persistence_read_drop
+    ~on_drop:(fun () ->
+      Otel_metric_store.inc_counter
+        Otel_metric_store.metric_persistence_read_drops
+        ~labels:[ "surface", pending_store_surface; "reason", reason ]
+        ())
+    ~surface:pending_store_surface
+    ~reason
+    ~path
+    ~detail
+;;
+
+let pending_entry_to_yojson (entry : pending_approval) =
+  `Assoc
+    [ "id", `String entry.id
+    ; "keeper_name", `String entry.keeper_name
+    ; "tool_name", `String entry.tool_name
+    ; "input_hash", `String entry.input_hash
+    ; "input", entry.input
+    ; "requested_at", `Float entry.requested_at
+    ; "turn_id", Json_util.int_opt_to_json entry.turn_id
+    ; ( "request_context"
+      , match entry.request_context with
+        | Some context -> context
+        | None -> `Null )
+    ; "task_id", Json_util.string_opt_to_json entry.task_id
+    ; "goal_id", Json_util.string_opt_to_json entry.goal_id
+    ; "goal_ids", Json_util.json_string_list entry.goal_ids
+    ; "continuation_channel", Keeper_continuation_channel.to_yojson entry.continuation_channel
+    ; "summary_status", summary_status_to_yojson entry.summary_status
+    ]
+;;
+
+let approval_decision_to_yojson = function
+  | Agent_sdk.Hooks.Approve -> `Assoc [ "kind", `String "approve" ]
+  | Agent_sdk.Hooks.Reject reason ->
+    `Assoc [ "kind", `String "reject"; "reason", `String reason ]
+  | Agent_sdk.Hooks.Edit input ->
+    `Assoc [ "kind", `String "edit"; "input", input ]
+;;
+
+let persisted_delivery_to_yojson delivery =
+  `Assoc
+    [ "entry", pending_entry_to_yojson delivery.entry
+    ; "decision", approval_decision_to_yojson delivery.decision
+    ; "source", `String (decision_source_to_string delivery.source)
+    ; "remember_rule", `Bool delivery.remember_rule
+    ; "created_by", Json_util.string_opt_to_json delivery.created_by
+    ; "grant_consumed", `Bool delivery.grant_consumed
+    ]
+;;
+
+let map_values_for_base ~base_path map project =
+  SMap.bindings map
+  |> List.filter_map (fun (_id, value) ->
+    if String.equal (project value).audit_base_path base_path then Some value else None)
+;;
+
+let snapshot_to_yojson ~base_path ~pending_map ~delivery_map =
+  let pending_entries =
+    map_values_for_base ~base_path pending_map Fun.id
+    |> List.map pending_entry_to_yojson
+  in
+  let delivery_entries =
+    map_values_for_base ~base_path delivery_map (fun delivery -> delivery.entry)
+    |> List.map persisted_delivery_to_yojson
+  in
+  `Assoc
+    [ "version", `Int pending_store_version
+    ; "pending", `List pending_entries
+    ; "deliveries", `List delivery_entries
+    ]
+;;
+
+let persist_snapshot_unlocked ~base_path ~pending_map ~delivery_map =
+  let path = pending_store_path ~base_path in
+  match SMap.find_opt base_path (Atomic.get unavailable_stores) with
+  | Some error -> Error error
+  | None ->
+    (try
+       Fs_compat.mkdir_p (Filename.dirname path);
+       let body =
+         snapshot_to_yojson ~base_path ~pending_map ~delivery_map
+         |> Yojson.Safe.pretty_to_string
+       in
+       (match Fs_compat.save_file_atomic path body with
+        | Ok () -> Ok ()
+        | Error reason -> Error { path; reason })
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn -> Error { path; reason = Printexc.to_string exn })
+;;
+
+let reject_unknown_fields ~surface ~allowed fields =
+  let rec duplicate seen = function
+    | [] -> None
+    | (key, _) :: rest ->
+      if List.mem key seen then Some key else duplicate (key :: seen) rest
+  in
+  match duplicate [] fields with
+  | Some field -> Error (Printf.sprintf "%s contains duplicate field %s" surface field)
+  | None ->
+    (match List.find_opt (fun (key, _) -> not (List.mem key allowed)) fields with
+     | None -> Ok ()
+     | Some (field, _) ->
+       Error (Printf.sprintf "%s contains unsupported field %s" surface field))
+;;
+
+let required_string ~surface field fields =
+  match List.assoc_opt field fields with
+  | Some (`String value) when String.trim value <> "" -> Ok value
+  | Some (`String _) -> Error (Printf.sprintf "%s.%s must be non-blank" surface field)
+  | Some _ -> Error (Printf.sprintf "%s.%s must be a string" surface field)
+  | None -> Error (Printf.sprintf "%s.%s is required" surface field)
+;;
+
+let required_member ~surface field fields =
+  match List.assoc_opt field fields with
+  | Some value -> Ok value
+  | None -> Error (Printf.sprintf "%s.%s is required" surface field)
+;;
+
+let optional_string ~surface field fields =
+  match List.assoc_opt field fields with
+  | None | Some `Null -> Ok None
+  | Some (`String value) when String.trim value <> "" -> Ok (Some value)
+  | Some (`String _) -> Error (Printf.sprintf "%s.%s must be non-blank" surface field)
+  | Some _ -> Error (Printf.sprintf "%s.%s must be a string or null" surface field)
+;;
+
+let optional_nonnegative_int ~surface field fields =
+  match List.assoc_opt field fields with
+  | None | Some `Null -> Ok None
+  | Some (`Int value) when value >= 0 -> Ok (Some value)
+  | Some _ ->
+    Error (Printf.sprintf "%s.%s must be a non-negative integer or null" surface field)
+;;
+
+let required_float ~surface field fields =
+  match List.assoc_opt field fields with
+  | Some (`Float value) -> Ok value
+  | Some (`Int value) -> Ok (Float.of_int value)
+  | Some _ -> Error (Printf.sprintf "%s.%s must be a number" surface field)
+  | None -> Error (Printf.sprintf "%s.%s is required" surface field)
+;;
+
+let required_string_list ~surface field fields =
+  match List.assoc_opt field fields with
+  | Some (`List values) ->
+    let rec parse index acc = function
+      | [] -> Ok (List.rev acc)
+      | `String value :: rest -> parse (index + 1) (value :: acc) rest
+      | _ :: _ ->
+        Error (Printf.sprintf "%s.%s[%d] must be a string" surface field index)
+    in
+    parse 0 [] values
+  | Some _ -> Error (Printf.sprintf "%s.%s must be an array" surface field)
+  | None -> Error (Printf.sprintf "%s.%s is required" surface field)
+;;
+
+let pending_entry_of_yojson ~base_path json =
+  match json with
+  | `Assoc fields ->
+    let ( let* ) = Result.bind in
+    let surface = "gate_pending.entry" in
+    let* () =
+      reject_unknown_fields
+        ~surface
+        ~allowed:
+          [ "id"
+          ; "keeper_name"
+          ; "tool_name"
+          ; "input_hash"
+          ; "input"
+          ; "requested_at"
+          ; "turn_id"
+          ; "request_context"
+          ; "task_id"
+          ; "goal_id"
+          ; "goal_ids"
+          ; "continuation_channel"
+          ; "summary_status"
+          ]
+        fields
+    in
+    let* id = required_string ~surface "id" fields in
+    let* keeper_name = required_string ~surface "keeper_name" fields in
+    let* tool_name = required_string ~surface "tool_name" fields in
+    let* input_hash = required_string ~surface "input_hash" fields in
+    let* input = required_member ~surface "input" fields in
+    let expected_hash = request_fingerprint input in
+    let* () =
+      if String.equal input_hash expected_hash
+      then Ok ()
+      else Error (Printf.sprintf "%s.input_hash does not match input" surface)
+    in
+    let* requested_at = required_float ~surface "requested_at" fields in
+    let* turn_id = optional_nonnegative_int ~surface "turn_id" fields in
+    let request_context =
+      match List.assoc_opt "request_context" fields with
+      | None | Some `Null -> None
+      | Some context -> Some context
+    in
+    let* task_id = optional_string ~surface "task_id" fields in
+    let* goal_id = optional_string ~surface "goal_id" fields in
+    let* goal_ids = required_string_list ~surface "goal_ids" fields in
+    let* continuation_json = required_member ~surface "continuation_channel" fields in
+    let* continuation_channel = Keeper_continuation_channel.of_yojson continuation_json in
+    let* summary_json = required_member ~surface "summary_status" fields in
+    let* summary_status = summary_status_of_yojson_with_error summary_json in
+    Ok
+      { id
+      ; keeper_name
+      ; tool_name
+      ; input_hash
+      ; input
+      ; requested_at
+      ; turn_id
+      ; request_context
+      ; task_id
+      ; goal_id
+      ; goal_ids
+      ; continuation_channel
+      ; audit_base_path = base_path
+      ; summary_status
+      }
+  | _ -> Error "gate_pending.entry must be a JSON object"
+;;
+
+let approval_decision_of_yojson json =
+  match json with
+  | `Assoc fields ->
+    let ( let* ) = Result.bind in
+    let* kind = required_string ~surface:"gate_pending.decision" "kind" fields in
+    (match kind with
+     | "approve" ->
+       let* () =
+         reject_unknown_fields
+           ~surface:"gate_pending.decision"
+           ~allowed:[ "kind" ]
+           fields
+       in
+       Ok Agent_sdk.Hooks.Approve
+     | "reject" ->
+       let* () =
+         reject_unknown_fields
+           ~surface:"gate_pending.decision"
+           ~allowed:[ "kind"; "reason" ]
+           fields
+       in
+       let* reason = required_string ~surface:"gate_pending.decision" "reason" fields in
+       Ok (Agent_sdk.Hooks.Reject reason)
+     | "edit" ->
+       let* () =
+         reject_unknown_fields
+           ~surface:"gate_pending.decision"
+           ~allowed:[ "kind"; "input" ]
+           fields
+       in
+       let* input = required_member ~surface:"gate_pending.decision" "input" fields in
+       Ok (Agent_sdk.Hooks.Edit input)
+     | other -> Error (Printf.sprintf "gate_pending.decision kind %S is unknown" other))
+  | _ -> Error "gate_pending.decision must be a JSON object"
+;;
+
+let persisted_delivery_of_yojson ~base_path json =
+  match json with
+  | `Assoc fields ->
+    let ( let* ) = Result.bind in
+    let surface = "gate_pending.delivery" in
+    let* () =
+      reject_unknown_fields
+        ~surface
+        ~allowed:
+          [ "entry"
+          ; "decision"
+          ; "source"
+          ; "remember_rule"
+          ; "created_by"
+          ; "grant_consumed"
+          ]
+        fields
+    in
+    let* entry_json = required_member ~surface "entry" fields in
+    let* entry = pending_entry_of_yojson ~base_path entry_json in
+    let* decision_json = required_member ~surface "decision" fields in
+    let* decision = approval_decision_of_yojson decision_json in
+    let* source_raw = required_string ~surface "source" fields in
+    let* source =
+      match decision_source_of_string source_raw with
+      | Some source -> Ok source
+      | None -> Error (Printf.sprintf "%s.source %S is unknown" surface source_raw)
+    in
+    let* remember_rule =
+      match List.assoc_opt "remember_rule" fields with
+      | Some (`Bool value) -> Ok value
+      | Some _ -> Error (surface ^ ".remember_rule must be a boolean")
+      | None -> Error (surface ^ ".remember_rule is required")
+    in
+    let* created_by = optional_string ~surface "created_by" fields in
+    let* grant_consumed =
+      match List.assoc_opt "grant_consumed" fields with
+      | Some (`Bool value) -> Ok value
+      | Some _ -> Error (surface ^ ".grant_consumed must be a boolean")
+      | None -> Error (surface ^ ".grant_consumed is required")
+    in
+    let* () =
+      match decision, grant_consumed with
+      | Agent_sdk.Hooks.Approve, _ -> Ok ()
+      | (Agent_sdk.Hooks.Reject _ | Agent_sdk.Hooks.Edit _), false -> Ok ()
+      | (Agent_sdk.Hooks.Reject _ | Agent_sdk.Hooks.Edit _), true ->
+        Error (surface ^ ".grant_consumed is valid only for approve")
+    in
+    Ok { entry; decision; source; remember_rule; created_by; grant_consumed }
+  | _ -> Error "gate_pending.delivery must be a JSON object"
+;;
+
+let map_of_unique_entries ~surface ~id_of entries =
+  let rec build map = function
+    | [] -> Ok map
+    | entry :: rest ->
+      let id = id_of entry in
+      if SMap.mem id map
+      then Error (Printf.sprintf "%s contains duplicate id %s" surface id)
+      else build (SMap.add id entry map) rest
+  in
+  build SMap.empty entries
+;;
+
+let first_shared_id left right =
+  SMap.fold
+    (fun id _ found ->
+       match found with
+       | Some _ -> found
+       | None -> if SMap.mem id right then Some id else None)
+    left
+    None
+;;
+
+let parse_list ~surface parse = function
+  | `List values ->
+    let rec loop index acc = function
+      | [] -> Ok (List.rev acc)
+      | value :: rest ->
+        (match parse value with
+         | Ok parsed -> loop (index + 1) (parsed :: acc) rest
+         | Error reason -> Error (Printf.sprintf "%s[%d]: %s" surface index reason))
+    in
+    loop 0 [] values
+  | _ -> Error (surface ^ " must be an array")
+;;
+
+let snapshot_of_yojson ~base_path json =
+  match json with
+  | `Assoc fields ->
+    let ( let* ) = Result.bind in
+    let surface = "gate_pending" in
+    let* () =
+      reject_unknown_fields
+        ~surface
+        ~allowed:[ "version"; "pending"; "deliveries" ]
+        fields
+    in
+    let* () =
+      match List.assoc_opt "version" fields with
+      | Some (`Int version) when version = pending_store_version -> Ok ()
+      | Some (`Int version) ->
+        Error (Printf.sprintf "%s.version %d is unsupported" surface version)
+      | Some _ -> Error (surface ^ ".version must be an integer")
+      | None -> Error (surface ^ ".version is required")
+    in
+    let* pending_json = required_member ~surface "pending" fields in
+    let* pending_entries =
+      parse_list ~surface:"gate_pending.pending" (pending_entry_of_yojson ~base_path) pending_json
+    in
+    let* delivery_json = required_member ~surface "deliveries" fields in
+    let* delivery_entries =
+      parse_list
+        ~surface:"gate_pending.deliveries"
+        (persisted_delivery_of_yojson ~base_path)
+        delivery_json
+    in
+    let* pending_map =
+      map_of_unique_entries
+        ~surface:"gate_pending.pending"
+        ~id_of:(fun (entry : pending_approval) -> entry.id)
+        pending_entries
+    in
+    let* delivery_map =
+      map_of_unique_entries
+        ~surface:"gate_pending.deliveries"
+        ~id_of:(fun (delivery : persisted_delivery) -> delivery.entry.id)
+        delivery_entries
+    in
+    let* () =
+      match first_shared_id pending_map delivery_map with
+      | None -> Ok ()
+      | Some id -> Error (Printf.sprintf "gate_pending id %s exists in both states" id)
+    in
+    Ok (pending_map, delivery_map)
+  | _ -> Error "gate_pending snapshot must be a JSON object"
+;;
+
+let load_snapshot_unlocked ~base_path =
+  let path = pending_store_path ~base_path in
+  try
+    if not (Sys.file_exists path)
+    then Ok (SMap.empty, SMap.empty)
+    else (
+      match Safe_ops.read_json_file_safe path with
+      | Error reason ->
+        report_pending_read_drop
+          ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+          ~path
+          ~detail:reason;
+        Error { path; reason }
+      | Ok json ->
+        (match snapshot_of_yojson ~base_path json with
+         | Ok snapshot -> Ok snapshot
+         | Error reason ->
+           report_pending_read_drop
+             ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+             ~path
+             ~detail:reason;
+           Error { path; reason }))
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    let reason = Printexc.to_string exn in
+    report_pending_read_drop
+      ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+      ~path
+      ~detail:reason;
+    Error { path; reason }
+;;
+
+let remove_base_entries ~base_path map project =
+  SMap.filter
+    (fun _id value ->
+       not (String.equal (project value).audit_base_path base_path))
+    map
+;;
+
+let merge_loaded_map ~surface ~existing ~loaded =
+  SMap.fold
+    (fun id value result ->
+       match result with
+       | Error _ as error -> error
+       | Ok map ->
+         if SMap.mem id map
+         then Error (Printf.sprintf "%s id %s collides with another workspace" surface id)
+         else Ok (SMap.add id value map))
+    loaded
+    (Ok existing)
+;;
 
 (* ── Persistent audit log ────────────────────────────────── *)
 
@@ -81,7 +630,6 @@ let read_recent_audit_raw store limit =
 
 let approval_audit_pending_event = "pending"
 let approval_audit_resolved_event = "resolved"
-let approval_audit_hard_forbidden_event = "hard_forbidden"
 let approval_audit_summary_event = "summary_updated"
 let approval_sse_pending_event = "approval:pending"
 let approval_sse_resolved_event = "approval:resolved"
@@ -92,15 +640,10 @@ let non_empty_reason reason =
   if String.equal reason "" then None else Some reason
 ;;
 
-let approval_audit_decision_kind_and_reason = function
-  | Approval_resolved Agent_sdk.Hooks.Approve -> "approve", None
-  | Approval_resolved (Agent_sdk.Hooks.Reject reason) -> "reject", non_empty_reason reason
-  | Approval_resolved (Agent_sdk.Hooks.Edit _) -> "edit", None
-  | Approval_expired reason -> "reject", non_empty_reason reason
-;;
-
-let approval_audit_disposition_fields = function
-  | Approval_escalated reason -> "escalated", non_empty_reason reason
+let approval_decision_kind_and_reason = function
+  | Agent_sdk.Hooks.Approve -> "approve", None
+  | Agent_sdk.Hooks.Reject reason -> "reject", non_empty_reason reason
+  | Agent_sdk.Hooks.Edit _ -> "edit", None
 ;;
 
 let keeper_audit_metric_label = function
@@ -135,7 +678,7 @@ let get_audit_store ~base_path () =
   in
   try
     match
-      mutex_protect_allow_reentrant audit_stores_mu (fun () ->
+      Stdlib.Mutex.protect audit_stores_mu (fun () ->
         try
           Ok
             (match Hashtbl.find_opt audit_stores base_path with
@@ -166,23 +709,14 @@ let audit_approval_event
       ~id
       ~keeper_name
       ~tool_name
-      ~risk_level
       ?turn_id
       ?task_id
       ?goal_id
       ?(goal_ids = [])
-      ?sandbox_target
-      ?runtime_contract
-      ?selected_model:(selected_model : string option)
-      ?audit_disposition
-      ?disposition
-      ?disposition_reason
       ?rule_match
       ?source_approval_id
       ?actor
-      ?approval_mode
-      ?authorizing_band
-      ?auto_approved
+      ?decision_source
       ?decision
       ()
   =
@@ -190,18 +724,8 @@ let audit_approval_event
     match decision with
     | None -> "", None, None
     | Some decision ->
-      let kind, reason = approval_audit_decision_kind_and_reason decision in
-      approval_audit_decision_to_string decision, Some kind, reason
-  in
-  let disposition, disposition_reason =
-    match audit_disposition with
-    | None -> disposition, disposition_reason
-    | Some audit_disposition ->
-      if Option.is_some disposition || Option.is_some disposition_reason then
-        invalid_arg
-          "audit_approval_event: audit_disposition cannot be combined with raw disposition fields";
-      let disposition, reason = approval_audit_disposition_fields audit_disposition in
-      Some disposition, reason
+      let kind, reason = approval_decision_kind_and_reason decision in
+      approval_decision_to_string decision, Some kind, reason
   in
   match get_audit_store ~base_path () with
   | None -> ()
@@ -213,23 +737,17 @@ let audit_approval_event
          ; "id", `String id
          ; "keeper", `String keeper_name
          ; "tool", `String tool_name
-         ; "risk", `String (risk_level_to_string risk_level)
          ; "decision", `String decision
          ; "turn_id", Json_util.int_opt_to_json turn_id
          ; "task_id", Json_util.string_opt_to_json task_id
          ; "goal_id", Json_util.string_opt_to_json goal_id
          ; "goal_ids", `List (List.map (fun goal -> `String goal) goal_ids)
-         ; "selected_model", `Null
-         ; "sandbox_target", Json_util.string_opt_to_json sandbox_target
          ; "actor", Json_util.string_opt_to_json actor
-         ; "approval_mode", Json_util.string_opt_to_json approval_mode
-         ; "authorizing_band", Json_util.string_opt_to_json authorizing_band
-         ; "disposition", Json_util.string_opt_to_json disposition
-         ; "disposition_reason", Json_util.string_opt_to_json disposition_reason
+         ; ( "decision_source"
+           , match decision_source with
+             | Some source -> `String (decision_source_to_string source)
+             | None -> `Null )
          ]
-         @ (match runtime_contract with
-            | Some json -> [ "runtime_contract", json ]
-            | None -> [])
          @ (match rule_match with
             | Some matched -> [ "rule_match", rule_match_to_yojson matched ]
             | None -> [])
@@ -242,12 +760,9 @@ let audit_approval_event
          @ (match decision_reason with
             | Some reason -> [ "decision_reason", `String reason ]
             | None -> [])
-         @
-         match auto_approved with
-         | Some value -> [ "auto_approved", `Bool value ]
-         | None -> [])
+         )
     in
-    mutex_protect_allow_reentrant audit_io_mu (fun () ->
+    Stdlib.Mutex.protect audit_io_mu (fun () ->
       try
         Fs_compat.append_jsonl (audit_today_path (Dated_jsonl.base_dir store)) json;
         invalidate_recent_audit_cache_for_store store
@@ -263,7 +778,6 @@ let audit_rule_event ~base_path ~event_type (rule : approval_rule) =
     ~id:rule.id
     ~keeper_name:rule.keeper_name
     ~tool_name:rule.tool_name
-    ~risk_level:rule.max_risk
     ?source_approval_id:rule.source_approval_id
     ()
 ;;
@@ -332,26 +846,15 @@ let closed_decision_kind_of_string value =
   | _ -> None
 ;;
 
-let legacy_decision_kind_of_string value =
-  let value = String.trim value in
-  match closed_decision_kind_of_string value with
-  | Some _ as kind -> kind
-  | None when String.starts_with ~prefix:"reject:" value -> Some "reject"
-  | None -> None
-;;
-
 let resolved_approval_decision_kind json =
-  match Option.bind (Safe_ops.json_string_opt "decision_kind" json) closed_decision_kind_of_string with
-  | Some _ as kind -> kind
-  | None ->
-    Option.bind (Safe_ops.json_string_opt "decision" json) legacy_decision_kind_of_string
+  Option.bind
+    (Safe_ops.json_string_opt "decision_kind" json)
+    closed_decision_kind_of_string
 ;;
 
 let resolved_history_event json =
   match Safe_ops.json_string_opt "event" json with
-  | Some event ->
-    String.equal event approval_audit_resolved_event
-    || String.equal event approval_audit_hard_forbidden_event
+  | Some event -> String.equal event approval_audit_resolved_event
   | None -> false
 ;;
 
@@ -362,26 +865,16 @@ let resolved_approval_json_of_audit_event json =
     ; "event", `String (Safe_ops.json_string ~default:"" "event" json)
     ; "keeper_name", `String (Safe_ops.json_string ~default:"" "keeper" json)
     ; "tool_name", `String (Safe_ops.json_string ~default:"" "tool" json)
-    ; "risk_level", `String (Safe_ops.json_string ~default:"" "risk" json)
     ; "decision", Json_util.string_opt_to_json_trimmed (Safe_ops.json_string_opt "decision" json)
     ; "decision_kind", Json_util.string_opt_to_json_trimmed (resolved_approval_decision_kind json)
     ; "decision_reason", json_member_or_null "decision_reason" json
     ; "resolved_at", Json_util.float_opt_to_json resolved_at
-    ; ( "resolved_at_iso",
-        match resolved_at with
-        | Some ts -> `String (Masc_domain.iso8601_of_unix_seconds ts)
-        | None -> `Null )
     ; "turn_id", json_member_or_null "turn_id" json
     ; "task_id", json_member_or_null "task_id" json
     ; "goal_id", json_member_or_null "goal_id" json
     ; "goal_ids", json_member_or_null "goal_ids" json
-    ; "sandbox_target", json_member_or_null "sandbox_target" json
-    ; "disposition", json_member_or_null "disposition" json
-    ; "disposition_reason", json_member_or_null "disposition_reason" json
     ; "actor", json_member_or_null "actor" json
-    ; "approval_mode", json_member_or_null "approval_mode" json
-    ; "authorizing_band", json_member_or_null "authorizing_band" json
-    ; "auto_approved", json_member_or_null "auto_approved" json
+    ; "decision_source", json_member_or_null "decision_source" json
     ; "rule_match", json_member_or_null "rule_match" json
     ]
 ;;
@@ -413,34 +906,138 @@ let list_recent_resolved_json ~base_path ?(n = recent_resolved_history_limit) ()
 
 let generate_id () = make_generated_id "appr"
 
-let rec canonical_exact_input = function
-  | `Assoc fields ->
-    fields
-    |> List.map (fun (key, value) -> key, canonical_exact_input value)
-    |> List.stable_sort (fun (left, _) (right, _) -> String.compare left right)
-    |> fun normalized -> `Assoc normalized
-  | `List items -> `List (List.map canonical_exact_input items)
-  | other -> other
+let default_continuation_channel () =
+  Keeper_continuation_channel.unrouted "no originating connector"
 ;;
 
-let normalized_input_hash (input : Yojson.Safe.t) =
-  let canonical = canonical_exact_input input |> Yojson.Safe.to_string in
-  Digestif.SHA256.(digest_string canonical |> to_hex)
+let normalized_input_hash = request_fingerprint
+
+type approved_delivery_lookup =
+  | Approved_delivery_unconsumed of persisted_delivery
+  | Approved_delivery_consumed
+
+type grant_consumption_commit =
+  | Consumption_without_audit of grant_consumption
+  | Consumption_with_audit of persisted_delivery
+
+let grant_workspace_mismatch ~base_path approval_id stored_base_path =
+  Grant_workspace_mismatch
+    { approval_id
+    ; requested_base_path = base_path
+    ; stored_base_path
+    }
 ;;
 
-let approved_action_matches_request
-      (approved : Keeper_event_queue.hitl_approved_action)
+let approved_delivery_unlocked ~base_path ~id =
+  match SMap.find_opt base_path (Atomic.get unavailable_stores) with
+  | Some error -> Error (Grant_store_unavailable error)
+  | None ->
+    (match SMap.find_opt id (Atomic.get deliveries) with
+     | Some delivery ->
+       let stored_base_path = delivery.entry.audit_base_path in
+       if not (String.equal stored_base_path base_path)
+       then Error (grant_workspace_mismatch ~base_path id stored_base_path)
+       else
+         (match delivery.decision with
+          | Agent_sdk.Hooks.Approve ->
+            if delivery.grant_consumed
+            then Ok Approved_delivery_consumed
+            else Ok (Approved_delivery_unconsumed delivery)
+          | Agent_sdk.Hooks.Reject _ | Agent_sdk.Hooks.Edit _ ->
+            Error (Grant_resolution_not_approved id))
+     | None ->
+       (match SMap.find_opt id (Atomic.get pending) with
+        | Some entry ->
+          if String.equal entry.audit_base_path base_path
+          then Error (Grant_still_pending id)
+          else
+            Error
+              (grant_workspace_mismatch
+                 ~base_path
+                 id
+                 entry.audit_base_path)
+        | None -> Error (Grant_resolution_missing id)))
+;;
+
+let approved_resolution_request ~base_path ~id =
+  Stdlib.Mutex.protect pending_store_mu (fun () ->
+    match approved_delivery_unlocked ~base_path ~id with
+    | Error _ as error -> error
+    | Ok Approved_delivery_consumed -> Ok None
+    | Ok (Approved_delivery_unconsumed delivery) ->
+      Ok
+        (Some
+           { keeper_name = delivery.entry.keeper_name
+           ; tool_name = delivery.entry.tool_name
+           ; input = delivery.entry.input
+           }))
+;;
+
+let approved_resolution_state ~base_path ~id =
+  Stdlib.Mutex.protect pending_store_mu (fun () ->
+    match approved_delivery_unlocked ~base_path ~id with
+    | Error _ as error -> error
+    | Ok Approved_delivery_consumed -> Ok Resolution_consumed
+    | Ok (Approved_delivery_unconsumed _) -> Ok Resolution_unconsumed)
+;;
+
+let consume_approved_resolution
+      ~base_path
+      ~id
       ~keeper_name
       ~tool_name
       ~input
   =
-  String.equal approved.keeper_name keeper_name
-  && String.equal approved.tool_name tool_name
-  && String.equal approved.input_hash (normalized_input_hash input)
-;;
-
-let first_cmd_token (cmd : string) =
-  Keeper_tool_command_words.first_token_of_cmd cmd
+  let result =
+    Stdlib.Mutex.protect pending_store_mu (fun () ->
+      match approved_delivery_unlocked ~base_path ~id with
+      | Error error -> Error error
+      | Ok Approved_delivery_consumed ->
+        Ok (Consumption_without_audit Consumption_already_committed)
+      | Ok (Approved_delivery_unconsumed delivery) ->
+        let entry = delivery.entry in
+        if
+          not
+            (String.equal entry.keeper_name keeper_name
+             && String.equal entry.tool_name tool_name
+             && String.equal entry.input_hash (normalized_input_hash input))
+        then Ok (Consumption_without_audit Consumption_not_matching)
+        else
+          let consumed_delivery = { delivery with grant_consumed = true } in
+          let updated_deliveries =
+            SMap.add id consumed_delivery (Atomic.get deliveries)
+          in
+          (match
+             persist_snapshot_unlocked
+               ~base_path
+               ~pending_map:(Atomic.get pending)
+               ~delivery_map:updated_deliveries
+           with
+           | Error error -> Error (Grant_store_unavailable error)
+           | Ok () ->
+             Atomic.set deliveries updated_deliveries;
+             Ok (Consumption_with_audit delivery)))
+  in
+  match result with
+  | Error _ as error -> error
+  | Ok (Consumption_without_audit consumption) -> Ok consumption
+  | Ok (Consumption_with_audit delivery) ->
+    let entry = delivery.entry in
+    audit_approval_event
+      ~base_path
+      ~event_type:"grant_consumed"
+      ~id
+      ~keeper_name:entry.keeper_name
+      ~tool_name:entry.tool_name
+      ?turn_id:entry.turn_id
+      ?task_id:entry.task_id
+      ?goal_id:entry.goal_id
+      ~goal_ids:entry.goal_ids
+      ~source_approval_id:id
+      ~decision_source:delivery.source
+      ~decision:Agent_sdk.Hooks.Approve
+      ();
+    Ok Consumption_committed
 ;;
 
 module For_testing = struct
@@ -450,39 +1047,18 @@ module For_testing = struct
       Hashtbl.clear recent_audit_cache)
   ;;
 
-  let first_cmd_token = first_cmd_token
-
   let get_pending_entry ~id = SMap.find_opt id (Atomic.get pending)
+
+  let reset_runtime_state () =
+    Stdlib.Mutex.protect pending_store_mu (fun () ->
+      Atomic.set pending SMap.empty;
+      Atomic.set deliveries SMap.empty;
+      Atomic.set unavailable_stores SMap.empty)
+  ;;
+
+  let pending_store_path = pending_store_path
+  let always_allowed_store_path ~base_path = rules_path ~base_path ()
 end
-
-let action_key_of_input ~tool_name ~(input : Yojson.Safe.t) =
-  match Safe_ops.json_string_opt "op" input with
-  | Some op when String.trim op <> "" -> "op:" ^ String.trim op
-  | _ ->
-    (match Safe_ops.json_string_opt "action" input with
-     | Some action when String.trim action <> "" -> "action:" ^ String.trim action
-     | _ ->
-       (match Safe_ops.json_string_opt "kind" input with
-        | Some kind when String.trim kind <> "" -> "kind:" ^ String.trim kind
-        | _ ->
-          (match
-             Safe_ops.json_string_opt "cmd" input
-             |> fun value -> Option.bind value first_cmd_token
-           with
-           | Some token -> "cmd:" ^ token
-           | None -> "tool:" ^ tool_name)))
-;;
-
-let sandbox_target_of_runtime_contract = function
-  | Some runtime_contract ->
-    (match Safe_ops.json_string_opt "sandbox_target" runtime_contract with
-     | Some target when String.trim target <> "" -> String.trim target
-     | _ ->
-       (match Safe_ops.json_string_opt "backend" runtime_contract with
-        | Some backend when String.trim backend <> "" -> String.trim backend
-        | _ -> "unknown"))
-  | None -> "unknown"
-;;
 
 let input_preview_of_json (json : Yojson.Safe.t) =
   (* Per-leaf marker-aware truncation: a naive [String.sub] on the
@@ -499,157 +1075,56 @@ let create_entry
       ~keeper_name
       ~tool_name
       ~input
-      ~risk_level
       ?turn_id
+      ?request_context
       ?task_id
       ?goal_id
       ?(goal_ids = [])
-      ?sandbox_target
-      ?sandbox_profile
-      ?backend
-      ?runtime_contract
-      ?selected_model
-      ?disposition
-      ?disposition_reason
-      ?(continuation_channel =
-         (* Missing connector fails closed as [Unrouted]; the reason string is
-            pinned by test_keeper_approval_queue "missing connector fails
-            closed" (#23716). #23845 reworded it in passing (main red #23901,
-            family B). *)
-         Keeper_continuation_channel.unrouted "no originating connector")
-      ~lane_policy
+      ~continuation_channel
       ~audit_base_path
-      ~resolver
-      ~on_resolution
       ()
   =
-  let action_key = action_key_of_input ~tool_name ~input in
   let input_hash = normalized_input_hash input in
-  let sandbox_target =
-    match nonempty_string_opt sandbox_target with
-    | Some target -> target
-    | None -> sandbox_target_of_runtime_contract runtime_contract
-  in
-  let sandbox_profile =
-    sandbox_profile_of_runtime_context ?sandbox_profile runtime_contract
-  in
-  let backend = backend_of_runtime_context ?backend runtime_contract in
   { id
   ; keeper_name
   ; tool_name
-  ; action_key
   ; input_hash
-  ; sandbox_target
-  ; sandbox_profile
-  ; backend
   ; input
-  ; risk_level
   ; requested_at = Unix.gettimeofday ()
   ; turn_id
+  ; request_context
   ; task_id
   ; goal_id
   ; goal_ids
-  ; runtime_contract
-  ; selected_model
-  ; disposition
-  ; disposition_reason
-  ; phase = Awaiting_operator
-  ; lane_policy
   ; continuation_channel
   ; audit_base_path
-  ; resolver
-  ; on_resolution
-  ; context_summary = None
   ; summary_status = Summary_not_requested
-  ; channel = Some continuation_channel
   }
 ;;
 
-let update_pending_phase ~id phase =
-  atomic_update pending (fun map ->
-    match SMap.find_opt id map with
-    | None -> map
-    | Some entry ->
-      let entry' = { entry with phase } in
-      SMap.add id entry' map);
-  match SMap.find_opt id (Atomic.get pending) with
-  | Some entry when entry.phase = phase -> Some entry
-  | Some entry ->
-    Log.Keeper.warn
-      "approval_queue: update_pending_phase id=%s phase race current=%s expected=%s"
-      id
-      (pending_phase_to_string entry.phase)
-      (pending_phase_to_string phase);
-    None
-  | None ->
-    Log.Keeper.warn
-      "approval_queue: update_pending_phase id=%s not found"
-      id;
-    None
-;;
-
 let pending_entry_json_fields
-      ?(include_requested_at_iso = false)
-      ?(include_runtime_contract = false)
       ?(include_input = false)
       (entry : pending_approval)
   =
   [ "id", `String entry.id
   ; "keeper_name", `String entry.keeper_name
   ; "tool_name", `String entry.tool_name
-  ; "action_key", `String entry.action_key
-  ; "sandbox_target", `String entry.sandbox_target
-  ; "risk_level", `String (risk_level_to_string entry.risk_level)
-  ; "phase", `String (pending_phase_to_string entry.phase)
-  ; "lane_policy", `String (lane_policy_to_string entry.lane_policy)
   ; "requested_at", `Float entry.requested_at
   ; "waiting_s", `Float (Unix.gettimeofday () -. entry.requested_at)
   ; "turn_id", Json_util.int_opt_to_json entry.turn_id
   ; "task_id", Json_util.string_opt_to_json entry.task_id
   ; "goal_id", Json_util.string_opt_to_json entry.goal_id
   ; "goal_ids", `List (List.map (fun goal -> `String goal) entry.goal_ids)
-  ; "selected_model", `Null
-  ; "disposition", Json_util.string_opt_to_json entry.disposition
-  ; "disposition_reason", Json_util.string_opt_to_json entry.disposition_reason
   ]
-  @ (if include_requested_at_iso
-     then
-       [ ( "requested_at_iso"
-         , `String (Masc_domain.iso8601_of_unix_seconds entry.requested_at) )
-       ]
-     else [])
-  @ (if include_runtime_contract
-     then
-       [ ( "runtime_contract"
-         , match entry.runtime_contract with
-           | Some json -> json
-           | None when String.equal entry.sandbox_target "unknown" -> `Null
-           | None ->
-             `Assoc
-               [ "backend", `String entry.sandbox_target
-               ; "sandbox_target", `String entry.sandbox_target
-               ] )
-       ]
-     else [])
   @ (if include_input
      then
        [ "input", entry.input
        ; "input_preview", `String (input_preview_of_json entry.input)
        ]
      else [])
-    (* The [include_input] conditional MUST stay parenthesized. Without the
-       parens the trailing [@ summary fields] is parsed as part of the [else]
-       branch ([else ([] @ summary)]), so [include_input = true] silently drops
-       [summary_status]/[context_summary] from the payload. Every dashboard
-       path ([list_pending_dashboard_json], [pending_entry_detail_json],
-       [broadcast_pending]) passes [include_input:true], so the HITL context
-       summary would never reach an operator. *)
-  @ [ "summary_status", summary_status_to_yojson entry.summary_status
-    ; ( "context_summary"
-      , match entry.context_summary with
-        | Some summary -> hitl_context_summary_to_yojson summary
-        | None -> `Null )
-    ]
+    (* The [include_input] conditional stays parenthesized so the trailing
+       canonical [summary_status] field is present in every wire shape. *)
+  @ [ "summary_status", summary_status_to_yojson entry.summary_status ]
 ;;
 
 let broadcast_pending entry =
@@ -660,7 +1135,6 @@ let broadcast_pending entry =
           ; ( "payload"
             , `Assoc
                 (pending_entry_json_fields
-                   ~include_runtime_contract:true
                    ~include_input:true
                    entry) )
           ])
@@ -677,46 +1151,36 @@ let broadcast_pending entry =
 
 let record_pending (entry : pending_approval) =
   Log.Keeper.info
-    "HITL_APPROVAL_PENDING: id=%s keeper=%s tool=%s risk=%s lane_policy=%s"
+    "HITL_APPROVAL_PENDING: id=%s keeper=%s tool=%s"
     entry.id
     entry.keeper_name
-    entry.tool_name
-    (risk_level_to_string entry.risk_level)
-    (lane_policy_to_string entry.lane_policy);
+    entry.tool_name;
   audit_approval_event
     ~base_path:entry.audit_base_path
     ~event_type:approval_audit_pending_event
     ~id:entry.id
     ~keeper_name:entry.keeper_name
     ~tool_name:entry.tool_name
-    ~risk_level:entry.risk_level
     ?turn_id:entry.turn_id
     ?task_id:entry.task_id
     ?goal_id:entry.goal_id
     ~goal_ids:entry.goal_ids
-    ~sandbox_target:entry.sandbox_target
-    ?runtime_contract:entry.runtime_contract
-    ?selected_model:entry.selected_model
-    ?disposition:entry.disposition
-    ?disposition_reason:entry.disposition_reason
     ();
   broadcast_pending entry
 ;;
 
 let summary_audit_extras (entry : pending_approval) : (string * Yojson.Safe.t) list =
-  match entry.context_summary with
-  | Some summary -> [ "model_run_id", `String summary.model_run_id ]
-  | None ->
-    (match entry.summary_status with
-     | Summary_failed { reason; _ } -> [ "failure_reason", `String reason ]
-     | _ -> [])
+  match entry.summary_status with
+  | Summary_available summary -> [ "model_run_id", `String summary.model_run_id ]
+  | Summary_failed { reason; _ } -> [ "failure_reason", `String reason ]
+  | Summary_not_requested | Summary_pending -> []
 ;;
 
 let record_summary_updated ~now (entry : pending_approval) =
   let event_ts =
-    match entry.context_summary with
-    | Some summary -> summary.generated_at
-    | None -> now
+    match entry.summary_status with
+    | Summary_available summary -> summary.generated_at
+    | Summary_not_requested | Summary_pending | Summary_failed _ -> now
   in
   (try
      match get_audit_store ~base_path:entry.audit_base_path () with
@@ -731,7 +1195,7 @@ let record_summary_updated ~now (entry : pending_approval) =
             ]
             @ summary_audit_extras entry)
        in
-       mutex_protect_allow_reentrant audit_io_mu (fun () ->
+       Stdlib.Mutex.protect audit_io_mu (fun () ->
          Fs_compat.append_jsonl (audit_today_path (Dated_jsonl.base_dir store)) json;
          invalidate_recent_audit_cache_for_store store)
    with
@@ -750,7 +1214,6 @@ let record_summary_updated ~now (entry : pending_approval) =
          ; ( "payload"
            , `Assoc
                (pending_entry_json_fields
-                  ~include_runtime_contract:true
                   ~include_input:false
                   entry) )
          ])
@@ -765,109 +1228,122 @@ let record_summary_updated ~now (entry : pending_approval) =
       exn
 ;;
 
-(* ── In-place entry updates (copy-on-write) ──────────────── *)
+(* ── Durable summary-state transitions ───────────────────── *)
 
 (** Read a pending entry by id. Returns [None] if already resolved. *)
 let get_pending_entry ~id : pending_approval option = SMap.find_opt id (Atomic.get pending)
 
-(** Apply [f] to the pending entry with [id] if it still exists.
-    Used by the HITL context-summary worker for non-blocking updates. *)
-let update_pending_entry ~id f =
-  atomic_update pending (fun map ->
+(** Complete an in-flight judge exactly once. A result cannot skip the
+    [Summary_pending] state or overwrite a terminal summary. *)
+let complete_summary ~id summary_status =
+  Stdlib.Mutex.protect pending_store_mu (fun () ->
+    let map = Atomic.get pending in
     match SMap.find_opt id map with
-    | None -> map
-    | Some entry -> SMap.add id (f entry) map)
+    | None -> Ok false
+    | Some ({ summary_status = Summary_pending; _ } as entry) ->
+      let updated = SMap.add id { entry with summary_status } map in
+      (match
+         persist_snapshot_unlocked
+           ~base_path:entry.audit_base_path
+           ~pending_map:updated
+           ~delivery_map:(Atomic.get deliveries)
+       with
+       | Error _ as error -> error
+       | Ok () ->
+         Atomic.set pending updated;
+         Ok true)
+    | Some
+        { summary_status =
+            (Summary_not_requested | Summary_available _ | Summary_failed _)
+        ; _
+        } ->
+      Ok false)
 ;;
 
-let record_summary_failure ~id ~reason ~retryable =
+let publish_summary_update ~id =
   let now = Time_compat.now () in
-  update_pending_entry ~id (fun e ->
-    { e with summary_status = Summary_failed { reason; retryable } });
   match get_pending_entry ~id with
   | Some updated -> record_summary_updated ~now updated
   | None -> ()
 ;;
 
-type summary_provider =
-  { runtime_id : string
-  ; provider_config : Llm_provider.Provider_config.t
-  }
-
-let provider_config_for_summary ~keeper_name =
-  (* The HITL evaluator is a dedicated judge (mirroring the memory-os librarian's
-     dedicated runtime), not the requesting keeper's own model. Route to the
-     [runtime].hitl_summary lane; [Runtime.runtime_id_for_hitl_summary] already
-     encodes the fallback chain hitl_summary -> structured_judge -> librarian ->
-     default, so an operator-selected HITL lane wins and unset deployments keep
-     the judge routing. Fall back to the keeper's own runtime only when the
-     resolved lane id has no runtime entry. *)
-  let resolve runtime_id =
-    Option.map
-      (fun rt -> { runtime_id; provider_config = rt.Runtime.provider_config })
-      (Runtime.get_runtime_by_id runtime_id)
-  in
-  let keeper_runtime_id () =
-    match Runtime.runtime_id_for_keeper keeper_name with
-    | Some id when String.trim id <> "" -> id
-    | Some _ | None -> Keeper_config.default_runtime_id ()
-  in
-  let summary_runtime_id = Runtime.runtime_id_for_hitl_summary () in
-  match resolve summary_runtime_id with
-  | Some _ as cfg -> cfg
-  | None ->
-    let fallback_runtime_id = keeper_runtime_id () in
-    Log.Keeper.warn ~keeper_name
-      "HITL summary lane runtime=%s is unavailable; falling back to keeper runtime=%s"
-      summary_runtime_id
-      fallback_runtime_id;
-    resolve fallback_runtime_id
+let publish_summary_transition ~id = function
+  | Ok true ->
+    publish_summary_update ~id;
+    Ok true
+  | Ok false -> Ok false
+  | Error error -> Error error
 ;;
 
-let spawn_hitl_summary_worker ~sw ~(entry : pending_approval) =
-  let now = Time_compat.now () in
-  match entry.risk_level with
-  | Low -> ()
-  | Medium | High | Critical ->
-    update_pending_entry ~id:entry.id (fun e ->
-      { e with summary_status = Summary_pending });
-    let on_summary summary =
-      update_pending_entry ~id:entry.id (fun e ->
-        { e with
-          context_summary = Some summary
-        ; summary_status = Summary_available summary
-        });
-      match get_pending_entry ~id:entry.id with
-      | Some updated -> record_summary_updated ~now updated
-      | None -> ()
-    in
-    let on_failure ~reason ~retryable =
-      record_summary_failure ~id:entry.id ~reason ~retryable
-    in
-    match provider_config_for_summary ~keeper_name:entry.keeper_name with
-    | None ->
-      on_failure ~reason:"HITL summary: no runtime provider config available" ~retryable:false
-    | Some selected ->
-      Hitl_summary_worker.spawn ~sw ~runtime_id:selected.runtime_id ~entry
-        ~provider_config:selected.provider_config ~on_summary ~on_failure ()
+let mark_summary_pending ~id =
+  let result =
+    Stdlib.Mutex.protect pending_store_mu (fun () ->
+    let map = Atomic.get pending in
+    match SMap.find_opt id map with
+    | None -> Ok false
+    | Some ({ summary_status = Summary_not_requested; _ } as entry) ->
+      let updated = SMap.add id { entry with summary_status = Summary_pending } map in
+      (match
+         persist_snapshot_unlocked
+           ~base_path:entry.audit_base_path
+           ~pending_map:updated
+           ~delivery_map:(Atomic.get deliveries)
+       with
+       | Error _ as error -> error
+       | Ok () ->
+         Atomic.set pending updated;
+         Ok true)
+    | Some
+        { summary_status =
+            (Summary_pending | Summary_available _ | Summary_failed _)
+        ; _
+        } ->
+      Ok false)
+  in
+  publish_summary_transition ~id result
 ;;
 
-let spawn_hitl_summary_worker_on_root_switch ~(entry : pending_approval) =
-  (* HITL summaries are queued background enrichment, not turn-scoped work.
-     Fork on the server root switch so the worker can finish after the keeper
-     turn that created the approval has unwound. *)
-  match entry.risk_level with
-  | Low -> ()
-  | Medium | High | Critical ->
-    (match Eio_context.get_root_switch_opt () with
-     | Some sw -> spawn_hitl_summary_worker ~sw ~entry
-     | None ->
-       let reason = "HITL summary: server root switch unavailable" in
-       Log.Keeper.warn
-         "HITL summary worker not spawned approval_id=%s keeper=%s reason=%s"
-         entry.id
-         entry.keeper_name
-         reason;
-       record_summary_failure ~id:entry.id ~reason ~retryable:false)
+let attach_summary ~id summary =
+  let updated = complete_summary ~id (Summary_available summary) in
+  publish_summary_transition ~id updated
+;;
+
+let mark_summary_failed ~id ~reason ~retryable =
+  let updated = complete_summary ~id (Summary_failed { reason; retryable }) in
+  publish_summary_transition ~id updated
+;;
+
+let restart_retryable_summary ~id =
+  let updated =
+    Stdlib.Mutex.protect pending_store_mu (fun () ->
+      let map = Atomic.get pending in
+      match SMap.find_opt id map with
+      | Some
+          ({ summary_status = Summary_failed { retryable = true; _ }; _ } as entry)
+        ->
+        let updated = SMap.add id { entry with summary_status = Summary_pending } map in
+        (match
+           persist_snapshot_unlocked
+             ~base_path:entry.audit_base_path
+             ~pending_map:updated
+             ~delivery_map:(Atomic.get deliveries)
+         with
+         | Error _ as error -> error
+         | Ok () ->
+           Atomic.set pending updated;
+           Ok true)
+      | None
+      | Some
+          { summary_status =
+              ( Summary_not_requested
+              | Summary_pending
+              | Summary_available _
+              | Summary_failed { retryable = false; _ } )
+          ; _
+          } ->
+        Ok false)
+  in
+  publish_summary_transition ~id updated
 ;;
 
 let record_resolution_delivery_failure ~keeper_name ~approval_id reason =
@@ -953,43 +1429,26 @@ let commit_keeper_approval_resolution
     Error reason
 ;;
 
-let hitl_resolution_decision_of_approval_decision
-      (entry : pending_approval)
-  = function
-  | Agent_sdk.Hooks.Approve ->
-    Keeper_event_queue.Hitl_approved
-      { keeper_name = entry.keeper_name
-      ; tool_name = entry.tool_name
-      ; input_hash = entry.input_hash
-      }
-  | Agent_sdk.Hooks.Reject _ -> Keeper_event_queue.Hitl_rejected
-  | Agent_sdk.Hooks.Edit _ -> Keeper_event_queue.Hitl_edited
+let hitl_resolution_decision_of_approval_decision = function
+  | Agent_sdk.Hooks.Approve -> Keeper_event_queue.Hitl_approved
+  | Agent_sdk.Hooks.Reject rationale -> Keeper_event_queue.Hitl_rejected rationale
+  | Agent_sdk.Hooks.Edit input -> Keeper_event_queue.Hitl_edited input
 ;;
 
-type committed_resolution =
-  | Blocking_owned
-  | Nonblocking_durable
-
 let deliver_resolution ~base_path (entry : pending_approval) decision =
-  match entry.lane_policy with
-  | Blocking -> Ok Blocking_owned
-  | Nonblocking ->
-    (match
-       commit_keeper_approval_resolution
-         ~base_path
-         ~keeper_name:entry.keeper_name
-         ~approval_id:entry.id
-         ~decision:(hitl_resolution_decision_of_approval_decision entry decision)
-         ~channel:entry.continuation_channel
-     with
-     | Error _ as err -> err
-     | Ok () -> Ok Nonblocking_durable)
+  commit_keeper_approval_resolution
+    ~base_path
+    ~keeper_name:entry.keeper_name
+    ~approval_id:entry.id
+    ~decision:(hitl_resolution_decision_of_approval_decision decision)
+    ~channel:entry.continuation_channel
 ;;
 
 let resolve_entry
       ?(before_terminal_publish = fun () -> ())
       ~base_path
       (entry : pending_approval)
+      ~(source : decision_source)
       (decision : decision)
   =
   let decision_str = approval_decision_to_string decision in
@@ -1005,38 +1464,13 @@ let resolve_entry
     ~id:entry.id
     ~keeper_name:entry.keeper_name
     ~tool_name:entry.tool_name
-    ~risk_level:entry.risk_level
     ?turn_id:entry.turn_id
     ?task_id:entry.task_id
     ?goal_id:entry.goal_id
     ~goal_ids:entry.goal_ids
-    ~sandbox_target:entry.sandbox_target
-    ?runtime_contract:entry.runtime_contract
-    ?selected_model:entry.selected_model
-    ?disposition:entry.disposition
-    ?disposition_reason:entry.disposition_reason
-    ~decision:(Approval_resolved decision)
+    ~decision_source:source
+    ~decision
     ();
-  (match entry.resolver with
-   | Some resolver -> Eio.Promise.resolve resolver decision
-   | None -> ());
-  (match entry.on_resolution with
-   | Some f ->
-     Cancel_safe.observe
-       ~on_exn:(fun exn ->
-         Otel_metric_store.inc_counter Keeper_metrics.(to_string LifecycleCallbackFailures)
-           ~labels:[ ("keeper", entry.keeper_name); ("callback", "on_resolution") ]
-           ();
-         Otel_metric_store.inc_counter
-           Keeper_metrics.(to_string ApprovalQueueFailures)
-           ~labels:[ "keeper", entry.keeper_name; "site", Keeper_approval_queue_failure_site.(to_label Resolution_callback) ]
-           ();
-         Log.Keeper.warn
-           "approval_queue: resolution callback failed id=%s err=%s"
-           entry.id
-           (Printexc.to_string exn))
-       (fun () -> f decision)
-   | None -> ());
   before_terminal_publish ();
   try
     Sse.broadcast
@@ -1048,10 +1482,6 @@ let resolve_entry
                 ; "keeper_name", `String entry.keeper_name
                 ; "tool_name", `String entry.tool_name
                 ; "decision", `String decision_str
-                ; "selected_model", `Null
-                ; "disposition", Json_util.string_opt_to_json entry.disposition
-                ; ( "disposition_reason"
-                  , Json_util.string_opt_to_json entry.disposition_reason )
                 ] )
           ])
   with
@@ -1067,35 +1497,40 @@ let resolve_entry
 
 let pending_entry_matches
       (entry : pending_approval)
+      ~base_path
       ~keeper_name
       ~tool_name
-      ~action_key
       ~input_hash
+      ~turn_id
       ~task_id
       ~goal_id
-      ~sandbox_target
-      ~lane_policy
+      ~goal_ids
+      ~continuation_channel
   =
-  String.equal entry.keeper_name keeper_name
+  String.equal entry.audit_base_path base_path
+  && String.equal entry.keeper_name keeper_name
   && String.equal entry.tool_name tool_name
-  && String.equal entry.action_key action_key
   && String.equal entry.input_hash input_hash
-  && String.equal entry.sandbox_target sandbox_target
-  && entry.lane_policy = lane_policy
+  && entry.turn_id = turn_id
   && entry.task_id = task_id
   && entry.goal_id = goal_id
+  && entry.goal_ids = goal_ids
+  && Yojson.Safe.equal
+       (Keeper_continuation_channel.to_yojson entry.continuation_channel)
+       (Keeper_continuation_channel.to_yojson continuation_channel)
 ;;
 
 let find_pending_id_in_map
       (map : pending_approval SMap.t)
+      ~base_path
       ~keeper_name
       ~tool_name
-      ~action_key
       ~input_hash
+      ~turn_id
       ~task_id
       ~goal_id
-      ~sandbox_target
-      ~lane_policy
+      ~goal_ids
+      ~continuation_channel
   =
   SMap.fold
     (fun id (entry : pending_approval) acc ->
@@ -1105,14 +1540,15 @@ let find_pending_id_in_map
          if
            pending_entry_matches
              entry
+             ~base_path
              ~keeper_name
              ~tool_name
-             ~action_key
              ~input_hash
+             ~turn_id
              ~task_id
              ~goal_id
-             ~sandbox_target
-             ~lane_policy
+             ~goal_ids
+             ~continuation_channel
          then Some id
          else None)
     map
@@ -1127,261 +1563,78 @@ let sort_entries_by_requested_at entries =
     entries
 ;;
 
-(* ── Submit & await ───────────────────────────────────────── *)
-
-(** Submit a tool call for approval and suspend the calling fiber.
-    Returns the operator's decision when the promise is resolved.
-    Called from the OAS approval_callback (inside agent fiber).
-
-    [timeout_s] defaults to {!default_noncritical_approval_timeout_s}
-    for non-[Critical] approvals. This is intentionally longer than the
-    30s wrapper used by A2 for generic [Eio.Promise.await] sites: a HITL
-    approval is bounded by an operator's response time, not by an SLA on
-    autonomous progress.
-    [Critical] approvals are exempt, matching [expire_stale]'s
-    operator-must-decide policy. Drop the default only after measuring
-    the operator-response distribution — premature shortening turns
-    every distracted operator into an [Approval_expired] event. *)
-let submit_and_await
-      ~keeper_name
-      ~tool_name
-      ~input
-      ~risk_level
-      ~base_path
-      ?turn_id
-      ?task_id
-      ?goal_id
-      ?(goal_ids = [])
-      ?sandbox_target
-      ?sandbox_profile
-      ?backend
-      ?runtime_contract
-      ?selected_model
-      ?disposition
-      ?disposition_reason
-      ?continuation_channel
-      ?clock
-      ?(timeout_s = default_noncritical_approval_timeout_s)
-      ?(critical_escalation_after_s = default_critical_approval_escalation_after_s)
-      ()
-  : Agent_sdk.Hooks.approval_decision
-  =
-  let id = generate_id () in
-  let promise, resolver = Eio.Promise.create () in
-  let entry =
-    create_entry
-      ~id
-      ~keeper_name
-      ~tool_name
-      ~input
-      ~risk_level
-      ?turn_id
-      ?task_id
-      ?goal_id
-      ~goal_ids
-      ?sandbox_target
-      ?sandbox_profile
-      ?backend
-      ?runtime_contract
-      ?selected_model
-      ?disposition
-      ?disposition_reason
-      ?continuation_channel
-      ~lane_policy:Blocking
-      ~audit_base_path:base_path
-      ~resolver:(Some resolver)
-      ~on_resolution:None
-      ()
-  in
-  atomic_update pending (fun map -> SMap.add id entry map);
-  record_pending entry;
-  spawn_hitl_summary_worker_on_root_switch ~entry;
-  let timeout_decision reason =
-    let decision = Agent_sdk.Hooks.Reject reason in
-    match Eio.Promise.peek promise with
-    | Some observed -> observed
-    | None ->
-      (try Eio.Promise.resolve resolver decision with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | _ -> ());
-      (match Eio.Promise.peek promise with
-       | Some observed -> observed
-       | None -> decision)
-  in
-  let await_with_timeout () =
-    match clock, risk_level with
-    | Some clock, (Low | Medium | High) ->
-      (match
-         Eio.Fiber.first
-           (fun () -> `Decision (Eio.Promise.await promise))
-           (fun () ->
-              Eio.Time.sleep clock timeout_s;
-              `Timeout)
-       with
-       | `Decision d -> d
-       | `Timeout ->
-         let reason = Printf.sprintf "approval timeout after %.0fs" timeout_s in
-         audit_approval_event
-           ~base_path:entry.audit_base_path
-           ~event_type:"approval_timeout"
-           ~id
-           ~keeper_name
-           ~tool_name
-           ~risk_level
-           ?turn_id
-           ?task_id
-           ?goal_id
-           ~goal_ids
-           ~sandbox_target:entry.sandbox_target
-           ?runtime_contract
-           ?selected_model
-           ~decision:(Approval_expired reason)
-           ();
-         (* Mirror expire_stale's teardown, but preserve any concurrent
-            operator decision that wins the promise resolution race. *)
-         timeout_decision reason)
-    | Some clock, Critical ->
-      (match
-         Eio.Fiber.first
-           (fun () -> `Decision (Eio.Promise.await promise))
-           (fun () ->
-              Eio.Time.sleep clock critical_escalation_after_s;
-              `Escalated)
-       with
-       | `Decision d -> d
-       | `Escalated ->
-         let reason = "critical approval escalated — operator must decide" in
-         audit_approval_event
-           ~base_path:entry.audit_base_path
-           ~event_type:"approval_escalated"
-           ~id
-           ~keeper_name
-           ~tool_name
-           ~risk_level
-           ?turn_id
-           ?task_id
-           ?goal_id
-           ~goal_ids
-           ~sandbox_target:entry.sandbox_target
-           ?runtime_contract
-           ?selected_model
-           ~audit_disposition:(Approval_escalated reason)
-           ();
-         (match update_pending_phase ~id Escalated with
-          | Some escalated_entry -> broadcast_pending escalated_entry
-          | None -> ());
-         (* Escalated — keep waiting for operator, do not reject *)
-         Eio.Promise.await promise)
-    | None, _ -> Eio.Promise.await promise
-  in
-  Eio_guard.protect await_with_timeout ~finally:(fun () ->
-    Safe_ops.protect ~default:() (fun () ->
-      (match Eio.Promise.peek promise with
-       | Some _ -> ()
-       | None ->
-         let reason = "approval await cancelled before operator decision" in
-         audit_approval_event
-           ~base_path:entry.audit_base_path
-           ~event_type:"cancelled"
-           ~id
-           ~keeper_name
-           ~tool_name
-           ~risk_level
-           ?turn_id
-           ?task_id
-           ?goal_id
-           ~goal_ids
-           ~sandbox_target:entry.sandbox_target
-           ?runtime_contract
-           ?selected_model
-           ?disposition
-           ?disposition_reason
-           ~decision:(Approval_expired reason)
-           ());
-      atomic_update pending (fun map -> SMap.remove id map)))
-;;
+(* ── Nonblocking submission ───────────────────────────────── *)
 
 let submit_pending
       ~keeper_name
       ~tool_name
       ~input
-      ~risk_level
       ~base_path
       ?turn_id
+      ?request_context
       ?task_id
       ?goal_id
       ?(goal_ids = [])
-      ?sandbox_target
-      ?sandbox_profile
-      ?backend
-      ?runtime_contract
-      ?selected_model
-      ?disposition
-      ?disposition_reason
       ?continuation_channel
-      ?(lane_policy = Nonblocking)
-      ~on_resolution
       ()
-  : string
+  : (string, storage_error) result
   =
-  let action_key = action_key_of_input ~tool_name ~input in
   let input_hash = normalized_input_hash input in
-  let sandbox_target =
-    match nonempty_string_opt sandbox_target with
-    | Some target -> target
-    | None -> sandbox_target_of_runtime_contract runtime_contract
+  let continuation_channel =
+    Option.value continuation_channel ~default:(default_continuation_channel ())
   in
-  let rec submit () =
-    let map = Atomic.get pending in
-    match
-      find_pending_id_in_map
-        map
-        ~keeper_name
-        ~tool_name
-        ~action_key
-        ~input_hash
-        ~task_id
-        ~goal_id
-        ~sandbox_target
-        ~lane_policy
-    with
-    | Some id -> id
-    | None ->
-      let id = generate_id () in
-      let entry =
-        create_entry
-          ~id
+  let stored =
+    Stdlib.Mutex.protect pending_store_mu (fun () ->
+      let map = Atomic.get pending in
+      match
+        find_pending_id_in_map
+          map
+          ~base_path
           ~keeper_name
           ~tool_name
-          ~input
-          ~risk_level
-          ?turn_id
-          ?task_id
-          ?goal_id
+          ~input_hash
+          ~turn_id
+          ~task_id
+          ~goal_id
           ~goal_ids
-          ~sandbox_target
-          ?sandbox_profile
-          ?backend
-          ?runtime_contract
-          ?selected_model
-          ?disposition
-          ?disposition_reason
-          ?continuation_channel
-          ~lane_policy
-          ~audit_base_path:base_path
-          ~resolver:None
-          ~on_resolution:(Some on_resolution)
-          ()
-      in
-      let updated = SMap.add id entry map in
-      if Atomic.compare_and_set pending map updated
-      then (
-        record_pending entry;
-        spawn_hitl_summary_worker_on_root_switch ~entry;
-        id)
-      else submit ()
+          ~continuation_channel
+      with
+      | Some id -> Ok (id, None)
+      | None ->
+        let id = generate_id () in
+        let entry =
+          create_entry
+            ~id
+            ~keeper_name
+            ~tool_name
+            ~input
+            ?turn_id
+            ?request_context
+            ?task_id
+            ?goal_id
+            ~goal_ids
+            ~continuation_channel
+            ~audit_base_path:base_path
+            ()
+        in
+        let updated = SMap.add id entry map in
+        (match
+           persist_snapshot_unlocked
+             ~base_path
+             ~pending_map:updated
+             ~delivery_map:(Atomic.get deliveries)
+         with
+         | Error _ as error -> error
+         | Ok () ->
+           Atomic.set pending updated;
+           Ok (id, Some entry)))
   in
-  submit ()
+  match stored with
+  | Error _ as error -> error
+  | Ok (id, None) -> Ok id
+  | Ok (id, Some entry) ->
+    record_pending entry;
+    Ok id
 ;;
 
 (* ── Resolve (operator action) ────────────────────────────── *)
@@ -1393,12 +1646,21 @@ type resolve_error =
       { approval_id : string
       ; reason : string
       }
+  | Persistence_failed of
+      { approval_id : string
+      ; storage_error : storage_error
+      }
 
 let resolve_error_to_string = function
   | Not_found id -> Printf.sprintf "approval %s not found" id
   | Already_resolved id -> Printf.sprintf "approval %s already resolved" id
   | Delivery_failed { approval_id; reason } ->
     Printf.sprintf "approval %s resolution delivery failed: %s" approval_id reason
+  | Persistence_failed { approval_id; storage_error } ->
+    Printf.sprintf
+      "approval %s queue persistence failed: %s"
+      approval_id
+      (storage_error_to_string storage_error)
 ;;
 
 module Resolution_claims = Set_util.StringSet
@@ -1422,50 +1684,254 @@ let release_resolution_claim id =
   atomic_update resolution_claims (fun claims -> Resolution_claims.remove id claims)
 ;;
 
-let remember_rule_for_entry ~base_path ?created_by (entry : pending_approval) =
-  let rememberable =
-    match entry.risk_level with
-    | Low | Medium -> true
-    | High | Critical -> false
-  in
-  if not rememberable
-  then None
-  else (
-    try
-      let rule, created =
-        upsert_rule
-          ~base_path:base_path
-          ~keeper_name:entry.keeper_name
-          ~tool_name:entry.tool_name
-          ~input:entry.input
-          ~risk_level:entry.risk_level
-          ?sandbox_profile:entry.sandbox_profile
-          ?backend:entry.backend
-          ?runtime_contract:entry.runtime_contract
-          ?created_by
-          ~source_approval_id:entry.id
-          ()
+type journal_error =
+  | Journal_not_found
+  | Journal_storage of storage_error
+
+let journal_resolution ~id ~decision ~source ~remember_rule ~created_by =
+  Stdlib.Mutex.protect pending_store_mu (fun () ->
+    let pending_map = Atomic.get pending in
+    match SMap.find_opt id pending_map with
+    | None -> Error Journal_not_found
+    | Some entry ->
+      let delivery =
+        { entry
+        ; decision
+        ; source
+        ; remember_rule
+        ; created_by
+        ; grant_consumed = false
+        }
       in
-      if created then audit_rule_event ~base_path:base_path ~event_type:"rule_created" rule;
-      Some rule
+      let updated_pending = SMap.remove id pending_map in
+      let updated_deliveries = SMap.add id delivery (Atomic.get deliveries) in
+      (match
+         persist_snapshot_unlocked
+           ~base_path:entry.audit_base_path
+           ~pending_map:updated_pending
+           ~delivery_map:updated_deliveries
+       with
+       | Error storage_error -> Error (Journal_storage storage_error)
+       | Ok () ->
+         Atomic.set pending updated_pending;
+         Atomic.set deliveries updated_deliveries;
+         Ok delivery))
+;;
+
+let remove_delivery_from_store delivery =
+  Stdlib.Mutex.protect pending_store_mu (fun () ->
+    let delivery_map = Atomic.get deliveries in
+    let updated_deliveries = SMap.remove delivery.entry.id delivery_map in
+    match
+      persist_snapshot_unlocked
+        ~base_path:delivery.entry.audit_base_path
+        ~pending_map:(Atomic.get pending)
+        ~delivery_map:updated_deliveries
     with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-      Otel_metric_store.inc_counter
-        Keeper_metrics.(to_string ApprovalQueueFailures)
-        ~labels:[ "keeper", entry.keeper_name; "site", Keeper_approval_queue_failure_site.(to_label Remember_rule) ]
-        ();
-      Log.Keeper.warn
-        "approval_queue: remember rule failed id=%s err=%s"
-        entry.id
-        (Printexc.to_string exn);
-      None)
+    | Error _ as error -> error
+    | Ok () ->
+      Atomic.set deliveries updated_deliveries;
+      Ok ())
+;;
+
+let approval_decision_equal left right =
+  match left, right with
+  | Agent_sdk.Hooks.Approve, Agent_sdk.Hooks.Approve -> true
+  | Agent_sdk.Hooks.Reject left, Agent_sdk.Hooks.Reject right -> String.equal left right
+  | Agent_sdk.Hooks.Edit left, Agent_sdk.Hooks.Edit right -> Yojson.Safe.equal left right
+  | (Agent_sdk.Hooks.Approve | Agent_sdk.Hooks.Reject _ | Agent_sdk.Hooks.Edit _),
+    (Agent_sdk.Hooks.Approve | Agent_sdk.Hooks.Reject _ | Agent_sdk.Hooks.Edit _) ->
+    false
+;;
+
+let remember_rule_for_entry ~base_path ?created_by (entry : pending_approval) =
+  try
+    match
+      upsert_rule
+        ~base_path
+        ~keeper_name:entry.keeper_name
+        ~tool_name:entry.tool_name
+        ~input:entry.input
+        ?created_by
+        ~source_approval_id:entry.id
+        ()
+    with
+    | Ok (rule, created) ->
+      if created then audit_rule_event ~base_path ~event_type:"rule_created" rule;
+      Ok rule
+    | Error reason -> Error reason
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    let reason = Printexc.to_string exn in
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string ApprovalQueueFailures)
+      ~labels:
+        [ "keeper", entry.keeper_name
+        ; "site", Keeper_approval_queue_failure_site.(to_label Remember_rule)
+        ]
+      ();
+    Log.Keeper.warn
+      "approval_queue: remember rule failed id=%s err=%s"
+      entry.id
+      reason;
+    Error
+      ({ path = rules_path ~base_path ()
+       ; reason
+       }
+       : rule_store_error)
+;;
+
+let remember_rule_for_delivery delivery =
+  match delivery.decision, delivery.remember_rule with
+  | Agent_sdk.Hooks.Approve, true ->
+    (match
+       remember_rule_for_entry
+         ~base_path:delivery.entry.audit_base_path
+         ?created_by:delivery.created_by
+         delivery.entry
+     with
+     | Ok rule -> Ok (Some rule)
+     | Error rule_error ->
+       Error
+         { path = rule_error.path
+         ; reason = rule_error.reason
+         })
+  | (Agent_sdk.Hooks.Approve | Agent_sdk.Hooks.Reject _ | Agent_sdk.Hooks.Edit _),
+    false ->
+    Ok None
+  | (Agent_sdk.Hooks.Reject _ | Agent_sdk.Hooks.Edit _), true -> Ok None
+;;
+
+let complete_delivery delivery =
+  let id = delivery.entry.id in
+  let base_path = delivery.entry.audit_base_path in
+  if delivery.grant_consumed
+  then Ok { remembered_rule = None }
+  else
+  match deliver_resolution ~base_path delivery.entry delivery.decision with
+  | Error reason -> Error (Delivery_failed { approval_id = id; reason })
+  | Ok () ->
+    (match remember_rule_for_delivery delivery with
+     | Error storage_error ->
+       Error (Persistence_failed { approval_id = id; storage_error })
+     | Ok remembered_rule ->
+       let finish () =
+         resolve_entry
+           ~base_path
+           delivery.entry
+           ~source:delivery.source
+           delivery.decision;
+         signal_resolution_after_commit
+           ~base_path
+           ~keeper_name:delivery.entry.keeper_name
+           ~approval_id:id;
+         Ok { remembered_rule }
+       in
+       (match delivery.decision with
+        | Agent_sdk.Hooks.Approve ->
+          (* Keep the resolved journal entry until the exact Gate request
+             consumes it. The wake event is only a correlation message and
+             cannot become a second authorization SSOT. *)
+          finish ()
+        | Agent_sdk.Hooks.Reject _ | Agent_sdk.Hooks.Edit _ ->
+          (match remove_delivery_from_store delivery with
+           | Error storage_error ->
+             Error (Persistence_failed { approval_id = id; storage_error })
+           | Ok () -> finish ())))
+;;
+
+let install_persistence ~base_path =
+  let installed =
+    Stdlib.Mutex.protect pending_store_mu (fun () ->
+      match load_snapshot_unlocked ~base_path with
+      | Error storage_error ->
+        mark_store_unavailable_unlocked ~base_path storage_error;
+        Error storage_error
+      | Ok (loaded_pending, loaded_deliveries) ->
+        let current_pending =
+          remove_base_entries ~base_path (Atomic.get pending) Fun.id
+        in
+        let current_deliveries =
+          remove_base_entries
+            ~base_path
+            (Atomic.get deliveries)
+            (fun delivery -> delivery.entry)
+        in
+        (match
+           merge_loaded_map
+             ~surface:"gate_pending.pending"
+             ~existing:current_pending
+             ~loaded:loaded_pending,
+           merge_loaded_map
+             ~surface:"gate_pending.deliveries"
+             ~existing:current_deliveries
+             ~loaded:loaded_deliveries
+         with
+         | Error reason, _ | _, Error reason ->
+           let path = pending_store_path ~base_path in
+           report_pending_read_drop
+             ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+             ~path
+             ~detail:reason;
+           let error = { path; reason } in
+           mark_store_unavailable_unlocked ~base_path error;
+           Error error
+         | Ok pending_map, Ok delivery_map ->
+           (match first_shared_id pending_map delivery_map with
+            | Some id ->
+              let path = pending_store_path ~base_path in
+              let reason =
+                Printf.sprintf
+                  "gate_pending id %s collides across pending and delivery states"
+                  id
+              in
+              report_pending_read_drop
+                ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                ~path
+                ~detail:reason;
+              let error = { path; reason } in
+              mark_store_unavailable_unlocked ~base_path error;
+              Error error
+            | None ->
+              clear_store_unavailable_unlocked ~base_path;
+              Atomic.set pending pending_map;
+              Atomic.set deliveries delivery_map;
+              Ok
+                ( SMap.cardinal loaded_pending
+                , SMap.bindings loaded_deliveries |> List.map snd ))))
+  in
+  match installed with
+  | Error storage_error -> Error (Install_storage_failed storage_error)
+  | Ok (loaded_pending, loaded_deliveries) ->
+    let rec replay count failures = function
+      | [] ->
+        Ok
+          { loaded_pending
+          ; replayed_deliveries = count
+          ; delivery_replay_failures = List.rev failures
+          }
+      | delivery :: rest ->
+        if delivery.grant_consumed
+        then replay count failures rest
+        else
+          (match complete_delivery delivery with
+           | Ok _ -> replay (count + 1) failures rest
+           | Error error ->
+             let failure =
+               { approval_id = delivery.entry.id
+               ; reason = resolve_error_to_string error
+               }
+             in
+             replay count (failure :: failures) rest)
+    in
+    replay 0 [] loaded_deliveries
 ;;
 
 let resolve_with_policy
-      ~base_path
       ~id
       ~(decision : Agent_sdk.Hooks.approval_decision)
+      ?(source = Human_operator)
       ?(remember_rule = false)
       ?created_by
       ()
@@ -1478,44 +1944,42 @@ let resolve_with_policy
       ~finally:(fun () -> release_resolution_claim id)
       (fun () ->
          match SMap.find_opt id (Atomic.get pending) with
-         | None -> Error (Not_found id)
-         | Some entry ->
-           (match deliver_resolution ~base_path entry decision with
-            | Error reason -> Error (Delivery_failed { approval_id = id; reason })
-            | Ok committed ->
-              (* Durable delivery is the commit point for nonblocking entries.
-                 Keep the approval queryable while its callback applies the
-                 approved domain mutation; intake defers this exact resolution
-                 until the pending id is removed below. Blocking entries retain
-                 their original lane-release-before-resume ordering. *)
-              (match entry.lane_policy with
-               | Blocking -> atomic_update pending (fun map -> SMap.remove id map)
-               | Nonblocking -> ());
-              let remembered_rule =
-                match decision with
-                | Agent_sdk.Hooks.Approve when remember_rule ->
-                  remember_rule_for_entry ~base_path ?created_by entry
-                | _ -> None
+         | Some _ ->
+           let remember_rule =
+             match decision with
+             | Agent_sdk.Hooks.Approve -> remember_rule
+             | Agent_sdk.Hooks.Reject _ | Agent_sdk.Hooks.Edit _ -> false
+           in
+           (match
+              journal_resolution
+                ~id
+                ~decision
+                ~source
+                ~remember_rule
+                ~created_by
+            with
+            | Error Journal_not_found -> Error (Not_found id)
+            | Error (Journal_storage storage_error) ->
+              Error (Persistence_failed { approval_id = id; storage_error })
+            | Ok delivery -> complete_delivery delivery)
+         | None ->
+           (match SMap.find_opt id (Atomic.get deliveries) with
+            | None -> Error (Not_found id)
+            | Some delivery ->
+              let same_request =
+                approval_decision_equal decision delivery.decision
+                && source = delivery.source
+                && remember_rule = delivery.remember_rule
+                && created_by = delivery.created_by
               in
-              let before_terminal_publish () =
-                match entry.lane_policy with
-                | Blocking -> ()
-                | Nonblocking -> atomic_update pending (fun map -> SMap.remove id map)
-              in
-              resolve_entry ~before_terminal_publish ~base_path entry decision;
-              (match committed with
-               | Blocking_owned -> ()
-               | Nonblocking_durable ->
-                 signal_resolution_after_commit
-                   ~base_path
-                   ~keeper_name:entry.keeper_name
-                   ~approval_id:id);
-              Ok { remembered_rule }))
+              if same_request
+              then complete_delivery delivery
+              else Error (Already_resolved id)))
 ;;
 
 (** Resolve a pending approval. Returns [Ok ()] if found and resolved,
     [Error (Not_found _)] if the id is not in the queue, or
-    [Error (Already_resolved _)] if another resolver currently owns the
+    [Error (Already_resolved _)] if another concurrent resolution owns the
     approval claim. A delivery failure leaves the entry pending for retry.
     Called from the dashboard approval HTTP handler
     ([server_dashboard_http.ml]) and MCP runtime.
@@ -1527,16 +1991,9 @@ let resolve_with_policy
 let resolve ~id ~(decision : Agent_sdk.Hooks.approval_decision)
   : (unit, resolve_error) result
   =
-  (* The entry is the authoritative base_path source for the convenience
-     wrapper: it has no caller-threaded [base_path], and the pending map
-     is per-workspace so the entry's captured [audit_base_path] is the
-     workspace that owns the approval. RFC-0274 Wave A. *)
-  match SMap.find_opt id (Atomic.get pending) with
-  | None -> Error (Not_found id)
-  | Some entry ->
-    (match resolve_with_policy ~base_path:entry.audit_base_path ~id ~decision () with
-     | Ok _ -> Ok ()
-     | Error _ as err -> err)
+  match resolve_with_policy ~id ~decision () with
+  | Ok _ -> Ok ()
+  | Error _ as error -> error
 ;;
 
 (* ── Query ────────────────────────────────────────────────── *)
@@ -1558,8 +2015,6 @@ let list_pending_dashboard_json () : Yojson.Safe.t =
       (fun _id entry acc ->
          `Assoc
            (pending_entry_json_fields
-              ~include_requested_at_iso:true
-              ~include_runtime_contract:true
               ~include_input:true
               entry)
          :: acc)
@@ -1577,8 +2032,6 @@ let list_pending_entries () : pending_approval list =
 let pending_entry_detail_json (entry : pending_approval) : Yojson.Safe.t =
   `Assoc
     (pending_entry_json_fields
-       ~include_requested_at_iso:true
-       ~include_runtime_contract:true
        ~include_input:true
        entry)
 ;;
@@ -1599,160 +2052,10 @@ let pending_count_for_keeper ~keeper_name : int =
     0
 ;;
 
-(* [lane_policy] is explicit because a non-suspending callback can still own a
-   lifecycle continuation (for example, a persisted partial-commit gate).
-   Keep that distinction typed at the queue boundary instead of inferring lane
-   ownership from a resolver or from tool names. *)
-let blocking_pending_count_for_keeper ~keeper_name : int =
-  SMap.fold
-    (fun _ (entry : pending_approval) count ->
-       if String.equal entry.keeper_name keeper_name
-          && entry.lane_policy = Blocking
-       then count + 1
-       else count)
-    (Atomic.get pending)
-    0
-;;
-
-let has_blocking_pending_for_keeper ~keeper_name : bool =
-  blocking_pending_count_for_keeper ~keeper_name > 0
-;;
-
 let has_pending_for_keeper ~keeper_name : bool =
   SMap.fold
     (fun _ (entry : pending_approval) acc ->
        acc || String.equal entry.keeper_name keeper_name)
     (Atomic.get pending)
     false
-;;
-
-(* ── Timeout cleanup ──────────────────────────────────────── *)
-
-let complete_expiration ~id (entry : pending_approval) ~reason ~decision =
-  Otel_metric_store.inc_counter
-    Keeper_metrics.(to_string ApprovalQueueFailures)
-    ~labels:
-      [ "keeper", entry.keeper_name
-      ; "site", Keeper_approval_queue_failure_site.(to_label Approval_expired)
-      ]
-    ();
-  Log.Keeper.warn
-    "HITL_APPROVAL_EXPIRED: id=%s keeper=%s tool=%s"
-    id
-    entry.keeper_name
-    entry.tool_name;
-  audit_approval_event
-    ~base_path:entry.audit_base_path
-    ~event_type:"expired"
-    ~id
-    ~keeper_name:entry.keeper_name
-    ~tool_name:entry.tool_name
-    ~risk_level:entry.risk_level
-    ?turn_id:entry.turn_id
-    ?task_id:entry.task_id
-    ?goal_id:entry.goal_id
-    ~goal_ids:entry.goal_ids
-    ~sandbox_target:entry.sandbox_target
-    ?runtime_contract:entry.runtime_contract
-    ?selected_model:entry.selected_model
-    ?disposition:entry.disposition
-    ?disposition_reason:entry.disposition_reason
-    ~decision:(Approval_expired reason)
-    ();
-  (match entry.resolver with
-   | Some resolver -> Eio.Promise.resolve resolver decision
-   | None -> ());
-  match entry.on_resolution with
-  | None -> ()
-  | Some f ->
-    Cancel_safe.observe
-      ~on_exn:(fun exn ->
-        Otel_metric_store.inc_counter
-          Keeper_metrics.(to_string LifecycleCallbackFailures)
-          ~labels:[ "keeper", entry.keeper_name; "callback", "on_approval_expire" ]
-          ();
-        Otel_metric_store.inc_counter
-          Keeper_metrics.(to_string ApprovalQueueFailures)
-          ~labels:
-            [ "keeper", entry.keeper_name
-            ; "site", Keeper_approval_queue_failure_site.(to_label Expire_callback)
-            ]
-          ();
-        Log.Keeper.warn
-          "approval_queue: expire callback failed id=%s err=%s"
-          id
-          (Printexc.to_string exn))
-      (fun () -> f decision)
-;;
-
-(** Reject all approvals that have been waiting longer than [max_wait_s].
-    Call periodically from a health loop.
-
-    [Critical] risk-level entries are NEVER auto-expired.  They originate
-    from indefinite-wait operator gates ([keeper_continue_after_reconcile],
-    [keeper_continue_after_partial_commit] — see callers in
-    [Keeper_supervisor] and [Keeper_unified_turn]) where:
-
-    - Auto-rejecting would cause the supervisor's Phase-2 sweep to
-      re-enqueue the same approval on the next tick (since the
-      paused-meta blocker class is unchanged), creating a 30-min
-      expire / re-enqueue / expire cycle that flooded the audit log
-      and starved the operator of agency.
-    - Critical decisions (auto-compact retry exhaustion, partial-commit
-      ambiguity) are exactly the cases where a human MUST decide; a
-      stale 30-min default would silently push the keeper into a
-      permanent [paused = true] state that no autonomous logic can
-      recover from.
-
-    Operators escalate a stuck Critical entry by manual resolve via
-    dashboard / mcp / CLI — the timeout policy applies to
-    [Low / Medium / High] tool approvals only. *)
-let expire_stale ~max_wait_s =
-  let now = Unix.gettimeofday () in
-  let is_stale (entry : pending_approval) =
-    match entry.risk_level with
-    | Critical -> false
-    | Low | Medium | High -> now -. entry.requested_at > max_wait_s
-  in
-  let candidates = list_pending_entries () |> List.filter is_stale in
-  List.iter
-    (* The annotation is load-bearing: [approval_rule] is declared after
-       [pending_approval] in [Keeper_approval_queue_rules_types] and also has
-       an [id] field, so a bare [candidate.id] projection resolves to
-       [approval_rule] and rejects the [pending_approval list] argument. *)
-    (fun (candidate : pending_approval) ->
-       let id = candidate.id in
-       if claim_resolution id
-       then
-         Fun.protect
-           ~finally:(fun () -> release_resolution_claim id)
-           (fun () ->
-              match SMap.find_opt id (Atomic.get pending) with
-              | None -> ()
-              | Some entry when not (is_stale entry) -> ()
-              | Some entry ->
-                let reason =
-                  Printf.sprintf
-                    "approval timed out after %.0fs"
-                    (now -. entry.requested_at)
-                in
-                let decision = Agent_sdk.Hooks.Reject reason in
-                (match deliver_resolution ~base_path:entry.audit_base_path entry decision with
-                 | Error _ -> ()
-                 | Ok committed ->
-                   (match entry.lane_policy with
-                    | Blocking -> atomic_update pending (fun map -> SMap.remove id map)
-                    | Nonblocking -> ());
-                   complete_expiration ~id entry ~reason ~decision;
-                   (match entry.lane_policy with
-                    | Blocking -> ()
-                    | Nonblocking -> atomic_update pending (fun map -> SMap.remove id map));
-                   (match committed with
-                    | Blocking_owned -> ()
-                    | Nonblocking_durable ->
-                      signal_resolution_after_commit
-                        ~base_path:entry.audit_base_path
-                        ~keeper_name:entry.keeper_name
-                        ~approval_id:id))))
-    candidates
 ;;

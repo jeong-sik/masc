@@ -5,10 +5,8 @@
 \* post-action checks that mirror this spec's postconditions, and
 \* [interruptible_sleep] whose [Atomic.compare_and_set wakeup true false]
 \* IS the HeartbeatTick action), [keeper_heartbeat_loop.ml]
-\* ([run_heartbeat_loop] the outer loop, [run_smart_heartbeat_gate] the
-\* dispatcher that turns a [Woken] sleep-outcome into a turn,
-\* [Heartbeat_smart.Skip_idle] the path that — if it consumed the CAS
-\* and then skipped — is the MissedWakeup bug-action), and
+\* ([run_heartbeat_loop] turns every [Woken] sleep outcome into the next
+\* cycle without an intervening busy/idle/visibility policy), and
 \* [keeper_keepalive.ml] ([wakeup_keeper_by_agent_name] and
 \* [Atomic.set entry.fiber_wakeup true] on the WakeupSignal side; it
 \* re-exports [Keeper_heartbeat_loop] via [include]).
@@ -49,9 +47,9 @@
 
 EXTENDS Naturals
 
-CONSTANTS MaxUnserved   \* invariant cap for unserved_signals counter
+CONSTANT MaxSignals   \* finite TLC environment, not a runtime limit
 
-ASSUME MaxUnservedNat == MaxUnserved \in Nat /\ MaxUnserved >= 1
+ASSUME MaxSignalsNat == MaxSignals \in Nat /\ MaxSignals >= 1
 
 VARIABLES
     wakeup_signaled,
@@ -65,7 +63,7 @@ vars == << wakeup_signaled, turn_state, unserved_signals >>
 TypeOK ==
     /\ wakeup_signaled  \in BOOLEAN
     /\ turn_state       \in {"idle", "running"}
-    /\ unserved_signals \in 0..MaxUnserved
+    /\ unserved_signals \in 0..MaxSignals
 
 Init ==
     /\ wakeup_signaled  = FALSE
@@ -79,7 +77,7 @@ Init ==
 \* not stack, but a fresh FALSE -> TRUE transition increments the
 \* unserved counter so we can prove the loop services every edge.
 WakeupSignal ==
-    /\ unserved_signals < MaxUnserved
+    /\ unserved_signals < MaxSignals
     /\ wakeup_signaled' = TRUE
     /\ unserved_signals' = IF wakeup_signaled = FALSE
                            THEN unserved_signals + 1
@@ -90,7 +88,7 @@ WakeupSignal ==
 \* and starts a turn.  In OCaml this is the path where
 \* [Atomic.compare_and_set wakeup true false] (in [interruptible_sleep],
 \* keeper_keepalive_signal.ml) succeeds — the sleep returns [Woken] and
-\* [run_smart_heartbeat_gate] dispatches a cycle.  The
+\* [run_heartbeat_loop] dispatches the next cycle. The
 \* [post_heartbeat_tick] [@@fsm_guard] PPX (`Atomic.get wakeup = false`)
 \* enforces this spec's [wakeup_signaled' = FALSE] postcondition at
 \* runtime.
@@ -118,12 +116,9 @@ Done ==
 
 \* Models the "missed wakeup": the heartbeat tick observes the
 \* signal, clears it, but does NOT start a turn.  In the OCaml
-\* runtime this is the [Heartbeat_smart.Skip_idle] branch consuming
-\* the [Atomic.compare_and_set wakeup true false] (so the CAS-true->false
-\* edge fires) and then skipping the cycle — i.e. the discriminator that
-\* couples [Woken] sleep-outcome to [run_smart_heartbeat_gate]'s dispatch
-\* is missing or wrong (see keeper_keepalive_signal.ml's [interruptible_sleep]
-\* comment on exactly this risk).
+\* runtime this would be a loop regression that consumes
+\* [Atomic.compare_and_set wakeup true false] but returns to sleep instead of
+\* entering the target Keeper's next cycle.
 MissedWakeup ==
     /\ wakeup_signaled = TRUE
     /\ turn_state = "idle"

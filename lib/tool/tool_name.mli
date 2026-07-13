@@ -62,7 +62,6 @@ module Goal_name : sig
     | Goal_list
     | Goal_transition
     | Goal_upsert
-    | Goal_verify
 
   val to_string : t -> string
   val of_string : string -> t option
@@ -94,8 +93,8 @@ module Operator_remote_name : sig
 end
 
 (** Domain_tool — single domain-owned grouping of Task/Board/Goal/Operator tool
-    names. This module owns only names and string round-tripping; dispatch,
-    effect, risk, and resource policy live in their own registries. *)
+    names. This module owns only names and string round-tripping; dispatch and
+    execution decisions belong to their explicit boundaries. *)
 module Domain_tool : sig
   type t =
     | Task of Task_name.t

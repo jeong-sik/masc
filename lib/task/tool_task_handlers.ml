@@ -54,14 +54,12 @@ type context = {
 type task_owner_hooks =
   { is_registered_agent_alias : Workspace.config -> string -> bool
   ; sync_current_task_binding : Workspace.config -> agent_name:string -> unit
-  ; transition_action_denylist : Workspace.config -> agent_name:string -> string list
   ; active_goal_phases_for_agent : Workspace.config -> agent_name:string -> string list
   }
 
 let default_task_owner_hooks =
   { is_registered_agent_alias = (fun _ _ -> false)
   ; sync_current_task_binding = (fun _ ~agent_name:_ -> ())
-  ; transition_action_denylist = (fun _ ~agent_name:_ -> [])
   ; active_goal_phases_for_agent = (fun _ ~agent_name:_ -> [])
   }
 ;;
@@ -187,20 +185,16 @@ let sync_owner_current_task_binding (ctx : context) =
     ctx.config
     ~agent_name:ctx.agent_name
 
-let owner_transition_action_denylist (ctx : context) =
-  (current_task_owner_hooks ()).transition_action_denylist
-    ctx.config
-    ~agent_name:ctx.agent_name
-
 let review_completion_notes
     ~(completion_contract : string list option)
     ~(evaluator_runtime : string option)
-    ~(operator_override : bool)
     ~(ctx : context)
     ~(task_opt : Masc_domain.task option)
     ~(task_id : string)
     ~(notes : string)
-    ~(evidence_refs : string list) : string option =
+    ~(evidence_refs : string list)
+  : Masc_domain.configured_llm_completion_verdict option
+  =
   match task_opt with
   | None -> None
   | Some task ->
@@ -246,28 +240,47 @@ let review_completion_notes
           ~verify_gate_evidence
           ~on_verdict
           ~few_shot_block
-          ~operator_override
           ~sw:ctx.sw
           ar_req
       in
-      match ar_result.verdict with
-      | Anti_rationalization.Reject reason -> Some reason
-      | Anti_rationalization.Approve -> None
+      let decision, rationale =
+        match ar_result.verdict, ar_result.gate with
+        | Some Anti_rationalization.Approve, Anti_rationalization.Structured_tool ->
+          Masc_domain.Completion_pass, None
+        | Some (Anti_rationalization.Reject reason), Anti_rationalization.Structured_tool ->
+          Masc_domain.Completion_reject reason, Some reason
+        | None, Anti_rationalization.Invalid_verdict ->
+          let reason =
+            Option.value
+              ~default:"configured LLM returned no valid structured completion verdict"
+              ar_result.fallback_reason
+          in
+          Masc_domain.Completion_verdict_unavailable reason, Some reason
+        | None, Anti_rationalization.Evaluator_unavailable ->
+          let reason =
+            Option.value
+              ~default:"configured LLM completion evaluator unavailable"
+              ar_result.fallback_reason
+          in
+          Masc_domain.Completion_verdict_unavailable reason, Some reason
+        | Some _,
+          (Anti_rationalization.Invalid_verdict | Anti_rationalization.Evaluator_unavailable)
+        | None, Anti_rationalization.Structured_tool ->
+          let reason = "inconsistent configured LLM completion result" in
+          Masc_domain.Completion_verdict_unavailable reason, Some reason
+      in
+      Some
+        { Masc_domain.decision
+        ; runtime_id = ar_result.evaluator_runtime
+        ; rationale
+        ; evaluated_at = Masc_domain.now_iso ()
+        }
 
 include Tool_task_completion_review
 
 include Tool_task_args
 
 include Tool_task_contract_gate
-
-(* [persisted_contract_rejection] takes [~agent_name] as a plain label so
-   that {!Tool_task_contract_gate} stays free of the {!Tool_task} context
-   record. The facade re-exports a context-bound shim so existing
-   downstream code shape ([~ctx]) is preserved. *)
-let persisted_contract_rejection ~(ctx : context)
-    ~(task_opt : Masc_domain.task option) ~(notes : string) =
-  Tool_task_contract_gate.persisted_contract_rejection
-    ~agent_name:ctx.agent_name ~task_opt ~notes
 
 (* Handlers *)
 
@@ -406,13 +419,16 @@ let handle_set_goal ~tool_name ~start_time ctx args =
     else (
       match Task_goal_assignment.set_task_goal ctx.config ~task_id ~goal_id with
       | Ok () ->
-        Tool_result.ok ~tool_name ~start_time
-          (Yojson.Safe.to_string
+        Tool_result.make_ok
+          ~tool_name
+          ~start_time
+          ~data:
             (`Assoc
-              [ ("ok", `Bool true)
-              ; ("task_id", `String task_id)
-              ; ("goal_id", `String goal_id)
-              ]))
+               [ ("ok", `Bool true)
+               ; ("task_id", `String task_id)
+               ; ("goal_id", `String goal_id)
+               ])
+          ()
       | Error err ->
         Tool_result.error
           ~failure_class:(Some Tool_result.Workflow_rejection)
@@ -648,15 +664,8 @@ let handle_claim_next ~tool_name ~start_time ctx _args =
         ~explicit_excluded_count
         ~claim_pool_candidate_count
     in
-    (* #18954: build the structured payload directly via [make_ok ~data]
-       so the message and diagnostics live in the JSON [data] field.
-       The previous form [Tool_result.ok (message ^ "\n" ^ payload)]
-       routed through [structured_payload_of_message], which parsed the
-       trailing JSON object out and discarded the prefix line — leaving
-       [Tool_result.message] able to round-trip only the JSON, not the
-       human-readable lead.  LLM/JSON consumers still see the message
-       inside the JSON [.message] field; we keep the same Assoc shape
-       that callers already inspect. *)
+    (* Build the structured payload directly so message and diagnostics
+       remain first-class typed fields. *)
     let data =
       `Assoc [ "message", `String message; "diagnostics", diagnostics ]
     in
@@ -700,11 +709,11 @@ let handle_release ~tool_name ~start_time ctx args =
            Workspace.release_task_r ctx.config ~agent_name:ctx.agent_name ~task_id
              ?expected_version ?handoff_context ()
          in
-         (match result with
-          | Ok _ ->
-            sync_owner_current_task_binding ctx;
-            sync_planning_current_task_with_owned_task ctx
-          | Error _ -> ());
+         Result.iter
+           (fun _ ->
+              sync_owner_current_task_binding ctx;
+              sync_planning_current_task_with_owned_task ctx)
+           result;
          result_to_response ~tool_name ~start_time result)
 
 let transition_known_args =
@@ -715,7 +724,6 @@ let transition_known_args =
     "reason";
     "expected_version";
     "agent_name";
-    "force";
     "completion_contract";
     "evaluator_runtime";
     "handoff_context";

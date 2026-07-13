@@ -10,8 +10,6 @@ type threshold_params = {
   handoff_threshold : float;
   handoff_cooldown_sec : int;
   auto_handoff_enabled : bool;
-  max_consecutive_hb_failures : int;
-  max_consecutive_turn_failures : int;
   model_ratio_multiplier : float;
   model_handoff_multiplier : float;
 }
@@ -56,8 +54,6 @@ let threshold_params_to_json (t : threshold_params) : Yojson.Safe.t =
     "handoff_threshold", `Float t.handoff_threshold;
     "handoff_cooldown_sec", `Int t.handoff_cooldown_sec;
     "auto_handoff_enabled", `Bool t.auto_handoff_enabled;
-    "max_consecutive_hb_failures", `Int t.max_consecutive_hb_failures;
-    "max_consecutive_turn_failures", `Int t.max_consecutive_turn_failures;
     "model_ratio_multiplier", `Float t.model_ratio_multiplier;
     "model_handoff_multiplier", `Float t.model_handoff_multiplier;
   ]

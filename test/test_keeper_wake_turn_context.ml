@@ -57,15 +57,13 @@ let with_repo_prompt_config f =
 
 let base_observation : WO.world_observation =
   {
-    pending_mentions = [];
+    pending_messages = [];
     pending_board_events = [];
-    pending_scope_messages = [];
     idle_seconds = 0;
     active_goals = [];
     context_ratio = lazy 0.0;
     unclaimed_task_count = 0;
     claimable_task_count = 0;
-    provider_capacity_blocked_task_count = 0;
     failed_task_count = 0;
     pending_verification_count = 0;
     scheduled_automation = WO.empty_scheduled_automation_observation;

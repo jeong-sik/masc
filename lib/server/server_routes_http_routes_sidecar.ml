@@ -670,7 +670,7 @@ let handle_stop state request reqd =
         | Ok desired ->
           let _status, stdout =
             Masc_exec.Exec_gate.run_argv_with_status
-              ~actor:`System_spawn
+              ~actor:(Masc_exec.Agent_id.of_string "system/spawn")
               ~raw_source:(script ^ " stop")
               ~summary:"sidecar stop script"
               ~timeout_sec:Env_config_runtime.Sidecar.control_command_timeout_sec
@@ -734,7 +734,7 @@ let handle_logs state request reqd =
     else (
       let _status, stdout =
         Masc_exec.Exec_gate.run_argv_with_status
-          ~actor:`System_runtime_info
+          ~actor:(Masc_exec.Agent_id.of_string "system/runtime_info")
           ~raw_source:("tail -n " ^ string_of_int lines ^ " " ^ path)
           ~summary:"tail sidecar logs"
           ~timeout_sec:Env_config_runtime.Sidecar.control_command_timeout_sec

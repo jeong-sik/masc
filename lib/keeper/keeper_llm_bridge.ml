@@ -92,13 +92,6 @@ let bridge_details fields envelope =
     Cancellation (server shutdown / parent fiber cancel) re-raises so the caller
     exits immediately instead of retrying. *)
 
-let with_hitl_approval_headroom timeout_s =
-  Float.max
-    timeout_s
-    (Keeper_approval_queue_rules.default_noncritical_approval_timeout_s +. 30.0)
-;;
-
-
 type cancel_classification =
   | Unknown_cancel
   | Inner_timeout_cancel

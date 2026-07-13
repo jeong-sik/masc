@@ -35,13 +35,13 @@ function makeItem(overrides: Partial<DashboardToolInventoryItem> = {}): Dashboar
 
 describe('hasSurface', () => {
   it('returns true when surface exists', () => {
-    const item = makeItem({ surfaces: ['public_mcp', 'keeper_standard'] })
+    const item = makeItem({ surfaces: ['public_mcp', 'keeper'] })
     expect(hasSurface(item, 'public_mcp')).toBe(true)
   })
 
   it('returns false when surface does not exist', () => {
     const item = makeItem({ surfaces: ['public_mcp'] })
-    expect(hasSurface(item, 'keeper_standard')).toBe(false)
+    expect(hasSurface(item, 'keeper')).toBe(false)
   })
 
   it('returns false for empty surfaces array', () => {
@@ -147,8 +147,8 @@ describe('toolMatchesQuery', () => {
   })
 
   it('matches surfaces', () => {
-    const item = makeItem({ surfaces: ['keeper_privileged'] })
-    expect(toolMatchesQuery(item, 'privileged')).toBe(true)
+    const item = makeItem({ surfaces: ['keeper'] })
+    expect(toolMatchesQuery(item, 'keeper')).toBe(true)
   })
 
   it('returns false when no field matches', () => {
@@ -175,7 +175,7 @@ describe('surfaceCountForFilter', () => {
   it('counts public_mcp items', () => {
     const items = [
       makeItem({ surfaces: ['public_mcp'] }),
-      makeItem({ surfaces: ['keeper_standard'] }),
+      makeItem({ surfaces: ['keeper'] }),
       makeItem({ surfaces: ['public_mcp'] }),
     ]
     expect(surfaceCountForFilter(items, 'public_mcp')).toBe(2)
@@ -191,20 +191,18 @@ describe('surfaceCountForFilter', () => {
 
   it('counts keeper items', () => {
     const items = [
-      makeItem({ surfaces: ['keeper_standard'] }),
-      makeItem({ surfaces: ['keeper_privileged'] }),
+      makeItem({ surfaces: ['keeper'] }),
       makeItem({ surfaces: ['public_mcp'] }),
     ]
-    expect(surfaceCountForFilter(items, 'keeper')).toBe(2)
+    expect(surfaceCountForFilter(items, 'keeper')).toBe(1)
   })
 
   it('counts internal items', () => {
     const items = [
       makeItem({ surfaces: ['local_worker'] }),
-      makeItem({ surfaces: ['privileged_executor'] }),
       makeItem({ surfaces: ['public_mcp'] }),
     ]
-    expect(surfaceCountForFilter(items, 'internal')).toBe(2)
+    expect(surfaceCountForFilter(items, 'internal')).toBe(1)
   })
 
   it('returns 0 for empty inventory', () => {
@@ -222,7 +220,7 @@ describe('surfaceCountForFilter', () => {
 
   it('counts item with multiple matching surfaces once', () => {
     const items = [
-      makeItem({ surfaces: ['keeper_standard', 'keeper_privileged'] }),
+      makeItem({ surfaces: ['keeper', 'keeper'] }),
     ]
     expect(surfaceCountForFilter(items, 'keeper')).toBe(1)
   })

@@ -352,7 +352,7 @@ let test_canonical_provider_label_delegates_to_oas_provider_config () =
   check (option string) "historical custom provider" (Some "custom-provider")
     (Runtime_provider_labels.canonical_provider_label "Custom-Provider")
 
-let test_untrusted_usage_excluded_from_aggregates () =
+let test_usage_labels_never_suppress_raw_aggregates () =
   let base = test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
     let path = make_keeper_dir base "meter" in
@@ -364,28 +364,46 @@ let test_untrusted_usage_excluded_from_aggregates () =
         ~input_tokens:1_721_506 ~output_tokens:900 ~latency_ms:1000
         ~usage_trust:"untrusted"
         ~usage_anomaly_reasons:["input_tokens_gt_1m"] ();
+      success_entry ~model:"llama:qwen3.5-27b" ~ts:(ts -. 2.0)
+        ~input_tokens:0 ~output_tokens:0 ~latency_ms:1000 ();
+      success_entry ~model:"llama:qwen3.5-27b" ~ts:(ts -. 1.0)
+        ~input_tokens:(-7) ~output_tokens:5 ~latency_ms:1000 ();
     ];
     let agg = M.compute ~base_path:base ~window_minutes:60 in
-    check int "total entries retained for diagnosis" 2 agg.total_entries;
+    check int "total entries retained for diagnosis" 4 agg.total_entries;
     check int "models" 1 (List.length agg.models);
     let s = List.hd agg.models in
-    check (option int) "trusted input total only" (Some 100)
+    check (option int) "raw input total" (Some 1_721_599)
       s.total_input_tokens;
-    check (option int) "trusted output total only" (Some 20)
+    check (option int) "raw output total" (Some 925)
       s.total_output_tokens;
-    check int "usage sample count excludes untrusted" 1 s.usage_sample_count;
-    check int "usage missing counts untrusted" 1 s.usage_missing_count;
-    check (option (float 0.001)) "tok/s excludes untrusted outlier"
-      (Some 20.0) s.avg_tok_per_sec;
-    check (option string) "coverage flags untrusted usage"
-      (Some "untrusted_usage") s.primary_coverage_reason;
-    let recent = List.hd s.recent_entries in
-    check (option string) "recent usage trust" (Some "untrusted")
-      recent.re_usage_trust;
-    check (option int) "recent untrusted input hidden" None
-      recent.re_input_tokens;
-    check (list string) "recent anomaly reasons"
-      ["input_tokens_gt_1m"] recent.re_usage_anomaly_reasons)
+    check int "all reported usage samples count" 4 s.usage_sample_count;
+    check int "invalidity is not missing usage" 0 s.usage_missing_count;
+    check (option (float 0.001)) "all reported tok/s observations remain"
+      (Some 231.25) s.avg_tok_per_sec;
+    check (option (float 0.001)) "cost is not suppressed by usage label"
+      (Some 0.04) s.total_cost_usd;
+    let large =
+      List.find
+        (fun (recent : M.recent_entry) ->
+          recent.re_input_tokens = Some 1_721_506)
+        s.recent_entries
+    in
+    check (option string) "legacy trust label retained as provenance"
+      (Some "untrusted") large.re_usage_trust;
+    check (option int) "large input remains visible" (Some 1_721_506)
+      large.re_input_tokens;
+    check (list string) "legacy anomaly reason retained as provenance"
+      ["input_tokens_gt_1m"] large.re_usage_anomaly_reasons;
+    let negative =
+      List.find
+        (fun (recent : M.recent_entry) -> recent.re_input_tokens = Some (-7))
+        s.recent_entries
+    in
+    check (option string) "negative input is explicitly invalid"
+      (Some "untrusted") negative.re_usage_trust;
+    check (list string) "negative reason is explicit"
+      ["negative_input_tokens"] negative.re_usage_anomaly_reasons)
 
 let test_error_turns_counted () =
   let base = test_dir () in
@@ -1357,8 +1375,8 @@ let () =
         test_provider_kind_is_not_reconstructed_from_legacy_fields;
       test_case "provider labels delegate to OAS Provider_config" `Quick
         test_canonical_provider_label_delegates_to_oas_provider_config;
-      test_case "untrusted usage excluded from aggregates" `Quick
-        test_untrusted_usage_excluded_from_aggregates;
+      test_case "usage labels never suppress raw aggregates" `Quick
+        test_usage_labels_never_suppress_raw_aggregates;
       test_case "error turns counted" `Quick test_error_turns_counted;
       test_case "multi model sorted" `Quick test_multi_model;
       test_case "window filter" `Quick test_window_filter;

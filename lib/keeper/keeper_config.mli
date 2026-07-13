@@ -35,14 +35,7 @@ val alert_excerpt_min_chars : int
 val alert_message_preview_max_chars : int
 val alert_reply_preview_max_chars : int
 
-(** {2 Tool Policy Display Thresholds} *)
-
-val tool_policy_count_warn_threshold : int
-val tool_first_sentence_max_chars : int
 val default_proactive_enabled : bool
-val default_proactive_idle_sec : int
-val default_proactive_cooldown_sec : int
-val approval_queue_stale_max_wait_sec : float
 val default_goal_max_chars : int
 
 (** Maximum bytes of personality text included in the rendered keeper prompt.
@@ -166,23 +159,6 @@ val normalize_compaction_message_gate : int -> int
 val normalize_compaction_token_gate : int -> int
 val normalize_compaction_cooldown_sec : int -> int
 
-(** Default number of recent tool results to keep verbatim during
-    OAS context compaction.  Preserves prior hardcoded [keep_recent:2]
-    behavior in [Keeper_compact_policy]. *)
-val default_keep_recent_tool_results : int
-
-(** Hard upper bound for operator-supplied
-    [keep_recent_tool_results] (typo guard). *)
-val keep_recent_tool_results_max : int
-
-(** Clamp [keep_recent_tool_results] to [[0, keep_recent_tool_results_max]].
-    Out-of-range values fall back to {!default_keep_recent_tool_results}
-    with a [Log.Keeper.warn] including [keeper_name] when supplied. *)
-val normalize_keep_recent_tool_results : ?keeper_name:string -> int -> int
-
-val normalize_proactive_idle_sec : int -> int
-val normalize_proactive_cooldown_sec : int -> int
-
 (** {1 Runtime Parameters}
 
     These functions return the current runtime-tunable value.
@@ -197,43 +173,21 @@ val keeper_compaction_policy_from_env : unit -> float * int * int
 
 val keeper_bootstrap_proactive_warmup_sec : unit -> int
 val keeper_bootstrap_stagger_step_sec : unit -> int
-val keeper_bootstrap_retry_max : unit -> int
 val keeper_bootstrap_retry_interval_sec : unit -> int
 
-val keeper_proactive_min_cooldown_sec : unit -> int
-val keeper_proactive_min_interval_sec : unit -> int
-
-val keeper_goal_stagnation_threshold_sec : unit -> int
-(** RFC-0310 §3.3: seconds a live goal may sit untouched before a one-shot
-    stagnation wake (default 3600). Edge-gated on the goal's updated_at, so
-    it is not a blind cadence. *)
-val keeper_proactive_task_cooldown_divisor : unit -> int
-val keeper_proactive_task_min_cooldown_sec : unit -> int
-val keeper_proactive_noop_backoff_max_shift : unit -> int
-val keeper_proactive_idle_decay_max_periods : unit -> int
-
 val keeper_batch_limit : unit -> int
-val keeper_llm_rerank_enabled : unit -> bool
-val keeper_llm_rerank_runtime : unit -> string
-(** Reranker runtime profile. Defaults through [routes.llm_rerank]; env
-    overrides may be either a concrete profile name or a logical route key. *)
 
 val keeper_unified_temperature : unit -> float
 val keeper_unified_max_tokens : unit -> int
-val keeper_tool_search_top_k : unit -> int
 
 (** {2 HITL Context-Summary Worker Policy} *)
 
 val hitl_summary_timeout_sec : unit -> float
-val hitl_summary_chat_message_limit : unit -> int
-val hitl_summary_max_tokens : unit -> int
 val hitl_summary_temperature : unit -> float
-val hitl_summary_concurrency_limit : unit -> int
 
 val keeper_status_fast_default : unit -> bool
 
 val keeper_enable_thinking : unit -> bool
-val keeper_adaptive_thinking_enabled : unit -> bool
 
 (** {1 Runtime Param Handles}
 

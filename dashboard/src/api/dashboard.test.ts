@@ -13,7 +13,7 @@ import {
   fetchDashboardExecution,
   fetchLogs,
   fetchDashboardExecutionTrust,
-  fetchDashboardGovernance,
+  fetchDashboardGate,
   fetchDashboardGoalDetail,
   fetchDashboardGoalsTree,
   fetchDashboardBriefing,
@@ -49,12 +49,10 @@ import {
   fetchTelemetrySummary,
   fetchTlcResults,
   fetchToolQuality,
-  resolveScheduleApproval,
+  setGateMode,
 } from './dashboard'
 import { fetchDashboardShell as fetchDashboardShellHot } from './dashboard-hot'
 import { keeperRuntimeBlockerLabel } from '../lib/keeper-runtime-display'
-
-const GOAL_FIXTURE_OK_COLOR = '#4ade80'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -70,21 +68,14 @@ function makeRawGoalNode(overrides: Record<string, unknown> = {}) {
     status_color: '#fff',
     phase: 'executing',
     phase_color: '#0ea5e9',
-    health: 'on_track',
-    health_color: GOAL_FIXTURE_OK_COLOR,
-    badges: [],
-    status_reason: 'working',
     priority: 1,
     metric: null,
     target_value: null,
     due_date: null,
     parent_goal_id: null,
-    convergence: 0.5,
-    convergence_pct: 50,
     tasks: [],
     task_count: 0,
     task_done_count: 0,
-    pending_verification_count: 0,
     timeline_events: [],
     children: [],
     child_count: 0,
@@ -92,14 +83,9 @@ function makeRawGoalNode(overrides: Record<string, unknown> = {}) {
     stagnation_seconds: 0,
     linked_keeper_names: [],
     pending_approval_count: 0,
-    infra_risk_count: 0,
     linkage_source: 'none',
-    linkage_warning_count: 0,
-    blocking_source: 'none',
-    blocking_reason: '',
     latest_keeper_ref: null,
     latest_turn_ref: null,
-    stalled_since: null,
     created_at: '2026-04-23T00:00:00Z',
     updated_at: '2026-04-23T00:00:00Z',
     ...overrides,
@@ -160,30 +146,6 @@ describe('fetchDashboardExecution', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/execution?force=1')
-  })
-})
-
-describe('resolveScheduleApproval', () => {
-  it('posts dashboard schedule decisions to the dashboard-only resolve route', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ ok: true, schedule_id: 'sched-1', decision: 'approve' }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    )
-    vi.stubGlobal('fetch', fetchMock)
-
-    const result = await resolveScheduleApproval('sched-1', 'approve')
-
-    expect(result).toEqual({ ok: true, schedule_id: 'sched-1', decision: 'approve' })
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/schedule/resolve')
-    const init = fetchMock.mock.calls[0]?.[1] as RequestInit
-    expect(init.method).toBe('POST')
-    expect(JSON.parse(String(init.body))).toEqual({
-      schedule_id: 'sched-1',
-      decision: 'approve',
-    })
   })
 })
 
@@ -434,7 +396,7 @@ describe('keeper tool telemetry fetchers', () => {
     })
   })
 
-  it('decodes semantic_outcome / semantic_success / goal_ids on an entry', async () => {
+  it('decodes objective success and goal_ids on an entry', async () => {
     const fetchMock = vi.fn(() => Promise.resolve(
       new Response(JSON.stringify({
         keeper: 'keeper-alpha',
@@ -446,11 +408,9 @@ describe('keeper tool telemetry fetchers', () => {
             keeper: 'keeper-alpha',
             tool: 'keeper_context_status',
             input: {},
-            output: 'blocked by policy',
+            output: 'ok',
             success: true,
             duration_ms: 5,
-            semantic_outcome: 'blocked',
-            semantic_success: false,
             goal_ids: ['g-1', 'g-2'],
           },
         ],
@@ -460,10 +420,7 @@ describe('keeper tool telemetry fetchers', () => {
 
     const result = await fetchKeeperToolCalls('keeper-alpha')
     const entry = result.entries[0]
-    // transport success=true but the parsed output was blocked.
     expect(entry?.success).toBe(true)
-    expect(entry?.semantic_success).toBe(false)
-    expect(entry?.semantic_outcome).toBe('blocked')
     expect(entry?.goal_ids).toEqual(['g-1', 'g-2'])
   })
 
@@ -661,7 +618,6 @@ describe('parseMemoryOsClaimKind (SSOT mirror of claim_kind_of_string)', () => {
 
 describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel-real-data §4a)', () => {
   it('decodes fact rows with typed category / provenance / TTL, absorbs Unknown, drops malformed and the deleted score model', async () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
       new Response(JSON.stringify({
         keeper: 'keeper-alpha',
@@ -679,9 +635,8 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel
           now: 1_790_000_000,
           now_iso: '2026-09-21T00:00:00Z',
           read_errors: [],
-          episodes: { tail_limit: 12, shown: 0, current: 0, expired: 0, terminal_markers: 0, items: [] },
+          episodes: { shown: 0, current: 0, expired: 0, terminal_markers: 0, items: [] },
           facts: {
-            tail_limit: 256,
             shown: 3,
             current: 2,
             expired: 1,
@@ -697,13 +652,9 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel
                 valid_until_iso: null,
                 last_verified_at: 1_789_500_000,
                 current: true,
-                prompt_recallable: true,
                 claim_kind: 'durable_knowledge',
-                external_ref: { kind: 'pr', id: '22198' },
                 // RFC-0247-deleted score fields: present on the wire here as a
                 // poison payload; the decoder must never copy them through.
-                // external_ref is also ignored: current backend projections no
-                // longer surface forced external-state references.
                 salience: 0.92,
                 uses: 14,
                 confidence: 0.8,
@@ -719,7 +670,6 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel
                 valid_until_iso: '2026-09-10T...Z',
                 last_verified_at: null,
                 current: false,
-                prompt_recallable: true,
                 // claim_kind omitted entirely → null
               },
               {
@@ -729,7 +679,6 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel
                 first_seen: 1,
                 reference_time: 1,
                 current: true,
-                prompt_recallable: true,
               },
             ],
           },
@@ -752,15 +701,12 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel
     expect(first?.valid_until).toBeNull()
     expect(first?.reference_time).toBe(1_789_500_000)
     expect(first?.claim_kind).toBe('durable_knowledge')
-    expect(first).not.toHaveProperty('external_ref')
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Ignoring legacy memory_os.external_ref payload'))
 
     // out-of-vocabulary category → typed Unknown arm carrying the raw label
     expect(second?.category).toEqual({ tag: 'unknown', raw: 'Speculation' })
     // omitted optionals are null, not fabricated
     expect(second?.source.tool_call_id).toBeNull()
     expect(second?.claim_kind).toBeNull()
-    expect(second).not.toHaveProperty('external_ref')
     expect(second?.current).toBe(false)
 
     // RFC-0247 drift guard: the deleted composite-score fields never reappear,
@@ -779,7 +725,6 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel
       expect(first as Record<string, unknown>).not.toHaveProperty(key)
     }
 
-    warnSpy.mockRestore()
   })
 })
 
@@ -1327,8 +1272,8 @@ describe('fetchDashboardMemory', () => {
   })
 })
 
-describe('fetchDashboardGovernance', () => {
-  it('requests a forced governance snapshot when asked', async () => {
+describe('fetchDashboardGate', () => {
+  it('requests a forced Gate snapshot when asked', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ approval_queue: [], recent_resolved: [] }), {
         status: 200,
@@ -1337,10 +1282,10 @@ describe('fetchDashboardGovernance', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    await fetchDashboardGovernance({ force: true })
+    await fetchDashboardGate({ force: true })
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/governance?force=1')
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/gate?force=1')
   })
 
   it('normalizes resolved approval history separately from pending queue items', async () => {
@@ -1352,19 +1297,18 @@ describe('fetchDashboardGovernance', () => {
             id: 'appr-done',
             keeper_name: 'keeper-a',
             tool_name: 'fs_write',
-            risk_level: 'medium',
             decision: 'reject:operator denied',
             decision_kind: 'reject',
             decision_reason: 'operator denied',
-            resolved_at_iso: '2026-06-27T01:02:03Z',
+            resolved_at: 1_782_522_123,
           },
           {
-            id: 'appr-legacy',
+            id: 'appr-approved',
             keeper_name: 'keeper-a',
             tool_name: 'shell_exec',
-            risk_level: 'high',
-            decision: 'reject:legacy reason',
-            resolved_at_iso: '2026-06-27T01:03:03Z',
+            decision: 'approve',
+            decision_kind: 'approve',
+            resolved_at: 1_782_522_183,
           },
         ],
       }), {
@@ -1374,38 +1318,65 @@ describe('fetchDashboardGovernance', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    const result = await fetchDashboardGovernance()
+    const result = await fetchDashboardGate()
 
     expect(result.recent_resolved).toEqual([
       expect.objectContaining({
         id: 'appr-done',
         keeper_name: 'keeper-a',
         tool_name: 'fs_write',
-        risk_level: 'medium',
         decision: 'reject',
         decision_raw: 'reject:operator denied',
         decision_reason: 'operator denied',
-        resolved_at: '2026-06-27T01:02:03Z',
+        resolved_at: '2026-06-27T01:02:03.000Z',
       }),
       expect.objectContaining({
-        id: 'appr-legacy',
+        id: 'appr-approved',
         keeper_name: 'keeper-a',
         tool_name: 'shell_exec',
-        risk_level: 'high',
-        decision: 'unknown',
-        decision_raw: 'reject:legacy reason',
+        decision: 'approve',
+        decision_raw: 'approve',
         decision_reason: null,
-        resolved_at: '2026-06-27T01:03:03Z',
+        resolved_at: '2026-06-27T01:03:03.000Z',
       }),
     ])
     expect(result.recent_resolved?.[0]).not.toHaveProperty('requested_at')
+  })
+
+  it('derives the immutable Always rule timestamp from its canonical numeric field', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        approval_queue: [],
+        recent_resolved: [],
+        approval_rules: [{
+          id: 'rule-1',
+          keeper_name: 'keeper-a',
+          tool_name: 'fs_write',
+          request_fingerprint: 'abcdef1234567890',
+          created_at: 1_783_123_200,
+        }],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchDashboardGate()
+
+    expect(result.approval_rules).toEqual([
+      expect.objectContaining({
+        request_fingerprint: 'abcdef1234567890',
+        created_at: '2026-07-04T00:00:00.000Z',
+      }),
+    ])
   })
 
   it('does not retry structured computation timeouts', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         error: 'computation_timeout',
-        message: 'Dashboard governance timed out after 30s',
+        message: 'Dashboard Gate timed out after 30s',
       }), {
         status: 504,
         statusText: 'Gateway Timeout',
@@ -1414,7 +1385,7 @@ describe('fetchDashboardGovernance', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(fetchDashboardGovernance()).rejects.toMatchObject({
+    await expect(fetchDashboardGate()).rejects.toMatchObject({
       name: 'ApiRequestError',
       status: 504,
       errorCode: 'computation_timeout',
@@ -1423,134 +1394,38 @@ describe('fetchDashboardGovernance', () => {
   })
 })
 
+describe('setGateMode', () => {
+  it('posts the exact non-hierarchical Gate mode contract', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        ok: true,
+        mode: 'auto_judge',
+        previous_mode: 'manual',
+        actor: 'operator',
+        changed_at: '2026-07-12T00:00:00Z',
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await setGateMode('auto_judge')
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/gate/mode')
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(String(init.body))).toEqual({ mode: 'auto_judge' })
+  })
+})
+
 describe('dashboard goals decoding', () => {
-  it('fills a missing verification_summary on goal tree payloads', async () => {
-    const rawResponse = {
-      tree: [makeRawGoalNode()],
-      summary: {},
-    }
-
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify(rawResponse), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    )
-    vi.stubGlobal('fetch', fetchMock)
-
-    const result = await fetchDashboardGoalsTree()
-
-    expect(result.tree[0]?.verification_summary).toEqual({
-      effective_policy: null,
-      open_request: null,
-      latest_request: null,
-      approve_count: 0,
-      reject_count: 0,
-      remaining_possible: 0,
-    })
-  })
-
-  it('fills a missing verification_summary on goal detail payloads', async () => {
-    const rawResponse = {
-      goal: makeRawGoalNode(),
-      linked_tasks: [],
-      linked_keepers: [],
-      approvals: [],
-      execution_receipts: [],
-      timeline: [],
-    }
-
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify(rawResponse), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    )
-    vi.stubGlobal('fetch', fetchMock)
-
-    const result = await fetchDashboardGoalDetail('goal-1')
-
-    expect(result.goal.verification_summary).toEqual({
-      effective_policy: null,
-      open_request: null,
-      latest_request: null,
-      approve_count: 0,
-      reject_count: 0,
-      remaining_possible: 0,
-    })
-  })
-
-  it('decodes resolved goal verification evidence on tree payloads', async () => {
+  it('retains direct keeper references without projecting blocker metadata', async () => {
     const rawResponse = {
       tree: [
         makeRawGoalNode({
-          verification_summary: {
-            effective_policy: null,
-            open_request: null,
-            latest_request: {
-              id: 'gvr-1',
-              goal_id: 'goal-1',
-              target_phase: 'completed',
-              requested_by: { id: 'planner' },
-              policy_snapshot: {
-                principals: [{ id: 'keeper-alpha' }],
-                eligible_principals: [{ id: 'keeper-alpha' }],
-                required_verdicts: 1,
-              },
-              votes: [
-                {
-                  principal: { id: 'keeper-alpha', display_name: 'keeper-alpha' },
-                  decision: 'approve',
-                  note: 'checked receipt and tests',
-                  evidence_refs: ['receipt:keeper-alpha:turn-7', 'test:test_goal_tools'],
-                  submitted_at: '2026-04-23T01:00:00Z',
-                },
-              ],
-              status: 'approved',
-              created_at: '2026-04-23T00:55:00Z',
-              resolved_at: '2026-04-23T01:00:00Z',
-            },
-            approve_count: 1,
-            reject_count: 0,
-            remaining_possible: 0,
-          },
-        }),
-      ],
-      summary: {},
-    }
-
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify(rawResponse), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    )
-    vi.stubGlobal('fetch', fetchMock)
-
-    const result = await fetchDashboardGoalsTree()
-
-    expect(result.tree[0]?.verification_summary.latest_request).toMatchObject({
-      id: 'gvr-1',
-      status: 'approved',
-      votes: [
-        {
-          decision: 'approve',
-          note: 'checked receipt and tests',
-          evidence_refs: ['receipt:keeper-alpha:turn-7', 'test:test_goal_tools'],
-        },
-      ],
-    })
-  })
-
-  it('retains goal blocker metadata on tree payloads', async () => {
-    const rawResponse = {
-      tree: [
-        makeRawGoalNode({
-          blocking_source: 'keeper_runtime',
-          blocking_reason: 'Pause until the keeper approval queue is resolved.',
           latest_keeper_ref: 'keeper-sangsu',
           latest_turn_ref: 42,
-          stalled_since: '2026-04-22T22:00:00Z',
         }),
       ],
       summary: {},
@@ -1567,50 +1442,18 @@ describe('dashboard goals decoding', () => {
     const result = await fetchDashboardGoalsTree()
 
     expect(result.tree[0]).toMatchObject({
-      blocking_source: 'keeper_runtime',
-      blocking_reason: 'Pause until the keeper approval queue is resolved.',
       latest_keeper_ref: 'keeper-sangsu',
       latest_turn_ref: 42,
-      stalled_since: '2026-04-22T22:00:00Z',
     })
   })
 
-  it('does not default missing goal health to on_track', async () => {
-    const rawResponse = {
-      tree: [
-        makeRawGoalNode({
-          health: undefined,
-          blocking_source: 'goal_linkage',
-          linkage_warning_count: 1,
-        }),
-      ],
-      summary: {},
-    }
-
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify(rawResponse), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    )
-    vi.stubGlobal('fetch', fetchMock)
-
-    const result = await fetchDashboardGoalsTree()
-
-    expect(result.tree[0]).toMatchObject({
-      health: 'at_risk',
-      blocking_source: 'goal_linkage',
-      linkage_warning_count: 1,
-    })
-  })
-
-  it('decodes on_track_goals separately from active_goals', async () => {
+  it('decodes explicit phase counts separately from active status', async () => {
     const rawResponse = {
       tree: [makeRawGoalNode()],
       summary: {
         total_goals: 3,
         active_goals: 2,
-        on_track_goals: 1,
+        phase_counts: { executing: 1, blocked: 1, completed: 1 },
       },
     }
 
@@ -1625,7 +1468,7 @@ describe('dashboard goals decoding', () => {
     const result = await fetchDashboardGoalsTree()
 
     expect(result.summary.active_goals).toBe(2)
-    expect(result.summary.on_track_goals).toBe(1)
+    expect(result.summary.phase_counts).toEqual({ executing: 1, blocked: 1, completed: 1 })
   })
 
   it('decodes goal attainment projections on tree payloads', async () => {
@@ -1755,7 +1598,7 @@ describe('dashboard goals decoding', () => {
               runtime_outcome: 'fallback_exhausted',
               sandbox_summary: 'docker / none',
               sandbox_root: '/tmp/keeper-sandbox',
-              mutation_guard_summary: 'mutation_contract_not_observed',
+              completion_observation_summary: 'not_observed',
               latest_receipt_at: '2026-04-23T00:10:00Z',
             },
             latest_causal_event: {
@@ -1827,7 +1670,7 @@ describe('dashboard goals decoding', () => {
           runtime_outcome: 'fallback_exhausted',
           sandbox_summary: 'docker / none',
           sandbox_root: '/tmp/keeper-sandbox',
-          mutation_guard_summary: 'mutation_contract_not_observed',
+          completion_observation_summary: 'not_observed',
           latest_receipt_at: '2026-04-23T00:10:00Z',
         },
         latest_causal_event: {
@@ -1865,13 +1708,13 @@ describe('dashboard goals decoding', () => {
           runtime_trust: {
             disposition: 'Pass',
             approval: {
-              state: 'matched_by_always_rule',
-              summary: 'Matched by stored allow rule.',
+              state: 'always_allowed',
+              summary: 'Exact Always rule allowed the request.',
               pending_count: 0,
             },
             execution: {
               sandbox_summary: 'docker / none',
-              mutation_guard_summary: 'allowed_in_sandbox',
+              completion_observation_summary: 'tool_execution_observed',
               latest_receipt_at: '2026-04-23T00:10:00Z',
             },
           },
@@ -1896,13 +1739,13 @@ describe('dashboard goals decoding', () => {
     expect(result.linked_keepers[0]?.runtime_trust).toMatchObject({
       disposition: 'Pass',
       approval_state: {
-        state: 'matched_by_always_rule',
-        summary: 'Matched by stored allow rule.',
+        state: 'always_allowed',
+        summary: 'Exact Always rule allowed the request.',
         pending_count: 0,
       },
       execution_summary: {
         sandbox_summary: 'docker / none',
-        mutation_guard_summary: 'allowed_in_sandbox',
+        completion_observation_summary: 'tool_execution_observed',
         latest_receipt_at: '2026-04-23T00:10:00Z',
       },
     })
@@ -1956,8 +1799,6 @@ describe('fetchKeeperConfig', () => {
       },
       proactive: {
         enabled: 'true',
-        idle_sec: '900',
-        cooldown_sec: '1800',
       },
       drift: {
         status: 'wired',
@@ -1980,7 +1821,6 @@ describe('fetchKeeperConfig', () => {
           },
         },
         deny_list: 'Execute',
-        destructive_check_tools: 'dynamic_boundary (Tool_dispatch.is_destructive)',
         cost_budget: {
           active: 'false',
         },
@@ -1993,7 +1833,6 @@ describe('fetchKeeperConfig', () => {
         fiber_health: 'healthy',
         runtime_blocker_class: 'stale_fleet_batch',
         runtime_blocker_summary: 'Fleet batch paused after stale termination storm.',
-        runtime_blocker_continue_gate: 'false',
       },
       runtime_trust: {
         disposition: 'Pass',
@@ -2009,14 +1848,6 @@ describe('fetchKeeperConfig', () => {
         ],
         active_goal_count: '1',
         missing_active_goal_ids: [],
-      },
-      tools: {
-        tool_access: ['tool_read_file'],
-        resolved_allowlist: 'tool_read_file',
-        tool_denylist: 'Execute',
-        active_masc_tool_count: '1',
-        active_keeper_tool_count: '2',
-        total_active: '3',
       },
       sources: {
         live_meta_path: '/tmp/.masc/keepers/keeper-sangsu/live.json',
@@ -2071,13 +1902,9 @@ describe('fetchKeeperConfig', () => {
     expect(result.execution.runtime_options).toEqual(['keeper_unified', 'runpod_mtp.qwen36-35b-a3b-mtp'])
     expect(result.execution.per_provider_timeout_sec).toBe(12.5)
     expect(result.execution.per_provider_timeout_mode).toBe('override')
-    expect(result.hooks?.destructive_check_tools).toEqual(['dynamic_boundary (Tool_dispatch.is_destructive)'])
     expect(result.hooks?.slots.pre_tool_use?.gates).toEqual(['keeper_deny_list'])
     // deny_list count is derived from the array (deny_list_count field dropped).
     expect(result.hooks?.deny_list).toEqual(['Execute'])
-    // tool_access is a string list (was mistyped as unknown/{}); needed so the
-    // denylist editor can echo it back to set_policy unchanged.
-    expect(result.tools.tool_access).toEqual(['tool_read_file'])
     expect(result.sources.precedence).toEqual(['live_meta'])
     expect(result.metrics.total_cost_usd).toBe(0.12)
     expect(result.runtime.runtime_blocker_class).toBe('stale_fleet_batch')
@@ -2087,7 +1914,6 @@ describe('fetchKeeperConfig', () => {
     expect(result.workspace.active_goals[0]?.title).toBe('Ship runtime clarity')
     expect(result.runtime_trust?.disposition).toBe('Pass')
     expect(result.field_presence?.present_paths).toContain('prompt.system_prompt_blocks.capabilities.text')
-    expect(result.field_presence?.present_paths).toContain('tools.tool_access')
     expect(result.field_presence?.producer).toBe('dashboard-keeper-config.normalizer')
   })
 
@@ -2210,7 +2036,6 @@ describe('fetchKeeperConfig', () => {
     const cases = [
       ['runtime_exhausted', '런타임 후보 소진'],
       ['provider_runtime_error', '런타임 호출 오류'],
-      ['tool_route_recoverable_failure', '도구 라우팅 복구 가능 실패'],
       ['fiber_unresolved', 'Fiber 미해결'],
       ['stale_turn_timeout', '오래된 턴 만료'],
       ['awaiting_operator', '운영자 조치 대기'],
@@ -2627,12 +2452,9 @@ describe('fetchRuntimeProviders', () => {
                 has_capabilities: true,
                 behavior_capabilities: {
                   supports_inline_tools: true,
-                  requires_per_keeper_bridging_for_bound_actor_tools: false,
-                  identity_runtime_mcp_header_keys: ['x-masc-keeper'],
                   argv_prompt_preflight: false,
                   uses_anthropic_caching: false,
                   max_turns_per_attempt: 3,
-                  tolerates_bound_actor_fallback: true,
                 },
                 custom_header_count: 2,
                 connect_timeout_s: 120,
@@ -2705,8 +2527,8 @@ describe('fetchRuntimeProviders', () => {
             temperature: null,
           },
         ],
-        assignment_governance: {
-          schema: 'masc.runtime_assignment_governance.v1',
+        assignment_status: {
+          schema: 'masc.runtime_assignment_status.v1',
           source: 'runtime.toml',
           status: 'degraded',
           degraded: true,
@@ -2829,8 +2651,8 @@ describe('fetchRuntimeProviders', () => {
     expect(result.providers[0]?.declared_spec?.provider?.api_format).toBe('chat-completions')
     expect(
       result.providers[0]?.declared_spec?.provider?.behavior_capabilities
-        ?.identity_runtime_mcp_header_keys,
-    ).toEqual(['x-masc-keeper'])
+        ?.supports_inline_tools,
+    ).toBe(true)
     expect(result.providers[0]?.declared_spec?.model?.capabilities?.supports_structured_output).toBe(true)
     expect(result.providers[0]?.declared_spec?.model?.capabilities?.supports_parallel_tool_calls).toBe(true)
     expect(result.providers[0]?.declared_spec?.model?.capabilities?.supports_system_prompt).toBe(true)
@@ -2843,10 +2665,10 @@ describe('fetchRuntimeProviders', () => {
     expect(result.providers[1]?.temperature).toBeNull()
     expect(result.providers[0]?.discovery?.discovered_model).toBe('Qwen/Qwen3-32B')
     expect(result.providers[0]?.discovery?.ctx_size).toBe(200000)
-    expect(result.assignment_governance?.status).toBe('degraded')
-    expect(result.assignment_governance?.assignment_count).toBe(2)
-    expect(result.assignment_governance?.assigned_runtimes).toEqual(['openai.gpt'])
-    expect(result.assignment_governance?.assignments[0]?.keeper).toBe('budgettest')
+    expect(result.assignment_status?.status).toBe('degraded')
+    expect(result.assignment_status?.assignment_count).toBe(2)
+    expect(result.assignment_status?.assigned_runtimes).toEqual(['openai.gpt'])
+    expect(result.assignment_status?.assignments[0]?.keeper).toBe('budgettest')
     expect(result.startup_degradation?.status).toBe('degraded')
     expect(result.startup_degradation?.terminal_reason).toBe('missing_oas_catalog_models')
     expect(result.startup_degradation?.effective_default_runtime_id).toBe('runpod_mtp.qwen')

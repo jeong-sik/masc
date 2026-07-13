@@ -18,15 +18,6 @@ let flusher_outcome_to_label : Board_metrics_hooks.flusher_outcome -> string =
   | Switch_finished -> "switch_finished"
   | Cas_exhausted -> "cas_exhausted"
 
-(* automation_label label for masc_board_legacy_migrate_post_kind_total *)
-let automation_label_to_label : Board_types.automation_label -> string = function
-  | Auto_prefixed -> "auto-prefix"
-  | Qa_prefixed -> "qa-prefix"
-  | Researcher_named -> "researcher"
-  | Harness_named -> "harness"
-  | Smoke_named -> "smoke"
-  | Probe_named -> "probe"
-
 (* reason label for masc_persistence_read_drops_total; reuses the
    SSOT wire mapping in Read_drop_reason (byte-identical to the old
    Safe_ops.persistence_read_drop_reason_* constants). *)
@@ -52,13 +43,6 @@ let install () =
              Otel_metric_store.metric_board_dispatch_flusher_start_outcomes
              ~labels:[ ("outcome", flusher_outcome_to_label outcome) ]
              ());
-      inc_vote_fixture_detected =
-        (fun ~count ->
-           if count > 0 then
-             Otel_metric_store.inc_counter
-               "masc_board_vote_fixture_detected_total"
-               ~delta:(Float.of_int count)
-               ());
       inc_persistence_read_drop =
         (fun ~surface ~reason ->
            Otel_metric_store.inc_counter
@@ -66,15 +50,6 @@ let install () =
              ~labels:
                [ ("surface", board_persist_surface_to_label surface)
                ; ("reason", read_drop_reason_to_label reason)
-               ]
-             ());
-      inc_legacy_migrate_post_kind =
-        (fun ~author ~automation_label ->
-           Otel_metric_store.inc_counter
-             "masc_board_legacy_migrate_post_kind_total"
-             ~labels:
-               [ ("author", author)
-               ; ("automation_label", automation_label_to_label automation_label)
                ]
              ());
     }

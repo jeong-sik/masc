@@ -405,11 +405,9 @@ let read_event_lines config ~limit =
     ) month_dirs;
     List.rev !collected
 
-(** Issue #8474: FSM transition matrix.  Each entry mirrors a match-arm
-    in [task transition] (lib/workspace/task_state.ml ~line
-    831).  Verifier-FSM rows ([submit_for_verification],
-    [approve_verification], [reject_verification]) are gated at runtime
-    by [MASC_VERIFICATION_FSM_ENABLED] but listed unconditionally so
+(** Issue #8474: FSM transition matrix. Each entry mirrors a match-arm
+    in the task transition lifecycle. Verification actions are always
+    available when their objective source-state preconditions hold, so
     the published schema matches the action enum
     ([Masc_domain.valid_task_action_strings] via #8354).  The regression test
     [test_types.ml :: fsm_transition_matrix] asserts every action
@@ -420,14 +418,14 @@ let task_fsm_transitions : (string * string list * string * string option) list 
   [
     ("claim",                   ["todo"],                                  "claimed",                None);
     ("start",                   ["claimed"],                               "in_progress",            None);
-    ("done",                    ["claimed"; "in_progress"],                "done",                   Some "rejected for contract.strict tasks when MASC_VERIFICATION_FSM_ENABLED — use submit_for_verification (RFC-0323 G-1)");
+    ("done",                    ["in_progress"],                           "done",                   Some "configured LLM completion verdict must pass");
     ("cancel",                  ["todo"; "claimed"; "in_progress"],        "cancelled",              None);
     ("release",                 ["claimed"; "in_progress"],                "todo",                   None);
     (* Action names match [Masc_domain.task_action_to_string] (SSOT):
        Approve_verification -> "approve", Reject_verification -> "reject". *)
-    ("submit_for_verification", ["claimed"; "in_progress"],                "awaiting_verification",  Some "MASC_VERIFICATION_FSM_ENABLED + verifier-FSM only");
-    ("approve",                 ["awaiting_verification"],                 "done",                   Some "MASC_VERIFICATION_FSM_ENABLED + verifier != assignee");
-    ("reject",                  ["awaiting_verification"],                 "in_progress",            Some "MASC_VERIFICATION_FSM_ENABLED + verifier != assignee");
+    ("submit_for_verification", ["claimed"; "in_progress"],                "awaiting_verification",  Some "asynchronous configured LLM review state");
+    ("approve",                 ["awaiting_verification"],                 "done",                   Some "configured LLM completion verdict must pass");
+    ("reject",                  ["awaiting_verification"],                 "in_progress",            Some "configured LLM completion verdict must reject");
   ]
 
 let task_fsm_transition_to_json (action, froms, to_, gate) =
@@ -465,12 +463,12 @@ let schema_markdown =
     "";
     "- claim: todo -> claimed";
     "- start: claimed(by you) -> in_progress";
-    "- done: claimed/in_progress(by you) -> done (contract.strict + MASC_VERIFICATION_FSM_ENABLED: rejected — use submit_for_verification)";
+    "- done: in_progress(by you) -> done (configured LLM verdict=pass)";
     "- cancel: todo/claimed/in_progress(by you) -> cancelled";
     "- release: claimed/in_progress(by you) -> todo";
-    "- submit_for_verification: claimed/in_progress(by you) -> awaiting_verification (MASC_VERIFICATION_FSM_ENABLED)";
-    "- approve: awaiting_verification -> done (verifier != assignee, MASC_VERIFICATION_FSM_ENABLED)";
-    "- reject: awaiting_verification -> in_progress (verifier != assignee, MASC_VERIFICATION_FSM_ENABLED)";
+    "- submit_for_verification: claimed/in_progress(by you) -> awaiting_verification";
+    "- approve: awaiting_verification -> done (configured LLM verdict=pass)";
+    "- reject: awaiting_verification -> in_progress (configured LLM verdict=reject)";
     "";
     "CAS guard: expected_version == backlog.version";
   ]
@@ -568,8 +566,7 @@ let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
     mono_clock = Some mono_clock;
     net = Some net;
   } in
-  (* Board post kind auto-classification: reads [workspace_config state] so
-     workspace changes via set_workspace are reflected automatically. *)
+  (* Agent-to-agent board feedback lookup follows the active workspace. *)
   Board_tool.set_agent_lookup (fun name ->
     try Workspace.is_agent_session_bound (workspace_config state) ~agent_name:name
     with Sys_error _ | Not_found | Invalid_argument _ -> false);

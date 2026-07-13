@@ -1,18 +1,5 @@
-(** Restores behavioral coverage for the wire-capture response-suppression
-    surface that PR #23929 (588-file [STATE]/BDI purge) swept out along with
-    test/test_keeper_state_snapshot_json.ml. The production code exercised
-    here has nothing to do with [STATE]/BDI and remained live at HEAD with
-    zero test consumers after the deletion:
-      - Keeper_agent_run_finalize_response: wire_capture_response_suppression_reasons,
-        wire_capture_response_suppression_reason_label,
-        emit_wire_capture_response_suppressed_metrics, replay_response_text_for_capture
-      - Keeper_agent_run_response_text: completion_contract_suppresses_visible_response,
-        finalize (budget/control-checkpoint/attention auto-suppress default)
-
-    Excluded from restoration: assertions on the deleted [STATE] snapshot
-    fields (state_snapshot_source, state_snapshot.decisions) and
-    checkpoint_for_replay_persistence — both were purged along with the
-    [STATE]/BDI protocol and have no live equivalent to test against. *)
+(** Response suppression is restricted to typed control checkpoints. Runtime
+    budget and completion-contract observations preserve model output. *)
 
 module Finalize = Masc.Keeper_agent_run_finalize_response.For_testing
 module Response_text = Masc.Keeper_agent_run_response_text
@@ -31,85 +18,37 @@ let input_required_request () : Agent_sdk.Error.input_required =
 
 (* ── wire_capture_response_suppression_reasons / labels / metrics ───── *)
 
-let test_wire_capture_suppression_reasons_emit_all_cause_metrics () =
-  let reasons
-        ~budget_exhausted
-        ~control_checkpoint
-        ~contract_suppresses_visible_response
-    =
+let test_wire_capture_suppression_reasons_emit_control_metric () =
+  let reasons ~control_checkpoint =
     Finalize.wire_capture_response_suppression_reasons
-      ~budget_exhausted
       ~control_checkpoint
-      ~contract_suppresses_visible_response
     |> List.map Finalize.wire_capture_response_suppression_reason_label
   in
   Alcotest.(check (list string))
     "no suppression"
     []
-    (reasons
-       ~budget_exhausted:false
-       ~control_checkpoint:false
-       ~contract_suppresses_visible_response:false);
-  Alcotest.(check (list string))
-    "budget exhausted"
-    [ "budget_exhausted" ]
-    (reasons
-       ~budget_exhausted:true
-       ~control_checkpoint:false
-       ~contract_suppresses_visible_response:false);
+    (reasons ~control_checkpoint:false);
   Alcotest.(check (list string))
     "control checkpoint"
     [ "control_checkpoint" ]
-    (reasons
-       ~budget_exhausted:false
-       ~control_checkpoint:true
-       ~contract_suppresses_visible_response:false);
-  Alcotest.(check (list string))
-    "completion contract"
-    [ "completion_contract" ]
-    (reasons
-       ~budget_exhausted:false
-       ~control_checkpoint:false
-       ~contract_suppresses_visible_response:true);
-  Alcotest.(check (list string))
-    "both cause labels preserved"
-    [ "budget_exhausted"; "completion_contract" ]
-    (reasons
-       ~budget_exhausted:true
-       ~control_checkpoint:false
-       ~contract_suppresses_visible_response:true);
+    (reasons ~control_checkpoint:true);
   let keeper_name = "wirecap_suppression_metric" in
   let labels reason = [ ("keeper", keeper_name); ("reason", reason) ] in
-  let budget_labels = labels "budget_exhausted" in
   let control_labels = labels "control_checkpoint" in
-  let contract_labels = labels "completion_contract" in
   let metric_value ~labels =
     Metrics.metric_value_or_zero
       Keeper_metrics.(to_string WireCaptureResponseSuppressed)
       ~labels
       ()
   in
-  let budget_before = metric_value ~labels:budget_labels in
   let control_before = metric_value ~labels:control_labels in
-  let contract_before = metric_value ~labels:contract_labels in
   Finalize.emit_wire_capture_response_suppressed_metrics
     ~keeper_name
-    (Finalize.wire_capture_response_suppression_reasons
-       ~budget_exhausted:true
-       ~control_checkpoint:true
-       ~contract_suppresses_visible_response:true);
-  Alcotest.(check (float 0.0001))
-    "budget exhausted metric increments"
-    (budget_before +. 1.0)
-    (metric_value ~labels:budget_labels);
+    (Finalize.wire_capture_response_suppression_reasons ~control_checkpoint:true);
   Alcotest.(check (float 0.0001))
     "control checkpoint metric increments"
     (control_before +. 1.0)
-    (metric_value ~labels:control_labels);
-  Alcotest.(check (float 0.0001))
-    "completion contract metric increments"
-    (contract_before +. 1.0)
-    (metric_value ~labels:contract_labels)
+    (metric_value ~labels:control_labels)
 ;;
 
 (* ── replay_response_text_for_capture ────────────────────────────────── *)
@@ -141,67 +80,34 @@ let test_replay_capture_omits_blank_response_text () =
        ~response_text:"   ")
 ;;
 
-let test_replay_capture_strips_internal_markup_before_visible_capture () =
+let test_replay_capture_preserves_model_reply_before_visible_capture () =
   let finalized =
     Response_text.finalize
-      ~completion_contract_result:Receipt.Contract_satisfied_completion
+      ~completion_contract_result:Receipt.Completion_response_observed
       ~stop_reason:Runtime_agent.Completed
-      ~raw_response_text:"SKILL: routing metadata\nVisible reply"
+      ~raw_response_text:"First line from model\nVisible reply"
       ()
   in
   Alcotest.(check string)
-    "internal reply markup stripped before capture decision"
-    "Visible reply"
+    "model reply preserved before capture decision"
+    "First line from model\nVisible reply"
     finalized.response_text;
   Alcotest.(check (option string))
     "visible finalized response is captured"
-    (Some "Visible reply")
+    (Some "First line from model\nVisible reply")
     (Finalize.replay_response_text_for_capture
        ~suppress_visible_response:false
        ~response_text:finalized.response_text)
 ;;
 
-(* ── completion_contract_suppresses_visible_response (passive-only) ─── *)
-
-let passive_suppresses_for_source source =
-  Response_text.completion_contract_suppresses_visible_response
-    ~history_assistant_source:source
-    Receipt.Contract_passive_only
-;;
-
-let test_direct_passive_only_is_not_suppressed () =
-  Alcotest.(check bool)
-    "direct-channel passive-only reply stays visible"
-    false
-    (passive_suppresses_for_source "direct_assistant")
-;;
-
-let test_internal_passive_only_is_suppressed () =
-  Alcotest.(check bool)
-    "internal-channel passive-only reply is suppressed"
-    true
-    (passive_suppresses_for_source "internal_assistant")
-;;
-
 let test_input_required_question_is_not_suppressed_for_internal_source () =
   let request = input_required_request () in
   let stop_reason = Runtime_agent.InputRequired { turns_used = 2; request } in
-  let suppressed =
-    Response_text.completion_contract_suppresses_visible_response_for_stop_reason
-      ~history_assistant_source:"internal_assistant"
-      ~stop_reason
-      Receipt.Contract_passive_only
-  in
-  Alcotest.(check bool)
-    "typed input question overrides passive internal suppression"
-    false
-    suppressed;
   let finalized =
     Response_text.finalize
-      ~completion_contract_result:Receipt.Contract_passive_only
+      ~completion_contract_result:Receipt.Completion_observation_unknown
       ~stop_reason
       ~raw_response_text:request.question
-      ~suppress_response_text:suppressed
       ()
   in
   Alcotest.(check string)
@@ -210,74 +116,76 @@ let test_input_required_question_is_not_suppressed_for_internal_source () =
     finalized.response_text
 ;;
 
-(* ── Keeper_agent_run_response_text.finalize: passive-only + auto-suppress ── *)
+(* ── Keeper_agent_run_response_text.finalize ── *)
 
-let test_direct_passive_only_finalizer_preserves_raw_response_text () =
+let test_direct_response_observation_preserves_raw_response_text () =
   let raw_response_text =
     "I cannot act on that from the current keeper state, but I am still here."
   in
   let finalized =
     Response_text.finalize
-      ~completion_contract_result:Receipt.Contract_passive_only
+      ~completion_contract_result:Receipt.Completion_response_observed
       ~stop_reason:Runtime_agent.Completed
       ~raw_response_text
-      ~suppress_response_text:(passive_suppresses_for_source "direct_assistant")
       ()
   in
   Alcotest.(check string)
-    "direct passive-only keeps visible response"
+    "direct response observation keeps visible response"
     raw_response_text
     finalized.response_text
 ;;
 
-let test_internal_passive_only_finalizer_drops_raw_response_text () =
+let test_internal_response_observation_preserves_raw_response_text () =
+  let raw_response_text =
+    "No actionable signal. I will wait for a future autonomous cycle."
+  in
   let finalized =
     Response_text.finalize
-      ~completion_contract_result:Receipt.Contract_passive_only
+      ~completion_contract_result:Receipt.Completion_response_observed
       ~stop_reason:Runtime_agent.Completed
-      ~raw_response_text:
-        "No actionable signal. I will wait for a future autonomous cycle."
-      ~suppress_response_text:(passive_suppresses_for_source "internal_assistant")
+      ~raw_response_text
       ()
   in
   Alcotest.(check string)
-    "internal passive-only drops visible response"
-    ""
+    "response observation preserves visible response"
+    raw_response_text
     finalized.response_text
 ;;
 
-let test_budget_exhausted_finalizer_drops_response_text_by_default () =
+let test_budget_exhausted_finalizer_preserves_response_text_by_default () =
+  let raw_response_text = "Continuation checkpoint saved; keeper remains scheduled" in
   let finalized =
     Response_text.finalize
-      ~completion_contract_result:Receipt.Contract_satisfied_completion
+      ~completion_contract_result:Receipt.Completion_response_observed
       ~stop_reason:(Runtime_agent.TurnBudgetExhausted { turns_used = 3; limit = 3 })
-      ~raw_response_text:"Continuation checkpoint saved; keeper remains scheduled"
+      ~raw_response_text
       ()
   in
   Alcotest.(check string)
-    "turn-budget exhaustion auto-suppresses response text with no explicit override"
-    ""
+    "turn-budget checkpoint preserves response text"
+    raw_response_text
     finalized.response_text
 ;;
 
-let test_contract_requires_attention_finalizer_drops_response_text_by_default () =
+let test_contract_observation_finalizer_preserves_response_text_by_default () =
+  let raw_response_text = "Attempted work but produced no tool call." in
   let finalized =
     Response_text.finalize
-      ~completion_contract_result:Receipt.Contract_violated
+      ~completion_contract_result:Receipt.Completion_no_visible_output
       ~stop_reason:Runtime_agent.Completed
-      ~raw_response_text:"Attempted work but violated the tool contract."
+      ~raw_response_text
       ()
   in
   Alcotest.(check string)
-    "contract-requires-attention auto-suppresses response text with no explicit override"
-    ""
+    "completion-contract observation preserves response text"
+    raw_response_text
     finalized.response_text
 ;;
 
 let test_recovery_defer_finalizer_drops_response_text_by_default () =
   let finalized =
     Response_text.finalize
-      ~completion_contract_result:Receipt.Contract_passive_only
+      ~completion_contract_result:Receipt.Completion_observation_unknown
       ~stop_reason:
         (Runtime_agent.ToolFailureRecoveryDeferred
            { turns_used = 2
@@ -300,7 +208,7 @@ let () =
       , [ Alcotest.test_case
             "reason combinations + labels + metric emission"
             `Quick
-            test_wire_capture_suppression_reasons_emit_all_cause_metrics
+            test_wire_capture_suppression_reasons_emit_control_metric
         ] )
     ; ( "replay_response_text_for_capture"
       , [ Alcotest.test_case
@@ -318,39 +226,31 @@ let () =
         ; Alcotest.test_case
             "strips internal markup before visible capture"
             `Quick
-            test_replay_capture_strips_internal_markup_before_visible_capture
+            test_replay_capture_preserves_model_reply_before_visible_capture
         ] )
-    ; ( "completion_contract_suppresses_visible_response"
+    ; ( "typed_control_response"
       , [ Alcotest.test_case
-            "direct-channel passive-only is not suppressed"
-            `Quick
-            test_direct_passive_only_is_not_suppressed
-        ; Alcotest.test_case
-            "internal-channel passive-only is suppressed"
-            `Quick
-            test_internal_passive_only_is_suppressed
-        ; Alcotest.test_case
-            "InputRequired remains visible on internal source"
+            "InputRequired remains visible"
             `Quick
             test_input_required_question_is_not_suppressed_for_internal_source
         ] )
     ; ( "keeper_agent_run_response_text.finalize"
       , [ Alcotest.test_case
-            "direct passive-only finalizer preserves raw response text"
+            "direct response observation preserves raw response text"
             `Quick
-            test_direct_passive_only_finalizer_preserves_raw_response_text
+            test_direct_response_observation_preserves_raw_response_text
         ; Alcotest.test_case
-            "internal passive-only finalizer drops raw response text"
+            "response observation preserves raw response text"
             `Quick
-            test_internal_passive_only_finalizer_drops_raw_response_text
+            test_internal_response_observation_preserves_raw_response_text
         ; Alcotest.test_case
-            "turn-budget exhaustion auto-suppresses by default"
+            "turn-budget checkpoint preserves by default"
             `Quick
-            test_budget_exhausted_finalizer_drops_response_text_by_default
+            test_budget_exhausted_finalizer_preserves_response_text_by_default
         ; Alcotest.test_case
-            "contract-requires-attention auto-suppresses by default"
+            "contract observation preserves by default"
             `Quick
-            test_contract_requires_attention_finalizer_drops_response_text_by_default
+            test_contract_observation_finalizer_preserves_response_text_by_default
         ; Alcotest.test_case
             "typed recovery checkpoint auto-suppresses by default"
             `Quick

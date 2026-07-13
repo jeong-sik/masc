@@ -53,7 +53,6 @@ val set_turn_context :
   ?sandbox_root:string ->
   ?allowed_paths:string list ->
   ?network_mode:string ->
-  ?approval_mode:string ->
   ?runtime_profile:string ->
   unit ->
   unit
@@ -62,10 +61,10 @@ val set_turn_context :
 
 val get_turn_context :
   cell:turn_ctx_cell ->
-  unit ->string option * string option * bool option * int option * string option * string option * string option * int option * int option * string option * string list option * string option * string option * string option
+  unit ->string option * string option * bool option * int option * string option * string option * string option * int option * int option * string option * string list option * string option * string option
 (** Returns [(lane, tool_choice, thinking_enabled, thinking_budget, trace_id,
     prompt_fingerprint, session_id, turn, keeper_turn_id, task_id, goal_ids,
-    sandbox_profile, network_mode, approval_mode)] for
+    sandbox_profile, network_mode)] for
     the run, or [None] values when no turn context has
     been recorded. *)
 
@@ -157,7 +156,6 @@ val log_call :
   ?sandbox_root:string ->
   ?allowed_paths:string list ->
   ?network_mode:string ->
-  ?approval_mode:string ->
   ?runtime_profile:string ->
   ?result_bytes:int ->
   ?truncated_to:int ->

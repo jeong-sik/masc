@@ -55,7 +55,6 @@ let test_identity_keys_are_canonical () =
       [ ("name", `String "identity")
       ; ("agent_name", `String "identity")
       ; ("trace_id", `String "trace-identity")
-      ; ("tool_access", `List [])
       ; ("instructions", `String "preserve operator guidance")
       ]);
   let after = counter_total () in
@@ -87,7 +86,7 @@ let test_persisted_multimodal_policy_is_canonical_before_warn () =
     (fun () ->
       Fs_compat.save_file
         path
-        {|{"name":"legacy-mm","agent_name":"legacy-mm","trace_id":"trace-legacy-mm","tool_access":[],"multimodal_policy":"Delegate"}|};
+        {|{"name":"legacy-mm","agent_name":"legacy-mm","trace_id":"trace-legacy-mm","multimodal_policy":"Delegate"}|};
       let before = counter_total () in
       (match Keeper_meta_store.read_meta_file_path path with
        | Ok (Some meta) ->
@@ -116,7 +115,7 @@ let test_config_keys_are_warned_before_parse () =
     (fun () ->
       Fs_compat.save_file
         path
-        {|{"name":"config-key","agent_name":"config-key","trace_id":"trace-config-key","tool_access":[],"goal":"legacy profile goal"}|};
+        {|{"name":"config-key","agent_name":"config-key","trace_id":"trace-config-key","goal":"legacy profile goal"}|};
       let before = counter_total () in
       (match Keeper_meta_store.read_meta_file_path path with
        | Ok (Some meta) -> Alcotest.(check string) "keeper name" "config-key" meta.name

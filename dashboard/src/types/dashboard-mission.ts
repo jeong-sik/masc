@@ -1,5 +1,5 @@
 import type { KeeperDiagnostic, KeeperTrustSummary, Message, MissionSignalTruth, MissionEvidenceSource } from './core'
-import type { PendingConfirmEnvelope, PendingConfirmation, PendingConfirmSummary, OperatorActionDescriptor } from './governance'
+import type { PendingConfirmEnvelope, PendingConfirmation, PendingConfirmSummary, OperatorActionDescriptor } from './gate'
 
 export interface DashboardMissionSummary {
   workspace_health?: string
@@ -292,7 +292,6 @@ export interface DashboardProofWorkerRunEvidence {
   proof_present?: boolean | null
   proof_run_id?: string | null
   proof_status?: string | null
-  proof_risk_class?: string | null
   proof_execution_mode?: string | null
   proof_evidence_count?: number | null
   checkpoint_ref?: string | null
@@ -512,20 +511,16 @@ export interface KeeperRecoverResult {
   up?: unknown
 }
 
-export interface AdmissionQueueSnapshot {
-  throttle_owner: string
-  max_concurrent: number
+export interface InferenceInflightSnapshot {
+  boundary_owner: 'oas_runtime'
   active: number
-  available: number
-  queue_depth: number
 }
 
 export interface OperatorSnapshot {
   root: OperatorNamespaceSnapshot
   sessions: OperatorSessionSnapshot[]
   keepers: OperatorKeeperSnapshot[]
-  admission_queue?: AdmissionQueueSnapshot | null
-  admission_queue_error?: string | null
+  inference_inflight?: InferenceInflightSnapshot | null
   operator_judge_runtime?: OperatorJudgeRuntime | null
   persistent_agents?: OperatorKeeperSnapshot[]
   recent_messages: Message[]

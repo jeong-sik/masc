@@ -110,38 +110,15 @@ let answered_of outcomes =
     outcomes
 
 type skip_reason =
-  | Quorum_not_met of
-      { answered : int
-      ; total : int
-      ; required : int
-      }
+  | No_panel_answers of { total : int }
 [@@deriving yojson, show, eq]
 
 let render_skip_reason = function
-  | Quorum_not_met { answered; total; required } ->
-    Printf.sprintf
-      "fusion aborted: %d of %d panels answered, preset requires at least %d"
-      answered
-      total
-      required
+  | No_panel_answers { total } ->
+    Printf.sprintf "fusion aborted: none of %d panels returned an answer" total
 
 let no_panel_answers_error =
   "all panels failed: no answered panel to synthesize"
-
-(* RFC-0252 left the panel-quorum case unspecified. The judge prompt is built
-   from [answered_of] only, so when fewer than [min_answered] panels [Answered]
-   the judge is handed a thin (or empty) <panel_answers> block and fabricates a
-   synthesis from little/no evidence — the run then surfaces a confident result
-   backed by too few panels (observed: a 0-success panel still produced a fusion
-   result). This pure decision lets the orchestrator skip the judge in that case:
-   [Some reason] => complete with [judge = Error reason]; [None] => quorum met,
-   run the judge. [min_answered] defaults to 1 (>= 1 answer required), so the
-   default behaviour is exactly "skip only when all panels failed". *)
-let judge_skip_reason ~min_answered outcomes =
-  let answered = List.length (answered_of outcomes) in
-  if answered < min_answered
-  then Some (Quorum_not_met { answered; total = List.length outcomes; required = min_answered })
-  else None
 
 type claim =
   { text : string

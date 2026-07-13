@@ -8,14 +8,12 @@ import { MutedSpan, DetailCard } from './keeper-detail-kpi'
 // ── Outcomes Ledger ──────────────────────────────────────
 //
 // Section-4 body for KpiGrid. Renders three rows that answer the
-// operator's question "무엇을 핸고 실패했고 검증을 통과했나?":
+// operator's question "무엇을 했고 실패했고 검증을 통과했나?":
 //
 //   Row 1 — Success / Failure Ledger
 //     Counters pulled from [Keeper_transition_audit] (50-entry ring):
 //       ✅ successes.substantive_turns
 //       ⚠️ failures.turn_failed
-//       🚫 failures.gate_rejected (live — counts Turn_gate_rejected audits from
-//          the keeper guards; source: lib/dashboard/dashboard_http_keeper_outcomes.ml)
 //     Rendered as compact inline counters + a stacked proportion bar.
 //     Secondary row lists compactions_ok / handoffs_ok as chips.
 //
@@ -35,10 +33,9 @@ export function OutcomesLedger({ keeper, outcomes }: {
   outcomes: NonNullable<Keeper['outcomes']>
 }) {
   const { successes, failures, validation, observed_turns } = outcomes
-  const ledgerTotal = successes.substantive_turns + failures.turn_failed + failures.gate_rejected
+  const ledgerTotal = successes.substantive_turns + failures.turn_failed
   const pctSuccess = ledgerTotal > 0 ? (successes.substantive_turns / ledgerTotal) * 100 : 0
   const pctFail    = ledgerTotal > 0 ? (failures.turn_failed        / ledgerTotal) * 100 : 0
-  const pctReject  = ledgerTotal > 0 ? (failures.gate_rejected      / ledgerTotal) * 100 : 0
 
   const verdicts = validation.oas_verdicts
   const verdictTotal = verdicts.pass + verdicts.fail + verdicts.unknown
@@ -60,12 +57,10 @@ export function OutcomesLedger({ keeper, outcomes }: {
         <div class="flex items-center gap-3 text-xs">
           <span class="tabular-nums"><span class="text-[var(--color-status-ok)]">✅</span> ${successes.substantive_turns} 성공</span>
           <span class="tabular-nums"><span class="text-[var(--color-status-warn)]">⚠️</span> ${failures.turn_failed} 실패</span>
-          <span class="tabular-nums"><span class="text-[var(--color-status-err)]">🚫</span> ${failures.gate_rejected} 거절</span>
         </div>
         <div class="mt-2 w-full h-1.5 bg-[var(--color-bg-hover)] rounded-[var(--r-0)] overflow-hidden flex" aria-label="성공/실패 비율 바">
           <div class="h-full bg-[var(--color-status-ok)]" style="width:${pctSuccess}%" title=${`성공 ${Math.round(pctSuccess)}%`}></div>
           <div class="h-full bg-[var(--color-status-warn)]" style="width:${pctFail}%" title=${`실패 ${Math.round(pctFail)}%`}></div>
-          <div class="h-full bg-[var(--color-status-err)]" style="width:${pctReject}%" title=${`거절 ${Math.round(pctReject)}%`}></div>
         </div>
         ${(successes.compactions_ok > 0 || successes.handoffs_ok > 0 || failures.compaction_failed > 0 || failures.handoff_failed > 0) ? html`
           <div class="mt-2 flex flex-wrap gap-1.5 text-3xs">

@@ -32,7 +32,7 @@ let read_tail_lines_or_empty ~site path ~max_bytes ~max_lines =
 type cache_entry = {
   updated_at : string;
   args_hash : string;
-  response : string;
+  response : Yojson.Safe.t;
 }
 
 let _cache : (string, cache_entry) Hashtbl.t = Hashtbl.create 8
@@ -104,8 +104,6 @@ let docker_preflight_status_cache_key ~timeout_sec =
       Env_config_sandbox.Hardening.seccomp_profile ();
       string_of_bool (Env_config_sandbox.Hardening.require_rootless ());
       string_of_bool (Env_config_sandbox.Hardening.require_userns ());
-      string_of_bool
-        (Env_config_sandbox.Runtime.git_dispatch ());
       Printf.sprintf "%.3f" timeout_sec;
     ]
 
@@ -224,18 +222,14 @@ let effective_meta_overlay_hash (meta : keeper_meta) =
       ("sandbox_image", opt_string meta.sandbox_image);
       ("network_mode", network_mode_to_string meta.network_mode);
       ("allowed_paths", cache_fingerprint_list meta.allowed_paths);
-      ("tool_access", cache_fingerprint_list meta.tool_access);
-      ("tool_denylist", cache_fingerprint_list meta.tool_denylist);
       ("mention_targets", cache_fingerprint_list meta.mention_targets);
       ("active_goal_ids", cache_fingerprint_list meta.active_goal_ids);
       ("proactive_enabled", string_of_bool meta.proactive.enabled);
-      ("proactive_idle_sec", string_of_int meta.proactive.idle_sec);
-      ("proactive_cooldown_sec", string_of_int meta.proactive.cooldown_sec);
       ("autoboot_enabled", string_of_bool meta.autoboot_enabled);
       ("telemetry_feedback_enabled", opt_bool meta.telemetry_feedback_enabled);
       ( "telemetry_feedback_window_hours",
         opt_int meta.telemetry_feedback_window_hours );
-      ("always_approve", opt_bool meta.always_approve);
+      ("always_allow", opt_bool meta.always_allow);
       ("oas_env", cache_fingerprint_pairs meta.oas_env);
     ]
   in
@@ -371,7 +365,7 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
        | Some entry
          when entry.updated_at = m.updated_at
            && entry.args_hash = args_hash ->
-         tool_result_ok entry.response
+         tool_result_ok_data entry.response
        | _ ->
       let tail_turns = max 0 (get_int args "tail_turns" 3) in
       let tail_messages = max 0 (get_int args "tail_messages" 5) in
@@ -402,7 +396,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            if include_context then
              let (_session, ctx_opt) =
                load_context_from_checkpoint
-                 ~max_checkpoint_messages:m.compaction.max_checkpoint_messages
                  ~trace_id:(Keeper_id.Trace_id.to_string m.runtime.trace_id)
                  ~primary_model_max_tokens:primary_max_context
                  ~base_dir
@@ -517,42 +510,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
                ~default_generation:m.runtime.generation
            else
              empty_metrics_summary
-         in
-         let last_skill_route =
-           if not include_metrics_overview then
-             None
-           else
-             let rec find_latest = function
-               | [] -> None
-               | line :: tl ->
-                 (try
-                    let j = Yojson.Safe.from_string line in
-                    match Safe_ops.json_string_opt "skill_primary" j with
-                    | Some primary when String.trim primary <> "" ->
-                      let secondary =
-                        match Json_util.assoc_member_opt "skill_secondary" j with
-                        | Some (`List xs) ->
-                          xs
-                          |> List.filter_map (fun v ->
-                               match v with
-                               | `String s when String.trim s <> "" -> Some s
-                               | _ -> None)
-                        | None | Some _ -> []
-                      in
-                      let reason = Safe_ops.json_string_opt "skill_reason" j in
-                      Some
-                        (`Assoc
-                           [
-                             ("primary", `String primary);
-                             ( "secondary",
-                               `List (List.map (fun s -> `String s) secondary) );
-                             ( "reason",
-                               Json_util.string_opt_to_json reason );
-                           ])
-                    | _ -> find_latest tl
-                  with Yojson.Json_error _ -> find_latest tl)
-             in
-             find_latest (List.rev metrics_window_lines)
          in
          (* RFC-0149 §3.1 — typed Result resolver.  The companion
             [memory_bank_error_class] travels alongside the summary so
@@ -766,7 +723,7 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
              let tail = List.filteri (fun i _ -> i >= start) events in
              (`List (apply_tail_order tail_order tail), total)
         in
-        let allowed_tools = keeper_allowed_tool_names m in
+        let allowed_tools = keeper_model_tool_names () in
         let last_autonomous = String.trim m.runtime.last_autonomous_action_at in
         let tool_audit_snapshot =
           match latest_tool_audit_snapshot_from_files config ~keeper_name:m.name with
@@ -889,7 +846,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            ("sandbox_last_error",
              Json_util.string_opt_to_json sandbox_last_error);
            ("sandbox_live", sandbox_live);
-           ("tool_denylist", Json_util.json_string_list m.tool_denylist);
            ("latest_tool_names",
              Json_util.json_string_list tool_audit_snapshot.latest_tool_names);
            ("latest_tool_call_count",
@@ -907,8 +863,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            ]);
            ("proactive", `Assoc [
              ("enabled", `Bool m.proactive.enabled);
-             ("idle_sec", `Int m.proactive.idle_sec);
-             ("cooldown_sec", `Int m.proactive.cooldown_sec);
              ("count_total", `Int m.runtime.proactive_rt.count_total);
              ("visible_count_total", `Int m.runtime.proactive_rt.visible_count_total);
              ("last_ts", `Float m.runtime.proactive_rt.last_ts);
@@ -981,7 +935,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            ("workspace", workspace_surface_json m);
            ("sources", source_provenance_json config m);
            ("context", ctx_stats);
-           ("skill_route", Json_util.option_to_yojson Fun.id last_skill_route);
            ("metrics_overview", metrics_summary_to_json metrics_overview);
            ("memory_bank", memory_summary_to_json memory_bank_summary);
            ("memory_bank_error_class",
@@ -1066,10 +1019,9 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
                with Sys_error _ -> `List []);
            ]);
          ]) in
-         let response = Yojson.Safe.pretty_to_string json in
          Eio_guard.with_mutex cache_mu (fun () ->
            Hashtbl.replace _cache cache_key
-             { updated_at = m.updated_at; args_hash; response });
-         tool_result_ok response)
+             { updated_at = m.updated_at; args_hash; response = json });
+         tool_result_ok_data json)
 (* TEL-OK: 1-line delegate to ctx-free body. *)
 let handle_keeper_status (ctx : _ context) args = handle_keeper_status_config ~config:ctx.config ~agent_name:ctx.agent_name args

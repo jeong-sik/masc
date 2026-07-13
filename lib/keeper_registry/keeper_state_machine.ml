@@ -9,14 +9,14 @@ include Keeper_state_machine_types
 
 (** [is_terminal phase] is true iff [phase] cannot accept new turns.
 
-    Stopped, Dead, and Zombie are terminal: in [can_transition] every
+    Stopped and Dead are terminal: in [can_transition] every
     outgoing edge from these sources is denied. Centralized here so the
     FSM, health surfaces, and the mermaid renderer share one source of
     truth instead of re-matching the terminal triple at each consumer.
     Exhaustive (no [_] wildcard) so adding a phase variant surfaces a
     compile-time warning here. *)
 let is_terminal = function
-  | Stopped | Dead | Zombie -> true
+  | Stopped | Dead -> true
   | Offline
   | Running
   | Failing
@@ -45,9 +45,7 @@ let is_terminal = function
        3a-c   | KeeperReconcileLiveness.tla:91-93 (Dead/Restarting/Crashed)
               |   boundary/KeeperRecoveryOrchestration.tla:53-57 (recovery)
        4      | KeeperReconcileLiveness.tla:94 (Draining)
-       5      | KeeperReconcileLiveness.tla:96 (Paused — operator_paused;
-              |   compact_retry_exhausted clause is OCaml-stricter, see
-              |   Note B below — refinement, not drift)
+       5      | KeeperReconcileLiveness.tla:96 (Paused — operator_paused)
        7a     | KeeperReconcileLiveness.tla:97 (HandingOff)
               |   KeeperConditionsGovernPhase.tla:96-100 (Transition action)
        7b     | KeeperReconcileLiveness.tla:98 (Compacting)
@@ -75,13 +73,7 @@ let is_terminal = function
        keeper_registry.ml:340 (set), this file:520 (clear in FSM),
        keeper_registry.ml:407 (clear on death) — all three sources
        are anchored in the spec's source-citation block.
-     Note B — Refinement (acknowledged). Priority 6 OCaml clause
-       `context_overflow AND compact_retry_exhausted -> Paused` is
-       stricter than spec line 96 (operator_paused only). Without it
-       Overflowed -> Compacting loops indefinitely when retries are
-       exhausted; KeeperReconcileLiveness scope deliberately excludes
-       compact retry semantics, which live in KeeperCompactionLifecycle.
-     Note C — Partition (acknowledged). Overflowed phase derivation
+     Note B — Partition (acknowledged). Overflowed phase derivation
        lives in KeeperCompactionLifecycle.tla; KeeperReconcileLiveness
        omits it because reconcile liveness is independent of overflow.
        Multi-spec coverage by design, not drift.
@@ -113,8 +105,8 @@ let derive_phase (c : conditions) : phase =
      which includes buffer operations. Guard Stopped against active buffer
      ops so the keeper stays in Draining until compaction/handoff exits. *)
 
-  (* 0. Forced terminal state — external cleanup/credential signals. *)
-  if c.credential_archived || c.zombie_timeout_reached
+  (* 0. Explicit durable terminal state. Runtime failures cannot synthesize it. *)
+  if c.dead_tombstone_latched
   then Dead (* 1. Completed stop — drain succeeded AND no buffer ops in flight *)
   else if
     c.stop_requested
@@ -123,23 +115,16 @@ let derive_phase (c : conditions) : phase =
     && not c.handoff_active
   then Stopped (* 2. Pre-start registration. This is the only path into Offline. *)
   else if c.launch_pending && not c.fiber_alive
-  then Offline (* 3. Terminal structural failure — Zombie (non-recoverable) *)
-  else if c.terminal_failure_latched
-  then Zombie (* 4. Fiber lifecycle — Dead / Restarting / Crashed *)
-  else if (not c.fiber_alive) && not c.restart_budget_remaining
-  then Dead
-  else if (not c.fiber_alive) && c.restart_budget_remaining && c.backoff_elapsed
+  then Offline (* 3. Fiber lifecycle — Restarting / Crashed *)
+  else if (not c.fiber_alive) && c.restart_requested
   then Restarting
-  else if (not c.fiber_alive) && c.restart_budget_remaining
+  else if not c.fiber_alive
   then Crashed (* 5. In-progress stop — still draining *)
   else if c.stop_requested
   then Draining
-    (* 6. Operator pause OR auto-compact retry budget exhausted.
-     When [compact_retry_exhausted] is latched together with an ongoing
-     [context_overflow], the keeper MUST land on [Paused] so that an
-     operator has to intervene; otherwise [Overflowed → Compacting]
-     would loop indefinitely. *)
-  else if c.operator_paused || (c.context_overflow && c.compact_retry_exhausted)
+    (* 6. Only an explicit operator action pauses a Keeper. Recovery
+       observations and retry counts never synthesize operator authority. *)
+  else if c.operator_paused
   then Paused (* 8. Buffer states: in-progress operations *)
   else if c.handoff_active
   then HandingOff
@@ -152,9 +137,10 @@ let derive_phase (c : conditions) : phase =
      next [derive_phase] returns [Compacting]. If [compaction_active] is
      already set (compaction already started), priority 8 wins and the
      keeper reads as [Compacting], not [Overflowed]. *)
-  else if c.context_overflow
-  then Overflowed (* 9. Health degradation *)
-  else if (not c.heartbeat_healthy) || not c.turn_healthy
+  else if
+    (not c.heartbeat_healthy)
+    || (not c.turn_healthy)
+    || c.credential_archived
   then Failing (* 10. Healthy running *)
   else if c.fiber_alive
   then Running
@@ -170,15 +156,15 @@ let update_conditions (c : conditions) (ev : event) : conditions =
   | Heartbeat_ok -> { c with heartbeat_healthy = true }
   | Heartbeat_failed _ ->
     (* Any failure makes heartbeat unhealthy. Recovery requires Heartbeat_ok.
-       The [consecutive] / [max_allowed] payload is for audit/logging, not
-       for health determination — mirrors TLA+ HeartbeatFailed which sets
+       The [consecutive] payload is an observation, not an authorization
+       threshold — mirrors TLA+ HeartbeatFailed which sets
        [heartbeat_healthy' = FALSE] unconditionally
        (specs/keeper-state-machine/KeeperStateMachine.tla §HeartbeatFailed). *)
     { c with heartbeat_healthy = false }
   | Turn_succeeded -> { c with turn_healthy = true }
   | Turn_failed _ ->
     (* Mirrors TLA+ TurnFailed: [turn_healthy' = FALSE] unconditional.
-       Same payload semantics as Heartbeat_failed (audit only). *)
+       Same observational payload semantics as Heartbeat_failed. *)
     { c with turn_healthy = false }
   | Context_measured { context_actions; _ } ->
     { c with context_handoff_needed = context_actions.handoff }
@@ -201,11 +187,7 @@ let update_conditions (c : conditions) (ev : event) : conditions =
     let saved_tokens = before_tokens - after_tokens in
     if saved_tokens > 0
     then
-      { c with
-        compaction_active = false
-      ; context_overflow = false
-      ; compact_retry_exhausted = false
-      }
+      { c with compaction_active = false; context_overflow = false }
     else (
       Log.Keeper.warn
         "[fsm] compaction_completed with no savings (before=%d after=%d); keeping \
@@ -240,8 +222,7 @@ let update_conditions (c : conditions) (ev : event) : conditions =
        Therefore stop_requested is reset on fiber start.
 
        operator_paused IS preserved — pause is an operator investigation tool
-       that should survive restarts. Budget is preserved — it's a supervisor
-       policy, not a fiber concern. *)
+       that should survive restarts. *)
     { c with
       launch_pending = false
     ; fiber_alive = true
@@ -249,28 +230,21 @@ let update_conditions (c : conditions) (ev : event) : conditions =
     ; turn_healthy = true
     ; compaction_active = false
     ; handoff_active = false
-    ; backoff_elapsed = false
+    ; restart_requested = false
     ; drain_complete = false
     ; stop_requested = false
     ; context_overflow = false
-    ; compact_retry_exhausted = false
-    ; terminal_failure_latched = false
     }
   | Fiber_terminated _ -> { c with fiber_alive = false }
-  | Supervisor_restart_attempt _ -> { c with backoff_elapsed = true }
-  | Restart_budget_exhausted -> { c with restart_budget_remaining = false }
+  | Supervisor_restart_attempt _ -> { c with restart_requested = true }
   | Credential_archived ->
     { c with
-      restart_budget_remaining = false
-    ; fiber_alive = false
+      fiber_alive = false
     ; credential_archived = true
     }
-  | Zombie_timeout ->
-    { c with restart_budget_remaining = false; zombie_timeout_reached = true }
-  | Terminal_failure_detected _ -> { c with terminal_failure_latched = true }
   | Context_overflow_detected _ ->
     (* Hard overflow reported by the provider. The phase derivation
-       maps this to either [Overflowed] (auto-compact path) or [Paused]
+       maps this to [Overflowed] (auto-compact path)
        (if the retry latch is already set). *)
     { c with context_overflow = true }
   | Auto_compact_triggered ->
@@ -278,24 +252,12 @@ let update_conditions (c : conditions) (ev : event) : conditions =
        keeper into [Compacting] on the next derivation without waiting
        for [Compaction_started] from the post-turn lifecycle. *)
     { c with compaction_active = true }
-  | Compact_retry_exhausted ->
-    (* Issue #8581: latch the retry-exhausted condition. Mirrors the
-       TLA+ [CompactRetryExhausted] action. The right disjunct of
-       [derive_phase]'s Paused branch — [(context_overflow &&
-       compact_retry_exhausted)] — was previously dead code because
-       no event ever set this flag; now [pause_keeper_for_overflow]
-       dispatches it before [Operator_pause] so the Paused phase
-       carries the actual reason for dashboards / observability. *)
-    { c with compact_retry_exhausted = true }
   | Operator_compact_requested ->
-    (* Operator override: same as [Auto_compact_triggered] but also
-       releases the retry latch so that a fresh compaction sequence
-       starts. *)
-    { c with compaction_active = true; compact_retry_exhausted = false }
+    { c with compaction_active = true }
   | Operator_clear_requested _ ->
     (* Last resort: context fully dropped by [masc_keeper_clear].
        Conditions reset in-place without passing through [Compacting]. *)
-    { c with context_overflow = false; compact_retry_exhausted = false }
+    { c with context_overflow = false }
 ;;
 
 (** Compute entry actions for a phase transition.
@@ -327,7 +289,6 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
     ; Trigger_immediate_cleanup
     ; Cancel_pending_oas
     ]
-  | Zombie -> [ Mark_zombie_tombstone; lifecycle "zombie" "terminal structural failure" ]
   | Stopped ->
     [ Cleanup_and_unregister
     ; lifecycle
@@ -344,7 +305,6 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
          | Compaction_completed _
          | Compaction_failed _
          | Context_overflow_detected _
-         | Compact_retry_exhausted
          | Handoff_started
          | Handoff_completed _
          | Handoff_failed _
@@ -354,10 +314,7 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
          | Fiber_started
          | Fiber_terminated _
          | Supervisor_restart_attempt _
-         | Restart_budget_exhausted
          | Credential_archived
-         | Zombie_timeout
-         | Terminal_failure_detected _
          | Auto_compact_triggered
          | Operator_compact_requested
          | Operator_clear_requested _ -> event_to_string event)
@@ -378,7 +335,6 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
              | None -> ""
            in
            Printf.sprintf "tokens=%d%s" r.token_count lim
-         | Compact_retry_exhausted
          | Heartbeat_ok
          | Heartbeat_failed _
          | Turn_succeeded
@@ -398,28 +354,15 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
          | Fiber_started
          | Fiber_terminated _
          | Supervisor_restart_attempt _
-         | Restart_budget_exhausted
          | Credential_archived
-         | Zombie_timeout
-         | Terminal_failure_detected _
          | Auto_compact_triggered
          | Operator_compact_requested
          | Operator_clear_requested _ -> event_to_string event)
     ]
   | Failing -> [ lifecycle "failing" (event_to_string event) ]
   | Paused ->
-    (* Distinguish operator-pause from overflow-induced pause so the
-       dashboard can surface the right message.
-       Issue #8728: Compact_retry_exhausted (added in #8581 specifically
-       to stop conflating operator pauses with auto-compact budget
-       exhaustion) used to fall into the catch-all and get re-labelled
-       as "operator request" - defeating the new event's whole purpose.
-       List both overflow-class events explicitly so the distinction
-       reaches the dashboard. *)
     let detail =
       match event with
-      | Context_overflow_detected _ | Compact_retry_exhausted ->
-        "auto-compact retry exhausted"
       | Operator_pause -> "operator request"
       | Heartbeat_ok
       | Heartbeat_failed _
@@ -439,12 +382,10 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
       | Fiber_started
       | Fiber_terminated _
       | Supervisor_restart_attempt _
-      | Restart_budget_exhausted
       | Credential_archived
-      | Zombie_timeout
-      | Terminal_failure_detected _
       | Auto_compact_triggered
       | Operator_compact_requested
+      | Context_overflow_detected _
       | Operator_clear_requested _ ->
         (* These events should not normally trigger a Paused transition,
            but if they do, label generically rather than mis-attributing
@@ -454,7 +395,7 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
     [ lifecycle "paused" detail ]
   | Restarting ->
     (match prev_phase with
-     | Crashed -> [ lifecycle "restarting" "backoff elapsed" ]
+     | Crashed -> [ lifecycle "restarting" "supervisor restart requested" ]
      | Offline
      | Running
      | Failing
@@ -465,8 +406,7 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
      | Paused
      | Stopped
      | Restarting
-     | Dead
-     | Zombie ->
+     | Dead ->
        (* Direct transitions to Restarting from non-Crashed phases are not
           a normal lifecycle path; the supervisor / registry owns publishing
           for those rare corner cases. Intentional no-op (matches the
@@ -477,13 +417,6 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
      | Restarting -> [ lifecycle "restarted" "fiber launched" ]
      | Failing -> [ lifecycle "recovered" "failure counters reset" ]
      | Paused ->
-       (* Issue #8732 (sibling of #8728): resume is event-driven, not always
-          operator-initiated. [Compaction_completed] / [Fiber_terminated]
-          clear the latched [compact_retry_exhausted] flag and let
-          [derive_phase] leave Paused; if we hardcode "operator request"
-          the dashboard claims a human resumed the keeper when in fact
-          auto-compact recovered. Mirror the per-event arms used in the
-          Paused-detail label. *)
        let detail =
          match event with
          | Operator_resume -> "operator request"
@@ -505,14 +438,10 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
          | Drain_complete
          | Fiber_started
          | Supervisor_restart_attempt _
-         | Restart_budget_exhausted
          | Credential_archived
-         | Zombie_timeout
-         | Terminal_failure_detected _
          | Auto_compact_triggered
          | Operator_compact_requested
          | Context_overflow_detected _
-         | Compact_retry_exhausted
          | Operator_clear_requested _ ->
            (* These events should not normally trigger a Paused→Running
               transition; label generically via [event_to_string]. *)
@@ -527,8 +456,7 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
      | Draining
      | Stopped
      | Crashed
-     | Dead
-     | Zombie ->
+     | Dead ->
        (* [register] takes Init → Running without traversing this function
           (it uses [register_with_state] directly). For other prevs (e.g.
           Compacting → Running on auto-compact success, Overflowed →
@@ -556,41 +484,23 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
 
 (* ── Event preconditions (R-A-9 minimal layer) ──────────
 
-   TLA+ KeeperStateMachine.tla enumerates state preconditions per
-   action (e.g. CompactRetryExhausted requires
-   [context_overflow /\ ~compaction_active /\ ~compact_retry_exhausted]).
-   [update_conditions] is a pure record-update and ignores them — a
-   mis-ordered caller can set [compact_retry_exhausted = TRUE] on a
-   non-overflowed keeper, which then latches the keeper into [Paused]
-   the next time an overflow event arrives (silent forced operator
-   intervention).
-
-   This helper enforces a subset of those preconditions at the
+   This helper enforces structural buffer-operation preconditions at the
    [apply_event] boundary so silent corruption becomes a typed
-   [Precondition_violation] result.  Coverage extended incrementally
-   across the spec/code refinement chain (R-A-9, then R-A-6.b):
-     - PR-1: Compact_retry_exhausted (latch correctness)
-     - PR-2: Context_overflow_detected, Auto_compact_triggered (overflow
+   [Precondition_violation] result:
+     - Context_overflow_detected, Auto_compact_triggered (overflow
        lifecycle — the two events that drive Overflowed↔Compacting)
-     - PR-3: Operator_compact_requested (operator-driven buffer op
+     - Operator_compact_requested (operator-driven buffer op
        exclusivity).  Operator_clear_requested is deliberately *not*
        arm-enforced beyond the terminal guard — see its arm below for
        the operator escape-hatch rationale.
-     - R-A-6.b: Restart_budget_exhausted (non-idempotency — pairs with
-       §S3 BudgetNeverRevives liveness invariant; iter 14 audit).
-
-   Coverage: 5/5 R-A-9 events (Compact_retry_exhausted,
-   Context_overflow_detected, Auto_compact_triggered,
-   Operator_compact_requested, Operator_clear_requested) plus the
-   adjacent R-A-6.b Restart_budget_exhausted arm (iter 14 follow-up).
    Other events have no spec preconditions beyond NotTerminal and
    fall through the catch-all.
 
    Background:
      - iter 9 audit memo: docs/tla-audit/ksm-precondition-enforcement-gap-2026-05-12.md
      - iter 9 PR #14730 (systematic gap class)
-     - TLA+ §ContextOverflowDetected, §AutoCompactTriggered,
-       §CompactRetryExhausted in KeeperStateMachine.tla *)
+     - TLA+ §ContextOverflowDetected and §AutoCompactTriggered in
+       KeeperStateMachine.tla *)
 let check_event_precondition (c : conditions) (ev : event)
   : (unit, transition_error) result
   =
@@ -599,34 +509,8 @@ let check_event_precondition (c : conditions) (ev : event)
      [Attribution.policy_failed.reason] telemetry field — keeping them
      low-cardinality lets operators aggregate / alert on the exact
      precondition that failed, while the long explanatory text stays
-     in source comments above each branch.
-
-     TLA+ §CompactRetryExhausted predicates: context_overflow=true /\
-     ~compaction_active /\ ~compact_retry_exhausted. *)
+     in source comments above each branch. *)
   match ev with
-  | Compact_retry_exhausted ->
-    if not c.context_overflow
-    then
-      (* Latching the retry flag on a non-overflowed keeper would force
-         Paused on the next overflow event (TLA+ violation). *)
-      Error
-        (Precondition_violation
-           { event = event_to_string ev; reason = "context_overflow=false" })
-    else if c.compaction_active
-    then
-      (* Latching the retry flag while a compaction is in flight
-         conflates the in-progress attempt with budget exhaustion. *)
-      Error
-        (Precondition_violation
-           { event = event_to_string ev; reason = "compaction_active=true" })
-    else if c.compact_retry_exhausted
-    then
-      (* Retry latch is idempotent — re-latching surfaces a duplicate
-         dispatch in the caller. *)
-      Error
-        (Precondition_violation
-           { event = event_to_string ev; reason = "already_latched" })
-    else Ok ()
   | Context_overflow_detected _ ->
     if c.compaction_active
     then
@@ -673,17 +557,6 @@ let check_event_precondition (c : conditions) (ev : event)
                 starting a compaction during handoff entangles two buffer \
                 ops on the same keeper"
            })
-    else if c.compact_retry_exhausted
-    then
-      Error
-        (Precondition_violation
-           { event = event_to_string ev
-           ; reason =
-               "TLA+ §AutoCompactTriggered requires ~compact_retry_exhausted; \
-                the retry budget is spent — DerivePhase routes the next \
-                overflow to Paused, and a fresh auto-compact would defeat \
-                that latch (Issue #8581 root cause)"
-           })
     else Ok ()
   | Operator_compact_requested ->
     (* TLA+ §OperatorCompactRequested.  Operator path differs from
@@ -721,30 +594,6 @@ let check_event_precondition (c : conditions) (ev : event)
        to make the deliberate minimal precondition explicit — adding any
        check beyond NotTerminal would weaken the operator escape-hatch. *)
     Ok ()
-  | Restart_budget_exhausted ->
-    (* TLA+ §RestartBudgetExhausted requires [restart_budget_remaining];
-       re-exhausting an already-exhausted budget is a logical no-op in
-       isolation, but masks a duplicate dispatch in the caller and —
-       paired with the §S3 [BudgetNeverRevives] invariant — indicates
-       the supervisor's restart-vs-mark-dead gate was bypassed.
-
-       This is the 6th R-A-9 candidate, identified in iter 14 audit
-       memo `docs/tla-audit/ksm-a6-budget-never-revives-2026-05-12.md`
-       — same systematic gap class as the 5 events in iter 9's
-       original enumeration. *)
-    if not c.restart_budget_remaining
-    then
-      Error
-        (Precondition_violation
-           { event = event_to_string ev
-           ; reason =
-               "TLA+ §RestartBudgetExhausted requires \
-                restart_budget_remaining=true; re-exhausting an already-\
-                exhausted budget masks a duplicate dispatch and \
-                signals the supervisor's restart-vs-mark-dead gate \
-                may have been bypassed (see §S3 BudgetNeverRevives)"
-           })
-    else Ok ()
   (* Other events have no TLA+ state preconditions beyond what
      [apply_event]'s terminal guard already enforces; their semantics
      are encoded in [update_conditions] + [derive_phase] (e.g.
@@ -764,7 +613,7 @@ let apply_event ~current_phase ~conditions ~event ~now =
      (which is wrong if the new phase is itself intended terminal).
      Mirrors the [can_transition] exhaustive refactor in #16747. *)
   match current_phase with
-  | Stopped | Dead | Zombie ->
+  | Stopped | Dead ->
     Error
       (Terminal_state { current = current_phase; attempted_event = event_to_string event })
   | Offline

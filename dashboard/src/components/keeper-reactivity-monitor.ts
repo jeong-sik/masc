@@ -1,11 +1,10 @@
-// Keeper Reactivity Monitor — Phase 1–3 observability for keeper stopping
-// patterns and auto-pause status.
+// Keeper Reactivity Monitor — lifecycle and operator-pause observability.
 //
 // Implements four data views:
 //   1. Health Grid     — compact grid: phase, pause status, last activity
 //   2. Lifecycle       — transition timeline (delegates to KeeperPhaseTimeline)
 //   3. Events          — supervisor lifecycle events
-//   4. Auto-Pause      — keepers in paused phase
+//   4. Paused Keepers  — keepers in operator-controlled paused phase
 
 import { html } from 'htm/preact'
 import { useSignal } from '@preact/signals'
@@ -15,7 +14,6 @@ import { navigate } from '../router'
 import { KeeperPhaseBadge, pipelineStageDetailLabel } from './keeper-phase-indicator'
 import { KeeperPhaseTimeline, refreshKeeperPhaseTimeline } from './keeper-phase-strip'
 import { KeeperLifecycleTimeline, refreshKeeperLifecycleTimeline } from './keeper-lifecycle-timeline'
-import { TurnBudgetGaugePanel } from './turn-budget-gauge'
 import { isKeeperCrashed, isKeeperPaused } from '../lib/keeper-predicates'
 import { TimeAgo } from './common/time-ago'
 import { EmptyState } from './common/feedback-state'
@@ -24,14 +22,13 @@ import type { Keeper } from '../types'
 
 // ── Sub-component helpers ──────────────────────────────────────────────────
 
-/** True when a keeper is in any paused state (operator or auto-pause).
+/** Paused state is projected through the canonical Keeper predicate.
  *
  * Three fields must be checked because they come from different serialisation
  * paths: `paused` is the legacy boolean from the keeper registry; `phase` is
  * the FSM-derived lifecycle phase from the composite observer; `pipeline_stage`
  * is the activity stage from the heartbeat path.  They are ordinarily in sync,
- * but during transient states (e.g. just after an auto-pause or just before a
- * resume heartbeat arrives) they can briefly disagree.  The OR ensures that any
+ * but during lifecycle propagation they can briefly disagree. The OR ensures that any
  * signal of pause is reflected in the UI immediately, matching operator intent.
  */
 // RFC-0135 PR-3: `isKeeperPaused` lives in the canonical SSOT
@@ -119,8 +116,8 @@ function HealthGrid({ allKeepers }: { allKeepers: Keeper[] }) {
   `
 }
 
-/** Auto-Pause panel — keepers currently in paused phase. */
-function AutoPausePanel({ allKeepers }: { allKeepers: Keeper[] }) {
+/** Operator-pause panel — keepers currently in paused phase. */
+function PausedKeepersPanel({ allKeepers }: { allKeepers: Keeper[] }) {
   const pausedKeepers = allKeepers.filter(isKeeperPaused)
 
   if (pausedKeepers.length === 0) {
@@ -225,7 +222,6 @@ export function KeeperReactivityMonitor({ defaultView }: { defaultView?: Reactiv
               <${HealthGrid} allKeepers=${allKeepers} />
               <div>
                 <div class="text-2xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mb-2">재시작 예산 게이지</div>
-                <${TurnBudgetGaugePanel} keepers=${allKeepers} />
               </div>
             </div>
           `
@@ -233,7 +229,7 @@ export function KeeperReactivityMonitor({ defaultView }: { defaultView?: Reactiv
           ? html`<${KeeperPhaseTimeline} />`
         : activeView.value === 'events'
           ? html`<${KeeperLifecycleTimeline} />`
-        : html`<${AutoPausePanel} allKeepers=${allKeepers} />`}
+        : html`<${PausedKeepersPanel} allKeepers=${allKeepers} />`}
       </div>
     </div>
   `

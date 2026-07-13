@@ -57,12 +57,6 @@ val effective_autoboot_enabled :
     (issue #8377). *)
 val keepalive_keeper_names : Workspace.config -> string list
 
-(** Names of paused keepers whose durable meta should still be inspected
-    during supervisor reconciliation. These keepers are not keepalive
-    execution candidates, but a previous runtime may have left them paused
-    while still owning an active backlog task. *)
-val paused_reconcile_keeper_names : Workspace.config -> string list
-
 (** Names of keepers expected to persist across sessions. Mirrors
     [keepalive_keeper_names] for readers caring about durability
     rather than the keepalive fiber. *)
@@ -82,8 +76,7 @@ val read_meta :
 
 (** Read persisted keeper meta and overlay TOML/persona defaults before
     returning it. Status/list/operator surfaces should use this for
-    TOML-owned fields such as [sandbox_profile], [network_mode], and
-    [tool_access]. *)
+    TOML-owned fields such as [sandbox_profile] and [network_mode]. *)
 val read_effective_meta_resolved :
   Workspace.config ->
   string ->

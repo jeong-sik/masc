@@ -42,7 +42,7 @@ describe('StatusDot component', () => {
   it('default (no ariaLabel) is decorative — aria-hidden=true, no role', () => {
     // Regression guard: dot must NOT announce itself when paired with
     // a text label, otherwise AT users hear "dot, running, dot, stopped"
-    // for every row. See governance / transport-health tables.
+    // for every row. See Gate / transport-health tables.
     render(html`<${StatusDot} />`, container)
     const el = container.querySelector('[data-status-dot]') as HTMLElement
     expect(el.getAttribute('aria-hidden')).toBe('true')

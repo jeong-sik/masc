@@ -1,12 +1,19 @@
 import { get, post, fetchWithTimeout, authHeaders, type GetOptions } from './core'
 import {
   type IdeAnnotation,
+  type IdeAnnotationReference,
   type IdeCodeRegion,
   type AnnotationKind,
+  parseIdeAnnotation,
 } from './schemas/ide-annotations'
 import { isRecord } from '../lib/type-guards'
 
-export type { IdeAnnotation, IdeCodeRegion, AnnotationKind } from './schemas/ide-annotations'
+export type {
+  IdeAnnotation,
+  IdeAnnotationReference,
+  IdeCodeRegion,
+  AnnotationKind,
+} from './schemas/ide-annotations'
 
 export interface IdeApiOptions extends GetOptions {
   readonly keeper?: string
@@ -29,7 +36,7 @@ export type IdeScope =
 
 export type IdeScopeOptions = Pick<IdeApiOptions, 'scope' | 'repoId' | 'canonicalUrl'>
 
-export type IdeEventKind = 'tool' | 'turn' | 'pr'
+export type IdeEventKind = 'tool' | 'turn'
 
 export interface IdeEventsOptions extends IdeApiOptions {
   readonly kind?: IdeEventKind | 'all'
@@ -82,7 +89,6 @@ export interface IdeToolEvent extends IdeBridgeEventBase {
   readonly latency_ms: number
   readonly summary: string
   readonly file_path: string | null
-  readonly command_descriptor: unknown
 }
 
 export interface IdeTurnEvent extends IdeBridgeEventBase {
@@ -94,18 +100,7 @@ export interface IdeTurnEvent extends IdeBridgeEventBase {
   readonly duration_ms: number | null
 }
 
-export interface IdePrEvent extends IdeBridgeEventBase {
-  readonly type: 'pr'
-  readonly pr_number: number
-  readonly pull_request_url: string
-  readonly pr_title: string
-  readonly pr_state: string
-  readonly repo: string
-  readonly comment_count: number
-  readonly review_status: string | null
-}
-
-export type IdeBridgeEvent = IdeToolEvent | IdeTurnEvent | IdePrEvent
+export type IdeBridgeEvent = IdeToolEvent | IdeTurnEvent
 
 export interface IdeAnnotationFilter {
   readonly file_path?: string
@@ -122,14 +117,7 @@ export interface CreateAnnotationInput {
   readonly content: string
   readonly goal_id?: string
   readonly task_id?: string
-  readonly board_post_id?: string
-  readonly comment_id?: string
-  readonly pr_id?: string
-  readonly git_ref?: string
-  readonly log_id?: string
-  readonly session_id?: string
-  readonly operation_id?: string
-  readonly worker_run_id?: string
+  readonly references?: ReadonlyArray<IdeAnnotationReference>
 }
 
 function appendFilterParams(
@@ -258,82 +246,8 @@ function positiveIntegerField(record: Record<string, unknown>, key: string): num
   return value !== null && value > 0 ? value : null
 }
 
-function annotationKindField(record: Record<string, unknown>): AnnotationKind | null {
-  const kind = stringField(record, 'kind')
-  return kind === 'Comment'
-    || kind === 'Decision'
-    || kind === 'Question'
-    || kind === 'Bookmark'
-    ? kind
-    : null
-}
-
 function parseStrictIdeAnnotation(raw: unknown): IdeAnnotation | null {
-  if (!isRecord(raw)) return null
-  const id = stringField(raw, 'id')
-  const filePath = stringField(raw, 'file_path')
-  const lineStart = positiveIntegerField(raw, 'line_start')
-  const lineEnd = positiveIntegerField(raw, 'line_end')
-  const keeperId = stringField(raw, 'keeper_id')
-  const kind = annotationKindField(raw)
-  const content = typeof raw.content === 'string' ? raw.content : null
-  const goalId = nullableStringField(raw, 'goal_id')
-  const taskId = nullableStringField(raw, 'task_id')
-  const boardPostId = nullableStringField(raw, 'board_post_id')
-  const commentId = nullableStringField(raw, 'comment_id')
-  const prId = nullableStringField(raw, 'pr_id')
-  const gitRef = nullableStringField(raw, 'git_ref')
-  const logId = nullableStringField(raw, 'log_id')
-  const sessionId = nullableStringField(raw, 'session_id')
-  const operationId = nullableStringField(raw, 'operation_id')
-  const workerRunId = nullableStringField(raw, 'worker_run_id')
-  const createdAtMs = numberField(raw, 'created_at_ms')
-  const updatedAtMs = numberField(raw, 'updated_at_ms')
-  if (
-    !id
-    || !filePath
-    || lineStart === null
-    || lineEnd === null
-    || lineEnd < lineStart
-    || !keeperId
-    || kind === null
-    || content === null
-    || goalId === undefined
-    || taskId === undefined
-    || boardPostId === undefined
-    || commentId === undefined
-    || prId === undefined
-    || gitRef === undefined
-    || logId === undefined
-    || sessionId === undefined
-    || operationId === undefined
-    || workerRunId === undefined
-    || createdAtMs === null
-    || updatedAtMs === null
-  ) {
-    return null
-  }
-  return {
-    id,
-    file_path: filePath,
-    line_start: lineStart,
-    line_end: lineEnd,
-    keeper_id: keeperId,
-    kind,
-    content,
-    goal_id: goalId,
-    task_id: taskId,
-    board_post_id: boardPostId,
-    comment_id: commentId,
-    pr_id: prId,
-    git_ref: gitRef,
-    log_id: logId,
-    session_id: sessionId,
-    operation_id: operationId,
-    worker_run_id: workerRunId,
-    created_at_ms: createdAtMs,
-    updated_at_ms: updatedAtMs,
-  }
+  return parseIdeAnnotation(raw)
 }
 
 function parseStrictIdeCodeRegion(raw: unknown): IdeCodeRegion | null {
@@ -544,45 +458,21 @@ function parseIdeBridgeEvent(raw: unknown): IdeBridgeEvent | null {
       latency_ms: latencyMs,
       summary,
       file_path: stringField(raw, 'file_path'),
-      command_descriptor: raw.command_descriptor ?? null,
     }
   }
 
-  if (type === 'turn') {
-    const phase = stringField(raw, 'phase')
-    if (!phase) return null
-    return {
-      type,
-      keeper_id: keeperId,
-      turn_id: turnId,
-      timestamp_ms: timestampMs,
-      phase,
-      model_used: stringField(raw, 'model_used'),
-      tools_used: stringArrayField(raw, 'tools_used'),
-      stop_reason: stringField(raw, 'stop_reason'),
-      duration_ms: numberField(raw, 'duration_ms'),
-    }
-  }
-
-  const prNumber = numberField(raw, 'pr_number')
-  const pullRequestUrl = stringField(raw, 'pull_request_url') ?? ''
-  const prTitle = stringField(raw, 'pr_title') ?? ''
-  const prState = stringField(raw, 'pr_state') ?? ''
-  const repo = stringField(raw, 'repo') ?? ''
-  const commentCount = numberField(raw, 'comment_count')
-  if (prNumber === null || commentCount === null) return null
+  const phase = stringField(raw, 'phase')
+  if (!phase) return null
   return {
     type,
     keeper_id: keeperId,
     turn_id: turnId,
     timestamp_ms: timestampMs,
-    pr_number: prNumber,
-    pull_request_url: pullRequestUrl,
-    pr_title: prTitle,
-    pr_state: prState,
-    repo,
-    comment_count: commentCount,
-    review_status: stringField(raw, 'review_status'),
+    phase,
+    model_used: stringField(raw, 'model_used'),
+    tools_used: stringArrayField(raw, 'tools_used'),
+    stop_reason: stringField(raw, 'stop_reason'),
+    duration_ms: numberField(raw, 'duration_ms'),
   }
 }
 
@@ -591,7 +481,7 @@ function isIdeBridgeEvent(value: IdeBridgeEvent | null): value is IdeBridgeEvent
 }
 
 function isIdeEventKind(value: string | null): value is IdeEventKind {
-  return value === 'tool' || value === 'turn' || value === 'pr'
+  return value === 'tool' || value === 'turn'
 }
 
 function stringField(record: Record<string, unknown>, key: string): string | null {

@@ -147,8 +147,7 @@ let existing_operation (config : Workspace.config) requested_name =
              | Keeper_shutdown_types.Dashboard_keeper_purge _ -> Some operation
              | Operator_stop_retain_meta
              | Operator_stop_remove_meta
-             | Dead_tombstone_cleanup
-             | Stale_paused_prune _ -> None)))
+             | Dead_tombstone_cleanup -> None)))
 ;;
 
 let submit ~config ~actor ({ requested_name; keeper_name; meta } : target) =

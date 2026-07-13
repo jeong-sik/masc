@@ -1,9 +1,10 @@
 ---
 status: reference
-last_verified: 2026-04-17
+last_verified: 2026-07-12
 code_refs:
   - test/
-  - lib/eval_gate.ml
+  - lib/keeper/keeper_gate.ml
+  - lib/keeper/keeper_approval_queue.ml
   - lib/eval_harness.ml
 ---
 
@@ -13,9 +14,9 @@ code_refs:
 |------|-----|
 | Status | Draft |
 | Team | Foundation |
-| Maps to | `test/`, `lib/eval_gate.ml`, `lib/eval_harness.ml`, `lib/trajectory.ml`, `lib/verifier_core.ml`, `lib/verifier_oas.ml`, `lib/keeper/keeper_guards.ml` |
+| Maps to | `test/`, `lib/keeper/keeper_gate.ml`, `lib/keeper/keeper_approval_queue.ml`, `lib/eval_harness.ml`, `lib/trajectory.ml`, `lib/verifier_core.ml`, `lib/verifier_oas.ml` |
 | Dependencies | (all subsystem specs) |
-| Test Files | 319 (.ml), 6 (bench), 3 (fixtures/other) |
+| Test Files | `test/dune`와 포함 stanza가 SSOT |
 
 ---
 
@@ -114,32 +115,18 @@ rg -n '^\((test|tests|executable)\b|^\s+\((name|names|modules)\b' test/dune test
 
 ## 5. Test Harness Architecture
 
-### 5.1 Eval Gate (lib/eval_gate.ml)
+### 5.1 Keeper execution-boundary tests
 
-Keeper tool call의 사전/사후 실행 게이트. Swiss Cheese Model (다중 방어층).
+Keeper 실행 테스트는 두 경계를 분리해서 검증한다.
 
-```
-Tool call -> Destructive pattern detection
-          -> Tool allowlist check
-          -> Entropy check (동일 도구 N회 연속 호출)
-          -> [모두 Pass] -> 실행 허용
-          -> [하나라도 Reject] -> 실행 차단
-```
+- typed argv/input, 명시적 cwd/redirect target, allowed-path containment,
+  sandbox confinement 같은 객관적 구조 불변식
+- exact Always Allowed, configured LLM Auto Judge, non-blocking HITL로 구성된
+  request-local Gate 흐름
 
-Current-source overlay: `max_cost_usd` is advisory telemetry only and is not a
-pre-execution gate.
-
-**gate_config 기본값**:
-
-| 파라미터 | 기본값 | 설명 |
-|---------|--------|------|
-| `max_cost_usd` | 0 | Advisory cost threshold. Cost never gates execution. |
-| `max_tool_calls_per_turn` | 10 | 턴당 도구 호출 상한 |
-| `entropy_threshold` | 3 | 동일 도구 연속 호출 임계값 |
-| `destructive_check_enabled` | true | 파괴적 명령 탐지 |
-| `allowlist_enabled` | false | 도구 허용 목록 사용 |
-
-**Destructive patterns** (18개): `rm -rf`, `drop table`, `git push --force`, `chmod 777`, `mkfs`, `dd if=`, `shutdown` 등. 문자열 부분 매칭으로 탐지. AST 수준 파싱은 아니지만 일반적 패턴을 차단한다.
+명령 문자열, 도구 이름, 호출 횟수, cost, entropy를 로컬 권한 분류나
+Keeper stop/pause 조건으로 사용하지 않는다. Cost, turn, tool-call 통계는
+관측 및 평가 데이터일 뿐 실행 전 차단 근거가 아니다.
 
 ### 5.2 Eval Harness (lib/eval_harness.ml)
 
@@ -203,16 +190,19 @@ Keeper tool call의 JSONL 기반 궤적 로깅. 결정적 재생, 비용 누적,
 
 ### 5.5 Verifier (lib/verifier_core.ml, lib/verifier_oas.ml)
 
-`lib/keeper/keeper_verifier.ml`가 단일 모듈로 제공하던 Generator–Verifier 루프는 `lib/verifier_core.ml`(코어 판정 로직)과 `lib/verifier_oas.ml`(OAS-bound execution path)로 2분할됐고, keeper 레벨의 사전 검증(guard gating)은 `lib/keeper/keeper_guards.ml`로 이동했다 (구 `keeper_verifier.ml`는 제거, #2589 및 05-keeper-agent 스펙 참조).
+`lib/keeper/keeper_verifier.ml`가 단일 모듈로 제공하던 Generator–Verifier 루프는 `lib/verifier_core.ml`(코어 판정 로직)과 `lib/verifier_oas.ml`(OAS-bound execution path)로 2분할됐다. `pre_tool_use`는 시간 관측만 하며, 외부 효과 승인은 normalized Gate 경계에서 별도로 판정한다 (구 `keeper_verifier.ml`는 제거, #2589 및 05-keeper-agent 스펙 참조).
 
 현 루프:
 
 ```
-proposed_action -> verifier_core: risk_level 분류 (Safe/Moderate/Dangerous)
-                                  + cost 추정
-                                  + PASS / WARN / FAIL
-              -> keeper_guards: execution-time guard (permission, rate, safety)
-              -> verifier_oas: OAS execution path에서 재확인
+typed effect request -> objective structure/path/sandbox invariants
+                     -> Gate: exact Always Allowed | configured LLM Auto Judge | non-blocking HITL
+                     -> execution + observation
+
+Task completion claim -> configured LLM verification
+                      -> complete | remain active
+
+cost / token / turn -> observation and aggregation only
 ```
 
 ### 5.6 Keeper Contract (RETIRED)
@@ -302,8 +292,8 @@ bisect-ppx-report html --coverage-path _coverage
 
 - **INV-T1**: Hermetic Required 계층의 모든 테스트는 외부 GraphQL/ZAI credentials 없이 통과해야 한다.
 - **INV-T2**: Env-gated 테스트는 필수 환경변수 부재 시 skip 또는 not run으로 처리한다. 실패가 아니다.
-- **INV-T3**: `eval_gate`의 각 검사 레이어는 독립적이다. 한 레이어의 통과가 다른 레이어의 실패를 가릴 수 없다 (Swiss Cheese).
-- **INV-T4**: `trajectory.tool_call_entry`의 `gate_decision`이 `Reject`이면 `result`는 반드시 `None`이다.
+- **INV-T3**: 구조 경계 테스트는 명령 문자열이나 도구 이름에서 권한 의미를 추론하지 않는다.
+- **INV-T4**: 한 Gate 요청의 pending/HITL 상태는 다른 Keeper 또는 같은 Keeper의 독립 작업 lane을 중단시키지 않는다.
 - **INV-T5**: `anti_fake` penalty 패턴에 매칭되는 테스트 파일은 `quality_tier`에서 경고 또는 위험으로 분류된다.
 - **INV-T6**: Contract harness는 외부 서버에 의존하지 않는다. Hermetic bootstrap 경로만 사용한다.
 - **INV-T7**: `eval_harness` 시나리오의 `max_cost_usd` 초과는 telemetry/warning only이다. Cost만으로 `trajectory_outcome`을 `CostExceeded`, `Gated`, `Failed`, 또는 `Timeout`으로 바꾸면 안 된다.
@@ -322,9 +312,9 @@ bisect-ppx-report html --coverage-path _coverage
 ### 10.2 Keeper 행동 테스트 추가 시
 
 1. `eval_harness.scenario` 정의 (goal, tool_expectations, graders)
-2. Deterministic grader를 우선 사용. LLM grader는 cost 고려.
+2. 타입/경로/격리 같은 객관적 불변식은 deterministic assertion으로, 의미·품질 판단은 configured LLM grader로 검증.
 3. `trajectory` 로깅으로 재현성 확보.
-4. `eval_gate` 설정으로 안전 경계 지정.
+4. 외부 효과는 exact Always Allowed, configured LLM Auto Judge, nonblocking HITL의 Gate 계약을 검증.
 
 ---
 
@@ -333,5 +323,3 @@ bisect-ppx-report html --coverage-path _coverage
 | 문서 | 경로 |
 |------|------|
 | Verification matrix | `docs/VERIFICATION-MATRIX.md` |
-| Check evaluation spec | `docs/design/check-evaluation-spec.md` |
-| Contract-driven agent loop RFC | `docs/design/contract-driven-agent-loop-rfc.md` |

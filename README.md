@@ -1,7 +1,7 @@
 # MASC
 
 [![OCaml](https://img.shields.io/badge/OCaml-%3E%3D%205.4-orange.svg)](https://ocaml.org/)
-[![agent_sdk](https://img.shields.io/badge/agent__sdk-%3E%3D%200.211.8-blue.svg)](https://github.com/jeong-sik/oas)
+[![agent_sdk](https://img.shields.io/badge/agent__sdk-%3E%3D%200.211.9-blue.svg)](https://github.com/jeong-sik/oas)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 [한국어 버전](README.ko.md)
@@ -44,7 +44,7 @@ Agents in this environment are called **Keepers**, a nickname borrowed from Bull
 - **Attach existing coding agents.** Because MASC is an MCP server, MCP clients such as Claude Code or Codex can connect to `/mcp` and join the same workspace — sharing task claim/transition, board, and goals, and waking Keepers via `masc_broadcast` or @mention. (There is no synchronous external tool for directly invoking a Keeper turn; interaction is through the workspace and mentions.)
 - **Reduce obvious collisions when multiple agents touch the same code.** Turns, locks, and worker ownership can coordinate multiple Keepers working on one repository, but this is not a concurrency-safety guarantee.
 - **Inspect decisions and failures.** The web dashboard shows Keeper / Goal / Task / Board state in real time, and every turn leaves a receipt.
-- **Queue risky actions for a human decision.** When an autonomous turn calls a dangerous tool, it blocks in an approval queue (HITL). This is an operational guardrail, not a security guarantee.
+- **Route external effects through one Gate.** Always Allow, LLM Auto Judge, and HITL are explicit non-hierarchical modes. HITL persists the exact request without blocking the Keeper; its lane is woken when the decision arrives.
 - **Run each Keeper on a different model.** A single line in `runtime.toml` routes a Keeper to a provider × model from the runtime catalog.
 
 ---
@@ -56,7 +56,7 @@ Legend — ✅ working now · 🟡 partially working · ❌ not working. Status 
 | Feature | Status | One-line description | Entry point |
 |------|:----:|-----------|--------------|
 | **Keepers** | ✅ | Resident agents with persona, goal, and instructions. Auto-boot when the server starts; state persists to disk | `.masc/config/keepers/*.toml` |
-| **HITL + Automatic** | 🟡 | Approval queue for dangerous tool calls. Bypassable and not a security boundary; critical calls currently wait until an operator decides | Dashboard approvals queue |
+| **Gate: Always Allow / Auto Judge / HITL** | 🟡 | Product-neutral external-effect boundary with exact one-use grants and per-Keeper wake-up | Dashboard approvals queue |
 | **Board** | ✅ | Keepers collaborate asynchronously via posts, comments, and votes; publishing wakes related Keepers | `masc_board_*` tools / dashboard |
 | **Sandbox (Docker)** | 🟡 | Docker-profile shell execution uses containers, but local profiles and fallback paths mean this is not a security boundary | keeper toml `sandbox_profile` |
 | **Dashboard** | ✅ | Web SPA for observing and commanding Keeper/Goal/Task/Board in real time | `dashboard/` (vite) |
@@ -71,9 +71,9 @@ Legend — ✅ working now · 🟡 partially working · ❌ not working. Status 
 
 ### Current behavior and limits
 
-- **Keepers** — Each Keeper is a long-running agent that stays resident while the server is alive. It wakes on heartbeat, runs turns, and its memory and decision logs persist across restarts. **A Keeper runs only one turn at a time** — parallelism comes from multiple Keepers running together. *Limit*: `[autonomous] concurrency` in `runtime.toml` is a dead setting not read by the code; fleet size is governed by `[bootstrap] autoboot_max` / `max_active_keepers`.
-- **HITL** — Enforced at the tool-dispatch boundary with `Eio.Promise.await`, not by prompt instruction. *Limit*: It can be bypassed with `MASC_DISABLE_HITL=true` (default false) or keeper `always_approve` rules. Non-critical tools are rejected after the approval silence timeout, but **critical dangerous tools currently have no timeout, so a turn can stall until the operator decides.** Treat HITL as an operator workflow only; it does not make autonomous execution safe. Policy details: [`docs/security/approval-rules.md#critical-approval-timeout-policy`](docs/security/approval-rules.md#critical-approval-timeout-policy).
-- **Sandbox** — Actually invokes `docker run --rm` with cap-drop / no-new-privileges / read-only rootfs and limits concurrent execution slots. Network is controlled by the keeper's `network_mode` (default `inherit`, can be `none`). *Limit*: not every Keeper runs Docker (some use `local`=host execution). If the image is missing and the path is inside the playground, execution falls back to host (telemetry is recorded). Do not treat this as a security boundary.
+- **Keepers** — Each Keeper is a long-running agent that stays resident while the server is alive. It wakes on heartbeat, runs turns, and its memory and decision logs persist across restarts. **A Keeper runs only one turn at a time** — parallelism comes from multiple Keepers running together. `[autonomous] concurrency` is a dead legacy key; MASC does not impose a global active-Keeper cap.
+- **Gate / HITL** — The dispatch boundary sends the opaque operation identity and complete typed input to one Gate. Workspace or Keeper Always Allow proceeds directly; Auto Judge runs asynchronously; Manual persists a HITL request. Deferred requests return to the Keeper instead of awaiting a promise, and an exact approved request is consumed once when that Keeper lane wakes. Gate decisions are authorization workflow, not a sandbox or credential boundary.
+- **Sandbox** — Actually invokes `docker run --rm` with cap-drop / no-new-privileges / read-only rootfs. MASC observes active Docker operations but does not pre-admit them through a global spawn slot. Network is controlled by the keeper's `network_mode` (default `inherit`, can be `none`). *Limit*: not every Keeper runs Docker (some use `local`=host execution). If the image is missing and the path is inside the playground, execution falls back to host (telemetry is recorded). Do not treat this as a security boundary.
 - **Multi-Runtime** — A single line in `runtime.toml` under `runtime.assignments`, `keeper = provider.model`, sends every turn for that Keeper to the chosen provider.
 - **Provider Failover** — Ordered automatic failover on provider failure is not implemented. When a provider fails, you must manually edit default/assignment and restart the server.
 - **Fusion + JoJ** — When a Keeper calls `masc_fusion`, panel models answer the same question independently and a judge synthesizes consensus, contradictions, and blind spots. *Limit*: The Judge-of-Judges (JoJ) phase has code and call paths, but the live config lacks a first-order `judges` panel, so JoJ calls **fail-closed with an error**. The result registry is in-memory and is lost on restart.
@@ -171,11 +171,11 @@ For disposable local installs, the convenience path is:
 curl -fsSL https://raw.githubusercontent.com/jeong-sik/masc/main/scripts/install.sh | bash
 ```
 
-This installs the binary to `$HOME/.local/bin/masc` and seeds default settings (`tool_policy.toml`, `runtime.toml`) into `<base-path>/.masc/config/`. Binaries are provided for **macOS arm64** and **Linux x86_64**. Other platforms build from source.
+This installs the binary to `$HOME/.local/bin/masc` and seeds `runtime.toml` into `<base-path>/.masc/config/`. Binaries are provided for **macOS arm64** and **Linux x86_64**. Other platforms build from source.
 
 Installer requirements: `curl` and standard Unix tools (`uname`, `chmod`, `mkdir`, `mktemp`). `jq` is required only when `--version` / `MASC_VERSION` is omitted and the script queries GitHub for the latest release. Use `--version <release-tag>` when you need a reproducible install.
 
-Release assets are downloaded from GitHub releases. When the selected release publishes `SHA256SUMS`, the installer verifies the downloaded binary plus seeded `tool_policy.toml` / `runtime.toml`; every expected entry must exist and match. Some existing releases do not publish `SHA256SUMS`; for those releases, the verified binary install path is unavailable. If the checksum file cannot be fetched, the installer fails closed by default. Use the source build path below, or bypass verification only for a disposable or air-gapped install by passing `--allow-unverified` or setting `MASC_ALLOW_UNVERIFIED=1`; the script prints a warning before continuing.
+Release assets are downloaded from GitHub releases. When the selected release publishes `SHA256SUMS`, the installer verifies the downloaded binary plus seeded `runtime.toml`; every expected entry must exist and match. Some existing releases do not publish `SHA256SUMS`; for those releases, the verified binary install path is unavailable. If the checksum file cannot be fetched, the installer fails closed by default. Use the source build path below, or bypass verification only for a disposable or air-gapped install by passing `--allow-unverified` or setting `MASC_ALLOW_UNVERIFIED=1`; the script prints a warning before continuing.
 
 > If `runtime.toml` is missing (or its `[runtime].default` is absent), the server logs `refusing to boot` and exits with status 1 — there is no environment-default fallback. Because the file is required to start, the install script seeds [`config/runtime.toml`](config/runtime.toml). To write it manually, define `[runtime].default = "<provider>.<model>"` and a matching `[provider.model]` runtime binding table; `[runtime.assignments]` is optional and only overrides individual Keepers.
 
@@ -244,9 +244,7 @@ Runtime settings and state live under `.masc/` below `--base-path`. Config files
 | File | Role |
 |------|------|
 | `runtime.toml` | Provider/model catalog + `[runtime].default`. Required to start: if it (or `[runtime].default`) is missing, the server logs `refusing to boot` and exits 1 — no environment-default fallback |
-| `tool_policy.toml` | Config-root marker seeded by the install script (legacy). Tool access is now registry/descriptor-based, so the contents are not consumed at runtime |
-
-⚠️ **Legacy / unused keys**: `tool_policy.toml` is only a config-root marker; its contents are not read at runtime. If your `runtime.toml` contains `[autonomous] concurrency`, it is also dead code — fleet size is controlled by `[bootstrap] autoboot_max` / `max_active_keepers`.
+⚠️ **Legacy / unused keys**: If your `runtime.toml` contains `[autonomous] concurrency` or `[bootstrap] max_active_keepers`, remove it; neither key controls execution.
 
 **When creating agents**
 
@@ -264,7 +262,7 @@ Runtime settings and state live under `.masc/` below `--base-path`. Config files
 | `keeper_repo_mappings.toml` | Keeper → credential + accessible repository mapping |
 | `credentials.toml` | GitHub credentials for PR work |
 
-> The remaining files under `prompts/` are behavior, governance, verification, and memory system templates. They are loaded by name where needed and work with defaults, so you usually do not edit them. The file to edit when you want to change the "stage" is `keeper.world.md`.
+> The remaining files under `prompts/` are behavior, analysis, deliberation, verification, and memory system templates. They are loaded by name where needed and work with defaults, so you usually do not edit them. The file to edit when you want to change the "stage" is `keeper.world.md`.
 >
 > The files you hand-author are `keepers/<name>.toml` (Keeper definitions) and `personas/<name>/profile.json` (personas). Runtime state (`.masc/keepers/*.json` + `*.jsonl` logs) is created by the server and should not be edited.
 >
@@ -351,7 +349,7 @@ Surfaces pinned to the main navigation rail (`V2_PRIMARY_SURFACE_IDS`):
 | Settings | Keeper settings operations console |
 | Logs | System execution logs |
 
-Additional surfaces reachable outside the rail: Monitor (keeper fleet, tool monitor, runtime, observatory), Command (intervention / governance / approvals), Lab (tool diagnostics, safety harness, performance, Memory OS, keeper memory state).
+Additional surfaces reachable outside the rail: Monitor (keeper fleet, tool monitor, runtime, observatory), Command (intervention / Gate / approvals), Lab (tool diagnostics, safety harness, performance, Memory OS, keeper memory state).
 
 Route examples: `dashboard#monitoring?section=agents`, `dashboard#monitoring?section=journey`, `dashboard#command?section=operations`, `dashboard#connectors?section=connector-status`, `dashboard#lab?section=memory-subsystems`, `dashboard#workspace?section=verification`.
 
@@ -393,7 +391,7 @@ The table below lists concrete remaining tasks derived from the current limits d
 
 | # | Area | Remaining work | Expected status change |
 |---|------|---------------|------------------------|
-| 1 | **Keepers / Fleet** | Remove or replace `[autonomous] concurrency` in `runtime.toml` with actual fleet concurrency control (`[bootstrap] autoboot_max`, `max_active_keepers`) and align docs with code. | 🟡→✅ |
+| 1 | **Keepers / Fleet** | Remove the dead `[autonomous] concurrency` key from deployed `runtime.toml` files and keep fleet documentation aligned with the no-global-cap runtime contract. | 🟡→✅ |
 | 2 | **Provider Failover** | Implement provider-health based **ordered automatic failover**. When a provider fails, automatically route a Keeper's turn to the next candidate provider and log/metric recovery. | ❌→✅ |
 | 3 | **Fusion + JoJ** | Add a first-order judge panel config for the Judge-of-Judges (JoJ) phase in `runtime.toml`, and persist the fusion result registry to disk. | 🟡→✅ |
 | 4 | **Goal + Task** | Let the goal-loop scheduler drive Keeper turns in addition to channel events, e.g. auto-wake on goal state change, deadline proximity, or blocked task detection. | 🟡→✅ |
@@ -401,8 +399,8 @@ The table below lists concrete remaining tasks derived from the current limits d
 | 6 | **IDE** | Make the observational IDE usable in practice. The LSP proxy, annotation overlay, and dashboard IDE shell exist, but the command-only flow is not validated and the IDE is currently unusable. | ❌→🟡/✅ |
 | 7 | **Multi-Channel** | Add **sidecars** for Slack, Telegram, and other channels outside Discord, and extend the gate message schema per channel. | 🟡→✅ |
 | 8 | **Sandbox** | Reduce host-execution fallback cases when Docker image is missing or the path is inside the playground, and document `sandbox_profile=local` usage explicitly. | ✅ stabilization |
-| 9 | **HITL** | Critical approvals now have a documented fail-closed, operator-must-decide policy; bounded timeout/escalation automation still needs runtime state, UI surfacing, audit events, and tests before use. | ✅ stabilization |
-| 10 | **Governance** | Restrict the use of `MASC_DISABLE_HITL=true` and keeper `always_approve` rules, and strengthen operator audit logging. | ✅ stabilization |
+| 9 | **HITL** | Keep human decisions nonblocking: persist the exact request, let the Keeper continue other work, and wake only that Keeper lane when a decision arrives. | ✅ stabilization |
+| 10 | **Gate** | Keep Always Allow, LLM Auto Judge, and HITL as non-hierarchical choices; audit exact one-use grants without classifying products, commands, or risk levels. | ✅ stabilization |
 | 11 | **OpenTelemetry** | Add missing signals and instrumentation such as low-level Keeper turn events, internal fusion metrics, and per-provider latency breakdowns. | 🟡→✅ |
 
 ---

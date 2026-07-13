@@ -8,7 +8,6 @@
       "bin/main_eio.ml:609:match Sys.getenv_opt \"MASC_BASE_PATH\" with",
       "bin/main_eio.ml:1017:match Sys.getenv_opt \"OCAMLRUNPARAM\" with",
       "bin/masc_completion_trust_audit.ml:40:match Sys.getenv_opt \"MASC_BASE_PATH\" with",
-      "lib/admission_queue.ml:91:{ counters = { max_slots = initial_max_concurrent_of_env Sys.getenv_opt; active = 0 }",
       "lib/auth/auth_credential_base.ml:97:match Sys.getenv_opt internal_keeper_token_env_key with",
       "lib/auth/auth_strict_mode.ml:18:match Sys.getenv_opt \"MASC_AUTH_STRICT\" with"
     ],
@@ -18,7 +17,6 @@
       "bin/main_eio.ml:609:match Sys.getenv_opt \"MASC_BASE_PATH\" with",
       "bin/main_eio.ml:1017:match Sys.getenv_opt \"OCAMLRUNPARAM\" with",
       "bin/masc_completion_trust_audit.ml:40:match Sys.getenv_opt \"MASC_BASE_PATH\" with",
-      "lib/admission_queue.ml:91:{ counters = { max_slots = initial_max_concurrent_of_env Sys.getenv_opt; active = 0 }",
       "lib/auth/auth_credential_base.ml:97:match Sys.getenv_opt internal_keeper_token_env_key with",
       "lib/auth/auth_strict_mode.ml:18:match Sys.getenv_opt \"MASC_AUTH_STRICT\" with"
     ],
@@ -113,8 +111,8 @@
   },
   "metrics": {
     "content_type_substring_checks": 0,
-    "direct_env_reads": 182,
-    "direct_env_reads_outside_env_boundary": 154,
+    "direct_env_reads": 181,
+    "direct_env_reads_outside_env_boundary": 153,
     "env_config_unclassified_typed_getters": 176,
     "exception_message_classifiers": 108,
     "local_workspace_path_literals": 0,

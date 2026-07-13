@@ -1,8 +1,6 @@
-(** Keeper_alerting — skill routing and path safety checks for keeper
-    execution.
+(** Keeper_alerting — path safety checks for keeper execution.
 
-    Includes {!Keeper_skill_routing} and {!Keeper_alerting_path} via
-    [include] for backward-compatible access by downstream modules.
+    Includes {!Keeper_alerting_path} for the objective filesystem boundary.
 
     The alert fanout layer (board/Slack/Slack-DM/GitHub senders,
     retry+dedup machinery) was removed here — see the .ml header
@@ -15,20 +13,6 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_memory
 
-(** {1 Included: Keeper_skill_routing types} *)
-
-type selection_mode =
-  | Heuristic
-  | Model_selected of string
-  | Model_rejected of string
-
-type keeper_skill_route = {
-  primary_skill : string;
-  secondary_skill : string option;
-  reason : string;
-  selection_mode : selection_mode;
-}
-
 (** {1 Usage Merging} *)
 
 (** Merge two API usage records by summing all fields. *)
@@ -36,22 +20,6 @@ val merge_usage :
   Agent_sdk.Types.api_usage ->
   Agent_sdk.Types.api_usage ->
   Agent_sdk.Types.api_usage
-
-(** {1 Included: Keeper_skill_routing} *)
-
-val keeper_allowed_skills : string list
-val is_valid_keeper_skill : string -> bool
-val keeper_skill_priority : string -> int
-val route_keeper_skill : message:string -> keeper_skill_route
-val format_skill_route_line : keeper_skill_route -> string
-val format_skill_route_reason : keeper_skill_route -> string
-val strip_skill_route_lines : string -> string
-val parse_skill_route_response :
-  string -> fallback_route:keeper_skill_route -> keeper_skill_route
-val keeper_skill_routing_instructions :
-  fallback_route:keeper_skill_route -> string
-val skill_route_context_text :
-  fallback_route:keeper_skill_route -> string
 
 (** {1 Included: Keeper_alerting_path} *)
 

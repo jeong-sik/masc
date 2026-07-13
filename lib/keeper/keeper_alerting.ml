@@ -1,5 +1,4 @@
-(** Keeper_alerting — skill routing and path safety checks for keeper
-    execution.
+(** Keeper_alerting — path safety checks for keeper execution.
 
     The keeper alert fanout layer (board/Slack/Slack-DM/GitHub senders,
     retry+dedup machinery) was removed here: its sole caller
@@ -32,5 +31,4 @@ let merge_usage
        | Some x, None | None, Some x -> Some x
        | None, None -> None) }
 
-include Keeper_skill_routing
 include Keeper_alerting_path

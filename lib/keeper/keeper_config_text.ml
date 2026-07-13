@@ -42,9 +42,6 @@ let validate_name = Safe_identifier.is_portable_name
 (* ── Configuration constants ────────────────────────────────── *)
 
 let default_proactive_enabled = true
-let default_proactive_idle_sec = 120
-let default_proactive_cooldown_sec = 300
-let approval_queue_stale_max_wait_sec = 600.0
 
 (* Environment-configurable caps. Defaults were raised from 480/320 to 4096
    because silent truncation in the dashboard made operators think edits were
@@ -84,6 +81,10 @@ let removed_keeper_input_key_names =
     "policy_shell_mode";
     "persona_ref";
     "runtime_ref";
+    "tool_access";
+    "tool_denylist";
+    "shards";
+    "policy_voice_enabled";
   ]
 
 let removed_keeper_sandbox_input_key_names =

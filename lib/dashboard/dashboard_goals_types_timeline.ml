@@ -24,20 +24,10 @@ let goal_status_color = function
 
 let goal_phase_color = function
   | Goal_phase.Executing -> "#4ade80"
-  | Goal_phase.Awaiting_verification -> "#f59e0b"
-  | Goal_phase.Awaiting_approval -> "#fb7185"
   | Goal_phase.Blocked -> "#ef4444"
   | Goal_phase.Paused -> "#94a3b8"
   | Goal_phase.Completed -> "#60a5fa"
   | Goal_phase.Dropped -> "#6b7280"
-
-let goal_health_color = function
-  | "done" -> "#60a5fa"
-  | "paused" -> "#f59e0b"
-  | "blocked" -> "#ef4444"
-  | "at_risk" -> "#f59e0b"
-  | "on_track" -> "#4ade80"
-  | _ -> "#94a3b8"
 
 let task_status_color status_label =
   match status_label with
@@ -235,63 +225,8 @@ let goal_event_timeline_json event =
           | None -> Printf.sprintf "phase=%s" phase),
           (match phase with
           | "blocked" -> "bad"
-          | "awaiting_verification" | "awaiting_approval" | "paused" -> "warn"
+          | "paused" -> "warn"
           | _ -> "ok") )
-    | "goal_verification_opened" ->
-        let request = payload_field "request" in
-        let request_id =
-          request |> json_member_or_null "id" |> json_to_string_opt
-          |> Option.value ~default:"request"
-        in
-        let required =
-          request |> json_member_or_null "policy_snapshot"
-          |> json_member_or_null "required_verdicts" |> json_to_int_opt
-        in
-        ( "Goal Verification Opened",
-          (match required with
-          | Some n -> Printf.sprintf "request %s quorum=%d" request_id n
-          | None -> Printf.sprintf "request %s opened" request_id),
-          "warn" )
-    | "goal_vote" ->
-        let vote = payload_field "vote" in
-        let decision =
-          vote |> json_member_or_null "decision" |> json_to_string_opt
-          |> Option.value ~default:"<missing payload.vote.decision>"
-        in
-        let principal =
-          vote |> json_member_or_null "principal" |> json_member_or_null "id"
-          |> json_to_string_opt
-          |> Option.value ~default:"principal"
-        in
-        ( "Goal Vote",
-          Printf.sprintf "%s voted %s" principal decision,
-          if String.equal decision "reject" then "bad" else "ok" )
-    | "goal_verification_resolved" ->
-        let status =
-          payload_field "status" |> json_to_string_opt
-          |> Option.value ~default:"<missing payload.status>"
-        in
-        ( "Goal Verification Resolved",
-          Printf.sprintf "status=%s" status,
-          (match status with
-          | "approved" -> "ok"
-          | "rejected" -> "bad"
-          | _ -> "warn") )
-    | "goal_approval_opened" ->
-        let request_id = payload_field "request_id" |> json_to_string_opt in
-        ( "Goal Approval Opened",
-          (match request_id with
-          | Some id -> Printf.sprintf "request %s is awaiting operator approval" id
-          | None -> "goal is awaiting operator approval"),
-          "warn" )
-    | "goal_approval_resolved" ->
-        let decision =
-          payload_field "decision" |> json_to_string_opt
-          |> Option.value ~default:"<missing payload.decision>"
-        in
-        ( "Goal Approval Resolved",
-          Printf.sprintf "decision=%s" decision,
-          if String.equal decision "reject" then "bad" else "ok" )
     | _ ->
         ("Goal Event", event_type, "ok")
   in
@@ -317,9 +252,12 @@ let build_goal_timeline node linked_keepers approvals goal_events =
   let approval_events =
     approvals
     |> List.filter_map (fun approval ->
-           match Json_util.get_string approval "requested_at_iso" with
+           match Json_util.get_float approval "requested_at" with
            | None -> None
-           | Some requested_at ->
+           | Some requested_at_unix ->
+               let requested_at =
+                 Masc_domain.iso8601_of_unix_seconds requested_at_unix
+               in
                let approval_id =
                  Json_util.get_string approval "id"
                  |> Option.value ~default:"approval"
@@ -375,11 +313,7 @@ let build_goal_timeline node linked_keepers approvals goal_events =
                          |> Option.value ~default:"<missing receipt.outcome>"
                        in
                        let severity =
-                         if receipt_has_error receipt then "bad"
-                         else if receipt_has_sandbox_risk receipt
-                                 || receipt_has_runtime_risk receipt
-                         then "warn"
-                         else "ok"
+                         if receipt_has_error receipt then "bad" else "ok"
                        in
                        let receipt_runtime_summary =
                          match receipt_runtime_id receipt with

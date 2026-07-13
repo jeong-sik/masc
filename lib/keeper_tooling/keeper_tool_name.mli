@@ -71,13 +71,11 @@ val masc_board_name_of_keeper_tool : t -> Tool_name.Board_name.t option
 type board_projection =
   | Keeper_wrapper of t
   | Direct_masc
-  | External_only
 
 val board_projection_of_masc_board_name : Tool_name.Board_name.t -> board_projection
 (** Exhaustive projection of each Board operation into the Keeper model
     surface. Wrapper-backed operations have one Keeper route, direct operations
-    retain their raw MASC route, and external-only operations have no Keeper
-    model route. *)
+    retain their raw MASC route. *)
 
 val masc_board_name_of_keeper_name : string -> Tool_name.Board_name.t option
 (** Parse a [keeper_board_*] string and return the corresponding typed
@@ -87,12 +85,3 @@ val masc_board_name_of_keeper_name : string -> Tool_name.Board_name.t option
     Keep this exact allowlist on the keeper side so prefix canonicalisation
     does not depend on the MCP catalog hand-list. *)
 val public_mcp_non_descriptor_names : string list
-
-(** Returns true for keeper board wrapper names and legacy public
-    [masc_board_*] names without depending on the central [Tool_name] enum. *)
-val is_board_surface_name : string -> bool
-
-(** Returns true for mutating board write surfaces that require extra keeper
-    board-write guard accounting. Handles keeper-owned names, legacy
-    [masc_board_*] names, and the MCP transport prefix. *)
-val is_board_write_surface_name : string -> bool

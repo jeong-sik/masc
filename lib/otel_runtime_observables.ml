@@ -13,7 +13,8 @@
 let metric_console_sink_dropped = "masc_console_sink_dropped_total"
 let metric_console_sink_queue_depth = "masc_console_sink_queue_depth"
 let metric_transition_audit_queue_depth = "masc_keeper_transition_audit_queue_depth"
-let metric_fd_in_flight = "masc_fd_in_flight"
+let metric_fd_active_operations = "masc_fd_active_operations"
+let metric_fd_resource_errors = "masc_fd_resource_errors_total"
 let metric_store_bytes = "masc_store_bytes"
 let metric_store_files = "masc_store_files"
 
@@ -121,32 +122,37 @@ let store_samples ~masc_root () =
 let fd_samples () =
   let snap = Fd_accountant.fd_snapshot () in
   let open_limit =
-    (* -1 means "not observable on this platform"; exporting it would read
-       as a real value, so the sample is omitted instead. *)
     List.concat
-      [ (if snap.Fd_accountant.fd_open >= 0
-         then [ gauge Otel_core_metric_names.metric_fd_open (Float.of_int snap.fd_open) ]
-         else [])
-      ; (if snap.Fd_accountant.fd_limit >= 0
-         then [ gauge Otel_core_metric_names.metric_fd_limit (Float.of_int snap.fd_limit) ]
-         else [])
+      [ (match snap.Fd_accountant.fd_open with
+         | Some value -> [ gauge Otel_core_metric_names.metric_fd_open (Float.of_int value) ]
+         | None -> [])
+      ; (match snap.Fd_accountant.fd_limit with
+         | Some value -> [ gauge Otel_core_metric_names.metric_fd_limit (Float.of_int value) ]
+         | None -> [])
       ]
-  in
-  let pressure =
-    gauge
-      Otel_core_metric_names.metric_fd_pressure_active
-      (if snap.Fd_accountant.pressure_active then 1.0 else 0.0)
   in
   let per_kind =
     List.map
       (fun (kind, n) ->
         gauge
           ~labels:[ "kind", Fd_accountant.kind_to_string kind ]
-          metric_fd_in_flight
+          metric_fd_active_operations
           (Float.of_int n))
       snap.Fd_accountant.per_kind
   in
-  open_limit @ (pressure :: per_kind)
+  let resource_errors =
+    List.map
+      (fun (kind, error, count) ->
+        counter_labeled
+          ~labels:
+            [ "kind", Fd_accountant.kind_to_string kind
+            ; "error", Fd_accountant.resource_error_to_string error
+            ]
+          metric_fd_resource_errors
+          (Float.of_int count))
+      snap.Fd_accountant.resource_errors
+  in
+  open_limit @ per_kind @ resource_errors
 ;;
 
 let bus_samples_of ~bus_label bus =

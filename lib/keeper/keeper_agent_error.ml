@@ -99,9 +99,6 @@ type sdk_termination_semantics =
   | Sdk_error_failure
 
 let sdk_termination_semantics = function
-  | Agent_sdk.Error.Api (Agent_sdk.Retry.Timeout { message })
-    when Keeper_error_classify.is_structural_oas_timeout_message message ->
-    Oas_agent_execution_timeout
   | Agent_sdk.Error.Api (Agent_sdk.Retry.Timeout _) -> Provider_wall_clock_timeout
   | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _)
   | Agent_sdk.Error.Provider
@@ -175,12 +172,9 @@ let api_error_terminal_reason_code (err : Agent_sdk.Error.api_error) : string =
   (* SSOT: the two transient wire codes are owned by [Keeper_terminal_reason]
      so the consumer-side disposition classifier
      ([Keeper_terminal_reason.is_transient_provider_runtime_failure]) and this
-     encoder cannot drift. The structural-OAS-timeout branch keeps its own
-     distinct (non-transient) code. *)
+     encoder cannot drift. Agent execution budgets are represented by the
+     typed [AgentExecutionTimeout] constructors above this API layer. *)
   | Agent_sdk.Retry.NetworkError _ -> Keeper_terminal_reason.wire_api_error_network
-  | Agent_sdk.Retry.Timeout { message }
-    when Keeper_error_classify.is_structural_oas_timeout_message message ->
-    "api_error_oas_agent_execution_timeout"
   | Agent_sdk.Retry.Timeout _ -> Keeper_terminal_reason.wire_api_error_timeout
 ;;
 

@@ -698,9 +698,7 @@ let parse_keeper_chat_stream_request body_str =
     Error ("invalid json: " ^ e)
 
 let strip_keeper_visible_reply (reply : string) =
-  reply
-  |> Keeper_skill_routing.strip_skill_route_lines
-  |> String.trim
+  String.trim reply
 
 let split_keeper_reply_chunks (text : string) : string list =
   let len = String.length text in
@@ -1659,13 +1657,13 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
          ~stream_lifecycle:errored_stream_lifecycle
          ()
     in
-    (match persisted with
-     | Ok () ->
+    Result.iter
+      (fun () ->
          Keeper_chat_broadcast.chat_appended
            ~keeper_name:payload.name ~source:chat_source
            ~content:(persisted_error_reply err)
-           ()
-     | Error _ -> ());
+           ())
+      persisted;
     persisted
   in
   let timeout_sec = payload.timeout_sec in
@@ -1786,19 +1784,20 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
         match dispatch_result with
         | Ok (`Deferred rejection) ->
             push_worker_event (Stream_queued_turn_deferred rejection);
-            Tool_result.ok
+            Tool_result.make_ok
               ~tool_name:"masc_keeper_msg"
               ~start_time
-              (Yojson.Safe.to_string
-                 (`Assoc
-                    [ ("status", `String "deferred")
-                    ; ("admission", admission_rejection_to_json rejection)
-                    ]))
+              ~data:
+                (`Assoc
+                   [ ("status", `String "deferred")
+                   ; ("admission", admission_rejection_to_json rejection)
+                   ])
+              ()
         | Ok (`Queued queued) ->
-            let body =
-              Yojson.Safe.to_string
-                (dashboard_deferred_chat_to_json ~keeper_name:payload.name queued)
+            let data =
+              dashboard_deferred_chat_to_json ~keeper_name:payload.name queued
             in
+            let body = Yojson.Safe.to_string data in
             let committed =
               let ( let* ) = Result.bind in
               let* receipt_id =
@@ -1819,7 +1818,11 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
             (match committed with
              | Ok () ->
                push_worker_event (Stream_dashboard_queued queued);
-               Tool_result.ok ~tool_name:"masc_keeper_msg" ~start_time body
+               Tool_result.make_ok
+                 ~tool_name:"masc_keeper_msg"
+                 ~start_time
+                 ~data
+                 ()
              | Error detail ->
                push_worker_event
                  (Stream_terminal
@@ -2042,15 +2045,16 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                       Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time detail
                   | Some (Deferred { rejection }) ->
                       push_worker_event (Stream_queued_turn_deferred rejection);
-                      Tool_result.ok
+                      Tool_result.make_ok
                         ~tool_name:"masc_keeper_msg"
                         ~start_time
-                        (Yojson.Safe.to_string
-                           (`Assoc
-                              [ ("status", `String "deferred")
-                              ; ( "admission"
-                                , admission_rejection_to_json rejection )
-                              ]))
+                        ~data:
+                          (`Assoc
+                             [ ("status", `String "deferred")
+                             ; ( "admission"
+                               , admission_rejection_to_json rejection )
+                             ])
+                        ()
                   | Some (Delivered _) | None ->
                       push_worker_event
                         (Stream_terminal
@@ -2058,7 +2062,18 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                            ; body
                            ; queued_outcome
                            });
-                      Tool_result.ok ~tool_name:"masc_keeper_msg" ~start_time body))
+                      (match payload_json_opt with
+                       | Some data ->
+                           Tool_result.make_ok
+                             ~tool_name:"masc_keeper_msg"
+                             ~start_time
+                             ~data
+                             ()
+                       | None ->
+                           Tool_result.ok
+                             ~tool_name:"masc_keeper_msg"
+                             ~start_time
+                             body)))
         | Ok (`Ran (false, err)) ->
             let persisted = persist_failure_reply err in
             let queued_outcome =

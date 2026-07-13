@@ -20,6 +20,7 @@ const annotation: IdeAnnotation = {
   content: 'Wire goal and task progress into the code line.',
   goal_id: 'goal-ide',
   task_id: 'task-42',
+  references: [],
   created_at_ms: 1,
   updated_at_ms: 2,
 }
@@ -519,19 +520,15 @@ describe('IdeContextLens', () => {
     })
   })
 
-  it('routes keeper annotations into comment, PR, git, log, and telemetry context', () => {
+  it('renders opaque annotation references without assigning product surfaces or routes', () => {
     const linkedAnnotation: IdeAnnotation = {
       ...annotation,
       id: 'ann-linked-route-context',
       kind: 'Bookmark',
-      board_post_id: 'post-1',
-      comment_id: 'comment-1',
-      pr_id: '15035',
-      git_ref: 'feat/context-lens',
-      log_id: 'turn-9',
-      session_id: 'sess-9',
-      operation_id: 'op-9',
-      worker_run_id: 'wr-9',
+      references: [
+        { relation: 'evidence', reference: 'urn:example:15035' },
+        { relation: 'source', reference: 'opaque-context' },
+      ],
     }
     const model = deriveIdeContextLens({
       filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
@@ -542,46 +539,21 @@ describe('IdeContextLens', () => {
     })
 
     const counts = new Map(model.surfaces.map(surface => [surface.id, surface.count]))
-    expect(counts.get('board')).toBe(1)
-    expect(counts.get('comment')).toBe(1)
-    expect(counts.get('pr')).toBe(1)
-    expect(counts.get('git')).toBe(1)
-    expect(counts.get('log')).toBe(1)
-    expect(counts.get('telemetry')).toBe(1)
-    expect(model.anchors[0]?.meta).toContain('PR 15035')
-    expect(model.anchors[0]?.meta).toContain('log turn-9')
+    expect(counts.get('board')).toBe(0)
+    expect(counts.get('comment')).toBe(0)
+    expect(counts.get('pr')).toBe(0)
+    expect(counts.get('git')).toBe(0)
+    expect(counts.get('log')).toBe(0)
+    expect(counts.get('runtime')).toBe(0)
+    expect(counts.get('telemetry')).toBe(0)
+    expect(model.anchors[0]?.meta).toContain('evidence urn:example:15035')
+    expect(model.anchors[0]?.meta).toContain('source opaque-context')
     expect(model.anchors[0]?.route_links?.map(link => link.label)).toEqual([
       'Code',
       'Goal',
       'Task',
-      'Board',
-      'Comment',
-      'PR',
-      'Git',
-      'Log',
-      'Telemetry',
       'Keeper',
     ])
-    expect(model.surfaces.find(surface => surface.id === 'comment')?.routeLink).toMatchObject({
-      label: 'Comment',
-      tab: 'board',
-      params: { post: 'post-1', comment: 'comment-1' },
-    })
-    expect(model.surfaces.find(surface => surface.id === 'pr')?.routeLink).toMatchObject({
-      label: 'PR',
-      params: { section: 'repositories', pr: '15035' },
-    })
-    expect(model.surfaces.find(surface => surface.id === 'telemetry')?.routeLink).toMatchObject({
-      label: 'Telemetry',
-      params: {
-        section: 'fleet-health',
-        view: 'event-log',
-        session_id: 'sess-9',
-        operation_id: 'op-9',
-        worker_run_id: 'wr-9',
-        q: 'turn-9',
-      },
-    })
   })
 
   it('routes file and line context back into the Code IDE shell', () => {

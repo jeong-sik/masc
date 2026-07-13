@@ -115,8 +115,8 @@ jobs:
       - name: Run TLA->OCaml line-ref validator (N-2.c)
         # Catches stale `[func] at line N` citations in spec preambles
         # where the OCaml `let func` declaration has drifted out of an
-        # N-line window.  iter 63 #14919 audit found KeeperApprovalQueue
-        # citing lines 751/772/941 for functions now at +245..+413; two
+        # N-line window. iter 63 #14919 found a retired queue model citing
+        # lines 751/772/941 for functions then at +245..+413; two
         # more specs (KeeperHeartbeat, KeeperTaskAcquisition) had the
         # same drift.  iter 64 N-2.a converted those to function-name-
         # only references; this guard prevents the next preamble that
@@ -129,8 +129,8 @@ jobs:
         # OCaml-docstring twin of N-2.c.  iter 70 #14939 / iter 71 #14943
         # found `[symbol] (~line N)` reverse-citations in lib/keeper/*.{ml,mli}
         # header docstrings whose line numbers had drifted +29 .. +424
-        # (keeper_approval_queue, keeper_failure_circuit_breaker,
-        # keeper_memory_policy, keeper_execution_receipt).  The TLA-side
+        # (keeper_approval_queue, keeper_memory_policy,
+        # keeper_execution_receipt).  The TLA-side
         # guard (audit-tla-ml-line-refs.sh) only scans *.tla preambles, so
         # the OCaml side went uncaught.  Baseline grandfathers the sites
         # in flight (N-2.e #14943 + N-2.f/g TBD); drain a line when its

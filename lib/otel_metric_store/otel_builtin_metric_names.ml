@@ -96,25 +96,6 @@ include Otel_policy_metric_names
    [orphan_drop_window_sec]. Together they let operators tell a
    harmless single-update race from a stuck orphan fiber emitting 30+
    drops per turn. See masc 2026-05-07 verifier-loop incident. *)
-(* Self-healing circuit breaker: incremented each time [sweep_and_recover]
-   auto-resumes a keeper after its back-off timer has elapsed.  A rate >0
-   means the system is self-healing; a zero rate while keepers accumulate
-   [auto_resume_after_sec] means the sweep is not firing or the meta write
-   is failing. Labels: keeper. *)
-(* Phase-3.5 health-gate block: incremented when the supervisor skips
-   auto-resume because the keeper's runtime is unhealthy (failure ratio
-   >= threshold).  Labels: keeper, runtime.  A positive rate means the
-   health probe is actively protecting the fleet from resuming into a
-   still-failing runtime. *)
-(* Positive signal for the Skip_idle + Woken gate-promotion path added
-   by #12271. Increments every time run_smart_heartbeat_gate observes
-   that an external wakeup_keeper call cut a Skip_idle backoff sleep
-   short and the cycle was resumed (KeeperHeartbeat.tla HeartbeatTick
-   action). A zero rate after operator-visible board signals to a Live
-   keeper means the fix path is not firing — either the wakeup never
-   reached the atomic, or a regression silently re-introduced
-   MissedWakeup. Pair with stale_termination_by_class for full
-   positive/negative coverage. Labels: keeper. *)
 (* Task-138: Minimum proactive cadence — observability gauges for consecutive
    idle turns and last productive turn timestamps. Labels: keeper. *)
 (* PR-M (Leak 9): consecutive [provider_timeout] cycle FAILED strikes
@@ -155,7 +136,7 @@ include Otel_identity_metric_names
 (* Centralized metric constants for inline string replacement.
    keeper_hooks_oas.ml, keeper_guards.ml, keeper_execution_receipt.ml,
    keeper_tool_execute_runtime.ml, keeper_sandbox_docker.ml,
-   keeper_heartbeat_snapshot.ml, keeper_no_progress_loop_detector.ml,
+   keeper_heartbeat_snapshot.ml,
    keeper_unified_metrics.ml. *)
 (* OAS after-turn response metadata was accepted but omitted its response model
    field. This is provider response-shape telemetry, not keeper policy

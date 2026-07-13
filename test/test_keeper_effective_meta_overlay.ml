@@ -140,7 +140,6 @@ let seed_runtime_meta config name =
         ("agent_name", `String ("keeper-" ^ name ^ "-agent"));
         ("trace_id", `String ("trace-" ^ name));
         ("goal", `String "effective meta overlay regression");
-        ("tool_access", `List [ `String "masc_status" ]);
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
@@ -245,7 +244,6 @@ let test_toml_overlay_reaches_effective_meta () =
     (Filename.concat keepers_dir (name ^ ".toml"))
     {|[keeper]
 sandbox_profile = "docker"
-tool_access = ["tool_execute", "tool_read_file"]
 |};
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
@@ -260,11 +258,7 @@ tool_access = ["tool_execute", "tool_read_file"]
       Alcotest.(check string)
         "docker default network overlays from TOML profile"
         "none"
-        (Profile.network_mode_to_string meta.network_mode);
-      Alcotest.(check (list string))
-        "tool_access overlays from TOML"
-        [ "tool_execute"; "tool_read_file" ]
-        meta.tool_access
+        (Profile.network_mode_to_string meta.network_mode)
 
 let test_profile_identity_snapshot_reaches_meta_json () =
   with_config_dir @@ fun ~base ~config_dir ~keepers_dir ->
@@ -287,7 +281,6 @@ let test_profile_identity_snapshot_reaches_meta_json () =
 persona_name = "probe"
 sandbox_profile = "local"
 multimodal_policy = "delegate"
-tool_access = ["tool_execute"]
 |};
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
@@ -351,9 +344,6 @@ persona_name = "masc-improver"
 sandbox_profile = "docker"
 goal = "Improve MASC autonomously"
 proactive_enabled = true
-proactive_idle_sec = 77
-proactive_cooldown_sec = 88
-tool_access = ["tool_execute", "tool_read_file"]
 allowed_paths = ["workspace/yousleepwhen/masc"]
 active_goal_ids = ["goal-masc-improver"]
 |};
@@ -370,8 +360,7 @@ active_goal_ids = ["goal-masc-improver"]
       persisted with
       persona = Some "analyst";
       goal = "stale goal";
-      proactive = { enabled = false; idle_sec = 1; cooldown_sec = 2 };
-      tool_access = [ "masc_status" ];
+      proactive = { enabled = false };
       allowed_paths = [ "/tmp/stale-local-path" ];
       active_goal_ids = [ "stale-goal" ];
     }
@@ -415,18 +404,6 @@ active_goal_ids = ["goal-masc-improver"]
     "returned proactive enabled is TOML canonical"
     true
     returned.proactive.enabled;
-  Alcotest.(check int)
-    "returned proactive idle is TOML canonical"
-    77
-    returned.proactive.idle_sec;
-  Alcotest.(check int)
-    "returned proactive cooldown is TOML canonical"
-    88
-    returned.proactive.cooldown_sec;
-  Alcotest.(check (list string))
-    "returned tool_access is TOML canonical"
-    [ "tool_execute"; "tool_read_file" ]
-    returned.tool_access;
   Alcotest.(check string)
     "returned sandbox_profile is TOML canonical"
     "docker"
@@ -447,7 +424,6 @@ let test_turn_setup_uses_effective_meta () =
     (Filename.concat keepers_dir (name ^ ".toml"))
     {|[keeper]
 sandbox_profile = "docker"
-tool_access = ["tool_search_files", "tool_read_file"]
 |};
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
@@ -469,11 +445,7 @@ tool_access = ["tool_search_files", "tool_read_file"]
       Alcotest.(check string)
         "turn setup sees TOML sandbox overlay"
         "docker"
-        (Profile.sandbox_profile_to_string meta.sandbox_profile);
-      Alcotest.(check (list string))
-        "turn setup sees TOML tool overlay"
-        [ "tool_search_files"; "tool_read_file" ]
-        meta.tool_access
+        (Profile.sandbox_profile_to_string meta.sandbox_profile)
 
 let test_keepalive_meta_selection_overlays_disk_meta () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
@@ -778,7 +750,7 @@ let () =
     [
       ( "effective_meta",
         [
-          Alcotest.test_case "TOML sandbox/tool overlay reaches effective meta"
+          Alcotest.test_case "TOML sandbox overlay reaches effective meta"
             `Quick test_toml_overlay_reaches_effective_meta;
           Alcotest.test_case
             "profile identity snapshot reaches meta JSON"

@@ -8,7 +8,7 @@
     {b Runtime chain}: surface re-exposed via
     [include module type of Env_config_core] in
     {!Env_config}, which sibling sub-modules
-    ({!Env_config_runtime}, {!Env_config_governance},
+    ({!Env_config_runtime}, {!Env_config_runtime_services},
     {!Env_config_keeper}) extend.  Sibling sub-modules also reach
     the helper getters here ([get_int], [get_float], [get_bool],
     [trim_opt], [raw_value_opt]) unqualified through the prelude
@@ -205,16 +205,12 @@ val telemetry_enabled_env_key : string
     them to a hard {!Config_error} (fail-fast boot). *)
 val parse_warn_env_key : string
 
-val governance_level_env_key : string
 val log_level_opt : unit -> string option
 val telemetry_enabled : unit -> bool
 
 (** Whether malformed env parses are escalated to {!Config_error} (fail-fast)
     instead of warn + default. Controlled by [MASC_PARSE_WARN]. Default: false. *)
 val parse_warn_enabled : unit -> bool
-val governance_level : unit -> string
-val disable_hitl_env_key : string
-val disable_hitl : unit -> bool
 
 (** {1 Build identity / pubsub} *)
 

@@ -38,14 +38,12 @@ type try_provider_ctx =
   ; temperature : float
   ; max_tokens : int option
   ; accept : Agent_sdk_response.api_response -> bool
-  ; guardrails : Agent_sdk.Guardrails.t option
   ; hooks : Agent_sdk.Hooks.hooks option
   ; context_reducer : Agent_sdk.Context_reducer.t option
   ; raw_trace : Agent_sdk.Raw_trace.t option
   ; trace_link : (string * string) option
   ; (* Transport *)
     transport_resolved : Masc_grpc_transport.t
-  ; runtime_mcp_policy : Llm_provider.Llm_transport.runtime_mcp_policy option
   ; (* Session / checkpoint *)
     allowed_paths : string list
   ; checkpoint_sidecar : Yojson.Safe.t option
@@ -56,6 +54,8 @@ type try_provider_ctx =
   ; context_window_tokens : int option
   ; oas_auto_context_overflow_retry : bool
   ; checkpoint_dir : string option
+  ; checkpoint_sink : Agent_sdk.Agent.checkpoint_sink option
+  ; checkpoint_stage_observed : bool Atomic.t
   ; context_injector : Agent_sdk.Hooks.context_injector option
   ; context : Agent_sdk.Context.t option
   ; enable_thinking : bool option
@@ -126,46 +126,6 @@ let emit_runtime_manifest
     |> append
   | _ -> ()
 
-let sanitize_runtime_mcp_external_tool_choice
-      ~runtime_mcp_external_tools
-      (params : Agent_sdk.Hooks.turn_params)
-  =
-  if not runtime_mcp_external_tools then params
-  else
-    match params.tool_choice with
-    | Some (Agent_sdk.Types.Any | Agent_sdk.Types.Tool _) ->
-      { params with tool_choice = Some Agent_sdk.Types.Auto }
-    | Some (Agent_sdk.Types.Auto | Agent_sdk.Types.None_) | None -> params
-
-let sanitize_runtime_mcp_external_tool_decision
-      ~runtime_mcp_external_tools
-      (decision : Agent_sdk.Hooks.hook_decision)
-  =
-  match decision with
-  | Agent_sdk.Hooks.AdjustParams params ->
-    Agent_sdk.Hooks.AdjustParams
-      (sanitize_runtime_mcp_external_tool_choice
-         ~runtime_mcp_external_tools
-         params)
-  | _ -> decision
-
-let wrap_runtime_mcp_external_tool_hooks
-      ~runtime_mcp_external_tools
-      (hooks : Agent_sdk.Hooks.hooks option)
-  =
-  match hooks, runtime_mcp_external_tools with
-  | None, _ | Some _, false -> hooks
-  | Some hooks, true ->
-    let before_turn_params =
-      Option.map
-        (fun hook event ->
-           hook event
-           |> sanitize_runtime_mcp_external_tool_decision
-                ~runtime_mcp_external_tools:true)
-        hooks.before_turn_params
-    in
-    Some { hooks with before_turn_params }
-
 let max_execution_time_for_attempt ?per_provider_timeout_s () =
   (* Never forward per-provider timeouts to OAS [max_execution_time_s].
      That field is a cumulative wall-clock kill switch for one Agent.run /
@@ -190,132 +150,9 @@ let body_timeout_for_attempt ?per_provider_timeout_s () =
   | Some _ as s -> s
   | None -> max_execution_time_for_attempt ?per_provider_timeout_s ()
 
-type last_tool_progress_context =
-  { tool_name : string
-  ; tool_effect : Keeper_internal_error.tool_progress_effect
-  ; any_mutating_tool : bool
-  ; tool_effects_seen : Keeper_internal_error.tool_progress_effect list
-  }
-
-let last_tool_effect_to_string = Keeper_internal_error.tool_progress_effect_to_string
-
-let classify_tool_effect ~tool_name ~input =
-  if Keeper_tool_registry.is_strictly_read_only_with_input ~tool_name ~input
-  then Keeper_internal_error.Tool_effect_read_only
-  else Keeper_internal_error.Tool_effect_mutating
-;;
-
-let dedupe_tool_effects effects =
-  effects
-  |> List.fold_left
-       (fun acc tool_effect ->
-          if List.mem tool_effect acc then acc else tool_effect :: acc)
-       []
-  |> List.rev
-;;
-
-let tool_uses_of_messages (messages : Agent_sdk.Types.message list) =
-  let tool_uses_in_message (msg : Agent_sdk.Types.message) acc =
-    if msg.role <> Agent_sdk.Types.Assistant
-    then acc
-    else
-      List.fold_left
-        (fun acc block ->
-          match Agent_sdk.Canonical_tool.tool_call_of_block block with
-          | Some call ->
-              (call.Agent_sdk.Canonical_tool.name, call.Agent_sdk.Canonical_tool.input)
-              :: acc
-          | None -> acc)
-        acc
-        msg.content
-  in
-  List.fold_left (fun acc msg -> tool_uses_in_message msg acc) [] messages
-  |> List.rev
-;;
-
-let last_tool_progress_context_of_messages messages =
-  match tool_uses_of_messages messages with
-  | [] -> None
-  | tool_uses ->
-    let tool_effects =
-      List.map
-        (fun (tool_name, input) -> classify_tool_effect ~tool_name ~input)
-        tool_uses
-    in
-    let last_tool_name, last_input =
-      match List.rev tool_uses with
-      | (tool_name, input) :: _ -> tool_name, input
-      | [] -> "unknown", `Assoc []
-    in
-    let tool_name = last_tool_name in
-    let tool_name = String.trim tool_name in
-    let tool_name = if tool_name = "" then "unknown" else tool_name in
-    let tool_effect = classify_tool_effect ~tool_name ~input:last_input in
-    let any_mutating_tool =
-      List.exists
-        (function
-          | Keeper_internal_error.Tool_effect_mutating -> true
-          | Keeper_internal_error.Tool_effect_read_only -> false)
-        tool_effects
-    in
-    Some
-      {
-        tool_name;
-        tool_effect;
-        any_mutating_tool;
-        tool_effects_seen = dedupe_tool_effects tool_effects;
-      }
-;;
-
-let accept_rejection_context_of_run_result
-      ?(initial_messages = [])
-      (run_result : Runtime_agent.run_result)
-  =
-  match run_result.checkpoint with
-  | None -> None
-  | Some checkpoint ->
-    let messages = checkpoint.Agent_sdk.Checkpoint.messages in
-    let attempt_messages =
-      match Keeper_replay_prefix.split ~prefix:initial_messages messages with
-      | Ok suffix -> suffix
-      | Error _prefix_mismatch ->
-        (* A rejected provider may return a resumed checkpoint whose carrier
-           does not share this attempt's initial prefix.  Preserve the complete
-           typed trace for rejection diagnostics; never drop by list length. *)
-        messages
-    in
-    last_tool_progress_context_of_messages attempt_messages
-;;
-
-let format_last_tool_progress_context = function
-  | None -> None
-  | Some { tool_name; tool_effect; any_mutating_tool; tool_effects_seen } ->
-    let effects_seen =
-      tool_effects_seen
-      |> List.map last_tool_effect_to_string
-      |> String.concat ","
-    in
-    Some
-      (Printf.sprintf
-         "last_tool=%s; last_tool_effect=%s; any_mutating_tool=%b; \
-          tool_effects_seen=%s"
-         tool_name
-         (last_tool_effect_to_string tool_effect)
-         any_mutating_tool
-         effects_seen)
-;;
-
-let accept_rejected_error ~last_tool_context ~runtime_id
-    ~(response : Agent_sdk_response.api_response) =
+let accept_rejected_error ~runtime_id ~(response : Agent_sdk_response.api_response) =
   let rejection =
     Keeper_tool_response.accept_rejection_of_response ~runtime_id response
-  in
-  let progress_context = format_last_tool_progress_context last_tool_context in
-  let rejection =
-    match progress_context with
-    | Some context when String.trim context <> "" ->
-      { rejection with reason = rejection.reason ^ "; " ^ context }
-    | Some _ | None -> rejection
   in
   let reason_kind =
     match rejection.kind with
@@ -341,23 +178,10 @@ let accept_rejected_error ~last_tool_context ~runtime_id
             classifier can tell a [MaxTokens] truncation from a clean [EndTurn]
             no-progress terminal. *)
          stop_reason = Some response.stop_reason;
-         last_tool_effect =
-           Option.map
-             (fun context -> context.tool_effect)
-             last_tool_context;
-         any_mutating_tool =
-           Option.map
-             (fun context -> context.any_mutating_tool)
-             last_tool_context;
-         tool_effects_seen =
-           (match last_tool_context with
-            | Some context -> context.tool_effects_seen
-            | None -> []);
          reason = rejection.reason;
        })
 
 let apply_accept
-      ?(initial_messages = [])
       ~runtime_id
       ~accept
       (run_result : Runtime_agent.run_result)
@@ -372,17 +196,12 @@ let apply_accept
     Ok run_result
   | Runtime_agent.Completed
   | Runtime_agent.TurnBudgetExhausted _
-  | Runtime_agent.MutationBoundaryReached _
   | Runtime_agent.Yielded_to_chat_waiting _
   | Runtime_agent.Yielded_to_durable_stimulus _ ->
     if accept run_result.response then Ok run_result
     else
-      let last_tool_context =
-        accept_rejection_context_of_run_result ~initial_messages run_result
-      in
       Error
         (accept_rejected_error
-           ~last_tool_context
            ~runtime_id
            ~response:run_result.response)
 
@@ -393,7 +212,6 @@ let apply_accept
     makes all captured dependencies explicit.
 
     @param ctx Explicit closure context (captures from [run_named]).
-    @param resume_checkpoint Checkpoint from a previous failed provider.
     @param per_provider_timeout_s Legacy per-provider budget used for manifest
     diagnostics only. It is not applied as a cumulative timeout around
     [Runtime_agent.run] because that run may include active tool execution.
@@ -401,9 +219,14 @@ let apply_accept
     @return [(result, checkpoint_after, liveness_success_sample)] tuple. The
     sample is not recorded here; the caller records it only after the runtime
     accept predicate accepts the response. *)
+let observe_checkpoint_stage observed (_ : Agent_sdk.Agent.checkpoint_stage) =
+  Atomic.set observed true
+;;
+
+let same_run_retry_allowed observed = not (Atomic.get observed)
+
 let run_try_provider
       (ctx : try_provider_ctx)
-      ?resume_checkpoint
       ?per_provider_timeout_s
       ?enable_thinking_override
       candidate
@@ -412,52 +235,28 @@ let run_try_provider
      different thinking policy without mutating [ctx]. RFC-0271 §4.1 uses it for the
      [Retry_no_thinking] recovery arm: a [Thinking_only_no_progress] rejection is
      retried once with thinking forced off before rerouting to the next candidate. *)
+  let resolved_lane =
+    match ctx.tools with
+    | [] -> "none"
+    | _ :: _ -> "inline"
+  in
+  emit_runtime_manifest ctx
+    ~status:"resolved"
+    ~decision:(`Assoc [ "resolved_lane", `String resolved_lane ])
+    Keeper_runtime_manifest.Provider_lane_resolved;
+  let checkpoint_sink (snapshot : Agent_sdk.Agent.checkpoint_snapshot) =
+    observe_checkpoint_stage ctx.checkpoint_stage_observed snapshot.stage;
+    match ctx.checkpoint_sink with
+    | Some sink -> sink snapshot
+    | None -> Ok ()
+  in
   let config_result =
-    match
-      Runtime_candidate.resolve_tool_lane_for_oas_tools
-        ~base_path:ctx.base_path
-        ?agent_name:(Runtime_oas_runner.keeper_agent_name_opt ctx.keeper_name)
-        ~tools:ctx.tools
-        candidate
-    with
-    | Error _ as err -> err
-    | Ok (effective_tools, runtime_mcp_policy) ->
-      let runtime_mcp_policy =
-        match runtime_mcp_policy, String.trim ctx.keeper_name with
-        | Some policy, keeper_name when keeper_name <> "" ->
-          Runtime_candidate.runtime_mcp_policy_for_agent
-            ~base_path:ctx.base_path
-            ~agent_name:(Keeper_identity.keeper_agent_name ctx.keeper_name)
-            candidate
-            (Some policy)
-        | _ -> runtime_mcp_policy
-      in
-      let resolved_lane =
-        Keeper_turn_driver_helpers.resolved_tool_lane_label ~effective_tools
-          ~runtime_mcp_policy
-      in
-      let runtime_mcp_external_tools =
-        effective_tools = [] && Option.is_some runtime_mcp_policy
-      in
-      let hooks =
-        wrap_runtime_mcp_external_tool_hooks
-          ~runtime_mcp_external_tools
-          ctx.hooks
-      in
-      emit_runtime_manifest ctx
-        ~status:"resolved"
-        ~decision:
-          (`Assoc
-            [
-              ("resolved_lane", `String resolved_lane);
-            ])
-        Keeper_runtime_manifest.Provider_lane_resolved;
-      Ok
-        { (Runtime_candidate.default_config
-             ~name:ctx.name
-             ~system_prompt:ctx.system_prompt
-             ~tools:effective_tools
-             candidate)
+    Ok
+      { (Runtime_candidate.default_config
+           ~name:ctx.name
+           ~system_prompt:ctx.system_prompt
+           ~tools:ctx.tools
+           candidate)
             with
             priority = ctx.priority
           ; max_tokens = ctx.max_tokens
@@ -475,8 +274,8 @@ let run_try_provider
           ; temperature = ctx.temperature
           ; max_turns = ctx.max_turns
           ; max_idle_turns = ctx.max_idle_turns
-          ; guardrails = ctx.guardrails
-          ; hooks
+          ; guardrails = Some Agent_sdk.Guardrails.permissive
+          ; hooks = ctx.hooks
           ; context_reducer = ctx.context_reducer
           ; description =
               Some (Printf.sprintf "runtime:%s/runtime" ctx.runtime_id)
@@ -489,6 +288,7 @@ let run_try_provider
           ; context_window_tokens = ctx.context_window_tokens
           ; oas_auto_context_overflow_retry = ctx.oas_auto_context_overflow_retry
           ; checkpoint_dir = ctx.checkpoint_dir
+          ; checkpoint_sink = Some checkpoint_sink
           ; context_injector = ctx.context_injector
           ; context = ctx.context
           ; enable_thinking =
@@ -506,7 +306,7 @@ let run_try_provider
           ; trace_link = ctx.trace_link
           ; yield_on_tool = ctx.yield_on_tool
           ; tool_failure_judge = ctx.tool_failure_judge
-          ; runtime_mcp_policy
+          ; runtime_mcp_policy = None
           }
   in
   let local_agent_ref : Agent_sdk.Agent.t option ref = ref None in
@@ -524,11 +324,6 @@ let run_try_provider
     in
     let result =
       Eio.Switch.run (fun attempt_sw ->
-        let effective_checkpoint =
-          match resume_checkpoint with
-          | Some _ -> resume_checkpoint
-          | None -> ctx.oas_checkpoint
-        in
         let run_fn () =
           Eio_guard.check_if_ready ();
           match ctx.goal_blocks with
@@ -537,7 +332,7 @@ let run_try_provider
                 ~sw:attempt_sw
                 ~net:ctx.net
                 ~config
-                ?oas_checkpoint:effective_checkpoint
+                ?oas_checkpoint:ctx.oas_checkpoint
                 ?on_event:ctx.on_event
                 ?on_yield:ctx.on_yield
                 ?on_resume:ctx.on_resume
@@ -549,7 +344,7 @@ let run_try_provider
                 ~sw:attempt_sw
                 ~net:ctx.net
                 ~config
-                ?oas_checkpoint:effective_checkpoint
+                ?oas_checkpoint:ctx.oas_checkpoint
                 ?on_event:ctx.on_event
                 ?on_yield:ctx.on_yield
                 ?on_resume:ctx.on_resume
@@ -566,21 +361,9 @@ let run_try_provider
         run_fn ())
     in
     let result =
-      (* Restore typed provider-context enrichment (auth-env / not-found hints).
-         [Runtime_candidate] lives below [lib/keeper] and cannot reach this
-         keeper-level helper, so the enrichment is applied here at the consumer
-         with the candidate's provider config. *)
-      Result.map_error
-        (Keeper_runtime_attempt.enrich_sdk_error
-           ~runtime_id:ctx.error_runtime_id
-           ~provider_cfg:(Runtime_candidate.provider_cfg candidate))
-        result
-    in
-    let result =
       match result with
       | Ok run_result ->
         apply_accept
-          ~initial_messages:ctx.initial_messages
           ~runtime_id:ctx.error_runtime_id
           ~accept:ctx.accept
           run_result
@@ -613,9 +396,5 @@ let run_try_provider
 module For_testing = struct
   let max_execution_time_for_attempt = max_execution_time_for_attempt
   let stream_idle_timeout_for_attempt = stream_idle_timeout_for_attempt
-  let sanitize_runtime_mcp_external_tool_choice =
-    sanitize_runtime_mcp_external_tool_choice
   let apply_accept = apply_accept
-  let last_tool_progress_context_of_messages = last_tool_progress_context_of_messages
-  let format_last_tool_progress_context = format_last_tool_progress_context
 end

@@ -317,38 +317,13 @@ let dead_tombstone_meta (meta : Keeper_meta_contract.keeper_meta) =
     current_task_id = None
   ; paused = true
   ; latched_reason = Some Keeper_latched_reason.Dead_tombstone
-  ; auto_resume_after_sec = None
   ; updated_at = Masc_domain.now_iso ()
   ; runtime = { meta.runtime with last_blocker = None }
   }
 ;;
 
-let stale_paused_state_matches context (meta : Keeper_meta_contract.keeper_meta) =
-  meta.paused
-  && String.equal meta.updated_at context.last_updated
-  && Option.equal
-       Keeper_latched_reason.equal
-       meta.latched_reason
-       context.latched_reason
-;;
-
 let read_operation_meta ~config operation =
   match operation.cleanup_intent.reason with
-  | Stale_paused_prune context ->
-    (match
-       Keeper_meta_store.read_meta_if_exact_identity
-         config
-         ~name:operation.keeper_name
-         ~trace_id:operation.trace_id
-         ~generation:operation.generation
-         ~meta_version:context.meta_version
-     with
-     | Error error ->
-       Error (Keeper_meta_store.exact_identity_error_to_string error)
-     | Ok meta when stale_paused_state_matches context meta -> Ok meta
-     | Ok _ ->
-       Error
-         "stale paused Keeper metadata state changed while lifecycle cleanup owned admission")
   | Dashboard_keeper_purge context ->
     (match
        Keeper_meta_store.read_meta_if_exact_identity
@@ -417,25 +392,12 @@ let validate_registry_owner_exact ~config operation =
            (Keeper_lane.id registry_entry.Keeper_registry.lane)
            lane_id)
     then Error "Keeper registry lane changed before cleanup"
-    else
-      (match operation.cleanup_intent.reason, registry_entry.phase with
-       | Stale_paused_prune _, Keeper_state_machine.Paused -> Ok ()
-       | Stale_paused_prune _, phase ->
-         Error
-           (Printf.sprintf
-              "stale paused Keeper lane changed phase before cleanup: expected paused, actual %s"
-              (Keeper_state_machine.phase_to_string phase))
-       | ( Operator_stop_retain_meta
-         | Operator_stop_remove_meta
-         | Dead_tombstone_cleanup
-         | Dashboard_keeper_purge _ )
-         , _ -> Ok ())
+    else Ok ()
 ;;
 
 let prepare_cleanup ~config ~entry operation settled_task_ids =
   let meta_prepare_result =
     match operation.cleanup_intent.reason with
-    | Stale_paused_prune _
     | Dashboard_keeper_purge _ ->
       (match read_operation_meta ~config operation with
        | Error _ as error -> error
@@ -528,23 +490,6 @@ let remove_tree path =
 
 let remove_meta_file ~config operation =
   match operation.cleanup_intent.reason with
-  | Stale_paused_prune context ->
-    (match
-       Keeper_meta_store.remove_meta_if_exact_identity
-         config
-         ~name:operation.keeper_name
-         ~trace_id:operation.trace_id
-         ~generation:operation.generation
-         ~meta_version:context.meta_version
-     with
-     | Ok () -> Ok ()
-     | Error Keeper_meta_store.Exact_identity_missing ->
-       Log.Keeper.warn
-         "%s: exact stale-paused metadata already absent during cleanup replay"
-         operation.keeper_name;
-       Ok ()
-     | Error error ->
-       Error (Keeper_meta_store.exact_identity_error_to_string error))
   | Dashboard_keeper_purge context ->
     (match
        Keeper_meta_store.remove_meta_if_exact_identity

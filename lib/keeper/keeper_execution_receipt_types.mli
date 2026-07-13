@@ -22,7 +22,6 @@ type tool_surface = {
 type runtime_rotation_outcome =
     Rotation_setup_failed
   | Rotation_retry_scheduled
-  | Rotation_slot_phase_exhausted
 val runtime_rotation_outcome_to_string : runtime_rotation_outcome -> string
 type runtime_outcome =
     Runtime_passed_to_next_model
@@ -32,26 +31,13 @@ type runtime_outcome =
   | Runtime_not_dispatched
 val runtime_outcome_to_string : runtime_outcome -> string
 type completion_contract_result =
-    Contract_unknown
-  | Contract_not_dispatched
-  | Contract_violated
-  | Contract_surface_mismatch
-  | Contract_no_capable_provider
-  | Contract_claim_only_after_owned_task
-  | Contract_needs_execution_progress
-  | Contract_passive_only
-  | Contract_satisfied_completion
-  | Contract_satisfied_execution
+    Completion_observation_unknown
+  | Completion_not_dispatched
+  | Completion_no_visible_output
+  | Completion_response_observed
+  | Completion_tool_execution_observed
 val completion_contract_result_to_string : completion_contract_result -> string
 val completion_contract_result_of_string : string -> completion_contract_result option
-val completion_contract_result_requires_attention : completion_contract_result -> bool
-val encode_tool_list : string list -> string
-val encode_contract_violation_reason :
-  called_tools:string list ->
-  satisfying_tools:string list -> string -> string
-val decode_tool_list : string -> string list option
-val decode_contract_violation_reason :
-  string -> (string * string list * string list) option
 type runtime_rotation_attempt = {
   from_runtime : string;
   to_runtime : string;
@@ -80,11 +66,8 @@ type t = {
   model_used : string option;
   completion_contract_result : completion_contract_result;
   actionable_signal : Keeper_contract_classifier.actionable_signal option;
-    (** Root B (#22710): world-observation actionable signal captured at turn
-        time, consumed by [operator_disposition]. Replaces the [goal_ids = []]
-        proxy in [passive_only_without_work_scope]. [None] when no world
-        observation was threaded (disposition falls back to broadcast-required;
-        conservative, never silently suppressed). *)
+    (** World-observation signal captured at turn time. It is independent of
+        completion evidence and does not authorize or block the turn. *)
   tool_surface : tool_surface;
   sandbox_kind : Keeper_types_profile_sandbox.sandbox_profile;
   sandbox_root : string option;
@@ -121,7 +104,6 @@ val stop_reason_to_string : Runtime_agent.stop_reason -> string
     does not classify the independent completion-contract axis; the typed
     operator disposition is the final receipt verdict. *)
 val receipt_terminal_reason_code_of_stop_reason : Runtime_agent.stop_reason -> string
-val enrich_contract_violation_reason : t -> string
 val sandbox_kind_of_meta :
   Keeper_meta_contract.keeper_meta -> Keeper_types_profile_sandbox.sandbox_profile
 val list_json : 'a list -> [> `List of [> `String of 'a ] list ]

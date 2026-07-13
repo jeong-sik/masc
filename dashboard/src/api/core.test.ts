@@ -358,7 +358,7 @@ describe('get bootstrap warm-up mapping', () => {
 
   it('surfaces JSON error messages from failed GET responses', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response('{"error":"computation_timeout","message":"Dashboard governance timed out after 30s"}', {
+      new Response('{"error":"computation_timeout","message":"Dashboard Gate timed out after 30s"}', {
         status: 504,
         statusText: 'Gateway Timeout',
         headers: { 'Content-Type': 'application/json' },
@@ -366,12 +366,12 @@ describe('get bootstrap warm-up mapping', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(get('/api/v1/dashboard/governance')).rejects.toMatchObject({
+    await expect(get('/api/v1/dashboard/gate')).rejects.toMatchObject({
       name: 'ApiRequestError',
       status: 504,
-      detail: 'Dashboard governance timed out after 30s',
+      detail: 'Dashboard Gate timed out after 30s',
       errorCode: 'computation_timeout',
-      message: 'GET /api/v1/dashboard/governance: Dashboard governance timed out after 30s',
+      message: 'GET /api/v1/dashboard/gate: Dashboard Gate timed out after 30s',
     })
   })
 
@@ -520,11 +520,11 @@ describe('get bootstrap warm-up mapping', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(get('/api/v1/dashboard/governance')).rejects.toMatchObject({
+    await expect(get('/api/v1/dashboard/gate')).rejects.toMatchObject({
       name: 'ApiRequestError',
       status: 200,
       detail: 'invalid JSON response',
-      message: 'GET /api/v1/dashboard/governance: invalid JSON response',
+      message: 'GET /api/v1/dashboard/gate: invalid JSON response',
     })
   })
 })
@@ -550,10 +550,10 @@ describe('extractApiError', () => {
   it('stores structured error codes on ApiRequestError', () => {
     const err = new ApiRequestError({
       method: 'GET',
-      path: '/api/v1/dashboard/governance',
+      path: '/api/v1/dashboard/gate',
       status: 504,
       statusText: 'Gateway Timeout',
-      detail: 'Dashboard governance timed out after 30s',
+      detail: 'Dashboard Gate timed out after 30s',
       errorCode: 'computation_timeout',
     })
     expect(err.errorCode).toBe('computation_timeout')

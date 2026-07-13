@@ -25,10 +25,7 @@ let check_invariant label (t : T.t) =
    [normalize_code] producer-side preprocessor. *)
 let constructor_cases : (string * T.t) list =
   [ "success", T.success ()
-  ; "of_code/explicit", T.of_code "post_commit_ambiguous"
   ; "of_code/runtime_stop_not_final/completed", T.of_code "completed"
-  ; ( "of_code/sdk_error/contract_violation"
-    , T.of_code "completion_contract_violation:completion_contract" )
   ; "of_code/sdk_error/api_error_timeout", T.of_code "api_error_timeout"
   ; "of_code/sdk_error/api_error_overloaded", T.of_code "api_error_overloaded"
   ; ( "of_code/sdk_error/agent_error_max_turns"
@@ -36,22 +33,12 @@ let constructor_cases : (string * T.t) list =
   ; "of_code/unknown", T.of_code "totally_unmapped"
   ; "of_code/empty", T.of_code ""
   ; "of_code/turn_wall_clock", T.of_code "turn_wall_clock_timeout"
-  ; "of_code/turn_overflow_pause", T.of_code "turn_overflow_pause"
-  ; "of_code/turn_livelock_pause", T.of_code "turn_livelock_pause"
-  ; "of_code/completion_contract", T.of_code "completion_contract_no_progress"
+  ; "of_code/turn_overflow_failure", T.of_code "turn_overflow_failure"
   ]
 ;;
 
 let test_invariant () =
   List.iter (fun (label, t) -> check_invariant label t) constructor_cases
-;;
-
-let test_of_failure_post_commit_ambiguous () =
-  (* of_failure with post_commit_ambiguous=true short-circuits to a
-     specific code regardless of the SDK error. *)
-  let err = Agent_sdk.Error.Internal "x" in
-  let t = T.of_failure ~post_commit_ambiguous:true ~raw_error:"" err in
-  check_invariant "of_failure/post_commit_ambiguous" t
 ;;
 
 let test_to_json_keeps_code_field () =
@@ -93,10 +80,6 @@ let () =
             "every public constructor preserves invariant"
             `Quick
             test_invariant
-        ; Alcotest.test_case
-            "of_failure/post_commit_ambiguous preserves invariant"
-            `Quick
-            test_of_failure_post_commit_ambiguous
         ] )
     ; ( "wire stability"
       , [ Alcotest.test_case

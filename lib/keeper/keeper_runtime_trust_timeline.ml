@@ -12,17 +12,17 @@ let json_string_opt_value = function
 
 let json_bool_opt_member key json = Json_util.get_bool json key
 
+let assoc_bool_default key ~default fields =
+  match List.assoc_opt key fields with
+  | Some (`Bool value) -> value
+  | _ -> default
+
 let json_list_member key json =
   match json_member key json with
   | `List items -> items
   | _ -> []
 
 let json_string_list_member = Json_util.json_string_list_member
-
-let assoc_bool_default key ~default fields =
-  match List.assoc_opt key fields with
-  | Some (`Bool value) -> value
-  | _ -> default
 
 let assoc_string_opt key fields =
   match List.assoc_opt key fields with
@@ -86,26 +86,12 @@ let severity_of_approval_event event decision =
   match event with
   | "pending" -> "warn"
   | "expired" | "approval_timeout" | "cancelled" -> "bad"
-  | event when String.equal event Keeper_approval_queue.approval_audit_hard_forbidden_event ->
-    "bad"
   | "resolved" -> (
       match decision with
       | Some raw when String_util.contains_substring_ci raw "reject" -> "bad"
       | _ -> "ok")
   | "auto_approved_rule_match" | "auto_approved_always" | "rule_created" -> "ok"
   | _ -> "warn"
-
-let severity_of_transition_type event_type =
-  if String_util.contains_substring_ci event_type "failed"
-     || String_util.contains_substring_ci event_type "exhausted"
-  then "bad"
-  else if
-    String_util.contains_substring_ci event_type "pause"
-    || String_util.contains_substring_ci event_type "stop"
-    || String_util.contains_substring_ci event_type "handoff"
-    || String_util.contains_substring_ci event_type "compaction"
-  then "warn"
-  else "ok"
 
 let tool_call_timeline_event json =
   match json_float_opt_member "ts" json, json_string_opt_member "tool" json with
@@ -148,17 +134,16 @@ let live_pending_approval_timeline_event json =
         json_string_opt_member "id" json |> Option.value ~default:"unknown"
       in
       let task_id = json_string_opt_member "task_id" json in
-      let blocker_class = "approval_pending" in
       let summary =
         Printf.sprintf
-          "approval_required · id=%s · blocker=%s · waiting for operator"
-          approval_id blocker_class
+          "operator decision requested · id=%s · Keeper lane remains available"
+          approval_id
       in
       Some
         (timeline_event_json
            ?task_id
            ~ts_unix ~kind:"approval_pending_live"
-           ~title:(Printf.sprintf "Approval Pending · %s" tool_name)
+           ~title:(Printf.sprintf "Operator Decision Pending · %s" tool_name)
            ~summary
            ~severity:"warn"
            ~observation_only:true
@@ -218,19 +203,14 @@ let approval_event_timeline_event json =
               approval_summary summary,
               Some "retry_or_rerun" )
         | "auto_approved_rule_match" ->
-            let matched_by =
-              json |> json_member "rule_match"
-              |> json_string_opt_member "matched_by"
-              |> Option.value ~default:"always_rule"
-            in
             ( "approval_rule_match",
               Printf.sprintf "Approval Rule · %s" tool_name,
-              approval_summary (Printf.sprintf "auto-approved by %s" matched_by),
+              approval_summary "allowed by an exact Always Allowed rule",
               None )
         | "auto_approved_always" ->
             ( "approval_always_flag",
               Printf.sprintf "Approval Always · %s" tool_name,
-              approval_summary "auto-approved by keeper always_approve flag",
+              approval_summary "allowed by keeper always_allow flag",
               None )
         | "rule_created" ->
             ( "approval_rule_created",
@@ -280,19 +260,6 @@ let transition_timeline_event json =
   match json_float_opt_member "wall_clock_at_decision" json with
   | None -> None
   | Some ts_unix ->
-      let operator_signal =
-        match json |> json_member "operator_signal" with
-        | `Assoc fields -> Some fields
-        | _ -> None
-      in
-      let signal_string key =
-        Option.bind operator_signal (assoc_string_opt key)
-      in
-      let signal_bool key =
-        Option.map
-          (fun fields -> assoc_bool_default key ~default:false fields)
-          operator_signal
-      in
       let prev_phase =
         json |> json_member "prev_phase"
         |> json_string_opt_value
@@ -312,29 +279,22 @@ let transition_timeline_event json =
       in
       let prev_phase = Option.value ~default:"unknown" prev_phase in
       let new_phase = Option.value ~default:"unknown" new_phase in
-      let signal_summary = signal_string "summary" in
-      let next_human_action =
-        match signal_bool "requires_operator_decision" with
-        | Some true -> signal_string "next_human_action"
-        | _ -> None
+      let transition_outcome =
+        json_string_opt_member "transition_outcome" json
+        |> Option.value ~default:"unknown"
       in
       let summary =
-        match signal_summary with
-        | Some signal when String.trim signal <> "" ->
-            Printf.sprintf "%s -> %s via %s · %s"
-              prev_phase new_phase event_type signal
-        | _ ->
-            Printf.sprintf "%s -> %s via %s"
-              prev_phase new_phase event_type
-      in
-      let severity =
-        signal_string "severity"
-        |> Option.value ~default:(severity_of_transition_type event_type)
+        Printf.sprintf
+          "%s -> %s via %s; outcome=%s"
+          prev_phase
+          new_phase
+          event_type
+          transition_outcome
       in
       Some
-        (timeline_event_json ?next_human_action ~ts_unix ~kind:"transition"
+        (timeline_event_json ~ts_unix ~kind:"transition"
            ~title:(Printf.sprintf "Transition · %s" event_type)
-           ~summary ~severity ())
+           ~summary ~severity:"info" ())
 
 let receipt_timeline_event receipt =
   match json_string_opt_member "ended_at" receipt with
@@ -367,9 +327,7 @@ let receipt_timeline_event receipt =
           match error_kind with
           | Some _ -> "bad"
           | None ->
-              if
-                String.equal completion_contract_result "violated"
-                || String.equal runtime_outcome "failed"
+              if String.equal runtime_outcome "failed"
               then "bad"
               else if
                 String.equal runtime_outcome "passed_to_next_model"
@@ -388,7 +346,7 @@ let receipt_timeline_event receipt =
              ~ts_unix ~kind:"execution_receipt"
              ~title:"Execution Receipt"
              ~summary:
-               (Printf.sprintf "%s · completion_contract=%s · runtime=%s"
+               (Printf.sprintf "%s · completion_observation=%s · runtime=%s"
                   outcome completion_contract_result runtime_outcome)
              ~severity ())
 
@@ -411,7 +369,7 @@ let blocker_timeline_event ?task_id ?(goal_ids = []) ?trace_id
            ~summary
            ~severity:
              (match blocker_class with
-              | "runtime_exhausted" | "completion_contract_violation" -> "bad"
+              | "runtime_exhausted" -> "bad"
               | _ -> "warn")
            ())
   | None, Some summary

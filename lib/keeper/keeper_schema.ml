@@ -12,12 +12,18 @@ module Sandbox_contract = Keeper_sandbox_control_contract
 
 let sandbox_stop_scope_enum_strings = Sandbox_contract.stop_scope_strings
 
-let bounded_number_schema (bounds : Sandbox_contract.bounded_float) description =
+let positive_number_schema description =
   `Assoc
     [ "type", `String "number"
-    ; "minimum", `Float bounds.minimum
-    ; "maximum", `Float bounds.maximum
-    ; "default", `Float bounds.default
+    ; "exclusiveMinimum", `Float 0.0
+    ; "description", `String description
+    ]
+;;
+
+let nonnegative_number_schema description =
+  `Assoc
+    [ "type", `String "number"
+    ; "minimum", `Float 0.0
     ; "description", `String description
     ]
 ;;
@@ -38,13 +44,6 @@ let string_array_schema =
     ("items", `Assoc [ ("type", `String "string") ]);
   ]
 
-let tool_access_schema description =
-  `Assoc [
-    ("type", `String "array");
-    ("description", `String description);
-    ("items", `Assoc [ ("type", `String "string") ]);
-  ]
-
 let keeper_schemas : tool_schema list = [
   {
     name = "masc_keeper_sandbox_start";
@@ -62,15 +61,12 @@ let keeper_schemas : tool_schema list = [
           ("description", `String "Optional sandbox network mode. Defaults to the keeper's configured network mode.");
         ]);
         ( "ttl_sec",
-          bounded_number_schema
-            Sandbox_contract.managed_ttl_sec
-            "Managed sandbox lifetime in seconds." );
+          nonnegative_number_schema
+            "Managed sandbox lifetime in seconds; omit or use 0 for no automatic expiry." );
         ( "timeout_sec",
-          bounded_number_schema
-            Sandbox_contract.operation_timeout_sec
-            "Sandbox start timeout in seconds." );
+          positive_number_schema "Explicit sandbox start timeout in seconds." );
       ]);
-      ("required", `List [`String "name"]);
+      ("required", `List [`String "name"; `String "timeout_sec"]);
       ("additionalProperties", `Bool false);
     ];
   };
@@ -94,15 +90,14 @@ let keeper_schemas : tool_schema list = [
           ("description", `String "Container scope to stop: managed, turn, or all (default: managed).");
         ]);
         ( "timeout_sec",
-          bounded_number_schema
-            Sandbox_contract.operation_timeout_sec
-            "Sandbox stop timeout in seconds." );
+          positive_number_schema "Explicit sandbox stop timeout in seconds." );
         ("prune_stale", `Assoc [
           ("type", `String "boolean");
           ("default", `Bool false);
           ("description", `String "Also remove stale managed sandbox containers after the targeted stop.");
         ]);
       ]);
+      ("required", `List [ `String "timeout_sec" ]);
       ("additionalProperties", `Bool false);
     ];
   };
@@ -158,13 +153,6 @@ let keeper_schemas : tool_schema list = [
         ("handoff_threshold", `Assoc [("type", `String "number")]);
         ("handoff_cooldown_sec", `Assoc [("type", `String "integer")]);
         ("allowed_paths", `Assoc [
-          ("type", `String "array");
-          ("items", `Assoc [("type", `String "string")]);
-        ]);
-        ("tool_access",
-          tool_access_schema
-            "Persisted tool candidate profiles for discovery. Does not alone grant execution; runtime applies descriptor availability, denylist, per-turn OAS policy, and eval gates.");
-        ("tool_denylist", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
         ]);
@@ -240,15 +228,7 @@ let keeper_schemas : tool_schema list = [
         ]);
         ("proactive_enabled", `Assoc [
           ("type", `String "boolean");
-          ("description", `String "If true, keeper can send proactive check-ins after idle periods. Defaults to false unless explicitly enabled.");
-        ]);
-        ("proactive_idle_sec", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "Idle seconds before proactive check-in is allowed (default: 900).");
-        ]);
-        ("proactive_cooldown_sec", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "Minimum seconds between proactive check-ins (default: 1800).");
+          ("description", `String "If true, scheduled keeper cycles may produce proactive responses.");
         ]);
         ("compaction_profile", `Assoc [
           ("type", `String "string");
@@ -286,14 +266,6 @@ let keeper_schemas : tool_schema list = [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
           ("description", `String "Restrict file writes to these path prefixes. Empty list means playground-only (.masc/playground/<name>/).");
-        ]);
-        ("tool_access",
-          tool_access_schema
-            "Persisted tool candidate profiles for discovery. Does not alone grant execution; runtime applies descriptor availability, denylist, per-turn OAS policy, and eval gates.");
-        ("tool_denylist", `Assoc [
-          ("type", `String "array");
-          ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Execution removal layer after candidate discovery. Excludes matching tools from runtime execution.");
         ]);
       ]);
       ("required", `List [`String "name"]);
@@ -380,10 +352,6 @@ let keeper_schemas : tool_schema list = [
         ("direct_reply", `Assoc [
           ("type", `String "boolean");
           ("description", `String "Optional: run the turn synchronously and return the reply directly instead of queueing");
-        ]);
-        ("no_skill_route", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "Optional: do not emit SKILL/SKILL_REASON headers in reply");
         ]);
         ("turn_instructions", `Assoc [
           ("type", `String "string");
@@ -538,22 +506,13 @@ Clears stale data from previous sessions. Does not affect configuration, goals, 
 
   {
     name = "masc_keeper_compact";
-    description = "Trigger operator-initiated context compaction for a keeper. \
-Compacts the keeper's checkpoint to reduce context size. \
-Default precondition: keeper phase is Overflowed, Paused, or Compacting. \
-Pass force=true to allow compaction on Running or Failing keepers. \
-Terminal/transient phases (Offline, Stopped, Dead, Crashed, Restarting, \
-HandingOff, Draining) are always rejected.";
+    description = "Trigger explicit context compaction for a non-terminal keeper checkpoint.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         ("name", `Assoc [
           ("type", `String "string");
           ("description", `String "Keeper handle");
-        ]);
-        ("force", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "Bypass default precondition to allow compaction on Running or Failing keepers. Has no effect on terminal/transient phases.");
         ]);
       ]);
       ("required", `List [`String "name"]);
@@ -566,7 +525,7 @@ HandingOff, Draining) are always rejected.";
 Wipes user/assistant/tool messages from the checkpoint; keeps the system prompt \
 by default (preserve_system_prompt=true). Set preserve_system_prompt=false to \
 drop the system prompt too. Dispatches Operator_clear_requested to the keeper \
-FSM, which resets context_overflow and compact_retry_exhausted. \
+FSM, which resets context_overflow. \
 Use only when compaction is insufficient and the keeper cannot recover otherwise. \
 Requires a reason for the audit trail.";
     input_schema = `Assoc [
@@ -594,7 +553,7 @@ Requires a reason for the audit trail.";
     description = "Create a new persona profile at MASC_PERSONAS_DIR/<name>/profile.json. \
 Persona profiles serve as templates for keeper creation via masc_keeper_create_from_persona. \
 Identity fields (display_name, role, trait) describe the persona; keeper-template fields \
-(goal, instructions, mention_targets, tool_denylist, proactive_enabled) become the defaults a \
+(goal, instructions, mention_targets, proactive_enabled) become the defaults a \
 keeper spawned from this persona inherits. Required fields: persona_name, display_name.";
     input_schema = `Assoc [
       ("type", `String "object");
@@ -612,10 +571,6 @@ keeper spawned from this persona inherits. Required fields: persona_name, displa
         ("goal", `Assoc [("type", `String "string")]);
         ("instructions", `Assoc [("type", `String "string")]);
         ("mention_targets", `Assoc [
-          ("type", `String "array");
-          ("items", `Assoc [("type", `String "string")]);
-        ]);
-        ("tool_denylist", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
         ]);
@@ -644,10 +599,6 @@ persona does not exist.";
         ("goal", `Assoc [("type", `String "string")]);
         ("instructions", `Assoc [("type", `String "string")]);
         ("mention_targets", `Assoc [
-          ("type", `String "array");
-          ("items", `Assoc [("type", `String "string")]);
-        ]);
-        ("tool_denylist", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
         ]);

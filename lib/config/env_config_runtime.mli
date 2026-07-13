@@ -148,50 +148,7 @@ end
 (** {1 Verification FSM} *)
 
 module Verification : sig
-  val fsm_enabled : unit -> bool
-  (** RFC-0323 G-5 Phase B default-on flip. Default: false. When true, the
-      done guard treats every task as verification-required. Flip only when
-      readiness gate S5 holds (identity>=2 anti-starvation). *)
-  val default_on : unit -> bool
   val timeout_deadline_seconds : unit -> float
-end
-
-(** {1 Approval janitor} *)
-
-module Approval_janitor : sig
-  val enabled : unit -> bool
-  val interval_seconds : float
-end
-
-(** {1 Keeper stale-run window (RFC-0250)} *)
-
-module Keeper_stale_run : sig
-  val threshold_sec_opt : unit -> float option
-  (** [threshold_sec_opt ()] returns the stale-run wall-clock threshold
-      when [MASC_KEEPER_STALE_RUN_SEC] is positive, or [None] when unset /
-      zero / negative.
-
-      Keys on [last_turn_ts] while [current_turn_observation = None],
-      producing [Idle_turn] — the no-turn-produced case. Default-on at
-      [1800.0] (30 min). *)
-end
-
-(** {1 Keeper mid-turn progress watchdog (RFC-0012)} *)
-
-module Keeper_mid_turn_progress : sig
-  val timeout_sec_opt : unit -> float option
-  (** [timeout_sec_opt ()] returns the in-turn progress-silence threshold
-      when [MASC_KEEPER_MID_TURN_PROGRESS_TIMEOUT_SEC] is positive, or [None]
-      when unset / zero / negative.
-
-      Distinct from [Keeper_stale_run] (no-turn, [Idle_turn]): keys on
-      [current_turn_observation.last_progress_at] while a turn is running,
-      producing [Mid_turn_no_progress] when no progress event has been recorded
-      for longer than the threshold.
-
-      Opt-in ([None] default): progress is stamped only on tool/sdk-boundary
-      events, so a default-on window could false-fire on a long single-attempt
-      thinking turn. RFC-0012 recommends [300.0] when enabling. *)
 end
 
 (** {1 Board persistence} *)
@@ -209,35 +166,18 @@ module Board : sig
   val backend_opt : unit -> backend option
 end
 
-(** {1 Procedural memory crystallization} *)
-
-module ProcMemory : sig
-  val min_evidence : int
-  val min_confidence : float
-end
-
-(** {1 Pulse} *)
-
-module Pulse_config : sig
-  val max_consumer_failures : int
-end
-
 (** {1 Tool surface} *)
 
 module Tools : sig
   (* RFC-0084 host-config-cleanup-J — [val dispatch_v2_enabled : bool]
      removed alongside the [MASC_DISPATCH_V2] feature flag. *)
-  val full_surface_enabled : unit -> bool
   val list_page_size : unit -> int
-  val readonly_retry_limit : int
   val public_tools_extra_opt : unit -> string option
   val web_search_provider_opt : unit -> string option
   val web_search_provider_order_opt : unit -> string option
   val web_search_fallbacks_opt : unit -> string option
   val web_search_timeout_sec : unit -> int
   val web_search_cache_ttl_sec : unit -> float
-  val web_search_rate_limit_window_sec : unit -> float
-  val web_search_rate_limit_max_calls : unit -> int
 end
 
 (** {1 Rate limit bucket} *)
@@ -256,7 +196,6 @@ end
 module Worker : sig
   val local_runtime_debug : bool
   val local_runtime_cooldown_sec_opt : unit -> string option
-  val local_worker_max_tokens : int
   val local_worker_heartbeat_sec : int
 end
 
@@ -264,14 +203,6 @@ end
 
 module Oas_sse : sig
   val drain_interval_sec : float
-end
-
-(** {1 Smart heartbeat tuning} *)
-
-module SmartHeartbeatTuning : sig
-  val base_interval_s : float
-  val idle_multiplier : float
-  val idle_threshold_s : float
 end
 
 (** {1 Dashboard signal thresholds + render budgets} *)
@@ -329,25 +260,4 @@ end
 
 module Workspace_file : sig
   val max_read_bytes : int
-end
-
-(** {1 Shell IR approval policy gate (RFC v5)} *)
-
-module Shell_ir_approval_gate : sig
-  val enabled : unit -> bool
-  (** [enabled ()] is true when [MASC_SHELL_IR_APPROVAL_GATE_ENABLED] is set.
-      Routes Execute tool calls through the capability-based approval policy
-      gate so safe commands can be auto-allowed while audited/privileged
-      operations require explicit approval. Default: [true] (the autonomous
-      policy is a strict safety improvement over the no-gate path). *)
-end
-
-(** {1 Shell IR approval policy config (RFC-0254)} *)
-
-module Shell_ir_approval : sig
-  val raw_overlay : unit -> string option
-  (** Single env spec for Shell IR approval trust overlay.
-      See {!Masc_exec.Approval_config.shell_ir_approval_overlay_of_string} for
-      supported values and validation semantics.
-      Returns [None] when unset/blank. *)
 end

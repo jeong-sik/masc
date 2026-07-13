@@ -16,18 +16,6 @@ open Workspace_identity
 
 (* activity_workspace_id removed — namespace retired (#unify-namespace). *)
 
-(* #9795: FSM drift observability. [masc_workspace] sits below the
-   [masc] library in the dep graph, so it cannot call
-   [Otel_metric_store.inc_counter] directly. The variant→label mapping
-   stays here (pattern-matches the sealed drift enum), and the
-   emit runs through a [Workspace_hooks] callback wired by
-   [lib/workspace.ml] at startup.  Exhaustive pattern-match forces
-   any new drift variant to be named alongside existing
-   dashboards. *)
-let drift_variant_label = function
-  | Workspace_task_lifecycle.Claimed_to_done_skip -> "claimed_to_done_skip"
-;;
-
 (* #10449: classify a task's contract surface so the completion-path
    metric can split bypass-rate by creation-side data presence.
    Three states: missing field, present-but-empty, populated. *)
@@ -38,28 +26,17 @@ let classify_contract_state (contract : Masc_domain.task_contract option) =
   | Some _ -> "with_contract"
 ;;
 
-(* #10449: classify which FSM path produced a [Done] new_status.
-   Approve_verification remains an explicit verification-submission path.
-   Normal contracted [Done_action] completions are LLM-reviewed in
-   [Tool_task] and then complete through the ordinary Done path. [forced_done]
-   only fires when [force=true] short-circuited the same-agent guard;
-   the lifecycle module emits the same drift variant for both forced
-   and consensual claimed→done jumps, so the [force] flag is the
-   only distinguisher. *)
-let classify_completion_path
-      ~(action : Masc_domain.task_action)
-      ~(drift : Workspace_task_lifecycle.drift option)
-      ~(force : bool)
-  =
+(* Completion path is descriptive telemetry only. Both paths require the same
+   configured-LLM verdict at the Workspace transition boundary. *)
+let classify_completion_path ~(action : Masc_domain.task_action) =
   match action with
   | Masc_domain.Approve_verification -> "via_verification"
-  | Masc_domain.Claim | Masc_domain.Start | Masc_domain.Done_action
+  | Masc_domain.Done_action -> "direct_llm_verdict"
+  | Masc_domain.Claim
+  | Masc_domain.Start
   | Masc_domain.Cancel | Masc_domain.Release
   | Masc_domain.Submit_for_verification | Masc_domain.Reject_verification ->
-    if force then "forced_done"
-    else (match drift with
-          | Some Workspace_task_lifecycle.Claimed_to_done_skip -> "claimed_to_done_skip"
-          | None -> "in_progress_to_done")
+    "not_completion"
 ;;
 
 let task_actor_kind agent_name =
@@ -200,16 +177,10 @@ let empty_task_contract =
 (* RFC-0311 Phase 1: the default verification contract declares no *specific*
    descriptive evidence entries. The prior default
    [ "completion_notes"; "reviewable_evidence_ref" ] could be satisfied only by
-   pasting those two literal tokens into the completion notes (the gate matched
-   them as substrings). That single mechanism simultaneously (a) over-blocked
-   keepers who did not know the tokens and (b) let any completion be faked by
-   pasting the labels. The completion gate ([Task_completion_gate]) no longer
-   reads these entries at all: it accepts a completion only when the caller
-   supplies at least one locally validated typed Evidence_ref (base-path file /
-   file URI, local git commit, or local .masc trace/turn/receipt artifact) on
-   handoff_context.evidence_refs — one flexible bar across code and non-code
-   tasks. [required_evidence] now serves only as human/LLM/verifier
-   description; typed-kind binding (a code task must cite a PR) is Phase 2. *)
+   pasting those two literal tokens into the completion notes. That mechanism
+   simultaneously over-blocked unaware keepers and let a completion be faked by
+   copying labels. [required_evidence] now serves only as a fact supplied to the
+   LLM reviewer and human verifier; the workspace FSM does not interpret it. *)
 let default_verification_evidence_refs = []
 
 let first_line text =
@@ -247,9 +218,7 @@ let ensure_task_contract_for_verification ?contract ~title ~description () =
   let required_evidence =
     if base.required_evidence <> []
     then base.required_evidence
-    (* A verify-only task can require verifier input without widening the
-       completion gate. Keep required_evidence empty in that case; the
-       verifier projection combines verify_gate_evidence separately. *)
+    (* A verify-only task can describe verifier input separately. *)
     else if base.verify_gate_evidence <> []
     then []
     else default_verification_evidence_refs
@@ -346,10 +315,8 @@ let task_assignee_of_status = Masc_domain.task_assignee_of_status
     Exhaustive [match] over [Masc_domain.task_status]: adding a 7th constructor
     will fail to compile. Each branch lists actions that
     [transition_task_r]'s match-arms accept for that status — keep this
-    in sync if you add new transitions there. Verifier-FSM transitions
-    require [MASC_VERIFICATION_FSM_ENABLED=true] but are listed
-    unconditionally so the hint stays accurate when the flag is on; the
-    flag-off case still rejects them and produces a more specific error. *)
+    in sync if you add new transitions there. Completion actions still require
+    a request-local configured-LLM verdict at execution time. *)
 let valid_next_actions_for_status
   : Masc_domain.task_status -> Masc_domain.task_action list
   = function
@@ -400,7 +367,7 @@ let task_transition_details
       ?notes
       ?reason
       ?duration_ms
-      ?(forced = false)
+      ?configured_llm_verdict
       ()
   =
   let optional_field name = function
@@ -410,11 +377,13 @@ let task_transition_details
   `Assoc
     ([ "from_status", `String (task_status_to_string from_status)
      ; "to_status", `String (task_status_to_string to_status)
-     ; "forced", `Bool forced
      ]
      @ optional_field "notes" (Option.map (fun value -> `String value) notes)
      @ optional_field "reason" (Option.map (fun value -> `String value) reason)
-     @ optional_field "duration_ms" (Option.map (fun value -> `Int value) duration_ms))
+     @ optional_field "duration_ms" (Option.map (fun value -> `Int value) duration_ms)
+     @ optional_field
+         "configured_llm_verdict"
+         (Option.map Masc_domain.configured_llm_completion_verdict_to_yojson configured_llm_verdict))
 ;;
 
 let observe_task_transition
@@ -461,8 +430,7 @@ let transition_log_event
       ?reason
       ?duration_ms
       ?handoff_context
-      ?(forced = false)
-      ?(authority = Assignee)
+      ?configured_llm_verdict
       ?assignee
       ?(now = now_iso ())
       ()
@@ -479,12 +447,6 @@ let transition_log_event
      ; "task", `String task_id
      ; "from_status", `String (task_status_to_string from_status)
      ; "to_status", `String (task_status_to_string to_status)
-     ; "forced", `Bool forced
-       (* RFC-0262 §9: the typed authority the FSM granted this transition.
-          [forced] is now the derived projection ([authority <> Assignee]); the
-          §9 auditor (Completion_trust_audit) keys off [authority] to tell an
-          Operator override from a System code-path satisfier. *)
-     ; "authority", `String (completion_authority_to_string authority)
      ; "ts", `String now
      ]
      (* RFC-0262 §9: the task's owner *before* this transition (the [from_status]
@@ -497,6 +459,9 @@ let transition_log_event
      @ optional_field "notes" (Option.map (fun v -> `String v) notes)
      @ optional_field "reason" (Option.map (fun v -> `String v) reason)
      @ optional_field "duration_ms" (Option.map (fun v -> `Int v) duration_ms)
+     @ optional_field
+         "configured_llm_verdict"
+         (Option.map Masc_domain.configured_llm_completion_verdict_to_yojson configured_llm_verdict)
      @ optional_field
          "handoff_context"
          (Option.map Masc_domain.task_handoff_context_to_yojson handoff_context))

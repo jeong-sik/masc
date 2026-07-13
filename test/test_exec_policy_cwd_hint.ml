@@ -1,6 +1,12 @@
-(** test_exec_policy_cwd_hint — pins the filesystem-grounded hint that
-    [Exec_policy.existing_sibling_dirs_hint] fills into a
-    [Cwd_not_directory] error.
+(** Explicit Shell IR path-scope contract.
+
+    [Exec_policy] validates typed [cwd] and redirect targets. Positional argv
+    remains opaque application data: command names, flags, and token shapes do
+    not create an inferred filesystem authorization boundary.
+
+    The suite also pins the filesystem-grounded hint that
+    [Exec_policy.existing_sibling_dirs_hint] fills into a [Cwd_not_directory]
+    error.
 
     The hint must come from real directory entries read via [Sys.readdir],
     never from a hardcoded rename table or a substring/similarity match.
@@ -61,6 +67,59 @@ let test_ignores_plain_files () =
       hint)
 ;;
 
+let lit value = Masc_exec.Shell_ir.Lit (value, Masc_exec.Shell_ir.default_meta)
+
+let shell_ir ?cwd ?(redirects = []) ~workdir args =
+  let cwd =
+    Option.map (fun raw -> Masc_exec.Path_scope.classify ~raw ~cwd:workdir) cwd
+  in
+  let bin =
+    match Masc_exec.Exec_program.of_string "cat" with
+    | Ok bin -> bin
+    | Error _ -> Alcotest.fail "literal cat executable must be non-empty"
+  in
+  Masc_exec.Shell_ir.Simple
+    { bin
+    ; args = List.map lit args
+    ; env = []
+    ; cwd
+    ; redirects
+    ; sandbox = Masc_exec.Sandbox_target.host ()
+    }
+;;
+
+let test_positional_argv_is_not_inferred_as_path () =
+  with_temp_tree (fun workdir ->
+    let ir = shell_ir ~workdir [ "/etc/passwd"; "../../opaque-token" ] in
+    Alcotest.(check bool)
+      "argv is opaque to exec policy"
+      true
+      (Result.is_ok (Exec_policy.validate_shell_ir_paths ~workdir ir)))
+;;
+
+let test_explicit_cwd_outside_workdir_is_rejected () =
+  with_temp_tree (fun workdir ->
+    let ir = shell_ir ~cwd:"/etc" ~workdir [] in
+    Alcotest.(check bool)
+      "typed cwd remains contained"
+      true
+      (Result.is_error (Exec_policy.validate_shell_ir_paths ~workdir ir)))
+;;
+
+let test_explicit_redirect_outside_workdir_is_rejected () =
+  with_temp_tree (fun workdir ->
+    let target = Masc_exec.Path_scope.classify ~raw:"/etc/passwd" ~cwd:workdir in
+    let redirect =
+      Masc_exec.Redirect_scope.File
+        { fd = 1; target; mode = Masc_exec.Redirect_scope.Write }
+    in
+    let ir = shell_ir ~redirects:[ redirect ] ~workdir [] in
+    Alcotest.(check bool)
+      "typed redirect remains contained"
+      true
+      (Result.is_error (Exec_policy.validate_shell_ir_paths ~workdir ir)))
+;;
+
 let () =
   Alcotest.run
     "exec_policy_cwd_hint"
@@ -68,6 +127,20 @@ let () =
       , [ Alcotest.test_case "lists existing sibling dirs" `Quick test_lists_existing_sibling_dirs
         ; Alcotest.test_case "none when no subdirs" `Quick test_none_when_ancestor_has_no_subdirs
         ; Alcotest.test_case "ignores plain files" `Quick test_ignores_plain_files
+        ] )
+    ; ( "explicit path scopes"
+      , [ Alcotest.test_case
+            "positional argv is opaque"
+            `Quick
+            test_positional_argv_is_not_inferred_as_path
+        ; Alcotest.test_case
+            "cwd outside workdir is rejected"
+            `Quick
+            test_explicit_cwd_outside_workdir_is_rejected
+        ; Alcotest.test_case
+            "redirect outside workdir is rejected"
+            `Quick
+            test_explicit_redirect_outside_workdir_is_rejected
         ] )
     ]
 ;;

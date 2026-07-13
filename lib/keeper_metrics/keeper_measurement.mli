@@ -21,8 +21,6 @@ type threshold_params = {
   handoff_threshold : float;
   handoff_cooldown_sec : int;
   auto_handoff_enabled : bool;
-  max_consecutive_hb_failures : int;
-  max_consecutive_turn_failures : int;
   model_ratio_multiplier : float;
   model_handoff_multiplier : float;
 }

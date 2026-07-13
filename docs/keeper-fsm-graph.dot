@@ -12,7 +12,6 @@
 //   bash scripts/validate-keeper-fsm-graph.sh
 //
 // References:
-//   - specs/keeper-state-machine/KeeperCompositeLifecycle.tla
 //   - test/test_keeper_fsm_joints.ml (PR-H, joint invariant tests)
 
 digraph keeper_fsm {

@@ -196,25 +196,9 @@ let query_required ~tool_name ~start_time =
 let missing_required ~tool_name ~start_time field =
   workflow_err ~tool_name ~start_time (sprintf "%s is required" field)
 
-(* RFC-0189 follow-up — preserve [Tool_result.message] round-trips.
-
-   The original PR-1b.7 [text_ok] wrapped [body] as
-   [`Assoc [ "text", `String body ]].  That works only when callers
-   read [result.data]; clients (and tests) that read
-   [result.message] receive [Yojson.Safe.to_string] of the wrapped
-   object — i.e. [{"text":"...escaped body..."}] — instead of the
-   raw Markdown / JSON envelope they expect.
-
-   [structured_payload_of_message] keeps JSON bodies structured and
-   plain text as [`String body], so both [data] and [message] stay
-   round-trip safe. *)
+(* Free-form library content remains opaque text. *)
 let text_ok ~tool_name ~start_time body : Tool_result.result =
-  let data =
-    match Tool_result.structured_payload_of_message body with
-    | Some json -> json
-    | None -> `String body
-  in
-  Tool_result.make_ok ~tool_name ~start_time ~data ()
+  Tool_result.ok ~tool_name ~start_time body
 
 let handle_list ~tool_name ~start_time _ctx args : Tool_result.result =
   let include_candidates =
@@ -500,7 +484,6 @@ let () =
            ~input_schema:s.input_schema
            ~handler_binding:Tag_dispatch
            ~is_read_only:definition.read_only
-           ~is_idempotent:definition.read_only
            ()))
     Tool_schemas_library.definitions
 

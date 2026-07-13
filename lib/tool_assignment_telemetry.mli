@@ -2,7 +2,7 @@
 (** Tool_assignment_telemetry — Unified tool assignment lifecycle events
 
     Tracks the full causal chain from tool provision through execution:
-    - [Assigned]: which tools were provided to which agent, when, under what policy
+    - [Assigned]: which exact tools were provided to which agent and when
     - [Called]: when a provisioned tool was actually invoked
     - [Completed]: the outcome (success/failure, duration, error classification)
 
@@ -31,8 +31,6 @@ type tool_event =
       agent_id : string;
       profile : string;
       tool_list : string list;
-      allow_set : string list;
-      deny_set : string list;
       config_hash : string;
       reason : string;
       timestamp : float;
@@ -59,14 +57,12 @@ val event_of_json : Yojson.Safe.t -> (tool_event, string) Result.t
 (** Emit an [Assigned] event, update the in-memory agent→assignment index,
     and return the generated [assignment_id].
 
-    [config_hash] defaults to a SHA256 of profile|tool_list|allow_set|deny_set.
+    [config_hash] defaults to a SHA256 of profile|tool_list.
     Callers that have a canonical config snapshot should pass it explicitly. *)
 val emit_assigned :
   agent_id:string ->
   profile:string ->
   tool_list:string list ->
-  ?allow_set:string list ->
-  ?deny_set:string list ->
   ?config_hash:string ->
   ?reason:string ->
   unit ->

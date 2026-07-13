@@ -14,16 +14,6 @@
     {!map_runtime} / {!map_usage}).  All consumed only via the runtime
     contract or the JSON pipeline. *)
 
-(** {1 Tool-access persisted-meta helpers} *)
-
-(** Trim, drop blanks, dedupe (preserve first-seen order). *)
-val normalize_tool_names : string list -> string list
-
-(** Parse [tool_access] from persisted meta JSON. Canonical form is a JSON
-    array of tool names. *)
-val tool_access_of_meta_json :
-  Yojson.Safe.t -> (string list, string) result
-
 (** {1 Policy types} *)
 
 type compaction_policy = {
@@ -36,20 +26,10 @@ type compaction_policy = {
   message_gate : int;
   token_gate : int;
   cooldown_sec : int;
-  max_checkpoint_messages : int;
-  keep_recent_tool_results : int;
-    (** Verbatim tool-result tail length passed to
-        [Agent_sdk.Context_reducer.stub_tool_results ~keep_recent].
-        Default
-        {!Keeper_config.default_keep_recent_tool_results} (2);
-        loader clamps to
-        [[0, Keeper_config.keep_recent_tool_results_max]]. *)
 }
 
 type proactive_policy = {
   enabled : bool;
-  idle_sec : int;
-  cooldown_sec : int;
 }
 
 type proactive_cycle_outcome =
@@ -151,14 +131,7 @@ type runtime_exhaustion_reason = Keeper_internal_error.runtime_exhaustion_reason
 type blocker_class =
   | Runtime_exhausted of runtime_exhaustion_reason
   | Capacity_backpressure
-  | Ambiguous_post_commit_timeout
-  | Ambiguous_post_commit_failure
-  | Admission_queue_wait_timeout
-  | Turn_timeout_after_queue_wait
   | Turn_timeout
-  | Turn_livelock_blocked
-  | Completion_contract_violation
-  | No_progress_loop
   | Fiber_unresolved
   | Stale_turn_timeout
   | Stale_fleet_batch
@@ -190,24 +163,6 @@ val runtime_exhaustion_reason_retryable : runtime_exhaustion_reason -> bool
     a string-prefix reparse with a [_ -> false] catch-all that mis-biased
     transient faults to terminal. *)
 
-val blocker_class_continue_gate : blocker_class -> bool
-(** [blocker_class_continue_gate b] is [true] iff the supervisor
-    should retry past this blocker.  Currently only
-    [Ambiguous_post_commit_timeout] and
-    [Ambiguous_post_commit_failure] are continue-gated — every
-    other blocker terminates the keeper.  Pinned at the
-    contract seam — drift changes keeper recovery semantics. *)
-
-val blocker_class_auto_approval_blocked : blocker_class -> bool
-(** [blocker_class_auto_approval_blocked b] is [true] iff this blocker
-    class should prevent auto-approval of the keeper's next tool call
-    (including [always_approve] and remembered allow-rules).  Only
-    safety/uncertainty classes are hard-forbidden; transient liveness
-    signals such as [Capacity_backpressure], [Turn_timeout], and SDK
-    budget/idle/input conditions are intentionally excluded so
-    automated recovery flows are not stalled.  Exhaustive — adding a
-    variant forces an explicit auto-approval policy decision. *)
-
 val runtime_exhaustion_reason_to_json :
   runtime_exhaustion_reason -> Yojson.Safe.t
 
@@ -228,23 +183,9 @@ val blocker_class_of_serialized_string :
 
 (** {1 Unified blocker_info} *)
 
-type no_progress_blocker_facts = {
-  no_progress_reason : string;
-  no_progress_streak : int;
-  no_progress_threshold : int;
-  no_progress_latched : bool;
-}
-(** Structured facts for a persisted [No_progress_loop] blocker.  These fields
-    are machine-readable state; [blocker_info.detail] remains presentation
-    text only. *)
-
-type blocker_facts =
-  | No_progress_loop_facts of no_progress_blocker_facts
-
 type blocker_info = {
   klass : blocker_class;
   detail : string;
-  facts : blocker_facts option;
 }
 (** Authoritative blocker representation: a typed [blocker_class]
     paired with optional free-form [detail] (UI / Otel_metric_store label).
@@ -255,21 +196,9 @@ type blocker_info = {
     [klass] is always populated and [detail] may be ["" ]. *)
 
 val blocker_info_of_class :
-  ?detail:string -> ?facts:blocker_facts -> blocker_class -> blocker_info
+  ?detail:string -> blocker_class -> blocker_info
 (** [blocker_info_of_class ?detail klass] constructs a [blocker_info]
     for [klass].  [detail] defaults to [""]. *)
-
-val blocker_info_of_no_progress_loop :
-  ?detail:string ->
-  reason:string ->
-  streak:int ->
-  threshold:int ->
-  latched:bool ->
-  unit ->
-  blocker_info
-(** [blocker_info_of_no_progress_loop] stamps [No_progress_loop] with
-    structured telemetry facts so downstream status surfaces do not parse
-    the human-readable [detail]. *)
 
 val blocker_info_to_json : blocker_info -> Yojson.Safe.t
 (** Round-trippable JSON encoding.  [Runtime_exhausted reason] uses
@@ -327,8 +256,9 @@ type agent_runtime_state = {
   last_blocker : blocker_info option;
   last_runtime_attempt : runtime_attempt_record option;
   last_turn_tool_calls : tool_call_summary list;
-  last_seen_message_seq : int;
-  (** Highest message seq this keeper has scanned for direct mentions. *)
+  message_scope_ack_id : string option;
+  (** Stable chat-row id of the newest message-scope row injected into a
+      completed Keeper turn. *)
 }
 
 (** {1 Keeper meta record} *)
@@ -346,8 +276,6 @@ type keeper_meta = {
   sandbox_image : string option;
   network_mode : Keeper_types_profile.network_mode;
   allowed_paths : string list;
-  tool_access : string list;
-  tool_denylist : string list;
   mention_targets : string list;
   proactive : proactive_policy;
   compaction : compaction_policy;
@@ -364,13 +292,9 @@ type keeper_meta = {
   active_goal_ids : string list;
   paused : bool;
   latched_reason : Keeper_latched_reason.t option;
-      (** Typed companion to [paused]: why this keeper is latched.
-          Producers set it alongside [paused = true]; consumers surface
-          it via the status bridge. Display/observability only. *)
-  auto_resume_after_sec : float option;
-      (** Self-healing circuit breaker: when [Some sec] the supervisor
-          can auto-resume this keeper after [sec] seconds following the
-          updated pause timestamp. [None] means operator-owned pause. *)
+      (** Typed companion to [paused]. Only explicit operator pause and terminal
+          dead-tombstone paths may write it. [None] while paused is an
+          unclassified legacy state requiring operator action. *)
   autoboot_enabled : bool;
   current_task_id : Keeper_id.Task_id.t option;
       (** Currently claimed task ID for cost attribution.  Set
@@ -379,7 +303,7 @@ type keeper_meta = {
           trajectory accumulator for per-task cost tracking. *)
   telemetry_feedback_enabled : bool option;
   telemetry_feedback_window_hours : int option;
-  always_approve : bool option;
+  always_allow : bool option;
   (* Agent runtime state *)
   runtime : agent_runtime_state;
   (* Identity & concurrency *)
@@ -390,8 +314,7 @@ type keeper_meta = {
 
 (** Overlay TOML/persona defaults onto persisted runtime meta for
     status-facing reads. Persisted runtime JSON intentionally omits
-    TOML-owned fields such as [sandbox_profile], [network_mode], and
-    [tool_access]. *)
+    TOML-owned fields such as [sandbox_profile] and [network_mode]. *)
 val effective_meta_result :
   base_path:string -> keeper_meta -> (keeper_meta, string) result
 

@@ -41,13 +41,9 @@ type context = {
     agent_name:string ->
     timeout:float ->
     Yojson.Safe.t option;
-  (** Governance types/helpers — passed in to avoid circular deps *)
-  governance_defaults : string -> Mcp_server_eio_governance.governance_config;
-  save_governance :
-    Workspace.config -> Mcp_server_eio_governance.governance_config -> unit;
-  load_mcp_sessions : Workspace.config -> Mcp_server_eio_governance.mcp_session_record list;
+  load_mcp_sessions : Workspace.config -> Mcp_session_store.mcp_session_record list;
   save_mcp_sessions :
-    Workspace.config -> Mcp_server_eio_governance.mcp_session_record list -> unit;
+    Workspace.config -> Mcp_session_store.mcp_session_record list -> unit;
 }
 
 (** Helper: run subprocess — uses [Dispatch] caller (default 120s).

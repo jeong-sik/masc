@@ -175,10 +175,9 @@ function compareKeepers(a: Keeper, b: Keeper, sort: 'name' | 'att'): number {
   return attentionScore(b) - attentionScore(a) || keeperContextRatio(b) - keeperContextRatio(a) || a.name.localeCompare(b.name)
 }
 
-/** ns proxy: keepers have no namespace field; the skill path is the closest
- *  real scope signal, with runtime identity as fallback. */
+/** Keepers currently expose runtime identity as their scope label. */
 function keeperScope(keeper: Keeper): string | null {
-  return keeper.skill_primary ?? keeperDisplayRuntime(keeper)?.value ?? null
+  return keeperDisplayRuntime(keeper)?.value ?? null
 }
 
 /** The keeper's sandbox location — the design's roster identity sub-line

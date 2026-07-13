@@ -145,19 +145,6 @@ export interface DashboardScheduledAutomationKeeperQueueEvidence {
   reason?: string
 }
 
-export interface DashboardScheduledAutomationKeeperToolStatus {
-  name: string
-  registered_schema?: boolean
-  dispatch_registered?: boolean
-  direct_call_allowed?: boolean
-  visibility?: string
-  surfaces?: string[]
-  surface_count?: number
-  effect_domain?: string | null
-  read_only?: boolean | null
-  requires_actor_binding?: boolean | null
-}
-
 export interface DashboardScheduledAutomationActor {
   id: string
   kind: string
@@ -173,22 +160,13 @@ export interface DashboardScheduledAutomationSignal {
   emitted_at_iso?: string | null
   due_at?: number
   due_at_iso?: string | null
-  risk_class: string
   payload_digest?: string
   payload_kind?: string | null
 }
 
 export interface DashboardScheduledAutomationRequest {
   schedule_id: string
-  status: string
-  effective_status?: string
-  execution_readiness?: string
-  operator_action?: string | null
-  keeper_next_tool?: string | null
-  keeper_next_tool_status?: DashboardScheduledAutomationKeeperToolStatus | null
-  keeper_next_action?: string | null
-  risk_class: string
-  approval_required: boolean
+  status: 'scheduled' | 'due' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'expired'
   source: string
   requested_by?: DashboardScheduledAutomationActor | null
   scheduled_by?: DashboardScheduledAutomationActor | null
@@ -216,8 +194,6 @@ export interface DashboardScheduledAutomationRequest {
   payload_target?: string | null
   payload_summary?: string | null
   recurrence_summary?: string | null
-  requires_separate_human_grant?: boolean
-  approval_policy?: string | null
   last_execution?: DashboardScheduledAutomationExecution | null
   dispatch_receipt?: DashboardScheduledAutomationDispatchReceipt | null
   keeper_queue_evidence?: DashboardScheduledAutomationKeeperQueueEvidence | null
@@ -264,7 +240,6 @@ export interface DashboardScheduledAutomation {
   signal_limit?: number
   signals?: DashboardScheduledAutomationSignal[]
   counts: Record<string, number>
-  derived_counts?: Record<string, number>
   payload_support?: DashboardScheduledAutomationPayloadSupport
   live_supported_non_terminal_evidence?: DashboardScheduledAutomationLiveSupportedNonTerminalEvidence
   fsm: DashboardScheduledAutomationFsm
@@ -395,7 +370,6 @@ export interface DashboardKeeperRecurringTask {
   enabled: boolean
   run_count: number
   failure_count: number
-  max_failures: number
   // null until the task first runs (never epoch 0), and next_run is null while
   // the task is paused or has never run.
   last_run_at?: number | null

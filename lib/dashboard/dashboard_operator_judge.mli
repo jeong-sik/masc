@@ -7,8 +7,8 @@
     consumption.
 
     The internal mutable per-base-path state, lock helpers, env-knob
-    accessors, prompt construction, parsing, refresh loop, and backoff
-    accounting are all hidden — the public surface is [start] (daemon
+    accessors, prompt construction, parsing, and refresh loop are all hidden —
+    the public surface is [start] (daemon
     spawn) plus [runtime_status] (snapshot read). *)
 
 (** Read-only snapshot of judge runtime state, returned by
@@ -34,7 +34,6 @@ val runtime_status : string -> runtime_snapshot
 val start :
   sw:Eio.Switch.t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
-  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   config:Workspace.config ->
   masc_tools:Masc_domain.tool_schema list ->
   dispatch:(name:string -> args:Yojson.Safe.t -> Tool_result.result) ->
@@ -43,8 +42,9 @@ val start :
   unit
 (** Spawn the judge daemon for [config.base_path] iff
     [Env_config.Operator.judge_enabled] and not already running.
-    Backoff doubles up to 5x and caps at 300s when local runtime slots
-    are saturated. Idempotent: subsequent calls are no-ops. *)
+    Provider availability is observed by attempting the configured LLM call;
+    no local capacity heuristic suppresses a cycle. Idempotent: subsequent
+    calls are no-ops. *)
 
 val register_record_operator_judgment :
   (Workspace.config ->

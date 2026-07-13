@@ -10,15 +10,15 @@ val board_post : string
 val keeper_wake : string
 
 val supported : string list
-(** Dispatchable side-effecting payload kinds the production consumer can run.
+(** Dispatchable payload kinds the production consumer can run.
     This is the consumer's dispatch set and the allow-list in
     {!unsupported_error}. Note: the creation validator does NOT grant
-    acceptance from this list alone — each side-effecting kind carries its own
-    payload + risk-class contract enforced by a per-kind branch in
-    [Tool_schedule.validate_known_payload_request]. So adding a side-effecting
+    acceptance from this list alone — each kind carries its own objective
+    payload schema contract enforced by a per-kind branch in
+    [Tool_schedule.validate_known_payload_request]. So adding a
     kind requires BOTH an entry here (consumer dispatch + reject message) AND a
     validator branch (creation acceptance); the list alone leaves it rejected at
-    creation as an unsupported side-effecting kind. *)
+    creation as an unsupported kind. *)
 
 val supported_list_string : unit -> string
 

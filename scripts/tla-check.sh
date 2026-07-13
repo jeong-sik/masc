@@ -4,7 +4,6 @@
 #
 # Usage:
 #   scripts/tla-check.sh           # Run all specs
-#   scripts/tla-check.sh --trace   # Also run TraceSpec (requires prior trace generation)
 
 set -euo pipefail
 
@@ -123,86 +122,24 @@ run_tlc_buggy() {
   fi
 }
 
-ensure_trace_data() {
-  local trace_data="$REPO_ROOT/specs/keeper-state-machine/TraceData.tla"
-  local trace_source="${MASC_TLA_TRACE_JSONL:-$REPO_ROOT/specs/keeper-state-machine/synthetic.tla-trace.jsonl}"
-
-  if [ -f "$trace_data" ]; then
-    return 0
-  fi
-
-  if [ ! -f "$trace_source" ]; then
-    echo "SKIP KeeperTraceSpec.tla (no trace source: $trace_source)"
-    return 1
-  fi
-
-  echo "Generating TraceData.tla from $(basename "$trace_source")..."
-  dune exec --root "$REPO_ROOT" ./bin/trace_to_tla.exe -- "$trace_source" "$trace_data"
-}
-
 # Run all keeper state machine specs
 run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperStateMachine.tla"
 run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperTurnCycle.tla"
-run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperOASAdvanced.tla"
-run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperContextLifecycle.tla"
-run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperContextLifecycle.tla"
-run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperGenerationLineage.tla"
-run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperGenerationLineage.tla"
 run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperDecisionPipeline.tla"
 run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperDecisionPipeline.tla"
-run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperProactiveWakeGuard.tla"
-run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperProactiveWakeGuard.tla"
-run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperLifecycleGate.tla"
-run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperLifecycleGate.tla"
 run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperDeadRevivalTransaction.tla"
-run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperCompactionLifecycle.tla"
-run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperCompactionLifecycle.tla"
-run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperCompactionCooldown.tla"
-run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperCompactionCooldown.tla"
-run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperCompositeLifecycle.tla"
-run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperCompositeLifecycle.tla"
-run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperCircuitBreaker.tla"
-run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperFleetPressureAdmission.tla"
-run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperFleetPressureAdmission.tla"
-run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperCoreTriad.tla"
-run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperCoreTriad.tla"
-run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperCircuitBreaker.tla"
-run_tlc "$REPO_ROOT/specs/keeper-state-machine" "OperatorPauseBroadcast.tla"
-run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "OperatorPauseBroadcast.tla"
 run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperHeartbeat.tla"
 run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperHeartbeat.tla"
-run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperTaskAcquisition.tla"
-run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperTaskAcquisition.tla"
-run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperReactionLiveness.tla"
-run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperReactionLiveness.tla"
-run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperApprovalQueue.tla"
-run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperApprovalQueue.tla"
-run_tlc "$REPO_ROOT/specs/keeper-state-machine" "OperatorApprovalMode.tla"
-run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "OperatorApprovalMode.tla"
+run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperHitlDeferred.tla"
+run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperHitlDeferred.tla" "KeeperHitlDeferred-blocking-buggy.cfg" "blocking-buggy"
+run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperHitlDeferred.tla" "KeeperHitlDeferred-wake-buggy.cfg" "wake-buggy"
+run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperHitlDeferred.tla" "KeeperHitlDeferred-consume-buggy.cfg" "consume-buggy"
 run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperEventQueue.tla"
 run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperEventQueue.tla"
-run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperPostTurnOrchestration.tla"
-run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperPostTurnOrchestration.tla"
-run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperRolloverDecision.tla"
-run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperRolloverDecision.tla"
-run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperLaunchPending.tla"
-run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperLaunchPending.tla"
-run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperConditionsGovernPhase.tla"
-run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperConditionsGovernPhase.tla"
-run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperCounterCausality.tla"
-run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperCounterCausality.tla"
 run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperDwellMonotone.tla"
 run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperDwellMonotone.tla"
-run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperMemoryLifecycle.tla"
-run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperMemoryLifecycle.tla"
-run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperPacing.tla"
-run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperPacing.tla"
-run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperPacing.tla" "KeeperPacing-buggy-unbounded.cfg" "buggy-unbounded"
 run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperOutcomesConservation.tla"
 run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperOutcomesConservation.tla"
-run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperReconcileLiveness.tla"
-run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperReconcileLiveness.tla"
-run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperWorkPipeline.tla"
 run_tlc "$REPO_ROOT/specs/keeper-turn-fsm" "KeeperTurnFSM.tla"
 run_tlc_buggy "$REPO_ROOT/specs/keeper-turn-fsm" "KeeperTurnFSM.tla"
 run_tlc "$REPO_ROOT/specs/keeper-switch-hierarchy" "KeeperSwitchHierarchy.tla"
@@ -211,10 +148,6 @@ run_tlc "$REPO_ROOT/specs/keeper-switch-hierarchy" "KeeperFiberLocalSwitch.tla"
 run_tlc_buggy "$REPO_ROOT/specs/keeper-switch-hierarchy" "KeeperFiberLocalSwitch.tla"
 run_tlc "$REPO_ROOT/specs/keeper-switch-hierarchy" "Pool_no_double_close.tla"
 run_tlc_buggy "$REPO_ROOT/specs/keeper-switch-hierarchy" "Pool_no_double_close.tla"
-run_tlc "$REPO_ROOT/specs/admission-queue" "AdmissionQueue.tla"
-run_tlc_buggy "$REPO_ROOT/specs/admission-queue" "AdmissionQueue.tla"
-run_tlc "$REPO_ROOT/specs/boundary" "KeeperContinueGate.tla"
-run_tlc_buggy "$REPO_ROOT/specs/boundary" "KeeperContinueGate.tla"
 run_tlc "$REPO_ROOT/specs/boundary" "SandboxDispatch.tla"
 run_tlc_buggy "$REPO_ROOT/specs/boundary" "SandboxDispatch.tla"
 run_tlc "$REPO_ROOT/specs/boundary" "Cancellation.tla"
@@ -225,39 +158,12 @@ run_tlc "$REPO_ROOT/specs/boundary" "AuditLogAppendOrder.tla"
 run_tlc_buggy "$REPO_ROOT/specs/boundary" "AuditLogAppendOrder.tla"
 run_tlc "$REPO_ROOT/specs/boundary" "AuditLogDurableBeforeAck.tla"
 run_tlc_buggy "$REPO_ROOT/specs/boundary" "AuditLogDurableBeforeAck.tla"
-run_tlc "$REPO_ROOT/specs/boundary" "KeeperRecoveryOrchestration.tla"
-run_tlc_buggy "$REPO_ROOT/specs/boundary" "KeeperRecoveryOrchestration.tla"
-run_tlc "$REPO_ROOT/specs/boundary" "KeeperTurnScheduler.tla"
-run_tlc_buggy "$REPO_ROOT/specs/boundary" "KeeperTurnScheduler.tla"
-run_tlc "$REPO_ROOT/specs/boundary" "ToolCallContract.tla"
-run_tlc_buggy "$REPO_ROOT/specs/boundary" "ToolCallContract.tla"
-run_tlc "$REPO_ROOT/specs/boundary" "KeeperTurnTerminal.tla"
-run_tlc_buggy "$REPO_ROOT/specs/boundary" "KeeperTurnTerminal.tla"
 run_tlc "$REPO_ROOT/specs/boundary" "TurnEvidenceChain.tla"
 run_tlc_buggy "$REPO_ROOT/specs/boundary" "TurnEvidenceChain.tla"
-run_tlc "$REPO_ROOT/specs/boundary" "KeeperEmptyToolUniverse.tla"
-run_tlc_buggy "$REPO_ROOT/specs/boundary" "KeeperEmptyToolUniverse.tla"
-run_tlc "$REPO_ROOT/specs/boundary" "KeeperContractViolated.tla"
-run_tlc_buggy "$REPO_ROOT/specs/boundary" "KeeperContractViolated.tla"
-run_tlc "$REPO_ROOT/specs/boundary" "KeeperStaleKilled.tla"
-run_tlc_buggy "$REPO_ROOT/specs/boundary" "KeeperStaleKilled.tla"
 run_tlc "$REPO_ROOT/specs/auth" "AuthIdentityFSM.tla"
 run_tlc_buggy "$REPO_ROOT/specs/auth" "AuthIdentityFSM.tla"
-run_tlc "$REPO_ROOT/specs/state-product" "StateProduct.tla"
-run_tlc_buggy "$REPO_ROOT/specs/state-product" "StateProduct.tla"
-run_tlc "$REPO_ROOT/specs/state-product" "WorkspaceProduct.tla"
-run_tlc_buggy "$REPO_ROOT/specs/state-product" "WorkspaceProduct.tla"
 run_tlc "$REPO_ROOT/specs/task-lifecycle" "TaskLifecycle.tla"
 run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskLifecycle.tla"
-run_tlc "$REPO_ROOT/specs/task-lifecycle" "CompletionAuthority.tla"
-run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "CompletionAuthority.tla"
-
-run_tlc "$REPO_ROOT/specs/goal-loop" "TierRouting.tla"
-run_tlc_buggy "$REPO_ROOT/specs/goal-loop" "TierRouting.tla"
-run_tlc "$REPO_ROOT/specs/goal-loop" "Validation.tla"
-run_tlc_buggy "$REPO_ROOT/specs/goal-loop" "Validation.tla"
-run_tlc "$REPO_ROOT/specs/goal-loop" "Liveness.tla"
-run_tlc_buggy "$REPO_ROOT/specs/goal-loop" "Liveness.tla"
 
 # Checkpoint message trim must preserve tool-use/tool-result pairing.
 run_tlc "$REPO_ROOT/specs/checkpoint-trim" "CheckpointTrim.tla"
@@ -273,12 +179,6 @@ run_tlc "$REPO_ROOT/specs/multimodal" "MultimodalArtifact.tla"
 # Cycle 27 — Multimodal hydrator provenance DAG (Tier B9 catch-up).
 run_tlc "$REPO_ROOT/specs/multimodal" "MultimodalHydrator.tla"
 
-# Cycle 19 — Resilience_outcome ternary lattice (Tier I5 catch-up).
-run_tlc "$REPO_ROOT/specs/resilience" "ResilienceOutcome.tla"
-
-# Cycle 27 — Resilience degradation lattice + safety (Tier A11 catch-up).
-run_tlc "$REPO_ROOT/specs/resilience" "ResilienceDegradation.tla"
-
 # Cycle 19 — Shared_audit Merkle chain integrity (Tier I6 catch-up).
 run_tlc "$REPO_ROOT/specs/shared" "SharedAudit.tla"
 
@@ -288,18 +188,6 @@ run_tlc "$REPO_ROOT/specs/autonomous" "AutonomousPhase.tla"
 # Cycle 27 — Autonomous loop wirein non-invasive contract (Tier A5 catch-up).
 run_tlc "$REPO_ROOT/specs/autonomous" "AutonomousLoop.tla"
 
-# Optional: run TraceSpec if --trace flag provided
-if [ "${1:-}" = "--trace" ]; then
-  TRACE_SPEC="$REPO_ROOT/specs/keeper-state-machine/KeeperTraceSpec.tla"
-  TRACE_DATA="$REPO_ROOT/specs/keeper-state-machine/TraceData.tla"
-  if [ -f "$TRACE_SPEC" ] && ensure_trace_data && [ -f "$TRACE_DATA" ]; then
-    run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperTraceSpec.tla"
-  else
-    echo "SKIP KeeperTraceSpec.tla (TraceData.tla unavailable)"
-  fi
-fi
-
-run_tlc "$REPO_ROOT/specs/masc-ecosystem" "MASCEcosystem.tla"
 
 # RFC-0160 G6 — Shell IR carries decision invariant.
 run_tlc "$REPO_ROOT/specs/shell-ir-first-class" "ShellIRFirstClass.tla"
@@ -320,9 +208,6 @@ run_tlc_buggy "$REPO_ROOT/specs/shell-ir-first-class" "ShellIRFirstClass.tla"
 # picked up automatically by the glob.
 BUG_MODELS_DIR="$REPO_ROOT/specs/bug-models"
 if [ -d "$BUG_MODELS_DIR" ]; then
-  run_tlc_cfg "$BUG_MODELS_DIR" "RuntimeLiveness.tla" \
-    "RuntimeLiveness-liveness.cfg" "liveness"
-
   for tla_path in "$BUG_MODELS_DIR"/*.tla; do
     [ -e "$tla_path" ] || continue              # no matches
     [ -L "$tla_path" ] && continue              # symlink → already run

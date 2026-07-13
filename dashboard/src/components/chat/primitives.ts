@@ -11,7 +11,7 @@ import { UNREAD_DIVIDER_LABEL, unreadDividerAnchorKey } from './unread-divider'
 import { showToast } from '../common/toast'
 import { copyToClipboard } from '../common/copyable-code'
 import { ExternalLink, Mic, Square } from 'lucide-preact'
-import { prettyJsonDeep } from '../tool-call-shared'
+import { prettyJson } from '../tool-call-shared'
 import { useVoiceInput } from './voice-input'
 
 const CHAT_FOCUS_RING = ringFocusClasses({ tone: 'accent-medium', width: 2 })
@@ -257,23 +257,6 @@ function surfaceLink(surface?: SurfaceRef | null): ChatMetaInfo | null {
           url: `https://slack.com/app_redirect?channel=${surface.channel_id}${team}`,
           label: `Slack Channel ${labelTarget}`,
           icon: '💬',
-          title,
-          tone: 'accent',
-        }
-      }
-      break
-    case 'github':
-      if (surface.repo) {
-        const path = surface.notification_id ? `/notifications/${surface.notification_id}` : ''
-        const title = compactKeyValues([
-          ['surface', 'github'],
-          ['repo', surface.repo],
-          ['notification_id', surface.notification_id],
-        ])
-        return {
-          url: `https://github.com/${surface.repo}${path}`,
-          label: `GitHub: ${surface.repo}`,
-          icon: '🐙',
           title,
           tone: 'accent',
         }
@@ -2751,17 +2734,6 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
                     </div>
                   `
                 : null}
-              ${entry.details.skillPrimary
-                ? html`
-                    <div class="chat-detail-callout rounded-[var(--r-1)] border border-[var(--ok-border)] px-3 py-3">
-                      <div class="text-2xs font-bold uppercase tracking-2 text-[var(--ok-fg)]">스킬 경로</div>
-                      <div class="mt-1 text-sm font-bold text-[var(--ok-fg)]">${entry.details.skillPrimary}</div>
-                      ${entry.details.skillReason
-                        ? html`<div class="mt-1 text-sm leading-loose text-[var(--ok-fg)]">${entry.details.skillReason}</div>`
-                        : null}
-                    </div>
-                  `
-                : null}
               ${entry.details.rawPayload
                 ? html`
                     <div class="flex flex-col gap-2">
@@ -2790,10 +2762,7 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
 function prettyJsonish(text: string): string {
   const trimmed = text.trimStart()
   if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-    // prettyJsonDeep recursively un-nests double-encoded JSON in string values
-    // so legacy "<label>\n{json}" tool rows render structurally instead of
-    // showing literal "\n". Returns null when not valid JSON.
-    const pretty = prettyJsonDeep(text)
+    const pretty = prettyJson(text)
     if (pretty !== null) return pretty
     // not valid JSON — show as-is
   }
@@ -3030,7 +2999,7 @@ function ToolTraceStep({
   if (unlinkedTraceTool) {
     status = 'unlinked'
   } else if (output !== null) {
-    status = output.success === false || output.semantic_success === false ? 'bad' : 'ok'
+    status = output.success === false ? 'bad' : 'ok'
   } else if (traceStep?.status === 'err') {
     status = 'bad'
   } else if (traceStep?.status === 'ok') {
@@ -3290,7 +3259,7 @@ function ToolTraceCard({
   const progressN = traceSteps.filter((step) => step.kind === 'progress').length
   const failN = orderedToolSteps.filter(
     (s) =>
-      (s.output !== null && (s.output.success === false || s.output.semantic_success === false))
+      (s.output !== null && s.output.success === false)
       || (s.kind === 'tool' && s.step.status === 'err'),
   ).length
   // Surface unjoined outputs as "missing" only once the turn and output
@@ -3731,7 +3700,7 @@ export function ChatTranscript({
         .map((entry) => {
           const output = lookupToolCallOutput(entry.id)
           return output
-            ? `${entry.id}:${output.success}:${output.semantic_success ?? ''}:${output.duration_ms}:${toolOutputDisplay(output.output)?.text.length ?? 0}`
+            ? `${entry.id}:${output.success}:${output.duration_ms}:${toolOutputDisplay(output.output)?.text.length ?? 0}`
             : `${entry.id}:pending:${coverageSig}`
         })
         .join('|')

@@ -1,5 +1,5 @@
-; Empty evaluator output is a typed parser error and Anti_rationalization.review
-; must reject it through format_reject instead of approving by liveness.
+; Only a structured report_review_verdict tool call may produce a semantic
+; task-completion verdict.
 
 (test
  (name test_anti_rationalization_empty_reject)

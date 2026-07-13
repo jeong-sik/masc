@@ -5,10 +5,6 @@ type known_kind =
   | Board_post
   | Keeper_wake
 
-type risk_policy =
-  | Requires_side_effecting
-  | Requires_exact of Schedule_domain.risk_class
-
 type support_status =
   | Supported
   | Unsupported
@@ -17,7 +13,7 @@ type support_status =
 type creation_rejection =
   | Creation_invalid_payload of string
   | Creation_invalid_supported_payload of known_kind * string
-  | Creation_unsupported_side_effecting_kind of string
+  | Creation_unsupported_kind of string
 
 type dispatch_rejection =
   | Dispatch_invalid_payload of string
@@ -73,7 +69,7 @@ let support_status_to_string = function
 let creation_rejection_message = function
   | Creation_invalid_payload msg -> msg
   | Creation_invalid_supported_payload (_, msg) -> msg
-  | Creation_unsupported_side_effecting_kind raw_kind ->
+  | Creation_unsupported_kind raw_kind ->
     Schedule_supported_kinds.unsupported_error raw_kind
 ;;
 
@@ -88,33 +84,6 @@ let classify_kind = function
   | kind when String.equal kind (known_kind_to_string Board_post) -> Some Board_post
   | kind when String.equal kind (known_kind_to_string Keeper_wake) -> Some Keeper_wake
   | _ -> None
-;;
-
-let risk_policy_of_kind = function
-  | Board_post -> Requires_side_effecting
-  | Keeper_wake -> Requires_exact Schedule_domain.Reminder_only
-;;
-
-(* The intrinsic risk of a payload kind, when the kind itself determines it
-   rather than the caller. [Keeper_wake] is always [Reminder_only] (an internal
-   self-wake, never a human-grant action); [Board_post] is caller-specified
-   (it may write to the board and require approval), so it returns [None]. *)
-let intrinsic_risk_class_of_kind kind =
-  match risk_policy_of_kind kind with
-  | Requires_side_effecting -> None
-  | Requires_exact risk_class -> Some risk_class
-;;
-
-let risk_class_satisfies_policy kind risk_class =
-  match risk_policy_of_kind kind with
-  | Requires_side_effecting -> Schedule_domain.is_side_effecting risk_class
-  | Requires_exact expected -> risk_class = expected
-;;
-
-let side_effecting_risk_required kind =
-  match risk_policy_of_kind kind with
-  | Requires_side_effecting -> true
-  | Requires_exact _ -> false
 ;;
 
 let assoc_string key fields =
@@ -183,16 +152,6 @@ let kind_of_json_result payload =
   Ok view.raw_kind
 ;;
 
-(* Resolve the intrinsic risk_class a payload's kind mandates, if any, so the
-   creation boundary can clamp a caller-supplied risk_class that would otherwise
-   deadlock (e.g. a keeper_wake escalated to a human-grant it cannot satisfy).
-   Returns [None] when the kind is unknown or caller-specified. *)
-let intrinsic_risk_class_of_payload payload =
-  match kind_of_json_result payload with
-  | Ok raw -> Option.bind (classify_kind raw) intrinsic_risk_class_of_kind
-  | Error _ -> None
-;;
-
 let board_schema_version_error ~creation schema_version =
   if schema_version = 1
   then Ok ()
@@ -213,33 +172,20 @@ let validate_board_post_common ~content_error view =
   | _ -> Ok ()
 ;;
 
-let validate_board_post_for_creation ~risk_class view =
+let validate_board_post_for_creation view =
   let* () = board_schema_version_error ~creation:true view.schema_version in
-  if not (risk_class_satisfies_policy Board_post risk_class)
-  then
-    Error
+  validate_board_post_common
+    ~content_error:
       (board_post_kind
-       ^ " requires a side-effecting risk_class such as workspace_write")
-  else
-    validate_board_post_common
-      ~content_error:
-        (board_post_kind
-         ^ " payload requires non-empty body.content; use board_content for board schedules")
-      view
+       ^ " payload requires non-empty body.content; use board_content for board schedules")
+    view
 ;;
 
-let validate_board_post_for_dispatch (request : Schedule_domain.schedule_request) view =
+let validate_board_post_for_dispatch view =
   let* () = board_schema_version_error ~creation:false view.schema_version in
-  if
-    not
-      (risk_class_satisfies_policy
-         Board_post
-         request.Schedule_domain.risk_class)
-  then Error (board_post_kind ^ " requires a side-effecting risk_class")
-  else
-    validate_board_post_common
-      ~content_error:"missing field: content"
-      view
+  validate_board_post_common
+    ~content_error:"missing field: content"
+    view
 ;;
 
 let keeper_wake_schema_version_error ~creation schema_version =
@@ -268,37 +214,17 @@ let validate_keeper_wake_body body =
        |> Result.map (fun _ -> ()))
 ;;
 
-(* A keeper_wake enqueues an internal keeper wake signal; it has no
-   external/destructive effect, so it must NOT be side-effecting. A
-   side-effecting risk_class would force [Pending_approval] and require a
-   separate human grant that a self-waking keeper cannot supply — the keeper
-   then polls [masc_schedule_get] on a status that never changes until the
-   idle guard kills the turn. Requiring a non-side-effecting risk_class keeps
-   a wake in [Scheduled] so it fires automatically. board_post is the opposite
-   (it writes to the shared board and legitimately requires approval). *)
-let validate_keeper_wake_for_creation ~risk_class view =
+let validate_keeper_wake_for_creation view =
   let* () = keeper_wake_schema_version_error ~creation:true view.schema_version in
-  if not (risk_class_satisfies_policy Keeper_wake risk_class)
-  then
-    Error
-      (keeper_wake_kind
-       ^ " requires a non-side-effecting risk_class such as reminder_only")
-  else validate_keeper_wake_body view.body
+  validate_keeper_wake_body view.body
 ;;
 
-(* Dispatch validates only payload well-formedness. risk_class gating is a
-   creation-time concern (it decides Pending_approval vs Scheduled); a schedule
-   that reaches dispatch already cleared that gate. Re-checking risk here is
-   redundant, and re-checking a *direction* would reject legacy keeper_wake rows
-   persisted under the old (side-effecting) rule. Enqueuing a keeper wake is
-   harmless regardless of the stored risk label. *)
-let validate_keeper_wake_for_dispatch
-    (_request : Schedule_domain.schedule_request) view =
+let validate_keeper_wake_for_dispatch view =
   let* () = keeper_wake_schema_version_error ~creation:false view.schema_version in
   validate_keeper_wake_body view.body
 ;;
 
-let validate_request_payload_for_creation_detailed ~payload ~risk_class =
+let validate_request_payload_for_creation_detailed ~payload =
   match payload with
   | `Assoc fields ->
     (match assoc_string "kind" fields with
@@ -333,8 +259,7 @@ let validate_request_payload_for_creation_detailed ~payload ~risk_class =
                      ^ " payload requires object body with non-empty content; use board_content for board schedules"
                    ))
           in
-          validate_board_post_for_creation ~risk_class
-            { raw_kind; schema_version; body }
+          validate_board_post_for_creation { raw_kind; schema_version; body }
           |> Result.map_error (fun msg ->
             Creation_invalid_supported_payload (Board_post, msg))
         | Some Keeper_wake ->
@@ -363,19 +288,16 @@ let validate_request_payload_for_creation_detailed ~payload ~risk_class =
                 (Creation_invalid_supported_payload
                    (Keeper_wake, keeper_wake_kind ^ " payload requires object body"))
           in
-          validate_keeper_wake_for_creation ~risk_class
-            { raw_kind; schema_version; body }
+          validate_keeper_wake_for_creation { raw_kind; schema_version; body }
           |> Result.map_error (fun msg ->
             Creation_invalid_supported_payload (Keeper_wake, msg))
-        | None when Schedule_domain.is_side_effecting risk_class ->
-          Error (Creation_unsupported_side_effecting_kind raw_kind)
-        | None -> Ok ())
+        | None -> Error (Creation_unsupported_kind raw_kind))
      | None -> Error (Creation_invalid_payload "payload.kind is required"))
   | _ -> Error (Creation_invalid_payload "payload must be a JSON object")
 ;;
 
-let validate_request_payload_for_creation ~payload ~risk_class =
-  validate_request_payload_for_creation_detailed ~payload ~risk_class
+let validate_request_payload_for_creation ~payload =
+  validate_request_payload_for_creation_detailed ~payload
   |> Result.map_error creation_rejection_message
 ;;
 
@@ -386,14 +308,14 @@ let dispatch_view_detailed request =
   match classify_kind view.raw_kind with
   | Some Board_post ->
     let* () =
-      validate_board_post_for_dispatch request view
+      validate_board_post_for_dispatch view
       |> Result.map_error (fun msg ->
         Dispatch_invalid_supported_payload (Board_post, msg))
     in
     Ok (Board_post, view)
   | Some Keeper_wake ->
     let* () =
-      validate_keeper_wake_for_dispatch request view
+      validate_keeper_wake_for_dispatch view
       |> Result.map_error (fun msg ->
         Dispatch_invalid_supported_payload (Keeper_wake, msg))
     in
@@ -466,7 +388,6 @@ let known_kind_contract_to_yojson kind =
       [ "kind", `String (known_kind_to_string kind)
       ; "schema_versions", `List [ `Int 1 ]
       ; "dispatch_tool", `String (dispatch_tool_name kind)
-      ; "side_effecting_risk_required", `Bool (side_effecting_risk_required kind)
       ; "creation_contract", `String "per_kind_validator_required"
       ; "dispatch_contract", `String "consumer_supported"
       ]

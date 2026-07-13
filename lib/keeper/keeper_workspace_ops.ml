@@ -14,7 +14,7 @@ include Keeper_workspace_ops_setup
 
 (* TEL-OK: handler rename only; [render_completed_process_result] records
    command history and failure telemetry through Keeper_workspace_ops_setup. *)
-let handle_tool_search_files
+let handle_tool_search_files_with_outcome
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~exec_cache:(_exec_cache : Masc_exec.Exec_cache.t option)
       ~(config : Workspace.config)
@@ -30,7 +30,7 @@ let handle_tool_search_files
   match requested_op with
   | None | Some "" | Some "rg" ->
     (match
-       Keeper_workspace_read_ops.try_handle ~turn_sandbox_factory ~config ~meta
+       Keeper_workspace_read_ops.try_handle_with_outcome ~turn_sandbox_factory ~config ~meta
          ~args ~op:"rg" ~raw_path
      with
     | Some response -> response
@@ -38,27 +38,39 @@ let handle_tool_search_files
       (* Unreachable: search_files is rg-only and try_handle always handles
          rg. Kept as a typed guard rather than an assert so a future routing
          change degrades to a clear message instead of a crash. *)
-      Yojson.Safe.to_string
-        (`Assoc
-            [ "ok", `Bool false
-            ; ( "error"
-              , `String
-                  "search_files supports only rg (pattern search); use \
-                   Execute for directory listing, file reads, find, or git" )
-            ]))
+      Keeper_tool_execution.failure
+        (Yojson.Safe.to_string
+           (`Assoc
+               [ "ok", `Bool false
+               ; ( "error"
+                 , `String
+                     "search_files supports only rg (pattern search); use \
+                      Execute for directory listing, file reads, find, or git" )
+               ])))
   | Some other ->
     (* Fail closed: preserve the caller-requested op in both the echoed
        [op] field and the error message so policy/audit see the real
        request, never a silent rewrite to rg. *)
-    Yojson.Safe.to_string
-      (`Assoc
-          [ "ok", `Bool false
-          ; "op", `String other
-          ; ( "error"
-            , `String
-                (Printf.sprintf
-                   "tool_search_files does not support op %S; this tool is rg \
-                    (pattern search) only. Use Execute for other operations."
-                   other) )
-          ])
+    Keeper_tool_execution.failure
+      ~class_:Tool_result.Policy_rejection
+      (Yojson.Safe.to_string
+         (`Assoc
+             [ "ok", `Bool false
+             ; "op", `String other
+             ; ( "error"
+               , `String
+                   (Printf.sprintf
+                      "tool_search_files does not support op %S; this tool is rg \
+                       (pattern search) only. Use Execute for other operations."
+                      other) )
+             ]))
+;;
+
+let handle_tool_search_files ~turn_sandbox_factory ~exec_cache ~config ~meta ~args =
+  (handle_tool_search_files_with_outcome
+     ~turn_sandbox_factory
+     ~exec_cache
+     ~config
+     ~meta
+     ~args).raw_output
 ;;

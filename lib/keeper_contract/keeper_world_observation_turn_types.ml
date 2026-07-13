@@ -10,8 +10,8 @@
     cooldown elapsed with timers, etc.). Inline-record variants carry
     the timing fields the dashboard surfaces.
 
-    [skip_reason] carries the 7 reasons a keeper *skips* a turn
-    (paused, approval pending, autonomous disabled, cooldown
+    [skip_reason] carries the reasons a keeper *skips* a turn
+    (paused, autonomous disabled, cooldown
     pending with remaining_sec, etc.).
 
     [turn_verdict] is [Run of { reasons }] or [Skip of { reasons }]
@@ -28,7 +28,6 @@ type keeper_cycle_channel =
 
 type event_queue_trigger =
   | Bootstrap_stimulus
-  | No_progress_recovery_stimulus
   | Scheduled_automation_stimulus
   | Connector_attention_stimulus
       (** RFC-connector-ambient-attention-wake P1: an ambient connector message
@@ -51,37 +50,24 @@ type turn_reason =
   | Board_event_pending
   | Scope_message_pending
   | Bootstrap_stimulus_pending
-  | No_progress_recovery_stimulus_pending
   | Connector_attention_pending
   | Hitl_resolved_pending
   | Failure_judgment_pending
   | Scheduled_autonomous_turn
   | Scheduled_automation_due
-  | Idle_cooldown_elapsed of
-      { idle_sec : int
-      ; cooldown : int
-      }
-  | Cooldown_elapsed
   | Task_backlog of
       { unclaimed : int
       ; failed : int
       }
-  | Task_reactive_cooldown_elapsed
   | Never_started
-  | Min_interval_elapsed
 
 type skip_reason =
   | Keeper_paused
-  | Approval_pending
   | Scheduled_autonomous_disabled
   | Reactive_disabled
       (** RFC-0297 P0-1: the global reactive kill-switch
           (MASC_KEEPER_REACTIVE_ENABLED) is off, so a pending reactive trigger
           (mention / board event / scope message) does not open a turn. *)
-  | Provider_cooldown_pending of { remaining_sec : int }
-  | Idle_gate_pending of { remaining_sec : int }
-  | Cooldown_pending of { remaining_sec : int }
-  | No_signal
 
 type turn_verdict =
   | Run of { reasons : turn_reason * turn_reason list }
@@ -92,23 +78,17 @@ let turn_reason_to_string = function
   | Board_event_pending -> "board_event_pending"
   | Scope_message_pending -> "scope_message_pending"
   | Bootstrap_stimulus_pending -> "bootstrap_stimulus_pending"
-  | No_progress_recovery_stimulus_pending -> "no_progress_recovery_stimulus_pending"
   | Connector_attention_pending -> "connector_attention_pending"
   | Hitl_resolved_pending -> "hitl_resolved_pending"
   | Failure_judgment_pending -> "failure_judgment_pending"
   | Scheduled_autonomous_turn -> "scheduled_autonomous_turn"
   | Scheduled_automation_due -> "scheduled_automation_due"
-  | Idle_cooldown_elapsed _ -> "idle_cooldown_elapsed"
-  | Cooldown_elapsed -> "cooldown_elapsed"
   | Task_backlog _ -> "task_backlog"
-  | Task_reactive_cooldown_elapsed -> "task_reactive_cooldown_elapsed"
   | Never_started -> "never_started"
-  | Min_interval_elapsed -> "min_interval_elapsed"
 ;;
 
 let turn_reason_of_event_queue_trigger = function
   | Bootstrap_stimulus -> Bootstrap_stimulus_pending
-  | No_progress_recovery_stimulus -> No_progress_recovery_stimulus_pending
   | Scheduled_automation_stimulus -> Scheduled_automation_due
   | Connector_attention_stimulus -> Connector_attention_pending
   | Hitl_resolved_stimulus -> Hitl_resolved_pending
@@ -117,13 +97,8 @@ let turn_reason_of_event_queue_trigger = function
 
 let skip_reason_to_string = function
   | Keeper_paused -> "keeper_paused"
-  | Approval_pending -> "approval_pending"
   | Scheduled_autonomous_disabled -> "scheduled_autonomous_disabled"
   | Reactive_disabled -> "reactive_disabled"
-  | Provider_cooldown_pending _ -> "provider_cooldown_pending"
-  | Idle_gate_pending _ -> "idle_gate_pending"
-  | Cooldown_pending _ -> "cooldown_pending"
-  | No_signal -> "no_signal"
 ;;
 
 (* Canonical wire encoding. [Reactive] serialises as "turn" (the value the

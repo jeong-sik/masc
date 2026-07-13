@@ -29,15 +29,11 @@ val is_transient_network_error : Agent_sdk.Error.sdk_error -> bool
     diagnostic-only and are not parsed heuristically. *)
 val is_transient_internal_runner_error : Agent_sdk.Error.sdk_error -> bool
 
-(** [true] when an OAS timeout message describes an execution budget expiry,
-    not a transport-level timeout. *)
-val is_structural_oas_timeout_message : string -> bool
-
 (** Detect request body parse errors from either the provider or the API
     (e.g. Ollama yyjson rejecting a malformed request body or the API
-    rejecting invalid JSON).  The LLM never processed the request, so
-    committed tool results are not at risk of duplication.  Used to
-    auto-recover reconcile-safe tools instead of requiring manual reconcile. *)
+    rejecting invalid JSON). The typed distinction is used for observability
+    and runtime rotation; it never exempts a committed mutation from explicit
+    partial-commit handling. *)
 val is_server_rejected_parse_error : Agent_sdk.Error.sdk_error -> bool
 
 (** [true] for provider-side request-body parse rejections. *)
@@ -61,37 +57,8 @@ val is_accept_no_usable_progress_error : Agent_sdk.Error.sdk_error -> bool
     strike with cooldown or work-level pause. *)
 val should_warn_keeper_cycle_failed : Agent_sdk.Error.sdk_error -> bool
 
-(** Reclassify any post-commit turn error as a persistent integrity error when
-    mutating tool calls already committed in the same turn. *)
-val reclassify_error_after_side_effect :
-  tool_names:string list ->
-  Agent_sdk.Error.sdk_error ->
-  Agent_sdk.Error.sdk_error
-
-val post_commit_failure_kind_of_error :
-  Agent_sdk.Error.sdk_error -> Keeper_registry.ambiguous_partial_commit_kind
-
-(** [true] when an error represents an ambiguous partial commit after a
-    mutating tool call succeeded but the turn failed before a clean result. *)
-val is_ambiguous_side_effect_error : Agent_sdk.Error.sdk_error -> bool
-
-val ambiguous_side_effect_commit_tools :
-  tool_names:string list ->
-  Agent_sdk.Error.sdk_error -> string list
-
-val has_ambiguous_side_effect_commit :
-  tool_names:string list ->
-  Agent_sdk.Error.sdk_error -> bool
-
 (** [true] when a structured error indicates context overflow. *)
 val is_context_overflow : Agent_sdk.Error.sdk_error -> bool
-
-(** [true] when the error is a completion contract violation.
-    Contract violations should cap rotation because retrying the same
-    or different runtime will not satisfy the contract. Narrow no-progress
-    accept rejections that carry an explicit empty/read-only recovery hint are
-    handled by the degraded retry path instead. *)
-val is_completion_contract_violation : Agent_sdk.Error.sdk_error -> bool
 
 (** [true] when the error is an OAS [InputRequired] — the agent paused
     to request human input.  Not a failure; a special stop condition. *)
@@ -115,7 +82,6 @@ val is_runtime_exhausted_error : Agent_sdk.Error.sdk_error -> bool
 type degraded_retry_reason =
   | Hard_quota
   | Resumable_cli_session
-  | Admission_queue_timeout
   | Provider_timeout
   | Turn_timeout
   | Runtime_candidates_filtered
@@ -124,16 +90,10 @@ type degraded_retry_reason =
   | Rate_limit
   | Server_error
   | Auth_error
-  | Read_only_no_progress
   | Empty_no_progress
   | Thinking_only_no_progress
 
 val degraded_retry_reason_to_string : degraded_retry_reason -> string
-
-val is_read_only_no_progress_accept_rejection : Agent_sdk.Error.sdk_error -> bool
-(** [true] for typed accept rejections whose only progress was read-only tool
-    observation. These can remain terminal for direct retry while still using a
-    bounded auto-resume pause policy after repeated failures. *)
 
 val normalized_runtime_id : catalog_names:string list -> string -> string
 (** Normalize a runtime name for rotation matching.
@@ -197,56 +157,19 @@ val degraded_retry_after_recoverable_error :
     runtime's credential pool, as reported by [credential_pool_of_runtime_id],
     are excluded before attempt filtering, preserving independent-provider
     failover while avoiding same-account fan-out. If no pool function is
-    supplied, no credential-pool filtering is applied. Non-contract transient
-    infrastructure errors (provider timeout, server error) allow cycling
-    through candidates again when all are exhausted, because the same runtime
-    may succeed on a subsequent attempt. [Capacity_backpressure] caps rotation:
-    its provider retry_after is minutes-long, so cycling the same pool is
-    futile and previously looped forever (2026-05-21, 2026-07-06, #23373).
-    Contract violations, read-only no-progress accept rejections, and
-    quota/rate-limit classes cap rotation after the candidate set is exhausted.
-
-    RFC-0313 W3: with [pacing_enforced:true] the class-based cycle cap is
-    bypassed — every recoverable class may re-cycle the (pool-filtered)
-    candidate set within the turn's cycle budget, because revisit pacing now
-    spaces the retries the cap used to suppress. [pacing_enforced:false]
-    keeps the legacy cap (kill-switch; the cap and this parameter go away in
-    W4). Contract violations never cycle in either mode.
+    supplied, no credential-pool filtering is applied. Once every typed
+    candidate has been attempted, the current turn stops rotating. A later
+    Keeper turn may make a fresh attempt; this function does not synthesize a
+    timed retry cycle.
     @since 0.174.0 *)
 val degraded_rotation_after_recoverable_error :
   ?credential_pool_of_runtime_id:(string -> string option) ->
   ?fallback_hint:string ->
-  pacing_enforced:bool ->
   base_runtime:string ->
   effective_runtime:string ->
   attempted_runtimes:string list ->
   Agent_sdk.Error.sdk_error ->
   degraded_retry option
-
-(** [true] when [reason] permits re-cycling the candidate pool after every
-    candidate has been attempted. [Capacity_backpressure] returns [false]
-    (see {!degraded_rotation_after_recoverable_error}). *)
-val degraded_reason_allows_candidate_cycle :
-  degraded_retry_reason -> bool
-
-val max_transient_retries : unit -> int
-
-val transient_backoff_sec : int -> float
-
-(** Filter and deduplicate tool names to those with mutating side effects. *)
-val committed_mutating_tools : string list -> string list
-
-val classify_post_commit_failure :
-  tool_names:string list ->
-  ?kind:Keeper_registry.ambiguous_partial_commit_kind ->
-  Agent_sdk.Error.sdk_error ->
-  (Agent_sdk.Error.sdk_error * Keeper_registry.failure_reason) option
-
-val summarize_post_commit_failure :
-  tool_names:string list ->
-  kind:Keeper_registry.ambiguous_partial_commit_kind ->
-  Agent_sdk.Error.sdk_error ->
-  string
 
 val is_provider_timeout_error : Agent_sdk.Error.sdk_error -> bool
 (** True when [err] is a provider-timeout class failure (deadline,

@@ -5,15 +5,12 @@
     mutable capability sets have been removed; dispatch owns routing,
     not capability authority.
 
-    The module is named [Tool_capability] (not [Capability]) because
-    [lib/exec/capability.ml] already owns the [Capability] name for the
-    shell-command capability domain (Read_path / Write_path / Exec_program /
-    Git / Env_set / Pipeline_fold), an orthogonal concern. *)
+    The module is named [Tool_capability] to make its narrow tool-registration
+    scope explicit. *)
 
 type kind =
   | Read_only
   | Mcp_context_required
-  | Destructive
   | Idempotent
 
 val to_string : kind -> string
@@ -23,8 +20,9 @@ val all_kinds : kind list
 (** Ordered Set of capability kinds. *)
 module Set : Stdlib.Set.S with type elt = kind
 
-(** [has kind tool_name] returns [true] when [Tool_catalog.metadata]
-    grants [kind] for [tool_name]. *)
+(** [has kind tool_name] returns [true] only when [Tool_catalog.metadata]
+    explicitly grants [kind] for [tool_name]. Read-only metadata never implies
+    idempotency. *)
 val has : kind -> string -> bool
 
 (** [granted tool_name] returns every capability kind currently granted

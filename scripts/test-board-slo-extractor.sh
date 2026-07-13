@@ -53,7 +53,7 @@ cat >"$masc_dir/logs/system_log_${today}.jsonl" <<JSONL
 {"ts":$now,"level":"WARN","message":"[Process_eio] Timeout after 5s (command): '/bin/bash' '-lc' 'scripts/dune-local.sh build test/test_operator_control.exe 2>&1'"}
 {"ts":$now,"level":"INFO","message":"verifier: prepared 60 docker worktree gitdir path(s) under /fixture/.masc/playground/docker/verifier"}
 {"ts":$now,"level":"INFO","message":"verifier: restored 60 docker worktree gitdir path(s) under /fixture/.masc/playground/docker/verifier"}
-{"ts":$now,"level":"ERROR","message":"docker_shell_failed: fd_pressure: host_fd_hotspot_budget_exhausted"}
+{"ts":$now,"level":"ERROR","message":"host_fd_hotspot_budget_exhausted"}
 {"ts":$old,"level":"INFO","details":{"event":"runtime_attempt_terminal","outcome":"failure"}}
 JSONL
 
@@ -62,11 +62,11 @@ mkdir -p \
   "$masc_dir/playground/docker/verifier/repos/masc/.worktrees/task-b"
 
 cat >"$masc_dir/tool_calls/$tool_month/$tool_day.jsonl" <<JSONL
-{"ts":$now,"tool":"keeper_board_post","success":true,"semantic_success":true,"duration_ms":10}
+{"ts":$now,"tool":"keeper_board_post","success":true,"duration_ms":10}
 {"ts":$now,"tool":"keeper_board_comment","success":true,"duration_ms":20}
-{"ts":$now,"tool":"Execute","success":true,"semantic_success":false,"duration_ms":30}
-{"ts":$now,"tool":"Execute","success":false,"semantic_success":false,"duration_ms":40}
-{"ts":$old,"tool":"Execute","success":true,"semantic_success":true,"duration_ms":50}
+{"ts":$now,"tool":"Execute","success":true,"duration_ms":30}
+{"ts":$now,"tool":"Execute","success":false,"duration_ms":40}
+{"ts":$old,"tool":"Execute","success":true,"duration_ms":50}
 JSONL
 
 json="$(MASC_BASE_PATH="$fixture" "$REPO_ROOT/scripts/board-slo-extractor.sh" --json --offline)"
@@ -84,8 +84,8 @@ check '.metrics.posts_window == 2'
 check '.metrics.comments_window == 20'
 check '.metrics.high_churn_threads_48h == 1'
 check '.metrics.warn_error_window == 7'
-check '.metrics.tool_call_success_pct == 50'
-check '.metrics.execute_failure_pct == 100'
+check '.metrics.tool_call_success_pct == 75'
+check '.metrics.execute_failure_pct == 50'
 check '.metrics.runtime_audit_failure_pct == 25'
 check '.metrics.docker_false_positive_24h == 1'
 check '.metrics.live_defect_signatures.project_snapshot_timeout == 1'

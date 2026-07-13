@@ -8,7 +8,7 @@ let embedded =
   [
     ("prompts/keeper.example.md", "---\ndescription: example\n---\nbody v2\n");
     ("prompts/behavior/contract.md", "---\ndescription: contract\n---\nrules\n");
-    ("tool_policy.toml", "[policy]\n");
+    ("runtime.toml", "[runtime]\n");
   ]
 
 let read_embedded rel = List.assoc_opt rel embedded
@@ -48,7 +48,7 @@ let test_copies_missing_and_scopes_to_prompts () =
       check string "subdir content" "---\ndescription: contract\n---\nrules\n"
         (read_file (Filename.concat dir "behavior/contract.md"));
       check bool "non-prompts asset not written" false
-        (Sys.file_exists (Filename.concat dir "tool_policy.toml")))
+        (Sys.file_exists (Filename.concat dir "runtime.toml")))
 
 let test_second_run_is_noop () =
   with_temp_prompts_dir (fun dir ->

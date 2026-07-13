@@ -6,7 +6,7 @@
       mislabels a run status (e.g.
       reports a denied/sink-failed run as "completed"), or returns the wrong
       shape for list vs single-run vs unknown-run_id; and
-   2. the tool is wired but its descriptor is Dispatch_only, so the Keeper LLM
+   2. the tool is wired but incorrectly marked as a transport alias, so the Keeper LLM
       cannot see it even though runtime dispatch still compiles.
 
    [fusion_status_json] is pure over a registry instance, so it is exercised on
@@ -140,7 +140,7 @@ let test_empty_registry () =
 ;;
 
 (* (2) keeper-LLM visibility: masc_fusion_status must have an explicit model
-   projection. Dispatch_only would compile but keep it out of the Keeper tool
+   projection. A transport-alias projection would compile but keep it out of the Keeper tool
    list. Also runs the unified
    registry boot invariant (enforce_visible_tag_coverage) so a Default-visible
    tool without a dispatch tag would fail loudly here. *)

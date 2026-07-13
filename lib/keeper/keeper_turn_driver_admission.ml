@@ -35,7 +35,6 @@ let runtime_candidates_of_providers provider_cfgs =
     - Resolves runtime providers from runtime.toml
     - For each provider, runs OAS with a single provider
     - Uses Runtime_fsm.decide to determine next action on failure
-    - Runtime loop runs inside Admission_queue permit
 
     @param accept Optional response validator. Default accepts all.
     @since Phase 2 — MASC-driven runtime FSM *)

@@ -24,7 +24,6 @@ function obs(overrides: Partial<CompositeObservation> & { ts: number }): Composi
     decision: 'undecided',
     runtime: 'idle',
     compaction: 'accumulating',
-    breaker: 'clean',
     ...overrides,
   }
 }
@@ -181,11 +180,6 @@ describe('inferTransitionReason', () => {
   it('returns Korean reason for KSM to Crashed', () => {
     const result = inferTransitionReason('KSM', 'Failing', 'Crashed')
     expect(result).toContain('비정상 종료')
-  })
-
-  it('returns Korean reason for KDP to gate_rejected', () => {
-    const result = inferTransitionReason('KDP', 'undecided', 'gate_rejected')
-    expect(result).toContain('게이트 차단')
   })
 
   it('returns Korean reason for KCL to exhausted', () => {

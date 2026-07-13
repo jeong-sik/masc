@@ -1,5 +1,4 @@
-(** Workspace task scheduling — claim pool gating, verification block
-    state, and the [claim_next] / [release_stale_claims] entries. *)
+(** Workspace task scheduling — claim pool state and the [claim_next] entry. *)
 
 open Masc_domain
 include module type of Workspace_utils
@@ -72,4 +71,3 @@ val claim_next_r
   -> Masc_domain.claim_next_result
 
 val claim_next : config -> agent_name:string -> string
-val release_stale_claims : config -> ttl_seconds:float -> (string * string) list

@@ -15,7 +15,7 @@ module Lane = Masc.Keeper_lane
 
 let base_path = "/tmp/test_keeper_registry_hardening"
 
-let make_meta ?(tool_access = []) name =
+let make_meta name =
   match
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
@@ -25,7 +25,6 @@ let make_meta ?(tool_access = []) name =
           ("trace_id", `String ("trace-" ^ name));
           ("goal", `String "test keeper");
           ("allowed_paths", `List [ `String "*" ]);
-          ("tool_access", Json_util.json_string_list tool_access);
           ("autoboot_enabled", `Bool false);
         ])
   with
@@ -326,12 +325,7 @@ let test_tool_dispatch_fallback_uses_original_meta () =
             (match KR.get_with_health ~base_path:config.base_path meta.name with
              | None -> fail "registered entry not found"
              | Some (entry, _) ->
-               let corrupted_meta =
-                 { entry.meta with
-                   name = "wrong-name"
-                 ; tool_denylist = [ "Read" ]
-                 }
-               in
+               let corrupted_meta = { entry.meta with name = "wrong-name" } in
                let corrupted = { entry with meta = corrupted_meta } in
                KR.For_testing.unsafe_put_entry ~base_path:config.base_path meta.name corrupted);
             let result =
@@ -341,7 +335,7 @@ let test_tool_dispatch_fallback_uses_original_meta () =
                 ~ctx_work
                 ~exec_cache:None
                 ~name:"Read"
-                ~input:(`Assoc [ ("file_path", `String "config/tool_policy.toml") ])
+                ~input:(`Assoc [ ("file_path", `String "dune-project") ])
                 ()
             in
             check

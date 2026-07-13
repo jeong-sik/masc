@@ -45,7 +45,7 @@ let expected_workspace_read_only_names =
   [ "masc_check"; "masc_goal_list"; "masc_status" ]
 ;;
 
-let expected_workspace_hidden_names = [ "masc_reset" ]
+let expected_workspace_hidden_names = []
 
 let expect_some ~label = function
   | Some value -> value
@@ -68,22 +68,6 @@ let test_schema_set_equals_tag_registry_set () =
     ~label:"tag_registry vs schema_registry"
     ~expected:tags
     ~actual:schemas
-;;
-
-let test_mandatory_tools_are_registered () =
-  init ();
-  let mandatory = Keeper_tool_registry.core_always_tools in
-  List.iter
-    (fun name ->
-      Alcotest.(check bool)
-        (Printf.sprintf "mandatory tool %s has tag" name)
-        true
-        (Option.is_some (Tool_dispatch.lookup_tag name));
-      Alcotest.(check bool)
-        (Printf.sprintf "mandatory tool %s has schema" name)
-        true
-        (Option.is_some (Tool_dispatch.lookup_schema name)))
-    mandatory
 ;;
 
 let test_workspace_schemas_route_to_state () =
@@ -141,6 +125,7 @@ let test_workspace_schemas_have_tool_spec_metadata () =
          |> expect_some ~label:(Printf.sprintf "%s Tool_catalog metadata" name)
        in
        let expected_read_only = List.mem name expected_workspace_read_only_names in
+       let expected_idempotent = false in
        let expected_hidden = List.mem name expected_workspace_hidden_names in
        Alcotest.(check (option bool))
          (Printf.sprintf "%s readonly metadata" name)
@@ -148,7 +133,7 @@ let test_workspace_schemas_have_tool_spec_metadata () =
          meta.Tool_catalog.readonly;
        Alcotest.(check (option bool))
          (Printf.sprintf "%s idempotent metadata" name)
-         (Some expected_read_only)
+         (Some expected_idempotent)
          meta.Tool_catalog.idempotent;
        Alcotest.(check bool)
          (Printf.sprintf "%s hidden visibility" name)
@@ -170,7 +155,7 @@ let test_default_metadata_has_no_implicit_execution_policy () =
   | Ok _ -> Alcotest.fail "default metadata must not invent an execution policy"
   | Error (Tool_catalog.Missing_execution_policy { tool_name; missing_axes }) ->
     Alcotest.(check string) "diagnostic keeps tool name" "__unregistered_tool" tool_name;
-    Alcotest.(check int) "all execution axes are absent" 4 (List.length missing_axes)
+    Alcotest.(check int) "all execution axes are absent" 3 (List.length missing_axes)
 ;;
 
 let test_keeper_schemas_have_explicit_execution_policy () =
@@ -216,15 +201,8 @@ let test_retired_tools_are_absent () =
     ; "tool_admin_update"
     ]
   in
-  let retired_masc_tool_shard =
-    [ "masc_tool_list"
-    ; "masc_tool_grant"
-    ; "masc_tool_revoke"
-    ]
-  in
   let retired_tools =
-    retired_front_door_tools @ retired_tool_admin_surface @ retired_masc_tool_shard
-    |> sorted_set
+    retired_front_door_tools @ retired_tool_admin_surface |> sorted_set
   in
   let leaked_tag =
     List.filter (fun name -> Option.is_some (Tool_dispatch.lookup_tag name)) retired_tools
@@ -247,10 +225,6 @@ let () =
     [ ( "registry_sets"
       , [ test_case "schema set equals tag_registry set" `Quick
             test_schema_set_equals_tag_registry_set
-        ] )
-    ; ( "mandatory_tools"
-      , [ test_case "mandatory tools are registered" `Quick
-            test_mandatory_tools_are_registered
         ] )
     ; ( "workspace_tools"
       , [ test_case "workspace schemas route to Mod_state" `Quick

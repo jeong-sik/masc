@@ -115,7 +115,7 @@ val delegated_tool_for : string -> string
     so the JSON contract knows which tool will receive the call. *)
 
 val confirm_required : string -> bool
-(** Re-export of {!Operator_approval.confirm_required}.  Pinned here
+(** Re-export of {!Operator_action_catalog.requires_confirmation}. Pinned here
     to keep the action contract surface in one place. *)
 
 val preview_of_action : action_request -> Yojson.Safe.t

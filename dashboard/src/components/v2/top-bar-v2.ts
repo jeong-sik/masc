@@ -1,7 +1,7 @@
 // MASC v2 — top bar (ported from prototype shell.jsx TopBar + AttentionIndicator).
 // Emits the prototype `.v2-top` DOM (crumb · live statchip · attention ·
 // schedule · Copilot). Wired to live signals: running count + attention
-// aggregate (governance approvals, needs-attention keepers, dead/overflowed,
+// aggregate (Gate approvals, needs-attention keepers, dead/overflowed,
 // stale connectors). The Copilot button reuses the existing dock controller.
 
 import { html } from 'htm/preact'
@@ -9,9 +9,7 @@ import { useState, useEffect } from 'preact/hooks'
 import { navigate, route } from '../../router'
 import { executionLoaded, keepers, shellCounts, shellRuntimeResolution, staleKeepers } from '../../store'
 import { activeKeeperName } from '../../keeper-state'
-import { governanceData } from '../governance-signals'
-import { toolsData } from '../tools/tool-state'
-import { scheduledPendingApprovalCount } from '../tools/scheduled-automation-panel'
+import { gateData } from '../gate-signals'
 import { CopilotDockTopBarButton, type CopilotDockApi } from '../copilot-dock'
 import { TweaksPanelToggle } from '../tweaks-panel'
 import { StatusDot } from './primitives-v2'
@@ -27,7 +25,7 @@ import { AuthStatus } from '../auth-status'
 import { EmergencyStopControl } from '../emergency-stop-control'
 import { TransportBeacon } from '../transport-beacon'
 
-const DEAD_PHASES = new Set(['Overflowed', 'Crashed', 'Dead', 'Zombie'])
+const DEAD_PHASES = new Set(['Overflowed', 'Crashed', 'Dead'])
 
 interface AttentionAgg {
   approvals: number
@@ -39,7 +37,7 @@ interface AttentionAgg {
 
 function computeAttention(): AttentionAgg {
   const ks = keepers.value
-  const approvals = governanceData.value?.approval_queue?.length ?? 0
+  const approvals = gateData.value?.approval_queue?.length ?? 0
   const attKeepers = ks.filter((k) => k.needs_attention === true).length
   const dead = ks.filter((k) => !!k.lifecycle_phase && DEAD_PHASES.has(k.lifecycle_phase)).length
   const stale = staleKeepers.value.size
@@ -134,23 +132,9 @@ export function TopBarV2({ dock }: { dock: CopilotDockApi }) {
         <${StatusDot} status="run" pulse=${true} />${running} 실행 중
       </span>
       <${AttentionIndicatorV2} />
-      ${/* 예약(schedule): pending-approval count from the scheduled-automation
-          projection (loaded app-wide at boot). No count when the projection has
-          not resolved — the chip stays a plain nav affordance rather than
-          fabricating a status. */ ''}
-      ${(() => {
-        const pending = scheduledPendingApprovalCount(toolsData.value?.scheduled_automation ?? null)
-        return html`
-          <button
-            class=${`v2-statchip${pending > 0 ? ' warn' : ''}`}
-            data-schedule-pending=${pending}
-            onClick=${() => navigate('schedule')}
-            title=${pending > 0 ? `예약 자동화 큐 · 승인 대기 ${pending}건` : '예약 자동화 큐'}
-          >
-            ${'◷'} 예약${pending > 0 ? html` <b>${pending}</b>` : null}
-          </button>
-        `
-      })()}
+      <button class="v2-statchip" onClick=${() => navigate('schedule')} title="예약 자동화 큐">
+        ${'◷'} 예약
+      </button>
       ${/* Operational/safety status cluster (review P1: keep operator chrome). */ ''}
       <div class="v2-top-ops">
         <${ConnectionStatus} />

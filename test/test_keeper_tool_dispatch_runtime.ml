@@ -1429,6 +1429,38 @@ let test_tool_execute_pipe_argv_emits_pipeline_recovery_plan () =
         (member "instruction" plan |> to_string |> fun s ->
           contains_substring s "Do not use sh -c"))
 
+(* A cwd that resolve_tool_execute_cwd rejects (outside the sandbox allowed
+   roots) is a deterministic caller/config rejection.  Before the fix its
+   payload carried no failure_class, so the boundary resolved it to
+   Runtime_failure→(Non_retryable, Unknown) and counted it against the
+   circuit breaker.  It must declare policy_rejection, like the sibling
+   of_json/validate rejections. *)
+let test_tool_execute_rejected_cwd_declares_policy_rejection () =
+  with_exec_fixture "tool_execute_rejected_cwd_policy_rejection"
+    (fun ~config ~meta ~ctx_work ->
+      let input =
+        `Assoc
+          [ "executable", `String "echo"
+          ; "argv", `List [ `String "hi" ]
+          ; "cwd", `String "/root/denied-outside-sandbox-xyz"
+          ]
+      in
+      let raw =
+        KET.execute_keeper_tool_call
+          ~config
+          ~meta
+          ~ctx_work
+          ~exec_cache:None
+          ~name:"tool_execute"
+          ~input
+          ()
+      in
+      let json = parse_json raw in
+      let open Yojson.Safe.Util in
+      check bool "call failed" false (member "ok" json |> to_bool);
+      check string "cwd rejection declares policy_rejection" "policy_rejection"
+        (member "failure_class" json |> to_string))
+
 let keeper_msg_input_schema () =
   match
     List.find_opt
@@ -1885,6 +1917,8 @@ let () =
         test_tool_execute_raw_cmd_requires_typed_shell_ir;
       test_case "tool_execute pipe argv emits pipeline recovery plan" `Quick
         test_tool_execute_pipe_argv_emits_pipeline_recovery_plan;
+      test_case "tool_execute rejected cwd declares policy_rejection" `Quick
+        test_tool_execute_rejected_cwd_declares_policy_rejection;
       test_case "OAS handler threads Eio context to keeper dispatch" `Quick
         test_oas_handler_threads_eio_context_to_keeper_dispatch;
       test_case "registered dispatch does not require masc_ prefix" `Quick

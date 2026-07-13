@@ -755,7 +755,16 @@ let handle_tool_execute_typed
       ~write_enabled:true
       ~args
   with
-    | Error e -> error_json e
+    | Error e ->
+      (* cwd resolution rejects a bad/absent working directory
+         (cwd_not_directory, directory does not exist) — a deterministic
+         caller/config rejection, same family as the of_json/validate
+         rejections below.  Declare Policy_rejection so the boundary does
+         not resolve it to Runtime_failure→(Non_retryable, Unknown) and
+         count it against the circuit breaker. *)
+      error_json
+        ~fields:([ "typed", `Bool true ] @ policy_rejection_failure_class_fields)
+        e
     | Ok cwd ->
         let execution_location_fields cwd =
           [ ( "execution_location"

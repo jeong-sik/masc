@@ -187,9 +187,10 @@ let tool_execute_stderr_field =
 ;;
 
 let tool_execute_description =
-  "Execute a typed process invocation inside the Keeper sandbox. Provide either \
+  "Execute a typed process invocation inside the Keeper sandbox. Accepted fields: executable, argv, pipeline, env, cwd, timeout_sec, stdin, stdout, stderr. Provide either \
    executable/argv for one process or an explicit pipeline of typed stages, \
-   never both. The legacy cmd/command string fields are not accepted. Shell \
+   never both; this tool no longer \
+   exposes background task lifecycle tools. The legacy cmd/command string fields are not accepted. Shell \
    metacharacters in argv are data, not syntax; use typed stdin/stdout/stderr \
    objects for redirection and the pipeline field for pipelines. cwd must resolve \
    inside the Keeper path jail. MASC does not interpret executable or subcommand \

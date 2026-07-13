@@ -4,6 +4,11 @@ module KF = Masc.Keeper_fs
 
 exception Synthetic_owner_failure
 
+(* This is a test-runner watchdog, not a production scheduling policy. It
+   localizes a coordination liveness regression instead of consuming the
+   quick-suite-wide 35 minute watchdog. *)
+let coordination_watchdog_seconds = 5.0
+
 type owner_fault =
   | Ordinary_failure
   | Cancellation
@@ -40,6 +45,10 @@ let release_blocking_hook hook =
     then (
       hook.released <- true;
       Stdlib.Condition.broadcast hook.condition))
+;;
+
+let with_blocking_hook_release hook f =
+  Fun.protect ~finally:(fun () -> release_blocking_hook hook) f
 ;;
 
 let await_blocking_hook_release hook =
@@ -328,7 +337,11 @@ let test_owner_context_cancellation_wakes_waiter () =
 
 let test_independent_suffix_progresses_after_common_prefix () =
   Eio_main.run
-  @@ fun _env ->
+  @@ fun env ->
+  Eio.Time.with_timeout_exn
+    (Eio.Stdenv.clock env)
+    coordination_watchdog_seconds
+  @@ fun () ->
   with_eio_guard
   @@ fun () ->
   KF.clear_dir_cache ();
@@ -345,6 +358,8 @@ let test_independent_suffix_progresses_after_common_prefix () =
        let sibling_claimed_before_release = Atomic.make false in
        Eio.Switch.run
        @@ fun sw ->
+       with_blocking_hook_release hook
+       @@ fun () ->
        Eio.Fiber.fork ~sw (fun () ->
          let result =
            KF.For_testing.save_json_durable_atomic
@@ -367,18 +382,19 @@ let test_independent_suffix_progresses_after_common_prefix () =
              (`Assoc [])
          in
          Eio.Promise.resolve resolve_sibling_result result);
-       Fun.protect
-         ~finally:(fun () -> release_blocking_hook hook)
-         (fun () ->
-            require_durable_ok "independent sibling" (Eio.Promise.await sibling_result);
-            require_durable_ok "blocked owner" (Eio.Promise.await owner_result);
-            check bool "sibling claims its suffix before owner release" true
-              (Atomic.get sibling_claimed_before_release)))
+       require_durable_ok "independent sibling" (Eio.Promise.await sibling_result);
+       require_durable_ok "blocked owner" (Eio.Promise.await owner_result);
+       check bool "sibling claims its suffix before owner release" true
+         (Atomic.get sibling_claimed_before_release))
 ;;
 
 let test_invalidate_reaps_resolved_ticket () =
   Eio_main.run
-  @@ fun _env ->
+  @@ fun env ->
+  Eio.Time.with_timeout_exn
+    (Eio.Stdenv.clock env)
+    coordination_watchdog_seconds
+  @@ fun () ->
   with_eio_guard
   @@ fun () ->
   KF.clear_dir_cache ();
@@ -395,6 +411,8 @@ let test_invalidate_reaps_resolved_ticket () =
        let reclaimed_before_release = Atomic.make false in
        Eio.Switch.run
        @@ fun sw ->
+       with_blocking_hook_release hook
+       @@ fun () ->
        Eio.Fiber.fork ~sw (fun () ->
          let result =
            KF.For_testing.save_json_durable_atomic
@@ -418,14 +436,11 @@ let test_invalidate_reaps_resolved_ticket () =
              (`Assoc [])
          in
          Eio.Promise.resolve resolve_reclaimer_result result);
-       Fun.protect
-         ~finally:(fun () -> release_blocking_hook hook)
-         (fun () ->
-            require_durable_ok "invalidated prefix reclaimer"
-              (Eio.Promise.await reclaimer_result);
-            require_durable_ok "original owner" (Eio.Promise.await owner_result);
-            check bool "resolved ticket is reaped before owner release" true
-              (Atomic.get reclaimed_before_release)))
+       require_durable_ok "invalidated prefix reclaimer"
+         (Eio.Promise.await reclaimer_result);
+       require_durable_ok "original owner" (Eio.Promise.await owner_result);
+       check bool "resolved ticket is reaped before owner release" true
+         (Atomic.get reclaimed_before_release))
 ;;
 
 let () =

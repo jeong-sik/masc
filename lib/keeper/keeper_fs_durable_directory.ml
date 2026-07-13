@@ -94,6 +94,8 @@ let make_preparation ~cache_revision =
 ;;
 
 let finish preparation =
+  (* See [release]: waking is intentionally idempotent because a durable-prefix
+     publication may resolve the ticket before final ownership cleanup. *)
   ignore (Eio.Promise.try_resolve preparation.resolver ())
 ;;
 
@@ -226,6 +228,8 @@ let prepare_owned ~before_prepare ~before_directory_fsync owned =
            let parent = Filename.dirname path in
            before_directory_fsync parent;
            fsync_directory parent;
+           (* See [ensure]: an invalidation revision race is observed by the
+              final target cache check and retried under the new revision. *)
            ignore (mark_if_current ~revision:preparation.cache_revision path);
            finish preparation)
         pending);
@@ -238,7 +242,7 @@ let capture_operation f =
 ;;
 
 let propagate_cancellation outcome =
-  Eio.Fiber.check ();
+  Eio_guard.check_if_ready ();
   match outcome with
   | Error (Operation_failed ((Eio.Cancel.Cancelled _ as exn), backtrace)) ->
     Printexc.raise_with_backtrace exn backtrace
@@ -272,11 +276,15 @@ let rec ensure ~before_prepare ~before_directory_fsync dir =
            capture_operation (fun () ->
              prepare_owned ~before_prepare ~before_directory_fsync owned)
          in
-         let cleanup = Eio.Cancel.protect (fun () -> release owned) in
+         let cleanup =
+           if Eio_guard.is_ready ()
+           then Eio.Cancel.protect (fun () -> release owned)
+           else release owned
+         in
          (match cleanup, outcome with
           | Ok (), (Error _ as outcome) -> propagate_cancellation outcome
           | Ok (), Ok () ->
-            Eio.Fiber.check ();
+            Eio_guard.check_if_ready ();
             if is_durable dir
             then Ok ()
             else ensure ~before_prepare ~before_directory_fsync dir

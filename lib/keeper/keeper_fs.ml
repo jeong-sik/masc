@@ -186,6 +186,12 @@ let run_durable_write_stage ~renamed ~before_stage stage f =
          { renamed; stage; failure = Operation_failed (Printexc.to_string exn) })
 ;;
 
+let run_in_systhread_cancel_checked f =
+  let outcome = Eio_guard.run_in_systhread f in
+  Eio_guard.check_if_ready ();
+  outcome
+;;
+
 let ensure_dir_durable ~before_stage ?(before_directory_fsync = fun _ -> ()) dir =
   match
     Keeper_fs_durable_directory.ensure
@@ -215,7 +221,7 @@ let save_json_durable_atomic_with ~before_stage ?before_directory_fsync path jso
   let content = Yojson.Safe.pretty_to_string json in
   try
     ensure_dir_durable ~before_stage ?before_directory_fsync dir;
-    Eio_guard.run_in_systhread (fun () ->
+    run_in_systhread_cancel_checked (fun () ->
       let temp_path = ref None in
       let channel = ref None in
       let renamed = ref false in
@@ -304,13 +310,14 @@ let durable_remove_error_to_string error =
 
 let remove_file_durable_with ~before_stage path =
   let parent = Filename.dirname path in
-  Eio_guard.run_in_systhread (fun () ->
+  run_in_systhread_cancel_checked (fun () ->
     let removed =
       try
         before_stage Unlink;
         Unix.unlink path;
         Ok true
       with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
       | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
       | exn -> Error { removed = false; failure = Unlink, Printexc.to_string exn }
     in
@@ -322,6 +329,7 @@ let remove_file_durable_with ~before_stage path =
          Keeper_fs_durable_directory.fsync_directory parent;
          Ok ()
        with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
        | exn ->
          Error
            { removed

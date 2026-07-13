@@ -486,7 +486,8 @@ let descriptor_route_invariant_payload ~tool_name descriptor =
   `Assoc
     [ "ok", `Bool false
     ; "error", `String "keeper_tool_descriptor_route_invariant"
-    ; "failure_class", `String "runtime_failure"
+    ; ( "failure_class"
+      , `String (Tool_result.tool_failure_class_to_string Tool_result.Runtime_failure) )
     ; "tool", `String tool_name
     ; "descriptor_id", `String descriptor_id
     ; "executor", `String executor
@@ -662,7 +663,9 @@ let execute_keeper_tool_call_with_outcome
             (let fields =
                [ "ok", `Bool false
                ; "error", `String "tool_not_allowed"
-               ; "failure_class", `String "policy_rejection"
+               ; ( "failure_class"
+                 , `String
+                     (Tool_result.tool_failure_class_to_string Tool_result.Policy_rejection) )
                ; "tool", `String name
                ; "reason", `String reason
                ; "hint", `String hint
@@ -808,7 +811,9 @@ let execute_keeper_tool_call_with_outcome
             let fields =
               [ "ok", `Bool false
               ; "error", `String "unknown_tool"
-              ; "failure_class", `String "policy_rejection"
+              ; ( "failure_class"
+                , `String
+                    (Tool_result.tool_failure_class_to_string Tool_result.Policy_rejection) )
               ; "tool", `String unknown_name
               ]
               @ suggestion_fields

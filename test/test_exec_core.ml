@@ -727,6 +727,26 @@ let test_runtime_error_declares_runtime_failure_class () =
     (boundary.Masc.Keeper_tools_oas_failure_boundary.failure_class
      = Tool_result.Runtime_failure)
 
+let test_partial_declares_runtime_failure_class () =
+  (* Partial (found some matches, some paths errored) maps to Runtime_failure
+     like Runtime_error -- see [failure_class_of_semantic_status]. *)
+  let json =
+    process_json
+      ~cmd:"find lib -name '*.ml'"
+      ~status:(Unix.WEXITED 1)
+      ~output:"lib/exec_core.ml\nfind: lib/private: Permission denied"
+      ()
+  in
+  check bool "ok" false (json |> member "ok" |> to_bool);
+  check string "semantic_status" "partial" (get_string_field json "semantic_status");
+  check string "failure_class" "runtime_failure" (get_string_field json "failure_class");
+  let boundary = boundary_of_json json in
+  check bool "declared" true
+    boundary.Masc.Keeper_tools_oas_failure_boundary.failure_class_declared;
+  check bool "boundary runtime_failure" true
+    (boundary.Masc.Keeper_tools_oas_failure_boundary.failure_class
+     = Tool_result.Runtime_failure)
+
 let test_blocked_declares_policy_rejection_failure_class () =
   let json =
     Masc.Exec_core.blocked_result_json
@@ -877,6 +897,8 @@ let () =
             test_timeout_declares_transient_failure_class;
           test_case "runtime error declares runtime_failure" `Quick
             test_runtime_error_declares_runtime_failure_class;
+          test_case "partial declares runtime_failure" `Quick
+            test_partial_declares_runtime_failure_class;
           test_case "blocked declares policy_rejection" `Quick
             test_blocked_declares_policy_rejection_failure_class;
           test_case "success carries no failure_class" `Quick

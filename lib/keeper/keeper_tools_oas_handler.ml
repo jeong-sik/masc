@@ -186,7 +186,10 @@ let make_keeper_tool_handler
                        ; "message", `String message
                        ; "recoverable", `Bool true
                        ; "error_class", `String "transient"
-                       ; "failure_class", `String "transient_error"
+                       ; ( "failure_class"
+                         , `String
+                             (Tool_result.tool_failure_class_to_string
+                                Tool_result.Transient_error) )
                        ])
                 in
                 Tool_result.error
@@ -203,7 +206,10 @@ let make_keeper_tool_handler
                        ; "message", `String message
                        ; "recoverable", `Bool true
                        ; "error_class", `String "transient"
-                       ; "failure_class", `String "transient_error"
+                       ; ( "failure_class"
+                         , `String
+                             (Tool_result.tool_failure_class_to_string
+                                Tool_result.Transient_error) )
                        ])
                 in
                 Tool_result.error

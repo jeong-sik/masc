@@ -57,7 +57,8 @@ let payload_json
   let fields =
     [ "ok", `Bool false
     ; "error", `String message
-    ; "failure_class", `String "workflow_rejection"
+    ; ( "failure_class"
+      , `String (Tool_result.tool_failure_class_to_string Tool_result.Workflow_rejection) )
     ; "error_class", `String "deterministic"
     ; "recoverable", `Bool recoverable
     ]

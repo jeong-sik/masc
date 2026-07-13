@@ -1288,6 +1288,53 @@ let test_workflow_rejection_payload_skips_circuit_breaker () =
     (KET.should_apply_circuit_breaker_to_failure_payload
        (KET.failure_class_of_tool_result_payload runtime_payload))
 
+(* fix(exec): declare typed failure_class on every failed Execute payload
+   (masc#24314) taught Execute's OWN producers (Exec_core.blocked_result_json,
+   process_result_json) to declare failure_class for the first time. That
+   makes Execute policy/deterministic rejections newly eligible for the
+   breaker-skip branch above — a behavior change the hand-built literals in
+   [test_workflow_rejection_payload_skips_circuit_breaker] cannot catch,
+   since they never exercise the real producer. This test proves the
+   interaction end-to-end on the payload Exec_core actually emits, the same
+   discipline [test_keeper_validation_breaker_exempt.ml] applies to
+   keeper_task_create. *)
+let test_execute_producer_payloads_route_through_circuit_breaker () =
+  let blocked_payload =
+    Masc.Exec_core.blocked_result_json
+      ~cmd:"rm -rf /"
+      ~error:"destructive_operation_blocked"
+      ~reason:"blocked by policy"
+      ()
+    |> Yojson.Safe.to_string
+  in
+  check (option string) "Exec_core blocked payload declares policy_rejection"
+    (Some "policy_rejection")
+    (Option.map Tool_result.tool_failure_class_to_string
+       (KET.failure_class_of_tool_result_payload blocked_payload));
+  check bool "Exec_core blocked payload skips circuit breaker" false
+    (KET.should_apply_circuit_breaker_to_failure_payload
+       (KET.failure_class_of_tool_result_payload blocked_payload));
+  (* Incident shape: `ls ls lib` exits non-zero immediately with no matching
+     semantic classifier -> runtime_error -> Runtime_failure (still counted,
+     the pre-fix Ambiguous_failure_signature collapse target). *)
+  let runtime_error_payload =
+    Masc.Exec_core.process_result_json
+      ~base_path:"/tmp"
+      ~keeper_name:"exec-core-breaker-test"
+      ~cmd:"ls ls lib"
+      ~status:(Unix.WEXITED 2)
+      ~output:"ls: cannot access 'ls': No such file or directory"
+      ()
+    |> Yojson.Safe.to_string
+  in
+  check (option string) "Exec_core runtime_error payload declares runtime_failure"
+    (Some "runtime_failure")
+    (Option.map Tool_result.tool_failure_class_to_string
+       (KET.failure_class_of_tool_result_payload runtime_error_payload));
+  check bool "Exec_core runtime_error payload still trips circuit breaker" true
+    (KET.should_apply_circuit_breaker_to_failure_payload
+       (KET.failure_class_of_tool_result_payload runtime_error_payload))
+
 let test_tool_execute_raw_cmd_requires_typed_shell_ir () =
   with_exec_fixture "tool_execute_raw_cmd_requires_typed_shell_ir"
     (fun ~config ~meta ~ctx_work ->
@@ -1832,6 +1879,8 @@ let () =
         test_tool_result_or_error_preserves_failure_class;
       test_case "workflow rejection skips circuit breaker" `Quick
         test_workflow_rejection_payload_skips_circuit_breaker;
+      test_case "Exec_core producer payloads route through circuit breaker"
+        `Quick test_execute_producer_payloads_route_through_circuit_breaker;
       test_case "tool_execute raw cmd requires typed Shell IR" `Quick
         test_tool_execute_raw_cmd_requires_typed_shell_ir;
       test_case "tool_execute pipe argv emits pipeline recovery plan" `Quick

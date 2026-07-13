@@ -152,9 +152,16 @@ val classify_tool_result_payload : string -> tool_result_payload
     plain text or malformed JSON. *)
 val failure_class_of_tool_result_payload : string -> Tool_result.tool_failure_class option
 
-(** [false] when a failed tool payload is a business-rule workflow
-    rejection that should be shown to the keeper without opening the
-    repeated-failure circuit breaker. *)
+(** [false] for [Policy_rejection] and [Workflow_rejection] — deterministic,
+    caller-visible rejections (permission/guardrail/validation denials and
+    business-rule refusals) surface as their own typed error/alternatives
+    instead of a loop-breaker hint, and repetition handling belongs to the
+    OAS-side episode detector at the LLM boundary. [true] (breaker applies)
+    for [Transient_error], [Runtime_failure], and [None] (undeclared,
+    conservatively treated as counting). Execute's own failure/blocked/
+    validation payloads declare [Policy_rejection] as of the sangsu
+    Ambiguous_failure_signature fix (masc#24314) and are routed by this same
+    predicate — no Execute-specific branch exists or is needed. *)
 val should_apply_circuit_breaker_to_failure_payload : Tool_result.tool_failure_class option -> bool
 
 (** Tag-based dispatch callback for masc_* tools without handler registry entries.

@@ -316,7 +316,8 @@ let transient_mutex_contention_tool_error
         [ "ok", `Bool false
         ; "error", `String message
         ; "error_class", `String transient_mutex_contention_error_class
-        ; "failure_class", `String "transient_error"
+        ; ( "failure_class"
+          , `String (Tool_result.tool_failure_class_to_string Tool_result.Transient_error) )
         ; "recoverable", `Bool true
         ; "transient", `Bool true
         ; "retry_recommended", `Bool true

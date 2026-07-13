@@ -82,10 +82,18 @@ let has_git_marker path =
   in
   try walk path with Sys_error _ -> false
 
-(** Get git root directory *)
+(** Get git root directory.
+    Tries [git rev-parse --show-toplevel] first; [has_git_marker] is a
+    fast-path optimisation that can fail inside Docker sandboxes where
+    [Sys.file_exists] does not see the host-side [.git] directory, so we
+    only use it as a fallback diagnostic, not a gate. *)
 let git_root ~base_path =
-  if not (has_git_marker base_path) then None
-  else git_first_line ~repo_path:base_path [ "rev-parse"; "--show-toplevel" ]
+  match git_first_line ~repo_path:base_path [ "rev-parse"; "--show-toplevel" ] with
+  | Some _ as result -> result
+  | None ->
+    if has_git_marker base_path then
+      git_first_line ~repo_path:base_path [ "rev-parse"; "--show-toplevel" ]
+    else None
 
 (** Check if directory is a git repository *)
 let is_git_repo ~base_path =

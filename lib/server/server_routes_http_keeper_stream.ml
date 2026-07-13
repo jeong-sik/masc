@@ -1477,7 +1477,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
           | `Terminal, _ | _, `Terminal -> `Terminal
           | `Client_disconnected, `Client_disconnected -> `Client_disconnected)
         (fun () ->
-           ignore (Eio.Promise.await worker_completion : keeper_stream_completion);
+           let (_ : keeper_stream_completion) = Eio.Promise.await worker_completion in
            `Terminal)
         (fun () ->
            Eio.Promise.await client_disconnect;
@@ -1501,8 +1501,9 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
         stage_completion
           (Completion_terminal { status; body; queued_outcome })
     | Stream_client_disconnected ->
-        Atomic.set client_disconnected true;
-        ignore (Eio.Promise.try_resolve client_disconnect_resolver () : bool)
+      Atomic.set client_disconnected true;
+      let (_ : bool) = Eio.Promise.try_resolve client_disconnect_resolver () in
+      ()
     | Stream_event stream_event ->
         if !closed
         then observe_stream_event_cutoff "writer_closed"

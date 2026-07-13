@@ -280,6 +280,9 @@ let with_store_transition_lock ~base_path ~request_id f =
         Store_transition_table.add store_transition_locks key lock;
         lock)
   in
+  (* fun-protect-finally-ok: the registry user-count cleanup acquires only the
+     cancellation-protected bookkeeping mutex; it awaits no external event and
+     cannot strand the protected exception behind cancellable cleanup. *)
   Fun.protect
     ~finally:(fun () ->
       Eio.Mutex.use_rw ~protect:true mu (fun () ->
@@ -306,6 +309,9 @@ let with_keeper_submission_lock ~base_path ~keeper_name f =
         Keeper_submission_table.add keeper_submission_locks key lock;
         lock)
   in
+  (* fun-protect-finally-ok: the registry user-count cleanup acquires only the
+     cancellation-protected bookkeeping mutex; it awaits no external event and
+     cannot strand the protected exception behind cancellable cleanup. *)
   Fun.protect
     ~finally:(fun () ->
       Eio.Mutex.use_rw ~protect:true mu (fun () ->
@@ -967,6 +973,9 @@ let persist_terminal_from_source ~(entry : entry) ~source_path =
       | Found terminal_entry ->
         if entry_record_to_json terminal_entry = entry_record_to_json entry
         then (
+          (* See the lossless namespace protocol below: the durable terminal
+             destination is authoritative; cleanup failure is observed by
+             [remove_duplicate_source] and recovery retries the source. *)
           ignore (remove_duplicate_source ~entry source_path : bool);
           Ok ())
         else
@@ -986,6 +995,8 @@ let persist_terminal_from_source ~(entry : entry) ~source_path =
          terminal precedence. Never rename the sole source across directories:
          partial parent-directory fsync can otherwise lose both names. *)
       let* () = save_entry_durable terminal_path entry in
+      (* See the lossless namespace protocol above: terminal publication is
+         committed even when observed source cleanup must be retried. *)
       ignore (remove_duplicate_source ~entry source_path : bool);
       Ok ())
 ;;
@@ -1269,8 +1280,7 @@ let finalize_existing_terminal_source ~(entry : entry) source_path =
   | None -> Error (Integrity_failed Unsafe_request_id)
   | Some terminal_path ->
     let* () = save_entry_durable terminal_path entry in
-    ignore (remove_duplicate_source ~entry source_path : bool);
-    Ok true
+    Ok (remove_duplicate_source ~entry source_path)
 ;;
 
 let empty_recovery_report =

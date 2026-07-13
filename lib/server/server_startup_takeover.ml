@@ -287,7 +287,7 @@ let release_base_path_lease lease =
       | None -> false
     in
     (try
-       ignore (Unix.lseek lease.fd 0 Unix.SEEK_SET : int);
+       let (_ : int) = Unix.lseek lease.fd 0 Unix.SEEK_SET in
        Unix.lockf lease.fd Unix.F_ULOCK 0
      with
      | Unix.Unix_error (error, syscall, argument) ->
@@ -351,7 +351,7 @@ let acquire_base_path_lock ?lock_path base_path =
          let pid = Unix.getpid () in
          let payload = Printf.sprintf "%d\n" pid in
          Unix.ftruncate fd 0;
-         ignore (Unix.lseek fd 0 Unix.SEEK_SET : int);
+         let (_ : int) = Unix.lseek fd 0 Unix.SEEK_SET in
          write_all fd payload;
          Unix.fsync fd;
          let lease = { fd; path } in

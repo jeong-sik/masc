@@ -9,6 +9,7 @@
 
 type keeper_persistence_report =
   { shutdown : Keeper_shutdown_runtime.restored_inventory
+  ; delivery : Keeper_chat_delivery_journal.recovery_report
   ; queue : Keeper_chat_queue.configure_report
   ; requests : Keeper_msg_async.recovery_report
   }
@@ -16,6 +17,7 @@ type keeper_persistence_report =
 type keeper_persistence_failure_phase =
   | Resolving_base_path
   | Restoring_shutdown
+  | Recovering_delivery
   | Configuring_queue
   | Recovering_requests
   | Starting_keeper_loops
@@ -84,12 +86,11 @@ val prepare_keeper_persistence :
   config:Workspace.config ->
   unit ->
   (prepared_keeper_persistence, keeper_persistence_prepare_error) result
-(** Synchronously configure/restore the durable queue, then recover keeper
-    message requests against one canonical BasePath identity captured at entry.
-    Direct chat checkpoints are request-local and deliberately excluded from a
-    global startup inventory. Only an idle process lifecycle may prepare; ready
-    state cannot be replaced by a second preparation. Per-record failures remain
-    typed in the report and do not stop unrelated Keeper lanes.
+(** Synchronously reconcile delivery journals, configure/restore the durable
+    queue, then recover keeper message requests against one canonical BasePath
+    identity captured at entry. Only an idle process lifecycle may prepare;
+    ready state cannot be replaced by a second preparation. Per-record failures
+    remain typed in the report and do not stop unrelated Keeper lanes.
     [requested_base_path] is diagnostic identity only; every persistence and
     backend operation uses the canonical [config]. *)
 

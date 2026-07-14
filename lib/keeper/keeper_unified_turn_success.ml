@@ -76,8 +76,7 @@ let terminal_outcome_of_result result =
     Terminal_done
   | Runtime_agent.InputRequired _ -> Terminal_input_required
   | Runtime_agent.Yielded_to_chat_waiting _
-  | Runtime_agent.Yielded_to_durable_stimulus _
-  | Runtime_agent.ToolFailureRecoveryDeferred _ ->
+  | Runtime_agent.Yielded_to_durable_stimulus _ ->
     Terminal_checkpoint
 ;;
 
@@ -284,8 +283,6 @@ let emit_usage_metrics_and_log
       Printf.sprintf "yielded_to_durable_stimulus(%d)" turns_used
     | Runtime_agent.InputRequired { turns_used; _ } ->
       Printf.sprintf "input_required(%d)" turns_used
-    | Runtime_agent.ToolFailureRecoveryDeferred { turns_used; _ } ->
-      Printf.sprintf "tool_failure_recovery_deferred(%d)" turns_used
   in
   let outcome_label =
     match terminal_outcome with
@@ -297,8 +294,6 @@ let emit_usage_metrics_and_log
        | Runtime_agent.Yielded_to_durable_stimulus _ ->
          "yielded_to_durable_stimulus"
        | Runtime_agent.InputRequired _ -> "input_required"
-       | Runtime_agent.ToolFailureRecoveryDeferred _ ->
-         "tool_failure_recovery_deferred"
        | Runtime_agent.Completed
        | Runtime_agent.TurnLimitObserved _
        | Runtime_agent.ExecutionTimeoutObserved _
@@ -422,7 +417,6 @@ let terminal_reason_of_outcome result = function
        Keeper_turn_terminal.of_disposition
          ~source:"runtime_stop_reason"
          Keeper_turn_disposition.Input_required
-     | Runtime_agent.ToolFailureRecoveryDeferred _
      | Runtime_agent.Completed
      | Runtime_agent.TurnLimitObserved _
      | Runtime_agent.ExecutionTimeoutObserved _
@@ -519,15 +513,6 @@ let reset_turn_failures_for_stop_reason ~config ~updated_meta result =
       "yielded autonomous run for a pending durable stimulus after %d turn(s), \
        checkpoint saved — will resume next cycle"
       turns_used;
-    reset_failure_state ()
-  | Runtime_agent.ToolFailureRecoveryDeferred
-      { turns_used; reason; tool_names } ->
-    Log.Keeper.info ~keeper_name:updated_meta.name
-      "typed tool-failure recovery deferred after %d turn(s), checkpoint saved \
-       tools=%s reason_digest=%s"
-      turns_used
-      (String.concat "," tool_names)
-      Digestif.SHA256.(digest_string reason |> to_hex);
     reset_failure_state ()
   | Runtime_agent.InputRequired { turns_used; request } ->
     Log.Keeper.info ~keeper_name:updated_meta.name

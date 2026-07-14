@@ -196,42 +196,31 @@ let test_accept_keeps_result () =
     Alcotest.failf "accepted response should pass through: %s"
       (Agent_sdk.Error.to_string err)
 
-let test_typed_recovery_control_stops_bypass_response_accept () =
+let test_input_required_bypasses_response_accept () =
   let accept_calls = ref 0 in
   let reject (_ : Agent_sdk.Types.api_response) =
     incr accept_calls;
     false
   in
   let request = input_required_request () in
-  let input_required =
+  let result =
     { (run_result ()) with
       stop_reason = Runtime_agent.InputRequired { turns_used = 2; request }
     }
   in
-  let deferred =
-    { (run_result ()) with
-      stop_reason =
-        Runtime_agent.ToolFailureRecoveryDeferred
-          { turns_used = 2; reason = "wait"; tool_names = [ "Execute" ] }
-    }
-  in
-  List.iter
-    (fun (label, result) ->
-       match
-         Masc.Keeper_turn_driver.For_testing.apply_accept
-           ~runtime_id:"runtime.reasoning-model"
-           ~accept:reject
-           result
-       with
-       | Ok _ -> ()
-       | Error error ->
-         Alcotest.failf
-           "%s control stop rotated through response acceptance: %s"
-           label
-           (Agent_sdk.Error.to_string error))
-    [ "input_required", input_required; "defer", deferred ];
+  (match
+     Masc.Keeper_turn_driver.For_testing.apply_accept
+       ~runtime_id:"runtime.reasoning-model"
+       ~accept:reject
+       result
+   with
+   | Ok _ -> ()
+   | Error error ->
+     Alcotest.failf
+       "InputRequired rotated through response acceptance: %s"
+       (Agent_sdk.Error.to_string error));
   Alcotest.(check int)
-    "typed control stops never invoke the deliverable accept predicate"
+    "InputRequired never invokes the deliverable accept predicate"
     0
     !accept_calls
 
@@ -518,36 +507,6 @@ let test_finalization_does_not_surface_hidden_reasoning () =
     "typed rejection diagnostic does not expose ReasoningDetails content"
     false
     (contains ~needle:"provider-private reasoning" reason)
-
-let test_recovery_defer_does_not_synthesize_tool_narration () =
-  let deferred =
-    { (run_result ()) with
-      stop_reason =
-        Runtime_agent.ToolFailureRecoveryDeferred
-          { turns_used = 2
-          ; reason = "wait for repository state"
-          ; tool_names = [ "Execute" ]
-          }
-    }
-  in
-  match
-    Masc.Keeper_agent_run.For_testing.normalize_response_text_for_finalization
-      ~runtime_id:"runtime.reasoning-model"
-      ~initial_messages:[]
-      ~run_result:deferred
-      ~text:""
-      ~tool_names:[ "Execute" ]
-      ()
-  with
-  | Ok text ->
-    Alcotest.(check string)
-      "control checkpoint has no synthetic assistant narration"
-      ""
-      text
-  | Error error ->
-    Alcotest.failf
-      "typed recovery checkpoint should finalize without a chat reply: %s"
-      (Agent_sdk.Error.to_string error)
 
 let test_direct_no_progress_retry_uses_runtime_decision () =
   with_direct_retry_runtime (fun () ->
@@ -1764,9 +1723,9 @@ let () =
           Alcotest.test_case "accepted response passes through" `Quick
             test_accept_keeps_result;
           Alcotest.test_case
-            "typed recovery control stops bypass response acceptance"
+            "InputRequired bypasses response acceptance"
             `Quick
-            test_typed_recovery_control_stops_bypass_response_accept;
+            test_input_required_bypasses_response_accept;
           Alcotest.test_case
             "replay projection failure preserves provider success"
             `Quick
@@ -1787,10 +1746,6 @@ let () =
             "finalization does not surface hidden reasoning"
             `Quick
             test_finalization_does_not_surface_hidden_reasoning;
-          Alcotest.test_case
-            "recovery defer does not synthesize tool narration"
-            `Quick
-            test_recovery_defer_does_not_synthesize_tool_narration;
 	          Alcotest.test_case
 	            "direct no-progress retry uses runtime decision"
 	            `Quick

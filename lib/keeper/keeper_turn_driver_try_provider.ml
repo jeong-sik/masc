@@ -154,7 +154,6 @@ let apply_accept
   =
   match run_result.stop_reason with
   | Runtime_agent.InputRequired _
-  | Runtime_agent.ToolFailureRecoveryDeferred _
   | Runtime_agent.TurnLimitObserved _
   | Runtime_agent.ExecutionTimeoutObserved _
   | Runtime_agent.ExecutionIdleTimeoutObserved _ ->

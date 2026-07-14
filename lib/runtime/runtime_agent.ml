@@ -81,11 +81,6 @@ type stop_reason =
       turns_used : int;
       request : Agent_sdk.Error.input_required;
     }
-  | ToolFailureRecoveryDeferred of {
-      turns_used : int;
-      reason : string;
-      tool_names : string list;
-    }
 
 type config =
   Runtime_agent_context.config = {
@@ -152,9 +147,6 @@ let worker_lifecycle_classification_of_result = function
   | Ok _ -> { event = "completed"; status = "completed"; error = None }
   | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.MaxTurnsExceeded _)) ->
     { event = "completed"; status = "turn_limit_observed"; error = None }
-  | Error
-      (Agent_sdk.Error.Agent (Agent_sdk.Error.ToolFailureRecoveryDeferred _)) ->
-    { event = "completed"; status = "tool_failure_recovery_deferred"; error = None }
   | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.InputRequired _)) ->
     { event = "completed"; status = "input_required"; error = None }
   | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionTimeout _)) ->
@@ -921,8 +913,6 @@ let dashboard_status_of_stop_reason = function
       Dashboard_oas_bridge.Cancelled { reason = "yielded_to_durable_stimulus" }
   | InputRequired _ ->
       Dashboard_oas_bridge.Cancelled { reason = "input_required" }
-  | ToolFailureRecoveryDeferred _ ->
-      Dashboard_oas_bridge.Cancelled { reason = "tool_failure_recovery_deferred" }
 
 let record_dashboard_oas_response ~config ~total_duration_ms ?serialization_ms
     ~status (response : Agent_sdk.Types.api_response) =
@@ -1294,41 +1284,6 @@ let run_blocks
       | None ->
         close_agent_for_cleanup ~propagate_cancel:false ~config agent;
         Error (Agent_sdk.Error.Agent (Agent_sdk.Error.ExitConditionMet r)))
-    | Error
-        (Agent_sdk.Error.Agent
-           (Agent_sdk.Error.ToolFailureRecoveryDeferred
-              { reason; tool_names })) ->
-      close_after_success ();
-      let stop_reason =
-        ToolFailureRecoveryDeferred { turns_used = turns; reason; tool_names }
-      in
-      let partial_response = partial_response_of_stop ~session_id ~text:"" in
-      record_dashboard_oas_response
-        ~config
-        ~total_duration_ms:run_total_duration_ms
-        ~status:(dashboard_status_of_stop_reason stop_reason)
-        partial_response;
-      Log.Misc.info
-        "oas_worker %s: typed tool-failure recovery deferred tools=%s \
-         reason_digest=%s"
-        config.name
-        (String.concat "," tool_names)
-        (Auth.sha256_hash reason);
-      let runtime_observation =
-        runtime_observation_for_completed_config
-          ~total_duration_ms:run_total_duration_ms
-          config
-      in
-      Ok
-        { response = partial_response
-        ; checkpoint
-        ; session_id
-        ; turns
-        ; trace_ref
-        ; run_validation
-        ; runtime_observation = Some runtime_observation
-        ; stop_reason
-        }
     | Error
         (Agent_sdk.Error.Agent
            (Agent_sdk.Error.AgentExecutionTimeout r)) ->

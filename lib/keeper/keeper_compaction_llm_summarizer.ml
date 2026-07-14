@@ -250,45 +250,109 @@ let run_plan
          runtime_id detail;
        None)
 
+type candidate =
+  { runtime_id : string
+  ; provider_cfg : Llm_provider.Provider_config.t
+  }
+
+let eligible_candidate ~keeper_name (runtime : Runtime.t) =
+  let runtime_id = runtime.Runtime.id in
+  let provider_cfg = runtime.Runtime.provider_config in
+  if not (is_direct_completion_provider provider_cfg)
+  then (
+    Log.Keeper.warn ~keeper_name
+      "compaction LLM candidate skipped runtime=%s: provider does not support \
+       direct completion"
+      runtime_id;
+    None)
+  else if not (plan_schema_supported provider_cfg)
+  then (
+    Log.Keeper.warn ~keeper_name
+      "compaction LLM candidate skipped runtime=%s: provider does not support \
+       the compaction plan schema"
+      runtime_id;
+    None)
+  else Some { runtime_id; provider_cfg }
+
+let candidates_for_assignment ~keeper_name assignment_id =
+  let rec resolve_lane acc = function
+    | [] -> Some (List.rev acc)
+    | runtime_id :: rest ->
+      (match Runtime.get_runtime_by_id runtime_id with
+       | None ->
+         Log.Keeper.warn ~keeper_name
+           "compaction LLM lane candidate disappeared runtime=%s assignment=%s"
+           runtime_id assignment_id;
+         None
+       | Some runtime ->
+         let acc =
+           match eligible_candidate ~keeper_name runtime with
+           | None -> acc
+           | Some candidate -> candidate :: acc
+         in
+         resolve_lane acc rest)
+  in
+  match Runtime.resolve_assignment assignment_id with
+  | `Missing ->
+    Log.Keeper.warn ~keeper_name
+      "compaction LLM assignment resolution failed runtime=%s: not configured"
+      assignment_id;
+    None
+  | `Single_runtime runtime ->
+    Some (Option.to_list (eligible_candidate ~keeper_name runtime))
+  | `Lane lane ->
+    resolve_lane [] (Runtime_lane.ordered_candidates lane)
+
 let make ?complete ?timeout_sec ~(runtime_id : string) ~(keeper_name : string) ()
   : summarizer option
   =
-  match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
-  | Some sw, Some net ->
-    let clock = Eio_context.get_clock_opt () in
-    (match
-       Keeper_memory_runtime_resolution.provider_for_runtime
-         ~runtime_id
-     with
-     | Error err ->
-       Log.Keeper.warn ~keeper_name
-         "compaction LLM summarizer provider resolution failed runtime=%s: %s"
-         runtime_id err;
-       None
-     | Ok provider ->
-       let providers =
-         [ provider ]
-         |> List.filter is_direct_completion_provider
-         |> List.filter plan_schema_supported
-       in
-       (match providers with
-        | [] ->
-          Log.Keeper.warn ~keeper_name
-            "compaction LLM summarizer has no schema-capable direct completion \
-             provider runtime=%s"
-            runtime_id;
-          None
-        | provider_cfg :: _ ->
-          Some
-            (fun ~messages ->
-              run_plan ?complete ?clock ?timeout_sec ~keeper_name
-                ~runtime_id ~sw ~net ~provider_cfg ~messages ())))
-  | _ ->
+  match candidates_for_assignment ~keeper_name runtime_id with
+  | None -> None
+  | Some [] ->
     Log.Keeper.warn ~keeper_name
-      "compaction LLM summarizer skipped: Eio context unavailable runtime=%s"
+      "compaction LLM summarizer has no eligible candidate assignment=%s"
       runtime_id;
     None
+  | Some candidates ->
+    (match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
+     | Some sw, Some net ->
+       let clock = Eio_context.get_clock_opt () in
+       Some
+         (fun ~messages ->
+           let rec attempt = function
+             | [] ->
+               Log.Keeper.warn ~keeper_name
+                 "compaction LLM candidate chain exhausted assignment=%s"
+                 runtime_id;
+               None
+             | candidate :: rest ->
+               (match
+                  run_plan ?complete ?clock ?timeout_sec ~keeper_name
+                    ~runtime_id:candidate.runtime_id ~sw ~net
+                    ~provider_cfg:candidate.provider_cfg ~messages ()
+                with
+                | Some _ as plan ->
+                  Log.Keeper.info ~keeper_name
+                    "compaction LLM candidate succeeded assignment=%s runtime=%s"
+                    runtime_id candidate.runtime_id;
+                  plan
+                | None -> attempt rest)
+           in
+           attempt candidates)
+     | _ ->
+       List.iter
+         (fun candidate ->
+           Log.Keeper.warn ~keeper_name
+             "compaction LLM candidate skipped runtime=%s assignment=%s: Eio \
+              context unavailable"
+             candidate.runtime_id runtime_id)
+         candidates;
+       None)
 
 module For_testing = struct
   let provider_for_plan = provider_for_plan
+
+  let candidate_runtime_ids_for_assignment ~keeper_name ~runtime_id =
+    candidates_for_assignment ~keeper_name runtime_id
+    |> Option.map (List.map (fun candidate -> candidate.runtime_id))
 end

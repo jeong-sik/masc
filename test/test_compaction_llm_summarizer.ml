@@ -28,6 +28,11 @@ let temperature_runtime_toml =
    protocol = \"ollama-http\"\n\
    endpoint = \"http://localhost:11434\"\n\
    \n\
+   [providers.fallback]\n\
+   display-name = \"Fallback\"\n\
+   protocol = \"ollama-http\"\n\
+   endpoint = \"http://localhost:11435\"\n\
+   \n\
    [models.kimi_like]\n\
    api-name = \"kimi-like\"\n\
    max-context = 1024\n\
@@ -38,9 +43,15 @@ let temperature_runtime_toml =
    \n\
    [local.kimi_like]\n\
    \n\
+   [fallback.kimi_like]\n\
+   \n\
    [runtime]\n\
    default = \"local.kimi_like\"\n\
-   librarian = \"local.kimi_like\"\n"
+   librarian = \"local.kimi_like\"\n\
+   \n\
+   [runtime.lanes.compaction]\n\
+   strategy = \"ordered\"\n\
+   candidates = [\"local.kimi_like\", \"fallback.kimi_like\"]\n"
 
 let with_temperature_runtime f =
   let path = Filename.temp_file "compaction_temperature_runtime" ".toml" in
@@ -84,6 +95,17 @@ let test_provider_for_plan_preserves_temperature_omission () =
     "temperature remains omitted"
     None
     cfg.temperature
+
+let test_lane_candidates_keep_declared_order () =
+  with_temperature_runtime @@ fun _ ->
+  let actual =
+    C.For_testing.candidate_runtime_ids_for_assignment
+      ~keeper_name:"keeper-test"
+      ~runtime_id:"compaction"
+  in
+  Alcotest.(check (option (list string))) "declared candidate order"
+    (Some [ "local.kimi_like"; "fallback.kimi_like" ])
+    actual
 
 (* -- plan_of_json: valid partition accepted -- *)
 
@@ -147,8 +169,7 @@ let test_all_dropped_rejected () =
 
 (* The summary is only consumed when there are summarized indices. A blank
    summary with an empty [summarized] set is a legitimate "keep everything"
-   plan and must be accepted — rejecting it spuriously falls back to the
-   deterministic chain. *)
+   plan and must be accepted — rejecting it would spuriously fail compaction. *)
 let test_empty_summary_accepted_when_nothing_summarized () =
   let json = plan_json ~summary:"   " ~kept:[ 0; 1 ] ~summarized:[] ~dropped:[] in
   Alcotest.(check bool)
@@ -224,6 +245,8 @@ let () =
             test_provider_for_plan_preserves_runtime_temperature
         ; Alcotest.test_case "temperature omission is preserved" `Quick
             test_provider_for_plan_preserves_temperature_omission
+        ; Alcotest.test_case "lane candidates keep declared order" `Quick
+            test_lane_candidates_keep_declared_order
         ] )
     ; ( "plan_of_json"
       , [ Alcotest.test_case "valid partition accepted" `Quick test_valid_partition_accepted

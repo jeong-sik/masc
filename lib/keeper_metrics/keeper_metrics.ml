@@ -67,9 +67,6 @@ type t =
   | ApprovalResolutionSignal
   | ProfileLoadFailures
   | CompactAuditFailures
-  | CompactAuditRetentionParse
-  | CompactAuditDrainBatches
-  | CompactAuditDrainBatchSizeBucket
   | FsFailures
   | PersistencePreparationStageDuration
   | PersistencePreparationExamined
@@ -291,10 +288,6 @@ let to_string = function
   | ApprovalResolutionSignal -> "masc_keeper_approval_resolution_signal_total"
   | ProfileLoadFailures -> "masc_keeper_profile_load_failures_total"
   | CompactAuditFailures -> "masc_keeper_compact_audit_failures_total"
-  | CompactAuditRetentionParse -> "masc_keeper_compact_audit_retention_parse_total"
-  | CompactAuditDrainBatches -> "masc_keeper_compact_audit_drain_batches_total"
-  | CompactAuditDrainBatchSizeBucket ->
-    "masc_keeper_compact_audit_drain_batch_size_bucket_total"
   | FsFailures -> "masc_keeper_fs_failures_total"
   | PersistencePreparationStageDuration ->
     "masc_keeper_persistence_preparation_stage_duration_seconds"

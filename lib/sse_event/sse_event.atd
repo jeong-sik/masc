@@ -51,9 +51,7 @@ type turn_ready_payload = {
 (* PR-4 events: handoff_requested, handoff_completed, context_compacted,
    context_overflow_imminent, context_compact_started,
    content_replacement_replaced, content_replacement_kept,
-   slot_scheduler_observed.  All simple records.  Side effects in the
-   runtime arms (Context_overflow_action_tracker, metric counters)
-   remain in runtime_event_bridge.ml -- typed constructors emit JSON
+   slot_scheduler_observed.  All simple records; typed constructors emit JSON
    only. *)
 
 type handoff_requested_payload = {

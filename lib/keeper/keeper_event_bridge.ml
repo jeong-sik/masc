@@ -84,7 +84,7 @@ let emit_native_event_log (evt : Agent_sdk.Event_bus.event) (json : Yojson.Safe.
   | Agent_sdk.Event_bus.TurnReady { agent_name; turn; tool_names } ->
     (* [substrate:tool_surface] — deterministic per-turn snapshot of the
          tool list the LLM actually sees this turn (after guardrails,
-         operator policy, tool_filter_override).  Emitted as a single
+         and operator policy).  Emitted as a single
          grep-friendly line with a stable hash so operators can confirm
          which tools were on the LLM's surface for a given turn without
          enabling verbose tool dumps. *)
@@ -96,27 +96,6 @@ let emit_native_event_log (evt : Agent_sdk.Event_bus.event) (json : Yojson.Safe.
          turn
          (List.length tool_names)
          (String.sub names_hash 0 16))
-  | Agent_sdk.Event_bus.ContextCompacted
-      { agent_name; before_tokens; after_tokens; phase } ->
-    log
-      (Printf.sprintf
-         "context compacted agent=%s before_tokens=%d after_tokens=%d phase=%s"
-         agent_name
-         before_tokens
-         after_tokens
-         phase)
-  | Agent_sdk.Event_bus.ContextOverflowImminent
-      { agent_name; estimated_tokens; limit_tokens; ratio } ->
-    log
-      (Printf.sprintf
-         "context overflow imminent agent=%s estimated_tokens=%d limit_tokens=%d \
-          ratio=%.3f"
-         agent_name
-         estimated_tokens
-         limit_tokens
-         ratio)
-  | Agent_sdk.Event_bus.ContextCompactStarted { agent_name; trigger } ->
-    log (Printf.sprintf "context compact started agent=%s trigger=%s" agent_name trigger)
   (* Variants below previously absorbed by [_ -> ()] catch-all.  Each is
      enumerated explicitly so adding a new [Agent_sdk.Event_bus.payload]
      variant fails the build instead of silently dropping the log line. *)
@@ -124,9 +103,6 @@ let emit_native_event_log (evt : Agent_sdk.Event_bus.event) (json : Yojson.Safe.
   | Agent_sdk.Event_bus.HandoffRequested _
   | Agent_sdk.Event_bus.HandoffCompleted _
   | Agent_sdk.Event_bus.ElicitationCompleted _
-  | Agent_sdk.Event_bus.ContentReplacementReplaced _
-  | Agent_sdk.Event_bus.ContentReplacementKept _
-  | Agent_sdk.Event_bus.SlotSchedulerObserved _
   | Agent_sdk.Event_bus.InferenceTelemetry _
   | Agent_sdk.Event_bus.Custom _ -> ()
 ;;
@@ -309,90 +285,7 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
         ]
     in
     Some (wrap ~event_type:"handoff_completed" ~payload ~agent_name:from_agent ())
-  | Agent_sdk.Event_bus.ContextCompacted
-      { agent_name; before_tokens; after_tokens; phase } ->
-    (* #9935: compaction completed — clears any pending
-         imminent and fires action-taken counter. *)
-    Context_overflow_action_tracker.record_action ~keeper_name:agent_name;
-    let payload =
-      `Assoc
-        [ "agent_name", `String agent_name
-        ; "before_tokens", `Int before_tokens
-        ; "after_tokens", `Int after_tokens
-        ; "phase", `String phase
-        ]
-    in
-    Some (wrap ~event_type:"context_compacted" ~payload ~agent_name ())
   | Agent_sdk.Event_bus.ElicitationCompleted _ -> None (* Internal; no SSE relay needed *)
-  | Agent_sdk.Event_bus.ContextOverflowImminent
-      { agent_name; estimated_tokens; limit_tokens; ratio } ->
-    (* #9935: track imminent→action pairing so an unanswered
-         overflow (no compact_started/compacted within grace
-         window) is observable via metric + warn log, rather
-         than silently burning out as provider_timeout. *)
-    Otel_metric_store.set_gauge
-      Otel_metric_store.metric_oas_context_overflow_ratio
-      ~labels:[ "agent_name", agent_name ]
-      ratio;
-    Context_overflow_action_tracker.record_imminent
-      ~keeper_name:agent_name
-      ~ts:(Time_compat.now ());
-    let payload =
-      `Assoc
-        [ "agent_name", `String agent_name
-        ; "estimated_tokens", `Int estimated_tokens
-        ; "limit_tokens", `Int limit_tokens
-        ; "ratio", `Float ratio
-        ]
-    in
-    Some (wrap ~event_type:"context_overflow_imminent" ~payload ~agent_name ())
-  | Agent_sdk.Event_bus.ContextCompactStarted { agent_name; trigger } ->
-    (* #9935: compaction started — clears pending imminent
-         and fires action-taken counter. *)
-    Context_overflow_action_tracker.record_action ~keeper_name:agent_name;
-    Otel_metric_store.inc_counter
-      Otel_metric_store.metric_oas_context_compaction_total
-      ~labels:[ "agent_name", agent_name; "trigger", trigger ]
-      ();
-    let payload =
-      `Assoc [ "agent_name", `String agent_name; "trigger", `String trigger ]
-    in
-    Some (wrap ~event_type:"context_compact_started" ~payload ~agent_name ())
-  | Agent_sdk.Event_bus.ContentReplacementReplaced
-      { tool_use_id; preview; original_chars; seen_count_after } ->
-    let payload =
-      `Assoc
-        [ "tool_use_id", `String tool_use_id
-        ; "preview", `String preview
-        ; "original_chars", `Int original_chars
-        ; "seen_count_after", `Int seen_count_after
-        ]
-    in
-    Some (wrap ~event_type:"content_replacement_replaced" ~payload ())
-  | Agent_sdk.Event_bus.ContentReplacementKept { tool_use_id; seen_count_after } ->
-    let payload =
-      `Assoc
-        [ "tool_use_id", `String tool_use_id; "seen_count_after", `Int seen_count_after ]
-    in
-    Some (wrap ~event_type:"content_replacement_kept" ~payload ())
-  | Agent_sdk.Event_bus.SlotSchedulerObserved
-      { max_slots; active; available; queue_length; state } ->
-    let state_str =
-      match state with
-      | Agent_sdk.Event_bus.Idle -> "idle"
-      | Agent_sdk.Event_bus.Queued -> "queued"
-      | Agent_sdk.Event_bus.Saturated -> "saturated"
-    in
-    let payload =
-      `Assoc
-        [ "max_slots", `Int max_slots
-        ; "active", `Int active
-        ; "available", `Int available
-        ; "queue_length", `Int queue_length
-        ; "state", `String state_str
-        ]
-    in
-    Some (wrap ~event_type:"slot_scheduler_observed" ~payload ())
   | Agent_sdk.Event_bus.Custom (name, payload) ->
     (* Wire compatibility: dashboard consumers historically decoded
          [masc:broadcast] / [masc:keeper:snapshot] (all colons).

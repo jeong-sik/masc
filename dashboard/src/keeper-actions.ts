@@ -4,6 +4,7 @@ import {
   cancelQueuedKeeperMessage,
   fetchKeeperChatHistory,
   fetchKeeperChatReceipt,
+  resolveKeeperChatRecovery,
   fetchQueuedKeeperMessageResult,
   interruptKeeperTurn as apiInterruptKeeperTurn,
   isTerminalQueuedKeeperMessage,
@@ -22,6 +23,7 @@ import { asString, isRecord } from './components/common/normalize'
 import { keeperTurnOutcomeSuppressesReply } from './keeper-message'
 import { invalidateDashboardCache, refreshDashboard } from './store'
 import { isAbortError } from './lib/async-state'
+import { compareKeeperQueueRevisions } from './lib/keeper-chat-receipt'
 import type {
   ChatBlock,
   KeeperConversationAttachment,
@@ -836,12 +838,15 @@ export async function reconcileKeeperChatReceipts(name: string): Promise<void> {
       if (!currentEntry || currentEntry.details?.queueReceiptId !== receiptId) return
       const currentRevision = currentEntry.details.queueRevision
       const currentState = currentEntry.details.queueState
-      if (typeof currentRevision === 'number' && receipt.revision < currentRevision) {
+      if (
+        typeof currentRevision === 'string'
+        && compareKeeperQueueRevisions(receipt.revision, currentRevision) < 0
+      ) {
         return
       }
       if (
-        typeof currentRevision === 'number'
-        && receipt.revision === currentRevision
+        typeof currentRevision === 'string'
+        && compareKeeperQueueRevisions(receipt.revision, currentRevision) === 0
         && currentState
         && currentState !== receipt.state.kind
       ) {
@@ -979,6 +984,78 @@ export async function reconcileKeeperChatReceipts(name: string): Promise<void> {
   } else if (keeperActionErrors.value[keeperName]?.startsWith('큐 receipt 조회 실패:')) {
     setRecordValue(keeperActionErrors, keeperName, null)
   }
+}
+
+async function resolveKeeperChatRecoveryEntry(
+  keeperName: string,
+  entry: KeeperConversationEntry,
+  decision:
+    | { kind: 'requeue_unconfirmed' }
+    | { kind: 'cancel_unconfirmed'; detail: string; outcomeRef: string | null },
+): Promise<void> {
+  const receiptId = entry.details?.queueReceiptId?.trim() ?? ''
+  if (!receiptId) {
+    throw new Error('복구할 durable queue receipt가 없습니다.')
+  }
+  setRecordValue(keeperActionErrors, keeperName, null)
+  try {
+    const observed = await fetchKeeperChatReceipt(keeperName, receiptId)
+    if (observed.state.kind !== 'recovery_required') {
+      throw new Error(`receipt ${receiptId} is ${observed.state.kind}, not recovery_required`)
+    }
+    const result = await resolveKeeperChatRecovery(
+      keeperName,
+      receiptId,
+      observed.revision,
+      observed.state.leaseId,
+      decision,
+    )
+    const state = result.receipt.state
+    const details = {
+      ...(entry.details ?? {}),
+      queueRevision: result.receipt.revision,
+      queueState: state.kind,
+      queueFailureKind: state.kind === 'failed' ? state.failureKind : null,
+    }
+    finalizeAssistantEntry(keeperName, entry.id, {
+      delivery: state.kind === 'failed' ? 'error' : state.kind === 'delivered' ? 'delivered' : 'queued',
+      streamState: null,
+      details,
+      error: state.kind === 'failed' ? state.detail : undefined,
+    })
+    if (!result.audit.recorded) {
+      setRecordValue(
+        keeperActionErrors,
+        keeperName,
+        `복구 결정은 반영됐지만 audit 기록에 실패했습니다: ${result.audit.error}`,
+      )
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    setRecordValue(keeperActionErrors, keeperName, `큐 복구 결정 실패: ${message}`)
+    throw error
+  }
+}
+
+export async function requeueKeeperChatRecoveryEntry(
+  keeperName: string,
+  entry: KeeperConversationEntry,
+): Promise<void> {
+  await resolveKeeperChatRecoveryEntry(keeperName, entry, {
+    kind: 'requeue_unconfirmed',
+  })
+}
+
+export async function cancelKeeperChatRecoveryEntry(
+  keeperName: string,
+  entry: KeeperConversationEntry,
+  detail: string,
+): Promise<void> {
+  await resolveKeeperChatRecoveryEntry(keeperName, entry, {
+    kind: 'cancel_unconfirmed',
+    detail,
+    outcomeRef: null,
+  })
 }
 
 /** React to a server `keeper_chat_appended` push: re-merge the

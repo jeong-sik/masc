@@ -219,11 +219,6 @@ let payload_of_queued_message ~keeper_name
   ; attachments = queued_message.attachments
   }
 
-let user_line_recorded_upstream = function
-  | Keeper_chat_store.Needs_append -> false
-  | Keeper_chat_store.Already_persisted _
-  | Keeper_chat_store.Already_persisted_upstream -> true
-
 let trimmed_env_opt name =
   match Sys.getenv_opt name with
   | None -> None
@@ -1824,9 +1819,6 @@ let start_keeper_loops_owned
                           Slack delivery skipped for keeper=%s \
                           (queued reply will not be delivered)"
                          keeper_name));
-             let connector_user_line_recorded_upstream =
-               user_line_recorded_upstream queued_message.user_row_origin
-             in
              (* Derive the typed reply-continuation channel from the queued
                 message source so [process_single_turn] can route the
                 assistant reply to the originating connector (Discord/Slack)
@@ -1837,7 +1829,8 @@ let start_keeper_loops_owned
              in
              let turn_outcome =
                match
-                 process_single_turn ~connector_user_line_recorded_upstream
+                 process_single_turn
+                   ~user_row_origin:queued_message.user_row_origin
                    ~queued_turn:true
                    ~delivery_key:(Some delivery_key)
                    ~state ~clock ~auth_token:None

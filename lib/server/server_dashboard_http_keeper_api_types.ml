@@ -15,6 +15,9 @@ let keeper_suffix_runtime_trace = "/runtime-trace"
 let keeper_suffix_directive = "/directive"
 let keeper_suffix_catchup_judge = "/catchup-judge"
 
+let keeper_chat_receipt_state_json = Keeper_chat_receipt_projection.state_json
+let keeper_chat_receipt_json = Keeper_chat_receipt_projection.receipt_json
+
 let cache_key_string_segment value =
   Printf.sprintf "s%d:%s" (String.length value) value
 ;;
@@ -55,6 +58,11 @@ let keeper_runtime_trace_cache_key (config : Workspace.config) name ?trace_id
     limit
 ;;
 
+type keeper_chat_recovery_route =
+  { keeper_name : string
+  ; receipt_id : string
+  }
+
 type keeper_post_route_kind =
   | Keeper_post_config
   | Keeper_post_secrets
@@ -65,12 +73,32 @@ type keeper_post_route_kind =
   | Keeper_post_checkpoints
   | Keeper_post_directive
   | Keeper_post_catchup_judge
+  | Keeper_post_chat_recovery of keeper_chat_recovery_route
   | Keeper_post_unknown
 
-let classify_keeper_post_route req_path =
-  if not (String.starts_with ~prefix:keeper_api_prefix req_path) then
-    Keeper_post_unknown
+let keeper_chat_recovery_route req_path =
+  if not (String.starts_with ~prefix:keeper_api_prefix req_path)
+  then None
   else
+    let rest =
+      String.sub
+        req_path
+        (String.length keeper_api_prefix)
+        (String.length req_path - String.length keeper_api_prefix)
+    in
+    match String.split_on_char '/' rest with
+    | [ keeper_name; "chat"; "receipts"; receipt_id; "recovery" ]
+      when not (String.equal keeper_name "") && not (String.equal receipt_id "") ->
+      Some { keeper_name; receipt_id }
+    | _ -> None
+;;
+
+let classify_keeper_post_route req_path =
+  match keeper_chat_recovery_route req_path with
+  | Some route -> Keeper_post_chat_recovery route
+  | None when not (String.starts_with ~prefix:keeper_api_prefix req_path) ->
+    Keeper_post_unknown
+  | None ->
     let plen = String.length keeper_api_prefix in
     let tlen = String.length req_path in
     let ends_with suffix =

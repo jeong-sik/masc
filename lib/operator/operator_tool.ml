@@ -22,6 +22,23 @@ type tool_result = Tool_result.result
 
 type 'a context = 'a Tool_operator.context
 
+module Operator_remote_name = Tool_name.Operator_remote_name
+module Operator_name = Tool_name.Operator_name
+
+let operator_remote_tool_name name = Operator_remote_name.to_string name
+
+let operator_tool_name name =
+  operator_remote_tool_name (Operator_remote_name.Operator_tool name)
+;;
+
+let chat_recovery_tool_name =
+  operator_tool_name Operator_name.Operator_chat_recovery_resolve
+;;
+
+let surface_audit_tool_name =
+  operator_remote_tool_name Operator_remote_name.Surface_audit
+;;
+
 
 (* RFC-0189 PR-1b.11 — typed result.
 
@@ -140,6 +157,94 @@ let digest_schema ~remote =
 
 let surface_audit_schema = Tool_schemas_misc.surface_audit_schema
 
+let chat_recovery_decision_schema =
+  `Assoc
+    [ ( "oneOf"
+      , `List
+          [ `Assoc
+              [ "type", `String "object"
+              ; "additionalProperties", `Bool false
+              ; ( "properties"
+                , `Assoc
+                    [ ( "kind"
+                      , `Assoc
+                          [ "type", `String "string"
+                          ; "enum", `List [ `String "requeue_unconfirmed" ]
+                          ] )
+                    ] )
+              ; "required", `List [ `String "kind" ]
+              ]
+          ; `Assoc
+              [ "type", `String "object"
+              ; "additionalProperties", `Bool false
+              ; ( "properties"
+                , `Assoc
+                    [ ( "kind"
+                      , `Assoc
+                          [ "type", `String "string"
+                          ; "enum", `List [ `String "cancel_unconfirmed" ]
+                          ] )
+                    ; "detail", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
+                    ; ( "outcome_ref"
+                      , `Assoc
+                          [ ( "oneOf"
+                            , `List
+                                [ `Assoc
+                                    [ "type", `String "string"
+                                    ; "minLength", `Int 1
+                                    ]
+                                ; `Assoc [ "type", `String "null" ]
+                                ] )
+                          ] )
+                    ] )
+              ; ( "required"
+                , `List
+                    [ `String "kind"; `String "detail"; `String "outcome_ref" ] )
+              ]
+          ] )
+    ]
+;;
+
+let chat_recovery_schema =
+  { name = chat_recovery_tool_name
+  ; description =
+      "Resolve exactly one crash-ambiguous Keeper chat receipt. The observed receipt_id, canonical revision string, and lease_id must all match; this tool never auto-redelivers."
+  ; input_schema =
+      `Assoc
+        [ "type", `String "object"
+        ; "additionalProperties", `Bool false
+        ; ( "properties"
+          , schema_properties
+              [ ( "schema"
+                , `Assoc
+                    [ "type", `String "string"
+                    ; ( "enum"
+                      , `List
+                          [ `String Keeper_chat_recovery_command.tool_command_schema ] )
+                    ] )
+              ; "keeper_name", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
+              ; "receipt_id", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
+              ; ( "expected_revision"
+                , `Assoc
+                    [ "type", `String "string"
+                    ; "pattern", `String "^(0|[1-9][0-9]*)$"
+                    ] )
+              ; "lease_id", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
+              ; "decision", chat_recovery_decision_schema
+              ] )
+        ; ( "required"
+          , `List
+              [ `String "schema"
+              ; `String "keeper_name"
+              ; `String "receipt_id"
+              ; `String "expected_revision"
+              ; `String "lease_id"
+              ; `String "decision"
+              ] )
+        ]
+  }
+;;
+
 let action_schema ~remote =
   {
     name = "masc_operator_action";
@@ -199,6 +304,63 @@ let confirm_schema =
           ("required", `List [ `String "confirm_token" ]);
         ];
   }
+
+let recovery_mutation_failure_class = function
+  | Keeper_chat_queue.Invalid_input _
+  | Keeper_chat_queue.Receipt_already_terminal _
+  | Keeper_chat_queue.Receipt_not_recovery_required _
+  | Keeper_chat_queue.Recovery_revision_mismatch _
+  | Keeper_chat_queue.Recovery_lease_mismatch _ ->
+    Tool_result.Workflow_rejection
+  | Keeper_chat_queue.Persistence_not_configured
+  | Keeper_chat_queue.Snapshot_unavailable _
+  | Keeper_chat_queue.Revision_exhausted
+  | Keeper_chat_queue.Persist_failed _ ->
+    Tool_result.Runtime_failure
+;;
+
+let chat_recovery_result ~tool_name ~start_time (ctx : _ context) args =
+  match Keeper_chat_recovery_command.parse_tool_command args with
+  | Error error ->
+    let data = Keeper_chat_recovery_command.input_error_to_json error in
+    Tool_result.make_err
+      ~tool_name
+      ~class_:Tool_result.Workflow_rejection
+      ~start_time
+      ~data
+      (Yojson.Safe.to_string data)
+  | Ok command ->
+    let result =
+      Keeper_chat_recovery_command.execute ~now:(Time_compat.now ()) command
+    in
+    let audit =
+      Keeper_chat_recovery_command.audit
+        ctx.config
+        ~actor:ctx.agent_name
+        command
+        ~outcome:
+          (match result with
+           | Ok _ -> Audit_log.Success
+           | Error error ->
+             Audit_log.Failure (Keeper_chat_queue.mutation_error_to_string error))
+      |> Keeper_chat_recovery_command.audit_json
+    in
+    (match result with
+     | Ok report ->
+       Tool_result.make_ok
+         ~tool_name
+         ~start_time
+         ~data:(Keeper_chat_recovery_command.success_json ~audit command report)
+         ()
+     | Error error ->
+       let data = Keeper_chat_recovery_command.mutation_error_json ~audit error in
+       Tool_result.make_err
+         ~tool_name
+         ~class_:(recovery_mutation_failure_class error)
+         ~start_time
+         ~data
+         (Yojson.Safe.to_string data))
+;;
 
 let judgment_write_schema =
   {
@@ -282,6 +444,8 @@ let dispatch (ctx : 'a context) ~name ~args : Tool_result.result option =
       Some
         (result_of_json ~tool_name:name ~start_time:start
            (Operator_control.action_json control_ctx args))
+  | tool_name when String.equal tool_name chat_recovery_tool_name ->
+      Some (chat_recovery_result ~tool_name ~start_time:start ctx args)
   | "masc_operator_confirm" ->
       Some
         (result_of_json ~tool_name:name ~start_time:start
@@ -306,6 +470,7 @@ let schemas : tool_schema list =
     snapshot_schema ~remote:false;
     digest_schema ~remote:false;
     action_schema ~remote:false;
+    chat_recovery_schema;
     confirm_schema;
     surface_audit_schema ~remote:false;
     judgment_write_schema;
@@ -316,17 +481,12 @@ let remote_schemas : tool_schema list =
     snapshot_schema ~remote:true;
     digest_schema ~remote:true;
     action_schema ~remote:true;
+    chat_recovery_schema;
     confirm_schema;
     surface_audit_schema ~remote:true;
   ]
 
-module Operator_remote_name = Tool_name.Operator_remote_name
-module Operator_name = Tool_name.Operator_name
-
 let remote_tool_names : string list = Operator_remote_name.all_strings
-let operator_remote_tool_name name = Operator_remote_name.to_string name
-let operator_tool_name name = operator_remote_tool_name (Operator_remote_name.Operator_tool name)
-let surface_audit_tool_name = operator_remote_tool_name Operator_remote_name.Surface_audit
 
 (* ================================================================ *)
 (* Tool_spec registration                                           *)
@@ -340,7 +500,10 @@ let tool_spec_read_only =
   ]
 
 (* Tools with explicit catalog metadata that must be preserved. *)
-let tool_spec_hidden = [ "masc_operator_judgment_write"; surface_audit_tool_name ]
+let tool_spec_hidden =
+  [ "masc_operator_judgment_write"; surface_audit_tool_name; chat_recovery_tool_name ]
+;;
+
 let tool_spec_hidden_actions = [ operator_tool_name Operator_name.Operator_action ]
 
 let () =
@@ -348,6 +511,9 @@ let () =
     (fun (s : tool_schema) ->
       let is_hidden = List.mem s.name tool_spec_hidden || List.mem s.name tool_spec_hidden_actions in
       let existing = Tool_catalog.metadata s.name in
+      let direct_call_when_hidden =
+        is_hidden && not (String.equal s.name chat_recovery_tool_name)
+      in
       Tool_spec.register
         (Tool_spec.create
            ~name:s.name
@@ -357,7 +523,7 @@ let () =
            ~handler_binding:Tag_dispatch
            ~is_read_only:(List.mem s.name tool_spec_read_only)
            ~visibility:(if is_hidden then Tool_catalog.Hidden else Tool_catalog.Default)
-           ~allow_direct_call_when_hidden:is_hidden
+           ~allow_direct_call_when_hidden:direct_call_when_hidden
            ?reason:existing.reason
            ()))
     schemas

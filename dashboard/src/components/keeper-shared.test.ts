@@ -1009,7 +1009,7 @@ describe('KeeperConversationPanel', () => {
         details: {
           queueReceiptId: `chatq_00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
           queueShutdownOperationId: queueState === 'pending' ? 'shutdown-op-7' : null,
-          queueRevision: index + 1,
+          queueRevision: String(index + 1),
           queueState,
         },
       })),

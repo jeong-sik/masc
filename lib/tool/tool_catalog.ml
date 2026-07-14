@@ -249,6 +249,13 @@ let explicit_metadata : (string * metadata) list =
        masc_execute) removed — no dispatch path, no schema, no caller. *)
     ( "masc_operator_action",
       hidden_active "Internal operator-action route; hidden from the public tool surface." );
+    ( "masc_operator_chat_recovery_resolve",
+      with_execution_policy
+        ~readonly:false
+        ~idempotent:false
+        (hidden_active
+           ~allow_direct_call_when_hidden:false
+           "Operator-profile-only exact recovery of one crash-ambiguous Keeper chat receipt.") );
     ( "masc_set_param",
       hidden_active
         "Internal HTTP runtime-parameter mutation route; hidden from the public tool surface." );

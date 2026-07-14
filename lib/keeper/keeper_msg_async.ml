@@ -1034,8 +1034,12 @@ let load_record_at_path ~base_path ~request_id path =
     Unreadable reason
 ;;
 
+type record_location =
+  | Active_location
+  | Terminal_location
+
 type located_load_result =
-  | Located of entry
+  | Located of entry * record_location
   | Located_absent
   | Located_unreadable of string
   | Located_rejected of access_rejection
@@ -1221,7 +1225,7 @@ let load_record_canonical_located ~base_path ~request_id : located_load_result =
                   <> entry_record_to_json terminal_entry ->
           Located_unreadable
             "conflicting terminal request records coexist across persistence partitions"
-        | Found _ | Absent -> Located terminal_entry
+        | Found _ | Absent -> Located (terminal_entry, Terminal_location)
         | Unreadable reason ->
           Located_unreadable
             (Printf.sprintf
@@ -1232,7 +1236,7 @@ let load_record_canonical_located ~base_path ~request_id : located_load_result =
      | Rejected rejection -> Located_rejected rejection
      | Absent ->
        (match load_record_at_path ~base_path ~request_id active_path with
-      | Found entry -> Located entry
+      | Found entry -> Located (entry, Active_location)
       | Unreadable reason -> Located_unreadable reason
       | Rejected rejection -> Located_rejected rejection
       | Absent -> Located_absent))
@@ -1240,7 +1244,7 @@ let load_record_canonical_located ~base_path ~request_id : located_load_result =
 
 let load_record_canonical ~base_path ~request_id : load_result =
   match load_record_canonical_located ~base_path ~request_id with
-  | Located entry -> Found entry
+  | Located (entry, _) -> Found entry
   | Located_absent -> Absent
   | Located_unreadable reason -> Unreadable reason
   | Located_rejected rejection -> Rejected rejection
@@ -2303,7 +2307,7 @@ let poll ~base_path ~caller request_id : load_result =
          | None -> Found entry)
       | None ->
         (match load_record_canonical_located ~base_path ~request_id with
-         | Located entry ->
+         | Located (entry, _) ->
            (match owner_rejection ~caller entry with
             | Some rejection -> Rejected rejection
             | None ->
@@ -2341,7 +2345,7 @@ let load_canonical_durable_terminal ~base_path ~caller request_id =
              Error (Canonical_terminal_unreadable reason)
            | Located_rejected rejection ->
              Error (Canonical_terminal_access_rejected rejection)
-           | Located (entry, location, _source_path) ->
+           | Located (entry, location) ->
              (match owner_rejection ~caller entry with
               | Some rejection ->
                 Error (Canonical_terminal_access_rejected rejection)
@@ -2351,7 +2355,7 @@ let load_canonical_durable_terminal ~base_path ~caller request_id =
                 else
                   match location with
                   | Terminal_location -> Ok { terminal_entry = entry }
-                  | Active_location | Legacy_location ->
+                  | Active_location ->
                     Error
                       (Canonical_terminal_noncanonical_location entry.status))))
 ;;
@@ -2450,7 +2454,7 @@ let cancel_disk_record ~base_path ~caller ~request_id =
   | Located_absent -> Cancel_not_found
   | Located_unreadable reason -> Cancel_unreadable reason
   | Located_rejected rejection -> Cancel_rejected rejection
-  | Located entry ->
+  | Located (entry, _) ->
     (match owner_rejection ~caller entry with
      | Some rejection -> Cancel_rejected rejection
      | None when is_terminal_status entry.status ->

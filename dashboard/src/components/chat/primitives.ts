@@ -372,9 +372,11 @@ function ChatMetaChip({ info, compact }: { info: ChatMetaInfo | null; compact: b
 type ChatTranscriptVariant = 'default' | 'messenger'
 type ChatTranscriptSize = 'default' | 'primary'
 type ChatTranscriptAction = {
-  label: string
+  label?: string
   title?: string
-  onClick: (entry: KeeperConversationEntry) => void
+  onClick?: (entry: KeeperConversationEntry) => void
+  onRecoveryRequeue?: (entry: KeeperConversationEntry) => Promise<void>
+  onRecoveryCancel?: (entry: KeeperConversationEntry, detail: string) => Promise<void>
 }
 
 export const THINKING_TRACE_PREVIEW_CHARS = 2400
@@ -438,7 +440,11 @@ function showDeliveryBadge(entry: KeeperConversationEntry, variant: ChatTranscri
   return entry.delivery !== 'history' && entry.delivery !== 'delivered'
 }
 
-function QueueReceiptBadge({ entry }: { entry: KeeperConversationEntry }) {
+function QueueReceiptBadge({ entry, action }: {
+  entry: KeeperConversationEntry
+  action?: ChatTranscriptAction
+}) {
+  const [recoveryPending, setRecoveryPending] = useState<'requeue' | 'cancel' | null>(null)
   const receiptId = entry.details?.queueReceiptId?.trim()
   const shutdownOperationId = entry.details?.queueShutdownOperationId?.trim()
   const queueState = entry.details?.queueState
@@ -459,15 +465,64 @@ function QueueReceiptBadge({ entry }: { entry: KeeperConversationEntry }) {
     label,
     shutdownOperationId ? `shutdown operation ${shutdownOperationId}` : null,
   ].filter((value): value is string => value !== null).join(' · ')
+  const runRecovery = async (
+    kind: 'requeue' | 'cancel',
+    operation: () => Promise<void>,
+  ) => {
+    setRecoveryPending(kind)
+    try {
+      await operation()
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), 'error')
+    } finally {
+      setRecoveryPending(null)
+    }
+  }
+  const cancelRecovery = () => {
+    if (!action?.onRecoveryCancel) return
+    const detail = window.prompt('미확인 배송을 취소하는 이유를 입력하세요.')
+    if (detail === null) return
+    if (!detail || detail !== detail.trim()) {
+      showToast('취소 이유는 공백 없이 정확히 입력해야 합니다.', 'error')
+      return
+    }
+    void runRecovery('cancel', () => action.onRecoveryCancel!(entry, detail))
+  }
   return html`
-    <span
-      class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-2xs font-semibold text-[var(--color-fg-secondary)]"
-      title=${title}
-      data-chat-queue-state-badge=${queueState}
-      data-chat-queue-receipt=${receiptId}
-      data-chat-queue-shutdown-operation-id=${shutdownOperationId ?? undefined}
-    >
-      ${label}${shutdownLabel}
+    <span class="inline-flex flex-wrap items-center gap-1.5">
+      <span
+        class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-2xs font-semibold text-[var(--color-fg-secondary)]"
+        title=${title}
+        data-chat-queue-state-badge=${queueState}
+        data-chat-queue-receipt=${receiptId}
+        data-chat-queue-shutdown-operation-id=${shutdownOperationId ?? undefined}
+      >
+        ${label}${shutdownLabel}
+      </span>
+      ${queueState === 'recovery_required' && action?.onRecoveryRequeue
+        ? html`
+            <button
+              type="button"
+              disabled=${recoveryPending !== null}
+              class="rounded-[var(--r-0)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-2 py-0.5 text-2xs font-semibold text-[var(--warn-bright)] disabled:opacity-50"
+              data-chat-queue-recovery-action="requeue_unconfirmed"
+              onClick=${() => {
+                void runRecovery('requeue', () => action.onRecoveryRequeue!(entry))
+              }}
+            >${recoveryPending === 'requeue' ? '반영 중...' : '미확인 배송 재큐잉'}</button>
+          `
+        : null}
+      ${queueState === 'recovery_required' && action?.onRecoveryCancel
+        ? html`
+            <button
+              type="button"
+              disabled=${recoveryPending !== null}
+              class="rounded-[var(--r-0)] border border-[var(--danger-20)] bg-[var(--danger-10)] px-2 py-0.5 text-2xs font-semibold text-[var(--color-status-err)] disabled:opacity-50"
+              data-chat-queue-recovery-action="cancel_unconfirmed"
+              onClick=${cancelRecovery}
+            >${recoveryPending === 'cancel' ? '반영 중...' : '미확인 배송 취소'}</button>
+          `
+        : null}
     </span>
   `
 }
@@ -610,7 +665,7 @@ function overviewRows(details: KeeperConversationDetails): Array<{ label: string
     details.queueShutdownOperationId ? { label: '종료 작업 ID', value: details.queueShutdownOperationId } : null,
     details.queueState ? { label: '큐 상태', value: details.queueState } : null,
     details.queueFailureKind ? { label: '큐 실패', value: details.queueFailureKind } : null,
-    typeof details.queueRevision === 'number' ? { label: '큐 revision', value: `${details.queueRevision}` } : null,
+    typeof details.queueRevision === 'string' ? { label: '큐 revision', value: details.queueRevision } : null,
     typeof details.queuePendingCount === 'number' ? { label: '접수 시 pending', value: `${details.queuePendingCount}` } : null,
     typeof details.queueInflightCount === 'number' ? { label: '접수 시 inflight', value: `${details.queueInflightCount}` } : null,
     typeof details.queueRecoveryRequiredCount === 'number'
@@ -2574,7 +2629,7 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
                           </span>
                         `
                       : null}
-                    <${QueueReceiptBadge} entry=${entry} />
+                    <${QueueReceiptBadge} entry=${entry} action=${action} />
                     <${StreamContractBadge} badge=${streamContractBadge} compact=${true} />
                     <${ChatMetaChip} info=${surfaceInfo} compact=${true} />
                     <${ChatMetaChip} info=${speakerInfo} compact=${true} />
@@ -2598,7 +2653,7 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
                           </span>
                         `
                       : null}
-                    <${QueueReceiptBadge} entry=${entry} />
+                    <${QueueReceiptBadge} entry=${entry} action=${action} />
                     ${timestamp
                       ? html`
                           <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] px-2.5 py-1 text-2xs font-medium tabular-nums text-[var(--color-fg-secondary)]">
@@ -2617,14 +2672,14 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
                 `}
           </div>
         </div>
-        ${action
+        ${action?.label && action.onClick
           ? html`
               <button
                 type="button"
                 class=${`border border-[var(--accent-20)] bg-[var(--accent-10)] text-xs font-semibold text-[var(--color-accent-fg)] transition-colors hover:bg-[var(--accent-20)] ${CHAT_FOCUS_RING} ${
                   isMessenger ? 'rounded-[var(--r-1)] px-2.5 py-1' : 'rounded-[var(--r-0)] px-3 py-1'
                 }`}
-                onClick=${() => action.onClick(entry)}
+                onClick=${() => action.onClick!(entry)}
                 title=${action.title ?? action.label}
                 data-testid="chat-message-action"
               >

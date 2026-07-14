@@ -35,7 +35,7 @@ import { isRecord, asNumber, asString } from './components/common/normalize'
 import { toolEntryIdFromCallId } from './tool-call-output-store'
 import { STREAMING_THINKING_PREVIEW_CHARS } from './config/constants'
 import { updatePendingKeeperChatAssistantDraft } from './keeper-chat-pending'
-import { isKeeperChatReceiptId } from './lib/keeper-chat-receipt'
+import { isKeeperChatReceiptId, parseKeeperQueueRevision } from './lib/keeper-chat-receipt'
 
 const KEEPER_MESSAGE_CANCELLED_TEXT = '요청이 취소되었습니다.'
 export const TERMINAL_REQUEST_STATUSES = new Set(['done', 'error', 'lost', 'cancelled'])
@@ -685,7 +685,7 @@ export function applyKeeperStreamEvent(
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
         const queued = isRecord(event.value) ? event.value : null
         const receiptId = asString(queued?.receipt_id, '').trim()
-        const revision = asNumber(queued?.queue_revision)
+        const revision = parseKeeperQueueRevision(queued?.queue_revision)
         const pendingCount = asNumber(queued?.pending_count)
         const inflightCount = asNumber(queued?.inflight_count)
         const recoveryRequiredCount = asNumber(queued?.recovery_required_count)
@@ -698,9 +698,7 @@ export function applyKeeperStreamEvent(
         })()
         if (
           !isKeeperChatReceiptId(receiptId)
-          || typeof revision !== 'number'
-          || !Number.isSafeInteger(revision)
-          || revision < 0
+          || revision === undefined
           || typeof pendingCount !== 'number'
           || !Number.isSafeInteger(pendingCount)
           || pendingCount < 1

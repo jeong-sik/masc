@@ -178,7 +178,7 @@ type queued_turn_outcome =
 val queued_turn_failure_kind_to_string : queued_turn_failure_kind -> string
 
 val process_single_turn :
-  connector_user_line_recorded_upstream:bool ->
+  user_row_origin:Keeper_chat_store.user_row_origin ->
   queued_turn:bool ->
   delivery_key:Keeper_chat_delivery_identity.delivery_key option ->
   state:Mcp_server.server_state ->
@@ -205,14 +205,11 @@ val process_single_turn :
     cancel the accepted request. [auth_token] is [None] for queue-consumer
     turns where no HTTP request is available.
 
-    [connector_user_line_recorded_upstream] (default [false]) tells the turn
-    that the inbound user line was already persisted by the gate inbound
-    boundary ([Gate_keeper_backend.dispatch_core], RFC-0226 sole-recorder).
-    When [true] the turn records the assistant reply only and never re-writes
-    the user line — set by the queue consumer for connector ([Discord]/[Slack])
-    sources whose busy message was enqueued after the gate already recorded it
-    (RFC-connector-deferred-reply-via-chat-queue §3.4). [false] keeps the dashboard-route behaviour of recording
-    both sides.
+    [user_row_origin] is the durable provenance selected by the accepting
+    boundary. [Needs_append] makes this turn own the user row;
+    [Already_persisted] and [Already_persisted_upstream] prohibit a duplicate
+    append. Queue-consumer turns pass the exact provenance stored with their
+    receipt instead of deriving ownership from a connector label.
 
     [queued_turn] (default [false], set [true] only by
     [Server_bootstrap_loops]'s queue-consumer [handle_turn] wiring) changes
@@ -272,11 +269,13 @@ module For_testing : sig
   val defer_dashboard_payload_if_busy :
     base_path:string ->
     clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+    thread_id:string ->
     keeper_chat_stream_request ->
     [ `Not_busy | `Queued of int | `Queue_error of string ]
   val defer_dashboard_payload_if_busy_evidence :
     base_path:string ->
     clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+    thread_id:string ->
     keeper_chat_stream_request ->
     [ `Not_busy
     | `Queued of Yojson.Safe.t * string

@@ -62,6 +62,19 @@ val handle_keeper_catchup_judge_post :
 (** Handle [POST /catchup-judge] by recomputing the keeper catch-up digest
     and starting an out-of-band Fusion judge run. *)
 
+val handle_keeper_chat_recovery_post :
+  Mcp_server.server_state ->
+  string ->
+  Httpun.Request.t ->
+  Httpun.Reqd.t ->
+  keeper_name:string ->
+  raw_receipt_id:string ->
+  string ->
+  unit
+(** Resolve exactly one recovery-required chat receipt using the caller's
+    revision and lease evidence. The route is wired only behind token-bound
+    [CanAdmin] authorization. *)
+
 (** {1 POST route classifier}
 
     keeper_post_route_kind ADT + classifier + path helpers live in
@@ -211,13 +224,6 @@ val handle_keeper_get_subroutes :
 val keeper_chat_receipt_route : string -> (string * string) option
 (** Parse the exact
     [/api/v1/keepers/<name>/chat/receipts/<receipt_id>] read route. *)
-
-val keeper_chat_receipt_json :
-  keeper_name:string ->
-  revision:int64 ->
-  Keeper_chat_queue.receipt_view ->
-  Yojson.Safe.t
-(** Read-only typed receipt projection returned by the route above. *)
 
 (** {1 Memory-OS dashboard JSON} *)
 

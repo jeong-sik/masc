@@ -10,6 +10,7 @@ const {
   cancelQueuedKeeperMessage,
   fetchKeeperChatHistory,
   fetchKeeperChatReceipt,
+  resolveKeeperChatRecovery,
   fetchQueuedKeeperMessageResult,
   isTerminalQueuedKeeperMessage,
   queuedKeeperMessageError,
@@ -27,6 +28,7 @@ const {
   ),
   fetchKeeperChatHistory: vi.fn(),
   fetchKeeperChatReceipt: vi.fn(),
+  resolveKeeperChatRecovery: vi.fn(),
   fetchQueuedKeeperMessageResult: vi.fn(),
   isTerminalQueuedKeeperMessage: vi.fn((result: { status: string }) => (
     result.status === 'done'
@@ -52,6 +54,7 @@ vi.mock('./api/keeper', () => ({
   cancelQueuedKeeperMessage,
   fetchKeeperChatHistory,
   fetchKeeperChatReceipt,
+  resolveKeeperChatRecovery,
   fetchQueuedKeeperMessageResult,
   isTerminalQueuedKeeperMessage,
   queuedKeeperMessageError,
@@ -89,6 +92,8 @@ import {
   noteKeeperChatAppended,
   probeKeeperRuntime,
   reconcileKeeperChatReceipts,
+  requeueKeeperChatRecoveryEntry,
+  cancelKeeperChatRecoveryEntry,
   recoverKeeperRuntime,
   refreshActiveKeeperChatHistory,
   resumePendingKeeperChatRequests,
@@ -221,7 +226,7 @@ describe('reconcileKeeperChatReceipts', () => {
           streamState: null,
           details: {
             queueReceiptId: 'chatq_00000000-0000-4000-8000-000000000001',
-            queueRevision: 1,
+            queueRevision: '1',
             queuePendingCount: 1,
             queueInflightCount: 0,
             queueState: 'pending',
@@ -234,13 +239,14 @@ describe('reconcileKeeperChatReceipts', () => {
     fetchKeeperChatHistory.mockReset()
     fetchKeeperChatHistory.mockResolvedValue([])
     fetchKeeperChatReceipt.mockReset()
+    resolveKeeperChatRecovery.mockReset()
   })
 
   it('retains the queued message while exact delivery recovery is required', async () => {
     fetchKeeperChatReceipt.mockResolvedValue({
       keeperName: 'echo',
       receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
-      revision: 3,
+      revision: '3',
       state: {
         kind: 'recovery_required',
         leaseId: 'lease_00000000-0000-4000-8000-000000000002',
@@ -259,11 +265,88 @@ describe('reconcileKeeperChatReceipts', () => {
     expect(entry?.error).toBeFalsy()
   })
 
+  it('requeues only with the freshly observed revision and lease', async () => {
+    const entry = keeperThreads.value.echo![0]!
+    fetchKeeperChatReceipt.mockResolvedValue({
+      keeperName: 'echo',
+      receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
+      revision: '9223372036854775805',
+      state: {
+        kind: 'recovery_required',
+        leaseId: 'lease_00000000-0000-4000-8000-000000000002',
+        startedAt: 42,
+        dispatchable: false,
+      },
+    })
+    resolveKeeperChatRecovery.mockResolvedValue({
+      decision: 'requeue_unconfirmed',
+      receipt: {
+        keeperName: 'echo',
+        receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
+        revision: '9223372036854775806',
+        state: { kind: 'pending' },
+      },
+      audit: { recorded: true },
+    })
+
+    await requeueKeeperChatRecoveryEntry('echo', entry)
+
+    expect(resolveKeeperChatRecovery).toHaveBeenCalledWith(
+      'echo',
+      'chatq_00000000-0000-4000-8000-000000000001',
+      '9223372036854775805',
+      'lease_00000000-0000-4000-8000-000000000002',
+      { kind: 'requeue_unconfirmed' },
+    )
+    expect(keeperThreads.value.echo?.[0]?.details?.queueRevision)
+      .toBe('9223372036854775806')
+  })
+
+  it('surfaces audit failure after an exact cancellation was committed', async () => {
+    const entry = keeperThreads.value.echo![0]!
+    fetchKeeperChatReceipt.mockResolvedValue({
+      keeperName: 'echo',
+      receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
+      revision: '3',
+      state: {
+        kind: 'recovery_required',
+        leaseId: 'lease_00000000-0000-4000-8000-000000000002',
+        startedAt: 42,
+        dispatchable: false,
+      },
+    })
+    resolveKeeperChatRecovery.mockResolvedValue({
+      decision: 'cancel_unconfirmed',
+      receipt: {
+        keeperName: 'echo',
+        receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
+        revision: '4',
+        state: {
+          kind: 'failed',
+          failureKind: 'cancelled',
+          detail: 'operator verified no delivery',
+          completedAt: 43,
+          outcomeRef: null,
+        },
+      },
+      audit: { recorded: false, error: 'audit disk unavailable' },
+    })
+
+    await cancelKeeperChatRecoveryEntry(
+      'echo',
+      entry,
+      'operator verified no delivery',
+    )
+
+    expect(keeperThreads.value.echo?.[0]?.details?.queueState).toBe('failed')
+    expect(keeperActionErrors.value.echo).toContain('audit disk unavailable')
+  })
+
   it('moves a busy ACK to delivered only after the durable terminal receipt', async () => {
     fetchKeeperChatReceipt.mockResolvedValue({
       keeperName: 'echo',
       receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
-      revision: 4,
+      revision: '4',
       state: { kind: 'delivered', completedAt: 42, outcomeRef: RECEIPT_TURN_REF },
     })
     fetchKeeperChatHistory.mockResolvedValue([
@@ -288,7 +371,7 @@ describe('reconcileKeeperChatReceipts', () => {
     fetchKeeperChatReceipt.mockResolvedValue({
       keeperName: 'echo',
       receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
-      revision: 4,
+      revision: '4',
       state: { kind: 'delivered', completedAt: 42, outcomeRef: null },
     })
 
@@ -311,7 +394,7 @@ describe('reconcileKeeperChatReceipts', () => {
     fetchKeeperChatReceipt.mockResolvedValue({
       keeperName: 'echo',
       receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
-      revision: 4,
+      revision: '4',
       state: { kind: 'delivered', completedAt: 42, outcomeRef: RECEIPT_TURN_REF },
     })
     fetchKeeperChatHistory.mockResolvedValue([
@@ -338,7 +421,7 @@ describe('reconcileKeeperChatReceipts', () => {
     fetchKeeperChatReceipt.mockResolvedValue({
       keeperName: 'echo',
       receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
-      revision: 4,
+      revision: '4',
       state: { kind: 'delivered', completedAt: 42, outcomeRef: RECEIPT_TURN_REF },
     })
     fetchKeeperChatHistory
@@ -374,7 +457,7 @@ describe('reconcileKeeperChatReceipts', () => {
     fetchKeeperChatReceipt.mockResolvedValue({
       keeperName: 'echo',
       receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
-      revision: 4,
+      revision: '4',
       state: { kind: 'delivered', completedAt: 42, outcomeRef: RECEIPT_TURN_REF },
     })
     fetchKeeperChatHistory
@@ -408,7 +491,7 @@ describe('reconcileKeeperChatReceipts', () => {
     fetchKeeperChatReceipt.mockResolvedValue({
       keeperName: 'echo',
       receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
-      revision: 4,
+      revision: '4',
       state: { kind: 'delivered', completedAt: 42, outcomeRef: RECEIPT_TURN_REF },
     })
     let resolveHistory!: (history: Array<{
@@ -446,7 +529,7 @@ describe('reconcileKeeperChatReceipts', () => {
     fetchKeeperChatReceipt.mockResolvedValue({
       keeperName: 'echo',
       receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
-      revision: 5,
+      revision: '5',
       state: {
         kind: 'failed',
         failureKind: 'delivery_failed',
@@ -469,13 +552,13 @@ describe('reconcileKeeperChatReceipts', () => {
     let resolveOlder!: (value: {
       keeperName: string
       receiptId: string
-      revision: number
+      revision: string
       state: { kind: 'pending' }
     }) => void
     let resolveNewer!: (value: {
       keeperName: string
       receiptId: string
-      revision: number
+      revision: string
       state: { kind: 'delivered'; completedAt: number; outcomeRef: string }
     }) => void
     const older = new Promise<Parameters<typeof resolveOlder>[0]>(resolve => {
@@ -493,21 +576,21 @@ describe('reconcileKeeperChatReceipts', () => {
     resolveNewer({
       keeperName: 'echo',
       receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
-      revision: 6,
+      revision: '6',
       state: { kind: 'delivered', completedAt: 44, outcomeRef: RECEIPT_TURN_REF },
     })
     await newerReconciliation
     resolveOlder({
       keeperName: 'echo',
       receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
-      revision: 5,
+      revision: '5',
       state: { kind: 'pending' },
     })
     await olderReconciliation
 
     const entry = keeperThreads.value.echo?.[0]
     expect(entry?.delivery).toBe('delivered')
-    expect(entry?.details?.queueRevision).toBe(6)
+    expect(entry?.details?.queueRevision).toBe('6')
     expect(entry?.details?.queueState).toBe('delivered')
   })
 
@@ -519,7 +602,7 @@ describe('reconcileKeeperChatReceipts', () => {
     fetchKeeperChatReceipt.mockResolvedValueOnce({
       keeperName: 'echo',
       receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
-      revision: 2,
+      revision: '2',
       state: { kind: 'pending' },
     })
     await reconcileKeeperChatReceipts('echo')
@@ -540,7 +623,7 @@ describe('reconcileKeeperChatReceipts', () => {
     let resolveNewer!: (value: {
       keeperName: string
       receiptId: string
-      revision: number
+      revision: string
       state: { kind: 'delivered'; completedAt: number; outcomeRef: string }
     }) => void
     const older = new Promise<never>((_resolve, reject) => {
@@ -558,7 +641,7 @@ describe('reconcileKeeperChatReceipts', () => {
     resolveNewer({
       keeperName: 'echo',
       receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
-      revision: 7,
+      revision: '7',
       state: { kind: 'delivered', completedAt: 46, outcomeRef: RECEIPT_TURN_REF },
     })
     await newerReconciliation
@@ -585,7 +668,7 @@ describe('reconcileKeeperChatReceipts', () => {
     fetchKeeperChatReceipt.mockResolvedValue({
       keeperName: 'echo',
       receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
-      revision: 3,
+      revision: '3',
       state: { kind: 'delivered', completedAt: 45, outcomeRef: RECEIPT_TURN_REF },
     })
 
@@ -1561,7 +1644,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     fetchKeeperChatReceipt.mockResolvedValue({
       keeperName: 'echo',
       receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
-      revision: 4,
+      revision: '4',
       state: { kind: 'pending' },
     })
     streamKeeperMessage.mockImplementation(emitting([
@@ -1575,7 +1658,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
           keeper_name: 'echo',
           status: 'queued',
           receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
-          queue_revision: 4,
+          queue_revision: '4',
           pending_count: 1,
           inflight_count: 0,
           recovery_required_count: 0,
@@ -1593,7 +1676,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     expect(reply?.text).toContain('message is queued')
     expect(reply?.details).toMatchObject({
       queueReceiptId: 'chatq_00000000-0000-4000-8000-000000000001',
-      queueRevision: 4,
+      queueRevision: '4',
       queuePendingCount: 1,
       queueInflightCount: 0,
       queueRecoveryRequiredCount: 0,
@@ -1608,7 +1691,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     fetchKeeperChatReceipt.mockResolvedValue({
       keeperName: 'echo',
       receiptId: 'chatq_00000000-0000-4000-8000-000000000002',
-      revision: 5,
+      revision: '5',
       state: {
         kind: 'failed',
         failureKind: 'turn_failed',
@@ -1628,7 +1711,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
           keeper_name: 'echo',
           status: 'queued',
           receipt_id: 'chatq_00000000-0000-4000-8000-000000000002',
-          queue_revision: 4,
+          queue_revision: '4',
           pending_count: 1,
           inflight_count: 0,
           recovery_required_count: 0,

@@ -572,17 +572,34 @@ let test_restart_requires_explicit_recovery_without_journal () =
    | Error (Keeper_chat_queue.Recovery_lease_mismatch _) ->
      check "mismatched recovery evidence is rejected" true
    | Ok _ | Error _ -> check "mismatched recovery evidence is rejected" false);
+  let recovery_fields =
+    [ ( "schema"
+      , `String Keeper_chat_recovery_command.tool_command_schema )
+    ; "keeper_name", `String keeper_name
+    ; "receipt_id", `String (receipt_wire receipt.receipt_id)
+    ; "expected_revision", `String "3"
+    ; "lease_id", `String lease.lease_id
+    ; ( "decision"
+      , `Assoc [ "kind", `String "requeue_unconfirmed" ] )
+    ]
+  in
   (match
-     Keeper_chat_queue.resolve_recovery_required
-       ~keeper_name
-       ~receipt_id:receipt.receipt_id
-       ~expected_revision:3L
-       ~lease_id:lease.lease_id
-       ~resolution:Requeue_unconfirmed
+     Keeper_chat_recovery_command.parse_tool_command
+       (`Assoc (("unexpected", `Bool true) :: recovery_fields))
    with
-   | Ok { revision = 4L; state = Pending; _ } ->
-     check "exact operator decision requeues once" true
-   | Ok _ | Error _ -> check "exact operator decision requeues once" false);
+   | Error (Keeper_chat_recovery_command.Unsupported_fields _) ->
+     check "operator command rejects extra fields" true
+   | Ok _ | Error _ -> check "operator command rejects extra fields" false);
+  (match Keeper_chat_recovery_command.parse_tool_command (`Assoc recovery_fields) with
+   | Error error ->
+     fail
+       "typed operator recovery command parses"
+       (Keeper_chat_recovery_command.input_error_to_string error)
+   | Ok command ->
+     (match Keeper_chat_recovery_command.execute ~now:4.0 command with
+      | Ok { revision = 4L; state = Pending; _ } ->
+        check "exact operator decision requeues once" true
+      | Ok _ | Error _ -> check "exact operator decision requeues once" false));
   (match Keeper_chat_queue.lease_next ~keeper_name with
    | `Leased replay ->
      check "explicit requeue preserves receipt identity"

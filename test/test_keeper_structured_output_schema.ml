@@ -209,7 +209,9 @@ let test_operator_remote_tool_name_ssot_matches_remote_schemas () =
     (list string)
     "operator remote exported names"
     (List.sort String.compare Tool_name.Operator_remote_name.all_strings)
-    (List.sort String.compare Operator_tool.remote_tool_names)
+    (List.sort String.compare Operator_tool.remote_tool_names);
+  check bool "chat recovery cannot bypass operator profile" false
+    (Tool_catalog.allow_direct_call "masc_operator_chat_recovery_resolve")
 ;;
 
 let test_fusion_judge_schema_uses_parser_wire_contract () =

@@ -1016,6 +1016,7 @@
   test_pulse
   test_transport_metrics
   test_adaptive_cache_ttl
+  test_keeper_compact_audit
   test_keeper_telemetry_consumer
   test_oas_bus_instrument
   test_trajectory
@@ -1192,6 +1193,7 @@
   test_pulse
   test_transport_metrics
   test_adaptive_cache_ttl
+  test_keeper_compact_audit
   test_keeper_telemetry_consumer
   test_oas_bus_instrument
   test_trajectory

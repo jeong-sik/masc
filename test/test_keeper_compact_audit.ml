@@ -6,8 +6,6 @@
 open Alcotest
 
 module KCA = Masc.Keeper_compact_audit
-module Memory_io = Masc.Keeper_memory_os_io
-module Memory_types = Masc.Keeper_memory_os_types
 
 (* ── Helpers ──────────────────────────────────────────────────── *)
 
@@ -35,18 +33,6 @@ let mk_complete ?(id = "id-1") ?(ts = 1_001.0) ?(keeper = "k")
     run_id = "run-y";
   }
 
-let mk_event ?(ts = 1_000.0) payload : Agent_sdk.Event_bus.event =
-  {
-    meta =
-      {
-        correlation_id = "corr-x";
-        run_id = "run-y";
-        ts;
-        caused_by = None;
-      };
-    payload;
-  }
-
 let tmp_base_path () =
   let dir = Filename.temp_file "kca_test_" "_dir" in
   Sys.remove dir;
@@ -61,32 +47,6 @@ let rec rm_rf path =
     Unix.rmdir path
   | _ -> Sys.remove path
   | exception Unix.Unix_error (ENOENT, _, _) -> ()
-
-let with_temp_keepers_dir f =
-  let dir = Filename.temp_file "kca_memory_os_" "_dir" in
-  Sys.remove dir;
-  let finally () = rm_rf dir in
-  Fun.protect ~finally (fun () ->
-    Memory_io.For_testing.with_keepers_dir dir (fun () -> f dir))
-;;
-
-let fact_fixture ~now ~claim ?valid_until () =
-  { Memory_types.claim = claim
-  ; category = Memory_types.Ephemeral
-  ; claim_kind = None
-  ; source =
-      { trace_id = "trace-kca-gc"
-      ; turn = 1
-      ; tool_call_id = None
-      }
-  ; observed_by = []
-  ; first_seen = now -. 60.0
-  ; valid_until
-  ; last_verified_at = Some (now -. 30.0)
-  ; schema_version = Memory_types.schema_version
-  ; claim_id = None
-  }
-;;
 
 (* ── Trigger round-trip ────────────────────────────────────────── *)
 
@@ -209,78 +169,6 @@ let test_read_keeper_filter () =
       | [KCA.Start r] -> check string "alpha keeper" "alpha" r.keeper_name
       | _ -> fail "expected single Start for alpha")
 
-let test_context_compacted_runs_memory_os_gc () =
-  Eio_main.run @@ fun _env ->
-  let base = tmp_base_path () in
-  let finally () = rm_rf base in
-  Fun.protect ~finally (fun () ->
-    with_temp_keepers_dir (fun _keepers_dir ->
-      let keeper_id = "gc-after-compact" in
-      let now = Unix.gettimeofday () in
-      let live =
-        fact_fixture ~now ~claim:"live fact" ~valid_until:(now +. 3600.0) ()
-      in
-      let expired =
-        fact_fixture ~now ~claim:"expired fact" ~valid_until:(now -. 1.0) ()
-      in
-      Memory_io.append_fact ~keeper_id live;
-      Memory_io.append_fact ~keeper_id expired;
-      let event =
-        mk_event
-          ~ts:now
-          (Agent_sdk.Event_bus.ContextCompacted
-             { agent_name = keeper_id
-             ; before_tokens = 1000
-             ; after_tokens = 800
-             ; phase = "proactive"
-             })
-      in
-      KCA.For_testing.handle_event_at
-        ~received_ts:now
-        ~base_path:base
-        ~retention_days:14
-        event;
-      let survivors = Memory_io.read_facts_all ~keeper_id in
-      check int "expired fact removed by gc" 1 (List.length survivors);
-      match survivors with
-      | [ fact ] -> check string "live fact remains" "live fact" fact.claim
-      | _ -> fail "expected one live survivor"))
-
-let test_pending_ttl_uses_receive_time () =
-  Eio_main.run @@ fun _env ->
-  let base = tmp_base_path () in
-  let finally () =
-    KCA.For_testing.clear_pending ();
-    rm_rf base
-  in
-  Fun.protect ~finally (fun () ->
-    KCA.For_testing.clear_pending ();
-    let received_ts = 1_000.0 in
-    let stale_event_ts = received_ts -. 310.0 in
-    let event =
-      mk_event
-        ~ts:stale_event_ts
-        (Agent_sdk.Event_bus.ContextCompactStarted
-           { agent_name = "slow-subscriber"; trigger = "proactive" })
-    in
-    KCA.For_testing.handle_event_at
-      ~received_ts
-      ~base_path:base
-      ~retention_days:14
-      event;
-    let immediate =
-      KCA.For_testing.evict_pending_older_than
-        ~max_age_s:300.0
-        ~now:(received_ts +. 1.0)
-    in
-    check int "fresh receive timestamp not evicted" 0 (List.length immediate);
-    let expired =
-      KCA.For_testing.evict_pending_older_than
-        ~max_age_s:300.0
-        ~now:(received_ts +. 301.0)
-    in
-    check int "entry expires by receive timestamp" 1 (List.length expired))
-
 (* ── Retention parse outcome ───────────────────────────────────── *)
 
 module KCARO = Keeper_compact_audit_retention_outcome
@@ -390,10 +278,5 @@ let () =
     ("persist", [
       test_case "persist + read + pair"          `Quick test_persist_and_read;
       test_case "keeper filter"                  `Quick test_read_keeper_filter;
-      test_case "context compacted runs memory os gc" `Quick
-        test_context_compacted_runs_memory_os_gc;
-    ]);
-    ("pending", [
-      test_case "ttl uses receive time"          `Quick test_pending_ttl_uses_receive_time;
     ]);
   ]

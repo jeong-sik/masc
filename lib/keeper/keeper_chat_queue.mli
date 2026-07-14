@@ -39,9 +39,6 @@ type completion = {
 
 type failure_kind =
   | Turn_failed
-  | Legacy_request_timeout
-(** Historical terminal result decoded from snapshots written by the retired
-    request-level Keeper watchdog. No live producer constructs this value. *)
   | No_visible_reply
   | Transcript_persist_failed
   | Connector_unavailable
@@ -83,7 +80,6 @@ type snapshot_load_error_kind =
   | Invalid_path
   | Read_failed
   | Parse_failed
-  | Migration_failed
   | Recovery_failed
 
 type snapshot_load_error = {
@@ -135,7 +131,6 @@ type enqueue_receipt = {
 
 type configure_report = {
   restored_keeper_count : int;
-  migrated_keeper_count : int;
   recovered_receipt_count : int;
   load_errors : (string option * snapshot_load_error) list;
 }
@@ -150,12 +145,10 @@ val set_transition_observer : transition_observer option -> unit
 val continuation_channel_of_message_source :
   ?dashboard_thread_id:string -> message_source -> Keeper_continuation_channel.t
 
-(** Enable persistence and restore every per-Keeper snapshot.  Version-1 files
-    are decoded only by the explicit one-time migration, atomically rewritten
-    as strict version 2, and never treated as a version-2 fallback.  A malformed
-    snapshot is retained, registered as unavailable, and reported here; it is
-    never replaced by an empty queue. Reconfiguration clears the prior
-    in-memory registry before loading the new BasePath ownership boundary. *)
+(** Enable persistence and restore every per-Keeper snapshot. Unsupported or
+    malformed snapshots are retained, registered as unavailable, and reported
+    here; they are never replaced by an empty queue. Reconfiguration clears the
+    prior in-memory registry before loading the new BasePath ownership boundary. *)
 val configure_persistence : base_path:string -> configure_report
 
 val persistence_configured : unit -> bool

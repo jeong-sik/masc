@@ -714,13 +714,13 @@ export type KeeperQueueReceiptLifecycle =
 
 export type KeeperQueueReceiptFailureKind =
   | 'turn_failed'
-  | 'legacy_request_timeout'
   | 'no_visible_reply'
   | 'transcript_persist_failed'
   | 'connector_unavailable'
   | 'delivery_failed'
   | 'cancelled'
   | 'internal_error'
+  | 'recovery_interrupted'
 
 export interface KeeperConversationDetails {
   traceId?: string | null

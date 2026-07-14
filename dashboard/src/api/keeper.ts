@@ -724,13 +724,13 @@ export interface KeeperChatReceipt {
 
 const KEEPER_CHAT_RECEIPT_FAILURE_KINDS = new Set<KeeperChatReceiptFailureKind>([
   'turn_failed',
-  'legacy_request_timeout',
   'no_visible_reply',
   'transcript_persist_failed',
   'connector_unavailable',
   'delivery_failed',
   'cancelled',
   'internal_error',
+  'recovery_interrupted',
 ])
 
 export function parseKeeperChatReceipt(value: unknown): KeeperChatReceipt {

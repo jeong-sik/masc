@@ -123,7 +123,7 @@ describe('Keeper chat durable receipt API', () => {
     })
   })
 
-  it.each(['legacy_request_timeout'] as const)(
+  it.each(['recovery_interrupted'] as const)(
     'parses the canonical %s terminal failure kind',
     (failureKind) => {
       expect(parseKeeperChatReceipt({
@@ -134,7 +134,7 @@ describe('Keeper chat durable receipt API', () => {
         state: {
           kind: 'failed',
           failure_kind: failureKind,
-          detail: 'historical or recovery terminal state',
+          detail: 'startup recovery could not prove terminal connector delivery',
           completed_at: 42,
           outcome_ref: null,
         },

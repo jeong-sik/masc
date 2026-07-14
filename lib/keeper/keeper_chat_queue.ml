@@ -28,7 +28,6 @@ type completion = {
 
 type failure_kind =
   | Turn_failed
-  | Legacy_request_timeout
   | No_visible_reply
   | Transcript_persist_failed
   | Connector_unavailable
@@ -68,7 +67,6 @@ type snapshot_load_error_kind =
   | Invalid_path
   | Read_failed
   | Parse_failed
-  | Migration_failed
   | Recovery_failed
 
 type snapshot_load_error = {
@@ -88,7 +86,6 @@ let snapshot_load_error_kind_to_string = function
   | Invalid_path -> "invalid_path"
   | Read_failed -> "read_failed"
   | Parse_failed -> "parse_failed"
-  | Migration_failed -> "migration_failed"
   | Recovery_failed -> "recovery_failed"
 
 let mutation_error_to_string = function
@@ -135,7 +132,6 @@ type enqueue_receipt = {
 
 type configure_report = {
   restored_keeper_count : int;
-  migrated_keeper_count : int;
   recovered_receipt_count : int;
   load_errors : (string option * snapshot_load_error) list;
 }
@@ -164,7 +160,6 @@ type queue_entry = {
   mutable load_errors : snapshot_load_error list;
 }
 
-let schema_v1 = "keeper_chat_queue.v1"
 let schema_v2 = "keeper_chat_queue.v2"
 (* Revisions cross the JSON/JavaScript dashboard boundary as numbers. Keep the
    persisted domain within IEEE-754's exact integer range instead of accepting
@@ -420,27 +415,6 @@ let queued_message_of_yojson_with_source source_parser json =
 let queued_message_of_yojson json =
   queued_message_of_yojson_with_source source_of_yojson json
 
-let source_of_v1_yojson json =
-  match required_string json "kind" with
-  | Ok "slack" ->
-    (match required_string json "channel", required_string json "user_id" with
-     | Ok channel_id, Ok user_id
-       when String.trim channel_id <> "" && String.trim user_id <> "" ->
-       (* Version 1 predates typed Slack thread/team/name persistence. Preserve
-          its known channel/user identity explicitly; absent fields remain
-          absent rather than being inferred from unrelated values. *)
-       Ok
-         (Slack
-            { channel_id
-            ; user_id
-            ; user_name = user_id
-            ; team_id = None
-            ; thread_ts = None
-            })
-     | Ok _, Ok _ -> Error "legacy slack chat queue source requires non-empty ids"
-     | Error error, _ | _, Error error -> Error error)
-  | Ok _ | Error _ -> source_of_yojson json
-
 let rec validate_json_utf8 path = function
   | `String value when String.is_valid_utf_8 value -> Ok ()
   | `String _ -> Error (path ^ " contains malformed UTF-8")
@@ -470,7 +444,6 @@ let canonical_queued_message message =
 
 let failure_kind_to_string = function
   | Turn_failed -> "turn_failed"
-  | Legacy_request_timeout -> "legacy_request_timeout"
   | No_visible_reply -> "no_visible_reply"
   | Transcript_persist_failed -> "transcript_persist_failed"
   | Connector_unavailable -> "connector_unavailable"
@@ -481,7 +454,6 @@ let failure_kind_to_string = function
 
 let failure_kind_of_string = function
   | "turn_failed" -> Ok Turn_failed
-  | "timed_out" | "legacy_request_timeout" -> Ok Legacy_request_timeout
   | "no_visible_reply" -> Ok No_visible_reply
   | "transcript_persist_failed" -> Ok Transcript_persist_failed
   | "connector_unavailable" -> Ok Connector_unavailable
@@ -696,54 +668,9 @@ let parse_v2 json =
               "chat queue v2 permits at most one same-source inflight lease per keeper"))
   | Error error, _ | _, Error error -> Error error
 
-let parse_message_list json =
-  match json with
-  | `List values ->
-    let rec loop acc = function
-      | [] -> Ok (List.rev acc)
-      | value :: rest ->
-        (match queued_message_of_yojson_with_source source_of_v1_yojson value with
-         | Error _ as error -> error
-         | Ok message -> loop (message :: acc) rest)
-    in
-    loop [] values
-  | _ -> Error "legacy chat queue items must be an array"
-
-let parse_v1_inflight json =
-  match Json_util.assoc_member_opt "inflight" json with
-  | None | Some `Null -> Ok []
-  | Some (`Assoc _ as inflight) ->
-    (match required_string inflight "lease_id", required_member inflight "items" with
-     | Ok lease_id, Ok items_json when String.trim lease_id <> "" -> parse_message_list items_json
-     | Ok _, Ok _ -> Error "legacy inflight lease_id must be non-empty"
-     | Error error, _ | _, Error error -> Error error)
-  | Some _ -> Error "legacy chat queue inflight must be null or an object"
-
-let parse_v1_for_migration json =
-  match required_member json "items", parse_v1_inflight json with
-  | Ok items_json, Ok inflight ->
-    Result.map (fun pending -> inflight @ pending) (parse_message_list items_json)
-  | Error error, _ | _, Error error -> Error error
-
-let migrate_v1_to_v2 path json =
-  match parse_v1_for_migration json with
-  | Error error -> Error (`Parse error)
-  | Ok messages ->
-    let receipts =
-      List.map
-        (fun message ->
-           { receipt_id = Receipt_id.generate (); state = Stored_pending message })
-        messages
-    in
-    let revision = 1L in
-    (match persist_snapshot_to_path path ~revision receipts with
-     | Ok () -> Ok (revision, receipts)
-     | Error error -> Error (`Persist error))
-
 type loaded_snapshot = {
   revision : int64;
   receipts : stored_receipt list;
-  migrated : bool;
   recovered_count : int;
 }
 
@@ -815,7 +742,7 @@ let recover_inflight ~base_path ~keeper_name path ~revision receipts =
       0 receipts
   in
   if recovered_count = 0
-  then Ok { revision; receipts; migrated = false; recovered_count = 0 }
+  then Ok { revision; receipts; recovered_count = 0 }
   else
     let recovered_terminal =
       recovered_queue_terminal ~base_path ~keeper_name receipts
@@ -849,7 +776,7 @@ let recover_inflight ~base_path ~keeper_name path ~revision receipts =
              ("failed to reconcile delivery journal: " ^ error))
       | Ok receipts ->
         (match persist_snapshot_to_path path ~revision receipts with
-         | Ok () -> Ok { revision; receipts; migrated = false; recovered_count }
+         | Ok () -> Ok { revision; receipts; recovered_count }
          | Error error ->
            Error
              (load_error Recovery_failed ~path
@@ -878,16 +805,6 @@ let load_snapshot ~base_path ~keeper_name =
                    path
                    ~revision
                    receipts))
-         | Ok schema when String.equal schema schema_v1 ->
-           (match migrate_v1_to_v2 path json with
-            | Ok (revision, receipts) ->
-              Ok (Some { revision; receipts; migrated = true; recovered_count = 0 })
-            | Error (`Parse message) ->
-              Error (load_error Parse_failed ~path message)
-            | Error (`Persist message) ->
-              Error
-                (load_error Migration_failed ~path
-                   ("failed to persist v1 migration: " ^ message)))
          | Ok schema ->
            Error
              (load_error Parse_failed ~path
@@ -1341,7 +1258,6 @@ let configure_persistence ~base_path =
      an in-memory entry from the previous workspace appear in the new one. *)
   with_registry_rw (fun () -> Hashtbl.clear registry);
   let restored_keeper_count = ref 0 in
-  let migrated_keeper_count = ref 0 in
   let recovered_receipt_count = ref 0 in
   let load_errors = ref [] in
   let restored_mutations = ref [] in
@@ -1409,14 +1325,13 @@ let configure_persistence ~base_path =
            | Ok None -> ()
            | Ok (Some loaded) ->
              incr restored_keeper_count;
-             if loaded.migrated then incr migrated_keeper_count;
              recovered_receipt_count :=
                !recovered_receipt_count + loaded.recovered_count;
              with_registry_rw (fun () ->
                Hashtbl.replace registry keeper_name
                  (create_entry ~revision:loaded.revision
                     ~receipts:loaded.receipts ()));
-             if loaded.migrated || loaded.recovered_count > 0
+             if loaded.recovered_count > 0
              then
                restored_mutations :=
                  (keeper_name, loaded.revision) :: !restored_mutations
@@ -1431,7 +1346,6 @@ let configure_persistence ~base_path =
   |> List.iter (fun (keeper_name, revision) ->
          notify_transition ~keeper_name ~revision);
   { restored_keeper_count = !restored_keeper_count
-  ; migrated_keeper_count = !migrated_keeper_count
   ; recovered_receipt_count = !recovered_receipt_count
   ; load_errors = List.rev !load_errors
   }

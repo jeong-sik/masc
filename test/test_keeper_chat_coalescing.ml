@@ -333,7 +333,7 @@ let test_persist_failures_roll_back () =
     "failed nack leaves original lease inflight"
     ((Keeper_chat_queue.snapshot ~keeper_name).inflight <> [])
 
-let v1_message_json ?(source = `Assoc [ "kind", `String "dashboard" ]) content =
+let persisted_message_json ?(source = `Assoc [ "kind", `String "dashboard" ]) content =
   `Assoc
     [ "content", `String content
     ; "user_blocks", `List []
@@ -341,69 +341,6 @@ let v1_message_json ?(source = `Assoc [ "kind", `String "dashboard" ]) content =
     ; "timestamp", `Float 1.0
     ; "source", source
     ]
-
-let test_v1_atomic_migration () =
-  Printf.printf "Test: v1 has one explicit atomic migration to strict v2\n%!";
-  with_base "keeper-chat-v1-migration" @@ fun base_path ->
-  let keeper_name = "v1-migration" in
-  let path = snapshot_path ~base_path ~keeper_name in
-  let v1 =
-    `Assoc
-      [ "schema", `String "keeper_chat_queue.v1"
-      ; "items",
-        `List
-          [ v1_message_json "legacy pending"
-          ; v1_message_json
-              ~source:
-                (`Assoc
-                   [ "kind", `String "slack"
-                   ; "channel", `String "C-legacy"
-                   ; "user_id", `String "U-legacy"
-                   ])
-              "legacy slack"
-          ]
-      ; ( "inflight"
-        , `Assoc
-            [ "lease_id", `String "legacy-lease"
-            ; "items", `List [ v1_message_json "legacy inflight" ]
-            ] )
-      ]
-  in
-  save_raw path (Yojson.Safe.pretty_to_string v1);
-  let report = Keeper_chat_queue.configure_persistence ~base_path in
-  check "migration is reported once" (report.migrated_keeper_count = 1);
-  let migrated = Keeper_chat_queue.snapshot ~keeper_name in
-  check "legacy inflight is replayed ahead of pending" (List.length migrated.pending = 3);
-  (match List.nth_opt migrated.pending 2 with
-   | Some
-       { message =
-           { source =
-               Keeper_chat_queue.Slack
-                 { channel_id; user_id; user_name; team_id; thread_ts }
-           ; _
-           }
-       ; _
-       } ->
-     check "legacy Slack channel survives migration" (channel_id = "C-legacy");
-     check "legacy Slack user survives migration"
-       (user_id = "U-legacy" && user_name = "U-legacy");
-     check "legacy absent Slack context remains absent"
-       (team_id = None && thread_ts = None)
-   | _ -> check "legacy Slack source migrates explicitly" false);
-  let migrated_ids = active_ids migrated.pending in
-  check "migration mints durable ids" (List.for_all (( <> ) "") migrated_ids);
-  Keeper_chat_queue.For_testing.reset ();
-  let second_report = Keeper_chat_queue.configure_persistence ~base_path in
-  check "v2 is not migrated again" (second_report.migrated_keeper_count = 0);
-  check
-    "migrated ids survive another restart"
-    (active_ids (Keeper_chat_queue.snapshot ~keeper_name).pending = migrated_ids);
-  (match Safe_ops.read_json_file_safe path with
-   | Ok json ->
-     check
-       "migration atomically rewrites strict v2 schema"
-       (Json_util.get_string json "schema" = Some "keeper_chat_queue.v2")
-   | Error _ -> check "migrated snapshot is readable" false)
 
 let test_corrupt_snapshot_is_quarantined () =
   Printf.printf "Test: corrupt snapshot is explicit and never overwritten as empty\n%!";
@@ -585,7 +522,7 @@ let test_revision_recovery_exhaustion_is_quarantined () =
                       ; "lease_id", `String "lease-before-restart"
                       ; "started_at", `Float 1.0
                       ] )
-                ; "message", v1_message_json "replay me"
+                ; "message", persisted_message_json "replay me"
                 ]
             ] )
       ]
@@ -751,7 +688,6 @@ let () =
   test_source_boundaries_preserve_fifo_runs ();
   test_nack_and_restart_preserve_receipt ();
   test_persist_failures_roll_back ();
-  test_v1_atomic_migration ();
   test_corrupt_snapshot_is_quarantined ();
   test_invalid_v2_is_not_a_compatibility_fallback ();
   test_invalid_v2_attachment_is_not_silently_dropped ();

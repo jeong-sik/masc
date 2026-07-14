@@ -968,19 +968,137 @@ let entry_of_record_json ~base_path ~request_id:expected_request_id json :
     }
 ;;
 
+type owned_record_file_load =
+  | Owned_record_file_absent
+  | Owned_record_file_loaded of string
+  | Owned_record_file_unreadable of string
+
+let file_kind_to_string = function
+  | Unix.S_REG -> "regular_file"
+  | Unix.S_DIR -> "directory"
+  | Unix.S_CHR -> "character_device"
+  | Unix.S_BLK -> "block_device"
+  | Unix.S_LNK -> "symbolic_link"
+  | Unix.S_FIFO -> "fifo"
+  | Unix.S_SOCK -> "socket"
+;;
+
+let same_file_identity (left : Unix.stats) (right : Unix.stats) =
+  left.st_dev = right.st_dev && left.st_ino = right.st_ino
+;;
+
+let same_file_snapshot (left : Unix.stats) (right : Unix.stats) =
+  same_file_identity left right
+  && left.st_kind = right.st_kind
+  && left.st_size = right.st_size
+  && left.st_mtime = right.st_mtime
+  && left.st_ctime = right.st_ctime
+;;
+
+let read_exact_file_descriptor fd length =
+  let bytes = Bytes.create length in
+  let rec read offset =
+    if offset = length
+    then Ok (Bytes.unsafe_to_string bytes)
+    else
+      match Unix.read fd bytes offset (length - offset) with
+      | 0 -> Error "record file ended before its observed length"
+      | count -> read (offset + count)
+  in
+  read 0
+;;
+
+let load_owned_record_file ~ownership_root path =
+  let unreadable detail = Owned_record_file_unreadable detail in
+  let changed () = unreadable "record filesystem identity changed during read" in
+  let inspect_parent parent =
+    match Fs_compat.inspect_owned_directory_chain ~ownership_root parent with
+    | Ok observation -> Ok observation
+    | Error rejection ->
+      Error (Fs_compat.owned_directory_chain_rejection_to_string rejection)
+  in
+  let load_blocking () =
+    let parent = Filename.dirname path in
+    match inspect_parent parent with
+    | Error detail -> unreadable detail
+    | Ok Fs_compat.Owned_directory_missing -> Owned_record_file_absent
+    | Ok (Fs_compat.Owned_directory parent_before) ->
+      (match Unix.lstat path with
+       | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Owned_record_file_absent
+       | stat when stat.st_kind <> Unix.S_REG ->
+         unreadable
+           (Printf.sprintf
+              "record path is not a regular file: %s"
+              (file_kind_to_string stat.st_kind))
+       | before_open ->
+         (try
+            let fd = Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 in
+            Fun.protect
+              ~finally:(fun () ->
+                try Unix.close fd with
+                | Unix.Unix_error _ -> ())
+              (fun () ->
+                 let opened = Unix.fstat fd in
+                 let boundary_is_current () =
+                   match inspect_parent parent with
+                   | Error _ | Ok Fs_compat.Owned_directory_missing -> false
+                   | Ok (Fs_compat.Owned_directory parent_now) ->
+                     same_file_identity parent_before parent_now
+                     && (match Unix.lstat path with
+                         | current ->
+                           current.st_kind = Unix.S_REG
+                           && same_file_identity opened current
+                         | exception Unix.Unix_error (Unix.ENOENT, _, _) -> false)
+                 in
+                 if
+                   opened.st_kind <> Unix.S_REG
+                   || not (same_file_identity before_open opened)
+                   || not (boundary_is_current ())
+                 then changed ()
+                 else
+                   match read_exact_file_descriptor fd opened.st_size with
+                   | Error detail -> unreadable detail
+                   | Ok content ->
+                     (* The opened inode is the read snapshot. A durable writer
+                        may atomically replace the directory entry while this
+                        descriptor remains valid; re-checking the path here
+                        would turn that valid transition into a false integrity
+                        error. In-place mutation of this inode is still rejected. *)
+                     let after_read = Unix.fstat fd in
+                     if not (same_file_snapshot opened after_read) then changed ()
+                     else Owned_record_file_loaded content)
+          with
+          | Unix.Unix_error (Unix.ENOENT, _, _) -> changed ()
+          | exn -> unreadable (Printexc.to_string exn)))
+  in
+  try
+    let result = Eio_guard.run_in_systhread load_blocking in
+    Eio_guard.check_if_ready ();
+    result
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> unreadable (Printexc.to_string exn)
+;;
+
 let load_record_at_path ~base_path ~request_id path =
   let decoded =
-    try
-      Fs_compat.load_file path
-      |> Yojson.Safe.from_string
-      |> entry_of_record_json ~base_path ~request_id
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn -> Error (Printexc.to_string exn)
+    match load_owned_record_file ~ownership_root:base_path path with
+    | Owned_record_file_absent -> None
+    | Owned_record_file_unreadable reason -> Some (Error reason)
+    | Owned_record_file_loaded content ->
+      Some
+        (try
+           content
+           |> Yojson.Safe.from_string
+           |> entry_of_record_json ~base_path ~request_id
+         with
+         | Eio.Cancel.Cancelled _ as exn -> raise exn
+         | exn -> Error (Printexc.to_string exn))
   in
   match decoded with
-  | Ok entry -> Found entry
-  | Error reason ->
+  | None -> Absent
+  | Some (Ok entry) -> Found entry
+  | Some (Error reason) ->
     Log.Keeper.warn
       "keeper_msg_async: load failed request_id=%s path=%s error=%s"
       request_id
@@ -1031,7 +1149,6 @@ type persist_integrity_error =
   | Terminal_partition_nonterminal
   | Terminal_conflict
   | Terminal_unreadable of string
-  | Terminal_disappeared
   | Terminal_access_rejected of access_rejection
 
 type write_failure =
@@ -1051,8 +1168,6 @@ let persist_integrity_error_to_string = function
     "terminal request record conflicts with the transition candidate"
   | Terminal_unreadable reason ->
     Printf.sprintf "terminal request record is unreadable: %s" reason
-  | Terminal_disappeared ->
-    "terminal request record disappeared during transition"
   | Terminal_access_rejected rejection ->
     access_rejection_to_json rejection |> Yojson.Safe.to_string
 ;;
@@ -1089,8 +1204,7 @@ let persist_terminal_from_source ~ops ~(entry : entry) ~source_path =
   | Some terminal_path ->
     if String.equal source_path terminal_path
     then save_entry_durable ~ops source_path entry
-    else if Fs_compat.file_exists terminal_path
-    then (
+    else (
       match
         load_record_at_path
           ~base_path:entry.base_path
@@ -1110,21 +1224,19 @@ let persist_terminal_from_source ~ops ~(entry : entry) ~source_path =
       | Unreadable reason ->
         Error (Integrity_failed (Terminal_unreadable reason))
       | Absent ->
-        Error (Integrity_failed Terminal_disappeared)
+        (* Lossless namespace protocol: first durably publish the terminal
+           destination, then durably remove the active source. A crash
+           before destination commit leaves the source authoritative; a crash
+           after destination commit may leave both names, and exact lookup gives
+           terminal precedence. Never rename the sole source across directories:
+           partial parent-directory fsync can otherwise lose both names. *)
+        let* () = save_entry_durable ~ops terminal_path entry in
+        (* See lossless namespace protocol: observed cleanup failure is retried. *)
+        ignore (remove_duplicate_source_unlocked ~ops ~entry source_path : bool);
+        Ok ()
       | Rejected rejection ->
         Error (Integrity_failed (Terminal_access_rejected rejection))
     )
-    else (
-      (* Lossless namespace protocol: first durably publish the terminal
-         destination, then durably remove the active source. A crash
-         before destination commit leaves the source authoritative; a crash
-         after destination commit may leave both names, and exact lookup gives
-         terminal precedence. Never rename the sole source across directories:
-         partial parent-directory fsync can otherwise lose both names. *)
-      let* () = save_entry_durable ~ops terminal_path entry in
-      (* See lossless namespace protocol: observed cleanup failure is retried. *)
-      ignore (remove_duplicate_source_unlocked ~ops ~entry source_path : bool);
-      Ok ())
 ;;
 
 let persist_entry_unlocked ~ops ?source_path (entry : entry) =
@@ -1167,43 +1279,36 @@ let load_record_canonical_located ~base_path ~request_id : located_load_result =
   with
   | None, _ | _, None -> Located_rejected Invalid_request_id
   | Some terminal_path, Some active_path ->
-    if Fs_compat.file_exists terminal_path
-    then (
-      match load_record_at_path ~base_path ~request_id terminal_path with
-      | Found terminal_entry when not (is_terminal_status terminal_entry.status) ->
-        Located_unreadable
-          "terminal partition contains a non-terminal request record"
-      | Found terminal_entry when not (Fs_compat.file_exists active_path) ->
-        Located terminal_entry
-      | Found terminal_entry ->
-        (match load_record_at_path ~base_path ~request_id active_path with
-         | Found active_entry when not (same_request_identity active_entry terminal_entry) ->
-           Located_unreadable
-             "conflicting request identities coexist across persistence partitions"
-         | Found active_entry
-           when is_terminal_status active_entry.status
-                && entry_record_to_json active_entry
-                   <> entry_record_to_json terminal_entry ->
-           Located_unreadable
-             "conflicting terminal request records coexist across persistence partitions"
-         | Found _ | Absent -> Located terminal_entry
-         | Unreadable reason ->
-           Located_unreadable
-             (Printf.sprintf
-                "terminal request record coexists with an unreadable active record: %s"
-                reason)
-         | Rejected rejection -> Located_rejected rejection)
-      | Unreadable reason -> Located_unreadable reason
-      | Rejected rejection -> Located_rejected rejection
-      | Absent -> Located_absent)
-    else if Fs_compat.file_exists active_path
-    then (
-      match load_record_at_path ~base_path ~request_id active_path with
+    (match load_record_at_path ~base_path ~request_id terminal_path with
+     | Found terminal_entry when not (is_terminal_status terminal_entry.status) ->
+       Located_unreadable
+         "terminal partition contains a non-terminal request record"
+     | Found terminal_entry ->
+       (match load_record_at_path ~base_path ~request_id active_path with
+        | Found active_entry when not (same_request_identity active_entry terminal_entry) ->
+          Located_unreadable
+            "conflicting request identities coexist across persistence partitions"
+        | Found active_entry
+          when is_terminal_status active_entry.status
+               && entry_record_to_json active_entry
+                  <> entry_record_to_json terminal_entry ->
+          Located_unreadable
+            "conflicting terminal request records coexist across persistence partitions"
+        | Found _ | Absent -> Located terminal_entry
+        | Unreadable reason ->
+          Located_unreadable
+            (Printf.sprintf
+               "terminal request record coexists with an unreadable active record: %s"
+               reason)
+        | Rejected rejection -> Located_rejected rejection)
+     | Unreadable reason -> Located_unreadable reason
+     | Rejected rejection -> Located_rejected rejection
+     | Absent ->
+       (match load_record_at_path ~base_path ~request_id active_path with
       | Found entry -> Located entry
       | Unreadable reason -> Located_unreadable reason
       | Rejected rejection -> Located_rejected rejection
-      | Absent -> Located_absent)
-    else Located_absent
+      | Absent -> Located_absent))
 ;;
 
 let load_record_canonical ~base_path ~request_id : load_result =
@@ -1296,15 +1401,12 @@ let terminal_destination_state (entry : entry) =
   match terminal_record_path ~base_path:entry.base_path ~request_id:entry.request_id with
   | None -> Invalid_terminal_destination Unsafe_request_id
   | Some terminal_path ->
-    if not (Fs_compat.file_exists terminal_path)
-    then No_terminal_destination
-    else (
-      match
-        load_record_at_path
-          ~base_path:entry.base_path
-          ~request_id:entry.request_id
-          terminal_path
-      with
+    (match
+       load_record_at_path
+         ~base_path:entry.base_path
+         ~request_id:entry.request_id
+         terminal_path
+     with
       | Found terminal_entry when is_terminal_status terminal_entry.status ->
         if not (same_request_identity entry terminal_entry)
         then Invalid_terminal_destination Terminal_conflict
@@ -1318,7 +1420,7 @@ let terminal_destination_state (entry : entry) =
         Invalid_terminal_destination Terminal_partition_nonterminal
       | Unreadable reason ->
         Invalid_terminal_destination (Terminal_unreadable reason)
-      | Absent -> Invalid_terminal_destination Terminal_disappeared
+      | Absent -> No_terminal_destination
       | Rejected rejection ->
         Invalid_terminal_destination (Terminal_access_rejected rejection))
 ;;

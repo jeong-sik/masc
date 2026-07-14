@@ -1280,6 +1280,65 @@ let require_record_path ~location ~base_path ~request_id =
   | None -> Alcotest.fail "expected safe partitioned request path"
 ;;
 
+let test_keeper_msg_async_exact_load_rejects_outside_symlink_records () =
+  with_eio_env
+  @@ fun _env ->
+  let base_path = temp_dir "keeper-msg-record-symlink-base-" in
+  let outside = temp_dir "keeper-msg-record-symlink-outside-" in
+  Fun.protect
+    ~finally:(fun () ->
+      rm_rf base_path;
+      rm_rf outside)
+    (fun () ->
+       [ Active_record; Terminal_record ]
+       |> List.iteri (fun index location ->
+         let request_id = Printf.sprintf "kmsg_outside_symlink_%d_0" index in
+         let status, status_fields =
+           match location with
+           | Active_record -> "running", []
+           | Terminal_record ->
+             ( "done"
+             , [ "completed_at", `Float 2.0
+               ; "ok", `Bool true
+               ; "body", `String "outside"
+               ] )
+         in
+         let outside_path = Filename.concat outside (request_id ^ ".json") in
+         let outside_content =
+           request_record_json
+             ~base_path
+             ~request_id
+             ~status
+             ~status_fields
+             ()
+           |> Yojson.Safe.to_string
+         in
+         Fs_compat.save_file outside_path outside_content;
+         let record_path = require_record_path ~location ~base_path ~request_id in
+         mkdir_p (Filename.dirname record_path);
+         Unix.symlink outside_path record_path;
+         (match Keeper_msg_async.For_testing.load_record ~base_path ~request_id with
+          | Keeper_msg_async.Unreadable reason ->
+            Alcotest.(check bool)
+              "symlink rejection is explicit"
+              true
+              (String.length reason > 0)
+          | Keeper_msg_async.Found _ ->
+            Alcotest.fail "outside symlink record crossed the BasePath boundary"
+          | Keeper_msg_async.Absent ->
+            Alcotest.fail "outside symlink record was silently hidden"
+          | Keeper_msg_async.Rejected _ ->
+            Alcotest.fail "persisted symlink was misclassified as caller input");
+         Alcotest.(check bool)
+           "canonical record name remains a symlink"
+           true
+           ((Unix.lstat record_path).st_kind = Unix.S_LNK);
+         Alcotest.(check string)
+           "outside evidence remains untouched"
+           outside_content
+           (Fs_compat.load_file outside_path)))
+;;
+
 let test_keeper_msg_async_finalizes_active_terminal_destination_first () =
   with_eio_env
   @@ fun _env ->
@@ -2602,6 +2661,10 @@ let () =
             "request recovery rejects a linked store root"
             `Quick
             test_keeper_msg_async_recovery_rejects_linked_request_root
+        ; test_case
+            "exact load rejects active and terminal outside symlinks"
+            `Quick
+            test_keeper_msg_async_exact_load_rejects_outside_symlink_records
         ; test_case
             "persistence preparation configures queue then recovers requests"
             `Quick

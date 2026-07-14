@@ -592,14 +592,12 @@ let prepare_keeper_persistence_owned ~base_path_identity ~set_phase ~config =
     queue_recovery.load_errors;
   if
     queue_recovery.restored_keeper_count > 0
-    || queue_recovery.migrated_keeper_count > 0
     || queue_recovery.recovered_receipt_count > 0
     || queue_recovery.load_errors <> []
   then
     Log.Keeper.warn
-      "keeper_chat_queue: recovery restored_keepers=%d migrated_keepers=%d recovered_receipts=%d failures=%d"
+      "keeper_chat_queue: recovery restored_keepers=%d recovered_receipts=%d failures=%d"
       queue_recovery.restored_keeper_count
-      queue_recovery.migrated_keeper_count
       queue_recovery.recovered_receipt_count
       (List.length queue_recovery.load_errors);
   (* Request status is recovered only after transcript journals and queue

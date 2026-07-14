@@ -31,9 +31,12 @@ type complete_fn =
   unit ->
   (Agent_sdk.Types.api_response, Llm_provider.Http_client.http_error) result
 
-(** [make ~runtime_id ~keeper_name ()] builds a summarizer from that exact
-    Runtime, or [None] if its Eio context or schema-capable provider is
-    unavailable. [complete]/[timeout_sec] override the call in tests. *)
+(** [make ~runtime_id ~keeper_name ()] resolves [runtime_id] as a Runtime or
+    Runtime Lane. A Runtime contributes its exact provider config; a Lane tries
+    its configured Runtime candidates in declared order until one returns a
+    valid plan. Missing, ineligible, and failed candidates are logged with
+    their Runtime id. No default Runtime is substituted. [complete]/
+    [timeout_sec] override the call in tests. *)
 val make
   :  ?complete:complete_fn
   -> ?timeout_sec:float
@@ -70,4 +73,11 @@ module For_testing : sig
   val provider_for_plan
     :  Llm_provider.Provider_config.t
     -> Llm_provider.Provider_config.t
+
+  (** Eligible Runtime ids for a Runtime/Lane assignment, in exact declaration
+      order. Provider configs are intentionally not exposed. *)
+  val candidate_runtime_ids_for_assignment
+    :  keeper_name:string
+    -> runtime_id:string
+    -> string list option
 end

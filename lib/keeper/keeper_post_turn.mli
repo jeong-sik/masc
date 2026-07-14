@@ -104,9 +104,8 @@ val apply_post_turn_lifecycle_with_resilience_handles :
 
 (** Reload the canonical OAS checkpoint and apply an explicit typed
     compaction request so the caller can continue from a smaller context.
-    Returns [None] when no checkpoint exists, when compaction did
-    not actually shrink the token count, or when the recovery save
-    failed. *)
+    Returns [None] when no checkpoint exists, the LLM produces no structural
+    plan, or the recovery save fails. Counts never gate continuation. *)
 val recover_latest_checkpoint_for_overflow_retry :
   base_dir:string ->
   meta:Keeper_meta_contract.keeper_meta ->

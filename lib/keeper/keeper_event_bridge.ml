@@ -806,6 +806,8 @@ let start_impl ~interval_s ~sw ~clock ~(config : Workspace.config) ~bus =
   let store = ref (oas_event_store ~config) in
   let sub =
     Agent_sdk_metrics_bridge.subscribe
+      ~capacity:256
+      ~overflow:Agent_sdk.Event_bus.Drop_oldest
       ~purpose:"sse_bridge"
       ~filter:Agent_sdk.Event_bus.accept_all
       bus

@@ -7,7 +7,11 @@
 
 open Alcotest
 
-module I = Masc.Agent_sdk_metrics_bridge
+module I = struct
+  include Masc.Agent_sdk_metrics_bridge
+
+  let subscribe = subscribe ~capacity:3 ~overflow:Agent_sdk.Event_bus.Drop_oldest
+end
 
 let mk_bus () = Agent_sdk.Event_bus.create ()
 
@@ -15,10 +19,7 @@ let mk_custom_event tag =
   Agent_sdk.Event_bus.mk_event
     (Agent_sdk.Event_bus.Custom (tag, `Assoc []))
 
-let topic_filter tag : Agent_sdk.Event_bus.filter = fun evt ->
-  match evt.payload with
-  | Agent_sdk.Event_bus.Custom (t, _) -> t = tag
-  | _ -> false
+let topic_filter = Agent_sdk.Event_bus.filter_topic
 
 let run_eio f =
   Eio_main.run (fun env ->
@@ -31,7 +32,10 @@ let test_subscribe_forwards_purpose_to_oas_stats () =
     let stats = Agent_sdk.Event_bus.stats bus in
     (match stats.subscriptions with
      | [ sub_stats ] ->
-       check (option string) "oas purpose" (Some "compact_audit") sub_stats.purpose
+       check (option string) "oas purpose" (Some "compact_audit") sub_stats.purpose;
+       check int "subscriber capacity" 3 sub_stats.capacity;
+       check bool "subscriber overflow" true
+         (sub_stats.overflow = Agent_sdk.Event_bus.Drop_oldest)
      | _ -> fail "expected one OAS subscription");
     I.unsubscribe bus h)
 

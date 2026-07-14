@@ -7,10 +7,14 @@
 type handle
 
 val subscribe
-  :  purpose:string
+  :  capacity:int
+  -> overflow:Agent_sdk.Event_bus.overflow
+  -> purpose:string
   -> ?filter:Agent_sdk.Event_bus.filter
   -> Agent_sdk.Event_bus.t
   -> handle
+(** Subscribe with a subscriber-owned queue contract. Invalid capacities fail
+    explicitly before the subscription is installed. *)
 
 val drain : handle -> Agent_sdk.Event_bus.event list
 val unsubscribe : Agent_sdk.Event_bus.t -> handle -> unit

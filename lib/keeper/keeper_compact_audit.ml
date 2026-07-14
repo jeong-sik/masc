@@ -530,6 +530,8 @@ let spawn_subscriber
   in
   let sub =
     Agent_sdk_metrics_bridge.subscribe
+      ~capacity:256
+      ~overflow:Agent_sdk.Event_bus.Drop_oldest
       ~purpose:"compact_audit"
       ~filter:compaction_filter
       bus

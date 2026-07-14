@@ -1100,11 +1100,10 @@ let start_keeper_loops_owned
     ~sw ~clock ~base_path:(Env_config.base_path ()) ~bus:event_bus;
   let keeper_lifecycle_sub =
     Agent_sdk_metrics_bridge.subscribe
+      ~capacity:256
+      ~overflow:Agent_sdk.Event_bus.Drop_oldest
       ~purpose:"lifecycle_listener"
-      ~filter:(fun (evt : Agent_sdk.Event_bus.event) ->
-        match evt.payload with
-        | Agent_sdk.Event_bus.Custom ("masc.keeper.lifecycle", _) -> true
-        | _ -> false)
+      ~filter:(Agent_sdk.Event_bus.filter_topic "masc.keeper.lifecycle")
       masc_event_bus
   in
   Eio.Switch.on_release sw (fun () ->

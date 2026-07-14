@@ -1008,10 +1008,10 @@ let entry_of_record_json ~base_path ~request_id:expected_request_id json :
 
 let load_record_at_path ~base_path ~request_id path =
   let decoded =
-    match Keeper_fs.load_owned_regular_file ~ownership_root:base_path path with
+    match Fs_compat.load_owned_regular_file ~ownership_root:base_path path with
     | Ok None -> None
     | Error error ->
-      Some (Error (Keeper_fs.owned_regular_file_read_error_to_string error))
+      Some (Error (Fs_compat.owned_regular_file_read_error_to_string error))
     | Ok (Some content) ->
       Some
         (try

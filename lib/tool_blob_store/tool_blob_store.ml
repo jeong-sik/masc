@@ -1,6 +1,9 @@
 module SS = Set_util.StringSet
 
-type t = { root : string } [@@unboxed]
+type t =
+  { root : string
+  ; ownership_root : string
+  }
 
 type invalid_sha256 =
   | Invalid_sha256_length of { actual : int }
@@ -32,12 +35,7 @@ let invalid_sha256_to_string = function
 
 type fetch_error =
   | Invalid_sha256 of invalid_sha256
-  | Inspect_failed of { path : string; cause : exn }
-  | Unexpected_file_kind of {
-      path : string;
-      kind : Fs_compat.exact_path_kind;
-    }
-  | Read_failed of { path : string; cause : exn }
+  | Owned_read_failed of Fs_compat.owned_regular_file_read_error
   | Integrity_mismatch of {
       path : string;
       expected : string;
@@ -46,24 +44,8 @@ type fetch_error =
 
 let fetch_error_to_string = function
   | Invalid_sha256 invalid -> invalid_sha256_to_string invalid
-  | Inspect_failed { path; cause } ->
-      Printf.sprintf "inspect failed path=%s cause=%s" path (Printexc.to_string cause)
-  | Unexpected_file_kind { path; kind } ->
-      let kind_name =
-        match kind with
-        | Fs_compat.Exact_missing -> "missing"
-        | Fs_compat.Exact_unknown -> "unknown"
-        | Fs_compat.Exact_kind Unix.S_REG -> "regular"
-        | Fs_compat.Exact_kind Unix.S_DIR -> "directory"
-        | Fs_compat.Exact_kind Unix.S_CHR -> "character-device"
-        | Fs_compat.Exact_kind Unix.S_BLK -> "block-device"
-        | Fs_compat.Exact_kind Unix.S_LNK -> "symbolic-link"
-        | Fs_compat.Exact_kind Unix.S_FIFO -> "fifo"
-        | Fs_compat.Exact_kind Unix.S_SOCK -> "socket"
-      in
-      Printf.sprintf "expected regular blob file path=%s kind=%s" path kind_name
-  | Read_failed { path; cause } ->
-      Printf.sprintf "read failed path=%s cause=%s" path (Printexc.to_string cause)
+  | Owned_read_failed error ->
+      Fs_compat.owned_regular_file_read_error_to_string error
   | Integrity_mismatch { path; expected; actual } ->
       Printf.sprintf
         "integrity mismatch path=%s expected=%s actual=%s"
@@ -92,6 +74,7 @@ let create ~base_path =
       Filename.concat
         (Common.masc_dir_from_base_path ~base_path)
         "tool_blobs";
+    ownership_root = base_path;
   }
 
 let root_dir t = t.root
@@ -109,37 +92,23 @@ let rec mkdir_p p =
 
 let ensure_parent_dir path = mkdir_p (Filename.dirname path)
 
-let inspect_path path =
-  Safe_ops.handle
-    (fun () -> Ok (Fs_compat.exact_path_kind ~follow:false path))
-    (fun cause -> Error (Inspect_failed { path; cause }))
-
-let read_path path =
-  Safe_ops.handle
-    (fun () -> Ok (Fs_compat.load_file path))
-    (fun cause -> Error (Read_failed { path; cause }))
-
 let fetch t ~sha256 =
   match validate_sha256 sha256 with
   | Error invalid -> Error (Invalid_sha256 invalid)
   | Ok () ->
       let path = shard_path t sha256 in
-      (match inspect_path path with
-       | Error _ as error -> error
-       | Ok Fs_compat.Exact_missing -> Ok None
-       | Ok (Fs_compat.Exact_kind Unix.S_REG) ->
-           (match read_path path with
-            | Error _ as error -> error
-            | Ok bytes ->
-                let actual = Digestif.SHA256.(digest_string bytes |> to_hex) in
-                if String.equal sha256 actual then Ok (Some bytes)
-                else Error (Integrity_mismatch { path; expected = sha256; actual }))
-       | Ok
-           ((Fs_compat.Exact_kind
-               (Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO
-               | Unix.S_SOCK)
-             | Fs_compat.Exact_unknown) as kind) ->
-           Error (Unexpected_file_kind { path; kind }))
+      (match
+         Fs_compat.load_owned_regular_file
+           ~ownership_root:t.ownership_root
+           path
+       with
+       | Error error -> Error (Owned_read_failed error)
+       | Ok None -> Ok None
+       | Ok (Some bytes) ->
+         let actual = Digestif.SHA256.(digest_string bytes |> to_hex) in
+         if String.equal sha256 actual
+         then Ok (Some bytes)
+         else Error (Integrity_mismatch { path; expected = sha256; actual }))
 
 let put t ~bytes ~mime =
   let sha256 = Digestif.SHA256.(digest_string bytes |> to_hex) in

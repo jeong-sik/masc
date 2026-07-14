@@ -175,6 +175,34 @@ let test_read_dir_and_path_kind_use_typed_inventory ~fs () =
   check_inventory "Eio"
 ;;
 
+let test_owned_regular_file_read_uses_eio_systhread ~fs () =
+  Fs_compat.set_fs fs;
+  with_tmp_dir
+  @@ fun base ->
+  let parent = Filename.concat base "owned" in
+  let path = Filename.concat parent "record.json" in
+  Fs_compat.mkdir_p parent;
+  Fs_compat.save_file path "owned";
+  (match Fs_compat.load_owned_regular_file ~ownership_root:base path with
+   | Ok (Some content) -> check string "descriptor content" "owned" content
+   | Ok None -> fail "owned file was reported absent"
+   | Error error ->
+     fail (Fs_compat.owned_regular_file_read_error_to_string error));
+  let cancellation_propagated =
+    try
+      Eio.Cancel.sub (fun context ->
+        Eio.Cancel.cancel context Exit;
+        ignore
+          (Fs_compat.load_owned_regular_file ~ownership_root:base path
+           : (string option, Fs_compat.owned_regular_file_read_error) result));
+      false
+    with
+    | Eio.Cancel.Cancelled _ -> true
+  in
+  check bool "cancellation is not converted to a read error" true
+    cancellation_propagated
+;;
+
 let with_redirected_stderr (f : unit -> 'a) : 'a * string =
   let tmp = Filename.temp_file "masc_stderr_" ".log" in
   let saved = Unix.dup Unix.stderr in
@@ -404,6 +432,13 @@ let () =
             "typed path kind and sorted read_dir"
             `Quick
             (test_read_dir_and_path_kind_use_typed_inventory
+               ~fs:(Eio.Stdenv.fs env))
+        ] )
+    ; ( "owned regular file"
+      , [ test_case
+            "Eio systhread and cancellation"
+            `Quick
+            (test_owned_regular_file_read_uses_eio_systhread
                ~fs:(Eio.Stdenv.fs env))
         ] )
     ; ( "load_jsonl_diagnostics"

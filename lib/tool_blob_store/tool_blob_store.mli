@@ -18,12 +18,7 @@ val invalid_sha256_to_string : invalid_sha256 -> string
 
 type fetch_error =
   | Invalid_sha256 of invalid_sha256
-  | Inspect_failed of { path : string; cause : exn }
-  | Unexpected_file_kind of {
-      path : string;
-      kind : Fs_compat.exact_path_kind;
-    }
-  | Read_failed of { path : string; cause : exn }
+  | Owned_read_failed of Fs_compat.owned_regular_file_read_error
   | Integrity_mismatch of {
       path : string;
       expected : string;
@@ -55,9 +50,9 @@ val put : t -> bytes:string -> mime:string -> Tool_output.t
 
 val fetch : t -> sha256:string -> (string option, fetch_error) result
 (** Validate and retrieve bytes by sha256. Returns [Ok None] only when the
-    validated path is absent. Validation, inspection, path-kind, read, and
-    content-integrity failures are distinct typed errors. Cancellation
-    propagates. *)
+    validated path is absent. The owned-file read validates the no-follow
+    parent chain and [lstat]/[fstat] identity before and after descriptor I/O.
+    Read and content-integrity failures remain typed. Cancellation propagates. *)
 
 val list_all : t -> string list
 (** List all sha256 hashes currently in the store. O(n) in store size.

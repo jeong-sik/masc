@@ -386,6 +386,246 @@ let owned_directory_chain_rejection_to_string =
   Owned_directory_chain.rejection_to_string
 ;;
 
+type owned_regular_file_read_operation =
+  | Inspect_parent
+  | Inspect_path
+  | Open_path
+  | Inspect_descriptor
+  | Read_contents
+  | Close_descriptor
+
+type owned_regular_file_read_failure =
+  | Ownership_boundary_rejected of
+      { path : string
+      ; rejection : owned_directory_chain_rejection
+      }
+  | Path_is_not_regular_file of
+      { path : string
+      ; kind : Unix.file_kind
+      }
+  | Filesystem_identity_changed of { path : string }
+  | Owned_file_operation_failed of
+      { path : string
+      ; operation : owned_regular_file_read_operation
+      ; cause : exn
+      }
+
+type owned_regular_file_read_error =
+  { failure : owned_regular_file_read_failure
+  ; close_failure : exn option
+  }
+
+let owned_regular_file_read_operation_to_string = function
+  | Inspect_parent -> "inspect_parent"
+  | Inspect_path -> "inspect_path"
+  | Open_path -> "open_path"
+  | Inspect_descriptor -> "inspect_descriptor"
+  | Read_contents -> "read_contents"
+  | Close_descriptor -> "close_descriptor"
+;;
+
+let file_kind_to_string = function
+  | Unix.S_REG -> "regular_file"
+  | Unix.S_DIR -> "directory"
+  | Unix.S_CHR -> "character_device"
+  | Unix.S_BLK -> "block_device"
+  | Unix.S_LNK -> "symbolic_link"
+  | Unix.S_FIFO -> "fifo"
+  | Unix.S_SOCK -> "socket"
+;;
+
+let owned_regular_file_read_failure_to_string = function
+  | Ownership_boundary_rejected { path; rejection } ->
+    Printf.sprintf
+      "owned file boundary rejected path=%s reason=%s"
+      path
+      (owned_directory_chain_rejection_to_string rejection)
+  | Path_is_not_regular_file { path; kind } ->
+    Printf.sprintf
+      "owned file path is not a regular file path=%s kind=%s"
+      path
+      (file_kind_to_string kind)
+  | Filesystem_identity_changed { path } ->
+    Printf.sprintf "owned file identity changed during read path=%s" path
+  | Owned_file_operation_failed { path; operation; cause } ->
+    Printf.sprintf
+      "owned file operation failed path=%s operation=%s reason=%s"
+      path
+      (owned_regular_file_read_operation_to_string operation)
+      (Printexc.to_string cause)
+;;
+
+let owned_regular_file_read_error_to_string { failure; close_failure } =
+  let primary = owned_regular_file_read_failure_to_string failure in
+  match close_failure with
+  | None -> primary
+  | Some cause ->
+    Printf.sprintf
+      "%s; descriptor close also failed: %s"
+      primary
+      (Printexc.to_string cause)
+;;
+
+let same_file_identity (left : Unix.stats) (right : Unix.stats) =
+  left.st_dev = right.st_dev && left.st_ino = right.st_ino
+;;
+
+let same_file_snapshot (left : Unix.stats) (right : Unix.stats) =
+  same_file_identity left right
+  && left.st_kind = right.st_kind
+  && left.st_size = right.st_size
+  && left.st_mtime = right.st_mtime
+  && left.st_ctime = right.st_ctime
+;;
+
+let owned_file_error failure = Error { failure; close_failure = None }
+
+let owned_file_operation_error ~path operation cause =
+  owned_file_error (Owned_file_operation_failed { path; operation; cause })
+;;
+
+let reraise_current exn =
+  Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ())
+;;
+
+let read_exact_file_descriptor ~path fd length =
+  try
+    let bytes = Bytes.create length in
+    let rec read offset =
+      if offset = length
+      then Ok (Bytes.unsafe_to_string bytes)
+      else
+        match Unix.read fd bytes offset (length - offset) with
+        | 0 -> owned_file_error (Filesystem_identity_changed { path })
+        | count -> read (offset + count)
+        | exception Unix.Unix_error (Unix.EINTR, _, _) -> read offset
+    in
+    read 0
+  with
+  | Eio.Cancel.Cancelled _ as cancellation -> reraise_current cancellation
+  | cause -> owned_file_operation_error ~path Read_contents cause
+;;
+
+let load_owned_regular_file_blocking ~ownership_root path =
+  let parent = Filename.dirname path in
+  let inspect_parent () =
+    try
+      match inspect_owned_directory_chain ~ownership_root parent with
+      | Ok observation -> Ok observation
+      | Error rejection ->
+        owned_file_error (Ownership_boundary_rejected { path; rejection })
+    with
+    | Eio.Cancel.Cancelled _ as cancellation -> reraise_current cancellation
+    | cause -> owned_file_operation_error ~path Inspect_parent cause
+  in
+  let inspect_current parent_before descriptor =
+    match inspect_parent () with
+    | Error _ as error -> error
+    | Ok Owned_directory_missing -> Ok false
+    | Ok (Owned_directory parent_now) ->
+      if not (same_file_identity parent_before parent_now)
+      then Ok false
+      else
+        (try
+           let current = Unix.lstat path in
+           Ok
+             (current.st_kind = Unix.S_REG
+              && same_file_identity descriptor current)
+         with
+         | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
+         | Eio.Cancel.Cancelled _ as cancellation -> reraise_current cancellation
+         | cause -> owned_file_operation_error ~path Inspect_path cause)
+  in
+  match inspect_parent () with
+  | Error _ as error -> error
+  | Ok Owned_directory_missing -> Ok None
+  | Ok (Owned_directory parent_before) ->
+    let before_open =
+      try Ok (Some (Unix.lstat path)) with
+      | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+      | Eio.Cancel.Cancelled _ as cancellation -> reraise_current cancellation
+      | cause -> owned_file_operation_error ~path Inspect_path cause
+    in
+    (match before_open with
+     | Error _ as error -> error
+     | Ok None -> Ok None
+     | Ok (Some stat) when stat.st_kind <> Unix.S_REG ->
+       owned_file_error (Path_is_not_regular_file { path; kind = stat.st_kind })
+     | Ok (Some before_open) ->
+       let opened =
+         try
+           Ok
+             (Unix.openfile
+                path
+                [ Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC ]
+                0)
+         with
+         | Eio.Cancel.Cancelled _ as cancellation -> reraise_current cancellation
+         | cause -> owned_file_operation_error ~path Open_path cause
+       in
+       (match opened with
+        | Error _ as error -> error
+        | Ok fd ->
+          let result =
+            match Unix.fstat fd with
+            | exception cause ->
+              owned_file_operation_error ~path Inspect_descriptor cause
+            | descriptor
+              when descriptor.st_kind <> Unix.S_REG
+                   || not (same_file_identity before_open descriptor) ->
+              owned_file_error (Filesystem_identity_changed { path })
+            | descriptor ->
+              (match inspect_current parent_before descriptor with
+               | Error _ as error -> error
+               | Ok false ->
+                 owned_file_error (Filesystem_identity_changed { path })
+               | Ok true ->
+                 (match read_exact_file_descriptor ~path fd descriptor.st_size with
+                  | Error _ as error -> error
+                  | Ok content ->
+                    (match Unix.fstat fd with
+                     | after_read when same_file_snapshot descriptor after_read ->
+                       (match inspect_current parent_before descriptor with
+                        | Error _ as error -> error
+                        | Ok true -> Ok (Some content)
+                        | Ok false ->
+                          owned_file_error
+                            (Filesystem_identity_changed { path }))
+                     | _ ->
+                       owned_file_error (Filesystem_identity_changed { path })
+                     | exception cause ->
+                       owned_file_operation_error
+                         ~path
+                         Inspect_descriptor
+                         cause)))
+          in
+          let close_result =
+            try Unix.close fd; Ok () with
+            | Eio.Cancel.Cancelled _ as cancellation ->
+              reraise_current cancellation
+            | cause -> Error cause
+          in
+          (match close_result, result with
+           | Ok (), result -> result
+           | Error cause, Ok _ ->
+             owned_file_operation_error ~path Close_descriptor cause
+           | Error cause, Error error ->
+             Error { error with close_failure = Some cause })))
+;;
+
+let load_owned_regular_file ~ownership_root path =
+  with_fs_or_fallback
+    ~path
+    ~fallback:(fun () -> load_owned_regular_file_blocking ~ownership_root path)
+    (fun _fs ->
+       let result =
+         Eio_unix.run_in_systhread (fun () ->
+           load_owned_regular_file_blocking ~ownership_root path)
+       in
+       Eio.Fiber.check ();
+       result)
+;;
+
 let read_dir (path : string) : string list =
   with_fs_or_fallback
     ~path

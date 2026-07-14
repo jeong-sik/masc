@@ -31,8 +31,9 @@ type exact_path_kind =
 
 (** Eio-native exact path classification. Unlike {!path_kind}, this preserves
     regular files, symbolic links, FIFOs, sockets, and devices as distinct
-    [Unix.file_kind] values. [follow=false] is suitable for owned-file read
-    boundaries that must reject links and special files before I/O. *)
+    [Unix.file_kind] values. Classification followed by a separate path-based
+    I/O operation is not atomic; owned-file readers must use
+    {!load_owned_regular_file}. *)
 val exact_path_kind : ?follow:bool -> string -> exact_path_kind
 
 type path_kind =
@@ -74,6 +75,51 @@ val owned_directory_paths
   -> string
   -> (string list, owned_directory_chain_rejection) result
 (** Lexical ordered descendant paths for ownership-aware directory creation. *)
+
+type owned_regular_file_read_operation =
+  | Inspect_parent
+  | Inspect_path
+  | Open_path
+  | Inspect_descriptor
+  | Read_contents
+  | Close_descriptor
+
+type owned_regular_file_read_failure =
+  | Ownership_boundary_rejected of
+      { path : string
+      ; rejection : owned_directory_chain_rejection
+      }
+  | Path_is_not_regular_file of
+      { path : string
+      ; kind : Unix.file_kind
+      }
+  | Filesystem_identity_changed of { path : string }
+  | Owned_file_operation_failed of
+      { path : string
+      ; operation : owned_regular_file_read_operation
+      ; cause : exn
+      }
+
+type owned_regular_file_read_error =
+  { failure : owned_regular_file_read_failure
+  ; close_failure : exn option
+  }
+
+(** Read one process-owned regular file without accepting symbolic links or a
+    changed parent chain. [Ok None] means that the owned directory or file is
+    absent. OCaml 5.4 does not expose [O_NOFOLLOW], so the implementation
+    validates [lstat]/[fstat] identity before reading and revalidates the
+    no-follow parent and leaf boundary after the read. Blocking Unix operations
+    run in a system thread when the Eio filesystem is active. A simultaneous
+    read and descriptor-close failure preserves both causes. *)
+val load_owned_regular_file
+  :  ownership_root:string
+  -> string
+  -> (string option, owned_regular_file_read_error) result
+
+val owned_regular_file_read_error_to_string
+  :  owned_regular_file_read_error
+  -> string
 
 (** Eio-native, deterministically sorted directory inventory. *)
 val read_dir : string -> string list

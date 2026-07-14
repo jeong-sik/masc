@@ -66,6 +66,30 @@ type load_result =
   | Unreadable of string
   | Rejected of access_rejection
 
+(** Opaque evidence that the exact request's canonical terminal-partition
+    record is durably authoritative.  A proof is never constructed from
+    {!poll}: process memory may contain a visible but unconfirmed terminal
+    publication. *)
+type durable_terminal_proof
+
+type canonical_terminal_error =
+  | Canonical_terminal_absent
+  | Canonical_terminal_unreadable of string
+  | Canonical_terminal_access_rejected of access_rejection
+  | Canonical_terminal_runtime_active of request_status
+      (** The exact request still has process-local nonterminal ownership. *)
+  | Canonical_terminal_publication_ambiguous of request_status
+      (** A terminal value is visible in process memory, but its canonical
+          partition publication was not durably confirmed. *)
+  | Canonical_terminal_nonterminal of request_status
+  | Canonical_terminal_noncanonical_location of request_status
+
+val canonical_terminal_error_to_string : canonical_terminal_error -> string
+
+val durable_terminal_entry : durable_terminal_proof -> entry
+(** Read-only identity/status carried by a proof.  The proof constructor stays
+    private to this module. *)
+
 type recovery_report =
   { lost : int
   ; migrated : int
@@ -253,6 +277,18 @@ val submit
     different process does not own its worker. Only the exclusive startup
     recovery boundary may transition such records to [Lost]. *)
 val poll : base_path:string -> caller:string -> string -> load_result
+
+(** Exact O(1) canonical-disk lookup for a durably committed terminal request.
+    It checks only the request's terminal/active/legacy filenames; it never
+    inventories a partition.  Process-local nonterminal ownership and a visible
+    but unconfirmed terminal publication are distinct typed failures, so neither
+    can be mistaken for durable truth.  Corrupt, conflicting, nonterminal, and
+    noncanonical records remain in place for lane-local recovery. *)
+val load_canonical_durable_terminal :
+  base_path:string ->
+  caller:string ->
+  string ->
+  (durable_terminal_proof, canonical_terminal_error) result
 
 (** Mark persisted non-terminal request records that have no live in-memory
     worker as [Lost], returning the number of records transitioned. This is

@@ -279,7 +279,6 @@ let iteri_with_fair_yield = Server_bootstrap_loops_fiber.iteri_with_fair_yield
 
 type keeper_persistence_report =
   { shutdown : Keeper_shutdown_runtime.restored_inventory
-  ; delivery : Keeper_chat_delivery_journal.recovery_report
   ; queue : Keeper_chat_queue.configure_report
   ; requests : Keeper_msg_async.recovery_report
   }
@@ -287,7 +286,6 @@ type keeper_persistence_report =
 type keeper_persistence_failure_phase =
   | Resolving_base_path
   | Restoring_shutdown
-  | Recovering_delivery
   | Configuring_queue
   | Recovering_requests
   | Starting_keeper_loops
@@ -413,7 +411,6 @@ let observe_preparation_stage ~stage ~started ~examined ~failures =
 let keeper_persistence_failure_phase_to_string = function
   | Resolving_base_path -> "resolving_base_path"
   | Restoring_shutdown -> "restoring_shutdown"
-  | Recovering_delivery -> "recovering_delivery"
   | Configuring_queue -> "configuring_queue"
   | Recovering_requests -> "recovering_requests"
   | Starting_keeper_loops -> "starting_keeper_loops"
@@ -525,48 +522,6 @@ let prepare_keeper_persistence_owned ~base_path_identity ~set_phase ~config =
   match shutdown_inventory with
   | Error _ as error -> error
   | Ok shutdown ->
-  set_phase Recovering_delivery;
-  let delivery_started = preparation_stage_started () in
-  let delivery_recovery =
-    Keeper_chat_delivery_journal.recover_all
-      ~base_path
-      ~now:(Time_compat.now ())
-  in
-  observe_preparation_stage
-    ~stage:"delivery"
-    ~started:delivery_started
-    ~examined:
-      (delivery_recovery.recovered
-       + delivery_recovery.already_final
-       + List.length delivery_recovery.failures)
-    ~failures:(List.length delivery_recovery.failures);
-  List.iter
-    (fun (failure : Keeper_chat_delivery_journal.recovery_failure) ->
-       let keeper_name, delivery_ref =
-         match failure.scope with
-         | Keeper_chat_delivery_journal.Root_inventory ->
-           "<root-inventory>", "inventory"
-         | Keeper_chat_delivery_journal.Keeper_inventory { keeper_name } ->
-           keeper_name, "inventory"
-         | Keeper_chat_delivery_journal.Delivery_record
-             { keeper_name; delivery_ref } -> keeper_name, delivery_ref
-       in
-       Log.Keeper.error
-         "keeper_chat_delivery_journal: recovery failed keeper=%s delivery_ref=%s error=%s"
-         keeper_name
-         delivery_ref
-         (Keeper_chat_delivery_journal.error_to_string failure.error))
-    delivery_recovery.failures;
-  if delivery_recovery.recovered > 0 || delivery_recovery.failures <> []
-  then
-    Log.Keeper.warn
-      "keeper_chat_delivery_journal: recovery completed recovered=%d already_final=%d failures=%d"
-      delivery_recovery.recovered
-      delivery_recovery.already_final
-      (List.length delivery_recovery.failures);
-  (* Recovery failures remain typed observations. They are not Keeper
-     lifecycle authority and therefore cannot prevent the process owner from
-     publishing the independent lanes that are still healthy. *)
   set_phase Configuring_queue;
   let queue_started = preparation_stage_started () in
   let queue_recovery = Keeper_chat_queue.configure_persistence ~base_path in
@@ -602,10 +557,10 @@ let prepare_keeper_persistence_owned ~base_path_identity ~set_phase ~config =
       queue_recovery.migrated_keeper_count
       queue_recovery.recovered_receipt_count
       (List.length queue_recovery.load_errors);
-  (* Request status is recovered only after transcript journals and queue
-     receipts converge: a
-     poller must never observe a final Lost status while its durable terminal
-     row is still absent. [server_runtime_bootstrap] calls this entire
+  (* Request status is recovered only after queue receipts converge: a poller
+     must never observe a final Lost status while its durable terminal row is
+     still absent. Direct transcript checkpoints are exact request-local state,
+     never a global startup scan. [server_runtime_bootstrap] calls this entire
      boundary before publishing [server_state], so no poll/cancel route can
      race a disk-only transition. *)
   set_phase Recovering_requests;
@@ -652,7 +607,6 @@ let prepare_keeper_persistence_owned ~base_path_identity ~set_phase ~config =
     ; config
     ; report =
         { shutdown
-        ; delivery = delivery_recovery
         ; queue = queue_recovery
         ; requests = keeper_msg_recovery
         }

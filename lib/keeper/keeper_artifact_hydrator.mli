@@ -27,5 +27,6 @@ val hydrate_recent :
     place; the LLM still has the metadata fields (sha256, byte count,
     preview) to reason about the missing payload.
 
-    Storage exceptions are caught — a corrupted store cannot break the
-    provider-bound projection. *)
+    Storage read errors are logged and leave the marker in place, so a
+    corrupted artifact cannot break the provider-bound projection without
+    becoming a silent failure. Cancellation propagates. *)

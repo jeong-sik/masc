@@ -15,21 +15,14 @@
     ]}
 
     Errors:
-    - 400 — malformed sha256 (not 64 hex chars)
+    - 400 — malformed sha256 (not 64 lowercase hex chars)
     - 404 — sha256 not in store
     - 503 — base path unresolvable (store unavailable) *)
 
 val is_valid_sha256 : string -> bool
-(** [true] iff [s] is exactly 64 chars long and every char is in
-    the lower / upper hex range ([0-9a-fA-F]). The route handler
-    rejects requests whose path parameter fails this check with
-    400 before touching the blob store, so the validation
-    surfaces as a contract guard for path-traversal and
-    fixed-length markers. *)
+(** Shared exact lowercase SHA-256 validation used by the route guard. *)
 
-val blob_response :
-  sha256:string ->
-  Yojson.Safe.t * Httpun.Status.t
+val blob_response : sha256:string -> Yojson.Safe.t * Httpun.Status.t
 (** Look up [sha256] in the on-disk blob store
     ([${MASC_BASE_PATH}/.masc/tool_blobs/]) and return the
     JSON envelope plus the HTTP status code:
@@ -41,8 +34,8 @@ val blob_response :
     - [`Service_unavailable] when [Env_config_core.base_path_opt]
       returns [None] (no [MASC_BASE_PATH], no store root).
 
-    The function never raises — every failure path produces a
-    JSON envelope with an [error] field. *)
+    Store inspection, read, and integrity failures return
+    [`Service_unavailable]. Cancellation propagates. *)
 
 val add_routes :
   Http_server_eio.Router.t ->

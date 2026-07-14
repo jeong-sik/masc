@@ -39,10 +39,10 @@ let with_temp_base_path f =
 (* --- sha256 validation --- *)
 
 let test_valid_sha256 () =
-  Alcotest.(check bool) "exact 64 hex" true
+  Alcotest.(check bool) "exact 64 lowercase hex" true
     (A.is_valid_sha256
        "abc1234567890123456789012345678901234567890123456789012345678901");
-  Alcotest.(check bool) "uppercase hex" true
+  Alcotest.(check bool) "uppercase hex" false
     (A.is_valid_sha256
        "ABC1234567890123456789012345678901234567890123456789012345678901");
   Alcotest.(check bool) "63 chars" false

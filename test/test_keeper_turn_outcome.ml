@@ -111,20 +111,57 @@ let test_of_result_surface () =
 
 let test_autonomous_yield_boundary_contract () =
   let module F = Masc.Keeper_agent_run.For_testing in
-  let chat : Masc.Keeper_agent_run.autonomous_yield_request =
-    { reason = Masc.Keeper_agent_run.Chat_waiting }
+  let start_turn = 11570 in
+  let immediate_chat : Masc.Keeper_agent_run.autonomous_yield_request =
+    { reason = Masc.Keeper_agent_run.Chat_waiting
+    ; boundary = Masc.Keeper_agent_run.Yield_immediately
+    }
+  in
+  let reactive_chat : Masc.Keeper_agent_run.autonomous_yield_request =
+    { reason = Masc.Keeper_agent_run.Chat_waiting
+    ; boundary = Masc.Keeper_agent_run.Yield_after_current_turn
+    }
   in
   let durable_stimulus : Masc.Keeper_agent_run.autonomous_yield_request =
-    { reason = Masc.Keeper_agent_run.Durable_stimulus_waiting }
+    { reason = Masc.Keeper_agent_run.Durable_stimulus_waiting
+    ; boundary = Masc.Keeper_agent_run.Yield_after_current_turn
+    }
   in
-  (match F.runtime_yield_reason chat with
-   | Runtime_agent.Chat_waiting -> ()
-   | Runtime_agent.Durable_stimulus_waiting ->
-     fail "chat request mapped to the durable-stimulus reason");
-  match F.runtime_yield_reason durable_stimulus with
-  | Runtime_agent.Durable_stimulus_waiting -> ()
-  | Runtime_agent.Chat_waiting ->
-    fail "durable request mapped to the chat reason"
+  check bool "chat may yield before first provider dispatch" true
+    (F.autonomous_yield_allowed_at_turn
+       ~start_turn
+       ~turn:start_turn
+       immediate_chat);
+  check bool "reactive chat cannot skip the leased stimulus" false
+    (F.autonomous_yield_allowed_at_turn
+       ~start_turn
+       ~turn:start_turn
+       reactive_chat);
+  check bool "durable backlog cannot skip the leased stimulus" false
+    (F.autonomous_yield_allowed_at_turn
+       ~start_turn
+       ~turn:start_turn
+       durable_stimulus);
+  check bool "durable backlog yields after one provider turn" true
+    (F.autonomous_yield_allowed_at_turn
+       ~start_turn
+       ~turn:(start_turn + 1)
+       durable_stimulus);
+  match
+    F.stop_reason_of_autonomous_yield
+      ~turn:(start_turn + 1)
+      durable_stimulus
+  with
+  | Runtime_agent.Yielded_to_durable_stimulus { turns_used } ->
+    check int "typed durable yield carries the OAS turn" (start_turn + 1)
+      turns_used
+  | Runtime_agent.Completed
+  | Runtime_agent.TurnLimitObserved _
+  | Runtime_agent.ExecutionTimeoutObserved _
+  | Runtime_agent.ExecutionIdleTimeoutObserved _
+  | Runtime_agent.Yielded_to_chat_waiting _
+  | Runtime_agent.InputRequired _ ->
+    fail "durable request mapped to the wrong stop reason"
 
 let payload fields = Some (`Assoc fields)
 

@@ -22,14 +22,22 @@ type raw_trace_sink_outcome =
   | Sink_ready of Agent_sdk.Raw_trace.t
   | Sink_degraded of Agent_sdk.Error.sdk_error
 
-(** Typed reason for an autonomous Keeper run to release its lane. The probe is
-    evaluated only after OAS completes a typed tool boundary. *)
+(** Typed reason and boundary for an autonomous Keeper run to release its lane
+    at an OAS turn boundary. Scheduled-idle chat can yield immediately;
+    reactive chat and durable backlog yield only after the current cycle has
+    completed at least one provider turn, so a leased stimulus is never
+    acknowledged without being observed by the model. *)
 type autonomous_yield_reason =
   | Chat_waiting
   | Durable_stimulus_waiting
 
+type autonomous_yield_boundary =
+  | Yield_immediately
+  | Yield_after_current_turn
+
 type autonomous_yield_request = {
   reason : autonomous_yield_reason;
+  boundary : autonomous_yield_boundary;
 }
 
 module For_testing : sig
@@ -74,9 +82,16 @@ module For_testing : sig
     -> meta:Keeper_meta_contract.keeper_meta
     -> Agent_sdk.Raw_trace.t option
 
-  val runtime_yield_reason
-    :  autonomous_yield_request
-    -> Runtime_agent.cooperative_yield_reason
+  val autonomous_yield_allowed_at_turn
+    :  start_turn:int
+    -> turn:int
+    -> autonomous_yield_request
+    -> bool
+
+  val stop_reason_of_autonomous_yield
+    :  turn:int
+    -> autonomous_yield_request
+    -> Runtime_agent.stop_reason
 
 end
 
@@ -138,12 +153,13 @@ val run_turn
   -> ?continuation_channel:Keeper_continuation_channel.t
   -> ?continuation_delivery_channel:Keeper_continuation_channel.t
   -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
-  -> ?autonomous_yield_requested:
-       (unit -> (autonomous_yield_request option, string) result)
-       (* Autonomous-lane hook: evaluated only at OAS's typed post-tool
-          boundary. Snapshot failures remain typed errors; they are never
-          inferred as waiting/not-waiting. Only the heartbeat path passes this
-          hook; a chat turn never receives it. *)
+  -> ?autonomous_yield_requested:(unit -> autonomous_yield_request option)
+       (* Autonomous-lane hook: evaluated at each OAS agent-loop turn boundary
+          before the next model dispatch — never mid tool execution. A typed
+          request stops the run gracefully at the boundary allowed by
+          [autonomous_yield_reason], releasing the lane for queued chat or
+          durable stimulus work. Only the heartbeat-scheduled path passes it; a
+          chat turn never receives this hook. *)
   -> ?on_checkpoint_stage:(Agent_sdk.Agent.checkpoint_stage -> unit)
   -> unit
   -> (run_result, Agent_sdk.Error.sdk_error) result

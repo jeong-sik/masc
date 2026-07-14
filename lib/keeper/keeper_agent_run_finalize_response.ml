@@ -161,14 +161,15 @@ let checkpoint_for_replay_persistence
           pre-turn history prefix")
   | Runtime_agent.TurnLimitObserved _
   | Runtime_agent.ExecutionTimeoutObserved _
-  | Runtime_agent.ExecutionIdleTimeoutObserved _
-  | Runtime_agent.Yielded_to_chat_waiting _
-  | Runtime_agent.Yielded_to_durable_stimulus _ ->
-    (* A control-boundary checkpoint keeps the exact current-turn replay suffix.
-       In particular, cooperative yield must retain the user input, typed tool
-       call, and tool result so the resumed cycle cannot repeat committed work. *)
+  | Runtime_agent.ExecutionIdleTimeoutObserved _ ->
+    (* An execution-limit observation has no lifecycle authority, but its OAS
+       checkpoint is still the replay SSOT. Preserve the full typed message
+       suffix (thinking, tool call, and tool result blocks) so the next cycle
+       cannot repeat already committed tools after a blank terminal payload. *)
     observation_replay_checkpoint ~history_messages ~session_id checkpoint
-  | Runtime_agent.Completed ->
+  | ( Runtime_agent.Completed
+    | Runtime_agent.Yielded_to_chat_waiting _
+    | Runtime_agent.Yielded_to_durable_stimulus _ ) ->
     canonical_success_replay_checkpoint
       ~history_messages
       ~session_id

@@ -94,7 +94,8 @@ val run_named :
   ?context_injector:Agent_sdk.Hooks.context_injector ->
   ?context:Agent_sdk.Context.t ->
   ?enable_thinking:bool ->
-  ?cooperative_yield_probe:Runtime_agent.cooperative_yield_probe ->
+  ?exit_condition:(int -> bool) ->
+  ?exit_condition_result:(int -> Runtime_agent.stop_reason * string option) ->
   ?oas_checkpoint:Agent_sdk.Checkpoint.t ->
   ?trace_link:string * string ->
   ?event_bus:Agent_sdk.Event_bus.t ->

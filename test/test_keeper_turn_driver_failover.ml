@@ -448,15 +448,19 @@ let test_prior_checkpoint_appends_current_goal_once () =
          ~goal:current_goal
          ~session_id:prior_checkpoint.session_id
          ~oas_checkpoint:prior_checkpoint
+         ~exit_condition:(fun _turn -> true)
+         ~exit_condition_result:
+           (fun _turn -> Runtime_agent.Completed, Some "exit proof")
          ~agent_ref
          ~sw
          ~net:env#net
          ()
      with
-     | Error _ -> ()
-     | Ok _ ->
-       Alcotest.fail
-         "invalid provider endpoints unexpectedly completed the resumed run");
+     | Ok _ -> ()
+     | Error err ->
+       Alcotest.failf
+         "prior-checkpoint start should complete before provider dispatch: %s"
+         (Agent_sdk.Error.to_string err));
     let messages =
       match !agent_ref with
       | Some agent -> (Agent_sdk.Agent.state agent).messages

@@ -34,18 +34,6 @@ type stop_reason =
       request : Agent_sdk.Error.input_required;
     }
 
-type cooperative_yield_reason =
-  | Chat_waiting
-  | Durable_stimulus_waiting
-
-type cooperative_yield_decision =
-  | Continue
-  | Yield of cooperative_yield_reason
-
-type cooperative_yield_probe =
-  Agent_sdk.Agent.Advanced.tool_boundary ->
-  (cooperative_yield_decision, Agent_sdk.Error.sdk_error) result
-
 (** {1 Per-worker config} *)
 
 type config = {
@@ -89,7 +77,8 @@ type config = {
   yield_on_tool : bool;
   context_injector : Agent_sdk.Hooks.context_injector option;
   context : Agent_sdk.Context.t option;
-  cooperative_yield_probe : cooperative_yield_probe option;
+  exit_condition : (int -> bool) option;
+  exit_condition_result : (int -> stop_reason * string option) option;
   thinking_budget : int option;
       (** Token budget for extended thinking, forwarded to OAS
           [Builder.with_thinking_budget]. Only meaningful when

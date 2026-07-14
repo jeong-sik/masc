@@ -31,7 +31,8 @@ type try_provider_ctx =
   ; context : Agent_sdk.Context.t option
   ; enable_thinking : bool option
   ; preserve_thinking : bool option
-  ; cooperative_yield_probe : Runtime_agent.cooperative_yield_probe option
+  ; exit_condition : (int -> bool) option
+  ; exit_condition_result : (int -> Runtime_agent.stop_reason * string option) option
   ; oas_checkpoint : Agent_sdk.Checkpoint.t option
   ; sw : Eio.Switch.t
   ; net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t

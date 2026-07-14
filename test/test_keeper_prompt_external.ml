@@ -140,7 +140,6 @@ let task_create_observation : WO.world_observation =
     pending_board_events = [];
     idle_seconds = 1;
     active_goals = [ "goal-test-task-create" ];
-    context_ratio = lazy 0.0;
     unclaimed_task_count = 0;
     claimable_task_count = 0;
     failed_task_count = 0;

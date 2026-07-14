@@ -100,7 +100,6 @@ let base_obs : WO.world_observation =
   ; pending_board_events = []
   ; idle_seconds = 0
   ; active_goals = []
-  ; context_ratio = lazy 0.0
   ; unclaimed_task_count = 0
   ; claimable_task_count = 0
   ; failed_task_count = 0

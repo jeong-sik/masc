@@ -219,107 +219,8 @@ let schema_shape_json schema =
 
 let schema_has_property_name schema name = List.mem name (schema_property_names schema)
 
-let is_execute_typed_argv_schema schema =
-  schema_has_property_name schema "executable"
-  && schema_has_property_name schema "argv"
-  && schema_has_property_name schema "pipeline"
-;;
-
-let execute_public_tool_name = "Execute"
-
-let is_execute_tool_name name =
-  let name = Tool_name_alias_axis.strip_mcp_masc_prefix name in
-  String.equal name execute_public_tool_name
-  ||
-  match Tool_name_alias_axis.internal_name_of_public execute_public_tool_name with
-  | Some internal_name -> String.equal name internal_name
-  | None -> false
-;;
-
-let normalize_execute_args_envelope ?schema ~name args =
-  match schema, args with
-  | Some schema, `Assoc [ "args", (`Assoc _ as nested) ]
-    when is_execute_tool_name name && is_execute_typed_argv_schema schema -> nested
-  | _ -> args
-;;
-
-let schema_type_includes schema expected =
-  match Json_util.assoc_member_opt "type" schema with
-  | Some (`String actual) -> String.equal actual expected
-  | Some (`List values) ->
-    List.exists
-      (function
-        | `String actual -> String.equal actual expected
-        | _ -> false)
-      values
-  | _ -> false
-;;
-
-let schema_expects_array schema =
-  schema_type_includes schema "array"
-  || Option.is_some (Json_util.assoc_member_opt "items" schema)
-;;
-
-let schema_expects_object schema =
-  schema_type_includes schema "object"
-  || Option.is_some (Json_util.assoc_member_opt "properties" schema)
-  || Option.is_some (Json_util.assoc_member_opt "additionalProperties" schema)
-;;
-
-let schema_accepts_composite_value schema = function
-  | `List _ -> schema_expects_array schema
-  | `Assoc _ -> schema_expects_object schema
-  | _ -> false
-;;
-
-let schema_property_schema schema key =
-  match Json_util.assoc_member_opt "properties" schema with
-  | Some (`Assoc properties) -> List.assoc_opt key properties
-  | _ -> None
-;;
-
-let schema_items_schema schema =
-  Json_util.assoc_member_opt "items" schema
-;;
-
-let rec normalize_schema_json_string_composites ~schema value =
-  match value with
-  | `String raw when schema_expects_array schema || schema_expects_object schema ->
-    (match
-       try Some (Yojson.Safe.from_string raw) with
-       | Yojson.Json_error _ -> None
-     with
-     | Some parsed when schema_accepts_composite_value schema parsed ->
-       normalize_schema_json_string_composites ~schema parsed
-     | _ -> value)
-  | `Assoc fields ->
-    `Assoc
-      (List.map
-         (fun (key, field_value) ->
-            match schema_property_schema schema key with
-            | None -> key, field_value
-            | Some field_schema ->
-              key, normalize_schema_json_string_composites ~schema:field_schema field_value)
-         fields)
-  | `List values ->
-    (match schema_items_schema schema with
-     | None -> value
-     | Some item_schema ->
-       `List
-         (List.map
-            (fun item -> normalize_schema_json_string_composites ~schema:item_schema item)
-            values))
-  | _ -> value
-;;
-
-let prepare_args ?schema ~name args =
+let prepare_args ?schema ~name:_ args =
   let args = strip_internal_marker_args args in
-  let args = normalize_execute_args_envelope ?schema ~name args in
-  let args =
-    match schema with
-    | None -> args
-    | Some schema -> normalize_schema_json_string_composites ~schema args
-  in
   normalize_blank_optional_enum_args ?schema args
 ;;
 
@@ -358,7 +259,7 @@ let schema_has_property schema name = schema_has_property_name schema name
 
 let typed_shell_unsupported_field_hint schema names =
   let has_shell_fields =
-    schema_has_property schema "executable" && schema_has_property schema "argv"
+    schema_has_property schema "argv" && schema_has_property schema "pipeline"
   in
   let has_legacy_shell_string =
     List.exists (fun name -> String.equal name "cmd" || String.equal name "command") names
@@ -366,9 +267,8 @@ let typed_shell_unsupported_field_hint schema names =
   if has_shell_fields && has_legacy_shell_string
   then
     Some
-      "typed shell execution has no cmd/command field; use executable/argv, \
-       e.g. executable=\"git\" argv=[\"status\",\"--short\"]. Do not include the \
-       executable again in argv"
+      "typed shell execution has no cmd/command field; use one non-empty argv \
+       process vector, e.g. argv=[\"git\",\"status\",\"--short\"]"
   else None
 ;;
 

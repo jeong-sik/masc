@@ -631,8 +631,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                     "keeper": "alpha",
                     "tool": "tool_execute",
                     "input": {
-                        "executable": "git",
-                        "argv": ["push", "-u", "origin", "keeper/proof"],
+                        "argv": ["git", "push", "-u", "origin", "keeper/proof"],
                     },
                     "output": json.dumps({"ok": True, "via": "docker"}),
                     "success": True,

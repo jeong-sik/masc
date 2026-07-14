@@ -1,16 +1,20 @@
-(** Typed argv schema for Execute.
+(** Typed process-vector schema for Execute.
 
     Introduced by RFC-0091 PR-1 (§5.1.1) to replace raw
-    command-string parsing with a structured executable/argv boundary.
+    command-string parsing with a structured non-empty argv boundary.
 
     {2 Design constraints}
 
     - **No shell-string parsing**.  Validation is structural only:
       argv/cwd/env/redirect shape is checked here, while external-effect
       authorization is handled by the product-neutral Gate.
-    - **Execve-style argv semantics**.  Each token in [argv] is passed
-      verbatim to the child process; the implementation invokes the
-      executable directly (no [/bin/sh -c "..."] wrapping).  Therefore
+    - **Single command SSOT**.  [argv] is a non-empty process vector whose
+      first token is the executable and whose remaining tokens are its
+      arguments.  There is no second [executable] field that can disagree
+      with, or be accidentally repeated in, [argv].
+    - **Execve-style argv semantics**.  Each argument token is passed verbatim
+      to the child process; the implementation invokes [argv[0]] directly (no
+      [/bin/sh -c "..."] wrapping).  Therefore
       shell metacharacters like [*], [?], [|], [&], [;], [>], [<],
       [`], [$], [\n], and [\r] inside a payload argv token are *literal
       characters*, not shell operators.  For example, the typed schema accepts
@@ -19,19 +23,16 @@
     - **Pipelines are explicit**.  The top-level JSON [pipeline] field
       enumerates each [exec_stage] separately; no argv token is parsed or
       rewritten as shell syntax.
-    - **Literal argv**.  [NUL] is the only rejected argv content because it
+    - **Literal argv**.  [NUL] is the only rejected argument content because it
       cannot be represented at the process boundary.  Standalone [|], [|&],
-      redirection-looking tokens, wildcard characters, and a leading token
-      equal to [executable] remain caller-authored literal argv.
+      redirection-looking tokens, wildcard characters, and repeated argument
+      tokens remain caller-authored literal argv.
     - **Cwd is a string for now**.  Path SSOT does not yet expose a
       [Path.t] type (RFC-0091 §2.3 mis-cited [Host_config.cwd_for_keeper]
       which does not exist).  Absolute-path enforcement happens in
       {!validate}.  PR-3 may revisit when a path SSOT module lands. *)
 
-type exec_stage = {
-  executable : string;
-  argv : string list;
-}
+type exec_stage = { argv : string list }
 
 type redirect_target =
   | Inherit
@@ -44,7 +45,6 @@ type redirect_target =
 
 type execute_input =
   | Exec of {
-      executable : string;
       argv : string list;
       cwd : string option;
       env : (string * string) list;
@@ -70,9 +70,9 @@ type execute_input =
           redirects on the pipeline's endpoints are a deferred extension. *)
 
 type validation_error =
-  | Empty_executable of { argv : string list }
+  | Empty_argv
+  | Empty_program
   | Argv_contains_nul of {
-      executable : string;
       index : int;
       token : string;
     }
@@ -90,15 +90,14 @@ type validation_error =
 
 val of_json : Yojson.Safe.t -> (execute_input, string) result
 (** Parse the typed Execute JSON boundary.  Accepts either
-    [{executable, argv?, cwd?, env?, timeout_sec?}] for [Exec] or
-    [{pipeline = [{executable, argv?}, ...], cwd?, env?}] for [Pipeline].
+    [{argv = [program; arg...], cwd?, env?, timeout_sec?}] for [Exec] or
+    [{pipeline = [{argv = [program; arg...]}, ...], cwd?, env?}] for [Pipeline].
     [timeout_sec] is preserved as an explicit optional execution boundary;
     absence means unbounded execution.
-    [executable] and [pipeline] together, raw command-string fields, [{stages =
+    [argv] and [pipeline] together, raw command-string fields, [{stages =
     ...}], and other unsupported fields are intentionally rejected here.  No
-    compatibility normalization is applied at parse time: missing [find .]
-    paths, empty [executable] fields, and duplicated executable tokens in
-    [argv] remain caller-authored input for validation/lowering. *)
+    compatibility normalization is applied at parse time.  The removed
+    [executable] field is rejected as an unsupported field. *)
 
 val validate : execute_input -> (unit, validation_error) result
 (** Run all structural checks against [input].  Returns [Ok ()] on

@@ -34,12 +34,10 @@ let route_candidate_of_output json =
        | _ -> None))
 ;;
 
-let route_safe_command_string ~max_output_len:_ _command =
-  (* Raw command strings do not preserve argv boundaries. Until the route
-     evidence surface receives structured argv/Shell IR, fail closed instead
-     of attempting shell parsing/redaction. *)
-  "[REDACTED]"
-;;
+(* Route evidence records only that a process-shaped input existed. The
+   canonical argv remains in the redacted tool-call input; this projection must
+   not collapse it back into an ambiguous shell-like string. *)
+let redacted_command = "[REDACTED]"
 
 let route_safe_path_string _path = "[REDACTED]"
 
@@ -79,14 +77,13 @@ let assoc_string_list_opt name json =
   | Some _ -> None
 ;;
 
-let typed_exec_command input =
-  match Json_util.assoc_string_opt "executable" input with
-  | Some executable ->
-      (match assoc_string_list_opt "argv" input with
-       | Some argv ->
-           Some (String.concat " " (executable :: argv))
-       | None -> None)
-  | None -> None
+let typed_exec_command_present input =
+  match Json_util.assoc_member_opt "argv" input with
+  | Some _ ->
+    (match assoc_string_list_opt "argv" input with
+     | Some (_ :: _) -> true
+     | Some [] | None -> false)
+  | None -> false
 ;;
 
 let route_evidence_json_of_tool_io ~max_output_len ~tool_name ~input ~output_text =
@@ -101,13 +98,10 @@ let route_evidence_json_of_tool_io ~max_output_len ~tool_name ~input ~output_tex
     | Some json -> route_candidate_of_output json
     | None -> None
   in
-  let command =
-    match Json_util.assoc_string_opt "cmd" input with
-    | Some cmd -> Some cmd
-    | None -> (
-        match typed_exec_command input with
-        | Some _ as command -> command
-        | None -> Json_util.assoc_string_opt "op" input)
+  let command_present =
+    Option.is_some (Json_util.assoc_string_opt "cmd" input)
+    || typed_exec_command_present input
+    || Option.is_some (Json_util.assoc_string_opt "op" input)
   in
   let add_string name value fields =
     match value with
@@ -136,7 +130,9 @@ let route_evidence_json_of_tool_io ~max_output_len ~tool_name ~input ~output_tex
       |> add_string "via" (Json_util.assoc_string_opt "via" output_json)
       |> add_string "path" (Option.map route_safe_path_string (Json_util.assoc_string_opt "path" input))
       |> add_string "cwd" (Option.map route_safe_path_string (Json_util.assoc_string_opt "cwd" input))
-      |> add_string "command" (Option.map (route_safe_command_string ~max_output_len) command)
+      |> add_string
+           "command"
+           (if command_present then Some redacted_command else None)
       |> add_string "tool_name" (Some tool_name)
     in
     Some (`Assoc (descriptor_fields @ List.rev dynamic_fields)))

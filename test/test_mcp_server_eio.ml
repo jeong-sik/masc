@@ -2202,8 +2202,7 @@ let test_handle_request_tools_call_internal_keeper_runtime_rejects_retired_execu
             `Assoc
               [
                 ("_agent_name", `String keeper_agent_name);
-                ("executable", `String "pwd");
-                ("argv", `List []);
+                ("argv", `List [ `String "pwd" ]);
               ] );
         ]);
       ]) in

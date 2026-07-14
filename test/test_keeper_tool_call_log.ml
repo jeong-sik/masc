@@ -386,10 +386,10 @@ let test_route_evidence_stored_for_git_push () =
       ~input:
         (`Assoc
            [
-             ("executable", `String "git");
              ( "argv",
                `List
                  [
+                   `String "git";
                    `String "push";
                    `String "-u";
                    `String "origin";
@@ -459,10 +459,10 @@ let test_route_evidence_stored_for_blob_backed_git_push () =
       ~input:
         (`Assoc
            [
-             ("executable", `String "git");
              ( "argv",
                `List
                  [
+                   `String "git";
                    `String "push";
                    `String "-u";
                    `String "origin";

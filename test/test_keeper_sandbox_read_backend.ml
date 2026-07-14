@@ -276,7 +276,7 @@ let test_read_directory_names_a_real_listing_tool () =
       Alcotest.(check bool)
         "error names a real listing command"
         true
-        (contains_substring msg "executable='ls'")
+        (contains_substring msg "argv=['ls'")
 
 (* ── run_command error paths
    (exercised without invoking docker) ──────────────────────────── *)

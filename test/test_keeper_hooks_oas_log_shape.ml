@@ -11,14 +11,13 @@ let test_empty_tool_args_are_explicit_object_shape () =
 let test_tool_arg_shapes_keep_field_names () =
   let input =
     `Assoc
-      [ "argv", `List [ `String "status"; `String "--short" ]
+      [ "argv", `List [ `String "git"; `String "status"; `String "--short" ]
       ; "cwd", `String "repos/masc-mcp"
-      ; "executable", `String "git"
       ]
   in
-  check string "shape" "argv=array:2,cwd=string:14,executable=string:3"
+  check string "shape" "argv=array:3,cwd=string:14"
     (Under_test.tool_input_shape_for_log input);
-  check string "keys preserve input order" "argv,cwd,executable"
+  check string "keys preserve input order" "argv,cwd"
     (Under_test.tool_input_keys_for_log input)
 
 let test_output_fingerprint_keeps_json_looking_text_opaque () =

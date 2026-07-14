@@ -30,7 +30,7 @@ depends: [
   "cohttp-eio" {>= "6.0"}
   "piaf" {>= "0.2.0"}
   "eio-ssl" {>= "0.3.0"}
-  "agent_sdk" {>= "0.211.9"}
+  "agent_sdk" {>= "0.212.0"}
   "uri" {>= "4.4"}
   "tls" {>= "2.0"}
   "tls-eio" {>= "2.0"}

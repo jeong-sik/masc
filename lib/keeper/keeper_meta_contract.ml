@@ -124,7 +124,6 @@ type blocker_class =
   | Sdk_tripwire_violation
   | Sdk_exit_condition_met
   | Sdk_input_required
-  | Sdk_tool_failure_recovery_failed
 
 let blocker_class_to_string = function
   | Runtime_exhausted _ -> "runtime_exhausted"
@@ -139,7 +138,6 @@ let blocker_class_to_string = function
   | Sdk_tripwire_violation -> "sdk_tripwire_violation"
   | Sdk_exit_condition_met -> "sdk_exit_condition_met"
   | Sdk_input_required -> "sdk_input_required"
-  | Sdk_tool_failure_recovery_failed -> "sdk_tool_failure_recovery_failed"
 ;;
 
 let blocker_class_of_serialized_string = function
@@ -155,7 +153,6 @@ let blocker_class_of_serialized_string = function
   | "sdk_tripwire_violation" -> Some Sdk_tripwire_violation
   | "sdk_exit_condition_met" -> Some Sdk_exit_condition_met
   | "sdk_input_required" -> Some Sdk_input_required
-  | "sdk_tool_failure_recovery_failed" -> Some Sdk_tool_failure_recovery_failed
   | _ -> None
 ;;
 

@@ -41,22 +41,6 @@ let payload_agent_name payload =
      | None -> Json_util.get_string payload "keeper_name")
 ;;
 
-let tool_failure_episode_observation =
-  Agent_sdk.Tool_failure_episode.observation_to_yojson
-;;
-
-let sha256_hex value = Digestif.SHA256.(digest_string value |> to_hex)
-
-let recovery_decision_observation_fields decision =
-  match
-    Agent_sdk.Tool_failure_recovery.decision_observation_to_yojson decision
-  with
-  | `Assoc fields -> fields
-  | _ ->
-    invalid_arg
-      "keeper_event_bridge: OAS recovery decision observation must be an object"
-;;
-
 let emit_native_event_log (evt : Agent_sdk.Event_bus.event) (json : Yojson.Safe.t) =
   let log_at level message =
     Log.Oas_event.emit level ~details:json message
@@ -97,25 +81,6 @@ let emit_native_event_log (evt : Agent_sdk.Event_bus.event) (json : Yojson.Safe.
   | Agent_sdk.Event_bus.ToolCompleted { agent_name; tool_name; _ } ->
     log_routine
       (Printf.sprintf "tool completed agent=%s tool_name=%s" agent_name tool_name)
-  | Agent_sdk.Event_bus.ToolFailureEpisodeDetected { agent_name; turn; episodes } ->
-    log
-      (Printf.sprintf
-         "typed tool failure episode detected agent=%s turn=%d episodes=%d"
-         agent_name
-         turn
-         (List.length episodes))
-  | Agent_sdk.Event_bus.ToolFailureRecoveryDecided { agent_name; turn; _ } ->
-    log
-      (Printf.sprintf
-         "typed tool failure recovery decided agent=%s turn=%d"
-         agent_name
-         turn)
-  | Agent_sdk.Event_bus.ToolFailureRecoveryJudgeFailed { agent_name; turn; _ } ->
-    log
-      (Printf.sprintf
-         "typed tool failure recovery judge failed agent=%s turn=%d"
-         agent_name
-         turn)
   | Agent_sdk.Event_bus.TurnReady { agent_name; turn; tool_names } ->
     (* [substrate:tool_surface] — deterministic per-turn snapshot of the
          tool list the LLM actually sees this turn (after guardrails,
@@ -308,56 +273,6 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
          @ execution_id_fields)
     in
     Some (wrap ~event_type:"tool_completed" ~payload ~agent_name ~tool_name ())
-  | Agent_sdk.Event_bus.ToolFailureEpisodeDetected { agent_name; turn; episodes } ->
-    let payload =
-      `Assoc
-        [ "agent_name", `String agent_name
-        ; "turn", `Int turn
-        ; "episode_count", `Int (List.length episodes)
-        ; ( "episodes"
-          , `List (List.map tool_failure_episode_observation episodes) )
-        ]
-    in
-    Some
-      (wrap
-         ~event_type:"tool_failure_episode_detected"
-         ~payload
-         ~agent_name
-         ~turn
-         ())
-  | Agent_sdk.Event_bus.ToolFailureRecoveryDecided
-      { agent_name; turn; decision } ->
-    let payload =
-      `Assoc
-        ([ "agent_name", `String agent_name; "turn", `Int turn ]
-         @ recovery_decision_observation_fields decision)
-    in
-    Some
-      (wrap
-         ~event_type:"tool_failure_recovery_decided"
-         ~payload
-         ~agent_name
-         ~turn
-         ())
-  | Agent_sdk.Event_bus.ToolFailureRecoveryJudgeFailed
-      { agent_name; turn; kind; detail } ->
-    let payload =
-      `Assoc
-        [ "agent_name", `String agent_name
-        ; "turn", `Int turn
-        ; ( "kind"
-          , `String
-              (Agent_sdk.Tool_failure_recovery.judge_error_kind_to_string kind) )
-        ; "detail_digest", `String (sha256_hex detail)
-        ]
-    in
-    Some
-      (wrap
-         ~event_type:"tool_failure_recovery_judge_failed"
-         ~payload
-         ~agent_name
-         ~turn
-         ())
   | Agent_sdk.Event_bus.TurnStarted { agent_name; turn } ->
     let payload = `Assoc [ "agent_name", `String agent_name; "turn", `Int turn ] in
     Some (wrap ~event_type:"turn_started" ~payload ~agent_name ~turn ())

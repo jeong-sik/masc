@@ -80,6 +80,7 @@ const LazyIdeShell = lazy(async () => ({ default: (await import('./ide/ide-shell
 const LazyCockpit = lazy(async () => ({ default: (await import('./cockpit/cockpit')).Cockpit }))
 const LazySettingsSurface = lazy(async () => ({ default: (await import('./settings-surface')).SettingsSurface }))
 const LazyApprovals = lazy(async () => ({ default: (await import('./approvals/approvals-surface')).ApprovalsSurface }))
+const LazyRegistrySurface = lazy(async () => ({ default: (await import('./registry/registry-surface')).RegistrySurface }))
 const LazyFusionSurface = lazy(async () => ({ default: (await import('./fusion/fusion-surface')).FusionSurface }))
 
 function lazyTabFallback(label: string) {
@@ -1228,6 +1229,12 @@ function TabContent() {
       return html`
         <${Suspense} fallback=${lazyTabFallback('Keepers')}>
           <${LazyKeeperDetailPage} />
+        <//>
+      `
+    case 'registry':
+      return html`
+        <${Suspense} fallback=${lazyTabFallback('Registry')}>
+          <${LazyRegistrySurface} />
         <//>
       `
     case 'board':

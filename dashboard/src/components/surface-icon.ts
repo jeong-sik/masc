@@ -7,6 +7,7 @@ import {
   FlaskConical,
   Gauge,
   Home,
+  Layers,
   Plug,
   ScrollText,
   Settings,
@@ -31,6 +32,8 @@ export function SurfaceIcon({ icon, size = 16 }: SurfaceIconProps) {
       return html`<${Activity} ...${props} />`
     case 'keepers':
       return html`<${UsersRound} ...${props} />`
+    case 'registry':
+      return html`<${Layers} ...${props} />`
     case 'board':
       return html`<${SquareKanban} ...${props} />`
     case 'schedule':

@@ -81,6 +81,12 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
       // reconnect: the route refresh runs after a disconnect and recovers the
       // open keeper's history when replayed events fell outside the buffer.
       return ['namespaceTruth', 'execution', 'missionSnapshot', 'activeKeeperChat']
+    case 'registry':
+      // Keeper roster hydrates from the execution snapshot; the persona
+      // library is fetched by the surface itself on mount (masc_persona_list
+      // has no refresh-task lane). Without this plan a direct entry
+      // (refresh on /registry) rendered an empty roster.
+      return ['namespaceTruth', 'execution', 'missionSnapshot']
     case 'board':
       return ['board']
     case 'fusion':

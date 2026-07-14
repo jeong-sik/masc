@@ -897,23 +897,5 @@ let json ~(config : Workspace.config) ?since ?until () =
 let () =
   Keeper_keepalive_signal.register_record_wake_payload (fun ~keeper_name ~trace_id ~turn_index ~model_id ~context_window ~approx_body_bytes ~system_prompt_bytes ~tool_defs_bytes ~messages_bytes ~message_count ~role_counts ~tool_count ~has_compact_happened ->
     ignore (record_wake_payload ~keeper_name ~trace_id ~turn_index ~model_id ~context_window ~approx_body_bytes ~system_prompt_bytes ~tool_defs_bytes ~messages_bytes ~message_count ~role_counts ~tool_count ~has_compact_happened)
-  );
-
-  Keeper_compact_policy.register_record_pre_compact (fun ~keeper_name ~context_ratio ~message_count ~token_count ~strategies ~context_window ~is_local_model ~trigger ->
-    let event = record_pre_compact ~keeper_name ~context_ratio ~message_count ~token_count ~strategies ~context_window ~is_local_model ~trigger in
-    let mapped_event : Keeper_compact_policy.pre_compact_event =
-      {
-        timestamp = event.timestamp;
-        keeper_name = event.keeper_name;
-        context_ratio = event.context_ratio;
-        message_count = event.message_count;
-        token_count = event.token_count;
-        strategies = event.strategies;
-        context_window = event.context_window;
-        is_local_model = event.is_local_model;
-        trigger = event.trigger;
-      }
-    in
-    Some mapped_event
   )
 ;;

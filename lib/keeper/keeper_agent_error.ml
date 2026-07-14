@@ -106,8 +106,6 @@ let sdk_termination_semantics = function
     Oas_execution_timeout_observed
   | Agent_sdk.Error.Agent (Agent_sdk.Error.MaxTurnsExceeded _) ->
     Oas_turn_limit_observed
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.IdleDetected _) ->
-    Oas_idle_detected_failure
   | Agent_sdk.Error.Agent (Agent_sdk.Error.ExitConditionMet _) ->
     Oas_exit_condition_reached
   | Agent_sdk.Error.Agent (Agent_sdk.Error.GuardrailViolation _) ->
@@ -201,10 +199,6 @@ let agent_error_terminal_reason_code = function
     Printf.sprintf "agent_error_exit_condition_met:turn=%d" turn
   | Agent_sdk.Error.UnrecognizedStopReason { reason } ->
     Printf.sprintf "agent_error_unrecognized_stop_reason:%s" reason
-  | Agent_sdk.Error.IdleDetected { consecutive_idle_turns } ->
-    Printf.sprintf
-      "agent_error_idle_detected:consecutive_idle_turns=%d"
-      consecutive_idle_turns
   | Agent_sdk.Error.GuardrailViolation { validator; reason = _ } ->
     Printf.sprintf "agent_error_guardrail_violation:validator=%s" validator
   | Agent_sdk.Error.TripwireViolation { tripwire; reason = _ } ->

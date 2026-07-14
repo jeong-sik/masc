@@ -80,7 +80,6 @@ type config = Runtime_agent_context.config = {
   max_tokens : int option;
   temperature : float option;
   hooks : Agent_sdk.Hooks.hooks option;
-  guardrails : Agent_sdk.Guardrails.t option;
   event_bus : Agent_sdk.Event_bus.t option;
   session_id : string option;
   description : string option;

@@ -57,7 +57,6 @@ let config_for_label
       temperature;
       max_idle_turns;
       stream_idle_timeout_s;
-      guardrails = Some Agent_sdk.Guardrails.permissive;
       hooks;
       enable_thinking;
       description;

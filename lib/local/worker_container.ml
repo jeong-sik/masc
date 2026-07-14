@@ -400,7 +400,6 @@ let append_worker_completion_log ~base_path ~worker_name
     Accepts [~provider] + [~model_id] as resolved values. *)
 let build_resume_config ~worker_name ~provider ~model_id ~system_prompt ~tools
     ~thinking_enabled ~hooks ~raw_trace ?(periodic_callbacks = [])
-    ?(guardrails : Agent_sdk.Guardrails.t option)
     () =
   let config =
     {
@@ -411,17 +410,11 @@ let build_resume_config ~worker_name ~provider ~model_id ~system_prompt ~tools
       enable_thinking = Some thinking_enabled;
     }
   in
-  let effective_guardrails =
-    match guardrails with
-    | Some g -> g
-    | None -> Agent_sdk.Guardrails.permissive
-  in
   let options =
     {
       Agent_sdk.Agent.default_options with
       provider = Some provider;
       hooks;
-      guardrails = effective_guardrails;
       raw_trace = Some raw_trace;
       periodic_callbacks;
     }

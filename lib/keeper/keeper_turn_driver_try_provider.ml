@@ -238,7 +238,6 @@ let run_try_provider
           ; body_timeout_s = ctx.body_timeout_s
           ; temperature
           ; max_idle_turns = ctx.max_idle_turns
-          ; guardrails = Some Agent_sdk.Guardrails.permissive
           ; hooks = ctx.hooks
           ; description =
               Some (Printf.sprintf "runtime:%s/runtime" ctx.runtime_id)

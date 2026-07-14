@@ -96,10 +96,6 @@ let sdk_agent_error_fields = function
     [ "variant", `String "max_turns_exceeded"; "turns", `Int turns; "limit", `Int limit ]
   | Agent_sdk.Error.UnrecognizedStopReason { reason } ->
     [ "variant", `String "unrecognized_stop_reason"; "reason", `String reason ]
-  | Agent_sdk.Error.IdleDetected { consecutive_idle_turns } ->
-    [ "variant", `String "idle_detected"
-    ; "consecutive_idle_turns", `Int consecutive_idle_turns
-    ]
   | Agent_sdk.Error.GuardrailViolation { validator; reason } ->
     [ "variant", `String "guardrail_violation"
     ; "validator", `String validator

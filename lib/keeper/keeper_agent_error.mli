@@ -63,8 +63,7 @@ val api_error_terminal_reason_code_typed
 
 (** Receipt outcome for terminal SDK values. OAS turn-limit and execution-time
     observations remain successful even if they reach this defensive bridge;
-    they are neither cancellation nor lifecycle-failure authority. Behavioral
-    [IdleDetected] remains an error. *)
+    they are neither cancellation nor lifecycle-failure authority. *)
 val receipt_outcome_kind_of_sdk_error
   :  Agent_sdk.Error.sdk_error
   -> Keeper_execution_receipt.outcome_kind

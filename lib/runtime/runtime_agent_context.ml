@@ -97,7 +97,6 @@ type config =
         request budget. *)
   ; temperature : float option
   ; hooks : Agent_sdk.Hooks.hooks option
-  ; guardrails : Agent_sdk.Guardrails.t option
   ; event_bus : Agent_sdk.Event_bus.t option
   ; session_id : string option
   ; description : string option
@@ -165,7 +164,6 @@ let default_config
   ; max_tokens = None
   ; temperature = provider_cfg.temperature
   ; hooks = None
-  ; guardrails = None
   ; event_bus = None
   ; session_id = None
   ; description = None
@@ -198,19 +196,6 @@ let default_config
 let oas_tracer_ref = Atomic.make Agent_sdk.Tracing.null
 let set_oas_tracer tracer = Atomic.set oas_tracer_ref tracer
 
-let guardrails_of_config (config : config) =
-  let tool_names = List.map (fun (t : Agent_sdk.Tool.t) -> t.schema.name) config.tools in
-  match config.guardrails with
-  | Some g -> g
-  | None ->
-    { Agent_sdk.Guardrails.default with
-      tool_filter =
-        (if tool_names <> []
-         then Agent_sdk.Guardrails.AllowList tool_names
-         else Agent_sdk.Guardrails.AllowAll)
-    }
-;;
-
 let builder_without_approval
       ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
       ~(config : config)
@@ -218,7 +203,6 @@ let builder_without_approval
       ()
   : Agent_sdk.Builder.t
   =
-  let guardrails = guardrails_of_config config in
   let builder =
     Agent_sdk.Builder.create ~net ~model:config.model_id
     |> Agent_sdk.Builder.with_provider_config config.provider_cfg
@@ -227,7 +211,6 @@ let builder_without_approval
     |> Agent_sdk.Builder.with_max_turns config.max_turns
     |> Agent_sdk.Builder.with_max_idle_turns config.max_idle_turns
     |> Agent_sdk.Builder.with_tools config.tools
-    |> Agent_sdk.Builder.with_guardrails guardrails
     |> Agent_sdk.Builder.with_missing_approval_callback_policy
          Agent_sdk.Hooks.Reject_without_callback
   in
@@ -423,7 +406,6 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
     ; stream_idle_timeout_s = config.stream_idle_timeout_s
     ; max_execution_time_s = config.max_execution_time_s
     ; body_timeout_s = config.body_timeout_s
-    ; guardrails = guardrails_of_config config
     ; context_injector = config.context_injector
     ; event_bus = config.event_bus
     ; raw_trace = config.raw_trace

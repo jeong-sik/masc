@@ -7,11 +7,7 @@
     {!Runtime_agent.resume_from_checkpoint}.
     {!Runtime_agent} remains the public facade and still
     performs the approval wiring and final
-    [build_safe] / [Agent.resume] calls.
-
-    Internal: \[guardrails_of_config\] (ToolName-list extraction
-    used by builder) stays private — it is consumed only inside
-    {!builder_without_approval}. *)
+    [build_safe] / [Agent.resume] calls. *)
 
 (** {1 Stop reason} *)
 
@@ -77,7 +73,6 @@ type config = {
       (** Exact caller/model sampling declaration. [None] omits temperature and
           leaves the selected provider's default intact. *)
   hooks : Agent_sdk.Hooks.hooks option;
-  guardrails : Agent_sdk.Guardrails.t option;
   event_bus : Agent_sdk.Event_bus.t option;
   session_id : string option;
   description : string option;

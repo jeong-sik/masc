@@ -133,6 +133,44 @@ let test_cold_start_backfills_from_disk () =
     save_ok ~session_dir (make_checkpoint ~session_id:sid ~turn_count:9 ~marker:"v9")
       "forward save after cold start")
 
+let string_contains ~needle haystack =
+  let nlen = String.length needle and hlen = String.length haystack in
+  let rec at i = i + nlen <= hlen && (String.sub haystack i nlen = needle || at (i + 1)) in
+  nlen = 0 || at 0
+
+(* The OAS per-turn pipeline builds checkpoints with an empty session_id (the
+   OAS agent carries no session field). The keeper sink stamps a validated,
+   non-empty trace_id before persisting; [save_oas] fails loud on an empty
+   session_id rather than letting the non-Eio fallback silently write
+   "<session_dir>/.json" and drop the checkpoint. *)
+let test_empty_session_id_rejected () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  Keeper_checkpoint_store.For_testing.reset_stale_write_guard ();
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) (fun () ->
+    (match
+       Keeper_checkpoint_store.save_oas ~session_dir
+         (make_checkpoint ~session_id:"" ~turn_count:1 ~marker:"empty")
+     with
+     | Ok () -> fail "save_oas accepted an empty session_id"
+     | Error msg ->
+       check bool "error names the empty session_id" true
+         (string_contains ~needle:"empty session_id" msg));
+    (* The silent non-Eio fallback would have written "<session_dir>/.json". *)
+    check bool "no orphan .json written for empty session_id" false
+      (Sys.file_exists (Filename.concat session_dir ".json"));
+    (* A stamped, non-empty session_id persists and round-trips. *)
+    save_ok ~session_dir
+      (make_checkpoint ~session_id:"trace-1-0000a" ~turn_count:1 ~marker:"stamped")
+      "stamped save";
+    match Keeper_checkpoint_store.load_oas ~session_dir ~session_id:"trace-1-0000a" with
+    | Ok on_disk ->
+      check string "round-trips the stamped session_id" "trace-1-0000a"
+        on_disk.Agent_sdk.Checkpoint.session_id
+    | Error _ -> fail "load after stamped save failed")
+
 let () =
   run "Keeper_checkpoint_store checkpoint watermark (RFC-0225 §3.2)"
     [
@@ -142,5 +180,7 @@ let () =
             test_forward_equal_and_stale;
           test_case "cold start backfills last turn_count from disk" `Quick
             test_cold_start_backfills_from_disk;
+          test_case "empty session_id is refused, not silently dropped" `Quick
+            test_empty_session_id_rejected;
         ] );
     ]

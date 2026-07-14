@@ -142,6 +142,15 @@ let delete_oas_history_files ~(session_dir : string) ~(snapshot_ids : string lis
    below) wraps this with the RFC-0225 §3.2 stale-write guard. *)
 let save_oas_unguarded ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t)
   : (unit, string) result =
+  if String.length ckpt.session_id = 0 then
+    (* Fail loud at the persistence boundary: a checkpoint with an empty
+       session_id is unpersistable. The primary Eio path already rejects it
+       ([Checkpoint_store.save] validates session_id), but the non-Eio
+       [fallback] below would otherwise silently write "<session_dir>/.json"
+       and drop the checkpoint. Callers must stamp a validated, non-empty
+       session_id (the keeper trace_id) before persisting. *)
+    Error "save_oas: refusing checkpoint with empty session_id"
+  else
   let fallback () =
     match Keeper_fs.save_atomic
       (oas_checkpoint_path ~session_dir ~session_id:ckpt.session_id)

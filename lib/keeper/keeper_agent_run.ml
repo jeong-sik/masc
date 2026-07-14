@@ -671,9 +671,22 @@ let run_turn
               in
               let checkpoint_sink (snapshot : Agent_sdk.Agent.checkpoint_snapshot) =
                 Option.iter (fun observe -> observe snapshot.stage) on_checkpoint_stage;
+                (* OAS's per-turn pipeline builds checkpoints with an empty
+                   session_id (the OAS agent carries no session field), so the
+                   sink must stamp the keeper's own session identity before
+                   persisting. [meta.runtime.trace_id] is a validated,
+                   non-empty [Trace_id.t]; without this restamp the OAS
+                   checkpoint store rejects the write with "session_id must not
+                   be empty" and every keeper turn dies. *)
+                let checkpoint =
+                  { snapshot.checkpoint with
+                    session_id =
+                      Keeper_id.Trace_id.to_string meta.runtime.trace_id
+                  }
+                in
                 Keeper_checkpoint_store.save_oas
                   ~session_dir:session.session_dir
-                  snapshot.checkpoint
+                  checkpoint
               in
               let call_run_named ?raw_trace ~initial_messages () =
                 (* Keeper does not impose a cumulative turn, time, token, or cost

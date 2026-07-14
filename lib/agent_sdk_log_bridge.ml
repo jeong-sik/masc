@@ -186,8 +186,6 @@ let should_promote_warn_to_error (record : Agent_sdk.Log.record) =
   match record.level, record.module_name, record.message with
   | Warn, "agent_config", "MCP server failed" -> true
   | Warn, "agent_turn", "context_injector raised" -> true
-  | Warn, "agent_tools", "ApprovalRequired but no approval callback — executing" ->
-      true
   | _ -> false
 
 let should_demote_info_to_debug (record : Agent_sdk.Log.record) =

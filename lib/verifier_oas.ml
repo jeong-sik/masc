@@ -125,7 +125,6 @@ let verify (req : Core.verification_request) : (Core.verdict, string) result =
       ~goal:prompt
       ~masc_tools:[ Core.report_verdict_schema ]
       ~dispatch
-      ~approval:Approval_callbacks.auto_approve
       ~provider_config_transform:apply_report_verdict_output_schema
       ()
   with

@@ -18,7 +18,6 @@ val build_agent :
   heartbeat_callbacks:Agent_sdk.Agent.periodic_callback list ->
   ?context_injector:Agent_sdk.Hooks.context_injector ->
   ?context:Agent_sdk.Context.t ->
-  ?approval:Agent_sdk.Hooks.approval_callback ->
   unit ->
   (Agent_sdk.Agent.t, string) result
 (** [build_agent] constructs an OAS agent for the given worker meta. *)
@@ -58,7 +57,6 @@ val resume_worker_via_oas :
   tools:Agent_sdk.Tool.t list ->
   raw_trace:Agent_sdk.Raw_trace.t ->
   ?worker_run_id:string ->
-  ?approval:Agent_sdk.Hooks.approval_callback ->
   unit ->
   (Worker_container_types.run_result, string) result
 

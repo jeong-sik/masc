@@ -1379,8 +1379,6 @@ let execute_tools_in_env env ~tools tool_uses =
     ~agent_name:state.Agent_sdk.Types.config.Agent_sdk.Types.name
     ~turn_count:state.Agent_sdk.Types.turn_count
     ~usage:state.Agent_sdk.Types.usage
-    ~approval:opts.Agent_sdk.Agent.approval
-    ~missing_approval_callback_policy:opts.Agent_sdk.Agent.missing_approval_callback_policy
     tool_uses
 ;;
 

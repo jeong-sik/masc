@@ -1175,7 +1175,7 @@ let test_runtime_agent_context_uses_configured_turn_limit () =
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
       let builder =
-        Runtime_agent_context.builder_without_approval
+        Runtime_agent_context.builder
           ~net:(Eio.Stdenv.net env)
           ~config
           ()
@@ -1231,7 +1231,7 @@ let test_runtime_agent_context_preserves_max_tokens_intent () =
         in
         let config = { config with max_tokens } in
         let builder =
-          Runtime_agent_context.builder_without_approval
+          Runtime_agent_context.builder
             ~net:(Eio.Stdenv.net env)
             ~config
             ()
@@ -1297,7 +1297,7 @@ let test_runtime_agent_context_preserves_provider_sampling_config () =
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
       let builder =
-        Runtime_agent_context.builder_without_approval
+        Runtime_agent_context.builder
           ~net:(Eio.Stdenv.net env)
           ~config
           ()
@@ -1469,7 +1469,7 @@ let test_runtime_agent_context_leaves_tool_choice_unset_with_tools () =
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
       let builder =
-        Runtime_agent_context.builder_without_approval
+        Runtime_agent_context.builder
           ~net:(Eio.Stdenv.net env)
           ~config
           ()

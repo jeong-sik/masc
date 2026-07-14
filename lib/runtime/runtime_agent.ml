@@ -119,7 +119,6 @@ type config =
   yield_on_tool : bool;
   context_injector : Agent_sdk.Hooks.context_injector option;
   context : Agent_sdk.Context.t option;
-  approval : Agent_sdk.Hooks.approval_callback option;
   exit_condition : (int -> bool) option;
   exit_condition_result : (int -> stop_reason * string option) option;
   thinking_budget : int option;
@@ -905,14 +904,7 @@ let build
      with
      | Error _ as e -> e
      | Ok transport ->
-      let builder =
-        Runtime_agent_context.builder_without_approval ~net ~config ?transport ()
-      in
-      let builder =
-        match config.approval with
-        | Some cb -> Agent_sdk.Builder.with_approval cb builder
-        | None -> builder
-      in
+      let builder = Runtime_agent_context.builder ~net ~config ?transport () in
       Agent_sdk.Builder.build_safe builder)
 
 let run_duration_ms_since started_at =

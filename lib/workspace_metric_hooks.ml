@@ -467,8 +467,6 @@ let install () =
 	             ~goal:prompt
              ~masc_tools:[ report_tool_schema ]
              ~dispatch
-             
-             ~approval:Approval_callbacks.auto_approve
              ~provider_config_transform:apply_review_verdict_output_schema
              ?sw
              ())

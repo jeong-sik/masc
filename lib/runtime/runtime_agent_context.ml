@@ -2,8 +2,8 @@
 
     This module owns the shared [config] surface plus the pure/defaulted
     preparation logic used by both [build] and [resume_from_checkpoint].
-    [Runtime_agent] remains the public facade and still performs the
-    approval wiring and final [build_safe] / [Agent.resume] calls. *)
+    [Runtime_agent] remains the public facade for [build_safe] and
+    [Agent.resume] calls. *)
 
 (* [0] is the pinned SDK's documented unbounded sentinel (agent_sdk
    lib/base/types.mli: "[0] = no turn-count limit; positive values enforce
@@ -116,7 +116,6 @@ type config =
   ; yield_on_tool : bool
   ; context_injector : Agent_sdk.Hooks.context_injector option
   ; context : Agent_sdk.Context.t option
-  ; approval : Agent_sdk.Hooks.approval_callback option
   ; exit_condition : (int -> bool) option
   ; exit_condition_result : (int -> stop_reason * string option) option
   ; thinking_budget : int option
@@ -179,7 +178,6 @@ let default_config
   ; yield_on_tool = false
   ; context_injector = None
   ; context = None
-  ; approval = None
   ; exit_condition = None
   ; exit_condition_result = None
   ; thinking_budget = None
@@ -194,7 +192,7 @@ let default_config
 let oas_tracer_ref = Atomic.make Agent_sdk.Tracing.null
 let set_oas_tracer tracer = Atomic.set oas_tracer_ref tracer
 
-let builder_without_approval
+let builder
       ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
       ~(config : config)
       ?transport
@@ -209,8 +207,6 @@ let builder_without_approval
     |> Agent_sdk.Builder.with_max_turns config.max_turns
     |> Agent_sdk.Builder.with_max_idle_turns config.max_idle_turns
     |> Agent_sdk.Builder.with_tools config.tools
-    |> Agent_sdk.Builder.with_missing_approval_callback_policy
-         Agent_sdk.Hooks.Reject_without_callback
   in
   let builder =
     match config.temperature with
@@ -404,9 +400,6 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
     ; raw_trace = config.raw_trace
     ; allowed_paths = config.allowed_paths
     ; description = config.description
-    ; approval = config.approval
-    ; missing_approval_callback_policy =
-        Agent_sdk.Hooks.Reject_without_callback
     ; on_run_complete = config.on_run_complete
     }
   in

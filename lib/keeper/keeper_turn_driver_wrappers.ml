@@ -29,7 +29,6 @@ let config_for_label
     ?hooks
     ?enable_thinking
     ?provider_config_transform
-    ?approval
     ~(description : string option)
     () : (Runtime_agent.config, Agent_sdk.Error.sdk_error) result =
   let* provider =
@@ -60,7 +59,6 @@ let config_for_label
       hooks;
       enable_thinking;
       description;
-      approval;
     }
 
 (* RFC-0206: the runtime CLI-preflight wrapper is gone; run the attempt
@@ -169,7 +167,6 @@ let run_named_with_masc_tools
     ?on_resume
     ?transport
     ?(yield_on_tool = false)
-    ?approval
     ?(max_idle_turns = 3)
     ?provider_config_transform
     ?sw
@@ -187,7 +184,6 @@ let run_named_with_masc_tools
     ?temperature
     ?stream_idle_timeout_s ?hooks
     ~accept
-    ?approval
     ?raw_trace ?on_event ?on_yield ?on_resume 
     ?transport ~yield_on_tool ?provider_config_transform ?sw ?net ()
 

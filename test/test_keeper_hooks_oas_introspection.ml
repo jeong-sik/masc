@@ -155,7 +155,6 @@ let test_pre_tool_use_is_observation_only () =
   | Agent_sdk.Hooks.Continue -> ()
   | Skip -> fail "pre_tool_use timing hook returned Skip"
   | Override _ -> fail "pre_tool_use timing hook returned Override"
-  | ApprovalRequired -> fail "pre_tool_use timing hook requested approval"
   | AdjustParams _ -> fail "pre_tool_use timing hook adjusted parameters"
   | ElicitInput _ -> fail "pre_tool_use timing hook elicited input"
   | Nudge _ -> fail "pre_tool_use timing hook returned Nudge"

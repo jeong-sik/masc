@@ -304,9 +304,7 @@ let handoff_completed
     payload_json
 ;;
 
-(** Emit a [context_compacted] envelope.  Runtime-side side effect
-    (Context_overflow_action_tracker.record_action) is retained in the
-    runtime arm and runs before this constructor. *)
+(** Emit a [context_compacted] envelope. *)
 let context_compacted
       ~(ts_unix : float)
       ~(correlation_id : string)

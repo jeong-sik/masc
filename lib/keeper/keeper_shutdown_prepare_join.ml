@@ -180,6 +180,8 @@ let lane_outcome = function
   | Keeper_lane.Completed -> Lane_completed
   | Keeper_lane.Shutdown_before_start -> Lane_shutdown_requested
   | Keeper_lane.Shutdown_requested -> Lane_shutdown_requested
+  | Keeper_lane.Shutdown_cancel_failed failure ->
+    Lane_failed (Printexc.to_string failure.cause)
   | Keeper_lane.Cancelled_by_parent exn ->
     Lane_cancelled_by_parent (Printexc.to_string exn)
   | Keeper_lane.Failed exn -> Lane_failed (Printexc.to_string exn)
@@ -364,8 +366,15 @@ let join_prepared ~config ~(entry : Keeper_registry.registry_entry) ~operation =
      | Some detail -> cancellation_error ~config operation Turn_cancel detail
      | None ->
        (match Keeper_lane.request_cancel current.lane with
-        | Keeper_lane.Cancel_signal_failed exn ->
+        | Keeper_lane.Cancel_not_committed exn
+        | Keeper_lane.Cancel_committed_with_failure exn ->
           cancellation_error ~config operation Lane_cancel (Printexc.to_string exn)
+        | Keeper_lane.Cancel_wrong_domain ->
+          cancellation_error
+            ~config
+            operation
+            Lane_cancel
+            "lane cancellation requested from a non-owning domain"
         | Keeper_lane.Cancel_requested
         | Keeper_lane.Cancel_already_requested
         | Keeper_lane.Cancel_already_exiting ->
@@ -391,6 +400,7 @@ let join_prepared ~config ~(entry : Keeper_registry.registry_entry) ~operation =
                   detail)
            | Keeper_lane.Completed
            | Keeper_lane.Shutdown_requested
+           | Keeper_lane.Shutdown_cancel_failed _
            | Keeper_lane.Cancelled_by_parent _
            | Keeper_lane.Failed _ -> ());
           let terminal_result = Eio.Promise.await current.done_p in

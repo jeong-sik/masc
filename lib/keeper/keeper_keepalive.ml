@@ -1045,11 +1045,38 @@ let start_keepalive
         let record_completed_lane () =
           record_stopped (if Atomic.get stop then "manual stop" else "normal exit")
         in
+        let record_lane_exception ?backtrace exn =
+          Otel_metric_store.inc_counter
+            Keeper_metrics.(to_string HeartbeatFailures)
+            ~labels:[ "keeper", live_meta.name; "phase", "lane_crash" ]
+            ();
+          Log.Keeper.emit
+            Log.Error
+            ~category:Log.Heartbeat
+            ~details:
+              (`Assoc
+                (("keeper", `String live_meta.name)
+                 :: ("error", `String (Printexc.to_string exn))
+                 :: (match backtrace with
+                     | None -> []
+                     | Some backtrace ->
+                       [ ( "backtrace"
+                         , `String (Printexc.raw_backtrace_to_string backtrace) ) ])))
+            (Printf.sprintf
+               "keeper lane for %s crashed: %s"
+               live_meta.name
+               (Printexc.to_string exn));
+          record_crash (Keeper_registry.Exception (Printexc.to_string exn))
+        in
         let terminalize_lane = function
           | Keeper_lane.Completed -> record_completed_lane ()
           | Keeper_lane.Shutdown_before_start ->
             record_stopped "shutdown requested before lane start"
           | Keeper_lane.Shutdown_requested -> record_stopped "shutdown requested"
+          | Keeper_lane.Shutdown_cancel_failed failure ->
+            record_lane_exception
+              ~backtrace:failure.backtrace
+              failure.cause
           | Keeper_lane.Cancelled_by_parent _ ->
             if Atomic.get stop || Shutdown.is_shutting_down_global ()
             then record_stopped "cancelled during shutdown"
@@ -1064,24 +1091,7 @@ let start_keepalive
           | Keeper_lane.Failed exn ->
             if Atomic.get stop
             then record_stopped "manual stop"
-            else (
-              Otel_metric_store.inc_counter
-                Keeper_metrics.(to_string HeartbeatFailures)
-                ~labels:[ "keeper", live_meta.name; "phase", "lane_crash" ]
-                ();
-              Log.Keeper.emit
-                Log.Error
-                ~category:Log.Heartbeat
-                ~details:
-                  (`Assoc
-                    [ "keeper", `String live_meta.name
-                    ; "error", `String (Printexc.to_string exn)
-                    ])
-                (Printf.sprintf
-                   "keeper lane for %s crashed: %s"
-                   live_meta.name
-                   (Printexc.to_string exn));
-              record_crash (Keeper_registry.Exception (Printexc.to_string exn)))
+            else record_lane_exception exn
         in
         (* Lane cleanup is declared outside [run] because [Keeper_lane.fork]
            invokes it only after the run scope and all child fibers join. *)

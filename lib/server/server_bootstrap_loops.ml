@@ -1660,10 +1660,23 @@ let start_keeper_loops_owned
     let base_path = config.base_path in
     let setup =
       try
+        (* A durable queue mutation both refreshes the dashboard (SSE) and must
+           wake this consumer: [notify_transition] is a non-blocking Wake_inbox
+           post, so a message enqueued after boot is actually leased and
+           delivered instead of sitting queued until the next unrelated wake. *)
         Keeper_chat_queue.set_transition_observer
           (Some
              (fun ~keeper_name ~revision ->
-                Keeper_chat_broadcast.queue_changed ~keeper_name ~revision ()));
+                Keeper_chat_broadcast.queue_changed ~keeper_name ~revision ();
+                Keeper_chat_consumer.notify_transition ~keeper_name));
+        (* A freed turn slot (turn released / shutdown rolled back) makes the
+           lane dispatchable again; wake the consumer so any receipt that was
+           deferred while the lane was busy is re-examined. The admission
+           observer is non-blocking and its failures cannot alter admission. *)
+        Keeper_turn_admission.set_slot_transition_observer
+          (Some
+             (fun ~base_path:_ ~keeper_name ~transition:_ ->
+                Keeper_chat_consumer.notify_transition ~keeper_name));
         Ok ()
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn

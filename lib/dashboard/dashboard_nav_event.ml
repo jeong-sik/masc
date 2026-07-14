@@ -12,6 +12,7 @@ let valid_surfaces =
   ; "overview"
   ; "monitoring"
   ; "keepers"
+  ; "registry"
   ; "board"
   ; "schedule"
   ; "fusion"

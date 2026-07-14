@@ -8,9 +8,12 @@
   mkdir_memo
   fd_cache
   owned_directory_chain
+  capability_mutation_lease
   atomic_write
+  blocking_write
+  fd_write_all
   atomic_orphan_size_class)
  ; RFC-0071 §3.4 Phase 5 ratchet (warning 4)
  (flags
   (:standard -w +4))
- (libraries eio eio.unix unix yojson optint))
+ (libraries eio eio.unix unix yojson optint uuidm))

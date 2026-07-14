@@ -145,6 +145,203 @@ val save_file_atomic : string -> string -> (unit, string) Result.t
     filename shape. The caller owns the returned channel and file. *)
 val open_atomic_temp_file : temp_dir:string -> unit -> string * out_channel
 
+type capability_append_operation_failure =
+  { exception_ : exn
+  ; backtrace : Printexc.raw_backtrace
+  }
+
+type capability_append_failure =
+  | Capability_append_posix_descriptor_unavailable
+  | Capability_append_inode_contended
+  | Capability_append_mutation_contended
+  | Capability_append_operation_failed of capability_append_operation_failure
+
+type capability_append_target_binding =
+  | Capability_append_target_not_checked
+  | Capability_append_target_verified
+  | Capability_append_target_changed
+  | Capability_append_target_check_failed of capability_append_operation_failure
+
+type capability_append_outcome =
+  { requested_bytes : int
+  ; bytes_written : int
+  ; write_failure : capability_append_failure option
+  ; sync_failure : capability_append_operation_failure option
+  ; target_binding : capability_append_target_binding
+  }
+
+val capability_append_failure_to_string : capability_append_failure -> string
+
+(** Append through an already-open capability without destructive rollback.
+    Cooperative same-process mutations of the same parent/leaf and appends to
+    the same inode use non-blocking leases. The leaf-to-open-file identity is
+    checked before and after the write, so an external rename is reported
+    rather than misclassified as a visible append. External processes are an
+    observation boundary, not an exclusion guarantee. Partial bytes and their
+    fsync result remain explicit. The caller owns the next cancellation
+    checkpoint. *)
+val append_open_file_observed
+  :  parent:Eio.Fs.dir_ty Eio.Path.t
+  -> leaf:string
+  -> [> Eio.File.ro_ty ] Eio.Resource.t
+  -> string
+  -> capability_append_outcome
+
+module Capability_append_for_testing : sig
+  val append_open_file_observed
+    :  after_write:(unit -> unit)
+    -> parent:Eio.Fs.dir_ty Eio.Path.t
+    -> leaf:string
+    -> [> Eio.File.ro_ty ] Eio.Resource.t
+    -> string
+    -> capability_append_outcome
+end
+
+type capability_append_io_for_testing =
+  { write_substring : Unix.file_descr -> string -> int -> int -> int
+  ; fsync : Unix.file_descr -> unit
+  }
+
+val append_fd_observed_for_testing
+  :  io:capability_append_io_for_testing
+  -> fd:Unix.file_descr
+  -> string
+  -> capability_append_outcome
+
+type capability_write_intent =
+  | Atomic_replace
+  | Create_exclusive
+
+type capability_write_stage =
+  | Validate_leaf
+  | Acquire_mutation_lease
+  | Create_staging_directory
+  | Inspect_staging_directory
+  | Acquire_staging_directory
+  | Apply_staging_directory_permissions
+  | Verify_staging_directory_identity
+  | Create_staging_entry
+  | Create_target_entry
+  | Inspect_open_resource
+  | Write_payload
+  | Apply_permissions
+  | Sync_payload
+  | Close_payload
+  | Verify_entry_identity
+  | Publish_replace
+  | Sync_staging_directory
+  | Sync_parent
+  | Remove_staging_directory
+  | Close_staging_directory
+  | Cleanup_close
+  | Cleanup_verify_identity
+  | Cleanup_unlink
+  | Cleanup_sync_staging_directory
+  | Cleanup_verify_staging_directory_identity
+  | Cleanup_remove_staging_directory
+  | Cleanup_close_staging_directory
+  | Cleanup_sync_parent
+
+type capability_write_target_effect =
+  | Target_unchanged
+  | Target_created
+  | Target_created_incomplete
+  | Target_replaced
+  | Target_state_unknown
+
+type capability_write_operation_failure =
+  { exception_ : exn
+  ; backtrace : Printexc.raw_backtrace
+  }
+
+type capability_write_payload_failure =
+  { exception_ : exn
+  ; backtrace : Printexc.raw_backtrace
+  ; bytes_written : int
+  }
+
+type capability_write_cause =
+  | Invalid_leaf of string
+  | Mutation_contended
+  | Posix_descriptor_unavailable
+  | Unexpected_resource_kind of Eio.File.Stat.kind
+  | Resource_identity_unavailable
+  | Resource_identity_changed
+  | Payload_write_failed of capability_write_payload_failure
+  | Operation_failed of capability_write_operation_failure
+
+type capability_write_failure =
+  { stage : capability_write_stage
+  ; cause : capability_write_cause
+  }
+
+type capability_write_error =
+  { intent : capability_write_intent
+  ; target_effect : capability_write_target_effect
+  ; failure : capability_write_failure
+  ; cleanup_failures : capability_write_failure list
+  }
+
+type capability_directory_sync_error =
+  { failure : capability_write_failure
+  ; cleanup_failures : capability_write_failure list
+  }
+
+type capability_write_cancellation =
+  { intent : capability_write_intent
+  ; target_effect : capability_write_target_effect
+  ; cleanup_failures : capability_write_failure list
+  }
+
+exception Capability_write_cancelled of exn * capability_write_cancellation
+
+(** Publish below an already-open, caller-validated directory capability.
+    Atomic replacement and exclusive creation preserve exact permissions,
+    fsync the payload and parent, and return primary plus cleanup failures
+    without reopening the path from a global root. *)
+val publish_capability_file
+  :  parent:Eio.Fs.dir_ty Eio.Path.t
+  -> leaf:string
+  -> intent:capability_write_intent
+  -> permissions:int
+  -> string
+  -> (unit, capability_write_error) result
+
+val capability_write_error_to_string : capability_write_error -> string
+val capability_write_intent_to_string : capability_write_intent -> string
+val capability_write_stage_to_string : capability_write_stage -> string
+
+val capability_write_target_effect_to_string
+  :  capability_write_target_effect
+  -> string
+
+val capability_write_cause_to_string : capability_write_cause -> string
+val capability_write_failure_to_string : capability_write_failure -> string
+
+val sync_directory_capability
+  :  _ Eio.Path.t
+  -> (unit, capability_directory_sync_error) result
+
+val capability_directory_sync_error_to_string
+  :  capability_directory_sync_error
+  -> string
+
+module Capability_write_for_testing : sig
+  val publish_capability_file
+    :  before_stage:(capability_write_stage -> unit)
+    -> parent:Eio.Fs.dir_ty Eio.Path.t
+    -> leaf:string
+    -> intent:capability_write_intent
+    -> permissions:int
+    -> string
+    -> (unit, capability_write_error) result
+
+  val sync_directory_capability
+    :  before_stage:(capability_write_stage -> unit)
+    -> _ Eio.Path.t
+    -> (unit, capability_directory_sync_error) result
+end
+
 (** [true] iff [name] matches the canonical [.atomic_*.tmp] pattern produced by
     this module. Exposed for tests and recovery sweeps. *)
 val is_atomic_orphan_name : string -> bool
@@ -337,6 +534,8 @@ type durable_append_error =
   { append_failure : durable_append_failure
   ; rollback_failures : durable_append_failure list
   }
+
+val durable_append_failure_to_string : durable_append_failure -> string
 
 (** Render a structured durable-append failure without discarding the original
     [Unix.error] or rollback failures. *)

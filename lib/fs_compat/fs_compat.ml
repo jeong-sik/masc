@@ -247,6 +247,121 @@ let open_atomic_temp_file ~temp_dir () =
   Atomic_write.open_atomic_temp_file ~temp_dir ()
 ;;
 
+type capability_write_intent = Atomic_write.capability_write_intent =
+  | Atomic_replace
+  | Create_exclusive
+
+type capability_write_stage = Atomic_write.capability_write_stage =
+  | Validate_leaf
+  | Acquire_mutation_lease
+  | Create_staging_directory
+  | Inspect_staging_directory
+  | Acquire_staging_directory
+  | Apply_staging_directory_permissions
+  | Verify_staging_directory_identity
+  | Create_staging_entry
+  | Create_target_entry
+  | Inspect_open_resource
+  | Write_payload
+  | Apply_permissions
+  | Sync_payload
+  | Close_payload
+  | Verify_entry_identity
+  | Publish_replace
+  | Sync_staging_directory
+  | Sync_parent
+  | Remove_staging_directory
+  | Close_staging_directory
+  | Cleanup_close
+  | Cleanup_verify_identity
+  | Cleanup_unlink
+  | Cleanup_sync_staging_directory
+  | Cleanup_verify_staging_directory_identity
+  | Cleanup_remove_staging_directory
+  | Cleanup_close_staging_directory
+  | Cleanup_sync_parent
+
+type capability_write_target_effect = Atomic_write.capability_write_target_effect =
+  | Target_unchanged
+  | Target_created
+  | Target_created_incomplete
+  | Target_replaced
+  | Target_state_unknown
+
+type capability_write_operation_failure =
+  Atomic_write.capability_write_operation_failure =
+  { exception_ : exn
+  ; backtrace : Printexc.raw_backtrace
+  }
+
+type capability_write_payload_failure = Atomic_write.capability_write_payload_failure =
+  { exception_ : exn
+  ; backtrace : Printexc.raw_backtrace
+  ; bytes_written : int
+  }
+
+type capability_write_cause = Atomic_write.capability_write_cause =
+  | Invalid_leaf of string
+  | Mutation_contended
+  | Posix_descriptor_unavailable
+  | Unexpected_resource_kind of Eio.File.Stat.kind
+  | Resource_identity_unavailable
+  | Resource_identity_changed
+  | Payload_write_failed of capability_write_payload_failure
+  | Operation_failed of capability_write_operation_failure
+
+type capability_write_failure = Atomic_write.capability_write_failure =
+  { stage : capability_write_stage
+  ; cause : capability_write_cause
+  }
+
+type capability_write_error = Atomic_write.capability_write_error =
+  { intent : capability_write_intent
+  ; target_effect : capability_write_target_effect
+  ; failure : capability_write_failure
+  ; cleanup_failures : capability_write_failure list
+  }
+
+type capability_directory_sync_error = Atomic_write.capability_directory_sync_error =
+  { failure : capability_write_failure
+  ; cleanup_failures : capability_write_failure list
+  }
+
+type capability_write_cancellation = Atomic_write.capability_write_cancellation =
+  { intent : capability_write_intent
+  ; target_effect : capability_write_target_effect
+  ; cleanup_failures : capability_write_failure list
+  }
+
+exception Capability_write_cancelled = Atomic_write.Capability_write_cancelled
+
+let publish_capability_file = Atomic_write.publish_capability_file
+let capability_write_error_to_string = Atomic_write.capability_write_error_to_string
+let capability_write_intent_to_string = Atomic_write.capability_write_intent_to_string
+let capability_write_stage_to_string = Atomic_write.capability_write_stage_to_string
+
+let capability_write_target_effect_to_string =
+  Atomic_write.capability_write_target_effect_to_string
+;;
+
+let capability_write_cause_to_string = Atomic_write.capability_write_cause_to_string
+let capability_write_failure_to_string = Atomic_write.capability_write_failure_to_string
+let sync_directory_capability = Atomic_write.sync_directory_capability
+
+let capability_directory_sync_error_to_string =
+  Atomic_write.capability_directory_sync_error_to_string
+;;
+
+module Capability_write_for_testing = struct
+  let publish_capability_file =
+    Atomic_write.Capability_write_for_testing.publish_capability_file
+  ;;
+
+  let sync_directory_capability =
+    Atomic_write.Capability_write_for_testing.sync_directory_capability
+  ;;
+end
+
 let is_atomic_orphan_name = Atomic_write.is_atomic_orphan_name
 type atomic_orphan_cleanup_scope = Atomic_write.atomic_orphan_cleanup_scope =
   | Directory_only
@@ -1095,23 +1210,19 @@ let unix_failure ~operation error function_name argument =
   Unix_error { operation; error; function_name; argument }
 ;;
 
-let rec write_fd_all ~write fd bytes offset remaining =
-  if remaining = 0
-  then Ok ()
-  else
-    match write fd bytes offset remaining with
-    | 0 -> Error No_write_progress
-    | written -> write_fd_all ~write fd bytes (offset + written) (remaining - written)
-    | exception Unix.Unix_error (Unix.EINTR, _, _) ->
-      write_fd_all ~write fd bytes offset remaining
-    | exception Unix.Unix_error (error, function_name, argument) ->
-      Error (unix_failure ~operation:Write error function_name argument)
-;;
-
 let rec run_unix_io ~operation f =
   match f () with
   | () -> Ok ()
   | exception Unix.Unix_error (Unix.EINTR, _, _) -> run_unix_io ~operation f
+  | exception Unix.Unix_error (error, function_name, argument) ->
+    Error (unix_failure ~operation error function_name argument)
+;;
+
+let rec run_unix_value ~operation f =
+  match f () with
+  | value -> Ok value
+  | exception Unix.Unix_error (Unix.EINTR, _, _) ->
+    run_unix_value ~operation f
   | exception Unix.Unix_error (error, function_name, argument) ->
     Error (unix_failure ~operation error function_name argument)
 ;;
@@ -1133,8 +1244,20 @@ let rollback_durable_append ~io ~fd ~original_length =
 let append_fd_durable ~io ~fd ~original_length suffix =
   let bytes = Bytes.of_string suffix in
   let append_result =
-    match write_fd_all ~write:io.write fd bytes 0 (Bytes.length bytes) with
-    | Error _ as error -> error
+    match
+      Fd_write_all.run
+        ~length:(Bytes.length bytes)
+        ~write:(fun ~offset ~length -> io.write fd bytes offset length)
+    with
+    | Error (Fd_write_all.No_progress _) -> Error No_write_progress
+    | Error
+        (Fd_write_all.Unix_error
+          { bytes_written = _; error; function_name; argument }) ->
+      Error (unix_failure ~operation:Write error function_name argument)
+    | Error
+        (Fd_write_all.Operation_failed
+          { bytes_written = _; exception_; backtrace }) ->
+      Printexc.raise_with_backtrace exception_ backtrace
     | Ok () -> run_unix_io ~operation:Append_fsync (fun () -> io.fsync fd)
   in
   match append_result with
@@ -1162,6 +1285,370 @@ let rec lock_whole_file fd =
   | () -> ()
   | exception Unix.Unix_error (Unix.EINTR, _, _) -> lock_whole_file fd
 ;;
+
+module Append_inode_key = struct
+  type t = int * int
+
+  let equal (left_dev, left_ino) (right_dev, right_ino) =
+    left_dev = right_dev && left_ino = right_ino
+  ;;
+
+  let hash = Hashtbl.hash
+end
+
+module Append_inode_table = Hashtbl.Make (Append_inode_key)
+
+type append_inode_entry =
+  { held : bool Atomic.t
+  ; mutable users : int
+  }
+
+type append_inode_lease =
+  { key : Append_inode_key.t
+  ; entry : append_inode_entry
+  }
+
+let append_inode_registry_mu = Stdlib.Mutex.create ()
+let append_inode_registry = Append_inode_table.create 0
+
+let release_append_inode_user key entry =
+  Stdlib.Mutex.protect append_inode_registry_mu (fun () ->
+    entry.users <- entry.users - 1;
+    if entry.users = 0
+    then
+      match Append_inode_table.find_opt append_inode_registry key with
+      | Some current when current == entry ->
+        Append_inode_table.remove append_inode_registry key
+      | Some _ | None -> ())
+;;
+
+let try_acquire_append_inode key =
+  let entry =
+    Stdlib.Mutex.protect append_inode_registry_mu (fun () ->
+      match Append_inode_table.find_opt append_inode_registry key with
+      | Some entry ->
+        entry.users <- entry.users + 1;
+        entry
+      | None ->
+        let entry = { held = Atomic.make false; users = 1 } in
+        Append_inode_table.add append_inode_registry key entry;
+        entry)
+  in
+  if Atomic.compare_and_set entry.held false true
+  then Some { key; entry }
+  else (
+    release_append_inode_user key entry;
+    None)
+;;
+
+let release_append_inode { key; entry } =
+  Atomic.set entry.held false;
+  release_append_inode_user key entry
+;;
+
+type capability_append_operation_failure =
+  { exception_ : exn
+  ; backtrace : Printexc.raw_backtrace
+  }
+
+type capability_append_failure =
+  | Capability_append_posix_descriptor_unavailable
+  | Capability_append_inode_contended
+  | Capability_append_mutation_contended
+  | Capability_append_operation_failed of capability_append_operation_failure
+
+type capability_append_target_binding =
+  | Capability_append_target_not_checked
+  | Capability_append_target_verified
+  | Capability_append_target_changed
+  | Capability_append_target_check_failed of capability_append_operation_failure
+
+type capability_append_outcome =
+  { requested_bytes : int
+  ; bytes_written : int
+  ; write_failure : capability_append_failure option
+  ; sync_failure : capability_append_operation_failure option
+  ; target_binding : capability_append_target_binding
+  }
+
+let capability_append_failure_to_string = function
+  | Capability_append_posix_descriptor_unavailable ->
+    "POSIX descriptor unavailable"
+  | Capability_append_inode_contended ->
+    "append inode is busy in another cooperative writer"
+  | Capability_append_mutation_contended ->
+    "append entry is busy in another cooperative writer"
+  | Capability_append_operation_failed { exception_; _ } ->
+    Printexc.to_string exception_
+;;
+
+let capability_append_operation_failure exception_ backtrace =
+  { exception_; backtrace }
+;;
+
+let capability_append_outcome
+      ~requested_bytes
+      ?(bytes_written = 0)
+      ?write_failure
+      ?sync_failure
+      ?(target_binding = Capability_append_target_not_checked)
+      ()
+  =
+  { requested_bytes
+  ; bytes_written
+  ; write_failure
+  ; sync_failure
+  ; target_binding
+  }
+;;
+
+type capability_append_io_for_testing =
+  { write_substring : Unix.file_descr -> string -> int -> int -> int
+  ; fsync : Unix.file_descr -> unit
+  }
+
+let append_fd_observed ~io ~fd content =
+  let requested_bytes = String.length content in
+  let bytes_written, write_failure =
+    match
+      Fd_write_all.run
+        ~length:requested_bytes
+        ~write:(fun ~offset ~length ->
+          io.write_substring fd content offset length)
+    with
+    | Ok () -> requested_bytes, None
+    | Error (Fd_write_all.No_progress { bytes_written }) ->
+      ( bytes_written
+      , Some
+          (Capability_append_operation_failed
+             (capability_append_operation_failure
+                (Unix.Unix_error
+                   (Unix.EIO, "write", "regular file accepted zero bytes"))
+                (Printexc.get_callstack 0))) )
+    | Error
+        (Fd_write_all.Unix_error
+          { bytes_written; error; function_name; argument }) ->
+      ( bytes_written
+      , Some
+          (Capability_append_operation_failed
+             (capability_append_operation_failure
+                (Unix.Unix_error (error, function_name, argument))
+                (Printexc.get_callstack 0))) )
+    | Error
+        (Fd_write_all.Operation_failed
+          { bytes_written; exception_; backtrace }) ->
+      ( bytes_written
+      , Some
+          (Capability_append_operation_failed
+             (capability_append_operation_failure exception_ backtrace)) )
+  in
+  let sync_failure =
+    if bytes_written > 0 || Option.is_none write_failure
+    then
+      let rec sync () =
+        try
+          io.fsync fd;
+          None
+        with
+        | Unix.Unix_error (Unix.EINTR, _, _) -> sync ()
+        | exception_ ->
+          let backtrace = Printexc.get_raw_backtrace () in
+          Some (capability_append_operation_failure exception_ backtrace)
+      in
+      sync ()
+    else None
+  in
+  capability_append_outcome
+    ~requested_bytes
+    ~bytes_written
+    ?write_failure
+    ?sync_failure
+    ()
+;;
+
+let append_fd_observed_for_testing = append_fd_observed
+
+let capability_append_unix_io =
+  { write_substring = Unix.write_substring; fsync = Unix.fsync }
+;;
+
+let append_target_binding ~parent ~leaf opened =
+  try
+    let lexical = Eio.Path.stat ~follow:false Eio.Path.(parent / leaf) in
+    if
+      opened.Eio.File.Stat.kind = `Regular_file
+      && lexical.kind = `Regular_file
+      && Int64.equal opened.dev lexical.dev
+      && Int64.equal opened.ino lexical.ino
+    then Capability_append_target_verified
+    else Capability_append_target_changed
+  with
+  | Eio.Cancel.Cancelled _ as cancellation -> raise cancellation
+  | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) ->
+    Capability_append_target_changed
+  | exception_ ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    Capability_append_target_check_failed
+      (capability_append_operation_failure exception_ backtrace)
+;;
+
+let append_open_file_observed_with
+      ~after_write
+      ~parent
+      ~leaf
+      resource
+      content
+  =
+  let requested_bytes = String.length content in
+  if requested_bytes = 0
+  then capability_append_outcome ~requested_bytes ()
+  else
+    let parent_stat =
+      try Ok (Eio.Path.stat ~follow:true parent) with
+      | Eio.Cancel.Cancelled _ as cancellation -> raise cancellation
+      | exception_ ->
+        let backtrace = Printexc.get_raw_backtrace () in
+        Error (capability_append_operation_failure exception_ backtrace)
+    in
+    match parent_stat with
+    | Error failure ->
+      capability_append_outcome
+        ~requested_bytes
+        ~write_failure:(Capability_append_operation_failed failure)
+        ~target_binding:(Capability_append_target_check_failed failure)
+        ()
+    | Ok parent_stat when parent_stat.kind <> `Directory ->
+      let exception_ =
+        Invalid_argument "append parent capability is not a directory"
+      in
+      let failure =
+        capability_append_operation_failure
+          exception_
+          (Printexc.get_callstack 0)
+      in
+      capability_append_outcome
+        ~requested_bytes
+        ~write_failure:(Capability_append_operation_failed failure)
+        ~target_binding:(Capability_append_target_check_failed failure)
+        ()
+    | Ok parent_stat ->
+      (match
+         Capability_mutation_lease.try_acquire
+           ~parent_dev:parent_stat.dev
+           ~parent_ino:parent_stat.ino
+           ~leaf
+       with
+       | None ->
+         capability_append_outcome
+           ~requested_bytes
+           ~write_failure:Capability_append_mutation_contended
+           ()
+       | Some mutation_lease ->
+         Fun.protect
+           ~finally:(fun () ->
+             Capability_mutation_lease.release mutation_lease)
+         @@ fun () ->
+         let opened_stat =
+           try Ok (Eio.File.stat resource) with
+           | Eio.Cancel.Cancelled _ as cancellation -> raise cancellation
+           | exception_ ->
+             let backtrace = Printexc.get_raw_backtrace () in
+             Error (capability_append_operation_failure exception_ backtrace)
+         in
+         match opened_stat with
+         | Error failure ->
+           capability_append_outcome
+             ~requested_bytes
+             ~write_failure:(Capability_append_operation_failed failure)
+             ~target_binding:(Capability_append_target_check_failed failure)
+             ()
+         | Ok opened_stat ->
+           (match append_target_binding ~parent ~leaf opened_stat with
+            | ( Capability_append_target_changed
+              | Capability_append_target_check_failed _ ) as target_binding ->
+              capability_append_outcome
+                ~requested_bytes
+                ~target_binding
+                ()
+            | Capability_append_target_not_checked -> assert false
+            | Capability_append_target_verified ->
+              let outcome =
+                match Eio_unix.Resource.fd_opt resource with
+                | None ->
+                  capability_append_outcome
+                    ~requested_bytes
+                    ~write_failure:
+                      Capability_append_posix_descriptor_unavailable
+                    ~target_binding:Capability_append_target_verified
+                    ()
+                | Some fd ->
+                  Eio_unix.run_in_systhread
+                    ~label:"fs-compat-open-file-append"
+                    (fun () ->
+                       Eio_unix.Fd.use_exn
+                         "fs-compat-open-file-append"
+                         fd
+                         (fun unix_fd ->
+                            let stat_result =
+                              try Ok (Unix.fstat unix_fd) with
+                              | exception_ ->
+                                let backtrace = Printexc.get_raw_backtrace () in
+                                Error
+                                  (capability_append_operation_failure
+                                     exception_
+                                     backtrace)
+                            in
+                            match stat_result with
+                            | Error failure ->
+                              capability_append_outcome
+                                ~requested_bytes
+                                ~write_failure:
+                                  (Capability_append_operation_failed failure)
+                                ~target_binding:
+                                  Capability_append_target_verified
+                                ()
+                            | Ok stat ->
+                              (match
+                                 try_acquire_append_inode
+                                   (stat.st_dev, stat.st_ino)
+                               with
+                               | None ->
+                                 capability_append_outcome
+                                   ~requested_bytes
+                                   ~write_failure:
+                                     Capability_append_inode_contended
+                                   ~target_binding:
+                                     Capability_append_target_verified
+                                   ()
+                               | Some lease ->
+                                 Fun.protect
+                                   ~finally:(fun () ->
+                                     release_append_inode lease)
+                                   (fun () ->
+                                      append_fd_observed
+                                        ~io:capability_append_unix_io
+                                        ~fd:unix_fd
+                                        content))))
+              in
+              after_write ();
+              let target_binding =
+                append_target_binding ~parent ~leaf opened_stat
+              in
+              { outcome with target_binding }))
+;;
+
+let append_open_file_observed ~parent ~leaf resource content =
+  append_open_file_observed_with
+    ~after_write:(fun () -> ())
+    ~parent
+    ~leaf
+    resource
+    content
+;;
+
+module Capability_append_for_testing = struct
+  let append_open_file_observed = append_open_file_observed_with
+end
 
 let run_blocking_durable_append ~path f =
   with_fs_or_fallback

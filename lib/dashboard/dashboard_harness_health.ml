@@ -872,7 +872,12 @@ let json ~(config : Workspace.config) ?since ?until () =
 
 let () =
   Keeper_keepalive_signal.register_record_wake_payload (fun ~keeper_name ~trace_id ~turn_index ~context_window ~system_prompt_bytes ~tool_schema_json_bytes ~message_content_bytes ~message_count ~role_counts ~tool_count ~has_compact_happened ->
-    ignore (record_wake_payload ~keeper_name ~trace_id ~turn_index ~context_window ~system_prompt_bytes ~tool_schema_json_bytes ~message_content_bytes ~message_count ~role_counts ~tool_count ~has_compact_happened)
+    let (_recorded : wake_payload_event) =
+      record_wake_payload ~keeper_name ~trace_id ~turn_index ~context_window
+        ~system_prompt_bytes ~tool_schema_json_bytes ~message_content_bytes
+        ~message_count ~role_counts ~tool_count ~has_compact_happened
+    in
+    ()
   );
 
   Keeper_compact_policy.register_record_pre_compact (fun ~keeper_name ~context_ratio ~message_count ~token_count ~strategies ~context_window ~is_local_model ~trigger ->

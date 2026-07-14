@@ -410,6 +410,8 @@ let ensure_thompson_persistence ~base_path =
 let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
     ~proc_mgr ~fs ?env ()
     : Mcp_server.server_state =
+  (* DET-OK: absent transport input delegates to the explicit owner BasePath;
+     normalization below remains the single path interpretation boundary. *)
   let input_base_path =
     match String.trim (Option.value input_base_path ~default:base_path) with
     | "" -> None
@@ -667,6 +669,8 @@ let initialize_owner_state_blocking
       ~fs
       ()
   =
+  (* DET-OK: the optional transport spelling and the required owner BasePath
+     denote the same requested path when the former is absent. *)
   let requested_base_path = Option.value input_base_path ~default:base_path in
   let base_path =
     match Eio_unix.run_in_systhread (fun () -> Unix.realpath base_path) with
@@ -1182,6 +1186,8 @@ let run_legacy_atomic_orphan_migration ~clock state =
            "boot: legacy atomic orphan migration record failure path=%s request_id=%s keeper=%s"
            error.path
            error.request_id
+           (* DET-OK: this is an observation-only label for an absent typed
+              attribution; it cannot select recovery or execution behavior. *)
            (Option.value error.keeper_name ~default:"<unattributed>"))
       report.record_errors;
     Log.Server.info

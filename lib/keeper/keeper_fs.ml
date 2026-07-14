@@ -280,6 +280,8 @@ let save_json_durable_atomic_with
       json
   =
   let dir = Filename.dirname path in
+  (* DET-OK: an omitted staging directory means the destination directory;
+     both paths are derived from the same explicit destination [path]. *)
   let temp_dir = Option.value temp_dir ~default:dir in
   let content = Yojson.Safe.pretty_to_string json in
   try

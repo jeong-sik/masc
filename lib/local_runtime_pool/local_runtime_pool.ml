@@ -278,7 +278,7 @@ let parse_llm_endpoints raw =
 let current_fingerprint () =
   String.concat "||"
     [
-      String.concat "," (Llm_provider.Discovery.endpoints_from_env ());
+      String.concat "," (Llm_provider.Discovery.parse_llm_endpoints_env ());
       Env_config.Local_runtime.server_url;
       Option.value ~default:"" (Env_config.Local_runtime.worker_model_opt ());
       Option.value ~default:""
@@ -295,7 +295,7 @@ let load_runtimes_from_env () =
   match discovered with
   | _ :: _ -> (discovered, [])
   | [] ->
-      let endpoints = Llm_provider.Discovery.endpoints_from_env () in
+      let endpoints = Llm_provider.Discovery.parse_llm_endpoints_env () in
       let runtimes = List.map runtime_of_endpoint_url endpoints in
       if runtimes = [] then ([ default_runtime () ], []) else (runtimes, [])
 

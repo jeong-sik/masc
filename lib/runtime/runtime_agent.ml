@@ -102,7 +102,6 @@ type config =
   max_tokens : int option;
   temperature : float option;
   hooks : Agent_sdk.Hooks.hooks option;
-  guardrails : Agent_sdk.Guardrails.t option;
   event_bus : Agent_sdk.Event_bus.t option;
   session_id : string option;
   description : string option;
@@ -971,7 +970,7 @@ let close_agent_for_cleanup ?(propagate_cancel = true) ~config agent =
 
     The checkpoint provides: messages, turn_count, usage_stats.
     The MASC config provides: provider, model_id, system_prompt,
-    temperature, tools, hooks, guardrails, etc.
+    temperature, tools, hooks, etc.
 
     @boundary-contract
     - MASC owns: per-turn config selection (model, temperature, tools,

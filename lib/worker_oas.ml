@@ -86,7 +86,7 @@ let oas_provider_of_label = Worker_container.oas_provider_of_label
     This is the central adapter function. It:
     1. Converts worker_meta to agent_config
     2. Attaches the MODEL provider
-    3. Wires tools, hooks, guardrails, raw_trace
+    3. Wires tools, hooks, raw_trace
     4. Adds MASC heartbeat as an OAS periodic_callback
     5. Embeds MASC metadata in the agent description *)
 let build_agent
@@ -115,7 +115,6 @@ let build_agent
     |> Agent_sdk.Builder.with_provider provider
     |> Agent_sdk.Builder.with_tools tools
     |> Agent_sdk.Builder.with_hooks hooks
-    |> Agent_sdk.Builder.with_guardrails Agent_sdk.Guardrails.permissive
     |> Agent_sdk.Builder.with_raw_trace raw_trace
     |> Agent_sdk.Builder.with_periodic_callbacks heartbeat_callbacks
     |> Agent_sdk.Builder.with_description (description_of_meta meta)
@@ -444,7 +443,6 @@ and resume_worker_via_oas
       ~hooks
       ~raw_trace
       ~periodic_callbacks:heartbeat_cbs
-      ~guardrails:Agent_sdk.Guardrails.permissive
       ()
   in
   let options =

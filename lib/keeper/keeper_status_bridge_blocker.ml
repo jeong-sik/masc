@@ -53,7 +53,6 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
      | Agent_sdk.Error.Agent (MaxTurnsExceeded _) -> None
      | Agent_sdk.Error.Agent (UnrecognizedStopReason _) ->
        Some Sdk_unrecognized_stop_reason
-     | Agent_sdk.Error.Agent (IdleDetected _) -> Some Sdk_idle_detected
      | Agent_sdk.Error.Agent (GuardrailViolation _) -> Some Sdk_guardrail_violation
      | Agent_sdk.Error.Agent (TripwireViolation _) -> Some Sdk_tripwire_violation
      | Agent_sdk.Error.Agent (ExitConditionMet _) -> Some Sdk_exit_condition_met

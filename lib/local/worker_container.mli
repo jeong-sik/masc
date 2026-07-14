@@ -200,7 +200,6 @@ val build_resume_config :
   hooks:Agent_sdk.Hooks.hooks ->
   raw_trace:Agent_sdk.Raw_trace.t ->
   ?periodic_callbacks:Agent_sdk.Agent.periodic_callback list ->
-  ?guardrails:Agent_sdk.Guardrails.t ->
   unit ->
   Agent_sdk.Types.agent_config * Agent_sdk.Agent.options
 (** Assembles the [(config, options)] pair consumed by
@@ -208,5 +207,4 @@ val build_resume_config :
     {!Agent_sdk.Types.default_config} and overrides
     [name] / [model] / [system_prompt] / [enable_thinking] /
     [tool_choice = Auto]. Provider/model sampling and output defaults remain
-    OAS-owned. [guardrails] defaults to the unrestricted worker surface; the
-    concrete [tools] list is the exposure SSOT. *)
+    OAS-owned. The concrete [tools] list is the tool-exposure SSOT. *)

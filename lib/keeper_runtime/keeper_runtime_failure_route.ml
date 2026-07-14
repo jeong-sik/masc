@@ -184,17 +184,6 @@ let route_of_error_family ~boundary (err : Agent_sdk.Error.sdk_error) : route =
       ~err
       ~provenance:(provenance_for_boundary boundary Oas_config_error)
       Config_mismatch
-  | Agent_sdk.Error.Agent
-      (Agent_sdk.Error.IdleDetected { consecutive_idle_turns }) ->
-    (* A repeated no-usable-progress observation becomes a behavioral contract
-       judgment, not a lifecycle transition or opaque internal error. *)
-    judge
-      ~err
-      ~provenance:
-        (provenance_for_boundary
-           boundary
-           (Oas_agent_idle_detected { consecutive_idle_turns }))
-      Contract_violation
   | Agent_sdk.Error.Agent _ ->
     judge
       ~err

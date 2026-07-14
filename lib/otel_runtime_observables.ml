@@ -18,16 +18,10 @@ let metric_fd_resource_errors = "masc_fd_resource_errors_total"
 let metric_store_bytes = "masc_store_bytes"
 let metric_store_files = "masc_store_files"
 
-(* Event-bus health (#20676): under Drop_oldest the oas_runtime bus sheds
-   events silently; under Block the masc_domain bus accumulates publish
-   wait. Labels: [bus] (masc_domain | oas_runtime), [purpose] (subscriber
-   purpose, "unspecified" when absent). dropped_total sums over the
-   currently-live subscriptions, so it can step down when a subscriber
-   leaves — long-lived keeper bridges make that rare; rate() spikes at
-   churn points are acceptable against having no shed signal at all. *)
+(* Event-bus health: each subscriber owns a non-blocking queue contract.
+   Labels identify the bus, purpose, capacity, and overflow behavior. *)
 let metric_bus_subscriber_dropped = "masc_event_bus_subscriber_dropped_total"
 let metric_bus_subscriber_depth = "masc_event_bus_subscriber_depth"
-let metric_bus_publish_blocked = "masc_event_bus_publish_blocked_seconds_total"
 let metric_bus_subscribers = "masc_event_bus_subscribers"
 
 (* HTTP connection pool: the export hook for Pool_metrics.current_snapshot.
@@ -157,33 +151,45 @@ let fd_samples () =
 
 let bus_samples_of ~bus_label bus =
   let stats = Agent_sdk.Event_bus.stats bus in
-  let by_purpose =
-    (* Aggregate per purpose: several subscriptions can share one. *)
+  let by_contract =
+    (* Aggregate identical contracts so label sets stay unique. *)
     List.fold_left
       (fun acc (s : Agent_sdk.Event_bus.subscription_stats) ->
         let purpose = Option.value s.purpose ~default:"unspecified" in
-        let depth, dropped =
-          match List.assoc_opt purpose acc with
-          | Some (d, dr) -> d + s.depth, dr + s.dropped_total
-          | None -> s.depth, s.dropped_total
+        let overflow =
+          match s.overflow with
+          | Agent_sdk.Event_bus.Drop_oldest -> "drop_oldest"
+          | Agent_sdk.Event_bus.Drop_newest -> "drop_newest"
         in
-        (purpose, (depth, dropped)) :: List.remove_assoc purpose acc)
+        let key = purpose, s.capacity, overflow in
+        let count, depth, dropped =
+          match List.assoc_opt key acc with
+          | Some (n, d, dr) -> n + 1, d + s.depth, dr + s.dropped_total
+          | None -> 1, s.depth, s.dropped_total
+        in
+        (key, (count, depth, dropped)) :: List.remove_assoc key acc)
       []
       stats.subscriptions
   in
   let base = [ "bus", bus_label ] in
   gauge ~labels:base metric_bus_subscribers (Float.of_int stats.subscriber_count)
-  :: counter_labeled
-       ~labels:base
-       metric_bus_publish_blocked
-       stats.total_publish_blocked_seconds
   :: List.concat_map
-       (fun (purpose, (depth, dropped)) ->
-         let labels = ("purpose", purpose) :: base in
-         [ gauge ~labels metric_bus_subscriber_depth (Float.of_int depth)
+       (fun ((purpose, capacity, overflow), (count, depth, dropped)) ->
+         let labels =
+           [ "bus", bus_label
+           ; "purpose", purpose
+           ; "capacity", string_of_int capacity
+           ; "overflow", overflow
+           ]
+         in
+         [ gauge
+             ~labels
+             Otel_metric_store.metric_oas_bus_capacity
+             (Float.of_int (count * capacity))
+         ; gauge ~labels metric_bus_subscriber_depth (Float.of_int depth)
          ; counter_labeled ~labels metric_bus_subscriber_dropped (Float.of_int dropped)
          ])
-       by_purpose
+       by_contract
 ;;
 
 let bus_samples () =

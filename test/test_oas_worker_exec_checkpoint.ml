@@ -16,11 +16,13 @@ let custom_payload_fields expected_topic (event : Agent_sdk.Event_bus.event) =
 
 let test_publish_lifecycle_reaches_masc_bus_with_max_tokens_intent () =
   Eio_main.run @@ fun _env ->
-  let bus =
-    Agent_sdk.Event_bus.create ~policy:Agent_sdk.Event_bus.Drop_oldest ()
-  in
+  let bus = Agent_sdk.Event_bus.create () in
   let subscription =
-    Agent_sdk.Event_bus.subscribe ~purpose:"runtime-lifecycle-test" bus
+    Agent_sdk_metrics_bridge.subscribe
+      ~capacity:256
+      ~overflow:Agent_sdk.Event_bus.Drop_oldest
+      ~purpose:"runtime-lifecycle-test"
+      bus
   in
   Masc_event_bus.set bus;
   Fun.protect

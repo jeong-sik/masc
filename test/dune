@@ -2071,6 +2071,8 @@
 
 (include stanzas/test_timeout_policy_overshoot_counter.inc)
 
+(include stanzas/test_event_bus_subscription_contract.inc)
+
 (include stanzas/test_tool_call_replay_harness.inc)
 
 (include stanzas/test_tool_diversity.inc)

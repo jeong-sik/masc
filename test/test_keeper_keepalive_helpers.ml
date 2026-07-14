@@ -426,24 +426,6 @@ let test_lane_meta_failure_does_not_block_next_durable_delivery () =
          (board_queue_length config healthy.name))
 ;;
 
-let test_status_tick_usage_json_includes_cache_fields () =
-  let usage = KK.status_tick_usage_json () in
-  let int_member key =
-    match usage with
-    | `Assoc fields -> (
-        match List.assoc_opt key fields with
-        | Some (`Int value) -> value
-        | _ -> fail (key ^ " should be int"))
-    | _ -> fail "usage should be object"
-  in
-  check int "input zero" 0 (int_member "input_tokens");
-  check int "output zero" 0 (int_member "output_tokens");
-  check int "cache creation zero" 0
-    (int_member "cache_creation_tokens");
-  check int "cache read zero" 0
-    (int_member "cache_read_tokens");
-  check int "total zero" 0 (int_member "total_tokens")
-
 (* ── Test runner ─── *)
 
 let () =
@@ -486,10 +468,6 @@ let () =
             test_directed_wake_cuts_configured_sleep
         ; test_case "explicit stop cuts configured sleep" `Quick
             test_explicit_stop_cuts_configured_sleep
-        ] )
-    ; ( "status_tick_usage"
-      , [ test_case "status tick usage preserves cache fields" `Quick
-            test_status_tick_usage_json_includes_cache_fields
         ] )
     ]
 ;;

@@ -989,7 +989,6 @@ let run_heartbeat_loop
           ~ctx
           ~meta_current
           ~now_ts
-          ~consecutive_hb_failures:!consecutive_failures
           ~last_snapshot_ts
           ~snapshot_interval_sec:(snapshot_interval_sec ())
           ~timing_ring

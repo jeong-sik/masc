@@ -69,10 +69,12 @@ def read(path: str) -> str:
 # --- Client side -----------------------------------------------------------
 
 def parse_valid_tabs() -> list[str]:
-    """Extract `export const VALID_TABS: TabId[] = [ ... ]` from sse.ts."""
+    """Extract `export const VALID_TABS = [ ... ]` (with or without a
+    `: TabId[]` annotation — #24409 dropped it for an `as const` array)
+    from sse.ts."""
     text = read("dashboard/src/types/sse.ts")
     m = re.search(
-        r"export\s+const\s+VALID_TABS\s*:\s*TabId\[\]\s*=\s*\[([^\]]*)\]",
+        r"export\s+const\s+VALID_TABS\s*(?::\s*TabId\[\]\s*)?=\s*\[([^\]]*)\]",
         text,
     )
     if not m:

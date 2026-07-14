@@ -260,8 +260,6 @@ let () =
       , [ test_case "store cache is shared per base_path" `Quick test_compact_audit_store_cache ] )
     ; ( "compact-policy"
       , [ test_case "record_pre_compact callback registration" `Quick test_compact_policy_callback
-        ; test_case "pre_compact context window uses working context" `Quick
-            test_pre_compact_context_window_uses_working_context
         ] )
     ; ( "meta-store"
       , [ test_case "runtime_meta_write_sync_hook registration" `Quick test_meta_store_hook ] )

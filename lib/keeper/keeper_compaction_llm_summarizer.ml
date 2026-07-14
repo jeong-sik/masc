@@ -161,6 +161,11 @@ let plan_of_json ~message_count json =
   in
   let* () = validate_partition ~message_count ~kept ~summarized ~dropped in
   let* () = validate_non_empty_output ~message_count ~kept ~summarized in
+  let* () =
+    if summarized = [] && dropped = []
+    then Error "plan keeps every message without summarizing or dropping any"
+    else Ok ()
+  in
   Ok { summary; kept; summarized; dropped }
 
 (* Marker prefix so the folded summary is recognizable in the transcript and

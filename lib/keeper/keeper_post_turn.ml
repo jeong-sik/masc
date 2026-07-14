@@ -697,7 +697,7 @@ let recover_latest_checkpoint_for_overflow_retry
       in
       let after_tokens = token_count compacted_ctx in
       let compaction_applied =
-        Keeper_compact_policy.compaction_decision_applied base_decision
+        Keeper_compact_policy.compaction_decision_prepared base_decision
       in
       let meaningful_reduction = after_tokens < before_tokens in
       if not (compaction_applied && meaningful_reduction) then None

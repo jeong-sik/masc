@@ -117,7 +117,7 @@ let compact_for_request_typed
       ~(meta : keeper_meta)
       ~(trigger : Compaction_trigger.t)
       (ctx : working_context)
-  : working_context * Compaction_trigger.t option * compaction_decision
+  : working_context * compaction_decision
   =
   let source_messages = messages_of_context ctx in
   let reject reason detail =
@@ -163,7 +163,7 @@ let compact_for_request_typed
                     ~messages:source_messages))))
   in
   match candidate with
-  | Error reason -> ctx, None, Rejected (trigger, reason)
+  | Error reason -> ctx, Rejected (trigger, reason)
   | Ok candidate ->
     let messages, pair_repair_stats =
       Keeper_context_core.repair_broken_tool_call_pairs_with_stats candidate
@@ -179,7 +179,7 @@ let compact_for_request_typed
       Log.Keeper.warn
         ~keeper_name:meta.name
         "context compaction rejected: plan produced no structural checkpoint change";
-      ctx, None, Rejected (trigger, Structural_noop))
+      ctx, Rejected (trigger, Structural_noop))
     else (
     let tool_use_sample_json =
       List.map
@@ -216,5 +216,5 @@ let compact_for_request_typed
                   ] )
             ])
       (Printf.sprintf "context compaction prepared keeper=%s" meta.name);
-    compacted_ctx, Some trigger, Prepared trigger)
+    compacted_ctx, Prepared trigger)
 ;;

@@ -689,11 +689,16 @@ let recover_latest_checkpoint_for_overflow_retry
         if turn_generation = meta.runtime.generation then meta
         else map_runtime (fun rt -> { rt with generation = turn_generation }) meta
       in
-      let compacted_ctx, trigger, base_decision =
+      let compacted_ctx, base_decision =
         Keeper_compact_policy.compact_for_request_typed
           ~meta:retry_meta
           ~trigger
           ctx
+      in
+      let trigger =
+        match base_decision with
+        | Keeper_compact_policy.Prepared trigger -> Some trigger
+        | _ -> None
       in
       let after_tokens = token_count compacted_ctx in
       let compaction_applied =

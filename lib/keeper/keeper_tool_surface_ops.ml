@@ -429,36 +429,24 @@ let handle_keeper_create_from_persona ctx args : tool_result =
              during the transition"
         else Ok ()
       in
-      let* resolved_args, initial_goal_id =
+      (* Inject first, validate, mint last (adversarial re-review P1-1 of
+         this PR): [resolved_args_with_initial_goal] is a pure, idempotent
+         JSON rewrite, so validation sees the same goal-bearing shape a real
+         create boots with — dry_run already previewed exactly this. Minting
+         before the validate gate left an unlinked Goal on disk for every
+         rejected create, one more per retry. *)
+      let resolved_args =
         match initial_goal_opt with
-        | None -> Ok (resolved_args, None)
+        | None -> resolved_args
         | Some title ->
-            if dry_run then
-              (* dry_run stays effect-free: preview the exact injection
-                 without minting the Goal entity. *)
-              Ok
-                ( Keeper_tool_persona_runtime.resolved_args_with_initial_goal
-                    ~goal_text:title resolved_args,
-                  None )
-            else (
-              match Goal_store.upsert_goal ctx.config ~title () with
-              | Error e -> Error ("initial_goal: goal creation failed: " ^ e)
-              | Ok (g, _created) ->
-                  Ok
-                    ( Keeper_tool_persona_runtime
-                      .resolved_args_with_initial_goal ~goal_text:title
-                        ~goal_id:g.Goal_store.id resolved_args,
-                      Some g.Goal_store.id ))
-      in
-      let initial_goal_field =
-        match initial_goal_id with
-        | Some gid -> [ ("initial_goal_id", `String gid) ]
-        | None -> []
+            Keeper_tool_persona_runtime.resolved_args_with_initial_goal
+              ~goal_text:title resolved_args
       in
       (* Validate on both branches: dry_run reports [ready]/[errors] as a
          preview, and a real create rejects with the same structured payload
-         before any boot side effect — the boot path's own goal gate stays as
-         the last line of defense, this one just fails earlier and typed. *)
+         before any Goal mint or boot side effect — the boot path's own goal
+         gate stays as the last line of defense, this one just fails earlier
+         and typed. *)
       let errors =
         Keeper_tool_persona_runtime.validate_resolved_keeper_create_json
           resolved_args
@@ -487,16 +475,75 @@ let handle_keeper_create_from_persona ctx args : tool_result =
                   ("resolved_args", resolved_args);
                 ]))
       else
+        let* resolved_args, initial_goal_id =
+          match initial_goal_opt with
+          | None -> Ok (resolved_args, None)
+          | Some title -> (
+              match Goal_store.upsert_goal ctx.config ~title () with
+              | Error e -> Error ("initial_goal: goal creation failed: " ^ e)
+              | Ok (g, _created) ->
+                  Ok
+                    ( Keeper_tool_persona_runtime
+                      .resolved_args_with_initial_goal ~goal_text:title
+                        ~goal_id:g.Goal_store.id resolved_args,
+                      Some g.Goal_store.id ))
+        in
+        let initial_goal_field =
+          match initial_goal_id with
+          | Some gid -> [ ("initial_goal_id", `String gid) ]
+          | None -> []
+        in
+        (* Failure between the mint and the point where the booted keeper's
+           persisted meta references the goal would strand the Goal entity —
+           release it. A failed release logs instead of masking the original
+           error (best-effort compensation, not a new failure path). *)
+        let release_minted_goal ~stage =
+          match initial_goal_id with
+          | None -> ()
+          | Some gid -> (
+              match Goal_store.delete_goal ctx.config ~goal_id:gid with
+              | Ok _ -> ()
+              | Error e ->
+                  Log.Keeper.warn
+                    "create_from_persona: %s failed and releasing minted \
+                     goal %s also failed: %s"
+                    stage gid
+                    (Goal_store.delete_goal_error_to_string e))
+        in
         let* _rendered_toml =
           Keeper_tool_persona_runtime.render_keeper_toml_from_resolved_args
             resolved_args
-          |> Result.map_error (fun e -> "" ^ e)
+          |> Result.map_error (fun e ->
+              (* Render happens before any boot side effect, so nothing can
+                 reference the goal yet — release unconditionally. *)
+              release_minted_goal ~stage:"toml render";
+              "" ^ e)
         in
         let result =
           with_keeper_startup_gate (fun () -> execute_keeper_up ctx resolved_args)
         in
-        if not (tool_result_success result) then
-          Ok result
+        if not (tool_result_success result) then (
+          (match initial_goal_id with
+           | None -> ()
+           | Some gid ->
+               (* A failed boot may still have persisted keeper meta whose
+                  [active_goal_ids] references the goal; deleting it then
+                  would dangle that reference. Release only when no meta
+                  persisted. Residual: a pre-existing meta under the same
+                  name (duplicate-name create) keeps the fresh goal alive —
+                  the WARN below carries the goal id for manual cleanup. *)
+               let keeper_name = get_string resolved_args "name" "" in
+               let meta_persisted =
+                 List.mem keeper_name
+                   (Keeper_meta_store.persisted_keeper_names ctx.config)
+               in
+               if meta_persisted then
+                 Log.Keeper.warn
+                   "create_from_persona: boot failed after goal mint; \
+                    keeping goal %s because keeper %s meta persists"
+                   gid keeper_name
+               else release_minted_goal ~stage:"boot");
+          Ok result)
         else
           let* durable_config =
             Keeper_tool_persona_runtime.persist_keeper_toml_from_resolved_args

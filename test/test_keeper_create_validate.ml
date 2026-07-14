@@ -97,6 +97,33 @@ let test_initial_goal_injection () =
         (string_list_field fields "active_goal_ids")
   | _ -> Alcotest.fail "injection must return an object"
 
+let test_pre_mint_shape_passes_gate () =
+  (* Orphan-Goal guard companion (PR #24364 re-review P1-1): the handler now
+     validates the goal_text-only injection BEFORE minting the Goal entity,
+     so the gate must accept that exact pre-mint shape — no goal id, no
+     active_goal_ids. If the gate ever starts requiring a minted id, the
+     validate-before-mint ordering breaks and this pins the regression. *)
+  let base =
+    `Assoc
+      [
+        ("name", `String "valid-name");
+        ("goal", `String "");
+        ("mention_targets", `List [ `String "valid-name" ]);
+      ]
+  in
+  let pre_mint =
+    Keeper_tool_persona_runtime.resolved_args_with_initial_goal
+      ~goal_text:"첫 목표" base
+  in
+  Alcotest.(check (list string))
+    "goal_text-only injection passes the gate" [] (validate pre_mint);
+  match pre_mint with
+  | `Assoc fields ->
+      Alcotest.(check (list string))
+        "no goal id linked before the mint" []
+        (string_list_field fields "active_goal_ids")
+  | _ -> Alcotest.fail "injection must return an object"
+
 let () =
   Alcotest.run "keeper_create_validate"
     [
@@ -114,5 +141,7 @@ let () =
           Alcotest.test_case
             "injection fills goal, links id with dedup, passes gate" `Quick
             test_initial_goal_injection;
+          Alcotest.test_case "pre-mint shape (goal_text only) passes gate"
+            `Quick test_pre_mint_shape_passes_gate;
         ] );
     ]

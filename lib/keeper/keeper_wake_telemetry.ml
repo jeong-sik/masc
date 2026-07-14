@@ -74,15 +74,16 @@ let role_counts_with_pending_user
     (history_messages : Agent_sdk.Types.message list) :
     (string * int) list =
   let tbl = Hashtbl.create 5 in
+  let increment_role key =
+    match Hashtbl.find_opt tbl key with
+    | None -> Hashtbl.add tbl key 1
+    | Some count -> Hashtbl.replace tbl key (count + 1)
+  in
   List.iter
     (fun (m : Agent_sdk.Types.message) ->
-      let key = role_key m.role in
-      let cur = Hashtbl.find_opt tbl key |> Option.value ~default:0 in
-      Hashtbl.replace tbl key (cur + 1))
+      increment_role (role_key m.role))
     history_messages;
-  let user_key = role_key Agent_sdk.Types.User in
-  let cur = Hashtbl.find_opt tbl user_key |> Option.value ~default:0 in
-  Hashtbl.replace tbl user_key (cur + 1);
+  increment_role (role_key Agent_sdk.Types.User);
   Hashtbl.fold (fun k v acc -> (k, v) :: acc) tbl []
   |> List.sort (fun (a, _) (b, _) -> String.compare a b)
 

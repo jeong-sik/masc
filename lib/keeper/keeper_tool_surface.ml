@@ -463,7 +463,11 @@ let keeper_compact_body ~(config : Workspace.config) args : tool_result =
           Keeper_state_machine.Compaction_started;
         match
           Keeper_context_runtime.recover_latest_checkpoint_for_overflow_retry
-            ~base_dir ~meta ~model:checkpoint_label ~primary_model_max_tokens:max_tokens
+            ~base_dir
+            ~meta
+            ~model:checkpoint_label
+            ~trigger:Compaction_trigger.Manual
+            ~primary_model_max_tokens:max_tokens
         with
         | Some recovery ->
           Keeper_context_runtime.dispatch_compaction_completed

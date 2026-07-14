@@ -115,6 +115,24 @@ let test_runtime_provider_path_has_no_cumulative_run_timeout () =
     false
     (contains_substring source "Eio.Time.with_timeout_exn clock t run_fn")
 
+let test_extra_system_context_preserves_typed_blocks () =
+  let blocks =
+    [ Prompt_block_id.Dynamic_context, "dynamic"
+    ; Prompt_block_id.Retry_nudge, "retry"
+    ; Prompt_block_id.Connected_surface, "surface"
+    ]
+  in
+  let assembly =
+    Keeper_run_prompt.assemble_extra_system_context
+      ~existing_extra_system_context:(Some "existing")
+      ~blocks
+  in
+  Alcotest.(check bool) "typed blocks unchanged" true (assembly.blocks = blocks);
+  Alcotest.(check (option string))
+    "complete source order reaches OAS"
+    (Some "existing\n\ndynamic\n\nretry\n\nsurface")
+    assembly.extra_system_context
+
 let test_context_injection_hook_records_post_tool_ledger () =
   let agent_run_source = read_file "lib/keeper/keeper_agent_run.ml" in
   Alcotest.(check bool)
@@ -179,6 +197,8 @@ let () =
           test_keeper_oas_path_has_no_bridge_total_timeout;
         Alcotest.test_case "runtime provider path has no cumulative timeout" `Quick
           test_runtime_provider_path_has_no_cumulative_run_timeout;
+        Alcotest.test_case "extra system context preserves typed blocks" `Quick
+          test_extra_system_context_preserves_typed_blocks;
         Alcotest.test_case "context injection hook records post-tool ledger" `Quick
           test_context_injection_hook_records_post_tool_ledger;
       ] );

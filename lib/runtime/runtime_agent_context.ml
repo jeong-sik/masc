@@ -5,16 +5,6 @@
     [Runtime_agent] remains the public facade for [build_safe] and
     [Agent.resume] calls. *)
 
-(* [0] is the pinned SDK's documented unbounded sentinel (agent_sdk
-   lib/base/types.mli: "[0] = no turn-count limit; positive values enforce
-   a finite limit") and is what [Agent_sdk.Types.has_finite_max_turns]
-   tests against. The SDK exports the predicate but no named constant
-   (a name only exists in the unmerged oas#2589), so masc owns the name
-   here. If an oas release ships a named sentinel, replace this value
-   with that re-export (masc#24391 layer 2). *)
-let unbounded_max_turns = 0
-let default_max_turns = unbounded_max_turns
-
 type stop_reason =
   | Completed
   | TurnLimitObserved of
@@ -59,19 +49,7 @@ type config =
   ; model_id : string
   ; system_prompt : string
   ; tools : Agent_sdk.Tool.t list
-  ; max_turns : int
-  ; max_idle_turns : int
   ; stream_idle_timeout_s : float option
-  ; max_execution_time_s : float option
-    (** Wall-clock ceiling for one [Agent_sdk.Agent.run] / [run_stream]
-          call. When [Some s] AND a clock is available at the call site,
-          agent_sdk's [with_optional_timeout] returns
-          [Error (Api (Retry.Timeout {...}))] after [s] seconds — the
-          runtime FSM already maps [Retry.Timeout] to a fallback signal,
-          so this is the canonical knob to bound a hung [run_stream]
-          when a provider closes the connection without [end_turn].
-          Default [None] preserves the historical behaviour
-          (block indefinitely on stream-parser hang). *)
   ; body_timeout_s : float option
     (** Total HTTP body-consumption ceiling for non-streaming OAS completion
         paths. Streaming paths deliberately ignore this knob so active long
@@ -100,7 +78,6 @@ type config =
   ; enable_thinking : bool option
   ; preserve_thinking : bool option
   ; transport : Masc_grpc_transport.t
-  ; allowed_paths : string list
   ; checkpoint_sidecar : Yojson.Safe.t option
   ; cache_system_prompt : bool
   ; yield_on_tool : bool
@@ -144,10 +121,7 @@ let default_config
   ; model_id = provider_cfg.model_id
   ; system_prompt
   ; tools
-  ; max_turns = default_max_turns
-  ; max_idle_turns = 3
   ; stream_idle_timeout_s = None
-  ; max_execution_time_s = None
   ; body_timeout_s = None
   ; max_tokens = None
   ; temperature = provider_cfg.temperature
@@ -162,7 +136,6 @@ let default_config
   ; enable_thinking = None
   ; preserve_thinking = None
   ; transport = Masc_grpc_transport.from_env ()
-  ; allowed_paths = []
   ; checkpoint_sidecar = None
   ; cache_system_prompt = false
   ; yield_on_tool = false
@@ -194,8 +167,6 @@ let builder
     |> Agent_sdk.Builder.with_provider_config config.provider_cfg
     |> Agent_sdk.Builder.with_name config.name
     |> Agent_sdk.Builder.with_system_prompt config.system_prompt
-    |> Agent_sdk.Builder.with_max_turns config.max_turns
-    |> Agent_sdk.Builder.with_max_idle_turns config.max_idle_turns
     |> Agent_sdk.Builder.with_tools config.tools
   in
   let builder =
@@ -214,11 +185,6 @@ let builder
   let builder =
     match config.stream_idle_timeout_s with
     | Some timeout_s -> Agent_sdk.Builder.with_stream_idle_timeout timeout_s builder
-    | None -> builder
-  in
-  let builder =
-    match config.max_execution_time_s with
-    | Some s -> Agent_sdk.Builder.with_max_execution_time s builder
     | None -> builder
   in
   let builder =
@@ -259,11 +225,6 @@ let builder
   let builder =
     if config.yield_on_tool
     then Agent_sdk.Builder.with_yield_on_tool true builder
-    else builder
-  in
-  let builder =
-    if config.allowed_paths <> []
-    then Agent_sdk.Builder.with_allowed_paths config.allowed_paths builder
     else builder
   in
   let builder =
@@ -339,11 +300,6 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
   : prepared_resume
   =
 
-  let max_turns_for_resume =
-    if Agent_sdk.Types.has_finite_max_turns config.max_turns
-    then checkpoint.turn_count + config.max_turns
-    else unbounded_max_turns
-  in
   let patched_checkpoint =
     { checkpoint with
       Agent_sdk.Checkpoint.model = config.model_id
@@ -365,7 +321,6 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
     ; model = config.model_id
     ; system_prompt = Some config.system_prompt
     ; max_tokens = config.max_tokens
-    ; max_turns = max_turns_for_resume
     ; temperature = config.temperature
     ; top_p = config.top_p
     ; top_k = config.top_k
@@ -381,14 +336,11 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
   let options : Agent_sdk.Agent.options =
     { Agent_sdk.Agent.default_options with
       hooks = Option.value ~default:Agent_sdk.Hooks.empty config.hooks
-    ; max_idle_turns = config.max_idle_turns
     ; stream_idle_timeout_s = config.stream_idle_timeout_s
-    ; max_execution_time_s = config.max_execution_time_s
     ; body_timeout_s = config.body_timeout_s
     ; context_injector = config.context_injector
     ; event_bus = config.event_bus
     ; raw_trace = config.raw_trace
-    ; allowed_paths = config.allowed_paths
     ; description = config.description
     ; on_run_complete = config.on_run_complete
     }

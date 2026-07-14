@@ -2231,7 +2231,6 @@ let test_runtime_run_blocks_appends_multimodal_input_to_oas_agent () =
   in
   let config =
     { config with
-      max_turns = 1;
       session_id = Some "multimodal-runtime-proof-session";
       exit_condition = Some (fun _turn -> true);
       exit_condition_result =

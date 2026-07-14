@@ -575,14 +575,11 @@ let run_turn
     let keeper_visible_sandbox_root =
       Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta
     in
-    let effective_allowed_paths = Keeper_alerting_path.effective_allowed_paths ~meta in
-    (match
-       Keeper_alerting_path.absolute_allowed_paths_result
-         ~config
-         ~allowed_paths:effective_allowed_paths
-     with
-     | Error e -> Error (Agent_sdk.Error.Internal e)
-     | Ok oas_allowed_paths ->
+    (* Tool/path confinement stays owned by MASC dispatch. Each filesystem and
+       shell operation resolves its concrete target through
+       [Keeper_alerting_path] and [Keeper_sandbox_containment]; OAS receives no
+       ambient path capability. *)
+    (
        (* OAS [stream_idle_timeout_s] bounds inter-line idle on HTTP streams
           only when the operator explicitly configures it. The deadline resets
           after each successful line, so this is gap detection, not a total run
@@ -709,12 +706,6 @@ let run_turn
                            ~site:"runtime_runtime"
                            config
                            manifest)
-                      (* No code-level tool-retry or idle-turn limit. Retrying
-                         a malformed tool call (e.g. missing required arg) is
-                         the keeper's own competence: OAS delivers the typed
-                         validation error back to the model and the agent loop
-                         decides whether to continue. *)
-                    ~max_idle_turns:0
                     ?stream_idle_timeout_s
                     ?body_timeout_s:
                       (Keeper_runtime_resolved.body_timeout_override_sec ())
@@ -725,7 +716,6 @@ let run_turn
                     ?on_yield
                     ?on_resume
                     ~agent_ref
-                    ~allowed_paths:oas_allowed_paths
                     ~cache_system_prompt:true
                     ~yield_on_tool
                     ~context_injector

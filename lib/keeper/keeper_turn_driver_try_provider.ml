@@ -31,7 +31,6 @@ type try_provider_ctx =
   ; initial_messages : Agent_sdk.Types.message list
   ; model_input_projection :
       (Agent_sdk.Types.message list -> Agent_sdk.Types.message list) option
-  ; max_idle_turns : int
   ; stream_idle_timeout_s : float option
   ; body_timeout_s : float option
   ; temperature : float option
@@ -42,8 +41,7 @@ type try_provider_ctx =
   ; (* Transport *)
     transport_resolved : Masc_grpc_transport.t
   ; (* Session / checkpoint *)
-    allowed_paths : string list
-  ; checkpoint_sidecar : Yojson.Safe.t option
+    checkpoint_sidecar : Yojson.Safe.t option
   ; cache_system_prompt : bool
   ; yield_on_tool : bool
   ; checkpoint_sink : Agent_sdk.Agent.checkpoint_sink option
@@ -234,12 +232,10 @@ let run_try_provider
         stream_idle_timeout_s = ctx.stream_idle_timeout_s
           ; body_timeout_s = ctx.body_timeout_s
           ; temperature
-          ; max_idle_turns = ctx.max_idle_turns
           ; hooks = ctx.hooks
           ; description =
               Some (Printf.sprintf "runtime:%s/runtime" ctx.runtime_id)
           ; transport = ctx.transport_resolved
-          ; allowed_paths = ctx.allowed_paths
           ; checkpoint_sidecar = ctx.checkpoint_sidecar
           ; session_id = ctx.session_id
           ; cache_system_prompt = ctx.cache_system_prompt

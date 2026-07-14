@@ -9,13 +9,10 @@
 (** runtime_id("provider.model")로 OAS 에이전트를 빌드한다.
 
     [tools]를 주면 패널/심판이 tool call을 할 수 있다.
-    [max_tool_calls] > 0이면 에이전트의 [max_turns]를 해당 횟수+1로 제한해
-    OpenRouter Fusion의 per-panel tool budget을 근사한다.
     [max_tokens]는 지정된 패널/심판 호출의 출력 토큰 예산이다. 생략하면
     Runtime_agent 기본값을 보존한다.
     [timeout_s]는 OAS transport idle/body budget에만 매핑한다. Fusion의 구조적
-    wall-clock budget은 호출자가 [Masc_oas_bridge.run_safe]로 소유하며, OAS
-    [max_execution_time_s]에는 매핑하지 않는다.
+    wall-clock budget은 호출자가 [Masc_oas_bridge.run_safe]로 소유한다.
     [name]은 에이전트 카드명 — [Async_agent.all]이 결과 키로 반환하는 패널 정체성이다
     (RFC-0278: 같은 model을 다른 라벨로 구분). 미지정이면 카드명=[model]. provider
     라우팅은 카드명과 무관하게 [model]로 한다.

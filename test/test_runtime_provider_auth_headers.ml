@@ -1104,106 +1104,6 @@ let test_runtime_agent_terminal_error_observation_marks_failed_attempt () =
        (Keeper_agent_error.runtime_outcome_of_observation
           (Some observation)))
 
-let test_runtime_agent_execution_limits_are_observations () =
-  let lifecycle =
-    Runtime_agent.worker_lifecycle_classification_of_result
-      (Error
-         (Agent_sdk.Error.Agent
-            (Agent_sdk.Error.MaxTurnsExceeded { turns = 24; limit = 24 })))
-  in
-  check string "event" "completed" lifecycle.event;
-  check string "status" "turn_limit_observed" lifecycle.status;
-  check (option string) "no error" None lifecycle.error;
-  let execution_timeout =
-    Runtime_agent.worker_lifecycle_classification_of_result
-      (Error
-         (Agent_sdk.Error.Agent
-            (Agent_sdk.Error.AgentExecutionTimeout
-               { elapsed_sec = 300.0
-               ; timeout_sec = 300.0
-               ; turn_count = 4
-               ; max_turns = Runtime_agent_context.unbounded_max_turns
-               })))
-  in
-  check string "execution timeout event" "completed" execution_timeout.event;
-  check string
-    "execution timeout status"
-    "agent_execution_timeout_observed"
-    execution_timeout.status;
-  check (option string) "execution timeout has no error" None execution_timeout.error;
-  let idle_timeout =
-    Runtime_agent.worker_lifecycle_classification_of_result
-      (Error
-         (Agent_sdk.Error.Agent
-            (Agent_sdk.Error.AgentExecutionIdleTimeout
-               { idle_sec = 120.0
-               ; idle_timeout_sec = 120.0
-               ; turn_count = 4
-               ; max_turns = Runtime_agent_context.unbounded_max_turns
-               })))
-  in
-  check string "idle timeout event" "completed" idle_timeout.event;
-  check string
-    "idle timeout status"
-    "agent_idle_timeout_observed"
-    idle_timeout.status;
-  check (option string) "idle timeout has no error" None idle_timeout.error
-
-let test_runtime_agent_context_uses_configured_turn_limit () =
-  let config =
-    Runtime_agent.default_config
-      ~name:"oas-runpod_mtp.qwen"
-      ~provider_cfg:(provider_cfg ())
-      ~system_prompt:""
-      ~tools:[]
-  in
-  let config = { config with max_turns = 7 } in
-  Eio_main.run (fun env ->
-    Eio.Switch.run (fun sw ->
-      let builder =
-        Runtime_agent_context.builder
-          ~net:(Eio.Stdenv.net env)
-          ~config
-          ()
-      in
-      match Agent_sdk.Builder.build_safe builder with
-      | Error err -> fail (Agent_sdk.Error.to_string err)
-      | Ok agent ->
-        check int "builder max_turns" 7
-          (Agent_sdk.Agent.state agent).config.max_turns;
-        Eio.Switch.on_release sw (fun () ->
-          Agent_sdk.Agent.close agent)));
-  let checkpoint =
-    { Agent_sdk.Checkpoint.version = Agent_sdk.Checkpoint.checkpoint_version
-    ; session_id = "session"
-    ; agent_name = "oas-runpod_mtp.qwen"
-    ; model = "qwen"
-    ; system_prompt = Some ""
-    ; messages = []
-    ; usage = Agent_sdk.Types.empty_usage
-    ; turn_count = 24
-    ; created_at = 0.0
-    ; tools = []
-    ; tool_choice = None
-    ; disable_parallel_tool_use = false
-    ; temperature = Some 0.3
-    ; top_p = None
-    ; top_k = None
-    ; min_p = None
-    ; enable_thinking = None
-    ; preserve_thinking = None
-    ; response_format = Agent_sdk.Types.default_config.response_format
-    ; thinking_budget = None
-    ; cache_system_prompt = false
-    ; context = Agent_sdk.Context.create_sync ()
-    ; mcp_sessions = []
-    ; working_context = None
-    }
-  in
-  let prepared = Runtime_agent_context.prepare_resume ~config ~checkpoint in
-  check int "resume adds fresh generic per-call turn allowance" 31
-    prepared.agent_config.max_turns
-
 let test_runtime_agent_context_preserves_max_tokens_intent () =
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
@@ -1339,46 +1239,6 @@ let test_runtime_agent_context_preserves_provider_sampling_config () =
     prepared.agent_config.top_k;
   check (option (float 0.0001)) "resume agent min_p" (Some 0.07)
     prepared.agent_config.min_p
-
-let test_runtime_agent_context_preserves_unbounded_resume_budget () =
-  let config =
-    Runtime_agent.default_config
-      ~name:"oas-runpod_mtp.qwen"
-      ~provider_cfg:(provider_cfg ())
-      ~system_prompt:""
-      ~tools:[]
-  in
-  let config = { config with max_turns = Runtime_agent_context.unbounded_max_turns } in
-  let checkpoint =
-    { Agent_sdk.Checkpoint.version = Agent_sdk.Checkpoint.checkpoint_version
-    ; session_id = "session"
-    ; agent_name = "oas-runpod_mtp.qwen"
-    ; model = "qwen"
-    ; system_prompt = Some ""
-    ; messages = []
-    ; usage = Agent_sdk.Types.empty_usage
-    ; turn_count = 24
-    ; created_at = 0.0
-    ; tools = []
-    ; tool_choice = None
-    ; disable_parallel_tool_use = false
-    ; temperature = Some 0.3
-    ; top_p = None
-    ; top_k = None
-    ; min_p = None
-    ; enable_thinking = None
-    ; preserve_thinking = None
-    ; response_format = Agent_sdk.Types.default_config.response_format
-    ; thinking_budget = None
-    ; cache_system_prompt = false
-    ; context = Agent_sdk.Context.create_sync ()
-    ; mcp_sessions = []
-    ; working_context = None
-    }
-  in
-  let prepared = Runtime_agent_context.prepare_resume ~config ~checkpoint in
-  check int "resume preserves unbounded turn allowance" 0
-    prepared.agent_config.max_turns
 
 let test_runtime_agent_context_resume_patches_stale_response_format_to_base_contract () =
   let resume_schema : Yojson.Safe.t =
@@ -1657,14 +1517,6 @@ let () =
             `Quick
             test_runtime_agent_terminal_error_observation_marks_failed_attempt
         ; test_case
-            "execution limits are lifecycle observations"
-            `Quick
-            test_runtime_agent_execution_limits_are_observations
-        ; test_case
-            "runtime agent context uses configured turn limit"
-            `Quick
-            test_runtime_agent_context_uses_configured_turn_limit
-        ; test_case
             "runtime agent context preserves max_tokens intent"
             `Quick
             test_runtime_agent_context_preserves_max_tokens_intent
@@ -1676,10 +1528,6 @@ let () =
             "runtime agent context preserves provider sampling config"
             `Quick
             test_runtime_agent_context_preserves_provider_sampling_config
-        ; test_case
-            "runtime agent context preserves unbounded resume budget"
-            `Quick
-            test_runtime_agent_context_preserves_unbounded_resume_budget
         ; test_case
             "runtime agent context resume patches stale response_format to base contract"
             `Quick

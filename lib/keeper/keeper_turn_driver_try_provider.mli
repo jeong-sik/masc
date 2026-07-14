@@ -14,7 +14,6 @@ type try_provider_ctx =
   ; initial_messages : Agent_sdk.Types.message list
   ; model_input_projection :
       (Agent_sdk.Types.message list -> Agent_sdk.Types.message list) option
-  ; max_idle_turns : int
   ; stream_idle_timeout_s : float option
   ; body_timeout_s : float option
   ; temperature : float option
@@ -23,7 +22,6 @@ type try_provider_ctx =
   ; raw_trace : Agent_sdk.Raw_trace.t option
   ; trace_link : (string * string) option
   ; transport_resolved : Masc_grpc_transport.t
-  ; allowed_paths : string list
   ; checkpoint_sidecar : Yojson.Safe.t option
   ; cache_system_prompt : bool
   ; yield_on_tool : bool

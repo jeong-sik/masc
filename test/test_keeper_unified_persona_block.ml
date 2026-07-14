@@ -139,6 +139,33 @@ let test_no_persona_file_means_no_block () =
   check bool "no persona block without persona text" false
     (contains ~affix:"<persona>" system_prompt)
 
+(* Pins the identity → persona → shared-body ordering the template
+   promises, so a template refactor cannot silently reorder the block. *)
+let test_persona_sits_between_identity_and_shared_body () =
+  with_config_dir @@ fun ~config_dir ->
+  let persona_dir = Filename.concat config_dir "personas/test-keeper" in
+  mkdir_p persona_dir;
+  write_file (Filename.concat persona_dir "AGENT.md") "차분하고 꼼꼼함.";
+  let system_prompt, _user =
+    Masc.Keeper_unified_prompt.build_prompt ~meta:(make_meta "test-keeper")
+      ~base_path:"/tmp" ~observation:base_observation ()
+  in
+  let index_of ~affix =
+    let n = String.length affix and m = String.length system_prompt in
+    let rec go i =
+      if i + n > m then
+        failwith (Printf.sprintf "affix %S not found in system prompt" affix)
+      else if String.sub system_prompt i n = affix then i
+      else go (i + 1)
+    in
+    go 0
+  in
+  let identity = index_of ~affix:"You are test-keeper" in
+  let persona = index_of ~affix:"<persona>" in
+  let shared_body = index_of ~affix:"Primary goal" in
+  check bool "identity precedes persona" true (identity < persona);
+  check bool "persona precedes the shared body" true (persona < shared_body)
+
 let () =
   Alcotest.run "keeper_unified_persona_block"
     [
@@ -148,5 +175,7 @@ let () =
             test_persona_reaches_unified_system_prompt;
           test_case "no persona file leaves no empty block" `Quick
             test_no_persona_file_means_no_block;
+          test_case "persona sits between identity and shared body" `Quick
+            test_persona_sits_between_identity_and_shared_body;
         ] );
     ]

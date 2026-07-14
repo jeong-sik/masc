@@ -535,11 +535,20 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
       | None -> meta.name
     in
     let persona_extended =
-      Keeper_types_profile.load_persona_extended persona_name
-      |> Option.value ~default:""
+      (* DET-OK: an absent persona file is a valid state — the block is
+         omitted below. Read failures already WARN and count
+         ProfileLoadFailures inside [load_persona_extended]; this is a
+         total default between two known outcomes, not an unknown-input
+         guess. *)
+      match Keeper_types_profile.load_persona_extended persona_name with
+      | Some text -> text
+      | None -> ""
     in
-    let s = String_util.escape_xml (String.trim persona_extended) in
-    if s = "" then "" else Printf.sprintf "\n<persona>\n%s\n</persona>\n" s
+    (* Inner bytes are the shared SSOT ([Keeper_persona_block.render]); the
+       surrounding newlines are unified-lane layout. *)
+    match Keeper_persona_block.render ~persona_extended with
+    | None -> ""
+    | Some block -> "\n" ^ block ^ "\n"
   in
   let goal_lines =
     let has_valid_primary_goal =

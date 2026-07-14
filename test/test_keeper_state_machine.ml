@@ -2025,10 +2025,7 @@ let test_setclear_coverage () =
     ; "Credential_archived", SM.Credential_archived
     ; ( "Context_overflow_detected"
       , SM.Context_overflow_detected
-          { source = `Prompt_rejected
-          ; token_count = 205_000
-          ; limit_tokens = Some 200_000
-          } )
+          { limit_tokens = Some 200_000 } )
     ; "Auto_compact_triggered", SM.Auto_compact_triggered
     ; "Operator_compact_requested", SM.Operator_compact_requested
     ; ( "Operator_clear_requested"

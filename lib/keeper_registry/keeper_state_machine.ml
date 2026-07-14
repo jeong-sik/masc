@@ -287,12 +287,9 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
         "overflowed"
         (match event with
          | Context_overflow_detected r ->
-           let lim =
-             match r.limit_tokens with
-             | Some n -> Printf.sprintf ",limit=%d" n
-             | None -> ""
-           in
-           Printf.sprintf "tokens=%d%s" r.token_count lim
+           (match r.limit_tokens with
+            | Some n -> Printf.sprintf "limit=%d" n
+            | None -> "limit=unknown")
          | Heartbeat_ok
          | Heartbeat_failed _
          | Turn_succeeded

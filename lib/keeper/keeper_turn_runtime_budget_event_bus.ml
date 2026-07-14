@@ -1,28 +1,8 @@
-(** Turn event-bus summary record + helpers.
+(** Turn event-bus observation summary.
 
-    Captures the within-turn observations emitted by
-    [Agent_sdk.Event_bus] — correlation/run identifiers, observed
-    overflow-imminent events, and context-compaction counters —
-    rolled up into a single [turn_event_bus_summary] record that the
-    keeper's post-turn handler attaches to the receipt.
-
-    Pure data + a left-biased merge (left wins on the
-    string-id and overflow_imminent slots; right wins on
-    last_compaction; counters sum). Verbatim extract from
-    [Keeper_turn_runtime_budget]; the parent retains transparent
-    record aliases + 2 value aliases. *)
-
-type turn_event_bus_overflow = {
-  estimated_tokens : int;
-  limit_tokens : int;
-}
-
-type turn_event_bus_compaction = {
-  before_tokens : int;
-  after_tokens : int;
-  tokens_freed : int;
-  phase_hint : string;
-}
+    OAS lifecycle events supply correlation metadata only. MASC-owned
+    compaction state must come from the lane's durable completion path,
+    never from this lossy observation bus. *)
 
 type turn_event_bus_summary = {
   correlation_id : string option;
@@ -30,10 +10,6 @@ type turn_event_bus_summary = {
   caused_by : string option;
   event_count : int;
   payload_kinds : string list;
-  overflow_imminent : turn_event_bus_overflow option;
-  context_compact_started_count : int;
-  context_compacted_count : int;
-  last_compaction : turn_event_bus_compaction option;
 }
 
 let empty_turn_event_bus_summary =
@@ -43,10 +19,6 @@ let empty_turn_event_bus_summary =
     caused_by = None;
     event_count = 0;
     payload_kinds = [];
-    overflow_imminent = None;
-    context_compact_started_count = 0;
-    context_compacted_count = 0;
-    last_compaction = None;
   }
 
 let add_payload_kind kinds kind =
@@ -73,16 +45,4 @@ let merge_turn_event_bus_summary
        | None -> right.caused_by);
     event_count = left.event_count + right.event_count;
     payload_kinds = merge_payload_kinds left.payload_kinds right.payload_kinds;
-    overflow_imminent =
-      (match right.overflow_imminent with
-       | Some _ -> right.overflow_imminent
-       | None -> left.overflow_imminent);
-    context_compact_started_count =
-      left.context_compact_started_count + right.context_compact_started_count;
-    context_compacted_count =
-      left.context_compacted_count + right.context_compacted_count;
-    last_compaction =
-      (match right.last_compaction with
-       | Some _ -> right.last_compaction
-       | None -> left.last_compaction);
   }

@@ -63,10 +63,7 @@ type event =
     }
   | Supervisor_restart_attempt of { attempt : int; }
   | Credential_archived
-  | Context_overflow_detected of {
-      source : [ `Oas_signal | `Prompt_rejected ]; token_count : int;
-      limit_tokens : int option;
-    }
+  | Context_overflow_detected of { limit_tokens : int option; }
   | Auto_compact_triggered
   | Operator_compact_requested
   | Operator_clear_requested of { preserve_system : bool; reason : string; }

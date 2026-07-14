@@ -27,7 +27,6 @@ type try_provider_ctx =
   ; checkpoint_sidecar : Yojson.Safe.t option
   ; cache_system_prompt : bool
   ; yield_on_tool : bool
-  ; tool_failure_judge : Agent_sdk.Tool_failure_recovery.judge option
   ; checkpoint_sink : Agent_sdk.Agent.checkpoint_sink option
   ; checkpoint_stage_observed : bool Atomic.t
   ; context_injector : Agent_sdk.Hooks.context_injector option

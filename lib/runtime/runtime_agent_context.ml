@@ -114,7 +114,6 @@ type config =
   ; checkpoint_sidecar : Yojson.Safe.t option
   ; cache_system_prompt : bool
   ; yield_on_tool : bool
-  ; tool_failure_judge : Agent_sdk.Tool_failure_recovery.judge option
   ; context_injector : Agent_sdk.Hooks.context_injector option
   ; context : Agent_sdk.Context.t option
   ; approval : Agent_sdk.Hooks.approval_callback option
@@ -178,7 +177,6 @@ let default_config
   ; checkpoint_sidecar = None
   ; cache_system_prompt = false
   ; yield_on_tool = false
-  ; tool_failure_judge = None
   ; context_injector = None
   ; context = None
   ; approval = None
@@ -276,11 +274,6 @@ let builder_without_approval
     if config.yield_on_tool
     then Agent_sdk.Builder.with_yield_on_tool true builder
     else builder
-  in
-  let builder =
-    match config.tool_failure_judge with
-    | Some judge -> Agent_sdk.Builder.with_tool_failure_judge judge builder
-    | None -> builder
   in
   let builder =
     if config.allowed_paths <> []

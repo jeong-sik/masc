@@ -92,7 +92,6 @@ val run_named :
   ?checkpoint_sidecar:Yojson.Safe.t ->
   ?cache_system_prompt:bool ->
   ?yield_on_tool:bool ->
-  ?tool_failure_judge:Agent_sdk.Tool_failure_recovery.judge ->
   ?checkpoint_sink:Agent_sdk.Agent.checkpoint_sink ->
   ?context_injector:Agent_sdk.Hooks.context_injector ->
   ?context:Agent_sdk.Context.t ->

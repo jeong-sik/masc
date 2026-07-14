@@ -570,11 +570,6 @@ let run_turn
         ~downstream:on_event
         ~turn_id:manifest_keeper_turn_id
     in
-    let tool_failure_judge =
-      Keeper_tool_failure_recovery_judge.create
-        ~base_path:config.base_path
-        ~keeper_name:meta.name
-    in
     ignore (Keeper_alerting_path.ensure_sandbox_bundle ~config ~meta);
     let _keeper_sandbox_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
     let keeper_visible_sandbox_root =
@@ -733,7 +728,6 @@ let run_turn
                     ~allowed_paths:oas_allowed_paths
                     ~cache_system_prompt:true
                     ~yield_on_tool
-                    ~tool_failure_judge
                     ~context_injector
                     ~context:shared_context
                     ~enable_thinking:(Keeper_config.keeper_enable_thinking ())

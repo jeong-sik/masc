@@ -91,7 +91,6 @@ type config =
   Runtime_agent_context.config = {
   name : string;
   provider_cfg : Llm_provider.Provider_config.t;
-  provider : Agent_sdk.Provider.config;
   model_id : string;
   system_prompt : string;
   tools : Agent_sdk.Tool.t list;
@@ -211,61 +210,6 @@ let provider_supports_inline_tools =
 let provider_label =
   Runtime_transport.provider_label
 
-let request_runtime_fields_on_base_config
-    ~(base : Llm_provider.Provider_config.t)
-    (req_config : Llm_provider.Provider_config.t)
-  =
-  let request_option_or_base req base =
-    match req with
-    | Some _ as value -> value
-    | None -> base
-  in
-  let response_format, output_schema =
-    match req_config.response_format, req_config.output_schema with
-    | Agent_sdk.Types.Off, None -> base.response_format, base.output_schema
-    | _, Some schema ->
-      let response_format = Agent_sdk.Types.JsonSchema schema in
-      ( response_format
-      , Llm_provider.Provider_config.output_schema_of_response_format response_format )
-    | Agent_sdk.Types.JsonMode, None -> Agent_sdk.Types.JsonMode, None
-    | Agent_sdk.Types.JsonSchema schema, None ->
-      let response_format = Agent_sdk.Types.JsonSchema schema in
-      ( response_format
-      , Llm_provider.Provider_config.output_schema_of_response_format response_format )
-  in
-  { base with
-    max_tokens = req_config.max_tokens;
-    temperature = req_config.temperature;
-    top_p = request_option_or_base req_config.top_p base.top_p;
-    top_k = request_option_or_base req_config.top_k base.top_k;
-    min_p = request_option_or_base req_config.min_p base.min_p;
-    system_prompt = req_config.system_prompt;
-    enable_thinking = req_config.enable_thinking;
-    preserve_thinking = req_config.preserve_thinking;
-    thinking_budget = req_config.thinking_budget;
-    clear_thinking = req_config.clear_thinking;
-    tool_stream = req_config.tool_stream;
-    tool_choice = req_config.tool_choice;
-    disable_parallel_tool_use = req_config.disable_parallel_tool_use;
-    (* structured output 계약은 [supports_tool_choice_override]와 같은
-       "요청이 의견을 낼 때만 요청 우선" 병합이다. OAS Agent의 요청 config는
-       [Agent_sdk.Provider.config](라우팅 삼중항)에서 파생되어 schema 필드를
-       구조적으로 운반할 수 없으므로 언제나 [Off]/[None]으로 도착한다 — 이를
-       무조건 복사하면 base(빌드 시 validate까지 통과한 schema-carrying config)의
-       계약이 와이어 직전에 조용히 증발한다. 실제로 #22768 이후 fusion judge/panel,
-       verifier, dashboard judge 등 모든 Keeper_structured_output_schema 소비자의
-       native schema가 HTTP body에 실린 적이 없었다 (2026-07-02 hop-by-hop 추적,
-       masc#23003 후속). [Off]/[None] = 무의견 → base 유지; 요청이 명시하면 요청 우선. *)
-    response_format;
-    output_schema;
-    cache_system_prompt = req_config.cache_system_prompt;
-    supports_tool_choice_override =
-      (match req_config.supports_tool_choice_override with
-       | Some _ as override -> override
-       | None -> base.supports_tool_choice_override);
-    seed = req_config.seed;
-  }
-
 let provider_resource_observation_transport
     ~(kind : Fd_accountant.kind)
     (transport : Llm_provider.Llm_transport.t)
@@ -283,12 +227,11 @@ let provider_resource_observation_transport
 let provider_http_observation_transport transport =
   provider_resource_observation_transport ~kind:Provider_http transport
 
-let provider_config_preserving_http_transport
+let observed_http_transport
     ~sw
     ~net
     ?clock
     ?body_timeout_s
-    ~(provider_cfg : Llm_provider.Provider_config.t)
     ()
   : Llm_provider.Llm_transport.t =
   (* RFC-OAS-026: stream_idle_timeout_s moved off transport construction
@@ -297,21 +240,14 @@ let provider_config_preserving_http_transport
      transport itself carries no idle deadline; OAS does not infer one. *)
   let http_transport =
     (* OAS owns stream-idle liveness on
-       [Llm_transport.completion_request.stream_idle_timeout_s].  The request
-       record update below changes only [config], so that typed deadline is
-       preserved without a second construction-time fallback. *)
+       [Llm_transport.completion_request.stream_idle_timeout_s]. The exact
+       typed provider request reaches this transport unchanged. *)
     Llm_provider.Complete.make_http_transport
       ?clock
       ?body_timeout_s
       ~sw
       ~net
       ()
-  in
-  let patch_request (req : Llm_provider.Llm_transport.completion_request) =
-    { req with
-      config =
-        request_runtime_fields_on_base_config ~base:provider_cfg req.config;
-    }
   in
   provider_http_observation_transport
     { complete_sync =
@@ -320,18 +256,17 @@ let provider_config_preserving_http_transport
            per turn for each provider. Removed at Phase 0 closeout. *)
         Log.Misc.debug
           "rfc0095-trace: runtime_runner http_transport.complete_sync invoked";
-        http_transport.complete_sync (patch_request req));
+        http_transport.complete_sync req);
       complete_stream =
       (fun ?on_telemetry ~on_event req ->
         (* RFC-0095 Phase 0 diagnostic trace — verify which transport path is invoked
            per turn for each provider. Removed at Phase 0 closeout. *)
         Log.Misc.debug
           "rfc0095-trace: runtime_runner http_transport.complete_stream invoked";
-        http_transport.complete_stream ?on_telemetry ~on_event
-          (patch_request req));
+        http_transport.complete_stream ?on_telemetry ~on_event req);
     }
 
-let transport_for_provider ~sw ~net ?clock ?body_timeout_s ~provider_cfg () =
+let transport_for_provider ~sw ~net ?clock ?body_timeout_s () =
   (* CLI subprocess transport removed (2026-05-31); every provider dispatches
      over HTTP. Runtime MCP policy is applied via the tool-lane resolver and
      per-request patching, not at transport construction, so it is no longer
@@ -339,12 +274,11 @@ let transport_for_provider ~sw ~net ?clock ?body_timeout_s ~provider_cfg () =
      (see RFC-OAS-026 note above). *)
   Ok
     (Some
-       (provider_config_preserving_http_transport
+       (observed_http_transport
           ~sw
           ~net
           ?clock
           ?body_timeout_s
-          ~provider_cfg
           ()))
 
 let runtime_id_of_config (config : config) =
@@ -865,9 +799,6 @@ let select_agent_result ~checkpoint ~resume ~build =
   | None -> build ()
 
 module For_testing = struct
-  let request_runtime_fields_on_base_config =
-    request_runtime_fields_on_base_config
-
   let provider_http_observation_transport = provider_http_observation_transport
   let runtime_id_of_config = runtime_id_of_config
   let runtime_observation_for_completed_config =
@@ -961,7 +892,6 @@ let build
          ~net
          ?clock
          ?body_timeout_s:config.body_timeout_s
-         ~provider_cfg:config.provider_cfg
          ()
      with
      | Error _ as e -> e
@@ -1056,7 +986,6 @@ let resume_from_checkpoint
          ~net
          ?clock
          ?body_timeout_s:config.body_timeout_s
-         ~provider_cfg:config.provider_cfg
          ()
      with
      | Error _ as e -> e
@@ -1071,6 +1000,7 @@ let resume_from_checkpoint
       Ok
         (Agent_sdk.Agent.resume ~net ~checkpoint:prepared_resume.patched_checkpoint
            ~tools:config.tools ?context:config.context
+           ~provider_config:config.provider_cfg
            ~options ~config:prepared_resume.agent_config
            ?checkpoint_sink:config.checkpoint_sink
            ?tool_failure_judge:config.tool_failure_judge

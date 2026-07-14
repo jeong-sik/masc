@@ -48,7 +48,6 @@ type stop_reason =
 type config = {
   name : string;
   provider_cfg : Llm_provider.Provider_config.t;
-  provider : Agent_sdk.Provider.config;
   model_id : string;
   system_prompt : string;
   tools : Agent_sdk.Tool.t list;

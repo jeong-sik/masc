@@ -66,7 +66,6 @@ type stop_reason =
 type config =
   { name : string
   ; provider_cfg : Llm_provider.Provider_config.t
-  ; provider : Agent_sdk.Provider.config
   ; model_id : string
   ; system_prompt : string
   ; tools : Agent_sdk.Tool.t list
@@ -171,13 +170,8 @@ let default_config
       ~tools
   : config
   =
-  let provider =
-    Agent_sdk.Provider.config_of_provider_config provider_cfg
-    |> Runtime_wire_overlay.apply ~provider_cfg
-  in
   { name
   ; provider_cfg
-  ; provider
   ; model_id = provider_cfg.model_id
   ; system_prompt
   ; tools
@@ -252,12 +246,12 @@ let builder_without_approval
   let guardrails = guardrails_of_config config in
   let builder =
     Agent_sdk.Builder.create ~net ~model:config.model_id
+    |> Agent_sdk.Builder.with_provider_config config.provider_cfg
     |> Agent_sdk.Builder.with_name config.name
     |> Agent_sdk.Builder.with_system_prompt config.system_prompt
     |> Agent_sdk.Builder.with_max_turns config.max_turns
     |> Agent_sdk.Builder.with_max_idle_turns config.max_idle_turns
     |> Agent_sdk.Builder.with_temperature config.temperature
-    |> Agent_sdk.Builder.with_provider config.provider
     |> Agent_sdk.Builder.with_tools config.tools
     |> Agent_sdk.Builder.with_guardrails guardrails
     |> Agent_sdk.Builder.with_missing_approval_callback_policy
@@ -469,14 +463,6 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
     ; thinking_budget = config.thinking_budget
     ; cache_system_prompt = config.cache_system_prompt
     ; response_format = config.provider_cfg.response_format
-      (* MASC owns the structured-output contract via [config.provider_cfg].
-         A checkpoint may carry a stale [response_format] from a previous run
-         (e.g., prompt-tier fallback or an older native schema).  If we resumed
-         with [JsonMode] while the current base config carries a native schema,
-         [Runtime_agent.request_runtime_fields_on_base_config] would treat the
-         stale request as an explicit opinion and clear the contract.  Patch the
-         checkpoint so the resume path observes the same contract as a fresh
-         build. *)
     }
   in
   let agent_config : Agent_sdk.Types.agent_config =
@@ -501,8 +487,7 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
   in
   let options : Agent_sdk.Agent.options =
     { Agent_sdk.Agent.default_options with
-      provider = Some config.provider
-    ; hooks = Option.value ~default:Agent_sdk.Hooks.empty config.hooks
+      hooks = Option.value ~default:Agent_sdk.Hooks.empty config.hooks
     ; max_idle_turns = config.max_idle_turns
     ; stream_idle_timeout_s = config.stream_idle_timeout_s
     ; max_execution_time_s = config.max_execution_time_s

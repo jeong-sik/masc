@@ -52,16 +52,6 @@ type stop_reason =
        must surface [request.question] and persist the checkpoint before
        returning control; this is neither a provider failure nor a completed
        model deliverable. *)
-  | ToolFailureRecoveryDeferred of
-      { turns_used : int
-      ; reason : string
-      ; tool_names : string list
-      }
-    (* The OAS typed recovery judge ended this Agent.run without another main
-       provider call. [reason] is observation-only model output; scheduling
-       decisions must branch only on this constructor. The host owns the next
-       activity boundary, so this is a checkpoint yield, never a provider
-       failure or Keeper pause. *)
 
 type config =
   { name : string

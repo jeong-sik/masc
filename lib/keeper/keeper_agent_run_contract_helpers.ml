@@ -27,7 +27,6 @@ let observed_completion_evidence
   =
   match stop_reason with
   | Runtime_agent.InputRequired _
-  | Runtime_agent.ToolFailureRecoveryDeferred _
   | Runtime_agent.Yielded_to_chat_waiting _
   | Runtime_agent.Yielded_to_durable_stimulus _ ->
     Keeper_execution_receipt.Completion_observation_unknown

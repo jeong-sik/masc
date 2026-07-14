@@ -92,26 +92,6 @@ let test_turn_limit_observation_is_contract_neutral () =
     (result [])
 ;;
 
-let test_recovery_defer_is_not_a_runtime_failure () =
-  let result =
-    KAR.Contract_helpers.observed_completion_evidence
-      ~actual_keeper_tool_names:[ "tool_execute" ]
-      ~stop_reason:
-        (Runtime_agent.ToolFailureRecoveryDeferred
-           { turns_used = 2
-           ; reason = "wait for repository state"
-           ; tool_names = [ "Execute" ]
-           })
-      ~response_text_present:false
-    |> Masc.Keeper_execution_receipt.completion_contract_result_to_string
-  in
-  check
-    string
-    "typed control checkpoint is completion-contract neutral"
-    "unknown"
-    result
-;;
-
 let tool_call_detail ?(outcome = "ok") tool_name : KAR.tool_call_detail =
   { tool_name
   ; provider = "test"
@@ -161,10 +141,6 @@ let () =
             "turn-limit observation is completion-contract neutral"
             `Quick
             test_turn_limit_observation_is_contract_neutral
-        ; test_case
-            "recovery defer is completion-contract neutral"
-            `Quick
-            test_recovery_defer_is_not_a_runtime_failure
         ; test_case
             "contract progress filters no-progress tool results"
             `Quick

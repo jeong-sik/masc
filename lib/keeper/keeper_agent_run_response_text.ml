@@ -5,7 +5,6 @@ type finalized = {
 }
 
 let stop_reason_suppresses_visible_response = function
-  | Runtime_agent.ToolFailureRecoveryDeferred _
   | Runtime_agent.ExecutionTimeoutObserved _
   | Runtime_agent.ExecutionIdleTimeoutObserved _ -> true
   | Runtime_agent.Completed

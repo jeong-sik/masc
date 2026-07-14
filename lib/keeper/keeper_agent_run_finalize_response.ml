@@ -136,12 +136,10 @@ let checkpoint_for_replay_persistence
       (checkpoint : Agent_sdk.Checkpoint.t)
   =
   match stop_reason with
-  | Runtime_agent.InputRequired _
-  | Runtime_agent.ToolFailureRecoveryDeferred _ ->
-    (* OAS attached the durable recovery receipt to the current ToolResult.
-       Blank-response canonicalization and completion-contract pruning both
-       remove that suffix, so this typed control checkpoint must preserve it
-       verbatim. Prefix validation still fails closed before persistence. *)
+  | Runtime_agent.InputRequired _ ->
+    (* The elicitation request can follow a current-turn tool result. Blank
+       response canonicalization and completion-contract pruning must not
+       remove that suffix; prefix validation still fails closed. *)
     (match
        Keeper_replay_prefix.split
          ~prefix:history_messages
@@ -155,11 +153,11 @@ let checkpoint_for_replay_persistence
          , None )
      | Ok [] ->
        Error
-         "refusing to save recovery-control checkpoint without a current-turn \
+         "refusing to save input-required checkpoint without a current-turn \
           replay suffix"
      | Error _ ->
        Error
-         "refusing to save recovery-control checkpoint: messages do not match \
+         "refusing to save input-required checkpoint: messages do not match \
           pre-turn history prefix")
   | Runtime_agent.TurnLimitObserved _
   | Runtime_agent.ExecutionTimeoutObserved _

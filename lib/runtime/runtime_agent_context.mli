@@ -33,11 +33,6 @@ type stop_reason =
       turns_used : int;
       request : Agent_sdk.Error.input_required;
     }
-  | ToolFailureRecoveryDeferred of {
-      turns_used : int;
-      reason : string;
-      tool_names : string list;
-    }
 
 (** {1 Per-worker config} *)
 

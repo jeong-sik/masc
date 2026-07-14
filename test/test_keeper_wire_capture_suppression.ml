@@ -182,25 +182,6 @@ let test_contract_observation_finalizer_preserves_response_text_by_default () =
     finalized.response_text
 ;;
 
-let test_recovery_defer_finalizer_drops_response_text_by_default () =
-  let finalized =
-    Response_text.finalize
-      ~completion_contract_result:Receipt.Completion_observation_unknown
-      ~stop_reason:
-        (Runtime_agent.ToolFailureRecoveryDeferred
-           { turns_used = 2
-           ; reason = "wait for repository state"
-           ; tool_names = [ "Execute" ]
-           })
-      ~raw_response_text:"No textual reply was produced. Tools invoked: Execute."
-      ()
-  in
-  Alcotest.(check string)
-    "typed recovery checkpoint never becomes a chat reply"
-    ""
-    finalized.response_text
-;;
-
 let () =
   Alcotest.run
     "keeper_wire_capture_suppression"
@@ -251,10 +232,6 @@ let () =
             "contract observation preserves by default"
             `Quick
             test_contract_observation_finalizer_preserves_response_text_by_default
-        ; Alcotest.test_case
-            "typed recovery checkpoint auto-suppresses by default"
-            `Quick
-            test_recovery_defer_finalizer_drops_response_text_by_default
         ] )
     ]
 ;;

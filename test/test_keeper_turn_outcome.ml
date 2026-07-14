@@ -77,10 +77,6 @@ let test_of_stop_reason () =
   check outcome "durable stimulus yield -> checkpoint" TO.Continuation_checkpoint
     (TO.of_stop_reason
        (Runtime_agent.Yielded_to_durable_stimulus { turns_used = 2 }));
-  check outcome "typed recovery defer -> checkpoint" TO.Continuation_checkpoint
-    (TO.of_stop_reason
-       (Runtime_agent.ToolFailureRecoveryDeferred
-          { turns_used = 2; reason = "wait"; tool_names = [ "Execute" ] }));
   check outcome "typed input required -> visible" TO.Visible_reply
     (TO.of_stop_reason
        (Runtime_agent.InputRequired { turns_used = 2; request }))
@@ -164,8 +160,7 @@ let test_autonomous_yield_boundary_contract () =
   | Runtime_agent.ExecutionTimeoutObserved _
   | Runtime_agent.ExecutionIdleTimeoutObserved _
   | Runtime_agent.Yielded_to_chat_waiting _
-  | Runtime_agent.InputRequired _
-  | Runtime_agent.ToolFailureRecoveryDeferred _ ->
+  | Runtime_agent.InputRequired _ ->
     fail "durable request mapped to the wrong stop reason"
 
 let payload fields = Some (`Assoc fields)

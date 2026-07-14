@@ -276,71 +276,6 @@ let test_empty_success_drops_current_turn_replay () =
     (prune_reason_to_string reason)
 ;;
 
-let test_recovery_defer_preserves_typed_receipt_suffix () =
-  let open Agent_sdk.Types in
-  let history =
-    [ message User [ Text "old user" ]; message Assistant [ Text "old answer" ] ]
-  in
-  let receipt_metadata =
-    [ "oas.tool_failure_recovery.v1", `Assoc [ "version", `Int 1 ] ]
-  in
-  let result_message =
-    { (message Tool
-         [ ToolResult
-             { tool_use_id = "tool-1"
-             ; content = "working directory is required"
-             ; outcome =
-                 Tool_failed
-                   { failure_kind = Validation_error
-                   ; error_class = Some Deterministic
-                   }
-             ; json = None
-             ; content_blocks = None
-             }
-         ]) with
-      metadata = receipt_metadata
-    }
-  in
-  let current_turn =
-    [ message User [ Text "current user" ]
-    ; message Assistant
-        [ ToolUse
-            { id = "tool-1"
-            ; name = "Execute"
-            ; input = `Assoc [ "cmd", `String "gh pr list" ]
-            }
-        ]
-    ; result_message
-    ]
-  in
-  let patched, reason =
-    Finalize.checkpoint_for_replay_persistence
-      ~history_messages:history
-      ~pre_turn_working_context:None
-      ~completion_contract_result:Receipt.Completion_observation_unknown
-      ~session_id:"new-session"
-      ~response_text:""
-      ~stop_reason:
-        (Runtime_agent.ToolFailureRecoveryDeferred
-           { turns_used = 2
-           ; reason = "wait for repository state"
-           ; tool_names = [ "Execute" ]
-           })
-      (checkpoint (history @ current_turn))
-    |> expect_ok
-  in
-  Alcotest.(check string) "session unified" "new-session" patched.session_id;
-  Alcotest.(check int) "full recovery suffix retained" 5
-    (List.length patched.messages);
-  Alcotest.(check bool) "receipt metadata retained" true
-    (List.exists
-       (fun (message : Agent_sdk.Types.message) ->
-          message.metadata = receipt_metadata)
-       patched.messages);
-  Alcotest.(check (option string)) "no prune reason" None
-    (prune_reason_to_string reason)
-;;
-
 let test_execution_observations_preserve_tool_replay_suffix () =
   let open Agent_sdk.Types in
   let history =
@@ -407,19 +342,10 @@ let test_execution_observations_preserve_tool_replay_suffix () =
     observations
 ;;
 
-let test_recovery_ask_user_preserves_exact_typed_receipt_suffix () =
+let test_input_required_preserves_exact_tool_failure_suffix () =
   let open Agent_sdk.Types in
   let history =
     [ message User [ Text "old user" ]; message Assistant [ Text "old answer" ] ]
-  in
-  let receipt_metadata =
-    [ ( "oas.tool_failure_recovery.v1"
-      , `Assoc
-          [ "version", `Int 1
-          ; "decision", `String "ask_user"
-          ; "question", `String "Which repository should I inspect?"
-          ] )
-    ]
   in
   let current_turn =
     [ message User [ Text "inspect the source" ]
@@ -430,21 +356,19 @@ let test_recovery_ask_user_preserves_exact_typed_receipt_suffix () =
             ; input = `Assoc [ "cmd", `String "gh pr list" ]
             }
         ]
-    ; { (message Tool
-           [ ToolResult
-               { tool_use_id = "tool-ask-1"
-               ; content = "working directory is required"
-               ; outcome =
-                   Tool_failed
-                     { failure_kind = Validation_error
-                     ; error_class = Some Deterministic
-                     }
-               ; json = None
-               ; content_blocks = None
-               }
-           ]) with
-        metadata = receipt_metadata
-      }
+    ; message Tool
+        [ ToolResult
+            { tool_use_id = "tool-ask-1"
+            ; content = "working directory is required"
+            ; outcome =
+                Tool_failed
+                  { failure_kind = Validation_error
+                  ; error_class = Some Deterministic
+                  }
+            ; json = None
+            ; content_blocks = None
+            }
+        ]
     ]
   in
   let request = input_required_request () in
@@ -461,7 +385,7 @@ let test_recovery_ask_user_preserves_exact_typed_receipt_suffix () =
   in
   Alcotest.(check string) "session unified" "new-session" patched.session_id;
   Alcotest.(check bool)
-    "Ask_user replay suffix is structurally unchanged"
+    "InputRequired replay suffix is structurally unchanged"
     true
     (patched.messages = history @ current_turn);
   Alcotest.(check (option string)) "no prune reason" None
@@ -556,17 +480,13 @@ let () =
             `Quick
             test_empty_success_drops_current_turn_replay
         ; Alcotest.test_case
-            "recovery defer preserves typed receipt suffix"
-            `Quick
-            test_recovery_defer_preserves_typed_receipt_suffix
-        ; Alcotest.test_case
             "execution observations preserve tool replay suffix"
             `Quick
             test_execution_observations_preserve_tool_replay_suffix
         ; Alcotest.test_case
-            "recovery Ask_user preserves exact typed receipt suffix"
+            "InputRequired preserves exact tool-failure suffix"
             `Quick
-            test_recovery_ask_user_preserves_exact_typed_receipt_suffix
+            test_input_required_preserves_exact_tool_failure_suffix
         ; Alcotest.test_case
             "media-degraded projection persists canonical checkpoint"
             `Quick

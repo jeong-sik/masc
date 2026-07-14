@@ -34,8 +34,7 @@ let of_stop_reason = function
   | Runtime_agent.Completed
   | Runtime_agent.TurnLimitObserved _ -> Visible_reply
   | Runtime_agent.Yielded_to_chat_waiting _
-  | Runtime_agent.Yielded_to_durable_stimulus _
-  | Runtime_agent.ToolFailureRecoveryDeferred _ -> Continuation_checkpoint
+  | Runtime_agent.Yielded_to_durable_stimulus _ -> Continuation_checkpoint
   | Runtime_agent.ExecutionTimeoutObserved _
   | Runtime_agent.ExecutionIdleTimeoutObserved _ -> No_visible_reply
   | Runtime_agent.InputRequired _ -> Visible_reply
@@ -45,8 +44,7 @@ let of_result_surface ~response_text = function
   | Runtime_agent.TurnLimitObserved _ ->
       if String.trim response_text = "" then No_visible_reply else Visible_reply
   | Runtime_agent.Yielded_to_chat_waiting _
-  | Runtime_agent.Yielded_to_durable_stimulus _
-  | Runtime_agent.ToolFailureRecoveryDeferred _ -> Continuation_checkpoint
+  | Runtime_agent.Yielded_to_durable_stimulus _ -> Continuation_checkpoint
   | Runtime_agent.ExecutionTimeoutObserved _
   | Runtime_agent.ExecutionIdleTimeoutObserved _ -> No_visible_reply
   | Runtime_agent.InputRequired _ -> Visible_reply

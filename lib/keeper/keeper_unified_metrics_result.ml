@@ -137,8 +137,8 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
               else if has_validated_evidence then
                 (match validated_evidence with
                  | Some v ->
-                   Printf.sprintf "unified:validated_evidence(ok=%b,file_write=%b,evidence=%d)"
-                     v.ok v.has_file_write (List.length v.evidence)
+                   Printf.sprintf "unified:validated_evidence(ok=%b,evidence=%d)"
+                     v.ok (List.length v.evidence)
                  | None -> "unified:validated_evidence(unreachable)")
               else if not has_text then
                 "unified:"

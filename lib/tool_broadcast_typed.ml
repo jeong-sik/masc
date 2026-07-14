@@ -21,8 +21,7 @@ module Float = Stdlib.Float
 module Sg = Agent_sdk.Tool_schema_gen
 
 let message_field =
-  Sg.string_field "message" ~required:true
-    ~desc:"Message content to broadcast to all agents" ()
+  Sg.string_field "message" ~desc:"Message content to broadcast to all agents" ()
 
 (* Issue #8595: dropped [format_field]. The schema field was advertised
    to LLM clients but [handle_broadcast] never read it (destructured as

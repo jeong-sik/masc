@@ -40,8 +40,9 @@ describe('NavRailV2 schedule item', () => {
     expect(scheduleNavItem(container)?.querySelector('.nav-badge')).toBeNull()
   })
 
-  // Rail order + group breaks mirror the 2026-07 keeper-v2 standalone export.
-  it('renders the v2 export rail order with Monitor after Keepers', () => {
+  // Rail order + group breaks mirror the 2026-07 keeper-v2 standalone export,
+  // plus the Registry surface (A4) inserted after Keepers in the same group.
+  it('renders the v2 export rail order with Registry between Keepers and Monitor', () => {
     render(html`<${NavRailV2} />`, container)
 
     const rail = container.querySelector('.v2-nav')
@@ -54,7 +55,7 @@ describe('NavRailV2 schedule item', () => {
     expect(walk).toEqual([
       'brand',
       '개요', '|',
-      'Keepers', 'Monitor', '|',
+      'Keepers', '레지스트리', 'Monitor', '|',
       '작업', '승인', '예약', '|',
       '보드', 'Fusion', '로그', '|',
       'IDE', '커넥터',

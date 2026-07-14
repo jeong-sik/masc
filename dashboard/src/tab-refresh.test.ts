@@ -73,6 +73,13 @@ describe('refreshPlanForRoute', () => {
     })).toEqual(['namespaceTruth', 'execution', 'missionSnapshot', 'activeKeeperChat'])
   })
 
+  it('hydrates the registry roster on direct entry (no default-[] blank roster)', () => {
+    expect(refreshPlanForRoute({
+      tab: 'registry',
+      params: {},
+    })).toEqual(['namespaceTruth', 'execution', 'missionSnapshot'])
+  })
+
   it('hydrates the top-level board surface from the board store', () => {
     expect(refreshPlanForRoute({
       tab: 'board',

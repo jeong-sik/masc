@@ -82,6 +82,18 @@ type stop_reason =
       request : Agent_sdk.Error.input_required;
     }
 
+type cooperative_yield_reason =
+  Runtime_agent_context.cooperative_yield_reason =
+  | Chat_waiting
+  | Durable_stimulus_waiting
+
+type cooperative_yield_decision =
+  Runtime_agent_context.cooperative_yield_decision =
+  | Continue
+  | Yield of cooperative_yield_reason
+
+type cooperative_yield_probe = Runtime_agent_context.cooperative_yield_probe
+
 type config =
   Runtime_agent_context.config = {
   name : string;
@@ -110,8 +122,7 @@ type config =
   yield_on_tool : bool;
   context_injector : Agent_sdk.Hooks.context_injector option;
   context : Agent_sdk.Context.t option;
-  exit_condition : (int -> bool) option;
-  exit_condition_result : (int -> stop_reason * string option) option;
+  cooperative_yield_probe : cooperative_yield_probe option;
   thinking_budget : int option;
   top_p : float option;
   top_k : int option;
@@ -1103,23 +1114,88 @@ let run_blocks
           "masc.runtime_id", `String config.name;
         ]
         (fun _trace_id ->
-          match on_event with
-          | Some cb ->
-              Agent_sdk.Agent.run_stream_blocks ~sw ?clock ?on_yield ?on_resume
-                ~on_event:cb agent goal_blocks
+          match config.cooperative_yield_probe with
           | None ->
-              Agent_sdk.Agent.run_blocks ~sw ?clock ?on_yield ?on_resume agent
-                goal_blocks)
+            (match on_event with
+             | Some cb ->
+               Agent_sdk.Agent.run_stream_blocks ~sw ?clock ?on_yield ?on_resume
+                 ~on_event:cb agent goal_blocks
+             | None ->
+               Agent_sdk.Agent.run_blocks ~sw ?clock ?on_yield ?on_resume agent
+                 goal_blocks)
+            |> Result.map (fun response -> `Completed response)
+          | Some probe ->
+            let probe_error = ref None in
+            let yield_reason = ref None in
+            let on_tool_boundary boundary =
+              match probe boundary with
+              | Ok Continue -> Agent_sdk.Agent.Advanced.Continue
+              | Ok (Yield stop_reason) ->
+                yield_reason := Some stop_reason;
+                Agent_sdk.Agent.Advanced.Yield
+              | Error error ->
+                probe_error := Some error;
+                Agent_sdk.Agent.Advanced.Yield
+            in
+            let api_strategy =
+              match on_event with
+              | None -> Agent_sdk.Agent.Sync
+              | Some on_event ->
+                let on_telemetry =
+                  Option.map
+                    (fun bus ->
+                       Agent_sdk.Telemetry_bus.publish
+                         (Agent_sdk.Telemetry_bus.of_event_bus bus))
+                    (Agent_sdk.Agent.options agent).event_bus
+                in
+                Agent_sdk.Agent.Stream { on_event; on_telemetry }
+            in
+            let advanced_result =
+              Agent_sdk.Agent.Advanced.run_blocks
+                ~sw
+                ?clock
+                ?on_yield
+                ?on_resume
+                ~api_strategy
+                ~on_tool_boundary
+                agent
+                goal_blocks
+            in
+            Result.bind advanced_result (function
+              | Agent_sdk.Agent.Advanced.Completed response ->
+                Ok (`Completed response)
+              | Agent_sdk.Agent.Advanced.Yielded yielded ->
+                (match !probe_error, !yield_reason with
+                 | Some error, _ -> Error error
+                 | None, Some reason ->
+                   Ok (`Yielded (reason, yielded))
+                 | None, None ->
+                   Error
+                     (Agent_sdk.Error.Internal
+                        "cooperative yield returned without a MASC decision"))))
     in
     let run_total_duration_ms = run_duration_ms_since run_started_at in
     let checkpoint =
-      let ckpt =
-        build_checkpoint ~session_id
-          ?checkpoint_sidecar:config.checkpoint_sidecar agent
-      in
-      Some ckpt
+      match result with
+      | Ok (`Yielded (_, yielded)) ->
+        Some
+          (Runtime_oas_checkpoint.restamp_cooperative_yield
+             ~session_id
+             ?checkpoint_sidecar:config.checkpoint_sidecar
+             yielded.checkpoint)
+      | Ok (`Completed _) | Error _ ->
+        Some
+          (build_checkpoint ~session_id
+             ?checkpoint_sidecar:config.checkpoint_sidecar agent)
     in
-    let lifecycle = worker_lifecycle_classification_of_result result in
+    let lifecycle =
+      match result with
+      | Ok (`Completed response) ->
+        worker_lifecycle_classification_of_result (Ok response)
+      | Ok (`Yielded _) ->
+        { event = "completed"; status = "cooperative_yield"; error = None }
+      | Error error -> worker_lifecycle_classification_of_result (Error error)
+    in
     publish_lifecycle ~name:config.name ~event:lifecycle.event
       ~detail:(Printf.sprintf "session=%s" session_id)
       ?error:lifecycle.error
@@ -1144,7 +1220,7 @@ let run_blocks
       | None -> None
     in
     (match result with
-    | Ok response ->
+    | Ok (`Completed response) ->
       close_after_success ();
       record_dashboard_oas_response ~config
         ~total_duration_ms:run_total_duration_ms
@@ -1163,6 +1239,36 @@ let run_blocks
           run_validation;
           runtime_observation = Some runtime_observation;
           stop_reason = Completed;
+        }
+    | Ok (`Yielded (reason, yielded)) ->
+      close_after_success ();
+      let stop_reason =
+        match reason with
+        | Chat_waiting ->
+          Yielded_to_chat_waiting { turns_used = yielded.turn }
+        | Durable_stimulus_waiting ->
+          Yielded_to_durable_stimulus { turns_used = yielded.turn }
+      in
+      let response = partial_response_of_stop ~session_id ~text:"" in
+      record_dashboard_oas_response
+        ~config
+        ~total_duration_ms:run_total_duration_ms
+        ~status:(dashboard_status_of_stop_reason stop_reason)
+        response;
+      let runtime_observation =
+        runtime_observation_for_completed_config
+          ~total_duration_ms:run_total_duration_ms
+          config
+      in
+      Ok
+        { response
+        ; checkpoint
+        ; session_id
+        ; turns = yielded.turn
+        ; trace_ref
+        ; run_validation
+        ; runtime_observation = Some runtime_observation
+        ; stop_reason
         }
     | Error
         (Agent_sdk.Error.Agent (Agent_sdk.Error.InputRequired request)) ->
@@ -1196,43 +1302,6 @@ let run_blocks
         ; runtime_observation = Some runtime_observation
         ; stop_reason
         }
-    | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.ExitConditionMet r)) -> (
-      match config.exit_condition_result with
-      | Some render ->
-        close_after_success ();
-        let stop_reason, response_text_opt = render r.turn in
-        let response_text =
-          match response_text_opt with
-          | Some text when String.trim text <> "" -> text
-          | _ -> Printf.sprintf "[exit condition met at turn %d]" r.turn
-        in
-        let partial_response =
-          partial_response_of_stop
-            ~session_id
-            ~text:response_text
-        in
-        record_dashboard_oas_response ~config
-          ~total_duration_ms:run_total_duration_ms
-          ~status:(dashboard_status_of_stop_reason stop_reason)
-          partial_response;
-        let runtime_observation =
-          runtime_observation_for_completed_config
-            ~total_duration_ms:run_total_duration_ms config
-        in
-        Ok
-          {
-            response = partial_response;
-            checkpoint;
-            session_id;
-            turns;
-            trace_ref;
-            run_validation;
-            runtime_observation = Some runtime_observation;
-            stop_reason;
-          }
-      | None ->
-        close_agent_for_cleanup ~propagate_cancel:false ~config agent;
-        Error (Agent_sdk.Error.Agent (Agent_sdk.Error.ExitConditionMet r)))
     | Error err ->
       let detail = Agent_sdk.Error.to_string err in
       let error_response =

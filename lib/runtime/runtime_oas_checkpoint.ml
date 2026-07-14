@@ -43,6 +43,16 @@ let build_checkpoint ~session_id ?checkpoint_sidecar (agent : Agent_sdk.Agent.t)
         ~mcp_clients:(Agent_sdk.Agent.options agent).mcp_clients
         ()
 
+let restamp_cooperative_yield ~session_id ?checkpoint_sidecar checkpoint =
+  { checkpoint with
+    Agent_sdk.Checkpoint.session_id
+  ; working_context =
+      (match checkpoint_sidecar with
+       | Some _ as sidecar -> sidecar
+       | None -> checkpoint.Agent_sdk.Checkpoint.working_context)
+  }
+;;
+
 let partial_response_of_stop
     ~(session_id : string)
     ~(text : string)

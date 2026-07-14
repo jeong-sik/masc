@@ -40,6 +40,18 @@ type stop_reason = Runtime_agent_context.stop_reason =
       turns_used : int;
       request : Agent_sdk.Error.input_required;
     }
+
+type cooperative_yield_reason =
+  Runtime_agent_context.cooperative_yield_reason =
+  | Chat_waiting
+  | Durable_stimulus_waiting
+
+type cooperative_yield_decision =
+  Runtime_agent_context.cooperative_yield_decision =
+  | Continue
+  | Yield of cooperative_yield_reason
+
+type cooperative_yield_probe = Runtime_agent_context.cooperative_yield_probe
 (** Why this single OAS call yielded control. [Completed] is the
     model's success path. [TurnLimitObserved], [ExecutionTimeoutObserved],
     and [ExecutionIdleTimeoutObserved] preserve unexpected typed OAS
@@ -85,8 +97,7 @@ type config = Runtime_agent_context.config = {
   yield_on_tool : bool;
   context_injector : Agent_sdk.Hooks.context_injector option;
   context : Agent_sdk.Context.t option;
-  exit_condition : (int -> bool) option;
-  exit_condition_result : (int -> stop_reason * string option) option;
+  cooperative_yield_probe : cooperative_yield_probe option;
   thinking_budget : int option;
   top_p : float option;
   top_k : int option;

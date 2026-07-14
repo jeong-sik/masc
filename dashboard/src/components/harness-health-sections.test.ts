@@ -53,7 +53,7 @@ function makeData(overrides: Partial<HarnessHealthData['overview']> = {}): Harne
       pre_compact_last_event_at: null,
       handoff_last_event_at: null,
       fallback_ratio: 0,
-      latest_pre_compact_ratio: null,
+      latest_pre_compact_checkpoint_bytes: null,
       latest_handoff_generation: null,
       ...overrides,
     },
@@ -196,11 +196,6 @@ describe('heroBody', () => {
     expect(heroBody(data)).toContain('세대 교체')
   })
 
-  it('describes pre_compact warning', () => {
-    const data = makeData({ pre_compact_status: 'warning' })
-    expect(heroBody(data)).toContain('압축')
-  })
-
   it('describes no signal state', () => {
     const data = makeData({ last_signal_at: null })
     expect(heroBody(data)).toContain('keeper')
@@ -228,9 +223,9 @@ describe('railDetail', () => {
     expect(railDetail(data, 'evaluator')).toBe('판정 기록 없음')
   })
 
-  it('returns context ratio for pre_compact', () => {
-    const data = makeData({ latest_pre_compact_ratio: 0.73 })
-    expect(railDetail(data, 'pre_compact')).toBe('컨텍스트 73%')
+  it('returns exact checkpoint bytes for pre_compact', () => {
+    const data = makeData({ latest_pre_compact_checkpoint_bytes: 131072 })
+    expect(railDetail(data, 'pre_compact')).toBe('체크포인트 131,072 B')
   })
 
   it('returns no compact for pre_compact with null', () => {
@@ -449,21 +444,19 @@ function makePreCompact(overrides: Partial<PreCompactEvent> = {}): PreCompactEve
   return {
     timestamp: 1_700_000_000_000,
     keeper_name: 'keeper-alpha',
-    context_ratio: 0.5,
+    checkpoint_bytes: 4096,
     message_count: 10,
-    token_count: 1000,
     strategies: ['summarize'],
-    model_family: 'claude-sonnet',
-    trigger: 'ratio_threshold',
+    trigger: 'manual',
     ...overrides,
   }
 }
 
 describe('filterPreCompactEvents', () => {
   const items: PreCompactEvent[] = [
-    makePreCompact({ keeper_name: 'keeper-alpha', trigger: 'ratio_threshold', model_family: 'claude-sonnet', strategies: ['summarize', 'drop_old'] }),
-    makePreCompact({ keeper_name: 'keeper-beta', trigger: 'manual', model_family: 'glm-4.6', strategies: ['handoff'] }),
-    makePreCompact({ keeper_name: 'keeper-gamma', trigger: 'token_cap', model_family: 'qwen-3', strategies: [] }),
+    makePreCompact({ keeper_name: 'keeper-alpha', strategies: ['summarize', 'drop_old'] }),
+    makePreCompact({ keeper_name: 'keeper-beta', strategies: ['handoff'] }),
+    makePreCompact({ keeper_name: 'keeper-gamma', strategies: [] }),
   ]
 
   it('returns the input reference when query is empty', () => {
@@ -481,12 +474,7 @@ describe('filterPreCompactEvents', () => {
 
   it('matches by trigger substring', () => {
     const result = filterPreCompactEvents(items, 'manual')
-    expect(result.map(r => r.keeper_name)).toEqual(['keeper-beta'])
-  })
-
-  it('does not match by concrete model_family substring', () => {
-    const result = filterPreCompactEvents(items, 'glm')
-    expect(result).toHaveLength(0)
+    expect(result).toHaveLength(3)
   })
 
   it('matches by strategies entry substring', () => {

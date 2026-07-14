@@ -16,9 +16,7 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
     ~(turn_generation : int)
     ~(channel : Keeper_world_observation.keeper_cycle_channel)
     ~(snapshot_source : string)
-    ~(context_ratio : float)
-    ~(context_tokens : int)
-    ~(context_max : int)
+    ~(checkpoint_bytes : int)
     ~(message_count : int)
     ~(compaction : Keeper_context_runtime.compaction_event)
     ~(handoff_json : Yojson.Safe.t option)
@@ -32,12 +30,6 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
       ~usage_reported:result.usage_reported
       ~usage:result.usage
   in
-  (* #9953: record context_max_bucket on the neutral runtime lane so
-     dashboards can directly count drift without preserving provider/model
-     identity at the MASC boundary. *)
-  record_context_max_observation
-    ~keeper:meta.name
-    ~context_max;
   let scheduled_autonomous_outcome =
     if Keeper_world_observation.is_autonomous channel then
       Some (scheduled_autonomous_outcome_for_result result)
@@ -119,15 +111,16 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
                (usage_trust_reasons usage_trust)) );
         ("latency_ms", `Int latency_ms);
         ("cost_usd", cost_json);
-        ("context_ratio", `Float context_ratio);
-        ("context_tokens", `Int context_tokens);
-        ("context_max", `Int context_max);
+        ("checkpoint_bytes", `Int checkpoint_bytes);
         ("message_count", `Int message_count);
         ("continuity_state", `Null);
         ("compacted", `Bool compaction.applied);
-        ("compaction_before_tokens", `Int compaction.before_tokens);
-        ("compaction_after_tokens", `Int compaction.after_tokens);
-        ("compaction_saved_tokens", `Int compaction.saved_tokens);
+        ( "compaction_before_checkpoint_bytes"
+        , `Int compaction.before_checkpoint_bytes );
+        ( "compaction_after_checkpoint_bytes"
+        , `Int compaction.after_checkpoint_bytes );
+        ( "compaction_saved_checkpoint_bytes"
+        , `Int compaction.saved_checkpoint_bytes );
         ("compaction_trigger",
           match compaction.trigger with
           | Some trigger -> `String (Compaction_trigger.to_label trigger)
@@ -194,26 +187,4 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
       ]
   in
   Dated_jsonl.append metrics_store snapshot;
-  (* #9943: a compaction trigger that produced no token reduction
-     is invisible in [masc_keeper_compactions_total] (which counts
-     trigger fires).  Emit a dedicated counter here so dashboards
-     can alert on the noop rate — production audit (2026-04-24)
-     showed 956/972 = 98.4% of compaction snapshots were silent
-     noops.  Emit only when a trigger fired and before/after match
-     at a non-zero token count; the [trigger] label uses the
-     human-readable reason already present in the snapshot. *)
-  (match compaction.trigger with
-   | Some trigger
-     when compaction.before_tokens > 0
-       && compaction.before_tokens = compaction.after_tokens ->
-       (* Closed label set (5 values) keeps the metric cardinality bound; the
-          full numerical detail is preserved in the snapshot's
-          [compaction_trigger_detail] JSON above. *)
-       Otel_metric_store.inc_counter
-         Keeper_metrics.(to_string CompactionNoop)
-         ~labels:
-           [ ("keeper", meta.name)
-           ; ("trigger", Compaction_trigger.to_label trigger)
-           ]
-         ()
-   | _ -> ())
+  ()

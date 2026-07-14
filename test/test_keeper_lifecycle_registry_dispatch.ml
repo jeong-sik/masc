@@ -151,14 +151,12 @@ let base_lifecycle ~(meta : Keeper_meta_contract.keeper_meta) : KEC.post_turn_li
         failure_reason = None;
         trigger = None;
         decision = KEC.Not_requested;
-        before_tokens = 0;
-        after_tokens = 0;
-        saved_tokens = 0;
+        before_checkpoint_bytes = 0;
+        after_checkpoint_bytes = 0;
+        saved_checkpoint_bytes = 0;
       };
     turn_generation = meta.runtime.generation;
-    context_ratio = 0.0;
-    context_tokens = 0;
-    context_max = 0;
+    checkpoint_bytes = 0;
     message_count = 0;
   }
 
@@ -285,9 +283,9 @@ let test_dispatch_post_turn_lifecycle_events_uses_workspace_base_path () =
               failure_reason = None;
               trigger = Some Compaction_trigger.Manual;
               decision = KEC.Applied Compaction_trigger.Manual;
-              before_tokens = 42;
-              after_tokens = 21;
-              saved_tokens = 21;
+              before_checkpoint_bytes = 42;
+              after_checkpoint_bytes = 21;
+              saved_checkpoint_bytes = 21;
             };
         }
       in
@@ -344,9 +342,9 @@ let test_post_turn_compaction_runs_from_failing_health_lane () =
               failure_reason = None;
               trigger = Some Compaction_trigger.Manual;
               decision = KEC.Applied Compaction_trigger.Manual;
-              before_tokens = 42;
-              after_tokens = 21;
-              saved_tokens = 21;
+              before_checkpoint_bytes = 42;
+              after_checkpoint_bytes = 21;
+              saved_checkpoint_bytes = 21;
             };
         }
       in
@@ -374,7 +372,7 @@ let test_compaction_completion_without_started_is_nonfatal () =
       let meta = make_keeper_meta ~name:"keeper-missing-compaction-start" () in
       ignore (KR.register ~base_path:config.base_path meta.name meta);
       let labels =
-        [ ("keeper", meta.name); ("event", "compaction_completed(42->21)") ]
+        [ ("keeper", meta.name); ("event", "compaction_completed(42B->21B)") ]
       in
       let before =
         Masc.Otel_metric_store.get_metric_value
@@ -393,9 +391,9 @@ let test_compaction_completion_without_started_is_nonfatal () =
               failure_reason = None;
               trigger = Some Compaction_trigger.Manual;
               decision = KEC.Applied Compaction_trigger.Manual;
-              before_tokens = 42;
-              after_tokens = 21;
-              saved_tokens = 21;
+              before_checkpoint_bytes = 42;
+              after_checkpoint_bytes = 21;
+              saved_checkpoint_bytes = 21;
             };
         }
       in
@@ -429,7 +427,7 @@ let test_post_turn_compaction_restarts_after_done_stage () =
       let config = Masc.Workspace.default_config base_dir in
       let meta = make_keeper_meta ~name:"keeper-repeat-compaction" () in
       ignore (KR.register ~base_path:config.base_path meta.name meta);
-      let lifecycle before_tokens after_tokens =
+      let lifecycle before_checkpoint_bytes after_checkpoint_bytes =
         {
           (base_lifecycle ~meta) with
           compaction =
@@ -440,9 +438,10 @@ let test_post_turn_compaction_restarts_after_done_stage () =
               failure_reason = None;
               trigger = Some Compaction_trigger.Manual;
               decision = KEC.Applied Compaction_trigger.Manual;
-              before_tokens;
-              after_tokens;
-              saved_tokens = before_tokens - after_tokens;
+              before_checkpoint_bytes;
+              after_checkpoint_bytes;
+              saved_checkpoint_bytes =
+                before_checkpoint_bytes - after_checkpoint_bytes;
             };
         }
       in

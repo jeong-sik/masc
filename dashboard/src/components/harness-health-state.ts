@@ -38,7 +38,7 @@ interface HarnessOverview {
   // verdicts that carried a generator_runtime. undefined when the backend
   // had zero eligible verdicts to compute the ratio.
   cross_model_rate?: number
-  latest_pre_compact_ratio: number | null
+  latest_pre_compact_checkpoint_bytes: number | null
   latest_handoff_generation: number | null
 }
 
@@ -59,11 +59,9 @@ export interface HarnessVerdictItem {
 export interface PreCompactEvent {
   timestamp: number
   keeper_name: string
-  context_ratio: number
+  checkpoint_bytes: number
   message_count: number
-  token_count: number
   strategies: string[]
-  model_family: string
   trigger: string
 }
 
@@ -194,14 +192,15 @@ function processHarnessEvent(evt: unknown): void {
 
   if (type === 'oas:masc:harness:pre_compact') {
     if (!payload) return
+    const checkpointBytes = asNumber(payload.checkpoint_bytes)
+    const messageCount = asNumber(payload.message_count)
+    if (checkpointBytes == null || messageCount == null) return
     const nextItem: PreCompactEvent = {
       timestamp: asNumber(payload.timestamp) ?? Date.now() / 1000,
       keeper_name: asString(payload.keeper_name, ''),
-      context_ratio: asNumber(payload.context_ratio, 0),
-      message_count: asNumber(payload.message_count, 0),
-      token_count: asNumber(payload.token_count, 0),
+      checkpoint_bytes: checkpointBytes,
+      message_count: messageCount,
       strategies: asStringArray(payload.strategies),
-      model_family: asString(payload.model_family, ''),
       trigger: asString(payload.trigger, ''),
     }
     updateHarnessData(data => ({
@@ -225,7 +224,7 @@ function processHarnessEvent(evt: unknown): void {
         ...data.overview,
         last_signal_at: nextItem.timestamp,
         pre_compact_last_event_at: nextItem.timestamp,
-        latest_pre_compact_ratio: nextItem.context_ratio,
+        latest_pre_compact_checkpoint_bytes: nextItem.checkpoint_bytes,
       },
     }))
     scheduleHarnessReload()

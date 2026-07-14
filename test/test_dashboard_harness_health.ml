@@ -85,21 +85,15 @@ let test_pre_compact_store_setter_records_event () =
   let event =
     H.record_pre_compact
       ~keeper_name:"keeper-harness"
-      ~context_ratio:0.92
+      ~checkpoint_bytes:3456
       ~message_count:12
-      ~token_count:3456
       ~strategies:[ "drop-old"; "summarize" ]
-      ~context_window:8192
-      ~is_local_model:true
       ~trigger:Compaction_trigger.Manual
   in
   check string "keeper" "keeper-harness" event.keeper_name;
-  check (float 0.0001) "ratio" 0.92 event.context_ratio;
+  check int "checkpoint bytes" 3456 event.checkpoint_bytes;
   check int "message count" 12 event.message_count;
-  check int "token count" 3456 event.token_count;
   check (list string) "strategies" [ "drop-old"; "summarize" ] event.strategies;
-  check int "context window" 8192 event.context_window;
-  check bool "local model" true event.is_local_model;
   check string "trigger" "manual" (Compaction_trigger.to_label event.trigger)
 
 let () =

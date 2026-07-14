@@ -34,7 +34,7 @@ let gen_event_chaos : SM.event QCheck.Gen.t =
     return SM.Compaction_started;
     (let* before = int_range 1000 100000 in
      let* after = int_range 100 (max 101 before) in
-     return (SM.Compaction_completed { before_tokens = before; after_tokens = after }));
+     return (SM.Compaction_completed { before_checkpoint_bytes = before; after_checkpoint_bytes = after }));
     return (SM.Compaction_failed { reason = "pbt_test" });
     return SM.Handoff_started;
     (let* gen = int_range 1 100 in
@@ -87,7 +87,7 @@ let valid_events_for_phase (phase : SM.phase) (c : SM.conditions) : SM.event lis
         SM.Fiber_terminated { outcome = "crash"; provider_id = None; http_status = None };
       ]
     | SM.Compacting ->
-      [ SM.Compaction_completed { before_tokens = 100; after_tokens = 50 };
+      [ SM.Compaction_completed { before_checkpoint_bytes = 100; after_checkpoint_bytes = 50 };
         SM.Compaction_failed { reason = "test" };
         SM.Heartbeat_failed { consecutive = 1 };
         SM.Fiber_terminated { outcome = "crash"; provider_id = None; http_status = None };

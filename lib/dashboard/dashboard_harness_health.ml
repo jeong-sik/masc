@@ -23,12 +23,9 @@ type harness_verdict_item =
 type pre_compact_event =
   { timestamp : float
   ; keeper_name : string
-  ; context_ratio : float
+  ; checkpoint_bytes : int
   ; message_count : int
-  ; token_count : int
   ; strategies : string list
-  ; context_window : int
-  ; is_local_model : bool
   ; trigger : Compaction_trigger.t
   }
 
@@ -84,12 +81,6 @@ let max_recent_verdicts = 8
 let max_signal_scan = 500
 let runtime_stale_after_s = 30. *. 60.
 let evaluator_stale_after_s = 12. *. Masc_time_constants.hour
-
-(** Runtime health warning thresholds. Distinct from compaction thresholds.
-    Values sourced from [Env_config_keeper.DashboardHealth]. *)
-let runtime_warning_ctx_ratio =
-  Env_config_keeper.DashboardHealth.runtime_warning_ctx_ratio
-;;
 
 let pre_compact_store_ref : Dated_jsonl.t option Atomic.t = Atomic.make None
 let pre_compact_store_mu = Eio.Mutex.create ()
@@ -241,12 +232,9 @@ let pre_compact_record_json (event : pre_compact_event) =
     [ "record_type", `String "pre_compact"
     ; "timestamp", `Float event.timestamp
     ; "keeper_name", `String event.keeper_name
-    ; "context_ratio", `Float event.context_ratio
+    ; "checkpoint_bytes", `Int event.checkpoint_bytes
     ; "message_count", `Int event.message_count
-    ; "token_count", `Int event.token_count
     ; "strategies", `List (List.map (fun value -> `String value) event.strategies)
-    ; "context_window", `Int event.context_window
-    ; "is_local_model", `Bool event.is_local_model
     ; "trigger", `String (Compaction_trigger.to_label event.trigger)
     ; "trigger_detail", Compaction_trigger.to_detail_json event.trigger
     ]
@@ -256,12 +244,9 @@ let pre_compact_event_json (event : pre_compact_event) =
   `Assoc
     [ "timestamp", `Float event.timestamp
     ; "keeper_name", `String event.keeper_name
-    ; "context_ratio", `Float event.context_ratio
+    ; "checkpoint_bytes", `Int event.checkpoint_bytes
     ; "message_count", `Int event.message_count
-    ; "token_count", `Int event.token_count
     ; "strategies", `List (List.map (fun value -> `String value) event.strategies)
-    ; "context_window", `Int event.context_window
-    ; "is_local_model", `Bool event.is_local_model
     ; "trigger", `String (Compaction_trigger.to_label event.trigger)
     ; "trigger_detail", Compaction_trigger.to_detail_json event.trigger
     ]
@@ -275,16 +260,9 @@ let pre_compact_event_of_json json =
     Some
       { timestamp = Safe_ops.json_float ~default:0.0 "timestamp" json
       ; keeper_name = string_field json "keeper_name"
-      ; context_ratio = Safe_ops.json_float ~default:0.0 "context_ratio" json
+      ; checkpoint_bytes = Safe_ops.json_int ~default:0 "checkpoint_bytes" json
       ; message_count = Safe_ops.json_int ~default:0 "message_count" json
-      ; token_count = Safe_ops.json_int ~default:0 "token_count" json
       ; strategies = Safe_ops.json_string_list "strategies" json
-      ; context_window =
-          Safe_ops.json_int
-            ~default:Runtime_constants.fallback_context_window
-            "context_window"
-            json
-      ; is_local_model = Safe_ops.json_bool ~default:false "is_local_model" json
       ; trigger =
           (match
              List.assoc_opt
@@ -535,14 +513,7 @@ let pre_compact_status (latest_event : pre_compact_event option) =
   | None -> Idle
   | Some event ->
     if is_stale ~threshold_s:runtime_stale_after_s event.timestamp
-    then
-      Stale
-      (* Boundary: use ratio-based check only. Raw token_count is an OAS
-         infrastructure concern — MASC operates on abstract ratio (0.0–1.0).
-         The context_ratio threshold already accounts for model-specific
-         context windows, making absolute token thresholds redundant. *)
-    else if event.context_ratio >= runtime_warning_ctx_ratio
-    then Warning
+    then Stale
     else Healthy
 ;;
 
@@ -592,7 +563,9 @@ let latest_by_timestamp timestamp_of items =
 ;;
 
 let pre_compact_timestamp (event : pre_compact_event) = event.timestamp
-let pre_compact_ratio (event : pre_compact_event) = event.context_ratio
+let pre_compact_checkpoint_bytes (event : pre_compact_event) =
+  event.checkpoint_bytes
+;;
 let handoff_timestamp (event : handoff_event) = event.timestamp
 let handoff_generation (event : handoff_event) = event.next_generation
 
@@ -644,8 +617,9 @@ let overview_json
     ; "cross_model_rate", `Float cross_model_rate
     ; "cross_model_match_count", `Int cross_model_match
     ; "verdicts_with_generator_runtime", `Int verdicts_with_generator
-    ; ( "latest_pre_compact_ratio"
-      , Json_util.float_opt_to_json (Option.map pre_compact_ratio latest_pre_compact) )
+    ; ( "latest_pre_compact_checkpoint_bytes"
+      , Json_util.int_opt_to_json
+          (Option.map pre_compact_checkpoint_bytes latest_pre_compact) )
     ; ( "latest_handoff_generation"
       , Json_util.int_opt_to_json (Option.bind latest_handoff handoff_generation) )
     ]
@@ -654,23 +628,17 @@ let overview_json
 let record_pre_compact_at
       ~timestamp
       ~keeper_name
-      ~context_ratio
+      ~checkpoint_bytes
       ~message_count
-      ~token_count
       ~strategies
-      ~context_window
-      ~is_local_model
       ~trigger
   =
   let event =
     { timestamp
     ; keeper_name
-    ; context_ratio
+    ; checkpoint_bytes
     ; message_count
-    ; token_count
     ; strategies
-    ; context_window
-    ; is_local_model
     ; trigger
     }
   in
@@ -684,23 +652,17 @@ let record_pre_compact_at
 
 let record_pre_compact
       ~keeper_name
-      ~context_ratio
+      ~checkpoint_bytes
       ~message_count
-      ~token_count
       ~strategies
-      ~context_window
-      ~is_local_model
       ~trigger
   =
   record_pre_compact_at
     ~timestamp:(Time_compat.now ())
     ~keeper_name
-    ~context_ratio
+    ~checkpoint_bytes
     ~message_count
-    ~token_count
     ~strategies
-    ~context_window
-    ~is_local_model
     ~trigger
 ;;
 
@@ -899,18 +861,15 @@ let () =
     ignore (record_wake_payload ~keeper_name ~trace_id ~turn_index ~model_id ~context_window ~approx_body_bytes ~system_prompt_bytes ~tool_defs_bytes ~messages_bytes ~message_count ~role_counts ~tool_count ~has_compact_happened)
   );
 
-  Keeper_compact_policy.register_record_pre_compact (fun ~keeper_name ~context_ratio ~message_count ~token_count ~strategies ~context_window ~is_local_model ~trigger ->
-    let event = record_pre_compact ~keeper_name ~context_ratio ~message_count ~token_count ~strategies ~context_window ~is_local_model ~trigger in
+  Keeper_compact_policy.register_record_pre_compact (fun ~keeper_name ~checkpoint_bytes ~message_count ~strategies ~trigger ->
+    let event = record_pre_compact ~keeper_name ~checkpoint_bytes ~message_count ~strategies ~trigger in
     let mapped_event : Keeper_compact_policy.pre_compact_event =
       {
         timestamp = event.timestamp;
         keeper_name = event.keeper_name;
-        context_ratio = event.context_ratio;
+        checkpoint_bytes = event.checkpoint_bytes;
         message_count = event.message_count;
-        token_count = event.token_count;
         strategies = event.strategies;
-        context_window = event.context_window;
-        is_local_model = event.is_local_model;
         trigger = event.trigger;
       }
     in

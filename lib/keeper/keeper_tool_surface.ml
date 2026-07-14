@@ -473,8 +473,8 @@ let keeper_compact_body ~(config : Workspace.config) args : tool_result =
           Keeper_context_runtime.dispatch_compaction_completed
             ~config ~keeper_name:name
             ~origin:Keeper_registry.Operator_compact
-            ~before_tokens:recovery.compaction.before_tokens
-            ~after_tokens:recovery.compaction.after_tokens;
+            ~before_checkpoint_bytes:recovery.compaction.before_checkpoint_bytes
+            ~after_checkpoint_bytes:recovery.compaction.after_checkpoint_bytes;
           invalidate_status_cache name;
           Otel_metric_store.inc_counter Keeper_metrics.(to_string OperatorCompact)
             ~labels:[("keeper", name); ("result", Keeper_operator_compact_result.(to_label Ok))] ();
@@ -488,8 +488,10 @@ let keeper_compact_body ~(config : Workspace.config) args : tool_result =
                        (match Keeper_registry.get ~base_path:config.base_path name with
                         | Some entry -> Keeper_state_machine.phase_to_string entry.phase
                         | None -> "unknown") );
-                   ("before_tokens", `Int recovery.compaction.before_tokens);
-                ("after_tokens", `Int recovery.compaction.after_tokens);
+                   ( "before_checkpoint_bytes"
+                   , `Int recovery.compaction.before_checkpoint_bytes );
+                ( "after_checkpoint_bytes"
+                , `Int recovery.compaction.after_checkpoint_bytes );
               ])
         | None ->
           (* Compaction infrastructure unavailable — emit [Compaction_failed]

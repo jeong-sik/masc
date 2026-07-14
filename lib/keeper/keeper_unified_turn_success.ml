@@ -135,9 +135,7 @@ let append_metrics_snapshot
       ~turn_generation:lifecycle.KEC.turn_generation
       ~channel
       ~snapshot_source:"keeper_unified_turn"
-      ~context_ratio:lifecycle.context_ratio
-      ~context_tokens:lifecycle.context_tokens
-      ~context_max:lifecycle.context_max
+      ~checkpoint_bytes:lifecycle.checkpoint_bytes
       ~message_count:lifecycle.message_count
       ~compaction:lifecycle.compaction
       ~handoff_json:lifecycle.handoff_json
@@ -218,7 +216,7 @@ let emit_activity_graph
                         (fun reason -> `String reason)
                         (KUM.usage_trust_reasons usage_trust)) )
                ; "turn_mode", `String turn_mode_label
-               ; "context_ratio", `Float lifecycle.KEC.context_ratio
+               ; "checkpoint_bytes", `Int lifecycle.KEC.checkpoint_bytes
                ]
                @ (match wall_tokens_per_second with
                   | Some v -> [ "tokens_per_second", `Float v ]
@@ -355,8 +353,7 @@ let emit_usage_metrics_and_log
       else Log.Keeper.info
     in
     log_usage
-      "%s: keeper usage telemetry %s runtime_lane=%s reasons=%s input=%d output=%d \
-       context_max=%d"
+      "%s: keeper usage telemetry %s runtime_lane=%s reasons=%s input=%d output=%d"
       updated_meta.name
       (if Keeper_usage_trust.warns_operator usage_trust
        then "untrusted"
@@ -365,7 +362,6 @@ let emit_usage_metrics_and_log
       (String.concat "," reasons)
       result.usage.input_tokens
       result.usage.output_tokens
-      lifecycle.KEC.context_max
    | Keeper_usage_trust.Usage_missing ->
      Log.Keeper.info
        "%s: keeper usage telemetry missing runtime_lane=%s"

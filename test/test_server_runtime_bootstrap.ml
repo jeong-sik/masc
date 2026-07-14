@@ -260,7 +260,7 @@ let test_capability_manifest_configuration_uses_config_root_file () =
         ~clear_manifest:(fun () -> incr clear_calls)
         ~load_manifest:(fun path ->
           load_calls := path :: !load_calls;
-          Some [])
+          Ok [])
         ~set_manifest:(fun (_ : Llm_provider.Capability_manifest.t) -> incr set_calls)
         ()
     in
@@ -282,6 +282,27 @@ let test_capability_manifest_configuration_uses_config_root_file () =
     Alcotest.(check int) "clear manifest cache" 1 !clear_calls;
     Alcotest.(check (list string)) "load manifest" [ manifest ] (List.rev !load_calls);
     Alcotest.(check int) "set manifest override" 1 !set_calls)
+
+let test_capability_manifest_configuration_rejects_invalid_file () =
+  with_temp_dir "capability-manifest-bootstrap-invalid" (fun config_root ->
+    let manifest = Filename.concat config_root "capability-manifest.json" in
+    write_file manifest {|{"schema_version":1,"models":[]}|};
+    Alcotest.check_raises
+      "invalid capability manifest fails startup configuration"
+      (Invalid_argument
+         (Printf.sprintf
+            "invalid OAS capability manifest %s: invalid fixture"
+            manifest))
+      (fun () ->
+         ignore
+           (Server_runtime_bootstrap.configure_oas_capability_manifest_env
+              ~env:(fun _ -> None)
+              ~config_root
+              ~putenv:(fun _ _ -> ())
+              ~clear_manifest:(fun () -> ())
+              ~load_manifest:(fun _ -> Error "invalid fixture")
+              ~set_manifest:(fun _ -> ())
+              ())))
 
 let test_model_catalog_configuration_installs_resolved_catalog () =
   with_temp_dir "model-catalog-bootstrap-install" (fun dir ->
@@ -306,7 +327,7 @@ let test_model_catalog_configuration_installs_resolved_catalog () =
         ~clear_catalog:(fun () -> incr clear_calls)
         ~load_catalog:(fun path ->
           load_calls := path :: !load_calls;
-          Some Llm_provider.Model_catalog.empty)
+          Ok Llm_provider.Model_catalog.empty)
         ~set_catalog:(fun (_ : Llm_provider.Model_catalog.t) -> incr set_calls)
         ()
     in
@@ -328,6 +349,27 @@ let test_model_catalog_configuration_installs_resolved_catalog () =
     Alcotest.(check int) "clear catalog cache" 1 !clear_calls;
     Alcotest.(check (list string)) "load catalog" [ catalog ] (List.rev !load_calls);
     Alcotest.(check int) "set catalog override" 1 !set_calls)
+
+let test_model_catalog_configuration_rejects_invalid_file () =
+  with_temp_dir "model-catalog-bootstrap-invalid" (fun config_root ->
+    let catalog = Filename.concat config_root "oas-models.toml" in
+    write_file catalog "[[models]]\nid_prefix = \"invalid-fixture\"\n";
+    Alcotest.check_raises
+      "invalid model catalog fails startup configuration"
+      (Invalid_argument
+         (Printf.sprintf "invalid OAS model catalog %s: invalid fixture" catalog))
+      (fun () ->
+         ignore
+           (Server_runtime_bootstrap.configure_oas_model_catalog_env
+              ~env:(fun _ -> None)
+              ~config_root
+              ~cwd:config_root
+              ~argv0:(Filename.concat config_root "main_eio.exe")
+              ~putenv:(fun _ _ -> ())
+              ~clear_catalog:(fun () -> ())
+              ~load_catalog:(fun _ -> Error "invalid fixture")
+              ~set_catalog:(fun _ -> ())
+              ())))
 
 let test_model_catalog_configuration_prefers_config_root_catalog () =
   with_temp_dir "model-catalog-bootstrap-config-root" (fun dir ->
@@ -351,7 +393,7 @@ let test_model_catalog_configuration_prefers_config_root_catalog () =
         ~clear_catalog:(fun () -> incr clear_calls)
         ~load_catalog:(fun path ->
           load_calls := path :: !load_calls;
-          Some Llm_provider.Model_catalog.empty)
+          Ok Llm_provider.Model_catalog.empty)
         ~set_catalog:(fun (_ : Llm_provider.Model_catalog.t) -> incr set_calls)
         ()
     in
@@ -439,7 +481,6 @@ let test_model_catalog_resolution_resolves_relative_argv0_from_process_cwd () =
 let test_model_catalog_configuration_delegates_to_agent_sdk_ambient () =
   with_temp_dir "model-catalog-bootstrap-agent-sdk" (fun dir ->
     let putenv_calls = ref [] in
-    let preload_calls = ref 0 in
     let env _ = None in
     let result =
       Server_runtime_bootstrap.configure_oas_model_catalog_env
@@ -447,12 +488,10 @@ let test_model_catalog_configuration_delegates_to_agent_sdk_ambient () =
         ~cwd:dir
         ~argv0:(Filename.concat dir "main_eio.exe")
         ~putenv:(fun name value -> putenv_calls := (name, value) :: !putenv_calls)
-        ~preload_agent_sdk_catalog:(fun () -> incr preload_calls)
         ~agent_sdk_catalog:(fun () -> Some Llm_provider.Model_catalog.empty)
         ()
     in
     Alcotest.(check bool) "no explicit path resolution" true (Option.is_none result);
-    Alcotest.(check int) "preload called once" 1 !preload_calls;
     Alcotest.(check int) "does not write OAS_MODEL_CATALOG" 0
       (List.length !putenv_calls))
 
@@ -4710,8 +4749,14 @@ let () =
             "capability manifest configuration uses config root"
             `Quick test_capability_manifest_configuration_uses_config_root_file;
           Alcotest.test_case
+            "capability manifest configuration rejects invalid file"
+            `Quick test_capability_manifest_configuration_rejects_invalid_file;
+          Alcotest.test_case
             "model catalog configuration installs resolved catalog"
             `Quick test_model_catalog_configuration_installs_resolved_catalog;
+          Alcotest.test_case
+            "model catalog configuration rejects invalid file"
+            `Quick test_model_catalog_configuration_rejects_invalid_file;
           Alcotest.test_case
             "model catalog configuration prefers config-root catalog"
             `Quick test_model_catalog_configuration_prefers_config_root_catalog;

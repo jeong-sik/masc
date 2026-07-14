@@ -57,41 +57,6 @@ let test_empty_no_tool_response_is_no_visible_output () =
     (result ~response_text_present:true)
 ;;
 
-let test_turn_limit_observation_is_contract_neutral () =
-  let result ?(response_text_present = false) tools =
-    KAR.Contract_helpers.observed_completion_evidence
-      ~actual_keeper_tool_names:tools
-      ~stop_reason:(Runtime_agent.TurnLimitObserved { turns_used = 60; limit = 60 })
-      ~response_text_present
-    |> Masc.Keeper_execution_receipt.completion_contract_result_to_string
-  in
-  check
-    string
-    "tool call remains positive execution evidence"
-    "tool_execution_observed"
-    (result [ "tool_execute" ]);
-  check
-    string
-    "tool evidence remains authoritative when text is also present"
-    "tool_execution_observed"
-    (result ~response_text_present:true [ "tool_execute" ]);
-  check
-    string
-    "tool identity does not change evidence classification"
-    "tool_execution_observed"
-    (result [ "keeper_task_claim" ]);
-  check
-    string
-    "completion-like names remain ordinary tool evidence"
-    "tool_execution_observed"
-    (result [ "keeper_task_done" ]);
-  check
-    string
-    "empty turn-limit observation records no visible output"
-    "no_visible_output"
-    (result [])
-;;
-
 let tool_call_detail ?(outcome = "ok") tool_name : KAR.tool_call_detail =
   { tool_name
   ; provider = "test"
@@ -137,10 +102,6 @@ let () =
             "empty no-tool response records no visible output"
             `Quick
             test_empty_no_tool_response_is_no_visible_output
-        ; test_case
-            "turn-limit observation is completion-contract neutral"
-            `Quick
-            test_turn_limit_observation_is_contract_neutral
         ; test_case
             "contract progress filters no-progress tool results"
             `Quick

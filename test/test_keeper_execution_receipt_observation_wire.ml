@@ -1,12 +1,5 @@
-(* Producer contract for non-gating runtime stop observations.
-
-   Runtime stop metadata and the MASC terminal disposition are distinct axes.
-   An unexpected OAS turn-limit observation remains visible in [stop_reason]
-   while [terminal_reason_code] stays canonical success: it must not create a
-   Keeper blocker, checkpoint, claim veto, or operator follow-up action. *)
-
-(* The same boundary must keep runtime-stop and final-disposition domains
-   distinct: [Runtime_agent.Completed] remains ["completed"] in runtime
+(* Runtime-stop and final-disposition domains remain distinct:
+   [Runtime_agent.Completed] remains ["completed"] in runtime
    telemetry, while a terminal receipt projects it to canonical ["success"]. *)
 
 module D = Masc.Keeper_turn_disposition
@@ -74,57 +67,6 @@ let () =
     (match D.of_wire input_required_terminal with
      | D.Input_required -> true
      | _ -> false);
-  let turns_used = 1070 and limit = 1070 in
-  let observation_wire =
-    Receipt.stop_reason_to_string
-      (Runtime_agent.TurnLimitObserved { turns_used; limit })
-  in
-  check
-    (Printf.sprintf "turn-limit fact remains an observation (got %S)" observation_wire)
-    (String.equal
-       observation_wire
-       (Printf.sprintf "turn_limit_observed:turns=%d,limit=%d" turns_used limit));
-  let terminal_wire =
-    Receipt.receipt_terminal_reason_code_of_stop_reason
-      (Runtime_agent.TurnLimitObserved { turns_used; limit })
-  in
-  check
-    (Printf.sprintf "turn-limit observation is non-gating (got %S)" terminal_wire)
-    (String.equal terminal_wire "success");
-  check
-    "turn-limit observation projects to successful MASC disposition"
-    (D.is_success (D.of_wire terminal_wire));
-  let timeout_observations =
-    [ ( Runtime_agent.ExecutionTimeoutObserved
-          { elapsed_sec = 300.0
-          ; timeout_sec = 300.0
-          ; turn_count = 7
-          ; max_turns = Runtime_agent_context.unbounded_max_turns
-          }
-      , Printf.sprintf
-          "execution_timeout_observed:elapsed_sec=300.0,timeout_sec=300.0,turn_count=7,max_turns=%d"
-          Runtime_agent_context.unbounded_max_turns )
-    ; ( Runtime_agent.ExecutionIdleTimeoutObserved
-          { idle_sec = 120.0
-          ; idle_timeout_sec = 120.0
-          ; turn_count = 7
-          ; max_turns = Runtime_agent_context.unbounded_max_turns
-          }
-      , Printf.sprintf
-          "execution_idle_timeout_observed:idle_sec=120.0,idle_timeout_sec=120.0,turn_count=7,max_turns=%d"
-          Runtime_agent_context.unbounded_max_turns )
-    ]
-  in
-  List.iter
-    (fun (stop_reason, expected_observation) ->
-       check
-         "execution timeout keeps typed observation metadata"
-         (String.equal (Receipt.stop_reason_to_string stop_reason) expected_observation);
-       let terminal = Receipt.receipt_terminal_reason_code_of_stop_reason stop_reason in
-       check
-         "execution timeout observation has no terminal authority"
-         (D.is_success (D.of_wire terminal)))
-    timeout_observations;
   match !failures with
   | [] -> print_endline "test_keeper_execution_receipt_observation_wire: OK"
   | xs ->

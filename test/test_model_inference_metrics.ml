@@ -638,7 +638,7 @@ let test_coverage_diagnostics_survive_aggregation () =
         ~ts:(ts -. 5.0)
         ~provider:"glm-coding"
         ~turn_lane:"text_only"
-        ~stop_reason:"turn_limit_observed:turns=3,limit=3"
+        ~stop_reason:"completed"
         ();
     ];
     let agg = M.compute ~base_path:base ~window_minutes:60 in
@@ -656,7 +656,7 @@ let test_coverage_diagnostics_survive_aggregation () =
     let recent = List.hd s.recent_entries in
     check string "recent outcome" "success" recent.re_outcome;
     check (option string) "recent stop reason"
-      (Some "turn_limit_observed:turns=3,limit=3")
+      (Some "completed")
       recent.re_stop_reason;
     check (option string) "recent turn lane"
       (Some "text_only")

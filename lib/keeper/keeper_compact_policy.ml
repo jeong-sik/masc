@@ -10,61 +10,6 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_context_core
 
-type pre_compact_event = {
-  timestamp : float;
-  keeper_name : string;
-  context_ratio : float;
-  message_count : int;
-  token_count : int;
-  strategies : string list;
-  context_window : int;
-  is_local_model : bool;
-  trigger : Compaction_trigger.t;
-}
-
-let record_pre_compact_callback_atomic
-    : (keeper_name:string -> context_ratio:float -> message_count:int -> token_count:int -> strategies:string list -> context_window:int -> is_local_model:bool -> trigger:Compaction_trigger.t -> pre_compact_event option)
-      Atomic.t
-  =
-  Atomic.make
-    (fun ~keeper_name:_ ~context_ratio:_ ~message_count:_ ~token_count:_ ~strategies:_ ~context_window:_ ~is_local_model:_ ~trigger:_ -> None)
-;;
-
-let record_pre_compact_callback
-    ~keeper_name
-    ~context_ratio
-    ~message_count
-    ~token_count
-    ~strategies
-    ~context_window
-    ~is_local_model
-    ~trigger
-  =
-  Atomic.get record_pre_compact_callback_atomic
-    ~keeper_name
-    ~context_ratio
-    ~message_count
-    ~token_count
-    ~strategies
-    ~context_window
-    ~is_local_model
-    ~trigger
-
-let register_record_pre_compact
-    (f :
-       keeper_name:string
-       -> context_ratio:float
-       -> message_count:int
-       -> token_count:int
-       -> strategies:string list
-       -> context_window:int
-       -> is_local_model:bool
-       -> trigger:Compaction_trigger.t
-       -> pre_compact_event option)
-  =
-  Atomic.set record_pre_compact_callback_atomic f
-;;
-
 type compaction_decision =
   | Applied of Compaction_trigger.t
   | Prepared of Compaction_trigger.t

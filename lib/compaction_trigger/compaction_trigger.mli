@@ -1,7 +1,7 @@
 (** Compaction_trigger — closed sum type for context compaction reason.
 
     Replaces the prior [string] / [string option] representation in
-    [compaction_event.trigger] and [pre_compact_event.trigger] so the
+    [compaction_event.trigger] so the
     Otel_metric_store [trigger] label has bounded cardinality (4 values) while
     structured numerical detail (ratio, counts, thresholds) is preserved
     in the JSON receipt via [to_detail_json]. *)

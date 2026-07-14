@@ -183,7 +183,5 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tools_oas_handler_telemetry.mli` - oas-tool-bridge
 - `lib/keeper/keeper_tools_oas_handler.ml` - oas-tool-bridge
 - `lib/keeper/keeper_tools_oas_handler.mli` - oas-tool-bridge
-- `lib/keeper/keeper_tool_failure_recovery_judge.ml` - oas-tool-bridge
-- `lib/keeper/keeper_tool_failure_recovery_judge.mli` - oas-tool-bridge
 - `lib/keeper/keeper_tools_oas.ml` - oas-tool-bridge
 - `lib/keeper/keeper_tools_oas.mli` - oas-tool-bridge

@@ -68,7 +68,6 @@ type config =
   ; provider_cfg : Llm_provider.Provider_config.t
   ; provider : Agent_sdk.Provider.config
   ; model_id : string
-  ; priority : Llm_provider.Request_priority.t option
   ; system_prompt : string
   ; tools : Agent_sdk.Tool.t list
   ; max_turns : int
@@ -182,7 +181,6 @@ let default_config
   ; provider_cfg
   ; provider
   ; model_id = provider_cfg.model_id
-  ; priority = None
   ; system_prompt
   ; tools
   ; max_turns = default_max_turns
@@ -319,11 +317,6 @@ let builder_without_approval
   let builder =
     match config.preserve_thinking with
     | Some preserve -> Agent_sdk.Builder.with_preserve_thinking preserve builder
-    | None -> builder
-  in
-  let builder =
-    match config.priority with
-    | Some priority -> Agent_sdk.Builder.with_priority priority builder
     | None -> builder
   in
   let builder =
@@ -506,7 +499,6 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
     ; cache_system_prompt = config.cache_system_prompt
     ; yield_on_tool = config.yield_on_tool
     ; context_compact_ratio = config.compact_ratio
-    ; priority = config.priority
     ; exit_condition = config.exit_condition
     }
   in
@@ -529,7 +521,6 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
     ; missing_approval_callback_policy =
         Agent_sdk.Hooks.Reject_without_callback
     ; summarizer = config.summarizer
-    ; priority = config.priority
     ; on_run_complete = config.on_run_complete
     ; disclosure_level = config.disclosure_level
     ; disclosure_resolver = config.disclosure_resolver

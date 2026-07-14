@@ -207,7 +207,6 @@ let run_turn
       ?temperature
       ?on_event
       ?(trajectory_acc : Trajectory.accumulator option)
-      ?priority
       ?(degraded_retry_applied = false)
       ?degraded_retry_runtime
       ?fallback_reason
@@ -571,9 +570,6 @@ let run_turn
         ~base_path:config.base_path
         ~keeper_name:meta.name
     in
-    let priority =
-      Option.value priority ~default:Llm_provider.Request_priority.Proactive
-    in
     ignore (Keeper_alerting_path.ensure_sandbox_bundle ~config ~meta);
     let _keeper_sandbox_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
     let keeper_visible_sandbox_root =
@@ -699,7 +695,6 @@ let run_turn
                   ~keeper_name:meta.name
                     ~goal:user_message
                     ?goal_blocks:user_blocks
-                    ~priority
                     ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
                     ?raw_trace
                     ~system_prompt:turn_system_prompt

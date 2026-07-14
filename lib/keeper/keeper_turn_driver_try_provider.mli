@@ -8,7 +8,6 @@ type try_provider_ctx =
   ; name : string
   ; goal : string
   ; goal_blocks : Agent_sdk.Types.content_block list option
-  ; priority : Llm_provider.Request_priority.t option
   ; session_id : string option
   ; system_prompt : string
   ; tools : Agent_sdk.Tool.t list

@@ -2,6 +2,9 @@
 (library
  (name masc)
  (public_name masc)
+ ; OAS no longer publishes compaction lifecycle events. A MASC durable lane
+ ; completion source must exist before this legacy audit module is rewired.
+ (modules (:standard \ keeper_compact_audit))
  (private_modules keeper_fs_durable_directory)
  (libraries
   mcp_protocol

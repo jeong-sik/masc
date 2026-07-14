@@ -1,7 +1,7 @@
 # MASC
 
 [![OCaml](https://img.shields.io/badge/OCaml-%3E%3D%205.4-orange.svg)](https://ocaml.org/)
-[![agent_sdk](https://img.shields.io/badge/agent__sdk-%3E%3D%200.211.9-blue.svg)](https://github.com/jeong-sik/oas)
+[![agent_sdk](https://img.shields.io/badge/agent__sdk-%3E%3D%200.212.0-blue.svg)](https://github.com/jeong-sik/oas)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 [한국어 버전](README.ko.md)

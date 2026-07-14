@@ -79,15 +79,55 @@ let validation_error_data message =
     ; "message", `String message
     ]
 
-let compaction_dispatch_error_data ~stage ~checkpoint_applied error =
+let compaction_dispatch_error_data
+    ?cleanup_error
+    ~stage
+    ~checkpoint_applied
+    error
+  =
   let detail = Keeper_context_runtime.lifecycle_dispatch_error_to_string error in
   error_assoc
-    [ "error_code", `String (error_code_to_string Conflict)
-    ; "message", `String (Printf.sprintf "compaction lifecycle dispatch failed: %s" detail)
-    ; "lifecycle_stage", `String stage
-    ; "checkpoint_applied", `Bool checkpoint_applied
-    ; "dispatch_error", `String detail
-    ]
+    ([ "error_code", `String (error_code_to_string Conflict)
+     ; "message", `String (Printf.sprintf "compaction lifecycle dispatch failed: %s" detail)
+     ; "lifecycle_stage", `String stage
+     ; "checkpoint_applied", `Bool checkpoint_applied
+     ; "dispatch_error", `String detail
+     ]
+     @
+     match cleanup_error with
+     | None -> []
+     | Some cleanup_error ->
+       [ ( "cleanup_dispatch_error"
+         , `String
+             (Keeper_context_runtime.lifecycle_dispatch_error_to_string
+                cleanup_error) ) ])
+
+let compaction_recovery_error_data ?dispatch_error error =
+  let tag = Keeper_context_runtime.compaction_recovery_error_to_tag error in
+  let detail = Keeper_context_runtime.compaction_recovery_error_to_string error in
+  let code =
+    match error with
+    | Keeper_context_runtime.Checkpoint_load_failed Not_found -> Not_found
+    | Compaction_rejected _ | Unexpected_compaction_decision _ ->
+      Precondition_failed
+    | Checkpoint_superseded _ -> Conflict
+    | Checkpoint_load_failed _ | Checkpoint_save_failed _
+    | Checkpoint_save_raised _ -> Internal_error
+  in
+  error_assoc
+    ([ "error_code", `String (error_code_to_string code)
+     ; "message", `String detail
+     ; "compaction_error", `String tag
+     ; "checkpoint_applied", `Bool false
+     ]
+     @
+     match dispatch_error with
+     | None -> []
+     | Some dispatch_error ->
+       [ ( "lifecycle_dispatch_error"
+         , `String
+             (Keeper_context_runtime.lifecycle_dispatch_error_to_string
+                dispatch_error) ) ])
 
 let keeper_sandbox_status_fleet_names ctx =
   let registry_names =
@@ -464,6 +504,7 @@ let keeper_compact_body ~(config : Workspace.config) args : tool_result =
       match
         Keeper_context_runtime.dispatch_keeper_phase_event_result
           ~config ~keeper_name:name
+          ~origin:Keeper_registry.Operator_compact
           Keeper_state_machine.Operator_compact_requested
       with
       | Error error ->
@@ -501,7 +542,6 @@ let keeper_compact_body ~(config : Workspace.config) args : tool_result =
                    error))
          | Ok (Some (_resolved, meta)) ->
            let base_dir = Keeper_types_profile.session_base_dir config in
-           let checkpoint_label = "runtime" in
            let max_tokens = resolve_primary_max_context (Some meta) in
            (match
               Keeper_context_runtime.dispatch_keeper_phase_event_result
@@ -510,9 +550,14 @@ let keeper_compact_body ~(config : Workspace.config) args : tool_result =
                 Keeper_state_machine.Compaction_started
             with
             | Error error ->
-              dispatch_failed "compaction_start_rejected" |> ignore;
+              let cleanup_error =
+                match dispatch_failed "compaction_start_rejected" with
+                | Ok () -> None
+                | Error cleanup_error -> Some cleanup_error
+              in
               tool_result_error_data
                 (compaction_dispatch_error_data
+                   ?cleanup_error
                    ~stage:"compaction_started"
                    ~checkpoint_applied:false
                    error)
@@ -521,11 +566,10 @@ let keeper_compact_body ~(config : Workspace.config) args : tool_result =
                  Keeper_context_runtime.recover_latest_checkpoint_for_overflow_retry
                    ~base_dir
                    ~meta
-                   ~model:checkpoint_label
                    ~trigger:Compaction_trigger.Manual
                    ~primary_model_max_tokens:max_tokens
                with
-               | Some recovery ->
+               | Ok recovery ->
                  (match
                     Keeper_context_runtime.dispatch_compaction_completed
                       ~config ~keeper_name:name
@@ -553,15 +597,15 @@ let keeper_compact_body ~(config : Workspace.config) args : tool_result =
                           [ "name", `String name
                           ; "phase_before", `String phase_before
                           ; ( "phase_after"
-                            , `String
-                                (match
-                                   Keeper_registry.get
-                                     ~base_path:config.base_path
-                                     name
-                                 with
-                                 | Some entry ->
-                                   Keeper_state_machine.phase_to_string entry.phase
-                                 | None -> "unknown") )
+                            , match
+                                Keeper_registry.get
+                                  ~base_path:config.base_path
+                                  name
+                              with
+                              | Some entry ->
+                                `String
+                                  (Keeper_state_machine.phase_to_string entry.phase)
+                              | None -> `Null )
                           ; "applied", `Bool recovery.compaction.applied
                           ; ( "trigger"
                             , match recovery.compaction.trigger with
@@ -569,28 +613,32 @@ let keeper_compact_body ~(config : Workspace.config) args : tool_result =
                                 Compaction_trigger.to_detail_json trigger
                               | None -> `Null )
                           ]))
-               | None ->
-                 let failure_dispatch = dispatch_failed "no_valid_checkpoint" in
-                 Otel_metric_store.inc_counter
-                   Keeper_metrics.(to_string OperatorCompact)
-                   ~labels:
-                     [ ("keeper", name)
-                     ; ( "result"
-                       , Keeper_operator_compact_result.(to_label No_checkpoint) )
-                     ]
-                   ();
+               | Error recovery_error ->
+                 let recovery_tag =
+                   Keeper_context_runtime.compaction_recovery_error_to_tag
+                     recovery_error
+                 in
+                 let failure_dispatch = dispatch_failed recovery_tag in
+                 (match recovery_error with
+                  | Keeper_context_runtime.Checkpoint_load_failed Not_found ->
+                    Otel_metric_store.inc_counter
+                      Keeper_metrics.(to_string OperatorCompact)
+                      ~labels:
+                        [ ("keeper", name)
+                        ; ( "result"
+                          , Keeper_operator_compact_result.(to_label No_checkpoint) )
+                        ]
+                      ()
+                  | _ -> ());
                  (match failure_dispatch with
                   | Error error ->
                     tool_result_error_data
-                      (compaction_dispatch_error_data
-                         ~stage:"compaction_failed"
-                         ~checkpoint_applied:false
-                         error)
+                      (compaction_recovery_error_data
+                         ~dispatch_error:error
+                         recovery_error)
                   | Ok () ->
-                    tool_result_error
-                      (Printf.sprintf
-                         "keeper %s: checkpoint compaction unavailable"
-                         name)))))
+                    tool_result_error_data
+                      (compaction_recovery_error_data recovery_error)))))
 
 let handle_keeper_compact ctx args : tool_result =
   keeper_compact_body ~config:ctx.config args

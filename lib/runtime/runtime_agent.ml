@@ -102,12 +102,13 @@ type config =
   max_tokens : int option;
   temperature : float option;
   hooks : Agent_sdk.Hooks.hooks option;
-  context_reducer : Agent_sdk.Context_reducer.t option;
   guardrails : Agent_sdk.Guardrails.t option;
   event_bus : Agent_sdk.Event_bus.t option;
   session_id : string option;
   description : string option;
   initial_messages : Agent_sdk.Types.message list;
+  model_input_projection
+      : (Agent_sdk.Types.message list -> Agent_sdk.Types.message list) option;
   raw_trace : Agent_sdk.Raw_trace.t option;
   trace_link : (string * string) option;
   enable_thinking : bool option;
@@ -228,6 +229,7 @@ let observed_http_transport
     ~net
     ?clock
     ?body_timeout_s
+    ?model_input_projection
     ()
   : Llm_provider.Llm_transport.t =
   (* RFC-OAS-026: stream_idle_timeout_s moved off transport construction
@@ -245,6 +247,13 @@ let observed_http_transport
       ~net
       ()
   in
+  let project_request
+      (request : Llm_provider.Llm_transport.completion_request)
+    =
+    match model_input_projection with
+    | None -> request
+    | Some project -> { request with messages = project request.messages }
+  in
   provider_http_observation_transport
     { complete_sync =
       (fun req ->
@@ -252,17 +261,27 @@ let observed_http_transport
            per turn for each provider. Removed at Phase 0 closeout. *)
         Log.Misc.debug
           "rfc0095-trace: runtime_runner http_transport.complete_sync invoked";
-        http_transport.complete_sync req);
+        http_transport.complete_sync (project_request req));
       complete_stream =
       (fun ?on_telemetry ~on_event req ->
         (* RFC-0095 Phase 0 diagnostic trace — verify which transport path is invoked
            per turn for each provider. Removed at Phase 0 closeout. *)
         Log.Misc.debug
           "rfc0095-trace: runtime_runner http_transport.complete_stream invoked";
-        http_transport.complete_stream ?on_telemetry ~on_event req);
+        http_transport.complete_stream
+          ?on_telemetry
+          ~on_event
+          (project_request req));
     }
 
-let transport_for_provider ~sw ~net ?clock ?body_timeout_s () =
+let transport_for_provider
+    ~sw
+    ~net
+    ?clock
+    ?body_timeout_s
+    ?model_input_projection
+    ()
+  =
   (* CLI subprocess transport removed (2026-05-31); every provider dispatches
      over HTTP. Runtime MCP policy is applied via the tool-lane resolver and
      per-request patching, not at transport construction, so it is no longer
@@ -275,6 +294,7 @@ let transport_for_provider ~sw ~net ?clock ?body_timeout_s () =
           ~net
           ?clock
           ?body_timeout_s
+          ?model_input_projection
           ()))
 
 let runtime_id_of_config (config : config) =
@@ -888,6 +908,7 @@ let build
          ~net
          ?clock
          ?body_timeout_s:config.body_timeout_s
+         ?model_input_projection:config.model_input_projection
          ()
      with
      | Error _ as e -> e
@@ -982,6 +1003,7 @@ let resume_from_checkpoint
          ~net
          ?clock
          ?body_timeout_s:config.body_timeout_s
+         ?model_input_projection:config.model_input_projection
          ()
      with
      | Error _ as e -> e

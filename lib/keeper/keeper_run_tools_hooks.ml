@@ -14,7 +14,8 @@ type agent_setup =
   { tools : Agent_sdk.Tool.t list
   ; cleanup : unit -> unit
   ; hooks : Agent_sdk.Hooks.hooks
-  ; reducer : Agent_sdk.Context_reducer.t
+  ; model_input_projection :
+      Agent_sdk.Types.message list -> Agent_sdk.Types.message list
   ; acc : hook_accumulator
   ; all_tool_names : string list
   ; tool_context_estimate : Keeper_run_prompt.tool_schema_context_estimate
@@ -618,74 +619,17 @@ let assemble_hooks
       }
     in
     let hooks = Agent_sdk.Hooks.compose ~outer:before_turn_hook ~inner:base_hooks in
-    let reducer =
-      let hydrator_steps =
-        match Keeper_artifact_hydrator.reducer_from_env () with
-        | Some r -> [ r ]
-        | None -> []
-      in
-      let repair_broken_tool_call_pairs_observed messages =
-        let repaired, stats =
-          Keeper_context_core.repair_broken_tool_call_pairs_with_stats messages
-        in
-        let record kind delta =
-          if delta > 0 then
-            Otel_metric_store.inc_counter
-              Keeper_metrics.(to_string ToolPairRepair)
-              ~labels:[ "keeper", agent_name; "kind", kind; "site", "keeper_reducer" ]
-              ~delta:(float_of_int delta)
-              ()
-        in
-        record "dropped_tool_use" stats.dropped_tool_uses;
-        record "dropped_tool_result" stats.dropped_tool_results;
-        if Keeper_context_core.tool_pair_repair_stats_changed stats then (
-          let tool_use_sample_json =
-            List.map
-              (fun (tool_use_id, tool_name) ->
-                 `Assoc
-                   [ "tool_use_id", `String tool_use_id
-                   ; "tool_name", `String tool_name
-                   ])
-              stats.dropped_tool_use_samples
-          in
-          let tool_result_id_json =
-            List.map
-              (fun tool_use_id -> `String tool_use_id)
-              stats.dropped_tool_result_ids
-          in
-          Log.Harness.emit
-            Log.Warn
-            ~details:
-              (`Assoc
-                  [ "keeper_name", `String agent_name
-                  ; "site", `String "keeper_reducer"
-                  ; "dropped_tool_uses", `Int stats.dropped_tool_uses
-                  ; "dropped_tool_results", `Int stats.dropped_tool_results
-                  ; "dropped_tool_use_samples", `List tool_use_sample_json
-                  ; "dropped_tool_result_ids", `List tool_result_id_json
-                  ])
-            (Printf.sprintf
-               "keeper_reducer_pair_repair keeper=%s dropped_tool_uses=%d \
-                dropped_tool_results=%d"
-               agent_name
-               stats.dropped_tool_uses
-               stats.dropped_tool_results));
-        repaired
-      in
-      Agent_sdk.Context_reducer.compose
-        (hydrator_steps
-         @ [ { Agent_sdk.Context_reducer.strategy =
-                 Agent_sdk.Context_reducer.Custom
-                   repair_broken_tool_call_pairs_observed
-             }
-           ; Agent_sdk.Context_reducer.merge_contiguous
-           ])
+    let model_input_projection =
+      let store = Tool_blob_store.create ~base_path:ctx.config.base_path in
+      Keeper_artifact_hydrator.hydrate_recent
+        ~store
+        ~keep_recent:(Keeper_artifact_hydrator.keep_recent_from_env ())
     in
     Ok
       { tools
       ; cleanup = keeper_tools_cleanup
       ; hooks
-      ; reducer
+      ; model_input_projection
       ; acc
       ; all_tool_names
       ; tool_context_estimate

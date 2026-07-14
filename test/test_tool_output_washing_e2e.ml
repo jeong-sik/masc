@@ -9,7 +9,7 @@
         \u2193 marker string
       [Agent_sdk.Types.ToolResult { content = marker }]
         \u2193 message list with marker
-      [Keeper_artifact_hydrator.hydrate_recent]   <- PR 4 (reducer)
+      [Keeper_artifact_hydrator.hydrate_recent]   <- PR 4 (projection)
         \u2193 hydrated message list
       [Server_routes_http_routes_artifacts.blob_response]   <- PR 5 (endpoint)
         \u2193 JSON envelope with full content
@@ -114,11 +114,8 @@ let test_full_flow_externalize_hydrate_serve () =
       metadata = [];
         }
       in
-      let reducer = H.hydrate_recent ~store ~keep_recent:3 in
       let hydrated_msgs =
-        match reducer.Agent_sdk.Context_reducer.strategy with
-        | Agent_sdk.Context_reducer.Custom f -> f [ msg ]
-        | _ -> Alcotest.fail "expected Custom strategy"
+        H.hydrate_recent ~store ~keep_recent:3 [ msg ]
       in
       Alcotest.(check string) "hydrated content matches original payload"
         payload
@@ -184,12 +181,7 @@ let test_recency_budget_holds_across_modules () =
           make_msg ~id:"t4" m4;
         ]
       in
-      let reducer = H.hydrate_recent ~store ~keep_recent:2 in
-      let result =
-        match reducer.Agent_sdk.Context_reducer.strategy with
-        | Agent_sdk.Context_reducer.Custom f -> f msgs
-        | _ -> Alcotest.fail "expected Custom strategy"
-      in
+      let result = H.hydrate_recent ~store ~keep_recent:2 msgs in
       let contents = List.map extract_tool_content result in
       match contents with
       | [ c1; c2; c3; c4 ] ->

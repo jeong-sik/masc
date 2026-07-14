@@ -97,12 +97,15 @@ type config =
         request budget. *)
   ; temperature : float option
   ; hooks : Agent_sdk.Hooks.hooks option
-  ; context_reducer : Agent_sdk.Context_reducer.t option
   ; guardrails : Agent_sdk.Guardrails.t option
   ; event_bus : Agent_sdk.Event_bus.t option
   ; session_id : string option
   ; description : string option
   ; initial_messages : Agent_sdk.Types.message list
+  ; model_input_projection :
+      (Agent_sdk.Types.message list -> Agent_sdk.Types.message list) option
+    (** Caller-owned projection applied only to provider-bound messages.
+        Agent state and checkpoints retain their canonical persisted form. *)
   ; raw_trace : Agent_sdk.Raw_trace.t option
   ; trace_link : (string * string) option
   ; enable_thinking : bool option
@@ -168,12 +171,12 @@ let default_config
   ; max_tokens = None
   ; temperature = provider_cfg.temperature
   ; hooks = None
-  ; context_reducer = None
   ; guardrails = None
   ; event_bus = None
   ; session_id = None
   ; description = None
   ; initial_messages = []
+  ; model_input_projection = None
   ; raw_trace = None
   ; trace_link = None
   ; enable_thinking = None
@@ -269,11 +272,6 @@ let builder_without_approval
   let builder =
     match config.hooks with
     | Some h -> Agent_sdk.Builder.with_hooks h builder
-    | None -> builder
-  in
-  let builder =
-    match config.context_reducer with
-    | Some r -> Agent_sdk.Builder.with_context_reducer r builder
     | None -> builder
   in
   let builder =
@@ -464,7 +462,6 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
     ; max_execution_time_s = config.max_execution_time_s
     ; body_timeout_s = config.body_timeout_s
     ; guardrails = guardrails_of_config config
-    ; context_reducer = config.context_reducer
     ; context_injector = config.context_injector
     ; event_bus = config.event_bus
     ; raw_trace = config.raw_trace

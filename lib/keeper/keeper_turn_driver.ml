@@ -310,6 +310,7 @@ let run_named
     ?(system_prompt = "")
     ?(tools = [])
     ?(initial_messages = [])
+    ?model_input_projection
     ?(max_turns = Runtime_agent_context.unbounded_max_turns)
     ~max_idle_turns
     ?stream_idle_timeout_s
@@ -317,7 +318,6 @@ let run_named
     ?temperature
     ?(accept = fun (_ : Agent_sdk_response.api_response) -> true)
     ?hooks
-    ?context_reducer
     ?raw_trace
     ?on_event
     ?on_yield
@@ -640,6 +640,7 @@ let run_named
             ; system_prompt
             ; tools
             ; initial_messages
+            ; model_input_projection
             ; max_turns
             ; max_idle_turns
             ; stream_idle_timeout_s
@@ -647,7 +648,6 @@ let run_named
             ; temperature
             ; accept
             ; hooks
-            ; context_reducer
             ; raw_trace
             ; transport_resolved
             ; allowed_paths

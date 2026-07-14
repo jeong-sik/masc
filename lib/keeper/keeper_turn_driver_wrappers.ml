@@ -27,7 +27,6 @@ let config_for_label
     ?(max_idle_turns = 3)
     ?stream_idle_timeout_s
     ?hooks
-    ?context_reducer
     ?enable_thinking
     ?compact_ratio
     ?provider_config_transform
@@ -61,7 +60,6 @@ let config_for_label
       stream_idle_timeout_s;
       guardrails = Some Agent_sdk.Guardrails.permissive;
       hooks;
-      context_reducer;
       enable_thinking;
       description;
       compact_ratio;
@@ -85,7 +83,6 @@ let run_model_by_label
     ?max_tokens
     ?(accept = fun (_ : Agent_sdk_response.api_response) -> true)
     ?hooks
-    ?context_reducer
     ?enable_thinking
     ?compact_ratio
     ?provider_config_transform
@@ -98,7 +95,7 @@ let run_model_by_label
   let* config =
     config_for_label ~name:"oas-label-model" ~model_label ~system_prompt
       ~tools ~max_tokens ~temperature
-      ~max_idle_turns ?stream_idle_timeout_s ?hooks ?context_reducer
+      ~max_idle_turns ?stream_idle_timeout_s ?hooks
       ?enable_thinking
       ?compact_ratio
       ?provider_config_transform

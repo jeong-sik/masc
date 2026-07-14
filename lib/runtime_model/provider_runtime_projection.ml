@@ -56,6 +56,7 @@ let binding_auth_is_no_auth (binding : Runtime_binding.t) =
   match binding.Runtime_binding.auth with
   | Runtime_binding.No_auth -> true
   | Runtime_binding.Api_key_env _
+  | Runtime_binding.Oauth_cached_login
   | Runtime_binding.Setup_token_env _ -> false
 ;;
 
@@ -203,6 +204,7 @@ let binding_auth_available (binding : Runtime_binding.t) =
   | Runtime_binding.No_auth -> true
   | Runtime_binding.Api_key_env env_name | Runtime_binding.Setup_token_env env_name ->
     env_present env_name
+  | Runtime_binding.Oauth_cached_login -> binding.Runtime_binding.available
 ;;
 
 let default_model_label_for_binding (binding : Runtime_binding.t) =

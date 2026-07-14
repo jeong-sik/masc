@@ -55,6 +55,7 @@ let binding_auth_is_no_auth (binding : Runtime_binding.t) =
   match binding.Runtime_binding.auth with
   | Runtime_binding.No_auth -> true
   | Runtime_binding.Api_key_env _
+  | Runtime_binding.Oauth_cached_login
   | Runtime_binding.Setup_token_env _ -> false
 ;;
 

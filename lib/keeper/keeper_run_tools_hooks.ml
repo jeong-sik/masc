@@ -142,7 +142,6 @@ let assemble_hooks
   : (agent_setup, Agent_sdk.Error.sdk_error) result
   =
   let acc = ctx.acc in
-  let agent_name = ctx.agent_name in
   let compute_tool_surface = ctx.compute_tool_surface in
   let record_tool_assignment = ctx.record_tool_assignment in
   let config = ctx.config in

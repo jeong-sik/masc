@@ -373,13 +373,13 @@ let test_execution_observations_preserve_tool_replay_suffix () =
         { elapsed_sec = 300.0
         ; timeout_sec = 300.0
         ; turn_count = 4
-        ; max_turns = Agent_sdk.Types.unbounded_max_turns
+        ; max_turns = Runtime_agent_context.unbounded_max_turns
         }
     ; Runtime_agent.ExecutionIdleTimeoutObserved
         { idle_sec = 120.0
         ; idle_timeout_sec = 120.0
         ; turn_count = 4
-        ; max_turns = Agent_sdk.Types.unbounded_max_turns
+        ; max_turns = Runtime_agent_context.unbounded_max_turns
         }
     ]
   in

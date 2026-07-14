@@ -321,7 +321,7 @@ let run_named
     ?(system_prompt = "")
     ?(tools = [])
     ?(initial_messages = [])
-    ?(max_turns = Agent_sdk.Types.unbounded_max_turns)
+    ?(max_turns = Runtime_agent_context.unbounded_max_turns)
     ~max_idle_turns
     ?stream_idle_timeout_s
     ?body_timeout_s

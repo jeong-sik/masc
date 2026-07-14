@@ -60,7 +60,7 @@ let test_of_stop_reason () =
           { elapsed_sec = 300.0
           ; timeout_sec = 300.0
           ; turn_count = 3
-          ; max_turns = Agent_sdk.Types.unbounded_max_turns
+          ; max_turns = Runtime_agent_context.unbounded_max_turns
           }));
   check outcome "idle timeout observation -> no visible reply"
     TO.No_visible_reply
@@ -69,7 +69,7 @@ let test_of_stop_reason () =
           { idle_sec = 120.0
           ; idle_timeout_sec = 120.0
           ; turn_count = 3
-          ; max_turns = Agent_sdk.Types.unbounded_max_turns
+          ; max_turns = Runtime_agent_context.unbounded_max_turns
           }));
   check outcome "chat yield -> checkpoint" TO.Continuation_checkpoint
     (TO.of_stop_reason
@@ -101,7 +101,7 @@ let test_of_result_surface () =
           { elapsed_sec = 300.0
           ; timeout_sec = 300.0
           ; turn_count = 3
-          ; max_turns = Agent_sdk.Types.unbounded_max_turns
+          ; max_turns = Runtime_agent_context.unbounded_max_turns
           }));
   check outcome "idle timeout observation -> no visible reply"
     TO.No_visible_reply
@@ -110,7 +110,7 @@ let test_of_result_surface () =
           { idle_sec = 120.0
           ; idle_timeout_sec = 120.0
           ; turn_count = 3
-          ; max_turns = Agent_sdk.Types.unbounded_max_turns
+          ; max_turns = Runtime_agent_context.unbounded_max_turns
           }))
 
 let test_autonomous_yield_boundary_contract () =

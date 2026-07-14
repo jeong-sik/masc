@@ -1122,7 +1122,7 @@ let test_runtime_agent_execution_limits_are_observations () =
                { elapsed_sec = 300.0
                ; timeout_sec = 300.0
                ; turn_count = 4
-               ; max_turns = Agent_sdk.Types.unbounded_max_turns
+               ; max_turns = Runtime_agent_context.unbounded_max_turns
                })))
   in
   check string "execution timeout event" "completed" execution_timeout.event;
@@ -1139,7 +1139,7 @@ let test_runtime_agent_execution_limits_are_observations () =
                { idle_sec = 120.0
                ; idle_timeout_sec = 120.0
                ; turn_count = 4
-               ; max_turns = Agent_sdk.Types.unbounded_max_turns
+               ; max_turns = Runtime_agent_context.unbounded_max_turns
                })))
   in
   check string "idle timeout event" "completed" idle_timeout.event;
@@ -1362,7 +1362,7 @@ let test_runtime_agent_context_preserves_unbounded_resume_budget () =
       ~system_prompt:""
       ~tools:[]
   in
-  let config = { config with max_turns = Agent_sdk.Types.unbounded_max_turns } in
+  let config = { config with max_turns = Runtime_agent_context.unbounded_max_turns } in
   let checkpoint =
     { Agent_sdk.Checkpoint.version = Agent_sdk.Checkpoint.checkpoint_version
     ; session_id = "session"

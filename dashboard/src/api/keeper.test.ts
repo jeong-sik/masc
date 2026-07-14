@@ -17,6 +17,7 @@ vi.mock('./core', async (importOriginal) => {
 import {
   bootKeeper,
   bulkKeeperDirective,
+  cancelQueuedKeeperMessage,
   clearKeeper,
   deleteKeeperHistorySnapshots,
   fetchKeeperChatHistory,
@@ -24,6 +25,7 @@ import {
   fetchKeeperCheckpoints,
   fetchQueuedKeeperMessageResult,
   fetchKeeperRuntimeTrace,
+  isTerminalQueuedKeeperMessage,
   pauseKeeper,
   parseKeeperRuntimeTrace,
   parseKeeperChatReceipt,
@@ -120,6 +122,25 @@ describe('Keeper chat durable receipt API', () => {
       },
     })
   })
+
+  it.each(['legacy_request_timeout'] as const)(
+    'parses the canonical %s terminal failure kind',
+    (failureKind) => {
+      expect(parseKeeperChatReceipt({
+        schema: 'keeper_chat_queue.receipt.v1',
+        keeper_name: 'echo',
+        receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
+        revision: 7,
+        state: {
+          kind: 'failed',
+          failure_kind: failureKind,
+          detail: 'historical or recovery terminal state',
+          completed_at: 42,
+          outcome_ref: null,
+        },
+      }).state).toMatchObject({ kind: 'failed', failureKind })
+    },
+  )
 
   it('rejects an unknown receipt lifecycle instead of guessing', () => {
     expect(() => parseKeeperChatReceipt({
@@ -324,6 +345,72 @@ describe('fetchQueuedKeeperMessageResult', () => {
     expect(queuedKeeperMessageToReply(result).text).toBe('요청이 취소되었습니다.')
   })
 
+  it('keeps cancelling as a typed non-terminal lifecycle state', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        request_id: 'kmsg_sangsu_cancelling',
+        keeper_name: 'sangsu',
+        status: 'cancelling',
+        result: {
+          cancellation_requested: true,
+          cancelled_by: 'operator',
+        },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ))
+
+    const result = await fetchQueuedKeeperMessageResult('kmsg_sangsu_cancelling')
+
+    expect(result.status).toBe('cancelling')
+    expect(isTerminalQueuedKeeperMessage(result)).toBe(false)
+  })
+
+  it('rejects an unknown request lifecycle instead of coercing it to error', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        request_id: 'kmsg_sangsu_future',
+        keeper_name: 'sangsu',
+        status: 'future_state',
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ))
+
+    await expect(fetchQueuedKeeperMessageResult('kmsg_sangsu_future'))
+      .rejects.toThrow('unsupported keeper message status')
+  })
+
+  it('preserves typed persistence failure detail as a terminal result', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        request_id: 'kmsg_sangsu_persist_failure',
+        keeper_name: 'sangsu',
+        status: 'persistence_failed',
+        ok: false,
+        result: {
+          error: 'request_persistence_failed',
+          attempted_status: 'cancelled',
+          reason: 'terminal callback failed',
+        },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ))
+
+    const result = await fetchQueuedKeeperMessageResult('kmsg_sangsu_persist_failure')
+
+    expect(result.status).toBe('persistence_failed')
+    expect(isTerminalQueuedKeeperMessage(result)).toBe(true)
+    expect(result.result).toEqual(expect.objectContaining({
+      attempted_status: 'cancelled',
+      reason: 'terminal callback failed',
+    }))
+  })
+
   it('suppresses queued continuation checkpoints as non-visible replies', () => {
     const result = {
       requestId: 'kmsg_sangsu_3',
@@ -362,6 +449,29 @@ describe('fetchQueuedKeeperMessageResult', () => {
     expect(reply.text).toBe('')
     expect(reply.details?.turnOutcome).toBe('no_visible_reply')
     expect(reply.details?.replyText).toBeNull()
+  })
+})
+
+describe('cancelQueuedKeeperMessage', () => {
+  it('accepts a durable cancelling acknowledgement without claiming terminal cancellation', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        request_id: 'kmsg_sangsu_cancel',
+        status: 'cancelling',
+      }), {
+        status: 202,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await cancelQueuedKeeperMessage('kmsg_sangsu_cancel')
+
+    expect(result).toEqual({
+      requestId: 'kmsg_sangsu_cancel',
+      status: 'cancelling',
+      message: undefined,
+    })
   })
 })
 

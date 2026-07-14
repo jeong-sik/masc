@@ -45,9 +45,19 @@ val episode_path : keeper_id:string -> trace_id:string -> generation:int -> stri
     the episode. *)
 val next_generation : keeper_id:string -> trace_id:string -> int
 
+(** BasePath-scoped variant of {!next_generation}. Use this whenever the
+    caller already owns a workspace config; it does not derive the runtime root
+    from cached ambient BasePath/cwd state. *)
+val next_generation_for_base_path :
+  base_path:string -> keeper_id:string -> trace_id:string -> int
+
 (** Like {!next_generation}, but preserves a caller-provided generation lower
     bound while still advancing the counter past it. *)
 val next_generation_with_floor : floor:int -> keeper_id:string -> trace_id:string -> int
+
+(** BasePath-scoped variant of {!next_generation_with_floor}. *)
+val next_generation_with_floor_for_base_path :
+  base_path:string -> floor:int -> keeper_id:string -> trace_id:string -> int
 
 (** {1 Atomic writes} *)
 

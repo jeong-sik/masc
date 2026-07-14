@@ -730,10 +730,10 @@ let rec dispatch_event_with_audit_internal
          ; reason = Printf.sprintf "keeper %s not registered" name
          })
   | Some entry
-    when Option.exists
-           (fun lane_id ->
-              not (Keeper_lane.Id.equal lane_id (Keeper_lane.id entry.lane)))
-           expected_lane ->
+    when (match expected_lane with
+          | None -> false
+          | Some lane_id ->
+            not (Keeper_lane.Id.equal lane_id (Keeper_lane.id entry.lane))) ->
     Error
       (Keeper_state_machine.Invalid_transition
          { from_phase = entry.phase

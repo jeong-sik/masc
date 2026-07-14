@@ -13,6 +13,12 @@ type resolved = {
 
 type violation = Implicit_base_path of resolved
 
+type canonicalization_error =
+  { base_path : string
+  ; cause : exn
+  ; backtrace : Printexc.raw_backtrace
+  }
+
 let resolution_source_label = function
   | Explicit_cli -> "explicit_cli"
   | Explicit_env -> "explicit_env"
@@ -47,6 +53,25 @@ let enforce resolved =
   match resolved.resolution_source with
   | Implicit_default -> Error (Implicit_base_path resolved)
   | Explicit_cli | Explicit_env -> Ok ()
+
+let canonicalize_existing base_path =
+  match Unix.realpath base_path with
+  | canonical -> Ok canonical
+  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+  | exception ((Unix.Unix_error _ | Sys_error _) as cause) ->
+    Error
+      { base_path
+      ; cause
+      ; backtrace = Printexc.get_raw_backtrace ()
+      }
+;;
+
+let format_canonicalization_error { base_path; cause; backtrace = _ } =
+  Printf.sprintf
+    "[FATAL] Could not establish canonical BasePath identity for %S: %s"
+    base_path
+    (Printexc.to_string cause)
+;;
 
 let format_violation = function
   | Implicit_base_path resolved ->

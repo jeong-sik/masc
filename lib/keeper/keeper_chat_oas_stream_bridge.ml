@@ -17,20 +17,36 @@ type block_state =
          chunks and is persisted to {!Keeper_chat_media_store} at the block stop,
          emitting a reader-facing URL instead of a byte count. *)
 
-type state = { blocks_by_index : (int * block_state) list }
+type state =
+  { blocks_by_index : (int * block_state) list
+  ; current_message_has_text : bool
+  ; last_completed_message_has_text : bool
+  ; message_open : bool
+  }
 
 type translated_event = {
   bridge_state : state;
   chat_events : Keeper_chat_events.keeper_chat_event list;
 }
 
-let empty_state = { blocks_by_index = [] }
+let empty_state =
+  { blocks_by_index = []
+  ; current_message_has_text = false
+  ; last_completed_message_has_text = false
+  ; message_open = false
+  }
+
+let terminal_message_had_text state =
+  if state.message_open
+  then state.current_message_has_text
+  else state.last_completed_message_has_text
 
 let stream_block_for_index bridge_state index =
   List.assoc_opt index bridge_state.blocks_by_index
 
 let replace_block bridge_state index block =
-  { blocks_by_index =
+  { bridge_state with
+    blocks_by_index =
       (index, block) :: List.remove_assoc index bridge_state.blocks_by_index
   }
 
@@ -41,7 +57,9 @@ let invalidate_media_block bridge_state index =
   replace_block bridge_state index Invalid_media_block
 
 let remove_block bridge_state index =
-  { blocks_by_index = List.remove_assoc index bridge_state.blocks_by_index }
+  { bridge_state with
+    blocks_by_index = List.remove_assoc index bridge_state.blocks_by_index
+  }
 
 let tool_start_is_replay existing tool =
   String.equal existing.tool_call_id tool.tool_call_id
@@ -167,7 +185,7 @@ let tool_args_event ~redact_text ~snapshot bridge_state index args =
               Tool_args_without_start ]
       }
 
-let translate ~redact_text ~on_text_delta ~base_dir bridge_state
+let translate ~redact_text ~base_dir bridge_state
     (evt : Agent_sdk.Types.sse_event) =
   let open Agent_sdk.Types in
   let open Keeper_chat_events in
@@ -175,7 +193,12 @@ let translate ~redact_text ~on_text_delta ~base_dir bridge_state
   | Connected ->
       { bridge_state; chat_events = [ Oas_stream_connected ] }
   | MessageStart { id; model; usage } ->
-      { bridge_state;
+      { bridge_state =
+          { bridge_state with
+            current_message_has_text = false
+          ; message_open = true
+          }
+      ;
         chat_events =
           [
             Oas_stream_message_start
@@ -212,7 +235,14 @@ let translate ~redact_text ~on_text_delta ~base_dir bridge_state
                   ~source_type ~chunks ~encoded_bytes)
           bridge_state.blocks_by_index
       in
-      { bridge_state = empty_state;
+      { bridge_state =
+          { blocks_by_index = []
+          ; current_message_has_text = false
+          ; last_completed_message_has_text =
+              bridge_state.current_message_has_text
+          ; message_open = false
+          }
+      ;
         chat_events = block_ends @ [ Oas_stream_message_stop ]
       }
   | Ping ->
@@ -223,7 +253,13 @@ let translate ~redact_text ~on_text_delta ~base_dir bridge_state
           [ Event_error { message = redact_text ("Timeout: " ^ reason) } ]
       }
   | ContentBlockDelta { delta = TextDelta text; _ } ->
-      { bridge_state; chat_events = [ Text_delta (on_text_delta text) ] }
+      { bridge_state =
+          { bridge_state with
+            current_message_has_text =
+              bridge_state.current_message_has_text || not (String.equal text "")
+          }
+      ; chat_events = [ Text_delta (redact_text text) ]
+      }
   | ContentBlockDelta { index; delta = ThinkingDelta text } ->
       { bridge_state;
         chat_events =

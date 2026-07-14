@@ -60,6 +60,7 @@
   masc
   masc.server
   masc.config
+  masc.host_config
   masc_core
   cmdliner
   eio

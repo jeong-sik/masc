@@ -982,11 +982,24 @@ let test_default_build_lock_is_worktree_local () =
 
 let test_stdio_entrypoint_uses_shared_base_path_guard () =
   let source = read_file (source_file "bin/main_stdio_eio.ml") in
+  let http_runtime_source =
+    read_file (source_file "lib/server/server_runtime_bootstrap.ml")
+  in
   check bool "stdio resolves base path through shared guard" true
     (contains_substring source
        "Server_base_path_guard.resolve_startup_base_path");
   check bool "stdio enforces shared base path guard" true
-    (contains_substring source "Server_base_path_guard.enforce")
+    (contains_substring source "Server_base_path_guard.enforce");
+  check bool "stdio uses common owner initialization" true
+    (contains_substring source
+       "Server_runtime_bootstrap.initialize_owner_state_blocking");
+  check bool "HTTP runtime uses common owner initialization" true
+    (contains_substring http_runtime_source
+       "initialize_owner_state_blocking ~sw ~env ~base_path");
+  check bool "stdio uses common owner activation" true
+    (contains_substring source "Server_runtime_bootstrap.activate_owner_state");
+  check bool "HTTP runtime uses common owner activation" true
+    (contains_substring http_runtime_source "activate_owner_state")
 
 let test_stdio_skips_dashboard_build_and_http_preflight () =
   with_temp_dir "start-masc-script-stdio" (fun dir ->

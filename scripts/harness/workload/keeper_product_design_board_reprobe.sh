@@ -38,7 +38,6 @@ MUTATE="${MUTATE:-0}"
 RUN_AUDIT="${RUN_AUDIT:-1}"
 EXIT_ON_AUDIT_FAIL="${EXIT_ON_AUDIT_FAIL:-}"
 MSG_TIMEOUT_SEC="${MSG_TIMEOUT_SEC:-120}"
-KEEPER_TURN_TIMEOUT_SEC="${KEEPER_TURN_TIMEOUT_SEC:-600}"
 INIT_TIMEOUT_SEC="${INIT_TIMEOUT_SEC:-60}"
 POLL_TIMEOUT_SEC="${POLL_TIMEOUT_SEC:-900}"
 POLL_INTERVAL_SEC="${POLL_INTERVAL_SEC:-10}"
@@ -73,7 +72,6 @@ Environment:
   POLL_TIMEOUT_SEC         Overall result polling window when --mutate is used.
   POLL_INTERVAL_SEC        Poll interval in seconds.
   MSG_TIMEOUT_SEC          HTTP request timeout for MCP tool calls.
-  KEEPER_TURN_TIMEOUT_SEC  Per-keeper Agent.run timeout_sec sent to masc_keeper_msg.
   RUN_AUDIT=0              Skip final audit.
 EOF
 }
@@ -405,8 +403,7 @@ send_prompts() {
       jq -cn \
         --arg name "$keeper" \
         --arg message "$prompt" \
-        --argjson timeout "$KEEPER_TURN_TIMEOUT_SEC" \
-        '{name:$name,message:$message,timeout_sec:$timeout}'
+        '{name:$name,message:$message}'
     )"
     log "sending product/design prompt to $keeper"
     payload="$(tool_call "keeper-product-design-msg-$keeper-$RUN_ID" "masc_keeper_msg" "$args" "$MSG_TIMEOUT_SEC")"

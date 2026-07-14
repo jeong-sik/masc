@@ -73,8 +73,11 @@ val clamp_int : int -> min_v:int -> max_v:int -> int
 
 (** {1 Name Validation} *)
 
-(** Validate a keeper name: non-empty, alphanumeric with dots, dashes, underscores. *)
+(** Validate a keeper name with the shared portable-name grammar. *)
 val validate_name : string -> bool
+
+val invalid_name_error : string -> string
+(** Canonical explanation for a value rejected by {!validate_name}. *)
 
 (** {1 Removed Key Detection} *)
 

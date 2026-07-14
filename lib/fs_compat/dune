@@ -3,7 +3,13 @@
 (library
  (name fs_compat)
  (public_name masc.fs_compat)
- (modules fs_compat mkdir_memo fd_cache atomic_write)
+ (modules
+  fs_compat
+  mkdir_memo
+  fd_cache
+  owned_directory_chain
+  atomic_write
+  atomic_orphan_size_class)
  ; RFC-0071 §3.4 Phase 5 ratchet (warning 4)
  (flags
   (:standard -w +4))

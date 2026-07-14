@@ -16,6 +16,7 @@ module KSM = Keeper_state_machine
 module KLH = Masc.Keeper_lifecycle_hooks
 module KA = Masc.Keeper_keepalive
 module KSR = Masc.Keeper_supervisor_reconcile_keepalive
+module Supervisor_launch = Masc.Keeper_supervisor_launch
 module Lane = Masc.Keeper_lane
 module Shutdown_finalize = Masc.Keeper_shutdown_finalize
 module Shutdown_store = Masc.Keeper_shutdown_store
@@ -1410,6 +1411,26 @@ let test_legacy_stale_fleet_batch_routes_to_restart () =
        | Error err -> fail ("read_meta failed: " ^ err));
       ())
 
+exception Synthetic_cleanup_failure
+
+let test_supervisor_cleanup_suppresses_cancellation_and_classifies_failures () =
+  (match
+     Supervisor_launch.run_cleanup_best_effort (fun () ->
+       raise (Eio.Cancel.Cancelled (Failure "synthetic cleanup cancellation")))
+   with
+   | Supervisor_launch.Cleanup_cancelled -> ()
+   | Supervisor_launch.Cleanup_completed -> fail "cancellation was reported as completed"
+   | Supervisor_launch.Cleanup_failed exn ->
+     failf "cancellation was reported as an ordinary failure: %s" (Printexc.to_string exn));
+  match
+    Supervisor_launch.run_cleanup_best_effort (fun () -> raise Synthetic_cleanup_failure)
+  with
+  | Supervisor_launch.Cleanup_failed Synthetic_cleanup_failure -> ()
+  | Supervisor_launch.Cleanup_failed exn ->
+    failf "unexpected cleanup failure: %s" (Printexc.to_string exn)
+  | Supervisor_launch.Cleanup_completed -> fail "ordinary failure was reported as completed"
+  | Supervisor_launch.Cleanup_cancelled -> fail "ordinary failure was reported as cancellation"
+
 (* The declarative start gate must run before launch side effects. *)
 let test_start_keepalive_gate_precedes_side_effects () =
   let load_source rel =
@@ -1993,6 +2014,8 @@ let () =
     "stale_storm_phase2", [
       test_case "legacy Stale_fleet_batch follows restart path" `Quick
         test_legacy_stale_fleet_batch_routes_to_restart;
+      test_case "supervisor cleanup suppresses cancellation and classifies failures" `Quick
+        test_supervisor_cleanup_suppresses_cancellation_and_classifies_failures;
       test_case "terminal-state launch reject does not announce Running" `Quick
         test_launch_rejected_terminal_state_does_not_announce_running;
       test_case "lane fork reject does not announce Running" `Quick

@@ -23,7 +23,12 @@ type turn_outcome =
       }
   | Deferred of { rejection : Keeper_turn_admission.rejection }
 
-(** [start ~sw ~clock ~base_path ~handle_turn] begins a background fiber that polls [Keeper_chat_queue]
+(** [run ~sw ~clock ~base_path ~handle_turn] runs the queue consumer control
+    loop and does not return before cancellation. The runtime supervisor owns
+    the control-loop fiber, so an exception is observed by that subsystem
+    boundary instead of escaping through an unobserved child fiber.
+
+    The loop polls [Keeper_chat_queue]
     every [MASC_KEEPER_QUEUE_POLL_SEC] seconds (default 1.0).
 
     Per keeper and per tick: when a turn is in flight
@@ -53,12 +58,12 @@ type turn_outcome =
     the decision, the consumer replaces it with a typed [Internal_error]
     terminal outcome instead of retrying a permanently invalid action forever.
 
-    The fiber runs until [sw] is released.
+    The call runs until [sw] is released.
 
     [handle_turn] is responsible for creating an event stream,
     spawning the appropriate delivery adapter, and calling
     [process_single_turn].  See RFC-0217 §Phase 3. *)
-val start :
+val run :
   sw:Eio.Switch.t ->
   clock:_ Eio.Time.clock ->
   base_path:string ->

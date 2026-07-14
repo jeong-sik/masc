@@ -12,6 +12,9 @@ fi
 PORT="${PORT:-$(harness_pick_free_port)}"
 BASE_PATH="${BASE_PATH:-$(harness_mktemp_dir "masc-contract-workspace")}"
 LOG_FILE="${LOG_FILE:-$(harness_mktemp_file "masc-contract-server" ".log")}"
+VERIFIER_PORT="${VERIFIER_PORT:-$(harness_pick_free_port)}"
+VERIFIER_LOG="${VERIFIER_LOG:-$(harness_mktemp_file "masc-contract-verifier" ".jsonl")}"
+VERIFIER_ERR="${VERIFIER_ERR:-$(harness_mktemp_file "masc-contract-verifier" ".log")}"
 KEEP_BASE_PATH="${KEEP_BASE_PATH:-0}"
 KEEP_LOG_FILE="${KEEP_LOG_FILE:-0}"
 STOP_WAIT_SEC="${STOP_WAIT_SEC:-10}"
@@ -33,17 +36,103 @@ export HARNESS_LOG_FILE="${HARNESS_LOG_FILE:-$LOG_FILE}"
 source "${ROOT_DIR}/scripts/harness/lib/mcp_jsonrpc.sh"
 
 SERVER_PID=""
+VERIFIER_PID=""
 
 cleanup() {
   harness_stop_server "$SERVER_PID" "$STOP_WAIT_SEC"
+  harness_stop_server "$VERIFIER_PID" "$STOP_WAIT_SEC"
   if [[ "$KEEP_BASE_PATH" != "1" ]]; then
     rm -rf "$BASE_PATH"
   fi
   if [[ "$KEEP_LOG_FILE" != "1" ]]; then
     rm -f "$LOG_FILE"
+    rm -f "$VERIFIER_LOG" "$VERIFIER_ERR"
   fi
 }
 trap cleanup EXIT
+
+seed_contract_verifier_config() {
+  local config_dir="${BASE_PATH%/}/.masc/config"
+  local provider_base_url="http://127.0.0.1:${VERIFIER_PORT}/v1"
+  mkdir -p \
+    "$config_dir" \
+    "$config_dir/keepers" \
+    "$config_dir/personas" \
+    "$config_dir/prompts"
+
+  cat >"$config_dir/runtime.toml" <<EOF
+[runtime]
+default = "contract_verifier.smoke"
+
+[providers.contract_verifier]
+display-name = "Contract Completion Verifier"
+protocol = "openai-compatible-http"
+endpoint = "$provider_base_url"
+
+[models.smoke]
+api-name = "contract-verifier"
+max-context = 32768
+tools-support = true
+streaming = false
+
+[contract_verifier.smoke]
+is-default = true
+max-concurrent = 1
+EOF
+
+  cat >"$config_dir/oas-models.toml" <<EOF
+[[providers]]
+id = "contract_verifier"
+kind = "openai_compat"
+base_url = "$provider_base_url"
+request_path = "/chat/completions"
+api_key_env = "MASC_CONTRACT_VERIFIER_API_KEY"
+default_model = "contract-verifier"
+capabilities_base = "openai_chat"
+
+[[models]]
+id_prefix = "contract_verifier/contract-verifier"
+base = "openai_chat"
+provider_name = "contract_verifier"
+max_context_tokens = 32768
+max_output_tokens = 1024
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = true
+supports_named_tool_choice = true
+supports_response_format_json = true
+supports_structured_output = true
+supports_native_streaming = false
+EOF
+}
+
+start_contract_verifier() {
+  python3 \
+    "$ROOT_DIR/scripts/harness/contract/openai_verifier_provider.py" \
+    --port "$VERIFIER_PORT" \
+    --log "$VERIFIER_LOG" \
+    >"$VERIFIER_ERR" 2>&1 &
+  VERIFIER_PID="$!"
+  if ! harness_wait_for_health "$VERIFIER_PORT" 10; then
+    echo "FAIL: contract verifier did not become healthy on port ${VERIFIER_PORT}" >&2
+    harness_print_log_tail "$VERIFIER_ERR"
+    return 1
+  fi
+}
+
+verify_completion_verdict_round_trip() {
+  if jq -s -e '
+    ([.[] | select(.status == "accepted" and .phase == "verdict_call")] | length) == 1
+    and
+    ([.[] | select(.status == "accepted" and .phase == "tool_result")] | length) == 1
+  ' "$VERIFIER_LOG" >/dev/null; then
+    echo "  PASS: configured-LLM verdict tool-call round trip"
+    return 0
+  fi
+  echo "FAIL: completion verifier did not observe exactly one verdict call and tool result" >&2
+  harness_print_log_tail "$VERIFIER_LOG"
+  return 1
+}
 
 build_server_exe() {
   if [[ -x "$SERVER_EXE" ]]; then
@@ -136,6 +225,8 @@ run_contract() {
   ); then
     echo "FAIL: ${script_name}" >&2
     harness_print_log_tail "$LOG_FILE"
+    harness_print_log_tail "$VERIFIER_LOG"
+    harness_print_log_tail "$VERIFIER_ERR"
     exit 1
   fi
 }
@@ -145,12 +236,16 @@ echo "[bootstrap] port=${PORT}"
 echo "[bootstrap] base_path=${BASE_PATH}"
 echo "[bootstrap] log_file=${LOG_FILE}"
 echo "[bootstrap] mcp_url=${MCP_URL}"
+echo "[bootstrap] verifier_url=http://127.0.0.1:${VERIFIER_PORT}/v1"
 
 if ! build_server_exe; then
   exit 1
 fi
 echo "[bootstrap] server_exe=${SERVER_EXE}"
-harness_seed_server_config "$ROOT_DIR" "$BASE_PATH"
+seed_contract_verifier_config
+if ! start_contract_verifier; then
+  exit 1
+fi
 
 if ! MCP_TOKEN="$(
   harness_mint_admin_token "$SERVER_EXE" "$PORT" "$BASE_PATH" \
@@ -182,6 +277,7 @@ fi
 
 run_contract 1 4 "streamable_http_contract.sh"
 run_contract 2 4 "golden_path_1_contract.sh"
+verify_completion_verdict_round_trip
 run_contract 3 4 "public_tool_live_sweep.sh"
 run_contract 4 4 "scheduler_live_supported_contract.sh"
 

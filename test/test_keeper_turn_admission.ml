@@ -594,7 +594,8 @@ let test_shutdown_reservation_fences_and_rolls_back () =
      check
        "autonomous lane sees typed shutdown fence"
        (Keeper_shutdown_types.Operation_id.equal reserved operation_id)
-   | `Busy (Keeper_turn_admission.Turn_busy _) | `Ran () ->
+   | `Busy (Keeper_turn_admission.Turn_busy _)
+   | `Ran () ->
      check "autonomous lane cannot cross shutdown fence" false);
   (match Keeper_turn_admission.run_serialized ~base_path ~keeper_name (fun () -> ()) with
    | `Rejected { shutdown_operation_id = Some reserved; _ } ->

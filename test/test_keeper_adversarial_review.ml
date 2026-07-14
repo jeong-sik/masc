@@ -27,7 +27,9 @@ let with_temp_base f =
   Fun.protect ~finally:(fun () -> rm_rf base) (fun () -> f base)
 
 let ensure_fs env =
-  Masc.Server_startup_state.mark_state_ready ~backend_mode:"test";
+  Masc.Server_startup_state.mark_state_ready
+    ~backend:Masc.Server_startup_state.Filesystem_backend
+  |> Result.get_ok;
   Masc_test_deps.init_eio_clock env;
   if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env)
 

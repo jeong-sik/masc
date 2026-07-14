@@ -208,17 +208,6 @@ let resolve_turn_runtime_id (meta : keeper_meta) =
   else
     Ok runtime_id
 
-let keeper_msg_timeout_override args =
-  match Json_util.assoc_member_opt "timeout_sec" args with
-  | None | Some `Null -> Ok None
-  | Some (`Int value) when value > 0 -> Ok (Some (float_of_int value))
-  | Some (`Float timeout_sec)
-    when Float.is_finite timeout_sec && timeout_sec > 0.0 ->
-      Ok (Some timeout_sec)
-  | Some (`Int _) | Some (`Float _) ->
-    Error "timeout_sec must be a positive finite number"
-  | Some _ -> Error "timeout_sec must be a JSON number"
-
 let user_oas_blocks_of_args args =
   match Keeper_multimodal_input.parse_user_blocks args with
   | Error err -> Error err
@@ -234,19 +223,11 @@ let preflight_keeper_msg ctx args : (unit, string) result =
   let name = get_string args "name" "" in
   let message = get_string args "message" "" in
   if not (validate_name name) then
-    Error
-      (Printf.sprintf
-         "invalid keeper name %S (must be non-empty and match \
-          [A-Za-z0-9._-]+; see Keeper_config.validate_name)"
-         name)
-  else if message = "" then
-    Error "message is required"
+    Error (invalid_name_error name)
+  else if message = "" then Error "message is required"
   else
     let direct_reply = get_bool args "direct_reply" false in
-    match keeper_msg_timeout_override args with
-    | Error e -> Error e
-    | Ok _ ->
-    (match Keeper_meta_contract.reject_removed_model_args ~tool_name:"masc_keeper_msg" args with
+    match Keeper_meta_contract.reject_removed_model_args ~tool_name:"masc_keeper_msg" args with
     | Error e -> Error e
     | Ok () ->
     (match reject_removed_keeper_input_keys ~tool_name:"masc_keeper_msg" args with
@@ -274,7 +255,7 @@ let preflight_keeper_msg ctx args : (unit, string) result =
         match Keeper_types_support.ensure_api_keys_for_labels effective_models with
         | Error e -> Error e
         | Ok () ->
-          Keeper_turn_helpers.ensure_local_discovery_ready effective_models))))
+          Keeper_turn_helpers.ensure_local_discovery_ready effective_models)))
 
 (* -- Direct-message turn FSM wrapper ---------------------------------------- *)
 
@@ -406,11 +387,7 @@ let run_keeper_msg_turn_admitted
   let name = get_string args "name" "" in
   let message = get_string args "message" "" in
   if not (validate_name name) then
-    tool_result_error
-      (Printf.sprintf
-         "invalid keeper name %S (must be non-empty and match \
-          [A-Za-z0-9._-]+; see Keeper_config.validate_name)"
-         name)
+    tool_result_error (invalid_name_error name)
   else if message = "" then
     tool_result_error "message is required"
   else
@@ -428,9 +405,6 @@ let run_keeper_msg_turn_admitted
     let direct_reply = get_bool args "direct_reply" false in
     let channel_session_key = get_string_opt args "channel_session_key" in
     let channel = get_string args "channel" "" in
-    (match keeper_msg_timeout_override args with
-    | Error e -> tool_result_error e
-    | Ok keeper_msg_oas_timeout_s ->
     (match Keeper_meta_contract.reject_removed_model_args ~tool_name:"masc_keeper_msg" args with
     | Error e -> tool_result_error ("" ^ e)
     | Ok () ->
@@ -807,7 +781,6 @@ let run_keeper_msg_turn_admitted
 			                                ?user_blocks
 			                                ~runtime_id
 			                                ~world_observation
-			                                ?oas_timeout_s:keeper_msg_oas_timeout_s
 		                                ~generation:meta.runtime.generation
 		                                ?on_event
 		                                ~trajectory_acc
@@ -1011,7 +984,7 @@ let run_keeper_msg_turn_admitted
               in
               tool_result_ok_data reply_json
 
-)))))))))
+))))))))
 
 let handle_keeper_msg
       ?on_text_delta

@@ -90,8 +90,9 @@ val run_if_free
     [`Busy (Turn_busy None)] means the slot is held but the holder has not yet
     published its info (admission in progress on another fiber).
     [`Busy (Shutdown_requested id)] means a durable shutdown reservation owns
-    admission. Exceptions from [f] (including [Eio.Cancel.Cancelled]) release
-    the slot and re-raise.
+    admission; no slot is acquired and no turn body runs.
+    Exceptions from [f] (including [Eio.Cancel.Cancelled]) release the slot and
+    re-raise.
 
     Also returns [`Busy] without attempting the lock when a chat request is
     already parked on this slot ([chat_waiting] is true), or when a busy

@@ -374,7 +374,8 @@ let revive (ctx : _ context) ~original ~candidate =
   | Ok token ->
     observe "acquire" original.name (Keeper_lifecycle_reservation.owner_id token);
     let generation =
-      Keeper_memory_os_io.next_generation_with_floor
+      Keeper_memory_os_io.next_generation_with_floor_for_base_path
+        ~base_path:ctx.config.base_path
         ~floor:(original.runtime.generation + 1)
         ~keeper_id:original.name
         ~trace_id:(Keeper_id.Trace_id.to_string original.runtime.trace_id)

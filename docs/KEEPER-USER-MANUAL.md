@@ -246,7 +246,7 @@ spawn 시 인자로 직접 설정하는 필드.
 
 | 필드 | 타입 | 기본값 | 설명 | 변경 방법 |
 |------|------|--------|------|----------|
-| `name` | string | (필수) | keeper 고유 이름. `[A-Za-z0-9._-]`만 허용 | 재생성 필요 |
+| `name` | string | (필수) | keeper 고유 이름. `[A-Za-z0-9._-]`만 허용하며 경로 예약값 `.`/`..`는 제외 | 재생성 필요 |
 | `goal` | string | (필수) | keeper의 현재 목표 | `masc_keeper_up` 재실행 시 `goal` 인자 |
 | `instructions` | string | `""` | 커스텀 시스템 프롬프트 | `masc_keeper_up`의 `instructions` 인자 |
 | `proactive_enabled` | bool | 기본 `false` | 자발적 메시지 생성 활성화 | `masc_keeper_up`의 `proactive_enabled` 인자 |

@@ -6,7 +6,10 @@ external unsetenv : string -> unit = "masc_test_unsetenv"
 
 let () = Random.self_init ()
 let () = Mirage_crypto_rng_unix.use_default ()
-let () = Server_startup_state.mark_state_ready ~backend_mode:"test"
+let () =
+  Server_startup_state.mark_state_ready
+    ~backend:Server_startup_state.Filesystem_backend
+  |> Result.get_ok
 let () = ignore Dashboard.force_link
 let str_contains s sub =
   let len_s = String.length s in

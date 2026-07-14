@@ -627,7 +627,9 @@ let test_masc_keeper_msg_schema () =
           Alcotest.(check bool) "omits required_tools" false
             (List.mem_assoc "required_tools" props);
           Alcotest.(check bool) "omits required_tool_names" false
-            (List.mem_assoc "required_tool_names" props)
+            (List.mem_assoc "required_tool_names" props);
+          Alcotest.(check bool) "omits request-level timeout_sec" false
+            (List.mem_assoc "timeout_sec" props)
       | None -> Alcotest.fail "masc_keeper_msg missing properties"
 
 (* keeper policy schema tests removed — policy tool schemas no longer exist *)

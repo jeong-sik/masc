@@ -25,11 +25,6 @@ val preflight_keeper_msg :
 (** Run synchronous validation for [handle_keeper_msg] before an async wrapper
     accepts the turn for later execution. *)
 
-val keeper_msg_timeout_override : Yojson.Safe.t -> (float option, string) result
-(** Parse the optional [timeout_sec] override used by [masc_keeper_msg]. The
-    value bounds the OAS turn and, for async dispatch, the request result
-    lifecycle exposed via [masc_keeper_msg_result]. *)
-
 module For_testing : sig
   val direct_owner_conversation_context :
     config:Workspace.config ->

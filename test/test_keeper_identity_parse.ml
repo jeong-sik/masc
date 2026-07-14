@@ -4,7 +4,10 @@
 open Alcotest
 open Masc
 
-let () = Server_startup_state.mark_state_ready ~backend_mode:"test"
+let () =
+  Server_startup_state.mark_state_ready
+    ~backend:Server_startup_state.Filesystem_backend
+  |> Result.get_ok
 
 let minimal_keeper_json ~trace_id =
   `Assoc

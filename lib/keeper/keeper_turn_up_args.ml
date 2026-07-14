@@ -118,7 +118,7 @@ let parse ?(allow_sandbox_fields = false) (ctx : _ context) (args : Yojson.Safe.
     (parsed_args, tool_result) result =
   let name = get_string args "name" "" in
   if not (validate_name name) then
-    Error (tool_result_error "invalid keeper name (allowed: [A-Za-z0-9._-])")
+    Error (tool_result_error (invalid_name_error name))
   else
     match Keeper_meta_contract.reject_removed_model_args ~tool_name:"masc_keeper_up" args with
     | Error e -> Error (tool_result_error e)

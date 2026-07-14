@@ -304,7 +304,6 @@
   test_keeper_tool_execute_descriptor_variant
   test_observability_redact
   test_keeper_tool_call_sse_io_preview
-  test_keeper_stream_text_accum
   test_keeper_tool_descriptor_registry_integrity
   test_voice_command_descriptor_parity
   test_disk_hygiene_script
@@ -635,7 +634,6 @@
   test_keeper_tool_execute_descriptor_variant
   test_observability_redact
   test_keeper_tool_call_sse_io_preview
-  test_keeper_stream_text_accum
   test_keeper_tool_descriptor_registry_integrity
   test_voice_command_descriptor_parity
   test_disk_hygiene_script
@@ -721,6 +719,17 @@
  (name test_keeper_structured_output_coverage)
  (modules test_keeper_structured_output_coverage)
  (libraries alcotest ast_grep masc_test_deps masc.fusion_core))
+
+(test
+ (name test_keeper_keepalive_launch_order_ast)
+ (modules test_keeper_keepalive_launch_order_ast)
+ (libraries alcotest ast_grep))
+
+(test
+ (name test_keeper_memory_os_generation_base_path)
+ (modules test_keeper_memory_os_generation_base_path)
+ (libraries masc_test_deps)
+ (action (setenv MASC_CONFIG_DIR "" (run %{test}))))
 
 (test
  (name test_oas_canonical_delegation)
@@ -1928,8 +1937,6 @@
 (include stanzas/test_keeper_supervisor_observability_10125.inc)
 
 (include stanzas/test_keeper_supervisor_write_meta_source.inc)
-
-(include stanzas/test_keeper_supervisor_finally_cancel_swallow.inc)
 
 (include stanzas/test_keeper_surface_status.inc)
 

@@ -288,7 +288,7 @@ let dispatch_queued_turn state ~sw ~clock ~handle_turn ~keeper_name ~lease_id
             keeper_name
             (Printexc.to_string exn))
 
-let start ~sw ~clock ~base_path ~handle_turn =
+let run ~sw ~clock ~base_path ~handle_turn =
   let dispatch_state = create_dispatch_state () in
   let rec poll_loop () =
     let keeper_names = Keeper_chat_queue.all_keeper_names () in
@@ -432,4 +432,4 @@ let start ~sw ~clock ~base_path ~handle_turn =
     Eio.Time.sleep clock poll_interval_sec;
     poll_loop ()
   in
-  Eio.Fiber.fork ~sw poll_loop
+  poll_loop ()

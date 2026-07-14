@@ -407,11 +407,13 @@ let ensure_thompson_persistence ~base_path =
     Shutdown.register ~name:"thompson_sampling_save" ~priority:24 (fun () ->
       Thompson_sampling.save_stats ())
 
-let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
-    ?env ()
+let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
+    ~proc_mgr ~fs ?env ()
     : Mcp_server.server_state =
   let input_base_path =
-    match String.trim base_path with
+    (* DET-OK: absent transport input selects the explicit owner BasePath;
+       normalization below remains the sole interpretation boundary. *)
+    match String.trim (Option.value input_base_path ~default:base_path) with
     | "" -> None
     | raw -> Some raw
   in
@@ -578,6 +580,308 @@ let lazy_startup_task_names () =
   lazy_startup_plan ()
   |> List.concat_map (fun group -> group.task_names)
 
+type startup_failure_disposition =
+  | Fatal_pre_ready
+  | Degraded_after_ready
+
+let startup_failure_disposition ~state_ready =
+  if state_ready then Degraded_after_ready else Fatal_pre_ready
+
+type owner_initialization_error =
+  | Runtime_config_path_unavailable
+  | Runtime_default_initialization_failed of Runtime.strict_init_error
+  | Keeper_persistence_preparation_failed of
+      Server_bootstrap_loops.keeper_persistence_prepare_error
+  | Keeper_persistence_claim_failed of
+      Server_bootstrap_loops.keeper_persistence_claim_error
+  | Keeper_persistence_start_failed of
+      Server_bootstrap_loops.keeper_persistence_start_error
+  | Startup_path_guard_rejected of Server_base_path_diagnostics.t
+  | Strict_path_guard_rejected of Server_base_path_diagnostics.t
+  | Lazy_startup_barrier_failed of Server_startup_state.lazy_prepare_error
+  | Readiness_transition_failed of Server_startup_state.state_ready_error
+  | Readiness_publication_failed of
+      { expected_backend_mode : string
+      ; observed_backend_mode : string
+      ; observed_phase : Server_startup_state.phase
+      }
+
+exception Owner_initialization_failed of owner_initialization_error
+
+type initialized_owner_state =
+  { state : Mcp_server.server_state
+  ; path_diagnostics : Server_base_path_diagnostics.t
+  ; prepared_keeper_persistence : Server_bootstrap_loops.prepared_keeper_persistence
+  ; domain_pool : Domain_pool.t
+  }
+
+type activated_owner_state =
+  { state : Mcp_server.server_state
+  ; path_diagnostics : Server_base_path_diagnostics.t
+  ; domain_pool : Domain_pool.t
+  }
+
+let owner_initialization_error_to_string = function
+  | Runtime_config_path_unavailable ->
+    "no runtime config path; cannot initialize the default Runtime"
+  | Runtime_default_initialization_failed error ->
+    "Runtime.init_default_degraded failed: "
+    ^ Runtime.strict_init_error_to_string error
+  | Keeper_persistence_preparation_failed error ->
+    "Keeper persistence preparation failed: "
+    ^ Server_bootstrap_loops.keeper_persistence_prepare_error_to_string error
+  | Keeper_persistence_claim_failed error ->
+    "Keeper persistence claim failed: "
+    ^ Server_bootstrap_loops.keeper_persistence_claim_error_to_string error
+  | Keeper_persistence_start_failed error ->
+    "Keeper persistence Keeper-loop start failed: "
+    ^ Server_bootstrap_loops.keeper_persistence_start_error_to_string error
+  | Startup_path_guard_rejected diagnostics ->
+    Option.value
+      diagnostics.Server_base_path_diagnostics.warning
+      ~default:"startup path guard rejected malformed runtime state"
+  | Strict_path_guard_rejected diagnostics ->
+    Option.value
+      diagnostics.Server_base_path_diagnostics.warning
+      ~default:"strict BasePath guard rejected the runtime path configuration"
+  | Lazy_startup_barrier_failed error ->
+    Server_startup_state.lazy_prepare_error_to_string error
+  | Readiness_transition_failed error ->
+    Server_startup_state.state_ready_error_to_string error
+  | Readiness_publication_failed
+      { expected_backend_mode; observed_backend_mode; observed_phase } ->
+    Printf.sprintf
+      "owner readiness publication failed for backend=%s (observed_backend=%s observed_phase=%s)"
+      expected_backend_mode
+      observed_backend_mode
+      (Server_startup_state.phase_to_string observed_phase)
+
+let initialize_owner_state_blocking
+      ~sw
+      ~env
+      ~base_path
+      ?input_base_path
+      ~clock
+      ~mono_clock
+      ~net
+      ~domain_mgr
+      ~proc_mgr
+      ~fs
+      ()
+  =
+  (* DET-OK: the optional transport spelling and the required owner BasePath
+     denote the same requested path when the former is absent. *)
+  let requested_base_path = Option.value input_base_path ~default:base_path in
+  let base_path =
+    match Eio_unix.run_in_systhread (fun () -> Unix.realpath base_path) with
+    | canonical -> canonical
+    | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+    | exception ((Unix.Unix_error _ | Sys_error _) as exception_) ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      let failure : Server_bootstrap_loops.keeper_persistence_failure =
+        { phase = Server_bootstrap_loops.Resolving_base_path
+        ; base_path
+        ; cause =
+            Server_bootstrap_loops.Base_path_identity_unavailable_cause
+              { exception_; backtrace }
+        }
+      in
+      raise
+        (Owner_initialization_failed
+           (Keeper_persistence_preparation_failed
+              (Server_bootstrap_loops.Preparation_base_path_identity_unavailable
+                 failure)))
+  in
+  let path_diagnostics =
+    Server_base_path_diagnostics.detect
+      ~input_base_path:requested_base_path
+      ?env_masc_base_path:((Host_config.from_env ()).base_path_raw)
+      ~effective_base_path:base_path
+      ~effective_masc_root:(Common.masc_dir_from_base_path ~base_path)
+      ()
+  in
+  Server_base_path_diagnostics.log_startup_warning path_diagnostics;
+  if Server_base_path_diagnostics.startup_should_abort path_diagnostics
+  then
+    raise
+      (Owner_initialization_failed
+         (Startup_path_guard_rejected path_diagnostics));
+  if Server_base_path_diagnostics.strict_violation path_diagnostics
+  then
+    raise
+      (Owner_initialization_failed
+         (Strict_path_guard_rejected path_diagnostics));
+  (* [main_eio] caches the normalized operator input before entering Eio.
+     Replace that preflight value with the canonical owner identity before
+     [Workspace.default_config_eio] constructs its backend, otherwise the
+     config record says canonical while its backend still follows an alias. *)
+  Workspace_utils_backend_setup.cache_resolved_base_path base_path;
+  Discovery_cache.set_env ~sw ~net;
+  Discovery_cache.set_base_path base_path;
+  Gc_sampler.run ~sw ~clock ~interval:30.0;
+  Eio.Fiber.fork ~sw (fun () ->
+    let rec loop () =
+      Eio.Time.sleep clock 5.0;
+      (try Keeper_registry_tool_usage_persistence.flush_all_dirty () with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn ->
+         Log.Keeper.warn
+           "tool_usage flush_all_dirty failed: %s"
+           (Printexc.to_string exn));
+      loop ()
+    in
+    loop ());
+  Eio.Fiber.fork ~sw (fun () ->
+    let rec loop () =
+      Eio.Time.sleep clock 2.0;
+      (try Trajectory.flush_all_pending () with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn ->
+         Log.Keeper.warn
+           "trajectory flush_all_pending failed: %s"
+           (Printexc.to_string exn));
+      loop ()
+    in
+    loop ());
+  let t0 = Eio.Time.now clock in
+  Llm_metric_bridge.install ();
+  Llm_metric_bridge.init ~base_path;
+  Log.Server.info
+    "Llm_metric_bridge installed (masc_llm_provider_http_status_total, inference-events JSONL)";
+  Backend.FileSystem.set_mutex_observers
+    ~acquire:(fun ~op ~seconds ->
+      Otel_metric_store.observe_histogram
+        Otel_metric_store.metric_backend_mutex_acquire_sec
+        ~labels:[ "op", op ]
+        seconds)
+    ~held:(fun ~op ~seconds ->
+      Otel_metric_store.observe_histogram
+        Otel_metric_store.metric_backend_mutex_held_sec
+        ~labels:[ "op", op ]
+        seconds);
+  Log.Server.info "Backend_mutex_metrics installed (masc_backend_mutex_* metrics)";
+  Fd_accountant.install_observers
+    ~nofile_soft_limit:Keeper_fd_pressure.process_nofile_soft_limit
+    ~on_resource_error:(fun ~kind error exn ->
+      let kind_name = Fd_accountant.kind_to_string kind in
+      let error_name = Fd_accountant.resource_error_to_string error in
+      let site = "fd_accountant." ^ kind_name in
+      Log.Server.error
+        "Fd_accountant observed OS resource error kind=%s error=%s exception=%s"
+        kind_name
+        error_name
+        (Printexc.to_string exn);
+      match error with
+      | Fd_accountant.Process_fd_exhausted
+      | Fd_accountant.System_fd_exhausted ->
+        Keeper_fd_pressure.note_exception ~site exn
+      | Fd_accountant.Storage_space_exhausted ->
+        Keeper_disk_pressure.note_exception ~site exn);
+  Log.Server.info "Fd_accountant OS resource observers installed";
+  Agent_sdk_log_bridge.install ();
+  Log.Server.info
+    "Agent_sdk_log_bridge installed (agent_sdk.Log -> masc structured log)";
+  let state =
+    create_server_state
+      ~sw
+      ~base_path
+      ~input_base_path:requested_base_path
+      ~clock
+      ~mono_clock
+      ~net
+      ~proc_mgr
+      ~fs
+      ~env
+      ()
+  in
+  (match Runtime.config_path () with
+   | None ->
+     raise (Owner_initialization_failed Runtime_config_path_unavailable)
+   | Some config_path ->
+     (match Runtime.init_default_degraded_report ~config_path with
+      | Ok Runtime.Initialized ->
+        Log.Server.info
+          "Runtime default initialized: %s"
+          (Runtime.get_default_runtime_id ())
+      | Ok (Runtime.Initialized_degraded degradation) ->
+        Log.Server.warn
+          "Runtime default initialized in degraded catalog mode: %s"
+          (Runtime.startup_degradation_to_string degradation);
+        Log.Server.warn
+          "Runtime degraded effective default: %s"
+          (Runtime.get_default_runtime_id ())
+      | Error error ->
+        raise
+          (Owner_initialization_failed
+             (Runtime_default_initialization_failed error))));
+  let t1 = Eio.Time.now clock in
+  Log.Server.info "State created (runtime state) in %.1fs" (t1 -. t0);
+  bootstrap_server_state_blocking state;
+  startup_recover_keeper_lifecycle_transactions state;
+  startup_migrate_retired_keeper_meta_keys state;
+  sync_admin_token_env state;
+  sync_internal_keeper_token_env state;
+  sync_bootable_keeper_credentials state;
+  let prepared_keeper_persistence =
+    match
+      Server_bootstrap_loops.prepare_keeper_persistence
+        ~requested_base_path
+        ~config:(Mcp_server.workspace_config state)
+        ()
+    with
+    | Ok prepared -> prepared
+    | Error error ->
+      raise
+        (Owner_initialization_failed
+           (Keeper_persistence_preparation_failed error))
+  in
+  Runtime_settings.ensure_init ();
+  Runtime_params.restore ~base_path;
+  Log.Server.info "Runtime_params restored from %s" base_path;
+  Keeper_crash_persistence.start_drain_fiber ~sw ~clock;
+  (try
+     Auth.audit_token_uniqueness base_path
+     |> List.iter (fun (token_hash_prefix, agent_names) ->
+       Otel_metric_store.inc_counter
+         Otel_metric_store.metric_auth_credential_token_duplicate
+         ~labels:[ "token_hash_prefix", token_hash_prefix ]
+         ();
+       Log.Server.warn
+         "#9786 credential token shared by %d agents [%s] (token_hash_prefix=%s) — rotate via Auth.create_token to prevent bearer-token routing ambiguity"
+         (List.length agent_names)
+         (String.concat ", " agent_names)
+         token_hash_prefix)
+   with
+   | Eio.Cancel.Cancelled _ as exn -> raise exn
+   | exn ->
+     Log.Server.error
+       "boot: credential token uniqueness audit failed: %s"
+       (Printexc.to_string exn));
+  Log.Server.info "Bootstrap completed in %.1fs" (Eio.Time.now clock -. t1);
+  let stale_threshold_hours = 12 in
+  let build = Build_identity.current () in
+  (match build.binary_commit, build.binary_commit_age_seconds with
+   | Some binary_commit, Some age
+     when age > stale_threshold_hours * Masc_time_constants.hour_int ->
+     let hours = age / Masc_time_constants.hour_int in
+     Log.Server.warn
+       "Server binary commit %s is %d hours old (>%dh threshold). Rebuild + restart recommended to pick up newer fixes; see /health build.binary_commit_age_seconds."
+       binary_commit
+       hours
+       stale_threshold_hours
+   | _ -> ());
+  let domain_pool =
+    Domain_pool.create
+      ~sw
+      ?domain_count:(Env_config.Executor.domain_count_override ())
+      domain_mgr
+  in
+  Domain_pool_ref.set domain_pool;
+  Log.Server.info
+    "Domain_pool created (%d domains) for dashboard/keeper compute"
+    (Domain_pool.domain_count domain_pool);
+  { state; path_diagnostics; prepared_keeper_persistence; domain_pool }
+
 (* Cap the per-boot file list in the sync log line; full counts are always
    logged, names are illustrative. *)
 let max_logged_prompt_sync_entries = 10
@@ -689,55 +993,286 @@ let restore_tool_metrics_from_disk (state : Mcp_server.server_state) =
      Log.Misc.warn "tool metrics restore failed: %s (metrics empty until next emission)"
        (Printexc.to_string exn))
 
+let start_owner_lazy_tasks ~sw state =
+  let run_lazy_task (task_name, task_fn) =
+    Log.Server.info "lazy_task: starting %s" task_name;
+    try
+      task_fn ();
+      Log.Server.info "lazy_task: finished %s" task_name;
+      Server_startup_state.finish_lazy_task ~task:task_name
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn ->
+      let error = Printexc.to_string exn in
+      Log.Server.error "lazy startup task %s failed: %s" task_name error;
+      Server_startup_state.fail_lazy_task ~task:task_name ~error
+  in
+  let task_fn = function
+    | "restore_sessions" -> fun () -> restore_persisted_sessions state
+    | "reconcile_active_agents" -> fun () -> reconcile_active_agents_gauge state
+    | "prompt_bootstrap" -> fun () -> bootstrap_prompt_state state
+    | "keeper_history_migration" -> fun () -> startup_migrate_keeper_histories state
+    | "telemetry_warmup" -> fun () -> warm_tool_registry_from_telemetry state
+    | "tool_metrics_restore" -> fun () -> restore_tool_metrics_from_disk state
+    | "jsonl_prune" -> fun () -> startup_prune_jsonl state
+    | task_name ->
+      raise
+        (Invalid_argument
+           (Printf.sprintf "unknown lazy startup task: %s" task_name))
+  in
+  let task_names = lazy_startup_task_names () in
+  let task_groups =
+    lazy_startup_plan ()
+    |> List.map (fun group ->
+      group, List.map (fun name -> name, task_fn name) group.task_names)
+  in
+  let execution_to_string = function
+    | Parallel -> "parallel"
+    | Serial -> "serial"
+  in
+  let run_lazy_task_group (group, tasks) =
+    Log.Server.info
+      "lazy_task_group: starting %s (%s, %d tasks)"
+      group.group_name
+      (execution_to_string group.execution)
+      (List.length tasks);
+    (match group.execution with
+     | Parallel ->
+       Eio.Fiber.all (List.map (fun task () -> run_lazy_task task) tasks)
+       |> ignore
+     | Serial -> List.iter run_lazy_task tasks);
+    Log.Server.info "lazy_task_group: finished %s" group.group_name
+  in
+  (match Server_startup_state.prepare_lazy_tasks ~tasks:task_names with
+   | Ok () -> ()
+   | Error error ->
+     raise (Owner_initialization_failed (Lazy_startup_barrier_failed error)));
+  Eio.Fiber.fork ~sw (fun () -> List.iter run_lazy_task_group task_groups)
+
+let claim_and_start_keeper_persistence
+      ~prepared_persistence
+      ~sw
+      ~clock
+      ~net
+      ~domain_mgr
+      ~proc_mgr
+      state
+  =
+  let claimed_persistence =
+    match
+      Server_bootstrap_loops.claim_prepared_keeper_persistence
+        ~config:(Mcp_server.workspace_config state)
+        prepared_persistence
+    with
+    | Ok claimed -> claimed
+    | Error error ->
+      raise
+        (Owner_initialization_failed
+           (Keeper_persistence_claim_failed error))
+  in
+  try
+    Server_bootstrap_loops.start_keeper_loops
+      ~claimed_persistence
+      ~sw
+      ~clock
+      ~net
+      ~domain_mgr
+      ~proc_mgr
+      state
+  with
+  | Server_bootstrap_loops.Keeper_persistence_start_failed error ->
+    raise
+      (Owner_initialization_failed
+         (Keeper_persistence_start_failed error))
+;;
+
+let mark_owner_state_ready state =
+  let backend =
+    match (Mcp_server.workspace_config state).Workspace.backend with
+    | Workspace.Memory _ -> Server_startup_state.Memory_backend
+    | Workspace.FileSystem _ -> Server_startup_state.Filesystem_backend
+  in
+  let expected_backend_mode = Server_startup_state.ready_backend_to_string backend in
+  match Server_startup_state.mark_state_ready ~backend with
+  | Error error -> Error (Readiness_transition_failed error)
+  | Ok () ->
+    let observed = Server_startup_state.(!state) in
+    if
+      observed.state_ready
+      && String.equal observed.backend_mode expected_backend_mode
+    then Ok ()
+    else
+      Error
+        (Readiness_publication_failed
+           { expected_backend_mode
+           ; observed_backend_mode = observed.backend_mode
+           ; observed_phase = observed.phase
+           })
+
+let install_keeper_gate_persistence state =
+  let base_path = (Mcp_server.workspace_config state).base_path in
+  match Keeper_approval_queue.install_persistence ~base_path with
+  | Error error ->
+    (* Gate persistence is lane-local. Keep unrelated server subsystems
+       available, but surface the unavailable Gate explicitly instead of
+       treating a malformed durable queue as empty. *)
+    Log.Server.error
+      "keeper_gate: durable queue install failed base_path=%s error=%s"
+      base_path
+      (Keeper_approval_queue.install_error_to_string error)
+  | Ok report ->
+    Log.Server.info
+      "keeper_gate: installed durable queue base_path=%s pending=%d replayed=%d replay_failed=%d"
+      base_path
+      report.loaded_pending
+      report.replayed_deliveries
+      (List.length report.delivery_replay_failures);
+    List.iter
+      (fun (failure : Keeper_approval_queue.delivery_replay_failure) ->
+         Log.Server.error
+           "keeper_gate: durable delivery replay failed approval=%s error=%s"
+           failure.approval_id
+           failure.reason)
+      report.delivery_replay_failures;
+    let resume_report = Keeper_gate.resume_persisted_auto_judges ~base_path in
+    Log.Server.info
+      "keeper_gate: recovered Auto Judge work requested=%d started=%d finalized=%d skipped=%d failed=%d"
+      resume_report.requested
+      (List.length resume_report.started_ids)
+      (List.length resume_report.finalized_ids)
+      (List.length resume_report.skipped_ids)
+      (List.length resume_report.failures);
+    List.iter
+      (fun approval_id ->
+         Log.Server.warn
+           "keeper_gate: recovered Auto Judge no longer startable approval=%s"
+           approval_id)
+      resume_report.skipped_ids;
+    List.iter
+      (fun (failure : Keeper_gate.auto_judge_resume_failure) ->
+         Log.Server.error
+           "keeper_gate: recovered Auto Judge start failed approval=%s error=%s"
+           failure.approval_id
+           failure.reason)
+      resume_report.failures
+;;
+
+let run_legacy_atomic_orphan_migration ~clock state =
+  let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
+  try
+    let started = Eio.Time.now clock in
+    let report = Keeper_msg_async.migrate_legacy_atomic_orphans ~base_path in
+    let elapsed_seconds = Eio.Time.now clock -. started in
+    let examined = report.atomic_orphans_inspected in
+    let labels = [ "stage", "legacy_atomic_orphan_migration" ] in
+    Otel_metric_store.observe_histogram
+      Keeper_metrics.(to_string PersistencePreparationStageDuration)
+      ~labels
+      elapsed_seconds;
+    Otel_metric_store.observe_histogram
+      Keeper_metrics.(to_string PersistencePreparationExamined)
+      ~labels
+      (Float.of_int examined);
+    List.iter
+      (fun (error : Keeper_msg_async.recovery_store_error) ->
+         Log.Server.error
+           "boot: legacy atomic orphan migration store failure path=%s reason=%s"
+           error.path
+           error.reason)
+      report.store_errors;
+    List.iter
+      (fun (error : Keeper_msg_async.recovery_record_error) ->
+         Log.Server.error
+           "boot: legacy atomic orphan migration record failure path=%s request_id=%s keeper=%s"
+           error.path
+           error.request_id
+           (* DET-OK: this is an observation-only label for an absent typed
+              attribution; it cannot select recovery or execution behavior. *)
+           (Option.value error.keeper_name ~default:"<unattributed>"))
+      report.record_errors;
+    Log.Server.info
+      "boot: legacy atomic orphan migration elapsed_seconds=%.6f examined=%d deleted=%d preserved=%d failed=%d store_errors=%d record_errors=%d"
+      elapsed_seconds
+      examined
+      report.atomic_orphans_deleted
+      report.atomic_orphans_preserved
+      report.failed
+      (List.length report.store_errors)
+      (List.length report.record_errors)
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Log.Server.error
+      "boot: legacy atomic orphan migration raised: %s"
+      (Printexc.to_string exn)
+;;
+
+let start_legacy_atomic_orphan_migration ~sw ~clock state =
+  try
+    Eio.Fiber.fork_daemon ~sw (fun () ->
+      run_legacy_atomic_orphan_migration ~clock state;
+      `Stop_daemon)
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string FsFailures)
+      ~labels:
+        [ "subsystem", "server_runtime_bootstrap"
+        ; "operation", "legacy_atomic_orphan_migration_fork"
+        ]
+      ();
+    Log.Server.error
+      "boot: legacy atomic orphan migration fiber was not started: %s"
+      (Printexc.to_string exn)
+;;
+
+let activate_owner_state
+      ~sw
+      ~clock
+      ~net
+      ~domain_mgr
+      ~proc_mgr
+      (initialized : initialized_owner_state)
+  =
+  let state = initialized.state in
+  (* Establish the complete barrier before the irreversible ownership commit.
+     Gate restore, claim, and start stay ordered inside one transport-neutral
+     function. Each composition root publishes readiness only after its own
+     required transport surfaces are installed. *)
+  install_keeper_gate_persistence state;
+  (* Retired temp names and current writes occupy disjoint namespaces: current
+     request writes stage only below [.atomic-staging-v1]. Keep the bounded
+     forensic migration under the exclusive BasePath lease, but outside the
+     readiness critical path. Its failures remain observations and never gain
+     Keeper lifecycle authority. *)
+  start_legacy_atomic_orphan_migration ~sw ~clock state;
+  start_owner_lazy_tasks ~sw state;
+  claim_and_start_keeper_persistence
+    ~prepared_persistence:initialized.prepared_keeper_persistence
+    ~sw
+    ~clock
+    ~net
+    ~domain_mgr
+    ~proc_mgr
+    state;
+  { state
+  ; path_diagnostics = initialized.path_diagnostics
+  ; domain_pool = initialized.domain_pool
+  }
+;;
+
 (* bootstrap_keepers removed: the keeper_autoboot subsystem in
    start_keeper_loops now handles keeper startup in a dedicated
    fiber with a 5-second delay, avoiding runtime bootstrap contention with
    the 7+ dashboard refresh loops that start alongside it. *)
 
-let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
-    ~make_h2_request_handler ~make_h2_error_handler =
+let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_request_handler
+    ~make_h2_request_handler ~make_h2_error_handler () =
   let clock, mono_clock, net, domain_mgr, proc_mgr, fs =
     init_runtime_context env
   in
-
-  Discovery_cache.set_env ~sw ~net;
-  Discovery_cache.set_base_path base_path;
-  (* Start global rate-limit bucket cleanup loop to prevent unbounded growth of
-     per-client buckets.  The loop is a background fiber that wakes periodically
-     and removes stale entries according to MASC_RATE_LIMIT_ENTRY_MAX_AGE_SEC. *)
   Rate_limit.start_global_cleanup_loop ~sw ~clock;
-  (* PR-0.2.D: OCaml runtime GC sampler.  Polls Gc.quick_stat every
-     30s and writes six masc_gc_* gauges so the telemetry backend can
-     answer GC pressure questions without a separate dump endpoint.
-     quick_stat does not walk the heap, so the call cost stays
-     bounded next to the request path. *)
-  Gc_sampler.run ~sw ~clock ~interval:30.0;
-  (* Background fiber: flush dirty tool-usage persistence every 5 seconds.
-     Avoids per-tool-call disk I/O in the hot path. *)
-  Eio.Fiber.fork ~sw (fun () ->
-    let rec loop () =
-      Eio.Time.sleep clock 5.0;
-      (try Keeper_registry_tool_usage_persistence.flush_all_dirty ()
-       with Eio.Cancel.Cancelled _ as e -> raise e
-       | exn ->
-         Log.Keeper.warn "tool_usage flush_all_dirty failed: %s"
-           (Printexc.to_string exn));
-      loop ()
-    in
-    loop ());
-  (* Background fiber: flush pending trajectory entries every 2 seconds.
-     Batches per-tool-call JSONL writes to reduce disk I/O. *)
-  Eio.Fiber.fork ~sw (fun () ->
-    let rec loop () =
-      Eio.Time.sleep clock 2.0;
-      (try Trajectory.flush_all_pending ()
-       with Eio.Cancel.Cancelled _ as e -> raise e
-       | exn ->
-         Log.Keeper.warn "trajectory flush_all_pending failed: %s"
-           (Printexc.to_string exn));
-      loop ()
-    in
-    loop ());
   (* 1. HTTP socket first — Railway healthcheck can reach /health immediately *)
   let config = Server_bootstrap_http.make_http_config ~host ~port in
   (* The listener identity comes only from the effective CLI/bootstrap config
@@ -785,359 +1320,57 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
   server_state := None;
   Server_startup_state.reset ~backend_mode:initial_backend_mode ();
 
-  (* 2. All init in background fiber — isolated on its own switch so a
-     failure in any init-time subsystem (keepers, maintenance, dashboard
-     refresh, etc.) cancels only that subtree and leaves the HTTP accept
-     loop running on the parent switch.  This is P1-5 Hierarchical
-     Supervision Phase 1.
-
-     [create_server_state] still attaches to the parent switch because
-     the resulting [server_state] (and its switch reference) is used by
-     the HTTP request path; we only want background init/maintenance
-     fibers to live on the child switch. *)
+  (* 2. Run owner initialization outside the accept loop. The state and
+     long-lived owner fibers attach to the parent switch because HTTP request
+     handlers use them after this setup fiber returns. A pre-readiness failure
+     exits immediately rather than leaving that partial owner alive; only an
+     auxiliary failure after readiness may continue as degraded serving. *)
   Eio.Fiber.fork ~sw (fun () ->
-    Eio.Switch.run @@ fun init_sw ->
-    let init_state_blocking () =
-      let t0 = Eio.Time.now clock in
-      (* Install the LLM provider metrics bridge BEFORE any subsystem
-         that might issue an LLM call.  Placed here — before server
-         state creation — so it is impossible for an init-time LLM
-         call (e.g. a warmup probe, early keeper fiber) to capture
-         the default noop sink instead of the Otel_metric_store-backed one. *)
-      Llm_metric_bridge.install ();
-      Llm_metric_bridge.init ~base_path;
-      Log.Server.info "Llm_metric_bridge installed (masc_llm_provider_http_status_total, inference-events JSONL)";
-      (* #13885: install backend mutex observers from the top-level
-         masc layer.  Backend/workspace sub-libraries cannot depend on
-         Otel_metric_store without creating dependency cycles, but the global
-         observer refs can be wired before any FileSystem backend writes. *)
-      Backend.FileSystem.set_mutex_observers
-        ~acquire:(fun ~op ~seconds ->
-          Otel_metric_store.observe_histogram
-            Otel_metric_store.metric_backend_mutex_acquire_sec
-            ~labels:[ ("op", op) ]
-            seconds)
-        ~held:(fun ~op ~seconds ->
-          Otel_metric_store.observe_histogram
-            Otel_metric_store.metric_backend_mutex_held_sec
-            ~labels:[ ("op", op) ]
-            seconds);
-      Log.Server.info "Backend_mutex_metrics installed (masc_backend_mutex_* metrics)";
-      Fd_accountant.install_observers
-        ~nofile_soft_limit:Keeper_fd_pressure.process_nofile_soft_limit
-        ~on_resource_error:(fun ~kind error exn ->
-          let kind_name = Fd_accountant.kind_to_string kind in
-          let error_name = Fd_accountant.resource_error_to_string error in
-          let site = "fd_accountant." ^ kind_name in
-          Log.Server.error
-            "Fd_accountant observed OS resource error kind=%s error=%s \
-             exception=%s"
-            kind_name
-            error_name
-            (Printexc.to_string exn);
-          match error with
-          | Fd_accountant.Process_fd_exhausted
-          | Fd_accountant.System_fd_exhausted ->
-            Keeper_fd_pressure.note_exception ~site exn
-          | Fd_accountant.Storage_space_exhausted ->
-            Keeper_disk_pressure.note_exception ~site exn);
-      Log.Server.info "Fd_accountant OS resource observers installed";
-      (* Forward Agent_sdk.Log records (per-turn timing from oas#816 and
-         any subsequent structured emits) into the masc log ring so
-         they land in <base_path>/.masc/logs/system_log_*.jsonl alongside
-         masc's own records.  Without this, OAS's structured Log
-         global sink registry is empty and every Log.info inside
-         agent_sdk is a silent drop. *)
-      Agent_sdk_log_bridge.install ();
-      Log.Server.info "Agent_sdk_log_bridge installed (agent_sdk.Log -> masc structured log)";
-      let state =
-        create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr
-          ~fs ~env ()
-      in
-      (* Initialize the default Runtime singleton from runtime TOML.
-         Must happen after Config_dir_resolver is set up (inside
-         create_server_state) and before any runtime name resolution.
-
-         fail-fast: a missing config path or a missing/broken [runtime].default
-         is fatal — the server cannot route turns without a default Runtime.
-         The OAS capability-catalog gate may degrade only by removing
-         uncatalogued runtimes from the active routing set; it never dispatches
-         through OAS provider_default. *)
-      (match Runtime.config_path () with
-       | Some config_path ->
-         (match Runtime.init_default_degraded_report ~config_path with
-          | Ok Runtime.Initialized ->
-            Log.Server.info "Runtime default initialized: %s"
-              (Runtime.get_default_runtime_id ())
-          | Ok (Runtime.Initialized_degraded degradation) ->
-            Log.Server.warn
-              "Runtime default initialized in degraded catalog mode: %s"
-              (Runtime.startup_degradation_to_string degradation);
-            Log.Server.warn
-              "Runtime degraded effective default: %s"
-              (Runtime.get_default_runtime_id ())
-          | Error err ->
-            Log.Server.error
-              "Runtime.init_default_degraded failed (fatal, refusing to boot): %s"
-              (Runtime.strict_init_error_to_string err);
-            exit 1)
-       | None ->
-         Log.Server.error
-           "No runtime config path; cannot initialize default Runtime \
-            (fatal, refusing to boot)";
-         exit 1);
-      let t1 = Eio.Time.now clock in
-      Log.Server.info "State created (runtime state) in %.1fs" (t1 -. t0);
-      bootstrap_server_state_blocking state;
-      (* Recover per-keeper lifecycle transactions before any other keeper
-         metadata writer or autoboot reader is published. A changed keeper
-         generation is never overwritten; its journal remains visible as an
-         unresolved recovery record. *)
-      startup_recover_keeper_lifecycle_transactions state;
-      (* The retired-key migration performs a raw atomic rewrite without version CAS.
-         Run it before [server_state := Some state] publishes mutation routes,
-         and before connectors, maintenance, or keeper loops can write meta.
-         This makes writer exclusion structural instead of relying on a
-         best-effort boot timing window. *)
-      startup_migrate_retired_keeper_meta_keys state;
-      sync_admin_token_env state;
-      sync_internal_keeper_token_env state;
-      sync_bootable_keeper_credentials state;
-      let path_diagnostics =
-        runtime_path_diagnostics ~input_base_path:base_path state
-      in
-      Server_base_path_diagnostics.log_startup_warning path_diagnostics;
-      if Server_base_path_diagnostics.startup_should_abort path_diagnostics then begin
-        Log.Server.error "%s\nStartup guard rejected malformed runtime state."
-          (Option.value path_diagnostics.warning
-             ~default:
-               "startup guard triggered without a diagnostic warning");
-        exit 1
-      end;
-      if Server_base_path_diagnostics.strict_violation path_diagnostics then begin
-        Log.Server.error "%s\nBase-path strict mode rejected the resolved runtime path configuration."
-          (Option.value path_diagnostics.warning
-             ~default:
-               "strict base-path guard triggered without a diagnostic warning");
-        exit 1
-      end;
-      Runtime_settings.ensure_init ();
-      Runtime_params.restore ~base_path;
-      Log.Server.info "Runtime_params restored from %s" base_path;
-      Keeper_crash_persistence.start_drain_fiber ~sw ~clock;
-      (* #10130: sweep [save_file_atomic] orphan temp files left by
-         SIGKILL'd or ENFILE-crashed prior processes.  Zero-byte
-         orphans are deleted; non-zero orphans (evidence of silent
-         atomic-save data loss) are preserved in
-         [<base_path>/.recovered/] for forensic inspection.  Always
-         runs at boot so each restart publishes fresh cleanup
-         counters.
-
-         #10205 finding 5: the sweep walks every keeper subdirectory
-         under [base_path] ([Sys.readdir] per directory + [Unix.stat]
-         per orphan candidate).  It does NOT need to gate the
-         [Bootstrap completed] log line —
-         the sweep results are advisory diagnostics, not a
-         precondition for serving.  Fork it into a background fiber
-         so the boot hot path completes immediately; the counter
-         and WARN publish asynchronously, which is the right shape
-         for operator dashboards (delta-from-zero, not synchronous
-         readback). *)
-      Eio.Fiber.fork ~sw (fun () ->
-        try
-          let deleted, preserved =
-            Fs_compat.cleanup_atomic_orphans ~base_path ()
-          in
-          if deleted > 0 then
-            Otel_metric_store.inc_counter
-              Otel_metric_store.metric_fs_atomic_orphans_cleaned
-              ~labels:[ ("size_class", Atomic_orphan_size_class.(to_label Empty)) ]
-              ~delta:(float_of_int deleted)
-              ();
-          if preserved > 0 then
-            Otel_metric_store.inc_counter
-              Otel_metric_store.metric_fs_atomic_orphans_cleaned
-              ~labels:[ ("size_class", Atomic_orphan_size_class.(to_label With_data)) ]
-              ~delta:(float_of_int preserved)
-              ();
-          if deleted + preserved > 0 then
-            Log.Server.warn
-              "boot: cleaned %d save_file_atomic orphans (%d empty, \
-               %d preserved with data in .recovered/ — see #10130)"
-              (deleted + preserved) deleted preserved
-        with Eio.Cancel.Cancelled _ as e -> raise e
-           | exn ->
-             Log.Server.error
-               "boot: atomic orphan sweep failed: %s"
-               (Printexc.to_string exn));
-      (* #9786: audit credential store for shared bearer tokens.
-         When two credentials hash to the same token,
-         [find_credential_by_token] silently routes to the FIRST
-         match — which is exactly the [bearer token belongs to X]
-         rejection observed when the second agent's name does not
-         match the first agent's credential.  Surface the
-         duplicate at boot so operators can rotate tokens before
-         requests start failing. *)
-      (try
-         let groups = Auth.audit_token_uniqueness base_path in
-         List.iter
-           (fun (token_hash_prefix, agent_names) ->
-             Otel_metric_store.inc_counter
-               Otel_metric_store.metric_auth_credential_token_duplicate
-               ~labels:[ ("token_hash_prefix", token_hash_prefix) ]
-               ();
-             Log.Server.warn
-               "#9786 credential token shared by %d agents \
-                [%s] (token_hash_prefix=%s) — rotate via \
-                Auth.create_token to prevent bearer-token routing \
-                ambiguity"
-               (List.length agent_names)
-               (String.concat ", " agent_names)
-               token_hash_prefix)
-           groups
-       with Eio.Cancel.Cancelled _ as e -> raise e
-          | exn ->
-            Log.Server.error
-              "boot: credential token uniqueness audit failed: %s"
-              (Printexc.to_string exn));
-      Log.Server.info "Bootstrap completed in %.1fs" (Eio.Time.now clock -. t1);
-      (* 2026-05-05 deploy-gap audit (#12943 follow-up): warn loudly when
-         the running binary is more than [stale_threshold_hours] behind
-         the build-env commit timestamp.  Runtime repo HEAD is intentionally
-         ignored here: it is checkout truth, not proof that this executable
-         was rebuilt from that commit. *)
-      let stale_threshold_hours = 12 in
-      let build = Build_identity.current () in
-      (match build.binary_commit, build.binary_commit_age_seconds with
-       | Some binary_commit, Some age
-         when age > stale_threshold_hours * Masc_time_constants.hour_int ->
-         let hours = age / Masc_time_constants.hour_int in
-         Log.Server.warn
-           "Server binary commit %s is %d hours old (>%dh threshold). \
-            Rebuild + restart recommended to pick up newer fixes; see \
-            /health build.binary_commit_age_seconds."
-           binary_commit
-           hours stale_threshold_hours
-       | _ -> ());
-      (state, path_diagnostics)
-    in
-    let run_lazy_task (task_name, task_fn) =
-      Log.Server.info "lazy_task: starting %s" task_name;
-      try
-        task_fn ();
-        Log.Server.info "lazy_task: finished %s" task_name;
-        Server_startup_state.finish_lazy_task ~task:task_name
+    let handle_initialization_failure error =
+      match
+        startup_failure_disposition
+          ~state_ready:Server_startup_state.(!state).state_ready
       with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | exn ->
-          let error = Printexc.to_string exn in
-          Log.Server.error "lazy startup task %s failed: %s" task_name error;
-          Server_startup_state.fail_lazy_task ~task:task_name ~error
-    in
-    let start_lazy_startup state =
-      let task_fn = function
-        | "restore_sessions" -> fun () -> restore_persisted_sessions state
-        | "reconcile_active_agents" -> fun () ->
-            reconcile_active_agents_gauge state
-        | "prompt_bootstrap" -> fun () -> bootstrap_prompt_state state
-        | "keeper_history_migration" -> fun () ->
-            startup_migrate_keeper_histories state
-        | "telemetry_warmup" -> fun () ->
-            warm_tool_registry_from_telemetry state
-        | "tool_metrics_restore" -> fun () ->
-            restore_tool_metrics_from_disk state
-        | "jsonl_prune" -> fun () -> startup_prune_jsonl state
-        | task_name ->
-            raise
-              (Invalid_argument
-                 (Printf.sprintf "unknown lazy startup task: %s" task_name))
-      in
-      let task_names = lazy_startup_task_names () in
-      let task_groups =
-        lazy_startup_plan ()
-        |> List.map (fun group ->
-               (group, List.map (fun name -> (name, task_fn name)) group.task_names))
-      in
-      let execution_to_string = function
-        | Parallel -> "parallel"
-        | Serial -> "serial"
-      in
-      let run_lazy_task_group (group, tasks) =
-        Log.Server.info
-          "lazy_task_group: starting %s (%s, %d tasks)"
-          group.group_name
-          (execution_to_string group.execution)
-          (List.length tasks);
-        (match group.execution with
-         | Parallel ->
-             Eio.Fiber.all
-               (List.map (fun task () -> run_lazy_task task) tasks)
-             |> ignore
-         | Serial -> List.iter run_lazy_task tasks);
-        Log.Server.info "lazy_task_group: finished %s" group.group_name
-      in
-      Server_startup_state.activate_lazy
-        ~backend_mode:(Workspace.backend_name (Mcp_server.workspace_config state))
-        ~tasks:task_names;
-      Eio.Fiber.fork ~sw (fun () -> List.iter run_lazy_task_group task_groups)
+      | Fatal_pre_ready ->
+        Log.Server.error
+          "[FATAL] Critical startup failed before readiness; refusing partial BasePath ownership: %s"
+          error;
+        exit 1
+      | Degraded_after_ready ->
+        Server_startup_state.mark_degraded ~error;
+        Log.Server.error
+          "Auxiliary initialization failed after readiness (HTTP remains available in degraded state): %s"
+          error
     in
     try
       Server_startup_state.mark_blocking ~backend_mode:initial_backend_mode;
-      let state, path_diagnostics =
-        init_state_blocking ()
+      let initialized_owner =
+        initialize_owner_state_blocking ~sw ~env ~base_path ?input_base_path
+          ~clock ~mono_clock ~net ~domain_mgr ~proc_mgr ~fs ()
       in
+      let activated_owner =
+        activate_owner_state
+        ~sw
+        ~clock
+        ~net
+        ~domain_mgr
+        ~proc_mgr
+        initialized_owner
+      in
+      let state = activated_owner.state in
+      (* Authentication wrappers treat [server_state = Some _] as the mutation
+         capability boundary. Publish only after transport-neutral activation
+         has restored Gate state and started the owner persistence lanes. *)
       server_state := Some state;
-      let gate_base_path = (Mcp_server.workspace_config state).base_path in
-      (match Keeper_approval_queue.install_persistence ~base_path:gate_base_path with
-       | Ok report ->
-         Log.Server.info
-           "keeper_gate: installed durable queue base_path=%s pending=%d replayed=%d replay_failed=%d"
-           gate_base_path
-           report.loaded_pending
-           report.replayed_deliveries
-           (List.length report.delivery_replay_failures);
-         List.iter
-           (fun (failure : Keeper_approval_queue.delivery_replay_failure) ->
-              Log.Server.error
-                "keeper_gate: durable delivery replay failed approval=%s error=%s"
-                failure.approval_id
-                failure.reason)
-           report.delivery_replay_failures;
-         let resume_report =
-           Keeper_gate.resume_persisted_auto_judges ~base_path:gate_base_path
-         in
-         Log.Server.info
-           "keeper_gate: recovered Auto Judge work requested=%d started=%d finalized=%d skipped=%d failed=%d"
-           resume_report.requested
-           (List.length resume_report.started_ids)
-           (List.length resume_report.finalized_ids)
-           (List.length resume_report.skipped_ids)
-           (List.length resume_report.failures);
-         List.iter
-           (fun approval_id ->
-              Log.Server.warn
-                "keeper_gate: recovered Auto Judge no longer startable approval=%s"
-                approval_id)
-           resume_report.skipped_ids;
-         List.iter
-           (fun (failure : Keeper_gate.auto_judge_resume_failure) ->
-              Log.Server.error
-                "keeper_gate: recovered Auto Judge start failed approval=%s error=%s"
-                failure.approval_id
-                failure.reason)
-           resume_report.failures
-       | Error error ->
-         (* The queue reports malformed snapshots through the shared
-            persistence-read-drop metric and delivery failures through the
-            approval queue metric. Keep unrelated server subsystems available,
-            but leave an explicit startup error instead of treating the queue
-            as empty. *)
-         Log.Server.error
-           "keeper_gate: durable queue install failed base_path=%s error=%s"
-           gate_base_path
-           (Keeper_approval_queue.install_error_to_string error));
-      Server_startup_state.mark_state_ready
-        ~backend_mode:(Workspace.backend_name (Mcp_server.workspace_config state));
+      (* Global readiness is the transport-neutral owner capability, not a
+         quorum over optional transports. Mark it before starting fallible
+         Discord/gRPC/WS/WebRTC/dashboard auxiliaries so one transport cannot
+         turn an already-published HTTP owner into a process-wide fatal
+         pre-readiness failure. Each auxiliary owns its typed health state. *)
+      (match mark_owner_state_ready state with
+       | Ok () -> ()
+       | Error error -> raise (Owner_initialization_failed error));
+      let path_diagnostics = activated_owner.path_diagnostics in
       let resolved_base, masc_dir =
         Server_bootstrap_loops.start_background_maintenance ~sw ~clock ~env state
       in
@@ -1152,24 +1385,14 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       Server_slack_in_process_gateway.start ~sw ~env ~state;
       Server_bootstrap_http.print_startup_banner ~config ~resolved_base ~base_path
         ~masc_dir ~path_diagnostics;
-      (* Create the shared Domain_pool for dashboard compute and optional
-         keeper offload.  The raw Executor_pool reference remains available
-         for existing dashboard call sites, but new runtime call sites should
-         go through Domain_pool_ref to preserve IO/CPU weight policy. *)
-      let domain_pool =
-        Domain_pool.create
-          ~sw
-          ?domain_count:(Env_config.Executor.domain_count_override ())
-          domain_mgr
-      in
-      Domain_pool_ref.set domain_pool;
-      Server_dashboard_http.set_executor_pool (Domain_pool.executor_pool domain_pool);
-      Log.Server.info
-        "Domain_pool created (%d domains) for dashboard/keeper compute"
-        (Domain_pool.domain_count domain_pool);
-      (* Start auxiliary transports before optional warmups and keeper loops.
-         Otherwise HTTP can report ready while gRPC/WS startup is still stuck
-         behind heavier startup work. *)
+      (* Dashboard owns only its executor projection; the shared pool itself
+         belongs to the transport-neutral owner bootstrap so stdio Keepers get
+         the same offload behavior. *)
+      Server_dashboard_http.set_executor_pool
+        (Domain_pool.executor_pool activated_owner.domain_pool);
+      (* Auxiliary transports start after owner readiness and report their own
+         availability. They must not gain lifecycle authority over HTTP or
+         unrelated Keeper lanes. *)
       (* gRPC workspace transport (default-on, opt-out via MASC_GRPC_ENABLED=0) *)
       let tool_dispatcher tool_name args_json =
         let arguments =
@@ -1462,16 +1685,13 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
           ~sw
           ~clock
           ~request_authority:background_request_authority);
-      start_lazy_startup state;
-      (* RFC-0206: runtime catalog startup validation removed; Runtime.init_default
-         already fail-fasts on an invalid runtime config at boot. *)
-      Server_bootstrap_loops.start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr state
+      ()
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
+    | Owner_initialization_failed error ->
+      handle_initialization_failure (owner_initialization_error_to_string error)
     | exn ->
-      Server_startup_state.mark_degraded ~error:(Printexc.to_string exn);
-      Log.Server.error "Background init failed (HTTP still serving): %s"
-        (Printexc.to_string exn));
+      handle_initialization_failure (Printexc.to_string exn));
 
   (* 2b. Startup watchdog: if init does not reach state_ready within timeout,
      log and exit so external process managers can restart the server.

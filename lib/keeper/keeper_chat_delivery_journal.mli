@@ -2,7 +2,12 @@
 
     Inference and transcript delivery are deliberately separate phases. A
     terminal model/timeout result is persisted before transcript append, and a
-    request becomes [Final] only after the exact transcript slot is durable. *)
+    request becomes [Final] only after the exact transcript slot is durable.
+
+    All persistence mutation, load, inventory, and recovery functions in this
+    module must be called from an Eio fiber. Per-record serialization is
+    cooperative and intentionally has no second non-Eio lock path. Pure codec
+    helpers under [For_testing] do not require an Eio runtime. *)
 
 module Identity = Keeper_chat_delivery_identity
 
@@ -158,9 +163,16 @@ val dashboard_queue_user_row_origin :
 (** Complete every durable non-final delivery without re-running inference.
     Recovery is lane-local: one malformed Keeper journal is reported without
     preventing other Keeper journals from converging. *)
+type recovery_failure_scope =
+  | Root_inventory
+  | Keeper_inventory of { keeper_name : string }
+  | Delivery_record of
+      { keeper_name : string
+      ; delivery_ref : string
+      }
+
 type recovery_failure =
-  { keeper_name : string
-  ; delivery_ref : string
+  { scope : recovery_failure_scope
   ; error : error
   }
 

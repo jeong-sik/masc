@@ -20,12 +20,14 @@ type t = {
 
 let backend_phase_of_string s =
   match String.lowercase_ascii s with
+  | "memory" -> Some Server_state_product.Backend.Memory
   | "filesystem" | "fs" -> Some Server_state_product.Backend.Filesystem
   | "degraded" -> Some Server_state_product.Backend.Degraded
   | "uninitialized" | "unknown" -> Some Server_state_product.Backend.Uninitialized
   | _ -> None
 
 let backend_phase_to_string = function
+  | Server_state_product.Backend.Memory -> "memory"
   | Server_state_product.Backend.Filesystem -> "filesystem"
   | Server_state_product.Backend.Degraded -> "degraded"
   | Server_state_product.Backend.Uninitialized -> "unknown"
@@ -189,97 +191,135 @@ let mark_blocking ~backend_mode =
       of_product product current.started_at current.path_diagnostics
         current.config_resolution)
 
-let mark_state_ready ~backend_mode =
-  update (fun current ->
-      let open Server_state_product in
-      let product = to_product current in
-      (* Resolve backend if still uninitialized. *)
-      let product =
-        match product.backend with
-        | Backend.Uninitialized ->
-            let event =
-              match String.lowercase_ascii backend_mode with
-              | "filesystem" | "fs" -> Some Backend.Resolve_fs
-              | _ -> None
-            in
-            (match event with
-             | Some ev ->
-                 (match apply_backend_event product ev with
-                  | Ok p -> p
-                  | Error _ -> product)
-             | None -> product)
-        | _ -> product
-      in
-      (* Boot complete if still booting. *)
-      let product =
-        match product.lifecycle with
-        | Lifecycle.Booting ->
-            (match apply_lifecycle_event product Boot_complete with
-             | Ok p -> p
-             | Error _ -> product)
-        | _ -> product
-      in
-      (* Set ready if not already. *)
-      let product =
-        match product.readiness with
-        | Readiness.NotReady ->
-            (match apply_readiness_event product Set_ready with
-             | Ok p -> p
-             | Error _ -> product)
-        | Readiness.Ready -> product
-      in
-      of_product product current.started_at current.path_diagnostics
-        current.config_resolution)
+type ready_backend =
+  | Memory_backend
+  | Filesystem_backend
 
-let activate_lazy ~backend_mode ~tasks =
-  update (fun current ->
-      let open Server_state_product in
-      let product = to_product current in
-      (* Resolve backend. *)
-      let product =
-        match product.backend with
-        | Backend.Uninitialized ->
-            let event =
-              match String.lowercase_ascii backend_mode with
-              | "filesystem" | "fs" -> Some Backend.Resolve_fs
-              | _ -> None
-            in
-            (match event with
-             | Some ev ->
-                 (match apply_backend_event product ev with
-                  | Ok p -> p
-                  | Error _ -> product)
-             | None -> product)
-        | _ -> product
-      in
-      (* Boot complete. *)
-      let product =
-        match product.lifecycle with
-        | Lifecycle.Booting ->
-            (match apply_lifecycle_event product Boot_complete with
-             | Ok p -> p
-             | Error _ -> product)
-        | _ -> product
-      in
-      (* Set ready. *)
-      let product =
-        match product.readiness with
-        | Readiness.NotReady ->
-            (match apply_readiness_event product Set_ready with
-             | Ok p -> p
-             | Error _ -> product)
-        | Readiness.Ready -> product
-      in
-      (* Apply lazy tasks. *)
-      let product =
-        if tasks <> [] then
-          match apply_lazy_event product (Tasks_appear tasks) with
-          | Ok p -> p
-          | Error _ -> product
-        else product
-      in
-      of_product product current.started_at current.path_diagnostics
-        current.config_resolution)
+type state_ready_transition_stage =
+  | Boot_completion
+  | Backend_resolution
+  | Readiness_publication
+
+type state_ready_error =
+  | State_ready_transition_rejected of
+      { stage : state_ready_transition_stage
+      ; reason : string
+      }
+
+let ready_backend_to_string = function
+  | Memory_backend -> "memory"
+  | Filesystem_backend -> "filesystem"
+
+let state_ready_transition_stage_to_string = function
+  | Boot_completion -> "boot_completion"
+  | Backend_resolution -> "backend_resolution"
+  | Readiness_publication -> "readiness_publication"
+
+let state_ready_error_to_string = function
+  | State_ready_transition_rejected { stage; reason } ->
+    Printf.sprintf
+      "server ready transition rejected at %s: %s"
+      (state_ready_transition_stage_to_string stage)
+      reason
+
+let transition_error stage reason =
+  Error (State_ready_transition_rejected { stage; reason })
+
+let mark_state_ready ~backend =
+  let current = !state in
+  let open Server_state_product in
+  let product = to_product current in
+  let after_boot =
+    match product.lifecycle with
+    | Lifecycle.Booting ->
+      Result.map_error
+        (fun reason -> State_ready_transition_rejected
+            { stage = Boot_completion; reason })
+        (apply_lifecycle_event product Lifecycle.Boot_complete)
+    | Lifecycle.Serving -> Ok product
+    | Lifecycle.Draining | Lifecycle.Stopped ->
+      transition_error
+        Boot_completion
+        (Printf.sprintf
+           "lifecycle=%s cannot publish startup readiness"
+           (Lifecycle.phase_to_string product.lifecycle))
+  in
+  let after_backend =
+    Result.bind after_boot (fun product ->
+      match product.backend, backend with
+      | Backend.Uninitialized, Memory_backend ->
+        Result.map_error
+          (fun reason -> State_ready_transition_rejected
+              { stage = Backend_resolution; reason })
+          (apply_backend_event product Backend.Resolve_memory)
+      | Backend.Uninitialized, Filesystem_backend ->
+        Result.map_error
+          (fun reason -> State_ready_transition_rejected
+              { stage = Backend_resolution; reason })
+          (apply_backend_event product Backend.Resolve_fs)
+      | Backend.Memory, Memory_backend
+      | Backend.Filesystem, Filesystem_backend -> Ok product
+      | Backend.Memory, Filesystem_backend
+      | Backend.Filesystem, Memory_backend
+      | Backend.Degraded, _ ->
+        transition_error
+          Backend_resolution
+          (Printf.sprintf
+             "resolved backend=%s does not match requested backend=%s"
+             (Backend.phase_to_string product.backend)
+             (ready_backend_to_string backend)))
+  in
+  let ready =
+    Result.bind after_backend (fun product ->
+      match product.readiness with
+      | Readiness.NotReady ->
+        Result.map_error
+          (fun reason -> State_ready_transition_rejected
+              { stage = Readiness_publication; reason })
+          (apply_readiness_event product Readiness.Set_ready)
+      | Readiness.Ready ->
+        Result.map (fun () -> product) (check_invariants product)
+        |> Result.map_error (fun reason ->
+          State_ready_transition_rejected
+            { stage = Readiness_publication; reason }))
+  in
+  match ready with
+  | Error _ as error -> error
+  | Ok product ->
+    state :=
+      of_product
+        product
+        current.started_at
+        current.path_diagnostics
+        current.config_resolution;
+    Ok ()
+
+type lazy_prepare_error =
+  | Lazy_state_transition_rejected of string
+
+let lazy_prepare_error_to_string = function
+  | Lazy_state_transition_rejected reason ->
+    "lazy startup barrier transition rejected: " ^ reason
+
+let prepare_lazy_tasks ~tasks =
+  let current = !state in
+  let open Server_state_product in
+  let product = to_product current in
+  let transition =
+    if tasks = []
+    then Result.map (fun () -> product) (check_invariants product)
+    else apply_lazy_event product (Tasks_appear tasks)
+  in
+  match transition with
+  | Error reason -> Error (Lazy_state_transition_rejected reason)
+  | Ok prepared ->
+    state :=
+      of_product
+        prepared
+        current.started_at
+        current.path_diagnostics
+        current.config_resolution;
+    Ok ()
 
 let finish_lazy_task ~task =
   update (fun current ->

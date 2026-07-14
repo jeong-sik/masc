@@ -80,12 +80,7 @@ let validate_resolved_keeper_create_json (json : Yojson.Safe.t) : string list =
   let goal = Safe_ops.json_string ~default:"" "goal" json |> String.trim in
   let mention_targets = Safe_ops.json_string_list "mention_targets" json in
   if not (validate_name name) then
-    errors :=
-      Printf.sprintf
-        "invalid keeper name %S (must be non-empty and match \
-         [A-Za-z0-9._-]+; see Keeper_config.validate_name)"
-        name
-      :: !errors;
+    errors := invalid_name_error name :: !errors;
   if goal = "" then errors := "goal is required" :: !errors;
   if mention_targets = [] then
     errors := "mention_targets is required" :: !errors;

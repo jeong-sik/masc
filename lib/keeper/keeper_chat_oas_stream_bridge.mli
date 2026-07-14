@@ -15,9 +15,13 @@ type translated_event = {
 
 val empty_state : state
 
+val terminal_message_had_text : state -> bool
+(** [true] when the last completed provider message (or the currently open
+    message) emitted a non-empty text delta. Earlier tool-loop messages never
+    affect this projection. *)
+
 val translate :
   redact_text:(string -> string) ->
-  on_text_delta:(string -> string) ->
   base_dir:string ->
   state ->
   Agent_sdk.Types.sse_event ->

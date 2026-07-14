@@ -168,13 +168,6 @@ let test_autonomous_yield_boundary_contract () =
   | Runtime_agent.ToolFailureRecoveryDeferred _ ->
     fail "durable request mapped to the wrong stop reason"
 
-let test_keeper_turn_limit_is_unbounded () =
-  let max_turns = Masc.Keeper_agent_run.For_testing.keeper_max_turns in
-  check bool
-    "Keeper passes OAS's unbounded turn sentinel"
-    false
-    (Agent_sdk.Types.has_finite_max_turns max_turns)
-
 let payload fields = Some (`Assoc fields)
 
 let test_payload_decode () =
@@ -357,8 +350,6 @@ let () =
           test_case "of_result_surface" `Quick test_of_result_surface;
           test_case "autonomous yield boundary contract" `Quick
             test_autonomous_yield_boundary_contract;
-          test_case "Keeper turn limit is unbounded" `Quick
-            test_keeper_turn_limit_is_unbounded;
         ] );
       ( "payload_decode",
         [

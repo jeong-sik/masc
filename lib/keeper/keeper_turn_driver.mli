@@ -76,7 +76,6 @@ val run_named :
   ?initial_messages:Agent_sdk.Types.message list ->
   ?model_input_projection:
     (Agent_sdk.Types.message list -> Agent_sdk.Types.message list) ->
-  ?max_turns:int ->
   max_idle_turns:int ->
   ?stream_idle_timeout_s:float ->
   ?body_timeout_s:float ->

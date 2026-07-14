@@ -31,7 +31,6 @@ type try_provider_ctx =
   ; initial_messages : Agent_sdk.Types.message list
   ; model_input_projection :
       (Agent_sdk.Types.message list -> Agent_sdk.Types.message list) option
-  ; max_turns : int
   ; max_idle_turns : int
   ; stream_idle_timeout_s : float option
   ; body_timeout_s : float option
@@ -238,7 +237,6 @@ let run_try_provider
         stream_idle_timeout_s = ctx.stream_idle_timeout_s
           ; body_timeout_s = ctx.body_timeout_s
           ; temperature
-          ; max_turns = ctx.max_turns
           ; max_idle_turns = ctx.max_idle_turns
           ; guardrails = Some Agent_sdk.Guardrails.permissive
           ; hooks = ctx.hooks

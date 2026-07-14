@@ -269,7 +269,6 @@ let run_named
     ?(tools = [])
     ?(initial_messages = [])
     ?model_input_projection
-    ?(max_turns = Runtime_agent_context.unbounded_max_turns)
     ~max_idle_turns
     ?stream_idle_timeout_s
     ?body_timeout_s
@@ -564,7 +563,6 @@ let run_named
             ; tools
             ; initial_messages
             ; model_input_projection
-            ; max_turns
             ; max_idle_turns
             ; stream_idle_timeout_s
             ; body_timeout_s

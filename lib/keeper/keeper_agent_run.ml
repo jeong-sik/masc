@@ -144,8 +144,6 @@ let raw_trace_for_dispatch
     None
 ;;
 
-let keeper_max_turns = Runtime_agent_context.unbounded_max_turns
-
 module For_testing = struct
   let sse_event_progress_kind = Turn_helpers.sse_event_progress_kind
   let sse_event_watchdog_progress_kind =
@@ -159,7 +157,6 @@ module For_testing = struct
   let raw_trace_for_dispatch = raw_trace_for_dispatch
   let autonomous_yield_allowed_at_turn = autonomous_yield_allowed_at_turn
   let stop_reason_of_autonomous_yield = stop_reason_of_autonomous_yield
-  let keeper_max_turns = keeper_max_turns
 end
 
 (** Run a single keeper turn via OAS Agent.run().
@@ -694,9 +691,8 @@ let run_turn
               in
               let call_run_named ?raw_trace ~initial_messages () =
                 (* Keeper does not impose a cumulative turn, time, token, or cost
-                   budget. OAS receives its unbounded turn sentinel; explicit
-                   cancellation and provider/tool progress boundaries settle the
-                   lane, while usage remains observational. *)
+                   budget. Explicit cancellation and provider/tool progress
+                   boundaries settle the lane, while usage remains observational. *)
                 Keeper_turn_driver.run_named
                   ~runtime_id:runtime_id_string
                   ~base_path:config.base_path
@@ -710,7 +706,6 @@ let run_turn
                     ~checkpoint_sink
                     ~initial_messages
                     ~model_input_projection
-                    ~max_turns:keeper_max_turns
                     ~hooks
                     ~runtime_manifest_context
                     ~runtime_manifest_append:
@@ -723,9 +718,7 @@ let run_turn
                          a malformed tool call (e.g. missing required arg) is
                          the keeper's own competence: OAS delivers the typed
                          validation error back to the model and the agent loop
-                         decides whether to continue. OAS defines zero as the
-                         unbounded idle-turn sentinel for this long-lived
-                         Keeper lane. *)
+                         decides whether to continue. *)
                     ~max_idle_turns:0
                     ?stream_idle_timeout_s
                     ?body_timeout_s:

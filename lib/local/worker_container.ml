@@ -399,7 +399,7 @@ let append_worker_completion_log ~base_path ~worker_name
     New workers use Worker_oas.build_agent (Builder pattern) instead.
     Accepts [~provider] + [~model_id] as resolved values. *)
 let build_resume_config ~worker_name ~provider ~model_id ~system_prompt ~tools
-    ~max_turns ~thinking_enabled ~hooks ~raw_trace ?(periodic_callbacks = [])
+    ~thinking_enabled ~hooks ~raw_trace ?(periodic_callbacks = [])
     ?(guardrails : Agent_sdk.Guardrails.t option)
     () =
   let config =
@@ -408,7 +408,6 @@ let build_resume_config ~worker_name ~provider ~model_id ~system_prompt ~tools
       name = worker_name;
       model = model_id;
       system_prompt = Some system_prompt;
-      max_turns;
       enable_thinking = Some thinking_enabled;
     }
   in
@@ -428,4 +427,3 @@ let build_resume_config ~worker_name ~provider ~model_id ~system_prompt ~tools
     }
   in
   (config, options)
-

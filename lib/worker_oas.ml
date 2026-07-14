@@ -110,7 +110,6 @@ let build_agent
     Agent_sdk.Builder.create ~net ~model:config.model
     |> Agent_sdk.Builder.with_name config.name
     |> Agent_sdk.Builder.with_system_prompt system_prompt
-    |> Agent_sdk.Builder.with_max_turns config.max_turns
     |> Agent_sdk.Builder.with_enable_thinking
          (Option.value ~default:false meta.thinking_enabled)
     |> Agent_sdk.Builder.with_provider provider
@@ -433,7 +432,6 @@ and resume_worker_via_oas
       ?selection_note:meta.selection_note
       ()
   in
-  let max_turns = Runtime_agent_context.unbounded_max_turns in
   let thinking_enabled = Option.value ~default:false meta.thinking_enabled in
   let config, options =
     Worker_container.build_resume_config
@@ -442,7 +440,6 @@ and resume_worker_via_oas
       ~model_id:resume_model_id
       ~system_prompt
       ~tools
-      ~max_turns
       ~thinking_enabled
       ~hooks
       ~raw_trace

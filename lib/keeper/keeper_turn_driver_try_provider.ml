@@ -154,16 +154,16 @@ let apply_accept
   | Runtime_agent.InputRequired _
   | Runtime_agent.TurnLimitObserved _
   | Runtime_agent.ExecutionTimeoutObserved _
-  | Runtime_agent.ExecutionIdleTimeoutObserved _ ->
+  | Runtime_agent.ExecutionIdleTimeoutObserved _
+  | Runtime_agent.Yielded_to_chat_waiting _
+  | Runtime_agent.Yielded_to_durable_stimulus _ ->
     (* These are typed host-control terminals, not model deliverables. Running
        the normal response accept predicate over their question/blank carrier
        would turn them into [Accept_rejected] and incorrectly rotate providers,
        discarding typed control/observation evidence. Execution-limit
        observations never become a MASC acceptance gate. *)
     Ok run_result
-  | Runtime_agent.Completed
-  | Runtime_agent.Yielded_to_chat_waiting _
-  | Runtime_agent.Yielded_to_durable_stimulus _ ->
+  | Runtime_agent.Completed ->
     if accept run_result.response then Ok run_result
     else
       Error

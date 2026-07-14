@@ -172,16 +172,10 @@ type event =
   | Supervisor_restart_attempt of { attempt : int }
   | Credential_archived
   | Context_overflow_detected of {
-      source : [`Prompt_rejected | `Oas_signal];
-      token_count : int;
       limit_tokens : int option;
     }
-    (** Provider rejected prompt for exceeding max context.
-        [`Prompt_rejected] is sourced from a failed unified turn
-        (see [Keeper_error_classify.is_context_overflow]);
-        [`Oas_signal] is sourced either from structured OAS overflow
-        diagnostics or from the drained OAS [Event_bus]
-        [ContextOverflowImminent] signal for the same turn. *)
+    (** Provider returned typed [ContextOverflow]. [limit_tokens] is only the
+        provider-declared window limit; actual input tokens remain unknown. *)
   | Auto_compact_triggered
     (** Legacy explicit input; no entry action produces this event. *)
   | Operator_compact_requested

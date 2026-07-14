@@ -348,7 +348,7 @@ let run (ctx : ctx)
           meta.name
           checkpoint_observed;
       match
-          Keeper_turn_runtime_budget.plan_degraded_retry_step
+          ( Keeper_turn_runtime_budget.plan_degraded_retry_step
             ~base_runtime:(runtime_id_of_meta meta)
             ~current_runtime_id:execution_runtime_id
             ~attempted_runtimes
@@ -384,9 +384,10 @@ let run (ctx : ctx)
                  Keeper_unified_turn_pre_dispatch.build_runtime_execution
                    ~meta
                    ~runtime_id)
+          , context_overflow_event_of_error err )
         with
         | Keeper_turn_runtime_budget.Degraded_retry_step_setup_failed
-            { retry = degraded_retry; reason = fallback_reason; fail_open_err } ->
+            { retry = degraded_retry; reason = fallback_reason; fail_open_err }, _ ->
              let productive_phase_elapsed_ms, retry_phase_elapsed_ms =
                current_turn_phase_elapsed_ms turn_state.retry_phase_started_at
              in
@@ -414,7 +415,7 @@ let run (ctx : ctx)
              mark_terminal_error fail_open_err;
              Error fail_open_err, turn_state
         | Keeper_turn_runtime_budget.Degraded_retry_step_prepared
-            { retry = degraded_retry; reason = fallback_reason; next = next_execution } ->
+            { retry = degraded_retry; reason = fallback_reason; next = next_execution }, _ ->
              let next_execution_runtime_id =
                next_execution.runtime_id
              in
@@ -470,8 +471,7 @@ let run (ctx : ctx)
                    next_execution_runtime_id :: attempted_runtimes
                }
                turn_state
-        | Keeper_turn_runtime_budget.Degraded_retry_step_not_allowed
-          when EC.is_context_overflow err ->
+        | Keeper_turn_runtime_budget.Degraded_retry_step_not_allowed, Some overflow_event ->
           Keeper_unified_turn_cascade_resolution.publish_cascade_resolution
             ~keeper_name:meta.name
             ~runtime_id:execution.runtime_id
@@ -483,12 +483,6 @@ let run (ctx : ctx)
             ~error_message:(Some (Agent_sdk.Error.to_string err));
           let current_turn_event_bus =
             drain_turn_event_bus ~site:"context_overflow_capture" ()
-          in
-          let overflow_event =
-            context_overflow_event_of_error
-              ~fallback_tokens:execution.max_context
-              ~turn_event_bus:current_turn_event_bus
-              err
           in
           let overflow_evidence_detail =
             turn_event_bus_overflow_evidence_detail current_turn_event_bus
@@ -517,21 +511,19 @@ let run (ctx : ctx)
               ]
             ();
           Log.Keeper.warn
-            "%s: OAS returned context overflow after its own retry \
-             path; MASC will not compact/retry within this turn — \
-             recording explicit overflow failure evidence: %s"
+            "%s: provider returned typed context overflow after runtime \
+             rotation; recording explicit lane recovery evidence: %s"
             meta.name
             (short_preview (Agent_sdk.Error.to_string err));
-          (* OAS already exhausted its own proactive + emergency compaction
-             for this turn, so MASC records the terminal failure and returns.
-             The next Keeper cycle remains available. *)
+          (* This attempt returns its typed provider error. The Keeper lifecycle
+             remains active; MASC lane compaction owns subsequent recovery. *)
           record_overflow_failure
             ~config
             ~meta
             ~reason:"context_overflow_after_oas_retry";
           mark_terminal_error err;
           Error err, turn_state
-        | Keeper_turn_runtime_budget.Degraded_retry_step_not_allowed ->
+        | Keeper_turn_runtime_budget.Degraded_retry_step_not_allowed, None ->
           Keeper_unified_turn_cascade_resolution.publish_cascade_resolution
             ~keeper_name:meta.name
             ~runtime_id:execution.runtime_id

@@ -35,28 +35,6 @@ let require_last_execution_for_finalize ~keeper_name turn_state =
 let turn_event_bus_manifest_decision
       (summary : Keeper_turn_runtime_budget.turn_event_bus_summary)
   =
-  let overflow =
-    match summary.overflow_imminent with
-    | None -> `Null
-    | Some overflow ->
-      `Assoc
-        [
-          ("estimated_tokens", `Int overflow.estimated_tokens);
-          ("limit_tokens", `Int overflow.limit_tokens);
-        ]
-  in
-  let last_compaction =
-    match summary.last_compaction with
-    | None -> `Null
-    | Some compaction ->
-      `Assoc
-        [
-          ("before_tokens", `Int compaction.before_tokens);
-          ("after_tokens", `Int compaction.after_tokens);
-          ("tokens_freed", `Int compaction.tokens_freed);
-          ("phase_hint", `String compaction.phase_hint);
-        ]
-  in
   `Assoc
     [
       ("correlation_id", Json_util.string_opt_to_json summary.correlation_id);
@@ -64,11 +42,6 @@ let turn_event_bus_manifest_decision
       ("caused_by", Json_util.string_opt_to_json summary.caused_by);
       ("event_count", `Int summary.event_count);
       ("payload_kinds", Json_util.json_string_list summary.payload_kinds);
-      ("overflow_imminent", overflow);
-      ( "context_compact_started_count",
-        `Int summary.context_compact_started_count );
-      ("context_compacted_count", `Int summary.context_compacted_count);
-      ("last_compaction", last_compaction);
     ]
 ;;
 

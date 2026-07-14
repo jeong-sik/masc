@@ -19,20 +19,6 @@ val decide_degraded_retry
   -> Agent_sdk.Error.sdk_error
   -> degraded_retry_decision
 
-(** Turn-local overflow hint published by the OAS event bus before a
-    proactive compaction attempt. Exposed for regression tests. *)
-type turn_event_bus_overflow =
-  { estimated_tokens : int
-  ; limit_tokens : int
-  }
-
-type turn_event_bus_compaction =
-  { before_tokens : int
-  ; after_tokens : int
-  ; tokens_freed : int
-  ; phase_hint : string
-  }
-
 val user_message_with_hitl_resolution :
   base_path:string ->
   user_message:string ->
@@ -50,10 +36,6 @@ type turn_event_bus_summary =
   ; caused_by : string option
   ; event_count : int
   ; payload_kinds : string list
-  ; overflow_imminent : turn_event_bus_overflow option
-  ; context_compact_started_count : int
-  ; context_compacted_count : int
-  ; last_compaction : turn_event_bus_compaction option
   }
 
 (** Fold the drained OAS event-bus events for a single keeper turn into
@@ -61,8 +43,7 @@ type turn_event_bus_summary =
 val summarize_turn_event_bus : Agent_sdk.Event_bus.event list -> turn_event_bus_summary
 
 val turn_event_bus_overflow_evidence_detail : turn_event_bus_summary -> string
-(** Compact forensic string for preserving OAS compaction/retry event-bus
-    evidence inside the keeper overflow blocker detail. *)
+(** Compact forensic string for observed OAS events around a typed overflow. *)
 
 (** Turn-local tool-event pairing state used to detect event-bus integrity
     failures. Exposed for targeted tests. *)
@@ -80,13 +61,11 @@ val turn_tool_event_integrity_error
   :  turn_tool_event_tracker
   -> Agent_sdk.Error.sdk_error option
 
-(** Build the keeper overflow event from either a drained event-bus
-    signal or the structured OAS error fallback. Exposed for tests. *)
+(** Build an overflow event only from typed [Api (ContextOverflow _)].
+    Non-overflow errors return [None]. *)
 val context_overflow_event_of_error
-  :  fallback_tokens:int
-  -> ?turn_event_bus:turn_event_bus_summary
-  -> Agent_sdk.Error.sdk_error
-  -> Keeper_state_machine.event
+  :  Agent_sdk.Error.sdk_error
+  -> Keeper_state_machine.event option
 
 (** Resolve the initial keeper turn context budget from the keeper's routed
     runtime, so lifecycle context math matches the provider that will receive

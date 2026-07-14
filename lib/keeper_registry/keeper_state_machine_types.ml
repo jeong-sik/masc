@@ -105,10 +105,7 @@ type event =
   | Supervisor_restart_attempt of { attempt : int }
   | Credential_archived
   | Context_overflow_detected of
-      { source : [ `Prompt_rejected | `Oas_signal ]
-      ; token_count : int
-      ; limit_tokens : int option
-      }
+      { limit_tokens : int option }
   | Auto_compact_triggered
   | Operator_compact_requested
   | Operator_clear_requested of
@@ -151,21 +148,12 @@ let event_to_string = function
     Printf.sprintf "supervisor_restart_attempt(%d)" r.attempt
   | Credential_archived -> "credential_archived"
   | Context_overflow_detected r ->
-    let src =
-      match r.source with
-      | `Prompt_rejected -> "prompt_rejected"
-      | `Oas_signal -> "oas_signal"
-    in
     let lim =
       match r.limit_tokens with
       | Some n -> string_of_int n
       | None -> "?"
     in
-    Printf.sprintf
-      "context_overflow_detected(%s,tokens=%d,limit=%s)"
-      src
-      r.token_count
-      lim
+    Printf.sprintf "context_overflow_detected(limit=%s)" lim
   | Auto_compact_triggered -> "auto_compact_triggered"
   | Operator_compact_requested -> "operator_compact_requested"
   | Operator_clear_requested r ->

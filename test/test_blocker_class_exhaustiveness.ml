@@ -36,7 +36,6 @@ let all_variants : blocker_class list =
   ; Sdk_tripwire_violation
   ; Sdk_exit_condition_met
   ; Sdk_input_required
-  ; Sdk_tool_failure_recovery_failed
   ]
 ;;
 
@@ -141,14 +140,6 @@ let all_sdk_agent_variants : (string * SdkE.sdk_error) list =
            ; timeout_s = None
            ; created_at = 0.0
            }) )
-  ; ( "ToolFailureRecoveryFailed"
-    , SdkE.Agent
-        (SdkE.ToolFailureRecoveryFailed
-           { stage = SdkE.Judge_response; detail = "judge unavailable" }) )
-  ; ( "ToolFailureRecoveryDeferred"
-    , SdkE.Agent
-        (SdkE.ToolFailureRecoveryDeferred
-           { reason = "wait for repository state"; tool_names = [ "Execute" ] }) )
   ]
 ;;
 
@@ -156,7 +147,6 @@ let agent_variants_with_no_runtime_blocker =
   [ "AgentExecutionTimeout"
   ; "AgentExecutionIdleTimeout"
   ; "MaxTurnsExceeded"
-  ; "ToolFailureRecoveryDeferred"
   ]
 
 let test_all_agent_variants_classified_intentionally () =
@@ -185,7 +175,7 @@ let test_all_agent_variants_classified_intentionally () =
 (** Pin the Agent sub-variant count so additions are visible in diffs.
     When the SDK adds a new [Agent] sub-variant, bump this number and add it
     to [all_sdk_agent_variants]. *)
-let expected_agent_variant_count = 11
+let expected_agent_variant_count = 9
 
 let test_agent_variant_count_pin () =
   let count = List.length all_sdk_agent_variants in

@@ -1,7 +1,5 @@
 let stop_reason_to_wire = Agent_sdk.Types.stop_reason_to_string
 
-let sha256_hex value = Digestif.SHA256.(digest_string value |> to_hex)
-
 let agent_completed_usage_fields (response : Agent_sdk.Types.api_response) =
   match response.usage with
   | None -> [ "usage_reported", `Bool false ]
@@ -113,17 +111,6 @@ let sdk_agent_error_fields = function
     ; "request_id", `String request_id
     ; "participant_name", Json_util.string_opt_to_json participant_name
     ; "question", `String question
-    ]
-  | Agent_sdk.Error.ToolFailureRecoveryFailed { stage; detail } ->
-    [ "variant", `String "tool_failure_recovery_failed"
-    ; ( "stage"
-      , `String (Agent_sdk.Error.tool_failure_recovery_stage_to_string stage) )
-    ; "detail_digest", `String (sha256_hex detail)
-    ]
-  | Agent_sdk.Error.ToolFailureRecoveryDeferred { reason; tool_names } ->
-    [ "variant", `String "tool_failure_recovery_deferred"
-    ; "reason_digest", `String (sha256_hex reason)
-    ; "tool_names", `List (List.map (fun name -> `String name) tool_names)
     ]
   | Agent_sdk.Error.AgentExecutionTimeout
       { elapsed_sec; timeout_sec; turn_count; max_turns } ->

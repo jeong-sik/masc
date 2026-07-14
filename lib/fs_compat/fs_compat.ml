@@ -328,21 +328,41 @@ type path_kind =
   | Directory
   | Other
 
-let path_kind ?(follow = true) (path : string) : path_kind =
+type exact_path_kind =
+  | Exact_missing
+  | Exact_kind of Unix.file_kind
+  | Exact_unknown
+
+let exact_path_kind ?(follow = true) (path : string) : exact_path_kind =
   with_fs_or_fallback
     ~path
     ~fallback:(fun () ->
       try
         let stats = if follow then Unix.stat path else Unix.lstat path in
-        if stats.Unix.st_kind = Unix.S_DIR then Directory else Other
+        Exact_kind stats.Unix.st_kind
       with
-      | Unix.Unix_error (Unix.ENOENT, _, _) -> Missing)
+      | Unix.Unix_error (Unix.ENOENT, _, _) -> Exact_missing)
     (fun fs ->
        match Eio.Path.kind ~follow Eio.Path.(fs / path) with
-       | `Not_found -> Missing
-       | `Directory -> Directory
-       | (`Unknown | `Fifo | `Character_special | `Block_device
-         | `Regular_file | `Symbolic_link | `Socket) -> Other)
+       | `Not_found -> Exact_missing
+       | `Directory -> Exact_kind Unix.S_DIR
+       | `Fifo -> Exact_kind Unix.S_FIFO
+       | `Character_special -> Exact_kind Unix.S_CHR
+       | `Block_device -> Exact_kind Unix.S_BLK
+       | `Regular_file -> Exact_kind Unix.S_REG
+       | `Symbolic_link -> Exact_kind Unix.S_LNK
+       | `Socket -> Exact_kind Unix.S_SOCK
+       | `Unknown -> Exact_unknown)
+;;
+
+let path_kind ?(follow = true) (path : string) : path_kind =
+  match exact_path_kind ~follow path with
+  | Exact_missing -> Missing
+  | Exact_kind Unix.S_DIR -> Directory
+  | Exact_kind
+      (Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO
+      | Unix.S_SOCK)
+  | Exact_unknown -> Other
 ;;
 
 type owned_directory_chain_rejection = Owned_directory_chain.rejection =

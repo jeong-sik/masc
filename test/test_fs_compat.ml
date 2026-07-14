@@ -134,10 +134,12 @@ let test_read_dir_and_path_kind_use_typed_inventory ~fs () =
   let regular = Filename.concat directory "b.json" in
   let nested = Filename.concat directory "a-dir" in
   let nested_link = Filename.concat directory "c-link" in
+  let fifo = Filename.concat directory "d-fifo" in
   Fs_compat.mkdir_p directory;
   Fs_compat.mkdir_p nested;
   Fs_compat.save_file regular "{}";
   Unix.symlink nested nested_link;
+  Unix.mkfifo fifo 0o600;
   let check_inventory implementation =
     check bool (implementation ^ " directory classified") true
       (Fs_compat.path_kind directory = Fs_compat.Directory);
@@ -149,10 +151,22 @@ let test_read_dir_and_path_kind_use_typed_inventory ~fs () =
       (Fs_compat.path_kind nested_link = Fs_compat.Directory);
     check bool (implementation ^ " symlink itself remains non-directory") true
       (Fs_compat.path_kind ~follow:false nested_link = Fs_compat.Other);
+    check bool (implementation ^ " exact regular file kind") true
+      (Fs_compat.exact_path_kind ~follow:false regular
+       = Fs_compat.Exact_kind Unix.S_REG);
+    check bool (implementation ^ " exact symlink kind") true
+      (Fs_compat.exact_path_kind ~follow:false nested_link
+       = Fs_compat.Exact_kind Unix.S_LNK);
+    check bool (implementation ^ " exact FIFO kind") true
+      (Fs_compat.exact_path_kind ~follow:false fifo
+       = Fs_compat.Exact_kind Unix.S_FIFO);
+    check bool (implementation ^ " exact missing kind") true
+      (Fs_compat.exact_path_kind (Filename.concat directory "missing")
+       = Fs_compat.Exact_missing);
     check
       (list string)
       (implementation ^ " directory inventory is deterministic")
-      [ "a-dir"; "b.json"; "c-link" ]
+      [ "a-dir"; "b.json"; "c-link"; "d-fifo" ]
       (Fs_compat.read_dir directory)
   in
   Fs_compat.clear_fs ();

@@ -131,8 +131,7 @@ val run_named :
     The runtime loop runs inside a capacity-managed queue permit. *)
 
 type attempt_inference_policy =
-  { attempt_temperature : float
-  ; attempt_enable_thinking : bool option
+  { attempt_enable_thinking : bool option
   ; attempt_preserve_thinking : bool option
   }
 
@@ -193,7 +192,6 @@ module For_testing : sig
 
   val attempt_inference_policy :
     runtime_id:string ->
-    fallback_temperature:float ->
     fallback_enable_thinking:bool option ->
     unit ->
     attempt_inference_policy

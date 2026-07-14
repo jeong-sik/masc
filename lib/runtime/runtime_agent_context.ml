@@ -95,7 +95,7 @@ type config =
         never a synthesized request value. [Some n] is an explicit
         operator/profile override or a non-keeper caller's deliberate
         request budget. *)
-  ; temperature : float
+  ; temperature : float option
   ; hooks : Agent_sdk.Hooks.hooks option
   ; context_reducer : Agent_sdk.Context_reducer.t option
   ; guardrails : Agent_sdk.Guardrails.t option
@@ -181,7 +181,7 @@ let default_config
   ; max_execution_time_s = None
   ; body_timeout_s = None
   ; max_tokens = None
-  ; temperature = Runtime_provider_defaults.agent_default_temperature
+  ; temperature = provider_cfg.temperature
   ; hooks = None
   ; context_reducer = None
   ; guardrails = None
@@ -251,11 +251,15 @@ let builder_without_approval
     |> Agent_sdk.Builder.with_system_prompt config.system_prompt
     |> Agent_sdk.Builder.with_max_turns config.max_turns
     |> Agent_sdk.Builder.with_max_idle_turns config.max_idle_turns
-    |> Agent_sdk.Builder.with_temperature config.temperature
     |> Agent_sdk.Builder.with_tools config.tools
     |> Agent_sdk.Builder.with_guardrails guardrails
     |> Agent_sdk.Builder.with_missing_approval_callback_policy
          Agent_sdk.Hooks.Reject_without_callback
+  in
+  let builder =
+    match config.temperature with
+    | Some temperature -> Agent_sdk.Builder.with_temperature temperature builder
+    | None -> builder
   in
   let builder =
     (* masc#24067 / oas#2517: [None] means the request carries no
@@ -454,7 +458,7 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
     { checkpoint with
       Agent_sdk.Checkpoint.model = config.model_id
     ; system_prompt = Some config.system_prompt
-    ; temperature = Some config.temperature
+    ; temperature = config.temperature
     ; top_p = config.top_p
     ; top_k = config.top_k
     ; min_p = config.min_p
@@ -472,7 +476,7 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
     ; system_prompt = Some config.system_prompt
     ; max_tokens = config.max_tokens
     ; max_turns = max_turns_for_resume
-    ; temperature = Some config.temperature
+    ; temperature = config.temperature
     ; top_p = config.top_p
     ; top_k = config.top_k
     ; min_p = config.min_p

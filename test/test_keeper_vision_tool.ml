@@ -245,15 +245,11 @@ let test_provider_for_vision_preserves_configured_max_tokens () =
       ()
   in
   let configured =
-    Vt.provider_for_vision
-      ~runtime_id:"test.unconfigured"
-      { base with max_tokens = Some 4096 }
+    Vt.provider_for_vision { base with max_tokens = Some 4096 }
   in
   assert (configured.max_tokens = Some 4096);
   let fallback =
-    Vt.provider_for_vision
-      ~runtime_id:"test.unconfigured"
-      { base with max_tokens = None }
+    Vt.provider_for_vision { base with max_tokens = None }
   in
   assert (fallback.max_tokens = Some Vt.vision_default_max_tokens);
   let expected_schema = Structured_schema.vision_analyze_output_schema in
@@ -629,7 +625,7 @@ let test_provider_for_vision_uses_runtime_temperature () =
        | None -> failwith "selected vision runtime should resolve"
        | Some runtime ->
          let configured =
-           Vt.provider_for_vision ~runtime_id runtime.Runtime.provider_config
+           Vt.provider_for_vision runtime.Runtime.provider_config
          in
          assert (configured.temperature = Some 1.0)))
 

@@ -100,7 +100,7 @@ type config =
   max_execution_time_s : float option;
   body_timeout_s : float option;
   max_tokens : int option;
-  temperature : float;
+  temperature : float option;
   hooks : Agent_sdk.Hooks.hooks option;
   context_reducer : Agent_sdk.Context_reducer.t option;
   guardrails : Agent_sdk.Guardrails.t option;

@@ -27,8 +27,7 @@ type outcome =
 
 module For_testing : sig
   val provider_for_consolidation
-    :  runtime_id:string
-    -> Llm_provider.Provider_config.t
+    :  Llm_provider.Provider_config.t
     -> Llm_provider.Provider_config.t
 end
 

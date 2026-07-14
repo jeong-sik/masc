@@ -16,7 +16,7 @@ type try_provider_ctx =
   ; max_idle_turns : int
   ; stream_idle_timeout_s : float option
   ; body_timeout_s : float option
-  ; temperature : float
+  ; temperature : float option
   ; accept : Agent_sdk_response.api_response -> bool
   ; hooks : Agent_sdk.Hooks.hooks option
   ; context_reducer : Agent_sdk.Context_reducer.t option

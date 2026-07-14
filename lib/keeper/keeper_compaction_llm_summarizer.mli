@@ -79,10 +79,9 @@ val apply
   -> Agent_sdk.Types.message list
 
 module For_testing : sig
-  (** Apply the compaction request policy while preserving the per-runtime
-      temperature override from runtime.toml. *)
+  (** Apply the compaction request policy while preserving the input provider
+      config's exact temperature, including omission. *)
   val provider_for_plan
-    :  runtime_id:string
-    -> Llm_provider.Provider_config.t
+    :  Llm_provider.Provider_config.t
     -> Llm_provider.Provider_config.t
 end

@@ -59,18 +59,12 @@ let truncated_of_stop_reason : Agent_sdk.Types.stop_reason -> bool = function
   | Agent_sdk.Types.UnmatchedToolCalls
   | Agent_sdk.Types.Unknown _ -> false
 
-let provider_for_vision ~runtime_id (provider_cfg : Llm_provider.Provider_config.t) =
-  let temperature =
-    Runtime_inference.resolve_temperature
-      ~runtime_id
-      ~fallback:(fun () -> Runtime_provider_defaults.deterministic_temperature)
-  in
+let provider_for_vision (provider_cfg : Llm_provider.Provider_config.t) =
   { provider_cfg with
     max_tokens =
       (match provider_cfg.max_tokens with
        | Some _ as configured -> configured
        | None -> Some vision_default_max_tokens)
-  ; temperature = Some temperature
   ; tool_choice = None
   ; disable_parallel_tool_use = true
   ; enable_thinking = Some false
@@ -406,7 +400,7 @@ let run_candidates
          in
          loop ~last_error ~attempt_index []
        | Some timeout_sec ->
-         let config = provider_for_vision ~runtime_id rt.Runtime.provider_config in
+         let config = provider_for_vision rt.Runtime.provider_config in
          (match
             with_timeout ~clock ~timeout_sec (fun () ->
               complete ~sw ~net ?clock:(Some clock) ~config ~messages ())
@@ -492,7 +486,7 @@ let run_candidates_outcome
          in
          loop ~last_error ~attempt_index []
        | Some timeout_sec ->
-         let config = provider_for_vision ~runtime_id rt.Runtime.provider_config in
+         let config = provider_for_vision rt.Runtime.provider_config in
          (match
             with_timeout ~clock ~timeout_sec (fun () ->
               complete ~sw ~net ?clock:(Some clock) ~config ~messages ())

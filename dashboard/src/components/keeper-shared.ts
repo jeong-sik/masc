@@ -23,6 +23,8 @@ import {
   isKeeperThreadMessageSendInFlight,
   probeKeeperRuntime,
   reconcileKeeperChatReceipts,
+  requeueKeeperChatRecoveryEntry,
+  cancelKeeperChatRecoveryEntry,
   recoverKeeperRuntime,
   resumePendingKeeperChatRequests,
   sendKeeperThreadMessage,
@@ -763,11 +765,16 @@ export function KeeperConversationPanel({
   // compare can skip unchanged messages — an inline `{ ...onClick }` literal
   // would be a new reference each render and defeat the memo.
   const inspectAction = useMemo(
-    () =>
-      onInspectTurn
+    () => ({
+      ...(onInspectTurn
         ? { label: '턴 상세', title: '이 메시지 턴 상세 열기', onClick: onInspectTurn }
-        : undefined,
-    [onInspectTurn],
+        : {}),
+      onRecoveryRequeue: (entry: KeeperConversationEntry) =>
+        requeueKeeperChatRecoveryEntry(keeperName, entry),
+      onRecoveryCancel: (entry: KeeperConversationEntry, detail: string) =>
+        cancelKeeperChatRecoveryEntry(keeperName, entry, detail),
+    }),
+    [keeperName, onInspectTurn],
   )
   const transcriptEmptyText =
     hasQuery && visibleThreadWithQueue.length > 0

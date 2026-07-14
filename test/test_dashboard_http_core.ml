@@ -186,8 +186,7 @@ let test_keeper_chat_receipt_route_and_json () =
     (json |> member "state" |> member "kind" |> to_string);
   check string "receipt JSON revision" "7"
     (match json |> member "revision" with
-     | `Int revision -> string_of_int revision
-     | `Intlit revision -> revision
+     | `String revision -> revision
      | _ -> "invalid");
   check string "receipt JSON failure kind" "delivery_failed"
     (json |> member "state" |> member "failure_kind" |> to_string);
@@ -195,6 +194,20 @@ let test_keeper_chat_receipt_route_and_json () =
     (contains_substring
        (json |> member "state" |> member "detail" |> to_string)
        "sk-proj-abcdefghijklmnopqrstuvwxyz")
+
+let test_keeper_chat_recovery_route_is_exact () =
+  let receipt_id = "chatq_00000000-0000-4000-8000-000000000123" in
+  let path =
+    "/api/v1/keepers/idealist/chat/receipts/" ^ receipt_id ^ "/recovery"
+  in
+  (match Server_dashboard_http_keeper_api.classify_keeper_post_route path with
+   | Server_dashboard_http_keeper_api.Keeper_post_chat_recovery route ->
+       check string "recovery route keeper" "idealist" route.keeper_name;
+       check string "recovery route receipt" receipt_id route.receipt_id
+   | _ -> fail "exact recovery route was not classified");
+  check bool "recovery route rejects extra segments" true
+    (Server_dashboard_http_keeper_api.classify_keeper_post_route (path ^ "/bulk")
+     = Server_dashboard_http_keeper_api.Keeper_post_unknown)
 
 let with_test_env f =
   let dir = test_dir () in
@@ -1860,6 +1873,8 @@ let () =
             test_keeper_post_route_classifies_catchup_judge;
           test_case "keeper chat receipt route is typed" `Quick
             test_keeper_chat_receipt_route_and_json;
+          test_case "keeper chat recovery route is exact" `Quick
+            test_keeper_chat_recovery_route_is_exact;
         ] );
       ( "lifecycle event classification (#22071)",
         [ test_case "event_of_string round-trips to_string" `Quick

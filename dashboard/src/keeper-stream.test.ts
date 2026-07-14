@@ -100,7 +100,7 @@ describe('applyKeeperStreamEvent', () => {
         keeper_name: 'sangsu',
         status: 'queued',
         receipt_id: 'chatq_00000000-0000-4000-8000-000000000007',
-        queue_revision: 12,
+        queue_revision: '12',
         pending_count: 3,
         inflight_count: 1,
         recovery_required_count: 1,
@@ -114,7 +114,7 @@ describe('applyKeeperStreamEvent', () => {
     expect(entry?.details).toMatchObject({
       queueReceiptId: 'chatq_00000000-0000-4000-8000-000000000007',
       queueShutdownOperationId: 'shutdown-op-7',
-      queueRevision: 12,
+      queueRevision: '12',
       queuePendingCount: 3,
       queueInflightCount: 1,
       queueRecoveryRequiredCount: 1,
@@ -148,7 +148,7 @@ describe('applyKeeperStreamEvent', () => {
       name: 'KEEPER_CHAT_QUEUED',
       value: {
         receipt_id: 'not-a-chat-receipt',
-        queue_revision: 1,
+        queue_revision: '1',
         pending_count: 1,
         inflight_count: 0,
         recovery_required_count: 0,
@@ -176,7 +176,7 @@ describe('applyKeeperStreamEvent', () => {
       name: 'KEEPER_CHAT_QUEUED',
       value: {
         receipt_id: 'chatq_00000000-0000-4000-8000-000000000007',
-        queue_revision: 1,
+        queue_revision: '1',
         pending_count: 1,
         inflight_count: 0,
         shutdown_operation_id: null,
@@ -188,7 +188,7 @@ describe('applyKeeperStreamEvent', () => {
     assistantEntry()
     const baseValue = {
       receipt_id: 'chatq_00000000-0000-4000-8000-000000000007',
-      queue_revision: 1,
+      queue_revision: '1',
       pending_count: 1,
       inflight_count: 0,
       recovery_required_count: 0,

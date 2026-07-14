@@ -295,6 +295,22 @@ let test_queued_delivery_requires_exact_turn_ref () =
   | Stream.Failed _ | Stream.Deferred _ ->
     fail "valid turn_ref must produce Delivered"
 
+let test_terminal_commit_error_cannot_become_delivery_success () =
+  let persist_error = "terminal transcript fsync failed" in
+  let check_error label queued_turn =
+    match
+      Stream.For_testing.committed_delivery_outcome
+        ~queued_turn
+        ~turn_ref:None
+        (Error persist_error)
+    with
+    | Error observed -> check string label persist_error observed
+    | Ok None -> fail (label ^ " was downgraded to direct delivery success")
+    | Ok (Some _) -> fail (label ^ " was downgraded to queued delivery success")
+  in
+  check_error "direct commit preserves typed Error" false;
+  check_error "queued commit preserves typed Error" true
+
 let body fields = `Assoc fields
 
 let test_direct_reply_visible_text () =
@@ -352,6 +368,8 @@ let () =
             test_turn_ref_payload_decode;
           test_case "queued delivery requires exact turn_ref" `Quick
             test_queued_delivery_requires_exact_turn_ref;
+          test_case "terminal commit error cannot become delivery success" `Quick
+            test_terminal_commit_error_cannot_become_delivery_success;
         ] );
       ( "direct_reply",
         [

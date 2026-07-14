@@ -28,7 +28,7 @@ import {
   DEFAULT_POST_TIMEOUT_MS,
 } from './core'
 import { ensureDevToken, resetDevTokenBootstrap } from './dev-token'
-import { isKeeperChatReceiptId } from '../lib/keeper-chat-receipt'
+import { isKeeperChatReceiptId, parseKeeperQueueRevision } from '../lib/keeper-chat-receipt'
 import type {
   KeeperCompositeSnapshot,
   FleetCompositeSnapshot,
@@ -724,8 +724,22 @@ export type KeeperChatReceiptState =
 export interface KeeperChatReceipt {
   keeperName: string
   receiptId: string
-  revision: number
+  revision: string
   state: KeeperChatReceiptState
+}
+
+export type KeeperChatRecoveryDecision =
+  | { kind: 'requeue_unconfirmed' }
+  | {
+      kind: 'cancel_unconfirmed'
+      detail: string
+      outcomeRef: string | null
+    }
+
+export interface KeeperChatRecoveryResult {
+  decision: KeeperChatRecoveryDecision['kind']
+  receipt: KeeperChatReceipt
+  audit: { recorded: true } | { recorded: false; error: string }
 }
 
 const KEEPER_CHAT_RECEIPT_FAILURE_KINDS = new Set<KeeperChatReceiptFailureKind>([
@@ -745,16 +759,14 @@ export function parseKeeperChatReceipt(value: unknown): KeeperChatReceipt {
   }
   const keeperName = asString(value.keeper_name, '').trim()
   const receiptId = asString(value.receipt_id, '').trim()
-  const revision = asNumber(value.revision)
+  const revision = parseKeeperQueueRevision(value.revision)
   const rawState = isRecord(value.state) ? value.state : null
   const kind = asString(rawState?.kind, '').trim()
   if (
     !keeperName
     || !isKeeperChatReceiptId(receiptId)
     || !rawState
-    || typeof revision !== 'number'
-    || !Number.isSafeInteger(revision)
-    || revision < 0
+    || revision === undefined
   ) {
     throw new Error('Keeper chat receipt response is missing identity or state')
   }
@@ -839,6 +851,52 @@ export async function fetchKeeperChatReceipt(
     throw new Error(`fetchKeeperChatReceipt: HTTP ${resp.status} ${resp.statusText}`)
   }
   return parseKeeperChatReceipt(data)
+}
+
+export async function resolveKeeperChatRecovery(
+  keeperName: string,
+  receiptId: string,
+  expectedRevision: string,
+  leaseId: string,
+  decision: KeeperChatRecoveryDecision,
+): Promise<KeeperChatRecoveryResult> {
+  const decisionPayload = decision.kind === 'requeue_unconfirmed'
+    ? { kind: decision.kind }
+    : {
+        kind: decision.kind,
+        detail: decision.detail,
+        outcome_ref: decision.outcomeRef,
+      }
+  const raw = await post<unknown>(
+    `/api/v1/keepers/${encodeURIComponent(keeperName)}/chat/receipts/${encodeURIComponent(receiptId)}/recovery`,
+    {
+      schema: 'keeper_chat_queue.recovery.request.v1',
+      expected_revision: expectedRevision,
+      lease_id: leaseId,
+      decision: decisionPayload,
+    },
+  )
+  if (
+    !isRecord(raw)
+    || raw.schema !== 'keeper_chat_queue.recovery.result.v1'
+    || raw.ok !== true
+    || raw.decision !== decision.kind
+    || !isRecord(raw.audit)
+    || typeof raw.audit.recorded !== 'boolean'
+  ) {
+    throw new Error('resolveKeeperChatRecovery: invalid response envelope')
+  }
+  const receipt = parseKeeperChatReceipt(raw.receipt)
+  if (receipt.keeperName !== keeperName || receipt.receiptId !== receiptId) {
+    throw new Error('resolveKeeperChatRecovery: response identity mismatch')
+  }
+  const audit = raw.audit.recorded
+    ? { recorded: true as const }
+    : {
+        recorded: false as const,
+        error: asString(raw.audit.error, '').trim() || 'recovery audit persistence failed',
+      }
+  return { decision: decision.kind, receipt, audit }
 }
 
 export async function fetchKeeperChatHistory(

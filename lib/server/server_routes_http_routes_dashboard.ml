@@ -1674,6 +1674,19 @@ let add_routes ~sw ~clock router =
   (* Keeper POST sub-routes. *)
   |> Http.Router.prefix_post "/api/v1/keepers/" (fun request reqd ->
        match Keeper_api.classify_keeper_post_route (Http.Request.path request) with
+       | Keeper_api.Keeper_post_chat_recovery { keeper_name; receipt_id } ->
+           with_token_permission_auth ~permission:Masc_domain.CanAdmin
+             (fun state agent_name req reqd ->
+               Http.Request.read_body_async reqd (fun body_str ->
+                 Keeper_api.handle_keeper_chat_recovery_post
+                   state
+                   agent_name
+                   req
+                   reqd
+                   ~keeper_name
+                   ~raw_receipt_id:receipt_id
+                   body_str))
+             request reqd
        | Keeper_api.Keeper_post_config ->
            with_token_permission_auth ~permission:Masc_domain.CanAdmin
              (fun state agent_name req reqd ->

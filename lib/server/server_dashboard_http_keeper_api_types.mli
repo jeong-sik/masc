@@ -23,6 +23,15 @@ val keeper_suffix_runtime_trace : string
 val keeper_suffix_directive : string
 val keeper_suffix_catchup_judge : string
 
+val keeper_chat_receipt_state_json :
+  Keeper_chat_queue.receipt_state -> Yojson.Safe.t
+
+val keeper_chat_receipt_json :
+  keeper_name:string ->
+  revision:int64 ->
+  Keeper_chat_queue.receipt_view ->
+  Yojson.Safe.t
+
 (** {1 Dashboard cache keys} *)
 
 val cache_key_string_segment : string -> string
@@ -50,6 +59,11 @@ val keeper_runtime_trace_cache_key :
 (** Cache key for [/api/v1/keepers/<name>/runtime-trace]. Optional query
     fields are tagged so absent values cannot collide with literal payloads. *)
 
+type keeper_chat_recovery_route =
+  { keeper_name : string
+  ; receipt_id : string
+  }
+
 type keeper_post_route_kind =
   | Keeper_post_config
   | Keeper_post_secrets
@@ -60,6 +74,7 @@ type keeper_post_route_kind =
   | Keeper_post_checkpoints
   | Keeper_post_directive
   | Keeper_post_catchup_judge
+  | Keeper_post_chat_recovery of keeper_chat_recovery_route
   | Keeper_post_unknown
 (** Sub-route kind for a [POST /api/v1/keepers/<name>/...] path. *)
 

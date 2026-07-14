@@ -1,5 +1,11 @@
 type owner_keeper_identity = string * string option
 
+type direct_call_authority =
+  | Catalog_policy
+  | Restricted_profile
+(** [Restricted_profile] means the call already passed an exact managed or
+    operator profile membership gate.  It does not weaken authentication. *)
+
 (** A resolved caller name tagged with the origin decided at mint time.
 
     Replaces the [Client_name_kind] string classifier: the
@@ -41,6 +47,7 @@ val resolve :
   cached_resolved_agent:(string * bool) option ->
   auth_token:string option ->
   internal_keeper_runtime:bool ->
+  direct_call_authority:direct_call_authority ->
   workspace_initialized:(unit -> bool) ->
   log_mcp_exn:(label:string -> exn -> unit) ->
   t

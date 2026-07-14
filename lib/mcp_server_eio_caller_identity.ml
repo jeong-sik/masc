@@ -1,5 +1,9 @@
 type owner_keeper_identity = string * string option
 
+type direct_call_authority =
+  | Catalog_policy
+  | Restricted_profile
+
 type t = {
   agent_name : string;
   agent_name_is_ephemeral : bool;
@@ -231,8 +235,8 @@ let resolve_explicit_bound_alias ~config ~workspace_initialized ~log_mcp_exn
     agent_name
 
 let resolve ~(config : Workspace_utils_backend_setup.config) ~tool_name ~arguments ~identity
-    ~cached_resolved_agent ~auth_token ~internal_keeper_runtime ~workspace_initialized
-    ~log_mcp_exn =
+    ~cached_resolved_agent ~auth_token ~internal_keeper_runtime
+    ~direct_call_authority ~workspace_initialized ~log_mcp_exn =
   let explicit_agent_name = caller_agent_name_from_arguments arguments in
   let has_explicit_agent_name = Option.is_some explicit_agent_name in
   let minted_name =
@@ -266,7 +270,10 @@ let resolve ~(config : Workspace_utils_backend_setup.config) ~tool_name ~argumen
   let mode_gate_error =
     if
       (not internal_keeper_runtime_tool)
-      && not (Tool_catalog.allow_direct_call tool_name)
+      &&
+      match direct_call_authority with
+      | Restricted_profile -> false
+      | Catalog_policy -> not (Tool_catalog.allow_direct_call tool_name)
     then
       Some (direct_call_block_message tool_name)
     else

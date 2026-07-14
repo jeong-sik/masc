@@ -745,7 +745,7 @@ let test_handle_request_initialize_operator_profile () =
               | _ -> ""
             in
             Alcotest.(check bool) "mentions operator profile" true
-              (contains_substring instructions "four control-plane tools");
+              (contains_substring instructions "five operator tools plus surface audit");
             Alcotest.(check bool) "mentions confirm workflow" true
               (contains_substring instructions "confirm_required=true")
         | _ -> Alcotest.fail "result not an object")
@@ -784,6 +784,7 @@ let test_handle_request_tools_list_operator_profile () =
                  Alcotest.(check (list string)) "operator-only tools"
                    [
                      "masc_operator_action";
+                     "masc_operator_chat_recovery_resolve";
                      "masc_operator_confirm";
                      "masc_operator_digest";
                      "masc_operator_snapshot";
@@ -1496,6 +1497,7 @@ let test_execute_tool_explicit_agent_name_not_overridden () =
       ~tool_name:"masc_bind" ~arguments ~identity
       ~cached_resolved_agent:(Some ("cached-stale-nickname", false))
       ~auth_token:None ~internal_keeper_runtime:false
+      ~direct_call_authority:Masc.Mcp_server_eio_caller_identity.Catalog_policy
       ~workspace_initialized:(fun () -> false)
       ~log_mcp_exn:(fun ~label:_ _ -> ())
   in
@@ -1536,6 +1538,7 @@ let test_execute_tool_domain_agent_name_does_not_reuse_joined_nickname () =
       ~arguments:(`Assoc [ ("agent_name", `String "alpha-agent") ])
       ~identity ~cached_resolved_agent:None
       ~auth_token:None ~internal_keeper_runtime:false
+      ~direct_call_authority:Masc.Mcp_server_eio_caller_identity.Catalog_policy
       ~workspace_initialized:(fun () -> true)
       ~log_mcp_exn:(fun ~label:_ _ -> ())
   in
@@ -1851,6 +1854,7 @@ let test_execute_tool_http_auth_token_overrides_stale_argument_token () =
       ~identity ~cached_resolved_agent:None
       ~auth_token:(Some "http-auth-token")
       ~internal_keeper_runtime:false
+      ~direct_call_authority:Masc.Mcp_server_eio_caller_identity.Catalog_policy
       ~workspace_initialized:(fun () -> true)
       ~log_mcp_exn:(fun ~label:_ _ -> ())
   in
@@ -1874,6 +1878,7 @@ let test_execute_tool_legacy_argument_token_ignored_without_http_auth () =
       ~arguments:(`Assoc [ ("token", `String "legacy-argument-token") ])
       ~identity ~cached_resolved_agent:None
       ~auth_token:None ~internal_keeper_runtime:false
+      ~direct_call_authority:Masc.Mcp_server_eio_caller_identity.Catalog_policy
       ~workspace_initialized:(fun () -> true)
       ~log_mcp_exn:(fun ~label:_ _ -> ())
   in
@@ -1897,6 +1902,7 @@ let test_execute_tool_without_mcp_session_uses_generated_identity () =
       ~arguments:(`Assoc [ ("message", `String "generated identity check") ])
       ~identity ~cached_resolved_agent:None
       ~auth_token:None ~internal_keeper_runtime:false
+      ~direct_call_authority:Masc.Mcp_server_eio_caller_identity.Catalog_policy
       ~workspace_initialized:(fun () -> true)
       ~log_mcp_exn:(fun ~label:_ _ -> ())
   in

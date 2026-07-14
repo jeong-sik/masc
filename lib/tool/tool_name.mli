@@ -71,6 +71,7 @@ end
 module Operator_name : sig
   type t =
     | Operator_action
+    | Operator_chat_recovery_resolve
     | Operator_confirm
     | Operator_digest
     | Operator_snapshot

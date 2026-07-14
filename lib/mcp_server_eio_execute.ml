@@ -84,10 +84,24 @@ let execute_tool_eio
     | None -> ()
     | Some sid -> Client_registry_eio.set_resolved_name sid agent_name ~is_ephemeral
   in
+  let direct_call_authority =
+    match profile with
+    | Mcp_server_eio_tool_profile.Full ->
+      Mcp_server_eio_caller_identity.Catalog_policy
+    | Managed_agent | Operator_remote ->
+      if
+        Mcp_server_eio_tool_profile.tool_allowed_in_profile
+          ~internal_keeper_runtime
+          state
+          profile
+          name
+      then Mcp_server_eio_caller_identity.Restricted_profile
+      else Mcp_server_eio_caller_identity.Catalog_policy
+  in
   let caller_identity =
     Mcp_server_eio_caller_identity.resolve ~config ~tool_name:name ~arguments
       ~identity ~cached_resolved_agent ~auth_token ~internal_keeper_runtime
-      ~workspace_initialized:(fun () -> workspace_init_cached)
+      ~direct_call_authority ~workspace_initialized:(fun () -> workspace_init_cached)
       ~log_mcp_exn
   in
   let agent_name = caller_identity.agent_name in
@@ -158,9 +172,22 @@ let execute_tool_eio
     let auth_result =
       if auth_enabled
       then (
-        match
-          Auth.authorize_tool_v2 config.base_path ~agent_name ~token ~tool_name:name
-        with
+        let permission_result =
+          match profile with
+          | Mcp_server_eio_tool_profile.Operator_remote ->
+            Auth.check_permission
+              config.base_path
+              ~agent_name
+              ~token
+              ~permission:Masc_domain.CanAdmin
+          | Full | Managed_agent ->
+            Auth.authorize_tool_v2
+              config.base_path
+              ~agent_name
+              ~token
+              ~tool_name:name
+        in
+        match permission_result with
         | Ok () -> Ok ()
         | Error err -> Error err)
       else Ok ()

@@ -8,7 +8,7 @@
     - [Full]: developer / internal MCP surface (full catalog).
     - [Managed_agent]: spawned agent surface (SDK contract +
       passthrough subset).
-    - [Operator_remote]: control-plane surface (4 operator tools).
+    - [Operator_remote]: control-plane surface (5 operator tools plus audit).
 
     Pagination contract: callers consume {!parse_cursor_only_params}
     / {!requested_tool_list_params} as concrete records — record
@@ -58,10 +58,11 @@ val managed_agent_instructions : string
     surface diverge in inventory. *)
 
 val operator_remote_instructions : string
-(** [Operator_remote] profile instructions.  Names the 4 operator
+(** [Operator_remote] profile instructions.  Names the 5 operator
     tools ([masc_operator_snapshot], [masc_operator_digest],
-    [masc_operator_action], [masc_operator_confirm]) and the
-    confirm_token contract for [confirm_required = true]. *)
+    [masc_operator_action], [masc_operator_chat_recovery_resolve],
+    [masc_operator_confirm]), the surface-audit tool, and the confirm_token
+    contract for [confirm_required = true]. *)
 
 (** {1 Schema filtering} *)
 

@@ -28,6 +28,16 @@ val respond_error :
 val handle_keeper_catchup_judge_post :
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
 
+val handle_keeper_chat_recovery_post :
+  Mcp_server.server_state ->
+  string ->
+  Httpun.Request.t ->
+  Httpun.Reqd.t ->
+  keeper_name:string ->
+  raw_receipt_id:string ->
+  string ->
+  unit
+
 val stat_json_of_path : string -> Yojson.Safe.t
 val oas_checkpoint_summary_json :
   source_kind:string ->

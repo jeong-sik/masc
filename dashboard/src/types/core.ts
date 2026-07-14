@@ -724,7 +724,7 @@ export interface KeeperConversationDetails {
   queueReceiptId?: string | null
   /** Shutdown fence that caused this message to be deferred, when present. */
   queueShutdownOperationId?: string | null
-  queueRevision?: number | null
+  queueRevision?: string | null
   queuePendingCount?: number | null
   queueInflightCount?: number | null
   queueRecoveryRequiredCount?: number | null

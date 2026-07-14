@@ -29,6 +29,7 @@ import {
   pauseKeeper,
   parseKeeperRuntimeTrace,
   parseKeeperChatReceipt,
+  resolveKeeperChatRecovery,
   queuedKeeperMessageError,
   queuedKeeperMessageToReply,
   resumeKeeper,
@@ -101,7 +102,7 @@ describe('Keeper chat durable receipt API', () => {
       schema: 'keeper_chat_queue.receipt.v2',
       keeper_name: 'echo',
       receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
-      revision: 8,
+      revision: '8',
       state: {
         kind: 'recovery_required',
         lease_id: 'lease_00000000-0000-4000-8000-000000000002',
@@ -111,7 +112,7 @@ describe('Keeper chat durable receipt API', () => {
     })).toEqual({
       keeperName: 'echo',
       receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
-      revision: 8,
+      revision: '8',
       state: {
         kind: 'recovery_required',
         leaseId: 'lease_00000000-0000-4000-8000-000000000002',
@@ -126,7 +127,7 @@ describe('Keeper chat durable receipt API', () => {
       schema: 'keeper_chat_queue.receipt.v2',
       keeper_name: 'echo',
       receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
-      revision: 8,
+      revision: '8',
       state: {
         kind: 'recovery_required',
         lease_id: 'lease_00000000-0000-4000-8000-000000000002',
@@ -141,7 +142,7 @@ describe('Keeper chat durable receipt API', () => {
       schema: 'keeper_chat_queue.receipt.v2',
       keeper_name: 'echo',
       receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
-      revision: 7,
+      revision: '7',
       state: {
         kind: 'failed',
         failure_kind: 'delivery_failed',
@@ -152,7 +153,7 @@ describe('Keeper chat durable receipt API', () => {
     })).toEqual({
       keeperName: 'echo',
       receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
-      revision: 7,
+      revision: '7',
       state: {
         kind: 'failed',
         failureKind: 'delivery_failed',
@@ -170,7 +171,7 @@ describe('Keeper chat durable receipt API', () => {
         schema: 'keeper_chat_queue.receipt.v2',
         keeper_name: 'echo',
         receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
-        revision: 7,
+        revision: '7',
         state: {
           kind: 'failed',
           failure_kind: failureKind,
@@ -187,7 +188,7 @@ describe('Keeper chat durable receipt API', () => {
       schema: 'keeper_chat_queue.receipt.v2',
       keeper_name: 'echo',
       receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
-      revision: 1,
+      revision: '1',
       state: { kind: 'lost_somewhere' },
     })).toThrow('unknown state')
   })
@@ -197,7 +198,7 @@ describe('Keeper chat durable receipt API', () => {
       schema: 'keeper_chat_queue.receipt.v2',
       keeper_name: 'echo',
       receipt_id: 'receipt-echo-1',
-      revision: 1,
+      revision: '1',
       state: { kind: 'pending' },
     })).toThrow('missing identity')
   })
@@ -207,7 +208,7 @@ describe('Keeper chat durable receipt API', () => {
       schema: 'keeper_chat_queue.receipt.v2',
       keeper_name: 'echo',
       receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
-      revision: 2,
+      revision: '2',
       state: { kind: 'delivered', completed_at: 42, outcome_ref: 7 },
     })).toThrow('outcome_ref must be a string or null')
   })
@@ -217,7 +218,7 @@ describe('Keeper chat durable receipt API', () => {
       schema: 'keeper_chat_queue.receipt.v2',
       keeper_name: 'echo',
       receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
-      revision: 2,
+      revision: '2',
       state: {
         kind: 'failed',
         failure_kind: 'delivery_failed',
@@ -234,7 +235,7 @@ describe('Keeper chat durable receipt API', () => {
         schema: 'keeper_chat_queue.receipt.v2',
         keeper_name: 'keeper sangsu',
         receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
-        revision: 2,
+        revision: '2',
         state: { kind: 'pending' },
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
     )
@@ -248,6 +249,49 @@ describe('Keeper chat durable receipt API', () => {
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/v1/keepers/keeper%20sangsu/chat/receipts/chatq_00000000-0000-4000-8000-000000000001',
       expect.objectContaining({ headers: expect.any(Object) }),
+    )
+  })
+
+  it('resolves one exact recovery receipt with string revision and lease evidence', async () => {
+    const receiptId = 'chatq_00000000-0000-4000-8000-000000000001'
+    const leaseId = 'lease_00000000-0000-4000-8000-000000000002'
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        schema: 'keeper_chat_queue.recovery.result.v1',
+        ok: true,
+        decision: 'requeue_unconfirmed',
+        receipt: {
+          schema: 'keeper_chat_queue.receipt.v2',
+          keeper_name: 'keeper sangsu',
+          receipt_id: receiptId,
+          revision: '9223372036854775806',
+          state: { kind: 'pending' },
+        },
+        audit: { recorded: true },
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await resolveKeeperChatRecovery(
+      'keeper sangsu',
+      receiptId,
+      '9223372036854775805',
+      leaseId,
+      { kind: 'requeue_unconfirmed' },
+    )
+
+    expect(result.receipt.revision).toBe('9223372036854775806')
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/v1/keepers/keeper%20sangsu/chat/receipts/${receiptId}/recovery`,
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          schema: 'keeper_chat_queue.recovery.request.v1',
+          expected_revision: '9223372036854775805',
+          lease_id: leaseId,
+          decision: { kind: 'requeue_unconfirmed' },
+        }),
+      }),
     )
   })
 

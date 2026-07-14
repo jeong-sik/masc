@@ -175,18 +175,8 @@ let append_many ctx msgs =
 let sync_oas_context (ctx : working_context) : working_context =
   let context = oas_context_of_context ctx in
   let message_count = message_count ctx in
-  let token_count = token_count ctx in
-  let context_ratio =
-    let max_tokens = max_tokens_of_context ctx in
-    if max_tokens = 0 then 0.0
-    else float_of_int token_count /. float_of_int max_tokens
-  in
   Agent_sdk.Context.set_scoped context Agent_sdk.Context.Session
     "message_count" (`Int message_count);
-  Agent_sdk.Context.set_scoped context Agent_sdk.Context.Session
-    "token_count" (`Int token_count);
-  Agent_sdk.Context.set_scoped context Agent_sdk.Context.Session
-    "context_ratio" (`Float context_ratio);
   ctx
 
 let role_to_string = Message_json.role_to_string
@@ -537,7 +527,6 @@ let serialize_context (ctx : working_context) : string =
       `String
         (Inference_utils.sanitize_text_utf8 (system_prompt_of_context ctx)) );
     ("messages", `List (List.map message_to_json (messages_of_context ctx)));
-    ("token_count", `Int (token_count ctx));
     ("max_tokens", `Int (max_tokens_of_context ctx));
   ] in
   Yojson.Safe.to_string json
@@ -549,7 +538,6 @@ let deserialize_context ~eio (s : string) ~max_tokens : working_context =
     (match Json_util.assoc_member_opt "messages" json with Some (`List l) -> l | _ -> []) |> List.map message_of_json
     |> repair_broken_tool_call_pairs
   in
-  let _legacy_token_count = Json_util.get_int json "token_count" in
   let context = create_oas_context ~eio in
   let checkpoint =
     empty_runtime_checkpoint ~system_prompt ~messages ~max_tokens ~context
@@ -563,7 +551,6 @@ let context_to_json (ctx : working_context) : Yojson.Safe.t =
       `String
         (Inference_utils.sanitize_text_utf8 (system_prompt_of_context ctx)) );
     ("messages", `List (List.map message_to_json (messages_of_context ctx)));
-    ("token_count", `Int (token_count ctx));
     ("max_tokens", `Int (max_tokens_of_context ctx));
   ]
 

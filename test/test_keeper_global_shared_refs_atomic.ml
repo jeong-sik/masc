@@ -181,24 +181,22 @@ let test_keepalive_signal_callbacks () =
     { Keeper_keepalive_signal.f = (fun ~ctx:_ ~m:_ ~stop:_ -> None) };
   (* Wake payload. *)
   let wake_called = ref false in
-  Keeper_keepalive_signal.register_record_wake_payload (fun ~keeper_name:_ ~trace_id:_ ~turn_index:_ ~model_id:_ ~context_window:_ ~approx_body_bytes:_ ~system_prompt_bytes:_ ~tool_defs_bytes:_ ~messages_bytes:_ ~message_count:_ ~role_counts:_ ~tool_count:_ ~has_compact_happened:_ ->
+  Keeper_keepalive_signal.register_record_wake_payload (fun ~keeper_name:_ ~trace_id:_ ~turn_index:_ ~context_window:_ ~system_prompt_bytes:_ ~tool_schema_json_bytes:_ ~message_content_bytes:_ ~message_count:_ ~role_counts:_ ~tool_count:_ ~has_compact_happened:_ ->
     wake_called := true);
   Keeper_keepalive_signal.record_wake_payload
     ~keeper_name:"k"
     ~trace_id:"t"
     ~turn_index:0
-    ~model_id:"m"
     ~context_window:4096
-    ~approx_body_bytes:0
     ~system_prompt_bytes:0
-    ~tool_defs_bytes:0
-    ~messages_bytes:0
+    ~tool_schema_json_bytes:0
+    ~message_content_bytes:0
     ~message_count:0
     ~role_counts:[]
     ~tool_count:0
     ~has_compact_happened:false;
   check bool "wake payload callback invoked" true !wake_called;
-  Keeper_keepalive_signal.register_record_wake_payload (fun ~keeper_name:_ ~trace_id:_ ~turn_index:_ ~model_id:_ ~context_window:_ ~approx_body_bytes:_ ~system_prompt_bytes:_ ~tool_defs_bytes:_ ~messages_bytes:_ ~message_count:_ ~role_counts:_ ~tool_count:_ ~has_compact_happened:_ -> ());
+  Keeper_keepalive_signal.register_record_wake_payload (fun ~keeper_name:_ ~trace_id:_ ~turn_index:_ ~context_window:_ ~system_prompt_bytes:_ ~tool_schema_json_bytes:_ ~message_content_bytes:_ ~message_count:_ ~role_counts:_ ~tool_count:_ ~has_compact_happened:_ -> ());
   (* Tool skipped. *)
   let skipped = ref false in
   Keeper_keepalive_signal.register_record_tool_skipped (fun ~keeper_name:_ ~tool_name:_ ~reason_code:_ -> skipped := true);

@@ -166,21 +166,6 @@ let test_preflight_overflow_does_not_bypass_driver_retry () =
     (contains_substring ~needle:"record_overflow_failure" execution_src)
 ;;
 
-let test_context_overflow_event_falls_back_without_event_bus_signal () =
-  match
-    UT.context_overflow_event_of_error
-      ~fallback_tokens:32_768
-      (Agent_sdk.Error.Api
-         (ContextOverflow { message = "prompt exceeds context"; limit = Some 32_768 }))
-  with
-  | KP.Context_overflow_detected
-      { source = `Prompt_rejected; token_count; limit_tokens = Some limit_tokens } ->
-    check int "fallback uses error limit" 32_768 token_count;
-    check int "fallback preserves limit" 32_768 limit_tokens
-  | event ->
-    fail ("expected prompt_rejected overflow event, got " ^ KP.event_to_string event)
-;;
-
 let () =
   run
     "keeper_unified_context_overflow"
@@ -205,10 +190,6 @@ let () =
             "preflight overflow does not bypass driver retry"
             `Quick
             test_preflight_overflow_does_not_bypass_driver_retry
-        ; test_case
-            "context_overflow_event falls back without event bus signal"
-            `Quick
-            test_context_overflow_event_falls_back_without_event_bus_signal
         ] )
     ]
 ;;

@@ -81,12 +81,8 @@ include module type of Otel_policy_metric_names
     [keeper, outcome]. Outcome is one of [started | meta_unavailable]. *)
 
 val metric_oas_bus_capacity : string
-(** Gauge: per-subscriber [Eio.Stream] capacity chosen at bus creation.
-    Labels: [bus] names the MASC bus ([oas_runtime] | [masc_domain]),
-    [policy] names the [Agent_sdk.Event_bus.backpressure_policy].
-    Published once per bus at [Masc_event_bus_policy.create_bus] so
-    operators can interpret [masc_event_bus_subscriber_depth]
-    as a fraction of capacity. *)
+(** Gauge: total queue capacity for live subscribers grouped by
+    [bus], [purpose], [capacity], and [overflow]. *)
 
 val metric_oas_bridge_unmigrated_payload_kind : string
 val metric_keeper_context_tool_result_compacted : string

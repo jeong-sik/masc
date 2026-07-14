@@ -937,13 +937,9 @@ let start_keeper_loops_owned
   (* Wire stop_keeper hook so zombie GC can terminate keeper fibers *)
   Atomic.set Workspace_hooks.stop_keeper_fn Keeper_keepalive.stop_keepalive;
   Atomic.set Workspace_hooks.runtime_agents_fn keeper_registry_runtime_agents;
-  (* Shared Agent_sdk Event_bus used as the runtime transport between subsystems.
-     Configuration is sourced from [Masc_event_bus_policy.oas_runtime] so the
-     buffer-size/policy choice is auditable in source rather than implicit in
-     OAS defaults, and the chosen capacity is published through OTel. *)
-  let event_bus =
-    Masc_event_bus_policy.create_bus Masc_event_bus_policy.oas_runtime
-  in
+  (* Bus creation carries no queue policy. Each subscriber owns its bounded,
+     non-blocking queue contract. *)
+  let event_bus = Agent_sdk.Event_bus.create () in
   (* Eio fiber isolation: each subsystem runs in its own fiber.
      If one crashes, others keep running — Eio's structured concurrency.
      Subsystem_health tracks liveness at module level (no init timing dependency). *)
@@ -1082,9 +1078,7 @@ let start_keeper_loops_owned
      boundary. Dashboard SSE consumers see both channels as one stream
      — the relay translates masc.* →
      masc:* on the wire for backward compatibility. *)
-  let masc_event_bus =
-    Masc_event_bus_policy.create_bus Masc_event_bus_policy.masc_domain
-  in
+  let masc_event_bus = Agent_sdk.Event_bus.create () in
   Masc_event_bus.set masc_event_bus;
   (* Event_bus → SSE bridge: relay both OAS and MASC buses to dashboard *)
   Keeper_event_bridge.start ~sw ~clock ~config:(Mcp_server.workspace_config state) ~bus:event_bus;
@@ -1156,22 +1150,6 @@ let start_keeper_loops_owned
                    (Keeper_shutdown_types.Operation_id.to_string operation.operation_id)
                    (Printexc.to_string exn)))
           restored.operations));
-  (* Spawn the OAS bus depth sampler so warnings surface on stdout
-     even when no external telemetry backend is attached.
-
-     [MASC_OAS_BUS_WARN_DEPTH] lets operators raise the threshold without
-     a rebuild — fleet-wide keeper load legitimately pushes depth past
-     the 200 default at peak (issue #8517). Invalid values fall back to
-     the compile-time default. *)
-  let warn_threshold =
-    match Sys.getenv_opt "MASC_OAS_BUS_WARN_DEPTH" with
-    | Some v ->
-      (match int_of_string_opt (String.trim v) with
-       | Some n when n > 0 -> n
-       | _ -> 200)
-    | None -> 200
-  in
-  Agent_sdk_metrics_bridge.start_sampler ~sw ~clock ~warn_threshold ();
   fork_logged_fiber
     ~sw
     ~on_error:(log_dashboard_fiber_crash "keeper lifecycle listener")

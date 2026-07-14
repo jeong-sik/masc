@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { lazy, Suspense } from 'preact/compat'
+import type { ComponentType } from 'preact'
 import { useEffect, useMemo } from 'preact/hooks'
 import type { GroundedVerdict, RouteState, TabId } from '../types'
 import type { DashboardCdalHealth, DashboardFleetSafetyHealth, DashboardKeeperReactionLedgerHealth, DashboardRuntimeResolution, Keeper } from '../types'
@@ -80,6 +81,7 @@ const LazyIdeShell = lazy(async () => ({ default: (await import('./ide/ide-shell
 const LazyCockpit = lazy(async () => ({ default: (await import('./cockpit/cockpit')).Cockpit }))
 const LazySettingsSurface = lazy(async () => ({ default: (await import('./settings-surface')).SettingsSurface }))
 const LazyApprovals = lazy(async () => ({ default: (await import('./approvals/approvals-surface')).ApprovalsSurface }))
+const LazyRegistrySurface = lazy(async () => ({ default: (await import('./registry/registry-surface')).RegistrySurface }))
 const LazyFusionSurface = lazy(async () => ({ default: (await import('./fusion/fusion-surface')).FusionSurface }))
 
 function lazyTabFallback(label: string) {
@@ -1208,107 +1210,39 @@ export function SideRail({
   `
 }
 
-function TabContent() {
-  const tab = route.value.tab
+// One dedicated surface per tab (WO-A4-3b). The Record is exhaustive over
+// TabId, so a new tab without a surface fails to compile HERE instead of
+// silently bouncing to Overview — the previous switch's default arm did
+// exactly that for any missed case. Exported for the tab→content contract
+// test.
+export const TAB_SURFACE: Readonly<
+  Record<TabId, { readonly label: string; readonly Component: ComponentType }>
+> = {
+  overview: { label: 'Overview', Component: LazyOverview },
+  monitoring: { label: 'Monitor', Component: LazyStatus },
+  keepers: { label: 'Keepers', Component: LazyKeeperDetailPage },
+  registry: { label: 'Registry', Component: LazyRegistrySurface },
+  board: { label: 'Board', Component: LazyBoardSurface },
+  schedule: { label: 'Schedule', Component: LazyScheduleSurface },
+  approvals: { label: 'Approvals', Component: LazyApprovals },
+  fusion: { label: 'Fusion', Component: LazyFusionSurface },
+  workspace: { label: 'Work', Component: LazyWork },
+  command: { label: 'Command', Component: LazyOperations },
+  connectors: { label: 'Connectors', Component: LazyConnectors },
+  lab: { label: 'Lab', Component: LazyLabSurface },
+  cockpit: { label: 'Cockpit', Component: LazyCockpit },
+  code: { label: 'Code IDE', Component: LazyIdeShell },
+  logs: { label: 'System Logs', Component: LazyLogViewer },
+  settings: { label: 'Settings', Component: LazySettingsSurface },
+}
 
-  switch (tab) {
-    case 'overview':
-      return html`
-        <${Suspense} fallback=${lazyTabFallback('Overview')}>
-          <${LazyOverview} />
-        <//>
-      `
-    case 'monitoring':
-      return html`
-        <${Suspense} fallback=${lazyTabFallback('Monitor')}>
-          <${LazyStatus} />
-        <//>
-      `
-    case 'keepers':
-      return html`
-        <${Suspense} fallback=${lazyTabFallback('Keepers')}>
-          <${LazyKeeperDetailPage} />
-        <//>
-      `
-    case 'board':
-      return html`
-        <${Suspense} fallback=${lazyTabFallback('Board')}>
-          <${LazyBoardSurface} />
-        <//>
-      `
-    case 'schedule':
-      return html`
-        <${Suspense} fallback=${lazyTabFallback('Schedule')}>
-          <${LazyScheduleSurface} />
-        <//>
-      `
-    case 'approvals':
-      return html`
-        <${Suspense} fallback=${lazyTabFallback('Approvals')}>
-          <${LazyApprovals} />
-        <//>
-      `
-    case 'fusion':
-      return html`
-        <${Suspense} fallback=${lazyTabFallback('Fusion')}>
-          <${LazyFusionSurface} />
-        <//>
-      `
-    case 'workspace':
-      return html`
-        <${Suspense} fallback=${lazyTabFallback('Work')}>
-          <${LazyWork} />
-        <//>
-      `
-    case 'command':
-      return html`
-        <${Suspense} fallback=${lazyTabFallback('Command')}>
-          <${LazyOperations} />
-        <//>
-      `
-    case 'connectors':
-      return html`
-        <${Suspense} fallback=${lazyTabFallback('Connectors')}>
-          <${LazyConnectors} />
-        <//>
-      `
-    case 'lab':
-      return html`
-        <${Suspense} fallback=${lazyTabFallback('Lab')}>
-          <${LazyLabSurface} />
-        <//>
-      `
-    case 'cockpit':
-      return html`
-        <${Suspense} fallback=${lazyTabFallback('Cockpit')}>
-          <${LazyCockpit} />
-        <//>
-      `
-    case 'code':
-      return html`
-        <${Suspense} fallback=${lazyTabFallback('Code IDE')}>
-          <${LazyIdeShell} />
-        <//>
-      `
-    case 'logs':
-      return html`
-        <${Suspense} fallback=${lazyTabFallback('System Logs')}>
-          <${LazyLogViewer} />
-        <//>
-      `
-    case 'settings':
-      return html`
-        <${Suspense} fallback=${lazyTabFallback('Settings')}>
-          <${LazySettingsSurface} />
-        <//>
-      `
-    default:
-      return html`
-        <${Suspense} fallback=${lazyTabFallback('Overview')}>
-          <${LazyOverview} />
-        <//>
-      `
-  }
+function TabContent() {
+  const { label, Component } = TAB_SURFACE[route.value.tab]
+  return html`
+    <${Suspense} fallback=${lazyTabFallback(label)}>
+      <${Component} />
+    <//>
+  `
 }
 
 /** Pure: build the shareable URL for the current section. Uses

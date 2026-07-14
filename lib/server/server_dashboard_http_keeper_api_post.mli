@@ -84,6 +84,16 @@ val handle_keeper_lifecycle_post :
   Httpun.Reqd.t ->
   unit
 
+val handle_keeper_create_post :
+  sw:Eio.Switch.t ->
+  clock:[> float Eio.Time.clock_ty ] Eio.Time.clock ->
+  Mcp_server.server_state ->
+  string ->
+  Httpun.Request.t ->
+  Httpun.Reqd.t ->
+  string ->
+  unit
+
 val handle_keeper_directive_post :
   sw:Eio.Switch.t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Time.clock ->

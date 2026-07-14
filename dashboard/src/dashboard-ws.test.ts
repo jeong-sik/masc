@@ -262,6 +262,11 @@ describe('dashboardSlicesForRoute', () => {
     ])
   })
 
+  it('subscribes the execution slice on the registry route (keepers hydrate only from the execution snapshot)', () => {
+    expect(dashboardSlicesForRoute({ tab: 'registry', params: {} }))
+      .toContain('execution')
+  })
+
   it('subscribes execution for execution-heavy monitoring and planning routes', () => {
     expect(dashboardSlicesForRoute({ tab: 'workspace', params: { section: 'planning' } }))
       .toContain('execution')

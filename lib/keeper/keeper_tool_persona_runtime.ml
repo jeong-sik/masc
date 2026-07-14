@@ -216,6 +216,18 @@ let render_keeper_toml_from_resolved_args (json : Yojson.Safe.t) :
               let fields =
                 append_present_string_list_field fields "active_goal_ids" json
               in
+              (* The reconcile boot gate is fail-closed on a declared
+                 [sandbox_profile] (#11080) and personas cannot own capability
+                 fields (D-9 zero-capability invariant), so the generated TOML
+                 pins the profile here. Docker is the most isolated profile
+                 and the unanimous live-fleet value (13/13 keeper TOMLs,
+                 2026-07-14); Local would strip isolation on omission.
+                 Post-create edits go through the keeper config panel. *)
+              let fields =
+                append_string_field fields "sandbox_profile"
+                  (Keeper_types_profile_sandbox.sandbox_profile_to_string
+                     Keeper_types_profile_sandbox.Docker)
+              in
               let timeout_fields =
                 match Safe_ops.json_float_opt "per_provider_timeout" json with
                 | None -> Ok fields
@@ -272,6 +284,101 @@ let persist_keeper_toml_from_resolved_args (json : Yojson.Safe.t) :
                           ("path", `String path);
                           ("created", `Bool true);
                         ])))
+
+(* Configured-only durable TOML write (create-without-boot).
+   - fresh-only: an existing TOML is an explicit error, not a silent
+     no-op — a wizard "create" must not quietly adopt an unrelated
+     keeper's config (contrast [persist_keeper_toml_from_resolved_args],
+     which tolerates already_exists because the boot path persists after
+     a successful boot).
+   - [autoboot_enabled] is pinned false in the rendered TOML so reconcile
+     classifies the keeper [Declarative_autoboot_disabled] before any meta
+     exists; a caller passing autoboot_enabled=true is an explicit
+     conflict, rejected instead of silently overridden.
+   - path scope: resolves under [base_path] (the same resolver family
+     discovery uses) instead of the process-global keepers_dir. *)
+let persist_new_keeper_toml_configured_only ~base_path
+    (json : Yojson.Safe.t) : (string, string) result =
+  match required_resolved_string "name" json with
+  | Error _ as err -> err
+  | Ok name ->
+      if not (validate_name name) then
+        Error "resolved_args.name is not a valid keeper name"
+      else if get_bool json "autoboot_enabled" false then
+        Error
+          "no_boot conflicts with autoboot_enabled=true: a configured-only \
+           keeper is written with autoboot_enabled=false; drop one of the \
+           two, then boot explicitly with masc_keeper_up"
+      else (
+        match
+          Keeper_types_profile.keeper_toml_path_opt_for_base_path ~base_path
+            name
+        with
+        | Some existing_path ->
+            Error
+              (Printf.sprintf "keeper config already exists: %s" existing_path)
+        | None -> (
+            let json =
+              match json with
+              | `Assoc fields ->
+                  `Assoc
+                    (List.remove_assoc "autoboot_enabled" fields
+                    @ [ ("autoboot_enabled", `Bool false) ])
+              | other -> other
+            in
+            match render_keeper_toml_from_resolved_args json with
+            | Error _ as err -> err
+            | Ok content -> (
+                let path =
+                  Filename.concat
+                    (Config_dir_resolver.keepers_dir_for_base_path ~base_path)
+                    (name ^ ".toml")
+                in
+                Fs_compat.mkdir_p (Filename.dirname path);
+                match Fs_compat.save_file_atomic path content with
+                | Error msg -> Error msg
+                | Ok () -> Ok path)))
+
+(* Create-without-boot composition: durable TOML first, then the meta is
+   derived by the SAME parse + derivation the boot path uses (the parse
+   reads profile defaults from the TOML just written — including the
+   pinned sandbox_profile — so the two paths cannot drift). On a failure
+   after the TOML write, the freshly created file is removed so a failed
+   create does not leave an orphan config that a later reconcile or
+   create would trip over. *)
+let create_configured_only (ctx : _ context)
+    (resolved_args : Yojson.Safe.t) : (Yojson.Safe.t, string) result =
+  let base_path = ctx.config.Workspace.base_path in
+  match persist_new_keeper_toml_configured_only ~base_path resolved_args with
+  | Error _ as err -> err
+  | Ok toml_path -> (
+      let remove_orphan_toml () =
+        try Sys.remove toml_path
+        with Sys_error e ->
+          Log.Keeper.error
+            "create_configured_only: failed to remove orphan TOML %s: %s"
+            toml_path e
+      in
+      match Keeper_turn_up_args.parse ctx resolved_args with
+      | Error result ->
+          remove_orphan_toml ();
+          Error (tool_result_body result)
+      | Ok p -> (
+          match
+            Keeper_turn_up_create.create_keeper_configured_only ctx.config p
+          with
+          | Error e ->
+              remove_orphan_toml ();
+              Error e
+          | Ok meta ->
+              Ok
+                (`Assoc
+                   [
+                     ("name", `String meta.name);
+                     ("path", `String toml_path);
+                     ("booted", `Bool false);
+                     ("autoboot_enabled", `Bool false);
+                   ])))
 
 let resolved_keeper_args_from_persona args :
     ((persona_summary * Yojson.Safe.t), string) result =

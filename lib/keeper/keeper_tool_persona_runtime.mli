@@ -24,5 +24,23 @@ val render_keeper_toml_from_resolved_args :
 val persist_keeper_toml_from_resolved_args :
   Yojson.Safe.t -> (Yojson.Safe.t, string) result
 
+(** Configured-only durable TOML write (create-without-boot):
+    fresh-only (existing TOML is an explicit error), pins
+    [autoboot_enabled = false] (an explicit [autoboot_enabled = true]
+    input is a rejected conflict), resolves under [base_path]. Returns
+    the written path. *)
+val persist_new_keeper_toml_configured_only :
+  base_path:string -> Yojson.Safe.t -> (string, string) result
+
+(** Create-without-boot composition: fresh TOML write, then meta via the
+    same parse + derivation as the boot path — no session, checkpoint,
+    registry, or keepalive. Removes the freshly written TOML when a later
+    step fails. Returns [{name; path; booted=false;
+    autoboot_enabled=false}]. *)
+val create_configured_only :
+  _ Keeper_types_profile.context ->
+  Yojson.Safe.t ->
+  (Yojson.Safe.t, string) result
+
 val resolved_keeper_args_from_persona :
   Yojson.Safe.t -> (persona_summary * Yojson.Safe.t, string) result

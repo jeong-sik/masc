@@ -403,6 +403,12 @@ export function dashboardSlicesForRoute(routeState: DashboardRouteState): string
     slices.add('execution')
     slices.add('composite')
   }
+  // Registry keeper cards hydrate exclusively from the execution snapshot
+  // (store.hydrateExecutionSnapshot is the only keepers-signal writer on
+  // this route), so the slice subscription is what keeps roster rows live.
+  if (routeState.tab === 'registry') {
+    slices.add('execution')
+  }
   if (routeState.tab === 'board') {
     return Array.from(slices).sort()
   }

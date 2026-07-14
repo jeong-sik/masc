@@ -25,6 +25,7 @@ const SURFACES: readonly NavEntry[] = [
   { tab: 'overview', label: '개요', icon: 'grid' },
   'sep',
   { tab: 'keepers', label: 'Keepers', icon: 'users' },
+  { tab: 'registry', label: '레지스트리', icon: 'layers' },
   { tab: 'monitoring', label: 'Monitor', icon: 'monitor' },
   'sep',
   { tab: 'workspace', label: '작업', icon: 'target' },

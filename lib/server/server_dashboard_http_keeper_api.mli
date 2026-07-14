@@ -182,6 +182,15 @@ val handle_keeper_lifecycle_post :
 (** Generic handler for boot / shutdown / reset / clear posts; the
     [action] parameter selects the keeper FSM event. *)
 
+val handle_keeper_create_post :
+  sw:Eio.Switch.t ->
+  clock:[> float Eio.Time.clock_ty ] Eio.Time.clock ->
+  Mcp_server.server_state ->
+  string -> Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
+(** Handle [POST /api/v1/keepers/<name>/create] — REST surface over
+    [masc_keeper_create_from_persona]; path name wins, body fields
+    (persona_name, initial_goal, no_boot, dry_run, ...) pass through. *)
+
 val handle_keeper_directive_post :
   sw:Eio.Switch.t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Time.clock ->

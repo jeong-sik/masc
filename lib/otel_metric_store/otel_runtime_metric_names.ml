@@ -5,7 +5,8 @@
     [Otel_metric_store.metric_*] bindings unchanged. *)
 
 let metric_mcp_tool_schema_count = "masc_tool_schema_count"
-let metric_mcp_tool_schema_tokens_approx = "masc_tool_schema_tokens_approx"
+let metric_mcp_tool_schema_component_bytes =
+  "masc_tool_schema_component_bytes"
 let metric_inference_inflight = "masc_inference_inflight"
 let metric_inference_started =
   Otel_metric_store_core.declare_counter "masc_inference_started_total"

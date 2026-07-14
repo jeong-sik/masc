@@ -415,6 +415,13 @@ let test_mcp_session_roundtrip () =
       check (float 0.001) "last_seen roundtrip" session.last_seen decoded.last_seen
   | None -> fail "roundtrip failed"
 
+let test_tool_schema_component_bytes () =
+  check int "UTF-8 bytes plus JSON bytes" 11
+    (Mcp_server_eio.tool_schema_component_bytes
+       ~name:"도구"
+       ~description:"x"
+       ~input_schema:`Null)
+
 (* ============================================================
    Test Runners
    ============================================================ *)
@@ -429,6 +436,9 @@ let () =
     "normalize_protocol_version", [
       test_case "basic" `Quick test_normalize_protocol_version;
       test_case "unknown" `Quick test_normalize_protocol_version_unknown;
+    ];
+    "tool_schema_component_bytes", [
+      test_case "exact UTF-8 bytes" `Quick test_tool_schema_component_bytes;
     ];
     "protocol_version_from_params", [
       test_case "none" `Quick test_protocol_version_from_params_none;

@@ -71,6 +71,10 @@ val get_clock : unit -> (float Eio.Time.clock_ty Eio.Resource.t, string) result
     @param base_path Workspace/base path; MASC data lives under [<base_path>/.masc]. *)
 val create_state : ?test_mode:bool -> base_path:string -> unit -> server_state
 
+(** Exact UTF-8 byte size of the visible schema components recorded at boot. *)
+val tool_schema_component_bytes :
+  name:string -> description:string -> input_schema:Yojson.Safe.t -> int
+
 (** Create server state with Eio context.
 
     @param sw Eio.Switch for structured concurrency

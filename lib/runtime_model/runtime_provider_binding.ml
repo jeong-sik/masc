@@ -55,7 +55,6 @@ let binding_auth_is_no_auth (binding : Runtime_binding.t) =
   match binding.Runtime_binding.auth with
   | Runtime_binding.No_auth -> true
   | Runtime_binding.Api_key_env _
-  | Runtime_binding.Oauth_cached_login
   | Runtime_binding.Setup_token_env _ -> false
 ;;
 
@@ -67,11 +66,9 @@ let binding_base_url_is_loopback (binding : Runtime_binding.t) =
 ;;
 
 let runtime_kind_of_binding (binding : Runtime_binding.t) =
-  match binding.Runtime_binding.transport with
-  | Runtime_binding.Http | Runtime_binding.Managed ->
-    if binding_auth_is_no_auth binding && binding_base_url_is_loopback binding
-    then "local"
-    else "direct_api"
+  if binding_auth_is_no_auth binding && binding_base_url_is_loopback binding
+  then "local"
+  else "direct_api"
 ;;
 
 let is_binding_local_openai_runtime (binding : Runtime_binding.t) =

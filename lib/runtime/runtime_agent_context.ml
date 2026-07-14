@@ -71,7 +71,6 @@ type config =
   ; priority : Llm_provider.Request_priority.t option
   ; system_prompt : string
   ; tools : Agent_sdk.Tool.t list
-  ; runtime_mcp_policy : Llm_provider.Llm_transport.runtime_mcp_policy option
   ; max_turns : int
   ; max_idle_turns : int
   ; stream_idle_timeout_s : float option
@@ -186,7 +185,6 @@ let default_config
   ; priority = None
   ; system_prompt
   ; tools
-  ; runtime_mcp_policy = None
   ; max_turns = default_max_turns
   ; max_idle_turns = 3
   ; stream_idle_timeout_s = None
@@ -326,11 +324,6 @@ let builder_without_approval
   let builder =
     match config.priority with
     | Some priority -> Agent_sdk.Builder.with_priority priority builder
-    | None -> builder
-  in
-  let builder =
-    match config.runtime_mcp_policy with
-    | Some policy -> Agent_sdk.Builder.with_runtime_mcp_policy policy builder
     | None -> builder
   in
   let builder =
@@ -535,7 +528,6 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
     ; approval = config.approval
     ; missing_approval_callback_policy =
         Agent_sdk.Hooks.Reject_without_callback
-    ; runtime_mcp_policy = config.runtime_mcp_policy
     ; summarizer = config.summarizer
     ; priority = config.priority
     ; on_run_complete = config.on_run_complete

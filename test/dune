@@ -52,7 +52,6 @@
   test_board_collect_pause_gate
   test_keeper_identity_id
   test_tool_agent_timeline_name_match
-  test_provider_tool_support_caps
   test_runtime_request_config_merge
   test_keeper_context_layers
   test_keeper_hooks_oas_introspection
@@ -325,7 +324,6 @@
   test_telemetry_observe
   test_keeper_typed_labels
   test_exec_shell_command_gate
-  test_runtime_mcp_policy_auth
   test_keeper_classifier_helper
   test_keeper_unified_persona_block
   test_persona_crud_profile_shape
@@ -379,7 +377,6 @@
   test_board_collect_pause_gate
   test_keeper_identity_id
   test_tool_agent_timeline_name_match
-  test_provider_tool_support_caps
   test_runtime_request_config_merge
   test_keeper_context_layers
   test_keeper_hooks_oas_introspection
@@ -658,7 +655,6 @@
   test_telemetry_observe
   test_keeper_typed_labels
   test_exec_shell_command_gate
-  test_runtime_mcp_policy_auth
   test_keeper_classifier_helper
   test_keeper_unified_persona_block
   test_persona_crud_profile_shape

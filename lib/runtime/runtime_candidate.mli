@@ -56,16 +56,6 @@ val effective_attempt_timeout_resolution :
 val effective_attempt_timeout_s :
   is_last:bool -> configured_timeout_s:float option -> t -> float option
 
-val resolve_tool_lane_for_oas_tools :
-  base_path:string ->
-  ?agent_name:string ->
-  tools:Agent_sdk.Tool.t list ->
-  t ->
-  ( Agent_sdk.Tool.t list
-    * Llm_provider.Llm_transport.runtime_mcp_policy option,
-    Agent_sdk.Error.sdk_error )
-  result
-
 val capacity_key : t -> string
 val capacity_keys : t list -> string list
 val declared_client_capacity : t -> int option

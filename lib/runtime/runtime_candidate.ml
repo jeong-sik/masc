@@ -37,14 +37,6 @@ let health_key (t : t) = Runtime_provider_binding.provider_health_key_of_config 
 let model_health_key (t : t) = Runtime_provider_binding.provider_health_key_of_config t.config
 let health_keys (t : t) = [ Runtime_provider_binding.provider_health_key_of_config t.config ]
 
-let resolve_tool_lane_for_oas_tools ~base_path ?agent_name ~tools (t : t) =
-  Runtime_agent.resolve_tool_lane_for_oas_tools
-    ~base_path
-    ?agent_name
-    ~provider_cfg:t.config
-    ~tools
-    ()
-
 let default_config ~name ~system_prompt ~tools (t : t) =
   Runtime_agent.default_config ~name ~provider_cfg:t.config ~system_prompt ~tools
 

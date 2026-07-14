@@ -53,8 +53,6 @@ type config = {
   priority : Llm_provider.Request_priority.t option;
   system_prompt : string;
   tools : Agent_sdk.Tool.t list;
-  runtime_mcp_policy :
-    Llm_provider.Llm_transport.runtime_mcp_policy option;
   max_turns : int;
   max_idle_turns : int;
   stream_idle_timeout_s : float option;

@@ -79,8 +79,8 @@ let resolve_runtime_providers ~runtime_id () =
      operator-overridable id (e.g. MASC_KEEPER_LLM_RERANK_RUNTIME) — an
      Unknown→Permissive fallback. An empty id means the default runtime; a
      non-empty id that is not a configured runtime is an [Error] (no silent
-     substitution — RFC-0206 §2.1). The former [?provider_filter] /
-     [?runtime_mcp_policy] parameters were ignored here and are deleted;
+     substitution — RFC-0206 §2.1). The former [?provider_filter] parameter
+     was ignored here and is deleted;
      each resolved runtime carries exactly one provider_config. *)
   let runtime_id = String.trim runtime_id in
   if String.equal runtime_id "" then

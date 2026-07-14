@@ -1936,6 +1936,8 @@
 
 (include stanzas/test_keeper_supervisor_write_meta_source.inc)
 
+(include stanzas/test_prompt_registry_dune_fallback.inc)
+
 (include stanzas/test_keeper_surface_status.inc)
 
 (include stanzas/test_keeper_memory_write.inc)

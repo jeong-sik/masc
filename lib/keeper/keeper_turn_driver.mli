@@ -32,13 +32,6 @@ include
       Keeper_internal_error.provider_cooldown_cause
      and type masc_internal_error = Keeper_internal_error.masc_internal_error
 
-(** {1 Provider error helpers} *)
-
-val sdk_error_is_hard_quota : Agent_sdk.Error.sdk_error -> bool
-
-val sdk_error_soft_rate_limited :
-  Agent_sdk.Error.sdk_error -> float option option
-
 (** {1 Turn pipeline records} *)
 
 type provider_attempt_provenance =

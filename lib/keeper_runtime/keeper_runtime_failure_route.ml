@@ -57,14 +57,22 @@ type route =
       ; detail : string
       }
 
-(* Cloudflare gateway timeout surfaces provider congestion, not provider
-   fault. Same predicate as [Keeper_error_classify.is_gateway_backpressure_status]
-   (lib/keeper, above this library); consolidation to one site is RFC-0313 W5
-   boundary cleanup. *)
-let cloudflare_gateway_timeout_status = 524
-
-let is_gateway_backpressure_status status =
-  status = cloudflare_gateway_timeout_status
+let sdk_error_is_hard_quota (err : Agent_sdk.Error.sdk_error) =
+  match err with
+  | Agent_sdk.Error.Api (Llm_provider.Retry.PaymentRequired _)
+  | Agent_sdk.Error.Provider (Llm_provider.Error.HardQuota _) ->
+    true
+  | Agent_sdk.Error.Api _
+  | Agent_sdk.Error.Provider _
+  | Agent_sdk.Error.Agent _
+  | Agent_sdk.Error.Mcp _
+  | Agent_sdk.Error.Config _
+  | Agent_sdk.Error.Serialization _
+  | Agent_sdk.Error.Io _
+  | Agent_sdk.Error.Orchestration _
+  | Agent_sdk.Error.Internal _ ->
+    false
+;;
 
 let observe_retry ?retry_after retry_class =
   Retry_after_observed { retry_class; retry_after }
@@ -117,17 +125,10 @@ let route_of_api_error ~err (api : Llm_provider.Retry.api_error) =
   let judge = judge ~err ~provenance:Oas_api_error in
   match api with
   | Llm_provider.Retry.RateLimited { retry_after; _ } ->
-    if Llm_provider.Retry.is_hard_quota api
-    then observe_retry ?retry_after Hard_quota
-    else observe_retry ?retry_after Rate_limited
+    observe_retry ?retry_after Rate_limited
   | Llm_provider.Retry.PaymentRequired _ -> observe_retry Hard_quota
   | Llm_provider.Retry.Overloaded _ -> observe_retry Capacity_backpressure
-  | Llm_provider.Retry.ServerError { status; _ } ->
-    if is_gateway_backpressure_status status
-    then observe_retry Capacity_backpressure
-    else if status >= 500
-    then observe_retry Server_error
-    else judge Provider_integration
+  | Llm_provider.Retry.ServerError _ -> observe_retry Server_error
   | Llm_provider.Retry.AuthError _
   | Llm_provider.Retry.AuthorizationError _ ->
     rotate Auth_failed
@@ -145,12 +146,10 @@ let route_of_provider_error ~err (p : Llm_provider.Error.provider_error) =
   | Llm_provider.Error.CapacityExhausted { retry_after; _ } ->
     observe_retry ?retry_after Capacity_backpressure
   | Llm_provider.Error.ProviderUnavailable _ -> observe_retry Server_error
-  | Llm_provider.Error.ServerError { code; transient; _ } ->
-    if is_gateway_backpressure_status code
-    then observe_retry Capacity_backpressure
-    else if transient || code >= 500
-    then observe_retry Server_error
-    else judge Provider_integration
+  | Llm_provider.Error.ServerError { transient = true; _ } ->
+    observe_retry Server_error
+  | Llm_provider.Error.ServerError { transient = false; _ } ->
+    judge Provider_integration
   | Llm_provider.Error.NetworkError _ -> observe_retry Network_transient
   | Llm_provider.Error.Timeout _ -> observe_retry Provider_timeout
   | Llm_provider.Error.AuthError _

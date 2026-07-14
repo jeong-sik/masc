@@ -17,6 +17,7 @@
 module AE = Masc.Keeper_agent_error
 module Code = Masc.Keeper_turn_terminal_code
 module EC = Masc.Keeper_error_classify
+module KFR = Keeper_runtime_failure_route
 module KTD = Masc.Keeper_turn_driver
 module KRB = Masc.Keeper_turn_runtime_budget
 module KSB = Masc.Keeper_status_bridge
@@ -390,7 +391,7 @@ let test_quota_prose_does_not_override_typed_rate_limit () =
   Alcotest.(check bool)
     "provider prose does not invent hard quota"
     false
-    (KTD.sdk_error_is_hard_quota err);
+    (KFR.sdk_error_is_hard_quota err);
   match EC.recoverable_runtime_failure_reason err with
   | Some EC.Rate_limit -> ()
   | Some reason ->
@@ -405,7 +406,7 @@ let test_payment_required_is_hard_quota () =
   Alcotest.(check bool)
     "payment required is hard quota"
     true
-    (KTD.sdk_error_is_hard_quota err);
+    (KFR.sdk_error_is_hard_quota err);
   match EC.recoverable_runtime_failure_reason err with
   | Some EC.Hard_quota -> ()
   | Some reason ->
@@ -429,7 +430,7 @@ let test_overloaded_with_quota_prose_is_not_hard_quota () =
   Alcotest.(check bool)
     "transient overload with quota prose is not hard quota"
     false
-    (KTD.sdk_error_is_hard_quota err)
+    (KFR.sdk_error_is_hard_quota err)
 ;;
 
 (* Deleting the month-hardcoded "resets apr " indicator loses no coverage: the
@@ -455,7 +456,7 @@ let test_soft_rate_limit_classifies_as_rate_limit () =
        Alcotest.(check bool)
          (label ^ " is not hard quota")
          false
-         (KTD.sdk_error_is_hard_quota err);
+         (KFR.sdk_error_is_hard_quota err);
        match EC.recoverable_runtime_failure_reason err with
        | Some EC.Rate_limit -> ()
        | Some reason ->
@@ -544,11 +545,11 @@ let test_static_error_classification_preserves_retry_semantics () =
     (SdkE.Api (Retry.Overloaded { message = "capacity exhausted" }));
   check_classification
     "api server 503"
-    EC.Transient_network
+    EC.Non_transient
     (SdkE.Api (Retry.ServerError { status = 503; message = "unavailable" }));
   check_classification
     "api server 522"
-    EC.Transient_network
+    EC.Non_transient
     (SdkE.Api (Retry.ServerError { status = 522; message = "origin timeout" }));
   check_classification
     "api server 500"
@@ -575,7 +576,7 @@ let test_static_error_classification_preserves_retry_semantics () =
           }));
   check_classification
     "provider server 524"
-    EC.Transient_network
+    EC.Non_transient
     (SdkE.Provider
        (Llm_provider.Error.ServerError
           { provider = "p"; code = 524; transient = false; detail = "timeout" }));

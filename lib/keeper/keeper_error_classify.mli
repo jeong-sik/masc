@@ -118,13 +118,13 @@ val fallback_runtime_for_unavailable_profile :
     narrow built-in progress-contract rejection is recoverable only when the
     response was thinking-only after a read-only tool.
 
-    Status-code-aware rotation: raw API errors that are not wrapped in a MASC
+    Typed rotation: raw API errors that are not wrapped in a MASC
     internal error are also classified when a different runtime may succeed:
-    - [RateLimited] hard-quota messages → ["hard_quota"]
-    - [RateLimited] soft provider throttles → ["rate_limit"] (rotation filters
+    - [PaymentRequired] / provider [HardQuota] → ["hard_quota"]
+    - [RateLimited] provider throttles → ["rate_limit"] (rotation filters
       candidates sharing the same credential pool)
-    - [Overloaded] and Cloudflare 524 → ["capacity_backpressure"]
-    - [ServerError] with status >= 500 → ["server_error"]
+    - [Overloaded] / [CapacityExhausted] → ["capacity_backpressure"]
+    - API [ServerError] and transient provider [ServerError] → ["server_error"]
     - [AuthError] → ["auth_error"]
 
     Exposed for unit tests; production callers go through

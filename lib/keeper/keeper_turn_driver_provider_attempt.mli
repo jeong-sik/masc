@@ -1,13 +1,5 @@
 (** Provider-attempt provenance and health helpers for keeper turn driver. *)
 
-(** {1 Provider SDK error classifiers}
-    Re-homed from the deleted runtime attempt FSM (RFC-0206); generic
-    provider-error classification, not runtime-specific. *)
-
-val sdk_error_is_hard_quota : Agent_sdk.Error.sdk_error -> bool
-val sdk_error_soft_rate_limited :
-  Agent_sdk.Error.sdk_error -> float option option
-
 val provider_attempt_status_of_result :
   ('a, Agent_sdk.Error.sdk_error) result -> string
 

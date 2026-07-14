@@ -25,7 +25,7 @@
     - Provider: {!oas_provider_of_label},
       {!resolve_oas_provider_of_label}.
     - Audit + run helpers: {!append_worker_completion_log},
-      {!build_resume_config}, {!materialize_direct_evidence}.
+      {!build_resume_config}.
 
     Internal helpers stay private at this boundary
     ([worker_container_root], [safe_worker_token],
@@ -130,8 +130,7 @@ val resolved_mcp_session_id :
 val evidence_session_id_of_worker_run :
   string option -> string option
 (** Trims and returns [Some] when non-empty, [None]
-    otherwise.  Pairs with {!materialize_direct_evidence}
-    to skip evidence persistence on missing run id. *)
+    otherwise. *)
 
 (** {1 Tool catalogue} *)
 
@@ -214,21 +213,3 @@ val build_resume_config :
     output defaults remain OAS-owned. [guardrails] defaults to the unrestricted
     worker surface; the concrete [tools] list is the exposure SSOT. *)
 
-(** {1 Direct-evidence persistence} *)
-
-val materialize_direct_evidence :
-  base_path:string ->
-  worker_name:string ->
-  worker_run_id:string option ->
-  meta:worker_container_meta ->
-  prompt:string ->
-  workspace_path:string ->
-  agent:Agent_sdk.Agent.t ->
-  raw_trace:Agent_sdk.Raw_trace.t ->
-  unit
-(** Writes a direct-evidence bundle under
-    [<base_path>/.masc/oas-runtime/...] when
-    [worker_run_id] is present (no-op otherwise).
-    Aliases are deduped through
-    {!unique_preserve_order}; failures log via
-    [Log.LocalWorker.error] but never re-raise. *)

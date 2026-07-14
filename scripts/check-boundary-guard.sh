@@ -419,8 +419,6 @@ check_forbidden_outside "V10-provider-filter-ownership" \
 check_forbidden_outside "V11-proof-store-layout" \
   'Filename\.concat .*"proofs"' \
   "lib/" \
-  "lib/cdal_runtime/proof_store.ml" \
-  "lib/cdal_runtime/proof_store.mli" \
   "lib/cdal/proof_artifact_reader.ml" \
   "lib/cdal/proof_artifact_reader.mli"
 

@@ -555,15 +555,6 @@ and run_existing_worker_agent
         ~meta
         ?error_type:session_error_type
         ();
-       Worker_container.materialize_direct_evidence
-         ~base_path
-         ~worker_name
-         ~worker_run_id
-         ~meta:completed_meta
-         ~prompt
-         ~workspace_path
-         ~agent
-         ~raw_trace;
        match result with
        | Ok response ->
          let output = Agent_sdk_response.text_of_response response in

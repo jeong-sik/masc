@@ -34,7 +34,6 @@ ALLOWLIST=(
   # pulling the whole masc_core surface.
   "lib/chronicle_event/chronicle_event.ml"
   "lib/autonomous/stimulus.ml"
-  "lib/cdal_runtime/effect_evidence.ml"
   "lib/multimodal/payload.ml"
 )
 

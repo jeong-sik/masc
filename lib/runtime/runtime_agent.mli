@@ -394,9 +394,6 @@ val publish_lifecycle :
   ?attrs:(string * Yojson.Safe.t) list ->
   unit ->
   unit
-val enrich_idle_detail :
-  string -> Agent_sdk.Types.message list -> string
-
 (** {1 Build / resume / run} *)
 
 val build :

@@ -56,35 +56,3 @@ let partial_response_of_stop
     usage = None;
     telemetry = None;
   }
-
-(** Enrich an [Agent_sdk.Error.to_string] detail with the name of the most
-    recently called tool when the error is an "Idle detected" failure.
-    For all other error strings the input is returned unchanged.
-
-    Exposed at module level so it can be unit-tested independently of
-    the network-bound [run] function. *)
-let enrich_idle_detail (detail : string) (messages : Agent_sdk.Types.message list) : string =
-  if String.starts_with ~prefix:"Idle detected" detail then
-    let last_tool =
-      let rec find = function
-        | [] -> None
-        | (m : Agent_sdk.Types.message) :: rest ->
-            let later = find rest in
-            if Option.is_some later then
-              later
-            else if m.role = Agent_sdk.Types.Assistant then
-              List.find_map
-                (fun block ->
-                  Agent_sdk.Canonical_tool.tool_call_of_block block
-                  |> Option.map (fun call -> call.Agent_sdk.Canonical_tool.name))
-                m.content
-            else
-              None
-      in
-      find messages
-    in
-    match last_tool with
-    | Some name -> Printf.sprintf "%s (tool: %s)" detail name
-    | None -> detail
-  else
-    detail

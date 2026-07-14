@@ -57,19 +57,3 @@ val partial_response_of_stop :
     [stop_reason = EndTurn], single [Text] content block, no
     usage / telemetry. The emitted response model is the neutral [runtime]
     lane; OAS owns concrete provider/model identity. *)
-
-val enrich_idle_detail :
-  string ->
-  Agent_sdk.Types.message list ->
-  string
-(** Enrich an [Agent_sdk.Error.to_string] detail string with the name
-    of the most recently called tool when the detail starts
-    with ["Idle detected"]. For all other detail strings the
-    input is returned unchanged.
-
-    The "most recently called tool" is projected through
-    [Agent_sdk.Canonical_tool.tool_call_of_block] from the most recent
-    [Assistant] message; when no such block exists the bare detail is returned.
-
-    Exposed at module level so the test suite can exercise it
-    independently of the network-bound [run] function. *)

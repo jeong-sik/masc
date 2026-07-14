@@ -196,7 +196,6 @@ val build_resume_config :
   model_id:string ->
   system_prompt:string ->
   tools:Agent_sdk.Tool.t list ->
-  max_turns:int ->
   thinking_enabled:bool ->
   hooks:Agent_sdk.Hooks.hooks ->
   raw_trace:Agent_sdk.Raw_trace.t ->
@@ -207,7 +206,7 @@ val build_resume_config :
 (** Assembles the [(config, options)] pair consumed by
     [Agent_sdk.Agent.resume].  [config] inherits
     {!Agent_sdk.Types.default_config} and overrides
-    [name] / [model] / [system_prompt] / [max_turns] /
-    [enable_thinking] / [tool_choice = Auto]. Provider/model sampling and
-    output defaults remain OAS-owned. [guardrails] defaults to the unrestricted
-    worker surface; the concrete [tools] list is the exposure SSOT. *)
+    [name] / [model] / [system_prompt] / [enable_thinking] /
+    [tool_choice = Auto]. Provider/model sampling and output defaults remain
+    OAS-owned. [guardrails] defaults to the unrestricted worker surface; the
+    concrete [tools] list is the exposure SSOT. *)

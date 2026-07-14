@@ -447,7 +447,6 @@ let test_prior_checkpoint_appends_current_goal_once () =
          ~base_path:(Filename.get_temp_dir_name ())
          ~goal:current_goal
          ~session_id:prior_checkpoint.session_id
-         ~max_turns:0
          ~max_idle_turns:0
          ~oas_checkpoint:prior_checkpoint
          ~exit_condition:(fun _turn -> true)

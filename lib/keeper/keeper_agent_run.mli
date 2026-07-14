@@ -93,8 +93,6 @@ module For_testing : sig
     -> autonomous_yield_request
     -> Runtime_agent.stop_reason
 
-  val keeper_max_turns : int
-  (** OAS-owned unbounded sentinel used explicitly for every Keeper run. *)
 end
 
 (** {1 Turn execution} *)

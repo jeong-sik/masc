@@ -289,6 +289,7 @@ let run_named
     ?enable_thinking
     ?exit_condition
     ?exit_condition_result
+    ?cooperative_yield_probe
     ?oas_checkpoint
     ?trace_link
     ?event_bus
@@ -577,6 +578,7 @@ let run_named
             ; preserve_thinking = inference_policy.attempt_preserve_thinking
             ; exit_condition
             ; exit_condition_result
+            ; cooperative_yield_probe
             ; oas_checkpoint
             ; trace_link
             ; sw

@@ -96,6 +96,7 @@ val run_named :
   ?enable_thinking:bool ->
   ?exit_condition:(int -> bool) ->
   ?exit_condition_result:(int -> Runtime_agent.stop_reason * string option) ->
+  ?cooperative_yield_probe:Runtime_agent.cooperative_yield_probe ->
   ?oas_checkpoint:Agent_sdk.Checkpoint.t ->
   ?trace_link:string * string ->
   ?event_bus:Agent_sdk.Event_bus.t ->

@@ -52,6 +52,7 @@ type try_provider_ctx =
   ; preserve_thinking : bool option
   ; exit_condition : (int -> bool) option
   ; exit_condition_result : (int -> Runtime_agent.stop_reason * string option) option
+  ; cooperative_yield_probe : Runtime_agent.cooperative_yield_probe option
   ; oas_checkpoint : Agent_sdk.Checkpoint.t option
   ; (* Eio concurrency *)
     sw : Eio.Switch.t
@@ -154,16 +155,16 @@ let apply_accept
   | Runtime_agent.InputRequired _
   | Runtime_agent.TurnLimitObserved _
   | Runtime_agent.ExecutionTimeoutObserved _
-  | Runtime_agent.ExecutionIdleTimeoutObserved _ ->
+  | Runtime_agent.ExecutionIdleTimeoutObserved _
+  | Runtime_agent.Yielded_to_chat_waiting _
+  | Runtime_agent.Yielded_to_durable_stimulus _ ->
     (* These are typed host-control terminals, not model deliverables. Running
        the normal response accept predicate over their question/blank carrier
        would turn them into [Accept_rejected] and incorrectly rotate providers,
        discarding typed control/observation evidence. Execution-limit
        observations never become a MASC acceptance gate. *)
     Ok run_result
-  | Runtime_agent.Completed
-  | Runtime_agent.Yielded_to_chat_waiting _
-  | Runtime_agent.Yielded_to_durable_stimulus _ ->
+  | Runtime_agent.Completed ->
     if accept run_result.response then Ok run_result
     else
       Error
@@ -286,6 +287,7 @@ let run_try_provider
                 ?on_yield:ctx.on_yield
                 ?on_resume:ctx.on_resume
                 ~agent_ref:local_agent_ref
+                ?cooperative_yield_probe:ctx.cooperative_yield_probe
                 ~goal_detail:ctx.goal
                 blocks
           | None ->
@@ -298,6 +300,7 @@ let run_try_provider
                 ?on_yield:ctx.on_yield
                 ?on_resume:ctx.on_resume
                 ~agent_ref:local_agent_ref
+                ?cooperative_yield_probe:ctx.cooperative_yield_probe
                 ctx.goal
         in
         run_fn ())

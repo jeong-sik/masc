@@ -5,14 +5,22 @@
 
     Extracted from Keeper_context_runtime as part of #4955 god-file split. *)
 
-(** Typed result for an explicit compaction request. String rendering is kept
-    at telemetry/persistence boundaries via {!compaction_decision_to_string}. *)
+(** [Prepared] is structural only; [Applied] requires a durable save. *)
 type compaction_decision =
   | Applied of Compaction_trigger.t
+  | Prepared of Compaction_trigger.t
+  | Rejected of Compaction_trigger.t * compaction_rejection
   | Not_requested
   | Skipped_no_checkpoint
 
+and compaction_rejection =
+  | Retired_deterministic_mode
+  | Runtime_unavailable
+  | Summarizer_unavailable_or_invalid
+  | Structural_noop
+
 val compaction_decision_to_string : compaction_decision -> string
+val compaction_decision_prepared : compaction_decision -> bool
 val compaction_decision_applied : compaction_decision -> bool
 
 (** Project [meta] to its [(ratio_gate, message_gate, token_gate)]
@@ -23,17 +31,14 @@ val compaction_policy_of_keeper : Keeper_meta_contract.keeper_meta -> float * in
     request through a valid configured-LLM plan. Missing/invalid LLM output and the retired
     deterministic mode preserve the original messages exactly.
 
-    Return triple:
+    Return pair:
     - the (possibly compacted) working context;
-    - [Some trigger] when compaction was applied, [None] otherwise;
     - a typed decision tag describing the request outcome. *)
 val compact_for_request_typed
   :  meta:Keeper_meta_contract.keeper_meta
   -> trigger:Compaction_trigger.t
   -> Keeper_context_core.working_context
-  -> Keeper_context_core.working_context
-     * Compaction_trigger.t option
-     * compaction_decision
+  -> Keeper_context_core.working_context * compaction_decision
 
 type pre_compact_event = {
   timestamp : float;

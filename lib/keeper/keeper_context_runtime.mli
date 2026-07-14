@@ -136,11 +136,14 @@ val compaction_policy_of_keeper : keeper_meta -> float * int * int
 
 type compaction_decision = Keeper_compact_policy.compaction_decision =
   | Applied of Compaction_trigger.t
+  | Prepared of Compaction_trigger.t
+  | Rejected of Compaction_trigger.t * Keeper_compact_policy.compaction_rejection
   | Not_requested
   | Skipped_no_checkpoint
 
 val compaction_decision_to_string : compaction_decision -> string
 val compaction_decision_applied : compaction_decision -> bool
+val compaction_decision_prepared : compaction_decision -> bool
 
 val apply_post_turn_lifecycle_with_resilience_handles
   :  resilience_audit_store:Shared_audit.Store.t option

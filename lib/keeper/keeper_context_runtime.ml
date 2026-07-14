@@ -68,6 +68,8 @@ let compaction_policy_of_keeper = Keeper_compact_policy.compaction_policy_of_kee
 
 type compaction_decision = Keeper_compact_policy.compaction_decision =
   | Applied of Compaction_trigger.t
+  | Prepared of Compaction_trigger.t
+  | Rejected of Compaction_trigger.t * Keeper_compact_policy.compaction_rejection
   | Not_requested
   | Skipped_no_checkpoint
 
@@ -76,6 +78,9 @@ let compaction_decision_to_string =
 
 let compaction_decision_applied =
   Keeper_compact_policy.compaction_decision_applied
+
+let compaction_decision_prepared =
+  Keeper_compact_policy.compaction_decision_prepared
 
 
 (* ================================================================ *)

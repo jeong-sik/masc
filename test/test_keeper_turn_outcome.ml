@@ -114,7 +114,7 @@ let test_autonomous_yield_boundary_contract () =
   let start_turn = 11570 in
   let immediate_chat : Masc.Keeper_agent_run.autonomous_yield_request =
     { reason = Masc.Keeper_agent_run.Chat_waiting
-    ; boundary = Masc.Keeper_agent_run.Yield_immediately
+    ; boundary = Masc.Keeper_agent_run.Scheduled_pre_admission
     }
   in
   let reactive_chat : Masc.Keeper_agent_run.autonomous_yield_request =
@@ -127,7 +127,7 @@ let test_autonomous_yield_boundary_contract () =
     ; boundary = Masc.Keeper_agent_run.Yield_after_current_turn
     }
   in
-  check bool "chat may yield before first provider dispatch" true
+  check bool "scheduled request remains eligible at a completed boundary" true
     (F.autonomous_yield_allowed_at_turn
        ~start_turn
        ~turn:start_turn

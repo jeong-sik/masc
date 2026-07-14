@@ -48,6 +48,14 @@ val build_checkpoint :
     used when masc wants to attach extra worker-side state
     that the SDK's default capture does not include. *)
 
+val restamp :
+  session_id:string ->
+  ?checkpoint_sidecar:Yojson.Safe.t ->
+  Agent_sdk.Checkpoint.t ->
+  Agent_sdk.Checkpoint.t
+(** Restore MASC's trace identity and optional working-context sidecar on an
+    OAS checkpoint without rebuilding its message history. *)
+
 val partial_response_of_stop :
   session_id:string ->
   text:string ->

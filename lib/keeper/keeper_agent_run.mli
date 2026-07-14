@@ -22,17 +22,16 @@ type raw_trace_sink_outcome =
   | Sink_ready of Agent_sdk.Raw_trace.t
   | Sink_degraded of Agent_sdk.Error.sdk_error
 
-(** Typed reason and boundary for an autonomous Keeper run to release its lane
-    at an OAS turn boundary. Scheduled-idle chat can yield immediately;
-    reactive chat and durable backlog yield only after the current cycle has
-    completed at least one provider turn, so a leased stimulus is never
-    acknowledged without being observed by the model. *)
+(** Typed reason and boundary for an autonomous Keeper run to release its lane.
+    Scheduled pre-admission is a separate Keeper admission concern; this
+    module's run-level probe is evaluated only after OAS completes a typed tool
+    boundary. *)
 type autonomous_yield_reason =
   | Chat_waiting
   | Durable_stimulus_waiting
 
 type autonomous_yield_boundary =
-  | Yield_immediately
+  | Scheduled_pre_admission
   | Yield_after_current_turn
 
 type autonomous_yield_request = {

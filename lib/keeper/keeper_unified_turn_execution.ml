@@ -33,7 +33,7 @@ let autonomous_yield_request ~base_path ~keeper_name ~channel =
     let boundary =
       match channel with
       | Keeper_world_observation.Scheduled_autonomous ->
-        Keeper_agent_run.Yield_immediately
+        Keeper_agent_run.Scheduled_pre_admission
       | Keeper_world_observation.Reactive ->
         Keeper_agent_run.Yield_after_current_turn
     in
@@ -216,11 +216,10 @@ let run (ctx : ctx)
                       reached via [Keeper_turn_admission.run_if_free]); the chat
                       lane runs [run_keeper_msg_turn_admitted] on a separate
                       path. So passing the yield hook here is inherently
-                      lane-gated. Scheduled-idle chat can take the slot
-                      immediately; reactive chat and a durable event waiting
-                      behind the event leased by this cycle cause a checkpointed
-                      yield after at least one provider turn. A chat turn receives
-                      neither preemption hook. Both signals are read from the
+                      lane-gated. Scheduled pre-admission is handled outside this
+                      run-level probe; here every request is observed only at an
+                      OAS post-tool boundary. A chat turn receives neither
+                      preemption hook. Both signals are read from the
                       exact queues their consumers drain, so no cadence, timeout, or
                       inferred text state participates in the decision. *)
                  ~autonomous_yield_requested:(fun () ->

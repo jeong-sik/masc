@@ -316,6 +316,8 @@ let test_execution_observations_preserve_tool_replay_suffix () =
         ; turn_count = 4
         ; max_turns = Runtime_agent_context.unbounded_max_turns
         }
+    ; Runtime_agent.Yielded_to_chat_waiting { turns_used = 4 }
+    ; Runtime_agent.Yielded_to_durable_stimulus { turns_used = 4 }
     ]
   in
   List.iter

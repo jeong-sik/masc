@@ -84,7 +84,7 @@ let emit_native_event_log (evt : Agent_sdk.Event_bus.event) (json : Yojson.Safe.
   | Agent_sdk.Event_bus.TurnReady { agent_name; turn; tool_names } ->
     (* [substrate:tool_surface] — deterministic per-turn snapshot of the
          tool list the LLM actually sees this turn (after guardrails,
-         operator policy, tool_filter_override).  Emitted as a single
+         and operator policy).  Emitted as a single
          grep-friendly line with a stable hash so operators can confirm
          which tools were on the LLM's surface for a given turn without
          enabling verbose tool dumps. *)
@@ -103,9 +103,6 @@ let emit_native_event_log (evt : Agent_sdk.Event_bus.event) (json : Yojson.Safe.
   | Agent_sdk.Event_bus.HandoffRequested _
   | Agent_sdk.Event_bus.HandoffCompleted _
   | Agent_sdk.Event_bus.ElicitationCompleted _
-  | Agent_sdk.Event_bus.ContentReplacementReplaced _
-  | Agent_sdk.Event_bus.ContentReplacementKept _
-  | Agent_sdk.Event_bus.SlotSchedulerObserved _
   | Agent_sdk.Event_bus.InferenceTelemetry _
   | Agent_sdk.Event_bus.Custom _ -> ()
 ;;
@@ -289,41 +286,6 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
     in
     Some (wrap ~event_type:"handoff_completed" ~payload ~agent_name:from_agent ())
   | Agent_sdk.Event_bus.ElicitationCompleted _ -> None (* Internal; no SSE relay needed *)
-  | Agent_sdk.Event_bus.ContentReplacementReplaced
-      { tool_use_id; preview; original_chars; seen_count_after } ->
-    let payload =
-      `Assoc
-        [ "tool_use_id", `String tool_use_id
-        ; "preview", `String preview
-        ; "original_chars", `Int original_chars
-        ; "seen_count_after", `Int seen_count_after
-        ]
-    in
-    Some (wrap ~event_type:"content_replacement_replaced" ~payload ())
-  | Agent_sdk.Event_bus.ContentReplacementKept { tool_use_id; seen_count_after } ->
-    let payload =
-      `Assoc
-        [ "tool_use_id", `String tool_use_id; "seen_count_after", `Int seen_count_after ]
-    in
-    Some (wrap ~event_type:"content_replacement_kept" ~payload ())
-  | Agent_sdk.Event_bus.SlotSchedulerObserved
-      { max_slots; active; available; queue_length; state } ->
-    let state_str =
-      match state with
-      | Agent_sdk.Event_bus.Idle -> "idle"
-      | Agent_sdk.Event_bus.Queued -> "queued"
-      | Agent_sdk.Event_bus.Saturated -> "saturated"
-    in
-    let payload =
-      `Assoc
-        [ "max_slots", `Int max_slots
-        ; "active", `Int active
-        ; "available", `Int available
-        ; "queue_length", `Int queue_length
-        ; "state", `String state_str
-        ]
-    in
-    Some (wrap ~event_type:"slot_scheduler_observed" ~payload ())
   | Agent_sdk.Event_bus.Custom (name, payload) ->
     (* Wire compatibility: dashboard consumers historically decoded
          [masc:broadcast] / [masc:keeper:snapshot] (all colons).

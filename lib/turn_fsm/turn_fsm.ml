@@ -16,6 +16,7 @@
 
 type cancel_reason =
   | Cancelled_supervisor_stop
+  | Cancelled_external
   | Cancelled_phase_gate_close
   | Cancelled_provider_timeout
   | Cancelled_fleet_shutdown
@@ -93,6 +94,7 @@ let is_idle state = Tla_symbol.is_idle (tla_symbol_variant state)
 
 let cancel_reason_label = function
   | Cancelled_supervisor_stop -> "supervisor_stop"
+  | Cancelled_external -> "external_cancel"
   | Cancelled_phase_gate_close -> "phase_gate_close"
   | Cancelled_provider_timeout -> "provider_timeout"
   | Cancelled_fleet_shutdown -> "fleet_shutdown"

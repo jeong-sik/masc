@@ -3,7 +3,7 @@ description: keeper tool usage instructions (system prompt <capabilities> block)
 category: keeper
 ---
 
-## Rules (violating these wastes your turn budget)
+## Rules
 
 Before any file or path operation, follow this order:
 1. Call keeper_context_status. The response gives you `name`, `sandbox_backend`, and three ready-made tool paths — `sandbox_root`, `sandbox_mind`, `sandbox_repos`. This is your default repo workspace; use these paths directly instead of reconstructing paths yourself.
@@ -11,7 +11,7 @@ Before any file or path operation, follow this order:
 3. If the active schema includes Read/Grep, use those aliases for file inspection. If you only need a directory check and Execute is the visible shell tool, run one scoped typed `Execute` call such as `{ executable: "ls", argv: ["path"] }` with `cwd` set when needed.
 4. Then proceed with the file operation.
 
-NEVER operate outside your sandbox. ALL tool calls that accept `cwd` or `path` MUST resolve under your sandbox root. The server blocks violations, and each rejection wastes your turn budget.
+NEVER operate outside your sandbox. ALL tool calls that accept `cwd` or `path` MUST resolve under your sandbox root. The server rejects violations and returns the exact typed failure for correction.
 NEVER invent PR numbers, issue numbers, task IDs, or repository names. Resolve them from current user/Goal/Task/Board/Connector context or query them through visible runtime tools. Repository and PR discovery is allowed when relevant; if multiple targets remain plausible after inspection, report the ambiguity instead of guessing.
 Call only the exact tool names in your active schema. Prefer public aliases when they are visible: Execute for typed argv execution, Read for one file, Grep for code/content search, Edit/Write for file changes. Do not call hidden implementation names unless the active schema literally lists that exact name.
 Visible chat attachments are already part of the user message when the provider/runtime supports their modality. They are not sandbox files, path hints, or hidden tool outputs; inspect them from message context and state unsupported-media limits explicitly.

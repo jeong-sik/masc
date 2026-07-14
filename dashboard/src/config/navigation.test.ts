@@ -60,10 +60,13 @@ describe('dashboard surface navigation', () => {
     expect(workspace?.defaultTab).toBe('workspace')
   })
 
-  it('keeps the v2 primary shell aligned to the 2026-07 keeper-v2 export rail order', () => {
+  // 2026-07 keeper-v2 export rail order, plus the Registry surface (A4)
+  // inserted after Keepers in the same group.
+  it('keeps the v2 primary shell aligned to the export rail order with Registry after Keepers', () => {
     expect(PRIMARY_DASHBOARD_SURFACES.map(surface => surface.id)).toEqual([
       'overview',
       'keepers',
+      'registry',
       'monitoring',
       'workspace',
       'approvals',
@@ -78,6 +81,7 @@ describe('dashboard surface navigation', () => {
     expect(PRIMARY_DASHBOARD_NAV_ITEMS.map(item => item.label)).toEqual([
       'Overview',
       'Keepers',
+      'Registry',
       'Monitor',
       'Work',
       'Gate',
@@ -92,7 +96,7 @@ describe('dashboard surface navigation', () => {
   })
 
   it('uses one sectionless-surface classifier for section stripping and section lookup', () => {
-    const sectionless = ['overview', 'logs', 'settings', 'keepers', 'board', 'schedule', 'approvals', 'fusion'] as const
+    const sectionless = ['overview', 'logs', 'settings', 'keepers', 'registry', 'board', 'schedule', 'approvals', 'fusion'] as const
     expect(sectionless.filter(id => isSectionlessSurface(id))).toEqual([...sectionless])
     expect(sectionItemsForTab('settings')).toEqual([])
     expect(normalizeRouteParams('settings', { section: 'legacy', surface: 'old', panel: 'theme' })).toEqual({

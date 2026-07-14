@@ -92,7 +92,6 @@
   masc.json_field
   masc.types_boundary
   masc.cdal_runtime
-  masc.cdal
   masc.trajectory
   masc.keeper_tooling
   masc.host_config

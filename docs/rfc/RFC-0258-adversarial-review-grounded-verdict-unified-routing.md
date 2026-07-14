@@ -23,11 +23,13 @@ The boundary stays exactly where the PoC put it: **judgment = LLM, routing = det
 
 ### 2.1 The four verdict surfaces (verified)
 
+> **Update (2026-07-14, owner decision)**: the structural `Adversarial_eval` surface (row 3 below) and its `masc_keeper_adversarial_review` keeper tool have been **removed** from the codebase (`lib/cdal/` deleted). It was advisory-only and never adopted; the prompt-based grounded-LLM reviewers are the only adversarial reviewers going forward. The row is retained below as historical context for the design, not as a live surface — treat later mentions of `Adversarial_eval` in §4.3 / §8 the same way.
+
 | Module | Trigger | Action | Wiring |
 |---|---|---|---|
 | `Verifier_oas` (`lib/verifier_oas.ml:73-113`, `.mli:25` `handle_pre_tool_use`) | before action (PreToolUse) | **gate** | wired |
 | `Anti_rationalization` (`lib/task/anti_rationalization.mli:1-16,78`) | on completion | **gate** | wired into `lib/task/task.ml`, `tool_task_handlers.ml` |
-| `Adversarial_eval` (`lib/cdal/adversarial_eval.ml:1-10`) via tool `masc_keeper_adversarial_review` (`lib/keeper/keeper_schema.ml:455`, dispatch `keeper_tool_surface.ml:705-706,820-824`, body `keeper_tool_surface_ops.ml:922`) | post diff | **advisory only — not a gate** | wired (keeper tool) |
+| `Adversarial_eval` (`lib/cdal/adversarial_eval.ml`) via tool `masc_keeper_adversarial_review` | post diff | **advisory only — not a gate** | **removed 2026-07-14** (retired; see note above) |
 | PoC #21401 `Keeper_adversarial_review` (`act_on_verdict` at `keeper_adversarial_review.ml:156`, `wake_author:113`) | on completion | **wake author** | **unwired** |
 
 All four share `Verifier_core.verdict` (`lib/verifier_core.mli:21-24`). All four use the generic engine `run_named_with_masc_tools` (`lib/keeper/keeper_turn_driver_wrappers.ml:157`). The PoC's own `.ml` comment states it "Mirrors `Verifier_oas.verify`".
@@ -130,7 +132,7 @@ The four reviewers keep their triggers; each calls `Verdict_router.route` instea
 Incremental, compiler-forced, no big-bang:
 
 1. **P1 — types only**: add `grounded_ref`, `grounded_verdict`, `grounded_of`, extend `report_verdict_schema` + `parse_verdict_from_json` to read `evidence`. No behaviour change; existing parse path keeps working (evidence defaults to `[]`, so old reviewers produce demoted `Warn` on `Fail` until they emit evidence). Ship behind no flag — it is purely additive.
-2. **P2 — router**: add `Verdict_router`; migrate `Adversarial_eval` (advisory, lowest risk — behaviour identical) first to prove the seam.
+2. **P2 — router**: add `Verdict_router` with its exhaustive verdict×trigger matrix and table-driven test (§6). No reviewer is migrated in this step: the structural `Adversarial_eval` advisory surface that this RFC originally used to prove the seam has been removed (owner decision, 2026-07-14 — see §2.1), so the router's own exhaustive-match test proves the seam. The first live migration lands in P3. The prompt-based grounded-LLM reviewers are the only adversarial-review surfaces going forward.
 3. **P3 — PoC absorption**: re-target PR #21401's wake as the `On_completion + Fail (grounded)` router case. Decide: fold into `Anti_rationalization` (one row, already wired) **or** keep `Keeper_adversarial_review` as a thin trigger that delegates to the router. (Open question — §8.)
 4. **P4 — gate migration**: `Verifier_oas`, `Anti_rationalization` route through `Verdict_router`. This changes the live gate path → feature-flagged + DET/NDT contract reviewed.
 

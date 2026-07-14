@@ -19,11 +19,12 @@
 ;   conformance      — session-proof conformance checks
 ;   runtime_evidence — telemetry + file evidence bundles
 ;
-; Intentionally separated from masc's contract Phase 1A evaluator (lib/cdal/,
-; masc.cdal, Adversarial_eval): different responsibility (producer vs
-; consumer-side judge) and different deps (this needs agent_sdk; the evaluator
-; needs none). NO dependency on the masc main library — the producer side must
-; remain reusable independently.
+; This is the producer/agent-runtime side of contract verification (needs
+; agent_sdk). The former consumer-side structural contract judge (the deleted
+; lib/cdal/ evaluator and its keeper structural-review tool) was removed
+; 2026-07-14 (owner decision — retired the never-adopted structural
+; adversarial reviewer). This library has NO dependency on the masc main
+; library — the producer side must remain reusable independently.
 ;
 ; @rfc RFC-OAS-011 (contract verification migration to masc)
 ; @phase Implemented (post-#19469 maintenance)

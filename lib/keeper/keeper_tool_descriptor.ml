@@ -1964,8 +1964,6 @@ let internal_descriptors : t list =
       "Audit configured keepers vs personas." ~readonly:true
   ; masc_keeper_descriptor "status" "masc_keeper_status"
       "Detailed single-keeper status (defaults to self when name is empty)." ~readonly:true
-  ; masc_keeper_descriptor "adversarial_review" "masc_keeper_adversarial_review"
-      "Run fresh-context structural adversarial review on a diff or changed file." ~readonly:true
   ; masc_keeper_descriptor "down" "masc_keeper_down"
       "Stop keeper keepalive, optionally remove meta and session directory." ~readonly:false
   (* RFC-0182 Phase 5 PR-B: Eio-bound keeper tools (require sw + clock). *)

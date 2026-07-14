@@ -425,25 +425,6 @@ let keeper_schemas : tool_schema list = [
   (* masc_keeper_reconcile removed with manual_reconcile blocker system. *)
 
   {
-    name = "masc_keeper_adversarial_review";
-    description = "Run fresh-context structural adversarial review on a diff or changed file.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("diff", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Unified diff or file content to review.");
-        ]);
-        ("path", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional file path; when provided the diff is treated as the changed file content.");
-        ]);
-      ]);
-      ("required", `List [`String "diff"]);
-    ];
-  };
-
-  {
     name = "masc_keeper_down";
     description = "Submit a durable, non-blocking Keeper shutdown. Returns an operation_id immediately after admission is fenced and the ownership snapshot is persisted. Repeating the call returns the existing operation state.";
     input_schema = `Assoc [

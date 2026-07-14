@@ -58,7 +58,9 @@ let event_to_json (ev : event) : Yojson.Safe.t =
   | Compaction_completed r ->
     obj
       "compaction_completed"
-      [ "before_tokens", `Int r.before_tokens; "after_tokens", `Int r.after_tokens ]
+      [ "before_checkpoint_bytes", `Int r.before_checkpoint_bytes
+      ; "after_checkpoint_bytes", `Int r.after_checkpoint_bytes
+      ]
   | Compaction_failed r -> obj "compaction_failed" [ "reason", `String r.reason ]
   | Handoff_started -> obj "handoff_started" []
   | Handoff_completed r ->

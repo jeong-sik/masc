@@ -686,24 +686,10 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
           let context =
             match last_metrics with
             | Some metrics ->
-                let context_tokens = Safe_ops.json_int "context_tokens" metrics in
-                let raw_context_max = Safe_ops.json_int "context_max" metrics in
-                let context_max =
-                  if raw_context_max > 0 then raw_context_max else primary_max_context
-                in
-                let raw_context_ratio =
-                  Safe_ops.json_float "context_ratio" metrics
-                in
-                let context_ratio =
-                  if raw_context_ratio > 0.0 || context_tokens <= 0 || context_max <= 0
-                  then raw_context_ratio
-                  else float_of_int context_tokens /. float_of_int context_max
-                in
                 `Assoc [
                   ("source", `String "metrics");
-                  ("context_ratio", `Float context_ratio);
-                  ("context_tokens", `Int context_tokens);
-                  ("context_max", `Int context_max);
+                  ( "checkpoint_bytes"
+                  , `Int (Safe_ops.json_int "checkpoint_bytes" metrics) );
                   ("message_count", `Int (Safe_ops.json_int "message_count" metrics));
                 ]
             | None ->
@@ -720,9 +706,8 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                          `Assoc [
                            ("has_checkpoint", `Bool true);
                            ("source", `String "checkpoint");
-                           ("context_ratio", `Float (Keeper_context_runtime.context_ratio c));
-                           ("context_tokens", `Int (Keeper_context_runtime.token_count c));
-                           ("context_max", `Int c.max_tokens);
+                           ( "checkpoint_bytes"
+                           , `Int (Keeper_context_runtime.serialized_bytes c) );
                            ("message_count", `Int (Keeper_context_runtime.message_count c));
                          ])
           in

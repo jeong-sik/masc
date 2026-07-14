@@ -44,7 +44,6 @@ type t =
   | EmergencyCompactRatioThreshold
   | OperatorCompact
   | OperatorClear
-  | CompactionNoop
   | ToolPairRepair
   | ToolEmissionRegistrySize
   | ToolEmissionPushes
@@ -268,7 +267,6 @@ let to_string = function
     "masc_keeper_emergency_compact_ratio_threshold"
   | OperatorCompact -> "masc_keeper_operator_compact_total"
   | OperatorClear -> "masc_keeper_operator_clear_total"
-  | CompactionNoop -> "masc_keeper_compaction_noop_total"
   | ToolPairRepair -> "masc_keeper_tool_pair_repair_total"
   | ToolEmissionRegistrySize -> "masc_keeper_tool_emission_registry_size"
   | ToolEmissionPushes -> "masc_keeper_tool_emission_pushes_total"

@@ -21,12 +21,9 @@ type working_context = Keeper_types.working_context
 type session_context = Keeper_types.session_context
 
 let text_of_message = Keeper_context_core.text_of_message
-let msg_tokens = Keeper_context_core.msg_tokens
-let count_tokens = Keeper_context_core.count_tokens
 let max_tokens_of_context = Keeper_context_core.max_tokens_of_context
-let token_count = Keeper_context_core.token_count
 let message_count = Keeper_context_core.message_count
-let context_ratio = Keeper_context_core.context_ratio
+let serialized_bytes = Keeper_context_core.serialized_bytes
 let checkpoint_of_context = Keeper_context_core.checkpoint_of_context
 let resume_checkpoint_of_context =
   Keeper_context_core.resume_checkpoint_of_context
@@ -68,8 +65,21 @@ let compaction_policy_of_keeper = Keeper_compact_policy.compaction_policy_of_kee
 
 type compaction_decision = Keeper_compact_policy.compaction_decision =
   | Applied of Compaction_trigger.t
+  | Rejected of
+      { trigger : Compaction_trigger.t
+      ; reason : Keeper_compact_policy.compaction_rejection_reason
+      }
   | Not_requested
   | Skipped_no_checkpoint
+
+type compaction_rejection_reason =
+  Keeper_compact_policy.compaction_rejection_reason =
+  | Retired_deterministic_mode
+  | Runtime_identity_unavailable
+  | Summarizer_unavailable
+  | Plan_unavailable_or_invalid
+  | Structurally_unchanged
+  | Checkpoint_not_reduced
 
 let compaction_decision_to_string =
   Keeper_compact_policy.compaction_decision_to_string
@@ -89,9 +99,9 @@ type compaction_event = Keeper_post_turn.compaction_event = {
   failure_reason : string option;
   trigger : Compaction_trigger.t option;
   decision : Keeper_compact_policy.compaction_decision;
-  before_tokens : int;
-  after_tokens : int;
-  saved_tokens : int;
+  before_checkpoint_bytes : int;
+  after_checkpoint_bytes : int;
+  saved_checkpoint_bytes : int;
 }
 
 type post_turn_lifecycle = Keeper_post_turn.post_turn_lifecycle = {
@@ -102,9 +112,7 @@ type post_turn_lifecycle = Keeper_post_turn.post_turn_lifecycle = {
   handoff_failure_reason : string option;
   compaction : compaction_event;
   turn_generation : int;
-  context_ratio : float;
-  context_tokens : int;
-  context_max : int;
+  checkpoint_bytes : int;
   message_count : int;
 }
 
@@ -222,8 +230,8 @@ let () =
   Otel_metric_store.register_counter
     ~name:compaction_outcome_metric
     ~help:
-      "Total Compaction_completed dispatches classified by token \
-       savings. Labels: keeper, outcome (ok = saved_tokens > 0, \
+      "Total Compaction_completed dispatches classified by exact checkpoint-byte \
+       savings. Labels: keeper, outcome (ok = saved bytes > 0, \
        noop = before == after or after > before). Rising noop \
        rate is the operational signal for \"reducer has nothing \
        to strip, switch profile or hand off\" (#9988)."
@@ -233,31 +241,41 @@ let () =
    when saved_tokens <= 0.  Split from [dispatch_compaction_completed]
    so unit tests can verify classification without needing a full
    [Workspace.config] / [Keeper_registry] setup. *)
-let record_compaction_outcome ~keeper_name ~before_tokens ~after_tokens =
-  let saved_tokens = before_tokens - after_tokens in
-  let outcome = if saved_tokens > 0 then "ok" else "noop" in
+let record_compaction_outcome
+      ~keeper_name
+      ~before_checkpoint_bytes
+      ~after_checkpoint_bytes
+  =
+  let saved_checkpoint_bytes = before_checkpoint_bytes - after_checkpoint_bytes in
+  let outcome = if saved_checkpoint_bytes > 0 then "ok" else "noop" in
   Otel_metric_store.inc_counter compaction_outcome_metric
     ~labels:[ ("keeper", keeper_name); ("outcome", outcome) ] ();
-  if saved_tokens <= 0 then
+  if saved_checkpoint_bytes <= 0 then
     Log.Keeper.warn
-      "#9988 compaction_completed but saved_tokens=%d \
+      "compaction_completed but saved_checkpoint_bytes=%d \
        (before=%d after=%d) keeper=%s — context_overflow will stay set \
        (FSM noop branch).  If this repeats, switch to a stronger \
        compaction profile or escalate to operator."
-      saved_tokens before_tokens after_tokens keeper_name
+      saved_checkpoint_bytes
+      before_checkpoint_bytes
+      after_checkpoint_bytes
+      keeper_name
 
 let dispatch_compaction_completed
     ~(config : Workspace.config)
     ~origin
     ~keeper_name
-    ~before_tokens
-    ~after_tokens =
-  record_compaction_outcome ~keeper_name ~before_tokens ~after_tokens;
+    ~before_checkpoint_bytes
+    ~after_checkpoint_bytes =
+  record_compaction_outcome
+    ~keeper_name
+    ~before_checkpoint_bytes
+    ~after_checkpoint_bytes;
   Otel_metric_store.inc_counter Keeper_metrics.(to_string FsmEdgeTransitions)
     ~labels:[("edge", "kmc_to_ksm_compact_completed")] ();
   dispatch_keeper_phase_event ~config ~origin ~keeper_name
     (Keeper_state_machine.Compaction_completed
-       { before_tokens; after_tokens })
+       { before_checkpoint_bytes; after_checkpoint_bytes })
 
 let dispatch_post_turn_lifecycle_events
     ~(config : Workspace.config)
@@ -291,8 +309,8 @@ let dispatch_post_turn_lifecycle_events
         ~config
         ~origin:Keeper_registry.Post_turn_lifecycle
         ~keeper_name
-        ~before_tokens:lifecycle.compaction.before_tokens
-        ~after_tokens:lifecycle.compaction.after_tokens
+        ~before_checkpoint_bytes:lifecycle.compaction.before_checkpoint_bytes
+        ~after_checkpoint_bytes:lifecycle.compaction.after_checkpoint_bytes
     end
     else
       dispatch_keeper_phase_event

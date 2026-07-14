@@ -5,8 +5,8 @@
    correctly on the [masc_keeper_compaction_outcome_total]
    counter.
 
-   [outcome=ok]   — [before_tokens > after_tokens], real savings
-   [outcome=noop] — [before_tokens <= after_tokens], no savings
+   [outcome=ok]   — serialized checkpoint bytes decreased
+   [outcome=noop] — serialized checkpoint bytes did not decrease
                     (the FSM's #9988 branch that keeps
                     [context_overflow] set so operators can
                     escalate). *)
@@ -33,7 +33,7 @@ let test_real_savings_marks_ok () =
   let before_ok = counter_for ~keeper ~outcome:"ok" in
   let before_noop = counter_for ~keeper ~outcome:"noop" in
   EC.record_compaction_outcome ~keeper_name:keeper
-    ~before_tokens:200_000 ~after_tokens:80_000;
+    ~before_checkpoint_bytes:200_000 ~after_checkpoint_bytes:80_000;
   Alcotest.(check (float 0.0001))
     "ok outcome counter +1"
     (before_ok +. 1.0) (counter_for ~keeper ~outcome:"ok");
@@ -46,7 +46,7 @@ let test_noop_before_equals_after_marks_noop () =
   let before_ok = counter_for ~keeper ~outcome:"ok" in
   let before_noop = counter_for ~keeper ~outcome:"noop" in
   EC.record_compaction_outcome ~keeper_name:keeper
-    ~before_tokens:150_000 ~after_tokens:150_000;
+    ~before_checkpoint_bytes:150_000 ~after_checkpoint_bytes:150_000;
   Alcotest.(check (float 0.0001))
     "noop outcome counter +1"
     (before_noop +. 1.0) (counter_for ~keeper ~outcome:"noop");
@@ -61,7 +61,7 @@ let test_negative_savings_marks_noop () =
   let keeper = "test-keeper-9988b-neg" in
   let before_noop = counter_for ~keeper ~outcome:"noop" in
   EC.record_compaction_outcome ~keeper_name:keeper
-    ~before_tokens:100_000 ~after_tokens:110_000;
+    ~before_checkpoint_bytes:100_000 ~after_checkpoint_bytes:110_000;
   Alcotest.(check (float 0.0001))
     "negative-savings classified as noop"
     (before_noop +. 1.0) (counter_for ~keeper ~outcome:"noop")
@@ -72,7 +72,7 @@ let test_per_keeper_isolation () =
   let a_before = counter_for ~keeper:a ~outcome:"ok" in
   let b_before = counter_for ~keeper:b ~outcome:"ok" in
   EC.record_compaction_outcome ~keeper_name:a
-    ~before_tokens:100_000 ~after_tokens:50_000;
+    ~before_checkpoint_bytes:100_000 ~after_checkpoint_bytes:50_000;
   Alcotest.(check (float 0.0001))
     "A counter +1" (a_before +. 1.0)
     (counter_for ~keeper:a ~outcome:"ok");

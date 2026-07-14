@@ -18,12 +18,9 @@ type session_context = Keeper_types.session_context
 (** {1 Working Context Operations} *)
 
 val text_of_message : Agent_sdk.Types.message -> string
-val msg_tokens : Agent_sdk.Types.message -> int
-val count_tokens : string -> Agent_sdk.Types.message list -> int
 val max_tokens_of_context : working_context -> int
-val token_count : working_context -> int
 val message_count : working_context -> int
-val context_ratio : working_context -> float
+val serialized_bytes : working_context -> int
 val checkpoint_of_context : working_context -> Agent_sdk.Checkpoint.t
 val resume_checkpoint_of_context : working_context -> Agent_sdk.Checkpoint.t
 val oas_context_of_context : working_context -> Agent_sdk.Context.t
@@ -84,9 +81,9 @@ type compaction_event =
   ; failure_reason : string option
   ; trigger : Compaction_trigger.t option
   ; decision : Keeper_compact_policy.compaction_decision
-  ; before_tokens : int
-  ; after_tokens : int
-  ; saved_tokens : int
+  ; before_checkpoint_bytes : int
+  ; after_checkpoint_bytes : int
+  ; saved_checkpoint_bytes : int
   }
 
 type post_turn_lifecycle =
@@ -97,9 +94,7 @@ type post_turn_lifecycle =
   ; handoff_failure_reason : string option
   ; compaction : compaction_event
   ; turn_generation : int
-  ; context_ratio : float
-  ; context_tokens : int
-  ; context_max : int
+  ; checkpoint_bytes : int
   ; message_count : int
   }
 
@@ -136,8 +131,21 @@ val compaction_policy_of_keeper : keeper_meta -> float * int * int
 
 type compaction_decision = Keeper_compact_policy.compaction_decision =
   | Applied of Compaction_trigger.t
+  | Rejected of
+      { trigger : Compaction_trigger.t
+      ; reason : Keeper_compact_policy.compaction_rejection_reason
+      }
   | Not_requested
   | Skipped_no_checkpoint
+
+type compaction_rejection_reason =
+  Keeper_compact_policy.compaction_rejection_reason =
+  | Retired_deterministic_mode
+  | Runtime_identity_unavailable
+  | Summarizer_unavailable
+  | Plan_unavailable_or_invalid
+  | Structurally_unchanged
+  | Checkpoint_not_reduced
 
 val compaction_decision_to_string : compaction_decision -> string
 val compaction_decision_applied : compaction_decision -> bool
@@ -169,22 +177,22 @@ val dispatch_keeper_phase_event
     literal.  #9988. *)
 val compaction_outcome_metric : string
 
-(** [record_compaction_outcome ~keeper_name ~before_tokens ~after_tokens]
-    emits the outcome counter and (for [saved_tokens <= 0]) a warn log,
+(** [record_compaction_outcome] emits the outcome counter and a warning when
+    exact serialized checkpoint bytes were not reduced,
     without dispatching an FSM event.  Exposed for unit tests and for
     callers that need the observability signal before/after a dispatch.  *)
 val record_compaction_outcome
   :  keeper_name:string
-  -> before_tokens:int
-  -> after_tokens:int
+  -> before_checkpoint_bytes:int
+  -> after_checkpoint_bytes:int
   -> unit
 
-(** [dispatch_compaction_completed ~config ~keeper_name ~before_tokens
-    ~after_tokens] dispatches a [Compaction_completed] phase event and
+(** [dispatch_compaction_completed] dispatches a [Compaction_completed] phase event and
     updates observability in one place.
 
     Emits [compaction_outcome_metric] labelled with [outcome=ok] when
-    [after_tokens < before_tokens] and [outcome=noop] otherwise.  A
+    when exact serialized checkpoint bytes decreased and [outcome=noop]
+    otherwise. A
     [noop] outcome also logs a warning — the FSM (#9988) keeps
     [context_overflow] set in this case, so operators need the signal
     to escalate profile / alert.
@@ -195,8 +203,8 @@ val dispatch_compaction_completed
   :  config:Workspace.config
   -> origin:Keeper_registry.lifecycle_event_origin
   -> keeper_name:string
-  -> before_tokens:int
-  -> after_tokens:int
+  -> before_checkpoint_bytes:int
+  -> after_checkpoint_bytes:int
   -> unit
 
 val dispatch_post_turn_lifecycle_events

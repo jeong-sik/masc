@@ -29,12 +29,11 @@ ALLOWLIST=(
 
   # RFC-0056 yojson-only sub-libraries (leaf isolation).  Adding
   # masc_core to these libs would break the dependency-graph
-  # invariant that the chronicle/event/autonomous/cdal sub-libs
+  # invariant that the chronicle/event/autonomous sub-libs
   # remain consumable by lightweight downstream tooling without
   # pulling the whole masc_core surface.
   "lib/chronicle_event/chronicle_event.ml"
   "lib/autonomous/stimulus.ml"
-  "lib/cdal_runtime/effect_evidence.ml"
   "lib/multimodal/payload.ml"
 )
 

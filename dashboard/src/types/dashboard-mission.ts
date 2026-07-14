@@ -285,15 +285,7 @@ export interface DashboardProofWorkerRunEvidence {
   operation_id?: string | null
   trace_ref?: Record<string, unknown> | null
   evidence_session_id?: string | null
-  session_conformance?: Record<string, unknown> | null
-  cdal_run_id?: string | null
-  contract_id?: string | null
   result_status?: string | null
-  proof_present?: boolean | null
-  proof_run_id?: string | null
-  proof_status?: string | null
-  proof_execution_mode?: string | null
-  proof_evidence_count?: number | null
   checkpoint_ref?: string | null
   tool_trace_refs?: string[]
   raw_evidence_refs?: string[]

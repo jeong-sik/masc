@@ -141,13 +141,6 @@ lib/runtime/runtime_transport.ml:790
 lib/runtime/runtime_transport.ml:1069
 lib/runtime/runtime_transport.ml:1248
 lib/runtime/runtime_transport.ml:1281
-lib/cdal_runtime/direct_evidence.ml:79
-lib/cdal_runtime/mode_enforcer.ml:242
-lib/cdal_runtime/mode_enforcer.ml:269
-lib/cdal/adversarial_eval.ml:78
-lib/cdal/effect_evidence.ml:30
-lib/cdal/effect_evidence.ml:35
-lib/cdal/labeling.ml:148
 lib/chronicle_ingest.ml:42
 lib/chronicle_ingest.ml:224
 lib/chronicle_ingest.ml:230

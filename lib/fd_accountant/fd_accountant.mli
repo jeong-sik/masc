@@ -50,7 +50,6 @@ val resource_error_count : kind:kind -> resource_error -> int
 val install_dated_jsonl_log_writer_observer : unit -> unit
 val install_process_eio_sandbox_exec_observer : unit -> unit
 val install_with_process_sandbox_exec_observer : unit -> unit
-val install_autonomy_exec_sandbox_exec_observer : unit -> unit
 val install_bg_sandbox_exec_observer : unit -> unit
 
 type snapshot =

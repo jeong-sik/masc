@@ -64,7 +64,6 @@
   masc.model_inference_metrics
   masc.json_field
   masc.types_boundary
-  masc.cdal_runtime
   masc.trajectory
   masc.host_config
   masc.briefing_compactors

@@ -129,9 +129,7 @@ let with_env name value_opt f =
 
 let with_isolated_runtime_env f =
   with_env "MASC_BASE_PATH" None (fun () ->
-    with_env "MASC_BASE_PATH_INPUT" None (fun () ->
-      (
-        with_env "MASC_CDAL_GATE_ENABLED" (Some "false") f)))
+    with_env "MASC_BASE_PATH_INPUT" None (fun () -> f ()))
 
 (* Test registry — collect via [test] then dispatch with Alcotest.run.
    Eio scope set up per-test inside the registered thunk. *)
@@ -770,8 +768,7 @@ let () = test "handle_batch_add_tasks_injects_default_verification_contracts" (f
    boundary. Contract shape does not create a second authorization lane. *)
 let () = test "handle_done_uses_llm_review_without_keeper_verifier_redirect" (fun () ->
   (
-    with_env "MASC_CDAL_GATE_ENABLED" (Some "true") (fun () ->
-      with_env "MASC_DATA_DIR" (Some (make_temp_dir "masc-cdal-empty")) (fun () ->
+    with_env "MASC_DATA_DIR" (Some (make_temp_dir "masc-data-empty")) (fun () ->
         let ctx = make_test_ctx () in
         let _ =
           Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
@@ -816,7 +813,7 @@ let () = test "handle_done_uses_llm_review_without_keeper_verifier_redirect" (fu
           failwith
             (Printf.sprintf
                "expected Done after LLM review, got: %s"
-               (Masc_domain.task_status_to_string other))))))
+               (Masc_domain.task_status_to_string other)))))
 
 let () = test "handle_transition_release_requires_handoff_for_strict_task" (fun () ->
   let ctx = make_test_ctx () in
@@ -1395,7 +1392,7 @@ let () = test "handle_transition_release_empty_summary_error_includes_example" (
   assert (str_contains (Tool_result.message result_empty) "\"summary\"")
 )
 
-let () = test "handle_transition_done_prefers_ownership_error_over_cdal_gate" (fun () ->
+let () = test "handle_transition_done_prefers_ownership_error_over_completion_gate" (fun () ->
   let ctx = make_test_ctx () in
   let _ =
     Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx

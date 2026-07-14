@@ -3377,9 +3377,7 @@ let test_health_response_default_is_light_probe () =
     (match json |> member "internal_mcp_auth" with `Assoc _ -> true | _ -> false);
   check_otel_health_shape "default health" json;
   Alcotest.(check bool) "default health skips reaction ledger" true
-    (json |> member "keeper_reaction_ledger" = `Null);
-  Alcotest.(check bool) "default health skips cdal snapshot" true
-    (json |> member "cdal" = `Null)
+    (json |> member "keeper_reaction_ledger" = `Null)
 
 let test_health_response_full_query_uses_snapshot_cache () =
   with_temp_dir "health-full-snapshot-cache" (fun dir ->
@@ -3421,8 +3419,6 @@ let test_health_response_full_query_uses_snapshot_cache () =
             (match first |> member "keeper_reaction_ledger" with
              | `Assoc _ -> true
              | _ -> false);
-          Alcotest.(check bool) "full health skips retired cdal snapshot" true
-            (first |> member "cdal" = `Null);
           Server_routes_http_runtime.For_testing.refresh_full_health_snapshot_now
             request;
           let refreshed =
@@ -3442,11 +3438,7 @@ let test_health_response_full_query_uses_snapshot_cache () =
             true
             (match refreshed |> member "keeper_reaction_ledger" with
              | `Assoc _ -> true
-             | _ -> false);
-          Alcotest.(check bool)
-            "refreshed full health skips retired cdal snapshot"
-            true
-            (refreshed |> member "cdal" = `Null)))
+             | _ -> false)))
 
 let test_full_health_refresh_timing_uses_dedicated_budget () =
   let interval_sec, timeout_sec, ttl_sec =
@@ -3526,9 +3518,7 @@ let test_full_health_cold_refresh_timeout_is_timeout_not_error () =
   Alcotest.(check bool) "cold timeout stale age is surfaced" true
     (match after |> member "full_health_snapshot" |> member "stale_age_ms" with
      | `Int age -> age >= 0
-     | _ -> false);
-  Alcotest.(check bool) "cold timeout omits retired cdal component" true
-    (after |> member "cdal" = `Null)
+     | _ -> false)
 
 let test_health_response_survives_deleted_cwd () =
   with_temp_dir "health-deleted-cwd" (fun dir ->

@@ -91,7 +91,6 @@ export interface DashboardRuntimeResolution {
   fleet_safety: DashboardFleetSafetyHealth | null
   fd_accountant: DashboardFdAccountant | null
   disk_observation: DashboardDiskObservation | null
-  cdal: DashboardCdalHealth | null
 }
 
 export interface DashboardFdAccountant {
@@ -181,53 +180,6 @@ export interface DashboardPausedKeepersHealth {
   read_errors: DashboardPausedKeeperReadError[]
 }
 
-export interface DashboardCdalProofCompleteness {
-  scan_limit: number | null
-  run_dir_entries_seen: number | null
-  scan_truncated: boolean | null
-  run_dirs_scanned: number | null
-  completed_run_dirs: number | null
-  incomplete_run_dirs: number | null
-  stale_incomplete_run_dirs: number | null
-  terminal_incomplete_run_dirs: number | null
-  missing_manifest_run_dirs: number | null
-  missing_contract_run_dirs: number | null
-  stale_incomplete_grace_seconds: number | null
-  sample_stale_incomplete_run_ids: string[]
-  sample_terminal_incomplete_run_ids: string[]
-}
-
-export interface DashboardCdalProofStoreHealth {
-  root: string | null
-  proofs_dir: string | null
-  exists: boolean | null
-  latest_activity_at: string | null
-  latest_activity_unix: number | null
-  age_seconds: number | null
-  status: string | null
-  completeness: DashboardCdalProofCompleteness | null
-}
-
-export interface DashboardCdalTaskScopeHealth {
-  status: string | null
-  recent_limit: number | null
-  recent_rows: number | null
-  task_id_rows: number | null
-  missing_task_scope_rows: number | null
-  legacy_unscoped_rows: number | null
-  current_writer_missing_task_scope_rows: number | null
-  missing_task_scope: boolean | null
-  partial_task_scope: boolean | null
-  current_writer_missing_task_scope: boolean | null
-}
-
-export interface DashboardCdalHealth {
-  writer_status: string | null
-  operator_action_required: boolean | null
-  proof_store_path_drift: boolean | null
-  proof_store: DashboardCdalProofStoreHealth | null
-  task_scope: DashboardCdalTaskScopeHealth | null
-}
 
 export interface DashboardKeeperReactionLedgerPendingKeeper {
   keeper_name: string

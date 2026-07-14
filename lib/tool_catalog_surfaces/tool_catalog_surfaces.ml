@@ -30,8 +30,7 @@ module Float = Stdlib.Float
 (* Workspace mutation classification                                *)
 (* ================================================================ *)
 
-(** Tools that mutate the workspace filesystem. Canonical list shared by
-    cdal_contract_bridge.ml and contract_risk.ml. *)
+(** Tools that mutate the workspace filesystem. *)
 let workspace_mutating_tool_names =
   [ "tool_edit_file"; "tool_write_file"; "create_text_file"; "edit_text_file"; "file_write" ]
 ;;

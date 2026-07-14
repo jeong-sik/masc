@@ -13,14 +13,12 @@ import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-ref
 import { formatMsCompact, formatNumber } from '../lib/format-number'
 import { refreshShell, shellRuntimeResolution } from '../store'
 import type {
-  DashboardCdalHealth,
   DashboardFleetSafetyHealth,
   DashboardPausedKeeperDetail,
 } from '../types'
 import { FilterChips } from './common/filter-chips'
 import { RouteLink } from './common/route-link'
 import { StatTile } from './common/stat-tile'
-import { StatusChip } from './common/status-chip'
 import { TelemetryUnified } from './telemetry-unified'
 import { FleetTelemetryPanel } from './fleet-telemetry-panel'
 import { ToolQualityPanel } from './tool-quality-panel'
@@ -240,7 +238,6 @@ function FleetCommandStrip() {
   const fleetSafety = runtime?.fleet_safety ?? null
   const fleet = fleetSafety?.keeper_fleet_safety
   const pausedHealth = fleetSafety?.paused_keepers_health
-  const cdal = runtime?.cdal ?? null
   const effective = fleet?.effective_reaction_capacity_count ?? fleet?.running_keeper_fiber_count ?? fleetSafety?.keeper_fibers
   const executable = fleet?.executable_reaction_capacity_count ?? fleet?.executable_keeper_fiber_count
   const target = fleet?.target_reaction_capacity_count ?? fleet?.autoboot_enabled_keeper_count
@@ -252,7 +249,7 @@ function FleetCommandStrip() {
       ? 'warn'
       : runtime?.status === 'ready' ? 'ok' : 'warn'
   const runtimeLabel = runtime?.status === 'ready' ? '런타임 가동' : `런타임 ${runtime?.status ?? 'unknown'}`
-  const tick = cdal?.proof_store?.latest_activity_at ?? (fleetSafety ? 'runtime sample' : 'no runtime sample')
+  const tick = fleetSafety ? 'runtime sample' : 'no runtime sample'
 
   return html`
     <section class="fl-shell v2-monitoring-card" data-testid="fleet-command-strip">
@@ -269,9 +266,6 @@ function FleetCommandStrip() {
           <span class="fl-hpill">exec ${countText(executable)}</span>
           <span class=${`fl-hpill ${pausedCount && pausedCount > 0 ? 'warn' : 'ok'}`}>
             일시정지 ${countText(pausedCount)}
-          </span>
-          <span class=${`fl-hpill ${cdalTone(cdal) === 'crit' ? 'bad' : cdalTone(cdal) === 'warn' ? 'warn' : 'ok'}`}>
-            Contract verification ${cdal?.writer_status ?? 'unknown'}
           </span>
         </div>
       </div>
@@ -295,12 +289,6 @@ function compactList(values: string[], limit = 3): string {
   if (values.length === 0) return MISSING_DATA_DASH
   const shown = values.slice(0, limit).join(', ')
   return values.length > limit ? `${shown} +${values.length - limit}` : shown
-}
-
-function cdalTone(cdal: DashboardCdalHealth | null): 'crit' | 'warn' | 'ok' | undefined {
-  if (!cdal) return undefined
-  if (cdal.operator_action_required === true) return 'crit'
-  return cdal.writer_status === 'active' ? 'ok' : 'warn'
 }
 
 function blockerClassText(row: DashboardPausedKeeperDetail): string | null {
@@ -366,58 +354,6 @@ function RuntimePausedKeeperTable({ fleetSafety }: { fleetSafety: DashboardFleet
   `
 }
 
-function RuntimeCdalBlock({ cdal }: { cdal: DashboardCdalHealth | null }) {
-  const proof = cdal?.proof_store
-  const completeness = proof?.completeness
-  const task = cdal?.task_scope
-  const staleSamples = completeness?.sample_stale_incomplete_run_ids ?? []
-  const terminalSamples = completeness?.sample_terminal_incomplete_run_ids ?? []
-  if (!cdal) {
-    return html`
-      <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-5 text-center text-2xs text-[var(--color-fg-muted)]">
-        Contract verification snapshot unavailable.
-      </div>
-    `
-  }
-  return html`
-    <div class="v2-monitoring-card grid gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-3 text-2xs">
-      <div class="flex flex-wrap items-center justify-between gap-2">
-        <span class="font-mono text-[var(--color-fg-primary)]">${cdal.writer_status ?? 'unknown'}</span>
-        <${StatusChip}
-          label=${cdal.operator_action_required ? 'action' : 'ok'}
-          tone=${cdal.operator_action_required ? 'warn' : 'ok'}
-        />
-      </div>
-      <div class="grid gap-1 text-[var(--color-fg-muted)]">
-        <div class="flex justify-between gap-3">
-          <span>Proof store</span>
-          <span class="font-mono text-[var(--color-fg-secondary)]">${proof?.status ?? 'unknown'}</span>
-        </div>
-        <div class="flex justify-between gap-3">
-          <span>Incomplete</span>
-          <span class="font-mono text-[var(--color-fg-secondary)]">
-            ${countText(completeness?.incomplete_run_dirs)}
-            <span class="text-[var(--color-fg-disabled)]"> stale ${countText(completeness?.stale_incomplete_run_dirs)} · terminal ${countText(completeness?.terminal_incomplete_run_dirs)}</span>
-          </span>
-        </div>
-        <div class="flex justify-between gap-3">
-          <span>Task scope</span>
-          <span class="font-mono text-[var(--color-fg-secondary)]">
-            ${task?.status ?? 'unknown'}
-            <span class="text-[var(--color-fg-disabled)]"> missing ${countText(task?.missing_task_scope_rows)} · current ${countText(task?.current_writer_missing_task_scope_rows)}</span>
-          </span>
-        </div>
-        ${staleSamples.length > 0 ? html`
-          <div class="truncate" title=${staleSamples.join(', ')}>stale samples: <span class="font-mono text-[var(--color-fg-secondary)]">${compactList(staleSamples)}</span></div>
-        ` : null}
-        ${terminalSamples.length > 0 ? html`
-          <div class="truncate" title=${terminalSamples.join(', ')}>terminal samples: <span class="font-mono text-[var(--color-fg-secondary)]">${compactList(terminalSamples)}</span></div>
-        ` : null}
-      </div>
-    </div>
-  `
-}
-
 function RuntimeBlockerBoard() {
   useEffect(() => {
     void refreshShell({ force: true })
@@ -427,7 +363,6 @@ function RuntimeBlockerBoard() {
   const fleetSafety = runtime?.fleet_safety ?? null
   const fleet = fleetSafety?.keeper_fleet_safety
   const pausedHealth = fleetSafety?.paused_keepers_health
-  const cdal = runtime?.cdal ?? null
   const effective = fleet?.effective_reaction_capacity_count ?? fleet?.running_keeper_fiber_count ?? fleetSafety?.keeper_fibers
   const executable = fleet?.executable_reaction_capacity_count ?? fleet?.executable_keeper_fiber_count
   const target = fleet?.target_reaction_capacity_count ?? fleet?.autoboot_enabled_keeper_count
@@ -442,7 +377,7 @@ function RuntimeBlockerBoard() {
 
   return html`
     <section class="grid gap-3" data-testid="runtime-blocker-board">
-      <div class="grid grid-cols-1 gap-3 lg:grid-cols-3">
+      <div class="grid grid-cols-1 gap-3 lg:grid-cols-2">
         <${StatTile}
           label="Reaction capacity"
           value=${`${countText(effective)}/${countText(target)}`}
@@ -455,22 +390,10 @@ function RuntimeBlockerBoard() {
           status=${pausedCount && pausedCount > 0 ? 'warn' : 'ok'}
           delta=${{ direction: pausedCount && pausedCount > 0 ? 'down' : 'flat', text: compactList(pausedNames) }}
         />
-        <${StatTile}
-          label="Contract writer"
-          value=${cdal?.writer_status ?? MISSING_DATA_DASH}
-          status=${cdalTone(cdal)}
-          delta=${{ direction: cdal?.operator_action_required ? 'down' : 'flat', text: cdal?.proof_store?.status ?? 'proof unknown' }}
-        />
       </div>
-      <div class="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.1fr)_minmax(18rem,0.9fr)]">
-        <div>
-          <div class="mb-2 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Paused keeper blockers</div>
-          <${RuntimePausedKeeperTable} fleetSafety=${fleetSafety} />
-        </div>
-        <div>
-          <div class="mb-2 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Contract blockers</div>
-          <${RuntimeCdalBlock} cdal=${cdal} />
-        </div>
+      <div>
+        <div class="mb-2 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Paused keeper blockers</div>
+        <${RuntimePausedKeeperTable} fleetSafety=${fleetSafety} />
       </div>
     </section>
   `

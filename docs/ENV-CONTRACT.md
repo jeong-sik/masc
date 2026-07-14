@@ -124,13 +124,11 @@ Operator rollout procedure and observer log interpretation: see
 | --- | --- | --- |
 | `MASC_BASH_SEMANTIC_EXIT` | **on** (post flip PR) | Emits a `return_code_interpretation` object (typed `semantic_exit`) alongside the raw `status`. Set to `0` / `false` / `no` / `off` to opt out and restore the pre-P1 byte-identical shape. See `lib/exec/exec_semantic.mli`. |
 | `MASC_BASH_OUTPUT_CAP` | on (500 KB head + 500 KB tail each) | Head+tail truncation via `Exec_buffer`. `MASC_BASH_CAP_HEAD` / `MASC_BASH_CAP_TAIL` override the per-stream caps. See `lib/exec/exec_buffer.mli`. |
-| `MASC_BASH_VERIFIABLE_MARKERS` | **on** (post flip PR) | Emits `verifiable_markers` from `Cdal_judge.of_exec_outcome` so the verifier runtime can consume typed `Test_pass {count}`, `Build_ok`, etc. without regex scraping. Set to `0` / `false` / `no` / `off` to opt out. See `lib/cdal_judge.mli`. |
 
 Representative code paths:
 
 - [`exec_semantic.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/exec/exec_semantic.ml)
 - [`exec_buffer.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/exec/exec_buffer.ml)
-- [`cdal_judge.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/cdal_judge.ml)
 - [`exec_policy.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/exec_policy/exec_policy.ml) — Shell_command_gate policy integration
 
 Because every flag here is `request_dynamic` on the Execute path

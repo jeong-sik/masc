@@ -392,13 +392,6 @@ function mergeTraceEvents(
   })
 }
 
-function stringArrayField(value: unknown): string[] {
-  if (!Array.isArray(value)) return []
-  return value
-    .map(item => (typeof item === 'string' ? item.trim() : ''))
-    .filter(Boolean)
-}
-
 function stringField(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() !== '' ? value : undefined
 }
@@ -662,42 +655,6 @@ function timelineEventToTrace(evt: AgentTimelineEvent, index: number): UnifiedTr
       sourceLane: 'masc',
       summary: evt.type,
       detail,
-    }
-  }
-
-  if (evt.type === 'keeper.contract_verdict') {
-    const status = typeof detail.status === 'string' ? detail.status : 'unknown'
-    const blockingGaps = stringArrayField(detail.blocking_gap_artifacts)
-    const summary = blockingGaps.length > 0
-      ? `Contract verdict ${status} · gaps ${blockingGaps.join(', ')}`
-      : `Contract verdict ${status}`
-    return {
-      id: `tl-${ts}-${evt.type}-${index}`,
-      ts,
-      ts_iso: evt.ts ?? new Date(ts).toISOString(),
-      kind: 'lifecycle',
-      sourceLane: 'masc',
-      summary,
-      detail: { ...detail, type: evt.type },
-    }
-  }
-
-  if (evt.type === 'keeper.friction') {
-    const tripwires = stringArrayField(detail.review_tripwires)
-    const gaps = stringArrayField(detail.evidence_gap_artifacts)
-    const summary = tripwires.length > 0
-      ? `Contract friction · ${tripwires.join(', ')}`
-      : gaps.length > 0
-        ? `Contract friction · gaps ${gaps.join(', ')}`
-        : 'Contract friction'
-    return {
-      id: `tl-${ts}-${evt.type}-${index}`,
-      ts,
-      ts_iso: evt.ts ?? new Date(ts).toISOString(),
-      kind: 'lifecycle',
-      sourceLane: 'masc',
-      summary,
-      detail: { ...detail, type: evt.type },
     }
   }
 

@@ -22,8 +22,8 @@
 
    Same MASC_BASE_PATH setenv pattern as
    test_tool_help_registry_shard_coverage_10101.ml — module init
-   triggers Cdal_verdict_gate.default_base_path which raises
-   under HOME. *)
+   resolves the runtime base path, which the #9903 prod-guard
+   rejects under HOME. *)
 
 let () =
   let dir =

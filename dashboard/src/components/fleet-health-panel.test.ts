@@ -182,47 +182,6 @@ describe('FleetHealthPanel', () => {
           reaction_capacity_below_target: true,
         },
       },
-      cdal: {
-        writer_status: 'proof_store_incomplete',
-        operator_action_required: true,
-        proof_store_path_drift: false,
-        proof_store: {
-          root: '/Users/dancer/me/.oas',
-          proofs_dir: '/Users/dancer/me/.oas/proofs',
-          exists: true,
-          latest_activity_at: '2026-05-21T03:00:00Z',
-          latest_activity_unix: 1779332400,
-          age_seconds: 30,
-          status: 'stale_incomplete_runs',
-          completeness: {
-            scan_limit: 200,
-            run_dir_entries_seen: 200,
-            scan_truncated: false,
-            run_dirs_scanned: 200,
-            completed_run_dirs: 194,
-            incomplete_run_dirs: 6,
-            stale_incomplete_run_dirs: 3,
-            terminal_incomplete_run_dirs: 1,
-            missing_manifest_run_dirs: 6,
-            missing_contract_run_dirs: 6,
-            stale_incomplete_grace_seconds: 300,
-            sample_stale_incomplete_run_ids: ['contract-stale-a'],
-            sample_terminal_incomplete_run_ids: ['contract-abort-a'],
-          },
-        },
-        task_scope: {
-          status: 'present',
-          recent_limit: 500,
-          recent_rows: 500,
-          task_id_rows: 500,
-          missing_task_scope_rows: 0,
-          legacy_unscoped_rows: 0,
-          current_writer_missing_task_scope_rows: 0,
-          missing_task_scope: false,
-          partial_task_scope: false,
-          current_writer_missing_task_scope: false,
-        },
-      },
     }
 
     render(html`<${FleetHealthPanel} />`)
@@ -233,15 +192,12 @@ describe('FleetHealthPanel', () => {
     expect(screen.getByText('capacity 8/17')).toBeTruthy()
     expect(screen.getByText('exec 13')).toBeTruthy()
     expect(screen.getByText('일시정지 3')).toBeTruthy()
-    expect(screen.getByText('Contract verification proof_store_incomplete')).toBeTruthy()
     expect(screen.getByTestId('runtime-blocker-board')).toBeTruthy()
     expect(screen.getByText('8/17')).toBeTruthy()
     expect(screen.getByText('analyst')).toBeTruthy()
     expect(screen.getByText('operator_paused')).toBeTruthy()
     expect(screen.queryByText(/blocker=/)).toBeNull()
     expect(screen.queryByText(/manual pause applied/)).toBeNull()
-    expect(screen.getAllByText('proof_store_incomplete').length).toBeGreaterThan(0)
-    expect(screen.getByText(/contract-stale-a/)).toBeTruthy()
   })
 
   it('marks the runtime health pill as warn when runtime.status is not ready', () => {
@@ -270,7 +226,6 @@ describe('FleetHealthPanel', () => {
           reaction_capacity_below_target: false,
         },
       },
-      cdal: { writer_status: 'active', operator_action_required: false, proof_store_path_drift: false },
     }
 
     render(html`<${FleetHealthPanel} />`)

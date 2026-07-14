@@ -148,13 +148,6 @@ let install_with_process_sandbox_exec_observer () =
     { With_process.run = (fun f -> observe ~kind:Sandbox_exec f) }
 ;;
 
-let install_autonomy_exec_sandbox_exec_observer () =
-  Masc_cdal_runtime.Autonomy_exec.set_run_guard
-    { Masc_cdal_runtime.Autonomy_exec.run =
-        (fun f -> observe ~kind:Sandbox_exec f)
-    }
-;;
-
 let install_bg_sandbox_exec_observer () =
   Bg_task.set_lifetime_guard
     { Bg_task.acquire =
@@ -166,7 +159,6 @@ let () =
   install_dated_jsonl_log_writer_observer ();
   install_process_eio_sandbox_exec_observer ();
   install_with_process_sandbox_exec_observer ();
-  install_autonomy_exec_sandbox_exec_observer ();
   install_bg_sandbox_exec_observer ()
 ;;
 

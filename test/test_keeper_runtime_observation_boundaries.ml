@@ -388,24 +388,6 @@ let test_keeper_context_estimates_use_context_facade () =
      || contains_substring hook_source
           "Agent_sdk.Context_reducer.estimate_char_tokens")
 
-let test_keeper_passes_context_window_to_oas_thresholds () =
-  let source = read_file "lib/keeper/keeper_agent_run.ml" in
-  Alcotest.(check bool)
-    "keeper run_named receives effective max_context as context window"
-    true
-    (contains_substring source "~context_window_tokens:max_context")
-
-let test_oas_thresholds_do_not_use_output_max_tokens_as_context_window () =
-  let source = read_file "lib/runtime/runtime_agent_context.ml" in
-  Alcotest.(check bool)
-    "thresholds use explicit context_window_tokens"
-    true
-    (contains_substring source "match config.context_window_tokens with");
-  Alcotest.(check bool)
-    "output max_tokens is not reused as context window"
-    false
-    (contains_substring source "~context_window_tokens:config.max_tokens")
-
 let () =
   Alcotest.run "keeper_runtime_observation_boundaries"
   [
@@ -449,9 +431,5 @@ let () =
           test_keeper_preflight_reuses_setup_tool_estimate;
         Alcotest.test_case "keeper context estimates use context facade" `Quick
           test_keeper_context_estimates_use_context_facade;
-        Alcotest.test_case "keeper passes context window to OAS thresholds" `Quick
-          test_keeper_passes_context_window_to_oas_thresholds;
-        Alcotest.test_case "OAS thresholds keep output max_tokens separate" `Quick
-          test_oas_thresholds_do_not_use_output_max_tokens_as_context_window;
       ] );
   ]

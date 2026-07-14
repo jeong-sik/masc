@@ -514,8 +514,8 @@ let run_turn
         ~max_context
     in
     (* This aggregate estimate is observation only. It neither suppresses
-       context nor fabricates a pre-dispatch failure. OAS receives the complete
-       request and owns typed ContextOverflow/compaction. *)
+       context nor fabricates a pre-dispatch failure. OAS transports the complete
+       request and reports typed ContextOverflow; MASC owns lane compaction. *)
     let pre_dispatch_over_context_window =
       context_window_observation.observed_over_context_tokens > 0
     in
@@ -707,9 +707,6 @@ let run_turn
                     ?raw_trace
                     ~system_prompt:turn_system_prompt
                     ~tools
-                    ~compact_ratio:meta.compaction.ratio_gate
-                    ~context_window_tokens:max_context
-                    ~oas_auto_context_overflow_retry:true
                     ~checkpoint_sink
                     ~initial_messages
                     ~model_input_projection

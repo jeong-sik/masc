@@ -116,17 +116,11 @@ type config =
   ; cache_system_prompt : bool
   ; yield_on_tool : bool
   ; tool_failure_judge : Agent_sdk.Tool_failure_recovery.judge option
-  ; compact_ratio : float option
-  ; context_window_tokens : int option
-  ; oas_auto_context_overflow_retry : bool
   ; context_injector : Agent_sdk.Hooks.context_injector option
   ; context : Agent_sdk.Context.t option
   ; approval : Agent_sdk.Hooks.approval_callback option
   ; exit_condition : (int -> bool) option
   ; exit_condition_result : (int -> stop_reason * string option) option
-  ; summarizer : (Agent_sdk.Types.message list -> string) option
-    (** Custom summarizer for OAS [Budget_strategy.reduce_for_budget]
-          Emergency-phase compaction. Defaults to OAS's extractive default. *)
   ; thinking_budget : int option
     (** Token budget for extended thinking, forwarded to OAS
         [Builder.with_thinking_budget]. Only meaningful when
@@ -187,15 +181,11 @@ let default_config
   ; cache_system_prompt = false
   ; yield_on_tool = false
   ; tool_failure_judge = None
-  ; compact_ratio = None
-  ; context_window_tokens = None
-  ; oas_auto_context_overflow_retry = true
   ; context_injector = None
   ; context = None
   ; approval = None
   ; exit_condition = None
   ; exit_condition_result = None
-  ; summarizer = None
   ; thinking_budget = None
   ; top_p = provider_cfg.top_p
   ; top_k = provider_cfg.top_k
@@ -320,28 +310,6 @@ let builder_without_approval
     else builder
   in
   let builder =
-    match config.context_window_tokens with
-    | Some window ->
-      let compact_ratio =
-        Option.value
-          ~default:Agent_sdk.Types.default_context_compact_ratio
-          config.compact_ratio
-      in
-      Agent_sdk.Builder.with_context_thresholds
-        ~compact_ratio
-        ~context_window_tokens:window
-        builder
-    | None ->
-      (match config.compact_ratio with
-       | Some ratio -> Agent_sdk.Builder.with_context_thresholds ~compact_ratio:ratio builder
-       | None -> builder)
-  in
-  let builder =
-    Agent_sdk.Builder.with_auto_context_overflow_retry
-      config.oas_auto_context_overflow_retry
-      builder
-  in
-  let builder =
     match config.context_injector with
     | Some injector -> Agent_sdk.Builder.with_context_injector injector builder
     | None -> builder
@@ -354,11 +322,6 @@ let builder_without_approval
   let builder =
     match config.exit_condition with
     | Some cond -> Agent_sdk.Builder.with_exit_condition cond builder
-    | None -> builder
-  in
-  let builder =
-    match config.summarizer with
-    | Some s -> Agent_sdk.Builder.with_summarizer s builder
     | None -> builder
   in
   let builder =
@@ -450,7 +413,6 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
     ; thinking_budget = config.thinking_budget
     ; cache_system_prompt = config.cache_system_prompt
     ; yield_on_tool = config.yield_on_tool
-    ; context_compact_ratio = config.compact_ratio
     ; exit_condition = config.exit_condition
     }
   in
@@ -470,7 +432,6 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
     ; approval = config.approval
     ; missing_approval_callback_policy =
         Agent_sdk.Hooks.Reject_without_callback
-    ; summarizer = config.summarizer
     ; on_run_complete = config.on_run_complete
     }
   in

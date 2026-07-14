@@ -62,13 +62,6 @@ val provider_attempt_started_decision :
 val provider_attempt_finished_decision :
   provider_attempt_finished_record -> Yojson.Safe.t
 
-type context_window_rebudget =
-  { requested_context_window : int option
-  ; final_runtime_context_window : int
-  ; resolved_context_window : int
-  ; context_window_rebudgeted : bool
-  }
-
 (** {1 Named runtime execution} *)
 
 val run_named :
@@ -101,9 +94,6 @@ val run_named :
   ?cache_system_prompt:bool ->
   ?yield_on_tool:bool ->
   ?tool_failure_judge:Agent_sdk.Tool_failure_recovery.judge ->
-  ?compact_ratio:float ->
-  ?context_window_tokens:int ->
-  ?oas_auto_context_overflow_retry:bool ->
   ?checkpoint_sink:Agent_sdk.Agent.checkpoint_sink ->
   ?context_injector:Agent_sdk.Hooks.context_injector ->
   ?context:Agent_sdk.Context.t ->
@@ -111,7 +101,6 @@ val run_named :
   ?approval:Agent_sdk.Hooks.approval_callback ->
   ?exit_condition:(int -> bool) ->
   ?exit_condition_result:(int -> Runtime_agent.stop_reason * string option) ->
-  ?summarizer:(Agent_sdk.Types.message list -> string) ->
   ?oas_checkpoint:Agent_sdk.Checkpoint.t ->
   ?trace_link:string * string ->
   ?event_bus:Agent_sdk.Event_bus.t ->
@@ -185,11 +174,6 @@ module For_testing : sig
 
   val media_degrade_manifest_decision :
     runtime_id:string -> (string * int) list -> Yojson.Safe.t
-
-  val resolve_context_window_tokens_after_runtime_selection :
-    requested_context_window:int option ->
-    final_runtime_context_window:int ->
-    (context_window_rebudget, Agent_sdk.Error.sdk_error) result
 
   val attempt_inference_policy :
     runtime_id:string ->

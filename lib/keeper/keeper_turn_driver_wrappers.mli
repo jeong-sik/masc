@@ -21,7 +21,6 @@ val run_model_by_label :
   ?accept:(Agent_sdk_response.api_response -> bool) ->
   ?hooks:Agent_sdk.Hooks.hooks ->
   ?enable_thinking:bool ->
-  ?compact_ratio:float ->
   ?provider_config_transform:
     (Llm_provider.Provider_config.t ->
     (Llm_provider.Provider_config.t, Agent_sdk.Error.sdk_error) result) ->
@@ -54,7 +53,6 @@ val run_named_with_masc_tools :
   ?on_resume:(unit -> unit) ->
   ?transport:Masc_grpc_transport.t ->
   ?yield_on_tool:bool ->
-  ?compact_ratio:float ->
   ?approval:Agent_sdk.Hooks.approval_callback ->
   ?max_turns:int ->
   ?max_idle_turns:int ->
@@ -81,7 +79,6 @@ val run_model_with_masc_tools :
   ?max_tokens:int ->
   ?hooks:Agent_sdk.Hooks.hooks ->
   ?enable_thinking:bool ->
-  ?compact_ratio:float ->
   ?provider_config_transform:
     (Llm_provider.Provider_config.t ->
     (Llm_provider.Provider_config.t, Agent_sdk.Error.sdk_error) result) ->

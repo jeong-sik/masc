@@ -511,10 +511,16 @@ let test_dispatch_keeper_phase_event_rejection_increments_metric () =
           ~labels ()
         |> Option.value ~default:0.0
       in
-      KEC.dispatch_keeper_phase_event
-        ~config
-        ~keeper_name:"missing-keeper"
-        KST.Compaction_started;
+      (match
+         KEC.dispatch_keeper_phase_event_result
+           ~config
+           ~keeper_name:"missing-keeper"
+           KST.Compaction_started
+       with
+       | Error (KEC.Transition_rejected _) -> ()
+       | Error (KEC.Compaction_invariant_violation _) ->
+         fail "missing keeper must be a transition rejection"
+       | Ok () -> fail "missing keeper lifecycle dispatch unexpectedly succeeded");
       let after =
         Masc.Otel_metric_store.get_metric_value
           Keeper_metrics.(to_string LifecycleDispatchRejections)

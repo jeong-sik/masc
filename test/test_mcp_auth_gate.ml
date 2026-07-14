@@ -2,9 +2,9 @@
 
     These tests exercise the typed authentication requirement that is applied
     to every JSON-RPC method before its handler runs.  They deliberately
-    re-enable workspace authentication after {!Mcp_server_eio.create_state}
-    because [create_state ~test_mode:true] disables auth to keep the bulk of
-    existing handler tests lightweight.
+    re-enable workspace authentication after
+    {!Mcp_server_eio.For_testing.create_state} because that test-only
+    constructor explicitly disables auth to keep handler tests lightweight.
 *)
 
 open Alcotest
@@ -99,7 +99,7 @@ let has_result response =
 
 let setup_auth_workspace () =
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   ignore (Masc.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
   let raw_token =
     match Masc.Auth.create_token base_path ~agent_name:"test-agent" ~role:Masc_domain.Worker with

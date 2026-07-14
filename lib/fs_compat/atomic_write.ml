@@ -56,13 +56,474 @@ type publication_recovery_access = Recovery_access.t
 type publication_recovery_registry = Recovery_access.registry
 type publication_recovery_registry_error = Recovery.transition_error
 type publication_recovery_lane_open_error = Recovery_access.lane_open_error
+type publication_recovery_owner = Recovery_access.owner
+type publication_recovery_reconciliation_report =
+  Capability_recovery_reconciler.report
+
+type publication_recovery_owner_inventory_row =
+  | Publication_recovery_valid_owner of publication_recovery_owner
+  | Publication_recovery_invalid_owner_name of string
+  | Publication_recovery_unexpected_owner_kind of
+      { owner : publication_recovery_owner
+      ; kind : Eio.File.Stat.kind
+      }
+  | Publication_recovery_missing_owner_entry of publication_recovery_owner
+  | Publication_recovery_owner_entry_unavailable of
+      { owner : publication_recovery_owner
+      ; error : publication_recovery_registry_error
+      }
+
+type publication_recovery_owner_inventory_error =
+  | Publication_recovery_registry_inventory_in_progress
+  | Publication_recovery_registry_inventory_failed of
+      publication_recovery_registry_error
+
+type publication_recovery_owner_block =
+  | Publication_recovery_owner_inventory_block of
+      publication_recovery_owner_inventory_row
+  | Publication_recovery_owner_report_block of
+      publication_recovery_reconciliation_report
+  | Publication_recovery_owner_crash_block of
+      { owner : publication_recovery_owner
+      ; exception_ : exn
+      ; backtrace : Printexc.raw_backtrace
+      }
+  | Publication_recovery_owner_cancelled_block of
+      { owner : publication_recovery_owner
+      ; reason : exn
+      ; backtrace : Printexc.raw_backtrace
+      }
+  | Publication_recovery_owner_activation_rejected_block of
+      publication_recovery_owner
+
+type publication_recovery_reconciliation_error =
+  | Publication_recovery_owner_inventory_required of
+      publication_recovery_owner
+  | Publication_recovery_owner_inventory_in_progress of
+      publication_recovery_owner
+  | Publication_recovery_owner_not_in_inventory of
+      publication_recovery_owner
+  | Publication_recovery_owner_reconciliation_in_progress of
+      publication_recovery_owner
+  | Publication_recovery_owner_inventory_prevents_reconciliation of
+      publication_recovery_owner_inventory_row
+  | Publication_recovery_owner_reconciliation_crashed of
+      { owner : publication_recovery_owner
+      ; exception_ : exn
+      ; backtrace : Printexc.raw_backtrace
+      }
+  | Publication_recovery_owner_reconciliation_cancelled of
+      { owner : publication_recovery_owner
+      ; reason : exn
+      ; backtrace : Printexc.raw_backtrace
+      }
+  | Publication_recovery_owner_activation_rejected of
+      publication_recovery_owner
+
+type publication_recovery_activation_rejection_error =
+  | Publication_recovery_activation_inventory_required of
+      publication_recovery_owner
+  | Publication_recovery_activation_inventory_in_progress of
+      publication_recovery_owner
+  | Publication_recovery_activation_owner_not_in_inventory of
+      publication_recovery_owner
+  | Publication_recovery_activation_owner_reconciliation_running of
+      publication_recovery_owner
+  | Publication_recovery_activation_owner_already_ready of
+      publication_recovery_owner
+  | Publication_recovery_activation_owner_already_blocked of
+      publication_recovery_owner_block
+
+type publication_recovery_lane_reconciliation_error =
+  | Publication_recovery_reconciliation_required of
+      publication_recovery_owner
+  | Publication_recovery_reconciliation_in_progress of
+      publication_recovery_owner
+  | Publication_recovery_reconciliation_blocked of
+      publication_recovery_owner_block
+
+type publication_recovery_record_area =
+  | Publication_recovery_active
+  | Publication_recovery_owned
+  | Publication_recovery_forensic
+
+type publication_recovery_source_state =
+  | Publication_recovery_prepared_source
+  | Publication_recovery_bound_source
+
+type publication_recovery_prepared_outcome_kind =
+  | Publication_recovery_prepared_unmaterialized
+  | Publication_recovery_prepared_allowed_root_mismatch
+  | Publication_recovery_prepared_parent_mismatch
+  | Publication_recovery_prepared_unbound_stage_preserved
+
+type publication_recovery_bound_outcome_kind =
+  | Publication_recovery_bound_stage_absent
+  | Publication_recovery_bound_allowed_root_mismatch
+  | Publication_recovery_bound_parent_mismatch
+  | Publication_recovery_bound_stage_mismatch
+  | Publication_recovery_bound_stage_preserved
+
+type publication_recovery_reconciliation_row_kind =
+  | Publication_recovery_unexpected_lane_entry
+  | Publication_recovery_missing_lane_entry
+  | Publication_recovery_lane_entry_unavailable
+  | Publication_recovery_area_inventory_unavailable
+  | Publication_recovery_source_transition_capabilities_unavailable
+  | Publication_recovery_prepared_reconciled of
+      publication_recovery_prepared_outcome_kind
+  | Publication_recovery_bound_reconciled of
+      publication_recovery_bound_outcome_kind
+  | Publication_recovery_existing_forensic_record of
+      publication_recovery_source_state
+  | Publication_recovery_conflicting_source_records
+  | Publication_recovery_invalid_record_name
+  | Publication_recovery_unexpected_record_kind
+  | Publication_recovery_missing_record_entry
+  | Publication_recovery_record_entry_unavailable
+  | Publication_recovery_corrupt_record_preserved
+  | Publication_recovery_record_observation_failed
+  | Publication_recovery_record_transition_failed
+  | Publication_recovery_record_scope_release_failed
+  | Publication_recovery_owner_store_release_failed
+  | Publication_recovery_owner_store_unavailable
+  | Publication_recovery_owner_inventory_unavailable
 
 let open_publication_recovery_registry = Recovery_access.open_registry
 let publication_recovery_registry_error_to_string = Recovery.transition_error_to_string
+
+let project_owner_inventory_row = function
+  | Recovery_access.Valid_owner owner ->
+    Publication_recovery_valid_owner owner
+  | Recovery_access.Invalid_owner_name name ->
+    Publication_recovery_invalid_owner_name name
+  | Recovery_access.Unexpected_owner_kind { owner; kind } ->
+    Publication_recovery_unexpected_owner_kind { owner; kind }
+  | Recovery_access.Missing_owner_entry owner ->
+    Publication_recovery_missing_owner_entry owner
+  | Recovery_access.Owner_entry_unavailable { owner; error } ->
+    Publication_recovery_owner_entry_unavailable { owner; error }
+;;
+
+let inventory_publication_recovery_owners registry =
+  match Recovery_access.inventory_owners registry with
+  | Error Recovery_access.Registry_inventory_in_progress ->
+    Error Publication_recovery_registry_inventory_in_progress
+  | Error (Recovery_access.Registry_inventory_failed error) ->
+    Error (Publication_recovery_registry_inventory_failed error)
+  | Ok rows -> Ok (List.map project_owner_inventory_row rows)
+;;
+
+let publication_recovery_owner_to_string = Recovery_access.owner_to_string
+
+let project_owner_inventory_row_back = function
+  | Publication_recovery_valid_owner owner ->
+    Recovery_access.Valid_owner owner
+  | Publication_recovery_invalid_owner_name name ->
+    Recovery_access.Invalid_owner_name name
+  | Publication_recovery_unexpected_owner_kind { owner; kind } ->
+    Recovery_access.Unexpected_owner_kind { owner; kind }
+  | Publication_recovery_missing_owner_entry owner ->
+    Recovery_access.Missing_owner_entry owner
+  | Publication_recovery_owner_entry_unavailable { owner; error } ->
+    Recovery_access.Owner_entry_unavailable { owner; error }
+;;
+
+let project_owner_block = function
+  | Recovery_access.Owner_inventory_block row ->
+    Publication_recovery_owner_inventory_block
+      (project_owner_inventory_row row)
+  | Recovery_access.Owner_reconciliation_block report ->
+    Publication_recovery_owner_report_block report
+  | Recovery_access.Owner_reconciliation_crash
+      { owner; exception_; backtrace } ->
+    Publication_recovery_owner_crash_block
+      { owner; exception_; backtrace }
+  | Recovery_access.Owner_reconciliation_cancelled_block
+      { owner; reason; backtrace } ->
+    Publication_recovery_owner_cancelled_block
+      { owner; reason; backtrace }
+  | Recovery_access.Owner_activation_rejected_block owner ->
+    Publication_recovery_owner_activation_rejected_block owner
+;;
+
+let project_reconciliation_error = function
+  | Recovery_access.Owner_inventory_required owner ->
+    Publication_recovery_owner_inventory_required owner
+  | Recovery_access.Owner_inventory_in_progress owner ->
+    Publication_recovery_owner_inventory_in_progress owner
+  | Recovery_access.Owner_not_in_inventory owner ->
+    Publication_recovery_owner_not_in_inventory owner
+  | Recovery_access.Owner_reconciliation_in_progress owner ->
+    Publication_recovery_owner_reconciliation_in_progress owner
+  | Recovery_access.Owner_inventory_prevents_reconciliation row ->
+    Publication_recovery_owner_inventory_prevents_reconciliation
+      (project_owner_inventory_row row)
+  | Recovery_access.Owner_reconciliation_crashed
+      { owner; exception_; backtrace } ->
+    Publication_recovery_owner_reconciliation_crashed
+      { owner; exception_; backtrace }
+  | Recovery_access.Owner_reconciliation_cancelled
+      { owner; reason; backtrace } ->
+    Publication_recovery_owner_reconciliation_cancelled
+      { owner; reason; backtrace }
+  | Recovery_access.Owner_activation_rejected owner ->
+    Publication_recovery_owner_activation_rejected owner
+;;
+
+let project_activation_rejection_error = function
+  | Recovery_access.Activation_inventory_required owner ->
+    Publication_recovery_activation_inventory_required owner
+  | Recovery_access.Activation_inventory_in_progress owner ->
+    Publication_recovery_activation_inventory_in_progress owner
+  | Recovery_access.Activation_owner_not_in_inventory owner ->
+    Publication_recovery_activation_owner_not_in_inventory owner
+  | Recovery_access.Activation_owner_reconciliation_running owner ->
+    Publication_recovery_activation_owner_reconciliation_running owner
+  | Recovery_access.Activation_owner_already_ready owner ->
+    Publication_recovery_activation_owner_already_ready owner
+  | Recovery_access.Activation_owner_already_blocked block ->
+    Publication_recovery_activation_owner_already_blocked
+      (project_owner_block block)
+;;
+
+let reconcile_publication_recovery_owner ~fs ~registry ~owner =
+  match Recovery_access.reconcile_owner ~fs ~registry ~owner with
+  | Ok report -> Ok report
+  | Error error -> Error (project_reconciliation_error error)
+;;
+
+let reject_publication_recovery_owner_activation ~registry ~owner =
+  match Recovery_access.reject_owner_activation ~registry ~owner with
+  | Ok () -> Ok ()
+  | Error error -> Error (project_activation_rejection_error error)
+;;
+
+let publication_recovery_reconciliation_report_owner =
+  Capability_recovery_reconciler.report_owner
+;;
+
+let publication_recovery_reconciliation_report_is_ready =
+  Capability_recovery_reconciler.report_is_ready
+;;
+
+let publication_recovery_prepared_outcome_kind = function
+  | Capability_recovery_reconciler.Prepared_unmaterialized ->
+    Publication_recovery_prepared_unmaterialized
+  | Capability_recovery_reconciler.Prepared_allowed_root_mismatch _ ->
+    Publication_recovery_prepared_allowed_root_mismatch
+  | Capability_recovery_reconciler.Prepared_parent_mismatch _ ->
+    Publication_recovery_prepared_parent_mismatch
+  | Capability_recovery_reconciler.Prepared_unbound_stage_preserved _ ->
+    Publication_recovery_prepared_unbound_stage_preserved
+;;
+
+let publication_recovery_bound_outcome_kind = function
+  | Capability_recovery_reconciler.Bound_stage_absent _ ->
+    Publication_recovery_bound_stage_absent
+  | Capability_recovery_reconciler.Bound_allowed_root_mismatch _ ->
+    Publication_recovery_bound_allowed_root_mismatch
+  | Capability_recovery_reconciler.Bound_parent_mismatch _ ->
+    Publication_recovery_bound_parent_mismatch
+  | Capability_recovery_reconciler.Bound_stage_mismatch _ ->
+    Publication_recovery_bound_stage_mismatch
+  | Capability_recovery_reconciler.Bound_stage_preserved _ ->
+    Publication_recovery_bound_stage_preserved
+;;
+
+let publication_recovery_source_state = function
+  | Capability_recovery_reconciler.Prepared ->
+    Publication_recovery_prepared_source
+  | Capability_recovery_reconciler.Bound ->
+    Publication_recovery_bound_source
+;;
+
+let publication_recovery_reconciliation_row_kind = function
+  | Capability_recovery_reconciler.Unexpected_lane_entry _ ->
+    Publication_recovery_unexpected_lane_entry
+  | Capability_recovery_reconciler.Missing_lane_entry _ ->
+    Publication_recovery_missing_lane_entry
+  | Capability_recovery_reconciler.Lane_entry_unavailable _ ->
+    Publication_recovery_lane_entry_unavailable
+  | Capability_recovery_reconciler.Area_inventory_unavailable _ ->
+    Publication_recovery_area_inventory_unavailable
+  | Capability_recovery_reconciler.Source_transition_capabilities_unavailable _ ->
+    Publication_recovery_source_transition_capabilities_unavailable
+  | Capability_recovery_reconciler.Prepared_reconciled { outcome; _ } ->
+    Publication_recovery_prepared_reconciled
+      (publication_recovery_prepared_outcome_kind outcome)
+  | Capability_recovery_reconciler.Bound_reconciled { outcome; _ } ->
+    Publication_recovery_bound_reconciled
+      (publication_recovery_bound_outcome_kind outcome)
+  | Capability_recovery_reconciler.Existing_forensic_record
+      { source_state; _ } ->
+    Publication_recovery_existing_forensic_record
+      (publication_recovery_source_state source_state)
+  | Capability_recovery_reconciler.Conflicting_source_records _ ->
+    Publication_recovery_conflicting_source_records
+  | Capability_recovery_reconciler.Invalid_record_name _ ->
+    Publication_recovery_invalid_record_name
+  | Capability_recovery_reconciler.Unexpected_record_kind _ ->
+    Publication_recovery_unexpected_record_kind
+  | Capability_recovery_reconciler.Missing_record_entry _ ->
+    Publication_recovery_missing_record_entry
+  | Capability_recovery_reconciler.Record_entry_unavailable _ ->
+    Publication_recovery_record_entry_unavailable
+  | Capability_recovery_reconciler.Corrupt_record_preserved _ ->
+    Publication_recovery_corrupt_record_preserved
+  | Capability_recovery_reconciler.Record_observation_failed _ ->
+    Publication_recovery_record_observation_failed
+  | Capability_recovery_reconciler.Record_transition_failed _ ->
+    Publication_recovery_record_transition_failed
+  | Capability_recovery_reconciler.Record_scope_release_failed _ ->
+    Publication_recovery_record_scope_release_failed
+  | Capability_recovery_reconciler.Owner_store_release_failed _ ->
+    Publication_recovery_owner_store_release_failed
+  | Capability_recovery_reconciler.Owner_store_unavailable _ ->
+    Publication_recovery_owner_store_unavailable
+  | Capability_recovery_reconciler.Owner_inventory_unavailable _ ->
+    Publication_recovery_owner_inventory_unavailable
+;;
+
+let publication_recovery_reconciliation_report_row_kinds report =
+  report
+  |> Capability_recovery_reconciler.report_rows
+  |> List.map publication_recovery_reconciliation_row_kind
+;;
+
+let publication_recovery_reconciliation_report_to_string =
+  Capability_recovery_reconciler.report_to_string
+;;
+
+let publication_recovery_reconciliation_report_to_yojson =
+  Capability_recovery_reconciler.report_to_yojson
+;;
+
+let publication_recovery_owner_inventory_row_to_string row =
+  row
+  |> project_owner_inventory_row_back
+  |> Recovery_access.owner_inventory_row_to_string
+;;
+
+let publication_recovery_owner_inventory_error_to_string = function
+  | Publication_recovery_registry_inventory_in_progress ->
+    Recovery_access.inventory_error_to_string
+      Recovery_access.Registry_inventory_in_progress
+  | Publication_recovery_registry_inventory_failed error ->
+    Recovery_access.inventory_error_to_string
+      (Recovery_access.Registry_inventory_failed error)
+;;
+
+let publication_recovery_reconciliation_error_to_string error =
+  let internal =
+    match error with
+    | Publication_recovery_owner_inventory_required owner ->
+      Recovery_access.Owner_inventory_required owner
+    | Publication_recovery_owner_inventory_in_progress owner ->
+      Recovery_access.Owner_inventory_in_progress owner
+    | Publication_recovery_owner_not_in_inventory owner ->
+      Recovery_access.Owner_not_in_inventory owner
+    | Publication_recovery_owner_reconciliation_in_progress owner ->
+      Recovery_access.Owner_reconciliation_in_progress owner
+    | Publication_recovery_owner_inventory_prevents_reconciliation row ->
+      Recovery_access.Owner_inventory_prevents_reconciliation
+        (project_owner_inventory_row_back row)
+    | Publication_recovery_owner_reconciliation_crashed
+        { owner; exception_; backtrace } ->
+      Recovery_access.Owner_reconciliation_crashed
+        { owner; exception_; backtrace }
+    | Publication_recovery_owner_reconciliation_cancelled
+        { owner; reason; backtrace } ->
+      Recovery_access.Owner_reconciliation_cancelled
+        { owner; reason; backtrace }
+    | Publication_recovery_owner_activation_rejected owner ->
+      Recovery_access.Owner_activation_rejected owner
+  in
+  Recovery_access.reconciliation_error_to_string internal
+;;
+
+let publication_recovery_owner_block_to_string = function
+  | Publication_recovery_owner_inventory_block row ->
+    Recovery_access.owner_block_to_string
+      (Recovery_access.Owner_inventory_block
+         (project_owner_inventory_row_back row))
+  | Publication_recovery_owner_report_block report ->
+    Recovery_access.owner_block_to_string
+      (Recovery_access.Owner_reconciliation_block report)
+  | Publication_recovery_owner_crash_block
+      { owner; exception_; backtrace } ->
+    Recovery_access.owner_block_to_string
+      (Recovery_access.Owner_reconciliation_crash
+         { owner; exception_; backtrace })
+  | Publication_recovery_owner_cancelled_block
+      { owner; reason; backtrace } ->
+    Recovery_access.owner_block_to_string
+      (Recovery_access.Owner_reconciliation_cancelled_block
+         { owner; reason; backtrace })
+  | Publication_recovery_owner_activation_rejected_block owner ->
+    Recovery_access.owner_block_to_string
+      (Recovery_access.Owner_activation_rejected_block owner)
+;;
+
+let publication_recovery_activation_rejection_error_to_string = function
+  | Publication_recovery_activation_inventory_required owner ->
+    Recovery_access.activation_rejection_error_to_string
+      (Recovery_access.Activation_inventory_required owner)
+  | Publication_recovery_activation_inventory_in_progress owner ->
+    Recovery_access.activation_rejection_error_to_string
+      (Recovery_access.Activation_inventory_in_progress owner)
+  | Publication_recovery_activation_owner_not_in_inventory owner ->
+    Recovery_access.activation_rejection_error_to_string
+      (Recovery_access.Activation_owner_not_in_inventory owner)
+  | Publication_recovery_activation_owner_reconciliation_running owner ->
+    Recovery_access.activation_rejection_error_to_string
+      (Recovery_access.Activation_owner_reconciliation_running owner)
+  | Publication_recovery_activation_owner_already_ready owner ->
+    Recovery_access.activation_rejection_error_to_string
+      (Recovery_access.Activation_owner_already_ready owner)
+  | Publication_recovery_activation_owner_already_blocked block ->
+    let internal =
+      match block with
+      | Publication_recovery_owner_inventory_block row ->
+        Recovery_access.Owner_inventory_block
+          (project_owner_inventory_row_back row)
+      | Publication_recovery_owner_report_block report ->
+        Recovery_access.Owner_reconciliation_block report
+      | Publication_recovery_owner_crash_block
+          { owner; exception_; backtrace } ->
+        Recovery_access.Owner_reconciliation_crash
+          { owner; exception_; backtrace }
+      | Publication_recovery_owner_cancelled_block
+          { owner; reason; backtrace } ->
+        Recovery_access.Owner_reconciliation_cancelled_block
+          { owner; reason; backtrace }
+      | Publication_recovery_owner_activation_rejected_block owner ->
+        Recovery_access.Owner_activation_rejected_block owner
+    in
+    Recovery_access.activation_rejection_error_to_string
+      (Recovery_access.Activation_owner_already_blocked internal)
+;;
+
 let with_publication_recovery_lane = Recovery_access.with_lane
+
+let await_publication_recovery_lane_reconciliation =
+  Recovery_access.await_lane_reconciliation
+;;
 
 let publication_recovery_lane_open_error_to_string =
   Recovery_access.lane_open_error_to_string
+;;
+
+let publication_recovery_lane_reconciliation_error = function
+  | Recovery_access.Invalid_owner _ | Recovery_access.Store_failed _ -> None
+  | Recovery_access.Reconciliation_required owner ->
+    Some (Publication_recovery_reconciliation_required owner)
+  | Recovery_access.Reconciliation_in_progress owner ->
+    Some (Publication_recovery_reconciliation_in_progress owner)
+  | Recovery_access.Reconciliation_blocked block ->
+    Some
+      (Publication_recovery_reconciliation_blocked
+         (project_owner_block block))
 ;;
 
 let atomic_replace_recovery_target_error_to_string = function
@@ -219,6 +680,7 @@ type capability_recovery_effect =
 type recovery_failure_detail =
   | Recovery_transition_failed of Recovery.transition_error
   | Recovery_validation_failed of Recovery.validation_error
+  | Recovery_lane_admission_failed of Recovery_access.lane_open_error
   | Recovery_transition_interrupted of
       { reason : exn
       ; cleanup_failures : Recovery.failure list
@@ -252,6 +714,26 @@ type capability_directory_sync_error =
   { failure : capability_write_failure
   ; cleanup_failures : capability_write_failure list
   }
+
+type publication_recovery_fixture_error =
+  | Fixture_lane_open_failed of publication_recovery_lane_open_error
+  | Fixture_validation_failed of Recovery.validation_error
+  | Fixture_transition_failed of Recovery.transition_error
+  | Fixture_invalid_record_leaf of string
+  | Fixture_io_failed of
+      { exception_ : exn
+      ; backtrace : Printexc.raw_backtrace
+      }
+
+let publication_recovery_fixture_error_to_string = function
+  | Fixture_lane_open_failed error ->
+    publication_recovery_lane_open_error_to_string error
+  | Fixture_validation_failed error -> Recovery.validation_error_to_string error
+  | Fixture_transition_failed error -> Recovery.transition_error_to_string error
+  | Fixture_invalid_record_leaf value ->
+    Printf.sprintf "invalid recovery fixture record leaf %S" value
+  | Fixture_io_failed { exception_; _ } -> Printexc.to_string exception_
+;;
 
 type capability_write_cancellation =
   { operation : capability_write_operation
@@ -436,7 +918,9 @@ let capability_recovery_failure_to_string failure =
       Recovery.transition_error_to_string error
     | Recovery_validation_failed error ->
       Recovery.validation_error_to_string error
-  | Recovery_transition_interrupted { reason; cleanup_failures } ->
+    | Recovery_lane_admission_failed error ->
+      Recovery_access.lane_open_error_to_string error
+    | Recovery_transition_interrupted { reason; cleanup_failures } ->
       let cleanup =
         match cleanup_failures with
         | [] -> ""
@@ -458,7 +942,10 @@ let capability_recovery_failure_to_string failure =
     detail
 ;;
 
-let recovery_transition_failure recovery_phase error =
+let recovery_transition_failure
+      recovery_phase
+      (error : Recovery.transition_error)
+  =
   { recovery_phase
   ; recovery_effect = capability_recovery_effect_of_core error.Recovery.store_effect
   ; recovery_detail = Recovery_transition_failed error
@@ -469,6 +956,13 @@ let recovery_validation_failure recovery_phase error =
   { recovery_phase
   ; recovery_effect = Recovery_no_record_change
   ; recovery_detail = Recovery_validation_failed error
+  }
+;;
+
+let recovery_lane_admission_failure error =
+  { recovery_phase = Recovery_open_store
+  ; recovery_effect = Recovery_no_record_change
+  ; recovery_detail = Recovery_lane_admission_failed error
   }
 ;;
 
@@ -1437,6 +1931,7 @@ let replace_capability_file_with
          []
     in
     callback_result := Some result;
+    Eio.Fiber.check ();
     result
   with
   | Eio.Cancel.Cancelled (Capability_write_cancelled _) as cancellation ->
@@ -1619,6 +2114,7 @@ let create_capability_file_exclusive_with
          []
     in
     callback_result := Some result;
+    Eio.Fiber.check ();
     result
   with
   | Eio.Cancel.Cancelled (Capability_write_cancelled _) as cancellation ->
@@ -1689,25 +2185,75 @@ let create_capability_file_exclusive_with
          })
 ;;
 
-let replace_capability_file ~recovery ~parent ~target content =
-  match
-    Recovery_access.with_store recovery (fun recovery ->
-      replace_capability_file_with
-        ~before_stage:(fun _ -> ())
-        ~recovery
-        ~parent
-        ~target
-        content)
+let replace_capability_file_through_access
+      ~before_stage
+      ~recovery
+      ~parent
+      ~target
+      content
+  =
+  let operation = Atomic_replace_operation in
+  let callback_result = ref None in
+  try
+    match
+      Recovery_access.with_store recovery (fun recovery ->
+        let result =
+          replace_capability_file_with
+            ~before_stage
+            ~recovery
+            ~parent
+            ~target
+            content
+        in
+        callback_result := Some result;
+        Eio.Fiber.check ();
+        result)
+    with
+    | Ok result -> result
+    | Error Recovery_access.Keeper_lane_not_available ->
+      Error
+        { operation
+        ; target_effect = Target_unchanged
+        ; primary_failure =
+            Recovery_access_primary_failure Recovery_access_not_available
+        ; cleanup_failures = []
+        }
   with
-  | Ok result -> result
-  | Error Recovery_access.Keeper_lane_not_available ->
-    Error
-      { operation = Atomic_replace_operation
-      ; target_effect = Target_unchanged
-      ; primary_failure =
-          Recovery_access_primary_failure Recovery_access_not_available
-      ; cleanup_failures = []
-      }
+  | Eio.Cancel.Cancelled (Capability_write_cancelled _) as cancellation ->
+    raise cancellation
+  | Eio.Cancel.Cancelled reason as cancellation ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    (match !callback_result with
+     | None -> Printexc.raise_with_backtrace cancellation backtrace
+     | Some result ->
+       let target_effect, interrupted_primary_failure, cleanup_failures =
+         match result with
+         | Ok () -> Target_replaced, None, []
+         | Error error ->
+           ( error.target_effect
+           , Some error.primary_failure
+           , error.cleanup_failures )
+       in
+       Printexc.raise_with_backtrace
+         (Eio.Cancel.Cancelled
+            (Capability_write_cancelled
+               ( reason
+               , { operation
+                 ; target_effect
+                 ; interrupted_primary_failure
+                 ; interrupted_recovery = None
+                 ; cleanup_failures
+                 } )))
+         backtrace)
+;;
+
+let replace_capability_file ~recovery ~parent ~target content =
+  replace_capability_file_through_access
+    ~before_stage:(fun _ -> ())
+    ~recovery
+    ~parent
+    ~target
+    content
 ;;
 
 let create_capability_file_exclusive ~parent ~leaf ~permissions content =
@@ -1745,6 +2291,236 @@ let sync_directory_capability directory =
 ;;
 
 module Capability_write_for_testing = struct
+  type resource_scope_callback =
+    | Return_completed_rows of string list
+    | Cancel_callback of exn
+
+  type resource_scope_evidence =
+    | Returned_rows of
+        { completed_rows : string list
+        ; release_failure : exn option
+        }
+    | Cancelled_callback of
+        { reason : exn
+        ; release_failure : exn option
+        }
+    | Raised_callback of
+        { exception_ : exn
+        ; release_failure : exn option
+        }
+
+  type reconciliation_interruption =
+    | Cancel_reconciliation of exn
+    | Crash_reconciliation of exn
+
+  type cleanup_body =
+    | Return_cleanup_value of string
+    | Raise_cleanup_body of exn
+    | Cancel_cleanup_body of exn
+
+  type observed_cleanup_failure =
+    { exception_ : exn
+    ; backtrace : Printexc.raw_backtrace
+    }
+
+  type cleanup_evidence =
+    | Cleanup_returned of string
+    | Cleanup_failed_without_cancellation of
+        { body : observed_cleanup_failure option
+        ; cleanup : observed_cleanup_failure
+        }
+    | Cancellation_primary_with_cleanup_failure of
+        { body : observed_cleanup_failure option
+        ; cancellation : observed_cleanup_failure
+        ; cleanup : observed_cleanup_failure
+        }
+    | Body_failure_during_cancellation of
+        { body : observed_cleanup_failure
+        ; cancellation : observed_cleanup_failure
+        }
+    | Cancellation_primary of observed_cleanup_failure
+    | Cleanup_boundary_raised of observed_cleanup_failure
+
+  type single_borrow_evidence =
+    | Single_borrow_balance of
+        { during_borrow : int
+        ; after_release : int
+        ; close_completed : bool
+        }
+    | Single_borrow_rejected
+    | Single_borrow_invariant of invariant_violation
+    | Single_borrow_raised of observed_cleanup_failure
+
+  and invariant_violation =
+    | Borrow_count_underflow
+    | Borrow_count_overflow
+    | Closing_without_active_borrows
+    | Closed_with_active_borrows of int
+    | Closed_without_drain_signal
+    | Drain_signal_already_resolved
+    | Inventory_finished_outside_running
+    | Reconciliation_finished_before_inventory
+    | Reconciliation_owner_not_running of string
+    | Reconciliation_settled_twice of string
+    | Reconciliation_settled_before_terminal of string
+    | Cleanup_body_outcome_lost
+
+  type owner_settlement =
+    | Owner_untracked
+    | Owner_unsettled
+    | Owner_settled
+
+  let run_publication_recovery_resource_scope ~callback ~release_failure =
+    let callback =
+      match callback with
+      | Return_completed_rows rows ->
+        Capability_recovery_reconciler.For_testing.Return_completed_rows rows
+      | Cancel_callback reason ->
+        Capability_recovery_reconciler.For_testing.Cancel_callback reason
+    in
+    match
+      Capability_recovery_reconciler.For_testing.run_resource_scope
+        ~callback
+        ~release_failure
+    with
+    | Capability_recovery_reconciler.For_testing.Returned_rows
+        { completed_rows; release_failure } ->
+      Returned_rows { completed_rows; release_failure }
+    | Capability_recovery_reconciler.For_testing.Cancelled_callback
+        { reason; release_failure } ->
+      Cancelled_callback { reason; release_failure }
+    | Capability_recovery_reconciler.For_testing.Raised_callback
+        { exception_; release_failure } ->
+      Raised_callback { exception_; release_failure }
+  ;;
+
+  let interrupt_publication_recovery_reconciliation
+        ~fs
+        ~registry
+        ~owner
+        interruption
+    =
+    let interruption =
+      match interruption with
+      | Cancel_reconciliation reason ->
+        Recovery_access.For_testing.Cancel_reconciliation reason
+      | Crash_reconciliation exception_ ->
+        Recovery_access.For_testing.Crash_reconciliation exception_
+    in
+    match
+      Recovery_access.For_testing.interrupt_reconciliation
+        ~fs
+        ~registry
+        ~owner
+        interruption
+    with
+    | Ok report -> Ok report
+    | Error error -> Error (project_reconciliation_error error)
+  ;;
+
+  let observed_cleanup_failure
+        ({ Recovery_access.For_testing.exception_; backtrace } :
+          Recovery_access.For_testing.observed_failure)
+    =
+    { exception_; backtrace }
+  ;;
+
+  let run_publication_recovery_cleanup_boundary ~body ~cleanup_failure =
+    let body =
+      match body with
+      | Return_cleanup_value value ->
+        Recovery_access.For_testing.Return_cleanup_value value
+      | Raise_cleanup_body exception_ ->
+        Recovery_access.For_testing.Raise_cleanup_body exception_
+      | Cancel_cleanup_body reason ->
+        Recovery_access.For_testing.Cancel_cleanup_body reason
+    in
+    match
+      Recovery_access.For_testing.run_cleanup_boundary
+        ~body
+        ~cleanup_failure
+    with
+    | Recovery_access.For_testing.Cleanup_returned value ->
+      Cleanup_returned value
+    | Recovery_access.For_testing.Cleanup_failed_without_cancellation
+        { body; cleanup } ->
+      Cleanup_failed_without_cancellation
+        { body = Option.map observed_cleanup_failure body
+        ; cleanup = observed_cleanup_failure cleanup
+        }
+    | Recovery_access.For_testing.Cancellation_primary_with_cleanup_failure
+        { body; cancellation; cleanup } ->
+      Cancellation_primary_with_cleanup_failure
+        { body = Option.map observed_cleanup_failure body
+        ; cancellation = observed_cleanup_failure cancellation
+        ; cleanup = observed_cleanup_failure cleanup
+        }
+    | Recovery_access.For_testing.Body_failure_during_cancellation
+        { body; cancellation } ->
+      Body_failure_during_cancellation
+        { body = observed_cleanup_failure body
+        ; cancellation = observed_cleanup_failure cancellation
+        }
+    | Recovery_access.For_testing.Cancellation_primary failure ->
+      Cancellation_primary (observed_cleanup_failure failure)
+    | Recovery_access.For_testing.Cleanup_boundary_raised failure ->
+      Cleanup_boundary_raised (observed_cleanup_failure failure)
+  ;;
+
+  let project_invariant_violation = function
+    | Recovery_access.Borrow_count_underflow -> Borrow_count_underflow
+    | Recovery_access.Borrow_count_overflow -> Borrow_count_overflow
+    | Recovery_access.Closing_without_active_borrows ->
+      Closing_without_active_borrows
+    | Recovery_access.Closed_with_active_borrows count ->
+      Closed_with_active_borrows count
+    | Recovery_access.Closed_without_drain_signal ->
+      Closed_without_drain_signal
+    | Recovery_access.Drain_signal_already_resolved ->
+      Drain_signal_already_resolved
+    | Recovery_access.Inventory_finished_outside_running ->
+      Inventory_finished_outside_running
+    | Recovery_access.Reconciliation_finished_before_inventory ->
+      Reconciliation_finished_before_inventory
+    | Recovery_access.Reconciliation_owner_not_running owner ->
+      Reconciliation_owner_not_running owner
+    | Recovery_access.Reconciliation_settled_twice owner ->
+      Reconciliation_settled_twice owner
+    | Recovery_access.Reconciliation_settled_before_terminal owner ->
+      Reconciliation_settled_before_terminal owner
+    | Recovery_access.Cleanup_body_outcome_lost -> Cleanup_body_outcome_lost
+  ;;
+
+  let single_publication_recovery_borrow_balance ~registry ~owner =
+    match Recovery_access.For_testing.single_borrow_balance ~registry ~owner with
+    | Error error -> Error error
+    | Ok
+        (Recovery_access.For_testing.Single_borrow_balance
+          { during_borrow; after_release; close_completed }) ->
+      Ok
+        (Single_borrow_balance
+           { during_borrow; after_release; close_completed })
+    | Ok Recovery_access.For_testing.Single_borrow_rejected ->
+      Ok Single_borrow_rejected
+    | Ok (Recovery_access.For_testing.Single_borrow_invariant invariant) ->
+      Ok (Single_borrow_invariant (project_invariant_violation invariant))
+    | Ok (Recovery_access.For_testing.Single_borrow_raised failure) ->
+      Ok (Single_borrow_raised (observed_cleanup_failure failure))
+  ;;
+
+  let publication_recovery_owner_settlement ~registry ~owner =
+    match Recovery_access.For_testing.owner_settlement registry owner with
+    | Recovery_access.For_testing.Owner_untracked -> Owner_untracked
+    | Recovery_access.For_testing.Owner_unsettled -> Owner_unsettled
+    | Recovery_access.For_testing.Owner_settled -> Owner_settled
+  ;;
+
+  let publication_recovery_stage_name operation_id =
+    operation_id
+    |> Recovery.For_testing.operation_id_of_uuid
+    |> Recovery.stage_name
+  ;;
+
   let replace_capability_file
         ~before_stage
         ~recovery
@@ -1752,42 +2528,204 @@ module Capability_write_for_testing = struct
         ~target
         content
     =
-    match
-      Recovery_access.with_store recovery (fun recovery ->
-        replace_capability_file_with
-          ~before_stage
-          ~recovery
-          ~parent
-          ~target
-          content)
-    with
-    | Ok result -> result
-    | Error Recovery_access.Keeper_lane_not_available ->
-      Error
-        { operation = Atomic_replace_operation
-        ; target_effect = Target_unchanged
-        ; primary_failure =
-            Recovery_access_primary_failure Recovery_access_not_available
-        ; cleanup_failures = []
-        }
+    replace_capability_file_through_access
+      ~before_stage
+      ~recovery
+      ~parent
+      ~target
+      content
   ;;
 
   let create_capability_file_exclusive =
     create_capability_file_exclusive_with
   ;;
 
-  let with_publication_recovery_access ~registry_root ~owner f =
-    Eio.Switch.run @@ fun sw ->
-    match Recovery_access.open_registry ~sw ~registry_root with
-    | Error error ->
-      Error (recovery_transition_failure Recovery_open_registry error)
-    | Ok registry ->
-      (match Recovery_access.with_lane ~registry ~owner f with
-       | Ok value -> Ok value
-       | Error (Recovery_access.Invalid_owner error) ->
-         Error (recovery_validation_failure Recovery_validate_owner error)
-       | Error (Recovery_access.Store_failed error) ->
-         Error (recovery_transition_failure Recovery_open_store error))
+  let fixture_identity ~device ~inode =
+    match Recovery.identity ~dev:device ~ino:inode with
+    | Ok identity -> Ok identity
+    | Error error -> Error (Fixture_validation_failed error)
+  ;;
+
+  let fixture_locator
+        ~allowed_root_path
+        ~allowed_root
+        ~parent_components
+        ~parent
+        ~target_leaf
+    =
+    match
+      Recovery.locator
+        ~allowed_root_path
+        ~allowed_root
+        ~parent_components
+        ~parent
+        ~target_leaf
+        ~initial_target:Recovery.Absent
+    with
+    | Ok locator -> Ok locator
+    | Error error -> Error (Fixture_validation_failed error)
+  ;;
+
+  let fixture_permissions value =
+    match Recovery.permissions_of_int value with
+    | Ok permissions -> Ok permissions
+    | Error error -> Error (Fixture_validation_failed error)
+  ;;
+
+  let prepare_fixture
+        ~store
+        ~operation_id
+        ~allowed_root_path
+        ~allowed_root_device
+        ~allowed_root_inode
+        ~parent_components
+        ~parent_device
+        ~parent_inode
+        ~target_leaf
+        ~permissions
+    =
+    match
+      fixture_identity
+        ~device:allowed_root_device
+        ~inode:allowed_root_inode
+    with
+    | Error _ as error -> error
+    | Ok allowed_root ->
+      (match fixture_identity ~device:parent_device ~inode:parent_inode with
+       | Error _ as error -> error
+       | Ok parent ->
+         (match
+            fixture_locator
+              ~allowed_root_path
+              ~allowed_root
+              ~parent_components
+              ~parent
+              ~target_leaf
+          with
+          | Error _ as error -> error
+          | Ok locator ->
+            (match fixture_permissions permissions with
+             | Error _ as error -> error
+             | Ok permissions ->
+               (match
+                  Recovery.For_testing.prepare_with_operation_id
+                    ~store
+                    ~operation_id:
+                      (Recovery.For_testing.operation_id_of_uuid operation_id)
+                    ~locator
+                    ~permissions
+                with
+                | Ok prepared -> Ok prepared
+                | Error error -> Error (Fixture_transition_failed error)))))
+  ;;
+
+  let with_fixture_store ~registry ~owner f =
+    match Recovery_access.with_core_store_for_testing ~registry ~owner f with
+    | Ok result -> result
+    | Error error -> Error (Fixture_lane_open_failed error)
+  ;;
+
+  let seed_prepared_publication_recovery
+        ~registry
+        ~owner
+        ~operation_id
+        ~allowed_root_path
+        ~allowed_root_device
+        ~allowed_root_inode
+        ~parent_components
+        ~parent_device
+        ~parent_inode
+        ~target_leaf
+        ~permissions
+    =
+    with_fixture_store ~registry ~owner @@ fun store ->
+    match
+      prepare_fixture
+        ~store
+        ~operation_id
+        ~allowed_root_path
+        ~allowed_root_device
+        ~allowed_root_inode
+        ~parent_components
+        ~parent_device
+        ~parent_inode
+        ~target_leaf
+        ~permissions
+    with
+    | Ok _ -> Ok ()
+    | Error _ as error -> error
+  ;;
+
+  let seed_bound_publication_recovery
+        ~registry
+        ~owner
+        ~operation_id
+        ~allowed_root_path
+        ~allowed_root_device
+        ~allowed_root_inode
+        ~parent_components
+        ~parent_device
+        ~parent_inode
+        ~target_leaf
+        ~permissions
+        ~stage_device
+        ~stage_inode
+    =
+    with_fixture_store ~registry ~owner @@ fun store ->
+    match
+      prepare_fixture
+        ~store
+        ~operation_id
+        ~allowed_root_path
+        ~allowed_root_device
+        ~allowed_root_inode
+        ~parent_components
+        ~parent_device
+        ~parent_inode
+        ~target_leaf
+        ~permissions
+    with
+    | Error _ as error -> error
+    | Ok prepared ->
+      (match fixture_identity ~device:stage_device ~inode:stage_inode with
+       | Error _ as error -> error
+       | Ok stage_identity ->
+         (match Recovery.bind ~store ~prepared ~stage_identity with
+          | Ok _ -> Ok ()
+          | Error error -> Error (Fixture_transition_failed error)))
+  ;;
+
+  let fixture_core_area = function
+    | Publication_recovery_active -> Recovery.Active
+    | Publication_recovery_owned -> Recovery.Owned
+    | Publication_recovery_forensic -> Recovery.Forensic
+  ;;
+
+  let write_raw_publication_recovery_record
+        ~registry
+        ~owner
+        ~area
+        ~record_name
+        ~raw
+    =
+    match Capability_leaf.of_string record_name with
+    | None -> Error (Fixture_invalid_record_leaf record_name)
+    | Some _ ->
+      with_fixture_store ~registry ~owner @@ fun store ->
+      let directory =
+        Recovery.For_testing.area_directory store (fixture_core_area area)
+      in
+      (try
+         Eio.Path.save
+           ~create:(`Exclusive 0o600)
+           Eio.Path.(directory / record_name)
+           raw;
+         Ok ()
+       with
+       | Eio.Cancel.Cancelled _ as cancellation -> raise cancellation
+       | exception_ ->
+         let backtrace = Printexc.get_raw_backtrace () in
+         Error (Fixture_io_failed { exception_; backtrace }))
   ;;
 
   let sync_directory_capability = sync_directory_capability_with

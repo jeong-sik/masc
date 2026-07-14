@@ -102,6 +102,18 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
+let publication_recovery_registry env sw config =
+  let registry_root =
+    Eio.Path.(Eio.Stdenv.fs env / Workspace.masc_root_dir config)
+  in
+  match
+    Fs_compat.open_publication_recovery_registry ~sw ~registry_root
+  with
+  | Ok registry -> Some registry
+  | Error error ->
+    fail
+      (Fs_compat.publication_recovery_registry_error_to_string error)
+
 let make_meta name =
   let json = `Assoc [
     ("name", `String name);
@@ -552,6 +564,7 @@ let test_fresh_presence_preserves_turn_failures () =
           clock = Eio.Stdenv.clock env;
           proc_mgr = None;
           net = None;
+          publication_recovery_registry = None;
         }
       in
       let meta = make_meta "fresh-presence-turn-failure" in
@@ -653,6 +666,8 @@ let test_direct_start_keepalive_resolves_done_on_stop () =
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
           net = None;
+          publication_recovery_registry =
+            publication_recovery_registry env sw config;
         }
       in
       seed_keeper_sandbox_profile ~base_dir keeper_name;
@@ -692,6 +707,7 @@ let test_keeper_lane_join_waits_for_children_and_cleanup () =
      Lane.fork
        ~sw:parent_sw
        lane
+       ~with_run_scope:(fun run -> run ())
        ~run:(fun lane_sw ->
          Eio.Fiber.fork ~sw:lane_sw (fun () ->
            Eio.Promise.await release_p;
@@ -731,6 +747,7 @@ let test_keeper_lane_surfaces_cleanup_failure () =
      Lane.fork
        ~sw:parent_sw
        lane
+       ~with_run_scope:(fun run -> run ())
        ~run:(fun _lane_sw -> ())
        ~cleanup:(fun _outcome -> Error "cleanup evidence")
    with
@@ -789,6 +806,7 @@ let test_keeper_lane_cancel_is_lane_local_and_joinable () =
      Lane.fork
        ~sw:parent_sw
        lane
+       ~with_run_scope:(fun run -> run ())
        ~run:(fun _lane_sw -> Eio.Promise.await never_p)
        ~cleanup:(fun _outcome -> Ok ())
    with
@@ -1437,6 +1455,7 @@ let test_keeper_shutdown_prepare_joins_idle_lane () =
          Lane.fork
            ~sw:parent_sw
            entry.lane
+           ~with_run_scope:(fun run -> run ())
            ~run:(fun _lane_sw -> Eio.Promise.await never_p)
            ~cleanup:(fun _outcome ->
              (match R.dispatch_event_exact entry KSM.Stop_requested with
@@ -2417,6 +2436,7 @@ let test_start_keepalive_denies_dead_tombstone_before_registration () =
         ; clock = Eio.Stdenv.clock env
         ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
         ; net = None
+        ; publication_recovery_registry = None
         }
       in
       (match Masc.Keeper_keepalive.start_keepalive ctx meta with
@@ -2458,6 +2478,8 @@ let test_start_keepalive_preserves_unresolved_failing_entry () =
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
           net = None;
+          publication_recovery_registry =
+            publication_recovery_registry env sw config;
         }
       in
       seed_keeper_sandbox_profile ~base_dir keeper_name;
@@ -2504,6 +2526,8 @@ let test_start_keepalive_reclaims_finished_failing_entry () =
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
           net = None;
+          publication_recovery_registry =
+            publication_recovery_registry env sw config;
         }
       in
       seed_keeper_sandbox_profile ~base_dir keeper_name;

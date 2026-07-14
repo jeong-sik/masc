@@ -454,6 +454,14 @@ let resolve_managed_agent_call ?mcp_session_id params =
 let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
     ~broadcast_tools_list_changed ~sw ~clock ?(profile = Full) ?mcp_session_id
     ?auth_token ?(internal_keeper_runtime = false) state id params =
+  (* The active workspace is an admission fact for this call.  In particular,
+     [masc_start] may publish a new current scope while executing, but the
+     initiating call and every post-execution observation remain attributed to
+     this source scope. *)
+  let workspace_scope : Mcp_server.workspace_scope =
+    Mcp_server.workspace_scope state
+  in
+  let config = workspace_scope.config in
   let make_response = Mcp_transport_protocol.make_response in
   let (name, arguments) =
     match profile with
@@ -474,6 +482,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
       execute_tool_eio
         ~sw
         ~clock
+        ~workspace_scope
         ?profile:(Some profile)
         ?mcp_session_id
         ?auth_token
@@ -555,7 +564,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
       Some (Printf.sprintf "duration_ms=%d|detail=%s" duration_ms truncated)
   in
   let otel_trace_id = Otel_spans.current_trace_id () in
-  Audit_log.log_tool_call (Mcp_server.workspace_config state)
+  Audit_log.log_tool_call config
     ~agent_id:agent_name ~tool_name:name ~success ~error_msg:error_detail
     ?trace_id:otel_trace_id ();
   if not success then (
@@ -584,13 +593,18 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
       (Printf.sprintf "tool call failed: %s — %s" name
          (Option.value ~default:"(no detail)" error_detail)));
 
-  (* Classify call source: Keeper_internal if the resolved agent_name matches
-     a registered keeper (keeper-internal dispatch via cli_agent runtime),
-     otherwise External_mcp (true external MCP client).  Sound partial:
-     missing identity falls through to External_mcp.  Issue #8915. *)
+  (* Classify call source: Keeper_internal only when the resolved agent_name
+     matches a keeper in the admission workspace.  A process-global lookup
+     could select an identically named keeper from the newly current scope
+     after [masc_start], tearing tool-usage persistence from this call's
+     observation generation.  Missing identity falls through to External_mcp.
+     Issue #8915. *)
   let keeper_entry =
     if String.length agent_name = 0 then None
-    else Keeper_registry_lookup.find_by_agent_name agent_name
+    else
+      Keeper_registry.all ~base_path:config.base_path ()
+      |> List.find_opt (fun (entry : Keeper_registry.registry_entry) ->
+        String.equal entry.meta.agent_name agent_name)
   in
   let source : Tool_registry.call_source =
     match keeper_entry with
@@ -622,7 +636,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
   if telemetry_enabled then
     (match state.Mcp_server.fs with
      | Some fs ->
-         (try Telemetry_eio.track_tool_called ~fs (Mcp_server.workspace_config state)
+         (try Telemetry_eio.track_tool_called ~fs config
                 ~tool_name:name ~agent_id:agent_name ~success ~duration_ms
                 ~source:(Tool_registry.string_of_source source)
                 ?session_id:telemetry_session_id
@@ -699,7 +713,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
   (* Emit activity graph event for tool call — enables real-time dashboard tracking *)
   (try
     (* fire-and-forget: activity graph emission must not change the tool-call result. *)
-    ignore (Activity_graph.emit (Mcp_server.workspace_config state)
+    ignore (Activity_graph.emit config
       ~actor:(Activity_graph.entity ~kind:"agent" agent_name)
       ~subject:(Activity_graph.entity ~kind:"tool" name)
       ~kind:

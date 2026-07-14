@@ -101,7 +101,7 @@ let with_call_tool_state f =
     (fun () ->
       let config = Masc.Workspace.default_config base_path in
       ignore (Masc.Workspace.init config ~agent_name:(Some "projection-test"));
-      let state = Masc.Mcp_server_eio.create_state ~test_mode:true ~base_path () in
+      let state = Masc.Mcp_server_eio.For_testing.create_state ~base_path () in
       f env sw state)
 ;;
 
@@ -111,6 +111,7 @@ let call_with_result ~env ~sw state result =
       (fun
         ~sw:_
         ~clock:_
+        ~workspace_scope:_
         ?profile:_
         ?mcp_session_id:_
         ?auth_token:_
@@ -250,7 +251,7 @@ let test_handle_call_executes_transient_failure_once () =
     (fun () ->
       let config = Masc.Workspace.default_config base_path in
       ignore (Masc.Workspace.init config ~agent_name:(Some "single-call-test"));
-      let state = Masc.Mcp_server_eio.create_state ~test_mode:true ~base_path () in
+      let state = Masc.Mcp_server_eio.For_testing.create_state ~base_path () in
       let calls = ref 0 in
       let response =
         Masc.Mcp_server_eio_call_tool.handle_call_tool_eio
@@ -258,6 +259,7 @@ let test_handle_call_executes_transient_failure_once () =
             (fun
               ~sw:_
               ~clock:_
+              ~workspace_scope:_
               ?profile:_
               ?mcp_session_id:_
               ?auth_token:_
@@ -290,8 +292,92 @@ let test_handle_call_executes_transient_failure_once () =
         (response
          |> U.member "result"
          |> U.member "_meta"
-         |> U.member "attempts"
-         |> U.to_int))
+        |> U.member "attempts"
+        |> U.to_int))
+
+let test_call_captures_admission_scope_across_workspace_switch () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let root = temp_dir () in
+  let destination_workspace = Filename.concat root "destination-workspace" in
+  Unix.mkdir destination_workspace 0o755;
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir root)
+    (fun () ->
+      let source_config = Masc.Workspace.default_config root in
+      let destination_config =
+        { source_config with workspace_path = destination_workspace }
+      in
+      ignore
+        (Masc.Workspace.init
+           source_config
+           ~agent_name:(Some "scope-admission-test"));
+      let state =
+        Masc.Mcp_server_eio.For_testing.create_state ~base_path:root ()
+      in
+      let admission_scope = Masc.Mcp_server.workspace_scope state in
+      let executed_scope = ref None in
+      let response =
+        Masc.Mcp_server_eio_call_tool.handle_call_tool_eio
+          ~execute_tool_eio:
+            (fun
+              ~sw:_
+              ~clock:_
+              ~workspace_scope
+              ?profile:_
+              ?mcp_session_id:_
+              ?auth_token:_
+              ?internal_keeper_runtime:_
+              callback_state
+              ~name
+              ~arguments:_
+            ->
+              executed_scope := Some workspace_scope;
+              (match
+                 Masc.Mcp_server.set_workspace_config
+                   callback_state
+                   destination_config
+               with
+               | Ok () -> ()
+               | Error error ->
+                 fail
+                   (Masc.Mcp_server.workspace_switch_error_to_string error));
+              Tool_result.make_ok
+                ~tool_name:name
+                ~start_time:0.0
+                ~data:(`String "workspace switched")
+                ())
+          ~maybe_emit_resource_notifications:(fun ~success:_ ~tool_name:_ -> ())
+          ~broadcast_tools_list_changed:(fun () -> ())
+          ~sw
+          ~clock:(Eio.Stdenv.clock env)
+          state
+          (`Int 41)
+          (`Assoc
+            [ "name", `String "masc_status"
+            ; ( "arguments"
+              , `Assoc [ "_agent_name", `String "scope-admission-test" ] )
+            ])
+      in
+      check string "tool call succeeds" "ok"
+        (result_envelope response |> U.member "status" |> U.to_string);
+      let callback_scope =
+        match !executed_scope with
+        | Some scope -> scope
+        | None -> fail "execute callback did not receive workspace scope"
+      in
+      check bool "execute receives exact admission scope object" true
+        (callback_scope == admission_scope);
+      check string "server process root stays fixed"
+        source_config.base_path
+        (Masc.Mcp_server.workspace_config state).base_path;
+      check string "server current workspace projection moved"
+        destination_workspace
+        (Masc.Mcp_server.workspace_config state).workspace_path)
+;;
 
 let test_activity_payload_sanitizes_invalid_utf8 () =
   let payload =
@@ -642,6 +728,8 @@ let () =
             test_typed_outcome_alone_controls_projection;
           test_case "transient failure executes once" `Quick
             test_handle_call_executes_transient_failure_once;
+          test_case "captures admission scope across workspace switch" `Quick
+            test_call_captures_admission_scope_across_workspace_switch;
           test_case "activity payload sanitizes invalid UTF-8" `Quick
             test_activity_payload_sanitizes_invalid_utf8;
           test_case "records MCP server operation duration metric" `Quick

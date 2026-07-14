@@ -23,6 +23,16 @@ let ensure_fs env =
      capability would leak a dead scheduler resource into later cases. *)
   Fs_compat.set_fs (Eio.Stdenv.fs env)
 
+let publication_recovery_registry env sw config =
+  let registry_root =
+    Eio.Path.(Eio.Stdenv.fs env / Workspace.masc_root_dir config)
+  in
+  match Fs_compat.open_publication_recovery_registry ~sw ~registry_root with
+  | Ok registry -> registry
+  | Error error ->
+    Alcotest.fail
+      (Fs_compat.publication_recovery_registry_error_to_string error)
+
 let cleanup_dir dir =
   let rec rm path =
     if Sys.file_exists path then
@@ -49,6 +59,8 @@ let operator_ctx ?mcp_session_id env sw config agent_name :
     clock = Eio.Stdenv.clock env;
     proc_mgr = Some (Eio.Stdenv.process_mgr env);
     net = Some (Eio.Stdenv.net env);
+    publication_recovery_registry =
+      Some (publication_recovery_registry env sw config);
     mcp_session_id;
   }
 

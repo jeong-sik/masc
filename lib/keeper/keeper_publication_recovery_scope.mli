@@ -41,7 +41,9 @@ val with_lane_scope :
   entry:Keeper_registry.registry_entry ->
   (unit -> 'a) ->
   'a
-(** [with_lane_scope] opens exactly [entry.name]'s lane store, publishes its
-    opaque access on the exact registry entry, runs [body], detaches the access,
-    and only then allows the store to close. Cancellation and a simultaneous
+(** [with_lane_scope] first awaits exactly [entry.name]'s one-shot
+    reconciliation settlement, then opens that lane store, publishes its opaque
+    access on the exact registry entry, runs [body], detaches the access, and
+    only then allows the store to close. It never waits on another owner, a
+    timeout, or a global activation barrier. Cancellation and a simultaneous
     detach invariant failure retain both causes. *)

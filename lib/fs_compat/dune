@@ -10,17 +10,21 @@
   owned_directory_chain
   capability_leaf
   capability_mutation_lease
+  eio_resource_scope
   capability_recovery_obligation
+  capability_recovery_reconciler
   publication_recovery_access
   atomic_write
   blocking_write
   fd_write_all
   atomic_orphan_size_class)
  (private_modules
+  eio_resource_scope
   capability_recovery_obligation
+  capability_recovery_reconciler
   publication_recovery_access
   atomic_write)
  ; RFC-0071 §3.4 Phase 5 ratchet (warning 4)
  (flags
   (:standard -w +4))
- (libraries eio eio.unix unix yojson optint uuidm))
+ (libraries eio eio.unix unix yojson optint uuidm digestif))

@@ -126,6 +126,7 @@ type subject =
   | Recovery_root
   | Lanes_root
   | Lane_root of owner
+  | Lane_entry of owner * string
   | Area of area * owner
   | Record of area * owner * operation_id
 
@@ -133,6 +134,7 @@ type operation =
   | Inspect_directory
   | Create_directory
   | Open_directory
+  | Close_directory
   | Sync_directory
   | Read_directory
   | Inspect_record
@@ -203,6 +205,18 @@ type transition_error =
   ; cleanup_failures : failure list
   }
 
+type callback_and_release_failure =
+  { store_effect : transition_effect
+  ; callback : Eio.Exn.with_bt
+  ; release : failure
+  }
+
+(** An unexpected callback exception and the exact resource-release failure
+    occurred at the same private scope. Neither cause is relabelled or
+    discarded. *)
+exception Resource_scope_callback_and_release_failed of
+  callback_and_release_failure
+
 (** Raised as the reason inside [Eio.Cancel.Cancelled] whenever cancellation is
     observed after a meaningful store effect, or when cancellation cleanup
     fails. The original reason, effect, and cleanup failures remain available. *)
@@ -270,12 +284,13 @@ val forensic_owner : forensic -> owner
 val forensic_operation_id : forensic -> operation_id
 
 (** Idempotently complete and pin the fixed registry prefix. Existing
-    components must be real 0700 directories; symbolic links and other kinds
-    are rejected. Every call repairs permissions and repeats both directory
-    and parent durability barriers, including for existing components. Retain
-    the returned registry for the process lifetime rather than reopening it on
-    the publication hot path. Only the final [lanes] capability is retained on
-    [sw]; the intermediate recovery-directory capability is short-scoped. *)
+    components must already be real 0700 directories; symbolic links, other
+    kinds, and wrong permissions are rejected without repair. Newly created
+    components are fchmodded after umask filtering. Every call repeats both
+    directory and parent durability barriers. Retain the returned registry for
+    the process lifetime rather than reopening it on the publication hot path.
+    Only the final [lanes] capability is retained on [sw]; the intermediate
+    recovery-directory capability is short-scoped. *)
 val open_registry
   :  sw:Eio.Switch.t
   -> registry_root:Eio.Fs.dir_ty Eio.Path.t
@@ -285,7 +300,7 @@ type owner_inventory_row =
   | Valid_owner of owner
   | Invalid_owner_name of string
   | Unexpected_owner_kind of
-      { name : string
+      { owner : owner
       ; kind : Eio.File.Stat.kind
       }
   | Missing_owner_entry of owner
@@ -322,6 +337,40 @@ val with_store
   -> owner:owner
   -> (store -> 'a)
   -> ('a, transition_error) result
+
+type resource_release_failure =
+  { failure : failure
+  ; exception_ : exn
+  ; backtrace : Printexc.raw_backtrace
+  }
+
+type 'a existing_store_scope_outcome =
+  | Existing_store_scope_released of 'a
+  | Existing_store_scope_release_failed of
+      { value : 'a
+      ; release_failure : resource_release_failure
+      }
+  | Existing_store_scope_cancelled of
+      { value : 'a option
+      ; reason : exn
+      ; backtrace : Printexc.raw_backtrace
+      ; release_failure : resource_release_failure option
+      }
+
+(** Pin an already-existing owner lane without creating, chmodding, syncing, or
+    otherwise repairing any registry entry. The lane and every area component
+    are observed without following symbolic links; opened capabilities are
+    checked against those exact observations. A lane failure returns [Error].
+    Each area failure is retained inside [store] so {!inventory} can report it
+    while continuing through the other areas. Startup reconciliation uses this
+    entry point so its only possible durable mutation is an explicit
+    source-record transition to an available, successfully inventoried
+    [forensic] area. *)
+val with_existing_store
+  :  registry:registry
+  -> owner:owner
+  -> (store -> 'a)
+  -> ('a existing_store_scope_outcome, transition_error) result
 
 val store_owner : store -> owner
 
@@ -422,6 +471,19 @@ type corrupt_record =
   }
 
 type inventory_row =
+  | Unexpected_lane_entry of
+      { name : string
+      ; kind : Eio.File.Stat.kind
+      }
+  | Missing_lane_entry of { name : string }
+  | Lane_entry_unavailable of
+      { name : string
+      ; error : transition_error
+      }
+  | Area_inventory_unavailable of
+      { area : area
+      ; error : transition_error
+      }
   | Active_record of prepared
   | Owned_record of bound
   | Forensic_record of forensic
@@ -447,13 +509,14 @@ type inventory_row =
 
 type inventory = inventory_row list
 
-(** Strict, non-recursive inventory of the three fixed lane stores. Invalid
-    names, non-regular entries, corrupt payloads, disappearance races, and
-    per-entry inspection/read failures are preserved as rows and enumeration
-    continues. Only failure to read an area directory itself returns [Error].
-    Each area's row order is the deterministic lexical order guaranteed by
-    [Eio.Path.read_dir]; the whole list is [Active], then [Owned], then
-    [Forensic]. *)
+(** Strict, non-recursive inventory of the exact owner lane and its three fixed
+    stores. Unexpected lane entries, unavailable areas, invalid record names,
+    non-regular records, corrupt payloads, disappearance races, and per-entry
+    inspection/read failures are preserved as rows. Failure in one area never
+    prevents inventory of the others. No entry is created, chmodded, synced,
+    removed, or otherwise repaired. Lane-residue rows retain lane lexical
+    order, followed by [Active], [Owned], and [Forensic] rows in each area's
+    lexical order. *)
 val inventory : store -> (inventory, transition_error) result
 
 module For_testing : sig
@@ -465,6 +528,8 @@ module For_testing : sig
     -> locator:locator
     -> permissions:permissions
     -> (prepared, transition_error) result
+
+  val area_directory : store -> area -> Eio.Fs.dir_ty Eio.Path.t
 end
 
 val validation_error_to_string : validation_error -> string

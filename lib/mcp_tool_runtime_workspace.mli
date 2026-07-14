@@ -35,10 +35,11 @@ val handle_start :
 
     {2 Three-step pipeline}
 
-    1. **Set project root**: validates the directory exists,
-       initialises {!Workspace} when not already initialised, and
-       atomically swaps the active workspace config via
-       {!Mcp_server.set_workspace_config}.
+    1. **Set workspace projection**: validates the directory exists and that
+       its exact MASC root equals the process-fixed runtime root, initialises
+       {!Workspace} when not already initialised, then atomically swaps the
+       workspace projection while reusing the one publication-recovery runtime
+       via {!Mcp_server.set_workspace_config}.
     2. **Bind agent session**: idempotent when already bound.
        Failure surfaces as a startup error.
     3. **Optional task creation**: when [task_title] non-empty,

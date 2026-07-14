@@ -613,7 +613,7 @@ let test_dashboard_query_cache_key_encodes_delimiter_values () =
 let test_operator_snapshot_default_route_exposes_provenance () =
   with_test_env @@ fun ~env ~sw ~config ->
   let state =
-    Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:config.base_path ()
+    Lib.Mcp_server_eio.For_testing.create_state ~base_path:config.base_path ()
   in
   let seed =
     `Assoc
@@ -659,7 +659,7 @@ let test_operator_snapshot_default_route_exposes_provenance () =
 let test_operator_digest_default_route_exposes_provenance () =
   with_test_env @@ fun ~env ~sw ~config ->
   let state =
-    Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:config.base_path ()
+    Lib.Mcp_server_eio.For_testing.create_state ~base_path:config.base_path ()
   in
   let seed =
     `Assoc
@@ -1000,7 +1000,7 @@ let test_execution_actor_for_request_canonicalizes_token_owner () =
 let test_dashboard_execution_force_refresh_bypasses_default_cache () =
   with_test_env @@ fun ~env ~sw ~config ->
   let state =
-    Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:config.base_path ()
+    Lib.Mcp_server_eio.For_testing.create_state ~base_path:config.base_path ()
   in
   let seed =
     `Assoc
@@ -1036,7 +1036,7 @@ let test_dashboard_execution_force_refresh_bypasses_default_cache () =
 let test_dashboard_execution_trust_default_route_uses_cached_surface () =
   with_test_env @@ fun ~env ~sw ~config ->
   let state =
-    Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:config.base_path ()
+    Lib.Mcp_server_eio.For_testing.create_state ~base_path:config.base_path ()
   in
   let seed =
     `Assoc
@@ -1595,7 +1595,7 @@ let test_telemetry_summary_snapshot_wire_falls_back_when_empty () =
    [test_dashboard_namespace_truth.ml] integration coverage. *)
 
 let test_project_snapshot_wire_returns_snapshot_when_populated () =
-  with_test_env @@ fun ~env ~sw ~config:_ ->
+  with_test_env @@ fun ~env ~sw ~config ->
   Dashboard_snapshot.reset_for_test ();
   let marker =
     `Assoc [ "namespace_truth_marker", `String "from-snapshot" ]
@@ -1605,7 +1605,9 @@ let test_project_snapshot_wire_returns_snapshot_when_populated () =
        ~shell:`Null ~tools:`Null
        ~namespace_truth:marker ~telemetry_summary:`Null ());
   let clock = Eio.Stdenv.clock env in
-  let state = Lib.Mcp_server.create_state ~base_path:"/tmp/rfc-0138-step3" in
+  let state =
+    Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path
+  in
   let req = request "/api/v1/dashboard/project-snapshot" in
   let timing = Server_timing.create () in
   let json =
@@ -1631,7 +1633,7 @@ let assoc_has key = function
 
 let test_dashboard_bootstrap_omits_eager_goal_tree () =
   with_test_env @@ fun ~env ~sw ~config ->
-  let state = Lib.Mcp_server.create_state ~base_path:config.base_path in
+  let state = Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path in
   let clock = Eio.Stdenv.clock env in
   let req = request "/api/v1/dashboard/bootstrap" in
   let json = Server_dashboard_http.dashboard_bootstrap_http_json ~state ~sw ~clock req in

@@ -1324,8 +1324,13 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
           try Yojson.Safe.from_string args_json
           with Yojson.Json_error _ -> `Assoc []
         in
+        let workspace_scope = Mcp_server.workspace_scope state in
         let result =
-          Mcp_server_eio_execute.execute_tool_eio ~sw ~clock state
+          Mcp_server_eio_execute.execute_tool_eio
+            ~sw
+            ~clock
+            ~workspace_scope
+            state
             ~name:tool_name ~arguments
         in
         let success = Tool_result.is_success result

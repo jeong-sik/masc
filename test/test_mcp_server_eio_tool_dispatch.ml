@@ -54,10 +54,15 @@ let test_execute_tool_help_tool () =
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   let raw_token = create_admin_token base_path in
   let result =
-    Mcp_eio.execute_tool_eio ~sw ~clock ~auth_token:raw_token state
+    Mcp_eio.execute_tool_eio
+      ~sw
+      ~clock
+      ~workspace_scope:(Mcp_server.workspace_scope state)
+      ~auth_token:raw_token
+      state
       ~name:"masc_tool_help"
       ~arguments:(`Assoc [ ("tool_name", `String "masc_status") ])
   in
@@ -93,11 +98,16 @@ let test_execute_tool_tag_dispatch_respects_pre_hooks () =
                  ; duration_ms = 0.0
                  })
           else Tool_dispatch.Pass);
-      let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+      let state = Mcp_eio.For_testing.create_state ~base_path () in
       let raw_token = create_admin_token base_path in
       let _workspace_path = Masc.Workspace.masc_dir (Mcp_server.workspace_config state) in
       let hook_result =
-        Mcp_eio.execute_tool_eio ~sw ~clock ~auth_token:raw_token state
+        Mcp_eio.execute_tool_eio
+          ~sw
+          ~clock
+          ~workspace_scope:(Mcp_server.workspace_scope state)
+          ~auth_token:raw_token
+          state
           ~name:"masc_tool_help"
           ~arguments:(`Assoc [ ("tool_name", `String "masc_status") ])
       in
@@ -121,7 +131,7 @@ let test_tool_metadata_does_not_gate_heartbeat () =
       Tool_catalog.register_metadata tool_name original_metadata;
       cleanup_dir base_path)
     (fun () ->
-      let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+      let state = Mcp_eio.For_testing.create_state ~base_path () in
       let config = Mcp_server.workspace_config state in
       let agent_name = "heartbeat-test-agent" in
       ignore (Masc.Workspace.init config ~agent_name:(Some agent_name));
@@ -152,6 +162,7 @@ let test_tool_metadata_does_not_gate_heartbeat () =
           (Mcp_eio.execute_tool_eio
              ~sw
              ~clock
+             ~workspace_scope:(Mcp_server.workspace_scope state)
              ~auth_token:raw_token
              state
              ~name:tool_name

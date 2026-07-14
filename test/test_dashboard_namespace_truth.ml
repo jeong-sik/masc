@@ -124,14 +124,17 @@ let expire_execution_warmup () =
   surface.last_attempt_unix <- Some stale_attempt_ts;
   surface.last_attempt_at <- Some "stale_attempt_for_test"
 
-let create_keeper env sw config name =
+let create_keeper env sw state name =
+  let workspace_scope = Lib.Mcp_server.workspace_scope state in
   let ctx : _ Lib.Keeper_tool_surface.context =
     {
-      config;
+      config = workspace_scope.config;
       agent_name = "tester";
       sw;
       clock = Eio.Stdenv.clock env;
       proc_mgr = Some (Eio.Stdenv.process_mgr env); net = None;
+      publication_recovery_registry =
+        (Mcp_server.workspace_scope_publication_recovery_registry workspace_scope);
     }
   in
   match
@@ -156,7 +159,7 @@ let test_dashboard_namespace_truth_empty_workspace () =
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
+      let state = Lib.Mcp_server_eio.For_testing.create_state ~base_path:dir () in
       Eio.Switch.run (fun sw ->
         warm_execution_cache ();
         let json =
@@ -222,7 +225,7 @@ let test_dashboard_namespace_truth_execution_fixture () =
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
+      let state = Lib.Mcp_server_eio.For_testing.create_state ~base_path:dir () in
       warm_execution_cache ();
       Eio.Switch.run (fun sw ->
         let json =
@@ -247,7 +250,7 @@ let test_dashboard_namespace_truth_empty_workspace_focus_label () =
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
+      let state = Lib.Mcp_server_eio.For_testing.create_state ~base_path:dir () in
       warm_execution_cache ();
       Eio.Switch.run (fun sw ->
         let json =
@@ -274,21 +277,31 @@ let test_dashboard_namespace_truth_keeper_only_workspace_not_reported_empty () =
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let module Mcp_server = Lib.Mcp_server in
-      let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
-      let config = (Mcp_server.workspace_config state) in
-      ignore (Lib.Workspace.init config ~agent_name:None);
-      ignore
-        (Lib.Workspace.bind_session config
-           ~agent_name:"keeper-sangsu-agent"
-           ~agent_type_override:(Some "keeper")
-           ~capabilities:["keeper"]
-           ());
       Eio.Switch.run (fun sw ->
+        Lib.Auth.disable_auth dir;
+        let state =
+          Lib.Mcp_server_eio.create_state_eio
+            ~sw
+            ~proc_mgr:(Eio.Stdenv.process_mgr env)
+            ~fs:(Eio.Stdenv.fs env)
+            ~clock:(Eio.Stdenv.clock env)
+            ~mono_clock:(Eio.Stdenv.mono_clock env)
+            ~net:(Eio.Stdenv.net env)
+            ~base_path:dir
+        in
+        let config = Mcp_server.workspace_config state in
+        ignore (Lib.Workspace.init config ~agent_name:None);
+        ignore
+          (Lib.Workspace.bind_session config
+             ~agent_name:"keeper-sangsu-agent"
+             ~agent_type_override:(Some "keeper")
+             ~capabilities:["keeper"]
+             ());
         Fun.protect
           ~finally:(fun () ->
             Lib.Keeper_keepalive.stop_keepalive "sangsu")
           (fun () ->
-            create_keeper env sw config "sangsu";
+            create_keeper env sw state "sangsu";
             warm_execution_cache ();
             let json =
               Server_dashboard_http.dashboard_namespace_truth_http_json
@@ -319,27 +332,37 @@ let test_dashboard_namespace_truth_mixed_runtime_counts () =
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let module Mcp_server = Lib.Mcp_server in
-      let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
-      let config = (Mcp_server.workspace_config state) in
-      ignore (Lib.Workspace.init config ~agent_name:None);
-      ignore
-        (Lib.Workspace.bind_session config
-           ~agent_name:"codex-test-agent"
-           ~agent_type_override:(Some "codex")
-           ~capabilities:["typescript"]
-           ());
-      ignore
-        (Lib.Workspace.bind_session config
-           ~agent_name:"keeper-sangsu-agent"
-           ~agent_type_override:(Some "keeper")
-           ~capabilities:["keeper"]
-           ());
       Eio.Switch.run (fun sw ->
+        Lib.Auth.disable_auth dir;
+        let state =
+          Lib.Mcp_server_eio.create_state_eio
+            ~sw
+            ~proc_mgr:(Eio.Stdenv.process_mgr env)
+            ~fs:(Eio.Stdenv.fs env)
+            ~clock:(Eio.Stdenv.clock env)
+            ~mono_clock:(Eio.Stdenv.mono_clock env)
+            ~net:(Eio.Stdenv.net env)
+            ~base_path:dir
+        in
+        let config = Mcp_server.workspace_config state in
+        ignore (Lib.Workspace.init config ~agent_name:None);
+        ignore
+          (Lib.Workspace.bind_session config
+             ~agent_name:"codex-test-agent"
+             ~agent_type_override:(Some "codex")
+             ~capabilities:["typescript"]
+             ());
+        ignore
+          (Lib.Workspace.bind_session config
+             ~agent_name:"keeper-sangsu-agent"
+             ~agent_type_override:(Some "keeper")
+             ~capabilities:["keeper"]
+             ());
         Fun.protect
           ~finally:(fun () ->
             Lib.Keeper_keepalive.stop_keepalive "sangsu")
           (fun () ->
-            create_keeper env sw config "sangsu";
+            create_keeper env sw state "sangsu";
             warm_execution_cache ();
             let json =
               Server_dashboard_http.dashboard_namespace_truth_http_json
@@ -366,7 +389,7 @@ let test_operator_pending_confirm_shape_matches_namespace_truth () =
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
+      let state = Lib.Mcp_server_eio.For_testing.create_state ~base_path:dir () in
       warm_execution_cache ();
       Eio.Switch.run (fun sw ->
         let json =
@@ -392,7 +415,7 @@ let test_namespace_truth_cached_snapshot_matches_http_projection_blocks () =
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
+      let state = Lib.Mcp_server_eio.For_testing.create_state ~base_path:dir () in
       warm_execution_cache ();
       Server_dashboard_http.warm_shell_cache state;
       Eio.Switch.run (fun sw ->
@@ -428,7 +451,7 @@ let test_dashboard_namespace_truth_warm_request_uses_stale_shell () =
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
+      let state = Lib.Mcp_server_eio.For_testing.create_state ~base_path:dir () in
       let config = Lib.Mcp_server.workspace_config state in
       warm_execution_cache ();
       let cached_shell =
@@ -490,7 +513,7 @@ let test_dashboard_namespace_truth_cold_cache_falls_back_to_partial_truth () =
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
+      let state = Lib.Mcp_server_eio.For_testing.create_state ~base_path:dir () in
       expire_execution_warmup ();
       Eio.Switch.run (fun sw ->
         let json =
@@ -520,7 +543,7 @@ let test_last_good_shell_fallback_preserves_counts () =
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
+      let state = Lib.Mcp_server_eio.For_testing.create_state ~base_path:dir () in
       ignore (Lib.Workspace.init (Lib.Mcp_server.workspace_config state) ~agent_name:None);
       warm_execution_cache ();
       (* Warm the shell cache so last_good_shell gets populated. *)

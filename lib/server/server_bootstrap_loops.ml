@@ -926,6 +926,7 @@ let () =
 
 let start_keeper_loops_owned
       ~claimed_persistence
+      ~workspace_scope
       ~sw
       ~clock
       ~net
@@ -952,7 +953,7 @@ let start_keeper_loops_owned
         Log.Server.error "subsystem %s crashed: %s" name (Printexc.to_string exn))
       f
   in
-  let config = claimed_persistence.claimed_config in
+  let config = workspace_scope.Mcp_server.config in
   (* [claimed_persistence] can only be constructed by the typed one-shot claim
      boundary before readiness publication. No late exception can turn an
      already-visible HTTP state into a degraded bootstrap. *)
@@ -1382,19 +1383,21 @@ let start_keeper_loops_owned
   let operator_judge_dispatch = make_judge_dispatch ~actor:"operator-judge" in
   fork_subsystem "operator_judge" (fun () ->
     let operator_judge_ctx : _ Operator_control.context =
-      { config = (Mcp_server.workspace_config state)
+      { config = workspace_scope.config
       ; agent_name = "operator-judge"
       ; sw
       ; clock
       ; proc_mgr = Some proc_mgr
       ; net = state.net
+      ; publication_recovery_registry =
+          (Mcp_server.workspace_scope_publication_recovery_registry workspace_scope)
       ; mcp_session_id = None
       }
     in
     Dashboard_operator_judge.start
       ~sw
       ~clock
-      ~config:(Mcp_server.workspace_config state)
+      ~config:workspace_scope.config
       ~masc_tools:judge_masc_tools
       ~dispatch:operator_judge_dispatch
       ~build_facts:(fun () ->
@@ -1422,7 +1425,6 @@ let start_keeper_loops_owned
       Log.Keeper.info "autoboot: lazy startup complete; keeper bootstrap will start last";
       (* Brief delay so other subsystems (SSE, board, orchestrator) settle first. *)
       Eio.Time.sleep clock Env_config_keeper.KeeperBootstrap.post_startup_settle_sec;
-      let config = claimed_persistence.claimed_config in
       let masc_root = Workspace.masc_root_dir config in
       let keeper_dir = Keeper_fs.keeper_dir config in
       let shutdown_blocked_names =
@@ -1450,7 +1452,8 @@ let start_keeper_loops_owned
         ; clock
         ; proc_mgr = Some proc_mgr
         ; net = state.net
-        ; publication_recovery_registry = state.publication_recovery_registry
+        ; publication_recovery_registry =
+            (Mcp_server.workspace_scope_publication_recovery_registry workspace_scope)
         }
       in
       Log.Keeper.info "autoboot: %d keeper(s) to boot" (List.length names);
@@ -1508,7 +1511,8 @@ let start_keeper_loops_owned
                 ; clock
                 ; proc_mgr = Some proc_mgr
                 ; net = state.net
-                ; publication_recovery_registry = state.publication_recovery_registry
+                ; publication_recovery_registry =
+                    (Mcp_server.workspace_scope_publication_recovery_registry workspace_scope)
                 }
               in
               let launch_outcome =
@@ -1894,7 +1898,8 @@ let start_keeper_loops
       ~proc_mgr
       (state : Mcp_server.server_state)
   =
-  let state_config = Mcp_server.workspace_config state in
+  let workspace_scope = Mcp_server.workspace_scope state in
+  let state_config = workspace_scope.config in
   (* Claim has already committed admission. Mask cancellation only across the
      second BasePath validation and [Claimed -> Starting] CAS so a cancelled
      startup cannot strand a claimed token. The long-running startup body is
@@ -1909,6 +1914,7 @@ let start_keeper_loops
       match
         start_keeper_loops_owned
           ~claimed_persistence
+          ~workspace_scope
           ~sw
           ~clock
           ~net

@@ -234,6 +234,137 @@ type publication_recovery_access
 type publication_recovery_registry
 type publication_recovery_registry_error
 type publication_recovery_lane_open_error
+type publication_recovery_owner
+type publication_recovery_reconciliation_report
+
+type publication_recovery_owner_inventory_row =
+  | Publication_recovery_valid_owner of publication_recovery_owner
+  | Publication_recovery_invalid_owner_name of string
+  | Publication_recovery_unexpected_owner_kind of
+      { owner : publication_recovery_owner
+      ; kind : Eio.File.Stat.kind
+      }
+  | Publication_recovery_missing_owner_entry of publication_recovery_owner
+  | Publication_recovery_owner_entry_unavailable of
+      { owner : publication_recovery_owner
+      ; error : publication_recovery_registry_error
+      }
+
+type publication_recovery_owner_inventory_error =
+  | Publication_recovery_registry_inventory_in_progress
+  | Publication_recovery_registry_inventory_failed of
+      publication_recovery_registry_error
+
+type publication_recovery_owner_block =
+  | Publication_recovery_owner_inventory_block of
+      publication_recovery_owner_inventory_row
+  | Publication_recovery_owner_report_block of
+      publication_recovery_reconciliation_report
+  | Publication_recovery_owner_crash_block of
+      { owner : publication_recovery_owner
+      ; exception_ : exn
+      ; backtrace : Printexc.raw_backtrace
+      }
+  | Publication_recovery_owner_cancelled_block of
+      { owner : publication_recovery_owner
+      ; reason : exn
+      ; backtrace : Printexc.raw_backtrace
+      }
+  | Publication_recovery_owner_activation_rejected_block of
+      publication_recovery_owner
+
+type publication_recovery_reconciliation_error =
+  | Publication_recovery_owner_inventory_required of
+      publication_recovery_owner
+  | Publication_recovery_owner_inventory_in_progress of
+      publication_recovery_owner
+  | Publication_recovery_owner_not_in_inventory of
+      publication_recovery_owner
+  | Publication_recovery_owner_reconciliation_in_progress of
+      publication_recovery_owner
+  | Publication_recovery_owner_inventory_prevents_reconciliation of
+      publication_recovery_owner_inventory_row
+  | Publication_recovery_owner_reconciliation_crashed of
+      { owner : publication_recovery_owner
+      ; exception_ : exn
+      ; backtrace : Printexc.raw_backtrace
+      }
+  | Publication_recovery_owner_reconciliation_cancelled of
+      { owner : publication_recovery_owner
+      ; reason : exn
+      ; backtrace : Printexc.raw_backtrace
+      }
+  | Publication_recovery_owner_activation_rejected of
+      publication_recovery_owner
+
+type publication_recovery_activation_rejection_error =
+  | Publication_recovery_activation_inventory_required of
+      publication_recovery_owner
+  | Publication_recovery_activation_inventory_in_progress of
+      publication_recovery_owner
+  | Publication_recovery_activation_owner_not_in_inventory of
+      publication_recovery_owner
+  | Publication_recovery_activation_owner_reconciliation_running of
+      publication_recovery_owner
+  | Publication_recovery_activation_owner_already_ready of
+      publication_recovery_owner
+  | Publication_recovery_activation_owner_already_blocked of
+      publication_recovery_owner_block
+
+type publication_recovery_lane_reconciliation_error =
+  | Publication_recovery_reconciliation_required of
+      publication_recovery_owner
+  | Publication_recovery_reconciliation_in_progress of
+      publication_recovery_owner
+  | Publication_recovery_reconciliation_blocked of
+      publication_recovery_owner_block
+
+type publication_recovery_record_area =
+  | Publication_recovery_active
+  | Publication_recovery_owned
+  | Publication_recovery_forensic
+
+type publication_recovery_source_state =
+  | Publication_recovery_prepared_source
+  | Publication_recovery_bound_source
+
+type publication_recovery_prepared_outcome_kind =
+  | Publication_recovery_prepared_unmaterialized
+  | Publication_recovery_prepared_allowed_root_mismatch
+  | Publication_recovery_prepared_parent_mismatch
+  | Publication_recovery_prepared_unbound_stage_preserved
+
+type publication_recovery_bound_outcome_kind =
+  | Publication_recovery_bound_stage_absent
+  | Publication_recovery_bound_allowed_root_mismatch
+  | Publication_recovery_bound_parent_mismatch
+  | Publication_recovery_bound_stage_mismatch
+  | Publication_recovery_bound_stage_preserved
+
+type publication_recovery_reconciliation_row_kind =
+  | Publication_recovery_unexpected_lane_entry
+  | Publication_recovery_missing_lane_entry
+  | Publication_recovery_lane_entry_unavailable
+  | Publication_recovery_area_inventory_unavailable
+  | Publication_recovery_source_transition_capabilities_unavailable
+  | Publication_recovery_prepared_reconciled of
+      publication_recovery_prepared_outcome_kind
+  | Publication_recovery_bound_reconciled of
+      publication_recovery_bound_outcome_kind
+  | Publication_recovery_existing_forensic_record of
+      publication_recovery_source_state
+  | Publication_recovery_conflicting_source_records
+  | Publication_recovery_invalid_record_name
+  | Publication_recovery_unexpected_record_kind
+  | Publication_recovery_missing_record_entry
+  | Publication_recovery_record_entry_unavailable
+  | Publication_recovery_corrupt_record_preserved
+  | Publication_recovery_record_observation_failed
+  | Publication_recovery_record_transition_failed
+  | Publication_recovery_record_scope_release_failed
+  | Publication_recovery_owner_store_release_failed
+  | Publication_recovery_owner_store_unavailable
+  | Publication_recovery_owner_inventory_unavailable
 
 (** Open the process-lifetime publication recovery registry below a
     caller-owned MASC root capability. The registry remains valid for exactly
@@ -247,6 +378,75 @@ val publication_recovery_registry_error_to_string
   :  publication_recovery_registry_error
   -> string
 
+(** Inventory the exact lane registry. MASC must validate each valid opaque
+    owner's string through [Keeper_id.Keeper_name] before reconciliation. *)
+val inventory_publication_recovery_owners
+  :  publication_recovery_registry
+  -> ( publication_recovery_owner_inventory_row list
+       , publication_recovery_owner_inventory_error )
+       result
+
+val publication_recovery_owner_to_string
+  :  publication_recovery_owner
+  -> string
+
+(** Startup/report-only reconciliation of one caller-validated owner. The
+    target tree is never scanned or mutated. *)
+val reconcile_publication_recovery_owner
+  :  fs:Eio.Fs.dir_ty Eio.Path.t
+  -> registry:publication_recovery_registry
+  -> owner:publication_recovery_owner
+  -> ( publication_recovery_reconciliation_report
+       , publication_recovery_reconciliation_error )
+       result
+
+val reject_publication_recovery_owner_activation
+  :  registry:publication_recovery_registry
+  -> owner:publication_recovery_owner
+  -> (unit, publication_recovery_activation_rejection_error) result
+
+val publication_recovery_reconciliation_report_owner
+  :  publication_recovery_reconciliation_report
+  -> string
+
+val publication_recovery_reconciliation_report_is_ready
+  :  publication_recovery_reconciliation_report
+  -> bool
+
+val publication_recovery_reconciliation_report_row_kinds
+  :  publication_recovery_reconciliation_report
+  -> publication_recovery_reconciliation_row_kind list
+
+val publication_recovery_reconciliation_report_to_string
+  :  publication_recovery_reconciliation_report
+  -> string
+
+(** Constructor-directed structured report projection. Callers can observe row
+    identity and nested evidence without parsing diagnostic strings. *)
+val publication_recovery_reconciliation_report_to_yojson
+  :  publication_recovery_reconciliation_report
+  -> Yojson.Safe.t
+
+val publication_recovery_owner_inventory_row_to_string
+  :  publication_recovery_owner_inventory_row
+  -> string
+
+val publication_recovery_owner_inventory_error_to_string
+  :  publication_recovery_owner_inventory_error
+  -> string
+
+val publication_recovery_reconciliation_error_to_string
+  :  publication_recovery_reconciliation_error
+  -> string
+
+val publication_recovery_owner_block_to_string
+  :  publication_recovery_owner_block
+  -> string
+
+val publication_recovery_activation_rejection_error_to_string
+  :  publication_recovery_activation_rejection_error
+  -> string
+
 (** Pin one Keeper-owned publication recovery lane for the whole callback.
     Publications borrow its store through the opaque access value. Closing
     rejects new borrows and drains every already-started borrow without a
@@ -257,9 +457,20 @@ val with_publication_recovery_lane
   -> (publication_recovery_access -> 'a)
   -> ('a, publication_recovery_lane_open_error) result
 
+(** Await only the exact owner's reconciliation settlement. There is no
+    timeout, polling, retry, or global activation barrier. *)
+val await_publication_recovery_lane_reconciliation
+  :  registry:publication_recovery_registry
+  -> owner:string
+  -> (unit, publication_recovery_lane_open_error) result
+
 val publication_recovery_lane_open_error_to_string
   :  publication_recovery_lane_open_error
   -> string
+
+val publication_recovery_lane_reconciliation_error
+  :  publication_recovery_lane_open_error
+  -> publication_recovery_lane_reconciliation_error option
 
 (** Build the immutable recovery locator projection used by
     {!replace_capability_file}. *)
@@ -424,6 +635,12 @@ type capability_directory_sync_error =
   ; cleanup_failures : capability_write_failure list
   }
 
+type publication_recovery_fixture_error
+
+val publication_recovery_fixture_error_to_string
+  :  publication_recovery_fixture_error
+  -> string
+
 type capability_write_cancellation =
   { operation : capability_write_operation
   ; target_effect : capability_write_target_effect
@@ -473,6 +690,116 @@ val capability_directory_sync_error_to_string
   -> string
 
 module Capability_write_for_testing : sig
+  type resource_scope_callback =
+    | Return_completed_rows of string list
+    | Cancel_callback of exn
+
+  type resource_scope_evidence =
+    | Returned_rows of
+        { completed_rows : string list
+        ; release_failure : exn option
+        }
+    | Cancelled_callback of
+        { reason : exn
+        ; release_failure : exn option
+        }
+    | Raised_callback of
+        { exception_ : exn
+        ; release_failure : exn option
+        }
+
+  type reconciliation_interruption =
+    | Cancel_reconciliation of exn
+    | Crash_reconciliation of exn
+
+  type cleanup_body =
+    | Return_cleanup_value of string
+    | Raise_cleanup_body of exn
+    | Cancel_cleanup_body of exn
+
+  type observed_cleanup_failure =
+    { exception_ : exn
+    ; backtrace : Printexc.raw_backtrace
+    }
+
+  type cleanup_evidence =
+    | Cleanup_returned of string
+    | Cleanup_failed_without_cancellation of
+        { body : observed_cleanup_failure option
+        ; cleanup : observed_cleanup_failure
+        }
+    | Cancellation_primary_with_cleanup_failure of
+        { body : observed_cleanup_failure option
+        ; cancellation : observed_cleanup_failure
+        ; cleanup : observed_cleanup_failure
+        }
+    | Body_failure_during_cancellation of
+        { body : observed_cleanup_failure
+        ; cancellation : observed_cleanup_failure
+        }
+    | Cancellation_primary of observed_cleanup_failure
+    | Cleanup_boundary_raised of observed_cleanup_failure
+
+  type single_borrow_evidence =
+    | Single_borrow_balance of
+        { during_borrow : int
+        ; after_release : int
+        ; close_completed : bool
+        }
+    | Single_borrow_rejected
+    | Single_borrow_invariant of invariant_violation
+    | Single_borrow_raised of observed_cleanup_failure
+
+  and invariant_violation =
+    | Borrow_count_underflow
+    | Borrow_count_overflow
+    | Closing_without_active_borrows
+    | Closed_with_active_borrows of int
+    | Closed_without_drain_signal
+    | Drain_signal_already_resolved
+    | Inventory_finished_outside_running
+    | Reconciliation_finished_before_inventory
+    | Reconciliation_owner_not_running of string
+    | Reconciliation_settled_twice of string
+    | Reconciliation_settled_before_terminal of string
+    | Cleanup_body_outcome_lost
+
+  type owner_settlement =
+    | Owner_untracked
+    | Owner_unsettled
+    | Owner_settled
+
+  val run_publication_recovery_resource_scope
+    :  callback:resource_scope_callback
+    -> release_failure:exn option
+    -> resource_scope_evidence
+
+  val interrupt_publication_recovery_reconciliation
+    :  fs:Eio.Fs.dir_ty Eio.Path.t
+    -> registry:publication_recovery_registry
+    -> owner:publication_recovery_owner
+    -> reconciliation_interruption
+    -> ( publication_recovery_reconciliation_report
+         , publication_recovery_reconciliation_error )
+         result
+
+  val run_publication_recovery_cleanup_boundary
+    :  body:cleanup_body
+    -> cleanup_failure:exn option
+    -> cleanup_evidence
+
+  val single_publication_recovery_borrow_balance
+    :  registry:publication_recovery_registry
+    -> owner:string
+    -> (single_borrow_evidence, publication_recovery_lane_open_error) result
+
+  val publication_recovery_owner_settlement
+    :  registry:publication_recovery_registry
+    -> owner:publication_recovery_owner
+    -> owner_settlement
+
+  val publication_recovery_stage_name : Uuidm.t -> string
+
   val replace_capability_file
     :  before_stage:(capability_write_stage -> unit)
     -> recovery:publication_recovery_access
@@ -489,11 +816,43 @@ module Capability_write_for_testing : sig
     -> string
     -> (unit, capability_write_error) result
 
-  val with_publication_recovery_access
-    :  registry_root:Eio.Fs.dir_ty Eio.Path.t
+  val seed_prepared_publication_recovery
+    :  registry:publication_recovery_registry
     -> owner:string
-    -> (publication_recovery_access -> 'a)
-    -> ('a, capability_recovery_failure) result
+    -> operation_id:Uuidm.t
+    -> allowed_root_path:string
+    -> allowed_root_device:int64
+    -> allowed_root_inode:int64
+    -> parent_components:string list
+    -> parent_device:int64
+    -> parent_inode:int64
+    -> target_leaf:string
+    -> permissions:int
+    -> (unit, publication_recovery_fixture_error) result
+
+  val seed_bound_publication_recovery
+    :  registry:publication_recovery_registry
+    -> owner:string
+    -> operation_id:Uuidm.t
+    -> allowed_root_path:string
+    -> allowed_root_device:int64
+    -> allowed_root_inode:int64
+    -> parent_components:string list
+    -> parent_device:int64
+    -> parent_inode:int64
+    -> target_leaf:string
+    -> permissions:int
+    -> stage_device:int64
+    -> stage_inode:int64
+    -> (unit, publication_recovery_fixture_error) result
+
+  val write_raw_publication_recovery_record
+    :  registry:publication_recovery_registry
+    -> owner:string
+    -> area:publication_recovery_record_area
+    -> record_name:string
+    -> raw:string
+    -> (unit, publication_recovery_fixture_error) result
 
   val sync_directory_capability
     :  before_stage:(capability_write_stage -> unit)

@@ -51,11 +51,6 @@ val not_in_registry_warn_state_step :
   float StringMap.t ->
   not_in_registry_warn_decision * float StringMap.t
 
-val status_tick_usage_json : unit -> Yojson.Safe.t
-(** Usage payload for heartbeat/status metrics rows.  Status ticks are not
-    LLM calls, so all per-turn token counters are explicit zeroes while
-    preserving the same cache-token field shape as turn snapshots. *)
-
 (** Test-only wrapper for the in-turn liveness pulse lifecycle. *)
 val with_in_turn_liveness_pulse_for_test :
   sw:Eio.Switch.t ->

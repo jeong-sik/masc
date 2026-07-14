@@ -85,6 +85,14 @@ type append_once_result =
   | Appended of { row_id : string }
   | Already_present of { row_id : string }
 
+(** Exact ownership of the accepted user transcript row. This provenance is
+    shared by direct and queued delivery, while lifecycle authority remains in
+    the owning request or queue store. *)
+type user_row_origin =
+  | Needs_append
+  | Already_persisted of { row_id : string }
+  | Already_persisted_upstream
+
 (** Authority class of the human (or agent) whose message opened a
     turn. Derived structurally from the arrival route, never from
     message content: the authenticated dashboard route is [Owner];

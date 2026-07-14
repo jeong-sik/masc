@@ -442,14 +442,15 @@ let run_keeper_msg_turn_admitted
            ~keeper_name:meta0.name
        with
        | Error failure -> publication_recovery_turn_error failure
-       | Ok { registry = publication_recovery_registry
+       | Ok { entry
+            ; registry = publication_recovery_registry
             ; access = publication_recovery_access
-            ; _
             } ->
+      let meta = entry.meta in
       (match
          Keeper_unified_turn_pre_dispatch.load_profile_defaults
            ~base_path:ctx.config.base_path
-           ~keeper_name:meta0.name
+           ~keeper_name:meta.name
        with
        | Error err -> tool_result_error (Agent_sdk.Error.to_string err)
        | Ok profile_defaults ->
@@ -462,14 +463,14 @@ let run_keeper_msg_turn_admitted
         Option.map
           (Keeper_vision_ingest.evict_blocks
              ~mode:Keeper_vision_ingest.Eager
-             ~policy:meta0.multimodal_policy
-             ~keeper_name:meta0.name)
+             ~policy:meta.multimodal_policy
+             ~keeper_name:meta.name)
           user_blocks
       in
       let turn_task_id = Printf.sprintf "keeper_turn_%s_%d"
         name (int_of_float (Time_compat.now () *. 1000.0)) in
-      let keeper_turn_id = meta0.runtime.usage.total_turns + 1 in
-      (* RFC-0233 §7: mint the turn's join key ONCE from the pre-turn meta0 —
+      let keeper_turn_id = meta.runtime.usage.total_turns + 1 in
+      (* RFC-0233 §7: mint the turn's join key ONCE from the exact admitted meta —
          the same (trace_id, total_turns + 1) snapshot the Turn_record writer
          stamps (keeper_agent_run.ml:250-251 receives this very meta via the
          run_turn call below). Threaded into reply_json; never re-derived at
@@ -479,12 +480,11 @@ let run_keeper_msg_turn_admitted
          (RFC §7.2 mint-once, thread down). *)
       let turn_ref =
         Ids.Turn_ref.make
-          ~trace_id:(Keeper_id.Trace_id.to_string meta0.runtime.trace_id)
+          ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
           ~absolute_turn:keeper_turn_id
       in
       let turn_tracker = Progress.start_tracking ~task_id:turn_task_id ~total_steps:5 () in
       Progress.Tracker.step turn_tracker ~message:"Preparing keeper turn configuration" ();
-      let meta = meta0 in
       match resolve_turn_runtime_id meta with
       | Error e ->
         Progress.stop_tracking turn_task_id;

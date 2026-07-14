@@ -163,10 +163,11 @@ let run_keeper_cycle
             error
       ; source_lease_disposition = Follow_failure_route
       }
-  | Ok { registry = publication_recovery_registry
+  | Ok { entry
+       ; registry = publication_recovery_registry
        ; access = publication_recovery_access
-       ; _
        } ->
+  let meta = entry.meta in
   (* Spec navigation: see specs/keeper-state-machine/KeeperTaskAcquisition.tla
      (Cycle 8/Tier B2, PR #11412).  Action mapping:
      SubmitTask=external producers, AssignTask=channel decision below,

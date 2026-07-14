@@ -775,8 +775,7 @@ let () =
     in
     let ctx_composition : Masc.Keeper_agent_prompt_metrics.ctx_composition_metrics =
       { actual_input_tokens = None
-      ; display_total_tokens = 0
-      ; estimated_known_tokens = 0
+      ; attributed_bytes = 0
       ; segments = []
       }
     in

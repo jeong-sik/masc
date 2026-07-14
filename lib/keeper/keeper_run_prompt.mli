@@ -50,7 +50,6 @@ val normalize_memory_fragment : string -> string
     local string deny-list. *)
 
 val estimate_input_tokens :
-  prompt_metrics:Keeper_agent_prompt_metrics.prompt_metrics ->
   system_prompt:string ->
   dynamic_context:string ->
   memory_context:string ->

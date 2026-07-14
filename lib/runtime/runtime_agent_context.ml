@@ -142,21 +142,6 @@ type config =
     (** Callback invoked when an OAS run finishes (success or failure).
         Forwarded to [Builder.with_on_run_complete]. Useful for emitting
         telemetry, flushing OTel spans, or finalizing receipts. *)
-  ; disclosure_level : Agent_sdk.Tool.disclosure_level option
-    (** Tool schema disclosure level forwarded to
-        [Builder.with_disclosure_level]. Controls whether full schemas
-        or minimal name+description indices are sent to the LLM.
-        [None] preserves the default (Full_schema). *)
-  ; disclosure_resolver
-      : (Agent_sdk.Types.tool_result list -> Agent_sdk.Tool.disclosure_level option) option
-    (** Per-turn resolver that adapts disclosure based on previous tool
-        results. Forwarded to [Builder.with_disclosure_resolver].
-        Overrides [disclosure_level] for the current turn when [Some]
-        is returned. *)
-  ; tool_selector : Agent_sdk.Tool_selector.strategy option
-    (** Tool selection strategy for large tool catalogs, forwarded to
-        [Builder.with_tool_selector]. When tool count exceeds ~15,
-        narrows candidates per turn before sending schemas to the LLM. *)
   ; checkpoint_sink : Agent_sdk.Agent.checkpoint_sink option
     (** Caller-owned turn-boundary checkpoint sink, forwarded to
         [Builder.with_checkpoint_sink]. Allows consumers to persist
@@ -213,9 +198,6 @@ let default_config
   ; top_k = provider_cfg.top_k
   ; min_p = provider_cfg.min_p
   ; on_run_complete = None
-  ; disclosure_level = None
-  ; disclosure_resolver = None
-  ; tool_selector = None
   ; checkpoint_sink = None
   }
 ;;
@@ -408,21 +390,6 @@ let builder_without_approval
     | None -> builder
   in
   let builder =
-    match config.disclosure_level with
-    | Some level -> Agent_sdk.Builder.with_disclosure_level level builder
-    | None -> builder
-  in
-  let builder =
-    match config.disclosure_resolver with
-    | Some resolver -> Agent_sdk.Builder.with_disclosure_resolver resolver builder
-    | None -> builder
-  in
-  let builder =
-    match config.tool_selector with
-    | Some strategy -> Agent_sdk.Builder.with_tool_selector strategy builder
-    | None -> builder
-  in
-  let builder =
     match config.checkpoint_sink with
     | Some sink -> Agent_sdk.Builder.with_checkpoint_sink sink builder
     | None -> builder
@@ -504,9 +471,6 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
         Agent_sdk.Hooks.Reject_without_callback
     ; summarizer = config.summarizer
     ; on_run_complete = config.on_run_complete
-    ; disclosure_level = config.disclosure_level
-    ; disclosure_resolver = config.disclosure_resolver
-    ; tool_selector = config.tool_selector
     }
   in
   { patched_checkpoint; agent_config; options }

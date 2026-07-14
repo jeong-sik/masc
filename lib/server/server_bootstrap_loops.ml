@@ -618,10 +618,9 @@ let prepare_keeper_persistence_owned ~base_path_identity ~set_phase ~config =
     ~started:request_started
     ~examined:
       (keeper_msg_recovery.lost
-       + keeper_msg_recovery.migrated
+       + keeper_msg_recovery.finalized
        + keeper_msg_recovery.cleaned
-       + keeper_msg_recovery.atomic_orphans_inspected
-       + keeper_msg_recovery.deferred
+       + keeper_msg_recovery.staging_files_inspected
        + keeper_msg_recovery.unreadable
        + keeper_msg_recovery.failed)
     ~failures:
@@ -630,21 +629,20 @@ let prepare_keeper_persistence_owned ~base_path_identity ~set_phase ~config =
        + List.length keeper_msg_recovery.store_errors);
   if
     keeper_msg_recovery.lost > 0
-    || keeper_msg_recovery.migrated > 0
+    || keeper_msg_recovery.finalized > 0
     || keeper_msg_recovery.cleaned > 0
-    || keeper_msg_recovery.atomic_orphans_inspected > 0
+    || keeper_msg_recovery.staging_files_inspected > 0
     || keeper_msg_recovery.unreadable > 0
     || keeper_msg_recovery.failed > 0
   then
     Log.Keeper.warn
-      "keeper_msg_async: recovery lost=%d migrated=%d cleaned=%d atomic_orphans_inspected=%d atomic_orphans_deleted=%d atomic_orphans_preserved=%d deferred=%d unreadable=%d failed=%d"
+      "keeper_msg_async: recovery lost=%d finalized=%d cleaned=%d staging_files_inspected=%d staging_files_deleted=%d staging_files_preserved=%d unreadable=%d failed=%d"
       keeper_msg_recovery.lost
-      keeper_msg_recovery.migrated
+      keeper_msg_recovery.finalized
       keeper_msg_recovery.cleaned
-      keeper_msg_recovery.atomic_orphans_inspected
-      keeper_msg_recovery.atomic_orphans_deleted
-      keeper_msg_recovery.atomic_orphans_preserved
-      keeper_msg_recovery.deferred
+      keeper_msg_recovery.staging_files_inspected
+      keeper_msg_recovery.staging_files_deleted
+      keeper_msg_recovery.staging_files_preserved
       keeper_msg_recovery.unreadable
       keeper_msg_recovery.failed;
   let prepared =

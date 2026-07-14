@@ -1229,7 +1229,6 @@ let rec mkdir_p path =
 type disk_record_location =
   | Active_record
   | Terminal_record
-  | Legacy_record
 
 let disk_record_path ~location ~base_path ~request_id =
   match location with
@@ -1237,11 +1236,9 @@ let disk_record_path ~location ~base_path ~request_id =
     Keeper_msg_async.For_testing.active_record_path ~base_path ~request_id
   | Terminal_record ->
     Keeper_msg_async.For_testing.terminal_record_path ~base_path ~request_id
-  | Legacy_record ->
-    Keeper_msg_async.For_testing.legacy_record_path ~base_path ~request_id
 ;;
 
-let write_disk_record ?(location = Legacy_record) ~base_path ~request_id content =
+let write_disk_record ?(location = Active_record) ~base_path ~request_id content =
   match disk_record_path ~location ~base_path ~request_id with
   | None -> Alcotest.fail "expected safe record path"
   | Some path ->
@@ -1283,14 +1280,14 @@ let require_record_path ~location ~base_path ~request_id =
   | None -> Alcotest.fail "expected safe partitioned request path"
 ;;
 
-let test_keeper_msg_async_migrates_legacy_terminal_destination_first () =
+let test_keeper_msg_async_finalizes_active_terminal_destination_first () =
   with_eio_env
   @@ fun _env ->
-  let base_path = temp_dir "keeper-msg-legacy-terminal-" in
+  let base_path = temp_dir "keeper-msg-active-terminal-" in
   Fun.protect
     ~finally:(fun () -> rm_rf base_path)
     (fun () ->
-       let request_id = "kmsg_legacy_done_0_0" in
+       let request_id = "kmsg_active_done_0_0" in
        write_request_record
          ~base_path
          ~request_id
@@ -1298,36 +1295,36 @@ let test_keeper_msg_async_migrates_legacy_terminal_destination_first () =
          ~status_fields:
            [ "completed_at", `Float 2.0
            ; "ok", `Bool true
-           ; "body", `String {|{"result":"legacy"}|}
+           ; "body", `String {|{"result":"active"}|}
            ]
          ();
        (match Keeper_msg_async.For_testing.load_record ~base_path ~request_id with
         | Keeper_msg_async.Found { status = Done { ok = true; _ }; _ } -> ()
-        | _ -> Alcotest.fail "legacy terminal row was not readable before migration");
+        | _ -> Alcotest.fail "active terminal row was not readable before recovery");
        let report =
          Keeper_msg_async.For_testing.recover_lost_disk_records ~base_path ()
        in
-       Alcotest.(check int) "one legacy terminal migrated" 1 report.migrated;
-       let legacy_path =
-         require_record_path ~location:Legacy_record ~base_path ~request_id
+       Alcotest.(check int) "one active terminal finalized" 1 report.finalized;
+       let active_path =
+         require_record_path ~location:Active_record ~base_path ~request_id
        in
        let terminal_path =
          require_record_path ~location:Terminal_record ~base_path ~request_id
        in
        Alcotest.(check bool) "terminal destination committed" true
          (Sys.file_exists terminal_path);
-       Alcotest.(check bool) "legacy source removed after commit" false
-         (Sys.file_exists legacy_path))
+       Alcotest.(check bool) "active source removed after commit" false
+         (Sys.file_exists active_path))
 ;;
 
-let test_keeper_msg_async_recovers_legacy_running_to_terminal_lost () =
+let test_keeper_msg_async_recovers_active_running_to_terminal_lost () =
   with_eio_env
   @@ fun _env ->
-  let base_path = temp_dir "keeper-msg-legacy-running-" in
+  let base_path = temp_dir "keeper-msg-active-running-" in
   Fun.protect
     ~finally:(fun () -> rm_rf base_path)
     (fun () ->
-       let request_id = "kmsg_legacy_running_0_0" in
+       let request_id = "kmsg_active_running_0_0" in
        write_request_record
          ~base_path
          ~request_id
@@ -1337,20 +1334,20 @@ let test_keeper_msg_async_recovers_legacy_running_to_terminal_lost () =
        let report =
          Keeper_msg_async.For_testing.recover_lost_disk_records ~base_path ()
        in
-       Alcotest.(check int) "one legacy in-flight row became lost" 1 report.lost;
-       let legacy_path =
-         require_record_path ~location:Legacy_record ~base_path ~request_id
+       Alcotest.(check int) "one active in-flight row became lost" 1 report.lost;
+       let active_path =
+         require_record_path ~location:Active_record ~base_path ~request_id
        in
        let terminal_path =
          require_record_path ~location:Terminal_record ~base_path ~request_id
        in
        Alcotest.(check bool) "lost terminal committed" true
          (Sys.file_exists terminal_path);
-       Alcotest.(check bool) "running legacy source removed" false
-         (Sys.file_exists legacy_path);
+       Alcotest.(check bool) "running active source removed" false
+         (Sys.file_exists active_path);
        match Keeper_msg_async.For_testing.load_record ~base_path ~request_id with
        | Keeper_msg_async.Found { status = Lost _; _ } -> ()
-       | _ -> Alcotest.fail "recovered legacy request did not decode as Lost")
+       | _ -> Alcotest.fail "recovered active request did not decode as Lost")
 ;;
 
 let test_keeper_msg_async_terminal_precedence_cleans_stale_active () =
@@ -1680,120 +1677,6 @@ let test_keeper_msg_async_preserves_mismatched_nonterminal_source_identity () =
          (Sys.file_exists active_path))
 ;;
 
-let test_keeper_msg_async_rejects_active_legacy_ambiguity_before_mutation () =
-  with_eio_env
-  @@ fun _env ->
-  let base_path = temp_dir "keeper-msg-active-legacy-conflict-" in
-  Fun.protect
-    ~finally:(fun () -> rm_rf base_path)
-    (fun () ->
-       let request_id = "kmsg_active_legacy_conflict_0_0" in
-       write_request_record
-         ~location:Active_record
-         ~keeper_name:"active-owner"
-         ~base_path
-         ~request_id
-         ~status:"running"
-         ~status_fields:[]
-         ();
-       write_request_record
-         ~location:Legacy_record
-         ~keeper_name:"legacy-owner"
-         ~base_path
-         ~request_id
-         ~status:"running"
-         ~status_fields:[]
-         ();
-       (match Keeper_msg_async.For_testing.load_record ~base_path ~request_id with
-        | Keeper_msg_async.Unreadable reason ->
-          Alcotest.(check bool)
-            "canonical lookup exposes source ambiguity"
-            true
-            (contains_substring ~needle:"identities" reason)
-        | _ -> Alcotest.fail "active silently won over conflicting legacy evidence");
-       let report =
-         Keeper_msg_async.For_testing.recover_lost_disk_records ~base_path ()
-       in
-       Alcotest.(check int) "both conflicting records are reported" 2 report.failed;
-       Alcotest.(check int)
-         "both conflicts retain typed evidence"
-         2
-         (List.length report.record_errors);
-       List.iter
-         (fun (error : Keeper_msg_async.recovery_record_error) ->
-            match error.kind with
-            | Keeper_msg_async.Recovery_source_ambiguity _ -> ()
-            | _ -> Alcotest.fail "source conflict lost its typed recovery kind")
-         report.record_errors;
-       let active_path =
-         require_record_path ~location:Active_record ~base_path ~request_id
-       in
-       let legacy_path =
-         require_record_path ~location:Legacy_record ~base_path ~request_id
-       in
-       let terminal_path =
-         require_record_path ~location:Terminal_record ~base_path ~request_id
-       in
-       Alcotest.(check bool) "active evidence is preserved" true
-         (Sys.file_exists active_path);
-       Alcotest.(check bool) "legacy evidence is preserved" true
-         (Sys.file_exists legacy_path);
-       Alcotest.(check bool) "no ambiguous terminal was created" false
-         (Sys.file_exists terminal_path))
-;;
-
-let test_keeper_msg_async_recovers_exact_active_legacy_duplicate_destination_first () =
-  with_eio_env
-  @@ fun _env ->
-  let base_path = temp_dir "keeper-msg-active-legacy-exact-" in
-  Fun.protect
-    ~finally:(fun () -> rm_rf base_path)
-    (fun () ->
-       let request_id = "kmsg_active_legacy_exact_0_0" in
-       let json =
-         request_record_json
-           ~keeper_name:"exact-owner"
-           ~base_path
-           ~request_id
-           ~status:"running"
-           ~status_fields:[]
-           ()
-         |> Yojson.Safe.to_string
-       in
-       write_disk_record
-         ~location:Active_record
-         ~base_path
-         ~request_id
-         json;
-       write_disk_record
-         ~location:Legacy_record
-         ~base_path
-         ~request_id
-         json;
-       let report =
-         Keeper_msg_async.For_testing.recover_lost_disk_records ~base_path ()
-       in
-       Alcotest.(check int) "canonical active transitions once" 1 report.lost;
-       Alcotest.(check int) "legacy duplicate cleans after destination" 1
-         report.cleaned;
-       Alcotest.(check int) "exact duplicate is not an error" 0 report.failed;
-       let active_path =
-         require_record_path ~location:Active_record ~base_path ~request_id
-       in
-       let legacy_path =
-         require_record_path ~location:Legacy_record ~base_path ~request_id
-       in
-       let terminal_path =
-         require_record_path ~location:Terminal_record ~base_path ~request_id
-       in
-       Alcotest.(check bool) "terminal destination exists" true
-         (Sys.file_exists terminal_path);
-       Alcotest.(check bool) "active source removed after destination" false
-         (Sys.file_exists active_path);
-       Alcotest.(check bool) "legacy source removed after destination" false
-         (Sys.file_exists legacy_path))
-;;
-
 let test_keeper_msg_async_reports_json_directory_as_record_error () =
   with_eio_env
   @@ fun _env ->
@@ -1870,144 +1753,50 @@ let test_keeper_msg_async_recovery_excludes_terminal_history () =
        let terminal_path =
          require_record_path ~location:Terminal_record ~base_path ~request_id
        in
-       let terminal_orphan =
+       let terminal_artifact =
          Filename.concat
            (Filename.dirname terminal_path)
-           ".keeper_atomic_terminal_history.tmp"
+           "unrelated-terminal-artifact"
        in
-       Fs_compat.save_file terminal_orphan "legacy terminal evidence";
+       Fs_compat.save_file terminal_artifact "terminal evidence";
        let report =
          Keeper_msg_async.For_testing.recover_lost_disk_records ~base_path ()
        in
        Alcotest.(check int) "terminal history is not scanned" 0
-         (report.lost + report.migrated + report.cleaned + report.unreadable + report.failed);
-       Alcotest.(check int) "terminal orphan inventory is not scanned" 0
-         (report.atomic_orphans_deleted + report.atomic_orphans_preserved);
+         (report.lost + report.finalized + report.cleaned + report.unreadable + report.failed);
+       Alcotest.(check int) "terminal staging inventory is not scanned" 0
+         (report.staging_files_deleted + report.staging_files_preserved);
        Alcotest.(check bool) "terminal history row is untouched" true
          (Sys.file_exists terminal_path);
-       Alcotest.(check bool) "legacy terminal orphan is deferred" true
-         (Sys.file_exists terminal_orphan))
+       Alcotest.(check bool) "terminal artifact is untouched" true
+         (Sys.file_exists terminal_artifact))
 ;;
 
-let test_keeper_msg_async_legacy_atomic_migration_is_versioned () =
+let test_keeper_msg_async_recovers_current_staging_files () =
   with_eio_env
   @@ fun _env ->
-  let base_path = temp_dir "keeper-msg-atomic-migration-" in
+  let base_path = temp_dir "keeper-msg-current-staging-" in
   Fun.protect
     ~finally:(fun () -> rm_rf base_path)
     (fun () ->
        let staging =
          Keeper_msg_async.For_testing.atomic_staging_dir ~base_path
        in
-       let request_root = Filename.dirname staging in
-       let active = Filename.concat request_root "active" in
-       let terminal = Filename.concat request_root "terminal" in
-       Fs_compat.mkdir_p active;
-       Fs_compat.mkdir_p terminal;
-       let empty = Filename.concat active ".keeper_atomic_empty.tmp" in
-       let evidence = Filename.concat terminal ".atomic_evidence.tmp" in
-       Fs_compat.save_file empty "";
-       Fs_compat.save_file evidence "terminal evidence";
-       let first = Keeper_msg_async.migrate_legacy_atomic_orphans ~base_path in
-       Alcotest.(check int) "legacy empty deleted" 1
-         first.atomic_orphans_deleted;
-       Alcotest.(check int) "legacy evidence preserved" 1
-         first.atomic_orphans_preserved;
-       Alcotest.(check int) "first migration succeeds" 0 first.failed;
-       let marker =
-         Keeper_msg_async.For_testing.legacy_atomic_migration_marker ~base_path
-       in
-       Alcotest.(check bool) "durable migration marker created" true
-         (Sys.file_exists marker);
-       let recovery =
+       Fs_compat.mkdir_p staging;
+       Fs_compat.save_file (Filename.concat staging ".atomic_empty.tmp") "";
+       Fs_compat.save_file
+         (Filename.concat staging ".atomic_evidence.tmp")
+         "unpublished v3 evidence";
+       let report =
          Keeper_msg_async.For_testing.recover_lost_disk_records ~base_path ()
        in
-       Alcotest.(check int)
-         "migration metadata is outside the legacy record namespace"
-         0
-         (recovery.unreadable + recovery.failed);
-       Alcotest.(check int)
-         "migration metadata creates no record or store errors"
-         0
-         (List.length recovery.record_errors + List.length recovery.store_errors);
-       let deferred = Filename.concat terminal ".atomic_after_marker.tmp" in
-       Fs_compat.save_file deferred "must not be enumerated again";
-       let second = Keeper_msg_async.migrate_legacy_atomic_orphans ~base_path in
-       Alcotest.(check int) "marked migration performs no cleanup" 0
-         (second.atomic_orphans_deleted + second.atomic_orphans_preserved);
-       Alcotest.(check int) "marked migration remains successful" 0 second.failed;
-       Alcotest.(check bool) "historical terminal is skipped after marker" true
-         (Sys.file_exists deferred))
-;;
-
-let test_keeper_msg_async_legacy_atomic_migration_retries_failure () =
-  with_eio_env
-  @@ fun _env ->
-  let base_path = temp_dir "keeper-msg-atomic-migration-retry-" in
-  Fun.protect
-    ~finally:(fun () -> rm_rf base_path)
-    (fun () ->
-       let staging =
-         Keeper_msg_async.For_testing.atomic_staging_dir ~base_path
-       in
-       let request_root = Filename.dirname staging in
-       let active = Filename.concat request_root "active" in
-       Fs_compat.mkdir_p active;
-       let orphan = Filename.concat active ".atomic_evidence.tmp" in
-       let recovery_blocker = Filename.concat active ".recovered" in
-       Fs_compat.save_file orphan "evidence";
-       Fs_compat.save_file recovery_blocker "occupied";
-       let first = Keeper_msg_async.migrate_legacy_atomic_orphans ~base_path in
-       Alcotest.(check bool) "cleanup failure is typed" true (first.failed > 0);
-       let marker =
-         Keeper_msg_async.For_testing.legacy_atomic_migration_marker ~base_path
-       in
-       Alcotest.(check bool) "failed migration has no marker" false
-         (Sys.file_exists marker);
-       Alcotest.(check bool) "failed migration retains source" true
-         (Sys.file_exists orphan);
-       Sys.remove recovery_blocker;
-       let second = Keeper_msg_async.migrate_legacy_atomic_orphans ~base_path in
-       Alcotest.(check int) "retry preserves evidence" 1
-         second.atomic_orphans_preserved;
-       Alcotest.(check int) "retry succeeds" 0 second.failed;
-       Alcotest.(check bool) "successful retry creates marker" true
-         (Sys.file_exists marker))
-;;
-
-let test_keeper_msg_async_legacy_atomic_migration_rejects_oversized_marker () =
-  with_eio_env
-  @@ fun _env ->
-  let base_path = temp_dir "keeper-msg-atomic-migration-marker-bound-" in
-  Fun.protect
-    ~finally:(fun () -> rm_rf base_path)
-    (fun () ->
-       let initial = Keeper_msg_async.migrate_legacy_atomic_orphans ~base_path in
-       Alcotest.(check int) "initial migration succeeds" 0 initial.failed;
-       let marker =
-         Keeper_msg_async.For_testing.legacy_atomic_migration_marker ~base_path
-       in
-       let canonical_marker = Fs_compat.load_file marker in
-       Fs_compat.save_file marker (canonical_marker ^ " ");
-       let active =
-         Keeper_msg_async.For_testing.atomic_staging_dir ~base_path
-         |> Filename.dirname
-         |> fun request_root -> Filename.concat request_root "active"
-       in
-       Fs_compat.mkdir_p active;
-       let orphan = Filename.concat active ".atomic_after_oversized_marker.tmp" in
-       Fs_compat.save_file orphan "";
-       let repaired = Keeper_msg_async.migrate_legacy_atomic_orphans ~base_path in
-       Alcotest.(check int)
-         "overlong marker cannot suppress cleanup"
-         1
-         repaired.atomic_orphans_deleted;
-       Alcotest.(check int) "marker repair succeeds" 0 repaired.failed;
-       Alcotest.(check bool) "orphan was cleaned" false (Sys.file_exists orphan);
-       Alcotest.(check string)
-         "marker is restored from the canonical SSOT"
-         canonical_marker
-         (Fs_compat.load_file marker))
+       Alcotest.(check int) "two current staging files inspected" 2
+         report.staging_files_inspected;
+       Alcotest.(check int) "empty staging file deleted" 1
+         report.staging_files_deleted;
+       Alcotest.(check int) "non-empty staging file preserved" 1
+         report.staging_files_preserved;
+       Alcotest.(check int) "staging recovery succeeds" 0 report.failed)
 ;;
 
 let test_keeper_msg_async_recovery_rejects_linked_request_root () =
@@ -2068,51 +1857,6 @@ let test_keeper_msg_async_recovery_rejects_linked_request_root () =
          "outside terminal source remains untouched"
          true
          (Sys.file_exists terminal_path))
-;;
-
-let test_keeper_msg_async_legacy_atomic_migration_rejects_symlink_ancestor () =
-  with_eio_env
-  @@ fun _env ->
-  let base_path = temp_dir "keeper-msg-atomic-migration-linked-base-" in
-  let outside = temp_dir "keeper-msg-atomic-migration-linked-outside-" in
-  Fun.protect
-    ~finally:(fun () ->
-      let linked_masc = Filename.concat base_path ".masc" in
-      (match Unix.lstat linked_masc with
-       | { Unix.st_kind = Unix.S_LNK; _ } -> Unix.unlink linked_masc
-       | _ -> ()
-       | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ());
-      rm_rf base_path;
-      rm_rf outside)
-    (fun () ->
-       let outside_initial =
-         Keeper_msg_async.migrate_legacy_atomic_orphans ~base_path:outside
-       in
-       Alcotest.(check int) "outside marker setup succeeds" 0 outside_initial.failed;
-       Unix.symlink
-         (Filename.concat outside ".masc")
-         (Filename.concat base_path ".masc");
-       let outside_active =
-         Keeper_msg_async.For_testing.atomic_staging_dir ~base_path:outside
-         |> Filename.dirname
-         |> fun request_root -> Filename.concat request_root "active"
-       in
-       Fs_compat.mkdir_p outside_active;
-       let outside_orphan =
-         Filename.concat outside_active ".atomic_after_linked_marker.tmp"
-       in
-       Fs_compat.save_file outside_orphan "must remain outside ownership root";
-       let report =
-         Keeper_msg_async.migrate_legacy_atomic_orphans ~base_path
-       in
-       Alcotest.(check bool)
-         "linked marker ancestor is a typed migration failure"
-         true
-         (report.failed > 0);
-       Alcotest.(check bool)
-         "outside orphan is never suppressed or mutated"
-         true
-         (Sys.file_exists outside_orphan))
 ;;
 
 let test_keeper_persistence_preparation_configures_queue_before_request_recovery () =
@@ -2490,16 +2234,16 @@ let test_keeper_persistence_claim_is_one_shot_for_process () =
        | Ok _ -> Alcotest.fail "second startup owner mutated claimed persistence")
 ;;
 
-let test_keeper_msg_async_loads_v2_done_without_typed_data () =
+let test_keeper_msg_async_rejects_v2_record_without_compatibility () =
   with_eio_env
   @@ fun _env ->
-  let base_path = temp_dir "keeper-msg-load-v2-" in
+  let base_path = temp_dir "keeper-msg-reject-v2-" in
   Fun.protect
     ~finally:(fun () -> rm_rf base_path)
     (fun () ->
-       let request_id = "kmsg_v2_done_0_0" in
-       let body = {|{"legacy":"opaque"}|} in
+       let request_id = "kmsg_unsupported_v2_0_0" in
        write_disk_record
+         ~location:Active_record
          ~base_path
          ~request_id
          (Yojson.Safe.to_string
@@ -2509,28 +2253,29 @@ let test_keeper_msg_async_loads_v2_done_without_typed_data () =
                 ; "keeper_name", `String "alpha"
                 ; "base_path", `String (Fs_compat.realpath base_path)
                 ; "submitted_by", `String caller
-                ; "status", `String "done"
+                ; "status", `String "running"
                 ; "submitted_at", `Float 1.0
-                ; "completed_at", `Float 2.0
-                ; "ok", `Bool true
-                ; "body", `String body
                 ]));
-       match Keeper_msg_async.poll ~base_path ~caller request_id with
-       | Keeper_msg_async.Found
-           ({ status = Done { ok = true; body = loaded; data = None }; _ } as entry) ->
-         Alcotest.(check string) "v2 body stays opaque" body loaded;
-         Alcotest.(check string)
-           "v2 poll projection stays a string"
-           body
-           Yojson.Safe.Util.(Keeper_msg_async.entry_to_json entry |> member "result" |> to_string)
-       | Keeper_msg_async.Found entry ->
-         Alcotest.failf
-           "expected recovered v2 done, got %s"
-           (Keeper_msg_async.status_to_string entry.status)
-       | Keeper_msg_async.Unreadable reason ->
-         Alcotest.failf "expected v2 compatibility, got unreadable: %s" reason
-       | Keeper_msg_async.Absent -> Alcotest.fail "expected v2 record"
-       | Keeper_msg_async.Rejected _ -> Alcotest.fail "expected v2 owner access")
+       (match Keeper_msg_async.poll ~base_path ~caller request_id with
+        | Keeper_msg_async.Unreadable reason ->
+          Alcotest.(check bool) "schema rejection is explicit" true
+            (String.length reason > 0)
+        | Keeper_msg_async.Found _ ->
+          Alcotest.fail "unsupported v2 record was decoded"
+        | Keeper_msg_async.Absent ->
+          Alcotest.fail "unsupported v2 evidence was hidden"
+        | Keeper_msg_async.Rejected _ ->
+          Alcotest.fail "unsupported persisted schema was classified as caller input");
+       let report =
+         Keeper_msg_async.For_testing.recover_lost_disk_records ~base_path ()
+       in
+       Alcotest.(check int) "unsupported v2 is reported unreadable" 1
+         report.unreadable;
+       let active_path =
+         require_record_path ~location:Active_record ~base_path ~request_id
+       in
+       Alcotest.(check bool) "unsupported v2 evidence is preserved" true
+         (Sys.file_exists active_path))
 ;;
 
 let test_keeper_msg_async_load_record_absent_id () =
@@ -2639,50 +2384,6 @@ let test_keeper_msg_async_load_record_unknown_status_is_unreadable () =
        | Keeper_msg_async.Found _ -> Alcotest.fail "expected unreadable, got found"
        | Keeper_msg_async.Absent -> Alcotest.fail "expected unreadable, got absent"
        | Keeper_msg_async.Rejected _ -> Alcotest.fail "expected unreadable, got rejected")
-;;
-
-let test_keeper_msg_async_rejects_ownerless_v1_record () =
-  with_eio_env
-  @@ fun _env ->
-  let base_path = temp_dir "keeper-msg-load-v1-" in
-  Fun.protect
-    ~finally:(fun () -> rm_rf base_path)
-    (fun () ->
-       let request_id = "kmsg_ownerless_v1_0_0" in
-       write_disk_record
-         ~base_path
-         ~request_id
-         (Yojson.Safe.to_string
-            (`Assoc
-                [ "schema_version", `Int 1
-                ; "request_id", `String request_id
-                ; "keeper_name", `String "alpha"
-                ; "base_path", `String (Fs_compat.realpath base_path)
-                ; "status", `String "queued"
-                ; "submitted_at", `Float 1.0
-                ]));
-       (match Keeper_msg_async.For_testing.load_record ~base_path ~request_id with
-        | Keeper_msg_async.Unreadable reason ->
-          Alcotest.(check bool)
-            "v1 hard cut is explicit"
-            true
-            (contains_substring
-               ~needle:"unsupported keeper_msg request schema_version=1"
-               reason)
-        | Keeper_msg_async.Found _ -> Alcotest.fail "ownerless v1 record must not load"
-        | Keeper_msg_async.Absent ->
-          Alcotest.fail "ownerless v1 record unexpectedly absent"
-        | Keeper_msg_async.Rejected _ -> Alcotest.fail "ownerless v1 is a schema error");
-       let report =
-         Keeper_msg_async.For_testing.recover_lost_disk_records ~base_path ()
-       in
-       Alcotest.(check int) "ownerless legacy row is reported unreadable" 1
-         report.unreadable;
-       let legacy_path =
-         require_record_path ~location:Legacy_record ~base_path ~request_id
-       in
-       Alcotest.(check bool) "ownerless evidence is preserved" true
-         (Sys.file_exists legacy_path))
 ;;
 
 let test_keeper_msg_async_rejects_filename_request_id_mismatch () =
@@ -2850,13 +2551,13 @@ let () =
             `Quick
             test_keeper_msg_async_terminal_record_is_durable_without_age_eviction
         ; test_case
-            "legacy terminal migrates destination first"
+            "active terminal finalizes destination first"
             `Quick
-            test_keeper_msg_async_migrates_legacy_terminal_destination_first
+            test_keeper_msg_async_finalizes_active_terminal_destination_first
         ; test_case
-            "legacy running recovers to terminal lost"
+            "active running recovers to terminal lost"
             `Quick
-            test_keeper_msg_async_recovers_legacy_running_to_terminal_lost
+            test_keeper_msg_async_recovers_active_running_to_terminal_lost
         ; test_case
             "terminal precedence cleans stale active"
             `Quick
@@ -2882,14 +2583,6 @@ let () =
             `Quick
             test_keeper_msg_async_integrity_ambiguity_projects_exact_poll_error
         ; test_case
-            "active legacy ambiguity is rejected before mutation"
-            `Quick
-            test_keeper_msg_async_rejects_active_legacy_ambiguity_before_mutation
-        ; test_case
-            "exact active legacy duplicate migrates destination first"
-            `Quick
-            test_keeper_msg_async_recovers_exact_active_legacy_duplicate_destination_first
-        ; test_case
             "json directory is a typed record error"
             `Quick
             test_keeper_msg_async_reports_json_directory_as_record_error
@@ -2902,21 +2595,9 @@ let () =
             `Quick
             test_keeper_msg_async_recovery_excludes_terminal_history
         ; test_case
-            "legacy atomic migration is versioned"
+            "current staging files recover without legacy scan"
             `Quick
-            test_keeper_msg_async_legacy_atomic_migration_is_versioned
-        ; test_case
-            "legacy atomic migration retries typed failure"
-            `Quick
-            test_keeper_msg_async_legacy_atomic_migration_retries_failure
-        ; test_case
-            "legacy atomic migration bounds and repairs its marker"
-            `Quick
-            test_keeper_msg_async_legacy_atomic_migration_rejects_oversized_marker
-        ; test_case
-            "legacy atomic migration rejects a linked marker ancestor"
-            `Quick
-            test_keeper_msg_async_legacy_atomic_migration_rejects_symlink_ancestor
+            test_keeper_msg_async_recovers_current_staging_files
         ; test_case
             "request recovery rejects a linked store root"
             `Quick
@@ -2954,9 +2635,9 @@ let () =
             `Quick
             test_keeper_msg_async_load_record_absent_id
         ; test_case
-            "v2 terminal record preserves opaque body"
+            "v2 request record is rejected without compatibility"
             `Quick
-            test_keeper_msg_async_loads_v2_done_without_typed_data
+            test_keeper_msg_async_rejects_v2_record_without_compatibility
         ; test_case
             "load_record corrupt JSON is Unreadable"
             `Quick
@@ -2969,10 +2650,6 @@ let () =
             "load_record unknown status is Unreadable"
             `Quick
             test_keeper_msg_async_load_record_unknown_status_is_unreadable
-        ; test_case
-            "ownerless v1 record is rejected"
-            `Quick
-            test_keeper_msg_async_rejects_ownerless_v1_record
         ; test_case
             "filename request id mismatch is rejected"
             `Quick

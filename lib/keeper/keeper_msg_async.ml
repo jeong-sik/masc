@@ -67,12 +67,11 @@ type load_result =
 
 type recovery_report =
   { lost : int
-  ; migrated : int
+  ; finalized : int
   ; cleaned : int
-  ; atomic_orphans_inspected : int
-  ; atomic_orphans_deleted : int
-  ; atomic_orphans_preserved : int
-  ; deferred : int
+  ; staging_files_inspected : int
+  ; staging_files_deleted : int
+  ; staging_files_preserved : int
   ; unreadable : int
   ; failed : int
   ; store_errors : recovery_store_error list
@@ -81,8 +80,7 @@ type recovery_report =
 
 and recovery_store =
   | Active_store
-  | Legacy_store
-  | Atomic_orphan_store
+  | Atomic_staging_store
 
 and recovery_store_error =
   { store : recovery_store
@@ -103,7 +101,6 @@ and recovery_record_error_kind =
   | Recovery_record_missing
   | Recovery_record_not_file
   | Recovery_record_rejected of access_rejection
-  | Recovery_source_ambiguity of string
   | Recovery_terminal_integrity of string
   | Recovery_persistence_failed of string
   | Recovery_source_cleanup_failed
@@ -491,7 +488,6 @@ exception CancelledByOperator
 exception Worker_preempted of string
 exception Worker_already_settled of request_status
 let record_schema_version = 3
-let supported_record_schema_versions = [ 2; record_schema_version ]
 
 let server_background_switch () =
   match Eio_context.get_root_switch_opt () with
@@ -509,36 +505,7 @@ let request_dir ~base_path =
 let active_request_dir ~base_path = Filename.concat (request_dir ~base_path) "active"
 let terminal_request_dir ~base_path = Filename.concat (request_dir ~base_path) "terminal"
 let atomic_staging_dir ~base_path =
-  Filename.concat (request_dir ~base_path) ".atomic-staging-v1"
-;;
-
-let legacy_atomic_migration_marker ~base_path =
-  Filename.concat
-    (atomic_staging_dir ~base_path)
-    "legacy-atomic-orphans-migrated.json"
-;;
-
-let legacy_atomic_migration_schema_version = 1
-
-let legacy_atomic_migration_marker_json =
-  `Assoc
-    [ "schema_version", `Int legacy_atomic_migration_schema_version
-    ]
-;;
-
-let legacy_atomic_migration_marker_max_bytes =
-  Yojson.Safe.pretty_to_string legacy_atomic_migration_marker_json
-  |> String.length
-;;
-
-let unix_file_kind_to_string = function
-  | Unix.S_REG -> "regular_file"
-  | Unix.S_DIR -> "directory"
-  | Unix.S_CHR -> "character_device"
-  | Unix.S_BLK -> "block_device"
-  | Unix.S_LNK -> "symbolic_link"
-  | Unix.S_FIFO -> "fifo"
-  | Unix.S_SOCK -> "socket"
+  Filename.concat (request_dir ~base_path) ".atomic-staging"
 ;;
 
 let canonical_base_path base_path =
@@ -609,10 +576,6 @@ let active_record_path ~base_path ~request_id =
 
 let terminal_record_path ~base_path ~request_id =
   record_path_in (terminal_request_dir ~base_path) ~request_id
-;;
-
-let legacy_record_path ~base_path ~request_id =
-  record_path_in (request_dir ~base_path) ~request_id
 ;;
 
 let status_to_string = function
@@ -820,27 +783,6 @@ let same_request_identity (left : entry) (right : entry) =
   && Float.equal left.submitted_at right.submitted_at
 ;;
 
-type source_comparison =
-  | Exact_source_duplicate
-  | Conflicting_source_identity
-  | Conflicting_source_state
-
-let compare_source_entries left right =
-  if not (same_request_identity left right)
-  then Conflicting_source_identity
-  else if entry_record_to_json left = entry_record_to_json right
-  then Exact_source_duplicate
-  else Conflicting_source_state
-;;
-
-let source_conflict_to_string = function
-  | Exact_source_duplicate -> "active and legacy request records are exact duplicates"
-  | Conflicting_source_identity ->
-    "conflicting request identities coexist across active and legacy partitions"
-  | Conflicting_source_state ->
-    "conflicting request states coexist across active and legacy partitions"
-;;
-
 let string_member name json =
   match Json_util.assoc_member_opt name json with
   | Some (`String value) -> Some value
@@ -963,16 +905,14 @@ let entry_of_record_json ~base_path ~request_id:expected_request_id json :
     | None -> Error "record is missing required integer field \"schema_version\""
   in
   let* () =
-    if List.mem schema_version supported_record_schema_versions
+    if Int.equal schema_version record_schema_version
     then Ok ()
     else
       Error
         (Printf.sprintf
-           "unsupported keeper_msg request schema_version=%d (supported: %s)"
+           "unsupported keeper_msg request schema_version=%d (expected: %d)"
            schema_version
-           (supported_record_schema_versions
-            |> List.map string_of_int
-            |> String.concat ", "))
+           record_schema_version)
   in
   let* request_id = required_string "request_id" json in
   let* () =
@@ -1014,9 +954,7 @@ let entry_of_record_json ~base_path ~request_id:expected_request_id json :
     | Lost _ -> [ "completed_at"; "reason" ]
     | Cancelled _ -> [ "completed_at"; "reason"; "cancelled_by" ]
     | Persistence_failed _ -> [ "completed_at"; "attempted_status"; "reason" ]
-    | Done _ ->
-      [ "completed_at"; "ok"; "body" ]
-      @ if Int.equal schema_version record_schema_version then [ "data" ] else []
+    | Done _ -> [ "completed_at"; "ok"; "body"; "data" ]
   in
   let* () = validate_record_fields ~status_fields json in
   Ok
@@ -1051,13 +989,8 @@ let load_record_at_path ~base_path ~request_id path =
     Unreadable reason
 ;;
 
-type record_location =
-  | Terminal_location
-  | Active_location
-  | Legacy_location
-
 type located_load_result =
-  | Located of entry * record_location * string
+  | Located of entry
   | Located_absent
   | Located_unreadable of string
   | Located_rejected of access_rejection
@@ -1183,7 +1116,7 @@ let persist_terminal_from_source ~ops ~(entry : entry) ~source_path =
     )
     else (
       (* Lossless namespace protocol: first durably publish the terminal
-         destination, then durably remove the active/legacy source. A crash
+         destination, then durably remove the active source. A crash
          before destination commit leaves the source authoritative; a crash
          after destination commit may leave both names, and exact lookup gives
          terminal precedence. Never rename the sole source across directories:
@@ -1230,93 +1163,52 @@ let persist_entry ~ops ?source_path (entry : entry) =
 let load_record_canonical_located ~base_path ~request_id : located_load_result =
   match
     terminal_record_path ~base_path ~request_id,
-    active_record_path ~base_path ~request_id,
-    legacy_record_path ~base_path ~request_id
+    active_record_path ~base_path ~request_id
   with
-  | None, _, _ | _, None, _ | _, _, None -> Located_rejected Invalid_request_id
-  | Some terminal_path, Some active_path, Some legacy_path ->
-    let validate_terminal_sources terminal_entry =
-      let rec loop = function
-        | [] -> Located (terminal_entry, Terminal_location, terminal_path)
-        | path :: rest ->
-          if not (Fs_compat.file_exists path)
-          then loop rest
-          else (
-            match load_record_at_path ~base_path ~request_id path with
-            | Found source_entry ->
-              if not (same_request_identity source_entry terminal_entry)
-              then
-                Located_unreadable
-                  "conflicting request identities coexist across persistence partitions"
-              else if
-                is_terminal_status source_entry.status
-                && entry_record_to_json source_entry
-                   <> entry_record_to_json terminal_entry
-              then
-                Located_unreadable
-                  "conflicting terminal request records coexist across persistence partitions"
-              else loop rest
-            | Unreadable reason ->
-              Located_unreadable
-                (Printf.sprintf
-                   "terminal request record coexists with an unreadable source record: %s"
-                   reason)
-            | Rejected rejection -> Located_rejected rejection
-            | Absent -> loop rest)
-      in
-      loop [ active_path; legacy_path ]
-    in
-    let validate_active_source active_entry =
-      if not (Fs_compat.file_exists legacy_path)
-      then Located (active_entry, Active_location, active_path)
-      else
-        match load_record_at_path ~base_path ~request_id legacy_path with
-        | Found legacy_entry ->
-          (match compare_source_entries active_entry legacy_entry with
-           | Exact_source_duplicate ->
-             Located (active_entry, Active_location, active_path)
-           | (Conflicting_source_identity | Conflicting_source_state) as conflict ->
-             Located_unreadable
-               (source_conflict_to_string conflict))
-        | Unreadable reason ->
-          Located_unreadable
-            (Printf.sprintf
-               "active request record coexists with an unreadable legacy record: %s"
-               reason)
-        | Rejected rejection -> Located_rejected rejection
-        | Absent -> Located (active_entry, Active_location, active_path)
-    in
-    let rec first_existing = function
-      | [] -> Located_absent
-      | (location, path) :: rest ->
-        if Fs_compat.file_exists path
-        then (
-          match load_record_at_path ~base_path ~request_id path with
-          | Found entry ->
-            if location = Terminal_location && not (is_terminal_status entry.status)
-            then
-              Located_unreadable
-                "terminal partition contains a non-terminal request record"
-            else if location = Terminal_location
-            then validate_terminal_sources entry
-            else if location = Active_location
-            then validate_active_source entry
-            else Located (entry, location, path)
-          | Unreadable reason -> Located_unreadable reason
-          | Rejected rejection -> Located_rejected rejection
-          | Absent -> first_existing rest)
-        else first_existing rest
-    in
-    first_existing
-      [ Terminal_location, terminal_path
-      ; Active_location, active_path
-      ; Legacy_location, legacy_path
-      ]
+  | None, _ | _, None -> Located_rejected Invalid_request_id
+  | Some terminal_path, Some active_path ->
+    if Fs_compat.file_exists terminal_path
+    then (
+      match load_record_at_path ~base_path ~request_id terminal_path with
+      | Found terminal_entry when not (is_terminal_status terminal_entry.status) ->
+        Located_unreadable
+          "terminal partition contains a non-terminal request record"
+      | Found terminal_entry when not (Fs_compat.file_exists active_path) ->
+        Located terminal_entry
+      | Found terminal_entry ->
+        (match load_record_at_path ~base_path ~request_id active_path with
+         | Found active_entry when not (same_request_identity active_entry terminal_entry) ->
+           Located_unreadable
+             "conflicting request identities coexist across persistence partitions"
+         | Found active_entry
+           when is_terminal_status active_entry.status
+                && entry_record_to_json active_entry
+                   <> entry_record_to_json terminal_entry ->
+           Located_unreadable
+             "conflicting terminal request records coexist across persistence partitions"
+         | Found _ | Absent -> Located terminal_entry
+         | Unreadable reason ->
+           Located_unreadable
+             (Printf.sprintf
+                "terminal request record coexists with an unreadable active record: %s"
+                reason)
+         | Rejected rejection -> Located_rejected rejection)
+      | Unreadable reason -> Located_unreadable reason
+      | Rejected rejection -> Located_rejected rejection
+      | Absent -> Located_absent)
+    else if Fs_compat.file_exists active_path
+    then (
+      match load_record_at_path ~base_path ~request_id active_path with
+      | Found entry -> Located entry
+      | Unreadable reason -> Located_unreadable reason
+      | Rejected rejection -> Located_rejected rejection
+      | Absent -> Located_absent)
+    else Located_absent
 ;;
 
 let load_record_canonical ~base_path ~request_id : load_result =
   match load_record_canonical_located ~base_path ~request_id with
-  | Located (entry, _, _) -> Found entry
+  | Located entry -> Found entry
   | Located_absent -> Absent
   | Located_unreadable reason -> Unreadable reason
   | Located_rejected rejection -> Rejected rejection
@@ -1395,71 +1287,10 @@ let request_has_live_worker ~base_path ~submitted_by request_id =
   Eio.Mutex.use_ro mu (fun () -> Request_table.mem pending key)
 ;;
 
-let recovery_terminal_operation = function
-  | Active_store -> "active_terminal_finalize"
-  | Legacy_store -> "legacy_terminal_finalize"
-  | Atomic_orphan_store -> "atomic_orphan_cleanup"
-;;
-
 type terminal_destination_state =
   | No_terminal_destination
   | Cleanup_source
   | Invalid_terminal_destination of persist_integrity_error
-
-type recovery_source_state =
-  | Recovery_source_ready
-  | Recovery_duplicate_waiting_for_active
-  | Recovery_source_conflict of string
-
-let recovery_source_peer ~source (entry : entry) =
-  match source with
-  | Atomic_orphan_store ->
-    Error "atomic orphan inventory is not a request record source"
-  | Active_store ->
-    Ok
-      ( legacy_record_path ~base_path:entry.base_path ~request_id:entry.request_id
-      , Recovery_source_ready )
-  | Legacy_store ->
-    Ok
-      ( active_record_path ~base_path:entry.base_path ~request_id:entry.request_id
-      , Recovery_duplicate_waiting_for_active )
-;;
-
-let recovery_source_state ~source (entry : entry) =
-  match recovery_source_peer ~source entry with
-  | Error reason -> Recovery_source_conflict reason
-  | Ok (peer_path, exact_duplicate_state) ->
-  match terminal_record_path ~base_path:entry.base_path ~request_id:entry.request_id with
-  | None -> Recovery_source_conflict "request_id is unsafe for persistence"
-  | Some terminal_path when Fs_compat.file_exists terminal_path ->
-    Recovery_source_ready
-  | Some _ ->
-    (match peer_path with
-     | None -> Recovery_source_conflict "request_id is unsafe for persistence"
-     | Some peer_path when not (Fs_compat.file_exists peer_path) ->
-       Recovery_source_ready
-     | Some peer_path ->
-       (match
-          load_record_at_path
-            ~base_path:entry.base_path
-            ~request_id:entry.request_id
-            peer_path
-        with
-        | Found peer_entry ->
-          (match compare_source_entries entry peer_entry with
-           | Exact_source_duplicate -> exact_duplicate_state
-           | (Conflicting_source_identity | Conflicting_source_state) as conflict ->
-             Recovery_source_conflict (source_conflict_to_string conflict))
-        | Unreadable reason ->
-          Recovery_source_conflict
-            (Printf.sprintf "coexisting request source is unreadable: %s" reason)
-        | Rejected rejection ->
-          Recovery_source_conflict
-            (Printf.sprintf
-               "coexisting request source was rejected: %s"
-               (access_rejection_to_json rejection |> Yojson.Safe.to_string))
-        | Absent -> Recovery_source_ready))
-;;
 
 let terminal_destination_state (entry : entry) =
   match terminal_record_path ~base_path:entry.base_path ~request_id:entry.request_id with
@@ -1507,12 +1338,11 @@ let finalize_existing_terminal_source ~(entry : entry) source_path =
 
 let empty_recovery_report =
   { lost = 0
-  ; migrated = 0
+  ; finalized = 0
   ; cleaned = 0
-  ; atomic_orphans_inspected = 0
-  ; atomic_orphans_deleted = 0
-  ; atomic_orphans_preserved = 0
-  ; deferred = 0
+  ; staging_files_inspected = 0
+  ; staging_files_deleted = 0
+  ; staging_files_preserved = 0
   ; unreadable = 0
   ; failed = 0
   ; store_errors = []
@@ -1527,7 +1357,6 @@ let recovery_record_error_kind_to_string = function
   | Recovery_record_rejected rejection ->
     "record identity rejected: "
     ^ (access_rejection_to_json rejection |> Yojson.Safe.to_string)
-  | Recovery_source_ambiguity reason -> "source ambiguity: " ^ reason
   | Recovery_terminal_integrity reason -> "terminal integrity: " ^ reason
   | Recovery_persistence_failed reason -> "persistence failed: " ^ reason
   | Recovery_source_cleanup_failed -> "source cleanup failed"
@@ -1544,8 +1373,7 @@ let record_error ~store ~path ~request_id ?keeper_name kind report =
     "keeper_msg_async: recovery record failed store=%s request_id=%s keeper=%s path=%s error=%s"
     (match store with
      | Active_store -> "active"
-     | Legacy_store -> "legacy"
-     | Atomic_orphan_store -> "atomic_orphan")
+     | Atomic_staging_store -> "atomic_staging")
     request_id
     keeper_label
     path
@@ -1556,29 +1384,10 @@ let record_error ~store ~path ~request_id ?keeper_name kind report =
   }
 ;;
 
-let recover_record_path ~base_path ~source ~request_id path report =
+let recover_record_path ~base_path ~request_id path report =
   match load_record_at_path ~base_path ~request_id path with
   | Found entry ->
-    (match recovery_source_state ~source entry with
-     | Recovery_source_conflict reason ->
-       { (record_error
-            ~store:source
-            ~path
-            ~request_id
-            ~keeper_name:entry.keeper_name
-            (Recovery_source_ambiguity reason)
-            report) with
-         failed = report.failed + 1
-       }
-     | Recovery_duplicate_waiting_for_active ->
-       (* Active is the canonical source. Do not remove or terminalize the
-          legacy duplicate until the active transition has durably published
-          its destination. The normal active-first sweep reaches that state
-          before scanning legacy; this branch preserves evidence if a caller
-          presents the stores in another order or the active lane is fenced. *)
-       { report with deferred = report.deferred + 1 }
-     | Recovery_source_ready ->
-       (match terminal_destination_state entry with
+    (match terminal_destination_state entry with
      | Cleanup_source ->
        (match
           with_entry_persistence_transaction entry (fun () ->
@@ -1591,7 +1400,7 @@ let recover_record_path ~base_path ~source ~request_id path report =
         | Ok true -> { report with cleaned = report.cleaned + 1 }
         | Ok false ->
           { (record_error
-               ~store:source
+               ~store:Active_store
                ~path
                ~request_id
                ~keeper_name:entry.keeper_name
@@ -1607,7 +1416,7 @@ let recover_record_path ~base_path ~source ~request_id path report =
                (Error error)
               : (unit, persist_error) result);
           { (record_error
-               ~store:source
+               ~store:Active_store
                ~path
                ~request_id
                ~keeper_name:entry.keeper_name
@@ -1623,7 +1432,7 @@ let recover_record_path ~base_path ~source ~request_id path report =
            (Error (Integrity_failed integrity_error))
            : (unit, persist_error) result);
        { (record_error
-            ~store:source
+            ~store:Active_store
             ~path
             ~request_id
             ~keeper_name:entry.keeper_name
@@ -1638,10 +1447,10 @@ let recover_record_path ~base_path ~source ~request_id path report =
          match
            finalize_existing_terminal_source ~entry path
          with
-         | Ok true -> { report with migrated = report.migrated + 1 }
+         | Ok true -> { report with finalized = report.finalized + 1 }
          | Ok false ->
            { (record_error
-                ~store:source
+                ~store:Active_store
                 ~path
                 ~request_id
                 ~keeper_name:entry.keeper_name
@@ -1652,12 +1461,12 @@ let recover_record_path ~base_path ~source ~request_id path report =
          | Error error ->
            ignore
              (observe_persist_error
-                ~operation:(recovery_terminal_operation source)
+                ~operation:"active_terminal_finalize"
                 entry
                 (Error error)
                : (unit, persist_error) result);
            { (record_error
-                ~store:source
+                ~store:Active_store
                 ~path
                 ~request_id
                 ~keeper_name:entry.keeper_name
@@ -1676,17 +1485,17 @@ let recover_record_path ~base_path ~source ~request_id path report =
          | Ok _ -> { report with lost = report.lost + 1 }
          | Error reason ->
            { (record_error
-                ~store:source
+                ~store:Active_store
                 ~path
                 ~request_id
                 ~keeper_name:entry.keeper_name
                 (Recovery_persistence_failed reason)
                 report) with
              failed = report.failed + 1
-           })))
+           }))
   | Unreadable reason ->
     { (record_error
-         ~store:source
+         ~store:Active_store
          ~path
          ~request_id
          (Recovery_record_unreadable reason)
@@ -1695,7 +1504,7 @@ let recover_record_path ~base_path ~source ~request_id path report =
     }
   | Absent ->
     { (record_error
-         ~store:source
+         ~store:Active_store
          ~path
          ~request_id
          Recovery_record_missing
@@ -1704,7 +1513,7 @@ let recover_record_path ~base_path ~source ~request_id path report =
     }
   | Rejected rejection ->
     { (record_error
-         ~store:source
+         ~store:Active_store
          ~path
          ~request_id
          (Recovery_record_rejected rejection)
@@ -1720,7 +1529,7 @@ let store_error ~store ~path reason report =
   }
 ;;
 
-let merge_atomic_cleanup_report cleanup report =
+let merge_staging_cleanup_report cleanup report =
   let record_cleaned size_class count =
     if count > 0
     then
@@ -1737,17 +1546,17 @@ let merge_atomic_cleanup_report cleanup report =
     cleanup.Fs_compat.preserved;
   let report =
     { report with
-      atomic_orphans_inspected =
-        report.atomic_orphans_inspected + cleanup.Fs_compat.inspected
-    ; atomic_orphans_deleted = report.atomic_orphans_deleted + cleanup.Fs_compat.deleted
-    ; atomic_orphans_preserved =
-        report.atomic_orphans_preserved + cleanup.Fs_compat.preserved
+      staging_files_inspected =
+        report.staging_files_inspected + cleanup.Fs_compat.inspected
+    ; staging_files_deleted = report.staging_files_deleted + cleanup.Fs_compat.deleted
+    ; staging_files_preserved =
+        report.staging_files_preserved + cleanup.Fs_compat.preserved
     }
   in
   List.fold_left
     (fun report failure ->
        store_error
-         ~store:Atomic_orphan_store
+         ~store:Atomic_staging_store
          ~path:failure.Fs_compat.path
          (Fs_compat.atomic_orphan_cleanup_failure_to_string failure)
          report)
@@ -1755,7 +1564,7 @@ let merge_atomic_cleanup_report cleanup report =
     cleanup.Fs_compat.failures
 ;;
 
-let run_atomic_cleanup_in_systhread ~ownership_root path =
+let run_staging_cleanup_in_systhread ~ownership_root path =
   let result =
     Eio_guard.run_in_systhread (fun () ->
       Fs_compat.cleanup_atomic_orphans
@@ -1768,9 +1577,9 @@ let run_atomic_cleanup_in_systhread ~ownership_root path =
   result
 ;;
 
-let sweep_request_atomic_orphans ~base_path report =
+let sweep_request_staging_files ~base_path report =
   let staging = atomic_staging_dir ~base_path in
-  let cleanup = run_atomic_cleanup_in_systhread ~ownership_root:base_path staging in
+  let cleanup = run_staging_cleanup_in_systhread ~ownership_root:base_path staging in
   if cleanup.deleted + cleanup.preserved > 0
   then
     Log.Keeper.warn
@@ -1778,290 +1587,16 @@ let sweep_request_atomic_orphans ~base_path report =
       cleanup.deleted
       cleanup.preserved
       staging;
-  merge_atomic_cleanup_report cleanup report
+  merge_staging_cleanup_report cleanup report
 ;;
 
-type legacy_atomic_migration_state =
-  | Legacy_atomic_migration_missing
-  | Legacy_atomic_migration_complete
-  | Legacy_atomic_migration_invalid of string
-  | Legacy_atomic_migration_unavailable of string
-
-type legacy_atomic_marker_read_error =
-  | Marker_invalid_file_kind of Unix.file_kind
-  | Marker_invalid_size of { max_bytes : int }
-  | Marker_identity_changed
-  | Marker_io_unavailable of string
-
-let legacy_atomic_marker_read_error_to_string = function
-  | Marker_invalid_file_kind kind ->
-    Printf.sprintf
-      "migration marker is not a regular file (kind=%s)"
-      (unix_file_kind_to_string kind)
-  | Marker_invalid_size { max_bytes } ->
-    Printf.sprintf "migration marker exceeds canonical size (max=%d)" max_bytes
-  | Marker_identity_changed ->
-    "migration marker identity changed while opening"
-  | Marker_io_unavailable reason -> reason
-;;
-
-let legacy_atomic_marker_error_is_repairable = function
-  | Marker_invalid_file_kind _
-  | Marker_invalid_size _ -> true
-  | Marker_identity_changed
-  | Marker_io_unavailable _ -> false
-;;
-
-let read_file_no_follow ~max_bytes path =
-  let initial = Unix.lstat path in
-  if initial.Unix.st_kind <> Unix.S_REG
-  then Error (Marker_invalid_file_kind initial.Unix.st_kind)
-  else (
-    let fd_result =
-      try
-        Ok
-          (Unix.openfile
-             path
-             [ Unix.O_RDONLY; Unix.O_CLOEXEC; Unix.O_NONBLOCK ]
-             0)
-      with
-      | exn -> Error (Marker_io_unavailable (Printexc.to_string exn))
-    in
-    match fd_result with
-    | Error _ as error -> error
-    | Ok fd ->
-    let read_result =
-      try
-        let opened = Unix.fstat fd in
-        if
-          opened.Unix.st_kind <> Unix.S_REG
-          || opened.Unix.st_dev <> initial.Unix.st_dev
-          || opened.Unix.st_ino <> initial.Unix.st_ino
-        then Error Marker_identity_changed
-        else if opened.Unix.st_size > max_bytes
-        then Error (Marker_invalid_size { max_bytes })
-        else (
-          (* The extra byte detects growth after [fstat] without allocating
-             from attacker-controlled metadata or reading an unbounded file. *)
-          let content = Bytes.create (max_bytes + 1) in
-          let rec read offset =
-            if offset = Bytes.length content
-            then Error (Marker_invalid_size { max_bytes })
-            else
-              match
-                Unix.read fd content offset (Bytes.length content - offset)
-              with
-              | 0 -> Ok (Bytes.sub_string content 0 offset)
-            | count ->
-              read (offset + count)
-          in
-          read 0)
-      with
-      | exn -> Error (Marker_io_unavailable (Printexc.to_string exn))
-    in
-    let close_result =
-      try Unix.close fd; Ok () with
-      | exn -> Error (Marker_io_unavailable (Printexc.to_string exn))
-    in
-    match read_result, close_result with
-    | Ok content, Ok () -> Ok content
-    | Error reason, Ok () -> Error reason
-    | Ok _, Error (Marker_io_unavailable close_error) ->
-      Error
-        (Marker_io_unavailable
-           ("migration marker close failed: " ^ close_error))
-    | Error reason, Error (Marker_io_unavailable close_error) ->
-      Error
-        (Marker_io_unavailable
-           (Printf.sprintf
-              "%s; migration marker close also failed: %s"
-              (legacy_atomic_marker_read_error_to_string reason)
-              close_error))
-    | Ok _, Error error
-    | Error _, Error error -> Error error)
-;;
-
-let inspect_legacy_atomic_migration_marker ~base_path =
-  let marker = legacy_atomic_migration_marker ~base_path in
-  let result =
-    Eio_guard.run_in_systhread (fun () ->
-      try
-        match
-          Fs_compat.inspect_owned_directory_chain
-            ~ownership_root:base_path
-            (Filename.dirname marker)
-        with
-        | Error rejection ->
-          Legacy_atomic_migration_unavailable
-            (Fs_compat.owned_directory_chain_rejection_to_string rejection)
-        | Ok Fs_compat.Owned_directory_missing ->
-          Legacy_atomic_migration_missing
-        | Ok (Fs_compat.Owned_directory _) ->
-          (match
-             read_file_no_follow
-               ~max_bytes:legacy_atomic_migration_marker_max_bytes
-               marker
-           with
-           | Error error ->
-             let reason = legacy_atomic_marker_read_error_to_string error in
-             if legacy_atomic_marker_error_is_repairable error
-             then Legacy_atomic_migration_invalid reason
-             else Legacy_atomic_migration_unavailable reason
-           | Ok content ->
-             (try
-                match Yojson.Safe.from_string content with
-                | `Assoc [ ("schema_version", `Int version) ]
-                  when version = legacy_atomic_migration_schema_version ->
-                  Legacy_atomic_migration_complete
-                | `Assoc _ ->
-                  Legacy_atomic_migration_invalid
-                    "migration marker does not match the canonical schema"
-                | _ ->
-                  Legacy_atomic_migration_invalid
-                    "migration marker root is not an object"
-              with
-              | Yojson.Json_error detail ->
-                Legacy_atomic_migration_invalid
-                  ("migration marker is malformed: " ^ detail)))
-      with
-      | Unix.Unix_error (Unix.ENOENT, _, _) ->
-        Legacy_atomic_migration_missing
-      | exn -> Legacy_atomic_migration_unavailable (Printexc.to_string exn))
-  in
-  Eio_guard.check_if_ready ();
-  result
-;;
-
-let fsync_owned_directory ~ownership_root path =
-  let result =
-    Eio_guard.run_in_systhread (fun () ->
-      match Fs_compat.inspect_owned_directory_chain ~ownership_root path with
-      | Error rejection ->
-        Error (Fs_compat.owned_directory_chain_rejection_to_string rejection)
-      | Ok Fs_compat.Owned_directory_missing -> Ok ()
-      | Ok (Fs_compat.Owned_directory expected) ->
-        let fd_result =
-          try Ok (Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0) with
-          | exn -> Error (Printexc.to_string exn)
-        in
-        (match fd_result with
-         | Error _ as error -> error
-         | Ok fd ->
-           let sync_result =
-             try
-               let opened = Unix.fstat fd in
-               if
-                 opened.Unix.st_kind <> Unix.S_DIR
-                 || opened.Unix.st_dev <> expected.Unix.st_dev
-                 || opened.Unix.st_ino <> expected.Unix.st_ino
-               then Error "directory identity changed before migration fsync"
-               else (
-                 Unix.fsync fd;
-                 Ok ())
-             with
-             | exn -> Error (Printexc.to_string exn)
-           in
-           let close_result =
-             try Unix.close fd; Ok () with
-             | exn -> Error (Printexc.to_string exn)
-           in
-           (match sync_result, close_result with
-            | Ok (), Ok () -> Ok ()
-            | Error reason, Ok () -> Error reason
-            | Ok (), Error reason ->
-              Error ("migration directory close failed: " ^ reason)
-            | Error reason, Error close_reason ->
-              Error
-                (Printf.sprintf
-                   "%s; migration directory close also failed: %s"
-                   reason
-                   close_reason))))
-  in
-  Eio_guard.check_if_ready ();
-  result
-;;
-
-let migrate_legacy_atomic_orphans ~base_path =
-  match canonical_base_path base_path with
-  | Error rejection ->
-    store_error
-      ~store:Atomic_orphan_store
-      ~path:base_path
-      (Yojson.Safe.to_string (access_rejection_to_json rejection))
-      empty_recovery_report
-  | Ok base_path ->
-    let marker_state = inspect_legacy_atomic_migration_marker ~base_path in
-    (match marker_state with
-     | Legacy_atomic_migration_complete -> empty_recovery_report
-     | Legacy_atomic_migration_unavailable reason ->
-       store_error
-         ~store:Atomic_orphan_store
-         ~path:(legacy_atomic_migration_marker ~base_path)
-         reason
-         empty_recovery_report
-     | Legacy_atomic_migration_missing
-     | Legacy_atomic_migration_invalid _ ->
-       (match marker_state with
-        | Legacy_atomic_migration_invalid reason ->
-          Log.Keeper.warn
-            "keeper_msg_async: legacy atomic migration marker will be repaired path=%s reason=%s"
-            (legacy_atomic_migration_marker ~base_path)
-            reason
-        | Legacy_atomic_migration_missing
-        | Legacy_atomic_migration_complete
-        | Legacy_atomic_migration_unavailable _ -> ());
-       let migration_directories =
-         [ request_dir ~base_path
-         ; active_request_dir ~base_path
-         ; terminal_request_dir ~base_path
-         ]
-       in
-       let report =
-         migration_directories
-         |> List.fold_left
-              (fun report path ->
-                 run_atomic_cleanup_in_systhread ~ownership_root:base_path path
-                 |> fun cleanup -> merge_atomic_cleanup_report cleanup report)
-              empty_recovery_report
-       in
-       let report =
-         if report.failed > 0
-         then report
-         else
-           List.fold_left
-             (fun report path ->
-                match fsync_owned_directory ~ownership_root:base_path path with
-                | Ok () -> report
-                | Error reason ->
-                  store_error ~store:Atomic_orphan_store ~path reason report)
-             report
-             migration_directories
-       in
-       if report.failed > 0 then report else (
-         let marker = legacy_atomic_migration_marker ~base_path in
-         match
-           Keeper_fs.save_json_durable_atomic
-             ~ownership_root:base_path
-             ~temp_dir:(atomic_staging_dir ~base_path)
-             marker
-             legacy_atomic_migration_marker_json
-         with
-         | Ok () -> report
-         | Error error ->
-           store_error
-             ~store:Atomic_orphan_store
-             ~path:marker
-             (Keeper_fs.durable_write_error_to_string error)
-             report))
-;;
-
-let recover_record_directory ~base_path ~source dir report =
+let recover_active_record_directory ~base_path dir report =
   try
     match Fs_compat.inspect_owned_directory_chain ~ownership_root:base_path dir with
     | Ok Fs_compat.Owned_directory_missing -> report
     | Error rejection ->
       store_error
-        ~store:source
+        ~store:Active_store
         ~path:dir
         (Fs_compat.owned_directory_chain_rejection_to_string rejection)
         report
@@ -2083,13 +1618,12 @@ let recover_record_directory ~base_path ~source dir report =
                        (fun () ->
                           recover_record_path
                             ~base_path
-                            ~source
                             ~request_id
                             path
                             report)
                    | _ ->
                      { (record_error
-                          ~store:source
+                          ~store:Active_store
                           ~path
                           ~request_id
                           Recovery_record_not_file
@@ -2098,7 +1632,7 @@ let recover_record_directory ~base_path ~source dir report =
                      }
                    | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
                      { (record_error
-                          ~store:source
+                          ~store:Active_store
                           ~path
                           ~request_id
                           Recovery_record_missing
@@ -2114,7 +1648,7 @@ let recover_record_directory ~base_path ~source dir report =
                      path
                      (Printexc.to_string exn);
                    { (record_error
-                        ~store:source
+                        ~store:Active_store
                         ~path
                         ~request_id
                         (Recovery_entry_exception (Printexc.to_string exn))
@@ -2129,22 +1663,14 @@ let recover_record_directory ~base_path ~source dir report =
       "keeper_msg_async: recovery directory failed dir=%s error=%s"
       dir
       (Printexc.to_string exn);
-    store_error ~store:source ~path:dir (Printexc.to_string exn) report
+    store_error ~store:Active_store ~path:dir (Printexc.to_string exn) report
 ;;
 
 let recover_lost_disk_records_canonical ~base_path =
   let active_dir = active_request_dir ~base_path in
-  let legacy_dir = request_dir ~base_path in
   let report =
-    sweep_request_atomic_orphans ~base_path empty_recovery_report
-    |> recover_record_directory
-         ~base_path
-         ~source:Active_store
-         active_dir
-      |> recover_record_directory
-           ~base_path
-           ~source:Legacy_store
-           legacy_dir
+    sweep_request_staging_files ~base_path empty_recovery_report
+    |> recover_active_record_directory ~base_path active_dir
   in
   { report with
     store_errors = List.rev report.store_errors
@@ -2748,7 +2274,7 @@ let poll ~base_path ~caller request_id : load_result =
          | None -> Found entry)
       | None ->
         (match load_record_canonical_located ~base_path ~request_id with
-         | Located (entry, _, _source_path) ->
+         | Located entry ->
            (match owner_rejection ~caller entry with
             | Some rejection -> Rejected rejection
             | None ->
@@ -2858,7 +2384,7 @@ let cancel_disk_record ~base_path ~caller ~request_id =
   | Located_absent -> Cancel_not_found
   | Located_unreadable reason -> Cancel_unreadable reason
   | Located_rejected rejection -> Cancel_rejected rejection
-  | Located (entry, _, _source_path) ->
+  | Located entry ->
     (match owner_rejection ~caller entry with
      | Some rejection -> Cancel_rejected rejection
      | None when is_terminal_status entry.status ->
@@ -3070,9 +2596,7 @@ module For_testing = struct
   ;;
   let active_record_path = active_record_path
   let terminal_record_path = terminal_record_path
-  let legacy_record_path = legacy_record_path
   let atomic_staging_dir = atomic_staging_dir
-  let legacy_atomic_migration_marker = legacy_atomic_migration_marker
   let load_record = load_record
   let recover_lost_disk_records = recover_lost_disk_records
   let submit = submit_with_ops

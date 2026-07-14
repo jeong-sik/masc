@@ -31,17 +31,14 @@ val compaction_policy_of_keeper : Keeper_meta_contract.keeper_meta -> float * in
     request through a valid configured-LLM plan. Missing/invalid LLM output and the retired
     deterministic mode preserve the original messages exactly.
 
-    Return triple:
+    Return pair:
     - the (possibly compacted) working context;
-    - [Some trigger] only for a structurally changed [Prepared] candidate;
     - a typed decision tag describing the request outcome. *)
 val compact_for_request_typed
   :  meta:Keeper_meta_contract.keeper_meta
   -> trigger:Compaction_trigger.t
   -> Keeper_context_core.working_context
-  -> Keeper_context_core.working_context
-     * Compaction_trigger.t option
-     * compaction_decision
+  -> Keeper_context_core.working_context * compaction_decision
 
 type pre_compact_event = {
   timestamp : float;

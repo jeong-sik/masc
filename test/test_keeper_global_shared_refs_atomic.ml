@@ -116,13 +116,12 @@ let test_pre_compact_context_window_uses_working_context () =
          Keeper_context_runtime.append ctx
            (Agent_sdk.Types.user_msg "explicit compaction request")
        in
-       let _, trigger, decision =
+       let _, decision =
          Keeper_compact_policy.compact_for_request_typed
            ~meta:(compact_policy_meta ())
            ~trigger:Compaction_trigger.Manual
            ctx
        in
-       check bool "compaction triggered" true (Option.is_some trigger);
        check bool "decision applied" true
          (Keeper_compact_policy.compaction_decision_applied decision);
        check (option int) "pre-compact event uses ctx max_tokens"

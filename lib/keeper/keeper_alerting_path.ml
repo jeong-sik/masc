@@ -198,13 +198,7 @@ let valid_relative_parent_path path =
   Filename.is_relative path && not (String.equal path "")
 ;;
 
-let valid_child_name name =
-  (not (String.equal name ""))
-  && not (String.equal name ".")
-  && not (String.equal name "..")
-  && Filename.is_relative name
-  && String.equal (Filename.basename name) name
-;;
+let valid_child_name = Fs_compat.is_capability_leaf
 
 let path_effect_parent_scope
       ~relative_path

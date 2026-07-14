@@ -247,6 +247,8 @@ let open_atomic_temp_file ~temp_dir () =
   Atomic_write.open_atomic_temp_file ~temp_dir ()
 ;;
 
+let is_capability_leaf = Capability_leaf.is_valid
+
 type capability_write_intent = Atomic_write.capability_write_intent =
   | Atomic_replace
   | Create_exclusive
@@ -1287,10 +1289,10 @@ let rec lock_whole_file fd =
 ;;
 
 module Append_inode_key = struct
-  type t = int * int
+  type t = int64 * int64
 
   let equal (left_dev, left_ino) (right_dev, right_ino) =
-    left_dev = right_dev && left_ino = right_ino
+    Int64.equal left_dev right_dev && Int64.equal left_ino right_ino
   ;;
 
   let hash = Hashtbl.hash
@@ -1371,6 +1373,18 @@ type capability_append_outcome =
   ; target_binding : capability_append_target_binding
   }
 
+type capability_append_open_error =
+  | Capability_append_open_invalid_leaf of string
+  | Capability_append_open_missing
+  | Capability_append_open_failed of capability_append_operation_failure
+
+type capability_append_file =
+  { parent : Eio.Fs.dir_ty Eio.Path.t
+  ; leaf : Capability_leaf.t
+  ; resource : Eio.File.rw_ty Eio.Resource.t
+  ; stat : Eio.File.Stat.t
+  }
+
 let capability_append_failure_to_string = function
   | Capability_append_posix_descriptor_unavailable ->
     "POSIX descriptor unavailable"
@@ -1382,9 +1396,45 @@ let capability_append_failure_to_string = function
     Printexc.to_string exception_
 ;;
 
+let capability_append_open_error_to_string = function
+  | Capability_append_open_invalid_leaf leaf ->
+    Printf.sprintf "invalid capability leaf %S" leaf
+  | Capability_append_open_missing -> "capability append target is missing"
+  | Capability_append_open_failed { exception_; _ } ->
+    Printexc.to_string exception_
+;;
+
 let capability_append_operation_failure exception_ backtrace =
   { exception_; backtrace }
 ;;
+
+let open_capability_append_file ~sw ~parent ~leaf =
+  match Capability_leaf.of_string leaf with
+  | None -> Error (Capability_append_open_invalid_leaf leaf)
+  | Some leaf ->
+    let leaf_name = Capability_leaf.to_string leaf in
+    (try
+       let resource =
+         Eio.Path.open_out
+           ~sw
+           ~append:true
+           ~create:`Never
+           Eio.Path.(parent / leaf_name)
+       in
+       let stat = Eio.File.stat resource in
+       Ok { parent; leaf; resource; stat }
+     with
+     | Eio.Cancel.Cancelled _ as cancellation -> raise cancellation
+     | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) ->
+       Error Capability_append_open_missing
+     | exception_ ->
+       let backtrace = Printexc.get_raw_backtrace () in
+       Error
+         (Capability_append_open_failed
+            (capability_append_operation_failure exception_ backtrace)))
+;;
+
+let capability_append_file_stat file = file.stat
 
 let capability_append_outcome
       ~requested_bytes
@@ -1466,11 +1516,14 @@ let append_fd_observed ~io ~fd content =
     ()
 ;;
 
-let append_fd_observed_for_testing = append_fd_observed
-
 let capability_append_unix_io =
   { write_substring = Unix.write_substring; fsync = Unix.fsync }
 ;;
+
+type append_target_observation =
+  | Append_target_verified
+  | Append_target_changed
+  | Append_target_check_failed of capability_append_operation_failure
 
 let append_target_binding ~parent ~leaf opened =
   try
@@ -1480,26 +1533,28 @@ let append_target_binding ~parent ~leaf opened =
       && lexical.kind = `Regular_file
       && Int64.equal opened.dev lexical.dev
       && Int64.equal opened.ino lexical.ino
-    then Capability_append_target_verified
-    else Capability_append_target_changed
+    then Append_target_verified
+    else Append_target_changed
   with
   | Eio.Cancel.Cancelled _ as cancellation -> raise cancellation
-  | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) ->
-    Capability_append_target_changed
+  | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) -> Append_target_changed
   | exception_ ->
     let backtrace = Printexc.get_raw_backtrace () in
-    Capability_append_target_check_failed
+    Append_target_check_failed
       (capability_append_operation_failure exception_ backtrace)
 ;;
 
-let append_open_file_observed_with
-      ~after_write
-      ~parent
-      ~leaf
-      resource
-      content
-  =
+let capability_append_target_binding_of_observation = function
+  | Append_target_verified -> Capability_append_target_verified
+  | Append_target_changed -> Capability_append_target_changed
+  | Append_target_check_failed failure ->
+    Capability_append_target_check_failed failure
+;;
+
+let append_capability_observed_with ~after_write file content =
+  let { parent; leaf; resource; stat = opened_stat } = file in
   let requested_bytes = String.length content in
+  let leaf_name = Capability_leaf.to_string leaf in
   if requested_bytes = 0
   then capability_append_outcome ~requested_bytes ()
   else
@@ -1548,106 +1603,79 @@ let append_open_file_observed_with
            ~finally:(fun () ->
              Capability_mutation_lease.release mutation_lease)
          @@ fun () ->
-         let opened_stat =
-           try Ok (Eio.File.stat resource) with
-           | Eio.Cancel.Cancelled _ as cancellation -> raise cancellation
-           | exception_ ->
-             let backtrace = Printexc.get_raw_backtrace () in
-             Error (capability_append_operation_failure exception_ backtrace)
-         in
-         match opened_stat with
-         | Error failure ->
-           capability_append_outcome
-             ~requested_bytes
-             ~write_failure:(Capability_append_operation_failed failure)
-             ~target_binding:(Capability_append_target_check_failed failure)
-             ()
-         | Ok opened_stat ->
-           (match append_target_binding ~parent ~leaf opened_stat with
-            | ( Capability_append_target_changed
-              | Capability_append_target_check_failed _ ) as target_binding ->
-              capability_append_outcome
-                ~requested_bytes
-                ~target_binding
-                ()
-            | Capability_append_target_not_checked -> assert false
-            | Capability_append_target_verified ->
-              let outcome =
-                match Eio_unix.Resource.fd_opt resource with
-                | None ->
-                  capability_append_outcome
-                    ~requested_bytes
-                    ~write_failure:
-                      Capability_append_posix_descriptor_unavailable
-                    ~target_binding:Capability_append_target_verified
-                    ()
-                | Some fd ->
-                  Eio_unix.run_in_systhread
-                    ~label:"fs-compat-open-file-append"
-                    (fun () ->
-                       Eio_unix.Fd.use_exn
-                         "fs-compat-open-file-append"
-                         fd
-                         (fun unix_fd ->
-                            let stat_result =
-                              try Ok (Unix.fstat unix_fd) with
-                              | exception_ ->
-                                let backtrace = Printexc.get_raw_backtrace () in
-                                Error
-                                  (capability_append_operation_failure
-                                     exception_
-                                     backtrace)
-                            in
-                            match stat_result with
-                            | Error failure ->
-                              capability_append_outcome
-                                ~requested_bytes
-                                ~write_failure:
-                                  (Capability_append_operation_failed failure)
-                                ~target_binding:
-                                  Capability_append_target_verified
-                                ()
-                            | Ok stat ->
-                              (match
-                                 try_acquire_append_inode
-                                   (stat.st_dev, stat.st_ino)
-                               with
-                               | None ->
-                                 capability_append_outcome
-                                   ~requested_bytes
-                                   ~write_failure:
-                                     Capability_append_inode_contended
-                                   ~target_binding:
-                                     Capability_append_target_verified
-                                   ()
-                               | Some lease ->
-                                 Fun.protect
-                                   ~finally:(fun () ->
-                                     release_append_inode lease)
-                                   (fun () ->
-                                      append_fd_observed
-                                        ~io:capability_append_unix_io
-                                        ~fd:unix_fd
-                                        content))))
-              in
-              after_write ();
-              let target_binding =
-                append_target_binding ~parent ~leaf opened_stat
-              in
-              { outcome with target_binding }))
+         (match append_target_binding ~parent ~leaf:leaf_name opened_stat with
+          | (Append_target_changed | Append_target_check_failed _) as observation ->
+            let target_binding =
+              capability_append_target_binding_of_observation observation
+            in
+            capability_append_outcome ~requested_bytes ~target_binding ()
+          | Append_target_verified ->
+            let outcome =
+              match Eio_unix.Resource.fd_opt resource with
+              | None ->
+                capability_append_outcome
+                  ~requested_bytes
+                  ~write_failure:Capability_append_posix_descriptor_unavailable
+                  ~target_binding:Capability_append_target_verified
+                  ()
+              | Some fd ->
+                (match
+                   try_acquire_append_inode
+                     (opened_stat.dev, opened_stat.ino)
+                 with
+                 | None ->
+                   capability_append_outcome
+                     ~requested_bytes
+                     ~write_failure:Capability_append_inode_contended
+                     ~target_binding:Capability_append_target_verified
+                     ()
+                 | Some lease ->
+                   Fun.protect
+                     ~finally:(fun () -> release_append_inode lease)
+                     (fun () ->
+                        try
+                          Eio_unix.run_in_systhread
+                            ~label:"fs-compat-open-file-append"
+                            (fun () ->
+                               Eio_unix.Fd.use_exn
+                                 "fs-compat-open-file-append"
+                                 fd
+                                 (fun unix_fd ->
+                                    append_fd_observed
+                                      ~io:capability_append_unix_io
+                                      ~fd:unix_fd
+                                      content))
+                        with
+                        | Eio.Cancel.Cancelled _ as cancellation ->
+                          raise cancellation
+                        | exception_ ->
+                          let backtrace = Printexc.get_raw_backtrace () in
+                          capability_append_outcome
+                            ~requested_bytes
+                            ~write_failure:
+                              (Capability_append_operation_failed
+                                 (capability_append_operation_failure
+                                    exception_
+                                    backtrace))
+                            ~target_binding:
+                              Capability_append_target_verified
+                            ()))
+            in
+            after_write ();
+            let target_binding =
+              append_target_binding ~parent ~leaf:leaf_name opened_stat
+              |> capability_append_target_binding_of_observation
+            in
+            { outcome with target_binding }))
 ;;
 
-let append_open_file_observed ~parent ~leaf resource content =
-  append_open_file_observed_with
-    ~after_write:(fun () -> ())
-    ~parent
-    ~leaf
-    resource
-    content
+let append_capability_observed file content =
+  append_capability_observed_with ~after_write:(fun () -> ()) file content
 ;;
 
 module Capability_append_for_testing = struct
-  let append_open_file_observed = append_open_file_observed_with
+  let append_capability_observed = append_capability_observed_with
+  let append_fd_observed = append_fd_observed
 end
 
 let run_blocking_durable_append ~path f =

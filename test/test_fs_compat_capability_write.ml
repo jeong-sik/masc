@@ -43,6 +43,11 @@ let require_ok = function
   | Error error -> fail (Fs_compat.capability_write_error_to_string error)
 ;;
 
+let require_append_file = function
+  | Ok file -> file
+  | Error error -> fail (Fs_compat.capability_append_open_error_to_string error)
+;;
+
 let test_atomic_replace_preserves_requested_mode ~fs () =
   with_tmp_dir @@ fun directory ->
   let target = Filename.concat directory "target" in
@@ -245,33 +250,157 @@ let test_append_and_replace_share_nonblocking_entry_lease ~fs () =
     in
     Eio.Promise.resolve resolve_writer_result result);
   Eio.Promise.await writer_entered;
-  let append_outcome =
+  let append_outcome, alias_rejected =
     Eio.Switch.run @@ fun append_sw ->
     let file =
-      Eio.Path.open_out
+      Fs_compat.open_capability_append_file
         ~sw:append_sw
-        ~append:true
-        ~create:`Never
-        Eio.Path.(parent / "target")
+        ~parent
+        ~leaf:"target"
+      |> require_append_file
     in
-    Fs_compat.append_open_file_observed
-      ~parent
-      ~leaf:"target"
-      file
-      "append"
+    let alias_rejected =
+      match
+        Fs_compat.open_capability_append_file
+          ~sw:append_sw
+          ~parent
+          ~leaf:"./target"
+      with
+      | Error (Fs_compat.Capability_append_open_invalid_leaf "./target") -> true
+      | Error _ | Ok _ -> false
+    in
+    Fs_compat.append_capability_observed file "append", alias_rejected
   in
   check bool "append immediately reports entry contention" true
     (append_outcome.write_failure
      = Some Fs_compat.Capability_append_mutation_contended);
   check int "contended append writes no bytes" 0 append_outcome.bytes_written;
+  check bool "alternate spelling is rejected before lease lookup" true
+    alias_rejected;
   check string "target stays old while replacement is paused" "old"
     (read_file target);
   Eio.Promise.resolve resolve_release_writer ();
   (match Eio.Promise.await writer_result with
    | Ok () -> ()
    | Error error -> fail (Fs_compat.capability_write_error_to_string error));
-  check string "replacement completes after lease release" "replacement"
+  let append_after_release =
+    Eio.Switch.run @@ fun append_sw ->
+    let file =
+      Fs_compat.open_capability_append_file
+        ~sw:append_sw
+        ~parent
+        ~leaf:"target"
+      |> require_append_file
+    in
+    Fs_compat.append_capability_observed file "after-release"
+  in
+  check bool "atomic writer releases the entry lease" true
+    (Option.is_none append_after_release.write_failure);
+  check string "replacement completes before the later append"
+    "replacementafter-release"
     (read_file target)
+;;
+
+let test_append_lease_blocks_replace_then_releases ~fs () =
+  with_tmp_dir @@ fun directory ->
+  let target = Filename.concat directory "target" in
+  write_file target "old";
+  with_parent_capability ~fs directory @@ fun parent ->
+  Eio.Switch.run @@ fun sw ->
+  let file =
+    Fs_compat.open_capability_append_file ~sw ~parent ~leaf:"target"
+    |> require_append_file
+  in
+  let append_entered, resolve_append_entered = Eio.Promise.create () in
+  let release_append, resolve_release_append = Eio.Promise.create () in
+  let append_result, resolve_append_result = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    let outcome =
+      Fs_compat.Capability_append_for_testing.append_capability_observed
+        ~after_write:(fun () ->
+          Eio.Promise.resolve resolve_append_entered ();
+          Eio.Promise.await release_append)
+        file
+        "-append"
+    in
+    Eio.Promise.resolve resolve_append_result outcome);
+  Eio.Promise.await append_entered;
+  (match
+     Fs_compat.publish_capability_file
+       ~parent
+       ~leaf:"target"
+       ~intent:Fs_compat.Atomic_replace
+       ~permissions:0o640
+       "replacement"
+   with
+   | Ok () -> fail "replace bypassed the append entry lease"
+   | Error error ->
+     check bool "replace reports immediate entry contention" true
+       (error.failure.stage = Fs_compat.Acquire_mutation_lease
+        && error.failure.cause = Fs_compat.Mutation_contended));
+  check string "append bytes remain visible while its lease is held"
+    "old-append"
+    (read_file target);
+  Eio.Promise.resolve resolve_release_append ();
+  let append_outcome = Eio.Promise.await append_result in
+  check bool "append completes on the pinned target" true
+    (append_outcome.target_binding = Fs_compat.Capability_append_target_verified);
+  require_ok
+    (Fs_compat.publish_capability_file
+       ~parent
+       ~leaf:"target"
+       ~intent:Fs_compat.Atomic_replace
+       ~permissions:0o640
+       "replacement");
+  check string "replace succeeds after append releases the lease"
+    "replacement"
+    (read_file target)
+;;
+
+let test_independent_targets_progress_without_global_io_serialization ~fs () =
+  with_tmp_dir @@ fun directory ->
+  let target_a = Filename.concat directory "target-a" in
+  let target_b = Filename.concat directory "target-b" in
+  write_file target_a "old-a";
+  write_file target_b "old-b";
+  with_parent_capability ~fs directory @@ fun parent ->
+  Eio.Switch.run @@ fun sw ->
+  let writer_a_entered, resolve_writer_a_entered = Eio.Promise.create () in
+  let release_writer_a, resolve_release_writer_a = Eio.Promise.create () in
+  let writer_a_result, resolve_writer_a_result = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    let result =
+      Fs_compat.Capability_write_for_testing.publish_capability_file
+        ~before_stage:(function
+          | Fs_compat.Create_staging_directory ->
+            Eio.Promise.resolve resolve_writer_a_entered ();
+            Eio.Promise.await release_writer_a
+          | _ -> ())
+        ~parent
+        ~leaf:"target-a"
+        ~intent:Fs_compat.Atomic_replace
+        ~permissions:0o640
+        "new-a"
+    in
+    Eio.Promise.resolve resolve_writer_a_result result);
+  Eio.Promise.await writer_a_entered;
+  require_ok
+    (Fs_compat.publish_capability_file
+       ~parent
+       ~leaf:"target-b"
+       ~intent:Fs_compat.Atomic_replace
+       ~permissions:0o640
+       "new-b");
+  check string "independent target completes while target A is paused"
+    "new-b"
+    (read_file target_b);
+  check string "paused target remains unchanged" "old-a" (read_file target_a);
+  Eio.Promise.resolve resolve_release_writer_a ();
+  (match Eio.Promise.await writer_a_result with
+   | Ok () -> ()
+   | Error error -> fail (Fs_compat.capability_write_error_to_string error));
+  check string "paused target completes after release" "new-a"
+    (read_file target_a)
 ;;
 
 let test_create_exclusive_does_not_overwrite ~fs () =
@@ -660,17 +789,13 @@ let test_open_capability_append_writes_complete_large_payload ~fs () =
   let outcome =
     Eio.Switch.run @@ fun sw ->
     let file =
-      Eio.Path.open_out
+      Fs_compat.open_capability_append_file
         ~sw
-        ~append:true
-        ~create:`Never
-        Eio.Path.(parent / "target")
+        ~parent
+        ~leaf:"target"
+      |> require_append_file
     in
-    Fs_compat.append_open_file_observed
-      ~parent
-      ~leaf:"target"
-      file
-      payload
+    Fs_compat.append_capability_observed file payload
   in
   check int "all requested append bytes written" (String.length payload)
     outcome.bytes_written;
@@ -690,18 +815,16 @@ let test_append_reports_detached_inode_after_external_replace ~fs () =
   let outcome =
     Eio.Switch.run @@ fun sw ->
     let file =
-      Eio.Path.open_out
+      Fs_compat.open_capability_append_file
         ~sw
-        ~append:true
-        ~create:`Never
-        Eio.Path.(parent / "target")
+        ~parent
+        ~leaf:"target"
+      |> require_append_file
     in
-    Fs_compat.Capability_append_for_testing.append_open_file_observed
+    Fs_compat.Capability_append_for_testing.append_capability_observed
       ~after_write:(fun () ->
         Unix.rename target detached;
         write_file target "replacement")
-      ~parent
-      ~leaf:"target"
       file
       "suffix"
   in
@@ -737,7 +860,7 @@ let test_partial_append_failure_is_synced_without_rollback () =
          }
        in
        let outcome =
-         Fs_compat.append_fd_observed_for_testing
+         Fs_compat.Capability_append_for_testing.append_fd_observed
            ~io
            ~fd
            "abcdef"
@@ -772,7 +895,7 @@ let test_append_sync_failure_is_explicit () =
          }
        in
        let outcome =
-         Fs_compat.append_fd_observed_for_testing
+         Fs_compat.Capability_append_for_testing.append_fd_observed
            ~io
            ~fd
            "suffix"
@@ -811,6 +934,11 @@ let () =
             (test_staging_name_swap_does_not_redirect_pinned_payload ~fs)
         ; test_case "append and replace share entry lease" `Quick
             (test_append_and_replace_share_nonblocking_entry_lease ~fs)
+        ; test_case "append lease blocks replace then releases" `Quick
+            (test_append_lease_blocks_replace_then_releases ~fs)
+        ; test_case "independent targets progress concurrently" `Quick
+            (test_independent_targets_progress_without_global_io_serialization
+               ~fs)
         ; test_case "exclusive create" `Quick
             (test_create_exclusive_does_not_overwrite ~fs)
         ; test_case "exclusive create success" `Quick

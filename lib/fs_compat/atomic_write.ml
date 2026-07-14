@@ -314,14 +314,9 @@ let fresh_capability_staging_directory_name () =
 
 let validate_leaf ~before_stage leaf =
   run_stage ~before_stage Validate_leaf (fun () ->
-    let is_single_component =
-      not (String.equal leaf "")
-      && Filename.is_relative leaf
-      && String.equal (Filename.basename leaf) leaf
-      && not (String.equal leaf ".")
-      && not (String.equal leaf "..")
-    in
-    if not is_single_component then raise_failure Validate_leaf (Invalid_leaf leaf))
+    match Capability_leaf.of_string leaf with
+    | Some leaf -> leaf
+    | None -> raise_failure Validate_leaf (Invalid_leaf leaf))
 ;;
 
 let set_open_file_permissions ~before_stage file permissions =
@@ -649,12 +644,13 @@ let publish_capability_file_with
       ~leaf
       ~intent
       ~permissions
-      content
+  content
   =
   try
-    validate_leaf ~before_stage leaf;
+    let leaf = validate_leaf ~before_stage leaf in
+    let leaf_name = Capability_leaf.to_string leaf in
     Eio.Switch.run @@ fun sw ->
-    let target = Eio.Path.(parent / leaf) in
+    let target = Eio.Path.(parent / leaf_name) in
     let mutation_lease =
       run_stage ~before_stage Acquire_mutation_lease (fun () ->
         let parent_stat = Eio.Path.stat ~follow:true parent in

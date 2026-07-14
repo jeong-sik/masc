@@ -511,10 +511,10 @@ type content_write_error =
   | Content_write_directory of created_directory_commit
   | Content_write_append of append_write_outcome
 
-let append_open_file ~on_cancelled ~parent ~leaf file content =
+let append_capability ~on_cancelled file content =
   let outcome =
     Eio.Cancel.protect (fun () ->
-      Fs_compat.append_open_file_observed ~parent ~leaf file content)
+      Fs_compat.append_capability_observed file content)
   in
   (try Eio.Fiber.check () with
    | Eio.Cancel.Cancelled _ as cancellation ->
@@ -1119,6 +1119,46 @@ let append_target_effect_to_string = function
   | Append_target_state_unknown -> "target_state_unknown"
 ;;
 
+let capability_append_open_error_kind = function
+  | Fs_compat.Capability_append_open_invalid_leaf _ -> "invalid_leaf"
+  | Fs_compat.Capability_append_open_missing -> "missing"
+  | Fs_compat.Capability_append_open_failed _ -> "operation_failed"
+;;
+
+let capability_append_open_error_payload ~target error =
+  error_json
+    ~fields:
+      [ "path", `String target
+      ; ( "filesystem_append_open_failure"
+        , `Assoc
+            [ ( "kind"
+              , `String (capability_append_open_error_kind error) )
+            ; ( "cause"
+              , `String
+                  (Fs_compat.capability_append_open_error_to_string error) )
+            ] )
+      ]
+    "Filesystem append capability acquisition failed explicitly."
+;;
+
+let observe_capability_append_open_error ~keeper_name ~target error =
+  match error with
+  | Fs_compat.Capability_append_open_failed { exception_; backtrace } ->
+    Log.Keeper.error
+      ~keeper_name
+      "WRITE_AUDIT: append capability acquisition failed path=%s error=%s backtrace=%s"
+      target
+      (Printexc.to_string exception_)
+      (Printexc.raw_backtrace_to_string backtrace)
+  | ( Fs_compat.Capability_append_open_invalid_leaf _
+    | Fs_compat.Capability_append_open_missing ) ->
+    Log.Keeper.error
+      ~keeper_name
+      "WRITE_AUDIT: append capability acquisition rejected path=%s kind=%s"
+      target
+      (capability_append_open_error_kind error)
+;;
+
 let append_target_effect outcome =
   match outcome.target_binding with
   | Fs_compat.Capability_append_target_not_checked
@@ -1522,36 +1562,49 @@ let handle_file_write_with_outcome
             Keeper_alerting_path.confined_endpoint_relative_path confined
           in
           Eio.Switch.run @@ fun sw ->
-          (match
-             try
-               Ok
-                 (Eio.Path.open_out
-                    ~sw
-                    ~append:true
-                    ~create:`Never
-                    Eio.Path.(root_dir / endpoint_relative_path))
-             with
-             | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) -> Error `Missing
-           with
-           | Error `Missing -> create_missing_entry ()
-           | Ok file ->
-             let stat = Eio.File.stat file in
-             if stat.kind <> `Regular_file
-             then Error "filesystem append target is not a regular file"
-             else
-               let* gate_effect =
-                 Keeper_alerting_path.append_pinned_resource_effect confined stat
-               in
-               finish_content_write ~target ~mode_label ~gate_effect (fun () ->
-                 append_open_file
-                   ~on_cancelled:
-                     (observe_append_write_outcome
-                        ~keeper_name:meta.name
-                        ~target)
-                   ~parent:parent_dir
-                   ~leaf
-                   file
-                   content))
+          (match Eio.Path.split Eio.Path.(root_dir / endpoint_relative_path) with
+           | None -> Error "filesystem append endpoint has no writable leaf"
+           | Some (endpoint_parent, endpoint_leaf) ->
+             let endpoint_parent_dir = Eio.Path.open_dir ~sw endpoint_parent in
+             (match
+                Fs_compat.open_capability_append_file
+                  ~sw
+                  ~parent:endpoint_parent_dir
+                  ~leaf:endpoint_leaf
+              with
+              | Error Fs_compat.Capability_append_open_missing ->
+                create_missing_entry ()
+              | Error open_error ->
+                observe_capability_append_open_error
+                  ~keeper_name:meta.name
+                  ~target
+                  open_error;
+                Ok
+                  (Write_failed
+                     { payload =
+                         capability_append_open_error_payload
+                           ~target
+                           open_error
+                     ; class_ = Tool_result.Runtime_failure
+                     })
+              | Ok file ->
+                let stat = Fs_compat.capability_append_file_stat file in
+                if stat.kind <> `Regular_file
+                then Error "filesystem append target is not a regular file"
+                else
+                  let* gate_effect =
+                    Keeper_alerting_path.append_pinned_resource_effect
+                      confined
+                      stat
+                  in
+                  finish_content_write ~target ~mode_label ~gate_effect (fun () ->
+                    append_capability
+                      ~on_cancelled:
+                        (observe_append_write_outcome
+                           ~keeper_name:meta.name
+                           ~target)
+                      file
+                      content)))
       in
       (match run () with
        | Ok attempt -> file_write_attempt_to_execution attempt

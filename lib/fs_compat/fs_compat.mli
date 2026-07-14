@@ -145,6 +145,10 @@ val save_file_atomic : string -> string -> (unit, string) Result.t
     filename shape. The caller owns the returned channel and file. *)
 val open_atomic_temp_file : temp_dir:string -> unit -> string * out_channel
 
+(** [true] exactly for one non-empty lexical child component. This is the
+    shared path-effect and mutation-lease validation boundary. *)
+val is_capability_leaf : string -> bool
+
 type capability_append_operation_failure =
   { exception_ : exn
   ; backtrace : Printexc.raw_backtrace
@@ -172,7 +176,27 @@ type capability_append_outcome =
 
 val capability_append_failure_to_string : capability_append_failure -> string
 
-(** Append through an already-open capability without destructive rollback.
+type capability_append_open_error =
+  | Capability_append_open_invalid_leaf of string
+  | Capability_append_open_missing
+  | Capability_append_open_failed of capability_append_operation_failure
+
+type capability_append_file
+
+val capability_append_open_error_to_string : capability_append_open_error -> string
+
+(** Open an opaque append capability. The resource is always opened by this
+    module with kernel append semantics; callers cannot construct a capability
+    from an arbitrary file resource. Its lifetime belongs to [sw]. *)
+val open_capability_append_file
+  :  sw:Eio.Switch.t
+  -> parent:Eio.Fs.dir_ty Eio.Path.t
+  -> leaf:string
+  -> (capability_append_file, capability_append_open_error) result
+
+val capability_append_file_stat : capability_append_file -> Eio.File.Stat.t
+
+(** Append through an opaque append capability without destructive rollback.
     Cooperative same-process mutations of the same parent/leaf and appends to
     the same inode use non-blocking leases. The leaf-to-open-file identity is
     checked before and after the write, so an external rename is reported
@@ -180,33 +204,29 @@ val capability_append_failure_to_string : capability_append_failure -> string
     observation boundary, not an exclusion guarantee. Partial bytes and their
     fsync result remain explicit. The caller owns the next cancellation
     checkpoint. *)
-val append_open_file_observed
-  :  parent:Eio.Fs.dir_ty Eio.Path.t
-  -> leaf:string
-  -> [> Eio.File.ro_ty ] Eio.Resource.t
+val append_capability_observed
+  :  capability_append_file
   -> string
   -> capability_append_outcome
-
-module Capability_append_for_testing : sig
-  val append_open_file_observed
-    :  after_write:(unit -> unit)
-    -> parent:Eio.Fs.dir_ty Eio.Path.t
-    -> leaf:string
-    -> [> Eio.File.ro_ty ] Eio.Resource.t
-    -> string
-    -> capability_append_outcome
-end
 
 type capability_append_io_for_testing =
   { write_substring : Unix.file_descr -> string -> int -> int -> int
   ; fsync : Unix.file_descr -> unit
   }
 
-val append_fd_observed_for_testing
-  :  io:capability_append_io_for_testing
-  -> fd:Unix.file_descr
-  -> string
-  -> capability_append_outcome
+module Capability_append_for_testing : sig
+  val append_capability_observed
+    :  after_write:(unit -> unit)
+    -> capability_append_file
+    -> string
+    -> capability_append_outcome
+
+  val append_fd_observed
+    :  io:capability_append_io_for_testing
+    -> fd:Unix.file_descr
+    -> string
+    -> capability_append_outcome
+end
 
 type capability_write_intent =
   | Atomic_replace

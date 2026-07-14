@@ -8,6 +8,7 @@
   mkdir_memo
   fd_cache
   owned_directory_chain
+  capability_leaf
   capability_mutation_lease
   atomic_write
   blocking_write

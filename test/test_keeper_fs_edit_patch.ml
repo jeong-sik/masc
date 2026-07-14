@@ -489,6 +489,37 @@ let test_outside_referent_endpoint_semantics ~sandbox ~with_runtime () =
     ~expected_leaf_kind:`Symlink
     ~expected_leaf_content:"outside-append-outside-symlink"
 
+let test_append_inside_symlink_uses_canonical_referent_capability () =
+  setup @@ fun ~config ~meta ~playground ->
+  let referent_dir = Filename.concat playground "append-referent" in
+  let lexical_dir = Filename.concat playground "append-link" in
+  ensure_dir referent_dir;
+  ensure_dir lexical_dir;
+  let referent = Filename.concat referent_dir "target.txt" in
+  let lexical = Filename.concat lexical_dir "target.txt" in
+  Fs_compat.save_file referent "before\n";
+  Unix.symlink referent lexical;
+  let raw =
+    Keeper_tool_filesystem_runtime.handle_file_write
+      ~turn_sandbox_factory:None
+      ~config
+      ~keeper_name:meta.name
+      ~args:
+        (`Assoc
+           [ "path", `String lexical
+           ; "mode", `String "append"
+           ; "content", `String "after\n"
+           ])
+      ()
+  in
+  if not (parse_ok raw)
+  then Alcotest.failf "inside symlink append failed: %s" raw;
+  Alcotest.(check string) "canonical referent receives append"
+    "before\nafter\n"
+    (Fs_compat.load_file referent);
+  Alcotest.(check bool) "lexical endpoint remains a symlink" true
+    ((Unix.lstat lexical).Unix.st_kind = Unix.S_LNK)
+
 let test_symlink_component_swap_cannot_escape_allowed_root
       ~sandbox
       ~with_runtime
@@ -916,6 +947,10 @@ let () =
             (test_outside_referent_endpoint_semantics
                ~sandbox:Keeper_types_profile_sandbox.Docker
                ~with_runtime:true);
+          Alcotest.test_case
+            "append through an inside symlink uses the canonical referent capability"
+            `Quick
+            test_append_inside_symlink_uses_canonical_referent_capability;
           Alcotest.test_case
             "local symlink component swap cannot escape allowed root"
             `Quick

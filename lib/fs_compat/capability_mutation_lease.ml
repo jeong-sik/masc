@@ -1,7 +1,7 @@
 type key =
   { parent_dev : int64
   ; parent_ino : int64
-  ; leaf : string
+  ; leaf : Capability_leaf.t
   }
 
 module Key = struct
@@ -10,10 +10,15 @@ module Key = struct
   let equal left right =
     Int64.equal left.parent_dev right.parent_dev
     && Int64.equal left.parent_ino right.parent_ino
-    && String.equal left.leaf right.leaf
+    && Capability_leaf.equal left.leaf right.leaf
   ;;
 
-  let hash = Hashtbl.hash
+  let hash key =
+    Hashtbl.hash
+      ( key.parent_dev
+      , key.parent_ino
+      , Capability_leaf.to_string key.leaf )
+  ;;
 end
 
 module Table = Hashtbl.Make (Key)

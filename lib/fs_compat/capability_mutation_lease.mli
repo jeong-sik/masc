@@ -8,7 +8,7 @@ type t
 val try_acquire
   :  parent_dev:int64
   -> parent_ino:int64
-  -> leaf:string
+  -> leaf:Capability_leaf.t
   -> t option
 
 val release : t -> unit

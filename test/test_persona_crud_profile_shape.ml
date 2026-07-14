@@ -6,8 +6,7 @@
     fields at the top level, but the loaders read the display name from
     ["name"] and every keeper-template field from the nested ["keeper"] object.
     The result was a persona whose display name showed the directory name and
-    whose [goal]/[instructions]/[mention_targets] were dropped, so a keeper
-    spawned from a tool-created persona failed with "goal is required".
+    whose [instructions]/[mention_targets] were dropped.
 
     These tests write what the create/update helpers produce and read it back
     through the two real loaders — [load_persona_summary_from_path] (identity)
@@ -43,7 +42,6 @@ let test_create_roundtrip () =
         ("display_name", `String "코드 리뷰어");
         ("role", `String "reviewer");
         ("trait", `String "꼼꼼한 검증가");
-        ("goal", `String "PR의 결함을 찾는다");
         ("instructions", `String "너는 리뷰어다");
         ("mention_targets", `List [ `String "reviewer"; `String "리뷰어" ]);
         ("proactive_enabled", `Bool true);
@@ -62,8 +60,6 @@ let test_create_roundtrip () =
        Alcotest.(check bool) "keeper defaults detected" true s.has_keeper_defaults);
   (* Keeper-template layer: read from the nested ["keeper"] object. *)
   let d = load_defaults ~dir ~name in
-  Alcotest.(check (option string))
-    "goal reaches keeper defaults" (Some "PR의 결함을 찾는다") d.goal;
   Alcotest.(check (option string))
     "instructions reach keeper defaults" (Some "너는 리뷰어다") d.instructions;
   Alcotest.(check (list string))
@@ -102,7 +98,11 @@ let test_update_routes_to_layers () =
         ("name", `String "오라클");
         ("role", `String "예측");
         ("trait", `String "느리지만 멀리 본다");
-        ("keeper", `Assoc [ ("goal", `String "old goal"); ("proactive_enabled", `Bool true) ]);
+        ( "keeper"
+        , `Assoc
+            [ ("instructions", `String "old instructions")
+            ; ("proactive_enabled", `Bool true)
+            ] );
       ]
   in
   let path = write_profile ~dir ~name seed in
@@ -113,10 +113,8 @@ let test_update_routes_to_layers () =
         ("persona_name", `String name);
         ("display_name", `String "오라클 v2");
         (* -> top-level name *)
-        ("goal", `String "new goal");
-        (* -> keeper.goal (overwrite) *)
         ("instructions", `String "누적 효과를 추적한다");
-        (* -> keeper.instructions (new key inside keeper) *)
+        (* -> keeper.instructions (overwrite) *)
       ]
   in
   (match Keeper_tool_persona_crud.merge_update_args_into_profile existing update_args with
@@ -130,7 +128,6 @@ let test_update_routes_to_layers () =
        Alcotest.(check (option string))
          "trait preserved" (Some "느리지만 멀리 본다") s.trait);
   let d = load_defaults ~dir ~name in
-  Alcotest.(check (option string)) "goal overwritten in keeper layer" (Some "new goal") d.goal;
   Alcotest.(check (option string))
     "instructions added to keeper layer" (Some "누적 효과를 추적한다") d.instructions;
   Alcotest.(check bool)

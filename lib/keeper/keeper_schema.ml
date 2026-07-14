@@ -131,9 +131,8 @@ let keeper_schemas : tool_schema list = [
         ]);
         ("dry_run", `Assoc [
           ("type", `String "boolean");
-          ("description", `String "If true, return the resolved keeper args and validation errors without creating the keeper.");
+          ("description", `String "If true, return the resolved keeper args without creating the keeper.");
         ]);
-        ("goal", `Assoc [("type", `String "string")]);
         ("instructions", `Assoc [("type", `String "string")]);
         ("mention_targets", `Assoc [
           ("type", `String "array");
@@ -199,10 +198,6 @@ let keeper_schemas : tool_schema list = [
         ("name", `Assoc [
           ("type", `String "string");
           ("description", `String "Keeper handle (stable). Example: 'keeper-helper'");
-        ]);
-        ("goal", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Keeper goal/system purpose (required when creating)");
         ]);
         ("instructions", `Assoc [
           ("type", `String "string");
@@ -545,7 +540,6 @@ keeper spawned from this persona inherits. Required fields: persona_name, displa
         ]);
         ("role", `Assoc [("type", `String "string")]);
         ("trait", `Assoc [("type", `String "string")]);
-        ("goal", `Assoc [("type", `String "string")]);
         ("instructions", `Assoc [("type", `String "string")]);
         ("mention_targets", `Assoc [
           ("type", `String "array");
@@ -573,7 +567,6 @@ persona does not exist.";
         ("display_name", `Assoc [("type", `String "string")]);
         ("role", `Assoc [("type", `String "string")]);
         ("trait", `Assoc [("type", `String "string")]);
-        ("goal", `Assoc [("type", `String "string")]);
         ("instructions", `Assoc [("type", `String "string")]);
         ("mention_targets", `Assoc [
           ("type", `String "array");

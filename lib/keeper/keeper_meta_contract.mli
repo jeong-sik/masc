@@ -259,7 +259,6 @@ type keeper_meta = {
   name : string;
   agent_name : string;
   persona : string option;
-  goal : string;
   instructions : string;
   (* Policy *)
   sandbox_profile : Keeper_types_profile.sandbox_profile;

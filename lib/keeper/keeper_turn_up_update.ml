@@ -55,20 +55,6 @@ let update_keeper ?(preserve_prompt_defaults = false)
   match resolve_active_goal_ids ctx.config p old.active_goal_ids with
   | Error msg -> tool_result_error msg
   | Ok active_goal_ids ->
-  let profile_default_text opt fallback =
-    match opt with
-    | Some value when String.trim value <> "" -> value
-    | _ -> fallback
-  in
-  let goal =
-    match p.goal_opt with
-    | Some g -> normalize_goal_text g
-    | None ->
-        if preserve_prompt_defaults then old.goal
-        else
-          profile_default_text p.profile_defaults.goal
-            (if String.trim old.goal <> "" then old.goal else "")
-  in
   let allowed_paths =
     Option.value ~default:old.allowed_paths p.allowed_paths_opt
   in
@@ -136,7 +122,6 @@ let update_keeper ?(preserve_prompt_defaults = false)
       old.name blocker_class blocker_detail);
   let source_meta = old in
   let updated = { source_meta with
-    goal;
     instructions =
       (match p.instructions_arg with
        | Some v -> v

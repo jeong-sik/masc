@@ -45,7 +45,6 @@ type boot_meta_failure_cause =
   | Meta_read_error
   | Config_invalid
   | Sandbox_profile_required
-  | Goal_required
   | Materialization_failed
 
 let boot_meta_failure_cause_label = function
@@ -53,7 +52,6 @@ let boot_meta_failure_cause_label = function
   | Meta_read_error -> "meta_read_error"
   | Config_invalid -> "config_invalid"
   | Sandbox_profile_required -> "sandbox_profile_required"
-  | Goal_required -> "goal_required"
   | Materialization_failed -> "materialization_failed"
 
 type boot_meta_error = {
@@ -227,22 +225,6 @@ let apply_default opt current = match opt with Some v -> v | None -> current
 (** Same as [apply_default] but both TOML and meta are option-typed. *)
 let apply_default_opt opt current = match opt with Some _ -> opt | None -> current
 
-let first_non_empty_goal_candidate candidates =
-  candidates
-  |> List.find_map (function
-       | None -> None
-       | Some raw ->
-         let value = normalize_goal_text raw in
-         if value = "" then None else Some value)
-
-let declarative_materialization_goal
-    (defaults : Keeper_types_profile.keeper_profile_defaults) =
-  first_non_empty_goal_candidate
-    [
-      defaults.goal;
-      defaults.instructions;
-    ]
-
 let profile_defaults_boot_error ~keeper_name error =
   boot_meta_error ~config_error:error Config_invalid
     (Printf.sprintf
@@ -282,11 +264,6 @@ let effective_declarative_runtime_id
 let drift_if label changed =
   if changed then Some label else None
 
-let goal_text_equal left right =
-  String.equal
-    (Keeper_types_profile.normalize_goal_text left)
-    (Keeper_types_profile.normalize_goal_text right)
-
 let keeper_meta_persistent_drift_categories
     ~(defaults : Keeper_types_profile.keeper_profile_defaults)
     ~(current : keeper_meta)
@@ -309,7 +286,6 @@ let keeper_meta_overlay_drift_categories
       drift_if "active_goal_ids"
         (Option.is_some defaults.active_goal_ids
          && current.active_goal_ids <> target.active_goal_ids);
-      drift_if "goal" (not (goal_text_equal current.goal target.goal));
       drift_if "autoboot_enabled"
         (current.autoboot_enabled <> target.autoboot_enabled);
       drift_if "mention_targets"
@@ -368,17 +344,6 @@ let ensure_keeper_meta_with_cause config name =
     let target_proactive =
       apply_default defaults.proactive_enabled Keeper_config.default_proactive_enabled in
     (* --- Personality --- *)
-    let target_goal =
-      match defaults.goal with
-      | Some goal -> goal
-      | None -> (
-          match normalize_goal_text meta.goal with
-          | "" -> (
-              match declarative_materialization_goal defaults with
-              | Some derived -> derived
-              | None -> meta.goal)
-          | normalized -> normalized)
-    in
     let target_instructions = apply_default defaults.instructions meta.instructions in
 
     (* --- Policy --- *)
@@ -445,7 +410,6 @@ let ensure_keeper_meta_with_cause config name =
         proactive = {
           enabled = target_proactive;
         };
-        goal = target_goal;
         instructions = target_instructions;
         autoboot_enabled = target_autoboot_enabled;
         mention_targets = target_mention_targets;
@@ -462,7 +426,7 @@ let ensure_keeper_meta_with_cause config name =
     in
     (* Keep the runtime snapshot honest as well as the live overlay for fields
        that are actually emitted by [meta_to_json].  TOML-only config fields
-       (goal, sandbox policy, cadence, etc.) remain overlay-only; if
+       (sandbox policy, cadence, etc.) remain overlay-only; if
        they triggered writes here, [meta_to_json]/scrub would drop them from disk
        and the next reconcile tick would see the same drift again. *)
     let overlay_cats =
@@ -526,18 +490,8 @@ let ensure_keeper_meta config name =
   | Ok meta -> Ok meta
   | Error err -> Error err.message
 
-let declarative_materialization_args name defaults =
-  let fields = [ ("name", `String name) ] in
-  let fields =
-    match declarative_materialization_goal defaults with
-    | None -> fields
-    | Some goal ->
-        Log.Keeper.info
-          "bootstrapping declarative keeper %s with derived goal from TOML defaults"
-          name;
-        ("goal", `String goal) :: fields
-  in
-  `Assoc (List.rev fields)
+let declarative_materialization_args name _defaults =
+  `Assoc [ "name", `String name ]
 
 let declarative_materialization_defaults config name =
   match profile_defaults_result_for_config config name with
@@ -550,12 +504,6 @@ let declarative_materialization_defaults config name =
             (sandbox_profile_required_boot_error
                ~keeper_name:name
                ~manifest_path:defaults.manifest_path))
-
-let goal_required_boot_error ~name ~toml_path =
-  boot_meta_error Goal_required
-    (Printf.sprintf
-       "failed to materialize declarative keeper %s from %s: goal is required when creating a keeper"
-       name toml_path)
 
 let materialization_failed_boot_error ~name ~toml_path ~body =
   boot_meta_error Materialization_failed
@@ -583,10 +531,7 @@ let load_or_materialize_boot_meta (ctx : _ context) name
               name toml_path;
             match declarative_materialization_defaults ctx.config name with
             | Error err -> Error err
-            | Ok defaults -> (
-                match declarative_materialization_goal defaults with
-                | None -> Error (goal_required_boot_error ~name ~toml_path)
-                | Some _ ->
+            | Ok defaults ->
             let result =
               Keeper_turn.handle_keeper_up ctx
                 (declarative_materialization_args name defaults)
@@ -615,7 +560,7 @@ let load_or_materialize_boot_meta (ctx : _ context) name
                   match ensure_keeper_meta_with_cause ctx.config name with
                   | Ok meta -> Ok { meta; materialized = true }
                   | Error msg ->
-                      Error (materialized_reload_boot_error ~name ~toml_path msg)))))
+                      Error (materialized_reload_boot_error ~name ~toml_path msg))))
   in
   remember_boot_meta_result ctx name result
 

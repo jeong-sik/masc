@@ -23,14 +23,13 @@ type t = {
   requester : string;
   topic : string;
   reason : string;
-  goal : string option;
   source_action : string;
   promotion_state : promotion_state;
   task_seed : task_seed;
 }
 
 val make :
-  requester:string -> ?goal:string -> topic:string -> reason:string -> unit -> t
+  requester:string -> topic:string -> reason:string -> unit -> t
 
 val identity_key : t -> string
 (** Stable artifact/index identity. Keeps [None] distinct from [Some ""]-style
@@ -38,7 +37,6 @@ val identity_key : t -> string
 
 val of_action :
   requester:string ->
-  ?goal:string ->
   Keeper_deliberation.deliberation_action ->
   t list
 (** [of_action] projects all [propose_spawn] actions in a [multi_step] action.
@@ -46,7 +44,6 @@ val of_action :
 
 val of_execution_result :
   requester:string ->
-  ?goal:string ->
   Keeper_deliberation.execution_result ->
   t list
 
@@ -56,12 +53,10 @@ val to_json : t -> Yojson.Safe.t
 
 val delegation_request_json :
   requester:string ->
-  ?goal:string ->
   Keeper_deliberation.execution_result option ->
   Yojson.Safe.t
 
 val delegation_request_field :
   requester:string ->
-  ?goal:string ->
   Keeper_deliberation.execution_result option ->
   string * Yojson.Safe.t

@@ -706,7 +706,6 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         config_error: normalizeKeeperProfileConfigError(row.config_error),
         trust,
         active_goal_ids: asStringArray(row.active_goal_ids) ?? [],
-        goal: asString(row.goal) ?? null,
         sandbox_profile: normalizeKeeperSandboxProfile(row.sandbox_profile),
         sandbox_target: asString(row.sandbox_target) ?? null,
         sandbox_last_error: asString(row.sandbox_last_error) ?? null,

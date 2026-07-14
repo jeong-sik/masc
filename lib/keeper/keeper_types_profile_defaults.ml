@@ -2,7 +2,6 @@ type keeper_profile_defaults = {
   id : Ids.Keeper_id.t option;
   manifest_path : string option;
   persona_name : string option;
-  goal : string option;
   instructions : string option;
   autoboot_enabled : bool option;
   mention_targets : string list;
@@ -38,7 +37,6 @@ let empty_keeper_profile_defaults =
     id = None;
     manifest_path = None;
     persona_name = None;
-    goal = None;
     instructions = None;
     autoboot_enabled = None;
     mention_targets = [];

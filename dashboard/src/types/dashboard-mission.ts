@@ -374,7 +374,6 @@ export interface OperatorKeeperSnapshot {
   last_autonomous_action_at?: string | null
   last_turn_ago_s?: number
   model?: string
-  goal?: string
   turn_count?: number
   context_tokens?: number
   context_max?: number

@@ -533,13 +533,12 @@ describe('keeperActivityDisplay', () => {
 })
 
 describe('keeperWorkPreview', () => {
-  it('prefers a message output over the proactive preview and goal', () => {
+  it('prefers a message output over the proactive preview', () => {
     expect(
       keeperWorkPreview(
         makeKeeper({
           recent_output_preview: '메시지 출력',
           last_proactive_preview: 'proactive',
-          goal: '목표',
         }),
       ),
     ).toBe('메시지 출력')
@@ -547,7 +546,7 @@ describe('keeperWorkPreview', () => {
 
   it('surfaces last_proactive_preview when message previews are empty', () => {
     // The proactive-only keeper: no broadcast (recent_output/input empty), no
-    // goal/current_task — work lives solely in last_proactive_preview.
+    // current_task — work lives solely in last_proactive_preview.
     expect(
       keeperWorkPreview(
         makeKeeper({
@@ -559,8 +558,7 @@ describe('keeperWorkPreview', () => {
     ).toBe('Continuation checkpoint saved.')
   })
 
-  it('falls through to goal then current_task', () => {
-    expect(keeperWorkPreview(makeKeeper({ goal: 'long' }))).toBe('long')
+  it('falls through to current_task', () => {
     expect(keeperWorkPreview(makeKeeper({ agent: { current_task: 'task-7' } }))).toBe('task-7')
   })
 

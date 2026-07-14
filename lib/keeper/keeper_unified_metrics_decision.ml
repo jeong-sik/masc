@@ -194,7 +194,7 @@ let append_decision_record
               Keeper_deliberation.execution_result_to_json execution
           | None -> `Null );
         Keeper_delegation_request.delegation_request_field ~requester:meta.name
-          ~goal:meta.goal deliberation_execution;
+          deliberation_execution;
         ( "response_preview", Json_util.string_opt_to_json response_preview );
         ( "response_preview_2000",
           match result with

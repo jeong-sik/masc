@@ -107,8 +107,8 @@ let validate_create_args args =
      - persona identity, top level: ["name"] (display name), ["role"],
        ["trait"] — read by
        [Keeper_types_profile_persona.persona_summary_of_profile_json];
-     - keeper template defaults, nested under ["keeper"]: ["goal"],
-       ["instructions"], ["mention_targets"], ["proactive_enabled"] — read by
+     - keeper template defaults, nested under ["keeper"]: ["instructions"],
+       ["mention_targets"], ["proactive_enabled"] — read by
        [Keeper_types_profile_persona_defaults.load_from_path], which only ever
        inspects the ["keeper"] member and rejects removed fields
        (tool_access/tool_denylist) fail-closed.
@@ -118,18 +118,17 @@ let validate_create_args args =
    top level instead of under ["keeper"]). Neither loader reads that shape, so
    the display name showed the directory name and every keeper-template field
    was silently dropped — spawning a keeper from a tool-created persona then
-   failed with "goal is required". These helpers write the shape the loaders
-   actually read. Fields that no reader consumes (previously [persona_name],
+   failed to materialize the requested keeper defaults. These helpers write
+   the shape the loaders actually read. Fields that no reader consumes
+   (previously [persona_name],
    [display_name] as a separate key, [created_at], [auto_handoff]) are not
    persisted. *)
 
 let keeper_defaults_fields args : (string * Yojson.Safe.t) list =
-  let goal = get_string_opt args "goal" in
   let instructions = get_string_opt args "instructions" in
   let mention_targets = get_string_list args "mention_targets" in
   let proactive_enabled = get_bool_opt args "proactive_enabled" in
-  (match goal with Some v -> [("goal", `String v)] | None -> [])
-  @ (match instructions with Some v -> [("instructions", `String v)] | None -> [])
+  (match instructions with Some v -> [("instructions", `String v)] | None -> [])
   @ (if mention_targets = [] then [] else [("mention_targets", `List (List.map (fun s -> `String s) mention_targets))])
   @ (match proactive_enabled with Some v -> [("proactive_enabled", `Bool v)] | None -> [])
 
@@ -168,7 +167,7 @@ let merge_assoc base updates =
 
     Updates are routed to the same two layers the loaders read: identity
     fields ([display_name] -> top-level ["name"], [role], [trait]) stay at
-    the top level, and keeper-template fields ([goal], [instructions],
+    the top level, and keeper-template fields ([instructions],
     [mention_targets], [proactive_enabled]) merge into the
     nested ["keeper"] object. Only fields present in [args] change. *)
 let merge_update_args_into_profile existing_json args : (Yojson.Safe.t, string) result =
@@ -206,8 +205,7 @@ let merge_update_args_into_profile existing_json args : (Yojson.Safe.t, string) 
         @ field "trait" (str_update "trait")
       in
       let keeper_updates =
-        field "goal" (str_update "goal")
-        @ field "instructions" (str_update "instructions")
+        field "instructions" (str_update "instructions")
         @ field "mention_targets" (list_update "mention_targets")
         @ field "proactive_enabled" (bool_update "proactive_enabled")
       in

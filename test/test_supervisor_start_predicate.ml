@@ -62,7 +62,7 @@ let write_keeper_toml ?autoboot_enabled config_root ~name =
        {|
 [keeper]
 name = "%s"
-goal = "test keeper"
+instructions = "test keeper"
 %s
 |}
        name
@@ -74,7 +74,6 @@ let make_meta ?(paused = false) name =
       [ ("name", `String name)
       ; ("agent_name", `String ("keeper-" ^ name ^ "-agent"))
       ; ("trace_id", `String ("trace-" ^ name))
-      ; ("goal", `String "test")
       ; ("sandbox_profile", `String "local")
       ; ("network_mode", `String "inherit")
       ]

@@ -42,7 +42,6 @@ let make_docker_meta ~name : Keeper_meta_contract.keeper_meta =
         ("name", `String name);
         ("agent_name", `String ("agent-" ^ name));
         ("trace_id", `String ("trace-" ^ name));
-        ("goal", `String "cwd response leak pin");
         ("allowed_paths", `List [ `String "*" ]);
         ( "sandbox_profile"
         , `String

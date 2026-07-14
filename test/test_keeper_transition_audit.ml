@@ -85,7 +85,6 @@ let keeper_meta name =
           ("name", `String name);
           ("agent_name", `String (name ^ "-agent"));
           ("trace_id", `String ("trace-" ^ name));
-          ("goal", `String "transition-audit-test");
           ("runtime_id", `String Masc.(Keeper_config.default_runtime_id ()));
         ])
   with

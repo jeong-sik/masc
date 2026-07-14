@@ -6,7 +6,6 @@ val alert_excerpt_min_chars : int
 val alert_message_preview_max_chars : int
 val alert_reply_preview_max_chars : int
 val default_proactive_enabled : bool
-val default_goal_max_chars : int
 val prompt_render_max_bytes : int
 val bool_default_true_of_env : string -> bool
 val bool_of_env_default : string -> default:bool -> bool
@@ -30,7 +29,6 @@ val reject_removed_keeper_msg_input_keys :
   tool_name:string -> Yojson.Safe.t -> (unit, string) result
 val utf8_repair_string : string -> string
 val normalize_prompt_text : max_bytes:int -> string -> string
-val normalize_goal_text : ?max_len:int -> string -> string
 val default_compaction_profile : string
 val canonical_compaction_profile : string -> string option
 val parse_compaction_profile_opt :
@@ -96,7 +94,6 @@ type keeper_profile_defaults =
   id : Ids.Keeper_id.t option;
   manifest_path : string option;
   persona_name : string option;
-  goal : string option;
   instructions : string option;
   autoboot_enabled : bool option;
   mention_targets : string list;

@@ -267,7 +267,7 @@ let execute_keeper_up ctx args : tool_result =
 let keeper_brief_meta_json (meta : keeper_meta) =
   `Assoc
     [
-      ("name", `String meta.name); ("goal", `String meta.goal);
+      ("name", `String meta.name);
       ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
       ("created_at", `String meta.created_at); ("updated_at", `String meta.updated_at);
     ]

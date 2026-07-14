@@ -108,7 +108,6 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
                     ; "agent_name", `String meta.agent_name
                     ; ( "trace_id"
                       , `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id) )
-                    ; "goal", `String meta.goal
                     ; "status", `String agent_status
                     ; "generation", `Int meta.runtime.generation
                     ; "turn_count", `Int meta.runtime.usage.total_turns

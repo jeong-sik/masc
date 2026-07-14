@@ -16,7 +16,6 @@ open Keeper_types_profile
 type parsed_args =
   { name : string
   ; compaction_profile_opt : string option
-  ; goal_opt : string option
   ; runtime_id_opt : string option
   ; allowed_paths_opt : string list option
   ; autoboot_enabled_opt : bool option

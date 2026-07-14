@@ -41,7 +41,7 @@ let find_jsonl_row_by_action_id rows action_id =
          | _ -> None)
 
 let resolved_keeper_args_to_json
-    ~name ~persona_name ~goal
+    ~name ~persona_name
     ~instructions
     ~mention_targets
     ~allowed_paths_opt
@@ -52,7 +52,6 @@ let resolved_keeper_args_to_json
     [
       ("name", `String name);
       ("persona_name", `String persona_name);
-      ("goal", `String goal);
       ("instructions", `String instructions);
       ("mention_targets", Json_util.json_string_list mention_targets);
       ("proactive_enabled", `Bool proactive_enabled);
@@ -73,18 +72,6 @@ let resolved_keeper_args_to_json
   in
   `Assoc
     (base @ allowed_paths_field @ autoboot_field)
-
-let validate_resolved_keeper_create_json (json : Yojson.Safe.t) : string list =
-  let errors = ref [] in
-  let name = Safe_ops.json_string ~default:"" "name" json in
-  let goal = Safe_ops.json_string ~default:"" "goal" json |> String.trim in
-  let mention_targets = Safe_ops.json_string_list "mention_targets" json in
-  if not (validate_name name) then
-    errors := invalid_name_error name :: !errors;
-  if goal = "" then errors := "goal is required" :: !errors;
-  if mention_targets = [] then
-    errors := "mention_targets is required" :: !errors;
-  List.rev !errors
 
 let toml_escape_string value =
   let buf = Buffer.create (String.length value + 8) in
@@ -164,7 +151,6 @@ let render_keeper_toml_from_resolved_args (json : Yojson.Safe.t) :
               let fields = [] in
               let fields = append_string_field fields "name" name in
               let fields = append_string_field fields "persona_name" persona_name in
-              let fields = append_optional_string_field fields "goal" json in
               let fields = append_optional_string_field fields "instructions" json in
               let fields =
                 append_optional_bool_field fields "autoboot_enabled" json
@@ -263,12 +249,6 @@ let resolved_keeper_args_from_persona args :
         let name =
           get_string_opt args "name" |> Option.value ~default:persona_name
         in
-        let goal =
-          get_string_opt args "goal"
-          |> Dashboard_utils.first_some defaults.goal
-          |> Option.value ~default:""
-          |> normalize_goal_text
-        in
         let instructions =
           get_string_opt args "instructions"
           |> Dashboard_utils.first_some defaults.instructions
@@ -312,7 +292,6 @@ let resolved_keeper_args_from_persona args :
                    resolved_keeper_args_to_json
                      ~name
                      ~persona_name
-                     ~goal
                      ~instructions
                      ~mention_targets
                      ~allowed_paths_opt:allowed_paths

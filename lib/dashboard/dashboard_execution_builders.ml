@@ -270,9 +270,9 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
       generation turn_count autonomous_turn_count autonomous_action_count goal_count
   in
   let focus =
-    match String_util.trim_to_option (string_field "goal" keeper) with
-    | Some value -> value
-    | None -> "현재 포커스 없음"
+    match string_list_of_field "active_goal_ids" keeper with
+    | goal_id :: _ -> goal_id
+    | [] -> "현재 활성 Goal 없음"
   in
   let recent_input_preview =
     String_util.trim_to_option (string_field "recent_input_preview" keeper)

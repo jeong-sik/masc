@@ -59,7 +59,6 @@ let make_meta name =
       [ ("name", `String name)
       ; ("agent_name", `String ("agent-" ^ name))
       ; ("trace_id", `String ("trace-conn-" ^ name))
-      ; ("goal", `String "connector attention wake test")
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with

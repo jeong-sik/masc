@@ -44,7 +44,6 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
     allowed_paths: ['/tmp/workspace'],
     effective_allowed_paths: ['/tmp/workspace'],
     prompt: {
-      goal: 'Ship stable keeper ops',
       instructions: 'Prefer direct remediation',
       system_prompt_blocks: {
         constitution: { key: 'keeper.constitution', source: 'file', text: 'constitution text' },
@@ -115,7 +114,7 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
       default_source_kind: 'toml',
       precedence: ['live_meta', 'toml', 'persona'],
       has_live_override: true,
-      override_fields: ['goal', 'instructions'],
+      override_fields: ['prompt.instructions'],
     },
     metrics: {
       generation: 3,
@@ -1073,7 +1072,7 @@ describe('KeeperConfigPanel', () => {
 
     const textareas = Array.from(container.querySelectorAll('textarea'))
     expect(textareas.length).toBeGreaterThan(0)
-    expect(textareas[0]?.value).toContain('Ship stable keeper ops')
+    expect(textareas[0]?.value).toContain('Prefer direct remediation')
   })
 
   it('runs lifecycle directives from the health tab and refreshes the config snapshot', async () => {
@@ -1239,7 +1238,7 @@ describe('KeeperConfigPanel', () => {
     const updated = makeKeeperConfig({
       prompt: {
         ...makeKeeperConfig().prompt,
-        goal: 'Ship refreshed keeper surfaces',
+        instructions: 'Ship refreshed keeper surfaces',
       },
     })
     mocks.patchKeeperConfig.mockResolvedValueOnce(updated)
@@ -1257,11 +1256,11 @@ describe('KeeperConfigPanel', () => {
     editButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await flush()
 
-    const goal = container.querySelector('textarea') as HTMLTextAreaElement | null
-    expect(goal).not.toBeNull()
-    goal!.value = 'Ship refreshed keeper surfaces'
-    goal!.dispatchEvent(new Event('input', { bubbles: true }))
-    goal!.dispatchEvent(new FocusEvent('blur', { bubbles: true }))
+    const instructions = container.querySelector('textarea') as HTMLTextAreaElement | null
+    expect(instructions).not.toBeNull()
+    instructions!.value = 'Ship refreshed keeper surfaces'
+    instructions!.dispatchEvent(new Event('input', { bubbles: true }))
+    instructions!.dispatchEvent(new FocusEvent('blur', { bubbles: true }))
     await flush()
 
     const saveButton = Array.from(container.querySelectorAll('button')).find(button =>
@@ -1274,7 +1273,7 @@ describe('KeeperConfigPanel', () => {
 
     expect(mocks.patchKeeperConfig).toHaveBeenCalledWith(
       'keeper-sangsu',
-      expect.objectContaining({ goal: 'Ship refreshed keeper surfaces' }),
+      expect.objectContaining({ instructions: 'Ship refreshed keeper surfaces' }),
     )
     expect(mocks.refreshKeeperRuntimeStatus).toHaveBeenCalledTimes(1)
     expect(mocks.refreshKeeperRuntimeStatus).toHaveBeenCalledWith({ force: true })
@@ -1535,11 +1534,11 @@ describe('KeeperConfigPanel', () => {
   })
 
   it('renders the keeper-scoped prompt assembly trace with an override win badge', async () => {
-    // Real server override_fields are dot-namespaced (prompt.goal); mark only goal.
+    // Real server override_fields are dot-namespaced; mark instructions.
     const base = makeKeeperConfig()
     mocks.fetchKeeperConfig.mockResolvedValueOnce(
       makeKeeperConfig({
-        sources: { ...base.sources, override_fields: ['prompt.goal'], has_live_override: true },
+        sources: { ...base.sources, override_fields: ['prompt.instructions'], has_live_override: true },
       }),
     )
     render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
@@ -1551,9 +1550,9 @@ describe('KeeperConfigPanel', () => {
 
     expect(container.textContent).toContain('조립 추적')
     expect(container.querySelector('.kasm')).not.toBeNull()
-    // 3 base blocks + goal + instructions + goals = 6 segments
-    expect(container.querySelectorAll('.kasm-seg').length).toBe(6)
-    // only prompt.goal is overridden → exactly one win badge
+    // 3 base blocks + instructions + goals = 5 segments
+    expect(container.querySelectorAll('.kasm-seg').length).toBe(5)
+    // only prompt.instructions is overridden → exactly one win badge
     const winBadges = container.querySelectorAll('.kasm-seg-win')
     expect(winBadges.length).toBe(1)
     expect(winBadges[0]!.textContent).toContain('매니페스트 덮어씀')
@@ -1640,10 +1639,8 @@ describe('buildKcfAssemblySegments', () => {
       sources: { ...base.sources, override_fields: ['prompt.instructions'] },
     })
     const segs = buildKcfAssemblySegments(c)
-    expect(segs.map((s) => s.src)).toEqual(['base', 'base', 'base', 'manifest', 'override', 'goals'])
-    const goalSeg = segs.find((s) => s.field.includes('objective'))
+    expect(segs.map((s) => s.src)).toEqual(['base', 'base', 'base', 'override', 'goals'])
     const instrSeg = segs.find((s) => s.field.includes('instructions'))
-    expect(goalSeg?.win).toBe(false)
     expect(instrSeg?.win).toBe(true)
     expect(instrSeg?.src).toBe('override')
   })
@@ -1651,7 +1648,7 @@ describe('buildKcfAssemblySegments', () => {
   it('omits empty prompt fields and the goals segment when there are no active goals', () => {
     const base = makeKeeperConfig()
     const c = makeKeeperConfig({
-      prompt: { ...base.prompt, goal: '', instructions: '' },
+      prompt: { ...base.prompt, instructions: '' },
       workspace: { ...base.workspace, active_goals: [] },
     })
     const segs = buildKcfAssemblySegments(c)

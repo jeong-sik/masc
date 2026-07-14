@@ -221,15 +221,18 @@ let test_registry_reload_meta_from_disk_repairs_stale_meta () =
       write_keeper_toml
         ~base_dir
         name
-        [ "[keeper]"; {|sandbox_profile = "local"|}; {|goal = "fresh goal"|} ];
+        [ "[keeper]"
+        ; {|sandbox_profile = "local"|}
+        ; {|instructions = "fresh instructions"|}
+        ];
       let persisted_meta = make_keeper_meta ~name () in
-      let stale_meta = { persisted_meta with goal = "stale goal" } in
+      let stale_meta = { persisted_meta with instructions = "stale instructions" } in
       ignore (KR.register ~base_path:config.base_path name stale_meta);
       write_keeper_meta_json_for_name config name persisted_meta;
       match KR.reload_meta_from_disk ~base_path:config.base_path name with
       | Ok (Some entry) ->
-          check string "reload applies base-path TOML goal" "fresh goal"
-            entry.meta.goal
+          check string "reload applies base-path TOML instructions" "fresh instructions"
+            entry.meta.instructions
       | Ok None -> fail "expected reload to update registered keeper"
       | Error msg -> fail ("reload_meta_from_disk failed: " ^ msg))
 

@@ -546,6 +546,8 @@ let test_masc_keeper_create_from_persona_schema () =
       | Some props ->
           Alcotest.(check bool) "has persona_name" true
             (List.mem_assoc "persona_name" props);
+          Alcotest.(check bool) "omits removed goal" false
+            (List.mem_assoc "goal" props);
           Alcotest.(check bool) "omits retired shards" false
             (List.mem_assoc "shards" props)
       | None -> Alcotest.fail "masc_keeper_create_from_persona missing properties"
@@ -564,6 +566,18 @@ let test_keeper_shards_arg_rejected () =
       true
       (contains_substring ~needle:"shards" msg)
 
+let test_keeper_goal_arg_rejected () =
+  let args = `Assoc [ "goal", `String "removed" ] in
+  match
+    Masc.Keeper_config.reject_removed_keeper_input_keys
+      ~tool_name:"masc_keeper_up"
+      args
+  with
+  | Ok () -> Alcotest.fail "removed goal arg should be rejected"
+  | Error msg ->
+    Alcotest.(check bool) "goal mentioned" true
+      (contains_substring ~needle:"goal" msg)
+
 let test_masc_keeper_up_schema () =
   match find_registered_tool "masc_keeper_up" with
   | None -> Alcotest.fail "masc_keeper_up not found"
@@ -576,6 +590,8 @@ let test_masc_keeper_up_schema () =
             (List.mem_assoc "network_mode" props);
           Alcotest.(check bool) "has autoboot_enabled" true
             (List.mem_assoc "autoboot_enabled" props);
+          Alcotest.(check bool) "omits removed goal" false
+            (List.mem_assoc "goal" props);
           Alcotest.(check bool) "omits models" false
             (List.mem_assoc "models" props);
           Alcotest.(check bool) "omits allowed_models" false
@@ -850,6 +866,8 @@ let () =
         test_masc_keeper_create_from_persona_schema;
       Alcotest.test_case "keeper-shards-arg-rejected" `Quick
         test_keeper_shards_arg_rejected;
+      Alcotest.test_case "keeper-goal-arg-rejected" `Quick
+        test_keeper_goal_arg_rejected;
       Alcotest.test_case "keeper-up" `Quick
         test_masc_keeper_up_schema;
       Alcotest.test_case "keeper-sandbox-args-rejected" `Quick

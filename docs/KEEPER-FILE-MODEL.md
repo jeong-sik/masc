@@ -83,7 +83,6 @@ These are the identity fields that should live in persona by default.
 
 | Field | Required | Meaning | Notes |
 | --- | --- | --- | --- |
-| `goal` | Required for a standalone operational persona | Primary goal | If absent, a caller must override it explicitly. |
 | `instructions` | Optional | Persona-specific behavior and voice instructions | Used as prompt default unless a keeper TOML overlay overrides it. |
 | `mention_targets` | Optional | Default mention aliases | If omitted, create-from-persona falls back to `[persona_name]`. |
 
@@ -127,7 +126,7 @@ These are still accepted by the loader, but for consistency they should be used 
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `goal`, `instructions` | string | Override persona prompt identity |
+| `instructions` | string | Override persona prompt identity |
 | `mention_targets` | string array | Override persona mention aliases |
 | `proactive_enabled` | bool | Override default proactive scheduling |
 | `proactive_idle_sec`, `proactive_cooldown_sec` | int | Proactive scheduling intervals |
@@ -178,6 +177,7 @@ These keys are **rejected at load time** with an `Error`. They are retained only
 
 | Field | Replacement / rationale |
 | --- | --- |
+| `goal` | Link typed Goal Store entities through `active_goal_ids`. Free-form keeper goal text is removed. |
 | `tool_access`, `tool_denylist`, `shards`, `policy_voice_enabled` | Per-Keeper tool hierarchies are removed. The immutable catalog and descriptor/registry projection define which typed tools exist; each concrete external effect then reaches the Gate. |
 | `runtime_id`, `model`, `runtime_ref` | Runtime assignment lives in `runtime.toml` `[runtime.assignments]`, keyed by keeper name. |
 | `models`, `allowed_models`, `active_model` | Models are resolved from the assigned runtime. Do not pin per-keeper. |
@@ -241,12 +241,11 @@ These are the fields that define the durable runtime snapshot itself.
 | `proactive_count_total`, `last_proactive_ts` | Optional | Proactive runtime counters |
 | `telemetry_feedback_*` state | Optional | Runtime feedback state |
 
-### Important compatibility note
+### Runtime snapshot note
 
-Current implementation may still materialize some authored fields into `keeper.json`
-for compatibility (`goal`, `instructions`, etc.).
-
-Those fields are **not** the preferred edit surface.
+The runtime may snapshot identity text such as `instructions` into `keeper.json`
+for status and prompt assembly. Removed `goal` values are rejected rather than
+read, migrated, or scrubbed.
 
 Operational rule:
 

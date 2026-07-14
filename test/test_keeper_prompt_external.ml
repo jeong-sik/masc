@@ -158,7 +158,6 @@ let meta_for_task_create_prompt () =
         [
           ("name", `String "prompt-task-create");
           ("trace_id", `String "trace-prompt-task-create");
-          ("goal", `String "test prompt task creation");
         ])
   with
   | Ok meta -> meta

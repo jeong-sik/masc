@@ -227,7 +227,7 @@ let test_snapshot_prefers_metrics_context_truth_over_usage_counters () =
             (`Assoc
               [
                 ("name", `String keeper_name);
-                ("goal", `String "Prefer metrics context truth");
+                ("instructions", `String "Prefer metrics context truth");
                 ("proactive_enabled", `Bool false);
                 ("autoboot_enabled", `Bool false);
               ])
@@ -389,7 +389,6 @@ let test_keeper_up_clears_dead_tombstone_resume_state () =
             ("name", `String keeper_name);
             ("agent_name", `String (Keeper_identity.keeper_agent_name keeper_name));
             ("trace_id", `String "trace-dead-tombstone-operator-resume");
-            ("goal", `String "Resume a tombstoned keeper");
             ("runtime_id", `String "runtime.primary");
           ])
     with
@@ -446,7 +445,7 @@ let test_keeper_up_clears_dead_tombstone_resume_state () =
         (`Assoc
           [
             ("name", `String keeper_name);
-            ("goal", `String "Resume tombstoned keeper");
+            ("instructions", `String "Resume tombstoned keeper");
             ("proactive_enabled", `Bool false);
             ("autoboot_enabled", `Bool false);
           ])
@@ -609,7 +608,6 @@ let test_lifecycle_owner_gates_meta_and_registry_mutations () =
               [ "name", `String "reserved-dead"
               ; "agent_name", `String (Keeper_identity.keeper_agent_name "reserved-dead")
               ; "trace_id", `String "trace-reserved-dead"
-              ; "goal", `String "Verify lifecycle ownership"
               ; "runtime_id", `String "runtime.primary"
               ])
         with
@@ -720,7 +718,6 @@ let test_dead_revival_launch_failure_rolls_back_both_authorities () =
               [ "name", `String keeper_name
               ; "agent_name", `String (Keeper_identity.keeper_agent_name keeper_name)
               ; "trace_id", `String "trace-dead-revival-rollback"
-              ; "goal", `String "Rollback a rejected revival"
               ; "runtime_id", `String "runtime.primary"
               ])
         with
@@ -837,7 +834,6 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
                 ("name", `String keeper_name);
                 ("agent_name", `String (Keeper_identity.keeper_agent_name keeper_name));
                 ("trace_id", `String "trace-paused-runtime-trust");
-                ("goal", `String "Expose paused keeper failure in summary");
                 ("runtime_id", `String "runtime.primary");
               ])
         with
@@ -981,7 +977,7 @@ let test_digest_workspace_includes_keeper_runtime_attention () =
             (`Assoc
               [
                 ("name", `String keeper_name);
-                ("goal", `String "Expose keeper attention in digest");
+                ("instructions", `String "Expose keeper attention in digest");
                 ("proactive_enabled", `Bool false);
                 ("autoboot_enabled", `Bool false);
               ])
@@ -1087,7 +1083,7 @@ let test_lightweight_snapshot_preserves_receipt_latest_causal_event () =
             (`Assoc
               [
                 ("name", `String keeper_name);
-                ("goal", `String "Keep receipt causal signal in summary");
+                ("instructions", `String "Keep receipt causal signal in summary");
                 ("proactive_enabled", `Bool false);
                 ("autoboot_enabled", `Bool false);
               ])
@@ -1360,7 +1356,7 @@ let test_snapshot_lightweight_summary_keeps_tool_audit () =
             (`Assoc
               [
                 ("name", `String keeper_name);
-                ("goal", `String "Surface tool audit in lightweight snapshots");
+                ("instructions", `String "Surface tool audit in lightweight snapshots");
                 ("proactive_enabled", `Bool false);
                 ("autoboot_enabled", `Bool false);
               ])
@@ -1471,7 +1467,7 @@ let test_snapshot_lightweight_summary_keeps_recent_tools_distinct_from_latest ()
             (`Assoc
               [
                 ("name", `String keeper_name);
-                ("goal", `String "Keep recent tool names distinct from latest");
+                ("instructions", `String "Keep recent tool names distinct from latest");
                 ("proactive_enabled", `Bool false);
                 ("autoboot_enabled", `Bool false);
               ])

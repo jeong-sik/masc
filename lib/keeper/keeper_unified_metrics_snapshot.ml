@@ -159,7 +159,7 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
               Keeper_deliberation.execution_result_to_json execution
           | None -> `Null );
         Keeper_delegation_request.delegation_request_field ~requester:meta.name
-          ~goal:meta.goal deliberation_execution;
+          deliberation_execution;
         ("runtime",
          match result.runtime_observation with
          | Some observation -> redacted_runtime_observation_to_json observation

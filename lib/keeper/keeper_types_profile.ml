@@ -156,13 +156,11 @@ let persona_operator_todo_placeholder_fields
       ("name", Some summary.display_name);
       ("role", summary.role);
       ("trait", summary.trait);
-      ("keeper.goal", defaults.goal);
     ]
 
 let keeper_profile_defaults_materializable (defaults : keeper_profile_defaults) =
   let has_runtime_identity =
     Option.is_some defaults.persona_name
-    || Option.is_some defaults.goal
     || defaults.mention_targets <> []
   in
   match defaults.autoboot_enabled with

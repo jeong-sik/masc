@@ -81,7 +81,6 @@ let make_meta name =
       (`Assoc
          [ ("name", `String name)
          ; ("trace_id", `String ("test-trace-" ^ name))
-         ; ("goal", `String "test goal")
          ])
   with
   | Ok meta -> meta

@@ -551,14 +551,27 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
     | Some block -> "\n" ^ block ^ "\n"
   in
   let goal_lines =
-    let has_valid_primary_goal =
-      Option.is_some (Keeper_runtime_contract.primary_goal_id_opt meta)
+    let primary_goal =
+      match Keeper_runtime_contract.primary_goal_id_opt meta with
+      | None -> None
+      | Some goal_id ->
+        let title =
+          match active_goal_summaries with
+          | Some summaries -> List.assoc_opt goal_id summaries
+          | None -> None
+        in
+        Some
+          (match title with
+           | Some title -> goal_id ^ " — " ^ title
+           | None -> goal_id)
     in
+    let has_valid_primary_goal = Option.is_some primary_goal in
     String.concat ""
       [
         line_block "Primary goal"
-          (if has_valid_primary_goal then meta.goal
-           else "(no valid active goal — awaiting assignment)");
+          (Option.value
+             ~default:"(no valid active goal — awaiting assignment)"
+             primary_goal);
         (if not has_valid_primary_goal then
            "\n\
             You have no active goal. Pick ONE action this turn to self-assign a purpose:\n\

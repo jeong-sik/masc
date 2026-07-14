@@ -113,12 +113,12 @@ let write_keeper_toml config_dir ~name =
        {|
 [keeper]
 name = "%s"
-goal = "test keeper"
+instructions = "test keeper"
 sandbox_profile = "local"
 |}
        name)
 
-let write_keeper_toml_without_goal config_dir ~name ~instructions =
+let write_keeper_toml_with_instructions config_dir ~name ~instructions =
   write_file
     (Filename.concat (Filename.concat config_dir "keepers") (name ^ ".toml"))
     (Printf.sprintf
@@ -132,7 +132,7 @@ instructions = "%s"
        name instructions);
   Keeper_types_profile.invalidate_keeper_profile_defaults_cache name
 
-let write_empty_keeper_toml_without_goal config_dir ~name =
+let write_empty_keeper_toml config_dir ~name =
   write_file
     (Filename.concat (Filename.concat config_dir "keepers") (name ^ ".toml"))
     (Printf.sprintf
@@ -189,7 +189,6 @@ let test_should_cleanup_dead_true () =
         ("name", `String "dead1");
         ("agent_name", `String "agent-dead1");
         ("trace_id", `String "trace-dead1");
-        ("goal", `String "goal");
         ("sandbox_profile", `String "local");
         ("network_mode", `String "inherit");
       ] in
@@ -209,7 +208,6 @@ let test_should_cleanup_dead_false_when_recent () =
         ("name", `String "dead2");
         ("agent_name", `String "agent-dead2");
         ("trace_id", `String "trace-dead2");
-        ("goal", `String "goal");
         ("sandbox_profile", `String "local");
         ("network_mode", `String "inherit");
       ] in
@@ -275,7 +273,6 @@ let make_meta name =
     ("name", `String name);
     ("agent_name", `String ("agent-" ^ name));
     ("trace_id", `String ("trace-" ^ name));
-    ("goal", `String "test");
     ("sandbox_profile", `String "local");
     ("network_mode", `String "inherit");
   ] in
@@ -439,7 +436,7 @@ let test_persona_drift_check_uses_toml_persona_name () =
 [keeper]
 name = "tech_glutton"
 persona_name = "executor"
-goal = "plan coding work"
+instructions = "plan coding work"
 |};
   match Sup.persona_name_for_drift_check (make_meta "tech_glutton") with
   | Ok persona_name ->
@@ -485,7 +482,7 @@ let test_missing_persona_with_inline_toml_is_warn () =
 [keeper]
 name = "inline-only"
 persona_name = "missing-profile"
-goal = "inline keeper metadata is enough to run"
+instructions = "inline keeper metadata is enough to run"
 |};
   check
     bool
@@ -524,7 +521,7 @@ let latest_log_seq () =
   | (entry : Log.Ring.entry) :: _ -> entry.seq
   | [] -> -1
 
-let test_declarative_boot_materializes_goal_from_instructions () =
+let test_declarative_boot_materializes_instructions () =
   with_config_dir @@ fun config_dir ->
   Eio_main.run @@ fun env ->
   ensure_test_runtime ();
@@ -533,7 +530,7 @@ let test_declarative_boot_materializes_goal_from_instructions () =
   let base_dir = Filename.dirname config_dir in
   let name = "intent-only" in
   let instructions = "watch fleet safety and repair keeper bootstrap" in
-  write_keeper_toml_without_goal config_dir ~name ~instructions;
+  write_keeper_toml_with_instructions config_dir ~name ~instructions;
   Eio.Switch.on_release sw (fun () ->
       Reg.clear ();
       KR.reset_test_state base_dir);
@@ -547,13 +544,13 @@ let test_declarative_boot_materializes_goal_from_instructions () =
       | Error err -> fail err
       | Ok resolution ->
       check bool "materialized from declarative TOML" true resolution.materialized;
-      check string "goal derived from instructions" instructions
-        resolution.meta.goal;
+      check string "instructions preserved" instructions
+        resolution.meta.instructions;
       check bool "boot failure cleared" true
         (Option.is_none
            (KR.boot_meta_failure_for ~base_path:config.base_path ~name)))
 
-let test_declarative_boot_records_goal_required_failure () =
+let test_declarative_boot_allows_empty_goal_links () =
   with_config_dir @@ fun config_dir ->
   Eio_main.run @@ fun env ->
   ensure_test_runtime ();
@@ -561,7 +558,7 @@ let test_declarative_boot_records_goal_required_failure () =
   Eio.Switch.run @@ fun sw ->
   let base_dir = Filename.dirname config_dir in
   let name = "empty-intent" in
-  write_empty_keeper_toml_without_goal config_dir ~name;
+  write_empty_keeper_toml config_dir ~name;
   Eio.Switch.on_release sw (fun () ->
       Reg.clear ();
       KR.reset_test_state base_dir);
@@ -569,18 +566,12 @@ let test_declarative_boot_records_goal_required_failure () =
   let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
   let ctx = keeper_runtime_context env sw config in
   (match KR.load_or_materialize_boot_meta ctx name with
-   | Ok _ -> fail "expected declarative keeper without any intent to fail"
-   | Error err ->
-       check bool "failure mentions goal" true
-         (String_util.contains_substring err "goal is required"));
-  match KR.boot_meta_failure_for ~base_path:config.base_path ~name with
-  | None -> fail "expected boot meta failure to be recorded"
-  | Some failure ->
-      check string "failure keeper name" name failure.keeper_name;
-      check string "recorded failure cause" "goal_required"
-        (KR.boot_meta_failure_cause_label failure.cause);
-      check bool "recorded failure keeps raw error" true
-        (String_util.contains_substring failure.error "goal is required")
+   | Error err -> fail err
+   | Ok resolution ->
+     check bool "empty-goal keeper materialized" true resolution.materialized;
+     check (list string) "no active goal links" [] resolution.meta.active_goal_ids);
+  check bool "no boot failure recorded" true
+    (Option.is_none (KR.boot_meta_failure_for ~base_path:config.base_path ~name))
 
 let test_declarative_boot_records_typed_invalid_config_failure () =
   with_config_dir @@ fun config_dir ->
@@ -1944,10 +1935,10 @@ let () =
         test_missing_persona_without_profile_or_toml_is_error;
     ];
     "boot_meta_materialization", [
-      test_case "declarative boot derives missing goal from instructions" `Quick
-        test_declarative_boot_materializes_goal_from_instructions;
-      test_case "declarative boot records goal-required failure" `Quick
-        test_declarative_boot_records_goal_required_failure;
+      test_case "declarative boot preserves instructions" `Quick
+        test_declarative_boot_materializes_instructions;
+      test_case "declarative boot allows empty goal links" `Quick
+        test_declarative_boot_allows_empty_goal_links;
       test_case "declarative boot records typed invalid-config failure" `Quick
         test_declarative_boot_records_typed_invalid_config_failure;
       test_case "reconcile materializes configured keeper without meta" `Quick

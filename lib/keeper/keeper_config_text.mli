@@ -1,5 +1,5 @@
 (** Keeper_config_text — String/UTF-8 processing, bool parsing, input key
-    validation, and goal-horizon text normalization.
+    validation, and prompt text normalization.
 
     Extracted from [keeper_config.ml] during godfile decomposition.
 
@@ -24,7 +24,6 @@ val invalid_name_error : string -> string
 (* ── Configuration constants ────────────────────────────────── *)
 
 val default_proactive_enabled : bool
-val default_goal_max_chars : int
 val prompt_render_max_bytes : int
 
 (* ── Removed / rejected keeper input keys ───────────────────── *)
@@ -50,5 +49,3 @@ val utf8_repair_string : string -> string
 (* ── Prompt text normalization ──────────────────────────────── *)
 
 val normalize_prompt_text : max_bytes:int -> string -> string
-
-val normalize_goal_text : ?max_len:int -> string -> string

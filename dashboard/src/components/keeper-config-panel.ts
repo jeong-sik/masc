@@ -167,7 +167,6 @@ const saveError = signal<string | null>(null)
 
 // Draft values for editable fields (only used in edit mode)
 type EditDraft = {
-  goal: string
   instructions: string
 }
 
@@ -233,7 +232,6 @@ export function filterHookSlots(
 
 function initDraftFromConfig(c: KeeperConfig): EditDraft {
   return {
-    goal: c.prompt.goal,
     instructions: c.prompt.instructions,
   }
 }
@@ -248,7 +246,6 @@ function buildPayload(draft: EditDraft, orig: KeeperConfig): KeeperConfigUpdateP
       payload[key] = draft[key]
     }
   }
-  setIfChanged('goal')
   setIfChanged('instructions')
   return payload
 }
@@ -533,15 +530,15 @@ export function keeperConfigControlInventory(
     case 'prompt':
       return [
         {
-          id: 'kcf-prompt-goal-instructions',
+          id: 'kcf-prompt-instructions',
           tab,
-          label: 'Goal and instructions',
+          label: 'Keeper instructions',
           kind: 'live-write',
-          source: `${configApiSource} prompt.goal/prompt.instructions + sources.override_fields`,
-          action: 'PATCH /api/v1/keepers/:name/config goal/instructions',
+          source: `${configApiSource} prompt.instructions + sources.override_fields`,
+          action: 'PATCH /api/v1/keepers/:name/config instructions',
           contracts: [
-            ...configReadContracts(['prompt.goal', 'prompt.instructions', 'sources.override_fields']),
-            apiContract('PATCH', KEEPER_CONFIG_API, 'goal/instructions'),
+            ...configReadContracts(['prompt.instructions', 'sources.override_fields']),
+            apiContract('PATCH', KEEPER_CONFIG_API, 'instructions'),
           ],
         },
         {
@@ -1149,8 +1146,8 @@ function KcfReadonlyText({ label, hint, text }: { label: string; hint?: string; 
 
 // ── prompt assembly trace (조립 추적) ──
 // Keeper-scoped layered lineage built from the keeper's OWN config provenance:
-// system_prompt_blocks (shared base), prompt.goal/instructions (manifest, or a
-// live override when sources.override_fields lists the field), and active_goals.
+// system_prompt_blocks (shared base), prompt.instructions (manifest, or a live
+// override when sources.override_fields lists the field), and active_goals.
 // This is deliberately NOT the workspace-global KeeperPromptAssemblyPanel — that
 // component fetches dashboard-wide prompt-registry overrides (fetchDashboardPrompts)
 // and cannot render one keeper's assembled layers. Read-only; every segment is
@@ -1173,7 +1170,7 @@ const KCF_ASSEMBLY_SRC_META: Readonly<Record<KcfAssemblySource, { lbl: string; c
 }
 
 // Server override_fields are dot-namespaced (keeper_status_bridge.ml
-// live_override_details): 'prompt.goal', 'prompt.instructions', etc. A field is
+// live_override_details): 'prompt.instructions', etc. A field is
 // marked as winning over the manifest only when its exact key is present.
 export function buildKcfAssemblySegments(c: KeeperConfig): KcfAssemblySegment[] {
   const overrideFields = new Set(c.sources.override_fields)
@@ -1208,7 +1205,6 @@ export function buildKcfAssemblySegments(c: KeeperConfig): KcfAssemblySegment[] 
       win: overridden,
     })
   }
-  pushPromptField('prompt.goal', '목표 (objective)', c.prompt.goal)
   pushPromptField('prompt.instructions', '지시사항 (instructions)', c.prompt.instructions)
   const goals = c.workspace.active_goals
   if (goals.length > 0) {
@@ -1505,7 +1501,7 @@ export function InlineSelectRow({
 
 // ── Edit field components ────────────────────────────────
 
-function updateDraft(field: keyof EditDraft, value: string | boolean | number) {
+function updateDraft(field: keyof EditDraft, value: string) {
   const d = editDraft.value
   if (!d) return
   editDraft.value = { ...d, [field]: value }
@@ -1803,14 +1799,11 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
   // --- Prompt section (editable) ---
   const promptSection = isEditing ? html`
     <${MajorSectionHeader} title="프롬프트 (편집)" />
-    <${EditTextarea} field="goal" label="목표" rows=${8} />
     <${EditTextarea} field="instructions" label="지시사항" rows=${10} />
   ` : html`
     <${MajorSectionHeader} title="프롬프트" />
-    <${SectionHeader} size="xs" class="mb-0.5">목표</${SectionHeader}>
-    <${LongText} text=${c.prompt.goal} />
     ${c.prompt.instructions ? html`
-      <${SectionHeader} size="xs" class="mt-2 mb-0.5">지시사항</${SectionHeader}>
+      <${SectionHeader} size="xs" class="mb-0.5">지시사항</${SectionHeader}>
       <${LongText} text=${c.prompt.instructions} />
     ` : null}
     <${SectionHeader} size="xs" class="mt-3 mb-0.5" right=${html`
@@ -1823,7 +1816,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       >설정 › 프롬프트 열기 →</button>
     `}>시스템 프롬프트</${SectionHeader}>
     <div class="text-3xs text-text-dim mb-2">
-      헌법·세계관·능력 블록은 <span class="font-mono">전역 프롬프트</span>입니다 (read-only) — 편집은 설정 › 프롬프트. 아래 목표·지시사항만 이 keeper 고유값입니다.
+      헌법·세계관·능력 블록은 <span class="font-mono">전역 프롬프트</span>입니다 (read-only) — 편집은 설정 › 프롬프트. 아래 지시사항은 이 keeper 고유값이며 목표 연결은 배정 목표 탭에서 관리합니다.
     </div>
     <div class="flex gap-2 mb-2 v2-monitoring-toolbar">
       <button

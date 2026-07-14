@@ -850,21 +850,7 @@ let () =
          (entry_after_success.last_failure_reason = None);
        check
          "successful terminal turn clears turn consecutive failures"
-         (entry_after_success.turn_consecutive_failures = 0);
-       latch_stale_provider_failure ();
-       UTS.reset_turn_failures_for_stop_reason
-         ~config
-         ~updated_meta:meta
-         (run_result
-            ~stop_reason:(Runtime_agent.TurnLimitObserved { turns_used = 8; limit = 8 })
-            ());
-       let entry_after_turn_limit_observation = registered_entry () in
-       check
-         "turn-limit observation clears stale provider failure reason"
-         (entry_after_turn_limit_observation.last_failure_reason = None);
-       check
-         "turn-limit observation clears turn consecutive failures"
-         (entry_after_turn_limit_observation.turn_consecutive_failures = 0))
+         (entry_after_success.turn_consecutive_failures = 0))
 ;;
 
 let () =

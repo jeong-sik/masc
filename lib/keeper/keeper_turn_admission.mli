@@ -18,6 +18,21 @@ type lane =
   | Autonomous (** heartbeat-scheduled cycle; skips when the slot is busy *)
   | Chat (** operator/connector message turn; queues when the slot is busy *)
 
+type slot_transition =
+  | Turn_released
+  | Shutdown_rolled_back
+
+type slot_transition_observer =
+  base_path:string ->
+  keeper_name:string ->
+  transition:slot_transition ->
+  unit
+
+val set_slot_transition_observer : slot_transition_observer option -> unit
+(** Install the single non-blocking observer for transitions that can make a
+    Keeper lane dispatchable again. It runs after the turn mutex/state mutex is
+    released. Observer failures are logged and cannot alter admission state. *)
+
 type in_flight_info =
   { lane : lane
   ; started_at : float (** Unix epoch seconds when the turn was admitted *)

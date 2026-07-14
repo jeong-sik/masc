@@ -3,6 +3,7 @@ type waiting_source =
   | Event_queue_inflight
   | Chat_queue_pending
   | Chat_queue_inflight
+  | Chat_queue_persistence_blocked
   | Hitl_pending
   | External_attention
   | Fusion_running
@@ -55,6 +56,7 @@ let source_to_string = function
   | Event_queue_inflight -> "event_queue_inflight"
   | Chat_queue_pending -> "chat_queue_pending"
   | Chat_queue_inflight -> "chat_queue_inflight"
+  | Chat_queue_persistence_blocked -> "chat_queue_persistence_blocked"
   | Hitl_pending -> "hitl_pending"
   | External_attention -> "external_attention"
   | Fusion_running -> "fusion_running"
@@ -71,6 +73,7 @@ let all_waiting_sources =
   ; Event_queue_inflight
   ; Chat_queue_pending
   ; Chat_queue_inflight
+  ; Chat_queue_persistence_blocked
   ; Hitl_pending
   ; External_attention
   ; Fusion_running
@@ -234,13 +237,17 @@ let schedule_read_error_detail = function
 ;;
 
 let chat_queue_source_label = function
-  | Keeper_chat_queue.Dashboard -> "dashboard"
+  | Keeper_chat_queue.Dashboard _ -> "dashboard"
   | Keeper_chat_queue.Discord _ -> "discord"
   | Keeper_chat_queue.Slack _ -> "slack"
 ;;
 
 let chat_queue_source_json = function
-  | Keeper_chat_queue.Dashboard -> `Assoc [ "kind", `String "dashboard" ]
+  | Keeper_chat_queue.Dashboard { thread_id } ->
+    `Assoc
+      [ "kind", `String "dashboard"
+      ; "thread_id", `String thread_id
+      ]
   | Keeper_chat_queue.Discord { channel_id; user_id } ->
     `Assoc
       [ "kind", `String "discord"
@@ -308,7 +315,45 @@ let chat_queue_load_error_row keeper_name
       ])
 ;;
 
-let chat_queue_rows keeper_name =
+let chat_queue_persistence_blocked_rows ~base_path keeper_name =
+  match
+    Keeper_chat_consumer.persistence_blocked_status
+      ~base_path
+      ~keeper_name
+  with
+  | Ok None -> []
+  | Error message ->
+    [ read_error_row
+        ~keeper_name
+        ~waiting_on:"chat_queue_persistence_blocked_observation"
+        ~next_action:"repair_keeper_chat_consumer_state"
+        (`Assoc [ "message", `String message ])
+    ]
+  | Ok (Some status) ->
+    let operation =
+      match status.Keeper_chat_consumer.operation with
+      | Keeper_chat_consumer.Lease_next_blocked -> "lease_next"
+      | Keeper_chat_consumer.Finalize_blocked -> "finalize"
+      | Keeper_chat_consumer.Nack_blocked -> "nack"
+    in
+    [ { keeper_name = Some keeper_name
+      ; source = Chat_queue_persistence_blocked
+      ; waiting_on = "operator_reconciliation"
+      ; wake_producer = Keeper_chat_queue_store
+      ; since = None
+      ; due_at = None
+      ; next_action = "reconcile_keeper_chat_queue"
+      ; detail =
+          `Assoc
+            [ "operation", `String operation
+            ; "lease_id", Json_util.string_opt_to_json status.lease_id
+            ; "error", Keeper_chat_queue.mutation_error_to_json status.error
+            ]
+      }
+    ]
+;;
+
+let chat_queue_rows ~base_path keeper_name =
   let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
   let pending =
     snapshot.pending
@@ -346,6 +391,7 @@ let chat_queue_rows keeper_name =
                  "inflight")
   in
   pending @ inflight
+  @ chat_queue_persistence_blocked_rows ~base_path keeper_name
   @ List.map (chat_queue_load_error_row keeper_name) snapshot.load_errors
 ;;
 
@@ -817,7 +863,7 @@ let keeper_rows ~base_path ~pending_approvals ~fusion_runs ~pending_confirms kee
     in
     let rows =
       event_queue_rows ~base_path ~keeper_name
-      @ chat_queue_rows keeper_name
+      @ chat_queue_rows ~base_path keeper_name
       @ turn_admission_rows ~base_path keeper_name
       @ hitl_rows keeper_name pending_approvals
       @ external_attention_rows

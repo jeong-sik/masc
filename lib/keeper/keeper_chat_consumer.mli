@@ -1,13 +1,38 @@
-(** Keeper_chat_consumer — standalone polling fiber for queue drain.
+(** Keeper_chat_consumer — transition-driven queue drain.
 
-    Polls all keeper queues at a configurable interval and initiates
-    turn processing for queued messages via a user-provided callback.
+    Consumes typed queue/admission wake transitions and initiates turn
+    processing for queued messages via a user-provided callback.
 
     This decouples queue consumption from the HTTP request lifecycle,
     enabling external connectors (Discord, Slack) to enqueue messages
     that will be auto-drained without requiring a Dashboard HTTP request.
 
     @since 2.145.0 *)
+
+(** Wake one Keeper lane after a durable queue mutation, admission release, or
+    explicit operator reconciliation. Repeated pending wakes for the same
+    Keeper are coalesced without a capacity limit; a wake observed while that
+    Keeper is running schedules exactly one follow-up inspection. *)
+val notify_transition : keeper_name:string -> unit
+
+type persistence_blocked_operation =
+  | Lease_next_blocked
+  | Finalize_blocked
+  | Nack_blocked
+
+type persistence_blocked_status =
+  { operation : persistence_blocked_operation
+  ; lease_id : string option
+  ; error : Keeper_chat_queue.mutation_error
+  }
+
+(** Observe the exact Keeper-local queue mutation that is waiting for an
+    explicit retry trigger. This is operational state, not a retry timer or an
+    admission constraint. *)
+val persistence_blocked_status :
+  base_path:string ->
+  keeper_name:string ->
+  (persistence_blocked_status option, string) result
 
 (** A typed outcome from the whole queued-turn delivery boundary. Connector
     adapters must be joined before returning [Delivered]; a persisted failure,
@@ -28,16 +53,18 @@ type turn_outcome =
     the control-loop fiber, so an exception is observed by that subsystem
     boundary instead of escaping through an unobserved child fiber.
 
-    The loop polls [Keeper_chat_queue]
-    every [MASC_KEEPER_QUEUE_POLL_SEC] seconds (default 1.0).
+    Startup performs one inventory of restored queue lanes. Thereafter the
+    consumer is driven only by durable queue transitions, Keeper admission
+    release, and explicit operator reconciliation; it performs no fleet-wide
+    timer polling.
 
-    Per keeper and per tick: when a turn is in flight
+    Per Keeper wake: when a turn is in flight
     ([Keeper_turn_admission.in_flight]), queued messages are left to
-    accumulate; once the slot is free, the head run of same-source messages
-    is leased ([Keeper_chat_queue.lease_batch]) and merged into ONE
-    coalesced message ([Keeper_chat_queue.merge_batch]).  The merged turn
-    then runs in a keeper-scoped child fiber, so a slow queued turn for one
-    keeper does not block polling or delivery for other keepers.  A
+    accumulate; once the slot is free, the exact FIFO head receipt is leased
+    ([Keeper_chat_queue.lease_next]) into one typed turn. User-message identity,
+    multimodal blocks, transcript provenance, and receipt correlation are never
+    flattened into a delimiter string. The turn then runs in a Keeper-scoped child fiber, so a slow queued turn for one
+    keeper does not block wake processing or delivery for other keepers.  A
     keeper-local dispatch gate preserves the single follow-up turn contract
     for messages sent during an existing queued turn.
 
@@ -51,12 +78,12 @@ type turn_outcome =
     watchdog: the turn runtime owns timeout/cancellation and must return the
     typed outcome.
 
-    If finalization persistence fails, the exact decision is retained and
-    retried before another turn starts; a transient filesystem error cannot
-    leave the lane stuck behind an outstanding lease. External diagnostic text
-    is normalized at this terminal boundary. If queue validation still rejects
-    the decision, the consumer replaces it with a typed [Internal_error]
-    terminal outcome instead of retrying a permanently invalid action forever.
+    If finalization persistence fails before publication, the exact decision is
+    retained and retried before another turn starts after the next durable
+    transition or explicit operator reconciliation. External diagnostic text is
+    normalized at this terminal boundary. If queue validation still rejects the
+    decision, the consumer replaces it with a typed [Internal_error] terminal
+    outcome instead of retrying a permanently invalid action forever.
 
     The call runs until [sw] is released.
 
@@ -73,8 +100,13 @@ val run :
 module For_testing : sig
   type dispatch_state
 
-  val create_dispatch_state : unit -> dispatch_state
+  val create_dispatch_state : base_path:string -> dispatch_state
   val is_dispatching : dispatch_state -> string -> bool
   val mark_dispatching : dispatch_state -> string -> bool
   val clear_dispatching : dispatch_state -> string -> unit
+  val finish_dispatching_and_reschedule : dispatch_state -> string -> unit
+  val notify_transition : keeper_name:string -> unit
+  val take_wake_nonblocking : unit -> string option
+  val reset_wake_inbox : unit -> unit
+  val reset_persistence_blocked : unit -> unit
 end

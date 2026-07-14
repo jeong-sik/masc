@@ -250,6 +250,8 @@ let test_chat_queue_pending_rows_are_visible () =
     ; attachments = []
     ; timestamp = 150.0
     ; source = Keeper_chat_queue.Discord { channel_id = "chan-42"; user_id = "user-7" }
+    ; user_row_origin =
+        Masc.Keeper_chat_delivery_journal.Already_persisted_upstream
     }
   in
   let receipt =
@@ -300,7 +302,7 @@ let test_chat_queue_pending_rows_are_visible () =
       | rows -> failf "expected one chat queue row, got %d" (List.length rows)))
   ;
   let lease =
-    match Keeper_chat_queue.lease_batch ~keeper_name with
+    match Keeper_chat_queue.lease_next ~keeper_name with
     | `Leased lease -> lease
     | `Empty | `Already_leased _ | `Error _ ->
       fail "pending chat receipt should lease"

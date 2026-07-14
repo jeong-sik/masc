@@ -28,6 +28,7 @@ let discord_msg ~content ~channel_id ~user_id ~timestamp =
   ; attachments = []
   ; timestamp
   ; source = Keeper_chat_queue.Discord { channel_id; user_id }
+  ; user_row_origin = Keeper_chat_delivery_journal.Already_persisted_upstream
   }
 
 let rec rm_rf path =
@@ -125,11 +126,22 @@ let receipt_id_in_active receipt_id receipts =
        Keeper_chat_queue.Receipt_id.equal receipt.receipt_id receipt_id)
     receipts
 
-let receipt_id_in_terminal receipt_id receipts =
-  List.exists
-    (fun (receipt : Keeper_chat_queue.receipt_view) ->
-       Keeper_chat_queue.Receipt_id.equal receipt.receipt_id receipt_id)
-    receipts
+let receipt_id_is_terminal ~keeper_name receipt_id =
+  match Keeper_chat_queue.lookup_receipt ~keeper_name ~receipt_id with
+  | Ok
+      { receipt =
+          Some
+            { state =
+                ( Keeper_chat_queue.Delivered _
+                | Keeper_chat_queue.Failed _ )
+            ; _
+            }
+      ; _
+      } ->
+    true
+  | Ok { receipt = None | Some { state = Pending | Inflight _; _ }; _ }
+  | Error _ ->
+    false
 
 let check_terminal_snapshot ~label ~keeper_name ~receipt_id =
   let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
@@ -138,13 +150,26 @@ let check_terminal_snapshot ~label ~keeper_name ~receipt_id =
   check (label ^ " has no inflight receipt")
     (not (receipt_id_in_active receipt_id snapshot.inflight));
   check (label ^ " retains terminal receipt")
-    (receipt_id_in_terminal receipt_id snapshot.terminal)
+    (receipt_id_is_terminal ~keeper_name receipt_id)
 
-(* Tests own the polling fiber explicitly; production runs the blocking loop
-   inside its supervised subsystem boundary. Raising
+(* Tests own the transition-driven fiber explicitly and install the same queue
+   and admission wake fan-in as the production bootstrap. Production runs the
+   blocking loop inside its supervised subsystem boundary. Raising
    from the switch body gives each test a structured teardown and, when a turn
    is active, exercises the same cancellation path as server shutdown. *)
 let start_consumer ~sw ~clock ~base_path ~handle_turn =
+  let canonical_base_path =
+    Keeper_registry_types.canonical_base_path_exn base_path
+  in
+  Keeper_chat_queue.set_transition_observer
+    (Some
+       (fun ~keeper_name ~revision:_ ->
+          Keeper_chat_consumer.notify_transition ~keeper_name));
+  Keeper_turn_admission.set_slot_transition_observer
+    (Some
+       (fun ~base_path:transition_base_path ~keeper_name ~transition:_ ->
+          if String.equal transition_base_path canonical_base_path
+          then Keeper_chat_consumer.notify_transition ~keeper_name));
   Eio.Fiber.fork ~sw (fun () ->
     Keeper_chat_consumer.run ~sw ~clock ~base_path ~handle_turn)
 
@@ -196,7 +221,7 @@ let test_delivery_finalizes_terminal_receipt () =
               (String.equal channel_id "channel-delivered");
             check "delivery preserves Discord user"
               (String.equal user_id "user-delivered")
-          | Dashboard | Slack _ -> check "delivery source is Discord" false)
+          | Dashboard _ | Slack _ -> check "delivery source is Discord" false)
        | None -> check "delivery invokes handle_turn" false);
       check_terminal_snapshot ~label:"delivery" ~keeper_name
         ~receipt_id:accepted.receipt_id)
@@ -291,7 +316,7 @@ let test_structured_cancellation_nacks_and_preserves_receipt () =
       check "cancelled receipt is not left inflight"
         (not (receipt_id_in_active accepted.receipt_id snapshot.inflight));
       check "cancelled receipt is not terminal"
-        (not (receipt_id_in_terminal accepted.receipt_id snapshot.terminal)))
+        (not (receipt_id_is_terminal ~keeper_name accepted.receipt_id)))
 
 let test_dispatch_is_concurrent_per_keeper () =
   Printf.printf "Test: queued turns dispatch concurrently across keepers\n%!";
@@ -386,12 +411,25 @@ let test_finalization_persistence_retry_does_not_redeliver () =
       let calls = ref 0 in
       let handle_turn ~sw:_ ~keeper_name:_ ~delivery_key:_ ~queued_message:_ =
         incr calls;
-        Keeper_chat_queue.For_testing.fail_next_persist ();
+        Keeper_chat_queue.For_testing.fail_transaction_at_stages
+          [ Mutation_applied ];
         Keeper_chat_consumer.Delivered
           { outcome_ref = "trace-finalized-after-retry#3" }
       in
       with_consumer_switch (fun sw ->
         start_consumer ~sw ~clock ~base_path:base ~handle_turn;
+        check "failed terminal persist leaves the exact lease observable"
+          (match
+             await_receipt ~clock ~seconds:5.0 ~keeper_name
+               ~receipt_id:accepted.receipt_id ~accept:is_inflight
+           with
+           | Some _ -> true
+           | None -> false);
+        (match Keeper_chat_queue.reconcile_persistence ~keeper_name with
+         | Ok _ -> Keeper_chat_consumer.notify_transition ~keeper_name
+         | Error error ->
+           check_failure "explicit finalization retry reconciliation"
+             (Keeper_chat_queue.mutation_error_to_string error));
         match
           await_receipt ~clock ~seconds:5.0 ~keeper_name
             ~receipt_id:accepted.receipt_id ~accept:is_delivered
@@ -407,6 +445,51 @@ let test_finalization_persistence_retry_does_not_redeliver () =
       check "finalization retry does not re-run handle_turn" (!calls = 1);
       check_terminal_snapshot ~label:"retried finalization" ~keeper_name
         ~receipt_id:accepted.receipt_id)
+
+let test_busy_turn_release_wakes_pending_receipt () =
+  Printf.printf
+    "Test: a busy-turn release wakes the exact pending Keeper lane\n%!";
+  with_env (fun ~base ~clock ->
+    let holder_started, resolve_holder_started = Eio.Promise.create () in
+    let release_holder, resolve_release_holder = Eio.Promise.create () in
+    let calls = ref 0 in
+    let handle_turn ~sw:_ ~keeper_name:_ ~delivery_key:_ ~queued_message:_ =
+      incr calls;
+      Keeper_chat_consumer.Delivered
+        { outcome_ref = "trace-busy-release#1" }
+    in
+    with_consumer_switch (fun sw ->
+      Eio.Fiber.fork ~sw (fun () ->
+        ignore
+          (Keeper_turn_admission.run_serialized
+             ~base_path:base
+             ~keeper_name
+             (fun () ->
+                Eio.Promise.resolve resolve_holder_started ();
+                Eio.Promise.await release_holder)
+            : [ `Ran of unit | `Rejected of Keeper_turn_admission.rejection ]));
+      check "busy holder owns the lane"
+        (await_promise ~clock ~seconds:5.0 holder_started);
+      start_consumer ~sw ~clock ~base_path:base ~handle_turn;
+      match
+        enqueue_checked ~label:"busy release enqueue" ~keeper_name
+          (discord_msg ~content:"wake after current turn"
+             ~channel_id:"channel-busy-release" ~user_id:"user-busy-release"
+             ~timestamp:6.25)
+      with
+      | None -> Eio.Promise.resolve resolve_release_holder ()
+      | Some accepted ->
+        Eio.Fiber.yield ();
+        check "consumer never crosses the held turn slot" (!calls = 0);
+        Eio.Promise.resolve resolve_release_holder ();
+        check "turn release dispatches without fleet polling"
+          (match
+             await_receipt ~clock ~seconds:5.0 ~keeper_name
+               ~receipt_id:accepted.receipt_id ~accept:is_delivered
+           with
+           | Some _ -> true
+           | None -> false));
+    check "busy receipt is delivered exactly once" (!calls = 1))
 
 let test_invalid_delivered_turn_ref_fails_closed () =
   Printf.printf
@@ -606,9 +689,8 @@ let test_typed_admission_race_nacks_then_retries () =
            with
            | Some _ -> true
            | None -> false);
-        let after_defer = Keeper_chat_queue.snapshot ~keeper_name in
         check "typed Deferred never creates a terminal Failed receipt"
-          (not (receipt_id_in_terminal accepted.receipt_id after_defer.terminal));
+          (not (receipt_id_is_terminal ~keeper_name accepted.receipt_id));
         check "consumer retries the same receipt after deferral"
           (await_promise ~clock ~seconds:5.0 second_started);
         Eio.Promise.resolve resolve_release_second ();
@@ -629,6 +711,7 @@ let () =
   test_structured_cancellation_nacks_and_preserves_receipt ();
   test_dispatch_is_concurrent_per_keeper ();
   test_finalization_persistence_retry_does_not_redeliver ();
+  test_busy_turn_release_wakes_pending_receipt ();
   test_invalid_delivered_turn_ref_fails_closed ();
   test_invalid_delivery_diagnostic_does_not_block_lane ();
   test_shutdown_fence_keeps_receipt_pending_until_rollback ();

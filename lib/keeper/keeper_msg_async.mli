@@ -55,8 +55,9 @@ type access_rejection =
 (** Outcome of looking up a request record.
 
     - [Found entry] — the request is known (in memory or recovered from disk).
-    - [Absent] — no record exists: the id was never accepted, or an explicit
-      operator retention action removed it. Pollers can stop polling or resubmit.
+    - [Absent] — no canonical record is observable. Pollers can stop polling,
+      but absence does not prove that an earlier side effect never occurred and
+      therefore does not authorize blind resubmission.
     - [Unreadable reason] — a record file exists but cannot be decoded
       (corrupt JSON, missing required fields, or unknown status). The request
       WAS accepted, but its result cannot be recovered. *)

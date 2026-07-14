@@ -2297,7 +2297,7 @@ let process_single_turn ~user_row_origin ~queued_turn
                            Tool_result.ok
                              ~tool_name:"masc_keeper_msg"
                              ~start_time
-                             body))))
+                             body)))))
         | Ok (`Ran (false, err)) ->
             let persisted = persist_failure_reply err in
             let queued_outcome =

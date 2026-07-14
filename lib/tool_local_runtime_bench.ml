@@ -105,100 +105,82 @@ let finalize_runtime_breakdown json =
         ]
   | _ -> json
 
-(* RFC-0206 single-binding: bench the default runtime's model directly. *)
-let default_local_model_id () = Runtime.default_model_api_name ()
-
-let is_oas_managed_runtime_pool = function
-  | None -> true
-  | Some pool ->
-      let trimmed = String.trim pool in
-      String.equal trimmed ""
-      || String.equal trimmed Local_runtime_pool.default_pool_label
-      || String.equal trimmed "default"
-
-let runtime_base_url_for_pool runtime_pool =
-  match runtime_pool with
-  | Some pool ->
-      let trimmed = String.trim pool in
-      if is_oas_managed_runtime_pool (Some trimmed) then
-        Llm_provider.Provider_registry.next_llama_endpoint ()
-      else if
-        String.starts_with ~prefix:"http://" trimmed
-        || String.starts_with ~prefix:"https://" trimmed
-      then
-        trimmed
+let validate_requested_model (runtime : Runtime.t) = function
+  | None -> Ok runtime
+  | Some requested_model ->
+      let requested_model = String.trim requested_model in
+      if String.equal requested_model "" then
+        Error "model must be a non-empty configured model id"
+      else if String.equal requested_model runtime.provider_config.model_id then
+        Ok runtime
       else
-        let snapshots = Local_runtime_pool.snapshots () in
-        (match
-           List.find_opt
-             (fun (runtime : Local_runtime_pool.runtime_snapshot) ->
-               String.equal runtime.id trimmed)
-             snapshots
-         with
-         | Some runtime -> runtime.base_url
-         | None -> trimmed)
-  | None -> Llm_provider.Provider_registry.next_llama_endpoint ()
+        Error
+          (Printf.sprintf
+             "runtime %S is configured for model %S, not requested model %S"
+             runtime.id
+             runtime.provider_config.model_id
+             requested_model)
 
-let model_label_for_pool ~model_id runtime_pool =
-  match runtime_pool with
-  | Some pool ->
-      let trimmed = String.trim pool in
-      if is_oas_managed_runtime_pool (Some trimmed) then
-        model_id
+let resolve_runtime ?model_id = function
+  | None ->
+      (match Runtime.get_default_runtime () with
+       | Some runtime -> validate_requested_model runtime model_id
+       | None ->
+           Error
+             "default runtime is not initialized; load runtime.toml before running the benchmark")
+  | Some runtime_id ->
+      let runtime_id = String.trim runtime_id in
+      if String.equal runtime_id "" then
+        Error "runtime_pool must be a non-empty runtime.toml runtime id"
       else
-        let base_url =
-          if
-            String.starts_with ~prefix:"http://" trimmed
-            || String.starts_with ~prefix:"https://" trimmed
-          then
-            trimmed
-          else
-            runtime_base_url_for_pool runtime_pool
-        in
-        Printf.sprintf "custom:%s@%s" model_id base_url
-  | None -> model_id
+        (match Runtime.get_runtime_by_id runtime_id with
+         | Some runtime -> validate_requested_model runtime model_id
+         | None ->
+             Error
+               (Printf.sprintf
+                  "runtime %S is not materialized from runtime.toml"
+                  runtime_id))
 
-let ensure_runtime_reachable ?runtime_pool ~timeout_sec () =
-  let base_url = runtime_base_url_for_pool runtime_pool |> String.trim in
-  let health_url = base_url ^ "/health" in
-  let probe_timeout = max 1 (min 2 timeout_sec) in
-  match http_get_text_with_status ~timeout_sec:probe_timeout health_url with
-  | Ok (Some 200, _) -> Ok ()
-  | Ok (status, _) ->
-      let status_text =
-        match status with
-        | Some code -> Int.to_string code
-        | None -> "no-status"
+let ensure_runtime_reachable (runtime : Runtime.t) ~timeout_sec =
+  match runtime.provider.healthcheck_path with
+  | None -> Ok ()
+  | Some healthcheck_path ->
+      let health_url =
+        runtime.provider_config.base_url
+        |> Uri.of_string
+        |> fun base -> Uri.with_path base healthcheck_path
+        |> Uri.to_string
       in
-      Error
-        (Printf.sprintf
-           "runtime unavailable: provider health check returned %s for %s"
-           status_text health_url)
-  | Error err ->
-      Error (Printf.sprintf "runtime unavailable: %s" err)
+      (match http_get_text_with_status ~timeout_sec health_url with
+       | Ok (Some 200, _) -> Ok ()
+       | Ok (status, _) ->
+           let status_text =
+             match status with
+             | Some code -> Int.to_string code
+             | None -> "no-status"
+           in
+           Error
+             (Printf.sprintf
+                "runtime %S unavailable: provider health check returned %s for %s"
+                runtime.id
+                status_text
+                health_url)
+       | Error err ->
+           Error (Printf.sprintf "runtime %S unavailable: %s" runtime.id err))
 
-let oas_completion_at ?runtime_pool ~model_id ~prompt ~max_tokens ~timeout_sec ()
-    =
+let oas_completion_at (runtime : Runtime.t) ~prompt ~max_tokens ~timeout_sec () =
   match Masc_eio_env.get_opt () with
   | None ->
       (* MASC-OAS boundary: raw curl fallback removed.
          Bench must run inside an Eio-managed context. *)
       ( { success = false; latency_ms = 0;
           error = Some "Eio environment not available; bench requires OAS runtime context" },
-        "unknown" )
+        runtime.id )
   | Some env -> (
       let started = Time_compat.now () in
-      let model_label = model_label_for_pool ~model_id runtime_pool in
-      match
-        Runtime_model_string.parse_model_string ~max_tokens model_label
-      with
-      | None ->
-          ( { success = false; latency_ms = 0; error = Some ("invalid model label: " ^ model_label) },
-            "unknown" )
-      | Some provider_config ->
-          let runtime_id =
-            Local_runtime_pool.runtime_id_of_base_url provider_config.base_url
-          in
+      let provider_config =
+        { runtime.provider_config with max_tokens = Some max_tokens }
+      in
           let messages : Oas_types.message list = [ Oas_types.user_msg prompt ] in
           let run_completion () =
             Llm_provider.Complete.complete ~sw:env.sw ~net:env.net
@@ -222,13 +204,16 @@ let oas_completion_at ?runtime_pool ~model_id ~prompt ~max_tokens ~timeout_sec (
                   error = Some (error_message_of_http_error http_error);
                 }
           in
-          (sample, runtime_id))
+          (sample, runtime.id))
 
 let run_bench ?model_id ?runtime_pool ~parallelism ~rounds ~prompt ~max_tokens
     ~timeout_sec () =
-  match ensure_runtime_reachable ?runtime_pool ~timeout_sec () with
+  match resolve_runtime ?model_id runtime_pool with
   | Error _ as err -> err
-  | Ok () ->
+  | Ok runtime ->
+    (match ensure_runtime_reachable runtime ~timeout_sec with
+     | Error _ as err -> err
+     | Ok () ->
       let total = parallelism * rounds in
       let results = Array.make total None in
       let runtime_breakdown = Hashtbl.create 8 in
@@ -237,14 +222,8 @@ let run_bench ?model_id ?runtime_pool ~parallelism ~rounds ~prompt ~max_tokens
         Eio.Fiber.all
           (List.init parallelism (fun fiber_idx ->
                fun () ->
-                 let resolved_model_id =
-                   match model_id with
-                   | Some model when not (String.equal (String.trim model) "") -> model
-                   | _ -> default_local_model_id ()
-                 in
                  let sample, runtime_id =
-                   oas_completion_at ?runtime_pool ~model_id:resolved_model_id
-                     ~prompt ~max_tokens ~timeout_sec ()
+                   oas_completion_at runtime ~prompt ~max_tokens ~timeout_sec ()
                  in
                  update_runtime_breakdown runtime_breakdown ~runtime_id ~sample;
                  results.(offset + fiber_idx) <- Some sample))
@@ -275,10 +254,10 @@ let run_bench ?model_id ?runtime_pool ~parallelism ~rounds ~prompt ~max_tokens
       Ok
         (`Assoc
           [
-            ("server_url", `String Env_config.Local_runtime.server_url);
+            ("server_url", `String runtime.provider_config.base_url);
             ("source", `String "oas_complete");
-            ("model_id", Json_util.string_opt_to_json model_id);
-            ("runtime_pool", Json_util.string_opt_to_json runtime_pool);
+            ("model_id", `String runtime.provider_config.model_id);
+            ("runtime_pool", `String runtime.id);
             ("parallelism", `Int parallelism);
             ("rounds", `Int rounds);
             ("total_requests", `Int (List.length samples));
@@ -299,4 +278,4 @@ let run_bench ?model_id ?runtime_pool ~parallelism ~rounds ~prompt ~max_tokens
             ("per_runtime_breakdown", `List runtime_breakdown);
             ( "errors",
               `List (errors |> List.map (fun message -> `String message)) );
-          ])
+          ]))

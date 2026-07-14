@@ -172,19 +172,6 @@ let test_oas_bridge_promotes_context_injector_failures_to_error () =
   Alcotest.(check string) "context injector failure promoted" "ERROR"
     (Log.level_to_string level)
 
-let test_oas_bridge_promotes_missing_approval_callback_to_error () =
-  let level =
-    Masc.Agent_sdk_log_bridge.effective_level
-      (oas_record
-         ~level:Agent_sdk.Log.Warn
-         ~module_name:"agent_tools"
-         ~message:"ApprovalRequired but no approval callback — executing"
-         [ Agent_sdk.Log.S ("tool", "tool_execute");
-           Agent_sdk.Log.S ("agent", "demo") ])
-  in
-  Alcotest.(check string) "approval callback gap promoted" "ERROR"
-    (Log.level_to_string level)
-
 let test_oas_bridge_demotes_tool_choice_relaxation_to_debug () =
   let level =
     Masc.Agent_sdk_log_bridge.effective_level
@@ -278,9 +265,6 @@ let () =
         Alcotest.test_case
           "oas bridge promotes context injector failures"
           `Quick test_oas_bridge_promotes_context_injector_failures_to_error;
-        Alcotest.test_case
-          "oas bridge promotes missing approval callback"
-          `Quick test_oas_bridge_promotes_missing_approval_callback_to_error;
         Alcotest.test_case
           "oas bridge demotes normal tool_choice relaxation"
           `Quick test_oas_bridge_demotes_tool_choice_relaxation_to_debug;

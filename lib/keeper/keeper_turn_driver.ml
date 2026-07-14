@@ -289,7 +289,6 @@ let run_named
     ?context_injector
     ?context
     ?enable_thinking
-    ?approval
     ?exit_condition
     ?exit_condition_result
     ?oas_checkpoint
@@ -580,7 +579,6 @@ let run_named
             ; context
             ; enable_thinking = inference_policy.attempt_enable_thinking
             ; preserve_thinking = inference_policy.attempt_preserve_thinking
-            ; approval
             ; exit_condition
             ; exit_condition_result
             ; oas_checkpoint

@@ -53,7 +53,6 @@ val run_named_with_masc_tools :
   ?on_resume:(unit -> unit) ->
   ?transport:Masc_grpc_transport.t ->
   ?yield_on_tool:bool ->
-  ?approval:Agent_sdk.Hooks.approval_callback ->
   ?max_idle_turns:int ->
   ?provider_config_transform:
     (Llm_provider.Provider_config.t ->

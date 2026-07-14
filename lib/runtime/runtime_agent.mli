@@ -97,7 +97,6 @@ type config = Runtime_agent_context.config = {
   yield_on_tool : bool;
   context_injector : Agent_sdk.Hooks.context_injector option;
   context : Agent_sdk.Context.t option;
-  approval : Agent_sdk.Hooks.approval_callback option;
   exit_condition : (int -> bool) option;
   exit_condition_result : (int -> stop_reason * string option) option;
   thinking_budget : int option;
@@ -387,8 +386,7 @@ val build :
   config:config ->
   (Agent_sdk.Agent.t, Agent_sdk.Error.sdk_error) result
 (** Builds an [Agent_sdk.Agent.t] from a {!config} ready for a
-    fresh run over the HTTP provider transport; threads
-    [config.approval] into the OAS builder when present. *)
+    fresh run over the HTTP provider transport. *)
 
 val resume_from_checkpoint :
   sw:Eio.Switch.t ->

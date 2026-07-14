@@ -100,8 +100,6 @@ let build_agent
       ~(heartbeat_callbacks : Agent_sdk.Agent.periodic_callback list)
       ?context_injector
       ?context
-      ?(approval : Agent_sdk.Hooks.approval_callback =
-        Approval_callbacks.auto_approve)
       ()
   : (Agent_sdk.Agent.t, string) result
   =
@@ -118,8 +116,6 @@ let build_agent
     |> Agent_sdk.Builder.with_raw_trace raw_trace
     |> Agent_sdk.Builder.with_periodic_callbacks heartbeat_callbacks
     |> Agent_sdk.Builder.with_description (description_of_meta meta)
-    (* #7883 *)
-    |> Agent_sdk.Builder.with_approval approval
   in
   let builder =
     match context_injector with
@@ -401,8 +397,6 @@ and resume_worker_via_oas
       ~(tools : Agent_sdk.Tool.t list)
       ~(raw_trace : Agent_sdk.Raw_trace.t)
       ?worker_run_id
-      ?(approval : Agent_sdk.Hooks.approval_callback =
-        Approval_callbacks.auto_approve)
       ()
   : (Worker_container_types.run_result, string) result
   =
@@ -448,8 +442,6 @@ and resume_worker_via_oas
   let options =
     { options with
       Agent_sdk.Agent_types.context_injector = Some context_injector
-    ; (* #7883 *)
-      approval = Some approval
     }
   in
   let agent =

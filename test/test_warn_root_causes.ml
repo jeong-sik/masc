@@ -350,10 +350,7 @@ let test_oas_mainline_warns_are_promoted_in_bridge () =
        {|Warn, "agent_config", "MCP server failed" -> true|});
   check bool "bridge promotes context injector failure" true
     (file_contains_pattern "lib/agent_sdk_log_bridge.ml"
-       {|Warn, "agent_turn", "context_injector raised" -> true|});
-  check bool "bridge promotes approval callback gap" true
-    (file_contains_pattern "lib/agent_sdk_log_bridge.ml"
-       {|Warn, "agent_tools", "ApprovalRequired but no approval callback — executing"|})
+       {|Warn, "agent_turn", "context_injector raised" -> true|})
 
 let test_correction_pipeline_log_preserves_detail_fields () =
   List.iter

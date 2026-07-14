@@ -90,7 +90,6 @@ type config = {
   yield_on_tool : bool;
   context_injector : Agent_sdk.Hooks.context_injector option;
   context : Agent_sdk.Context.t option;
-  approval : Agent_sdk.Hooks.approval_callback option;
   exit_condition : (int -> bool) option;
   exit_condition_result : (int -> stop_reason * string option) option;
   thinking_budget : int option;
@@ -134,21 +133,18 @@ val default_config :
     returns a {!config} populated with sensible defaults for every
     field except the four required ones.  Caller mutates fields
     in place via record copy ([{ cfg with ... }]) before passing
-    to {!builder_without_approval} or {!prepare_resume}. *)
+    to {!builder} or {!prepare_resume}. *)
 
-(** {1 Builder (no approval)} *)
+(** {1 Builder} *)
 
-val builder_without_approval :
+val builder :
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   config:config ->
   ?transport:Llm_provider.Llm_transport.t ->
   unit ->
   Agent_sdk.Builder.t
-(** [builder_without_approval ~net ~config ?transport ()] builds an
-    {!Agent_sdk.Builder.t} from [config] without wiring approval
-    callbacks.  Approval wiring is the responsibility of the
-    public facade ({!Runtime_agent}) which adds the approval
-    callback before calling [Builder.build_safe]. *)
+(** [builder ~net ~config ?transport ()] builds an {!Agent_sdk.Builder.t}
+    from [config]. *)
 
 (** {1 Resume preparation} *)
 
@@ -164,7 +160,7 @@ type prepared_resume = {
     re-counting consumed turns. *)
 
 val set_oas_tracer : Agent_sdk.Tracing.t -> unit
-(** Set the OAS tracer used by {!builder_without_approval}.  Called once
+(** Set the OAS tracer used by {!builder}.  Called once
     at server bootstrap so OAS spans flow to the same OTLP collector as
     MASC-native telemetry.  Defaults to [Tracing.null] until set. *)
 

@@ -74,9 +74,7 @@ type runtime_exhaustion_reason = Keeper_internal_error.runtime_exhaustion_reason
   | No_providers_available
   | All_providers_failed
   | Candidates_filtered_after_cycles
-  | Max_turns_exceeded
   | Session_conflict
-  | Structural_attempt_timeout of { detail : string }
   | Capacity_exhausted
   | Other_detail of string
 
@@ -87,8 +85,7 @@ type runtime_exhaustion_reason = Keeper_internal_error.runtime_exhaustion_reason
     [runtime_exhaustion_reason_code] and biased every unlisted reason to
     non-retryable via a [_ -> false] catch-all.  That polarity was wrong
     for transient/connectivity faults (Connection_refused, Dns_failure,
-    No_providers_available, All_providers_failed,
-    Structural_attempt_timeout), which the supervisor should retry.
+    No_providers_available, All_providers_failed), which the supervisor should retry.
 
     Exhaustive match: adding a new [runtime_exhaustion_reason] variant
     fails compilation here, forcing an explicit retryability decision
@@ -100,7 +97,6 @@ let runtime_exhaustion_reason_retryable (reason : runtime_exhaustion_reason) : b
 type blocker_class =
   | Runtime_exhausted of runtime_exhaustion_reason
   | Capacity_backpressure
-  | Turn_timeout
   | Fiber_unresolved
     (** 2026-05-05: turn fiber finished without invoking [resolve_done]
         (cancelled mid-turn, raised an exception not handled by the
@@ -121,10 +117,7 @@ type blocker_class =
     (** Retired blocker class for pre-existing fleet-batch state. Current
         fleet-batch detection is observation-only and should not stamp keeper
         meta; stale keepers use their per-keeper watchdog blocker instead. *)
-  | Oas_agent_execution_timeout
-  | Sdk_max_turns_exceeded
-  | Sdk_token_budget_exceeded
-  | Sdk_cost_budget_exceeded
+  | Sdk_context_window_exceeded
   | Sdk_unrecognized_stop_reason
   | Sdk_idle_detected
   | Sdk_guardrail_violation
@@ -136,14 +129,10 @@ type blocker_class =
 let blocker_class_to_string = function
   | Runtime_exhausted _ -> "runtime_exhausted"
   | Capacity_backpressure -> "capacity_backpressure"
-  | Turn_timeout -> "turn_timeout"
   | Fiber_unresolved -> "fiber_unresolved"
   | Stale_turn_timeout -> "stale_turn_timeout"
   | Stale_fleet_batch -> "stale_fleet_batch"
-  | Oas_agent_execution_timeout -> "oas_agent_execution_timeout"
-  | Sdk_max_turns_exceeded -> "sdk_max_turns_exceeded"
-  | Sdk_token_budget_exceeded -> "sdk_token_budget_exceeded"
-  | Sdk_cost_budget_exceeded -> "sdk_cost_budget_exceeded"
+  | Sdk_context_window_exceeded -> "sdk_context_window_exceeded"
   | Sdk_unrecognized_stop_reason -> "sdk_unrecognized_stop_reason"
   | Sdk_idle_detected -> "sdk_idle_detected"
   | Sdk_guardrail_violation -> "sdk_guardrail_violation"
@@ -156,14 +145,10 @@ let blocker_class_to_string = function
 let blocker_class_of_serialized_string = function
   | "runtime_exhausted" -> Some (Runtime_exhausted (Other_detail "runtime_exhausted"))
   | "capacity_backpressure" -> Some Capacity_backpressure
-  | "turn_timeout" -> Some Turn_timeout
   | "fiber_unresolved" -> Some Fiber_unresolved
   | "stale_turn_timeout" -> Some Stale_turn_timeout
   | "stale_fleet_batch" -> Some Stale_fleet_batch
-  | "oas_agent_execution_timeout" -> Some Oas_agent_execution_timeout
-  | "sdk_max_turns_exceeded" -> Some Sdk_max_turns_exceeded
-  | "sdk_token_budget_exceeded" -> Some Sdk_token_budget_exceeded
-  | "sdk_cost_budget_exceeded" -> Some Sdk_cost_budget_exceeded
+  | "sdk_context_window_exceeded" -> Some Sdk_context_window_exceeded
   | "sdk_unrecognized_stop_reason" -> Some Sdk_unrecognized_stop_reason
   | "sdk_idle_detected" -> Some Sdk_idle_detected
   | "sdk_guardrail_violation" -> Some Sdk_guardrail_violation
@@ -184,12 +169,8 @@ let runtime_exhaustion_summary = function
     "Runtime exhausted after all configured providers failed; inspect per-attempt root causes."
   | Candidates_filtered_after_cycles ->
     "Runtime exhausted after provider candidates were filtered; inspect candidate filter reasons."
-  | Max_turns_exceeded ->
-    "Runtime exhausted after a provider hit its per-call turn budget."
   | Session_conflict ->
     "Runtime exhausted because another process owns the provider session lease."
-  | Structural_attempt_timeout _ ->
-    "Runtime exhausted after the per-OAS-call ceiling (max_execution_time_s) fired."
   | Capacity_exhausted ->
     "Runtime exhausted; all providers reported capacity backpressure."
   | Other_detail _ ->

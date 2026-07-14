@@ -308,7 +308,7 @@ export function trustDispositionLabel(value: string | null | undefined): string 
  *
  *  `runtime_outcome` is emitted per-provider-attempt (the last hop in
  *  a runtime ladder), while `stop_cause` is emitted per-turn (the
- *  terminal verdict for the whole turn budget). Rendering the
+ *  terminal verdict for the whole turn). Rendering the
  *  per-attempt success under the generic "런타임 레인" label next to
  *  a per-turn failure such as `turn_timeout` reads as a
  *  contradiction.
@@ -391,7 +391,6 @@ const OPERATOR_DISPOSITION_REASON_LABELS: Record<string, string> = {
   provider_runtime_error: '런타임 호출 오류',
   internal_error: '내부 오류',
   input_required: '사용자 입력 대기',
-  turn_budget_exhausted: '턴 예산 소진',
   cancelled: '취소됨',
   phase_skipped: 'phase 건너뜀',
   unmapped_runtime_state: '매핑되지 않은 runtime 상태',

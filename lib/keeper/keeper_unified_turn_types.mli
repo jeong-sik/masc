@@ -13,7 +13,6 @@ type turn_state =
   ; manifest_seq : int
   ; current_turn_blocker_info : Keeper_meta_contract.blocker_info option
   ; last_execution : Keeper_turn_runtime_budget.runtime_execution option
-  ; last_provider_timeout_budget : Keeper_turn_runtime_budget.provider_timeout_budget option
   ; degraded_retry_info : Keeper_error_classify.degraded_retry option
   ; runtime_rotation_attempts : Keeper_execution_receipt.runtime_rotation_attempt list
   ; failure_reason : Keeper_turn_fsm.failure_reason option
@@ -81,14 +80,9 @@ val record_turn_tool_events :
 (** Record the observation for a streaming turn cancelled externally.
     Reads the fiber_stop flag from [Keeper_registry], emits FSM
     transitions, and writes a terminal observation via
-    [Keeper_turn_helpers.record_pre_dispatch_terminal_observation].
+    [Keeper_turn_helpers.record_pre_dispatch_terminal_observation]. *)
 
-    [cancel_reason] overrides the inferred reason when provided:
-      - ["attempt_watchdog_safety_deadline"] — legacy watchdog timeout receipt
-      - ["supervisor_stop"] — supervisor requested stop
-      - ["external_cancel"] — external fiber cancellation (default) *)
 val record_streaming_cancelled_observation :
-  ?cancel_reason:string ->
   config:Workspace.config ->
   run_meta:Keeper_meta_contract.keeper_meta ->
   run_generation:int ->

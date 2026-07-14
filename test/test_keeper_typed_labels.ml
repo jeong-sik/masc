@@ -42,9 +42,11 @@ let format_to_string pp v =
 let all_cancel_reasons : Keeper_turn_fsm.cancel_reason list =
   [
     Cancelled_supervisor_stop;
+    Cancelled_external;
     Cancelled_phase_gate_close;
     Cancelled_provider_timeout;
     Cancelled_fleet_shutdown;
+    Cancelled_input_required;
   ]
 
 let test_cancel_reason_labels_unique () =

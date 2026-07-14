@@ -1,8 +1,7 @@
 (* Keeper_unified_turn_pre_dispatch — RFC-0136 PR-3.
 
    Extracted from keeper_unified_turn.ml (L166-228) during the
-   run_keeper_cycle stage decomposition. Owns the runtime-execution
-   builder + unified-max-tokens fallback. *)
+   run_keeper_cycle stage decomposition. Owns the runtime-execution builder. *)
 
 open Keeper_types
 open Keeper_meta_contract
@@ -26,23 +25,8 @@ let load_profile_defaults ~base_path ~keeper_name =
     keeper_name
   |> Result.map_error (profile_load_error ~keeper_name)
 
-(* masc#24067 / oas#2517: the keeper lane must not synthesize a request
-   [max_tokens] value. The only override source is the explicit per-keeper
-   env/profile knob; absent that, [None] — no [max_tokens] field goes on the
-   request. *)
-let resolve_unified_max_tokens_override
-      ~(meta_name : string)
-      ~(profile_defaults : Keeper_types_profile.keeper_profile_defaults)
-      ()
-  : int option
-  =
-  Keeper_types_profile.unified_max_tokens_override_of_oas_env
-    ~keeper_name:meta_name
-    profile_defaults.oas_env
-
 let build_runtime_execution
       ~(meta : keeper_meta)
-      ~(profile_defaults : Keeper_types_profile.keeper_profile_defaults)
       ~(runtime_id : string)
   : ( Keeper_turn_runtime_budget.runtime_execution
     , Agent_sdk.Error.sdk_error )
@@ -93,16 +77,9 @@ let build_runtime_execution
            ~runtime_id
            ~fallback:Keeper_config.keeper_unified_temperature
        in
-       let raw_max_tokens =
-         resolve_unified_max_tokens_override
-           ~meta_name:meta.name
-           ~profile_defaults
-           ()
-       in
        Ok
          { Keeper_turn_runtime_budget.runtime_id
          ; max_context_resolution
          ; max_context
          ; temperature
-         ; max_tokens = raw_max_tokens
          })

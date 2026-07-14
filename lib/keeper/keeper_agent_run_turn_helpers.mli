@@ -5,13 +5,6 @@ val mark_task_link : keeper:string -> task_id:string -> trace_id:string -> unit
 val task_link_already_recorded :
   keeper:string -> task_id:string -> trace_id:string -> bool
 
-val per_provider_timeout_for_turn :
-  ?oas_timeout_s:float ->
-  ?oas_timeout_is_explicit:bool ->
-  timeout_s:float ->
-  unit ->
-  float option
-
 val sse_event_progress_kind : Agent_sdk.Types.sse_event -> string option
 val sse_event_watchdog_progress_kind :
   Agent_sdk.Types.sse_event -> string option

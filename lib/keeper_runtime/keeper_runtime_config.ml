@@ -33,10 +33,7 @@ let key_to_env =
     (* [proactive] *)
     "proactive.enabled",                "MASC_KEEPER_PROACTIVE_ENABLED";
     (* [turn] *)
-    "turn.timeout_sec",                 "MASC_KEEPER_TURN_TIMEOUT_SEC";
-    "turn.oas_timeout_sec",             "MASC_KEEPER_OAS_TIMEOUT_SEC";
     "turn.stream_idle_timeout_sec",     "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC";
-    "turn.execution_idle_timeout_sec",  "MASC_KEEPER_EXECUTION_IDLE_TIMEOUT_SEC";
     "turn.cli_subprocess_idle_sec",     "MASC_KEEPER_CLI_SUBPROCESS_IDLE_SEC";
     "turn.capacity_limit",              "MASC_KEEPER_TURN_CAPACITY_LIMIT";
     "turn.batch_limit",                 "MASC_KEEPER_BATCH_LIMIT";
@@ -47,8 +44,6 @@ let key_to_env =
     "supervisor.sweep_sec",             "MASC_KEEPER_SUPERVISOR_SWEEP_SEC";
     (* [lifecycle] *)
     "lifecycle.dead_ttl_sec",           "MASC_KEEPER_DEAD_TTL_SEC";
-    (* [budget] *)
-    "budget.daily_usd",                 "MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD";
     (* [metrics] *)
     "metrics.max_bytes",                "MASC_KEEPER_METRICS_MAX_BYTES";
     "metrics.max_rotated",              "MASC_KEEPER_METRICS_MAX_ROTATED";
@@ -158,6 +153,26 @@ let toml_shadow : (string, string) Hashtbl.t = Hashtbl.create 16
 
 let toml_value_opt env_name = Hashtbl.find_opt toml_shadow env_name
 
+let validate_stream_idle_timeout doc =
+  let key = "turn.stream_idle_timeout_sec" in
+  match List.assoc_opt key doc with
+  | None -> Ok ()
+  | Some (Keeper_toml_loader.Toml_int seconds) ->
+    Env_config_keeper.KeeperKeepalive.parse_stream_idle_timeout_sec
+      (string_of_int seconds)
+    |> Result.map (fun (_ : float) -> ())
+    |> Result.map_error (fun detail -> Printf.sprintf "%s: %s" key detail)
+  | Some (Keeper_toml_loader.Toml_float seconds) ->
+    Env_config_keeper.KeeperKeepalive.parse_stream_idle_timeout_sec
+      (Printf.sprintf "%.17g" seconds)
+    |> Result.map (fun (_ : float) -> ())
+    |> Result.map_error (fun detail -> Printf.sprintf "%s: %s" key detail)
+  | Some
+      (Keeper_toml_loader.Toml_string _
+      | Keeper_toml_loader.Toml_bool _
+      | Keeper_toml_loader.Toml_string_array _) ->
+    Error (Printf.sprintf "%s: expected a numeric TOML value" key)
+
 let load_and_apply ~base_path =
   let path = toml_path ~base_path in
   if not (Sys.file_exists path) then
@@ -171,19 +186,22 @@ let load_and_apply ~base_path =
       | Error msg ->
         Error (Printf.sprintf "parse %s: %s" path msg)
       | Ok doc ->
-        let count =
-          List.fold_left
-            (fun acc (toml_key, env_name) ->
-               (* Populate shadow registry for every known key that has a
-                  TOML value, regardless of whether env preempts it. *)
-               (match List.assoc_opt toml_key doc with
-                | None -> ()
-                | Some v ->
-                  match value_to_string v with
-                  | None -> ()
-                  | Some s -> Hashtbl.replace toml_shadow env_name s);
-               if apply_one doc (toml_key, env_name) then acc + 1 else acc)
-            0
-            key_to_env
-        in
-        Ok count
+        (match validate_stream_idle_timeout doc with
+         | Error msg -> Error (Printf.sprintf "validate %s: %s" path msg)
+         | Ok () ->
+           let count =
+             List.fold_left
+               (fun acc (toml_key, env_name) ->
+                  (* Populate shadow registry for every known key that has a
+                     TOML value, regardless of whether env preempts it. *)
+                  (match List.assoc_opt toml_key doc with
+                   | None -> ()
+                   | Some v ->
+                     match value_to_string v with
+                     | None -> ()
+                     | Some s -> Hashtbl.replace toml_shadow env_name s);
+                  if apply_one doc (toml_key, env_name) then acc + 1 else acc)
+               0
+               key_to_env
+           in
+           Ok count)

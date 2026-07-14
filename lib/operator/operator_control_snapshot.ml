@@ -460,8 +460,6 @@ let keepers_json
                            ; "tool_audit_source", Json_util.string_opt_to_json tool_audit_source
                            ; "tool_audit_at", Json_util.string_opt_to_json tool_audit_at
                            ; "proactive_enabled", `Bool meta.proactive.enabled
-                           ; ( "turn_budget"
-                             , `String "disabled — governed by timeout_sec" )
                            ; ( "last_proactive_reason"
                              , Json_util.string_opt_to_json
                                  (let value =

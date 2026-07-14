@@ -9,20 +9,16 @@ let test_resolve_overrides_maps_known_keys () =
   let doc =
     [ "turn.batch_limit", T.Toml_int 9
     ; "turn.temperature", T.Toml_float 0.25
-    ; "turn.execution_idle_timeout_sec", T.Toml_int 95
     ]
   in
   let count, overrides = K.resolve_overrides ~env_lookup:empty_env doc in
-  check int "count" 3 count;
+  check int "count" 2 count;
   check (option string) "batch limit"
     (Some "9")
     (List.assoc_opt "MASC_KEEPER_BATCH_LIMIT" overrides);
   check (option string) "temperature"
     (Some "0.25")
-    (List.assoc_opt "MASC_KEEPER_UNIFIED_TEMP" overrides);
-  check (option string) "execution idle timeout"
-    (Some "95")
-    (List.assoc_opt "MASC_KEEPER_EXECUTION_IDLE_TIMEOUT_SEC" overrides)
+    (List.assoc_opt "MASC_KEEPER_UNIFIED_TEMP" overrides)
 ;;
 
 let test_resolve_overrides_keeps_env_precedence () =

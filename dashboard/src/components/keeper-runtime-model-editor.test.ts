@@ -211,7 +211,6 @@ function makeRuntimeProvider(runtimeId: string, providerName: string, modelName:
           supports_inline_tools: true,
           argv_prompt_preflight: false,
           uses_anthropic_caching: false,
-          max_turns_per_attempt: null,
         },
         custom_header_count: 1,
         connect_timeout_s: 30,

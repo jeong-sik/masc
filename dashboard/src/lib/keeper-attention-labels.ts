@@ -54,7 +54,6 @@ export const ATTENTION_REASONS = [
   'degraded_retry',
   'transient_runtime_retry',
   'internal_error',
-  'turn_budget_exhausted',
   'cancelled',
   'unmapped_runtime_state',
 ] as const
@@ -74,7 +73,6 @@ const ATTENTION_REASON_LABELS: Record<AttentionReason, string> = {
   degraded_retry: '저하 상태 재시도',
   transient_runtime_retry: '일시적 런타임 재시도',
   internal_error: '내부 오류',
-  turn_budget_exhausted: '턴 예산 소진',
   cancelled: '취소됨',
   unmapped_runtime_state: '매핑되지 않은 runtime 상태',
 }
@@ -115,7 +113,7 @@ export function attentionReasonLabel(reason: string | null, paused: boolean): st
 //     the corresponding attention_reason)
 //   - lib/keeper/keeper_turn_disposition.ml next_action
 //     (provide_input_or_decline, rerun_if_still_relevant, inspect_turn_timeout,
-//      inspect_runtime_attempts, inspect_turn_budget, inspect_latest_error)
+//      inspect_runtime_attempts, inspect_latest_error)
 //   - lib/dashboard/dashboard_goals.ml ('inspect_keeper_runtime_trust')
 //   - lib/keeper/keeper_status_bridge.ml runtime_trust fallback
 //     ('inspect_keeper_runtime_trust')
@@ -131,7 +129,6 @@ export const NEXT_HUMAN_ACTIONS = [
   'provide_input_or_decline',
   'rerun_if_still_relevant',
   'inspect_turn_timeout',
-  'inspect_turn_budget',
   'inspect_latest_error',
   'inspect_keeper_runtime_trust',
 ] as const
@@ -149,7 +146,6 @@ const NEXT_HUMAN_ACTION_LABELS: Record<NextHumanAction, string> = {
   provide_input_or_decline: '입력 제공 또는 거절',
   rerun_if_still_relevant: '필요 시 재실행',
   inspect_turn_timeout: '턴 타임아웃 원인 확인',
-  inspect_turn_budget: '턴 예산 소진 원인 확인',
   inspect_latest_error: '최근 오류 확인',
   inspect_keeper_runtime_trust: '런타임 신뢰 스냅샷 확인',
 }

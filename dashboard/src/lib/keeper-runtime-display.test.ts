@@ -281,10 +281,8 @@ describe('keeperRuntimeBlockerLabel', () => {
     expect(keeperRuntimeBlockerLabel('runtime_exhausted')).toBe('런타임 후보 소진')
   })
 
-  it('labels the 9 RFC-0062 SDK blocker variants', () => {
-    expect(keeperRuntimeBlockerLabel('sdk_max_turns_exceeded')).toBe('SDK 최대 턴 초과')
-    expect(keeperRuntimeBlockerLabel('sdk_token_budget_exceeded')).toBe('SDK 토큰 예산 초과')
-    expect(keeperRuntimeBlockerLabel('sdk_cost_budget_exceeded')).toBe('SDK 비용 예산 초과')
+  it('labels the active SDK blocker variants', () => {
+    expect(keeperRuntimeBlockerLabel('sdk_context_window_exceeded')).toBe('SDK 컨텍스트 윈도 초과')
     expect(keeperRuntimeBlockerLabel('sdk_unrecognized_stop_reason')).toBe('SDK 미식별 정지 사유')
     expect(keeperRuntimeBlockerLabel('sdk_idle_detected')).toBe('SDK Idle 감지')
     expect(keeperRuntimeBlockerLabel('sdk_guardrail_violation')).toBe('SDK 가드레일 위반')

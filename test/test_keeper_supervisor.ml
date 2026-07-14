@@ -963,7 +963,7 @@ let test_sweep_does_not_synthesize_gate_from_runtime_blocker () =
                 Some
                   (Keeper_meta_contract.blocker_info_of_class
                      ~detail:"provider turn timed out"
-                     Keeper_meta_contract.Turn_timeout);
+                     Keeper_meta_contract.Stale_turn_timeout);
             };
         }
       in
@@ -1881,7 +1881,7 @@ let test_persisted_blocker_survives_unregister () =
           runtime =
             {
               meta.runtime with
-              last_blocker = Some (Keeper_meta_contract.blocker_info_of_class ~detail:"test-blocker" Keeper_meta_contract.Turn_timeout);
+              last_blocker = Some (Keeper_meta_contract.blocker_info_of_class ~detail:"test-blocker" Keeper_meta_contract.Stale_turn_timeout);
             };
         }
       in
@@ -1905,7 +1905,7 @@ let test_persisted_blocker_survives_unregister () =
            (match m.runtime.last_blocker with
             | Some b ->
                 check string "meta.runtime.last_blocker" "test-blocker" b.detail;
-                check bool "meta.runtime.last_blocker.klass" true (b.klass = Keeper_meta_contract.Turn_timeout)
+                check bool "meta.runtime.last_blocker.klass" true (b.klass = Keeper_meta_contract.Stale_turn_timeout)
             | None -> fail "expected blocker after storm pause");
        | Ok None -> fail "meta missing after storm pause"
        | Error err -> fail ("read_meta failed: " ^ err));
@@ -1919,7 +1919,7 @@ let test_persisted_blocker_survives_unregister () =
            (match m.runtime.last_blocker with
             | Some b ->
                 check string "meta.runtime.last_blocker after unregister" "test-blocker" b.detail;
-                check bool "meta.runtime.last_blocker.klass after unregister" true (b.klass = Keeper_meta_contract.Turn_timeout)
+                check bool "meta.runtime.last_blocker.klass after unregister" true (b.klass = Keeper_meta_contract.Stale_turn_timeout)
             | None -> fail "expected blocker after unregister")
        | Ok None -> fail "meta missing after unregister"
        | Error err -> fail ("read_meta failed: " ^ err)))

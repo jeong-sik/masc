@@ -5,20 +5,33 @@
     [Runtime_agent] remains the public facade and still performs the
     approval wiring and final [build_safe] / [Agent.resume] calls. *)
 
-let default_max_turns = Agent_sdk.Types.default_config.max_turns
+let default_max_turns = Agent_sdk.Types.unbounded_max_turns
 
 type stop_reason =
   | Completed
-  | TurnBudgetExhausted of
+  | TurnLimitObserved of
       { turns_used : int
       ; limit : int
+      }
+  | ExecutionTimeoutObserved of
+      { elapsed_sec : float
+      ; timeout_sec : float
+      ; turn_count : int
+      ; max_turns : int
+      }
+  | ExecutionIdleTimeoutObserved of
+      { idle_sec : float
+      ; idle_timeout_sec : float
+      ; turn_count : int
+      ; max_turns : int
       }
   | Yielded_to_chat_waiting of { turns_used : int }
     (* The autonomous lane's OAS run stopped at a turn boundary because a
        dashboard/connector chat request was parked on the keeper's turn slot.
        Progress is checkpointed and the keeper resumes on the next cycle — the
-       same checkpoint disposition as a turn-budget stop, but a distinct reason
-       so receipts do not conflate an on-demand yield with budget exhaustion. *)
+       same checkpoint disposition as a turn-limit observation, but a distinct
+       reason so receipts do not conflate an on-demand yield with an OAS loop
+       observation. *)
   | Yielded_to_durable_stimulus of { turns_used : int }
     (* The current autonomous cycle completed at least one OAS provider turn,
        then released its lane because another durable stimulus was queued
@@ -107,14 +120,6 @@ type config =
   ; summarizer : (Agent_sdk.Types.message list -> string) option
     (** Custom summarizer for OAS [Budget_strategy.reduce_for_budget]
           Emergency-phase compaction. Defaults to OAS's extractive default. *)
-  ; execution_idle_timeout_s : float option
-    (** Per-run inactivity deadline forwarded to OAS
-        [Builder.with_execution_idle_timeout]. Resets on each unit of
-        progress (streamed token or completed turn) and fires only on
-        genuine silence, surfacing [Error.AgentExecutionIdleTimeout].
-        Unlike [max_execution_time_s] (total wall-clock), this never
-        cancels a run that is still producing output.
-        @since 0.201.0 OAS *)
   ; thinking_budget : int option
     (** Token budget for extended thinking, forwarded to OAS
         [Builder.with_thinking_budget]. Only meaningful when
@@ -208,7 +213,6 @@ let default_config
   ; exit_condition = None
   ; exit_condition_result = None
   ; summarizer = None
-  ; execution_idle_timeout_s = None
   ; thinking_budget = None
   ; top_p = provider_cfg.top_p
   ; top_k = provider_cfg.top_k
@@ -389,11 +393,6 @@ let builder_without_approval
     | None -> builder
   in
   let builder =
-    match config.execution_idle_timeout_s with
-    | Some s -> Agent_sdk.Builder.with_execution_idle_timeout s builder
-    | None -> builder
-  in
-  let builder =
     match config.thinking_budget with
     | Some budget -> Agent_sdk.Builder.with_thinking_budget budget builder
     | None -> builder
@@ -462,7 +461,9 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
   =
 
   let max_turns_for_resume =
-    if config.max_turns = 0 then 0 else checkpoint.turn_count + config.max_turns
+    if Agent_sdk.Types.has_finite_max_turns config.max_turns
+    then checkpoint.turn_count + config.max_turns
+    else Agent_sdk.Types.unbounded_max_turns
   in
   let patched_checkpoint =
     { checkpoint with
@@ -516,7 +517,6 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
     ; stream_idle_timeout_s = config.stream_idle_timeout_s
     ; max_execution_time_s = config.max_execution_time_s
     ; body_timeout_s = config.body_timeout_s
-    ; execution_idle_timeout_s = config.execution_idle_timeout_s
     ; guardrails = guardrails_of_config config
     ; context_reducer = config.context_reducer
     ; context_injector = config.context_injector

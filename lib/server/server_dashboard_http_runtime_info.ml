@@ -1580,7 +1580,6 @@ let runtime_provider_behavior_capabilities_json
       [ "supports_inline_tools", `Bool caps.supports_inline_tools
       ; "argv_prompt_preflight", `Bool caps.argv_prompt_preflight
       ; "uses_anthropic_caching", `Bool caps.uses_anthropic_caching
-      ; "max_turns_per_attempt", Json_util.int_opt_to_json caps.max_turns_per_attempt
       ]
 ;;
 

@@ -112,15 +112,9 @@ type runtime_exhaustion_reason = Keeper_internal_error.runtime_exhaustion_reason
   | No_providers_available
   | All_providers_failed
   | Candidates_filtered_after_cycles
-  | Max_turns_exceeded
   | Session_conflict
       (** The provider session lease is owned by another process. This remains
           terminal for automatic retry and is never inferred from message text. *)
-  | Structural_attempt_timeout of { detail : string }
-      (** Agent SDK [with_optional_timeout] wrapper fired its per-OAS-call
-          ceiling ([max_execution_time_s]). Distinct from transport-level
-          provider timeouts. This variant is accepted only from typed
-          envelopes; free-form messages stay [Other_detail]. *)
   | Capacity_exhausted
       (** Typed surface for capacity-induced runtime exhaustion.
           Previously [ProviderFailure { kind = Capacity_exhausted _ }] fell
@@ -131,14 +125,10 @@ type runtime_exhaustion_reason = Keeper_internal_error.runtime_exhaustion_reason
 type blocker_class =
   | Runtime_exhausted of runtime_exhaustion_reason
   | Capacity_backpressure
-  | Turn_timeout
   | Fiber_unresolved
   | Stale_turn_timeout
   | Stale_fleet_batch
-  | Oas_agent_execution_timeout
-  | Sdk_max_turns_exceeded
-  | Sdk_token_budget_exceeded
-  | Sdk_cost_budget_exceeded
+  | Sdk_context_window_exceeded
   | Sdk_unrecognized_stop_reason
   | Sdk_idle_detected
   | Sdk_guardrail_violation
@@ -158,7 +148,7 @@ val runtime_exhaustion_summary :
 
 val runtime_exhaustion_reason_retryable : runtime_exhaustion_reason -> bool
 (** Total typed retryability per reason variant. Transient/connectivity
-    reasons and bounded-cycle/turn/capacity exhaustion are retryable;
+    reasons and candidate/capacity exhaustion are retryable;
     [Session_conflict] and [Other_detail] (unknown free-text) are not. Replaces
     a string-prefix reparse with a [_ -> false] catch-all that mis-biased
     transient faults to terminal. *)

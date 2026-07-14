@@ -1350,21 +1350,6 @@ function BoolRow({ label, value }: { label: string; value: boolean }) {
   `
 }
 
-function formatSeconds(value: number): string {
-  if (!Number.isFinite(value)) return MISSING_DATA_DASH
-  return value >= 60 ? `${(value / 60).toFixed(1)}m` : `${value.toFixed(value % 1 === 0 ? 0 : 1)}s`
-}
-
-function perProviderTimeoutLabel(execution: KeeperConfig['execution']): string {
-  if (
-    execution.per_provider_timeout_mode === 'override'
-    && typeof execution.per_provider_timeout_sec === 'number'
-  ) {
-    return formatSeconds(execution.per_provider_timeout_sec)
-  }
-  return 'turn budget default'
-}
-
 function MajorSectionHeader({ title }: { title: string }) {
   return html`
     <div class="rounded-[var(--r-3)] border border-[var(--accent-20)] bg-[var(--accent-5)] px-4 py-3 mt-8 mb-4 flex items-center gap-2 shadow-[var(--shadow-1)] v2-monitoring-panel">
@@ -1955,10 +1940,9 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       `
       : null}
 
-    <${KcfSec} title="실행" desc="런타임 후보·타임아웃은 읽기 전용입니다. fallback 은 마지막 runtime 을 제외한 항목에 순서대로 적용됩니다.">
+    <${KcfSec} title="실행" desc="런타임 후보는 읽기 전용입니다. fallback 은 마지막 runtime 을 제외한 항목에 순서대로 적용됩니다.">
       <${KcfFacts} rows=${[
         ['활성 런타임', c.execution.active_model ? 'runtime' : null],
-        ['runtime timeout', perProviderTimeoutLabel(c.execution), true],
       ]} />
       ${rd && runtimeCanEdit ? html`
         <${InlineNumberRow} label="컨텍스트 오버라이드" value=${rd.max_context_override}

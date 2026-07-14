@@ -483,11 +483,11 @@ function normalizeKeeperRuntimeField<T>(
   if (value === _MISSING) return null
   const source = asString(raw.source)
   if (!source) return null
-  const validSources: KeeperRuntimeSource[] = ['env', 'toml', 'default', 'derived']
+  const validSources: KeeperRuntimeSource[] = ['env', 'toml', 'default']
+  if (!validSources.includes(source as KeeperRuntimeSource)) return null
   return {
     value: value as T,
-    source: validSources.includes(source as KeeperRuntimeSource)
-      ? (source as KeeperRuntimeSource) : 'default',
+    source: source as KeeperRuntimeSource,
   }
 }
 
@@ -497,23 +497,23 @@ function normalizeKeeperRuntimeResolved(raw: unknown): KeeperRuntimeResolved | n
     const n = asNumber(v)
     return n !== null && n !== undefined ? n : _MISSING
   }
-  const floatField = (key: string) => normalizeKeeperRuntimeField(
-    (raw as Record<string, unknown>)[key], toNumber,
-  )
   const optFloatField = (key: string) => normalizeKeeperRuntimeField<number | null>(
     (raw as Record<string, unknown>)[key],
-    v => v === null || v === undefined ? null : toNumber(v) === _MISSING ? _MISSING : (toNumber(v) as number),
+    v => v === null ? null : toNumber(v) === _MISSING ? _MISSING : (toNumber(v) as number),
   )
-  const turnTimeout = floatField('turn_timeout_sec')
-  const oasTimeoutOverride = optFloatField('oas_timeout_override_sec')
-  const oasTimeoutPer1k = floatField('oas_timeout_per_1k')
-  const oasTimeoutPerTurn = floatField('oas_timeout_per_turn')
-  if (!turnTimeout || !oasTimeoutPer1k || !oasTimeoutPerTurn) return null
+  const streamIdleTimeout = normalizeKeeperRuntimeField<number | null>(
+    raw.stream_idle_timeout_sec,
+    v => {
+      if (v === null) return null
+      const seconds = toNumber(v)
+      return seconds !== _MISSING && seconds > 0 ? seconds : _MISSING
+    },
+  )
+  const bodyTimeoutOverride = optFloatField('body_timeout_override_sec')
+  if (!streamIdleTimeout || !bodyTimeoutOverride) return null
   return {
-    turn_timeout_sec: turnTimeout,
-    oas_timeout_override_sec: oasTimeoutOverride as KeeperRuntimeField<number | null>,
-    oas_timeout_per_1k: oasTimeoutPer1k,
-    oas_timeout_per_turn: oasTimeoutPerTurn,
+    stream_idle_timeout_sec: streamIdleTimeout,
+    body_timeout_override_sec: bodyTimeoutOverride,
   }
 }
 

@@ -5,11 +5,8 @@
     provider-error classification, not runtime-specific. *)
 
 val sdk_error_is_hard_quota : Agent_sdk.Error.sdk_error -> bool
-val sdk_error_is_max_turns_exceeded : Agent_sdk.Error.sdk_error -> bool
 val sdk_error_soft_rate_limited :
   Agent_sdk.Error.sdk_error -> float option option
-val sdk_error_runtime_fallback_class :
-  Agent_sdk.Error.sdk_error -> string option
 
 val provider_attempt_status_of_result :
   ('a, Agent_sdk.Error.sdk_error) result -> string
@@ -36,9 +33,6 @@ val provider_attempt_provenance_fields :
 type provider_attempt_started_record =
   { started_provenance : provider_attempt_provenance
   ; started_is_last : bool
-  ; started_per_provider_timeout_s : float option
-  ; started_attempt_timeout_source : string
-  ; started_attempt_watchdog_source : string
   }
 
 type provider_attempt_finished_record =

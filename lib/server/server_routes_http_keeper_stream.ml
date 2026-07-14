@@ -459,11 +459,11 @@ let handle_keeper_turn_interrupt state request reqd =
                ])))
 ;;
 
-(* No external timeout for keeper_msg. Keeper has its own internal limits
-   (max_turns, max_cost_usd, max_tokens) that control call duration.
-   A fixed external timeout conflicts with multi-turn tool-use loops and
-   causes lost turn metrics when the timeout fires mid-Agent.run().
-   Aligned with MCP path (mcp_server_eio_call_tool.ml:139-143). *)
+(* No cumulative timeout or work budget for keeper_msg. Keeper calls OAS with
+   unbounded turn/idle sentinels; turn, token, and cost usage are observations,
+   not lifecycle authority. Explicit cancellation plus provider/tool progress
+   boundaries settle real liveness failures without discarding the request or
+   its terminal receipt. *)
 
 (** Build a compact error-detail string for audit/telemetry, mirroring the
     MCP tool path.  Keeps long error bodies from dominating log/JSONL rows

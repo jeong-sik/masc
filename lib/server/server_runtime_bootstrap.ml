@@ -469,7 +469,8 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
        Log.Server.info "runtime.toml: applied %d override(s)" n
    | Error msg ->
        record_runtime_toml_load_failure msg;
-       Log.Server.warn "runtime.toml load failed: %s (continuing with env defaults)" msg);
+       Log.Server.error "runtime.toml load failed: %s" msg;
+       raise (Env_config_core.Config_error msg));
   Keeper_runtime_resolved.init ();
   Keeper_task_owner_backend.install_hooks ();
   let state =

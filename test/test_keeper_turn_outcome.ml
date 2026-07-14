@@ -50,9 +50,27 @@ let test_of_stop_reason () =
   in
   check outcome "completed -> visible" TO.Visible_reply
     (TO.of_stop_reason Runtime_agent.Completed);
-  check outcome "budget exhausted -> checkpoint" TO.Continuation_checkpoint
+  check outcome "turn limit observation -> visible" TO.Visible_reply
     (TO.of_stop_reason
-       (Runtime_agent.TurnBudgetExhausted { turns_used = 3; limit = 3 }));
+       (Runtime_agent.TurnLimitObserved { turns_used = 3; limit = 3 }));
+  check outcome "execution timeout observation -> no visible reply"
+    TO.No_visible_reply
+    (TO.of_stop_reason
+       (Runtime_agent.ExecutionTimeoutObserved
+          { elapsed_sec = 300.0
+          ; timeout_sec = 300.0
+          ; turn_count = 3
+          ; max_turns = Agent_sdk.Types.unbounded_max_turns
+          }));
+  check outcome "idle timeout observation -> no visible reply"
+    TO.No_visible_reply
+    (TO.of_stop_reason
+       (Runtime_agent.ExecutionIdleTimeoutObserved
+          { idle_sec = 120.0
+          ; idle_timeout_sec = 120.0
+          ; turn_count = 3
+          ; max_turns = Agent_sdk.Types.unbounded_max_turns
+          }));
   check outcome "chat yield -> checkpoint" TO.Continuation_checkpoint
     (TO.of_stop_reason
        (Runtime_agent.Yielded_to_chat_waiting { turns_used = 2 }));
@@ -73,9 +91,27 @@ let test_of_result_surface () =
   check outcome "completed with empty text -> no visible reply"
     TO.No_visible_reply
     (TO.of_result_surface ~response_text:"   " Runtime_agent.Completed);
-  check outcome "budget exhausted -> checkpoint" TO.Continuation_checkpoint
+  check outcome "turn limit observation with text -> visible" TO.Visible_reply
     (TO.of_result_surface ~response_text:"done"
-       (Runtime_agent.TurnBudgetExhausted { turns_used = 3; limit = 3 }))
+       (Runtime_agent.TurnLimitObserved { turns_used = 3; limit = 3 }));
+  check outcome "execution timeout observation -> no visible reply"
+    TO.No_visible_reply
+    (TO.of_result_surface ~response_text:"ignored"
+       (Runtime_agent.ExecutionTimeoutObserved
+          { elapsed_sec = 300.0
+          ; timeout_sec = 300.0
+          ; turn_count = 3
+          ; max_turns = Agent_sdk.Types.unbounded_max_turns
+          }));
+  check outcome "idle timeout observation -> no visible reply"
+    TO.No_visible_reply
+    (TO.of_result_surface ~response_text:"ignored"
+       (Runtime_agent.ExecutionIdleTimeoutObserved
+          { idle_sec = 120.0
+          ; idle_timeout_sec = 120.0
+          ; turn_count = 3
+          ; max_turns = Agent_sdk.Types.unbounded_max_turns
+          }))
 
 let test_autonomous_yield_boundary_contract () =
   let module F = Masc.Keeper_agent_run.For_testing in
@@ -124,11 +160,20 @@ let test_autonomous_yield_boundary_contract () =
     check int "typed durable yield carries the OAS turn" (start_turn + 1)
       turns_used
   | Runtime_agent.Completed
-  | Runtime_agent.TurnBudgetExhausted _
+  | Runtime_agent.TurnLimitObserved _
+  | Runtime_agent.ExecutionTimeoutObserved _
+  | Runtime_agent.ExecutionIdleTimeoutObserved _
   | Runtime_agent.Yielded_to_chat_waiting _
   | Runtime_agent.InputRequired _
   | Runtime_agent.ToolFailureRecoveryDeferred _ ->
     fail "durable request mapped to the wrong stop reason"
+
+let test_keeper_turn_limit_is_unbounded () =
+  let max_turns = Masc.Keeper_agent_run.For_testing.keeper_max_turns in
+  check bool
+    "Keeper passes OAS's unbounded turn sentinel"
+    false
+    (Agent_sdk.Types.has_finite_max_turns max_turns)
 
 let payload fields = Some (`Assoc fields)
 
@@ -296,6 +341,8 @@ let () =
           test_case "of_result_surface" `Quick test_of_result_surface;
           test_case "autonomous yield boundary contract" `Quick
             test_autonomous_yield_boundary_contract;
+          test_case "Keeper turn limit is unbounded" `Quick
+            test_keeper_turn_limit_is_unbounded;
         ] );
       ( "payload_decode",
         [

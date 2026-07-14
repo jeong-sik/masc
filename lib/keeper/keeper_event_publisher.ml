@@ -164,7 +164,6 @@ let publish_audit_event ~id ~ts ~actor ~kind ?target ~summary ~severity
 let publish_runtime_execution_built
     ~keeper_name
     ~runtime_id
-    ~max_tokens
     ~max_context
     ~effective_budget
     ~temperature
@@ -172,16 +171,14 @@ let publish_runtime_execution_built
   =
   let payload =
     `Assoc
-      ([ ("keeper_name", `String keeper_name)
-       ; ("runtime_id", `String runtime_id)
-       ]
-       @ Runtime_max_tokens.telemetry_fields max_tokens
-       @ [ ("max_context", `Int max_context)
-         ; ("max_context_resolution", `String (string_of_int effective_budget))
-         ; ("temperature", `Float temperature)
-         ; ("generation", `Int generation)
-         ; ("timestamp", `Float (Time_compat.now ()))
-         ])
+      [ ("keeper_name", `String keeper_name)
+      ; ("runtime_id", `String runtime_id)
+      ; ("max_context", `Int max_context)
+      ; ("max_context_resolution", `String (string_of_int effective_budget))
+      ; ("temperature", `Float temperature)
+      ; ("generation", `Int generation)
+      ; ("timestamp", `Float (Time_compat.now ()))
+      ]
   in
   masc_publish
     (Agent_sdk.Event_bus.mk_event (Custom ("telemetry_event", payload)))

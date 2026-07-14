@@ -154,12 +154,6 @@ let sdk_error_is_hard_quota =
 let sdk_error_soft_rate_limited =
   Keeper_turn_driver_provider_attempt.sdk_error_soft_rate_limited
 
-let sdk_error_is_max_turns_exceeded =
-  Keeper_turn_driver_provider_attempt.sdk_error_is_max_turns_exceeded
-
-let sdk_error_runtime_fallback_class =
-  Keeper_turn_driver_provider_attempt.sdk_error_runtime_fallback_class
-
 let sdk_error_is_resumable_cli_session err =
   match Keeper_internal_error.classify_masc_internal_error err with
   | Some (Keeper_internal_error.Resumable_cli_session _) -> true

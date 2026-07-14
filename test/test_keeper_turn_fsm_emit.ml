@@ -326,9 +326,11 @@ let test_terminal_stutter_requires_unchanged_stop_context () =
 let test_cancel_reason_labels_documented () =
   let pairs : (F.cancel_reason * string) list =
     [ F.Cancelled_supervisor_stop, "supervisor_stop"
+    ; F.Cancelled_external, "external_cancel"
     ; F.Cancelled_phase_gate_close, "phase_gate_close"
     ; F.Cancelled_provider_timeout, "provider_timeout"
     ; F.Cancelled_fleet_shutdown, "fleet_shutdown"
+    ; F.Cancelled_input_required, "input_required"
     ]
   in
   List.iter

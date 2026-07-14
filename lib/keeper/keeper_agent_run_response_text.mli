@@ -4,9 +4,9 @@ type finalized = {
   response_text : string;
 }
 
-(** [true] only for typed control checkpoints that must not manufacture a
-    chat reply. The checkpoint remains observable through its stop/event
-    surfaces. *)
+(** [true] for typed control checkpoints and no-output execution observations
+    that must not manufacture a chat reply. Their state remains observable
+    through typed stop/event surfaces. *)
 val stop_reason_suppresses_visible_response : Runtime_agent.stop_reason -> bool
 
 val finalize :

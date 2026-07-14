@@ -201,11 +201,6 @@ let append_decision_record
           | Some r when String.trim r.response_text <> "" ->
               `String (short_preview ~max_len:2000 r.response_text)
           | _ -> `Null );
-        ( "response_requests_confirmation",
-          `Bool
-            (match result with
-             | Some r -> response_requests_confirmation r.response_text
-             | None -> false) );
         ( "error", Json_util.string_opt_to_json error );
         ( "trace_ref",
           match result with
@@ -268,27 +263,7 @@ let append_decision_record
                 ]
               in
                 let stop_reason_str =
-                  match r.stop_reason with
-                  | Runtime_agent.Completed -> "completed"
-                  | Runtime_agent.TurnBudgetExhausted { turns_used; limit } ->
-                      (* Detail-less wire form via the single SSOT [to_wire]:
-                         [Runtime_agent.TurnBudgetExhausted] carries only
-                         {turns_used; limit}, so [detail] is None — the
-                         same form the receipt producer emits. The previous
-                         hardcoded {`Turns; `Oas_sdk} fabricated tags the variant
-                         does not carry and drifted from the receipt path. *)
-                      Keeper_turn_disposition.(
-                        to_wire
-                          (Turn_budget_exhausted
-                             { detail = None; used = turns_used; limit }))
-                  | Runtime_agent.Yielded_to_chat_waiting { turns_used } ->
-                      Printf.sprintf "yielded_to_chat_waiting(%d)" turns_used
-                  | Runtime_agent.Yielded_to_durable_stimulus { turns_used } ->
-                      Printf.sprintf "yielded_to_durable_stimulus(%d)" turns_used
-                  | Runtime_agent.InputRequired { turns_used; _ } ->
-                      Printf.sprintf "input_required(%d)" turns_used
-                  | Runtime_agent.ToolFailureRecoveryDeferred { turns_used; _ } ->
-                      Printf.sprintf "tool_failure_recovery_deferred(%d)" turns_used
+                  Keeper_execution_receipt.stop_reason_to_string r.stop_reason
                 in
               let inference_fields =
                 match r.inference_telemetry with
@@ -364,13 +339,14 @@ let append_decision_record
               (* Partial telemetry for turns without a run_result: record
                  what we know without collapsing skipped/cancelled/partial
                  outcomes into telemetry.outcome=error. *)
-              let error_category =
-                error_category_of_no_result_outcome ~outcome ~error
-              in
               `Assoc [
                 ("runtime_id", `String (runtime_id_of_meta meta));
                 ("candidate_models", `List []);
-                ( "error_category", Json_util.string_opt_to_json error_category );
+                (* The terminal reason is the typed failure projection built at
+                   the dispatch boundary. Persist its canonical code directly;
+                   free-form provider/error prose is diagnostic data, never a
+                   classification input. *)
+                ("error_category", `String terminal_reason_code);
                 ("outcome", `String outcome);
                 ("usage_reported", `Bool false);
                 ("telemetry_reported", `Bool false);

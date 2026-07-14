@@ -1,8 +1,3 @@
-type per_provider_timeout_state =
-  | Per_provider_timeout_unset
-  | Per_provider_timeout_invalid
-  | Per_provider_timeout_set
-
 type keeper_profile_defaults = {
   id : Ids.Keeper_id.t option;
   manifest_path : string option;
@@ -21,8 +16,6 @@ type keeper_profile_defaults = {
   (* Telemetry Feedback — inject behavioral stats into keeper context *)
   telemetry_feedback_enabled : bool option;
   telemetry_feedback_window_hours : int option;
-  per_provider_timeout_state : per_provider_timeout_state;
-  per_provider_timeout : float option;
   always_allow : bool option;
   (* Per-keeper OAS CLI transport env vars (OAS 0.159+).
      Parsed from [[keeper.oas_env]] table.  Keys MUST match
@@ -58,8 +51,6 @@ let empty_keeper_profile_defaults =
     active_goal_ids = None;
     telemetry_feedback_enabled = None;
     telemetry_feedback_window_hours = None;
-    per_provider_timeout_state = Per_provider_timeout_unset;
-    per_provider_timeout = None;
     always_allow = None;
     unknown_toml_keys = [];
     oas_env = [];

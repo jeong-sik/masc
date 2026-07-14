@@ -1100,7 +1100,6 @@ describe('SettingsSurface', () => {
                 supports_inline_tools: true,
                 argv_prompt_preflight: true,
                 uses_anthropic_caching: true,
-                max_turns_per_attempt: 3,
               },
               custom_header_count: 1,
               connect_timeout_s: 120,

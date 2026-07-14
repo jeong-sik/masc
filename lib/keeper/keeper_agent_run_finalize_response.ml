@@ -105,6 +105,27 @@ let canonical_success_replay_checkpoint
        checkpoint messages to match pre-turn history prefix"
 ;;
 
+let observation_replay_checkpoint
+      ~(history_messages : Agent_sdk.Types.message list)
+      ~(session_id : string)
+      (checkpoint : Agent_sdk.Checkpoint.t)
+  =
+  match
+    Keeper_replay_prefix.split
+      ~prefix:history_messages
+      checkpoint.Agent_sdk.Checkpoint.messages
+  with
+  | Ok _ ->
+    Ok
+      ( { checkpoint with
+          Agent_sdk.Checkpoint.session_id
+        }
+      , None )
+  | Error _ ->
+    Error
+      "refusing to save execution-observation checkpoint: messages do not match pre-turn history prefix"
+;;
+
 let checkpoint_for_replay_persistence
       ~(history_messages : Agent_sdk.Types.message list)
       ~pre_turn_working_context:_
@@ -140,8 +161,15 @@ let checkpoint_for_replay_persistence
        Error
          "refusing to save recovery-control checkpoint: messages do not match \
           pre-turn history prefix")
+  | Runtime_agent.TurnLimitObserved _
+  | Runtime_agent.ExecutionTimeoutObserved _
+  | Runtime_agent.ExecutionIdleTimeoutObserved _ ->
+    (* An execution-limit observation has no lifecycle authority, but its OAS
+       checkpoint is still the replay SSOT. Preserve the full typed message
+       suffix (thinking, tool call, and tool result blocks) so the next cycle
+       cannot repeat already committed tools after a blank terminal payload. *)
+    observation_replay_checkpoint ~history_messages ~session_id checkpoint
   | ( Runtime_agent.Completed
-    | Runtime_agent.TurnBudgetExhausted _
     | Runtime_agent.Yielded_to_chat_waiting _
     | Runtime_agent.Yielded_to_durable_stimulus _ ) ->
     canonical_success_replay_checkpoint

@@ -256,7 +256,6 @@ function runtimeProviderBehaviorText(provider: DashboardRuntimeProviderSnapshot)
     flagText(behavior.supports_inline_tools, 'inline-tools'),
     flagText(behavior.argv_prompt_preflight, 'argv-preflight'),
     flagText(behavior.uses_anthropic_caching, 'anthropic-cache'),
-    typeof behavior.max_turns_per_attempt === 'number' ? `max-turns ${behavior.max_turns_per_attempt}` : null,
   ])
 }
 

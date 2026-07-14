@@ -20,8 +20,8 @@
       [metric_keeper_meta_read_failures] on read failure +
       Site=none_after_failure or error_after_failure label).
 
-    - [Ok updated] → reset budget exhaustion + clear provider-timeout
-      failure reason + return updated meta.
+    - [Ok updated] → clear prior observational failure reason and return
+      updated meta.
 
     Pure helper move — no callback injection, all references reach
     external modules (Keeper_unified_turn, Agent_sdk, Log, Otel_metric_store,

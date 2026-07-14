@@ -234,7 +234,7 @@ let test_dead_tombstone_final_meta_records_reason () =
   let timeout_blocker =
     Keeper_meta_contract.blocker_info_of_class
       ~detail:"stale pause before durable dead finalization"
-      Keeper_meta_contract.Turn_timeout
+      Keeper_meta_contract.Stale_turn_timeout
   in
   let input =
     { (make_meta "dead-tombstone-final-meta") with

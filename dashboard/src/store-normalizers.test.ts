@@ -310,6 +310,67 @@ describe('mergeMessages', () => {
 })
 
 describe('normalizeDashboardRuntimeResolution fleet safety', () => {
+  it('projects only the active stream and body timeout fields', () => {
+    const result = normalizeDashboardRuntimeResolution(runtimeResolutionRaw({
+      keeper_runtime: {
+        stream_idle_timeout_sec: { value: 75, source: 'toml' },
+        body_timeout_override_sec: { value: null, source: 'default' },
+      },
+    }))
+
+    expect(result?.keeper_runtime).toEqual({
+      stream_idle_timeout_sec: { value: 75, source: 'toml' },
+      body_timeout_override_sec: { value: null, source: 'default' },
+    })
+  })
+
+  it('projects an unset stream idle timeout as explicitly disabled', () => {
+    const result = normalizeDashboardRuntimeResolution(runtimeResolutionRaw({
+      keeper_runtime: {
+        stream_idle_timeout_sec: { value: null, source: 'default' },
+        body_timeout_override_sec: { value: null, source: 'default' },
+      },
+    }))
+
+    expect(result?.keeper_runtime?.stream_idle_timeout_sec).toEqual({
+      value: null,
+      source: 'default',
+    })
+  })
+
+  it('rejects unknown keeper runtime sources instead of coercing them', () => {
+    const result = normalizeDashboardRuntimeResolution(runtimeResolutionRaw({
+      keeper_runtime: {
+        stream_idle_timeout_sec: { value: null, source: 'compatibility' },
+        body_timeout_override_sec: { value: null, source: 'default' },
+      },
+    }))
+
+    expect(result?.keeper_runtime).toBeNull()
+  })
+
+  it('rejects a missing stream idle value instead of treating it as disabled', () => {
+    const result = normalizeDashboardRuntimeResolution(runtimeResolutionRaw({
+      keeper_runtime: {
+        stream_idle_timeout_sec: { source: 'default' },
+        body_timeout_override_sec: { value: null, source: 'default' },
+      },
+    }))
+
+    expect(result?.keeper_runtime).toBeNull()
+  })
+
+  it('rejects a non-positive stream idle value instead of clamping it', () => {
+    const result = normalizeDashboardRuntimeResolution(runtimeResolutionRaw({
+      keeper_runtime: {
+        stream_idle_timeout_sec: { value: 0, source: 'toml' },
+        body_timeout_override_sec: { value: null, source: 'default' },
+      },
+    }))
+
+    expect(result?.keeper_runtime).toBeNull()
+  })
+
   it('keeps old runtime payloads compatible when fleet safety fields are absent', () => {
     const result = normalizeDashboardRuntimeResolution(runtimeResolutionRaw())
 

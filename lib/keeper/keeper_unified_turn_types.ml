@@ -14,7 +14,6 @@ type turn_state =
   ; manifest_seq : int
   ; current_turn_blocker_info : Keeper_meta_contract.blocker_info option
   ; last_execution : Keeper_turn_runtime_budget.runtime_execution option
-  ; last_provider_timeout_budget : Keeper_turn_runtime_budget.provider_timeout_budget option
   ; degraded_retry_info : Keeper_error_classify.degraded_retry option
   ; runtime_rotation_attempts : Keeper_execution_receipt.runtime_rotation_attempt list
   ; failure_reason : Keeper_turn_fsm.failure_reason option
@@ -73,23 +72,6 @@ let turn_event_bus_manifest_decision
     ]
 ;;
 
-let runtime_exhaustion_detail_code detail =
-  let contains needle = String_util.contains_substring_ci detail needle in
-  if contains "no_first_token"
-  then "runtime_exhausted_no_first_token"
-  else if contains "http 429" || contains "usage limit" || contains "rate limit"
-  then "runtime_exhausted_rate_limited"
-  else if contains "max_execution_time"
-  then "runtime_exhausted_max_execution_time"
-  else if contains "wall-clock timeout"
-  then "runtime_exhausted_wall_clock_timeout"
-  else if contains "connection closed by peer"
-  then "runtime_exhausted_connection_closed"
-  else if contains "connection refused"
-  then "runtime_exhausted_connection_refused"
-  else "runtime_exhausted_provider_failure"
-;;
-
 let runtime_exhaustion_reason_code
       (reason : Keeper_internal_error.runtime_exhaustion_reason)
   =
@@ -100,12 +82,9 @@ let runtime_exhaustion_reason_code
   | Keeper_internal_error.All_providers_failed -> "runtime_exhausted_all_providers_failed"
   | Keeper_internal_error.Candidates_filtered_after_cycles ->
     "runtime_exhausted_candidates_filtered"
-  | Keeper_internal_error.Max_turns_exceeded -> "runtime_exhausted_max_turns"
   | Keeper_internal_error.Session_conflict -> "runtime_exhausted_session_conflict"
-  | Keeper_internal_error.Structural_attempt_timeout _ ->
-    "runtime_exhausted_structural_attempt_timeout"
   | Keeper_internal_error.Capacity_exhausted -> "runtime_exhausted_capacity_exhausted"
-  | Keeper_internal_error.Other_detail detail -> runtime_exhaustion_detail_code detail
+  | Keeper_internal_error.Other_detail _ -> "runtime_exhausted_provider_failure"
 ;;
 
 let registry_reason_of_internal_reason
@@ -121,12 +100,8 @@ let registry_reason_of_internal_reason
     Keeper_meta_contract.All_providers_failed
   | Keeper_internal_error.Candidates_filtered_after_cycles ->
     Keeper_meta_contract.Candidates_filtered_after_cycles
-  | Keeper_internal_error.Max_turns_exceeded ->
-    Keeper_meta_contract.Max_turns_exceeded
   | Keeper_internal_error.Session_conflict ->
     Keeper_meta_contract.Session_conflict
-  | Keeper_internal_error.Structural_attempt_timeout { detail } ->
-    Keeper_meta_contract.Structural_attempt_timeout { detail }
   | Keeper_internal_error.Capacity_exhausted ->
     Keeper_meta_contract.Capacity_exhausted
   | Keeper_internal_error.Other_detail detail ->
@@ -158,8 +133,6 @@ let runtime_exhausted_failure_reason_of_raw_error ~detail raw_error =
   | Some
       ( Keeper_internal_error.Resumable_cli_session _
       | Keeper_internal_error.Accept_rejected _
-      | Keeper_internal_error.Turn_timeout _
-      | Keeper_internal_error.Provider_timeout _
       (* RFC-0159 Phase A: typed [Internal_*] variants are not
          runtime-exhaustion reasons; they map to opaque
          internal-error events upstream. *)
@@ -212,7 +185,6 @@ let registry_failure_reason_of_terminal_reason
   | Keeper_turn_disposition.External_cancel
   | Keeper_turn_disposition.Input_required
   | Keeper_turn_disposition.Turn_wall_clock_timeout
-  | Keeper_turn_disposition.Turn_budget_exhausted _
   | Keeper_turn_disposition.Unknown _ -> None
 ;;
 
@@ -320,13 +292,20 @@ let record_turn_tool_events
     events
 ;;
 
-(** Record the observation for a streaming turn that was cancelled.
-    [cancel_reason] distinguishes the source:
-      - ["attempt_watchdog_safety_deadline"] — legacy watchdog timeout receipt
-      - ["supervisor_stop"] — supervisor requested stop
-      - ["external_cancel"] — external fiber cancellation *)
+type streaming_cancellation_source =
+  | Supervisor_stop
+  | External_cancel
+
+let streaming_cancellation_source_to_code = function
+  | Supervisor_stop -> "supervisor_stop"
+  | External_cancel -> "external_cancel"
+
+let streaming_cancellation_source_to_fsm = function
+  | Supervisor_stop -> Keeper_turn_fsm.Cancelled_supervisor_stop
+  | External_cancel -> Keeper_turn_fsm.Cancelled_external
+
+(** Record the observation for a streaming turn that was cancelled. *)
 let record_streaming_cancelled_observation
-      ?(cancel_reason : string = "external_cancel")
       ~(config : Workspace.config)
       ~(run_meta : Keeper_meta_contract.keeper_meta)
       ~(run_generation : int)
@@ -340,11 +319,11 @@ let record_streaming_cancelled_observation
     | Some entry -> Atomic.get entry.fiber_stop
     | None -> false
   in
+  let cancellation_source =
+    if fiber_stop_set then Supervisor_stop else External_cancel
+  in
   let terminal_reason_code =
-    (* Priority: explicit cancel_reason > fiber_stop inference *)
-    if cancel_reason <> "external_cancel"
-    then cancel_reason
-    else if fiber_stop_set then "supervisor_stop" else "external_cancel"
+    streaming_cancellation_source_to_code cancellation_source
   in
   if fiber_stop_set
   then
@@ -366,19 +345,10 @@ let record_streaming_cancelled_observation
     ~trajectory_outcome:(Trajectory.Gated terminal_reason_code)
     ~keeper_turn_id
     ();
-  let cancelled_variant =
-    match terminal_reason_code with
-    | "attempt_watchdog_safety_deadline" ->
-      (* Compatibility parse for old watchdog receipts. Current runtime code
-         must not emit this reason from a MASC-created wall-clock timeout. *)
-      Keeper_turn_fsm.Cancelled Keeper_turn_fsm.Cancelled_provider_timeout
-    | _ ->
-      (* supervisor_stop, external_cancel, or any future reason *)
-      Keeper_turn_fsm.Cancelled Keeper_turn_fsm.Cancelled_supervisor_stop
-  in
   Keeper_turn_fsm.emit_transition
     ~keeper_name:run_meta.name
     ~turn_id:keeper_turn_id
     ~prev:Keeper_turn_fsm.Streaming
-    cancelled_variant
+    (Keeper_turn_fsm.Cancelled
+       (streaming_cancellation_source_to_fsm cancellation_source))
 ;;

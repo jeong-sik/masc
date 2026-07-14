@@ -75,7 +75,6 @@ export interface DashboardRuntimeProviderBehaviorCapabilities {
   supports_inline_tools?: boolean
   argv_prompt_preflight?: boolean
   uses_anthropic_caching?: boolean
-  max_turns_per_attempt?: number | null
 }
 
 export interface DashboardRuntimeDeclaredProviderSpec {
@@ -534,7 +533,6 @@ function decodeRuntimeProviderBehaviorCapabilities(
     supports_inline_tools: asBoolean(raw.supports_inline_tools),
     argv_prompt_preflight: asBoolean(raw.argv_prompt_preflight),
     uses_anthropic_caching: asBoolean(raw.uses_anthropic_caching),
-    max_turns_per_attempt: asNumber(raw.max_turns_per_attempt) ?? null,
   }
 }
 

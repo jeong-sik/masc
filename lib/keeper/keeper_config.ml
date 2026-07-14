@@ -332,15 +332,6 @@ let hitl_summary_temperature_rp =
 let hitl_summary_temperature () : float =
   Runtime_params.get hitl_summary_temperature_rp
 
-(* max_turns is owned by the OAS SDK default; MASC no longer sets it from
-   keeper runtime config.
-   Known constraints (retain for future tuning):
-   - 1000 turns caused 787s+ latency per turn
-   - 20 turns caused 6.7GB RSS in 2 minutes with 3 concurrent keepers
-   - 3 turns left keepers unable to do meaningful work (board_post x3 only)
-   - 10 turns was insufficient for multi-step tasks (PR creation, web search)
-   - historical 50-turn experiments balanced completion rate vs resource usage *)
-
 (** Force module initialization to guarantee all runtime params are registered
     before [Runtime_params.restore]. Call from server bootstrap. *)
 let ensure_runtime_params_init () =

@@ -1850,7 +1850,7 @@ let test_health_json_reports_unclassified_timeout_pause_without_mutation () =
                   Some
                     (Keeper_meta_contract.blocker_info_of_class
                        ~detail:"turn_timeout"
-                       Keeper_meta_contract.Turn_timeout);
+                       Keeper_meta_contract.Stale_turn_timeout);
               };
           }
         in
@@ -2378,7 +2378,7 @@ let test_health_json_degrades_when_reaction_capacity_below_target () =
                   Some
                     (Keeper_meta_contract.blocker_info_of_class
                        ~detail:"operator pause diagnostic"
-                       Keeper_meta_contract.Turn_timeout);
+                       Keeper_meta_contract.Stale_turn_timeout);
               };
           }
         in

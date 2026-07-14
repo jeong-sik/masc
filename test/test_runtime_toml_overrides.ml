@@ -107,13 +107,12 @@ let test_applies_turn_execution_overrides () =
     "[turn]\n\
      temperature = 0.65\n\
      max_output_tokens = 8192\n\
-     stream_idle_timeout_sec = 90\n\
-     execution_idle_timeout_sec = 95\n"
+     stream_idle_timeout_sec = 90\n"
   in
   let count, overrides =
     Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
   in
-  check int "applied 4" 4 count;
+  check int "applied 3" 3 count;
   check (option string) "temperature"
     (Some "0.65")
     (List.assoc_opt "MASC_KEEPER_UNIFIED_TEMP" overrides);
@@ -122,10 +121,7 @@ let test_applies_turn_execution_overrides () =
     (List.assoc_opt "MASC_KEEPER_UNIFIED_MAX_TOKENS" overrides);
   check (option string) "stream idle timeout"
     (Some "90")
-    (List.assoc_opt "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC" overrides);
-  check (option string) "execution idle timeout"
-    (Some "95")
-    (List.assoc_opt "MASC_KEEPER_EXECUTION_IDLE_TIMEOUT_SEC" overrides)
+    (List.assoc_opt "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC" overrides)
 
 let test_applies_health_overrides () =
   let doc =
@@ -260,22 +256,23 @@ let test_parse_error_returns_error () =
   | Error _ -> ()
 
 let test_load_and_apply_records_boot_override () =
-  match Sys.getenv_opt "MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD" with
+  match Sys.getenv_opt "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC" with
   | Some _ -> ()
   | None ->
     with_clean_boot_overrides @@ fun () ->
     with_base_path @@ fun base_path ->
-    write_toml base_path "[budget]\ndaily_usd = 0.42\n";
+    write_toml base_path "[turn]\nstream_idle_timeout_sec = 42\n";
     match Keeper_runtime_config.load_and_apply ~base_path with
     | Error msg -> failf "unexpected error: %s" msg
     | Ok n ->
       check int "applied count" 1 n;
       check (option string) "boot override stored"
-        (Some "0.42")
-        (Config_boot_overrides.get_opt "MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD");
-      check (float 0.0001) "env-backed reader sees boot override"
-        0.42
-        (Env_config_keeper.KeeperRuntime.deliberation_daily_budget_usd ())
+        (Some "42")
+        (Config_boot_overrides.get_opt "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC");
+      Keeper_runtime_resolved.reset_for_tests ();
+      check (option (float 0.0001)) "runtime resolver sees boot override"
+        (Some 42.0)
+        (Keeper_runtime_resolved.stream_idle_timeout_sec ())
 
 
 
@@ -295,8 +292,8 @@ let test_explicit_config_dir_wins_over_base_path () =
   with_clean_boot_overrides @@ fun () ->
   with_base_path @@ fun base_path ->
   with_base_path @@ fun override_root ->
-  write_toml base_path "[budget]\ndaily_usd = 0.42\n";
-  write_toml override_root "[budget]\ndaily_usd = 0.99\n";
+  write_toml base_path "[turn]\nstream_idle_timeout_sec = 42\n";
+  write_toml override_root "[turn]\nstream_idle_timeout_sec = 99\n";
   let override_config_dir = Filename.concat override_root ".masc/config" in
   with_env "MASC_CONFIG_DIR" (Some override_config_dir) @@ fun () ->
   match Keeper_runtime_config.load_and_apply ~base_path with
@@ -304,8 +301,8 @@ let test_explicit_config_dir_wins_over_base_path () =
   | Ok n ->
     check int "applied count" 1 n;
     check (option string) "explicit config dir stored"
-      (Some "0.99")
-      (Config_boot_overrides.get_opt "MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD")
+      (Some "99")
+      (Config_boot_overrides.get_opt "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC")
 
 let test_float_value_round_trip () =
   let doc = parse_or_fail
@@ -323,36 +320,28 @@ let test_resolved_runtime_freezes_toml_values_after_init () =
   with_base_path @@ fun base_path ->
   write_toml base_path
     "[turn]\n\
-     timeout_sec = 500\n";
+     stream_idle_timeout_sec = 50\n";
   (match Keeper_runtime_config.load_and_apply ~base_path with
    | Error msg -> failf "unexpected error: %s" msg
    | Ok _ -> ());
   Keeper_runtime_resolved.init ();
-  Config_boot_overrides.set "MASC_KEEPER_TURN_TIMEOUT_SEC" "900";
+  Config_boot_overrides.set "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC" "90";
   let runtime = Keeper_runtime_resolved.current () in
-  check (float 0.0001) "turn timeout frozen from toml"
-    500.0 runtime.turn_timeout_sec.value;
-  check string "turn timeout source"
+  check (option (float 0.0001)) "stream idle timeout frozen from toml"
+    (Some 50.0) runtime.stream_idle_timeout_sec.value;
+  check string "stream idle timeout source"
     "toml"
-    (Keeper_runtime_resolved.source_to_string runtime.turn_timeout_sec.source)
+    (Keeper_runtime_resolved.source_to_string runtime.stream_idle_timeout_sec.source)
 
-let test_resolved_stream_idle_timeout_defaults_and_clamps_to_total () =
+let test_resolved_stream_idle_timeout_defaults_disabled () =
   with_clean_boot_overrides @@ fun () ->
   Keeper_runtime_resolved.init ();
   let runtime = Keeper_runtime_resolved.current () in
-  check (float 0.0001) "stream idle timeout default"
-    120.0 runtime.stream_idle_timeout_sec.value;
+  check (option (float 0.0001)) "stream idle timeout disabled by default"
+    None runtime.stream_idle_timeout_sec.value;
   check string "stream idle timeout default source"
     "default"
-    (Keeper_runtime_resolved.source_to_string runtime.stream_idle_timeout_sec.source);
-  check (float 0.0001) "stream idle clamps to shorter total"
-    60.0
-    (Keeper_runtime_resolved.stream_idle_timeout_for_total_timeout
-       ~total_timeout_s:60.0);
-  check (float 0.0001) "stream idle keeps configured default below total"
-    120.0
-    (Keeper_runtime_resolved.stream_idle_timeout_for_total_timeout
-       ~total_timeout_s:600.0)
+    (Keeper_runtime_resolved.source_to_string runtime.stream_idle_timeout_sec.source)
 
 let test_resolved_stream_idle_timeout_uses_toml () =
   with_clean_boot_overrides @@ fun () ->
@@ -363,67 +352,83 @@ let test_resolved_stream_idle_timeout_uses_toml () =
    | Ok _ -> ());
   Keeper_runtime_resolved.init ();
   let runtime = Keeper_runtime_resolved.current () in
-  check (float 0.0001) "stream idle timeout from toml"
-    75.0 runtime.stream_idle_timeout_sec.value;
+  check (option (float 0.0001)) "stream idle timeout from toml"
+    (Some 75.0) runtime.stream_idle_timeout_sec.value;
   check string "stream idle timeout source"
     "toml"
     (Keeper_runtime_resolved.source_to_string runtime.stream_idle_timeout_sec.source)
 
-let test_resolved_execution_idle_timeout_default_disabled () =
-  with_clean_boot_overrides @@ fun () ->
-  Keeper_runtime_resolved.init ();
-  let runtime = Keeper_runtime_resolved.current () in
-  check (option (float 0.0001)) "execution idle timeout default"
-    None runtime.execution_idle_timeout_sec.value;
-  check string "execution idle timeout default source"
-    "default"
-    (Keeper_runtime_resolved.source_to_string runtime.execution_idle_timeout_sec.source)
-
-let test_resolved_execution_idle_timeout_uses_toml () =
-  with_clean_boot_overrides @@ fun () ->
-  with_base_path @@ fun base_path ->
-  write_toml base_path "[turn]\nexecution_idle_timeout_sec = 75\n";
-  (match Keeper_runtime_config.load_and_apply ~base_path with
-   | Error msg -> failf "unexpected error: %s" msg
-   | Ok _ -> ());
-  Keeper_runtime_resolved.init ();
-  let runtime = Keeper_runtime_resolved.current () in
-  check (option (float 0.0001)) "execution idle timeout from toml"
-    (Some 75.0) runtime.execution_idle_timeout_sec.value;
-  check string "execution idle timeout source"
-    "toml"
-    (Keeper_runtime_resolved.source_to_string runtime.execution_idle_timeout_sec.source)
-
-let test_resolved_execution_idle_timeout_zero_disables () =
-  with_clean_boot_overrides @@ fun () ->
-  with_base_path @@ fun base_path ->
-  write_toml base_path "[turn]\nexecution_idle_timeout_sec = 0\n";
-  (match Keeper_runtime_config.load_and_apply ~base_path with
-   | Error msg -> failf "unexpected error: %s" msg
-   | Ok _ -> ());
-  Keeper_runtime_resolved.init ();
-  let runtime = Keeper_runtime_resolved.current () in
-  check (option (float 0.0001)) "execution idle timeout disabled by toml"
-    None runtime.execution_idle_timeout_sec.value;
-  check string "execution idle timeout source"
-    "toml"
-    (Keeper_runtime_resolved.source_to_string runtime.execution_idle_timeout_sec.source)
-
 let test_resolved_runtime_prefers_env_over_toml () =
   with_clean_boot_overrides @@ fun () ->
   with_base_path @@ fun base_path ->
-  write_toml base_path "[turn]\ntimeout_sec = 500\n";
-  with_env "MASC_KEEPER_TURN_TIMEOUT_SEC" (Some "555") @@ fun () ->
+  write_toml base_path "[turn]\nstream_idle_timeout_sec = 50\n";
+  with_env "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC" (Some "55") @@ fun () ->
   (match Keeper_runtime_config.load_and_apply ~base_path with
    | Error msg -> failf "unexpected error: %s" msg
    | Ok _ -> ());
   Keeper_runtime_resolved.init ();
   let runtime = Keeper_runtime_resolved.current () in
-  check (float 0.0001) "env timeout wins"
-    555.0 runtime.turn_timeout_sec.value;
+  check (option (float 0.0001)) "env stream idle timeout wins"
+    (Some 55.0) runtime.stream_idle_timeout_sec.value;
   check string "env source"
     "env"
-    (Keeper_runtime_resolved.source_to_string runtime.turn_timeout_sec.source)
+    (Keeper_runtime_resolved.source_to_string runtime.stream_idle_timeout_sec.source)
+
+let test_resolved_stream_idle_timeout_does_not_clamp () =
+  with_clean_boot_overrides @@ fun () ->
+  with_env "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC" (Some "3600") @@ fun () ->
+  Keeper_runtime_resolved.init ();
+  check (option (float 0.0001)) "explicit value is preserved"
+    (Some 3600.0)
+    (Keeper_runtime_resolved.stream_idle_timeout_sec ())
+
+let expect_stream_idle_timeout_env_config_error raw =
+  with_clean_boot_overrides @@ fun () ->
+  with_env "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC" (Some raw) @@ fun () ->
+  match Keeper_runtime_resolved.init () with
+  | () -> fail "expected invalid stream idle timeout to fail"
+  | exception Env_config_core.Config_error message ->
+    check string "diagnostic names the invalid stream idle setting"
+      (Printf.sprintf
+         "invalid MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC=%S (expected a finite, positive number of seconds)"
+         raw)
+      message
+
+let test_resolved_stream_idle_timeout_invalid_env_fails_loud () =
+  expect_stream_idle_timeout_env_config_error "not-a-timeout"
+
+let test_resolved_stream_idle_timeout_empty_env_fails_loud () =
+  expect_stream_idle_timeout_env_config_error ""
+
+let test_resolved_stream_idle_timeout_whitespace_env_fails_loud () =
+  expect_stream_idle_timeout_env_config_error "   "
+
+let test_stream_idle_timeout_invalid_toml_returns_error () =
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  write_toml base_path "[turn]\nstream_idle_timeout_sec = 0\n";
+  match Keeper_runtime_config.load_and_apply ~base_path with
+  | Ok _ -> fail "expected non-positive stream idle timeout to be rejected"
+  | Error message ->
+    check bool "diagnostic names the TOML key" true
+      (String.starts_with ~prefix:"validate " message
+       && String.ends_with
+            ~suffix:
+              "turn.stream_idle_timeout_sec: expected a finite, positive number of seconds"
+            message)
+
+let test_stream_idle_timeout_toml_wrong_type_returns_error () =
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  write_toml base_path "[turn]\nstream_idle_timeout_sec = \"120\"\n";
+  match Keeper_runtime_config.load_and_apply ~base_path with
+  | Ok _ -> fail "expected string stream idle timeout to be rejected"
+  | Error message ->
+    check bool "diagnostic requires a numeric TOML value" true
+      (String.ends_with
+         ~suffix:
+           "turn.stream_idle_timeout_sec: expected a numeric TOML value"
+         message)
 
 let test_resolved_cli_subprocess_idle_default_120s () =
   with_clean_boot_overrides @@ fun () ->
@@ -456,35 +461,6 @@ let test_resolved_cli_subprocess_idle_from_toml () =
   check (float 0.0001) "cli_subprocess_idle from toml"
     45.0 (Keeper_runtime_resolved.cli_subprocess_idle_sec ())
 
-(* Step 2 (PR #13861 / RFC-0012/0022): the hard ceiling for
-   turn_timeout_sec is lifted from 600 s to 900 s so runtimes that
-   legitimately run 27 B local-LLM turns can opt in via env override.
-   The default stays at 600 s so existing remote runtimes keep their
-   budget unchanged. *)
-
-let test_resolved_turn_timeout_default_stays_600s () =
-  with_clean_boot_overrides @@ fun () ->
-  Keeper_runtime_resolved.init ();
-  let runtime = Keeper_runtime_resolved.current () in
-  check (float 0.0001) "turn_timeout default 600s post-lift"
-    600.0 runtime.turn_timeout_sec.value
-
-let test_resolved_turn_timeout_accepts_900s_env_override () =
-  with_clean_boot_overrides @@ fun () ->
-  with_env "MASC_KEEPER_TURN_TIMEOUT_SEC" (Some "900") @@ fun () ->
-  Keeper_runtime_resolved.init ();
-  let runtime = Keeper_runtime_resolved.current () in
-  check (float 0.0001) "env override of 900s passes new ceiling"
-    900.0 runtime.turn_timeout_sec.value
-
-let test_resolved_turn_timeout_clamps_above_900s () =
-  with_clean_boot_overrides @@ fun () ->
-  with_env "MASC_KEEPER_TURN_TIMEOUT_SEC" (Some "1800") @@ fun () ->
-  Keeper_runtime_resolved.init ();
-  let runtime = Keeper_runtime_resolved.current () in
-  check (float 0.0001) "1800s env input clamps to new 900s ceiling"
-    900.0 runtime.turn_timeout_sec.value
-
 let () =
   run "runtime_toml_overrides"
     [ ( "resolve_overrides"
@@ -504,18 +480,18 @@ let () =
         ; test_case "explicit MASC_CONFIG_DIR wins over base path" `Quick test_explicit_config_dir_wins_over_base_path
         ; test_case "float value round trip" `Quick test_float_value_round_trip
         ; test_case "resolved runtime freezes toml values after init" `Quick test_resolved_runtime_freezes_toml_values_after_init
-        ; test_case "resolved stream idle timeout defaults and clamps to total" `Quick test_resolved_stream_idle_timeout_defaults_and_clamps_to_total
+        ; test_case "resolved stream idle timeout defaults disabled" `Quick test_resolved_stream_idle_timeout_defaults_disabled
         ; test_case "resolved stream idle timeout uses toml" `Quick test_resolved_stream_idle_timeout_uses_toml
-        ; test_case "execution idle timeout default disabled" `Quick test_resolved_execution_idle_timeout_default_disabled
-        ; test_case "execution idle timeout uses toml" `Quick test_resolved_execution_idle_timeout_uses_toml
-        ; test_case "execution idle timeout zero disables" `Quick test_resolved_execution_idle_timeout_zero_disables
-        ; test_case "resolved runtime prefers env over toml" `Quick test_resolved_runtime_prefers_env_over_toml
+        ; test_case "invalid stream idle TOML returns Error" `Quick test_stream_idle_timeout_invalid_toml_returns_error
+        ; test_case "wrong-type stream idle TOML returns Error" `Quick test_stream_idle_timeout_toml_wrong_type_returns_error
         ; test_case "cli subprocess idle default 120s" `Quick test_resolved_cli_subprocess_idle_default_120s
         ; test_case "cli subprocess idle from toml" `Quick test_resolved_cli_subprocess_idle_from_toml
         ; test_case "cli subprocess idle clamps to 10s floor" `Quick test_resolved_cli_subprocess_idle_clamps_low
         ; test_case "cli subprocess idle clamps to 600s ceiling" `Quick test_resolved_cli_subprocess_idle_clamps_high
-        ; test_case "turn_timeout default stays 600s post-lift" `Quick test_resolved_turn_timeout_default_stays_600s
-        ; test_case "turn_timeout accepts 900s env override" `Quick test_resolved_turn_timeout_accepts_900s_env_override
-        ; test_case "turn_timeout clamps above 900s ceiling" `Quick test_resolved_turn_timeout_clamps_above_900s
+        ; test_case "resolved runtime prefers env over toml" `Quick test_resolved_runtime_prefers_env_over_toml
+        ; test_case "resolved stream idle timeout does not clamp" `Quick test_resolved_stream_idle_timeout_does_not_clamp
+        ; test_case "invalid stream idle env fails loud" `Quick test_resolved_stream_idle_timeout_invalid_env_fails_loud
+        ; test_case "empty stream idle env fails loud" `Quick test_resolved_stream_idle_timeout_empty_env_fails_loud
+        ; test_case "whitespace stream idle env fails loud" `Quick test_resolved_stream_idle_timeout_whitespace_env_fails_loud
         ] )
     ]

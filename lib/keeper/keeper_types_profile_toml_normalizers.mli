@@ -91,11 +91,6 @@ val all_network_modes : network_mode list
 val valid_network_mode_strings : string list
 val default_sandbox_profile : sandbox_profile
 val default_network_mode_for_profile : sandbox_profile -> network_mode
-type per_provider_timeout_state =
-  Keeper_types_profile_defaults.per_provider_timeout_state =
-    Per_provider_timeout_unset
-  | Per_provider_timeout_invalid
-  | Per_provider_timeout_set
 type keeper_profile_defaults =
   Keeper_types_profile_defaults.keeper_profile_defaults = {
   id : Ids.Keeper_id.t option;
@@ -115,8 +110,6 @@ type keeper_profile_defaults =
   active_goal_ids : string list option;
   telemetry_feedback_enabled : bool option;
   telemetry_feedback_window_hours : int option;
-  per_provider_timeout_state : per_provider_timeout_state;
-  per_provider_timeout : float option;
   always_allow : bool option;
   oas_env : (string * string) list;
   unknown_toml_keys : string list;
@@ -127,27 +120,5 @@ val normalize_name_list : string list -> string list
 val normalize_name_list_opt : string list -> string list option
 val lower_string_list_opt : string list -> string list option
 val first_some : 'a option -> 'a option -> 'a option
-val normalize_per_provider_timeout_opt :
-  source:string -> float option -> float option
-val per_provider_timeout_of_declared_float_opt :
-  source:string ->
-  declared:bool ->
-  float option ->
-  Keeper_types_profile_per_provider_timeout.per_provider_timeout_state *
-  float option
-val per_provider_timeout_of_toml :
-  source:string ->
-  Keeper_toml_loader.toml_doc ->
-  string ->
-  Keeper_types_profile_per_provider_timeout.per_provider_timeout_state *
-  float option
-val per_provider_timeout_of_json_field :
-  source:string ->
-  field:string ->
-  Yojson.Safe.t ->
-  Keeper_types_profile_per_provider_timeout.per_provider_timeout_state *
-  float option
-val normalize_per_provider_timeout_json_field :
-  source:string -> field:string -> Yojson.Safe.t -> float option
 val personas_root_opt : unit -> string option
 val persona_profile_path_opt : string -> string option

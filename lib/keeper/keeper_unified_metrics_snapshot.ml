@@ -22,7 +22,7 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
     ~(message_count : int)
     ~(compaction : Keeper_context_runtime.compaction_event)
     ~(handoff_json : Yojson.Safe.t option)
-    ?provider_timeout_plan_json ?(count_completed_turn = true)
+    ?(count_completed_turn = true)
     ?deliberation_execution () : unit =
   let now_ts = Time_compat.now () in
   let _observation = observation in
@@ -83,7 +83,7 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
   in
   (* #9933: same latency bucket, split by provider/model/runtime.
      This keeps the existing keeper-only counter stable while making
-     timeout-budget burn attributable to the redacted runtime lane. *)
+     long-running turns attributable to the redacted runtime lane. *)
   record_turn_latency_by_model_bucket
     ~keeper:meta.name
     ~channel:(Keeper_world_observation.channel_to_string channel)
@@ -109,10 +109,6 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
         ("resolved_model_id", `Null);
         ("prompt_fingerprint", `String result.prompt_metrics.fingerprint);
         ("prompt", Keeper_agent_run.prompt_metrics_to_json result.prompt_metrics);
-        ( "provider_timeout_plan",
-          match provider_timeout_plan_json with
-          | Some value -> value
-          | None -> `Null );
         ("ctx_composition", Keeper_agent_run.ctx_composition_to_json result.ctx_composition);
         ("usage", usage_json);
         ("usage_trust", `String (usage_trust_to_string usage_trust));

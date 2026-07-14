@@ -16,10 +16,8 @@ type try_provider_ctx =
   ; max_turns : int
   ; max_idle_turns : int
   ; stream_idle_timeout_s : float option
-  ; execution_idle_timeout_s : float option
   ; body_timeout_s : float option
   ; temperature : float
-  ; max_tokens : int option
   ; accept : Agent_sdk_response.api_response -> bool
   ; hooks : Agent_sdk.Hooks.hooks option
   ; context_reducer : Agent_sdk.Context_reducer.t option
@@ -68,7 +66,6 @@ val same_run_retry_allowed : bool Atomic.t -> bool
 
 val run_try_provider :
   try_provider_ctx ->
-  ?per_provider_timeout_s:float ->
   ?enable_thinking_override:bool ->
   Runtime_candidate.t ->
   (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
@@ -81,12 +78,6 @@ val accept_rejected_error :
   Agent_sdk.Error.sdk_error
 
 module For_testing : sig
-  val max_execution_time_for_attempt :
-    ?per_provider_timeout_s:float -> unit -> float option
-
-  val stream_idle_timeout_for_attempt :
-    configured:float option -> float option
-
   val apply_accept :
     runtime_id:string ->
     accept:(Agent_sdk_response.api_response -> bool) ->

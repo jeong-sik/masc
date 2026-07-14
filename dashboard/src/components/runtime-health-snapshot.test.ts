@@ -99,7 +99,6 @@ function providerPayload(overrides: Record<string, unknown> = {}) {
               supports_inline_tools: true,
               argv_prompt_preflight: false,
               uses_anthropic_caching: false,
-              max_turns_per_attempt: 8,
             },
           },
           model: {

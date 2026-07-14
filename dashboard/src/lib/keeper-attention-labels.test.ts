@@ -20,7 +20,7 @@ describe('keeper attention labels', () => {
   it('labels typed next actions without warning', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
-    expect(nextHumanActionLabel('inspect_turn_budget')).toBe('턴 예산 소진 원인 확인')
+    expect(nextHumanActionLabel('inspect_latest_error')).toBe('최근 오류 확인')
     expect(warn).not.toHaveBeenCalled()
   })
 

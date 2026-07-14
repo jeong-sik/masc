@@ -122,7 +122,7 @@ type max_context_resolution = {
   requested_override : int option;
   primary_budget : int;
   runtime_budget : int;
-  turn_budget : int;
+  requested_context_window : int;
   effective_budget : int;
 }
 
@@ -134,7 +134,8 @@ type context_budget_source =
 let context_budget_source_of_resolution (resolution : max_context_resolution) =
   match resolution.requested_override with
   | Some requested
-    when requested > 0 && resolution.effective_budget < resolution.turn_budget ->
+    when requested > 0
+         && resolution.effective_budget < resolution.requested_context_window ->
     Requested_override_clamped_to_provider
   | Some requested when requested > 0 -> Requested_override
   | Some _ | None -> Runtime_provider_cap
@@ -160,7 +161,7 @@ let context_budget_json_of_resolution
     ; ("requested_override", Json_util.int_opt_to_json resolution.requested_override)
     ; ("primary_budget", `Int resolution.primary_budget)
     ; ("runtime_budget", `Int resolution.runtime_budget)
-    ; ("turn_budget", `Int resolution.turn_budget)
+    ; ("requested_context_window", `Int resolution.requested_context_window)
     ; ("effective_budget", `Int resolution.effective_budget)
     ]
 ;;
@@ -407,14 +408,19 @@ let resolve_max_context_resolution ~requested_override (labels : string list)
   in
   (* RFC-0207: budget against the same per-keeper runtime id that dispatch uses. *)
   let primary_budget = runtime_budget in
-  let turn_budget =
+  let requested_context_window =
     match requested_override with
     | Some requested when requested > 0 ->
       max min_keeper_context requested
     | _ -> primary_budget
   in
-  let effective_budget = min turn_budget primary_budget in
-  { requested_override; primary_budget; runtime_budget; turn_budget; effective_budget }
+  let effective_budget = min requested_context_window primary_budget in
+  { requested_override
+  ; primary_budget
+  ; runtime_budget
+  ; requested_context_window
+  ; effective_budget
+  }
 
 let resolve_max_context_resolution_of_meta (m : keeper_meta)
     : max_context_resolution =

@@ -355,19 +355,6 @@ export interface PromptTelemetry {
   segments: Record<string, PromptSegmentTelemetry>
 }
 
-// Compatibility telemetry for historical OAS timeout-budget payloads.
-// New keeper surfaces must keep the immutable root cause owner-specific
-// (provider timeout, admission/capacity pressure, or turn deadline) instead of
-// reclassifying those causes back into a timeout-budget state.
-export interface TimeoutBudgetTelemetry {
-  oas_timeout_sec: number | null
-  adaptive_timeout_sec: number | null
-  keeper_turn_timeout_sec: number | null
-  remaining_turn_budget_sec: number | null
-  estimated_input_tokens: number | null
-  source: string | null
-}
-
 export interface CtxCompositionTelemetry {
   actual_input_tokens: number | null
   display_total_tokens: number
@@ -393,7 +380,6 @@ export interface KeeperMetricPoint {
   handoff_new_generation: number | null
   prompt_fingerprint: string | null
   prompt_metrics: PromptTelemetry | null
-  provider_timeout_plan: TimeoutBudgetTelemetry | null
   ctx_composition: CtxCompositionTelemetry | null
   input_tokens: number | null
   output_tokens: number | null
@@ -438,9 +424,7 @@ export const KEEPER_RUNTIME_BLOCKER_CLASSES = [
   'supervisor_paused',
   'synthetic_stall',
   'self_imposed_idle',
-  'sdk_max_turns_exceeded',
-  'sdk_token_budget_exceeded',
-  'sdk_cost_budget_exceeded',
+  'sdk_context_window_exceeded',
   'sdk_unrecognized_stop_reason',
   'sdk_idle_detected',
   'sdk_guardrail_violation',
@@ -1277,25 +1261,6 @@ export interface Keeper {
   latest_tool_call_count?: number | null
   tool_audit_source?: string | null
   tool_audit_at?: string | null
-  turn_budget?: {
-    reactive: {
-      value: number
-      source: 'override' | 'env' | 'override_invalid'
-      env_default: number
-      env_var: string
-      raw_override: number | null
-    }
-    scheduled_autonomous: {
-      value: number
-      source: 'override' | 'env' | 'override_invalid'
-      env_default: number
-      env_var: string
-      raw_override: number | null
-    }
-    manifest_path: string | null
-    clamp_min: number
-    clamp_max: number
-  } | null
   conversation_tail_count?: number
   k2k_count?: number
   k2k_mentions?: Array<{ keeper: string; count: number }>
@@ -1429,8 +1394,6 @@ interface KeeperConfigExecution {
   active_model: string
   active_model_label?: string | null
   last_model_used_label?: string | null
-  per_provider_timeout_sec?: number | null
-  per_provider_timeout_mode: 'override' | 'turn_budget_default'
   verify: boolean
   selected_runtime_id: string
   selected_runtime_canonical: string

@@ -11,7 +11,6 @@ include Keeper_agent_error
 module Contract_helpers = Keeper_agent_run_contract_helpers
 module Turn_helpers = Keeper_agent_run_turn_helpers
 
-let per_provider_timeout_for_turn = Turn_helpers.per_provider_timeout_for_turn
 let progress_keeper_tool_names_for_contract =
   Contract_helpers.progress_keeper_tool_names_for_contract
 ;;
@@ -145,6 +144,8 @@ let raw_trace_for_dispatch
     None
 ;;
 
+let keeper_max_turns = Agent_sdk.Types.unbounded_max_turns
+
 module For_testing = struct
   let sse_event_progress_kind = Turn_helpers.sse_event_progress_kind
   let sse_event_watchdog_progress_kind =
@@ -158,6 +159,7 @@ module For_testing = struct
   let raw_trace_for_dispatch = raw_trace_for_dispatch
   let autonomous_yield_allowed_at_turn = autonomous_yield_allowed_at_turn
   let stop_reason_of_autonomous_yield = stop_reason_of_autonomous_yield
+  let keeper_max_turns = keeper_max_turns
 end
 
 (** Run a single keeper turn via OAS Agent.run().
@@ -183,10 +185,6 @@ end
     @param temperature Subsystem temperature fallback; a selected runtime model
            declaration takes precedence. When omitted,
            [Keeper_config.keeper_unified_temperature] is the fallback.
-    @param max_tokens Explicit caller output-token override. When omitted, the
-           turn-start profile snapshot may provide the validated keeper OAS
-           override; absent both, no [max_tokens] field is sent. The keeper lane
-           never synthesizes a model-derived value (masc#24067 / oas#2517)
     @param is_retry When [true], replays the current user message into the
            working context without persisting it again, so transient retry
            attempts do not duplicate the user entry in session history *)
@@ -207,9 +205,6 @@ let run_turn
       ?(history_user_source = "direct_user")
       ?(history_assistant_source = "direct_assistant")
       ?temperature
-      ?max_tokens
-      ?oas_timeout_s
-      ?(oas_timeout_is_explicit = true)
       ?on_event
       ?(trajectory_acc : Trajectory.accumulator option)
       ?priority
@@ -332,18 +327,12 @@ let run_turn
       ~max_context
       ~runtime_id
       ?temperature
-      ?max_tokens
       ?shared_context
       ~generation
       ()
   in
   let meta = ctx.meta in
   let temperature = ctx.temperature in
-  (* The single turn-start snapshot. This exact binding feeds every runtime
-     candidate, OAS provider/lifecycle config, and the Turn_record sampling
-     payload below. OAS owns model-ceiling validation and envelope-specific
-     clamp/fallback policy. *)
-  let max_tokens = ctx.max_tokens in
   let context_injector = ctx.context_injector in
   let shared_context = ctx.shared_context in
   let session = ctx.session in
@@ -598,24 +587,13 @@ let run_turn
      with
      | Error e -> Error (Agent_sdk.Error.Internal e)
      | Ok oas_allowed_paths ->
-       let timeout_s =
-         match oas_timeout_s with
-         | Some value -> value
-         | None -> Keeper_runtime_resolved.oas_call_timeout_sec ()
-       in
-       let per_provider_timeout_s = None in
        (* OAS [stream_idle_timeout_s] bounds inter-line idle on HTTP streams
-       (Anthropic/OpenAI/Gemini/GLM/Ollama). The deadline resets after each
-       successful line, so this is gap detection, not total run cap.
-
-       Default 120 s catches real network/stream hangs while preserving
-       legitimate reasoning pauses + provider keepalives. If the total
-       OAS timeout is shorter, the idle gap is clamped to that total cap
-       so the nested timeout envelope is explicit. *)
+          only when the operator explicitly configures it. The deadline resets
+          after each successful line, so this is gap detection, not a total run
+          cap. [None] is carried unchanged: neither MASC nor OAS may infer a
+          provider/model default. *)
        let stream_idle_timeout_s =
-         Some
-           (Keeper_runtime_resolved.stream_idle_timeout_for_total_timeout
-              ~total_timeout_s:timeout_s)
+         Keeper_runtime_resolved.stream_idle_timeout_sec ()
        in
        Keeper_agent_run_phase0_telemetry.record_if_enabled
          ~meta
@@ -698,13 +676,14 @@ let run_turn
                   snapshot.checkpoint
               in
               let call_run_named ?raw_trace ~initial_messages () =
-                (* The keeper turn deadline must own the OAS Agent.run switch.
-                   Stream/body idle budgets catch liveness gaps; this hard
-                   ceiling is the final guard that releases a stuck turn slot. *)
-	                Keeper_turn_driver.run_named
-	                  ~runtime_id:runtime_id_string
-	                  ~base_path:config.base_path
-	                    ~keeper_name:meta.name
+                (* Keeper does not impose a cumulative turn, time, token, or cost
+                   budget. OAS receives its unbounded turn sentinel; explicit
+                   cancellation and provider/tool progress boundaries settle the
+                   lane, while usage remains observational. *)
+                Keeper_turn_driver.run_named
+                  ~runtime_id:runtime_id_string
+                  ~base_path:config.base_path
+                  ~keeper_name:meta.name
                     ~goal:user_message
                     ?goal_blocks:user_blocks
                     ~priority
@@ -717,16 +696,17 @@ let run_turn
                     ~oas_auto_context_overflow_retry:true
                     ~checkpoint_sink
                     ~initial_messages
+                    ~max_turns:keeper_max_turns
                     ~hooks
                     ~context_reducer:reducer
-                   ~runtime_manifest_context
-                   ~runtime_manifest_append:
-                     (fun manifest ->
-                        Keeper_runtime_manifest.append_best_effort
-                          ~site:"runtime_runtime"
-                          config
-                          manifest)
-                      (* No code-level tool-retry or idle-turn budget. Retrying
+                    ~runtime_manifest_context
+                    ~runtime_manifest_append:
+                      (fun manifest ->
+                         Keeper_runtime_manifest.append_best_effort
+                           ~site:"runtime_runtime"
+                           config
+                           manifest)
+                      (* No code-level tool-retry or idle-turn limit. Retrying
                          a malformed tool call (e.g. missing required arg) is
                          the keeper's own competence: OAS delivers the typed
                          validation error back to the model and the agent loop
@@ -735,9 +715,9 @@ let run_turn
                          Keeper lane. *)
                     ~max_idle_turns:0
                     ?stream_idle_timeout_s
-                    ~body_timeout_s:timeout_s
+                    ?body_timeout_s:
+                      (Keeper_runtime_resolved.body_timeout_override_sec ())
                     ~temperature
-                    ?max_tokens
                     ~accept:
                       Keeper_tool_response.response_has_text_or_tool_progress
                     ?on_event
@@ -764,7 +744,6 @@ let run_turn
                     ~on_runtime_observation:
                       (fun observation ->
                          receipt_runtime_observation_ref := Some observation)
-                    ?per_provider_timeout_s
                     ()
               in
               (* Trace-store failure isolation: [raw_trace_for_dispatch]
@@ -1010,7 +989,7 @@ let run_turn
           ~sampling:
             { temperature = Some temperature
             ; top_p = Runtime.top_p_of_runtime_id runtime_id_string
-            ; max_tokens
+            ; max_tokens = None
             ; thinking_budget = tctx.thinking_budget
             ; enable_thinking = tctx.thinking_enabled
             }

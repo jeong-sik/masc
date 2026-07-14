@@ -40,7 +40,6 @@ val timeout_phase_is_streaming_activity : timeout_phase -> bool
 type timeout_source =
   | Oas_api
   | Oas_provider
-  | Masc_internal
 
 type provider_timeout =
   { phase : timeout_phase option

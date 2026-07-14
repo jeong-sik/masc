@@ -99,10 +99,9 @@ type t = {
 val stop_reason_to_string : Runtime_agent.stop_reason -> string
 
 (** Project the runtime-stop axis into the receipt terminal-reason field.
-    Runtime [Completed] stays ["completed"] in {!stop_reason_to_string}, while
-    the receipt field emits canonical [Keeper_turn_disposition.Success]. This
-    does not classify the independent completion-contract axis; the typed
-    operator disposition is the final receipt verdict. *)
+    Runtime [Completed] and observational execution-limit stops emit canonical
+    [Keeper_turn_disposition.Success]. The independent [stop_reason] field keeps
+    each observation without turning it into a MASC lifecycle gate. *)
 val receipt_terminal_reason_code_of_stop_reason : Runtime_agent.stop_reason -> string
 val sandbox_kind_of_meta :
   Keeper_meta_contract.keeper_meta -> Keeper_types_profile_sandbox.sandbox_profile

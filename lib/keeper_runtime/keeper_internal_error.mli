@@ -50,9 +50,7 @@ type runtime_exhaustion_reason =
   | No_providers_available
   | All_providers_failed
   | Candidates_filtered_after_cycles
-  | Max_turns_exceeded
   | Session_conflict
-  | Structural_attempt_timeout of { detail : string }
   | Capacity_exhausted
   | Other_detail of string
 
@@ -117,16 +115,6 @@ type masc_internal_error =
          and serialized, not yet consumed by classification. *)
       stop_reason : Agent_sdk.Types.stop_reason option;
       reason : string;
-    }
-  | Turn_timeout of { elapsed_sec : float }
-  | Provider_timeout of {
-      budget_sec : float;
-      keeper_turn_timeout_sec : float;
-      estimated_input_tokens : int;
-      source : string;
-      remaining_turn_budget_sec : float option;
-      min_required_sec : float;
-      phase : string;
     }
   | Internal_unhandled_exception of {
       site : string;

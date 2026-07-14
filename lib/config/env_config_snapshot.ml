@@ -135,8 +135,6 @@ let keeper_entries =
     entry ~default:"300" "MASC_KEEPER_SNAPSHOT_SEC"
       "Keeper keepalive snapshot interval";
     entry ~default:"false" "MASC_KEEPER_DEBUG" "Enable keeper debug logging";
-    entry ~default:"0.10" "MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD"
-      "Daily deliberation budget (USD)";
     entry ~default:"(none)" "MASC_TLA_TRACE"
       "Enable TLA+ trace emission";
   ]
@@ -149,8 +147,6 @@ let keeper_execution_entries =
       "Max messages before compaction";
     entry ~default:"4000" "MASC_KEEPER_COMPACT_MAX_TOKENS"
       "Max tokens before compaction (0=disabled)";
-    entry ~default:"0" "MASC_KEEPER_TOOL_COST_MAX_USD"
-      "Unified turn accumulated cost ceiling (USD, 0=disabled)";
     entry ~default:"0.4" "MASC_KEEPER_UNIFIED_TEMP" "Unified turn temperature";
     entry ~default:"131072" "MASC_KEEPER_UNIFIED_MAX_TOKENS"
       "Unified turn max output tokens";
@@ -393,16 +389,8 @@ let keeper_keepalive_entries =
       "Heartbeat cycle interval (clamped 5-300 seconds)";
     entry ~default:"120.0" "MASC_KEEPER_MAX_SILENCE_SEC"
       "Max seconds since last heartbeat before presence sync required";
-    entry ~default:"(none)" "MASC_KEEPER_OAS_TIMEOUT_SEC"
-      "Legacy optional override for OAS call timeout. When set, clamped to [30, turn_timeout_sec].";
     entry ~default:"2.0" "MASC_KEEPER_SLEEP_CHUNK_SEC"
       "Interruptible sleep chunk size (seconds, clamped 0.1-10)";
-    entry ~default:"600.0" "MASC_KEEPER_TURN_TIMEOUT_SEC"
-      "Wall-clock timeout for a single unified turn (clamped 60-900 seconds)";
-    entry ~default:"1800.0" "MASC_KEEPER_ATTEMPT_WATCHDOG_SAFETY_CAP_SEC"
-      "Deprecated compatibility knob; not applied as a MASC timeout around active provider/tool execution";
-    entry ~default:"(none)" "MASC_KEEPER_EXECUTION_IDLE_TIMEOUT_SEC"
-      "Parsed compatibility knob; keeper path does not forward until tool execution is excluded";
     entry ~default:"(none)" "MASC_KEEPER_WORK_AS_HEARTBEAT"
       "Successful workspace heartbeat after turn counts as presence proof (feature flag)";
   ]

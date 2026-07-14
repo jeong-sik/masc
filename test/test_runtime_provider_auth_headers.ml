@@ -1104,7 +1104,7 @@ let test_runtime_agent_terminal_error_observation_marks_failed_attempt () =
        (Keeper_agent_error.runtime_outcome_of_observation
           (Some observation)))
 
-let test_runtime_agent_max_turns_is_continuation_checkpoint () =
+let test_runtime_agent_execution_limits_are_observations () =
   let lifecycle =
     Runtime_agent.worker_lifecycle_classification_of_result
       (Error
@@ -1112,8 +1112,42 @@ let test_runtime_agent_max_turns_is_continuation_checkpoint () =
             (Agent_sdk.Error.MaxTurnsExceeded { turns = 24; limit = 24 })))
   in
   check string "event" "completed" lifecycle.event;
-  check string "status" "continuation_checkpoint" lifecycle.status;
-  check (option string) "no error" None lifecycle.error
+  check string "status" "turn_limit_observed" lifecycle.status;
+  check (option string) "no error" None lifecycle.error;
+  let execution_timeout =
+    Runtime_agent.worker_lifecycle_classification_of_result
+      (Error
+         (Agent_sdk.Error.Agent
+            (Agent_sdk.Error.AgentExecutionTimeout
+               { elapsed_sec = 300.0
+               ; timeout_sec = 300.0
+               ; turn_count = 4
+               ; max_turns = Agent_sdk.Types.unbounded_max_turns
+               })))
+  in
+  check string "execution timeout event" "completed" execution_timeout.event;
+  check string
+    "execution timeout status"
+    "agent_execution_timeout_observed"
+    execution_timeout.status;
+  check (option string) "execution timeout has no error" None execution_timeout.error;
+  let idle_timeout =
+    Runtime_agent.worker_lifecycle_classification_of_result
+      (Error
+         (Agent_sdk.Error.Agent
+            (Agent_sdk.Error.AgentExecutionIdleTimeout
+               { idle_sec = 120.0
+               ; idle_timeout_sec = 120.0
+               ; turn_count = 4
+               ; max_turns = Agent_sdk.Types.unbounded_max_turns
+               })))
+  in
+  check string "idle timeout event" "completed" idle_timeout.event;
+  check string
+    "idle timeout status"
+    "agent_idle_timeout_observed"
+    idle_timeout.status;
+  check (option string) "idle timeout has no error" None idle_timeout.error
 
 let test_runtime_agent_recovery_defer_is_control_checkpoint () =
   let lifecycle =
@@ -1129,7 +1163,7 @@ let test_runtime_agent_recovery_defer_is_control_checkpoint () =
   check string "status" "tool_failure_recovery_deferred" lifecycle.status;
   check (option string) "no provider error" None lifecycle.error
 
-let test_runtime_agent_context_uses_configured_turn_budget () =
+let test_runtime_agent_context_uses_configured_turn_limit () =
   let config =
     Runtime_agent.default_config
       ~name:"oas-runpod_mtp.qwen"
@@ -1181,7 +1215,7 @@ let test_runtime_agent_context_uses_configured_turn_budget () =
     }
   in
   let prepared = Runtime_agent_context.prepare_resume ~config ~checkpoint in
-  check int "resume adds fresh per-call turn budget" 31
+  check int "resume adds fresh generic per-call turn allowance" 31
     prepared.agent_config.max_turns
 
 let test_runtime_agent_context_preserves_max_tokens_intent () =
@@ -1328,7 +1362,7 @@ let test_runtime_agent_context_preserves_unbounded_resume_budget () =
       ~system_prompt:""
       ~tools:[]
   in
-  let config = { config with max_turns = 0 } in
+  let config = { config with max_turns = Agent_sdk.Types.unbounded_max_turns } in
   let checkpoint =
     { Agent_sdk.Checkpoint.version = Agent_sdk.Checkpoint.checkpoint_version
     ; session_id = "session"
@@ -1357,7 +1391,7 @@ let test_runtime_agent_context_preserves_unbounded_resume_budget () =
     }
   in
   let prepared = Runtime_agent_context.prepare_resume ~config ~checkpoint in
-  check int "resume preserves unbounded turn budget" 0
+  check int "resume preserves unbounded turn allowance" 0
     prepared.agent_config.max_turns
 
 let test_runtime_agent_context_resume_patches_stale_response_format_to_base_contract () =
@@ -1637,17 +1671,17 @@ let () =
             `Quick
             test_runtime_agent_terminal_error_observation_marks_failed_attempt
         ; test_case
-            "max turns is continuation checkpoint"
+            "execution limits are lifecycle observations"
             `Quick
-            test_runtime_agent_max_turns_is_continuation_checkpoint
+            test_runtime_agent_execution_limits_are_observations
         ; test_case
             "typed recovery defer is a control checkpoint"
             `Quick
             test_runtime_agent_recovery_defer_is_control_checkpoint
         ; test_case
-            "runtime agent context uses configured turn budget"
+            "runtime agent context uses configured turn limit"
             `Quick
-            test_runtime_agent_context_uses_configured_turn_budget
+            test_runtime_agent_context_uses_configured_turn_limit
         ; test_case
             "runtime agent context preserves max_tokens intent"
             `Quick

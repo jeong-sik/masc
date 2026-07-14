@@ -266,20 +266,6 @@ let deterministic_baseline_action (obs : world_observation) : deliberation_actio
 (* Phase 2: Deliberation Evaluation (L1 Reactive)                    *)
 (* ================================================================ *)
 
-(* ---------- Budget check ---------- *)
-
-(** Current daily budget from keeper runtime config. *)
-let daily_budget_usd () : float =
-  Env_config.KeeperRuntime.deliberation_daily_budget_usd ()
-
-(** Advisory cost telemetry for deliberation.
-
-    Deliberation must not be blocked by a daily cost threshold. *)
-let deliberation_budget_check ~daily_budget_usd ~cost_today_usd : bool =
-  ignore daily_budget_usd;
-  ignore cost_today_usd;
-  true
-
 (* ---------- Prompt builder ---------- *)
 
 let triggers_to_prompt_list (triggers : deliberation_trigger list) : string =

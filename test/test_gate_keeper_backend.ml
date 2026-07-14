@@ -30,6 +30,13 @@ let string_contains haystack needle =
     in
     loop 0
 
+let json_string_field key = function
+  | Some (`Assoc fields) ->
+    (match List.assoc_opt key fields with
+     | Some (`String value) -> value
+     | _ -> "")
+  | Some _ | None -> ""
+
 let read_file path =
   In_channel.with_open_bin path In_channel.input_all
 
@@ -44,9 +51,8 @@ let with_env key value f =
       Unix.putenv key value;
       f ())
 
-let translate_oas_stream_events ?base_dir events =
+let translate_oas_stream ?base_dir events =
   let redact_text text = text in
-  let on_text_delta text = text in
   (* RFC-0301: [translate] persists model-generated media under [base_dir]; the
      unique temp dir keeps generated media from leaking across test runs. *)
   let cleanup, base_dir =
@@ -58,16 +64,19 @@ let translate_oas_stream_events ?base_dir events =
   in
   Fun.protect ~finally:cleanup (fun () ->
     let rec loop bridge_state acc = function
-      | [] -> List.rev acc
+      | [] -> List.rev acc, bridge_state
       | event :: rest ->
           let translated =
-            Keeper_chat_oas_stream_bridge.translate ~redact_text ~on_text_delta
-              ~base_dir bridge_state event
+            Keeper_chat_oas_stream_bridge.translate ~redact_text ~base_dir
+              bridge_state event
           in
           loop translated.bridge_state
             (List.rev_append translated.chat_events acc) rest
     in
     loop Keeper_chat_oas_stream_bridge.empty_state [] events)
+
+let translate_oas_stream_events ?base_dir events =
+  fst (translate_oas_stream ?base_dir events)
 
 let has_stream_protocol_error events =
   List.exists
@@ -233,32 +242,17 @@ let test_parse_keeper_chat_stream_request_accepts_connector_context () =
       check string "workspace id" "workspace-9" payload.channel_workspace_id
   | Error err -> fail ("expected connector context to parse: " ^ err)
 
-let test_parse_keeper_chat_stream_request_preserves_explicit_timeout () =
+let test_parse_keeper_chat_stream_request_rejects_removed_timeout () =
   let body = {|{"name":"luna","message":"hello","timeout_sec":1200.5}|} in
   match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
-  | Ok payload ->
-    check (option (float 0.0001))
-      "explicit timeout"
-      (Some 1200.5)
-      payload.timeout_sec
-  | Error err -> fail ("expected explicit timeout to parse: " ^ err)
-;;
-
-let test_parse_keeper_chat_stream_request_rejects_invalid_timeout () =
-  let body = {|{"name":"luna","message":"hello","timeout_sec":0}|} in
-  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
-  | Ok _ -> fail "expected non-positive timeout to be rejected"
+  | Ok _ -> fail "expected the retired request timeout to be rejected"
   | Error err ->
     check string
-      "validation message"
-      "timeout_sec must be a positive finite number"
+      "removed field is named explicitly"
+      "removed keeper message args for masc_keeper_msg: timeout_sec \
+       (request-level whole-turn deadline is retired; use explicit operator \
+       cancellation, provider progress deadlines, or tool-local deadlines)."
       err
-;;
-
-let test_keeper_msg_timeout_override_rejects_non_number () =
-  match KT.keeper_msg_timeout_override (`Assoc [ "timeout_sec", `String "120" ]) with
-  | Ok _ -> fail "expected a string timeout to be rejected"
-  | Error err -> check string "validation message" "timeout_sec must be a JSON number" err
 ;;
 
 let test_parse_keeper_chat_stream_request_rejects_partial_connector_context () =
@@ -619,7 +613,6 @@ let test_keeper_stream_args_preserve_user_blocks () =
           Keeper_multimodal_input.User_text "describe this";
           Keeper_multimodal_input.User_image media;
         ];
-      timeout_sec = None;
       turn_instructions = None;
       surface_context = None;
       channel = "";
@@ -1408,6 +1401,54 @@ let test_keeper_stream_bridge_surfaces_oas_message_metadata () =
         (Agent_sdk.Types.total_tokens delta_usage)
   | _ -> fail "expected OAS message lifecycle metadata events"
 
+let test_keeper_stream_bridge_terminal_text_state_is_message_scoped () =
+  let open Agent_sdk.Types in
+  let message_start id =
+    MessageStart { id; model = "provider-model"; usage = None }
+  in
+  let _, no_final_text =
+    translate_oas_stream
+      [ message_start "intermediate"
+      ; ContentBlockDelta { index = 0; delta = TextDelta "working" }
+      ; MessageStop
+      ; message_start "terminal"
+      ; MessageStop
+      ]
+  in
+  check bool "intermediate narration is not terminal text" false
+    (Keeper_chat_oas_stream_bridge.terminal_message_had_text no_final_text);
+  let _, open_final_text =
+    translate_oas_stream
+      [ message_start "terminal-open"
+      ; ContentBlockDelta { index = 0; delta = TextDelta "approved" }
+      ]
+  in
+  check bool "open terminal message text is observable" true
+    (Keeper_chat_oas_stream_bridge.terminal_message_had_text open_final_text);
+  let _, open_final_without_text =
+    translate_oas_stream
+      [ message_start "intermediate"
+      ; ContentBlockDelta { index = 0; delta = TextDelta "working" }
+      ; MessageStop
+      ; message_start "terminal-open-empty"
+      ]
+  in
+  check bool "new open message resets prior text state" false
+    (Keeper_chat_oas_stream_bridge.terminal_message_had_text
+       open_final_without_text);
+  let _, final_text =
+    translate_oas_stream
+      [ message_start "intermediate"
+      ; ContentBlockDelta { index = 0; delta = TextDelta "working" }
+      ; MessageStop
+      ; message_start "terminal"
+      ; ContentBlockDelta { index = 0; delta = TextDelta "approved" }
+      ; MessageStop
+      ]
+  in
+  check bool "terminal message text suppresses terminal resend" true
+    (Keeper_chat_oas_stream_bridge.terminal_message_had_text final_text)
+
 let test_keeper_stream_bridge_preserves_typed_media_source () =
   let open Agent_sdk.Types in
   let raw_media = "raw image bytes" in
@@ -1925,13 +1966,18 @@ let test_keeper_chat_user_only_persists_attachment_refs_not_raw_media () =
           | _ -> fail "expected one persisted user-only attachment")
       | _ -> fail "expected one persisted user message")
 
-let test_extract_visible_reply_drops_empty_structured_envelope () =
+let test_canonical_reply_payload_keeps_empty_typed_reply () =
+  let turn_ref =
+    Ids.Turn_ref.make ~trace_id:"canonical-empty" ~absolute_turn:1
+    |> Ids.Turn_ref.to_string
+  in
   let body =
     Yojson.Safe.to_string
       (`Assoc
         [
           ("runtime_class", `String "keeper");
           ("turn_outcome", `String "visible_reply");
+          ("turn_ref", `String turn_ref);
           ("reply", `String "");
           ( "tool_call_evidence",
             `List
@@ -1944,28 +1990,115 @@ let test_extract_visible_reply_drops_empty_structured_envelope () =
               ] );
         ])
   in
-  let payload_json_opt, visible_reply =
-    Server_routes_http_keeper_stream.For_testing.extract_visible_reply body
-  in
-  check bool "structured envelope parsed" true (Option.is_some payload_json_opt);
-  check string "empty reply does not fall back to envelope" "" visible_reply
+  match
+    Server_routes_http_keeper_stream.For_testing.canonical_reply_payload_of_body
+      ~redact_text:Fun.id body
+  with
+  | Error error ->
+    fail
+      (Server_routes_http_keeper_stream.canonical_reply_payload_error_to_string
+         error)
+  | Ok canonical ->
+    check string "empty reply stays empty" "" canonical.visible_reply;
+    check bool "typed visible outcome is preserved" true
+      (Keeper_turn_outcome.equal canonical.turn_outcome
+         Keeper_turn_outcome.Visible_reply)
 
-let test_extract_visible_reply_uses_typed_reply_field_only () =
+let test_canonical_reply_payload_redacts_reply_and_preserves_evidence () =
+  let turn_ref =
+    Ids.Turn_ref.make ~trace_id:"canonical-visible" ~absolute_turn:9
+  in
+  let tool_evidence =
+    `List
+      [ `Assoc
+          [ "name", `String "keeper_context_status"
+          ; "status", `String "ok"
+          ]
+      ]
+  in
   let body =
     Yojson.Safe.to_string
       (`Assoc
         [
           ("runtime_class", `String "keeper");
           ("turn_outcome", `String "visible_reply");
-          ("reply", `String "Done.");
+          ("turn_ref", Ids.Turn_ref.to_yojson turn_ref);
+          ("reply", `String "api_key=secret Done.");
+          ("tool_call_evidence", tool_evidence);
           ("runtime_note", `String "must not be user-visible");
         ])
   in
-  let payload_json_opt, visible_reply =
-    Server_routes_http_keeper_stream.For_testing.extract_visible_reply body
+  let redact_text = function
+    | "api_key=secret Done." -> "api_key=[redacted] Done."
+    | text -> text
   in
-  check bool "structured envelope parsed" true (Option.is_some payload_json_opt);
-  check string "visible reply comes from reply field" "Done." visible_reply
+  match
+    Server_routes_http_keeper_stream.For_testing.canonical_reply_payload_of_body
+      ~redact_text body
+  with
+  | Error error ->
+    fail
+      (Server_routes_http_keeper_stream.canonical_reply_payload_error_to_string
+         error)
+  | Ok canonical ->
+    check string "visible reply is redacted once" "api_key=[redacted] Done."
+      canonical.visible_reply;
+    check bool "turn_ref identity is preserved" true
+      (Ids.Turn_ref.equal turn_ref canonical.turn_ref);
+    check string "turn outcome label is unchanged" "visible_reply"
+      (json_string_field Keeper_turn_outcome.wire_key
+         (Some canonical.payload_json));
+    check string "non-reply field is preserved" "must not be user-visible"
+      (json_string_field "runtime_note" (Some canonical.payload_json));
+    check bool "tool evidence is preserved semantically" true
+      (match canonical.payload_json with
+       | `Assoc fields ->
+         Option.equal Yojson.Safe.equal
+           (Some tool_evidence)
+           (List.assoc_opt "tool_call_evidence" fields)
+       | _ -> false);
+    check bool "raw reply secret is absent from poll body" false
+      (string_contains canonical.poll_body "api_key=secret")
+
+let test_canonical_reply_payload_rejects_noncanonical_success_bodies () =
+  let parse body =
+    Server_routes_http_keeper_stream.For_testing.canonical_reply_payload_of_body
+      ~redact_text:Fun.id body
+  in
+  let assert_error label accepts body =
+    match parse body with
+    | Error error when accepts error -> ()
+    | Error error ->
+      failf "%s: unexpected error %s" label
+        (Server_routes_http_keeper_stream.canonical_reply_payload_error_to_string
+           error)
+    | Ok _ -> failf "%s: malformed success body was accepted" label
+  in
+  assert_error "invalid JSON"
+    (function
+      | Server_routes_http_keeper_stream.Malformed_reply_json _ -> true
+      | _ -> false)
+    "not-json";
+  assert_error "non-object JSON"
+    (function
+      | Server_routes_http_keeper_stream.Reply_payload_not_object -> true
+      | _ -> false)
+    {|"raw text"|};
+  assert_error "duplicate reply field"
+    (function
+      | Server_routes_http_keeper_stream.Duplicate_payload_field "reply" -> true
+      | _ -> false)
+    {|{"reply":"a","reply":"b","turn_outcome":"visible_reply","turn_ref":"trace#1"}|};
+  assert_error "unknown outcome"
+    (function
+      | Server_routes_http_keeper_stream.Unknown_turn_outcome -> true
+      | _ -> false)
+    {|{"reply":"ok","turn_outcome":"guessed","turn_ref":"trace#1"}|};
+  assert_error "invalid turn ref"
+    (function
+      | Server_routes_http_keeper_stream.Invalid_turn_ref -> true
+      | _ -> false)
+    {|{"reply":"ok","turn_outcome":"visible_reply","turn_ref":"invalid"}|}
 
 let test_direct_reply_terminal_error_rejects_no_visible_reply () =
   let payload_json =
@@ -1997,13 +2130,6 @@ let test_direct_reply_terminal_error_allows_checkpoint () =
       (Some payload_json) ""
   in
   check bool "checkpoint can stay user-only" true (Option.is_none err)
-
-let json_string_field key = function
-  | Some (`Assoc fields) -> (
-      match List.assoc_opt key fields with
-      | Some (`String value) -> value
-      | _ -> "")
-  | Some _ | None -> ""
 
 let test_keeper_tool_failure_log_details_include_preview_and_class () =
   let error_body = String.make 260 'x' in
@@ -2043,108 +2169,46 @@ let test_keeper_tool_failure_log_details_include_preview_and_class () =
         (List.mem_assoc "error_body" fields)
   | _ -> fail "expected Assoc"
 
-let test_visible_reply_uses_streamed_text_fallback () =
-  let fallback =
-    Server_routes_http_keeper_stream.For_testing.visible_reply_with_stream_fallback
-      ~streamed_text:" streamed final " ""
-  in
-  check string "empty terminal reply uses streamed text" "streamed final"
-    fallback;
-  let explicit =
-    Server_routes_http_keeper_stream.For_testing.visible_reply_with_stream_fallback
-      ~streamed_text:"streamed final" " terminal final "
-  in
-  check string "typed terminal reply wins over streamed fallback" "terminal final"
-    explicit
-
-let test_visible_reply_stream_fallback_redacts_before_persist () =
-  let redact = function
-    | "api_key=secret" -> "api_key=[redacted]"
-    | "terminal secret" -> "terminal [redacted]"
-    | text -> text
-  in
-  let fallback =
-    Server_routes_http_keeper_stream.For_testing.redacted_visible_reply_with_stream_fallback
-      ~redact ~streamed_text:" api_key=secret " ""
-  in
-  check string "stream fallback redacted" "api_key=[redacted]" fallback;
-  let explicit =
-    Server_routes_http_keeper_stream.For_testing.redacted_visible_reply_with_stream_fallback
-      ~redact ~streamed_text:"api_key=secret" " terminal secret "
-  in
-  check string "terminal reply redacted" "terminal [redacted]" explicit
-
-let test_streamed_visible_reply_promotes_no_visible_payload_when_text_streamed () =
-  let payload_json =
+let canonical_empty_reply_for_outcome outcome =
+  let body =
     `Assoc
       [
         ("runtime_class", `String "keeper");
-        ("turn_outcome", `String "no_visible_reply");
+        ("turn_outcome", `String outcome);
+        ("turn_ref", `String "canonical-outcome#1");
         ("reply", `String "");
       ]
+    |> Yojson.Safe.to_string
   in
-  let visible_reply =
-    Server_routes_http_keeper_stream.For_testing.visible_reply_with_stream_fallback
-      ~streamed_text:"streamed final" ""
-  in
-  let rewritten =
-    Server_routes_http_keeper_stream.For_testing.reply_payload_with_streamed_visible_reply
-      (Some payload_json) ~visible_reply ~streamed_text_present:true
-  in
-  check string "streamed visible reply is preserved" "streamed final"
-    (json_string_field "reply" rewritten);
-  check string "streamed visible reply wins terminal outcome" "visible_reply"
-    (json_string_field Keeper_turn_outcome.wire_key rewritten);
-  let err =
-    Server_routes_http_keeper_stream.For_testing.direct_reply_terminal_error
-      rewritten visible_reply
-  in
-  check bool "typed text stream avoids no-visible terminal error" true
-    (Option.is_none err)
+  match
+    Server_routes_http_keeper_stream.For_testing.canonical_reply_payload_of_body
+      ~redact_text:Fun.id body
+  with
+  | Ok canonical -> canonical
+  | Error error ->
+    fail
+      (Server_routes_http_keeper_stream.canonical_reply_payload_error_to_string
+         error)
 
-let test_visible_reply_without_stream_preserves_no_visible_payload () =
-  let payload_json =
-    `Assoc
-      [
-        ("runtime_class", `String "keeper");
-        ("turn_outcome", `String "no_visible_reply");
-        ("reply", `String "");
-      ]
-  in
-  let rewritten =
-    Server_routes_http_keeper_stream.For_testing.reply_payload_with_streamed_visible_reply
-      (Some payload_json) ~visible_reply:"terminal fallback"
-      ~streamed_text_present:false
-  in
-  check string "declared no-visible reply remains empty" ""
-    (json_string_field "reply" rewritten);
-  check string "declared no-visible outcome remains semantic" "no_visible_reply"
+let test_redacted_reply_rewrite_preserves_typed_no_visible_outcome () =
+  let canonical = canonical_empty_reply_for_outcome "no_visible_reply" in
+  let rewritten = Some canonical.payload_json in
+  check string "redacted reply remains empty" "" canonical.visible_reply;
+  check string "typed no-visible outcome remains unchanged" "no_visible_reply"
     (json_string_field Keeper_turn_outcome.wire_key rewritten);
   let err =
     Server_routes_http_keeper_stream.For_testing.direct_reply_terminal_error
-      rewritten "terminal fallback"
+      rewritten canonical.visible_reply
   in
-  check bool "non-stream fallback cannot override no-visible terminal contract" true
+  check bool "stream projection cannot override no-visible terminal contract" true
     (Option.is_some err)
 
-let test_streamed_visible_reply_preserves_checkpoint_payload () =
-  let payload_json =
-    `Assoc
-      [
-        ("runtime_class", `String "keeper");
-        ("turn_outcome", `String "continuation_checkpoint");
-        ("reply", `String "");
-      ]
-  in
-  let rewritten =
-    Server_routes_http_keeper_stream.For_testing.reply_payload_with_streamed_visible_reply
-      (Some payload_json) ~visible_reply:"streamed final"
-      ~streamed_text_present:true
-  in
+let test_redacted_reply_rewrite_preserves_checkpoint_payload () =
+  let canonical = canonical_empty_reply_for_outcome "continuation_checkpoint" in
+  let rewritten = Some canonical.payload_json in
   check string "checkpoint outcome is semantic" "continuation_checkpoint"
     (json_string_field Keeper_turn_outcome.wire_key rewritten);
-  check string "checkpoint reply remains hidden" ""
-    (json_string_field "reply" rewritten)
+  check string "checkpoint reply remains hidden" "" canonical.visible_reply
 
 let vision_provider_cfg () =
   Llm_provider.Provider_config.make
@@ -2429,7 +2493,6 @@ let test_chat_surface_of_request_labels_copilot_gate () =
   let payload =
     { Server_routes_http_keeper_stream.name = "luna";
       message = "hello";
-      timeout_sec = None;
       turn_instructions = None;
       surface_context = None;
       user_blocks = [];
@@ -2453,7 +2516,6 @@ let test_chat_speaker_of_request_copilot_is_owner () =
   let payload =
     { Server_routes_http_keeper_stream.name = "luna";
       message = "hello";
-      timeout_sec = None;
       turn_instructions = None;
       surface_context = None;
       user_blocks = [];
@@ -2473,7 +2535,6 @@ let test_chat_speaker_of_request_connector_is_external () =
   let payload =
     { Server_routes_http_keeper_stream.name = "luna";
       message = "hello";
-      timeout_sec = None;
       turn_instructions = None;
       surface_context = None;
       user_blocks = [];
@@ -2799,12 +2860,8 @@ let () =
             test_contextualize_message_includes_channel_metadata;
           test_case "stream request accepts connector context" `Quick
             test_parse_keeper_chat_stream_request_accepts_connector_context;
-          test_case "stream request preserves explicit timeout" `Quick
-            test_parse_keeper_chat_stream_request_preserves_explicit_timeout;
-          test_case "stream request rejects invalid explicit timeout" `Quick
-            test_parse_keeper_chat_stream_request_rejects_invalid_timeout;
-          test_case "keeper message rejects non-number timeout" `Quick
-            test_keeper_msg_timeout_override_rejects_non_number;
+          test_case "stream request rejects removed request timeout" `Quick
+            test_parse_keeper_chat_stream_request_rejects_removed_timeout;
           test_case "stream request rejects partial connector context" `Quick
             test_parse_keeper_chat_stream_request_rejects_partial_connector_context;
           test_case "stream request accepts copilot context" `Quick
@@ -2853,6 +2910,8 @@ let () =
             test_keeper_stream_bridge_isolates_tool_blocks_across_messages;
           test_case "stream bridge surfaces OAS message metadata" `Quick
             test_keeper_stream_bridge_surfaces_oas_message_metadata;
+          test_case "stream bridge scopes terminal text to final message" `Quick
+            test_keeper_stream_bridge_terminal_text_state_is_message_scoped;
           test_case "stream bridge preserves typed media source" `Quick
             test_keeper_stream_bridge_preserves_typed_media_source;
           test_case "stream bridge rejects media delta for tool block" `Quick
@@ -2883,26 +2942,22 @@ let () =
             test_keeper_chat_history_persists_attachment_refs_not_raw_media;
           test_case "user-only chat history persists attachment refs not raw media" `Quick
             test_keeper_chat_user_only_persists_attachment_refs_not_raw_media;
-          test_case "visible reply drops empty structured envelope" `Quick
-            test_extract_visible_reply_drops_empty_structured_envelope;
-          test_case "visible reply uses typed reply field only" `Quick
-            test_extract_visible_reply_uses_typed_reply_field_only;
+          test_case "canonical reply keeps empty typed reply" `Quick
+            test_canonical_reply_payload_keeps_empty_typed_reply;
+          test_case "canonical reply redacts text and preserves evidence" `Quick
+            test_canonical_reply_payload_redacts_reply_and_preserves_evidence;
+          test_case "canonical reply rejects malformed success bodies" `Quick
+            test_canonical_reply_payload_rejects_noncanonical_success_bodies;
           test_case "tool failure log details include error body and failure_class"
             `Quick test_keeper_tool_failure_log_details_include_preview_and_class;
           test_case "direct reply rejects no visible reply" `Quick
             test_direct_reply_terminal_error_rejects_no_visible_reply;
           test_case "direct reply allows continuation checkpoint" `Quick
             test_direct_reply_terminal_error_allows_checkpoint;
-          test_case "visible reply uses streamed text fallback" `Quick
-            test_visible_reply_uses_streamed_text_fallback;
-          test_case "visible reply stream fallback redacts before persist" `Quick
-            test_visible_reply_stream_fallback_redacts_before_persist;
-          test_case "streamed visible reply promotes no-visible payload" `Quick
-            test_streamed_visible_reply_promotes_no_visible_payload_when_text_streamed;
-          test_case "no-visible payload still wins without text stream" `Quick
-            test_visible_reply_without_stream_preserves_no_visible_payload;
-          test_case "streamed visible reply preserves checkpoint payload" `Quick
-            test_streamed_visible_reply_preserves_checkpoint_payload;
+          test_case "redacted reply rewrite preserves no-visible outcome" `Quick
+            test_redacted_reply_rewrite_preserves_typed_no_visible_outcome;
+          test_case "redacted reply rewrite preserves checkpoint payload" `Quick
+            test_redacted_reply_rewrite_preserves_checkpoint_payload;
           test_case "runtime run_blocks appends multimodal input to OAS agent" `Quick
             test_runtime_run_blocks_appends_multimodal_input_to_oas_agent;
           test_case "runtime multimodal gate lists required modalities" `Quick

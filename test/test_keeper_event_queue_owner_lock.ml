@@ -103,11 +103,26 @@ let test_canonical_owner_and_cross_context_isolation () =
       (match
          Persistence.update_result
            ~base_path:base_a
-           ~keeper_name:"owner.with.untyped-separator"
+           ~keeper_name:"owner.with.internal.dots"
            (fun queue -> queue)
        with
-       | Error _ -> ()
-       | Ok () -> Alcotest.fail "invalid Keeper identity resolved an owner lock");
+       | Ok () -> ()
+       | Error error ->
+         Alcotest.failf "portable dotted Keeper identity was rejected: %s" error);
+      List.iter
+        (fun reserved_name ->
+          match
+            Persistence.update_result
+              ~base_path:base_a
+              ~keeper_name:reserved_name
+              (fun queue -> queue)
+          with
+          | Error _ -> ()
+          | Ok () ->
+            Alcotest.failf
+              "reserved Keeper path component %S resolved an owner lock"
+              reserved_name)
+        [ "."; ".." ];
 
       let held = Atomic.make false in
       let release = Atomic.make false in

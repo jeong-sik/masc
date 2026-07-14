@@ -16,7 +16,15 @@ const {
   queuedKeeperMessageToReply,
   streamKeeperMessage,
 } = vi.hoisted(() => ({
-  cancelQueuedKeeperMessage: vi.fn(async () => undefined),
+  cancelQueuedKeeperMessage: vi.fn(
+    async (requestId: string): Promise<{
+      requestId: string
+      status: 'cancelling' | 'cancelled'
+    }> => ({
+      requestId,
+      status: 'cancelled',
+    }),
+  ),
   fetchKeeperChatHistory: vi.fn(),
   fetchKeeperChatReceipt: vi.fn(),
   fetchQueuedKeeperMessageResult: vi.fn(),
@@ -25,6 +33,7 @@ const {
     || result.status === 'error'
     || result.status === 'lost'
     || result.status === 'cancelled'
+    || result.status === 'persistence_failed'
   )),
   queuedKeeperMessageError: vi.fn((result: { status: string }) => `request ${result.status}`),
   queuedKeeperMessageToReply: vi.fn((result: { result?: { reply?: string } }): KeeperToolReply => ({
@@ -759,7 +768,10 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     _resetCancelledKeeperThreadRequestsForTests()
     streamKeeperMessage.mockReset()
     cancelQueuedKeeperMessage.mockReset()
-    cancelQueuedKeeperMessage.mockResolvedValue(undefined)
+    cancelQueuedKeeperMessage.mockImplementation(async (requestId: string) => ({
+      requestId,
+      status: 'cancelled' as const,
+    }))
     fetchKeeperChatHistory.mockReset()
     fetchQueuedKeeperMessageResult.mockReset()
     isTerminalQueuedKeeperMessage.mockClear()
@@ -1121,6 +1133,112 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     expect(err).toBeInstanceOf(Error)
     expect(err.name).toBe('AbortError')
     expect(pendingKeeperChatRequestsForKeeper('echo')).toEqual([])
+  })
+
+  it('retains and polls a durable cancelling request until its actual terminal state', async () => {
+    cancelQueuedKeeperMessage.mockImplementation(async (requestId: string) => ({
+      requestId,
+      status: 'cancelling' as const,
+    }))
+    fetchQueuedKeeperMessageResult.mockResolvedValue({
+      requestId: 'kmsg_echo_cancelling',
+      keeperName: 'echo',
+      status: 'cancelled',
+      ok: false,
+      result: {
+        cancelled: true,
+        cancelled_by: 'operator',
+      },
+    })
+    fetchKeeperChatHistory.mockResolvedValue([])
+    streamKeeperMessage.mockImplementation(async (
+      _name: string,
+      _message: string,
+      opts: {
+        signal?: AbortSignal
+        onEvent: (event: KeeperChatStreamEvent) => void
+      },
+    ) => {
+      opts.onEvent({
+        type: 'CUSTOM',
+        name: 'KEEPER_QUEUE_REQUEST',
+        value: { request_id: 'kmsg_echo_cancelling', status: 'queued' },
+      })
+      return new Promise<{ terminal: boolean }>((_resolve, reject) => {
+        opts.signal?.addEventListener('abort', () => { reject(abortError()) }, { once: true })
+      })
+    })
+
+    const sendPromise = sendKeeperThreadMessage('echo', 'cancel and observe').catch(err => err)
+    await Promise.resolve()
+
+    await expect(cancelActiveKeeperThreadMessage('echo')).resolves.toBe(true)
+    const err = await sendPromise
+
+    expect(err).toBeInstanceOf(Error)
+    expect(err.name).toBe('AbortError')
+    await vi.waitFor(() => {
+      expect(fetchQueuedKeeperMessageResult).toHaveBeenCalledWith('kmsg_echo_cancelling')
+      expect(pendingKeeperChatRequestsForKeeper('echo')).toEqual([])
+    })
+  })
+
+  it('surfaces the actual persistence failure after a cancellation acknowledgement', async () => {
+    cancelQueuedKeeperMessage.mockImplementation(async (requestId: string) => ({
+      requestId,
+      status: 'cancelling' as const,
+    }))
+    fetchQueuedKeeperMessageResult.mockResolvedValue({
+      requestId: 'kmsg_echo_cancel_persist_failure',
+      keeperName: 'echo',
+      status: 'persistence_failed',
+      ok: false,
+      result: {
+        error: 'request_persistence_failed',
+        attempted_status: 'cancelled',
+        reason: 'terminal callback failed',
+      },
+    })
+    fetchKeeperChatHistory.mockResolvedValue([])
+    streamKeeperMessage.mockImplementation(async (
+      _name: string,
+      _message: string,
+      opts: {
+        signal?: AbortSignal
+        onEvent: (event: KeeperChatStreamEvent) => void
+      },
+    ) => {
+      opts.onEvent({
+        type: 'CUSTOM',
+        name: 'KEEPER_QUEUE_REQUEST',
+        value: { request_id: 'kmsg_echo_cancel_persist_failure', status: 'queued' },
+      })
+      return new Promise<{ terminal: boolean }>((_resolve, reject) => {
+        opts.signal?.addEventListener('abort', () => { reject(abortError()) }, { once: true })
+      })
+    })
+
+    const sendPromise = sendKeeperThreadMessage('echo', 'cancel with callback failure')
+      .catch(err => err)
+    await Promise.resolve()
+
+    await expect(cancelActiveKeeperThreadMessage('echo')).resolves.toBe(true)
+    const err = await sendPromise
+
+    expect(err).toBeInstanceOf(Error)
+    expect(err.name).toBe('AbortError')
+    await vi.waitFor(() => {
+      expect(fetchQueuedKeeperMessageResult)
+        .toHaveBeenCalledWith('kmsg_echo_cancel_persist_failure')
+      expect(queuedKeeperMessageError).toHaveBeenCalledWith(expect.objectContaining({
+        status: 'persistence_failed',
+        result: expect.objectContaining({
+          attempted_status: 'cancelled',
+          reason: 'terminal callback failed',
+        }),
+      }))
+      expect(pendingKeeperChatRequestsForKeeper('echo')).toEqual([])
+    })
   })
 
   it('reports failure and keeps the pending request when server cancel fails', async () => {

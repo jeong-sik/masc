@@ -111,7 +111,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 
 | File | Module | Kind | cfg | buggy | Invariants / Properties | Source Hash |
 |------|--------|------|-----|-------|-------------------------|---------------|
-| ServerState.tla | ServerState | manual | 2 | 1 | clean={inv:SafetyInvariant} buggy={inv:InvariantViolated} | 1f36d3b34bfe |
+| ServerState.tla | ServerState | manual | 2 | 1 | clean={inv:SafetyInvariant} buggy={inv:InvariantViolated} | f0202d19102e |
 
 ### specs/shared (1 specs)
 

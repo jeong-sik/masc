@@ -101,6 +101,21 @@ let init () =
     [ 0.001; 0.005; 0.01; 0.05; 0.1; 0.5; 1.0; 5.0 ];
   reg "masc_backend_mutex_held_sec"
     [ 0.001; 0.005; 0.01; 0.05; 0.1; 0.5; 1.0; 5.0; 10.0; 60.0 ];
+  reg Keeper_metrics.(to_string PersistenceLaneDuration)
+    [ 0.001
+    ; 0.005
+    ; 0.01
+    ; 0.05
+    ; 0.1
+    ; 0.5
+    ; 1.0
+    ; 5.0
+    ; 10.0
+    ; 30.0
+    ; 60.0
+    ; 120.0
+    ; 300.0
+    ];
   reg "masc_dashboard_execution_render_phase_seconds"
     [ 0.001; 0.005; 0.01; 0.025; 0.05; 0.1; 0.25; 0.5; 1.0; 2.5; 5.0; 10.0 ];
   reg "masc_keeper_turn_phase_duration_seconds"

@@ -13,6 +13,7 @@ type t =
   | FailureRoute
   | FailureJudgmentOutcome
   | IdleSeconds
+  | StreamProjectionEventCutoff
   | MetricEmitDropped
   | ContextMaxObserved
   | TurnStarts
@@ -61,6 +62,12 @@ type t =
   | CompactAuditDrainBatches
   | CompactAuditDrainBatchSizeBucket
   | FsFailures
+  | PersistencePreparationStageDuration
+  | PersistencePreparationExamined
+  | PersistenceLaneWaits
+  | PersistenceLanePending
+  | PersistenceLaneInFlight
+  | PersistenceLaneDuration
   | CrashPersistenceFailures
   | GenerationLineageFailures
   | KeepaliveSignalFailures
@@ -204,6 +211,14 @@ type t =
   | WireCaptureRecordSkipped
 
 val to_string : t -> string
+
+type collection =
+  | Metric_store
+  | External_observable
+
+val collection : t -> collection
+(** Typed ownership of a metric's exported value. [External_observable]
+    metrics must not also be registered in the mutable metric store. *)
 
 val emit_runtime_selected :
   keeper_name:string -> runtime_id:string -> fallback_reason:string -> unit

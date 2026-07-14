@@ -506,7 +506,7 @@ Keeper turn에서 어떤 "skill" 경로를 사용할지 결정:
 
 ### INV-KEEPER-001: keeper_meta.name 유효성
 
-`validate_name`이 `^[A-Za-z0-9._-]+$` 정규식으로 이름을 검증한다. 빈 문자열 또는 특수문자 포함 시 `meta_of_json`이 `Error`를 반환한다.
+`validate_name`이 공유 portable-name 계약(`[A-Za-z0-9._-]+`, 경로 예약값 `.`/`..` 제외)으로 이름을 검증한다. 빈 문자열, 예약값 또는 특수문자 포함 시 `meta_of_json`이 `Error`를 반환한다.
 
 ### INV-KEEPER-002: trace_id 유일성
 

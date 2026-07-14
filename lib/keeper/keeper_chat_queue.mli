@@ -39,7 +39,9 @@ type completion = {
 
 type failure_kind =
   | Turn_failed
-  | Timed_out
+  | Legacy_request_timeout
+(** Historical terminal result decoded from snapshots written by the retired
+    request-level Keeper watchdog. No live producer constructs this value. *)
   | No_visible_reply
   | Transcript_persist_failed
   | Connector_unavailable
@@ -214,4 +216,6 @@ val all_keeper_names : unit -> string list
 module For_testing : sig
   val reset : unit -> unit
   val fail_next_persist : unit -> unit
+  val failure_kind_of_string : string -> (failure_kind, string) result
+  val snapshot_path : base_path:string -> keeper_name:string -> (string, string) result
 end

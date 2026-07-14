@@ -714,7 +714,7 @@ export type KeeperQueueReceiptLifecycle =
 
 export type KeeperQueueReceiptFailureKind =
   | 'turn_failed'
-  | 'timed_out'
+  | 'legacy_request_timeout'
   | 'no_visible_reply'
   | 'transcript_persist_failed'
   | 'connector_unavailable'

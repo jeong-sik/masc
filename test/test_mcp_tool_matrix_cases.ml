@@ -660,8 +660,6 @@ let field_value fixture ~tool_name field_name schema =
   | "verifier" -> `String fixture.agent_name
   | "verdict" -> `String "pass"
   | "score" -> `Float 0.9
-  | "timeout_sec" when tool_name = "masc_keeper_msg" ->
-      `Float 1.0
   | "timeout" when tool_name = "masc_listen" -> `Int 1
   | "interval" when tool_name = "masc_heartbeat_start" -> `Int 5
   | "ice_candidates" -> `List [ `String "candidate:tool-matrix" ]
@@ -745,8 +743,6 @@ let tool_arguments fixture (schema : Masc_domain.tool_schema) =
       match name with
       | "masc_start" -> [ "path"; "task_title" ]
       | "masc_heartbeat_start" -> [ "interval" ]
-      | "masc_keeper_msg" ->
-          [ "timeout_sec" ]
       | "masc_board_post" ->
           (* Schema no longer requires content|author (both are validated at
              the handler layer so body/content aliases both work). Matrix

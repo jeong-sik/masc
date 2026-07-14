@@ -3,7 +3,7 @@
 \*
 \* Models four independent FSMs composed as a product:
 \*   1. Lifecycle  (Booting | Serving | Draining | Stopped)
-\*   2. Backend    (Uninitialized | PostgreSQL | Filesystem | Degraded)
+\*   2. Backend    (Uninitialized | Memory | Filesystem | Degraded)
 \*   3. LazyQueue  (Complete | Pending)  — simplified boolean for spec
 \*   4. Readiness  (NotReady | Ready)
 \*
@@ -37,7 +37,7 @@ vars == <<lifecycle, backend, lazy_pending, readiness>>
 \* ── Phase Sets ───────────────────────────────────────────
 
 LifecyclePhases == {"Booting", "Serving", "Draining", "Stopped"}
-BackendPhases == {"Uninitialized", "PostgreSQL", "Filesystem", "Degraded"}
+BackendPhases == {"Uninitialized", "Memory", "Filesystem", "Degraded"}
 ReadinessPhases == {"NotReady", "Ready"}
 
 LifecycleTerminal == {"Stopped"}
@@ -80,10 +80,10 @@ LifecycleStop ==
 
 \* ── Backend Events ───────────────────────────────────────
 
-BackendResolvePg ==
+BackendResolveMemory ==
     /\ backend = "Uninitialized"
     /\ lifecycle \in {"Serving", "Draining"}
-    /\ backend' = "PostgreSQL"
+    /\ backend' = "Memory"
     /\ UNCHANGED <<lifecycle, lazy_pending, readiness>>
 
 BackendResolveFs ==
@@ -93,7 +93,7 @@ BackendResolveFs ==
     /\ UNCHANGED <<lifecycle, lazy_pending, readiness>>
 
 BackendDegrade ==
-    /\ backend \in {"PostgreSQL", "Filesystem"}
+    /\ backend \in {"Memory", "Filesystem"}
     /\ lifecycle \in {"Serving", "Draining"}
     /\ backend' = "Degraded"
     /\ readiness' = "NotReady"
@@ -140,7 +140,7 @@ Next ==
     \/ LifecycleBootComplete
     \/ LifecycleStartDraining
     \/ LifecycleStop
-    \/ BackendResolvePg
+    \/ BackendResolveMemory
     \/ BackendResolveFs
     \/ BackendDegrade
     \/ BackendRecover
@@ -193,7 +193,7 @@ DrainingResolves ==
 
 \* P3: Degraded backend eventually recovers
 DegradedResolves ==
-    (backend = "Degraded") ~> (backend \in {"PostgreSQL", "Filesystem"})
+    (backend = "Degraded") ~> (backend \in {"Memory", "Filesystem"})
 
 \* ── Buggy Spec (for mutation testing) ────────────────────
 \*

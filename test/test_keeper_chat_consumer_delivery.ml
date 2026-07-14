@@ -140,9 +140,14 @@ let check_terminal_snapshot ~label ~keeper_name ~receipt_id =
   check (label ^ " retains terminal receipt")
     (receipt_id_in_terminal receipt_id snapshot.terminal)
 
-(* [Keeper_chat_consumer.start] owns a process-lifetime polling fiber.  Raising
+(* Tests own the polling fiber explicitly; production runs the blocking loop
+   inside its supervised subsystem boundary. Raising
    from the switch body gives each test a structured teardown and, when a turn
    is active, exercises the same cancellation path as server shutdown. *)
+let start_consumer ~sw ~clock ~base_path ~handle_turn =
+  Eio.Fiber.fork ~sw (fun () ->
+    Keeper_chat_consumer.run ~sw ~clock ~base_path ~handle_turn)
+
 exception Stop_consumer
 
 let with_consumer_switch body =
@@ -166,7 +171,7 @@ let test_delivery_finalizes_terminal_receipt () =
           { outcome_ref = "trace-delivered#1" }
       in
       with_consumer_switch (fun sw ->
-        Keeper_chat_consumer.start ~sw ~clock ~base_path:base ~handle_turn;
+        start_consumer ~sw ~clock ~base_path:base ~handle_turn;
         match
           await_receipt ~clock ~seconds:5.0 ~keeper_name
             ~receipt_id:accepted.receipt_id ~accept:is_delivered
@@ -214,7 +219,7 @@ let test_explicit_failure_finalizes_failed_receipt () =
           }
       in
       with_consumer_switch (fun sw ->
-        Keeper_chat_consumer.start ~sw ~clock ~base_path:base ~handle_turn;
+        start_consumer ~sw ~clock ~base_path:base ~handle_turn;
         match
           await_receipt ~clock ~seconds:5.0 ~keeper_name
             ~receipt_id:accepted.receipt_id ~accept:is_failed
@@ -252,7 +257,7 @@ let test_structured_cancellation_nacks_and_preserves_receipt () =
         Eio.Promise.await never
       in
       with_consumer_switch (fun sw ->
-        Keeper_chat_consumer.start ~sw ~clock ~base_path:base ~handle_turn;
+        start_consumer ~sw ~clock ~base_path:base ~handle_turn;
         check "cancellable turn starts"
           (await_promise ~clock ~seconds:5.0 started);
         check "receipt is inflight before cancellation"
@@ -331,7 +336,7 @@ let test_dispatch_is_concurrent_per_keeper () =
             { outcome_ref = "trace-" ^ dispatched_keeper ^ "#2" }
       in
       with_consumer_switch (fun sw ->
-        Keeper_chat_consumer.start ~sw ~clock ~base_path:base ~handle_turn;
+        start_consumer ~sw ~clock ~base_path:base ~handle_turn;
         check "first keeper dispatch starts"
           (await_promise ~clock ~seconds:5.0 first_started);
         check "other keeper starts while first keeper is blocked"
@@ -386,7 +391,7 @@ let test_finalization_persistence_retry_does_not_redeliver () =
           { outcome_ref = "trace-finalized-after-retry#3" }
       in
       with_consumer_switch (fun sw ->
-        Keeper_chat_consumer.start ~sw ~clock ~base_path:base ~handle_turn;
+        start_consumer ~sw ~clock ~base_path:base ~handle_turn;
         match
           await_receipt ~clock ~seconds:5.0 ~keeper_name
             ~receipt_id:accepted.receipt_id ~accept:is_delivered
@@ -419,7 +424,7 @@ let test_invalid_delivered_turn_ref_fails_closed () =
         Keeper_chat_consumer.Delivered { outcome_ref = "trace#0042" }
       in
       with_consumer_switch (fun sw ->
-        Keeper_chat_consumer.start ~sw ~clock ~base_path:base ~handle_turn;
+        start_consumer ~sw ~clock ~base_path:base ~handle_turn;
         match
           await_receipt ~clock ~seconds:5.0 ~keeper_name
             ~receipt_id:accepted.receipt_id ~accept:is_failed
@@ -465,7 +470,7 @@ let test_invalid_delivery_diagnostic_does_not_block_lane () =
         else Keeper_chat_consumer.Delivered { outcome_ref = "trace-next#4" }
       in
       with_consumer_switch (fun sw ->
-        Keeper_chat_consumer.start ~sw ~clock ~base_path:base ~handle_turn;
+        start_consumer ~sw ~clock ~base_path:base ~handle_turn;
         check "invalid diagnostic turn starts"
           (await_promise ~clock ~seconds:5.0 first_started);
         match
@@ -524,7 +529,7 @@ let test_shutdown_fence_keeps_receipt_pending_until_rollback () =
           { outcome_ref = "trace-shutdown-rollback#1" }
       in
       with_consumer_switch (fun sw ->
-        Keeper_chat_consumer.start ~sw ~clock ~base_path:base ~handle_turn;
+        start_consumer ~sw ~clock ~base_path:base ~handle_turn;
         Eio.Time.sleep clock 1.2;
         check "consumer does not lease through the shutdown fence" (!calls = 0);
         check "fenced receipt remains Pending"
@@ -591,7 +596,7 @@ let test_typed_admission_race_nacks_then_retries () =
             { outcome_ref = "trace-typed-deferral#2" })
       in
       with_consumer_switch (fun sw ->
-        Keeper_chat_consumer.start ~sw ~clock ~base_path:base ~handle_turn;
+        start_consumer ~sw ~clock ~base_path:base ~handle_turn;
         check "first leased attempt returns typed Deferred"
           (await_promise ~clock ~seconds:5.0 first_deferred);
         check "typed Deferred returns the same receipt to Pending"
@@ -618,6 +623,18 @@ let test_typed_admission_race_nacks_then_retries () =
       check_terminal_snapshot ~label:"typed deferral retry" ~keeper_name
         ~receipt_id:accepted.receipt_id)
 
+let test_legacy_request_timeout_decoder_is_read_only_and_canonical () =
+  Printf.printf "Test: retired request timeout decodes to a historical label\n%!";
+  match Keeper_chat_queue.For_testing.failure_kind_of_string "timed_out" with
+  | Ok Keeper_chat_queue.Legacy_request_timeout ->
+    check "legacy timeout re-encodes under an explicitly historical label"
+      (String.equal
+         (Keeper_chat_queue.failure_kind_to_string
+            Keeper_chat_queue.Legacy_request_timeout)
+         "legacy_request_timeout")
+  | Ok _ -> check "legacy timeout does not become a live failure kind" false
+  | Error detail -> check_failure "legacy timeout remains readable" detail
+
 let () =
   test_delivery_finalizes_terminal_receipt ();
   test_explicit_failure_finalizes_failed_receipt ();
@@ -628,6 +645,7 @@ let () =
   test_invalid_delivery_diagnostic_does_not_block_lane ();
   test_shutdown_fence_keeps_receipt_pending_until_rollback ();
   test_typed_admission_race_nacks_then_retries ();
+  test_legacy_request_timeout_decoder_is_read_only_and_canonical ();
   if !failures > 0
   then (
     Printf.printf "FAILED: %d check(s)\n%!" !failures;

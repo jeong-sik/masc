@@ -1,5 +1,5 @@
 (** Tests for [Keeper_msg_async.For_testing.is_safe_request_id] path
-    traversal guards and the [record_path] integration (#20942).
+    traversal guards and the partitioned record-path integration (#20942).
 
     Rewritten from the ppx_inline_test style the original commit used:
     the test stanza has no inline-test preprocessor, so [let%test] never
@@ -9,7 +9,13 @@ open Alcotest
 module Keeper_msg_async = Masc.Keeper_msg_async
 
 let is_safe = Keeper_msg_async.For_testing.is_safe_request_id
-let record_path = Keeper_msg_async.For_testing.record_path
+
+let record_paths =
+  [ Keeper_msg_async.For_testing.active_record_path
+  ; Keeper_msg_async.For_testing.terminal_record_path
+  ; Keeper_msg_async.For_testing.legacy_record_path
+  ]
+;;
 
 let test_valid_ids () =
   check bool "normal alphanumeric" true (is_safe "abc123");
@@ -35,12 +41,15 @@ let test_traversal_rejected () =
   check bool "dots and slash combo rejected" false (is_safe "a/../b")
 
 let test_record_path_integration () =
-  check bool "Some for safe id" true
-    (Option.is_some (record_path ~base_path:"/tmp" ~request_id:"safe-42"));
-  check bool "None for double dot" true
-    (Option.is_none (record_path ~base_path:"/tmp" ~request_id:".."));
-  check bool "None for single dot" true
-    (Option.is_none (record_path ~base_path:"/tmp" ~request_id:"."))
+  List.iter
+    (fun record_path ->
+       check bool "Some for safe id" true
+         (Option.is_some (record_path ~base_path:"/tmp" ~request_id:"safe-42"));
+       check bool "None for double dot" true
+         (Option.is_none (record_path ~base_path:"/tmp" ~request_id:".."));
+       check bool "None for single dot" true
+         (Option.is_none (record_path ~base_path:"/tmp" ~request_id:".")))
+    record_paths
 
 let () =
   run "keeper_msg_async_path_traversal"

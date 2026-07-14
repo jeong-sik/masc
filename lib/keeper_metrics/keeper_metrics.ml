@@ -22,6 +22,7 @@ type t =
   | FailureRoute
   | FailureJudgmentOutcome
   | IdleSeconds
+  | StreamProjectionEventCutoff
   | MetricEmitDropped
   | ContextMaxObserved
   | TurnStarts
@@ -70,6 +71,12 @@ type t =
   | CompactAuditDrainBatches
   | CompactAuditDrainBatchSizeBucket
   | FsFailures
+  | PersistencePreparationStageDuration
+  | PersistencePreparationExamined
+  | PersistenceLaneWaits
+  | PersistenceLanePending
+  | PersistenceLaneInFlight
+  | PersistenceLaneDuration
   | CrashPersistenceFailures
   | GenerationLineageFailures
   | KeepaliveSignalFailures
@@ -236,6 +243,8 @@ let to_string = function
   | FailureRoute -> "masc_keeper_failure_route_total"
   | FailureJudgmentOutcome -> "masc_keeper_failure_judgment_outcome_total"
   | IdleSeconds -> "masc_keeper_idle_seconds"
+  | StreamProjectionEventCutoff ->
+    "masc_keeper_stream_projection_event_cutoff_total"
   | MetricEmitDropped -> "masc_keeper_metric_emit_dropped_total"
   | ContextMaxObserved -> "masc_keeper_context_max_observed_total"
   | TurnStarts -> "masc_keeper_turn_starts_total"
@@ -287,6 +296,14 @@ let to_string = function
   | CompactAuditDrainBatchSizeBucket ->
     "masc_keeper_compact_audit_drain_batch_size_bucket_total"
   | FsFailures -> "masc_keeper_fs_failures_total"
+  | PersistencePreparationStageDuration ->
+    "masc_keeper_persistence_preparation_stage_duration_seconds"
+  | PersistencePreparationExamined ->
+    "masc_keeper_persistence_preparation_examined_records"
+  | PersistenceLaneWaits -> "masc_keeper_persistence_lane_waits_total"
+  | PersistenceLanePending -> "masc_keeper_persistence_lane_pending"
+  | PersistenceLaneInFlight -> "masc_keeper_persistence_lane_in_flight"
+  | PersistenceLaneDuration -> "masc_keeper_persistence_lane_duration_seconds"
   | CrashPersistenceFailures -> "masc_keeper_crash_persistence_failures_total"
   | GenerationLineageFailures -> "masc_keeper_generation_lineage_failures_total"
   | KeepaliveSignalFailures -> "masc_keeper_keepalive_signal_failures_total"
@@ -443,6 +460,16 @@ let to_string = function
   | WireCaptureRecordSkipped -> "masc_keeper_wire_capture_record_skipped_total"
 ;;
 
+type collection =
+  | Metric_store
+  | External_observable
+
+let collection = function
+  | PersistenceLaneWaits | PersistenceLanePending | PersistenceLaneInFlight ->
+    External_observable
+  | _ -> Metric_store
+;;
+
 let emit_runtime_selected ~keeper_name ~runtime_id ~fallback_reason =
   Otel_metric_store_core.inc_counter
     (to_string RuntimeSelected)
@@ -481,8 +508,11 @@ let () =
   List.iter
     (fun m ->
       let name = to_string m in
-      if String.ends_with ~suffix:"_total" name then
-        Otel_metric_store_core.register_counter ~name ~help:name ())
+      match collection m with
+      | External_observable -> ()
+      | Metric_store ->
+        if String.ends_with ~suffix:"_total" name
+        then Otel_metric_store_core.register_counter ~name ~help:name ())
     all;
   Otel_metric_store_core.register_gauge
     ~name:(to_string SupervisorLastSweepUnixtime)

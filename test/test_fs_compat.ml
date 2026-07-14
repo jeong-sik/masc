@@ -92,6 +92,31 @@ let test_save_file_atomic_leaves_no_tmp_on_success () =
   check (list string) "no leftover .atomic_ tmp files" [] leftover_tmps
 ;;
 
+let test_open_atomic_temp_file_uses_canonical_shape () =
+  Fs_compat.clear_fs ();
+  with_tmp_dir
+  @@ fun base ->
+  let path, channel = Fs_compat.open_atomic_temp_file ~temp_dir:base () in
+  Fun.protect
+    ~finally:(fun () ->
+      close_out_noerr channel;
+      if Sys.file_exists path then Sys.remove path)
+    (fun () ->
+       let name = Filename.basename path in
+       check string "temp file is created in requested directory" base
+         (Filename.dirname path);
+       check bool "canonical prefix" true
+         (String.starts_with name ~prefix:".atomic_");
+       check bool "shared orphan matcher recognizes writer output" true
+         (Fs_compat.is_atomic_orphan_name name);
+       check bool "retired Keeper prefix is not generated" false
+         (String.starts_with name ~prefix:".keeper_atomic_");
+       output_string channel "payload";
+       close_out channel;
+       check string "returned channel writes the temp file" "payload"
+         (Fs_compat.load_file path))
+;;
+
 let test_save_file_atomic_overwrites_existing () =
   Fs_compat.clear_fs ();
   with_tmp_dir
@@ -102,6 +127,40 @@ let test_save_file_atomic_overwrites_existing () =
    | Ok () -> ()
    | Error msg -> fail msg);
   check string "overwrite succeeded" "new" (Fs_compat.load_file target)
+;;
+
+let test_read_dir_and_path_kind_use_typed_inventory ~fs () =
+  with_tmp_dir
+  @@ fun base ->
+  let directory = Filename.concat base "inventory" in
+  let regular = Filename.concat directory "b.json" in
+  let nested = Filename.concat directory "a-dir" in
+  let nested_link = Filename.concat directory "c-link" in
+  Fs_compat.mkdir_p directory;
+  Fs_compat.mkdir_p nested;
+  Fs_compat.save_file regular "{}";
+  Unix.symlink nested nested_link;
+  let check_inventory implementation =
+    check bool (implementation ^ " directory classified") true
+      (Fs_compat.path_kind directory = Fs_compat.Directory);
+    check bool (implementation ^ " regular file classified") true
+      (Fs_compat.path_kind regular = Fs_compat.Other);
+    check bool (implementation ^ " missing path classified") true
+      (Fs_compat.path_kind (Filename.concat directory "missing") = Fs_compat.Missing);
+    check bool (implementation ^ " symlink target followed") true
+      (Fs_compat.path_kind nested_link = Fs_compat.Directory);
+    check bool (implementation ^ " symlink itself remains non-directory") true
+      (Fs_compat.path_kind ~follow:false nested_link = Fs_compat.Other);
+    check
+      (list string)
+      (implementation ^ " directory inventory is deterministic")
+      [ "a-dir"; "b.json"; "c-link" ]
+      (Fs_compat.read_dir directory)
+  in
+  Fs_compat.clear_fs ();
+  check_inventory "fallback";
+  Fs_compat.set_fs fs;
+  check_inventory "Eio"
 ;;
 
 let with_redirected_stderr (f : unit -> 'a) : 'a * string =
@@ -323,6 +382,17 @@ let () =
             "overwrites existing target"
             `Quick
             test_save_file_atomic_overwrites_existing
+        ; test_case
+            "temp writer uses canonical shared shape"
+            `Quick
+            test_open_atomic_temp_file_uses_canonical_shape
+        ] )
+    ; ( "inventory"
+      , [ test_case
+            "typed path kind and sorted read_dir"
+            `Quick
+            (test_read_dir_and_path_kind_use_typed_inventory
+               ~fs:(Eio.Stdenv.fs env))
         ] )
     ; ( "load_jsonl_diagnostics"
       , [ test_case

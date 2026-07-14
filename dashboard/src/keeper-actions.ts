@@ -88,7 +88,12 @@ type KeeperInterjectActionKind = 'send' | 'approve' | 'pause' | 'drain'
 const TOOL_ONLY_EMPTY_REPLY_TEXT = 'Tool-only turn ended without a final reply.'
 const EMPTY_VISIBLE_REPLY_TEXT =
   'Keeper가 thinking만 반환하고 표시할 답변을 만들지 못했습니다. 다시 보내주세요.'
-const pendingKeeperThreadCancels = new Map<string, Promise<boolean>>()
+type KeeperThreadCancelOutcome = 'cancelling' | 'cancelled'
+
+const pendingKeeperThreadCancels = new Map<
+  string,
+  Promise<KeeperThreadCancelOutcome | null>
+>()
 const KEEPER_THREAD_CANCEL_TIMEOUT_MS = 5_000
 const KEEPER_THREAD_CANCEL_SETTLE_GRACE_MS = 500
 const KEEPER_STREAM_SIGNAL_THROTTLE_MS = 1_000
@@ -172,10 +177,10 @@ export function cancelKeeperThreadRequest(
   keeperName: string,
   requestId: string,
   opts: { signal?: AbortSignal } = {},
-): Promise<boolean> {
+): Promise<KeeperThreadCancelOutcome | null> {
   const name = keeperName.trim()
   const id = requestId.trim()
-  if (!name || !id) return Promise.resolve(false)
+  if (!name || !id) return Promise.resolve(null)
   const existing = pendingKeeperThreadCancels.get(id)
   if (existing) return existing
   const promise = withCancelTrackingTimeout(
@@ -184,17 +189,19 @@ export function cancelKeeperThreadRequest(
       ? cancelQueuedKeeperMessage(id, { signal: opts.signal })
       : cancelQueuedKeeperMessage(id),
   )
-    .then(() => {
-      removePendingKeeperChatRequest(id)
-      releaseActiveStreamRequestId(id)
+    .then(result => {
+      if (result.status === 'cancelled') {
+        removePendingKeeperChatRequest(id)
+        releaseActiveStreamRequestId(id)
+      }
       setRecordValue(keeperActionErrors, name, null)
-      return true
+      return result.status
     })
     .catch((err) => {
       const message = keeperThreadCancelFailureMessage(name, id, err)
       console.warn('[keeper] server cancel failed', message)
       setRecordValue(keeperActionErrors, name, message)
-      return false
+      return null
     })
     .finally(() => {
       pendingKeeperThreadCancels.delete(id)
@@ -785,6 +792,16 @@ export async function resumePendingKeeperChatRequests(name: string): Promise<voi
   await Promise.all(pendingKeeperChatRequestsForKeeper(keeperName).map(resumePendingKeeperChatRequest))
 }
 
+async function handoffCancelledStreamToRequestPoll(
+  request: PendingKeeperChatRequest,
+  localEntryIds: readonly string[],
+): Promise<void> {
+  removeThreadEntries(request.keeperName, localEntryIds)
+  releaseLiveSendRequest(request.requestId)
+  releaseActiveStreamRequestId(request.requestId)
+  await resumePendingKeeperChatRequest(request)
+}
+
 /** Reconcile locally visible busy-ACK rows against the server's durable queue
  * receipt ledger. Queue-change SSE is only an invalidation signal; this GET is
  * the lifecycle truth for the exact receipt. */
@@ -1224,8 +1241,24 @@ export async function sendKeeperThreadMessage(
             setRecordValue(keeperActionErrors, keeperName, message)
           } else if (controller.signal.aborted) {
             requestId = nextRequestId
+            const pendingRequest: PendingKeeperChatRequest = {
+              requestId: nextRequestId,
+              keeperName,
+              message,
+              submittedAt: Date.now(),
+              ...(attachments ? { attachments } : {}),
+            }
+            upsertPendingKeeperChatRequest(pendingRequest)
             void cancelKeeperThreadRequest(keeperName, nextRequestId, {
               signal: keeperThreadCancelSignal(),
+            }).then(outcome => {
+              if (outcome === 'cancelling') {
+                return handoffCancelledStreamToRequestPoll(
+                  pendingRequest,
+                  [localId, assistantId],
+                )
+              }
+              return undefined
             })
           } else {
             requestId = nextRequestId
@@ -1355,16 +1388,37 @@ export async function sendKeeperThreadMessage(
   } catch (err) {
     flushPendingKeeperStreamDeltas(keeperName, assistantId)
     if (isAbortError(err)) {
-      const shouldAttemptServerCancel = Boolean(requestId && liveSendOwnsRequest(requestId))
+      const hasDurablePendingRequest = Boolean(
+        requestId
+        && pendingKeeperChatRequestsForKeeper(keeperName)
+          .some(candidate => candidate.requestId === requestId),
+      )
+      const shouldAttemptServerCancel = Boolean(
+        requestId && (liveSendOwnsRequest(requestId) || hasDurablePendingRequest),
+      )
       const serverCancelAlreadyFinalized = Boolean(
         requestId
         && !liveSendOwnsRequest(requestId)
-        && !pendingKeeperChatRequestsForKeeper(keeperName).some(r => r.requestId === requestId),
+        && !hasDurablePendingRequest,
       )
-      let cancelSucceeded = serverCancelAlreadyFinalized
       if (shouldAttemptServerCancel && requestId) {
-        cancelSucceeded = await cancelKeeperThreadRequest(keeperName, requestId, {
+        const pendingRequest: PendingKeeperChatRequest = {
+          requestId,
+          keeperName,
+          message,
+          submittedAt: Date.now(),
+          ...(attachments ? { attachments } : {}),
+        }
+        void cancelKeeperThreadRequest(keeperName, requestId, {
           signal: keeperThreadCancelSignal(),
+        }).then(outcome => {
+          if (outcome === 'cancelling') {
+            return handoffCancelledStreamToRequestPoll(
+              pendingRequest,
+              [localId, assistantId],
+            )
+          }
+          return undefined
         })
       }
       finalizeAssistantEntry(keeperName, localId, {
@@ -1389,7 +1443,7 @@ export async function sendKeeperThreadMessage(
           reason: KEEPER_MESSAGE_CANCELLED_TEXT,
         }),
       })
-      if (cancelSucceeded) setRecordValue(keeperActionErrors, keeperName, null)
+      if (serverCancelAlreadyFinalized) setRecordValue(keeperActionErrors, keeperName, null)
       throw err
     }
 

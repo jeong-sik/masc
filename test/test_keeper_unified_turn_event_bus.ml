@@ -268,7 +268,6 @@ let test_keeper_msg_async_submit_uses_captured_event_bus () =
     (fun () ->
        let request_id =
          Ops.For_testing.submit_keeper_msg_with_captured_event_bus
-           ~clock:env#clock
            ~background_sw:sw
            ~base_path
            ~caller:keeper_msg_caller
@@ -279,7 +278,14 @@ let test_keeper_msg_async_submit_uses_captured_event_bus () =
              Tool_result.ok ~tool_name:"keeper-event-bus-test" ~start_time:0.0 "{}")
            ()
          |> function
-         | Ok request_id -> request_id
+         | Ok
+             ({ acceptance = Kmsg.Durably_accepted; request_id }
+               : Kmsg.submit_outcome) ->
+           request_id
+         | Ok outcome ->
+           Alcotest.failf
+             "keeper_msg submission requires reconciliation: %s"
+             (Kmsg.submit_outcome_to_json outcome |> Yojson.Safe.to_string)
          | Error error ->
            Alcotest.failf
              "keeper_msg submission rejected: %s"
@@ -295,7 +301,63 @@ let test_keeper_msg_async_submit_uses_captured_event_bus () =
          (option pass)
          "worker changed fallback bus after capture"
          (Some later_bus)
-         (Keeper_event_bus.get ()))
+       (Keeper_event_bus.get ()))
+;;
+
+let require_unique_assoc label = function
+  | `Assoc fields ->
+    let keys = List.map fst fields in
+    let unique_keys = List.sort_uniq String.compare keys in
+    check int (label ^ " has no duplicate keys") (List.length keys)
+      (List.length unique_keys);
+    fields
+  | _ -> Alcotest.fail (label ^ " must be a JSON object")
+;;
+
+let test_keeper_msg_submission_projection_has_unique_keys () =
+  let reason = "directory fsync could not confirm publication" in
+  let outcome : Kmsg.submit_outcome =
+    { request_id = "kmsg-reconciliation-projection"
+    ; acceptance = Kmsg.Reconciliation_required { reason }
+    }
+  in
+  let core_fields =
+    Kmsg.submit_outcome_to_json outcome
+    |> require_unique_assoc "core reconciliation outcome"
+  in
+  check
+    (option string)
+    "uncertainty reason has a dedicated field"
+    (Some reason)
+    (Option.bind
+       (List.assoc_opt "reason" core_fields)
+       (function `String value -> Some value | _ -> None));
+  let tool_fields =
+    Ops.For_testing.submit_outcome_with_keeper_json
+      ~keeper_name:"projection-keeper"
+      outcome
+    |> require_unique_assoc "tool reconciliation outcome"
+  in
+  check bool "operator instruction is explicit" true
+    (List.mem_assoc "operator_instruction" tool_fields);
+  let entry : Kmsg.entry =
+    { request_id = "kmsg-entry-projection"
+    ; keeper_name = "projection-keeper"
+    ; base_path = "/projection/base"
+    ; submitted_by = "projection-caller"
+    ; status = Kmsg.Running
+    ; submitted_at = 0.0
+    ; completed_at = None
+    }
+  in
+  let entry_fields =
+    Kmsg.entry_to_json entry |> require_unique_assoc "request entry projection"
+  in
+  check int "entry status is projected exactly once" 1
+    (List.fold_left
+       (fun count (key, _) -> if String.equal key "status" then count + 1 else count)
+       0
+       entry_fields)
 ;;
 
 let test_take_drain_cancel_clears_active_without_spin () =
@@ -379,6 +441,8 @@ let () =
             test_turn_event_bus_prefers_injected_bus_over_fallback
         ; test_case "keeper msg async submit uses captured event bus" `Quick
             test_keeper_msg_async_submit_uses_captured_event_bus
+        ; test_case "keeper msg submission JSON keys are unique" `Quick
+            test_keeper_msg_submission_projection_has_unique_keys
         ] )
     ; ( "background-drain"
       , [ test_case "continues after first poll" `Quick

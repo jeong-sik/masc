@@ -91,6 +91,31 @@ let test_plain_workspace_allowed () =
   | Error violation ->
       fail (Server_base_path_guard.format_violation violation)
 
+let test_canonicalize_existing_freezes_symlink_target () =
+  with_temp_dir "masc-canonical-path-" @@ fun dir ->
+  let target = Filename.concat dir "target" in
+  let alias = Filename.concat dir "alias" in
+  Unix.mkdir target 0o755;
+  Unix.symlink target alias;
+  Fun.protect
+    ~finally:(fun () -> if Sys.file_exists alias then Sys.remove alias)
+    (fun () ->
+       match Server_base_path_guard.canonicalize_existing alias with
+       | Ok canonical ->
+         check string "canonical target" (Unix.realpath target) canonical
+       | Error error ->
+         fail
+           (Server_base_path_guard.format_canonicalization_error error))
+
+let test_canonicalize_existing_retains_failure () =
+  with_temp_dir "masc-canonical-missing-" @@ fun dir ->
+  let missing = Filename.concat dir "missing" in
+  match Server_base_path_guard.canonicalize_existing missing with
+  | Error { base_path; cause = _; backtrace = _ } ->
+    check string "failed path" missing base_path
+  | Ok canonical ->
+    failf "missing BasePath unexpectedly resolved to %s" canonical
+
 let () =
   Alcotest.run "Server_base_path_guard"
     [ ( "resolution"
@@ -103,5 +128,11 @@ let () =
       , [ test_case "explicit source checkout is allowed" `Quick
             test_explicit_source_checkout_is_allowed
         ; test_case "plain workspace allowed" `Quick test_plain_workspace_allowed
+        ] )
+    ; ( "canonicalization"
+      , [ test_case "existing symlink target is frozen" `Quick
+            test_canonicalize_existing_freezes_symlink_target
+        ; test_case "canonicalization failure is retained" `Quick
+            test_canonicalize_existing_retains_failure
         ] )
     ]

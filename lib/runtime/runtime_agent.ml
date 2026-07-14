@@ -289,15 +289,17 @@ let provider_config_preserving_http_transport
     ~sw
     ~net
     ?clock
-    ?stream_idle_timeout_s
     ?body_timeout_s
     ~(provider_cfg : Llm_provider.Provider_config.t)
     ()
   : Llm_provider.Llm_transport.t =
+  (* RFC-OAS-026: stream_idle_timeout_s moved off transport construction
+     (OAS 0.211.10 "remove implicit execution limits") and is now applied at
+     the agent builder via [Agent_sdk.Builder.with_stream_idle_timeout]. The
+     transport itself carries no idle deadline; OAS does not infer one. *)
   let http_transport =
     Llm_provider.Complete.make_http_transport
       ?clock
-      ?stream_idle_timeout_s
       ?body_timeout_s
       ~sw
       ~net
@@ -327,12 +329,13 @@ let provider_config_preserving_http_transport
           (patch_request req));
     }
 
-let transport_for_provider ~sw ~net ?clock ?stream_idle_timeout_s ?body_timeout_s ~provider_cfg () =
+let transport_for_provider ~sw ~net ?clock ?body_timeout_s ~provider_cfg () =
   (* CLI subprocess transport removed (2026-05-31); every provider dispatches
      over HTTP. Runtime MCP policy is applied via the tool-lane resolver and
      per-request patching, not at transport construction, so it is no longer
-     threaded here. *)
-  Ok (Some (provider_config_preserving_http_transport ~sw ~net ?clock ?stream_idle_timeout_s ?body_timeout_s ~provider_cfg ()))
+     threaded here. stream_idle_timeout_s is applied at the builder, not here
+     (see RFC-OAS-026 note above). *)
+  Ok (Some (provider_config_preserving_http_transport ~sw ~net ?clock ?body_timeout_s ~provider_cfg ()))
 
 let runtime_id_of_config (config : config) =
   let runtime_prefix = "runtime:" in
@@ -944,7 +947,6 @@ let build
          ~sw
          ~net
          ?clock
-         ?stream_idle_timeout_s:config.stream_idle_timeout_s
          ?body_timeout_s:config.body_timeout_s
          ~provider_cfg:config.provider_cfg
          ()
@@ -1051,7 +1053,6 @@ let resume_from_checkpoint
          ~sw
          ~net
          ?clock
-         ?stream_idle_timeout_s:config.stream_idle_timeout_s
          ?body_timeout_s:config.body_timeout_s
          ~provider_cfg:config.provider_cfg
          ()

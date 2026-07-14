@@ -104,8 +104,6 @@ let rec cached_json_by_key cache_ref ~key ~ttl_s compute =
       end
 
 let submit_keeper_msg_with_captured_event_bus
-      ?timeout_sec
-      ~clock
       ~background_sw
       ~base_path
       ~caller
@@ -114,14 +112,25 @@ let submit_keeper_msg_with_captured_event_bus
       () =
   let event_bus = Keeper_event_bus.get () in
   Keeper_msg_async.submit
-    ?timeout_sec
-    ~clock
     ~background_sw
     ~base_path
     ~caller
     ~keeper_name
     ~f:(fun request_sw -> f ?event_bus request_sw)
     ()
+
+let submit_outcome_with_keeper_json ~keeper_name outcome =
+  match Keeper_msg_async.submit_outcome_to_json outcome with
+  | `Assoc fields ->
+    `Assoc
+      (("keeper_name", `String keeper_name)
+       :: ( "operator_instruction"
+          , `String
+              "Keeper request publication is uncertain. Poll this exact request_id; do not resubmit."
+          )
+       :: fields)
+  | json -> json
+;;
 
 module For_testing = struct
   let reset_keeper_list_cache () =
@@ -131,6 +140,7 @@ module For_testing = struct
     cached_json_by_key keeper_list_cache ~key ~ttl_s compute
   let submit_keeper_msg_with_captured_event_bus =
     submit_keeper_msg_with_captured_event_bus
+  let submit_outcome_with_keeper_json = submit_outcome_with_keeper_json
 end
 let annotate_keeper_json ~runtime_class json =
   match json with
@@ -605,18 +615,13 @@ let keeper_msg_body
     let* name = message_error (resolve_keeper_name_config ~config args) in
     let resolved_args = with_keeper_name args name in
     let* () = message_error (Turn.preflight_keeper_msg keeper_ctx resolved_args) in
-    let* timeout_sec =
-      message_error (Turn.keeper_msg_timeout_override resolved_args)
-    in
     let* background_sw =
       Keeper_msg_async.server_background_switch ()
       |> Result.map_error (fun error ->
         Payload_error (Keeper_msg_async.submit_error_to_json error))
     in
-    let* request_id =
+    let* submission =
       submit_keeper_msg_with_captured_event_bus
-        ?timeout_sec
-        ~clock
         ~background_sw
         ~base_path:config.base_path
         ~caller:agent_name
@@ -645,17 +650,23 @@ let keeper_msg_body
       |> Result.map_error (fun error ->
         Payload_error (Keeper_msg_async.submit_error_to_json error))
     in
-    let json =
-      `Assoc
-        [ "request_id", `String request_id
-        ; "keeper_name", `String name
-        ; "status", `String "queued"
-        ; ( "message"
-          , `String
-              "Keeper turn submitted. Poll with keeper_msg_result." )
-        ]
-    in
-    Ok (tool_result_ok_data json)
+    (match submission.acceptance with
+     | Keeper_msg_async.Reconciliation_required _ ->
+       Ok
+         (tool_result_ok_data
+            (submit_outcome_with_keeper_json ~keeper_name:name submission))
+     | Keeper_msg_async.Durably_accepted ->
+       let json =
+         `Assoc
+           [ "request_id", `String submission.request_id
+           ; "keeper_name", `String name
+           ; "status", `String "queued"
+           ; ( "message"
+             , `String
+                 "Keeper turn submitted. Poll with keeper_msg_result." )
+           ]
+       in
+       Ok (tool_result_ok_data json))
   with
   | Ok result -> result
   | Error error -> tool_result_of_handler_error error
@@ -666,16 +677,13 @@ let handle_keeper_msg ?continuation_channel ~submitted_by ctx args : tool_result
     let* name = message_error (resolve_keeper_name ctx args) in
     let resolved_args = with_keeper_name args name in
     let* () = message_error (Turn.preflight_keeper_msg ctx resolved_args) in
-    let* timeout_sec = message_error (Turn.keeper_msg_timeout_override resolved_args) in
     let* background_sw =
       Keeper_msg_async.server_background_switch ()
       |> Result.map_error (fun error ->
         Payload_error (Keeper_msg_async.submit_error_to_json error))
     in
-    let* request_id =
+    let* submission =
       submit_keeper_msg_with_captured_event_bus
-        ?timeout_sec
-        ~clock:ctx.clock
         ~background_sw
         ~base_path:ctx.config.base_path
         ~caller:submitted_by
@@ -704,17 +712,23 @@ let handle_keeper_msg ?continuation_channel ~submitted_by ctx args : tool_result
       |> Result.map_error (fun error ->
         Payload_error (Keeper_msg_async.submit_error_to_json error))
     in
-    let json =
-      `Assoc
-        [ "request_id", `String request_id
-        ; "keeper_name", `String name
-        ; "status", `String "queued"
-        ; ( "message"
-          , `String
-              "Keeper turn submitted. Poll with keeper_msg_result." )
-        ]
-    in
-    Ok (tool_result_ok_data json)
+    (match submission.acceptance with
+     | Keeper_msg_async.Reconciliation_required _ ->
+       Ok
+         (tool_result_ok_data
+            (submit_outcome_with_keeper_json ~keeper_name:name submission))
+     | Keeper_msg_async.Durably_accepted ->
+       let json =
+         `Assoc
+           [ "request_id", `String submission.request_id
+           ; "keeper_name", `String name
+           ; "status", `String "queued"
+           ; ( "message"
+             , `String
+                 "Keeper turn submitted. Poll with keeper_msg_result." )
+           ]
+       in
+       Ok (tool_result_ok_data json))
   with
   | Ok result -> result
   | Error error -> tool_result_of_handler_error error
@@ -763,13 +777,16 @@ let keeper_msg_cancel_body ~(config : Workspace.config) ~caller args : tool_resu
     in
     let json = Keeper_msg_async.cancel_result_to_json ~request_id result in
     match result with
-    | Keeper_msg_async.Cancelled_request -> tool_result_ok_data json
+    | Keeper_msg_async.Cancellation_requested _ ->
+      tool_result_ok_data json
     | Keeper_msg_async.Cancel_not_found
     | Keeper_msg_async.Cancel_unreadable _
     | Keeper_msg_async.Cancel_rejected _
+    | Keeper_msg_async.Cancel_worker_ownership_unknown _
     | Keeper_msg_async.Cancel_already_terminal _
     | Keeper_msg_async.Cancel_persistence_failed _
-    | Keeper_msg_async.Cancel_worker_signal_failed _ ->
+    | Keeper_msg_async.Cancel_worker_signal_failed _
+    | Keeper_msg_async.Cancel_state_invariant_failed _ ->
       tool_result_error_data json)
 
 let handle_keeper_msg_cancel ctx args : tool_result =

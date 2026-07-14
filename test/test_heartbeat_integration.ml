@@ -1428,7 +1428,11 @@ let test_keeper_shutdown_prepare_joins_idle_lane () =
         Masc.Workspace.init config ~agent_name:(Some "operator")
       in
       let name = "shutdown-idle-lane" in
-      let entry = R.register ~base_path:config.base_path name (make_meta name) in
+      let meta = make_meta name in
+      (match Keeper_meta_store.write_meta config meta with
+       | Ok () -> ()
+       | Error detail -> fail detail);
+      let entry = R.register ~base_path:config.base_path name meta in
       let never_p, _never_r = Eio.Promise.create () in
       (match
          Lane.fork
@@ -1486,7 +1490,8 @@ let test_keeper_shutdown_prepare_joins_idle_lane () =
            "shutdown admission fence retains operation identity"
            true
            (Shutdown_types.Operation_id.equal operation.operation_id operation_id)
-      | `Busy (Masc.Keeper_turn_admission.Turn_busy _) | `Ran () ->
+      | `Busy (Masc.Keeper_turn_admission.Turn_busy _)
+      | `Ran () ->
          fail "shutdown admission fence reopened before finalization"))
 
 let test_keeper_shutdown_prepare_joins_not_started_lane () =
@@ -1505,7 +1510,11 @@ let test_keeper_shutdown_prepare_joins_not_started_lane () =
         Masc.Workspace.init config ~agent_name:(Some "operator")
       in
       let name = "shutdown-not-started-lane" in
-      let entry = R.register ~base_path:config.base_path name (make_meta name) in
+      let meta = make_meta name in
+      (match Keeper_meta_store.write_meta config meta with
+       | Ok () -> ()
+       | Error detail -> fail detail);
+      let entry = R.register ~base_path:config.base_path name meta in
       let operation =
         match
           Shutdown_prepare_join.run
@@ -1552,7 +1561,11 @@ let test_keeper_shutdown_prepare_failure_rolls_back_fence () =
         Masc.Workspace.init config ~agent_name:(Some "operator")
       in
       let name = "shutdown-prepare-rollback-lane" in
-      let entry = R.register ~base_path:config.base_path name (make_meta name) in
+      let meta = make_meta name in
+      (match Keeper_meta_store.write_meta config meta with
+       | Ok () -> ()
+       | Error detail -> fail detail);
+      let entry = R.register ~base_path:config.base_path name meta in
       let probe_operation_id = Shutdown_types.Operation_id.generate () in
       let records_dir =
         match Shutdown_store.path ~config ~keeper_name:name probe_operation_id with

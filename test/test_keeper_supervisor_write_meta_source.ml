@@ -18,11 +18,20 @@
     Keeper_registry fixture to exercise; the risk we guard against is
     exactly that someone collapses the handler back to [ignore] during
     cleanup.
+
+    #24332 split the supervisor: the guarded presence-sync call site moved
+    from [keeper_supervisor.ml] to
+    [keeper_supervisor_supervise_keepalive.ml] (the [match write_meta ...]
+    with its [Error] arm moved intact). The guard follows the call site —
+    the old file no longer contains any [write_meta], which made check (b)
+    fail while the behaviour it pinned was alive in the new module. This
+    failure surfaced only when the quick suite unskipped (it had been
+    masked behind the env-knob gate).
 *)
 
 open Alcotest
 
-let target_file = "lib/keeper/keeper_supervisor.ml"
+let target_file = "lib/keeper/keeper_supervisor_supervise_keepalive.ml"
 
 let load_source rel =
   let source_root =

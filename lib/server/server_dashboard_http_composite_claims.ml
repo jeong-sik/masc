@@ -309,51 +309,6 @@ let composite_execution_config_drift execution =
 
 let keeper_activation_readiness_json = Server_dashboard_fleet_readiness.keeper_activation_readiness_json
 
-(* Typed budget-exhausted classification.
-
-   The dashboard composite reads the wire [terminal_reason_code] field
-   from the typed execution schema. Rather than scanning substrings
-   (anti-pattern #2), we route the wire string through the typed
-   [Keeper_turn_disposition.of_wire] parser and match on the closed sum.
-   An unrecognised string falls through [Unknown _] and yields [false];
-   no permissive default, no silent accept. *)
-let execution_turn_budget_disposition execution =
-  Option.bind (json_string "terminal_reason_code" execution) (fun raw ->
-    let trimmed = String.trim raw in
-    if String.length trimmed = 0
-    then None
-    else Some (Keeper_turn_disposition.of_wire (String.lowercase_ascii trimmed)))
-;;
-
-let execution_turn_budget_disposition_of_reason reason =
-  match reason with
-  | None -> None
-  | Some raw ->
-    let trimmed = String.trim raw in
-    if String.length trimmed = 0
-    then None
-    else Some (Keeper_turn_disposition.of_wire (String.lowercase_ascii trimmed))
-;;
-
-let composite_execution_turn_budget_exhausted execution =
-  match json_string "terminal_reason_code" execution with
-  | Some raw -> Keeper_turn_disposition.is_turn_budget_exhausted_wire raw
-  | None -> false
-;;
-
-let composite_execution_budget_exhausted_pass execution =
-  string_opt_is_any (json_string "operator_disposition" execution) [ "pass" ]
-  && composite_execution_turn_budget_exhausted execution
-  &&
-  match execution_turn_budget_disposition_of_reason
-          (lower_string_opt (json_string "operator_disposition_reason" execution)) with
-  | None -> true
-  | Some Keeper_turn_disposition.Success -> true
-  | Some (Keeper_turn_disposition.Turn_budget_exhausted _) -> true
-  | Some Keeper_turn_disposition.Unknown _ -> true
-  | Some _ -> false
-;;
-
 let composite_execution_blocked execution =
   composite_execution_claim_no_eligible execution
   || string_opt_is_any (json_string "operator_disposition" execution) [ "pause_human" ]
@@ -363,7 +318,6 @@ let composite_execution_blocked execution =
         && not
              (Keeper_turn_disposition.is_success
                 (Keeper_turn_disposition.of_wire terminal))
-        && not (composite_execution_budget_exhausted_pass execution)
       | None -> false)
   ||
   match json_member "error" execution with

@@ -36,7 +36,7 @@ let message
     ?(timestamp = 1.0)
     ?(user_blocks = [])
     ?(attachments = [])
-    ?(user_row_origin = Keeper_chat_delivery_journal.Needs_append)
+    ?(user_row_origin = Keeper_chat_store.Needs_append)
     content =
   { Keeper_chat_queue.content
   ; user_blocks
@@ -81,6 +81,12 @@ let lease_exn ~keeper_name =
   | `Already_leased lease_id ->
     fail "lease succeeds" ("outstanding lease " ^ lease_id);
     failwith "already leased"
+  | `Recovery_required evidence ->
+    fail
+      "lease succeeds"
+      ("recovery required for "
+       ^ Keeper_chat_queue.Receipt_id.to_string evidence.receipt_id);
+    failwith "recovery required"
   | `Error error ->
     fail "lease succeeds" (Keeper_chat_queue.mutation_error_to_string error);
     failwith "lease failed"
@@ -96,13 +102,6 @@ let active_ids values =
 
 let database_path ~base_path ~keeper_name =
   match Keeper_chat_queue.For_testing.snapshot_path ~base_path ~keeper_name with
-  | Ok path -> path
-  | Error detail -> failwith detail
-
-let legacy_path ~base_path ~keeper_name =
-  match
-    Keeper_chat_queue.For_testing.legacy_snapshot_path ~base_path ~keeper_name
-  with
   | Ok path -> path
   | Error detail -> failwith detail
 
@@ -136,10 +135,10 @@ let test_lifecycle_fifo_terminal_pk_and_restart () =
        ~outcome:
          (Mark_delivered { completed_at = 2.0; outcome_ref = Some "turn-1" })
    with
-   | `Finalized [ receipt_id ] ->
+   | `Finalized receipt_id ->
      check "finalize returns exact receipt"
        (Keeper_chat_queue.Receipt_id.equal receipt_id first.receipt_id)
-   | `Finalized _ | `Unknown_lease | `Error _ ->
+   | `Unknown_lease | `Error _ ->
      check "finalize returns exact receipt" false);
   let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
   check "terminal body leaves active memory" (active_ids snapshot.pending = [ second_id ]);
@@ -204,7 +203,7 @@ let test_preallocated_receipt_convergence () =
             ; detail = "transport failed"
             ; outcome_ref = None
             }) :
-      [ `Finalized of Keeper_chat_queue.Receipt_id.t list
+      [ `Finalized of Keeper_chat_queue.Receipt_id.t
       | `Unknown_lease
       | `Error of Keeper_chat_queue.mutation_error
       ]);
@@ -222,14 +221,15 @@ let test_preallocated_receipt_convergence () =
    | Ok _ | Error _ ->
      check "terminal preallocated receipt converges without payload equality claim" false)
 
-let expect_published_indeterminate label expected_transition = function
+let expect_enqueue_indeterminate label expected_receipt_id = function
   | Error
       (Keeper_chat_queue.Persist_failed
          { publication =
-             Keeper_chat_queue.Published_indeterminate { transition; _ }
+             Keeper_chat_queue.Enqueue_indeterminate { receipt_id; _ }
          ; _
          }) ->
-    check label (expected_transition transition)
+    check label
+      (Keeper_chat_queue.Receipt_id.equal receipt_id expected_receipt_id)
   | Ok _ -> check label false
   | Error error ->
     fail label (Keeper_chat_queue.mutation_error_to_string error)
@@ -254,10 +254,14 @@ let test_transaction_publication_boundaries () =
     let keeper_name = "commit-invoked" in
     ignore (configure_clean base_path : Keeper_chat_queue.configure_report);
     Keeper_chat_queue.For_testing.fail_transaction_at_stages [ Commit_invoked ];
-    let outcome = Keeper_chat_queue.enqueue ~keeper_name (message "commit uncertain") in
-    expect_published_indeterminate
+    let receipt_id = Keeper_chat_queue.Receipt_id.generate () in
+    let outcome =
+      Keeper_chat_queue.enqueue_with_receipt
+        ~keeper_name ~receipt_id (message "commit uncertain")
+    in
+    expect_enqueue_indeterminate
       "failure at COMMIT invocation is never downgraded"
-      (function Enqueue_published -> true | _ -> false)
+      receipt_id
       outcome;
     (match Keeper_chat_queue.reconcile_persistence ~keeper_name with
      | Ok { outcome = Reconciled; revision = 1L } ->
@@ -270,10 +274,14 @@ let test_transaction_publication_boundaries () =
     let keeper_name = "commit-result" in
     ignore (configure_clean base_path : Keeper_chat_queue.configure_report);
     Keeper_chat_queue.For_testing.fail_next_commit_with failure;
-    let outcome = Keeper_chat_queue.enqueue ~keeper_name (message label) in
-    expect_published_indeterminate
+    let receipt_id = Keeper_chat_queue.Receipt_id.generate () in
+    let outcome =
+      Keeper_chat_queue.enqueue_with_receipt
+        ~keeper_name ~receipt_id (message label)
+    in
+    expect_enqueue_indeterminate
       (label ^ " after COMMIT invocation remains indeterminate")
-      (function Enqueue_published -> true | _ -> false)
+      receipt_id
       outcome;
     (match Keeper_chat_queue.reconcile_persistence ~keeper_name with
      | Ok { outcome = Reconciled; _ } ->
@@ -288,10 +296,14 @@ let test_transaction_publication_boundaries () =
     let keeper_name = "commit-returned" in
     ignore (configure_clean base_path : Keeper_chat_queue.configure_report);
     Keeper_chat_queue.For_testing.fail_transaction_at_stages [ Commit_returned ];
-    let outcome = Keeper_chat_queue.enqueue ~keeper_name (message "durable target") in
-    expect_published_indeterminate
-      "post-COMMIT failure remains Published_indeterminate"
-      (function Enqueue_published -> true | _ -> false)
+    let receipt_id = Keeper_chat_queue.Receipt_id.generate () in
+    let outcome =
+      Keeper_chat_queue.enqueue_with_receipt
+        ~keeper_name ~receipt_id (message "durable target")
+    in
+    expect_enqueue_indeterminate
+      "post-COMMIT failure remains structurally indeterminate"
+      receipt_id
       outcome;
     (match Keeper_chat_queue.reconcile_persistence ~keeper_name with
      | Ok { outcome = Reconciled; revision = 1L } ->
@@ -305,10 +317,14 @@ let test_transaction_publication_boundaries () =
     ignore (configure_clean base_path : Keeper_chat_queue.configure_report);
     Keeper_chat_queue.For_testing.fail_transaction_at_stages
       [ Mutation_applied; Before_rollback ];
-    let outcome = Keeper_chat_queue.enqueue ~keeper_name (message "rollback uncertain") in
-    expect_published_indeterminate
+    let receipt_id = Keeper_chat_queue.Receipt_id.generate () in
+    let outcome =
+      Keeper_chat_queue.enqueue_with_receipt
+        ~keeper_name ~receipt_id (message "rollback uncertain")
+    in
+    expect_enqueue_indeterminate
       "rollback failure cannot claim Not_published"
-      (function Enqueue_published -> true | _ -> false)
+      receipt_id
       outcome;
     (match Keeper_chat_queue.reconcile_persistence ~keeper_name with
      | Ok { outcome = Reconciled; _ } ->
@@ -326,10 +342,14 @@ let test_commit_observer_exception_and_cancellation () =
       (Some (function
          | Commit_returned -> failwith "observer failed after COMMIT"
          | _ -> ()));
-    let outcome = Keeper_chat_queue.enqueue ~keeper_name (message "committed") in
-    expect_published_indeterminate
+    let receipt_id = Keeper_chat_queue.Receipt_id.generate () in
+    let outcome =
+      Keeper_chat_queue.enqueue_with_receipt
+        ~keeper_name ~receipt_id (message "committed")
+    in
+    expect_enqueue_indeterminate
       "post-COMMIT observer exception is explicit indeterminate"
-      (function Enqueue_published -> true | _ -> false)
+      receipt_id
       outcome;
     Keeper_chat_queue.For_testing.set_transaction_stage_observer None;
     (match Keeper_chat_queue.reconcile_persistence ~keeper_name with
@@ -410,12 +430,11 @@ let test_uncertain_lease_compensates_and_other_transitions_reconcile () =
      | `Error
          (Keeper_chat_queue.Persist_failed
             { publication =
-                Keeper_chat_queue.Published_indeterminate
-                  { transition = Lease_published _; _ }
+                Keeper_chat_queue.Lease_indeterminate _
             ; _
             }) ->
        check "uncertain lease is not returned to a consumer" true
-     | `Leased _ | `Empty | `Already_leased _ | `Error _ ->
+     | `Leased _ | `Empty | `Already_leased _ | `Recovery_required _ | `Error _ ->
        check "uncertain lease is not returned to a consumer" false);
     (match Keeper_chat_queue.reconcile_persistence ~keeper_name with
      | Ok { outcome = Reconciled; revision = 3L } ->
@@ -425,7 +444,7 @@ let test_uncertain_lease_compensates_and_other_transitions_reconcile () =
     check "compensated receipt is leaseable again"
       (match Keeper_chat_queue.lease_next ~keeper_name with
        | `Leased _ -> true
-       | `Empty | `Already_leased _ | `Error _ -> false)
+       | `Empty | `Already_leased _ | `Recovery_required _ | `Error _ -> false)
   in
   with_base "keeper-chat-lease-uncertain" lease_case;
   let finalize_case base_path =
@@ -443,7 +462,7 @@ let test_uncertain_lease_compensates_and_other_transitions_reconcile () =
      with
      | `Error
          (Keeper_chat_queue.Persist_failed
-            { publication = Keeper_chat_queue.Published_indeterminate _; _ }) ->
+            { publication = Keeper_chat_queue.Finalize_indeterminate _; _ }) ->
        check "uncertain finalize is typed" true
      | `Finalized _ | `Unknown_lease | `Error _ ->
        check "uncertain finalize is typed" false);
@@ -467,7 +486,7 @@ let test_uncertain_lease_compensates_and_other_transitions_reconcile () =
     (match Keeper_chat_queue.nack ~keeper_name ~lease_id:lease.lease_id with
      | `Error
          (Keeper_chat_queue.Persist_failed
-            { publication = Keeper_chat_queue.Published_indeterminate _; _ }) ->
+            { publication = Keeper_chat_queue.Nack_indeterminate _; _ }) ->
        check "uncertain nack is typed" true
      | `Requeued _ | `Unknown_lease | `Error _ -> check "uncertain nack is typed" false);
     (match Keeper_chat_queue.reconcile_persistence ~keeper_name with
@@ -478,46 +497,141 @@ let test_uncertain_lease_compensates_and_other_transitions_reconcile () =
   in
   with_base "keeper-chat-nack-uncertain" nack_case
 
-let test_restart_recovers_inflight_without_journal () =
-  Printf.printf "Test: restart converts unproven inflight to Pending transactionally\n%!";
+let test_restart_requires_explicit_recovery_without_journal () =
+  Printf.printf
+    "Test: restart preserves inflight evidence until exact operator requeue\n%!";
   with_base "keeper-chat-restart-inflight" @@ fun base_path ->
   let keeper_name = "restart-inflight" in
   ignore (configure_clean base_path : Keeper_chat_queue.configure_report);
   let receipt = enqueue_exn ~keeper_name (message "recover me") in
-  ignore (lease_exn ~keeper_name : Keeper_chat_queue.lease);
+  let lease = lease_exn ~keeper_name in
+  let delivery_key =
+    match
+      Keeper_chat_delivery_identity.Receipt_ids.of_list [ receipt.receipt_id ]
+    with
+    | Ok receipt_ids -> Keeper_chat_delivery_identity.Queue_receipts receipt_ids
+    | Error Keeper_chat_delivery_identity.Receipt_ids.Empty ->
+      failwith "singleton receipt identity was empty"
+  in
+  let corrupt_journal =
+    match
+      Keeper_chat_delivery_journal.For_testing.path
+        ~base_path ~keeper_name delivery_key
+    with
+    | Ok path -> path
+    | Error error ->
+      failwith (Keeper_chat_delivery_journal.error_to_string error)
+  in
+  save_text corrupt_journal "not-json";
   Keeper_chat_queue.For_testing.reset ();
   let report = configure base_path in
-  check "restart reports one recovered receipt" (report.recovered_receipt_count = 1);
+  check "corrupt external journal is never read" (report.load_errors = []);
+  check "restart reports one recovery-required receipt"
+    (report.recovery_required_receipt_count = 1);
   let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
   check "restart recovery increments revision once" (Int64.equal snapshot.revision 3L);
-  check "restart recovery preserves receipt identity"
-    (active_ids snapshot.pending = [ receipt_wire receipt.receipt_id ])
+  check "restart does not return inflight evidence to Pending"
+    (snapshot.pending = [] && snapshot.inflight = []);
+  check "restart preserves exact receipt identity in recovery state"
+    (active_ids snapshot.recovery_required
+     = [ receipt_wire receipt.receipt_id ]);
+  (match Keeper_chat_queue.lane_status ~keeper_name with
+   | Ok
+       { health =
+           Delivery_recovery_required
+             { receipt_id; lease_id; started_at = _ }
+       ; has_active = true
+       ; _
+       } ->
+     check "O(1) lane health exposes exact recovery evidence"
+       (Keeper_chat_queue.Receipt_id.equal receipt_id receipt.receipt_id
+        && String.equal lease_id lease.lease_id)
+   | Ok _ | Error _ ->
+     check "O(1) lane health exposes exact recovery evidence" false);
+  (match snapshot.recovery_required with
+   | [ { state = Recovery_required evidence; _ } ] ->
+     check "restart preserves exact lease evidence"
+       (String.equal evidence.lease_id lease.lease_id)
+   | _ -> check "restart preserves exact lease evidence" false);
+  (match Keeper_chat_queue.lease_next ~keeper_name with
+   | `Recovery_required evidence ->
+     check "recovery-required lane cannot auto-redeliver"
+       (Keeper_chat_queue.Receipt_id.equal evidence.receipt_id receipt.receipt_id
+        && String.equal evidence.lease_id lease.lease_id)
+   | `Leased _ | `Empty | `Already_leased _ | `Error _ ->
+     check "recovery-required lane cannot auto-redeliver" false);
+  let healthy_keeper = "healthy" in
+  ignore
+    (enqueue_exn ~keeper_name:healthy_keeper (message "independent") :
+      Keeper_chat_queue.enqueue_receipt);
+  check "recovery blocks only its Keeper lane"
+    (match Keeper_chat_queue.lease_next ~keeper_name:healthy_keeper with
+     | `Leased _ -> true
+     | `Empty | `Already_leased _ | `Recovery_required _ | `Error _ -> false);
+  (match
+     Keeper_chat_queue.resolve_recovery_required
+       ~keeper_name
+       ~receipt_id:receipt.receipt_id
+       ~expected_revision:2L
+       ~lease_id:lease.lease_id
+       ~resolution:Requeue_unconfirmed
+   with
+   | Error (Keeper_chat_queue.Recovery_revision_mismatch _) ->
+     check "stale recovery decision is rejected" true
+   | Ok _ | Error _ -> check "stale recovery decision is rejected" false);
+  (match
+     Keeper_chat_queue.resolve_recovery_required
+       ~keeper_name
+       ~receipt_id:receipt.receipt_id
+       ~expected_revision:3L
+       ~lease_id:"different-lease"
+       ~resolution:Requeue_unconfirmed
+   with
+   | Error (Keeper_chat_queue.Recovery_lease_mismatch _) ->
+     check "mismatched recovery evidence is rejected" true
+   | Ok _ | Error _ -> check "mismatched recovery evidence is rejected" false);
+  (match
+     Keeper_chat_queue.resolve_recovery_required
+       ~keeper_name
+       ~receipt_id:receipt.receipt_id
+       ~expected_revision:3L
+       ~lease_id:lease.lease_id
+       ~resolution:Requeue_unconfirmed
+   with
+   | Ok { revision = 4L; state = Pending; _ } ->
+     check "exact operator decision requeues once" true
+   | Ok _ | Error _ -> check "exact operator decision requeues once" false);
+  (match Keeper_chat_queue.lease_next ~keeper_name with
+   | `Leased replay ->
+     check "explicit requeue preserves receipt identity"
+       (Keeper_chat_queue.Receipt_id.equal
+          replay.item.receipt_id receipt.receipt_id)
+   | `Empty | `Already_leased _ | `Recovery_required _ | `Error _ ->
+     check "explicit requeue preserves receipt identity" false)
 
-let test_legacy_hard_cut_and_lane_isolation () =
-  Printf.printf "Test: legacy JSON is quarantined without blocking another Keeper\n%!";
+let test_legacy_json_is_not_a_queue_authority () =
+  Printf.printf "Test: removed legacy JSON is never inspected as queue state\n%!";
   with_base "keeper-chat-legacy-hard-cut" @@ fun base_path ->
   let legacy_keeper = "legacy" in
   let healthy_keeper = "healthy" in
-  let legacy = legacy_path ~base_path ~keeper_name:legacy_keeper in
+  let legacy =
+    Filename.concat
+      (Filename.dirname
+         (database_path ~base_path ~keeper_name:legacy_keeper))
+      "chat-queue.json"
+  in
   let original = "{\"schema\":\"keeper_chat_queue.v3\"}" in
   save_text legacy original;
   let report = configure base_path in
-  check "legacy lane is explicitly reported"
-    (List.exists
-       (function
-         | Some keeper_name, (error : Keeper_chat_queue.snapshot_load_error) ->
-           String.equal keeper_name legacy_keeper && error.kind = Parse_failed
-         | None, _ -> false)
-       report.load_errors);
+  check "legacy JSON creates no configured queue lane"
+    (report.load_errors = [] && report.restored_keeper_count = 0);
   (match Keeper_chat_queue.enqueue ~keeper_name:legacy_keeper (message "blocked") with
-   | Error (Keeper_chat_queue.Snapshot_unavailable { kind = Parse_failed; _ }) ->
-     check "legacy lane rejects mutation with typed quarantine" true
-   | Ok _ | Error _ ->
-     check "legacy lane rejects mutation with typed quarantine" false);
+   | Ok _ -> check "new SQLite queue ignores removed legacy format" true
+   | Error _ -> check "new SQLite queue ignores removed legacy format" false);
   check "legacy file is retained byte-for-byte"
     (String.equal (Fs_compat.load_file legacy) original);
-  check "legacy lane does not create a SQLite compatibility store"
-    (not (Sys.file_exists (database_path ~base_path ~keeper_name:legacy_keeper)));
+  check "new acceptance creates only the SQLite SSOT"
+    (Sys.file_exists (database_path ~base_path ~keeper_name:legacy_keeper));
   check "unrelated Keeper lane remains writable"
     (Result.is_ok
        (Keeper_chat_queue.enqueue ~keeper_name:healthy_keeper (message "works")))
@@ -589,8 +703,8 @@ let () =
   test_commit_observer_exception_and_cancellation ();
   test_transition_observer_outside_lock_exactly_once ();
   test_uncertain_lease_compensates_and_other_transitions_reconcile ();
-  test_restart_recovers_inflight_without_journal ();
-  test_legacy_hard_cut_and_lane_isolation ();
+  test_restart_requires_explicit_recovery_without_journal ();
+  test_legacy_json_is_not_a_queue_authority ();
   test_foreign_database_and_symlink_are_quarantined ();
   test_reconcile_absent_lane_and_stage_order ();
   if !failures > 0

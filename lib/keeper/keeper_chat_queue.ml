@@ -17,7 +17,7 @@ type queued_message = {
   attachments : Keeper_chat_store.attachment list;
   timestamp : float;
   source : message_source;
-  user_row_origin : Keeper_chat_delivery_journal.user_row_origin;
+  user_row_origin : Keeper_chat_store.user_row_origin;
 }
 
 module Receipt_id = Keeper_chat_delivery_identity.Receipt_id
@@ -47,6 +47,7 @@ type failure = {
 type receipt_state =
   | Pending
   | Inflight of { lease_id : string; started_at : float }
+  | Recovery_required of { lease_id : string; started_at : float }
   | Delivered of completion
   | Failed of failure
 
@@ -58,6 +59,12 @@ type leased_message = {
 type lease = {
   lease_id : string;
   item : leased_message;
+}
+
+type recovery_evidence = {
+  receipt_id : Receipt_id.t;
+  lease_id : string;
+  started_at : float;
 }
 
 type finalization =
@@ -81,18 +88,40 @@ type snapshot_load_error = {
 
 type persistence_publication =
   | Not_published
-  | Published_indeterminate of
+  | Enqueue_indeterminate of
       { revision : int64
-      ; receipt_ids : Receipt_id.t list
-      ; transition : persistence_transition
+      ; receipt_id : Receipt_id.t
       }
-
-and persistence_transition =
-  | Enqueue_published
-  | Lease_published of { lease_id : string }
-  | Finalize_published
-  | Nack_published
-  | Recovery_published
+  | Lease_indeterminate of
+      { revision : int64
+      ; receipt_id : Receipt_id.t
+      ; lease_id : string
+      }
+  | Finalize_indeterminate of
+      { revision : int64
+      ; receipt_id : Receipt_id.t
+      ; lease_id : string
+      }
+  | Nack_indeterminate of
+      { revision : int64
+      ; receipt_id : Receipt_id.t
+      ; lease_id : string
+      }
+  | Startup_recovery_indeterminate of
+      { revision : int64
+      ; receipt_id : Receipt_id.t
+      ; lease_id : string
+      }
+  | Recovery_requeue_indeterminate of
+      { revision : int64
+      ; receipt_id : Receipt_id.t
+      ; lease_id : string
+      }
+  | Recovery_cancel_indeterminate of
+      { revision : int64
+      ; receipt_id : Receipt_id.t
+      ; lease_id : string
+      }
 
 type persistence_failure =
   { publication : persistence_publication
@@ -107,6 +136,20 @@ type mutation_error =
       { receipt_id : Receipt_id.t
       ; state : receipt_state
       }
+  | Receipt_not_recovery_required of
+      { receipt_id : Receipt_id.t
+      ; observed_state : receipt_state option
+      }
+  | Recovery_revision_mismatch of
+      { receipt_id : Receipt_id.t
+      ; expected_revision : int64
+      ; observed_revision : int64
+      }
+  | Recovery_lease_mismatch of
+      { receipt_id : Receipt_id.t
+      ; expected_lease_id : string
+      ; observed_lease_id : string
+      }
   | Revision_exhausted
   | Persist_failed of persistence_failure
 
@@ -119,32 +162,94 @@ let snapshot_load_error_kind_to_string = function
   | Reconciliation_failed -> "reconciliation_failed"
   | Configuration_conflict -> "configuration_conflict"
 
+type persistence_transition =
+  | Enqueue_transition of { receipt_id : Receipt_id.t }
+  | Lease_transition of { receipt_id : Receipt_id.t; lease_id : string }
+  | Finalize_transition of { receipt_id : Receipt_id.t; lease_id : string }
+  | Nack_transition of { receipt_id : Receipt_id.t; lease_id : string }
+  | Startup_recovery_transition of
+      { receipt_id : Receipt_id.t
+      ; lease_id : string
+      }
+  | Recovery_requeue_transition of
+      { receipt_id : Receipt_id.t
+      ; lease_id : string
+      }
+  | Recovery_cancel_transition of
+      { receipt_id : Receipt_id.t
+      ; lease_id : string
+      }
+
 let persistence_transition_to_string = function
-  | Enqueue_published -> "enqueue"
-  | Lease_published _ -> "lease"
-  | Finalize_published -> "finalize"
-  | Nack_published -> "nack"
-  | Recovery_published -> "recovery"
+  | Enqueue_transition _ -> "enqueue"
+  | Lease_transition _ -> "lease"
+  | Finalize_transition _ -> "finalize"
+  | Nack_transition _ -> "nack"
+  | Startup_recovery_transition _ -> "startup_recovery"
+  | Recovery_requeue_transition _ -> "recovery_requeue"
+  | Recovery_cancel_transition _ -> "recovery_cancel"
+
+let transition_receipt_id = function
+  | Enqueue_transition { receipt_id }
+  | Lease_transition { receipt_id; _ }
+  | Finalize_transition { receipt_id; _ }
+  | Nack_transition { receipt_id; _ }
+  | Startup_recovery_transition { receipt_id; _ }
+  | Recovery_requeue_transition { receipt_id; _ }
+  | Recovery_cancel_transition { receipt_id; _ } -> receipt_id
+
+let publication_transition = function
+  | Not_published -> None
+  | Enqueue_indeterminate _ -> Some "enqueue"
+  | Lease_indeterminate _ -> Some "lease"
+  | Finalize_indeterminate _ -> Some "finalize"
+  | Nack_indeterminate _ -> Some "nack"
+  | Startup_recovery_indeterminate _ -> Some "startup_recovery"
+  | Recovery_requeue_indeterminate _ -> Some "recovery_requeue"
+  | Recovery_cancel_indeterminate _ -> Some "recovery_cancel"
+
+let publication_evidence = function
+  | Not_published -> None
+  | Enqueue_indeterminate { revision; receipt_id }
+  | Lease_indeterminate { revision; receipt_id; _ }
+  | Finalize_indeterminate { revision; receipt_id; _ }
+  | Nack_indeterminate { revision; receipt_id; _ }
+  | Startup_recovery_indeterminate { revision; receipt_id; _ }
+  | Recovery_requeue_indeterminate { revision; receipt_id; _ }
+  | Recovery_cancel_indeterminate { revision; receipt_id; _ } ->
+    Some (revision, receipt_id)
+
+let publication_lease_id = function
+  | Lease_indeterminate { lease_id; _ }
+  | Finalize_indeterminate { lease_id; _ }
+  | Nack_indeterminate { lease_id; _ }
+  | Startup_recovery_indeterminate { lease_id; _ }
+  | Recovery_requeue_indeterminate { lease_id; _ }
+  | Recovery_cancel_indeterminate { lease_id; _ } -> Some lease_id
+  | Not_published | Enqueue_indeterminate _ -> None
 
 let receipt_state_kind_to_string = function
   | Pending -> "pending"
   | Inflight _ -> "inflight"
+  | Recovery_required _ -> "recovery_required"
   | Delivered _ -> "delivered"
   | Failed _ -> "failed"
 
 let persistence_failure_to_string failure =
   match failure.publication with
   | Not_published -> "not published: " ^ failure.detail
-  | Published_indeterminate { revision; receipt_ids; transition } ->
-    let receipt_ids =
-      receipt_ids |> List.map Receipt_id.to_string |> String.concat ","
-    in
-    Printf.sprintf
-      "transition %s published with indeterminate durability at revision %Ld for receipt(s) %s; do not resubmit, reconcile by receipt id: %s"
-      (persistence_transition_to_string transition)
-      revision
-      receipt_ids
-      failure.detail
+  | publication ->
+    (match publication_transition publication, publication_evidence publication with
+     | Some transition, Some (revision, receipt_id) ->
+       Printf.sprintf
+         "transition %s published with indeterminate durability at revision %Ld for receipt %s; do not resubmit, reconcile by receipt id: %s"
+         transition
+         revision
+         (Receipt_id.to_string receipt_id)
+         failure.detail
+     | None, None -> "not published: " ^ failure.detail
+     | None, Some _ | Some _, None ->
+       "invalid persistence publication evidence: " ^ failure.detail)
 
 let mutation_error_to_string = function
   | Persistence_not_configured -> "chat queue persistence is not configured"
@@ -154,6 +259,27 @@ let mutation_error_to_string = function
       "chat queue receipt %s is already terminal (%s)"
       (Receipt_id.to_string receipt_id)
       (receipt_state_kind_to_string state)
+  | Receipt_not_recovery_required { receipt_id; observed_state } ->
+    Printf.sprintf
+      "chat queue receipt %s is not recovery-required (observed=%s)"
+      (Receipt_id.to_string receipt_id)
+      (match observed_state with
+       | None -> "absent"
+       | Some state -> receipt_state_kind_to_string state)
+  | Recovery_revision_mismatch
+      { receipt_id; expected_revision; observed_revision } ->
+    Printf.sprintf
+      "chat queue recovery revision mismatch for receipt %s (expected=%Ld observed=%Ld)"
+      (Receipt_id.to_string receipt_id)
+      expected_revision
+      observed_revision
+  | Recovery_lease_mismatch
+      { receipt_id; expected_lease_id; observed_lease_id } ->
+    Printf.sprintf
+      "chat queue recovery lease mismatch for receipt %s (expected=%s observed=%s)"
+      (Receipt_id.to_string receipt_id)
+      expected_lease_id
+      observed_lease_id
   | Revision_exhausted -> "chat queue revision domain is exhausted"
   | Persist_failed failure ->
     "chat queue persistence failed: " ^ persistence_failure_to_string failure
@@ -181,6 +307,34 @@ let mutation_error_to_json = function
       ; "state", `String (receipt_state_kind_to_string state)
       ; "message", `String "chat queue receipt is already terminal"
       ]
+  | Receipt_not_recovery_required { receipt_id; observed_state } ->
+    `Assoc
+      [ "error", `String "chat_queue_receipt_not_recovery_required"
+      ; "receipt_id", `String (Receipt_id.to_string receipt_id)
+      ; ( "observed_state"
+        , match observed_state with
+          | None -> `Null
+          | Some state -> `String (receipt_state_kind_to_string state) )
+      ; "message", `String "chat queue receipt is not recovery-required"
+      ]
+  | Recovery_revision_mismatch
+      { receipt_id; expected_revision; observed_revision } ->
+    `Assoc
+      [ "error", `String "chat_queue_recovery_revision_mismatch"
+      ; "receipt_id", `String (Receipt_id.to_string receipt_id)
+      ; "expected_revision", `String (Int64.to_string expected_revision)
+      ; "observed_revision", `String (Int64.to_string observed_revision)
+      ; "message", `String "chat queue recovery decision is stale"
+      ]
+  | Recovery_lease_mismatch
+      { receipt_id; expected_lease_id; observed_lease_id } ->
+    `Assoc
+      [ "error", `String "chat_queue_recovery_lease_mismatch"
+      ; "receipt_id", `String (Receipt_id.to_string receipt_id)
+      ; "expected_lease_id", `String expected_lease_id
+      ; "observed_lease_id", `String observed_lease_id
+      ; "message", `String "chat queue recovery lease evidence differs"
+      ]
   | Revision_exhausted ->
     `Assoc
       [ "error", `String "chat_queue_revision_exhausted"
@@ -199,25 +353,39 @@ let mutation_error_to_json = function
       ; "published", `Bool false
       ; "message", `String detail
       ]
-  | Persist_failed
-      { publication = Published_indeterminate { revision; receipt_ids; transition }
-      ; detail
-      } ->
-    `Assoc
-      [ "error", `String "chat_queue_acceptance_uncertain"
-      ; "status", `String "acceptance_uncertain"
-      ; "published", `Bool true
-      ; "durability", `String "indeterminate"
-      ; "reconciliation_required", `Bool true
-      ; "revision", `String (Int64.to_string revision)
-      ; "transition", `String (persistence_transition_to_string transition)
-      ; ( "receipt_ids"
-        , `List
-            (List.map
-               (fun receipt_id -> `String (Receipt_id.to_string receipt_id))
-               receipt_ids) )
-      ; "message", `String detail
-      ]
+  | Persist_failed { publication; detail } ->
+    (match publication_transition publication, publication_evidence publication with
+     | Some transition, Some (revision, receipt_id) ->
+       let fields =
+         [ "error", `String "chat_queue_acceptance_uncertain"
+         ; "status", `String "acceptance_uncertain"
+         ; "published", `Bool true
+         ; "durability", `String "indeterminate"
+         ; "reconciliation_required", `Bool true
+         ; "revision", `String (Int64.to_string revision)
+         ; "transition", `String transition
+         ; "receipt_id", `String (Receipt_id.to_string receipt_id)
+         ; "message", `String detail
+         ]
+       in
+       let fields =
+         match publication_lease_id publication with
+         | None -> fields
+         | Some lease_id -> ("lease_id", `String lease_id) :: fields
+       in
+       `Assoc fields
+     | None, None ->
+       `Assoc
+         [ "error", `String "chat_queue_persistence_failed"
+         ; "published", `Bool false
+         ; "message", `String detail
+         ]
+     | None, Some _ | Some _, None ->
+       `Assoc
+         [ "error", `String "chat_queue_invalid_publication_evidence"
+         ; "published", `Bool true
+         ; "message", `String detail
+         ])
 
 type active_receipt = {
   receipt_id : Receipt_id.t;
@@ -239,6 +407,7 @@ type diagnostic_snapshot = {
   revision : int64;
   pending : active_receipt list;
   inflight : active_receipt list;
+  recovery_required : active_receipt list;
   terminal_count : int64;
   load_errors : snapshot_load_error list;
 }
@@ -248,11 +417,12 @@ type enqueue_receipt = {
   revision : int64;
   pending_count : int;
   inflight_count : int;
+  recovery_required_count : int;
 }
 
 type configure_report = {
   restored_keeper_count : int;
-  recovered_receipt_count : int;
+  recovery_required_receipt_count : int;
   load_errors : (string option * snapshot_load_error) list;
 }
 
@@ -261,6 +431,11 @@ type transition_observer = keeper_name:string -> revision:int64 -> unit
 type stored_state =
   | Stored_pending of queued_message
   | Stored_inflight of
+      { lease_id : string
+      ; started_at : float
+      ; message : queued_message
+      }
+  | Stored_recovery_required of
       { lease_id : string
       ; started_at : float
       ; message : queued_message
@@ -302,7 +477,6 @@ type reconciliation_plan = {
   target_terminal_count : int64;
   before_row : stored_row option;
   target_row : stored_row option;
-  receipt_ids : Receipt_id.t list;
   transition : persistence_transition;
 }
 
@@ -313,6 +487,7 @@ type queue_entry = {
   mutable pending : stored_row Sequence_map.t;
   mutable pending_count : int;
   mutable inflight : stored_row option;
+  mutable recovery_required : stored_row option;
   mutable terminal_count : int64;
   mutable load_errors : snapshot_load_error list;
   mutable reconciliation_plan : reconciliation_plan option;
@@ -324,12 +499,11 @@ type persistence_configuration =
   | Configured of string
   | Configuration_failed of snapshot_load_error
 
-let database_schema = "keeper_chat_queue.sqlite.v1"
-let database_user_version = 1L
+let database_schema = "keeper_chat_queue.sqlite.v2"
+let database_user_version = 2L
 let database_application_id = 0x4d435151L
 let max_revision = Int64.max_int
 let database_file = "chat-queue.sqlite3"
-let legacy_file = "chat-queue.json"
 
 let persistence_configuration = Atomic.make Unconfigured
 let global_load_errors : snapshot_load_error list Atomic.t = Atomic.make []
@@ -396,9 +570,6 @@ let path_for_file ~base_path ~keeper_name file =
 
 let snapshot_path ~base_path ~keeper_name =
   path_for_file ~base_path ~keeper_name database_file
-
-let legacy_snapshot_path ~base_path ~keeper_name =
-  path_for_file ~base_path ~keeper_name legacy_file
 
 let load_error kind ?path message = { kind; path; message }
 
@@ -505,6 +676,31 @@ let source_of_yojson json =
      | _, _, _, _, Error error -> Error error)
   | Ok kind -> Error (Printf.sprintf "unsupported chat queue source kind: %s" kind)
 
+let user_row_origin_to_yojson = function
+  | Keeper_chat_store.Needs_append ->
+    `Assoc [ "kind", `String "needs_append" ]
+  | Keeper_chat_store.Already_persisted { row_id } ->
+    `Assoc
+      [ "kind", `String "already_persisted"
+      ; "row_id", `String row_id
+      ]
+  | Keeper_chat_store.Already_persisted_upstream ->
+    `Assoc [ "kind", `String "already_persisted_upstream" ]
+
+let user_row_origin_of_yojson json =
+  match required_string json "kind" with
+  | Ok "needs_append" -> Ok Keeper_chat_store.Needs_append
+  | Ok "already_persisted" ->
+    (match required_string json "row_id" with
+     | Ok row_id when not (String.equal (String.trim row_id) "") ->
+       Ok (Keeper_chat_store.Already_persisted { row_id })
+     | Ok _ -> Error "persisted user row origin requires a non-empty row_id"
+     | Error _ as error -> error)
+  | Ok "already_persisted_upstream" ->
+    Ok Keeper_chat_store.Already_persisted_upstream
+  | Ok kind -> Error (Printf.sprintf "unknown user row origin: %s" kind)
+  | Error _ as error -> error
+
 let queued_message_to_yojson (message : queued_message) =
   `Assoc
     [ "content", `String message.content
@@ -512,9 +708,7 @@ let queued_message_to_yojson (message : queued_message) =
     ; "attachments", Keeper_multimodal_input.attachments_to_yojson message.attachments
     ; "timestamp", `Float message.timestamp
     ; "source", source_to_yojson message.source
-    ; ( "user_row_origin"
-      , Keeper_chat_delivery_journal.user_row_origin_to_yojson
-          message.user_row_origin )
+    ; "user_row_origin", user_row_origin_to_yojson message.user_row_origin
     ]
 
 let attachment_of_yojson json =
@@ -581,8 +775,7 @@ let queued_message_of_yojson json =
           Keeper_multimodal_input.parse_user_blocks json,
           attachments_of_yojson attachments_json,
           source_of_yojson source_json,
-          Keeper_chat_delivery_journal.user_row_origin_of_yojson
-            user_row_origin_json
+          user_row_origin_of_yojson user_row_origin_json
         with
         | Ok user_blocks, Ok attachments, Ok source, Ok user_row_origin ->
           Ok
@@ -595,8 +788,7 @@ let queued_message_of_yojson json =
             }
         | Error error, _, _, _ | _, Error error, _, _ | _, _, Error error, _ ->
           Error error
-        | _, _, _, Error error ->
-          Error (Keeper_chat_delivery_journal.error_to_string error))
+        | _, _, _, Error error -> Error error)
      | Error error, _, _, _, _, _
      | _, Error error, _, _, _, _
      | _, _, Error error, _, _, _
@@ -676,6 +868,12 @@ let state_to_yojson = function
       ; "lease_id", `String lease_id
       ; "started_at", `Float started_at
       ]
+  | Stored_recovery_required { lease_id; started_at; _ } ->
+    `Assoc
+      [ "kind", `String "recovery_required"
+      ; "lease_id", `String lease_id
+      ; "started_at", `Float started_at
+      ]
   | Stored_delivered completion ->
     `Assoc (("kind", `String "delivered") :: completion_fields completion)
   | Stored_failed failure ->
@@ -694,7 +892,9 @@ let stored_receipt_to_yojson receipt =
   in
   let fields =
     match receipt.state with
-    | Stored_pending message | Stored_inflight { message; _ } ->
+    | Stored_pending message
+    | Stored_inflight { message; _ }
+    | Stored_recovery_required { message; _ } ->
       fields @ [ "message", queued_message_to_yojson message ]
     | Stored_delivered _ | Stored_failed _ -> fields
   in
@@ -745,6 +945,25 @@ let stored_receipt_of_yojson json =
            | Ok _, Ok _, Ok _ ->
              Error "chat queue inflight lease_id must be non-empty"
            | Error error, _, _ | _, Error error, _ | _, _, Error error -> Error error)
+        | Ok "recovery_required" ->
+          (match
+             required_string state_json "lease_id",
+             required_float state_json "started_at",
+             required_member json "message"
+           with
+           | Ok lease_id, Ok started_at, Ok message_json
+             when not (String.equal (String.trim lease_id) "") ->
+             Result.map
+               (fun message ->
+                  { receipt_id
+                  ; state =
+                      Stored_recovery_required
+                        { lease_id; started_at; message }
+                  })
+               (queued_message_of_yojson message_json)
+           | Ok _, Ok _, Ok _ ->
+             Error "chat queue recovery lease_id must be non-empty"
+           | Error error, _, _ | _, Error error, _ | _, _, Error error -> Error error)
         | Ok "delivered" ->
           (match
              required_float state_json "completed_at",
@@ -794,18 +1013,22 @@ let strict_stored_receipt_of_wire wire =
 let state_kind_and_lease = function
   | Stored_pending _ -> "pending", None
   | Stored_inflight { lease_id; _ } -> "inflight", Some lease_id
+  | Stored_recovery_required { lease_id; _ } ->
+    "recovery_required", Some lease_id
   | Stored_delivered _ -> "delivered", None
   | Stored_failed _ -> "failed", None
 
 let receipt_state_of_stored = function
   | Stored_pending _ -> Pending
   | Stored_inflight { lease_id; started_at; _ } -> Inflight { lease_id; started_at }
+  | Stored_recovery_required { lease_id; started_at; _ } ->
+    Recovery_required { lease_id; started_at }
   | Stored_delivered completion -> Delivered completion
   | Stored_failed failure -> Failed failure
 
 let stored_state_is_terminal = function
   | Stored_delivered _ | Stored_failed _ -> true
-  | Stored_pending _ | Stored_inflight _ -> false
+  | Stored_pending _ | Stored_inflight _ | Stored_recovery_required _ -> false
 
 let stored_row_equal left right =
   Int64.equal left.fifo_sequence right.fifo_sequence
@@ -969,25 +1192,6 @@ let validate_database_paths ~ownership_root path =
   in
   Ok database
 
-let validate_legacy_absent ~ownership_root path =
-  match
-    Fs_compat.inspect_owned_directory_chain
-      ~ownership_root
-      (Filename.dirname path)
-  with
-  | Ok Fs_compat.Owned_directory_missing -> Ok ()
-  | Error rejection ->
-    Error (Fs_compat.owned_directory_chain_rejection_to_string rejection)
-  | Ok (Fs_compat.Owned_directory _) ->
-    (match inspect_regular_or_absent path with
-     | Ok Path_absent -> Ok ()
-     | Ok (Regular_path _) ->
-       Error
-         (Printf.sprintf
-            "unsupported legacy chat queue snapshot remains at %s; automatic migration is intentionally disabled"
-            path)
-     | Error _ as error -> error)
-
 let sqlite_error ~operation db rc =
   Printf.sprintf
     "SQLite %s failed: rc=%s error=%s"
@@ -1063,17 +1267,21 @@ let queue_meta_table_sql =
   "CREATE TABLE queue_meta (singleton INTEGER PRIMARY KEY CHECK (singleton = 1), schema_version TEXT NOT NULL, revision INTEGER NOT NULL CHECK (revision >= 0), next_sequence INTEGER NOT NULL CHECK (next_sequence >= 0), terminal_count INTEGER NOT NULL CHECK (terminal_count >= 0)) STRICT"
 
 let receipts_table_sql =
-  "CREATE TABLE receipts (receipt_id TEXT PRIMARY KEY NOT NULL, fifo_sequence INTEGER NOT NULL CHECK (fifo_sequence >= 0), state_kind TEXT NOT NULL CHECK (state_kind IN ('pending', 'inflight', 'delivered', 'failed')), lease_id TEXT, receipt_json TEXT NOT NULL CHECK (length(receipt_json) > 0), CHECK ((state_kind = 'inflight' AND lease_id IS NOT NULL AND length(lease_id) > 0) OR (state_kind <> 'inflight' AND lease_id IS NULL))) STRICT, WITHOUT ROWID"
+  "CREATE TABLE receipts (receipt_id TEXT PRIMARY KEY NOT NULL, fifo_sequence INTEGER NOT NULL CHECK (fifo_sequence >= 0), state_kind TEXT NOT NULL CHECK (state_kind IN ('pending', 'inflight', 'recovery_required', 'delivered', 'failed')), lease_id TEXT, receipt_json TEXT NOT NULL CHECK (length(receipt_json) > 0), CHECK ((state_kind IN ('inflight', 'recovery_required') AND lease_id IS NOT NULL AND length(lease_id) > 0) OR (state_kind NOT IN ('inflight', 'recovery_required') AND lease_id IS NULL))) STRICT, WITHOUT ROWID"
 
 let fifo_index_sql =
   "CREATE UNIQUE INDEX receipts_fifo_sequence ON receipts (fifo_sequence)"
 
-let inflight_index_sql =
-  "CREATE UNIQUE INDEX receipts_single_inflight ON receipts (state_kind) WHERE state_kind = 'inflight'"
+let active_fifo_index_sql =
+  "CREATE INDEX receipts_active_fifo ON receipts (fifo_sequence) WHERE state_kind IN ('pending', 'inflight', 'recovery_required')"
+
+let active_lease_index_sql =
+  "CREATE UNIQUE INDEX receipts_single_active_lease ON receipts ((CASE WHEN state_kind IN ('inflight', 'recovery_required') THEN 1 END))"
 
 let expected_schema_objects =
-  [ "index", "receipts_fifo_sequence", fifo_index_sql
-  ; "index", "receipts_single_inflight", inflight_index_sql
+  [ "index", "receipts_active_fifo", active_fifo_index_sql
+  ; "index", "receipts_fifo_sequence", fifo_index_sql
+  ; "index", "receipts_single_active_lease", active_lease_index_sql
   ; "table", "queue_meta", queue_meta_table_sql
   ; "table", "receipts", receipts_table_sql
   ]
@@ -1127,7 +1335,12 @@ let initialize_database db path =
     let* () = sqlite_exec db ~operation:"create queue_meta" queue_meta_table_sql in
     let* () = sqlite_exec db ~operation:"create receipts" receipts_table_sql in
     let* () = sqlite_exec db ~operation:"create FIFO index" fifo_index_sql in
-    let* () = sqlite_exec db ~operation:"create inflight index" inflight_index_sql in
+    let* () =
+      sqlite_exec db ~operation:"create active FIFO index" active_fifo_index_sql
+    in
+    let* () =
+      sqlite_exec db ~operation:"create active lease index" active_lease_index_sql
+    in
     let* () =
       with_statement db
         "INSERT INTO queue_meta(singleton, schema_version, revision, next_sequence, terminal_count) VALUES (1, ?, 0, 0, 0)"
@@ -1416,46 +1629,52 @@ type loaded_database = {
   loaded_next_sequence : int64;
   loaded_pending : stored_row Sequence_map.t;
   loaded_inflight : stored_row option;
+  loaded_recovery_required : stored_row option;
   loaded_terminal_count : int64;
 }
 
 let read_active_rows db =
   with_statement db
-    "SELECT fifo_sequence, state_kind, lease_id, receipt_json FROM receipts WHERE state_kind IN ('pending', 'inflight') ORDER BY fifo_sequence"
+    "SELECT fifo_sequence, state_kind, lease_id, receipt_json FROM receipts INDEXED BY receipts_active_fifo WHERE state_kind IN ('pending', 'inflight', 'recovery_required') ORDER BY fifo_sequence"
     (fun stmt ->
-      let rec loop pending inflight =
+      let rec loop pending inflight recovery_required =
         match Sqlite3.step stmt with
-        | Sqlite3.Rc.DONE -> Ok (pending, inflight)
+        | Sqlite3.Rc.DONE -> Ok (pending, inflight, recovery_required)
         | Sqlite3.Rc.ROW ->
           let* row = decode_row_columns stmt in
-          (match row.receipt.state, inflight with
-           | Stored_pending _, _ ->
+          (match row.receipt.state, inflight, recovery_required with
+           | Stored_pending _, _, _ ->
              if Sequence_map.mem row.fifo_sequence pending
              then Error "chat queue contains duplicate FIFO positions"
-             else loop (Sequence_map.add row.fifo_sequence row pending) inflight
-           | Stored_inflight _, None -> loop pending (Some row)
-           | Stored_inflight _, Some _ ->
-             Error "chat queue contains more than one inflight receipt"
-           | (Stored_delivered _ | Stored_failed _), _ ->
+             else
+               loop
+                 (Sequence_map.add row.fifo_sequence row pending)
+                 inflight
+                 recovery_required
+           | Stored_inflight _, None, None -> loop pending (Some row) None
+           | Stored_recovery_required _, None, None ->
+             loop pending None (Some row)
+           | (Stored_inflight _ | Stored_recovery_required _), _, _ ->
+             Error "chat queue contains more than one active lease receipt"
+           | (Stored_delivered _ | Stored_failed _), _, _ ->
              Error "chat queue active index returned a terminal receipt")
         | rc -> Error (sqlite_error ~operation:"read active receipts" db rc)
       in
-      loop Sequence_map.empty None)
+      loop Sequence_map.empty None None)
 
-let read_sequence_summary db =
+let read_last_sequence db =
   with_statement db
-    "SELECT COUNT(*), MAX(fifo_sequence) FROM receipts"
+    "SELECT MAX(fifo_sequence) FROM receipts INDEXED BY receipts_fifo_sequence"
     (fun stmt ->
       match Sqlite3.step stmt with
       | Sqlite3.Rc.ROW ->
-        let row_count = Sqlite3.column_int64 stmt 0 in
-        let max_sequence =
-          if Sqlite3.column_is_null stmt 1
+        let sequence =
+          if Sqlite3.column_is_null stmt 0
           then None
-          else Some (Sqlite3.column_int64 stmt 1)
+          else Some (Sqlite3.column_int64 stmt 0)
         in
         (match Sqlite3.step stmt with
-         | Sqlite3.Rc.DONE -> Ok (row_count, max_sequence)
+         | Sqlite3.Rc.DONE -> Ok sequence
          | rc -> Error (sqlite_error ~operation:"finish FIFO summary" db rc))
       | rc -> Error (sqlite_error ~operation:"read FIFO summary" db rc))
 
@@ -1465,21 +1684,20 @@ let read_loaded_database db =
     let* loaded_revision, loaded_next_sequence, loaded_terminal_count =
       read_meta db
     in
-    let* loaded_pending, loaded_inflight = read_active_rows db in
-    let* observed_terminal_count =
-      sqlite_single_int64 db ~operation:"count terminal receipts"
-        "SELECT COUNT(*) FROM receipts WHERE state_kind IN ('delivered', 'failed')"
+    let* loaded_pending, loaded_inflight, loaded_recovery_required =
+      read_active_rows db
     in
-    let* row_count, max_sequence = read_sequence_summary db in
+    let* max_sequence = read_last_sequence db in
     let active_count =
       Sequence_map.cardinal loaded_pending
-      + if Option.is_some loaded_inflight then 1 else 0
+      + (if Option.is_some loaded_inflight then 1 else 0)
+      + (if Option.is_some loaded_recovery_required then 1 else 0)
     in
     let projected_row_count =
       Int64.add loaded_terminal_count (Int64.of_int active_count)
     in
     let sequence_is_contiguous =
-      match row_count, max_sequence with
+      match projected_row_count, max_sequence with
       | 0L, None -> Int64.equal loaded_next_sequence 0L
       | count, Some max_sequence
         when Int64.compare count 0L > 0
@@ -1488,11 +1706,7 @@ let read_loaded_database db =
         && Int64.equal count loaded_next_sequence
       | 0L, Some _ | _, None | _, Some _ -> false
     in
-    if not (Int64.equal observed_terminal_count loaded_terminal_count)
-    then Error "chat queue terminal_count metadata differs from terminal rows"
-    else if not (Int64.equal row_count projected_row_count)
-    then Error "chat queue active and terminal projections do not cover every receipt"
-    else if not sequence_is_contiguous
+    if not sequence_is_contiguous
     then Error "chat queue FIFO sequence metadata is not contiguous"
     else
       let* () = sqlite_exec db ~operation:"commit load transaction" "COMMIT" in
@@ -1501,6 +1715,7 @@ let read_loaded_database db =
         ; loaded_next_sequence
         ; loaded_pending
         ; loaded_inflight
+        ; loaded_recovery_required
         ; loaded_terminal_count
         }
   in
@@ -1657,6 +1872,14 @@ let validate_plan_shape plan =
       | None -> Ok ()
       | Some row -> validate_row row
     in
+    let* receipt_id =
+      match plan.before_row, plan.target_row with
+      | Some row, _ | None, Some row -> Ok row.receipt.receipt_id
+      | None, None -> Error "chat queue transaction plan has no row mutation"
+    in
+    if not (Receipt_id.equal receipt_id (transition_receipt_id plan.transition))
+    then Error "chat queue transition evidence differs from its receipt mutation"
+    else
     match plan.before_row, plan.target_row with
     | Some before, Some target
       when not (Receipt_id.equal before.receipt.receipt_id target.receipt.receipt_id) ->
@@ -1719,17 +1942,29 @@ type transaction_execution =
 let not_published_failure detail =
   { publication = Not_published; detail }
 
+let indeterminate_publication revision = function
+  | Enqueue_transition { receipt_id } ->
+    Enqueue_indeterminate { revision; receipt_id }
+  | Lease_transition { receipt_id; lease_id } ->
+    Lease_indeterminate { revision; receipt_id; lease_id }
+  | Finalize_transition { receipt_id; lease_id } ->
+    Finalize_indeterminate { revision; receipt_id; lease_id }
+  | Nack_transition { receipt_id; lease_id } ->
+    Nack_indeterminate { revision; receipt_id; lease_id }
+  | Startup_recovery_transition { receipt_id; lease_id } ->
+    Startup_recovery_indeterminate { revision; receipt_id; lease_id }
+  | Recovery_requeue_transition { receipt_id; lease_id } ->
+    Recovery_requeue_indeterminate { revision; receipt_id; lease_id }
+  | Recovery_cancel_transition { receipt_id; lease_id } ->
+    Recovery_cancel_indeterminate { revision; receipt_id; lease_id }
+
 let published_indeterminate_failure plan detail =
   { publication =
-      Published_indeterminate
-        { revision = plan.target_revision
-        ; receipt_ids = plan.receipt_ids
-        ; transition = plan.transition
-        }
+      indeterminate_publication plan.target_revision plan.transition
   ; detail
   }
 
-let run_transaction ~ownership_root ~path ~legacy_path ~create_if_missing plan =
+let run_transaction ~ownership_root ~path ~create_if_missing plan =
   let testing_active =
     Atomic.get transaction_failures_for_testing <> []
     || Option.is_some (Atomic.get transaction_observer_for_testing)
@@ -1744,19 +1979,16 @@ let run_transaction ~ownership_root ~path ~legacy_path ~create_if_missing plan =
         | Eio.Cancel.Cancelled _ as exception_ -> raise exception_
         | exn -> Error (Printexc.to_string exn)
       in
-      match protect_result (fun () -> validate_legacy_absent ~ownership_root legacy_path) with
+      match
+        protect_result (fun () ->
+          open_database
+            ~ownership_root
+            ~path
+            ~create_if_missing
+            ~schema_validation:Validate_transaction_preconditions)
+      with
       | Error detail -> Transaction_failed (not_published_failure detail)
-      | Ok () ->
-        (match
-           protect_result (fun () ->
-             open_database
-               ~ownership_root
-               ~path
-               ~create_if_missing
-               ~schema_validation:Validate_transaction_preconditions)
-         with
-         | Error detail -> Transaction_failed (not_published_failure detail)
-         | Ok handle ->
+      | Ok handle ->
            let transaction_started = ref false in
            let commit_invoked = ref false in
            let committed = ref false in
@@ -1834,7 +2066,7 @@ let run_transaction ~ownership_root ~path ~legacy_path ~create_if_missing plan =
                { failure = published_indeterminate_failure plan details
                ; exception_
                }
-           | Some _, (Transaction_cancelled _ as outcome) -> outcome))
+           | Some _, (Transaction_cancelled _ as outcome) -> outcome)
 
 let with_registry_rw f = Eio.Mutex.use_rw ~protect:true registry_mutex f
 
@@ -1844,6 +2076,7 @@ let create_entry
     ?(pending = Sequence_map.empty)
     ?pending_count
     ?inflight
+    ?recovery_required
     ?(terminal_count = 0L)
     ?(load_errors = [])
     ?reconciliation_plan
@@ -1857,6 +2090,7 @@ let create_entry
   ; pending
   ; pending_count
   ; inflight
+  ; recovery_required
   ; terminal_count
   ; load_errors
   ; reconciliation_plan
@@ -1912,12 +2146,7 @@ let mutation_context ~keeper_name ~create =
         |> Result.map_error (fun detail ->
           Snapshot_unavailable (load_error Invalid_path detail))
       in
-      let* legacy_path =
-        legacy_snapshot_path ~base_path ~keeper_name
-        |> Result.map_error (fun detail ->
-          Snapshot_unavailable (load_error Invalid_path detail))
-      in
-      Ok (base_path, path, legacy_path, entry)
+      Ok (base_path, path, entry)
 
 let remove_active_row entry row =
   if Sequence_map.mem row.fifo_sequence entry.pending
@@ -1929,6 +2158,12 @@ let remove_active_row entry row =
      when Receipt_id.equal current.receipt.receipt_id row.receipt.receipt_id ->
      entry.inflight <- None
    | None | Some _ -> ())
+  ;
+  (match entry.recovery_required with
+   | Some current
+     when Receipt_id.equal current.receipt.receipt_id row.receipt.receipt_id ->
+     entry.recovery_required <- None
+   | None | Some _ -> ())
 
 let add_active_row entry row =
   match row.receipt.state with
@@ -1937,6 +2172,7 @@ let add_active_row entry row =
     then entry.pending_count <- entry.pending_count + 1;
     entry.pending <- Sequence_map.add row.fifo_sequence row entry.pending
   | Stored_inflight _ -> entry.inflight <- Some row
+  | Stored_recovery_required _ -> entry.recovery_required <- Some row
   | Stored_delivered _ | Stored_failed _ -> ()
 
 let set_entry_projection entry ~from_row ~to_row ~revision ~next_sequence
@@ -1977,38 +2213,35 @@ let apply_transaction_result ~path entry plan = function
     entry.load_errors <- [];
     entry.reconciliation_plan <- None;
     Ok plan.target_revision
-  | Transaction_failed ({ publication = Not_published; _ } as failure) ->
-    Error (Persist_failed failure)
-  | Transaction_failed
-      ({ publication = Published_indeterminate _; detail } as failure) ->
-    set_entry_to_plan_target entry plan;
-    entry.load_errors <- [ durability_error ~path plan detail ];
-    entry.reconciliation_plan <- Some plan;
-    Error (Persist_failed failure)
-  | Transaction_cancelled
-      { failure = { publication = Not_published; _ }; exception_ } ->
-    raise exception_
-  | Transaction_cancelled
-      { failure = { publication = Published_indeterminate _; detail }
-      ; exception_
-      } ->
-    set_entry_to_plan_target entry plan;
-    entry.load_errors <- [ durability_error ~path plan detail ];
-    entry.reconciliation_plan <- Some plan;
-    raise exception_
+  | Transaction_failed failure ->
+    (match failure.publication with
+     | Not_published -> Error (Persist_failed failure)
+     | _ ->
+       set_entry_to_plan_target entry plan;
+       entry.load_errors <- [ durability_error ~path plan failure.detail ];
+       entry.reconciliation_plan <- Some plan;
+       Error (Persist_failed failure))
+  | Transaction_cancelled { failure; exception_ } ->
+    (match failure.publication with
+     | Not_published -> raise exception_
+     | _ ->
+       set_entry_to_plan_target entry plan;
+       entry.load_errors <- [ durability_error ~path plan failure.detail ];
+       entry.reconciliation_plan <- Some plan;
+       raise exception_)
 
 let notify_indeterminate ~keeper_name = function
-  | Error
-      (Persist_failed
-         { publication = Published_indeterminate { revision; _ }; _ }) ->
-    notify_transition ~keeper_name ~revision
+  | Error (Persist_failed { publication; _ }) ->
+    (match publication_evidence publication with
+     | Some (revision, _) -> notify_transition ~keeper_name ~revision
+     | None -> ())
   | Ok _ | Error _ -> ()
 
 type lane_store_presence =
   | Store_absent
   | Store_present
 
-let observe_lane_store_blocking ~ownership_root ~path ~legacy_path =
+let observe_lane_store_blocking ~ownership_root ~path =
   let parent = Filename.dirname path in
   match Fs_compat.inspect_owned_directory_chain ~ownership_root parent with
   | Error rejection ->
@@ -2017,21 +2250,14 @@ let observe_lane_store_blocking ~ownership_root ~path ~legacy_path =
          (Fs_compat.owned_directory_chain_rejection_to_string rejection))
   | Ok Fs_compat.Owned_directory_missing -> Ok Store_absent
   | Ok (Fs_compat.Owned_directory _) ->
-    (match inspect_regular_or_absent legacy_path with
-     | Error detail -> Error (load_error Invalid_path ~path:legacy_path detail)
-     | Ok (Regular_path _) ->
-       Error
-         (load_error Parse_failed ~path:legacy_path
-            "legacy chat-queue.json is unsupported; automatic migration and compatibility fallback are disabled")
-     | Ok Path_absent ->
-       (match validate_database_paths ~ownership_root path with
-        | Error detail -> Error (load_error Invalid_path ~path detail)
-        | Ok Path_absent -> Ok Store_absent
-        | Ok (Regular_path _) -> Ok Store_present))
+    (match validate_database_paths ~ownership_root path with
+     | Error detail -> Error (load_error Invalid_path ~path detail)
+     | Ok Path_absent -> Ok Store_absent
+     | Ok (Regular_path _) -> Ok Store_present)
 
-let observe_lane_store ~ownership_root ~path ~legacy_path =
+let observe_lane_store ~ownership_root ~path =
   Eio_guard.run_in_systhread (fun () ->
-      try observe_lane_store_blocking ~ownership_root ~path ~legacy_path with
+      try observe_lane_store_blocking ~ownership_root ~path with
       | Eio.Cancel.Cancelled _ as exception_ -> raise exception_
       | exn -> Error (load_error Read_failed ~path (Printexc.to_string exn)))
 
@@ -2039,11 +2265,11 @@ let quarantine_entry entry error =
   entry.load_errors <- [ error ];
   Error (Snapshot_unavailable error)
 
-let check_entry_store ~base_path ~path ~legacy_path entry ~allow_absent =
+let check_entry_store ~base_path ~path entry ~allow_absent =
   match first_blocking_error entry with
   | Some error -> Error (Snapshot_unavailable error)
   | None ->
-    (match observe_lane_store ~ownership_root:base_path ~path ~legacy_path with
+    (match observe_lane_store ~ownership_root:base_path ~path with
      | Error error -> quarantine_entry entry error
      | Ok Store_present -> Ok Store_present
      | Ok Store_absent
@@ -2052,6 +2278,7 @@ let check_entry_store ~base_path ~path ~legacy_path entry ~allow_absent =
             && Int64.equal entry.next_sequence 0L
             && entry.pending_count = 0
             && Option.is_none entry.inflight
+            && Option.is_none entry.recovery_required
             && Int64.equal entry.terminal_count 0L ->
        Ok Store_absent
      | Ok Store_absent ->
@@ -2069,11 +2296,13 @@ let cache_matches_meta entry revision next_sequence terminal_count =
   && Int64.equal entry.terminal_count terminal_count
 
 let canonical_message_of_stored_state = function
-  | Stored_pending message | Stored_inflight { message; _ } -> Some message
+  | Stored_pending message
+  | Stored_inflight { message; _ }
+  | Stored_recovery_required { message; _ } -> Some message
   | Stored_delivered _ | Stored_failed _ -> None
 
 let make_plan entry ~before_row ~target_row ~target_next_sequence
-    ~target_terminal_count ~receipt_ids ~transition =
+    ~target_terminal_count ~transition =
   let* target_revision = succ_revision entry.revision in
   Ok
     { before_revision = entry.revision
@@ -2084,7 +2313,6 @@ let make_plan entry ~before_row ~target_row ~target_next_sequence
     ; target_terminal_count
     ; before_row
     ; target_row
-    ; receipt_ids
     ; transition
     }
 
@@ -2094,16 +2322,16 @@ let enqueue_with_receipt ~keeper_name ~receipt_id message =
   | Ok message ->
     (match mutation_context ~keeper_name ~create:true with
      | Error _ as error -> error
-     | Ok (_, _, _, None) ->
+     | Ok (_, _, None) ->
        Error
          (Persist_failed
             (not_published_failure
                "chat queue entry creation did not produce a lane"))
-     | Ok (base_path, path, legacy_path, Some entry) ->
+     | Ok (base_path, path, Some entry) ->
        let result =
          with_entry_lock keeper_name entry (fun () ->
              match
-               check_entry_store ~base_path ~path ~legacy_path entry
+               check_entry_store ~base_path ~path entry
                  ~allow_absent:true
              with
              | Error _ as error -> error
@@ -2156,6 +2384,10 @@ let enqueue_with_receipt ~keeper_name ~receipt_id message =
                                  ; pending_count = entry.pending_count
                                  ; inflight_count =
                                      (if Option.is_some entry.inflight then 1 else 0)
+                                 ; recovery_required_count =
+                                     (if Option.is_some entry.recovery_required
+                                      then 1
+                                      else 0)
                                  }
                                , false )
                            | Ok _, Ok _ ->
@@ -2183,8 +2415,7 @@ let enqueue_with_receipt ~keeper_name ~receipt_id message =
                                ~target_row:(Some target_row)
                                ~target_next_sequence
                                ~target_terminal_count:entry.terminal_count
-                               ~receipt_ids:[ receipt_id ]
-                               ~transition:Enqueue_published
+                               ~transition:(Enqueue_transition { receipt_id })
                            with
                            | Error _ as error -> error
                            | Ok plan ->
@@ -2192,7 +2423,6 @@ let enqueue_with_receipt ~keeper_name ~receipt_id message =
                                run_transaction
                                  ~ownership_root:base_path
                                  ~path
-                                 ~legacy_path
                                  ~create_if_missing:(presence = Store_absent)
                                  plan
                              in
@@ -2203,6 +2433,10 @@ let enqueue_with_receipt ~keeper_name ~receipt_id message =
                                     ; pending_count = entry.pending_count
                                     ; inflight_count =
                                         (if Option.is_some entry.inflight then 1 else 0)
+                                    ; recovery_required_count =
+                                        (if Option.is_some entry.recovery_required
+                                         then 1
+                                         else 0)
                                     }
                                   , true ))
                                (apply_transaction_result ~path entry plan execution))))))
@@ -2226,12 +2460,12 @@ let lease_id () = Random_id.prefixed ~prefix:"lease_" ~bytes:16
 let lease_next ~keeper_name =
   match mutation_context ~keeper_name ~create:false with
   | Error error -> `Error error
-  | Ok (_, _, _, None) -> `Empty
-  | Ok (base_path, path, legacy_path, Some entry) ->
+  | Ok (_, _, None) -> `Empty
+  | Ok (base_path, path, Some entry) ->
     let result =
       with_entry_lock keeper_name entry (fun () ->
           match
-            check_entry_store ~base_path ~path ~legacy_path entry
+            check_entry_store ~base_path ~path entry
               ~allow_absent:false
           with
           | Error error -> `Error error
@@ -2241,15 +2475,32 @@ let lease_next ~keeper_name =
                  (load_error Read_failed ~path
                     "chat queue database is absent during lease"))
           | Ok Store_present ->
-            (match entry.inflight with
-             | Some { receipt = { state = Stored_inflight { lease_id; _ }; _ }; _ } ->
+            (match entry.recovery_required, entry.inflight with
+             | ( Some
+                   { receipt =
+                       { receipt_id
+                       ; state =
+                           Stored_recovery_required
+                             { lease_id; started_at; _ }
+                       }
+                   ; _
+                   }
+               , None ) ->
+               `Recovery_required
+                 ({ receipt_id; lease_id; started_at } : recovery_evidence)
+             | Some _, _ ->
+               `Error
+                 (Snapshot_unavailable
+                    (load_error Parse_failed ~path
+                       "in-memory recovery index contains an invalid active lease"))
+             | None, Some { receipt = { state = Stored_inflight { lease_id; _ }; _ }; _ } ->
                `Already_leased lease_id
-             | Some _ ->
+             | None, Some _ ->
                `Error
                  (Snapshot_unavailable
                     (load_error Parse_failed ~path
                        "in-memory inflight index contains a non-inflight receipt"))
-             | None ->
+             | None, None ->
                (match Sequence_map.min_binding_opt entry.pending with
                 | None -> `Empty
                 | Some (_, row) ->
@@ -2275,8 +2526,9 @@ let lease_next ~keeper_name =
                           ~target_row:(Some target_row)
                           ~target_next_sequence:entry.next_sequence
                           ~target_terminal_count:entry.terminal_count
-                          ~receipt_ids:[ row.receipt.receipt_id ]
-                          ~transition:(Lease_published { lease_id })
+                          ~transition:
+                            (Lease_transition
+                               { receipt_id = row.receipt.receipt_id; lease_id })
                       with
                       | Error error -> `Error error
                       | Ok plan ->
@@ -2284,7 +2536,6 @@ let lease_next ~keeper_name =
                           run_transaction
                             ~ownership_root:base_path
                             ~path
-                            ~legacy_path
                             ~create_if_missing:false
                             plan
                         in
@@ -2297,7 +2548,10 @@ let lease_next ~keeper_name =
                                    { receipt_id = row.receipt.receipt_id; message }
                                }
                              , revision )))
-                   | Stored_inflight _ | Stored_delivered _ | Stored_failed _ ->
+                   | Stored_inflight _
+                   | Stored_recovery_required _
+                   | Stored_delivered _
+                   | Stored_failed _ ->
                      `Error
                        (Snapshot_unavailable
                           (load_error Parse_failed ~path
@@ -2311,7 +2565,8 @@ let lease_next ~keeper_name =
        notify_indeterminate ~keeper_name (Error error);
        `Error error
      | `Empty -> `Empty
-     | `Already_leased lease_id -> `Already_leased lease_id)
+     | `Already_leased lease_id -> `Already_leased lease_id
+     | `Recovery_required evidence -> `Recovery_required evidence)
 
 let canonical_optional_ref = function
   | None -> Ok None
@@ -2347,12 +2602,12 @@ let finalize ~keeper_name ~lease_id ~outcome =
   | Ok terminal_state ->
     (match mutation_context ~keeper_name ~create:false with
      | Error error -> `Error error
-     | Ok (_, _, _, None) -> `Unknown_lease
-     | Ok (base_path, path, legacy_path, Some entry) ->
+     | Ok (_, _, None) -> `Unknown_lease
+     | Ok (base_path, path, Some entry) ->
        let result =
          with_entry_lock keeper_name entry (fun () ->
              match
-               check_entry_store ~base_path ~path ~legacy_path entry
+               check_entry_store ~base_path ~path entry
                  ~allow_absent:false
              with
              | Error error -> `Error error
@@ -2385,8 +2640,8 @@ let finalize ~keeper_name ~lease_id ~outcome =
                          ~target_row:(Some target_row)
                          ~target_next_sequence:entry.next_sequence
                          ~target_terminal_count:(Int64.succ entry.terminal_count)
-                         ~receipt_ids:[ receipt_id ]
-                         ~transition:Finalize_published
+                         ~transition:
+                           (Finalize_transition { receipt_id; lease_id })
                      with
                      | Error error -> `Error error
                      | Ok plan ->
@@ -2394,19 +2649,18 @@ let finalize ~keeper_name ~lease_id ~outcome =
                          run_transaction
                            ~ownership_root:base_path
                            ~path
-                           ~legacy_path
                            ~create_if_missing:false
                            plan
                        in
                        (match apply_transaction_result ~path entry plan execution with
-                        | Ok revision -> `Finalized ([ receipt_id ], revision)
+                        | Ok revision -> `Finalized (receipt_id, revision)
                         | Error error -> `Error error))
                 | None | Some _ -> `Unknown_lease))
        in
        (match result with
-        | `Finalized (receipt_ids, revision) ->
+        | `Finalized (receipt_id, revision) ->
           notify_transition ~keeper_name ~revision;
-          `Finalized receipt_ids
+          `Finalized receipt_id
         | `Error error ->
           notify_indeterminate ~keeper_name (Error error);
           `Error error
@@ -2415,12 +2669,12 @@ let finalize ~keeper_name ~lease_id ~outcome =
 let nack ~keeper_name ~lease_id =
   match mutation_context ~keeper_name ~create:false with
   | Error error -> `Error error
-  | Ok (_, _, _, None) -> `Unknown_lease
-  | Ok (base_path, path, legacy_path, Some entry) ->
+  | Ok (_, _, None) -> `Unknown_lease
+  | Ok (base_path, path, Some entry) ->
     let result =
       with_entry_lock keeper_name entry (fun () ->
           match
-            check_entry_store ~base_path ~path ~legacy_path entry
+            check_entry_store ~base_path ~path entry
               ~allow_absent:false
           with
           | Error error -> `Error error
@@ -2451,8 +2705,7 @@ let nack ~keeper_name ~lease_id =
                     ~target_row:(Some target_row)
                     ~target_next_sequence:entry.next_sequence
                     ~target_terminal_count:entry.terminal_count
-                    ~receipt_ids:[ receipt_id ]
-                    ~transition:Nack_published
+                    ~transition:(Nack_transition { receipt_id; lease_id })
                 with
                 | Error error -> `Error error
                 | Ok plan ->
@@ -2460,19 +2713,18 @@ let nack ~keeper_name ~lease_id =
                     run_transaction
                       ~ownership_root:base_path
                       ~path
-                      ~legacy_path
                       ~create_if_missing:false
                       plan
                   in
                   (match apply_transaction_result ~path entry plan execution with
-                   | Ok revision -> `Requeued ([ receipt_id ], revision)
+                   | Ok revision -> `Requeued (receipt_id, revision)
                    | Error error -> `Error error))
              | None | Some _ -> `Unknown_lease))
     in
     (match result with
-     | `Requeued (receipt_ids, revision) ->
+     | `Requeued (receipt_id, revision) ->
        notify_transition ~keeper_name ~revision;
-       `Requeued receipt_ids
+       `Requeued receipt_id
      | `Error error ->
        notify_indeterminate ~keeper_name (Error error);
        `Error error
@@ -2481,8 +2733,8 @@ let nack ~keeper_name ~lease_id =
 let pending_count ~keeper_name =
   match mutation_context ~keeper_name ~create:false with
   | Error _ as error -> error
-  | Ok (_, _, _, None) -> Ok 0
-  | Ok (_, _, _, Some entry) ->
+  | Ok (_, _, None) -> Ok 0
+  | Ok (_, _, Some entry) ->
     with_entry_lock keeper_name entry (fun () ->
         match first_blocking_error entry with
         | Some error -> Error (Snapshot_unavailable error)
@@ -2491,8 +2743,8 @@ let pending_count ~keeper_name =
 let inflight_count ~keeper_name =
   match mutation_context ~keeper_name ~create:false with
   | Error _ as error -> error
-  | Ok (_, _, _, None) -> Ok 0
-  | Ok (_, _, _, Some entry) ->
+  | Ok (_, _, None) -> Ok 0
+  | Ok (_, _, Some entry) ->
     with_entry_lock keeper_name entry (fun () ->
         match first_blocking_error entry with
         | Some error -> Error (Snapshot_unavailable error)
@@ -2501,16 +2753,25 @@ let inflight_count ~keeper_name =
 let has_active_receipts ~keeper_name =
   match mutation_context ~keeper_name ~create:false with
   | Error _ as error -> error
-  | Ok (_, _, _, None) -> Ok false
-  | Ok (_, _, _, Some entry) ->
+  | Ok (_, _, None) -> Ok false
+  | Ok (_, _, Some entry) ->
     with_entry_lock keeper_name entry (fun () ->
         match first_blocking_error entry with
         | Some error -> Error (Snapshot_unavailable error)
-        | None -> Ok (entry.pending_count > 0 || Option.is_some entry.inflight))
+        | None ->
+          Ok
+            (entry.pending_count > 0
+             || Option.is_some entry.inflight
+             || Option.is_some entry.recovery_required))
 
 type lane_health =
   | Ready
-  | Reconciliation_required
+  | Persistence_reconciliation_required
+  | Delivery_recovery_required of
+      { receipt_id : Receipt_id.t
+      ; lease_id : string
+      ; started_at : float
+      }
   | Unavailable of snapshot_load_error
 
 type lane_status = {
@@ -2522,20 +2783,42 @@ type lane_status = {
 let lane_status ~keeper_name =
   match mutation_context ~keeper_name ~create:false with
   | Error _ as error -> error
-  | Ok (_, _, _, None) ->
+  | Ok (_, _, None) ->
     Ok { revision = 0L; has_active = false; health = Ready }
-  | Ok (_, _, _, Some entry) ->
+  | Ok (_, _, Some entry) ->
     with_entry_lock keeper_name entry (fun () ->
         let health =
-          match entry.reconciliation_plan, entry.load_errors with
-          | Some _, _ -> Reconciliation_required
-          | None, [] -> Ready
-          | None, error :: _ -> Unavailable error
+          match
+            entry.reconciliation_plan,
+            entry.load_errors,
+            entry.recovery_required
+          with
+          | Some _, _, _ -> Persistence_reconciliation_required
+          | None, error :: _, _ -> Unavailable error
+          | ( None
+            , []
+            , Some
+                { receipt =
+                    { receipt_id
+                    ; state =
+                        Stored_recovery_required
+                          { lease_id; started_at; _ }
+                    }
+                ; _
+                } ) ->
+            Delivery_recovery_required { receipt_id; lease_id; started_at }
+          | None, [], None -> Ready
+          | None, [], Some _ ->
+            Unavailable
+              (load_error Parse_failed
+                 "recovery index contains a non-recovery receipt")
         in
         Ok
           { revision = entry.revision
           ; has_active =
-              entry.pending_count > 0 || Option.is_some entry.inflight
+              entry.pending_count > 0
+              || Option.is_some entry.inflight
+              || Option.is_some entry.recovery_required
           ; health
           })
 
@@ -2553,6 +2836,12 @@ let active_receipt_of_row row =
       ; message
       ; state = receipt_state_of_stored (Stored_inflight inflight)
       }
+  | Stored_recovery_required ({ message; _ } as recovery) ->
+    Ok
+      { receipt_id = row.receipt.receipt_id
+      ; message
+      ; state = receipt_state_of_stored (Stored_recovery_required recovery)
+      }
   | Stored_delivered _ | Stored_failed _ ->
     Error "active receipt projection contains a terminal state"
 
@@ -2562,6 +2851,7 @@ let snapshot ~keeper_name =
     { revision = 0L
     ; pending = []
     ; inflight = []
+    ; recovery_required = []
     ; terminal_count = 0L
     ; load_errors = Atomic.get global_load_errors
     }
@@ -2585,8 +2875,16 @@ let snapshot ~keeper_name =
              | Ok receipt -> [ receipt ], []
              | Error detail -> [], [ detail ])
         in
+        let recovery_required, recovery_errors =
+          match entry.recovery_required with
+          | None -> [], []
+          | Some row ->
+            (match active_receipt_of_row row with
+             | Ok receipt -> [ receipt ], []
+             | Error detail -> [], [ detail ])
+        in
         let projection_errors =
-          List.rev_append pending_errors inflight_errors
+          List.concat [ pending_errors; inflight_errors; recovery_errors ]
           |> List.map (fun detail ->
             load_error Parse_failed
               ("in-memory active receipt projection is invalid: " ^ detail))
@@ -2594,6 +2892,7 @@ let snapshot ~keeper_name =
         { revision = entry.revision
         ; pending
         ; inflight
+        ; recovery_required
         ; terminal_count = entry.terminal_count
         ; load_errors =
             projection_errors
@@ -2628,14 +2927,9 @@ let lookup_receipt ~keeper_name ~receipt_id =
       |> Result.map_error (fun detail ->
         Snapshot_unavailable (load_error Invalid_path detail))
     in
-    let* legacy_path =
-      legacy_snapshot_path ~base_path ~keeper_name
-      |> Result.map_error (fun detail ->
-        Snapshot_unavailable (load_error Invalid_path detail))
-    in
     match find_entry keeper_name with
     | None ->
-      (match observe_lane_store ~ownership_root:base_path ~path ~legacy_path with
+      (match observe_lane_store ~ownership_root:base_path ~path with
        | Error error -> Error (Snapshot_unavailable error)
        | Ok Store_absent -> Ok { revision = 0L; receipt = None }
        | Ok Store_present ->
@@ -2649,7 +2943,7 @@ let lookup_receipt ~keeper_name ~receipt_id =
           | Error _ as error -> error
           | Ok () ->
             (match
-               observe_lane_store ~ownership_root:base_path ~path ~legacy_path
+               observe_lane_store ~ownership_root:base_path ~path
              with
              | Error error -> Error (Snapshot_unavailable error)
              | Ok Store_absent ->
@@ -2711,12 +3005,9 @@ let read_receipt_observation db receipt_id =
               ^ rollback_detail))
 
 let observe_plan_receipt ~base_path ~path plan =
-  match plan.receipt_ids with
-  | [ receipt_id ] ->
-    with_database ~ownership_root:base_path ~path ~create_if_missing:false
-      (fun db -> read_receipt_observation db receipt_id)
-  | [] | _ :: _ :: _ ->
-    Error "chat queue reconciliation plan must identify exactly one receipt"
+  with_database ~ownership_root:base_path ~path ~create_if_missing:false
+    (fun db ->
+      read_receipt_observation db (transition_receipt_id plan.transition))
 
 let observation_matches
     observation ~revision ~next_sequence ~terminal_count ~row =
@@ -2754,13 +3045,20 @@ let compensate_uncertain_lease entry plan =
       ; target_terminal_count = plan.target_terminal_count
       ; before_row = plan.target_row
       ; target_row = Some target_row
-      ; receipt_ids = [ receipt_id ]
-      ; transition = Nack_published
+      ; transition =
+          Nack_transition
+            { receipt_id; lease_id = inflight.lease_id }
       }
   | None
   | Some
       { receipt =
-          { state = (Stored_pending _ | Stored_delivered _ | Stored_failed _); _ }
+          { state =
+              ( Stored_pending _
+              | Stored_recovery_required _
+              | Stored_delivered _
+              | Stored_failed _ )
+          ; _
+          }
       ; _
       } ->
     Error
@@ -2777,14 +3075,9 @@ let reconcile_persistence ~keeper_name =
       |> Result.map_error (fun detail ->
         Snapshot_unavailable (load_error Invalid_path detail))
     in
-    let* legacy_path =
-      legacy_snapshot_path ~base_path ~keeper_name
-      |> Result.map_error (fun detail ->
-        Snapshot_unavailable (load_error Invalid_path detail))
-    in
     match find_entry keeper_name with
     | None ->
-      (match observe_lane_store ~ownership_root:base_path ~path ~legacy_path with
+      (match observe_lane_store ~ownership_root:base_path ~path with
        | Ok Store_absent -> Ok { outcome = Already_consistent; revision = 0L }
        | Error error -> Error (Snapshot_unavailable error)
        | Ok Store_present ->
@@ -2801,7 +3094,7 @@ let reconcile_persistence ~keeper_name =
             | error :: _, None -> Error (Snapshot_unavailable error)
             | _, Some plan ->
               (match
-                 observe_lane_store ~ownership_root:base_path ~path ~legacy_path
+                 observe_lane_store ~ownership_root:base_path ~path
                with
                | Error error -> mark_reconciliation_conflict entry ~path error.message
                | Ok Store_absent ->
@@ -2828,12 +3121,12 @@ let reconcile_persistence ~keeper_name =
                         ~row:plan.target_row
                     in
                     (match plan.transition, matches_before, matches_target with
-                     | Lease_published _, true, false ->
+                     | Lease_transition _, true, false ->
                        set_entry_to_plan_before entry plan;
                        entry.load_errors <- [];
                        entry.reconciliation_plan <- None;
                        Ok { outcome = Reconciled; revision = plan.before_revision }
-                     | Lease_published _, false, true ->
+                     | Lease_transition _, false, true ->
                        (match compensate_uncertain_lease entry plan with
                         | Error _ as error -> error
                         | Ok compensation ->
@@ -2841,7 +3134,6 @@ let reconcile_persistence ~keeper_name =
                             run_transaction
                               ~ownership_root:base_path
                               ~path
-                              ~legacy_path
                               ~create_if_missing:false
                               compensation
                           in
@@ -2852,19 +3144,26 @@ let reconcile_persistence ~keeper_name =
                            | Ok revision ->
                              Ok { outcome = Reconciled; revision }
                            | Error _ as error -> error))
-                     | (Enqueue_published | Finalize_published | Nack_published
-                       | Recovery_published), false, true ->
+                     | ( Enqueue_transition _
+                       | Finalize_transition _
+                       | Nack_transition _
+                       | Startup_recovery_transition _
+                       | Recovery_requeue_transition _
+                       | Recovery_cancel_transition _ ), false, true ->
                        set_entry_to_plan_target entry plan;
                        entry.load_errors <- [];
                        entry.reconciliation_plan <- None;
                        Ok { outcome = Reconciled; revision = plan.target_revision }
-                     | (Enqueue_published | Finalize_published | Nack_published
-                       | Recovery_published), true, false ->
+                     | ( Enqueue_transition _
+                       | Finalize_transition _
+                       | Nack_transition _
+                       | Startup_recovery_transition _
+                       | Recovery_requeue_transition _
+                       | Recovery_cancel_transition _ ), true, false ->
                        let execution =
                          run_transaction
                            ~ownership_root:base_path
                            ~path
-                           ~legacy_path
                            ~create_if_missing:false
                            plan
                        in
@@ -2887,100 +3186,203 @@ let reconcile_persistence ~keeper_name =
          notify_indeterminate ~keeper_name error;
          error)
 
+type recovery_cancellation =
+  { cancelled_at : float
+  ; detail : string
+  ; outcome_ref : string option
+  }
+
+type recovery_resolution =
+  | Requeue_unconfirmed
+  | Cancel_unconfirmed of recovery_cancellation
+
+type recovery_resolution_report =
+  { receipt_id : Receipt_id.t
+  ; revision : int64
+  ; state : receipt_state
+  }
+
+type canonical_recovery_resolution =
+  | Canonical_requeue
+  | Canonical_cancel of stored_state
+
+let canonical_recovery_resolution = function
+  | Requeue_unconfirmed -> Ok Canonical_requeue
+  | Cancel_unconfirmed cancellation ->
+    Result.map
+      (fun state -> Canonical_cancel state)
+      (canonical_terminal_state
+         (Mark_failed
+            { completed_at = cancellation.cancelled_at
+            ; kind = Cancelled
+            ; detail = cancellation.detail
+            ; outcome_ref = cancellation.outcome_ref
+            }))
+
+let receipt_not_recovery_required
+    ~base_path ~path entry ~receipt_id =
+  match observe_receipt_in_store ~base_path ~path receipt_id with
+  | Error detail ->
+    quarantine_entry entry (load_error Read_failed ~path detail)
+  | Ok (revision, next_sequence, terminal_count, row) ->
+    if not (cache_matches_meta entry revision next_sequence terminal_count)
+    then
+      quarantine_entry entry
+        (load_error Reconciliation_failed ~path
+           "chat queue database metadata diverged during recovery resolution")
+    else
+      Error
+        (Receipt_not_recovery_required
+           { receipt_id
+           ; observed_state =
+               Option.map
+                 (fun row -> receipt_state_of_stored row.receipt.state)
+                 row
+           })
+
+let resolve_recovery_required
+    ~keeper_name
+    ~receipt_id
+    ~expected_revision
+    ~lease_id
+    ~resolution =
+  if Int64.compare expected_revision 0L < 0
+  then Error (Invalid_input "recovery expected_revision must be non-negative")
+  else if String.equal (String.trim lease_id) ""
+  then Error (Invalid_input "recovery lease_id must be non-empty")
+  else if not (String.is_valid_utf_8 lease_id)
+  then Error (Invalid_input "recovery lease_id contains malformed UTF-8")
+  else
+    match canonical_recovery_resolution resolution with
+    | Error detail -> Error (Invalid_input detail)
+    | Ok resolution ->
+      (match mutation_context ~keeper_name ~create:false with
+       | Error _ as error -> error
+       | Ok (_, _, None) ->
+         Error
+           (Receipt_not_recovery_required
+              { receipt_id; observed_state = None })
+       | Ok (base_path, path, Some entry) ->
+         let result =
+           with_entry_lock keeper_name entry (fun () ->
+               match check_entry_store ~base_path ~path entry ~allow_absent:false with
+               | Error _ as error -> error
+               | Ok Store_absent ->
+                 quarantine_entry entry
+                   (load_error Read_failed ~path
+                      "chat queue database is absent during recovery resolution")
+               | Ok Store_present ->
+                 if not (Int64.equal entry.revision expected_revision)
+                 then
+                   Error
+                     (Recovery_revision_mismatch
+                        { receipt_id
+                        ; expected_revision
+                        ; observed_revision = entry.revision
+                        })
+                 else
+                   match entry.recovery_required with
+                   | Some
+                       ({ receipt =
+                            { receipt_id = observed_receipt_id
+                            ; state =
+                                Stored_recovery_required
+                                  ({ lease_id = observed_lease_id; _ } as recovery)
+                            }
+                        ; _
+                        } as row)
+                     when Receipt_id.equal receipt_id observed_receipt_id ->
+                     if not (String.equal lease_id observed_lease_id)
+                     then
+                       Error
+                         (Recovery_lease_mismatch
+                            { receipt_id
+                            ; expected_lease_id = lease_id
+                            ; observed_lease_id
+                            })
+                     else if
+                       (match resolution with
+                        | Canonical_cancel _ ->
+                          Int64.equal entry.terminal_count Int64.max_int
+                        | Canonical_requeue -> false)
+                     then Error Revision_exhausted
+                     else
+                       let target_state, target_terminal_count, transition =
+                         match resolution with
+                         | Canonical_requeue ->
+                           ( Stored_pending recovery.message
+                           , entry.terminal_count
+                           , Recovery_requeue_transition
+                               { receipt_id; lease_id } )
+                         | Canonical_cancel terminal_state ->
+                           ( terminal_state
+                           , Int64.succ entry.terminal_count
+                           , Recovery_cancel_transition
+                               { receipt_id; lease_id } )
+                       in
+                       let target_row =
+                           { row with
+                             receipt = { receipt_id; state = target_state }
+                           }
+                       in
+                       (match
+                            make_plan entry
+                              ~before_row:(Some row)
+                              ~target_row:(Some target_row)
+                              ~target_next_sequence:entry.next_sequence
+                              ~target_terminal_count
+                              ~transition
+                          with
+                          | Error _ as error -> error
+                          | Ok plan ->
+                            let execution =
+                              run_transaction
+                                ~ownership_root:base_path
+                                ~path
+                                ~create_if_missing:false
+                                plan
+                            in
+                            Result.map
+                              (fun revision ->
+                                 { receipt_id
+                                 ; revision
+                                 ; state = receipt_state_of_stored target_state
+                                 })
+                              (apply_transaction_result
+                                 ~path entry plan execution))
+                   | Some _ | None ->
+                     receipt_not_recovery_required
+                       ~base_path ~path entry ~receipt_id)
+         in
+         (match result with
+          | Ok ({ revision; _ } as report) ->
+            notify_transition ~keeper_name ~revision;
+            Ok report
+          | Error _ as error ->
+            notify_indeterminate ~keeper_name error;
+            error))
+
 let all_keeper_names () =
   with_registry_rw (fun () ->
       Hashtbl.fold (fun keeper_name _ names -> keeper_name :: names) registry []
       |> List.sort String.compare)
 
-let recovered_failure ~completed_at ~kind ~detail =
-  if not (Float.is_finite completed_at)
-  then Error "recovered terminal timestamp must be finite"
-  else if String.equal (String.trim detail) ""
-  then Error "recovered terminal failure must carry non-empty detail"
-  else if not (String.is_valid_utf_8 detail)
-  then Error "recovered terminal failure detail contains malformed UTF-8"
-  else
-    Ok
-      (Stored_failed
-         { completed_at
-         ; kind
-         ; detail
-         ; outcome_ref = None
-         })
-
-let recovered_inflight_state ~base_path ~keeper_name row =
+let recovery_required_state row =
   match row.receipt.state with
-  | Stored_pending _ | Stored_delivered _ | Stored_failed _ ->
+  | Stored_pending _
+  | Stored_recovery_required _
+  | Stored_delivered _
+  | Stored_failed _ ->
     Error "startup recovery requires one inflight receipt"
-  | Stored_inflight { message; _ } ->
-    (match
-       Keeper_chat_delivery_identity.Receipt_ids.of_list
-         [ row.receipt.receipt_id ]
-     with
-     | Error Keeper_chat_delivery_identity.Receipt_ids.Empty ->
-       Error "failed to construct a singleton queue delivery identity"
-     | Ok receipt_ids ->
-       let delivery_key =
-         Keeper_chat_delivery_identity.Queue_receipts receipt_ids
-       in
-       (match
-          Keeper_chat_delivery_journal.load
-            ~base_path
-            ~keeper_name
-            delivery_key
-        with
-        | Error (Keeper_chat_delivery_journal.Not_found _) ->
-          Ok (Stored_pending message)
-        | Error error ->
-          Error (Keeper_chat_delivery_journal.error_to_string error)
-        | Ok
-            { Keeper_chat_delivery_journal.phase =
-                Keeper_chat_delivery_journal.Final { terminal; _ }
-            ; updated_at
-            ; _
-            } ->
-          (match message.source, terminal.ok, terminal.delivery with
-           | ( Dashboard _
-             , true
-             , Keeper_chat_delivery_journal.Assistant_reply
-                 { turn_ref = Some turn_ref; _ } ) ->
-             Ok
-               (Stored_delivered
-                  { completed_at = updated_at
-                  ; outcome_ref = Some (Ids.Turn_ref.to_string turn_ref)
-                  })
-           | Dashboard _, false, _ ->
-             recovered_failure
-               ~completed_at:updated_at
-               ~kind:Turn_failed
-               ~detail:terminal.poll_body
-           | Dashboard _, true, _ ->
-             recovered_failure
-               ~completed_at:updated_at
-               ~kind:Recovery_interrupted
-               ~detail:
-                 "Dashboard queue transcript committed without a canonical assistant turn_ref"
-           | (Discord _ | Slack _), _, _ ->
-             let detail =
-               if terminal.ok
-               then
-                 "queue transcript committed before restart, but terminal connector delivery was not durably proven"
-               else terminal.poll_body
-             in
-             recovered_failure
-               ~completed_at:updated_at
-               ~kind:Recovery_interrupted
-               ~detail)
-        | Ok journal ->
-          Error
-            (Printf.sprintf
-               "queue delivery journal remained non-final after startup recovery: %s"
-               (Keeper_chat_delivery_journal.phase_to_string journal.phase))))
+  | Stored_inflight { lease_id; started_at; message } ->
+    Ok
+      ( Stored_recovery_required { lease_id; started_at; message }
+      , lease_id )
 
 type loaded_lane = {
   entry : queue_entry;
-  recovered_count : int;
-  recovered_revision : int64 option;
+  recovery_required_count : int;
+  recovery_revision : int64 option;
 }
 
 let entry_of_loaded_database loaded =
@@ -2989,10 +3391,11 @@ let entry_of_loaded_database loaded =
     ~next_sequence:loaded.loaded_next_sequence
     ~pending:loaded.loaded_pending
     ?inflight:loaded.loaded_inflight
+    ?recovery_required:loaded.loaded_recovery_required
     ~terminal_count:loaded.loaded_terminal_count
     ()
 
-let load_keeper_lane ~base_path ~keeper_name ~path ~legacy_path =
+let load_keeper_lane ~base_path ~path =
   match
     with_database
       ~schema_validation:Validate_full_schema
@@ -3004,18 +3407,44 @@ let load_keeper_lane ~base_path ~keeper_name ~path ~legacy_path =
   | Error detail -> Error (load_error Parse_failed ~path detail)
   | Ok loaded ->
     let entry = entry_of_loaded_database loaded in
-    (match loaded.loaded_inflight with
-     | None -> Ok { entry; recovered_count = 0; recovered_revision = None }
-     | Some before_row ->
-       (match recovered_inflight_state ~base_path ~keeper_name before_row with
+    (match loaded.loaded_inflight, loaded.loaded_recovery_required with
+     | None, None ->
+       Ok
+         { entry
+         ; recovery_required_count = 0
+         ; recovery_revision = None
+         }
+     | None, Some _ ->
+       Ok
+         { entry
+         ; recovery_required_count = 1
+         ; recovery_revision = None
+         }
+     | Some _, Some _ ->
+       let error =
+         load_error Recovery_failed ~path
+           "chat queue contains both inflight and recovery-required receipts"
+       in
+       entry.load_errors <- [ error ];
+       Ok
+         { entry
+         ; recovery_required_count = 1
+         ; recovery_revision = None
+         }
+     | Some before_row, None ->
+       (match recovery_required_state before_row with
         | Error detail ->
           let error =
             load_error Recovery_failed ~path
-              ("failed to reconcile inflight delivery journal: " ^ detail)
+              ("failed to preserve inflight recovery evidence: " ^ detail)
           in
           entry.load_errors <- [ error ];
-          Ok { entry; recovered_count = 0; recovered_revision = None }
-        | Ok target_state ->
+          Ok
+            { entry
+            ; recovery_required_count = 0
+            ; recovery_revision = None
+            }
+        | Ok (target_state, lease_id) ->
           if Int64.equal entry.revision Int64.max_int
           then (
             let error =
@@ -3023,18 +3452,18 @@ let load_keeper_lane ~base_path ~keeper_name ~path ~legacy_path =
                 "cannot persist startup recovery because the queue revision domain is exhausted"
             in
             entry.load_errors <- [ error ];
-            Ok { entry; recovered_count = 0; recovered_revision = None })
+            Ok
+              { entry
+              ; recovery_required_count = 0
+              ; recovery_revision = None
+              })
           else
             let target_row =
               { before_row with
                 receipt = { before_row.receipt with state = target_state }
               }
             in
-            let target_terminal_count =
-              if stored_state_is_terminal target_state
-              then Int64.succ entry.terminal_count
-              else entry.terminal_count
-            in
+            let target_terminal_count = entry.terminal_count in
             let plan =
               { before_revision = entry.revision
               ; target_revision = Int64.succ entry.revision
@@ -3044,15 +3473,17 @@ let load_keeper_lane ~base_path ~keeper_name ~path ~legacy_path =
               ; target_terminal_count
               ; before_row = Some before_row
               ; target_row = Some target_row
-              ; receipt_ids = [ before_row.receipt.receipt_id ]
-              ; transition = Recovery_published
+              ; transition =
+                  Startup_recovery_transition
+                    { receipt_id = before_row.receipt.receipt_id
+                    ; lease_id
+                    }
               }
             in
             let execution =
               run_transaction
                 ~ownership_root:base_path
                 ~path
-                ~legacy_path
                 ~create_if_missing:false
                 plan
             in
@@ -3060,16 +3491,15 @@ let load_keeper_lane ~base_path ~keeper_name ~path ~legacy_path =
              | Ok revision ->
                Ok
                  { entry
-                 ; recovered_count = 1
-                 ; recovered_revision = Some revision
+                 ; recovery_required_count = 1
+                 ; recovery_revision = Some revision
                  }
-             | Error
-                 (Persist_failed
-                    { publication = Published_indeterminate _; _ }) ->
+             | Error (Persist_failed { publication; _ })
+               when Option.is_some (publication_evidence publication) ->
                Ok
                  { entry
-                 ; recovered_count = 1
-                 ; recovered_revision = Some plan.target_revision
+                 ; recovery_required_count = 1
+                 ; recovery_revision = Some plan.target_revision
                  }
              | Error (Persist_failed { publication = Not_published; detail }) ->
                let error =
@@ -3078,7 +3508,11 @@ let load_keeper_lane ~base_path ~keeper_name ~path ~legacy_path =
                in
                entry.load_errors <- [ error ];
                entry.reconciliation_plan <- Some plan;
-               Ok { entry; recovered_count = 0; recovered_revision = None }
+               Ok
+                 { entry
+                 ; recovery_required_count = 0
+                 ; recovery_revision = None
+                 }
              | Error error ->
                let load =
                  load_error Recovery_failed ~path
@@ -3086,7 +3520,11 @@ let load_keeper_lane ~base_path ~keeper_name ~path ~legacy_path =
                in
                entry.load_errors <- [ load ];
                entry.reconciliation_plan <- Some plan;
-               Ok { entry; recovered_count = 0; recovered_revision = None })))
+               Ok
+                 { entry
+                 ; recovery_required_count = 0
+                 ; recovery_revision = None
+                 })))
 
 let inspect_owned_directory ~ownership_root path =
   try
@@ -3147,7 +3585,7 @@ let configure_persistence ~base_path =
         "chat queue persistence configuration is startup-only and has already been claimed"
     in
     { restored_keeper_count = 0
-    ; recovered_receipt_count = 0
+    ; recovery_required_receipt_count = 0
     ; load_errors = [ None, error ]
     }
   else (
@@ -3162,12 +3600,12 @@ let configure_persistence ~base_path =
       Atomic.set global_load_errors [ error ];
       Atomic.set persistence_configuration (Configuration_failed error);
       { restored_keeper_count = 0
-      ; recovered_receipt_count = 0
+      ; recovery_required_receipt_count = 0
       ; load_errors = [ None, error ]
       }
     | Ok base_path ->
       let restored_keeper_count = ref 0 in
-      let recovered_receipt_count = ref 0 in
+      let recovery_required_receipt_count = ref 0 in
       let reported_errors = ref [] in
       let recovered_mutations = ref [] in
       let keepers_dir = Common.keepers_runtime_dir_of_base ~base_path in
@@ -3207,34 +3645,25 @@ let configure_persistence ~base_path =
                       keeper_name) )
                :: !reported_errors
            else
-             match
-               snapshot_path ~base_path ~keeper_name,
-               legacy_snapshot_path ~base_path ~keeper_name
-             with
-             | Error detail, _ | _, Error detail ->
+             match snapshot_path ~base_path ~keeper_name with
+             | Error detail ->
                quarantine keeper_name (load_error Invalid_path detail)
-             | Ok path, Ok legacy_path ->
+             | Ok path ->
                (match
-                  observe_lane_store
-                    ~ownership_root:base_path
-                    ~path
-                    ~legacy_path
+                  observe_lane_store ~ownership_root:base_path ~path
                 with
                 | Error error -> quarantine keeper_name error
                 | Ok Store_absent -> ()
                 | Ok Store_present ->
                   (match
-                     load_keeper_lane
-                       ~base_path
-                       ~keeper_name
-                       ~path
-                       ~legacy_path
+                     load_keeper_lane ~base_path ~path
                    with
                    | Error error -> quarantine keeper_name error
                    | Ok loaded ->
                      incr restored_keeper_count;
-                     recovered_receipt_count :=
-                       !recovered_receipt_count + loaded.recovered_count;
+                     recovery_required_receipt_count :=
+                       !recovery_required_receipt_count
+                       + loaded.recovery_required_count;
                      List.iter
                        (fun error ->
                           reported_errors :=
@@ -3246,14 +3675,15 @@ let configure_persistence ~base_path =
                        (fun revision ->
                           recovered_mutations :=
                             (keeper_name, revision) :: !recovered_mutations)
-                       loaded.recovered_revision)))
+                       loaded.recovery_revision)))
         keeper_names;
       Atomic.set persistence_configuration (Configured base_path);
       List.rev !recovered_mutations
       |> List.iter (fun (keeper_name, revision) ->
         notify_transition ~keeper_name ~revision);
       { restored_keeper_count = !restored_keeper_count
-      ; recovered_receipt_count = !recovered_receipt_count
+      ; recovery_required_receipt_count =
+          !recovery_required_receipt_count
       ; load_errors = List.rev !reported_errors
       })
 
@@ -3295,7 +3725,6 @@ module For_testing = struct
 
   let failure_kind_of_string = failure_kind_of_string
   let snapshot_path = snapshot_path
-  let legacy_snapshot_path = legacy_snapshot_path
 
   let receipt_json ~base_path ~keeper_name ~receipt_id =
     let* path = snapshot_path ~base_path ~keeper_name in

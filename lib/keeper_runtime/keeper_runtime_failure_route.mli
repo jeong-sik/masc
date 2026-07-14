@@ -72,14 +72,11 @@ type judgment_class =
 
 (** Typed origin of a judgment request. The route class says what kind of
     decision is needed; this provenance says which execution boundary produced
-    it. [Oas_agent_idle_detected] retains the behavioral counter that was
-    previously collapsed into [Contract_violation]. [Legacy_unattributed] is a
-    decode-only state for persisted pre-provenance stimuli and is never emitted
-    by current producers. *)
+    it. [Legacy_unattributed] is a decode-only state for persisted
+    pre-provenance stimuli and is never emitted by current producers. *)
 type judgment_provenance =
   | Oas_api_error
   | Oas_provider_error
-  | Oas_agent_idle_detected of { consecutive_idle_turns : int }
   | Oas_agent_error
   | Oas_mcp_error
   | Oas_config_error

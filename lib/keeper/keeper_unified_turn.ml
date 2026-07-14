@@ -415,15 +415,6 @@ let run_keeper_cycle
            No dynamic_context needed here. *)
                  { system_prompt; dynamic_context = "" }
                in
-               let prompt_timeout_metrics =
-                 Keeper_agent_run.build_prompt_metrics
-                   ~system_prompt
-                   ~dynamic_context:""
-                   ~user_message
-               in
-               let prompt_timeout_estimate_tokens =
-                 max 1 prompt_timeout_metrics.estimated_total_tokens
-               in
                (* 5. Run via OAS Agent.run() with transient-error retry.
                   The turn-local OAS Event_bus preserves factual
                   ToolCalled/ToolCompleted pairing and drives
@@ -730,18 +721,11 @@ let run_keeper_cycle
                     then Log.Keeper.warn
                     else Log.Keeper.error
                   in
-                  let failure_context_ratio =
-                    if final_execution.max_context <= 0
-                    then 0.0
-                    else
-                      float_of_int prompt_timeout_estimate_tokens
-                      /. float_of_int final_execution.max_context
-                  in
                   log_keeper_cycle_failed
                     ~keeper_name:meta.name
                     "%s: keeper cycle FAILED runtime=%s max_context=%d context_budget=%d \
-                     primary_budget=%d requested_override=%s estimated_input_tokens=%d \
-                     context_ratio=%.4f latency=%dms%s error=%s"
+                     primary_budget=%d requested_override=%s system_and_user_bytes=%d \
+                     latency=%dms%s error=%s"
                     meta.name
                     final_execution.runtime_id
                     final_execution.max_context
@@ -752,8 +736,7 @@ let run_keeper_cycle
                      with
                      | Some requested -> string_of_int requested
                      | None -> "none")
-                    prompt_timeout_estimate_tokens
-                    failure_context_ratio
+                    (String.length system_prompt + String.length user_message)
                     latency_ms
                     (if is_server_parse_rejection
                      then " (server parse rejection, auto-recoverable)"

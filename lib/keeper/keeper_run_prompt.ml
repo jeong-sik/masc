@@ -44,25 +44,21 @@ let normalize_memory_fragment = Inference_utils.sanitize_text_utf8
 let sanitize_user_message = Inference_utils.sanitize_text_utf8
 
 let estimate_input_tokens
-    ~(prompt_metrics : Keeper_agent_prompt_metrics.prompt_metrics)
     ~(system_prompt : string)
     ~(dynamic_context : string)
     ~(memory_context : string)
     ~(temporal_context : string)
     ~(user_message : string)
     ~(history_messages : Agent_sdk.Types.message list) : int =
-  let composition =
-    Keeper_agent_prompt_metrics.build_ctx_composition_metrics
-      ~system_prompt
-      ~dynamic_context
-      ~memory_context
-      ~temporal_context
-      ~user_message
-      ~history_messages
-      ~actual_input_tokens:None
-  in
-  max prompt_metrics.Keeper_agent_prompt_metrics.estimated_total_tokens
-      composition.Keeper_agent_prompt_metrics.display_total_tokens
+  List.fold_left
+    (fun total text ->
+      total + Keeper_context_core_accessors.estimate_char_tokens text)
+    0
+    [ system_prompt; dynamic_context; memory_context; temporal_context; user_message ]
+  + List.fold_left
+      (fun total message -> total + Keeper_context_core.msg_tokens message)
+      0
+      history_messages
 
 let estimate_tool_schema_context
     ~(estimated_input_tokens : int)
@@ -268,7 +264,6 @@ let build_turn_context
   in
   let estimated_input_tokens =
     estimate_input_tokens
-      ~prompt_metrics
       ~system_prompt:turn_system_prompt
       ~dynamic_context
       ~memory_context

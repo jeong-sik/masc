@@ -338,7 +338,7 @@ let test_pending_hitl_approval_keeper_names_filters_persisted_pending () =
           ignore
             (AQ.resolve
                ~id
-               ~decision:(Agent_sdk.Hooks.Reject "test cleanup")))
+               ~decision:(AQ.Decision.Reject "test cleanup")))
         !approval_ids;
       cleanup_dir base_dir)
     (fun () ->
@@ -1009,7 +1009,7 @@ let test_sweep_reports_pending_hitl_approval () =
            ignore
              (AQ.resolve
                 ~id
-                ~decision:(Agent_sdk.Hooks.Reject "test cleanup")))
+                ~decision:(AQ.Decision.Reject "test cleanup")))
         !approval_id;
       Reg.clear ();
       Masc.Keeper_runtime.reset_test_state base_dir;
@@ -1056,7 +1056,7 @@ let test_sweep_reports_pending_hitl_approval () =
       check bool "pending HITL approval visibility emitted" true visibility_seen;
       check bool "approval remains pending after visibility sweep" true
         (AQ.has_pending_for_keeper ~keeper_name:name);
-      (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
+      (match AQ.resolve ~id ~decision:AQ.Decision.Approve with
        | Ok () -> approval_id := None
        | Error err -> fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
       check bool "resolution removes pending request" false

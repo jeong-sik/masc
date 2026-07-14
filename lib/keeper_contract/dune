@@ -12,7 +12,6 @@
   keeper_invariant
   keeper_path_rejection)
  (libraries
-  agent_sdk
   eio
   masc.keeper_registry
   masc.keeper_runtime

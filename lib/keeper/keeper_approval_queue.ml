@@ -137,10 +137,10 @@ let pending_entry_to_yojson (entry : pending_approval) =
 ;;
 
 let approval_decision_to_yojson = function
-  | Agent_sdk.Hooks.Approve -> `Assoc [ "kind", `String "approve" ]
-  | Agent_sdk.Hooks.Reject reason ->
+  | Decision.Approve -> `Assoc [ "kind", `String "approve" ]
+  | Decision.Reject reason ->
     `Assoc [ "kind", `String "reject"; "reason", `String reason ]
-  | Agent_sdk.Hooks.Edit input ->
+  | Decision.Edit input ->
     `Assoc [ "kind", `String "edit"; "input", input ]
 ;;
 
@@ -345,7 +345,7 @@ let approval_decision_of_yojson json =
            ~allowed:[ "kind" ]
            fields
        in
-       Ok Agent_sdk.Hooks.Approve
+       Ok Decision.Approve
      | "reject" ->
        let* () =
          reject_unknown_fields
@@ -354,7 +354,7 @@ let approval_decision_of_yojson json =
            fields
        in
        let* reason = required_string ~surface:"gate_pending.decision" "reason" fields in
-       Ok (Agent_sdk.Hooks.Reject reason)
+       Ok (Decision.Reject reason)
      | "edit" ->
        let* () =
          reject_unknown_fields
@@ -363,7 +363,7 @@ let approval_decision_of_yojson json =
            fields
        in
        let* input = required_member ~surface:"gate_pending.decision" "input" fields in
-       Ok (Agent_sdk.Hooks.Edit input)
+       Ok (Decision.Edit input)
      | other -> Error (Printf.sprintf "gate_pending.decision kind %S is unknown" other))
   | _ -> Error "gate_pending.decision must be a JSON object"
 ;;
@@ -411,9 +411,9 @@ let persisted_delivery_of_yojson ~base_path json =
     in
     let* () =
       match decision, grant_consumed with
-      | Agent_sdk.Hooks.Approve, _ -> Ok ()
-      | (Agent_sdk.Hooks.Reject _ | Agent_sdk.Hooks.Edit _), false -> Ok ()
-      | (Agent_sdk.Hooks.Reject _ | Agent_sdk.Hooks.Edit _), true ->
+      | Decision.Approve, _ -> Ok ()
+      | (Decision.Reject _ | Decision.Edit _), false -> Ok ()
+      | (Decision.Reject _ | Decision.Edit _), true ->
         Error (surface ^ ".grant_consumed is valid only for approve")
     in
     Ok { entry; decision; source; remember_rule; created_by; grant_consumed }
@@ -641,9 +641,9 @@ let non_empty_reason reason =
 ;;
 
 let approval_decision_kind_and_reason = function
-  | Agent_sdk.Hooks.Approve -> "approve", None
-  | Agent_sdk.Hooks.Reject reason -> "reject", non_empty_reason reason
-  | Agent_sdk.Hooks.Edit _ -> "edit", None
+  | Decision.Approve -> "approve", None
+  | Decision.Reject reason -> "reject", non_empty_reason reason
+  | Decision.Edit _ -> "edit", None
 ;;
 
 let keeper_audit_metric_label = function
@@ -939,11 +939,11 @@ let approved_delivery_unlocked ~base_path ~id =
        then Error (grant_workspace_mismatch ~base_path id stored_base_path)
        else
          (match delivery.decision with
-          | Agent_sdk.Hooks.Approve ->
+          | Decision.Approve ->
             if delivery.grant_consumed
             then Ok Approved_delivery_consumed
             else Ok (Approved_delivery_unconsumed delivery)
-          | Agent_sdk.Hooks.Reject _ | Agent_sdk.Hooks.Edit _ ->
+          | Decision.Reject _ | Decision.Edit _ ->
             Error (Grant_resolution_not_approved id))
      | None ->
        (match SMap.find_opt id (Atomic.get pending) with
@@ -1035,7 +1035,7 @@ let consume_approved_resolution
       ~goal_ids:entry.goal_ids
       ~source_approval_id:id
       ~decision_source:delivery.source
-      ~decision:Agent_sdk.Hooks.Approve
+      ~decision:Decision.Approve
       ();
     Ok Consumption_committed
 ;;
@@ -1430,9 +1430,9 @@ let commit_keeper_approval_resolution
 ;;
 
 let hitl_resolution_decision_of_approval_decision = function
-  | Agent_sdk.Hooks.Approve -> Keeper_event_queue.Hitl_approved
-  | Agent_sdk.Hooks.Reject rationale -> Keeper_event_queue.Hitl_rejected rationale
-  | Agent_sdk.Hooks.Edit input -> Keeper_event_queue.Hitl_edited input
+  | Decision.Approve -> Keeper_event_queue.Hitl_approved
+  | Decision.Reject rationale -> Keeper_event_queue.Hitl_rejected rationale
+  | Decision.Edit input -> Keeper_event_queue.Hitl_edited input
 ;;
 
 let deliver_resolution ~base_path (entry : pending_approval) decision =
@@ -1736,11 +1736,11 @@ let remove_delivery_from_store delivery =
 
 let approval_decision_equal left right =
   match left, right with
-  | Agent_sdk.Hooks.Approve, Agent_sdk.Hooks.Approve -> true
-  | Agent_sdk.Hooks.Reject left, Agent_sdk.Hooks.Reject right -> String.equal left right
-  | Agent_sdk.Hooks.Edit left, Agent_sdk.Hooks.Edit right -> Yojson.Safe.equal left right
-  | (Agent_sdk.Hooks.Approve | Agent_sdk.Hooks.Reject _ | Agent_sdk.Hooks.Edit _),
-    (Agent_sdk.Hooks.Approve | Agent_sdk.Hooks.Reject _ | Agent_sdk.Hooks.Edit _) ->
+  | Decision.Approve, Decision.Approve -> true
+  | Decision.Reject left, Decision.Reject right -> String.equal left right
+  | Decision.Edit left, Decision.Edit right -> Yojson.Safe.equal left right
+  | (Decision.Approve | Decision.Reject _ | Decision.Edit _),
+    (Decision.Approve | Decision.Reject _ | Decision.Edit _) ->
     false
 ;;
 
@@ -1784,7 +1784,7 @@ let remember_rule_for_entry ~base_path ?created_by (entry : pending_approval) =
 
 let remember_rule_for_delivery delivery =
   match delivery.decision, delivery.remember_rule with
-  | Agent_sdk.Hooks.Approve, true ->
+  | Decision.Approve, true ->
     (match
        remember_rule_for_entry
          ~base_path:delivery.entry.audit_base_path
@@ -1797,10 +1797,10 @@ let remember_rule_for_delivery delivery =
          { path = rule_error.path
          ; reason = rule_error.reason
          })
-  | (Agent_sdk.Hooks.Approve | Agent_sdk.Hooks.Reject _ | Agent_sdk.Hooks.Edit _),
+  | (Decision.Approve | Decision.Reject _ | Decision.Edit _),
     false ->
     Ok None
-  | (Agent_sdk.Hooks.Reject _ | Agent_sdk.Hooks.Edit _), true -> Ok None
+  | (Decision.Reject _ | Decision.Edit _), true -> Ok None
 ;;
 
 let complete_delivery delivery =
@@ -1829,12 +1829,12 @@ let complete_delivery delivery =
          Ok { remembered_rule }
        in
        (match delivery.decision with
-        | Agent_sdk.Hooks.Approve ->
+        | Decision.Approve ->
           (* Keep the resolved journal entry until the exact Gate request
              consumes it. The wake event is only a correlation message and
              cannot become a second authorization SSOT. *)
           finish ()
-        | Agent_sdk.Hooks.Reject _ | Agent_sdk.Hooks.Edit _ ->
+        | Decision.Reject _ | Decision.Edit _ ->
           (match remove_delivery_from_store delivery with
            | Error storage_error ->
              Error (Persistence_failed { approval_id = id; storage_error })
@@ -1936,7 +1936,7 @@ let install_persistence ~base_path =
 
 let resolve_with_policy
       ~id
-      ~(decision : Agent_sdk.Hooks.approval_decision)
+      ~(decision : decision)
       ?(source = Human_operator)
       ?(remember_rule = false)
       ?created_by
@@ -1953,8 +1953,8 @@ let resolve_with_policy
          | Some _ ->
            let remember_rule =
              match decision with
-             | Agent_sdk.Hooks.Approve -> remember_rule
-             | Agent_sdk.Hooks.Reject _ | Agent_sdk.Hooks.Edit _ -> false
+             | Decision.Approve -> remember_rule
+             | Decision.Reject _ | Decision.Edit _ -> false
            in
            (match
               journal_resolution
@@ -1994,7 +1994,7 @@ let resolve_with_policy
     rather than threaded from the caller: the convenience wrapper takes
     only an [id], so the entry is the authoritative workspace source
     (RFC-0274 Wave A). *)
-let resolve ~id ~(decision : Agent_sdk.Hooks.approval_decision)
+let resolve ~id ~(decision : decision)
   : (unit, resolve_error) result
   =
   match resolve_with_policy ~id ~decision () with

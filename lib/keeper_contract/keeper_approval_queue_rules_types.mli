@@ -42,7 +42,16 @@ type pending_approval =
   ; summary_status : summary_status
   }
 
-type decision = Agent_sdk.Hooks.approval_decision
+(** Exact queue resolution. This is an outcome value, not a risk class,
+    authorization hierarchy, or provider/tool policy. *)
+module Decision : sig
+  type t =
+    | Approve
+    | Reject of string
+    | Edit of Yojson.Safe.t
+end
+
+type decision = Decision.t
 
 type decision_source =
   | Always_allowed

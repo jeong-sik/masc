@@ -247,9 +247,9 @@ let resolve_judgment (entry : Keeper_approval_queue.pending_approval) ~approval_
       (summary : Keeper_approval_queue.hitl_context_summary) =
   let decision =
     match summary.Keeper_approval_queue.judgment with
-    | Keeper_approval_queue.Approve -> Some Agent_sdk.Hooks.Approve
+    | Keeper_approval_queue.Approve -> Some Keeper_approval_queue.Decision.Approve
     | Keeper_approval_queue.Deny ->
-      Some (Agent_sdk.Hooks.Reject summary.rationale)
+      Some (Keeper_approval_queue.Decision.Reject summary.rationale)
     | Keeper_approval_queue.Require_human -> None
   in
   match decision with

@@ -106,7 +106,7 @@ let submit ~base_path ~keeper_name ~input =
 ;;
 
 let reject_and_cleanup id =
-  match AQ.resolve ~id ~decision:(Agent_sdk.Hooks.Reject "test cleanup") with
+  match AQ.resolve ~id ~decision:(AQ.Decision.Reject "test cleanup") with
   | Ok () -> ()
   | Error error -> Alcotest.fail (AQ.resolve_error_to_string error)
 ;;
@@ -303,7 +303,7 @@ let test_resolution_is_durable_and_origin_scoped () =
        let result =
          AQ.resolve_with_policy
            ~id
-           ~decision:Agent_sdk.Hooks.Approve
+           ~decision:AQ.Decision.Approve
            ~remember_rule:true
            ~created_by:"operator"
            ()
@@ -404,7 +404,7 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
            ~input
            ()
        in
-       (match AQ.resolve ~id:approval_id ~decision:Agent_sdk.Hooks.Approve with
+       (match AQ.resolve ~id:approval_id ~decision:AQ.Decision.Approve with
         | Ok () -> ()
         | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
        let resolution =
@@ -550,7 +550,7 @@ let test_summary_updates_never_resolve_pending_request () =
        Alcotest.(check bool) "model judgment remains pending" true
          (Option.is_some (AQ.get_pending_entry ~id));
        Alcotest.(check bool) "resolved entry cannot be updated" true
-         (match AQ.resolve ~id ~decision:(Agent_sdk.Hooks.Reject "operator denied") with
+         (match AQ.resolve ~id ~decision:(AQ.Decision.Reject "operator denied") with
           | Error error -> Alcotest.fail (AQ.resolve_error_to_string error)
           | Ok () ->
             (match AQ.attach_summary ~id summary with
@@ -1058,7 +1058,7 @@ let test_unavailable_cycle_grant_never_falls_through () =
       cleanup_dir base_path)
     (fun () ->
        let approval_id = submit ~base_path ~keeper_name ~input in
-       (match AQ.resolve ~id:approval_id ~decision:Agent_sdk.Hooks.Approve with
+       (match AQ.resolve ~id:approval_id ~decision:AQ.Decision.Approve with
         | Ok () -> ()
         | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
        let resolution =
@@ -1118,7 +1118,7 @@ let test_nonapproved_resolution_payload_is_delivered () =
        (match
           AQ.resolve
             ~id:reject_id
-            ~decision:(Agent_sdk.Hooks.Reject rationale)
+            ~decision:(AQ.Decision.Reject rationale)
         with
         | Ok () -> ()
         | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
@@ -1146,7 +1146,7 @@ let test_nonapproved_resolution_payload_is_delivered () =
        let edited_input =
          `Assoc [ "target", `String "after"; "confirmed", `Bool true ]
        in
-       (match AQ.resolve ~id:edit_id ~decision:(Agent_sdk.Hooks.Edit edited_input) with
+       (match AQ.resolve ~id:edit_id ~decision:(AQ.Decision.Edit edited_input) with
         | Ok () -> ()
         | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
        let edited =
